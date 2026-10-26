@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <EnableDefaultAntlrItems>false</EnableDefaultAntlrItems>
-    <DefaultItemExcludes>$(DefaultItemExcludes);Pilot.Tests\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Pilot.Tests\**;Pilot.LanguageServer\**;vscode-pilot\**</DefaultItemExcludes>
     <NoWarn>$(NoWarn);CS3021</NoWarn>
   </PropertyGroup>
 

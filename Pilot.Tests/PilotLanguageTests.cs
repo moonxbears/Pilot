@@ -682,6 +682,488 @@ def process(user: User?, opts: Config?) {
         }
     }
 
+    public class ExtendedLanguageFeaturesTests
+    {
+        [Fact]
+        public void Test_Accessibility_Modifiers()
+        {
+            string code = @"
+public def public_func() -> int { return 1; }
+private def private_func() -> void { }
+protected def protected_func() -> void { }
+internal def internal_func() -> void { }
+
+public class PublicClass {
+    public def method() -> void { }
+    private var secret: int = 42
+}
+
+protected class ProtectedClass { }
+internal struct InternalPoint {
+    public let x: int
+    public let y: int
+}
+
+public interface IPublicService {
+    def execute() -> void
+}
+
+public enum Status {
+    Active,
+    Inactive
+}
+
+public let global_name: str = ""Pilot""
+private var internal_counter: int = 0
+public const MAX_CONNECTIONS: int = 1000
+public macro public_macro(msg) { print(msg); }
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Macros_Definitions_And_Invocations()
+        {
+            string code = @"
+macro trace(msg) {
+    print(msg);
+}
+
+macro! compile_time_eval() -> str {
+    return ""evaluated"";
+}
+
+def run() -> void {
+    println!(""Hello, {}!"", ""Pilot"");
+    let numbers = vec![1, 2, 3, 4, 5];
+    let query_res = sql! {
+        select id, name from users where active = true;
+    };
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Destructuring_Unpacking_Declarations_And_Loops()
+        {
+            string code = @"
+def test_unpacking() -> void {
+    let (a, b) = (1, 2)
+    let (x: int, y: int) = (10, 20)
+    let [first, *rest] = [1, 2, 3, 4]
+    let {id, name} = get_user()
+    let {id: uid, name: uname} = get_user()
+    var (w, h) = (800, 600)
+    const (MIN, MAX) = (0, 100)
+    let ((x1, y1), [z1, *remaining]) = complex_data
+
+    for (k, v) in pairs {
+        print(k)
+    }
+
+    for [x, y] in coordinates {
+        print(x + y)
+    }
+
+    for {id, name} in user_list {
+        print(id)
+    }
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Keywords_Symbol_BreakLabel_Ref_Dynamic()
+        {
+            string code = @"
+def test_keywords() -> void {
+    // symbol keyword
+    let s1: symbol = :active
+    let s2: symbol = symbol(""pending"")
+    let s3 = :error_code
+
+    // break and continue to label
+    outer: for i in 0..10 {
+        inner: while True {
+            if i > 5 {
+                break outer;
+            } else {
+                continue outer;
+            }
+        }
+    }
+
+    named_block: {
+        let x = 10
+        if x > 5 {
+            break named_block;
+        }
+    }
+
+    // ref keyword
+    var counter = 0
+    ref r = counter
+    let f = [ref counter]() => { counter += 1; }
+
+    // dynamic keyword
+    dynamic dyn_obj = get_external_service()
+    let dyn_val: dynamic = dyn_obj.invoke(""test"")
+}
+
+def swap(ref a: int, ref b: int) -> void {
+    let tmp = a
+    a = b
+    b = tmp
+}
+
+def test_swap_call() -> void {
+    var x = 1
+    var y = 2
+    swap(ref x, ref y)
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Modern_Lambda_And_Closure_Syntax()
+        {
+            string code = @"
+def test_lambdas() -> void {
+    let factor = 10
+    // [capture](args) => expression
+    let mult = [factor](x: int) => x * factor;
+
+    // [capture](args) => { code block }
+    let logger = [](msg: str) => {
+        print(msg);
+        return True;
+    };
+
+    // [capture](args) -> return_type { code block }
+    var total = 0
+    let accum = [ref total](item: int) -> int {
+        total += item;
+        return total;
+    };
+
+    // (args) => expression
+    let add = (a: int, b: int) => a + b;
+
+    // x => expression
+    let double_val = x => x * 2;
+
+    // x => { code block }
+    let complex_mapper = x => {
+        let squared = x * x;
+        return squared + 1;
+    };
+
+    // def anonymous function
+    let anon1 = def(x: int) -> int { return x * 3; };
+    let anon2 = fn(x) => x + 10;
+
+    // Pipeline with modern closure
+    let items = [1, 2, 3] |> map((x) => x * 2) |> filter(x => x > 2);
+
+    // Legacy lambda syntax backwards compatibility
+    let legacy = lambda x, y: x + y;
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Cascade_Operator_And_Chaining_With_Interruption()
+        {
+            string code = @"
+class Builder {
+    def myfunc1(self) -> void { }
+    def myfunc2(self, a: int, b: int) -> int { return a + b; }
+    def myfunc3(self, a: int, b: int) -> void { }
+    def myfunc4(self) -> str { return ""done""; }
+    def myfunc5(self, msg: str) -> void { }
+}
+
+def test_cascade() -> void {
+    let myclass = Builder()
+
+    // Chaining example from prompt
+    myclass..myfunc1()
+    ..myfunc2(arg1, arg2)
+    ..myfunc3(arg1, kwarg1)
+
+    // Partial interruption to assign method return value (with let, arrow, or direct assignment)
+    myclass..myfunc1()
+    ..let res1 = myfunc2(1, 2)
+    ..myfunc3(1, res1)
+    ..myfunc4() -> res2
+    ..myfunc5(res2)
+    ..res3 = myfunc2(3, 4)
+    ..myfunc3(3, res3)
+
+    // Null-safe cascade
+    let opt_builder: Builder? = null
+    opt_builder?..myfunc1()..myfunc2(10, 20)
+
+    // Range preservation check (ranges remain distinct from cascades)
+    for i in 0..10 { }
+    let start_idx = 0
+    let end_idx = 5
+    for i in start_idx..end_idx { }
+    let sub = [1, 2, 3][0..2]
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Keywords_Params_Args_Kwargs_Nameof_Static()
+        {
+            string code = @"
+public static class MathUtils {
+    public static const PI: float = 3.14159
+    public static var call_count: int = 0
+
+    public static def calculate(params numbers: List[float]) -> float {
+        return 0.0
+    }
+
+    public static def variadic_call(*args, **kwargs) -> void {
+        pass
+    }
+}
+
+def test_features() -> void {
+    let x = 42
+    let var_name = nameof(x)
+    let method_name = nameof(MathUtils.calculate)
+
+    MathUtils.call_count += 1
+    let result = MathUtils.calculate(1.0, 2.0, 3.0)
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+    }
+
+    public class PatternMatchingAndCollectionsTests
+    {
+        [Fact]
+        public void Test_CSharp_Collection_Expressions_With_Spreads()
+        {
+            string code = @"
+def test_collections() {
+    let a = [1, 2, 3]
+    let b = [4, 5, 6]
+    let c = [..a, ..b]
+    let d = [0, ..a, 99, ..b, 100]
+    let empty = []
+    let dict = {..d1, ""key"": 123}
+    let set_val = {..s1, 10}
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Relational_And_Combinator_Patterns()
+        {
+            string code = @"
+def classify(x: int) -> str {
+    match x {
+        case > 0 and <= 100 => ""in range""
+        case < 0 or > 1000 => ""out of bounds""
+        case not 42 => ""not answer""
+        case not null => ""valid""
+        case _ => ""other""
+    }
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Slice_And_Collection_Patterns()
+        {
+            string code = @"
+def inspect_list(items: List[int]) -> str {
+    match items {
+        case [] => ""empty""
+        case [var first, ..var rest] when first == 0 => ""zero start""
+        case [first, .., last] => ""endpoints""
+        case [_, > 10, ..] => ""second > 10""
+        case [..] => ""anything""
+    }
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Property_Patterns_And_Guards()
+        {
+            string code = @"
+def test_props(obj: any) -> str {
+    match obj {
+        case { Name: ""Pilot"", Version: >= 2.0 } => ""modern""
+        case { Count: 0 } => ""empty""
+        case (var x, var y) when x == y => ""equal pair""
+        case (var x, var y) if x > y => ""descending pair""
+        case Point { X: 1, Y: 2 } => ""unit point""
+    }
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Is_Pattern_Expressions()
+        {
+            string code = @"
+def test_is(val: any, items: List[int]) -> void {
+    if val is > 0 and <= 100 {
+        pass
+    }
+    if val is not null {
+        pass
+    }
+    if items is [var first, ..var rest] {
+        pass
+    }
+    if items is [] {
+        pass
+    }
+    if items is [_, > 10, ..] {
+        pass
+    }
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+    }
+
+    public class BuiltInTypesAndMatrixTests
+    {
+        [Fact]
+        public void Test_All_Numeric_And_Float_Bit_Types()
+        {
+            string code = @"
+def test_primitives() -> void {
+    let c: char = 'A'
+    let s: str = ""pilot""
+    let s_alias: string = ""language""
+
+    let a8: i8 = 10
+    let a16: i16 = 100
+    let a32: i32 = 1000
+    let a_int: int = 10000
+    let a64: i64 = 100000
+
+    let u8_val: u8 = 255
+    let u16_val: u16 = 65535
+    let u32_val: u32 = 4294967295
+    let u_int: uint = 500
+    let u64_val: u64 = 18446744073709551615
+
+    let f8_val: f8 = 1.0
+    let f16_val: f16 = 2.0
+    let f32_val: f32 = 3.14
+    let f_float: float = 2.718
+    let f64_val: f64 = 1.414
+    let d_double: double = 0.577
+    let d_decimal: decimal = 99.99
+    let c_complex: complex = 1.0
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Collections_Buffer_And_Nullability_Types()
+        {
+            string code = @"
+def test_collections_and_buffers() -> void {
+    let t: tuple = (1, 2)
+    let l: list = [1, 2]
+    let r: range = range(0, 10)
+    let m: map = {""a"": 1}
+    let s: set = {1, 2}
+    let fs: frozenset = frozenset([1, 2])
+    let b: bool = True
+    let by: bytes = bytes([1, 2])
+    let ba: bytearray = bytearray([1, 2])
+    let mv: memoryview = memoryview(by)
+
+    let nl: null = null
+    let no: none = none
+    let un: undefined = undefined
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Matrix_NxM_With_Type_Parameter()
+        {
+            string code = @"
+def transform(m3: matrix3x3<u8>, m4: matrix4x4<f32>, m2x4: matrix2x4<f64>) -> matrix3x3<u8> {
+    let view: matrix1x3<int> = mat1x3()
+    return m3
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Angle_Bracket_Generics()
+        {
+            string code = @"
+def test_generics() -> void {
+    let l: list<int> = [1, 2, 3]
+    let m: map<str, i32> = {""a"": 1}
+    let s: set<char> = {'a', 'b'}
+    let t: tuple<int, str> = (42, ""val"")
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+    }
+
     public class FileSuiteTests
     {
         public static IEnumerable<object[]> GetPositiveTestFiles()

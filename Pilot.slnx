@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="Pilot.csproj" />
+  <Project Path="Pilot.LanguageServer/Pilot.LanguageServer.csproj" />
   <Project Path="Pilot.Tests/Pilot.Tests.csproj" />
 </Solution>

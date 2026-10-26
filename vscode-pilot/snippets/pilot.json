@@ -1,0 +1,200 @@
+{
+  "Function Definition": {
+    "prefix": "def",
+    "body": [
+      "def ${1:function_name}(${2:param}: ${3:int}) -> ${4:void} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Define a type-safe Pilot function"
+  },
+  "Guard Precondition": {
+    "prefix": "guard",
+    "body": [
+      "guard ${1:condition} else {",
+      "\treturn ${2:false}",
+      "}"
+    ],
+    "description": "Mandatory early-exit precondition"
+  },
+  "Guard Let Unwrap": {
+    "prefix": "guardlet",
+    "body": [
+      "guard let ${1:val} = ${2:optional_expr} else {",
+      "\treturn ${3:null}",
+      "}"
+    ],
+    "description": "Null-safe unwrap with mandatory early exit"
+  },
+  "Defer Cleanup": {
+    "prefix": "defer",
+    "body": [
+      "defer {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Schedule cleanup at scope/function exit"
+  },
+  "Hard Real-Time Function": {
+    "prefix": "hardrt",
+    "body": [
+      "@hard_realtime",
+      "@wcet(${1:250us})",
+      "def ${2:control_step}(${3:cmd}: ${4:int}) -> void {",
+      "\tnoalloc {",
+      "\t\tfor ${5:i} in 0..${6:64} bounded ${6:64} {",
+      "\t\t\t$0",
+      "\t\t}",
+      "\t}",
+      "}"
+    ],
+    "description": "Deterministic zero-allocation hard real-time routine"
+  },
+  "Soft Real-Time Deadline": {
+    "prefix": "deadline",
+    "body": [
+      "deadline ${1:10ms} jitter ${2:500us} {",
+      "\t$0",
+      "} on_missed {",
+      "\t${3:handle_missed_deadline()}",
+      "}"
+    ],
+    "description": "Soft real-time deadline block with on_missed handler"
+  },
+  "Actor Definition": {
+    "prefix": "actor",
+    "body": [
+      "actor ${1:ActorName} {",
+      "\tvar ${2:state}: ${3:int} = 0",
+      "",
+      "\tasync def ${4:handle}(self, ${5:msg}: ${6:str}) -> void {",
+      "\t\t$0",
+      "\t}",
+      "}"
+    ],
+    "description": "Concurrent message-driven Actor"
+  },
+  "Channel Select": {
+    "prefix": "select",
+    "body": [
+      "select {",
+      "\tcase ${1:msg} = <-${2:in_ch} {",
+      "\t\t$0",
+      "\t}",
+      "\ttimeout ${3:50ms} {",
+      "\t\tpass",
+      "\t}",
+      "}"
+    ],
+    "description": "CSP channel multiplexing select block"
+  },
+  "LINQ Relational Query": {
+    "prefix": "from",
+    "body": [
+      "let ${1:results} = (from ${2:u} in ${3:users} with index(${4:id})",
+      "\twhere ${2:u}.${5:active} == True",
+      "\torder by ${2:u}.${6:created_at} desc",
+      "\tselect ${2:u})"
+    ],
+    "description": "In-memory or database LINQ relational query"
+  },
+  "Postgres Upsert": {
+    "prefix": "insert",
+    "body": [
+      "let ${1:id} = insert into ${2:db.users} (${3:name}, ${4:email})",
+      "\tvalues (${5:name_val}, ${6:email_val})",
+      "\ton conflict (${4:email}) do update set ${3:name} = ${5:name_val}",
+      "\treturning id"
+    ],
+    "description": "Postgres-style INSERT ... ON CONFLICT ... RETURNING"
+  },
+  "C# Property": {
+    "prefix": "property",
+    "body": [
+      "property ${1:name}: ${2:float} {",
+      "\tget {",
+      "\t\treturn self._${1:name}",
+      "\t}",
+      "\tset(v) {",
+      "\t\tself._${1:name} = v",
+      "\t}",
+      "}"
+    ],
+    "description": "C#-style property with get and set accessors"
+  },
+  "UDSA Unit of Measure": {
+    "prefix": "unit",
+    "body": [
+      "unit ${1:speed} = ${2:meter} / ${3:second}"
+    ],
+    "description": "First-class dimensional unit of measure"
+  },
+  "Closure Arrow": {
+    "prefix": "lambda",
+    "body": [
+      "[${1:capture}](${2:args}) => ${3:expression}"
+    ],
+    "description": "Modern Pilot closure with captures: [capture](args) => expr"
+  },
+  "Closure Block": {
+    "prefix": "lambdablock",
+    "body": [
+      "[${1:capture}](${2:args}) => {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Modern Pilot closure block with captures: [capture](args) => { ... }"
+  },
+  "Macro Definition": {
+    "prefix": "macro",
+    "body": [
+      "macro ${1:macro_name}(${2:param}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Define compile-time macro"
+  },
+  "Cascade Chaining": {
+    "prefix": "cascade",
+    "body": [
+      "${1:object}..${2:method1}()",
+      "\t..let ${3:result} = ${4:method2}()",
+      "\t..${5:method3}($3)"
+    ],
+    "description": "Cascade operator chaining with partial assignment"
+  },
+  "Nameof Operator": {
+    "prefix": "nameof",
+    "body": [
+      "nameof(${1:symbol})"
+    ],
+    "description": "Get symbol name as string"
+  },
+  "Static Method": {
+    "prefix": "staticdef",
+    "body": [
+      "public static def ${1:name}(${2:param}: ${3:int}) -> ${4:void} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Define a static method"
+  },
+  "Pattern Matching Match": {
+    "prefix": "match",
+    "body": [
+      "match ${1:expr} {",
+      "\tcase [${2:first}, ..var ${3:rest}] when ${4:condition} => ${5:/* handle */}",
+      "\tcase { ${6:prop}: ${7:val} } => ${8:/* handle */}",
+      "\tcase _ => ${9:/* fallback */}",
+      "}"
+    ],
+    "description": "C#-style pattern matching match statement with slice & property patterns"
+  },
+  "Collection Expression": {
+    "prefix": "collexpr",
+    "body": [
+      "[${1:item1}, ..${2:spread_collection}, ${3:item2}]"
+    ],
+    "description": "C#-style collection expression with spread element"
+  }
+}

@@ -1,0 +1,162 @@
+# ==============================================================================
+# Pilot Language Test 12: C#-Style Pattern Matching & Collection Expressions
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. C# Collection Expressions with Spread Elements (..)
+# ------------------------------------------------------------------------------
+def test_collection_expressions() -> void {
+    let row0: List[int] = [1, 2, 3]
+    let row1: List[int] = [4, 5, 6]
+    
+    # Direct C# collection expression syntax: [..a, ..b]
+    let combined: List[int] = [..row0, ..row1]
+    
+    # Boundary elements with spread
+    let surrounded: List[int] = [0, ..row0, 99, ..row1, 100]
+    
+    # Empty collection expression
+    let empty_list: List[int] = []
+    
+    # Python-style star spread also supported
+    let star_spread: List[int] = [*row0, *row1]
+    
+    # Dictionary and Set expressions with spread
+    let base_dict = {"a": 1, "b": 2}
+    let extended_dict = {..base_dict, "c": 3}
+    
+    let base_set = {10, 20}
+    let extended_set = {..base_set, 30}
+}
+
+# ------------------------------------------------------------------------------
+# 2. Relational & Combinator Patterns (> 0 and <= 100, not null, or, and)
+# ------------------------------------------------------------------------------
+def classify_temperature(temp: float) -> str {
+    match temp {
+        case < -273.15 => "Physically impossible"
+        case < 0.0 => "Freezing"
+        case >= 0.0 and <= 15.0 => "Cold"
+        case > 15.0 and < 25.0 => "Pleasant"
+        case >= 25.0 and < 35.0 => "Warm"
+        case >= 35.0 or 100.0 => "Hot"
+        case _ => "Unknown"
+    }
+}
+
+def test_logical_patterns(val: any) -> bool {
+    match val {
+        case not null => True
+        case null => False
+    }
+}
+
+# ------------------------------------------------------------------------------
+# 3. Collection Expressions & Slice Patterns in Pattern Matching
+# ------------------------------------------------------------------------------
+def test_slice_patterns(items: List[int]) -> str {
+    match items {
+        # Empty collection pattern
+        case [] => "Empty"
+        
+        # Single element
+        case [var single] => "Single: " + str(single)
+        
+        # Slice pattern at the end: [first, ..rest]
+        case [var first, ..var rest] when first == 0 => "Starts with zero"
+        
+        # Slice pattern in the middle: [first, .., last]
+        case [var head, .., var tail] => "Head and tail"
+        
+        # Relational element inside collection pattern: [_, > 10, ..]
+        case [_, > 10, ..] => "Second element is greater than 10"
+        
+        # Catch-all slice pattern: [..]
+        case [..] => "Any list"
+    }
+}
+
+# ------------------------------------------------------------------------------
+# 4. Property Patterns ({ Name: "Pilot", Version: >= 2.0 })
+# ------------------------------------------------------------------------------
+struct SoftwareRelease {
+    public let name: str
+    public let version: float
+    public let active: bool
+}
+
+def inspect_release(rel: SoftwareRelease) -> str {
+    match rel {
+        case { name: "Pilot", version: >= 2.0, active: True } => "Pilot 2.0+ Active"
+        case { name: "Pilot", version: < 2.0 } => "Legacy Pilot"
+        case { active: False } => "Inactive software"
+        case { version: 0.0 } => "Unreleased"
+        case _ => "Generic release"
+    }
+}
+
+# ------------------------------------------------------------------------------
+# 5. Positional / Tuple Patterns & Guards (when & if)
+# ------------------------------------------------------------------------------
+def evaluate_coordinates(point: (int, int)) -> str {
+    match point {
+        case (0, 0) => "Origin"
+        case (var x, 0) => "X-Axis: " + str(x)
+        case (0, var y) => "Y-Axis: " + str(y)
+        case (var x, var y) when x == y => "Diagonal"
+        case (var x, var y) if x + y == 10 => "Sum is 10"
+        case (var x, var y) => "Arbitrary Point"
+    }
+}
+
+# ------------------------------------------------------------------------------
+# 6. Type and Var Patterns with Destructuring
+# ------------------------------------------------------------------------------
+class Shape { }
+class Circle(Shape) {
+    public let radius: float = 1.0
+}
+class Rectangle(Shape) {
+    public let width: float = 2.0
+    public let height: float = 4.0
+}
+
+def calculate_area(shape: Shape) -> float {
+    match shape {
+        case Circle c when c.radius > 0.0 => 3.14159 * c.radius * c.radius
+        case Rectangle r => r.width * r.height
+        case var fallback => 0.0
+    }
+}
+
+# ------------------------------------------------------------------------------
+# 7. C#-Style `is` Pattern Expressions
+# ------------------------------------------------------------------------------
+def test_is_pattern_expressions(data: any, nums: List[int]) -> bool {
+    # Relational pattern with is
+    if data is > 0 and <= 100 {
+        pass
+    }
+    
+    # Null checking with pattern
+    if data is not null {
+        pass
+    }
+    
+    # Collection pattern with is
+    if nums is [var first, ..var rest] {
+        pass
+    }
+    
+    # Empty collection test with is
+    if nums is [] {
+        pass
+    }
+    
+    # Discard and slice with is
+    if nums is [_, > 0, ..] {
+        pass
+    }
+    
+    return True
+}

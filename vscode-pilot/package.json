@@ -1,0 +1,67 @@
+{
+  "name": "pilot-lang",
+  "displayName": "Pilot Language Support",
+  "description": "Syntax highlighting, semantic analysis, type checking, and Language Server (LSP) integration for the Pilot programming language.",
+  "version": "1.0.0",
+  "publisher": "pilot-lang",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "activationEvents": [
+    "onLanguage:pilot"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "pilot",
+        "aliases": [
+          "Pilot",
+          "pilot"
+        ],
+        "extensions": [
+          ".pilot"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "pilot",
+        "scopeName": "source.pilot",
+        "path": "./syntaxes/pilot.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "pilot",
+        "path": "./snippets/pilot.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "pilot.restartLanguageServer",
+        "title": "Pilot: Restart Language Server"
+      }
+    ],
+    "configuration": {
+      "title": "Pilot Language",
+      "properties": {
+        "pilot.languageServer.dotnetPath": {
+          "type": "string",
+          "default": "dotnet",
+          "description": "Path to the dotnet executable used to run Pilot.LanguageServer."
+        },
+        "pilot.languageServer.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional explicit path to Pilot.LanguageServer.dll or Pilot.LanguageServer.csproj."
+        }
+      }
+    }
+  }
+}

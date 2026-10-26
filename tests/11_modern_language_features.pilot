@@ -1,0 +1,253 @@
+// =============================================================================
+// Test 11: Modern Pilot Language Features
+// - Accessibility Modifiers: public, private, protected, internal
+// - Macro System: macro definitions and invocation (ident!(), ident![], ident!{})
+// - Destructuring Unpacking: tuples, lists with rest, records, and for-loops
+// - Additional Keywords: symbol, break/continue (to label), ref, dynamic
+// - Modern Closures: [capture](args) => expr or { code block } or def()/fn()
+// =============================================================================
+
+// --- 1. Accessibility Modifiers ---
+public def calculate_tax(amount: float) -> float {
+    return amount * 0.15
+}
+
+private def internal_helper() -> void {
+    pass
+}
+
+public class AccountManager {
+    public def get_balance() -> float {
+        return self._balance
+    }
+
+    private var _balance: float = 1000.0
+}
+
+protected class BaseController {
+    protected def on_init() -> void {
+        pass
+    }
+}
+
+internal struct SecurityToken {
+    public let id: str
+    public let expires: int
+}
+
+public interface IDataStore {
+    def persist() -> bool
+}
+
+public enum TransactionState {
+    Pending,
+    Committed,
+    Aborted
+}
+
+public let APP_VERSION: str = "2.0.0"
+private var _session_counter: int = 0
+public const MAX_BUFFER_SIZE: int = 65536
+
+// --- 2. Macro System ---
+public macro log_metric(name, value) {
+    print(name + ": " + value)
+}
+
+macro! generate_unique_id() -> str {
+    return "uuid_generated"
+}
+
+def demonstrate_macros() -> void {
+    println!("System metric: {}", 42);
+    let numbers = vec![10, 20, 30, 40];
+    let query_result = sql! {
+        select id, name, created_at from accounts where balance > 0;
+    };
+}
+
+// --- 3. Additional Keywords: symbol, ref, dynamic, break/continue (to label) ---
+def swap_values(ref a: int, ref b: int) -> void {
+    let temp = a
+    a = b
+    b = temp
+}
+
+def demonstrate_keywords() -> void {
+    // Symbol keyword & literal
+    let status_sym: symbol = :active
+    let fallback_sym = symbol("fallback_state")
+
+    // Dynamic typing keyword
+    dynamic external_service = connect("postgres://localhost/mydb")
+    let dynamic_data: dynamic = external_service.query("select version()")
+
+    // Ref keyword
+    var count: int = 0
+    ref count_alias = count
+
+    // Labeled break and continue
+    search_loop: for row in 0..100 {
+        col_loop: for col in 0..100 {
+            if row == 50 and col == 50 {
+                break search_loop;
+            } else if col == 10 {
+                continue col_loop;
+            }
+        }
+    }
+
+    exit_block: {
+        let error_found = false
+        if error_found {
+            break exit_block;
+        }
+    }
+}
+
+// --- 4. Destructuring Unpacking ---
+def demonstrate_unpacking() -> void {
+    // Tuple destructuring
+    let (left, right) = (100, 200)
+    let (x_pos: int, y_pos: int) = (10, 20)
+
+    // List destructuring with rest pattern
+    let [first_item, *rest_items] = [1, 2, 3, 4, 5]
+
+    // Record destructuring
+    let {user_id, username} = get_current_user()
+    let {id: target_id, name: display_name} = get_current_user()
+
+    // Nested destructuring
+    let ((pt_x, pt_y), [head_elem, *tail_elems]) = get_nested_geometry()
+
+    // Destructuring in for loops
+    for (key, val) in dictionary_pairs {
+        print(key)
+    }
+
+    for [x, y] in point_list {
+        print(x + y)
+    }
+
+    for {user_id, username} in active_user_records {
+        print(username)
+    }
+}
+
+// --- 5. Modern Closure / Anonymous Function Syntax ---
+def demonstrate_closures() -> void {
+    let multiplier = 5
+
+    // [capture](args) => expression
+    let scale = [multiplier](n: int) => n * multiplier;
+
+    // [capture](args) => { code block }
+    let log_and_scale = [multiplier](n: int) => {
+        let result = n * multiplier;
+        print(result);
+        return result;
+    };
+
+    // [capture](args) -> return_type { code block }
+    var running_total = 0
+    let add_to_total = [ref running_total](amount: int) -> int {
+        running_total += amount;
+        return running_total;
+    };
+
+    // Capture all by reference / value
+    let ref_closure = [&]() => { running_total += 1; };
+    let val_closure = [=]() => multiplier + 10;
+
+    // (args) => expression
+    let sum = (a: int, b: int) => a + b;
+
+    // Identifier => expression (concise arrow)
+    let squared = n => n * n;
+
+    // def / fn anonymous function expressions
+    let anon_func = def(x: int) -> int { return x * 10; };
+    let fn_arrow = fn(x: int) => x + 100;
+
+    // Pipeline composition with closures
+    let processed = [1, 2, 3, 4]
+        |> map([multiplier](x) => x * multiplier)
+        |> filter(x => x > 10);
+}
+
+// --- 6. Cascade Operator & Function Chaining ---
+class ServiceClient {
+    public def myfunc1(self) -> void {
+        print("Function 1 executed")
+    }
+
+    public def myfunc2(self, a: int, b: int) -> int {
+        return a + b
+    }
+
+    public def myfunc3(self, a: int, kwarg1: int = 0) -> void {
+        print("Function 3 executed")
+    }
+
+    public def fetch_status(self) -> str {
+        return "SUCCESS"
+    }
+
+    public def acknowledge(self, msg: str) -> void {
+        print("ACK: " + msg)
+    }
+}
+
+def demonstrate_cascade() -> void {
+    let myclass = ServiceClient()
+    let arg1 = 10
+    let arg2 = 20
+    let kwarg1 = 30
+
+    // Standard cascade chaining across lines
+    myclass..myfunc1()
+    ..myfunc2(arg1, arg2)
+    ..myfunc3(arg1, kwarg1)
+
+    // Partially interrupting chaining to assign method returns:
+    // 1. Using 'let' assignment
+    myclass..myfunc1()
+    ..let intermediate_sum = myfunc2(arg1, arg2)
+    ..myfunc3(arg1, intermediate_sum)
+
+    // 2. Using arrow '->' assignment
+    ..fetch_status() -> status_msg
+    ..acknowledge(status_msg)
+
+    // 3. Using direct assignment
+    ..direct_result = myfunc2(100, 200)
+    ..myfunc3(direct_result, kwarg1)
+}
+
+// --- 7. Keywords: params, args, kwargs, nameof, static ---
+public static class SystemUtilities {
+    public static const MAX_WORKERS: int = 64
+    public static var total_requests: int = 0
+
+    public static def sum_values(params numbers: List[int]) -> int {
+        return 0
+    }
+
+    public static def variadic_dispatch(*args, **kwargs) -> void {
+        pass
+    }
+}
+
+def demonstrate_new_keywords() -> void {
+    let service_instance = ServiceClient()
+
+    // nameof keyword
+    let prop_name = nameof(service_instance)
+    let class_name = nameof(SystemUtilities.sum_values)
+
+    // static method call and params
+    let res = SystemUtilities.sum_values(1, 2, 3, 4, 5)
+    SystemUtilities.variadic_dispatch("cmd", timeout = 50)
+}
+

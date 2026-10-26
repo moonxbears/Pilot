@@ -4,8 +4,20 @@ lexer grammar CoreLexer;
 // DOMAIN: Core Pythonic Syntax, Type Safety & Preconditions (Lexer)
 // =============================================================================
 
+// Accessibility & Declaration Modifiers
+PUBLIC      : 'public';
+PRIVATE     : 'private';
+PROTECTED   : 'protected';
+INTERNAL    : 'internal';
+STATIC      : 'static';
+PARAMS      : 'params';
+ARGS        : 'args';
+KWARGS      : 'kwargs';
+NAMEOF      : 'nameof';
+
 // Declaration Keywords
-DEF         : 'def' | 'fn';
+DEF         : 'def';
+FN          : 'fn';
 CLASS       : 'class';
 STRUCT      : 'struct';
 INTERFACE   : 'interface';
@@ -15,6 +27,9 @@ LET         : 'let';
 VAR         : 'var';
 CONST       : 'const';
 TYPE        : 'type';
+REF         : 'ref';
+DYNAMIC     : 'dynamic';
+SYMBOL      : 'symbol';
 PURE        : 'pure';
 MUT         : 'mut';
 IMMUT       : 'immut';
@@ -46,6 +61,7 @@ GLOBAL      : 'global';
 LAMBDA      : 'lambda';
 MATCH       : 'match';
 CASE        : 'case';
+WHEN        : 'when';
 AND         : 'and';
 OR          : 'or';
 NOT         : 'not';
@@ -56,12 +72,14 @@ TRUE        : 'True' | 'true';
 FALSE       : 'False' | 'false';
 NONE        : 'None' | 'none';
 NULL        : 'null';
+UNDEFINED   : 'undefined';
 
 // Operators & Delimiters
 ARROW            : '->';
 FAT_ARROW        : '=>';
 PIPE_FORWARD     : '|>';
 PIPE_BACKWARD    : '<|';
+SAFE_CASCADE     : '?..';
 SAFE_NAV         : '?.';
 COALESCE_EQUAL   : '??=';
 COALESCE         : '??';

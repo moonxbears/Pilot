@@ -1,0 +1,86 @@
+# ==============================================================================
+# Pilot Language Test 13: Comprehensive Built-In Types & Matrix Support
+# ==============================================================================
+
+# 1. Characters and Strings
+let c1: char = 'A'
+let s1: str = "Hello Pilot"
+let s2: string = "Type alias for str"
+
+# 2. Sized Signed Integers (i# = bits within datatype)
+let a_i8: i8 = 127
+let a_i16: i16 = 32767
+let a_i32: i32 = 2147483647
+let a_int: int = 42
+let a_i64: i64 = 9223372036854775807
+
+# 3. Sized Unsigned Integers (u# = unsigned bits)
+let a_u8: u8 = 255
+let a_u16: u16 = 65535
+let a_u32: u32 = 4294967295
+let a_uint: uint = 100
+let a_u64: u64 = 18446744073709551615
+
+# 4. Floating Point Numbers (f# = float bits, half, single, double, decimal, complex)
+let a_f8: f8 = 1.5
+let a_f16: f16 = 3.14
+let a_f32: f32 = 3.14159
+let a_float: float = 2.71828
+let a_f64: f64 = 1.41421356237
+let a_double: double = 0.5772156649
+let a_decimal: decimal = 199.99
+let a_complex: complex = 1.0
+
+# 5. Collections & Sequences (with angle bracket <> and bracket [] generics)
+let t1: tuple = (1, 2, 3)
+let t2: tuple<int, str> = (42, "pilot")
+let l1: list = [1, 2, 3]
+let l2: list<int> = [10, 20, 30]
+let l3: List[f64] = [1.1, 2.2, 3.3]
+let r1: range = range(0, 10)
+let m1: map = {"k": 1}
+let m2: map<str, int> = {"a": 1, "b": 2}
+let s_set1: set = {1, 2, 3}
+let s_set2: set<int> = {10, 20}
+let fset1: frozenset = frozenset([1, 2])
+let fset2: frozenset<str> = frozenset(["x", "y"])
+
+# 6. Binary & Memory Buffers
+let b_bool: bool = True
+let b_bytes: bytes = bytes([65, 66, 67])
+let b_bytearray: bytearray = bytearray([0, 1, 2])
+let b_mem: memoryview = memoryview(b_bytes)
+
+# 7. Nullability & Undefined
+let n1: null = null
+let n2: none = none
+let u1: undefined = undefined
+let opt_val: int? = null
+let union_val: int | undefined = undefined
+
+# 8. Matrix Types: matrix#x#<type>
+def transform_matrix(mat: matrix3x3<u8>) -> matrix3x3<u8> {
+    return mat
+}
+
+def physics_simulation(
+    m4: matrix4x4<f32>,
+    m2x4: matrix2x4<f64>,
+    view: matrix1x3<int>
+) -> matrix4x4<f32> {
+    let identity: matrix3x3<f32> = mat3_identity()
+    let raw_grid: matrix2x2<u16> = mat2_create()
+    return m4
+}
+
+def test_type_resolution() -> void {
+    let m: matrix3x3<u8> = mat3_u8()
+    let f: f16 = 1.0
+    let c: char = 'Z'
+    let ui: uint = 50
+    let uval: undefined = undefined
+    
+    if uval == undefined {
+        pass
+    }
+}

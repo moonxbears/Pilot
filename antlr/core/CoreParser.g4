@@ -15,11 +15,14 @@ identifier
     : NAME
     | GUARD | DEFER | TYPE | PURE | MUT | IMMUT | LET | VAR | CONST
     | MATCH | CASE | EXCEPT
+    | PUBLIC | PRIVATE | PROTECTED | INTERNAL
+    | SYMBOL | REF | DYNAMIC | FN
+    | STATIC | PARAMS | ARGS | KWARGS | NAMEOF | WHEN | UNDEFINED
     ;
 
 stmt
-    : simple_stmt
-    | compound_stmt
+    : compound_stmt
+    | simple_stmt
     ;
 
 simple_stmt
@@ -30,6 +33,8 @@ small_stmt
     : let_stmt
     | var_stmt
     | const_stmt
+    | ref_stmt
+    | dynamic_stmt
     | type_alias_stmt
     | guard_stmt
     | defer_stmt
@@ -43,7 +48,8 @@ small_stmt
     ;
 
 compound_stmt
-    : func_def
+    : labeled_stmt
+    | func_def
     | class_def
     | struct_def
     | interface_def
@@ -95,11 +101,13 @@ intersection_type
     ;
 
 primary_type
-    : base_type QUESTION?
+    : REF? base_type QUESTION?
     ;
 
 base_type
-    : (dotted_name | NONE | NULL) (LSQB type_arguments RSQB)?
+    : SYMBOL
+    | DYNAMIC
+    | (dotted_name | NONE | NULL | UNDEFINED) ( (LSQB type_arguments RSQB) | (LESS type_arguments GREATER) )?
     | LPAR type_spec (COMMA type_spec)* RPAR
     | LPAR (type_spec (COMMA type_spec)*)? RPAR ARROW type_spec
     | LSQB type_spec (SEMI test)? RSQB
@@ -118,21 +126,70 @@ generic_param
     : identifier (COLON type_spec)?
     ;
 
-// Variables & Constants
+// Accessibility & Declaration Modifiers
+access_modifier
+    : PUBLIC
+    | PRIVATE
+    | PROTECTED
+    | INTERNAL
+    ;
+
+declaration_modifier
+    : access_modifier
+    | STATIC
+    ;
+
+// Variables, Constants & Destructuring Declarations
+binding_pattern
+    : identifier
+    | tuple_pattern
+    | list_pattern
+    | record_pattern
+    ;
+
+tuple_pattern
+    : LPAR (binding_pattern_item (COMMA binding_pattern_item)* COMMA?)? RPAR
+    ;
+
+list_pattern
+    : LSQB (binding_pattern_item (COMMA binding_pattern_item)* COMMA?)? RSQB
+    ;
+
+record_pattern
+    : LBRACE (record_pattern_field (COMMA record_pattern_field)* COMMA?)? RBRACE
+    ;
+
+binding_pattern_item
+    : (STAR | DOUBLESTAR)? binding_pattern (COLON type_spec)? (EQUAL test)?
+    ;
+
+record_pattern_field
+    : identifier (COLON binding_pattern)? (EQUAL test)?
+    | DOUBLESTAR identifier
+    ;
+
 let_stmt
-    : LET identifier type_annotation? (EQUAL test)?
+    : declaration_modifier* LET binding_pattern type_annotation? (EQUAL test)?
     ;
 
 var_stmt
-    : VAR identifier type_annotation? (EQUAL test)?
+    : declaration_modifier* VAR binding_pattern type_annotation? (EQUAL test)?
     ;
 
 const_stmt
-    : CONST identifier type_annotation? EQUAL test
+    : declaration_modifier* CONST binding_pattern type_annotation? EQUAL test
+    ;
+
+ref_stmt
+    : declaration_modifier* REF binding_pattern type_annotation? (EQUAL test)?
+    ;
+
+dynamic_stmt
+    : declaration_modifier* DYNAMIC binding_pattern (EQUAL test)?
     ;
 
 type_alias_stmt
-    : TYPE identifier generic_params? EQUAL type_spec
+    : declaration_modifier* TYPE identifier generic_params? EQUAL type_spec
     ;
 
 annassign_stmt
@@ -161,7 +218,7 @@ augassign
 
 // Functions & Object Model
 func_def
-    : decorators? (PURE)? DEF identifier generic_params? parameters (ARROW type_spec)? (COLON? suite | SEMI)?
+    : decorators? declaration_modifier* (PURE)? (DEF | FN) identifier generic_params? parameters (ARROW type_spec)? (COLON? suite | SEMI)?
     ;
 
 parameters
@@ -169,11 +226,11 @@ parameters
     ;
 
 parameter
-    : (STAR | DOUBLESTAR)? identifier type_annotation? (EQUAL test)?
+    : (PARAMS | REF)? (STAR | DOUBLESTAR)? identifier type_annotation? (EQUAL test)?
     ;
 
 class_def
-    : decorators? CLASS identifier generic_params? (LPAR class_bases? RPAR)? COLON? suite
+    : decorators? declaration_modifier* CLASS identifier generic_params? (LPAR class_bases? RPAR)? COLON? suite
     ;
 
 class_bases
@@ -181,19 +238,19 @@ class_bases
     ;
 
 struct_def
-    : decorators? STRUCT identifier generic_params? COLON? (LBRACE struct_member* RBRACE | suite)
+    : decorators? declaration_modifier* STRUCT identifier generic_params? COLON? (LBRACE struct_member* RBRACE | suite)
     ;
 
 struct_member
-    : (LET | VAR)? identifier type_annotation (EQUAL test)? SEMI?
+    : declaration_modifier* (LET | VAR | CONST)? identifier type_annotation? (EQUAL test)? SEMI?
     ;
 
 interface_def
-    : decorators? (INTERFACE | PROTOCOL) identifier generic_params? COLON? suite
+    : decorators? declaration_modifier* (INTERFACE | PROTOCOL) identifier generic_params? COLON? suite
     ;
 
 enum_def
-    : decorators? ENUM identifier generic_params? COLON? enum_suite
+    : decorators? declaration_modifier* ENUM identifier generic_params? COLON? enum_suite
     ;
 
 enum_suite
@@ -213,8 +270,12 @@ decorator
     ;
 
 // Control Flow
+labeled_stmt
+    : identifier COLON (for_stmt | while_stmt | suite)
+    ;
+
 if_stmt
-    : IF test COLON? suite (ELIF test COLON? suite)* (ELSE COLON? suite)?
+    : IF test COLON? suite ((ELIF | ELSE IF) test COLON? suite)* (ELSE COLON? suite)?
     ;
 
 while_stmt
@@ -226,7 +287,8 @@ for_stmt
     ;
 
 for_target
-    : exprlist
+    : binding_pattern (COMMA binding_pattern)* COMMA?
+    | exprlist
     ;
 
 match_stmt
@@ -238,20 +300,65 @@ match_suite
     ;
 
 match_arm
-    : CASE pattern (IF test)? (COLON | ARROW)? suite
+    : CASE pattern ((WHEN | IF) test)? (COLON | ARROW | FAT_ARROW)? suite
     ;
 
 pattern
-    : pattern_term (VBAR pattern_term)*
+    : or_pattern
     ;
 
-pattern_term
-    : literal
-    | dotted_name (LPAR (pattern (COMMA pattern)*)? RPAR)?
-    | LSQB (pattern (COMMA pattern)*)? RSQB
-    | LPAR (pattern (COMMA pattern)*)? RPAR
-    | STAR identifier
+or_pattern
+    : and_pattern ((OR | VBAR) and_pattern)*
+    ;
+
+and_pattern
+    : not_pattern (AND not_pattern)*
+    ;
+
+not_pattern
+    : NOT not_pattern
+    | primary_pattern
+    ;
+
+primary_pattern
+    : relational_pattern
+    | collection_pattern
+    | property_pattern
+    | tuple_pattern_match
+    | type_or_var_pattern
+    | literal
+    | symbol_literal
     | UNDERSCORE
+    ;
+
+relational_pattern
+    : (LESS | LESSEQUAL | GREATER | GREATEREQUAL | EQEQUAL | NOTEQUAL) shift_expr
+    ;
+
+collection_pattern
+    : LSQB (slice_pattern_element (COMMA slice_pattern_element)* COMMA?)? RSQB
+    ;
+
+slice_pattern_element
+    : (DOTDOT | STAR) pattern?
+    | pattern
+    ;
+
+property_pattern
+    : LBRACE (property_pattern_member (COMMA property_pattern_member)* COMMA?)? RBRACE
+    ;
+
+property_pattern_member
+    : identifier COLON pattern
+    ;
+
+tuple_pattern_match
+    : LPAR (pattern (COMMA pattern)* COMMA?)? RPAR
+    ;
+
+type_or_var_pattern
+    : (VAR | LET) identifier
+    | dotted_name (LPAR (pattern (COMMA pattern)* COMMA?)? RPAR)? property_pattern? identifier?
     ;
 
 try_stmt
@@ -271,8 +378,8 @@ with_item
     ;
 
 flow_stmt
-    : BREAK
-    | CONTINUE
+    : BREAK identifier?
+    | CONTINUE identifier?
     | RETURN testlist?
     | YIELD testlist?
     | RAISE (test (FROM test)?)?
@@ -333,12 +440,32 @@ exprlist
     ;
 
 test
-    : pipe_expr (IF pipe_expr ELSE test)?
-    | lambdef
+    : lambda_expr
+    | pipe_expr (IF pipe_expr ELSE test)?
     ;
 
-lambdef
-    : LAMBDA lambda_params? (ARROW | COLON) test
+lambda_expr
+    : capture_list parameters (ARROW type_spec)? lambda_body
+    | capture_list (ARROW type_spec)? lambda_body
+    | parameters (ARROW type_spec)? (FAT_ARROW test | FAT_ARROW? LBRACE stmt* RBRACE)
+    | identifier FAT_ARROW (test | LBRACE stmt* RBRACE)
+    | (DEF | FN) parameters? ((ARROW | COLON) type_spec)? (FAT_ARROW test | COLON? LBRACE stmt* RBRACE)
+    | LAMBDA lambda_params? (ARROW | COLON) test
+    ;
+
+lambda_body
+    : FAT_ARROW test
+    | FAT_ARROW? LBRACE stmt* RBRACE
+    ;
+
+capture_list
+    : LSQB (capture_item (COMMA capture_item)* COMMA?)? RSQB
+    ;
+
+capture_item
+    : (REF | AMPER)? identifier (EQUAL test)?
+    | AMPER
+    | EQUAL
     ;
 
 lambda_params
@@ -372,7 +499,7 @@ not_test
     ;
 
 comparison
-    : range_expr (comp_op range_expr)*
+    : range_expr ( (IS | IS NOT) pattern | comp_op range_expr )*
     ;
 
 comp_op
@@ -384,8 +511,6 @@ comp_op
     | GREATEREQUAL
     | IN
     | NOT IN
-    | IS
-    | IS NOT
     ;
 
 range_expr
@@ -434,7 +559,18 @@ trailer
     | LSQB subscriptlist RSQB
     | DOT identifier
     | SAFE_NAV identifier
+    | cascade_trailer
     | EXCLAMATION
+    ;
+
+cascade_trailer
+    : (DOTDOT | SAFE_CASCADE) cascade_target
+    ;
+
+cascade_target
+    : ( (LET | VAR)? binding_pattern (EQUAL | WALRUS) )? dotted_name (LSQB type_arguments RSQB)? LPAR arglist? RPAR (ARROW binding_pattern)?
+    | dotted_name EQUAL test
+    | LSQB subscriptlist RSQB EQUAL test
     ;
 
 subscriptlist
@@ -451,10 +587,34 @@ subscript
 
 atom
     : literal
+    | macro_call
+    | symbol_literal
+    | nameof_expr
     | identifier
     | LPAR testlist_comp? RPAR
-    | LSQB testlist_comp? RSQB
+    | collection_expr
     | LBRACE dictorsetmaker? RBRACE
+    ;
+
+collection_expr
+    : LSQB (collection_element (comp_for | (COMMA collection_element)* COMMA?))? RSQB
+    ;
+
+collection_element
+    : (DOTDOT | STAR)? test
+    ;
+
+nameof_expr
+    : NAMEOF LPAR (dotted_name | test) RPAR
+    ;
+
+macro_call
+    : identifier EXCLAMATION (LPAR arglist? RPAR | LBRACE stmt* RBRACE | LSQB arglist? RSQB)
+    ;
+
+symbol_literal
+    : SYMBOL (LPAR test? RPAR)?
+    | COLON identifier
     ;
 
 literal
@@ -470,6 +630,7 @@ literal
     | FALSE
     | NONE
     | NULL
+    | UNDEFINED
     ;
 
 testlist_comp
@@ -477,8 +638,13 @@ testlist_comp
     ;
 
 dictorsetmaker
-    : (test COLON test (comp_for | (COMMA test COLON test)* COMMA?))
-    | (test (comp_for | (COMMA test)* COMMA?))
+    : (dict_entry (comp_for | (COMMA dict_entry)* COMMA?))
+    | (collection_element (comp_for | (COMMA collection_element)* COMMA?))
+    ;
+
+dict_entry
+    : (DOUBLESTAR | DOTDOT) test
+    | test COLON test
     ;
 
 comp_for
@@ -499,6 +665,6 @@ arglist
     ;
 
 argument
-    : (STAR | DOUBLESTAR)? test
+    : REF? (STAR | DOUBLESTAR)? test
     | identifier EQUAL test
     ;

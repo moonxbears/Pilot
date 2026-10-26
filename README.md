@@ -47,9 +47,29 @@ Pilot/
 │   ├── 08_guard_defer.pilot
 │   ├── 09_postgres_database.pilot
 │   └── 10_csharp_robustness.pilot
-├── Pilot.Tests/                 <-- xUnit automated test suite (39 unit tests)
+├── Pilot.LanguageServer/        <-- Connected C# Language Server (LSP) & Semantic Analyzer
+│   ├── Pilot.LanguageServer.csproj
+│   ├── Program.cs
+│   ├── Lsp/
+│   │   └── PilotLspServer.cs    (JSON-RPC 2.0 LSP Server over stdio)
+│   └── Semantics/
+│       ├── PilotSymbol.cs       (Symbol tables, scopes, semantic token legend)
+│       └── PilotSemanticAnalyzer.cs (Type checker, immutability, guard/real-time rules)
+├── vscode-pilot/                <-- VS Code Extension for Pilot (.pilot)
+│   ├── package.json             (Extension manifest, grammars, snippets, settings)
+│   ├── language-configuration.json
+│   ├── syntaxes/
+│   │   └── pilot.tmLanguage.json (TextMate syntax highlighting across all 6 domains)
+│   ├── snippets/
+│   │   └── pilot.json           (Idiomatic Pilot code snippets)
+│   ├── src/
+│   │   └── extension.ts         (TypeScript LSP client bridge)
+│   └── out/
+│       └── extension.js         (Ready-to-run compiled VS Code extension entrypoint)
+├── Pilot.Tests/                 <-- xUnit automated test suite (47 unit tests)
 │   ├── Pilot.Tests.csproj
-│   └── PilotLanguageTests.cs
+│   ├── PilotLanguageTests.cs
+│   └── PilotSemanticAndLspTests.cs
 ├── Class1.cs                    <-- Pilot CLI runner & parse tree visualizer
 ├── Pilot.csproj                 <-- Main C# project compiling Pilot.g4 via Antlr4 MSBuild
 └── README.md
@@ -103,3 +123,38 @@ dotnet run -- --tree examples/overview.pilot
 ```powershell
 dotnet run -- --tokens examples/overview.pilot
 ```
+
+### Run Syntax & Semantic Check via `Pilot.LanguageServer`
+```powershell
+dotnet run --project Pilot.LanguageServer/Pilot.LanguageServer.csproj -- --check examples/overview.pilot
+```
+
+---
+
+## VS Code Extension (`vscode-pilot`) & Connected Language Server (`Pilot.LanguageServer`)
+
+`Pilot.LanguageServer` directly references `Pilot.csproj`, meaning any grammar change in `antlr/Pilot.g4` automatically flows into the Language Server and VS Code extension.
+
+### Features Provided in VS Code
+1. **Lexical & AST Semantic Highlighting**: TextMate grammar (`pilot.tmLanguage.json`) + compiler-driven LSP `textDocument/semanticTokens/full`.
+2. **Real-Time Syntax & Semantic Diagnostics**:
+   - `PILOT001`: Syntax Error (directly from ANTLR `PilotLexer` / `PilotParser`)
+   - `PILOT101`: Immutable Reassignment (`let` or `const` variable modified after initialization)
+   - `PILOT102`: Static Type / Nullability / Dimensional Unit-of-Measure Mismatch (`int` vs `str`, `null` assigned to non-nullable `T`, or incompatible units like `float<meter>` vs `float<second>`)
+   - `PILOT103`: `guard` Missing Mandatory Early Exit (`guard ... else { ... }` block that does not exit via `return`, `raise`, `break`, or `continue`)
+   - `PILOT104`: Unbounded Loop in Hard Real-Time / `noalloc` (`for` or `while` without `bounded <N>` inside `@hard_realtime` or `noalloc`)
+   - `PILOT105`: Duplicate Symbol Declaration in the same scope
+   - `PILOT106`: `await` Used Outside `async def` or `actor` Context
+   - `PILOT107`: `rollback to savepoint` targeting an undeclared savepoint
+3. **Rich Hover Documentation (`textDocument/hover`)**: Displays full symbol signatures, inferred/explicit types, mutability (`let`/`var`/`const`), `@hard_realtime` WCET budgets, table index definitions, and domain documentation.
+4. **Go to Definition (`F12` / `Ctrl+Click`)**: Jumps to the declaration of classes, structs, models, actors, functions, parameters, units, and variables.
+5. **Document Outline & Breadcrumbs (`textDocument/documentSymbol`)**: Hierarchical symbol tree in VS Code's Outline view.
+6. **Context-Aware Code Completion & Snippets**: Suggests in-scope variables, functions, types, properties, and Pilot domain keywords/snippets.
+
+### How to Launch or Install the VS Code Extension
+- **Option A (Press `F5` in VS Code)**: Open this repository in VS Code and press **F5** (`Run Pilot VS Code Extension`). It automatically builds `Pilot.LanguageServer` and opens an Extension Development Host window with the extension active.
+- **Option B (Install locally into your main VS Code)**:
+  ```powershell
+  New-Item -ItemType Junction -Path "$env:USERPROFILE\.vscode\extensions\pilot-lang-1.0.0" -Target "$PWD\vscode-pilot"
+  ```
+  Then reload VS Code and open any `.pilot` file.

@@ -29,7 +29,7 @@ unit_term
     ;
 
 macro_def
-    : MACRO identifier generic_params? parameters COLON? suite
+    : decorators? access_modifier? MACRO EXCLAMATION? identifier generic_params? parameters? (ARROW type_spec)? COLON? suite
     ;
 
 quote_stmt
