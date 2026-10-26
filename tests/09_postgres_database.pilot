@@ -1,0 +1,119 @@
+# ==============================================================================
+# Pilot Test Suite 09: PostgreSQL-like Inherent Database Integration with {} Braces
+# ==============================================================================
+
+# 1. Generic Database Connections (PostgreSQL, SQLite, DuckDB, etc.)
+# Same syntax connects generically without specialized syntax divergence
+database pg_db = connect("postgres://postgres:secret@localhost:5432/pilot_production")
+database sqlite_db = connect("sqlite:///var/data/app.db")
+database in_mem_db = connect("memory://")
+
+# 2. Schema and Model Definition
+model User {
+    id: int
+    name: str
+    email: str
+    metadata: dict[str, str]
+    tags: list[str]
+    salary: float
+    dept_id: int
+}
+
+model Department {
+    id: int
+    dept_name: str
+}
+
+# 3. PostgreSQL-Style INSERT with ON CONFLICT & RETURNING
+def register_user(u: User) -> int {
+    # Insert with ON CONFLICT DO UPDATE and RETURNING clause
+    let inserted_id = insert into pg_db.users (id, name, email, salary, dept_id)
+        values (u.id, u.name, u.email, u.salary, u.dept_id)
+        on conflict (email) do update set name = u.name, salary = u.salary
+        returning id
+
+    # Standalone insert with ON CONFLICT DO NOTHING
+    insert into pg_db.audit_logs (action, target_user) values ("USER_REGISTERED", inserted_id) on conflict do nothing
+
+    return inserted_id
+}
+
+# 4. PostgreSQL-Style UPDATE with RETURNING
+def give_raise(dept_id: int, percent: float) -> list[float] {
+    let new_salaries = update pg_db.users
+        set salary = salary * (1.0 + percent)
+        where dept_id == dept_id
+        returning salary
+
+    return new_salaries
+}
+
+# 5. PostgreSQL-Style DELETE with RETURNING
+def cleanup_inactive_users(threshold_days: int) -> int {
+    let deleted_count = delete from pg_db.users
+        where last_active_days > threshold_days
+        returning count()
+
+    return deleted_count
+}
+
+# 6. PostgreSQL Window Functions (OVER, PARTITION BY, ORDER BY)
+def analyze_department_salaries() -> list[tuple] {
+    # Window function in SQL-style query
+    let ranking = select
+            u.name,
+            u.salary,
+            rank() over (partition by u.dept_id order by u.salary desc) as dept_rank,
+            sum(u.salary) over (partition by u.dept_id) as total_dept_spend
+        from pg_db.users as u
+
+    return ranking
+}
+
+# 7. PostgreSQL JSONB Query Operators (->>, @>, <@)
+def query_jsonb_metadata() -> list[str] {
+    # ->> extracts JSON text, @> checks JSON containment
+    let results = select u.name
+        from pg_db.users as u
+        where u.metadata ->> "role" == "admin"
+          and u.tags @> ["verified", "internal"]
+
+    return results
+}
+
+# 8. Transactions, Savepoints, Commit, and Rollback
+def transfer_department_budget(from_dept: int, to_dept: int, amount: float) -> bool {
+    transaction(pg_db) {
+        update pg_db.departments set budget = budget - amount where id == from_dept
+
+        savepoint debit_complete
+
+        try {
+            update pg_db.departments set budget = budget + amount where id == to_dept
+            commit transaction
+            return true
+        } except Exception as ex {
+            rollback to savepoint debit_complete
+            rollback transaction
+            return false
+        }
+    }
+}
+
+# 9. Generic Unified Query Syntax (Works on PostgreSQL or In-Memory equally)
+def find_high_earners(min_salary: float) {
+    # LINQ style on database
+    let top_pg = from u in pg_db.users
+        where u.salary > min_salary
+        order by u.salary desc
+        select u.name
+
+    # Exact same syntax on local in-memory collection
+    var local_users: list[User] = []
+    let top_local = from u in local_users
+        where u.salary > min_salary
+        order by u.salary desc
+        select u.name
+
+    return (top_pg, top_local)
+}

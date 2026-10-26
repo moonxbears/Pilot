@@ -1,0 +1,100 @@
+# ==============================================================================
+# Pilot Test Suite 08: Guard & Defer with {} Braces
+# ==============================================================================
+
+# 1. Guard Statements with Basic Conditions
+def process_user_id(user_id: int?) -> str {
+    # Guard ensures preconditions are met, otherwise forces an exit block
+    guard user_id is not None else {
+        return "invalid_id"
+    }
+
+    guard user_id > 0 else {
+        raise ValueError("ID must be positive")
+    }
+
+    return f"Processed ID: {user_id}"
+}
+
+# 2. Guard with Pattern Matching / Value Binding (guard let ... else { ... })
+class User {
+    id: int
+    name: str
+    email: str?
+}
+
+def find_user(id: int) -> User? {
+    if id == 1 {
+        return User(id=1, name="Alice", email="alice@example.com")
+    }
+    return None
+}
+
+def send_notification(user_id: int, message: str) -> bool {
+    guard let user = find_user(user_id) else {
+        print("User not found!")
+        return false
+    }
+
+    guard user.email is not None else {
+        print("User has no email!")
+        return false
+    }
+
+    print(f"Sending '{message}' to {user.email}")
+    return true
+}
+
+# 3. Defer Statements for Deterministic Cleanup
+class DatabaseConnection {
+    is_open: bool = true
+
+    def close() -> None {
+        self.is_open = false
+        print("Database connection closed")
+    }
+}
+
+class FileHandle {
+    path: str
+    def flush() -> None {
+        print(f"Flushed {self.path}")
+    }
+    def dispose() -> None {
+        print(f"Disposed {self.path}")
+    }
+}
+
+def run_query(query_str: str) -> list[str] {
+    conn = DatabaseConnection()
+    # Single statement defer: executes on function/scope exit
+    defer conn.close()
+
+    file = FileHandle(path="/var/log/query.log")
+    # Multiline defer block
+    defer {
+        file.flush()
+        file.dispose()
+    }
+
+    guard len(query_str) > 0 else {
+        return []
+    }
+
+    print(f"Executing: {query_str}")
+    return ["result1", "result2"]
+}
+
+# 4. Nested Scopes with Guard and Defer
+def transaction_pipeline() -> int {
+    var counter: int = 0
+
+    with open_scope() {
+        defer counter += 10
+        guard counter == 0 else {
+            return -1
+        }
+    }
+
+    return counter
+}

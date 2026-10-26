@@ -1,0 +1,128 @@
+# ==============================================================================
+# Pilot Test Suite 10: C#-Style Robustness with {} Braces
+# ==============================================================================
+
+# --- 1. Properties with Pythonic and Auto Accessors ---
+class BankAccount {
+    var _balance: float = 0.0
+
+    # Braced Property with Validation Guard in Setter
+    property balance: float {
+        get {
+            return self._balance
+        }
+        set(value) {
+            guard value >= 0.0 else {
+                raise ValueError("Balance cannot be negative")
+            }
+            self._balance = value
+        }
+    }
+
+    # Compact C#-style Auto-Property
+    property account_number: str { get; set; }
+    property routing_code: str { get; }
+}
+
+# --- 2. Operator Overloading (+, -, ==, [], []=) ---
+struct Vector3 {
+    let x: float
+    let y: float
+    let z: float
+
+    operator + (self, other: Vector3) -> Vector3 {
+        return Vector3(self.x + other.x, self.y + other.y, self.z + other.z)
+    }
+
+    operator - (self, other: Vector3) -> Vector3 {
+        return Vector3(self.x - other.x, self.y - other.y, self.z - other.z)
+    }
+
+    operator == (self, other: Vector3) -> bool {
+        return self.x == other.x and self.y == other.y and self.z == other.z
+    }
+}
+
+class MatrixBuffer {
+    var data: list[list[float]] = []
+
+    # Overloading Indexer Getter []
+    operator [] (self, index: int) -> list[float] {
+        return self.data[index]
+    }
+
+    # Overloading Indexer Setter []=
+    operator []= (self, index: int, val: list[float]) -> void {
+        self.data[index] = val
+    }
+}
+
+# --- 3. Extension Methods for Built-in & Custom Types ---
+extension StringExtensions for str {
+    def is_blank(self) -> bool {
+        return len(self) == 0
+    }
+
+    def slugify(self) -> str {
+        return self.lower().replace(" ", "-")
+    }
+}
+
+interface Printable {
+    def to_string() -> str
+}
+
+extension for list[T] where T: Printable {
+    def print_elements(self) -> void {
+        for item in self {
+            print(item.to_string())
+        }
+    }
+}
+
+# --- 4. Generic Type Constraints (where T: ...) ---
+interface Serializable {
+    def serialize() -> str
+}
+
+interface Entity[TKey] {
+    def get_id() -> TKey
+}
+
+interface Equatable[T] {
+    def equals(self, other: T) -> bool
+}
+
+# Generic function with intersection constraint
+def dump_payload[T](payload: T) -> str where T: Printable & Serializable {
+    return payload.serialize()
+}
+
+# Generic class with multiple constrained type parameters
+class GenericRepository[T, TKey] where T: Entity[TKey], TKey: Equatable[TKey] {
+    def find_by_key(self, key: TKey) -> T? {
+        return null
+    }
+}
+
+# --- 5. Null-Coalescing (??), Null-Coalescing Assignment (??=), and Safe Navigation (?.) ---
+class UserProfile {
+    var nickname: str? = null
+    var bio: str? = null
+}
+
+class AccountRecord {
+    var profile: UserProfile? = null
+}
+
+def resolve_user_greeting(account: AccountRecord?, config_map: dict[str, str]?) -> str {
+    # Null-coalescing assignment (??=)
+    var opts = config_map
+    opts ??= {"mode": "default", "role": "guest"}
+
+    # Safe navigation (?.) combined with Null-coalescing (??)
+    let display_name: str = account?.profile?.nickname ?? "Anonymous"
+    let greeting: str = f"Hello, {display_name}!"
+
+    return greeting
+}

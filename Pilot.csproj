@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultAntlrItems>false</EnableDefaultAntlrItems>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Pilot.Tests\**</DefaultItemExcludes>
+    <NoWarn>$(NoWarn);CS3021</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Antlr4" Version="4.6.6">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Antlr4.CodeGenerator" Version="4.6.6">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Antlr4.Runtime" Version="4.6.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Antlr4 Include="antlr\Pilot.g4">
+      <Generator>MSBuild:Compile</Generator>
+      <CustomToolNamespace>Pilot</CustomToolNamespace>
+      <Visitor>True</Visitor>
+      <Listener>True</Listener>
+    </Antlr4>
+  </ItemGroup>
+
+  <Target Name="IncludeAntlr4InDesignTimeBuild"
+          BeforeTargets="CoreCompile;CompileDesignTime;CollectResolvedCompilationReferencesDesignTime"
+          DependsOnTargets="Antlr4CompileReadGeneratedFileList;Antlr4Compile;Antlr4CompileAddFilesGenerated" />
+
+</Project>

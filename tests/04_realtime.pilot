@@ -1,0 +1,68 @@
+# =============================================================================
+# Test Suite 4: Soft Real-Time vs. Hard Real-Time Trade-offs with {} Braces
+# =============================================================================
+
+# --- 1. Real-Time Duration, Frequency, and Memory Literals ---
+let clock_ns = 25ns
+let sensor_deadline = 250us
+let cycle_ms = 10ms
+let timeout_sec = 2s
+let sample_rate = 50kHz
+let carrier_freq = 2.4GHz
+let stack_limit = 64KB
+let arena_cap = 16MB
+
+# --- 2. Hard Real-Time: Deterministic WCET, Zero Heap Allocations ---
+@hard_realtime
+@wcet(250us)
+def motor_control_loop(target_angle: float) -> void {
+    # Compiler enforces zero heap allocations inside noalloc block
+    noalloc {
+        # Stack allocation for deterministic, unboxed scratch buffers
+        var buffer = stackalloc float[128]
+
+        # Bounded for loop: static verification of Worst-Case Execution Time (WCET)
+        for i in 0..128 bounded 128 {
+            buffer[i] = compute_pid(target_angle, i)
+        }
+
+        # Bounded while loop: guarantees loop termination bound
+        var stable: bool = False
+        var iterations: int = 0
+        while not stable bounded 50 {
+            stable = check_actuator_limits()
+            iterations += 1
+        }
+    }
+}
+
+# Scoped region memory allocator (deterministic arena without GC pauses)
+def signal_processing_routine() -> void {
+    region dsp_scratchpad {
+        let samples = read_adc_buffer()
+        apply_fft_filter(samples)
+    }
+}
+
+# --- 3. Soft Real-Time: Deadlines, Budgets, and Periodic Scheduling ---
+@soft_realtime
+def autonomous_navigation_cycle() -> void {
+    # Deadline block with jitter bound and graceful miss recovery
+    deadline 10ms jitter 500us {
+        solve_kinematics()
+    } on_missed {
+        engage_failsafe_brake()
+    }
+
+    # Execution budget with deterministic fallback
+    within 3ms {
+        render_augmented_hud()
+    } fallback {
+        reuse_previous_frame()
+    }
+
+    # Fixed-priority rate-monotonic periodic task
+    periodic 20ms priority 99 jitter 50us {
+        read_imu_sensors()
+    }
+}

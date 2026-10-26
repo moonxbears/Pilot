@@ -1,0 +1,89 @@
+# =============================================================================
+# Test Suite 3: Asynchronous and Multi-Threaded Concurrency with {} Braces
+# =============================================================================
+
+# --- 1. Actor Model ---
+actor StateCoordinator {
+    var counter: int = 0
+    var active_nodes: List[str] = []
+
+    async def increment(self, step: int) -> int {
+        self.counter += step
+        return self.counter
+    }
+
+    async def register_node(self, node_id: str) -> void {
+        self.active_nodes.append(node_id)
+    }
+}
+
+# --- 2. Asynchronous Functions & Await ---
+async def fetch_payload(url: str, timeout_sec: float) -> Result[bytes, str] {
+    let client = HttpClient()
+    let response = await client.get_async(url, timeout=timeout_sec)
+    return Ok(response.body)
+}
+
+async def stream_processor(socket: AsyncSocket) -> void {
+    # Async with & async for
+    async with socket.acquire_lock() as session {
+        async for chunk in session.read_stream() {
+            process_chunk(chunk)
+        }
+    }
+}
+
+# --- 3. Channels & CSP (Communicating Sequential Processes) ---
+async def channel_broker(request_ch: Channel[Request], response_ch: Channel[Response]) -> void {
+    while True {
+        # Channel Multiplexing Select
+        select {
+            case req = <-request_ch {
+                let result = process_request(req)
+                response_ch <- result
+            }
+            case response_ch <- Response.Ping {
+                log("Heartbeat emitted")
+            }
+            timeout 100ms {
+                log("Channel idle timeout")
+            }
+            default {
+                yield_execution()
+            }
+        }
+    }
+}
+
+# --- 4. Multi-Threaded Spawning & Parallel Data Processing ---
+def compute_workload(data: List[int]) -> List[int] {
+    # Multithreaded background worker task
+    spawn {
+        background_telemetry_dump()
+    }
+
+    # Worker pool parameterized spawn
+    let handle = spawn(worker_pool) run_matrix_multiplication()
+
+    # Multi-threaded parallel loop
+    parallel for item in data {
+        heavy_math(item)
+    }
+
+    # Thread synchronization primitives
+    atomic {
+        global_transaction_id += 1
+    }
+
+    sync(resource_mutex) {
+        shared_state.commit()
+    }
+
+    # Thread-isolated heap execution (zero GC pauses on other threads)
+    isolate {
+        let isolated_buffer = allocate_local_cache()
+        compute_on_isolated_buffer(isolated_buffer)
+    }
+
+    return data
+}

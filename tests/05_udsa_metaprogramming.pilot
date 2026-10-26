@@ -1,0 +1,60 @@
+# =============================================================================
+# Test Suite 5: Universal Domain-Specific Abstractions (UDSA) & Metaprogramming with {} Braces
+# =============================================================================
+
+# --- 1. Units of Measure & Dimensional Analysis ---
+unit meter
+unit second
+unit kilogram
+unit speed = meter / second
+unit acceleration = meter / second**2
+unit force = kilogram * meter / second**2
+
+def calculate_kinetics() -> float<force> {
+    let dist: float<meter> = 100.0<meter>
+    let duration: float<second> = 4.5<second>
+    let velocity: float<meter / second> = dist / duration
+    let mass: float<kilogram> = 75.0<kilogram>
+    let accel: float<meter / second**2> = 9.8<meter / second**2>
+    let f: float<force> = mass * accel
+    return f
+}
+
+# --- 2. Universal Embedded DSL Blocks ---
+dsl electronic_circuit {
+    resistor(name="R1", resistance=100)
+    capacitor(name="C1", capacitance=10)
+    inductor(name="L1", inductance=5)
+}
+
+dsl neural_network(hidden_layers: int, output_classes: int) {
+    dense(256, activation="relu")
+    batch_norm()
+    dropout(rate=0.25)
+    dense(hidden_layers, activation="relu")
+    dense(output_classes, activation="softmax")
+}
+
+# --- 3. Functional Pipelining & Composition ---
+def data_transformation_pipeline(raw_records: List[int]) -> List[int] {
+    # Forward pipeline operator (|>)
+    let cleaned_records = raw_records |> filter(is_positive) |> map(double_val) |> sort_descending()
+
+    # Backward pipeline operator (<|)
+    let final_result = summarize <| cleaned_records
+    return final_result
+}
+
+# --- 4. Compile-Time Metaprogramming & Macros ---
+macro generate_accessor(field_name) {
+    quote {
+        def get_field(self) -> any {
+            return getattr(self, $field_name)
+        }
+    }
+}
+
+def generate_expression_ast() -> AstNode {
+    let expr_node = quote { 10 + 20 * 30 }
+    return expr_node
+}

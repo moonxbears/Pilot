@@ -1,0 +1,66 @@
+# =============================================================================
+# Test Suite 6: Syntax Edge Cases & Braced Blocks
+# =============================================================================
+
+# --- 1. Both Braced and Single-Line Statements ---
+# Braced function
+def add_numbers(a: int, b: int) -> int {
+    return a + b;
+}
+
+# Braced class
+class Rectangle {
+    def __init__(self, w: float, h: float) -> void {
+        self.w = w;
+        self.h = h;
+    }
+
+    def area(self) -> float {
+        return self.w * self.h;
+    }
+}
+
+# --- 2. Single-Line Statements ---
+if True: pass
+while False: break
+
+# --- 3. Explicit Line Joining with Backslash ---
+let long_calculation = 100 + \
+                       200 + \
+                       300
+
+# --- 4. Trailing Commas in Multiple Constructs ---
+let trailing_list: List[int] = [
+    10,
+    20,
+    30,
+]
+
+let trailing_map: Dict[str, int] = {
+    "first": 1,
+    "second": 2,
+}
+
+def multi_arg_func(
+    first: int,
+    second: str,
+    third: bool,
+) -> void {
+    pass
+}
+
+# --- 5. Nested Parens Suppressing Newlines ---
+let complex_tuple = (
+    1,
+    (2, 3),
+    [
+        4,
+        5,
+        6
+    ]
+)
+
+# --- 6. Full Pipeline and Range Operators ---
+let step1 = 0..10
+let step2 = 0..=10
+let result_val = [1, 2, 3] |> map(lambda x: x * 2) |> filter(lambda x: x > 2)

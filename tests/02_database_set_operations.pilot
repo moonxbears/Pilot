@@ -1,0 +1,84 @@
+# =============================================================================
+# Test Suite 2: Native In-Memory Database-Style Set Operations with {} Braces
+# =============================================================================
+
+# --- 1. Schemas & Indexed Relational Tables ---
+class Customer {
+    def __init__(self, id: int, name: str, email: str, tier: str, score: int) -> void {
+        self.id = id
+        self.name = name
+        self.email = email
+        self.tier = tier
+        self.score = score
+    }
+}
+
+class Transaction {
+    def __init__(self, id: int, customer_id: int, amount: float, region: str) -> void {
+        self.id = id
+        self.customer_id = customer_id
+        self.amount = amount
+        self.region = region
+    }
+}
+
+# Multi-index in-memory table declarations (Hash for O(1) lookups, BTree for range scans)
+var customers: Table[Customer] index by (id [hash, unique], email [hash], score [btree])
+var transactions: Table[Transaction] index by (id [hash], customer_id [btree], amount [btree])
+
+# --- 2. LINQ-Style Relational Query Comprehensions ---
+def query_vip_customers(min_score: int, min_spend: float) -> List[VipSummary] {
+    let results = from c in customers with index(score)
+        join t in transactions on c.id == t.customer_id
+        where c.score >= min_score and t.amount >= min_spend
+        group t by c.name into g having sum(g.amount) > 5000.0
+        order by sum(g.amount) descending
+        select {
+            name: g.key,
+            total_spent: sum(g.amount),
+            order_count: count(g)
+        }
+        limit 20 offset 0
+    return results
+}
+
+# --- 3. SQL-First Direct Query Expressions ---
+def query_regional_aggregates(target_region: str) -> List[RegionReport] {
+    let report = select c.tier, count(t) as txn_count, sum(t.amount) as total_volume
+        from transactions as t
+        join customers as c on t.customer_id == c.id
+        where t.region == target_region
+        order by total_volume desc
+        limit 10
+    return report
+}
+
+# --- 4. First-Class Relational Set Operations ---
+def combine_customer_segments() -> Dataset[Customer] {
+    let domestic_vips = select c.id, c.name, c.email
+        from customers as c with index(score)
+        where c.score > 800
+
+    let high_spenders = select c.id, c.name, c.email
+        from customers as c
+        join t in transactions on c.id == t.customer_id
+        where t.amount > 10000.0
+
+    # Set Union (Distinct & All)
+    let all_candidates = domestic_vips union all high_spenders
+    let unique_candidates = domestic_vips union high_spenders
+
+    # Set Intersect (in both sets)
+    let premium_intersect = domestic_vips intersect high_spenders
+
+    # Set Difference / Except (in A but not B)
+    let non_spending_vips = domestic_vips except high_spenders
+
+    return unique_candidates
+}
+
+# --- 5. Direct Indexed Point & Key Lookups ---
+def fast_lookup(user_email: str) -> Customer? {
+    let user = lookup customers with index(email) where c.email == user_email
+    return user
+}

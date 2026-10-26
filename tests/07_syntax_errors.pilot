@@ -1,0 +1,10 @@
+# =============================================================================
+# Negative Test: Intentional Syntax Errors for Error Handling Verification
+# =============================================================================
+
+# 1. Unclosed block brace
+def broken_function() {
+    let a = 10
+
+# 2. Unclosed parenthesis
+let broken_tuple = (1, 2, 3

@@ -1,0 +1,187 @@
+# =============================================================================
+# Pilot Language Overview & Feature Tour
+# Type-Safe, Pythonic Syntax with {} Braces:
+#  - Native In-Memory Database-Style Set Operations
+#  - Asynchronous & Multi-Threaded Concurrency
+#  - Soft Real-Time vs. Hard Real-Time Trade-offs
+#  - Universal Domain-Specific Abstractions (UDSA)
+# =============================================================================
+
+# --- 1. Universal Domain-Specific Abstractions (UDSA): Units of Measure ---
+unit meter
+unit second
+unit mps = meter / second
+unit millisecond
+
+# --- 2. Type-Safe Data Structures & Object Models ---
+struct Vector3 {
+    let x: float<meter>
+    let y: float<meter>
+    let z: float<meter>
+}
+
+interface Sensor[T] {
+    fn read() -> Result[T, str]
+}
+
+enum TelemetryState {
+    Idle,
+    Calibrating(int<millisecond>),
+    Active(float),
+    Faulted(int)
+}
+
+class User {
+    fn __init__(self, id: int, name: str, email: str, age: int, is_active: bool) -> void {
+        self.id = id
+        self.name = name
+        self.email = email
+        self.age = age
+        self.is_active = is_active
+    }
+}
+
+class Order {
+    fn __init__(self, id: int, user_id: int, total: float, created_at: int) -> void {
+        self.id = id
+        self.user_id = user_id
+        self.total = total
+        self.created_at = created_at
+    }
+}
+
+# --- 3. Native In-Memory Database Set Operations & Indexing ---
+var users: Table[User] index by (id [hash, unique], email [hash], age [btree])
+var orders: Table[Order] index by (id [hash], user_id [btree])
+
+fn run_analytics(min_age: int, min_total: float) -> List[Summary] {
+    # LINQ-style query with JOIN, WHERE, GROUP BY, ORDER BY, and projection
+    let high_value_orders = from u in users with index(age)
+        join o in orders on u.id == o.user_id
+        where u.age >= min_age and o.total > min_total
+        group o by u.name into g having sum(g.total) > 1000.0
+        order by sum(g.total) descending
+        select { customer: g.key, total_spent: sum(g.total) }
+        limit 50
+
+    # SQL-First query syntax
+    let active_customers = select u.name, u.email
+        from users as u with index(email)
+        where u.is_active == True
+        order by u.name asc
+
+    # Set operations between relational collections
+    let combined_report = high_value_orders union all active_customers
+
+    # Direct indexed lookup
+    let target_user = lookup users with index(email) where u.email == "pilot@example.org"
+
+    return high_value_orders
+}
+
+# --- 4. Asynchronous and Multi-Threaded Concurrency ---
+actor TelemetryAggregator {
+    var message_count: int = 0
+
+    async fn ingest(msg: str) -> void {
+        self.message_count += 1
+    }
+}
+
+async fn worker_loop(in_ch: Channel[int], out_ch: Channel[str]) -> void {
+    # Channel multiplexing select
+    select {
+        case val = <-in_ch {
+            print(f"Received: {val}")
+            out_ch <- f"Processed {val}"
+        }
+        case out_ch <- "heartbeat" {
+            print("Heartbeat sent")
+        }
+        timeout 50ms {
+            print("Channel timed out")
+        }
+        default {
+            pass
+        }
+    }
+}
+
+fn parallel_pipeline(items: List[int]) -> List[int] {
+    # Multi-threaded spawn and parallel for
+    spawn {
+        print("Background task running on worker pool")
+    }
+
+    parallel for item in items {
+        process_concurrently(item)
+    }
+
+    # Thread synchronization and atomic guarantees
+    atomic {
+        global_counter += 1
+    }
+
+    sync(mutex) {
+        shared_resource.update()
+    }
+
+    isolate {
+        run_in_thread_isolated_heap()
+    }
+
+    # Functional pipelining (UDSA)
+    let processed = items |> filter(is_valid) |> map(transform)
+    return processed
+}
+
+# --- 5. Soft Real-Time vs. Hard Real-Time ---
+
+# Hard Real-Time: Deterministic WCET, zero dynamic heap allocations, no GC
+@hard_realtime
+@wcet(250us)
+fn flight_control_actuator(target_pos: Vector3) -> void {
+    noalloc {
+        # Compiler guarantees zero heap allocation
+        var stack_buf = stackalloc float[64]
+        for i in 0..64 bounded 64 {
+            stack_buf[i] = compute_thrust(target_pos, i)
+        }
+    }
+}
+
+# Soft Real-Time: Deadline monitoring with graceful fallback
+@soft_realtime
+fn trajectory_planner() -> void {
+    deadline 10ms jitter 500us {
+        solve_spline_trajectory()
+    } on_missed {
+        engage_failsafe()
+    }
+
+    within 5ms {
+        update_hud_display()
+    } fallback {
+        use_last_frame()
+    }
+
+    # Periodic task scheduling
+    periodic 20ms priority 99 jitter 50us {
+        poll_imu_gyro()
+    }
+}
+
+# --- 6. Universal Domain-Specific Abstractions (UDSA) & Metaprogramming ---
+dsl neural_network(layers: int) {
+    dense(128, activation="relu")
+    dropout(0.2)
+    dense(10, activation="softmax")
+}
+
+macro create_getter(field_name) {
+    quote {
+        fn get_value(self) -> any {
+            return getattr(self, $field_name)
+        }
+    }
+}

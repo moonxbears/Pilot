@@ -1,0 +1,108 @@
+# =============================================================================
+# Test Suite 1: Pythonic Syntax & Type Safety with {} Braces
+# =============================================================================
+
+# --- 1. Primitive & Compound Types ---
+let a_int: int = 42
+let a_float: float = 3.14159
+let a_bool: bool = True
+let a_str: str = "Pilot Language"
+let a_bytes: bytes = "raw bytes"
+
+# Optional / Nullable types
+var optional_user: User? = null
+let maybe_count: int? = 10
+
+# Tuples & Function Types
+let coords: (float, float, float) = (1.0, 2.5, 3.8)
+let math_op: (int, int) -> int = lambda x, y: x + y
+
+# Union and Intersection Types
+type Identifier = int | str
+type JsonSerializable = Printable & Serializable
+
+# Generic Collections
+let numbers: List[int] = [1, 2, 3, 4, 5]
+let scores: Dict[str, float] = {"alice": 98.5, "bob": 87.0}
+let flags: Set[str] = {"read", "write", "execute"}
+let lookup_result: Result[str, int] = Ok("Success")
+
+# --- 2. Structs (Unboxed Value-Types for Zero-GC) ---
+struct Point2D {
+    let x: float
+    let y: float
+}
+
+struct Color {
+    let r: int = 255
+    let g: int = 255
+    let b: int = 255
+}
+
+# --- 3. Nominal Reference Classes ---
+class BankAccount {
+    def __init__(self, owner: str, initial_balance: float = 0.0) -> void {
+        self.owner = owner
+        self.balance = initial_balance
+    }
+
+    def deposit(self, amount: float) -> float {
+        if amount <= 0.0 {
+            raise ValueError("Amount must be positive")
+        }
+        self.balance += amount
+        return self.balance
+    }
+
+    pure def get_balance(self) -> float {
+        return self.balance
+    }
+}
+
+# --- 4. Protocols & Interfaces ---
+interface Printable {
+    def to_string() -> str
+}
+
+protocol Serializable {
+    def serialize() -> bytes
+}
+
+# --- 5. Enums & Algebraic Data Types ---
+enum HttpResponse {
+    Ok(str),
+    NotFound,
+    ServerError(int)
+}
+
+# --- 6. Pattern Matching ---
+def handle_response(res: HttpResponse) -> str {
+    match res {
+        case HttpResponse.Ok(body) {
+            return f"Received body: {body}"
+        }
+        case HttpResponse.ServerError(code) if code >= 500 {
+            return f"Fatal server error code: {code}"
+        }
+        case HttpResponse.NotFound {
+            return "Resource 404"
+        }
+        case _ {
+            return "Unknown status"
+        }
+    }
+}
+
+# --- 7. Generic Functions ---
+def swap[T](a: T, b: T) -> (T, T) {
+    return (b, a)
+}
+
+def find_first[T](items: List[T], predicate: (T) -> bool) -> T? {
+    for item in items {
+        if predicate(item) {
+            return item
+        }
+    }
+    return null
+}
