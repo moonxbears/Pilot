@@ -1,0 +1,38 @@
+#!/usr/bin/env pilot
+// =============================================================================
+// Pilot Suite 20: Pre-Compilation, Scripting & Execution
+// - Shebang line support on line 1
+// - Script argument inspection via args & argv
+// - Environment variable access via env
+// - Directory inspection via cwd()
+// - File I/O builtins (write_text, read_text, file_exists)
+// =============================================================================
+
+// 1. Scripting arguments access
+assert args != null;
+assert argv != null;
+
+// 2. Environment inspection
+assert env != null;
+
+// 3. Working directory query
+let cur_dir = cwd();
+assert cur_dir != null;
+assert cur_dir.length > 0;
+
+// 4. File I/O operations
+let test_file = "pilot_test_scratch.tmp";
+let write_ok = write_text(test_file, "Pilot Pre-compilation and Scripting verified");
+assert write_ok == true;
+
+let check_exists = file_exists(test_file);
+assert check_exists == true;
+
+let file_content = read_text(test_file);
+assert file_content == "Pilot Pre-compilation and Scripting verified";
+
+// 5. Cleanup test file
+delete_file(test_file);
+assert file_exists(test_file) == false;
+
+print("Pilot compilation and scripting capabilities verified successfully!");

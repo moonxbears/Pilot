@@ -1,0 +1,80 @@
+// =============================================================================
+// Pilot Suite 19: Exception Protections and Error Handling
+// - Try-except-else-finally complete block lifecycle
+// - Domain-specific error protection: DivideByZeroError, NullReferenceError,
+//   TypeError, AssertionError
+// - Safe navigation (?.) preventing null reference exceptions
+// - User defined raise statements
+// - Control flow signals preservation (return, break, continue)
+// =============================================================================
+
+// 1. DivideByZeroError Protection
+let div_handled = false;
+try {
+    let bad = 50 / 0;
+} except DivideByZeroError as ex {
+    div_handled = true;
+}
+assert div_handled == true;
+
+// 2. NullReferenceError Protection with Safe Navigation Comparison
+let null_handled = false;
+let empty_ref = null;
+
+// Safe navigation returns undefined safely
+let safe_len = empty_ref?.length;
+assert safe_len == undefined;
+
+// Unchecked dot access raises NullReferenceError
+try {
+    let crash = empty_ref.length;
+} except NullReferenceError as ex {
+    null_handled = true;
+}
+assert null_handled == true;
+
+// 3. TypeError Protection (invoking non-callable)
+let type_err_handled = false;
+let number_value = 999;
+try {
+    number_value();
+} except TypeError as ex {
+    type_err_handled = true;
+}
+assert type_err_handled == true;
+
+// 4. AssertionError Protection
+let assert_handled = false;
+try {
+    assert 10 == 20, "Math integrity breach";
+} except AssertionError as ex {
+    assert_handled = true;
+}
+assert assert_handled == true;
+
+// 5. Try-Except-Else-Finally Lifecycle Execution Ordering
+let lifecycle = [];
+try {
+    lifecycle.append("try_start");
+} except {
+    lifecycle.append("except_branch");
+} else {
+    lifecycle.append("else_branch");
+} finally {
+    lifecycle.append("finally_branch");
+}
+
+assert lifecycle[0] == "try_start";
+assert lifecycle[1] == "else_branch";
+assert lifecycle[2] == "finally_branch";
+
+// 6. User-defined raise statement
+let custom_raised = false;
+try {
+    raise "Custom system alert";
+} except as err {
+    custom_raised = true;
+}
+assert custom_raised == true;
+
+print("All exception protections and error handling verified successfully!");

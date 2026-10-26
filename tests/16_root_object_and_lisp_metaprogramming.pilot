@@ -1,0 +1,144 @@
+// =============================================================================
+// Pilot Test Suite 16: Root Object Methods & Lisp Homoiconic Metaprogramming
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// Part 1: Root Object Methods Definition & Custom Overrides
+// -----------------------------------------------------------------------------
+
+class Vector2D {
+    var x: f32
+    var y: f32
+
+    def __init__(self, x: f32, y: f32) -> void {
+        self.x = x
+        self.y = y
+    }
+
+    // Standard root object string representation
+    def to_string(self) -> str {
+        return f"Vector2D({self.x}, {self.y})"
+    }
+
+    // C#-style alias
+    def ToString(self) -> str {
+        return self.to_string()
+    }
+
+    // Standard root object equality
+    def equals(self, other: any) -> bool {
+        guard other is not None else { return false }
+        let v: Vector2D = other
+        return self.x == v.x && self.y == v.y
+    }
+
+    // Standard root object hash code
+    def hash(self) -> int {
+        return hash(self.x) ^ hash(self.y)
+    }
+
+    // Standard root object cloning
+    def clone(self) -> Vector2D {
+        return Vector2D(self.x, self.y)
+    }
+
+    // Standard root object runtime type reflection
+    def type_of(self) -> str {
+        return "Vector2D"
+    }
+
+    // Positional pattern matching deconstruction
+    def deconstruct(self) -> (f32, f32) {
+        return (self.x, self.y)
+    }
+}
+
+class Entity {
+    var id: int = 1
+    var name: str = "Default"
+    // Default class inheriting base root object methods
+}
+
+def test_root_object_behaviors() -> void {
+    let v1 = Vector2D(3.0, 4.0)
+    let v2 = Vector2D(3.0, 4.0)
+
+    // Overridden root methods
+    let s: str = v1.to_string()
+    let cs_s: str = v1.ToString()
+    let is_eq: bool = v1.equals(v2)
+    let h: int = v1.hash()
+    let cloned: Vector2D = v1.clone()
+    let t: str = v1.type_of()
+    let (vx, vy) = v1.deconstruct()
+
+    // Default root object method resolution on base class
+    let ent = Entity()
+    let ent_str: str = ent.to_string()
+    let ent_hash: int = ent.hash()
+    let ent_type: str = ent.type_of()
+    let ent_clone: any = ent.clone()
+    let ent_eq: bool = ent.equals(ent)
+}
+
+// -----------------------------------------------------------------------------
+// Part 2: Lisp-Equivalent Homoiconic Metaprogramming
+// -----------------------------------------------------------------------------
+
+// 1. Classic defmacro with AST inputs and quasiquote template
+defmacro unless_macro(condition: AstNode, body: AstNode) -> AstNode {
+    return quasiquote {
+        if not $condition {
+            $body
+        }
+    }
+}
+
+// 2. Hygienic macro generation with gensym and unquote-splicing ($@)
+defmacro time_execution(expr: AstNode) -> AstNode {
+    let start_sym: AstNode = gensym("start_t")
+    let result_sym: AstNode = gensym("res")
+
+    return quasiquote {
+        let $start_sym = 0
+        let $result_sym = $expr
+        print("Elapsed execution")
+        $result_sym
+    }
+}
+
+// 3. Homoiconic AST Pair / List Operations (cons, car, cdr, atom)
+def test_lisp_homoiconicity() -> void {
+    // Basic quoting: code-as-data AST
+    let quoted_expr: AstNode = quote { 10 + 20 * 30 }
+    let quoted_block: AstNode = quote {
+        let a = 1
+        let b = 2
+        return a + b
+    }
+
+    // Quasiquote with unquote ($) and splicing ($@)
+    let item_val: int = 42
+    let templated: AstNode = quasiquote {
+        print($item_val)
+    }
+
+    // S-expression list construction via cons, car, cdr
+    let head_node: AstNode = symbol("foo")
+    let tail_node: AstNode = symbol("bar")
+    let pair: AstNode = cons(head_node, tail_node)
+
+    let first_elem: any = car(pair)
+    let rest_elems: any = cdr(pair)
+    let is_atomic: bool = atom(head_node)
+
+    // AstNode object method invocation
+    let node_car: AstNode = pair.car()
+    let node_cdr: AstNode = pair.cdr()
+    let src: str = quoted_expr.to_source()
+    let eval_res: any = quoted_expr.eval()
+
+    // Macro expansion and evaluation
+    let expanded: AstNode = macroexpand(templated)
+    let single_expanded: AstNode = macroexpand_1(templated)
+}

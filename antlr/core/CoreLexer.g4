@@ -10,6 +10,10 @@ PRIVATE     : 'private';
 PROTECTED   : 'protected';
 INTERNAL    : 'internal';
 STATIC      : 'static';
+PARTIAL     : 'partial';
+STEAL       : 'steal';
+CONTRACTS   : 'contracts';
+DELEGATE    : 'delegate';
 PARAMS      : 'params';
 ARGS        : 'args';
 KWARGS      : 'kwargs';
@@ -62,10 +66,30 @@ LAMBDA      : 'lambda';
 MATCH       : 'match';
 CASE        : 'case';
 WHEN        : 'when';
-AND         : 'and';
-OR          : 'or';
+AND         : 'and' | '&&';
+OR          : 'or' | '||';
 NOT         : 'not';
 IS          : 'is';
+
+// Polyglot Interoperability
+EXTERN      : 'extern';
+CSHARP      : 'csharp';
+PYTHON      : 'python';
+RUST        : 'rust';
+ASSEMBLY    : 'assembly';
+MODULE      : 'module';
+LIB         : 'lib';
+
+// Metaprogramming & Lisp Homoiconicity
+MACRO       : 'macro';
+DEFMACRO    : 'defmacro';
+QUOTE       : 'quote';
+QUASIQUOTE  : 'quasiquote';
+SPLICE      : 'splice';
+UNQUOTE     : 'unquote';
+UNQUOTE_SPLICING : 'unquote_splicing';
+DOLLAR      : '$';
+BACKQUOTE   : '`';
 
 // Built-in Literals
 TRUE        : 'True' | 'true';

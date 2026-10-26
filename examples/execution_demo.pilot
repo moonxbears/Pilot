@@ -1,0 +1,50 @@
+// Pilot Execution Demo Script
+// Demonstrating functions, collections, pattern matching, guard/defer, cascades, and root methods
+
+println("=== PILOT EXECUTION RUNTIME DEMO ===");
+
+def greet(name: str) {
+    return "Hello, " + name + "!";
+}
+
+let greeting = greet("Pilot Developer");
+println(greeting);
+
+// Guard & Defer
+def process_data(value: int) {
+    defer {
+        println("[defer] Cleanup executed successfully.");
+    }
+
+    guard value > 0 else {
+        println("[guard] Value must be positive!");
+        return -1;
+    }
+
+    println("[process] Processing positive value: " + value.to_string());
+    return value * 10;
+}
+
+process_data(5);
+
+// Collection Pattern Matching
+let numbers = [10, 20, 30, 40, 50];
+match numbers {
+    case [first, ..middle, last] => {
+        println("Pattern matched collection with middle count: " + len(middle).to_string());
+    }
+    case _ => {
+        println("Other collection pattern");
+    }
+}
+
+// Matrix Operations
+let id3 = eye(3);
+println("3x3 Identity Matrix: " + id3.to_string());
+
+// Root Object Methods
+let num = 12345;
+println("Type of num: " + num.type_of());
+println("Hash of num: " + num.hash().to_string());
+
+println("=== DEMO FINISHED SUCCESSFULLY ===");

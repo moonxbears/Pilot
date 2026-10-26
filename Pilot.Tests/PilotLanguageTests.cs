@@ -8,9 +8,17 @@ namespace Pilot.Tests
 {
     public static class ParserHelper
     {
-        public static (PilotParser.ProgramContext Tree, List<string> Errors) Parse(string code)
+        public static (PilotParser.ProgramContext Tree, List<string> Errors) Parse(string code, IEnumerable<string>? definedSymbols = null)
         {
-            var inputStream = new AntlrInputStream(code);
+            var options = new Pilot.Preprocessing.PilotPreprocessorOptions(definedSymbols ?? Array.Empty<string>());
+            var preprocResult = Pilot.Preprocessing.PilotPreprocessor.Preprocess(code, "", options);
+            var errors = new List<string>();
+            foreach (var pd in preprocResult.Diagnostics.Where(d => d.Severity == Pilot.Preprocessing.PreprocessorDiagnosticSeverity.Error))
+            {
+                errors.Add($"[Preproc {pd.Line}:{pd.Column}] {pd.Message}");
+            }
+
+            var inputStream = new AntlrInputStream(preprocResult.PreprocessedSource);
             var lexer = new PilotLexer(inputStream);
             var tokenStream = new CommonTokenStream(lexer);
             var parser = new PilotParser(tokenStream);
@@ -20,7 +28,8 @@ namespace Pilot.Tests
             parser.AddErrorListener(errorTracker);
 
             var tree = parser.program();
-            return (tree, errorTracker.Errors);
+            errors.AddRange(errorTracker.Errors);
+            return (tree, errors);
         }
     }
 
@@ -1164,6 +1173,144 @@ def test_generics() -> void {
         }
     }
 
+    public class PreprocessingTests
+    {
+        [Fact]
+        public void Test_ConditionalCompilation_IfElseEndif()
+        {
+            string code = @"
+#define DEBUG
+#if DEBUG
+let mode = ""debug""
+#else
+let mode = ""release""
+#endif
+";
+            var result = Pilot.Preprocessing.PilotPreprocessor.Preprocess(code);
+            Assert.False(result.HasErrors);
+            Assert.Contains("let mode = \"debug\"", result.PreprocessedSource);
+            Assert.DoesNotContain("let mode = \"release\"", result.PreprocessedSource);
+
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_ComplexConditions_WithLogicalOperators()
+        {
+            string code = @"
+#define FEATURE_X
+#define FEATURE_Y
+
+#if (FEATURE_X && !FEATURE_Z) || FALSE_FLAG
+let status = ""x_active""
+#elif FEATURE_Z
+let status = ""z_active""
+#else
+let status = ""fallback""
+#endif
+";
+            var result = Pilot.Preprocessing.PilotPreprocessor.Preprocess(code);
+            Assert.False(result.HasErrors);
+            Assert.Contains("let status = \"x_active\"", result.PreprocessedSource);
+            Assert.DoesNotContain("let status = \"z_active\"", result.PreprocessedSource);
+            Assert.DoesNotContain("let status = \"fallback\"", result.PreprocessedSource);
+
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_SymbolDefineAndUndef()
+        {
+            string code = @"
+#define FLAG_A
+#undef FLAG_A
+
+#if FLAG_A
+let a = 1
+#else
+let a = 2
+#endif
+";
+            var result = Pilot.Preprocessing.PilotPreprocessor.Preprocess(code);
+            Assert.False(result.HasErrors);
+            Assert.Contains("let a = 2", result.PreprocessedSource);
+            Assert.DoesNotContain("let a = 1", result.PreprocessedSource);
+        }
+
+        [Fact]
+        public void Test_ErrorAndWarningDirectives()
+        {
+            string codeWithError = @"
+#define DEPRECATED
+#if DEPRECATED
+#error ""Custom deprecation error""
+#endif
+";
+            var errorResult = Pilot.Preprocessing.PilotPreprocessor.Preprocess(codeWithError);
+            Assert.True(errorResult.HasErrors);
+            Assert.Contains(errorResult.Diagnostics, d => d.Severity == Pilot.Preprocessing.PreprocessorDiagnosticSeverity.Error && d.Message.Contains("Custom deprecation error"));
+
+            string codeWithWarning = @"
+#warning ""Check configuration""
+";
+            var warnResult = Pilot.Preprocessing.PilotPreprocessor.Preprocess(codeWithWarning);
+            Assert.False(warnResult.HasErrors);
+            Assert.Contains(warnResult.Diagnostics, d => d.Severity == Pilot.Preprocessing.PreprocessorDiagnosticSeverity.Warning && d.Message.Contains("Check configuration"));
+        }
+
+        [Fact]
+        public void Test_RegionAndEndregionExtraction()
+        {
+            string code = @"
+#region PublicAPI
+def api_func() -> void { }
+#endregion PublicAPI
+";
+            var result = Pilot.Preprocessing.PilotPreprocessor.Preprocess(code);
+            Assert.False(result.HasErrors);
+            Assert.Single(result.Regions);
+            Assert.Equal("PublicAPI", result.Regions[0].Name);
+            Assert.Equal(2, result.Regions[0].StartLine);
+            Assert.Equal(4, result.Regions[0].EndLine);
+
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_PragmaWarningSuppression()
+        {
+            string code = @"
+#pragma warning disable PILOT101, PILOT102
+let x = 10
+#pragma warning restore PILOT101
+let y = 20
+";
+            var result = Pilot.Preprocessing.PilotPreprocessor.Preprocess(code);
+            Assert.False(result.HasErrors);
+            Assert.True(result.IsWarningSuppressed("PILOT101", 3));
+            Assert.False(result.IsWarningSuppressed("PILOT101", 5));
+            Assert.True(result.IsWarningSuppressed("PILOT102", 5));
+        }
+
+        [Fact]
+        public void Test_LineCountPreserved()
+        {
+            string code = "let a = 1\n#if DEBUG\nlet b = 2\n#else\nlet c = 3\n#endif\nlet d = 4";
+            int originalLineCount = code.Split('\n').Length;
+
+            var result = Pilot.Preprocessing.PilotPreprocessor.Preprocess(code);
+            int preprocLineCount = result.PreprocessedSource.Split('\n').Length;
+
+            Assert.Equal(originalLineCount, preprocLineCount);
+        }
+    }
+
     public class FileSuiteTests
     {
         public static IEnumerable<object[]> GetPositiveTestFiles()
@@ -1204,6 +1351,191 @@ def broken_function() {
 ";
             var (tree, errors) = ParserHelper.Parse(badCode);
             Assert.NotEmpty(errors);
+        }
+    }
+
+    public class PolyglotInteropLanguageTests
+    {
+        [Fact]
+        public void Test_Python_Foreign_Imports_Parse_Cleanly()
+        {
+            string code = @"
+import python:numpy as np
+from python:math import sin, cos, pi as PI
+from python:dataclasses import dataclass
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_CSharp_Foreign_Imports_Parse_Cleanly()
+        {
+            string code = @"
+import csharp:System.Text.Json as Json
+from csharp:System.IO import File, Path, Directory
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Rust_Foreign_Imports_Parse_Cleanly()
+        {
+            string code = @"
+import rust:""libpilot_core"" as core_rs
+from rust:""libcrypto"" import sha256_hash, verify_sig as verify_signature
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Extern_FFI_Blocks_And_Members_Parse_Cleanly()
+        {
+            string code = @"
+extern ""rust"" lib ""libphysics"" {
+    fn simulate_step(dt: f32) -> void;
+    fn get_particle_count() -> i32;
+}
+
+extern ""csharp"" assembly ""System.Data"" {
+    class SqlConnection {
+        public def open() -> void;
+        public def close() -> void;
+    }
+}
+
+extern ""python"" module ""scipy.optimize"" {
+    def minimize_scalar(f: any, method: str) -> any;
+}
+
+extern ""rust"" lib ""libmath"" fn fast_inv_sqrt(number: f32) -> f32;
+extern ""c"" lib ""libc"" fn puts(msg: str) -> i32;
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Inline_Foreign_Blocks_Parse_Cleanly()
+        {
+            string code = @"
+def test_inline() -> void {
+    let py_val = python {
+        import math
+        return math.sqrt(256.0)
+    }
+
+    csharp {
+        Console.WriteLine(""Hello from inline C#"");
+    }
+
+    rust ```rust
+    unsafe {
+        libc::puts(b""Native rust\0"".as_ptr() as *const i8);
+    }
+    ```
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+    }
+
+    public class RootObjectAndLispMetaprogrammingTests
+    {
+        [Fact]
+        public void Test_Root_Object_Method_Definitions_Parse_Cleanly()
+        {
+            string code = @"
+class Point {
+    var x: f32
+    var y: f32
+
+    def to_string(self) -> str {
+        return f""Point({self.x}, {self.y})""
+    }
+
+    def ToString(self) -> str {
+        return self.to_string()
+    }
+
+    def equals(self, other: any) -> bool {
+        return true
+    }
+
+    def hash(self) -> int {
+        return 42
+    }
+
+    def clone(self) -> Point {
+        return Point(self.x, self.y)
+    }
+
+    def type_of(self) -> str {
+        return ""Point""
+    }
+
+    def deconstruct(self) -> (f32, f32) {
+        return (self.x, self.y)
+    }
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Lisp_Defmacro_And_Quasiquote_Parse_Cleanly()
+        {
+            string code = @"
+defmacro unless_macro(condition: AstNode, body: AstNode) -> AstNode {
+    return quasiquote {
+        if not $condition {
+            $body
+        }
+    }
+}
+
+defmacro hygienic_macro(expr: AstNode) -> AstNode {
+    let tmp = gensym(""tmp"")
+    return quasiquote {
+        let $tmp = $expr
+        $tmp
+    }
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
+        }
+
+        [Fact]
+        public void Test_Homoiconic_Cons_Car_Cdr_Operations_Parse_Cleanly()
+        {
+            string code = @"
+def test_homoiconic() -> void {
+    let quoted = quote { 1 + 2 * 3 }
+    let h = symbol(""head"")
+    let t = symbol(""tail"")
+    let pair = cons(h, t)
+    let a = car(pair)
+    let b = cdr(pair)
+    let is_at = atom(h)
+    let code_src = quoted.to_source()
+    let res = quoted.eval()
+}
+";
+            var (tree, errors) = ParserHelper.Parse(code);
+            Assert.Empty(errors);
+            Assert.NotNull(tree);
         }
     }
 }

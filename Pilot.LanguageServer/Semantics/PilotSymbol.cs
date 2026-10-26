@@ -28,7 +28,8 @@ public enum PilotSymbolKind
     TypeAlias,
     TypeParameter,
     QueryVariable,
-    Savepoint
+    Savepoint,
+    Module
 }
 
 public enum PilotDiagnosticSeverity
@@ -176,7 +177,7 @@ public sealed class PilotSymbol
         PilotSymbolKind.Actor => 5,          // Class (Actor)
         PilotSymbolKind.Model => 23,         // Struct/Model
         PilotSymbolKind.Table => 23,         // Table
-        PilotSymbolKind.Database => 2,       // Module/Namespace
+        PilotSymbolKind.Database or PilotSymbolKind.Module or PilotSymbolKind.Extension or PilotSymbolKind.Dsl => 2,       // Module/Namespace
         PilotSymbolKind.Struct => 23,        // Struct
         PilotSymbolKind.Interface => 11,     // Interface
         PilotSymbolKind.Enum => 10,          // Enum
@@ -185,9 +186,7 @@ public sealed class PilotSymbol
         PilotSymbolKind.Method => 6,         // Method
         PilotSymbolKind.Property => 7,       // Property
         PilotSymbolKind.Operator => 25,      // Operator
-        PilotSymbolKind.Extension => 2,      // Module
         PilotSymbolKind.Unit => 26,          // TypeParameter/Unit
-        PilotSymbolKind.Dsl => 2,            // Module
         PilotSymbolKind.Macro => 12,         // Function/Macro
         PilotSymbolKind.TypeAlias => 26,     // TypeParameter
         PilotSymbolKind.Parameter => 13,     // Variable

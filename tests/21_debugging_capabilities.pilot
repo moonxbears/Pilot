@@ -1,0 +1,34 @@
+// =============================================================================
+// Pilot Suite 21: Debugging Capabilities (Call Stacks, Locals, Steps)
+// - Stack frame nesting across function calls
+// - Locals manipulation and scope binding verification
+// - Expression evaluation verification
+// =============================================================================
+
+def fibonacci(n) {
+    if (n <= 1) {
+        return n;
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+def calculate_stats(data) {
+    let sum = 0;
+    for item in data {
+        sum = sum + item;
+    }
+    let count = data.length;
+    let avg = sum / count;
+    return avg;
+}
+
+// 1. Recursive call stack test
+let fib_result = fibonacci(6);
+assert fib_result == 8;
+
+// 2. Loop and locals aggregation
+let numbers = [10, 20, 30, 40];
+let average = calculate_stats(numbers);
+assert average == 25;
+
+print("Pilot debugging capabilities and call stack verification completed successfully!");

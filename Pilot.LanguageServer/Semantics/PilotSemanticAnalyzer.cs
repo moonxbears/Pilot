@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Antlr4.Runtime;
 using Antlr4.Runtime.Tree;
+using Pilot.Preprocessing;
 
 namespace Pilot.LanguageServer.Semantics;
 
@@ -10,6 +11,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 {
     private readonly PilotAnalysisResult _result;
     private PilotScope _currentScope;
+    private PilotPreprocessResult? _preprocResult;
     private readonly HashSet<string> _activeSavepoints = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _unitAliases = new(StringComparer.Ordinal);
 
@@ -50,6 +52,47 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         return false;
     }
 
+    public static readonly Dictionary<string, (string ReturnType, string Signature, string Doc)> RootObjectMethods = new(StringComparer.Ordinal)
+    {
+        ["to_string"] = ("str", "pure def to_string() -> str", "Returns a string representing the current object instance."),
+        ["ToString"] = ("str", "pure def ToString() -> str", "C#-compatible: returns a string representing the current object instance."),
+        ["hash"] = ("int", "pure def hash() -> int", "Serves as the default hash function for hashing, hash tables, and set collections."),
+        ["GetHashCode"] = ("int", "pure def GetHashCode() -> int", "C#-compatible: serves as the default hash function."),
+        ["equals"] = ("bool", "pure def equals(other: any) -> bool", "Determines whether the specified object is structurally or referentially equal to the current instance."),
+        ["Equals"] = ("bool", "pure def Equals(other: any) -> bool", "C#-compatible: determines whether the specified object is equal to the current instance."),
+        ["clone"] = ("any", "def clone() -> any", "Creates and returns a copy of the current object instance."),
+        ["Clone"] = ("any", "def Clone() -> any", "C#-compatible: creates and returns a copy of the current object instance."),
+        ["type_of"] = ("str", "pure def type_of() -> str", "Gets the runtime type descriptor or metadata name of the current instance."),
+        ["GetType"] = ("any", "pure def GetType() -> any", "C#-compatible: gets the runtime Type metadata of the current instance."),
+        ["deconstruct"] = ("tuple", "pure def deconstruct() -> tuple", "Deconstructs the object instance into positional members for pattern matching and tuple assignment."),
+        ["Deconstruct"] = ("tuple", "pure def Deconstruct() -> tuple", "C#-compatible: deconstructs the object instance into positional members."),
+        ["__str__"] = ("str", "pure def __str__() -> str", "Python-compatible string representation."),
+        ["__repr__"] = ("str", "pure def __repr__() -> str", "Python-compatible official representation."),
+        ["__hash__"] = ("int", "pure def __hash__() -> int", "Python-compatible hash code."),
+        ["__eq__"] = ("bool", "pure def __eq__(other: any) -> bool", "Python-compatible equality comparison."),
+        ["__ne__"] = ("bool", "pure def __ne__(other: any) -> bool", "Python-compatible inequality comparison."),
+        ["__init__"] = ("void", "def __init__(*args, **kwargs) -> void", "Python-compatible object initializer."),
+        ["__clone__"] = ("any", "def __clone__() -> any", "Python-compatible object copy.")
+    };
+
+    public static readonly Dictionary<string, PilotSymbol> RootMethodSymbols = new(StringComparer.Ordinal);
+
+    static PilotSemanticAnalyzer()
+    {
+        foreach (var kvp in RootObjectMethods)
+        {
+            RootMethodSymbols[kvp.Key] = new PilotSymbol
+            {
+                Name = kvp.Key,
+                Kind = PilotSymbolKind.Method,
+                TypeName = kvp.Value.ReturnType,
+                Domain = "Core / Object",
+                Signature = kvp.Value.Signature,
+                Documentation = kvp.Value.Doc
+            };
+        }
+    }
+
     private static readonly Dictionary<string, (string ReturnType, string Signature, string Doc)> BuiltinFunctions = new(StringComparer.Ordinal)
     {
         ["print"] = ("void", "def print(*values: any) -> void", "Writes values to the standard output stream."),
@@ -64,7 +107,19 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         ["rank"] = ("int", "pure def rank() -> int", "Postgres window function computing rank within a partition."),
         ["row_number"] = ("int", "pure def row_number() -> int", "Postgres window function computing sequential row number."),
         ["dense_rank"] = ("int", "pure def dense_rank() -> int", "Postgres window function computing dense rank without gaps."),
-        ["getattr"] = ("any", "def getattr(obj: any, name: str) -> any", "Retrieves an attribute value dynamically or in a macro.")
+        ["getattr"] = ("any", "def getattr(obj: any, name: str) -> any", "Retrieves an attribute value dynamically or in a macro."),
+
+        // Lisp-style homoiconic metaprogramming & AST manipulation
+        ["gensym"] = ("AstNode", "def gensym(prefix: str = \"g\") -> AstNode", "Generates a unique uninterned compile-time AST symbol for hygienic macros."),
+        ["macroexpand"] = ("AstNode", "def macroexpand(ast: AstNode) -> AstNode", "Recursively expands all macro forms within the provided AST."),
+        ["macroexpand_1"] = ("AstNode", "def macroexpand_1(ast: AstNode) -> AstNode", "Expands only the top-level macro form in the provided AST."),
+        ["eval"] = ("any", "def eval(ast: any) -> any", "Evaluates an AST expression in the current environment."),
+        ["cons"] = ("AstNode", "pure def cons(head: any, tail: any) -> AstNode", "Constructs a new homoiconic AST list pair from head and tail components."),
+        ["car"] = ("any", "pure def car(list: any) -> any", "Returns the first element (head) of a homoiconic AST list."),
+        ["cdr"] = ("any", "pure def cdr(list: any) -> any", "Returns the tail of a homoiconic AST list."),
+        ["atom"] = ("bool", "pure def atom(node: any) -> bool", "Returns true if the node is an atomic AST element rather than a list."),
+        ["list_ast"] = ("AstNode", "def list_ast(*elements: any) -> AstNode", "Constructs an AST list node containing the provided elements."),
+        ["symbol"] = ("AstNode", "pure def symbol(name: str) -> AstNode", "Constructs a named AST identifier/symbol node.")
     };
 
     private PilotSemanticAnalyzer(string uri)
@@ -85,9 +140,60 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                 TypeName = kvp.Value.ReturnType,
                 Signature = kvp.Value.Signature,
                 Documentation = kvp.Value.Doc,
-                Domain = kvp.Key is "connect" or "sum" or "avg" or "count" or "rank" or "row_number" or "dense_rank" ? "Database" : "Core"
+                Domain = kvp.Key is "connect" or "sum" or "avg" or "count" or "rank" or "row_number" or "dense_rank" ? "Database"
+                    : kvp.Key is "gensym" or "macroexpand" or "macroexpand_1" or "eval" or "cons" or "car" or "cdr" or "atom" or "list_ast" or "symbol" ? "Metaprogramming / Lisp"
+                    : "Core"
             };
         }
+
+        // Register root 'object' and 'Object' classes
+        var objectSym = new PilotSymbol
+        {
+            Name = "object",
+            Kind = PilotSymbolKind.Class,
+            TypeName = "object",
+            Domain = "Core / Object",
+            Signature = "class object",
+            Documentation = "The ultimate root base class of all Pilot and polyglot types."
+        };
+        foreach (var rm in RootMethodSymbols.Values)
+        {
+            objectSym.Members[rm.Name] = rm;
+            objectSym.Children.Add(rm);
+        }
+        rootScope.Symbols["object"] = objectSym;
+        rootScope.Symbols["Object"] = objectSym;
+
+        // Register homoiconic 'AstNode' class
+        var astSym = new PilotSymbol
+        {
+            Name = "AstNode",
+            Kind = PilotSymbolKind.Class,
+            TypeName = "AstNode",
+            Domain = "Metaprogramming / Lisp",
+            Signature = "class AstNode",
+            Documentation = "First-class homoiconic AST node representing Pilot / Lisp code-as-data."
+        };
+        astSym.Members["car"] = new PilotSymbol { Name = "car", Kind = PilotSymbolKind.Method, TypeName = "AstNode", Domain = "Metaprogramming", Signature = "pure def car() -> AstNode", Documentation = "Lisp homoiconic: returns the head element of this AST list node." };
+        astSym.Members["cdr"] = new PilotSymbol { Name = "cdr", Kind = PilotSymbolKind.Method, TypeName = "AstNode", Domain = "Metaprogramming", Signature = "pure def cdr() -> AstNode", Documentation = "Lisp homoiconic: returns the tail list of this AST list node." };
+        astSym.Members["head"] = astSym.Members["car"];
+        astSym.Members["tail"] = astSym.Members["cdr"];
+        astSym.Members["cons"] = new PilotSymbol { Name = "cons", Kind = PilotSymbolKind.Method, TypeName = "AstNode", Domain = "Metaprogramming", Signature = "def cons(other: AstNode) -> AstNode", Documentation = "Constructs a new AST pair prepending this node to another." };
+        astSym.Members["eval"] = new PilotSymbol { Name = "eval", Kind = PilotSymbolKind.Method, TypeName = "any", Domain = "Metaprogramming", Signature = "def eval() -> any", Documentation = "Evaluates this AST node in the current environment." };
+        astSym.Members["to_source"] = new PilotSymbol { Name = "to_source", Kind = PilotSymbolKind.Method, TypeName = "str", Domain = "Metaprogramming", Signature = "pure def to_source() -> str", Documentation = "Converts this AST node back into formatted Pilot source code." };
+        astSym.Members["is_atom"] = new PilotSymbol { Name = "is_atom", Kind = PilotSymbolKind.Property, TypeName = "bool", Domain = "Metaprogramming", Signature = "var is_atom: bool", Documentation = "True if this AST node is an atomic literal or symbol." };
+        astSym.Members["is_list"] = new PilotSymbol { Name = "is_list", Kind = PilotSymbolKind.Property, TypeName = "bool", Domain = "Metaprogramming", Signature = "var is_list: bool", Documentation = "True if this AST node is a composite list or s-expression." };
+        astSym.Members["is_symbol"] = new PilotSymbol { Name = "is_symbol", Kind = PilotSymbolKind.Property, TypeName = "bool", Domain = "Metaprogramming", Signature = "var is_symbol: bool", Documentation = "True if this AST node is an identifier or variable symbol." };
+        astSym.Members["name"] = new PilotSymbol { Name = "name", Kind = PilotSymbolKind.Property, TypeName = "str", Domain = "Metaprogramming", Signature = "var name: str", Documentation = "Symbol name or node operator token." };
+        astSym.Members["value"] = new PilotSymbol { Name = "value", Kind = PilotSymbolKind.Property, TypeName = "any", Domain = "Metaprogramming", Signature = "var value: any", Documentation = "Literal value or payload of the AST node." };
+        astSym.Members["children"] = new PilotSymbol { Name = "children", Kind = PilotSymbolKind.Property, TypeName = "List[AstNode]", Domain = "Metaprogramming", Signature = "var children: List[AstNode]", Documentation = "Child AST subtrees." };
+
+        foreach (var rm in RootMethodSymbols.Values)
+        {
+            if (!astSym.Members.ContainsKey(rm.Name))
+                astSym.Members[rm.Name] = rm;
+        }
+        rootScope.Symbols["AstNode"] = astSym;
 
         _currentScope = rootScope;
         _result = new PilotAnalysisResult
@@ -97,10 +203,31 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         };
     }
 
-    public static PilotAnalysisResult Analyze(string code, string uri = "inmemory://test.pilot")
+    public static PilotAnalysisResult Analyze(string code, string uri = "inmemory://test.pilot", PilotPreprocessorOptions? preprocessorOptions = null)
     {
-        var analyzer = new PilotSemanticAnalyzer(uri);
-        var inputStream = new AntlrInputStream(code ?? string.Empty);
+        var preprocResult = PilotPreprocessor.Preprocess(code ?? string.Empty, uri, preprocessorOptions);
+
+        var analyzer = new PilotSemanticAnalyzer(uri)
+        {
+            _preprocResult = preprocResult
+        };
+
+        // Transfer preprocessor diagnostics
+        foreach (var pd in preprocResult.Diagnostics)
+        {
+            analyzer._result.Diagnostics.Add(new PilotDiagnostic
+            {
+                StartLine = Math.Max(0, pd.Line - 1),
+                StartColumn = Math.Max(0, pd.Column),
+                EndLine = Math.Max(0, pd.Line - 1),
+                EndColumn = Math.Max(1, pd.Column + 1),
+                Severity = pd.Severity == PreprocessorDiagnosticSeverity.Error ? PilotDiagnosticSeverity.Error : PilotDiagnosticSeverity.Warning,
+                Code = pd.Code,
+                Message = pd.Message
+            });
+        }
+
+        var inputStream = new AntlrInputStream(preprocResult.PreprocessedSource);
         var lexer = new PilotLexer(inputStream);
         var lexerErrors = new LspErrorListener(analyzer._result.Diagnostics);
         lexer.RemoveErrorListeners();
@@ -152,6 +279,67 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             {
                 RegisterTypeStub(modelId, PilotSymbolKind.Model, "Database");
             }
+            else if (compound.extern_def() is { } externDef)
+            {
+                string lang = externDef.STRING().Length > 0 ? externDef.STRING(0).GetText().Trim('"', '\'')
+                    : externDef.identifier().Length > 0 ? externDef.identifier(0).GetText()
+                    : "foreign";
+
+                string domain = lang.ToLowerInvariant() switch
+                {
+                    "python" => "Python Interop",
+                    "csharp" => "C# / .NET Interop",
+                    "rust" => "Rust FFI",
+                    "c" => "C FFI",
+                    _ => $"{char.ToUpperInvariant(lang[0])}{lang[1..]} Interop"
+                };
+
+                foreach (var member in externDef.extern_member())
+                {
+                    if (member.identifier() is { } mId)
+                    {
+                        if (member.CLASS() != null)
+                            RegisterTypeStub(mId, PilotSymbolKind.Class, domain);
+                        else if (member.STRUCT() != null)
+                            RegisterTypeStub(mId, PilotSymbolKind.Struct, domain);
+                        else if (member.INTERFACE() != null)
+                            RegisterTypeStub(mId, PilotSymbolKind.Interface, domain);
+                        else if (member.DEF() != null || member.FN() != null)
+                        {
+                            string retType = member.type_spec()?.GetText() ?? "void";
+                            RegisterFunctionStub(mId, retType, domain);
+                        }
+                    }
+                }
+            }
+            else if (compound.macro_def() is { } macroDef && macroDef.identifier() is { } macroId)
+            {
+                RegisterFunctionStub(macroId, "AstNode", "Metaprogramming / Lisp");
+            }
+        }
+    }
+
+    private void RegisterFunctionStub(PilotParser.IdentifierContext idCtx, string returnType, string domain)
+    {
+        string name = idCtx.GetText();
+        var (line, col, endCol) = GetTokenCoords(idCtx.Start);
+        if (!_currentScope.Symbols.ContainsKey(name))
+        {
+            _currentScope.Symbols[name] = new PilotSymbol
+            {
+                Name = name,
+                Kind = PilotSymbolKind.Function,
+                TypeName = returnType,
+                Domain = domain,
+                SelectionLine = line,
+                SelectionColumn = col,
+                SelectionEndColumn = endCol,
+                StartLine = line,
+                StartColumn = col,
+                EndLine = line,
+                EndColumn = endCol,
+                Signature = $"fn {name}(...) -> {returnType}"
+            };
         }
     }
 
@@ -193,6 +381,14 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             string name = idCtx.GetText();
             string sig = $"{(isConstant ? "const" : isMutable ? "var" : "let")} {name}: {finalType}";
             DeclareVariableSymbol(idCtx, stmtCtx, name, finalType, isMutable, isConstant, sig, $"{docPrefix} `{name}`.", domain);
+            return;
+        }
+
+        if (patternCtx.splice_expr() is { } spliceCtx)
+        {
+            string name = spliceCtx.GetText();
+            string sig = $"{(isConstant ? "const" : isMutable ? "var" : "let")} {name}: {finalType}";
+            DeclareVariableSymbolFromToken(spliceCtx.Start, stmtCtx, name, finalType, isMutable, isConstant, sig, $"{docPrefix} `{name}`.", domain);
             return;
         }
 
@@ -546,7 +742,10 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                 foreach (var param in context.parameters().parameter())
                 {
                     var pId = param.identifier();
-                    string pName = pId.GetText();
+                    var pSplice = param.splice_expr();
+                    string pName = pId?.GetText() ?? pSplice?.GetText() ?? "_";
+                    var tokenForSym = pId?.Start ?? pSplice?.Start;
+
                     string pType = param.type_annotation()?.type_spec()?.GetText()
                         ?? (pName == "self" && _currentScope.EnclosingType != null ? _currentScope.EnclosingType.Name : "any");
 
@@ -554,8 +753,11 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                         Visit(param.type_annotation().type_spec());
 
                     funcSymbol.Parameters.Add((pName, pType));
-                    var pSym = CreateSymbol(pId, param, pName, PilotSymbolKind.Parameter, pType, domain, $"{pName}: {pType}", $"Parameter of `{name}`.", isMutable: false);
-                    RegisterSymbol(pSym, PilotSemanticTokenLegend.TypeParameter, PilotSemanticTokenLegend.ModDeclaration);
+                    if (tokenForSym != null)
+                    {
+                        var pSym = CreateSymbolFromToken(tokenForSym, param, pName, PilotSymbolKind.Parameter, pType, domain, $"{pName}: {pType}", $"Parameter of `{name}`.", isMutable: false);
+                        RegisterSymbol(pSym, PilotSemanticTokenLegend.TypeParameter, PilotSemanticTokenLegend.ModDeclaration);
+                    }
 
                     if (param.test() != null) Visit(param.test());
                 }
@@ -851,10 +1053,15 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
     public override string? VisitMacro_def(PilotParser.Macro_defContext context)
     {
+        var kw = context.MACRO()?.Symbol ?? context.DEFMACRO()?.Symbol;
+        if (kw != null)
+            AddSemanticToken(kw, PilotSemanticTokenLegend.TypeKeyword, 0);
+
         var idCtx = context.identifier();
         string name = idCtx.GetText();
-        var symbol = CreateSymbol(idCtx, context, name, PilotSymbolKind.Macro, "AstNode", "UDSA",
-            $"macro {name}{context.parameters()?.GetText() ?? "()"}", "Compile-time AST hygiene macro.");
+        string macroKind = context.DEFMACRO() != null ? "defmacro" : "macro";
+        var symbol = CreateSymbol(idCtx, context, name, PilotSymbolKind.Macro, "AstNode", "Metaprogramming / Lisp",
+            $"{macroKind} {name}{context.parameters()?.GetText() ?? "()"}", "Compile-time AST macro (Lisp homoiconicity).");
         RegisterSymbol(symbol, PilotSemanticTokenLegend.TypeMacro, PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModDefinition);
 
         using (EnterScope($"macro:{name}", context))
@@ -864,7 +1071,8 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                 foreach (var param in context.parameters().parameter())
                 {
                     var pId = param.identifier();
-                    var pSym = CreateSymbol(pId, param, pId.GetText(), PilotSymbolKind.Parameter, "AstNode", "UDSA", pId.GetText(), "Macro AST parameter.");
+                    if (pId == null) continue;
+                    var pSym = CreateSymbol(pId, param, pId.GetText(), PilotSymbolKind.Parameter, "AstNode", "Metaprogramming", pId.GetText(), "Macro AST parameter.");
                     RegisterSymbol(pSym, PilotSemanticTokenLegend.TypeParameter, PilotSemanticTokenLegend.ModDeclaration);
                 }
             }
@@ -872,6 +1080,365 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         }
 
         return "AstNode";
+    }
+
+    public override string? VisitQuote_stmt(PilotParser.Quote_stmtContext context)
+    {
+        var kw = context.QUOTE()?.Symbol ?? context.QUASIQUOTE()?.Symbol;
+        if (kw != null)
+            AddSemanticToken(kw, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.suite() != null) Visit(context.suite());
+        if (context.test() != null) Visit(context.test());
+        return "AstNode";
+    }
+
+    public override string? VisitQuote_expr(PilotParser.Quote_exprContext context)
+    {
+        if (context.QUOTE() != null)
+            AddSemanticToken(context.QUOTE().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.suite() != null) Visit(context.suite());
+        if (context.test() != null) Visit(context.test());
+        return "AstNode";
+    }
+
+    public override string? VisitQuasiquote_expr(PilotParser.Quasiquote_exprContext context)
+    {
+        var kw = context.QUASIQUOTE()?.Symbol ?? context.BACKQUOTE()?.Symbol;
+        if (kw != null)
+            AddSemanticToken(kw, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.suite() != null) Visit(context.suite());
+        if (context.test() != null) Visit(context.test());
+        if (context.identifier() != null) Visit(context.identifier());
+        if (context.literal() != null) Visit(context.literal());
+        return "AstNode";
+    }
+
+    public override string? VisitSplice_expr(PilotParser.Splice_exprContext context)
+    {
+        var kw = context.DOLLAR()?.Symbol ?? context.SPLICE()?.Symbol ?? context.UNQUOTE()?.Symbol ?? context.UNQUOTE_SPLICING()?.Symbol;
+        if (kw != null)
+            AddSemanticToken(kw, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.AT() != null)
+            AddSemanticToken(context.AT().Symbol, PilotSemanticTokenLegend.TypeOperator, 0);
+        if (context.identifier() != null) Visit(context.identifier());
+        if (context.test() != null) Visit(context.test());
+        return "AstNode";
+    }
+
+    public override string? VisitForeign_import_stmt(PilotParser.Foreign_import_stmtContext context)
+    {
+        if (context.IMPORT() != null)
+            AddSemanticToken(context.IMPORT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.FROM() != null)
+            AddSemanticToken(context.FROM().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.AS() != null)
+            AddSemanticToken(context.AS().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
+        var ft = context.foreign_target();
+        string lang = (ft.PYTHON() != null ? "python"
+            : ft.CSHARP() != null ? "csharp"
+            : ft.RUST() != null ? "rust"
+            : ft.identifier()?.GetText() ?? "foreign").ToLowerInvariant();
+
+        var langTok = ft.PYTHON()?.Symbol ?? ft.CSHARP()?.Symbol ?? ft.RUST()?.Symbol ?? ft.identifier()?.Start;
+        if (langTok != null)
+            AddSemanticToken(langTok, PilotSemanticTokenLegend.TypeKeyword, 0);
+
+        string targetModule = ft.dotted_name() != null
+            ? ft.dotted_name().GetText()
+            : (ft.STRING() != null ? ft.STRING().GetText().Trim('"', '\'') : string.Empty);
+
+        string domain = lang switch
+        {
+            "python" => "Python Interop",
+            "csharp" => "C# / .NET Interop",
+            "rust" => "Rust FFI",
+            "c" => "C FFI",
+            _ => $"{char.ToUpperInvariant(lang[0])}{lang[1..]} Interop"
+        };
+
+        if (context.FROM() != null)
+        {
+            var names = context.import_as_names()?.import_as_name();
+            if (names != null)
+            {
+                foreach (var nameCtx in names)
+                {
+                    var origId = nameCtx.identifier(0);
+                    string origName = origId.GetText();
+                    var asId = nameCtx.identifier().Length > 1 ? nameCtx.identifier(1) : null;
+                    if (nameCtx.AS() != null)
+                        AddSemanticToken(nameCtx.AS().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
+                    var bindId = asId ?? origId;
+                    string bindName = bindId.GetText();
+
+                    var kind = lang == "csharp"
+                        ? (char.IsUpper(origName[0]) ? PilotSymbolKind.Class : PilotSymbolKind.Function)
+                        : lang == "rust" || lang == "c"
+                        ? (char.IsUpper(origName[0]) ? PilotSymbolKind.Struct : PilotSymbolKind.Function)
+                        : (char.IsUpper(origName[0]) ? PilotSymbolKind.Class : PilotSymbolKind.Function);
+
+                    string typeName = lang == "csharp" ? $"{targetModule}.{origName}" : "any";
+                    string sig = $"from {lang}:{targetModule} import {origName}{(asId != null ? $" as {bindName}" : "")}";
+                    string doc = $"Imported symbol `{origName}` from {domain} ({lang}:{targetModule}).";
+
+                    var sym = CreateSymbol(bindId, context, bindName, kind, typeName, domain, sig, doc);
+                    int tokenType = kind switch
+                    {
+                        PilotSymbolKind.Class => PilotSemanticTokenLegend.TypeClass,
+                        PilotSymbolKind.Struct => PilotSemanticTokenLegend.TypeStruct,
+                        _ => PilotSemanticTokenLegend.TypeFunction
+                    };
+                    RegisterSymbol(sym, tokenType, PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModDefinition);
+                }
+            }
+        }
+        else
+        {
+            var asId = context.identifier();
+            string bindName;
+            PilotParser.IdentifierContext? bindId;
+
+            if (asId != null)
+            {
+                bindName = asId.GetText();
+                bindId = asId;
+            }
+            else
+            {
+                bindId = ft.dotted_name()?.identifier().Last();
+                bindName = bindId?.GetText() ?? targetModule.Replace("lib", "").Replace(".dll", "").Replace(".so", "");
+            }
+
+            if (bindId != null)
+            {
+                string sig = $"import {lang}:{targetModule}{(asId != null ? $" as {bindName}" : "")}";
+                string doc = $"Imported foreign module `{targetModule}` ({domain}).";
+                var sym = CreateSymbol(bindId, context, bindName, PilotSymbolKind.Module, $"{lang}:{targetModule}", domain, sig, doc);
+                RegisterSymbol(sym, PilotSemanticTokenLegend.TypeNamespace, PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModDefinition);
+            }
+        }
+
+        return null;
+    }
+
+    public override string? VisitExtern_def(PilotParser.Extern_defContext context)
+    {
+        AddSemanticToken(context.EXTERN().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
+        string lang = "foreign";
+        if (context.STRING().Length > 0 && (context.identifier().Length == 0 || context.STRING(0).Symbol.TokenIndex < context.identifier(0).Start.TokenIndex))
+        {
+            lang = context.STRING(0).GetText().Trim('"', '\'');
+        }
+        else if (context.identifier().Length > 0)
+        {
+            lang = context.identifier(0).GetText();
+            AddSemanticToken(context.identifier(0).Start, PilotSemanticTokenLegend.TypeKeyword, 0);
+        }
+
+        string domain = lang.ToLowerInvariant() switch
+        {
+            "python" => "Python Interop",
+            "csharp" => "C# / .NET Interop",
+            "rust" => "Rust FFI",
+            "c" => "C FFI",
+            _ => $"{char.ToUpperInvariant(lang[0])}{lang[1..]} Interop"
+        };
+
+        string? libKind = null;
+        string? libName = null;
+        IToken? specToken = null;
+
+        if (context.ASSEMBLY() != null)
+        {
+            libKind = "assembly";
+            specToken = context.ASSEMBLY().Symbol;
+            AddSemanticToken(specToken, PilotSemanticTokenLegend.TypeKeyword, 0);
+        }
+        else if (context.MODULE() != null)
+        {
+            libKind = "module";
+            specToken = context.MODULE().Symbol;
+            AddSemanticToken(specToken, PilotSemanticTokenLegend.TypeKeyword, 0);
+        }
+        else if (context.LIB() != null)
+        {
+            libKind = "lib";
+            specToken = context.LIB().Symbol;
+            AddSemanticToken(specToken, PilotSemanticTokenLegend.TypeKeyword, 0);
+        }
+
+        if (specToken != null)
+        {
+            var libStr = context.STRING().FirstOrDefault(s => s.Symbol.TokenIndex > specToken.TokenIndex);
+            var libId = context.identifier().FirstOrDefault(i => i.Start.TokenIndex > specToken.TokenIndex);
+            if (libStr != null) libName = libStr.GetText().Trim('"', '\'');
+            else if (libId != null) libName = libId.GetText();
+        }
+
+        foreach (var member in context.extern_member())
+        {
+            ProcessExternMember(member, lang, domain, libKind, libName);
+        }
+
+        return null;
+    }
+
+    private void ProcessExternMember(PilotParser.Extern_memberContext member, string lang, string domain, string? libKind, string? libName)
+    {
+        if (member.DEF() != null || member.FN() != null)
+        {
+            ProcessExternFunction(member, lang, domain, libKind, libName);
+        }
+        else if (member.CLASS() != null || member.STRUCT() != null || member.INTERFACE() != null)
+        {
+            ProcessExternType(member, lang, domain, libKind, libName);
+        }
+        else if (member.small_stmt() != null)
+        {
+            Visit(member.small_stmt());
+        }
+    }
+
+    private void ProcessExternFunction(PilotParser.Extern_memberContext member, string lang, string domain, string? libKind, string? libName)
+    {
+        var idCtx = member.identifier();
+        if (idCtx == null) return;
+        string name = idCtx.GetText();
+
+        var kw = member.DEF()?.Symbol ?? member.FN()?.Symbol;
+        if (kw != null) AddSemanticToken(kw, PilotSemanticTokenLegend.TypeKeyword, 0);
+
+        bool isStatic = member.declaration_modifier().Any(m => m.STATIC() != null);
+        foreach (var mod in member.declaration_modifier())
+        {
+            AddSemanticToken(mod.Start, PilotSemanticTokenLegend.TypeModifier, 0);
+        }
+
+        string returnType = member.type_spec()?.GetText() ?? "void";
+        if (member.type_spec() != null) Visit(member.type_spec());
+
+        var kind = _currentScope.EnclosingType != null ? PilotSymbolKind.Method : PilotSymbolKind.Function;
+        string doc = libName != null
+            ? $"External {lang} function declared in {libKind} `{libName}`."
+            : $"External {lang} function.";
+
+        var funcSymbol = CreateSymbol(idCtx, member, name, kind, returnType, domain, "", doc, isStatic: isStatic);
+
+        int mods = PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModDefinition;
+        if (isStatic) mods |= PilotSemanticTokenLegend.ModStatic;
+
+        RegisterSymbol(
+            funcSymbol,
+            kind == PilotSymbolKind.Method ? PilotSemanticTokenLegend.TypeMethod : PilotSemanticTokenLegend.TypeFunction,
+            mods);
+
+        if (_currentScope.EnclosingType != null)
+        {
+            _currentScope.EnclosingType.Members[name] = funcSymbol;
+            _currentScope.EnclosingType.Children.Add(funcSymbol);
+        }
+
+        using (EnterScope($"extern_fn:{name}", member, returnType: returnType))
+        {
+            if (member.parameters()?.parameter() != null)
+            {
+                foreach (var param in member.parameters().parameter())
+                {
+                    var pId = param.identifier();
+                    if (pId == null) continue;
+                    string pName = pId.GetText();
+                    string pType = param.type_annotation()?.type_spec()?.GetText()
+                        ?? (pName == "self" && _currentScope.EnclosingType != null ? _currentScope.EnclosingType.Name : "any");
+
+                    if (param.type_annotation()?.type_spec() != null)
+                        Visit(param.type_annotation().type_spec());
+
+                    funcSymbol.Parameters.Add((pName, pType));
+                    var pSym = CreateSymbol(pId, param, pName, PilotSymbolKind.Parameter, pType, domain, $"{pName}: {pType}", $"Parameter of `{name}`.", isMutable: false);
+                    RegisterSymbol(pSym, PilotSemanticTokenLegend.TypeParameter, PilotSemanticTokenLegend.ModDeclaration);
+
+                    if (param.test() != null) Visit(param.test());
+                }
+            }
+
+            string paramListStr = string.Join(", ", funcSymbol.Parameters.Select(p => $"{p.Name}: {p.Type}"));
+            funcSymbol.Signature = $"extern \"{lang}\" fn {name}({paramListStr}) -> {returnType}";
+
+            if (member.suite() != null) Visit(member.suite());
+        }
+    }
+
+    private void ProcessExternType(PilotParser.Extern_memberContext member, string lang, string domain, string? libKind, string? libName)
+    {
+        var idCtx = member.identifier();
+        if (idCtx == null) return;
+        string name = idCtx.GetText();
+
+        var kw = member.CLASS()?.Symbol ?? member.STRUCT()?.Symbol ?? member.INTERFACE()?.Symbol;
+        if (kw != null) AddSemanticToken(kw, PilotSemanticTokenLegend.TypeKeyword, 0);
+
+        foreach (var mod in member.declaration_modifier())
+        {
+            AddSemanticToken(mod.Start, PilotSemanticTokenLegend.TypeModifier, 0);
+        }
+
+        var kind = member.CLASS() != null ? PilotSymbolKind.Class
+            : member.STRUCT() != null ? PilotSymbolKind.Struct
+            : PilotSymbolKind.Interface;
+
+        int tokenType = kind switch
+        {
+            PilotSymbolKind.Class => PilotSemanticTokenLegend.TypeClass,
+            PilotSymbolKind.Struct => PilotSemanticTokenLegend.TypeStruct,
+            _ => PilotSemanticTokenLegend.TypeInterface
+        };
+
+        string typeKeyword = kind switch
+        {
+            PilotSymbolKind.Class => "class",
+            PilotSymbolKind.Struct => "struct",
+            _ => "interface"
+        };
+
+        string doc = libName != null
+            ? $"External {lang} {typeKeyword} declared in {libKind} `{libName}`."
+            : $"External {lang} {typeKeyword}.";
+
+        string sig = $"extern \"{lang}\" {typeKeyword} {name}";
+
+        var typeSymbol = CreateSymbol(idCtx, member, name, kind, name, domain, sig, doc);
+        RegisterSymbol(typeSymbol, tokenType, PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModDefinition);
+
+        using (EnterScope($"extern_type:{name}", member, enclosingType: typeSymbol))
+        {
+            foreach (var nested in member.extern_member())
+            {
+                ProcessExternMember(nested, lang, domain, libKind, libName);
+            }
+            if (member.suite() != null)
+            {
+                Visit(member.suite());
+            }
+        }
+    }
+
+    public override string? VisitInline_foreign_block(PilotParser.Inline_foreign_blockContext context)
+    {
+        var kw = context.PYTHON() ?? context.CSHARP() ?? context.RUST();
+        if (kw != null)
+        {
+            AddSemanticToken(kw.Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        }
+
+        foreach (var stmt in context.stmt())
+        {
+            Visit(stmt);
+        }
+
+        return "any";
     }
 
     public override string? VisitDatabase_stmt(PilotParser.Database_stmtContext context)
@@ -1136,6 +1703,10 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             return ExtractElementType(inner ?? "any");
         }
 
+        if (context.quote_expr() is { } qe) return VisitQuote_expr(qe);
+        if (context.quasiquote_expr() is { } qqe) return VisitQuasiquote_expr(qqe);
+        if (context.splice_expr() is { } se) return VisitSplice_expr(se);
+
         return base.VisitUnary_op(context);
     }
 
@@ -1188,12 +1759,13 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             }
             else if (trailer.identifier() is { } memberId)
             {
+                string memberName = memberId.GetText();
                 // Resolve member on currentType if known
                 if (currentType != null)
                 {
                     string baseTypeName = currentType.TrimEnd('?');
                     var typeSym = _currentScope.Resolve(baseTypeName);
-                    if (typeSym != null && typeSym.Members.TryGetValue(memberId.GetText(), out var memberSym))
+                    if (typeSym != null && typeSym.Members.TryGetValue(memberName, out var memberSym))
                     {
                         AddSymbolReference(memberId.Start, memberSym);
                         AddSemanticToken(memberId.Start, GetSemanticTokenTypeForSymbol(memberSym), 0);
@@ -1201,6 +1773,19 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                         continue;
                     }
                 }
+
+                // Check Root Object Methods
+                if (RootObjectMethods.TryGetValue(memberName, out var rootMethod))
+                {
+                    if (RootMethodSymbols.TryGetValue(memberName, out var rootMethodSym))
+                    {
+                        AddSymbolReference(memberId.Start, rootMethodSym);
+                    }
+                    AddSemanticToken(memberId.Start, PilotSemanticTokenLegend.TypeMethod, 0);
+                    currentType = rootMethod.ReturnType;
+                    continue;
+                }
+
                 AddSemanticToken(memberId.Start, trailer.LPAR() != null ? PilotSemanticTokenLegend.TypeMethod : PilotSemanticTokenLegend.TypeProperty, 0);
             }
             else if (trailer.unit_expr() != null)
@@ -1425,6 +2010,26 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
     public override string? VisitAtom(PilotParser.AtomContext context)
     {
+        if (context.inline_foreign_block() is { } ifb)
+        {
+            return VisitInline_foreign_block(ifb);
+        }
+
+        if (context.quote_expr() is { } qe)
+        {
+            return VisitQuote_expr(qe);
+        }
+
+        if (context.quasiquote_expr() is { } qqe)
+        {
+            return VisitQuasiquote_expr(qqe);
+        }
+
+        if (context.splice_expr() is { } se)
+        {
+            return VisitSplice_expr(se);
+        }
+
         if (context.literal() is { } lit)
         {
             return InferLiteralType(lit);
@@ -1766,16 +2371,31 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         string domain = "Core",
         PilotSymbolKind kind = PilotSymbolKind.Variable)
     {
-        if (_currentScope.Symbols.TryGetValue(name, out var prev) && prev.SelectionLine != idCtx.Start.Line - 1)
+        return DeclareVariableSymbolFromToken(idCtx.Start, fullCtx, name, typeName, isMutable, isConstant, signature, doc, domain, kind);
+    }
+
+    private PilotSymbol DeclareVariableSymbolFromToken(
+        IToken idToken,
+        ParserRuleContext fullCtx,
+        string name,
+        string typeName,
+        bool isMutable,
+        bool isConstant,
+        string signature,
+        string doc,
+        string domain = "Core",
+        PilotSymbolKind kind = PilotSymbolKind.Variable)
+    {
+        if (_currentScope.Symbols.TryGetValue(name, out var prev) && prev.SelectionLine != idToken.Line - 1)
         {
             AddDiagnostic(
-                idCtx.Start,
+                idToken,
                 PilotDiagnosticSeverity.Warning,
                 "PILOT105",
                 $"Symbol '{name}' is already declared in this scope (line {prev.SelectionLine + 1}).");
         }
 
-        var symbol = CreateSymbol(idCtx, fullCtx, name, kind, typeName, domain, signature, doc, isMutable: isMutable, isConstant: isConstant);
+        var symbol = CreateSymbolFromToken(idToken, fullCtx, name, kind, typeName, domain, signature, doc, isMutable: isMutable, isConstant: isConstant);
         int mods = PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModDefinition;
         if (!isMutable || isConstant) mods |= PilotSemanticTokenLegend.ModReadonly;
 
@@ -1914,6 +2534,9 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
     private void AddDiagnostic(IToken token, PilotDiagnosticSeverity severity, string code, string message)
     {
+        if (_preprocResult != null && _preprocResult.IsWarningSuppressed(code, token.Line))
+            return;
+
         var (line, col, endCol) = GetTokenCoords(token);
         _result.Diagnostics.Add(new PilotDiagnostic
         {
@@ -1940,7 +2563,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         PilotSymbolKind.Parameter => PilotSemanticTokenLegend.TypeParameter,
         PilotSymbolKind.Macro => PilotSemanticTokenLegend.TypeMacro,
         PilotSymbolKind.Unit or PilotSymbolKind.TypeParameter or PilotSymbolKind.TypeAlias => PilotSemanticTokenLegend.TypeTypeParameter,
-        PilotSymbolKind.Database or PilotSymbolKind.Dsl => PilotSemanticTokenLegend.TypeNamespace,
+        PilotSymbolKind.Database or PilotSymbolKind.Dsl or PilotSymbolKind.Module => PilotSemanticTokenLegend.TypeNamespace,
         _ => PilotSemanticTokenLegend.TypeVariable
     };
 

@@ -1,0 +1,108 @@
+// =============================================================================
+// Pilot Suite 17: Advanced Runtime Features
+// Partial Classes, Generators & Coroutines, Concurrency, Lazy Evals,
+// JSON Serialization, and C# Collection Expression Spreading ".."
+// =============================================================================
+
+// 1. Partial Classes
+partial class ServiceHost {
+    def start(self) {
+        return "started";
+    }
+}
+
+partial class ServiceHost {
+    def stop(self) {
+        return "stopped";
+    }
+}
+
+let host = ServiceHost();
+assert host.start() == "started";
+assert host.stop() == "stopped";
+
+// 2. Generators & Coroutines
+def step_generator(limit) {
+    let current = 1;
+    while current <= limit {
+        yield current;
+        current = current + 1;
+    }
+}
+
+let g = step_generator(3);
+assert g.next() == 1;
+assert g.next() == 2;
+assert g.next() == 3;
+assert g.is_done == true;
+
+let total = 0;
+for item in step_generator(4) {
+    total = total + item;
+}
+assert total == 10;
+
+// 3. Concurrency (spawn, await, parallel_map)
+def square(x) {
+    return x * x;
+}
+
+let future = spawn square(9);
+let awaited = await future;
+assert awaited == 81;
+
+let numbers = [1, 2, 3, 4];
+let squared_list = parallel_map(square, numbers);
+assert squared_list[0] == 1;
+assert squared_list[1] == 4;
+assert squared_list[2] == 9;
+assert squared_list[3] == 16;
+
+// 4. Lazy Evaluation
+let eval_counter = 0;
+def heavy_calc() {
+    eval_counter = eval_counter + 1;
+    return 42 * 10;
+}
+
+let lazy_res = lazy(heavy_calc);
+assert eval_counter == 0;
+assert lazy_res.value == 420;
+assert lazy_res.value == 420;
+assert eval_counter == 1;
+
+// 5. JSON Serialization & Deserialization
+let payload = { "service": "api", "port": 8080 };
+let json_str = json.dumps(payload);
+let restored_payload = json.loads(json_str);
+assert restored_payload["service"] == "api";
+assert restored_payload["port"] == 8080;
+
+class AgentConfig {
+    def __init__(self, id, active) {
+        self.id = id;
+        self.active = active;
+    }
+}
+
+let cfg = AgentConfig("agt-01", true);
+let cfg_json = cfg.to_json();
+let restored_cfg = json.loads(cfg_json);
+assert restored_cfg["id"] == "agt-01";
+assert restored_cfg["active"] == true;
+
+// 6. C# Collection Expressions Inline Spreading ".."
+let initial = [2, 3];
+let inline_spread = [1, ..initial, 4, 5];
+assert inline_spread[0] == 1;
+assert inline_spread[1] == 2;
+assert inline_spread[2] == 3;
+assert inline_spread[3] == 4;
+assert inline_spread[4] == 5;
+
+let base_map = { "host": "localhost" };
+let merged_map = { ..base_map, "ssl": true };
+assert merged_map["host"] == "localhost";
+assert merged_map["ssl"] == true;
+
+print("All advanced runtime features verified successfully!");

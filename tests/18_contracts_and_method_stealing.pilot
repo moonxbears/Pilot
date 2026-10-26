@@ -1,0 +1,126 @@
+// =============================================================================
+// Pilot Suite 18: Contract Delegation and Method Stealing
+// - Contract forwarding via defined property/field (e.g. IList.Contracts = _items)
+// - Generic syntax: IList<PilotValue>.Contracts = _items
+// - Custom method overrides on top of contract defaults
+// - IEquatable equivalence contract forwarding
+// - Method stealing from non-inherited classes (full and selective)
+// - Overriding stolen methods with custom implementations
+// =============================================================================
+
+// 1. Contract Forwarding: IList pointing to underlying list
+class FastBuffer(IList) {
+    let _data = [];
+    IList<PilotValue>.Contracts = _data;
+}
+
+let buf = FastBuffer();
+buf.append("alpha");
+buf.append("beta");
+buf.append("gamma");
+
+assert buf.count() == 3;
+assert buf.get(0) == "alpha";
+assert buf.get(1) == "beta";
+assert buf.get(2) == "gamma";
+assert buf.contains("beta") == true;
+assert buf.contains("omega") == false;
+
+// 2. Contract Forwarding with Custom Override
+class MonitoredList(IList) {
+    let _items = [];
+    IList.Contracts = _items;
+
+    // Custom override for count that includes extra telemetry
+    def count(self) {
+        return self._items.length * 10;
+    }
+}
+
+let mlist = MonitoredList();
+mlist.append(100);
+mlist.append(200);
+
+// count uses the custom override: 2 * 10 = 20
+assert mlist.count() == 20;
+// get and contains use the default contract forwarders
+assert mlist.get(0) == 100;
+assert mlist.get(1) == 200;
+assert mlist.contains(100) == true;
+
+// 3. Contract Forwarding: IEquatable
+class Entity(IEquatable) {
+    def __init__(self, key, value) {
+        self.key = key;
+        self.value = value;
+        IEquatable.Contracts = key;
+    }
+}
+
+let e1 = Entity("user:100", "Alice");
+let e2 = Entity("user:100", "Alice Clone");
+let e3 = Entity("user:200", "Bob");
+
+assert e1.equals(e2) == true;
+assert e1.equals(e3) == false;
+
+// 4. Method Stealing: Borrowing functions from non-inherited classes
+class EncryptionEngine {
+    def encrypt(self, plain) {
+        return "enc(" + str(plain) + ")";
+    }
+    def decrypt(self, cipher) {
+        return "dec(" + str(cipher) + ")";
+    }
+}
+
+class SecureVault {
+    steal EncryptionEngine;
+
+    def store(self, secret) {
+        return "stored: " + self.encrypt(secret);
+    }
+}
+
+let vault = SecureVault();
+assert vault.encrypt("my_pass") == "enc(my_pass)";
+assert vault.decrypt("enc(my_pass)") == "dec(enc(my_pass))";
+assert vault.store("secret_data") == "stored: enc(secret_data)";
+
+// 5. Method Stealing with Custom Overrides
+class Formatter {
+    def format_title(self, text) {
+        return "Title: " + str(text);
+    }
+    def format_body(self, text) {
+        return "Body: " + str(text);
+    }
+}
+
+class CustomPublisher {
+    steal Formatter;
+
+    // Override format_title with custom formatting
+    def format_title(self, text) {
+        return "=== " + str(text) + " ===";
+    }
+}
+
+let pub = CustomPublisher();
+assert pub.format_title("Pilot News") == "=== Pilot News ==="; // custom override
+assert pub.format_body("Contracts work!") == "Body: Contracts work!"; // stolen default
+
+// 6. Selective Method Stealing
+class ScientificOps {
+    def exp(self, x) { return x * 10; }
+    def log(self, x) { return x / 10; }
+}
+
+class SimpleExpEngine {
+    steal from ScientificOps [exp];
+}
+
+let eng = SimpleExpEngine();
+assert eng.exp(5) == 50;
+
+print("All contract delegation and method stealing features verified successfully!");

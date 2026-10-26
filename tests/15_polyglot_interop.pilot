@@ -1,0 +1,91 @@
+// =============================================================================
+// Pilot Test Suite 15: Polyglot Foreign Interoperability (Python, C#, Rust)
+// =============================================================================
+
+// 1. Python Foreign Imports
+import python:numpy as np
+from python:math import sin, cos, pi as PI
+from python:dataclasses import dataclass, field
+
+// 2. C# / .NET Foreign Imports
+import csharp:System.Text.Json as Json
+from csharp:System.IO import File, Path, Directory
+from csharp:System.Collections.Generic import List, Dictionary
+
+// 3. Rust Native Shared Library Imports
+import rust:"libpilot_core" as core_rs
+from rust:"libcrypto" import sha256_hash, verify_sig as verify_signature
+
+// 4. Extern Declarations & FFI Blocks
+
+// Multi-member Rust library block
+extern "rust" lib "libphysics" {
+    fn simulate_step(dt: f32) -> void;
+    fn get_particle_count() -> i32;
+    fn compute_impulse(mass: f32, velocity: f32) -> f32;
+}
+
+// C# Assembly type declarations
+extern "csharp" assembly "System.Data" {
+    class SqlConnection {
+        public def open() -> void;
+        public def close() -> void;
+        public def execute_non_query(query: str) -> i32;
+    }
+}
+
+// Python module declaration
+extern "python" module "scipy.optimize" {
+    def minimize_scalar(cost_func: any, method: str) -> any;
+}
+
+// Single-line extern functions
+extern "rust" lib "libmath" fn fast_inv_sqrt(number: f32) -> f32;
+extern "c" lib "libc" fn puts(msg: str) -> i32;
+
+// 5. Functions Utilizing Polyglot Foreign Symbols
+def test_python_integration() -> void {
+    let angle: f32 = 0.5
+    let s: any = sin(angle)
+    let c: any = cos(angle)
+    let approx: f32 = PI
+}
+
+def test_csharp_integration(filePath: str) -> bool {
+    let exists: bool = File.Exists(filePath)
+    let dir: str = Path.GetDirectoryName(filePath)
+    return exists
+}
+
+def test_rust_ffi(step_time: f32) -> f32 {
+    simulate_step(step_time)
+    let count: i32 = get_particle_count()
+    let inv: f32 = fast_inv_sqrt(step_time)
+    return inv
+}
+
+// 6. Inline Foreign Blocks (Statements & Expression Atoms)
+def test_inline_polyglot_blocks() -> void {
+    // Inline Python block expression
+    let py_result: any = python {
+        import math
+        return math.sqrt(256.0)
+    }
+
+    // Inline C# block statement
+    csharp {
+        Console.WriteLine("Executing native C# code within Pilot block");
+    }
+
+    // Inline Rust block statement
+    rust {
+        let status: i32 = puts("Executing native Rust / C code within Pilot block")
+    }
+
+    // Inline Rust raw block
+    rust ```rust
+    unsafe {
+        libc::puts(b"Executing native Rust raw code within Pilot block\0".as_ptr() as *const i8);
+    }
+    ```
+}

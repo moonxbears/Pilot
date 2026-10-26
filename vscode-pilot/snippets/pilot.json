@@ -196,5 +196,147 @@
       "[${1:item1}, ..${2:spread_collection}, ${3:item2}]"
     ],
     "description": "C#-style collection expression with spread element"
+  },
+  "Conditional Compilation If": {
+    "prefix": "#if",
+    "body": [
+      "#if ${1:DEBUG}",
+      "\t$0",
+      "#else",
+      "\t",
+      "#endif"
+    ],
+    "description": "Conditional compilation block with #if, #else, and #endif"
+  },
+  "Code Region": {
+    "prefix": "#region",
+    "body": [
+      "#region ${1:RegionName}",
+      "$0",
+      "#endregion"
+    ],
+    "description": "Collapsible code region"
+  },
+  "Define Symbol": {
+    "prefix": "#define",
+    "body": [
+      "#define ${1:SYMBOL}"
+    ],
+    "description": "Define a conditional compilation symbol"
+  },
+  "Pragma Warning Disable": {
+    "prefix": "#pragma",
+    "body": [
+      "#pragma warning disable ${1:PILOT101}",
+      "$0",
+      "#pragma warning restore ${1:PILOT101}"
+    ],
+    "description": "Suppress and restore compiler diagnostics with #pragma"
+  },
+  "Python Foreign Import": {
+    "prefix": "importpy",
+    "body": [
+      "from python:${1:math} import ${2:sin, cos}"
+    ],
+    "description": "Import functions, classes, or modules from Python"
+  },
+  "C# Foreign Import": {
+    "prefix": "importcs",
+    "body": [
+      "from csharp:${1:System.IO} import ${2:File, Path}"
+    ],
+    "description": "Import types and namespaces from C# / .NET"
+  },
+  "Rust Foreign Import": {
+    "prefix": "importrs",
+    "body": [
+      "from rust:\"${1:libcrypto}\" import ${2:sha256_hash}"
+    ],
+    "description": "Import native symbols from a compiled Rust crate/shared library"
+  },
+  "Extern FFI Block": {
+    "prefix": "extern",
+    "body": [
+      "extern \"${1|rust,csharp,python,c|}\" ${2|lib,assembly,module|} \"${3:target}\" {",
+      "\t${4|fn,def|} ${5:function_name}(${6:param}: ${7:i32}) -> ${8:void};",
+      "}"
+    ],
+    "description": "Declare foreign function interfaces (FFI) and external types"
+  },
+  "Inline Foreign Block": {
+    "prefix": "foreignblock",
+    "body": [
+      "${1|python,csharp,rust|} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Inline foreign language block (Python, C#, Rust)"
+  },
+  "Lisp Defmacro Definition": {
+    "prefix": "defmacro",
+    "body": [
+      "defmacro ${1:macro_name}(${2:ast}: AstNode) -> AstNode {",
+      "\tlet ${3:tmp} = gensym(\"${4:g}\")",
+      "\tquasiquote {",
+      "\t\t$0",
+      "\t}",
+      "}"
+    ],
+    "description": "Define a Lisp-style homoiconic compile-time AST macro"
+  },
+  "Quasiquote Template": {
+    "prefix": "quasiquote",
+    "body": [
+      "quasiquote {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Lisp-style quasiquote template with $ unquote and $@ splicing"
+  },
+  "Root Object to_string": {
+    "prefix": "to_string",
+    "body": [
+      "def to_string(self) -> str {",
+      "\treturn $\"${1:ClassName}({$0})\"",
+      "}"
+    ],
+    "description": "Override the root object to_string representation method"
+  },
+  "Root Object equals": {
+    "prefix": "equals",
+    "body": [
+      "def equals(self, other: any) -> bool {",
+      "\tguard let o = other as ${1:Type} else { return false }",
+      "\treturn ${2:self.id == o.id}",
+      "}"
+    ],
+    "description": "Override the root object equals comparison method"
+  },
+  "Root Object hash": {
+    "prefix": "hash",
+    "body": [
+      "def hash(self) -> int {",
+      "\treturn ${1:hash(self.id)}",
+      "}"
+    ],
+    "description": "Override the root object hash function method"
+  },
+  "Root Object clone": {
+    "prefix": "clone",
+    "body": [
+      "def clone(self) -> ${1:Type} {",
+      "\treturn ${1:Type}($0)",
+      "}"
+    ],
+    "description": "Override the root object clone copying method"
+  },
+  "Root Object deconstruct": {
+    "prefix": "deconstruct",
+    "body": [
+      "def deconstruct(self) -> ${1:tuple} {",
+      "\treturn ($0)",
+      "}"
+    ],
+    "description": "Override root object pattern matching deconstruction"
   }
 }

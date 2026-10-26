@@ -30,6 +30,7 @@ identifier
     | DEADLINE | WITHIN | FALLBACK | PRIORITY | JITTER | BOUNDED
     | SPAWN | PARALLEL | ATOMIC | SYNC | LOCK | ISOLATE
     | CHAN | CHANNEL | ASYNC | AWAIT | ACTOR | MACRO | QUOTE | SPLICE
+    | DEFMACRO | QUASIQUOTE | UNQUOTE | UNQUOTE_SPLICING
     | MATCH | CASE | TYPE | PURE | MUT | IMMUT | LET | VAR | CONST
     | GUARD | DEFER | INSERT | UPDATE | DELETE | VALUES | SET_KW
     | RETURNING | CONFLICT | DO | NOTHING | OVER | PARTITION | WINDOW
@@ -38,7 +39,8 @@ identifier
     | EXCEPT
     | PUBLIC | PRIVATE | PROTECTED | INTERNAL
     | SYMBOL | REF | DYNAMIC | FN
-    | STATIC | PARAMS | ARGS | KWARGS | NAMEOF | WHEN | UNDEFINED
+    | STATIC | PARAMS | ARGS | KWARGS | NAMEOF | WHEN | UNDEFINED | PARTIAL | STEAL | CONTRACTS | DELEGATE
+    | EXTERN | CSHARP | PYTHON | RUST | ASSEMBLY | MODULE | LIB | STATE
     ;
 
 // =============================================================================
@@ -55,7 +57,8 @@ simple_stmt
     ;
 
 small_stmt
-    : let_stmt
+    : import_stmt
+    | let_stmt
     | var_stmt
     | const_stmt
     | ref_stmt
@@ -69,19 +72,22 @@ small_stmt
     | database_stmt
     | savepoint_stmt
     | annassign_stmt
-    | expr_stmt
     | channel_send_stmt
     | flow_stmt
-    | import_stmt
     | global_stmt
     | assert_stmt
     | pass_stmt
+    | steal_stmt
+    | delegate_stmt
+    | contract_forward_stmt
+    | expr_stmt
     ;
 
 compound_stmt
     : labeled_stmt
     | func_def
     | class_def
+    | state_def
     | struct_def
     | interface_def
     | enum_def
@@ -91,6 +97,8 @@ compound_stmt
     | operator_def
     | extension_def
     | macro_def
+    | extern_def
+    | inline_foreign_block
     | quote_stmt
     | guard_stmt
     | defer_stmt
@@ -213,6 +221,7 @@ access_modifier
 declaration_modifier
     : access_modifier
     | STATIC
+    | PARTIAL
     ;
 
 // =============================================================================
@@ -221,6 +230,7 @@ declaration_modifier
 
 binding_pattern
     : identifier
+    | splice_expr
     | tuple_pattern
     | list_pattern
     | record_pattern
@@ -312,11 +322,16 @@ parameters
     ;
 
 parameter
-    : (PARAMS | REF)? (STAR | DOUBLESTAR)? identifier type_annotation? (EQUAL test)?
+    : (PARAMS | REF)? (STAR | DOUBLESTAR)? (identifier | splice_expr) type_annotation? (EQUAL test)?
     ;
 
 class_def
-    : decorators? declaration_modifier* CLASS identifier generic_params? (LPAR class_bases? RPAR)? where_type_clause? COLON? suite
+    : decorators? declaration_modifier* CLASS identifier generic_params? EQUAL test SEMI?
+    | decorators? declaration_modifier* CLASS identifier generic_params? (LPAR class_bases? RPAR)? where_type_clause? COLON? suite
+    ;
+
+state_def
+    : STATE identifier generic_params? COLON? suite
     ;
 
 class_bases
@@ -398,18 +413,47 @@ overloadable_op
     | LSQB RSQB EQUAL?
     ;
 
-// Extension methods / classes: extension for Type: ...
+// Extension methods / classes: extension for Type: ... or extension Name on Type: ...
 extension_def
-    : decorators? declaration_modifier* EXTENSION identifier? FOR type_spec where_type_clause? COLON? suite
+    : decorators? declaration_modifier* EXTENSION identifier? (FOR | ON) type_spec where_type_clause? COLON? suite
     ;
 
-// Compile-Time Metaprogramming / Macros
+// Compile-Time Metaprogramming / Macros (Lisp Homoiconicity)
 macro_def
-    : decorators? declaration_modifier* MACRO EXCLAMATION? identifier generic_params? parameters? (ARROW type_spec)? COLON? suite
+    : decorators? declaration_modifier* (MACRO | DEFMACRO) EXCLAMATION? identifier generic_params? parameters? (ARROW type_spec)? COLON? suite
     ;
 
 quote_stmt
-    : QUOTE COLON? (suite | LBRACE test RBRACE)
+    : (QUOTE | QUASIQUOTE) COLON? (suite | LBRACE test RBRACE)
+    ;
+
+quote_expr
+    : QUOTE COLON? (suite | LBRACE test RBRACE | LPAR test RPAR)
+    ;
+
+quasiquote_expr
+    : (QUASIQUOTE | BACKQUOTE) COLON? (suite | LBRACE test RBRACE | LPAR test RPAR | identifier | literal)
+    ;
+
+splice_expr
+    : DOLLAR AT (identifier | LPAR test RPAR)
+    | (DOLLAR | SPLICE | UNQUOTE) (identifier | LPAR test RPAR)
+    | UNQUOTE_SPLICING (identifier | LPAR test RPAR)
+    ;
+
+// Polyglot Interoperability (Python, C#, Rust FFI)
+extern_def
+    : EXTERN (STRING | identifier) ( (ASSEMBLY | MODULE | LIB) (STRING | identifier) )? COLON? (LBRACE extern_member* RBRACE | extern_member)
+    ;
+
+extern_member
+    : decorators? declaration_modifier* (DEF | FN) identifier generic_params? parameters (ARROW type_spec)? (COLON? suite | SEMI)?
+    | decorators? declaration_modifier* (CLASS | STRUCT | INTERFACE) identifier generic_params? (LPAR class_bases? RPAR)? COLON? (LBRACE extern_member* RBRACE | suite | SEMI)
+    | small_stmt
+    ;
+
+inline_foreign_block
+    : (PYTHON | CSHARP | RUST) (RAW_DSL_BLOCK | LBRACE stmt* RBRACE)
     ;
 
 // Decorators
@@ -521,7 +565,7 @@ try_stmt
     ;
 
 except_clause
-    : EXCEPT (type_spec (AS identifier)?)? COLON? suite
+    : EXCEPT ((type_spec (AS identifier)?) | (AS identifier))? COLON? suite
     ;
 
 with_stmt
@@ -529,7 +573,8 @@ with_stmt
     ;
 
 with_item
-    : test (AS identifier)?
+    : EXTENSION identifier
+    | test (AS identifier)?
     ;
 
 flow_stmt
@@ -548,13 +593,35 @@ assert_stmt
     : ASSERT test (COMMA test)?
     ;
 
+steal_stmt
+    : STEAL FROM? dotted_name (DOT identifier | LSQB identifier (COMMA identifier)* RSQB)?
+    ;
+
+delegate_stmt
+    : DELEGATE type_spec TO test
+    ;
+
+contract_forward_stmt
+    : CONTRACTS FOR? type_spec (EQUAL | COLON) test
+    ;
+
 global_stmt
     : GLOBAL identifier (COMMA identifier)*
     ;
 
 import_stmt
-    : import_name
+    : foreign_import_stmt
+    | import_name
     | import_from
+    ;
+
+foreign_import_stmt
+    : IMPORT foreign_target (AS identifier)?
+    | FROM foreign_target IMPORT (STAR | import_as_names | LPAR import_as_names RPAR)
+    ;
+
+foreign_target
+    : (PYTHON | CSHARP | RUST | identifier) COLON (dotted_name | STRING)
     ;
 
 import_name
@@ -978,8 +1045,9 @@ unary_op
     | ARROW_LEFT factor                                              // Channel receive: <-ch
     | SPAWN (LPAR test RPAR)? factor                                 // Concurrency spawn expression
     | STACKALLOC type_spec (LSQB test RSQB)?                        // Hard real-time stack allocation
-    | QUOTE COLON? (suite | LBRACE test RBRACE)                      // Universal Domain AST quote
-    | DOLLAR (identifier | LPAR test RPAR)                           // Universal Domain AST splice
+    | quote_expr
+    | quasiquote_expr
+    | splice_expr
     ;
 
 power
@@ -992,11 +1060,13 @@ atom_expr
 
 trailer
     : LPAR arglist? RPAR over_clause?
+    | STAR LPAR arglist? RPAR
+    | DOT STAR LPAR arglist? RPAR
     | LSQB subscriptlist RSQB
     | DOT identifier
     | SAFE_NAV identifier
     | cascade_trailer
-    | LESS unit_expr GREATER                                        // Unit-of-measure tag: expr<meter / second>
+    | LESS unit_expr GREATER
     | EXCLAMATION                                                    // Non-null assertion
     | over_clause
     ;
@@ -1029,7 +1099,11 @@ subscript
     ;
 
 atom
-    : literal
+    : inline_foreign_block
+    | quote_expr
+    | quasiquote_expr
+    | splice_expr
+    | literal
     | macro_call
     | symbol_literal
     | nameof_expr
@@ -1134,6 +1208,10 @@ PRIVATE     : 'private';
 PROTECTED   : 'protected';
 INTERNAL    : 'internal';
 STATIC      : 'static';
+PARTIAL     : 'partial';
+STEAL       : 'steal';
+CONTRACTS   : 'contracts';
+DELEGATE    : 'delegate';
 PARAMS      : 'params';
 ARGS        : 'args';
 KWARGS      : 'kwargs';
@@ -1161,6 +1239,7 @@ PROPERTY    : 'property';
 GET         : 'get';
 OPERATOR    : 'operator';
 EXTENSION   : 'extension';
+STATE       : 'state';
 
 // --- Relational & Postgres-like Database Keywords ---
 SELECT      : 'select';
@@ -1247,13 +1326,26 @@ WCET        : 'wcet';
 HARD_RT     : 'hard_rt';
 SOFT_RT     : 'soft_rt';
 
+// --- Polyglot Interoperability (Python, C#, Rust FFI) ---
+EXTERN      : 'extern';
+CSHARP      : 'csharp';
+PYTHON      : 'python';
+RUST        : 'rust';
+ASSEMBLY    : 'assembly';
+MODULE      : 'module';
+LIB         : 'lib';
+
 // --- Universal Domain-Specific Abstractions Keywords ---
 DSL         : 'dsl';
 DOMAIN      : 'domain';
 UNIT        : 'unit';
 MACRO       : 'macro';
+DEFMACRO    : 'defmacro';
 QUOTE       : 'quote';
+QUASIQUOTE  : 'quasiquote';
 SPLICE      : 'splice';
+UNQUOTE     : 'unquote';
+UNQUOTE_SPLICING : 'unquote_splicing';
 MATCH       : 'match';
 CASE        : 'case';
 WHEN        : 'when';
@@ -1283,8 +1375,8 @@ ASSERT      : 'assert';
 IMPORT      : 'import';
 GLOBAL      : 'global';
 LAMBDA      : 'lambda';
-AND         : 'and';
-OR          : 'or';
+AND         : 'and' | '&&';
+OR          : 'or' | '||';
 NOT         : 'not';
 IS          : 'is';
 

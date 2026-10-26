@@ -1,0 +1,151 @@
+// =============================================================================
+// Pilot Suite 22: Method Groups and Advanced Dispatch Capabilities
+// - Switchboard (Auto-routing maps) for heterogeneous collections
+// - Method Group Currying (The Signature Sieve) for partial argument matching
+// - Group Fallback and Union (|) for merging overload groups across modules
+// - Compile-Time & Runtime AST Introspection (.overloads, .signature, .parameters)
+// - Multi-Cast Execution (The Broadcast *) for invoking all matching overloads
+// =============================================================================
+
+// --- 1. Switchboard (Auto-routing maps) ---
+def process(data: int) {
+    return data * 2;
+}
+
+def process(data: str) {
+    return data.to_upper();
+}
+
+def process(data: list) {
+    return data.length;
+}
+
+let mixed_data = [42, "hello", [1, 2, 3], 99];
+let routed_results = mixed_data.map(process);
+
+assert routed_results[0] == 84;
+assert routed_results[1] == "HELLO";
+assert routed_results[2] == 3;
+assert routed_results[3] == 198;
+
+// --- 2. Method Group Currying (The Signature Sieve) ---
+class Circle {
+    let radius = 10.0;
+}
+
+class Square {
+    let side = 5.0;
+}
+
+class Triangle {
+    let angle = 45.0;
+}
+
+class Color {
+    let RED = "red";
+    let BLUE = "blue";
+}
+
+def draw(shape: Circle, color: str) {
+    return "Circle in " + color;
+}
+
+def draw(shape: Square, color: str) {
+    return "Square in " + color;
+}
+
+def draw(shape: Triangle, angle: float) {
+    return "Triangle at angle";
+}
+
+// Providing only the color argument filters out the Triangle overload.
+// draw_red is now a curried method group narrowed to (Circle) and (Square).
+let draw_red = draw(color=Color.RED);
+
+let my_circle = Circle();
+let my_square = Square();
+
+assert draw_red(my_circle) == "Circle in red";
+assert draw_red(my_square) == "Square in red";
+
+// --- 3. Group Fallback and Union (|) ---
+class User {
+    let name = "Isaac";
+}
+
+class Document {
+    let title = "Pilot Manual";
+}
+
+class Json {
+    def serialize(data: User) {
+        return "JSON:" + data.name;
+    }
+}
+
+class Xml {
+    def serialize(data: Document) {
+        return "XML:" + data.title;
+    }
+}
+
+// Merge Json.serialize and Xml.serialize into a single method group
+let serialize_any = Json.serialize | Xml.serialize;
+
+let user = User();
+let doc = Document();
+
+assert serialize_any(user) == "JSON:Isaac";
+assert serialize_any(doc) == "XML:Pilot Manual";
+
+// --- 4. Overload AST Introspection ---
+def calculate(x: int, y: int) {
+    return x + y;
+}
+
+def calculate(name: str) {
+    return "Hello " + name;
+}
+
+let overloads = calculate.overloads;
+assert overloads.length == 2;
+assert calculate.name == "calculate";
+
+let sig1 = overloads[0].signature;
+let params1 = overloads[0].parameters;
+assert params1.length == 2;
+assert params1[0]["name"] == "x";
+assert params1[0]["type"] == "int";
+
+// --- 5. Multi-Cast Execution (The Broadcast *) ---
+class EntitySpawned {
+    let id = 42;
+}
+
+class PlayerJoined(EntitySpawned) {
+    let name = "Hero";
+}
+
+let events = [];
+
+def on_event(e: PlayerJoined) {
+    events.append("player:" + e.name);
+    return 1;
+}
+
+def on_event(e: EntitySpawned) {
+    events.append("entity:" + e.id);
+    return 2;
+}
+
+let hero = PlayerJoined();
+
+// Broadcast invocation (*) triggers BOTH matching overloads in the inheritance chain
+let broadcast_results = on_event*(hero);
+
+assert broadcast_results.length == 2;
+assert events.length == 2;
+assert events[0] == "player:Hero";
+assert events[1] == "entity:42";
+
+print("Pilot method groups, switchboard, currying, union, and broadcast verified successfully!");

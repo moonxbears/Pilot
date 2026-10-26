@@ -1,0 +1,67 @@
+# ==============================================================================
+# Pilot Language Test 14: Preprocessing Commands & Capabilities
+# ==============================================================================
+
+# 1. Defining and Undefining Symbols
+#define DEBUG_MODE
+#define FEATURE_A
+#undef FEATURE_B
+
+# 2. Region Folding
+#region Math Utilities
+def calculate_metric(factor: float) -> float {
+    return factor * 2.5
+}
+#endregion Math Utilities
+
+# 3. Conditional Compilation (#if, #elif, #else, #endif)
+#if DEBUG_MODE && !FEATURE_B
+def get_log_level() -> str {
+    return "VERBOSE"
+}
+#elif FEATURE_B
+def get_log_level() -> str {
+    return "SILENT"
+}
+#else
+def get_log_level() -> str {
+    return "DEFAULT"
+}
+#endif
+
+# 4. Complex Boolean Expressions with Parentheses
+#if (DEBUG_MODE && FEATURE_A) || LINUX_BUILD
+let environment: str = "Development with Feature A"
+#else
+let environment: str = "Production"
+#endif
+
+# 5. Nested #if Blocks
+#if DEBUG_MODE
+    #if FEATURE_A
+    let debug_feature_a_enabled: bool = True
+    #else
+    let debug_feature_a_enabled: bool = False
+    #endif
+#endif
+
+# 6. Inactive Branch Elimination (syntactically invalid code in inactive branch is ignored)
+#if INACTIVE_FLAG
+this is completely invalid syntax that should not be parsed because INACTIVE_FLAG is false
+#else
+let valid_binding: int = 42
+#endif
+
+# 7. Warning Directive & Pragmas
+#warning "Preprocessing capabilities active in test file"
+
+#pragma warning disable PILOT101
+let suppressed_test: int = 100
+#pragma warning restore PILOT101
+
+#region Core Execution Routine
+def run_test_suite() -> bool {
+    let lvl: str = get_log_level()
+    return lvl == "VERBOSE" && debug_feature_a_enabled
+}
+#endregion

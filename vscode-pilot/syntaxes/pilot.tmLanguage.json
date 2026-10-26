@@ -3,6 +3,7 @@
   "name": "Pilot",
   "scopeName": "source.pilot",
   "patterns": [
+    { "include": "#preprocessor" },
     { "include": "#comments" },
     { "include": "#raw-dsl" },
     { "include": "#strings" },
@@ -16,12 +17,25 @@
     { "include": "#keywords-realtime" },
     { "include": "#keywords-udsa" },
     { "include": "#keywords-csharp" },
+    { "include": "#keywords-interop" },
     { "include": "#constants" },
     { "include": "#types" },
     { "include": "#operators" },
     { "include": "#function-calls" }
   ],
   "repository": {
+    "preprocessor": {
+      "patterns": [
+        {
+          "name": "meta.preprocessor.pilot",
+          "match": "^\\s*(#\\s*(?:define|undef|if|elif|else|endif|region|endregion|error|warning|pragma|line|nullable))\\b(.*)$",
+          "captures": {
+            "1": { "name": "keyword.control.directive.pilot" },
+            "2": { "name": "string.unquoted.preprocessor.pilot" }
+          }
+        }
+      ]
+    },
     "comments": {
       "patterns": [
         {
@@ -117,7 +131,7 @@
     "declarations": {
       "patterns": [
         {
-          "match": "\\b((?:(?:public|private|protected|internal|static)\\s+)?(?:async\\s+|pure\\s+)?)(def|fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "match": "\\b((?:(?:public|private|protected|internal|static|partial)\\s+)?(?:async\\s+|pure\\s+)?)(def|fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
             "1": { "name": "storage.modifier.pilot" },
             "2": { "name": "keyword.declaration.function.pilot" },
@@ -125,7 +139,7 @@
           }
         },
         {
-          "match": "\\b((?:(?:public|private|protected|internal|static)\\s+)?)(class|struct|interface|protocol|enum|actor|model|table|schema|unit|dsl|domain|macro|type|extension|database)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "match": "\\b((?:(?:public|private|protected|internal|static|partial)\\s+)?)(class|struct|interface|protocol|enum|actor|model|table|schema|unit|dsl|domain|macro|type|extension|database)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
             "1": { "name": "storage.modifier.pilot" },
             "2": { "name": "keyword.declaration.type.pilot" },
@@ -133,7 +147,7 @@
           }
         },
         {
-          "match": "\\b((?:(?:public|private|protected|internal|static)\\s+)?)(property)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "match": "\\b((?:(?:public|private|protected|internal|static|partial)\\s+)?)(property)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
             "1": { "name": "storage.modifier.pilot" },
             "2": { "name": "keyword.declaration.property.pilot" },
@@ -141,7 +155,7 @@
           }
         },
         {
-          "match": "\\b(public|private|protected|internal|static|ref|dynamic|params)\\b",
+          "match": "\\b(public|private|protected|internal|static|partial|ref|dynamic|params)\\b",
           "name": "storage.modifier.pilot"
         },
         {
@@ -230,7 +244,7 @@
       "patterns": [
         {
           "name": "keyword.other.udsa.pilot",
-          "match": "\\b(dsl|domain|unit|macro|quote|splice)\\b"
+          "match": "\\b(dsl|domain|unit|macro|defmacro|quote|quasiquote|splice|unquote|unquote_splicing|gensym|macroexpand|eval|cons|car|cdr|atom|list_ast)\\b"
         }
       ]
     },
@@ -238,7 +252,26 @@
       "patterns": [
         {
           "name": "keyword.other.csharp.pilot",
-          "match": "\\b(property|get|operator|extension|pure|lambda|nameof|params|args|kwargs|static)\\b"
+          "match": "\\b(property|get|operator|extension|pure|lambda|nameof|params|args|kwargs|static|partial|steal|contracts|delegate)\\b"
+        }
+      ]
+    },
+    "keywords-interop": {
+      "patterns": [
+        {
+          "name": "keyword.control.foreign.pilot",
+          "match": "\\b(extern|assembly|module|lib)\\b"
+        },
+        {
+          "name": "support.class.foreign.pilot",
+          "match": "\\b(python|csharp|rust)\\b"
+        },
+        {
+          "name": "meta.foreign.target.pilot",
+          "match": "\\b(python|csharp|rust|c):",
+          "captures": {
+            "1": { "name": "support.class.foreign.pilot" }
+          }
         }
       ]
     },

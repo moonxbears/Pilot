@@ -17,7 +17,9 @@ identifier
     | MATCH | CASE | EXCEPT
     | PUBLIC | PRIVATE | PROTECTED | INTERNAL
     | SYMBOL | REF | DYNAMIC | FN
-    | STATIC | PARAMS | ARGS | KWARGS | NAMEOF | WHEN | UNDEFINED
+    | STATIC | PARAMS | ARGS | KWARGS | NAMEOF | WHEN | UNDEFINED | PARTIAL | STEAL | CONTRACTS | DELEGATE
+    | EXTERN | CSHARP | PYTHON | RUST | ASSEMBLY | MODULE | LIB
+    | MACRO | DEFMACRO | QUOTE | QUASIQUOTE | SPLICE | UNQUOTE | UNQUOTE_SPLICING
     ;
 
 stmt
@@ -30,7 +32,8 @@ simple_stmt
     ;
 
 small_stmt
-    : let_stmt
+    : import_stmt
+    | let_stmt
     | var_stmt
     | const_stmt
     | ref_stmt
@@ -39,12 +42,11 @@ small_stmt
     | guard_stmt
     | defer_stmt
     | annassign_stmt
-    | expr_stmt
     | flow_stmt
-    | import_stmt
     | global_stmt
     | assert_stmt
     | pass_stmt
+    | expr_stmt
     ;
 
 compound_stmt
@@ -60,6 +62,10 @@ compound_stmt
     | while_stmt
     | for_stmt
     | match_stmt
+    | extern_def
+    | inline_foreign_block
+    | macro_def
+    | quote_stmt
     | try_stmt
     | with_stmt
     ;
@@ -137,11 +143,13 @@ access_modifier
 declaration_modifier
     : access_modifier
     | STATIC
+    | PARTIAL
     ;
 
 // Variables, Constants & Destructuring Declarations
 binding_pattern
     : identifier
+    | splice_expr
     | tuple_pattern
     | list_pattern
     | record_pattern
@@ -226,7 +234,7 @@ parameters
     ;
 
 parameter
-    : (PARAMS | REF)? (STAR | DOUBLESTAR)? identifier type_annotation? (EQUAL test)?
+    : (PARAMS | REF)? (STAR | DOUBLESTAR)? (identifier | splice_expr) type_annotation? (EQUAL test)?
     ;
 
 class_def
@@ -398,8 +406,18 @@ global_stmt
     ;
 
 import_stmt
-    : import_name
+    : foreign_import_stmt
+    | import_name
     | import_from
+    ;
+
+foreign_import_stmt
+    : IMPORT foreign_target (AS identifier)?
+    | FROM foreign_target IMPORT (STAR | import_as_names | LPAR import_as_names RPAR)
+    ;
+
+foreign_target
+    : (PYTHON | CSHARP | RUST | identifier) COLON (dotted_name | STRING)
     ;
 
 import_name
@@ -586,7 +604,11 @@ subscript
     ;
 
 atom
-    : literal
+    : inline_foreign_block
+    | quote_expr
+    | quasiquote_expr
+    | splice_expr
+    | literal
     | macro_call
     | symbol_literal
     | nameof_expr
@@ -594,6 +616,44 @@ atom
     | LPAR testlist_comp? RPAR
     | collection_expr
     | LBRACE dictorsetmaker? RBRACE
+    ;
+
+// Metaprogramming / Macros / Lisp Homoiconicity
+macro_def
+    : decorators? declaration_modifier* (MACRO | DEFMACRO) EXCLAMATION? identifier generic_params? parameters? (ARROW type_spec)? COLON? suite
+    ;
+
+quote_stmt
+    : (QUOTE | QUASIQUOTE) COLON? (suite | LBRACE test RBRACE)
+    ;
+
+quote_expr
+    : QUOTE COLON? (suite | LBRACE test RBRACE | LPAR test RPAR)
+    ;
+
+quasiquote_expr
+    : (QUASIQUOTE | BACKQUOTE) COLON? (suite | LBRACE test RBRACE | LPAR test RPAR | identifier | literal)
+    ;
+
+splice_expr
+    : DOLLAR AT (identifier | LPAR test RPAR)
+    | (DOLLAR | SPLICE | UNQUOTE) (identifier | LPAR test RPAR)
+    | UNQUOTE_SPLICING (identifier | LPAR test RPAR)
+    ;
+
+// Polyglot Interoperability (Python, C#, Rust FFI)
+extern_def
+    : EXTERN (STRING | identifier) ( (ASSEMBLY | MODULE | LIB) (STRING | identifier) )? COLON? (LBRACE extern_member* RBRACE | extern_member)
+    ;
+
+extern_member
+    : decorators? declaration_modifier* (DEF | FN) identifier generic_params? parameters (ARROW type_spec)? (COLON? suite | SEMI)?
+    | decorators? declaration_modifier* (CLASS | STRUCT | INTERFACE) identifier generic_params? (LPAR class_bases? RPAR)? COLON? (LBRACE extern_member* RBRACE | suite | SEMI)
+    | small_stmt
+    ;
+
+inline_foreign_block
+    : (PYTHON | CSHARP | RUST) (RAW_DSL_BLOCK | LBRACE stmt* RBRACE)
     ;
 
 collection_expr

@@ -9,6 +9,7 @@ using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using Pilot.LanguageServer.Semantics;
+using Pilot.Preprocessing;
 
 namespace Pilot.LanguageServer.Lsp;
 
@@ -50,7 +51,14 @@ public sealed class PilotLspServer
         ["quote"] = ("UDSA Metaprogramming", "`quote { ... }` — Constructs a compile-time AST fragment with `$splice` interpolation."),
         ["property"] = ("C# Robustness", "`property <name>: <type> { get { ... } set(v) { ... } }` — Declares a C#-style encapsulated property."),
         ["operator"] = ("C# Robustness", "`operator <op>(self, other: <T>) -> <R> { ... }` — Overloads an arithmetic, comparison, or index operator on a `class` or `struct`."),
-        ["extension"] = ("C# Robustness", "`extension [<Name>] for <Type> [where ...] { ... }` — Adds C#-style extension methods to an existing type.")
+        ["extension"] = ("C# Robustness", "`extension [<Name>] for <Type> [where ...] { ... }` — Adds C#-style extension methods to an existing type."),
+        ["#if"] = ("Preprocessing", "`#if <condition>` — Conditionally compiles the following code block based on symbol expressions."),
+        ["#define"] = ("Preprocessing", "`#define <symbol>` — Defines a conditional compilation symbol."),
+        ["#undef"] = ("Preprocessing", "`#undef <symbol>` — Undefines a conditional compilation symbol."),
+        ["#region"] = ("Preprocessing / Editor", "`#region <name>` — Defines a named collapsible code region."),
+        ["#pragma"] = ("Preprocessing / Compiler", "`#pragma warning disable/restore <id>` — Controls compiler diagnostic behavior."),
+        ["#error"] = ("Preprocessing / Diagnostics", "`#error <message>` — Emits a compile-time preprocessor error."),
+        ["#warning"] = ("Preprocessing / Diagnostics", "`#warning <message>` — Emits a compile-time preprocessor warning.")
     };
 
     public async Task RunAsync(Stream input, Stream output, CancellationToken cancellationToken = default)
@@ -113,6 +121,7 @@ public sealed class PilotLspServer
                         ["hoverProvider"] = true,
                         ["definitionProvider"] = true,
                         ["documentSymbolProvider"] = true,
+                        ["foldingRangeProvider"] = true,
                         ["completionProvider"] = new JsonObject
                         {
                             ["resolveProvider"] = false,
@@ -351,6 +360,27 @@ public sealed class PilotLspServer
                 }
 
                 outgoing.Add(BuildResponse(idNode, items));
+                break;
+            }
+
+            case "textDocument/foldingRange":
+            {
+                string? uri = @params?["textDocument"]?["uri"]?.GetValue<string>();
+                var ranges = new JsonArray();
+                if (uri != null && _documents.TryGetValue(uri, out var source))
+                {
+                    var preproc = PilotPreprocessor.Preprocess(source, uri);
+                    foreach (var reg in preproc.Regions)
+                    {
+                        ranges.Add(new JsonObject
+                        {
+                            ["startLine"] = reg.StartLine - 1,
+                            ["endLine"] = reg.EndLine - 1,
+                            ["kind"] = "region"
+                        });
+                    }
+                }
+                outgoing.Add(BuildResponse(idNode, ranges));
                 break;
             }
         }

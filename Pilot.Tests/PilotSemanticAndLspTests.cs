@@ -396,4 +396,285 @@ def test_builtins() -> void {
 
         Assert.Equal("matrix3x3<u8>", funcScope.Resolve("mat")!.TypeName);
     }
+
+    [Fact]
+    public void Test_Preprocessing_In_Semantic_Analysis()
+    {
+        string code = @"
+#define LINUX
+#if LINUX
+let os_name = ""Linux""
+#else
+let os_name = ""Windows""
+#endif
+";
+        var result = PilotSemanticAnalyzer.Analyze(code);
+        Assert.Empty(result.Diagnostics);
+
+        var sym = result.RootScope.Resolve("os_name");
+        Assert.NotNull(sym);
+    }
+
+    [Fact]
+    public void Test_Error_And_Warning_In_Semantic_Analysis()
+    {
+        string code = @"
+#warning ""Check security context""
+#error ""Fatal environment check failed""
+";
+        var result = PilotSemanticAnalyzer.Analyze(code);
+        Assert.Contains(result.Diagnostics, d => d.Severity == PilotDiagnosticSeverity.Warning && d.Message.Contains("Check security context"));
+        Assert.Contains(result.Diagnostics, d => d.Severity == PilotDiagnosticSeverity.Error && d.Message.Contains("Fatal environment check failed"));
+    }
+
+    [Fact]
+    public void Test_Polyglot_Foreign_Imports_Semantic_Resolution()
+    {
+        string code = @"
+import python:numpy as np
+from python:math import sin, cos, pi as PI
+import csharp:System.Text.Json as Json
+from csharp:System.IO import File, Path
+import rust:""libpilot_core"" as core_rs
+from rust:""libcrypto"" import sha256_hash, verify_sig as verify_signature
+";
+        var result = PilotSemanticAnalyzer.Analyze(code);
+        Assert.Empty(result.Diagnostics);
+
+        // Python imports
+        var npSym = result.RootScope.Resolve("np");
+        Assert.NotNull(npSym);
+        Assert.Equal(PilotSymbolKind.Module, npSym.Kind);
+        Assert.Equal("Python Interop", npSym.Domain);
+        Assert.Contains("import python:numpy as np", npSym.Signature);
+        Assert.Contains("Python Interop", npSym.FormatHoverMarkdown());
+
+        var sinSym = result.RootScope.Resolve("sin");
+        Assert.NotNull(sinSym);
+        Assert.Equal(PilotSymbolKind.Function, sinSym.Kind);
+        Assert.Equal("Python Interop", sinSym.Domain);
+
+        var piSym = result.RootScope.Resolve("PI");
+        Assert.NotNull(piSym);
+        Assert.Equal("Python Interop", piSym.Domain);
+
+        // C# imports
+        var jsonSym = result.RootScope.Resolve("Json");
+        Assert.NotNull(jsonSym);
+        Assert.Equal(PilotSymbolKind.Module, jsonSym.Kind);
+        Assert.Equal("C# / .NET Interop", jsonSym.Domain);
+
+        var fileSym = result.RootScope.Resolve("File");
+        Assert.NotNull(fileSym);
+        Assert.Equal(PilotSymbolKind.Class, fileSym.Kind);
+        Assert.Equal("C# / .NET Interop", fileSym.Domain);
+        Assert.Equal("System.IO.File", fileSym.TypeName);
+
+        // Rust imports
+        var coreSym = result.RootScope.Resolve("core_rs");
+        Assert.NotNull(coreSym);
+        Assert.Equal(PilotSymbolKind.Module, coreSym.Kind);
+        Assert.Equal("Rust FFI", coreSym.Domain);
+
+        var hashSym = result.RootScope.Resolve("sha256_hash");
+        Assert.NotNull(hashSym);
+        Assert.Equal(PilotSymbolKind.Function, hashSym.Kind);
+        Assert.Equal("Rust FFI", hashSym.Domain);
+
+        var verifySym = result.RootScope.Resolve("verify_signature");
+        Assert.NotNull(verifySym);
+        Assert.Equal(PilotSymbolKind.Function, verifySym.Kind);
+        Assert.Equal("Rust FFI", verifySym.Domain);
+    }
+
+    [Fact]
+    public void Test_Extern_FFI_Blocks_Semantic_Resolution()
+    {
+        string code = @"
+extern ""rust"" lib ""libphysics"" {
+    fn simulate_step(dt: f32) -> void;
+    fn get_particle_count() -> i32;
+}
+
+extern ""csharp"" assembly ""System.Data"" {
+    class SqlConnection {
+        public def open() -> void;
+        public def close() -> void;
+    }
+}
+
+extern ""rust"" lib ""libmath"" fn fast_inv_sqrt(number: f32) -> f32;
+";
+        var result = PilotSemanticAnalyzer.Analyze(code);
+        Assert.Empty(result.Diagnostics);
+
+        var simSym = result.RootScope.Resolve("simulate_step");
+        Assert.NotNull(simSym);
+        Assert.Equal(PilotSymbolKind.Function, simSym.Kind);
+        Assert.Equal("Rust FFI", simSym.Domain);
+        Assert.Single(simSym.Parameters);
+        Assert.Equal("dt", simSym.Parameters[0].Name);
+        Assert.Equal("f32", simSym.Parameters[0].Type);
+        Assert.Contains("libphysics", simSym.Documentation);
+
+        var countSym = result.RootScope.Resolve("get_particle_count");
+        Assert.NotNull(countSym);
+        Assert.Equal("i32", countSym.TypeName);
+
+        var sqlSym = result.RootScope.Resolve("SqlConnection");
+        Assert.NotNull(sqlSym);
+        Assert.Equal(PilotSymbolKind.Class, sqlSym.Kind);
+        Assert.Equal("C# / .NET Interop", sqlSym.Domain);
+        Assert.True(sqlSym.Members.ContainsKey("open"));
+        Assert.True(sqlSym.Members.ContainsKey("close"));
+
+        var fastInvSym = result.RootScope.Resolve("fast_inv_sqrt");
+        Assert.NotNull(fastInvSym);
+        Assert.Equal("Rust FFI", fastInvSym.Domain);
+        Assert.Equal("f32", fastInvSym.TypeName);
+    }
+
+    [Fact]
+    public void Test_Inline_Foreign_Blocks_Semantic_Analysis()
+    {
+        string code = @"
+def test_polyglot() -> void {
+    let py_val = python {
+        import math
+        return math.sqrt(256.0)
+    }
+
+    csharp {
+        let x: int = 10
+    }
+}
+";
+        var result = PilotSemanticAnalyzer.Analyze(code);
+        Assert.Empty(result.Diagnostics);
+
+        var funcScope = result.RootScope.Children.First(c => c.Name == "def:test_polyglot");
+        var pyValSym = funcScope.Resolve("py_val");
+        Assert.NotNull(pyValSym);
+    }
+
+    [Fact]
+    public void Test_Root_Object_Methods_Resolution()
+    {
+        string code = @"
+class CustomWidget {
+    var id: int
+    def to_string(self) -> str { return ""widget"" }
+    def hash(self) -> int { return self.id }
+}
+
+class BaseItem {
+    var name: str
+}
+
+def test_root_methods() -> void {
+    let w = CustomWidget()
+    let s_custom: str = w.to_string()
+    let h_custom: int = w.hash()
+
+    let item = BaseItem()
+    let s_default: str = item.to_string()
+    let s_cs: str = item.ToString()
+    let h_default: int = item.hash()
+    let h_cs: int = item.GetHashCode()
+    let eq: bool = item.equals(item)
+    let eq_cs: bool = item.Equals(item)
+    let cloned: any = item.clone()
+    let cloned_cs: any = item.Clone()
+    let t_name: str = item.type_of()
+    let t_cs: any = item.GetType()
+    let d: tuple = item.deconstruct()
+}
+";
+        var result = PilotSemanticAnalyzer.Analyze(code);
+        Assert.Empty(result.Diagnostics);
+
+        // Verify root 'object' symbol in RootScope
+        var objSym = result.RootScope.Resolve("object");
+        Assert.NotNull(objSym);
+        Assert.Equal(PilotSymbolKind.Class, objSym.Kind);
+        Assert.True(objSym.Members.ContainsKey("to_string"));
+        Assert.True(objSym.Members.ContainsKey("ToString"));
+        Assert.True(objSym.Members.ContainsKey("hash"));
+        Assert.True(objSym.Members.ContainsKey("GetHashCode"));
+        Assert.True(objSym.Members.ContainsKey("equals"));
+        Assert.True(objSym.Members.ContainsKey("Equals"));
+        Assert.True(objSym.Members.ContainsKey("clone"));
+        Assert.True(objSym.Members.ContainsKey("type_of"));
+        Assert.True(objSym.Members.ContainsKey("deconstruct"));
+
+        // Verify custom override on CustomWidget
+        var widgetSym = result.RootScope.Resolve("CustomWidget");
+        Assert.NotNull(widgetSym);
+        Assert.True(widgetSym.Members.ContainsKey("to_string"));
+        Assert.True(widgetSym.Members.ContainsKey("hash"));
+    }
+
+    [Fact]
+    public void Test_Lisp_Homoiconic_Metaprogramming_Semantics()
+    {
+        string code = @"
+defmacro make_adder(x: AstNode) -> AstNode {
+    let tmp = gensym(""param"")
+    return quasiquote {
+        def adder($tmp: int) -> int {
+            return $tmp + $x
+        }
+    }
+}
+
+def test_metaprog() -> void {
+    let quoted: AstNode = quote { 100 * 2 }
+    let templated: AstNode = quasiquote { print($quoted) }
+
+    let sym_a: AstNode = symbol(""a"")
+    let sym_b: AstNode = symbol(""b"")
+    let pair: AstNode = cons(sym_a, sym_b)
+
+    let head: any = car(pair)
+    let tail: any = cdr(pair)
+    let is_at: bool = atom(sym_a)
+
+    let eval_res: any = eval(quoted)
+    let expanded: AstNode = macroexpand(templated)
+    let single_expanded: AstNode = macroexpand_1(templated)
+}
+";
+        var result = PilotSemanticAnalyzer.Analyze(code);
+        Assert.Empty(result.Diagnostics);
+
+        // Verify defmacro registration
+        var macroSym = result.RootScope.Resolve("make_adder");
+        Assert.NotNull(macroSym);
+        Assert.Equal(PilotSymbolKind.Macro, macroSym.Kind);
+        Assert.Equal("Metaprogramming / Lisp", macroSym.Domain);
+
+        // Verify AstNode class and its homoiconic members
+        var astType = result.RootScope.Resolve("AstNode");
+        Assert.NotNull(astType);
+        Assert.True(astType.Members.ContainsKey("car"));
+        Assert.True(astType.Members.ContainsKey("cdr"));
+        Assert.True(astType.Members.ContainsKey("head"));
+        Assert.True(astType.Members.ContainsKey("tail"));
+        Assert.True(astType.Members.ContainsKey("cons"));
+        Assert.True(astType.Members.ContainsKey("eval"));
+        Assert.True(astType.Members.ContainsKey("to_source"));
+        Assert.True(astType.Members.ContainsKey("is_atom"));
+        Assert.True(astType.Members.ContainsKey("is_list"));
+
+        // Verify Lisp built-in functions
+        Assert.NotNull(result.RootScope.Resolve("gensym"));
+        Assert.NotNull(result.RootScope.Resolve("macroexpand"));
+        Assert.NotNull(result.RootScope.Resolve("macroexpand_1"));
+        Assert.NotNull(result.RootScope.Resolve("eval"));
+        Assert.NotNull(result.RootScope.Resolve("cons"));
+        Assert.NotNull(result.RootScope.Resolve("car"));
+        Assert.NotNull(result.RootScope.Resolve("cdr"));
+        Assert.NotNull(result.RootScope.Resolve("atom"));
+        Assert.NotNull(result.RootScope.Resolve("symbol"));
+    }
 }
