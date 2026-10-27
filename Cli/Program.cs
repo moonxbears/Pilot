@@ -52,6 +52,12 @@ public static class Program
             return ExecuteWatchSubcommand(args.Skip(1).ToArray());
         }
 
+        // 2d. Native AOT Build subcommand: pilot build <file.pilot> [-o <out>] [--target <native|llvm|wasm|wat|cabi|c>]
+        if (args.Length > 1 && (args[0] == "build" || args[0] == "--build"))
+        {
+            return ExecuteBuildSubcommand(args.Skip(1).ToArray());
+        }
+
         // 3. Script run subcommand: pilot run <file.pilot|file.pilc> [--patch <patch.pilot|.pilc>] [args...]
         if (args.Length > 1 && (args[0] == "run"))
         {
@@ -233,6 +239,117 @@ public static class Program
             Console.ResetColor();
             return 1;
         }
+        return 0;
+    }
+
+    private static int ExecuteBuildSubcommand(string[] args)
+    {
+        string? inputFile = null;
+        string? outputFile = null;
+        var target = Pilot.Native.NativeCompilationTarget.NativeExecutable;
+        int optLevel = 2;
+        bool targetWasi = true;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            if ((args[i] == "-o" || args[i] == "--output") && i + 1 < args.Length)
+            {
+                outputFile = args[++i];
+            }
+            else if (args[i] == "--target" && i + 1 < args.Length)
+            {
+                string t = args[++i].ToLowerInvariant();
+                target = t switch
+                {
+                    "llvm" or "ll" or "ir" => Pilot.Native.NativeCompilationTarget.LlvmIr,
+                    "wasm" => Pilot.Native.NativeCompilationTarget.WebAssemblyBinary,
+                    "wat" => Pilot.Native.NativeCompilationTarget.WebAssemblyText,
+                    "cabi" or "header" or "h" => Pilot.Native.NativeCompilationTarget.CAbiHeader,
+                    "c" => Pilot.Native.NativeCompilationTarget.CSource,
+                    "cpp" or "c++" => Pilot.Native.NativeCompilationTarget.CppSource,
+                    _ => Pilot.Native.NativeCompilationTarget.NativeExecutable
+                };
+            }
+            else if (args[i] is "--emit-llvm" or "--emit-ir")
+            {
+                target = Pilot.Native.NativeCompilationTarget.LlvmIr;
+            }
+            else if (args[i] is "--emit-wasm")
+            {
+                target = Pilot.Native.NativeCompilationTarget.WebAssemblyBinary;
+            }
+            else if (args[i] is "--emit-wat")
+            {
+                target = Pilot.Native.NativeCompilationTarget.WebAssemblyText;
+            }
+            else if (args[i] is "--emit-lib" or "--emit-cabi" or "--emit-header")
+            {
+                target = Pilot.Native.NativeCompilationTarget.CAbiHeader;
+            }
+            else if (args[i] is "-O0") optLevel = 0;
+            else if (args[i] is "-O1") optLevel = 1;
+            else if (args[i] is "-O2") optLevel = 2;
+            else if (args[i] is "-O3") optLevel = 3;
+            else if (args[i] == "--opt-level" && i + 1 < args.Length && int.TryParse(args[++i], out int ol))
+            {
+                optLevel = ol;
+            }
+            else if (!args[i].StartsWith("-"))
+            {
+                inputFile = args[i];
+            }
+        }
+
+        if (string.IsNullOrEmpty(inputFile))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("[ERROR] Missing source file to build. Usage: pilot build <file.pilot> [-o <out>] [--target <native|llvm|wasm|wat|cabi|c>]");
+            Console.ResetColor();
+            return 1;
+        }
+
+        if (!File.Exists(inputFile))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[ERROR] File not found: '{inputFile}'");
+            Console.ResetColor();
+            return 1;
+        }
+
+        Console.WriteLine($"--> Building Native AOT Target '{target}' for '{inputFile}'...");
+        var options = new Pilot.Native.PilotNativeOptions
+        {
+            Target = target,
+            OutputPath = outputFile,
+            OptimizationLevel = optLevel,
+            TargetWasi = targetWasi
+        };
+
+        var result = Pilot.Native.PilotNativeCompiler.CompileFile(inputFile, options);
+        if (!result.Success)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[AOT BUILD FAILURE] Errors building '{inputFile}':");
+            foreach (var diag in result.Diagnostics)
+            {
+                Console.WriteLine($"  - {diag}");
+            }
+            Console.ResetColor();
+            return 1;
+        }
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        string artDesc = result.ArtifactPath ?? outputFile ?? target.ToString();
+        Console.WriteLine($"[AOT BUILD SUCCESS] Generated target '{target}' -> '{artDesc}'");
+        Console.ResetColor();
+
+        foreach (var diag in result.Diagnostics)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"  [NOTE] {diag}");
+            Console.ResetColor();
+        }
+
         return 0;
     }
 
