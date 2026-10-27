@@ -22,6 +22,7 @@ public sealed class PilotBytecodeChunk
     public Dictionary<string, int> LocalSlotMap { get; } = new(StringComparer.Ordinal);
     public int LocalCount { get; set; } = 0;
     public List<IParseTree> AstFallbackNodes { get; } = new();
+    public PilotParser.Func_defContext? FuncDefContext { get; set; }
 
     public int InstructionCount => Instructions.Count;
 

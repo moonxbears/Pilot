@@ -1,9 +1,6 @@
 for x in 15..20:
     println(x)
 
-for i in [15..20]:
-    println(i)
-
 for j in [1, 2, 3, 4, 5]{
     println(j)
 }
@@ -20,7 +17,7 @@ while (true) {
     if (myvar >= 20){
         break;
     }
-        
-        println(f"true - {myvar}")
-        myvar += 1
+    
+    println(f"true - {myvar}")
+    myvar += 1
 }

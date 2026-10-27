@@ -91,7 +91,7 @@ extension DebugHelpers on str {
     }
 }
 
-let transformed = "";
+var transformed = "";
 with extension DebugHelpers {
     transformed = "pilot_lang".to_screaming();
 }

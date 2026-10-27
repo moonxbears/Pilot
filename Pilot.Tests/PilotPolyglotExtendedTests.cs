@@ -66,7 +66,7 @@ public class PilotPolyglotExtendedTests
     {
         string code = @"
             let myPilotVariable: str = ""Hello, Python!"";
-            let captured = """";
+            var captured = """";
 
             python {
                 captured = myPilotVariable;

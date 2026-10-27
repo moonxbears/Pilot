@@ -71,6 +71,8 @@ public sealed class PilotBuiltinRegistry
                 PilotValueKind.Set => PilotValue.FromInt(val.AsSet().Count),
                 PilotValueKind.Range => PilotValue.FromInt(val.AsRange().Count),
                 PilotValueKind.Matrix => PilotValue.FromInt(val.AsMatrix().Rows * val.AsMatrix().Cols),
+                PilotValueKind.NativeArray => PilotValue.FromInt(val.AsNativeArray().Length),
+                PilotValueKind.NativeMap => PilotValue.FromInt(val.AsNativeMap().Count),
                 _ => PilotValue.FromInt(0)
             };
         }, "collection");
@@ -101,6 +103,48 @@ public sealed class PilotBuiltinRegistry
             if (args.Count >= 3) return PilotValue.FromRange(new PilotRange(args[0].AsInt(), args[1].AsInt(), args[2].AsInt()));
             return PilotValue.FromRange(new PilotRange(0, 0));
         }, "start", "end", "step");
+
+        // High-Performance Native Types (Burst / HPC# / SIMD)
+        Register("natarray", (_, args) =>
+        {
+            if (args.Count == 0) return PilotValue.FromNativeArray(new Pilot.Runtime.NativeMemory.PilotNativeArray(0));
+            var first = args[0];
+            if (first.Kind == PilotValueKind.List) return PilotValue.FromNativeArray(new Pilot.Runtime.NativeMemory.PilotNativeArray(first.AsList()));
+            if (first.Kind == PilotValueKind.Tuple) return PilotValue.FromNativeArray(new Pilot.Runtime.NativeMemory.PilotNativeArray(first.AsTuple()));
+            if (first.Kind == PilotValueKind.NativeArray) return first;
+            int len = (int)first.AsInt();
+            return PilotValue.FromNativeArray(new Pilot.Runtime.NativeMemory.PilotNativeArray(len));
+        }, "size_or_elements");
+
+        Register("natmap", (_, args) =>
+        {
+            if (args.Count == 0) return PilotValue.FromNativeMap(new Pilot.Runtime.NativeMemory.PilotNativeMap());
+            var first = args[0];
+            if (first.Kind == PilotValueKind.Map) return PilotValue.FromNativeMap(new Pilot.Runtime.NativeMemory.PilotNativeMap(first.AsMap()));
+            if (first.Kind == PilotValueKind.NativeMap) return first;
+            int cap = (int)first.AsInt();
+            return PilotValue.FromNativeMap(new Pilot.Runtime.NativeMemory.PilotNativeMap(cap));
+        }, "capacity_or_dict");
+
+        Register("to_native", (_, args) =>
+        {
+            if (args.Count == 0) return PilotValue.Null;
+            var val = args[0];
+            if (val.Kind == PilotValueKind.List) return PilotValue.FromNativeArray(new Pilot.Runtime.NativeMemory.PilotNativeArray(val.AsList()));
+            if (val.Kind == PilotValueKind.Tuple) return PilotValue.FromNativeArray(new Pilot.Runtime.NativeMemory.PilotNativeArray(val.AsTuple()));
+            if (val.Kind == PilotValueKind.Map) return PilotValue.FromNativeMap(new Pilot.Runtime.NativeMemory.PilotNativeMap(val.AsMap()));
+            return val;
+        }, "val");
+
+        Register("as_native", (_, args) =>
+        {
+            if (args.Count == 0) return PilotValue.Null;
+            var val = args[0];
+            if (val.Kind == PilotValueKind.List) return PilotValue.FromNativeArray(new Pilot.Runtime.NativeMemory.PilotNativeArray(val.AsList()));
+            if (val.Kind == PilotValueKind.Tuple) return PilotValue.FromNativeArray(new Pilot.Runtime.NativeMemory.PilotNativeArray(val.AsTuple()));
+            if (val.Kind == PilotValueKind.Map) return PilotValue.FromNativeMap(new Pilot.Runtime.NativeMemory.PilotNativeMap(val.AsMap()));
+            return val;
+        }, "val");
 
         // Matrices
         Register("matrix", (_, args) =>

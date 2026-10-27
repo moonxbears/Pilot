@@ -267,8 +267,13 @@ public static class Program
                     "cabi" or "header" or "h" => Pilot.Native.NativeCompilationTarget.CAbiHeader,
                     "c" => Pilot.Native.NativeCompilationTarget.CSource,
                     "cpp" or "c++" => Pilot.Native.NativeCompilationTarget.CppSource,
+                    "asm" or "s" => Pilot.Native.NativeCompilationTarget.Assembly,
                     _ => Pilot.Native.NativeCompilationTarget.NativeExecutable
                 };
+            }
+            else if (args[i] is "--emit-asm" or "--emit-s" or "-S")
+            {
+                target = Pilot.Native.NativeCompilationTarget.Assembly;
             }
             else if (args[i] is "--emit-llvm" or "--emit-ir")
             {

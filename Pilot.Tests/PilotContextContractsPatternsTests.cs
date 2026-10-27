@@ -39,7 +39,7 @@ public class PilotContextContractsPatternsTests
                 return save_user(user);
             }
 
-            let result = """";
+            var result = """";
             let dbInstance = Database();
             dbInstance.connectionString = ""postgresql://localhost:5432"";
 
@@ -78,8 +78,8 @@ public class PilotContextContractsPatternsTests
             let customSvc = Service();
             customSvc.name = ""custom"";
 
-            let resImplicit = """";
-            let resExplicit = """";
+            var resImplicit = """";
+            var resExplicit = """";
 
             with context svc = mainSvc {
                 resImplicit = get_service_name();

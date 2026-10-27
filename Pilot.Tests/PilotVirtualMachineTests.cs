@@ -117,8 +117,8 @@ public class PilotVirtualMachineTests
     {
         string code = @"
             def factorial(n) {
-                let result = 1;
-                let cur = n;
+                var result = 1;
+                var cur = n;
                 while (cur > 1) {
                     result = result * cur;
                     cur = cur - 1;
@@ -161,7 +161,7 @@ public class PilotVirtualMachineTests
     {
         string code = @"
             def compute(base, exponent) {
-                let total = 1;
+                var total = 1;
                 for i in 0..exponent {
                     total = total * base;
                 }
@@ -219,7 +219,7 @@ public class PilotVirtualMachineTests
     public void Test_VM_Short_Circuit_Operators()
     {
         string code = @"
-            let side_effect = 0;
+            var side_effect = 0;
             def inc() {
                 side_effect = side_effect + 1;
                 return true;
@@ -294,8 +294,8 @@ public class PilotVirtualMachineTests
     public void Test_VM_Execution_Speed_Benchmark()
     {
         string code = @"
-            let total = 0;
-            let i = 0;
+            var total = 0;
+            var i = 0;
             while (i < 30000) {
                 total = total + i;
                 i = i + 1;

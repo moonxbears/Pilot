@@ -98,6 +98,10 @@ public sealed class PilotCompiler : IPilotCompiler
             {
                 program.BytecodeChunk = PilotBytecodeCompiler.Compile(tree, preprocessedCode);
             }
+            catch (PilotCompilationException pce)
+            {
+                return PilotCompilationResult.CreateFailure(pce.Message, sw.Elapsed);
+            }
             catch
             {
                 // Graceful fallback to AST interpretation

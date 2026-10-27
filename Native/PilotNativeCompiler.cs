@@ -21,7 +21,8 @@ public enum NativeCompilationTarget
     WebAssemblyText,
     CAbiHeader,
     CSource,
-    CppSource
+    CppSource,
+    Assembly
 }
 
 /// <summary>
@@ -36,6 +37,7 @@ public sealed class PilotNativeOptions
     public bool EmitHeaderComments { get; set; } = true;
     public string ModuleName { get; set; } = "pilot_module";
     public string? TargetTriple { get; set; }
+    public bool BurstOptimized { get; set; } = true;
 }
 
 /// <summary>
@@ -99,6 +101,21 @@ public static class PilotNativeCompiler
         {
             switch (options.Target)
             {
+                case NativeCompilationTarget.Assembly:
+                {
+                    string asm = Pilot.Native.Assembly.PilotAssemblyEmitter.EmitAssembly(
+                        source,
+                        modName,
+                        options.OptimizationLevel,
+                        options.BurstOptimized);
+                    string? outPath = options.OutputPath;
+                    if (!string.IsNullOrEmpty(outPath))
+                    {
+                        File.WriteAllText(outPath, asm);
+                    }
+                    return PilotNativeResult.CreateSuccess(options.Target, outPath, asm);
+                }
+
                 case NativeCompilationTarget.LlvmIr:
                 {
                     string llvmIr = PilotLlvmEmitter.Emit(source, modName);

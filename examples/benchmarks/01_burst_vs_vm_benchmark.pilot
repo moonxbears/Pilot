@@ -1,0 +1,91 @@
+# =============================================================================
+# Pilot Benchmark Suite: Burst Engine, Native Types (natarray, natmap) & ASM
+# =============================================================================
+
+println("==================================================================")
+println("      PILOT HIGH-PERFORMANCE BURST & NATIVE TYPES BENCHMARK       ")
+println("==================================================================")
+
+# -----------------------------------------------------------------------------
+# Benchmark 1: SIMD Vector Math & Dot Product with natarray
+# -----------------------------------------------------------------------------
+println("\n[1] Vector Math & SIMD Dot Product:")
+
+let n: int = 50000
+let a = natarray(n)
+let b = natarray(n)
+a.fill(1.5)
+b.fill(2.0)
+
+# Fast contiguous vector dot product
+let dot_result = a.dot(b)
+println(f"  Vector size: {n} elements")
+println(f"  Dot product (1.5 * 2.0 * {n}): {dot_result}")
+
+# In-place vector scaling
+a.scale(3.0)
+let scaled_sum = a.sum()
+println(f"  Scaled sum (1.5 * 3.0 * {n}): {scaled_sum}")
+
+# -----------------------------------------------------------------------------
+# Benchmark 2: Particle Physics Integration with @burst Kernel
+# -----------------------------------------------------------------------------
+println("\n[2] N-Body Particle Physics Update via @burst Kernel:")
+
+@burst
+def update_particles(positions: natarray, velocities: natarray, dt: float, steps: int) -> float {
+    var step: int = 0
+    let count: int = positions.length
+    while (step < steps) {
+        var i: int = 0
+        while (i < count) {
+            positions[i] += velocities[i] * dt
+            velocities[i] *= 0.999
+            i += 1
+        }
+        step += 1
+    }
+    return positions.sum()
+}
+
+let particle_count: int = 10000
+let pos = natarray(particle_count)
+let vel = natarray(particle_count)
+pos.fill(0.0)
+vel.fill(10.0)
+
+let final_pos_sum = update_particles(pos, vel, 0.016, 50)
+println(f"  Simulated {particle_count} particles across 50 time-steps.")
+println(f"  Final aggregated position sum: {final_pos_sum}")
+
+# -----------------------------------------------------------------------------
+# Benchmark 3: Seamless List <-> natarray Interop
+# -----------------------------------------------------------------------------
+println("\n[3] Interoperability (List -> Native Conversion):")
+
+let standard_list = [1.0, 2.0, 3.0, 4.0, 5.0]
+let native_view = standard_list.to_native()
+println(f"  Standard list: {standard_list}")
+println(f"  Native array:  {native_view}")
+println(f"  Native sum:    {native_view.sum()}")
+
+# -----------------------------------------------------------------------------
+# Benchmark 4: Cache-Friendly Open-Addressing Native Map (natmap)
+# -----------------------------------------------------------------------------
+println("\n[4] High-Throughput Lookup via natmap:")
+
+let fast_map = natmap()
+var k: int = 0
+while (k < 1000) {
+    fast_map[k] = k * 10
+    k += 1
+}
+
+println(f"  Populated natmap with {fast_map.length} entries.")
+println(f"  fast_map[42] = {fast_map[42]}")
+println(f"  fast_map.has(999) = {fast_map.has(999)}")
+println(f"  fast_map.has(5000) = {fast_map.has(5000)}")
+
+println("\n==================================================================")
+println("               BENCHMARK COMPLETED SUCCESSFULLY!                  ")
+println("==================================================================")

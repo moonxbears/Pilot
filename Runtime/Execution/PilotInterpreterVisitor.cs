@@ -184,7 +184,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
     public override PilotValue VisitLet_stmt(PilotParser.Let_stmtContext context)
     {
         PilotValue initialVal = context.test() != null ? Visit(context.test()) : PilotValue.Undefined;
-        DeclareBinding(context.binding_pattern(), initialVal, isConst: false);
+        DeclareBinding(context.binding_pattern(), initialVal, isConst: true);
         return initialVal;
     }
 
@@ -883,6 +883,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             isAsync: context.ASYNC() != null,
             isGenerator: isGen);
         function.IsVectorized = isVectorized;
+        Pilot.Runtime.Burst.PilotBurstEngine.TryAttachBurstKernel(function, context);
 
         if (context.contract_clause() != null)
         {

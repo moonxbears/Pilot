@@ -234,7 +234,7 @@ public class PilotFeedbackFeaturesTests
                 }
             }
 
-            let inside_result = """";
+            var inside_result = """";
 
             with extension DebugHelpers {
                 inside_result = ""hello"".to_hex();

@@ -16,7 +16,7 @@ public class PilotExceptionProtectionsTests
     public void Test_Try_Except_Catches_Generic_User_Error()
     {
         string code = @"
-            let caught_msg = """";
+            var caught_msg = """";
             try {
                 raise ""Critical calculation failure"";
             } except err {
@@ -34,8 +34,8 @@ public class PilotExceptionProtectionsTests
     public void Test_Try_Except_Catches_DivideByZeroError()
     {
         string code = @"
-            let handled = false;
-            let result_val = -1;
+            var handled = false;
+            var result_val = -1;
 
             try {
                 let a = 100 / 0;
@@ -58,7 +58,7 @@ public class PilotExceptionProtectionsTests
     public void Test_Try_Except_Catches_NullReferenceError()
     {
         string code = @"
-            let handled = false;
+            var handled = false;
             let non_null_safe_val = null;
 
             // Safe nav should not throw
@@ -85,7 +85,7 @@ public class PilotExceptionProtectionsTests
     public void Test_Try_Except_Catches_TypeError()
     {
         string code = @"
-            let handled = false;
+            var handled = false;
             let not_a_func = 42;
 
             try {
@@ -179,7 +179,7 @@ public class PilotExceptionProtectionsTests
     public void Test_Assertion_Throws_AssertionError_Catchable()
     {
         string code = @"
-            let assert_caught = false;
+            var assert_caught = false;
 
             try {
                 assert 5 > 10, ""Five is not greater than ten"";

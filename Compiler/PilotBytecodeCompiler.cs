@@ -20,6 +20,15 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
     private readonly Stack<LoopContext> _loops = new();
     private readonly bool _isFunction;
     private bool _discardExpressionResult = true;
+    private readonly HashSet<string> _immutableBindings = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _mutableBindings = new(StringComparer.Ordinal);
+
+    private bool IsImmutable(string name)
+    {
+        if (_mutableBindings.Contains(name)) return false;
+        if (_immutableBindings.Contains(name)) return true;
+        return _parent?.IsImmutable(name) ?? false;
+    }
 
     private sealed class LoopContext
     {
@@ -67,6 +76,7 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
             {
                 compiler._chunk.ParameterNames.Add(p);
                 compiler._chunk.GetOrAllocateLocalSlot(p);
+                compiler._mutableBindings.Add(p);
             }
         }
 
@@ -173,6 +183,12 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     public override object? VisitLet_stmt(PilotParser.Let_stmtContext context)
     {
+        foreach (var id in ExtractBindingIdentifiers(context.binding_pattern()))
+        {
+            _immutableBindings.Add(id);
+            _mutableBindings.Remove(id);
+        }
+
         string name = context.binding_pattern()?.identifier()?.GetText() ?? "";
         if (!string.IsNullOrEmpty(name))
         {
@@ -189,6 +205,12 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     public override object? VisitVar_stmt(PilotParser.Var_stmtContext context)
     {
+        foreach (var id in ExtractBindingIdentifiers(context.binding_pattern()))
+        {
+            _mutableBindings.Add(id);
+            _immutableBindings.Remove(id);
+        }
+
         string name = context.binding_pattern()?.identifier()?.GetText() ?? "";
         if (!string.IsNullOrEmpty(name))
         {
@@ -205,6 +227,12 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     public override object? VisitConst_stmt(PilotParser.Const_stmtContext context)
     {
+        foreach (var id in ExtractBindingIdentifiers(context.binding_pattern()))
+        {
+            _immutableBindings.Add(id);
+            _mutableBindings.Remove(id);
+        }
+
         string name = context.binding_pattern()?.identifier()?.GetText() ?? "";
         if (!string.IsNullOrEmpty(name))
         {
@@ -217,6 +245,52 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
             _chunk.Emit(PilotOpcode.Pop);
         }
         return null;
+    }
+
+    private static IEnumerable<string> ExtractBindingIdentifiers(PilotParser.Binding_patternContext? patternCtx)
+    {
+        if (patternCtx == null) yield break;
+        if (patternCtx.identifier() is { } idCtx)
+        {
+            yield return idCtx.GetText();
+            yield break;
+        }
+        if (patternCtx.splice_expr() is { } spliceCtx)
+        {
+            yield return spliceCtx.GetText();
+            yield break;
+        }
+        if (patternCtx.tuple_pattern() is { } tuplePat)
+        {
+            foreach (var item in tuplePat.binding_pattern_item())
+            {
+                foreach (var name in ExtractBindingIdentifiers(item.binding_pattern()))
+                    yield return name;
+            }
+        }
+        else if (patternCtx.list_pattern() is { } listPat)
+        {
+            foreach (var item in listPat.binding_pattern_item())
+            {
+                foreach (var name in ExtractBindingIdentifiers(item.binding_pattern()))
+                    yield return name;
+            }
+        }
+        else if (patternCtx.record_pattern() is { } recPat)
+        {
+            foreach (var field in recPat.record_pattern_field())
+            {
+                if (field.binding_pattern() is { } subPat)
+                {
+                    foreach (var name in ExtractBindingIdentifiers(subPat))
+                        yield return name;
+                }
+                else if (field.identifier() is { } fieldId)
+                {
+                    yield return fieldId.GetText();
+                }
+            }
+        }
     }
 
     private void CompileVariableDeclaration(string name, PilotParser.TestContext? initExpr)
@@ -282,6 +356,14 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         // Simple identifier target: x = rhs
         if (IsSimpleIdentifier(targetNode, out string idName))
         {
+            if (IsImmutable(idName))
+            {
+                throw new PilotCompilationException(
+                    $"Cannot reassign immutable binding '{idName}' (declared with 'let' or 'const'). Use 'var' if mutation is intended.",
+                    targetNode.Start.Line,
+                    targetNode.Start.Column);
+            }
+
             if (_isFunction && _chunk.TryGetLocalSlot(idName, out int targetSlot))
             {
                 _chunk.Emit(PilotOpcode.StoreLocal, targetSlot);
@@ -323,11 +405,11 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
                 var subCtx = lastTrailer.subscriptlist()?.subscript(0);
                 if (subCtx != null)
                 {
+                    int tempVal = _chunk.GetOrAllocateLocalSlot("<temp_val>");
+                    _chunk.Emit(PilotOpcode.StoreLocal, tempVal);
                     CompileAtomExprPrefix(atomExpr, trailers.Length - 1);
                     Visit(subCtx.test(0));
-                    int tempSlot = _chunk.GetOrAllocateLocalSlot("<temp_rhs>");
-                    _chunk.Emit(PilotOpcode.StoreLocal, tempSlot);
-                    _chunk.Emit(PilotOpcode.LoadLocal, tempSlot);
+                    _chunk.Emit(PilotOpcode.LoadLocal, tempVal);
                     _chunk.Emit(PilotOpcode.SetIndex);
                     return;
                 }
@@ -342,8 +424,18 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     private void CompileAugmentedAssign(PilotParser.TestContext targetNode, PilotParser.TestContext rhsNode, PilotParser.AugassignContext aug)
     {
+        string op = aug.GetText();
+
         if (IsSimpleIdentifier(targetNode, out string idName))
         {
+            if (IsImmutable(idName))
+            {
+                throw new PilotCompilationException(
+                    $"Cannot reassign immutable binding '{idName}' (declared with 'let' or 'const'). Use 'var' if mutation is intended.",
+                    targetNode.Start.Line,
+                    targetNode.Start.Column);
+            }
+
             if (_isFunction && _chunk.TryGetLocalSlot(idName, out int slot))
             {
                 _chunk.Emit(PilotOpcode.LoadLocal, slot);
@@ -355,22 +447,7 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
             }
 
             Visit(rhsNode);
-
-            string op = aug.GetText();
-            switch (op)
-            {
-                case "+=": _chunk.Emit(PilotOpcode.Add); break;
-                case "-=": _chunk.Emit(PilotOpcode.Sub); break;
-                case "*=": _chunk.Emit(PilotOpcode.Mul); break;
-                case "/=": _chunk.Emit(PilotOpcode.Div); break;
-                case "%=": _chunk.Emit(PilotOpcode.Mod); break;
-                case "&=": _chunk.Emit(PilotOpcode.BitAnd); break;
-                case "|=": _chunk.Emit(PilotOpcode.BitOr); break;
-                case "^=": _chunk.Emit(PilotOpcode.BitXor); break;
-                case "<<=": _chunk.Emit(PilotOpcode.ShiftLeft); break;
-                case ">>=": _chunk.Emit(PilotOpcode.ShiftRight); break;
-                default: _chunk.Emit(PilotOpcode.Add); break;
-            }
+            EmitAugassignOp(op);
 
             if (_isFunction && _chunk.TryGetLocalSlot(idName, out int storeSlot))
             {
@@ -384,10 +461,100 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
             return;
         }
 
+        // Member or index access assignment: a[i] += rhs or a.b += rhs
+        var atomExpr = GetAtomExpr(targetNode);
+        if (atomExpr != null && atomExpr.trailer()?.Length > 0)
+        {
+            var trailers = atomExpr.trailer();
+            var lastTrailer = trailers[^1];
+
+            if (lastTrailer.LSQB() != null)
+            {
+                var subCtx = lastTrailer.subscriptlist()?.subscript(0);
+                if (subCtx != null)
+                {
+                    int tempReceiver = _chunk.GetOrAllocateLocalSlot("<temp_receiver>");
+                    int tempIndex = _chunk.GetOrAllocateLocalSlot("<temp_index>");
+                    int tempVal = _chunk.GetOrAllocateLocalSlot("<temp_val>");
+
+                    CompileAtomExprPrefix(atomExpr, trailers.Length - 1);
+                    _chunk.Emit(PilotOpcode.StoreLocal, tempReceiver);
+
+                    Visit(subCtx.test(0));
+                    _chunk.Emit(PilotOpcode.StoreLocal, tempIndex);
+
+                    // Load current value: receiver[index]
+                    _chunk.Emit(PilotOpcode.LoadLocal, tempReceiver);
+                    _chunk.Emit(PilotOpcode.LoadLocal, tempIndex);
+                    _chunk.Emit(PilotOpcode.GetIndex);
+
+                    // Evaluate rhs
+                    Visit(rhsNode);
+
+                    // Compute op
+                    EmitAugassignOp(op);
+
+                    // Store back: receiver[index] = result
+                    _chunk.Emit(PilotOpcode.StoreLocal, tempVal);
+                    _chunk.Emit(PilotOpcode.LoadLocal, tempReceiver);
+                    _chunk.Emit(PilotOpcode.LoadLocal, tempIndex);
+                    _chunk.Emit(PilotOpcode.LoadLocal, tempVal);
+                    _chunk.Emit(PilotOpcode.SetIndex);
+                    return;
+                }
+            }
+
+            if (lastTrailer.DOT() != null)
+            {
+                string member = lastTrailer.identifier().GetText();
+                int memberId = _chunk.AddIdentifier(member);
+                int tempReceiver = _chunk.GetOrAllocateLocalSlot("<temp_receiver>");
+                int tempVal = _chunk.GetOrAllocateLocalSlot("<temp_val>");
+
+                CompileAtomExprPrefix(atomExpr, trailers.Length - 1);
+                _chunk.Emit(PilotOpcode.StoreLocal, tempReceiver);
+
+                // Load current value: receiver.member
+                _chunk.Emit(PilotOpcode.LoadLocal, tempReceiver);
+                _chunk.Emit(PilotOpcode.GetMember, memberId);
+
+                // Evaluate rhs
+                Visit(rhsNode);
+
+                // Compute op
+                EmitAugassignOp(op);
+
+                // Store back: receiver.member = result
+                _chunk.Emit(PilotOpcode.StoreLocal, tempVal);
+                _chunk.Emit(PilotOpcode.LoadLocal, tempReceiver);
+                _chunk.Emit(PilotOpcode.LoadLocal, tempVal);
+                _chunk.Emit(PilotOpcode.SetMember, memberId);
+                return;
+            }
+        }
+
         // Fallback
         int fallback = _chunk.AddAstFallback(targetNode);
         _chunk.Emit(PilotOpcode.EvalAst, fallback);
         _chunk.Emit(PilotOpcode.Pop);
+    }
+
+    private void EmitAugassignOp(string op)
+    {
+        switch (op)
+        {
+            case "+=": _chunk.Emit(PilotOpcode.Add); break;
+            case "-=": _chunk.Emit(PilotOpcode.Sub); break;
+            case "*=": _chunk.Emit(PilotOpcode.Mul); break;
+            case "/=": _chunk.Emit(PilotOpcode.Div); break;
+            case "%=": _chunk.Emit(PilotOpcode.Mod); break;
+            case "&=": _chunk.Emit(PilotOpcode.BitAnd); break;
+            case "|=": _chunk.Emit(PilotOpcode.BitOr); break;
+            case "^=": _chunk.Emit(PilotOpcode.BitXor); break;
+            case "<<=": _chunk.Emit(PilotOpcode.ShiftLeft); break;
+            case ">>=": _chunk.Emit(PilotOpcode.ShiftRight); break;
+            default: _chunk.Emit(PilotOpcode.Add); break;
+        }
     }
 
     public override object? VisitFlow_stmt(PilotParser.Flow_stmtContext context)
@@ -532,6 +699,8 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         // 2. Assign item to target
         var forTarget = context.for_target();
         string targetName = forTarget.GetText();
+        _mutableBindings.Add(targetName);
+        _immutableBindings.Remove(targetName);
         if (_isFunction)
         {
             int slot = _chunk.GetOrAllocateLocalSlot(targetName);
@@ -582,6 +751,7 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         }
 
         var nestedChunk = CompileSuite(context.suite(), paramNames, funcName, this);
+        nestedChunk.FuncDefContext = context;
         int chunkIndex = _chunk.AddNestedChunk(nestedChunk);
 
         _chunk.Emit(PilotOpcode.MakeClosure, chunkIndex);

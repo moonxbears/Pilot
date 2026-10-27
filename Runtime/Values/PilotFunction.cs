@@ -48,6 +48,8 @@ public sealed class PilotFunction
     public bool IsAsync { get; private set; }
     public bool IsGenerator { get; private set; }
     public bool IsVectorized { get; set; }
+    public bool IsBurstCompiled { get; set; }
+    public Func<IReadOnlyList<PilotValue>, PilotValue>? BurstKernel { get; set; }
     public IReadOnlyDictionary<string, PilotValue>? Captures { get; private set; }
     public PilotClassDefinition? ClassDef { get; set; }
     public Pilot.Runtime.Bytecode.PilotBytecodeChunk? BytecodeChunk { get; set; }
@@ -119,6 +121,11 @@ public sealed class PilotFunction
 
     public PilotValue Invoke(PilotExecutionContext context, IReadOnlyList<PilotValue> arguments)
     {
+        if (BurstKernel != null)
+        {
+            return BurstKernel(arguments);
+        }
+
         if (HostDelegate != null)
         {
             return HostDelegate(context, arguments);

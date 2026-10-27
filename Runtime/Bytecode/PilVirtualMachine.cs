@@ -575,9 +575,14 @@ public sealed class PilVirtualMachine
                     var fn = new PilotFunction(
                         nestedChunk.Name,
                         CreateParameters(nestedChunk.ParameterNames),
-                        astBody: null,
+                        astBody: nestedChunk.FuncDefContext?.suite(),
                         closureScope: scope);
                     fn.BytecodeChunk = nestedChunk;
+
+                    if (nestedChunk.FuncDefContext != null)
+                    {
+                        Pilot.Runtime.Burst.PilotBurstEngine.TryAttachBurstKernel(fn, nestedChunk.FuncDefContext);
+                    }
 
                     // Automatically bind in scope if named
                     if (!string.IsNullOrEmpty(nestedChunk.Name) && nestedChunk.Name != "<lambda>")
@@ -710,6 +715,19 @@ public sealed class PilVirtualMachine
                 // AST Fallback (Guarantees 100% full language coverage for complex edge constructs)
                 case PilotOpcode.EvalAst:
                 {
+                    if (chunk.LocalSlotMap.Count > 0)
+                    {
+                        foreach (var (locName, slot) in chunk.LocalSlotMap)
+                        {
+                            if (!string.IsNullOrEmpty(locName) && !locName.StartsWith("<") && slot < locals.Length)
+                            {
+                                if (!scope.Assign(locName, locals[slot]))
+                                {
+                                    scope.Declare(locName, locals[slot]);
+                                }
+                            }
+                        }
+                    }
                     var node = chunk.AstFallbackNodes[inst.Operand];
                     var visitor = context.GetOrCreateVisitor();
                     var astResult = visitor.Visit(node);

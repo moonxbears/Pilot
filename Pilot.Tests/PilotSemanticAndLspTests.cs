@@ -1,4 +1,7 @@
+using System;
 using System.Threading.Tasks;
+using Pilot.Compiler;
+using Pilot.Scripting;
 using System.Linq;
 using System.Text.Json.Nodes;
 using Pilot.LanguageServer.Lsp;
@@ -716,5 +719,179 @@ def test_metaprog() -> void {
         await server.RunAsync(inputStream, outputStream, cts.Token);
 
         Assert.Equal(0, outputStream.Length);
+    }
+
+    [Fact]
+    public void Test_For_Loop_Target_Variables_And_Keywords_Semantic_Tokens()
+    {
+        string code = @"
+for x in 15..20:
+    println(x)
+
+for i in [15..20]:
+    println(i)
+
+for j in [1, 2, 3, 4, 5]{
+    println(j)
+}
+";
+        var result = PilotSemanticAnalyzer.Analyze(code);
+
+        // Verify println is recognized as a builtin symbol
+        var printlnSym = result.RootScope.Resolve("println");
+        Assert.NotNull(printlnSym);
+        Assert.Equal(PilotSymbolKind.Function, printlnSym!.Kind);
+        Assert.Contains("println", printlnSym.Signature);
+
+        // Verify loop variables x, i, j are registered in their respective scopes
+        var xRef = result.References.FirstOrDefault(r => r.Symbol.Name == "x");
+        Assert.NotNull(xRef);
+        Assert.Equal(PilotSymbolKind.Variable, xRef!.Symbol.Kind);
+
+        var iRef = result.References.FirstOrDefault(r => r.Symbol.Name == "i");
+        Assert.NotNull(iRef);
+        Assert.Equal(PilotSymbolKind.Variable, iRef!.Symbol.Kind);
+
+        var jRef = result.References.FirstOrDefault(r => r.Symbol.Name == "j");
+        Assert.NotNull(jRef);
+        Assert.Equal(PilotSymbolKind.Variable, jRef!.Symbol.Kind);
+
+        // Verify semantic tokens contain keywords (for, in) and variables (x, i, j)
+        var tokens = result.SemanticTokens;
+        var keywordTokens = tokens.Where(t => t.TokenType == PilotSemanticTokenLegend.TypeKeyword).ToList();
+        Assert.True(keywordTokens.Count >= 6); // at least 3 'for' and 3 'in'
+
+        var varTokens = tokens.Where(t => t.TokenType == PilotSemanticTokenLegend.TypeVariable).ToList();
+        Assert.True(varTokens.Count >= 6); // declarations and usages of x, i, j
+    }
+
+    [Fact]
+    public void Test_String_Interpolation_Variables_Semantic_Tokens_And_Hover()
+    {
+        string code = @"
+var myvar : int = 0
+while (true) {
+    if (myvar >= 20){
+        break;
+    }
+    println(f""true - {myvar}"")
+    myvar += 1
+}
+";
+        var result = PilotSemanticAnalyzer.Analyze(code);
+
+        // Verify myvar reference inside f-string interpolation
+        var fstringVarRef = result.References.FirstOrDefault(r => r.Symbol.Name == "myvar" && r.Line >= 6 && r.Line <= 7);
+        Assert.NotNull(fstringVarRef);
+        Assert.Equal("myvar", fstringVarRef!.Symbol.Name);
+        Assert.Equal("int", fstringVarRef.Symbol.TypeName);
+
+        // Verify semantic tokens include control keywords (while, if, break)
+        var keywords = result.SemanticTokens.Where(t => t.TokenType == PilotSemanticTokenLegend.TypeKeyword).ToList();
+        Assert.True(keywords.Count >= 3); // while, if, break
+
+        // Verify semantic token for variable inside f-string
+        var fstringVarToken = result.SemanticTokens.FirstOrDefault(t => t.TokenType == PilotSemanticTokenLegend.TypeVariable && t.Line >= 6 && t.Line <= 7);
+        Assert.NotNull(fstringVarToken);
+        Assert.Equal(5, fstringVarToken!.Length); // 'myvar' length
+    }
+
+    [Fact]
+    public void Test_Builtin_Functions_And_Keywords_In_Lsp_Completion_And_Hover()
+    {
+        var server = new PilotLspServer();
+        string docUri = "file:///test/completion_test.pilot";
+        string sampleCode = "var myvar: int = 10\n";
+
+        // Open doc
+        server.ProcessMessage(new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["method"] = "textDocument/didOpen",
+            ["params"] = new JsonObject
+            {
+                ["textDocument"] = new JsonObject
+                {
+                    ["uri"] = docUri,
+                    ["languageId"] = "pilot",
+                    ["version"] = 1,
+                    ["text"] = sampleCode
+                }
+            }
+        }.ToJsonString());
+
+        // Completion request
+        var compResp = server.ProcessMessage($@"{{""jsonrpc"":""2.0"",""id"":10,""method"":""textDocument/completion"",""params"":{{""textDocument"":{{""uri"":""{docUri}""}},""position"":{{""line"":0,""character"":0}}}}}}");
+        var items = JsonNode.Parse(compResp[0])!["result"]?.AsArray();
+        Assert.NotNull(items);
+
+        var labels = items!.Select(i => i?["label"]?.GetValue<string>()).ToHashSet();
+        // Check built-in functions
+        Assert.Contains("print", labels);
+        Assert.Contains("println", labels);
+        Assert.Contains("assert", labels);
+        Assert.Contains("type_of", labels);
+        Assert.Contains("matrix", labels);
+        Assert.Contains("json", labels);
+        Assert.Contains("venv", labels);
+
+        // Check control flow keywords
+        Assert.Contains("for", labels);
+        Assert.Contains("in", labels);
+        Assert.Contains("while", labels);
+        Assert.Contains("if", labels);
+        Assert.Contains("elif", labels);
+        Assert.Contains("else", labels);
+        Assert.Contains("break", labels);
+        Assert.Contains("continue", labels);
+        Assert.Contains("return", labels);
+
+        // Hover at line 0, col 1 (on "var")
+        var varHover = server.ProcessMessage($@"{{""jsonrpc"":""2.0"",""id"":12,""method"":""textDocument/hover"",""params"":{{""textDocument"":{{""uri"":""{docUri}""}},""position"":{{""line"":0,""character"":1}}}}}}");
+        var hoverVal = JsonNode.Parse(varHover[0])!["result"]?["contents"]?["value"]?.GetValue<string>();
+        Assert.NotNull(hoverVal);
+        Assert.Contains("Pilot Keyword", hoverVal);
+    }
+
+    [Fact]
+    public void Test_CompileTime_Rejection_Of_Let_Reassignment()
+    {
+        string code = "let x = 10\nx = 20\n";
+        var compResult = PilotCompiler.Default.Compile(code);
+        Assert.False(compResult.Success);
+        Assert.Contains(compResult.Diagnostics, d => d.Contains("Cannot reassign immutable binding 'x'"));
+    }
+
+    [Fact]
+    public void Test_CompileTime_Rejection_Of_Let_Augmented_Assignment()
+    {
+        string code = "let total = 0\ntotal += 5\n";
+        var compResult = PilotCompiler.Default.Compile(code);
+        Assert.False(compResult.Success);
+        Assert.Contains(compResult.Diagnostics, d => d.Contains("Cannot reassign immutable binding 'total'"));
+    }
+
+    [Fact]
+    public void Test_CompileTime_Permits_Var_Reassignment()
+    {
+        string code = "var count = 10\ncount = 20\ncount += 5\nassert count == 25\n";
+        var compResult = PilotCompiler.Default.Compile(code);
+        Assert.True(compResult.Success);
+        var execResult = compResult.Program!.Run();
+        Assert.True(execResult.Success);
+    }
+
+    [Fact]
+    public void Test_Runtime_Interpreter_Rejects_Let_Reassignment()
+    {
+        string code = "let val = 42\nval = 99\n";
+        var engine = new Pilot.Runtime.Execution.PilotEngine();
+        var ctx = new Pilot.Runtime.Execution.PilotExecutionContext(engine, new Pilot.Runtime.Execution.PilotExecutionOptions());
+        var visitor = new Pilot.Runtime.Execution.PilotInterpreterVisitor(ctx);
+        var parser = new PilotParser(new Antlr4.Runtime.CommonTokenStream(new PilotLexer(new Antlr4.Runtime.AntlrInputStream(code))));
+        var tree = parser.ParseProgramFast();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => visitor.VisitProgram(tree));
+        Assert.Contains("Cannot assign to immutable binding 'val'", ex.Message);
     }
 }

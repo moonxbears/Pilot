@@ -117,7 +117,7 @@ public class PilotExecutionEngineTests
     {
         string code = @"
             let items = [10, 20, 30, 40, 50];
-            let category = """";
+            var category = """";
 
             match items {
                 case [first, ..mid, last] => {
@@ -137,7 +137,7 @@ public class PilotExecutionEngineTests
     {
         string code = @"
             let score = 85;
-            let grade = """";
+            var grade = """";
 
             match score {
                 case >= 90 => { grade = ""A""; }

@@ -118,7 +118,7 @@ public class PilotDebuggingTests
     public void Test_Conditional_Breakpoint()
     {
         string code = @"
-            let total = 0;
+            var total = 0;
             for i in [1, 2, 3, 4, 5] {
                 total = total + i;
             }
@@ -150,7 +150,7 @@ public class PilotDebuggingTests
     public void Test_HitCount_Threshold_Breakpoint()
     {
         string code = @"
-            let count = 0;
+            var count = 0;
             for x in [10, 20, 30, 40, 50] {
                 count = count + 1;
             }
@@ -189,7 +189,7 @@ public class PilotDebuggingTests
     public void Test_SetVariable_During_Debug_Pause()
     {
         string code = @"
-            let x = 10;
+            var x = 10;
             let y = 20;
             let result = x + y;
         ";

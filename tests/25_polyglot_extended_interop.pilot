@@ -7,7 +7,7 @@
 
 // --- 1. Python Block & Pilot Variable Injection ---
 let myPilotVariable : str = "Hello, Python!";
-let capturedVal = "";
+var capturedVal = "";
 
 python {
     capturedVal = myPilotVariable;

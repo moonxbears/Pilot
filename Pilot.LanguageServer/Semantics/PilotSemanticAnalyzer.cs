@@ -97,6 +97,54 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
     private static readonly Dictionary<string, (string ReturnType, string Signature, string Doc)> BuiltinFunctions = new(StringComparer.Ordinal)
     {
         ["print"] = ("void", "def print(*values: any) -> void", "Writes values to the standard output stream."),
+        ["println"] = ("void", "def println(*values: any) -> void", "Writes values to the standard output stream followed by a newline."),
+        ["assert"] = ("bool", "def assert(condition: bool, message: str = \"\") -> bool", "Asserts that a condition is true; raises PilotRuntimeException if false."),
+        ["type_of"] = ("str", "pure def type_of(value: any) -> str", "Returns the runtime type descriptor or name of the value."),
+        ["clock"] = ("float", "pure def clock() -> float", "Returns the high-resolution elapsed time in milliseconds."),
+        ["matrix"] = ("Matrix", "pure def matrix(rows: int = 1, cols: int = 1) -> Matrix", "Constructs a zero-initialized real-time matrix."),
+        ["eye"] = ("Matrix", "pure def eye(size: int = 3) -> Matrix", "Constructs an n-by-n identity matrix."),
+        ["zeros"] = ("Matrix", "pure def zeros(rows: int = 3, cols: int = 3) -> Matrix", "Constructs a rows-by-cols matrix populated with zeros."),
+        ["ones"] = ("Matrix", "pure def ones(rows: int = 3, cols: int = 3) -> Matrix", "Constructs a rows-by-cols matrix populated with ones."),
+        ["str"] = ("str", "pure def str(val: any = \"\") -> str", "Converts a value to its string representation."),
+        ["int"] = ("int", "pure def int(val: any = 0) -> int", "Converts a value to an integer."),
+        ["float"] = ("float", "pure def float(val: any = 0.0) -> float", "Converts a value to a 64-bit float."),
+        ["bool"] = ("bool", "pure def bool(val: any = false) -> bool", "Converts a value to a boolean."),
+        ["next"] = ("any", "def next(generator: any) -> any", "Retrieves the next yielded value from a generator."),
+        ["spawn"] = ("Future", "def spawn(callable: any, *args: any) -> Future", "Spawns an asynchronous concurrent task."),
+        ["parallel_map"] = ("List[any]", "def parallel_map(callable: any, list: List[any]) -> List[any]", "Applies a function over elements in parallel."),
+        ["lazy"] = ("Lazy", "def lazy(callable: any) -> Lazy", "Constructs a lazily-evaluated deferred value."),
+        ["json_dumps"] = ("str", "pure def json_dumps(value: any, formatted: bool = false) -> str", "Serializes a value or object graph to JSON string."),
+        ["json_loads"] = ("any", "def json_loads(json_string: str, target_class: any = null) -> any", "Deserializes a JSON string into Pilot values or typed objects."),
+        ["json"] = ("object", "object json", "Built-in JSON serialization module (`dumps`, `loads`)."),
+        ["register_adapter"] = ("bool", "def register_adapter(from_type: str, to_type: str, converter: any) -> bool", "Registers a custom bidirectional type adapter."),
+        ["TypeAdapter"] = ("object", "object TypeAdapter", "Built-in TypeAdapter registry object (`register`)."),
+        ["vectorize"] = ("any", "def vectorize(target: any) -> any", "Vectorizes a scalar mathematical function over collections."),
+        ["auto_repeat"] = ("str", "str auto_repeat", "Auto repeat execution policy."),
+        ["repeat"] = ("str", "str repeat", "Repeat execution policy."),
+        ["venv"] = ("object", "object venv", "Virtual environment manager module (`create`, `activate`, `deactivate`, `is_active`, `active_path`)."),
+        ["virtual_environment"] = ("object", "object virtual_environment", "Alias for the `venv` virtual environment module."),
+        ["transpile"] = ("str", "def transpile(pilot_code: str, target_lang: str) -> str", "Transpiles Pilot code to target language (Python, C#, Rust, C)."),
+        ["transpile_file"] = ("str", "def transpile_file(input_path: str, target_lang: str, output_path: str = \"\") -> str", "Transpiles a Pilot source file to target language."),
+        ["ingest"] = ("str", "def ingest(foreign_code: str, source_lang: str) -> str", "Ingests foreign code into equivalent idiomatic Pilot code."),
+        ["ingest_file"] = ("str", "def ingest_file(input_path: str, source_lang: str = \"auto\", output_path: str = \"\") -> str", "Ingests a foreign source file into Pilot code."),
+        ["transpile_library"] = ("List[str]", "def transpile_library(pilot_dir: str, target_lang: str, output_dir: str) -> List[str]", "Batch transpiles an entire Pilot package/library."),
+        ["ingest_library"] = ("List[str]", "def ingest_library(source_dir: str, source_lang: str, output_dir: str) -> List[str]", "Batch ingests an entire foreign library into Pilot."),
+        ["hot_reload"] = ("Map", "def hot_reload(code_or_path: str) -> Map", "Applies source patch or file updates to active runtime session."),
+        ["apply_patch"] = ("Map", "def apply_patch(patch_code: str, label: str = \"\") -> Map", "Applies an inline code patch in real-time."),
+        ["patch_file"] = ("Map", "def patch_file(file_path: str, only_if_changed: bool = false) -> Map", "Applies a patch file to running system."),
+        ["rollback_patch"] = ("Map", "def rollback_patch(steps: int = 1) -> Map", "Rolls back applied hot-reload patches."),
+        ["patch_binary"] = ("str", "def patch_binary(base_path: str, patch_path: str, output_path: str = \"\") -> str", "Directly patches a compiled Pilot binary program."),
+        ["HotReload"] = ("object", "object HotReload", "Comprehensive live hot-reloading manager object."),
+        ["cwd"] = ("str", "def cwd() -> str", "Returns the current working directory."),
+        ["exit"] = ("void", "def exit(code: int = 0) -> void", "Terminates script execution with an exit code."),
+        ["read_text"] = ("str", "def read_text(path: str) -> str", "Reads the entire contents of a file as a string."),
+        ["write_text"] = ("bool", "def write_text(path: str, content: str) -> bool", "Writes text content to a file."),
+        ["file_exists"] = ("bool", "def file_exists(path: str) -> bool", "Returns true if the specified file exists."),
+        ["delete_file"] = ("bool", "def delete_file(path: str) -> bool", "Deletes the specified file."),
+        ["args"] = ("List[str]", "List[str] args", "Command-line argument list passed to the script."),
+        ["argv"] = ("List[str]", "List[str] argv", "Command-line argument list passed to the script."),
+        ["env"] = ("Map[str, str]", "Map[str, str] env", "Dictionary of system environment variables."),
+        ["script_path"] = ("str", "str script_path", "Full path of the currently executing script."),
         ["len"] = ("int", "pure def len(collection: any) -> int", "Returns the number of elements in a collection or string."),
         ["range"] = ("List[int]", "pure def range(start: int, end: int) -> List[int]", "Generates a sequence of integers."),
         ["connect"] = ("Database", "def connect(connection_string: str) -> Database", "Connects generically to a Postgres, SQLite, or in-memory database."),
@@ -137,12 +185,20 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             rootScope.Symbols[kvp.Key] = new PilotSymbol
             {
                 Name = kvp.Key,
-                Kind = PilotSymbolKind.Function,
+                Kind = kvp.Key is "json" or "TypeAdapter" or "venv" or "virtual_environment" or "HotReload" ? PilotSymbolKind.Class
+                    : kvp.Key is "args" or "argv" or "env" or "script_path" or "auto_repeat" or "repeat" ? PilotSymbolKind.Variable
+                    : PilotSymbolKind.Function,
+
                 TypeName = kvp.Value.ReturnType,
                 Signature = kvp.Value.Signature,
                 Documentation = kvp.Value.Doc,
                 Domain = kvp.Key is "connect" or "sum" or "avg" or "count" or "rank" or "row_number" or "dense_rank" ? "Database"
                     : kvp.Key is "gensym" or "macroexpand" or "macroexpand_1" or "eval" or "cons" or "car" or "cdr" or "atom" or "list_ast" or "symbol" ? "Metaprogramming / Lisp"
+                    : kvp.Key is "spawn" or "parallel_map" ? "Concurrency"
+                    : kvp.Key is "matrix" or "eye" or "zeros" or "ones" ? "Numerics / Matrix"
+                    : kvp.Key is "hot_reload" or "apply_patch" or "patch_file" or "rollback_patch" or "patch_binary" or "HotReload" ? "Hot Reload"
+                    : kvp.Key is "transpile" or "transpile_file" or "ingest" or "ingest_file" or "transpile_library" or "ingest_library" ? "Transpilation"
+                    : kvp.Key is "read_text" or "write_text" or "file_exists" or "delete_file" or "cwd" or "exit" or "args" or "argv" or "env" or "script_path" ? "Scripting / IO"
                     : "Core"
             };
         }
@@ -247,6 +303,25 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         // Pass 2: Full semantic walk
         analyzer.Visit(tree);
 
+        // Pass 3: Milestone 3 Advanced Static Analysis (Type Inference, Borrow Checking, Dimensional Analysis, Contracts)
+        var analysisRes = Pilot.Analysis.PilotAnalysisPipeline.Analyze(tree);
+        foreach (var diag in analysisRes.Diagnostics)
+        {
+            if (diag.Code is "PILOT301" or "PILOT302" or "PILOT303" or "PILOT304" or "PILOT305" or "PILOT306")
+            {
+                analyzer._result.Diagnostics.Add(new PilotDiagnostic
+                {
+                    StartLine = Math.Max(0, diag.Line - 1),
+                    StartColumn = Math.Max(0, diag.Column),
+                    EndLine = Math.Max(0, diag.Line - 1),
+                    EndColumn = Math.Max(1, diag.Column + 1),
+                    Severity = diag.IsError ? PilotDiagnosticSeverity.Error : PilotDiagnosticSeverity.Warning,
+                    Code = diag.Code,
+                    Message = diag.Message
+                });
+            }
+        }
+
         return analyzer._result;
     }
 
@@ -331,6 +406,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             {
                 Name = name,
                 Kind = PilotSymbolKind.Function,
+
                 TypeName = returnType,
                 Domain = domain,
                 SelectionLine = line,
@@ -1603,6 +1679,13 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
     public override string? VisitWhile_stmt(PilotParser.While_stmtContext context)
     {
+        if (context.WHILE() != null)
+            AddSemanticToken(context.WHILE().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.BOUNDED() != null)
+            AddSemanticToken(context.BOUNDED().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.ELSE() != null)
+            AddSemanticToken(context.ELSE().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
         Visit(context.test(0));
         bool isBounded = context.BOUNDED() != null;
         if (isBounded && context.test().Length > 1)
@@ -1626,6 +1709,19 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
     public override string? VisitFor_stmt(PilotParser.For_stmtContext context)
     {
+        if (context.FOR() != null)
+            AddSemanticToken(context.FOR().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.IN() != null)
+            AddSemanticToken(context.IN().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.ASYNC() != null)
+            AddSemanticToken(context.ASYNC().Symbol, PilotSemanticTokenLegend.TypeKeyword, PilotSemanticTokenLegend.ModAsync);
+        if (context.PARALLEL() != null)
+            AddSemanticToken(context.PARALLEL().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.BOUNDED() != null)
+            AddSemanticToken(context.BOUNDED().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.ELSE() != null)
+            AddSemanticToken(context.ELSE().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
         bool isBounded = context.BOUNDED() != null;
         bool isParallel = context.PARALLEL() != null;
         bool isAsync = context.ASYNC() != null;
@@ -1647,17 +1743,28 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
         using (EnterScope("for", context, inLoop: true, inAsync: isAsync || _currentScope.InAsync))
         {
-            if (context.for_target()?.exprlist()?.test() != null)
+            if (context.for_target() != null)
             {
-                foreach (var targetTest in context.for_target().exprlist().test())
+                var bindingPatterns = context.for_target().binding_pattern();
+                if (bindingPatterns != null && bindingPatterns.Length > 0)
                 {
-                    var idCtx = TryExtractSimpleIdentifier(targetTest);
-                    if (idCtx != null)
+                    foreach (var bp in bindingPatterns)
                     {
-                        var loopVar = CreateSymbol(idCtx, targetTest, idCtx.GetText(), PilotSymbolKind.Variable, elemType,
-                            isParallel ? "Concurrency" : "Core",
-                            $"{idCtx.GetText()}: {elemType}", "Loop iteration variable.", isMutable: false);
-                        RegisterSymbol(loopVar, PilotSemanticTokenLegend.TypeVariable, PilotSemanticTokenLegend.ModDeclaration);
+                        DeclareBindingPattern(bp, context, elemType, isMutable: false, isConstant: false, "Loop iteration variable", isParallel ? "Concurrency" : "Core");
+                    }
+                }
+                else if (context.for_target().exprlist()?.test() != null)
+                {
+                    foreach (var targetTest in context.for_target().exprlist().test())
+                    {
+                        var idCtx = TryExtractSimpleIdentifier(targetTest);
+                        if (idCtx != null)
+                        {
+                            var loopVar = CreateSymbol(idCtx, targetTest, idCtx.GetText(), PilotSymbolKind.Variable, elemType,
+                                isParallel ? "Concurrency" : "Core",
+                                $"{idCtx.GetText()}: {elemType}", "Loop iteration variable.", isMutable: false);
+                            RegisterSymbol(loopVar, PilotSemanticTokenLegend.TypeVariable, PilotSemanticTokenLegend.ModDeclaration);
+                        }
                     }
                 }
             }
@@ -1666,6 +1773,81 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         return "void";
     }
 
+    public override string? VisitIf_stmt(PilotParser.If_stmtContext context)
+    {
+        if (context.IF() != null)
+        {
+            foreach (var ifTok in context.IF())
+                AddSemanticToken(ifTok.Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        }
+        if (context.ELIF() != null)
+        {
+            foreach (var elifTok in context.ELIF())
+                AddSemanticToken(elifTok.Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        }
+        if (context.ELSE() != null)
+        {
+            foreach (var elseTok in context.ELSE())
+                AddSemanticToken(elseTok.Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        }
+        return base.VisitIf_stmt(context);
+    }
+
+    public override string? VisitFlow_stmt(PilotParser.Flow_stmtContext context)
+    {
+        if (context.BREAK() != null)
+            AddSemanticToken(context.BREAK().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.CONTINUE() != null)
+            AddSemanticToken(context.CONTINUE().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.RETURN() != null)
+            AddSemanticToken(context.RETURN().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.YIELD() != null)
+            AddSemanticToken(context.YIELD().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.RAISE() != null)
+            AddSemanticToken(context.RAISE().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.FROM() != null)
+            AddSemanticToken(context.FROM().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
+        return base.VisitFlow_stmt(context);
+    }
+
+    public override string? VisitPass_stmt(PilotParser.Pass_stmtContext context)
+    {
+        if (context.PASS() != null)
+            AddSemanticToken(context.PASS().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        return base.VisitPass_stmt(context);
+    }
+
+    public override string? VisitAssert_stmt(PilotParser.Assert_stmtContext context)
+    {
+        if (context.ASSERT() != null)
+            AddSemanticToken(context.ASSERT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        return base.VisitAssert_stmt(context);
+    }
+
+    public override string? VisitComparison(PilotParser.ComparisonContext context)
+    {
+        if (context.IS() != null)
+        {
+            foreach (var isTok in context.IS())
+                AddSemanticToken(isTok.Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        }
+        if (context.NOT() != null)
+        {
+            foreach (var notTok in context.NOT())
+                AddSemanticToken(notTok.Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        }
+        return base.VisitComparison(context);
+    }
+
+    public override string? VisitComp_op(PilotParser.Comp_opContext context)
+    {
+        if (context.IN() != null)
+            AddSemanticToken(context.IN().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.NOT() != null)
+            AddSemanticToken(context.NOT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        return base.VisitComp_op(context);
+    }
     public override string? VisitSelect_arm(PilotParser.Select_armContext context)
     {
         using (EnterScope("select_arm", context))
@@ -2122,6 +2304,14 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
         if (context.literal() is { } lit)
         {
+            if (lit.FSTRING() is { Length: > 0 } fstrings)
+            {
+                foreach (var fstrNode in fstrings)
+                {
+                    ProcessFStringNode(fstrNode);
+                }
+                return "str";
+            }
             return InferLiteralType(lit);
         }
 
@@ -2595,6 +2785,176 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             TokenType = tokenType,
             TokenModifiers = tokenModifiers
         });
+    }
+
+    private void AddSymbolReferenceDirect(int line, int col, int endCol, PilotSymbol symbol)
+    {
+        _result.References.Add(new PilotSymbolReference
+        {
+            Line = line,
+            StartColumn = col,
+            EndColumn = endCol,
+            Symbol = symbol
+        });
+    }
+
+    private void AddSemanticTokenDirect(int line, int col, int length, int tokenType, int tokenModifiers)
+    {
+        _result.SemanticTokens.Add(new PilotSemanticToken
+        {
+            Line = line,
+            StartColumn = col,
+            Length = Math.Max(1, length),
+            TokenType = tokenType,
+            TokenModifiers = tokenModifiers
+        });
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex FStringIdentifierRegex =
+        new(@"\b[a-zA-Z_][a-zA-Z0-9_]*\b", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static readonly HashSet<string> FStringKeywords = new(StringComparer.Ordinal)
+    {
+        "if", "elif", "else", "and", "or", "not", "in", "is", "for", "while",
+        "true", "false", "True", "False", "null", "none", "None", "undefined"
+    };
+
+    private void ProcessFStringNode(ITerminalNode fstrNode)
+    {
+        string rawText = fstrNode.GetText();
+        if (string.IsNullOrEmpty(rawText)) return;
+
+        var (startLine, startCol, _) = GetTokenCoords(fstrNode.Symbol);
+
+        int currentLine = startLine;
+        int currentCol = startCol;
+
+        int i = 0;
+        while (i < rawText.Length)
+        {
+            char c = rawText[i];
+            if (c == '\r')
+            {
+                i++;
+                continue;
+            }
+            if (c == '\n')
+            {
+                currentLine++;
+                currentCol = 0;
+                i++;
+                continue;
+            }
+
+            if (c == '{')
+            {
+                if (i + 1 < rawText.Length && rawText[i + 1] == '{')
+                {
+                    i += 2;
+                    currentCol += 2;
+                    continue;
+                }
+
+                int holeStartCol = currentCol + 1;
+                int holeStartLine = currentLine;
+
+                i++;
+                currentCol++;
+
+                int depth = 1;
+                int exprStartIndex = i;
+                int exprEndIndex = i;
+
+                while (i < rawText.Length && depth > 0)
+                {
+                    char hc = rawText[i];
+                    if (hc == '\r')
+                    {
+                        i++;
+                        continue;
+                    }
+                    if (hc == '\n')
+                    {
+                        currentLine++;
+                        currentCol = 0;
+                        i++;
+                        continue;
+                    }
+
+                    if (hc == '{')
+                    {
+                        depth++;
+                    }
+                    else if (hc == '}')
+                    {
+                        depth--;
+                        if (depth == 0)
+                        {
+                            exprEndIndex = i;
+                            break;
+                        }
+                    }
+
+                    i++;
+                    currentCol++;
+                }
+
+                if (exprEndIndex > exprStartIndex)
+                {
+                    string holeExpr = rawText.Substring(exprStartIndex, exprEndIndex - exprStartIndex);
+                    foreach (System.Text.RegularExpressions.Match match in FStringIdentifierRegex.Matches(holeExpr))
+                    {
+                        int idRelOffset = match.Index;
+                        string idName = match.Value;
+
+                        int idLine = holeStartLine;
+                        int idCol = holeStartCol;
+
+                        for (int k = 0; k < idRelOffset; k++)
+                        {
+                            if (holeExpr[k] == '\n')
+                            {
+                                idLine++;
+                                idCol = 0;
+                            }
+                            else if (holeExpr[k] != '\r')
+                            {
+                                idCol++;
+                            }
+                        }
+
+                        if (FStringKeywords.Contains(idName))
+                        {
+                            AddSemanticTokenDirect(idLine, idCol, match.Length, PilotSemanticTokenLegend.TypeKeyword, 0);
+                        }
+                        else
+                        {
+                            var resolved = _currentScope.Resolve(idName);
+                            if (resolved != null)
+                            {
+                                AddSymbolReferenceDirect(idLine, idCol, idCol + match.Length, resolved);
+                                int mod = (!resolved.IsMutable && resolved.Kind == PilotSymbolKind.Variable) ? PilotSemanticTokenLegend.ModReadonly : 0;
+                                AddSemanticTokenDirect(idLine, idCol, match.Length, GetSemanticTokenTypeForSymbol(resolved), mod);
+                            }
+                            else
+                            {
+                                AddSemanticTokenDirect(idLine, idCol, match.Length, PilotSemanticTokenLegend.TypeVariable, 0);
+                            }
+                        }
+                    }
+                }
+
+                if (i < rawText.Length && rawText[i] == '}')
+                {
+                    i++;
+                    currentCol++;
+                }
+                continue;
+            }
+
+            i++;
+            currentCol++;
+        }
     }
 
     private void AddSymbolReference(IToken token, PilotSymbol symbol)

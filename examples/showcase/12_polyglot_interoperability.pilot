@@ -10,7 +10,7 @@ println("==================================================");
 println("\n--- 1. Python Block & Bidirectional Variable Binding ---");
 
 let pilot_greeting : str = "Greetings from Pilot!";
-let python_echo = "";
+var python_echo = "";
 
 python {
     # pilot_greeting is bound directly from the host scope!

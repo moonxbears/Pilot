@@ -54,6 +54,8 @@ public readonly struct PilotValue : IEquatable<PilotValue>
     public static PilotValue FromFuture(Pilot.Runtime.Concurrency.PilotFuture f) => new(PilotValueKind.Future, f, 0, 0);
     public static PilotValue FromForeign(object? foreign) => foreign == null ? Null : new(PilotValueKind.Foreign, foreign, 0, 0);
     public static PilotValue FromMethodGroup(PilotMethodGroup mg) => new(PilotValueKind.MethodGroup, mg, 0, 0);
+    public static PilotValue FromNativeArray(Pilot.Runtime.NativeMemory.PilotNativeArray na) => new(PilotValueKind.NativeArray, na, 0, 0);
+    public static PilotValue FromNativeMap(Pilot.Runtime.NativeMemory.PilotNativeMap nm) => new(PilotValueKind.NativeMap, nm, 0, 0);
 
     #endregion
 
@@ -134,6 +136,8 @@ public readonly struct PilotValue : IEquatable<PilotValue>
     public PilotLazy AsLazy() => _reference as PilotLazy ?? throw new InvalidCastException($"Expected Lazy, got {Kind}");
     public Pilot.Runtime.Concurrency.PilotFuture AsFuture() => _reference as Pilot.Runtime.Concurrency.PilotFuture ?? throw new InvalidCastException($"Expected Future, got {Kind}");
     public PilotMethodGroup AsMethodGroup() => _reference as PilotMethodGroup ?? throw new InvalidCastException($"Expected MethodGroup, got {Kind}");
+    public Pilot.Runtime.NativeMemory.PilotNativeArray AsNativeArray() => _reference as Pilot.Runtime.NativeMemory.PilotNativeArray ?? throw new InvalidCastException($"Expected NativeArray, got {Kind}");
+    public Pilot.Runtime.NativeMemory.PilotNativeMap AsNativeMap() => _reference as Pilot.Runtime.NativeMemory.PilotNativeMap ?? throw new InvalidCastException($"Expected NativeMap, got {Kind}");
     public object? AsForeign() => _reference;
 
     #endregion
@@ -389,6 +393,18 @@ public readonly struct PilotValue : IEquatable<PilotValue>
                 var map = (Dictionary<PilotValue, PilotValue>)_reference!;
                 return map.TryGetValue(index, out var v) ? v : Undefined;
             }
+            if (Kind == PilotValueKind.NativeArray)
+            {
+                var na = (Pilot.Runtime.NativeMemory.PilotNativeArray)_reference!;
+                int idx = (int)index.AsInt();
+                if (idx < 0) idx += na.Length;
+                return (idx >= 0 && idx < na.Length) ? na.GetValue(idx) : Undefined;
+            }
+            if (Kind == PilotValueKind.NativeMap)
+            {
+                var nm = (Pilot.Runtime.NativeMemory.PilotNativeMap)_reference!;
+                return nm.Get(index);
+            }
             if (Kind == PilotValueKind.String)
             {
                 string s = (string)_reference!;
@@ -400,7 +416,19 @@ public readonly struct PilotValue : IEquatable<PilotValue>
         }
         set
         {
-            if (Kind == PilotValueKind.List)
+            if (Kind == PilotValueKind.NativeArray)
+            {
+                var na = (Pilot.Runtime.NativeMemory.PilotNativeArray)_reference!;
+                int idx = (int)index.AsInt();
+                if (idx < 0) idx += na.Length;
+                if (idx >= 0 && idx < na.Length) na.SetValue(idx, value);
+            }
+            else if (Kind == PilotValueKind.NativeMap)
+            {
+                var nm = (Pilot.Runtime.NativeMemory.PilotNativeMap)_reference!;
+                nm.Set(index, value);
+            }
+            else if (Kind == PilotValueKind.List)
             {
                 var list = (List<PilotValue>)_reference!;
                 int idx = (int)index.AsInt();
@@ -492,12 +520,89 @@ public readonly struct PilotValue : IEquatable<PilotValue>
         }
 
         // Collection methods
+        if (Kind == PilotValueKind.NativeArray)
+        {
+            var na = (Pilot.Runtime.NativeMemory.PilotNativeArray)_reference!;
+            return memberName switch
+            {
+                "length" or "count" => FromInt(na.Length),
+                "to_list" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => FromList(na.ToList()))),
+                "fill" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    if (args.Count > 0) na.Fill(args[0].AsFloat());
+                    return Null;
+                }, "val")),
+                "sum" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => FromFloat(na.Sum()))),
+                "dot" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    if (args.Count > 0 && args[0].Kind == PilotValueKind.NativeArray)
+                    {
+                        return FromFloat(na.Dot(args[0].AsNativeArray()));
+                    }
+                    return FromFloat(0.0);
+                }, "other")),
+                "scale" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    if (args.Count > 0) na.Scale(args[0].AsFloat());
+                    return Null;
+                }, "factor")),
+                "copy_to" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    if (args.Count > 0 && args[0].Kind == PilotValueKind.NativeArray)
+                    {
+                        int cnt = args.Count > 1 ? (int)args[1].AsInt() : -1;
+                        na.CopyTo(args[0].AsNativeArray(), cnt);
+                    }
+                    return Null;
+                }, "dest", "count")),
+                _ => ResolveRootMember(memberName)
+            };
+        }
+
+        if (Kind == PilotValueKind.NativeMap)
+        {
+            var nm = (Pilot.Runtime.NativeMemory.PilotNativeMap)_reference!;
+            return memberName switch
+            {
+                "length" or "count" => FromInt(nm.Count),
+                "to_map" or "to_dict" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => FromMap(nm.ToDictionary()))),
+                "get" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    if (args.Count == 0) return Undefined;
+                    var def = args.Count > 1 ? args[1] : Undefined;
+                    return nm.Get(args[0], def);
+                }, "key", "default")),
+                "set" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    if (args.Count >= 2) nm.Set(args[0], args[1]);
+                    return Null;
+                }, "key", "val")),
+                "has" or "contains" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    return FromBool(args.Count > 0 && nm.Has(args[0]));
+                }, "key")),
+                "delete" or "remove" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    return FromBool(args.Count > 0 && nm.Delete(args[0]));
+                }, "key")),
+                "clear" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) =>
+                {
+                    nm.Clear();
+                    return Null;
+                })),
+                "keys" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => FromList(nm.Keys()))),
+                "values" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => FromList(nm.Values()))),
+                _ => ResolveRootMember(memberName)
+            };
+        }
+
         if (Kind == PilotValueKind.List)
         {
             var list = (List<PilotValue>)_reference!;
             return memberName switch
             {
                 "length" or "count" => FromInt(list.Count),
+                "to_native" or "as_native" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => FromNativeArray(new Pilot.Runtime.NativeMemory.PilotNativeArray(list)))),
                 "append" or "push" => FromFunction(CreateAppendFunction(memberName, list)),
                 "map" => FromFunction(PilotFunction.CreateNative(memberName, (ctx, args) =>
                 {
@@ -549,6 +654,7 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             return memberName switch
             {
                 "length" or "count" => FromInt(map.Count),
+                "to_native" or "as_native" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => FromNativeMap(new Pilot.Runtime.NativeMemory.PilotNativeMap(map)))),
                 "keys" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => FromList(new List<PilotValue>(map.Keys)))),
                 "values" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => FromList(new List<PilotValue>(map.Values)))),
                 "contains_key" or "ContainsKey" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
@@ -816,6 +922,8 @@ public readonly struct PilotValue : IEquatable<PilotValue>
         PilotValueKind.Set => $"#{{{string.Join(", ", (HashSet<PilotValue>)_reference!)}}}",
         PilotValueKind.Range => _reference!.ToString()!,
         PilotValueKind.Matrix => _reference!.ToString()!,
+        PilotValueKind.NativeArray => _reference!.ToString()!,
+        PilotValueKind.NativeMap => _reference!.ToString()!,
         PilotValueKind.Function => _reference!.ToString()!,
         PilotValueKind.Object => _reference!.ToString()!,
         PilotValueKind.Generator => _reference!.ToString()!,

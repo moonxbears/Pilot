@@ -26,5 +26,7 @@ public enum PilotValueKind
     Lazy,
     Future,
     Foreign,
-    MethodGroup
+    MethodGroup,
+    NativeArray,
+    NativeMap
 }

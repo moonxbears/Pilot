@@ -44,7 +44,7 @@ public sealed class PilotScope
             {
                 if (existing.IsConst)
                 {
-                    throw new InvalidOperationException($"Cannot assign to constant variable '{name}'.");
+                    throw new InvalidOperationException($"Cannot assign to immutable binding '{name}' (declared with 'let' or 'const'). Use 'var' if mutation is intended.");
                 }
                 existing.Value = initialValue;
                 return existing;
@@ -66,7 +66,7 @@ public sealed class PilotScope
             {
                 if (binding.IsConst)
                 {
-                    throw new InvalidOperationException($"Cannot assign to constant variable '{name}'.");
+                    throw new InvalidOperationException($"Cannot assign to immutable binding '{name}' (declared with 'let' or 'const'). Use 'var' if mutation is intended.");
                 }
                 binding.Value = value;
                 return true;

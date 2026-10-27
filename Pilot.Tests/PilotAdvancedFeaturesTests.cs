@@ -47,7 +47,7 @@ public class PilotAdvancedFeaturesTests
     {
         string code = @"
             def count_to(limit) {
-                let i = 1;
+                var i = 1;
                 while i <= limit {
                     yield i;
                     i = i + 1;
@@ -82,9 +82,9 @@ public class PilotAdvancedFeaturesTests
     {
         string code = @"
             def fib_gen(n) {
-                let a = 0;
-                let b = 1;
-                let count = 0;
+                var a = 0;
+                var b = 1;
+                var count = 0;
                 while count < n {
                     yield a;
                     let next = a + b;
@@ -146,7 +146,7 @@ public class PilotAdvancedFeaturesTests
     public void Test_Lazy_Evaluation()
     {
         string code = @"
-            let eval_count = 0;
+            var eval_count = 0;
             def compute() {
                 eval_count = eval_count + 1;
                 return 42 * 2;
