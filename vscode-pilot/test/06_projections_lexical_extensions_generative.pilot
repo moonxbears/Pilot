@@ -1,0 +1,81 @@
+# ==============================================================================
+# Concept 06: Structural Projections, Scoped Lexical Extensions & Generative AST
+# ==============================================================================
+
+println("==================================================");
+println(" PILOT SHOWCASE: Projections, Extensions & Generative AST");
+println("==================================================");
+
+# 1. Structural Projection (Lightweight DTO Extraction)
+println("\n--- 1. Structural Projection (Data Shape Extraction) ---");
+
+class SystemWorker {
+    let id: int = 1042;
+    let full_name: str = "Marcus Vance";
+    let department: str = "Quantum Engineering";
+    let salary: float = 145000.0;
+    let internal_db_handle: str = "PGSQL_POOL_0x7FFF9"; # Heavy/private dependency
+}
+
+let heavy_worker = SystemWorker();
+println("Heavy Domain Object contains: id, full_name, department, salary, internal_db_handle");
+
+# Project only specific public fields into an anonymous lightweight DTO:
+let public_dto = heavy_worker -> { full_name, department };
+println("Extracted DTO via arrow projection (worker -> {full_name, department}):");
+println("  DTO Map:        " + public_dto);
+println("  DTO Name:       " + public_dto["full_name"]);
+println("  DTO Department: " + public_dto["department"]);
+
+
+# 2. Lexical Scoped Extensions (Safe Scoped Monkey-Patching)
+println("\n--- 2. Lexical Scoped Extensions ---");
+
+extension StringFormatting on str {
+    def to_shouting(self) {
+        return self.to_upper() + "!!!";
+    }
+
+    def quote_wrapped(self) {
+        return ">> " + self + " <<";
+    }
+}
+
+println("Declared extension StringFormatting with methods: to_shouting(), quote_wrapped().");
+println("Extensions in Pilot are safely restricted to lexical 'with extension' scopes!");
+
+with extension StringFormatting {
+    let phrase = "hello pilot world";
+    println("  Inside 'with extension StringFormatting' scope:");
+    println("    phrase.to_shouting():  " + phrase.to_shouting());
+    println("    phrase.quote_wrapped(): " + phrase.quote_wrapped());
+}
+
+println("Outside the 'with extension' scope, the base type remains completely pristine.");
+
+
+# 3. Compile-Time Generative Classes (AST Injection)
+println("\n--- 3. Compile-Time Generative Classes ---");
+
+class EntityModel {
+    macro create_crud_methods(ast) {
+        for field in ast.fields {
+            ast.add_method(f"get_{field.name}", f"return self.{field.name}");
+        }
+    }
+}
+
+class Product(EntityModel) {
+    name: str
+    sku: str
+}
+
+let laptop = Product();
+laptop.name = "Pilot Developer Rig 16";
+laptop.sku = "RIG-16-PILOT";
+
+println("Generated Methods injected by AST macro into Product instance:");
+println("  laptop.get_name(): " + laptop.get_name());
+println("  laptop.get_sku():  " + laptop.get_sku());
+
+println("\n>>> Concept 06 Demonstration Complete! <<<\n");

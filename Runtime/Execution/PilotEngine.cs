@@ -76,7 +76,7 @@ public sealed class PilotEngine : IPilotEngine
             parser.RemoveErrorListeners();
             parser.AddErrorListener(errorTracker);
 
-            var tree = parser.program();
+            var tree = parser.ParseProgramFast();
 
             if (errorTracker.HasErrors)
             {
@@ -97,8 +97,13 @@ public sealed class PilotEngine : IPilotEngine
                 context.Environment.GlobalScope.Declare(kvp.Key, PilotValue.FromFunction(kvp.Value));
             }
 
-            var visitor = new PilotInterpreterVisitor(context);
+            var visitor = context.GetOrCreateVisitor();
             var resultValue = visitor.VisitProgram(tree);
+            if (context.PendingFlow == PilotFlowSignalKind.Return)
+            {
+                resultValue = context.PendingReturnValue;
+                context.PendingFlow = PilotFlowSignalKind.None;
+            }
 
             var execResult = PilotExecutionResult.CreateSuccess(
                 resultValue,
@@ -151,28 +156,16 @@ public sealed class PilotEngine : IPilotEngine
         var options = new PilotExecutionOptions();
         var context = new PilotExecutionContext(this, options, new PilotEnvironment(scope));
 
-        foreach (var kvp in options.Builtins.GetAll())
+        if (!context.Environment.GlobalScope.ContainsLocal("print"))
         {
-            context.Environment.GlobalScope.Declare(kvp.Key, PilotValue.FromFunction(kvp.Value));
+            foreach (var kvp in options.Builtins.GetAll())
+            {
+                context.Environment.GlobalScope.Declare(kvp.Key, PilotValue.FromFunction(kvp.Value));
+            }
         }
 
-        var inputStream = new AntlrInputStream(expression);
-        var lexer = new PilotLexer(inputStream);
-        var tokenStream = new CommonTokenStream(lexer);
-        var parser = new PilotParser(tokenStream);
-
-        var errorTracker = new ErrorTracker();
-        parser.RemoveErrorListeners();
-        parser.AddErrorListener(errorTracker);
-
-        var tree = parser.test();
-
-        if (errorTracker.HasErrors)
-        {
-            throw new PilotRuntimeException($"Parse error in expression: {errorTracker.Errors[0]}");
-        }
-
-        var visitor = new PilotInterpreterVisitor(context);
+        var tree = PilotParser.GetOrParseExpression(expression);
+        var visitor = context.GetOrCreateVisitor();
         return visitor.Visit(tree);
     }
 
@@ -189,52 +182,54 @@ public sealed class PilotEngine : IPilotEngine
         context.CallDepth++;
 
         var callScope = CreateCallScope(function, arguments, context, "Call");
+        var previousScope = context.Environment.SwapScope(callScope);
+        int deferWatermark = context.DeferStack.Count;
+        int activeExtWatermark = context.ActiveExtensions.Count;
+        int ctxBindWatermark = context.ContextualBindings.Count;
 
-        // Swap scope in environment
-        var previousScope = context.Environment.CurrentScope;
-        var functionContext = new PilotExecutionContext(
-            this,
-            context.Options,
-            new PilotEnvironment(callScope),
-            context.CancellationToken);
-
-        // Propagate active extensions and contextual bindings
-        foreach (var ext in context.ActiveExtensions) functionContext.ActiveExtensions.Push(ext);
-        foreach (var kvp in context.RegisteredExtensions) functionContext.RegisteredExtensions[kvp.Key] = kvp.Value;
-        foreach (var frame in context.ContextualBindings) functionContext.ContextualBindings.Push(frame);
-
-        var methodVisitor = new PilotInterpreterVisitor(functionContext);
+        var methodVisitor = context.GetOrCreateVisitor();
 
         // Design-by-Contract: 1. Evaluate Preconditions (requires)
-        if (function.RequiresContracts.Count > 0)
+        if (function.HasRequiresContracts)
         {
-            foreach (var req in function.RequiresContracts)
+            var reqs = function.RequiresContracts;
+            for (int i = 0; i < reqs.Count; i++)
             {
+                var req = reqs[i];
                 var reqVal = methodVisitor.Visit(req);
                 if (!reqVal.IsTrue)
                 {
+                    context.Environment.SwapScope(previousScope);
+                    context.CallDepth--;
                     throw new Pilot.Runtime.ControlFlow.PilotContractException(
                         $"Precondition failed for '{function.Name}': requires {req.GetText()}");
                 }
             }
         }
 
-        // Design-by-Contract: 2. Pre-evaluate and snapshot old(...) expressions
-        if (function.EnsuresContracts.Count > 0)
+        // Design-by-Contract: 2. Pre-evaluate and snapshot old(...) expressions only if EnsuresContracts exist
+        Dictionary<string, PilotValue>? previousSnapshots = null;
+        bool hasEnsures = function.HasEnsuresContracts;
+        if (hasEnsures)
         {
-            foreach (var ens in function.EnsuresContracts)
+            var snapshots = new Dictionary<string, PilotValue>(StringComparer.Ordinal);
+            var ensures = function.EnsuresContracts;
+            for (int i = 0; i < ensures.Count; i++)
             {
-                SnapshotOldCalls(ens, methodVisitor, functionContext.OldSnapshots);
+                SnapshotOldCalls(ensures[i], methodVisitor, snapshots);
             }
+            previousSnapshots = context.SwapOldSnapshots(snapshots);
         }
 
         void ValidatePostconditions(PilotValue ret)
         {
-            if (function.EnsuresContracts.Count > 0)
+            if (hasEnsures)
             {
                 callScope.Declare("result", ret);
-                foreach (var ens in function.EnsuresContracts)
+                var ensures = function.EnsuresContracts;
+                for (int i = 0; i < ensures.Count; i++)
                 {
+                    var ens = ensures[i];
                     var ensVal = methodVisitor.Visit(ens);
                     if (!ensVal.IsTrue)
                     {
@@ -248,7 +243,7 @@ public sealed class PilotEngine : IPilotEngine
         Pilot.Debugging.PilotStackFrame? debugFrame = null;
         if (context.Debugger != null)
         {
-            debugFrame = context.Debugger.OnFunctionEnter(function.Name, arguments, callScope, functionContext);
+            debugFrame = context.Debugger.OnFunctionEnter(function.Name, arguments, callScope, context);
         }
 
         PilotValue resultVal = PilotValue.Undefined;
@@ -267,6 +262,12 @@ public sealed class PilotEngine : IPilotEngine
                 resultVal = methodVisitor.Visit(function.AstBody!);
             }
 
+            if (context.PendingFlow == PilotFlowSignalKind.Return)
+            {
+                resultVal = context.PendingReturnValue;
+                context.PendingFlow = PilotFlowSignalKind.None;
+            }
+
             ValidatePostconditions(resultVal);
             return resultVal;
         }
@@ -278,11 +279,24 @@ public sealed class PilotEngine : IPilotEngine
         }
         finally
         {
-            functionContext.ExecuteDefers();
+            context.ExecuteDefersDownTo(deferWatermark);
+            while (context.ActiveExtensions.Count > activeExtWatermark)
+            {
+                context.ActiveExtensions.Pop();
+            }
+            while (context.ContextualBindings.Count > ctxBindWatermark)
+            {
+                context.ContextualBindings.Pop();
+            }
+            if (hasEnsures)
+            {
+                context.SwapOldSnapshots(previousSnapshots);
+            }
+            context.Environment.SwapScope(previousScope);
             context.CallDepth--;
             if (context.Debugger != null && debugFrame != null)
             {
-                context.Debugger.OnFunctionExit(debugFrame, resultVal, functionContext);
+                context.Debugger.OnFunctionExit(debugFrame, resultVal, context);
             }
         }
     }
@@ -354,7 +368,7 @@ public sealed class PilotEngine : IPilotEngine
                     return _currentInput;
                 };
 
-                var genVisitor = new PilotInterpreterVisitor(genContext);
+                var genVisitor = genContext.GetOrCreateVisitor();
 
                 if (_function.AstBody is PilotParser.SuiteContext suiteCtx)
                 {
@@ -479,7 +493,7 @@ public sealed class PilotEngine : IPilotEngine
             var p = parameters[i];
             if (p.IsParams)
             {
-                var restArgs = new List<PilotValue>();
+                var restArgs = new List<PilotValue>(Math.Max(0, arguments.Count - argIdx));
                 while (argIdx < arguments.Count)
                 {
                     restArgs.Add(arguments[argIdx++]);

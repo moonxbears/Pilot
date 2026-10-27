@@ -40,7 +40,19 @@ public static class Program
             return ExecuteCompilationSubcommand(args.Skip(1).ToArray());
         }
 
-        // 3. Script run subcommand: pilot run <file.pilot|file.pilc> [args...]
+        // 2b. Binary / Script Patch subcommand: pilot patch <base.pilc|.pilot> <patch.pilot|.pilc> [-o <out.pilc>]
+        if (args.Length > 1 && (args[0] == "patch" || args[0] == "--patch-binary"))
+        {
+            return ExecutePatchSubcommand(args.Skip(1).ToArray());
+        }
+
+        // 2c. Live Hot-Reload Watch subcommand: pilot watch <file.pilot|.pilc> [args...]
+        if (args.Length > 1 && (args[0] == "watch" || args[0] == "--watch"))
+        {
+            return ExecuteWatchSubcommand(args.Skip(1).ToArray());
+        }
+
+        // 3. Script run subcommand: pilot run <file.pilot|file.pilc> [--patch <patch.pilot|.pilc>] [args...]
         if (args.Length > 1 && (args[0] == "run"))
         {
             string scriptFile = args[1];
@@ -76,7 +88,8 @@ public static class Program
         }
 
         // 4. Direct script execution if first argument is a file: pilot script.pilot [args...] or pilot script.pilc [args...]
-        if (args.Length > 0 && !args[0].StartsWith("-") &&
+        bool hasToolingFlags = args.Any(a => a is "--emit" or "--target" or "--from" or "--ingest" or "--tokens" or "--tree");
+        if (!hasToolingFlags && args.Length > 0 && !args[0].StartsWith("-") &&
             (args[0].EndsWith(".pilot", StringComparison.OrdinalIgnoreCase) || args[0].EndsWith(".pilc", StringComparison.OrdinalIgnoreCase)) &&
             File.Exists(args[0]))
         {
@@ -92,6 +105,7 @@ public static class Program
         string? emitTarget = null;
         string? fromSource = null;
         string? targetFile = null;
+        string? outputFile = null;
         var definedSymbols = new List<string>();
         var scriptArgsList = new List<string>();
 
@@ -113,6 +127,10 @@ public static class Program
             {
                 definedSymbols.Add(args[++i]);
             }
+            else if ((args[i] == "-o" || args[i] == "--output") && i + 1 < args.Length)
+            {
+                outputFile = args[++i];
+            }
             else if (!args[i].StartsWith("-"))
             {
                 if (targetFile == null)
@@ -131,10 +149,27 @@ public static class Program
             return new PilotRepl().Run();
         }
 
+        if (!string.IsNullOrEmpty(fromSource) && !string.IsNullOrEmpty(targetFile) && Directory.Exists(targetFile))
+        {
+            string outDir = outputFile ?? (targetFile.TrimEnd('/', '\\') + "_pilot");
+            var libRes = Pilot.Transpilation.PilotLibraryTranspiler.IngestLibraryToPilot(targetFile, outDir, fromSource);
+            Console.WriteLine($"[LIBRARY INGEST] Converted {libRes.GeneratedFiles.Count} files into '{outDir}'");
+            return libRes.Success ? 0 : 1;
+        }
+        if (!string.IsNullOrEmpty(emitTarget) && !string.IsNullOrEmpty(targetFile) && Directory.Exists(targetFile))
+        {
+            string outDir = outputFile ?? (targetFile.TrimEnd('/', '\\') + "_" + emitTarget);
+            var libRes = Pilot.Transpilation.PilotLibraryTranspiler.TranspilePilotLibraryToTarget(targetFile, outDir, emitTarget);
+            Console.WriteLine($"[LIBRARY EMIT] Transpiled {libRes.GeneratedFiles.Count} files into '{outDir}'");
+            return libRes.Success ? 0 : 1;
+        }
         if (!string.IsNullOrEmpty(fromSource) && !string.IsNullOrEmpty(targetFile) && File.Exists(targetFile))
         {
             string foreignCode = File.ReadAllText(targetFile);
-            var result = Pilot.Transpilation.TranspilationRegistry.Default.Ingest(foreignCode, fromSource);
+            string resolvedSourceLang = string.Equals(fromSource, "auto", StringComparison.OrdinalIgnoreCase)
+                ? Pilot.Transpilation.TranspilationRegistry.InferLanguageFromPath(targetFile)
+                : fromSource;
+            var result = Pilot.Transpilation.TranspilationRegistry.Default.Ingest(foreignCode, resolvedSourceLang);
             if (!result.Success)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
@@ -142,7 +177,7 @@ public static class Program
                 Console.ResetColor();
                 return 1;
             }
-            Console.WriteLine(result.Code);
+            if (!string.IsNullOrEmpty(outputFile)) { File.WriteAllText(outputFile, result.Code); Console.WriteLine($"[ output written to '{outputFile}' ]"); } else { Console.WriteLine(result.Code); }
             return 0;
         }
 
@@ -181,7 +216,7 @@ public static class Program
                 Console.ResetColor();
                 return 1;
             }
-            Console.WriteLine(result.Code);
+            if (!string.IsNullOrEmpty(outputFile)) { File.WriteAllText(outputFile, result.Code); Console.WriteLine($"[ output written to '{outputFile}' ]"); } else { Console.WriteLine(result.Code); }
             return 0;
         }
 
@@ -276,7 +311,58 @@ public static class Program
             return 1;
         }
 
-        var result = PilotScript.RunFile(filePath, scriptArgs);
+        var patchFiles = new List<string>();
+        var cleanArgs = new List<string>();
+        for (int i = 0; i < scriptArgs.Length; i++)
+        {
+            if ((scriptArgs[i] == "--patch" || scriptArgs[i] == "-p") && i + 1 < scriptArgs.Length)
+            {
+                patchFiles.Add(scriptArgs[++i]);
+            }
+            else
+            {
+                cleanArgs.Add(scriptArgs[i]);
+            }
+        }
+
+        if (patchFiles.Count > 0)
+        {
+            byte[] baseBytes = File.ReadAllBytes(filePath);
+            PilotCompiledProgram baseProg;
+            if (Pilot.Runtime.HotReload.PilotHotReloadSession.IsCompiledBinary(baseBytes, filePath))
+            {
+                baseProg = PilotCompiledProgram.FromBytes(baseBytes, filePath);
+            }
+            else
+            {
+                var comp = PilotCompiler.Default.CompileFile(filePath);
+                if (!comp.Success || comp.Program is not PilotCompiledProgram compiledBase)
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"[COMPILATION ERROR] {string.Join("; ", comp.Diagnostics)}");
+                    Console.ResetColor();
+                    return 1;
+                }
+                baseProg = compiledBase;
+            }
+
+            foreach (var pf in patchFiles)
+            {
+                baseProg = baseProg.ApplyPatchFile(pf);
+            }
+
+            var patchedRes = baseProg.RunWithArgs(cleanArgs.ToArray());
+            if (!patchedRes.Success)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"[PATCHED RUN ERROR] {string.Join("; ", patchedRes.Diagnostics)}");
+                Console.ResetColor();
+                return 1;
+            }
+            return 0;
+        }
+
+        var result = PilotScript.RunFile(filePath, cleanArgs.ToArray());
         if (!result.Success)
         {
             Console.ForegroundColor = ConsoleColor.Red;
@@ -290,6 +376,133 @@ public static class Program
         }
 
         return 0;
+    }
+
+    private static int ExecutePatchSubcommand(string[] args)
+    {
+        string? baseFile = null;
+        var patchFiles = new List<string>();
+        string? outputFile = null;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            if ((args[i] == "-o" || args[i] == "--output") && i + 1 < args.Length)
+            {
+                outputFile = args[++i];
+            }
+            else if (!args[i].StartsWith("-"))
+            {
+                if (baseFile == null) baseFile = args[i];
+                else patchFiles.Add(args[i]);
+            }
+        }
+
+        if (string.IsNullOrEmpty(baseFile) || patchFiles.Count == 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("[ERROR] Usage: pilot patch <base.pilc|base.pilot> <patch.pilot|patch.pilc> [-o <out.pilc|out.pilot>]");
+            Console.ResetColor();
+            return 1;
+        }
+
+        if (!File.Exists(baseFile))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[ERROR] Base file not found: '{baseFile}'");
+            Console.ResetColor();
+            return 1;
+        }
+
+        byte[] baseBytes = File.ReadAllBytes(baseFile);
+        PilotCompiledProgram currentProg;
+        if (Pilot.Runtime.HotReload.PilotHotReloadSession.IsCompiledBinary(baseBytes, baseFile))
+        {
+            currentProg = PilotCompiledProgram.FromBytes(baseBytes, baseFile);
+        }
+        else
+        {
+            var comp = PilotCompiler.Default.CompileFile(baseFile);
+            if (!comp.Success || comp.Program is not PilotCompiledProgram compiledBase)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"[PATCH ERROR] Base compilation failed: {string.Join("; ", comp.Diagnostics)}");
+                Console.ResetColor();
+                return 1;
+            }
+            currentProg = compiledBase;
+        }
+
+        foreach (var pf in patchFiles)
+        {
+            if (!File.Exists(pf))
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"[ERROR] Patch file not found: '{pf}'");
+                Console.ResetColor();
+                return 1;
+            }
+            currentProg = currentProg.ApplyPatchFile(pf);
+        }
+
+        outputFile ??= baseFile;
+        if (outputFile.EndsWith(".pilot", StringComparison.OrdinalIgnoreCase))
+        {
+            File.WriteAllText(outputFile, currentProg.Source);
+        }
+        else
+        {
+            currentProg.Save(outputFile);
+        }
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"[PATCH SUCCESS] Applied {patchFiles.Count} patch(es) to '{baseFile}' -> '{outputFile}'");
+        Console.ResetColor();
+        return 0;
+    }
+
+    private static int ExecuteWatchSubcommand(string[] args)
+    {
+        if (args.Length == 0 || !File.Exists(args[0]))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("[ERROR] Usage: pilot watch <file.pilot|file.pilc>");
+            Console.ResetColor();
+            return 1;
+        }
+
+        string filePath = Path.GetFullPath(args[0]);
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"[HOT-RELOAD WATCH] Watching '{filePath}' for live patches (Ctrl+C to stop)...");
+        Console.ResetColor();
+
+        var engine = new Pilot.Runtime.Execution.PilotEngine();
+        var execResult = File.ReadAllBytes(filePath) is var raw && Pilot.Runtime.HotReload.PilotHotReloadSession.IsCompiledBinary(raw, filePath)
+            ? PilotCompiledProgram.FromBytes(raw, filePath).Run()
+            : engine.ExecuteFile(filePath);
+
+        if (execResult.Context != null)
+        {
+            execResult.Context.HotReload.WatchFile(
+                filePath,
+                Pilot.Runtime.Values.PilotFunction.CreateNative("on_watch_reload", (_, cbArgs) =>
+                {
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine($"[HOT-RELOAD] Applied patch revision v{execResult.Context.HotReload.Version} from '{Path.GetFileName(filePath)}'");
+                    Console.ResetColor();
+                    return Pilot.Runtime.Values.PilotValue.Null;
+                }));
+
+            using var exitEvent = new System.Threading.ManualResetEventSlim(false);
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                exitEvent.Set();
+            };
+            exitEvent.Wait();
+            execResult.Context.HotReload.Dispose();
+        }
+
+        return execResult.Success ? 0 : 1;
     }
 
     private static int ExecutePackageSubcommand(string[] args)
@@ -546,7 +759,7 @@ public static class Program
         parser.RemoveErrorListeners();
         parser.AddErrorListener(errorListener);
 
-        var tree = parser.program();
+        var tree = parser.ParseProgramFast();
 
         if (errorListener.HasErrors)
         {

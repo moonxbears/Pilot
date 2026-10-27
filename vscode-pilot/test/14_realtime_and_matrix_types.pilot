@@ -1,0 +1,49 @@
+# ==============================================================================
+# Concept 14: Real-Time Determinism, Sized Primitives & Dimensional Literals
+# ==============================================================================
+
+println("==================================================");
+println(" PILOT SHOWCASE: Real-Time & Sized Primitives");
+println("==================================================");
+
+# 1. Real-Time Dimensional Literals (Time, Frequency & Memory)
+println("\n--- 1. Real-Time Dimensional Literals ---");
+
+let clock_tick = 25ns;
+let sensor_deadline = 250us;
+let cycle_duration = 10ms;
+let network_timeout = 2s;
+
+let sampling_freq = 50kHz;
+let wifi_carrier = 2.4GHz;
+
+let l1_cache_size = 64KB;
+let heap_arena_cap = 16MB;
+
+println("Duration Literals:  clock=" + clock_tick + ", deadline=" + sensor_deadline + ", cycle=" + cycle_duration + ", timeout=" + network_timeout);
+println("Frequency Literals: sample_rate=" + sampling_freq + ", carrier=" + wifi_carrier);
+println("Memory Literals:    cache=" + l1_cache_size + ", arena=" + heap_arena_cap);
+
+
+# 2. Sized Signed and Unsigned Primitives
+println("\n--- 2. Sized Explicit Bit-Width Primitives ---");
+
+let byte_val : u8 = 255;
+let short_signed : i16 = 32767;
+let standard_int : i32 = 2147483647;
+let precision_float : f64 = 3.141592653589793;
+
+println("Unsigned 8-bit  (u8):  " + byte_val);
+println("Signed 16-bit   (i16): " + short_signed);
+println("Signed 32-bit   (i32): " + standard_int);
+println("Precision float (f64): " + precision_float);
+
+
+# 3. Binary Byte Buffers
+println("\n--- 3. Raw Byte Buffers ---");
+
+let raw_header = [ 80, 73, 76, 79, 84 ]; # 'PILOT' in ASCII
+println("Constructed byte buffer: " + raw_header);
+println("Buffer Length: " + raw_header.length + " bytes");
+
+println("\n>>> Concept 14 Demonstration Complete! <<<\n");

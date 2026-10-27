@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Pilot.Transpilation.Targets;
 
 namespace Pilot.Transpilation;
 
 /// <summary>
 /// Registry of active compile-time target language converters for Pilot.
-/// Follows a decoupled, plug-and-play architecture.
+/// Supports Python, Lua, JavaScript, C++, C, Rust, and C#.
 /// </summary>
 public sealed class TranspilationRegistry
 {
@@ -17,9 +18,17 @@ public sealed class TranspilationRegistry
 
     public TranspilationRegistry()
     {
-        Register(new PythonTargetConverter());
+        Register(new PythonTargetConverter("python"));
+        Register(new PythonTargetConverter("py"));
+        Register(new LuaTargetConverter());
+        Register(new JavaScriptTargetConverter("js"));
+        Register(new JavaScriptTargetConverter("javascript"));
+        Register(new CTargetConverter());
+        Register(new CppTargetConverter("cpp"));
+        Register(new CppTargetConverter("c++"));
+        Register(new RustTargetConverter("rust"));
+        Register(new RustTargetConverter("rs"));
         Register(new CSharpTargetConverter());
-        Register(new RustTargetConverter());
     }
 
     public void Register(ITargetLanguageConverter converter)
@@ -46,12 +55,95 @@ public sealed class TranspilationRegistry
     public TranspilationResult Transpile(string pilotSource, string targetLanguage, TranspilationOptions? options = null)
     {
         var converter = Get(targetLanguage);
-        return converter.TranspileSource(pilotSource, options ?? new TranspilationOptions());
+        var res = converter.TranspileSource(pilotSource, options ?? new TranspilationOptions());
+        if (!res.Success)
+            return res;
+
+        string mappedCode = PilotLibraryMapper.TranslatePilotLibrariesToTarget(res.Code, targetLanguage);
+        if (PilotLibraryMapper.UsesMatrixPrimitives(pilotSource))
+        {
+            string preamble = PilotLibraryMapper.GetMatrixRuntimePreamble(targetLanguage);
+            if (!string.IsNullOrEmpty(preamble) && !mappedCode.Contains(preamble.Trim(), StringComparison.Ordinal))
+            {
+                mappedCode = InjectPreambleAfterHeaders(mappedCode, preamble, targetLanguage);
+            }
+        }
+        return TranspilationResult.CreateSuccess(mappedCode, res.TargetLanguage);
     }
 
     public TranspilationResult Ingest(string foreignSource, string sourceLanguage, TranspilationOptions? options = null)
     {
         var converter = Get(sourceLanguage);
-        return converter.IngestToPilot(foreignSource, options ?? new TranspilationOptions());
+        var lines = foreignSource.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+        for (int i = 0; i < lines.Length; i++)
+        {
+            lines[i] = PilotLibraryMapper.TranslateForeignLibrariesToPilot(lines[i], sourceLanguage);
+        }
+        string preMapped = string.Join(Environment.NewLine, lines);
+        return converter.IngestToPilot(preMapped, options ?? new TranspilationOptions());
     }
+
+    private static string InjectPreambleAfterHeaders(string code, string preamble, string targetLang)
+    {
+        string lang = targetLang.ToLowerInvariant();
+        if (lang is "c" or "cpp" or "c++")
+        {
+            int lastInclude = code.LastIndexOf("#include", StringComparison.Ordinal);
+            if (lastInclude >= 0)
+            {
+                int lineEnd = code.IndexOf('\n', lastInclude);
+                if (lineEnd >= 0)
+                {
+                    return code[..(lineEnd + 1)] + Environment.NewLine + preamble.Trim() + Environment.NewLine + code[(lineEnd + 1)..];
+                }
+            }
+        }
+        else if (lang is "python" or "py")
+        {
+            int lastImport = code.LastIndexOf("from typing import", StringComparison.Ordinal);
+            if (lastImport >= 0)
+            {
+                int lineEnd = code.IndexOf('\n', lastImport);
+                if (lineEnd >= 0)
+                {
+                    return code[..(lineEnd + 1)] + preamble.Trim() + Environment.NewLine + code[(lineEnd + 1)..];
+                }
+            }
+        }
+        return preamble.Trim() + Environment.NewLine + Environment.NewLine + code;
+    }
+
+    /// <summary>
+    /// Infers the source/target language identifier from a file path extension.
+    /// </summary>
+    public static string InferLanguageFromPath(string filePath)
+    {
+        string ext = Path.GetExtension(filePath).ToLowerInvariant();
+        return ext switch
+        {
+            ".py" => "python",
+            ".lua" => "lua",
+            ".js" or ".mjs" or ".cjs" or ".ts" => "js",
+            ".c" or ".h" => "c",
+            ".cpp" or ".cc" or ".cxx" or ".hpp" => "cpp",
+            ".rs" => "rust",
+            ".cs" => "csharp",
+            _ => "python"
+        };
+    }
+
+    /// <summary>
+    /// Returns the default file extension for a given target language.
+    /// </summary>
+    public static string GetDefaultExtension(string targetLanguage) => targetLanguage.ToLowerInvariant() switch
+    {
+        "python" or "py" => ".py",
+        "lua" => ".lua",
+        "js" or "javascript" => ".js",
+        "c" => ".c",
+        "cpp" or "c++" => ".cpp",
+        "rust" or "rs" => ".rs",
+        "csharp" or "cs" => ".cs",
+        _ => ".txt"
+    };
 }

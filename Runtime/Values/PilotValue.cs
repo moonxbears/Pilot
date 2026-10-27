@@ -196,6 +196,9 @@ public readonly struct PilotValue : IEquatable<PilotValue>
 
     public static PilotValue operator +(PilotValue a, PilotValue b)
     {
+        if (a.Kind == PilotValueKind.Int && b.Kind == PilotValueKind.Int)
+            return new(PilotValueKind.Int, null, a._integer + b._integer, 0);
+
         if (a.Kind == PilotValueKind.String || b.Kind == PilotValueKind.String)
             return FromString(a.ToString() + b.ToString());
 
@@ -219,6 +222,9 @@ public readonly struct PilotValue : IEquatable<PilotValue>
 
     public static PilotValue operator -(PilotValue a, PilotValue b)
     {
+        if (a.Kind == PilotValueKind.Int && b.Kind == PilotValueKind.Int)
+            return new(PilotValueKind.Int, null, a._integer - b._integer, 0);
+
         // Class Algebraic Subtraction: ClassA - ClassB or ClassA - "member"
         if (a.Kind == PilotValueKind.Function && a.AsFunction().ClassDef != null)
         {
@@ -247,6 +253,9 @@ public readonly struct PilotValue : IEquatable<PilotValue>
 
     public static PilotValue operator *(PilotValue a, PilotValue b)
     {
+        if (a.Kind == PilotValueKind.Int && b.Kind == PilotValueKind.Int)
+            return new(PilotValueKind.Int, null, a._integer * b._integer, 0);
+
         if (a.Kind == PilotValueKind.Matrix && b.Kind == PilotValueKind.Matrix)
         {
             return FromMatrix(a.AsMatrix().Multiply(b.AsMatrix()));
@@ -273,6 +282,12 @@ public readonly struct PilotValue : IEquatable<PilotValue>
 
     public static PilotValue operator /(PilotValue a, PilotValue b)
     {
+        if (a.Kind == PilotValueKind.Int && b.Kind == PilotValueKind.Int)
+        {
+            if (b._integer == 0) throw new PilotDivideByZeroException("Division by zero.");
+            return new(PilotValueKind.Int, null, a._integer / b._integer, 0);
+        }
+
         if (a.Kind == PilotValueKind.Float || b.Kind == PilotValueKind.Float)
         {
             double divisor = b.AsFloat();
@@ -287,6 +302,12 @@ public readonly struct PilotValue : IEquatable<PilotValue>
 
     public static PilotValue operator %(PilotValue a, PilotValue b)
     {
+        if (a.Kind == PilotValueKind.Int && b.Kind == PilotValueKind.Int)
+        {
+            if (b._integer == 0) throw new PilotDivideByZeroException("Modulo by zero.");
+            return new(PilotValueKind.Int, null, a._integer % b._integer, 0);
+        }
+
         if (a.Kind == PilotValueKind.Float || b.Kind == PilotValueKind.Float)
         {
             double divisor = b.AsFloat();
@@ -301,7 +322,8 @@ public readonly struct PilotValue : IEquatable<PilotValue>
 
     public static PilotValue operator -(PilotValue a)
     {
-        if (a.Kind == PilotValueKind.Float) return FromFloat(-a.AsFloat());
+        if (a.Kind == PilotValueKind.Int) return new(PilotValueKind.Int, null, -a._integer, 0);
+        if (a.Kind == PilotValueKind.Float) return FromFloat(-a._floating);
         return FromInt(-a.AsInt());
     }
 
@@ -311,24 +333,32 @@ public readonly struct PilotValue : IEquatable<PilotValue>
     public static bool operator !=(PilotValue a, PilotValue b) => !a.Equals(b);
 
     public static bool operator <(PilotValue a, PilotValue b) =>
-        (a.Kind == PilotValueKind.Float || b.Kind == PilotValueKind.Float)
-            ? a.AsFloat() < b.AsFloat()
-            : a.AsInt() < b.AsInt();
+        (a.Kind == PilotValueKind.Int && b.Kind == PilotValueKind.Int)
+            ? a._integer < b._integer
+            : (a.Kind == PilotValueKind.Float || b.Kind == PilotValueKind.Float)
+                ? a.AsFloat() < b.AsFloat()
+                : a.AsInt() < b.AsInt();
 
     public static bool operator <=(PilotValue a, PilotValue b) =>
-        (a.Kind == PilotValueKind.Float || b.Kind == PilotValueKind.Float)
-            ? a.AsFloat() <= b.AsFloat()
-            : a.AsInt() <= b.AsInt();
+        (a.Kind == PilotValueKind.Int && b.Kind == PilotValueKind.Int)
+            ? a._integer <= b._integer
+            : (a.Kind == PilotValueKind.Float || b.Kind == PilotValueKind.Float)
+                ? a.AsFloat() <= b.AsFloat()
+                : a.AsInt() <= b.AsInt();
 
     public static bool operator >(PilotValue a, PilotValue b) =>
-        (a.Kind == PilotValueKind.Float || b.Kind == PilotValueKind.Float)
-            ? a.AsFloat() > b.AsFloat()
-            : a.AsInt() > b.AsInt();
+        (a.Kind == PilotValueKind.Int && b.Kind == PilotValueKind.Int)
+            ? a._integer > b._integer
+            : (a.Kind == PilotValueKind.Float || b.Kind == PilotValueKind.Float)
+                ? a.AsFloat() > b.AsFloat()
+                : a.AsInt() > b.AsInt();
 
     public static bool operator >=(PilotValue a, PilotValue b) =>
-        (a.Kind == PilotValueKind.Float || b.Kind == PilotValueKind.Float)
-            ? a.AsFloat() >= b.AsFloat()
-            : a.AsInt() >= b.AsInt();
+        (a.Kind == PilotValueKind.Int && b.Kind == PilotValueKind.Int)
+            ? a._integer >= b._integer
+            : (a.Kind == PilotValueKind.Float || b.Kind == PilotValueKind.Float)
+                ? a.AsFloat() >= b.AsFloat()
+                : a.AsInt() >= b.AsInt();
 
     #endregion
 
@@ -408,10 +438,12 @@ public readonly struct PilotValue : IEquatable<PilotValue>
         if (Kind == PilotValueKind.Function)
         {
             var fn = (PilotFunction)_reference!;
-            if (fn.Members.TryGetValue(memberName, out var memberVal))
+            if (fn.TryGetMember(memberName, out var memberVal))
             {
                 return memberVal;
             }
+            if (memberName == "patch_version") return FromInt(fn.PatchVersion);
+            if (memberName == "signature") return FromString(fn.GetSignatureKey());
             if (fn.ClassDef != null)
             {
                 if (fn.ClassDef.MethodGroups.TryGetValue(memberName, out var mg))
@@ -699,6 +731,9 @@ public readonly struct PilotValue : IEquatable<PilotValue>
 
     public bool Equals(PilotValue other)
     {
+        if (Kind == PilotValueKind.Int && other.Kind == PilotValueKind.Int)
+            return _integer == other._integer;
+
         if (Kind != other.Kind)
         {
             if (IsNumber && other.IsNumber)

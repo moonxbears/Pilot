@@ -52,9 +52,34 @@ public sealed class PilotMethodGroup
 
     public void AddOverload(PilotFunction function)
     {
-        if (function != null && !Overloads.Contains(function))
+        if (function == null) return;
+        if (Overloads.Contains(function)) return;
+
+        string sig = function.GetSignatureKey();
+        for (int i = 0; i < Overloads.Count; i++)
         {
-            Overloads.Add(function);
+            if (Overloads[i].GetSignatureKey() == sig)
+            {
+                Overloads[i].ApplyPatchFrom(function);
+                return;
+            }
+        }
+
+        Overloads.Add(function);
+    }
+
+    public PilotMethodGroup CloneSnapshot()
+    {
+        var clones = Overloads.Select(o => o.CloneSnapshot()).ToList();
+        return new PilotMethodGroup(Name, clones, TargetInstance, BoundArguments);
+    }
+
+    public void RestoreFromSnapshot(PilotMethodGroup snapshot)
+    {
+        Overloads.Clear();
+        foreach (var fn in snapshot.Overloads)
+        {
+            Overloads.Add(fn.CloneSnapshot());
         }
     }
 

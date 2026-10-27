@@ -139,7 +139,7 @@ public sealed class PilotSymbol
 {
     public string Name { get; init; } = string.Empty;
     public PilotSymbolKind Kind { get; init; }
-    public string TypeName { get; set; } = "any";
+    public string TypeName { get; init; } = "any";
     public bool IsMutable { get; init; }
     public bool IsConstant { get; init; }
     public bool IsAsync { get; init; }
@@ -297,11 +297,13 @@ public sealed class PilotAnalysisResult
     public List<PilotSemanticToken> SemanticTokens { get; } = new();
     public List<PilotSymbolReference> References { get; } = new();
     public List<PilotSymbol> TopLevelSymbols { get; } = new();
+    public List<Pilot.Preprocessing.CodeRegion> Regions { get; init; } = new();
 
     public PilotSymbol? FindSymbolAtPosition(int line, int character)
     {
-        foreach (var r in References)
+        for (int i = 0; i < References.Count; i++)
         {
+            var r = References[i];
             if (r.Line == line && character >= r.StartColumn && character <= r.EndColumn)
                 return r.Symbol;
         }
@@ -325,20 +327,34 @@ public sealed class PilotAnalysisResult
 
     public int[] EncodeSemanticTokens()
     {
-        var sorted = SemanticTokens
-            .Where(t => t.Length > 0 && t.Line >= 0 && t.StartColumn >= 0)
-            .GroupBy(t => (t.Line, t.StartColumn))
-            .Select(g => g.Last())
-            .OrderBy(t => t.Line)
-            .ThenBy(t => t.StartColumn)
-            .ToList();
+        if (SemanticTokens.Count == 0)
+            return Array.Empty<int>();
+
+        // Deduplicate by (Line, StartColumn) keeping the last emitted token, then sort
+        var uniqueByPos = new Dictionary<(int Line, int Col), PilotSemanticToken>(SemanticTokens.Count);
+        for (int i = 0; i < SemanticTokens.Count; i++)
+        {
+            var t = SemanticTokens[i];
+            if (t.Length > 0 && t.Line >= 0 && t.StartColumn >= 0)
+            {
+                uniqueByPos[(t.Line, t.StartColumn)] = t;
+            }
+        }
+
+        var sorted = new List<PilotSemanticToken>(uniqueByPos.Values);
+        sorted.Sort(static (a, b) =>
+        {
+            int cmp = a.Line.CompareTo(b.Line);
+            return cmp != 0 ? cmp : a.StartColumn.CompareTo(b.StartColumn);
+        });
 
         var data = new List<int>(sorted.Count * 5);
         int prevLine = 0;
         int prevChar = 0;
 
-        foreach (var tok in sorted)
+        for (int i = 0; i < sorted.Count; i++)
         {
+            var tok = sorted[i];
             int deltaLine = tok.Line - prevLine;
             int deltaStart = deltaLine == 0 ? tok.StartColumn - prevChar : tok.StartColumn;
             if (deltaStart < 0) continue;

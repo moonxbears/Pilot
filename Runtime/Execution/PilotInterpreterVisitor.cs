@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -19,6 +20,59 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 {
     public PilotExecutionContext Context { get; }
     private PilotClassDefinition? _currentClassDef;
+
+    private static readonly ConcurrentDictionary<PilotParser.LiteralContext, PilotValue> LiteralCache =
+        new(ReferenceEqualityComparer.Instance);
+
+    private static readonly ConcurrentDictionary<IParseTree, bool> ContainsYieldCache =
+        new(ReferenceEqualityComparer.Instance);
+
+    private static readonly ConcurrentDictionary<string, FStringSegment[]> FStringCache =
+        new(StringComparer.Ordinal);
+
+    private static readonly ConcurrentDictionary<PilotParser.TestContext, TargetAssignmentInfo> TargetCache =
+        new(ReferenceEqualityComparer.Instance);
+
+    private static readonly List<PilotValue> EmptyPositional = new(0);
+    private static readonly Dictionary<string, PilotValue> EmptyNamed = new(StringComparer.Ordinal);
+    private static readonly HashSet<int> EmptyEachPos = new();
+    private static readonly HashSet<string> EmptyEachNamed = new(StringComparer.Ordinal);
+
+    private readonly struct FStringSegment
+    {
+        public readonly bool IsExpression;
+        public readonly string Text;
+        public readonly bool IsSimpleIdentifier;
+        public readonly PilotParser.TestContext? ParsedExpr;
+
+        public FStringSegment(bool isExpression, string text, bool isSimpleIdentifier, PilotParser.TestContext? parsedExpr)
+        {
+            IsExpression = isExpression;
+            Text = text;
+            IsSimpleIdentifier = isSimpleIdentifier;
+            ParsedExpr = parsedExpr;
+        }
+    }
+
+    private enum TargetAssignmentKind : byte
+    {
+        Fallback = 0,
+        SimpleIdentifier = 1,
+        MemberAccess = 2,
+        IndexAccess = 3,
+        ContractForward = 4
+    }
+
+    private sealed class TargetAssignmentInfo
+    {
+        public TargetAssignmentKind Kind;
+        public string TargetText = string.Empty;
+        public string? Identifier;
+        public PilotParser.Atom_exprContext? AtomExpr;
+        public int ReceiverTrailerCount;
+        public PilotParser.TestContext? IndexExpr;
+        public string? NormalizedContract;
+    }
 
     public PilotInterpreterVisitor(PilotExecutionContext context)
     {
@@ -45,6 +99,15 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             foreach (var stmt in context.stmt())
             {
                 lastValue = Visit(stmt);
+                if (Context.PendingFlow != PilotFlowSignalKind.None)
+                {
+                    if (Context.PendingFlow == PilotFlowSignalKind.Return)
+                    {
+                        lastValue = Context.PendingReturnValue;
+                    }
+                    Context.PendingFlow = PilotFlowSignalKind.None;
+                    break;
+                }
             }
         }
         catch (PilotReturnSignal ret)
@@ -88,6 +151,8 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 Context.Debugger.BeforeExecuteStatement(smalls[i].Start.Line, smalls[i].Start.Column, Context);
             }
             lastVal = Visit(smalls[i]);
+            if (Context.PendingFlow != PilotFlowSignalKind.None)
+                break;
         }
         return lastVal;
     }
@@ -105,6 +170,8 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             foreach (var stmt in context.stmt())
             {
                 lastVal = Visit(stmt);
+                if (Context.PendingFlow != PilotFlowSignalKind.None)
+                    break;
             }
         }
         return lastVal;
@@ -461,8 +528,9 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         if (context.EQUAL() != null && context.EQUAL().Length > 0 && context.test() != null && context.test().Length > 0)
         {
             // Simple assignment: a = val
-            var rhsVal = Visit(context.test(0));
-            AssignTarget(tests[0], rhsVal, context.test(0).GetText());
+            var rhsNode = context.test(0);
+            var rhsVal = Visit(rhsNode);
+            AssignTarget(tests[0], rhsVal, rhsNode);
             return rhsVal;
         }
 
@@ -493,19 +561,217 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         return result;
     }
 
-    private void AssignTarget(PilotParser.TestContext targetContext, PilotValue value, string? rhsText = null)
+    private static PilotParser.Atom_exprContext? TryUnwrapAtomExpr(PilotParser.TestContext test)
     {
-        string targetText = targetContext.GetText();
+        if (test.lambda_expr() != null || test.IF() != null) return null;
+        var pipes = test.pipe_expr();
+        if (pipes == null || pipes.Length != 1) return null;
+        var queries = pipes[0].set_query_expr();
+        if (queries == null || queries.Length != 1) return null;
+        var coalesces = queries[0].coalesce_expr();
+        if (coalesces == null || coalesces.Length != 1) return null;
+        var ors = coalesces[0].or_test();
+        if (ors == null || ors.Length != 1) return null;
+        var ands = ors[0].and_test();
+        if (ands == null || ands.Length != 1) return null;
+        var notTests = ands[0].not_test();
+        if (notTests == null || notTests.Length != 1 || notTests[0].NOT() != null) return null;
+        var comp = notTests[0].comparison();
+        if (comp == null || comp.comp_op()?.Length > 0 || comp.IS()?.Length > 0) return null;
+        var ranges = comp.range_expr();
+        if (ranges == null || ranges.Length != 1) return null;
+        var bitors = ranges[0].bitor_expr();
+        if (bitors == null || bitors.Length != 1) return null;
+        var bitxors = bitors[0].bitxor_expr();
+        if (bitxors == null || bitxors.Length != 1) return null;
+        var bitands = bitxors[0].bitand_expr();
+        if (bitands == null || bitands.Length != 1) return null;
+        var shifts = bitands[0].shift_expr();
+        if (shifts == null || shifts.Length != 1) return null;
+        var ariths = shifts[0].arith_expr();
+        if (ariths == null || ariths.Length != 1) return null;
+        var terms = ariths[0].term();
+        if (terms == null || terms.Length != 1) return null;
+        var factors = terms[0].factor();
+        if (factors == null || factors.Length != 1) return null;
+        var factor = factors[0];
+        if (factor.PLUS() != null || factor.MINUS() != null || factor.unary_op() != null) return null;
+        var power = factor.power();
+        if (power == null || power.DOUBLESTAR() != null) return null;
+        return power.atom_expr();
+    }
 
-        // Contract forwarding assignment: IList.Contracts = target or self.IList.Contracts = target
+    private static TargetAssignmentInfo AnalyzeTarget(PilotParser.TestContext targetContext)
+    {
+        var atomExpr = TryUnwrapAtomExpr(targetContext);
+        if (atomExpr != null)
+        {
+            var trailers = atomExpr.trailer();
+            if (trailers == null || trailers.Length == 0)
+            {
+                var id = atomExpr.atom()?.identifier();
+                if (id != null)
+                {
+                    string idText = id.GetText();
+                    return new TargetAssignmentInfo
+                    {
+                        Kind = TargetAssignmentKind.SimpleIdentifier,
+                        Identifier = idText,
+                        TargetText = idText
+                    };
+                }
+            }
+            else
+            {
+                var lastTrailer = trailers[^1];
+                if (lastTrailer.DOT() != null && lastTrailer.identifier() != null)
+                {
+                    string memberName = lastTrailer.identifier().GetText();
+                    if (!memberName.Equals("Contracts", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new TargetAssignmentInfo
+                        {
+                            Kind = TargetAssignmentKind.MemberAccess,
+                            AtomExpr = atomExpr,
+                            ReceiverTrailerCount = trailers.Length - 1,
+                            Identifier = memberName,
+                            TargetText = targetContext.GetText()
+                        };
+                    }
+                }
+                else if (lastTrailer.LSQB() != null)
+                {
+                    var subTest = lastTrailer.subscriptlist()?.subscript(0)?.test(0);
+                    if (subTest != null)
+                    {
+                        return new TargetAssignmentInfo
+                        {
+                            Kind = TargetAssignmentKind.IndexAccess,
+                            AtomExpr = atomExpr,
+                            ReceiverTrailerCount = trailers.Length - 1,
+                            IndexExpr = subTest,
+                            TargetText = targetContext.GetText()
+                        };
+                    }
+                }
+            }
+        }
+
+        string targetText = targetContext.GetText();
         if (targetText.EndsWith(".Contracts", StringComparison.OrdinalIgnoreCase))
         {
             int cIdx = targetText.LastIndexOf(".Contracts", StringComparison.OrdinalIgnoreCase);
             string contractPart = targetText[..cIdx];
             string normContract = Pilot.Runtime.Contracts.PilotContractRegistry.NormalizeContractName(contractPart);
+            return new TargetAssignmentInfo
+            {
+                Kind = TargetAssignmentKind.ContractForward,
+                TargetText = targetText,
+                NormalizedContract = normContract
+            };
+        }
+
+        return new TargetAssignmentInfo
+        {
+            Kind = TargetAssignmentKind.Fallback,
+            TargetText = targetText
+        };
+    }
+
+    private PilotValue EvaluateAtomExprPrefix(PilotParser.Atom_exprContext context, int trailerCount)
+    {
+        PilotValue current = Visit(context.atom());
+        var trailers = context.trailer();
+        for (int i = 0; i < trailerCount; i++)
+        {
+            var trailer = trailers[i];
+            if ((trailer.STAR() != null && trailer.LPAR() != null) || trailer.LPAR() != null)
+            {
+                current = DispatchCall(current, trailer, trailers, i, context);
+            }
+            else if (trailer.DOT() != null || trailer.SAFE_NAV() != null)
+            {
+                if (trailer.SAFE_NAV() != null && (current.IsNull || current.IsUndefined))
+                {
+                    current = PilotValue.Undefined;
+                    continue;
+                }
+                if (trailer.DOT() != null && (current.IsNull || current.IsUndefined))
+                {
+                    string mName = trailer.identifier()?.GetText() ?? "unknown";
+                    throw new PilotNullReferenceException($"Cannot access member '{mName}' on null or undefined value.", context.Start.Line, context.Start.Column);
+                }
+                string memberName = trailer.identifier().GetText();
+                current = current.GetMember(memberName, Context);
+            }
+            else if (trailer.LSQB() != null)
+            {
+                var subCtx = trailer.subscriptlist()?.subscript(0);
+                if (subCtx != null)
+                {
+                    var idxVal = Visit(subCtx.test(0));
+                    current = current[idxVal];
+                }
+            }
+            else if (trailer.cascade_trailer() != null)
+            {
+                current = EvaluateCascade(current, trailer.cascade_trailer());
+            }
+        }
+        return current;
+    }
+
+    private void AssignTarget(PilotParser.TestContext targetContext, PilotValue value, PilotParser.TestContext? rhsNode = null)
+    {
+        var info = TargetCache.GetOrAdd(targetContext, AnalyzeTarget);
+
+        if (info.Kind == TargetAssignmentKind.SimpleIdentifier)
+        {
+            string name = info.Identifier!;
+            if (!Context.Environment.CurrentScope.Assign(name, value))
+            {
+                Context.Environment.CurrentScope.Declare(name, value);
+            }
+            return;
+        }
+
+        if (info.Kind == TargetAssignmentKind.MemberAccess)
+        {
+            try
+            {
+                var receiverVal = EvaluateAtomExprPrefix(info.AtomExpr!, info.ReceiverTrailerCount);
+                if (receiverVal.Kind == PilotValueKind.Object)
+                {
+                    receiverVal.AsObject().SetMember(info.Identifier!, value);
+                    return;
+                }
+            }
+            catch
+            {
+                // Fallback to scope
+            }
+        }
+        else if (info.Kind == TargetAssignmentKind.IndexAccess)
+        {
+            try
+            {
+                var receiverVal = EvaluateAtomExprPrefix(info.AtomExpr!, info.ReceiverTrailerCount);
+                var indexVal = Visit(info.IndexExpr!);
+                receiverVal[indexVal] = value;
+                return;
+            }
+            catch
+            {
+                // Fallback to scope
+            }
+        }
+        else if (info.Kind == TargetAssignmentKind.ContractForward)
+        {
+            string normContract = info.NormalizedContract!;
+            string? rhsText = rhsNode?.GetText();
             string targetMember = !string.IsNullOrEmpty(rhsText)
                 ? rhsText
-                : (value.Kind == PilotValueKind.String ? value.AsString() : targetText);
+                : (value.Kind == PilotValueKind.String ? value.AsString() : info.TargetText);
 
             if (targetMember.StartsWith("self.", StringComparison.OrdinalIgnoreCase))
             {
@@ -526,6 +792,8 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 return;
             }
         }
+
+        string targetText = info.TargetText;
 
         int dotIdx = targetText.LastIndexOf('.');
         if (dotIdx > 0 && !targetText.EndsWith("."))
@@ -643,9 +911,14 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             else if (existing.Kind == PilotValueKind.Function)
             {
                 var oldFunc = existing.AsFunction();
+                if (oldFunc.ClassDef == null && oldFunc.GetSignatureKey() == function.GetSignatureKey())
+                {
+                    oldFunc.ApplyPatchFrom(function);
+                    return existing;
+                }
                 var mg = new PilotMethodGroup(funcName, new[] { oldFunc, function });
                 var mgVal = PilotValue.FromMethodGroup(mg);
-                Context.Environment.CurrentScope.Assign(funcName, mgVal);
+                Context.Environment.CurrentScope.ForceSet(funcName, mgVal);
                 return mgVal;
             }
         }
@@ -657,11 +930,17 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
     private static bool ContainsYield(Antlr4.Runtime.Tree.IParseTree? tree)
     {
         if (tree == null) return false;
+        return ContainsYieldCache.GetOrAdd(tree, static t => ContainsYieldCore(t));
+    }
+
+    private static bool ContainsYieldCore(Antlr4.Runtime.Tree.IParseTree? tree)
+    {
+        if (tree == null) return false;
         if (tree is PilotParser.Func_defContext) return false;
         if (tree is PilotParser.Flow_stmtContext flow && flow.YIELD() != null) return true;
         for (int i = 0; i < tree.ChildCount; i++)
         {
-            if (ContainsYield(tree.GetChild(i))) return true;
+            if (ContainsYieldCore(tree.GetChild(i))) return true;
         }
         return false;
     }
@@ -1099,11 +1378,13 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
     public override PilotValue VisitWhile_stmt(PilotParser.While_stmtContext context)
     {
         PilotValue lastVal = PilotValue.Undefined;
-        while (Visit(context.test(0)).IsTrue)
+        var condNode = context.test(0);
+        var bodyNode = context.suite(0);
+        while (Visit(condNode).IsTrue)
         {
             try
             {
-                lastVal = Visit(context.suite(0));
+                lastVal = Visit(bodyNode);
             }
             catch (PilotBreakSignal)
             {
@@ -1112,6 +1393,21 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             catch (PilotContinueSignal)
             {
                 continue;
+            }
+
+            if (Context.PendingFlow != PilotFlowSignalKind.None)
+            {
+                if (Context.PendingFlow == PilotFlowSignalKind.Continue && string.IsNullOrEmpty(Context.PendingFlowLabel))
+                {
+                    Context.PendingFlow = PilotFlowSignalKind.None;
+                    continue;
+                }
+                if (Context.PendingFlow == PilotFlowSignalKind.Break && string.IsNullOrEmpty(Context.PendingFlowLabel))
+                {
+                    Context.PendingFlow = PilotFlowSignalKind.None;
+                    break;
+                }
+                break;
             }
         }
         return lastVal;
@@ -1122,10 +1418,20 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         string label = context.identifier().GetText();
         try
         {
-            if (context.for_stmt() != null) return Visit(context.for_stmt());
-            if (context.while_stmt() != null) return Visit(context.while_stmt());
-            if (context.block() != null) return Visit(context.block());
-            return PilotValue.Undefined;
+            PilotValue res = PilotValue.Undefined;
+            if (context.for_stmt() != null) res = Visit(context.for_stmt());
+            else if (context.while_stmt() != null) res = Visit(context.while_stmt());
+            else if (context.block() != null) res = Visit(context.block());
+
+            if ((Context.PendingFlow == PilotFlowSignalKind.Break || Context.PendingFlow == PilotFlowSignalKind.Continue) &&
+                (string.IsNullOrEmpty(Context.PendingFlowLabel) || Context.PendingFlowLabel == label))
+            {
+                Context.PendingFlow = PilotFlowSignalKind.None;
+                Context.PendingFlowLabel = null;
+                return PilotValue.Undefined;
+            }
+
+            return res;
         }
         catch (PilotBreakSignal b) when (b.Label == label || string.IsNullOrEmpty(b.Label))
         {
@@ -1141,6 +1447,8 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             foreach (var stmt in context.stmt())
             {
                 lastVal = Visit(stmt);
+                if (Context.PendingFlow != PilotFlowSignalKind.None)
+                    break;
             }
         }
         return lastVal;
@@ -1149,19 +1457,131 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
     public override PilotValue VisitFor_stmt(PilotParser.For_stmtContext context)
     {
         var iterable = Visit(context.test(0));
-        IEnumerable<PilotValue> collection;
+        var forTarget = context.for_target();
+        var bodySuite = context.suite(0);
+        PilotValue lastVal = PilotValue.Undefined;
 
+        string? simpleTargetName = TryGetSimpleForTargetName(forTarget);
+
+        // Fast-path 1: Range iteration without boxing or LINQ enumerator allocation
+        if (iterable.Kind == PilotValueKind.Range)
+        {
+            var range = iterable.AsRange();
+            long step = range.Step;
+            if (step == 0) return lastVal;
+
+            long current = range.Start;
+            long end = range.End;
+            bool inclusive = range.Inclusive;
+
+            PilotBinding? binding = simpleTargetName != null
+                ? Context.Environment.CurrentScope.GetOrDeclareBinding(simpleTargetName, PilotValue.Undefined)
+                : null;
+
+            while (step > 0 ? (inclusive ? current <= end : current < end) : (inclusive ? current >= end : current > end))
+            {
+                var itemVal = PilotValue.FromInt(current);
+                if (binding != null)
+                {
+                    binding.Value = itemVal;
+                }
+                else
+                {
+                    AssignForTarget(forTarget, itemVal);
+                }
+
+                try
+                {
+                    lastVal = Visit(bodySuite);
+                }
+                catch (PilotBreakSignal)
+                {
+                    break;
+                }
+                catch (PilotContinueSignal)
+                {
+                    current += step;
+                    continue;
+                }
+
+                if (Context.PendingFlow != PilotFlowSignalKind.None)
+                {
+                    if (Context.PendingFlow == PilotFlowSignalKind.Continue && string.IsNullOrEmpty(Context.PendingFlowLabel))
+                    {
+                        Context.PendingFlow = PilotFlowSignalKind.None;
+                        current += step;
+                        continue;
+                    }
+                    if (Context.PendingFlow == PilotFlowSignalKind.Break && string.IsNullOrEmpty(Context.PendingFlowLabel))
+                    {
+                        Context.PendingFlow = PilotFlowSignalKind.None;
+                        break;
+                    }
+                    break;
+                }
+
+                current += step;
+            }
+
+            return lastVal;
+        }
+
+        // Fast-path 2: List iteration by index
         if (iterable.Kind == PilotValueKind.List)
         {
-            collection = iterable.AsList();
+            var list = iterable.AsList();
+            PilotBinding? binding = simpleTargetName != null
+                ? Context.Environment.CurrentScope.GetOrDeclareBinding(simpleTargetName, PilotValue.Undefined)
+                : null;
+
+            for (int i = 0; i < list.Count; i++)
+            {
+                var itemVal = list[i];
+                if (binding != null)
+                {
+                    binding.Value = itemVal;
+                }
+                else
+                {
+                    AssignForTarget(forTarget, itemVal);
+                }
+
+                try
+                {
+                    lastVal = Visit(bodySuite);
+                }
+                catch (PilotBreakSignal)
+                {
+                    break;
+                }
+                catch (PilotContinueSignal)
+                {
+                    continue;
+                }
+
+                if (Context.PendingFlow != PilotFlowSignalKind.None)
+                {
+                    if (Context.PendingFlow == PilotFlowSignalKind.Continue && string.IsNullOrEmpty(Context.PendingFlowLabel))
+                    {
+                        Context.PendingFlow = PilotFlowSignalKind.None;
+                        continue;
+                    }
+                    if (Context.PendingFlow == PilotFlowSignalKind.Break && string.IsNullOrEmpty(Context.PendingFlowLabel))
+                    {
+                        Context.PendingFlow = PilotFlowSignalKind.None;
+                        break;
+                    }
+                    break;
+                }
+            }
+
+            return lastVal;
         }
-        else if (iterable.Kind == PilotValueKind.Tuple)
+
+        IEnumerable<PilotValue> collection;
+        if (iterable.Kind == PilotValueKind.Tuple)
         {
             collection = iterable.AsTuple();
-        }
-        else if (iterable.Kind == PilotValueKind.Range)
-        {
-            collection = iterable.AsRange().Select(i => PilotValue.FromInt(i));
         }
         else if (iterable.Kind == PilotValueKind.Set)
         {
@@ -1184,15 +1604,24 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             collection = Array.Empty<PilotValue>();
         }
 
-        var forTarget = context.for_target();
-        PilotValue lastVal = PilotValue.Undefined;
+        PilotBinding? genBinding = simpleTargetName != null
+            ? Context.Environment.CurrentScope.GetOrDeclareBinding(simpleTargetName, PilotValue.Undefined)
+            : null;
 
         foreach (var item in collection)
         {
-            AssignForTarget(forTarget, item);
+            if (genBinding != null)
+            {
+                genBinding.Value = item;
+            }
+            else
+            {
+                AssignForTarget(forTarget, item);
+            }
+
             try
             {
-                lastVal = Visit(context.suite(0));
+                lastVal = Visit(bodySuite);
             }
             catch (PilotBreakSignal)
             {
@@ -1202,9 +1631,42 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             {
                 continue;
             }
+
+            if (Context.PendingFlow != PilotFlowSignalKind.None)
+            {
+                if (Context.PendingFlow == PilotFlowSignalKind.Continue && string.IsNullOrEmpty(Context.PendingFlowLabel))
+                {
+                    Context.PendingFlow = PilotFlowSignalKind.None;
+                    continue;
+                }
+                if (Context.PendingFlow == PilotFlowSignalKind.Break && string.IsNullOrEmpty(Context.PendingFlowLabel))
+                {
+                    Context.PendingFlow = PilotFlowSignalKind.None;
+                    break;
+                }
+                break;
+            }
         }
 
         return lastVal;
+    }
+
+    private static string? TryGetSimpleForTargetName(PilotParser.For_targetContext target)
+    {
+        var bps = target.binding_pattern();
+        if (bps != null && bps.Length == 1 && bps[0].identifier() != null)
+        {
+            return bps[0].identifier().GetText();
+        }
+        if (target.exprlist() != null)
+        {
+            string name = target.exprlist().GetText();
+            if (IsSimpleIdentifier(name))
+            {
+                return name;
+            }
+        }
+        return null;
     }
 
     public override PilotValue VisitWith_stmt(PilotParser.With_stmtContext context)
@@ -1372,7 +1834,10 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         var capturedScope = Context.Environment.CurrentScope;
         Context.PushDefer(() =>
         {
-            var prevScope = Context.Environment.CurrentScope;
+            var prevFlow = Context.PendingFlow;
+            var prevRet = Context.PendingReturnValue;
+            var prevLabel = Context.PendingFlowLabel;
+            Context.PendingFlow = PilotFlowSignalKind.None;
             try
             {
                 if (context.suite() != null) Visit(context.suite());
@@ -1381,7 +1846,12 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             }
             finally
             {
-                // Restore scope
+                if (Context.PendingFlow == PilotFlowSignalKind.None)
+                {
+                    Context.PendingFlow = prevFlow;
+                    Context.PendingReturnValue = prevRet;
+                    Context.PendingFlowLabel = prevLabel;
+                }
             }
         });
 
@@ -1436,7 +1906,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             try
             {
                 lastVal = Visit(context.suite(0));
-                executedWithoutException = true;
+                executedWithoutException = Context.PendingFlow == PilotFlowSignalKind.None;
             }
             catch (PilotControlFlowSignal)
             {
@@ -1496,7 +1966,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 }
             }
 
-            // Execute else suite if try block succeeded without any exception
+            // Execute else suite if try block succeeded without any exception or flow jump
             if (executedWithoutException && context.ELSE() != null)
             {
                 var suites = context.suite();
@@ -1511,15 +1981,31 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             // Execute finally suite if present (always runs regardless of try/except/else outcome)
             if (context.FINALLY() != null)
             {
-                var suites = context.suite();
-                int finallyIdx = context.ELSE() != null ? 2 : 1;
-                if (finallyIdx < suites.Length)
+                var prevFlow = Context.PendingFlow;
+                var prevRet = Context.PendingReturnValue;
+                var prevLabel = Context.PendingFlowLabel;
+                Context.PendingFlow = PilotFlowSignalKind.None;
+                try
                 {
-                    Visit(suites[finallyIdx]);
+                    var suites = context.suite();
+                    int finallyIdx = context.ELSE() != null ? 2 : 1;
+                    if (finallyIdx < suites.Length)
+                    {
+                        Visit(suites[finallyIdx]);
+                    }
+                    else if (suites.Length > 1)
+                    {
+                        Visit(suites[suites.Length - 1]);
+                    }
                 }
-                else if (suites.Length > 1)
+                finally
                 {
-                    Visit(suites[suites.Length - 1]);
+                    if (Context.PendingFlow == PilotFlowSignalKind.None)
+                    {
+                        Context.PendingFlow = prevFlow;
+                        Context.PendingReturnValue = prevRet;
+                        Context.PendingFlowLabel = prevLabel;
+                    }
                 }
             }
         }
@@ -1570,19 +2056,27 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         if (context.RETURN() != null)
         {
             PilotValue retVal = context.testlist() != null ? VisitTestlist(context.testlist()) : PilotValue.Undefined;
-            throw new PilotReturnSignal(retVal);
+            if (Context.YieldHandler != null)
+            {
+                throw new PilotReturnSignal(retVal);
+            }
+            Context.PendingFlow = PilotFlowSignalKind.Return;
+            Context.PendingReturnValue = retVal;
+            return retVal;
         }
 
         if (context.BREAK() != null)
         {
-            string? label = context.identifier()?.GetText();
-            throw new PilotBreakSignal(label);
+            Context.PendingFlow = PilotFlowSignalKind.Break;
+            Context.PendingFlowLabel = context.identifier()?.GetText();
+            return PilotValue.Undefined;
         }
 
         if (context.CONTINUE() != null)
         {
-            string? label = context.identifier()?.GetText();
-            throw new PilotContinueSignal(label);
+            Context.PendingFlow = PilotFlowSignalKind.Continue;
+            Context.PendingFlowLabel = context.identifier()?.GetText();
+            return PilotValue.Undefined;
         }
 
         if (context.YIELD() != null)
@@ -1848,9 +2342,10 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         for (int i = 1; i < ariths.Length; i++)
         {
             var rhs = Visit(ariths[i]);
-            var op = context.GetChild(2 * i - 1).GetText();
-            if (op == "<<") val = PilotValue.FromInt(val.AsInt() << (int)rhs.AsInt());
-            else if (op == ">>") val = PilotValue.FromInt(val.AsInt() >> (int)rhs.AsInt());
+            var opNode = context.GetChild(2 * i - 1) as ITerminalNode;
+            int opType = opNode?.Symbol.Type ?? 0;
+            if (opType == PilotParser.LEFTSHIFT) val = PilotValue.FromInt(val.AsInt() << (int)rhs.AsInt());
+            else if (opType == PilotParser.RIGHTSHIFT) val = PilotValue.FromInt(val.AsInt() >> (int)rhs.AsInt());
         }
 
         return val;
@@ -1864,9 +2359,10 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         for (int i = 1; i < terms.Length; i++)
         {
             var rhs = Visit(terms[i]);
-            var op = context.GetChild(2 * i - 1).GetText();
-            if (op == "+") val = val + rhs;
-            else if (op == "-") val = val - rhs;
+            var opNode = context.GetChild(2 * i - 1) as ITerminalNode;
+            int opType = opNode?.Symbol.Type ?? 0;
+            if (opType == PilotParser.PLUS) val = val + rhs;
+            else if (opType == PilotParser.MINUS) val = val - rhs;
         }
 
         return val;
@@ -1879,8 +2375,9 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
         for (int i = 1; i < factors.Length; i++)
         {
-            var op = context.GetChild(2 * i - 1).GetText();
-            if (op == "->")
+            var opNode = context.GetChild(2 * i - 1) as ITerminalNode;
+            int opType = opNode?.Symbol.Type ?? 0;
+            if (opType == PilotParser.ARROW)
             {
                 // Structural Projection: source -> {field1, field2}
                 val = EvaluateProjection(val, factors[i]);
@@ -1888,8 +2385,8 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             }
 
             var rhs = Visit(factors[i]);
-            if (op == "*") val = val * rhs;
-            else if (op == "/")
+            if (opType == PilotParser.STAR) val = val * rhs;
+            else if (opType == PilotParser.SLASH)
             {
                 if ((rhs.Kind == PilotValueKind.Int || rhs.Kind == PilotValueKind.UInt) && rhs.AsInt() == 0)
                 {
@@ -1901,7 +2398,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 }
                 val = val / rhs;
             }
-            else if (op == "%")
+            else if (opType == PilotParser.PERCENT)
             {
                 if ((rhs.Kind == PilotValueKind.Int || rhs.Kind == PilotValueKind.UInt) && rhs.AsInt() == 0)
                 {
@@ -1909,7 +2406,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 }
                 val = val % rhs;
             }
-            else if (op == "//")
+            else if (opType == PilotParser.DOUBLESLASH)
             {
                 long divisor = rhs.AsInt();
                 if (divisor == 0)
@@ -2051,12 +2548,13 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         PilotValue current;
         int startTrailerIdx = 0;
 
+        var trailers = context.trailer();
         // Design-by-Contract: old(expr) interception during postcondition evaluations
-        if (context.atom()?.GetText() == "old" &&
-            context.trailer()?.Length > 0 &&
-            context.trailer(0).LPAR() != null)
+        if (trailers?.Length > 0 &&
+            trailers[0].LPAR() != null &&
+            context.atom()?.identifier()?.GetText() == "old")
         {
-            var arglist = context.trailer(0).arglist();
+            var arglist = trailers[0].arglist();
             string exprKey = arglist?.GetText() ?? "";
             if (Context.OldSnapshots.TryGetValue(exprKey, out var oldVal))
             {
@@ -2073,8 +2571,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             current = Visit(context.atom());
         }
 
-        var trailers = context.trailer();
-        for (int i = startTrailerIdx; i < trailers.Length; i++)
+        for (int i = startTrailerIdx; i < trailers!.Length; i++)
         {
             var trailer = trailers[i];
             // Multi-cast Broadcast Call or Standard Function/Method Call: *(...) or (...)
@@ -2098,6 +2595,20 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 }
 
                 string memberName = trailer.identifier().GetText();
+
+                // Fast-path direct member call: receiver.method(args) without allocating an intermediate PilotFunction
+                if (trailer.DOT() != null &&
+                    i + 1 < trailers.Length &&
+                    trailers[i + 1].LPAR() != null &&
+                    trailers[i + 1].STAR() == null &&
+                    !Context.IsAutoRepeatActive &&
+                    TryInvokeDirectMemberCall(current, memberName, trailers[i + 1].arglist(), out var directResult))
+                {
+                    current = directResult;
+                    i++;
+                    continue;
+                }
+
                 current = current.GetMember(memberName, Context);
             }
             // Indexing: [index]
@@ -2118,6 +2629,204 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         }
 
         return current;
+    }
+
+    private bool TryInvokeDirectMemberCall(
+        PilotValue receiver,
+        string memberName,
+        PilotParser.ArglistContext? arglist,
+        out PilotValue result)
+    {
+        result = PilotValue.Undefined;
+        var args = arglist?.argument();
+        int argCount = args?.Length ?? 0;
+
+        // Ensure no argument uses named or 'each'/'repeat'/'..' modifiers before taking direct fast-path
+        for (int i = 0; i < argCount; i++)
+        {
+            var a = args![i];
+            if (a.EACH() != null || a.REPEAT() != null || a.DOTDOT() != null || a.EQUAL() != null || a. test() == null)
+            {
+                return false;
+            }
+        }
+
+        if (receiver.Kind == PilotValueKind.List)
+        {
+            var list = receiver.AsList();
+            switch (memberName)
+            {
+                case "append":
+                case "push":
+                    if (argCount == 1)
+                    {
+                        list.Add(Visit(args![0].test()));
+                        result = PilotValue.Null;
+                        return true;
+                    }
+                    break;
+                case "pop":
+                    if (argCount == 0)
+                    {
+                        if (list.Count == 0)
+                        {
+                            result = PilotValue.Undefined;
+                        }
+                        else
+                        {
+                            result = list[^1];
+                            list.RemoveAt(list.Count - 1);
+                        }
+                        return true;
+                    }
+                    break;
+                case "clear":
+                    if (argCount == 0)
+                    {
+                        list.Clear();
+                        result = PilotValue.Null;
+                        return true;
+                    }
+                    break;
+            }
+            return false;
+        }
+
+        if (receiver.Kind == PilotValueKind.Map)
+        {
+            var map = receiver.AsMap();
+            if (map.ContainsKey(PilotValue.FromString(memberName)))
+            {
+                return false;
+            }
+            switch (memberName)
+            {
+                case "contains_key":
+                case "ContainsKey":
+                    if (argCount == 1)
+                    {
+                        var key = Visit(args![0].test());
+                        result = PilotValue.FromBool(map.ContainsKey(key));
+                        return true;
+                    }
+                    break;
+                case "keys":
+                    if (argCount == 0)
+                    {
+                        result = PilotValue.FromList(new List<PilotValue>(map.Keys));
+                        return true;
+                    }
+                    break;
+                case "values":
+                    if (argCount == 0)
+                    {
+                        result = PilotValue.FromList(new List<PilotValue>(map.Values));
+                        return true;
+                    }
+                    break;
+                case "clear":
+                    if (argCount == 0)
+                    {
+                        map.Clear();
+                        result = PilotValue.Null;
+                        return true;
+                    }
+                    break;
+            }
+            return false;
+        }
+
+        if (receiver.Kind == PilotValueKind.Set)
+        {
+            var set = receiver.AsSet();
+            switch (memberName)
+            {
+                case "add":
+                    if (argCount == 1)
+                    {
+                        set.Add(Visit(args![0].test()));
+                        result = PilotValue.Null;
+                        return true;
+                    }
+                    break;
+                case "contains":
+                case "Contains":
+                    if (argCount == 1)
+                    {
+                        result = PilotValue.FromBool(set.Contains(Visit(args![0].test())));
+                        return true;
+                    }
+                    break;
+                case "clear":
+                    if (argCount == 0)
+                    {
+                        set.Clear();
+                        result = PilotValue.Null;
+                        return true;
+                    }
+                    break;
+            }
+            return false;
+        }
+
+        if (receiver.Kind == PilotValueKind.String)
+        {
+            string s = receiver.AsString();
+            switch (memberName)
+            {
+                case "to_upper":
+                case "ToUpper":
+                    if (argCount == 0)
+                    {
+                        result = PilotValue.FromString(s.ToUpperInvariant());
+                        return true;
+                    }
+                    break;
+                case "to_lower":
+                case "ToLower":
+                    if (argCount == 0)
+                    {
+                        result = PilotValue.FromString(s.ToLowerInvariant());
+                        return true;
+                    }
+                    break;
+                case "trim":
+                case "Trim":
+                    if (argCount == 0)
+                    {
+                        result = PilotValue.FromString(s.Trim());
+                        return true;
+                    }
+                    break;
+                case "starts_with":
+                case "StartsWith":
+                    if (argCount == 1)
+                    {
+                        result = PilotValue.FromBool(s.StartsWith(Visit(args![0].test()).ToString()));
+                        return true;
+                    }
+                    break;
+                case "ends_with":
+                case "EndsWith":
+                    if (argCount == 1)
+                    {
+                        result = PilotValue.FromBool(s.EndsWith(Visit(args![0].test()).ToString()));
+                        return true;
+                    }
+                    break;
+                case "contains":
+                case "Contains":
+                    if (argCount == 1)
+                    {
+                        result = PilotValue.FromBool(s.Contains(Visit(args![0].test()).ToString()));
+                        return true;
+                    }
+                    break;
+            }
+            return false;
+        }
+
+        return false;
     }
 
     private PilotValue EvaluateCascade(PilotValue receiver, PilotParser.Cascade_trailerContext cascadeCtx)
@@ -2189,6 +2898,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             {
                 if (posArgs[i].Kind is PilotValueKind.List or PilotValueKind.Tuple or PilotValueKind.Set)
                 {
+                    if (ReferenceEquals(eachPos, EmptyEachPos)) eachPos = new HashSet<int>();
                     eachPos.Add(i);
                     shouldRepeat = true;
                     break;
@@ -2203,6 +2913,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             {
                 if (posArgs[i].Kind is PilotValueKind.List or PilotValueKind.Tuple or PilotValueKind.Set)
                 {
+                    if (ReferenceEquals(eachPos, EmptyEachPos)) eachPos = new HashSet<int>();
                     eachPos.Add(i);
                     shouldRepeat = true;
                     break;
@@ -2220,25 +2931,27 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 {
                     if (posArgs[i].Kind is PilotValueKind.List or PilotValueKind.Tuple or PilotValueKind.Set)
                     {
+                        if (ReferenceEquals(eachPos, EmptyEachPos)) eachPos = new HashSet<int>();
                         eachPos.Add(i);
                         shouldRepeat = true;
                         break;
                     }
                 }
             }
-            else
+            else if (fn.Parameters.Count > 0 && posArgs.Count > 0)
             {
                 for (int i = 0; i < fn.Parameters.Count && i < posArgs.Count; i++)
                 {
                     if (fn.Parameters[i].IsEach && posArgs[i].Kind is PilotValueKind.List or PilotValueKind.Tuple or PilotValueKind.Set)
                     {
+                        if (ReferenceEquals(eachPos, EmptyEachPos)) eachPos = new HashSet<int>();
                         eachPos.Add(i);
                         shouldRepeat = true;
                         break;
                     }
                 }
 
-                if (!shouldRepeat && fn.Parameters.Count > 0 && posArgs.Count > 0)
+                if (!shouldRepeat)
                 {
                     for (int i = 0; i < fn.Parameters.Count && i < posArgs.Count; i++)
                     {
@@ -2250,6 +2963,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                             !pType.Equals("dynamic", StringComparison.OrdinalIgnoreCase) &&
                             (posArgs[i].Kind is PilotValueKind.List or PilotValueKind.Tuple or PilotValueKind.Set))
                         {
+                            if (ReferenceEquals(eachPos, EmptyEachPos)) eachPos = new HashSet<int>();
                             eachPos.Add(i);
                             shouldRepeat = true;
                             break;
@@ -2299,8 +3013,9 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         }
         else if (current.Kind == PilotValueKind.Function)
         {
-            var boundArgs = BindArgumentsToFunction(current.AsFunction(), posArgs, namedArgs);
-            var res = current.AsFunction().Invoke(Context, boundArgs);
+            var fn = current.AsFunction();
+            var boundArgs = BindArgumentsToFunction(fn, posArgs, namedArgs);
+            var res = fn.Invoke(Context, boundArgs);
             if (isBroadcast)
             {
                 return PilotValue.FromList(new List<PilotValue> { res });
@@ -2330,31 +3045,46 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
     private (List<PilotValue> Positional, Dictionary<string, PilotValue> Named, HashSet<int> EachPositions, HashSet<string> EachNamed)
         EvaluateCallArgumentsWithModifiers(PilotParser.ArglistContext? arglist)
     {
-        var positional = new List<PilotValue>();
-        var named = new Dictionary<string, PilotValue>(StringComparer.Ordinal);
-        var eachPos = new HashSet<int>();
-        var eachNamed = new HashSet<string>(StringComparer.Ordinal);
-        if (arglist?.argument() == null) return (positional, named, eachPos, eachNamed);
-
-        foreach (var arg in arglist.argument())
+        var args = arglist?.argument();
+        if (args == null || args.Length == 0)
         {
+            return (EmptyPositional, EmptyNamed, EmptyEachPos, EmptyEachNamed);
+        }
+
+        var positional = new List<PilotValue>(args.Length);
+        Dictionary<string, PilotValue>? named = null;
+        HashSet<int>? eachPos = null;
+        HashSet<string>? eachNamed = null;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            var arg = args[i];
             bool isEach = arg.EACH() != null || arg.REPEAT() != null || arg.DOTDOT() != null;
             if (arg.identifier() != null && arg.EQUAL() != null && arg.test() != null)
             {
                 string key = arg.identifier().GetText();
                 var val = Visit(arg.test());
+                named ??= new Dictionary<string, PilotValue>(StringComparer.Ordinal);
                 named[key] = val;
-                if (isEach) eachNamed.Add(key);
+                if (isEach)
+                {
+                    eachNamed ??= new HashSet<string>(StringComparer.Ordinal);
+                    eachNamed.Add(key);
+                }
             }
             else if (arg.test() != null)
             {
                 var val = Visit(arg.test());
                 int idx = positional.Count;
                 positional.Add(val);
-                if (isEach) eachPos.Add(idx);
+                if (isEach)
+                {
+                    eachPos ??= new HashSet<int>();
+                    eachPos.Add(idx);
+                }
             }
         }
-        return (positional, named, eachPos, eachNamed);
+        return (positional, named ?? EmptyNamed, eachPos ?? EmptyEachPos, eachNamed ?? EmptyEachNamed);
     }
 
     private (List<PilotValue> Positional, Dictionary<string, PilotValue> Named) EvaluateCallArguments(PilotParser.ArglistContext? arglist)
@@ -2375,20 +3105,31 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
     {
         if (namedArgs.Count == 0)
         {
-            var adapted = new List<PilotValue>(posArgs.Count);
+            int paramCount = function.Parameters.Count;
+            if (paramCount == 0 || posArgs.Count == 0)
+            {
+                return posArgs;
+            }
+
+            List<PilotValue>? adapted = null;
             for (int i = 0; i < posArgs.Count; i++)
             {
                 var val = posArgs[i];
-                if (i < function.Parameters.Count && function.Parameters[i].TypeName != null && !val.IsUndefined)
+                if (i < paramCount && function.Parameters[i].TypeName != null && !val.IsUndefined)
                 {
                     if (Context.TypeAdapters.TryConvert(val, function.Parameters[i].TypeName, Context, out var conv))
                     {
+                        if (adapted == null)
+                        {
+                            adapted = new List<PilotValue>(posArgs.Count);
+                            for (int j = 0; j < i; j++) adapted.Add(posArgs[j]);
+                        }
                         val = conv;
                     }
                 }
-                adapted.Add(val);
+                adapted?.Add(val);
             }
-            return adapted;
+            return adapted ?? posArgs;
         }
 
         var full = new List<PilotValue>();
@@ -2475,26 +3216,44 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitLiteral(PilotParser.LiteralContext context)
     {
-        if (context.INTEGER() != null)
-        {
-            string text = context.INTEGER().GetText().Replace("_", "");
-            if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-                return PilotValue.FromInt(Convert.ToInt64(text[2..], 16));
-            if (text.StartsWith("0b", StringComparison.OrdinalIgnoreCase))
-                return PilotValue.FromInt(Convert.ToInt64(text[2..], 2));
-            return PilotValue.FromInt(long.Parse(text, CultureInfo.InvariantCulture));
-        }
-
-        if (context.FLOAT_NUMBER() != null)
-        {
-            string text = context.FLOAT_NUMBER().GetText().Replace("_", "");
-            return PilotValue.FromFloat(double.Parse(text, CultureInfo.InvariantCulture));
-        }
+        if (context.TRUE() != null) return PilotValue.True;
+        if (context.FALSE() != null) return PilotValue.False;
+        if (context.NULL() != null || context.NONE() != null) return PilotValue.Null;
+        if (context.UNDEFINED() != null) return PilotValue.Undefined;
 
         if (context.FSTRING()?.Length > 0)
         {
             string raw = context.FSTRING(0).GetText();
             return EvaluateFString(raw);
+        }
+
+        if (LiteralCache.TryGetValue(context, out var cached))
+        {
+            return cached;
+        }
+
+        if (context.INTEGER() != null)
+        {
+            string text = context.INTEGER().GetText();
+            if (text.IndexOf('_') >= 0) text = text.Replace("_", "");
+            PilotValue intVal;
+            if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                intVal = PilotValue.FromInt(Convert.ToInt64(text[2..], 16));
+            else if (text.StartsWith("0b", StringComparison.OrdinalIgnoreCase))
+                intVal = PilotValue.FromInt(Convert.ToInt64(text[2..], 2));
+            else
+                intVal = PilotValue.FromInt(long.Parse(text, CultureInfo.InvariantCulture));
+            LiteralCache[context] = intVal;
+            return intVal;
+        }
+
+        if (context.FLOAT_NUMBER() != null)
+        {
+            string text = context.FLOAT_NUMBER().GetText();
+            if (text.IndexOf('_') >= 0) text = text.Replace("_", "");
+            var floatVal = PilotValue.FromFloat(double.Parse(text, CultureInfo.InvariantCulture));
+            LiteralCache[context] = floatVal;
+            return floatVal;
         }
 
         if (context.STRING()?.Length > 0)
@@ -2505,29 +3264,42 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             {
                 return EvaluateFString(raw);
             }
-            return PilotValue.FromString(UnescapeString(raw));
+            var strVal = PilotValue.FromString(UnescapeString(raw));
+            LiteralCache[context] = strVal;
+            return strVal;
         }
 
         if (context.TRIPLE_STRING()?.Length > 0)
         {
             string raw = context.TRIPLE_STRING(0).GetText();
             if (raw.Length >= 6) raw = raw[3..^3];
-            return PilotValue.FromString(raw);
+            var tripleVal = PilotValue.FromString(raw);
+            LiteralCache[context] = tripleVal;
+            return tripleVal;
         }
-
-        if (context.TRUE() != null) return PilotValue.True;
-        if (context.FALSE() != null) return PilotValue.False;
-        if (context.NULL() != null || context.NONE() != null) return PilotValue.Null;
-        if (context.UNDEFINED() != null) return PilotValue.Undefined;
 
         return PilotValue.Undefined;
     }
 
-    private PilotValue EvaluateFString(string raw)
+    private static bool IsSimpleIdentifier(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return false;
+        char first = s[0];
+        if (!char.IsLetter(first) && first != '_') return false;
+        for (int i = 1; i < s.Length; i++)
+        {
+            char c = s[i];
+            if (!char.IsLetterOrDigit(c) && c != '_') return false;
+        }
+        return true;
+    }
+
+    private static FStringSegment[] ParseFStringSegments(string raw)
     {
         string content = raw.Substring(2, raw.Length - 3);
-        var sb = new StringBuilder();
+        var segments = new List<FStringSegment>();
         int i = 0;
+        int literalStart = 0;
         while (i < content.Length)
         {
             if (content[i] == '{')
@@ -2535,35 +3307,92 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 int endBrace = content.IndexOf('}', i);
                 if (endBrace > i)
                 {
+                    if (i > literalStart)
+                    {
+                        segments.Add(new FStringSegment(false, content.Substring(literalStart, i - literalStart), false, null));
+                    }
                     string expr = content.Substring(i + 1, endBrace - i - 1).Trim();
-                    try
+                    bool isSimple = IsSimpleIdentifier(expr);
+                    PilotParser.TestContext? parsedExpr = null;
+                    if (!isSimple)
                     {
-                        var inputStream = new AntlrInputStream(expr);
-                        var lexer = new PilotLexer(inputStream);
-                        var parser = new PilotParser(new CommonTokenStream(lexer));
-                        parser.RemoveErrorListeners();
-                        var exprTree = parser.test();
-                        var evaluated = Visit(exprTree);
-                        sb.Append(evaluated.ToString());
+                        try
+                        {
+                            parsedExpr = PilotParser.GetOrParseExpression(expr);
+                        }
+                        catch
+                        {
+                            parsedExpr = null;
+                        }
                     }
-                    catch
-                    {
-                        sb.Append(expr);
-                    }
+                    segments.Add(new FStringSegment(true, expr, isSimple, parsedExpr));
                     i = endBrace + 1;
+                    literalStart = i;
                     continue;
                 }
             }
-            sb.Append(content[i++]);
+            i++;
+        }
+        if (literalStart < content.Length)
+        {
+            segments.Add(new FStringSegment(false, content.Substring(literalStart), false, null));
+        }
+        return segments.ToArray();
+    }
+
+    private PilotValue EvaluateFString(string raw)
+    {
+        var segments = FStringCache.GetOrAdd(raw, ParseFStringSegments);
+        if (segments.Length == 0) return PilotValue.FromString(string.Empty);
+        if (segments.Length == 1 && !segments[0].IsExpression) return PilotValue.FromString(segments[0].Text);
+
+        var sb = new StringBuilder(raw.Length);
+        for (int i = 0; i < segments.Length; i++)
+        {
+            ref readonly var seg = ref segments[i];
+            if (!seg.IsExpression)
+            {
+                sb.Append(seg.Text);
+            }
+            else if (seg.IsSimpleIdentifier)
+            {
+                try
+                {
+                    sb.Append(ResolveIdentifier(seg.Text).ToString());
+                }
+                catch
+                {
+                    sb.Append(seg.Text);
+                }
+            }
+            else if (seg.ParsedExpr != null)
+            {
+                try
+                {
+                    sb.Append(Visit(seg.ParsedExpr).ToString());
+                }
+                catch
+                {
+                    sb.Append(seg.Text);
+                }
+            }
+            else
+            {
+                sb.Append(seg.Text);
+            }
         }
         return PilotValue.FromString(sb.ToString());
     }
 
     private static string UnescapeString(string str)
     {
-        if (str.Length >= 2 && ((str.StartsWith("\"") && str.EndsWith("\"")) || (str.StartsWith("'") && str.EndsWith("'"))))
+        if (str.Length >= 2 && ((str[0] == '"' && str[^1] == '"') || (str[0] == '\'' && str[^1] == '\'')))
         {
             str = str[1..^1];
+        }
+        if (str.IndexOf('\\') < 0)
+        {
+            return str;
         }
         return str.Replace("\\n", "\n").Replace("\\r", "\r").Replace("\\t", "\t").Replace("\\\"", "\"").Replace("\\\\", "\\");
     }
@@ -2719,7 +3548,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                         callCtx.Options,
                         new PilotEnvironment(coroutineScope),
                         callCtx.CancellationToken);
-                    var subVisitor = new PilotInterpreterVisitor(execContext);
+                    var subVisitor = execContext.GetOrCreateVisitor();
 
                     while (currentStmtIdx < stmts.Length)
                     {
@@ -2748,6 +3577,12 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
                         // Normal statement execution
                         subVisitor.Visit(stmt);
+                        if (execContext.PendingFlow == PilotFlowSignalKind.Return)
+                        {
+                            var retVal = execContext.PendingReturnValue;
+                            execContext.PendingFlow = PilotFlowSignalKind.None;
+                            return retVal;
+                        }
                     }
 
                     return PilotValue.Undefined;
@@ -2775,7 +3610,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 Context.Options,
                 new PilotEnvironment(subScope),
                 Context.CancellationToken);
-            var subVisitor = new PilotInterpreterVisitor(subContext);
+            var subVisitor = subContext.GetOrCreateVisitor();
 
             PilotValue lastVal = PilotValue.Undefined;
             try
@@ -2783,6 +3618,15 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 foreach (var stmt in context.stmt())
                 {
                     lastVal = subVisitor.Visit(stmt);
+                    if (subContext.PendingFlow != PilotFlowSignalKind.None)
+                    {
+                        if (subContext.PendingFlow == PilotFlowSignalKind.Return)
+                        {
+                            lastVal = subContext.PendingReturnValue;
+                        }
+                        subContext.PendingFlow = PilotFlowSignalKind.None;
+                        break;
+                    }
                 }
                 if (!lastVal.IsUndefined) return lastVal;
             }

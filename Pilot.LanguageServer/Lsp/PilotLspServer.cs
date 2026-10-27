@@ -367,7 +367,19 @@ public sealed class PilotLspServer
             {
                 string? uri = @params?["textDocument"]?["uri"]?.GetValue<string>();
                 var ranges = new JsonArray();
-                if (uri != null && _documents.TryGetValue(uri, out var source))
+                if (uri != null && TryGetAnalysis(uri, out var analysis))
+                {
+                    foreach (var reg in analysis.Regions)
+                    {
+                        ranges.Add(new JsonObject
+                        {
+                            ["startLine"] = reg.StartLine - 1,
+                            ["endLine"] = reg.EndLine - 1,
+                            ["kind"] = "region"
+                        });
+                    }
+                }
+                else if (uri != null && _documents.TryGetValue(uri, out var source))
                 {
                     var preproc = PilotPreprocessor.Preprocess(source, uri);
                     foreach (var reg in preproc.Regions)
@@ -491,20 +503,49 @@ public sealed class PilotLspServer
 
     private static string? ExtractWordAt(string source, int line, int character)
     {
-        var lines = source.Replace("\r\n", "\n").Split('\n');
-        if (line < 0 || line >= lines.Length) return null;
-        string textLine = lines[line];
-        if (character < 0 || character > textLine.Length) return null;
+        if (line < 0 || character < 0 || string.IsNullOrEmpty(source))
+            return null;
 
-        int start = character;
-        while (start > 0 && (char.IsLetterOrDigit(textLine[start - 1]) || textLine[start - 1] == '_'))
+        int currentLine = 0;
+        int lineStart = 0;
+        int len = source.Length;
+
+        for (int i = 0; i < len && currentLine < line; i++)
+        {
+            char c = source[i];
+            if (c == '\r')
+            {
+                if (i + 1 < len && source[i + 1] == '\n') i++;
+                currentLine++;
+                lineStart = i + 1;
+            }
+            else if (c == '\n')
+            {
+                currentLine++;
+                lineStart = i + 1;
+            }
+        }
+
+        if (currentLine != line || lineStart >= len && character > 0)
+            return null;
+
+        int lineEnd = lineStart;
+        while (lineEnd < len && source[lineEnd] != '\r' && source[lineEnd] != '\n')
+            lineEnd++;
+
+        int lineLen = lineEnd - lineStart;
+        if (character > lineLen) return null;
+
+        int pos = lineStart + character;
+        int start = pos;
+        while (start > lineStart && (char.IsLetterOrDigit(source[start - 1]) || source[start - 1] == '_'))
             start--;
 
-        int end = character;
-        while (end < textLine.Length && (char.IsLetterOrDigit(textLine[end]) || textLine[end] == '_'))
+        int end = pos;
+        while (end < lineEnd && (char.IsLetterOrDigit(source[end]) || source[end] == '_'))
             end++;
 
-        return end > start ? textLine[start..end] : null;
+        return end > start ? source[start..end] : null;
     }
 
     private void SendRawJson(string json)
@@ -539,14 +580,7 @@ public sealed class PilotLspServer
                 _readBufferPos = 0;
             }
 
-            int startPos = _readBufferPos;
             int foundEnd = -1;
-
-            // We need 4 characters for \r\n\r\n. The easiest way to search without dealing
-            // with boundary splits between buffer reads is to append to the StringBuilder
-            // char by char but only up to the point we find the boundary.
-            // Alternatively, since we append char by char in the original code, we can optimize
-            // it by searching within the buffer first. Let's do a simple append but check faster.
 
             while (_readBufferPos < _readBufferLen)
             {

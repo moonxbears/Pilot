@@ -393,5 +393,229 @@ public sealed class PilotBuiltinRegistry
 
         Register("venv", (_, _) => PilotValue.FromObject(venvModule));
         Register("virtual_environment", (_, _) => PilotValue.FromObject(venvModule));
+
+        // Bidirectional Optimizing Transpilation & Ingestion Built-ins
+        Register("transpile", (_, args) =>
+        {
+            if (args.Count < 2) return PilotValue.Null;
+            string pilotCode = args[0].AsString();
+            string targetLang = args[1].AsString();
+            var res = Pilot.Transpilation.TranspilationRegistry.Default.Transpile(pilotCode, targetLang);
+            return res.Success ? PilotValue.FromString(res.Code) : PilotValue.Null;
+        }, "pilot_code", "target_lang");
+
+        Register("transpile_file", (_, args) =>
+        {
+            if (args.Count < 2) return PilotValue.Null;
+            string inputPath = args[0].AsString();
+            string targetLang = args[1].AsString();
+            if (!System.IO.File.Exists(inputPath)) return PilotValue.Null;
+
+            string pilotCode = System.IO.File.ReadAllText(inputPath);
+            var res = Pilot.Transpilation.TranspilationRegistry.Default.Transpile(pilotCode, targetLang);
+            if (!res.Success) return PilotValue.Null;
+
+            if (args.Count >= 3 && args[2].Kind == PilotValueKind.String)
+            {
+                string outPath = args[2].AsString();
+                if (!string.IsNullOrWhiteSpace(outPath))
+                {
+                    System.IO.File.WriteAllText(outPath, res.Code);
+                }
+            }
+            return PilotValue.FromString(res.Code);
+        }, "input_path", "target_lang", "output_path");
+
+        Register("ingest", (_, args) =>
+        {
+            if (args.Count < 2) return PilotValue.Null;
+            string foreignCode = args[0].AsString();
+            string sourceLang = args[1].AsString();
+            var res = Pilot.Transpilation.TranspilationRegistry.Default.Ingest(foreignCode, sourceLang);
+            return res.Success ? PilotValue.FromString(res.Code) : PilotValue.Null;
+        }, "foreign_code", "source_lang");
+
+        Register("ingest_file", (_, args) =>
+        {
+            if (args.Count < 1) return PilotValue.Null;
+            string inputPath = args[0].AsString();
+            if (!System.IO.File.Exists(inputPath)) return PilotValue.Null;
+
+            string sourceLang = args.Count >= 2 && args[1].Kind == PilotValueKind.String && !string.IsNullOrWhiteSpace(args[1].AsString())
+                ? args[1].AsString()
+                : Pilot.Transpilation.TranspilationRegistry.InferLanguageFromPath(inputPath);
+
+            string foreignCode = System.IO.File.ReadAllText(inputPath);
+            var res = Pilot.Transpilation.TranspilationRegistry.Default.Ingest(foreignCode, sourceLang);
+            if (!res.Success) return PilotValue.Null;
+
+            if (args.Count >= 3 && args[2].Kind == PilotValueKind.String)
+            {
+                string outPath = args[2].AsString();
+                if (!string.IsNullOrWhiteSpace(outPath))
+                {
+                    System.IO.File.WriteAllText(outPath, res.Code);
+                }
+            }
+            return PilotValue.FromString(res.Code);
+        }, "input_path", "source_lang", "output_path");
+
+        Register("transpile_library", (_, args) =>
+        {
+            if (args.Count < 3) return PilotValue.Null;
+            string pilotDir = args[0].AsString();
+            string targetLang = args[1].AsString();
+            string outputDir = args[2].AsString();
+            var summary = Pilot.Transpilation.PilotLibraryTranspiler.TranspilePilotLibraryToTarget(pilotDir, outputDir, targetLang);
+            var list = new List<PilotValue>(summary.GeneratedFiles.Count);
+            foreach (var f in summary.GeneratedFiles) list.Add(PilotValue.FromString(f));
+            return PilotValue.FromList(list);
+        }, "pilot_dir", "target_lang", "output_dir");
+
+        Register("ingest_library", (_, args) =>
+        {
+            if (args.Count < 2) return PilotValue.Null;
+            string sourceDir = args[0].AsString();
+            string sourceLang = args.Count >= 3 ? args[1].AsString() : "auto";
+            string outputDir = args.Count >= 3 ? args[2].AsString() : args[1].AsString();
+            var summary = Pilot.Transpilation.PilotLibraryTranspiler.IngestLibraryToPilot(sourceDir, outputDir, sourceLang);
+            var list = new List<PilotValue>(summary.GeneratedFiles.Count);
+            foreach (var f in summary.GeneratedFiles) list.Add(PilotValue.FromString(f));
+            return PilotValue.FromList(list);
+        }, "source_dir", "source_lang", "output_dir");
+
+        // Hot-Reloading & Binary/Script Patching Built-ins
+        Register("hot_reload", (ctx, args) =>
+        {
+            if (args.Count < 1) return PilotValue.Null;
+            string codeOrPath = args[0].AsString();
+            return ctx.HotReload.ApplyCodeOrFile(codeOrPath).ToPilotMap();
+        }, "code_or_path");
+
+        Register("apply_patch", (ctx, args) =>
+        {
+            if (args.Count < 1) return PilotValue.Null;
+            string patchCode = args[0].AsString();
+            string label = args.Count >= 2 ? args[1].AsString() : "<inline-patch>";
+            return ctx.HotReload.ApplySourcePatch(patchCode, label).ToPilotMap();
+        }, "patch_code", "label");
+
+        Register("patch_file", (ctx, args) =>
+        {
+            if (args.Count < 1) return PilotValue.Null;
+            string path = args[0].AsString();
+            bool onlyIfChanged = args.Count >= 2 && args[1].IsTrue;
+            return ctx.HotReload.ApplyPatchFile(path, onlyIfChanged).ToPilotMap();
+        }, "file_path", "only_if_changed");
+
+        Register("rollback_patch", (ctx, args) =>
+        {
+            int steps = args.Count >= 1 ? (int)args[0].AsInt() : 1;
+            return ctx.HotReload.Rollback(steps).ToPilotMap();
+        }, "steps");
+
+        Register("patch_binary", (_, args) =>
+        {
+            if (args.Count < 2) return PilotValue.False;
+            string basePath = args[0].AsString();
+            string patchPath = args[1].AsString();
+            string outPath = args.Count >= 3 && !string.IsNullOrWhiteSpace(args[2].AsString())
+                ? args[2].AsString()
+                : basePath;
+
+            if (!System.IO.File.Exists(basePath) || !System.IO.File.Exists(patchPath))
+            {
+                return PilotValue.False;
+            }
+
+            byte[] baseBytes = System.IO.File.ReadAllBytes(basePath);
+            Pilot.Compiler.PilotCompiledProgram baseProg;
+            if (Pilot.Runtime.HotReload.PilotHotReloadSession.IsCompiledBinary(baseBytes, basePath))
+            {
+                baseProg = Pilot.Compiler.PilotCompiledProgram.FromBytes(baseBytes, basePath);
+            }
+            else
+            {
+                var comp = Pilot.Compiler.PilotCompiler.Default.CompileFile(basePath);
+                if (!comp.Success || comp.Program is not Pilot.Compiler.PilotCompiledProgram compiledBase) return PilotValue.False;
+                baseProg = compiledBase;
+            }
+
+            var patchedProg = baseProg.ApplyPatchFile(patchPath);
+            patchedProg.Save(outPath);
+            return PilotValue.FromString(System.IO.Path.GetFullPath(outPath));
+        }, "base_path", "patch_path", "output_path");
+
+        var hotReloadModule = PilotFunction.CreateNative("HotReload", (ctx, args) =>
+        {
+            if (args.Count == 0)
+            {
+                return PilotValue.FromInt(ctx.HotReload.Version);
+            }
+            return ctx.HotReload.ApplyCodeOrFile(args[0].AsString()).ToPilotMap();
+        }, "code_or_path");
+
+        hotReloadModule.Members["apply"] = PilotValue.FromFunction(
+            PilotFunction.CreateNative("apply", (ctx, args) =>
+            {
+                if (args.Count < 1) return PilotValue.Null;
+                string code = args[0].AsString();
+                string label = args.Count >= 2 ? args[1].AsString() : "<inline-patch>";
+                return ctx.HotReload.ApplySourcePatch(code, label).ToPilotMap();
+            }, "patch_code", "label"));
+
+        hotReloadModule.Members["apply_file"] = PilotValue.FromFunction(
+            PilotFunction.CreateNative("apply_file", (ctx, args) =>
+            {
+                if (args.Count < 1) return PilotValue.Null;
+                return ctx.HotReload.ApplyPatchFile(args[0].AsString(), onlyIfChanged: false).ToPilotMap();
+            }, "file_path"));
+
+        hotReloadModule.Members["reload_if_changed"] = PilotValue.FromFunction(
+            PilotFunction.CreateNative("reload_if_changed", (ctx, args) =>
+            {
+                if (args.Count < 1) return PilotValue.Null;
+                return ctx.HotReload.ApplyPatchFile(args[0].AsString(), onlyIfChanged: true).ToPilotMap();
+            }, "file_path"));
+
+        hotReloadModule.Members["rollback"] = PilotValue.FromFunction(
+            PilotFunction.CreateNative("rollback", (ctx, args) =>
+            {
+                int steps = args.Count >= 1 ? (int)args[0].AsInt() : 1;
+                return ctx.HotReload.Rollback(steps).ToPilotMap();
+            }, "steps"));
+
+        hotReloadModule.Members["version"] = PilotValue.FromFunction(
+            PilotFunction.CreateNative("version", (ctx, _) => PilotValue.FromInt(ctx.HotReload.Version)));
+
+        hotReloadModule.Members["history"] = PilotValue.FromFunction(
+            PilotFunction.CreateNative("history", (ctx, _) =>
+            {
+                var list = ctx.HotReload.History.Select(h => h.ToPilotMap()).ToList();
+                return PilotValue.FromList(list);
+            }));
+
+        hotReloadModule.Members["watch"] = PilotValue.FromFunction(
+            PilotFunction.CreateNative("watch", (ctx, args) =>
+            {
+                if (args.Count < 1) return PilotValue.False;
+                string path = args[0].AsString();
+                PilotFunction? cb = args.Count >= 2 && args[1].Kind == PilotValueKind.Function
+                    ? args[1].AsFunction()
+                    : null;
+                ctx.HotReload.WatchFile(path, cb);
+                return PilotValue.True;
+            }, "file_path", "callback"));
+
+        hotReloadModule.Members["unwatch_all"] = PilotValue.FromFunction(
+            PilotFunction.CreateNative("unwatch_all", (ctx, _) =>
+            {
+                ctx.HotReload.UnwatchAll();
+                return PilotValue.True;
+            }));
+
+        hotReloadModule.Members["patch_binary"] = PilotValue.FromFunction(_functions["patch_binary"]);
+
+        _functions["HotReload"] = hotReloadModule;
     }
 }

@@ -1,0 +1,66 @@
+# ==============================================================================
+# Concept 13: Homoiconic Lisp Metaprogramming & Base Object Introspection
+# ==============================================================================
+
+println("==================================================");
+println(" PILOT SHOWCASE: Metaprogramming & Base Objects");
+println("==================================================");
+
+# 1. Base Root Object Capabilities
+println("\n--- 1. Root Object Introspection & Reflection ---");
+
+class SystemCoordinate {
+    let x: float;
+    let y: float;
+
+    def __init__(self, x: float, y: float) {
+        self.x = x;
+        self.y = y;
+    }
+
+    def to_string(self) {
+        return "Coord(" + self.x + ", " + self.y + ")";
+    }
+
+    def type_of(self) {
+        return "SystemCoordinate";
+    }
+
+    def equals(self, other) {
+        if other == null { return false; }
+        return self.x == other.x && self.y == other.y;
+    }
+}
+
+let c1 = SystemCoordinate(15.0, 30.0);
+let c2 = SystemCoordinate(15.0, 30.0);
+let c3 = SystemCoordinate(99.0, 0.0);
+
+println("Coordinate Instance c1: " + c1.to_string());
+println("Coordinate Type:        " + c1.type_of());
+println("c1.equals(c2):          " + c1.equals(c2));
+println("c1.equals(c3):          " + c1.equals(c3));
+
+
+# 2. Homoiconic LISP Primitives (cons, car, cdr, atom)
+println("\n--- 2. Homoiconic S-Expression Primitives ---");
+
+let item_a = "node_alpha";
+let item_b = "node_beta";
+let item_c = "node_gamma";
+
+println("Symbols constructed: " + item_a + ", " + item_b + ", " + item_c);
+
+# Construct pair/list using cons:
+let list_pair = cons(item_a, cons(item_b, item_c));
+println("Constructed S-expression list via cons: " + list_pair);
+
+let first_item = car(list_pair);
+let tail_items = cdr(list_pair);
+
+println("car(list_pair): " + first_item);
+println("cdr(list_pair): " + tail_items);
+println("atom(item_a):   " + atom(item_a));
+println("atom(list_pair):" + atom(list_pair));
+
+println("\n>>> Concept 13 Demonstration Complete! <<<\n");

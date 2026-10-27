@@ -4,6 +4,17 @@ using Pilot.Runtime.Values;
 namespace Pilot.Runtime.ControlFlow;
 
 /// <summary>
+/// Lightweight control-flow signal kind used for zero-exception return/break/continue unwinding.
+/// </summary>
+public enum PilotFlowSignalKind : byte
+{
+    None = 0,
+    Return = 1,
+    Break = 2,
+    Continue = 3
+}
+
+/// <summary>
 /// Base class for all internal control flow signals (Return, Break, Continue, Yield).
 /// These signals bypass normal exception catch blocks so that user try/except cannot swallow them.
 /// </summary>

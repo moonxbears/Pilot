@@ -48,9 +48,11 @@ public sealed class PilotMatrix : IEquatable<PilotMatrix>
     public static PilotMatrix Identity(int size, string elementType = "float")
     {
         var m = new PilotMatrix(size, size, elementType);
-        for (int i = 0; i < size; i++)
+        int stride = size + 1;
+        var data = m._data;
+        for (int idx = 0; idx < data.Length; idx += stride)
         {
-            m[i, i] = 1.0;
+            data[idx] = 1.0;
         }
         return m;
     }
@@ -61,10 +63,7 @@ public sealed class PilotMatrix : IEquatable<PilotMatrix>
     public static PilotMatrix Ones(int rows, int cols, string elementType = "float")
     {
         var m = new PilotMatrix(rows, cols, elementType);
-        for (int i = 0; i < m._data.Length; i++)
-        {
-            m._data[i] = 1.0;
-        }
+        Array.Fill(m._data, 1.0);
         return m;
     }
 
@@ -74,9 +73,12 @@ public sealed class PilotMatrix : IEquatable<PilotMatrix>
             throw new InvalidOperationException($"Cannot add matrices of mismatched dimensions: ({Rows}x{Cols}) vs ({other.Rows}x{other.Cols})");
 
         var result = new PilotMatrix(Rows, Cols, ElementType);
-        for (int i = 0; i < _data.Length; i++)
+        var a = _data;
+        var b = other._data;
+        var dst = result._data;
+        for (int i = 0; i < a.Length; i++)
         {
-            result._data[i] = _data[i] + other._data[i];
+            dst[i] = a[i] + b[i];
         }
         return result;
     }
@@ -87,9 +89,12 @@ public sealed class PilotMatrix : IEquatable<PilotMatrix>
             throw new InvalidOperationException($"Cannot subtract matrices of mismatched dimensions: ({Rows}x{Cols}) vs ({other.Rows}x{other.Cols})");
 
         var result = new PilotMatrix(Rows, Cols, ElementType);
-        for (int i = 0; i < _data.Length; i++)
+        var a = _data;
+        var b = other._data;
+        var dst = result._data;
+        for (int i = 0; i < a.Length; i++)
         {
-            result._data[i] = _data[i] - other._data[i];
+            dst[i] = a[i] - b[i];
         }
         return result;
     }
@@ -99,17 +104,28 @@ public sealed class PilotMatrix : IEquatable<PilotMatrix>
         if (Cols != other.Rows)
             throw new InvalidOperationException($"Cannot multiply matrices with inner dimensions mismatch: ({Rows}x{Cols}) * ({other.Rows}x{other.Cols})");
 
-        var result = new PilotMatrix(Rows, other.Cols, ElementType);
-        for (int i = 0; i < Rows; i++)
+        int rows = Rows;
+        int kDim = Cols;
+        int otherCols = other.Cols;
+        var result = new PilotMatrix(rows, otherCols, ElementType);
+        var a = _data;
+        var b = other._data;
+        var c = result._data;
+
+        // Cache-friendly row-major (i, k, j) loop order without per-element bounds checks
+        for (int i = 0; i < rows; i++)
         {
-            for (int j = 0; j < other.Cols; j++)
+            int aRowOffset = i * kDim;
+            int cRowOffset = i * otherCols;
+            for (int k = 0; k < kDim; k++)
             {
-                double sum = 0;
-                for (int k = 0; k < Cols; k++)
+                double aik = a[aRowOffset + k];
+                if (aik == 0.0) continue;
+                int bRowOffset = k * otherCols;
+                for (int j = 0; j < otherCols; j++)
                 {
-                    sum += this[i, k] * other[k, j];
+                    c[cRowOffset + j] += aik * b[bRowOffset + j];
                 }
-                result[i, j] = sum;
             }
         }
         return result;
@@ -118,21 +134,28 @@ public sealed class PilotMatrix : IEquatable<PilotMatrix>
     public PilotMatrix MultiplyScalar(double scalar)
     {
         var result = new PilotMatrix(Rows, Cols, ElementType);
-        for (int i = 0; i < _data.Length; i++)
+        var src = _data;
+        var dst = result._data;
+        for (int i = 0; i < src.Length; i++)
         {
-            result._data[i] = _data[i] * scalar;
+            dst[i] = src[i] * scalar;
         }
         return result;
     }
 
     public PilotMatrix Transpose()
     {
-        var result = new PilotMatrix(Cols, Rows, ElementType);
-        for (int r = 0; r < Rows; r++)
+        int rows = Rows;
+        int cols = Cols;
+        var result = new PilotMatrix(cols, rows, ElementType);
+        var src = _data;
+        var dst = result._data;
+        for (int r = 0; r < rows; r++)
         {
-            for (int c = 0; c < Cols; c++)
+            int rOffset = r * cols;
+            for (int c = 0; c < cols; c++)
             {
-                result[c, r] = this[r, c];
+                dst[c * rows + r] = src[rOffset + c];
             }
         }
         return result;
@@ -167,10 +190,11 @@ public sealed class PilotMatrix : IEquatable<PilotMatrix>
         for (int r = 0; r < Rows; r++)
         {
             if (r > 0) sb.Append("; ");
+            int rOffset = r * Cols;
             for (int c = 0; c < Cols; c++)
             {
                 if (c > 0) sb.Append(", ");
-                sb.Append(this[r, c]);
+                sb.Append(_data[rOffset + c]);
             }
         }
         sb.Append(']');
@@ -179,7 +203,7 @@ public sealed class PilotMatrix : IEquatable<PilotMatrix>
 
     private void ValidateBounds(int r, int c)
     {
-        if (r < 0 || r >= Rows || c < 0 || c >= Cols)
+        if ((uint)r >= (uint)Rows || (uint)c >= (uint)Cols)
             throw new IndexOutOfRangeException($"Matrix index [{r}, {c}] out of bounds for {Rows}x{Cols} matrix.");
     }
 }

@@ -79,7 +79,7 @@ public sealed class PilotCompiler : IPilotCompiler
             parser.RemoveErrorListeners();
             parser.AddErrorListener(errorTracker);
 
-            var tree = parser.program();
+            var tree = parser.ParseProgramFast();
 
             if (errorTracker.HasErrors)
             {
@@ -140,13 +140,21 @@ public sealed class PilotCompiler : IPilotCompiler
 
     private static string ComputeCacheKey(string source, PilotCompilerOptions options)
     {
-        var sb = new System.Text.StringBuilder();
-        sb.Append(source.Length).Append(':').Append(source.GetHashCode());
-        sb.Append('|').Append(options.StrictMode);
-        if (options.DefinedSymbols.Count > 0)
+        if (options.DefinedSymbols.Count == 0)
         {
-            sb.Append('|').Append(string.Join(",", options.DefinedSymbols.OrderBy(s => s)));
+            return string.Concat(
+                source.Length.ToString(),
+                ":",
+                source.GetHashCode(StringComparison.Ordinal).ToString(),
+                options.StrictMode ? "|1|" : "|0|",
+                source);
         }
+
+        var sb = new System.Text.StringBuilder(source.Length + 64);
+        sb.Append(source.Length).Append(':').Append(source.GetHashCode(StringComparison.Ordinal));
+        sb.Append('|').Append(options.StrictMode);
+        sb.Append('|').Append(string.Join(",", options.DefinedSymbols.OrderBy(s => s, StringComparer.Ordinal)));
+        sb.Append('|').Append(source);
         return sb.ToString();
     }
 }

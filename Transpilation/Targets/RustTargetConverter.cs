@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using Antlr4.Runtime;
 using Pilot.Diagnostics;
 using Pilot.Preprocessing;
@@ -9,13 +10,20 @@ using Pilot.Preprocessing;
 namespace Pilot.Transpilation.Targets;
 
 /// <summary>
-/// Bidirectional compile-time code converter between Pilot and Rust.
+/// Bidirectional optimizing compile-time code converter between Pilot and Rust (2024 Edition).
+/// Performs mutability analysis to emit immutable 'let' vs 'let mut', inclusive ranges 'a..=b',
+/// and hardware-exact scalar types.
 /// </summary>
 public sealed class RustTargetConverter : ITargetLanguageConverter
 {
-    public string Language => "rust";
+    public string Language { get; }
     public string TargetLanguage => Language;
     public string SourceLanguage => Language;
+
+    public RustTargetConverter(string alias = "rust")
+    {
+        Language = alias;
+    }
 
     public TranspilationResult TranspileSource(string pilotSource, TranspilationOptions options)
     {
@@ -36,7 +44,7 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
         parser.RemoveErrorListeners();
         parser.AddErrorListener(errorTracker);
 
-        var tree = parser.program();
+        var tree = parser.ParseProgramFast();
         if (errorTracker.HasErrors)
         {
             return TranspilationResult.CreateFailure(errorTracker.Errors, TargetLanguage);
@@ -50,12 +58,13 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
         var sb = new StringBuilder();
         if (options.EmitHeaderComments)
         {
-            sb.AppendLine("// Code transpiled from Pilot to Rust (2024 Edition)");
+            sb.AppendLine("// Code transpiled & optimized from Pilot to Rust (2024 Edition)");
             sb.AppendLine("#![allow(unused_variables, dead_code)]");
             sb.AppendLine();
         }
 
-        var visitor = new PilotToRustVisitor(options);
+        var mutatedVars = PilotOptimizer.AnalyzeMutatedVariables(programAst);
+        var visitor = new PilotToRustVisitor(options, mutatedVars);
         string code = visitor.VisitProgram(programAst);
         sb.Append(code);
 
@@ -67,7 +76,7 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
         var sb = new StringBuilder();
         if (options.EmitHeaderComments)
         {
-            sb.AppendLine("// Converted from Rust to Pilot");
+            sb.AppendLine("// Converted & optimized from Rust to Pilot");
             sb.AppendLine();
         }
 
@@ -86,21 +95,40 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
             sb.AppendLine(new string(' ', indent) + converted);
         }
 
-        return TranspilationResult.CreateSuccess(sb.ToString().TrimEnd() + Environment.NewLine, "pilot");
+        string optimized = PilotOptimizer.OptimizeIngestedPilotCode(sb.ToString());
+        return TranspilationResult.CreateSuccess(optimized, "pilot");
     }
 
     private static string ConvertRustLineToPilot(string line)
     {
-        string res = line;
+        string res = line.TrimEnd(';');
 
-        // Visibility
+        // Visibility & Functions
         res = res.Replace("pub fn ", "def ").Replace("fn ", "def ");
         res = res.Replace("pub struct ", "class ").Replace("struct ", "class ");
 
-        // Variables
-        res = res.Replace("let mut ", "let ");
+        // Inclusive range a..=b -> a..b
+        res = res.Replace("..=", "..");
 
-        // Print
+        // Variables
+        res = res.Replace("let mut ", "var ");
+
+        // println!("Hello {}", x) -> println(f"Hello {x}")
+        var printMatch = Regex.Match(res, @"^println!\(\s*""([^""]*)""\s*(?:,\s*(.+))?\)$");
+        if (printMatch.Success)
+        {
+            string fmt = printMatch.Groups[1].Value;
+            string argsStr = printMatch.Groups[2].Value;
+            if (!string.IsNullOrWhiteSpace(argsStr))
+            {
+                var args = argsStr.Split(',').Select(a => a.Trim()).ToArray();
+                int idx = 0;
+                string fstr = Regex.Replace(fmt, @"\{\}", _ => idx < args.Length ? $"{{{args[idx++]}}}" : "");
+                return $"println(f\"{fstr}\")";
+            }
+            return $"println(\"{fmt}\")";
+        }
+
         res = res.Replace("println!", "println").Replace("print!", "print");
 
         return res;
@@ -109,11 +137,13 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
     private sealed class PilotToRustVisitor
     {
         private readonly TranspilationOptions _options;
+        private readonly HashSet<string> _mutatedVars;
         private int _indent;
 
-        public PilotToRustVisitor(TranspilationOptions options)
+        public PilotToRustVisitor(TranspilationOptions options, HashSet<string> mutatedVars)
         {
             _options = options;
+            _mutatedVars = mutatedVars;
         }
 
         private string Indent => string.Concat(Enumerable.Repeat(_options.IndentString, _indent));
@@ -162,7 +192,8 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
                 string? val = ctx.let_stmt().test()?.GetText();
                 string typeAnnot = !string.IsNullOrEmpty(type) ? $": {MapType(type)}" : "";
                 string valStr = val != null ? FormatExpr(val) : "";
-                return val != null ? $"let mut {name}{typeAnnot} = {valStr};" : $"let mut {name}{typeAnnot};";
+                string mutKw = _mutatedVars.Contains(name) ? "let mut" : "let";
+                return val != null ? $"{mutKw} {name}{typeAnnot} = {valStr};" : $"let mut {name}{typeAnnot};";
             }
             if (ctx.var_stmt() != null)
             {
@@ -170,31 +201,57 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
                 string? type = ctx.var_stmt().type_annotation()?.type_spec()?.GetText();
                 string? val = ctx.var_stmt().test()?.GetText();
                 string typeAnnot = !string.IsNullOrEmpty(type) ? $": {MapType(type)}" : "";
-                return val != null ? $"let mut {name}{typeAnnot} = {val};" : $"let mut {name}{typeAnnot};";
+                return val != null ? $"let mut {name}{typeAnnot} = {FormatExpr(val)};" : $"let mut {name}{typeAnnot};";
+            }
+            if (ctx.const_stmt() != null)
+            {
+                string name = ctx.const_stmt().binding_pattern().GetText();
+                string? type = ctx.const_stmt().type_annotation()?.type_spec()?.GetText();
+                string val = ctx.const_stmt().test().GetText();
+                string typeStr = !string.IsNullOrEmpty(type) ? MapType(type) : "i64";
+                return $"const {name}: {typeStr} = {FormatExpr(val)};";
+            }
+            if (ctx.guard_stmt() != null)
+            {
+                return VisitGuardStmt(ctx.guard_stmt(), inlineIndent: false);
             }
             if (ctx.flow_stmt() != null)
             {
                 var flow = ctx.flow_stmt();
                 if (flow.RETURN() != null)
                 {
-                    string ret = flow.testlist() != null ? flow.testlist().GetText() : "";
+                    string ret = flow.testlist() != null ? FormatExpr(flow.testlist().GetText()) : "";
                     return string.IsNullOrEmpty(ret) ? "return;" : $"return {ret};";
                 }
                 if (flow.BREAK() != null) return "break;";
                 if (flow.CONTINUE() != null) return "continue;";
+            }
+            if (ctx.assert_stmt() != null)
+            {
+                var tests = ctx.assert_stmt().test();
+                return $"assert!({FormatExpr(tests[0].GetText())});";
             }
             if (ctx.expr_stmt() != null)
             {
                 string expr = ctx.expr_stmt().GetText().TrimEnd(';');
                 if (expr.StartsWith("println("))
                 {
-                    expr = "println!" + expr["println".Length..];
+                    string inner = expr["println(".Length..^1].Trim();
+                    if (inner.StartsWith("f\"") && inner.EndsWith("\""))
+                    {
+                        return $"println!(\"{inner[2..^1]}\");";
+                    }
+                    if (inner.StartsWith("\"") && inner.EndsWith("\""))
+                    {
+                        return $"println!({inner});";
+                    }
+                    return $"println!(\"{{:?}}\", {FormatExpr(inner)});";
                 }
-                else if (expr.StartsWith("print("))
+                if (expr.StartsWith("print("))
                 {
                     expr = "print!" + expr["print".Length..];
                 }
-                return expr + ";";
+                return FormatExpr(expr) + ";";
             }
             return ctx.GetText().TrimEnd(';') + ";";
         }
@@ -206,8 +263,20 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
             if (ctx.if_stmt() != null) return VisitIfStmt(ctx.if_stmt());
             if (ctx.while_stmt() != null) return VisitWhileStmt(ctx.while_stmt());
             if (ctx.for_stmt() != null) return VisitForStmt(ctx.for_stmt());
+            if (ctx.guard_stmt() != null) return VisitGuardStmt(ctx.guard_stmt(), inlineIndent: true);
             if (ctx.match_stmt() != null) return VisitMatchStmt(ctx.match_stmt());
+            if (ctx.inline_foreign_block() != null) return VisitForeignBlock(ctx.inline_foreign_block());
             return Indent + "// " + ctx.GetText();
+        }
+
+        private string VisitGuardStmt(PilotParser.Guard_stmtContext ctx, bool inlineIndent)
+        {
+            string prefix = inlineIndent ? Indent : "";
+            string cond = ctx.test() != null ? FormatExpr(ctx.test().GetText()) : "true";
+            var sb = new StringBuilder();
+            sb.AppendLine($"{prefix}if !({cond})");
+            sb.Append(VisitSuite(ctx.suite()));
+            return sb.ToString().TrimEnd();
         }
 
         public string VisitFuncDef(PilotParser.Func_defContext ctx)
@@ -251,12 +320,12 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
             var suites = ctx.suite();
             var sb = new StringBuilder();
 
-            sb.AppendLine($"{Indent}if {tests[0].GetText()}");
+            sb.AppendLine($"{Indent}if {FormatExpr(tests[0].GetText())}");
             sb.Append(VisitSuite(suites[0]));
 
             for (int i = 1; i < tests.Length; i++)
             {
-                sb.AppendLine($"{Indent}else if {tests[i].GetText()}");
+                sb.AppendLine($"{Indent}else if {FormatExpr(tests[i].GetText())}");
                 sb.Append(VisitSuite(suites[i]));
             }
 
@@ -272,7 +341,7 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
         public string VisitWhileStmt(PilotParser.While_stmtContext ctx)
         {
             var sb = new StringBuilder();
-            sb.AppendLine($"{Indent}while {ctx.test(0).GetText()}");
+            sb.AppendLine($"{Indent}while {FormatExpr(ctx.test(0).GetText())}");
             sb.Append(VisitSuite(ctx.suite(0)));
             return sb.ToString();
         }
@@ -281,7 +350,12 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
         {
             var sb = new StringBuilder();
             string target = ctx.for_target().GetText();
-            string iterable = ctx.test(0).GetText();
+            string rawIter = ctx.test(0).GetText();
+
+            string iterable = PilotOptimizer.TryParseRangeExpr(rawIter, out string startR, out string endR)
+                ? $"{FormatExpr(startR)}..={FormatExpr(endR)}"
+                : FormatExpr(rawIter);
+
             sb.AppendLine($"{Indent}for {target} in {iterable}");
             sb.Append(VisitSuite(ctx.suite(0)));
             return sb.ToString();
@@ -290,14 +364,14 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
         public string VisitMatchStmt(PilotParser.Match_stmtContext ctx)
         {
             var sb = new StringBuilder();
-            sb.AppendLine($"{Indent}match {ctx.test().GetText()} {{");
+            sb.AppendLine($"{Indent}match {FormatExpr(ctx.test().GetText())} {{");
             _indent++;
             if (ctx.match_suite()?.match_arm() != null)
             {
                 foreach (var arm in ctx.match_suite().match_arm())
                 {
                     string pattern = arm.pattern().GetText();
-                    string guard = arm.test() != null ? $" if {arm.test().GetText()}" : "";
+                    string guard = arm.test() != null ? $" if {FormatExpr(arm.test().GetText())}" : "";
                     sb.AppendLine($"{Indent}{pattern}{guard} => {{");
                     _indent++;
                     sb.AppendLine(VisitSuite(arm.suite()).Trim());
@@ -308,6 +382,21 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
             _indent--;
             sb.AppendLine($"{Indent}}}");
             return sb.ToString();
+        }
+
+        private string VisitForeignBlock(PilotParser.Inline_foreign_blockContext ctx)
+        {
+            string lang = ctx.foreign_language().GetText().ToLowerInvariant();
+            if (lang == "rust" && ctx.stmt() != null && ctx.stmt().Length > 0)
+            {
+                var sb = new StringBuilder();
+                foreach (var s in ctx.stmt())
+                {
+                    sb.AppendLine(VisitStmt(s));
+                }
+                return sb.ToString().TrimEnd();
+            }
+            return $"{Indent}// [polyglot:{lang}] {ctx.GetText()}";
         }
 
         private string VisitSuite(PilotParser.SuiteContext ctx)
@@ -339,7 +428,12 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
 
         private static string FormatExpr(string expr)
         {
-            string formatted = expr;
+            string formatted = PilotOptimizer.FoldConstantsAndNormalize(expr);
+            if (formatted.StartsWith("f\"") && formatted.EndsWith("\""))
+            {
+                return $"format!(\"{formatted[2..^1]}\")";
+            }
+
             foreach (var op in new[] { "==", "!=", "<=", ">=", "+", "-", "*", "/", "%" })
             {
                 if (formatted.Contains(op) && !formatted.Contains($" {op} "))

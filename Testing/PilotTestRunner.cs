@@ -54,7 +54,7 @@ public static class PilotTestRunner
             parser.RemoveErrorListeners();
             parser.AddErrorListener(errorTracker);
 
-            parser.program();
+            parser.ParseProgramFast();
 
             if (expectFailure)
             {

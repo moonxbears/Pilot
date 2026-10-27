@@ -1,0 +1,98 @@
+# ==============================================================================
+# Concept 11: Concurrency, Coroutines, Generators & Lazy Evaluation
+# ==============================================================================
+
+println("==================================================");
+println(" PILOT SHOWCASE: Concurrency, Generators & Lazy");
+println("==================================================");
+
+# 1. Generators & Coroutines (Stateful Yielding)
+println("\n--- 1. Stateful Generators (Yield Execution) ---");
+
+def fibonacci_stream(limit: int) {
+    let a = 0;
+    let b = 1;
+    let count = 0;
+    while count < limit {
+        yield a;
+        let next_val = a + b;
+        a = b;
+        b = next_val;
+        count = count + 1;
+    }
+}
+
+println("Invoking fibonacci_stream(7)...");
+let stream = fibonacci_stream(7);
+
+println("Pulling items via .next():");
+println("  Step 1: " + stream.next());
+println("  Step 2: " + stream.next());
+println("  Step 3: " + stream.next());
+
+println("\nStreaming remaining items via for-in loop:");
+for item in stream {
+    println("  -> Streamed: " + item);
+}
+println("Generator completed: " + stream.is_done);
+
+
+# 2. Concurrency Primitives (spawn, await, parallel_map)
+println("\n--- 2. Concurrency (spawn, await & parallel_map) ---");
+
+def compute_heavy_hash(seed: int) {
+    return "HASH_0x" + (seed * 1337);
+}
+
+println("Spawning asynchronous future on thread pool...");
+let background_future = spawn compute_heavy_hash(42);
+println("Future status before await: is_completed=" + background_future.is_completed);
+
+let computed_val = await background_future;
+println("Awaited future result: " + computed_val);
+
+# Parallel mapping over a dataset
+let batch_inputs = [ 10, 20, 30, 40 ];
+println("\nExecuting parallel_map across dataset: " + batch_inputs);
+let parallel_outputs = parallel_map(compute_heavy_hash, batch_inputs);
+println("Parallel outputs: " + parallel_outputs);
+
+
+# 3. Lazy Evaluation (Deferred Computation)
+println("\n--- 3. Lazy Evaluation (On-Demand Execution) ---");
+
+let evaluation_executions = 0;
+def expensive_initialization() {
+    evaluation_executions = evaluation_executions + 1;
+    println("  [COMPUTING] Performing high-cost algorithm calculation...");
+    return 999 * 888;
+}
+
+let deferred_metric = lazy(expensive_initialization);
+println("Lazy value created. Total executions so far: " + evaluation_executions);
+println("Accessing deferred_metric.value for the first time:");
+println("  Value: " + deferred_metric.value);
+println("Total executions after first access: " + evaluation_executions);
+
+println("\nAccessing deferred_metric.value a second time (cached):");
+println("  Value: " + deferred_metric.value);
+println("Total executions (notice it did NOT recompute): " + evaluation_executions);
+
+
+# 4. JSON Serialization & Deserialization
+println("\n--- 4. Native JSON Serialization ---");
+
+let state_payload = {
+    "node_id": "PILOT-CORE-01",
+    "uptime_hours": 1420.5,
+    "services": [ "auth", "routing", "lsp" ]
+};
+
+let json_string = json.dumps(state_payload);
+println("Serialized JSON String: " + json_string);
+
+let parsed_data = json.loads(json_string);
+println("Deserialized Node ID:  " + parsed_data["node_id"]);
+println("Deserialized Services: " + parsed_data["services"]);
+
+println("\n>>> Concept 11 Demonstration Complete! <<<\n");

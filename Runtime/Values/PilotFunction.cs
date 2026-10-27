@@ -36,19 +36,39 @@ public sealed class PilotParameter
 /// </summary>
 public sealed class PilotFunction
 {
+    private Dictionary<string, PilotValue>? _members;
+    private List<ParserRuleContext>? _requiresContracts;
+    private List<ParserRuleContext>? _ensuresContracts;
+
     public string Name { get; }
-    public IReadOnlyList<PilotParameter> Parameters { get; }
-    public PilotScope? ClosureScope { get; }
-    public ParserRuleContext? AstBody { get; }
-    public Func<PilotExecutionContext, IReadOnlyList<PilotValue>, PilotValue>? HostDelegate { get; }
-    public bool IsAsync { get; }
-    public bool IsGenerator { get; }
+    public IReadOnlyList<PilotParameter> Parameters { get; private set; }
+    public PilotScope? ClosureScope { get; private set; }
+    public ParserRuleContext? AstBody { get; private set; }
+    public Func<PilotExecutionContext, IReadOnlyList<PilotValue>, PilotValue>? HostDelegate { get; private set; }
+    public bool IsAsync { get; private set; }
+    public bool IsGenerator { get; private set; }
     public bool IsVectorized { get; set; }
-    public IReadOnlyDictionary<string, PilotValue>? Captures { get; }
+    public IReadOnlyDictionary<string, PilotValue>? Captures { get; private set; }
     public PilotClassDefinition? ClassDef { get; set; }
-    public Dictionary<string, PilotValue> Members { get; } = new(StringComparer.Ordinal);
-    public List<ParserRuleContext> RequiresContracts { get; } = new();
-    public List<ParserRuleContext> EnsuresContracts { get; } = new();
+    public int PatchVersion { get; private set; } = 0;
+
+    public Dictionary<string, PilotValue> Members => _members ??= new(StringComparer.Ordinal);
+    public bool HasMembers => _members != null && _members.Count > 0;
+    public bool TryGetMember(string name, out PilotValue value)
+    {
+        if (_members != null && _members.TryGetValue(name, out value))
+        {
+            return true;
+        }
+        value = PilotValue.Undefined;
+        return false;
+    }
+
+    public List<ParserRuleContext> RequiresContracts => _requiresContracts ??= new();
+    public bool HasRequiresContracts => _requiresContracts != null && _requiresContracts.Count > 0;
+
+    public List<ParserRuleContext> EnsuresContracts => _ensuresContracts ??= new();
+    public bool HasEnsuresContracts => _ensuresContracts != null && _ensuresContracts.Count > 0;
 
     public PilotFunction(
         string name,
@@ -83,10 +103,15 @@ public sealed class PilotFunction
         Func<PilotExecutionContext, IReadOnlyList<PilotValue>, PilotValue> hostDelegate,
         params string[] paramNames)
     {
-        var parameters = new List<PilotParameter>();
-        foreach (var p in paramNames)
+        if (paramNames.Length == 0)
         {
-            parameters.Add(new PilotParameter(p));
+            return new PilotFunction(name, Array.Empty<PilotParameter>(), hostDelegate);
+        }
+
+        var parameters = new PilotParameter[paramNames.Length];
+        for (int i = 0; i < paramNames.Length; i++)
+        {
+            parameters[i] = new PilotParameter(paramNames[i]);
         }
         return new PilotFunction(name, parameters, hostDelegate);
     }
@@ -109,6 +134,109 @@ public sealed class PilotFunction
         }
 
         throw new InvalidOperationException($"Cannot invoke function '{Name}': no executable body or host delegate available.");
+    }
+
+    /// <summary>
+    /// Returns a canonical parameter signature key (arity + parameter types) for overload &amp; hot-patch matching.
+    /// </summary>
+    public string GetSignatureKey()
+    {
+        if (Parameters == null || Parameters.Count == 0) return "()";
+        var sb = new System.Text.StringBuilder("(");
+        bool first = true;
+        for (int i = 0; i < Parameters.Count; i++)
+        {
+            var p = Parameters[i];
+            if (i == 0 && p.Name == "self" && string.IsNullOrEmpty(p.TypeName))
+            {
+                continue;
+            }
+            if (!first) sb.Append(',');
+            first = false;
+            if (p.IsParams) sb.Append('*');
+            else if (p.IsKwArgs) sb.Append("**");
+            sb.Append(string.IsNullOrWhiteSpace(p.TypeName) ? "any" : p.TypeName.Trim());
+        }
+        sb.Append(')');
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Creates an independent snapshot of this function's state for hot-reload rollback.
+    /// </summary>
+    public PilotFunction CloneSnapshot()
+    {
+        var copy = HostDelegate != null
+            ? new PilotFunction(Name, new List<PilotParameter>(Parameters), HostDelegate)
+            : new PilotFunction(
+                Name,
+                new List<PilotParameter>(Parameters),
+                AstBody,
+                ClosureScope,
+                IsAsync,
+                IsGenerator,
+                Captures != null ? new Dictionary<string, PilotValue>(Captures, StringComparer.Ordinal) : null);
+
+        copy.IsVectorized = IsVectorized;
+        copy.ClassDef = ClassDef;
+        copy.PatchVersion = PatchVersion;
+        if (_members != null)
+        {
+            foreach (var kv in _members) copy.Members[kv.Key] = kv.Value;
+        }
+        if (_requiresContracts != null)
+        {
+            copy.RequiresContracts.AddRange(_requiresContracts);
+        }
+        if (_ensuresContracts != null)
+        {
+            copy.EnsuresContracts.AddRange(_ensuresContracts);
+        }
+        return copy;
+    }
+
+    /// <summary>
+    /// Mutates this function instance in-place with the body, parameters, and contracts of <paramref name="patch"/>.
+    /// Existing references, callbacks, and method group slots immediately observe the updated implementation.
+    /// </summary>
+    public void ApplyPatchFrom(PilotFunction patch, bool isRollback = false)
+    {
+        if (patch == null || ReferenceEquals(this, patch)) return;
+
+        Parameters = patch.Parameters;
+        AstBody = patch.AstBody;
+        ClosureScope = patch.ClosureScope;
+        HostDelegate = patch.HostDelegate;
+        IsAsync = patch.IsAsync;
+        IsGenerator = patch.IsGenerator;
+        IsVectorized = patch.IsVectorized;
+        Captures = patch.Captures;
+        if (patch.ClassDef != null)
+        {
+            ClassDef = patch.ClassDef;
+        }
+
+        _requiresContracts?.Clear();
+        if (patch.HasRequiresContracts)
+        {
+            RequiresContracts.AddRange(patch.RequiresContracts);
+        }
+
+        _ensuresContracts?.Clear();
+        if (patch.HasEnsuresContracts)
+        {
+            EnsuresContracts.AddRange(patch.EnsuresContracts);
+        }
+
+        if (patch.HasMembers)
+        {
+            foreach (var kv in patch.Members)
+            {
+                Members[kv.Key] = kv.Value;
+            }
+        }
+
+        PatchVersion = isRollback ? patch.PatchVersion : PatchVersion + 1;
     }
 
     public override string ToString() => $"<function {Name}>";

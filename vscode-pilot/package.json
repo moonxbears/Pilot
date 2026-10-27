@@ -1,188 +1,197 @@
 {
-  "name": "pilot-lang",
-  "displayName": "Pilot Language Support",
-  "description": "Syntax highlighting, semantic analysis, type checking, and Language Server (LSP) integration for the Pilot programming language.",
-  "version": "1.0.0",
-  "publisher": "pilot-lang",
-  "engines": {
-    "vscode": "^1.85.0"
-  },
-  "categories": [
-    "Programming Languages",
-    "Linters"
-  ],
-  "activationEvents": [
-    "onLanguage:pilot",
-    "onDebug",
-    "onCommand:pilot.runCurrentFile",
-    "onCommand:pilot.debugCurrentFile",
-    "onCommand:pilot.createLaunchConfig"
-  ],
-  "main": "./out/extension.js",
-  "contributes": {
-    "languages": [
-      {
-        "id": "pilot",
-        "aliases": [
-          "Pilot",
-          "pilot"
-        ],
-        "extensions": [
-          ".pilot"
-        ],
-        "configuration": "./language-configuration.json"
-      }
-    ],
-    "grammars": [
-      {
-        "language": "pilot",
-        "scopeName": "source.pilot",
-        "path": "./syntaxes/pilot.tmLanguage.json"
-      }
-    ],
-    "snippets": [
-      {
-        "language": "pilot",
-        "path": "./snippets/pilot.json"
-      }
-    ],
-    "commands": [
-      {
-        "command": "pilot.restartLanguageServer",
-        "title": "Pilot: Restart Language Server"
-      },
-      {
-        "command": "pilot.runCurrentFile",
-        "title": "Pilot: Run Current File",
-        "icon": "$(play)"
-      },
-      {
-        "command": "pilot.debugCurrentFile",
-        "title": "Pilot: Debug Current File",
-        "icon": "$(debug-alt)"
-      },
-      {
-        "command": "pilot.createLaunchConfig",
-        "title": "Pilot: Add Run & Debug Configurations to launch.json"
-      }
-    ],
-    "menus": {
-      "editor/title/run": [
-        {
-          "command": "pilot.runCurrentFile",
-          "when": "resourceExtname == .pilot",
-          "group": "navigation@1"
-        },
-        {
-          "command": "pilot.debugCurrentFile",
-          "when": "resourceExtname == .pilot",
-          "group": "navigation@2"
-        }
-      ]
+    "name": "pilot-lang",
+    "displayName": "Pilot Language Support",
+    "description": "Syntax highlighting, semantic analysis, type checking, and Language Server (LSP) integration for the Pilot programming language.",
+    "version": "1.0.0",
+    "publisher": "pilot-lang",
+    "engines": {
+        "vscode": "^1.85.0"
     },
-    "debuggers": [
-      {
-        "type": "pilot",
-        "label": "Pilot",
-        "languages": [
-          "pilot"
-        ],
-        "configurationAttributes": {
-          "launch": {
-            "required": [
-              "program"
-            ],
-            "properties": {
-              "program": {
-                "type": "string",
-                "description": "Path to the .pilot script to run or debug.",
-                "default": "${file}"
-              },
-              "mode": {
-                "type": "string",
-                "description": "Execution mode: 'run' for standard execution, 'debug' for interactive terminal debugging.",
-                "enum": [
-                  "run",
-                  "debug"
-                ],
-                "default": "run"
-              },
-              "args": {
-                "type": "array",
-                "description": "Command line arguments passed to the script.",
-                "items": {
-                  "type": "string"
-                },
-                "default": []
-              },
-              "pilotPath": {
-                "type": "string",
-                "description": "Path to the pilot executable (default: 'pilot')",
-                "default": "pilot"
-              }
-            }
-          }
-        },
-        "initialConfigurations": [
-          {
-            "type": "pilot",
-            "request": "launch",
-            "name": "Pilot: Run Current File",
-            "mode": "run",
-            "program": "${file}",
-            "args": []
-          },
-          {
-            "type": "pilot",
-            "request": "launch",
-            "name": "Pilot: Debug Current File",
-            "mode": "debug",
-            "program": "${file}",
-            "args": []
-          }
-        ],
-        "configurationSnippets": [
-          {
-            "label": "Pilot: Run Current File",
-            "description": "Run the currently open Pilot file",
-            "body": {
-              "type": "pilot",
-              "request": "launch",
-              "name": "Pilot: Run Current File",
-              "mode": "run",
-              "program": "^\"\\${file}\"",
-              "args": []
-            }
-          },
-          {
-            "label": "Pilot: Debug Current File",
-            "description": "Start an interactive debugger session for the current Pilot file",
-            "body": {
-              "type": "pilot",
-              "request": "launch",
-              "name": "Pilot: Debug Current File",
-              "mode": "debug",
-              "program": "^\"\\${file}\"",
-              "args": []
-            }
-          }
-        ]
-      }
+    "categories": [
+        "Programming Languages",
+        "Linters"
     ],
-    "configuration": {
-      "title": "Pilot Language",
-      "properties": {
-        "pilot.languageServer.dotnetPath": {
-          "type": "string",
-          "default": "dotnet",
-          "description": "Path to the dotnet executable used to run Pilot.LanguageServer."
+    "activationEvents": [
+        "onLanguage:pilot",
+        "onDebug",
+        "onCommand:pilot.runCurrentFile",
+        "onCommand:pilot.debugCurrentFile",
+        "onCommand:pilot.createLaunchConfig"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "languages": [
+            {
+                "id": "pilot",
+                "aliases": [
+                    "Pilot",
+                    "pilot"
+                ],
+                "extensions": [
+                    ".pilot"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "pilot",
+                "scopeName": "source.pilot",
+                "path": "./syntaxes/pilot.tmLanguage.json"
+            }
+        ],
+        "snippets": [
+            {
+                "language": "pilot",
+                "path": "./snippets/pilot.json"
+            }
+        ],
+        "commands": [
+            {
+                "command": "pilot.restartLanguageServer",
+                "title": "Pilot: Restart Language Server"
+            },
+            {
+                "command": "pilot.runCurrentFile",
+                "title": "Pilot: Run Current File",
+                "icon": "$(play)"
+            },
+            {
+                "command": "pilot.debugCurrentFile",
+                "title": "Pilot: Debug Current File",
+                "icon": "$(debug-alt)"
+            },
+            {
+                "command": "pilot.createLaunchConfig",
+                "title": "Pilot: Add Run \u0026 Debug Configurations to launch.json"
+            }
+        ],
+        "menus": {
+            "editor/title/run": [
+                {
+                    "command": "pilot.runCurrentFile",
+                    "when": "resourceExtname == .pilot",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "pilot.debugCurrentFile",
+                    "when": "resourceExtname == .pilot",
+                    "group": "navigation@2"
+                }
+            ]
         },
-        "pilot.languageServer.serverPath": {
-          "type": "string",
-          "default": "",
-          "description": "Optional explicit path to Pilot.LanguageServer.dll or Pilot.LanguageServer.csproj."
+        "debuggers": [
+            {
+                "type": "pilot",
+                "label": "Pilot",
+                "languages": [
+                    "pilot"
+                ],
+                "configurationAttributes": {
+                    "launch": {
+                        "required": [
+                            "program"
+                        ],
+                        "properties": {
+                            "program": {
+                                "type": "string",
+                                "description": "Path to the .pilot script to run or debug.",
+                                "default": "${file}"
+                            },
+                            "mode": {
+                                "type": "string",
+                                "description": "Execution mode: \u0027run\u0027 for standard execution, \u0027debug\u0027 for interactive terminal debugging.",
+                                "enum": [
+                                    "run",
+                                    "debug"
+                                ],
+                                "default": "run"
+                            },
+                            "args": {
+                                "type": "array",
+                                "description": "Command line arguments passed to the script.",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "default": []
+                            },
+                            "pilotPath": {
+                                "type": "string",
+                                "description": "Path to the pilot executable (default: \u0027pilot\u0027)",
+                                "default": "pilot"
+                            }
+                        }
+                    }
+                },
+                "initialConfigurations": [
+                    {
+                        "type": "pilot",
+                        "request": "launch",
+                        "name": "Pilot: Run Current File",
+                        "mode": "run",
+                        "program": "${file}",
+                        "args": []
+                    },
+                    {
+                        "type": "pilot",
+                        "request": "launch",
+                        "name": "Pilot: Debug Current File",
+                        "mode": "debug",
+                        "program": "${file}",
+                        "args": []
+                    }
+                ],
+                "configurationSnippets": [
+                    {
+                        "label": "Pilot: Run Current File",
+                        "description": "Run the currently open Pilot file",
+                        "body": {
+                            "type": "pilot",
+                            "request": "launch",
+                            "name": "Pilot: Run Current File",
+                            "mode": "run",
+                            "program": "^\"\\${file}\"",
+                            "args": []
+                        }
+                    },
+                    {
+                        "label": "Pilot: Debug Current File",
+                        "description": "Start an interactive debugger session for the current Pilot file",
+                        "body": {
+                            "type": "pilot",
+                            "request": "launch",
+                            "name": "Pilot: Debug Current File",
+                            "mode": "debug",
+                            "program": "^\"\\${file}\"",
+                            "args": []
+                        }
+                    }
+                ]
+            }
+        ],
+        "configuration": {
+            "title": "Pilot Language",
+            "properties": {
+                "pilot.languageServer.dotnetPath": {
+                    "type": "string",
+                    "default": "dotnet",
+                    "description": "Path to the dotnet executable used to run Pilot.LanguageServer."
+                },
+                "pilot.languageServer.serverPath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Optional explicit path to Pilot.LanguageServer.dll or Pilot.LanguageServer.csproj."
+                }
+            }
         }
-      }
+    },
+    "devDependencies": {
+        "@types/node": "^26.6.5",
+        "@types/vscode": "^1.140.0",
+        "typescript": "^7.0.2"
+    },
+    "scripts": {
+        "compile": "tsc -p .",
+        "watch": "tsc -watch -p ."
     }
-  }
 }

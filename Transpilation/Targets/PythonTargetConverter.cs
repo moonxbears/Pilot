@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using Antlr4.Runtime;
 using Pilot.Diagnostics;
 using Pilot.Preprocessing;
@@ -9,13 +10,18 @@ using Pilot.Preprocessing;
 namespace Pilot.Transpilation.Targets;
 
 /// <summary>
-/// Bidirectional compile-time code converter between Pilot and Python 3.
+/// Bidirectional optimizing compile-time code converter between Pilot and Python 3.10+.
 /// </summary>
 public sealed class PythonTargetConverter : ITargetLanguageConverter
 {
-    public string Language => "python";
+    public string Language { get; }
     public string TargetLanguage => Language;
     public string SourceLanguage => Language;
+
+    public PythonTargetConverter(string alias = "python")
+    {
+        Language = alias;
+    }
 
     public TranspilationResult TranspileSource(string pilotSource, TranspilationOptions options)
     {
@@ -36,7 +42,7 @@ public sealed class PythonTargetConverter : ITargetLanguageConverter
         parser.RemoveErrorListeners();
         parser.AddErrorListener(errorTracker);
 
-        var tree = parser.program();
+        var tree = parser.ParseProgramFast();
         if (errorTracker.HasErrors)
         {
             return TranspilationResult.CreateFailure(errorTracker.Errors, TargetLanguage);
@@ -50,10 +56,10 @@ public sealed class PythonTargetConverter : ITargetLanguageConverter
         var sb = new StringBuilder();
         if (options.EmitHeaderComments)
         {
-            sb.AppendLine("# Code transpiled from Pilot to Python 3");
+            sb.AppendLine("# Code transpiled & optimized from Pilot to Python 3");
             sb.AppendLine("# Target: Python 3.10+ (typed)");
             sb.AppendLine("from __future__ import annotations");
-            sb.AppendLine("from typing import Any, List, Dict, Set, Tuple, Optional, Callable");
+            sb.AppendLine("from typing import Any, List, Dict, Set, Tuple, Optional, Callable, Final");
             sb.AppendLine();
         }
 
@@ -69,7 +75,7 @@ public sealed class PythonTargetConverter : ITargetLanguageConverter
         var sb = new StringBuilder();
         if (options.EmitHeaderComments)
         {
-            sb.AppendLine("// Converted from Python to Pilot");
+            sb.AppendLine("// Converted & optimized from Python to Pilot");
             sb.AppendLine();
         }
 
@@ -81,6 +87,9 @@ public sealed class PythonTargetConverter : ITargetLanguageConverter
         {
             string line = lines[i];
             string trimmed = line.Trim();
+
+            if (trimmed.StartsWith("from __future__") || trimmed.StartsWith("from typing import"))
+                continue;
 
             if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#"))
             {
@@ -99,7 +108,6 @@ public sealed class PythonTargetConverter : ITargetLanguageConverter
                 sb.AppendLine(new string(' ', indentStack.Peek()) + "}");
             }
 
-            // Convert Python constructs to Pilot
             string converted = ConvertPythonLineToPilot(trimmed);
 
             if (converted.EndsWith(":"))
@@ -123,7 +131,8 @@ public sealed class PythonTargetConverter : ITargetLanguageConverter
             sb.AppendLine(new string(' ', indentStack.Count * 4) + "}");
         }
 
-        return TranspilationResult.CreateSuccess(sb.ToString().TrimEnd() + Environment.NewLine, "pilot");
+        string optimized = PilotOptimizer.OptimizeIngestedPilotCode(sb.ToString());
+        return TranspilationResult.CreateSuccess(optimized, "pilot");
     }
 
     private static string ConvertPythonLineToPilot(string line)
@@ -132,6 +141,12 @@ public sealed class PythonTargetConverter : ITargetLanguageConverter
 
         // Literals
         res = res.Replace("True", "true").Replace("False", "false").Replace("None", "null");
+
+        // print(...) -> println(...)
+        if (res.StartsWith("print("))
+        {
+            res = "println(" + res["print(".Length..];
+        }
 
         // Elif
         if (res.StartsWith("elif "))
@@ -143,7 +158,7 @@ public sealed class PythonTargetConverter : ITargetLanguageConverter
         if (!res.StartsWith("def ") && !res.StartsWith("class ") && !res.StartsWith("if ") &&
             !res.StartsWith("while ") && !res.StartsWith("for ") && !res.StartsWith("return ") &&
             !res.StartsWith("else") && !res.StartsWith("match ") && !res.StartsWith("case ") &&
-            res.Contains('=') && !res.Contains("==") && !res.Contains("<=") && !res.Contains(">="))
+            res.Contains('=') && !res.Contains("==") && !res.Contains("!=") && !res.Contains("<=") && !res.Contains(">="))
         {
             if (!res.StartsWith("self."))
             {
@@ -219,7 +234,11 @@ public sealed class PythonTargetConverter : ITargetLanguageConverter
             {
                 string name = ctx.const_stmt().binding_pattern().GetText();
                 string val = ctx.const_stmt().test().GetText();
-                return $"{name} = {TranslateExpr(val)}";
+                return $"{name}: Final = {TranslateExpr(val)}";
+            }
+            if (ctx.guard_stmt() != null)
+            {
+                return VisitGuardStmt(ctx.guard_stmt(), inlineIndent: false);
             }
             if (ctx.flow_stmt() != null)
             {
@@ -231,6 +250,11 @@ public sealed class PythonTargetConverter : ITargetLanguageConverter
                 }
                 if (flow.BREAK() != null) return "break";
                 if (flow.CONTINUE() != null) return "continue";
+                if (flow.RAISE() != null)
+                {
+                    string err = flow.test() != null && flow.test().Length > 0 ? TranslateExpr(flow.test(0).GetText()) : "\"Error\"";
+                    return $"raise RuntimeError({err})";
+                }
             }
             if (ctx.expr_stmt() != null)
             {
@@ -253,8 +277,20 @@ public sealed class PythonTargetConverter : ITargetLanguageConverter
             if (ctx.if_stmt() != null) return VisitIfStmt(ctx.if_stmt());
             if (ctx.while_stmt() != null) return VisitWhileStmt(ctx.while_stmt());
             if (ctx.for_stmt() != null) return VisitForStmt(ctx.for_stmt());
+            if (ctx.guard_stmt() != null) return VisitGuardStmt(ctx.guard_stmt(), inlineIndent: true);
             if (ctx.match_stmt() != null) return VisitMatchStmt(ctx.match_stmt());
+            if (ctx.inline_foreign_block() != null) return VisitForeignBlock(ctx.inline_foreign_block());
             return Indent + "# " + ctx.GetText();
+        }
+
+        private string VisitGuardStmt(PilotParser.Guard_stmtContext ctx, bool inlineIndent)
+        {
+            string prefix = inlineIndent ? Indent : "";
+            string cond = ctx.test() != null ? TranslateExpr(ctx.test().GetText()) : "True";
+            var sb = new StringBuilder();
+            sb.AppendLine($"{prefix}if not ({cond}):");
+            sb.Append(VisitSuite(ctx.suite()));
+            return sb.ToString().TrimEnd();
         }
 
         public string VisitFuncDef(PilotParser.Func_defContext ctx)
@@ -342,7 +378,21 @@ public sealed class PythonTargetConverter : ITargetLanguageConverter
         {
             var sb = new StringBuilder();
             string target = ctx.for_target().GetText();
-            string iterable = TranslateExpr(ctx.test(0).GetText());
+            string rawIter = ctx.test(0).GetText();
+
+            string iterable;
+            if (PilotOptimizer.TryParseRangeExpr(rawIter, out string startR, out string endR))
+            {
+                if (int.TryParse(endR, out int endInt))
+                    iterable = startR == "0" ? $"range({endInt + 1})" : $"range({TranslateExpr(startR)}, {endInt + 1})";
+                else
+                    iterable = $"range({TranslateExpr(startR)}, {TranslateExpr(endR)} + 1)";
+            }
+            else
+            {
+                iterable = TranslateExpr(rawIter);
+            }
+
             sb.AppendLine($"{Indent}for {target} in {iterable}:");
             sb.Append(VisitSuite(ctx.suite(0)));
             return sb.ToString();
@@ -365,6 +415,21 @@ public sealed class PythonTargetConverter : ITargetLanguageConverter
             }
             _indent--;
             return sb.ToString();
+        }
+
+        private string VisitForeignBlock(PilotParser.Inline_foreign_blockContext ctx)
+        {
+            string lang = ctx.foreign_language().GetText().ToLowerInvariant();
+            if (lang == "python" && ctx.stmt() != null && ctx.stmt().Length > 0)
+            {
+                var sb = new StringBuilder();
+                foreach (var s in ctx.stmt())
+                {
+                    sb.AppendLine(VisitStmt(s));
+                }
+                return sb.ToString().TrimEnd();
+            }
+            return $"{Indent}# [polyglot:{lang}] {ctx.GetText()}";
         }
 
         private string VisitSuite(PilotParser.SuiteContext ctx)
@@ -419,13 +484,20 @@ public sealed class PythonTargetConverter : ITargetLanguageConverter
 
         private static string TranslateExpr(string expr)
         {
-            // If string literal, return as is
-            if ((expr.StartsWith("\"") && expr.EndsWith("\"")) || (expr.StartsWith("'") && expr.EndsWith("'")))
+            string s = PilotOptimizer.FoldConstantsAndNormalize(expr);
+
+            if ((s.StartsWith("\"") && s.EndsWith("\"")) || (s.StartsWith("'") && s.EndsWith("'")) || (s.StartsWith("f\"") && s.EndsWith("\"")))
             {
-                return expr;
+                return s;
             }
 
-            string formatted = expr
+            if (s.StartsWith("println(", StringComparison.Ordinal))
+            {
+                string inner = s["println(".Length..^1];
+                return $"print({TranslateExpr(inner)})";
+            }
+
+            string formatted = s
                 .Replace("true", "True")
                 .Replace("false", "False")
                 .Replace("null", "None")

@@ -1,0 +1,91 @@
+# ==============================================================================
+# Concept 02: Guard Preconditions, Defer Cleanup & Exception Handling
+# ==============================================================================
+
+println("==================================================");
+println(" PILOT SHOWCASE: Guard, Defer & Exception Handling");
+println("==================================================");
+
+# 1. Guard Preconditions
+println("\n--- 1. Guard Statements (Precondition Enforcement) ---");
+
+def process_transaction(user_id: int, balance: float, amount: float) {
+    println("Attempting transaction: user=" + user_id + ", balance=" + balance + ", amount=" + amount);
+
+    guard user_id > 0 else {
+        println("  [GUARD FAILED] Invalid user ID: " + user_id);
+        return "Transaction Rejected";
+    }
+
+    guard amount > 0 else {
+        println("  [GUARD FAILED] Transfer amount must be positive: " + amount);
+        return "Transaction Rejected";
+    }
+
+    guard balance >= amount else {
+        println("  [GUARD FAILED] Insufficient funds! Needed " + amount + " but only had " + balance);
+        return "Transaction Rejected";
+    }
+
+    let remaining = balance - amount;
+    println("  [GUARD PASSED] Approved! New balance: " + remaining);
+    return "Transaction Success";
+}
+
+let res1 = process_transaction(101, 500.0, 150.0);
+println("Result 1: " + res1);
+
+let res2 = process_transaction(101, 100.0, 300.0);
+println("Result 2: " + res2);
+
+
+# 2. Defer Cleanup (LIFO Order Execution)
+println("\n--- 2. Defer Statements (Guaranteed Cleanup) ---");
+
+def simulate_resource_workflow() {
+    println("Entering workflow: opening connections...");
+
+    defer {
+        println("  [DEFER 1] Closing primary database connection.");
+    }
+
+    defer {
+        println("  [DEFER 2] Releasing network socket handle.");
+    }
+
+    defer {
+        println("  [DEFER 3] Flushing buffered log stream to disk.");
+    }
+
+    println("Workflow active: processing critical payload...");
+    println("Workflow completing: preparing function return...");
+}
+
+simulate_resource_workflow();
+println("Workflow finished and all deferred actions executed in LIFO order!");
+
+
+# 3. Exception Handling (Try-Catch-Finally)
+println("\n--- 3. Exception Protections (Try / Catch / Finally) ---");
+
+def dangerous_division(numerator: float, denominator: float) {
+    println("\nEvaluating: " + numerator + " / " + denominator);
+    try {
+        if denominator == 0 {
+            raise "DivideByZeroError: Denominator cannot be zero.";
+        }
+        let result = numerator / denominator;
+        println("  Computed quotient: " + result);
+        return result;
+    } except as err {
+        println("  [CAUGHT EXCEPTION] Handled error gracefully: " + err);
+        return null;
+    } finally {
+        println("  [FINALLY BLOCK] Cleanup complete (always runs).");
+    }
+}
+
+dangerous_division(100.0, 4.0);
+dangerous_division(42.0, 0.0);
+
+println("\n>>> Concept 02 Demonstration Complete! <<<\n");

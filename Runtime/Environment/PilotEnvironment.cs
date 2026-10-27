@@ -35,6 +35,16 @@ public sealed class PilotEnvironment
         return popped;
     }
 
+    /// <summary>
+    /// Swaps the active scope directly and returns the previous scope (used for fast function call frames).
+    /// </summary>
+    public PilotScope SwapScope(PilotScope newScope)
+    {
+        var previous = CurrentScope;
+        CurrentScope = newScope;
+        return previous;
+    }
+
     public void Declare(string name, PilotValue value, bool isConst = false, string? typeName = null) =>
         CurrentScope.Declare(name, value, isConst, typeName);
 

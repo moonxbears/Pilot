@@ -144,12 +144,12 @@ class PilotLspClient implements vscode.Disposable {
         }
         const id = this.nextId++;
         const payload = JSON.stringify({ jsonrpc: '2.0', id, method, params });
-        const body = Buffer.from(payload, 'utf8');
-        const header = Buffer.from(`Content-Length: ${body.length}\r\n\r\n`, 'ascii');
+        const byteLen = Buffer.byteLength(payload, 'utf8');
+        const message = `Content-Length: ${byteLen}\r\n\r\n${payload}`;
 
         return new Promise((resolve, reject) => {
             this.pending.set(id, { resolve, reject });
-            this.process!.stdin.write(Buffer.concat([header, body]));
+            this.process!.stdin.write(message, 'utf8');
         });
     }
 
@@ -158,13 +158,12 @@ class PilotLspClient implements vscode.Disposable {
             return;
         }
         const payload = JSON.stringify({ jsonrpc: '2.0', method, params });
-        const body = Buffer.from(payload, 'utf8');
-        const header = Buffer.from(`Content-Length: ${body.length}\r\n\r\n`, 'ascii');
-        this.process.stdin.write(Buffer.concat([header, body]));
+        const byteLen = Buffer.byteLength(payload, 'utf8');
+        this.process.stdin.write(`Content-Length: ${byteLen}\r\n\r\n${payload}`, 'utf8');
     }
 
     private onData(chunk: Buffer): void {
-        this.buffer = Buffer.concat([this.buffer, chunk]);
+        this.buffer = this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk]);
 
         while (true) {
             const headerEnd = this.buffer.indexOf('\r\n\r\n');

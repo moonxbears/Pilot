@@ -68,9 +68,16 @@ public sealed class PilotPreprocessResult
 
     public bool IsWarningSuppressed(string warningCode, int line)
     {
-        return Suppressions.Any(s =>
-            string.Equals(s.WarningCode, warningCode, StringComparison.OrdinalIgnoreCase) &&
-            line >= s.StartLine && line <= s.EndLine);
+        for (int i = 0; i < Suppressions.Count; i++)
+        {
+            var s = Suppressions[i];
+            if (line >= s.StartLine && line <= s.EndLine &&
+                string.Equals(s.WarningCode, warningCode, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }
 
@@ -86,6 +93,10 @@ public static class PilotPreprocessor
     private static readonly Regex DirectiveRegex = new(
         @"^[ \t]*#[ \t]*([a-zA-Z_][a-zA-Z0-9_]*)(?:[ \t]+(.*))?$",
         RegexOptions.Compiled);
+
+    private static readonly Regex PragmaRegex = new(
+        @"^warning\s+(disable|restore)(?:\s+(.*))?$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly HashSet<string> KnownDirectives = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -112,10 +123,9 @@ public static class PilotPreprocessor
         {
             int lineNumber = lineIndex + 1;
             string rawLine = lines[lineIndex];
-            string trimmed = rawLine.Trim();
 
             // Support UNIX shebang on first line: e.g. #!/usr/bin/env pilot
-            if (lineNumber == 1 && rawLine.StartsWith("#!"))
+            if (lineNumber == 1 && rawLine.StartsWith("#!", StringComparison.Ordinal))
             {
                 outputLines[lineIndex] = options.BlankDirectiveLines ? string.Empty : $"// {rawLine}";
                 continue;
@@ -123,36 +133,45 @@ public static class PilotPreprocessor
 
             bool isCurrentlyActive = ifStack.Count == 0 || ifStack.Peek().CurrentBranchActive;
 
-            var match = DirectiveRegex.Match(rawLine);
-            if (match.Success && KnownDirectives.Contains(match.Groups[1].Value))
+            // Fast scan for leading '#' before invoking regex
+            int firstNonWs = 0;
+            while (firstNonWs < rawLine.Length && (rawLine[firstNonWs] == ' ' || rawLine[firstNonWs] == '\t'))
             {
-                string directive = match.Groups[1].Value.ToLowerInvariant();
-                string args = match.Groups[2].Success ? match.Groups[2].Value.Trim() : string.Empty;
+                firstNonWs++;
+            }
 
-                ProcessDirective(
-                    directive,
-                    args,
-                    lineNumber,
-                    isCurrentlyActive,
-                    ifStack,
-                    regionStack,
-                    activeSuppressions,
-                    result);
+            if (firstNonWs < rawLine.Length && rawLine[firstNonWs] == '#')
+            {
+                var match = DirectiveRegex.Match(rawLine);
+                if (match.Success && KnownDirectives.Contains(match.Groups[1].Value))
+                {
+                    string directive = match.Groups[1].Value.ToLowerInvariant();
+                    string args = match.Groups[2].Success ? match.Groups[2].Value.Trim() : string.Empty;
 
-                // Directive lines are blanked or preserved according to options to retain 1:1 line numbers
-                outputLines[lineIndex] = options.BlankDirectiveLines ? string.Empty : $"// #{directive} {args}";
+                    ProcessDirective(
+                        directive,
+                        args,
+                        lineNumber,
+                        isCurrentlyActive,
+                        ifStack,
+                        regionStack,
+                        activeSuppressions,
+                        result);
+
+                    // Directive lines are blanked or preserved according to options to retain 1:1 line numbers
+                    outputLines[lineIndex] = options.BlankDirectiveLines ? string.Empty : $"// #{directive} {args}";
+                    continue;
+                }
+            }
+
+            if (isCurrentlyActive)
+            {
+                outputLines[lineIndex] = rawLine;
             }
             else
             {
-                if (isCurrentlyActive)
-                {
-                    outputLines[lineIndex] = rawLine;
-                }
-                else
-                {
-                    // Inactive code block: replaced with blank line so parser line numbers match 100%
-                    outputLines[lineIndex] = options.BlankInactiveCode ? string.Empty : $"// [INACTIVE] {rawLine}";
-                }
+                // Inactive code block: replaced with blank line so parser line numbers match 100%
+                outputLines[lineIndex] = options.BlankInactiveCode ? string.Empty : $"// [INACTIVE] {rawLine}";
             }
         }
 
@@ -437,7 +456,7 @@ public static class PilotPreprocessor
     {
         // Example: warning disable PILOT101, PILOT102
         // Example: warning restore PILOT101
-        var match = Regex.Match(args, @"^warning\s+(disable|restore)(?:\s+(.*))?$", RegexOptions.IgnoreCase);
+        var match = PragmaRegex.Match(args);
         if (!match.Success) return;
 
         string action = match.Groups[1].Value.ToLowerInvariant();
@@ -538,8 +557,20 @@ public static class PilotPreprocessor
         return lines;
     }
 
-    private static bool IsValidSymbolName(string name) =>
-        !string.IsNullOrEmpty(name) && Regex.IsMatch(name, @"^[a-zA-Z_][a-zA-Z0-9_]*$");
+    private static bool IsValidSymbolName(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return false;
+        char first = name[0];
+        if (!((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_'))
+            return false;
+        for (int i = 1; i < name.Length; i++)
+        {
+            char c = name[i];
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'))
+                return false;
+        }
+        return true;
+    }
 
     private static string StripQuotes(string s)
     {

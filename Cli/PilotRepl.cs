@@ -122,7 +122,7 @@ public sealed class PilotRepl
                 // If not standalone expression, execute as statements
             }
 
-            var visitor = new PilotInterpreterVisitor(_context);
+            var visitor = _context.GetOrCreateVisitor();
             var inputStream = new Antlr4.Runtime.AntlrInputStream(input);
             var lexer = new PilotLexer(inputStream);
             var tokenStream = new Antlr4.Runtime.CommonTokenStream(lexer);
@@ -132,7 +132,7 @@ public sealed class PilotRepl
             parser.RemoveErrorListeners();
             parser.AddErrorListener(errorTracker);
 
-            var tree = parser.program();
+            var tree = parser.ParseProgramFast();
             if (errorTracker.HasErrors)
             {
                 Console.ForegroundColor = ConsoleColor.Red;

@@ -1,0 +1,70 @@
+# ==============================================================================
+# Concept 09: Design-by-Contract (Requires, Ensures & Old State Snapshots)
+# ==============================================================================
+
+println("==================================================");
+println(" PILOT SHOWCASE: Design-by-Contract Validation");
+println("==================================================");
+
+class AccountVault {
+    let account_id: str;
+    let balance: float;
+
+    def withdraw(self, amt: float) {
+        self.balance = self.balance - amt;
+    }
+
+    def deposit(self, amt: float) {
+        self.balance = self.balance + amt;
+    }
+}
+
+# The function signature declares declarative specifications:
+# 'requires' runs before body execution
+# 'ensures' runs after body execution and validates post-state against old(...) snapshots
+def execute_funds_transfer(transfer_amount: float, source: AccountVault, destination: AccountVault)
+    requires transfer_amount > 0.0
+    requires source.balance >= transfer_amount
+    ensures source.balance == old(source.balance) - transfer_amount
+    ensures destination.balance == old(destination.balance) + transfer_amount
+    ensures result == true {
+
+    println("  [CONTRACT VERIFIED] Preconditions passed! Executing ledger transfer of $" + transfer_amount);
+    source.withdraw(transfer_amount);
+    destination.deposit(transfer_amount);
+    println("  [LEDGER UPDATED] Source new balance: $" + source.balance + ", Destination new balance: $" + destination.balance);
+    return true;
+}
+
+println("\n--- 1. Valid Contract Execution ---");
+let checking = AccountVault();
+checking.account_id = "CHK-9102";
+checking.balance = 1200.0;
+
+let savings = AccountVault();
+savings.account_id = "SAV-3341";
+savings.balance = 500.0;
+
+println("Initial Balances:");
+println("  Checking (Source):      $" + checking.balance);
+println("  Savings (Destination):  $" + savings.balance);
+
+println("\nCalling execute_funds_transfer(400.0, checking, savings):");
+let success = execute_funds_transfer(400.0, checking, savings);
+println("Transfer Success: " + success);
+
+println("\nFinal Balances Verified by Postconditions:");
+println("  Checking balance:  $" + checking.balance + " (old was $1200.0 - $400.0)");
+println("  Savings balance:   $" + savings.balance + " (old was $500.0 + $400.0)");
+
+
+println("\n--- 2. Contract Precondition Failure Protection ---");
+println("Attempting transfer exceeding source balance ($10,000.0 > $" + checking.balance + "):");
+
+try {
+    execute_funds_transfer(10000.0, checking, savings);
+} except as contract_err {
+    println("  [CONTRACT ENFORCED] Precondition violation trapped: " + contract_err);
+}
+
+println("\n>>> Concept 09 Demonstration Complete! <<<\n");

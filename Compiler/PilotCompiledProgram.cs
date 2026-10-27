@@ -19,8 +19,9 @@ namespace Pilot.Compiler;
 /// </summary>
 public sealed class PilotCompiledProgram : IPilotProgram
 {
-    private const uint MagicHeader = 0x434C4950; // 'PILC' in little-endian
+    public const uint MagicHeader = 0x434C4950; // 'PILC' in little-endian
     private const byte CurrentFormatVersion = 1;
+    private static readonly PilotEngine SharedEngine = new();
 
     public string Source { get; }
     public string? FilePath { get; }
@@ -54,6 +55,11 @@ public sealed class PilotCompiledProgram : IPilotProgram
         try
         {
             var value = visitor.VisitProgram(ProgramTree);
+            if (context.PendingFlow == PilotFlowSignalKind.Return)
+            {
+                value = context.PendingReturnValue;
+                context.PendingFlow = PilotFlowSignalKind.None;
+            }
             var result = PilotExecutionResult.CreateSuccess(value, string.Empty, string.Empty, sw.Elapsed);
             result.Context = context;
             return result;
@@ -98,7 +104,7 @@ public sealed class PilotCompiledProgram : IPilotProgram
 
         try
         {
-            var context = new PilotExecutionContext(new PilotEngine(), options);
+            var context = new PilotExecutionContext(SharedEngine, options);
 
             // Register standard builtins into global scope
             foreach (var kvp in options.Builtins.GetAll())
@@ -111,6 +117,11 @@ public sealed class PilotCompiledProgram : IPilotProgram
 
             var visitor = new PilotInterpreterVisitor(context);
             var resultValue = visitor.VisitProgram(ProgramTree);
+            if (context.PendingFlow == PilotFlowSignalKind.Return)
+            {
+                resultValue = context.PendingReturnValue;
+                context.PendingFlow = PilotFlowSignalKind.None;
+            }
 
             var execResult = PilotExecutionResult.CreateSuccess(
                 resultValue,
@@ -228,7 +239,7 @@ public sealed class PilotCompiledProgram : IPilotProgram
         parser.RemoveErrorListeners();
         parser.AddErrorListener(errorTracker);
 
-        var tree = parser.program();
+        var tree = parser.ParseProgramFast();
         if (errorTracker.HasErrors)
         {
             throw new InvalidOperationException($"Corrupt compiled program AST: {string.Join("; ", errorTracker.Errors)}");
@@ -243,9 +254,243 @@ public sealed class PilotCompiledProgram : IPilotProgram
         return Load(fs);
     }
 
-    public static PilotCompiledProgram FromBytes(byte[] bytes)
+    public static PilotCompiledProgram FromBytes(byte[] bytes, string? filePath = null)
     {
         using var ms = new MemoryStream(bytes);
-        return Load(ms);
+        var loaded = Load(ms);
+        if (!string.IsNullOrEmpty(filePath) && string.IsNullOrEmpty(loaded.FilePath))
+        {
+            return new PilotCompiledProgram(loaded.Source, loaded.ProgramTree, filePath, loaded.CompiledAt, loaded.DefinedSymbols);
+        }
+        return loaded;
     }
+
+    #region Binary & Script Patching / Hot-Reloading
+
+    /// <summary>
+    /// Applies this compiled program as a live hot-patch into an already-running <see cref="PilotExecutionContext"/>.
+    /// Existing functions, method groups, classes, and typestates are updated in-place while preserving live object state.
+    /// </summary>
+    public Pilot.Runtime.HotReload.PilotPatchResult ApplyHotPatch(PilotExecutionContext context)
+    {
+        if (context == null) throw new ArgumentNullException(nameof(context));
+        return context.HotReload.ApplyCompiledPatch(this, isCompiledBinary: true, sourceLabel: FilePath ?? "<compiled-patch>");
+    }
+
+    /// <summary>
+    /// Produces a new patched <see cref="PilotCompiledProgram"/> (suitable for saving as a <c>.pilc</c> binary
+    /// or executing directly) by merging a <c>.pilot</c> source patch into this compiled program.
+    /// </summary>
+    public PilotCompiledProgram ApplyPatchSource(string patchSource, string? patchFilePath = null)
+    {
+        var opts = new PilotCompilerOptions().WithSourceFile(patchFilePath ?? "<patch>");
+        var comp = PilotCompiler.Default.Compile(patchSource, opts);
+        if (!comp.Success || comp.Program is not PilotCompiledProgram compiledPatch)
+        {
+            string errors = string.Join("; ", comp.Diagnostics);
+            throw new InvalidOperationException($"Failed to compile patch: {errors}");
+        }
+        return ApplyPatch(compiledPatch);
+    }
+
+    /// <summary>
+    /// Loads a <c>.pilot</c> source file or <c>.pilc</c> compiled binary patch from disk and merges it
+    /// into this compiled program to produce a new patched <see cref="PilotCompiledProgram"/>.
+    /// </summary>
+    public PilotCompiledProgram ApplyPatchFile(string patchFilePath)
+    {
+        if (!File.Exists(patchFilePath))
+        {
+            throw new FileNotFoundException($"Patch file not found: '{patchFilePath}'", patchFilePath);
+        }
+
+        byte[] raw = File.ReadAllBytes(patchFilePath);
+        if (Pilot.Runtime.HotReload.PilotHotReloadSession.IsCompiledBinary(raw, patchFilePath))
+        {
+            var patchProg = FromBytes(raw, patchFilePath);
+            return ApplyPatch(patchProg);
+        }
+        else
+        {
+            string patchSource = Encoding.UTF8.GetString(raw);
+            if (patchSource.Length > 0 && patchSource[0] == '\uFEFF')
+            {
+                patchSource = patchSource[1..];
+            }
+            return ApplyPatchSource(patchSource, patchFilePath);
+        }
+    }
+
+    /// <summary>
+    /// Merges <paramref name="patch"/> into this <see cref="PilotCompiledProgram"/> and returns a newly
+    /// compiled <see cref="PilotCompiledProgram"/> with all patched functions, method overloads, classes,
+    /// and typestates woven in-place before top-level execution statements.
+    /// </summary>
+    public PilotCompiledProgram ApplyPatch(PilotCompiledProgram patch)
+    {
+        if (patch == null) throw new ArgumentNullException(nameof(patch));
+
+        string mergedSource = MergeProgramSources(this, patch);
+        string mergedPath = FilePath ?? patch.FilePath ?? "<patched.pilc>";
+        var opts = new PilotCompilerOptions().WithSourceFile(mergedPath);
+        var comp = PilotCompiler.Default.Compile(mergedSource, opts);
+        if (!comp.Success || comp.Program is not PilotCompiledProgram mergedProg)
+        {
+            string errors = string.Join("; ", comp.Diagnostics);
+            throw new InvalidOperationException($"Failed to compile merged binary patch: {errors}");
+        }
+
+        return mergedProg;
+    }
+
+    private static string MergeProgramSources(PilotCompiledProgram baseProg, PilotCompiledProgram patchProg)
+    {
+        var baseStmts = baseProg.ProgramTree.stmt() ?? Array.Empty<PilotParser.StmtContext>();
+        var patchStmts = patchProg.ProgramTree.stmt() ?? Array.Empty<PilotParser.StmtContext>();
+
+        var baseDeclNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var s in baseStmts)
+        {
+            string? dName = GetDeclarationName(s);
+            if (!string.IsNullOrEmpty(dName))
+            {
+                baseDeclNames.Add(dName);
+            }
+        }
+
+        // Group patch statements into:
+        // 1. New helper declarations (functions/classes/extensions not in base) -> injected before first patched symbol
+        // 2. Patched declarations (matching a function/class/extension in base) -> injected immediately after base declaration
+        // 3. Trailing imperative patch statements -> appended at end
+        var newHelperDecls = new List<string>();
+        var patchesBySymbol = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var trailingStmts = new List<string>();
+
+        foreach (var pStmt in patchStmts)
+        {
+            string text = ExtractStatementSource(patchProg.Source, pStmt);
+            if (string.IsNullOrWhiteSpace(text)) continue;
+
+            string? declName = GetDeclarationName(pStmt);
+            if (!string.IsNullOrEmpty(declName))
+            {
+                if (baseDeclNames.Contains(declName))
+                {
+                    if (!patchesBySymbol.TryGetValue(declName, out var list))
+                    {
+                        list = new List<string>();
+                        patchesBySymbol[declName] = list;
+                    }
+                    list.Add(text);
+                }
+                else
+                {
+                    newHelperDecls.Add(text);
+                }
+            }
+            else
+            {
+                trailingStmts.Add(text);
+            }
+        }
+
+        // Track last occurrence index of each declared symbol in baseStmts
+        var lastBaseIndexForSymbol = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < baseStmts.Length; i++)
+        {
+            string? dName = GetDeclarationName(baseStmts[i]);
+            if (!string.IsNullOrEmpty(dName))
+            {
+                lastBaseIndexForSymbol[dName] = i;
+            }
+        }
+
+        var sb = new StringBuilder();
+        bool helpersInjected = false;
+
+        for (int i = 0; i < baseStmts.Length; i++)
+        {
+            string? dName = GetDeclarationName(baseStmts[i]);
+            if (!helpersInjected && dName != null && patchesBySymbol.ContainsKey(dName) && newHelperDecls.Count > 0)
+            {
+                foreach (var helper in newHelperDecls)
+                {
+                    sb.AppendLine(helper.TrimEnd());
+                    sb.AppendLine();
+                }
+                helpersInjected = true;
+            }
+
+            string baseStmtText = ExtractStatementSource(baseProg.Source, baseStmts[i]);
+            sb.AppendLine(baseStmtText.TrimEnd());
+
+            if (dName != null &&
+                lastBaseIndexForSymbol.TryGetValue(dName, out int lastIdx) &&
+                lastIdx == i &&
+                patchesBySymbol.TryGetValue(dName, out var symbolPatches))
+            {
+                sb.AppendLine();
+                foreach (var pText in symbolPatches)
+                {
+                    sb.AppendLine(pText.TrimEnd());
+                }
+                sb.AppendLine();
+            }
+        }
+
+        if (!helpersInjected && newHelperDecls.Count > 0)
+        {
+            sb.AppendLine();
+            foreach (var helper in newHelperDecls)
+            {
+                sb.AppendLine(helper.TrimEnd());
+                sb.AppendLine();
+            }
+        }
+
+        if (trailingStmts.Count > 0)
+        {
+            sb.AppendLine();
+            foreach (var t in trailingStmts)
+            {
+                sb.AppendLine(t.TrimEnd());
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static string? GetDeclarationName(PilotParser.StmtContext stmt)
+    {
+        var comp = stmt.compound_stmt();
+        if (comp != null)
+        {
+            if (comp.func_def() != null) return comp.func_def().identifier()?.GetText();
+            if (comp.class_def() != null) return comp.class_def().identifier()?.GetText();
+            if (comp.extension_def() != null) return comp.extension_def().identifier()?.GetText();
+            if (comp.macro_def() != null) return comp.macro_def().identifier()?.GetText();
+        }
+        return null;
+    }
+
+    private static string ExtractStatementSource(string fullSource, PilotParser.StmtContext stmt)
+    {
+        if (stmt.Start == null || stmt.Stop == null) return stmt.GetText();
+        int startIdx = stmt.Start.StartIndex;
+        int stopIdx = stmt.Stop.StopIndex;
+        if (startIdx < 0 || stopIdx < startIdx || stopIdx >= fullSource.Length)
+        {
+            return stmt.GetText();
+        }
+
+        // Include leading indentation on the first line of the statement
+        while (startIdx > 0 && (fullSource[startIdx - 1] == ' ' || fullSource[startIdx - 1] == '\t'))
+        {
+            startIdx--;
+        }
+
+        return fullSource.Substring(startIdx, stopIdx - startIdx + 1);
+    }
+
+    #endregion
 }

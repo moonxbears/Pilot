@@ -18,13 +18,30 @@ public abstract class BaseInteropPackageAdapter : IInteropPackageAdapter
         string moduleDir = GetModuleDirectory(projectDirectory, packageName);
         Directory.CreateDirectory(moduleDir);
 
+        string metaFile = Path.Combine(moduleDir, ".pilot_adopted.json");
+        if (File.Exists(metaFile))
+        {
+            try
+            {
+                string existingMeta = File.ReadAllText(metaFile);
+                if (existingMeta.Contains($"\"version\": \"{version}\"", StringComparison.Ordinal))
+                {
+                    log?.Invoke($"[{Ecosystem.ToUpperInvariant()}] Package '{packageName}@{version}' is already adopted in '{moduleDir}'.");
+                    return true;
+                }
+            }
+            catch
+            {
+                // Re-provision on read error
+            }
+        }
+
         log?.Invoke($"[{Ecosystem.ToUpperInvariant()}] Adopting package '{packageName}@{version}' into '{moduleDir}'...");
 
         // Run underlying CLI if available, otherwise write manifest record
         bool cliSuccess = TryRunCliInstall(packageName, version, projectDirectory, log);
 
         // Write adoption metadata
-        string metaFile = Path.Combine(moduleDir, ".pilot_adopted.json");
         string metaContent = $"{{\"ecosystem\": \"{Ecosystem}\", \"package\": \"{packageName}\", \"version\": \"{version}\", \"adoptedAt\": \"{DateTime.UtcNow:O}\"}}";
         File.WriteAllText(metaFile, metaContent);
 
@@ -68,6 +85,30 @@ public abstract class BaseInteropPackageAdapter : IInteropPackageAdapter
         return false;
     }
 
+    protected static bool ShouldProvisionExternalCli(string projectDirectory, params string[] hostManifestPatterns)
+    {
+        if (System.Environment.GetEnvironmentVariable("PILOT_PROVISION_CLI") == "1")
+            return true;
+
+        if (!Directory.Exists(projectDirectory))
+            return false;
+
+        foreach (var pattern in hostManifestPatterns)
+        {
+            if (pattern.IndexOf('*') >= 0)
+            {
+                if (Directory.GetFiles(projectDirectory, pattern, SearchOption.TopDirectoryOnly).Length > 0)
+                    return true;
+            }
+            else if (File.Exists(Path.Combine(projectDirectory, pattern)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     protected static bool ExecuteProcess(string fileName, string arguments, string workingDir, Action<string>? log)
     {
         try
@@ -102,6 +143,9 @@ public sealed class NuGetPackageAdapter : BaseInteropPackageAdapter
 
     protected override bool TryRunCliInstall(string packageName, string version, string projectDirectory, Action<string>? log)
     {
+        if (!ShouldProvisionExternalCli(projectDirectory, "*.csproj", "*.fsproj"))
+            return false;
+
         string args = string.IsNullOrWhiteSpace(version)
             ? $"add package {packageName}"
             : $"add package {packageName} --version {version}";
@@ -115,6 +159,9 @@ public sealed class NpmPackageAdapter : BaseInteropPackageAdapter
 
     protected override bool TryRunCliInstall(string packageName, string version, string projectDirectory, Action<string>? log)
     {
+        if (!ShouldProvisionExternalCli(projectDirectory, "package.json"))
+            return false;
+
         string pkgSpec = string.IsNullOrWhiteSpace(version) ? packageName : $"{packageName}@{version}";
         string modDir = GetModuleDirectory(projectDirectory, packageName);
         return ExecuteProcess("npm", $"install {pkgSpec} --prefix \"{modDir}\"", projectDirectory, log);
@@ -127,6 +174,9 @@ public sealed class PipPackageAdapter : BaseInteropPackageAdapter
 
     protected override bool TryRunCliInstall(string packageName, string version, string projectDirectory, Action<string>? log)
     {
+        if (!ShouldProvisionExternalCli(projectDirectory, "requirements.txt", "pyproject.toml"))
+            return false;
+
         string pkgSpec = string.IsNullOrWhiteSpace(version) ? packageName : $"{packageName}=={version}";
         string modDir = GetModuleDirectory(projectDirectory, packageName);
         return ExecuteProcess("pip", $"install {pkgSpec} --target \"{modDir}\"", projectDirectory, log);
@@ -139,6 +189,9 @@ public sealed class CargoPackageAdapter : BaseInteropPackageAdapter
 
     protected override bool TryRunCliInstall(string packageName, string version, string projectDirectory, Action<string>? log)
     {
+        if (!ShouldProvisionExternalCli(projectDirectory, "Cargo.toml"))
+            return false;
+
         string pkgSpec = string.IsNullOrWhiteSpace(version) ? packageName : $"{packageName}@{version}";
         return ExecuteProcess("cargo", $"add {pkgSpec}", projectDirectory, log);
     }
@@ -155,6 +208,9 @@ public sealed class LuaRocksPackageAdapter : BaseInteropPackageAdapter
 
     protected override bool TryRunCliInstall(string packageName, string version, string projectDirectory, Action<string>? log)
     {
+        if (!ShouldProvisionExternalCli(projectDirectory, "*.rockspec"))
+            return false;
+
         string pkgSpec = string.IsNullOrWhiteSpace(version) ? packageName : $"{packageName} {version}";
         string modDir = GetModuleDirectory(projectDirectory, packageName);
         return ExecuteProcess("luarocks", $"install {pkgSpec} --tree \"{modDir}\"", projectDirectory, log);
