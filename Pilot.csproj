@@ -24,6 +24,8 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Antlr4.Runtime" Version="4.6.6" />
+    <PackageReference Include="MySqlConnector" Version="2.3.7" />
+    <PackageReference Include="Npgsql" Version="8.0.3" />
   </ItemGroup>
 
   <ItemGroup>
@@ -35,8 +37,6 @@
     </Antlr4>
   </ItemGroup>
 
-  <Target Name="IncludeAntlr4InDesignTimeBuild"
-          BeforeTargets="CoreCompile;CompileDesignTime;CollectResolvedCompilationReferencesDesignTime"
-          DependsOnTargets="Antlr4CompileReadGeneratedFileList;Antlr4Compile;Antlr4CompileAddFilesGenerated" />
+  <Target Name="IncludeAntlr4InDesignTimeBuild" BeforeTargets="CoreCompile;CompileDesignTime;CollectResolvedCompilationReferencesDesignTime" DependsOnTargets="Antlr4CompileReadGeneratedFileList;Antlr4Compile;Antlr4CompileAddFilesGenerated" />
 
 </Project>
