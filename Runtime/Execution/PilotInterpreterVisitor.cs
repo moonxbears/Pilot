@@ -186,84 +186,104 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         {
             if (field.DOUBLESTAR() != null && field.identifier() != null)
             {
-                // Rest pattern: **rest
-                string restName = field.identifier().GetText();
-                var restMap = new Dictionary<PilotValue, PilotValue>();
-                if (map != null)
-                {
-                    foreach (var kvp in map)
-                    {
-                        if (!visitedKeys.Contains(kvp.Key.ToString()))
-                        {
-                            restMap[kvp.Key] = kvp.Value;
-                        }
-                    }
-                }
-                else if (obj != null)
-                {
-                    foreach (var kvp in obj.Fields)
-                    {
-                        if (!visitedKeys.Contains(kvp.Key))
-                        {
-                            restMap[PilotValue.FromString(kvp.Key)] = kvp.Value;
-                        }
-                    }
-                }
-                Context.Environment.CurrentScope.Declare(restName, PilotValue.FromMap(restMap), isConst);
+                ProcessRecordRestPattern(field, map, obj, visitedKeys, isConst);
                 continue;
             }
 
-            string key = field.identifier()?.GetText()
-                         ?? (field.STRING() != null ? UnescapeString(field.STRING().GetText()) : "");
-            if (string.IsNullOrEmpty(key)) continue;
+            ProcessRecordFieldPattern(field, val, map, obj, visitedKeys, isConst);
+        }
+    }
 
-            visitedKeys.Add(key);
-            PilotValue propVal = PilotValue.Undefined;
-            bool found = false;
-
-            if (map != null)
+    private void ProcessRecordRestPattern(
+        PilotParser.Record_pattern_fieldContext field,
+        Dictionary<PilotValue, PilotValue>? map,
+        PilotObject? obj,
+        HashSet<string> visitedKeys,
+        bool isConst)
+    {
+        string restName = field.identifier().GetText();
+        var restMap = new Dictionary<PilotValue, PilotValue>();
+        if (map != null)
+        {
+            foreach (var kvp in map)
             {
-                if (map.TryGetValue(PilotValue.FromString(key), out propVal)) found = true;
-            }
-            else if (obj != null)
-            {
-                if (obj.Fields.TryGetValue(key, out propVal)) found = true;
-                else
+                if (!visitedKeys.Contains(kvp.Key.ToString()))
                 {
-                    var gm = obj.GetMember(key, Context);
-                    if (!gm.IsUndefined)
-                    {
-                        propVal = gm;
-                        found = true;
-                    }
+                    restMap[kvp.Key] = kvp.Value;
                 }
             }
-
-            if (!found)
+        }
+        else if (obj != null)
+        {
+            foreach (var kvp in obj.Fields)
             {
-                if (field.test() != null)
+                if (!visitedKeys.Contains(kvp.Key))
                 {
-                    propVal = Visit(field.test());
+                    restMap[PilotValue.FromString(kvp.Key)] = kvp.Value;
+                }
+            }
+        }
+        Context.Environment.CurrentScope.Declare(restName, PilotValue.FromMap(restMap), isConst);
+    }
+
+    private void ProcessRecordFieldPattern(
+        PilotParser.Record_pattern_fieldContext field,
+        PilotValue val,
+        Dictionary<PilotValue, PilotValue>? map,
+        PilotObject? obj,
+        HashSet<string> visitedKeys,
+        bool isConst)
+    {
+        string key = field.identifier()?.GetText()
+                     ?? (field.STRING() != null ? UnescapeString(field.STRING().GetText()) : "");
+        if (string.IsNullOrEmpty(key)) return;
+
+        visitedKeys.Add(key);
+        PilotValue propVal = PilotValue.Undefined;
+        bool found = false;
+
+        if (map != null)
+        {
+            if (map.TryGetValue(PilotValue.FromString(key), out propVal)) found = true;
+        }
+        else if (obj != null)
+        {
+            if (obj.Fields.TryGetValue(key, out propVal)) found = true;
+            else
+            {
+                var gm = obj.GetMember(key, Context);
+                if (!gm.IsUndefined)
+                {
+                    propVal = gm;
                     found = true;
                 }
-                else
-                {
-                    throw new Pilot.Runtime.ControlFlow.PilotPatternMatchingException(
-                        $"Pattern match failed: required property '{key}' not found on record {val}.");
-                }
             }
+        }
 
-            if (field.binding_pattern() != null)
+        if (!found)
+        {
+            if (field.test() != null)
             {
-                DeclareBinding(field.binding_pattern(), propVal, isConst);
+                propVal = Visit(field.test());
+                found = true;
             }
-            else if (field.identifier() != null)
+            else
             {
-                string varName = field.identifier().GetText();
-                if (!Context.Environment.CurrentScope.Assign(varName, propVal))
-                {
-                    Context.Environment.CurrentScope.Declare(varName, propVal, isConst);
-                }
+                throw new Pilot.Runtime.ControlFlow.PilotPatternMatchingException(
+                    $"Pattern match failed: required property '{key}' not found on record {val}.");
+            }
+        }
+
+        if (field.binding_pattern() != null)
+        {
+            DeclareBinding(field.binding_pattern(), propVal, isConst);
+        }
+        else if (field.identifier() != null)
+        {
+            string varName = field.identifier().GetText();
+            if (!Context.Environment.CurrentScope.Assign(varName, propVal))
+            {
+                Context.Environment.CurrentScope.Declare(varName, propVal, isConst);
             }
         }
     }
