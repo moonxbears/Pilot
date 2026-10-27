@@ -12,7 +12,11 @@
     "Linters"
   ],
   "activationEvents": [
-    "onLanguage:pilot"
+    "onLanguage:pilot",
+    "onDebug",
+    "onCommand:pilot.runCurrentFile",
+    "onCommand:pilot.debugCurrentFile",
+    "onCommand:pilot.createLaunchConfig"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -46,6 +50,123 @@
       {
         "command": "pilot.restartLanguageServer",
         "title": "Pilot: Restart Language Server"
+      },
+      {
+        "command": "pilot.runCurrentFile",
+        "title": "Pilot: Run Current File",
+        "icon": "$(play)"
+      },
+      {
+        "command": "pilot.debugCurrentFile",
+        "title": "Pilot: Debug Current File",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "pilot.createLaunchConfig",
+        "title": "Pilot: Add Run & Debug Configurations to launch.json"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "pilot.runCurrentFile",
+          "when": "resourceExtname == .pilot",
+          "group": "navigation@1"
+        },
+        {
+          "command": "pilot.debugCurrentFile",
+          "when": "resourceExtname == .pilot",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "debuggers": [
+      {
+        "type": "pilot",
+        "label": "Pilot",
+        "languages": [
+          "pilot"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Path to the .pilot script to run or debug.",
+                "default": "${file}"
+              },
+              "mode": {
+                "type": "string",
+                "description": "Execution mode: 'run' for standard execution, 'debug' for interactive terminal debugging.",
+                "enum": [
+                  "run",
+                  "debug"
+                ],
+                "default": "run"
+              },
+              "args": {
+                "type": "array",
+                "description": "Command line arguments passed to the script.",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "pilotPath": {
+                "type": "string",
+                "description": "Path to the pilot executable (default: 'pilot')",
+                "default": "pilot"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "pilot",
+            "request": "launch",
+            "name": "Pilot: Run Current File",
+            "mode": "run",
+            "program": "${file}",
+            "args": []
+          },
+          {
+            "type": "pilot",
+            "request": "launch",
+            "name": "Pilot: Debug Current File",
+            "mode": "debug",
+            "program": "${file}",
+            "args": []
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Pilot: Run Current File",
+            "description": "Run the currently open Pilot file",
+            "body": {
+              "type": "pilot",
+              "request": "launch",
+              "name": "Pilot: Run Current File",
+              "mode": "run",
+              "program": "^\"\\${file}\"",
+              "args": []
+            }
+          },
+          {
+            "label": "Pilot: Debug Current File",
+            "description": "Start an interactive debugger session for the current Pilot file",
+            "body": {
+              "type": "pilot",
+              "request": "launch",
+              "name": "Pilot: Debug Current File",
+              "mode": "debug",
+              "program": "^\"\\${file}\"",
+              "args": []
+            }
+          }
+        ]
       }
     ],
     "configuration": {

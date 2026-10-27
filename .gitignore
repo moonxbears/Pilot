@@ -9,6 +9,9 @@
 [Oo]bj/
 **/[Bb]in/
 **/[Oo]bj/
+*.nupkg
+*.snupkg
+nupkg/
 
 # ------------------------------------------------------------------------------
 # ANTLR Intermediate Artifacts
@@ -50,6 +53,7 @@ TestResults/
 vscode-pilot/node_modules/
 vscode-pilot/out/
 vscode-pilot/dist/
+vscode-pilot/server/
 *.vsix
 
 # ------------------------------------------------------------------------------

@@ -8,6 +8,10 @@
     <EnableDefaultAntlrItems>false</EnableDefaultAntlrItems>
     <DefaultItemExcludes>$(DefaultItemExcludes);Pilot.Tests\**;Pilot.LanguageServer\**;vscode-pilot\**</DefaultItemExcludes>
     <NoWarn>$(NoWarn);CS3021</NoWarn>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>pilot</ToolCommandName>
+    <PackageId>pilot.cli</PackageId>
+    <Version>1.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

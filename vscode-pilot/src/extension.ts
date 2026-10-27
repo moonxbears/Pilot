@@ -38,30 +38,52 @@ class PilotLspClient implements vscode.Disposable {
         const config = vscode.workspace.getConfiguration('pilot.languageServer');
         const dotnetPath = config.get<string>('dotnetPath') || 'dotnet';
         const customPath = config.get<string>('serverPath') || '';
-
         const repoRoot = path.resolve(this.extensionPath, '..');
-        const dllCandidate = customPath.endsWith('.dll')
-            ? customPath
-            : path.join(repoRoot, 'Pilot.LanguageServer', 'bin', 'Debug', 'net10.0', 'Pilot.LanguageServer.dll');
-        const csprojCandidate = customPath.endsWith('.csproj')
-            ? customPath
-            : path.join(repoRoot, 'Pilot.LanguageServer', 'Pilot.LanguageServer.csproj');
+
+        const bundledDll = path.join(this.extensionPath, 'server', 'Pilot.LanguageServer.dll');
+        const repoDebugDll = path.join(repoRoot, 'Pilot.LanguageServer', 'bin', 'Debug', 'net10.0', 'Pilot.LanguageServer.dll');
+        const repoReleaseDll = path.join(repoRoot, 'Pilot.LanguageServer', 'bin', 'Release', 'net10.0', 'Pilot.LanguageServer.dll');
+        const csprojCandidate = path.join(repoRoot, 'Pilot.LanguageServer', 'Pilot.LanguageServer.csproj');
+
+        let serverDll = '';
+        let serverCsproj = '';
+
+        if (customPath) {
+            if (customPath.endsWith('.dll') && fs.existsSync(customPath)) {
+                serverDll = customPath;
+            } else if (customPath.endsWith('.csproj') && fs.existsSync(customPath)) {
+                serverCsproj = customPath;
+            }
+        }
+
+        if (!serverDll && !serverCsproj) {
+            if (fs.existsSync(bundledDll)) {
+                serverDll = bundledDll;
+            } else if (fs.existsSync(repoDebugDll)) {
+                serverDll = repoDebugDll;
+            } else if (fs.existsSync(repoReleaseDll)) {
+                serverDll = repoReleaseDll;
+            } else if (fs.existsSync(csprojCandidate)) {
+                serverCsproj = csprojCandidate;
+            }
+        }
 
         let args: string[];
-        if (fs.existsSync(dllCandidate)) {
-            args = [dllCandidate];
-            this.outputChannel.appendLine(`[Pilot LSP] Starting server from DLL: ${dllCandidate}`);
-        } else if (fs.existsSync(csprojCandidate)) {
-            args = ['run', '--project', csprojCandidate];
-            this.outputChannel.appendLine(`[Pilot LSP] Starting server from project: ${csprojCandidate}`);
+        if (serverDll) {
+            args = [serverDll];
+            this.outputChannel.appendLine(`[Pilot LSP] Starting server from DLL: ${serverDll}`);
+        } else if (serverCsproj) {
+            args = ['run', '--project', serverCsproj];
+            this.outputChannel.appendLine(`[Pilot LSP] Starting server from project: ${serverCsproj}`);
         } else {
             this.statusBar.text = '$(error) Pilot LSP (Not Found)';
-            vscode.window.showErrorMessage(`Pilot Language Server not found at ${dllCandidate}`);
+            vscode.window.showErrorMessage(`Pilot Language Server not found. Looked in bundled '${bundledDll}' and custom setting.`);
             return;
         }
 
+        const workingDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || path.dirname(serverDll || serverCsproj);
         this.process = cp.spawn(dotnetPath, args, {
-            cwd: repoRoot,
+            cwd: workingDir,
             stdio: ['pipe', 'pipe', 'pipe']
         });
 
@@ -378,6 +400,221 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             '.', ':', '@', '<'
         )
     );
+
+    // Register Debug Provider & Adapter Factory
+    const debugProvider = new PilotDebugConfigurationProvider();
+    const debugFactory = new PilotDebugAdapterDescriptorFactory();
+    context.subscriptions.push(
+        vscode.debug.registerDebugConfigurationProvider('pilot', debugProvider),
+        vscode.debug.registerDebugAdapterDescriptorFactory('pilot', debugFactory)
+    );
+
+    // Register Execution Commands
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pilot.runCurrentFile', async (uri?: vscode.Uri) => {
+            let filePath = uri?.fsPath;
+            if (!filePath && vscode.window.activeTextEditor) {
+                filePath = vscode.window.activeTextEditor.document.fileName;
+            }
+            if (!filePath) {
+                vscode.window.showErrorMessage('No active Pilot file to run.');
+                return;
+            }
+            let terminal = vscode.window.terminals.find(t => t.name === 'Pilot Runner') || vscode.window.createTerminal('Pilot Runner');
+            terminal.show();
+            terminal.sendText(`pilot run "${filePath}"`);
+        }),
+        vscode.commands.registerCommand('pilot.debugCurrentFile', async (uri?: vscode.Uri) => {
+            let filePath = uri?.fsPath;
+            if (!filePath && vscode.window.activeTextEditor) {
+                filePath = vscode.window.activeTextEditor.document.fileName;
+            }
+            if (!filePath) {
+                vscode.window.showErrorMessage('No active Pilot file to debug.');
+                return;
+            }
+            let terminal = vscode.window.terminals.find(t => t.name === 'Pilot Debugger') || vscode.window.createTerminal('Pilot Debugger');
+            terminal.show();
+            terminal.sendText(`pilot debug "${filePath}"`);
+        }),
+        vscode.commands.registerCommand('pilot.createLaunchConfig', async () => {
+            await addOrUpdateLaunchJson(true);
+        })
+    );
+
+    // Auto-create launch.json if workspace has no launch.json yet
+    try {
+        const folders = vscode.workspace.workspaceFolders;
+        if (folders && folders.length > 0) {
+            const launchPath = path.join(folders[0].uri.fsPath, '.vscode', 'launch.json');
+            if (!fs.existsSync(launchPath)) {
+                await addOrUpdateLaunchJson(false);
+            }
+        }
+    } catch {}
+}
+
+class PilotDebugConfigurationProvider implements vscode.DebugConfigurationProvider {
+    provideDebugConfigurations(folder: vscode.WorkspaceFolder | undefined): vscode.ProviderResult<vscode.DebugConfiguration[]> {
+        return [
+            {
+                type: 'pilot',
+                request: 'launch',
+                name: 'Pilot: Run Current File',
+                mode: 'run',
+                program: '${file}',
+                args: []
+            },
+            {
+                type: 'pilot',
+                request: 'launch',
+                name: 'Pilot: Debug Current File',
+                mode: 'debug',
+                program: '${file}',
+                args: []
+            }
+        ];
+    }
+
+    resolveDebugConfiguration(
+        folder: vscode.WorkspaceFolder | undefined,
+        config: vscode.DebugConfiguration,
+        token?: vscode.CancellationToken
+    ): vscode.ProviderResult<vscode.DebugConfiguration> {
+        if (!config.type && !config.request && !config.name) {
+            const editor = vscode.window.activeTextEditor;
+            if (editor && editor.document.languageId === 'pilot') {
+                config.type = 'pilot';
+                config.name = 'Pilot: Run Current File';
+                config.request = 'launch';
+                config.mode = 'run';
+                config.program = '${file}';
+                config.args = [];
+            } else {
+                return null;
+            }
+        }
+
+        if (!config.program) {
+            config.program = '${file}';
+        }
+        if (!config.mode) {
+            config.mode = 'run';
+        }
+
+        return config;
+    }
+}
+
+class PilotDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory {
+    createDebugAdapterDescriptor(session: vscode.DebugSession): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
+        const config = session.configuration;
+        let program = config.program || '${file}';
+        if (program === '${file}' && vscode.window.activeTextEditor) {
+            program = vscode.window.activeTextEditor.document.fileName;
+        }
+
+        const mode = config.mode || 'run';
+        const args = Array.isArray(config.args) ? config.args.join(' ') : (config.args || '');
+        const pilotExe = config.pilotPath || 'pilot';
+
+        const terminalName = mode === 'debug' ? 'Pilot Debugger' : 'Pilot Runner';
+        let terminal = vscode.window.terminals.find(t => t.name === terminalName);
+        if (!terminal) {
+            terminal = vscode.window.createTerminal(terminalName);
+        }
+        terminal.show();
+
+        if (mode === 'debug') {
+            terminal.sendText(`${pilotExe} debug "${program}" ${args}`);
+        } else {
+            terminal.sendText(`${pilotExe} run "${program}" ${args}`);
+        }
+
+        return new vscode.DebugAdapterInlineImplementation({
+            onDidSendMessage: new vscode.EventEmitter<any>().event,
+            handleMessage: () => {},
+            dispose: () => {}
+        });
+    }
+}
+
+async function addOrUpdateLaunchJson(showNotice = true): Promise<void> {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0) {
+        if (showNotice) {
+            vscode.window.showWarningMessage('Open a workspace folder to configure launch.json.');
+        }
+        return;
+    }
+
+    const vscodeDir = path.join(folders[0].uri.fsPath, '.vscode');
+    const launchJsonPath = path.join(vscodeDir, 'launch.json');
+
+    const defaultPilotConfigs = [
+        {
+            type: 'pilot',
+            request: 'launch',
+            name: 'Pilot: Run Current File',
+            mode: 'run',
+            program: '${file}',
+            args: []
+        },
+        {
+            type: 'pilot',
+            request: 'launch',
+            name: 'Pilot: Debug Current File',
+            mode: 'debug',
+            program: '${file}',
+            args: []
+        }
+    ];
+
+    if (!fs.existsSync(vscodeDir)) {
+        fs.mkdirSync(vscodeDir, { recursive: true });
+    }
+
+    if (!fs.existsSync(launchJsonPath)) {
+        const content = {
+            version: '0.2.0',
+            configurations: defaultPilotConfigs
+        };
+        fs.writeFileSync(launchJsonPath, JSON.stringify(content, null, 4), 'utf8');
+        if (showNotice) {
+            vscode.window.showInformationMessage('Created .vscode/launch.json with Pilot Run & Debug configurations!');
+            const doc = await vscode.workspace.openTextDocument(launchJsonPath);
+            await vscode.window.showTextDocument(doc);
+        }
+    } else {
+        try {
+            const raw = fs.readFileSync(launchJsonPath, 'utf8');
+            const data = JSON.parse(raw);
+            data.configurations = data.configurations || [];
+            let addedCount = 0;
+            for (const cfg of defaultPilotConfigs) {
+                if (!data.configurations.some((c: any) => c.name === cfg.name || (c.type === 'pilot' && c.mode === cfg.mode))) {
+                    data.configurations.push(cfg);
+                    addedCount++;
+                }
+            }
+            if (addedCount > 0) {
+                fs.writeFileSync(launchJsonPath, JSON.stringify(data, null, 4), 'utf8');
+                if (showNotice) {
+                    vscode.window.showInformationMessage(`Added Pilot configuration(s) to .vscode/launch.json!`);
+                    const doc = await vscode.workspace.openTextDocument(launchJsonPath);
+                    await vscode.window.showTextDocument(doc);
+                }
+            } else if (showNotice) {
+                vscode.window.showInformationMessage('Pilot configurations are already present in .vscode/launch.json.');
+                const doc = await vscode.workspace.openTextDocument(launchJsonPath);
+                await vscode.window.showTextDocument(doc);
+            }
+        } catch (err: any) {
+            if (showNotice) {
+                vscode.window.showErrorMessage(`Failed to update launch.json: ${err.message}`);
+            }
+        }
+    }
 }
 
 export function deactivate(): void {}
