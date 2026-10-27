@@ -1,7 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
+using System.Data.Common;
 using Pilot.Runtime.Execution;
 using Pilot.Runtime.Values;
+using Npgsql;
+using MySqlConnector;
 
 namespace Pilot.Runtime.Interop;
 
@@ -594,6 +598,70 @@ public sealed class DefaultPostgreSqlProvider : IPolyglotProvider
     {
         string trimmed = code.Trim().TrimEnd(';');
 
+        if (context.Environment.CurrentScope.TryResolve("ConnectionString", out var csVal) && csVal.Kind == PilotValueKind.String)
+        {
+            string connectionString = csVal.AsString();
+
+            // Allow tests to specify a "mock" connection string to bypass real DB
+            if (connectionString != "mock")
+            {
+                return ExecuteRealSqlQuery(trimmed, dialect, connectionString, context);
+            }
+        }
+
+        // Mock fallback for tests without real DB connection string
+        return ExecuteMockSqlQuery(trimmed, dialect);
+    }
+
+    private static PilotValue ExecuteRealSqlQuery(string query, string dialect, string connectionString, PilotExecutionContext context)
+    {
+        using DbConnection connection = dialect.Equals("mysql", StringComparison.OrdinalIgnoreCase)
+            ? new MySqlConnection(connectionString)
+            : new NpgsqlConnection(connectionString);
+
+        connection.Open();
+
+        using DbCommand command = connection.CreateCommand();
+        command.CommandText = query;
+
+        // Simple distinction between query vs non-query execution
+        if (query.StartsWith("select", StringComparison.OrdinalIgnoreCase))
+        {
+            using DbDataReader reader = command.ExecuteReader();
+            var rows = new List<PilotValue>();
+
+            while (reader.Read())
+            {
+                var rowObj = new PilotObject();
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    string name = reader.GetName(i);
+                    object val = reader.GetValue(i);
+
+                    if (val is DBNull || val == null) rowObj.SetMember(name, PilotValue.Null);
+                    else if (val is int i32) rowObj.SetMember(name, PilotValue.FromInt(i32));
+                    else if (val is long i64) rowObj.SetMember(name, PilotValue.FromInt(i64));
+                    else if (val is short i16) rowObj.SetMember(name, PilotValue.FromInt(i16));
+                    else if (val is double d) rowObj.SetMember(name, PilotValue.FromFloat(d));
+                    else if (val is float f) rowObj.SetMember(name, PilotValue.FromFloat(f));
+                    else if (val is decimal dec) rowObj.SetMember(name, PilotValue.FromFloat((double)dec));
+                    else if (val is bool b) rowObj.SetMember(name, b ? PilotValue.True : PilotValue.False);
+                    else rowObj.SetMember(name, PilotValue.FromString(val.ToString() ?? ""));
+                }
+                rows.Add(PilotValue.FromObject(rowObj));
+            }
+
+            return PilotValue.FromList(rows);
+        }
+        else
+        {
+            int affected = command.ExecuteNonQuery();
+            return PilotValue.FromInt(affected);
+        }
+    }
+
+    private static PilotValue ExecuteMockSqlQuery(string trimmed, string dialect)
+    {
         if (trimmed.StartsWith("select", StringComparison.OrdinalIgnoreCase))
         {
             var ids = new List<int>();
