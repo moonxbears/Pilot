@@ -1,0 +1,30 @@
+# Suite 27: Pilot Virtual Environment Management
+
+# 1. Inspect initial state (should be inactive unless PILOT_VENV is set externally)
+let initial_active = venv.is_active();
+print("Virtual environment active: " + initial_active);
+
+# 2. Virtual environment object discovery
+assert(venv != null, "venv module must be accessible");
+assert(virtual_environment != null, "virtual_environment alias must be accessible");
+
+# 3. Create a test virtual environment at a temporary directory
+let test_env_path = "./.tmp_test_venv";
+let created_path = venv.create(test_env_path, "pilot-test-suite");
+assert(created_path == test_env_path, "venv.create should return created path");
+
+# 4. Activate the virtual environment programmatically
+let activated = venv.activate(test_env_path);
+assert(activated == true, "venv.activate should return true");
+assert(venv.is_active() == true, "venv.is_active() should be true after activation");
+
+let active_p = venv.active_path();
+assert(active_p != null, "active_path() should not be null");
+print("Active venv path: " + active_p);
+
+# 5. Deactivate the virtual environment
+let deactivated = venv.deactivate();
+assert(deactivated == true, "venv.deactivate should return true");
+assert(venv.is_active() == false, "venv.is_active() should be false after deactivation");
+
+print("Virtual environment suite passed successfully!");

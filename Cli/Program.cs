@@ -62,6 +62,19 @@ public static class Program
             return ExecutePackageSubcommand(args);
         }
 
+        // 7. Virtual Environment subcommand: pilot venv <create|info|activate> [path]
+        if (args.Length > 0 && (args[0] == "venv" || args[0] == "env"))
+        {
+            return ExecuteVenvSubcommand(args);
+        }
+
+        // Auto-detect virtual environment in current or parent directory
+        string? autoVenv = Pilot.Runtime.Venv.PilotVirtualEnvironment.Detect(Directory.GetCurrentDirectory());
+        if (autoVenv != null && !Pilot.Runtime.Venv.PilotVirtualEnvironment.IsActive)
+        {
+            Pilot.Runtime.Venv.PilotVirtualEnvironment.Activate(autoVenv);
+        }
+
         // 4. Direct script execution if first argument is a file: pilot script.pilot [args...] or pilot script.pilc [args...]
         if (args.Length > 0 && !args[0].StartsWith("-") &&
             (args[0].EndsWith(".pilot", StringComparison.OrdinalIgnoreCase) || args[0].EndsWith(".pilc", StringComparison.OrdinalIgnoreCase)) &&
@@ -373,6 +386,73 @@ public static class Program
         return 1;
     }
 
+    private static int ExecuteVenvSubcommand(string[] args)
+    {
+        string subCmd = args.Length > 1 ? args[1] : string.Empty;
+
+        // pilot venv info [dir]
+        if (subCmd == "info")
+        {
+            string targetDir = args.Length > 2 ? args[2] : (Pilot.Runtime.Venv.PilotVirtualEnvironment.ActiveVenvPath ?? Directory.GetCurrentDirectory());
+            string? venvPath = Pilot.Runtime.Venv.PilotVirtualEnvironment.Detect(targetDir);
+            if (venvPath == null)
+            {
+                Console.WriteLine("No active or detected Pilot virtual environment.");
+                return 1;
+            }
+
+            var cfg = Pilot.Runtime.Venv.PilotVenvConfig.Load(Path.Combine(venvPath, Pilot.Runtime.Venv.PilotVirtualEnvironment.ConfigFileName));
+            Console.WriteLine($"Pilot Virtual Environment: {venvPath}");
+            Console.WriteLine($"  Prompt: {cfg.Prompt}");
+            Console.WriteLine($"  Home: {cfg.Home}");
+            Console.WriteLine($"  Version: {cfg.Version}");
+            Console.WriteLine($"  Include System Packages: {cfg.IncludeSystemPackages}");
+            Console.WriteLine($"  Created At: {cfg.CreatedAt:O}");
+            Console.WriteLine($"  Is Active: {Pilot.Runtime.Venv.PilotVirtualEnvironment.ActiveVenvPath == venvPath}");
+            return 0;
+        }
+
+        // pilot venv create <targetDir> [--prompt <name>] or pilot venv <targetDir>
+        string venvTarget = (subCmd == "create" && args.Length > 2) ? args[2]
+                          : (!string.IsNullOrEmpty(subCmd) && !subCmd.StartsWith("-")) ? subCmd
+                          : ".pilotvenv";
+
+        string? promptName = null;
+        for (int i = 1; i < args.Length; i++)
+        {
+            if ((args[i] == "--prompt" || args[i] == "-p") && i + 1 < args.Length)
+            {
+                promptName = args[++i];
+            }
+        }
+
+        Console.WriteLine($"--> Creating Pilot virtual environment in '{venvTarget}'...");
+        var options = new Pilot.Runtime.Venv.PilotVenvOptions
+        {
+            Prompt = promptName
+        };
+
+        var config = Pilot.Runtime.Venv.PilotVirtualEnvironment.Create(venvTarget, options);
+        string absPath = Path.GetFullPath(venvTarget);
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"[VENV SUCCESS] Created Pilot virtual environment at '{absPath}'.");
+        Console.ResetColor();
+
+        string scriptsDir = OperatingSystem.IsWindows() ? Path.Combine(absPath, "Scripts") : Path.Combine(absPath, "bin");
+        Console.WriteLine("\nTo activate this virtual environment:");
+        if (OperatingSystem.IsWindows())
+        {
+            Console.WriteLine($"  PowerShell : & \"{Path.Combine(scriptsDir, "activate.ps1")}\"");
+            Console.WriteLine($"  CMD        : \"{Path.Combine(scriptsDir, "activate.bat")}\"");
+        }
+        else
+        {
+            Console.WriteLine($"  Bash / Zsh : source \"{Path.Combine(scriptsDir, "activate")}\"");
+        }
+        return 0;
+    }
+
     public static void PrintUsage()
     {
         Console.WriteLine("==================================================================");
@@ -385,6 +465,10 @@ public static class Program
         Console.WriteLine("  pilot debug <file.pilot> [args...]   # Start interactive CLI debugger session");
         Console.WriteLine("  pilot -c \"<code>\" [args...]         # Execute inline code string");
         Console.WriteLine("  pilot compile <file> [-o <out.pilc>] # Precompile to binary format");
+        Console.WriteLine("\nVirtual Environment Usage (Isolation & Sandboxing):");
+        Console.WriteLine("  pilot venv [path]                    # Create new virtual environment (default: .pilotvenv)");
+        Console.WriteLine("  pilot venv create <path> [-p <name>] # Create named virtual environment");
+        Console.WriteLine("  pilot venv info                      # Display active or local virtual environment metadata");
         Console.WriteLine("\nPackage Management Usage (Native & Adopted Interop):");
         Console.WriteLine("  pilot pkg init [name]                # Create new pilot.json manifest");
         Console.WriteLine("  pilot pkg add <pkg>                  # Add native or interop dependency");

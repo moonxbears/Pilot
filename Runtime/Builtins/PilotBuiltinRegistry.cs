@@ -357,5 +357,41 @@ public sealed class PilotBuiltinRegistry
 
         Register("auto_repeat", (_, _) => PilotValue.FromString("auto_repeat"));
         Register("repeat", (_, _) => PilotValue.FromString("repeat"));
+
+        // Virtual Environment Module (venv / virtual_environment)
+        var venvModule = new PilotObject(new PilotClassDefinition("venv"));
+        venvModule.SetMember("create", PilotValue.FromFunction(PilotFunction.CreateNative("create", (_, a) =>
+        {
+            if (a.Count == 0) return PilotValue.Null;
+            string path = a[0].AsString();
+            string? prompt = a.Count > 1 ? a[1].AsString() : null;
+            var cfg = Pilot.Runtime.Venv.PilotVirtualEnvironment.Create(path, new Pilot.Runtime.Venv.PilotVenvOptions { Prompt = prompt });
+            return PilotValue.FromString(path);
+        }, "path", "prompt")));
+
+        venvModule.SetMember("is_active", PilotValue.FromFunction(PilotFunction.CreateNative("is_active", (_, _) =>
+            PilotValue.FromBool(Pilot.Runtime.Venv.PilotVirtualEnvironment.IsActive))));
+
+        venvModule.SetMember("active_path", PilotValue.FromFunction(PilotFunction.CreateNative("active_path", (_, _) =>
+        {
+            string? p = Pilot.Runtime.Venv.PilotVirtualEnvironment.ActiveVenvPath;
+            return p != null ? PilotValue.FromString(p) : PilotValue.Null;
+        })));
+
+        venvModule.SetMember("activate", PilotValue.FromFunction(PilotFunction.CreateNative("activate", (_, a) =>
+        {
+            if (a.Count == 0) return PilotValue.Null;
+            Pilot.Runtime.Venv.PilotVirtualEnvironment.Activate(a[0].AsString());
+            return PilotValue.True;
+        }, "path")));
+
+        venvModule.SetMember("deactivate", PilotValue.FromFunction(PilotFunction.CreateNative("deactivate", (_, _) =>
+        {
+            Pilot.Runtime.Venv.PilotVirtualEnvironment.Deactivate();
+            return PilotValue.True;
+        })));
+
+        Register("venv", (_, _) => PilotValue.FromObject(venvModule));
+        Register("virtual_environment", (_, _) => PilotValue.FromObject(venvModule));
     }
 }

@@ -176,7 +176,7 @@ public sealed class PilotPackageManager
 
         log?.Invoke($"--> Restoring dependencies for '{manifest.Name}@{manifest.Version}'...");
 
-        string modulesDir = Path.Combine(projectDirectory, ".pilot_modules");
+        string modulesDir = GetEffectiveModulesDirectory(projectDirectory);
         Directory.CreateDirectory(modulesDir);
 
         // 1. Restore Native Pilot dependencies
@@ -362,5 +362,15 @@ public sealed class PilotPackageManager
     {
         byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(text));
         return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    public static string GetEffectiveModulesDirectory(string projectDirectory)
+    {
+        string? activeVenv = Pilot.Runtime.Venv.PilotVirtualEnvironment.ActiveVenvPath;
+        if (!string.IsNullOrEmpty(activeVenv))
+        {
+            return Path.Combine(activeVenv, "lib", ".pilot_modules");
+        }
+        return Path.Combine(projectDirectory, ".pilot_modules");
     }
 }

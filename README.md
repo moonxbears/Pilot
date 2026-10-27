@@ -16,6 +16,11 @@
   - [Native Pilot Packages](#native-pilot-packages)
   - [Adopting Interop Packages (NuGet, npm, pip, Cargo, Maven, LuaRocks)](#adopting-interop-packages)
   - [Packaging CLI Reference](#packaging-cli-reference)
+- [Virtual Environment System (`pilot venv`)](#virtual-environment-system-pilot-venv)
+  - [Creating and Activating Environments](#creating-and-activating-environments)
+  - [Virtual Environment CLI Reference](#virtual-environment-cli-reference)
+  - [Automatic Dependency Sandboxing](#automatic-dependency-sandboxing)
+  - [Programmatic Runtime API](#programmatic-runtime-api)
 - [Language Features & Syntax Reference](#language-features--syntax-reference)
   - [1. Type Safety, Variables & Control Flow](#1-type-safety-variables--control-flow)
   - [2. Preconditions & Cleanup (`guard` and `defer`)](#2-preconditions--cleanup-guard-and-defer)
@@ -219,6 +224,107 @@ pilot pkg add luarocks:luasocket@3.0
 | `pilot pkg remove <pkgSpec>` | Removes a dependency from `pilot.json` and lockfile |
 | `pilot pkg list` | Lists all installed native and adopted interop dependencies |
 | `pilot pkg pack [out.pilpkg]` | Bundles the project into a distributable `.pilpkg` archive |
+
+---
+
+## Virtual Environment System (`pilot venv`)
+
+Pilot includes a complete, production-ready virtual environment system that isolates runtime environments, installed native modules, and foreign dependencies across projects.
+
+### Environment Layout
+
+When created, a Pilot virtual environment initializes a deterministic, self-contained filesystem layout:
+
+```
+myenv/
+├── pilotvenv.cfg              # Key-value environment configuration
+├── Scripts/                   # (bin/ on Unix/Linux/macOS)
+│   ├── activate.ps1           # PowerShell activation script
+│   ├── activate.bat           # Windows Command Prompt activation script
+│   ├── deactivate.bat         # Windows Command Prompt deactivation script
+│   ├── activate               # POSIX Bash/Zsh activation script
+│   └── pilot.cmd / pilot      # Isolated binary launcher
+├── lib/
+│   └── .pilot_modules/        # Sandboxed module directory
+│       ├── pilot/             # Native Pilot packages
+│       ├── nuget/             # Adopted NuGet packages
+│       ├── npm/               # Adopted npm packages
+│       ├── pip/               # Adopted Python wheels
+│       ├── cargo/             # Adopted Cargo crates
+│       ├── maven/             # Adopted Java JARs
+│       └── luarocks/          # Adopted Lua modules
+└── include/                   # C/C++ header stubs for native extensions
+```
+
+### Creating and Activating Environments
+
+**Create a virtual environment:**
+```bash
+# Basic creation in .venv
+pilot venv create .venv
+
+# Custom prompt name and include system-wide packages
+pilot venv create /path/to/myenv --prompt dev-sandbox --system-site-packages
+```
+
+**Activate your environment:**
+```powershell
+# PowerShell
+& .venv\Scripts\activate.ps1
+
+# Windows CMD
+.venv\Scripts\activate.bat
+
+# Linux / macOS (POSIX)
+source .venv/bin/activate
+```
+
+Once activated, your terminal prompt is prefixed with `(myenv)` and any `pilot pkg install` or `pilot pkg add` automatically targets the isolated `.venv/lib/.pilot_modules/` location.
+
+**Deactivate:**
+```bash
+deactivate
+```
+
+### Virtual Environment CLI Reference
+
+| Command | Description |
+| :--- | :--- |
+| `pilot venv create <path> [--prompt <name>] [--system-site-packages]` | Creates a new virtual environment at the specified directory |
+| `pilot venv info [path]` | Inspects the currently active or detected virtual environment configuration |
+
+### Automatic Dependency Sandboxing
+
+When a virtual environment is active (detected via `PILOT_VENV` or `VIRTUAL_ENV`), the Pilot Universal Package Manager (`pilot pkg`) automatically switches its module resolution root to:
+```
+<venv_path>/lib/.pilot_modules
+```
+This guarantees that projects running different versions of native packages, NuGet assemblies, npm packages, or Python libraries do not conflict or contaminate system directories.
+
+### Programmatic Runtime API
+
+Pilot provides first-class language bindings to manage and query virtual environments directly within Pilot code:
+
+```pilot
+import venv # or virtual_environment
+
+# Query activation status
+let active = venv.is_active();
+print("Is active: " + active);
+
+# Query current environment root path
+let env_path = venv.active_path();
+print("Active venv path: " + env_path);
+
+# Create a virtual environment programmatically
+venv.create("./.custom_venv", "my-script-env");
+
+# Programmatically activate or deactivate in-process
+venv.activate("./.custom_venv");
+print("Now running inside: " + venv.active_path());
+
+venv.deactivate();
+```
 
 ---
 
