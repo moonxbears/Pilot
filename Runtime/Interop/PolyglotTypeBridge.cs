@@ -47,62 +47,101 @@ public sealed class PolyglotTypeBridge : IPolyglotTypeConverter
             return customMapper(foreignObject);
         }
 
-        // Direct primitive mappings
+        if (TryMapPrimitiveToPilotValue(foreignObject, out var primitiveValue))
+        {
+            return primitiveValue;
+        }
+
+        if (TryMapCollectionToPilotValue(foreignObject, type, sourceLanguage, out var collectionValue))
+        {
+            return collectionValue;
+        }
+
+        // Complex Objects, POCOs, Anonymous Types
+        return ConvertPocoToPilotObject(foreignObject, type);
+    }
+
+    private bool TryMapPrimitiveToPilotValue(object foreignObject, out PilotValue result)
+    {
         switch (foreignObject)
         {
             case bool b:
-                return PilotValue.FromBool(b);
-
+                result = PilotValue.FromBool(b);
+                return true;
             case sbyte sb:
-                return PilotValue.FromInt(sb);
+                result = PilotValue.FromInt(sb);
+                return true;
             case byte b:
-                return PilotValue.FromUInt(b);
+                result = PilotValue.FromUInt(b);
+                return true;
             case short s:
-                return PilotValue.FromInt(s);
+                result = PilotValue.FromInt(s);
+                return true;
             case ushort us:
-                return PilotValue.FromUInt(us);
+                result = PilotValue.FromUInt(us);
+                return true;
             case int i:
-                return PilotValue.FromInt(i);
+                result = PilotValue.FromInt(i);
+                return true;
             case uint u:
-                return PilotValue.FromUInt(u);
+                result = PilotValue.FromUInt(u);
+                return true;
             case long l:
-                return PilotValue.FromInt(l);
+                result = PilotValue.FromInt(l);
+                return true;
             case ulong ul:
-                return PilotValue.FromUInt(ul);
+                result = PilotValue.FromUInt(ul);
+                return true;
             case BigInteger bi:
-                return PilotValue.FromInt((long)bi);
-
+                result = PilotValue.FromInt((long)bi);
+                return true;
             case float f:
-                return PilotValue.FromFloat(f);
+                result = PilotValue.FromFloat(f);
+                return true;
             case double d:
-                return PilotValue.FromFloat(d);
+                result = PilotValue.FromFloat(d);
+                return true;
             case decimal dec:
-                return PilotValue.FromDecimal(dec);
-
+                result = PilotValue.FromDecimal(dec);
+                return true;
             case char c:
-                return PilotValue.FromChar(c);
+                result = PilotValue.FromChar(c);
+                return true;
             case string str:
-                return PilotValue.FromString(str);
-
+                result = PilotValue.FromString(str);
+                return true;
             case Guid guid:
-                return PilotValue.FromString(guid.ToString());
+                result = PilotValue.FromString(guid.ToString());
+                return true;
             case DateTime dt:
-                return PilotValue.FromString(dt.ToString("o", CultureInfo.InvariantCulture));
+                result = PilotValue.FromString(dt.ToString("o", CultureInfo.InvariantCulture));
+                return true;
             case DateTimeOffset dto:
-                return PilotValue.FromString(dto.ToString("o", CultureInfo.InvariantCulture));
+                result = PilotValue.FromString(dto.ToString("o", CultureInfo.InvariantCulture));
+                return true;
             case TimeSpan ts:
-                return PilotValue.FromFloat(ts.TotalMilliseconds);
-
+                result = PilotValue.FromFloat(ts.TotalMilliseconds);
+                return true;
             case PilotRange range:
-                return PilotValue.FromRange(range);
+                result = PilotValue.FromRange(range);
+                return true;
             case PilotMatrix matrix:
-                return PilotValue.FromMatrix(matrix);
+                result = PilotValue.FromMatrix(matrix);
+                return true;
             case PilotFunction func:
-                return PilotValue.FromFunction(func);
+                result = PilotValue.FromFunction(func);
+                return true;
             case PilotObject obj:
-                return PilotValue.FromObject(obj);
+                result = PilotValue.FromObject(obj);
+                return true;
+            default:
+                result = default;
+                return false;
         }
+    }
 
+    private bool TryMapCollectionToPilotValue(object foreignObject, Type type, string? sourceLanguage, out PilotValue result)
+    {
         // Dictionaries and Map representations
         if (foreignObject is IDictionary dict)
         {
@@ -113,7 +152,8 @@ public sealed class PolyglotTypeBridge : IPolyglotTypeConverter
                 var v = ToPilotValue(entry.Value, sourceLanguage);
                 pilotMap[k] = v;
             }
-            return PilotValue.FromMap(pilotMap);
+            result = PilotValue.FromMap(pilotMap);
+            return true;
         }
 
         // Tuples
@@ -124,7 +164,8 @@ public sealed class PolyglotTypeBridge : IPolyglotTypeConverter
             {
                 tupleItems.Add(ToPilotValue(tuple[i], sourceLanguage));
             }
-            return PilotValue.FromTuple(tupleItems);
+            result = PilotValue.FromTuple(tupleItems);
+            return true;
         }
 
         // Sets
@@ -135,7 +176,8 @@ public sealed class PolyglotTypeBridge : IPolyglotTypeConverter
             {
                 pilotSet.Add(ToPilotValue(item, sourceLanguage));
             }
-            return PilotValue.FromSet(pilotSet);
+            result = PilotValue.FromSet(pilotSet);
+            return true;
         }
 
         // Lists, Arrays, and Sequences
@@ -146,11 +188,12 @@ public sealed class PolyglotTypeBridge : IPolyglotTypeConverter
             {
                 pilotList.Add(ToPilotValue(item, sourceLanguage));
             }
-            return PilotValue.FromList(pilotList);
+            result = PilotValue.FromList(pilotList);
+            return true;
         }
 
-        // Complex Objects, POCOs, Anonymous Types
-        return ConvertPocoToPilotObject(foreignObject, type);
+        result = default;
+        return false;
     }
 
     public object? ToForeignValue(PilotValue value, Type? targetType = null)
@@ -167,51 +210,69 @@ public sealed class PolyglotTypeBridge : IPolyglotTypeConverter
 
         if (targetType == null || targetType == typeof(object))
         {
-            return value.Kind switch
-            {
-                PilotValueKind.Null => null,
-                PilotValueKind.Undefined => null,
-                PilotValueKind.Bool => value.IsTrue,
-                PilotValueKind.Int => value.AsInt(),
-                PilotValueKind.UInt => (ulong)value.AsInt(),
-                PilotValueKind.Float => value.AsFloat(),
-                PilotValueKind.Decimal => (decimal)value.AsFloat(),
-                PilotValueKind.Char => (char)value.AsInt(),
-                PilotValueKind.String => value.AsString(),
-                PilotValueKind.List => ConvertListToHost(value.AsList()),
-                PilotValueKind.Tuple => ConvertListToHost(value.AsTuple()),
-                PilotValueKind.Map => ConvertMapToHost(value.AsMap()),
-                PilotValueKind.Matrix => value.AsMatrix(),
-                PilotValueKind.Range => value.AsRange(),
-                PilotValueKind.Object => value.AsObject().Fields,
-                PilotValueKind.Foreign => value.AsForeign(),
-                _ => value.ToString()
-            };
+            return MapKindToForeignValue(value);
         }
 
+        if (TryCoerceToForeignType(value, targetType, out var coercedValue))
+        {
+            return coercedValue;
+        }
+
+        return value.ToString();
+    }
+
+    private static object? MapKindToForeignValue(PilotValue value)
+    {
+        return value.Kind switch
+        {
+            PilotValueKind.Null => null,
+            PilotValueKind.Undefined => null,
+            PilotValueKind.Bool => value.IsTrue,
+            PilotValueKind.Int => value.AsInt(),
+            PilotValueKind.UInt => (ulong)value.AsInt(),
+            PilotValueKind.Float => value.AsFloat(),
+            PilotValueKind.Decimal => (decimal)value.AsFloat(),
+            PilotValueKind.Char => (char)value.AsInt(),
+            PilotValueKind.String => value.AsString(),
+            PilotValueKind.List => ConvertListToHost(value.AsList()),
+            PilotValueKind.Tuple => ConvertListToHost(value.AsTuple()),
+            PilotValueKind.Map => ConvertMapToHost(value.AsMap()),
+            PilotValueKind.Matrix => value.AsMatrix(),
+            PilotValueKind.Range => value.AsRange(),
+            PilotValueKind.Object => value.AsObject().Fields,
+            PilotValueKind.Foreign => value.AsForeign(),
+            _ => value.ToString()
+        };
+    }
+
+    private static bool TryCoerceToForeignType(PilotValue value, Type targetType, out object? result)
+    {
         // Explicit target type coercions
-        if (targetType == typeof(int)) return (int)value.AsInt();
-        if (targetType == typeof(long)) return value.AsInt();
-        if (targetType == typeof(uint)) return (uint)value.AsInt();
-        if (targetType == typeof(ulong)) return (ulong)value.AsInt();
-        if (targetType == typeof(double)) return value.AsFloat();
-        if (targetType == typeof(float)) return (float)value.AsFloat();
-        if (targetType == typeof(decimal)) return (decimal)value.AsFloat();
-        if (targetType == typeof(bool)) return value.IsTrue;
-        if (targetType == typeof(string)) return value.AsString();
-        if (targetType == typeof(char)) return (char)value.AsInt();
+        if (targetType == typeof(int)) { result = (int)value.AsInt(); return true; }
+        if (targetType == typeof(long)) { result = value.AsInt(); return true; }
+        if (targetType == typeof(uint)) { result = (uint)value.AsInt(); return true; }
+        if (targetType == typeof(ulong)) { result = (ulong)value.AsInt(); return true; }
+        if (targetType == typeof(double)) { result = value.AsFloat(); return true; }
+        if (targetType == typeof(float)) { result = (float)value.AsFloat(); return true; }
+        if (targetType == typeof(decimal)) { result = (decimal)value.AsFloat(); return true; }
+        if (targetType == typeof(bool)) { result = value.IsTrue; return true; }
+        if (targetType == typeof(string)) { result = value.AsString(); return true; }
+        if (targetType == typeof(char)) { result = (char)value.AsInt(); return true; }
 
         if (targetType == typeof(PilotMatrix) && value.Kind == PilotValueKind.Matrix)
         {
-            return value.AsMatrix();
+            result = value.AsMatrix();
+            return true;
         }
 
         if (targetType == typeof(PilotRange) && value.Kind == PilotValueKind.Range)
         {
-            return value.AsRange();
+            result = value.AsRange();
+            return true;
         }
 
-        return value.ToString();
+        result = null;
+        return false;
     }
 
     private PilotValue ConvertPocoToPilotObject(object foreignObject, Type type)
