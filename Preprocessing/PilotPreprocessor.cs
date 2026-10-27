@@ -212,7 +212,7 @@ public static partial class PilotPreprocessor
             });
         }
 
-        result.PreprocessedSource = string.Join("\n", outputLines);
+        result.PreprocessedSource = DesugarColonBlocks(outputLines);
         return result;
     }
 
@@ -733,6 +733,248 @@ public static partial class PilotPreprocessor
             return _symbols.Contains(token);
         }
     }
+
+    #region Pythonic Colon & Indentation Desugaring
+
+    private static readonly HashSet<string> BlockKeywords = new(StringComparer.Ordinal)
+    {
+        "if", "elif", "else", "while", "for", "def", "fn", "func", "class", "struct",
+        "interface", "protocol", "actor", "state", "enum", "try", "catch", "except", "finally",
+        "with", "guard", "defer", "match", "case", "default", "select", "periodic",
+        "deadline", "within", "noalloc", "region", "spawn", "atomic", "sync", "lock",
+        "isolate", "database", "transaction", "savepoint", "unit"
+    };
+
+    private static readonly HashSet<string> BlockModifiers = new(StringComparer.Ordinal)
+    {
+        "pub", "public", "private", "protected", "internal",
+        "async", "parallel", "static", "override", "virtual",
+        "pure", "extern", "lazy"
+    };
+
+    private sealed class ColonBlockFrame
+    {
+        public int ParentIndent { get; }
+        public int BodyIndent { get; }
+
+        public ColonBlockFrame(int parentIndent, int bodyIndent)
+        {
+            ParentIndent = parentIndent;
+            BodyIndent = bodyIndent;
+        }
+    }
+
+    private static int GetIndent(string line)
+    {
+        int indent = 0;
+        foreach (char c in line)
+        {
+            if (c == ' ') indent++;
+            else if (c == '\t') indent += 4;
+            else break;
+        }
+        return indent;
+    }
+
+    private static int FindTrailingCommentIndex(string line)
+    {
+        bool inDoubleQuote = false;
+        bool inSingleQuote = false;
+        for (int i = 0; i < line.Length; i++)
+        {
+            char c = line[i];
+            if (c == '\\' && (inDoubleQuote || inSingleQuote))
+            {
+                i++;
+                continue;
+            }
+            if (c == '"' && !inSingleQuote) inDoubleQuote = !inDoubleQuote;
+            else if (c == '\'' && !inDoubleQuote) inSingleQuote = !inSingleQuote;
+            else if (!inDoubleQuote && !inSingleQuote && c == '/' && i + 1 < line.Length && line[i + 1] == '/')
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static bool IsBlockStartLine(string line)
+    {
+        int i = 0;
+        while (i < line.Length && (line[i] == ' ' || line[i] == '\t' || line[i] == '}')) i++;
+        if (i >= line.Length) return false;
+
+        while (i < line.Length)
+        {
+            int wordStart = i;
+            while (i < line.Length && (char.IsLetterOrDigit(line[i]) || line[i] == '_')) i++;
+            string word = line[wordStart..i];
+
+            if (BlockKeywords.Contains(word))
+                return true;
+
+            if (BlockModifiers.Contains(word))
+            {
+                while (i < line.Length && (line[i] == ' ' || line[i] == '\t')) i++;
+                continue;
+            }
+
+            if (i < line.Length && line[i] == ':')
+                return true;
+
+            break;
+        }
+
+        return false;
+    }
+
+    private static bool EndsWithBlockColon(string line, out int colonIndex)
+    {
+        colonIndex = -1;
+        int commentIndex = FindTrailingCommentIndex(line);
+        string code = commentIndex >= 0 ? line[..commentIndex] : line;
+
+        bool inDoubleQuote = false;
+        bool inSingleQuote = false;
+        int paren = 0;
+        int bracket = 0;
+        int brace = 0;
+
+        for (int i = 0; i < code.Length; i++)
+        {
+            char c = code[i];
+            if (c == '\\' && (inDoubleQuote || inSingleQuote))
+            {
+                i++;
+                continue;
+            }
+            if (c == '"' && !inSingleQuote) inDoubleQuote = !inDoubleQuote;
+            else if (c == '\'' && !inDoubleQuote) inSingleQuote = !inSingleQuote;
+            else if (!inDoubleQuote && !inSingleQuote)
+            {
+                if (c == '(') paren++;
+                else if (c == ')') paren = Math.Max(0, paren - 1);
+                else if (c == '[') bracket++;
+                else if (c == ']') bracket = Math.Max(0, bracket - 1);
+                else if (c == '{') brace++;
+                else if (c == '}') brace = Math.Max(0, brace - 1);
+            }
+        }
+
+        if (inDoubleQuote || inSingleQuote || paren > 0 || bracket > 0 || brace > 0)
+            return false;
+
+        string trimmed = code.TrimEnd();
+        if (trimmed.EndsWith(':') && !trimmed.EndsWith("::") && !trimmed.EndsWith("?:"))
+        {
+            colonIndex = trimmed.Length - 1;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string DesugarColonBlocks(string[] inputLines)
+    {
+        var lines = new List<string>(inputLines);
+        var colonStack = new Stack<ColonBlockFrame>();
+
+        for (int i = 0; i < lines.Count; i++)
+        {
+            string line = lines[i];
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            int commentIdx = FindTrailingCommentIndex(line);
+            string codePart = commentIdx >= 0 ? line[..commentIdx] : line;
+            if (string.IsNullOrWhiteSpace(codePart))
+                continue;
+
+            int curIndent = GetIndent(line);
+
+            // 1. Check if dedented
+            int dedentCount = 0;
+            while (colonStack.Count > 0 && curIndent < colonStack.Peek().BodyIndent)
+            {
+                colonStack.Pop();
+                dedentCount++;
+            }
+
+            if (dedentCount > 0)
+            {
+                string closingBraces = string.Concat(Enumerable.Repeat("}", dedentCount));
+                if (i > 0 && string.IsNullOrWhiteSpace(lines[i - 1]))
+                {
+                    lines[i - 1] = new string(' ', curIndent) + closingBraces;
+                }
+                else
+                {
+                    int nonWs = 0;
+                    while (nonWs < lines[i].Length && (lines[i][nonWs] == ' ' || lines[i][nonWs] == '\t'))
+                        nonWs++;
+                    lines[i] = lines[i][..nonWs] + closingBraces + " " + lines[i][nonWs..];
+                }
+            }
+
+            // 2. Check if current line opens a colon block
+            if (EndsWithBlockColon(lines[i], out _))
+            {
+                if (IsBlockStartLine(lines[i]))
+                {
+                    int nextIdx = i + 1;
+                    while (nextIdx < lines.Count)
+                    {
+                        if (!string.IsNullOrWhiteSpace(lines[nextIdx]))
+                        {
+                            int nextCIdx = FindTrailingCommentIndex(lines[nextIdx]);
+                            string nextCode = nextCIdx >= 0 ? lines[nextIdx][..nextCIdx] : lines[nextIdx];
+                            if (!string.IsNullOrWhiteSpace(nextCode))
+                                break;
+                        }
+                        nextIdx++;
+                    }
+
+                    if (nextIdx < lines.Count)
+                    {
+                        int nextIndent = GetIndent(lines[nextIdx]);
+                        if (nextIndent > curIndent)
+                        {
+                            string raw = lines[i];
+                            int commentPos = FindTrailingCommentIndex(raw);
+                            string codeOnly = commentPos >= 0 ? raw[..commentPos] : raw;
+                            string commentOnly = commentPos >= 0 ? raw[commentPos..] : string.Empty;
+
+                            int lastColon = codeOnly.LastIndexOf(':');
+                            if (lastColon >= 0)
+                            {
+                                lines[i] = codeOnly[..lastColon].TrimEnd() + " {" + (string.IsNullOrEmpty(commentOnly) ? "" : " " + commentOnly);
+                                colonStack.Push(new ColonBlockFrame(curIndent, nextIndent));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (colonStack.Count > 0)
+        {
+            int remaining = colonStack.Count;
+            colonStack.Clear();
+            string finalBraces = string.Concat(Enumerable.Repeat("}", remaining));
+            if (lines.Count > 0 && string.IsNullOrWhiteSpace(lines[^1]))
+            {
+                lines[^1] = finalBraces;
+            }
+            else
+            {
+                lines.Add(finalBraces);
+            }
+        }
+
+        return string.Join("\n", lines);
+    }
+
+    #endregion
 
     [GeneratedRegex(@"^[ \t]*#[ \t]*([a-zA-Z_][a-zA-Z0-9_]*)(?:[ \t]+(.*))?$", RegexOptions.Compiled)]
     private static partial Regex MyRegex();

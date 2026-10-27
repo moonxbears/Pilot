@@ -508,7 +508,7 @@ public sealed class PilVirtualMachine
 
                 case PilotOpcode.ForIter:
                 {
-                    var iterObj = stack[sp - 1].AsForeign() as IEnumerator<PilotValue>;
+                    var iterObj = stack[--sp].AsForeign() as IEnumerator<PilotValue>;
                     if (iterObj != null && iterObj.MoveNext())
                     {
                         EnsureStackCapacity(ref stack, sp + 1);
@@ -516,7 +516,6 @@ public sealed class PilVirtualMachine
                     }
                     else
                     {
-                        sp--; // Pop iterator
                         ip = inst.Operand; // Jump past loop
                     }
                     break;

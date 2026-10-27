@@ -151,9 +151,10 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     public override object? VisitSuite(PilotParser.SuiteContext context)
     {
+        bool parentDiscard = _discardExpressionResult;
         if (context.simple_stmt() != null)
         {
-            _discardExpressionResult = false;
+            _discardExpressionResult = parentDiscard;
             Visit(context.simple_stmt());
             return null;
         }
@@ -163,7 +164,7 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         {
             for (int i = 0; i < stmts.Length; i++)
             {
-                _discardExpressionResult = (i < stmts.Length - 1);
+                _discardExpressionResult = parentDiscard || (i < stmts.Length - 1);
                 Visit(stmts[i]);
             }
         }
@@ -487,7 +488,10 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         int exitJump = _chunk.EmitJump(PilotOpcode.JumpIfFalse);
 
         // Body
+        bool prevDiscard = _discardExpressionResult;
+        _discardExpressionResult = true;
         Visit(context.suite(0));
+        _discardExpressionResult = prevDiscard;
 
         // Jump back to condition
         _chunk.Emit(PilotOpcode.Jump, loopStart);
@@ -515,10 +519,14 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         Visit(context.test(0));
         _chunk.Emit(PilotOpcode.GetIter);
 
+        int iterSlot = _chunk.GetOrAllocateLocalSlot($"<iter_{_chunk.Instructions.Count}>");
+        _chunk.Emit(PilotOpcode.StoreLocal, iterSlot);
+
         int loopStart = _chunk.Instructions.Count;
         var loopCtx = new LoopContext(loopStart);
         _loops.Push(loopCtx);
 
+        _chunk.Emit(PilotOpcode.LoadLocal, iterSlot);
         int exitJump = _chunk.EmitJump(PilotOpcode.ForIter);
 
         // 2. Assign item to target
@@ -536,7 +544,10 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         }
 
         // 3. Body suite
+        bool prevDiscard = _discardExpressionResult;
+        _discardExpressionResult = true;
         Visit(context.suite(0));
+        _discardExpressionResult = prevDiscard;
 
         // 4. Jump back
         _chunk.Emit(PilotOpcode.Jump, loopStart);
