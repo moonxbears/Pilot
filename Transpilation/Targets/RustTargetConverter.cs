@@ -90,18 +90,18 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
                 continue;
             }
 
-            string converted = ConvertRustLineToPilot(trimmed);
+            string converted = ConvertRustLineToPilot(trimmed, options.Optimize);
             int indent = line.TakeWhile(char.IsWhiteSpace).Count();
             sb.AppendLine(new string(' ', indent) + converted);
         }
 
-        string optimized = PilotOptimizer.OptimizeIngestedPilotCode(sb.ToString());
-        return TranspilationResult.CreateSuccess(optimized, "pilot");
+        string outputCode = options.Optimize ? PilotOptimizer.OptimizeIngestedPilotCode(sb.ToString()) : sb.ToString().TrimEnd() + Environment.NewLine;
+        return TranspilationResult.CreateSuccess(outputCode, "pilot");
     }
 
-    private static string ConvertRustLineToPilot(string line)
+    private static string ConvertRustLineToPilot(string line, bool optimize = false)
     {
-        string res = line.TrimEnd(';');
+        string res = optimize ? line.TrimEnd(';') : line;
 
         // Visibility & Functions
         res = res.Replace("pub fn ", "def ").Replace("fn ", "def ");
@@ -111,7 +111,7 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
         res = res.Replace("..=", "..");
 
         // Variables
-        res = res.Replace("let mut ", "var ");
+        res = res.Replace("let mut ", optimize ? "var " : "let ");
 
         // println!("Hello {}", x) -> println(f"Hello {x}")
         var printMatch = Regex.Match(res, @"^println!\(\s*""([^""]*)""\s*(?:,\s*(.+))?\)$");
@@ -192,7 +192,7 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
                 string? val = ctx.let_stmt().test()?.GetText();
                 string typeAnnot = !string.IsNullOrEmpty(type) ? $": {MapType(type)}" : "";
                 string valStr = val != null ? FormatExpr(val) : "";
-                string mutKw = _mutatedVars.Contains(name) ? "let mut" : "let";
+                string mutKw = _options.Optimize ? (_mutatedVars.Contains(name) ? "let mut" : "let") : "let mut";
                 return val != null ? $"{mutKw} {name}{typeAnnot} = {valStr};" : $"let mut {name}{typeAnnot};";
             }
             if (ctx.var_stmt() != null)

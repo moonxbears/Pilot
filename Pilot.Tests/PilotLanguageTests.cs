@@ -27,7 +27,7 @@ namespace Pilot.Tests
             parser.RemoveErrorListeners();
             parser.AddErrorListener(errorTracker);
 
-            var tree = parser.program();
+            var tree = parser.ParseProgramFast();
             errors.AddRange(errorTracker.Errors);
             return (tree, errors);
         }

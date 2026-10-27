@@ -43,11 +43,12 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         "Result", "Option", "Span", "Memory", "AstNode", "Exception", "ValueError"
     };
 
+    private static readonly System.Text.RegularExpressions.Regex MatrixTypeRegex = new(@"^matrix\d+x\d+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
     private static bool IsBuiltinType(string typeName)
     {
         if (BuiltinTypes.Contains(typeName)) return true;
         // matrix#x# pattern, e.g. matrix3x3, matrix4x4, matrix2x4, etc.
-        if (System.Text.RegularExpressions.Regex.IsMatch(typeName, @"^matrix\d+x\d+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        if (MatrixTypeRegex.IsMatch(typeName))
             return true;
         return false;
     }
@@ -237,7 +238,8 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         parser.RemoveErrorListeners();
         parser.AddErrorListener(lexerErrors);
 
-        var tree = parser.program();
+        analyzer._result.Regions.AddRange(preprocResult.Regions);
+        var tree = parser.ParseProgramFast();
 
         // Pass 1: Pre-register top-level type, model, actor, unit, and function symbols for forward references
         analyzer.PreRegisterTopLevelDeclarations(tree);

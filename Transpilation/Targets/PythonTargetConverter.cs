@@ -131,8 +131,8 @@ public sealed class PythonTargetConverter : ITargetLanguageConverter
             sb.AppendLine(new string(' ', indentStack.Count * 4) + "}");
         }
 
-        string optimized = PilotOptimizer.OptimizeIngestedPilotCode(sb.ToString());
-        return TranspilationResult.CreateSuccess(optimized, "pilot");
+        string outputCode = options.Optimize ? PilotOptimizer.OptimizeIngestedPilotCode(sb.ToString()) : sb.ToString().TrimEnd() + Environment.NewLine;
+        return TranspilationResult.CreateSuccess(outputCode, "pilot");
     }
 
     private static string ConvertPythonLineToPilot(string line)

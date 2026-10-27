@@ -12,6 +12,7 @@ public sealed class TranspilationOptions
     public string? TargetNamespaceOrModule { get; set; }
     public bool EmitHeaderComments { get; set; } = true;
     public bool GenerateTypeAnnotations { get; set; } = true;
+    public bool Optimize { get; set; } = false;
     public Dictionary<string, string> TypeMappings { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public TranspilationOptions()
@@ -39,6 +40,12 @@ public sealed class TranspilationOptions
     public TranspilationOptions WithTypeMapping(string pilotType, string targetType)
     {
         TypeMappings[pilotType] = targetType;
+        return this;
+    }
+
+    public TranspilationOptions WithOptimization(bool optimize = true)
+    {
+        Optimize = optimize;
         return this;
     }
 }

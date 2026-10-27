@@ -36,7 +36,7 @@ public sealed class CSharpTargetConverter : ITargetLanguageConverter
         parser.RemoveErrorListeners();
         parser.AddErrorListener(errorTracker);
 
-        var tree = parser.program();
+        var tree = parser.ParseProgramFast();
         if (errorTracker.HasErrors)
         {
             return TranspilationResult.CreateFailure(errorTracker.Errors, TargetLanguage);

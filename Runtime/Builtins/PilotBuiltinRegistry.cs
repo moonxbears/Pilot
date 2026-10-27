@@ -241,10 +241,11 @@ public sealed class PilotBuiltinRegistry
             var items = args[1].AsList();
             var results = new PilotValue[items.Count];
 
-            System.Threading.Tasks.Parallel.For(0, items.Count, i =>
+            System.Threading.Tasks.Parallel.For<PilotExecutionContext>(0, items.Count, () => new PilotExecutionContext(ctx.Engine, ctx.Options, new Pilot.Runtime.Environment.PilotEnvironment(ctx.Environment.CurrentScope)), (i, state, threadCtx) =>
             {
-                results[i] = func.Invoke(ctx, new[] { items[i] });
-            });
+                results[i] = func.Invoke(threadCtx, new[] { items[i] });
+                return threadCtx;
+            }, _ => {});
 
             return PilotValue.FromList(results.ToList());
         }, "callable", "list");
