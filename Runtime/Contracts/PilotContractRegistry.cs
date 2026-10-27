@@ -143,128 +143,21 @@ public static class PilotContractRegistry
         if (methodName.Equals("equals", StringComparison.OrdinalIgnoreCase) ||
             normalizedContract.Equals("IEquatable", StringComparison.OrdinalIgnoreCase))
         {
-            if (args.Count == 0) return PilotValue.False;
-            var other = args[0];
-
-            if (other.Kind == PilotValueKind.Object)
-            {
-                var otherSelf = other.AsObject();
-                var otherTargetVal = ResolveTargetValue(otherSelf, targetMember, normalizedContract);
-                if (otherTargetVal != PilotValue.Undefined)
-                {
-                    return PilotValue.FromBool(targetVal.Equals(otherTargetVal));
-                }
-            }
-
-            return PilotValue.FromBool(targetVal.Equals(other));
+            return DispatchEquals(targetVal, targetMember, normalizedContract, args);
         }
 
         // Target is a native Pilot List
         if (targetVal.Kind == PilotValueKind.List)
         {
-            var list = targetVal.AsList();
-            switch (methodName.ToLowerInvariant())
-            {
-                case "add":
-                case "append":
-                case "push":
-                    if (args.Count > 0) list.Add(args[0]);
-                    return PilotValue.Null;
-
-                case "remove":
-                    if (args.Count > 0)
-                    {
-                        bool removed = list.Remove(args[0]);
-                        return PilotValue.FromBool(removed);
-                    }
-                    return PilotValue.False;
-
-                case "pop":
-                    if (list.Count == 0) return PilotValue.Undefined;
-                    int popIdx = args.Count > 0 ? (int)args[0].AsInt() : list.Count - 1;
-                    if (popIdx < 0) popIdx = list.Count + popIdx;
-                    if (popIdx >= 0 && popIdx < list.Count)
-                    {
-                        var val = list[popIdx];
-                        list.RemoveAt(popIdx);
-                        return val;
-                    }
-                    return PilotValue.Undefined;
-
-                case "count":
-                case "length":
-                case "size":
-                    return PilotValue.FromInt(list.Count);
-
-                case "get":
-                    if (args.Count > 0)
-                    {
-                        int idx = (int)args[0].AsInt();
-                        if (idx < 0) idx = list.Count + idx;
-                        return idx >= 0 && idx < list.Count ? list[idx] : PilotValue.Undefined;
-                    }
-                    return PilotValue.Undefined;
-
-                case "set":
-                    if (args.Count >= 2)
-                    {
-                        int idx = (int)args[0].AsInt();
-                        if (idx >= 0 && idx < list.Count) list[idx] = args[1];
-                        return PilotValue.Null;
-                    }
-                    return PilotValue.Null;
-
-                case "clear":
-                    list.Clear();
-                    return PilotValue.Null;
-
-                case "contains":
-                    return PilotValue.FromBool(args.Count > 0 && list.Contains(args[0]));
-
-                case "insert":
-                    if (args.Count >= 2)
-                    {
-                        int idx = (int)args[0].AsInt();
-                        list.Insert(idx, args[1]);
-                    }
-                    return PilotValue.Null;
-            }
+            var result = DispatchListMethod(targetVal.AsList(), methodName, args);
+            if (result != null) return result.Value;
         }
 
         // Target is a native Pilot Map
         if (targetVal.Kind == PilotValueKind.Map)
         {
-            var map = targetVal.AsMap();
-            switch (methodName.ToLowerInvariant())
-            {
-                case "get":
-                    return args.Count > 0 && map.TryGetValue(args[0], out var val) ? val : PilotValue.Undefined;
-
-                case "set":
-                    if (args.Count >= 2) map[args[0]] = args[1];
-                    return PilotValue.Null;
-
-                case "contains_key":
-                case "contains":
-                    return PilotValue.FromBool(args.Count > 0 && map.ContainsKey(args[0]));
-
-                case "remove":
-                    return PilotValue.FromBool(args.Count > 0 && map.Remove(args[0]));
-
-                case "keys":
-                    return PilotValue.FromList(map.Keys.ToList());
-
-                case "values":
-                    return PilotValue.FromList(map.Values.ToList());
-
-                case "count":
-                case "length":
-                    return PilotValue.FromInt(map.Count);
-
-                case "clear":
-                    map.Clear();
-                    return PilotValue.Null;
-            }
+            var result = DispatchMapMethod(targetVal.AsMap(), methodName, args);
+            if (result != null) return result.Value;
         }
 
         // Target is another PilotObject or general value with members
@@ -280,5 +173,141 @@ public static class PilotContractRegistry
         }
 
         throw new PilotRuntimeException($"Contract method '{methodName}' not found on target substitute '{targetMember}'.");
+    }
+
+    private static PilotValue DispatchEquals(
+        PilotValue targetVal,
+        string targetMember,
+        string normalizedContract,
+        IReadOnlyList<PilotValue> args)
+    {
+        if (args.Count == 0) return PilotValue.False;
+        var other = args[0];
+
+        if (other.Kind == PilotValueKind.Object)
+        {
+            var otherSelf = other.AsObject();
+            var otherTargetVal = ResolveTargetValue(otherSelf, targetMember, normalizedContract);
+            if (otherTargetVal != PilotValue.Undefined)
+            {
+                return PilotValue.FromBool(targetVal.Equals(otherTargetVal));
+            }
+        }
+
+        return PilotValue.FromBool(targetVal.Equals(other));
+    }
+
+    private static PilotValue? DispatchListMethod(
+        List<PilotValue> list,
+        string methodName,
+        IReadOnlyList<PilotValue> args)
+    {
+        switch (methodName.ToLowerInvariant())
+        {
+            case "add":
+            case "append":
+            case "push":
+                if (args.Count > 0) list.Add(args[0]);
+                return PilotValue.Null;
+
+            case "remove":
+                if (args.Count > 0)
+                {
+                    bool removed = list.Remove(args[0]);
+                    return PilotValue.FromBool(removed);
+                }
+                return PilotValue.False;
+
+            case "pop":
+                if (list.Count == 0) return PilotValue.Undefined;
+                int popIdx = args.Count > 0 ? (int)args[0].AsInt() : list.Count - 1;
+                if (popIdx < 0) popIdx = list.Count + popIdx;
+                if (popIdx >= 0 && popIdx < list.Count)
+                {
+                    var val = list[popIdx];
+                    list.RemoveAt(popIdx);
+                    return val;
+                }
+                return PilotValue.Undefined;
+
+            case "count":
+            case "length":
+            case "size":
+                return PilotValue.FromInt(list.Count);
+
+            case "get":
+                if (args.Count > 0)
+                {
+                    int idx = (int)args[0].AsInt();
+                    if (idx < 0) idx = list.Count + idx;
+                    return idx >= 0 && idx < list.Count ? list[idx] : PilotValue.Undefined;
+                }
+                return PilotValue.Undefined;
+
+            case "set":
+                if (args.Count >= 2)
+                {
+                    int idx = (int)args[0].AsInt();
+                    if (idx >= 0 && idx < list.Count) list[idx] = args[1];
+                    return PilotValue.Null;
+                }
+                return PilotValue.Null;
+
+            case "clear":
+                list.Clear();
+                return PilotValue.Null;
+
+            case "contains":
+                return PilotValue.FromBool(args.Count > 0 && list.Contains(args[0]));
+
+            case "insert":
+                if (args.Count >= 2)
+                {
+                    int idx = (int)args[0].AsInt();
+                    list.Insert(idx, args[1]);
+                }
+                return PilotValue.Null;
+        }
+
+        return null;
+    }
+
+    private static PilotValue? DispatchMapMethod(
+        Dictionary<PilotValue, PilotValue> map,
+        string methodName,
+        IReadOnlyList<PilotValue> args)
+    {
+        switch (methodName.ToLowerInvariant())
+        {
+            case "get":
+                return args.Count > 0 && map.TryGetValue(args[0], out var val) ? val : PilotValue.Undefined;
+
+            case "set":
+                if (args.Count >= 2) map[args[0]] = args[1];
+                return PilotValue.Null;
+
+            case "contains_key":
+            case "contains":
+                return PilotValue.FromBool(args.Count > 0 && map.ContainsKey(args[0]));
+
+            case "remove":
+                return PilotValue.FromBool(args.Count > 0 && map.Remove(args[0]));
+
+            case "keys":
+                return PilotValue.FromList(map.Keys.ToList());
+
+            case "values":
+                return PilotValue.FromList(map.Values.ToList());
+
+            case "count":
+            case "length":
+                return PilotValue.FromInt(map.Count);
+
+            case "clear":
+                map.Clear();
+                return PilotValue.Null;
+        }
+
+        return null;
     }
 }
