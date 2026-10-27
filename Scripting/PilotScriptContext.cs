@@ -28,6 +28,16 @@ public static class PilotScriptContext
     {
         var scope = context.Environment.GlobalScope;
 
+        InjectCommandLineArgs(scope, scriptArgs);
+        InjectScriptPath(scope, scriptPath);
+        InjectEnvironmentVariables(scope);
+        InjectProcessControlFunctions(scope);
+        InjectFileSystemFunctions(scope);
+        InjectUtilityFunctions(scope);
+    }
+
+    private static void InjectCommandLineArgs(PilotScope scope, IReadOnlyList<string>? scriptArgs)
+    {
         // 1. Command-line arguments: args and argv
         var argsList = new List<PilotValue>();
         if (scriptArgs != null)
@@ -40,10 +50,16 @@ public static class PilotScriptContext
         var argsVal = PilotValue.FromList(argsList);
         scope.Declare("args", argsVal);
         scope.Declare("argv", argsVal);
+    }
 
+    private static void InjectScriptPath(PilotScope scope, string? scriptPath)
+    {
         // 2. Script path
         scope.Declare("script_path", PilotValue.FromString(scriptPath ?? string.Empty));
+    }
 
+    private static void InjectEnvironmentVariables(PilotScope scope)
+    {
         // 3. Environment variables: env
         var envMap = new Dictionary<PilotValue, PilotValue>();
         foreach (DictionaryEntry entry in System.Environment.GetEnvironmentVariables())
@@ -53,7 +69,10 @@ public static class PilotScriptContext
             envMap[PilotValue.FromString(k)] = PilotValue.FromString(v);
         }
         scope.Declare("env", PilotValue.FromMap(envMap));
+    }
 
+    private static void InjectProcessControlFunctions(PilotScope scope)
+    {
         // 4. cwd(): Current working directory
         scope.Declare("cwd", PilotValue.FromFunction(PilotFunction.CreateNative(
             "cwd",
@@ -68,7 +87,10 @@ public static class PilotScriptContext
                 throw new PilotScriptExitException(exitCode);
             },
             "code")));
+    }
 
+    private static void InjectFileSystemFunctions(PilotScope scope)
+    {
         // 6. read_text(path): Reads entire file as text
         scope.Declare("read_text", PilotValue.FromFunction(PilotFunction.CreateNative(
             "read_text",
@@ -120,7 +142,10 @@ public static class PilotScriptContext
                 return PilotValue.False;
             },
             "path")));
+    }
 
+    private static void InjectUtilityFunctions(PilotScope scope)
+    {
         // 10. println(args...): Convenience println
         scope.Declare("println", PilotValue.FromFunction(PilotFunction.CreateNative(
             "println",

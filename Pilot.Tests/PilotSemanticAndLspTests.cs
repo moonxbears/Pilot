@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using System.Linq;
 using System.Text.Json.Nodes;
 using Pilot.LanguageServer.Lsp;
@@ -676,5 +677,44 @@ def test_metaprog() -> void {
         Assert.NotNull(result.RootScope.Resolve("cdr"));
         Assert.NotNull(result.RootScope.Resolve("atom"));
         Assert.NotNull(result.RootScope.Resolve("symbol"));
+    }
+
+    [Fact]
+    public async Task Test_Lsp_Server_RunAsync_Processes_Messages_And_Exits()
+    {
+        var server = new PilotLspServer();
+
+        string initMsg = LspMessageHelper.BuildLspMessage("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}");
+        string shutdownMsg = LspMessageHelper.BuildLspMessage("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"shutdown\",\"params\":{}}");
+        string exitMsg = LspMessageHelper.BuildLspMessage("{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{}}");
+
+        string fullInput = initMsg + shutdownMsg + exitMsg;
+
+        using var inputStream = new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes(fullInput));
+        using var outputStream = new System.IO.MemoryStream();
+
+        await server.RunAsync(inputStream, outputStream);
+
+        string outputStr = System.Text.Encoding.UTF8.GetString(outputStream.ToArray());
+
+
+        Assert.Contains("\"id\":1", outputStr);
+        Assert.Contains("\"id\":2", outputStr);
+    }
+
+    [Fact]
+    public async Task Test_Lsp_Server_RunAsync_Respects_CancellationToken()
+    {
+        var server = new PilotLspServer();
+
+        using var inputStream = new System.IO.MemoryStream();
+        using var outputStream = new System.IO.MemoryStream();
+
+        using var cts = new System.Threading.CancellationTokenSource();
+        cts.Cancel();
+
+        await server.RunAsync(inputStream, outputStream, cts.Token);
+
+        Assert.Equal(0, outputStream.Length);
     }
 }

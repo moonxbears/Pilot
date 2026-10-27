@@ -33,19 +33,19 @@ public sealed class PilotScope
 
     public bool Assign(string name, PilotValue value)
     {
-        if (_bindings.TryGetValue(name, out var binding))
+        var current = this;
+        while (current != null)
         {
-            if (binding.IsConst)
+            if (current._bindings.TryGetValue(name, out var binding))
             {
-                throw new InvalidOperationException($"Cannot assign to constant variable '{name}'.");
+                if (binding.IsConst)
+                {
+                    throw new InvalidOperationException($"Cannot assign to constant variable '{name}'.");
+                }
+                binding.Value = value;
+                return true;
             }
-            binding.Value = value;
-            return true;
-        }
-
-        if (Parent != null)
-        {
-            return Parent.Assign(name, value);
+            current = current.Parent;
         }
 
         return false;
@@ -53,15 +53,15 @@ public sealed class PilotScope
 
     public bool TryResolve(string name, out PilotValue value)
     {
-        if (_bindings.TryGetValue(name, out var binding))
+        var current = this;
+        while (current != null)
         {
-            value = binding.Value;
-            return true;
-        }
-
-        if (Parent != null)
-        {
-            return Parent.TryResolve(name, out value);
+            if (current._bindings.TryGetValue(name, out var binding))
+            {
+                value = binding.Value;
+                return true;
+            }
+            current = current.Parent;
         }
 
         value = PilotValue.Undefined;

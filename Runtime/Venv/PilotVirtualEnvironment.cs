@@ -188,10 +188,10 @@ public static class PilotVirtualEnvironment
         config.Save(cfgPath);
 
         // 3. Generate Activation Scripts
-        GenerateActivationScripts(fullPath, scriptsDir, envName);
+        GenerateActivationScripts(scriptsDir, envName);
 
         // 4. Generate local pilot launcher wrapper in Scripts / bin
-        GenerateLauncher(fullPath, scriptsDir);
+        GenerateLauncher(scriptsDir);
 
         return config;
     }
@@ -266,9 +266,15 @@ public static class PilotVirtualEnvironment
         System.Environment.SetEnvironmentVariable("PILOT_MODULES_PATH", null);
     }
 
-    private static void GenerateActivationScripts(string venvPath, string scriptsDir, string envName)
+    private static void GenerateActivationScripts(string scriptsDir, string envName)
     {
-        // 1. PowerShell: activate.ps1
+        GeneratePowerShellScript(scriptsDir, envName);
+        GenerateCmdScripts(scriptsDir, envName);
+        GeneratePosixScript(scriptsDir, envName);
+    }
+
+    private static void GeneratePowerShellScript(string scriptsDir, string envName)
+    {
         string ps1Path = Path.Combine(scriptsDir, "activate.ps1");
         string ps1Content = $@"# Pilot Virtual Environment Activation Script (PowerShell)
 $script:VENV_PATH = Resolve-Path ""$PSScriptRoot\..""
@@ -307,8 +313,11 @@ function global:prompt {{
 Write-Host ""Activated Pilot virtual environment: ({envName}) at $script:VENV_PATH"" -ForegroundColor Green
 ";
         File.WriteAllText(ps1Path, ps1Content);
+    }
 
-        // 2. Windows Command Prompt: activate.bat
+    private static void GenerateCmdScripts(string scriptsDir, string envName)
+    {
+        // activate.bat
         string batPath = Path.Combine(scriptsDir, "activate.bat");
         string batContent = $@"@echo off
 set ""{EnvVarName}=%~dp0..""
@@ -337,8 +346,10 @@ set ""VIRTUAL_ENV=""
 echo Deactivated Pilot virtual environment: {envName}
 ";
         File.WriteAllText(deactBatPath, deactBatContent);
+    }
 
-        // 3. POSIX Bash/Zsh: activate
+    private static void GeneratePosixScript(string scriptsDir, string envName)
+    {
         string shPath = Path.Combine(scriptsDir, "activate");
         string shContent = $@"#!/usr/bin/env bash
 # Pilot Virtual Environment Activation Script (POSIX)
@@ -378,7 +389,7 @@ echo ""Activated Pilot virtual environment: ({envName}) at ${{{EnvVarName}}}""
         File.WriteAllText(shPath, shContent);
     }
 
-    private static void GenerateLauncher(string venvPath, string scriptsDir)
+    private static void GenerateLauncher(string scriptsDir)
     {
         // Generate a pilot.cmd launcher script in the venv Scripts directory
         string baseDir = AppContext.BaseDirectory;
