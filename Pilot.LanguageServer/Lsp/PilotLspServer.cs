@@ -521,24 +521,49 @@ public sealed class PilotLspServer
         }
     }
 
-    private static async Task<string?> ReadMessageAsync(Stream input, CancellationToken ct)
+    private readonly byte[] _readBuffer = new byte[8192];
+    private int _readBufferLen = 0;
+    private int _readBufferPos = 0;
+
+    private async Task<string?> ReadMessageAsync(Stream input, CancellationToken ct)
     {
         int contentLength = -1;
         var headerBuilder = new StringBuilder();
-        byte[] oneByte = new byte[1];
 
         while (!ct.IsCancellationRequested)
         {
-            int read = await input.ReadAsync(oneByte.AsMemory(0, 1), ct);
-            if (read == 0) return null;
+            if (_readBufferPos >= _readBufferLen)
+            {
+                _readBufferLen = await input.ReadAsync(_readBuffer.AsMemory(), ct);
+                if (_readBufferLen == 0) return null;
+                _readBufferPos = 0;
+            }
 
-            headerBuilder.Append((char)oneByte[0]);
-            int len = headerBuilder.Length;
-            if (len >= 4 &&
-                headerBuilder[len - 4] == '\r' &&
-                headerBuilder[len - 3] == '\n' &&
-                headerBuilder[len - 2] == '\r' &&
-                headerBuilder[len - 1] == '\n')
+            int startPos = _readBufferPos;
+            int foundEnd = -1;
+
+            // We need 4 characters for \r\n\r\n. The easiest way to search without dealing
+            // with boundary splits between buffer reads is to append to the StringBuilder
+            // char by char but only up to the point we find the boundary.
+            // Alternatively, since we append char by char in the original code, we can optimize
+            // it by searching within the buffer first. Let's do a simple append but check faster.
+
+            while (_readBufferPos < _readBufferLen)
+            {
+                headerBuilder.Append((char)_readBuffer[_readBufferPos++]);
+                int len = headerBuilder.Length;
+                if (len >= 4 &&
+                    headerBuilder[len - 4] == '\r' &&
+                    headerBuilder[len - 3] == '\n' &&
+                    headerBuilder[len - 2] == '\r' &&
+                    headerBuilder[len - 1] == '\n')
+                {
+                    foundEnd = _readBufferPos;
+                    break;
+                }
+            }
+
+            if (foundEnd != -1)
             {
                 string headers = headerBuilder.ToString();
                 foreach (var line in headers.Split("\r\n", StringSplitOptions.RemoveEmptyEntries))
@@ -557,11 +582,35 @@ public sealed class PilotLspServer
 
         byte[] body = new byte[contentLength];
         int offset = 0;
+
+        int remainingInBuffer = _readBufferLen - _readBufferPos;
+        if (remainingInBuffer > 0)
+        {
+            int toCopy = Math.Min(remainingInBuffer, contentLength);
+            Array.Copy(_readBuffer, _readBufferPos, body, 0, toCopy);
+            _readBufferPos += toCopy;
+            offset += toCopy;
+        }
+
         while (offset < contentLength)
         {
-            int read = await input.ReadAsync(body.AsMemory(offset, contentLength - offset), ct);
-            if (read == 0) return null;
-            offset += read;
+            if (contentLength - offset >= _readBuffer.Length)
+            {
+                int read = await input.ReadAsync(body.AsMemory(offset, contentLength - offset), ct);
+                if (read == 0) return null;
+                offset += read;
+            }
+            else
+            {
+                _readBufferLen = await input.ReadAsync(_readBuffer.AsMemory(), ct);
+                if (_readBufferLen == 0) return null;
+                _readBufferPos = 0;
+
+                int toCopy = Math.Min(_readBufferLen, contentLength - offset);
+                Array.Copy(_readBuffer, _readBufferPos, body, offset, toCopy);
+                _readBufferPos += toCopy;
+                offset += toCopy;
+            }
         }
 
         return Encoding.UTF8.GetString(body);
