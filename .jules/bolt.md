@@ -1,0 +1,3 @@
+## 2024-10-27 - [Iterative variable resolution in lexical scope hierarchy]
+**Learning:** In heavily nested variable scopes (like those common when defining many local scopes/blocks), recursive calls to resolve variables or assign values (e.g., `Parent.TryResolve(name, out value)`) introduce stack overhead and can be measurably slower than an iterative `while(current != null)` loop over the parent chain. This applies to operations executed constantly by the interpreter.
+**Action:** Always favor iterative traversal of hierarchical structures (like scopes or prototypes) over recursion for frequently called methods like `TryResolve` or `Assign`, especially in a dynamic language execution engine.
