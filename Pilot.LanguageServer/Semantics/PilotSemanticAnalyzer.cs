@@ -1951,23 +1951,46 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                     PilotDiagnosticCatalog.ReturnOutsideFunction,
                     "'return' statement can only appear inside a function or method body.");
             }
-            else if (context.testlist() != null && _currentScope.EnclosingReturnType != null)
+            else if (context.testlist() != null)
             {
                 var tests = context.testlist().test();
                 if (tests != null && tests.Length > 0)
                 {
-                    var retExpr = tests[0];
-                    string retType = Visit(retExpr) ?? "any";
-                    string expected = _currentScope.EnclosingReturnType;
-                    if (expected is not ("void" or "any" or "unknown" or "dynamic") &&
-                        retType is not ("any" or "unknown" or "dynamic") &&
-                        !string.Equals(expected, retType, StringComparison.OrdinalIgnoreCase) &&
-                        !IsCompatibleType(expected, retType))
+                    string retType;
+                    if (tests.Length == 1)
                     {
-                        AddDiagnostic(retExpr.Start, PilotDiagnosticSeverity.Error,
-                            PilotDiagnosticCatalog.ReturnTypeMismatch,
-                            $"Function declared return type '{expected}', but returned value of type '{retType}'.");
+                        var retExpr = tests[0];
+                        retType = Visit(retExpr) ?? "any";
+                        if (_currentScope.EnclosingReturnType != null)
+                        {
+                            string expected = _currentScope.EnclosingReturnType;
+                            if (expected is not ("void" or "any" or "unknown" or "dynamic") &&
+                                retType is not ("any" or "unknown" or "dynamic") &&
+                                !string.Equals(expected, retType, StringComparison.OrdinalIgnoreCase) &&
+                                !IsCompatibleType(expected, retType))
+                            {
+                                AddDiagnostic(retExpr.Start, PilotDiagnosticSeverity.Error,
+                                    PilotDiagnosticCatalog.ReturnTypeMismatch,
+                                    $"Function declared return type '{expected}', but returned value of type '{retType}'.");
+                            }
+                        }
                     }
+                    else
+                    {
+                        retType = $"({string.Join(", ", tests.Select(t => Visit(t) ?? "any"))})";
+                    }
+
+                    if (_returnTypeCollectorStack.Count > 0)
+                    {
+                        _returnTypeCollectorStack.Peek().Add(retType);
+                    }
+                }
+            }
+            else
+            {
+                if (_returnTypeCollectorStack.Count > 0)
+                {
+                    _returnTypeCollectorStack.Peek().Add("void");
                 }
             }
         }
