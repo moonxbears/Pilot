@@ -3040,6 +3040,74 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             }
             return res;
         }
+        else if (current.Kind == PilotValueKind.Keyword)
+        {
+            // Clojure-like keyword invocation: (:key map [default])
+            if (posArgs.Count > 0)
+            {
+                var target = posArgs[0];
+                var defaultVal = posArgs.Count > 1 ? posArgs[1] : PilotValue.Undefined;
+                return current.AsKeyword().Invoke(target, defaultVal);
+            }
+            return PilotValue.Null;
+        }
+        else if (current.Kind == PilotValueKind.Map)
+        {
+            // Clojure-like map invocation: (map :key [default])
+            if (posArgs.Count > 0)
+            {
+                var key = posArgs[0];
+                var map = current.AsMap();
+                if (map.TryGetValue(key, out var val))
+                    return val;
+
+                // Fallback string/keyword lookup
+                if (key.Kind == PilotValueKind.Keyword)
+                {
+                    var kw = key.AsKeyword();
+                    if (map.TryGetValue(PilotValue.FromString(kw.FullName), out var sVal))
+                        return sVal;
+                    if (map.TryGetValue(PilotValue.FromString(kw.Name), out var shVal))
+                        return shVal;
+                }
+                else if (key.Kind == PilotValueKind.String)
+                {
+                    if (map.TryGetValue(PilotValue.FromKeyword(key.AsString()), out var kwVal))
+                        return kwVal;
+                }
+
+                return posArgs.Count > 1 ? posArgs[1] : PilotValue.Null;
+            }
+            return PilotValue.Null;
+        }
+        else if (current.Kind == PilotValueKind.Set)
+        {
+            // Clojure-like set invocation: (set item) -> returns item if in set, else null
+            if (posArgs.Count > 0)
+            {
+                var item = posArgs[0];
+                var set = current.AsSet();
+                if (set.Contains(item))
+                    return item;
+
+                if (item.Kind == PilotValueKind.Keyword && set.Contains(PilotValue.FromString(item.AsKeyword().FullName)))
+                    return item;
+                if (item.Kind == PilotValueKind.String && set.Contains(PilotValue.FromKeyword(item.AsString())))
+                    return item;
+
+                return posArgs.Count > 1 ? posArgs[1] : PilotValue.Null;
+            }
+            return PilotValue.Null;
+        }
+        else if (current.Kind == PilotValueKind.Object)
+        {
+            var callMember = current.GetMember("__call__", Context);
+            if (callMember.Kind == PilotValueKind.Function)
+            {
+                return callMember.AsFunction().Invoke(Context, posArgs);
+            }
+            throw new PilotTypeException($"Attempted to invoke non-function value: {current}", context.Start.Line, context.Start.Column);
+        }
         else if (current.IsNumber && posArgs.Count > 0 && isBroadcast)
         {
             return current * posArgs[0];
@@ -3199,6 +3267,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
     public override PilotValue VisitAtom(PilotParser.AtomContext context)
     {
         if (context.literal() != null) return Visit(context.literal());
+        if (context.symbol_literal() != null) return VisitSymbol_literal(context.symbol_literal());
         if (context.identifier() != null) return ResolveIdentifier(context.identifier().GetText());
         if (context.collection_expr() != null) return VisitCollection_expr(context.collection_expr());
         if (context.LPAR() != null && context.testlist_comp() != null) return VisitTestlist_comp(context.testlist_comp());
@@ -3210,6 +3279,19 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         if (context.splice_expr() != null) return ResolveIdentifier(context.splice_expr().GetText().TrimStart('$', '@'));
 
         return PilotValue.Undefined;
+    }
+
+    public override PilotValue VisitSymbol_literal(PilotParser.Symbol_literalContext context)
+    {
+        if (context.identifier() != null)
+        {
+            return PilotValue.FromKeyword(context.identifier().GetText());
+        }
+        if (context.test() != null)
+        {
+            return PilotValue.FromKeyword(Visit(context.test()).AsString());
+        }
+        return PilotValue.FromKeyword(context.GetText().TrimStart(':'));
     }
 
     private PilotValue ResolveIdentifier(string name)

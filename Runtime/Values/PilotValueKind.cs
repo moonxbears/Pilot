@@ -14,6 +14,7 @@ public enum PilotValueKind
     Decimal,
     Char,
     String,
+    Keyword,
     List,
     Tuple,
     Map,

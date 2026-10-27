@@ -978,8 +978,6 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         }
 
         return returnType;
-
-        return returnType;
     }
 
     public override string? VisitContract_clause(PilotParser.Contract_clauseContext context)
@@ -2635,7 +2633,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             return "any";
         }
 
-        if (context.collection_expr() != null)
+        if (context.collection_expr() is { } colExpr)
         {
             if (_currentScope.InHardRealtime || _currentScope.InNoAlloc)
             {
@@ -2643,11 +2641,30 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                     PilotDiagnosticCatalog.HeapAllocInRealtime,
                     "Heap allocation detected inside '@hard_realtime' / 'noalloc' context: dynamic collection creation triggers GC pauses. Use stack buffer or preallocated array.");
             }
-            base.VisitAtom(context);
-            return "List[any]";
+
+            var elementTypes = new List<string>();
+            foreach (var elem in colExpr.collection_element())
+            {
+                if (elem.test() != null)
+                {
+                    string t = Visit(elem.test()) ?? "any";
+                    if (elem.DOTDOT() != null || elem.STAR() != null)
+                    {
+                        t = ExtractElementType(t);
+                    }
+                    elementTypes.Add(t);
+                }
+            }
+            if (colExpr.comp_for() != null)
+            {
+                Visit(colExpr.comp_for());
+            }
+
+            string elemType = elementTypes.Count > 0 ? HomogenizeTypes(elementTypes) : "any";
+            return $"List[{elemType}]";
         }
 
-        if (context.LBRACE() != null && context.dictorsetmaker() != null)
+        if (context.LBRACE() != null && context.dictorsetmaker() is { } dsm)
         {
             if (_currentScope.InHardRealtime || _currentScope.InNoAlloc)
             {
@@ -2655,9 +2672,55 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                     PilotDiagnosticCatalog.HeapAllocInRealtime,
                     "Heap allocation detected inside '@hard_realtime' / 'noalloc' context: dynamic dictionary/set creation triggers GC pauses.");
             }
-            base.VisitAtom(context);
-            if (context.dictorsetmaker().dict_entry().Length == 0)
-                return "Set[any]";
+
+            if (dsm.dict_entry() is { Length: > 0 } dictEntries)
+            {
+                var keyTypes = new List<string>();
+                var valTypes = new List<string>();
+                foreach (var entry in dictEntries)
+                {
+                    var tests = entry.test();
+                    if (tests.Length == 2)
+                    {
+                        keyTypes.Add(Visit(tests[0]) ?? "any");
+                        valTypes.Add(Visit(tests[1]) ?? "any");
+                    }
+                    else if (tests.Length == 1)
+                    {
+                        string dType = Visit(tests[0]) ?? "Dict[any, any]";
+                        var (k, v) = ExtractDictTypes(dType);
+                        keyTypes.Add(k);
+                        valTypes.Add(v);
+                    }
+                }
+                if (dsm.comp_for() != null) Visit(dsm.comp_for());
+                string kType = keyTypes.Count > 0 ? HomogenizeTypes(keyTypes) : "any";
+                string vType = valTypes.Count > 0 ? HomogenizeTypes(valTypes) : "any";
+                return $"Dict[{kType}, {vType}]";
+            }
+            else if (dsm.collection_element() is { Length: > 0 } setElems)
+            {
+                var elemTypes = new List<string>();
+                foreach (var elem in setElems)
+                {
+                    if (elem.test() != null)
+                    {
+                        string t = Visit(elem.test()) ?? "any";
+                        if (elem.DOTDOT() != null || elem.STAR() != null)
+                        {
+                            t = ExtractElementType(t);
+                        }
+                        elemTypes.Add(t);
+                    }
+                }
+                if (dsm.comp_for() != null) Visit(dsm.comp_for());
+                string elemType = elemTypes.Count > 0 ? HomogenizeTypes(elemTypes) : "any";
+                return $"Set[{elemType}]";
+            }
+            return "Dict[any, any]";
+        }
+        else if (context.LBRACE() != null)
+        {
             return "Dict[any, any]";
         }
 
@@ -2732,6 +2795,11 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             return targetType.Split('|').Select(s => s.Trim()).Any(branch => IsCompatibleType(branch, valueType));
         }
 
+        if (valueType.Contains('|'))
+        {
+            return valueType.Split('|').Select(s => s.Trim()).All(branch => IsCompatibleType(targetType, branch));
+        }
+
         // Nullable type: T? accepts T or null
         if (targetType.EndsWith("?", StringComparison.Ordinal))
         {
@@ -2777,8 +2845,18 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         {
             string tBase = targetType[..targetBracket];
             string vBase = valueType[..valueBracket];
-            return string.Equals(tBase, vBase, StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(tBase, vBase, StringComparison.OrdinalIgnoreCase))
+            {
+                string tElem = ExtractElementType(targetType);
+                string vElem = ExtractElementType(valueType);
+                if (tElem == "any" || IsCompatibleType(tElem, vElem))
+                    return true;
+            }
         }
+
+        // Subtyping / Inheritance check
+        if (IsSubtypeOf(valueType, targetType))
+            return true;
 
         // Strict primitive type checking
         if (IsStrictPrimitive(targetType) && IsStrictPrimitive(valueType))
@@ -3510,13 +3588,178 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         return (line, col, col + len);
     }
 
+    private static (string Key, string Value) ExtractDictTypes(string dictType)
+    {
+        int start = dictType.IndexOf('[');
+        int end = dictType.LastIndexOf(']');
+        if (start > 0 && end > start + 1)
+        {
+            string inner = dictType[(start + 1)..end];
+            int depth = 0;
+            int splitIdx = -1;
+            for (int i = 0; i < inner.Length; i++)
+            {
+                char c = inner[i];
+                if (c is '[' or '<' or '(') depth++;
+                else if (c is ']' or '>' or ')') depth--;
+                else if (c == ',' && depth == 0)
+                {
+                    splitIdx = i;
+                    break;
+                }
+            }
+            if (splitIdx > 0)
+            {
+                return (inner[..splitIdx].Trim(), inner[(splitIdx + 1)..].Trim());
+            }
+        }
+        return ("any", "any");
+    }
+
     private static string ExtractElementType(string collectionType)
     {
+        if (collectionType.Contains('|'))
+        {
+            var branches = collectionType.Split('|').Select(b => b.Trim());
+            var extracted = branches.Select(b => ExtractElementType(b)).Where(e => e != "any");
+            var extList = extracted.ToList();
+            return extList.Count > 0 ? string.Join(" | ", extList.Distinct()) : "any";
+        }
+
         int start = collectionType.IndexOf('[');
         int end = collectionType.LastIndexOf(']');
         if (start > 0 && end > start + 1)
-            return collectionType[(start + 1)..end].Trim();
+        {
+            string inner = collectionType[(start + 1)..end].Trim();
+            if (collectionType.StartsWith("Dict[", StringComparison.OrdinalIgnoreCase) ||
+                collectionType.StartsWith("Map[", StringComparison.OrdinalIgnoreCase))
+            {
+                var (_, val) = ExtractDictTypes(collectionType);
+                return val;
+            }
+            return inner;
+        }
         return "any";
+    }
+
+    private bool IsSubtypeOf(string subType, string superType)
+    {
+        if (string.Equals(subType, superType, StringComparison.OrdinalIgnoreCase)) return true;
+        var sym = _currentScope.Resolve(subType);
+        if (sym == null) return false;
+        foreach (var b in sym.BaseTypes)
+        {
+            if (string.Equals(b, superType, StringComparison.OrdinalIgnoreCase) || IsSubtypeOf(b, superType))
+                return true;
+        }
+        return false;
+    }
+
+    private string? FindCommonBaseType(IEnumerable<string> typeNames)
+    {
+        var list = typeNames.ToList();
+        if (list.Count == 0) return null;
+        if (list.Count == 1) return list[0];
+
+        var firstAncestry = new List<string>();
+        void CollectAncestry(string typeName)
+        {
+            var sym = _currentScope.Resolve(typeName);
+            if (sym == null) return;
+            foreach (var b in sym.BaseTypes)
+            {
+                if (!firstAncestry.Contains(b))
+                {
+                    firstAncestry.Add(b);
+                    CollectAncestry(b);
+                }
+            }
+        }
+        CollectAncestry(list[0]);
+
+        foreach (var candidate in firstAncestry)
+        {
+            if (candidate is "object" or "Object" or "any") continue;
+            if (list.Skip(1).All(t => IsSubtypeOf(t, candidate)))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private string HomogenizeTypes(IEnumerable<string> rawTypes)
+    {
+        var types = rawTypes.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).Distinct().ToList();
+        if (types.Count == 0) return "any";
+        if (types.Count == 1) return types[0];
+
+        // Flatten any union types
+        var flattened = new List<string>();
+        foreach (var t in types)
+        {
+            if (t.Contains('|'))
+                flattened.AddRange(t.Split('|').Select(s => s.Trim()));
+            else
+                flattened.Add(t);
+        }
+        types = flattened.Distinct().ToList();
+        if (types.Count == 1) return types[0];
+
+        // Group generic containers: List[A], List[B] -> List[A | B]
+        var listElements = new List<string>();
+        var dictEntries = new List<(string Key, string Val)>();
+        var setElements = new List<string>();
+        var nonContainers = new List<string>();
+
+        foreach (var t in types)
+        {
+            if (t.StartsWith("List[", StringComparison.OrdinalIgnoreCase) && t.EndsWith("]"))
+                listElements.Add(ExtractElementType(t));
+            else if (t.StartsWith("Set[", StringComparison.OrdinalIgnoreCase) && t.EndsWith("]"))
+                setElements.Add(ExtractElementType(t));
+            else if ((t.StartsWith("Dict[", StringComparison.OrdinalIgnoreCase) || t.StartsWith("Map[", StringComparison.OrdinalIgnoreCase)) && t.EndsWith("]"))
+                dictEntries.Add(ExtractDictTypes(t));
+            else
+                nonContainers.Add(t);
+        }
+
+        var results = new List<string>();
+
+        if (listElements.Count > 0)
+        {
+            results.Add($"List[{HomogenizeTypes(listElements)}]");
+        }
+        if (setElements.Count > 0)
+        {
+            results.Add($"Set[{HomogenizeTypes(setElements)}]");
+        }
+        if (dictEntries.Count > 0)
+        {
+            string kHom = HomogenizeTypes(dictEntries.Select(d => d.Key));
+            string vHom = HomogenizeTypes(dictEntries.Select(d => d.Val));
+            results.Add($"Dict[{kHom}, {vHom}]");
+        }
+
+        if (nonContainers.Count > 0)
+        {
+            bool allNumeric = nonContainers.All(t => t is "int" or "float" or "double" or "decimal");
+            if (allNumeric && nonContainers.Contains("float"))
+            {
+                results.Add("float");
+            }
+            else
+            {
+                results.AddRange(nonContainers);
+            }
+        }
+
+        var distinctResults = results.Distinct().ToList();
+        if (distinctResults.Count == 1)
+            return distinctResults[0];
+
+        return string.Join(" | ", distinctResults);
     }
 
     private static PilotParser.IdentifierContext? TryExtractSimpleIdentifier(PilotParser.TestContext test)

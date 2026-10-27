@@ -41,6 +41,8 @@ public readonly struct PilotValue : IEquatable<PilotValue>
     public static PilotValue FromDecimal(decimal value) => new(PilotValueKind.Decimal, value, 0, 0);
     public static PilotValue FromChar(char value) => new(PilotValueKind.Char, null, value, 0);
     public static PilotValue FromString(string value) => new(PilotValueKind.String, value ?? string.Empty, 0, 0);
+    public static PilotValue FromKeyword(PilotKeyword keyword) => new(PilotValueKind.Keyword, keyword, 0, 0);
+    public static PilotValue FromKeyword(string text) => new(PilotValueKind.Keyword, PilotKeyword.Intern(text), 0, 0);
     public static PilotValue FromList(List<PilotValue> list) => new(PilotValueKind.List, list ?? new List<PilotValue>(), 0, 0);
     public static PilotValue FromTuple(IReadOnlyList<PilotValue> tuple) => new(PilotValueKind.Tuple, tuple ?? Array.Empty<PilotValue>(), 0, 0);
     public static PilotValue FromMap(Dictionary<PilotValue, PilotValue> map) => new(PilotValueKind.Map, map ?? new Dictionary<PilotValue, PilotValue>(), 0, 0);
@@ -120,9 +122,11 @@ public readonly struct PilotValue : IEquatable<PilotValue>
         _ => 0.0
     };
 
+    public bool IsKeyword => Kind == PilotValueKind.Keyword;
     public string AsString() => ToString();
     public decimal AsDecimal() => _reference is decimal d ? d : (decimal)AsFloat();
     public char AsChar() => (char)_integer;
+    public PilotKeyword AsKeyword() => _reference as PilotKeyword ?? throw new InvalidCastException($"Expected Keyword, got {Kind}");
 
     public List<PilotValue> AsList() => _reference as List<PilotValue> ?? throw new InvalidCastException($"Expected List, got {Kind}");
     public IReadOnlyList<PilotValue> AsTuple() => _reference as IReadOnlyList<PilotValue> ?? throw new InvalidCastException($"Expected Tuple, got {Kind}");
@@ -857,6 +861,7 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             PilotValueKind.Float => Math.Abs(_floating - other._floating) < 1e-9,
             PilotValueKind.Decimal => Equals(_reference, other._reference),
             PilotValueKind.String => string.Equals((string)_reference!, (string)other._reference!, StringComparison.Ordinal),
+            PilotValueKind.Keyword => _reference is PilotKeyword kw && other._reference is PilotKeyword okw && kw.Equals(okw),
             PilotValueKind.List => EqualsList((List<PilotValue>)_reference!, (List<PilotValue>)other._reference!),
             PilotValueKind.Tuple => EqualsTuple((IReadOnlyList<PilotValue>)_reference!, (IReadOnlyList<PilotValue>)other._reference!),
             PilotValueKind.Map => EqualsMap((Dictionary<PilotValue, PilotValue>)_reference!, (Dictionary<PilotValue, PilotValue>)other._reference!),
@@ -916,6 +921,7 @@ public readonly struct PilotValue : IEquatable<PilotValue>
         PilotValueKind.Decimal => ((decimal)_reference!).ToString(CultureInfo.InvariantCulture),
         PilotValueKind.Char => ((char)_integer).ToString(),
         PilotValueKind.String => (string)_reference!,
+        PilotValueKind.Keyword => _reference!.ToString()!,
         PilotValueKind.List => $"[{string.Join(", ", (List<PilotValue>)_reference!)}]",
         PilotValueKind.Tuple => $"({string.Join(", ", (IReadOnlyList<PilotValue>)_reference!)})",
         PilotValueKind.Map => $"{{{string.Join(", ", ((Dictionary<PilotValue, PilotValue>)_reference!).Select(k => $"{k.Key}: {k.Value}"))}}}",

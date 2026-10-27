@@ -234,8 +234,82 @@ public sealed class PilotBuiltinRegistry
         Register("symbol", (_, args) =>
         {
             string s = args.Count > 0 ? args[0].ToString() : "";
-            return PilotValue.FromString(s);
+            return PilotValue.FromKeyword(s);
         }, "name");
+
+        Register("keyword", (_, args) =>
+        {
+            if (args.Count == 0) return PilotValue.FromKeyword("");
+            if (args.Count == 1)
+            {
+                var v = args[0];
+                if (v.Kind == PilotValueKind.Keyword) return v;
+                return PilotValue.FromKeyword(v.ToString());
+            }
+            string ns = args[0].ToString().TrimStart(':');
+            string name = args[1].ToString().TrimStart(':');
+            return PilotValue.FromKeyword(PilotKeyword.Intern(name, ns));
+        }, "name_or_ns", "name");
+
+        Register("is_keyword", (_, args) =>
+        {
+            return PilotValue.FromBool(args.Count > 0 && args[0].Kind == PilotValueKind.Keyword);
+        }, "val");
+
+        Register("name", (_, args) =>
+        {
+            if (args.Count == 0) return PilotValue.FromString("");
+            var first = args[0];
+            if (first.Kind == PilotValueKind.Keyword)
+            {
+                return PilotValue.FromString(first.AsKeyword().Name);
+            }
+            if (first.Kind == PilotValueKind.String)
+            {
+                string s = first.AsString().TrimStart(':');
+                int slash = s.IndexOf('/');
+                return PilotValue.FromString(slash >= 0 ? s[(slash + 1)..] : s);
+            }
+            return PilotValue.FromString(first.ToString());
+        }, "kw");
+
+        Register("namespace", (_, args) =>
+        {
+            if (args.Count == 0) return PilotValue.Null;
+            var first = args[0];
+            if (first.Kind == PilotValueKind.Keyword)
+            {
+                var ns = first.AsKeyword().Namespace;
+                return ns != null ? PilotValue.FromString(ns) : PilotValue.Null;
+            }
+            if (first.Kind == PilotValueKind.String)
+            {
+                string s = first.AsString().TrimStart(':');
+                int slash = s.IndexOf('/');
+                return slash >= 0 ? PilotValue.FromString(s[..slash]) : PilotValue.Null;
+            }
+            return PilotValue.Null;
+        }, "kw");
+
+        // First-class operators
+        Register("operator", (_, args) =>
+        {
+            if (args.Count == 0) return PilotValue.Null;
+            string op = args[0].ToString().Trim();
+            return PilotValue.FromFunction(GetOperatorFunction(op));
+        }, "op_name");
+
+        Register("add", (_, a) => a.Count >= 2 ? a[0] + a[1] : (a.Count == 1 ? a[0] : PilotValue.FromInt(0)), "a", "b");
+        Register("sub", (_, a) => a.Count >= 2 ? a[0] - a[1] : (a.Count == 1 ? -a[0] : PilotValue.FromInt(0)), "a", "b");
+        Register("mul", (_, a) => a.Count >= 2 ? a[0] * a[1] : (a.Count == 1 ? a[0] : PilotValue.FromInt(1)), "a", "b");
+        Register("div", (_, a) => a.Count >= 2 ? a[0] / a[1] : (a.Count == 1 ? a[0] : PilotValue.FromInt(1)), "a", "b");
+        Register("mod", (_, a) => a.Count >= 2 ? a[0] % a[1] : PilotValue.FromInt(0), "a", "b");
+        Register("eq", (_, a) => PilotValue.FromBool(a.Count >= 2 && a[0].Equals(a[1])), "a", "b");
+        Register("neq", (_, a) => PilotValue.FromBool(a.Count >= 2 && !a[0].Equals(a[1])), "a", "b");
+        Register("lt", (_, a) => PilotValue.FromBool(a.Count >= 2 && a[0] < a[1]), "a", "b");
+        Register("lte", (_, a) => PilotValue.FromBool(a.Count >= 2 && a[0] <= a[1]), "a", "b");
+        Register("gt", (_, a) => PilotValue.FromBool(a.Count >= 2 && a[0] > a[1]), "a", "b");
+        Register("gte", (_, a) => PilotValue.FromBool(a.Count >= 2 && a[0] >= a[1]), "a", "b");
 
         Register("eval", (ctx, args) =>
         {
@@ -708,5 +782,28 @@ public sealed class PilotBuiltinRegistry
         hotReloadModule.Members["patch_binary"] = PilotValue.FromFunction(_functions["patch_binary"]);
 
         _functions["HotReload"] = hotReloadModule;
+    }
+
+    private static PilotFunction GetOperatorFunction(string op)
+    {
+        return op switch
+        {
+            "+" => PilotFunction.CreateNative("+", (_, a) => a.Count >= 2 ? a[0] + a[1] : (a.Count == 1 ? a[0] : PilotValue.FromInt(0)), "a", "b"),
+            "-" => PilotFunction.CreateNative("-", (_, a) => a.Count >= 2 ? a[0] - a[1] : (a.Count == 1 ? -a[0] : PilotValue.FromInt(0)), "a", "b"),
+            "*" => PilotFunction.CreateNative("*", (_, a) => a.Count >= 2 ? a[0] * a[1] : (a.Count == 1 ? a[0] : PilotValue.FromInt(1)), "a", "b"),
+            "/" => PilotFunction.CreateNative("/", (_, a) => a.Count >= 2 ? a[0] / a[1] : (a.Count == 1 ? a[0] : PilotValue.FromInt(1)), "a", "b"),
+            "%" => PilotFunction.CreateNative("%", (_, a) => a.Count >= 2 ? a[0] % a[1] : PilotValue.FromInt(0), "a", "b"),
+            "==" => PilotFunction.CreateNative("==", (_, a) => PilotValue.FromBool(a.Count >= 2 && a[0].Equals(a[1])), "a", "b"),
+            "!=" => PilotFunction.CreateNative("!=", (_, a) => PilotValue.FromBool(a.Count >= 2 && !a[0].Equals(a[1])), "a", "b"),
+            "<" => PilotFunction.CreateNative("<", (_, a) => PilotValue.FromBool(a.Count >= 2 && a[0] < a[1]), "a", "b"),
+            "<=" => PilotFunction.CreateNative("<=", (_, a) => PilotValue.FromBool(a.Count >= 2 && a[0] <= a[1]), "a", "b"),
+            ">" => PilotFunction.CreateNative(">", (_, a) => PilotValue.FromBool(a.Count >= 2 && a[0] > a[1]), "a", "b"),
+            ">=" => PilotFunction.CreateNative(">=", (_, a) => PilotValue.FromBool(a.Count >= 2 && a[0] >= a[1]), "a", "b"),
+            "&" => PilotFunction.CreateNative("&", (_, a) => a.Count >= 2 ? a[0] & a[1] : PilotValue.FromInt(0), "a", "b"),
+            "|" => PilotFunction.CreateNative("|", (_, a) => a.Count >= 2 ? a[0] | a[1] : PilotValue.FromInt(0), "a", "b"),
+            "^" => PilotFunction.CreateNative("^", (_, a) => a.Count >= 2 ? a[0] ^ a[1] : PilotValue.FromInt(0), "a", "b"),
+            "!" or "not" => PilotFunction.CreateNative("not", (_, a) => PilotValue.FromBool(a.Count > 0 && !a[0].IsTrue), "a"),
+            _ => throw new PilotRuntimeException($"Unknown operator '{op}' passed to operator().")
+        };
     }
 }
