@@ -88,15 +88,11 @@ public sealed class PilotPreprocessResult
 /// code organization (#region, #endregion), warning suppression (#pragma warning),
 /// and line mapping (#line).
 /// </summary>
-public static class PilotPreprocessor
+public static partial class PilotPreprocessor
 {
-    private static readonly Regex DirectiveRegex = new(
-        @"^[ \t]*#[ \t]*([a-zA-Z_][a-zA-Z0-9_]*)(?:[ \t]+(.*))?$",
-        RegexOptions.Compiled);
+    private static readonly Regex DirectiveRegex = MyRegex();
 
-    private static readonly Regex PragmaRegex = new(
-        @"^warning\s+(disable|restore)(?:\s+(.*))?$",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex PragmaRegex = MyRegex1();
 
     private static readonly HashSet<string> KnownDirectives = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -737,4 +733,9 @@ public static class PilotPreprocessor
             return _symbols.Contains(token);
         }
     }
+
+    [GeneratedRegex(@"^[ \t]*#[ \t]*([a-zA-Z_][a-zA-Z0-9_]*)(?:[ \t]+(.*))?$", RegexOptions.Compiled)]
+    private static partial Regex MyRegex();
+    [GeneratedRegex(@"^warning\s+(disable|restore)(?:\s+(.*))?$", RegexOptions.IgnoreCase | RegexOptions.Compiled, "en-US")]
+    private static partial Regex MyRegex1();
 }

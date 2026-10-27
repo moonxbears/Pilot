@@ -14,7 +14,7 @@ namespace Pilot.Transpilation.Targets;
 /// Emits exact-width <cstdint> types, const/auto bindings, RAII ScopeGuard for defer,
 /// std::string/std::vector, and native C++ classes.
 /// </summary>
-public sealed class CppTargetConverter : ITargetLanguageConverter
+public sealed partial class CppTargetConverter : ITargetLanguageConverter
 {
     public string Language { get; }
     public string TargetLanguage => Language;
@@ -143,14 +143,14 @@ public sealed class CppTargetConverter : ITargetLanguageConverter
         }
 
         // Range-based for: for (const auto& x : items) { -> for x in items {
-        var rangeFor = Regex.Match(res, @"^for\s*\(\s*(?:const\s+)?(?:auto|int64_t|int|std::string)[&*\s]+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)\)\s*\{?$");
+        var rangeFor = MyRegex().Match(res);
         if (rangeFor.Success)
         {
             return $"for {rangeFor.Groups[1].Value} in {rangeFor.Groups[2].Value.Trim()} {{";
         }
 
         // C-style for loop: for (int64_t i = a; i <= b; ++i) -> for i in a..b {
-        var forMatch = Regex.Match(res, @"^for\s*\(\s*(?:int64_t|int32_t|int|size_t|auto)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);\s*\1\s*(<=|<)\s*([^;]+);\s*(?:\+\+\1|\1\+\+)\s*\)\s*\{?$");
+        var forMatch = MyRegex1().Match(res);
         if (forMatch.Success)
         {
             string v = forMatch.Groups[1].Value;
@@ -165,7 +165,7 @@ public sealed class CppTargetConverter : ITargetLanguageConverter
         }
 
         // Function definition: constexpr int64_t square(int64_t x) {
-        var fnMatch = Regex.Match(res, @"^(?:constexpr\s+)?(?:inline\s+)?(int8_t|int16_t|int32_t|int64_t|uint8_t|uint16_t|uint32_t|uint64_t|int|long|float|double|bool|void|std::string|auto)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)\s*(\{?)$");
+        var fnMatch = MyRegex2().Match(res);
         if (fnMatch.Success)
         {
             string retType = MapCppTypeToPilot(fnMatch.Groups[1].Value);
@@ -198,7 +198,7 @@ public sealed class CppTargetConverter : ITargetLanguageConverter
         }
 
         // Variable declarations: const auto x = 10; or int64_t x = 10;
-        var varMatch = Regex.Match(res, @"^(constexpr\s+|const\s+)?(auto|int8_t|int16_t|int32_t|int64_t|uint8_t|uint16_t|uint32_t|uint64_t|int|long|float|double|bool|std::string)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$");
+        var varMatch = MyRegex3().Match(res);
         if (varMatch.Success)
         {
             bool isConst = !string.IsNullOrEmpty(varMatch.Groups[1].Value);
@@ -229,7 +229,7 @@ public sealed class CppTargetConverter : ITargetLanguageConverter
         _ => cppType.Trim()
     };
 
-    private sealed class PilotToCppVisitor
+    private sealed partial class PilotToCppVisitor
     {
         private readonly TranspilationOptions _options;
         private readonly HashSet<string> _mutatedVars;
@@ -523,7 +523,7 @@ public sealed class CppTargetConverter : ITargetLanguageConverter
                 if (inner.StartsWith("f\"", StringComparison.Ordinal) && inner.EndsWith("\"", StringComparison.Ordinal))
                 {
                     string raw = inner[2..^1];
-                    string streamChain = Regex.Replace(raw, @"\{([^}]+)\}", "\" << ($1) << \"");
+                    string streamChain = MyRegex().Replace(raw, "\" << ($1) << \"");
                     return $"std::cout << \"{streamChain}\" << '\\n';";
                 }
                 return $"std::cout << {TranslateExpr(inner)} << '\\n';";
@@ -564,5 +564,18 @@ public sealed class CppTargetConverter : ITargetLanguageConverter
                 _ => pilotType
             };
         }
+
+        [GeneratedRegex(@"\{([^}]+)\}")]
+        private static partial Regex MyRegex();
+
     }
+
+    [GeneratedRegex(@"^for\s*\(\s*(?:const\s+)?(?:auto|int64_t|int|std::string)[&*\s]+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)\)\s*\{?$")]
+    private static partial Regex MyRegex();
+    [GeneratedRegex(@"^for\s*\(\s*(?:int64_t|int32_t|int|size_t|auto)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);\s*\1\s*(<=|<)\s*([^;]+);\s*(?:\+\+\1|\1\+\+)\s*\)\s*\{?$")]
+    private static partial Regex MyRegex1();
+    [GeneratedRegex(@"^(?:constexpr\s+)?(?:inline\s+)?(int8_t|int16_t|int32_t|int64_t|uint8_t|uint16_t|uint32_t|uint64_t|int|long|float|double|bool|void|std::string|auto)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)\s*(\{?)$")]
+    private static partial Regex MyRegex2();
+    [GeneratedRegex(@"^(constexpr\s+|const\s+)?(auto|int8_t|int16_t|int32_t|int64_t|uint8_t|uint16_t|uint32_t|uint64_t|int|long|float|double|bool|std::string)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$")]
+    private static partial Regex MyRegex3();
 }

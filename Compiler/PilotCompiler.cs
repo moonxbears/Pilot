@@ -94,6 +94,15 @@ public sealed class PilotCompiler : IPilotCompiler
                 DateTime.UtcNow,
                 options.DefinedSymbols);
 
+            try
+            {
+                program.BytecodeChunk = PilotBytecodeCompiler.Compile(tree, preprocessedCode);
+            }
+            catch
+            {
+                // Graceful fallback to AST interpretation
+            }
+
             // 5. Store in cache if enabled
             if (options.EnableCaching && !string.IsNullOrEmpty(cacheKey))
             {

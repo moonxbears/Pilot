@@ -50,6 +50,7 @@ public sealed class PilotFunction
     public bool IsVectorized { get; set; }
     public IReadOnlyDictionary<string, PilotValue>? Captures { get; private set; }
     public PilotClassDefinition? ClassDef { get; set; }
+    public Pilot.Runtime.Bytecode.PilotBytecodeChunk? BytecodeChunk { get; set; }
     public int PatchVersion { get; private set; } = 0;
 
     public Dictionary<string, PilotValue> Members => _members ??= new(StringComparer.Ordinal);
@@ -128,9 +129,14 @@ public sealed class PilotFunction
             return context.Engine.CreateGenerator(this, arguments, context);
         }
 
-        if (context.Engine != null && AstBody != null)
+        if (context.Engine != null && (AstBody != null || BytecodeChunk != null))
         {
             return context.Engine.InvokeFunction(this, arguments, context);
+        }
+
+        if (BytecodeChunk != null)
+        {
+            return Pilot.Runtime.Bytecode.PilVirtualMachine.Execute(BytecodeChunk, context, arguments, this);
         }
 
         throw new InvalidOperationException($"Cannot invoke function '{Name}': no executable body or host delegate available.");
@@ -179,6 +185,7 @@ public sealed class PilotFunction
 
         copy.IsVectorized = IsVectorized;
         copy.ClassDef = ClassDef;
+        copy.BytecodeChunk = BytecodeChunk;
         copy.PatchVersion = PatchVersion;
         if (_members != null)
         {
@@ -210,6 +217,7 @@ public sealed class PilotFunction
         IsAsync = patch.IsAsync;
         IsGenerator = patch.IsGenerator;
         IsVectorized = patch.IsVectorized;
+        BytecodeChunk = patch.BytecodeChunk;
         Captures = patch.Captures;
         if (patch.ClassDef != null)
         {

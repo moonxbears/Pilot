@@ -119,6 +119,8 @@ public readonly struct PilotValue : IEquatable<PilotValue>
     };
 
     public string AsString() => ToString();
+    public decimal AsDecimal() => _reference is decimal d ? d : (decimal)AsFloat();
+    public char AsChar() => (char)_integer;
 
     public List<PilotValue> AsList() => _reference as List<PilotValue> ?? throw new InvalidCastException($"Expected List, got {Kind}");
     public IReadOnlyList<PilotValue> AsTuple() => _reference as IReadOnlyList<PilotValue> ?? throw new InvalidCastException($"Expected Tuple, got {Kind}");

@@ -14,7 +14,7 @@ namespace Pilot.Transpilation.Targets;
 /// Emits exact hardware integer types (<stdint.h>), static inline functions, const promotion,
 /// zero-allocation range loops, and automatic main() entry point wrapping.
 /// </summary>
-public sealed class CTargetConverter : ITargetLanguageConverter
+public sealed partial class CTargetConverter : ITargetLanguageConverter
 {
     public string Language => "c";
     public string TargetLanguage => Language;
@@ -107,7 +107,7 @@ public sealed class CTargetConverter : ITargetLanguageConverter
         string res = line.TrimEnd(';');
 
         // printf("msg\n") -> println("msg")
-        var printfMatch = Regex.Match(res, @"^printf\(\s*""([^""]*?)\\n""\s*(?:,\s*(.+))?\)$");
+        var printfMatch = MyRegex().Match(res);
         if (printfMatch.Success)
         {
             string fmt = printfMatch.Groups[1].Value;
@@ -119,12 +119,12 @@ public sealed class CTargetConverter : ITargetLanguageConverter
 
             var args = argsStr.Split(',').Select(a => a.Trim()).ToArray();
             int idx = 0;
-            string fstr = Regex.Replace(fmt, @"%[dlsfu]", _ => idx < args.Length ? $"{{{args[idx++]}}}" : "");
+            string fstr = MyRegex1().Replace(fmt, _ => idx < args.Length ? $"{{{args[idx++]}}}" : "");
             return $"println(f\"{fstr}\")";
         }
 
         // C-style for loop: for (int i = a; i <= b; ++i) -> for i in a..b {
-        var forMatch = Regex.Match(res, @"^for\s*\(\s*(?:int64_t|int32_t|int|size_t)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);\s*\1\s*(<=|<)\s*([^;]+);\s*(?:\+\+\1|\1\+\+)\s*\)\s*\{?$");
+        var forMatch = MyRegex2().Match(res);
         if (forMatch.Success)
         {
             string v = forMatch.Groups[1].Value;
@@ -139,7 +139,7 @@ public sealed class CTargetConverter : ITargetLanguageConverter
         }
 
         // Function definition: static inline int64_t add(int64_t a, int64_t b) {
-        var fnMatch = Regex.Match(res, @"^(?:static\s+)?(?:inline\s+)?(int8_t|int16_t|int32_t|int64_t|uint8_t|uint16_t|uint32_t|uint64_t|int|long|float|double|bool|void|const\s+char\s*\*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)\s*(\{?)$");
+        var fnMatch = MyRegex3().Match(res);
         if (fnMatch.Success)
         {
             string retType = MapCTypeToPilot(fnMatch.Groups[1].Value);
@@ -172,7 +172,7 @@ public sealed class CTargetConverter : ITargetLanguageConverter
         }
 
         // Typed variable declaration: const int64_t x = 10 -> const x: i64 = 10
-        var varMatch = Regex.Match(res, @"^(const\s+)?(int8_t|int16_t|int32_t|int64_t|uint8_t|uint16_t|uint32_t|uint64_t|int|long|float|double|bool|const\s+char\s*\*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$");
+        var varMatch = MyRegex4().Match(res);
         if (varMatch.Success)
         {
             bool isConst = !string.IsNullOrEmpty(varMatch.Groups[1].Value);
@@ -202,7 +202,7 @@ public sealed class CTargetConverter : ITargetLanguageConverter
         _ => cType.Trim()
     };
 
-    private sealed class PilotToCVisitor
+    private sealed partial class PilotToCVisitor
     {
         private readonly TranspilationOptions _options;
         private readonly HashSet<string> _mutatedVars;
@@ -494,7 +494,7 @@ public sealed class CTargetConverter : ITargetLanguageConverter
                 {
                     string raw = inner[2..^1];
                     var args = new List<string>();
-                    string fmt = Regex.Replace(raw, @"\{([^}]+)\}", m =>
+                    string fmt = MyRegex().Replace(raw, m =>
                     {
                         args.Add(m.Groups[1].Value.Trim());
                         return "%lld";
@@ -557,5 +557,21 @@ public sealed class CTargetConverter : ITargetLanguageConverter
                 _ => pilotType
             };
         }
+
+        [GeneratedRegex(@"\{([^}]+)\}")]
+        private static partial Regex MyRegex();
+
     }
+
+    [GeneratedRegex(@"^printf\(\s*""([^""]*?)\\n""\s*(?:,\s*(.+))?\)$")]
+    private static partial Regex MyRegex();
+    [GeneratedRegex(@"%[dlsfu]")]
+    private static partial Regex MyRegex1();
+    [GeneratedRegex(@"^for\s*\(\s*(?:int64_t|int32_t|int|size_t)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);\s*\1\s*(<=|<)\s*([^;]+);\s*(?:\+\+\1|\1\+\+)\s*\)\s*\{?$")]
+    private static partial Regex MyRegex2();
+    [GeneratedRegex(@"^(?:static\s+)?(?:inline\s+)?(int8_t|int16_t|int32_t|int64_t|uint8_t|uint16_t|uint32_t|uint64_t|int|long|float|double|bool|void|const\s+char\s*\*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)\s*(\{?)$")]
+    private static partial Regex MyRegex3();
+    [GeneratedRegex(@"^(const\s+)?(int8_t|int16_t|int32_t|int64_t|uint8_t|uint16_t|uint32_t|uint64_t|int|long|float|double|bool|const\s+char\s*\*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$")]
+    private static partial Regex MyRegex4();
+
 }

@@ -14,7 +14,7 @@ namespace Pilot.Transpilation.Targets;
 /// Performs mutability analysis to emit immutable 'let' vs 'let mut', inclusive ranges 'a..=b',
 /// and hardware-exact scalar types.
 /// </summary>
-public sealed class RustTargetConverter : ITargetLanguageConverter
+public sealed partial class RustTargetConverter : ITargetLanguageConverter
 {
     public string Language { get; }
     public string TargetLanguage => Language;
@@ -114,7 +114,7 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
         res = res.Replace("let mut ", optimize ? "var " : "let ");
 
         // println!("Hello {}", x) -> println(f"Hello {x}")
-        var printMatch = Regex.Match(res, @"^println!\(\s*""([^""]*)""\s*(?:,\s*(.+))?\)$");
+        var printMatch = MyRegex().Match(res);
         if (printMatch.Success)
         {
             string fmt = printMatch.Groups[1].Value;
@@ -123,7 +123,7 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
             {
                 var args = argsStr.Split(',').Select(a => a.Trim()).ToArray();
                 int idx = 0;
-                string fstr = Regex.Replace(fmt, @"\{\}", _ => idx < args.Length ? $"{{{args[idx++]}}}" : "");
+                string fstr = MyRegex1().Replace(fmt, _ => idx < args.Length ? $"{{{args[idx++]}}}" : "");
                 return $"println(f\"{fstr}\")";
             }
             return $"println(\"{fmt}\")";
@@ -471,4 +471,9 @@ public sealed class RustTargetConverter : ITargetLanguageConverter
             };
         }
     }
+
+    [GeneratedRegex(@"^println!\(\s*""([^""]*)""\s*(?:,\s*(.+))?\)$")]
+    private static partial Regex MyRegex();
+    [GeneratedRegex(@"\{\}")]
+    private static partial Regex MyRegex1();
 }

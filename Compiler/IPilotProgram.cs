@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Pilot.Runtime.Bytecode;
 using Pilot.Runtime.Execution;
 
 namespace Pilot.Compiler;
@@ -30,6 +31,11 @@ public interface IPilotProgram
     /// Gets the preprocessor symbols defined when this program was compiled.
     /// </summary>
     IReadOnlyList<string> DefinedSymbols { get; }
+
+    /// <summary>
+    /// Gets the compiled bytecode chunk for PilVM execution, if available.
+    /// </summary>
+    PilotBytecodeChunk? BytecodeChunk { get; }
 
     /// <summary>
     /// Runs the compiled program with the specified execution options.

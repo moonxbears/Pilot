@@ -12,7 +12,7 @@ namespace Pilot.Transpilation;
 /// Shared compile-time optimization engine for both Pilot -> Target Language emission
 /// and Foreign Language -> Pilot ingestion.
 /// </summary>
-public static class PilotOptimizer
+public static partial class PilotOptimizer
 {
     static PilotOptimizer()
     {
@@ -20,12 +20,12 @@ public static class PilotOptimizer
             Regex.CacheSize = 256;
     }
 
-    private static readonly Regex DurationLiteralRegex = new(@"\b(\d+(?:\.\d+)?)(ns|us|ms|s|min|h)\b", RegexOptions.Compiled);
-    private static readonly Regex MemoryLiteralRegex = new(@"\b(\d+)(B|KB|MB|GB|TB)\b", RegexOptions.Compiled);
-    private static readonly Regex FrequencyLiteralRegex = new(@"\b(\d+(?:\.\d+)?)(Hz|kHz|MHz|GHz)\b", RegexOptions.Compiled);
-    private static readonly Regex SimpleBinaryIntRegex = new(@"^(-?\d+)\s*([+\-*])\s*(-?\d+)$", RegexOptions.Compiled);
-    private static readonly Regex StringConcatRegex = new(@"^""([^""\\]*)""\s*\+\s*""([^""\\]*)""$", RegexOptions.Compiled);
-    private static readonly Regex RangeCallRegex = new(@"^range\(\s*([^,)]+)(?:\s*,\s*([^,)]+))?\s*\)$", RegexOptions.Compiled);
+    private static readonly Regex DurationLiteralRegex = MyRegex();
+    private static readonly Regex MemoryLiteralRegex = MyRegex2();
+    private static readonly Regex FrequencyLiteralRegex = MyRegex3();
+    private static readonly Regex SimpleBinaryIntRegex = MyRegex4();
+    private static readonly Regex StringConcatRegex = MyRegex5();
+    private static readonly Regex RangeCallRegex = MyRegex6();
 
     /// <summary>
     /// Walks a Pilot AST subtree and returns the set of variable identifiers that are
@@ -282,7 +282,7 @@ public static class PilotOptimizer
             // 1. Elevate single-line early-exit 'if (!(cond)) { return ...; }' or 'if (!cond) { return ...; }' or 'if not cond { return ...; }' to 'guard'
             if (trimmed.StartsWith("if ", StringComparison.Ordinal))
             {
-                var inlineGuardMatch = Regex.Match(trimmed, @"^if\s+(?:\(\s*)?(?:!\((.+?)\)|!([A-Za-z_][A-Za-z0-9_]*)|not\s+\(?(.+?)\)?)(?:\s*\))?\s*\{\s*(return\b[^}]*|raise\b[^}]*|break\b[^}]*|continue\b[^}]*)\s*\}$");
+                var inlineGuardMatch = MyRegex1().Match(trimmed);
                 if (inlineGuardMatch.Success)
                 {
                     string cond = (inlineGuardMatch.Groups[1].Value + inlineGuardMatch.Groups[2].Value + inlineGuardMatch.Groups[3].Value).Trim();
@@ -296,11 +296,11 @@ public static class PilotOptimizer
                 //        return ...
                 //    }
                 if (i + 2 < lines.Length &&
-                    Regex.IsMatch(trimmed, @"^if\s+(.+?)\s*\{$") &&
-                    Regex.IsMatch(lines[i + 1].Trim(), @"^(return\b|raise\b)") &&
+                    MyRegex7().IsMatch(trimmed) &&
+                    MyRegex8().IsMatch(lines[i + 1].Trim()) &&
                     lines[i + 2].Trim() == "}")
                 {
-                    var condMatch = Regex.Match(trimmed, @"^if\s+(.+?)\s*\{$");
+                    var condMatch = MyRegex7().Match(trimmed);
                     string rawCond = condMatch.Groups[1].Value.Trim();
                     if (rawCond.StartsWith("(") && rawCond.EndsWith(")"))
                         rawCond = rawCond[1..^1].Trim();
@@ -316,7 +316,7 @@ public static class PilotOptimizer
             if (trimmed.StartsWith("for ", StringComparison.Ordinal))
             {
                 // 3. Elevate range(0, N) in 'for' loops to native inclusive range 0..(N-1) when N is integer literal
-                var rangeForMatch = Regex.Match(trimmed, @"^for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+range\(\s*(\d+)\s*,\s*(\d+)\s*\)\s*\{$");
+                var rangeForMatch = MyRegex9().Match(trimmed);
                 if (rangeForMatch.Success &&
                     int.TryParse(rangeForMatch.Groups[2].Value, out int startVal) &&
                     int.TryParse(rangeForMatch.Groups[3].Value, out int endExclusive) &&
@@ -327,7 +327,7 @@ public static class PilotOptimizer
                     continue;
                 }
 
-                var singleRangeForMatch = Regex.Match(trimmed, @"^for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+range\(\s*(\d+)\s*\)\s*\{$");
+                var singleRangeForMatch = MyRegex10().Match(trimmed);
                 if (singleRangeForMatch.Success &&
                     int.TryParse(singleRangeForMatch.Groups[2].Value, out int stopVal) &&
                     stopVal > 0)
@@ -371,4 +371,28 @@ public static class PilotOptimizer
             return cond.Replace(" >= ", " < ");
         return $"not ({cond})";
     }
+
+    [GeneratedRegex(@"\b(\d+(?:\.\d+)?)(ns|us|ms|s|min|h)\b", RegexOptions.Compiled)]
+    private static partial Regex MyRegex();
+    [GeneratedRegex(@"^if\s+(?:\(\s*)?(?:!\((.+?)\)|!([A-Za-z_][A-Za-z0-9_]*)|not\s+\(?(.+?)\)?)(?:\s*\))?\s*\{\s*(return\b[^}]*|raise\b[^}]*|break\b[^}]*|continue\b[^}]*)\s*\}$")]
+    private static partial Regex MyRegex1();
+    [GeneratedRegex(@"\b(\d+)(B|KB|MB|GB|TB)\b", RegexOptions.Compiled)]
+    private static partial Regex MyRegex2();
+    [GeneratedRegex(@"\b(\d+(?:\.\d+)?)(Hz|kHz|MHz|GHz)\b", RegexOptions.Compiled)]
+    private static partial Regex MyRegex3();
+    [GeneratedRegex(@"^(-?\d+)\s*([+\-*])\s*(-?\d+)$", RegexOptions.Compiled)]
+    private static partial Regex MyRegex4();
+    [GeneratedRegex(@"^""([^""\\]*)""\s*\+\s*""([^""\\]*)""$", RegexOptions.Compiled)]
+    private static partial Regex MyRegex5();
+    [GeneratedRegex(@"^range\(\s*([^,)]+)(?:\s*,\s*([^,)]+))?\s*\)$", RegexOptions.Compiled)]
+    private static partial Regex MyRegex6();
+    [GeneratedRegex(@"^if\s+(.+?)\s*\{$")]
+    private static partial Regex MyRegex7();
+    [GeneratedRegex(@"^(return\b|raise\b)")]
+    private static partial Regex MyRegex8();
+    [GeneratedRegex(@"^for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+range\(\s*(\d+)\s*,\s*(\d+)\s*\)\s*\{$")]
+    private static partial Regex MyRegex9();
+    [GeneratedRegex(@"^for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+range\(\s*(\d+)\s*\)\s*\{$")]
+    private static partial Regex MyRegex10();
+
 }

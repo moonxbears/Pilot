@@ -3236,13 +3236,34 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         {
             string text = context.INTEGER().GetText();
             if (text.IndexOf('_') >= 0) text = text.Replace("_", "");
-            PilotValue intVal;
-            if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-                intVal = PilotValue.FromInt(Convert.ToInt64(text[2..], 16));
-            else if (text.StartsWith("0b", StringComparison.OrdinalIgnoreCase))
-                intVal = PilotValue.FromInt(Convert.ToInt64(text[2..], 2));
-            else
-                intVal = PilotValue.FromInt(long.Parse(text, CultureInfo.InvariantCulture));
+            var intVal = PilotValue.FromInt(long.Parse(text, CultureInfo.InvariantCulture));
+            LiteralCache[context] = intVal;
+            return intVal;
+        }
+
+        if (context.HEX_INTEGER() != null)
+        {
+            string text = context.HEX_INTEGER().GetText();
+            if (text.IndexOf('_') >= 0) text = text.Replace("_", "");
+            var intVal = PilotValue.FromInt(Convert.ToInt64(text[2..], 16));
+            LiteralCache[context] = intVal;
+            return intVal;
+        }
+
+        if (context.BIN_INTEGER() != null)
+        {
+            string text = context.BIN_INTEGER().GetText();
+            if (text.IndexOf('_') >= 0) text = text.Replace("_", "");
+            var intVal = PilotValue.FromInt(Convert.ToInt64(text[2..], 2));
+            LiteralCache[context] = intVal;
+            return intVal;
+        }
+
+        if (context.OCT_INTEGER() != null)
+        {
+            string text = context.OCT_INTEGER().GetText();
+            if (text.IndexOf('_') >= 0) text = text.Replace("_", "");
+            var intVal = PilotValue.FromInt(Convert.ToInt64(text[2..], 8));
             LiteralCache[context] = intVal;
             return intVal;
         }

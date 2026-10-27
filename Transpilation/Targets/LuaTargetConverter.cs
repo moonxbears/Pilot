@@ -13,7 +13,7 @@ namespace Pilot.Transpilation.Targets;
 /// Bidirectional optimizing compile-time code converter between Pilot and Lua 5.4 / LuaJIT.
 /// Emits register-allocated 'local' bindings, native numeric 'for' loops, and metatable classes.
 /// </summary>
-public sealed class LuaTargetConverter : ITargetLanguageConverter
+public sealed partial class LuaTargetConverter : ITargetLanguageConverter
 {
     public string Language => "lua";
     public string TargetLanguage => Language;
@@ -112,10 +112,10 @@ public sealed class LuaTargetConverter : ITargetLanguageConverter
 
         // Operators and literals
         res = res.Replace("~=", "!=").Replace(" nil", " null").Replace("=nil", "=null");
-        res = Regex.Replace(res, @"\s+\.\.\s+", " + ");
+        res = MyRegex().Replace(res, " + ");
 
         // local function name(args) -> def name(args) {
-        var localFn = Regex.Match(res, @"^(?:local\s+)?function\s+([A-Za-z0-9_.:]+)\s*\((.*)\)\s*$");
+        var localFn = MyRegex1().Match(res);
         if (localFn.Success)
         {
             string fnName = localFn.Groups[1].Value.Replace(":", ".");
@@ -123,14 +123,14 @@ public sealed class LuaTargetConverter : ITargetLanguageConverter
         }
 
         // Numeric for: for i = a, b do -> for i in a..b {
-        var numFor = Regex.Match(res, @"^for\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^,]+),\s*([^\s]+)\s+do$");
+        var numFor = MyRegex2().Match(res);
         if (numFor.Success)
         {
             return $"for {numFor.Groups[1].Value} in {numFor.Groups[2].Value.Trim()}..{numFor.Groups[3].Value.Trim()} {{";
         }
 
         // Generic for: for _, v in ipairs(list) do -> for v in list {
-        var genFor = Regex.Match(res, @"^for\s+(?:[A-Za-z_][A-Za-z0-9_]*\s*,\s*)?([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(?:i?pairs\((.+)\)|(.+))\s+do$");
+        var genFor = MyRegex3().Match(res);
         if (genFor.Success)
         {
             string coll = !string.IsNullOrEmpty(genFor.Groups[2].Value) ? genFor.Groups[2].Value : genFor.Groups[3].Value;
@@ -138,14 +138,14 @@ public sealed class LuaTargetConverter : ITargetLanguageConverter
         }
 
         // elseif cond then -> } elif cond {
-        var elifMatch = Regex.Match(res, @"^elseif\s+(.+?)\s+then$");
+        var elifMatch = MyRegex4().Match(res);
         if (elifMatch.Success)
         {
             return $"}} elif {elifMatch.Groups[1].Value} {{";
         }
 
         // if cond then -> if cond {
-        var ifMatch = Regex.Match(res, @"^if\s+(.+?)\s+then$");
+        var ifMatch = MyRegex5().Match(res);
         if (ifMatch.Success)
         {
             return $"if {ifMatch.Groups[1].Value} {{";
@@ -157,7 +157,7 @@ public sealed class LuaTargetConverter : ITargetLanguageConverter
         }
 
         // while cond do -> while cond {
-        var whileMatch = Regex.Match(res, @"^while\s+(.+?)\s+do$");
+        var whileMatch = MyRegex6().Match(res);
         if (whileMatch.Success)
         {
             return $"while {whileMatch.Groups[1].Value} {{";
@@ -178,7 +178,7 @@ public sealed class LuaTargetConverter : ITargetLanguageConverter
         return res;
     }
 
-    private sealed class PilotToLuaVisitor
+    private sealed partial class PilotToLuaVisitor
     {
         private readonly TranspilationOptions _options;
         private int _indent;
@@ -480,7 +480,7 @@ public sealed class LuaTargetConverter : ITargetLanguageConverter
             {
                 string inner = s[2..^1];
                 var args = new List<string>();
-                string fmt = Regex.Replace(inner, @"\{([^}]+)\}", m =>
+                string fmt = MyRegex().Replace(inner, m =>
                 {
                     args.Add($"tostring({m.Groups[1].Value.Trim()})");
                     return "%s";
@@ -504,5 +504,25 @@ public sealed class LuaTargetConverter : ITargetLanguageConverter
 
             return s;
         }
+
+        [GeneratedRegex(@"\{([^}]+)\}")]
+        private static partial Regex MyRegex();
+
     }
+
+    [GeneratedRegex(@"\s+\.\.\s+")]
+    private static partial Regex MyRegex();
+    [GeneratedRegex(@"^(?:local\s+)?function\s+([A-Za-z0-9_.:]+)\s*\((.*)\)\s*$")]
+    private static partial Regex MyRegex1();
+    [GeneratedRegex(@"^for\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^,]+),\s*([^\s]+)\s+do$")]
+    private static partial Regex MyRegex2();
+    [GeneratedRegex(@"^for\s+(?:[A-Za-z_][A-Za-z0-9_]*\s*,\s*)?([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(?:i?pairs\((.+)\)|(.+))\s+do$")]
+    private static partial Regex MyRegex3();
+    [GeneratedRegex(@"^elseif\s+(.+?)\s+then$")]
+    private static partial Regex MyRegex4();
+    [GeneratedRegex(@"^if\s+(.+?)\s+then$")]
+    private static partial Regex MyRegex5();
+    [GeneratedRegex(@"^while\s+(.+?)\s+do$")]
+    private static partial Regex MyRegex6();
+
 }

@@ -13,7 +13,7 @@ namespace Pilot.Transpilation.Targets;
 /// Bidirectional optimizing compile-time code converter between Pilot and modern JavaScript (ES2024+).
 /// Emits immutability-aware const/let bindings, strict equality, template literals, and zero-allocation numeric loops.
 /// </summary>
-public sealed class JavaScriptTargetConverter : ITargetLanguageConverter
+public sealed partial class JavaScriptTargetConverter : ITargetLanguageConverter
 {
     public string Language { get; }
     public string TargetLanguage => Language;
@@ -113,9 +113,9 @@ public sealed class JavaScriptTargetConverter : ITargetLanguageConverter
         // Template literals `Hello ${x}` -> f"Hello {x}"
         if (res.Contains('`'))
         {
-            res = Regex.Replace(res, @"`([^`]*)`", m =>
+            res = MyRegex().Replace(res, m =>
             {
-                string inner = Regex.Replace(m.Groups[1].Value, @"\$\{([^}]+)\}", "{$1}");
+                string inner = MyRegex1().Replace(m.Groups[1].Value, "{$1}");
                 return $"f\"{inner}\"";
             });
         }
@@ -134,7 +134,7 @@ public sealed class JavaScriptTargetConverter : ITargetLanguageConverter
         }
 
         // C-style for loop: for (let i = a; i <= b; i++) { -> for i in a..b {
-        var forIncr = Regex.Match(res, @"^for\s*\(\s*(?:let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);\s*\1\s*(<=|<)\s*([^;]+);\s*\1\+\+\s*\)\s*\{?$");
+        var forIncr = MyRegex2().Match(res);
         if (forIncr.Success)
         {
             string v = forIncr.Groups[1].Value;
@@ -149,7 +149,7 @@ public sealed class JavaScriptTargetConverter : ITargetLanguageConverter
         }
 
         // for (const x of items) { -> for x in items {
-        var forOf = Regex.Match(res, @"^for\s*\(\s*(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s+of\s+(.+)\)\s*\{?$");
+        var forOf = MyRegex3().Match(res);
         if (forOf.Success)
         {
             return $"for {forOf.Groups[1].Value} in {forOf.Groups[2].Value.Trim()} {{";
@@ -158,7 +158,7 @@ public sealed class JavaScriptTargetConverter : ITargetLanguageConverter
         return res;
     }
 
-    private sealed class PilotToJsVisitor
+    private sealed partial class PilotToJsVisitor
     {
         private readonly TranspilationOptions _options;
         private readonly HashSet<string> _mutatedVars;
@@ -458,7 +458,7 @@ public sealed class JavaScriptTargetConverter : ITargetLanguageConverter
             if (s.StartsWith("f\"", StringComparison.Ordinal) && s.EndsWith("\"", StringComparison.Ordinal))
             {
                 string inner = s[2..^1];
-                string tpl = Regex.Replace(inner, @"\{([^}]+)\}", "${$1}");
+                string tpl = MyRegex().Replace(inner, "${$1}");
                 return $"`{tpl}`";
             }
 
@@ -478,5 +478,18 @@ public sealed class JavaScriptTargetConverter : ITargetLanguageConverter
 
             return s;
         }
+
+        [GeneratedRegex(@"\{([^}]+)\}")]
+        private static partial Regex MyRegex();
+
     }
+
+    [GeneratedRegex(@"`([^`]*)`")]
+    private static partial Regex MyRegex();
+    [GeneratedRegex(@"\$\{([^}]+)\}")]
+    private static partial Regex MyRegex1();
+    [GeneratedRegex(@"^for\s*\(\s*(?:let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);\s*\1\s*(<=|<)\s*([^;]+);\s*\1\+\+\s*\)\s*\{?$")]
+    private static partial Regex MyRegex2();
+    [GeneratedRegex(@"^for\s*\(\s*(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s+of\s+(.+)\)\s*\{?$")]
+    private static partial Regex MyRegex3();
 }

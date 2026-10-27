@@ -249,7 +249,11 @@ public sealed class PilotEngine : IPilotEngine
         PilotValue resultVal = PilotValue.Undefined;
         try
         {
-            if (function.AstBody is PilotParser.SuiteContext suiteCtx)
+            if (function.BytecodeChunk != null && !function.IsGenerator)
+            {
+                resultVal = Pilot.Runtime.Bytecode.PilVirtualMachine.Execute(function.BytecodeChunk, context, arguments, function);
+            }
+            else if (function.AstBody is PilotParser.SuiteContext suiteCtx)
             {
                 resultVal = methodVisitor.VisitSuite(suiteCtx);
             }

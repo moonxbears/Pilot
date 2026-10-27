@@ -16,7 +16,7 @@ namespace Pilot.Transpilation;
 /// - JavaScript: mathjs, lodash (_), JSON, fs, Promise
 /// - Lua: math, cjson, table, io
 /// </summary>
-public static class PilotLibraryMapper
+public static partial class PilotLibraryMapper
 {
     static PilotLibraryMapper()
     {
@@ -24,13 +24,9 @@ public static class PilotLibraryMapper
             Regex.CacheSize = 256;
     }
 
-    private static readonly Regex MatrixPrimitivesRegex = new(
-        @"\b(matrix|zeros|ones|eye|matrix2x2|matrix3x3|matrix4x4)\b",
-        RegexOptions.Compiled);
+    private static readonly Regex MatrixPrimitivesRegex = MyRegex();
 
-    private static readonly Regex JsonPrimitivesRegex = new(
-        @"\b(json\.dumps|json\.loads|json_dumps|json_loads|\.to_json\()\b",
-        RegexOptions.Compiled);
+    private static readonly Regex JsonPrimitivesRegex = MyRegex1();
 
     /// <summary>
     /// Detects whether a Pilot program AST/source uses native matrix/linear-algebra constructs
@@ -71,21 +67,21 @@ public static class PilotLibraryMapper
         var trimmed = s.Trim();
         if (trimmed.StartsWith("import ", StringComparison.Ordinal) || trimmed.StartsWith("from ", StringComparison.Ordinal))
         {
-            if (Regex.IsMatch(trimmed, @"^(import\s+numpy(\s+as\s+\w+)?|from\s+numpy\s+import\s+.+|import\s+pandas(\s+as\s+\w+)?|import\s+json|import\s+math|import\s+functools)$"))
+            if (MyRegex2().IsMatch(trimmed))
             {
                 return $"// [Native Pilot Library Equivalent] {trimmed}";
             }
         }
         if (trimmed.StartsWith("use ", StringComparison.Ordinal))
         {
-            if (Regex.IsMatch(trimmed, @"^use\s+(ndarray|nalgebra|serde_json|rayon|std::fs)(::.+)?;?$"))
+            if (MyRegex3().IsMatch(trimmed))
             {
                 return $"// [Native Pilot Library Equivalent] {trimmed}";
             }
         }
         if (trimmed.Contains("require(", StringComparison.Ordinal))
         {
-            if (Regex.IsMatch(trimmed, @"^(const|let|var)\s+\w+\s*=\s*require\(['""](mathjs|lodash|fs|path)['""]\);?$"))
+            if (MyRegex4().IsMatch(trimmed))
             {
                 return $"// [Native Pilot Library Equivalent] {trimmed}";
             }
@@ -99,83 +95,82 @@ public static class PilotLibraryMapper
         // B. Linear Algebra: NumPy (np.*) / Eigen / ndarray / mathjs -> PilotMatrix
         // ---------------------------------------------------------------------
         // np.zeros((r, c)) or np.zeros([r, c]) or Array2::zeros((r, c)) or Eigen::MatrixXd::Zero(r, c) -> zeros(r, c)
-        s = Regex.Replace(s, @"\b(?:np|numpy|math)\.zeros\(\s*[\(\[]\s*([^,\)\]]+)\s*,\s*([^\)\]]+)\s*[\)\]]\s*(?:,\s*dtype\s*=\s*[^)]+)?\)", "zeros($1, $2)");
-        s = Regex.Replace(s, @"\b(?:np|numpy|math)\.zeros\(\s*([^,)]+)\s*\)", "zeros(1, $1)");
-        s = Regex.Replace(s, @"\b(?:Array2|DMatrix)::(?:<[^>]+>::)?zeros\(\s*\(\s*([^,)]+)\s*,\s*([^)]+)\s*\)\s*\)", "zeros($1, $2)");
-        s = Regex.Replace(s, @"\bEigen::Matrix[A-Za-z0-9_]*::Zero\(\s*([^,)]+)\s*,\s*([^)]+)\s*\)", "zeros($1, $2)");
+        s = NPRegexZeroes1().Replace(s, "zeros($1, $2)");
+        s = NPRegexZeroes2().Replace(s, "zeros(1, $1)");
+        s = NPRegexZeroes3().Replace(s, "zeros($1, $2)");
+        s = NPRegexZeroes4().Replace(s, "zeros($1, $2)");
 
         // np.ones((r, c)) / Array2::ones((r, c)) / Eigen::MatrixXd::Ones(r, c) -> ones(r, c)
-        s = Regex.Replace(s, @"\b(?:np|numpy|math)\.ones\(\s*[\(\[]\s*([^,\)\]]+)\s*,\s*([^\)\]]+)\s*[\)\]]\s*(?:,\s*dtype\s*=\s*[^)]+)?\)", "ones($1, $2)");
-        s = Regex.Replace(s, @"\b(?:np|numpy|math)\.ones\(\s*([^,)]+)\s*\)", "ones(1, $1)");
-        s = Regex.Replace(s, @"\b(?:Array2|DMatrix)::(?:<[^>]+>::)?ones\(\s*\(\s*([^,)]+)\s*,\s*([^)]+)\s*\)\s*\)", "ones($1, $2)");
-        s = Regex.Replace(s, @"\bEigen::Matrix[A-Za-z0-9_]*::Ones\(\s*([^,)]+)\s*,\s*([^)]+)\s*\)", "ones($1, $2)");
+        s = NPRegexOnes1().Replace(s, "ones($1, $2)");
+        s = NPRegexOnes2().Replace(s, "ones(1, $1)");
+        s = NPRegexOnes3().Replace(s, "ones($1, $2)");
+        s = NPRegexOnes4().Replace(s, "ones($1, $2)");
 
         // np.eye(n) / np.identity(n) / Array2::eye(n) / Eigen::MatrixXd::Identity(n, n) / math.identity(n) -> eye(n)
-        s = Regex.Replace(s, @"\b(?:np|numpy|math)\.(?:eye|identity)\(\s*([^,)]+)(?:\s*,\s*[^)]+)?\)", "eye($1)");
-        s = Regex.Replace(s, @"\b(?:Array2|DMatrix)::(?:<[^>]+>::)?eye\(\s*([^)]+)\s*\)", "eye($1)");
-        s = Regex.Replace(s, @"\bEigen::Matrix[A-Za-z0-9_]*::Identity\(\s*([^,)]+)\s*,\s*[^)]+\)", "eye($1)");
+        s = NPRegexEye1().Replace(s, "eye($1)");
+        s = NPRegexEye2().Replace(s, "eye($1)");
+        s = NPRegexEye3().Replace(s, "eye($1)");
 
         // np.array([[...]], dtype=np.float32) -> matrix([[...]], "f32")
-        s = Regex.Replace(s, @"\b(?:np|numpy)\.(?:array|matrix|asarray)\(\s*(\[.+\])\s*,\s*dtype\s*=\s*(?:np\.)?([A-Za-z0-9_'\""]+)\s*\)", m =>
+        s = NPRegexArray1().Replace(s, m =>
         {
             string arr = m.Groups[1].Value;
             string dtype = MapNumpyDtypeToPilot(m.Groups[2].Value.Trim('\'', '"'));
             return $"matrix({arr}, \"{dtype}\")";
         });
-        s = Regex.Replace(s, @"\b(?:np|numpy|math)\.(?:array|matrix|asarray)\(\s*(\[.+\])\s*\)", "matrix($1)");
-        s = Regex.Replace(s, @"\barr2\(\s*&(\[.+\])\s*\)", "matrix($1)");
+        s = NPRegexMatrix1().Replace(s, "matrix($1)");
+        s = NPRegexMatrix2().Replace(s, "matrix($1)");
 
         // Matrix multiplication: np.dot(A, B), np.matmul(A, B), math.multiply(A, B), A.dot(&B), A @ B -> A * B
-        s = Regex.Replace(s, @"\b(?:np|numpy|math)\.(?:dot|matmul|multiply)\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)", "($1 * $2)");
-        s = Regex.Replace(s, @"\b([A-Za-z_][A-Za-z0-9_]*)\.dot\(\s*&?([A-Za-z_][A-Za-z0-9_]*)\s*\)", "($1 * $2)");
-        s = Regex.Replace(s, @"\b([A-Za-z_][A-Za-z0-9_]*)\s+@\s+([A-Za-z_][A-Za-z0-9_]*)\b", "$1 * $2");
+        s = NPRegexMatrix3().Replace(s, "($1 * $2)");
+        s = NPRegexMatrix4().Replace(s, "($1 * $2)");
+        s = NPRegexMatrix5().Replace(s, "$1 * $2");
 
         // np.arange(start, stop) -> range(start, stop)
-        s = Regex.Replace(s, @"\b(?:np|numpy)\.arange\(", "range(");
+        s = NPRegexRange1().Replace(s, "range(");
 
         // Matrix properties: .dtype -> .element_type
-        s = Regex.Replace(s, @"\.dtype\b", ".element_type");
+        s = NPRegexMatrix6().Replace(s, ".element_type");
 
         // Vectorized NumPy ufuncs: np.sqrt(arr), np.sin(arr), np.cos(arr), np.abs(arr)
-        s = Regex.Replace(s, @"\b(?:np|numpy)\.vectorize\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)", "vectorize($1)");
+        s = NPRegexVector1().Replace(s, "vectorize($1)");
 
         // ---------------------------------------------------------------------
         // C. DataFrames & Functional Pipelines (Pandas / Lodash / Python / Rust Iterators)
         // ---------------------------------------------------------------------
         // Pandas DataFrame filter: df[df["col"] > val] -> from row in df where row["col"] > val select row
-        s = Regex.Replace(s, @"\b([A-Za-z_][A-Za-z0-9_]*)\[\s*\1\[(['""][^'""]+['""])\]\s*([><=!]+)\s*([^\]]+)\]",
-            "from row in $1 where row[$2] $3 $4 select row");
+        s = PandasRegexDF1().Replace(s, "from row in $1 where row[$2] $3 $4 select row");
 
         // Python list(map(fn, items)) / Lodash _.map(items, fn) -> items.map(fn)
-        s = Regex.Replace(s, @"\blist\(\s*map\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)\s*\)", "$2.map($1)");
-        s = Regex.Replace(s, @"\blist\(\s*filter\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)\s*\)", "$2.filter($1)");
-        s = Regex.Replace(s, @"\b_\.map\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)", "$1.map($2)");
-        s = Regex.Replace(s, @"\b_\.filter\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)", "$1.filter($2)");
-        s = Regex.Replace(s, @"\bfunctools\.reduce\(\s*([^,]+?)\s*,\s*([^,)]+?)(?:\s*,\s*([^)]+?))?\s*\)", m =>
+        s = PyRegexMap1().Replace(s, "$2.map($1)");
+        s = PyRegexMap2().Replace(s, "$2.filter($1)");
+        s = PyRegexMap3().Replace(s, "$1.map($2)");
+        s = PyRegexMap4().Replace(s, "$1.filter($2)");
+        s = PyRegexMap5().Replace(s, m =>
             m.Groups[3].Success ? $"{m.Groups[2].Value}.reduce({m.Groups[1].Value}, {m.Groups[3].Value})" : $"{m.Groups[2].Value}.reduce({m.Groups[1].Value})");
 
         // Rust Rayon par_iter: items.par_iter().map(fn).collect() -> parallel_map(fn, items)
-        s = Regex.Replace(s, @"\b([A-Za-z_][A-Za-z0-9_]*)\.(?:par_iter|into_par_iter)\(\)\.map\(\s*([^)]+)\s*\)\.collect(?::<[^>]+>)?\(\)", "parallel_map($2, $1)");
-        s = Regex.Replace(s, @"\b([A-Za-z_][A-Za-z0-9_]*)\.(?:iter|into_iter)\(\)\.map\(\s*([^)]+)\s*\)\.collect(?::<[^>]+>)?\(\)", "$1.map($2)");
-        s = Regex.Replace(s, @"\b([A-Za-z_][A-Za-z0-9_]*)\.(?:iter|into_iter)\(\)\.filter\(\s*([^)]+)\s*\)\.collect(?::<[^>]+>)?\(\)", "$1.filter($2)");
+        s = RustRegexMap1().Replace(s, "parallel_map($2, $1)");
+        s = RustRegexMap2().Replace(s, "$1.map($2)");
+        s = RustRegexMap3().Replace(s, "$1.filter($2)");
 
         // ---------------------------------------------------------------------
         // D. JSON & File System Equivalents
         // ---------------------------------------------------------------------
         // JSON.stringify / serde_json::to_string / cjson.encode -> json.dumps
-        s = Regex.Replace(s, @"\b(?:JSON\.stringify|serde_json::to_string|cjson\.encode)\(\s*&?([^)]+)\s*\)(?:\.unwrap\(\))?", "json.dumps($1)");
-        s = Regex.Replace(s, @"\b(?:JSON\.parse|serde_json::from_str(?::<[^>]+>)?|cjson\.decode)\(\s*&?([^)]+)\s*\)(?:\.unwrap\(\))?", "json.loads($1)");
+        s = JsonRegexString1().Replace(s, "json.dumps($1)");
+        s = JsonRegexString2().Replace(s, "json.loads($1)");
 
         // File I/O: fs.readFileSync(p, 'utf8') / std::fs::read_to_string(p).unwrap() / Path(p).read_text() -> read_text(p)
-        s = Regex.Replace(s, @"\bfs\.readFileSync\(\s*([^,)]+)(?:\s*,\s*['""]utf-?8['""])?\s*\)", "read_text($1)");
-        s = Regex.Replace(s, @"\bfs\.writeFileSync\(\s*([^,]+)\s*,\s*([^)]+)\s*\)", "write_text($1, $2)");
-        s = Regex.Replace(s, @"\bfs\.existsSync\(\s*([^)]+)\s*\)", "file_exists($1)");
-        s = Regex.Replace(s, @"\bstd::fs::read_to_string\(\s*&?([^)]+)\s*\)(?:\.unwrap\(\)|\?)?", "read_text($1)");
-        s = Regex.Replace(s, @"\bstd::fs::write\(\s*&?([^,]+)\s*,\s*&?([^)]+)\s*\)(?:\.unwrap\(\)|\?)?", "write_text($1, $2)");
-        s = Regex.Replace(s, @"\bos\.path\.exists\(\s*([^)]+)\s*\)", "file_exists($1)");
+        s = FileIORegex1().Replace(s, "read_text($1)");
+        s = FileIORegex2().Replace(s, "write_text($1, $2)");
+        s = FileIORegex3().Replace(s, "file_exists($1)");
+        s = FileIORegex4().Replace(s, "read_text($1)");
+        s = FileIORegex5().Replace(s, "write_text($1, $2)");
+        s = FileIORegex6().Replace(s, "file_exists($1)");
 
         // Concurrency: tokio::spawn / std::async / asyncio.create_task -> spawn
-        s = Regex.Replace(s, @"\b(?:tokio::spawn|asyncio\.create_task|std::async)\(\s*([^)]+)\s*\)", "spawn($1)");
+        s = ConcurrencyRegex1().Replace(s, "spawn($1)");
 
         return s;
     }
@@ -439,4 +434,91 @@ impl PilotMatrix {
 
         _ => string.Empty
     };
+    [GeneratedRegex(@"\b(matrix|zeros|ones|eye|matrix2x2|matrix3x3|matrix4x4)\b", RegexOptions.Compiled)]
+    private static partial Regex MyRegex();
+    [GeneratedRegex(@"\b(json\.dumps|json\.loads|json_dumps|json_loads|\.to_json\()\b", RegexOptions.Compiled)]
+    private static partial Regex MyRegex1();
+    [GeneratedRegex(@"^(import\s+numpy(\s+as\s+\w+)?|from\s+numpy\s+import\s+.+|import\s+pandas(\s+as\s+\w+)?|import\s+json|import\s+math|import\s+functools)$")]
+    private static partial Regex MyRegex2();
+    [GeneratedRegex(@"^use\s+(ndarray|nalgebra|serde_json|rayon|std::fs)(::.+)?;?$")]
+    private static partial Regex MyRegex3();
+    [GeneratedRegex(@"^(const|let|var)\s+\w+\s*=\s*require\(['""](mathjs|lodash|fs|path)['""]\);?$")]
+    private static partial Regex MyRegex4();
+    [GeneratedRegex(@"\b(?:np|numpy|math)\.zeros\(\s*[\(\[]\s*([^,\)\]]+)\s*,\s*([^\)\]]+)\s*[\)\]]\s*(?:,\s*dtype\s*=\s*[^)]+)?\)")]
+    private static partial Regex NPRegexZeroes1();
+    [GeneratedRegex(@"\b(?:np|numpy|math)\.zeros\(\s*([^,)]+)\s*\)")]
+    private static partial Regex NPRegexZeroes2();
+    [GeneratedRegex(@"\b(?:Array2|DMatrix)::(?:<[^>]+>::)?zeros\(\s*\(\s*([^,)]+)\s*,\s*([^)]+)\s*\)\s*\)")]
+    private static partial Regex NPRegexZeroes3();
+    [GeneratedRegex(@"\bEigen::Matrix[A-Za-z0-9_]*::Zero\(\s*([^,)]+)\s*,\s*([^)]+)\s*\)")]
+    private static partial Regex NPRegexZeroes4();
+    [GeneratedRegex(@"\b(?:np|numpy|math)\.ones\(\s*[\(\[]\s*([^,\)\]]+)\s*,\s*([^\)\]]+)\s*[\)\]]\s*(?:,\s*dtype\s*=\s*[^)]+)?\)")]
+    private static partial Regex NPRegexOnes1();
+    [GeneratedRegex(@"\b(?:np|numpy|math)\.ones\(\s*([^,)]+)\s*\)")]
+    private static partial Regex NPRegexOnes2();
+    [GeneratedRegex(@"\b(?:Array2|DMatrix)::(?:<[^>]+>::)?ones\(\s*\(\s*([^,)]+)\s*,\s*([^)]+)\s*\)\s*\)")]
+    private static partial Regex NPRegexOnes3();
+    [GeneratedRegex(@"\bEigen::Matrix[A-Za-z0-9_]*::Ones\(\s*([^,)]+)\s*,\s*([^)]+)\s*\)")]
+    private static partial Regex NPRegexOnes4();
+    [GeneratedRegex(@"\b(?:np|numpy|math)\.(?:eye|identity)\(\s*([^,)]+)(?:\s*,\s*[^)]+)?\)")]
+    private static partial Regex NPRegexEye1();
+    [GeneratedRegex(@"\b(?:Array2|DMatrix)::(?:<[^>]+>::)?eye\(\s*([^)]+)\s*\)")]
+    private static partial Regex NPRegexEye2();
+    [GeneratedRegex(@"\bEigen::Matrix[A-Za-z0-9_]*::Identity\(\s*([^,)]+)\s*,\s*[^)]+\)")]
+    private static partial Regex NPRegexEye3();
+    [GeneratedRegex(@"\b(?:np|numpy)\.(?:array|matrix|asarray)\(\s*(\[.+\])\s*,\s*dtype\s*=\s*(?:np\.)?([A-Za-z0-9_'\""]+)\s*\)")]
+    private static partial Regex NPRegexArray1();
+    [GeneratedRegex(@"\b(?:np|numpy|math)\.(?:array|matrix|asarray)\(\s*(\[.+\])\s*\)")]
+    private static partial Regex NPRegexMatrix1();
+    [GeneratedRegex(@"\barr2\(\s*&(\[.+\])\s*\)")]
+    private static partial Regex NPRegexMatrix2();
+    [GeneratedRegex(@"\b(?:np|numpy|math)\.(?:dot|matmul|multiply)\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)")]
+    private static partial Regex NPRegexMatrix3();
+    [GeneratedRegex(@"\b([A-Za-z_][A-Za-z0-9_]*)\.dot\(\s*&?([A-Za-z_][A-Za-z0-9_]*)\s*\)")]
+    private static partial Regex NPRegexMatrix4();
+    [GeneratedRegex(@"\b([A-Za-z_][A-Za-z0-9_]*)\s+@\s+([A-Za-z_][A-Za-z0-9_]*)\b")]
+    private static partial Regex NPRegexMatrix5();
+    [GeneratedRegex(@"\b(?:np|numpy)\.arange\(")]
+    private static partial Regex NPRegexRange1();
+    [GeneratedRegex(@"\.dtype\b")]
+    private static partial Regex NPRegexMatrix6();
+    [GeneratedRegex(@"\b(?:np|numpy)\.vectorize\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)")]
+    private static partial Regex NPRegexVector1();
+    [GeneratedRegex(@"\b([A-Za-z_][A-Za-z0-9_]*)\[\s*\1\[(['""][^'""]+['""])\]\s*([><=!]+)\s*([^\]]+)\]")]
+    private static partial Regex PandasRegexDF1();
+    [GeneratedRegex(@"\blist\(\s*map\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)\s*\)")]
+    private static partial Regex PyRegexMap1();
+    [GeneratedRegex(@"\blist\(\s*filter\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)\s*\)")]
+    private static partial Regex PyRegexMap2();
+    [GeneratedRegex(@"\b_\.map\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)")]
+    private static partial Regex PyRegexMap3();
+    [GeneratedRegex(@"\b_\.filter\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)")]
+    private static partial Regex PyRegexMap4();
+    [GeneratedRegex(@"\bfunctools\.reduce\(\s*([^,]+?)\s*,\s*([^,)]+?)(?:\s*,\s*([^)]+?))?\s*\)")]
+    private static partial Regex PyRegexMap5();
+    [GeneratedRegex(@"\b([A-Za-z_][A-Za-z0-9_]*)\.(?:par_iter|into_par_iter)\(\)\.map\(\s*([^)]+)\s*\)\.collect(?::<[^>]+>)?\(\)")]
+    private static partial Regex RustRegexMap1();
+    [GeneratedRegex(@"\b([A-Za-z_][A-Za-z0-9_]*)\.(?:iter|into_iter)\(\)\.map\(\s*([^)]+)\s*\)\.collect(?::<[^>]+>)?\(\)")]
+    private static partial Regex RustRegexMap2();
+    [GeneratedRegex(@"\b([A-Za-z_][A-Za-z0-9_]*)\.(?:iter|into_iter)\(\)\.filter\(\s*([^)]+)\s*\)\.collect(?::<[^>]+>)?\(\)")]
+    private static partial Regex RustRegexMap3();
+    [GeneratedRegex(@"\b(?:JSON\.stringify|serde_json::to_string|cjson\.encode)\(\s*&?([^)]+)\s*\)(?:\.unwrap\(\))?")]
+    private static partial Regex JsonRegexString1();
+    [GeneratedRegex(@"\b(?:JSON\.parse|serde_json::from_str(?::<[^>]+>)?|cjson\.decode)\(\s*&?([^)]+)\s*\)(?:\.unwrap\(\))?")]
+    private static partial Regex JsonRegexString2();
+    [GeneratedRegex(@"\bfs\.readFileSync\(\s*([^,)]+)(?:\s*,\s*['""]utf-?8['""])?\s*\)")]
+    private static partial Regex FileIORegex1();
+    [GeneratedRegex(@"\bfs\.writeFileSync\(\s*([^,]+)\s*,\s*([^)]+)\s*\)")]
+    private static partial Regex FileIORegex2();
+    [GeneratedRegex(@"\bfs\.existsSync\(\s*([^)]+)\s*\)")]
+    private static partial Regex FileIORegex3();
+    [GeneratedRegex(@"\bstd::fs::read_to_string\(\s*&?([^)]+)\s*\)(?:\.unwrap\(\)|\?)?")]
+    private static partial Regex FileIORegex4();
+    [GeneratedRegex(@"\bstd::fs::write\(\s*&?([^,]+)\s*,\s*&?([^)]+)\s*\)(?:\.unwrap\(\)|\?)?")]
+    private static partial Regex FileIORegex5();
+    [GeneratedRegex(@"\bos\.path\.exists\(\s*([^)]+)\s*\)")]
+    private static partial Regex FileIORegex6();
+    [GeneratedRegex(@"\b(?:tokio::spawn|asyncio\.create_task|std::async)\(\s*([^)]+)\s*\)")]
+    private static partial Regex ConcurrencyRegex1();
+
 }

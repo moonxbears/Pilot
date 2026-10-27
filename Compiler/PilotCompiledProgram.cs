@@ -20,27 +20,50 @@ namespace Pilot.Compiler;
 public sealed class PilotCompiledProgram : IPilotProgram
 {
     public const uint MagicHeader = 0x434C4950; // 'PILC' in little-endian
-    private const byte CurrentFormatVersion = 1;
+    private const byte VersionLegacyV1 = 1;
+    private const byte CurrentFormatVersion = 2;
     private static readonly PilotEngine SharedEngine = new();
 
     public string Source { get; }
     public string? FilePath { get; }
     public DateTime CompiledAt { get; }
     public IReadOnlyList<string> DefinedSymbols { get; }
-    public PilotParser.ProgramContext ProgramTree { get; }
+    public Pilot.Runtime.Bytecode.PilotBytecodeChunk? BytecodeChunk { get; set; }
+
+    private PilotParser.ProgramContext? _programTree;
+    public PilotParser.ProgramContext ProgramTree
+    {
+        get
+        {
+            if (_programTree == null && !string.IsNullOrEmpty(Source))
+            {
+                var inputStream = new AntlrInputStream(Source);
+                var lexer = new PilotLexer(inputStream);
+                var tokenStream = new CommonTokenStream(lexer);
+                var parser = new PilotParser(tokenStream);
+                var errorTracker = new ErrorTracker();
+                parser.RemoveErrorListeners();
+                parser.AddErrorListener(errorTracker);
+                _programTree = parser.ParseProgramFast();
+            }
+            return _programTree!;
+        }
+    }
 
     public PilotCompiledProgram(
         string source,
-        PilotParser.ProgramContext programTree,
+        PilotParser.ProgramContext? programTree,
         string? filePath = null,
         DateTime? compiledAt = null,
-        IEnumerable<string>? definedSymbols = null)
+        IEnumerable<string>? definedSymbols = null,
+        Pilot.Runtime.Bytecode.PilotBytecodeChunk? bytecodeChunk = null)
     {
         Source = source ?? string.Empty;
-        ProgramTree = programTree ?? throw new ArgumentNullException(nameof(programTree));
+        _programTree = programTree;
         FilePath = filePath;
         CompiledAt = compiledAt ?? DateTime.UtcNow;
         DefinedSymbols = definedSymbols != null ? new List<string>(definedSymbols) : Array.Empty<string>();
+        BytecodeChunk = bytecodeChunk;
     }
 
     public PilotExecutionResult Run(PilotExecutionOptions? options = null)
@@ -51,10 +74,19 @@ public sealed class PilotCompiledProgram : IPilotProgram
     public PilotExecutionResult Run(PilotExecutionContext context)
     {
         var sw = Stopwatch.StartNew();
-        var visitor = new PilotInterpreterVisitor(context);
         try
         {
-            var value = visitor.VisitProgram(ProgramTree);
+            PilotValue value;
+            if (BytecodeChunk != null)
+            {
+                value = Pilot.Runtime.Bytecode.PilVirtualMachine.Execute(BytecodeChunk, context);
+            }
+            else
+            {
+                var visitor = new PilotInterpreterVisitor(context);
+                value = visitor.VisitProgram(ProgramTree);
+            }
+
             if (context.PendingFlow == PilotFlowSignalKind.Return)
             {
                 value = context.PendingReturnValue;
@@ -115,8 +147,17 @@ public sealed class PilotCompiledProgram : IPilotProgram
             // Ingest scripting globals: args, env, cwd, exit, read_text, write_text
             PilotScriptContext.Inject(context, scriptArgs, FilePath);
 
-            var visitor = new PilotInterpreterVisitor(context);
-            var resultValue = visitor.VisitProgram(ProgramTree);
+            PilotValue resultValue;
+            if (BytecodeChunk != null)
+            {
+                resultValue = Pilot.Runtime.Bytecode.PilVirtualMachine.Execute(BytecodeChunk, context);
+            }
+            else
+            {
+                var visitor = new PilotInterpreterVisitor(context);
+                resultValue = visitor.VisitProgram(ProgramTree);
+            }
+
             if (context.PendingFlow == PilotFlowSignalKind.Return)
             {
                 resultValue = context.PendingReturnValue;
@@ -179,6 +220,14 @@ public sealed class PilotCompiledProgram : IPilotProgram
         byte[] sourceBytes = Encoding.UTF8.GetBytes(Source);
         writer.Write(sourceBytes.Length);
         writer.Write(sourceBytes);
+
+        // Serialize bytecode chunk
+        bool hasBytecode = BytecodeChunk != null;
+        writer.Write(hasBytecode);
+        if (hasBytecode)
+        {
+            BytecodeChunk!.Write(writer);
+        }
     }
 
     public void Save(string filePath)
@@ -209,7 +258,7 @@ public sealed class PilotCompiledProgram : IPilotProgram
         }
 
         byte version = reader.ReadByte();
-        if (version != CurrentFormatVersion)
+        if (version != VersionLegacyV1 && version != CurrentFormatVersion)
         {
             throw new InvalidDataException($"Unsupported Pilot compiled binary version: {version}. Expected: {CurrentFormatVersion}.");
         }
@@ -229,23 +278,36 @@ public sealed class PilotCompiledProgram : IPilotProgram
         byte[] sourceBytes = reader.ReadBytes(sourceLen);
         string source = Encoding.UTF8.GetString(sourceBytes);
 
-        // Parse tree once during loading
-        var inputStream = new AntlrInputStream(source);
-        var lexer = new PilotLexer(inputStream);
-        var tokenStream = new CommonTokenStream(lexer);
-        var parser = new PilotParser(tokenStream);
-
-        var errorTracker = new ErrorTracker();
-        parser.RemoveErrorListeners();
-        parser.AddErrorListener(errorTracker);
-
-        var tree = parser.ParseProgramFast();
-        if (errorTracker.HasErrors)
+        Pilot.Runtime.Bytecode.PilotBytecodeChunk? bytecodeChunk = null;
+        if (version >= CurrentFormatVersion)
         {
-            throw new InvalidOperationException($"Corrupt compiled program AST: {string.Join("; ", errorTracker.Errors)}");
+            bool hasBytecode = reader.ReadBoolean();
+            if (hasBytecode)
+            {
+                bytecodeChunk = Pilot.Runtime.Bytecode.PilotBytecodeChunk.Read(reader);
+            }
         }
 
-        return new PilotCompiledProgram(source, tree, string.IsNullOrEmpty(filePath) ? null : filePath, compiledAt, symbols);
+        PilotParser.ProgramContext? tree = null;
+        if (bytecodeChunk == null && !string.IsNullOrEmpty(source))
+        {
+            var inputStream = new AntlrInputStream(source);
+            var lexer = new PilotLexer(inputStream);
+            var tokenStream = new CommonTokenStream(lexer);
+            var parser = new PilotParser(tokenStream);
+
+            var errorTracker = new ErrorTracker();
+            parser.RemoveErrorListeners();
+            parser.AddErrorListener(errorTracker);
+
+            tree = parser.ParseProgramFast();
+            if (errorTracker.HasErrors)
+            {
+                throw new InvalidOperationException($"Corrupt compiled program AST: {string.Join("; ", errorTracker.Errors)}");
+            }
+        }
+
+        return new PilotCompiledProgram(source, tree, string.IsNullOrEmpty(filePath) ? null : filePath, compiledAt, symbols, bytecodeChunk);
     }
 
     public static PilotCompiledProgram Load(string filePath)
