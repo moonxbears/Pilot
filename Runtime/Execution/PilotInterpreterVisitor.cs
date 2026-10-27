@@ -207,10 +207,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         if (context.identifier() != null)
         {
             string name = context.identifier().GetText();
-            if (!Context.Environment.CurrentScope.Assign(name, val))
-            {
-                Context.Environment.CurrentScope.Declare(name, val, isConst);
-            }
+            Context.Environment.CurrentScope.DeclareOrShadow(name, val, isConst);
             return;
         }
 
@@ -928,7 +925,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         return PilotValue.FromFunction(function);
     }
 
-    private static bool ContainsYield(Antlr4.Runtime.Tree.IParseTree? tree)
+    internal static bool ContainsYield(Antlr4.Runtime.Tree.IParseTree? tree)
     {
         if (tree == null) return false;
         return ContainsYieldCache.GetOrAdd(tree, static t => ContainsYieldCore(t));
@@ -1383,6 +1380,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         var bodyNode = context.suite(0);
         while (Visit(condNode).IsTrue)
         {
+            Context.Environment.PushScope("while");
             try
             {
                 lastVal = Visit(bodyNode);
@@ -1394,6 +1392,10 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             catch (PilotContinueSignal)
             {
                 continue;
+            }
+            finally
+            {
+                Context.Environment.PopScope();
             }
 
             if (Context.PendingFlow != PilotFlowSignalKind.None)
@@ -1491,6 +1493,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                     AssignForTarget(forTarget, itemVal);
                 }
 
+                Context.Environment.PushScope("for");
                 try
                 {
                     lastVal = Visit(bodySuite);
@@ -1503,6 +1506,10 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 {
                     current += step;
                     continue;
+                }
+                finally
+                {
+                    Context.Environment.PopScope();
                 }
 
                 if (Context.PendingFlow != PilotFlowSignalKind.None)
@@ -1547,6 +1554,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                     AssignForTarget(forTarget, itemVal);
                 }
 
+                Context.Environment.PushScope("for");
                 try
                 {
                     lastVal = Visit(bodySuite);
@@ -1558,6 +1566,10 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 catch (PilotContinueSignal)
                 {
                     continue;
+                }
+                finally
+                {
+                    Context.Environment.PopScope();
                 }
 
                 if (Context.PendingFlow != PilotFlowSignalKind.None)
@@ -1620,6 +1632,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 AssignForTarget(forTarget, item);
             }
 
+            Context.Environment.PushScope("for");
             try
             {
                 lastVal = Visit(bodySuite);
@@ -1631,6 +1644,10 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             catch (PilotContinueSignal)
             {
                 continue;
+            }
+            finally
+            {
+                Context.Environment.PopScope();
             }
 
             if (Context.PendingFlow != PilotFlowSignalKind.None)

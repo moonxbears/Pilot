@@ -260,7 +260,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         };
     }
 
-    public static PilotAnalysisResult Analyze(string code, string uri = "inmemory://test.pilot", PilotPreprocessorOptions? preprocessorOptions = null)
+    public static PilotAnalysisResult Analyze(string code, string uri = "inmemory://test.pilot", PilotPreprocessorOptions? preprocessorOptions = null, bool checkUnused = false)
     {
         var preprocResult = PilotPreprocessor.Preprocess(code ?? string.Empty, uri, preprocessorOptions);
 
@@ -322,7 +322,49 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             }
         }
 
+        if (checkUnused)
+        {
+            analyzer.CheckUnusedVariables(analyzer._result.RootScope);
+        }
+
         return analyzer._result;
+    }
+
+    private void CheckUnusedVariables(PilotScope scope)
+    {
+        if (scope != _result.RootScope)
+        {
+            foreach (var sym in scope.Symbols.Values)
+            {
+                if (sym.Kind == PilotSymbolKind.Variable && sym.ReferenceCount == 0 && !sym.Name.StartsWith("_", StringComparison.Ordinal))
+                {
+                    var action = new PilotCodeAction
+                    {
+                        Title = $"Rename '{sym.Name}' to '_{sym.Name}'",
+                        Kind = "quickfix",
+                        IsPreferred = true,
+                        NewText = $"_{sym.Name}",
+                        StartLine = sym.SelectionLine,
+                        StartColumn = sym.SelectionColumn,
+                        EndLine = sym.SelectionLine,
+                        EndColumn = sym.SelectionEndColumn
+                    };
+                    AddDiagnosticDirect(
+                        sym.SelectionLine,
+                        sym.SelectionColumn,
+                        sym.SelectionEndColumn,
+                        PilotDiagnosticSeverity.Warning,
+                        PilotDiagnosticCatalog.UnusedVariable,
+                        $"Variable '{sym.Name}' is declared but its value is never used.",
+                        new[] { action });
+                }
+            }
+        }
+
+        foreach (var child in scope.Children)
+        {
+            CheckUnusedVariables(child);
+        }
     }
 
     private void PreRegisterTopLevelDeclarations(PilotParser.ProgramContext program)
@@ -392,6 +434,11 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             else if (compound.macro_def() is { } macroDef && macroDef.identifier() is { } macroId)
             {
                 RegisterFunctionStub(macroId, "AstNode", "Metaprogramming / Lisp");
+            }
+            else if (compound.func_def() is { } funcDef && funcDef.identifier() is { } funcId)
+            {
+                string retType = funcDef.type_spec()?.GetText() ?? "any";
+                RegisterFunctionStub(funcId, retType, "Core");
             }
         }
     }
@@ -643,6 +690,33 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
         if (!isAssignment)
         {
+            if (testlist?.test() != null)
+            {
+                foreach (var t in testlist.test())
+                {
+                    string? exprType = Visit(t);
+                    if (exprType != null && (exprType.StartsWith("Future[", StringComparison.OrdinalIgnoreCase) || exprType.StartsWith("Task[", StringComparison.OrdinalIgnoreCase) || exprType is "Future" or "Task"))
+                    {
+                        var (tLine, tCol, _) = GetTokenCoords(t.Start);
+                        var action = new PilotCodeAction
+                        {
+                            Title = "Add 'await' to future expression",
+                            Kind = "quickfix",
+                            IsPreferred = true,
+                            NewText = "await ",
+                            StartLine = tLine,
+                            StartColumn = tCol,
+                            EndLine = tLine,
+                            EndColumn = tCol
+                        };
+                        AddDiagnostic(t.Start, PilotDiagnosticSeverity.Warning,
+                            PilotDiagnosticCatalog.UnawaitedFutureDiscarded,
+                            $"Expression of type '{exprType}' is discarded without awaiting; async operation will not complete synchronously.",
+                            new[] { action });
+                    }
+                }
+                return "void";
+            }
             return base.VisitExpr_stmt(context);
         }
 
@@ -664,7 +738,15 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                 if (existing != null)
                 {
                     AddSymbolReference(idCtx.Start, existing);
-                    if (!existing.IsMutable && existing.Kind == PilotSymbolKind.Variable)
+                    if (existing.Kind == PilotSymbolKind.Parameter && !existing.IsMutable)
+                    {
+                        AddDiagnostic(
+                            idCtx.Start,
+                            PilotDiagnosticSeverity.Error,
+                            PilotDiagnosticCatalog.ParameterReassignment,
+                            $"Cannot reassign parameter '{varName}'. Parameters are immutable by default; pass by reference or declare a local variable.");
+                    }
+                    else if (!existing.IsMutable && existing.Kind == PilotSymbolKind.Variable)
                     {
                         string bindingKind = existing.IsConstant ? "const" : "let";
                         AddDiagnostic(
@@ -802,7 +884,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             _currentScope.EnclosingType.Children.Add(funcSymbol);
         }
 
-        using (EnterScope($"def:{name}", context, inHardRt: isHardRt, inSoftRt: isSoftRt, inAsync: isAsync, returnType: returnType))
+        using (EnterScope($"def:{name}", context, inHardRt: isHardRt, inSoftRt: isSoftRt, inAsync: isAsync, inFunction: true, returnType: returnType))
         {
             if (context.generic_params() != null)
             {
@@ -901,7 +983,18 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         using (EnterScope($"class:{name}", context, enclosingType: symbol))
         {
             RegisterGenericParams(context.generic_params(), symbol);
-            if (context.class_bases() != null) Visit(context.class_bases());
+            if (context.class_bases() != null)
+            {
+                foreach (var b in context.class_bases().type_spec())
+                {
+                    string bName = b.GetText();
+                    if (!string.IsNullOrEmpty(bName))
+                    {
+                        symbol.BaseTypes.Add(bName);
+                    }
+                }
+                Visit(context.class_bases());
+            }
             if (context.where_type_clause() != null) Visit(context.where_type_clause());
             if (context.suite() != null) Visit(context.suite());
         }
@@ -988,7 +1081,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         var symbol = CreateSymbol(idCtx, context, name, PilotSymbolKind.Actor, name, "Concurrency", $"actor {name}", "Isolated concurrent actor with message-driven state.");
         RegisterSymbol(symbol, PilotSemanticTokenLegend.TypeClass, PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModDefinition | PilotSemanticTokenLegend.ModAsync);
 
-        using (EnterScope($"actor:{name}", context, inAsync: true, enclosingType: symbol))
+        using (EnterScope($"actor:{name}", context, inAsync: true, inActor: true, enclosingType: symbol))
         {
             RegisterGenericParams(context.generic_params(), symbol);
             if (context.suite() != null) Visit(context.suite());
@@ -1031,7 +1124,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             _currentScope.EnclosingType.Children.Add(symbol);
         }
 
-        using (EnterScope($"property:{name}", context, returnType: propType))
+        using (EnterScope($"property:{name}", context, inFunction: true, returnType: propType))
         {
             if (_currentScope.EnclosingType != null)
             {
@@ -1053,7 +1146,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
                     if (acc.set_accessor() != null)
                     {
-                        using (EnterScope($"set:{name}", acc.set_accessor()))
+                        using (EnterScope($"set:{name}", acc.set_accessor(), inFunction: true))
                         {
                             var setParamId = acc.set_accessor().identifier();
                             string valParamName = setParamId?.GetText() ?? "value";
@@ -1095,7 +1188,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         if (_currentScope.EnclosingType != null)
             _currentScope.EnclosingType.Children.Add(symbol);
 
-        using (EnterScope($"operator:{opText}", context, returnType: retType))
+        using (EnterScope($"operator:{opText}", context, inFunction: true, returnType: retType))
         {
             if (context.parameters()?.parameter() != null)
             {
@@ -1215,7 +1308,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             $"{macroKind} {name}{context.parameters()?.GetText() ?? "()"}", "Compile-time AST macro (Lisp homoiconicity).");
         RegisterSymbol(symbol, PilotSemanticTokenLegend.TypeMacro, PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModDefinition);
 
-        using (EnterScope($"macro:{name}", context))
+        using (EnterScope($"macro:{name}", context, inFunction: true))
         {
             if (context.parameters()?.parameter() != null)
             {
@@ -1796,13 +1889,68 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
     public override string? VisitFlow_stmt(PilotParser.Flow_stmtContext context)
     {
         if (context.BREAK() != null)
+        {
             AddSemanticToken(context.BREAK().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+            if (!_currentScope.InLoop)
+            {
+                AddDiagnostic(context.BREAK().Symbol, PilotDiagnosticSeverity.Error,
+                    PilotDiagnosticCatalog.LoopJumpOutsideLoop,
+                    "'break' statement can only be used inside a loop ('for' or 'while').");
+            }
+        }
         if (context.CONTINUE() != null)
+        {
             AddSemanticToken(context.CONTINUE().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+            if (!_currentScope.InLoop)
+            {
+                AddDiagnostic(context.CONTINUE().Symbol, PilotDiagnosticSeverity.Error,
+                    PilotDiagnosticCatalog.LoopJumpOutsideLoop,
+                    "'continue' statement can only be used inside a loop ('for' or 'while').");
+            }
+        }
         if (context.RETURN() != null)
+        {
             AddSemanticToken(context.RETURN().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+            if (!_currentScope.InFunction)
+            {
+                AddDiagnostic(context.RETURN().Symbol, PilotDiagnosticSeverity.Error,
+                    PilotDiagnosticCatalog.ReturnOutsideFunction,
+                    "'return' statement can only appear inside a function or method body.");
+            }
+            else if (context.testlist() != null && _currentScope.EnclosingReturnType != null)
+            {
+                var tests = context.testlist().test();
+                if (tests != null && tests.Length > 0)
+                {
+                    var retExpr = tests[0];
+                    string retType = Visit(retExpr) ?? "any";
+                    string expected = _currentScope.EnclosingReturnType;
+                    if (expected is not ("void" or "any" or "unknown" or "dynamic") &&
+                        retType is not ("any" or "unknown" or "dynamic") &&
+                        !string.Equals(expected, retType, StringComparison.OrdinalIgnoreCase) &&
+                        !IsCompatibleType(expected, retType))
+                    {
+                        AddDiagnostic(retExpr.Start, PilotDiagnosticSeverity.Error,
+                            PilotDiagnosticCatalog.ReturnTypeMismatch,
+                            $"Function declared return type '{expected}', but returned value of type '{retType}'.");
+                    }
+                }
+            }
+        }
         if (context.YIELD() != null)
+        {
             AddSemanticToken(context.YIELD().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+            if (!_currentScope.InFunction)
+            {
+                AddDiagnostic(context.YIELD().Symbol, PilotDiagnosticSeverity.Error,
+                    PilotDiagnosticCatalog.YieldOutsideGenerator,
+                    "'yield' statement can only appear inside a generator function or method.");
+            }
+            else
+            {
+                _currentScope.IsGenerator = true;
+            }
+        }
         if (context.RAISE() != null)
             AddSemanticToken(context.RAISE().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
         if (context.FROM() != null)
@@ -1848,6 +1996,25 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             AddSemanticToken(context.NOT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
         return base.VisitComp_op(context);
     }
+    public override string? VisitSelect_stmt(PilotParser.Select_stmtContext context)
+    {
+        if (context.SELECT() != null)
+            AddSemanticToken(context.SELECT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
+        var arms = context.select_suite()?.select_arm();
+        if (arms != null && arms.Length > 0)
+        {
+            bool hasTimeoutOrDefault = arms.Any(a => a.TIMEOUT() != null || a.DEFAULT() != null);
+            if (!hasTimeoutOrDefault)
+            {
+                AddDiagnostic(context.SELECT().Symbol, PilotDiagnosticSeverity.Warning,
+                    PilotDiagnosticCatalog.UnboundedSelectDeadlockRisk,
+                    "'select' block has neither 'timeout' nor 'default' case and may block indefinitely if no channel becomes ready.");
+            }
+        }
+        return base.VisitSelect_stmt(context);
+    }
+
     public override string? VisitSelect_arm(PilotParser.Select_armContext context)
     {
         using (EnterScope("select_arm", context))
@@ -1949,18 +2116,35 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         return "Dataset[any]";
     }
 
+    private bool IsInsideSyncFunction()
+    {
+        for (var scope = _currentScope; scope != null; scope = scope.Parent)
+        {
+            if (scope.Name.StartsWith("def:", StringComparison.Ordinal) ||
+                scope.Name.StartsWith("extern_fn:", StringComparison.Ordinal) ||
+                scope.Name.StartsWith("property:", StringComparison.Ordinal) ||
+                scope.Name.StartsWith("operator:", StringComparison.Ordinal) ||
+                scope.Name.StartsWith("set:", StringComparison.Ordinal) ||
+                scope.Name.StartsWith("lambda", StringComparison.Ordinal))
+            {
+                return !scope.InAsync;
+            }
+        }
+        return false;
+    }
+
     public override string? VisitUnary_op(PilotParser.Unary_opContext context)
     {
         if (context.AWAIT() != null)
         {
             AddSemanticToken(context.AWAIT().Symbol, PilotSemanticTokenLegend.TypeKeyword, PilotSemanticTokenLegend.ModAsync);
-            if (!_currentScope.InAsync)
+            if (IsInsideSyncFunction())
             {
                 AddDiagnostic(
                     context.AWAIT().Symbol,
                     PilotDiagnosticSeverity.Error,
                     "PILOT106",
-                    "The 'await' operator can only be used inside an 'async def' function or 'actor' handler.");
+                    "The 'await' operator can only be used inside an 'async def' function, 'actor' handler, or top-level script.");
             }
             string? inner = context.factor() != null ? Visit(context.factor()) : "any";
             return ExtractElementType(inner ?? "any");
@@ -2013,6 +2197,13 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         var atom = context.atom();
         string? currentType = Visit(atom);
 
+        string? funcName = atom.identifier()?.GetText();
+        PilotSymbol? funcSym = funcName != null ? _currentScope.Resolve(funcName) : null;
+        if (funcSym != null && funcSym.IsAsync && context.trailer().Any(t => t.LPAR() != null))
+        {
+            currentType = $"Future[{funcSym.TypeName}]";
+        }
+
         foreach (var trailer in context.trailer())
         {
             if (trailer.cascade_trailer() is { } cascade)
@@ -2023,6 +2214,28 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             else if (trailer.identifier() is { } memberId)
             {
                 string memberName = memberId.GetText();
+
+                if (trailer.DOT() != null && currentType != null && currentType.EndsWith("?", StringComparison.Ordinal))
+                {
+                    var dotTok = trailer.DOT().Symbol;
+                    var (dLine, dCol, dEndCol) = GetTokenCoords(dotTok);
+                    var action = new PilotCodeAction
+                    {
+                        Title = "Replace '.' with '?.' safe navigation",
+                        Kind = "quickfix",
+                        IsPreferred = true,
+                        NewText = "?.",
+                        StartLine = dLine,
+                        StartColumn = dCol,
+                        EndLine = dLine,
+                        EndColumn = dEndCol
+                    };
+                    AddDiagnostic(dotTok, PilotDiagnosticSeverity.Error,
+                        PilotDiagnosticCatalog.PossibleNullDereference,
+                        $"Possible null dereference on optional expression: type is '{currentType}'. Use '?.' for safe navigation.",
+                        new[] { action });
+                }
+
                 // Resolve member on currentType if known
                 if (currentType != null)
                 {
@@ -2129,7 +2342,12 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             Name = "lambda",
             Parent = enclosing,
             StartLine = startLine,
-            EndLine = endLine
+            EndLine = endLine,
+            InFunction = true,
+            InAsync = enclosing.InAsync,
+            InHardRealtime = enclosing.InHardRealtime,
+            InSoftRealtime = enclosing.InSoftRealtime,
+            InNoAlloc = enclosing.InNoAlloc
         };
         enclosing.Children.Add(lambdaScope);
         _currentScope = lambdaScope;
@@ -2346,14 +2564,26 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
         if (context.collection_expr() != null)
         {
+            if (_currentScope.InHardRealtime || _currentScope.InNoAlloc)
+            {
+                AddDiagnostic(context.Start, PilotDiagnosticSeverity.Error,
+                    PilotDiagnosticCatalog.HeapAllocInRealtime,
+                    "Heap allocation detected inside '@hard_realtime' / 'noalloc' context: dynamic collection creation triggers GC pauses. Use stack buffer or preallocated array.");
+            }
             base.VisitAtom(context);
             return "List[any]";
         }
 
-        if (context.LBRACE() != null)
+        if (context.LBRACE() != null && context.dictorsetmaker() != null)
         {
+            if (_currentScope.InHardRealtime || _currentScope.InNoAlloc)
+            {
+                AddDiagnostic(context.Start, PilotDiagnosticSeverity.Error,
+                    PilotDiagnosticCatalog.HeapAllocInRealtime,
+                    "Heap allocation detected inside '@hard_realtime' / 'noalloc' context: dynamic dictionary/set creation triggers GC pauses.");
+            }
             base.VisitAtom(context);
-            if (context.dictorsetmaker() != null && context.dictorsetmaker().dict_entry().Length == 0)
+            if (context.dictorsetmaker().dict_entry().Length == 0)
                 return "Set[any]";
             return "Dict[any, any]";
         }
@@ -2540,6 +2770,158 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
     private static bool SimpleStmtExits(PilotParser.Simple_stmtContext simple)
     {
         return simple.small_stmt().Any(s => s.flow_stmt() != null);
+    }
+
+    public override string? VisitSimple_stmt(PilotParser.Simple_stmtContext context)
+    {
+        var semis = context.SEMI();
+        var smallStmts = context.small_stmt();
+        bool hasDoubleSemi = context.GetText().Contains(";;") ||
+            (semis != null && semis.Length > 0 && smallStmts != null && smallStmts.Any(s => s.GetText().EndsWith(";")));
+        if (hasDoubleSemi || (semis != null && smallStmts != null && semis.Length > smallStmts.Length))
+        {
+            var extraSemi = semis?.LastOrDefault();
+            if (extraSemi != null)
+            {
+                var (sLine, sCol, sEndCol) = GetTokenCoords(extraSemi.Symbol);
+                var action = new PilotCodeAction
+                {
+                    Title = "Remove redundant semicolon",
+                    Kind = "quickfix",
+                    IsPreferred = true,
+                    NewText = "",
+                    StartLine = sLine,
+                    StartColumn = sCol,
+                    EndLine = sLine,
+                    EndColumn = sEndCol
+                };
+                AddDiagnostic(
+                    extraSemi.Symbol,
+                    PilotDiagnosticSeverity.Hint,
+                    PilotDiagnosticCatalog.RedundantSemicolon,
+                    "Redundant semicolon.",
+                    new[] { action });
+            }
+        }
+        return base.VisitSimple_stmt(context);
+    }
+
+    public override string? VisitSuite(PilotParser.SuiteContext context)
+    {
+        var stmts = context.stmt();
+        if (stmts != null && stmts.Length > 1)
+        {
+            bool hasExited = false;
+            for (int i = 0; i < stmts.Length; i++)
+            {
+                var stmt = stmts[i];
+                if (hasExited)
+                {
+                    var action = new PilotCodeAction
+                    {
+                        Title = "Remove unreachable code",
+                        Kind = "quickfix",
+                        IsPreferred = true,
+                        NewText = "",
+                        StartLine = Math.Max(0, (stmt.Start?.Line ?? 1) - 1),
+                        StartColumn = stmt.Start?.Column ?? 0,
+                        EndLine = Math.Max(0, (stmt.Stop?.Line ?? stmt.Start?.Line ?? 1) - 1),
+                        EndColumn = (stmt.Stop?.Column ?? 0) + (stmt.Stop?.Text?.Length ?? 1)
+                    };
+                    if (stmt.Start != null)
+                    {
+                        AddDiagnostic(stmt.Start, PilotDiagnosticSeverity.Warning,
+                            PilotDiagnosticCatalog.UnreachableCode,
+                            "Unreachable code detected; this statement will never be executed.",
+                            new[] { action });
+                    }
+                }
+                Visit(stmt);
+                if (!hasExited && StmtGuaranteesExit(stmt))
+                {
+                    hasExited = true;
+                }
+            }
+            return "void";
+        }
+        return base.VisitSuite(context);
+    }
+
+    private static bool StmtGuaranteesExit(PilotParser.StmtContext stmt)
+    {
+        if (stmt.simple_stmt() != null)
+            return SimpleStmtExits(stmt.simple_stmt());
+        if (stmt.compound_stmt()?.if_stmt() is { } ifStmt)
+        {
+            var suites = ifStmt.suite();
+            var elses = ifStmt.ELSE();
+            if (elses != null && elses.Length > 0 && suites != null && suites.Length > 1)
+            {
+                return suites.All(SuiteGuaranteesExit);
+            }
+        }
+        return false;
+    }
+
+    public override string? VisitArith_expr(PilotParser.Arith_exprContext context)
+    {
+        var terms = context.term();
+        var pluses = context.PLUS();
+        if (pluses != null && pluses.Length > 0 && terms != null && terms.Length > 1)
+        {
+            string? firstType = Visit(terms[0]);
+            bool anyString = firstType is "str" or "string" || terms[0].GetText().StartsWith("\"");
+            for (int i = 1; i < terms.Length; i++)
+            {
+                string? tType = Visit(terms[i]);
+                if (tType is "str" or "string" || terms[i].GetText().StartsWith("\""))
+                {
+                    anyString = true;
+                }
+            }
+            if (anyString)
+            {
+                var action = new PilotCodeAction
+                {
+                    Title = "Convert to f-string",
+                    Kind = "quickfix",
+                    IsPreferred = true,
+                    NewText = null,
+                    StartLine = Math.Max(0, (context.Start?.Line ?? 1) - 1),
+                    StartColumn = context.Start?.Column ?? 0,
+                    EndLine = Math.Max(0, (context.Stop?.Line ?? context.Start?.Line ?? 1) - 1),
+                    EndColumn = (context.Stop?.Column ?? 0) + (context.Stop?.Text?.Length ?? 1)
+                };
+                AddDiagnostic(pluses[0].Symbol, PilotDiagnosticSeverity.Hint,
+                    PilotDiagnosticCatalog.SuggestFString,
+                    "String concatenation with '+' can be simplified using an interpolated f-string.",
+                    new[] { action });
+                return "str";
+            }
+            return firstType ?? "any";
+        }
+        return base.VisitArith_expr(context);
+    }
+
+    public override string? VisitExcept_clause(PilotParser.Except_clauseContext context)
+    {
+        if (context.EXCEPT() != null)
+            AddSemanticToken(context.EXCEPT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
+        var suite = context.suite();
+        if (suite != null)
+        {
+            var stmts = suite.stmt();
+            bool isEmpty = stmts == null || stmts.Length == 0 ||
+                (stmts.Length == 1 && stmts[0].simple_stmt()?.small_stmt()?.Any(s => s.pass_stmt() != null) == true);
+            if (isEmpty)
+            {
+                AddDiagnostic(context.EXCEPT().Symbol, PilotDiagnosticSeverity.Warning,
+                    PilotDiagnosticCatalog.EmptyCatchBlock,
+                    "Empty 'except' block suppresses all exceptions without logging or handling.");
+            }
+        }
+        return base.VisitExcept_clause(context);
     }
 
     public override string? VisitMatch_stmt(PilotParser.Match_stmtContext context)
@@ -2789,6 +3171,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
     private void AddSymbolReferenceDirect(int line, int col, int endCol, PilotSymbol symbol)
     {
+        symbol.ReferenceCount++;
         _result.References.Add(new PilotSymbolReference
         {
             Line = line,
@@ -2959,6 +3342,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
     private void AddSymbolReference(IToken token, PilotSymbol symbol)
     {
+        symbol.ReferenceCount++;
         var (line, col, endCol) = GetTokenCoords(token);
         _result.References.Add(new PilotSymbolReference
         {
@@ -2982,13 +3366,13 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         });
     }
 
-    private void AddDiagnostic(IToken token, PilotDiagnosticSeverity severity, string code, string message)
+    private void AddDiagnostic(IToken token, PilotDiagnosticSeverity severity, string code, string message, IEnumerable<PilotCodeAction>? actions = null)
     {
         if (_preprocResult != null && _preprocResult.IsWarningSuppressed(code, token.Line))
             return;
 
         var (line, col, endCol) = GetTokenCoords(token);
-        _result.Diagnostics.Add(new PilotDiagnostic
+        var diag = new PilotDiagnostic
         {
             StartLine = line,
             StartColumn = col,
@@ -2997,7 +3381,34 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             Severity = severity,
             Code = code,
             Message = message
-        });
+        };
+        if (actions != null)
+        {
+            diag.CodeActions.AddRange(actions);
+        }
+        _result.Diagnostics.Add(diag);
+    }
+
+    private void AddDiagnosticDirect(int startLine, int startCol, int endCol, PilotDiagnosticSeverity severity, string code, string message, IEnumerable<PilotCodeAction>? actions = null)
+    {
+        if (_preprocResult != null && _preprocResult.IsWarningSuppressed(code, startLine + 1))
+            return;
+
+        var diag = new PilotDiagnostic
+        {
+            StartLine = startLine,
+            StartColumn = startCol,
+            EndLine = startLine,
+            EndColumn = Math.Max(startCol + 1, endCol),
+            Severity = severity,
+            Code = code,
+            Message = message
+        };
+        if (actions != null)
+        {
+            diag.CodeActions.AddRange(actions);
+        }
+        _result.Diagnostics.Add(diag);
     }
 
     private static int GetSemanticTokenTypeForSymbol(PilotSymbol symbol) => symbol.Kind switch
@@ -3066,6 +3477,8 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         bool? inNoAlloc = null,
         bool? inAsync = null,
         bool? inLoop = null,
+        bool? inFunction = null,
+        bool? inActor = null,
         bool? inTransaction = null,
         string? returnType = null,
         PilotSymbol? enclosingType = null)
@@ -3082,6 +3495,8 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             InNoAlloc = inNoAlloc ?? parent.InNoAlloc,
             InAsync = inAsync ?? parent.InAsync,
             InLoop = inLoop ?? parent.InLoop,
+            InFunction = inFunction ?? parent.InFunction,
+            InActor = inActor ?? parent.InActor,
             InTransaction = inTransaction ?? parent.InTransaction,
             EnclosingReturnType = returnType ?? parent.EnclosingReturnType,
             EnclosingType = enclosingType ?? parent.EnclosingType
@@ -3119,6 +3534,35 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             int zeroLine = Math.Max(0, line - 1);
             int col = Math.Max(0, charPositionInLine);
             int len = Math.Max(1, offendingSymbol?.Text?.Length ?? 1);
+
+            if (offendingSymbol?.Text == ";")
+            {
+                var action = new PilotCodeAction
+                {
+                    Title = "Remove redundant semicolon",
+                    Kind = "quickfix",
+                    IsPreferred = true,
+                    NewText = "",
+                    StartLine = zeroLine,
+                    StartColumn = col,
+                    EndLine = zeroLine,
+                    EndColumn = col + len
+                };
+                var semiDiag = new PilotDiagnostic
+                {
+                    StartLine = zeroLine,
+                    StartColumn = col,
+                    EndLine = zeroLine,
+                    EndColumn = col + len,
+                    Severity = PilotDiagnosticSeverity.Hint,
+                    Code = PilotDiagnosticCatalog.RedundantSemicolon,
+                    Message = "Redundant semicolon."
+                };
+                semiDiag.CodeActions.Add(action);
+                _diagnostics.Add(semiDiag);
+                return;
+            }
+
             _diagnostics.Add(new PilotDiagnostic
             {
                 StartLine = zeroLine,

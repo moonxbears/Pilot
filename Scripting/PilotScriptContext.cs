@@ -136,8 +136,12 @@ public static class PilotScriptContext
 
     private static void InjectScriptPath(PilotScope scope, string? scriptPath)
     {
-        // 2. Script path
+        // 2. Script path and module entry name
         scope.Declare("script_path", PilotValue.FromString(scriptPath ?? string.Empty));
+        if (!scope.TryResolve("__name__", out _))
+        {
+            scope.Declare("__name__", PilotValue.FromString("__main__"));
+        }
     }
 
     private static void InjectEnvironmentVariables(PilotScope scope)

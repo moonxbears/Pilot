@@ -32,6 +32,16 @@ public sealed class PilotScope
     }
 
     /// <summary>
+    /// Declares a binding in this local scope, or shadows an existing local/outer binding with a new definition.
+    /// </summary>
+    public PilotBinding DeclareOrShadow(string name, PilotValue value, bool isConst = false, string? typeName = null)
+    {
+        var binding = new PilotBinding(name, value, isConst, typeName);
+        _bindings[name] = binding;
+        return binding;
+    }
+
+    /// <summary>
     /// Resolves an existing mutable binding in the scope chain or declares a new local binding,
     /// returning the direct <see cref="PilotBinding"/> slot for zero-lookup loop updates.
     /// </summary>

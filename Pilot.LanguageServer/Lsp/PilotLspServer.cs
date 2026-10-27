@@ -157,6 +157,7 @@ public sealed class PilotLspServer
                         ["definitionProvider"] = true,
                         ["documentSymbolProvider"] = true,
                         ["foldingRangeProvider"] = true,
+                        ["codeActionProvider"] = true,
                         ["completionProvider"] = new JsonObject
                         {
                             ["resolveProvider"] = false,
@@ -395,6 +396,61 @@ public sealed class PilotLspServer
                 }
 
                 outgoing.Add(BuildResponse(idNode, items));
+                break;
+            }
+
+            case "textDocument/codeAction":
+            {
+                string? uri = @params?["textDocument"]?["uri"]?.GetValue<string>();
+                var actions = new JsonArray();
+                if (uri != null && TryGetAnalysis(uri, out var analysis))
+                {
+                    var rangeObj = @params?["range"];
+                    int reqStartLine = rangeObj?["start"]?["line"]?.GetValue<int>() ?? 0;
+                    int reqEndLine = rangeObj?["end"]?["line"]?.GetValue<int>() ?? reqStartLine;
+
+                    foreach (var diag in analysis.Diagnostics)
+                    {
+                        if (diag.StartLine >= reqStartLine - 1 && diag.StartLine <= reqEndLine + 1 && diag.CodeActions.Count > 0)
+                        {
+                            foreach (var ca in diag.CodeActions)
+                            {
+                                actions.Add(new JsonObject
+                                {
+                                    ["title"] = ca.Title,
+                                    ["kind"] = ca.Kind,
+                                    ["isPreferred"] = ca.IsPreferred,
+                                    ["diagnostics"] = new JsonArray
+                                    {
+                                        new JsonObject
+                                        {
+                                            ["range"] = CreateRange(diag.StartLine, diag.StartColumn, diag.EndLine, diag.EndColumn),
+                                            ["severity"] = (int)diag.Severity,
+                                            ["code"] = diag.Code,
+                                            ["source"] = diag.Source,
+                                            ["message"] = diag.Message
+                                        }
+                                    },
+                                    ["edit"] = new JsonObject
+                                    {
+                                        ["changes"] = new JsonObject
+                                        {
+                                            [uri] = new JsonArray
+                                            {
+                                                new JsonObject
+                                                {
+                                                    ["range"] = CreateRange(ca.StartLine, ca.StartColumn, ca.EndLine, ca.EndColumn),
+                                                    ["newText"] = ca.NewText ?? string.Empty
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+                outgoing.Add(BuildResponse(idNode, actions));
                 break;
             }
 

@@ -459,6 +459,32 @@ public sealed class PilotBuiltinRegistry
         Register("metadata", (_, a) =>
             PilotValue.FromFunction(PilotFunction.CreateNative("meta_decorator", (_, innerArgs) => innerArgs.Count > 0 ? innerArgs[0] : PilotValue.Null)));
 
+        // Selective Execution, Benchmarking, and Testing Built-ins
+        Register("test", (_, a) => a.Count > 0 ? a[0] : PilotValue.Null, "fn");
+        Register("bench", (_, a) => a.Count > 0 ? a[0] : PilotValue.Null, "fn");
+        Register("benchmark", (_, a) =>
+        {
+            if (a.Count > 0 && a[0].Kind == PilotValueKind.Function) return a[0];
+            return PilotValue.FromFunction(PilotFunction.CreateNative("benchmark_dec", (_, innerArgs) =>
+                innerArgs.Count > 0 ? innerArgs[0] : PilotValue.Null));
+        });
+        Register("tag", (_, _) =>
+            PilotValue.FromFunction(PilotFunction.CreateNative("tag_dec", (_, innerArgs) =>
+                innerArgs.Count > 0 ? innerArgs[0] : PilotValue.Null)));
+        Register("entry", (_, a) => a.Count > 0 ? a[0] : PilotValue.Null, "fn");
+        Register("is_selective", (ctx, a) =>
+        {
+            if (ctx.Environment != null && ctx.Environment.TryResolve("__selective__", out var selVal))
+            {
+                if (a.Count > 0)
+                {
+                    return PilotValue.FromBool(string.Equals(selVal.AsString(), a[0].AsString(), StringComparison.OrdinalIgnoreCase));
+                }
+                return PilotValue.True;
+            }
+            return PilotValue.False;
+        }, "target_mode");
+
         // Bidirectional Optimizing Transpilation & Ingestion Built-ins
         Register("transpile", (_, args) =>
         {

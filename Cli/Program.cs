@@ -58,6 +58,18 @@ public static class Program
             return ExecuteBuildSubcommand(args.Skip(1).ToArray());
         }
 
+        // 2e. Test runner subcommand: pilot test <file.pilot|dir> [--filter <pattern>]
+        if (args.Length > 0 && (args[0] == "test" || args[0] == "--test"))
+        {
+            return ExecuteTestSubcommand(args.Skip(1).ToArray());
+        }
+
+        // 2f. Benchmark runner subcommand: pilot bench <file.pilot> [--filter <pattern>] [--iterations <N>]
+        if (args.Length > 0 && (args[0] == "bench" || args[0] == "benchmark" || args[0] == "--bench"))
+        {
+            return ExecuteBenchmarkSubcommand(args.Skip(1).ToArray());
+        }
+
         // 3. Script run subcommand: pilot run <file.pilot|file.pilc> [--patch <patch.pilot|.pilc>] [args...]
         if (args.Length > 1 && (args[0] == "run"))
         {
@@ -96,12 +108,19 @@ public static class Program
         // 4. Direct script execution if first argument is a file: pilot script.pilot [args...] or pilot script.pilc [args...]
         bool hasToolingFlags = args.Any(a => a is "--emit" or "--target" or "--from" or "--ingest" or "--tokens" or "--tree");
         if (!hasToolingFlags && args.Length > 0 && !args[0].StartsWith("-") &&
-            (args[0].EndsWith(".pilot", StringComparison.OrdinalIgnoreCase) || args[0].EndsWith(".pilc", StringComparison.OrdinalIgnoreCase)) &&
-            File.Exists(args[0]))
+            (args[0].EndsWith(".pilot", StringComparison.OrdinalIgnoreCase) ||
+             args[0].EndsWith(".pilc", StringComparison.OrdinalIgnoreCase) ||
+             args[0].Contains("::")))
         {
-            string scriptFile = args[0];
-            string[] scriptArgs = args.Length > 1 ? args.Skip(1).ToArray() : Array.Empty<string>();
-            return RunScriptFile(scriptFile, scriptArgs);
+            string candidatePath = args[0].Contains("::")
+                ? args[0].Split(new[] { "::" }, 2, StringSplitOptions.None)[0]
+                : args[0];
+            if (File.Exists(candidatePath))
+            {
+                string scriptFile = args[0];
+                string[] scriptArgs = args.Length > 1 ? args.Skip(1).ToArray() : Array.Empty<string>();
+                return RunScriptFile(scriptFile, scriptArgs);
+            }
         }
 
         bool showTokens = false;
@@ -446,12 +465,12 @@ public static class Program
 
     private static int RunScriptFile(string filePath, string[] scriptArgs)
     {
-        if (!File.Exists(filePath))
+        string? entryFunc = null;
+        if (filePath.Contains("::"))
         {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"[ERROR] Script file not found: '{filePath}'");
-            Console.ResetColor();
-            return 1;
+            var parts = filePath.Split(new[] { "::" }, 2, StringSplitOptions.None);
+            filePath = parts[0];
+            entryFunc = parts[1];
         }
 
         var patchFiles = new List<string>();
@@ -462,10 +481,44 @@ public static class Program
             {
                 patchFiles.Add(scriptArgs[++i]);
             }
+            else if ((scriptArgs[i] == "--entry" || scriptArgs[i] == "-e") && i + 1 < scriptArgs.Length)
+            {
+                entryFunc = scriptArgs[++i];
+            }
             else
             {
                 cleanArgs.Add(scriptArgs[i]);
             }
+        }
+
+        if (!File.Exists(filePath))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[ERROR] Script file not found: '{filePath}'");
+            Console.ResetColor();
+            return 1;
+        }
+
+        if (!string.IsNullOrEmpty(entryFunc))
+        {
+            var selResult = PilotScript.RunFunction(filePath, entryFunc, cleanArgs.ToArray());
+            if (!selResult.Success)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"[SELECTIVE RUN ERROR] ({selResult.Elapsed.TotalMilliseconds:F2}ms):");
+                foreach (var diag in selResult.Diagnostics)
+                {
+                    Console.WriteLine($"  {diag}");
+                }
+                Console.ResetColor();
+                return 1;
+            }
+            if (selResult.Value.Kind != Runtime.Values.PilotValueKind.Null &&
+                selResult.Value.Kind != Runtime.Values.PilotValueKind.Undefined)
+            {
+                Console.WriteLine(selResult.Value.ToString());
+            }
+            return 0;
         }
 
         if (patchFiles.Count > 0)
@@ -518,6 +571,169 @@ public static class Program
             return 1;
         }
 
+        return 0;
+    }
+
+    private static int ExecuteTestSubcommand(string[] args)
+    {
+        string? targetPath = null;
+        string? filter = null;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            if ((args[i] == "--filter" || args[i] == "-f") && i + 1 < args.Length)
+            {
+                filter = args[++i];
+            }
+            else if (!args[i].StartsWith("-"))
+            {
+                targetPath = args[i];
+            }
+        }
+
+        targetPath ??= Directory.GetCurrentDirectory();
+
+        var files = new List<string>();
+        if (File.Exists(targetPath))
+        {
+            files.Add(targetPath);
+        }
+        else if (Directory.Exists(targetPath))
+        {
+            files.AddRange(Directory.GetFiles(targetPath, "*test*.pilot", SearchOption.AllDirectories));
+            if (files.Count == 0)
+            {
+                files.AddRange(Directory.GetFiles(targetPath, "*.pilot", SearchOption.AllDirectories));
+            }
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[TEST ERROR] Target file or directory not found: '{targetPath}'");
+            Console.ResetColor();
+            return 1;
+        }
+
+        int totalPassed = 0;
+        int totalFailed = 0;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"=== Pilot Selective Test Runner ===");
+        Console.WriteLine($"Target: {targetPath} | Filter: {(string.IsNullOrEmpty(filter) ? "<none>" : filter)}");
+        Console.ResetColor();
+
+        foreach (var file in files)
+        {
+            var report = PilotScript.RunTests(file, filter);
+            if (report.TotalCount == 0) continue;
+
+            Console.WriteLine($"\nFile: {Path.GetFileName(file)}");
+            foreach (var r in report.Results)
+            {
+                if (r.Passed)
+                {
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine($"  [PASS] {r.TestName} ({r.Duration.TotalMilliseconds:F2}ms)");
+                }
+                else
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"  [FAIL] {r.TestName} ({r.Duration.TotalMilliseconds:F2}ms)");
+                    if (!string.IsNullOrEmpty(r.ErrorMessage))
+                    {
+                        Console.WriteLine($"         Error: {r.ErrorMessage}");
+                    }
+                }
+                Console.ResetColor();
+            }
+
+            totalPassed += report.PassedCount;
+            totalFailed += report.FailedCount;
+        }
+
+        sw.Stop();
+        Console.WriteLine($"\n{new string('-', 60)}");
+        if (totalFailed > 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"FAILED: {totalFailed} failed, {totalPassed} passed in {sw.Elapsed.TotalMilliseconds:F2}ms");
+            Console.ResetColor();
+            return 1;
+        }
+        else if (totalPassed == 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"No test cases found matching criteria.");
+            Console.ResetColor();
+            return 0;
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"PASSED: All {totalPassed} tests passed successfully in {sw.Elapsed.TotalMilliseconds:F2}ms");
+            Console.ResetColor();
+            return 0;
+        }
+    }
+
+    private static int ExecuteBenchmarkSubcommand(string[] args)
+    {
+        string? targetPath = null;
+        string? filter = null;
+        int iterations = 100;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            if ((args[i] == "--filter" || args[i] == "-f") && i + 1 < args.Length)
+            {
+                filter = args[++i];
+            }
+            else if ((args[i] == "--iterations" || args[i] == "-n" || args[i] == "-i") && i + 1 < args.Length && int.TryParse(args[i + 1], out int iters))
+            {
+                iterations = iters;
+                i++;
+            }
+            else if (!args[i].StartsWith("-"))
+            {
+                targetPath = args[i];
+            }
+        }
+
+        if (string.IsNullOrEmpty(targetPath) || !File.Exists(targetPath))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[BENCHMARK ERROR] Benchmark script not found: '{targetPath}'");
+            Console.ResetColor();
+            return 1;
+        }
+
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"=== Pilot Selective Benchmark Runner ===");
+        Console.WriteLine($"Target: {Path.GetFileName(targetPath)} | Iterations: {iterations} | Filter: {(string.IsNullOrEmpty(filter) ? "<none>" : filter)}");
+        Console.ResetColor();
+
+        var report = PilotScript.RunBenchmarks(targetPath, filter, iterations);
+        if (report.Results.Count == 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("No benchmark targets found. Annotate functions with @bench / @benchmark or name with 'bench_'.");
+            Console.ResetColor();
+            return 0;
+        }
+
+        Console.WriteLine($"\n{new string('-', 78)}");
+        Console.WriteLine($"{"Benchmark",-30} | {"Mean / Op",14} | {"Ops / sec",14} | {"Iterations",10}");
+        Console.WriteLine($"{new string('-', 78)}");
+
+        foreach (var r in report.Results)
+        {
+            Console.WriteLine($"{r.BenchmarkName,-30} | {r.FormatMeanTime(),14} | {r.OpsPerSecond,14:N1} | {r.Iterations,10}");
+        }
+        Console.WriteLine($"{new string('-', 78)}");
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"Finished {report.Results.Count} benchmark(s) in {report.TotalDuration.TotalSeconds:F2}s");
+        Console.ResetColor();
         return 0;
     }
 

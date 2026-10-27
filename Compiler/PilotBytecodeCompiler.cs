@@ -147,7 +147,11 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         if (context.var_stmt() != null) return Visit(context.var_stmt());
         if (context.const_stmt() != null) return Visit(context.const_stmt());
         if (context.flow_stmt() != null) return Visit(context.flow_stmt());
-        return base.VisitSmall_stmt(context);
+
+        int fallback = _chunk.AddAstFallback(context);
+        _chunk.Emit(PilotOpcode.EvalAst, fallback);
+        _chunk.Emit(PilotOpcode.Pop);
+        return null;
     }
 
     public override object? VisitCompound_stmt(PilotParser.Compound_stmtContext context)

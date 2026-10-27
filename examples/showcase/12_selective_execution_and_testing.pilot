@@ -1,0 +1,81 @@
+# ==============================================================================
+# Showcase 12: Selective Execution, Unit Testing, and Benchmarking in Pilot
+# ==============================================================================
+# Demonstrates:
+#   1. Running specific target functions selectively:
+#      $ pilot run examples/showcase/12_selective_execution_and_testing.pilot::compute_euler 1000
+#   2. Running targeted tests with @test or test_* naming:
+#      $ pilot test examples/showcase/12_selective_execution_and_testing.pilot
+#   3. Benchmarking performance with @bench / @benchmark:
+#      $ pilot bench examples/showcase/12_selective_execution_and_testing.pilot -n 100
+#   4. Skipping top-level __main__ guards during selective runs
+# ==============================================================================
+
+# --- Selective Functions Callable Directly by Name ---
+
+def compute_euler(terms: int) -> float:
+    var e = 1.0
+    var fact = 1.0
+    for i in 1..terms:
+        fact = fact * float(i)
+        if fact > 1e15:
+            break
+        e = e + (1.0 / fact)
+    return e
+
+def transform_record(name: str, score: int) -> str:
+    var grade = "B"
+    if score >= 90:
+        grade = "A"
+    return f"Student: {name} | Grade: {grade}"
+
+# --- Selective Unit Tests (@test or test_*) ---
+
+@test
+def verify_euler_approximation():
+    let approx = compute_euler(50)
+    assert approx > 2.71 && approx < 2.73, "Euler's number approximation failed"
+
+@test
+def verify_transform_record():
+    let res = transform_record("Alice", 95)
+    assert res == "Student: Alice | Grade: A", "Record formatting failed"
+
+def test_arithmetic_properties():
+    var x = 10
+    var y = 20
+    assert x + y == 30, "Addition invariant failed"
+    assert x * y == 200, "Multiplication invariant failed"
+
+# --- Selective Benchmarks (@bench / @benchmark or bench_*) ---
+
+@benchmark
+def bench_euler_convergence():
+    return compute_euler(50)
+
+@bench
+def bench_record_formatting():
+    return transform_record("BenchmarkUser", 92)
+
+def bench_fibonacci_iterative():
+    var a = 0
+    var b = 1
+    for i in 0..30:
+        var temp = a + b
+        a = b
+        b = temp
+    return a
+
+# --- Top-Level Script Logic (Guarded by __name__ == "__main__") ---
+if __name__ == "__main__":
+    println("=================================================================")
+    println("  Pilot Showcase 12: Selective Execution, Testing & Benchmarking ")
+    println("=================================================================")
+    println("This file can be run in multiple modes:")
+    println("  1. Whole file:       pilot examples/showcase/12_selective_execution_and_testing.pilot")
+    println("  2. Function only:    pilot run examples/showcase/12_selective_execution_and_testing.pilot::compute_euler 500")
+    println("  3. Test suite:       pilot test examples/showcase/12_selective_execution_and_testing.pilot")
+    println("  4. Benchmark suite:  pilot bench examples/showcase/12_selective_execution_and_testing.pilot -n 200")
+    println("=================================================================")
+    let demo_val = compute_euler(200)
+    println(f"Full-script demo result: compute_euler(200) = {demo_val}")

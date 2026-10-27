@@ -64,6 +64,30 @@ public static class PilotScript
     }
 
     /// <summary>
+    /// Selectively executes a specific named function within a script or code snippet.
+    /// </summary>
+    public static PilotExecutionResult RunFunction(string scriptPathOrCode, string functionName, params string[] args)
+    {
+        return Runtime.SelectiveExecution.PilotSelectiveExecutionEngine.ExecuteFunction(scriptPathOrCode, functionName, args);
+    }
+
+    /// <summary>
+    /// Selectively discovers and runs test functions (@test or test_*) in the given script or code.
+    /// </summary>
+    public static Runtime.SelectiveExecution.PilotTestReport RunTests(string scriptPathOrCode, string? filter = null)
+    {
+        return Runtime.SelectiveExecution.PilotSelectiveExecutionEngine.RunTests(scriptPathOrCode, filter);
+    }
+
+    /// <summary>
+    /// Selectively discovers and benchmarks functions (@bench / @benchmark or bench_*) in the given script or code.
+    /// </summary>
+    public static Runtime.SelectiveExecution.PilotBenchmarkReport RunBenchmarks(string scriptPathOrCode, string? filter = null, int iterations = 100)
+    {
+        return Runtime.SelectiveExecution.PilotSelectiveExecutionEngine.RunBenchmarks(scriptPathOrCode, filter, defaultIterations: iterations);
+    }
+
+    /// <summary>
     /// Evaluates a single Pilot expression string and returns the resulting PilotValue.
     /// </summary>
     public static PilotValue Evaluate(string expression)

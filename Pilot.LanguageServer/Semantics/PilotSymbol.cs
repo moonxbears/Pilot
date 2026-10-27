@@ -40,6 +40,18 @@ public enum PilotDiagnosticSeverity
     Hint = 4
 }
 
+public sealed class PilotCodeAction
+{
+    public string Title { get; init; } = string.Empty;
+    public string Kind { get; init; } = "quickfix";
+    public bool IsPreferred { get; init; } = true;
+    public string? NewText { get; init; }
+    public int StartLine { get; init; }
+    public int StartColumn { get; init; }
+    public int EndLine { get; init; }
+    public int EndColumn { get; init; }
+}
+
 public sealed class PilotDiagnostic
 {
     public int StartLine { get; init; }
@@ -50,6 +62,7 @@ public sealed class PilotDiagnostic
     public string Code { get; init; } = "PILOT000";
     public string Message { get; init; } = string.Empty;
     public string Source { get; init; } = "pilot";
+    public List<PilotCodeAction> CodeActions { get; } = new();
 }
 
 public static class PilotSemanticTokenLegend
@@ -139,7 +152,7 @@ public sealed class PilotSymbol
 {
     public string Name { get; init; } = string.Empty;
     public PilotSymbolKind Kind { get; init; }
-    public string TypeName { get; init; } = "any";
+    public string TypeName { get; set; } = "any";
     public bool IsMutable { get; init; }
     public bool IsConstant { get; init; }
     public bool IsAsync { get; init; }
@@ -150,6 +163,7 @@ public sealed class PilotSymbol
     public bool IsSoftRealtime { get; init; }
     public string? WcetBudget { get; init; }
     public string Domain { get; init; } = "Core";
+    public int ReferenceCount { get; set; }
 
     // 0-based LSP coordinates for the identifier token
     public int SelectionLine { get; init; }
@@ -167,6 +181,7 @@ public sealed class PilotSymbol
 
     public List<(string Name, string Type)> Parameters { get; } = new();
     public List<string> GenericParameters { get; } = new();
+    public List<string> BaseTypes { get; } = new();
     public List<string> IndexedFields { get; } = new();
     public Dictionary<string, PilotSymbol> Members { get; } = new(StringComparer.Ordinal);
     public List<PilotSymbol> Children { get; } = new();
@@ -261,6 +276,9 @@ public sealed class PilotScope
     public bool InNoAlloc { get; init; }
     public bool InAsync { get; init; }
     public bool InLoop { get; init; }
+    public bool InFunction { get; init; }
+    public bool InActor { get; init; }
+    public bool IsGenerator { get; set; }
     public bool InTransaction { get; init; }
     public string? EnclosingReturnType { get; init; }
     public PilotSymbol? EnclosingType { get; init; }

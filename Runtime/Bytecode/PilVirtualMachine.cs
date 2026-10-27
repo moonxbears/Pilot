@@ -180,7 +180,33 @@ public sealed class PilVirtualMachine
                 {
                     string name = identifiers[inst.Operand];
                     var val = stack[--sp];
-                    scope.Declare(name, val);
+                    if (scope.ContainsLocal(name))
+                    {
+                        var existing = scope.Resolve(name);
+                        if (existing.Kind == PilotValueKind.Function && val.Kind == PilotValueKind.Function)
+                        {
+                            var oldFunc = existing.AsFunction();
+                            var newFunc = val.AsFunction();
+                            if (oldFunc.ClassDef == null && oldFunc.GetSignatureKey() == newFunc.GetSignatureKey())
+                            {
+                                oldFunc.ApplyPatchFrom(newFunc);
+                                break;
+                            }
+                            var mg = new PilotMethodGroup(name, new[] { oldFunc, newFunc });
+                            scope.ForceSet(name, PilotValue.FromMethodGroup(mg));
+                            break;
+                        }
+                        else if (existing.Kind == PilotValueKind.MethodGroup && val.Kind == PilotValueKind.Function)
+                        {
+                            existing.AsMethodGroup().AddOverload(val.AsFunction());
+                            break;
+                        }
+                        scope.ForceSet(name, val);
+                    }
+                    else
+                    {
+                        scope.Declare(name, val);
+                    }
                     break;
                 }
 
@@ -572,11 +598,17 @@ public sealed class PilVirtualMachine
                         }
                     }
 
+                    bool isGen = nestedChunk.FuncDefContext?.suite() != null &&
+                                 PilotInterpreterVisitor.ContainsYield(nestedChunk.FuncDefContext.suite());
+                    bool isAsync = nestedChunk.FuncDefContext?.ASYNC() != null;
+
                     var fn = new PilotFunction(
                         nestedChunk.Name,
                         CreateParameters(nestedChunk.ParameterNames),
                         astBody: nestedChunk.FuncDefContext?.suite(),
-                        closureScope: scope);
+                        closureScope: scope,
+                        isAsync: isAsync,
+                        isGenerator: isGen);
                     fn.BytecodeChunk = nestedChunk;
 
                     if (nestedChunk.FuncDefContext != null)
@@ -731,6 +763,28 @@ public sealed class PilVirtualMachine
                     var node = chunk.AstFallbackNodes[inst.Operand];
                     var visitor = context.GetOrCreateVisitor();
                     var astResult = visitor.Visit(node);
+
+                    if (context.PendingFlow == PilotFlowSignalKind.Return)
+                    {
+                        var retVal = context.PendingReturnValue;
+                        context.PendingFlow = PilotFlowSignalKind.None;
+                        return retVal;
+                    }
+
+                    if (chunk.LocalSlotMap.Count > 0)
+                    {
+                        foreach (var (locName, slot) in chunk.LocalSlotMap)
+                        {
+                            if (!string.IsNullOrEmpty(locName) && !locName.StartsWith("<") && slot < locals.Length)
+                            {
+                                if (scope.TryResolve(locName, out var updatedVal))
+                                {
+                                    locals[slot] = updatedVal;
+                                }
+                            }
+                        }
+                    }
+
                     EnsureStackCapacity(ref stack, sp + 1);
                     stack[sp++] = astResult;
                     break;
