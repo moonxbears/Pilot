@@ -13,6 +13,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
     private PilotScope _currentScope;
     private PilotPreprocessResult? _preprocResult;
     private readonly HashSet<string> _activeSavepoints = new(StringComparer.Ordinal);
+    private readonly Stack<List<string>> _returnTypeCollectorStack = new();
     private readonly Dictionary<string, string> _unitAliases = new(StringComparer.Ordinal);
 
     private static readonly HashSet<string> BuiltinTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -857,7 +858,8 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             }
         }
 
-        string returnType = context.type_spec()?.GetText() ?? "void";
+        bool hasExplicitReturnType = context.type_spec() != null;
+        string returnType = hasExplicitReturnType ? context.type_spec()!.GetText() : "void";
         if (context.type_spec() != null) Visit(context.type_spec());
 
         string domain = isHardRt || isSoftRt ? "Real-Time"
@@ -884,7 +886,12 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             _currentScope.EnclosingType.Children.Add(funcSymbol);
         }
 
-        using (EnterScope($"def:{name}", context, inHardRt: isHardRt, inSoftRt: isSoftRt, inAsync: isAsync, inFunction: true, returnType: returnType))
+        if (!hasExplicitReturnType)
+        {
+            _returnTypeCollectorStack.Push(new List<string>());
+        }
+
+        using (EnterScope($"def:{name}", context, inHardRt: isHardRt, inSoftRt: isSoftRt, inAsync: isAsync, inFunction: true, returnType: hasExplicitReturnType ? returnType : null))
         {
             if (context.generic_params() != null)
             {
@@ -943,7 +950,34 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                 }
             }
             if (context.suite() != null) Visit(context.suite());
+
+            if (!hasExplicitReturnType)
+            {
+                var collected = _returnTypeCollectorStack.Pop();
+                if (collected.Count > 0)
+                {
+                    returnType = HomogenizeTypes(collected);
+                }
+                else
+                {
+                    returnType = _currentScope.IsGenerator ? "Generator[any]" : "void";
+                }
+
+                if (_currentScope.IsGenerator && !returnType.StartsWith("Generator[", StringComparison.OrdinalIgnoreCase))
+                {
+                    returnType = $"Generator[{returnType}]";
+                }
+
+                funcSymbol.TypeName = returnType;
+                funcSymbol.Signature = $"{prefix}def {name}({paramListStr}) -> {returnType}";
+                if (_currentScope.Parent?.EnclosingType != null)
+                {
+                    _currentScope.Parent.EnclosingType.Members[name] = funcSymbol;
+                }
+            }
         }
+
+        return returnType;
 
         return returnType;
     }
