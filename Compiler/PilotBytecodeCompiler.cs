@@ -156,7 +156,11 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         if (context.while_stmt() != null) return Visit(context.while_stmt());
         if (context.for_stmt() != null) return Visit(context.for_stmt());
         if (context.func_def() != null) return Visit(context.func_def());
-        return base.VisitCompound_stmt(context);
+
+        int fallback = _chunk.AddAstFallback(context);
+        _chunk.Emit(PilotOpcode.EvalAst, fallback);
+        _chunk.Emit(PilotOpcode.Pop);
+        return null;
     }
 
     public override object? VisitSuite(PilotParser.SuiteContext context)
@@ -367,11 +371,6 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
             if (_isFunction && _chunk.TryGetLocalSlot(idName, out int targetSlot))
             {
                 _chunk.Emit(PilotOpcode.StoreLocal, targetSlot);
-            }
-            else if (_isFunction)
-            {
-                int newSlot = _chunk.GetOrAllocateLocalSlot(idName);
-                _chunk.Emit(PilotOpcode.StoreLocal, newSlot);
             }
             else
             {

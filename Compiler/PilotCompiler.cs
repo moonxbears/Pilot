@@ -69,6 +69,18 @@ public sealed class PilotCompiler : IPilotCompiler
                 preprocessedCode = preproc.PreprocessedSource;
             }
 
+            // 2.5 Code Generation Pipeline (Zero-cost when unused)
+            Dictionary<string, string>? generatedSources = null;
+            if (Pilot.CodeGen.Engine.PilotCodeGeneratorPipeline.ShouldRun(preprocessedCode))
+            {
+                var genResult = Pilot.CodeGen.Engine.PilotCodeGeneratorPipeline.Run(preprocessedCode, options.SourceFilePath, options);
+                preprocessedCode = genResult.AugmentedSource;
+                if (genResult.GeneratedSources.Count > 0)
+                {
+                    generatedSources = new Dictionary<string, string>(genResult.GeneratedSources);
+                }
+            }
+
             // 3. Parsing and Syntax Tree Generation
             var inputStream = new AntlrInputStream(preprocessedCode);
             var lexer = new PilotLexer(inputStream);
@@ -93,6 +105,7 @@ public sealed class PilotCompiler : IPilotCompiler
                 options.SourceFilePath,
                 DateTime.UtcNow,
                 options.DefinedSymbols);
+            program.GeneratedSources = generatedSources;
 
             try
             {

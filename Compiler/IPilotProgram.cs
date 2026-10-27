@@ -38,6 +38,11 @@ public interface IPilotProgram
     PilotBytecodeChunk? BytecodeChunk { get; }
 
     /// <summary>
+    /// Gets any source-generated files produced during compilation, if any.
+    /// </summary>
+    IReadOnlyDictionary<string, string>? GeneratedSources { get; }
+
+    /// <summary>
     /// Runs the compiled program with the specified execution options.
     /// </summary>
     PilotExecutionResult Run(PilotExecutionOptions? options = null);

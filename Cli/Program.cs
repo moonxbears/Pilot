@@ -363,6 +363,7 @@ public static class Program
         string? inputFile = null;
         string? outputFile = null;
         var symbols = new List<string>();
+        bool emitGenerated = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -373,6 +374,10 @@ public static class Program
             else if ((args[i] == "-D" || args[i] == "--define") && i + 1 < args.Length)
             {
                 symbols.Add(args[++i]);
+            }
+            else if (args[i] == "--emit-generated" || args[i] == "-g")
+            {
+                emitGenerated = true;
             }
             else if (!args[i].StartsWith("-"))
             {
@@ -416,6 +421,22 @@ public static class Program
         }
 
         result.Program.Save(outputFile);
+
+        if (emitGenerated)
+        {
+            string genPath = Path.ChangeExtension(inputFile, ".g.pilot");
+            File.WriteAllText(genPath, result.Program.Source);
+            Console.WriteLine($"[CODEGEN] Emitted augmented source -> '{genPath}'");
+            if (result.Program.GeneratedSources != null)
+            {
+                foreach (var (compName, compSource) in result.Program.GeneratedSources)
+                {
+                    string cPath = Path.Combine(Path.GetDirectoryName(inputFile) ?? "", compName);
+                    File.WriteAllText(cPath, compSource);
+                    Console.WriteLine($"[CODEGEN] Emitted companion script -> '{cPath}'");
+                }
+            }
+        }
 
         Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine($"[COMPILATION SUCCESS] Generated '{outputFile}' ({new FileInfo(outputFile).Length} bytes) in {result.Elapsed.TotalMilliseconds:F2}ms");

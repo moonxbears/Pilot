@@ -29,6 +29,7 @@ public sealed class PilotCompiledProgram : IPilotProgram
     public DateTime CompiledAt { get; }
     public IReadOnlyList<string> DefinedSymbols { get; }
     public Pilot.Runtime.Bytecode.PilotBytecodeChunk? BytecodeChunk { get; set; }
+    public IReadOnlyDictionary<string, string>? GeneratedSources { get; set; }
 
     private PilotParser.ProgramContext? _programTree;
     public PilotParser.ProgramContext ProgramTree

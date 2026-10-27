@@ -439,6 +439,26 @@ public sealed class PilotBuiltinRegistry
         Register("venv", (_, _) => PilotValue.FromObject(venvModule));
         Register("virtual_environment", (_, _) => PilotValue.FromObject(venvModule));
 
+        // Code Generation & Metaprogramming (codegen)
+        var codegenModule = new PilotObject(new PilotClassDefinition("codegen"));
+        codegenModule.SetMember("generator", PilotValue.FromFunction(PilotFunction.CreateNative("generator", (_, a) =>
+            a.Count > 0 ? a[0] : PilotValue.Null, "fn")));
+        codegenModule.SetMember("generate", PilotValue.FromFunction(PilotFunction.CreateNative("generate", (_, a) =>
+            PilotValue.FromFunction(PilotFunction.CreateNative("decorator", (_, innerArgs) => innerArgs.Count > 0 ? innerArgs[0] : PilotValue.Null)), "name")));
+
+        Register("codegen", (_, _) => PilotValue.FromObject(codegenModule));
+        Register("generator", (_, a) => a.Count > 0 ? a[0] : PilotValue.Null, "target");
+        Register("generate", (_, a) =>
+            PilotValue.FromFunction(PilotFunction.CreateNative("decorator", (_, innerArgs) => innerArgs.Count > 0 ? innerArgs[0] : PilotValue.Null)), "name");
+        Register("builder", (_, a) => a.Count > 0 ? a[0] : PilotValue.Null, "target");
+        Register("observable", (_, a) => a.Count > 0 ? a[0] : PilotValue.Null, "target");
+        Register("equality", (_, a) => a.Count > 0 ? a[0] : PilotValue.Null, "target");
+        Register("dataclass", (_, a) => a.Count > 0 ? a[0] : PilotValue.Null, "target");
+        Register("meta", (_, a) =>
+            PilotValue.FromFunction(PilotFunction.CreateNative("meta_decorator", (_, innerArgs) => innerArgs.Count > 0 ? innerArgs[0] : PilotValue.Null)));
+        Register("metadata", (_, a) =>
+            PilotValue.FromFunction(PilotFunction.CreateNative("meta_decorator", (_, innerArgs) => innerArgs.Count > 0 ? innerArgs[0] : PilotValue.Null)));
+
         // Bidirectional Optimizing Transpilation & Ingestion Built-ins
         Register("transpile", (_, args) =>
         {

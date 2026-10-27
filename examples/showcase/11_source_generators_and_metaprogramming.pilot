@@ -1,0 +1,129 @@
+# =============================================================================
+# Pilot Showcase 11: Pythonic Source Generators & Metaprogramming
+# =============================================================================
+# Zero-overhead, Python-simple source generation with Roslyn-like configurability.
+# Accesses all aspects of Pilot: classes, properties, methods, metadata,
+# partial classes, and companion scripts.
+# =============================================================================
+
+println("==================================================================")
+println("       PILOT SOURCE GENERATORS & METAPROGRAMMING SHOWCASE         ")
+println("==================================================================")
+
+# -----------------------------------------------------------------------------
+# 1. Automatic JSON Serialization via @generate("json")
+# -----------------------------------------------------------------------------
+println("\n[1] Auto-Generated JSON Serialization:")
+
+@generate("json")
+class Customer {
+    var id: int = 101
+    var name: str = "Alice Walker"
+    var tier: str = "Platinum"
+}
+
+let customer = Customer()
+let json_output = customer.to_json()
+println(f"  Generated JSON: {json_output}")
+println(f"  Generated Map:  {customer.to_map()}")
+
+# -----------------------------------------------------------------------------
+# 2. Fluent Builder Pattern via @generate("builder")
+# -----------------------------------------------------------------------------
+println("\n[2] Auto-Generated Fluent Builder:")
+
+@generate("builder")
+class DatabaseConfig {
+    var host: str = "localhost"
+    var port: int = 5432
+    var database: str = "pilot_db"
+    var ssl: bool = true
+}
+
+let config = DatabaseConfig()
+    .with_host("cluster-prod.pilot.internal")
+    .with_port(9999)
+    .with_database("analytics_vault")
+
+println(f"  Configured Host: {config.host}:{config.port}")
+println(f"  Target Database: {config.database}")
+
+# -----------------------------------------------------------------------------
+# 3. Clean String Representation via @generate("repr")
+# -----------------------------------------------------------------------------
+println("\n[3] Auto-Generated Pythonic Repr / to_string():")
+
+@generate("repr")
+class Vector3 {
+    var x: int = 15
+    var y: int = 30
+    var z: int = 45
+}
+
+let vec = Vector3()
+println(f"  Vector string representation: {vec.to_string()}")
+
+# -----------------------------------------------------------------------------
+# 4. Reactive Property Notifications via @generate("observable")
+# -----------------------------------------------------------------------------
+println("\n[4] Reactive Property Change Events (@observable):")
+
+@generate("observable")
+class BankAccount {
+    var balance: int = 1000
+}
+
+let account = BankAccount()
+
+def on_account_changed(sender, prop_name, old_val, new_val) {
+    println(f"  [AUDIT EVENT] Property '{prop_name}' changed from {old_val} to {new_val}")
+}
+
+account.subscribe(on_account_changed)
+
+println(f"  Initial balance: {account.balance}")
+account.set_balance(1500)
+account.set_balance(3200)
+println(f"  Final balance:   {account.balance}")
+
+# -----------------------------------------------------------------------------
+# 5. Metadata Manipulation & Reflection (@meta / @metadata)
+# -----------------------------------------------------------------------------
+println("\n[5] Custom Metadata Attributes & Reflection:")
+
+@meta(service="BillingService", version="3.0", author="Team Cloud", env="Production")
+class InvoiceRecord {
+    var invoice_id: str = "INV-2026-001"
+}
+
+let invoice = InvoiceRecord()
+let metadata_map = invoice.get_meta()
+let service_name = metadata_map["service"]
+let ver = metadata_map["version"]
+let auth = metadata_map["author"]
+let env_name = metadata_map["env"]
+println(f"  Service:     {service_name}")
+println(f"  Version:     {ver}")
+println(f"  Author:      {auth}")
+println(f"  Environment: {env_name}")
+
+# -----------------------------------------------------------------------------
+# 6. Equality & Hash Code Generation via @generate("equality")
+# -----------------------------------------------------------------------------
+println("\n[6] Structural Equality & Hash Code:")
+
+@generate("equality")
+class Color {
+    var r: int = 255
+    var g: int = 128
+    var b: int = 0
+}
+
+let col1 = Color()
+let col2 = Color()
+println(f"  col1.equals(col2): {col1.equals(col2)}")
+println(f"  col1.hash():       {col1.hash()}")
+
+println("\n==================================================================")
+println("           SOURCE GENERATOR SHOWCASE COMPLETED!                   ")
+println("==================================================================")
