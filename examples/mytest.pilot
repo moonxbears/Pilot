@@ -1,0 +1,17 @@
+for i in [15..20]:
+    println(i)
+
+for j in [1, 2, 3, 4, 5]{
+
+    println(j)
+}
+
+var myvar : int = 0
+while (true) {    
+    if (myvar >= 20){
+        break;
+    }
+        
+        println(f"true - {myvar}")
+        myvar += 1
+}
