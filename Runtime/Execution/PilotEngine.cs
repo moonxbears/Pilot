@@ -188,63 +188,7 @@ public sealed class PilotEngine : IPilotEngine
 
         context.CallDepth++;
 
-        // Function local scope with parent set to its lexical closure scope or global scope
-        var callScope = new PilotScope(function.ClosureScope ?? context.Environment.GlobalScope, $"Call:{function.Name}");
-
-        // Bind parameters
-        var parameters = function.Parameters;
-        int argIdx = 0;
-
-        for (int i = 0; i < parameters.Count; i++)
-        {
-            var p = parameters[i];
-            if (p.IsParams)
-            {
-                var restArgs = new List<PilotValue>();
-                while (argIdx < arguments.Count)
-                {
-                    restArgs.Add(arguments[argIdx++]);
-                }
-                callScope.Declare(p.Name, PilotValue.FromList(restArgs));
-            }
-            else if (argIdx < arguments.Count)
-            {
-                callScope.Declare(p.Name, arguments[argIdx++]);
-            }
-            else if (p.IsContextual)
-            {
-                if (context.TryResolveContextual(p.Name, out var contextualVal))
-                {
-                    callScope.Declare(p.Name, contextualVal);
-                }
-                else if (p.DefaultValue.HasValue)
-                {
-                    callScope.Declare(p.Name, p.DefaultValue.Value);
-                }
-                else
-                {
-                    throw new Pilot.Runtime.ControlFlow.PilotContextException(
-                        $"Contextual parameter '{p.Name}' required by function '{function.Name}' could not be resolved from caller context.");
-                }
-            }
-            else if (p.DefaultValue.HasValue)
-            {
-                callScope.Declare(p.Name, p.DefaultValue.Value);
-            }
-            else
-            {
-                callScope.Declare(p.Name, PilotValue.Undefined);
-            }
-        }
-
-        // Bind captured variables if any
-        if (function.Captures != null)
-        {
-            foreach (var kvp in function.Captures)
-            {
-                callScope.Declare(kvp.Key, kvp.Value);
-            }
-        }
+        var callScope = CreateCallScope(function, arguments, context, "Call");
 
         // Swap scope in environment
         var previousScope = context.Environment.CurrentScope;
@@ -348,71 +292,77 @@ public sealed class PilotEngine : IPilotEngine
         IReadOnlyList<PilotValue> arguments,
         PilotExecutionContext context)
     {
-        var callScope = new PilotScope(function.ClosureScope ?? context.Environment.GlobalScope, $"Gen:{function.Name}");
-        var parameters = function.Parameters;
-        int argIdx = 0;
+        var callScope = CreateCallScope(function, arguments, context, "Gen");
+        var runner = new GeneratorRunner(this, function, context, callScope);
+        return PilotValue.FromGenerator(runner.CreateGenerator());
+    }
 
-        for (int i = 0; i < parameters.Count; i++)
+    private class GeneratorRunner
+    {
+        private readonly PilotEngine _engine;
+        private readonly PilotFunction _function;
+        private readonly PilotExecutionContext _callerContext;
+        private readonly PilotScope _callScope;
+
+        private readonly CancellationTokenSource _cts = new CancellationTokenSource();
+        private readonly AutoResetEvent _runnerResumeEvent = new AutoResetEvent(false);
+        private readonly AutoResetEvent _callerResumeEvent = new AutoResetEvent(false);
+
+        private PilotValue _currentYielded = PilotValue.Undefined;
+        private PilotValue _currentInput = PilotValue.Undefined;
+        private Exception? _executionException = null;
+        private bool _isFinished = false;
+        private bool _isStarted = false;
+        private readonly object _syncLock = new object();
+
+        public GeneratorRunner(
+            PilotEngine engine,
+            PilotFunction function,
+            PilotExecutionContext callerContext,
+            PilotScope callScope)
         {
-            var p = parameters[i];
-            if (p.IsParams)
-            {
-                var restArgs = new List<PilotValue>();
-                while (argIdx < arguments.Count) restArgs.Add(arguments[argIdx++]);
-                callScope.Declare(p.Name, PilotValue.FromList(restArgs));
-            }
-            else if (argIdx < arguments.Count) callScope.Declare(p.Name, arguments[argIdx++]);
-            else if (p.DefaultValue.HasValue) callScope.Declare(p.Name, p.DefaultValue.Value);
-            else callScope.Declare(p.Name, PilotValue.Undefined);
+            _engine = engine;
+            _function = function;
+            _callerContext = callerContext;
+            _callScope = callScope;
         }
 
-        if (function.Captures != null)
+        public PilotGenerator CreateGenerator()
         {
-            foreach (var kvp in function.Captures) callScope.Declare(kvp.Key, kvp.Value);
+            return new PilotGenerator(_function.Name, Next, Close);
         }
 
-        var cts = new CancellationTokenSource();
-        var runnerResumeEvent = new AutoResetEvent(false);
-        var callerResumeEvent = new AutoResetEvent(false);
-
-        PilotValue currentYielded = PilotValue.Undefined;
-        PilotValue currentInput = PilotValue.Undefined;
-        Exception? executionException = null;
-        bool isFinished = false;
-        bool isStarted = false;
-        var syncLock = new object();
-
-        void RunnerBody()
+        private void RunnerBody()
         {
             try
             {
                 var genContext = new PilotExecutionContext(
-                    this,
-                    context.Options,
-                    new PilotEnvironment(callScope),
-                    cts.Token);
+                    _engine,
+                    _callerContext.Options,
+                    new PilotEnvironment(_callScope),
+                    _cts.Token);
 
                 genContext.YieldHandler = yieldedVal =>
                 {
-                    currentYielded = yieldedVal;
-                    callerResumeEvent.Set();
-                    runnerResumeEvent.WaitOne();
-                    if (cts.Token.IsCancellationRequested)
+                    _currentYielded = yieldedVal;
+                    _callerResumeEvent.Set();
+                    _runnerResumeEvent.WaitOne();
+                    if (_cts.Token.IsCancellationRequested)
                     {
                         throw new OperationCanceledException();
                     }
-                    return currentInput;
+                    return _currentInput;
                 };
 
                 var genVisitor = new PilotInterpreterVisitor(genContext);
 
-                if (function.AstBody is PilotParser.SuiteContext suiteCtx)
+                if (_function.AstBody is PilotParser.SuiteContext suiteCtx)
                 {
                     genVisitor.VisitSuite(suiteCtx);
                 }
-                else if (function.AstBody != null)
+                else if (_function.AstBody != null)
                 {
-                    genVisitor.Visit(function.AstBody);
+                    genVisitor.Visit(_function.AstBody);
                 }
             }
             catch (OperationCanceledException)
@@ -425,69 +375,59 @@ public sealed class PilotEngine : IPilotEngine
             }
             catch (Exception ex)
             {
-                executionException = ex;
+                _executionException = ex;
             }
             finally
             {
-                lock (syncLock)
+                lock (_syncLock)
                 {
-                    isFinished = true;
+                    _isFinished = true;
                 }
-                callerResumeEvent.Set();
+                _callerResumeEvent.Set();
             }
         }
 
-        PilotGenerator? gen = null;
-        gen = new PilotGenerator(function.Name, input =>
+        private PilotValue Next(PilotValue input)
         {
-            lock (syncLock)
+            lock (_syncLock)
             {
-                if (isFinished)
-                {
-                    throw new PilotReturnSignal(PilotValue.Undefined);
-                }
+                if (_isFinished) throw new PilotReturnSignal(PilotValue.Undefined);
 
-                currentInput = input;
-                if (!isStarted)
+                _currentInput = input;
+                if (!_isStarted)
                 {
-                    isStarted = true;
+                    _isStarted = true;
                     Task.Factory.StartNew(RunnerBody, TaskCreationOptions.LongRunning);
                 }
                 else
                 {
-                    runnerResumeEvent.Set();
+                    _runnerResumeEvent.Set();
                 }
             }
 
-            callerResumeEvent.WaitOne();
+            _callerResumeEvent.WaitOne();
 
-            if (executionException != null)
+            if (_executionException != null) throw _executionException;
+
+            lock (_syncLock)
             {
-                throw executionException;
+                if (_isFinished) throw new PilotReturnSignal(PilotValue.Undefined);
             }
 
-            lock (syncLock)
-            {
-                if (isFinished)
-                {
-                    throw new PilotReturnSignal(PilotValue.Undefined);
-                }
-            }
+            return _currentYielded;
+        }
 
-            return currentYielded;
-        }, () =>
+        private void Close()
         {
-            lock (syncLock)
+            lock (_syncLock)
             {
-                if (!isFinished)
+                if (!_isFinished)
                 {
-                    cts.Cancel();
-                    runnerResumeEvent.Set();
+                    _cts.Cancel();
+                    _runnerResumeEvent.Set();
                 }
             }
-        });
-
-        return PilotValue.FromGenerator(gen);
+        }
     }
 
     public Pilot.Transpilation.TranspilationRegistry Transpilers { get; set; } = Pilot.Transpilation.TranspilationRegistry.Default;
@@ -523,6 +463,70 @@ public sealed class PilotEngine : IPilotEngine
         }
         return result.Program;
     }
+
+    private static PilotScope CreateCallScope(
+        PilotFunction function,
+        IReadOnlyList<PilotValue> arguments,
+        PilotExecutionContext context,
+        string scopePrefix)
+    {
+        var callScope = new PilotScope(function.ClosureScope ?? context.Environment.GlobalScope, $"{scopePrefix}:{function.Name}");
+        var parameters = function.Parameters;
+        int argIdx = 0;
+
+        for (int i = 0; i < parameters.Count; i++)
+        {
+            var p = parameters[i];
+            if (p.IsParams)
+            {
+                var restArgs = new List<PilotValue>();
+                while (argIdx < arguments.Count)
+                {
+                    restArgs.Add(arguments[argIdx++]);
+                }
+                callScope.Declare(p.Name, PilotValue.FromList(restArgs));
+            }
+            else if (argIdx < arguments.Count)
+            {
+                callScope.Declare(p.Name, arguments[argIdx++]);
+            }
+            else if (p.IsContextual)
+            {
+                if (context.TryResolveContextual(p.Name, out var contextualVal))
+                {
+                    callScope.Declare(p.Name, contextualVal);
+                }
+                else if (p.DefaultValue.HasValue)
+                {
+                    callScope.Declare(p.Name, p.DefaultValue.Value);
+                }
+                else
+                {
+                    throw new Pilot.Runtime.ControlFlow.PilotContextException(
+                        $"Contextual parameter '{p.Name}' required by function '{function.Name}' could not be resolved from caller context.");
+                }
+            }
+            else if (p.DefaultValue.HasValue)
+            {
+                callScope.Declare(p.Name, p.DefaultValue.Value);
+            }
+            else
+            {
+                callScope.Declare(p.Name, PilotValue.Undefined);
+            }
+        }
+
+        if (function.Captures != null)
+        {
+            foreach (var kvp in function.Captures)
+            {
+                callScope.Declare(kvp.Key, kvp.Value);
+            }
+        }
+
+        return callScope;
+    }
+
     private static void SnapshotOldCalls(
         Antlr4.Runtime.Tree.IParseTree node,
         PilotInterpreterVisitor visitor,
