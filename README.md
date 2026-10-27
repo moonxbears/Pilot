@@ -8,6 +8,7 @@
 
 ## Table of Contents
 
+- [Documentation & Reference Manuals](#documentation--reference-manuals)
 - [Core Highlights](#core-highlights)
 - [Design Philosophy](#design-philosophy)
 - [Architecture & Repository Structure](#architecture--repository-structure)
@@ -41,6 +42,35 @@
 - [Language Server Protocol (LSP) & Tooling](#language-server-protocol-lsp--tooling)
 - [Running the Test Suites](#running-the-test-suites)
 - [Step-by-Step Architecture Guide](#step-by-step-architecture-guide)
+
+---
+
+## Documentation & Reference Manuals
+
+Explore the complete, navigable Pilot documentation suite in [`docs/index.md`](docs/index.md):
+
+### Core Language Reference Manuals
+- **[Master Documentation Hub (`docs/index.md`)](docs/index.md)** — Central navigation portal, architecture pipeline, and cross-reference index.
+- **[Exhaustive Lexical Reference (`docs/lexical-reference.md`)](docs/lexical-reference.md)** — Every lexer token, preprocessor directive (`#define`, `#if`, `#region`, `#pragma`), diagnostic code (`PREPROC001`–`PREPROC011`), keyword category, contextual identifier rule, numeric/dimensional literal (`50ms`, `100Hz`, `64KB`), string/f-string/symbol literal, and operator/delimiter.
+- **[Exhaustive Syntax & Grammar Reference (`docs/syntax-reference.md`)](docs/syntax-reference.md)** — Every EBNF grammar production from `Pilot.g4`, program structure, `{}` vs `:` suites, type annotations, classes, algebraic class math, typestates, pattern matching, LINQ/SQL queries, concurrency, real-time blocks, macros, and the 19-level operator precedence table.
+- **[Exhaustive Functions, Methods & Runtime API Reference (`docs/functions-and-apis.md`)](docs/functions-and-apis.md)** — Every global built-in function, built-in module (`json`, `venv`, `TypeAdapter`), scripting host API, Universal Root Object method, collection/matrix/generator/future/lazy method, Design-by-Contract intrinsic, standard contract (`IList`, `IEquatable`, etc.), and runtime exception type.
+
+### 15 Deep-Dive Concept Guides (`docs/concepts/`)
+1. **[Types, Variables, Collections & Control Flow](docs/concepts/01-types-variables-control-flow.md)**
+2. **[Guard, Defer & Structured Exception Handling](docs/concepts/02-guard-defer-exceptions.md)**
+3. **[First-Class Method Groups & Multi-Dispatch](docs/concepts/03-method-groups-and-dispatch.md)**
+4. **[First-Class Type Adapters & Scalar-to-Collection Repetition](docs/concepts/04-type-adapters-and-repetition.md)**
+5. **[Algebraic Class Composition & Typestate Classes](docs/concepts/05-algebraic-classes-and-typestates.md)**
+6. **[Structural Projections, Scoped Lexical Extensions & Generative Classes](docs/concepts/06-projections-extensions-generative.md)**
+7. **[Contextual Parameters & Lexical Dependency Injection](docs/concepts/07-contextual-parameters-di.md)**
+8. **[Exhaustive Pattern Matching & Deep Destructuring](docs/concepts/08-exhaustive-pattern-matching.md)**
+9. **[Design-by-Contract, Contract Delegation & Method Stealing](docs/concepts/09-design-by-contract.md)**
+10. **[Native Database Engine, LINQ Queries & SQL-First DML](docs/concepts/10-database-and-sql.md)**
+11. **[Concurrency, Stateful Generators & Lazy Evaluation](docs/concepts/11-concurrency-generators-lazy.md)**
+12. **[Polyglot Interoperability & Resumable Yield-Bridge Coroutines](docs/concepts/12-polyglot-interoperability.md)**
+13. **[Metaprogramming, Homoiconic Lisp & Universal Root Object](docs/concepts/13-metaprogramming-and-lisp.md)**
+14. **[Hard Real-Time Systems, Dimensional Units & Native Matrix Types](docs/concepts/14-realtime-and-matrix-types.md)**
+15. **[Universal Package Manager, Virtual Environments, Preprocessor & Tooling](docs/concepts/15-packaging-venv-and-tooling.md)**
 
 ---
 
