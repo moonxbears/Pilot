@@ -2207,6 +2207,14 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             return ExtractElementType(inner ?? "any");
         }
 
+        if (context.SPAWN() != null)
+        {
+            AddSemanticToken(context.SPAWN().Symbol, PilotSemanticTokenLegend.TypeKeyword, PilotSemanticTokenLegend.ModAsync);
+            if (context.test() != null) Visit(context.test());
+            string? inner = context.factor() != null ? Visit(context.factor()) : "any";
+            return $"Future[{inner ?? "any"}]";
+        }
+
         if (context.quote_expr() is { } qe) return VisitQuote_expr(qe);
         if (context.quasiquote_expr() is { } qqe) return VisitQuasiquote_expr(qqe);
         if (context.splice_expr() is { } se) return VisitSplice_expr(se);
@@ -2333,6 +2341,14 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                     }
                 }
                 currentType = $"{currentType ?? "float"}<{trailer.unit_expr().GetText()}>";
+            }
+            else if (trailer.LSQB() != null)
+            {
+                Visit(trailer);
+                if (currentType != null)
+                {
+                    currentType = ExtractElementType(currentType);
+                }
             }
             else
             {
