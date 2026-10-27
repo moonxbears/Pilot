@@ -176,10 +176,54 @@ public sealed class PilotMethodGroup
             }
         }
 
-        // 5. If no overloads matched even partially, throw descriptive error
+        // 5. Automatic Repeated Call / Vectorization Fallback for Collections
+        for (int i = 0; i < positionalArgs.Count; i++)
+        {
+            var pVal = positionalArgs[i];
+            if (pVal.Kind is PilotValueKind.List or PilotValueKind.Tuple or PilotValueKind.Set)
+            {
+                var collectionItems = ExtractCollectionElements(pVal);
+                if (collectionItems.Count > 0)
+                {
+                    var firstElem = collectionItems[0];
+                    bool matchesAny = Overloads.Any(ov =>
+                    {
+                        int pIndex = (TargetInstance != null && ov.Parameters.Count > 0 &&
+                                     (ov.Parameters[0].Name == "self" || ov.Parameters[0].Name == "this")) ? i + 1 : i;
+                        return ov.Parameters.Count > pIndex && IsTypeCompatible(ov.Parameters[pIndex].TypeName, firstElem, context, out _);
+                    });
+
+                    if (matchesAny)
+                    {
+                        var repeatedResults = new List<PilotValue>(collectionItems.Count);
+                        foreach (var elem in collectionItems)
+                        {
+                            var clonedPos = new List<PilotValue>(positionalArgs);
+                            clonedPos[i] = elem;
+                            repeatedResults.Add(Invoke(context, clonedPos, allNamed, isBroadcast: false));
+                        }
+                        if (repeatedResults.All(r => r.IsNull || r.IsUndefined))
+                        {
+                            return PilotValue.Null;
+                        }
+                        return PilotValue.FromList(repeatedResults);
+                    }
+                }
+            }
+        }
+
+        // 6. If no overloads matched even partially, throw descriptive error
         string argTypes = string.Join(", ", positionalArgs.Select(a => a.Kind.ToString().ToLowerInvariant())
             .Concat(allNamed.Select(kv => $"{kv.Key}={kv.Value.Kind.ToString().ToLowerInvariant()}")));
         throw new PilotTypeException($"No matching overload in method group '{Name}' for arguments ({argTypes}).");
+    }
+
+    private static List<PilotValue> ExtractCollectionElements(PilotValue val)
+    {
+        if (val.Kind == PilotValueKind.List) return val.AsList();
+        if (val.Kind == PilotValueKind.Tuple) return val.AsTuple().ToList();
+        if (val.Kind == PilotValueKind.Set) return val.AsSet().ToList();
+        return new List<PilotValue> { val };
     }
 
     private PilotValue ExecuteOverload(
@@ -228,22 +272,22 @@ public sealed class PilotMethodGroup
             // 1. Check if supplied via named argument
             if (named.TryGetValue(p.Name, out var namedVal))
             {
-                if (!IsTypeCompatible(p.TypeName, namedVal, context))
+                if (!IsTypeCompatible(p.TypeName, namedVal, context, out var adaptedNamed))
                 {
                     return false;
                 }
-                constructedArgs.Add(namedVal);
+                constructedArgs.Add(adaptedNamed);
                 usedNamed.Add(p.Name);
             }
             // 2. Check if supplied via positional argument
             else if (posIdx < positional.Count)
             {
                 var posVal = positional[posIdx++];
-                if (!IsTypeCompatible(p.TypeName, posVal, context))
+                if (!IsTypeCompatible(p.TypeName, posVal, context, out var adaptedPos))
                 {
                     return false;
                 }
-                constructedArgs.Add(posVal);
+                constructedArgs.Add(adaptedPos);
             }
             // 3. Fallback to default parameter value
             else if (p.DefaultValue.HasValue)
@@ -321,13 +365,36 @@ public sealed class PilotMethodGroup
     }
 
     /// <summary>
-    /// Evaluates whether an argument value matches an expected type annotation.
+    /// Evaluates whether an argument value matches an expected type annotation, optionally using argument adapters.
     /// </summary>
     public static bool IsTypeCompatible(string? expectedType, PilotValue arg, PilotExecutionContext? context = null)
     {
+        return IsTypeCompatible(expectedType, arg, context, out _);
+    }
+
+    public static bool IsTypeCompatible(string? expectedType, PilotValue arg, PilotExecutionContext? context, out PilotValue adapted)
+    {
+        adapted = arg;
         if (string.IsNullOrWhiteSpace(expectedType)) return true;
         expectedType = expectedType.Trim();
 
+        // 1. Direct type matching
+        if (IsDirectlyCompatible(expectedType, arg, context))
+        {
+            return true;
+        }
+
+        // 2. Argument Type Adapters
+        if (Pilot.Runtime.Adapters.PilotTypeAdapterRegistry.Default.TryConvert(arg, expectedType, context, out adapted))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsDirectlyCompatible(string expectedType, PilotValue arg, PilotExecutionContext? context = null)
+    {
         if (expectedType.Equals("any", StringComparison.OrdinalIgnoreCase) ||
             expectedType.Equals("dynamic", StringComparison.OrdinalIgnoreCase) ||
             expectedType.Equals("object", StringComparison.OrdinalIgnoreCase))

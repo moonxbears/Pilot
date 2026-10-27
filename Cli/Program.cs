@@ -48,12 +48,18 @@ public static class Program
             return RunScriptFile(scriptFile, scriptArgs);
         }
 
-        // 4. Interactive debugger subcommand: pilot debug <file.pilot> [args...]
+        // 5. Interactive debugger subcommand: pilot debug <file.pilot> [args...]
         if (args.Length > 1 && (args[0] == "debug" || args[0] == "--debug"))
         {
             string scriptFile = args[1];
             string[] scriptArgs = args.Length > 2 ? args.Skip(2).ToArray() : Array.Empty<string>();
             return new Pilot.Debugging.PilotCliDebugger().Run(scriptFile, scriptArgs);
+        }
+
+        // 6. Universal Package Manager subcommands: pilot pkg <init|add|install|restore|remove|list|pack>
+        if (args.Length > 0 && (args[0] == "pkg" || args[0] == "package" || args[0] == "install" || args[0] == "add" || args[0] == "restore" || args[0] == "pack"))
+        {
+            return ExecutePackageSubcommand(args);
         }
 
         // 4. Direct script execution if first argument is a file: pilot script.pilot [args...] or pilot script.pilc [args...]
@@ -273,6 +279,100 @@ public static class Program
         return 0;
     }
 
+    private static int ExecutePackageSubcommand(string[] args)
+    {
+        string curDir = Directory.GetCurrentDirectory();
+        var pm = Pilot.Runtime.Packaging.PilotPackageManager.Default;
+        Action<string> log = msg => Console.WriteLine(msg);
+
+        string cmd = args[0];
+        string subCmd = args.Length > 1 ? args[1] : string.Empty;
+
+        // e.g. pilot install [pkg] or pilot pkg install
+        if (cmd == "install" || (cmd == "pkg" && subCmd == "install") || (cmd == "package" && subCmd == "install") ||
+            cmd == "restore" || (cmd == "pkg" && subCmd == "restore") || (cmd == "package" && subCmd == "restore"))
+        {
+            string? pkg = (cmd == "install" && args.Length > 1) ? args[1]
+                        : (cmd == "pkg" && args.Length > 2) ? args[2] : null;
+
+            if (!string.IsNullOrEmpty(pkg))
+            {
+                bool addOk = pm.Add(curDir, pkg, null, log);
+                return addOk ? 0 : 1;
+            }
+            bool ok = pm.Restore(curDir, log);
+            return ok ? 0 : 1;
+        }
+
+        // e.g. pilot add <pkg> or pilot pkg add <pkg>
+        if (cmd == "add" || ((cmd == "pkg" || cmd == "package") && subCmd == "add"))
+        {
+            int pkgIdx = cmd == "add" ? 1 : 2;
+            if (pkgIdx >= args.Length)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("[PKG ERROR] Missing package to add. Usage: pilot pkg add <packageSpec>");
+                Console.ResetColor();
+                return 1;
+            }
+            string pkgSpec = args[pkgIdx];
+            bool ok = pm.Add(curDir, pkgSpec, null, log);
+            return ok ? 0 : 1;
+        }
+
+        // e.g. pilot pkg remove <pkg>
+        if ((cmd == "pkg" || cmd == "package") && subCmd == "remove")
+        {
+            if (args.Length < 3)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("[PKG ERROR] Missing package to remove. Usage: pilot pkg remove <packageSpec>");
+                Console.ResetColor();
+                return 1;
+            }
+            bool ok = pm.Remove(curDir, args[2], log);
+            return ok ? 0 : 1;
+        }
+
+        // e.g. pilot pkg list
+        if ((cmd == "pkg" || cmd == "package") && subCmd == "list")
+        {
+            pm.List(curDir, log);
+            return 0;
+        }
+
+        // e.g. pilot pkg init [name]
+        if ((cmd == "pkg" || cmd == "package") && subCmd == "init")
+        {
+            string? name = args.Length > 2 ? args[2] : null;
+            var manifest = pm.Init(curDir, name);
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"[PKG SUCCESS] Initialized Pilot package '{manifest.Name}' in '{curDir}/pilot.json'");
+            Console.ResetColor();
+            return 0;
+        }
+
+        // e.g. pilot pack or pilot pkg pack
+        if (cmd == "pack" || ((cmd == "pkg" || cmd == "package") && subCmd == "pack"))
+        {
+            string? outPath = (cmd == "pack" && args.Length > 1) ? args[1]
+                            : (args.Length > 2) ? args[2] : null;
+            pm.Pack(curDir, outPath, log);
+            return 0;
+        }
+
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"Unknown package command. Supported:");
+        Console.WriteLine("  pilot pkg init [name]               # Initialize new package manifest (pilot.json)");
+        Console.WriteLine("  pilot pkg add <packageSpec>         # Add native or interop dependency (e.g. nuget:Newtonsoft.Json, npm:lodash)");
+        Console.WriteLine("  pilot pkg install / restore         # Restore all declared native and adopted dependencies");
+        Console.WriteLine("  pilot pkg remove <packageSpec>      # Remove dependency");
+        Console.WriteLine("  pilot pkg list                      # List all dependencies");
+        Console.WriteLine("  pilot pkg pack [out.pilpkg]         # Bundle package into distributable .pilpkg");
+        Console.ResetColor();
+        return 1;
+    }
+
     public static void PrintUsage()
     {
         Console.WriteLine("==================================================================");
@@ -285,6 +385,14 @@ public static class Program
         Console.WriteLine("  pilot debug <file.pilot> [args...]   # Start interactive CLI debugger session");
         Console.WriteLine("  pilot -c \"<code>\" [args...]         # Execute inline code string");
         Console.WriteLine("  pilot compile <file> [-o <out.pilc>] # Precompile to binary format");
+        Console.WriteLine("\nPackage Management Usage (Native & Adopted Interop):");
+        Console.WriteLine("  pilot pkg init [name]                # Create new pilot.json manifest");
+        Console.WriteLine("  pilot pkg add <pkg>                  # Add native or interop dependency");
+        Console.WriteLine("                                       # (nuget:Pkg@Ver, npm:Pkg@Ver, pip:Pkg@Ver, cargo:Pkg@Ver)");
+        Console.WriteLine("  pilot pkg install                    # Restore and install all dependencies");
+        Console.WriteLine("  pilot pkg remove <pkg>               # Remove dependency from project");
+        Console.WriteLine("  pilot pkg list                       # List all dependencies");
+        Console.WriteLine("  pilot pkg pack [out.pilpkg]          # Package project into distributable archive");
         Console.WriteLine("\nTooling & Analysis Usage:");
         Console.WriteLine("  pilot --tokens <file>                # Dump lexical token stream");
         Console.WriteLine("  pilot --tree <file>                  # Print hierarchical AST");

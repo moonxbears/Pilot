@@ -315,5 +315,47 @@ public sealed class PilotBuiltinRegistry
         }, "json_string", "target_class")));
 
         Register("json", (_, _) => PilotValue.FromObject(jsonModule));
+
+        // Type Adapters & Repeat / Vectorization
+        Register("register_adapter", (ctx, args) =>
+        {
+            if (args.Count >= 3)
+            {
+                string fromType = args[0].AsString();
+                string toType = args[1].AsString();
+                if (args[2].Kind == PilotValueKind.Function)
+                {
+                    Pilot.Runtime.Adapters.PilotTypeAdapterRegistry.Default.Register(fromType, toType, args[2].AsFunction());
+                    return PilotValue.True;
+                }
+            }
+            return PilotValue.False;
+        }, "from_type", "to_type", "converter");
+
+        var adapterObj = new PilotObject(new PilotClassDefinition("TypeAdapter"));
+        adapterObj.SetMember("register", PilotValue.FromFunction(PilotFunction.CreateNative("register", (ctx, args) =>
+        {
+            if (args.Count >= 3 && args[2].Kind == PilotValueKind.Function)
+            {
+                Pilot.Runtime.Adapters.PilotTypeAdapterRegistry.Default.Register(args[0].AsString(), args[1].AsString(), args[2].AsFunction());
+                return PilotValue.True;
+            }
+            return PilotValue.False;
+        }, "from_type", "to_type", "converter")));
+        Register("TypeAdapter", (_, _) => PilotValue.FromObject(adapterObj));
+
+        Register("vectorize", (_, args) =>
+        {
+            if (args.Count > 0 && args[0].Kind == PilotValueKind.Function)
+            {
+                var fn = args[0].AsFunction();
+                fn.IsVectorized = true;
+                return PilotValue.FromFunction(fn);
+            }
+            return PilotValue.Null;
+        }, "target");
+
+        Register("auto_repeat", (_, _) => PilotValue.FromString("auto_repeat"));
+        Register("repeat", (_, _) => PilotValue.FromString("repeat"));
     }
 }

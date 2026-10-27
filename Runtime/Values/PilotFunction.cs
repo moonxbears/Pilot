@@ -16,14 +16,18 @@ public sealed class PilotParameter
     public PilotValue? DefaultValue { get; }
     public bool IsParams { get; }
     public bool IsKwArgs { get; }
+    public bool IsContextual { get; }
+    public bool IsEach { get; }
 
-    public PilotParameter(string name, string? typeName = null, PilotValue? defaultValue = null, bool isParams = false, bool isKwArgs = false)
+    public PilotParameter(string name, string? typeName = null, PilotValue? defaultValue = null, bool isParams = false, bool isKwArgs = false, bool isContextual = false, bool isEach = false)
     {
         Name = name;
         TypeName = typeName;
         DefaultValue = defaultValue;
         IsParams = isParams;
         IsKwArgs = isKwArgs;
+        IsContextual = isContextual;
+        IsEach = isEach;
     }
 }
 
@@ -39,9 +43,12 @@ public sealed class PilotFunction
     public Func<PilotExecutionContext, IReadOnlyList<PilotValue>, PilotValue>? HostDelegate { get; }
     public bool IsAsync { get; }
     public bool IsGenerator { get; }
+    public bool IsVectorized { get; set; }
     public IReadOnlyDictionary<string, PilotValue>? Captures { get; }
     public PilotClassDefinition? ClassDef { get; set; }
     public Dictionary<string, PilotValue> Members { get; } = new(StringComparer.Ordinal);
+    public List<ParserRuleContext> RequiresContracts { get; } = new();
+    public List<ParserRuleContext> EnsuresContracts { get; } = new();
 
     public PilotFunction(
         string name,

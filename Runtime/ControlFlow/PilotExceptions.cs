@@ -85,6 +85,24 @@ public class PilotTimeoutException : PilotRuntimeException
 }
 
 /// <summary>
+/// Thrown when a destructuring pattern assignment or exhaustive match fails to match the required structure.
+/// </summary>
+public class PilotPatternMatchingException : PilotRuntimeException
+{
+    public PilotPatternMatchingException(string message = "Pattern matching assignment failed.", int line = 0, int column = 0, Exception? inner = null)
+        : base(message, "MatchError", line, column, inner) { }
+}
+
+/// <summary>
+/// Thrown when a contextual parameter cannot be resolved from the caller environment.
+/// </summary>
+public class PilotContextException : PilotRuntimeException
+{
+    public PilotContextException(string message = "Contextual parameter resolution failed.", int line = 0, int column = 0, Exception? inner = null)
+        : base(message, "ContextError", line, column, inner) { }
+}
+
+/// <summary>
 /// Thrown by user explicit 'raise' statements.
 /// </summary>
 public class PilotUserException : PilotRuntimeException

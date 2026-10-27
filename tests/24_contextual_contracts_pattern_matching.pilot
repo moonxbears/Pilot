@@ -1,0 +1,102 @@
+// =============================================================================
+// Pilot Suite 24: Contextual Parameters, Exhaustive Pattern Matching,
+// and Design-by-Contract Signature Validation
+// =============================================================================
+
+// --- 1. Contextual Parameters (Native Dependency Injection) ---
+class Database {
+    let url = "";
+    let queries = [];
+
+    def execute(self, sql, data) {
+        self.queries.append(sql + " -> " + data);
+        return "success";
+    }
+}
+
+def save_user(user, context db: Database) {
+    db.execute("INSERT_USER", user);
+    return "saved";
+}
+
+def process_registration(payload, context db: Database) {
+    let user = payload["name"];
+    // db is automatically and implicitly passed down to save_user
+    save_user(user);
+    return "registered";
+}
+
+let dbInstance = Database();
+dbInstance.url = "postgresql://localhost:5432/app";
+
+with context db = dbInstance {
+    let status = process_registration({ "name": "Isaac" });
+    assert status == "registered";
+}
+
+assert dbInstance.queries.length == 1;
+assert dbInstance.queries[0] == "INSERT_USER -> Isaac";
+
+// --- 2. Exhaustive Pattern Matching Assignments ---
+def fetch_user_record() {
+    return {
+        "id": 42,
+        "metadata": {
+            "role": "LeadArchitect",
+            "access": "Full"
+        }
+    };
+}
+
+// Extract variables instantly while validating structure
+{ "id": user_id, "metadata": { "role": user_role } } = fetch_user_record();
+
+assert user_id == 42;
+assert user_role == "LeadArchitect";
+
+// Spread pattern matching assignment
+let list_data = [100, 200, 300, 400];
+[first_elem, ..middle_elems, last_elem] = list_data;
+
+assert first_elem == 100;
+assert middle_elems.length == 2;
+assert middle_elems[0] == 200;
+assert middle_elems[1] == 300;
+assert last_elem == 400;
+
+// --- 3. Design-by-Contract (Signature Validation) ---
+class BankAccount {
+    let balance = 1000.0;
+
+    def deduct(self, amount) {
+        self.balance = self.balance - amount;
+    }
+
+    def add(self, amount) {
+        self.balance = self.balance + amount;
+    }
+}
+
+def transfer_funds(amount: float, source: BankAccount, dest: BankAccount)
+    requires amount > 0.0
+    requires source.balance >= amount
+    ensures source.balance == old(source.balance) - amount
+    ensures dest.balance == old(dest.balance) + amount
+    ensures result == true {
+
+    source.deduct(amount);
+    dest.add(amount);
+    return true;
+}
+
+let sourceAcc = BankAccount();
+sourceAcc.balance = 800.0;
+
+let destAcc = BankAccount();
+destAcc.balance = 200.0;
+
+let success = transfer_funds(300.0, sourceAcc, destAcc);
+
+assert success == true;
+assert sourceAcc.balance == 500.0;
+assert destAcc.balance == 500.0;

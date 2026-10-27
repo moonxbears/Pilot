@@ -272,7 +272,13 @@ public sealed class PilotObject : IEquatable<PilotObject>
             return fieldVal;
         }
 
-        // Built-in state transition function: self.transition_to("StateName")
+        // Built-in state functions: self.transition_to("StateName"), self.current_state()
+        if (memberName == "current_state" || memberName == "currentState")
+        {
+            return PilotValue.FromFunction(PilotFunction.CreateNative(memberName, (ctx, args) =>
+                CurrentState != null ? PilotValue.FromString(CurrentState) : PilotValue.Null));
+        }
+
         if (memberName == "transition_to")
         {
             return PilotValue.FromFunction(PilotFunction.CreateNative("transition_to", (ctx, args) =>

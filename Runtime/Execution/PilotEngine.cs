@@ -211,6 +211,22 @@ public sealed class PilotEngine : IPilotEngine
             {
                 callScope.Declare(p.Name, arguments[argIdx++]);
             }
+            else if (p.IsContextual)
+            {
+                if (context.TryResolveContextual(p.Name, out var contextualVal))
+                {
+                    callScope.Declare(p.Name, contextualVal);
+                }
+                else if (p.DefaultValue.HasValue)
+                {
+                    callScope.Declare(p.Name, p.DefaultValue.Value);
+                }
+                else
+                {
+                    throw new Pilot.Runtime.ControlFlow.PilotContextException(
+                        $"Contextual parameter '{p.Name}' required by function '{function.Name}' could not be resolved from caller context.");
+                }
+            }
             else if (p.DefaultValue.HasValue)
             {
                 callScope.Declare(p.Name, p.DefaultValue.Value);
@@ -237,7 +253,53 @@ public sealed class PilotEngine : IPilotEngine
             context.Options,
             new PilotEnvironment(callScope),
             context.CancellationToken);
+
+        // Propagate active extensions and contextual bindings
+        foreach (var ext in context.ActiveExtensions) functionContext.ActiveExtensions.Push(ext);
+        foreach (var kvp in context.RegisteredExtensions) functionContext.RegisteredExtensions[kvp.Key] = kvp.Value;
+        foreach (var frame in context.ContextualBindings) functionContext.ContextualBindings.Push(frame);
+
         var methodVisitor = new PilotInterpreterVisitor(functionContext);
+
+        // Design-by-Contract: 1. Evaluate Preconditions (requires)
+        if (function.RequiresContracts.Count > 0)
+        {
+            foreach (var req in function.RequiresContracts)
+            {
+                var reqVal = methodVisitor.Visit(req);
+                if (!reqVal.IsTrue)
+                {
+                    throw new Pilot.Runtime.ControlFlow.PilotContractException(
+                        $"Precondition failed for '{function.Name}': requires {req.GetText()}");
+                }
+            }
+        }
+
+        // Design-by-Contract: 2. Pre-evaluate and snapshot old(...) expressions
+        if (function.EnsuresContracts.Count > 0)
+        {
+            foreach (var ens in function.EnsuresContracts)
+            {
+                SnapshotOldCalls(ens, methodVisitor, functionContext.OldSnapshots);
+            }
+        }
+
+        void ValidatePostconditions(PilotValue ret)
+        {
+            if (function.EnsuresContracts.Count > 0)
+            {
+                callScope.Declare("result", ret);
+                foreach (var ens in function.EnsuresContracts)
+                {
+                    var ensVal = methodVisitor.Visit(ens);
+                    if (!ensVal.IsTrue)
+                    {
+                        throw new Pilot.Runtime.ControlFlow.PilotContractException(
+                            $"Postcondition failed for '{function.Name}': ensures {ens.GetText()}");
+                    }
+                }
+            }
+        }
 
         Pilot.Debugging.PilotStackFrame? debugFrame = null;
         if (context.Debugger != null)
@@ -261,11 +323,13 @@ public sealed class PilotEngine : IPilotEngine
                 resultVal = methodVisitor.Visit(function.AstBody!);
             }
 
+            ValidatePostconditions(resultVal);
             return resultVal;
         }
         catch (PilotReturnSignal ret)
         {
             resultVal = ret.Value;
+            ValidatePostconditions(resultVal);
             return resultVal;
         }
         finally
@@ -458,6 +522,37 @@ public sealed class PilotEngine : IPilotEngine
             throw new InvalidOperationException($"Compilation failed for '{filePath}': {string.Join("; ", result.Diagnostics)}");
         }
         return result.Program;
+    }
+    private static void SnapshotOldCalls(
+        Antlr4.Runtime.Tree.IParseTree node,
+        PilotInterpreterVisitor visitor,
+        Dictionary<string, PilotValue> snapshots)
+    {
+        if (node is PilotParser.Atom_exprContext atomExpr)
+        {
+            if (atomExpr.atom()?.GetText() == "old" && atomExpr.trailer()?.Length > 0 && atomExpr.trailer(0).LPAR() != null)
+            {
+                var arglist = atomExpr.trailer(0).arglist();
+                if (arglist != null)
+                {
+                    string key = arglist.GetText();
+                    if (!snapshots.ContainsKey(key))
+                    {
+                        var argNode = arglist.argument()?.FirstOrDefault()?.test();
+                        if (argNode != null)
+                        {
+                            var evaluated = visitor.Visit(argNode);
+                            snapshots[key] = evaluated.CloneValue();
+                        }
+                    }
+                }
+            }
+        }
+
+        for (int i = 0; i < node.ChildCount; i++)
+        {
+            SnapshotOldCalls(node.GetChild(i), visitor, snapshots);
+        }
     }
 }
 

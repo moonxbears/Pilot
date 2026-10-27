@@ -464,11 +464,7 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             return memberName switch
             {
                 "length" or "count" => FromInt(list.Count),
-                "append" or "push" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
-                {
-                    if (args.Count > 0) list.Add(args[0]);
-                    return Null;
-                })),
+                "append" or "push" => FromFunction(CreateAppendFunction(memberName, list)),
                 "map" => FromFunction(PilotFunction.CreateNative(memberName, (ctx, args) =>
                 {
                     if (args.Count == 0) return FromList(new List<PilotValue>(list));
@@ -574,6 +570,60 @@ public readonly struct PilotValue : IEquatable<PilotValue>
         }
 
         return ResolveExtensionOrRoot(memberName, context);
+    }
+
+    private static IEnumerable<PilotValue> EnumerateCollection(PilotValue val)
+    {
+        if (val.Kind == PilotValueKind.List) return val.AsList();
+        if (val.Kind == PilotValueKind.Tuple) return val.AsTuple();
+        if (val.Kind == PilotValueKind.Set) return val.AsSet();
+        return new[] { val };
+    }
+
+    private static PilotFunction CreateAppendFunction(string memberName, List<PilotValue> list)
+    {
+        var fn = PilotFunction.CreateNative(memberName, (ctx, args) =>
+        {
+            if (args.Count > 0)
+            {
+                var first = args[0];
+                bool isRepeat = (ctx != null && ctx.IsAutoRepeatActive);
+                if (args.Count > 1 && args[1].IsTrue) isRepeat = true;
+                if (isRepeat && (first.Kind == PilotValueKind.List || first.Kind == PilotValueKind.Tuple || first.Kind == PilotValueKind.Set))
+                {
+                    foreach (var item in EnumerateCollection(first))
+                    {
+                        list.Add(item);
+                    }
+                }
+                else
+                {
+                    list.Add(first);
+                }
+            }
+            return Null;
+        }, "item");
+
+        var repeatFn = PilotFunction.CreateNative($"{memberName}.each", (_, args) =>
+        {
+            if (args.Count > 0 && (args[0].Kind == PilotValueKind.List || args[0].Kind == PilotValueKind.Tuple || args[0].Kind == PilotValueKind.Set))
+            {
+                foreach (var item in EnumerateCollection(args[0]))
+                {
+                    list.Add(item);
+                }
+            }
+            else if (args.Count > 0)
+            {
+                list.Add(args[0]);
+            }
+            return Null;
+        }, "items");
+
+        fn.Members["each"] = FromFunction(repeatFn);
+        fn.Members["repeat"] = FromFunction(repeatFn);
+        fn.Members["broadcast"] = FromFunction(repeatFn);
+        return fn;
     }
 
     private PilotValue ResolveExtensionOrRoot(string memberName, PilotExecutionContext? context)

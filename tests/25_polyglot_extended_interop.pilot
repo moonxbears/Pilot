@@ -1,0 +1,102 @@
+// =============================================================================
+// Pilot Suite 25: Extended Polyglot Interoperability
+// - JavaScript, Java, ASM, C, C++, Lua, PostgreSQL, MySQL
+// - Pilot Variable Injection into Foreign Blocks
+// - Foreign Coroutines & Callables with Yield Statements
+// =============================================================================
+
+// --- 1. Python Block & Pilot Variable Injection ---
+let myPilotVariable : str = "Hello, Python!";
+let capturedVal = "";
+
+python {
+    capturedVal = myPilotVariable;
+}
+
+assert capturedVal == "Hello, Python!";
+
+// --- 2. PostgreSQL Inline Block Query & Row Iteration ---
+let psqlVal = postgresql {
+    select id, name, count(*)
+    from mytable tb
+    where tb.id in (1, 2, 3, 4, 5, 6);
+}
+
+let namesList = [];
+let idsList = [];
+for val in psqlVal {
+    namesList.append(val.name);
+    idsList.append(val.id);
+}
+
+assert namesList.length == 6;
+assert idsList.length == 6;
+assert namesList[0] == "item_1";
+assert namesList[5] == "item_6";
+assert idsList[0] == 1;
+assert idsList[5] == 6;
+
+// --- 3. MySQL Inline Block Query ---
+let mySqlVal = mysql {
+    select id, name from mytable tb where tb.id in (10, 20);
+}
+
+assert mySqlVal[0].id == 10;
+assert mySqlVal[1].id == 20;
+
+// --- 4. Callable / Coroutine Block with Yield Statements ---
+let recordedSequence = [];
+
+def log_output(item) {
+    recordedSequence.append(item);
+    return item;
+}
+
+let myCustomFunc = python {
+    log_output("1")
+    yield log_output
+    log_output("3")
+    yield log_output("4")
+}
+
+myCustomFunc("2");
+myCustomFunc();
+
+assert recordedSequence.length == 4;
+assert recordedSequence[0] == "1";
+assert recordedSequence[1] == "2";
+assert recordedSequence[2] == "3";
+assert recordedSequence[3] == "4";
+
+// --- 5. JavaScript (js), Lua, Java, C, C++, and Assembly Blocks ---
+let jsAnswer = js {
+    return 42;
+}
+assert jsAnswer == 42;
+
+let luaAnswer = lua {
+    return 100;
+}
+assert luaAnswer == 100;
+
+let javaAnswer = java {
+    return 200;
+}
+assert javaAnswer == 200;
+
+let cAnswer = c {
+    return 300;
+}
+assert cAnswer == 300;
+
+let cppAnswer = cpp {
+    return 400;
+}
+assert cppAnswer == 400;
+
+let asmAnswer = asm {
+    mov eax, 120;
+    add eax, 380;
+    ret;
+}
+assert asmAnswer == 500;

@@ -41,6 +41,9 @@ identifier
     | SYMBOL | REF | DYNAMIC | FN
     | STATIC | PARAMS | ARGS | KWARGS | NAMEOF | WHEN | UNDEFINED | PARTIAL | STEAL | CONTRACTS | DELEGATE
     | EXTERN | CSHARP | PYTHON | RUST | ASSEMBLY | MODULE | LIB | STATE
+    | CONTEXT | REQUIRES | ENSURES
+    | JS | JAVASCRIPT | JAVA | ASM | CPP | C_KW | LUA | SQL_KW | POSTGRES | POSTGRESQL | MYSQL
+    | EACH | REPEAT | ADAPTER | CONVERTER
     ;
 
 // =============================================================================
@@ -80,6 +83,7 @@ small_stmt
     | steal_stmt
     | delegate_stmt
     | contract_forward_stmt
+    | pattern_assign_stmt
     | expr_stmt
     ;
 
@@ -96,6 +100,7 @@ compound_stmt
     | property_def
     | operator_def
     | extension_def
+    | adapter_def
     | macro_def
     | extern_def
     | inline_foreign_block
@@ -249,12 +254,16 @@ record_pattern
     ;
 
 binding_pattern_item
-    : (STAR | DOUBLESTAR)? binding_pattern (COLON type_spec)? (EQUAL test)?
+    : (STAR | DOUBLESTAR | DOTDOT)? binding_pattern (COLON type_spec)? (EQUAL test)?
     ;
 
 record_pattern_field
-    : identifier (COLON binding_pattern)? (EQUAL test)?
+    : (identifier | STRING) (COLON binding_pattern)? (EQUAL test)?
     | DOUBLESTAR identifier
+    ;
+
+pattern_assign_stmt
+    : (tuple_pattern | list_pattern | record_pattern) EQUAL test
     ;
 
 let_stmt
@@ -314,7 +323,12 @@ augassign
 // =============================================================================
 
 func_def
-    : decorators? declaration_modifier* (PURE | ASYNC)? (DEF | FN) identifier generic_params? parameters (ARROW type_spec)? where_type_clause? (COLON? suite | SEMI)?
+    : decorators? declaration_modifier* (PURE | ASYNC)? (DEF | FN) identifier generic_params? parameters (ARROW type_spec)? where_type_clause? COLON? contract_clause* COLON? (suite | SEMI)?
+    ;
+
+contract_clause
+    : REQUIRES test
+    | ENSURES test
     ;
 
 parameters
@@ -322,7 +336,7 @@ parameters
     ;
 
 parameter
-    : (PARAMS | REF)? (STAR | DOUBLESTAR)? (identifier | splice_expr) type_annotation? (EQUAL test)?
+    : CONTEXT? (EACH | REPEAT)? (PARAMS | REF)? (STAR | DOUBLESTAR)? (identifier | splice_expr) type_annotation? (EQUAL test)?
     ;
 
 class_def
@@ -418,6 +432,11 @@ extension_def
     : decorators? declaration_modifier* EXTENSION identifier? (FOR | ON) type_spec where_type_clause? COLON? suite
     ;
 
+// Type Adapter Definition: adapter FromType -> ToType: ... or adapter Name: ...
+adapter_def
+    : decorators? declaration_modifier* ADAPTER (type_spec (ARROW | TO) type_spec | identifier) COLON? suite
+    ;
+
 // Compile-Time Metaprogramming / Macros (Lisp Homoiconicity)
 macro_def
     : decorators? declaration_modifier* (MACRO | DEFMACRO) EXCLAMATION? identifier generic_params? parameters? (ARROW type_spec)? COLON? suite
@@ -452,8 +471,12 @@ extern_member
     | small_stmt
     ;
 
+foreign_language
+    : PYTHON | CSHARP | RUST | JS | JAVASCRIPT | JAVA | ASM | ASSEMBLY | CPP | C_KW | LUA | SQL_KW | POSTGRES | POSTGRESQL | MYSQL
+    ;
+
 inline_foreign_block
-    : (PYTHON | CSHARP | RUST) (RAW_DSL_BLOCK | LBRACE stmt* RBRACE)
+    : foreign_language (RAW_DSL_BLOCK | LBRACE stmt* RBRACE | TRIPLE_STRING | STRING)
     ;
 
 // Decorators
@@ -470,7 +493,11 @@ decorator
 // =============================================================================
 
 labeled_stmt
-    : identifier COLON (for_stmt | while_stmt | suite)
+    : identifier COLON (for_stmt | while_stmt | block)
+    ;
+
+block
+    : LBRACE stmt* RBRACE
     ;
 
 if_stmt
@@ -574,6 +601,7 @@ with_stmt
 
 with_item
     : EXTENSION identifier
+    | CONTEXT identifier EQUAL test
     | test (AS identifier)?
     ;
 
@@ -621,7 +649,7 @@ foreign_import_stmt
     ;
 
 foreign_target
-    : (PYTHON | CSHARP | RUST | identifier) COLON (dotted_name | STRING)
+    : (foreign_language | identifier) COLON (dotted_name | STRING)
     ;
 
 import_name
@@ -893,7 +921,7 @@ sql_query_expr
     ;
 
 from_source
-    : test (AS identifier)? index_hint?
+    : test (AS? identifier)? index_hint?
     ;
 
 // Direct Indexed Key Lookup
@@ -1192,8 +1220,9 @@ arglist
     ;
 
 argument
-    : REF? (STAR | DOUBLESTAR)? test
-    | identifier EQUAL test
+    : (REF | EACH | REPEAT)? (STAR | DOUBLESTAR | DOTDOT)? test
+    | identifier EQUAL (EACH | REPEAT | DOTDOT)? test
+    | STAR
     ;
 
 
@@ -1216,6 +1245,10 @@ PARAMS      : 'params';
 ARGS        : 'args';
 KWARGS      : 'kwargs';
 NAMEOF      : 'nameof';
+EACH        : 'each';
+REPEAT      : 'repeat';
+ADAPTER     : 'adapter';
+CONVERTER   : 'converter';
 
 DEF         : 'def';
 FN          : 'fn';
@@ -1326,12 +1359,23 @@ WCET        : 'wcet';
 HARD_RT     : 'hard_rt';
 SOFT_RT     : 'soft_rt';
 
-// --- Polyglot Interoperability (Python, C#, Rust FFI) ---
+// --- Polyglot Interoperability (Python, C#, Rust, JS, Java, ASM, C++, C, Lua, SQL) ---
 EXTERN      : 'extern';
 CSHARP      : 'csharp';
 PYTHON      : 'python';
 RUST        : 'rust';
+JS          : 'js';
+JAVASCRIPT  : 'javascript';
+JAVA        : 'java';
+ASM         : 'asm';
 ASSEMBLY    : 'assembly';
+CPP         : 'cpp' | 'c++';
+C_KW        : 'c';
+LUA         : 'lua';
+SQL_KW      : 'sql';
+POSTGRES    : 'postgres';
+POSTGRESQL  : 'postgresql';
+MYSQL       : 'mysql';
 MODULE      : 'module';
 LIB         : 'lib';
 
@@ -1355,6 +1399,9 @@ TIMEOUT     : 'timeout';
 // --- Robust Control Flow & Precondition Keywords ---
 GUARD       : 'guard';      // Mandatory early-exit precondition
 DEFER       : 'defer';      // Schedule cleanup at scope/function exit
+CONTEXT     : 'context';    // Native dependency injection & contextual bindings
+REQUIRES    : 'requires';   // Design-by-contract precondition
+ENSURES     : 'ensures';    // Design-by-contract postcondition
 IF          : 'if';
 ELIF        : 'elif';
 ELSE        : 'else';

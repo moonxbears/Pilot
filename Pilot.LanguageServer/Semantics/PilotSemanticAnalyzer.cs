@@ -746,6 +746,13 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                     string pName = pId?.GetText() ?? pSplice?.GetText() ?? "_";
                     var tokenForSym = pId?.Start ?? pSplice?.Start;
 
+                    if (param.CONTEXT() != null)
+                        AddSemanticToken(param.CONTEXT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+                    if (param.EACH() != null)
+                        AddSemanticToken(param.EACH().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+                    if (param.REPEAT() != null)
+                        AddSemanticToken(param.REPEAT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
                     string pType = param.type_annotation()?.type_spec()?.GetText()
                         ?? (pName == "self" && _currentScope.EnclosingType != null ? _currentScope.EnclosingType.Name : "any");
 
@@ -768,10 +775,39 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             funcSymbol.Signature = $"{prefix}def {name}({paramListStr}) -> {returnType}";
 
             if (context.where_type_clause() != null) Visit(context.where_type_clause());
+            if (context.contract_clause() != null)
+            {
+                foreach (var cc in context.contract_clause())
+                {
+                    Visit(cc);
+                }
+            }
             if (context.suite() != null) Visit(context.suite());
         }
 
         return returnType;
+    }
+
+    public override string? VisitContract_clause(PilotParser.Contract_clauseContext context)
+    {
+        if (context.REQUIRES() != null)
+            AddSemanticToken(context.REQUIRES().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        else if (context.ENSURES() != null)
+            AddSemanticToken(context.ENSURES().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
+        if (context.test() != null)
+            Visit(context.test());
+
+        return null;
+    }
+
+    public override string? VisitPattern_assign_stmt(PilotParser.Pattern_assign_stmtContext context)
+    {
+        if (context.tuple_pattern() != null) Visit(context.tuple_pattern());
+        if (context.list_pattern() != null) Visit(context.list_pattern());
+        if (context.record_pattern() != null) Visit(context.record_pattern());
+        if (context.test() != null) Visit(context.test());
+        return null;
     }
 
     public override string? VisitClass_def(PilotParser.Class_defContext context)
@@ -989,6 +1025,13 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                 {
                     var pId = param.identifier();
                     string pName = pId.GetText();
+                    if (param.CONTEXT() != null)
+                        AddSemanticToken(param.CONTEXT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+                    if (param.EACH() != null)
+                        AddSemanticToken(param.EACH().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+                    if (param.REPEAT() != null)
+                        AddSemanticToken(param.REPEAT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
                     string pType = param.type_annotation()?.type_spec()?.GetText() ?? (_currentScope.EnclosingType?.Name ?? "any");
                     var pSym = CreateSymbol(pId, param, pName, PilotSymbolKind.Parameter, pType, "C# Robustness", $"{pName}: {pType}", "Operator parameter.");
                     RegisterSymbol(pSym, PilotSemanticTokenLegend.TypeParameter, PilotSemanticTokenLegend.ModDeclaration);
@@ -1017,6 +1060,36 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         }
 
         return targetType;
+    }
+
+    public override string? VisitAdapter_def(PilotParser.Adapter_defContext context)
+    {
+        string fromType = "any";
+        string toType = "any";
+        if (context.type_spec().Length >= 2)
+        {
+            fromType = context.type_spec(0).GetText();
+            toType = context.type_spec(1).GetText();
+        }
+        else if (context.identifier() != null)
+        {
+            fromType = context.identifier().GetText();
+        }
+
+        string adapterName = $"adapter_{fromType}_to_{toType}";
+        var token = context.identifier()?.Start ?? context.ADAPTER().Symbol;
+        AddSemanticToken(context.ADAPTER().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
+        var symbol = CreateSymbolFromToken(token, context, adapterName, PilotSymbolKind.Function, toType, "Adapters",
+            $"adapter {fromType} -> {toType}", $"Type adapter converting `{fromType}` to `{toType}`.");
+        RegisterSymbol(symbol, PilotSemanticTokenLegend.TypeFunction, PilotSemanticTokenLegend.ModDeclaration);
+
+        using (EnterScope($"adapter:{adapterName}", context, enclosingType: symbol))
+        {
+            if (context.suite() != null) Visit(context.suite());
+        }
+
+        return toType;
     }
 
     public override string? VisitUnit_stmt(PilotParser.Unit_stmtContext context)
@@ -1135,12 +1208,9 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             AddSemanticToken(context.AS().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
 
         var ft = context.foreign_target();
-        string lang = (ft.PYTHON() != null ? "python"
-            : ft.CSHARP() != null ? "csharp"
-            : ft.RUST() != null ? "rust"
-            : ft.identifier()?.GetText() ?? "foreign").ToLowerInvariant();
+        string lang = (ft.foreign_language()?.GetText() ?? ft.identifier()?.GetText() ?? "foreign").ToLowerInvariant();
 
-        var langTok = ft.PYTHON()?.Symbol ?? ft.CSHARP()?.Symbol ?? ft.RUST()?.Symbol ?? ft.identifier()?.Start;
+        var langTok = ft.foreign_language()?.Start ?? ft.identifier()?.Start;
         if (langTok != null)
             AddSemanticToken(langTok, PilotSemanticTokenLegend.TypeKeyword, 0);
 
@@ -1350,6 +1420,13 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                     var pId = param.identifier();
                     if (pId == null) continue;
                     string pName = pId.GetText();
+                    if (param.CONTEXT() != null)
+                        AddSemanticToken(param.CONTEXT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+                    if (param.EACH() != null)
+                        AddSemanticToken(param.EACH().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+                    if (param.REPEAT() != null)
+                        AddSemanticToken(param.REPEAT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
                     string pType = param.type_annotation()?.type_spec()?.GetText()
                         ?? (pName == "self" && _currentScope.EnclosingType != null ? _currentScope.EnclosingType.Name : "any");
 
@@ -1427,15 +1504,17 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
     public override string? VisitInline_foreign_block(PilotParser.Inline_foreign_blockContext context)
     {
-        var kw = context.PYTHON() ?? context.CSHARP() ?? context.RUST();
-        if (kw != null)
+        if (context.foreign_language() != null)
         {
-            AddSemanticToken(kw.Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+            AddSemanticToken(context.foreign_language().Start, PilotSemanticTokenLegend.TypeKeyword, 0);
         }
 
-        foreach (var stmt in context.stmt())
+        if (context.stmt() != null)
         {
-            Visit(stmt);
+            foreach (var stmt in context.stmt())
+            {
+                Visit(stmt);
+            }
         }
 
         return "any";
@@ -1842,7 +1921,16 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         AddSemanticToken(context.identifier().Start, PilotSemanticTokenLegend.TypeVariable, 0);
         if (context.for_stmt() != null) return Visit(context.for_stmt());
         if (context.while_stmt() != null) return Visit(context.while_stmt());
-        if (context.suite() != null) return Visit(context.suite());
+        if (context.block() != null) return Visit(context.block());
+        return null;
+    }
+
+    public override string? VisitBlock(PilotParser.BlockContext context)
+    {
+        foreach (var stmt in context.stmt())
+        {
+            Visit(stmt);
+        }
         return null;
     }
 

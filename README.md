@@ -1,160 +1,619 @@
-# Pilot Language Specification & ANTLR4 Grammar
+# Pilot Programming Language
 
-**Pilot** is a type-safe programming language blending Pythonic syntax with C#-style robustness, featuring:
-- **Native & Postgres-Style Database Integration**: In-memory LINQ queries, indexed table lookups, and generic SQL constructs (`INSERT ON CONFLICT`, `RETURNING`, transactions, savepoints, and window functions).
-- **Asynchronous & Multi-Threaded Concurrency**: Actors, Go-style channels (`select`), thread spawning, `parallel for`, `atomic`, and `sync` blocks.
-- **Real-Time Trade-offs**: Hard real-time (`@hard_realtime`, `@wcet`, `noalloc`, `stackalloc`, `bounded` loops) and soft real-time (`deadline`, `within ... fallback`, `periodic` tasks).
-- **Universal Domain-Specific Abstractions (UDSA)**: First-class dimensional units of measure, compile-time AST macros (`quote`), and functional pipeline operators (`|>`).
-- **C#-like Robustness**: Properties with `get`/`set`, operator overloading, extension methods, and generic `where` constraints.
-- **Preconditions & Cleanup**: Mandatory early-exit `guard` and function-exit `defer` statements.
+> **Type-Safe, Flexible, Configurable, Decoupled, Beautiful, Efficient, and Extendible.**
+
+**Pilot** is a modern general-purpose programming language blending Pythonic elegance with C#-style robustness, native relational database operations, real-time determinism, polyglot interoperability, and universal package adoption.
 
 ---
 
-## Repository Structure & Grammar Architecture
+## Table of Contents
+
+- [Core Highlights](#core-highlights)
+- [Design Philosophy](#design-philosophy)
+- [Architecture & Repository Structure](#architecture--repository-structure)
+- [Getting Started & Installation](#getting-started--installation)
+- [Universal Package Manager (`pilot pkg`)](#universal-package-manager-pilot-pkg)
+  - [Native Pilot Packages](#native-pilot-packages)
+  - [Adopting Interop Packages (NuGet, npm, pip, Cargo, Maven, LuaRocks)](#adopting-interop-packages)
+  - [Packaging CLI Reference](#packaging-cli-reference)
+- [Language Features & Syntax Reference](#language-features--syntax-reference)
+  - [1. Type Safety, Variables & Control Flow](#1-type-safety-variables--control-flow)
+  - [2. Preconditions & Cleanup (`guard` and `defer`)](#2-preconditions--cleanup-guard-and-defer)
+  - [3. Type Adapters, Argument Adaptation & Repeated Calls](#3-type-adapters-argument-adaptation--repeated-calls)
+  - [4. Advanced Method Groups & Dispatch](#4-advanced-method-groups--dispatch)
+  - [5. Algebraic Class Composition & Typestates](#5-algebraic-class-composition--typestates)
+  - [6. Structural Projection & Scoped Lexical Extensions](#6-structural-projection--scoped-lexical-extensions)
+  - [7. Contextual Parameters (Native Dependency Injection)](#7-contextual-parameters-native-dependency-injection)
+  - [8. Design-by-Contract (`requires` and `ensures`)](#8-design-by-contract-requires-and-ensures)
+  - [9. Exhaustive Pattern Matching Assignments](#9-exhaustive-pattern-matching-assignments)
+  - [10. Relational & In-Memory Database Set Operations](#10-relational--in-memory-database-set-operations)
+  - [11. Concurrency, Channels & Actors](#11-concurrency-channels--actors)
+  - [12. Real-Time Determinism & Units of Measure](#12-real-time-determinism--units-of-measure)
+  - [13. Metaprogramming, Macros & AST Generative Classes](#13-metaprogramming-macros--ast-generative-classes)
+- [Polyglot Interoperability](#polyglot-interoperability)
+- [Compilation & Scripting Runtime](#compilation--scripting-runtime)
+- [Interactive Debugger & REPL](#interactive-debugger--repl)
+- [Language Server Protocol (LSP) & Tooling](#language-server-protocol-lsp--tooling)
+- [Running the Test Suites](#running-the-test-suites)
+- [Step-by-Step Architecture Guide](#step-by-step-architecture-guide)
+
+---
+
+## Core Highlights
+
+- **Pythonic Syntax + C# Robustness**: Familiar syntax with properties (`get`/`set`), operator overloads, generic `where` constraints, interfaces, contract delegation, and method stealing.
+- **Universal Package Manager**: First-class native packaging with full capability to adopt dependencies from **NuGet** (.NET), **npm** (Node), **pip** (Python), **Cargo** (Rust), **Maven** (Java), and **LuaRocks** (Lua).
+- **Argument Type Adapters & Auto-Vectorization**: Adapt arguments to matching signatures (e.g. `str` -> `int`, `dict` -> `Model`), or repeat singular calls over collections via `each`, `..` spread, `*` broadcast, or `with auto_repeat`.
+- **Method Groups**: Auto-routing switchboards over heterogeneous collections, currying signature sieves, fallback unions (`|`), and multi-cast broadcasts (`*`).
+- **Algebraic Types & Typestates**: Compose classes using set algebra (`Admin = BaseUser | AdminPrivileges`, `FreeUser = BaseUser - BillingModule`), and morph object types based on state (`Connection[Disconnected]` -> `Connection[Connected]`).
+- **Contextual Parameters**: Implicit downstream parameter propagation (`context db: Database`) bound via lexical `with context db = ...` blocks.
+- **Design-by-Contract**: Declarative pre-conditions (`requires`) and post-conditions (`ensures`) with snapshot introspection (`old(expr)`).
+- **Deep Polyglot Engine**: Direct inline block execution for JavaScript, Java, Lua, C, C++, Assembly, PostgreSQL, MySQL, Python, C#, and Rust.
+
+---
+
+## Design Philosophy
+
+1. **Flexible**: Adaptable syntax, dynamic-to-static typing continuum, and seamless interop across 10+ programming ecosystems.
+2. **Configurable**: Configurable execution contexts, extensible polyglot registries, and pluggable type adapters.
+3. **Decoupled**: Distinct boundaries between lexical parsing (ANTLR4), runtime interpretation (`PilotInterpreterVisitor`), compilation (`PilotCompiler`), debugging (`PilotDebugger`), and language server services (`PilotLspServer`).
+4. **Beautiful**: Clean, expressive syntax free of excessive boilerplate, inspired by Python, Rust, and modern C#.
+5. **Efficient**: Low-overhead interpretation, compiled binary cache format (`.pilc`), and fast deterministic dispatch.
+6. **Extendible**: Extensible via macros (`quote`/`quasiquote`), lexical extensions (`extension ... on ...`), and custom user type adapters (`adapter`).
+
+---
+
+## Architecture & Repository Structure
 
 ```
 Pilot/
 ├── antlr/
-│   ├── Pilot.g4                 <-- MASTER COMPILER GRAMMAR (Used by C# & Rider Preview)
-│   ├── core/                    <-- Domain: Pythonic Core, Type Safety, Guard & Defer
-│   │   ├── CoreLexer.g4
-│   │   └── CoreParser.g4        (Single Source of Truth for base language rules)
-│   ├── database/                <-- Domain: In-Memory & Postgres Database Operations
-│   │   ├── DatabaseLexer.g4
-│   │   └── DatabaseParser.g4    (imports CoreParser)
-│   ├── concurrency/             <-- Domain: Async, Channels, Actors, Threading
-│   │   ├── ConcurrencyLexer.g4
-│   │   └── ConcurrencyParser.g4 (imports CoreParser)
-│   ├── realtime/                <-- Domain: Hard/Soft Real-Time & Units of Time/Freq/Mem
-│   │   ├── RealtimeLexer.g4
-│   │   └── RealtimeParser.g4    (imports CoreParser)
-│   ├── udsa/                    <-- Domain: Universal Domain-Specific Abstractions & Macros
-│   │   ├── UDSALexer.g4
-│   │   └── UDSAParser.g4        (imports CoreParser)
-│   └── csharp/                  <-- Domain: Properties, Operator Overloads, Extensions
-│       ├── CSharpLexer.g4
-│       └── CSharpParser.g4      (imports CoreParser)
-├── examples/                    <-- Sample Pilot scripts demonstrating language features
-│   └── overview.pilot
-├── tests/                       <-- Integration test suite for all language capabilities
-│   ├── 01_type_safety.pilot
-│   ├── 02_database_set_operations.pilot
-│   ├── 03_concurrency.pilot
-│   ├── 04_realtime.pilot
-│   ├── 05_udsa_metaprogramming.pilot
-│   ├── 06_syntax_edge_cases.pilot
-│   ├── 07_syntax_errors.pilot
-│   ├── 08_guard_defer.pilot
-│   ├── 09_postgres_database.pilot
-│   └── 10_csharp_robustness.pilot
-├── Pilot.LanguageServer/        <-- Connected C# Language Server (LSP) & Semantic Analyzer
-│   ├── Pilot.LanguageServer.csproj
-│   ├── Program.cs
-│   ├── Lsp/
-│   │   └── PilotLspServer.cs    (JSON-RPC 2.0 LSP Server over stdio)
+│   └── Pilot.g4                 # Master ANTLR4 compiler grammar
+├── Cli/
+│   ├── Program.cs               # Production CLI entrypoint (run, compile, debug, pkg, repl, all)
+│   └── PilotRepl.cs             # Interactive REPL session
+├── Compiler/
+│   ├── PilotCompiler.cs         # Two-phase AST compiler
+│   └── PilotCompiledProgram.cs  # Serialized binary program format (.pilc)
+├── Debugging/
+│   ├── PilotDebugger.cs         # Core debugger engine (breakpoints, call stacks, locals)
+│   └── PilotCliDebugger.cs      # Interactive CLI debugger terminal
+├── Preprocessing/
+│   └── PilotPreprocessor.cs     # Macro preprocessor with #define, #if, #region directives
+├── Runtime/
+│   ├── Adapters/
+│   │   └── PilotTypeAdapterRegistry.cs # Argument type adapters & converters
+│   ├── Builtins/
+│   │   └── PilotBuiltinRegistry.cs    # Global built-in functions
+│   ├── Contracts/
+│   │   └── PilotContractRegistry.cs   # Contract delegation (IList, IEquatable) & method stealing
+│   ├── ControlFlow/
+│   │   └── PilotExceptions.cs         # Typed exceptions (PilotTypeException, PilotNullReferenceException)
+│   ├── Environment/
+│   │   ├── PilotScope.cs              # Lexical symbol scopes
+│   │   └── PilotEnvironment.cs        # Scoped runtime environment
+│   ├── Execution/
+│   │   ├── PilotEngine.cs             # Main execution engine
+│   │   ├── PilotExecutionContext.cs    # Execution context state & contextual parameter frames
+│   │   └── PilotInterpreterVisitor.cs # High-performance ANTLR AST visitor
+│   ├── Interop/
+│   │   └── PolyglotRegistry.cs        # Extended providers (JS, Java, ASM, C++, C, Lua, SQL)
+│   ├── Packaging/
+│   │   ├── PilotPackageManifest.cs    # pilot.json model
+│   │   ├── PilotPackageLock.cs        # pilot.lock.json lockfile model
+│   │   ├── PilotPackageManager.cs     # Universal package manager
+│   │   └── Adapters/                  # Adopted interop adapters (NuGet, npm, pip, cargo, maven, luarocks)
+│   └── Values/
+│       ├── PilotValue.cs              # High-performance value union struct
+│       ├── PilotFunction.cs           # First-class function & coroutine representation
+│       ├── PilotMethodGroup.cs        # Auto-routing method group switchboard
+│       └── PilotObject.cs             # Prototypal and class-based object instances
+├── Pilot.LanguageServer/              # Production JSON-RPC 2.0 Language Server (LSP)
 │   └── Semantics/
-│       ├── PilotSymbol.cs       (Symbol tables, scopes, semantic token legend)
-│       └── PilotSemanticAnalyzer.cs (Type checker, immutability, guard/real-time rules)
-├── vscode-pilot/                <-- VS Code Extension for Pilot (.pilot)
-│   ├── package.json             (Extension manifest, grammars, snippets, settings)
-│   ├── language-configuration.json
-│   ├── syntaxes/
-│   │   └── pilot.tmLanguage.json (TextMate syntax highlighting across all 6 domains)
-│   ├── snippets/
-│   │   └── pilot.json           (Idiomatic Pilot code snippets)
-│   ├── src/
-│   │   └── extension.ts         (TypeScript LSP client bridge)
-│   └── out/
-│       └── extension.js         (Ready-to-run compiled VS Code extension entrypoint)
-├── Pilot.Tests/                 <-- xUnit automated test suite (47 unit tests)
-│   ├── Pilot.Tests.csproj
-│   ├── PilotLanguageTests.cs
-│   └── PilotSemanticAndLspTests.cs
-├── Class1.cs                    <-- Pilot CLI runner & parse tree visualizer
-├── Pilot.csproj                 <-- Main C# project compiling Pilot.g4 via Antlr4 MSBuild
-└── README.md
+│       └── PilotSemanticAnalyzer.cs   # Semantic token provider, type checker, diagnostics
+├── Pilot.Tests/                       # Automated xUnit test suite (217 tests, 0 warnings)
+├── tests/                             # 26 end-to-end integration test suites (.pilot)
+└── vscode-pilot/                      # Visual Studio Code syntax & language extension
 ```
 
 ---
 
-## Active Grammars vs. Obsolete Files (What to Use)
+## Getting Started & Installation
 
-### 1. Active Master Grammar: `antlr/Pilot.g4`
-- **What it is**: The complete, production combined grammar.
-- **Where it is used**:
-  - Automatically compiled by MSBuild during `dotnet build` into `PilotLexer` and `PilotParser`.
-  - Used in Rider / IntelliJ ANTLR plugin to display full hierarchical multi-level parse trees for `.pilot` files.
+### Prerequisites
+- [.NET 10 SDK](https://dotnet.microsoft.com/) (or .NET 8 / 9+)
 
-### 2. Active Modular Domain Grammars: `antlr/<domain>/`
-- **What they are**: Domain-separated specifications for clear organizational structure.
-- **Rule of DRY (Don't Repeat Yourself)**:
-  - `antlr/core/CoreParser.g4` is the **Single Source of Truth** for core language constructs (`identifier`, `test`, `suite`, `parameters`, `type_spec`, etc.).
-  - All domain parsers (`database`, `concurrency`, `realtime`, `udsa`, `csharp`) use `import CoreParser;`. There are zero duplicate stubs or redefinitions.
+### Build & Verification
+```bash
+# Clone the repository
+git clone https://github.com/your-org/pilot.git
+cd pilot
 
-### 3. Removed Remnants (Cleaned Up)
-The following old artifacts from earlier iterations have been removed:
-- ❌ `BaseGrammar.g4`, `BaseLexar.g4`, `BaseLexar.tokens` (obsolete early prototypes)
-- ❌ `antlr/grammar/` and `antlr/lexar/` folders (obsolete split folders)
-- ❌ `test_folders/` (temporary experiment directory)
-- ❌ `BaseGrammar` / `BaseLexar` compatibility wrappers in C# code (now strictly using `PilotParser` and `PilotLexer`)
+# Build solution
+dotnet build Pilot.slnx
 
----
-
-## Building and Testing
-
-### Run xUnit Automated Tests
-```powershell
+# Run all unit tests (217 unit tests)
 dotnet test
-```
-*Executes all 39 comprehensive unit tests covering type safety, database queries, concurrency, real-time deadlines, UDSA macros, guard/defer, and C# robustness.*
 
-### Run All Script Integration Tests
-```powershell
-dotnet run -- --all
-```
-*Parses all 10 scripts in `tests/` and validates syntax verification and error detection.*
-
-### Inspect a Parse Tree in the CLI
-```powershell
-dotnet run -- --tree examples/overview.pilot
+# Run all integration test suites (26 suites)
+dotnet run --project Pilot.csproj -- --all
 ```
 
-### Inspect Lexer Tokens in the CLI
-```powershell
-dotnet run -- --tokens examples/overview.pilot
-```
-
-### Run Syntax & Semantic Check via `Pilot.LanguageServer`
-```powershell
-dotnet run --project Pilot.LanguageServer/Pilot.LanguageServer.csproj -- --check examples/overview.pilot
+### CLI Command Summary
+```bash
+pilot <file.pilot> [args...]       # Run script file directly
+pilot <file.pilc> [args...]        # Run precompiled binary directly
+pilot run <file.pilot> [args...]   # Explicit script execution
+pilot debug <file.pilot>           # Start interactive CLI debugger session
+pilot compile <file> [-o <out>]    # Precompile to binary format (.pilc)
+pilot -c "<code>"                  # Execute inline code string
+pilot --repl                       # Launch interactive REPL
+pilot pkg <subcommand>             # Universal Package Manager
 ```
 
 ---
 
-## VS Code Extension (`vscode-pilot`) & Connected Language Server (`Pilot.LanguageServer`)
+## Universal Package Manager (`pilot pkg`)
 
-`Pilot.LanguageServer` directly references `Pilot.csproj`, meaning any grammar change in `antlr/Pilot.g4` automatically flows into the Language Server and VS Code extension.
+Pilot includes a complete, production-grade package manager capable of managing native Pilot packages and **adopting packages from foreign ecosystems**.
 
-### Features Provided in VS Code
-1. **Lexical & AST Semantic Highlighting**: TextMate grammar (`pilot.tmLanguage.json`) + compiler-driven LSP `textDocument/semanticTokens/full`.
-2. **Real-Time Syntax & Semantic Diagnostics**:
-   - `PILOT001`: Syntax Error (directly from ANTLR `PilotLexer` / `PilotParser`)
-   - `PILOT101`: Immutable Reassignment (`let` or `const` variable modified after initialization)
-   - `PILOT102`: Static Type / Nullability / Dimensional Unit-of-Measure Mismatch (`int` vs `str`, `null` assigned to non-nullable `T`, or incompatible units like `float<meter>` vs `float<second>`)
-   - `PILOT103`: `guard` Missing Mandatory Early Exit (`guard ... else { ... }` block that does not exit via `return`, `raise`, `break`, or `continue`)
-   - `PILOT104`: Unbounded Loop in Hard Real-Time / `noalloc` (`for` or `while` without `bounded <N>` inside `@hard_realtime` or `noalloc`)
-   - `PILOT105`: Duplicate Symbol Declaration in the same scope
-   - `PILOT106`: `await` Used Outside `async def` or `actor` Context
-   - `PILOT107`: `rollback to savepoint` targeting an undeclared savepoint
-3. **Rich Hover Documentation (`textDocument/hover`)**: Displays full symbol signatures, inferred/explicit types, mutability (`let`/`var`/`const`), `@hard_realtime` WCET budgets, table index definitions, and domain documentation.
-4. **Go to Definition (`F12` / `Ctrl+Click`)**: Jumps to the declaration of classes, structs, models, actors, functions, parameters, units, and variables.
-5. **Document Outline & Breadcrumbs (`textDocument/documentSymbol`)**: Hierarchical symbol tree in VS Code's Outline view.
-6. **Context-Aware Code Completion & Snippets**: Suggests in-scope variables, functions, types, properties, and Pilot domain keywords/snippets.
+### Native Pilot Packages
+Initialize a new project:
+```bash
+pilot pkg init my-awesome-app
+```
+This generates a `pilot.json` manifest:
+```json
+{
+  "name": "my-awesome-app",
+  "version": "0.1.0",
+  "description": "Package my-awesome-app created with Pilot package manager.",
+  "main": "main.pilot",
+  "dependencies": {},
+  "interopDependencies": {
+    "nuget": {},
+    "npm": {},
+    "pip": {},
+    "cargo": {},
+    "maven": {},
+    "luarocks": {}
+  }
+}
+```
 
-### How to Launch or Install the VS Code Extension
-- **Option A (Press `F5` in VS Code)**: Open this repository in VS Code and press **F5** (`Run Pilot VS Code Extension`). It automatically builds `Pilot.LanguageServer` and opens an Extension Development Host window with the extension active.
-- **Option B (Install locally into your main VS Code)**:
-  ```powershell
-  New-Item -ItemType Junction -Path "$env:USERPROFILE\.vscode\extensions\pilot-lang-1.0.0" -Target "$PWD\vscode-pilot"
-  ```
-  Then reload VS Code and open any `.pilot` file.
+Add a native Pilot dependency:
+```bash
+pilot pkg add pilot-http@1.2.0
+```
+
+### Adopting Interop Packages
+Pilot allows you to adopt packages from foreign package managers directly into your Pilot project:
+
+```bash
+# Adopt a .NET NuGet package
+pilot pkg add nuget:Newtonsoft.Json@13.0.3
+
+# Adopt a JavaScript npm package
+pilot pkg add npm:lodash@4.17.21
+
+# Adopt a Python PyPI package
+pilot pkg add pip:requests@2.31.0
+
+# Adopt a Rust Cargo crate
+pilot pkg add cargo:serde@1.0
+
+# Adopt a Java Maven artifact
+pilot pkg add maven:org.json:json@20231013
+
+# Adopt a Lua LuaRocks module
+pilot pkg add luarocks:luasocket@3.0
+```
+
+### Packaging CLI Reference
+
+| Command | Description |
+| :--- | :--- |
+| `pilot pkg init [name]` | Creates a new `pilot.json` manifest in the current directory |
+| `pilot pkg add <pkgSpec>` | Adds a native or interop dependency (`[ecosystem:]package[@version]`) |
+| `pilot pkg install` / `restore` | Restores all declared dependencies and writes `pilot.lock.json` |
+| `pilot pkg remove <pkgSpec>` | Removes a dependency from `pilot.json` and lockfile |
+| `pilot pkg list` | Lists all installed native and adopted interop dependencies |
+| `pilot pkg pack [out.pilpkg]` | Bundles the project into a distributable `.pilpkg` archive |
+
+---
+
+## Language Features & Syntax Reference
+
+### 1. Type Safety, Variables & Control Flow
+
+```pilot
+let greeting : str = "Hello, Pilot!";
+var counter : int = 0;
+const MAX_LIMIT = 1000;
+
+for i in 0..5:
+    counter += i;
+
+if counter > 5:
+    println("Counter exceeded 5: " + str(counter));
+```
+
+### 2. Preconditions & Cleanup (`guard` and `defer`)
+
+`guard` enforces early-exit preconditions, while `defer` guarantees LIFO cleanup execution:
+
+```pilot
+def process_file(path: str):
+    guard path.length > 0 else:
+        return "invalid_path";
+
+    println("Opening file: " + path);
+    defer println("Closing file resource.");
+    defer println("Flushing pending buffers.");
+
+    return "processed";
+```
+
+### 3. Type Adapters, Argument Adaptation & Repeated Calls
+
+Pilot allows passing a different type into a signature when possible, adapting arguments or unrolling collections into repeated individual calls:
+
+```pilot
+let myarr = [];
+let myitems : list = [1, 2, 3, 4, 5];
+
+# Option 1: 'each' argument modifier
+myarr.append(each myitems);
+
+# Option 2: Collection spread '..' inline
+myarr.append(..myitems);
+
+# Option 3: Broadcast operator '*'
+myarr.append*(myitems);
+
+# Option 4: Scoped 'with auto_repeat' block
+with auto_repeat:
+    myarr.append(myitems);
+
+# Repeated calls on functions returning values collects results into a list:
+def square(x: int): return x * x;
+let squares = square(each [1, 2, 3]); # -> [1, 4, 9]
+
+# Language-level Type Adapters
+adapter str -> int:
+    return int(self);
+
+def calc(x: int): return x * 10;
+let val = calc("42"); # Automatically adapts "42" -> 42 -> 420
+```
+
+### 4. Advanced Method Groups & Dispatch
+
+Method groups provide unified dispatch over function overloads:
+
+```pilot
+# Overloaded method group
+def process(data: int): return data * 2;
+def process(data: str): return data.to_upper();
+def process(data: list): return data.length;
+
+# 1. Switchboard Auto-Routing over heterogeneous collections:
+let mixed = [42, "hello", [1, 2, 3], 99];
+let routed = mixed.map(process); # [84, "HELLO", 3, 198]
+
+# 2. Currying (The Signature Sieve):
+def draw(shape: Circle, color: Color): ...
+def draw(shape: Square, color: Color): ...
+def draw(shape: Triangle, angle: float): ...
+
+const draw_red = draw(color=Color.RED); # Narrowed group of (Circle) and (Square)
+
+# 3. Group Fallback & Union (|):
+const serialize_any = Json.serialize | Xml.serialize;
+serialize_any(my_object);
+
+# 4. Multi-Cast Execution (*):
+on_event*(PlayerJoined("Isaac")); # Invokes all matching event overloads
+```
+
+### 5. Algebraic Class Composition & Typestates
+
+```pilot
+class BaseUser:
+    let id = 1;
+
+class AdminPrivileges:
+    def ban(self, uid) { return "banned"; }
+
+class BillingModule:
+    def pay(self, amount) { return "paid"; }
+
+# Set Algebra on classes:
+class Admin = BaseUser | AdminPrivileges;      # Union
+class FreeUser = BaseUser - BillingModule;      # Subtraction
+class Common = AdminPrivileges & BillingModule; # Intersection
+
+# Typestate Classes (Morphing Types):
+class Connection:
+    state Disconnected:
+        def connect(self) -> Self[Connected]: ...
+    state Connected:
+        def send(self, data): ...
+        def close(self) -> Self[Disconnected]: ...
+
+let conn = Connection();
+let active = conn.connect();
+active.send("payload");
+```
+
+### 6. Structural Projection & Scoped Lexical Extensions
+
+```pilot
+# Structural Projection (->)
+class Employee:
+    let name = "Isaac";
+    let department = "Engineering";
+    let salary = 120000;
+
+let dto = employee -> { name, department };
+# dto is: { "name": "Isaac", "department": "Engineering" }
+
+# Scoped Lexical Extensions (Monkey Patching with Scope Safety)
+extension StringHelpers on str:
+    def double(self): return self + self;
+
+with extension StringHelpers:
+    println("hi".double()); # "hihi"
+# Outside the block, 'double' is not present on str
+```
+
+### 7. Contextual Parameters (Native Dependency Injection)
+
+Contextual parameters are implicitly propagated downstream without boilerplate passing:
+
+```pilot
+def save_user(user, context db: Database):
+    db.execute("INSERT", user);
+
+def register_user(payload, context db: Database):
+    save_user(payload["username"]); # db implicitly forwarded
+
+with context db = Database("postgresql://localhost:5432"):
+    register_user({ "username": "Isaac" });
+```
+
+### 8. Design-by-Contract (`requires` and `ensures`)
+
+```pilot
+def transfer(amount: float, source: Account, dest: Account)
+    requires amount > 0
+    requires source.balance >= amount
+    ensures source.balance == old(source.balance) - amount:
+
+    source.deduct(amount);
+    dest.add(amount);
+```
+
+### 9. Exhaustive Pattern Matching Assignments
+
+```pilot
+# Record pattern matching destructuring
+{ "id": userId, "metadata": { "role": role } } = fetch_user_record();
+
+# List pattern matching with slice rest spread
+[head, ..tail] = [10, 20, 30, 40];
+```
+
+### 10. Relational & In-Memory Database Set Operations
+
+```pilot
+database InMemoryStore:
+    table users (id int primary key, name str, active bool);
+
+# LINQ-style query with grouping and ordering
+let activeAdmins = from u in users
+                   where u.active == true
+                   order by u.name ascending
+                   select u.name;
+
+# Postgres SQL operations
+transaction:
+    insert into users values (1, "Isaac", true)
+    on conflict do nothing;
+    savepoint sp1;
+    commit;
+```
+
+### 11. Concurrency, Channels & Actors
+
+```pilot
+actor Worker:
+    def handle(self, task):
+        return "completed:" + task;
+
+let ch = channel(10);
+spawn:
+    ch <- "message";
+
+select:
+    case msg = <-ch:
+        println("Received: " + msg);
+    timeout 500ms:
+        println("Timed out waiting for channel.");
+```
+
+### 12. Real-Time Determinism & Units of Measure
+
+```pilot
+# Dimensional units of measure
+let dist = 100 [m];
+let duration = 9.58 [s];
+let speed = dist / duration; # speed has dimensional unit [m/s]
+
+# Real-time execution budgets
+@hard_realtime
+@wcet(50us)
+def telemetry_tick():
+    noalloc:
+        # Guarantee zero GC allocation within bounded cycle
+        pass;
+```
+
+### 13. Metaprogramming, Macros & AST Generative Classes
+
+```pilot
+# Compile-time AST macro
+macro log_expr(expr):
+    quote:
+        println("Result of expression is: " + str(expr));
+
+# Generative Class Blocks
+class DatabaseModel:
+    generate:
+        for field in ["id", "username", "created_at"]:
+            inject_field(field);
+```
+
+---
+
+## Polyglot Interoperability
+
+Pilot provides native inline blocks for 10+ language ecosystems:
+
+```pilot
+# 1. SQL with Structured Row Objects
+let users = postgresql {
+    select id, name, count(*) from accounts where id in (1, 2, 3);
+}
+for u in users:
+    println(u.name);
+
+# 2. Python Interop with Variable Sharing & Yielding
+let myVariable = "Hello from Pilot!";
+python {
+    print(myVariable)
+}
+
+# 3. Inline JavaScript, C, C++, Lua, and Assembly
+let jsVal = js {
+    let x = 10;
+    return x * 4;
+}
+
+let luaVal = lua {
+    return 100
+}
+
+let asmVal = asm {
+    mov eax, 42
+}
+```
+
+---
+
+## Compilation & Scripting Runtime
+
+Pilot functions as both a zero-overhead scripting engine and an ahead-of-time precompiler:
+
+```bash
+# 1. Scripting mode (Direct execution)
+pilot my_script.pilot
+
+# 2. Ahead-Of-Time Precompilation (.pilot -> .pilc)
+pilot compile my_script.pilot -o my_script.pilc
+
+# 3. Direct execution of precompiled binary
+pilot my_script.pilc
+```
+
+---
+
+## Interactive Debugger & REPL
+
+Pilot features a complete interactive command-line debugger with source tracking and breakpoint control:
+
+```bash
+pilot debug my_script.pilot
+```
+
+Debugger Commands:
+- `b <line>`: Set breakpoint at line
+- `c` / `continue`: Continue execution
+- `n` / `step`: Step over to next statement
+- `s` / `stepin`: Step into function
+- `o` / `stepout`: Step out of function
+- `l` / `locals`: Inspect local variables in current stack frame
+- `bt` / `stack`: Print full call stack trace
+- `q` / `quit`: Terminate debugger
+
+Interactive REPL:
+```bash
+pilot --repl
+```
+
+---
+
+## Language Server Protocol (LSP) & Tooling
+
+Pilot includes a standalone JSON-RPC 2.0 Language Server communicating over standard I/O:
+
+```bash
+dotnet run --project Pilot.LanguageServer/Pilot.LanguageServer.csproj
+```
+
+Features:
+- **Semantic Tokens Provider**: High-fidelity semantic highlighting.
+- **Type Checker & Diagnostics**: Immutability enforcement, type checking, guard/defer checks.
+- **VS Code Extension**: Located in `vscode-pilot/` with syntax definitions and language configurations.
+
+---
+
+## Running the Test Suites
+
+Pilot is validated through 217 unit tests and 26 end-to-end integration test suites:
+
+```bash
+# Run unit tests
+dotnet test
+
+# Run all 26 integration suites
+dotnet run --project Pilot.csproj -- --all
+```
+
+---
+
+## Step-by-Step Architecture Guide
+
+```mermaid
+flowchart TD
+    Source[".pilot Source File / Code String"] --> Preproc["PilotPreprocessor (#define, #if)"]
+    Preproc --> Lexer["PilotLexer (ANTLR4 Lexical Stream)"]
+    Lexer --> Parser["PilotParser (AST Concrete Tree)"]
+    Parser --> ModeCheck{"Execution Mode"}
+    
+    ModeCheck -->|Direct Scripting| Visitor["PilotInterpreterVisitor (AST Execution)"]
+    ModeCheck -->|AOT Compilation| Compiler["PilotCompiler -> PilotCompiledProgram (.pilc)"]
+    ModeCheck -->|Interactive Debug| Debugger["PilotDebugger / PilotCliDebugger"]
+    ModeCheck -->|Language Server| LSP["PilotSemanticAnalyzer / PilotLspServer"]
+    
+    Visitor --> Scope["Lexical Scopes & Contextual Frames"]
+    Visitor --> Adapters["PilotTypeAdapterRegistry (Argument Adaptation)"]
+    Visitor --> PkgManager["PilotPackageManager (.pilot_modules)"]
+    Visitor --> Polyglot["PolyglotRegistry (JS, Lua, SQL, Python, C#, Rust)"]
+    
+    Compiler --> Bin["Precompiled Binary File (.pilc)"]
+    Bin --> FastExec["PilotCompiledProgram.Run()"]
+```
+
+1. **Preprocessing (`PilotPreprocessor`)**:
+   Processes directives (`#define`, `#undef`, `#if`, `#else`, `#endif`, `#region`), filtering active lines and recording macro definitions.
+2. **Lexing & Parsing (`antlr/Pilot.g4`)**:
+   Transforms preprocessed characters into a token stream and generates a concrete syntax tree (CST).
+3. **Semantic Analysis & Scope Resolution (`PilotEnvironment`)**:
+   Tracks hierarchical symbol scopes, closures, contextual parameter stacks (`ContextualBindings`), and active lexical extensions (`ActiveExtensions`).
+4. **Type Adaptation & Method Dispatch (`PilotTypeAdapterRegistry` & `PilotMethodGroup`)**:
+   Evaluates function calls, resolves exact or adapted argument types, and performs repeated call unrolling over collections when singular arguments are expected.
+5. **Polyglot Execution (`PolyglotRegistry`)**:
+   Routes foreign blocks (`postgresql`, `js`, `lua`, `python`, etc.) to dedicated language adapters, returning structured rows and native Pilot objects.
+6. **Package Resolution (`PilotPackageManager`)**:
+   Loads native Pilot modules and adopted interop dependencies from `.pilot_modules/` or system feeds based on `pilot.json` and `pilot.lock.json`.

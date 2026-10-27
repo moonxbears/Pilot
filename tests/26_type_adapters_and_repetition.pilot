@@ -1,0 +1,80 @@
+# Suite 26: Type Adapters, Repeated Argument Calls & Vectorization
+
+# 1. Collection-to-Scalar Repeated Call (append example)
+let myarr = [];
+let myitems : list = [1, 2, 3, 4, 5];
+
+# append only accepts singular items, but 'each' treats it as a repeated call
+myarr.append(each myitems);
+assert(myarr.length == 5, "myarr should have 5 items after each append");
+assert(myarr[0] == 1, "first item should be 1");
+assert(myarr[4] == 5, "last item should be 5");
+
+# 2. Spread '..' syntax for repeated call
+let arr2 = [];
+arr2.append(..myitems);
+assert(arr2.length == 5, "arr2 should have 5 items after .. append");
+
+# 3. Broadcast operator '*' for repeated call
+let arr3 = [];
+arr3.append*(myitems);
+assert(arr3.length == 5, "arr3 should have 5 items after * append");
+
+# 4. Scoped auto_repeat context block
+let arr4 = [];
+with auto_repeat {
+    arr4.append(myitems);
+}
+assert(arr4.length == 5, "arr4 should have 5 items within auto_repeat block");
+
+# 5. Method group auto-lifting when no list overload exists
+def double_num(x: int) {
+    return x * 2;
+}
+
+let doubled = double_num(each [10, 20, 30]);
+assert(doubled.length == 3, "doubled length should be 3");
+assert(doubled[0] == 20, "first doubled is 20");
+assert(doubled[1] == 40, "second doubled is 40");
+assert(doubled[2] == 60, "third doubled is 60");
+
+# 6. Built-in Type Adapters for Signatures (str -> int, str -> float)
+def add_nums(a: int, b: float) {
+    return a + b;
+}
+
+let sum = add_nums("100", "50.5");
+assert(sum == 150.5, "sum with string-to-numeric adapters should be 150.5");
+
+# 7. Structural Dictionary to Object Adapter
+class Customer {
+    let name = "";
+    let tier = "";
+}
+
+def get_customer_summary(c: Customer) {
+    return c.name + ":" + c.tier;
+}
+
+let custSummary = get_customer_summary({ "name": "Alice", "tier": "Gold" });
+assert(custSummary == "Alice:Gold", "customer summary adapted from dict should match");
+
+# 8. User-defined language-level Adapter
+class Kilometers {
+    let km = 0;
+}
+
+adapter int -> Kilometers {
+    let k = Kilometers();
+    k.km = self;
+    return k;
+}
+
+def display_km(k: Kilometers) {
+    return str(k.km) + " km";
+}
+
+let kmText = display_km(42);
+assert(kmText == "42 km", "km display adapted from int should be '42 km'");
+
+println("Suite 26 passed: Type adapters, repeated calls, and signature vectorization verified successfully.");

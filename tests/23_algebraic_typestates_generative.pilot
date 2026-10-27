@@ -1,0 +1,119 @@
+// =============================================================================
+// Pilot Suite 23: Algebraic Composition, Typestates, Projections, Lexical
+// Extensions, and Generative Classes
+// =============================================================================
+
+// --- 1. Algebraic Class Composition (Class Math) ---
+class BaseUser {
+    let name = "Alice";
+    def get_role(self) {
+        return "base";
+    }
+}
+
+class AdminPrivileges {
+    let permissions = ["read", "write"];
+    def grant_access(self) {
+        return "granted";
+    }
+}
+
+class BillingModule {
+    let balance = 100.0;
+    def process_payment(self, amount) {
+        return "paid";
+    }
+}
+
+// Union: Combines properties and methods of both
+class Admin = BaseUser | AdminPrivileges;
+
+// Subtraction: Removes specific methods and properties
+class FreeUser = BaseUser - BillingModule;
+
+// Intersection: Retains overlapping structural methods and properties
+class Common = AdminPrivileges & BillingModule;
+
+let admin = Admin();
+assert admin.get_role() == "base";
+assert admin.grant_access() == "granted";
+assert admin.name == "Alice";
+
+// --- 2. Typestate Classes (Morphing Types) ---
+class Connection {
+    state Disconnected {
+        def connect(self) {
+            self.transition_to("Connected");
+            return self;
+        }
+    }
+
+    state Connected {
+        def send(self, payload) {
+            return "sent:" + payload;
+        }
+
+        def close(self) {
+            self.transition_to("Disconnected");
+            return self;
+        }
+    }
+}
+
+let conn = Connection();
+assert conn.current_state() == "Disconnected";
+
+let active = conn.connect();
+assert active.current_state() == "Connected";
+assert active.send("ping") == "sent:ping";
+
+let closed = active.close();
+assert closed.current_state() == "Disconnected";
+
+// --- 3. Structural Projection (Data Shape Extraction) ---
+class Employee {
+    let name = "Isaac";
+    let department = "Engineering";
+    let salary = 120000;
+}
+
+let employee = Employee();
+// Project only specific fields into a lightweight anonymous map
+let user_dto = employee -> {name, department};
+
+assert user_dto["name"] == "Isaac";
+assert user_dto["department"] == "Engineering";
+
+// --- 4. Lexical Extensions (Scoped Monkey Patching) ---
+extension DebugHelpers on str {
+    def to_screaming(self) {
+        return self.to_upper();
+    }
+}
+
+let transformed = "";
+with extension DebugHelpers {
+    transformed = "pilot_lang".to_screaming();
+}
+assert transformed == "PILOT_LANG";
+
+// --- 5. Compile-Time Generative Classes (AST Injection) ---
+class DatabaseModel {
+    macro create_crud_methods(ast) {
+        for field in ast.fields {
+            ast.add_method(f"get_{field.name}", f"return self.{field.name}");
+        }
+    }
+}
+
+class User(DatabaseModel) {
+    name: str
+    email: str
+}
+
+let user = User();
+user.name = "Isaac";
+user.email = "isaac@pilot.lang";
+
+assert user.get_name() == "Isaac";
+assert user.get_email() == "isaac@pilot.lang";
