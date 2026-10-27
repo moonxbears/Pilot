@@ -1,0 +1,98 @@
+# ==============================================================================
+# Concept 01: Types, Variables, Collections & Control Flow
+# ==============================================================================
+
+println("==================================================");
+println(" PILOT SHOWCASE: Types, Variables & Control Flow");
+println("==================================================");
+
+# 1. Variables and Static vs Dynamic Typing
+println("\n--- 1. Variable Declarations ---");
+let inferred_num = 42;
+let explicit_text : str = "Pilot Language";
+let decimal_val : float = 3.14159;
+let flag : bool = true;
+
+println("Inferred integer: " + inferred_num);
+println("Explicit string:  " + explicit_text);
+println("Float precision:  " + decimal_val);
+println("Boolean flag:     " + flag);
+
+# 2. Rich Collection Data Structures
+println("\n--- 2. Collections (Lists, Maps, Tuples) ---");
+let numbers : list = [10, 20, 30, 40, 50];
+println("Initial list: " + numbers);
+
+# Appending and indexing
+numbers.append(60);
+println("Appended 60:  " + numbers);
+println("First item:   " + numbers[0]);
+println("Last item:    " + numbers[numbers.length - 1]);
+println("List length:  " + numbers.length);
+
+# Maps (Dictionaries)
+let user_map = {
+    "username": "isaac_pilot",
+    "role": "Lead Architect",
+    "level": 99
+};
+println("\nMap dictionary: " + user_map);
+println("Username:       " + user_map["username"]);
+println("Role:           " + user_map["role"]);
+
+# 3. Control Flow: If-Else & Loops
+println("\n--- 3. Control Flow ---");
+let score = 85;
+println("Evaluating score: " + score);
+if score >= 90 {
+    println("Grade: A - Exceptional!");
+} else if score >= 80 {
+    println("Grade: B - Very Good!");
+} else {
+    println("Grade: C - Passing.");
+}
+
+println("\nIterating with for-in loop:");
+for item in [ "Alpha", "Beta", "Gamma" ] {
+    println("  -> Node: " + item);
+}
+
+println("\nCounting down with while loop:");
+var countdown = 3;
+while countdown > 0 {
+    println("  Countdown: " + countdown + "...");
+    countdown = countdown - 1;
+}
+println("  Liftoff!");
+
+# 4. Safe Navigation (?.) and Cascade (..) Operators
+println("\n--- 4. Safe Navigation & Cascade Operations ---");
+
+class SystemProfile {
+    let title: str = "Root Node";
+    let status: str = "Active";
+
+    def set_title(self, new_title: str) {
+        self.title = new_title;
+        return self;
+    }
+
+    def set_status(self, new_status: str) {
+        self.status = new_status;
+        return self;
+    }
+}
+
+let node = SystemProfile();
+println("Original Profile: " + node.title + " [" + node.status + "]");
+
+# Cascade operator allows fluid builder-pattern chaining without re-referencing
+node..set_title("Master Controller")..set_status("Synchronized");
+println("After Cascades:   " + node.title + " [" + node.status + "]");
+
+# Safe navigation gracefully handles nulls without throwing exceptions
+let empty_target = null;
+let safe_result = empty_target?.unknown_property;
+println("Safe navigation on null result: " + safe_result);
+
+println("\n>>> Concept 01 Demonstration Complete! <<<\n");

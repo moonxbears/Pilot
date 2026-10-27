@@ -1,0 +1,60 @@
+# ==============================================================================
+# Concept 07: Contextual Parameters (Native Dependency Injection)
+# ==============================================================================
+
+println("==================================================");
+println(" PILOT SHOWCASE: Contextual Parameters (Native DI)");
+println("==================================================");
+
+class Logger {
+    let service_name: str;
+    def log(self, message: str) {
+        println("  [LOGGER - " + self.service_name + "] " + message);
+    }
+}
+
+class DatabaseConnection {
+    let connection_string: str;
+    def query(self, sql: str) {
+        println("  [DATABASE - " + self.connection_string + "] Executed: " + sql);
+        return "QUERY_OK";
+    }
+}
+
+# Functions declare what they need with 'context':
+def low_level_save_record(record_id: int, context db: DatabaseConnection, context logger: Logger) {
+    logger.log("Writing record #" + record_id + " to persistence storage...");
+    db.query("INSERT INTO telemetry_records VALUES (" + record_id + ");");
+    logger.log("Record #" + record_id + " successfully committed.");
+    return "SAVED";
+}
+
+def intermediate_workflow(record_id: int, context db: DatabaseConnection, context logger: Logger) {
+    logger.log("Initiating intermediate workflow for record #" + record_id);
+    # Neither 'db' nor 'logger' need to be passed explicitly!
+    # They are automatically and implicitly routed down the call stack.
+    let status = low_level_save_record(record_id);
+    return status;
+}
+
+def top_level_handler(payload_id: int, context db: DatabaseConnection, context logger: Logger) {
+    logger.log("Top-level request received for payload " + payload_id);
+    return intermediate_workflow(payload_id);
+}
+
+println("\n--- Initializing Contextual Dependencies ---");
+let main_db = DatabaseConnection();
+main_db.connection_string = "postgresql://prod-cluster.internal:5432/app";
+
+let app_logger = Logger();
+app_logger.service_name = "AuthService";
+
+println("Binding dependencies into execution environment via 'with context':");
+
+with context db = main_db, context logger = app_logger {
+    println("\nCalling top_level_handler(7712)... Notice how db & logger are implicitly passed!");
+    let outcome = top_level_handler(7712);
+    println("\nFinal Outcome: " + outcome);
+}
+
+println("\n>>> Concept 07 Demonstration Complete! <<<\n");

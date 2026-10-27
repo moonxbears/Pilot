@@ -1,0 +1,70 @@
+# ==============================================================================
+# Concept 08: Exhaustive Pattern Matching Assignments & Slicing
+# ==============================================================================
+
+println("==================================================");
+println(" PILOT SHOWCASE: Exhaustive Pattern Matching");
+println("==================================================");
+
+# 1. Structural Map / Record Pattern Assignment
+println("\n--- 1. Structural Record Pattern Assignment ---");
+
+def get_telemetry_payload() {
+    return {
+        "device_id": 9811,
+        "location": {
+            "region": "us-east-cluster",
+            "rack": "bay-04"
+        },
+        "metrics": {
+            "temperature_c": 42.5,
+            "status": "HEALTHY"
+        }
+    };
+}
+
+println("Incoming Payload: " + get_telemetry_payload());
+
+# Destructure nested properties directly into local variables:
+{ "device_id": dev_id, "location": { "region": region_name }, "metrics": { "temperature_c": temp } } = get_telemetry_payload();
+
+println("\nExtracted Variables via Single Structural Assignment Pattern:");
+println("  dev_id:      " + dev_id);
+println("  region_name: " + region_name);
+println("  temp:        " + temp + " °C");
+
+
+# 2. Sequential List & Spread Pattern Matching
+println("\n--- 2. Sequence Slicing & Spread Patterns ---");
+
+let packet_stream = [ 170, 10, 20, 30, 40, 50, 255 ];
+println("Original packet: " + packet_stream);
+
+# Extract header, body slice, and checksum footer:
+[ header_byte, ..payload_slice, footer_byte ] = packet_stream;
+
+println("Extracted via [ header_byte, ..payload_slice, footer_byte ]:");
+println("  Header:        " + header_byte);
+println("  Payload Slice: " + payload_slice);
+println("  Footer:        " + footer_byte);
+
+
+# 3. Match Expressions with Guard Conditions
+println("\n--- 3. Match Statement with Pattern Guard Branches ---");
+
+def classify_http_response(status_code: int) {
+    match status_code {
+        case 200 => "200: OK - Request fulfilled successfully"
+        case 201 => "201: Created - Resource generated"
+        case 400 => "400: Bad Request - Malformed syntax"
+        case 404 => "404: Not Found - Missing resource endpoint"
+        case 500 => "500: Internal Server Error - Crash in handler"
+        case _   => "Status " + status_code + ": Other HTTP code"
+    }
+}
+
+for code in [ 200, 404, 500, 418 ] {
+    println("  " + classify_http_response(code));
+}
+
+println("\n>>> Concept 08 Demonstration Complete! <<<\n");

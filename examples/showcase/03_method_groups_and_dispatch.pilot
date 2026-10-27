@@ -1,0 +1,116 @@
+# ==============================================================================
+# Concept 03: Method Groups, Switchboards, Currying, Unions & Broadcasts
+# ==============================================================================
+
+println("==================================================");
+println(" PILOT SHOWCASE: Advanced Method Groups & Dispatch");
+println("==================================================");
+
+# 1. Switchboard (Auto-Routing Maps over Heterogeneous Collections)
+println("\n--- 1. Auto-Routing Switchboard ---");
+
+def process_item(item: int) {
+    return "Integer Doubled: " + (item * 2);
+}
+
+def process_item(item: str) {
+    return "String Uppercase: " + item.to_upper();
+}
+
+def process_item(item: list) {
+    return "List Count: " + item.length + " elements";
+}
+
+let mixed_collection = [ 42, "pilot language", [1, 2, 3, 4], 100 ];
+println("Original heterogeneous collection: " + mixed_collection);
+
+println("\nMapping method group 'process_item' directly across collection:");
+let routed_results = mixed_collection.map(process_item);
+for res in routed_results {
+    println("  -> " + res);
+}
+
+
+# 2. Method Group Currying (The Signature Sieve)
+println("\n--- 2. Method Group Currying (Signature Sieve) ---");
+
+class Circle { let radius = 12.0; }
+class Square { let side = 8.0; }
+class Triangle { let angle = 60.0; }
+
+def draw(shape: Circle, color: str) {
+    return "Drawing Circle with radius " + shape.radius + " in " + color;
+}
+
+def draw(shape: Square, color: str) {
+    return "Drawing Square with side " + shape.side + " in " + color;
+}
+
+def draw(shape: Triangle, angle: float) {
+    return "Drawing Triangle rotated at " + angle + " deg";
+}
+
+println("Initial 'draw' method group has 3 overloads: (Circle, str), (Square, str), (Triangle, float).");
+
+# Supplying only color="Crimson" sieves out Triangle!
+let draw_crimson = draw(color="Crimson");
+println("Currying draw(color='Crimson') narrowed the group to Circle and Square overloads.");
+
+let my_circle = Circle();
+let my_square = Square();
+
+println("  Result: " + draw_crimson(my_circle));
+println("  Result: " + draw_crimson(my_square));
+
+
+# 3. Method Group Fallback and Union (|)
+println("\n--- 3. Group Fallback and Union (|) ---");
+
+class UserProfile { let name = "Alice"; }
+class SystemConfig { let version = "2.4.0"; }
+
+class JsonHandler {
+    def serialize(target: UserProfile) {
+        return "{\"type\": \"user\", \"name\": \"" + target.name + "\"}";
+    }
+}
+
+class XmlHandler {
+    def serialize(target: SystemConfig) {
+        return "<config version=\"" + target.version + "\" />";
+    }
+}
+
+# Merge JsonHandler.serialize and XmlHandler.serialize into one logical pipeline!
+let universal_serializer = JsonHandler.serialize | XmlHandler.serialize;
+println("Constructed union: JsonHandler.serialize | XmlHandler.serialize");
+
+let user_obj = UserProfile();
+let config_obj = SystemConfig();
+
+println("Serializing UserProfile:  " + universal_serializer(user_obj));
+println("Serializing SystemConfig: " + universal_serializer(config_obj));
+
+
+# 4. Multi-Cast Execution (The Broadcast *)
+println("\n--- 4. Multi-Cast Execution (Broadcast *) ---");
+
+class SystemEvent { let event_id = 9001; }
+class NetworkAlert(SystemEvent) { let message = "High Latency Warning"; }
+
+def on_alert(ev: NetworkAlert) {
+    println("  [Subscriber 1: Network Alert Handler] Received: " + ev.message);
+    return "Handled by AlertHandler";
+}
+
+def on_alert(ev: SystemEvent) {
+    println("  [Subscriber 2: Global Event Telemetry] Logged event ID: " + ev.event_id);
+    return "Handled by Telemetry";
+}
+
+let alert = NetworkAlert();
+println("Broadcasting alert to on_alert*(alert)...");
+let broadcast_responses = on_alert*(alert);
+println("All matching hierarchy subscribers triggered simultaneously: " + broadcast_responses);
+
+println("\n>>> Concept 03 Demonstration Complete! <<<\n");

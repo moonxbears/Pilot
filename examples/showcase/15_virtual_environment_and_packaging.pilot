@@ -1,0 +1,45 @@
+# ==============================================================================
+# Concept 15: Virtual Environment Management & Package Isolation
+# ==============================================================================
+
+println("==================================================");
+println(" PILOT SHOWCASE: Virtual Environment Management");
+println("==================================================");
+
+# 1. Initial State Query
+println("\n--- 1. Querying Virtual Environment Status ---");
+
+let initial_state = venv.is_active();
+println("Is virtual environment currently active? " + initial_state);
+println("Active virtual environment path:         " + venv.active_path());
+
+
+# 2. Creating an Isolated Virtual Environment
+println("\n--- 2. Creating a Virtual Environment ---");
+
+let sandbox_dir = "./.showcase_sandbox_venv";
+println("Creating virtual environment at: " + sandbox_dir + " with prompt 'pilot-sandbox'...");
+
+let created_path = venv.create(sandbox_dir, "pilot-sandbox");
+println("Virtual environment successfully created at: " + created_path);
+
+
+# 3. Activating the Virtual Environment
+println("\n--- 3. Activating Environment in Current Process ---");
+
+let activated_ok = venv.activate(sandbox_dir);
+println("venv.activate() returned:            " + activated_ok);
+println("Is virtual environment now active?   " + venv.is_active());
+println("Active environment root path:        " + venv.active_path());
+println("Package installs will now isolate inside: " + venv.active_path() + "/lib/.pilot_modules");
+
+
+# 4. Deactivating the Virtual Environment
+println("\n--- 4. Deactivating Environment ---");
+
+let deactivated_ok = venv.deactivate();
+println("venv.deactivate() returned:          " + deactivated_ok);
+println("Is virtual environment active now?   " + venv.is_active());
+println("Active virtual environment path:     " + venv.active_path());
+
+println("\n>>> Concept 15 Demonstration Complete! <<<\n");

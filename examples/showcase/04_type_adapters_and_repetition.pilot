@@ -1,0 +1,96 @@
+# ==============================================================================
+# Concept 04: Type Adapters, Argument Adaptation & Repeated Calls
+# ==============================================================================
+
+println("==================================================");
+println(" PILOT SHOWCASE: Type Adapters & Repeated Calls");
+println("==================================================");
+
+# 1. Collection-to-Scalar Repeated Calls (each, .., *)
+println("\n--- 1. Vectorized Repeated Argument Calls ---");
+
+let sink1 = [];
+let source_items : list = [10, 20, 30, 40, 50];
+println("Source items collection: " + source_items);
+println("Notice that 'append' accepts a single element, not a list.");
+
+# Using 'each' syntax
+sink1.append(each source_items);
+println("After sink1.append(each source_items): " + sink1);
+
+# Using spread '..' syntax
+let sink2 = [];
+sink2.append(..source_items);
+println("After sink2.append(..source_items):   " + sink2);
+
+# Using broadcast '*' syntax
+let sink3 = [];
+sink3.append*(source_items);
+println("After sink3.append*(source_items):    " + sink3);
+
+# Scoped auto_repeat context block
+let sink4 = [];
+with auto_repeat {
+    sink4.append(source_items);
+}
+println("Inside with auto_repeat block:        " + sink4);
+
+
+# 2. Method Group Auto-Lifting on Singular Functions
+println("\n--- 2. Scalar Function Vectorization ---");
+
+def compute_square(n: int) {
+    return n * n;
+}
+
+let numbers_to_square = [2, 4, 6, 8, 10];
+println("Input numbers: " + numbers_to_square);
+
+let squared_results = compute_square(each numbers_to_square);
+println("Vectorized square output: " + squared_results);
+
+
+# 3. Built-in Type Adapters for Signatures
+println("\n--- 3. Built-in Type Adapters for Signatures ---");
+
+def calculate_invoice(quantity: int, unit_price: float, discount: float) {
+    let subtotal = quantity * unit_price;
+    let total = subtotal - discount;
+    return total;
+}
+
+println("Function signature expects: (quantity: int, unit_price: float, discount: float)");
+println("Passing string arguments:   (\"5\", \"24.50\", \"10.00\")");
+
+# String arguments adapt automatically into target numeric types!
+let final_total = calculate_invoice("5", "24.50", "10.00");
+println("Calculated Total: $" + final_total);
+
+
+# 4. Structural Dictionary-to-Object Adapter
+println("\n--- 4. Structural Dictionary to Object Projection ---");
+
+class CustomerAccount {
+    let id: int;
+    let email: str;
+    let tier: str;
+}
+
+def send_welcome_email(account: CustomerAccount) {
+    return "Welcome email dispatched to " + account.email + " (Tier: " + account.tier + ", ID: " + account.id + ")";
+}
+
+let raw_json_payload = {
+    "id": 8421,
+    "email": "customer@pilot-lang.org",
+    "tier": "Enterprise"
+};
+
+println("Raw JSON Dictionary: " + raw_json_payload);
+println("Passing raw dictionary directly to function expecting CustomerAccount object:");
+
+# Automatically hydrates and adapts the dictionary into CustomerAccount!
+let notification_status = send_welcome_email(raw_json_payload);
+println("Result: " + notification_status);
+
+println("\n>>> Concept 04 Demonstration Complete! <<<\n");
