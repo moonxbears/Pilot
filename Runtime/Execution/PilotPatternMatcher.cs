@@ -345,9 +345,9 @@ public static class PilotPatternMatcher
         if (kwCtx.LPAR() == null)
         {
             if (value.Kind == PilotValueKind.Keyword)
-                return value.AsKeyword().Equals(targetKw);
+                return value.AsKeyword().IsA(targetKw);
             if (value.Kind == PilotValueKind.KeywordVariant)
-                return value.AsKeywordVariant().Fields.Length == 0 && value.AsKeywordVariant().Keyword.Equals(targetKw);
+                return value.AsKeywordVariant().Fields.Length == 0 && value.AsKeywordVariant().Keyword.IsA(targetKw);
             return false;
         }
 
@@ -358,7 +358,7 @@ public static class PilotPatternMatcher
         if (value.Kind == PilotValueKind.KeywordVariant)
         {
             var kv = value.AsKeywordVariant();
-            if (!kv.Keyword.Equals(targetKw) || kv.Fields.Length != argCount) return false;
+            if (!kv.Keyword.IsA(targetKw) || kv.Fields.Length != argCount) return false;
             for (int i = 0; i < argCount; i++)
             {
                 if (!MatchPatternInternal(args![i].pattern(), kv.Fields[i], scope, visitor, bindings))
@@ -372,7 +372,7 @@ public static class PilotPatternMatcher
         {
             var tuple = value.AsTuple();
             if (tuple.Count != argCount + 1) return false;
-            if (tuple[0].Kind != PilotValueKind.Keyword || !tuple[0].AsKeyword().Equals(targetKw)) return false;
+            if (tuple[0].Kind != PilotValueKind.Keyword || !tuple[0].AsKeyword().IsA(targetKw)) return false;
             for (int i = 0; i < argCount; i++)
             {
                 if (!MatchPatternInternal(args![i].pattern(), tuple[i + 1], scope, visitor, bindings))
@@ -532,6 +532,22 @@ public static class PilotPatternMatcher
                 bindings[trailingId.GetText()] = (value, true);
             }
             return true;
+        }
+
+        // A2. Reified type union / MethodGroup in scope: `let T = int | str; val is T` or `case T x =>`
+        if (explicitParentAdt == null && genericSuffix == null && !hasParens && propPat == null &&
+            scope.TryResolve(targetName, out var reifiedTypeVal) && reifiedTypeVal.Kind == PilotValueKind.MethodGroup)
+        {
+            var mg = reifiedTypeVal.AsMethodGroup();
+            if (mg.Overloads.Count > 0 && mg.Overloads.All(ov => KnownPrimitiveTypes.Contains(ov.Name) || ov.ClassDef != null))
+            {
+                if (!mg.MatchesReifiedType(value, visitor.Context)) return false;
+                if (trailingId != null && trailingId.GetText() != "_")
+                {
+                    bindings[trailingId.GetText()] = (value, true);
+                }
+                return true;
+            }
         }
 
         // B. Typestate pattern on class object: `Conn[Open]` or `Conn[Open] c`

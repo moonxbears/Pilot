@@ -73,6 +73,7 @@ public sealed class PilotBuiltinRegistry
                 PilotValueKind.Matrix => PilotValue.FromInt(val.AsMatrix().Rows * val.AsMatrix().Cols),
                 PilotValueKind.NativeArray => PilotValue.FromInt(val.AsNativeArray().Length),
                 PilotValueKind.NativeMap => PilotValue.FromInt(val.AsNativeMap().Count),
+                PilotValueKind.SliceBuffer => PilotValue.FromInt(val.AsSliceBuffer().Length),
                 _ => PilotValue.FromInt(0)
             };
         }, "collection");
@@ -113,6 +114,22 @@ public sealed class PilotBuiltinRegistry
         {
             if (args.Count == 0) return PilotValue.FromInt(8);
             string typeSpec = args[0].ToString().Trim();
+            if (typeSpec.Equals("SliceBuffer", StringComparison.OrdinalIgnoreCase) ||
+                typeSpec.StartsWith("SliceBuffer[", StringComparison.OrdinalIgnoreCase) ||
+                typeSpec.StartsWith("SliceBuffer<", StringComparison.OrdinalIgnoreCase) ||
+                typeSpec.Equals("SharedBuffer", StringComparison.OrdinalIgnoreCase) ||
+                typeSpec.StartsWith("SharedBuffer[", StringComparison.OrdinalIgnoreCase) ||
+                typeSpec.StartsWith("SharedBuffer<", StringComparison.OrdinalIgnoreCase))
+            {
+                return PilotValue.FromInt(24);
+            }
+            if (typeSpec.Equals("RangeWindow", StringComparison.OrdinalIgnoreCase) ||
+                typeSpec.StartsWith("RangeWindow[", StringComparison.OrdinalIgnoreCase) ||
+                typeSpec.StartsWith("RangeWindow<", StringComparison.OrdinalIgnoreCase))
+            {
+                var elemKind = Pilot.Runtime.NativeMemory.PilotSharedBuffer.ParseElementKind(typeSpec);
+                return PilotValue.FromInt(2 * Pilot.Runtime.NativeMemory.PilotSharedBuffer.GetStride(elemKind));
+            }
             if (PilotAdtMemoryLayout.TrySplitFallibleTypeSpec(typeSpec, out string okType, out string errType))
             {
                 var (resSz, _, _, _) = PilotAdtMemoryLayout.ComputeResultLayout(
@@ -191,7 +208,46 @@ public sealed class PilotBuiltinRegistry
             return PilotValue.FromRange(new PilotRange(0, 0));
         }, "start", "end", "step");
 
-        // High-Performance Native Types (Burst / HPC# / SIMD)
+        // High-Performance Native Types (Burst / HPC# / SIMD / C-ABI Zero-Marshalling)
+        Register("slice_buffer", (_, args) =>
+        {
+            var elemKind = args.Count > 1
+                ? Pilot.Runtime.NativeMemory.PilotSharedBuffer.ParseElementKind(args[1].ToString())
+                : Pilot.Runtime.NativeMemory.PilotSharedBuffer.ParseElementKind(null);
+            if (args.Count == 0)
+                return PilotValue.FromSliceBuffer(Pilot.Runtime.NativeMemory.PilotSharedBuffer.AllocateUnmanaged(0, elemKind));
+
+            var first = args[0];
+            if (first.Kind == PilotValueKind.SliceBuffer)
+                return first;
+            if (first.Kind is PilotValueKind.List or PilotValueKind.Tuple)
+            {
+                var items = first.Kind == PilotValueKind.List ? (IReadOnlyList<PilotValue>)first.AsList() : first.AsTuple();
+                if (args.Count <= 1 && items.Count > 0 && items[0].Kind == PilotValueKind.Int)
+                    elemKind = Pilot.Runtime.NativeMemory.PilotSharedElementKind.Int64;
+                var buf = Pilot.Runtime.NativeMemory.PilotSharedBuffer.AllocateUnmanaged((nuint)items.Count, elemKind);
+                for (int i = 0; i < items.Count; i++)
+                    buf.YieldElement(items[i]);
+                return PilotValue.FromSliceBuffer(buf);
+            }
+
+            long cap = Math.Max(0L, first.AsInt());
+            return PilotValue.FromSliceBuffer(Pilot.Runtime.NativeMemory.PilotSharedBuffer.AllocateUnmanaged((nuint)cap, elemKind));
+        }, "capacity_or_elements", "elem_type");
+
+        Func<PilotExecutionContext, IReadOnlyList<PilotValue>, PilotValue> sharedBufferFactory = (_, args) =>
+        {
+            string name = args.Count > 0 ? args[0].ToString() : $"pilot_shm_{Guid.NewGuid():N}";
+            long cap = args.Count > 1 ? Math.Max(1L, args[1].AsInt()) : 64L;
+            var elemKind = args.Count > 2
+                ? Pilot.Runtime.NativeMemory.PilotSharedBuffer.ParseElementKind(args[2].ToString())
+                : Pilot.Runtime.NativeMemory.PilotSharedElementKind.Float64;
+            nuint? initLen = args.Count > 3 ? (nuint)Math.Max(0L, args[3].AsInt()) : null;
+            return PilotValue.FromSliceBuffer(Pilot.Runtime.NativeMemory.PilotSharedBuffer.CreateOrOpenShared(name, (nuint)cap, elemKind, initLen));
+        };
+        Register("shared_buffer", sharedBufferFactory, "name_or_path", "capacity", "elem_type", "initial_length");
+        Register("mmap_buffer", sharedBufferFactory, "name_or_path", "capacity", "elem_type", "initial_length");
+
         Register("natarray", (_, args) =>
         {
             if (args.Count == 0) return PilotValue.FromNativeArray(new Pilot.Runtime.NativeMemory.PilotNativeArray(0));
@@ -908,9 +964,92 @@ public sealed class PilotBuiltinRegistry
             };
             return PilotValue.FromMap(dict);
         });
+
+        // ─── Milestone 17: First-Class Keywords, Hierarchies & Reified Lexical Scopes ───
+        Register("derive", (_, args) =>
+        {
+            if (args.Count >= 2 && args[0].Kind == PilotValueKind.Keyword && args[1].Kind == PilotValueKind.Keyword)
+            {
+                args[0].AsKeyword().Derive(args[1].AsKeyword());
+                return args[0];
+            }
+            return PilotValue.Null;
+        }, "child", "parent");
+
+        Register("underive", (_, args) =>
+        {
+            if (args.Count >= 2 && args[0].Kind == PilotValueKind.Keyword && args[1].Kind == PilotValueKind.Keyword)
+            {
+                args[0].AsKeyword().Underive(args[1].AsKeyword());
+                return args[0];
+            }
+            return PilotValue.False;
+        }, "child", "parent");
+
+        Register("isa", (_, args) =>
+        {
+            if (args.Count >= 2 && args[0].Kind == PilotValueKind.Keyword && args[1].Kind == PilotValueKind.Keyword)
+            {
+                return PilotValue.FromBool(args[0].AsKeyword().IsA(args[1].AsKeyword()));
+            }
+            return PilotValue.False;
+        }, "child", "parent");
+
+        Register("is_a", (_, args) =>
+        {
+            if (args.Count >= 2 && args[0].Kind == PilotValueKind.Keyword && args[1].Kind == PilotValueKind.Keyword)
+            {
+                return PilotValue.FromBool(args[0].AsKeyword().IsA(args[1].AsKeyword()));
+            }
+            return PilotValue.False;
+        }, "child", "parent");
+
+        Register("current_scope", (ctx, _) =>
+        {
+            var capturedScope = ctx.Environment.CurrentScope;
+            var scopeObj = new PilotObject(new PilotClassDefinition("LexicalScope"));
+            scopeObj.SetMember("get", PilotValue.FromFunction(PilotFunction.CreateNative("get", (_, a) =>
+            {
+                if (a.Count == 0) return PilotValue.Null;
+                string key = a[0].Kind == PilotValueKind.Keyword ? a[0].AsKeyword().Name : a[0].AsString();
+                if (capturedScope.TryResolve(key, out var val)) return val;
+                return a.Count > 1 ? a[1] : PilotValue.Null;
+            }, "name", "default")));
+            scopeObj.SetMember("set", PilotValue.FromFunction(PilotFunction.CreateNative("set", (_, a) =>
+            {
+                if (a.Count < 2) return PilotValue.Null;
+                string key = a[0].Kind == PilotValueKind.Keyword ? a[0].AsKeyword().Name : a[0].AsString();
+                if (!capturedScope.Assign(key, a[1]))
+                {
+                    capturedScope.Declare(key, a[1]);
+                }
+                return a[1];
+            }, "name", "value")));
+            scopeObj.SetMember("contains", PilotValue.FromFunction(PilotFunction.CreateNative("contains", (_, a) =>
+            {
+                if (a.Count == 0) return PilotValue.False;
+                string key = a[0].Kind == PilotValueKind.Keyword ? a[0].AsKeyword().Name : a[0].AsString();
+                return PilotValue.FromBool(capturedScope.TryResolve(key, out var resolved));
+            }, "name")));
+            scopeObj.SetMember("keys", PilotValue.FromFunction(PilotFunction.CreateNative("keys", (_, _) =>
+            {
+                var keys = capturedScope.GetLocalBindings().Keys.Select(PilotValue.FromString).ToList();
+                return PilotValue.FromList(keys);
+            })));
+            scopeObj.SetMember("bindings", PilotValue.FromFunction(PilotFunction.CreateNative("bindings", (_, _) =>
+            {
+                var map = new Dictionary<PilotValue, PilotValue>();
+                foreach (var kv in capturedScope.GetLocalBindings())
+                {
+                    map[PilotValue.FromString(kv.Key)] = kv.Value.Value;
+                }
+                return PilotValue.FromMap(map);
+            })));
+            return PilotValue.FromObject(scopeObj);
+        });
     }
 
-    private static PilotFunction GetOperatorFunction(string op)
+    public static PilotFunction GetOperatorFunction(string op)
     {
         return op switch
         {

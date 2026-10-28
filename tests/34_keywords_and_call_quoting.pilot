@@ -1,0 +1,76 @@
+// =============================================================================
+// Suite 34: First-Class Keywords, Reified Special Forms & Core Homoiconic Call-Quoting
+// Milestone 17 Integration Suite (:kw, :ns/kw, !, !!, ~, !&)
+// =============================================================================
+
+print("=== Suite 34: Keywords, Reified Citizens & Core Call-Quoting ===")
+
+// 1. Namespaced Keywords & Callable Map Lookup
+let profile = { :id: 101, :user/role: :admin, :user/status: :active }
+let role = :user/role(profile, default=:guest)
+let tier = :user/tier(profile, default=:standard)
+assert(role == :admin)
+assert(tier == :standard)
+
+// 2. Keyword Hierarchies (.Derive, .IsA) & Keyword-Dispatched Method Groups
+:admin.Derive(:user)
+:superadmin.Derive(:admin)
+assert(:admin.IsA(:user))
+assert(:superadmin.IsA(:user))
+assert(!:user.IsA(:admin))
+
+def Authorize(r: :user) -> str { return "user_scope" }
+def Authorize(r: :admin) -> str { return "admin_scope" }
+def Authorize(r: :guest) -> str { return "guest_scope" }
+
+assert(Authorize(:user) == "user_scope")
+assert(Authorize(:admin) == "admin_scope")
+assert(Authorize(:superadmin) == "admin_scope")
+
+// 3. Reified Special Forms, Types, Operators & Lexical Scopes
+let guard_form = keyword(guard)
+assert(guard_form.is_special_form == true)
+
+defkeyword repeat_scale(factor: int, base_val: int) {
+    return factor * base_val
+}
+let rk = keyword(repeat_scale)
+assert(rk.is_special_form == true)
+assert(rk(4, 12) == 48)
+
+let ScalarOrText = int | str
+assert(ScalarOrText.Check(123))
+assert(ScalarOrText.Check("pilot"))
+assert(!ScalarOrText.Check(false))
+
+let plus = (+)
+let times = (*)
+assert(times(plus(3, 4), 6) == 42)
+
+var scoped_counter = 10
+let env = current_scope()
+assert(env.get(:scoped_counter) == 10)
+env.set(:scoped_counter, 25)
+assert(scoped_counter == 25)
+
+// 4. Homoiconic Call-Quoting Modes 1–4 (!, !!, ~, !&)
+def ComputeImpulse(mass: f32, velocity: f32) -> f32 {
+    return 0.5 * mass * (velocity * velocity)
+}
+
+// Mode 1: Shallow Quote (`!`) -> CallExpr<f32>
+let shallow = ComputeImpulse!(10.0, 4.0)
+assert(shallow.fn_name == "ComputeImpulse")
+assert(shallow.eval() == 80.0)
+
+// Mode 2 & 3: Deep Splice (`!!`) & Quasiquote (`~`) -> AstExpr<f32>
+let spliced = ComputeImpulse!!(~10.0, v)
+assert(spliced.to_string() == "Mul(5.0, Mul(Sym(\"v\"), Sym(\"v\")))")
+assert(spliced.eval({ "v": 4.0 }) == 80.0)
+
+// Mode 4: C-ABI Sequential Call-Frame (`!&`) -> 12-byte CallFrame_ComputeImpulse
+let abi_frame = ComputeImpulse!&(10.0, 4.0)
+assert(abi_frame.size_bytes == 12)
+assert(abi_frame.dispatch() == 80.0)
+
+print("Suite 34 passed all assertions!")

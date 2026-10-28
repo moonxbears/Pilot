@@ -63,10 +63,44 @@ public sealed class PolyglotTypeBridge : IPolyglotTypeConverter
         return ConvertPocoToPilotObject(foreignObject, type);
     }
 
-    private bool TryMapPrimitiveToPilotValue(object foreignObject, out PilotValue result)
+    private unsafe bool TryMapPrimitiveToPilotValue(object foreignObject, out PilotValue result)
     {
         switch (foreignObject)
         {
+            case Pilot.Runtime.NativeMemory.PilotSharedBuffer sharedBuf:
+                result = PilotValue.FromSliceBuffer(sharedBuf);
+                return true;
+            case Pilot.Runtime.NativeMemory.SliceBuffer<double> sbd:
+                result = PilotValue.FromSliceBuffer(
+                    Pilot.Runtime.NativeMemory.PilotSharedBuffer.WrapExternalPointer(
+                        sbd.DataPtr, sbd.Length, sbd.Capacity, Pilot.Runtime.NativeMemory.PilotSharedElementKind.Float64));
+                return true;
+            case Pilot.Runtime.NativeMemory.SliceBuffer<long> sbi64:
+                result = PilotValue.FromSliceBuffer(
+                    Pilot.Runtime.NativeMemory.PilotSharedBuffer.WrapExternalPointer(
+                        sbi64.DataPtr, sbi64.Length, sbi64.Capacity, Pilot.Runtime.NativeMemory.PilotSharedElementKind.Int64));
+                return true;
+            case Pilot.Runtime.NativeMemory.SliceBuffer<float> sbf32:
+                result = PilotValue.FromSliceBuffer(
+                    Pilot.Runtime.NativeMemory.PilotSharedBuffer.WrapExternalPointer(
+                        sbf32.DataPtr, sbf32.Length, sbf32.Capacity, Pilot.Runtime.NativeMemory.PilotSharedElementKind.Float32));
+                return true;
+            case Pilot.Runtime.NativeMemory.SliceBuffer<int> sbi32:
+                result = PilotValue.FromSliceBuffer(
+                    Pilot.Runtime.NativeMemory.PilotSharedBuffer.WrapExternalPointer(
+                        sbi32.DataPtr, sbi32.Length, sbi32.Capacity, Pilot.Runtime.NativeMemory.PilotSharedElementKind.Int32));
+                return true;
+            case Pilot.Runtime.NativeMemory.SliceBuffer<byte> sbu8:
+                result = PilotValue.FromSliceBuffer(
+                    Pilot.Runtime.NativeMemory.PilotSharedBuffer.WrapExternalPointer(
+                        sbu8.DataPtr, sbu8.Length, sbu8.Capacity, Pilot.Runtime.NativeMemory.PilotSharedElementKind.UInt8));
+                return true;
+            case IntPtr rawPtr:
+                result = PilotValue.FromInt((long)rawPtr);
+                return true;
+            case UIntPtr rawUPtr:
+                result = PilotValue.FromUInt((ulong)rawUPtr);
+                return true;
             case bool b:
                 result = PilotValue.FromBool(b);
                 return true;
@@ -241,6 +275,7 @@ public sealed class PolyglotTypeBridge : IPolyglotTypeConverter
             PilotValueKind.Map => ConvertMapToHost(value.AsMap()),
             PilotValueKind.Matrix => value.AsMatrix(),
             PilotValueKind.Range => value.AsRange(),
+            PilotValueKind.SliceBuffer => value.AsSliceBuffer(),
             PilotValueKind.Object => value.AsObject().Fields,
             PilotValueKind.Foreign => value.AsForeign(),
             _ => value.ToString()
@@ -249,6 +284,19 @@ public sealed class PolyglotTypeBridge : IPolyglotTypeConverter
 
     private static bool TryCoerceToForeignType(PilotValue value, Type targetType, out object? result)
     {
+        // Zero-copy contiguous SliceBuffer / raw pointer coercions (Milestone 15.3)
+        if (value.Kind == PilotValueKind.SliceBuffer)
+        {
+            var sb = value.AsSliceBuffer();
+            if (targetType == typeof(Pilot.Runtime.NativeMemory.PilotSharedBuffer)) { result = sb; return true; }
+            if (targetType == typeof(IntPtr)) { result = sb.DataPointer; return true; }
+            if (targetType == typeof(Pilot.Runtime.NativeMemory.SliceBuffer<double>)) { result = sb.AsTypedSliceBuffer<double>(); return true; }
+            if (targetType == typeof(Pilot.Runtime.NativeMemory.SliceBuffer<long>)) { result = sb.AsTypedSliceBuffer<long>(); return true; }
+            if (targetType == typeof(Pilot.Runtime.NativeMemory.SliceBuffer<float>)) { result = sb.AsTypedSliceBuffer<float>(); return true; }
+            if (targetType == typeof(Pilot.Runtime.NativeMemory.SliceBuffer<int>)) { result = sb.AsTypedSliceBuffer<int>(); return true; }
+            if (targetType == typeof(Pilot.Runtime.NativeMemory.SliceBuffer<byte>)) { result = sb.AsTypedSliceBuffer<byte>(); return true; }
+        }
+
         // Explicit target type coercions
         if (targetType == typeof(int)) { result = (int)value.AsInt(); return true; }
         if (targetType == typeof(long)) { result = value.AsInt(); return true; }

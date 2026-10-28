@@ -150,13 +150,24 @@ class PilotLspClient implements vscode.Disposable {
             stdio: ['pipe', 'pipe', 'pipe']
         });
 
+        const spawnedProcess = this.process;
         this.process.stdout.on('data', (chunk: Buffer) => this.onData(chunk));
         this.process.stderr.on('data', (chunk: Buffer) => {
             this.outputChannel.appendLine(`[Pilot LSP stderr] ${chunk.toString('utf8')}`);
         });
         this.process.on('exit', (code) => {
             this.outputChannel.appendLine(`[Pilot LSP] Process exited with code ${code}`);
-            this.statusBar.text = '$(warning) Pilot LSP (Stopped)';
+            if (this.process === spawnedProcess) {
+                this.process = null;
+                this.statusBar.text = '$(sync~spin) Pilot LSP (Restarting...)';
+                setTimeout(() => {
+                    if (!this.process) {
+                        this.start().catch(() => {});
+                    }
+                }, 800);
+            } else {
+                this.statusBar.text = '$(warning) Pilot LSP (Stopped)';
+            }
         });
 
         const initResult = await this.sendRequest('initialize', {

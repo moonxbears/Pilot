@@ -2157,8 +2157,8 @@ internal sealed class PilotMatchBytecodeLowerer
 
     private static string ExtractKeywordText(PilotParser.Symbol_literalContext sym)
     {
-        if (sym.identifier() != null)
-            return sym.identifier().GetText();
+        if (sym.SYMBOL() == null)
+            return sym.GetText().TrimStart(':');
         string raw = sym.SYMBOL()?.GetText() ?? ":empty";
         return raw.TrimStart(':');
     }

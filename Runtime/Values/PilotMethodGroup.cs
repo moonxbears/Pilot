@@ -16,6 +16,7 @@ namespace Pilot.Runtime.Values;
 /// - Method group fallback and union via bitwise OR (|).
 /// - Compile-time and dynamic overload AST introspection (.overloads).
 /// - Multi-cast broadcast execution (*).
+/// - First-class keyword-dispatched overloads and reified type checking.
 /// </summary>
 public sealed class PilotMethodGroup
 {
@@ -58,7 +59,8 @@ public sealed class PilotMethodGroup
         string sig = function.GetSignatureKey();
         for (int i = 0; i < Overloads.Count; i++)
         {
-            if (Overloads[i].GetSignatureKey() == sig)
+            if (string.Equals(Overloads[i].Name, function.Name, StringComparison.Ordinal) &&
+                Overloads[i].GetSignatureKey() == sig)
             {
                 Overloads[i].ApplyPatchFrom(function);
                 return;
@@ -153,7 +155,9 @@ public sealed class PilotMethodGroup
             }
 
             // Normal invocation: invoke best (most specific / first) match
-            var bestMatch = completeMatches[0];
+            var bestMatch = completeMatches
+                .OrderByDescending(m => ComputeOverloadSpecificityScore(m.Function, m.Args))
+                .First();
             return ExecuteOverload(bestMatch.Function, bestMatch.Args, context);
         }
 
@@ -458,6 +462,24 @@ public sealed class PilotMethodGroup
 
             case "matrix":
                 return arg.Kind == PilotValueKind.Matrix;
+
+            case "keyword" or "symbol" or "atom":
+                return arg.Kind == PilotValueKind.Keyword;
+        }
+
+        // First-class keyword-dispatched parameter type: `def Handle(role: :admin)` or `def Handle(role: :user/admin)`
+        if (expectedType.StartsWith(':'))
+        {
+            var expectedKw = PilotKeyword.Intern(expectedType.AsSpan(1).ToString());
+            if (arg.Kind == PilotValueKind.Keyword)
+            {
+                return arg.AsKeyword().IsA(expectedKw);
+            }
+            if (arg.Kind == PilotValueKind.KeywordVariant)
+            {
+                return arg.AsKeywordVariant().Keyword.IsA(expectedKw);
+            }
+            return false;
         }
 
         // Custom class / inheritance matching
@@ -491,6 +513,68 @@ public sealed class PilotMethodGroup
         }
 
         return false;
+    }
+
+    private static int ComputeOverloadSpecificityScore(PilotFunction fn, IReadOnlyList<PilotValue> args)
+    {
+        int score = 0;
+        int count = Math.Min(fn.Parameters.Count, args.Count);
+        for (int i = 0; i < count; i++)
+        {
+            string? expectedType = fn.Parameters[i].TypeName;
+            if (string.IsNullOrEmpty(expectedType) ||
+                expectedType.Equals("any", StringComparison.OrdinalIgnoreCase) ||
+                expectedType.Equals("dynamic", StringComparison.OrdinalIgnoreCase) ||
+                expectedType.Equals("object", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (expectedType.StartsWith(':'))
+            {
+                var expectedKw = PilotKeyword.Intern(expectedType.AsSpan(1).ToString());
+                PilotKeyword? actualKw = args[i].Kind == PilotValueKind.Keyword
+                    ? args[i].AsKeyword()
+                    : (args[i].Kind == PilotValueKind.KeywordVariant ? args[i].AsKeywordVariant().Keyword : null);
+                if (actualKw != null)
+                {
+                    int dist = actualKw.GetDerivationDistance(expectedKw);
+                    if (dist >= 0)
+                    {
+                        score += Math.Max(10, 100 - dist * 10);
+                    }
+                }
+            }
+            else
+            {
+                score += 20;
+            }
+        }
+        return score;
+    }
+
+    /// <summary>
+    /// Checks whether a runtime value satisfies this reified type union / method group (e.g., `let T = int | str`).
+    /// </summary>
+    public bool MatchesReifiedType(PilotValue value, PilotExecutionContext? context = null)
+    {
+        foreach (var ov in Overloads)
+        {
+            if (MatchesSingleTypeFunction(ov, value, context))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static bool MatchesSingleTypeFunction(PilotFunction fn, PilotValue value, PilotExecutionContext? context = null)
+    {
+        if (fn.ClassDef != null)
+        {
+            return IsDirectlyCompatible(fn.Name, value, context);
+        }
+        return IsDirectlyCompatible(fn.Name, value, context);
     }
 
     /// <summary>

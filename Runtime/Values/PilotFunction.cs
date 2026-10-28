@@ -44,7 +44,7 @@ public sealed class PilotFunction
     public IReadOnlyList<PilotParameter> Parameters { get; internal set; }
     public PilotScope? ClosureScope { get; private set; }
     public ParserRuleContext? AstBody { get; private set; }
-    public Func<PilotExecutionContext, IReadOnlyList<PilotValue>, PilotValue>? HostDelegate { get; private set; }
+    public Func<PilotExecutionContext, IReadOnlyList<PilotValue>, PilotValue>? HostDelegate { get; internal set; }
     public bool IsAsync { get; private set; }
     public bool IsGenerator { get; private set; }
     public bool IsVectorized { get; set; }
@@ -58,6 +58,9 @@ public sealed class PilotFunction
     public string? SuccessTypeSpec { get; set; }
     public string? ErrorTypeSpec { get; set; }
     public bool IsFallible { get; set; }
+    public bool IsMacro { get; set; }
+    public bool IsExternFfi { get; set; }
+    public string? SourceBodyText { get; set; }
 
     public Dictionary<string, PilotValue> Members => _members ??= new(StringComparer.Ordinal);
     public bool HasMembers => _members != null && _members.Count > 0;
@@ -202,6 +205,9 @@ public sealed class PilotFunction
         copy.SuccessTypeSpec = SuccessTypeSpec;
         copy.ErrorTypeSpec = ErrorTypeSpec;
         copy.IsFallible = IsFallible;
+        copy.IsMacro = IsMacro;
+        copy.IsExternFfi = IsExternFfi;
+        copy.SourceBodyText = SourceBodyText;
         if (_members != null)
         {
             foreach (var kv in _members) copy.Members[kv.Key] = kv.Value;
@@ -238,6 +244,9 @@ public sealed class PilotFunction
         SuccessTypeSpec = patch.SuccessTypeSpec;
         ErrorTypeSpec = patch.ErrorTypeSpec;
         IsFallible = patch.IsFallible;
+        IsMacro = patch.IsMacro;
+        IsExternFfi = patch.IsExternFfi;
+        SourceBodyText = patch.SourceBodyText;
         if (patch.ClassDef != null)
         {
             ClassDef = patch.ClassDef;

@@ -21,17 +21,23 @@ public sealed class PilotStaticAnalysisResult
     public IReadOnlyDictionary<string, PilotType> InferredTypes { get; }
     public IReadOnlyDictionary<string, string> InferredFunctionReturnTypes { get; }
     public IReadOnlyDictionary<PilotParser.For_stmtContext, PilotForLoopInfo> LoopInfos { get; }
+    public PilotTypeInferenceEngine? TypeEngine { get; }
+    public IReadOnlyList<PilotTypeConstraint> TypeConstraints => TypeEngine?.Constraints ?? Array.Empty<PilotTypeConstraint>();
+    public IReadOnlyList<PilotMonomorphizedCallSite> MonomorphizedCallSites => TypeEngine?.MonomorphizedCallSites ?? Array.Empty<PilotMonomorphizedCallSite>();
+    public IReadOnlyList<PilotInlayHint> InlayHints => TypeEngine?.InlayHints ?? Array.Empty<PilotInlayHint>();
 
     public PilotStaticAnalysisResult(
         IEnumerable<PilotAnalysisDiagnostic> diagnostics,
         IReadOnlyDictionary<string, PilotType> inferredTypes,
         IReadOnlyDictionary<string, string>? inferredFunctionReturnTypes = null,
-        IReadOnlyDictionary<PilotParser.For_stmtContext, PilotForLoopInfo>? loopInfos = null)
+        IReadOnlyDictionary<PilotParser.For_stmtContext, PilotForLoopInfo>? loopInfos = null,
+        PilotTypeInferenceEngine? typeEngine = null)
     {
         Diagnostics.AddRange(diagnostics);
         InferredTypes = inferredTypes;
         InferredFunctionReturnTypes = inferredFunctionReturnTypes ?? new Dictionary<string, string>(StringComparer.Ordinal);
         LoopInfos = loopInfos ?? new Dictionary<PilotParser.For_stmtContext, PilotForLoopInfo>();
+        TypeEngine = typeEngine;
     }
 }
 
@@ -91,7 +97,7 @@ public static class PilotAnalysisPipeline
         loopAnalyzer.CheckProgram(program);
         diagnostics.AddRange(loopAnalyzer.Diagnostics);
 
-        return new PilotStaticAnalysisResult(diagnostics, typeEngine.InferredTypes, errorFlow.InferredFunctionReturnTypes, loopAnalyzer.LoopInfos);
+        return new PilotStaticAnalysisResult(diagnostics, typeEngine.InferredTypes, errorFlow.InferredFunctionReturnTypes, loopAnalyzer.LoopInfos, typeEngine);
     }
 
     /// <summary>

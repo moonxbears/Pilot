@@ -14,6 +14,8 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
     private PilotPreprocessResult? _preprocResult;
     private readonly HashSet<string> _activeSavepoints = new(StringComparer.Ordinal);
     private readonly Stack<List<string>> _returnTypeCollectorStack = new();
+    private readonly Stack<List<string>> _loopYieldCollectorStack = new();
+    private readonly Stack<List<string>> _loopBreakCollectorStack = new();
     private readonly Dictionary<string, string> _unitAliases = new(StringComparer.Ordinal);
 
     private static readonly HashSet<string> BuiltinTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -41,7 +43,8 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
         // Domain & Concurrency primitives
         "symbol", "dynamic", "Table", "Dataset", "Relation", "Channel", "Chan", "Task", "Future",
-        "Result", "Option", "Span", "Memory", "AstNode", "Exception", "ValueError"
+        "Result", "Option", "Span", "Memory", "SliceBuffer", "SharedBuffer", "RangeWindow",
+        "NativeArray", "NativeMap", "AstNode", "Exception", "ValueError"
     };
 
     private static readonly System.Text.RegularExpressions.Regex MatrixTypeRegex = new(@"^matrix\d+x\d+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
@@ -177,9 +180,16 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         ["fail"] = ("any", "pure def fail(err: any) -> any", "Constructs a zero-allocation register-returned error value for a fallible T ! E return."),
         ["ignore_err"] = ("void", "def ignore_err(res: any) -> void", "Explicitly acknowledges and discards a fallible T ! E return value."),
         ["panic"] = ("void", "def panic(reason: str = \"explicit panic\") -> void", "Terminates the current execution or isolate due to an unrecoverable invariant violation."),
-        ["sizeof_type"] = ("int", "pure def sizeof_type(type_name: str) -> int", "Returns the native inline byte size of a Pilot type, ADT, record, Option[T], or Result[T, E]."),
+        ["sizeof_type"] = ("int", "pure def sizeof_type(type_name: str) -> int", "Returns the native inline byte size of a Pilot type, ADT, record, Option[T], Result[T, E], SliceBuffer[T], or RangeWindow[T]."),
         ["alignof_type"] = ("int", "pure def alignof_type(type_name: str) -> int", "Returns the native byte alignment of a Pilot type, ADT, or record."),
-        ["option_has_niche"] = ("bool", "pure def option_has_niche(type_name: str) -> bool", "Returns true if Option[T] uses a zero-allocation niche representation.")
+        ["option_has_niche"] = ("bool", "pure def option_has_niche(type_name: str) -> bool", "Returns true if Option[T] uses a zero-allocation niche representation."),
+        ["slice_buffer"] = ("SliceBuffer[any]", "def slice_buffer(capacity_or_elements: any = 0, elem_type: symbol = :f64) -> SliceBuffer[any]", "Allocates a contiguous unmanaged 24-byte C-ABI SliceBuffer[T] with zero GC List<T> overhead."),
+        ["shared_buffer"] = ("SharedBuffer[any]", "def shared_buffer(name_or_path: str, capacity: int = 64, elem_type: symbol = :f64, initial_length: int = 0) -> SharedBuffer[any]", "Creates or attaches to an OS mmap-backed contiguous SharedBuffer[T] shared zero-copy across Pilot, Python (memoryview), Node.js, C/C++, Rust, C# (Span<T>), and Assembly."),
+        ["mmap_buffer"] = ("SharedBuffer[any]", "def mmap_buffer(name_or_path: str, capacity: int = 64, elem_type: symbol = :f64, initial_length: int = 0) -> SharedBuffer[any]", "Alias for shared_buffer: creates or maps an OS mmap-backed zero-copy contiguous buffer."),
+        ["natarray"] = ("NativeArray", "def natarray(size_or_elements: any = 0) -> NativeArray", "Creates a high-performance numeric array."),
+        ["natmap"] = ("NativeMap", "def natmap(capacity_or_dict: any = 0) -> NativeMap", "Creates a high-performance native map."),
+        ["to_native"] = ("any", "def to_native(val: any) -> any", "Converts a collection to its native representation."),
+        ["as_native"] = ("any", "def as_native(val: any) -> any", "Alias for to_native.")
     };
 
     private PilotSemanticAnalyzer(string uri)
@@ -263,6 +273,69 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         }
         rootScope.Symbols["AstNode"] = astSym;
 
+        // Register contiguous C-ABI memory classes 'SliceBuffer' and 'SharedBuffer'
+        var sliceBufferSym = new PilotSymbol
+        {
+            Name = "SliceBuffer",
+            Kind = PilotSymbolKind.Struct,
+            TypeName = "SliceBuffer[T]",
+            Domain = "Contiguous Memory / C-ABI",
+            Signature = "struct SliceBuffer[T]",
+            Documentation = "A contiguous 24-byte unmanaged C-ABI buffer ({ T* DataPtr, nuint Length, nuint Capacity }) with zero GC list allocations and zero-marshalling cross-language interoperability."
+        };
+        sliceBufferSym.Members["data_ptr"] = new PilotSymbol { Name = "data_ptr", Kind = PilotSymbolKind.Property, TypeName = "int", Domain = "Contiguous Memory / C-ABI", Signature = "let data_ptr: int", Documentation = "Native unmanaged memory address of the first contiguous element." };
+        sliceBufferSym.Members["DataPtr"] = sliceBufferSym.Members["data_ptr"];
+        sliceBufferSym.Members["ptr"] = sliceBufferSym.Members["data_ptr"];
+        sliceBufferSym.Members["header_ptr"] = new PilotSymbol { Name = "header_ptr", Kind = PilotSymbolKind.Property, TypeName = "int", Domain = "Contiguous Memory / C-ABI", Signature = "let header_ptr: int", Documentation = "Native pointer to the live 24-byte unmanaged SliceBuffer header." };
+        sliceBufferSym.Members["len"] = new PilotSymbol { Name = "len", Kind = PilotSymbolKind.Property, TypeName = "int", Domain = "Contiguous Memory / C-ABI", Signature = "let len: int", Documentation = "Current active element count in the contiguous buffer." };
+        sliceBufferSym.Members["length"] = sliceBufferSym.Members["len"];
+        sliceBufferSym.Members["Length"] = sliceBufferSym.Members["len"];
+        sliceBufferSym.Members["count"] = sliceBufferSym.Members["len"];
+        sliceBufferSym.Members["capacity"] = new PilotSymbol { Name = "capacity", Kind = PilotSymbolKind.Property, TypeName = "int", Domain = "Contiguous Memory / C-ABI", Signature = "let capacity: int", Documentation = "Total allocated capacity in elements before reallocation." };
+        sliceBufferSym.Members["Capacity"] = sliceBufferSym.Members["capacity"];
+        sliceBufferSym.Members["element_size"] = new PilotSymbol { Name = "element_size", Kind = PilotSymbolKind.Property, TypeName = "int", Domain = "Contiguous Memory / C-ABI", Signature = "let element_size: int", Documentation = "Byte size / stride of each element in the contiguous buffer." };
+        sliceBufferSym.Members["stride"] = sliceBufferSym.Members["element_size"];
+        sliceBufferSym.Members["byte_length"] = new PilotSymbol { Name = "byte_length", Kind = PilotSymbolKind.Property, TypeName = "int", Domain = "Contiguous Memory / C-ABI", Signature = "let byte_length: int", Documentation = "Active byte length of the buffer (`length * stride`)." };
+        sliceBufferSym.Members["byte_capacity"] = new PilotSymbol { Name = "byte_capacity", Kind = PilotSymbolKind.Property, TypeName = "int", Domain = "Contiguous Memory / C-ABI", Signature = "let byte_capacity: int", Documentation = "Total byte capacity of the buffer (`capacity * stride`)." };
+        sliceBufferSym.Members["abi_header_size"] = new PilotSymbol { Name = "abi_header_size", Kind = PilotSymbolKind.Property, TypeName = "int", Domain = "Contiguous Memory / C-ABI", Signature = "let abi_header_size: int", Documentation = "Size of the unmanaged C-ABI header (fixed at 24 bytes: 8-byte pointer, 8-byte length, 8-byte capacity)." };
+        sliceBufferSym.Members["managed_list_allocations"] = new PilotSymbol { Name = "managed_list_allocations", Kind = PilotSymbolKind.Property, TypeName = "int", Domain = "Contiguous Memory / C-ABI", Signature = "let managed_list_allocations: int", Documentation = "Count of GC managed List<T> allocations incurred (always 0 for zero-copy C-ABI buffers)." };
+        sliceBufferSym.Members["is_shared_memory"] = new PilotSymbol { Name = "is_shared_memory", Kind = PilotSymbolKind.Property, TypeName = "bool", Domain = "Contiguous Memory / C-ABI", Signature = "let is_shared_memory: bool", Documentation = "True if backed by OS shared memory (mmap / CreateFileMapping)." };
+        sliceBufferSym.Members["is_shared"] = sliceBufferSym.Members["is_shared_memory"];
+        sliceBufferSym.Members["is_zero_copy"] = new PilotSymbol { Name = "is_zero_copy", Kind = PilotSymbolKind.Property, TypeName = "bool", Domain = "Contiguous Memory / C-ABI", Signature = "let is_zero_copy: bool", Documentation = "True if elements are accessed with zero marshalling or copying." };
+        sliceBufferSym.Members["shared_name"] = new PilotSymbol { Name = "shared_name", Kind = PilotSymbolKind.Property, TypeName = "str?", Domain = "Contiguous Memory / C-ABI", Signature = "let shared_name: str?", Documentation = "OS shared memory name or file backing identifier (or null if anonymous unmanaged heap)." };
+        sliceBufferSym.Members["backing_path"] = sliceBufferSym.Members["shared_name"];
+        sliceBufferSym.Members["open_view"] = new PilotSymbol { Name = "open_view", Kind = PilotSymbolKind.Method, TypeName = "SliceBuffer[T]", Domain = "Contiguous Memory / C-ABI", Signature = "def open_view(length: int? = none) -> SliceBuffer[T]", Documentation = "Opens an independent base-address view over the contiguous buffer." };
+        sliceBufferSym.Members["slice"] = new PilotSymbol { Name = "slice", Kind = PilotSymbolKind.Method, TypeName = "SliceBuffer[T]", Domain = "Contiguous Memory / C-ABI", Signature = "def slice(start: int = 0, length: int? = none) -> SliceBuffer[T]", Documentation = "Returns a zero-copy sub-slice view over the contiguous buffer." };
+        sliceBufferSym.Members["ensure_shared"] = new PilotSymbol { Name = "ensure_shared", Kind = PilotSymbolKind.Method, TypeName = "str", Domain = "Contiguous Memory / C-ABI", Signature = "def ensure_shared(name: str? = none) -> str", Documentation = "Promotes this unmanaged buffer to OS-level named shared memory if not already shared." };
+        sliceBufferSym.Members["reset"] = new PilotSymbol { Name = "reset", Kind = PilotSymbolKind.Method, TypeName = "void", Domain = "Contiguous Memory / C-ABI", Signature = "def reset() -> void", Documentation = "Resets the active element count to 0 without freeing allocated memory." };
+
+        foreach (var rm in RootMethodSymbols.Values)
+        {
+            if (!sliceBufferSym.Members.ContainsKey(rm.Name))
+                sliceBufferSym.Members[rm.Name] = rm;
+        }
+        foreach (var mem in sliceBufferSym.Members.Values)
+        {
+            sliceBufferSym.Children.Add(mem);
+        }
+        rootScope.Symbols["SliceBuffer"] = sliceBufferSym;
+
+        var sharedBufferSym = new PilotSymbol
+        {
+            Name = "SharedBuffer",
+            Kind = PilotSymbolKind.Struct,
+            TypeName = "SharedBuffer[T]",
+            Domain = "Contiguous Memory / C-ABI",
+            Signature = "struct SharedBuffer[T]",
+            Documentation = "An OS mmap-backed contiguous 24-byte unmanaged C-ABI buffer shared zero-copy across Pilot, Python (memoryview), Node.js, C/C++, Rust (&mut slice), C# (Span<T>), and Assembly."
+        };
+        foreach (var kv in sliceBufferSym.Members)
+        {
+            sharedBufferSym.Members[kv.Key] = kv.Value;
+            sharedBufferSym.Children.Add(kv.Value);
+        }
+        rootScope.Symbols["SharedBuffer"] = sharedBufferSym;
+
         _currentScope = rootScope;
         _result = new PilotAnalysisResult
         {
@@ -314,15 +387,18 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         // Pass 2: Full semantic walk
         analyzer.Visit(tree);
 
-        // Pass 3: Milestone 3 Advanced Static Analysis (Type Inference, Borrow Checking, Dimensional Analysis, Contracts)
+        // Pass 3: Milestone 3 & 16 Advanced Static Analysis (Type Inference, Borrow Checking, Dimensional Analysis, Contracts, Inlay Hints)
         var analysisRes = Pilot.Analysis.PilotAnalysisPipeline.Analyze(tree);
+        analyzer.SynchronizeInferredTypesFromAnalysis(analysisRes);
+        analyzer._result.InlayHints.AddRange(analysisRes.InlayHints);
         foreach (var diag in analysisRes.Diagnostics)
         {
             if (diag.Code is "PILOT301" or "PILOT302" or "PILOT303" or "PILOT304" or "PILOT305" or "PILOT306"
                 or "MATCH001" or "MATCH002"
                 or "NULL001" or "NULL002" or "NULL003" or "NULL004" or "NULL005"
                 or "ERR001" or "ERR002" or "ERR003" or "ERR004"
-                or "LOOP001" or "LOOP002" or "LOOP003" or "LOOP004")
+                or "LOOP001" or "LOOP002" or "LOOP003" or "LOOP004"
+                or "TYPE008")
             {
                 analyzer._result.Diagnostics.Add(new PilotDiagnostic
                 {
@@ -343,6 +419,218 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         }
 
         return analyzer._result;
+    }
+
+    private void SynchronizeInferredTypesFromAnalysis(Pilot.Analysis.PilotStaticAnalysisResult analysisRes)
+    {
+        if (analysisRes.TypeEngine != null)
+        {
+            var inferencer = analysisRes.TypeEngine.BidirectionalInferencer;
+            var subs = analysisRes.TypeEngine.Substitutions;
+
+            foreach (var (fnName, schemes) in inferencer.FunctionGroups)
+            {
+                if (schemes.Count == 0) continue;
+                var scheme = schemes[0];
+                var fullFnType = scheme.BuildFunctionType(subs);
+                var funcSymbol = FindFunctionSymbol(_result.RootScope, fnName);
+                var fnScope = FindFunctionScope(_result.RootScope, $"def:{fnName}");
+
+                if (funcSymbol != null)
+                {
+                    for (int i = 0; i < scheme.ParameterNames.Count; i++)
+                    {
+                        string pName = scheme.ParameterNames[i];
+                        var pPilotType = i < fullFnType.TypeArguments.Count
+                            ? fullFnType.TypeArguments[i]
+                            : Pilot.Analysis.TypeSystem.PilotType.Any;
+
+                        if (!scheme.ParameterHasExplicitType[i] && pPilotType.Kind != Pilot.Analysis.TypeSystem.PilotTypeKind.Any)
+                        {
+                            string pTypeStr = FormatInferredTypeForSymbol(pPilotType);
+                            for (int pIdx = 0; pIdx < funcSymbol.Parameters.Count; pIdx++)
+                            {
+                                if (string.Equals(funcSymbol.Parameters[pIdx].Name, pName, StringComparison.Ordinal))
+                                {
+                                    funcSymbol.Parameters[pIdx] = (pName, pTypeStr);
+                                }
+                            }
+                            if (fnScope != null && fnScope.Symbols.TryGetValue(pName, out var pSym))
+                            {
+                                pSym.TypeName = pTypeStr;
+                                pSym.Signature = $"{pName}: {pTypeStr}";
+                            }
+                        }
+                    }
+
+                    var retPilotType = fullFnType.ReturnType ?? Pilot.Analysis.TypeSystem.PilotType.Void;
+                    if ((!scheme.HasExplicitReturnType || scheme.HasOpenErrorMarker) &&
+                        retPilotType.Kind != Pilot.Analysis.TypeSystem.PilotTypeKind.Any)
+                    {
+                        string retStr = FormatInferredTypeForSymbol(retPilotType);
+                        if (funcSymbol.TypeName is "void" or "any" ||
+                            funcSymbol.TypeName.Contains("any", StringComparison.Ordinal) ||
+                            scheme.HasOpenErrorMarker ||
+                            retPilotType.Kind == Pilot.Analysis.TypeSystem.PilotTypeKind.TypeVariable)
+                        {
+                            funcSymbol.TypeName = retStr;
+                        }
+                    }
+
+                    string paramListStr = string.Join(", ", funcSymbol.Parameters.Select(p => $"{p.Name}: {p.Type}"));
+                    string prefix = funcSymbol.IsPure ? "pure " : funcSymbol.IsAsync ? "async " : "";
+                    funcSymbol.Signature = $"{prefix}def {funcSymbol.Name}({paramListStr}) -> {funcSymbol.TypeName}";
+
+                    var callSites = analysisRes.MonomorphizedCallSites
+                        .Where(m => string.Equals(m.FunctionName, fnName, StringComparison.Ordinal))
+                        .ToList();
+                    if (callSites.Count > 0)
+                    {
+                        var specLines = callSites
+                            .Select(cs => $"- `{cs.FunctionName}({string.Join(", ", cs.ConcreteArgumentTypes.Select(FormatInferredTypeForSymbol))}) -> {FormatInferredTypeForSymbol(cs.SpecializedReturnType)}` (`{cs.MonomorphizedSymbol}`)")
+                            .Distinct()
+                            .ToList();
+                        if (!funcSymbol.Documentation.Contains("Monomorphized Call-Site Specializations:", StringComparison.Ordinal))
+                        {
+                            funcSymbol.Documentation = $"{funcSymbol.Documentation}\n\n**Monomorphized Call-Site Specializations:**\n{string.Join("\n", specLines)}";
+                        }
+
+                        foreach (var cs in callSites)
+                        {
+                            int zeroBasedLine = Math.Max(0, cs.Line - 1);
+                            string specRetStr = FormatInferredTypeForSymbol(cs.SpecializedReturnType);
+                            string specParamsStr = string.Join(", ", cs.ConcreteArgumentTypes.Select((t, idx) =>
+                                $"{(idx < scheme.ParameterNames.Count ? scheme.ParameterNames[idx] : $"arg{idx}")}: {FormatInferredTypeForSymbol(t)}"));
+                            string specSig = $"{prefix}def {funcSymbol.Name}({specParamsStr}) -> {specRetStr}";
+
+                            for (int rIdx = 0; rIdx < _result.References.Count; rIdx++)
+                            {
+                                var r = _result.References[rIdx];
+                                if (r.Line == zeroBasedLine &&
+                                    r.Line != funcSymbol.SelectionLine &&
+                                    string.Equals(r.Symbol.Name, fnName, StringComparison.Ordinal))
+                                {
+                                    var specializedSym = new PilotSymbol
+                                    {
+                                        Name = funcSymbol.Name,
+                                        Kind = funcSymbol.Kind,
+                                        TypeName = specRetStr,
+                                        IsPure = funcSymbol.IsPure,
+                                        IsAsync = funcSymbol.IsAsync,
+                                        IsStatic = funcSymbol.IsStatic,
+                                        Domain = funcSymbol.Domain,
+                                        SelectionLine = r.Line,
+                                        SelectionColumn = r.StartColumn,
+                                        SelectionEndColumn = r.EndColumn,
+                                        StartLine = funcSymbol.StartLine,
+                                        StartColumn = funcSymbol.StartColumn,
+                                        EndLine = funcSymbol.EndLine,
+                                        EndColumn = funcSymbol.EndColumn,
+                                        Signature = specSig,
+                                        Documentation = $"Compile-time monomorphized call-site specialization `{cs.MonomorphizedSymbol}` of `{funcSymbol.Signature}`."
+                                    };
+                                    _result.References[rIdx] = new PilotSymbolReference
+                                    {
+                                        Line = r.Line,
+                                        StartColumn = r.StartColumn,
+                                        EndColumn = r.EndColumn,
+                                        Symbol = specializedSym
+                                    };
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        SynchronizeScopeSymbols(_result.RootScope, analysisRes.InferredTypes);
+    }
+
+    private static void SynchronizeScopeSymbols(
+        PilotScope scope,
+        IReadOnlyDictionary<string, Pilot.Analysis.TypeSystem.PilotType> inferredTypes)
+    {
+        foreach (var sym in scope.Symbols.Values)
+        {
+            if (sym.Kind is PilotSymbolKind.Variable or PilotSymbolKind.Parameter)
+            {
+                string lookupKey = scope.Name.StartsWith("def:", StringComparison.Ordinal) && sym.Kind == PilotSymbolKind.Parameter
+                    ? $"{scope.Name["def:".Length..]}.{sym.Name}"
+                    : sym.Name;
+                if ((inferredTypes.TryGetValue(lookupKey, out var inferredType) ||
+                     inferredTypes.TryGetValue(sym.Name, out inferredType)) &&
+                    inferredType.Kind != Pilot.Analysis.TypeSystem.PilotTypeKind.Any &&
+                    inferredType.Kind != Pilot.Analysis.TypeSystem.PilotTypeKind.Void)
+                {
+                    string inferredStr = FormatInferredTypeForSymbol(inferredType);
+                    if (sym.TypeName is "any" or "void" or "unknown" ||
+                        sym.TypeName.Contains("any", StringComparison.Ordinal))
+                    {
+                        sym.TypeName = inferredStr;
+                        if (sym.Kind == PilotSymbolKind.Parameter)
+                        {
+                            sym.Signature = $"{sym.Name}: {inferredStr}";
+                        }
+                        else
+                        {
+                            string bindingKw = sym.IsConstant ? "const" : sym.IsMutable ? "var" : "let";
+                            sym.Signature = $"{bindingKw} {sym.Name}: {inferredStr}";
+                        }
+                    }
+                }
+            }
+        }
+
+        foreach (var child in scope.Children)
+        {
+            SynchronizeScopeSymbols(child, inferredTypes);
+        }
+    }
+
+    private static PilotSymbol? FindFunctionSymbol(PilotScope scope, string fnName)
+    {
+        if (scope.Symbols.TryGetValue(fnName, out var sym) && sym.Kind is PilotSymbolKind.Function or PilotSymbolKind.Method)
+            return sym;
+        foreach (var child in scope.Children)
+        {
+            var found = FindFunctionSymbol(child, fnName);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static PilotScope? FindFunctionScope(PilotScope scope, string scopeName)
+    {
+        if (string.Equals(scope.Name, scopeName, StringComparison.Ordinal))
+            return scope;
+        foreach (var child in scope.Children)
+        {
+            var found = FindFunctionScope(child, scopeName);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static string FormatInferredTypeForSymbol(Pilot.Analysis.TypeSystem.PilotType type)
+    {
+        if (type.Kind == Pilot.Analysis.TypeSystem.PilotTypeKind.Collection && type.TypeArguments.Count > 0)
+        {
+            return $"{type.Name}[{string.Join(", ", type.TypeArguments.Select(FormatInferredTypeForSymbol))}]";
+        }
+        if (type.Kind == Pilot.Analysis.TypeSystem.PilotTypeKind.Option && type.TypeArguments.Count == 1)
+        {
+            return $"{FormatInferredTypeForSymbol(type.TypeArguments[0])}?";
+        }
+        if (type.Kind == Pilot.Analysis.TypeSystem.PilotTypeKind.Union)
+        {
+            return string.Join(" | ", type.TypeArguments.Select(FormatInferredTypeForSymbol));
+        }
+        if (type.Kind == Pilot.Analysis.TypeSystem.PilotTypeKind.Tuple)
+        {
+            return $"({string.Join(", ", type.TypeArguments.Select(FormatInferredTypeForSymbol))})";
+        }
+        return type.ToString();
     }
 
     private void CheckUnusedVariables(PilotScope scope)
@@ -1091,11 +1379,15 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                     Visit(cc);
                 }
             }
-            if (context.suite() != null) Visit(context.suite());
+            string? suiteBodyType = context.suite() != null ? Visit(context.suite()) : null;
 
             if (!hasExplicitReturnType)
             {
                 var collected = _returnTypeCollectorStack.Pop();
+                if (collected.Count == 0 && !string.IsNullOrEmpty(suiteBodyType) && suiteBodyType != "void")
+                {
+                    collected.Add(suiteBodyType);
+                }
                 if (collected.Count > 0)
                 {
                     returnType = HomogenizeTypes(collected);
@@ -1420,6 +1712,8 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
         using (EnterScope($"extension:{extName}", context, enclosingType: symbol))
         {
+            RegisterGenericParams(context.generic_params(), symbol);
+            Visit(context.type_spec());
             if (context.where_type_clause() != null) Visit(context.where_type_clause());
             if (context.suite() != null) Visit(context.suite());
         }
@@ -2034,8 +2328,13 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         if (isBounded && context.test().Length > 1)
             Visit(context.test(1));
 
+        var suites = context.suite();
+        _loopYieldCollectorStack.Push(new List<string>());
+        _loopBreakCollectorStack.Push(new List<string>());
+        List<string> loopYields;
+        List<string> loopBreaks;
+
         using (EnterScope("for", context, inLoop: true, inAsync: isAsync || _currentScope.InAsync))
-        {
         {
             if (context.for_target() != null)
             {
@@ -2062,17 +2361,36 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                     }
                 }
             }
-            foreach (var s in context.suite()) Visit(s);
+            if (suites != null && suites.Length > 0)
+            {
+                Visit(suites[0]);
+            }
         }
+
+        loopYields = _loopYieldCollectorStack.Pop();
+        loopBreaks = _loopBreakCollectorStack.Pop();
+
+        if (suites != null && suites.Length > 1)
+        {
+            string? thenType = Visit(suites[1]);
+            if (!string.IsNullOrEmpty(thenType) && thenType != "void")
+            {
+                loopBreaks.Add(thenType);
+            }
         }
+
         var loopInfo = Pilot.Analysis.Loops.PilotForLoopAnalyzer.AnalyzeSingleLoop(context);
         if (loopInfo.ReturnMode == Pilot.Analysis.Loops.LoopReturnMode.CollectionYield)
         {
-            return "List[any]";
+            string yieldedElem = loopYields.Count > 0 ? HomogenizeTypes(loopYields) : "any";
+            return $"List[{yieldedElem}]";
         }
         if (loopInfo.ReturnMode == Pilot.Analysis.Loops.LoopReturnMode.ScalarBreak)
         {
-            return loopInfo.HasCompletionBranch ? "any" : "any?";
+            string breakType = loopBreaks.Count > 0 ? HomogenizeTypes(loopBreaks) : "any";
+            return loopInfo.HasCompletionBranch
+                ? breakType
+                : (breakType.EndsWith("?", StringComparison.Ordinal) ? breakType : $"{breakType}?");
         }
         return "void";
     }
@@ -2108,6 +2426,16 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                     PilotDiagnosticCatalog.LoopJumpOutsideLoop,
                     "'break' statement can only be used inside a loop ('for' or 'while').");
             }
+            if (context.test() is { Length: > 0 } bTests)
+            {
+                string bType = Visit(bTests[0]) ?? "any";
+                if (_loopBreakCollectorStack.Count > 0)
+                {
+                    _loopBreakCollectorStack.Peek().Add(bType);
+                }
+                for (int i = 1; i < bTests.Length; i++) Visit(bTests[i]);
+            }
+            return "void";
         }
         if (context.CONTINUE() != null)
         {
@@ -2118,6 +2446,11 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                     PilotDiagnosticCatalog.LoopJumpOutsideLoop,
                     "'continue' statement can only be used inside a loop ('for' or 'while').");
             }
+            if (context.test() != null)
+            {
+                foreach (var ct in context.test()) Visit(ct);
+            }
+            return "void";
         }
         if (context.RETURN() != null)
         {
@@ -2185,7 +2518,23 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                 }
                 p = p.Parent;
             }
-            if (!insideForExpr)
+
+            string yieldType = "any";
+            if (context.testlist()?.test() is { Length: > 0 } yTests)
+            {
+                yieldType = yTests.Length == 1
+                    ? (Visit(yTests[0]) ?? "any")
+                    : $"({string.Join(", ", yTests.Select(t => Visit(t) ?? "any"))})";
+            }
+
+            if (insideForExpr)
+            {
+                if (_loopYieldCollectorStack.Count > 0)
+                {
+                    _loopYieldCollectorStack.Peek().Add(yieldType);
+                }
+            }
+            else
             {
                 if (!_currentScope.InFunction)
                 {
@@ -2196,8 +2545,13 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                 else
                 {
                     _currentScope.IsGenerator = true;
+                    if (_returnTypeCollectorStack.Count > 0)
+                    {
+                        _returnTypeCollectorStack.Peek().Add(yieldType);
+                    }
                 }
             }
+            return "void";
         }
         if (context.RAISE() != null)
             AddSemanticToken(context.RAISE().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
@@ -2239,7 +2593,38 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             foreach (var notTok in context.NOT())
                 AddSemanticToken(notTok.Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
         }
-        return base.VisitComparison(context);
+        string? res = base.VisitComparison(context);
+        if (context.comp_op().Length > 0 || context.IS().Length > 0 || context.pattern().Length > 0)
+        {
+            return "bool";
+        }
+        return res;
+    }
+
+    public override string? VisitRange_expr(PilotParser.Range_exprContext context)
+    {
+        var bitors = context.bitor_expr();
+        if (bitors == null || bitors.Length == 0) return "any";
+        if (bitors.Length == 1) return Visit(bitors[0]);
+        foreach (var b in bitors) Visit(b);
+        return "Range[int]";
+    }
+
+    public override string? VisitTest(PilotParser.TestContext context)
+    {
+        var pipes = context.pipe_expr();
+        if (context.IF() != null && pipes != null && pipes.Length >= 2 && context.test() != null)
+        {
+            AddSemanticToken(context.IF().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+            if (context.ELSE() != null)
+                AddSemanticToken(context.ELSE().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+            string tTrue = Visit(pipes[0]) ?? "any";
+            Visit(pipes[1]);
+            string tFalse = Visit(context.test()) ?? "any";
+            var nonVoid = new[] { tTrue, tFalse }.Where(t => t is not ("void" or "any")).ToList();
+            return nonVoid.Count > 0 ? HomogenizeTypes(nonVoid) : tTrue;
+        }
+        return base.VisitTest(context);
     }
 
     public override string? VisitComp_op(PilotParser.Comp_opContext context)
@@ -2429,7 +2814,16 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             if (resolved != null)
             {
                 AddSymbolReference(firstId.Start, resolved);
-                AddSemanticToken(firstId.Start, GetSemanticTokenTypeForSymbol(resolved), 0);
+                int tokenType = resolved.Kind switch
+                {
+                    PilotSymbolKind.TypeParameter or PilotSymbolKind.Unit or PilotSymbolKind.TypeAlias => PilotSemanticTokenLegend.TypeTypeParameter,
+                    PilotSymbolKind.Struct => PilotSemanticTokenLegend.TypeStruct,
+                    PilotSymbolKind.Interface => PilotSemanticTokenLegend.TypeInterface,
+                    PilotSymbolKind.Enum => PilotSemanticTokenLegend.TypeEnum,
+                    PilotSymbolKind.Class or PilotSymbolKind.Actor or PilotSymbolKind.Model or PilotSymbolKind.Table => PilotSemanticTokenLegend.TypeClass,
+                    _ => PilotSemanticTokenLegend.TypeType
+                };
+                AddSemanticToken(firstId.Start, tokenType, 0);
             }
             else if (IsBuiltinType(typeName))
             {
@@ -2521,6 +2915,34 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                         currentType = memberSym.TypeName;
                         continue;
                     }
+
+                    if (baseTypeName.StartsWith("SliceBuffer", StringComparison.OrdinalIgnoreCase) ||
+                        baseTypeName.StartsWith("SharedBuffer", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (memberName is "data_ptr" or "len" or "length" or "capacity" or "element_size" or "byte_length" or "abi_header_size" or "managed_list_allocations")
+                        {
+                            AddSemanticToken(memberId.Start, PilotSemanticTokenLegend.TypeProperty, 0);
+                            currentType = "int";
+                            continue;
+                        }
+                        if (memberName == "is_shared_memory")
+                        {
+                            AddSemanticToken(memberId.Start, PilotSemanticTokenLegend.TypeProperty, 0);
+                            currentType = "bool";
+                            continue;
+                        }
+                        if (memberName == "shared_name")
+                        {
+                            AddSemanticToken(memberId.Start, PilotSemanticTokenLegend.TypeProperty, 0);
+                            currentType = "str";
+                            continue;
+                        }
+                        if (memberName is "open_view" or "slice")
+                        {
+                            AddSemanticToken(memberId.Start, PilotSemanticTokenLegend.TypeMethod, 0);
+                            continue;
+                        }
+                    }
                 }
 
                 // Check Root Object Methods
@@ -2561,6 +2983,42 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             else
             {
                 Visit(trailer);
+                if (trailer.call_quote_op() != null)
+                {
+                    var quoteKind = Pilot.Analysis.CallQuoting.PilotCallQuotingEngine.GetCallQuoteKind(trailer);
+                    string innerRet = currentType ?? "any";
+                    currentType = quoteKind switch
+                    {
+                        Pilot.Analysis.CallQuoting.CallQuoteKind.ShallowQuote => $"CallExpr[{innerRet}]",
+                        Pilot.Analysis.CallQuoting.CallQuoteKind.DeepSplice => $"AstExpr[{innerRet}]",
+                        Pilot.Analysis.CallQuoting.CallQuoteKind.AbiFrame => $"CallFrame_{funcName ?? "Anonymous"}",
+                        Pilot.Analysis.CallQuoting.CallQuoteKind.ReactiveSignal => $"Signal[{innerRet}]",
+                        Pilot.Analysis.CallQuoting.CallQuoteKind.SymbolicAdjoint => $"Pullback[{innerRet}]",
+                        Pilot.Analysis.CallQuoting.CallQuoteKind.EffectDryRun => $"DryRunPlan[{innerRet}]",
+                        _ => innerRet
+                    };
+                }
+                else if (trailer.LPAR() != null && funcName is "shared_buffer" or "slice_buffer" or "mmap_buffer")
+                {
+                    string elemType = "f64";
+                    var args = trailer.arglist()?.argument();
+                    if (args != null)
+                    {
+                        foreach (var a in args)
+                        {
+                            string txt = a.GetText().Trim();
+                            if (txt.StartsWith(':'))
+                            {
+                                string sym = txt.TrimStart(':').ToLowerInvariant();
+                                if (sym is "f64" or "float" or "f32" or "i64" or "int" or "i32" or "u8" or "byte")
+                                {
+                                    elemType = sym;
+                                }
+                            }
+                        }
+                    }
+                    currentType = $"SliceBuffer[{elemType}]";
+                }
             }
         }
 
@@ -2710,9 +3168,12 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
     public override string? VisitSymbol_literal(PilotParser.Symbol_literalContext context)
     {
-        if (context.identifier() != null)
+        if (context.identifier() is { Length: > 0 } ids)
         {
-            AddSemanticToken(context.identifier().Start, PilotSemanticTokenLegend.TypeString, 0);
+            foreach (var id in ids)
+            {
+                AddSemanticToken(id.Start, PilotSemanticTokenLegend.TypeEnumMember, PilotSemanticTokenLegend.ModReadonly);
+            }
         }
         if (context.test() != null)
         {
@@ -2939,6 +3400,10 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             var elemTypes = context.testlist_comp().test().Select(t => Visit(t) ?? "any");
             return $"({string.Join(", ", elemTypes)})";
         }
+        if (context.LPAR() != null && context.testlist_comp()?.test() is { Length: 1 } singleParen && context.testlist_comp().COMMA().Length == 0)
+        {
+            return Visit(singleParen[0]);
+        }
 
         if (context.if_stmt() is { } ifExpr)
         {
@@ -3085,18 +3550,29 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             return true;
         }
 
-        // Generic containers: list[int] vs List[any]
+        // Generic containers: list[int] vs List[any], plus SliceBuffer[T] / SharedBuffer[T] zero-marshalling CollectionYield targets
+        if ((targetType.Equals("SliceBuffer", StringComparison.OrdinalIgnoreCase) || targetType.Equals("SharedBuffer", StringComparison.OrdinalIgnoreCase)) &&
+            (valueType.StartsWith("List[", StringComparison.OrdinalIgnoreCase) ||
+             valueType.StartsWith("SliceBuffer", StringComparison.OrdinalIgnoreCase) ||
+             valueType.StartsWith("SharedBuffer", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
         int targetBracket = targetType.IndexOf('[');
         int valueBracket = valueType.IndexOf('[');
         if (targetBracket > 0 && valueBracket > 0)
         {
             string tBase = targetType[..targetBracket];
             string vBase = valueType[..valueBracket];
-            if (string.Equals(tBase, vBase, StringComparison.OrdinalIgnoreCase))
+            bool sameOrSliceYield =
+                string.Equals(tBase, vBase, StringComparison.OrdinalIgnoreCase) ||
+                ((tBase.Equals("SliceBuffer", StringComparison.OrdinalIgnoreCase) || tBase.Equals("SharedBuffer", StringComparison.OrdinalIgnoreCase)) &&
+                 (vBase.Equals("List", StringComparison.OrdinalIgnoreCase) || vBase.Equals("SliceBuffer", StringComparison.OrdinalIgnoreCase) || vBase.Equals("SharedBuffer", StringComparison.OrdinalIgnoreCase)));
+            if (sameOrSliceYield)
             {
                 string tElem = ExtractElementType(targetType);
                 string vElem = ExtractElementType(valueType);
-                if (tElem == "any" || IsCompatibleType(tElem, vElem))
+                if (tElem == "any" || vElem == "any" || IsCompatibleType(tElem, vElem))
                     return true;
             }
         }
@@ -3201,14 +3677,29 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                     new[] { action });
             }
         }
+        if (smallStmts != null && smallStmts.Length > 0)
+        {
+            string? lastRes = null;
+            foreach (var sm in smallStmts)
+            {
+                string? r = Visit(sm);
+                if (r != null) lastRes = r;
+            }
+            return lastRes;
+        }
         return base.VisitSimple_stmt(context);
     }
 
     public override string? VisitSuite(PilotParser.SuiteContext context)
     {
-        var stmts = context.stmt();
-        if (stmts != null && stmts.Length > 1)
+        if (context.simple_stmt() != null)
         {
+            return Visit(context.simple_stmt());
+        }
+        var stmts = context.stmt();
+        if (stmts != null && stmts.Length > 0)
+        {
+            string? lastType = "void";
             bool hasExited = false;
             for (int i = 0; i < stmts.Length; i++)
             {
@@ -3234,13 +3725,13 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                             new[] { action });
                     }
                 }
-                Visit(stmt);
+                lastType = Visit(stmt) ?? lastType;
                 if (!hasExited && StmtGuaranteesExit(stmt))
                 {
                     hasExited = true;
                 }
             }
-            return "void";
+            return lastType;
         }
         return base.VisitSuite(context);
     }
@@ -3700,8 +4191,8 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
         if (node is PilotParser.Keyword_patternContext kwPat)
         {
-            if (kwPat.symbol_literal()?.identifier() is { } kwId)
-                AddSemanticToken(kwId.Start, PilotSemanticTokenLegend.TypeString, 0);
+            if (kwPat.symbol_literal() is { } symLit)
+                VisitSymbol_literal(symLit);
             foreach (var arg in kwPat.pattern_arg())
             {
                 if (arg.pattern() != null)
@@ -4359,13 +4850,25 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             return collectionType[..^2].Trim();
         }
 
-        int start = collectionType.IndexOf('[');
-        int end = collectionType.LastIndexOf(']');
+        if (collectionType.Equals("range", StringComparison.OrdinalIgnoreCase))
+        {
+            return "int";
+        }
+        if (collectionType.Equals("str", StringComparison.OrdinalIgnoreCase) ||
+            collectionType.Equals("string", StringComparison.OrdinalIgnoreCase))
+        {
+            return "str";
+        }
+
+        int start = collectionType.IndexOfAny(new[] { '[', '<' });
+        int end = collectionType.LastIndexOfAny(new[] { ']', '>' });
         if (start > 0 && end > start + 1)
         {
             string inner = collectionType[(start + 1)..end].Trim();
             if (collectionType.StartsWith("Dict[", StringComparison.OrdinalIgnoreCase) ||
-                collectionType.StartsWith("Map[", StringComparison.OrdinalIgnoreCase))
+                collectionType.StartsWith("Dict<", StringComparison.OrdinalIgnoreCase) ||
+                collectionType.StartsWith("Map[", StringComparison.OrdinalIgnoreCase) ||
+                collectionType.StartsWith("Map<", StringComparison.OrdinalIgnoreCase))
             {
                 var (_, val) = ExtractDictTypes(collectionType);
                 return val;

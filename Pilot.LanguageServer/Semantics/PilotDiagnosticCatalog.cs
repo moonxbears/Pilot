@@ -185,6 +185,31 @@ public static class PilotDiagnosticCatalog
     public const string InvalidForLoopThenBranch = "LOOP003";
     public const string YieldInStatementForLoopOutsideGenerator = "LOOP004";
 
+    // =========================================================================
+    // TYPE Series: Bidirectional, Flow-Sensitive & Row-Polymorphic Inference (Milestone 16)
+    // =========================================================================
+    public const string BidirectionalConstraintMismatch = "TYPE001";
+    public const string CollectionElementMismatch = "TYPE002";
+    public const string InfiniteTypeOccursCheck = "TYPE003";
+    public const string LambdaReturnMismatch = "TYPE004";
+    public const string LambdaParameterArityMismatch = "TYPE005";
+    public const string MethodGroupOverloadMismatch = "TYPE006";
+    public const string RecursiveReturnUnificationMismatch = "TYPE007";
+    public const string MissingStructuralRowField = "TYPE008";
+    public const string IncompatibleRowFieldType = "TYPE009";
+    public const string ClosedRowExtraField = "TYPE010";
+    public const string TypeClassConstraintViolation = "TYPE011";
+    public const string TypestateTransitionMismatch = "TYPE012";
+
+    // =========================================================================
+    // QUOTE Series: Homoiconic Call-Quoting & Multi-Modal Projection (Milestone 17)
+    // =========================================================================
+    public const string MissingWhiteBoxAstForDeepSplice = "QUOTE001";
+    public const string InvalidUnquotePrefixOutsideDeepSplice = "QUOTE002";
+    public const string NonUnmanagedParameterInAbiCallFrame = "QUOTE003";
+    public const string NondifferentiableAdjointCallQuote = "QUOTE004";
+    public const string UnhandledEffectInDryRunQuote = "QUOTE005";
+
     private static readonly Dictionary<string, PilotDiagnosticDescriptor> Descriptors = new(StringComparer.Ordinal);
 
     static PilotDiagnosticCatalog()
@@ -292,6 +317,20 @@ public static class PilotDiagnosticCatalog
         Register(new(MixedVoidAndValuedBreakInForLoop, "Cannot mix 'break;' and 'break <expr>;' in same for loop", "ControlFlow", PilotDiagnosticSeverity.Error, "Cannot mix valueless 'break;' and valued 'break <expr>;' in the same 'for' loop.", "All 'break' statements targeting a 'ScalarBreak' loop must provide a value expression.", "Provide a value for every 'break' in this loop"));
         Register(new(InvalidForLoopThenBranch, "Loop completion 'then' branch is only valid with ScalarBreak", "ControlFlow", PilotDiagnosticSeverity.Error, "Loop completion 'then' branch is only valid on a ScalarBreak 'for' loop (containing 'break <expr>').", "A 'then <expr>' completion value branch provides the fallback scalar value when a loop finishes without 'break <expr>', and cannot be combined with 'CollectionYield' or 'Void' loops.", "Remove 'then' branch or use 'break <expr>'"));
         Register(new(YieldInStatementForLoopOutsideGenerator, "'yield <expr>' in statement-position for loop outside generator", "ControlFlow", PilotDiagnosticSeverity.Error, "'yield <expr>' inside a statement-position 'for' loop is invalid outside of a generator function. Assign or return the 'for' expression to use CollectionYield.", "In statement position, 'yield' delegates to an enclosing coroutine generator 'def'. To build a collection from a 'for' loop, use the 'for' loop in an expression position.", "Assign the 'for' loop result to a variable"));
+
+        // TYPE Series: Milestone 16 Bidirectional, Flow-Sensitive & Row-Polymorphic Type Inference (TYPE001–TYPE025)
+        for (int i = 1; i <= 25; i++)
+        {
+            string code = $"TYPE{i:D3}";
+            Register(new(code, $"Type constraint violation ({code})", "TypeSystem", PilotDiagnosticSeverity.Error, "{0}", "Bidirectional, row-polymorphic, or flow-sensitive type unification constraint failed with provenance tracking."));
+        }
+
+        // QUOTE Series: Milestone 17 Homoiconic Call-Quoting & Multi-Modal Projection (QUOTE001–QUOTE005)
+        Register(new(MissingWhiteBoxAstForDeepSplice, "Deep-splice call quote requires white-box AST body", "CallQuoting", PilotDiagnosticSeverity.Error, "Cannot deep-splice '{0}!!(...)': target function '{0}' is an external FFI or native intrinsic without a white-box Pilot AST body.", "Deep-splicing ('fn!!(...)') requires a white-box Pilot function AST body to clone, alpha-rename, and constant-fold.", "Use shallow call quote 'fn!(...)' instead"));
+        Register(new(InvalidUnquotePrefixOutsideDeepSplice, "Unquote prefix '~' is only valid inside 'fn!!(...)'", "CallQuoting", PilotDiagnosticSeverity.Error, "Unquote prefix '~' on argument '{0}' is only valid inside a deep-splice call quote 'fn!!(...)'.", "Quasiquoted unquote arguments ('~arg') evaluate eagerly in caller scope and splice into a deep-quoted 'fn!!(...)' AST.", "Remove '~' or change call to 'fn!!(...)'"));
+        Register(new(NonUnmanagedParameterInAbiCallFrame, "ABI Call-Frame requires unmanaged / repr(C) parameter layout", "CallQuoting", PilotDiagnosticSeverity.Error, "ABI Call-Frame '{0}!&(...)' requires unmanaged / repr(C) parameter layouts, but parameter '{1}' has type '{2}'.", "Zero-allocation C-ABI call frames ('fn!&(...)') pack arguments into a sequential struct and forbid managed heap references.", "Use unmanaged scalar/struct types or 'fn!(...)'"));
+        Register(new(NondifferentiableAdjointCallQuote, "Symbolic adjoint call quote requires differentiable body", "CallQuoting", PilotDiagnosticSeverity.Error, "Symbolic adjoint '{0}!@(...)' requires a differentiable function body.", "Reverse-mode symbolic differentiation ('fn!@(...)') requires differentiable operations."));
+        Register(new(UnhandledEffectInDryRunQuote, "Invalid effect dry-run call quote", "CallQuoting", PilotDiagnosticSeverity.Error, "Effect dry-run '{0}!?(...)' requires an interceptable function.", "Algebraic effect dry-run ('fn!?(...)') intercepts I/O, DB, and concurrency effects."));
     }
 
     public static PilotDiagnosticDescriptor? GetDescriptor(string code) =>

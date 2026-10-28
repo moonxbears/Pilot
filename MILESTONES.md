@@ -83,8 +83,8 @@ flowchart TD
 | **M13** | Values-First Error System (Transparent, Localized, Must-Use `T ! E`) | Phase A | ✅ **Completed** | `antlr/Pilot.g4`, `Analysis/TypeSystem/`, `Runtime/Execution/` |
 | **M14** | Unified Expression Ergonomics, Class-Like Literals & Zero-Cost `extend` | Phase A | ✅ **Completed** | `antlr/Pilot.g4`, `Runtime/Values/PilotValue.cs`, `Compiler/` |
 | **M15** | Dynamic-Schedule `for` Expressions & Zero-Marshalling C-ABI Guarantees | Phase A | ✅ **Completed** | `antlr/Pilot.g4`, `Analysis/Loops/`, `Runtime/NativeMemory/`, `Native/` |
-| **M16** | Advanced Type Inference (Bidirectional, Flow-Narrowing & Row Polymorphism) | Phase B | 🎯 **Next Up** | `Analysis/TypeSystem/`, `Pilot.LanguageServer/` |
-| **M17** | First-Class Keywords, Reified Forms & Core Call-Quoting (`:kw`, `!`, `!!`, `~`, `!&`) | Phase B | 📋 **Planned** | `Runtime/Values/PilotKeyword.cs`, `Analysis/CallQuoting/`, `Native/` |
+| **M16** | Advanced Type Inference (Bidirectional, Flow-Narrowing & Row Polymorphism) | Phase B | ✅ **Completed** | `Analysis/TypeSystem/`, `Pilot.LanguageServer/` |
+| **M17** | First-Class Keywords, Reified Forms & Core Call-Quoting (`:kw`, `!`, `!!`, `~`, `!&`) | Phase B | 🎯 **Next Up** | `Runtime/Values/PilotKeyword.cs`, `Analysis/CallQuoting/`, `Native/` |
 | **M18** | Semantic Call Projections: Signals (`!^`), Autodiff (`!@`) & Dry-Runs (`!?`) | Phase B | 📋 **Planned** | `Analysis/Autodiff/`, `Runtime/Reactive/`, `Runtime/Effects/` |
 | **M19** | Rigorous Runtime-to-Compile-Time Demotion & `comptime` Audit | Phase B | 📋 **Planned** | `Analysis/Comptime/`, `Compiler/`, `Transpilation/PilotOptimizer.cs` |
 | **M20** | Accurate Bidirectional Language Transpilation & Library Ingestion (`--emit` / `--from`) | Phase C | 📋 **Planned** | `Transpilation/`, `Formatting/PilotFormatter.cs`, `Cli/Program.cs` |
@@ -469,17 +469,17 @@ public unsafe struct SliceBuffer<T> where T : unmanaged
 Synthesizing C-ABI `CallFrame` structs (`M17` `!&`), checking `IDifferentiable` ASTs (`M18` `!@`), and demoting runtime lookups to static offsets (`M19`) all require concrete parameter, field, and return types to be inferred *first*.
 
 ### Sub-Tasks & Deliverables
-- [ ] **16.1: Bidirectional Type Synthesis & Top-Down Checking (`PilotBidirectionalInferencer.cs`)**
+- [x] **16.1: Bidirectional Type Synthesis & Top-Down Checking (`PilotBidirectionalInferencer.cs`)**
   - Propagate expected types top-down from bindings, call parameters, return signatures, and ADT constructors into unannotated multi-statement lambdas (`users.Filter(u => u.Age >= 21).Map(u => u.Name)`), overloaded `PilotMethodGroup` calls, empty literals (`[]`, `{}`), and `if`/`match`/`for` expressions.
   - Solve recursive and mutually recursive function return types and inferred `! ErrorSet` unions via Tarjan SCC fixed-point unification.
-- [ ] **16.2: Dominator-Based Control-Flow Type Narrowing (Flow-Sensitive Typing)**
+- [x] **16.2: Dominator-Based Control-Flow Type Narrowing (Flow-Sensitive Typing)**
   - Narrow types across `if`, `else`, `guard ... else`, `match`, `&&`, `||`, and early `return`/`break`/`continue`:
     - `guard some x else` / `if x != none` narrows `x: T?` $\rightarrow$ `T`.
     - `if val is Circle(r)` narrows `A | B` $\rightarrow$ `A` in `then` and `B` in `else`.
     - Track typestate transitions (`Conn[Closed]` $\rightarrow$ `Conn[Open]`) across branching control-flow graphs.
-- [ ] **16.3: Structural Row Polymorphism & Compile-Time Monomorphization**
+- [x] **16.3: Structural Row Polymorphism & Compile-Time Monomorphization**
   - Infer principal structural row constraints on unannotated parameters (`def area(s) => s.width * s.height;` infers `{ width: T, height: T, ..R } where T: Numeric`) and monomorphize call sites to fixed field offsets.
-- [ ] **16.4: Constraint-Provenance Diagnostics & VS Code LSP Inlay Hints**
+- [x] **16.4: Constraint-Provenance Diagnostics & VS Code LSP Inlay Hints**
   - Attach exact AST source spans to every unification constraint for crystal-clear mismatch explanations (`TYPE001`–`TYPE025`) and expose LSP `textDocument/inlayHint` for inferred types and error sets.
 
 ---

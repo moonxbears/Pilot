@@ -84,6 +84,7 @@ public readonly struct PilotValue : IEquatable<PilotValue>
     public static PilotValue FromMethodGroup(PilotMethodGroup mg) => new(PilotValueKind.MethodGroup, mg, 0, 0);
     public static PilotValue FromNativeArray(Pilot.Runtime.NativeMemory.PilotNativeArray na) => new(PilotValueKind.NativeArray, na, 0, 0);
     public static PilotValue FromNativeMap(Pilot.Runtime.NativeMemory.PilotNativeMap nm) => new(PilotValueKind.NativeMap, nm, 0, 0);
+    public static PilotValue FromSliceBuffer(Pilot.Runtime.NativeMemory.PilotSharedBuffer sb) => new(PilotValueKind.SliceBuffer, sb, 0, 0);
     public static PilotValue FromAdtType(PilotAdtDefinition adtDef) => new(PilotValueKind.AdtType, adtDef, 0, 0);
     public static PilotValue FromAdtUnit(PilotAdtVariantDefinition variantDef) => new(PilotValueKind.Adt, variantDef, 0, 0);
     public static PilotValue FromAdtBoxed(PilotAdtInstance instance) => new(PilotValueKind.Adt, instance, instance.Variant.Tag, 0);
@@ -179,6 +180,7 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             IReadOnlyList<PilotValue> tup => FromTuple(tup),
             Dictionary<PilotValue, PilotValue> map => FromMap(map),
             HashSet<PilotValue> set => FromSet(set),
+            Pilot.Runtime.NativeMemory.PilotSharedBuffer sb => FromSliceBuffer(sb),
             decimal dec => FromDecimal(dec),
             PilotNestedSomeSentinel => new PilotValue(PilotValueKind.Foreign, _reference, _integer, _floating),
             _ => new PilotValue(PilotValueKind.Foreign, _reference, _integer, _floating)
@@ -243,6 +245,7 @@ public readonly struct PilotValue : IEquatable<PilotValue>
         PilotValueKind.Map => ((Dictionary<PilotValue, PilotValue>)_reference!).Count > 0,
         PilotValueKind.Set => ((HashSet<PilotValue>)_reference!).Count > 0,
         PilotValueKind.Range => ((PilotRange)_reference!).Count > 0,
+        PilotValueKind.SliceBuffer => ((Pilot.Runtime.NativeMemory.PilotSharedBuffer)_reference!).Length > 0,
         PilotValueKind.Null or PilotValueKind.Undefined or PilotValueKind.Failure => false,
         _ => true
     };
@@ -290,6 +293,7 @@ public readonly struct PilotValue : IEquatable<PilotValue>
     public PilotMethodGroup AsMethodGroup() => _reference as PilotMethodGroup ?? throw new InvalidCastException($"Expected MethodGroup, got {Kind}");
     public Pilot.Runtime.NativeMemory.PilotNativeArray AsNativeArray() => _reference as Pilot.Runtime.NativeMemory.PilotNativeArray ?? throw new InvalidCastException($"Expected NativeArray, got {Kind}");
     public Pilot.Runtime.NativeMemory.PilotNativeMap AsNativeMap() => _reference as Pilot.Runtime.NativeMemory.PilotNativeMap ?? throw new InvalidCastException($"Expected NativeMap, got {Kind}");
+    public Pilot.Runtime.NativeMemory.PilotSharedBuffer AsSliceBuffer() => _reference as Pilot.Runtime.NativeMemory.PilotSharedBuffer ?? throw new InvalidCastException($"Expected SliceBuffer, got {Kind}");
     public object? AsForeign() => _reference;
 
     public bool IsUnboxedInline =>
@@ -642,6 +646,17 @@ public readonly struct PilotValue : IEquatable<PilotValue>
                 var nm = (Pilot.Runtime.NativeMemory.PilotNativeMap)_reference!;
                 return nm.Get(index);
             }
+            if (Kind == PilotValueKind.SliceBuffer)
+            {
+                var sb = (Pilot.Runtime.NativeMemory.PilotSharedBuffer)_reference!;
+                if (index.Kind == PilotValueKind.Range)
+                {
+                    var r = index.AsRange();
+                    if (r.Step == 1)
+                        return FromSliceBuffer(sb.SliceView((int)r.Start, (int)r.Count));
+                }
+                return sb.GetElement((int)index.AsInt());
+            }
             if (Kind == PilotValueKind.String)
             {
                 string s = (string)_reference!;
@@ -668,6 +683,11 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             {
                 var nm = (Pilot.Runtime.NativeMemory.PilotNativeMap)_reference!;
                 nm.Set(index, value);
+            }
+            else if (Kind == PilotValueKind.SliceBuffer)
+            {
+                var sb = (Pilot.Runtime.NativeMemory.PilotSharedBuffer)_reference!;
+                sb.SetElement((int)index.AsInt(), value);
             }
             else if (Kind == PilotValueKind.List)
             {
@@ -752,6 +772,46 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             };
         }
 
+        if (Kind == PilotValueKind.Keyword)
+        {
+            var kw = (PilotKeyword)_reference!;
+            return memberName switch
+            {
+                "name" or "Name" => FromString(kw.Name),
+                "namespace" or "Namespace" => kw.Namespace != null ? FromString(kw.Namespace) : Null,
+                "full_name" or "FullName" => FromString(kw.FullName),
+                "is_special_form" or "IsSpecialForm" => FromBool(kw.IsSpecialForm),
+                "parents" or "Parents" => FromList(kw.GetParents().Select(FromKeyword).ToList()),
+                "ancestors" or "Ancestors" => FromList(kw.GetAncestors().Select(FromKeyword).ToList()),
+                "descendants" or "Descendants" => FromList(kw.GetDescendants().Select(FromKeyword).ToList()),
+                "derive" or "Derive" => FromFunction(PilotFunction.CreateNative(memberName, (_, a) =>
+                {
+                    if (a.Count > 0 && a[0].Kind == PilotValueKind.Keyword)
+                    {
+                        kw.Derive(a[0].AsKeyword());
+                    }
+                    return FromKeyword(kw);
+                }, "parent")),
+                "underive" or "Underive" => FromFunction(PilotFunction.CreateNative(memberName, (_, a) =>
+                {
+                    if (a.Count > 0 && a[0].Kind == PilotValueKind.Keyword)
+                    {
+                        kw.Underive(a[0].AsKeyword());
+                    }
+                    return FromKeyword(kw);
+                }, "parent")),
+                "is_a" or "IsA" or "isa" => FromFunction(PilotFunction.CreateNative(memberName, (_, a) =>
+                {
+                    if (a.Count > 0 && a[0].Kind == PilotValueKind.Keyword)
+                    {
+                        return FromBool(kw.IsA(a[0].AsKeyword()));
+                    }
+                    return False;
+                }, "parent")),
+                _ => ResolveExtensionOrRoot(memberName, context)
+            };
+        }
+
         if (Kind == PilotValueKind.KeywordVariant)
         {
             var kv = (PilotKeywordVariant)_reference!;
@@ -793,6 +853,13 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             }
             if (memberName == "patch_version") return FromInt(fn.PatchVersion);
             if (memberName == "signature") return FromString(fn.GetSignatureKey());
+            if (memberName is "name" or "Name") return FromString(fn.Name);
+            if (memberName is "is_macro" or "IsMacro" or "is_special_form" or "IsSpecialForm") return FromBool(fn.IsMacro);
+            if (memberName is "check" or "Check" or "matches" or "Matches")
+            {
+                return FromFunction(PilotFunction.CreateNative(memberName, (ctx, a) =>
+                    FromBool(a.Count > 0 && PilotMethodGroup.MatchesSingleTypeFunction(fn, a[0], ctx)), "value"));
+            }
             if (fn.ClassDef != null)
             {
                 if (fn.ClassDef.MethodGroups.TryGetValue(memberName, out var mg))
@@ -828,8 +895,10 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             var mg = (PilotMethodGroup)_reference!;
             return memberName switch
             {
-                "overloads" => FromList(mg.GetOverloadValues()),
-                "name" => FromString(mg.Name),
+                "overloads" or "Overloads" => FromList(mg.GetOverloadValues()),
+                "name" or "Name" => FromString(mg.Name),
+                "check" or "Check" or "matches" or "Matches" => FromFunction(PilotFunction.CreateNative(memberName, (ctx, args) =>
+                    FromBool(args.Count > 0 && mg.MatchesReifiedType(args[0], ctx)), "value")),
                 "broadcast" => FromFunction(PilotFunction.CreateNative(memberName, (ctx, args) =>
                 {
                     return mg.Invoke(ctx, args, null, isBroadcast: true);
@@ -839,6 +908,82 @@ public readonly struct PilotValue : IEquatable<PilotValue>
         }
 
         // Collection methods
+        if (Kind == PilotValueKind.SliceBuffer)
+        {
+            var sb = (Pilot.Runtime.NativeMemory.PilotSharedBuffer)_reference!;
+            return memberName switch
+            {
+                "length" or "Length" or "count" or "Count" => FromInt(sb.Length),
+                "capacity" or "Capacity" => FromInt(sb.Capacity),
+                "is_empty" or "IsEmpty" => FromBool(sb.Length == 0),
+                "data_ptr" or "DataPtr" or "ptr" => FromInt((long)sb.DataPointer),
+                "header_ptr" or "HeaderPtr" => FromInt((long)sb.HeaderPointer),
+                "abi_header_size" or "AbiHeaderSize" => FromInt(24),
+                "stride" or "Stride" or "elem_size" => FromInt(sb.Stride),
+                "byte_length" or "ByteLength" => FromInt(sb.ByteLength),
+                "byte_capacity" or "ByteCapacity" => FromInt(sb.ByteCapacity),
+                "elem_type" or "ElementType" => FromString(sb.ElementTypeName),
+                "is_zero_copy" or "IsZeroCopy" => True,
+                "is_shared_mmap" or "IsSharedMmap" or "is_shared" => FromBool(sb.IsSharedMmap),
+                "managed_list_allocations" or "ManagedListAllocations" => FromInt(sb.ManagedListAllocations),
+                "direct_yield_writes" or "DirectYieldWrites" => FromInt(sb.DirectYieldWrites),
+                "backing_path" or "BackingPath" => sb.BackingPath != null ? FromString(sb.BackingPath) : Null,
+                "open_view" or "OpenView" or "remap_view" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    int? lenOverride = args.Count > 0 ? (int)args[0].AsInt() : null;
+                    return FromSliceBuffer(sb.OpenIndependentView(lenOverride));
+                }, "length")),
+                "slice" or "Slice" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    int start = args.Count > 0 ? (int)args[0].AsInt() : 0;
+                    int len = args.Count > 1 ? (int)args[1].AsInt() : Math.Max(0, sb.Length - start);
+                    return FromSliceBuffer(sb.SliceView(start, len));
+                }, "start", "length")),
+                "ensure_shared" or "EnsureShared" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    string? name = args.Count > 0 ? args[0].ToString() : null;
+                    return FromString(sb.EnsureSharedMapping(name));
+                }, "name")),
+                "reset" or "Reset" or "clear" or "Clear" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) =>
+                {
+                    sb.ResetLength();
+                    return Null;
+                })),
+                "yield_push" or "append" or "Append" or "push" or "Push" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    for (int i = 0; i < args.Count; i++) sb.YieldElement(args[i]);
+                    return Null;
+                }, "val")),
+                "fill" or "Fill" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    if (args.Count > 0)
+                    {
+                        int? cnt = args.Count > 1 ? (int)args[1].AsInt() : null;
+                        sb.Fill(args[0], cnt);
+                    }
+                    return Null;
+                }, "val", "count")),
+                "sum" or "Sum" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => sb.Sum())),
+                "scale" or "Scale" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    if (args.Count > 0) sb.ScaleInPlace(args[0].AsFloat());
+                    return Null;
+                }, "factor")),
+                "flush" or "Flush" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) =>
+                {
+                    sb.Flush();
+                    return Null;
+                })),
+                "to_list" or "ToList" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => FromList(sb.ToPilotValueList()))),
+                "dispose" or "Dispose" or "close" or "Close" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) =>
+                {
+                    sb.Dispose();
+                    return Null;
+                })),
+                _ => ResolveExtensionOrRoot(memberName, context)
+            };
+        }
+
         if (Kind == PilotValueKind.NativeArray)
         {
             var na = (Pilot.Runtime.NativeMemory.PilotNativeArray)_reference!;
@@ -1704,6 +1849,47 @@ public readonly struct PilotValue : IEquatable<PilotValue>
                 }
                 break;
             }
+
+            case PilotValueKind.Keyword:
+            {
+                var kw = receiver.AsKeyword();
+                switch (memberName)
+                {
+                    case "derive" or "Derive" when argc >= 1 && args[0].Kind == PilotValueKind.Keyword:
+                        kw.Derive(args[0].AsKeyword());
+                        result = receiver;
+                        return true;
+                    case "underive" or "Underive" when argc >= 1 && args[0].Kind == PilotValueKind.Keyword:
+                        kw.Underive(args[0].AsKeyword());
+                        result = receiver;
+                        return true;
+                    case "is_a" or "IsA" or "isa" when argc >= 1 && args[0].Kind == PilotValueKind.Keyword:
+                        result = FromBool(kw.IsA(args[0].AsKeyword()));
+                        return true;
+                    case "parents" or "Parents" when argc == 0:
+                        result = FromList(kw.GetParents().Select(FromKeyword).ToList());
+                        return true;
+                    case "ancestors" or "Ancestors" when argc == 0:
+                        result = FromList(kw.GetAncestors().Select(FromKeyword).ToList());
+                        return true;
+                    case "descendants" or "Descendants" when argc == 0:
+                        result = FromList(kw.GetDescendants().Select(FromKeyword).ToList());
+                        return true;
+                }
+                break;
+            }
+
+            case PilotValueKind.MethodGroup:
+            {
+                var mg = receiver.AsMethodGroup();
+                switch (memberName)
+                {
+                    case "check" or "Check" or "matches" or "Matches" when argc >= 1:
+                        result = FromBool(mg.MatchesReifiedType(args[0], context));
+                        return true;
+                }
+                break;
+            }
         }
 
         // Check active extensions directly without allocating a bound wrapper closure
@@ -1913,6 +2099,10 @@ public readonly struct PilotValue : IEquatable<PilotValue>
                 return (char)_integer == other.AsString()[0];
             if (Kind == PilotValueKind.String && AsString().Length == 1 && other.Kind == PilotValueKind.Char)
                 return AsString()[0] == (char)other._integer;
+            if (Kind == PilotValueKind.SliceBuffer && other.Kind == PilotValueKind.List)
+                return EqualsList(((Pilot.Runtime.NativeMemory.PilotSharedBuffer)_reference!).ToPilotValueList(), (List<PilotValue>)other._reference!);
+            if (Kind == PilotValueKind.List && other.Kind == PilotValueKind.SliceBuffer)
+                return EqualsList((List<PilotValue>)_reference!, ((Pilot.Runtime.NativeMemory.PilotSharedBuffer)other._reference!).ToPilotValueList());
             return false;
         }
 
@@ -1931,6 +2121,7 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             PilotValueKind.Set => ((HashSet<PilotValue>)_reference!).SetEquals((HashSet<PilotValue>)other._reference!),
             PilotValueKind.Range => Equals(_reference, other._reference),
             PilotValueKind.Matrix => Equals(_reference, other._reference),
+            PilotValueKind.SliceBuffer => _reference is Pilot.Runtime.NativeMemory.PilotSharedBuffer sb && other._reference is Pilot.Runtime.NativeMemory.PilotSharedBuffer osb && sb.Equals(osb),
             PilotValueKind.Object => Equals(_reference, other._reference),
             PilotValueKind.Adt => EqualsAdt(other),
             PilotValueKind.Record => EqualsRecord(other),
@@ -2076,6 +2267,7 @@ public readonly struct PilotValue : IEquatable<PilotValue>
         PilotValueKind.Matrix => _reference!.ToString()!,
         PilotValueKind.NativeArray => _reference!.ToString()!,
         PilotValueKind.NativeMap => _reference!.ToString()!,
+        PilotValueKind.SliceBuffer => _reference!.ToString()!,
         PilotValueKind.Function => _reference!.ToString()!,
         PilotValueKind.Object => _reference!.ToString()!,
         PilotValueKind.Generator => _reference!.ToString()!,

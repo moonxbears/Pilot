@@ -1,7 +1,7 @@
 # Pilot — AI-Only Codebase Navigation & Symbol Index
 
 > **STRICTLY FOR AI AGENTS**: Do not link this file in user-facing documentation. Use exact paths and `:L<line>` anchors below with `read_file` (`StartLine`/`EndLine`) to jump directly to code without exploratory directory/grep bouncing.
-> **Auto-Sync Stamp**: `7A6087F5E3CE9CCFD40173DB67020191854A3BE3725659C24AFE3722A3A5B5DA` | **Total Indexed Files**: 301 | **Regenerate**: `pwsh -NoProfile -File .agents/scripts/update_ai_index.ps1`
+> **Auto-Sync Stamp**: `AE769B8FFAB32E10F16DBD52B60F56031F42370922CD8A3B28ACE2C5F0B36A36` | **Total Indexed Files**: 310 | **Regenerate**: `pwsh -NoProfile -File .agents/scripts/update_ai_index.ps1`
 
 <!-- BEGIN MANUAL NOTES -->
 ## 1. Instant Task-to-File Routing Table (Consult First — Zero Blind Searching)
@@ -15,14 +15,14 @@
 | **Runtime Values & Primitives** | `Runtime/Values/PilotValue.cs`, `PilotValueKind.cs`, `PilotAdt.cs`, `PilotObject.cs` | Also `PilotFunction.cs`, `PilotMethodGroup.cs`, `PilotKeyword.cs`, `PilotMatrix.cs`, `PilotRange.cs`, `PilotGenerator.cs`, `PilotLazy.cs`. |
 | **Bytecode Compiler & `.pilc` Format** | `Compiler/PilotBytecodeCompiler.cs`, `Compiler/PilotCompiledProgram.cs`, `Runtime/Bytecode/PilotOpcode.cs` | Two-phase AST -> PilVM chunk compiler and `.pilc` v2 serializer. |
 | **PilVM Virtual Machine** | `Runtime/Bytecode/PilVirtualMachine.cs`, `Runtime/Bytecode/PilotBytecodeChunk.cs` | Stack/register bytecode VM execution loop. |
-| **Static Analysis & Type Inference** | `Analysis/PilotAnalysisPipeline.cs`, `Analysis/TypeSystem/PilotTypeInferenceEngine.cs`, `PilotType.cs` | Orchestrates inference, exhaustiveness, borrow checking, dimensions, and contracts. |
+| **Static Analysis & Type Inference** | `Analysis/PilotAnalysisPipeline.cs`, `Analysis/TypeSystem/PilotTypeInferenceEngine.cs`, `PilotBidirectionalInferencer.cs`, `PilotType.cs` | Orchestrates bidirectional/HM inference, Tarjan SCC fixed-point, flow narrowing, row polymorphism, exhaustiveness, borrow checking, dimensions, and contracts. |
 | **Exhaustive Pattern Matching** | `Analysis/PatternMatching/PilotExhaustivenessChecker.cs`, `Runtime/Execution/PilotPatternMatcher.cs` | Compile-time usefulness/exhaustiveness checking + runtime destructuring. |
 | **Ownership, Loops, Units & Contracts** | `Analysis/Ownership/PilotBorrowChecker.cs`, `Analysis/Loops/PilotForLoopAnalyzer.cs`, `Analysis/DimensionalAnalysis/PilotDimensionChecker.cs`, `Analysis/ContractVerification/PilotContractVerifier.cs` | Runtime contracts registry in `Runtime/Contracts/PilotContractRegistry.cs`; loop ABI types in `Runtime/NativeMemory/PilotLoopAbiTypes.cs`. |
 | **Built-in Functions & Host Scripting** | `Runtime/Builtins/PilotBuiltinRegistry.cs`, `Scripting/PilotScriptContext.cs`, `Scripting/PilotScript.cs` | Global intrinsics (`println`, `len`, `json`, `venv`, `matrix`, file/OS helpers). |
 | **Type Adapters & Extensions** | `Runtime/Adapters/PilotTypeAdapterRegistry.cs`, `Runtime/Extensions/PilotLexicalExtension.cs` | First-class `adapter` conversion chains & `extension ... on ...` dispatch. |
 | **Compile-Time `@` Code Generators** | `CodeGen/Engine/PilotCodeGeneratorPipeline.cs`, `CodeGen/Builtins/*.cs` | `@builder`, `@equality`, `@json`, `@metadata`, `@observable`, `@repr`. |
 | **Bidirectional Source Transpilers** | `Transpilation/TranspilationRegistry.cs`, `PilotLibraryTranspiler.cs`, `PilotLibraryMapper.cs`, `Transpilation/Targets/*` | `--emit <target>` and `--from <lang>` for C, C++, C#, Rust, Python, JS, Lua + `PilotOptimizer.cs`. |
-| **Native AOT (LLVM, WASM, C-ABI, ASM)** | `Native/PilotNativeCompiler.cs`, `Native/Llvm/PilotLlvmEmitter.cs`, `Native/Wasm/PilotWasmEmitter.cs`, `Native/CAbi/PilotCAbiEmitter.cs`, `Native/Assembly/PilotAssemblyEmitter.cs` | Native C header in `Native/Runtime/pilot_runtime.h`; Burst/Zero-GC in `Runtime/Burst/PilotBurstEngine.cs`, `Runtime/NativeMemory/`. |
+| **Native AOT & Zero-Copy Shared Memory** | `Native/PilotNativeCompiler.cs`, `Native/Llvm/PilotLlvmEmitter.cs`, `Native/Wasm/PilotWasmEmitter.cs`, `Native/CAbi/PilotCAbiEmitter.cs`, `Native/Assembly/PilotAssemblyEmitter.cs`, `Runtime/NativeMemory/PilotSharedBuffer.cs`, `Runtime/NativeMemory/PilotLoopAbiTypes.cs` | Native C header in `Native/Runtime/pilot_runtime.h`; 24-byte C-ABI `SliceBuffer<T>` / `mmap` IPC in `PilotSharedBuffer.cs`; Burst in `Runtime/Burst/PilotBurstEngine.cs`. |
 | **Polyglot Interop Blocks** | `Runtime/Interop/PolyglotRegistry.cs`, `Runtime/Interop/PolyglotTypeBridge.cs` | Inline Python, JS, Java, Lua, C, C++, ASM, C#, Rust, PostgreSQL, MySQL + yield bridges. |
 | **Packages (`pkg`) & Virtual Envs (`venv`)** | `Runtime/Packaging/PilotPackageManager.cs`, `Runtime/Packaging/Adapters/BaseInteropPackageAdapter.cs`, `Runtime/Venv/PilotVirtualEnvironment.cs` | `.pilpkg`, `pilot.json`, `pilot.lock.json`, foreign package adoption, `pilotvenv.cfg`. |
 | **Debugger & Hot Reload** | `Debugging/PilotDebugger.cs`, `Debugging/PilotCliDebugger.cs`, `Runtime/HotReload/PilotHotReloader.cs` | Breakpoints, stepping, call stack, state-preserving hot reload. |
@@ -45,107 +45,123 @@
 
 ## 2. Master Grammar Map (`antlr/Pilot.g4` Exact Line Anchors)
 
-Total lines in `antlr/Pilot.g4`: **1690**
+Total lines in `antlr/Pilot.g4`: **1709**
 
-### Parser Rules (236)
+### Parser Rules (237)
 `program`:L15 · `identifier`:L23 · `stmt`:L53 · `simple_stmt`:L58 · `small_stmt`:L62 · `compound_stmt`:L90
 `suite`:L141 · `guard_stmt`:L151 · `pattern_guard`:L155 · `defer_stmt`:L160 · `type_annotation`:L168
 `return_type`:L172 · `type_spec`:L176 · `error_union_type`:L180 · `error_primary_type`:L184 · `union_type`:L191
-`intersection_type`:L195 · `primary_type`:L199 · `base_type`:L203 · `type_arguments`:L213 · `generic_params`:L217
-`generic_param`:L221 · `where_type_clause`:L226 · `where_type_item`:L230 · `access_modifier`:L235
-`declaration_modifier`:L242 · `binding_pattern`:L252 · `tuple_pattern`:L260 · `list_pattern`:L264
-`record_pattern`:L268 · `binding_pattern_item`:L272 · `record_pattern_field`:L276 · `pattern_assign_stmt`:L281
-`let_stmt`:L285 · `var_stmt`:L289 · `const_stmt`:L293 · `ref_stmt`:L297 · `dynamic_stmt`:L301
-`type_alias_stmt`:L305 · `adt_sum_body`:L310 · `adt_variant`:L316 · `adt_variant_payload`:L320
-`adt_field_list`:L324 · `adt_field`:L328 · `annassign_stmt`:L333 · `expr_stmt`:L337 · `channel_send_stmt`:L341
-`augassign`:L345 · `func_def`:L365 · `contract_clause`:L369 · `parameters`:L374 · `parameter`:L378
-`class_def`:L382 · `state_def`:L387 · `class_bases`:L391 · `struct_def`:L396 · `record_def`:L401
-`struct_member`:L406 · `interface_def`:L411 · `enum_def`:L416 · `enum_suite`:L420 · `enum_member`:L424
-`actor_def`:L429 · `model_def`:L434 · `property_def`:L443 · `property_body`:L447 · `property_accessor`:L451
-`get_accessor`:L456 · `set_accessor`:L460 · `operator_def`:L465 · `overloadable_op`:L469 · `extension_def`:L477
-`adapter_def`:L483 · `macro_def`:L488 · `quote_stmt`:L492 · `quote_expr`:L496 · `quasiquote_expr`:L500
-`splice_expr`:L504 · `extern_def`:L511 · `extern_member`:L515 · `foreign_language`:L521
-`inline_foreign_block`:L525 · `decorators`:L530 · `decorator`:L534 · `labeled_stmt`:L542 · `block`:L546
-`if_stmt`:L550 · `while_stmt`:L554 · `for_stmt`:L558 · `for_target`:L562 · `match_stmt`:L567 · `match_suite`:L572
-`match_arm`:L576 · `pattern`:L580 · `or_pattern`:L584 · `and_pattern`:L588 · `not_pattern`:L592
-`primary_pattern`:L598 · `range_pattern`:L611 · `range_bound`:L615 · `signed_number_pattern`:L620
-`keyword_pattern`:L624 · `pattern_arg`:L628 · `relational_pattern`:L633 · `collection_pattern`:L637
-`slice_pattern_element`:L641 · `property_pattern`:L646 · `property_pattern_member`:L650
-`tuple_pattern_match`:L654 · `type_or_var_pattern`:L658 · `generic_pattern_suffix`:L663 · `try_stmt`:L667
-`except_clause`:L671 · `with_stmt`:L675 · `with_item`:L679 · `with_context_binding`:L686 · `flow_stmt`:L690
-`pass_stmt`:L698 · `assert_stmt`:L702 · `steal_stmt`:L706 · `delegate_stmt`:L710 · `contract_forward_stmt`:L714
-`global_stmt`:L718 · `import_stmt`:L722 · `foreign_import_stmt`:L728 · `foreign_target`:L733 · `import_name`:L737
-`import_from`:L741 · `import_as_name`:L745 · `dotted_as_name`:L749 · `import_as_names`:L753
-`dotted_as_names`:L757 · `dotted_name`:L761 · `deadline_stmt`:L769 · `within_stmt`:L773 · `periodic_stmt`:L777
-`noalloc_stmt`:L781 · `region_stmt`:L785 · `duration_term`:L789 · `spawn_stmt`:L798 · `atomic_stmt`:L802
-`sync_stmt`:L806 · `isolate_stmt`:L810 · `select_stmt`:L814 · `select_suite`:L818 · `select_arm`:L822
-`select_case_target`:L828 · `dsl_stmt`:L838 · `dsl_args`:L842 · `unit_stmt`:L846 · `unit_expr`:L850
-`unit_term`:L854 · `database_stmt`:L865 · `database_def`:L869 · `transaction_stmt`:L874 · `savepoint_stmt`:L878
-`savepoint_block`:L882 · `commit_stmt`:L886 · `rollback_stmt`:L890 · `insert_stmt`:L895
-`insert_values_group`:L902 · `on_conflict_clause`:L906 · `update_stmt`:L911 · `set_assignment_list`:L918
-`set_assignment`:L922 · `delete_stmt`:L927 · `returning_clause`:L933 · `index_clause`:L938 · `index_field`:L942
-`index_type`:L946 · `index_hint`:L950 · `query_expr`:L955 · `from_clause`:L959 · `join_clause`:L963
-`where_clause`:L967 · `group_clause`:L971 · `order_clause`:L975 · `ordering_term`:L979 · `select_clause`:L983
-`select_projection`:L987 · `select_item`:L992 · `limit_clause`:L996 · `sql_query_expr`:L1001 · `from_source`:L1005
-`lookup_expr`:L1010 · `set_op`:L1015 · `testlist`:L1026 · `exprlist`:L1030 · `test`:L1034 · `lambda_expr`:L1039
-`lambda_body`:L1048 · `capture_list`:L1053 · `capture_item`:L1057 · `lambda_params`:L1063 · `lambda_param`:L1068
-`pipe_expr`:L1073 · `set_query_expr`:L1078 · `coalesce_expr`:L1085 · `catch_clause`:L1089 · `or_test`:L1095
-`and_test`:L1099 · `not_test`:L1103 · `comparison`:L1108 · `comp_op`:L1112 · `range_expr`:L1125
-`bitor_expr`:L1129 · `bitxor_expr`:L1133 · `bitand_expr`:L1137 · `shift_expr`:L1141 · `arith_expr`:L1145
-`term`:L1149 · `factor`:L1153 · `unary_op`:L1159 · `power`:L1169 · `atom_expr`:L1173 · `trailer`:L1177
-`cascade_trailer`:L1194 · `cascade_target`:L1198 · `over_clause`:L1205 · `subscriptlist`:L1209 · `subscript`:L1213
-`atom`:L1221 · `collection_expr`:L1249 · `collection_element`:L1253 · `nameof_expr`:L1257 · `macro_call`:L1261
-`symbol_literal`:L1265 · `literal`:L1270 · `testlist_comp`:L1289 · `dictorsetmaker`:L1293 · `dict_entry`:L1298
-`comp_for`:L1303 · `comp_iter`:L1307 · `comp_if`:L1312 · `arglist`:L1316 · `argument`:L1320
+`intersection_type`:L195 · `primary_type`:L199 · `base_type`:L203 · `type_arguments`:L214 · `generic_params`:L218
+`generic_param`:L222 · `where_type_clause`:L227 · `where_type_item`:L231 · `access_modifier`:L236
+`declaration_modifier`:L243 · `binding_pattern`:L253 · `tuple_pattern`:L261 · `list_pattern`:L265
+`record_pattern`:L269 · `binding_pattern_item`:L273 · `record_pattern_field`:L277 · `pattern_assign_stmt`:L282
+`let_stmt`:L286 · `var_stmt`:L290 · `const_stmt`:L294 · `ref_stmt`:L298 · `dynamic_stmt`:L302
+`type_alias_stmt`:L306 · `adt_sum_body`:L311 · `adt_variant`:L317 · `adt_variant_payload`:L321
+`adt_field_list`:L325 · `adt_field`:L329 · `annassign_stmt`:L334 · `expr_stmt`:L338 · `channel_send_stmt`:L342
+`augassign`:L346 · `func_def`:L366 · `contract_clause`:L370 · `parameters`:L375 · `parameter`:L379
+`class_def`:L383 · `state_def`:L388 · `class_bases`:L392 · `struct_def`:L397 · `record_def`:L402
+`struct_member`:L407 · `interface_def`:L412 · `enum_def`:L417 · `enum_suite`:L421 · `enum_member`:L425
+`actor_def`:L430 · `model_def`:L435 · `property_def`:L444 · `property_body`:L448 · `property_accessor`:L452
+`get_accessor`:L457 · `set_accessor`:L461 · `operator_def`:L466 · `overloadable_op`:L470 · `extension_def`:L478
+`adapter_def`:L484 · `macro_def`:L489 · `quote_stmt`:L493 · `quote_expr`:L497 · `quasiquote_expr`:L501
+`splice_expr`:L505 · `extern_def`:L512 · `extern_member`:L516 · `foreign_language`:L522
+`inline_foreign_block`:L526 · `decorators`:L531 · `decorator`:L535 · `labeled_stmt`:L543 · `block`:L547
+`if_stmt`:L551 · `while_stmt`:L555 · `for_stmt`:L559 · `for_target`:L563 · `match_stmt`:L568 · `match_suite`:L573
+`match_arm`:L577 · `pattern`:L581 · `or_pattern`:L585 · `and_pattern`:L589 · `not_pattern`:L593
+`primary_pattern`:L599 · `range_pattern`:L612 · `range_bound`:L616 · `signed_number_pattern`:L621
+`keyword_pattern`:L625 · `pattern_arg`:L629 · `relational_pattern`:L634 · `collection_pattern`:L638
+`slice_pattern_element`:L642 · `property_pattern`:L647 · `property_pattern_member`:L651
+`tuple_pattern_match`:L655 · `type_or_var_pattern`:L659 · `generic_pattern_suffix`:L664 · `try_stmt`:L668
+`except_clause`:L672 · `with_stmt`:L676 · `with_item`:L680 · `with_context_binding`:L687 · `flow_stmt`:L691
+`pass_stmt`:L699 · `assert_stmt`:L703 · `steal_stmt`:L707 · `delegate_stmt`:L711 · `contract_forward_stmt`:L715
+`global_stmt`:L719 · `import_stmt`:L723 · `foreign_import_stmt`:L729 · `foreign_target`:L734 · `import_name`:L738
+`import_from`:L742 · `import_as_name`:L746 · `dotted_as_name`:L750 · `import_as_names`:L754
+`dotted_as_names`:L758 · `dotted_name`:L762 · `deadline_stmt`:L770 · `within_stmt`:L774 · `periodic_stmt`:L778
+`noalloc_stmt`:L782 · `region_stmt`:L786 · `duration_term`:L790 · `spawn_stmt`:L799 · `atomic_stmt`:L803
+`sync_stmt`:L807 · `isolate_stmt`:L811 · `select_stmt`:L815 · `select_suite`:L819 · `select_arm`:L823
+`select_case_target`:L829 · `dsl_stmt`:L839 · `dsl_args`:L843 · `unit_stmt`:L847 · `unit_expr`:L851
+`unit_term`:L855 · `database_stmt`:L866 · `database_def`:L870 · `transaction_stmt`:L875 · `savepoint_stmt`:L879
+`savepoint_block`:L883 · `commit_stmt`:L887 · `rollback_stmt`:L891 · `insert_stmt`:L896
+`insert_values_group`:L903 · `on_conflict_clause`:L907 · `update_stmt`:L912 · `set_assignment_list`:L919
+`set_assignment`:L923 · `delete_stmt`:L928 · `returning_clause`:L934 · `index_clause`:L939 · `index_field`:L943
+`index_type`:L947 · `index_hint`:L951 · `query_expr`:L956 · `from_clause`:L960 · `join_clause`:L964
+`where_clause`:L968 · `group_clause`:L972 · `order_clause`:L976 · `ordering_term`:L980 · `select_clause`:L984
+`select_projection`:L988 · `select_item`:L993 · `limit_clause`:L997 · `sql_query_expr`:L1002 · `from_source`:L1006
+`lookup_expr`:L1011 · `set_op`:L1016 · `testlist`:L1027 · `exprlist`:L1031 · `test`:L1035 · `lambda_expr`:L1040
+`lambda_body`:L1049 · `capture_list`:L1054 · `capture_item`:L1058 · `lambda_params`:L1064 · `lambda_param`:L1069
+`pipe_expr`:L1074 · `set_query_expr`:L1079 · `coalesce_expr`:L1086 · `catch_clause`:L1090 · `or_test`:L1096
+`and_test`:L1100 · `not_test`:L1104 · `comparison`:L1109 · `comp_op`:L1113 · `range_expr`:L1126
+`bitor_expr`:L1130 · `bitxor_expr`:L1134 · `bitand_expr`:L1138 · `shift_expr`:L1142 · `arith_expr`:L1146
+`term`:L1150 · `factor`:L1154 · `unary_op`:L1160 · `power`:L1170 · `atom_expr`:L1174 · `trailer`:L1178
+`call_quote_op`:L1195 · `cascade_trailer`:L1204 · `cascade_target`:L1208 · `over_clause`:L1215
+`subscriptlist`:L1219 · `subscript`:L1223 · `atom`:L1231 · `collection_expr`:L1260 · `collection_element`:L1264
+`nameof_expr`:L1268 · `macro_call`:L1272 · `symbol_literal`:L1276 · `literal`:L1282 · `testlist_comp`:L1301
+`dictorsetmaker`:L1305 · `dict_entry`:L1310 · `comp_for`:L1315 · `comp_iter`:L1319 · `comp_if`:L1324
+`arglist`:L1328 · `argument`:L1332
 
-### Lexer Tokens (256)
-`PUBLIC`:L1333 · `PRIVATE`:L1334 · `PROTECTED`:L1335 · `INTERNAL`:L1336 · `STATIC`:L1337 · `PARTIAL`:L1338
-`STEAL`:L1339 · `CONTRACTS`:L1340 · `DELEGATE`:L1341 · `PARAMS`:L1342 · `ARGS`:L1343 · `KWARGS`:L1344
-`NAMEOF`:L1345 · `EACH`:L1346 · `REPEAT`:L1347 · `ADAPTER`:L1348 · `CONVERTER`:L1349 · `DEF`:L1351 · `FN`:L1352
-`CLASS`:L1353 · `STRUCT`:L1354 · `RECORD`:L1355 · `INTERFACE`:L1356 · `PROTOCOL`:L1357 · `ENUM`:L1358
-`ACTOR`:L1359 · `LET`:L1360 · `VAR`:L1361 · `CONST`:L1362 · `TYPE`:L1363 · `REF`:L1364 · `DYNAMIC`:L1365
-`SYMBOL`:L1366 · `PURE`:L1367 · `MUT`:L1368 · `IMMUT`:L1369 · `PROPERTY`:L1370 · `GET`:L1371 · `OPERATOR`:L1372
-`EXTENSION`:L1373 · `EXTEND`:L1374 · `STATE`:L1375 · `SELECT`:L1378 · `FROM`:L1379 · `WHERE`:L1380 · `JOIN`:L1381
-`INNER`:L1382 · `LEFT`:L1383 · `RIGHT`:L1384 · `FULL`:L1385 · `CROSS`:L1386 · `OUTER`:L1387 · `ON`:L1388
-`GROUP`:L1389 · `BY`:L1390 · `HAVING`:L1391 · `ORDER`:L1392 · `ASC`:L1393 · `DESC`:L1394 · `ASCENDING`:L1395
-`DESCENDING`:L1396 · `LIMIT`:L1397 · `OFFSET`:L1398 · `INTO`:L1399 · `DISTINCT`:L1400 · `UNION`:L1401 · `ALL`:L1402
-`INTERSECT`:L1403 · `EXCEPT`:L1404 · `DIFFERENCE`:L1405 · `INDEX`:L1406 · `INDEXED`:L1407 · `LOOKUP`:L1408
-`TABLE`:L1409 · `SCHEMA`:L1410 · `INSERT`:L1411 · `UPDATE`:L1412 · `DELETE`:L1413 · `VALUES`:L1414 · `SET_KW`:L1415
-`RETURNING`:L1416 · `CONFLICT`:L1417 · `DO`:L1418 · `NOTHING`:L1419 · `OVER`:L1420 · `PARTITION`:L1421
-`WINDOW`:L1422 · `TRANSACTION`:L1423 · `COMMIT`:L1424 · `ROLLBACK`:L1425 · `SAVEPOINT`:L1426 · `TO`:L1427
-`CONNECT`:L1428 · `DATABASE`:L1429 · `MODEL`:L1430 · `ASYNC`:L1433 · `AWAIT`:L1434 · `SPAWN`:L1435
-`PARALLEL`:L1436 · `CHAN`:L1437 · `CHANNEL`:L1438 · `ATOMIC`:L1439 · `SYNC`:L1440 · `LOCK`:L1441 · `ISOLATE`:L1442
-`REALTIME`:L1445 · `DEADLINE`:L1446 · `ON_MISSED`:L1447 · `WITHIN`:L1448 · `FALLBACK`:L1449 · `PERIOD`:L1450
-`PERIODIC`:L1451 · `PRIORITY`:L1452 · `JITTER`:L1453 · `BOUNDED`:L1454 · `NOALLOC`:L1455 · `STACKALLOC`:L1456
-`REGION`:L1457 · `WCET`:L1458 · `HARD_RT`:L1459 · `SOFT_RT`:L1460 · `EXTERN`:L1463 · `CSHARP`:L1464
-`PYTHON`:L1465 · `RUST`:L1466 · `JS`:L1467 · `JAVASCRIPT`:L1468 · `JAVA`:L1469 · `ASM`:L1470 · `ASSEMBLY`:L1471
-`CPP`:L1472 · `C_KW`:L1473 · `LUA`:L1474 · `SQL_KW`:L1475 · `POSTGRES`:L1476 · `POSTGRESQL`:L1477 · `MYSQL`:L1478
-`MODULE`:L1479 · `LIB`:L1480 · `DSL`:L1483 · `DOMAIN`:L1484 · `UNIT`:L1485 · `MACRO`:L1486 · `DEFMACRO`:L1487
-`QUOTE`:L1488 · `QUASIQUOTE`:L1489 · `SPLICE`:L1490 · `UNQUOTE`:L1491 · `UNQUOTE_SPLICING`:L1492 · `MATCH`:L1493
-`CASE`:L1494 · `WHEN`:L1495 · `DEFAULT`:L1496 · `TIMEOUT`:L1497 · `GUARD`:L1500 · `DEFER`:L1501 · `CONTEXT`:L1502
-`REQUIRES`:L1503 · `ENSURES`:L1504 · `IF`:L1505 · `ELIF`:L1506 · `ELSE`:L1507 · `THEN`:L1508 · `WHILE`:L1509
-`FOR`:L1510 · `IN`:L1511 · `RETURN`:L1512 · `YIELD`:L1513 · `BREAK`:L1514 · `CONTINUE`:L1515 · `PASS`:L1516
-`RAISE`:L1517 · `TRY`:L1518 · `CATCH`:L1519 · `FINALLY`:L1520 · `WITH`:L1521 · `AS`:L1522 · `ASSERT`:L1523
-`IMPORT`:L1524 · `GLOBAL`:L1525 · `LAMBDA`:L1526 · `AND`:L1527 · `OR`:L1528 · `NOT`:L1529 · `IS`:L1530
-`TRUE`:L1533 · `FALSE`:L1534 · `SOME`:L1535 · `NONE`:L1536 · `NULL`:L1537 · `UNDEFINED`:L1538
-`JSON_GET_TEXT`:L1541 · `ARROW_LEFT`:L1542 · `ARROW`:L1543 · `FAT_ARROW`:L1544 · `PIPE_FORWARD`:L1545
-`PIPE_BACKWARD`:L1546 · `SAFE_CASCADE`:L1547 · `SAFE_NAV`:L1548 · `COALESCE_EQUAL`:L1549 · `COALESCE`:L1550
-`JSON_CONTAINS`:L1551 · `JSON_CONTAINED`:L1552 · `ELLIPSIS`:L1553 · `DOTDOT_EQUAL`:L1554 · `DOTDOT_LESS`:L1555
-`DOTDOT`:L1556 · `DOUBLESTAR`:L1557 · `DOUBLESLASH`:L1558 · `EQEQUAL`:L1559 · `NOTEQUAL`:L1560 · `LESSEQUAL`:L1561
-`GREATEREQUAL`:L1562 · `LEFTSHIFT`:L1563 · `RIGHTSHIFT`:L1564 · `PLUSEQUAL`:L1565 · `MINEQUAL`:L1566
-`STAREQUAL`:L1567 · `SLASHEQUAL`:L1568 · `PERCENTEQUAL`:L1569 · `AMPEREQUAL`:L1570 · `VBAREQUAL`:L1571
-`CIRCUMFLEXEQUAL`:L1572 · `LEFTSHIFTEQUAL`:L1573 · `RIGHTSHIFTEQUAL`:L1574 · `DOUBLESTAREQUAL`:L1575
-`DOUBLESLASHEQUAL`:L1576 · `WALRUS`:L1577 · `LPAR`:L1580 · `RPAR`:L1581 · `LSQB`:L1582 · `RSQB`:L1583
-`LBRACE`:L1584 · `RBRACE`:L1585 · `COLON`:L1586 · `SEMI`:L1587 · `COMMA`:L1588 · `DOT`:L1589 · `AT`:L1590
-`PLUS`:L1591 · `MINUS`:L1592 · `STAR`:L1593 · `SLASH`:L1594 · `PERCENT`:L1595 · `VBAR`:L1596 · `AMPER`:L1597
-`CIRCUMFLEX`:L1598 · `TILDE`:L1599 · `LESS`:L1600 · `GREATER`:L1601 · `EQUAL`:L1602 · `QUESTION`:L1603
-`EXCLAMATION`:L1604 · `DOLLAR`:L1605 · `BACKQUOTE`:L1606 · `UNDERSCORE`:L1607
+### Lexer Tokens (262)
+`PUBLIC`:L1346 · `PRIVATE`:L1347 · `PROTECTED`:L1348 · `INTERNAL`:L1349 · `STATIC`:L1350 · `PARTIAL`:L1351
+`STEAL`:L1352 · `CONTRACTS`:L1353 · `DELEGATE`:L1354 · `PARAMS`:L1355 · `ARGS`:L1356 · `KWARGS`:L1357
+`NAMEOF`:L1358 · `EACH`:L1359 · `REPEAT`:L1360 · `ADAPTER`:L1361 · `CONVERTER`:L1362 · `DEF`:L1364 · `FN`:L1365
+`CLASS`:L1366 · `STRUCT`:L1367 · `RECORD`:L1368 · `INTERFACE`:L1369 · `PROTOCOL`:L1370 · `ENUM`:L1371
+`ACTOR`:L1372 · `LET`:L1373 · `VAR`:L1374 · `CONST`:L1375 · `TYPE`:L1376 · `REF`:L1377 · `DYNAMIC`:L1378
+`SYMBOL`:L1379 · `PURE`:L1380 · `MUT`:L1381 · `IMMUT`:L1382 · `PROPERTY`:L1383 · `GET`:L1384 · `OPERATOR`:L1385
+`EXTENSION`:L1386 · `EXTEND`:L1387 · `STATE`:L1388 · `SELECT`:L1391 · `FROM`:L1392 · `WHERE`:L1393 · `JOIN`:L1394
+`INNER`:L1395 · `LEFT`:L1396 · `RIGHT`:L1397 · `FULL`:L1398 · `CROSS`:L1399 · `OUTER`:L1400 · `ON`:L1401
+`GROUP`:L1402 · `BY`:L1403 · `HAVING`:L1404 · `ORDER`:L1405 · `ASC`:L1406 · `DESC`:L1407 · `ASCENDING`:L1408
+`DESCENDING`:L1409 · `LIMIT`:L1410 · `OFFSET`:L1411 · `INTO`:L1412 · `DISTINCT`:L1413 · `UNION`:L1414 · `ALL`:L1415
+`INTERSECT`:L1416 · `EXCEPT`:L1417 · `DIFFERENCE`:L1418 · `INDEX`:L1419 · `INDEXED`:L1420 · `LOOKUP`:L1421
+`TABLE`:L1422 · `SCHEMA`:L1423 · `INSERT`:L1424 · `UPDATE`:L1425 · `DELETE`:L1426 · `VALUES`:L1427 · `SET_KW`:L1428
+`RETURNING`:L1429 · `CONFLICT`:L1430 · `DO`:L1431 · `NOTHING`:L1432 · `OVER`:L1433 · `PARTITION`:L1434
+`WINDOW`:L1435 · `TRANSACTION`:L1436 · `COMMIT`:L1437 · `ROLLBACK`:L1438 · `SAVEPOINT`:L1439 · `TO`:L1440
+`CONNECT`:L1441 · `DATABASE`:L1442 · `MODEL`:L1443 · `ASYNC`:L1446 · `AWAIT`:L1447 · `SPAWN`:L1448
+`PARALLEL`:L1449 · `CHAN`:L1450 · `CHANNEL`:L1451 · `ATOMIC`:L1452 · `SYNC`:L1453 · `LOCK`:L1454 · `ISOLATE`:L1455
+`REALTIME`:L1458 · `DEADLINE`:L1459 · `ON_MISSED`:L1460 · `WITHIN`:L1461 · `FALLBACK`:L1462 · `PERIOD`:L1463
+`PERIODIC`:L1464 · `PRIORITY`:L1465 · `JITTER`:L1466 · `BOUNDED`:L1467 · `NOALLOC`:L1468 · `STACKALLOC`:L1469
+`REGION`:L1470 · `WCET`:L1471 · `HARD_RT`:L1472 · `SOFT_RT`:L1473 · `EXTERN`:L1476 · `CSHARP`:L1477
+`PYTHON`:L1478 · `RUST`:L1479 · `JS`:L1480 · `JAVASCRIPT`:L1481 · `JAVA`:L1482 · `ASM`:L1483 · `ASSEMBLY`:L1484
+`CPP`:L1485 · `C_KW`:L1486 · `LUA`:L1487 · `SQL_KW`:L1488 · `POSTGRES`:L1489 · `POSTGRESQL`:L1490 · `MYSQL`:L1491
+`MODULE`:L1492 · `LIB`:L1493 · `DSL`:L1496 · `DOMAIN`:L1497 · `UNIT`:L1498 · `MACRO`:L1499 · `DEFMACRO`:L1500
+`DEFKEYWORD`:L1501 · `QUOTE`:L1502 · `QUASIQUOTE`:L1503 · `SPLICE`:L1504 · `UNQUOTE`:L1505
+`UNQUOTE_SPLICING`:L1506 · `MATCH`:L1507 · `CASE`:L1508 · `WHEN`:L1509 · `DEFAULT`:L1510 · `TIMEOUT`:L1511
+`GUARD`:L1514 · `DEFER`:L1515 · `CONTEXT`:L1516 · `REQUIRES`:L1517 · `ENSURES`:L1518 · `IF`:L1519 · `ELIF`:L1520
+`ELSE`:L1521 · `THEN`:L1522 · `WHILE`:L1523 · `FOR`:L1524 · `IN`:L1525 · `RETURN`:L1526 · `YIELD`:L1527
+`BREAK`:L1528 · `CONTINUE`:L1529 · `PASS`:L1530 · `RAISE`:L1531 · `TRY`:L1532 · `CATCH`:L1533 · `FINALLY`:L1534
+`WITH`:L1535 · `AS`:L1536 · `ASSERT`:L1537 · `IMPORT`:L1538 · `GLOBAL`:L1539 · `LAMBDA`:L1540 · `AND`:L1541
+`OR`:L1542 · `NOT`:L1543 · `IS`:L1544 · `TRUE`:L1547 · `FALSE`:L1548 · `SOME`:L1549 · `NONE`:L1550 · `NULL`:L1551
+`UNDEFINED`:L1552 · `JSON_GET_TEXT`:L1555 · `ARROW_LEFT`:L1556 · `ARROW`:L1557 · `FAT_ARROW`:L1558
+`PIPE_FORWARD`:L1559 · `PIPE_BACKWARD`:L1560 · `SAFE_CASCADE`:L1561 · `SAFE_NAV`:L1562 · `COALESCE_EQUAL`:L1563
+`COALESCE`:L1564 · `JSON_CONTAINS`:L1565 · `JSON_CONTAINED`:L1566 · `ELLIPSIS`:L1567 · `DOTDOT_EQUAL`:L1568
+`DOTDOT_LESS`:L1569 · `DOTDOT`:L1570 · `DOUBLESTAR`:L1571 · `DOUBLESLASH`:L1572 · `CALL_QUOTE_DEEP`:L1573
+`CALL_QUOTE_ABI`:L1574 · `CALL_QUOTE_REACT`:L1575 · `CALL_QUOTE_ADJOINT`:L1576 · `CALL_QUOTE_EFFECT`:L1577
+`EQEQUAL`:L1578 · `NOTEQUAL`:L1579 · `LESSEQUAL`:L1580 · `GREATEREQUAL`:L1581 · `LEFTSHIFT`:L1582
+`RIGHTSHIFT`:L1583 · `PLUSEQUAL`:L1584 · `MINEQUAL`:L1585 · `STAREQUAL`:L1586 · `SLASHEQUAL`:L1587
+`PERCENTEQUAL`:L1588 · `AMPEREQUAL`:L1589 · `VBAREQUAL`:L1590 · `CIRCUMFLEXEQUAL`:L1591 · `LEFTSHIFTEQUAL`:L1592
+`RIGHTSHIFTEQUAL`:L1593 · `DOUBLESTAREQUAL`:L1594 · `DOUBLESLASHEQUAL`:L1595 · `WALRUS`:L1596 · `LPAR`:L1599
+`RPAR`:L1600 · `LSQB`:L1601 · `RSQB`:L1602 · `LBRACE`:L1603 · `RBRACE`:L1604 · `COLON`:L1605 · `SEMI`:L1606
+`COMMA`:L1607 · `DOT`:L1608 · `AT`:L1609 · `PLUS`:L1610 · `MINUS`:L1611 · `STAR`:L1612 · `SLASH`:L1613
+`PERCENT`:L1614 · `VBAR`:L1615 · `AMPER`:L1616 · `CIRCUMFLEX`:L1617 · `TILDE`:L1618 · `LESS`:L1619
+`GREATER`:L1620 · `EQUAL`:L1621 · `QUESTION`:L1622 · `EXCLAMATION`:L1623 · `DOLLAR`:L1624 · `BACKQUOTE`:L1625
+`UNDERSCORE`:L1626
 
 ---
 
 ## 3. Large File Internal Method Maps (Files > 350 Lines)
 
 Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `read_file` for large files:
+
+### `Analysis/CallQuoting/PilotCallQuotingEngine.cs` (1628 lines)
+`Invoke`:L67 · `ToPilotObject`:L80 · `ToString`:L116 · `Const`:L184 · `Sym`:L187 · `Binary`:L190 · `Add`:L193
+`Sub`:L194 · `Mul`:L195 · `Div`:L196 · `Unary`:L198 · `If`:L201 · `Call`:L204 · `Let`:L207 · `GetFreeSymbols`:L213
+`CollectSymbols`:L220 · `FoldConstants`:L258 · `FoldCore`:L267 · `SubstituteSymbol`:L398 · `Evaluate`:L435
+`ToPilotObject`:L492 · `ToInfixString`:L553 · `ToString`:L568 · `FormatScalarValue`:L627 · `IsZeroConst`:L645
+`IsOneConst`:L650 · `TryEvaluateBinaryConst`:L655 · `InferValueTypeName`:L685 · `AsStruct2x32`:L759
+`Dispatch`:L773 · `ToPilotObject`:L776 · `ToString`:L826 · `GetCallQuoteKind`:L847
+`HasZeroWhitespaceBeforeParen`:L863 · `ComputeFnMetadataId`:L874 · `EvaluateQuotedCall`:L892
+`EvaluateDeepSplice`:L997 · `BuildAbiCallFrame`:L1063 · `DispatchAbiFrame`:L1129
+`IsUnmanagedAbiCompatibleType`:L1142 · `GetAbiScalarSizeAndAlignment`:L1165 · `InferAbiTypeFromValue`:L1183
+`WriteScalarToAbiSpan`:L1197 · `ConvertFunctionBodyToSymbolicAst`:L1242 · `ConvertStmtSequenceToSymbolicAst`:L1263
+`ConvertSimpleStmtToSymbolicAst`:L1350 · `ConvertParseTreeToSymbolicAst`:L1370
 
 ### `Analysis/Loops/PilotForLoopAnalyzer.cs` (473 lines)
 `CheckProgram`:L66 · `VisitFor_stmt`:L71 · `AnalyzeSingleLoop`:L81 · `IsInExpressionPosition`:L202
@@ -179,6 +195,37 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 `ConcatPatterns`:L1977 · `ConcatTypes`:L1986 · `PrependRepeated`:L1995 · `IsIntegerType`:L2004
 `IsBuiltinTypeName`:L2007 · `StripTypeArgs`:L2013 · `StripQuotes`:L2019 · `SplitTopLevel`:L2022
 
+### `Analysis/TypeSystem/PilotBidirectionalInferencer.cs` (4138 lines)
+`FromContext`:L39 · `FromToken`:L51 · `ToString`:L60 · `FormatDiagnosticMessage`:L91 · `BuildFunctionType`:L197
+`AddField`:L265 · `GetNarrowedTypeAt`:L310 · `GetFlowTypeAtLine`:L313 · `AnalyzeProgram`:L318
+`PrescanProgramDeclarations`:L353 · `IsInsideClassOrState`:L416 · `RegisterStructLayout`:L426
+`ExtractSuiteFields`:L455 · `RegisterRecordLayout`:L497 · `RegisterClassLayout`:L531 · `RegisterClassMethod`:L576
+`FindTransitionTarget`:L629 · `RegisterTypeAliasLayout`:L659 · `RegisterEnumLayout`:L699
+`RegisterVariantLayout`:L718 · `HasResourceOrLinearDecorator`:L766 · `RegisterFunctionStub`:L778
+`SolveFunctionSccs`:L830 · `CollectCalledSchemes`:L863 · `ComputeTarjanSccs`:L885 · `SolveSingleSccFixedPoint`:L945
+`IsTypeVariableReferencedInParameters`:L988 · `InferSchemeOnce`:L1006 · `AnalyzeFunctionBodyFinal`:L1075
+`PushFlowScope`:L1168 · `PopFlowScope`:L1176 · `SetFlowNarrowedType`:L1179 · `LookupFlowAwareType`:L1189
+`AnalyzeSuiteForReturn`:L1208 · `CheckSuite`:L1227 · `AnalyzeStatement`:L1261 · `AnalyzeSimpleStmt`:L1272
+`AnalyzeCompoundStmt`:L1296 · `AnalyzeVarDecl`:L1335 · `AnalyzeVarDecl`:L1346 · `BindDestructuringPattern`:L1405
+`AnalyzeGuardStmt`:L1435 · `AnalyzeIfStmt`:L1512 · `AnalyzeMatchStmt`:L1656 · `AnalyzeForStmt`:L1757
+`CollectLoopBodyFlowTypes`:L1854 · `AnalyzeFlowStmt`:L1888 · `AnalyzeExprStmt`:L1972
+`SubtractAdtOrUnionVariant`:L2184 · `TryExtractPatternNarrowedType`:L2204 · `BindMatchPatternVariables`:L2265
+`FindFirstPrimaryPattern`:L2298 · `Check`:L2313 · `CheckAtom`:L2401 · `CheckLambda`:L2462
+`ExtractLambdaParameters`:L2555 · `Synthesize`:L2592 · `SynthesizeTest`:L2626 · `SynthesizePipeExpr`:L2653
+`SynthesizePipeStage`:L2665 · `SynthesizeSetQueryExpr`:L2681 · `SynthesizeCoalesceExpr`:L2689
+`SynthesizeOrTest`:L2739 · `SynthesizeAndTest`:L2747 · `SynthesizeNotTest`:L2755 · `SynthesizeComparison`:L2765
+`SynthesizeRangeExpr`:L2786 · `SynthesizeBitorExpr`:L2796 · `SynthesizeBitxorExpr`:L2804
+`SynthesizeBitandExpr`:L2812 · `SynthesizeShiftExpr`:L2820 · `SynthesizeArithExpr`:L2828 · `SynthesizeTerm`:L2842
+`CombineArithmeticOperandTypes`:L2856 · `ConstrainTypeVariable`:L2884 · `SynthesizeFactor`:L2906
+`SynthesizePower`:L2934 · `SynthesizeAtomExpr`:L2945 · `TryRecordRowPolymorphicFieldAccess`:L3104
+`TryInferCollectionHigherOrderMethod`:L3130 · `ResolveMemberMethodCall`:L3283 · `ResolveDirectCall`:L3344
+`ResolveSingleSchemeCall`:L3478 · `VerifyAndBindRowPolymorphicArgument`:L3550 · `SelectBestFunctionOverload`:L3595
+`SynthesizeAtom`:L3688 · `VerifyAndUnifyConstraint`:L3811 · `RecordConstraintFailure`:L3836 · `AddInlayHint`:L3865
+`LookupFieldType`:L3880 · `TryLookupFieldAndOffset`:L3887 · `JoinTypes`:L3948 · `InferSimpleSuiteReturnType`:L3987
+`TryExtractFailArgumentType`:L4005 · `SuiteAlwaysExits`:L4030 · `SimpleStmtAlwaysExits`:L4053
+`FindIfBranchPattern`:L4070 · `HasIfBranchSome`:L4086 · `FindFirstAtomExpr`:L4105 · `IsNullLiteralText`:L4116
+`IsSimpleIdentifier`:L4119 · `IsKnownBuiltinTypeName`:L4131 · `TruncateSource`:L4134
+
 ### `Analysis/TypeSystem/PilotErrorFlowAnalyzer.cs` (1240 lines)
 `ResolveVariable`:L64 · `CheckProgram`:L88 · `PushScope`:L95 · `PopScope`:L96 · `PrescanDeclarations`:L104
 `RegisterTypeAlias`:L134 · `RegisterEnum`:L179 · `RegisterAdapter`:L195 · `RegisterFunction`:L205
@@ -211,12 +258,12 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 `ExtractElementType`:L1444 · `StripGenericSuffix`:L1455 · `IsSimpleIdentifierText`:L1462
 `FormatDisplayType`:L1474 · `Report`:L1477
 
-### `Analysis/TypeSystem/PilotTypeInferenceEngine.cs` (573 lines)
-`ToString`:L30 · `RegisterBuiltins`:L55 · `PushScope`:L71 · `AggregateResult`:L78 · `VisitProgram`:L83
-`PopScope`:L96 · `SetVariableType`:L104 · `TryLookupType`:L113 · `ParseTypeString`:L132 · `VisitLet_stmt`:L207
-`VisitVar_stmt`:L235 · `VisitFunc_def`:L263 · `VisitTest`:L296 · `VisitCoalesce_expr`:L306 · `VisitArith_expr`:L339
-`VisitAtom`:L364 · `VisitAtom_expr`:L415 · `VisitType_alias_stmt`:L458 · `VisitEnum_def`:L497
-`VisitRecord_def`:L513 · `RegisterAdtVariantType`:L530 · `ExtractFieldTypes`:L552
+### `Analysis/TypeSystem/PilotType.cs` (753 lines)
+`ListOf`:L104 · `SetOf`:L107 · `MapOf`:L110 · `FutureOf`:L113 · `TupleOf`:L116 · `OptionOf`:L119 · `ResultOf`:L125
+`FunctionOf`:L133 · `MatrixOf`:L136 · `WithUnit`:L139 · `WithTypestate`:L142 · `RowRecordOf`:L157 · `UnionOf`:L172
+`AddUnique`:L214 · `ResourceOf`:L220 · `NewTypeVariable`:L223 · `WithConstraint`:L226 · `SatisfiesConstraint`:L256
+`SubtractType`:L285 · `IsAssignableTo`:L315 · `Unify`:L436 · `OccursIn`:L520 · `Resolve`:L540 · `ResolveCore`:L543
+`ToString`:L633 · `FormatConstraint`:L697 · `Equals`:L708 · `Equals`:L734 · `GetHashCode`:L736
 
 ### `Cli/Program.cs` (1229 lines)
 `Main`:L20 · `PrintVersion`:L264 · `ExecuteInlineScript`:L275 · `ExecuteBuildSubcommand`:L288
@@ -229,7 +276,7 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 `ExtractMethodModel`:L287 · `ExtractDecorator`:L326 · `ExtractViaRegexFallback`:L352
 `ExecuteInScriptGenerators`:L381
 
-### `Compiler/PilotBytecodeCompiler.cs` (2464 lines)
+### `Compiler/PilotBytecodeCompiler.cs` (2523 lines)
 `IsImmutable`:L41 · `AllocateTempSlot`:L48 · `RegisterBindingMetadata`:L51 · `HasDeclaredBinding`:L71
 `EmitStoreBinding`:L82 · `EmitRestoreBinding`:L97 · `EmitLoadBindingOrUndefined`:L110 · `EmitLiteralConstant`:L123
 `TryResolveAdtVariant`:L145 · `TryResolveAdtType`:L192 · `TryResolveRecordType`:L207
@@ -238,20 +285,20 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 `BuildEnumDescriptor`:L445 · `BuildRecordDescriptor`:L473 · `ExtractGenericParamList`:L491
 `ExtractSerializedFields`:L497 · `VisitProgram`:L534 · `VisitStmt`:L548 · `VisitSimple_stmt`:L557
 `VisitSmall_stmt`:L572 · `VisitCompound_stmt`:L587 · `VisitType_alias_stmt`:L613 · `VisitEnum_def`:L634
-`VisitRecord_def`:L652 · `VisitMatch_stmt`:L670 · `VisitGuard_stmt`:L676 · `VisitSuite`:L682 · `VisitLet_stmt`:L704
-`VisitVar_stmt`:L726 · `VisitConst_stmt`:L748 · `ExtractBindingIdentifiers`:L770
-`CompileVariableDeclaration`:L816 · `VisitExpr_stmt`:L842 · `AssignToTarget`:L886 · `CompileAugmentedAssign`:L952
-`EmitAugassignOp`:L1080 · `VisitFlow_stmt`:L1098 · `VisitIf_stmt`:L1144 · `VisitWhile_stmt`:L1202
-`VisitFor_stmt`:L1251 · `VisitFunc_def`:L1324 · `VisitTest`:L1373 · `VisitPipe_expr`:L1400
-`TryCompileFluentPipeStage`:L1421 · `VisitSet_query_expr`:L1491 · `VisitCoalesce_expr`:L1500
-`CompileCoalesceExprPrefix`:L1506 · `CompileCatchBlockAsExpression`:L1569 · `VisitOr_test`:L1587
-`VisitAnd_test`:L1604 · `VisitNot_test`:L1621 · `VisitComparison`:L1633 · `VisitRange_expr`:L1671
-`VisitBitor_expr`:L1688 · `VisitBitxor_expr`:L1702 · `VisitBitand_expr`:L1716 · `VisitShift_expr`:L1730
-`VisitArith_expr`:L1745 · `VisitTerm`:L1760 · `VisitFactor`:L1782 · `VisitPower`:L1812 · `VisitAtom_expr`:L1825
-`RequiresAtomExprAstFallback`:L1925 · `HasNamedArguments`:L1968 · `TryResolveKnownFieldOrderForCall`:L1979
-`OrderCallArgumentExpressions`:L2019 · `VisitAtom`:L2067 · `VisitLiteral`:L2220 · `VisitCollection_expr`:L2351
-`IsSimpleIdentifier`:L2384 · `GetAtomExpr`:L2400 · `CompileAtomExprPrefix`:L2408 · `UnescapeStringLiteral`:L2433
-`StripQuotes`:L2449
+`VisitRecord_def`:L652 · `VisitMatch_stmt`:L670 · `VisitGuard_stmt`:L676 · `VisitSuite`:L682
+`IsSliceBufferTypeAnnotation`:L704 · `IsTopLevelForExpression`:L716 · `VisitLet_stmt`:L725 · `VisitVar_stmt`:L749
+`VisitConst_stmt`:L773 · `ExtractBindingIdentifiers`:L797 · `CompileVariableDeclaration`:L843
+`VisitExpr_stmt`:L869 · `AssignToTarget`:L923 · `CompileAugmentedAssign`:L989 · `EmitAugassignOp`:L1117
+`VisitFlow_stmt`:L1135 · `VisitIf_stmt`:L1181 · `VisitWhile_stmt`:L1239 · `VisitFor_stmt`:L1288
+`VisitFunc_def`:L1361 · `VisitTest`:L1410 · `VisitPipe_expr`:L1437 · `TryCompileFluentPipeStage`:L1458
+`VisitSet_query_expr`:L1528 · `VisitCoalesce_expr`:L1537 · `CompileCoalesceExprPrefix`:L1543
+`CompileCatchBlockAsExpression`:L1606 · `VisitOr_test`:L1624 · `VisitAnd_test`:L1641 · `VisitNot_test`:L1658
+`VisitComparison`:L1677 · `VisitRange_expr`:L1715 · `VisitBitor_expr`:L1732 · `VisitBitxor_expr`:L1746
+`VisitBitand_expr`:L1760 · `VisitShift_expr`:L1774 · `VisitArith_expr`:L1789 · `VisitTerm`:L1804
+`VisitFactor`:L1826 · `VisitPower`:L1856 · `VisitAtom_expr`:L1869 · `RequiresAtomExprAstFallback`:L1969
+`HasNamedArguments`:L2017 · `TryResolveKnownFieldOrderForCall`:L2028 · `OrderCallArgumentExpressions`:L2068
+`VisitAtom`:L2116 · `VisitLiteral`:L2279 · `VisitCollection_expr`:L2410 · `IsSimpleIdentifier`:L2443
+`GetAtomExpr`:L2459 · `CompileAtomExprPrefix`:L2467 · `UnescapeStringLiteral`:L2492 · `StripQuotes`:L2508
 
 ### `Compiler/PilotCompiledProgram.cs` (607 lines)
 `CheckVersionCompatibility`:L44 · `Run`:L85 · `Run`:L90 · `RunWithArgs`:L131 · `ExecuteCore`:L136 · `Save`:L222
@@ -275,10 +322,10 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 `ExtractKeywordText`:L2158 · `IsPrimitiveTypeName`:L2166 · `TryParseLiteralInt`:L2174 · `TryExtractIntRange`:L2183
 `EvaluateRangeBoundValue`:L2203 · `ParseSignedNumberValue`:L2221 · `ParseUnsignedIntToken`:L2232
 
-### `Native/CAbi/PilotCAbiEmitter.cs` (515 lines)
-`EmitHeader`:L24 · `EmitHeader`:L43 · `SanitizeCIdentifier`:L184 · `Extract`:L220 · `PrescanTypes`:L251
-`ExtractGenerics`:L328 · `ExtractAdtFields`:L331 · `VisitFunc_def`:L354 · `VisitStruct_def`:L380
-`VisitClass_def`:L397 · `MapType`:L438
+### `Native/CAbi/PilotCAbiEmitter.cs` (554 lines)
+`EmitHeader`:L24 · `EmitHeader`:L43 · `SanitizeCIdentifier`:L189 · `Extract`:L225 · `PrescanTypes`:L256
+`ExtractGenerics`:L333 · `ExtractAdtFields`:L336 · `VisitFunc_def`:L359 · `VisitStruct_def`:L385
+`VisitClass_def`:L402 · `MapType`:L443
 
 ### `Native/Llvm/PilotLlvmEmitter.cs` (1869 lines)
 `Emit`:L50 · `Emit`:L69 · `NextReg`:L75 · `NextBlock`:L76 · `CompileProgram`:L78 · `PrescanTypesAndFunctions`:L187
@@ -309,51 +356,53 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 `CompileLiteral`:L650 · `MapType`:L692 · `AssembleWatToWasm`:L714 · `WriteSection`:L832 · `WriteString`:L839
 `WriteVarUInt`:L846 · `WriteVarInt`:L857
 
-### `Pilot.LanguageServer/Lsp/PilotLspServer.cs` (747 lines)
-`RunAsync`:L100 · `ProcessMessage`:L121 · `UpdateDocumentAndBuildDiagnostics`:L498 · `TryGetAnalysis`:L531
-`ConvertToDocumentSymbol`:L548 · `GetCompletionItemKind`:L567 · `CreateRange`:L582 · `BuildResponse`:L588
-`ExtractWordAt`:L599 · `SendRawJson`:L646 · `ReadMessageAsync`:L664
+### `Pilot.LanguageServer/Lsp/PilotLspServer.cs` (838 lines)
+`RunAsync`:L100 · `ProcessMessage`:L121 · `UpdateDocumentAndBuildDiagnostics`:L589 · `TryGetAnalysis`:L622
+`ConvertToDocumentSymbol`:L639 · `GetCompletionItemKind`:L658 · `CreateRange`:L673 · `BuildResponse`:L679
+`ExtractWordAt`:L690 · `SendRawJson`:L737 · `ReadMessageAsync`:L755
 
-### `Pilot.LanguageServer/Semantics/PilotSemanticAnalyzer.cs` (4641 lines)
-`IsBuiltinType`:L48 · `Analyze`:L274 · `CheckUnusedVariables`:L348 · `PreRegisterTopLevelDeclarations`:L385
-`RegisterFunctionStub`:L475 · `RegisterTypeStub`:L500 · `DeclareBindingPattern`:L524 · `VisitLet_stmt`:L583
-`VisitVar_stmt`:L598 · `VisitConst_stmt`:L633 · `VisitRef_stmt`:L648 · `VisitDynamic_stmt`:L663
-`VisitAnnassign_stmt`:L671 · `VisitType_alias_stmt`:L702 · `VisitPlainTypeAlias`:L711 · `VisitExpr_stmt`:L724
-`CheckImmutableMemberAssignment`:L834 · `StripGenericSuffixForLookup`:L889 · `FindFirstAtomExpr`:L896
-`VisitGuard_stmt`:L907 · `VisitDefer_stmt`:L974 · `VisitFunc_def`:L980 · `VisitContract_clause`:L1125
-`VisitPattern_assign_stmt`:L1138 · `VisitClass_def`:L1147 · `VisitStruct_def`:L1179 · `VisitInterface_def`:L1208
-`VisitEnum_def`:L1224 · `VisitActor_def`:L1266 · `VisitModel_def`:L1282 · `VisitProperty_def`:L1299
-`VisitOperator_def`:L1374 · `VisitExtension_def`:L1411 · `VisitAdapter_def`:L1430 · `VisitUnit_stmt`:L1460
-`VisitDsl_stmt`:L1476 · `VisitMacro_def`:L1492 · `VisitQuote_stmt`:L1523 · `VisitQuote_expr`:L1533
-`VisitQuasiquote_expr`:L1542 · `VisitSplice_expr`:L1554 · `VisitForeign_import_stmt`:L1566
-`VisitExtern_def`:L1661 · `ProcessExternMember`:L1724 · `ProcessExternFunction`:L1740 · `ProcessExternType`:L1816
-`VisitInline_foreign_block`:L1870 · `VisitDatabase_stmt`:L1888 · `VisitTransaction_stmt`:L1899
-`VisitSavepoint_stmt`:L1912 · `VisitSavepoint_block`:L1923 · `VisitRollback_stmt`:L1935 · `VisitNoalloc_stmt`:L1957
-`VisitWhile_stmt`:L1967 · `VisitFor_stmt`:L2001 · `VisitIf_stmt`:L2080 · `VisitFlow_stmt`:L2100
-`VisitPass_stmt`:L2216 · `VisitAssert_stmt`:L2223 · `VisitComparison`:L2230 · `VisitComp_op`:L2245
-`VisitSelect_stmt`:L2253 · `VisitSelect_arm`:L2272 · `VisitQuery_expr`:L2296 · `VisitSql_query_expr`:L2345
-`IsInsideSyncFunction`:L2373 · `VisitUnary_op`:L2390 · `VisitPrimary_type`:L2422 · `VisitAtom_expr`:L2457
-`VisitTerm`:L2570 · `VisitLabeled_stmt`:L2596 · `VisitBlock`:L2606 · `VisitLambda_expr`:L2615
-`VisitMacro_call`:L2699 · `VisitSymbol_literal`:L2711 · `VisitCascade_trailer`:L2724 · `VisitNameof_expr`:L2763
-`VisitAtom`:L2782 · `InferLiteralType`:L2970 · `ValidateAndResolveType`:L2993 · `IsCompatibleType`:L3021
-`IsStrictPrimitive`:L3117 · `NormalizePrimitive`:L3123 · `TryExtractUnit`:L3131 · `ExpandUnitExpression`:L3144
-`SuiteGuaranteesExit`:L3155 · `SimpleStmtExits`:L3168 · `VisitSimple_stmt`:L3173 · `VisitSuite`:L3207
-`StmtGuaranteesExit`:L3248 · `VisitArith_expr`:L3264 · `VisitExcept_clause`:L3304 · `VisitMatch_stmt`:L3325
-`VisitMatch_arm`:L3348 · `VisitMatchArmWithScrutinee`:L3353 · `BindPatternIdentifiers`:L3395
-`VisitRecord_def`:L3401 · `RegisterAdtSumTypeAlias`:L3459 · `RegisterAdtVariantSymbol`:L3500
-`FinishGuardSuite`:L3538 · `VisitIfBranchesWithPatterns`:L3556 · `BindPatternVarSingle`:L3665
-`BindPatternNode`:L3688 · `BindPatternNodeLegacyUnused`:L3856 · `RegisterGenericParams`:L3891
-`DeclareVariableSymbol`:L3903 · `DeclareVariableSymbolFromToken`:L3918 · `CreateSymbol`:L3952
-`CreateSymbolFromToken`:L3974 · `RegisterSymbol`:L4024 · `AddSymbolReferenceDirect`:L4051
-`AddSemanticTokenDirect`:L4063 · `ProcessFStringNode`:L4084 · `AddSymbolReference`:L4222 · `AddSemanticToken`:L4235
-`AddDiagnostic`:L4248 · `AddDiagnosticDirect`:L4271 · `GetSemanticTokenTypeForSymbol`:L4293
-`GetTokenCoords`:L4310 · `ExtractDictTypes`:L4319 · `ExtractElementType`:L4347 · `IsSubtypeOf`:L4378
-`FindCommonBaseType`:L4391 · `HomogenizeTypes`:L4425 · `TryExtractSimpleIdentifier`:L4498
-`FindFirstIdentifier`:L4507 · `Truncate`:L4518 · `EnterScope`:L4521 · `Dispose`:L4567 · `SyntaxError`:L4575
+### `Pilot.LanguageServer/Semantics/PilotSemanticAnalyzer.cs` (5144 lines)
+`IsBuiltinType`:L51 · `Analyze`:L347 · `SynchronizeInferredTypesFromAnalysis`:L424 · `SynchronizeScopeSymbols`:L550
+`FindFunctionSymbol`:L591 · `FindFunctionScope`:L603 · `FormatInferredTypeForSymbol`:L615
+`CheckUnusedVariables`:L636 · `PreRegisterTopLevelDeclarations`:L673 · `RegisterFunctionStub`:L763
+`RegisterTypeStub`:L788 · `DeclareBindingPattern`:L812 · `VisitLet_stmt`:L871 · `VisitVar_stmt`:L886
+`VisitConst_stmt`:L921 · `VisitRef_stmt`:L936 · `VisitDynamic_stmt`:L951 · `VisitAnnassign_stmt`:L959
+`VisitType_alias_stmt`:L990 · `VisitPlainTypeAlias`:L999 · `VisitExpr_stmt`:L1012
+`CheckImmutableMemberAssignment`:L1122 · `StripGenericSuffixForLookup`:L1177 · `FindFirstAtomExpr`:L1184
+`VisitGuard_stmt`:L1195 · `VisitDefer_stmt`:L1262 · `VisitFunc_def`:L1268 · `VisitContract_clause`:L1417
+`VisitPattern_assign_stmt`:L1430 · `VisitClass_def`:L1439 · `VisitStruct_def`:L1471 · `VisitInterface_def`:L1500
+`VisitEnum_def`:L1516 · `VisitActor_def`:L1558 · `VisitModel_def`:L1574 · `VisitProperty_def`:L1591
+`VisitOperator_def`:L1666 · `VisitExtension_def`:L1703 · `VisitAdapter_def`:L1724 · `VisitUnit_stmt`:L1754
+`VisitDsl_stmt`:L1770 · `VisitMacro_def`:L1786 · `VisitQuote_stmt`:L1817 · `VisitQuote_expr`:L1827
+`VisitQuasiquote_expr`:L1836 · `VisitSplice_expr`:L1848 · `VisitForeign_import_stmt`:L1860
+`VisitExtern_def`:L1955 · `ProcessExternMember`:L2018 · `ProcessExternFunction`:L2034 · `ProcessExternType`:L2110
+`VisitInline_foreign_block`:L2164 · `VisitDatabase_stmt`:L2182 · `VisitTransaction_stmt`:L2193
+`VisitSavepoint_stmt`:L2206 · `VisitSavepoint_block`:L2217 · `VisitRollback_stmt`:L2229 · `VisitNoalloc_stmt`:L2251
+`VisitWhile_stmt`:L2261 · `VisitFor_stmt`:L2295 · `VisitIf_stmt`:L2398 · `VisitFlow_stmt`:L2418
+`VisitPass_stmt`:L2570 · `VisitAssert_stmt`:L2577 · `VisitComparison`:L2584 · `VisitRange_expr`:L2604
+`VisitTest`:L2613 · `VisitComp_op`:L2630 · `VisitSelect_stmt`:L2638 · `VisitSelect_arm`:L2657
+`VisitQuery_expr`:L2681 · `VisitSql_query_expr`:L2730 · `IsInsideSyncFunction`:L2758 · `VisitUnary_op`:L2775
+`VisitPrimary_type`:L2807 · `VisitAtom_expr`:L2851 · `VisitTerm`:L3028 · `VisitLabeled_stmt`:L3054
+`VisitBlock`:L3064 · `VisitLambda_expr`:L3073 · `VisitMacro_call`:L3157 · `VisitSymbol_literal`:L3169
+`VisitCascade_trailer`:L3185 · `VisitNameof_expr`:L3224 · `VisitAtom`:L3243 · `InferLiteralType`:L3435
+`ValidateAndResolveType`:L3458 · `IsCompatibleType`:L3486 · `IsStrictPrimitive`:L3593 · `NormalizePrimitive`:L3599
+`TryExtractUnit`:L3607 · `ExpandUnitExpression`:L3620 · `SuiteGuaranteesExit`:L3631 · `SimpleStmtExits`:L3644
+`VisitSimple_stmt`:L3649 · `VisitSuite`:L3693 · `StmtGuaranteesExit`:L3739 · `VisitArith_expr`:L3755
+`VisitExcept_clause`:L3795 · `VisitMatch_stmt`:L3816 · `VisitMatch_arm`:L3839 · `VisitMatchArmWithScrutinee`:L3844
+`BindPatternIdentifiers`:L3886 · `VisitRecord_def`:L3892 · `RegisterAdtSumTypeAlias`:L3950
+`RegisterAdtVariantSymbol`:L3991 · `FinishGuardSuite`:L4029 · `VisitIfBranchesWithPatterns`:L4047
+`BindPatternVarSingle`:L4156 · `BindPatternNode`:L4179 · `BindPatternNodeLegacyUnused`:L4347
+`RegisterGenericParams`:L4382 · `DeclareVariableSymbol`:L4394 · `DeclareVariableSymbolFromToken`:L4409
+`CreateSymbol`:L4443 · `CreateSymbolFromToken`:L4465 · `RegisterSymbol`:L4515 · `AddSymbolReferenceDirect`:L4542
+`AddSemanticTokenDirect`:L4554 · `ProcessFStringNode`:L4575 · `AddSymbolReference`:L4713 · `AddSemanticToken`:L4726
+`AddDiagnostic`:L4739 · `AddDiagnosticDirect`:L4762 · `GetSemanticTokenTypeForSymbol`:L4784
+`GetTokenCoords`:L4801 · `ExtractDictTypes`:L4810 · `ExtractElementType`:L4838 · `IsSubtypeOf`:L4881
+`FindCommonBaseType`:L4894 · `HomogenizeTypes`:L4928 · `TryExtractSimpleIdentifier`:L5001
+`FindFirstIdentifier`:L5010 · `Truncate`:L5021 · `EnterScope`:L5024 · `Dispose`:L5070 · `SyntaxError`:L5078
 
-### `Pilot.LanguageServer/Semantics/PilotSymbol.cs` (392 lines)
+### `Pilot.LanguageServer/Semantics/PilotSymbol.cs` (393 lines)
 `GetLspDocumentSymbolKind`:L189 · `FormatHoverMarkdown`:L212 · `Resolve`:L286 · `GetAllVisibleSymbols`:L296
-`FindSymbolAtPosition`:L320 · `FindScopeAtLine`:L331 · `FindDeepestScope`:L336 · `EncodeSemanticTokens`:L346
+`FindSymbolAtPosition`:L321 · `FindScopeAtLine`:L332 · `FindDeepestScope`:L337 · `EncodeSemanticTokens`:L347
 
 ### `Preprocessing/PilotPreprocessor.cs` (983 lines)
 `ToString`:L24 · `IsWarningSuppressed`:L69 · `Preprocess`:L103 · `ProcessDirective`:L219 · `ProcessPragma`:L447
@@ -362,8 +411,9 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 `ParseUnary`:L705 · `ParsePrimary`:L715 · `GetIndent`:L767 · `FindTrailingCommentIndex`:L779
 `IsBlockStartLine`:L801 · `EndsWithBlockColon`:L831 · `DesugarColonBlocks`:L877
 
-### `Runtime/Builtins/PilotBuiltinRegistry.cs` (935 lines)
-`Register`:L25 · `Register`:L30 · `TryGet`:L38 · `GetAll`:L41 · `RegisterDefaults`:L43 · `GetOperatorFunction`:L913
+### `Runtime/Builtins/PilotBuiltinRegistry.cs` (1074 lines)
+`Register`:L25 · `Register`:L30 · `TryGet`:L38 · `GetAll`:L41 · `RegisterDefaults`:L43
+`GetOperatorFunction`:L1052
 
 ### `Runtime/Bytecode/PilotBytecodeChunk.cs` (586 lines)
 `Emit`:L89 · `EmitJump`:L97 · `PatchJump`:L107 · `AddJumpTable`:L121 · `AddTypeDescriptor`:L130
@@ -372,11 +422,11 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 `WriteValue`:L453 · `ReadValue`:L522 · `ReadKeywordVariant`:L545 · `ReadList`:L554 · `ReadTuple`:L565
 `ReadRange`:L576
 
-### `Runtime/Bytecode/PilVirtualMachine.cs` (1483 lines)
-`Execute`:L28 · `DeclareTypeDescriptorInContext`:L1128 · `RefreshLayouts`:L1181 · `CheckRuntimeTypeMatch`:L1193
-`MatchesClassHierarchy`:L1289 · `EnsureStackCapacity`:L1310 · `InvokeCallable`:L1319 · `InvokeMethod`:L1358
-`CreateIterator`:L1375 · `EnumerateRange`:L1416 · `EnumerateString`:L1430 · `EnumerateObjects`:L1438
-`EnumerateSingle`:L1446 · `CreateParameters`:L1451
+### `Runtime/Bytecode/PilVirtualMachine.cs` (1530 lines)
+`Execute`:L28 · `DeclareTypeDescriptorInContext`:L1158 · `RefreshLayouts`:L1211 · `CheckRuntimeTypeMatch`:L1223
+`MatchesClassHierarchy`:L1326 · `EnsureStackCapacity`:L1347 · `InvokeCallable`:L1356 · `InvokeMethod`:L1395
+`CreateIterator`:L1412 · `EnumerateSliceBuffer`:L1455 · `EnumerateRange`:L1463 · `EnumerateString`:L1477
+`EnumerateObjects`:L1485 · `EnumerateSingle`:L1493 · `CreateParameters`:L1498
 
 ### `Runtime/Execution/PilotEngine.cs` (650 lines)
 `Execute`:L21 · `Execute`:L27 · `ExecuteFile`:L153 · `EvaluateExpression`:L168 · `InvokeFunction`:L186
@@ -384,46 +434,47 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 `TranspileTo`:L486 · `TranspileFrom`:L492 · `Compile`:L498 · `CompileFile`:L508 · `CreateCallScope`:L518
 `SnapshotOldCalls`:L581 · `Write`:L627 · `Write`:L633 · `WriteLine`:L639 · `Flush`:L645
 
-### `Runtime/Execution/PilotInterpreterVisitor.cs` (5145 lines)
+### `Runtime/Execution/PilotInterpreterVisitor.cs` (5522 lines)
 `VisitProgram`:L84 · `VisitStmt`:L129 · `VisitSimple_stmt`:L143 · `VisitSuite`:L160 · `VisitLet_stmt`:L184
-`VisitVar_stmt`:L192 · `VisitConst_stmt`:L200 · `DeclareBinding`:L208 · `DeclareRecordPattern`:L236
-`ProcessRecordRestPattern`:L264 · `ProcessRecordFieldPattern`:L296 · `DeclareListPattern`:L358
-`DeclareTuplePattern`:L431 · `VisitPattern_assign_stmt`:L504 · `VisitExpr_stmt`:L522 · `TryUnwrapAtomExpr`:L576
-`AnalyzeTarget`:L616 · `EvaluateAtomExprPrefix`:L693 · `AssignTarget`:L778 · `VisitFunc_def`:L913
-`ContainsYield`:L1011 · `ContainsYieldCore`:L1017 · `VisitClass_def`:L1034 · `VisitState_def`:L1199
-`VisitMacro_def`:L1252 · `VisitType_alias_stmt`:L1280 · `VisitEnum_def`:L1343 · `VisitRecord_def`:L1362
-`VisitStruct_def`:L1401 · `DefaultValueForType`:L1461 · `RegisterAdtDefinition`:L1470
-`RefreshAllAdtAndRecordLayouts`:L1493 · `IsKnownTypeOrBinding`:L1505 · `ExtractGenericParamNames`:L1521
-`ExtractAdtFields`:L1527 · `VisitExtension_def`:L1556 · `EnsureSelfParameter`:L1669
-`SanitizeExtensionTargetName`:L1682 · `VisitAdapter_def`:L1692 · `VisitSteal_stmt`:L1739
-`VisitDelegate_stmt`:L1779 · `VisitContract_forward_stmt`:L1800 · `VisitIf_stmt`:L1825
-`HasBranchSomeKeyword`:L1905 · `FindBranchPattern`:L1925 · `FindBranchPatternGuard`:L1944
-`IsBareOptionalBindingPattern`:L1963 · `VisitWhile_stmt`:L1988 · `VisitLabeled_stmt`:L2114 · `VisitBlock`:L2145
-`VisitFor_stmt`:L2168 · `TryGetSimpleForTargetName`:L2522 · `VisitWith_stmt`:L2540 · `AssignForTarget`:L2621
-`VisitMatch_stmt`:L2647 · `EvaluateMatchSuite`:L2676 · `VisitGuard_stmt`:L2703 · `EvaluateGuardRhs`:L2802
-`VisitDefer_stmt`:L2849 · `IsKnownExceptionTypeName`:L2906 · `VisitTry_stmt`:L2916 · `IsExceptionMatching`:L3033
-`VisitAssert_stmt`:L3057 · `VisitFlow_stmt`:L3071 · `VisitTestlist`:L3200 · `VisitTest`:L3217
-`VisitLambda_expr`:L3242 · `VisitPipe_expr`:L3318 · `VisitSet_query_expr`:L3335 · `VisitCoalesce_expr`:L3344
-`VisitCoalesceExprPrefix`:L3349 · `EvaluateCatchClause`:L3386 · `VisitOr_test`:L3423 · `VisitAnd_test`:L3437
-`VisitNot_test`:L3451 · `VisitComparison`:L3460 · `VisitRange_expr`:L3503 · `VisitBitor_expr`:L3518
-`VisitBitxor_expr`:L3532 · `VisitBitand_expr`:L3546 · `VisitShift_expr`:L3560 · `VisitArith_expr`:L3577
-`VisitTerm`:L3594 · `EvaluateProjection`:L3646 · `VisitFactor`:L3706 · `VisitUnary_op`:L3715 · `VisitPower`:L3754
-`VisitAtom_expr`:L3769 · `CreateFluentMemberFunction`:L3906 · `TryInvokeDirectMemberCall`:L3948
-`EvaluateCascade`:L4079 · `DispatchCall`:L4128 · `InvokeCallableSingle`:L4247 · `ExtractCollectionItems`:L4352
-`EvaluateCallArguments`:L4407 · `EvaluateArglist`:L4413 · `BindArgumentsToFunction`:L4418
-`IsCollectionOrTupleParameterType`:L4498 · `VisitAtom`:L4528 · `VisitSymbol_literal`:L4555
-`ResolveIdentifier`:L4568 · `VisitLiteral`:L4588 · `ParseDurationLiteralSeconds`:L4697
-`ParseFrequencyLiteralHz`:L4715 · `ParseMemoryLiteralBytes`:L4729 · `IsSimpleIdentifier`:L4745
-`ParseFStringSegments`:L4758 · `EvaluateFString`:L4804 · `UnescapeString`:L4848 · `VisitCollection_expr`:L4861
-`VisitDictorsetmaker`:L4892 · `VisitTestlist_comp`:L4975 · `VisitInline_foreign_block`:L4991
-`GetBlockBodyText`:L5112
+`VisitVar_stmt`:L192 · `VisitConst_stmt`:L200 · `EvaluateDeclarationInitializer`:L208 · `TryUnwrapForStmt`:L283
+`DeclareBinding`:L293 · `DeclareRecordPattern`:L321 · `ProcessRecordRestPattern`:L349
+`ProcessRecordFieldPattern`:L381 · `DeclareListPattern`:L443 · `DeclareTuplePattern`:L516
+`VisitPattern_assign_stmt`:L589 · `VisitExpr_stmt`:L607 · `TryUnwrapAtomExpr`:L684 · `AnalyzeTarget`:L724
+`EvaluateAtomExprPrefix`:L801 · `AssignTarget`:L886 · `VisitFunc_def`:L1021 · `ContainsYield`:L1120
+`ContainsYieldCore`:L1126 · `VisitClass_def`:L1143 · `VisitState_def`:L1308 · `VisitMacro_def`:L1361
+`VisitExtern_def`:L1396 · `VisitType_alias_stmt`:L1450 · `VisitEnum_def`:L1513 · `VisitRecord_def`:L1532
+`VisitStruct_def`:L1571 · `DefaultValueForType`:L1631 · `RegisterAdtDefinition`:L1640
+`RefreshAllAdtAndRecordLayouts`:L1663 · `IsKnownTypeOrBinding`:L1675 · `ExtractGenericParamNames`:L1691
+`ExtractAdtFields`:L1697 · `VisitExtension_def`:L1726 · `EnsureSelfParameter`:L1839
+`SanitizeExtensionTargetName`:L1852 · `VisitAdapter_def`:L1862 · `VisitSteal_stmt`:L1909
+`VisitDelegate_stmt`:L1949 · `VisitContract_forward_stmt`:L1970 · `VisitIf_stmt`:L1995
+`HasBranchSomeKeyword`:L2075 · `FindBranchPattern`:L2095 · `FindBranchPatternGuard`:L2114
+`IsBareOptionalBindingPattern`:L2133 · `VisitWhile_stmt`:L2158 · `VisitLabeled_stmt`:L2284 · `VisitBlock`:L2315
+`VisitFor_stmt`:L2338 · `TryGetSimpleForTargetName`:L2785 · `VisitWith_stmt`:L2803 · `AssignForTarget`:L2884
+`VisitMatch_stmt`:L2910 · `EvaluateMatchSuite`:L2939 · `VisitGuard_stmt`:L2966 · `EvaluateGuardRhs`:L3065
+`VisitDefer_stmt`:L3112 · `IsKnownExceptionTypeName`:L3169 · `VisitTry_stmt`:L3179 · `IsExceptionMatching`:L3296
+`VisitAssert_stmt`:L3320 · `VisitFlow_stmt`:L3334 · `VisitTestlist`:L3463 · `VisitTest`:L3480
+`VisitLambda_expr`:L3505 · `VisitPipe_expr`:L3581 · `VisitSet_query_expr`:L3598 · `VisitCoalesce_expr`:L3607
+`VisitCoalesceExprPrefix`:L3612 · `EvaluateCatchClause`:L3649 · `VisitOr_test`:L3686 · `VisitAnd_test`:L3700
+`VisitNot_test`:L3714 · `VisitComparison`:L3727 · `VisitRange_expr`:L3770 · `VisitBitor_expr`:L3785
+`VisitBitxor_expr`:L3799 · `VisitBitand_expr`:L3813 · `VisitShift_expr`:L3827 · `VisitArith_expr`:L3844
+`VisitTerm`:L3861 · `EvaluateProjection`:L3913 · `VisitFactor`:L3973 · `VisitUnary_op`:L3983 · `VisitPower`:L4022
+`VisitAtom_expr`:L4037 · `CreateFluentMemberFunction`:L4204 · `TryInvokeDirectMemberCall`:L4246
+`EvaluateCascade`:L4377 · `DispatchCall`:L4426 · `InvokeCallableSingle`:L4570 · `ExtractCollectionItems`:L4690
+`EvaluateCallArguments`:L4745 · `EvaluateArglist`:L4751 · `BindArgumentsToFunction`:L4756
+`IsCollectionOrTupleParameterType`:L4836 · `VisitAtom`:L4866 · `VisitSymbol_literal`:L4898
+`VisitMacro_call`:L4919 · `IsBuiltinSpecialFormName`:L4936 · `ResolveIdentifier`:L4941 · `VisitLiteral`:L4961
+`ParseDurationLiteralSeconds`:L5070 · `ParseFrequencyLiteralHz`:L5088 · `ParseMemoryLiteralBytes`:L5102
+`IsSimpleIdentifier`:L5118 · `ParseFStringSegments`:L5131 · `EvaluateFString`:L5177 · `UnescapeString`:L5221
+`VisitCollection_expr`:L5234 · `VisitDictorsetmaker`:L5265 · `VisitTestlist_comp`:L5348
+`VisitInline_foreign_block`:L5364 · `GetBlockBodyText`:L5489
 
-### `Runtime/Execution/PilotPatternMatcher.cs` (970 lines)
+### `Runtime/Execution/PilotPatternMatcher.cs` (986 lines)
 `Match`:L25 · `MatchPatternInternal`:L46 · `MatchOrPattern`:L57 · `MatchAndPattern`:L86 · `MatchNotPattern`:L103
 `MatchPrimaryPattern`:L134 · `MatchRangePattern`:L249 · `EvaluateRangeBound`:L295 · `ParseSignedNumber`:L315
-`ParseUnsignedIntToken`:L326 · `MatchKeywordPattern`:L335 · `MatchTypeOrVarPattern`:L396 · `MatchAdtFields`:L716
-`MatchRecordFields`:L764 · `MatchPropertyPattern`:L803 · `MatchesObjectType`:L847 · `MatchesPrimitiveType`:L875
-`MatchCollectionSlice`:L898
+`ParseUnsignedIntToken`:L326 · `MatchKeywordPattern`:L335 · `MatchTypeOrVarPattern`:L396 · `MatchAdtFields`:L732
+`MatchRecordFields`:L780 · `MatchPropertyPattern`:L819 · `MatchesObjectType`:L863 · `MatchesPrimitiveType`:L891
+`MatchCollectionSlice`:L914
 
 ### `Runtime/HotReload/PilotHotReloader.cs` (732 lines)
 `CreateNonExistent`:L50 · `Capture`:L54 · `Restore`:L107 · `ToPilotMap`:L190 · `ToPilotMap`:L218
@@ -431,21 +482,37 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 `Rollback`:L522 · `WatchFile`:L573 · `UnwatchAll`:L634 · `Dispose`:L645 · `IsCompiledBinary`:L650
 `RestoreScopeChain`:L663 · `ExtractTopLevelDeclaredSymbols`:L689 · `ComputeSha256Hex`:L727
 
-### `Runtime/Interop/PolyglotRegistry.cs` (670 lines)
-`Register`:L34 · `TryGet`:L40 · `NormalizeLanguage`:L46 · `Get`:L58 · `ExecuteBlock`:L82 · `Invoke`:L108
-`Import`:L126 · `EvaluatePythonLiteralOrMarshal`:L131 · `ExecuteBlock`:L159 · `Invoke`:L183 · `Import`:L198
-`EvaluateCSharpLiteralOrMarshal`:L203 · `ExecuteBlock`:L231 · `Invoke`:L250 · `Import`:L255 · `ExecuteBlock`:L274
-`Invoke`:L308 · `Import`:L311 · `ExecuteBlock`:L328 · `Invoke`:L360 · `Import`:L363 · `ExecuteBlock`:L380
-`Invoke`:L429 · `Import`:L432 · `ExecuteBlock`:L449 · `Invoke`:L474 · `Import`:L477 · `ExecuteBlock`:L494
-`Invoke`:L518 · `Import`:L521 · `ExecuteBlock`:L538 · `Invoke`:L568 · `Import`:L571 · `ExecuteBlock`:L588
-`ExecuteSqlQuery`:L593 · `Invoke`:L642 · `Import`:L645 · `ExecuteBlock`:L662 · `Invoke`:L665 · `Import`:L668
+### `Runtime/Interop/PolyglotRegistry.cs` (1572 lines)
+`Register`:L40 · `TryGet`:L46 · `NormalizeLanguage`:L52 · `Get`:L64 · `ExecuteBlock`:L88 · `Invoke`:L119
+`Import`:L137 · `EvaluatePythonLiteralOrMarshal`:L142 · `ExecuteBlock`:L170 · `Invoke`:L198 · `Import`:L213
+`EvaluateCSharpLiteralOrMarshal`:L218 · `ExecuteBlock`:L246 · `Invoke`:L269 · `Import`:L274 · `ExecuteBlock`:L293
+`Invoke`:L331 · `Import`:L334 · `ExecuteBlock`:L351 · `Invoke`:L383 · `Import`:L386 · `ExecuteBlock`:L403
+`Invoke`:L533 · `Import`:L536 · `ExecuteBlock`:L553 · `Invoke`:L582 · `Import`:L585 · `ExecuteBlock`:L602
+`Invoke`:L630 · `Import`:L633 · `ExecuteBlock`:L650 · `Invoke`:L680 · `Import`:L683 · `ExecuteBlock`:L700
+`ExecuteSqlQuery`:L705 · `Invoke`:L754 · `Import`:L757 · `ExecuteBlock`:L774 · `Invoke`:L777 · `Import`:L780
+`LocateExecutable`:L793 · `CollectReferencedBuffers`:L819 · `ContainsIdentifierToken`:L854
+`TryExecutePythonSharedMemory`:L872 · `TryExecuteNodeSharedMemory`:L995 · `ParseSubprocessReturn`:L1089
+`TryExecuteInProcessBufferScript`:L1125 · `SplitForeignStatements`:L1156 · `ExecuteForeignStatementList`:L1190
+`TryMatchBufferAliasRhs`:L1325 · `EvaluateNumericExpr`:L1345 · `EvaluateNumericExpr`:L1351
+`IsBalancedOuterParens`:L1418 · `FindTopLevelBinaryOp`:L1433 · `ResolveAsmScalarOperand`:L1455
+`ResolveAsmFloatOperand`:L1501 · `TryResolveAsmMemoryAddress`:L1519
 
-### `Runtime/Interop/PolyglotTypeBridge.cs` (442 lines)
+### `Runtime/Interop/PolyglotTypeBridge.cs` (490 lines)
 `RegisterCustomMapper`:L24 · `ToPilotValue`:L30 · `TryMapPrimitiveToPilotValue`:L66
-`TryMapCollectionToPilotValue`:L145 · `ToForeignValue`:L201 · `MapKindToForeignValue`:L226
-`TryCoerceToForeignType`:L250 · `ConvertPocoToPilotObject`:L280 · `ConvertListToHost`:L326
-`ConvertMapToHost`:L336 · `InferForeignReturnPilotType`:L352 · `InferForeignClrPilotType`:L383
-`InferSqlColumnPilotType`:L407 · `MapClrBaseType`:L430
+`TryMapCollectionToPilotValue`:L179 · `ToForeignValue`:L235 · `MapKindToForeignValue`:L260
+`TryCoerceToForeignType`:L285 · `ConvertPocoToPilotObject`:L328 · `ConvertListToHost`:L374
+`ConvertMapToHost`:L384 · `InferForeignReturnPilotType`:L400 · `InferForeignClrPilotType`:L431
+`InferSqlColumnPilotType`:L455 · `MapClrBaseType`:L478
+
+### `Runtime/NativeMemory/PilotSharedBuffer.cs` (750 lines)
+`AllocateUnmanaged`:L100 · `CreateOrOpenShared`:L121 · `WrapExternalPointer`:L140 · `MapBackingFile`:L156
+`EnsureSharedMapping`:L202 · `OpenIndependentView`:L248 · `SliceView`:L260 · `ResetLength`:L276
+`ReserveInitialCapacity`:L286 · `EnsureCapacityForYield`:L305 · `YieldElement`:L337 · `GetElement`:L348
+`SetElement`:L368 · `WriteRawUnchecked`:L384 · `AsSpan`:L410 · `CapacitySpan`:L423 · `AsTypedSliceBuffer`:L436
+`Sum`:L444 · `ScaleInPlace`:L495 · `Fill`:L537 · `ToPilotValueList`:L548 · `Flush`:L557 · `Equals`:L562
+`Equals`:L575 · `GetHashCode`:L577 · `ToString`:L579 · `GetStride`:L593 · `GetCanonicalElementName`:L603
+`GetPythonStructFormat`:L613 · `ParseElementKind`:L623 · `ResolveBackingFilePath`:L655 · `EnsureNotDisposed`:L683
+`ReleaseCurrentMapping`:L689 · `Dispose`:L717 · `Dispose`:L740
 
 ### `Runtime/Packaging/PilotPackageManager.cs` (376 lines)
 `RegisterAdapter`:L34 · `TryGetAdapter`:L42 · `Init`:L50 · `Add`:L85 · `Remove`:L123 · `Restore`:L159 · `List`:L246
@@ -462,11 +529,12 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 `Equals`:L974 · `GetHashCode`:L976 · `ToString`:L987 · `Equals`:L1013 · `Equals`:L1025 · `GetHashCode`:L1027
 `ToString`:L1035
 
-### `Runtime/Values/PilotMethodGroup.cs` (551 lines)
-`AddOverload`:L53 · `CloneSnapshot`:L71 · `RestoreFromSnapshot`:L77 · `Union`:L90 · `BindTo`:L105 · `Invoke`:L114
-`ExtractCollectionElements`:L246 · `ExecuteOverload`:L254 · `TryMatchOverload`:L272 · `CanPartiallyMatch`:L358
-`IsTypeCompatible`:L395 · `IsTypeCompatible`:L400 · `IsDirectlyCompatible`:L421 · `GetOverloadValues`:L500
-`BuildSignature`:L531 · `ToString`:L549
+### `Runtime/Values/PilotMethodGroup.cs` (635 lines)
+`AddOverload`:L54 · `CloneSnapshot`:L73 · `RestoreFromSnapshot`:L79 · `Union`:L92 · `BindTo`:L107 · `Invoke`:L116
+`ExtractCollectionElements`:L250 · `ExecuteOverload`:L258 · `TryMatchOverload`:L276 · `CanPartiallyMatch`:L362
+`IsTypeCompatible`:L399 · `IsTypeCompatible`:L404 · `IsDirectlyCompatible`:L425
+`ComputeOverloadSpecificityScore`:L518 · `MatchesReifiedType`:L559 · `MatchesSingleTypeFunction`:L571
+`GetOverloadValues`:L584 · `BuildSignature`:L615 · `ToString`:L633
 
 ### `Runtime/Values/PilotObject.cs` (649 lines)
 `Union`:L31 · `Subtract`:L59 · `Subtract`:L93 · `Intersect`:L107 · `CloneWithName`:L134 · `MergeMethodValue`:L151
@@ -474,29 +542,29 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 `PopulateDefaultFields`:L373 · `ToString`:L387 · `GetMember`:L413 · `SetMember`:L557 · `BindMethodValue`:L562
 `BindMethod`:L595 · `Clone`:L597 · `Equals`:L607 · `Equals`:L621 · `GetHashCode`:L623 · `ToString`:L635
 
-### `Runtime/Values/PilotValue.cs` (2103 lines)
+### `Runtime/Values/PilotValue.cs` (2295 lines)
 `CreateTable`:L38 · `FromBool`:L63 · `FromInt`:L64 · `FromUInt`:L65 · `FromFloat`:L66 · `FromDecimal`:L67
 `FromChar`:L68 · `FromString`:L69 · `FromKeyword`:L70 · `FromKeyword`:L71 · `FromList`:L72 · `FromTuple`:L73
 `FromMap`:L74 · `FromSet`:L75 · `FromRange`:L76 · `FromMatrix`:L77 · `FromFunction`:L78 · `FromObject`:L79
 `FromGenerator`:L80 · `FromLazy`:L81 · `FromFuture`:L82 · `FromForeign`:L83 · `FromMethodGroup`:L84
-`FromNativeArray`:L85 · `FromNativeMap`:L86 · `FromAdtType`:L87 · `FromAdtUnit`:L88 · `FromAdtBoxed`:L89
-`FromRecordUnboxedEmpty`:L90 · `FromRecordUnboxedPairF64`:L91 · `FromRecordBoxed`:L93 · `FromKeywordVariant`:L94
-`FromSome`:L102 · `UnwrapOption`:L119 · `FromFailure`:L139 · `UnwrapFailure`:L159
-`TryCreateUnboxedAdtSingle`:L191 · `PilotValue`:L214 · `PilotValue`:L215 · `PilotValue`:L216 · `PilotValue`:L217
-`PilotValue`:L218 · `PilotValue`:L219 · `PilotValue`:L220 · `PilotValue`:L221 · `PilotValue`:L222 · `AsInt`:L250
-`AsFloat`:L262 · `AsString`:L274 · `AsDecimal`:L275 · `AsChar`:L276 · `AsKeyword`:L277 · `AsList`:L279
-`AsTuple`:L280 · `AsMap`:L281 · `AsSet`:L282 · `AsRange`:L283 · `AsMatrix`:L284 · `AsFunction`:L285
-`AsObject`:L286 · `AsGenerator`:L287 · `AsLazy`:L288 · `AsFuture`:L289 · `AsMethodGroup`:L290
-`AsNativeArray`:L291 · `AsNativeMap`:L292 · `AsForeign`:L293 · `AsAdtType`:L301 · `AsKeywordVariant`:L302
-`GetAdtVariantDefinition`:L304 · `GetAdtTag`:L312 · `GetAdtFieldCount`:L314 · `GetAdtField`:L316
-`GetRecordDefinition`:L339 · `GetRecordFieldCount`:L346 · `GetRecordField`:L348 · `CreateClassConstructor`:L368
-`GetMember`:L687 · `CreateParseError`:L1189 · `ComputeCollectionSum`:L1198 · `InvokeSingleCallback`:L1221
-`MapCollection`:L1238 · `FilterCollection`:L1248 · `TryInvokePrimitiveIntrinsic`:L1266
-`EnumerateCollection`:L1739 · `CreateAppendFunction`:L1747 · `ResolveExtensionOrRoot`:L1793
-`ResolveRootMember`:L1831 · `CloneValue`:L1884 · `Equals`:L1900 · `EqualsAdt`:L1945 · `EqualsRecord`:L1960
-`ComputeAdtHashCode`:L1975 · `ComputeRecordHashCode`:L1985 · `FormatAdt`:L1994 · `FormatRecord`:L2004
-`EqualsList`:L2018 · `EqualsTuple`:L2025 · `EqualsMap`:L2032 · `Equals`:L2042 · `GetHashCode`:L2044
-`ToString`:L2059 · `FormatNestedSome`:L2095
+`FromNativeArray`:L85 · `FromNativeMap`:L86 · `FromSliceBuffer`:L87 · `FromAdtType`:L88 · `FromAdtUnit`:L89
+`FromAdtBoxed`:L90 · `FromRecordUnboxedEmpty`:L91 · `FromRecordUnboxedPairF64`:L92 · `FromRecordBoxed`:L94
+`FromKeywordVariant`:L95 · `FromSome`:L103 · `UnwrapOption`:L120 · `FromFailure`:L140 · `UnwrapFailure`:L160
+`TryCreateUnboxedAdtSingle`:L193 · `PilotValue`:L216 · `PilotValue`:L217 · `PilotValue`:L218 · `PilotValue`:L219
+`PilotValue`:L220 · `PilotValue`:L221 · `PilotValue`:L222 · `PilotValue`:L223 · `PilotValue`:L224 · `AsInt`:L253
+`AsFloat`:L265 · `AsString`:L277 · `AsDecimal`:L278 · `AsChar`:L279 · `AsKeyword`:L280 · `AsList`:L282
+`AsTuple`:L283 · `AsMap`:L284 · `AsSet`:L285 · `AsRange`:L286 · `AsMatrix`:L287 · `AsFunction`:L288
+`AsObject`:L289 · `AsGenerator`:L290 · `AsLazy`:L291 · `AsFuture`:L292 · `AsMethodGroup`:L293
+`AsNativeArray`:L294 · `AsNativeMap`:L295 · `AsSliceBuffer`:L296 · `AsForeign`:L297 · `AsAdtType`:L305
+`AsKeywordVariant`:L306 · `GetAdtVariantDefinition`:L308 · `GetAdtTag`:L316 · `GetAdtFieldCount`:L318
+`GetAdtField`:L320 · `GetRecordDefinition`:L343 · `GetRecordFieldCount`:L350 · `GetRecordField`:L352
+`CreateClassConstructor`:L372 · `GetMember`:L707 · `CreateParseError`:L1334 · `ComputeCollectionSum`:L1343
+`InvokeSingleCallback`:L1366 · `MapCollection`:L1383 · `FilterCollection`:L1393
+`TryInvokePrimitiveIntrinsic`:L1411 · `EnumerateCollection`:L1925 · `CreateAppendFunction`:L1933
+`ResolveExtensionOrRoot`:L1979 · `ResolveRootMember`:L2017 · `CloneValue`:L2070 · `Equals`:L2086
+`EqualsAdt`:L2136 · `EqualsRecord`:L2151 · `ComputeAdtHashCode`:L2166 · `ComputeRecordHashCode`:L2176
+`FormatAdt`:L2185 · `FormatRecord`:L2195 · `EqualsList`:L2209 · `EqualsTuple`:L2216 · `EqualsMap`:L2223
+`Equals`:L2233 · `GetHashCode`:L2235 · `ToString`:L2250 · `FormatNestedSome`:L2287
 
 ### `Runtime/Venv/PilotVirtualEnvironment.cs` (446 lines)
 `CheckVersionCompatibility`:L41 · `Load`:L44 · `Save`:L91 · `Create`:L157 · `Detect`:L220 · `Activate`:L252
@@ -560,9 +628,9 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 `VisitForStmt`:L349 · `VisitMatchStmt`:L364 · `VisitForeignBlock`:L387 · `VisitSuite`:L402 · `FormatExpr`:L429
 `MapType`:L447
 
-### `vscode-pilot/src/extension.ts` (700 lines)
-`pickNewestExistingFile`:L18 · `resolvePilotExecutionPrefix`:L40 · `activate`:L321 · `addOrUpdateLaunchJson`:L622
-`deactivate`:L700
+### `vscode-pilot/src/extension.ts` (711 lines)
+`pickNewestExistingFile`:L18 · `resolvePilotExecutionPrefix`:L40 · `activate`:L332 · `addOrUpdateLaunchJson`:L633
+`deactivate`:L711
 
 ---
 
@@ -588,16 +656,18 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 - `README.md` (756 L)
 
 ### Analysis
+- `Analysis/CallQuoting/PilotCallQuotingEngine.cs` (1628 L) — enum `CallQuoteKind`:L22, class `PilotCallExpr`:L38, enum `PilotAstNodeKind`:L123, class `PilotAstExpr`:L140, struct `CallFrame_ComputeImpulse`:L703, class `PilotAbiCallFrame`:L723, class `PilotCallQuotingEngine`:L839
 - `Analysis/ContractVerification/PilotContractVerifier.cs` (227 L) — class `PilotContractVerifier`:L14, class `FunctionContractInfo`:L21
 - `Analysis/DimensionalAnalysis/PilotDimensionChecker.cs` (344 L) — class `UnitDimensionSignature`:L13, class `PilotDimensionChecker`:L101
 - `Analysis/Loops/PilotForLoopAnalyzer.cs` (473 L) — enum `LoopScheduleMode`:L11, enum `LoopReturnMode`:L26, class `PilotForLoopInfo`:L41, class `PilotForLoopAnalyzer`:L58, class `ScopedBodyScanState`:L453
 - `Analysis/Ownership/PilotBorrowChecker.cs` (503 L) — enum `ResourceState`:L13, enum `ResourceAffinity`:L25, class `ResourceBinding`:L44, class `PilotBorrowChecker`:L68
 - `Analysis/PatternMatching/PilotExhaustivenessChecker.cs` (2046 L) — class `PilotExhaustivenessChecker`:L21, record `MatchPat`:L536, record `WildPat`:L537, record `OrPat`:L541, record `CtorPat`:L542, enum `CtorFamily`:L544, record `CtorDesc`:L563
-- `Analysis/PilotAnalysisPipeline.cs` (148 L) — class `PilotStaticAnalysisResult`:L17, class `PilotAnalysisPipeline`:L46, class `NullAssertionSyntaxListener`:L124
+- `Analysis/PilotAnalysisPipeline.cs` (154 L) — class `PilotStaticAnalysisResult`:L17, class `PilotAnalysisPipeline`:L52, class `NullAssertionSyntaxListener`:L130
+- `Analysis/TypeSystem/PilotBidirectionalInferencer.cs` (4138 L) — class `PilotSourceSpan`:L14, class `PilotTypeConstraint`:L66, enum `PilotInlayHintKind`:L99, class `PilotInlayHint`:L109, class `PilotMonomorphizedCallSite`:L142, class `PilotFunctionScheme`:L178, class `PilotNominalTypeLayout`:L245, class `PilotBidirectionalInferencer`:L278
 - `Analysis/TypeSystem/PilotErrorFlowAnalyzer.cs` (1240 L) — class `PilotErrorFlowAnalyzer`:L19, class `FallibleFunctionInfo`:L27, class `ErrorScope`:L45
 - `Analysis/TypeSystem/PilotNullSafetyAnalyzer.cs` (1481 L) — class `PilotNullSafetyAnalyzer`:L16, class `FunctionSignatureInfo`:L18, class `TypeMemberInfo`:L26, class `NullSafetyScope`:L33
-- `Analysis/TypeSystem/PilotType.cs` (277 L) — enum `PilotTypeKind`:L10, class `PilotType`:L32
-- `Analysis/TypeSystem/PilotTypeInferenceEngine.cs` (573 L) — class `PilotAnalysisDiagnostic`:L13, class `PilotTypeInferenceEngine`:L39
+- `Analysis/TypeSystem/PilotType.cs` (753 L) — enum `PilotTypeKind`:L10, enum `PilotTypeClassConstraint`:L32, class `PilotType`:L47
+- `Analysis/TypeSystem/PilotTypeInferenceEngine.cs` (336 L) — class `PilotAnalysisDiagnostic`:L13, class `PilotTypeInferenceEngine`:L40
 
 ### antlr
 - `antlr/concurrency/ConcurrencyLexer.g4` (23 L)
@@ -608,7 +678,7 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 - `antlr/csharp/CSharpParser.g4` (54 L)
 - `antlr/database/DatabaseLexer.g4` (68 L)
 - `antlr/database/DatabaseParser.g4` (163 L)
-- `antlr/Pilot.g4` (1690 L)
+- `antlr/Pilot.g4` (1709 L)
 - `antlr/realtime/RealtimeLexer.g4` (34 L)
 - `antlr/realtime/RealtimeParser.g4` (32 L)
 - `antlr/udsa/UDSALexer.g4` (19 L)
@@ -640,7 +710,7 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 ### Compiler
 - `Compiler/IPilotCompiler.cs` (34 L) — interface `IPilotCompiler`:L8
 - `Compiler/IPilotProgram.cs` (74 L) — interface `IPilotProgram`:L13
-- `Compiler/PilotBytecodeCompiler.cs` (2464 L) — class `PilotBytecodeCompiler`:L17, class `LoopContext`:L225
+- `Compiler/PilotBytecodeCompiler.cs` (2523 L) — class `PilotBytecodeCompiler`:L17, class `LoopContext`:L225
 - `Compiler/PilotCompilationException.cs` (19 L) — class `PilotCompilationException`:L8
 - `Compiler/PilotCompilationResult.cs` (42 L) — class `PilotCompilationResult`:L9
 - `Compiler/PilotCompiledProgram.cs` (607 L) — class `PilotCompiledProgram`:L20
@@ -714,37 +784,41 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 - `examples/showcase/17_modern_null_safety.pilot` (33 L)
 - `examples/showcase/18_values_first_error_system.pilot` (45 L)
 - `examples/showcase/19_expression_ergonomics_and_extensions.pilot` (32 L)
-- `examples/showcase/20_dynamic_for_expressions_and_c_abi.pilot` (46 L)
+- `examples/showcase/20_dynamic_for_expressions_and_c_abi.pilot` (94 L)
+- `examples/showcase/21_advanced_type_inference.pilot` (33 L)
+- `examples/showcase/22_homoiconic_call_quoting.pilot` (39 L)
 - `examples/showcase/run_all.ps1` (14 L)
 
 ### Native
 - `Native/Assembly/PilotAssemblyEmitter.cs` (213 L) — class `PilotAssemblyEmitter`:L13
-- `Native/CAbi/PilotCAbiEmitter.cs` (515 L) — class `PilotCAbiEmitter`:L19, class `StructDescriptor`:L190, class `AdtDescriptor`:L196, class `FunctionDescriptor`:L202, class `CAbiExtractionVisitor`:L209
+- `Native/CAbi/PilotCAbiEmitter.cs` (554 L) — class `PilotCAbiEmitter`:L19, class `StructDescriptor`:L195, class `AdtDescriptor`:L201, class `FunctionDescriptor`:L207, class `CAbiExtractionVisitor`:L214
 - `Native/Llvm/PilotLlvmEmitter.cs` (1869 L) — class `PilotLlvmEmitter`:L21
 - `Native/PilotNativeCompiler.cs` (373 L) — enum `NativeCompilationTarget`:L16, class `PilotNativeOptions`:L31, class `PilotNativeResult`:L46, class `PilotNativeCompiler`:L90
-- `Native/Runtime/pilot_runtime.h` (164 L)
+- `Native/Runtime/pilot_runtime.h` (182 L)
 - `Native/Wasm/PilotWasmEmitter.cs` (878 L) — class `PilotWasmEmitter`:L18
 
 ### Pilot.LanguageServer
-- `Pilot.LanguageServer/Lsp/PilotLspServer.cs` (747 L) — class `PilotLspServer`:L17
+- `Pilot.LanguageServer/Lsp/PilotLspServer.cs` (838 L) — class `PilotLspServer`:L17
 - `Pilot.LanguageServer/Pilot.LanguageServer.csproj` (15 L)
 - `Pilot.LanguageServer/Program.cs` (53 L) — class `Program`:L10
-- `Pilot.LanguageServer/Semantics/PilotDiagnosticCatalog.cs` (301 L) — class `PilotDiagnosticDescriptor`:L9, class `PilotDiagnosticCatalog`:L54
-- `Pilot.LanguageServer/Semantics/PilotSemanticAnalyzer.cs` (4641 L) — class `PilotSemanticAnalyzer`:L10, class `ScopeRestorer`:L4558, class `LspErrorListener`:L4570
-- `Pilot.LanguageServer/Semantics/PilotSymbol.cs` (392 L) — enum `PilotSymbolKind`:L7, enum `PilotDiagnosticSeverity`:L35, class `PilotCodeAction`:L43, class `PilotDiagnostic`:L55, class `PilotSemanticTokenLegend`:L68, class `PilotSemanticToken`:L142, class `PilotSymbol`:L151, class `PilotSymbolReference`:L256, class `PilotScope`:L264, class `PilotAnalysisResult`:L310
+- `Pilot.LanguageServer/Semantics/PilotDiagnosticCatalog.cs` (340 L) — class `PilotDiagnosticDescriptor`:L9, class `PilotDiagnosticCatalog`:L54
+- `Pilot.LanguageServer/Semantics/PilotSemanticAnalyzer.cs` (5144 L) — class `PilotSemanticAnalyzer`:L10, class `ScopeRestorer`:L5061, class `LspErrorListener`:L5073
+- `Pilot.LanguageServer/Semantics/PilotSymbol.cs` (393 L) — enum `PilotSymbolKind`:L7, enum `PilotDiagnosticSeverity`:L35, class `PilotCodeAction`:L43, class `PilotDiagnostic`:L55, class `PilotSemanticTokenLegend`:L68, class `PilotSemanticToken`:L142, class `PilotSymbol`:L151, class `PilotSymbolReference`:L256, class `PilotScope`:L264, class `PilotAnalysisResult`:L310
 
 ### Pilot.Tests
 - `Pilot.Tests/LspMessageHelper.cs` (13 L) — class `LspMessageHelper`:L6
 - `Pilot.Tests/Pilot.Tests.csproj` (27 L)
 - `Pilot.Tests/PilotAdtAndExhaustivenessTests.cs` (720 L) — class `PilotAdtAndExhaustivenessTests`:L33
 - `Pilot.Tests/PilotAdvancedFeaturesTests.cs` (263 L) — class `PilotAdvancedFeaturesTests`:L11
+- `Pilot.Tests/PilotAdvancedTypeInferenceTests.cs` (412 L) — class `PilotAdvancedTypeInferenceTests`:L18
 - `Pilot.Tests/PilotBurstAndNativeTypesTests.cs` (150 L) — class `PilotBurstAndNativeTypesTests`:L14
+- `Pilot.Tests/PilotCallQuotingCoreTests.cs` (196 L) — class `PilotCallQuotingCoreTests`:L24
 - `Pilot.Tests/PilotCompilationAndScriptingTests.cs` (174 L) — class `PilotCompilationAndScriptingTests`:L11
 - `Pilot.Tests/PilotComprehensiveKeywordValidationTests.cs` (452 L) — class `PilotComprehensiveKeywordValidationTests`:L13
 - `Pilot.Tests/PilotContextContractsPatternsTests.cs` (297 L) — class `PilotContextContractsPatternsTests`:L11
 - `Pilot.Tests/PilotContractDelegationAndStealingTests.cs` (234 L) — class `PilotContractDelegationAndStealingTests`:L10
 - `Pilot.Tests/PilotDebuggingTests.cs` (265 L) — class `PilotDebuggingTests`:L12
-- `Pilot.Tests/PilotDynamicForExpressionTests.cs` (345 L) — class `PilotDynamicForExpressionTests`:L27
+- `Pilot.Tests/PilotDynamicForExpressionTests.cs` (566 L) — class `PilotDynamicForExpressionTests`:L27
 - `Pilot.Tests/PilotErrorSystemTests.cs` (464 L) — class `PilotErrorSystemTests`:L22
 - `Pilot.Tests/PilotExceptionProtectionsTests.cs` (196 L) — class `PilotExceptionProtectionsTests`:L11
 - `Pilot.Tests/PilotExecutionEngineTests.cs` (260 L) — class `PilotExecutionEngineTests`:L9
@@ -760,7 +834,7 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 - `Pilot.Tests/PilotPolyglotExtendedTests.cs` (206 L) — class `PilotPolyglotExtendedTests`:L10
 - `Pilot.Tests/PilotReplTests.cs` (110 L) — class `PilotReplTests`:L9
 - `Pilot.Tests/PilotSelectiveExecutionTests.cs` (163 L) — class `PilotSelectiveExecutionTests`:L10
-- `Pilot.Tests/PilotSemanticAndLspTests.cs` (897 L) — class `PilotSemanticAndLspTests`:L13, class `MathHelper`:L305
+- `Pilot.Tests/PilotSemanticAndLspTests.cs` (984 L) — class `PilotSemanticAndLspTests`:L13, class `MathHelper`:L305
 - `Pilot.Tests/PilotSourceGeneratorTests.cs` (208 L) — class `PilotSourceGeneratorTests`:L11
 - `Pilot.Tests/PilotSyntaxAndLoopFixTests.cs` (110 L) — class `PilotSyntaxAndLoopFixTests`:L12
 - `Pilot.Tests/PilotTranspilationAndMarshalingTests.cs` (225 L) — class `PilotTranspilationAndMarshalingTests`:L12, class `MathUtil`:L109, class `TestPerson`:L217
@@ -777,12 +851,12 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 ### Runtime
 - `Runtime/Adapters/PilotTypeAdapterRegistry.cs` (245 L) — class `PilotTypeAdapterRegistry`:L14, class `AdapterKeyComparer`:L230
 - `Runtime/Builtins/IBuiltinFunction.cs` (15 L) — interface `IBuiltinFunction`:L10
-- `Runtime/Builtins/PilotBuiltinRegistry.cs` (935 L) — class `PilotBuiltinRegistry`:L15
+- `Runtime/Builtins/PilotBuiltinRegistry.cs` (1074 L) — class `PilotBuiltinRegistry`:L15
 - `Runtime/Burst/PilotBurstEngine.cs` (145 L) — class `PilotBurstEngine`:L19
 - `Runtime/Bytecode/PilotBytecodeChunk.cs` (586 L) — class `PilotJumpTable`:L12, class `PilotSerializedFieldDescriptor`:L29, class `PilotSerializedVariantDescriptor`:L38, class `PilotBytecodeTypeDescriptor`:L48, class `PilotBytecodeChunk`:L62
 - `Runtime/Bytecode/PilotInstruction.cs` (46 L) — struct `PilotInstruction`:L11
 - `Runtime/Bytecode/PilotOpcode.cs` (266 L) — enum `PilotOpcode`:L11
-- `Runtime/Bytecode/PilVirtualMachine.cs` (1483 L) — class `PilVirtualMachine`:L20
+- `Runtime/Bytecode/PilVirtualMachine.cs` (1530 L) — class `PilVirtualMachine`:L20
 - `Runtime/Concurrency/PilotFuture.cs` (72 L) — class `PilotFuture`:L11
 - `Runtime/Contracts/PilotContractRegistry.cs` (313 L) — class `PilotContractRegistry`:L14
 - `Runtime/ControlFlow/PilotControlFlowSignals.cs` (99 L) — enum `PilotFlowSignalKind`:L9, class `PilotControlFlowSignal`:L21, class `PilotReturnSignal`:L29, class `PilotBreakSignal`:L42, class `PilotContinueSignal`:L55, class `PilotYieldSignal`:L68, class `PilotRuntimeException`:L81
@@ -792,21 +866,22 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 - `Runtime/Environment/PilotScope.cs` (137 L) — class `PilotScope`:L10
 - `Runtime/Execution/IPilotEngine.cs` (56 L) — interface `IPilotEngine`:L10
 - `Runtime/Execution/PilotEngine.cs` (650 L) — class `PilotEngine`:L19, class `GeneratorRunner`:L351, class `MergedTextWriter`:L614
-- `Runtime/Execution/PilotExecutionContext.cs` (153 L) — class `PilotExecutionContext`:L13
+- `Runtime/Execution/PilotExecutionContext.cs` (154 L) — class `PilotExecutionContext`:L13
 - `Runtime/Execution/PilotExecutionOptions.cs` (87 L) — class `PilotExecutionOptions`:L13
 - `Runtime/Execution/PilotExecutionResult.cs` (56 L) — class `PilotExecutionResult`:L10
-- `Runtime/Execution/PilotInterpreterVisitor.cs` (5145 L) — class `PilotInterpreterVisitor`:L19, struct `FStringSegment`:L41, enum `TargetAssignmentKind`:L57, class `TargetAssignmentInfo`:L66
-- `Runtime/Execution/PilotPatternMatcher.cs` (970 L) — class `PilotPatternMatcher`:L16
+- `Runtime/Execution/PilotInterpreterVisitor.cs` (5522 L) — class `PilotInterpreterVisitor`:L19, struct `FStringSegment`:L41, enum `TargetAssignmentKind`:L57, class `TargetAssignmentInfo`:L66
+- `Runtime/Execution/PilotPatternMatcher.cs` (986 L) — class `PilotPatternMatcher`:L16
 - `Runtime/Extensions/PilotLexicalExtension.cs` (138 L) — class `PilotLexicalExtension`:L11
 - `Runtime/Generative/PilotClassNode.cs` (127 L) — class `PilotFieldNode`:L11, class `PilotClassNode`:L38
 - `Runtime/HotReload/PilotHotReloader.cs` (732 L) — class `PilotSymbolSnapshot`:L19, class `PilotPatchRecord`:L165, class `PilotPatchResult`:L208, class `PilotHotReloadSession`:L242
 - `Runtime/Interop/IPolyglotProvider.cs` (31 L) — interface `IPolyglotProvider`:L10
 - `Runtime/Interop/IPolyglotTypeConverter.cs` (20 L) — interface `IPolyglotTypeConverter`:L9
-- `Runtime/Interop/PolyglotRegistry.cs` (670 L) — class `PolyglotRegistry`:L12, class `DefaultPythonProvider`:L72, class `DefaultCSharpProvider`:L149, class `DefaultRustProvider`:L221, class `DefaultJavaScriptProvider`:L264, class `DefaultJavaProvider`:L318, class `DefaultAsmProvider`:L370, class `DefaultCProvider`:L439, class `DefaultCppProvider`:L484, class `DefaultLuaProvider`:L528, class `DefaultPostgreSqlProvider`:L578, class `DefaultMySqlProvider`:L652
-- `Runtime/Interop/PolyglotTypeBridge.cs` (442 L) — class `PolyglotTypeBridge`:L16
-- `Runtime/NativeMemory/PilotLoopAbiTypes.cs` (122 L) — struct `RangeWindow`:L15, struct `SliceBuffer`:L48
+- `Runtime/Interop/PolyglotRegistry.cs` (1572 L) — class `PolyglotRegistry`:L18, class `DefaultPythonProvider`:L78, class `DefaultCSharpProvider`:L160, class `DefaultRustProvider`:L236, class `DefaultJavaScriptProvider`:L283, class `DefaultJavaProvider`:L341, class `DefaultAsmProvider`:L393, class `DefaultCProvider`:L543, class `DefaultCppProvider`:L592, class `DefaultLuaProvider`:L640, class `DefaultPostgreSqlProvider`:L690, class `DefaultMySqlProvider`:L764, class `PolyglotSharedMemoryInterop`:L788
+- `Runtime/Interop/PolyglotTypeBridge.cs` (490 L) — class `PolyglotTypeBridge`:L16
+- `Runtime/NativeMemory/PilotLoopAbiTypes.cs` (226 L) — struct `RangeWindow`:L15, struct `SliceBuffer`:L48, struct `UnmanagedWorklist`:L146
 - `Runtime/NativeMemory/PilotNativeArray.cs` (212 L) — class `PilotNativeArray`:L15
 - `Runtime/NativeMemory/PilotNativeMap.cs` (281 L) — class `PilotNativeMap`:L15
+- `Runtime/NativeMemory/PilotSharedBuffer.cs` (750 L) — enum `PilotSharedElementKind`:L14, class `PilotSharedBuffer`:L28
 - `Runtime/Packaging/Adapters/BaseInteropPackageAdapter.cs` (218 L) — class `BaseInteropPackageAdapter`:L12, class `NuGetPackageAdapter`:L140, class `NpmPackageAdapter`:L156, class `PipPackageAdapter`:L171, class `CargoPackageAdapter`:L186, class `MavenPackageAdapter`:L200, class `LuaRocksPackageAdapter`:L205
 - `Runtime/Packaging/IInteropPackageAdapter.cs` (31 L) — interface `IInteropPackageAdapter`:L10
 - `Runtime/Packaging/PilotPackageLock.cs` (65 L) — class `PilotPackageLock`:L12, class `LockedPackageEntry`:L49
@@ -817,16 +892,16 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 - `Runtime/SelectiveExecution/PilotTestReport.cs` (46 L) — class `PilotTestCaseResult`:L9, class `PilotTestReport`:L32
 - `Runtime/Serialization/PilotJsonSerializer.cs` (198 L) — class `PilotJsonSerializer`:L15
 - `Runtime/Values/PilotAdt.cs` (1037 L) — class `PilotAdtFieldDefinition`:L14, record `PilotFieldMemoryLayout`:L35, record `PilotVariantMemoryLayout`:L46, class `PilotAdtMemoryLayout`:L58, class `PilotAdtFloatSlot`:L563, class `PilotAdtVariantDefinition`:L572, class `PilotAdtDefinition`:L721, class `PilotAdtInstance`:L768, class `PilotRecordDefinition`:L828, class `PilotRecordInstance`:L951, class `PilotKeywordVariant`:L1002
-- `Runtime/Values/PilotFunction.cs` (270 L) — class `PilotParameter`:L12, class `PilotFunction`:L37
+- `Runtime/Values/PilotFunction.cs` (279 L) — class `PilotParameter`:L12, class `PilotFunction`:L37
 - `Runtime/Values/PilotGenerator.cs` (123 L) — enum `PilotGeneratorState`:L13, class `PilotGenerator`:L25
-- `Runtime/Values/PilotKeyword.cs` (96 L) — class `PilotKeyword`:L12
+- `Runtime/Values/PilotKeyword.cs` (301 L) — class `PilotKeyword`:L13
 - `Runtime/Values/PilotLazy.cs` (55 L) — class `PilotLazy`:L9
 - `Runtime/Values/PilotMatrix.cs` (209 L) — class `PilotMatrix`:L9
-- `Runtime/Values/PilotMethodGroup.cs` (551 L) — class `PilotMethodGroup`:L20
+- `Runtime/Values/PilotMethodGroup.cs` (635 L) — class `PilotMethodGroup`:L21
 - `Runtime/Values/PilotObject.cs` (649 L) — class `PilotClassDefinition`:L11, class `PilotObject`:L393
 - `Runtime/Values/PilotRange.cs` (98 L) — class `PilotRange`:L10
-- `Runtime/Values/PilotValue.cs` (2103 L) — struct `PilotValue`:L15, class `PilotNestedSomeSentinel`:L27, class `PilotFailurePrimitiveSentinel`:L32, class `PilotNestedFailureBox`:L47
-- `Runtime/Values/PilotValueKind.cs` (38 L) — enum `PilotValueKind`:L6
+- `Runtime/Values/PilotValue.cs` (2295 L) — struct `PilotValue`:L15, class `PilotNestedSomeSentinel`:L27, class `PilotFailurePrimitiveSentinel`:L32, class `PilotNestedFailureBox`:L47
+- `Runtime/Values/PilotValueKind.cs` (39 L) — enum `PilotValueKind`:L6
 - `Runtime/Venv/PilotVirtualEnvironment.cs` (446 L) — class `PilotVenvOptions`:L12, class `PilotVenvConfig`:L23, class `PilotVirtualEnvironment`:L116
 
 ### Scripting
@@ -870,6 +945,8 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 - `tests/30_values_first_errors.pilot` (109 L)
 - `tests/31_expression_ergonomics_and_extensions.pilot` (154 L)
 - `tests/32_dynamic_for_expressions_and_c_abi.pilot` (69 L)
+- `tests/33_advanced_type_inference.pilot` (55 L)
+- `tests/34_keywords_and_call_quoting.pilot` (76 L)
 
 ### Transpilation
 - `Transpilation/ITargetLanguageConverter.cs` (13 L) — interface `ITargetLanguageConverter`:L7
@@ -894,8 +971,8 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 - `vscode-pilot/package-lock.json` (419 L)
 - `vscode-pilot/package.json` (197 L)
 - `vscode-pilot/snippets/pilot.json` (342 L)
-- `vscode-pilot/src/extension.ts` (700 L)
-- `vscode-pilot/syntaxes/pilot.tmLanguage.json` (401 L)
+- `vscode-pilot/src/extension.ts` (711 L)
+- `vscode-pilot/syntaxes/pilot.tmLanguage.json` (405 L)
 - `vscode-pilot/test/01_types_variables_control_flow.pilot` (98 L)
 - `vscode-pilot/test/02_guard_defer_exceptions.pilot` (91 L)
 - `vscode-pilot/test/03_method_groups_and_dispatch.pilot` (116 L)

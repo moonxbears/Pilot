@@ -38,6 +38,7 @@ public sealed class PilotExecutionContext
     public PilotRange? PendingContinueRange { get; set; }
     public bool PendingContinueWorklistSpread { get; set; }
     public Action<PilotValue>? LoopYieldAccumulator { get; set; }
+    public Pilot.Runtime.NativeMemory.PilotSharedBuffer? PendingSliceYieldTarget { get; set; }
     public PilotFunction? CurrentFunction { get; set; }
 
     public PilotValue AdaptPropagatedError(PilotValue errVal, string? targetErrorType = null)

@@ -65,6 +65,11 @@ public static class PilotCAbiEmitter
         sb.AppendLine("typedef struct RangeWindow_i32 { int32_t current; int32_t max; } RangeWindow_i32;");
         sb.AppendLine("typedef struct RangeWindow_i64 { int64_t current; int64_t max; } RangeWindow_i64;");
         sb.AppendLine("typedef struct SliceBuffer { void* data_ptr; size_t length; size_t capacity; } SliceBuffer;");
+        sb.AppendLine("typedef struct SliceBuffer_f64 { double* data_ptr; size_t length; size_t capacity; } SliceBuffer_f64;");
+        sb.AppendLine("typedef struct SliceBuffer_f32 { float* data_ptr; size_t length; size_t capacity; } SliceBuffer_f32;");
+        sb.AppendLine("typedef struct SliceBuffer_i64 { int64_t* data_ptr; size_t length; size_t capacity; } SliceBuffer_i64;");
+        sb.AppendLine("typedef struct SliceBuffer_i32 { int32_t* data_ptr; size_t length; size_t capacity; } SliceBuffer_i32;");
+        sb.AppendLine("typedef struct SliceBuffer_u8 { uint8_t* data_ptr; size_t length; size_t capacity; } SliceBuffer_u8;");
         sb.AppendLine();
 
         var visitor = new CAbiExtractionVisitor();
@@ -485,6 +490,40 @@ public static class PilotCAbiEmitter
             {
                 string elemType = MapType(trimmed[..^2], genericParams);
                 return $"struct {{ const {elemType}* ptr; size_t len; }}";
+            }
+
+            // Milestone 15.3: Zero-marshalling RangeWindow[TIter] and 24-byte SliceBuffer[T] / SharedBuffer[T]
+            if (trimmed.Equals("RangeWindow", StringComparison.OrdinalIgnoreCase))
+                return "RangeWindow_i64";
+            if ((trimmed.StartsWith("RangeWindow[", StringComparison.OrdinalIgnoreCase) && trimmed.EndsWith("]", StringComparison.Ordinal)) ||
+                (trimmed.StartsWith("RangeWindow<", StringComparison.OrdinalIgnoreCase) && trimmed.EndsWith(">", StringComparison.Ordinal)))
+            {
+                string iterArg = trimmed[12..^1].Trim().ToLowerInvariant();
+                return iterArg is "i32" or "int32" or "u32" or "uint32" ? "RangeWindow_i32" : "RangeWindow_i64";
+            }
+
+            if (trimmed.Equals("SliceBuffer", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.Equals("SharedBuffer", StringComparison.OrdinalIgnoreCase))
+            {
+                return "SliceBuffer";
+            }
+            if (((trimmed.StartsWith("SliceBuffer[", StringComparison.OrdinalIgnoreCase) ||
+                  trimmed.StartsWith("SharedBuffer[", StringComparison.OrdinalIgnoreCase)) && trimmed.EndsWith("]", StringComparison.Ordinal)) ||
+                ((trimmed.StartsWith("SliceBuffer<", StringComparison.OrdinalIgnoreCase) ||
+                  trimmed.StartsWith("SharedBuffer<", StringComparison.OrdinalIgnoreCase)) && trimmed.EndsWith(">", StringComparison.Ordinal)))
+            {
+                int openIdx = trimmed.IndexOfAny(new[] { '[', '<' });
+                string innerSpec = trimmed[(openIdx + 1)..^1].Trim();
+                string innerLower = innerSpec.ToLowerInvariant();
+                return innerLower switch
+                {
+                    "f64" or "float" or "double" or "float64" => "SliceBuffer_f64",
+                    "f32" or "float32" => "SliceBuffer_f32",
+                    "i64" or "int" or "long" or "int64" => "SliceBuffer_i64",
+                    "i32" or "int32" => "SliceBuffer_i32",
+                    "u8" or "byte" or "uint8" => "SliceBuffer_u8",
+                    _ => $"struct {{ {MapType(innerSpec, genericParams)}* data_ptr; size_t length; size_t capacity; }}"
+                };
             }
 
             string baseName = PilotAdtMemoryLayout.StripGenericsAndModifiers(trimmed);

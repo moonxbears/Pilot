@@ -894,4 +894,91 @@ while (true) {
         var ex = Assert.Throws<InvalidOperationException>(() => visitor.VisitProgram(tree));
         Assert.Contains("Cannot assign to immutable binding 'val'", ex.Message);
     }
+
+    [Fact]
+    public void Test_SliceBuffer_Intellisense_Completion_And_Semantic_Tokens()
+    {
+        var server = new PilotLspServer();
+        string docUri = "inmemory://test_slicebuffer_lsp.pilot";
+        string code = "var shm = shared_buffer(\"test_shm\", 6, :f64)\r\nshm.\r\n";
+
+        server.ProcessMessage(new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["method"] = "textDocument/didOpen",
+            ["params"] = new JsonObject
+            {
+                ["textDocument"] = new JsonObject
+                {
+                    ["uri"] = docUri,
+                    ["languageId"] = "pilot",
+                    ["version"] = 1,
+                    ["text"] = code
+                }
+            }
+        }.ToJsonString());
+
+        // Dot completion on `shm.` at line 1, character 4
+        var completionResp = server.ProcessMessage(new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["id"] = 100,
+            ["method"] = "textDocument/completion",
+            ["params"] = new JsonObject
+            {
+                ["textDocument"] = new JsonObject { ["uri"] = docUri },
+                ["position"] = new JsonObject { ["line"] = 1, ["character"] = 4 }
+            }
+        }.ToJsonString());
+        var items = JsonNode.Parse(completionResp[0])!["result"]?.AsArray();
+        Assert.NotNull(items);
+        var labels = items.Select(i => i?["label"]?.GetValue<string>()).Where(s => s != null).ToList();
+
+        Assert.Contains("data_ptr", labels);
+        Assert.Contains("open_view", labels);
+        Assert.Contains("slice", labels);
+        Assert.Contains("len", labels);
+        Assert.Contains("length", labels);
+        Assert.Contains("capacity", labels);
+        Assert.Contains("element_size", labels);
+        Assert.Contains("byte_length", labels);
+        Assert.Contains("abi_header_size", labels);
+        Assert.Contains("managed_list_allocations", labels);
+        Assert.Contains("is_shared_memory", labels);
+        Assert.Contains("shared_name", labels);
+
+        // Check hover details on SliceBuffer
+        var analysis = PilotSemanticAnalyzer.Analyze(code, docUri);
+        var shmSym = analysis.RootScope.Symbols["shm"];
+        Assert.NotNull(shmSym);
+        Assert.Equal("SliceBuffer[f64]", shmSym.TypeName);
+
+        var sliceTypeSym = analysis.RootScope.Resolve("SliceBuffer");
+        Assert.NotNull(sliceTypeSym);
+        Assert.True(sliceTypeSym.Members.ContainsKey("data_ptr"));
+        Assert.True(sliceTypeSym.Members.ContainsKey("open_view"));
+    }
+
+    [Fact]
+    public void Test_Extension_Generics_And_Type_Coloring()
+    {
+        string code = @"
+extension Ext[T] for T[] {
+    def first_or_none(self) -> T? {
+        return none
+    }
+}
+def process_data(data: SliceBuffer[f64]) -> SliceBuffer[f64] {
+    return data
+}
+";
+        var analysis = PilotSemanticAnalyzer.Analyze(code);
+        Assert.Empty(analysis.Diagnostics.Where(d => d.Severity == PilotDiagnosticSeverity.Error));
+
+        // Ensure generic parameter 'T' is resolved in extension scope
+        var extScope = analysis.FindScopeAtLine(2);
+        var tSym = extScope.Resolve("T");
+        Assert.NotNull(tSym);
+        Assert.Equal(PilotSymbolKind.TypeParameter, tSym.Kind);
+    }
 }

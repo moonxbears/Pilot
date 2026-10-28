@@ -316,6 +316,7 @@ public sealed class PilotAnalysisResult
     public List<PilotSymbolReference> References { get; } = new();
     public List<PilotSymbol> TopLevelSymbols { get; } = new();
     public List<Pilot.Preprocessing.CodeRegion> Regions { get; init; } = new();
+    public List<Pilot.Analysis.TypeSystem.PilotInlayHint> InlayHints { get; } = new();
 
     public PilotSymbol? FindSymbolAtPosition(int line, int character)
     {

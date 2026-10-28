@@ -30,7 +30,7 @@ identifier
     | DEADLINE | WITHIN | FALLBACK | PRIORITY | JITTER | BOUNDED
     | SPAWN | PARALLEL | ATOMIC | SYNC | LOCK | ISOLATE
     | CHAN | CHANNEL | ASYNC | AWAIT | ACTOR | MACRO | QUOTE | SPLICE
-    | DEFMACRO | QUASIQUOTE | UNQUOTE | UNQUOTE_SPLICING
+    | DEFMACRO | DEFKEYWORD | QUASIQUOTE | UNQUOTE | UNQUOTE_SPLICING
     | MATCH | CASE | TYPE | PURE | MUT | IMMUT | LET | VAR | CONST
     | GUARD | DEFER | INSERT | UPDATE | DELETE | VALUES | SET_KW
     | RETURNING | CONFLICT | DO | NOTHING | OVER | PARTITION | WINDOW
@@ -202,6 +202,7 @@ primary_type
 
 base_type
     : SYMBOL
+    | symbol_literal
     | DYNAMIC
     | (dotted_name | NONE | NULL | UNDEFINED) ( (LSQB type_arguments RSQB) | (LESS type_arguments GREATER) )?
     | LPAR type_spec (COMMA type_spec)* RPAR
@@ -331,7 +332,7 @@ adt_field
     ;
 
 annassign_stmt
-    : test COLON type_spec (EQUAL test)?
+    : {_input.LA(1) != PilotLexer.COLON}? test {((ITokenStream)_input).LT(-1).Line == ((ITokenStream)_input).LT(1).Line}? COLON type_spec (EQUAL test)?
     ;
 
 expr_stmt
@@ -486,7 +487,7 @@ adapter_def
 
 // Compile-Time Metaprogramming / Macros (Lisp Homoiconicity)
 macro_def
-    : decorators? declaration_modifier* (MACRO | DEFMACRO) EXCLAMATION? identifier generic_params? parameters? (ARROW type_spec)? COLON? suite
+    : decorators? declaration_modifier* (MACRO | DEFMACRO | DEFKEYWORD) EXCLAMATION? identifier generic_params? parameters? (ARROW type_spec)? (COLON | FAT_ARROW)? suite
     ;
 
 quote_stmt
@@ -1101,7 +1102,7 @@ and_test
     ;
 
 not_test
-    : NOT not_test
+    : (NOT | EXCLAMATION | CALL_QUOTE_DEEP) not_test
     | comparison
     ;
 
@@ -1175,7 +1176,7 @@ atom_expr
     ;
 
 trailer
-    : LPAR arglist? RPAR over_clause?
+    : call_quote_op? LPAR arglist? RPAR over_clause?
     | STAR LPAR arglist? RPAR
     | DOT STAR LPAR arglist? RPAR
     | LSQB subscriptlist RSQB
@@ -1189,6 +1190,15 @@ trailer
     | cascade_trailer
     | LESS unit_expr GREATER
     | over_clause
+    ;
+
+call_quote_op
+    : CALL_QUOTE_DEEP
+    | CALL_QUOTE_ABI
+    | CALL_QUOTE_REACT
+    | CALL_QUOTE_ADJOINT
+    | CALL_QUOTE_EFFECT
+    | EXCLAMATION
     ;
 
 cascade_trailer
@@ -1233,6 +1243,7 @@ atom
     | for_stmt
     | DOT identifier
     | identifier
+    | LPAR overloadable_op RPAR
     | LPAR testlist_comp? RPAR
     | collection_expr
     | LBRACE dictorsetmaker? RBRACE
@@ -1259,12 +1270,13 @@ nameof_expr
     ;
 
 macro_call
-    : identifier EXCLAMATION (LPAR arglist? RPAR | LBRACE stmt* RBRACE | LSQB arglist? RSQB)
+    : identifier EXCLAMATION (LBRACE stmt* RBRACE | LSQB arglist? RSQB)
     ;
 
 symbol_literal
     : SYMBOL (LPAR test? RPAR)?
-    | COLON identifier
+    | COLON identifier (DOT identifier)* SLASH identifier (SLASH identifier)*
+    | COLON identifier (SLASH identifier)*
     ;
 
 literal
@@ -1318,8 +1330,9 @@ arglist
     ;
 
 argument
-    : (REF | EACH | REPEAT)? (STAR | DOUBLESTAR | DOTDOT)? test
-    | identifier (EQUAL | COLON) (EACH | REPEAT | DOTDOT)? test
+    : TILDE test
+    | (REF | EACH | REPEAT)? (STAR | DOUBLESTAR | DOTDOT)? test
+    | identifier (EQUAL | COLON) (EACH | REPEAT | DOTDOT | TILDE)? test
     | STAR
     ;
 
@@ -1485,6 +1498,7 @@ DOMAIN      : 'domain';
 UNIT        : 'unit';
 MACRO       : 'macro';
 DEFMACRO    : 'defmacro';
+DEFKEYWORD  : 'defkeyword';
 QUOTE       : 'quote';
 QUASIQUOTE  : 'quasiquote';
 SPLICE      : 'splice';
@@ -1556,6 +1570,11 @@ DOTDOT_LESS      : '..<';    // Half-open range
 DOTDOT           : '..';     // Range / slice spread
 DOUBLESTAR       : '**';
 DOUBLESLASH      : '//';
+CALL_QUOTE_DEEP    : '!!';    // Deep white-box AST splice / quasiquote
+CALL_QUOTE_ABI     : '!&';    // Zero-marshalling C-ABI CallFrame struct
+CALL_QUOTE_REACT   : '!^';    // Reactive Signal<T> projection
+CALL_QUOTE_ADJOINT : '!@';    // Symbolic / Adjoint differentiation
+CALL_QUOTE_EFFECT  : '!?';    // Copy-on-Write Effect Dry-Run
 EQEQUAL          : '==';
 NOTEQUAL         : '!=' | '<>';
 LESSEQUAL        : '<=';

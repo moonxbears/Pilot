@@ -1,0 +1,33 @@
+// =============================================================================
+// Showcase 21: Advanced Type Inference — Bidirectional, Flow-Sensitive & Row-Polymorphic
+// =============================================================================
+
+record Product(title: str, price: float, in_stock: bool);
+record Frame2D(width: int, height: int, name: str);
+record Canvas2D(width: float, height: float);
+
+// 1. Structural Row Polymorphism: infers `({ width: T, height: T, ..R } where T: Numeric) -> T`
+def compute_area(surface) => surface.width * surface.height;
+
+let frame_area = compute_area(Frame2D(1920, 1080, "HD"));
+let canvas_area = compute_area(Canvas2D(12.5, 8.0));
+
+println(f"Frame area (int): {frame_area}");
+println(f"Canvas area (float): {canvas_area}");
+
+// 2. Tarjan SCC Fixed-Point Mutual Recursion
+def is_even_step(n: int) => true if n == 0 else is_odd_step(n - 1);
+def is_odd_step(n: int) => false if n == 0 else is_even_step(n - 1);
+
+println(f"is_even_step(10) = {is_even_step(10)}");
+
+// 3. Dominator Control-Flow Narrowing
+def format_discount(code: str?, base_price: float) -> str {
+    guard some code else {
+        return f"${base_price} (no promo)";
+    }
+    return f"${base_price * 0.9} (promo: {code})";
+}
+
+println(format_discount("PILOT16", 100.0));
+println(format_discount(none, 100.0));

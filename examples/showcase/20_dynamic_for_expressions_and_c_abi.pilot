@@ -44,3 +44,51 @@ let fallback_idx = for (idx in 0..<4) {
 println(f"Port 8080 index: {port_idx}, Port 3000 fallback: {fallback_idx}");
 assert(port_idx == 2);
 assert(fallback_idx == -1);
+
+println("=== 5. Zero-List Contiguous SliceBuffer[f64] Yield (15.3.3) ===");
+let contig_buf: SliceBuffer[f64] = for (i in 0..<6) {
+    yield (i + 1) * 10.0;
+};
+println(f"24-byte C-ABI SliceBuffer: {contig_buf}, managed_lists={contig_buf.managed_list_allocations}");
+assert(contig_buf.abi_header_size == 24);
+assert(contig_buf.managed_list_allocations == 0);
+assert(contig_buf == [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]);
+
+println("=== 6. Cross-Language Zero-Copy Shared Memory & Base-Address Independence (15.3.2) ===");
+var shm = shared_buffer("showcase_20_shm", 6, :f64);
+let base_ptr = shm.data_ptr;
+shm = for (i in 0..<6) {
+    yield (i + 1) * 10.0;
+};
+var second_view = shm.open_view();
+assert(shm.data_ptr == base_ptr);
+assert(shm.data_ptr != second_view.data_ptr);
+
+// Mutate in-place from Python (mmap + memoryview), C (double*), Rust (&mut slice), and x86_64 ASM
+python {
+    mv = memoryview(shm)
+    mv[0] = mv[0] + 5.5
+}
+# python """
+#     mv = memoryview(shm)
+#     mv[0] = mv[0] + 5.5
+# """;
+c """
+    double* p = (double*)shm.data_ptr;
+    p[1] *= 2.0;
+""";
+rust """
+    let s = &mut shm;
+    s[2] += 3.25;
+""";
+asm """
+    mov rax, shm
+    movsd xmm0, 100.0
+    addsd [rax + 0], xmm0
+    ret
+""";
+
+println(f"Shared view 1 (@0x{shm.data_ptr}): {shm}");
+println(f"Shared view 2 (@0x{second_view.data_ptr}): {second_view}");
+assert(shm.data_ptr == base_ptr);
+assert(second_view == [115.5, 40.0, 33.25, 40.0, 50.0, 60.0]);

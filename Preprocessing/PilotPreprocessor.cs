@@ -742,7 +742,7 @@ public static partial class PilotPreprocessor
         "interface", "protocol", "actor", "state", "enum", "try", "catch", "except", "finally",
         "with", "guard", "defer", "match", "case", "default", "select", "periodic",
         "deadline", "within", "noalloc", "region", "spawn", "atomic", "sync", "lock",
-        "isolate", "database", "transaction", "savepoint", "unit"
+        "isolate", "database", "transaction", "savepoint", "unit", "macro", "defmacro", "defkeyword"
     };
 
     private static readonly HashSet<string> BlockModifiers = new(StringComparer.Ordinal)

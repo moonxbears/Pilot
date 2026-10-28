@@ -196,7 +196,7 @@
       "patterns": [
         {
           "name": "constant.other.symbol.pilot",
-          "match": "(?<![a-zA-Z0-9_:]):[a-zA-Z_][a-zA-Z0-9_]*\\b"
+          "match": "(?<![a-zA-Z0-9_:]):[a-zA-Z_][a-zA-Z0-9_./]*\\b"
         }
       ]
     },
@@ -288,7 +288,7 @@
       "patterns": [
         {
           "name": "keyword.other.udsa.pilot",
-          "match": "\\b(dsl|domain|unit|macro|defmacro|quote|quasiquote|splice|unquote|unquote_splicing|gensym|macroexpand|eval|cons|car|cdr|atom|list_ast)\\b"
+          "match": "\\b(dsl|domain|unit|macro|defmacro|defkeyword|quote|quasiquote|splice|unquote|unquote_splicing|gensym|macroexpand|eval|cons|car|cdr|atom|list_ast)\\b"
         }
       ]
     },
@@ -331,7 +331,7 @@
       "patterns": [
         {
           "name": "support.type.primitive.pilot",
-          "match": "\\b(char|str|string|i8|i16|i32|int|i64|u8|u16|u32|uint|u64|f8|f16|f32|float|f64|decimal|double|complex|tuple|Tuple|list|List|range|map|Map|dict|Dict|set|Set|frozenset|bool|bytes|bytearray|memoryview|null|none|undefined|void|any|symbol|dynamic|Table|Dataset|Relation|Channel|Chan|Result|Option|Span|Memory|AstNode|matrix\\d+x\\d+)\\b"
+          "match": "\\b(char|str|string|i8|i16|i32|int|i64|u8|u16|u32|uint|u64|f8|f16|f32|float|f64|decimal|double|complex|tuple|Tuple|list|List|range|map|Map|dict|Dict|set|Set|frozenset|bool|bytes|bytearray|memoryview|null|none|undefined|void|any|symbol|dynamic|Table|Dataset|Relation|Channel|Chan|Result|Option|Span|Memory|SliceBuffer|SharedBuffer|RangeWindow|NativeArray|NativeMap|AstNode|matrix\\d+x\\d+)\\b"
         },
         {
           "name": "entity.name.type.pilot",
@@ -366,6 +366,10 @@
           "match": "@"
         },
         {
+          "name": "keyword.operator.callquote.pilot",
+          "match": "(!!|!&|!\\^|!@|!\\?|~)"
+        },
+        {
           "name": "keyword.operator.comparison.pilot",
           "match": "(==|!=|<=|>=|<|>)"
         },
@@ -379,7 +383,7 @@
       "patterns": [
         {
           "name": "entity.name.function.macro.pilot",
-          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)!\\s*(?=[\\(\\{\\[])"
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)(?:!!|!&|!\\^|!@|!\\?|!)\\s*(?=[\\(\\{\\[])"
         },
         {
           "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",

@@ -45,6 +45,24 @@ typedef struct pilot_slice_buffer {
     size_t capacity; /* Offset: 16 (sizeof == 24 on 64-bit targets) */
 } pilot_slice_buffer_t;
 
+typedef struct pilot_slice_buffer_f64 {
+    double* data_ptr;
+    size_t  length;
+    size_t  capacity;
+} pilot_slice_buffer_f64_t;
+
+typedef struct pilot_slice_buffer_i64 {
+    int64_t* data_ptr;
+    size_t   length;
+    size_t   capacity;
+} pilot_slice_buffer_i64_t;
+
+typedef struct pilot_slice_buffer_i32 {
+    int32_t* data_ptr;
+    size_t   length;
+    size_t   capacity;
+} pilot_slice_buffer_i32_t;
+
 /* --- Memory Management --- */
 static inline void* pilot_alloc(size_t size) {
     void* ptr = malloc(size);

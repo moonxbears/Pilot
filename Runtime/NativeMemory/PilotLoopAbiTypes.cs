@@ -77,7 +77,23 @@ public unsafe struct SliceBuffer<T> where T : unmanaged
     }
 
     /// <summary>
-    /// Appends a yielded element in-place, growing the unmanaged buffer if owned/resizable.
+    /// Appends a yielded element in-place, growing an owned unmanaged buffer via
+    /// <see cref="NativeMemory.Realloc(void*, nuint)"/> when capacity is reached (zero <c>List&lt;T&gt;</c> allocation).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void GrowAndYield(T value)
+    {
+        if (Length >= Capacity)
+        {
+            nuint nextCap = Capacity == 0 ? 8u : Capacity * 2u;
+            DataPtr = (T*)System.Runtime.InteropServices.NativeMemory.Realloc(DataPtr, nextCap * (nuint)sizeof(T));
+            Capacity = nextCap;
+        }
+        DataPtr[Length++] = value;
+    }
+
+    /// <summary>
+    /// Appends a yielded element in-place without bounds checking when pre-allocated capacity is known.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void YieldUnchecked(T value)
@@ -117,6 +133,94 @@ public unsafe struct SliceBuffer<T> where T : unmanaged
             DataPtr = null;
             Length = 0;
             Capacity = 0;
+        }
+    }
+}
+
+/// <summary>
+/// Milestone 15.3.1 &amp; 15.3.2: Contiguous C-ABI worklist stack storing <see cref="RangeWindow{TIter}"/> frames
+/// directly in unmanaged or shared <c>mmap</c> memory with zero GC <c>Stack&lt;T&gt;</c> allocation and
+/// zero raw pointers inside frames (base-address independent across virtual memory mappings).
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct UnmanagedWorklist<TIter> : IDisposable where TIter : unmanaged
+{
+    private SliceBuffer<RangeWindow<TIter>> _slice;
+    private byte _ownsMemory;
+
+    public SliceBuffer<RangeWindow<TIter>> Slice => _slice;
+    public RangeWindow<TIter>* DataPtr => _slice.DataPtr;
+    public int Count => checked((int)_slice.Length);
+    public int Capacity => checked((int)_slice.Capacity);
+    public bool IsEmpty => _slice.Length == 0;
+    public bool OwnsMemory => _ownsMemory != 0;
+
+    private UnmanagedWorklist(SliceBuffer<RangeWindow<TIter>> slice, bool ownsMemory)
+    {
+        _slice = slice;
+        _ownsMemory = ownsMemory ? (byte)1 : (byte)0;
+    }
+
+    /// <summary>
+    /// Allocates an owned unmanaged worklist backed by <see cref="NativeMemory"/>.
+    /// </summary>
+    public static UnmanagedWorklist<TIter> AllocateNative(nuint initialCapacity = 16)
+    {
+        return new UnmanagedWorklist<TIter>(SliceBuffer<RangeWindow<TIter>>.AllocateNative(initialCapacity), ownsMemory: true);
+    }
+
+    /// <summary>
+    /// Attaches a worklist view to an existing shared-memory / <c>mmap</c> or FFI <see cref="RangeWindow{TIter}"/> buffer
+    /// at any virtual base address with zero copying and zero pointer swizzling.
+    /// </summary>
+    public static UnmanagedWorklist<TIter> FromSharedSlice(RangeWindow<TIter>* dataPtr, nuint capacity, nuint initialLength = 0)
+    {
+        return new UnmanagedWorklist<TIter>(new SliceBuffer<RangeWindow<TIter>>(dataPtr, capacity, initialLength), ownsMemory: false);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Push(RangeWindow<TIter> window)
+    {
+        if (_ownsMemory != 0)
+        {
+            _slice.GrowAndYield(window);
+            return;
+        }
+
+        if (!_slice.TryYield(window))
+            throw new InvalidOperationException($"Shared UnmanagedWorklist<{typeof(TIter).Name}> capacity ({_slice.Capacity}) exceeded.");
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryPop(out RangeWindow<TIter> window)
+    {
+        if (_slice.DataPtr == null || _slice.Length == 0)
+        {
+            window = default;
+            return false;
+        }
+
+        _slice.Length--;
+        window = _slice.DataPtr[_slice.Length];
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public RangeWindow<TIter> Pop()
+    {
+        if (!TryPop(out var window))
+            throw new InvalidOperationException("Cannot pop from an empty UnmanagedWorklist.");
+        return window;
+    }
+
+    public Span<RangeWindow<TIter>> AsSpan() => _slice.AsSpan();
+
+    public void Dispose()
+    {
+        if (_ownsMemory != 0)
+        {
+            _slice.FreeNative();
+            _ownsMemory = 0;
         }
     }
 }

@@ -30,6 +30,7 @@ public enum PilotValueKind
     MethodGroup,
     NativeArray,
     NativeMap,
+    SliceBuffer,
     Adt,
     AdtType,
     Record,

@@ -1,0 +1,55 @@
+// =============================================================================
+// Pilot Test 33: Advanced Type Inference (Milestone 16)
+// Bidirectional synthesis, Tarjan SCC mutual recursion, flow narrowing, and
+// structural row polymorphism.
+// =============================================================================
+
+record User(Name: str, Age: int);
+record Rect(width: float, height: float, label: str);
+record Box(width: int, height: int);
+
+// 1. Bidirectional synthesis over higher-order collection pipelines
+let users = [User("Alice", 25), User("Bob", 17), User("Carol", 30)];
+let adults = for (u in users) {
+    if u.Age >= 21 {
+        yield u.Name;
+    }
+};
+assert len(adults) == 2;
+assert adults[0] == "Alice";
+assert adults[1] == "Carol";
+
+// 2. Tarjan SCC mutually recursive functions without explicit return annotations
+def is_even(n: int) => true if n == 0 else is_odd(n - 1);
+def is_odd(n: int) => false if n == 0 else is_even(n - 1);
+
+assert is_even(6) == true;
+assert is_odd(6) == false;
+assert is_odd(7) == true;
+
+// 3. Dominator-based control-flow type narrowing (`guard some` + `is` pattern)
+type Shape = Circle(radius: float) | Square(side: float);
+
+def compute_shape_score(bonus: int?, s: Shape) -> float {
+    guard some bonus else {
+        return -1.0;
+    }
+    if s is Circle(r) {
+        return r * 2.0 + float(bonus);
+    } else {
+        return 10.0 + float(bonus);
+    }
+}
+
+assert compute_shape_score(5, Circle(3.0)) == 11.0;
+assert compute_shape_score(none, Circle(3.0)) == -1.0;
+
+// 4. Structural Row Polymorphism (`{ width: T, height: T, ..R } where T: Numeric`)
+def area(s) => s.width * s.height;
+
+let rect_area = area(Rect(10.0, 5.0, "panel"));
+let box_area = area(Box(4, 6));
+assert rect_area == 50.0;
+assert box_area == 24;
+
+println("All Milestone 16 advanced type inference assertions passed!");

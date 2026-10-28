@@ -1,0 +1,39 @@
+// =============================================================================
+// Showcase 22: First-Class Keywords & Homoiconic Call-Quoting (:kw, !, !!, ~, !&)
+// =============================================================================
+
+print("╔══════════════════════════════════════════════════════════════════╗")
+print("║  Pilot Showcase 22: First-Class Keywords & Call-Quoting         ║")
+print("╚══════════════════════════════════════════════════════════════════╝")
+
+// 1. Namespaced Keywords & DAG Hierarchies
+let account = { :id: 404, :auth/role: :superadmin }
+:admin.Derive(:user)
+:superadmin.Derive(:admin)
+
+def DescribeAccess(role: :user) -> str { return "Standard User Access" }
+def DescribeAccess(role: :admin) -> str { return "Elevated Administrator Access" }
+
+let active_role = :auth/role(account, default=:guest)
+print(f"1. Account Role: {active_role} (IsA :user = {active_role.IsA(:user)}) -> {DescribeAccess(active_role)}")
+
+// 2. Reified Citizens: Special Forms, Type Unions, Operators & Scopes
+let PrimitiveId = int | str
+let add_op = (+)
+print(f"2. Reified Type Check: 101 is int|str = {PrimitiveId.Check(101)}, (+) (20, 22) = {add_op(20, 22)}")
+
+// 3. Homoiconic Call-Quoting Modes 0–4
+def ComputeImpulse(mass: f32, velocity: f32) -> f32 {
+    return 0.5 * mass * (velocity * velocity)
+}
+
+let direct = ComputeImpulse(10.0, 4.0)
+let shallow = ComputeImpulse!(10.0, 4.0)
+let deep_folded = ComputeImpulse!!(~10.0, v)
+let abi_frame = ComputeImpulse!&(10.0, 4.0)
+
+println()
+println(f"3. Mode 0 Direct       : {direct}")
+println(f"4. Mode 1 Shallow (!)  : {shallow} => eval() = {shallow.eval()}")
+println(f"5. Mode 3 Quasiquote(!!): {deep_folded.to_string()} => eval(v=4) = {deep_folded.eval({ 'v': 4.0 })}")
+println(f"6. Mode 4 ABI Frame(!&): {abi_frame} (size={abi_frame.size_bytes}B) => dispatch() = {abi_frame.dispatch()}")

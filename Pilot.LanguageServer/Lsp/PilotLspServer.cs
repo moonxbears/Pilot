@@ -159,6 +159,7 @@ public sealed class PilotLspServer
                         ["documentSymbolProvider"] = true,
                         ["foldingRangeProvider"] = true,
                         ["codeActionProvider"] = true,
+                        ["inlayHintProvider"] = true,
                         ["completionProvider"] = new JsonObject
                         {
                             ["resolveProvider"] = false,
@@ -363,24 +364,80 @@ public sealed class PilotLspServer
             {
                 string? uri = @params?["textDocument"]?["uri"]?.GetValue<string>();
                 int line = @params?["position"]?["line"]?.GetValue<int>() ?? 0;
+                int character = @params?["position"]?["character"]?.GetValue<int>() ?? 0;
                 var items = new JsonArray();
 
                 if (uri != null && TryGetAnalysis(uri, out var analysis))
                 {
                     var scope = analysis.FindScopeAtLine(line);
-                    foreach (var sym in scope.GetAllVisibleSymbols())
+                    bool isMemberAccess = false;
+
+                    // Inspect document text immediately preceding position for dot member access (e.g. `shm.`)
+                    if (_documents.TryGetValue(uri, out var docText))
                     {
-                        items.Add(new JsonObject
+                        var lines = docText.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+                        if (line >= 0 && line < lines.Length)
                         {
-                            ["label"] = sym.Name,
-                            ["kind"] = GetCompletionItemKind(sym.Kind),
-                            ["detail"] = string.IsNullOrEmpty(sym.Signature) ? sym.TypeName : sym.Signature,
-                            ["documentation"] = new JsonObject
+                            string curLine = lines[line];
+                            int col = Math.Min(character, curLine.Length);
+                            string prefix = curLine.Substring(0, col);
+                            int dotIdx = prefix.LastIndexOf('.');
+                            if (dotIdx >= 0)
                             {
-                                ["kind"] = "markdown",
-                                ["value"] = sym.FormatHoverMarkdown()
+                                string exprPrefix = prefix.Substring(0, dotIdx).Trim();
+                                int wordStart = exprPrefix.Length - 1;
+                                while (wordStart >= 0 && (char.IsLetterOrDigit(exprPrefix[wordStart]) || exprPrefix[wordStart] == '_'))
+                                    wordStart--;
+                                string receiverVar = exprPrefix.Substring(wordStart + 1);
+                                if (!string.IsNullOrEmpty(receiverVar))
+                                {
+                                    var recSym = scope.Resolve(receiverVar);
+                                    string recType = recSym?.TypeName ?? "any";
+                                    string baseRecType = recType.TrimEnd('?');
+                                    int bracketIdx = baseRecType.IndexOf('[');
+                                    if (bracketIdx > 0) baseRecType = baseRecType.Substring(0, bracketIdx);
+
+                                    var typeSym = scope.Resolve(baseRecType);
+                                    if (typeSym != null && typeSym.Members.Count > 0)
+                                    {
+                                        isMemberAccess = true;
+                                        foreach (var memberName in typeSym.Members.Keys)
+                                        {
+                                            var m = typeSym.Members[memberName];
+                                            items.Add(new JsonObject
+                                            {
+                                                ["label"] = memberName,
+                                                ["kind"] = GetCompletionItemKind(m.Kind),
+                                                ["detail"] = string.IsNullOrEmpty(m.Signature) ? m.TypeName : m.Signature,
+                                                ["documentation"] = new JsonObject
+                                                {
+                                                    ["kind"] = "markdown",
+                                                    ["value"] = m.FormatHoverMarkdown()
+                                                }
+                                            });
+                                        }
+                                    }
+                                }
                             }
-                        });
+                        }
+                    }
+
+                    if (!isMemberAccess)
+                    {
+                        foreach (var sym in scope.GetAllVisibleSymbols())
+                        {
+                            items.Add(new JsonObject
+                            {
+                                ["label"] = sym.Name,
+                                ["kind"] = GetCompletionItemKind(sym.Kind),
+                                ["detail"] = string.IsNullOrEmpty(sym.Signature) ? sym.TypeName : sym.Signature,
+                                ["documentation"] = new JsonObject
+                                {
+                                    ["kind"] = "markdown",
+                                    ["value"] = sym.FormatHoverMarkdown()
+                                }
+                            });
+                        }
                     }
                 }
 
@@ -488,6 +545,40 @@ public sealed class PilotLspServer
                     }
                 }
                 outgoing.Add(BuildResponse(idNode, ranges));
+                break;
+            }
+
+            case "textDocument/inlayHint":
+            {
+                string? uri = @params?["textDocument"]?["uri"]?.GetValue<string>();
+                var hintsArray = new JsonArray();
+                if (uri != null && TryGetAnalysis(uri, out var analysis))
+                {
+                    var rangeObj = @params?["range"];
+                    int startLine = rangeObj?["start"]?["line"]?.GetValue<int>() ?? 0;
+                    int endLine = rangeObj?["end"]?["line"]?.GetValue<int>() ?? int.MaxValue;
+
+                    foreach (var hint in analysis.InlayHints)
+                    {
+                        if (hint.Line < startLine || hint.Line > endLine)
+                            continue;
+
+                        hintsArray.Add(new JsonObject
+                        {
+                            ["position"] = new JsonObject
+                            {
+                                ["line"] = hint.Line,
+                                ["character"] = hint.Character
+                            },
+                            ["label"] = hint.Label,
+                            ["kind"] = (int)hint.Kind,
+                            ["paddingLeft"] = hint.PaddingLeft,
+                            ["paddingRight"] = hint.PaddingRight,
+                            ["tooltip"] = hint.Tooltip
+                        });
+                    }
+                }
+                outgoing.Add(BuildResponse(idNode, hintsArray));
                 break;
             }
         }

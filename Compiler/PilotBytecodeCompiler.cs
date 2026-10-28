@@ -701,6 +701,27 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         return null;
     }
 
+    private static bool IsSliceBufferTypeAnnotation(PilotParser.Type_annotationContext? typeAnn)
+    {
+        string? rawType = typeAnn?.type_spec()?.GetText()?.Trim();
+        if (string.IsNullOrEmpty(rawType)) return false;
+        return rawType.Equals("SliceBuffer", StringComparison.OrdinalIgnoreCase) ||
+               rawType.StartsWith("SliceBuffer[", StringComparison.OrdinalIgnoreCase) ||
+               rawType.StartsWith("SliceBuffer<", StringComparison.OrdinalIgnoreCase) ||
+               rawType.Equals("SharedBuffer", StringComparison.OrdinalIgnoreCase) ||
+               rawType.StartsWith("SharedBuffer[", StringComparison.OrdinalIgnoreCase) ||
+               rawType.StartsWith("SharedBuffer<", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsTopLevelForExpression(PilotParser.TestContext? test)
+    {
+        if (test == null) return false;
+        string trimmed = test.GetText().TrimStart();
+        return trimmed.StartsWith("for(", StringComparison.Ordinal) ||
+               trimmed.StartsWith("for ", StringComparison.Ordinal) ||
+               trimmed.StartsWith("for\t", StringComparison.Ordinal);
+    }
+
     public override object? VisitLet_stmt(PilotParser.Let_stmtContext context)
     {
         foreach (var id in ExtractBindingIdentifiers(context.binding_pattern()))
@@ -710,12 +731,14 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         }
 
         string name = context.binding_pattern()?.identifier()?.GetText() ?? "";
-        if (!string.IsNullOrEmpty(name))
+        if (!string.IsNullOrEmpty(name) && !IsSliceBufferTypeAnnotation(context.type_annotation()))
         {
             CompileVariableDeclaration(name, context.test());
         }
         else
         {
+            if (_isFunction && !string.IsNullOrEmpty(name))
+                _chunk.GetOrAllocateLocalSlot(name);
             int fallback = _chunk.AddAstFallback(context);
             _chunk.Emit(PilotOpcode.EvalAst, fallback);
             _chunk.Emit(PilotOpcode.Pop);
@@ -732,12 +755,14 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         }
 
         string name = context.binding_pattern()?.identifier()?.GetText() ?? "";
-        if (!string.IsNullOrEmpty(name))
+        if (!string.IsNullOrEmpty(name) && !IsSliceBufferTypeAnnotation(context.type_annotation()))
         {
             CompileVariableDeclaration(name, context.test());
         }
         else
         {
+            if (_isFunction && !string.IsNullOrEmpty(name))
+                _chunk.GetOrAllocateLocalSlot(name);
             int fallback = _chunk.AddAstFallback(context);
             _chunk.Emit(PilotOpcode.EvalAst, fallback);
             _chunk.Emit(PilotOpcode.Pop);
@@ -754,12 +779,14 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         }
 
         string name = context.binding_pattern()?.identifier()?.GetText() ?? "";
-        if (!string.IsNullOrEmpty(name))
+        if (!string.IsNullOrEmpty(name) && !IsSliceBufferTypeAnnotation(context.type_annotation()))
         {
             CompileVariableDeclaration(name, context.test());
         }
         else
         {
+            if (_isFunction && !string.IsNullOrEmpty(name))
+                _chunk.GetOrAllocateLocalSlot(name);
             int fallback = _chunk.AddAstFallback(context);
             _chunk.Emit(PilotOpcode.EvalAst, fallback);
             _chunk.Emit(PilotOpcode.Pop);
@@ -850,6 +877,16 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         // Simple assignment: target = expr
         if (context.EQUAL()?.Length > 0 && context.test()?.Length > 0)
         {
+            if (IsTopLevelForExpression(context.test(0)) &&
+                IsSimpleIdentifier(tests[0], out string targetName) &&
+                !IsImmutable(targetName))
+            {
+                int fallback = _chunk.AddAstFallback(context);
+                _chunk.Emit(PilotOpcode.EvalAst, fallback);
+                _chunk.Emit(PilotOpcode.Pop);
+                return null;
+            }
+
             bool prevDiscard = _discardExpressionResult;
             _discardExpressionResult = false;
             Visit(context.test(0)); // Evaluate RHS
@@ -1620,9 +1657,16 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     public override object? VisitNot_test(PilotParser.Not_testContext context)
     {
-        if (context.NOT() != null)
+        if (context.NOT() != null || context.EXCLAMATION() != null)
         {
             Visit(context.not_test());
+            _chunk.Emit(PilotOpcode.Not);
+            return null;
+        }
+        if (context.CALL_QUOTE_DEEP() != null)
+        {
+            Visit(context.not_test());
+            _chunk.Emit(PilotOpcode.Not);
             _chunk.Emit(PilotOpcode.Not);
             return null;
         }
@@ -1924,10 +1968,15 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     private bool RequiresAtomExprAstFallback(PilotParser.Atom_exprContext context, PilotParser.TrailerContext[] trailers)
     {
+        if (context.atom()?.identifier()?.GetText() is "keyword" or "symbol" or "old")
+        {
+            return true;
+        }
+
         for (int i = 0; i < trailers.Length; i++)
         {
             var t = trailers[i];
-            if (t.STAR() != null || t.cascade_trailer() != null ||
+            if (t.call_quote_op() != null || t.STAR() != null || t.cascade_trailer() != null ||
                 t.unit_expr() != null || t.over_clause() != null)
             {
                 return true;
@@ -1948,7 +1997,7 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
                 {
                     foreach (var a in args)
                     {
-                        if (a.EACH() != null || a.REPEAT() != null || a.DOTDOT() != null ||
+                        if (a.TILDE() != null || a.EACH() != null || a.REPEAT() != null || a.DOTDOT() != null ||
                             a.STAR() != null || a.DOUBLESTAR() != null || a.test() == null)
                         {
                             return true;
@@ -2108,9 +2157,9 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         if (context.symbol_literal() != null)
         {
             var sym = context.symbol_literal();
-            if (sym.identifier() != null)
+            if (sym.SYMBOL() == null)
             {
-                int idx = _chunk.AddConstant(PilotValue.FromKeyword(sym.identifier().GetText()));
+                int idx = _chunk.AddConstant(PilotValue.FromKeyword(sym.GetText().TrimStart(':')));
                 _chunk.Emit(PilotOpcode.Const, idx);
                 return null;
             }
@@ -2120,6 +2169,16 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
                 _chunk.Emit(PilotOpcode.Const, idx);
                 return null;
             }
+            int fb = _chunk.AddAstFallback(context);
+            _chunk.Emit(PilotOpcode.EvalAst, fb);
+            return null;
+        }
+
+        if (context.overloadable_op() != null || context.macro_call() != null)
+        {
+            int fb = _chunk.AddAstFallback(context);
+            _chunk.Emit(PilotOpcode.EvalAst, fb);
+            return null;
         }
 
         if (context.identifier() != null)

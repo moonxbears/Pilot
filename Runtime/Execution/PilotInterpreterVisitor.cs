@@ -183,7 +183,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitLet_stmt(PilotParser.Let_stmtContext context)
     {
-        PilotValue initialVal = context.test() != null ? Visit(context.test()) : PilotValue.Undefined;
+        PilotValue initialVal = EvaluateDeclarationInitializer(context.type_annotation(), context.test());
         if (Context.PendingFlow != PilotFlowSignalKind.None) return Context.PendingReturnValue;
         DeclareBinding(context.binding_pattern(), initialVal, isConst: true);
         return initialVal;
@@ -191,7 +191,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitVar_stmt(PilotParser.Var_stmtContext context)
     {
-        PilotValue initialVal = context.test() != null ? Visit(context.test()) : PilotValue.Undefined;
+        PilotValue initialVal = EvaluateDeclarationInitializer(context.type_annotation(), context.test());
         if (Context.PendingFlow != PilotFlowSignalKind.None) return Context.PendingReturnValue;
         DeclareBinding(context.binding_pattern(), initialVal, isConst: false);
         return initialVal;
@@ -199,10 +199,95 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitConst_stmt(PilotParser.Const_stmtContext context)
     {
-        PilotValue initialVal = context.test() != null ? Visit(context.test()) : PilotValue.Undefined;
+        PilotValue initialVal = EvaluateDeclarationInitializer(context.type_annotation(), context.test());
         if (Context.PendingFlow != PilotFlowSignalKind.None) return Context.PendingReturnValue;
         DeclareBinding(context.binding_pattern(), initialVal, isConst: true);
         return initialVal;
+    }
+
+    private PilotValue EvaluateDeclarationInitializer(
+        PilotParser.Type_annotationContext? typeAnn,
+        PilotParser.TestContext? rhsExpr)
+    {
+        string? rawType = typeAnn?.type_spec()?.GetText()?.Trim();
+        bool isSliceBufferAnn = !string.IsNullOrEmpty(rawType) &&
+            (rawType.Equals("SliceBuffer", StringComparison.OrdinalIgnoreCase) ||
+             rawType.StartsWith("SliceBuffer[", StringComparison.OrdinalIgnoreCase) ||
+             rawType.StartsWith("SliceBuffer<", StringComparison.OrdinalIgnoreCase));
+        bool isSharedBufferAnn = !string.IsNullOrEmpty(rawType) &&
+            (rawType.Equals("SharedBuffer", StringComparison.OrdinalIgnoreCase) ||
+             rawType.StartsWith("SharedBuffer[", StringComparison.OrdinalIgnoreCase) ||
+             rawType.StartsWith("SharedBuffer<", StringComparison.OrdinalIgnoreCase));
+
+        if (!isSliceBufferAnn && !isSharedBufferAnn)
+        {
+            return rhsExpr != null ? Visit(rhsExpr) : PilotValue.Undefined;
+        }
+
+        var elemKind = Pilot.Runtime.NativeMemory.PilotSharedBuffer.ParseElementKind(rawType);
+        if (rhsExpr == null)
+        {
+            var emptyBuf = isSharedBufferAnn
+                ? Pilot.Runtime.NativeMemory.PilotSharedBuffer.CreateOrOpenShared($"pilot_shm_{Guid.NewGuid():N}", 16, elemKind, 0)
+                : Pilot.Runtime.NativeMemory.PilotSharedBuffer.AllocateUnmanaged(8, elemKind, 0);
+            return PilotValue.FromSliceBuffer(emptyBuf);
+        }
+
+        Pilot.Runtime.NativeMemory.PilotSharedBuffer? pendingTarget = null;
+        if (TryUnwrapForStmt(rhsExpr) != null)
+        {
+            pendingTarget = isSharedBufferAnn
+                ? Pilot.Runtime.NativeMemory.PilotSharedBuffer.CreateOrOpenShared($"pilot_shm_{Guid.NewGuid():N}", 16, elemKind, 0)
+                : Pilot.Runtime.NativeMemory.PilotSharedBuffer.AllocateUnmanaged(0, elemKind, 0);
+        }
+
+        var prevPending = Context.PendingSliceYieldTarget;
+        if (pendingTarget != null)
+            Context.PendingSliceYieldTarget = pendingTarget;
+
+        PilotValue val;
+        try
+        {
+            val = Visit(rhsExpr);
+        }
+        finally
+        {
+            Context.PendingSliceYieldTarget = prevPending;
+        }
+
+        if (val.Kind == PilotValueKind.SliceBuffer)
+        {
+            if (pendingTarget != null && !ReferenceEquals(pendingTarget, val.AsSliceBuffer()))
+                pendingTarget.Dispose();
+            if (isSharedBufferAnn)
+                val.AsSliceBuffer().EnsureSharedMapping();
+            return val;
+        }
+
+        if (val.Kind is PilotValueKind.List or PilotValueKind.Tuple)
+        {
+            var items = val.Kind == PilotValueKind.List ? (IReadOnlyList<PilotValue>)val.AsList() : val.AsTuple();
+            var converted = pendingTarget ?? (isSharedBufferAnn
+                ? Pilot.Runtime.NativeMemory.PilotSharedBuffer.CreateOrOpenShared($"pilot_shm_{Guid.NewGuid():N}", (nuint)Math.Max(1, items.Count), elemKind, 0)
+                : Pilot.Runtime.NativeMemory.PilotSharedBuffer.AllocateUnmanaged((nuint)items.Count, elemKind, 0));
+            converted.ReserveInitialCapacity((nuint)items.Count);
+            for (int i = 0; i < items.Count; i++)
+                converted.YieldElement(items[i]);
+            return PilotValue.FromSliceBuffer(converted);
+        }
+
+        pendingTarget?.Dispose();
+        return val;
+    }
+
+    private static PilotParser.For_stmtContext? TryUnwrapForStmt(PilotParser.TestContext? test)
+    {
+        if (test == null) return null;
+        var atomExpr = TryUnwrapAtomExpr(test);
+        if (atomExpr == null) return null;
+        var trailers = atomExpr.trailer();
+        if (trailers != null && trailers.Length > 0) return null;
+        return atomExpr.atom()?.for_stmt();
     }
 
     private void DeclareBinding(PilotParser.Binding_patternContext context, PilotValue val, bool isConst)
@@ -529,7 +614,30 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         {
             // Simple assignment: a = val
             var rhsNode = context.test(0);
-            var rhsVal = Visit(rhsNode);
+            Pilot.Runtime.NativeMemory.PilotSharedBuffer? existingSliceTarget = null;
+            var targetInfo = TargetCache.GetOrAdd(tests[0], AnalyzeTarget);
+            if (targetInfo.Kind == TargetAssignmentKind.SimpleIdentifier &&
+                TryUnwrapForStmt(rhsNode) != null &&
+                Context.Environment.CurrentScope.TryResolve(targetInfo.Identifier!, out var curVal) &&
+                curVal.Kind == PilotValueKind.SliceBuffer)
+            {
+                existingSliceTarget = curVal.AsSliceBuffer();
+                existingSliceTarget.ResetLength();
+            }
+
+            var prevPendingSlice = Context.PendingSliceYieldTarget;
+            if (existingSliceTarget != null)
+                Context.PendingSliceYieldTarget = existingSliceTarget;
+
+            PilotValue rhsVal;
+            try
+            {
+                rhsVal = Visit(rhsNode);
+            }
+            finally
+            {
+                Context.PendingSliceYieldTarget = prevPendingSlice;
+            }
             if (Context.PendingFlow != PilotFlowSignalKind.None) return Context.PendingReturnValue;
             AssignTarget(tests[0], rhsVal, rhsNode);
             return rhsVal;
@@ -949,6 +1057,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             isAsync: context.ASYNC() != null,
             isGenerator: isGen);
         function.IsVectorized = isVectorized;
+        function.SourceBodyText = context.suite()?.GetText();
         if (context.type_spec() != null)
         {
             function.ReturnTypeSpec = context.type_spec().GetText();
@@ -1271,10 +1380,71 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             context.suite(),
             Context.Environment.CurrentScope,
             isAsync: false,
-            isGenerator: false);
+            isGenerator: false)
+        {
+            IsMacro = true,
+            SourceBodyText = context.suite()?.GetText()
+        };
+
+        var kw = PilotKeyword.Intern(macroName);
+        kw.IsSpecialForm = true;
 
         Context.Environment.CurrentScope.Declare(macroName, PilotValue.FromFunction(macroFunction));
         return PilotValue.FromFunction(macroFunction);
+    }
+
+    public override PilotValue VisitExtern_def(PilotParser.Extern_defContext context)
+    {
+        if (context.extern_member() == null) return PilotValue.Undefined;
+
+        PilotValue lastVal = PilotValue.Undefined;
+        foreach (var member in context.extern_member())
+        {
+            if (member.small_stmt() != null)
+            {
+                lastVal = Visit(member.small_stmt());
+                continue;
+            }
+
+            if ((member.DEF() != null || member.FN() != null) && member.identifier() != null)
+            {
+                string fnName = member.identifier().GetText();
+                var paramList = new List<PilotParameter>();
+                if (member.parameters()?.parameter() != null)
+                {
+                    foreach (var p in member.parameters().parameter())
+                    {
+                        string pName = p.identifier()?.GetText() ?? p.splice_expr()?.GetText() ?? "arg";
+                        string? pType = p.type_annotation()?.type_spec()?.GetText();
+                        PilotValue? defaultVal = p.test() != null ? Visit(p.test()) : default(PilotValue?);
+                        paramList.Add(new PilotParameter(pName, pType, defaultVal));
+                    }
+                }
+
+                PilotFunction extFn;
+                if (member.suite() != null)
+                {
+                    extFn = new PilotFunction(fnName, paramList, member.suite(), Context.Environment.CurrentScope)
+                    {
+                        IsExternFfi = false,
+                        SourceBodyText = member.suite().GetText(),
+                        ReturnTypeSpec = member.type_spec()?.GetText()
+                    };
+                }
+                else
+                {
+                    extFn = new PilotFunction(fnName, paramList, (_, _) => PilotValue.Null)
+                    {
+                        IsExternFfi = true,
+                        ReturnTypeSpec = member.type_spec()?.GetText()
+                    };
+                }
+
+                lastVal = PilotValue.FromFunction(extFn);
+                Context.Environment.CurrentScope.Declare(fnName, lastVal);
+            }
+        }
+        return lastVal;
     }
 
     public override PilotValue VisitType_alias_stmt(PilotParser.Type_alias_stmtContext context)
@@ -2167,6 +2337,9 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitFor_stmt(PilotParser.For_stmtContext context)
     {
+        var sliceTarget = Context.PendingSliceYieldTarget;
+        Context.PendingSliceYieldTarget = null;
+
         var loopDiags = new List<Pilot.Analysis.TypeSystem.PilotAnalysisDiagnostic>();
         var loopInfo = Pilot.Analysis.Loops.PilotForLoopAnalyzer.AnalyzeSingleLoop(context, loopDiags);
         if (loopDiags.Count > 0)
@@ -2188,23 +2361,39 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
         if (loopInfo.ReturnMode == Pilot.Analysis.Loops.LoopReturnMode.CollectionYield)
         {
-            if (loopInfo.CanPreallocateYieldArray && iterable.Kind == PilotValueKind.Range)
+            if (sliceTarget != null)
             {
-                var r = iterable.AsRange();
-                long exactLen = r.Step > 0
-                    ? Math.Max(0, (r.Inclusive ? r.End - r.Start + 1 : r.End - r.Start))
-                    : (int)Math.Max(0, r.Count);
-                yieldedItems = new List<PilotValue>((int)Math.Min(exactLen, int.MaxValue));
+                if (loopInfo.CanPreallocateYieldArray && iterable.Kind == PilotValueKind.Range)
+                {
+                    var r = iterable.AsRange();
+                    long exactLen = r.Step > 0
+                        ? Math.Max(0, (r.Inclusive ? r.End - r.Start + 1 : r.End - r.Start))
+                        : Math.Max(0, r.Count);
+                    sliceTarget.ReserveInitialCapacity((nuint)Math.Min(exactLen, int.MaxValue));
+                }
+                Context.LoopYieldAccumulator = val => sliceTarget.YieldElement(val);
             }
             else
             {
-                yieldedItems = new List<PilotValue>();
+                if (loopInfo.CanPreallocateYieldArray && iterable.Kind == PilotValueKind.Range)
+                {
+                    var r = iterable.AsRange();
+                    long exactLen = r.Step > 0
+                        ? Math.Max(0, (r.Inclusive ? r.End - r.Start + 1 : r.End - r.Start))
+                        : (int)Math.Max(0, r.Count);
+                    yieldedItems = new List<PilotValue>((int)Math.Min(exactLen, int.MaxValue));
+                }
+                else
+                {
+                    yieldedItems = new List<PilotValue>();
+                }
+                Context.LoopYieldAccumulator = val => yieldedItems.Add(val);
             }
-            Context.LoopYieldAccumulator = val => yieldedItems.Add(val);
         }
         else
         {
             // Nested Scope Isolation: non-yielding inner loops must not accidentally feed outer loop yield buffers
+            sliceTarget = null;
             Context.LoopYieldAccumulator = null;
         }
 
@@ -2225,113 +2414,185 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                         ? (range.Inclusive ? range.End : range.End - 1)
                         : (range.Inclusive ? range.End : range.End + 1);
 
-                    Stack<Pilot.Runtime.NativeMemory.RangeWindow<long>>? worklist =
-                        loopInfo.ScheduleMode == Pilot.Analysis.Loops.LoopScheduleMode.WorklistStack
-                            ? new Stack<Pilot.Runtime.NativeMemory.RangeWindow<long>>()
+                    bool hasWorklist = loopInfo.ScheduleMode == Pilot.Analysis.Loops.LoopScheduleMode.WorklistStack;
+                    var worklist = hasWorklist
+                        ? Pilot.Runtime.NativeMemory.UnmanagedWorklist<long>.AllocateNative(16)
+                        : default;
+
+                    try
+                    {
+                        PilotBinding? binding = simpleTargetName != null
+                            ? Context.Environment.CurrentScope.GetOrDeclareBinding(simpleTargetName, PilotValue.Undefined)
                             : null;
 
-                    PilotBinding? binding = simpleTargetName != null
-                        ? Context.Environment.CurrentScope.GetOrDeclareBinding(simpleTargetName, PilotValue.Undefined)
-                        : null;
-
-                    while (true)
-                    {
-                        bool inBounds = step > 0 ? current <= max : current >= max;
-                        if (!inBounds)
+                        while (true)
                         {
-                            if (worklist != null && worklist.Count > 0)
+                            bool inBounds = step > 0 ? current <= max : current >= max;
+                            if (!inBounds)
                             {
-                                var nextWin = worklist.Pop();
-                                current = nextWin.Current;
-                                max = nextWin.Max;
-                                continue;
-                            }
-                            break;
-                        }
-
-                        var itemVal = PilotValue.FromInt(current);
-                        if (binding != null)
-                        {
-                            binding.Value = itemVal;
-                        }
-                        else
-                        {
-                            AssignForTarget(forTarget, itemVal);
-                        }
-
-                        Context.Environment.PushScope("for");
-                        try
-                        {
-                            lastVal = Visit(bodySuite);
-                        }
-                        catch (PilotBreakSignal)
-                        {
-                            brokeEarly = true;
-                            break;
-                        }
-                        catch (PilotContinueSignal)
-                        {
-                            current += step;
-                            continue;
-                        }
-                        finally
-                        {
-                            Context.Environment.PopScope();
-                        }
-
-                        if (Context.PendingFlow != PilotFlowSignalKind.None)
-                        {
-                            if (Context.PendingFlow == PilotFlowSignalKind.Continue && string.IsNullOrEmpty(Context.PendingFlowLabel))
-                            {
-                                Context.PendingFlow = PilotFlowSignalKind.None;
-                                if (Context.HasPendingContinueRange && Context.PendingContinueRange != null)
+                                if (hasWorklist && worklist.TryPop(out var nextWin))
                                 {
-                                    var nr = Context.PendingContinueRange;
-                                    bool spread = Context.PendingContinueWorklistSpread;
-                                    Context.HasPendingContinueRange = false;
-                                    Context.PendingContinueRange = null;
-                                    Context.PendingContinueWorklistSpread = false;
-
-                                    if (spread)
-                                    {
-                                        worklist ??= new Stack<Pilot.Runtime.NativeMemory.RangeWindow<long>>();
-                                        long remStart = current + step;
-                                        if (step > 0 ? remStart <= max : remStart >= max)
-                                        {
-                                            worklist.Push(new Pilot.Runtime.NativeMemory.RangeWindow<long>(remStart, max));
-                                        }
-                                    }
-
-                                    current = nr.Start;
-                                    max = nr.Step > 0
-                                        ? (nr.Inclusive ? nr.End : nr.End - 1)
-                                        : (nr.Inclusive ? nr.End : nr.End + 1);
+                                    current = nextWin.Current;
+                                    max = nextWin.Max;
                                     continue;
-                                }
-
-                                current += step;
-                                continue;
-                            }
-                            if (Context.PendingFlow == PilotFlowSignalKind.Break && string.IsNullOrEmpty(Context.PendingFlowLabel))
-                            {
-                                Context.PendingFlow = PilotFlowSignalKind.None;
-                                brokeEarly = true;
-                                if (Context.HasPendingBreakValue)
-                                {
-                                    breakVal = Context.PendingBreakValue;
-                                    Context.HasPendingBreakValue = false;
-                                    Context.PendingBreakValue = PilotValue.Undefined;
                                 }
                                 break;
                             }
-                            break;
-                        }
 
-                        current += step;
+                            var itemVal = PilotValue.FromInt(current);
+                            if (binding != null)
+                            {
+                                binding.Value = itemVal;
+                            }
+                            else
+                            {
+                                AssignForTarget(forTarget, itemVal);
+                            }
+
+                            Context.Environment.PushScope("for");
+                            try
+                            {
+                                lastVal = Visit(bodySuite);
+                            }
+                            catch (PilotBreakSignal)
+                            {
+                                brokeEarly = true;
+                                break;
+                            }
+                            catch (PilotContinueSignal)
+                            {
+                                current += step;
+                                continue;
+                            }
+                            finally
+                            {
+                                Context.Environment.PopScope();
+                            }
+
+                            if (Context.PendingFlow != PilotFlowSignalKind.None)
+                            {
+                                if (Context.PendingFlow == PilotFlowSignalKind.Continue && string.IsNullOrEmpty(Context.PendingFlowLabel))
+                                {
+                                    Context.PendingFlow = PilotFlowSignalKind.None;
+                                    if (Context.HasPendingContinueRange && Context.PendingContinueRange != null)
+                                    {
+                                        var nr = Context.PendingContinueRange;
+                                        bool spread = Context.PendingContinueWorklistSpread;
+                                        Context.HasPendingContinueRange = false;
+                                        Context.PendingContinueRange = null;
+                                        Context.PendingContinueWorklistSpread = false;
+
+                                        if (spread)
+                                        {
+                                            if (!hasWorklist)
+                                            {
+                                                worklist = Pilot.Runtime.NativeMemory.UnmanagedWorklist<long>.AllocateNative(16);
+                                                hasWorklist = true;
+                                            }
+                                            long remStart = current + step;
+                                            if (step > 0 ? remStart <= max : remStart >= max)
+                                            {
+                                                worklist.Push(new Pilot.Runtime.NativeMemory.RangeWindow<long>(remStart, max));
+                                            }
+                                        }
+
+                                        current = nr.Start;
+                                        max = nr.Step > 0
+                                            ? (nr.Inclusive ? nr.End : nr.End - 1)
+                                            : (nr.Inclusive ? nr.End : nr.End + 1);
+                                        continue;
+                                    }
+
+                                    current += step;
+                                    continue;
+                                }
+                                if (Context.PendingFlow == PilotFlowSignalKind.Break && string.IsNullOrEmpty(Context.PendingFlowLabel))
+                                {
+                                    Context.PendingFlow = PilotFlowSignalKind.None;
+                                    brokeEarly = true;
+                                    if (Context.HasPendingBreakValue)
+                                    {
+                                        breakVal = Context.PendingBreakValue;
+                                        Context.HasPendingBreakValue = false;
+                                        Context.PendingBreakValue = PilotValue.Undefined;
+                                    }
+                                    break;
+                                }
+                                break;
+                            }
+
+                            current += step;
+                        }
+                    }
+                    finally
+                    {
+                        worklist.Dispose();
                     }
                 }
             }
-            // Fast-path 2: List iteration by index
+            // Fast-path 2: Contiguous SliceBuffer iteration by relative index (base-address independent)
+            else if (iterable.Kind == PilotValueKind.SliceBuffer)
+            {
+                var sb = iterable.AsSliceBuffer();
+                PilotBinding? binding = simpleTargetName != null
+                    ? Context.Environment.CurrentScope.GetOrDeclareBinding(simpleTargetName, PilotValue.Undefined)
+                    : null;
+
+                for (int i = 0; i < sb.Length; i++)
+                {
+                    var itemVal = sb.GetElement(i);
+                    if (binding != null)
+                    {
+                        binding.Value = itemVal;
+                    }
+                    else
+                    {
+                        AssignForTarget(forTarget, itemVal);
+                    }
+
+                    Context.Environment.PushScope("for");
+                    try
+                    {
+                        lastVal = Visit(bodySuite);
+                    }
+                    catch (PilotBreakSignal)
+                    {
+                        brokeEarly = true;
+                        break;
+                    }
+                    catch (PilotContinueSignal)
+                    {
+                        continue;
+                    }
+                    finally
+                    {
+                        Context.Environment.PopScope();
+                    }
+
+                    if (Context.PendingFlow != PilotFlowSignalKind.None)
+                    {
+                        if (Context.PendingFlow == PilotFlowSignalKind.Continue && string.IsNullOrEmpty(Context.PendingFlowLabel))
+                        {
+                            Context.PendingFlow = PilotFlowSignalKind.None;
+                            continue;
+                        }
+                        if (Context.PendingFlow == PilotFlowSignalKind.Break && string.IsNullOrEmpty(Context.PendingFlowLabel))
+                        {
+                            Context.PendingFlow = PilotFlowSignalKind.None;
+                            brokeEarly = true;
+                            if (Context.HasPendingBreakValue)
+                            {
+                                breakVal = Context.PendingBreakValue;
+                                Context.HasPendingBreakValue = false;
+                                Context.PendingBreakValue = PilotValue.Undefined;
+                            }
+                            break;
+                        }
+                        break;
+                    }
+                }
+            }
+            // Fast-path 3: List iteration by index
             else if (iterable.Kind == PilotValueKind.List)
             {
                 var list = iterable.AsList();
@@ -2495,7 +2756,9 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
         if (loopInfo.ReturnMode == Pilot.Analysis.Loops.LoopReturnMode.CollectionYield)
         {
-            return PilotValue.FromList(yieldedItems!);
+            return sliceTarget != null
+                ? PilotValue.FromSliceBuffer(sliceTarget)
+                : PilotValue.FromList(yieldedItems!);
         }
 
         if (loopInfo.ReturnMode == Pilot.Analysis.Loops.LoopReturnMode.ScalarBreak)
@@ -3450,9 +3713,13 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitNot_test(PilotParser.Not_testContext context)
     {
-        if (context.NOT() != null)
+        if (context.NOT() != null || context.EXCLAMATION() != null)
         {
             return !Visit(context.not_test());
+        }
+        if (context.CALL_QUOTE_DEEP() != null)
+        {
+            return PilotValue.FromBool(Visit(context.not_test()).IsTrue);
         }
         return Visit(context.comparison());
     }
@@ -3707,6 +3974,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
     {
         if (context.PLUS() != null) return Visit(context.factor());
         if (context.MINUS() != null) return -Visit(context.factor());
+        if (context.TILDE() != null) return PilotValue.FromInt(~Visit(context.factor()).AsInt());
         if (context.power() != null) return Visit(context.power());
         if (context.unary_op() != null) return Visit(context.unary_op());
         return PilotValue.Undefined;
@@ -3796,6 +4064,35 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 current = Visit(context.atom());
             }
         }
+        // Milestone 17.1: Reified special forms via `keyword(guard)`, `keyword(defer)`, `keyword(match)`, or `keyword(my_macro)`
+        else if (trailers?.Length > 0 &&
+                 trailers[0].LPAR() != null &&
+                 trailers[0].call_quote_op() == null &&
+                 context.atom()?.identifier()?.GetText() is "keyword" or "symbol")
+        {
+            var firstArg = trailers[0].arglist()?.argument()?.FirstOrDefault();
+            string? rawArgText = firstArg?.test()?.GetText()?.Trim();
+            if (!string.IsNullOrEmpty(rawArgText) &&
+                IsSimpleIdentifier(rawArgText) &&
+                (IsBuiltinSpecialFormName(rawArgText) ||
+                 !Context.Environment.CurrentScope.TryResolve(rawArgText, out var resolvedVar) ||
+                 (resolvedVar.Kind == PilotValueKind.Function && resolvedVar.AsFunction().IsMacro)))
+            {
+                var kw = PilotKeyword.Intern(rawArgText);
+                if (IsBuiltinSpecialFormName(rawArgText) ||
+                    (Context.Environment.CurrentScope.TryResolve(rawArgText, out var macroFn) &&
+                     macroFn.Kind == PilotValueKind.Function && macroFn.AsFunction().IsMacro))
+                {
+                    kw.IsSpecialForm = true;
+                }
+                current = PilotValue.FromKeyword(kw);
+                startTrailerIdx = 1;
+            }
+            else
+            {
+                current = Visit(context.atom());
+            }
+        }
         else
         {
             current = Visit(context.atom());
@@ -3847,6 +4144,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 // Fast-path direct member call: receiver.method(args) or receiver?.method(args) without allocating an intermediate PilotFunction
                 if (i + 1 < trailers.Length &&
                     trailers[i + 1].LPAR() != null &&
+                    trailers[i + 1].call_quote_op() == null &&
                     trailers[i + 1].STAR() == null &&
                     trailers[i + 1].SAFE_NAV() == null &&
                     trailers[i + 1].QUESTION() == null &&
@@ -3955,11 +4253,11 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         var args = arglist?.argument();
         int argCount = args?.Length ?? 0;
 
-        // Ensure no argument uses named or 'each'/'repeat'/'..' modifiers before taking direct fast-path
+        // Ensure no argument uses named or 'each'/'repeat'/'..'/'~' modifiers before taking direct fast-path
         for (int i = 0; i < argCount; i++)
         {
             var a = args![i];
-            if (a.EACH() != null || a.REPEAT() != null || a.DOTDOT() != null || a.EQUAL() != null || a.COLON() != null || a.test() == null)
+            if (a.TILDE() != null || a.EACH() != null || a.REPEAT() != null || a.DOTDOT() != null || a.EQUAL() != null || a.COLON() != null || a.test() == null)
             {
                 return false;
             }
@@ -4132,6 +4430,31 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         int trailerIndex,
         PilotParser.Atom_exprContext context)
     {
+        // Milestone 17.3: Homoiconic Call-Quoting (`fn!(...)`, `fn!!(...)`, `fn!&(...)`, `fn!^(...)`, `fn!@(...)`, `fn!?(...)`)
+        if (trailer.call_quote_op() != null)
+        {
+            var quoteKind = Pilot.Analysis.CallQuoting.PilotCallQuotingEngine.GetCallQuoteKind(trailer);
+            string rootName = (trailerIndex == 0
+                ? (context.atom()?.identifier()?.GetText() ?? context.atom()?.GetText())
+                : trailers[trailerIndex - 1].identifier()?.GetText()) ?? "Anonymous";
+            return Pilot.Analysis.CallQuoting.PilotCallQuotingEngine.EvaluateQuotedCall(
+                quoteKind, current, rootName, trailer, this);
+        }
+
+        // Validate that '~arg' unquote prefix is not used in a standard unquoted call (QUOTE002)
+        var rawArgs = trailer.arglist()?.argument();
+        if (rawArgs != null)
+        {
+            for (int i = 0; i < rawArgs.Length; i++)
+            {
+                if (rawArgs[i].TILDE() != null)
+                {
+                    throw new PilotRuntimeException(
+                        $"[QUOTE002] Unquote prefix '~' on argument '{rawArgs[i].GetText()}' is only valid inside a deep-splice call quote 'fn!!(...)'.");
+                }
+            }
+        }
+
         bool isBroadcast = trailer.STAR() != null;
         var (posArgs, namedArgs, eachPos, eachNamed) = EvaluateCallArgumentsWithModifiers(trailer.arglist());
 
@@ -4268,17 +4591,32 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         }
         else if (current.Kind == PilotValueKind.Keyword)
         {
-            // Clojure-like keyword invocation on Map/Object/Null: (:key map [default])
-            if (posArgs.Count > 0 && posArgs[0].Kind is PilotValueKind.Map or PilotValueKind.Object or PilotValueKind.Null)
+            var kw = current.AsKeyword();
+            if (kw.IsSpecialForm && Context.Environment.TryResolve(kw.Name, out var sfVal) && sfVal.Kind == PilotValueKind.Function)
+            {
+                var boundArgs = BindArgumentsToFunction(sfVal.AsFunction(), posArgs, namedArgs);
+                return sfVal.AsFunction().Invoke(Context, boundArgs);
+            }
+
+            // Clojure-like keyword invocation on Map/Object/Record/Null: :key(map, default=:guest) or :key(map, :guest)
+            if (posArgs.Count > 0 && posArgs[0].Kind is PilotValueKind.Map or PilotValueKind.Object or PilotValueKind.Record or PilotValueKind.Null)
             {
                 var target = posArgs[0];
-                var defaultVal = posArgs.Count > 1 ? posArgs[1] : PilotValue.Undefined;
-                return current.AsKeyword().Invoke(target, defaultVal);
+                PilotValue defaultVal = PilotValue.Undefined;
+                if (posArgs.Count > 1)
+                {
+                    defaultVal = posArgs[1];
+                }
+                else if (namedArgs.TryGetValue("default", out var namedDef))
+                {
+                    defaultVal = namedDef;
+                }
+                return kw.Invoke(target, defaultVal);
             }
             // Keyword-tagged variant constructor: :ok([1, 2, 3]), :err("timeout")
             if (posArgs.Count > 0)
             {
-                return PilotValue.FromKeywordVariant(new PilotKeywordVariant(current.AsKeyword(), posArgs.ToArray()));
+                return PilotValue.FromKeywordVariant(new PilotKeywordVariant(kw, posArgs.ToArray()));
             }
             return PilotValue.Null;
         }
@@ -4538,6 +4876,11 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         {
             return CreateFluentMemberFunction(context.identifier().GetText(), null);
         }
+        if (context.overloadable_op() != null)
+        {
+            return PilotValue.FromFunction(Pilot.Runtime.Builtins.PilotBuiltinRegistry.GetOperatorFunction(context.overloadable_op().GetText()));
+        }
+        if (context.macro_call() != null) return VisitMacro_call(context.macro_call());
         if (context.identifier() != null) return ResolveIdentifier(context.identifier().GetText());
         if (context.collection_expr() != null) return VisitCollection_expr(context.collection_expr());
         if (context.LPAR() != null && context.testlist_comp() != null) return VisitTestlist_comp(context.testlist_comp());
@@ -4554,16 +4897,46 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitSymbol_literal(PilotParser.Symbol_literalContext context)
     {
-        if (context.identifier() != null)
+        if (context.SYMBOL() != null)
         {
-            return PilotValue.FromKeyword(context.identifier().GetText());
-        }
-        if (context.test() != null)
-        {
-            return PilotValue.FromKeyword(Visit(context.test()).AsString());
+            if (context.test() != null)
+            {
+                string rawArg = context.test().GetText().Trim();
+                if (IsSimpleIdentifier(rawArg) &&
+                    (IsBuiltinSpecialFormName(rawArg) || !Context.Environment.CurrentScope.TryResolve(rawArg, out _)))
+                {
+                    var kw = PilotKeyword.Intern(rawArg);
+                    if (IsBuiltinSpecialFormName(rawArg)) kw.IsSpecialForm = true;
+                    return PilotValue.FromKeyword(kw);
+                }
+                return PilotValue.FromKeyword(Visit(context.test()).AsString());
+            }
+            return PilotValue.FromKeyword("symbol");
         }
         return PilotValue.FromKeyword(context.GetText().TrimStart(':'));
     }
+
+    public override PilotValue VisitMacro_call(PilotParser.Macro_callContext context)
+    {
+        string macroName = context.identifier().GetText();
+        if (Context.Environment.CurrentScope.TryResolve(macroName, out var fnVal) && fnVal.Kind == PilotValueKind.Function)
+        {
+            var fn = fnVal.AsFunction();
+            if (context.arglist() != null)
+            {
+                var (posArgs, namedArgs) = EvaluateCallArguments(context.arglist());
+                var boundArgs = BindArgumentsToFunction(fn, posArgs, namedArgs);
+                return fn.Invoke(Context, boundArgs);
+            }
+            return fn.Invoke(Context, Array.Empty<PilotValue>());
+        }
+        return PilotValue.Null;
+    }
+
+    private static bool IsBuiltinSpecialFormName(string name) => name is
+        "guard" or "defer" or "match" or "if" or "for" or "while" or "try" or "with"
+        or "spawn" or "atomic" or "sync" or "isolate" or "select" or "transaction"
+        or "deadline" or "within" or "periodic" or "noalloc" or "region" or "quote" or "quasiquote";
 
     private PilotValue ResolveIdentifier(string name)
     {
@@ -5063,7 +5436,11 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         }
 
         // For Python/C#/Rust or general blocks with Pilot statements
-        if (context.stmt() != null && context.stmt().Length > 0)
+        bool forceForeignProvider = rawLang == "python" &&
+            (code.Contains("memoryview", StringComparison.Ordinal) ||
+             code.Contains("mmap", StringComparison.Ordinal) ||
+             code.Contains("struct.", StringComparison.Ordinal));
+        if (!forceForeignProvider && context.stmt() != null && context.stmt().Length > 0)
         {
             var subScope = new PilotScope(Context.Environment.CurrentScope, $"{rawLang}:inline");
             var subContext = new PilotExecutionContext(

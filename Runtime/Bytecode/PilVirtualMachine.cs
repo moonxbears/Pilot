@@ -623,6 +623,7 @@ public sealed class PilVirtualMachine
                         isAsync: isAsync,
                         isGenerator: isGen);
                     fn.BytecodeChunk = nestedChunk;
+                    fn.SourceBodyText = nestedChunk.FuncDefContext?.suite()?.GetText();
 
                     if (nestedChunk.FuncDefContext != null)
                     {
@@ -643,10 +644,38 @@ public sealed class PilVirtualMachine
                         Pilot.Runtime.Burst.PilotBurstEngine.TryAttachBurstKernel(fn, nestedChunk.FuncDefContext);
                     }
 
-                    // Automatically bind in scope if named
+                    // Automatically bind in scope if named (preserving MethodGroup overloads!)
                     if (!string.IsNullOrEmpty(nestedChunk.Name) && nestedChunk.Name != "<lambda>")
                     {
-                        scope.Declare(nestedChunk.Name, PilotValue.FromFunction(fn));
+                        if (scope.ContainsLocal(nestedChunk.Name))
+                        {
+                            var existing = scope.Resolve(nestedChunk.Name);
+                            if (existing.Kind == PilotValueKind.Function)
+                            {
+                                var oldFn = existing.AsFunction();
+                                if (oldFn.ClassDef == null && oldFn.GetSignatureKey() != fn.GetSignatureKey())
+                                {
+                                    var mg = new PilotMethodGroup(nestedChunk.Name, new[] { oldFn, fn });
+                                    scope.ForceSet(nestedChunk.Name, PilotValue.FromMethodGroup(mg));
+                                }
+                                else
+                                {
+                                    scope.Declare(nestedChunk.Name, PilotValue.FromFunction(fn));
+                                }
+                            }
+                            else if (existing.Kind == PilotValueKind.MethodGroup)
+                            {
+                                existing.AsMethodGroup().AddOverload(fn);
+                            }
+                            else
+                            {
+                                scope.Declare(nestedChunk.Name, PilotValue.FromFunction(fn));
+                            }
+                        }
+                        else
+                        {
+                            scope.Declare(nestedChunk.Name, PilotValue.FromFunction(fn));
+                        }
                     }
 
                     EnsureStackCapacity(ref stack, sp + 1);
@@ -951,6 +980,7 @@ public sealed class PilVirtualMachine
                     EnsureStackCapacity(ref stack, sp + 1);
                     int len = val.Kind == PilotValueKind.List ? val.AsList().Count
                             : val.Kind == PilotValueKind.Tuple ? val.AsTuple().Count
+                            : val.Kind == PilotValueKind.SliceBuffer ? val.AsSliceBuffer().Length
                             : -1;
                     stack[sp++] = PilotValue.FromInt(len);
                     break;
@@ -1225,14 +1255,21 @@ public sealed class PilVirtualMachine
                 return val.Kind == PilotValueKind.Map;
             case "set" or "Set":
                 return val.Kind == PilotValueKind.Set;
+            case "SliceBuffer" or "SharedBuffer" or "slice_buffer" or "shared_buffer":
+                return val.Kind == PilotValueKind.SliceBuffer;
         }
 
-        // Typestate pattern: `Conn[Open]`
+        // Typestate pattern: `Conn[Open]` or generic `SliceBuffer[f64]`
         int lb = expectedName.IndexOf('[');
         if (lb > 0 && expectedName.EndsWith("]", StringComparison.Ordinal))
         {
             string baseCls = expectedName[..lb].Trim();
             string stateArg = expectedName[(lb + 1)..^1].Trim();
+            if (baseCls is "SliceBuffer" or "SharedBuffer")
+            {
+                return val.Kind == PilotValueKind.SliceBuffer &&
+                       val.AsSliceBuffer().ElementKind == Pilot.Runtime.NativeMemory.PilotSharedBuffer.ParseElementKind(stateArg);
+            }
             if (val.Kind == PilotValueKind.Object)
             {
                 var obj = val.AsObject();
@@ -1398,6 +1435,8 @@ public sealed class PilVirtualMachine
                 return iterable.AsGenerator().GetEnumerator();
             case PilotValueKind.NativeArray:
                 return iterable.AsNativeArray().Select(PilotValue.FromFloat).GetEnumerator();
+            case PilotValueKind.SliceBuffer:
+                return EnumerateSliceBuffer(iterable.AsSliceBuffer());
             case PilotValueKind.Foreign:
             {
                 if (iterable.AsForeign() is IEnumerable<PilotValue> enumValues)
@@ -1411,6 +1450,14 @@ public sealed class PilVirtualMachine
         }
 
         return EnumerateSingle(iterable);
+    }
+
+    private static IEnumerator<PilotValue> EnumerateSliceBuffer(Pilot.Runtime.NativeMemory.PilotSharedBuffer sb)
+    {
+        for (int i = 0; i < sb.Length; i++)
+        {
+            yield return sb.GetElement(i);
+        }
     }
 
     private static IEnumerator<PilotValue> EnumerateRange(PilotRange range)
