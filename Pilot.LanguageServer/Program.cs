@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using Pilot.Diagnostics;
 using Pilot.LanguageServer.Lsp;
 using Pilot.LanguageServer.Semantics;
 
@@ -10,6 +11,12 @@ public static class Program
 {
     public static async Task<int> Main(string[] args)
     {
+        if (args.Length > 0 && (args[0] is "--version" or "-v" or "-V" or "version"))
+        {
+            Console.WriteLine($"Pilot Language Server v{PilotVersion.FullVersion} (commit #{PilotVersion.CommitCount}: {PilotVersion.ShortCommitSha} on {PilotVersion.Branch})");
+            return 0;
+        }
+
         if (args.Length >= 2 && args[0] == "--check")
         {
             string filePath = Path.GetFullPath(args[1]);

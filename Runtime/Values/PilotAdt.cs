@@ -271,6 +271,153 @@ public sealed class PilotAdtMemoryLayout
         return false;
     }
 
+    /// <summary>
+    /// Computes the native memory layout for `T?` (`Option[T]`), applying Milestone 12.3
+    /// zero-allocation niche optimization:
+    /// - Reference types, classes, pointers, handles, strings, slices, and `bool` exploit invalid
+    ///   bit-pattern niches (`0x0` null pointer or `0x02` bool niche), so `sizeof(T?) == sizeof(T)`.
+    /// - Unboxed value primitives (`int?`, `f64?`, `i32?`) and value records/structs live inline on
+    ///   the stack/register slot as `{ T value, u8 has_value }` aligned to `alignof(T)`.
+    /// </summary>
+    public static (int SizeBytes, int AlignmentBytes, bool UsesZeroNiche) ComputeOptionLayout(
+        string innerTypeSpec,
+        IReadOnlyDictionary<string, PilotAdtDefinition>? knownAdts = null,
+        IReadOnlyDictionary<string, PilotRecordDefinition>? knownRecords = null)
+    {
+        string inner = (innerTypeSpec ?? "any").Trim();
+        var (innerSize, innerAlign) = EstimateInlineTypeSizeAndAlign(
+            inner,
+            Array.Empty<string>(),
+            knownAdts,
+            knownRecords,
+            new HashSet<string>(StringComparer.Ordinal));
+
+        if (HasZeroAllocationNiche(inner, knownAdts, knownRecords))
+        {
+            return (innerSize, innerAlign, true);
+        }
+
+        int totalSize = AlignUp(innerSize + 1, innerAlign);
+        return (totalSize, innerAlign, false);
+    }
+
+    /// <summary>
+    /// Computes the Milestone 13.1 zero-unwinding register/stack ABI layout for `T ! E`:
+    /// `{ u8 is_ok; union { T ok; E err } }`.
+    /// </summary>
+    public static (int SizeBytes, int AlignmentBytes, int PayloadOffsetBytes, int PayloadSizeBytes) ComputeResultLayout(
+        string okTypeSpec,
+        string errTypeSpec,
+        IReadOnlyDictionary<string, PilotAdtDefinition>? knownAdts = null,
+        IReadOnlyDictionary<string, PilotRecordDefinition>? knownRecords = null)
+    {
+        var (okSize, okAlign) = EstimateInlineTypeSizeAndAlign(
+            string.IsNullOrWhiteSpace(okTypeSpec) ? "int" : okTypeSpec.Trim(),
+            Array.Empty<string>(),
+            knownAdts,
+            knownRecords,
+            new HashSet<string>(StringComparer.Ordinal));
+        var (errSize, errAlign) = EstimateInlineTypeSizeAndAlign(
+            string.IsNullOrWhiteSpace(errTypeSpec) ? "str" : errTypeSpec.Trim(),
+            Array.Empty<string>(),
+            knownAdts,
+            knownRecords,
+            new HashSet<string>(StringComparer.Ordinal));
+
+        int maxAlign = Math.Max(okAlign, errAlign);
+        int payloadSize = Math.Max(okSize, errSize);
+        int payloadOffset = AlignUp(1, maxAlign);
+        int totalSize = AlignUp(payloadOffset + payloadSize, maxAlign);
+        return (totalSize, maxAlign, payloadOffset, payloadSize);
+    }
+
+    public static bool TrySplitFallibleTypeSpec(string typeSpec, out string okType, out string errType)
+    {
+        okType = string.Empty;
+        errType = string.Empty;
+        if (string.IsNullOrWhiteSpace(typeSpec)) return false;
+        string trimmed = typeSpec.Trim();
+        if (trimmed.EndsWith("!", StringComparison.Ordinal) && trimmed.Length > 1)
+        {
+            string prefix = trimmed[..^1].Trim();
+            if (!prefix.Contains('!'))
+            {
+                okType = prefix;
+                errType = string.Empty;
+                return !string.IsNullOrEmpty(okType);
+            }
+        }
+        var parts = SplitTopLevel(trimmed, '!');
+        if (parts.Count != 2) return false;
+        okType = parts[0].Trim();
+        errType = parts[1].Trim();
+        return !string.IsNullOrEmpty(okType);
+    }
+
+    public static bool HasZeroAllocationNiche(
+        string innerTypeSpec,
+        IReadOnlyDictionary<string, PilotAdtDefinition>? knownAdts = null,
+        IReadOnlyDictionary<string, PilotRecordDefinition>? knownRecords = null)
+    {
+        if (string.IsNullOrWhiteSpace(innerTypeSpec)) return true;
+        string t = innerTypeSpec.Trim();
+
+        // Nested T?? (`some(none)` vs `none`) requires an outer discriminant unless inner is non-optional
+        if (t.EndsWith("?", StringComparison.Ordinal) ||
+            t.StartsWith("Option[", StringComparison.OrdinalIgnoreCase) ||
+            t.StartsWith("Option<", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // Fat pointers / slices / strings / pointers / references use 0x0 ptr niche
+        if (t.EndsWith("[]", StringComparison.Ordinal) ||
+            t.EndsWith("*", StringComparison.Ordinal) ||
+            t.StartsWith("ref ", StringComparison.Ordinal) ||
+            t.StartsWith("List[", StringComparison.OrdinalIgnoreCase) ||
+            t.StartsWith("Array[", StringComparison.OrdinalIgnoreCase) ||
+            t.StartsWith("Map[", StringComparison.OrdinalIgnoreCase) ||
+            t.StartsWith("Dict[", StringComparison.OrdinalIgnoreCase) ||
+            t.StartsWith("Set[", StringComparison.OrdinalIgnoreCase) ||
+            t.StartsWith("Ptr[", StringComparison.OrdinalIgnoreCase) ||
+            t.StartsWith("NonNull[", StringComparison.OrdinalIgnoreCase) ||
+            t.StartsWith("Box[", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string baseName = StripGenericsAndModifiers(t);
+        switch (baseName.ToLowerInvariant())
+        {
+            case "str" or "string" or "bytes" or "object" or "any" or "dynamic":
+            case "bool": // 1-byte boolean uses 0x02 niche (`0` = false, `1` = true, `2` = none)
+                return true;
+            case "i8" or "u8" or "byte" or "i16" or "u16" or "f16" or "i32" or "u32" or "f32" or "char"
+                or "int" or "uint" or "i64" or "u64" or "float" or "f64" or "double"
+                or "decimal" or "complex" or "duration" or "frequency" or "memorysize":
+                return false;
+        }
+
+        // Value records that contain at least one niche-carrying field (e.g. `str`, `bool`, reference)
+        // exploit that field's niche so `sizeof(Record?) == sizeof(Record)`; pure primitive records use an inline tag.
+        if (knownRecords != null && knownRecords.TryGetValue(baseName, out var rec))
+        {
+            foreach (var f in rec.Fields)
+            {
+                if (HasZeroAllocationNiche(f.TypeName, knownAdts, knownRecords))
+                    return true;
+            }
+            return false;
+        }
+        if (knownAdts != null && knownAdts.TryGetValue(baseName, out var adt))
+        {
+            return adt.Layout.IsRecursive || adt.Variants.Count < 255;
+        }
+
+        // Default user-defined nominal types (e.g. classes like `User`, `Connection`, `Handle`) are reference types with 0x0 niche
+        return true;
+    }
+
     private static (int Size, int Align) EstimateInlineTypeSizeAndAlign(
         string typeSpec,
         IReadOnlyList<string> genericParams,
@@ -280,6 +427,28 @@ public sealed class PilotAdtMemoryLayout
     {
         if (string.IsNullOrWhiteSpace(typeSpec)) return (8, 8);
         string t = typeSpec.Trim();
+
+        if (t.EndsWith("?", StringComparison.Ordinal) && t.Length > 1)
+        {
+            string inner = t[..^1].Trim();
+            var (innerSize, innerAlign) = EstimateInlineTypeSizeAndAlign(inner, genericParams, knownAdts, knownRecords, computing);
+            if (HasZeroAllocationNiche(inner, knownAdts, knownRecords))
+            {
+                return (innerSize, innerAlign);
+            }
+            return (AlignUp(innerSize + 1, innerAlign), innerAlign);
+        }
+        if ((t.StartsWith("Option[", StringComparison.OrdinalIgnoreCase) && t.EndsWith("]", StringComparison.Ordinal)) ||
+            (t.StartsWith("Option<", StringComparison.OrdinalIgnoreCase) && t.EndsWith(">", StringComparison.Ordinal)))
+        {
+            string inner = t[7..^1].Trim();
+            var (innerSize, innerAlign) = EstimateInlineTypeSizeAndAlign(inner, genericParams, knownAdts, knownRecords, computing);
+            if (HasZeroAllocationNiche(inner, knownAdts, knownRecords))
+            {
+                return (innerSize, innerAlign);
+            }
+            return (AlignUp(innerSize + 1, innerAlign), innerAlign);
+        }
 
         if (t.EndsWith("[]", StringComparison.Ordinal) ||
             t.StartsWith("List[", StringComparison.OrdinalIgnoreCase) ||

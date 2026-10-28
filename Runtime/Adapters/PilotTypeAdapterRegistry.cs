@@ -152,6 +152,38 @@ public sealed class PilotTypeAdapterRegistry
             }
         }
 
+        // 2b. For ADT instances, also check variant-specific adapter or union target branches (e.g. target `IoError | ParseError`)
+        if (source.Kind == PilotValueKind.Adt)
+        {
+            string variantName = source.GetAdtVariantDefinition().Name;
+            string parentAdtName = source.GetAdtVariantDefinition().ParentAdt.Name;
+            if (_adapters.TryGetValue((variantName, targetType), out var varAdapter) ||
+                _adapters.TryGetValue((parentAdtName, targetType), out varAdapter))
+            {
+                try
+                {
+                    var res = varAdapter(source, context);
+                    if (!res.IsUndefined)
+                    {
+                        converted = res;
+                        return true;
+                    }
+                }
+                catch { }
+            }
+        }
+
+        if (targetType.Contains('|'))
+        {
+            foreach (var branch in targetType.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (TryConvert(source, branch, context, out converted))
+                {
+                    return true;
+                }
+            }
+        }
+
         // 3. Structural Map -> Target Class conversion (e.g. { name: "x" } -> User)
         if (source.Kind == PilotValueKind.Map && context != null && context.Environment.TryResolve(targetType, out var classVal) && classVal.Kind == PilotValueKind.Function)
         {
@@ -186,6 +218,9 @@ public sealed class PilotTypeAdapterRegistry
             PilotValueKind.Set => "set",
             PilotValueKind.Tuple => "tuple",
             PilotValueKind.Object => val.AsObject().TypeName,
+            PilotValueKind.Adt => val.GetAdtVariantDefinition().ParentAdt.Name,
+            PilotValueKind.Record => val.GetRecordDefinition().Name,
+            PilotValueKind.Failure => GetTypeName(val.UnwrapFailure()),
             PilotValueKind.Function => "function",
             PilotValueKind.MethodGroup => "methodgroup",
             _ => val.Kind.ToString().ToLowerInvariant()

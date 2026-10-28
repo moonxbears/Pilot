@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
+using Pilot.Diagnostics;
 using Pilot.Runtime.Execution;
 using Pilot.Runtime.Values;
 using Pilot.Transpilation;
@@ -35,11 +36,12 @@ public sealed class PilotRepl
         Console.OutputEncoding = Encoding.UTF8;
         Console.ForegroundColor = ConsoleColor.Cyan;
         Console.WriteLine("==================================================================");
-        Console.WriteLine("                    PILOT INTERACTIVE REPL                        ");
+        Console.WriteLine($"         PILOT INTERACTIVE REPL v{PilotVersion.FullVersion,-28}");
+        Console.WriteLine($"         Commit #{PilotVersion.CommitCount} ({PilotVersion.ShortCommitSha} on {PilotVersion.Branch})");
         Console.WriteLine("     \"Beautiful code you can make your own without sacrificing speed\"  ");
         Console.WriteLine("==================================================================");
         Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine("Commands: :help, :scope, :reset, :emit <python|csharp|rust>, :exit");
+        Console.WriteLine("Commands: :help, :version, :scope, :reset, :emit <python|csharp|rust>, :exit");
         Console.WriteLine("Type any expression or statement and press Enter.\n");
         Console.ResetColor();
 
@@ -176,11 +178,19 @@ public sealed class PilotRepl
                 Console.ForegroundColor = ConsoleColor.Yellow;
                 Console.WriteLine("Available REPL commands:");
                 Console.WriteLine("  :help                       Show this help menu");
+                Console.WriteLine("  :version                    Show exact Pilot commit version info");
                 Console.WriteLine("  :scope, :vars               List variables declared in current session");
                 Console.WriteLine("  :reset                      Reset environment and variables");
                 Console.WriteLine("  :clear                      Clear the terminal screen");
                 Console.WriteLine("  :emit <python|csharp|rust>  Transpile code snippet to target");
                 Console.WriteLine("  :exit, :quit                Exit the REPL");
+                Console.ResetColor();
+                return true;
+
+            case ":version":
+            case ":ver":
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine(PilotVersion.DisplayBanner);
                 Console.ResetColor();
                 return true;
 

@@ -169,7 +169,17 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         ["cdr"] = ("any", "pure def cdr(list: any) -> any", "Returns the tail of a homoiconic AST list."),
         ["atom"] = ("bool", "pure def atom(node: any) -> bool", "Returns true if the node is an atomic AST element rather than a list."),
         ["list_ast"] = ("AstNode", "def list_ast(*elements: any) -> AstNode", "Constructs an AST list node containing the provided elements."),
-        ["symbol"] = ("AstNode", "pure def symbol(name: str) -> AstNode", "Constructs a named AST identifier/symbol node.")
+        ["symbol"] = ("AstNode", "pure def symbol(name: str) -> AstNode", "Constructs a named AST identifier/symbol node."),
+        ["pilot_version"] = ("str", "pure def pilot_version(part: str = \"full\") -> str", "Returns the commit-bound Pilot runtime version (or a component such as 'semver', 'sha', 'count', 'branch', 'date')."),
+        ["pilot_version_info"] = ("dict", "pure def pilot_version_info() -> dict", "Returns a dictionary containing full commit-bound version metadata (version, semver, commit_count, commit_sha, branch, commit_date)."),
+        ["some"] = ("any?", "pure def some(val: any) -> any?", "Constructs an explicit non-null Option[T] value."),
+        ["ok"] = ("any", "pure def ok(val: any) -> any", "Constructs a success value for a fallible T ! E return."),
+        ["fail"] = ("any", "pure def fail(err: any) -> any", "Constructs a zero-allocation register-returned error value for a fallible T ! E return."),
+        ["ignore_err"] = ("void", "def ignore_err(res: any) -> void", "Explicitly acknowledges and discards a fallible T ! E return value."),
+        ["panic"] = ("void", "def panic(reason: str = \"explicit panic\") -> void", "Terminates the current execution or isolate due to an unrecoverable invariant violation."),
+        ["sizeof_type"] = ("int", "pure def sizeof_type(type_name: str) -> int", "Returns the native inline byte size of a Pilot type, ADT, record, Option[T], or Result[T, E]."),
+        ["alignof_type"] = ("int", "pure def alignof_type(type_name: str) -> int", "Returns the native byte alignment of a Pilot type, ADT, or record."),
+        ["option_has_niche"] = ("bool", "pure def option_has_niche(type_name: str) -> bool", "Returns true if Option[T] uses a zero-allocation niche representation.")
     };
 
     private PilotSemanticAnalyzer(string uri)
@@ -308,7 +318,11 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         var analysisRes = Pilot.Analysis.PilotAnalysisPipeline.Analyze(tree);
         foreach (var diag in analysisRes.Diagnostics)
         {
-            if (diag.Code is "PILOT301" or "PILOT302" or "PILOT303" or "PILOT304" or "PILOT305" or "PILOT306" or "MATCH001" or "MATCH002")
+            if (diag.Code is "PILOT301" or "PILOT302" or "PILOT303" or "PILOT304" or "PILOT305" or "PILOT306"
+                or "MATCH001" or "MATCH002"
+                or "NULL001" or "NULL002" or "NULL003" or "NULL004" or "NULL005"
+                or "ERR001" or "ERR002" or "ERR003" or "ERR004"
+                or "LOOP001" or "LOOP002" or "LOOP003" or "LOOP004")
             {
                 analyzer._result.Diagnostics.Add(new PilotDiagnostic
                 {
@@ -893,28 +907,47 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
     public override string? VisitGuard_stmt(PilotParser.Guard_stmtContext context)
     {
         AddSemanticToken(context.GUARD().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.SOME() != null)
+            AddSemanticToken(context.SOME().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
         if (context.ELSE() != null)
             AddSemanticToken(context.ELSE().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.CATCH() != null)
+            AddSemanticToken(context.CATCH().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
 
-        if ((context.LET() != null || context.VAR() != null) && context.pattern() != null)
+        if ((context.LET() != null || context.VAR() != null || context.SOME() != null) && context.pattern() != null)
         {
             bool isMut = context.VAR() != null;
             string? initType = context.test() != null ? Visit(context.test()) : "any";
+            if (initType != null && Pilot.Runtime.Values.PilotAdtMemoryLayout.TrySplitFallibleTypeSpec(initType, out string okPart, out _))
+                initType = okPart;
             if (initType != null && initType.EndsWith("?", StringComparison.Ordinal))
                 initType = initType[..^1]; // Guard unwrap narrows nullable T? -> T
+
+            if (context.CATCH() != null && context.identifier() != null)
+            {
+                var errId = context.identifier();
+                var errSym = CreateSymbol(errId, context, errId.GetText(), PilotSymbolKind.Variable, "any", "ErrorHandling",
+                    $"{errId.GetText()}: any", "Error value bound in `guard ... catch` recovery block.");
+                RegisterSymbol(errSym, PilotSemanticTokenLegend.TypeVariable, PilotSemanticTokenLegend.ModDeclaration);
+            }
 
             BindPatternIdentifiers(context.pattern(), initType ?? "any", isMutable: isMut, "Unwrapped binding from `guard` pattern precondition.");
             if (context.pattern_guard()?.test() != null)
                 Visit(context.pattern_guard().test());
             return FinishGuardSuite(context);
         }
-        if (false && context.LET() != null && context.pattern() != null)
+        if (context.SOME() != null && context.test() != null)
         {
-            string? initType = context.test() != null ? Visit(context.test()) : "any";
-            if (initType != null && initType.EndsWith("?", StringComparison.Ordinal))
-                initType = initType[..^1]; // Guard unwrap narrows nullable T? -> T
-
-            BindPatternIdentifiers(context.pattern(), initType ?? "any", isMutable: false, "Unwrapped non-null binding from `guard let` precondition.");
+            Visit(context.test());
+            var idCtx = TryExtractSimpleIdentifier(context.test());
+            if (idCtx != null && _currentScope.Resolve(idCtx.GetText()) is { } sym &&
+                sym.TypeName.EndsWith("?", StringComparison.Ordinal))
+            {
+                sym.TypeName = sym.TypeName[..^1];
+            }
+            if (context.pattern_guard()?.test() != null)
+                Visit(context.pattern_guard().test());
+            return FinishGuardSuite(context);
         }
         else if (context.test() != null)
         {
@@ -1190,9 +1223,12 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
     public override string? VisitEnum_def(PilotParser.Enum_defContext context)
     {
+        if (context.ENUM() != null)
+            AddSemanticToken(context.ENUM().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
         var idCtx = context.identifier();
         string name = idCtx.GetText();
-        var symbol = CreateSymbol(idCtx, context, name, PilotSymbolKind.Enum, name, "Core", $"enum {name}", "Algebraic data type / enum definition.");
+        var symbol = CreateSymbol(idCtx, context, name, PilotSymbolKind.Enum, name, "Core / ADT", $"enum {name}", "Algebraic data type / enum definition.");
         RegisterSymbol(symbol, PilotSemanticTokenLegend.TypeEnum, PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModDefinition);
 
         using (EnterScope($"enum:{name}", context, enclosingType: symbol))
@@ -1202,13 +1238,25 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             {
                 foreach (var member in context.enum_suite().enum_member())
                 {
-                    var mId = member.identifier();
-                    string mName = mId.GetText();
-                    var mSym = CreateSymbol(mId, member, mName, PilotSymbolKind.EnumMember, name, "Core", $"{name}.{mName}", $"Variant of enum `{name}`.");
-                    RegisterSymbol(mSym, PilotSemanticTokenLegend.TypeEnumMember, PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModReadonly);
-                    symbol.Members[mName] = mSym;
-                    symbol.Children.Add(mSym);
+                    RegisterAdtVariantSymbol(
+                        symbol,
+                        member.identifier(),
+                        member,
+                        name,
+                        member.adt_field_list(),
+                        member.struct_member());
+                    if (member.test() != null)
+                        Visit(member.test());
                 }
+            }
+        }
+
+        // Expose enum/ADT variant constructors in the enclosing scope for direct construction & pattern matching
+        foreach (var kvp in symbol.Members)
+        {
+            if (!_currentScope.Symbols.ContainsKey(kvp.Key))
+            {
+                _currentScope.Symbols[kvp.Key] = kvp.Value;
             }
         }
 
@@ -1276,6 +1324,11 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                     TypeName = _currentScope.EnclosingType.Name,
                     Domain = "C# Robustness"
                 };
+            }
+
+            if (context.suite() != null)
+            {
+                Visit(context.suite());
             }
 
             if (context.property_body() != null)
@@ -1359,7 +1412,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
     {
         string targetType = context.type_spec().GetText();
         string extName = context.identifier()?.GetText() ?? $"Extension<{targetType}>";
-        var token = context.identifier()?.Start ?? context.EXTENSION().Symbol;
+        var token = context.identifier()?.Start ?? context.EXTENSION()?.Symbol ?? context.EXTEND().Symbol;
 
         var symbol = CreateSymbolFromToken(token, context, extName, PilotSymbolKind.Extension, targetType, "C# Robustness",
             $"extension {extName} for {targetType}", $"C#-style extension methods for `{targetType}`.");
@@ -1940,9 +1993,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             {
                 BindPatternIdentifiers(context.pattern(), "any", isMutable: context.VAR() != null, "Pattern variable bound in `while let` loop.");
             }
-        {
             foreach (var s in context.suite()) Visit(s);
-        }
         }
         return "void";
     }
@@ -1961,6 +2012,8 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             AddSemanticToken(context.BOUNDED().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
         if (context.ELSE() != null)
             AddSemanticToken(context.ELSE().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.THEN() != null)
+            AddSemanticToken(context.THEN().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
 
         bool isBounded = context.BOUNDED() != null;
         bool isParallel = context.PARALLEL() != null;
@@ -2011,6 +2064,15 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             }
             foreach (var s in context.suite()) Visit(s);
         }
+        }
+        var loopInfo = Pilot.Analysis.Loops.PilotForLoopAnalyzer.AnalyzeSingleLoop(context);
+        if (loopInfo.ReturnMode == Pilot.Analysis.Loops.LoopReturnMode.CollectionYield)
+        {
+            return "List[any]";
+        }
+        if (loopInfo.ReturnMode == Pilot.Analysis.Loops.LoopReturnMode.ScalarBreak)
+        {
+            return loopInfo.HasCompletionBranch ? "any" : "any?";
         }
         return "void";
     }
@@ -2112,21 +2174,41 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         if (context.YIELD() != null)
         {
             AddSemanticToken(context.YIELD().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
-            if (!_currentScope.InFunction)
+            bool insideForExpr = false;
+            Antlr4.Runtime.Tree.IParseTree? p = context.Parent;
+            while (p != null && p is not PilotParser.Func_defContext and not PilotParser.Lambda_exprContext)
             {
-                AddDiagnostic(context.YIELD().Symbol, PilotDiagnosticSeverity.Error,
-                    PilotDiagnosticCatalog.YieldOutsideGenerator,
-                    "'yield' statement can only appear inside a generator function or method.");
+                if (p is PilotParser.For_stmtContext fs)
+                {
+                    insideForExpr = Pilot.Analysis.Loops.PilotForLoopAnalyzer.IsInExpressionPosition(fs);
+                    break;
+                }
+                p = p.Parent;
             }
-            else
+            if (!insideForExpr)
             {
-                _currentScope.IsGenerator = true;
+                if (!_currentScope.InFunction)
+                {
+                    AddDiagnostic(context.YIELD().Symbol, PilotDiagnosticSeverity.Error,
+                        PilotDiagnosticCatalog.YieldOutsideGenerator,
+                        "'yield' statement can only appear inside a generator function or method.");
+                }
+                else
+                {
+                    _currentScope.IsGenerator = true;
+                }
             }
         }
         if (context.RAISE() != null)
             AddSemanticToken(context.RAISE().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
         if (context.FROM() != null)
             AddSemanticToken(context.FROM().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
+        // Avoid double-visiting `return <expr>` when RETURN already evaluated `testlist()` above
+        if (context.RETURN() != null)
+        {
+            return "void";
+        }
 
         return base.VisitFlow_stmt(context);
     }
@@ -2394,8 +2476,10 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             else if (trailer.identifier() is { } memberId)
             {
                 string memberName = memberId.GetText();
+                bool isBuiltInOptionMember = memberName is "or_panic" or "OrPanic" or "unwrap_or" or "UnwrapOr"
+                    or "is_some" or "IsSome" or "is_none" or "IsNone" or "is_unboxed" or "IsUnboxed" or "has_niche" or "HasNiche";
 
-                if (trailer.DOT() != null && currentType != null && currentType.EndsWith("?", StringComparison.Ordinal))
+                if (trailer.DOT() != null && !isBuiltInOptionMember && currentType != null && currentType.EndsWith("?", StringComparison.Ordinal))
                 {
                     var dotTok = trailer.DOT().Symbol;
                     var (dLine, dCol, dEndCol) = GetTokenCoords(dotTok);
@@ -2414,6 +2498,15 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                         PilotDiagnosticCatalog.PossibleNullDereference,
                         $"Possible null dereference on optional expression: type is '{currentType}'. Use '?.' for safe navigation.",
                         new[] { action });
+                }
+
+                if (isBuiltInOptionMember)
+                {
+                    AddSemanticToken(memberId.Start, PilotSemanticTokenLegend.TypeMethod, 0);
+                    currentType = memberName is "or_panic" or "OrPanic" or "unwrap_or" or "UnwrapOr"
+                        ? (currentType?.TrimEnd('?') ?? "any")
+                        : "bool";
+                    continue;
                 }
 
                 // Resolve member on currentType if known
@@ -2847,9 +2940,29 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             return $"({string.Join(", ", elemTypes)})";
         }
 
+        if (context.if_stmt() is { } ifExpr)
+        {
+            return VisitIf_stmt(ifExpr) ?? "any";
+        }
+
         if (context.match_stmt() is { } matchExpr)
         {
             return VisitMatch_stmt(matchExpr) ?? "any";
+        }
+
+        if (context.with_stmt() is { } withExpr)
+        {
+            return VisitWith_stmt(withExpr) ?? "any";
+        }
+
+        if (context.for_stmt() is { } forExpr)
+        {
+            return VisitFor_stmt(forExpr) ?? "any";
+        }
+
+        if (context.block() is { } blockExpr)
+        {
+            return VisitBlock(blockExpr) ?? "any";
         }
         return base.VisitAtom(context);
     }
@@ -2909,6 +3022,19 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
     {
         if (targetType == "any" || valueType == "any" || targetType == valueType)
             return true;
+
+        // Fallible return type `T ! E`: accepts `T` or error values
+        if (Pilot.Runtime.Values.PilotAdtMemoryLayout.TrySplitFallibleTypeSpec(targetType, out string okTarget, out string errTarget))
+        {
+            if (IsCompatibleType(okTarget, valueType))
+                return true;
+            if (!string.IsNullOrEmpty(errTarget) && IsCompatibleType(errTarget, valueType))
+                return true;
+        }
+        if (Pilot.Runtime.Values.PilotAdtMemoryLayout.TrySplitFallibleTypeSpec(valueType, out string okValue, out _))
+        {
+            return IsCompatibleType(targetType, okValue);
+        }
 
         // Union types: int | str
         if (targetType.Contains('|'))
@@ -3201,16 +3327,30 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         if (context.MATCH() != null)
             AddSemanticToken(context.MATCH().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
 
-        if (context.test() != null)
-            Visit(context.test());
+        string scrutineeType = context.test() != null ? (Visit(context.test()) ?? "any") : "any";
+        var armTypes = new List<string>();
 
-        if (context.match_suite() != null)
-            Visit(context.match_suite());
+        if (context.match_suite()?.match_arm() is { } arms)
+        {
+            foreach (var arm in arms)
+            {
+                string? armType = VisitMatchArmWithScrutinee(arm, scrutineeType);
+                if (!string.IsNullOrWhiteSpace(armType) && armType != "void")
+                {
+                    armTypes.Add(armType);
+                }
+            }
+        }
 
-        return null;
+        return armTypes.Count > 0 ? HomogenizeTypes(armTypes) : "any";
     }
 
     public override string? VisitMatch_arm(PilotParser.Match_armContext context)
+    {
+        return VisitMatchArmWithScrutinee(context, "any");
+    }
+
+    private string? VisitMatchArmWithScrutinee(PilotParser.Match_armContext context, string scrutineeType)
     {
         using (EnterScope($"match_arm_{context.Start.Line}_{context.Start.Column}", context))
         {
@@ -3223,7 +3363,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
             if (context.pattern() != null)
             {
-                BindPatternIdentifiers(context.pattern(), "any", isMutable: false, "Pattern variable bound in match arm.");
+                BindPatternIdentifiers(context.pattern(), scrutineeType, isMutable: false, "Pattern variable bound in match arm.");
                 Visit(context.pattern());
             }
 
@@ -3232,9 +3372,21 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                 Visit(context.test());
             }
 
-            if (context.suite() != null)
+            if (context.suite() is { } suite)
             {
-                Visit(context.suite());
+                if (suite.LBRACE() == null &&
+                    suite.stmt()?.Length == 1 &&
+                    suite.stmt(0).simple_stmt()?.small_stmt()?.Length == 1 &&
+                    suite.stmt(0).simple_stmt().small_stmt(0).expr_stmt() is { } armExpr &&
+                    armExpr.augassign().Length == 0 &&
+                    armExpr.EQUAL().Length == 0 &&
+                    armExpr.WALRUS().Length == 0 &&
+                    armExpr.testlist()?.test()?.Length == 1)
+                {
+                    return Visit(armExpr.testlist().test(0)) ?? "any";
+                }
+
+                return Visit(suite);
             }
         }
         return null;
@@ -3412,12 +3564,14 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             {
                 childIdx++;
                 bool hasLetVar = false;
+                bool hasSome = false;
                 bool isMut = false;
                 PilotParser.PatternContext? branchPat = null;
                 if (childIdx < n && context.GetChild(childIdx) is ITerminalNode lv &&
-                    (lv.Symbol.Type == PilotLexer.LET || lv.Symbol.Type == PilotLexer.VAR))
+                    (lv.Symbol.Type == PilotLexer.LET || lv.Symbol.Type == PilotLexer.VAR || lv.Symbol.Type == PilotLexer.SOME))
                 {
                     hasLetVar = true;
+                    hasSome = lv.Symbol.Type == PilotLexer.SOME;
                     isMut = lv.Symbol.Type == PilotLexer.VAR;
                     AddSemanticToken(lv.Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
                     childIdx++;
@@ -3433,8 +3587,10 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                 }
 
                 string rhsType = "any";
+                PilotParser.TestContext? branchTestCtx = null;
                 if (childIdx < n && context.GetChild(childIdx) is PilotParser.TestContext tc)
                 {
+                    branchTestCtx = tc;
                     rhsType = Visit(tc) ?? "any";
                     if (hasLetVar && rhsType.EndsWith("?", StringComparison.Ordinal))
                         rhsType = rhsType[..^1];
@@ -3458,6 +3614,20 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                         using (EnterScope($"if_let_{sc.Start.Line}", sc))
                         {
                             BindPatternIdentifiers(branchPat, rhsType, isMutable: isMut, "Conditional pattern binding.");
+                            if (branchGuard?.test() != null)
+                                Visit(branchGuard.test());
+                            Visit(sc);
+                        }
+                    }
+                    else if (hasSome && branchTestCtx != null)
+                    {
+                        using (EnterScope($"if_some_{sc.Start.Line}", sc))
+                        {
+                            var someId = TryExtractSimpleIdentifier(branchTestCtx);
+                            if (someId != null)
+                            {
+                                BindPatternVarSingle(someId, branchTestCtx, rhsType, isMutable: false, "Narrowed non-null binding from `if some`.");
+                            }
                             if (branchGuard?.test() != null)
                                 Visit(branchGuard.test());
                             Visit(sc);
@@ -3556,14 +3726,93 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             return;
         }
 
+        if (node is PilotParser.Collection_patternContext colPat)
+        {
+            string elemT = ExtractElementType(typeName);
+            string sliceT = elemT != "any" ? $"List[{elemT}]" : (typeName != "any" ? typeName : "List[any]");
+            foreach (var elem in colPat.slice_pattern_element())
+            {
+                if (elem.pattern() != null)
+                {
+                    bool isSpread = elem.DOTDOT() != null || elem.ELLIPSIS() != null || elem.STAR() != null;
+                    BindPatternNode(elem.pattern(), isSpread ? sliceT : elemT, isMutable, doc);
+                }
+            }
+            return;
+        }
+
         if (node is PilotParser.Type_or_var_patternContext typeVar)
         {
             bool explicitMut = typeVar.VAR() != null || isMutable;
-            if (typeVar.identifier() != null)
+            if (typeVar.identifier() != null && typeVar.LPAR() == null && typeVar.property_pattern() == null)
             {
                 var idCtx = typeVar.identifier();
                 var resolvedType = typeVar.dotted_name() != null ? typeVar.dotted_name().GetText() : typeName;
                 BindPatternVarSingle(idCtx, typeVar, resolvedType, explicitMut, doc);
+                return;
+            }
+
+            if (typeVar.dotted_name() != null && (typeVar.LPAR() != null || typeVar.property_pattern() != null))
+            {
+                var ctorIds = typeVar.dotted_name().identifier();
+                PilotSymbol? ctorSym = null;
+                if (ctorIds.Length == 1)
+                {
+                    ctorSym = _currentScope.Resolve(ctorIds[0].GetText());
+                    if (ctorSym != null)
+                    {
+                        AddSymbolReference(ctorIds[0].Start, ctorSym);
+                        AddSemanticToken(ctorIds[0].Start, GetSemanticTokenTypeForSymbol(ctorSym), 0);
+                    }
+                }
+                else if (ctorIds.Length >= 2)
+                {
+                    var ownerSym = _currentScope.Resolve(ctorIds[0].GetText());
+                    if (ownerSym != null)
+                    {
+                        AddSymbolReference(ctorIds[0].Start, ownerSym);
+                        AddSemanticToken(ctorIds[0].Start, GetSemanticTokenTypeForSymbol(ownerSym), 0);
+                        if (ownerSym.Members.TryGetValue(ctorIds[^1].GetText(), out var memSym))
+                        {
+                            ctorSym = memSym;
+                            AddSymbolReference(ctorIds[^1].Start, memSym);
+                            AddSemanticToken(ctorIds[^1].Start, GetSemanticTokenTypeForSymbol(memSym), 0);
+                        }
+                    }
+                }
+
+                var args = typeVar.pattern_arg();
+                for (int i = 0; i < args.Length; i++)
+                {
+                    var arg = args[i];
+                    if (arg.pattern() == null) continue;
+                    string argType = "any";
+                    if (ctorSym != null && ctorSym.Parameters.Count > 0)
+                    {
+                        if (arg.identifier() != null)
+                        {
+                            string namedField = arg.identifier().GetText();
+                            var matchedParam = ctorSym.Parameters.FirstOrDefault(p => p.Name == namedField);
+                            if (!string.IsNullOrEmpty(matchedParam.Type))
+                                argType = matchedParam.Type;
+                        }
+                        else if (i < ctorSym.Parameters.Count)
+                        {
+                            argType = ctorSym.Parameters[i].Type;
+                        }
+                    }
+                    BindPatternNode(arg.pattern(), argType, isMutable, doc);
+                }
+
+                if (typeVar.property_pattern() != null)
+                {
+                    BindPatternNode(typeVar.property_pattern(), ctorSym?.TypeName ?? typeName, isMutable, doc);
+                }
+
+                if (typeVar.identifier() != null)
+                {
+                    BindPatternVarSingle(typeVar.identifier(), typeVar, ctorSym?.TypeName ?? typeName, explicitMut, doc);
+                }
                 return;
             }
 
@@ -4105,6 +4354,11 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             return extList.Count > 0 ? string.Join(" | ", extList.Distinct()) : "any";
         }
 
+        if (collectionType.EndsWith("[]", StringComparison.Ordinal) && collectionType.Length > 2)
+        {
+            return collectionType[..^2].Trim();
+        }
+
         int start = collectionType.IndexOf('[');
         int end = collectionType.LastIndexOf(']');
         if (start > 0 && end > start + 1)
@@ -4356,6 +4610,20 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                 semiDiag.CodeActions.Add(action);
                 _diagnostics.Add(semiDiag);
                 return;
+            }
+
+            if (offendingSymbol?.Text == "!" || (msg != null && msg.Contains("'!'", StringComparison.Ordinal)))
+            {
+                _diagnostics.Add(new PilotDiagnostic
+                {
+                    StartLine = zeroLine,
+                    StartColumn = col,
+                    EndLine = zeroLine,
+                    EndColumn = col + len,
+                    Severity = PilotDiagnosticSeverity.Error,
+                    Code = PilotDiagnosticCatalog.UnsafeNonNullAssertionRemoved,
+                    Message = "Unchecked postfix non-null assertion '!' is removed in Pilot. Use 'guard some x else', '??', or explicit '.OrPanic(\"reason\")'."
+                });
             }
 
             _diagnostics.Add(new PilotDiagnostic

@@ -30,6 +30,7 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
     private readonly Dictionary<string, PilotAdtVariantDefinition> _variants = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PilotRecordDefinition> _records = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<string>> _classTypestates = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, PilotType> _functionReturnTypes = new(StringComparer.Ordinal);
     private readonly Stack<Dictionary<string, PilotType>> _localScopes = new();
 
     public IReadOnlyList<PilotAnalysisDiagnostic> Diagnostics => _diagnostics;
@@ -77,6 +78,12 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
                 break;
             case PilotParser.Class_defContext classDef:
                 RegisterClassTypestates(classDef);
+                break;
+            case PilotParser.Func_defContext funcDef:
+                if (funcDef.identifier() != null && funcDef.type_spec() != null)
+                {
+                    _functionReturnTypes[funcDef.identifier().GetText()] = ParseRichType(funcDef.type_spec().GetText());
+                }
                 break;
         }
 
@@ -287,6 +294,60 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
         return base.VisitMatch_stmt(context);
     }
 
+    public override object? VisitCoalesce_expr(PilotParser.Coalesce_exprContext context)
+    {
+        var catches = context.catch_clause();
+        if (catches == null || catches.Length == 0)
+            return base.VisitCoalesce_expr(context);
+
+        var orTests = context.or_test();
+        if (orTests != null && orTests.Length > 0)
+            Visit(orTests[0]);
+
+        var lhsType = orTests != null && orTests.Length > 0
+            ? InferExpressionTextType(orTests[0].GetText().Trim())
+            : PilotType.Any;
+        var errType = lhsType.IsResult ? lhsType.TypeArguments[1] : PilotType.Any;
+
+        foreach (var cc in catches)
+        {
+            var catchScope = new Dictionary<string, PilotType>(_localScopes.Peek(), StringComparer.Ordinal);
+            if (cc.identifier() != null)
+            {
+                catchScope[cc.identifier().GetText()] = errType;
+            }
+            _localScopes.Push(catchScope);
+            try
+            {
+                Visit(cc);
+            }
+            finally
+            {
+                _localScopes.Pop();
+            }
+        }
+        return null;
+    }
+
+    private PilotType InferExpressionTextType(string txt)
+    {
+        foreach (var sc in _localScopes)
+        {
+            if (sc.TryGetValue(txt, out var localT) && localT.Kind != PilotTypeKind.Any)
+                return localT;
+        }
+        int parenIdx = txt.IndexOf('(');
+        if (parenIdx > 0 && txt.EndsWith(")", StringComparison.Ordinal))
+        {
+            string callee = txt[..parenIdx].Trim();
+            int genericBr = callee.IndexOf('[');
+            string baseCallee = genericBr > 0 ? callee[..genericBr] : callee;
+            if (_functionReturnTypes.TryGetValue(baseCallee, out var fnRet))
+                return fnRet;
+        }
+        return PilotType.Any;
+    }
+
     private PilotType ResolveDeclType(string? explicitType, PilotParser.TestContext? rhs)
     {
         if (!string.IsNullOrWhiteSpace(explicitType))
@@ -341,6 +402,8 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
                 return new PilotType(PilotTypeKind.Primitive, vDef.ParentAdt.Name);
             if (_records.ContainsKey(baseCallee))
                 return new PilotType(PilotTypeKind.Primitive, baseCallee);
+            if (_functionReturnTypes.TryGetValue(baseCallee, out var fnRet))
+                return fnRet;
         }
 
         // Tuple literal: `(a, b)`
@@ -387,6 +450,21 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
         if (string.IsNullOrWhiteSpace(typeStr)) return PilotType.Any;
         string s = typeStr.Trim();
         if (s.StartsWith("ref ", StringComparison.Ordinal)) s = s[4..].Trim();
+
+        // Milestone 13.1: Fallible return type `T ! E` or inferred `T!`
+        if (PilotAdtMemoryLayout.TrySplitFallibleTypeSpec(s, out string okSpec, out string errSpec))
+        {
+            var okType = ParseRichType(okSpec);
+            var errType = string.IsNullOrEmpty(errSpec) ? PilotType.Any : ParseRichType(errSpec);
+            return PilotType.ResultOf(okType, errType);
+        }
+
+        // Top-level union `IoError | ParseError`
+        var unionParts = SplitTopLevel(s, '|');
+        if (unionParts.Count > 1)
+        {
+            return PilotType.UnionOf(unionParts.Select(ParseRichType).ToArray());
+        }
 
         if (s.EndsWith("?", StringComparison.Ordinal))
             return PilotType.OptionOf(ParseRichType(s[..^1]));
@@ -477,6 +555,8 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
         Typestate,
         Null,
         NonNull,
+        ResultOk,
+        ResultErr,
         OpenValue
     }
 
@@ -513,6 +593,10 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
         if (scrutineeType.Kind is PilotTypeKind.Any or PilotTypeKind.TypeVariable)
         {
             scrutineeType = RefineTypeFromPatterns(parsedArmPatterns, scrutineeType);
+            if (matchCtx.test() == null && scrutineeType.Kind is PilotTypeKind.Any or PilotTypeKind.TypeVariable)
+            {
+                return;
+            }
             // Re-lower patterns with refined scrutinee type so positional/named fields map cleanly
             for (int i = 0; i < arms.Length; i++)
             {
@@ -561,13 +645,20 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
         }
 
         // Check exhaustiveness: is WildPat useful against `effectiveMatrix`?
-        if (IsUseful(effectiveMatrix, new MatchPat[] { WildPat.Instance }, colTypes))
+        // For shorthand `match { ... }` lambdas without an explicit scrutinee, only enforce MATCH001 on closed finite ADT/bool domains.
+        bool enforceExhaustiveness = matchCtx.test() != null ||
+            scrutineeType.Equals(PilotType.Bool) ||
+            scrutineeType.Kind == PilotTypeKind.Option ||
+            scrutineeType.Name.StartsWith("Result[", StringComparison.Ordinal) ||
+            _adts.ContainsKey(scrutineeType.Name);
+        if (enforceExhaustiveness && IsUseful(effectiveMatrix, new MatchPat[] { WildPat.Instance }, colTypes))
         {
             var witnesses = FindMissingWitnesses(effectiveMatrix, colTypes, maxWitnesses: 4);
             string witnessText = witnesses.Count > 0 ? string.Join(" | ", witnesses) : "_";
+            string scrutineeLabel = matchCtx.test()?.GetText() ?? "<match>";
             _diagnostics.Add(new PilotAnalysisDiagnostic(
                 NonExhaustiveDiagnosticCode,
-                $"Non-exhaustive match on `{matchCtx.test().GetText()}` (type `{scrutineeType}`). Missing pattern: {witnessText}",
+                $"Non-exhaustive match on `{scrutineeLabel}` (type `{scrutineeType}`). Missing pattern: {witnessText}",
                 matchCtx.Start.Line,
                 matchCtx.Start.Column,
                 isError: true));
@@ -601,6 +692,14 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
                     CtorFamily.Tuple => PilotType.TupleOf(Enumerable.Repeat(PilotType.Any, cp.Ctor.Arity).ToArray()),
                     CtorFamily.Typestate when cp.Ctor.OwnerType != null => new PilotType(PilotTypeKind.Primitive, cp.Ctor.OwnerType),
                     CtorFamily.Keyword => new PilotType(PilotTypeKind.Primitive, "keyword"),
+                    CtorFamily.NonNull when cp.Ctor.Arity == 1 => PilotType.OptionOf(
+                        cp.Args.Count == 1 ? (TryInferTypeFromSinglePat(cp.Args[0]) ?? PilotType.Any) : PilotType.Any),
+                    CtorFamily.ResultOk when cp.Ctor.Arity == 1 => PilotType.ResultOf(
+                        cp.Args.Count == 1 ? (TryInferTypeFromSinglePat(cp.Args[0]) ?? PilotType.Any) : PilotType.Any,
+                        PilotType.Any),
+                    CtorFamily.ResultErr when cp.Ctor.Arity == 1 => PilotType.ResultOf(
+                        PilotType.Any,
+                        cp.Args.Count == 1 ? (TryInferTypeFromSinglePat(cp.Args[0]) ?? PilotType.Any) : PilotType.Any),
                     _ => null
                 };
             case OrPat op:
@@ -969,6 +1068,47 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
             targetName = parts[1].GetText();
         }
 
+        // Built-in Option `some(pat)` / `some x` constructor pattern (Milestone 12)
+        if ((explicitOwner == null || string.Equals(explicitOwner, "Option", StringComparison.Ordinal)) &&
+            (string.Equals(targetName, "some", StringComparison.Ordinal) ||
+             (string.Equals(targetName, "Some", StringComparison.Ordinal) && !_variants.ContainsKey("Some"))) &&
+            (hasParens || trailingId != null))
+        {
+            var innerType = expectedType.Kind == PilotTypeKind.Option && expectedType.TypeArguments.Count == 1
+                ? expectedType.TypeArguments[0]
+                : expectedType;
+            var innerPat = hasParens && patArgs != null && patArgs.Length == 1
+                ? LowerPattern(patArgs[0].pattern(), innerType)
+                : WildPat.Instance;
+            return new CtorPat(new CtorDesc(CtorFamily.NonNull, "some", 1), new[] { innerPat });
+        }
+
+        // Built-in Result `ok(pat)` / `ok x` and `fail(pat)` / `err(pat)` constructor patterns (Milestone 13)
+        if ((explicitOwner == null || string.Equals(explicitOwner, "Result", StringComparison.Ordinal)) &&
+            (string.Equals(targetName, "ok", StringComparison.Ordinal) ||
+             (string.Equals(targetName, "Ok", StringComparison.Ordinal) && !_variants.ContainsKey("Ok"))) &&
+            (hasParens || trailingId != null))
+        {
+            var innerType = expectedType.IsResult ? expectedType.TypeArguments[0] : PilotType.Any;
+            var innerPat = hasParens && patArgs != null && patArgs.Length == 1
+                ? LowerPattern(patArgs[0].pattern(), innerType)
+                : WildPat.Instance;
+            return new CtorPat(new CtorDesc(CtorFamily.ResultOk, "ok", 1), new[] { innerPat });
+        }
+
+        if ((explicitOwner == null || string.Equals(explicitOwner, "Result", StringComparison.Ordinal)) &&
+            (string.Equals(targetName, "fail", StringComparison.Ordinal) ||
+             string.Equals(targetName, "err", StringComparison.Ordinal) ||
+             (string.Equals(targetName, "Err", StringComparison.Ordinal) && !_variants.ContainsKey("Err"))) &&
+            (hasParens || trailingId != null))
+        {
+            var innerType = expectedType.IsResult ? expectedType.TypeArguments[1] : PilotType.Any;
+            var innerPat = hasParens && patArgs != null && patArgs.Length == 1
+                ? LowerPattern(patArgs[0].pattern(), innerType)
+                : WildPat.Instance;
+            return new CtorPat(new CtorDesc(CtorFamily.ResultErr, "fail", 1), new[] { innerPat });
+        }
+
         // Typestate pattern: `Conn[Open]`
         if (genSuffix != null && genSuffix.identifier() == null && !hasParens)
         {
@@ -1041,8 +1181,23 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
             return WildPat.Instance;
         }
 
-        // Record / Struct destructuring `Point(x, y)` or `Point { x: 1, y: 2 }`
-        if (_records.TryGetValue(targetName, out var recDef) && (hasParens || propPat != null || trailingId != null))
+        // ADT type match inside a union error set (`case IoError e =>` on `IoError | ParseError`)
+        if (!hasParens && propPat == null && trailingId != null &&
+            expectedType.Kind == PilotTypeKind.Union &&
+            _adts.TryGetValue(targetName, out var unionSubAdt) &&
+            unionSubAdt.Variants.Count > 0)
+        {
+            var variantPats = unionSubAdt.Variants
+                .Select(v => (MatchPat)new CtorPat(
+                    new CtorDesc(CtorFamily.AdtVariant, v.Name, v.Arity, OwnerType: unionSubAdt.Name),
+                    Enumerable.Repeat<MatchPat>(WildPat.Instance, v.Arity).ToArray()))
+                .ToArray();
+            return variantPats.Length == 1 ? variantPats[0] : new OrPat(variantPats);
+        }
+
+        // Record / Struct destructuring `Point(x, y)` or `Point { x: 1, y: 2 }` or unit record `TimeoutError`
+        if (_records.TryGetValue(targetName, out var recDef) &&
+            (hasParens || propPat != null || trailingId != null || recDef.Fields.Count == 0))
         {
             var subPats = Enumerable.Repeat<MatchPat>(WildPat.Instance, recDef.Fields.Count).ToArray();
             if (hasParens && patArgs != null)
@@ -1342,26 +1497,69 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
     {
         string baseName = StripTypeArgs(colType.Name);
 
-        // 1. Nullable `T?` or `{ null, not null }` pair
-        bool hasNullAndNonNull =
-            flatMatrix.Any(r => r[0] is CtorPat { Ctor.Family: CtorFamily.Null }) &&
-            flatMatrix.Any(r => r[0] is CtorPat { Ctor.Family: CtorFamily.NonNull });
-        if (hasNullAndNonNull)
+        // 0. Fallible Result `T ! E` (`{ ok(x), fail(e) }`)
+        bool hasResultPat = flatMatrix.Any(r => r[0] is CtorPat { Ctor.Family: CtorFamily.ResultOk or CtorFamily.ResultErr });
+        if (colType.IsResult || hasResultPat)
         {
             return (true, new List<CtorDesc>
             {
-                new(CtorFamily.Null, "null", 0),
-                new(CtorFamily.NonNull, "not null", 0)
+                new(CtorFamily.ResultOk, "ok", 1),
+                new(CtorFamily.ResultErr, "fail", 1)
             });
         }
 
-        if (colType.Kind == PilotTypeKind.Option && colType.TypeArguments.Count == 1)
+        // 0b. Closed Union of ADTs / Records / Variants (`IoError | ParseError`)
+        if (colType.Kind == PilotTypeKind.Union && colType.TypeArguments.Count > 0)
         {
-            // Option `T?` is covered by `null` + `not null` (or inner constructors if unwrapped)
+            var unionCtors = new List<CtorDesc>();
+            bool allClosed = true;
+            foreach (var memberType in colType.TypeArguments)
+            {
+                string mName = StripTypeArgs(memberType.Name);
+                if (_adts.TryGetValue(mName, out var mAdt) && mAdt.Variants.Count > 0)
+                {
+                    foreach (var v in mAdt.Variants)
+                    {
+                        var desc = new CtorDesc(CtorFamily.AdtVariant, v.Name, v.Arity, OwnerType: mAdt.Name);
+                        if (!unionCtors.Contains(desc)) unionCtors.Add(desc);
+                    }
+                }
+                else if (_records.TryGetValue(mName, out var mRec))
+                {
+                    var desc = new CtorDesc(CtorFamily.Record, mRec.Name, mRec.Fields.Count, OwnerType: mRec.Name);
+                    if (!unionCtors.Contains(desc)) unionCtors.Add(desc);
+                }
+                else if (_variants.TryGetValue(mName, out var mVar))
+                {
+                    var desc = new CtorDesc(CtorFamily.AdtVariant, mVar.Name, mVar.Arity, OwnerType: mVar.ParentAdt.Name);
+                    if (!unionCtors.Contains(desc)) unionCtors.Add(desc);
+                }
+                else
+                {
+                    allClosed = false;
+                    break;
+                }
+            }
+            if (allClosed && unionCtors.Count > 0)
+            {
+                return (true, unionCtors);
+            }
+        }
+
+        // 1. Nullable `T?` or `{ null, not null }` / `{ some(x), none }` pair
+        bool hasSomePat = flatMatrix.Any(r => r[0] is CtorPat { Ctor.Family: CtorFamily.NonNull, Ctor.Arity: 1 });
+        bool hasNullAndNonNull =
+            flatMatrix.Any(r => r[0] is CtorPat { Ctor.Family: CtorFamily.Null }) &&
+            flatMatrix.Any(r => r[0] is CtorPat { Ctor.Family: CtorFamily.NonNull });
+        if (hasSomePat || hasNullAndNonNull || (colType.Kind == PilotTypeKind.Option && colType.TypeArguments.Count == 1))
+        {
+            bool useSomeConstructor = hasSomePat ||
+                (colType.Kind == PilotTypeKind.Option &&
+                 !flatMatrix.Any(r => r[0] is CtorPat { Ctor.Family: CtorFamily.NonNull, Ctor.Arity: 0 }));
             return (true, new List<CtorDesc>
             {
-                new(CtorFamily.Null, "null", 0),
-                new(CtorFamily.NonNull, "not null", 0)
+                useSomeConstructor ? new(CtorFamily.NonNull, "some", 1) : new(CtorFamily.NonNull, "not null", 0),
+                new(CtorFamily.Null, useSomeConstructor ? "none" : "null", 0)
             });
         }
 
@@ -1516,10 +1714,44 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
                     continue;
                 }
 
+                // Null constructor (`null` and `none` are aliases for CtorFamily.Null)
+                if (targetCtor.Family == CtorFamily.Null)
+                {
+                    if (cp.Ctor.Family == CtorFamily.Null)
+                    {
+                        result.Add(rest);
+                    }
+                    continue;
+                }
+
+                // NonNull (`some(pat)` with Arity 1 or `not null` with Arity 0)
+                if (targetCtor.Family == CtorFamily.NonNull)
+                {
+                    if (cp.Ctor.Family == CtorFamily.NonNull)
+                    {
+                        if (cp.Ctor.Arity == targetCtor.Arity)
+                        {
+                            result.Add(ConcatPatterns(cp.Args, rest));
+                        }
+                        else if (cp.Ctor.Arity == 0 && targetCtor.Arity == 1)
+                        {
+                            result.Add(PrependWildcards(1, rest));
+                        }
+                        else if (cp.Ctor.Arity == 1 && targetCtor.Arity == 0 && cp.Args[0] is WildPat)
+                        {
+                            result.Add(rest);
+                        }
+                    }
+                    continue;
+                }
+
                 // NonNull covers concrete non-null constructors
                 if (cp.Ctor.Family == CtorFamily.NonNull && targetCtor.Family != CtorFamily.Null)
                 {
-                    result.Add(PrependWildcards(targetCtor.Arity, rest));
+                    if (cp.Ctor.Arity == 0 || (cp.Ctor.Arity == 1 && cp.Args[0] is WildPat))
+                    {
+                        result.Add(PrependWildcards(targetCtor.Arity, rest));
+                    }
                     continue;
                 }
 
@@ -1668,6 +1900,18 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
                 var elemT = GetListElementType(parentType);
                 return Enumerable.Repeat(elemT, ctor.Arity).ToArray();
 
+            case CtorFamily.NonNull when ctor.Arity == 1:
+                var innerOpt = parentType.Kind == PilotTypeKind.Option && parentType.TypeArguments.Count == 1
+                    ? parentType.TypeArguments[0]
+                    : parentType;
+                return new[] { innerOpt };
+
+            case CtorFamily.ResultOk when ctor.Arity == 1:
+                return new[] { parentType.IsResult ? parentType.TypeArguments[0] : PilotType.Any };
+
+            case CtorFamily.ResultErr when ctor.Arity == 1:
+                return new[] { parentType.IsResult ? parentType.TypeArguments[1] : PilotType.Any };
+
             default:
                 return Enumerable.Repeat(PilotType.Any, ctor.Arity).ToArray();
         }
@@ -1686,8 +1930,10 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
             CtorFamily.Record => $"{ctor.Name}({string.Join(", ", argWitnesses)})",
             CtorFamily.Tuple => $"({string.Join(", ", argWitnesses)})",
             CtorFamily.Bool => ctor.Name,
-            CtorFamily.Null => "null",
-            CtorFamily.NonNull => "not null",
+            CtorFamily.Null => ctor.Name,
+            CtorFamily.NonNull => ctor.Arity == 1 ? $"some({string.Join(", ", argWitnesses)})" : "not null",
+            CtorFamily.ResultOk => $"ok({string.Join(", ", argWitnesses)})",
+            CtorFamily.ResultErr => $"fail({string.Join(", ", argWitnesses)})",
             CtorFamily.Typestate => ctor.Name,
             CtorFamily.Keyword => ctor.Arity == 0 ? ctor.Name : $"{ctor.Name}({string.Join(", ", argWitnesses)})",
             CtorFamily.ListExact => ctor.Arity == 0 ? "[]" : $"[{string.Join(", ", argWitnesses)}]",

@@ -80,6 +80,14 @@ public sealed class PilotType : IEquatable<PilotType>
     public static PilotType OptionOf(PilotType innerType) =>
         new(PilotTypeKind.Option, $"{innerType.Name}?", new[] { innerType });
 
+    public static PilotType ResultOf(PilotType okType, PilotType errType) =>
+        new(PilotTypeKind.Primitive, "Result", new[] { okType, errType });
+
+    public bool IsResult =>
+        Kind == PilotTypeKind.Primitive &&
+        string.Equals(Name, "Result", StringComparison.Ordinal) &&
+        TypeArguments.Count == 2;
+
     public static PilotType FunctionOf(IReadOnlyList<PilotType> paramTypes, PilotType returnType) =>
         new(PilotTypeKind.Function, "Function", paramTypes, returnType);
 
@@ -122,6 +130,12 @@ public sealed class PilotType : IEquatable<PilotType>
 
         // T assignable to Option<T>
         if (target.Kind == PilotTypeKind.Option && target.TypeArguments.Count == 1)
+        {
+            return IsAssignableTo(target.TypeArguments[0]);
+        }
+
+        // T assignable to Result<T, E>
+        if (target.IsResult && !IsResult)
         {
             return IsAssignableTo(target.TypeArguments[0]);
         }
@@ -216,6 +230,10 @@ public sealed class PilotType : IEquatable<PilotType>
     {
         if (Kind == PilotTypeKind.Option)
             return $"{TypeArguments[0]}?";
+        if (IsResult)
+            return TypeArguments[1].Kind == PilotTypeKind.Any
+                ? $"{TypeArguments[0]}!"
+                : $"{TypeArguments[0]} ! {TypeArguments[1]}";
         if (Kind == PilotTypeKind.Collection && TypeArguments.Count > 0)
             return $"{Name}<{string.Join(", ", TypeArguments)}>";
         if (Kind == PilotTypeKind.Function && ReturnType != null)

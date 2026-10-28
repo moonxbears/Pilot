@@ -32,6 +32,24 @@ public sealed class PilotExecutionContext
     public PilotFlowSignalKind PendingFlow { get; set; }
     public PilotValue PendingReturnValue { get; set; }
     public string? PendingFlowLabel { get; set; }
+    public bool HasPendingBreakValue { get; set; }
+    public PilotValue PendingBreakValue { get; set; }
+    public bool HasPendingContinueRange { get; set; }
+    public PilotRange? PendingContinueRange { get; set; }
+    public bool PendingContinueWorklistSpread { get; set; }
+    public Action<PilotValue>? LoopYieldAccumulator { get; set; }
+    public PilotFunction? CurrentFunction { get; set; }
+
+    public PilotValue AdaptPropagatedError(PilotValue errVal, string? targetErrorType = null)
+    {
+        targetErrorType ??= CurrentFunction?.ErrorTypeSpec;
+        if (!string.IsNullOrWhiteSpace(targetErrorType) &&
+            TypeAdapters.TryConvert(errVal, targetErrorType, this, out var adapted))
+        {
+            return adapted;
+        }
+        return errVal;
+    }
 
     /// <summary>
     /// Gets or creates a reusable <see cref="PilotInterpreterVisitor"/> bound to this context.

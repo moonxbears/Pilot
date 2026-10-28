@@ -435,6 +435,94 @@ public static class PilotPatternMatcher
             targetName = nameParts[1].GetText();
         }
 
+        // A0. Built-in Option `some(pat)` / `some x` pattern matching (Milestone 12)
+        if ((explicitParentAdt == null || string.Equals(explicitParentAdt, "Option", StringComparison.Ordinal)) &&
+            (string.Equals(targetName, "some", StringComparison.Ordinal) ||
+             (string.Equals(targetName, "Some", StringComparison.Ordinal) && !visitor.Context.VariantDefinitions.ContainsKey("Some"))) &&
+            (hasParens || trailingId != null))
+        {
+            // If `value` is a user-defined ADT whose variant is literally named `Some`/`some`, defer to ADT matching below
+            if (value.Kind != PilotValueKind.Adt ||
+                !string.Equals(value.GetAdtVariantDefinition().Name, targetName, StringComparison.Ordinal))
+            {
+                if (value.IsNull || value.IsUndefined) return false;
+                var unwrapped = value.UnwrapOption();
+                if (hasParens)
+                {
+                    if (patArgs != null && patArgs.Length == 1)
+                    {
+                        if (!MatchPatternInternal(patArgs[0].pattern(), unwrapped, scope, visitor, bindings))
+                            return false;
+                    }
+                    else if (patArgs != null && patArgs.Length > 1)
+                    {
+                        return false;
+                    }
+                }
+                if (trailingId != null && trailingId.GetText() != "_")
+                {
+                    bindings[trailingId.GetText()] = (unwrapped, true);
+                }
+                return true;
+            }
+        }
+
+        // A0b. Built-in Result `ok(pat)` and `fail(pat)` / `err(pat)` pattern matching (Milestone 13)
+        if ((explicitParentAdt == null || string.Equals(explicitParentAdt, "Result", StringComparison.Ordinal)) &&
+            (hasParens || trailingId != null))
+        {
+            bool isOkCtor = string.Equals(targetName, "ok", StringComparison.Ordinal) ||
+                            (string.Equals(targetName, "Ok", StringComparison.Ordinal) && !visitor.Context.VariantDefinitions.ContainsKey("Ok"));
+            bool isFailCtor = string.Equals(targetName, "fail", StringComparison.Ordinal) ||
+                              string.Equals(targetName, "err", StringComparison.Ordinal) ||
+                              (string.Equals(targetName, "Fail", StringComparison.Ordinal) && !visitor.Context.VariantDefinitions.ContainsKey("Fail")) ||
+                              (string.Equals(targetName, "Err", StringComparison.Ordinal) && !visitor.Context.VariantDefinitions.ContainsKey("Err"));
+
+            if (isOkCtor)
+            {
+                if (value.IsFailure) return false;
+                if (hasParens && patArgs != null && patArgs.Length == 1)
+                {
+                    if (!MatchPatternInternal(patArgs[0].pattern(), value, scope, visitor, bindings))
+                        return false;
+                }
+                else if (hasParens && patArgs != null && patArgs.Length > 1)
+                {
+                    return false;
+                }
+                if (trailingId != null && trailingId.GetText() != "_")
+                {
+                    bindings[trailingId.GetText()] = (value, true);
+                }
+                return true;
+            }
+            if (isFailCtor)
+            {
+                if (!value.IsFailure) return false;
+                var errPayload = value.UnwrapFailure();
+                if (hasParens && patArgs != null && patArgs.Length == 1)
+                {
+                    if (!MatchPatternInternal(patArgs[0].pattern(), errPayload, scope, visitor, bindings))
+                        return false;
+                }
+                else if (hasParens && patArgs != null && patArgs.Length > 1)
+                {
+                    return false;
+                }
+                if (trailingId != null && trailingId.GetText() != "_")
+                {
+                    bindings[trailingId.GetText()] = (errPayload, true);
+                }
+                return true;
+            }
+        }
+
+        // Allow direct error variant matching when matching a `PilotValueKind.Failure` against an error ADT variant
+        if (value.IsFailure)
+        {
+            value = value.UnwrapFailure();
+        }
+
         // A. Built-in primitive type test: `int n`, `str s`, `bool b`
         if (explicitParentAdt == null && genericSuffix == null && !hasParens && propPat == null && KnownPrimitiveTypes.Contains(targetName))
         {

@@ -22,8 +22,8 @@ for x in 15..20:
         var res = PilotScript.Run(code);
         Assert.True(res.Success);
         Assert.NotNull(res.Context);
-        // 15 + 16 + 17 + 18 + 19 = 85
-        Assert.Equal(85, res.Context.Environment.CurrentScope.Resolve("sum").AsInt());
+        // 15 + 16 + 17 + 18 + 19 + 20 = 105 (inclusive ..)
+        Assert.Equal(105, res.Context.Environment.CurrentScope.Resolve("sum").AsInt());
     }
 
     [Fact]
@@ -103,7 +103,7 @@ while (true):
         var res = PilotScript.Run(code);
         Assert.True(res.Success);
         Assert.NotNull(res.Context);
-        Assert.Equal(5, res.Context.Environment.CurrentScope.Resolve("count").AsInt());
+        Assert.Equal(6, res.Context.Environment.CurrentScope.Resolve("count").AsInt());
         Assert.Equal(5, res.Context.Environment.CurrentScope.Resolve("listCount").AsInt());
         Assert.Equal(20, res.Context.Environment.CurrentScope.Resolve("myvar").AsInt());
     }

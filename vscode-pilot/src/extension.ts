@@ -15,6 +15,60 @@ const TOKEN_MODIFIERS = [
     'abstract', 'async', 'modification', 'documentation', 'defaultLibrary'
 ];
 
+function pickNewestExistingFile(candidates: string[]): string {
+    let bestPath = '';
+    let bestMtime = -1;
+    for (const candidate of candidates) {
+        if (!candidate) {
+            continue;
+        }
+        try {
+            if (fs.existsSync(candidate)) {
+                const stat = fs.statSync(candidate);
+                if (stat.isFile() && stat.mtimeMs > bestMtime) {
+                    bestMtime = stat.mtimeMs;
+                    bestPath = candidate;
+                }
+            }
+        } catch {
+            // Ignore inaccessible candidate paths
+        }
+    }
+    return bestPath;
+}
+
+function resolvePilotExecutionPrefix(extensionPath: string, configuredPilotPath?: string): string {
+    if (configuredPilotPath && configuredPilotPath !== 'pilot') {
+        return `"${configuredPilotPath}"`;
+    }
+
+    const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    const repoRoot = path.resolve(extensionPath, '..');
+    const dotnetConfig = vscode.workspace.getConfiguration('pilot.languageServer');
+    const dotnetCmd = dotnetConfig.get<string>('dotnetPath') || 'dotnet';
+
+    const dllCandidates: string[] = [];
+    if (wsRoot) {
+        dllCandidates.push(
+            path.join(wsRoot, 'bin', 'Debug', 'net10.0', 'Pilot.dll'),
+            path.join(wsRoot, 'bin', 'Release', 'net10.0', 'Pilot.dll')
+        );
+    }
+    dllCandidates.push(
+        path.join(repoRoot, 'bin', 'Debug', 'net10.0', 'Pilot.dll'),
+        path.join(repoRoot, 'bin', 'Release', 'net10.0', 'Pilot.dll'),
+        path.join(extensionPath, 'server', 'Pilot.dll')
+    );
+
+    const newestDll = pickNewestExistingFile(dllCandidates);
+    if (newestDll) {
+        const dotnetRef = dotnetCmd.includes(' ') ? `"${dotnetCmd}"` : dotnetCmd;
+        return `${dotnetRef} "${newestDll}"`;
+    }
+
+    return 'pilot';
+}
+
 class PilotLspClient implements vscode.Disposable {
     private process: cp.ChildProcessWithoutNullStreams | null = null;
     private nextId = 1;
@@ -38,12 +92,16 @@ class PilotLspClient implements vscode.Disposable {
         const config = vscode.workspace.getConfiguration('pilot.languageServer');
         const dotnetPath = config.get<string>('dotnetPath') || 'dotnet';
         const customPath = config.get<string>('serverPath') || '';
+        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
         const repoRoot = path.resolve(this.extensionPath, '..');
 
         const bundledDll = path.join(this.extensionPath, 'server', 'Pilot.LanguageServer.dll');
+        const wsDebugDll = wsRoot ? path.join(wsRoot, 'Pilot.LanguageServer', 'bin', 'Debug', 'net10.0', 'Pilot.LanguageServer.dll') : '';
+        const wsReleaseDll = wsRoot ? path.join(wsRoot, 'Pilot.LanguageServer', 'bin', 'Release', 'net10.0', 'Pilot.LanguageServer.dll') : '';
         const repoDebugDll = path.join(repoRoot, 'Pilot.LanguageServer', 'bin', 'Debug', 'net10.0', 'Pilot.LanguageServer.dll');
         const repoReleaseDll = path.join(repoRoot, 'Pilot.LanguageServer', 'bin', 'Release', 'net10.0', 'Pilot.LanguageServer.dll');
-        const csprojCandidate = path.join(repoRoot, 'Pilot.LanguageServer', 'Pilot.LanguageServer.csproj');
+        const wsCsproj = wsRoot ? path.join(wsRoot, 'Pilot.LanguageServer', 'Pilot.LanguageServer.csproj') : '';
+        const repoCsproj = path.join(repoRoot, 'Pilot.LanguageServer', 'Pilot.LanguageServer.csproj');
 
         let serverDll = '';
         let serverCsproj = '';
@@ -57,14 +115,19 @@ class PilotLspClient implements vscode.Disposable {
         }
 
         if (!serverDll && !serverCsproj) {
-            if (fs.existsSync(bundledDll)) {
-                serverDll = bundledDll;
-            } else if (fs.existsSync(repoDebugDll)) {
-                serverDll = repoDebugDll;
-            } else if (fs.existsSync(repoReleaseDll)) {
-                serverDll = repoReleaseDll;
-            } else if (fs.existsSync(csprojCandidate)) {
-                serverCsproj = csprojCandidate;
+            serverDll = pickNewestExistingFile([
+                wsDebugDll,
+                wsReleaseDll,
+                repoDebugDll,
+                repoReleaseDll,
+                bundledDll
+            ]);
+            if (!serverDll) {
+                if (wsCsproj && fs.existsSync(wsCsproj)) {
+                    serverCsproj = wsCsproj;
+                } else if (fs.existsSync(repoCsproj)) {
+                    serverCsproj = repoCsproj;
+                }
             }
         }
 
@@ -81,7 +144,7 @@ class PilotLspClient implements vscode.Disposable {
             return;
         }
 
-        const workingDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || path.dirname(serverDll || serverCsproj);
+        const workingDir = wsRoot || path.dirname(serverDll || serverCsproj);
         this.process = cp.spawn(dotnetPath, args, {
             cwd: workingDir,
             stdio: ['pipe', 'pipe', 'pipe']
@@ -96,13 +159,21 @@ class PilotLspClient implements vscode.Disposable {
             this.statusBar.text = '$(warning) Pilot LSP (Stopped)';
         });
 
-        await this.sendRequest('initialize', {
+        const initResult = await this.sendRequest('initialize', {
             processId: process.pid,
             rootUri: vscode.workspace.workspaceFolders?.[0]?.uri.toString() ?? null,
             capabilities: {}
         });
         this.sendNotification('initialized', {});
-        this.statusBar.text = '$(check) Pilot LSP';
+        const srvVersion: string = initResult?.serverInfo?.version || '';
+        const srvCommit: string = initResult?.serverInfo?.commitSha || '';
+        if (srvVersion) {
+            this.statusBar.text = `$(check) Pilot LSP v${srvVersion}`;
+            this.statusBar.tooltip = `Pilot Language Server v${srvVersion}${srvCommit ? ` (commit ${srvCommit})` : ''} — Click to restart`;
+            this.outputChannel.appendLine(`[Pilot LSP] Connected to Pilot Language Server v${srvVersion}`);
+        } else {
+            this.statusBar.text = '$(check) Pilot LSP';
+        }
 
         for (const doc of vscode.workspace.textDocuments) {
             if (doc.languageId === 'pilot') {
@@ -217,7 +288,9 @@ class PilotLspClient implements vscode.Disposable {
                     ? vscode.DiagnosticSeverity.Error
                     : d.severity === 2
                     ? vscode.DiagnosticSeverity.Warning
-                    : vscode.DiagnosticSeverity.Information;
+                    : d.severity === 3
+                    ? vscode.DiagnosticSeverity.Information
+                    : vscode.DiagnosticSeverity.Hint;
                 const diag = new vscode.Diagnostic(range, d.message, severity);
                 diag.code = d.code;
                 diag.source = d.source || 'pilot';
@@ -402,7 +475,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // Register Debug Provider & Adapter Factory
     const debugProvider = new PilotDebugConfigurationProvider();
-    const debugFactory = new PilotDebugAdapterDescriptorFactory();
+    const debugFactory = new PilotDebugAdapterDescriptorFactory(context.extensionPath);
     context.subscriptions.push(
         vscode.debug.registerDebugConfigurationProvider('pilot', debugProvider),
         vscode.debug.registerDebugAdapterDescriptorFactory('pilot', debugFactory)
@@ -419,9 +492,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 vscode.window.showErrorMessage('No active Pilot file to run.');
                 return;
             }
+            const pilotCmd = resolvePilotExecutionPrefix(context.extensionPath);
             let terminal = vscode.window.terminals.find(t => t.name === 'Pilot Runner') || vscode.window.createTerminal('Pilot Runner');
             terminal.show();
-            terminal.sendText(`pilot run "${filePath}"`);
+            terminal.sendText(`${pilotCmd} run "${filePath}"`);
         }),
         vscode.commands.registerCommand('pilot.debugCurrentFile', async (uri?: vscode.Uri) => {
             let filePath = uri?.fsPath;
@@ -432,9 +506,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 vscode.window.showErrorMessage('No active Pilot file to debug.');
                 return;
             }
+            const pilotCmd = resolvePilotExecutionPrefix(context.extensionPath);
             let terminal = vscode.window.terminals.find(t => t.name === 'Pilot Debugger') || vscode.window.createTerminal('Pilot Debugger');
             terminal.show();
-            terminal.sendText(`pilot debug "${filePath}"`);
+            terminal.sendText(`${pilotCmd} debug "${filePath}"`);
         }),
         vscode.commands.registerCommand('pilot.createLaunchConfig', async () => {
             await addOrUpdateLaunchJson(true);
@@ -506,6 +581,12 @@ class PilotDebugConfigurationProvider implements vscode.DebugConfigurationProvid
 }
 
 class PilotDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory {
+    private extensionPath: string;
+
+    constructor(extensionPath: string) {
+        this.extensionPath = extensionPath;
+    }
+
     createDebugAdapterDescriptor(session: vscode.DebugSession): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
         const config = session.configuration;
         let program = config.program || '${file}';
@@ -515,7 +596,7 @@ class PilotDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescripto
 
         const mode = config.mode || 'run';
         const args = Array.isArray(config.args) ? config.args.join(' ') : (config.args || '');
-        const pilotExe = config.pilotPath || 'pilot';
+        const pilotExe = resolvePilotExecutionPrefix(this.extensionPath, config.pilotPath);
 
         const terminalName = mode === 'debug' ? 'Pilot Debugger' : 'Pilot Runner';
         let terminal = vscode.window.terminals.find(t => t.name === terminalName);
@@ -525,9 +606,9 @@ class PilotDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescripto
         terminal.show();
 
         if (mode === 'debug') {
-            terminal.sendText(`${pilotExe} debug "${program}" ${args}`);
+            terminal.sendText(`${pilotExe} debug "${program}" ${args}`.trim());
         } else {
-            terminal.sendText(`${pilotExe} run "${program}" ${args}`);
+            terminal.sendText(`${pilotExe} run "${program}" ${args}`.trim());
         }
 
         return new vscode.DebugAdapterInlineImplementation({

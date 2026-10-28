@@ -1,0 +1,69 @@
+// =============================================================================
+// Milestone 15: Expression-Oriented & Dynamic-Schedule `for` Loops + C-ABI
+// =============================================================================
+
+// 1. Standard Fixed Yield (`FixedScalar` + `CollectionYield` with exact pre-allocation)
+let squares = for (i in 1..5) {
+    yield i * i;
+};
+assert(squares == [1, 4, 9, 16, 25], "Inclusive 1..5 yield failed");
+
+let half_open = for (i in 0..<4) {
+    yield i * 10;
+};
+assert(half_open == [0, 10, 20, 30], "Half-open 0..<4 yield failed");
+
+// 2. Destructive Range Pivot (`continue start..end;` -> `MutableBounds`, 0 allocations)
+let pivoted = for (i in 0..10) {
+    yield i;
+    if i == 2 {
+        continue 8..10;
+    }
+};
+assert(pivoted == [0, 1, 2, 8, 9, 10], "Destructive range pivot failed");
+
+// 3. Resumable Sub-Loop Prepend (`continue start..end, ...;` -> `WorklistStack` LIFO)
+let worklist_order = for (i in 1..4) {
+    yield i;
+    if i == 2 {
+        continue 10..11, ...;
+    }
+};
+assert(worklist_order == [1, 2, 10, 11, 3, 4], "Resumable worklist LIFO schedule failed");
+
+// 4. Scalar Break + `then` Completion Branch (`ScalarBreak`)
+let items = [12, 24, 36, 48];
+
+let hit_index = for (i in 0..<4) {
+    if items[i] == 36 {
+        break i;
+    }
+} then -1;
+assert(hit_index == 2, "ScalarBreak hit failed");
+
+let miss_fallback = for (i in 0..<4) {
+    if items[i] == 99 {
+        break i;
+    }
+} then -1;
+assert(miss_fallback == -1, "ScalarBreak `then` completion branch failed");
+
+let miss_optional = for (i in 0..<4) {
+    if items[i] == 99 {
+        break i;
+    }
+};
+assert(miss_optional == none, "ScalarBreak without `then` should default to `none`");
+
+// 5. Nested Scope Isolation
+let nested = for (row in 1..3) {
+    let cell = for (col in 1..3) {
+        if row * col == 4 {
+            break 400;
+        }
+    } then (row * 10);
+    yield cell;
+};
+assert(nested == [10, 400, 30], "Nested scope isolation failed");
+
+println("All Milestone 15 dynamic `for` expression assertions passed!");

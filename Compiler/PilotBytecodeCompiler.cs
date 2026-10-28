@@ -273,6 +273,11 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
             }
         }
 
+        if (suite.simple_stmt() != null)
+        {
+            compiler._discardExpressionResult = false;
+        }
+
         compiler.VisitSuite(suite);
 
         // Ensure every function path returns
@@ -968,8 +973,19 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
                 _chunk.Emit(PilotOpcode.LoadNamed, idIndex);
             }
 
-            Visit(rhsNode);
-            EmitAugassignOp(op);
+            if (op == "??=")
+            {
+                _chunk.Emit(PilotOpcode.Dup);
+                int skipJump = _chunk.EmitJump(PilotOpcode.JumpIfNotNull);
+                _chunk.Emit(PilotOpcode.Pop);
+                Visit(rhsNode);
+                _chunk.PatchJump(skipJump);
+            }
+            else
+            {
+                Visit(rhsNode);
+                EmitAugassignOp(op);
+            }
 
             if (_isFunction && _chunk.TryGetLocalSlot(idName, out int storeSlot))
             {
@@ -1127,7 +1143,8 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     public override object? VisitIf_stmt(PilotParser.If_stmtContext context)
     {
-        if (context.pattern() != null && context.pattern().Length > 0)
+        if ((context.pattern() != null && context.pattern().Length > 0) ||
+            (context.SOME() != null && context.SOME().Length > 0))
         {
             new PilotMatchBytecodeLowerer(this).LowerIfStmt(context);
             return null;
@@ -1168,6 +1185,10 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         {
             Visit(context.suite(suiteIndex));
         }
+        else if (!_discardExpressionResult)
+        {
+            _chunk.Emit(PilotOpcode.ConstNull);
+        }
 
         // Patch all end jumps to point here
         foreach (var ej in endJumps)
@@ -1185,7 +1206,7 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         _loops.Push(loopCtx);
 
         var exitJumps = new List<int>();
-        if (context.pattern() != null)
+        if (context.pattern() != null || context.SOME() != null)
         {
             new PilotMatchBytecodeLowerer(this).LowerWhileLetStmt(context, loopStart, exitJumps);
         }
@@ -1229,6 +1250,20 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     public override object? VisitFor_stmt(PilotParser.For_stmtContext context)
     {
+        var loopInfo = Pilot.Analysis.Loops.PilotForLoopAnalyzer.AnalyzeSingleLoop(context);
+        if (loopInfo.ScheduleMode != Pilot.Analysis.Loops.LoopScheduleMode.FixedScalar ||
+            loopInfo.ReturnMode != Pilot.Analysis.Loops.LoopReturnMode.Void ||
+            loopInfo.HasCompletionBranch)
+        {
+            int fb = _chunk.AddAstFallback(context);
+            _chunk.Emit(PilotOpcode.EvalAst, fb);
+            if (_discardExpressionResult)
+            {
+                _chunk.Emit(PilotOpcode.Pop);
+            }
+            return null;
+        }
+
         // 1. Evaluate collection/range
         bool prevIterDiscard = _discardExpressionResult;
         _discardExpressionResult = false;
@@ -1288,6 +1323,17 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     public override object? VisitFunc_def(PilotParser.Func_defContext context)
     {
+        if (Pilot.Runtime.Execution.PilotInterpreterVisitor.ContainsYield(context.suite()))
+        {
+            int fb = _chunk.AddAstFallback(context);
+            _chunk.Emit(PilotOpcode.EvalAst, fb);
+            if (_discardExpressionResult)
+            {
+                _chunk.Emit(PilotOpcode.Pop);
+            }
+            return null;
+        }
+
         string funcName = context.identifier().GetText();
 
         var paramNames = new List<string>();
@@ -1360,12 +1406,86 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
         for (int i = 1; i < queries.Length; i++)
         {
+            if (TryCompileFluentPipeStage(queries[i]))
+            {
+                continue;
+            }
             Visit(queries[i]);
             _chunk.Emit(PilotOpcode.Swap);
             _chunk.Emit(PilotOpcode.Call, 1);
         }
 
         return null;
+    }
+
+    private bool TryCompileFluentPipeStage(PilotParser.Set_query_exprContext stage)
+    {
+        if (stage.set_op()?.Length > 0) return false;
+        var coalesce = stage.coalesce_expr(0);
+        if (coalesce == null || coalesce.or_test().Length != 1) return false;
+        var orTest = coalesce.or_test(0);
+        if (orTest.and_test().Length != 1) return false;
+        var andTest = orTest.and_test(0);
+        if (andTest.not_test().Length != 1 || andTest.not_test(0).NOT() != null) return false;
+        var comp = andTest.not_test(0).comparison();
+        if (comp == null || comp.range_expr().Length != 1) return false;
+        var range = comp.range_expr(0);
+        if (range.bitor_expr().Length != 1) return false;
+        var bitor = range.bitor_expr(0);
+        if (bitor.bitxor_expr().Length != 1) return false;
+        var bitxor = bitor.bitxor_expr(0);
+        if (bitxor.bitand_expr().Length != 1) return false;
+        var bitand = bitxor.bitand_expr(0);
+        if (bitand.shift_expr().Length != 1) return false;
+        var shift = bitand.shift_expr(0);
+        if (shift.arith_expr().Length != 1) return false;
+        var arith = shift.arith_expr(0);
+        if (arith.term().Length != 1) return false;
+        var term = arith.term(0);
+        if (term.factor().Length != 1) return false;
+        var factor = term.factor(0);
+        var power = factor.power();
+        if (power == null || power.factor() != null) return false;
+        var atomExpr = power.atom_expr();
+        if (atomExpr == null || atomExpr.atom()?.DOT() == null || atomExpr.atom()?.identifier() == null)
+        {
+            return false;
+        }
+        string memberName = atomExpr.atom().identifier().GetText();
+        var trailers = atomExpr.trailer();
+        if (trailers == null || trailers.Length == 0)
+        {
+            int memberId = _chunk.AddIdentifier(memberName);
+            _chunk.Emit(PilotOpcode.CallPrimIntrinsic, memberId, extra: 0);
+            return true;
+        }
+        if (trailers.Length == 1 && trailers[0].LPAR() != null && trailers[0].STAR() == null &&
+            trailers[0].SAFE_NAV() == null && trailers[0].QUESTION() == null)
+        {
+            var callArgs = trailers[0].arglist()?.argument();
+            if (!HasNamedArguments(callArgs))
+            {
+                int argCount = callArgs?.Length ?? 0;
+                if (callArgs != null)
+                {
+                    for (int a = 0; a < callArgs.Length; a++)
+                    {
+                        if (callArgs[a].EACH() != null || callArgs[a].REPEAT() != null || callArgs[a].DOTDOT() != null || callArgs[a].test() == null)
+                        {
+                            return false;
+                        }
+                    }
+                    for (int a = 0; a < callArgs.Length; a++)
+                    {
+                        Visit(callArgs[a].test());
+                    }
+                }
+                int memberId = _chunk.AddIdentifier(memberName);
+                _chunk.Emit(PilotOpcode.CallPrimIntrinsic, memberId, extra: argCount);
+                return true;
+            }
+        }
+        return false;
     }
 
     public override object? VisitSet_query_expr(PilotParser.Set_query_exprContext context)
@@ -1379,21 +1499,89 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     public override object? VisitCoalesce_expr(PilotParser.Coalesce_exprContext context)
     {
+        CompileCoalesceExprPrefix(context, stopBeforeCatch: null);
+        return null;
+    }
+
+    internal void CompileCoalesceExprPrefix(PilotParser.Coalesce_exprContext context, PilotParser.Catch_clauseContext? stopBeforeCatch)
+    {
         var orTests = context.or_test();
-        if (orTests == null || orTests.Length == 0) return null;
+        if (orTests == null || orTests.Length == 0) return;
 
         Visit(orTests[0]);
 
-        for (int i = 1; i < orTests.Length; i++)
+        for (int i = 1; i < context.ChildCount; i++)
         {
-            _chunk.Emit(PilotOpcode.Dup);
-            int skipJump = _chunk.EmitJump(PilotOpcode.JumpIfNotNull);
-            _chunk.Emit(PilotOpcode.Pop);
-            Visit(orTests[i]);
-            _chunk.PatchJump(skipJump);
-        }
+            var child = context.GetChild(i);
+            if (ReferenceEquals(child, stopBeforeCatch))
+            {
+                break;
+            }
 
-        return null;
+            if (child is PilotParser.Or_testContext rhsOrTest)
+            {
+                _chunk.Emit(PilotOpcode.Dup);
+                int skipJump = _chunk.EmitJump(PilotOpcode.JumpIfNotNull);
+                _chunk.Emit(PilotOpcode.Pop);
+                Visit(rhsOrTest);
+                _chunk.PatchJump(skipJump);
+            }
+            else if (child is PilotParser.Catch_clauseContext catchCtx)
+            {
+                _chunk.Emit(PilotOpcode.Dup);
+                int skipJump = _chunk.EmitJump(PilotOpcode.JumpIfNotFailure);
+                if (catchCtx.FAT_ARROW() != null && catchCtx.identifier() != null)
+                {
+                    string errVar = catchCtx.identifier().GetText();
+                    _chunk.Emit(PilotOpcode.GetAdtField, 0, extra: 3);
+                    if (errVar != "_")
+                    {
+                        EmitStoreBinding(errVar, isMutable: false);
+                    }
+                    else
+                    {
+                        _chunk.Emit(PilotOpcode.Pop);
+                    }
+                    if (catchCtx.block() != null)
+                    {
+                        CompileCatchBlockAsExpression(catchCtx.block());
+                    }
+                    else
+                    {
+                        Visit(catchCtx.test());
+                    }
+                }
+                else if (catchCtx.block() != null)
+                {
+                    _chunk.Emit(PilotOpcode.Pop);
+                    CompileCatchBlockAsExpression(catchCtx.block());
+                }
+                else if (catchCtx.or_test() != null)
+                {
+                    _chunk.Emit(PilotOpcode.Pop);
+                    Visit(catchCtx.or_test());
+                }
+                _chunk.PatchJump(skipJump);
+            }
+        }
+    }
+
+    internal void CompileCatchBlockAsExpression(PilotParser.BlockContext block)
+    {
+        var stmts = block.stmt();
+        if (stmts == null || stmts.Length == 0)
+        {
+            _chunk.Emit(PilotOpcode.ConstUndefined);
+            return;
+        }
+        bool prevDiscard = _discardExpressionResult;
+        for (int i = 0; i < stmts.Length; i++)
+        {
+            bool isLast = i == stmts.Length - 1;
+            _discardExpressionResult = !isLast;
+            Visit(stmts[i]);
+        }
+        _discardExpressionResult = prevDiscard;
     }
 
     public override object? VisitOr_test(PilotParser.Or_testContext context)
@@ -1490,7 +1678,7 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         if (bitorExprs.Length > 1)
         {
             Visit(bitorExprs[1]);
-            bool isExclusive = context.DOTDOT_EQUAL() == null && context.ELLIPSIS() == null;
+            bool isExclusive = context.DOTDOT_LESS() != null;
             _chunk.Emit(PilotOpcode.BuildRange, isExclusive ? 1 : 0);
         }
 
@@ -1636,6 +1824,13 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     public override object? VisitAtom_expr(PilotParser.Atom_exprContext context)
     {
+        if (context.atom()?.DOT() != null && context.atom()?.identifier() != null)
+        {
+            int fallback = _chunk.AddAstFallback(context);
+            _chunk.Emit(PilotOpcode.EvalAst, fallback);
+            return null;
+        }
+
         var trailers = context.trailer();
         if (trailers != null && RequiresAtomExprAstFallback(context, trailers))
         {
@@ -1646,13 +1841,20 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
         Visit(context.atom());
 
-        if (trailers != null)
+        if (trailers != null && trailers.Length > 0)
         {
+            var shortCircuitJumps = new List<int>();
             for (int i = 0; i < trailers.Length; i++)
             {
                 var trailer = trailers[i];
+                bool isOptional = trailer.SAFE_NAV() != null ||
+                                  (trailer.QUESTION() != null && (trailer.LSQB() != null || trailer.LPAR() != null));
+                if (isOptional)
+                {
+                    shortCircuitJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfNullShortCircuit));
+                }
 
-                // Method / Function / Variant / Record Call: (args)
+                // Method / Function / Variant / Record Call: (args) or ?(args) or ?.(args)
                 if (trailer.LPAR() != null)
                 {
                     var args = trailer.arglist()?.argument();
@@ -1663,15 +1865,18 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
                     }
                     _chunk.Emit(PilotOpcode.Call, orderedTests.Count);
                 }
-                // Member Access: .member
-                else if (trailer.DOT() != null)
+                // Member Access: .member or ?.member
+                else if (trailer.identifier() != null && (trailer.DOT() != null || trailer.SAFE_NAV() != null))
                 {
                     string member = trailer.identifier().GetText();
-                    // Peek ahead: is next trailer a call?
-                    if (i + 1 < trailers.Length && trailers[i + 1].LPAR() != null &&
+                    // Peek ahead: is next trailer a standard call?
+                    if (i + 1 < trailers.Length &&
+                        trailers[i + 1].LPAR() != null &&
+                        trailers[i + 1].SAFE_NAV() == null &&
+                        trailers[i + 1].QUESTION() == null &&
                         !HasNamedArguments(trailers[i + 1].arglist()?.argument()))
                     {
-                        // Direct method call: receiver.method(args)
+                        // Direct method / primitive intrinsic call: receiver.method(args)
                         i++;
                         var callArgs = trailers[i].arglist()?.argument();
                         int argCount = callArgs?.Length ?? 0;
@@ -1683,7 +1888,7 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
                             }
                         }
                         int memberId = _chunk.AddIdentifier(member);
-                        _chunk.Emit(PilotOpcode.CallMethod, memberId, extra: argCount);
+                        _chunk.Emit(PilotOpcode.CallPrimIntrinsic, memberId, extra: argCount);
                     }
                     else
                     {
@@ -1691,7 +1896,7 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
                         _chunk.Emit(PilotOpcode.GetMember, memberId);
                     }
                 }
-                // Subscript Access: [index]
+                // Subscript Access: [index] or ?[index] or ?.[index]
                 else if (trailer.LSQB() != null)
                 {
                     var subCtx = trailer.subscriptlist()?.subscript(0);
@@ -1701,6 +1906,16 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
                         _chunk.Emit(PilotOpcode.GetIndex);
                     }
                 }
+                // Postfix `?` early-return error/none propagation (Milestone 13.2)
+                else if (trailer.QUESTION() != null)
+                {
+                    _chunk.Emit(PilotOpcode.TryPropagate);
+                }
+            }
+
+            foreach (int sj in shortCircuitJumps)
+            {
+                _chunk.PatchJump(sj);
             }
         }
 
@@ -1712,7 +1927,7 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         for (int i = 0; i < trailers.Length; i++)
         {
             var t = trailers[i];
-            if (t.STAR() != null || t.SAFE_NAV() != null || t.cascade_trailer() != null ||
+            if (t.STAR() != null || t.cascade_trailer() != null ||
                 t.unit_expr() != null || t.over_clause() != null)
             {
                 return true;
@@ -1851,9 +2066,42 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     public override object? VisitAtom(PilotParser.AtomContext context)
     {
+        if (context.if_stmt() != null)
+        {
+            bool prevDiscard = _discardExpressionResult;
+            _discardExpressionResult = false;
+            VisitIf_stmt(context.if_stmt());
+            _discardExpressionResult = prevDiscard;
+            return null;
+        }
+
         if (context.match_stmt() != null)
         {
+            if (context.match_stmt().test() == null)
+            {
+                int fb = _chunk.AddAstFallback(context.match_stmt());
+                _chunk.Emit(PilotOpcode.EvalAst, fb);
+                return null;
+            }
             new PilotMatchBytecodeLowerer(this).LowerMatch(context.match_stmt(), isExpression: true);
+            return null;
+        }
+
+        if (context.block() != null)
+        {
+            var stmts = context.block().stmt();
+            if (stmts == null || stmts.Length == 0)
+            {
+                _chunk.Emit(PilotOpcode.ConstNull);
+                return null;
+            }
+            bool prevDiscard = _discardExpressionResult;
+            for (int i = 0; i < stmts.Length; i++)
+            {
+                _discardExpressionResult = (i < stmts.Length - 1);
+                Visit(stmts[i]);
+            }
+            _discardExpressionResult = prevDiscard;
             return null;
         }
 
@@ -2023,10 +2271,48 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
             return null;
         }
 
+        if (context.DURATION_LITERAL() != null)
+        {
+            double val = Pilot.Runtime.Execution.PilotInterpreterVisitor.ParseDurationLiteralSeconds(context.DURATION_LITERAL().GetText());
+            int idx = _chunk.AddConstant(PilotValue.FromFloat(val));
+            _chunk.Emit(PilotOpcode.Const, idx);
+            return null;
+        }
+
+        if (context.FREQUENCY_LITERAL() != null)
+        {
+            double val = Pilot.Runtime.Execution.PilotInterpreterVisitor.ParseFrequencyLiteralHz(context.FREQUENCY_LITERAL().GetText());
+            int idx = _chunk.AddConstant(PilotValue.FromFloat(val));
+            _chunk.Emit(PilotOpcode.Const, idx);
+            return null;
+        }
+
+        if (context.MEMORY_LITERAL() != null)
+        {
+            long val = Pilot.Runtime.Execution.PilotInterpreterVisitor.ParseMemoryLiteralBytes(context.MEMORY_LITERAL().GetText());
+            if (val >= int.MinValue && val <= int.MaxValue)
+            {
+                _chunk.Emit(PilotOpcode.ConstInt, (int)val);
+            }
+            else
+            {
+                int idx = _chunk.AddConstant(PilotValue.FromInt(val));
+                _chunk.Emit(PilotOpcode.Const, idx);
+            }
+            return null;
+        }
+
         if (context.STRING()?.Length > 0 && context.STRING().Length == 1)
         {
             string raw = context.STRING(0).GetText();
-            string unescaped = StripQuotes(raw);
+            if ((raw.StartsWith("f\"", StringComparison.OrdinalIgnoreCase) || raw.StartsWith("f'", StringComparison.OrdinalIgnoreCase)) &&
+                raw.Length >= 3 && (raw.EndsWith("\"") || raw.EndsWith("'")))
+            {
+                int fb = _chunk.AddAstFallback(context);
+                _chunk.Emit(PilotOpcode.EvalAst, fb);
+                return null;
+            }
+            string unescaped = UnescapeStringLiteral(raw);
             int idx = _chunk.AddConstant(PilotValue.FromString(unescaped));
             _chunk.Emit(PilotOpcode.Const, idx);
             return null;
@@ -2142,6 +2428,22 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
                 }
             }
         }
+    }
+
+    private static string UnescapeStringLiteral(string raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return raw;
+        if ((raw.StartsWith("r\"", StringComparison.OrdinalIgnoreCase) || raw.StartsWith("r'", StringComparison.OrdinalIgnoreCase)) && raw.Length >= 3)
+        {
+            return StripQuotes(raw[1..]);
+        }
+
+        string str = StripQuotes(raw);
+        if (str.IndexOf('\\') < 0)
+        {
+            return str;
+        }
+        return str.Replace("\\n", "\n").Replace("\\r", "\r").Replace("\\t", "\t").Replace("\\\"", "\"").Replace("\\'", "'").Replace("\\\\", "\\");
     }
 
     private static string StripQuotes(string s)

@@ -29,7 +29,9 @@ public sealed class PolyglotTypeBridge : IPolyglotTypeConverter
 
     public PilotValue ToPilotValue(object? foreignObject, string? sourceLanguage = null)
     {
-        if (foreignObject is null || foreignObject is DBNull)
+        if (foreignObject is null || foreignObject is DBNull ||
+            (foreignObject is IntPtr ptr && ptr == IntPtr.Zero) ||
+            (foreignObject is UIntPtr uptr && uptr == UIntPtr.Zero))
         {
             return PilotValue.Null;
         }
@@ -341,5 +343,100 @@ public sealed class PolyglotTypeBridge : IPolyglotTypeConverter
             result[k] = v;
         }
         return result;
+    }
+
+    /// <summary>
+    /// Milestone 12.4: Foreign Interop Null-Boundary Hardening.
+    /// Surfaces nullable C pointers, `Nullable&lt;T&gt;`, and nullable/unannotated .NET reference returns as `T?`.
+    /// </summary>
+    public static string InferForeignReturnPilotType(MethodInfo method)
+    {
+        var retType = method.ReturnType;
+        if (retType == typeof(void)) return "void";
+
+        var underlyingNullable = Nullable.GetUnderlyingType(retType);
+        if (underlyingNullable != null)
+        {
+            return $"{MapClrBaseType(underlyingNullable)}?";
+        }
+
+        if (retType.IsPointer || retType == typeof(IntPtr) || retType == typeof(UIntPtr))
+        {
+            if (retType.IsPointer && retType.GetElementType() is { } elemT && elemT != typeof(void))
+                return $"{MapClrBaseType(elemT)}?";
+            return "ptr?";
+        }
+
+        if (retType.IsValueType)
+        {
+            return MapClrBaseType(retType);
+        }
+
+        // Reference return: check .NET NullabilityInfoContext; only NotNull is non-optional `T`,
+        // while Nullable or Unknown (unannotated foreign reference return) hardens to `T?`!
+        var nullCtx = new NullabilityInfoContext();
+        var nullInfo = nullCtx.Create(method.ReturnParameter);
+        string basePilot = MapClrBaseType(retType);
+        return nullInfo.ReadState == NullabilityState.NotNull ? basePilot : $"{basePilot}?";
+    }
+
+    public static string InferForeignClrPilotType(Type clrType, bool isNullableAnnotation = true)
+    {
+        if (clrType == typeof(void)) return "void";
+        var underlying = Nullable.GetUnderlyingType(clrType);
+        if (underlying != null)
+        {
+            return $"{MapClrBaseType(underlying)}?";
+        }
+        if (clrType.IsPointer || clrType == typeof(IntPtr) || clrType == typeof(UIntPtr))
+        {
+            return "ptr?";
+        }
+        string baseName = MapClrBaseType(clrType);
+        if (clrType.IsValueType)
+        {
+            return isNullableAnnotation ? $"{baseName}?" : baseName;
+        }
+        return isNullableAnnotation ? $"{baseName}?" : baseName;
+    }
+
+    /// <summary>
+    /// Milestone 12.4: SQL Null-Boundary Hardening.
+    /// Maps SQL column definitions to Pilot types, automatically surfacing nullable columns as `T?`.
+    /// </summary>
+    public static string InferSqlColumnPilotType(string sqlColumnSpec, bool isNotNullConstraint = false)
+    {
+        if (string.IsNullOrWhiteSpace(sqlColumnSpec)) return "any?";
+        string upper = sqlColumnSpec.Trim().ToUpperInvariant();
+        bool hasInlineNotNull = upper.Contains("NOT NULL", StringComparison.Ordinal) ||
+                                upper.Contains("PRIMARY KEY", StringComparison.Ordinal) ||
+                                upper.Contains("SERIAL", StringComparison.Ordinal);
+        bool nonNull = isNotNullConstraint || hasInlineNotNull;
+
+        string firstToken = upper.Split(new[] { ' ', '(', '\t' }, StringSplitOptions.RemoveEmptyEntries)[0];
+        string baseType = firstToken switch
+        {
+            "INT" or "INTEGER" or "BIGINT" or "SMALLINT" or "TINYINT" or "SERIAL" or "BIGSERIAL" => "int",
+            "REAL" or "FLOAT" or "DOUBLE" or "NUMERIC" or "DECIMAL" => "float",
+            "BOOL" or "BOOLEAN" or "BIT" => "bool",
+            "TEXT" or "VARCHAR" or "CHAR" or "NVARCHAR" or "UUID" or "TIMESTAMP" or "TIMESTAMPTZ" or "DATE" or "JSON" or "JSONB" => "str",
+            "BYTEA" or "BLOB" or "BINARY" or "VARBINARY" => "bytes",
+            _ => "any"
+        };
+
+        return nonNull ? baseType : $"{baseType}?";
+    }
+
+    private static string MapClrBaseType(Type t)
+    {
+        if (t == typeof(bool)) return "bool";
+        if (t == typeof(int) || t == typeof(long) || t == typeof(short) || t == typeof(sbyte)) return "int";
+        if (t == typeof(uint) || t == typeof(ulong) || t == typeof(ushort) || t == typeof(byte)) return "uint";
+        if (t == typeof(double) || t == typeof(float)) return "float";
+        if (t == typeof(decimal)) return "decimal";
+        if (t == typeof(char)) return "char";
+        if (t == typeof(string) || t == typeof(Guid) || t == typeof(DateTime) || t == typeof(DateTimeOffset)) return "str";
+        if (t.IsArray && t.GetElementType() is { } elem) return $"{MapClrBaseType(elem)}[]";
+        return t.Name;
     }
 }

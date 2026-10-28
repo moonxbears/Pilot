@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Antlr4.Runtime;
 using Antlr4.Runtime.Tree;
+using Pilot.Runtime.Values;
 
 namespace Pilot.Analysis.TypeSystem;
 
@@ -132,6 +133,13 @@ public sealed class PilotTypeInferenceEngine : PilotBaseVisitor<PilotType>
     {
         if (string.IsNullOrWhiteSpace(typeStr)) return PilotType.Any;
         typeStr = typeStr.Trim();
+
+        if (PilotAdtMemoryLayout.TrySplitFallibleTypeSpec(typeStr, out string okSpec, out string errSpec))
+        {
+            var okType = ParseTypeString(okSpec);
+            var errType = string.IsNullOrEmpty(errSpec) ? PilotType.Any : ParseTypeString(errSpec);
+            return PilotType.ResultOf(okType, errType);
+        }
 
         if (typeStr.EndsWith("?"))
         {
@@ -274,7 +282,10 @@ public sealed class PilotTypeInferenceEngine : PilotBaseVisitor<PilotType>
         string declaredRetStr = context.type_spec()?.GetText() ?? "";
         PilotType expectedRet = !string.IsNullOrEmpty(declaredRetStr) ? ParseTypeString(declaredRetStr) : PilotType.Any;
 
-        VisitSuite(context.suite());
+        if (context.suite() != null)
+        {
+            VisitSuite(context.suite());
+        }
         PopScope();
 
         var funcType = PilotType.FunctionOf(paramTypes, expectedRet);
@@ -290,6 +301,39 @@ public sealed class PilotTypeInferenceEngine : PilotBaseVisitor<PilotType>
             return Visit(pipes[0]);
         }
         return PilotType.Any;
+    }
+
+    public override PilotType VisitCoalesce_expr(PilotParser.Coalesce_exprContext context)
+    {
+        var orTests = context.or_test();
+        if (orTests == null || orTests.Length == 0) return PilotType.Any;
+
+        PilotType current = Visit(orTests[0]);
+        var catches = context.catch_clause();
+        if (catches != null && catches.Length > 0)
+        {
+            PilotType errType = current.IsResult ? current.TypeArguments[1] : PilotType.Any;
+            foreach (var cc in catches)
+            {
+                PushScope();
+                if (cc.identifier() != null)
+                {
+                    SetVariableType(cc.identifier().GetText(), errType);
+                }
+                Visit(cc);
+                PopScope();
+            }
+            if (current.IsResult)
+                current = current.TypeArguments[0];
+        }
+        else if (orTests.Length > 1)
+        {
+            for (int i = 1; i < orTests.Length; i++)
+                Visit(orTests[i]);
+            if (current.Kind == PilotTypeKind.Option && current.TypeArguments.Count == 1)
+                current = current.TypeArguments[0];
+        }
+        return current;
     }
 
     public override PilotType VisitArith_expr(PilotParser.Arith_exprContext context)
@@ -379,7 +423,14 @@ public sealed class PilotTypeInferenceEngine : PilotBaseVisitor<PilotType>
         var atomType = Visit(context.atom());
         foreach (var tr in trailers)
         {
-            if (tr.LPAR() != null && atomType.Kind == PilotTypeKind.Function && atomType.ReturnType != null)
+            if (tr.QUESTION() != null)
+            {
+                if (atomType.Kind == PilotTypeKind.Option && atomType.TypeArguments.Count == 1)
+                    atomType = atomType.TypeArguments[0];
+                else if (atomType.IsResult)
+                    atomType = atomType.TypeArguments[0];
+            }
+            else if (tr.LPAR() != null && atomType.Kind == PilotTypeKind.Function && atomType.ReturnType != null)
             {
                 Visit(tr);
                 atomType = atomType.ReturnType;

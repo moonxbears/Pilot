@@ -45,6 +45,12 @@ public sealed class PilVirtualMachine
         int localCount = Math.Max(chunk.LocalCount, arguments?.Count ?? 0);
         var locals = new PilotValue[localCount];
 
+        var instructions = chunk.Instructions;
+        int instCount = instructions.Count;
+        var constants = chunk.Constants;
+        var identifiers = chunk.IdentifierPool;
+        var scope = context.Environment.CurrentScope;
+
         if (arguments != null && arguments.Count > 0)
         {
             for (int i = 0; i < arguments.Count && i < locals.Length; i++)
@@ -53,11 +59,17 @@ public sealed class PilVirtualMachine
             }
         }
 
-        var instructions = chunk.Instructions;
-        int instCount = instructions.Count;
-        var constants = chunk.Constants;
-        var identifiers = chunk.IdentifierPool;
-        var scope = context.Environment.CurrentScope;
+        if (chunk.LocalSlotMap.Count > 0)
+        {
+            int argCount = arguments?.Count ?? 0;
+            foreach (var (locName, slot) in chunk.LocalSlotMap)
+            {
+                if (slot >= argCount && slot < locals.Length && scope.TryResolve(locName, out var scopeVal))
+                {
+                    locals[slot] = scopeVal;
+                }
+            }
+        }
 
         int ip = 0;
 
@@ -605,7 +617,7 @@ public sealed class PilVirtualMachine
 
                     var fn = new PilotFunction(
                         nestedChunk.Name,
-                        CreateParameters(nestedChunk.ParameterNames),
+                        CreateParameters(nestedChunk.ParameterNames, nestedChunk.FuncDefContext, context),
                         astBody: nestedChunk.FuncDefContext?.suite(),
                         closureScope: scope,
                         isAsync: isAsync,
@@ -614,6 +626,20 @@ public sealed class PilVirtualMachine
 
                     if (nestedChunk.FuncDefContext != null)
                     {
+                        if (nestedChunk.FuncDefContext.type_spec() != null)
+                        {
+                            fn.ReturnTypeSpec = nestedChunk.FuncDefContext.type_spec().GetText();
+                            if (nestedChunk.FuncDefContext.type_spec().EXCLAMATION() != null)
+                            {
+                                fn.IsFallible = true;
+                                fn.SuccessTypeSpec = nestedChunk.FuncDefContext.type_spec().union_type()?.GetText();
+                                fn.ErrorTypeSpec = nestedChunk.FuncDefContext.type_spec().error_union_type()?.GetText();
+                            }
+                            else
+                            {
+                                fn.SuccessTypeSpec = fn.ReturnTypeSpec;
+                            }
+                        }
                         Pilot.Runtime.Burst.PilotBurstEngine.TryAttachBurstKernel(fn, nestedChunk.FuncDefContext);
                     }
 
@@ -843,6 +869,7 @@ public sealed class PilVirtualMachine
                 case PilotOpcode.GetAdtTag:
                 {
                     var val = stack[--sp];
+                    if (val.IsFailure) val = val.UnwrapFailure();
                     EnsureStackCapacity(ref stack, sp + 1);
                     if (val.Kind == PilotValueKind.Adt)
                     {
@@ -862,6 +889,17 @@ public sealed class PilVirtualMachine
                     var val = stack[--sp];
                     int idx = inst.Operand;
                     EnsureStackCapacity(ref stack, sp + 1);
+                    if (inst.Extra == 2)
+                    {
+                        stack[sp++] = val.UnwrapOption();
+                        break;
+                    }
+                    if (inst.Extra == 3)
+                    {
+                        stack[sp++] = val.UnwrapFailure();
+                        break;
+                    }
+                    if (val.IsFailure) val = val.UnwrapFailure();
                     switch (val.Kind)
                     {
                         case PilotValueKind.Adt:
@@ -983,10 +1021,102 @@ public sealed class PilVirtualMachine
                 case PilotOpcode.CheckRecordType:
                 {
                     var val = stack[--sp];
+                    if (val.IsFailure) val = val.UnwrapFailure();
                     string expectedName = identifiers[inst.Operand];
                     bool matched = CheckRuntimeTypeMatch(val, expectedName, inst.Extra, context);
                     EnsureStackCapacity(ref stack, sp + 1);
                     stack[sp++] = PilotValue.FromBool(matched);
+                    break;
+                }
+
+                // =====================================================================
+                // Milestone 13: Values-First Error System (T ! E) & Postfix `?` Opcodes
+                // =====================================================================
+
+                case PilotOpcode.TryPropagate:
+                {
+                    var val = stack[--sp];
+                    if (val.IsFailure)
+                    {
+                        string? targetErrType = context.CurrentFunction?.ErrorTypeSpec;
+                        var adaptedErr = context.AdaptPropagatedError(val.UnwrapFailure(), targetErrType);
+                        return PilotValue.FromFailure(adaptedErr);
+                    }
+                    if (val.IsNull || val.IsUndefined)
+                    {
+                        return PilotValue.Null;
+                    }
+                    EnsureStackCapacity(ref stack, sp + 1);
+                    stack[sp++] = val.UnwrapOption();
+                    break;
+                }
+
+                case PilotOpcode.JumpIfFailure:
+                {
+                    var val = stack[--sp];
+                    if (val.IsFailure) ip = inst.Operand;
+                    break;
+                }
+
+                case PilotOpcode.JumpIfNotFailure:
+                {
+                    var val = stack[--sp];
+                    if (!val.IsFailure) ip = inst.Operand;
+                    break;
+                }
+
+                // =====================================================================
+                // Milestone 14: Unboxed Primitive Intrinsics & Deep Optional Chaining
+                // =====================================================================
+
+                case PilotOpcode.CallPrimIntrinsic:
+                {
+                    string methodName = identifiers[inst.Operand];
+                    int argc = inst.Extra;
+                    if (argc == 0)
+                    {
+                        var target = stack[--sp];
+                        if (PilotValue.TryInvokePrimitiveIntrinsic(target, methodName, ReadOnlySpan<PilotValue>.Empty, context, out var primRes0))
+                        {
+                            EnsureStackCapacity(ref stack, sp + 1);
+                            stack[sp++] = primRes0;
+                            break;
+                        }
+                        var callRes0 = InvokeMethod(target, methodName, Array.Empty<PilotValue>(), context);
+                        EnsureStackCapacity(ref stack, sp + 1);
+                        stack[sp++] = callRes0;
+                        break;
+                    }
+                    var callArgs = new PilotValue[argc];
+                    for (int a = argc - 1; a >= 0; a--)
+                    {
+                        callArgs[a] = stack[--sp];
+                    }
+                    var recv = stack[--sp];
+                    if (PilotValue.TryInvokePrimitiveIntrinsic(recv, methodName, callArgs.AsSpan(), context, out var primRes))
+                    {
+                        EnsureStackCapacity(ref stack, sp + 1);
+                        stack[sp++] = primRes;
+                        break;
+                    }
+                    var callResult = InvokeMethod(recv, methodName, callArgs, context);
+                    EnsureStackCapacity(ref stack, sp + 1);
+                    stack[sp++] = callResult;
+                    break;
+                }
+
+                case PilotOpcode.JumpIfNullShortCircuit:
+                {
+                    var val = stack[sp - 1];
+                    if (val.IsNull || val.IsUndefined)
+                    {
+                        stack[sp - 1] = PilotValue.Null;
+                        ip = inst.Operand;
+                    }
+                    else if (val.IsNestedSome)
+                    {
+                        stack[sp - 1] = val.UnwrapOption();
+                    }
                     break;
                 }
             }
@@ -1227,31 +1357,18 @@ public sealed class PilVirtualMachine
 
     private static PilotValue InvokeMethod(PilotValue target, string methodName, IReadOnlyList<PilotValue> args, PilotExecutionContext context)
     {
-        // Direct fast-path method invocation
-        if (target.Kind == PilotValueKind.List)
+        var argSpan = args is PilotValue[] arr ? arr.AsSpan() : (args.Count == 0 ? ReadOnlySpan<PilotValue>.Empty : new List<PilotValue>(args).ToArray().AsSpan());
+        if (PilotValue.TryInvokePrimitiveIntrinsic(target, methodName, argSpan, context, out var intrinsicRes))
         {
-            var list = target.AsList();
-            if (methodName is "append" or "push" && args.Count > 0)
-            {
-                list.Add(args[0]);
-                return target;
-            }
-            if (methodName == "pop")
-            {
-                if (list.Count == 0) return PilotValue.Undefined;
-                var last = list[^1];
-                list.RemoveAt(list.Count - 1);
-                return last;
-            }
-            if (methodName == "clear")
-            {
-                list.Clear();
-                return PilotValue.Null;
-            }
+            return intrinsicRes;
         }
 
         // Standard member resolution & call
         var member = target.GetMember(methodName, context);
+        if (args.Count == 0 && member.Kind != PilotValueKind.Function && member.Kind != PilotValueKind.MethodGroup && member.Kind != PilotValueKind.Keyword && member.Kind != PilotValueKind.Object)
+        {
+            return member;
+        }
         return InvokeCallable(member, args, context);
     }
 
@@ -1277,6 +1394,10 @@ public sealed class PilVirtualMachine
                 string s = iterable.AsString();
                 return EnumerateString(s);
             }
+            case PilotValueKind.Generator:
+                return iterable.AsGenerator().GetEnumerator();
+            case PilotValueKind.NativeArray:
+                return iterable.AsNativeArray().Select(PilotValue.FromFloat).GetEnumerator();
             case PilotValueKind.Foreign:
             {
                 if (iterable.AsForeign() is IEnumerable<PilotValue> enumValues)
@@ -1327,8 +1448,30 @@ public sealed class PilVirtualMachine
         yield return val;
     }
 
-    private static IReadOnlyList<PilotParameter> CreateParameters(IReadOnlyList<string> paramNames)
+    private static IReadOnlyList<PilotParameter> CreateParameters(
+        IReadOnlyList<string> paramNames,
+        PilotParser.Func_defContext? funcDef = null,
+        PilotExecutionContext? context = null)
     {
+        if (funcDef?.parameters()?.parameter() is { Length: > 0 } astParams)
+        {
+            var astList = new PilotParameter[astParams.Length];
+            var visitor = context?.GetOrCreateVisitor();
+            for (int i = 0; i < astParams.Length; i++)
+            {
+                var p = astParams[i];
+                string pName = p.identifier()?.GetText() ?? p.splice_expr()?.GetText() ?? (i < paramNames.Count ? paramNames[i] : "arg");
+                string? pType = p.type_annotation()?.type_spec()?.GetText();
+                PilotValue? defaultVal = (p.test() != null && visitor != null) ? visitor.Visit(p.test()) : default(PilotValue?);
+                bool isParams = p.PARAMS() != null || p.STAR() != null;
+                bool isKwargs = p.DOUBLESTAR() != null;
+                bool isContextual = p.CONTEXT() != null;
+                bool isEach = p.EACH() != null || p.REPEAT() != null;
+                astList[i] = new PilotParameter(pName, pType, defaultVal, isParams, isKwargs, isContextual, isEach);
+            }
+            return astList;
+        }
+
         if (paramNames.Count == 0) return Array.Empty<PilotParameter>();
         var parameters = new PilotParameter[paramNames.Count];
         for (int i = 0; i < paramNames.Count; i++)

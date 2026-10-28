@@ -1,0 +1,33 @@
+// =============================================================================
+// Showcase 17: Concise Modern Null-Safety System (`T?` Optionals, Zero NREs)
+// =============================================================================
+
+record Account(id: int, username: str, email: str?, tier: str?)
+
+def render_badge(acct: Account?) -> str {
+    // 1. In-place `guard some` narrowing without `let acct = acct` repetition
+    guard some acct else {
+        return "[Guest]"
+    }
+
+    // 2. Null-coalescing (`??`) + safe navigation (`?.`)
+    let badge_tier = acct.tier?.ToUpper() ?? "STANDARD"
+
+    // 3. Concise `if some` binding
+    if some mail = acct.email {
+        return f"[{badge_tier}] {acct.username} <{mail}>"
+    }
+    return f"[{badge_tier}] {acct.username}"
+}
+
+let a1: Account? = Account(101, "maverick", "mav@topgun.dev", "pro")
+let a2: Account? = Account(102, "iceman", none, none)
+
+assert(render_badge(a1) == "[PRO] maverick <mav@topgun.dev>")
+assert(render_badge(a2) == "[STANDARD] iceman")
+assert(render_badge(none) == "[Guest]")
+assert(sizeof_type("Account?") == sizeof_type("Account"))
+
+println(render_badge(a1))
+println(render_badge(a2))
+println(render_badge(none))

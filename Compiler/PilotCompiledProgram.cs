@@ -22,14 +22,27 @@ public sealed class PilotCompiledProgram : IPilotProgram
     public const uint MagicHeader = 0x434C4950; // 'PILC' in little-endian
     private const byte VersionLegacyV1 = 1;
     private const byte CurrentFormatVersion = 2;
+    private const int CompilerVersionFooterMarker = 0x52455650; // 'PVER' in little-endian
     private static readonly PilotEngine SharedEngine = new();
 
     public string Source { get; }
     public string? FilePath { get; }
     public DateTime CompiledAt { get; }
+    public string CompilerVersion { get; }
     public IReadOnlyList<string> DefinedSymbols { get; }
     public Pilot.Runtime.Bytecode.PilotBytecodeChunk? BytecodeChunk { get; set; }
     public IReadOnlyDictionary<string, string>? GeneratedSources { get; set; }
+
+    /// <summary>
+    /// True if this compiled binary was built by the exact same commit version of Pilot currently running.
+    /// </summary>
+    public bool IsVersionMatched => string.IsNullOrEmpty(CompilerVersion) || PilotVersion.IsExactMatch(CompilerVersion);
+
+    /// <summary>
+    /// Checks whether this compiled binary's embedded compiler version matches the currently running Pilot commit version.
+    /// </summary>
+    public bool CheckVersionCompatibility(out string? mismatchMessage) =>
+        PilotVersion.CheckCompatibility(CompilerVersion, $"compiled binary '{FilePath ?? "<memory>"}'", out mismatchMessage);
 
     private PilotParser.ProgramContext? _programTree;
     public PilotParser.ProgramContext ProgramTree
@@ -57,12 +70,14 @@ public sealed class PilotCompiledProgram : IPilotProgram
         string? filePath = null,
         DateTime? compiledAt = null,
         IEnumerable<string>? definedSymbols = null,
-        Pilot.Runtime.Bytecode.PilotBytecodeChunk? bytecodeChunk = null)
+        Pilot.Runtime.Bytecode.PilotBytecodeChunk? bytecodeChunk = null,
+        string? compilerVersion = null)
     {
         Source = source ?? string.Empty;
         _programTree = programTree;
         FilePath = filePath;
         CompiledAt = compiledAt ?? DateTime.UtcNow;
+        CompilerVersion = string.IsNullOrWhiteSpace(compilerVersion) ? PilotVersion.FullVersion : compilerVersion;
         DefinedSymbols = definedSymbols != null ? new List<string>(definedSymbols) : Array.Empty<string>();
         BytecodeChunk = bytecodeChunk;
     }
@@ -229,6 +244,10 @@ public sealed class PilotCompiledProgram : IPilotProgram
         {
             BytecodeChunk!.Write(writer);
         }
+
+        // Write compiler commit version footer for strict version mismatch detection
+        writer.Write(CompilerVersionFooterMarker);
+        writer.Write(CompilerVersion);
     }
 
     public void Save(string filePath)
@@ -289,6 +308,35 @@ public sealed class PilotCompiledProgram : IPilotProgram
             }
         }
 
+        string? compilerVersion = null;
+        if (reader.BaseStream.CanSeek && reader.BaseStream.Position + 4 <= reader.BaseStream.Length)
+        {
+            long pos = reader.BaseStream.Position;
+            int footerMarker = reader.ReadInt32();
+            if (footerMarker == CompilerVersionFooterMarker)
+            {
+                compilerVersion = reader.ReadString();
+            }
+            else
+            {
+                reader.BaseStream.Position = pos;
+            }
+        }
+        else if (!reader.BaseStream.CanSeek)
+        {
+            try
+            {
+                int footerMarker = reader.ReadInt32();
+                if (footerMarker == CompilerVersionFooterMarker)
+                {
+                    compilerVersion = reader.ReadString();
+                }
+            }
+            catch (EndOfStreamException)
+            {
+            }
+        }
+
         PilotParser.ProgramContext? tree = null;
         if (bytecodeChunk == null && !string.IsNullOrEmpty(source))
         {
@@ -308,7 +356,7 @@ public sealed class PilotCompiledProgram : IPilotProgram
             }
         }
 
-        return new PilotCompiledProgram(source, tree, string.IsNullOrEmpty(filePath) ? null : filePath, compiledAt, symbols, bytecodeChunk);
+        return new PilotCompiledProgram(source, tree, string.IsNullOrEmpty(filePath) ? null : filePath, compiledAt, symbols, bytecodeChunk, compilerVersion);
     }
 
     public static PilotCompiledProgram Load(string filePath)
@@ -323,7 +371,7 @@ public sealed class PilotCompiledProgram : IPilotProgram
         var loaded = Load(ms);
         if (!string.IsNullOrEmpty(filePath) && string.IsNullOrEmpty(loaded.FilePath))
         {
-            return new PilotCompiledProgram(loaded.Source, loaded.ProgramTree, filePath, loaded.CompiledAt, loaded.DefinedSymbols);
+            return new PilotCompiledProgram(loaded.Source, loaded.ProgramTree, filePath, loaded.CompiledAt, loaded.DefinedSymbols, loaded.BytecodeChunk, loaded.CompilerVersion);
         }
         return loaded;
     }

@@ -79,11 +79,11 @@ flowchart TD
 | **M9** | Language Server Protocol (LSP), Diagnostic Catalog & VS Code Extension | Core | ✅ **Completed** | `Pilot.LanguageServer/`, `vscode-pilot/` |
 | **M10** | Exhaustive Reference Manuals & 15 Interactive Visual Showcases | Core | ✅ **Completed** | `docs/`, `examples/showcase/`, `README.md` |
 | **M11** | Exhaustive Pattern Matching & Algebraic Data Types (ADTs) | Phase A | ✅ **Completed** | `antlr/Pilot.g4`, `Analysis/PatternMatching/`, `Runtime/Values/`, `Compiler/` |
-| **M12** | Concise Modern Null-Safety (`T?` Optionals, Zero `NullReferenceException`) | Phase A | 🎯 **Next Up** | `Analysis/TypeSystem/`, `Runtime/Values/`, `Compiler/` |
-| **M13** | Values-First Error System (Transparent, Localized, Must-Use `T ! E`) | Phase A | 📋 **Planned** | `antlr/Pilot.g4`, `Analysis/ErrorFlow/`, `Runtime/Execution/` |
-| **M14** | Unified Expression Ergonomics, Class-Like Literals & Zero-Cost `extend` | Phase A | 📋 **Planned** | `antlr/Pilot.g4`, `Runtime/Values/PilotValue.cs`, `Compiler/` |
-| **M15** | Dynamic-Schedule `for` Expressions & Zero-Marshalling C-ABI Guarantees | Phase A | 📋 **Planned** | `antlr/Pilot.g4`, `Analysis/`, `Runtime/NativeMemory/`, `Native/` |
-| **M16** | Advanced Type Inference (Bidirectional, Flow-Narrowing & Row Polymorphism) | Phase B | 📋 **Planned** | `Analysis/TypeSystem/`, `Pilot.LanguageServer/` |
+| **M12** | Concise Modern Null-Safety (`T?` Optionals, Zero `NullReferenceException`) | Phase A | ✅ **Completed** | `Analysis/TypeSystem/`, `Runtime/Values/`, `Compiler/` |
+| **M13** | Values-First Error System (Transparent, Localized, Must-Use `T ! E`) | Phase A | ✅ **Completed** | `antlr/Pilot.g4`, `Analysis/TypeSystem/`, `Runtime/Execution/` |
+| **M14** | Unified Expression Ergonomics, Class-Like Literals & Zero-Cost `extend` | Phase A | ✅ **Completed** | `antlr/Pilot.g4`, `Runtime/Values/PilotValue.cs`, `Compiler/` |
+| **M15** | Dynamic-Schedule `for` Expressions & Zero-Marshalling C-ABI Guarantees | Phase A | ✅ **Completed** | `antlr/Pilot.g4`, `Analysis/Loops/`, `Runtime/NativeMemory/`, `Native/` |
+| **M16** | Advanced Type Inference (Bidirectional, Flow-Narrowing & Row Polymorphism) | Phase B | 🎯 **Next Up** | `Analysis/TypeSystem/`, `Pilot.LanguageServer/` |
 | **M17** | First-Class Keywords, Reified Forms & Core Call-Quoting (`:kw`, `!`, `!!`, `~`, `!&`) | Phase B | 📋 **Planned** | `Runtime/Values/PilotKeyword.cs`, `Analysis/CallQuoting/`, `Native/` |
 | **M18** | Semantic Call Projections: Signals (`!^`), Autodiff (`!@`) & Dry-Runs (`!?`) | Phase B | 📋 **Planned** | `Analysis/Autodiff/`, `Runtime/Reactive/`, `Runtime/Effects/` |
 | **M19** | Rigorous Runtime-to-Compile-Time Demotion & `comptime` Audit | Phase B | 📋 **Planned** | `Analysis/Comptime/`, `Compiler/`, `Transpilation/PilotOptimizer.cs` |
@@ -124,9 +124,9 @@ To parallelize work across sessions, branches, or subagents **without dependency
 | :--- | :--- | :--- |
 | **`M11`** (ADTs & Exhaustive `match`) | `M1`–`M10` *(✅ Completed)* | `M22.1`/`M22.4` (Core DAP/Gutter UI), `M27` (Architecture RFC) |
 | **`M12`** (Null-Safety `T?`) | `M11` *(✅ Completed)* | `M22.1`/`M22.4`, `M27` (RFC) |
-| **`M13`** (Values-First Errors `T ! E`) | `M11`, `M12` | **`M15`** |
-| **`M14`** (Literals, `extend`, `?.`, Expr Flow) | `M11`, `M12`, `M13` | **`M15`** |
-| **`M15`** (Dynamic `for` & Zero-Marshalling C-ABI) | `M11`, `M12` | **`M13`**, **`M14`** |
+| **`M13`** (Values-First Errors `T ! E`) | `M11`, `M12` *(✅ Completed)* | **`M15`** |
+| **`M14`** (Literals, `extend`, `?.`, Expr Flow) | `M11`, `M12` *(✅ Completed)*, `M13` | **`M15`** |
+| **`M15`** (Dynamic `for` & Zero-Marshalling C-ABI) | `M11`, `M12` *(✅ Completed)* | **`M13`**, **`M14`** |
 | **`M16`** (Advanced Type Inference) | `M11`, `M12`, `M13`, `M14`, `M15` | `M20.4` *(optional early foreign-AST parser prototyping)*, `M22.1`/`M22.4` |
 | **`M17`** (Keywords & Core Call-Quoting) | `M11`–`M16` | `M20.4` *(foreign-AST parser prototyping)*, `M22.1`/`M22.4` |
 | **`M18`** (`!^`, `!@`, `!?` Projections) | `M11`–`M17` | Internal 3-way split (`18.1` $\parallel$ `18.2` $\parallel$ `18.3`) |
@@ -266,17 +266,17 @@ Every modern safety and metaprogramming construct in Pilot—Optionals `T?` (`M1
 
 ---
 
-## Milestone 12: Concise Modern Null-Safety System (`T?` Optionals, Zero `NullReferenceException`)
+## Milestone 12: Concise Modern Null-Safety System (`T?` Optionals, Zero `NullReferenceException`) — ✅ Completed
 **Goal**: Eliminate `NullReferenceException`s across Pilot at compile time using an algebraic optional model (`some(T) | none`) that is **far more concise and effortless** than verbose `Something(x)` / `Nothing` wrapper ceremony.
 
 ### Why This Sits Here (Logical Flow)
 Built directly atop `M11`'s sum-type representation and exhaustiveness checker, `M12` establishes `T?` before `M13` (Error System), `M14` (Primitive Methods like `"42".ToInt() -> int?`), and `M15` (`ScalarBreak` loop without `else` returning `T?`).
 
 ### Sub-Tasks & Deliverables
-- [ ] **12.1: Non-Nullable by Default & Removal of Unsafe `x!` (`NULL001`–`NULL005`)**
+- [x] **12.1: Non-Nullable by Default & Removal of Unsafe `x!` (`NULL001`–`NULL005`)**
   - Every standard Pilot type (`int`, `str`, `User`, `f64[]`) is **strictly non-nullable**. Assigning `none` / `null` to `T` emits **`NULL001`**; accessing members on `T?` without narrowing or `?.` emits **`NULL002`**.
-  - **Grammar Cleanup**: Remove the unchecked postfix `EXCLAMATION` non-null assertion from `trailer` in `antlr/Pilot.g4` (resolving Conflict #1 and guaranteeing no silent runtime null crashes; explicit `.OrPanic("msg")` is provided for deliberate invariant traps).
-- [ ] **12.2: Effortless `T?` Ergonomics (Implicit Lifting + `none` + Zero-Repetition `some` Narrowing)**
+  - **Grammar Cleanup**: Removed the unchecked postfix `EXCLAMATION` non-null assertion from `trailer` in `antlr/Pilot.g4` (resolving Conflict #1 and guaranteeing no silent runtime null crashes; explicit `.OrPanic("msg")` is provided for deliberate invariant traps).
+- [x] **12.2: Effortless `T?` Ergonomics (Implicit Lifting + `none` + Zero-Repetition `some` Narrowing)**
   - `T?` is canonical syntax for `Option[T]` (`some(T) | none`):
     - **Implicit Value Lifting**: Any `T` value implicitly lifts to `T?` on assignment, argument passing, or `return` (`let nickname: str? = "Maverick";`, `let empty: str? = none;`)—zero `Something(...)` wrapper noise in everyday code (explicit `some(x)` remains available for nested `T??` disambiguation and `match` patterns).
     - **Concise In-Place Presence Narrowing (`some x` & `!= none`)**: Without overloading postfix `?` (preserving Conflict Resolution #2), `if some nickname { ... }` and `guard some nickname else { return; }` test presence and narrow `nickname` in-place from `str?` to non-null `str`:
@@ -293,11 +293,12 @@ Built directly atop `M11`'s sum-type representation and exhaustiveness checker, 
       let port: int = env_port ?? 8080;
       cached_session ??= open_session();
       ```
-- [ ] **12.3: Zero-Allocation Niche Memory Optimization**
-  - Reference types, classes, non-null pointers, and non-zero handles exploit the `0x0` bit-pattern niche for `none` (`sizeof(User?) == sizeof(User)`, 0 heap wrapper allocations).
-  - Unboxed value primitives (`int?`, `f64?`, `bool?`) live inline in stack/register slots (`PilotValue` tag bit in PilVM; sequential `{ T value, u8 has_value }` in C-ABI).
-- [ ] **12.4: Foreign Interop & SQL Null-Boundary Hardening**
-  - Automatically surface nullable C pointers, unannotated/nullable .NET/Python/JS FFI returns, and nullable SQL columns as `T?` at interop boundaries.
+- [x] **12.3: Zero-Allocation Niche Memory Optimization**
+  - Reference types, classes, non-null pointers, strings, `bool`, enums, and records with niche-carrying fields exploit bit-pattern niches for `none` (`sizeof(User?) == sizeof(User)` and `sizeof(str?) == sizeof(str)`, 0 heap wrapper allocations).
+  - Unboxed value primitives (`int?`, `f64?`, `bool?`) and nested `some(none)` live inline in stack/register slots (`PilotValue` tag/depth in PilVM; sequential `{ T value, u8 has_value }` in C-ABI).
+- [x] **12.4: Foreign Interop & SQL Null-Boundary Hardening**
+  - Automatically surface nullable C pointers, unannotated/nullable .NET/Python/JS FFI returns, and nullable SQL columns as `T?` at interop boundaries (`PilotNullSafetyAnalyzer`, `PolyglotTypeBridge`).
+  - **Verification**: 12/12 unit & integration tests passing in `Pilot.Tests/PilotNullSafetyTests.cs`, `tests/29_null_safety_and_optionals.pilot`, and `examples/showcase/17_modern_null_safety.pilot`.
 
 ---
 
@@ -308,7 +309,7 @@ Built directly atop `M11`'s sum-type representation and exhaustiveness checker, 
 Built on `M11` ADTs and `M12` `T?` optionals, `M13` completes Pilot's core return-type algebra (`(T?) ! E`) before `M14` defines fallible primitive/extension methods and `M21` builds `stdlib/` I/O APIs.
 
 ### Sub-Tasks & Deliverables
-- [ ] **13.1: Fallible Return Type Grammar (`T ! E` and Inferred Error Sets `T!`)**
+- [x] **13.1: Fallible Return Type Grammar (`T ! E` and Inferred Error Sets `T!`)**
   - Add `fallible_type : union_type (EXCLAMATION union_type)?` at the top of `type_spec` in `antlr/Pilot.g4` (so `User? ! IoError | ParseError` parses cleanly as `(User?) ! (IoError | ParseError)`).
   - Allow functions to declare `-> T ! E` explicitly or `-> T!` (where the compiler infers the closed union of all `fail(...)` variants returned in the body):
     ```pilot
@@ -325,7 +326,7 @@ Built on `M11` ADTs and `M12` `T?` optionals, `M13` completes Pilot's core retur
     }
     ```
   - **Zero-Unwinding Register ABI**: Lower `T ! E` to `{ u8 is_ok; union { T ok; E err } }` returned directly in CPU registers / PilVM stack slots (0 stack-trace allocations, 0 unwinding tables, `@hard_realtime` WCET-safe).
-- [ ] **13.2: Universal Postfix `?` Propagation & Localized Call-Site `catch` Recovery**
+- [x] **13.2: Universal Postfix `?` Propagation & Localized Call-Site `catch` Recovery**
   - **Postfix `?` Operator**: Works uniformly on `T ! E` (unwraps `T` or returns `fail(adapted_err)` via registered error `adapter`s) and on `T?` inside `U?`-returning functions (unwraps `T` or returns `none`).
   - **Inline `catch` & `guard ... catch`**: Recover, fallback, or transform errors right at the call site without nested `try` blocks:
     ```pilot
@@ -344,21 +345,21 @@ Built on `M11` ADTs and `M12` `T?` optionals, `M13` completes Pilot's core retur
         return;
     }
     ```
-- [ ] **13.3: Must-Use Enforcement & Unified Error Stratification (`ERR001`–`ERR005`)**
+- [x] **13.3: Must-Use Enforcement & Unified Error Stratification (`ERR001`–`ERR005`)**
   - **`ERR001` (Unhandled Error Return)**: Statement-level call to a `T ! E` function without `?`, `catch`, `match`, or explicit `ignore_err(...)` is a **hard compile-time error**—making errors impossible to accidentally ignore.
   - **`ERR002` / `ERR003`**: Partial `catch` narrowing shrinks the remaining error union statically.
   - **`ERR005` (Error Stratification Lint)**: Scope legacy `try`/`except`/`raise` strictly to polyglot FFI exception boundaries (`T ! ForeignError` adapters) and `isolate` fault supervisors, reserving `panic(...)` for unrecoverable invariant bugs.
 
 ---
 
-## Milestone 14: Unified Expression Ergonomics, Class-Like Primitive Literals & Zero-Cost Extensions
+## Milestone 14: Unified Expression Ergonomics, Class-Like Primitive Literals & Zero-Cost Extensions (✅ Completed)
 **Goal**: Unify **zero-cost class-like methods/properties on every primitive literal**, **module & generic `extend` declarations**, **deep optional chaining (`?.`, `?[]`, `?()`)**, and **expression-oriented control flow** into a single cohesive static-dispatch layer.
 
 ### Why These Were Merged Here (Granularity & Order Fix)
 Class-like primitive literal methods (`"hello world".Substring(0, 5)`, `42.Clamp(0, 100)`) and user `extend` methods share the **exact same unboxed static-dispatch architecture**, and primitive parsing/lookup methods (`"42".ToInt() -> int?`, `"hi".IndexOf("x") -> int?`) require `M12` (`T?`) and `M13` (`T ! E`) to already exist so they never resort to `-1` sentinels or exceptions.
 
 ### Sub-Tasks & Deliverables
-- [ ] **14.1: Zero-Cost Class-Like Methods & Properties on All Primitive Literals**
+- [x] **14.1: Zero-Cost Class-Like Methods & Properties on All Primitive Literals**
   - Allow every primitive literal and value type to be used directly like a rich class (`PascalCase` and `snake_case` aliases) while keeping `PilotValue` 100% unboxed:
     - **`str`**: `"hello world".Substring(0, 5)`, `.Split(" ")`, `.Replace("world", "Pilot")`, `.IndexOf("world") -> int?`, `.PadLeft(15)`, `.Trim()`, `.StartsWith(...)`, `.Chars()`, `.Lines()`, `.ToInt() -> int?`, `.ParseInt() -> int ! ParseError`.
     - **`int` (`i8`..`i64`, `u8`..`u64`)**: `42.Abs()`, `42.Clamp(0, 100)`, `255.ToHex()`, `42.ToBinary()`, `42.IsEven`, `42.IsOdd`, `2.Pow(10)`, `255.PopCount()`, `16.BitLength()`, `5.Times(i => println(i))`.
@@ -366,7 +367,7 @@ Class-like primitive literal methods (`"hello world".Substring(0, 5)`, `42.Clamp
     - **`bool` & `char`**: `true.Toggle()`, `flag.Select("On", "Off")`, `'a'.ToUpper()`, `'9'.IsDigit`, `'A'.CodePoint`.
     - **Dimensional Literals**: `250ms.ToMicroseconds()`, `50kHz.Period()`, `64KB.ToBytes()`.
   - **Unboxed Intrinsic Lowering**: Emit `OP_CALL_PRIM_INTRINSIC` in PilVM and inline LLVM/C instructions in native emitters with **zero delegate/wrapper heap allocation**.
-- [ ] **14.2: Ergonomic `extend` Methods, Computed Properties & Generic Extensions**
+- [x] **14.2: Ergonomic `extend` Methods, Computed Properties & Generic Extensions**
   - Support concise `extend Type { ... }` and constrained generic `extend[T: Numeric] T[] { ... }` alongside scoped `extension Name on Type` blocks, lowering statically to direct function calls (`TypeExt_Method(self, ...)`):
     ```pilot
     extend str {
@@ -378,9 +379,9 @@ Class-like primitive literal methods (`"hello world".Substring(0, 5)`, `42.Clamp
         def Mean() -> f64? => if self.Length == 0 { none } else { self.Sum().ToFloat() / self.Length };
     }
     ```
-- [ ] **14.3: Deep Single-Evaluation Optional Chaining (`?.`, `?[]`, `?()`)**
+- [x] **14.3: Deep Single-Evaluation Optional Chaining (`?.`, `?[]`, `?()`)**
   - Extend `SAFE_NAV` in `antlr/Pilot.g4` to cover member access (`order?.Customer?.City`), optional indexing (`items?[0]`), and optional callable invocation (`on_done?(res)`), short-circuiting to `none` in a single forward jump without re-evaluating receivers and composing cleanly with `??` and `?..` safe cascades.
-- [ ] **14.4: Unified Expression-Oriented Control Flow**
+- [x] **14.4: Unified Expression-Oriented Control Flow**
   - Promote `if` / `elif` / `else`, `match` (including shorthand `items.Map(match { case :a => 1, case :b => 2 })`), `{ stmt*; trailing_expr }` blocks, and `with context (...) { expr }` to first-class expressions in `antlr/Pilot.g4`, PilVM, and native emitters, plus fluent member piping (`raw |> .Trim() |> .Slugify()`).
 
 ---
@@ -392,9 +393,9 @@ Class-like primitive literal methods (`"hello world".Substring(0, 5)`, `42.Clamp
 `WorklistStack` (`RangeWindow<TIter>`) and `CollectionYield` (`SliceBuffer<T>`) are the exact runtime representations lowered by `ForExpr`. Unifying the loop specification and its C-ABI memory invariants into one atomic milestone guarantees zero rework.
 
 ### 15.1: Concrete Pilot Syntax, Range Tokens & Disambiguation (`antlr/Pilot.g4`)
-Add `ELLIPSIS : '...'` (above `DOTDOT_EQUAL` and `DOTDOT`) and `DOTDOT_LESS : '..<'` to `antlr/Pilot.g4`:
+Add `ELLIPSIS : '...'` (above `DOTDOT_EQUAL` and `DOTDOT`), `DOTDOT_LESS : '..<'`, and `THEN : 'then'` to `antlr/Pilot.g4`:
 ```ebnf
-ForExpr        ::= "for" ( "(" Identifier "in" RangeExpr ")" | Identifier "in" RangeExpr ) Suite ( "else" Expr )?
+ForExpr        ::= "for" ( "(" Identifier "in" RangeExpr ")" | Identifier "in" RangeExpr ) Suite ( "then" Expr )?
 RangeExpr      ::= Expr ( ".." | "..=" | "..<" ) Expr       (* ".." / "..=" inclusive; "..<" half-open *)
 
 ContinueStmt   ::= "continue" ( RangeExpr ( "," "..." )? )? ";"?
@@ -406,7 +407,8 @@ YieldStmt      ::= "yield" Expr ";"?
 2. `continue <RangeExpr>;` — **Destructive range pivot** (`MutableBounds`: overwrites active registers in-place, 0 allocations).
 3. `continue <RangeExpr>, ...;` — **Resumable sub-loop prepend** (`WorklistStack`: pushes remaining unvisited range onto LIFO `RangeWindow<TIter>` worklist, then pivots active registers to `<RangeExpr>`).
 4. `break;` vs `break <Expr>;` — Valued `break <Expr>;` exits the loop returning `<Expr>` (`ScalarBreak`).
-5. `yield <Expr>;` — When `ForExpr` is in **expression position**, appends `<Expr>` to the loop's `CollectionYield` buffer; when `for` is in **statement (`Void`) position**, delegates to the enclosing generator `def` coroutine (preserving 100% backward compatibility with `M1`/`M3` generators; emits `LOOP004` if outside a generator).
+5. `then <Expr>` — Post-completion branch executed when the loop completes all iterations without an early `break` ("complete the loop and then move on").
+6. `yield <Expr>;` — When `ForExpr` is in **expression position**, appends `<Expr>` to the loop's `CollectionYield` buffer; when `for` is in **statement (`Void`) position**, delegates to the enclosing generator `def` coroutine (preserving 100% backward compatibility with `M1`/`M3` generators; emits `LOOP004` if outside a generator).
 
 ### 15.2: AST Nodes, Single-Pass Scoped Inference & Diagnostics (`LOOP001`–`LOOP004`)
 ```csharp
@@ -415,9 +417,9 @@ public enum LoopReturnMode   { Void, ScalarBreak, CollectionYield }
 ```
 - Walk `Body` **stopping at nested `ForExpr` boundaries** so inner loop statements never pollute outer loop inference:
   - **Schedule Inference**: Any `continue range, ...` $\rightarrow$ `WorklistStack`; else any `continue range` $\rightarrow$ `MutableBounds`; else `FixedScalar`.
-  - **Return Inference**: Expression-position `yield expr` $\rightarrow$ `CollectionYield` (`T[]` / `SliceBuffer<T>`); `break expr` + `else expr` $\rightarrow$ `ScalarBreak` (`T | U`); `break expr` without `else` $\rightarrow$ `ScalarBreak` (`T?`, defaults to `none`); neither $\rightarrow$ `Void`.
+  - **Return Inference**: Expression-position `yield expr` $\rightarrow$ `CollectionYield` (`T[]` / `SliceBuffer<T>`); `break expr` + `then expr` $\rightarrow$ `ScalarBreak` (`T | U`); `break expr` without `then` $\rightarrow$ `ScalarBreak` (`T?`, defaults to `none`); neither $\rightarrow$ `Void`.
   - **`CanPreallocateYieldArray`**: `true` iff `ScheduleMode == FixedScalar`, single top-level unconditional `yield`, and no `break`/`continue`—pre-allocating exact length `max(0, end - start + 1)` (for `..`) or `max(0, end - start)` (for `..<`).
-  - **Diagnostics**: **`LOOP001`** (cannot mix `break <expr>` and `yield <expr>`), **`LOOP002`** (cannot mix `break;` and `break <expr>;`), **`LOOP003`** (`else` branch only valid with `ScalarBreak`), **`LOOP004`** (`yield` in statement-position `for` outside generator).
+  - **Diagnostics**: **`LOOP001`** (cannot mix `break <expr>` and `yield <expr>`), **`LOOP002`** (cannot mix `break;` and `break <expr>;`), **`LOOP003`** (`then` branch only valid with `ScalarBreak`), **`LOOP004`** (`yield` in statement-position `for` outside generator).
 
 ### 15.3: Zero-Marshalling & Cross-Language C-ABI Guarantees
 To ensure loop state, input buffers, and yielded collections can be shared across FFI, IPC (`mmap`), and multi-language polyglot runtimes (C, C#, Rust, Zig, Python `memoryview`) with **zero marshalling or copying**, enforce the following lowering invariants:
@@ -454,7 +456,7 @@ public unsafe struct SliceBuffer<T> where T : unmanaged
 ```
 
 ### 15.4: Canonical Acceptance Suite
-- [ ] Verify all 5 loop acceptance cases (`Standard Fixed Yield`, `Destructive Pivot`, `Resumable Worklist`, `Scalar Break + Else`, `Nested Scope Isolation`) + C-ABI `sizeof(RangeWindow<int>) == 8` and `sizeof(SliceBuffer<float>) == 24` layout invariants in `Pilot.Tests/PilotDynamicForExpressionTests.cs`.
+- [x] Verify all 5 loop acceptance cases (`Standard Fixed Yield`, `Destructive Pivot`, `Resumable Worklist`, `Scalar Break + Then`, `Nested Scope Isolation`) + C-ABI `sizeof(RangeWindow<int>) == 8` and `sizeof(SliceBuffer<float>) == 24` layout invariants in `Pilot.Tests/PilotDynamicForExpressionTests.cs`.
 
 ---
 

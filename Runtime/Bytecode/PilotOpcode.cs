@@ -221,5 +221,46 @@ public enum PilotOpcode : byte
     /// <summary>
     /// Pops a value; pushes True if it is a Record whose type name equals IdentifierPool[Operand]; otherwise pushes False.
     /// </summary>
-    CheckRecordType
+    CheckRecordType,
+
+    // =========================================================================
+    // Milestone 13: Values-First Error System (T ! E) & Postfix `?` Opcodes
+    // =========================================================================
+
+    /// <summary>
+    /// Pops a value; if it is a `PilotValueKind.Failure`, adapts the error via the current function's
+    /// declared error type and returns immediately from the current frame (zero unwinding).
+    /// If it is `Null`/`Undefined` (`none`), returns `PilotValue.Null` immediately from the current frame.
+    /// Otherwise pushes `val.UnwrapOption()` onto the stack.
+    /// </summary>
+    TryPropagate,
+
+    /// <summary>
+    /// Pops a value; jumps to Operand if `val.IsFailure`.
+    /// </summary>
+    JumpIfFailure,
+
+    /// <summary>
+    /// Pops a value; jumps to Operand if `!val.IsFailure`.
+    /// </summary>
+    JumpIfNotFailure,
+
+    // =========================================================================
+    // Milestone 14: Unboxed Primitive Intrinsics & Deep Optional Chaining
+    // =========================================================================
+
+    /// <summary>
+    /// Calls a primitive or collection intrinsic directly on an unboxed stack value
+    /// with zero delegate or wrapper allocation (`OP_CALL_PRIM_INTRINSIC`).
+    /// Operand: identifier pool index (method name), Extra: argument count.
+    /// </summary>
+    CallPrimIntrinsic,
+
+    /// <summary>
+    /// Peeks the top value on the stack; if it is `Null` or `Undefined`, replaces top-of-stack
+    /// with `PilotValue.Null` (`none`) and jumps to Operand (short-circuiting the remainder of
+    /// a deep `?.` / `?[]` / `?()` optional chain in a single jump).
+    /// If present, unwraps one `Option` layer in-place and continues.
+    /// </summary>
+    JumpIfNullShortCircuit
 }

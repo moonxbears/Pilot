@@ -738,7 +738,7 @@ public static partial class PilotPreprocessor
 
     private static readonly HashSet<string> BlockKeywords = new(StringComparer.Ordinal)
     {
-        "if", "elif", "else", "while", "for", "def", "fn", "func", "class", "struct",
+        "if", "elif", "else", "then", "while", "for", "def", "fn", "func", "class", "struct",
         "interface", "protocol", "actor", "state", "enum", "try", "catch", "except", "finally",
         "with", "guard", "defer", "match", "case", "default", "select", "periodic",
         "deadline", "within", "noalloc", "region", "spawn", "atomic", "sync", "lock",

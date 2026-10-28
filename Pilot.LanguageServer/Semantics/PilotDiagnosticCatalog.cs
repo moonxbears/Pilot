@@ -159,6 +159,32 @@ public static class PilotDiagnosticCatalog
     public const string MatchNonExhaustive = "MATCH001";
     public const string MatchRedundantArm = "MATCH002";
 
+    // =========================================================================
+    // NULL Series: Concise Modern Null-Safety System (Milestone 12)
+    // =========================================================================
+    public const string NullAssignedToNonNullable = "NULL001";
+    public const string UncheckedOptionalAccess = "NULL002";
+    public const string NullReturnedFromNonNullable = "NULL003";
+    public const string NullArgumentToNonNullable = "NULL004";
+    public const string UnsafeNonNullAssertionRemoved = "NULL005";
+
+    // =========================================================================
+    // ERR Series: Values-First Error System T ! E (Milestone 13)
+    // =========================================================================
+    public const string UnhandledErrorReturn = "ERR001";
+    public const string IncompatibleErrorPropagation = "ERR002";
+    public const string NonExhaustiveCatchRecovery = "ERR003";
+    public const string InvalidFailReturn = "ERR004";
+    public const string ErrorStratificationLint = "ERR005";
+
+    // =========================================================================
+    // LOOP Series: Dynamic-Schedule & Expression-Oriented For Loops (Milestone 15)
+    // =========================================================================
+    public const string MixedBreakAndYieldInForLoop = "LOOP001";
+    public const string MixedVoidAndValuedBreakInForLoop = "LOOP002";
+    public const string InvalidForLoopThenBranch = "LOOP003";
+    public const string YieldInStatementForLoopOutsideGenerator = "LOOP004";
+
     private static readonly Dictionary<string, PilotDiagnosticDescriptor> Descriptors = new(StringComparer.Ordinal);
 
     static PilotDiagnosticCatalog()
@@ -246,6 +272,26 @@ public static class PilotDiagnosticCatalog
         Register(new(SuggestVectorized, "Suggest vectorized kernel", "Quality", PilotDiagnosticSeverity.Hint, "Loop over numeric collection '{0}' can be accelerated using '@vectorized'", "Element-wise arithmetic loops can run on SIMD hardware kernels.", "Add '@vectorized' attribute"));
         Register(new(MatchNonExhaustive, "Non-exhaustive pattern match", "PatternMatching", PilotDiagnosticSeverity.Error, "Non-exhaustive match. Missing pattern: {0}", "Maranget usefulness matrix verification proved that one or more values of the scrutinee type are not covered by any unguarded match arm.", "Add missing match arm"));
         Register(new(MatchRedundantArm, "Unreachable / subsumed match arm", "PatternMatching", PilotDiagnosticSeverity.Warning, "Unreachable match arm: pattern '{0}' is completely subsumed by prior unguarded arms", "Prior unguarded match arms already cover every possible value matched by this arm.", "Remove unreachable match arm"));
+
+        // NULL Series: Milestone 12 Concise Modern Null-Safety
+        Register(new(NullAssignedToNonNullable, "Null or optional assigned to non-nullable type", "NullSafety", PilotDiagnosticSeverity.Error, "Cannot assign '{0}' to non-nullable type '{1}'. Change type to '{1}?' or provide a fallback with '??'.", "All standard Pilot types are strictly non-nullable by default; use 'T?' ('Option[T]') for optional values.", "Change type annotation to 'T?'"));
+        Register(new(UncheckedOptionalAccess, "Unchecked member or index access on optional T?", "NullSafety", PilotDiagnosticSeverity.Error, "Cannot access '{0}' on optional expression '{1}' of type '{2}' without narrowing ('guard some', 'if some', '!= none') or safe navigation ('?.').", "Direct member access, indexing, or invocation on an unnarrowed optional 'T?' is rejected at compile time to eliminate NullReferenceException.", "Use safe navigation '?.' or narrow with 'guard some'"));
+        Register(new(NullReturnedFromNonNullable, "Null or optional returned from non-nullable function", "NullSafety", PilotDiagnosticSeverity.Error, "Cannot return '{0}' from function '{1}' with non-nullable return type '{2}'.", "Functions declaring a non-nullable return type 'T' cannot return 'none'/'null' or an unnarrowed optional 'T?'.", "Change return type to 'T?' or narrow before returning"));
+        Register(new(NullArgumentToNonNullable, "Null or optional argument passed to non-nullable parameter", "NullSafety", PilotDiagnosticSeverity.Error, "Cannot pass '{0}' to non-nullable parameter '{1}: {2}' of '{3}'.", "Passing 'none'/'null' or an unnarrowed optional 'T?' to a non-nullable parameter is rejected at compile time.", "Provide fallback with '??' or narrow argument first"));
+        Register(new(UnsafeNonNullAssertionRemoved, "Unchecked postfix x! assertion is forbidden", "NullSafety", PilotDiagnosticSeverity.Error, "Unchecked postfix non-null assertion '{0}!' is forbidden in Pilot. Use 'guard some {0} else', '??', or explicit '{0}.OrPanic(\"reason\")'.", "Pilot removes unsafe postfix 'x!' assertions in favor of flow-sensitive narrowing ('guard some x else') or explicit '.OrPanic(\"reason\")'.", "Replace '!' with '.OrPanic(\"reason\")'"));
+
+        // ERR Series: Milestone 13 Values-First Error System (T ! E)
+        Register(new(UnhandledErrorReturn, "Unhandled fallible return value (must-use T ! E)", "ErrorHandling", PilotDiagnosticSeverity.Error, "Must-use error return: expression '{0}' returns fallible type '{1}' and cannot be ignored.", "Statement-level calls to fallible 'T ! E' functions must be handled via '?', 'catch', 'guard ... catch', 'match', assignment, or 'ignore_err(...)'.", "Add '?' propagation or 'catch' recovery"));
+        Register(new(IncompatibleErrorPropagation, "Incompatible '?' error propagation or missing error adapter", "ErrorHandling", PilotDiagnosticSeverity.Error, "Cannot propagate error type '{0}' from '{1}?' into function '{2}' returning '{3}'.", "Postfix '?' requires the enclosing function to return a compatible fallible 'T ! E' type or declare an 'adapter E1 -> E2'.", "Declare 'adapter E1 -> E2' or widen return error union"));
+        Register(new(NonExhaustiveCatchRecovery, "Non-exhaustive 'catch' error recovery", "ErrorHandling", PilotDiagnosticSeverity.Error, "Non-exhaustive 'catch' error recovery on '{0}' (error set '{1}'): unhandled error variant(s): {2}.", "A 'catch err => match err' recovery block must either handle all error variants in 'E' or re-propagate remaining variants via 'fail(err)'.", "Add missing error variant arm"));
+        Register(new(InvalidFailReturn, "Invalid 'fail(...)' return or fallible return type mismatch", "ErrorHandling", PilotDiagnosticSeverity.Error, "Cannot return '{0}' from function '{1}' with return type '{2}'.", "Returning 'fail(err)' is only permitted inside fallible 'T ! E' or 'T!' functions whose error set covers 'err'.", "Change function return type to 'T ! E' or 'T!'"));
+        Register(new(ErrorStratificationLint, "Legacy try/except/raise in native Pilot code", "ErrorHandling", PilotDiagnosticSeverity.Warning, "Error stratification lint: legacy '{0}' is discouraged in native Pilot code; use values-first 'T ! E' return errors with '?' / 'catch' for recoverable errors, 'panic(...)' for invariant bugs, or scope 'try/except' to FFI/isolate boundaries.", "Pilot stratifies recoverable errors into register-returned 'T ! E' values, panic(...) for invariant bugs, and isolates/FFI boundaries for foreign exceptions.", "Refactor to 'T ! E' return value"));
+
+        // LOOP Series: Milestone 15 Dynamic-Schedule & Expression-Oriented For Loops
+        Register(new(MixedBreakAndYieldInForLoop, "Cannot mix 'break <expr>' and 'yield <expr>' in same for loop", "ControlFlow", PilotDiagnosticSeverity.Error, "Cannot mix valued 'break <expr>' and 'yield <expr>' in the same 'for' loop.", "A 'for' expression must either exit early with a scalar value ('ScalarBreak') or accumulate elements ('CollectionYield'), not both.", "Use either 'break <expr>' or 'yield <expr>'"));
+        Register(new(MixedVoidAndValuedBreakInForLoop, "Cannot mix 'break;' and 'break <expr>;' in same for loop", "ControlFlow", PilotDiagnosticSeverity.Error, "Cannot mix valueless 'break;' and valued 'break <expr>;' in the same 'for' loop.", "All 'break' statements targeting a 'ScalarBreak' loop must provide a value expression.", "Provide a value for every 'break' in this loop"));
+        Register(new(InvalidForLoopThenBranch, "Loop completion 'then' branch is only valid with ScalarBreak", "ControlFlow", PilotDiagnosticSeverity.Error, "Loop completion 'then' branch is only valid on a ScalarBreak 'for' loop (containing 'break <expr>').", "A 'then <expr>' completion value branch provides the fallback scalar value when a loop finishes without 'break <expr>', and cannot be combined with 'CollectionYield' or 'Void' loops.", "Remove 'then' branch or use 'break <expr>'"));
+        Register(new(YieldInStatementForLoopOutsideGenerator, "'yield <expr>' in statement-position for loop outside generator", "ControlFlow", PilotDiagnosticSeverity.Error, "'yield <expr>' inside a statement-position 'for' loop is invalid outside of a generator function. Assign or return the 'for' expression to use CollectionYield.", "In statement position, 'yield' delegates to an enclosing coroutine generator 'def'. To build a collection from a 'for' loop, use the 'for' loop in an expression position.", "Assign the 'for' loop result to a variable"));
     }
 
     public static PilotDiagnosticDescriptor? GetDescriptor(string code) =>

@@ -790,6 +790,7 @@ internal sealed class PilotMatchBytecodeLowerer
         {
             var prevSuite = i > 0 ? suites[i - 1] : null;
             var (branchPat, isVar) = FindBranchPatternAndMutability(context, patterns, tests[i], prevSuite);
+            bool hasSome = Pilot.Runtime.Execution.PilotInterpreterVisitor.HasBranchSomeKeyword(context, tests[i], prevSuite);
             var branchGuard = FindBranchPatternGuard(guards, tests[i], suites[i]);
 
             if (branchPat != null)
@@ -803,15 +804,46 @@ internal sealed class PilotMatchBytecodeLowerer
                 _chunk.Emit(PilotOpcode.StoreLocal, scrutSlot);
 
                 var failJumps = new List<int>();
-                if (IsBareOptionalBindingPattern(branchPat))
+                if (hasSome || IsBareOptionalBindingPattern(branchPat))
                 {
                     _chunk.Emit(PilotOpcode.LoadLocal, scrutSlot);
                     failJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfNull));
+                }
+                if (hasSome)
+                {
+                    _chunk.Emit(PilotOpcode.LoadLocal, scrutSlot);
+                    _chunk.Emit(PilotOpcode.GetAdtField, 0, extra: 2);
+                    _chunk.Emit(PilotOpcode.StoreLocal, scrutSlot);
                 }
 
                 var staged = new Dictionary<string, StagedBinding>(StringComparer.Ordinal);
                 EmitPatternTest(branchPat, scrutSlot, staged, failJumps, defaultMutable: isVar);
                 EmitCommitWithOptionalGuard(staged, branchGuard?.test(), failJumps);
+
+                _compiler.Visit(suites[i]);
+                endJumps.Add(_chunk.EmitJump(PilotOpcode.Jump));
+
+                int nextIp = _chunk.InstructionCount;
+                foreach (int fj in failJumps) _chunk.PatchJump(fj, nextIp);
+            }
+            else if (hasSome)
+            {
+                bool prevDiscard = _compiler.DiscardExpressionResult;
+                _compiler.DiscardExpressionResult = false;
+                _compiler.Visit(tests[i]);
+                _compiler.DiscardExpressionResult = prevDiscard;
+
+                var failJumps = new List<int>();
+                failJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfNull));
+
+                if (branchGuard?.test() != null)
+                {
+                    bool prevGuardDiscard = _compiler.DiscardExpressionResult;
+                    _compiler.DiscardExpressionResult = false;
+                    _compiler.Visit(branchGuard.test());
+                    _compiler.DiscardExpressionResult = prevGuardDiscard;
+                    failJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfFalse));
+                }
 
                 _compiler.Visit(suites[i]);
                 endJumps.Add(_chunk.EmitJump(PilotOpcode.Jump));
@@ -846,7 +878,8 @@ internal sealed class PilotMatchBytecodeLowerer
 
     public void LowerWhileLetStmt(PilotParser.While_stmtContext context, int loopStart, List<int> exitJumps)
     {
-        var pat = context.pattern()!;
+        var pat = context.pattern();
+        bool hasSome = context.SOME() != null;
         bool isMutable = context.VAR() != null;
 
         bool prevDiscard = _compiler.DiscardExpressionResult;
@@ -854,13 +887,33 @@ internal sealed class PilotMatchBytecodeLowerer
         _compiler.Visit(context.test(0));
         _compiler.DiscardExpressionResult = prevDiscard;
 
+        if (pat == null)
+        {
+            exitJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfNull));
+            if (context.pattern_guard()?.test() != null)
+            {
+                bool prevGuard = _compiler.DiscardExpressionResult;
+                _compiler.DiscardExpressionResult = false;
+                _compiler.Visit(context.pattern_guard().test());
+                _compiler.DiscardExpressionResult = prevGuard;
+                exitJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfFalse));
+            }
+            return;
+        }
+
         int scrutSlot = _compiler.AllocateTempSlot("whilelet_scrut");
         _chunk.Emit(PilotOpcode.StoreLocal, scrutSlot);
 
-        if (IsBareOptionalBindingPattern(pat))
+        if (hasSome || IsBareOptionalBindingPattern(pat))
         {
             _chunk.Emit(PilotOpcode.LoadLocal, scrutSlot);
             exitJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfNull));
+        }
+        if (hasSome)
+        {
+            _chunk.Emit(PilotOpcode.LoadLocal, scrutSlot);
+            _chunk.Emit(PilotOpcode.GetAdtField, 0, extra: 2);
+            _chunk.Emit(PilotOpcode.StoreLocal, scrutSlot);
         }
 
         var staged = new Dictionary<string, StagedBinding>(StringComparer.Ordinal);
@@ -871,12 +924,37 @@ internal sealed class PilotMatchBytecodeLowerer
     public void LowerGuardStmt(PilotParser.Guard_stmtContext context)
     {
         var pat = context.pattern();
+        bool hasSome = context.SOME() != null;
         if (pat == null)
         {
             bool prevDiscard = _compiler.DiscardExpressionResult;
             _compiler.DiscardExpressionResult = false;
             _compiler.Visit(context.test());
             _compiler.DiscardExpressionResult = prevDiscard;
+
+            if (hasSome)
+            {
+                var someFailJumps = new List<int>();
+                someFailJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfNull));
+                if (context.pattern_guard()?.test() != null)
+                {
+                    bool prevGuard = _compiler.DiscardExpressionResult;
+                    _compiler.DiscardExpressionResult = false;
+                    _compiler.Visit(context.pattern_guard().test());
+                    _compiler.DiscardExpressionResult = prevGuard;
+                    someFailJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfFalse));
+                }
+                int somePassJump = _chunk.EmitJump(PilotOpcode.Jump);
+                int someElseIp = _chunk.InstructionCount;
+                foreach (int fj in someFailJumps) _chunk.PatchJump(fj, someElseIp);
+
+                bool prevSomeBodyDiscard = _compiler.DiscardExpressionResult;
+                _compiler.DiscardExpressionResult = true;
+                _compiler.Visit(context.suite());
+                _compiler.DiscardExpressionResult = prevSomeBodyDiscard;
+                _chunk.PatchJump(somePassJump);
+                return;
+            }
 
             int passJump = _chunk.EmitJump(PilotOpcode.JumpIfTrue);
             bool prevBodyDiscard = _compiler.DiscardExpressionResult;
@@ -888,19 +966,73 @@ internal sealed class PilotMatchBytecodeLowerer
         }
 
         bool isMutable = context.VAR() != null;
+        string? catchErrVarName = context.CATCH() != null ? context.identifier()?.GetText() : null;
+        PilotParser.BlockContext? trailingCatchBlock = null;
+        PilotParser.Coalesce_exprContext? guardCoalescePrefix = null;
+        PilotParser.Catch_clauseContext? guardTrailingCatch = null;
+
+        if (context.ELSE() == null && context.CATCH() == null && context.test() is { } tCtx)
+        {
+            var pipes = tCtx.pipe_expr();
+            if (pipes?.Length == 1 && tCtx.IF() == null)
+            {
+                var sqs = pipes[0].set_query_expr();
+                if (sqs?.Length == 1 && sqs[0].coalesce_expr()?.Length == 1)
+                {
+                    var coal = sqs[0].coalesce_expr(0);
+                    var catches = coal.catch_clause();
+                    if (catches != null && catches.Length > 0)
+                    {
+                        var lastCatch = catches[^1];
+                        if (lastCatch.FAT_ARROW() == null)
+                        {
+                            if (lastCatch.or_test() != null && context.suite() != null)
+                            {
+                                catchErrVarName = lastCatch.or_test().GetText().Trim();
+                                guardCoalescePrefix = coal;
+                                guardTrailingCatch = lastCatch;
+                            }
+                            else if (lastCatch.block() != null && context.suite() == null)
+                            {
+                                trailingCatchBlock = lastCatch.block();
+                                guardCoalescePrefix = coal;
+                                guardTrailingCatch = lastCatch;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        bool isCatchGuard = context.CATCH() != null || catchErrVarName != null || trailingCatchBlock != null;
         bool prev = _compiler.DiscardExpressionResult;
         _compiler.DiscardExpressionResult = false;
-        _compiler.Visit(context.test());
+        if (guardCoalescePrefix != null)
+        {
+            _compiler.CompileCoalesceExprPrefix(guardCoalescePrefix, guardTrailingCatch);
+        }
+        else
+        {
+            _compiler.Visit(context.test());
+        }
         _compiler.DiscardExpressionResult = prev;
 
         int scrutSlot = _compiler.AllocateTempSlot("guardlet_scrut");
         _chunk.Emit(PilotOpcode.StoreLocal, scrutSlot);
 
         var failJumps = new List<int>();
-        if (IsBareOptionalBindingPattern(pat))
+        if (hasSome || isCatchGuard || IsBareOptionalBindingPattern(pat))
         {
             _chunk.Emit(PilotOpcode.LoadLocal, scrutSlot);
             failJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfNull));
+            _chunk.Emit(PilotOpcode.LoadLocal, scrutSlot);
+            failJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfFailure));
+        }
+        if (hasSome)
+        {
+            _chunk.Emit(PilotOpcode.LoadLocal, scrutSlot);
+            _chunk.Emit(PilotOpcode.GetAdtField, 0, extra: 2);
+            _chunk.Emit(PilotOpcode.StoreLocal, scrutSlot);
         }
 
         var staged = new Dictionary<string, StagedBinding>(StringComparer.Ordinal);
@@ -911,9 +1043,26 @@ internal sealed class PilotMatchBytecodeLowerer
         int elseIp = _chunk.InstructionCount;
         foreach (int fj in failJumps) _chunk.PatchJump(fj, elseIp);
 
+        if (!string.IsNullOrEmpty(catchErrVarName) && catchErrVarName != "_")
+        {
+            _chunk.Emit(PilotOpcode.LoadLocal, scrutSlot);
+            _chunk.Emit(PilotOpcode.GetAdtField, 0, extra: 3);
+            _compiler.EmitStoreBinding(catchErrVarName, isMutable: false);
+        }
+
         bool prevSuiteDiscard = _compiler.DiscardExpressionResult;
         _compiler.DiscardExpressionResult = true;
-        _compiler.Visit(context.suite());
+        if (context.suite() != null)
+        {
+            _compiler.Visit(context.suite());
+        }
+        else if (trailingCatchBlock != null)
+        {
+            foreach (var st in trailingCatchBlock.stmt())
+            {
+                _compiler.Visit(st);
+            }
+        }
         _compiler.DiscardExpressionResult = prevSuiteDiscard;
 
         _chunk.PatchJump(okJump);
@@ -1368,6 +1517,95 @@ internal sealed class PilotMatchBytecodeLowerer
         {
             explicitParent = parts[0].GetText();
             targetName = parts[1].GetText();
+        }
+
+        // A0. Built-in Option `some(pat)` / `some x` pattern matching (Milestone 12)
+        if ((explicitParent == null || string.Equals(explicitParent, "Option", StringComparison.Ordinal)) &&
+            (string.Equals(targetName, "some", StringComparison.Ordinal) ||
+             (string.Equals(targetName, "Some", StringComparison.Ordinal) && !_compiler.TryResolveAdtVariant(explicitParent, targetName, out _, out _, out _))) &&
+            (hasParens || trailingId != null))
+        {
+            _chunk.Emit(PilotOpcode.LoadLocal, valSlot);
+            failJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfNull));
+
+            int unwrappedSlot = _compiler.AllocateTempSlot("opt_unwrap");
+            _chunk.Emit(PilotOpcode.LoadLocal, valSlot);
+            _chunk.Emit(PilotOpcode.GetAdtField, 0, extra: 2);
+            _chunk.Emit(PilotOpcode.StoreLocal, unwrappedSlot);
+
+            if (hasParens && patArgs != null && patArgs.Length == 1)
+            {
+                EmitPatternTest(patArgs[0].pattern(), unwrappedSlot, staged, failJumps, defaultMutable);
+            }
+            else if (hasParens && patArgs != null && patArgs.Length > 1)
+            {
+                failJumps.Add(_chunk.EmitJump(PilotOpcode.Jump));
+                return;
+            }
+
+            if (trailingId != null)
+            {
+                StageSlotValue(trailingId.GetText(), unwrappedSlot, defaultMutable, staged);
+            }
+            return;
+        }
+
+        // A0b. Built-in Result `ok(pat)` and `fail(pat)` / `err(pat)` pattern matching (Milestone 13)
+        if ((explicitParent == null || string.Equals(explicitParent, "Result", StringComparison.Ordinal)) &&
+            (hasParens || trailingId != null))
+        {
+            bool isOkCtor = string.Equals(targetName, "ok", StringComparison.Ordinal) ||
+                            (string.Equals(targetName, "Ok", StringComparison.Ordinal) && !_compiler.TryResolveAdtVariant(explicitParent, targetName, out _, out _, out _));
+            bool isFailCtor = string.Equals(targetName, "fail", StringComparison.Ordinal) ||
+                              string.Equals(targetName, "err", StringComparison.Ordinal) ||
+                              (string.Equals(targetName, "Fail", StringComparison.Ordinal) && !_compiler.TryResolveAdtVariant(explicitParent, targetName, out _, out _, out _)) ||
+                              (string.Equals(targetName, "Err", StringComparison.Ordinal) && !_compiler.TryResolveAdtVariant(explicitParent, targetName, out _, out _, out _));
+
+            if (isOkCtor)
+            {
+                _chunk.Emit(PilotOpcode.LoadLocal, valSlot);
+                failJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfFailure));
+
+                if (hasParens && patArgs != null && patArgs.Length == 1)
+                {
+                    EmitPatternTest(patArgs[0].pattern(), valSlot, staged, failJumps, defaultMutable);
+                }
+                else if (hasParens && patArgs != null && patArgs.Length > 1)
+                {
+                    failJumps.Add(_chunk.EmitJump(PilotOpcode.Jump));
+                    return;
+                }
+                if (trailingId != null)
+                {
+                    StageSlotValue(trailingId.GetText(), valSlot, defaultMutable, staged);
+                }
+                return;
+            }
+            if (isFailCtor)
+            {
+                _chunk.Emit(PilotOpcode.LoadLocal, valSlot);
+                failJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfNotFailure));
+
+                int errSlot = _compiler.AllocateTempSlot("err_unwrap");
+                _chunk.Emit(PilotOpcode.LoadLocal, valSlot);
+                _chunk.Emit(PilotOpcode.GetAdtField, 0, extra: 3);
+                _chunk.Emit(PilotOpcode.StoreLocal, errSlot);
+
+                if (hasParens && patArgs != null && patArgs.Length == 1)
+                {
+                    EmitPatternTest(patArgs[0].pattern(), errSlot, staged, failJumps, defaultMutable);
+                }
+                else if (hasParens && patArgs != null && patArgs.Length > 1)
+                {
+                    failJumps.Add(_chunk.EmitJump(PilotOpcode.Jump));
+                    return;
+                }
+                if (trailingId != null)
+                {
+                    StageSlotValue(trailingId.GetText(), errSlot, defaultMutable, staged);
+                }
+                return;
+            }
         }
 
         // A. Typestate pattern: `Conn[Open]` or `Conn[Open] c`

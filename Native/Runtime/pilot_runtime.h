@@ -28,6 +28,23 @@ typedef struct pilot_str {
     size_t length;
 } pilot_str_t;
 
+/* --- Milestone 15.3: Zero-Marshalling C-ABI Loop & Slice Types --- */
+typedef struct pilot_range_window_i32 {
+    int32_t current; /* Offset: 0 */
+    int32_t max;     /* Offset: 4 (sizeof == 8, 0 padding) */
+} pilot_range_window_i32_t;
+
+typedef struct pilot_range_window_i64 {
+    int64_t current; /* Offset: 0 */
+    int64_t max;     /* Offset: 8 (sizeof == 16, 0 padding) */
+} pilot_range_window_i64_t;
+
+typedef struct pilot_slice_buffer {
+    void*  data_ptr; /* Offset: 0 */
+    size_t length;   /* Offset: 8 */
+    size_t capacity; /* Offset: 16 (sizeof == 24 on 64-bit targets) */
+} pilot_slice_buffer_t;
+
 /* --- Memory Management --- */
 static inline void* pilot_alloc(size_t size) {
     void* ptr = malloc(size);

@@ -1,0 +1,46 @@
+// =============================================================================
+// SHOWCASE 20: Expression-Oriented & Dynamic-Schedule `for` Loops + C-ABI (M15)
+// =============================================================================
+
+println("=== 1. Standard Fixed Yield (CollectionYield) ===");
+let cubes = for (i in 1..5) {
+    yield i * i * i;
+};
+println(f"Cubes (1..5): {cubes}");
+assert(cubes == [1, 8, 27, 64, 125]);
+
+println("=== 2. Destructive Range Pivot (MutableBounds) ===");
+let skipped_middle = for (i in 0..10) {
+    yield i;
+    if i == 2 {
+        continue 8..10;
+    }
+};
+println(f"Pivoted (0..2 -> 8..10): {skipped_middle}");
+assert(skipped_middle == [0, 1, 2, 8, 9, 10]);
+
+println("=== 3. Resumable Sub-Loop Prepend (WorklistStack LIFO) ===");
+let hierarchical_walk = for (i in 1..4) {
+    yield i;
+    if i == 2 {
+        continue 100..101, ...;
+    }
+};
+println(f"Resumable LIFO Worklist: {hierarchical_walk}");
+assert(hierarchical_walk == [1, 2, 100, 101, 3, 4]);
+
+println("=== 4. Scalar Break + `then` Completion Clause ===");
+let ports = [80, 443, 8080, 9000];
+let port_idx = for (idx in 0..<4) {
+    if ports[idx] == 8080 {
+        break idx;
+    }
+} then -1;
+let fallback_idx = for (idx in 0..<4) {
+    if ports[idx] == 3000 {
+        break idx;
+    }
+} then -1;
+println(f"Port 8080 index: {port_idx}, Port 3000 fallback: {fallback_idx}");
+assert(port_idx == 2);
+assert(fallback_idx == -1);

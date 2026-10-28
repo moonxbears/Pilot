@@ -686,4 +686,35 @@ public class PilotAdtAndExhaustivenessTests
         string showcase16 = File.ReadAllText(ResolveRepoFile(Path.Combine("examples", "showcase", "16_algebraic_data_types.pilot")));
         RunInterpreterAndVm(showcase16);
     }
+
+    [Fact]
+    public void Test_11_5_Suite28_And_Showcase16_SemanticAnalyzer_ZeroErrorsOrWarnings_And_VmStringEscapeParity()
+    {
+        string suite28Path = ResolveRepoFile(Path.Combine("tests", "28_adt_and_exhaustive_matching.pilot"));
+        string showcase16Path = ResolveRepoFile(Path.Combine("examples", "showcase", "16_algebraic_data_types.pilot"));
+
+        var suite28Lsp = PilotSemanticAnalyzer.Analyze(File.ReadAllText(suite28Path), new Uri(suite28Path).AbsoluteUri);
+        Assert.DoesNotContain(suite28Lsp.Diagnostics, d => d.Severity is PilotDiagnosticSeverity.Error or PilotDiagnosticSeverity.Warning);
+
+        var showcase16Lsp = PilotSemanticAnalyzer.Analyze(File.ReadAllText(showcase16Path), new Uri(showcase16Path).AbsoluteUri);
+        Assert.DoesNotContain(showcase16Lsp.Diagnostics, d => d.Severity is PilotDiagnosticSeverity.Error or PilotDiagnosticSeverity.Warning);
+        // Ensure `return match ...` arms are not double-visited (no duplicate line+column diagnostics)
+        var duplicateHints = showcase16Lsp.Diagnostics
+            .GroupBy(d => (d.Code, d.StartLine, d.StartColumn))
+            .Where(g => g.Count() > 1)
+            .ToList();
+        Assert.Empty(duplicateHints);
+
+        // Verify PilVM bytecode string-literal escape parity (`\n`, `\t`, triple-quoted verbatim `"""..."""`)
+        string escapeCode = @"
+            let normal = ""line1\nline2\tend"";
+            let triple = """"""line1\nline2"""""";
+            assert(len(normal) == 15, ""Bytecode string literal must unescape \\n and \\t"");
+            assert(len(triple) == 12, ""Triple-quoted string literal must preserve backslash escapes"");
+            len(normal);
+        ";
+        var (interpLen, vmLen) = RunInterpreterAndVm(escapeCode);
+        Assert.Equal(15, interpLen.AsInt());
+        Assert.Equal(15, vmLen.AsInt());
+    }
 }

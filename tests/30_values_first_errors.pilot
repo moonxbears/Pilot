@@ -1,0 +1,109 @@
+// =============================================================================
+// Milestone 13: Values-First Error System (T ! E) Integration Test
+// =============================================================================
+
+type ConfigError =
+    | FileMissing(path: str)
+    | BadPort(raw: str);
+
+record AppError(code: int, detail: str);
+
+adapter ConfigError -> AppError {
+    def convert(err: ConfigError) -> AppError {
+        return match err {
+            case FileMissing(p) => AppError(404, f"missing:{p}"),
+            case BadPort(r) => AppError(400, f"bad_port:{r}")
+        };
+    }
+}
+
+def mock_read_file(path: str) -> str ! ConfigError {
+    if path == "missing.conf" {
+        return fail(FileMissing(path));
+    }
+    if path == "bad.conf" {
+        return "not_a_number";
+    }
+    return "9090";
+}
+
+def read_port(path: str) -> int ! ConfigError {
+    let text = mock_read_file(path)?;
+    guard some parsed = text.Trim().ToInt() else {
+        return fail(BadPort(text.Trim()));
+    }
+    return parsed;
+}
+
+// Automatic error adaptation via `?` from `ConfigError` -> `AppError`
+def boot_service(path: str) -> int ! AppError {
+    let port = read_port(path)?;
+    return port + 1;
+}
+
+// Inferred error set `-> int!`
+def compute_ratio(a: int, b: int) -> int! {
+    if b == 0 {
+        return fail("division_by_zero");
+    }
+    return a / b;
+}
+
+// Postfix `?` on `T?` inside `U?`-returning function
+def double_optional(opt: int?) -> int? {
+    let v = opt?;
+    return v * 2;
+}
+
+// 1. Happy path & error path with `catch <default>`
+let p1 = read_port("app.conf") catch 8080;
+let p2 = read_port("missing.conf") catch 8080;
+assert(p1 == 9090, "happy path read_port should return 9090");
+assert(p2 == 8080, "missing.conf should fallback to 8080");
+
+// 2. Call-site `catch err => match err` recovery
+let p3 = read_port("bad.conf") catch err => match err {
+    case FileMissing(_) => 8000,
+    case BadPort(raw) => 7000 + raw.length
+};
+assert(p3 == 7012, "BadPort('not_a_number') should recover to 7012");
+
+// 3. Automatic error `adapter` on `?` propagation
+let b_ok = boot_service("app.conf") catch -1;
+let b_err = boot_service("missing.conf") catch err => err.code;
+assert(b_ok == 9091, "boot_service happy path should be 9091");
+assert(b_err == 404, "boot_service adapted AppError code should be 404");
+
+// 4. Flat happy-path `guard ... catch`
+def format_endpoint(path: str) -> str {
+    guard let active_port = read_port(path) catch err {
+        return f"boot_failed:{err}";
+    }
+    return f"0.0.0.0:{active_port}";
+}
+
+assert(format_endpoint("app.conf") == "0.0.0.0:9090", "guard catch happy path");
+assert(format_endpoint("missing.conf") == "boot_failed:FileMissing(path: missing.conf)", "guard catch error path");
+
+// 5. Pattern matching on `ok(v)` and `fail(e)` + inferred error set `T!`
+let ratio_res = compute_ratio(20, 4);
+let ratio_err = compute_ratio(20, 0);
+let m1 = match ratio_res {
+    case ok(v) => f"ok={v}",
+    case fail(e) => f"err={e}"
+};
+let m2 = match ratio_err {
+    case ok(v) => f"ok={v}",
+    case fail(e) => f"err={e}"
+};
+assert(m1 == "ok=5", "match ok(v)");
+assert(m2 == "err=division_by_zero", "match fail(e)");
+
+// 6. Postfix `?` on `T?` optional
+assert(double_optional(21) == 42, "double_optional(21) == 42");
+assert(double_optional(none) == none, "double_optional(none) == none");
+
+// 7. Explicit `ignore_err(...)`
+ignore_err(read_port("missing.conf"));
+
+print("Milestone 13 values-first error system tests passed!");

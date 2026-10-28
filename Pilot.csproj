@@ -5,14 +5,24 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <EnableDefaultAntlrItems>false</EnableDefaultAntlrItems>
     <DefaultItemExcludes>$(DefaultItemExcludes);Pilot.Tests\**;Pilot.LanguageServer\**;vscode-pilot\**</DefaultItemExcludes>
     <NoWarn>$(NoWarn);CS3021</NoWarn>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>pilot</ToolCommandName>
     <PackageId>pilot.cli</PackageId>
+    <PilotBaseVersion>1.1</PilotBaseVersion>
     <Version>1.1.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
+
+  <ItemGroup Condition="Exists('.git\HEAD')">
+    <UpToDateCheckInput Include=".git\HEAD" />
+  </ItemGroup>
+  <ItemGroup Condition="Exists('.git\logs\HEAD')">
+    <UpToDateCheckInput Include=".git\logs\HEAD" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Antlr4" Version="4.6.6">
@@ -38,5 +48,100 @@
   <Target Name="IncludeAntlr4InDesignTimeBuild"
           BeforeTargets="CoreCompile;CompileDesignTime;CollectResolvedCompilationReferencesDesignTime"
           DependsOnTargets="Antlr4CompileReadGeneratedFileList;Antlr4Compile;Antlr4CompileAddFilesGenerated" />
+
+  <Target Name="ComputePilotGitVersion"
+          BeforeTargets="PrepareForBuild;GetAssemblyVersion;GetAssemblyAttributes;GenerateAssemblyInfo;CoreCompile;CompileDesignTime">
+    <Exec Command="git rev-list --count HEAD"
+          ConsoleToMSBuild="true"
+          EchoOff="true"
+          IgnoreExitCode="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="PilotGitCommitCount" />
+    </Exec>
+    <Exec Command="git rev-parse --short=7 HEAD"
+          ConsoleToMSBuild="true"
+          EchoOff="true"
+          IgnoreExitCode="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="PilotGitCommitShortSha" />
+    </Exec>
+    <Exec Command="git rev-parse HEAD"
+          ConsoleToMSBuild="true"
+          EchoOff="true"
+          IgnoreExitCode="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="PilotGitCommitFullSha" />
+    </Exec>
+    <Exec Command="git rev-parse --abbrev-ref HEAD"
+          ConsoleToMSBuild="true"
+          EchoOff="true"
+          IgnoreExitCode="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="PilotGitBranch" />
+    </Exec>
+    <Exec Command="git log -1 --format=%%cI HEAD"
+          ConsoleToMSBuild="true"
+          EchoOff="true"
+          IgnoreExitCode="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="PilotGitCommitDate" />
+    </Exec>
+
+    <PropertyGroup>
+      <PilotGitCommitCount Condition="'$(PilotGitCommitCount)' == ''">0</PilotGitCommitCount>
+      <PilotGitCommitShortSha Condition="'$(PilotGitCommitShortSha)' == ''">unknown</PilotGitCommitShortSha>
+      <PilotGitCommitFullSha Condition="'$(PilotGitCommitFullSha)' == ''">unknown</PilotGitCommitFullSha>
+      <PilotGitBranch Condition="'$(PilotGitBranch)' == ''">unknown</PilotGitBranch>
+      <PilotGitCommitDate Condition="'$(PilotGitCommitDate)' == ''">unknown</PilotGitCommitDate>
+      <PilotComputedSemVer>$(PilotBaseVersion).$(PilotGitCommitCount)</PilotComputedSemVer>
+      <PilotComputedFullVersion>$(PilotComputedSemVer)+$(PilotGitCommitShortSha)</PilotComputedFullVersion>
+      <VersionPrefix>$(PilotComputedSemVer)</VersionPrefix>
+      <Version>$(PilotComputedSemVer)</Version>
+      <PackageVersion>$(PilotComputedSemVer)</PackageVersion>
+      <AssemblyVersion>$(PilotComputedSemVer).0</AssemblyVersion>
+      <FileVersion>$(PilotComputedSemVer).0</FileVersion>
+      <InformationalVersion>$(PilotComputedFullVersion)</InformationalVersion>
+      <PilotGitVersionGenFile>$(IntermediateOutputPath)PilotGitVersion.g.cs</PilotGitVersionGenFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <AssemblyMetadata Include="PilotCommitCount" Value="$(PilotGitCommitCount)" />
+      <AssemblyMetadata Include="PilotCommitShortSha" Value="$(PilotGitCommitShortSha)" />
+      <AssemblyMetadata Include="PilotCommitFullSha" Value="$(PilotGitCommitFullSha)" />
+      <AssemblyMetadata Include="PilotGitBranch" Value="$(PilotGitBranch)" />
+      <AssemblyMetadata Include="PilotGitCommitDate" Value="$(PilotGitCommitDate)" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <_PilotGitVersionLines Include="// &lt;auto-generated /&gt;" />
+      <_PilotGitVersionLines Include="namespace Pilot.Diagnostics%3B" />
+      <_PilotGitVersionLines Include="internal static class PilotGitBuildStamp" />
+      <_PilotGitVersionLines Include="{" />
+      <_PilotGitVersionLines Include="    public const string BaseVersion = &quot;$(PilotBaseVersion)&quot;%3B" />
+      <_PilotGitVersionLines Include="    public const int CommitCount = $(PilotGitCommitCount)%3B" />
+      <_PilotGitVersionLines Include="    public const string SemVer = &quot;$(PilotComputedSemVer)&quot;%3B" />
+      <_PilotGitVersionLines Include="    public const string ShortCommitSha = &quot;$(PilotGitCommitShortSha)&quot;%3B" />
+      <_PilotGitVersionLines Include="    public const string FullCommitSha = &quot;$(PilotGitCommitFullSha)&quot;%3B" />
+      <_PilotGitVersionLines Include="    public const string Branch = &quot;$(PilotGitBranch)&quot;%3B" />
+      <_PilotGitVersionLines Include="    public const string CommitDate = &quot;$(PilotGitCommitDate)&quot;%3B" />
+      <_PilotGitVersionLines Include="    public const string FullVersion = &quot;$(PilotComputedFullVersion)&quot;%3B" />
+      <_PilotGitVersionLines Include="}" />
+    </ItemGroup>
+
+    <MakeDir Directories="$(IntermediateOutputPath)" Condition="!Exists('$(IntermediateOutputPath)')" />
+    <WriteLinesToFile File="$(PilotGitVersionGenFile)"
+                      Lines="@(_PilotGitVersionLines)"
+                      Overwrite="true"
+                      WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(PilotGitVersionGenFile)" Condition="!('@(Compile)' == '' or @(Compile->AnyHaveMetadataValue('Identity', '$(PilotGitVersionGenFile)')))" />
+      <FileWrites Include="$(PilotGitVersionGenFile)" />
+    </ItemGroup>
+  </Target>
 
 </Project>

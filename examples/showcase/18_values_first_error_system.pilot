@@ -1,0 +1,45 @@
+// =============================================================================
+// Pilot Showcase 18: Values-First Error System (T ! E)
+// Transparent, Localized, Zero-Unwinding Register-Returned Errors
+// =============================================================================
+
+type ConfigError =
+    | FileMissing(path: str)
+    | BadPort(raw: str);
+
+def fs_read_text(path: str) -> str ! ConfigError {
+    if path == "missing.conf" {
+        return fail(FileMissing(path));
+    }
+    if path == "invalid.conf" {
+        return "abc";
+    }
+    return "8443";
+}
+
+def read_port(path: str) -> int ! ConfigError {
+    let text = fs_read_text(path)?; // Unwraps 'str' or returns 'ConfigError' immediately
+    guard some parsed = text.Trim().ToInt() else {
+        return fail(BadPort(text.Trim()));
+    }
+    return parsed; // Implicitly wraps success value
+}
+
+// 1. Concise default value on any error:
+let port = read_port("missing.conf") catch 8080;
+
+// 2. Localized error inspection/exhaustiveness right at the call site:
+let port2 = read_port("invalid.conf") catch err => match err {
+    case FileMissing(_) => 8080,
+    case BadPort(raw) => 9000 + raw.length
+};
+
+// 3. Flat happy-path guard-catch:
+def start_server(conf: str) -> str {
+    guard let active_port = read_port(conf) catch err {
+        return f"Cannot boot: {err}";
+    }
+    return f"Listening on :{active_port}";
+}
+
+print(f"port={port}, port2={port2}, server={start_server(\"app.conf\")}");

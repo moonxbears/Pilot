@@ -162,7 +162,7 @@ public class PilotVirtualMachineTests
         string code = @"
             def compute(base, exponent) {
                 var total = 1;
-                for i in 0..exponent {
+                for i in 0..<exponent {
                     total = total * base;
                 }
                 return total;

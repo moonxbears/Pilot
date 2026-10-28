@@ -1,0 +1,32 @@
+// =============================================================================
+// Showcase 19: Unified Expression Ergonomics, Class-Like Primitive Literals
+//              & Zero-Cost Extensions (Milestone 14)
+// =============================================================================
+
+// 1. Zero-Cost Extensions with Computed Properties & Constrained Generics
+extend str {
+    property IsBlank: bool { get => self.Trim().Length == 0 }
+    def Slugify() -> str => self.Trim().ToLower().Replace(" ", "-");
+}
+
+extend[T: Numeric] T[] {
+    def Mean() -> f64? => if self.Length == 0 { none } else { self.Sum().ToFloat() / self.Length };
+}
+
+// 2. Class-Like Methods & Properties on Unboxed Primitive Literals
+let hex = 255.ToHex();
+let bits = 16.BitLength();
+let lerped = 0.5.Lerp(0.0, 100.0);
+let flag_label = true.Toggle().Select("Active", "Standby");
+let period_sec = 50kHz.Period();
+let buf_bytes = 64KB.ToBytes();
+
+// 3. Expression-Oriented Control Flow, Block Expressions & Fluent Member Piping
+let score = 94;
+let badge = if score >= 90 { "Gold" } elif score >= 75 { "Silver" } else { "Bronze" };
+let dist = { let dx = 3.0; let dy = 4.0; (dx * dx + dy * dy).Sqrt() };
+let route = "  /API V2/Users  " |> .Trim() |> .ToLower() |> .Replace(" ", "-");
+let weights = [:low, :high, :low].Map(match { case :low => 10, case :high => 100 });
+
+println($"Hex={hex}, Bits={bits}, Lerp={lerped}, Flag={flag_label}, Period={period_sec}s, Bytes={buf_bytes}");
+println($"Badge={badge}, Dist={dist}, Route={route}, Mean={weights.Mean()}");

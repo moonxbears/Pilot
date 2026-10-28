@@ -21,6 +21,13 @@ public static class Program
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
 
+        // 0. Version inspection: pilot --version / -v / -V / version
+        if (args.Length > 0 && (args[0] is "--version" or "-v" or "-V" or "version"))
+        {
+            PrintVersion();
+            return 0;
+        }
+
         if (args.Length > 0 && args[0] == "--all")
         {
             return PilotTestRunner.RunAll();
@@ -103,6 +110,12 @@ public static class Program
         if (autoVenv != null && !Pilot.Runtime.Venv.PilotVirtualEnvironment.IsActive)
         {
             Pilot.Runtime.Venv.PilotVirtualEnvironment.Activate(autoVenv);
+            if (!string.IsNullOrEmpty(Pilot.Runtime.Venv.PilotVirtualEnvironment.LastVersionMismatchWarning))
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.Error.WriteLine($"[VERSION MISMATCH WARNING] {Pilot.Runtime.Venv.PilotVirtualEnvironment.LastVersionMismatchWarning}");
+                Console.ResetColor();
+            }
         }
 
         // 4. Direct script execution if first argument is a file: pilot script.pilot [args...] or pilot script.pilc [args...]
@@ -246,6 +259,17 @@ public static class Program
         }
 
         return ParseAndReport(targetFile, showTokens, showTree, definedSymbols, execute, scriptArgsList);
+    }
+
+    public static void PrintVersion()
+    {
+        Console.WriteLine(PilotVersion.DisplayBanner);
+        Console.WriteLine($"  Version      : {PilotVersion.FullVersion}");
+        Console.WriteLine($"  SemVer       : {PilotVersion.SemVer}");
+        Console.WriteLine($"  Commit Count : #{PilotVersion.CommitCount}");
+        Console.WriteLine($"  Commit SHA   : {PilotVersion.ShortCommitSha} ({PilotVersion.FullCommitSha})");
+        Console.WriteLine($"  Branch       : {PilotVersion.Branch}");
+        Console.WriteLine($"  Commit Date  : {PilotVersion.CommitDate}");
     }
 
     private static int ExecuteInlineScript(string code, string[] scriptArgs)
@@ -422,7 +446,7 @@ public static class Program
 
         outputFile ??= Path.ChangeExtension(inputFile, ".pilc");
 
-        Console.WriteLine($"--> Compiling '{inputFile}' -> '{outputFile}'...");
+        Console.WriteLine($"--> Compiling '{inputFile}' -> '{outputFile}' (Pilot v{PilotVersion.FullVersion})...");
         var options = new PilotCompilerOptions(symbols)
             .WithSourceFile(inputFile);
 
@@ -458,7 +482,7 @@ public static class Program
         }
 
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($"[COMPILATION SUCCESS] Generated '{outputFile}' ({new FileInfo(outputFile).Length} bytes) in {result.Elapsed.TotalMilliseconds:F2}ms");
+        Console.WriteLine($"[COMPILATION SUCCESS] Generated '{outputFile}' ({new FileInfo(outputFile).Length} bytes, compiler v{PilotVersion.FullVersion}) in {result.Elapsed.TotalMilliseconds:F2}ms");
         Console.ResetColor();
         return 0;
     }
@@ -475,6 +499,7 @@ public static class Program
 
         var patchFiles = new List<string>();
         var cleanArgs = new List<string>();
+        bool strictVersion = false;
         for (int i = 0; i < scriptArgs.Length; i++)
         {
             if ((scriptArgs[i] == "--patch" || scriptArgs[i] == "-p") && i + 1 < scriptArgs.Length)
@@ -484,6 +509,10 @@ public static class Program
             else if ((scriptArgs[i] == "--entry" || scriptArgs[i] == "-e") && i + 1 < scriptArgs.Length)
             {
                 entryFunc = scriptArgs[++i];
+            }
+            else if (scriptArgs[i] == "--strict-version")
+            {
+                strictVersion = true;
             }
             else
             {
@@ -497,6 +526,24 @@ public static class Program
             Console.WriteLine($"[ERROR] Script file not found: '{filePath}'");
             Console.ResetColor();
             return 1;
+        }
+
+        if (filePath.EndsWith(".pilc", StringComparison.OrdinalIgnoreCase))
+        {
+            var loadedProg = PilotCompiledProgram.Load(filePath);
+            if (!loadedProg.CheckVersionCompatibility(out string? mismatchMsg))
+            {
+                if (strictVersion)
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.Error.WriteLine($"[VERSION MISMATCH ERROR] {mismatchMsg}");
+                    Console.ResetColor();
+                    return 1;
+                }
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.Error.WriteLine($"[VERSION MISMATCH WARNING] {mismatchMsg}");
+                Console.ResetColor();
+            }
         }
 
         if (!string.IsNullOrEmpty(entryFunc))
@@ -974,13 +1021,21 @@ public static class Program
             }
 
             var cfg = Pilot.Runtime.Venv.PilotVenvConfig.Load(Path.Combine(venvPath, Pilot.Runtime.Venv.PilotVirtualEnvironment.ConfigFileName));
+            bool versionMatched = cfg.CheckVersionCompatibility(out string? mismatchWarning);
             Console.WriteLine($"Pilot Virtual Environment: {venvPath}");
             Console.WriteLine($"  Prompt: {cfg.Prompt}");
             Console.WriteLine($"  Home: {cfg.Home}");
             Console.WriteLine($"  Version: {cfg.Version}");
+            Console.WriteLine($"  Pilot Version: {cfg.PilotVersion} (running: {PilotVersion.FullVersion} - {(versionMatched ? "MATCH" : "MISMATCH")})");
             Console.WriteLine($"  Include System Packages: {cfg.IncludeSystemPackages}");
             Console.WriteLine($"  Created At: {cfg.CreatedAt:O}");
             Console.WriteLine($"  Is Active: {Pilot.Runtime.Venv.PilotVirtualEnvironment.ActiveVenvPath == venvPath}");
+            if (!versionMatched && !string.IsNullOrEmpty(mismatchWarning))
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"  [WARNING] {mismatchWarning}");
+                Console.ResetColor();
+            }
             return 0;
         }
 
@@ -1028,7 +1083,8 @@ public static class Program
     public static void PrintUsage()
     {
         Console.WriteLine("==================================================================");
-        Console.WriteLine("                 PILOT LANGUAGE RUNNER & VALIDATOR                ");
+        Console.WriteLine($"       PILOT LANGUAGE RUNNER & VALIDATOR v{PilotVersion.FullVersion,-20}");
+        Console.WriteLine($"       Commit #{PilotVersion.CommitCount} ({PilotVersion.ShortCommitSha} on {PilotVersion.Branch})");
         Console.WriteLine("==================================================================");
         Console.WriteLine("Scripting & Execution Usage:");
         Console.WriteLine("  pilot <script.pilot> [args...]       # Run script file directly");
@@ -1037,6 +1093,7 @@ public static class Program
         Console.WriteLine("  pilot debug <file.pilot> [args...]   # Start interactive CLI debugger session");
         Console.WriteLine("  pilot -c \"<code>\" [args...]         # Execute inline code string");
         Console.WriteLine("  pilot compile <file> [-o <out.pilc>] # Precompile to binary format");
+        Console.WriteLine("  pilot --version, -v                  # Print commit-bound Pilot version info");
         Console.WriteLine("\nVirtual Environment Usage (Isolation & Sandboxing):");
         Console.WriteLine("  pilot venv [path]                    # Create new virtual environment (default: .pilotvenv)");
         Console.WriteLine("  pilot venv create <path> [-p <name>] # Create named virtual environment");

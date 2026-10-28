@@ -33,5 +33,6 @@ public enum PilotValueKind
     Adt,
     AdtType,
     Record,
-    KeywordVariant
+    KeywordVariant,
+    Failure
 }

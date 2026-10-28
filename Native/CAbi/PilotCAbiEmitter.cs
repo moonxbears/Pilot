@@ -61,6 +61,11 @@ public static class PilotCAbiEmitter
         sb.AppendLine("#include <stdbool.h>");
         sb.AppendLine("#include <stddef.h>");
         sb.AppendLine();
+        sb.AppendLine("/* --- Zero-Marshalling C-ABI Loop & Slice Descriptors (Milestone 15.3) --- */");
+        sb.AppendLine("typedef struct RangeWindow_i32 { int32_t current; int32_t max; } RangeWindow_i32;");
+        sb.AppendLine("typedef struct RangeWindow_i64 { int64_t current; int64_t max; } RangeWindow_i64;");
+        sb.AppendLine("typedef struct SliceBuffer { void* data_ptr; size_t length; size_t capacity; } SliceBuffer;");
+        sb.AppendLine();
 
         var visitor = new CAbiExtractionVisitor();
         visitor.Extract(program);
@@ -436,6 +441,43 @@ public static class PilotCAbiEmitter
             if (genericParams != null && genericParams.Contains(trimmed))
             {
                 return "int64_t";
+            }
+
+            // Milestone 13.1: Fallible return type `T ! E` -> zero-unwinding register ABI struct
+            if (PilotAdtMemoryLayout.TrySplitFallibleTypeSpec(trimmed, out string okTypeSpec, out string errTypeSpec))
+            {
+                string okCType = MapType(okTypeSpec, genericParams);
+                string errCType = string.IsNullOrEmpty(errTypeSpec) ? "int64_t" : MapType(errTypeSpec, genericParams);
+                if (okCType == "void") okCType = "uint8_t";
+                return $"struct {{ uint8_t is_ok; union {{ {okCType} ok; {errCType} err; }} payload; }}";
+            }
+
+            // Milestone 12.3: Option `T?` / `Option[T]` with zero-allocation niche optimization
+            if ((trimmed.EndsWith("?", StringComparison.Ordinal) && trimmed.Length > 1) ||
+                (trimmed.StartsWith("Option[", StringComparison.OrdinalIgnoreCase) && trimmed.EndsWith("]", StringComparison.Ordinal)))
+            {
+                string inner = trimmed.EndsWith("?", StringComparison.Ordinal)
+                    ? trimmed[..^1].Trim()
+                    : trimmed[7..^1].Trim();
+
+                if (PilotAdtMemoryLayout.HasZeroAllocationNiche(inner))
+                {
+                    string innerLower = inner.ToLowerInvariant();
+                    if (innerLower is "str" or "string") return "const char*";
+                    if (innerLower is "bool" or "boolean") return "uint8_t"; // 0=false, 1=true, 2=none niche
+                    if (inner.EndsWith("*", StringComparison.Ordinal) || inner.EndsWith("[]", StringComparison.Ordinal))
+                    {
+                        return MapType(inner, genericParams);
+                    }
+                    string cleanInner = PilotAdtMemoryLayout.StripGenericsAndModifiers(inner);
+                    if (!_knownCustomValueTypes.Contains(cleanInner))
+                    {
+                        return $"const {SanitizeCIdentifier(cleanInner)}*";
+                    }
+                }
+
+                string valType = MapType(inner, genericParams);
+                return $"struct {{ {valType} value; uint8_t has_value; }}";
             }
 
             // Slice fat-pointer: `Point[]` -> `struct { const Point* ptr; size_t len; }`

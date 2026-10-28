@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
+using Pilot.Diagnostics;
 using Pilot.LanguageServer.Semantics;
 using Pilot.Preprocessing;
 
@@ -176,7 +177,10 @@ public sealed class PilotLspServer
                     ["serverInfo"] = new JsonObject
                     {
                         ["name"] = "Pilot Language Server",
-                        ["version"] = "1.0.0"
+                        ["version"] = PilotVersion.FullVersion,
+                        ["semver"] = PilotVersion.SemVer,
+                        ["commitCount"] = PilotVersion.CommitCount,
+                        ["commitSha"] = PilotVersion.ShortCommitSha
                     }
                 };
                 outgoing.Add(BuildResponse(idNode, result));

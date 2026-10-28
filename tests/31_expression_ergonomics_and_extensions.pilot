@@ -1,0 +1,154 @@
+// =============================================================================
+// Pilot Suite 31: Unified Expression Ergonomics, Class-Like Primitive Literals
+//                 & Zero-Cost Extensions (Milestone 14)
+// =============================================================================
+
+// 1. 14.1: Zero-Cost Class-Like Methods & Properties on Primitive Literals
+// str literals
+assert "hello world".Substring(0, 5) == "hello";
+assert "hello world".Split(" ").Length == 2;
+assert "hello world".Replace("world", "Pilot") == "hello Pilot";
+assert "hello world".IndexOf("world") == 6;
+assert "hello world".IndexOf("missing") == none;
+assert "hi".PadLeft(5) == "   hi";
+assert "hi".PadRight(5) == "hi   ";
+assert "  pilot  ".Trim() == "pilot";
+assert "pilot".StartsWith("pi") == true;
+assert "pilot".EndsWith("lot") == true;
+assert "pilot".Contains("ilo") == true;
+assert "abc".Chars().Length == 3;
+assert "line1\nline2\nline3".Lines().Length == 3;
+assert "42".ToInt() == 42;
+assert "not_an_int".ToInt() == none;
+
+let parsed_ok = "128".ParseInt() catch err => -1;
+assert parsed_ok == 128;
+
+let parsed_bad = "bad_num".ParseInt() catch err => -99;
+assert parsed_bad == -99;
+
+// int literals
+assert (-42).Abs() == 42;
+assert 42.Clamp(0, 30) == 30;
+assert 255.ToHex() == "FF";
+assert 42.ToBinary() == "101010";
+assert 42.IsEven == true;
+assert 42.IsOdd == false;
+assert 2.Pow(10) == 1024;
+assert 255.PopCount() == 8;
+assert 16.BitLength() == 5;
+assert 42.ToFloat() == 42.0;
+
+var sum_times = 0;
+5.Times(i => { sum_times += i; });
+assert sum_times == 10;
+
+// float literals
+assert 3.14159.Round(2) == 3.14;
+assert 3.7.Floor() == 3.0;
+assert 3.2.Ceil() == 4.0;
+assert (-9.5).Abs() == 9.5;
+assert 16.0.Sqrt() == 4.0;
+assert 0.5.Lerp(0.0, 100.0) == 50.0;
+assert 3.7.IsNaN == false;
+assert 3.7.IsInfinite == false;
+assert 3.7.ToInt() == 3;
+
+// bool & char literals
+assert true.Toggle() == false;
+assert false.Toggle() == true;
+assert true.Select("On", "Off") == "On";
+assert false.Select("On", "Off") == "Off";
+assert 'a'.ToUpper() == "A";
+assert 'A'.ToLower() == "a";
+assert '9'.IsDigit == true;
+assert 'a'.IsAlpha == true;
+assert ' '.IsWhitespace == true;
+assert 'A'.CodePoint == 65;
+
+// Dimensional literals
+assert 250ms.ToMicroseconds() == 250000.0;
+assert 250ms.ToMilliseconds() == 250.0;
+assert 250ms.ToSeconds() == 0.25;
+assert 50kHz.Period() == 0.00002;
+assert 64KB.ToBytes() == 65536;
+assert 2MB.ToBytes() == 2097152;
+
+// 2. 14.2: Ergonomic `extend` Methods, Computed Properties & Generic Extensions
+extend str {
+    property IsBlank: bool { get => self.Trim().Length == 0 }
+    def Slugify() -> str => self.Trim().ToLower().Replace(" ", "-");
+}
+
+assert "   ".IsBlank == true;
+assert "  Hello World  ".IsBlank == false;
+assert "  Hello World  ".Slugify() == "hello-world";
+assert strExt_Slugify("  Pilot Lang  ") == "pilot-lang";
+
+extend[T: Numeric] T[] {
+    def Mean() -> f64? => if self.Length == 0 { none } else { self.Sum().ToFloat() / self.Length };
+}
+
+let nums = [10, 20, 30, 40];
+assert nums.Mean() == 25.0;
+let empty_nums = [];
+assert empty_nums.Mean() == none;
+
+// 3. 14.3: Deep Single-Evaluation Optional Chaining (`?.`, `?[]`, `?()`)
+record Address(City: str);
+record Customer(Address: Address?);
+record Order(Customer: Customer?);
+
+let valid_order: Order? = Order(Customer(Address("Austin")));
+let missing_addr_order: Order? = Order(Customer(none));
+let null_order: Order? = none;
+
+assert (valid_order?.Customer?.Address?.City ?? "Unknown") == "Austin";
+assert (missing_addr_order?.Customer?.Address?.City ?? "Unknown") == "Unknown";
+assert (null_order?.Customer?.Address?.City ?? "Unknown") == "Unknown";
+
+var receiver_evals = 0;
+def get_optional_order(present: bool) -> Order? {
+    receiver_evals += 1;
+    if present { return Order(Customer(Address("Seattle"))); }
+    return none;
+}
+
+let city1 = get_optional_order(false)?.Customer?.Address?.City ?? "Fallback";
+assert city1 == "Fallback";
+assert receiver_evals == 1;
+
+let matrix = [[10, 20], [30, 40]];
+let null_matrix = none;
+assert matrix?[1]?[0] == 30;
+assert (null_matrix?[1]?[0] ?? -1) == -1;
+
+let on_complete = x => x * 3;
+let no_callback = none;
+assert on_complete?(14) == 42;
+assert (no_callback?(14) ?? -1) == -1;
+
+// 4. 14.4: Unified Expression-Oriented Control Flow & Fluent Member Piping
+let score = 82;
+let tier = if score >= 90 { "Gold" } elif score >= 75 { "Silver" } else { "Bronze" };
+assert tier == "Silver";
+
+let tags = [:a, :b, :a];
+let mapped_tags = tags.Map(match { case :a => 1, case :b => 2 });
+assert mapped_tags == [1, 2, 1];
+
+let x1 = 1.0;
+let y1 = 2.0;
+let x2 = 4.0;
+let y2 = 6.0;
+let norm = { let dx = x2 - x1; let dy = y2 - y1; (dx * dx + dy * dy).Sqrt() };
+assert norm == 5.0;
+
+def read_Contextual(context db: str, context logger: str) -> str => $"{db}:{logger}";
+let ctx_res = with context (db = "pg_mock", logger = "silent") { read_Contextual() };
+assert ctx_res == "pg_mock:silent";
+
+let piped_slug = "  Hello World  " |> .Trim() |> .ToLower() |> .Replace(" ", "-");
+assert piped_slug == "hello-world";
+
+print("All Milestone 14 expression ergonomics and zero-cost extensions verified!");

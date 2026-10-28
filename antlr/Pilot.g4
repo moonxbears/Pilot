@@ -35,15 +35,15 @@ identifier
     | GUARD | DEFER | INSERT | UPDATE | DELETE | VALUES | SET_KW
     | RETURNING | CONFLICT | DO | NOTHING | OVER | PARTITION | WINDOW
     | TRANSACTION | COMMIT | ROLLBACK | SAVEPOINT | TO | CONNECT | DATABASE | MODEL
-    | PROPERTY | GET | OPERATOR | EXTENSION
-    | EXCEPT
+    | PROPERTY | GET | OPERATOR | EXTENSION | EXTEND
+    | EXCEPT | CATCH
     | PUBLIC | PRIVATE | PROTECTED | INTERNAL
     | SYMBOL | REF | DYNAMIC | FN
     | STATIC | PARAMS | ARGS | KWARGS | NAMEOF | WHEN | UNDEFINED | PARTIAL | STEAL | CONTRACTS | DELEGATE
     | EXTERN | CSHARP | PYTHON | RUST | ASSEMBLY | MODULE | LIB | STATE
     | CONTEXT | REQUIRES | ENSURES
     | JS | JAVASCRIPT | JAVA | ASM | CPP | C_KW | LUA | SQL_KW | POSTGRES | POSTGRESQL | MYSQL
-    | EACH | REPEAT | ADAPTER | CONVERTER
+    | EACH | REPEAT | ADAPTER | CONVERTER | SOME | THEN
     ;
 
 // =============================================================================
@@ -56,7 +56,7 @@ stmt
     ;
 
 simple_stmt
-    : small_stmt (SEMI small_stmt)* SEMI?
+    : small_stmt ({false}? SEMI small_stmt)* SEMI?
     ;
 
 small_stmt
@@ -147,9 +147,9 @@ suite
 // Robustness: Guard (Precondition) and Defer (Exit Cleanup)
 // =============================================================================
 
-// Mandatory early-exit precondition: guard <condition> else { <exit_suite> }
+// Mandatory early-exit precondition: guard <condition> else { <exit_suite> } or guard let x = expr catch err { <exit_suite> }
 guard_stmt
-    : GUARD ((LET | VAR) pattern EQUAL test pattern_guard? | test) ELSE COLON? suite
+    : GUARD ((LET | VAR | SOME) pattern EQUAL test pattern_guard? | SOME? test pattern_guard?) ((ELSE | CATCH identifier?) COLON? suite | suite)?
     ;
 
 pattern_guard
@@ -174,7 +174,18 @@ return_type
     ;
 
 type_spec
-    : union_type
+    : union_type (EXCLAMATION error_union_type?)?
+    ;
+
+error_union_type
+    : error_primary_type (VBAR error_primary_type)*
+    ;
+
+error_primary_type
+    : SYMBOL
+    | DYNAMIC
+    | (dotted_name | NONE | NULL | UNDEFINED) ( (LSQB type_arguments RSQB) | (LESS type_arguments GREATER) )? (LSQB RSQB | QUESTION)*
+    | LPAR type_spec (COMMA type_spec)* RPAR
     ;
 
 union_type
@@ -186,7 +197,7 @@ intersection_type
     ;
 
 primary_type
-    : REF? base_type (LSQB RSQB | QUESTION)* (LESS unit_expr GREATER)?
+    : REF? base_type (LSQB RSQB | QUESTION | COALESCE | STAR)* (LESS unit_expr GREATER)?
     ;
 
 base_type
@@ -352,7 +363,7 @@ augassign
 // =============================================================================
 
 func_def
-    : decorators? declaration_modifier* (PURE | ASYNC)? (DEF | FN) identifier generic_params? parameters (ARROW type_spec)? where_type_clause? COLON? contract_clause* COLON? (suite | SEMI)?
+    : decorators? declaration_modifier* (PURE | ASYNC)? (DEF | FN) identifier generic_params? parameters (ARROW type_spec)? where_type_clause? COLON? contract_clause* (COLON | FAT_ARROW)? (suite | SEMI)?
     ;
 
 contract_clause
@@ -430,7 +441,7 @@ model_def
 
 // Properties with get / set accessors
 property_def
-    : decorators? declaration_modifier* PROPERTY identifier type_annotation? COLON? property_body
+    : decorators? declaration_modifier* PROPERTY identifier type_annotation? (FAT_ARROW suite | COLON? property_body)
     ;
 
 property_body
@@ -443,11 +454,11 @@ property_accessor
     ;
 
 get_accessor
-    : GET (COLON? suite | SEMI)?
+    : GET (COLON | FAT_ARROW)? (suite | SEMI)?
     ;
 
 set_accessor
-    : SET_KW (LPAR identifier RPAR)? (COLON? suite | SEMI)?
+    : SET_KW (LPAR identifier RPAR)? (COLON | FAT_ARROW)? (suite | SEMI)?
     ;
 
 // Operator Overloading
@@ -462,9 +473,10 @@ overloadable_op
     | LSQB RSQB EQUAL?
     ;
 
-// Extension methods / classes: extension for Type: ... or extension Name on Type: ...
+// Extension methods / classes: extension for Type: ... or extension Name on Type: ... or extend Type { ... }
 extension_def
-    : decorators? declaration_modifier* EXTENSION identifier? (FOR | ON) type_spec where_type_clause? COLON? suite
+    : decorators? declaration_modifier* EXTENSION identifier? generic_params? (FOR | ON) type_spec where_type_clause? COLON? suite
+    | decorators? declaration_modifier* EXTEND generic_params? type_spec where_type_clause? COLON? suite
     ;
 
 // Type Adapter Definition: adapter FromType -> ToType: ... or adapter Name: ...
@@ -536,15 +548,15 @@ block
     ;
 
 if_stmt
-    : IF ((LET | VAR) pattern EQUAL)? test pattern_guard? COLON? suite ((ELIF | ELSE IF) ((LET | VAR) pattern EQUAL)? test pattern_guard? COLON? suite)* (ELSE COLON? suite)?
+    : IF (((LET | VAR | SOME) pattern EQUAL) | SOME)? test pattern_guard? COLON? suite ((ELIF | ELSE IF) (((LET | VAR | SOME) pattern EQUAL) | SOME)? test pattern_guard? COLON? suite)* (ELSE COLON? suite)?
     ;
 
 while_stmt
-    : WHILE ((LET | VAR) pattern EQUAL)? test pattern_guard? (BOUNDED test)? COLON? suite (ELSE COLON? suite)?
+    : WHILE (((LET | VAR | SOME) pattern EQUAL) | SOME)? test pattern_guard? (BOUNDED test)? COLON? suite (ELSE COLON? suite)?
     ;
 
 for_stmt
-    : (ASYNC | PARALLEL)? FOR for_target IN test (BOUNDED test)? COLON? suite (ELSE COLON? suite)?
+    : (ASYNC | PARALLEL)? FOR (LPAR for_target IN test RPAR | for_target IN test) (BOUNDED test)? COLON? suite ((THEN | ELSE) COLON? suite)?
     ;
 
 for_target
@@ -554,6 +566,7 @@ for_target
 
 match_stmt
     : MATCH test COLON? match_suite
+    | MATCH COLON? match_suite
     ;
 
 match_suite
@@ -665,13 +678,18 @@ with_stmt
 
 with_item
     : EXTENSION identifier
-    | CONTEXT identifier EQUAL test
+    | CONTEXT LPAR with_context_binding (COMMA with_context_binding)* COMMA? RPAR
+    | CONTEXT with_context_binding
     | test (AS identifier)?
     ;
 
+with_context_binding
+    : identifier (EQUAL | COLON) test
+    ;
+
 flow_stmt
-    : BREAK identifier?
-    | CONTINUE identifier?
+    : BREAK (test | identifier)?
+    | CONTINUE (range_expr (COMMA ELLIPSIS)? | identifier)?
     | RETURN testlist?
     | YIELD testlist?
     | RAISE (test (FROM test)?)?
@@ -1065,7 +1083,13 @@ set_query_expr
     ;
 
 coalesce_expr
-    : or_test (COALESCE or_test)*
+    : or_test (COALESCE or_test | catch_clause)*
+    ;
+
+catch_clause
+    : CATCH identifier FAT_ARROW (block | test)
+    | CATCH block
+    | CATCH or_test
     ;
 
 or_test
@@ -1157,9 +1181,13 @@ trailer
     | LSQB subscriptlist RSQB
     | DOT identifier
     | SAFE_NAV identifier
+    | SAFE_NAV LSQB subscriptlist RSQB
+    | SAFE_NAV LPAR arglist? RPAR
+    | QUESTION LSQB subscriptlist RSQB
+    | QUESTION LPAR arglist? RPAR
+    | QUESTION
     | cascade_trailer
     | LESS unit_expr GREATER
-    | EXCLAMATION                                                    // Non-null assertion
     | over_clause
     ;
 
@@ -1199,11 +1227,16 @@ atom
     | macro_call
     | symbol_literal
     | nameof_expr
+    | if_stmt
     | match_stmt
+    | with_stmt
+    | for_stmt
+    | DOT identifier
     | identifier
     | LPAR testlist_comp? RPAR
     | collection_expr
     | LBRACE dictorsetmaker? RBRACE
+    | block
     | sql_query_expr
     | query_expr
     | lookup_expr
@@ -1338,6 +1371,7 @@ PROPERTY    : 'property';
 GET         : 'get';
 OPERATOR    : 'operator';
 EXTENSION   : 'extension';
+EXTEND      : 'extend';
 STATE       : 'state';
 
 // --- Relational & Postgres-like Database Keywords ---
@@ -1471,6 +1505,7 @@ ENSURES     : 'ensures';    // Design-by-contract postcondition
 IF          : 'if';
 ELIF        : 'elif';
 ELSE        : 'else';
+THEN        : 'then';
 WHILE       : 'while';
 FOR         : 'for';
 IN          : 'in';
@@ -1481,6 +1516,7 @@ CONTINUE    : 'continue';
 PASS        : 'pass';
 RAISE       : 'raise';
 TRY         : 'try';
+CATCH       : 'catch';
 FINALLY     : 'finally';
 WITH        : 'with';
 AS          : 'as';
@@ -1496,6 +1532,7 @@ IS          : 'is';
 // --- Built-in Literals ---
 TRUE        : 'True' | 'true';
 FALSE       : 'False' | 'false';
+SOME        : 'some';
 NONE        : 'None' | 'none';
 NULL        : 'null';
 UNDEFINED   : 'undefined';
@@ -1616,7 +1653,7 @@ TRIPLE_STRING
     ;
 
 FSTRING
-    : [fF] ('"""' .*? '"""' | '\'\'\'' .*? '\'\'\'' | '"' (~["\\\r\n] | '\\' .)* '"' | '\'' (~['\\\r\n] | '\\' .)* '\'')
+    : [fF$] ('"""' .*? '"""' | '\'\'\'' .*? '\'\'\'' | '"' (~["\\\r\n] | '\\' .)* '"' | '\'' (~['\\\r\n] | '\\' .)* '\'')
     ;
 
 STRING

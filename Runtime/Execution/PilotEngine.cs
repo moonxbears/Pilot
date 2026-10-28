@@ -197,6 +197,8 @@ public sealed class PilotEngine : IPilotEngine
 
         var callScope = CreateCallScope(function, arguments, context, "Call");
         var previousScope = context.Environment.SwapScope(callScope);
+        var previousFunction = context.CurrentFunction;
+        context.CurrentFunction = function;
         int deferWatermark = context.DeferStack.Count;
         int activeExtWatermark = context.ActiveExtensions.Count;
         int ctxBindWatermark = context.ContextualBindings.Count;
@@ -277,7 +279,23 @@ public sealed class PilotEngine : IPilotEngine
             }
             else
             {
-                resultVal = methodVisitor.Visit(function.AstBody!);
+                if (function.AstBody is PilotParser.Lambda_exprContext lamCtx)
+                {
+                    var stmts = lamCtx.stmt()?.Length > 0 ? lamCtx.stmt() : lamCtx.lambda_body()?.stmt();
+                    if (stmts != null)
+                    {
+                        foreach (var s in stmts)
+                        {
+                            resultVal = methodVisitor.Visit(s);
+                            if (context.PendingFlow != PilotFlowSignalKind.None)
+                                break;
+                        }
+                    }
+                }
+                else
+                {
+                    resultVal = methodVisitor.Visit(function.AstBody!);
+                }
             }
 
             if (context.PendingFlow == PilotFlowSignalKind.Return)
@@ -310,6 +328,7 @@ public sealed class PilotEngine : IPilotEngine
             {
                 context.SwapOldSnapshots(previousSnapshots);
             }
+            context.CurrentFunction = previousFunction;
             context.Environment.SwapScope(previousScope);
             context.CallDepth--;
             if (context.Debugger != null && debugFrame != null)

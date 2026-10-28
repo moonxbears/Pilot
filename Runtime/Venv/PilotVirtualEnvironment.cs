@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using Pilot.Diagnostics;
 
 namespace Pilot.Runtime.Venv;
 
@@ -22,12 +23,23 @@ public sealed class PilotVenvOptions
 public sealed class PilotVenvConfig
 {
     public string Home { get; set; } = string.Empty;
-    public string Version { get; set; } = "1.0.0";
-    public string PilotVersion { get; set; } = "1.0.0";
+    public string Version { get; set; } = Pilot.Diagnostics.PilotVersion.SemVer;
+    public string PilotVersion { get; set; } = Pilot.Diagnostics.PilotVersion.FullVersion;
     public bool IncludeSystemPackages { get; set; } = false;
     public string Prompt { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public Dictionary<string, string> Properties { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True if this virtual environment was created by the exact same commit version of Pilot currently running.
+    /// </summary>
+    public bool IsVersionMatched => Pilot.Diagnostics.PilotVersion.IsExactMatch(PilotVersion);
+
+    /// <summary>
+    /// Verifies whether this virtual environment's recorded Pilot version matches the currently running Pilot commit version.
+    /// </summary>
+    public bool CheckVersionCompatibility(out string? mismatchMessage) =>
+        Pilot.Diagnostics.PilotVersion.CheckCompatibility(PilotVersion, $"virtual environment '{Prompt}'", out mismatchMessage);
 
     public static PilotVenvConfig Load(string cfgPath)
     {
@@ -107,6 +119,12 @@ public static class PilotVirtualEnvironment
     public const string EnvVarName = "PILOT_VENV";
 
     /// <summary>
+    /// Holds the version mismatch warning if the most recently activated virtual environment
+    /// was created with a different commit version of Pilot.
+    /// </summary>
+    public static string? LastVersionMismatchWarning { get; private set; }
+
+    /// <summary>
     /// Gets the path to the currently active virtual environment, if any.
     /// Checks environment variables, then active process context.
     /// </summary>
@@ -172,8 +190,8 @@ public static class PilotVirtualEnvironment
         var config = new PilotVenvConfig
         {
             Home = homeDir,
-            Version = "1.0.0",
-            PilotVersion = "1.0.0",
+            Version = PilotVersion.SemVer,
+            PilotVersion = PilotVersion.FullVersion,
             IncludeSystemPackages = options.IncludeSystemPackages,
             Prompt = envName,
             CreatedAt = DateTime.UtcNow
@@ -234,9 +252,20 @@ public static class PilotVirtualEnvironment
     public static void Activate(string venvPath)
     {
         string fullPath = Path.GetFullPath(venvPath);
-        if (!File.Exists(Path.Combine(fullPath, ConfigFileName)))
+        string cfgFile = Path.Combine(fullPath, ConfigFileName);
+        if (!File.Exists(cfgFile))
         {
             throw new InvalidOperationException($"'{venvPath}' is not a valid Pilot virtual environment (missing {ConfigFileName}).");
+        }
+
+        var cfg = PilotVenvConfig.Load(cfgFile);
+        if (!cfg.CheckVersionCompatibility(out string? mismatch))
+        {
+            LastVersionMismatchWarning = mismatch;
+        }
+        else
+        {
+            LastVersionMismatchWarning = null;
         }
 
         System.Environment.SetEnvironmentVariable(EnvVarName, fullPath);
@@ -261,6 +290,7 @@ public static class PilotVirtualEnvironment
     /// </summary>
     public static void Deactivate()
     {
+        LastVersionMismatchWarning = null;
         System.Environment.SetEnvironmentVariable(EnvVarName, null);
         System.Environment.SetEnvironmentVariable("VIRTUAL_ENV", null);
         System.Environment.SetEnvironmentVariable("PILOT_MODULES_PATH", null);

@@ -83,6 +83,93 @@ public sealed class PilotBuiltinRegistry
             return PilotValue.FromString(args[0].Kind.ToString().ToLowerInvariant());
         }, "value");
 
+        Register("some", (_, args) =>
+        {
+            if (args.Count == 0) return PilotValue.FromSome(PilotValue.Null);
+            return PilotValue.FromSome(args[0]);
+        }, "value");
+
+        Register("fail", (_, args) =>
+        {
+            if (args.Count == 0) return PilotValue.FromFailure(PilotValue.FromString("error"));
+            return PilotValue.FromFailure(args[0]);
+        }, "error");
+
+        Register("ok", (_, args) =>
+        {
+            if (args.Count == 0) return PilotValue.Null;
+            return args[0];
+        }, "value");
+
+        Register("ignore_err", (_, _) => PilotValue.Null, "result");
+
+        Register("panic", (_, args) =>
+        {
+            string msg = args.Count > 0 ? args[0].ToString() : "Explicit runtime panic";
+            throw new PilotRuntimeException($"[ERR005] {msg}");
+        }, "message");
+
+        Register("sizeof_type", (ctx, args) =>
+        {
+            if (args.Count == 0) return PilotValue.FromInt(8);
+            string typeSpec = args[0].ToString().Trim();
+            if (PilotAdtMemoryLayout.TrySplitFallibleTypeSpec(typeSpec, out string okType, out string errType))
+            {
+                var (resSz, _, _, _) = PilotAdtMemoryLayout.ComputeResultLayout(
+                    okType,
+                    errType,
+                    ctx.AdtDefinitions,
+                    ctx.RecordDefinitions);
+                return PilotValue.FromInt(resSz);
+            }
+            if (typeSpec.EndsWith("?", StringComparison.Ordinal) && typeSpec.Length > 1)
+            {
+                var (sz, _, _) = PilotAdtMemoryLayout.ComputeOptionLayout(
+                    typeSpec[..^1],
+                    ctx.AdtDefinitions,
+                    ctx.RecordDefinitions);
+                return PilotValue.FromInt(sz);
+            }
+            if ((typeSpec.StartsWith("Option[", StringComparison.OrdinalIgnoreCase) && typeSpec.EndsWith("]", StringComparison.Ordinal)) ||
+                (typeSpec.StartsWith("Option<", StringComparison.OrdinalIgnoreCase) && typeSpec.EndsWith(">", StringComparison.Ordinal)))
+            {
+                var (sz, _, _) = PilotAdtMemoryLayout.ComputeOptionLayout(
+                    typeSpec[7..^1],
+                    ctx.AdtDefinitions,
+                    ctx.RecordDefinitions);
+                return PilotValue.FromInt(sz);
+            }
+            var (baseSz, _, _) = PilotAdtMemoryLayout.ComputeOptionLayout(
+                typeSpec,
+                ctx.AdtDefinitions,
+                ctx.RecordDefinitions);
+            // If `typeSpec` has a zero niche, `ComputeOptionLayout(typeSpec)` already equals `sizeof(typeSpec)`.
+            // Otherwise recompute via single-field dummy record layout.
+            if (PilotAdtMemoryLayout.HasZeroAllocationNiche(typeSpec, ctx.AdtDefinitions, ctx.RecordDefinitions))
+            {
+                return PilotValue.FromInt(baseSz);
+            }
+            var dummyRec = new PilotRecordDefinition("__sizeof", new[] { new PilotAdtFieldDefinition("v", typeSpec, 0) }, Array.Empty<string>());
+            var layout = PilotAdtMemoryLayout.ComputeForRecord(dummyRec, ctx.AdtDefinitions, ctx.RecordDefinitions);
+            return PilotValue.FromInt(layout.TotalSizeBytes);
+        }, "type_name");
+
+        Register("option_has_niche", (ctx, args) =>
+        {
+            if (args.Count == 0) return PilotValue.False;
+            string typeSpec = args[0].ToString().Trim();
+            if (typeSpec.EndsWith("?", StringComparison.Ordinal) && typeSpec.Length > 1)
+            {
+                typeSpec = typeSpec[..^1].Trim();
+            }
+            else if ((typeSpec.StartsWith("Option[", StringComparison.OrdinalIgnoreCase) && typeSpec.EndsWith("]", StringComparison.Ordinal)) ||
+                     (typeSpec.StartsWith("Option<", StringComparison.OrdinalIgnoreCase) && typeSpec.EndsWith(">", StringComparison.Ordinal)))
+            {
+                typeSpec = typeSpec[7..^1].Trim();
+            }
+            return PilotValue.FromBool(PilotAdtMemoryLayout.HasZeroAllocationNiche(typeSpec, ctx.AdtDefinitions, ctx.RecordDefinitions));
+        }, "type_name");
+
         Register("assert", (_, args) =>
         {
             if (args.Count == 0 || !args[0].IsTrue)
@@ -782,6 +869,45 @@ public sealed class PilotBuiltinRegistry
         hotReloadModule.Members["patch_binary"] = PilotValue.FromFunction(_functions["patch_binary"]);
 
         _functions["HotReload"] = hotReloadModule;
+
+        // ─── Commit-Bound Runtime Version Introspection ───
+        Register("pilot_version", (_, args) =>
+        {
+            if (args.Count == 0)
+            {
+                return PilotValue.FromString(Pilot.Diagnostics.PilotVersion.FullVersion);
+            }
+
+            string part = args[0].AsString().Trim().ToLowerInvariant();
+            return part switch
+            {
+                "semver" => PilotValue.FromString(Pilot.Diagnostics.PilotVersion.SemVer),
+                "base" => PilotValue.FromString(Pilot.Diagnostics.PilotVersion.BaseVersion),
+                "sha" or "commit" or "short_sha" => PilotValue.FromString(Pilot.Diagnostics.PilotVersion.ShortCommitSha),
+                "full_sha" => PilotValue.FromString(Pilot.Diagnostics.PilotVersion.FullCommitSha),
+                "count" or "commit_count" => PilotValue.FromInt(Pilot.Diagnostics.PilotVersion.CommitCount),
+                "branch" => PilotValue.FromString(Pilot.Diagnostics.PilotVersion.Branch),
+                "date" or "commit_date" => PilotValue.FromString(Pilot.Diagnostics.PilotVersion.CommitDate),
+                "banner" => PilotValue.FromString(Pilot.Diagnostics.PilotVersion.DisplayBanner),
+                _ => PilotValue.FromString(Pilot.Diagnostics.PilotVersion.FullVersion)
+            };
+        }, "part");
+
+        Register("pilot_version_info", (_, _) =>
+        {
+            var dict = new Dictionary<PilotValue, PilotValue>
+            {
+                [PilotValue.FromString("version")] = PilotValue.FromString(Pilot.Diagnostics.PilotVersion.FullVersion),
+                [PilotValue.FromString("semver")] = PilotValue.FromString(Pilot.Diagnostics.PilotVersion.SemVer),
+                [PilotValue.FromString("base_version")] = PilotValue.FromString(Pilot.Diagnostics.PilotVersion.BaseVersion),
+                [PilotValue.FromString("commit_count")] = PilotValue.FromInt(Pilot.Diagnostics.PilotVersion.CommitCount),
+                [PilotValue.FromString("commit_sha")] = PilotValue.FromString(Pilot.Diagnostics.PilotVersion.ShortCommitSha),
+                [PilotValue.FromString("full_commit_sha")] = PilotValue.FromString(Pilot.Diagnostics.PilotVersion.FullCommitSha),
+                [PilotValue.FromString("branch")] = PilotValue.FromString(Pilot.Diagnostics.PilotVersion.Branch),
+                [PilotValue.FromString("commit_date")] = PilotValue.FromString(Pilot.Diagnostics.PilotVersion.CommitDate)
+            };
+            return PilotValue.FromMap(dict);
+        });
     }
 
     private static PilotFunction GetOperatorFunction(string op)

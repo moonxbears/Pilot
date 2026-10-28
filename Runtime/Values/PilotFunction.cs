@@ -41,7 +41,7 @@ public sealed class PilotFunction
     private List<ParserRuleContext>? _ensuresContracts;
 
     public string Name { get; }
-    public IReadOnlyList<PilotParameter> Parameters { get; private set; }
+    public IReadOnlyList<PilotParameter> Parameters { get; internal set; }
     public PilotScope? ClosureScope { get; private set; }
     public ParserRuleContext? AstBody { get; private set; }
     public Func<PilotExecutionContext, IReadOnlyList<PilotValue>, PilotValue>? HostDelegate { get; private set; }
@@ -54,6 +54,10 @@ public sealed class PilotFunction
     public PilotClassDefinition? ClassDef { get; set; }
     public Pilot.Runtime.Bytecode.PilotBytecodeChunk? BytecodeChunk { get; set; }
     public int PatchVersion { get; private set; } = 0;
+    public string? ReturnTypeSpec { get; set; }
+    public string? SuccessTypeSpec { get; set; }
+    public string? ErrorTypeSpec { get; set; }
+    public bool IsFallible { get; set; }
 
     public Dictionary<string, PilotValue> Members => _members ??= new(StringComparer.Ordinal);
     public bool HasMembers => _members != null && _members.Count > 0;
@@ -194,6 +198,10 @@ public sealed class PilotFunction
         copy.ClassDef = ClassDef;
         copy.BytecodeChunk = BytecodeChunk;
         copy.PatchVersion = PatchVersion;
+        copy.ReturnTypeSpec = ReturnTypeSpec;
+        copy.SuccessTypeSpec = SuccessTypeSpec;
+        copy.ErrorTypeSpec = ErrorTypeSpec;
+        copy.IsFallible = IsFallible;
         if (_members != null)
         {
             foreach (var kv in _members) copy.Members[kv.Key] = kv.Value;
@@ -226,6 +234,10 @@ public sealed class PilotFunction
         IsVectorized = patch.IsVectorized;
         BytecodeChunk = patch.BytecodeChunk;
         Captures = patch.Captures;
+        ReturnTypeSpec = patch.ReturnTypeSpec;
+        SuccessTypeSpec = patch.SuccessTypeSpec;
+        ErrorTypeSpec = patch.ErrorTypeSpec;
+        IsFallible = patch.IsFallible;
         if (patch.ClassDef != null)
         {
             ClassDef = patch.ClassDef;

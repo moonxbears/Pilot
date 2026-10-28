@@ -1,0 +1,114 @@
+// =============================================================================
+// Milestone 12 Verification Suite: Concise Modern Null-Safety System (T?)
+// =============================================================================
+
+record User(id: int, name: str, bio: str?)
+
+// 1. Implicit lifting (T -> T?) & `none` literal
+let present_nick: str? = "Maverick"
+let absent_nick: str? = none
+assert(present_nick.is_some == true)
+assert(present_nick.is_none == false)
+assert(absent_nick.is_some == false)
+assert(absent_nick.is_none == true)
+
+// 2. Concise `guard some x else` in-place narrowing (zero `let x = x` repetition!)
+def format_greeting(nickname: str?) -> str {
+    guard some nickname else {
+        return "Hello, Guest!"
+    }
+    // `nickname` is narrowed in-place from `str?` to `str`!
+    return f"Hello, {nickname.ToUpper()}!"
+}
+
+assert(format_greeting("Maverick") == "Hello, MAVERICK!")
+assert(format_greeting(none) == "Hello, Guest!")
+
+// 3. Concise `guard some y = expr else` & `if some y = expr` binding without `let`
+def parse_positive_score(raw: str) -> int {
+    guard some parsed = raw.Trim().ToInt() when parsed > 0 else {
+        return 0
+    }
+    return parsed * 10
+}
+
+assert(parse_positive_score("  42 ") == 420)
+assert(parse_positive_score("-5") == 0)
+assert(parse_positive_score("invalid") == 0)
+
+// 4. `if some x` / `elif some x` in-place narrowing & `!= none` flow-sensitive narrowing
+def describe_user(u: User?) -> str {
+    if some u {
+        if some bio = u.bio {
+            return f"{u.name} ({bio})"
+        }
+        return f"{u.name} (no bio)"
+    }
+    return "anonymous"
+}
+
+let u1: User? = User(1, "Ada", "Compiler Pioneer")
+let u2: User? = User(2, "Grace", none)
+assert(describe_user(u1) == "Ada (Compiler Pioneer)")
+assert(describe_user(u2) == "Grace (no bio)")
+assert(describe_user(none) == "anonymous")
+
+// 5. Safe navigation (`?.`), null-coalescing (`??`), and null-coalescing assignment (`??=`)
+let bio1: str = u1?.bio ?? "default-bio"
+let bio2: str = u2?.bio ?? "default-bio"
+let bio3: str = (none)?.bio ?? "fallback-bio"
+assert(bio1 == "Compiler Pioneer")
+assert(bio2 == "default-bio")
+assert(bio3 == "fallback-bio")
+
+var cached_tag: str? = none
+cached_tag ??= "initialized-once"
+cached_tag ??= "never-overwritten"
+assert(cached_tag == "initialized-once")
+
+// 6. Explicit `.OrPanic("reason")` & `.UnwrapOr(fallback)` (replacing unsafe postfix `x!`)
+let guaranteed: int? = 99
+assert(guaranteed.OrPanic("expected present integer") == 99)
+assert(absent_nick.UnwrapOr("fallback") == "fallback")
+
+// 7. Exhaustive pattern matching on `T?` with `some(v)` and `none`
+def match_optional(val: int?) -> str {
+    return match val {
+        case some(n) when n > 100 => f"large:{n}",
+        case some(n) => f"num:{n}",
+        case none => "empty"
+    }
+}
+
+assert(match_optional(250) == "large:250")
+assert(match_optional(7) == "num:7")
+assert(match_optional(none) == "empty")
+
+// 8. Nested `T??` disambiguation (`some(none)` vs `none`) with zero heap allocation
+let outer_none: int?? = none
+let inner_none: int?? = some(none)
+let inner_val: int?? = some(42)
+
+def inspect_nested(opt: int??) -> str {
+    if some inner = opt {
+        if some v = inner {
+            return f"some(some({v}))"
+        }
+        return "some(none)"
+    }
+    return "none"
+}
+
+assert(inspect_nested(outer_none) == "none")
+assert(inspect_nested(inner_none) == "some(none)")
+assert(inspect_nested(inner_val) == "some(some(42))")
+
+// 9. Zero-allocation niche memory optimization checks
+assert(option_has_niche("User?") == true)
+assert(option_has_niche("str?") == true)
+assert(option_has_niche("bool?") == true)
+assert(sizeof_type("User?") == sizeof_type("User"))
+assert(sizeof_type("str?") == sizeof_type("str"))
+assert(guaranteed.is_unboxed == true)
+
+println("Milestone 12 Null-Safety & Option[T] verification passed!")
