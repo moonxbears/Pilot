@@ -308,7 +308,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         var analysisRes = Pilot.Analysis.PilotAnalysisPipeline.Analyze(tree);
         foreach (var diag in analysisRes.Diagnostics)
         {
-            if (diag.Code is "PILOT301" or "PILOT302" or "PILOT303" or "PILOT304" or "PILOT305" or "PILOT306")
+            if (diag.Code is "PILOT301" or "PILOT302" or "PILOT303" or "PILOT304" or "PILOT305" or "PILOT306" or "MATCH001" or "MATCH002")
             {
                 analyzer._result.Diagnostics.Add(new PilotDiagnostic
                 {
@@ -372,6 +372,16 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
     {
         foreach (var stmt in program.stmt())
         {
+            if (stmt.simple_stmt()?.small_stmt() is { } smallStmts)
+            {
+                foreach (var small in smallStmts)
+                {
+                    if (small.type_alias_stmt() is { } ta && ta.adt_sum_body() != null && ta.identifier() is { } taId)
+                    {
+                        RegisterTypeStub(taId, PilotSymbolKind.Enum, "Core / ADT");
+                    }
+                }
+            }
             var compound = stmt.compound_stmt();
             if (compound == null) continue;
 
@@ -382,6 +392,10 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             else if (compound.struct_def() is { } structDef && structDef.identifier() is { } structId)
             {
                 RegisterTypeStub(structId, PilotSymbolKind.Struct, "Core / Real-Time");
+            }
+            else if (compound.record_def() is { } recordDef && recordDef.identifier() is { } recordId)
+            {
+                RegisterTypeStub(recordId, PilotSymbolKind.Struct, "Core / ADT");
             }
             else if (compound.interface_def() is { } ifaceDef && ifaceDef.identifier() is { } ifaceId)
             {
@@ -673,6 +687,15 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
     public override string? VisitType_alias_stmt(PilotParser.Type_alias_stmtContext context)
     {
+        if (context.adt_sum_body() is { } sumBody)
+        {
+            return RegisterAdtSumTypeAlias(context, sumBody);
+        }
+        return VisitPlainTypeAlias(context);
+    }
+
+    private string? VisitPlainTypeAlias(PilotParser.Type_alias_stmtContext context)
+    {
         var idCtx = context.identifier();
         string name = idCtx.GetText();
         string targetType = context.type_spec().GetText();
@@ -788,9 +811,83 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             }
 
             Visit(lhsTest);
+            CheckImmutableMemberAssignment(lhsTest);
         }
 
         return rhsType;
+    }
+
+    private void CheckImmutableMemberAssignment(PilotParser.TestContext lhsTest)
+    {
+        var atomExpr = FindFirstAtomExpr(lhsTest);
+        if (atomExpr == null) return;
+        var trailers = atomExpr.trailer();
+        if (trailers == null || trailers.Length == 0) return;
+
+        var lastTr = trailers[^1];
+        if (lastTr.DOT() == null || lastTr.identifier() == null || lastTr.LPAR() != null)
+            return;
+
+        string? recvType = null;
+        if (atomExpr.atom()?.identifier() is { } rootId)
+        {
+            recvType = _currentScope.Resolve(rootId.GetText())?.TypeName;
+        }
+
+        for (int i = 0; i < trailers.Length - 1 && recvType != null; i++)
+        {
+            var tr = trailers[i];
+            if (tr.DOT() != null && tr.identifier() != null)
+            {
+                string basePrev = StripGenericSuffixForLookup(recvType);
+                var prevSym = _currentScope.Resolve(basePrev);
+                recvType = prevSym != null && prevSym.Members.TryGetValue(tr.identifier().GetText(), out var ms)
+                    ? ms.TypeName
+                    : null;
+            }
+            else if (tr.LSQB() != null)
+            {
+                recvType = ExtractElementType(recvType);
+            }
+        }
+
+        if (string.IsNullOrEmpty(recvType)) return;
+        string baseRecv = StripGenericSuffixForLookup(recvType!);
+        var typeSym = _currentScope.Resolve(baseRecv);
+        if (typeSym == null) return;
+
+        string fieldName = lastTr.identifier().GetText();
+        bool isImmutableAdtOrRecord = string.Equals(typeSym.Domain, "Core / ADT", StringComparison.Ordinal);
+        bool isImmutableMember = typeSym.Members.TryGetValue(fieldName, out var fieldSym) &&
+                                 !fieldSym.IsMutable &&
+                                 string.Equals(fieldSym.Domain, "Core / ADT", StringComparison.Ordinal);
+
+        if (isImmutableAdtOrRecord || isImmutableMember)
+        {
+            AddDiagnostic(
+                lastTr.identifier().Start,
+                PilotDiagnosticSeverity.Error,
+                "PILOT101",
+                $"Cannot mutate field '{fieldName}' on immutable type '{typeSym.Name}'. Records and ADT variants are immutable.");
+        }
+    }
+
+    private static string StripGenericSuffixForLookup(string typeName)
+    {
+        string trimmed = typeName.Trim().TrimEnd('?');
+        int br = trimmed.IndexOfAny(new[] { '[', '<' });
+        return br > 0 ? trimmed[..br].Trim() : trimmed;
+    }
+
+    private static PilotParser.Atom_exprContext? FindFirstAtomExpr(IParseTree tree)
+    {
+        if (tree is PilotParser.Atom_exprContext ae) return ae;
+        for (int i = 0; i < tree.ChildCount; i++)
+        {
+            var found = FindFirstAtomExpr(tree.GetChild(i));
+            if (found != null) return found;
+        }
+        return null;
     }
 
     public override string? VisitGuard_stmt(PilotParser.Guard_stmtContext context)
@@ -799,7 +896,19 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         if (context.ELSE() != null)
             AddSemanticToken(context.ELSE().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
 
-        if (context.LET() != null && context.pattern() != null)
+        if ((context.LET() != null || context.VAR() != null) && context.pattern() != null)
+        {
+            bool isMut = context.VAR() != null;
+            string? initType = context.test() != null ? Visit(context.test()) : "any";
+            if (initType != null && initType.EndsWith("?", StringComparison.Ordinal))
+                initType = initType[..^1]; // Guard unwrap narrows nullable T? -> T
+
+            BindPatternIdentifiers(context.pattern(), initType ?? "any", isMutable: isMut, "Unwrapped binding from `guard` pattern precondition.");
+            if (context.pattern_guard()?.test() != null)
+                Visit(context.pattern_guard().test());
+            return FinishGuardSuite(context);
+        }
+        if (false && context.LET() != null && context.pattern() != null)
         {
             string? initType = context.test() != null ? Visit(context.test()) : "any";
             if (initType != null && initType.EndsWith("?", StringComparison.Ordinal))
@@ -1827,7 +1936,13 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
         using (EnterScope("while", context, inLoop: true))
         {
+            if (context.pattern() != null)
+            {
+                BindPatternIdentifiers(context.pattern(), "any", isMutable: context.VAR() != null, "Pattern variable bound in `while let` loop.");
+            }
+        {
             foreach (var s in context.suite()) Visit(s);
+        }
         }
         return "void";
     }
@@ -1868,6 +1983,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
         using (EnterScope("for", context, inLoop: true, inAsync: isAsync || _currentScope.InAsync))
         {
+        {
             if (context.for_target() != null)
             {
                 var bindingPatterns = context.for_target().binding_pattern();
@@ -1895,6 +2011,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             }
             foreach (var s in context.suite()) Visit(s);
         }
+        }
         return "void";
     }
 
@@ -1915,7 +2032,7 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             foreach (var elseTok in context.ELSE())
                 AddSemanticToken(elseTok.Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
         }
-        return base.VisitIf_stmt(context);
+        return VisitIfBranchesWithPatterns(context);
     }
 
     public override string? VisitFlow_stmt(PilotParser.Flow_stmtContext context)
@@ -2730,6 +2847,10 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             return $"({string.Join(", ", elemTypes)})";
         }
 
+        if (context.match_stmt() is { } matchExpr)
+        {
+            return VisitMatch_stmt(matchExpr) ?? "any";
+        }
         return base.VisitAtom(context);
     }
 
@@ -3125,7 +3246,365 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         BindPatternNode(pattern, typeName, isMutable, doc);
     }
 
+    public override string? VisitRecord_def(PilotParser.Record_defContext context)
+    {
+        if (context.RECORD() != null)
+            AddSemanticToken(context.RECORD().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
+        var idCtx = context.identifier();
+        string name = idCtx.GetText();
+        var symbol = CreateSymbol(idCtx, context, name, PilotSymbolKind.Struct, name, "Core / ADT",
+            $"record {name}", "Immutable value-semantic product type (`record`).");
+        RegisterSymbol(symbol, PilotSemanticTokenLegend.TypeStruct, PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModDefinition | PilotSemanticTokenLegend.ModReadonly);
+
+        using (EnterScope($"record:{name}", context, enclosingType: symbol))
+        {
+            RegisterGenericParams(context.generic_params(), symbol);
+            if (context.adt_field_list()?.adt_field() is { } adtFields)
+            {
+                for (int i = 0; i < adtFields.Length; i++)
+                {
+                    var f = adtFields[i];
+                    string fType = f.type_spec().GetText();
+                    Visit(f.type_spec());
+                    if (f.identifier() is { } fId)
+                    {
+                        string fName = fId.GetText();
+                        var fSym = CreateSymbol(fId, f, fName, PilotSymbolKind.Property, fType, "Core / ADT",
+                            $"let {fName}: {fType}", $"Immutable field of record `{name}`.", isMutable: false);
+                        RegisterSymbol(fSym, PilotSemanticTokenLegend.TypeProperty, PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModReadonly);
+                        symbol.Members[fName] = fSym;
+                        symbol.Children.Add(fSym);
+                        symbol.Parameters.Add((fName, fType));
+                    }
+                    else
+                    {
+                        symbol.Parameters.Add(($"item{i}", fType));
+                    }
+                    if (f.test() != null) Visit(f.test());
+                }
+            }
+            foreach (var member in context.struct_member())
+            {
+                var mId = member.identifier();
+                string mName = mId.GetText();
+                string mType = member.type_annotation().type_spec().GetText();
+                Visit(member.type_annotation().type_spec());
+                var mSym = CreateSymbol(mId, member, mName, PilotSymbolKind.Property, mType, "Core / ADT",
+                    $"let {mName}: {mType}", $"Immutable field of record `{name}`.", isMutable: false);
+                RegisterSymbol(mSym, PilotSemanticTokenLegend.TypeProperty, PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModReadonly);
+                symbol.Members[mName] = mSym;
+                symbol.Children.Add(mSym);
+                symbol.Parameters.Add((mName, mType));
+                if (member.test() != null) Visit(member.test());
+            }
+            foreach (var st in context.stmt()) Visit(st);
+        }
+
+        return name;
+    }
+
+    private string RegisterAdtSumTypeAlias(PilotParser.Type_alias_stmtContext context, PilotParser.Adt_sum_bodyContext sumBody)
+    {
+        var idCtx = context.identifier();
+        string name = idCtx.GetText();
+        var symbol = CreateSymbol(idCtx, context, name, PilotSymbolKind.Enum, name, "Core / ADT",
+            $"type {name}", "First-class discriminated algebraic sum type (ADT).");
+        RegisterSymbol(symbol, PilotSemanticTokenLegend.TypeEnum, PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModDefinition);
+
+        using (EnterScope($"adt:{name}", context, enclosingType: symbol))
+        {
+            RegisterGenericParams(context.generic_params(), symbol);
+            for (int i = 0; i < sumBody.ChildCount; i++)
+            {
+                var ch = sumBody.GetChild(i);
+                if (ch is PilotParser.IdentifierContext unitId)
+                {
+                    RegisterAdtVariantSymbol(symbol, unitId, sumBody, name, null, null);
+                }
+                else if (ch is PilotParser.Adt_variantContext vc)
+                {
+                    RegisterAdtVariantSymbol(symbol, vc.identifier(), vc, name, vc.adt_field_list(), vc.struct_member());
+                }
+                else if (ch is PilotParser.Adt_variant_payloadContext vpc)
+                {
+                    RegisterAdtVariantSymbol(symbol, vpc.identifier(), vpc, name, vpc.adt_field_list(), vpc.struct_member());
+                }
+            }
+        }
+
+        // Expose ADT variant constructors directly in the enclosing scope for ergonomic construction & matching
+        foreach (var kvp in symbol.Members)
+        {
+            if (!_currentScope.Symbols.ContainsKey(kvp.Key))
+            {
+                _currentScope.Symbols[kvp.Key] = kvp.Value;
+            }
+        }
+
+        return name;
+    }
+
+    private void RegisterAdtVariantSymbol(
+        PilotSymbol adtSymbol,
+        PilotParser.IdentifierContext vId,
+        ParserRuleContext fullCtx,
+        string adtName,
+        PilotParser.Adt_field_listContext? fieldList,
+        PilotParser.Struct_memberContext[]? structMembers)
+    {
+        string vName = vId.GetText();
+        bool hasPayload = fieldList != null || (structMembers != null && structMembers.Length > 0);
+        var kind = hasPayload ? PilotSymbolKind.Function : PilotSymbolKind.EnumMember;
+        var vSym = CreateSymbol(vId, fullCtx, vName, kind, adtName, "Core / ADT",
+            hasPayload ? $"{vName}(...) -> {adtName}" : $"{adtName}.{vName}",
+            $"Variant `{vName}` of sum type `{adtName}`.");
+        RegisterSymbol(vSym, hasPayload ? PilotSemanticTokenLegend.TypeFunction : PilotSemanticTokenLegend.TypeEnumMember,
+            PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModReadonly);
+
+        if (fieldList?.adt_field() != null)
+        {
+            foreach (var f in fieldList.adt_field())
+            {
+                Visit(f.type_spec());
+                vSym.Parameters.Add((f.identifier()?.GetText() ?? "_", f.type_spec().GetText()));
+            }
+        }
+        else if (structMembers != null)
+        {
+            foreach (var m in structMembers)
+            {
+                Visit(m.type_annotation().type_spec());
+                vSym.Parameters.Add((m.identifier().GetText(), m.type_annotation().type_spec().GetText()));
+            }
+        }
+
+        adtSymbol.Members[vName] = vSym;
+        adtSymbol.Children.Add(vSym);
+    }
+
+    private string FinishGuardSuite(PilotParser.Guard_stmtContext context)
+    {
+        var suite = context.suite();
+        if (suite != null)
+        {
+            Visit(suite);
+            if (!SuiteGuaranteesExit(suite))
+            {
+                AddDiagnostic(
+                    context.GUARD().Symbol,
+                    PilotDiagnosticSeverity.Error,
+                    "PILOT103",
+                    "Mandatory precondition 'guard' else-block must exit the enclosing scope via 'return', 'raise', 'break', or 'continue'.");
+            }
+        }
+        return "void";
+    }
+
+    private string? VisitIfBranchesWithPatterns(PilotParser.If_stmtContext context)
+    {
+        int childIdx = 0;
+        int n = context.ChildCount;
+        while (childIdx < n)
+        {
+            var tok = (context.GetChild(childIdx) as ITerminalNode)?.Symbol;
+            if (tok != null && (tok.Type == PilotLexer.IF || tok.Type == PilotLexer.ELIF))
+            {
+                childIdx++;
+                bool hasLetVar = false;
+                bool isMut = false;
+                PilotParser.PatternContext? branchPat = null;
+                if (childIdx < n && context.GetChild(childIdx) is ITerminalNode lv &&
+                    (lv.Symbol.Type == PilotLexer.LET || lv.Symbol.Type == PilotLexer.VAR))
+                {
+                    hasLetVar = true;
+                    isMut = lv.Symbol.Type == PilotLexer.VAR;
+                    AddSemanticToken(lv.Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+                    childIdx++;
+                    if (childIdx < n && context.GetChild(childIdx) is PilotParser.PatternContext pc)
+                    {
+                        branchPat = pc;
+                        childIdx++;
+                    }
+                    if (childIdx < n && (context.GetChild(childIdx) as ITerminalNode)?.Symbol.Type == PilotLexer.EQUAL)
+                    {
+                        childIdx++;
+                    }
+                }
+
+                string rhsType = "any";
+                if (childIdx < n && context.GetChild(childIdx) is PilotParser.TestContext tc)
+                {
+                    rhsType = Visit(tc) ?? "any";
+                    if (hasLetVar && rhsType.EndsWith("?", StringComparison.Ordinal))
+                        rhsType = rhsType[..^1];
+                    childIdx++;
+                }
+
+                PilotParser.Pattern_guardContext? branchGuard = null;
+                if (childIdx < n && context.GetChild(childIdx) is PilotParser.Pattern_guardContext pgc)
+                {
+                    branchGuard = pgc;
+                    childIdx++;
+                }
+
+                if (childIdx < n && (context.GetChild(childIdx) as ITerminalNode)?.Symbol.Type == PilotLexer.COLON)
+                    childIdx++;
+
+                if (childIdx < n && context.GetChild(childIdx) is PilotParser.SuiteContext sc)
+                {
+                    if (hasLetVar && branchPat != null)
+                    {
+                        using (EnterScope($"if_let_{sc.Start.Line}", sc))
+                        {
+                            BindPatternIdentifiers(branchPat, rhsType, isMutable: isMut, "Conditional pattern binding.");
+                            if (branchGuard?.test() != null)
+                                Visit(branchGuard.test());
+                            Visit(sc);
+                        }
+                    }
+                    else
+                    {
+                        if (branchGuard?.test() != null)
+                            Visit(branchGuard.test());
+                        Visit(sc);
+                    }
+                    childIdx++;
+                }
+                continue;
+            }
+
+            if (tok != null && tok.Type == PilotLexer.ELSE)
+            {
+                childIdx++;
+                if (childIdx < n && (context.GetChild(childIdx) as ITerminalNode)?.Symbol.Type == PilotLexer.COLON)
+                    childIdx++;
+                if (childIdx < n && context.GetChild(childIdx) is PilotParser.SuiteContext elseSc)
+                {
+                    Visit(elseSc);
+                    childIdx++;
+                }
+                continue;
+            }
+
+            childIdx++;
+        }
+        return "void";
+    }
+
+    private void BindPatternVarSingle(
+        PilotParser.IdentifierContext idCtx,
+        ParserRuleContext fullCtx,
+        string resolvedType,
+        bool isMutable,
+        string doc)
+    {
+        string varName = idCtx.GetText();
+        if (varName == "_") return;
+
+        if (_currentScope.Symbols.TryGetValue(varName, out var existingLocal) && existingLocal.Kind == PilotSymbolKind.Variable)
+        {
+            AddSymbolReference(idCtx.Start, existingLocal);
+            return;
+        }
+
+        var sym = CreateSymbol(idCtx, fullCtx, varName, PilotSymbolKind.Variable, resolvedType, "Core",
+            $"{(isMutable ? "var" : "let")} {varName}: {resolvedType}", doc, isMutable: isMutable);
+        int mods = PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModDefinition;
+        if (!isMutable) mods |= PilotSemanticTokenLegend.ModReadonly;
+        RegisterSymbol(sym, PilotSemanticTokenLegend.TypeVariable, mods);
+    }
+
     private void BindPatternNode(IParseTree node, string typeName, bool isMutable, string doc)
+    {
+        if (node is PilotParser.Not_patternContext notPat && notPat.AT() != null && notPat.identifier() != null)
+        {
+            bool atMut = notPat.VAR() != null || isMutable;
+            BindPatternVarSingle(notPat.identifier(), notPat, typeName, atMut, doc);
+            if (notPat.not_pattern() != null)
+            {
+                BindPatternNode(notPat.not_pattern(), typeName, isMutable, doc);
+            }
+            return;
+        }
+
+        if (node is PilotParser.Keyword_patternContext kwPat)
+        {
+            if (kwPat.symbol_literal()?.identifier() is { } kwId)
+                AddSemanticToken(kwId.Start, PilotSemanticTokenLegend.TypeString, 0);
+            foreach (var arg in kwPat.pattern_arg())
+            {
+                if (arg.pattern() != null)
+                    BindPatternNode(arg.pattern(), "any", isMutable, doc);
+            }
+            return;
+        }
+
+        if (node is PilotParser.Pattern_argContext patArg)
+        {
+            if (patArg.pattern() != null)
+                BindPatternNode(patArg.pattern(), "any", isMutable, doc);
+            return;
+        }
+
+        if (node is PilotParser.Property_pattern_memberContext propSub)
+        {
+            if (propSub.pattern() != null)
+            {
+                BindPatternNode(propSub.pattern(), "any", isMutable, doc);
+            }
+            return;
+        }
+
+        if (node is PilotParser.Type_or_var_patternContext typeVar)
+        {
+            bool explicitMut = typeVar.VAR() != null || isMutable;
+            if (typeVar.identifier() != null)
+            {
+                var idCtx = typeVar.identifier();
+                var resolvedType = typeVar.dotted_name() != null ? typeVar.dotted_name().GetText() : typeName;
+                BindPatternVarSingle(idCtx, typeVar, resolvedType, explicitMut, doc);
+                return;
+            }
+
+            if (typeVar.dotted_name() != null &&
+                typeVar.LPAR() == null &&
+                typeVar.property_pattern() == null &&
+                typeVar.generic_pattern_suffix() == null &&
+                typeVar.dotted_name().identifier().Length == 1)
+            {
+                var idCtx = typeVar.dotted_name().identifier(0);
+                string idName = idCtx.GetText();
+                if (typeVar.VAR() == null && typeVar.LET() == null)
+                {
+                    var outerSym = _currentScope.Resolve(idName);
+                    if (outerSym != null && outerSym.Kind is PilotSymbolKind.EnumMember or PilotSymbolKind.Enum or PilotSymbolKind.Struct or PilotSymbolKind.Class)
+                    {
+                        AddSymbolReference(idCtx.Start, outerSym);
+                        AddSemanticToken(idCtx.Start, GetSemanticTokenTypeForSymbol(outerSym), 0);
+                        return;
+                    }
+                }
+                BindPatternVarSingle(idCtx, typeVar, typeName, explicitMut, doc);
+                return;
+            }
+        }
+        else if (node is PilotParser.Slice_pattern_elementContext sliceElem)
+        {
+            if (sliceElem.pattern() != null)
+            {
+                BindPatternNode(sliceElem.pattern(), typeName, isMutable, doc);
+            }
+            return;
+        }
+
+        for (int i = 0; i < node.ChildCount; i++)
+        {
+            BindPatternNode(node.GetChild(i), typeName, isMutable, doc);
+        }
+    }
+
+    private void BindPatternNodeLegacyUnused(IParseTree node, string typeName, bool isMutable, string doc)
     {
         if (node is PilotParser.Type_or_var_patternContext typeVar)
         {

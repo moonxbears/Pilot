@@ -1,6 +1,6 @@
 # Pilot Language Documentation Hub
 
-[**Home**](index.md) | [**Lexical Reference**](lexical-reference.md) | [**Syntax Reference**](syntax-reference.md) | [**Functions & API Reference**](functions-and-apis.md) | [**Main README**](../README.md)
+[**Home**](index.md) | [**Milestones & Roadmap**](../MILESTONES.md) | [**Lexical Reference**](lexical-reference.md) | [**Syntax Reference**](syntax-reference.md) | [**Functions & API Reference**](functions-and-apis.md) | [**Main README**](../README.md)
 
 ---
 
@@ -12,6 +12,7 @@ Welcome to the comprehensive, navigable documentation for the **Pilot Programmin
 
 | Reference Manual | Description | Key Contents |
 | :--- | :--- | :--- |
+| [**Milestones & Roadmap**](../MILESTONES.md) | Dependency-verified roadmap, concurrency schedule, and conflict-resolution tracker across sessions | Completed milestones (M1–M10) and Phase A–C roadmap (M11–M27: exhaustive ADTs, concise `T?` null-safety, localized `T ! E` value errors, class-like literals & `extend`, dynamic-schedule `for` loops & C-ABI slices, advanced type inference, first-class keywords & call-quoting, reactive/autodiff/dry-run projections, `comptime` demotion, accurate bidirectional `--emit`/`--from` transpilers & `pilot fmt` with `--viable-license-only`, Core & Extended `stdlib`, DAP GUI breakpoints, `pilot build` LLVM/WASM linking, `pilot perf`, self-hosted compiler, and package registry options) |
 | [**Lexical Reference**](lexical-reference.md) | Complete specification of Pilot's lexical structure and preprocessor | 140+ Keywords, Contextual Keywords, Numeric/Dimensional/String Literals, Operators, Delimiters, Comments, and Preprocessor Directives (`#define`, `#if`, `#region`, `#pragma`) |
 | [**Syntax Reference**](syntax-reference.md) | Formal grammar rules, statement forms, type expressions, and operator precedence | Program structure, Type annotations, Declarations, Functions, Classes, Pattern Matching, Database queries, Concurrency blocks, Real-Time constructs, and Full Precedence Table |
 | [**Functions & API Reference**](functions-and-apis.md) | Every global function, module, scripting utility, type method, and contract | Global Built-ins, `json` & `venv` modules, Scripting Host API (`args`, `env`, `cwd`, file I/O), Root Object methods, Collection/String/Matrix/Async methods, Standard Contracts, and Exceptions |

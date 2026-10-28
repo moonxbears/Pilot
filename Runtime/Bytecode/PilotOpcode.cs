@@ -5,7 +5,8 @@ namespace Pilot.Runtime.Bytecode;
 /// <summary>
 /// Virtual machine opcode instruction set for the PilVM bytecode engine.
 /// Provides a high-performance stack/slot hybrid architecture with direct-indexed locals,
-/// fast arithmetic dispatch, compact control-flow jumping, and full host/AST interoperability.
+/// fast arithmetic dispatch, compact control-flow jumping, O(1) ADT/integer jump tables,
+/// and full host/AST interoperability.
 /// </summary>
 public enum PilotOpcode : byte
 {
@@ -172,5 +173,53 @@ public enum PilotOpcode : byte
     EvalAst,
 
     /// <summary>Halts VM execution.</summary>
-    Halt
+    Halt,
+
+    // =========================================================================
+    // Milestone 11: ADTs, Records & Decision-Tree / O(1) Jump Table Opcodes
+    // =========================================================================
+
+    /// <summary>
+    /// Pops an integer/boolean/char/ADT discriminant and dispatches in O(1) via chunk.JumpTables[Operand].
+    /// </summary>
+    JumpTable,
+
+    /// <summary>
+    /// Pops a value; if it is an ADT matching IdentifierPool[Operand] (or any ADT when Operand &lt; 0),
+    /// pushes its integer variant tag (0..K-1); otherwise pushes -1.
+    /// </summary>
+    GetAdtTag,
+
+    /// <summary>
+    /// Pops an ADT, Record, Tuple, List, or KeywordVariant and pushes field/element at Operand index
+    /// (supports negative indices from end for List/Tuple).
+    /// </summary>
+    GetAdtField,
+
+    /// <summary>
+    /// Registers chunk.TypeDescriptors[Operand] (ADT sum type or Record product type) into runtime context &amp; scope.
+    /// </summary>
+    DeclareTypeDescriptor,
+
+    /// <summary>
+    /// Pops a value; if it is a List or Tuple (matching Tuple when Extra == 1, or List/Tuple when Extra == 0),
+    /// pushes its integer element count; otherwise pushes -1.
+    /// </summary>
+    GetSequenceLen,
+
+    /// <summary>
+    /// Pops a List or Tuple and pushes a new List containing elements from index Operand up to (Count - Extra).
+    /// </summary>
+    SliceSublist,
+
+    /// <summary>
+    /// Pops a value; pushes True if it matches `:kw` (Extra == -1) or `:kw(args...)` with arity Extra (Extra &gt;= 0)
+    /// where `kw` is IdentifierPool[Operand]; otherwise pushes False.
+    /// </summary>
+    CheckKeywordTag,
+
+    /// <summary>
+    /// Pops a value; pushes True if it is a Record whose type name equals IdentifierPool[Operand]; otherwise pushes False.
+    /// </summary>
+    CheckRecordType
 }

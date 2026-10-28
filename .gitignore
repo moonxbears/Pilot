@@ -67,7 +67,8 @@ __pycache__/
 !Runtime/Venv/
 
 # ------------------------------------------------------------------------------
-# Operating System Files
+# Operating System & Local AI Cache Files
 # ------------------------------------------------------------------------------
 .DS_Store
 Thumbs.db
+.agents/.ai_index_stamp

@@ -1,0 +1,23 @@
+{
+  "ai-codebase-index-sync": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/sync_ai_index_hook.ps1",
+        "timeout": 15
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/sync_ai_index_hook.ps1",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

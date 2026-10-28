@@ -1,0 +1,146 @@
+# Suite 28: Algebraic Data Types (ADTs) & Exhaustive Pattern Matching
+
+# 1. Immutable Value-Semantic Records & Compact Unboxed Inline Storage
+record Point(x: f64, y: f64);
+
+let p1 = Point(3.0, 4.0);
+let p2 = Point(3.0, 4.0);
+let p3 = Point(x: 6.0, y: 8.0);
+
+assert(p1 == p2, "Record instances with identical fields must be equal by value");
+assert(p1 != p3, "Record instances with distinct fields must not be equal");
+assert(p1.x == 3.0 and p1.y == 4.0, "Record field projection must match constructor args");
+assert(p1.is_unboxed == true, "2-float Point record must use unboxed inline storage");
+assert(p1.size_of == 16, "Point(f64, f64) layout must be 16 bytes");
+
+let grid = { Point(0.0, 0.0): "origin", Point(3.0, 4.0): "waypoint" };
+assert(grid[p2] == "waypoint", "Value-semantic records must hash structurally in maps");
+
+# 2. First-Class Sum Types (`type`) & Compact Tagged-Union Layout
+type Shape =
+    | Circle(radius: f64)
+    | Rectangle(width: f64, height: f64)
+    | Polygon(points: Point[])
+    | Origin;
+
+assert(Shape.tag_bytes == 1, "4-variant ADT must use compact 1-byte u8 discriminant tag");
+assert(Shape.is_recursive == false, "Slice payload Point[] does not create inline recursion");
+
+let c = Circle(radius: 5.0);
+let sq = Rectangle(height: 4.0, width: 4.0);
+let rect = Rectangle(3.0, 7.0);
+let poly = Polygon([Point(0.0, 0.0), Point(3.0, 4.0), Point(6.0, 0.0)]);
+let orig = Origin;
+
+assert(orig.is_unboxed == true, "Unit variant Origin must be stored inline without heap boxing");
+assert(c.is_unboxed == true, "Single-primitive variant Circle(f64) must be stored inline");
+assert(c == Circle(5.0), "ADT variants must support structural value equality");
+
+# 3. Exhaustive `match` Expressions, `@` Whole-Value Bindings, Guards & Slice Destructuring
+def describe_shape(s: Shape) -> str {
+    return match s {
+        case Origin => "origin"
+        case Circle(r) => "circle:" + r
+        case whole @ Rectangle(w, h) when w == h => "square:" + whole.width
+        case Rectangle(w, h) => "rect:" + w + "x" + h
+        case Polygon([]) => "empty_poly"
+        case Polygon([Point(x0, y0), ..rest]) => "poly_head(" + x0 + "," + y0 + ")_tail:" + len(rest)
+    };
+}
+
+assert(describe_shape(orig) == "origin", "Unit variant match failed");
+assert(describe_shape(c) == "circle:5", "Circle destructuring match failed");
+assert(describe_shape(sq) == "square:4", "@ whole-value binding with when-guard failed");
+assert(describe_shape(rect) == "rect:3x7", "Fallback unguarded Rectangle arm failed");
+assert(describe_shape(Polygon([])) == "empty_poly", "Empty slice pattern failed");
+assert(describe_shape(poly) == "poly_head(0,0)_tail:2", "Nested record + slice pattern failed");
+
+# 4. Generic & Recursive ADTs (`Expr[T]`)
+type Expr[T] =
+    | Const(value: T)
+    | Add(left: Expr[T], right: Expr[T])
+    | Mul(left: Expr[T], right: Expr[T]);
+
+assert(Expr.is_recursive == true, "Self-referential Expr[T] must detect recursive cycle edges");
+
+def eval_expr(e: Expr[int]) -> int {
+    return match e {
+        case Const(v) => v
+        case Add(l, r) => eval_expr(l) + eval_expr(r)
+        case Mul(l, r) => eval_expr(l) * eval_expr(r)
+    };
+}
+
+# (2 + 3) * 7 = 35
+let ast = Mul(Add(Const(2), Const(3)), Const(7));
+assert(eval_expr(ast) == 35, "Recursive generic ADT evaluation failed");
+
+# 5. Range Patterns (Inclusive `..` vs Half-Open `..<`), Or-Patterns (`|`) & `:kw` Destructuring
+def classify_code(code: int) -> str {
+    return match code {
+        case 0..<10 => "single_digit"
+        case 200..299 => "http_2xx"
+        case 400 | 404 | 422 => "client_err"
+        case _ => "other"
+    };
+}
+
+assert(classify_code(0) == "single_digit", "0..<10 must include lower bound 0");
+assert(classify_code(9) == "single_digit", "0..<10 must include 9");
+assert(classify_code(10) == "other", "0..<10 half-open range must exclude upper bound 10");
+assert(classify_code(200) == "http_2xx" and classify_code(299) == "http_2xx", "200..299 inclusive range failed");
+assert(classify_code(404) == "client_err", "Or-pattern failed");
+
+def parse_packet(pkt) -> str {
+    return match pkt {
+        case :ok([head, ..tail]) => "ok:" + head + ":rem=" + len(tail)
+        case :pending | :running => "in_flight"
+        case :err(reason) => "err:" + reason
+        case _ => "unknown"
+    };
+}
+
+assert(parse_packet(:ok([10, 20, 30])) == "ok:10:rem=2", "Keyword + slice pattern failed");
+assert(parse_packet(:pending) == "in_flight" and parse_packet(:running) == "in_flight", "Keyword or-pattern failed");
+assert(parse_packet(:err("timeout")) == "err:timeout", "Keyword payload pattern failed");
+
+# 6. Conditional Pattern Bindings (`if let`, `elif let`, `guard let ... else`, `while let`)
+def radius_or_area(s: Shape) -> f64 {
+    if let Circle(r) = s {
+        return r;
+    } elif let Rectangle(w, h) = s {
+        return w * h;
+    } else {
+        return 0.0;
+    }
+}
+
+assert(radius_or_area(c) == 5.0, "if let Circle(r) failed");
+assert(radius_or_area(rect) == 21.0, "elif let Rectangle(w, h) failed");
+assert(radius_or_area(orig) == 0.0, "if let else branch failed");
+
+def require_circle_diameter(s: Shape) -> f64 {
+    guard let Circle(r) = s else {
+        return -1.0;
+    }
+    return r * 2.0;
+}
+
+assert(require_circle_diameter(c) == 10.0, "guard let success path failed");
+assert(require_circle_diameter(orig) == -1.0, "guard let else early-return failed");
+
+enum StepStream {
+    | Emit(val: int)
+    | Stop
+}
+
+let events = [Emit(4), Emit(6), Emit(5), Stop, Emit(99)];
+var idx = 0;
+var acc = 0;
+while let Emit(v) = events[idx] {
+    acc = acc + v;
+    idx = idx + 1;
+}
+assert(acc == 15 and idx == 3, "while let loop termination on Stop failed");
+
+print("ADT and exhaustive pattern matching suite passed successfully!");

@@ -1,18 +1,68 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text;
 using Antlr4.Runtime.Tree;
 using Pilot.Runtime.Values;
 
 namespace Pilot.Runtime.Bytecode;
 
 /// <summary>
+/// Dense O(1) jump table used by <see cref="PilotOpcode.JumpTable"/> for ADT tag and integer interval dispatch.
+/// </summary>
+public sealed class PilotJumpTable
+{
+    public long MinValue { get; set; }
+    public int[] Targets { get; set; }
+    public int DefaultTarget { get; set; }
+
+    public PilotJumpTable(long minValue, int[] targets, int defaultTarget)
+    {
+        MinValue = minValue;
+        Targets = targets;
+        DefaultTarget = defaultTarget;
+    }
+}
+
+/// <summary>
+/// Serializable field metadata for an ADT variant or Record product type in `.pilc` bytecode chunks.
+/// </summary>
+public sealed class PilotSerializedFieldDescriptor
+{
+    public string? Name { get; set; }
+    public string TypeName { get; set; } = "any";
+}
+
+/// <summary>
+/// Serializable variant metadata for an ADT sum type in `.pilc` bytecode chunks.
+/// </summary>
+public sealed class PilotSerializedVariantDescriptor
+{
+    public string Name { get; set; } = "";
+    public List<PilotSerializedFieldDescriptor> Fields { get; set; } = new();
+}
+
+/// <summary>
+/// Serializable ADT or Record descriptor persisted inside `.pilc` bytecode chunks so standalone
+/// binary execution reconstructs exact memory layouts and constructors without AST access.
+/// </summary>
+public sealed class PilotBytecodeTypeDescriptor
+{
+    public bool IsRecord { get; set; }
+    public string Name { get; set; } = "";
+    public List<string> GenericParameters { get; set; } = new();
+    public List<PilotSerializedVariantDescriptor> Variants { get; set; } = new();
+    public List<PilotSerializedFieldDescriptor> RecordFields { get; set; } = new();
+}
+
+/// <summary>
 /// Encapsulates a compiled sequence of bytecode instructions, constant pool,
-/// variable bindings, local slot layout, and nested closure chunks.
+/// variable bindings, local slot layout, O(1) jump tables, ADT/record descriptors,
+/// and nested closure chunks.
 /// </summary>
 public sealed class PilotBytecodeChunk
 {
+    private const int ChunkFormatV2Marker = -0x50494C32; // Distinguishes M11 extended tail cleanly if needed
+
     public string Name { get; set; } = "<main>";
     public List<PilotInstruction> Instructions { get; } = new();
     public List<PilotValue> Constants { get; } = new();
@@ -22,6 +72,8 @@ public sealed class PilotBytecodeChunk
     public Dictionary<string, int> LocalSlotMap { get; } = new(StringComparer.Ordinal);
     public int LocalCount { get; set; } = 0;
     public List<IParseTree> AstFallbackNodes { get; } = new();
+    public List<PilotJumpTable> JumpTables { get; } = new();
+    public List<PilotBytecodeTypeDescriptor> TypeDescriptors { get; } = new();
     public PilotParser.Func_defContext? FuncDefContext { get; set; }
 
     public int InstructionCount => Instructions.Count;
@@ -64,13 +116,31 @@ public sealed class PilotBytecodeChunk
     }
 
     /// <summary>
+    /// Adds a dense O(1) jump table to the chunk, returning its index.
+    /// </summary>
+    public int AddJumpTable(PilotJumpTable table)
+    {
+        JumpTables.Add(table);
+        return JumpTables.Count - 1;
+    }
+
+    /// <summary>
+    /// Adds an ADT or Record descriptor to the chunk, returning its index.
+    /// </summary>
+    public int AddTypeDescriptor(PilotBytecodeTypeDescriptor descriptor)
+    {
+        TypeDescriptors.Add(descriptor);
+        return TypeDescriptors.Count - 1;
+    }
+
+    /// <summary>
     /// Adds a value to the constant pool, returning its index. Reuses identical constants when possible.
     /// </summary>
     public int AddConstant(PilotValue value)
     {
         for (int i = 0; i < Constants.Count; i++)
         {
-            if (Constants[i].Equals(value))
+            if (Constants[i].Kind == value.Kind && Constants[i].Equals(value))
             {
                 return i;
             }
@@ -187,6 +257,48 @@ public sealed class PilotBytecodeChunk
             writer.Write(inst.Extra);
             writer.Write(inst.Line);
         }
+
+        // Milestone 11 Extension Section: JumpTables & TypeDescriptors
+        writer.Write(ChunkFormatV2Marker);
+        writer.Write(JumpTables.Count);
+        foreach (var jt in JumpTables)
+        {
+            writer.Write(jt.MinValue);
+            writer.Write(jt.DefaultTarget);
+            writer.Write(jt.Targets.Length);
+            for (int i = 0; i < jt.Targets.Length; i++)
+            {
+                writer.Write(jt.Targets[i]);
+            }
+        }
+
+        writer.Write(TypeDescriptors.Count);
+        foreach (var td in TypeDescriptors)
+        {
+            writer.Write(td.IsRecord);
+            writer.Write(td.Name);
+            writer.Write(td.GenericParameters.Count);
+            foreach (var gp in td.GenericParameters) writer.Write(gp);
+
+            writer.Write(td.Variants.Count);
+            foreach (var v in td.Variants)
+            {
+                writer.Write(v.Name);
+                writer.Write(v.Fields.Count);
+                foreach (var f in v.Fields)
+                {
+                    writer.Write(f.Name ?? string.Empty);
+                    writer.Write(f.TypeName);
+                }
+            }
+
+            writer.Write(td.RecordFields.Count);
+            foreach (var rf in td.RecordFields)
+            {
+                writer.Write(rf.Name ?? string.Empty);
+                writer.Write(rf.TypeName);
+            }
+        }
     }
 
     public static PilotBytecodeChunk Read(BinaryReader reader)
@@ -245,7 +357,97 @@ public sealed class PilotBytecodeChunk
             chunk.Instructions.Add(new PilotInstruction(op, operand, extra, line));
         }
 
+        // Milestone 11 Extension Section (gracefully backward-compatible if reading V1 stream at EOF)
+        if (reader.BaseStream.CanSeek && reader.BaseStream.Position + 4 <= reader.BaseStream.Length)
+        {
+            long pos = reader.BaseStream.Position;
+            int marker = reader.ReadInt32();
+            if (marker == ChunkFormatV2Marker)
+            {
+                ReadV2Extensions(reader, chunk);
+            }
+            else
+            {
+                reader.BaseStream.Position = pos;
+            }
+        }
+        else if (!reader.BaseStream.CanSeek)
+        {
+            try
+            {
+                int marker = reader.ReadInt32();
+                if (marker == ChunkFormatV2Marker)
+                {
+                    ReadV2Extensions(reader, chunk);
+                }
+            }
+            catch (EndOfStreamException)
+            {
+            }
+        }
+
         return chunk;
+    }
+
+    private static void ReadV2Extensions(BinaryReader reader, PilotBytecodeChunk chunk)
+    {
+        int jtCount = reader.ReadInt32();
+        for (int i = 0; i < jtCount; i++)
+        {
+            long minVal = reader.ReadInt64();
+            int defaultTarget = reader.ReadInt32();
+            int len = reader.ReadInt32();
+            var targets = new int[len];
+            for (int t = 0; t < len; t++)
+            {
+                targets[t] = reader.ReadInt32();
+            }
+            chunk.JumpTables.Add(new PilotJumpTable(minVal, targets, defaultTarget));
+        }
+
+        int tdCount = reader.ReadInt32();
+        for (int i = 0; i < tdCount; i++)
+        {
+            var td = new PilotBytecodeTypeDescriptor
+            {
+                IsRecord = reader.ReadBoolean(),
+                Name = reader.ReadString()
+            };
+            int gpCount = reader.ReadInt32();
+            for (int g = 0; g < gpCount; g++) td.GenericParameters.Add(reader.ReadString());
+
+            int varCount = reader.ReadInt32();
+            for (int v = 0; v < varCount; v++)
+            {
+                var vd = new PilotSerializedVariantDescriptor { Name = reader.ReadString() };
+                int fCount = reader.ReadInt32();
+                for (int f = 0; f < fCount; f++)
+                {
+                    string fn = reader.ReadString();
+                    string ft = reader.ReadString();
+                    vd.Fields.Add(new PilotSerializedFieldDescriptor
+                    {
+                        Name = string.IsNullOrEmpty(fn) ? null : fn,
+                        TypeName = ft
+                    });
+                }
+                td.Variants.Add(vd);
+            }
+
+            int rfCount = reader.ReadInt32();
+            for (int r = 0; r < rfCount; r++)
+            {
+                string fn = reader.ReadString();
+                string ft = reader.ReadString();
+                td.RecordFields.Add(new PilotSerializedFieldDescriptor
+                {
+                    Name = string.IsNullOrEmpty(fn) ? null : fn,
+                    TypeName = ft
+                });
+            }
+
+            chunk.TypeDescriptors.Add(td);
+        }
     }
 
     private static void WriteValue(BinaryWriter writer, PilotValue value)
@@ -277,6 +479,17 @@ public sealed class PilotBytecodeChunk
             case PilotValueKind.String:
                 writer.Write(value.AsString());
                 break;
+            case PilotValueKind.Keyword:
+                writer.Write(value.AsKeyword().FullName);
+                break;
+            case PilotValueKind.KeywordVariant:
+            {
+                var kv = value.AsKeywordVariant();
+                writer.Write(kv.Keyword.FullName);
+                writer.Write(kv.Fields.Length);
+                foreach (var a in kv.Fields) WriteValue(writer, a);
+                break;
+            }
             case PilotValueKind.List:
             {
                 var list = value.AsList();
@@ -320,11 +533,22 @@ public sealed class PilotBytecodeChunk
             PilotValueKind.Decimal => PilotValue.FromDecimal(reader.ReadDecimal()),
             PilotValueKind.Char => PilotValue.FromChar(reader.ReadChar()),
             PilotValueKind.String => PilotValue.FromString(reader.ReadString()),
+            PilotValueKind.Keyword => PilotValue.FromKeyword(reader.ReadString()),
+            PilotValueKind.KeywordVariant => ReadKeywordVariant(reader),
             PilotValueKind.List => ReadList(reader),
             PilotValueKind.Tuple => ReadTuple(reader),
             PilotValueKind.Range => ReadRange(reader),
             _ => PilotValue.Null
         };
+    }
+
+    private static PilotValue ReadKeywordVariant(BinaryReader reader)
+    {
+        string kw = reader.ReadString();
+        int count = reader.ReadInt32();
+        var args = new PilotValue[count];
+        for (int i = 0; i < count; i++) args[i] = ReadValue(reader);
+        return PilotValue.FromKeywordVariant(new PilotKeywordVariant(PilotKeyword.Intern(kw), args));
     }
 
     private static PilotValue ReadList(BinaryReader reader)

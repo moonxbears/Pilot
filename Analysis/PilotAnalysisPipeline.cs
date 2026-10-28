@@ -4,6 +4,7 @@ using Antlr4.Runtime;
 using Pilot.Analysis.ContractVerification;
 using Pilot.Analysis.DimensionalAnalysis;
 using Pilot.Analysis.Ownership;
+using Pilot.Analysis.PatternMatching;
 using Pilot.Analysis.TypeSystem;
 using Pilot.Compiler;
 
@@ -28,11 +29,12 @@ public sealed class PilotStaticAnalysisResult
 }
 
 /// <summary>
-/// Primary coordinator for Milestone 3 static analysis passes:
+/// Primary coordinator for Milestone 3 &amp; Milestone 11 static analysis passes:
 /// - Flow-sensitive bidirectional type inference and constraint solving
-/// - Affine & linear resource borrow checking (preserving Python/C#-like simplicity)
+/// - Affine &amp; linear resource borrow checking (preserving Python/C#-like simplicity)
 /// - Static physical units of measure dimensional algebra
 /// - Design-by-contract compile-time predicate verification
+/// - Maranget decision-tree exhaustiveness &amp; redundancy checking (`MATCH001` / `MATCH002`)
 /// </summary>
 public static class PilotAnalysisPipeline
 {
@@ -62,6 +64,10 @@ public static class PilotAnalysisPipeline
         var contractVerifier = new PilotContractVerifier();
         contractVerifier.VisitProgram(program);
         diagnostics.AddRange(contractVerifier.Diagnostics);
+
+        // 5. Maranget Exhaustiveness & Redundancy Pattern Matching Verification (Milestone 11)
+        var matchDiagnostics = PilotExhaustivenessChecker.CheckProgram(program, typeEngine);
+        diagnostics.AddRange(matchDiagnostics);
 
         return new PilotStaticAnalysisResult(diagnostics, typeEngine.InferredTypes);
     }

@@ -139,24 +139,40 @@ public sealed class PilotTypeInferenceEngine : PilotBaseVisitor<PilotType>
             return PilotType.OptionOf(inner);
         }
 
+        if (typeStr.EndsWith("[]"))
+        {
+            var inner = ParseTypeString(typeStr[..^2]);
+            return PilotType.ListOf(inner);
+        }
+
         if (typeStr.Contains('|'))
         {
             var parts = typeStr.Split('|').Select(p => ParseTypeString(p.Trim())).ToArray();
             return PilotType.UnionOf(parts);
         }
 
-        if (typeStr.StartsWith("List<") && typeStr.EndsWith(">"))
+        if ((typeStr.StartsWith("List<") && typeStr.EndsWith(">")) ||
+            (typeStr.StartsWith("List[") && typeStr.EndsWith("]")))
         {
             var inner = ParseTypeString(typeStr[5..^1]);
             return PilotType.ListOf(inner);
         }
 
-        if (typeStr.StartsWith("Map<") && typeStr.EndsWith(">"))
+        if ((typeStr.StartsWith("Map<") && typeStr.EndsWith(">")) ||
+            (typeStr.StartsWith("Map[") && typeStr.EndsWith("]")) ||
+            (typeStr.StartsWith("Dict[") && typeStr.EndsWith("]")))
         {
-            var innerParts = typeStr[4..^1].Split(',');
+            int openIdx = typeStr.IndexOfAny(new[] { '<', '[' });
+            var innerParts = typeStr[(openIdx + 1)..^1].Split(',');
             var k = innerParts.Length > 0 ? ParseTypeString(innerParts[0].Trim()) : PilotType.Any;
             var v = innerParts.Length > 1 ? ParseTypeString(innerParts[1].Trim()) : PilotType.Any;
             return PilotType.MapOf(k, v);
+        }
+
+        if (typeStr.StartsWith("(") && typeStr.EndsWith(")") && !typeStr.Contains("->"))
+        {
+            var parts = typeStr[1..^1].Split(',').Select(p => ParseTypeString(p.Trim())).ToArray();
+            return PilotType.TupleOf(parts);
         }
 
         int unitOpen = typeStr.IndexOf('<');
@@ -343,6 +359,164 @@ public sealed class PilotTypeInferenceEngine : PilotBaseVisitor<PilotType>
             return PilotType.MapOf(PilotType.String, PilotType.Any);
         }
 
+        if (context.match_stmt() != null)
+        {
+            Visit(context.match_stmt());
+            return PilotType.Any;
+        }
+
         return PilotType.Any;
+    }
+
+    public override PilotType VisitAtom_expr(PilotParser.Atom_exprContext context)
+    {
+        var trailers = context.trailer();
+        if (trailers == null || trailers.Length == 0)
+        {
+            return Visit(context.atom());
+        }
+
+        var atomType = Visit(context.atom());
+        foreach (var tr in trailers)
+        {
+            if (tr.LPAR() != null && atomType.Kind == PilotTypeKind.Function && atomType.ReturnType != null)
+            {
+                Visit(tr);
+                atomType = atomType.ReturnType;
+            }
+            else if (tr.DOT() != null && tr.identifier() != null && atomType.Kind == PilotTypeKind.Primitive)
+            {
+                string qualified = $"{atomType.Name}.{tr.identifier().GetText()}";
+                if (TryLookupType(qualified, out var memberType))
+                {
+                    atomType = memberType;
+                }
+                else
+                {
+                    return base.VisitAtom_expr(context);
+                }
+            }
+            else
+            {
+                return base.VisitAtom_expr(context);
+            }
+        }
+        return atomType;
+    }
+
+    public override PilotType VisitType_alias_stmt(PilotParser.Type_alias_stmtContext context)
+    {
+        string name = context.identifier().GetText();
+        if (context.adt_sum_body() is { } sumBody)
+        {
+            var adtType = new PilotType(PilotTypeKind.Primitive, name);
+            SetVariableType(name, adtType);
+
+            for (int i = 0; i < sumBody.ChildCount; i++)
+            {
+                var ch = sumBody.GetChild(i);
+                if (ch is PilotParser.IdentifierContext unitId)
+                {
+                    string vName = unitId.GetText();
+                    SetVariableType(vName, adtType);
+                    SetVariableType($"{name}.{vName}", adtType);
+                }
+                else if (ch is PilotParser.Adt_variantContext vc)
+                {
+                    RegisterAdtVariantType(name, adtType, vc.identifier().GetText(), vc.adt_field_list(), vc.struct_member());
+                }
+                else if (ch is PilotParser.Adt_variant_payloadContext vpc)
+                {
+                    RegisterAdtVariantType(name, adtType, vpc.identifier().GetText(), vpc.adt_field_list(), vpc.struct_member());
+                }
+            }
+            return adtType;
+        }
+
+        if (context.type_spec() != null)
+        {
+            var target = ParseTypeString(context.type_spec().GetText());
+            SetVariableType(name, target);
+            return target;
+        }
+
+        return PilotType.Void;
+    }
+
+    public override PilotType VisitEnum_def(PilotParser.Enum_defContext context)
+    {
+        string name = context.identifier().GetText();
+        var enumType = new PilotType(PilotTypeKind.Primitive, name);
+        SetVariableType(name, enumType);
+
+        if (context.enum_suite()?.enum_member() is { } members)
+        {
+            foreach (var m in members)
+            {
+                RegisterAdtVariantType(name, enumType, m.identifier().GetText(), m.adt_field_list(), m.struct_member());
+            }
+        }
+        return enumType;
+    }
+
+    public override PilotType VisitRecord_def(PilotParser.Record_defContext context)
+    {
+        string name = context.identifier().GetText();
+        var recType = new PilotType(PilotTypeKind.Primitive, name);
+        var fieldTypes = ExtractFieldTypes(context.adt_field_list(), context.struct_member());
+        var ctorType = PilotType.FunctionOf(fieldTypes, recType);
+        SetVariableType(name, ctorType);
+        if (context.stmt() is { Length: > 0 } stmts)
+        {
+            PushScope();
+            SetVariableType("self", recType);
+            foreach (var st in stmts) Visit(st);
+            PopScope();
+        }
+        return recType;
+    }
+
+    private void RegisterAdtVariantType(
+        string adtName,
+        PilotType adtType,
+        string variantName,
+        PilotParser.Adt_field_listContext? fieldList,
+        PilotParser.Struct_memberContext[]? structMembers)
+    {
+        bool hasPayload = fieldList != null || (structMembers != null && structMembers.Length > 0);
+        if (!hasPayload)
+        {
+            SetVariableType(variantName, adtType);
+            SetVariableType($"{adtName}.{variantName}", adtType);
+        }
+        else
+        {
+            var fieldTypes = ExtractFieldTypes(fieldList, structMembers);
+            var ctor = PilotType.FunctionOf(fieldTypes, adtType);
+            SetVariableType(variantName, ctor);
+            SetVariableType($"{adtName}.{variantName}", ctor);
+        }
+    }
+
+    private static List<PilotType> ExtractFieldTypes(
+        PilotParser.Adt_field_listContext? fieldList,
+        PilotParser.Struct_memberContext[]? structMembers)
+    {
+        var types = new List<PilotType>();
+        if (fieldList?.adt_field() != null)
+        {
+            foreach (var f in fieldList.adt_field())
+            {
+                types.Add(ParseTypeString(f.type_spec().GetText()));
+            }
+        }
+        else if (structMembers != null)
+        {
+            foreach (var m in structMembers)
+            {
+                types.Add(ParseTypeString(m.type_annotation()?.type_spec()?.GetText() ?? "any"));
+            }
+        }
+        return types;
     }
 }

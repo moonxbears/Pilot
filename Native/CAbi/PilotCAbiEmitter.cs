@@ -7,12 +7,14 @@ using Antlr4.Runtime;
 using Pilot.Compiler;
 using Pilot.Diagnostics;
 using Pilot.Preprocessing;
+using Pilot.Runtime.Values;
 
 namespace Pilot.Native.CAbi;
 
 /// <summary>
 /// Generates standard C-ABI header files (.h) from Pilot ASTs.
-/// Enables Pilot functions and data structures to be seamlessly consumed by C, C++, Rust (bindgen), and Python (ctypes).
+/// Enables Pilot functions, records, structs, and compact unboxed ADT tagged unions
+/// (#[repr(C, u8/u16)] equivalent) to be seamlessly consumed by C, C++, Rust (bindgen), and Python (ctypes).
 /// </summary>
 public static class PilotCAbiEmitter
 {
@@ -60,21 +62,90 @@ public static class PilotCAbiEmitter
         sb.AppendLine("#include <stddef.h>");
         sb.AppendLine();
 
-        // Scan for struct/class definitions
         var visitor = new CAbiExtractionVisitor();
-        visitor.Visit(program);
+        visitor.Extract(program);
+
+        // Forward-declare custom records, structs, and ADTs so mutual/recursive pointers resolve cleanly
+        if (visitor.Structs.Count > 0 || visitor.Adts.Count > 0)
+        {
+            sb.AppendLine("/* --- Forward Type Declarations --- */");
+            foreach (var st in visitor.Structs)
+            {
+                sb.AppendLine($"typedef struct {st.Name} {st.Name};");
+            }
+            foreach (var adt in visitor.Adts)
+            {
+                sb.AppendLine($"typedef struct {adt.Definition.Name} {adt.Definition.Name};");
+            }
+            sb.AppendLine();
+        }
 
         if (visitor.Structs.Count > 0)
         {
-            sb.AppendLine("/* --- Struct Declarations --- */");
+            sb.AppendLine("/* --- Struct & Record Declarations --- */");
             foreach (var st in visitor.Structs)
             {
                 sb.AppendLine($"typedef struct {st.Name} {{");
-                foreach (var field in st.Fields)
+                if (st.Fields.Count == 0)
                 {
-                    sb.AppendLine($"    {field.Type} {field.Name};");
+                    sb.AppendLine("    uint8_t _empty;");
+                }
+                else
+                {
+                    foreach (var field in st.Fields)
+                    {
+                        sb.AppendLine($"    {field.Type} {field.Name};");
+                    }
                 }
                 sb.AppendLine($"}} {st.Name};");
+                sb.AppendLine();
+            }
+        }
+
+        if (visitor.Adts.Count > 0)
+        {
+            sb.AppendLine("/* --- Discriminated Sum Types (Compact Unboxed Tagged Unions) --- */");
+            foreach (var adtEntry in visitor.Adts)
+            {
+                var adt = adtEntry.Definition;
+                var layout = adtEntry.Layout;
+                string tagCType = layout.TagBytes <= 1 ? "uint8_t" : "uint16_t";
+
+                sb.AppendLine($"/* Layout: tag={layout.TagBytes}B, payload={layout.PayloadSizeBytes}B, total={layout.TotalSizeBytes}B, align={layout.AlignmentBytes}B, recursive={layout.IsRecursive.ToString().ToLowerInvariant()} */");
+                sb.AppendLine($"typedef {tagCType} {adt.Name}_Tag;");
+                sb.AppendLine($"enum {adt.Name}_Tag_Values {{");
+                for (int i = 0; i < adt.Variants.Count; i++)
+                {
+                    string comma = i < adt.Variants.Count - 1 ? "," : "";
+                    sb.AppendLine($"    {adt.Name}_Tag_{adt.Variants[i].Name} = {adt.Variants[i].Tag}{comma}");
+                }
+                sb.AppendLine("};");
+                sb.AppendLine();
+
+                sb.AppendLine($"typedef struct {adt.Name} {{");
+                sb.AppendLine($"    {adt.Name}_Tag tag;");
+                if (layout.PayloadSizeBytes > 0)
+                {
+                    sb.AppendLine("    union {");
+                    for (int vIdx = 0; vIdx < layout.Variants.Count; vIdx++)
+                    {
+                        var vLayout = layout.Variants[vIdx];
+                        if (vLayout.Fields.Count == 0) continue;
+
+                        sb.AppendLine("        struct {");
+                        foreach (var fLayout in vLayout.Fields)
+                        {
+                            string cFieldType = fLayout.IsBoxedIndirection
+                                ? $"struct {PilotAdtMemoryLayout.StripGenericsAndModifiers(fLayout.TypeName)}*"
+                                : visitor.MapType(fLayout.TypeName, adt.GenericParameters);
+                            string suffixComment = fLayout.IsBoxedIndirection ? " /* boxed recursive indirection */" : "";
+                            sb.AppendLine($"            {cFieldType} {SanitizeCIdentifier(fLayout.FieldName)};{suffixComment}");
+                        }
+                        sb.AppendLine($"        }} {vLayout.VariantName};");
+                    }
+                    sb.AppendLine("    } payload;");
+                }
+                sb.AppendLine($"}} {adt.Name};");
                 sb.AppendLine();
             }
         }
@@ -88,9 +159,9 @@ public static class PilotCAbiEmitter
                     ? string.Join(", ", fn.Parameters.Select(p => $"{p.Type} {p.Name}"))
                     : "void";
 
-                sb.AppendLine($"/**");
+                sb.AppendLine("/**");
                 sb.AppendLine($" * Exported Pilot Function: {fn.Name}");
-                sb.AppendLine($" */");
+                sb.AppendLine(" */");
                 sb.AppendLine($"{fn.ReturnType} {fn.Name}({paramList});");
                 sb.AppendLine();
             }
@@ -105,10 +176,22 @@ public static class PilotCAbiEmitter
         return sb.ToString();
     }
 
+    private static string SanitizeCIdentifier(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "item0";
+        return char.IsDigit(name[0]) ? $"_{name}" : name;
+    }
+
     public sealed class StructDescriptor
     {
         public string Name { get; set; } = "";
         public List<(string Type, string Name)> Fields { get; } = new();
+    }
+
+    public sealed class AdtDescriptor
+    {
+        public PilotAdtDefinition Definition { get; set; } = null!;
+        public PilotAdtMemoryLayout Layout { get; set; } = null!;
     }
 
     public sealed class FunctionDescriptor
@@ -120,13 +203,153 @@ public static class PilotCAbiEmitter
 
     private sealed class CAbiExtractionVisitor : PilotBaseVisitor<object?>
     {
+        private readonly Dictionary<string, PilotAdtDefinition> _knownAdts = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, PilotRecordDefinition> _knownRecords = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _knownCustomValueTypes = new(StringComparer.Ordinal);
+        private readonly List<(PilotParser.Record_defContext Ctx, PilotRecordDefinition Def)> _rawRecords = new();
+
         public List<StructDescriptor> Structs { get; } = new();
+        public List<AdtDescriptor> Adts { get; } = new();
         public List<FunctionDescriptor> Functions { get; } = new();
+
+        public void Extract(PilotParser.ProgramContext program)
+        {
+            // Pass 1: Collect custom types (records, structs, classes, ADTs, enums)
+            PrescanTypes(program);
+
+            // Recompute layouts across all mutually-referencing ADTs and Records
+            foreach (var adt in _knownAdts.Values)
+            {
+                adt.Layout = PilotAdtMemoryLayout.ComputeForAdt(adt, _knownAdts, _knownRecords);
+                Adts.Add(new AdtDescriptor { Definition = adt, Layout = adt.Layout });
+            }
+
+            foreach (var (_, recDef) in _rawRecords)
+            {
+                recDef.Layout = PilotAdtMemoryLayout.ComputeForRecord(recDef, _knownAdts, _knownRecords);
+                var st = new StructDescriptor { Name = recDef.Name };
+                var vLayout = recDef.Layout.Variants[0];
+                foreach (var fl in vLayout.Fields)
+                {
+                    string cType = fl.IsBoxedIndirection
+                        ? $"struct {PilotAdtMemoryLayout.StripGenericsAndModifiers(fl.TypeName)}*"
+                        : MapType(fl.TypeName, recDef.GenericParameters);
+                    st.Fields.Add((cType, SanitizeCIdentifier(fl.FieldName)));
+                }
+                Structs.Add(st);
+            }
+
+            // Pass 2: Visit classes, structs, and functions with full type context
+            Visit(program);
+        }
+
+        private void PrescanTypes(PilotParser.ProgramContext program)
+        {
+            var stmts = program.stmt();
+            if (stmts == null) return;
+
+            foreach (var stmt in stmts)
+            {
+                if (stmt.compound_stmt() is { } comp)
+                {
+                    if (comp.record_def() is { } recCtx)
+                    {
+                        string name = recCtx.identifier().GetText();
+                        var gps = ExtractGenerics(recCtx.generic_params());
+                        var fields = ExtractAdtFields(recCtx.adt_field_list(), recCtx.struct_member());
+                        var recDef = new PilotRecordDefinition(name, fields, gps);
+                        _knownRecords[name] = recDef;
+                        _knownCustomValueTypes.Add(name);
+                        _rawRecords.Add((recCtx, recDef));
+                    }
+                    else if (comp.enum_def() is { } enumCtx)
+                    {
+                        string name = enumCtx.identifier().GetText();
+                        var gps = ExtractGenerics(enumCtx.generic_params());
+                        var adtDef = new PilotAdtDefinition(name, gps);
+                        if (enumCtx.enum_suite()?.enum_member() != null)
+                        {
+                            foreach (var m in enumCtx.enum_suite().enum_member())
+                            {
+                                adtDef.AddVariant(m.identifier().GetText(), ExtractAdtFields(m.adt_field_list(), m.struct_member()));
+                            }
+                        }
+                        _knownAdts[name] = adtDef;
+                        _knownCustomValueTypes.Add(name);
+                    }
+                    else if (comp.struct_def() is { } strCtx)
+                    {
+                        _knownCustomValueTypes.Add(strCtx.identifier().GetText());
+                    }
+                    else if (comp.class_def() is { } clsCtx)
+                    {
+                        _knownCustomValueTypes.Add(clsCtx.identifier().GetText());
+                    }
+                }
+                else if (stmt.simple_stmt()?.small_stmt() is { } smalls)
+                {
+                    foreach (var sm in smalls)
+                    {
+                        if (sm.type_alias_stmt() is { } ta && ta.adt_sum_body() != null)
+                        {
+                            string name = ta.identifier().GetText();
+                            var gps = ExtractGenerics(ta.generic_params());
+                            var adtDef = new PilotAdtDefinition(name, gps);
+                            var sumBody = ta.adt_sum_body();
+                            for (int i = 0; i < sumBody.ChildCount; i++)
+                            {
+                                var ch = sumBody.GetChild(i);
+                                if (ch is PilotParser.IdentifierContext uid)
+                                {
+                                    adtDef.AddVariant(uid.GetText(), Array.Empty<PilotAdtFieldDefinition>());
+                                }
+                                else if (ch is PilotParser.Adt_variantContext vc)
+                                {
+                                    adtDef.AddVariant(vc.identifier().GetText(), ExtractAdtFields(vc.adt_field_list(), vc.struct_member()));
+                                }
+                                else if (ch is PilotParser.Adt_variant_payloadContext vpc)
+                                {
+                                    adtDef.AddVariant(vpc.identifier().GetText(), ExtractAdtFields(vpc.adt_field_list(), vpc.struct_member()));
+                                }
+                            }
+                            _knownAdts[name] = adtDef;
+                            _knownCustomValueTypes.Add(name);
+                        }
+                    }
+                }
+            }
+        }
+
+        private static IReadOnlyList<string> ExtractGenerics(PilotParser.Generic_paramsContext? gp) =>
+            gp == null ? Array.Empty<string>() : gp.generic_param().Select(p => p.identifier().GetText()).ToArray();
+
+        private static List<PilotAdtFieldDefinition> ExtractAdtFields(
+            PilotParser.Adt_field_listContext? fieldList,
+            PilotParser.Struct_memberContext[]? structMembers)
+        {
+            var list = new List<PilotAdtFieldDefinition>();
+            int idx = 0;
+            if (fieldList?.adt_field() != null)
+            {
+                foreach (var f in fieldList.adt_field())
+                {
+                    list.Add(new PilotAdtFieldDefinition(f.identifier()?.GetText(), f.type_spec()?.GetText() ?? "i64", idx++, f.test()));
+                }
+            }
+            if (structMembers != null)
+            {
+                foreach (var sm in structMembers)
+                {
+                    list.Add(new PilotAdtFieldDefinition(sm.identifier()?.GetText(), sm.type_annotation()?.type_spec()?.GetText() ?? "i64", idx++, sm.test()));
+                }
+            }
+            return list;
+        }
 
         public override object? VisitFunc_def(PilotParser.Func_defContext context)
         {
             string funcName = context.identifier()?.GetText() ?? "unknown_func";
-            string retType = MapPilotTypeToC(context.type_spec()?.GetText() ?? "i64");
+            string retType = MapType(context.type_spec()?.GetText() ?? "i64");
 
             var fn = new FunctionDescriptor
             {
@@ -140,12 +363,29 @@ public static class PilotCAbiEmitter
                 foreach (var p in paramsCtx)
                 {
                     string pName = p.identifier()?.GetText() ?? "arg";
-                    string pType = MapPilotTypeToC(p.type_annotation()?.type_spec()?.GetText() ?? "i64");
+                    string pType = MapType(p.type_annotation()?.type_spec()?.GetText() ?? "i64");
                     fn.Parameters.Add((pType, pName));
                 }
             }
 
             Functions.Add(fn);
+            return null;
+        }
+
+        public override object? VisitStruct_def(PilotParser.Struct_defContext context)
+        {
+            string structName = context.identifier()?.GetText() ?? "PilotStruct";
+            var st = new StructDescriptor { Name = structName };
+            foreach (var sm in context.struct_member())
+            {
+                string fName = sm.identifier()?.GetText() ?? "field";
+                string fType = MapType(sm.type_annotation()?.type_spec()?.GetText() ?? "i64");
+                st.Fields.Add((fType, fName));
+            }
+            if (st.Fields.Count > 0)
+            {
+                Structs.Add(st);
+            }
             return null;
         }
 
@@ -168,13 +408,13 @@ public static class PilotCAbiEmitter
                             if (small.var_stmt() != null)
                             {
                                 string fName = small.var_stmt().binding_pattern()?.identifier()?.GetText() ?? "field";
-                                string fType = MapPilotTypeToC(small.var_stmt().type_annotation()?.type_spec()?.GetText() ?? "i64");
+                                string fType = MapType(small.var_stmt().type_annotation()?.type_spec()?.GetText() ?? "i64");
                                 st.Fields.Add((fType, fName));
                             }
                             else if (small.let_stmt() != null)
                             {
                                 string fName = small.let_stmt().binding_pattern()?.identifier()?.GetText() ?? "field";
-                                string fType = MapPilotTypeToC(small.let_stmt().type_annotation()?.type_spec()?.GetText() ?? "i64");
+                                string fType = MapType(small.let_stmt().type_annotation()?.type_spec()?.GetText() ?? "i64");
                                 st.Fields.Add((fType, fName));
                             }
                         }
@@ -190,15 +430,34 @@ public static class PilotCAbiEmitter
             return base.VisitClass_def(context);
         }
 
-        private static string MapPilotTypeToC(string pilotType)
+        public string MapType(string pilotType, IReadOnlyList<string>? genericParams = null)
         {
-            return pilotType.Trim().ToLowerInvariant() switch
+            string trimmed = pilotType.Trim();
+            if (genericParams != null && genericParams.Contains(trimmed))
+            {
+                return "int64_t";
+            }
+
+            // Slice fat-pointer: `Point[]` -> `struct { const Point* ptr; size_t len; }`
+            if (trimmed.EndsWith("[]", StringComparison.Ordinal))
+            {
+                string elemType = MapType(trimmed[..^2], genericParams);
+                return $"struct {{ const {elemType}* ptr; size_t len; }}";
+            }
+
+            string baseName = PilotAdtMemoryLayout.StripGenericsAndModifiers(trimmed);
+            if (_knownCustomValueTypes.Contains(baseName))
+            {
+                return baseName;
+            }
+
+            return baseName.ToLowerInvariant() switch
             {
                 "int" or "i64" or "long" => "int64_t",
                 "i32" => "int32_t",
                 "i16" => "int16_t",
                 "i8" or "byte" => "int8_t",
-                "u64" or "ulong" => "uint64_t",
+                "uint" or "u64" or "ulong" => "uint64_t",
                 "u32" => "uint32_t",
                 "u16" => "uint16_t",
                 "u8" => "uint8_t",

@@ -140,7 +140,7 @@
           }
         },
         {
-          "match": "\\b((?:(?:public|private|protected|internal|static|partial)\\s+)?)(class|struct|interface|protocol|enum|actor|model|table|schema|unit|dsl|domain|macro|type|extension|database)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "match": "\\b((?:(?:public|private|protected|internal|static|partial)\\s+)?)(class|struct|record|interface|protocol|enum|actor|model|table|schema|unit|dsl|domain|macro|type|extension|database)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
             "1": { "name": "storage.modifier.pilot" },
             "2": { "name": "keyword.declaration.type.pilot" },
@@ -327,7 +327,7 @@
         },
         {
           "name": "keyword.operator.range.pilot",
-          "match": "(\\.\\.=|\\.\\.)"
+          "match": "(\\.\\.\\.|\\.\\.=|\\.\\.<|\\.\\.)"
         },
         {
           "name": "keyword.operator.comparison.pilot",

@@ -1,0 +1,118 @@
+# ==============================================================================
+# Concept 16: Algebraic Data Types (ADTs) & Exhaustive Pattern Matching
+# ==============================================================================
+
+println("==========================================================");
+println(" PILOT SHOWCASE: Algebraic Data Types & Exhaustive Match");
+println("==========================================================");
+
+# 1. Immutable Value-Semantic Product Types (`record`)
+println("\n--- 1. Value-Semantic Product Records & Unboxed Storage ---");
+
+record Point(x: f64, y: f64);
+
+let p1 = Point(3.0, 4.0);
+let p2 = Point(x: 3.0, y: 4.0);
+
+println("Point p1:                       " + p1);
+println("Structural equality (p1 == p2): " + (p1 == p2));
+println("Unboxed inline storage:         " + p1.is_unboxed);
+println("C-ABI layout size (bytes):      " + p1.size_of);
+
+
+# 2. Discriminated Sum Types (`type`) & Compact Tagged Unions
+println("\n--- 2. First-Class Sum Types & Compact Tagged Unions ---");
+
+type Shape =
+    | Circle(radius: f64)
+    | Rectangle(width: f64, height: f64)
+    | Polygon(points: Point[])
+    | Origin;
+
+println("Shape tag width (u8):           " + Shape.tag_bytes + " byte");
+println("Shape C-ABI tagged union size:  " + Shape.size_of + " bytes");
+println("Shape has recursive cycle:      " + Shape.is_recursive);
+
+let shapes = [
+    Origin,
+    Circle(radius: 5.0),
+    Rectangle(width: 6.0, height: 6.0),
+    Rectangle(width: 4.0, height: 9.0),
+    Polygon([Point(0.0, 0.0), Point(3.0, 4.0), Point(6.0, 0.0)])
+];
+
+def describe_shape(s: Shape) -> str {
+    return match s {
+        case Origin => "Origin (0, 0)"
+        case Circle(r) => "Circle(r=" + r + ", unboxed=" + s.is_unboxed + ")"
+        case sq @ Rectangle(w, h) when w == h => "Square(side=" + sq.width + ")"
+        case Rectangle(w, h) => "Rectangle(" + w + " x " + h + ")"
+        case Polygon([]) => "Empty Polygon"
+        case Polygon([Point(x0, y0), ..rest]) => "Polygon(start=(" + x0 + ", " + y0 + "), +" + len(rest) + " pts)"
+    };
+}
+
+for s in shapes {
+    println("  -> " + describe_shape(s));
+}
+
+
+# 3. Generic & Recursive ADTs (`Expr[T]`)
+println("\n--- 3. Generic & Recursive ADTs (Expr[T] Evaluator) ---");
+
+type Expr[T] =
+    | Const(value: T)
+    | Add(left: Expr[T], right: Expr[T])
+    | Mul(left: Expr[T], right: Expr[T]);
+
+println("Expr[T] recursive cycle boxed:  " + Expr.is_recursive);
+
+def eval_expr(expr: Expr[int]) -> int {
+    return match expr {
+        case Const(v) => v
+        case Add(l, r) => eval_expr(l) + eval_expr(r)
+        case Mul(l, r) => eval_expr(l) * eval_expr(r)
+    };
+}
+
+def format_expr(expr: Expr[int]) -> str {
+    return match expr {
+        case Const(v) => "" + v
+        case Add(l, r) => "(" + format_expr(l) + " + " + format_expr(r) + ")"
+        case Mul(l, r) => "(" + format_expr(l) + " * " + format_expr(r) + ")"
+    };
+}
+
+let tree = Mul(Add(Const(10), Const(4)), Const(3));
+println("Expression AST:                 " + format_expr(tree) + " = " + eval_expr(tree));
+
+
+# 4. Range/Slice/Keyword Patterns & Conditional Bindings
+println("\n--- 4. Deep Destructuring, Ranges, Keywords & Conditional Let ---");
+
+def inspect_response(msg) -> str {
+    return match msg {
+        case :ok([first, ..rest]) => "OK head=" + first + " (remaining=" + len(rest) + ")"
+        case :pending | :running => "In-flight async job"
+        case 0..<10 => "Priority tier [0, 10)"
+        case 200..299 => "HTTP 2xx Success"
+        case _ => "Unhandled payload"
+    };
+}
+
+println("  :ok([42, 99, 105]) => " + inspect_response(:ok([42, 99, 105])));
+println("  :running           => " + inspect_response(:running));
+println("  7                  => " + inspect_response(7));
+println("  204                => " + inspect_response(204));
+
+def extract_circle_radius(s: Shape) -> f64 {
+    guard let Circle(r) = s else {
+        return -1.0;
+    }
+    return r;
+}
+
+println("guard let Circle(r) on Circle(5.0): " + extract_circle_radius(Circle(5.0)));
+println("guard let Circle(r) on Origin:      " + extract_circle_radius(Origin));
+
+println("\n>>> Concept 16 Demonstration Complete! <<<\n");

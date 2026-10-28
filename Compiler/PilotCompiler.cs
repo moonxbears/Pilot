@@ -98,7 +98,18 @@ public sealed class PilotCompiler : IPilotCompiler
                 return PilotCompilationResult.CreateFailure(errorTracker.Errors, sw.Elapsed);
             }
 
-            // 4. Construct compiled executable program
+            // 4. Exhaustiveness verification (Milestone 11: MATCH001 hard compile-time error)
+            var matchDiagnostics = Pilot.Analysis.PatternMatching.PilotExhaustivenessChecker.CheckProgram(tree);
+            var matchErrors = matchDiagnostics
+                .Where(d => d.IsError)
+                .Select(d => d.ToString())
+                .ToList();
+            if (matchErrors.Count > 0)
+            {
+                return PilotCompilationResult.CreateFailure(matchErrors, sw.Elapsed);
+            }
+
+            // 5. Construct compiled executable program
             var program = new PilotCompiledProgram(
                 preprocessedCode,
                 tree,

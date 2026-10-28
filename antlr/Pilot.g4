@@ -93,6 +93,7 @@ compound_stmt
     | class_def
     | state_def
     | struct_def
+    | record_def
     | interface_def
     | enum_def
     | actor_def
@@ -148,7 +149,11 @@ suite
 
 // Mandatory early-exit precondition: guard <condition> else { <exit_suite> }
 guard_stmt
-    : GUARD (LET pattern EQUAL test | test) ELSE COLON? suite
+    : GUARD ((LET | VAR) pattern EQUAL test pattern_guard? | test) ELSE COLON? suite
+    ;
+
+pattern_guard
+    : WHEN test
     ;
 
 // Schedule cleanup code to execute when exiting the containing scope/function
@@ -181,7 +186,7 @@ intersection_type
     ;
 
 primary_type
-    : REF? base_type QUESTION? (LESS unit_expr GREATER)?
+    : REF? base_type (LSQB RSQB | QUESTION)* (LESS unit_expr GREATER)?
     ;
 
 base_type
@@ -287,7 +292,31 @@ dynamic_stmt
     ;
 
 type_alias_stmt
-    : declaration_modifier* TYPE identifier generic_params? EQUAL type_spec
+    : decorators? declaration_modifier* TYPE identifier generic_params? EQUAL adt_sum_body
+    | decorators? declaration_modifier* TYPE identifier generic_params? EQUAL type_spec
+    ;
+
+adt_sum_body
+    : VBAR adt_variant (VBAR adt_variant)*
+    | adt_variant_payload (VBAR adt_variant)*
+    | identifier (VBAR identifier)* VBAR adt_variant_payload (VBAR adt_variant)*
+    ;
+
+adt_variant
+    : identifier (LPAR adt_field_list? RPAR | LBRACE struct_member* RBRACE)?
+    ;
+
+adt_variant_payload
+    : identifier (LPAR adt_field_list? RPAR | LBRACE struct_member* RBRACE)
+    ;
+
+adt_field_list
+    : adt_field (COMMA adt_field)* COMMA?
+    ;
+
+adt_field
+    : identifier COLON type_spec (EQUAL test)?
+    | type_spec
     ;
 
 annassign_stmt
@@ -357,6 +386,12 @@ struct_def
     : decorators? declaration_modifier* STRUCT identifier generic_params? where_type_clause? COLON? (LBRACE struct_member* RBRACE | suite)
     ;
 
+// Records: Immutable value-semantic product types
+record_def
+    : decorators? declaration_modifier* RECORD identifier generic_params? LPAR adt_field_list? RPAR where_type_clause? (COLON? LBRACE stmt* RBRACE | SEMI)?
+    | decorators? declaration_modifier* RECORD identifier generic_params? where_type_clause? COLON? LBRACE struct_member* RBRACE SEMI?
+    ;
+
 struct_member
     : declaration_modifier* (LET | VAR | CONST)? identifier type_annotation? (EQUAL test)? SEMI?
     ;
@@ -372,11 +407,11 @@ enum_def
     ;
 
 enum_suite
-    : LBRACE enum_member (COMMA enum_member)* COMMA? RBRACE
+    : LBRACE VBAR? enum_member ((COMMA | VBAR) enum_member)* COMMA? RBRACE
     ;
 
 enum_member
-    : identifier (LPAR (type_spec | parameter) (COMMA (type_spec | parameter))* COMMA? RPAR)? (EQUAL test)? SEMI?
+    : identifier (LPAR adt_field_list? RPAR | LBRACE struct_member* RBRACE)? (EQUAL test)? SEMI?
     ;
 
 // Actor concurrency model
@@ -501,11 +536,11 @@ block
     ;
 
 if_stmt
-    : IF test COLON? suite ((ELIF | ELSE IF) test COLON? suite)* (ELSE COLON? suite)?
+    : IF ((LET | VAR) pattern EQUAL)? test pattern_guard? COLON? suite ((ELIF | ELSE IF) ((LET | VAR) pattern EQUAL)? test pattern_guard? COLON? suite)* (ELSE COLON? suite)?
     ;
 
 while_stmt
-    : WHILE test (BOUNDED test)? COLON? suite (ELSE COLON? suite)?
+    : WHILE ((LET | VAR) pattern EQUAL)? test pattern_guard? (BOUNDED test)? COLON? suite (ELSE COLON? suite)?
     ;
 
 for_stmt
@@ -526,7 +561,7 @@ match_suite
     ;
 
 match_arm
-    : CASE pattern ((WHEN | IF) test)? (COLON | ARROW | FAT_ARROW)? suite
+    : CASE pattern ((WHEN | IF) test)? (COLON | ARROW | FAT_ARROW)? suite COMMA?
     ;
 
 pattern
@@ -543,18 +578,43 @@ and_pattern
 
 not_pattern
     : NOT not_pattern
+    | (VAR | LET)? identifier AT not_pattern
     | primary_pattern
     ;
 
 primary_pattern
     : relational_pattern
+    | range_pattern
+    | signed_number_pattern
     | collection_pattern
     | property_pattern
     | tuple_pattern_match
+    | keyword_pattern
     | type_or_var_pattern
     | literal
-    | symbol_literal
     | UNDERSCORE
+    ;
+
+range_pattern
+    : range_bound (DOTDOT | DOTDOT_EQUAL | ELLIPSIS | DOTDOT_LESS) range_bound
+    ;
+
+range_bound
+    : MINUS? (INTEGER | FLOAT_NUMBER | HEX_INTEGER | BIN_INTEGER | OCT_INTEGER)
+    | STRING
+    ;
+
+signed_number_pattern
+    : MINUS (INTEGER | FLOAT_NUMBER | HEX_INTEGER | BIN_INTEGER | OCT_INTEGER)
+    ;
+
+keyword_pattern
+    : symbol_literal (LPAR (pattern_arg (COMMA pattern_arg)* COMMA?)? RPAR)?
+    ;
+
+pattern_arg
+    : identifier COLON pattern
+    | pattern
     ;
 
 relational_pattern
@@ -566,7 +626,7 @@ collection_pattern
     ;
 
 slice_pattern_element
-    : (DOTDOT | STAR) pattern?
+    : (DOTDOT | ELLIPSIS | STAR) pattern?
     | pattern
     ;
 
@@ -584,7 +644,11 @@ tuple_pattern_match
 
 type_or_var_pattern
     : (VAR | LET) identifier
-    | dotted_name (LPAR (pattern (COMMA pattern)* COMMA?)? RPAR)? property_pattern? identifier?
+    | dotted_name generic_pattern_suffix? (LPAR (pattern_arg (COMMA pattern_arg)* COMMA?)? RPAR)? property_pattern? identifier?
+    ;
+
+generic_pattern_suffix
+    : LSQB type_arguments RSQB (DOT identifier)?
     ;
 
 try_stmt
@@ -1035,7 +1099,7 @@ comp_op
     ;
 
 range_expr
-    : bitor_expr ((DOTDOT | DOTDOT_EQUAL) bitor_expr)?
+    : bitor_expr ((DOTDOT | DOTDOT_EQUAL | DOTDOT_LESS | ELLIPSIS) bitor_expr)?
     ;
 
 bitor_expr
@@ -1135,6 +1199,7 @@ atom
     | macro_call
     | symbol_literal
     | nameof_expr
+    | match_stmt
     | identifier
     | LPAR testlist_comp? RPAR
     | collection_expr
@@ -1221,7 +1286,7 @@ arglist
 
 argument
     : (REF | EACH | REPEAT)? (STAR | DOUBLESTAR | DOTDOT)? test
-    | identifier EQUAL (EACH | REPEAT | DOTDOT)? test
+    | identifier (EQUAL | COLON) (EACH | REPEAT | DOTDOT)? test
     | STAR
     ;
 
@@ -1254,6 +1319,7 @@ DEF         : 'def';
 FN          : 'fn';
 CLASS       : 'class';
 STRUCT      : 'struct';
+RECORD      : 'record';
 INTERFACE   : 'interface';
 PROTOCOL    : 'protocol';
 ENUM        : 'enum';
@@ -1447,8 +1513,10 @@ COALESCE_EQUAL   : '??=';    // Null-coalescing assignment
 COALESCE         : '??';     // Null coalescing
 JSON_CONTAINS    : '@>';     // Postgres JSONB contains
 JSON_CONTAINED   : '<@';     // Postgres JSONB contained by
+ELLIPSIS         : '...';    // Inclusive / variadic ellipsis
 DOTDOT_EQUAL     : '..=';    // Inclusive range
-DOTDOT           : '..';     // Half-open range
+DOTDOT_LESS      : '..<';    // Half-open range
+DOTDOT           : '..';     // Range / slice spread
 DOUBLESTAR       : '**';
 DOUBLESLASH      : '//';
 EQEQUAL          : '==';

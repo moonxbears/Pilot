@@ -153,6 +153,12 @@ public static class PilotDiagnosticCatalog
     public const string EmptyCatchBlock = "PILOT904";
     public const string SuggestVectorized = "PILOT905";
 
+    // =========================================================================
+    // MATCH Series: Maranget Pattern Matching & ADT Verification (Milestone 11)
+    // =========================================================================
+    public const string MatchNonExhaustive = "MATCH001";
+    public const string MatchRedundantArm = "MATCH002";
+
     private static readonly Dictionary<string, PilotDiagnosticDescriptor> Descriptors = new(StringComparer.Ordinal);
 
     static PilotDiagnosticCatalog()
@@ -238,6 +244,8 @@ public static class PilotDiagnosticCatalog
         Register(new(HotReloadRedefinedConst, "Hot-reload redefined constant", "Quality", PilotDiagnosticSeverity.Warning, "Hot-reload patch redefined constant '{0}' which may cause inconsistency with cached references", "Live patching constants does not update inlined primitive constants."));
         Register(new(EmptyCatchBlock, "Empty catch block", "Quality", PilotDiagnosticSeverity.Warning, "Empty 'catch' / 'except' block suppresses all exceptions without logging or handling", "Swallowing errors silently can mask bugs and corrupt application state.", "Add logging or re-raise"));
         Register(new(SuggestVectorized, "Suggest vectorized kernel", "Quality", PilotDiagnosticSeverity.Hint, "Loop over numeric collection '{0}' can be accelerated using '@vectorized'", "Element-wise arithmetic loops can run on SIMD hardware kernels.", "Add '@vectorized' attribute"));
+        Register(new(MatchNonExhaustive, "Non-exhaustive pattern match", "PatternMatching", PilotDiagnosticSeverity.Error, "Non-exhaustive match. Missing pattern: {0}", "Maranget usefulness matrix verification proved that one or more values of the scrutinee type are not covered by any unguarded match arm.", "Add missing match arm"));
+        Register(new(MatchRedundantArm, "Unreachable / subsumed match arm", "PatternMatching", PilotDiagnosticSeverity.Warning, "Unreachable match arm: pattern '{0}' is completely subsumed by prior unguarded arms", "Prior unguarded match arms already cover every possible value matched by this arm.", "Remove unreachable match arm"));
     }
 
     public static PilotDiagnosticDescriptor? GetDescriptor(string code) =>

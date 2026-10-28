@@ -87,6 +87,20 @@ public sealed class PilotEngine : IPilotEngine
                     sw.Elapsed);
             }
 
+            var matchDiagnostics = Pilot.Analysis.PatternMatching.PilotExhaustivenessChecker.CheckProgram(tree);
+            var matchErrors = matchDiagnostics
+                .Where(d => d.IsError)
+                .Select(d => d.ToString())
+                .ToList();
+            if (matchErrors.Count > 0)
+            {
+                return PilotExecutionResult.CreateFailure(
+                    matchErrors,
+                    stdoutCapture.ToString(),
+                    stderrCapture.ToString(),
+                    sw.Elapsed);
+            }
+
             var context = options.InitialScope != null
                 ? new PilotExecutionContext(this, options, new PilotEnvironment(options.InitialScope))
                 : new PilotExecutionContext(this, options);

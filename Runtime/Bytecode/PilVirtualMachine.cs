@@ -14,7 +14,8 @@ namespace Pilot.Runtime.Bytecode;
 /// <summary>
 /// High-performance stack-based virtual machine execution engine (PilVM).
 /// Implements direct array operand stack, slot-based local variable registers,
-/// inline hardware arithmetic fast paths, and bidirectional interop with AST and native code.
+/// inline hardware arithmetic fast paths, O(1) ADT/integer jump tables,
+/// and bidirectional interop with AST and native code.
 /// </summary>
 public sealed class PilVirtualMachine
 {
@@ -346,7 +347,7 @@ public sealed class PilVirtualMachine
                 {
                     var b = stack[--sp];
                     var a = stack[--sp];
-                    stack[sp++] = PilotValue.FromInt(a.AsInt() ^ b.AsInt());
+                    stack[sp++] = a ^ b;
                     break;
                 }
 
@@ -707,6 +708,11 @@ public sealed class PilVirtualMachine
                     string memberName = identifiers[inst.Operand];
                     var val = stack[--sp];
                     var target = stack[--sp];
+                    if (target.Kind is PilotValueKind.Record or PilotValueKind.Adt or PilotValueKind.KeywordVariant)
+                    {
+                        throw new PilotRuntimeException(
+                            $"[PILOT101] Cannot mutate field '{memberName}' on immutable {target.Kind.ToString().ToLowerInvariant()} value.");
+                    }
                     if (target.Kind == PilotValueKind.Object)
                     {
                         target.AsObject().SetMember(memberName, val);
@@ -792,10 +798,382 @@ public sealed class PilVirtualMachine
 
                 case PilotOpcode.Halt:
                     return sp > 0 ? stack[--sp] : PilotValue.Undefined;
+
+                // =====================================================================
+                // Milestone 11: ADTs, Records & Decision-Tree / O(1) Jump Table Opcodes
+                // =====================================================================
+
+                case PilotOpcode.JumpTable:
+                {
+                    var discVal = stack[--sp];
+                    var jt = chunk.JumpTables[inst.Operand];
+                    long disc = 0;
+                    bool valid = true;
+                    switch (discVal.Kind)
+                    {
+                        case PilotValueKind.Int:
+                        case PilotValueKind.UInt:
+                            disc = discVal.AsInt();
+                            break;
+                        case PilotValueKind.Bool:
+                            disc = discVal.IsTrue ? 1L : 0L;
+                            break;
+                        case PilotValueKind.Char:
+                            disc = discVal.AsChar();
+                            break;
+                        case PilotValueKind.Adt:
+                            disc = discVal.GetAdtTag();
+                            break;
+                        default:
+                            valid = false;
+                            break;
+                    }
+
+                    if (valid && disc >= jt.MinValue && disc < jt.MinValue + jt.Targets.Length)
+                    {
+                        ip = jt.Targets[(int)(disc - jt.MinValue)];
+                    }
+                    else
+                    {
+                        ip = jt.DefaultTarget;
+                    }
+                    break;
+                }
+
+                case PilotOpcode.GetAdtTag:
+                {
+                    var val = stack[--sp];
+                    EnsureStackCapacity(ref stack, sp + 1);
+                    if (val.Kind == PilotValueKind.Adt)
+                    {
+                        var vd = val.GetAdtVariantDefinition();
+                        if (inst.Operand < 0 || string.Equals(vd.ParentAdt.Name, identifiers[inst.Operand], StringComparison.Ordinal))
+                        {
+                            stack[sp++] = PilotValue.FromInt(vd.Tag);
+                            break;
+                        }
+                    }
+                    stack[sp++] = PilotValue.FromInt(-1);
+                    break;
+                }
+
+                case PilotOpcode.GetAdtField:
+                {
+                    var val = stack[--sp];
+                    int idx = inst.Operand;
+                    EnsureStackCapacity(ref stack, sp + 1);
+                    switch (val.Kind)
+                    {
+                        case PilotValueKind.Adt:
+                            stack[sp++] = val.GetAdtField(idx);
+                            break;
+                        case PilotValueKind.Record:
+                            stack[sp++] = val.GetRecordField(idx);
+                            break;
+                        case PilotValueKind.KeywordVariant:
+                        {
+                            var kv = val.AsKeywordVariant();
+                            int realIdx = idx >= 0 ? idx : kv.Fields.Length + idx;
+                            stack[sp++] = realIdx >= 0 && realIdx < kv.Fields.Length ? kv.Fields[realIdx] : PilotValue.Undefined;
+                            break;
+                        }
+                        case PilotValueKind.Tuple:
+                        {
+                            var tup = val.AsTuple();
+                            // inst.Extra == 1 indicates keyword-tagged tuple (:ok, payload) where element 0 is the keyword tag
+                            int adjusted = inst.Extra == 1 ? idx + 1 : idx;
+                            int realIdx = adjusted >= 0 ? adjusted : tup.Count + adjusted;
+                            stack[sp++] = realIdx >= 0 && realIdx < tup.Count ? tup[realIdx] : PilotValue.Undefined;
+                            break;
+                        }
+                        case PilotValueKind.List:
+                        {
+                            var list = val.AsList();
+                            int realIdx = idx >= 0 ? idx : list.Count + idx;
+                            stack[sp++] = realIdx >= 0 && realIdx < list.Count ? list[realIdx] : PilotValue.Undefined;
+                            break;
+                        }
+                        default:
+                            stack[sp++] = PilotValue.Undefined;
+                            break;
+                    }
+                    break;
+                }
+
+                case PilotOpcode.DeclareTypeDescriptor:
+                {
+                    var td = chunk.TypeDescriptors[inst.Operand];
+                    DeclareTypeDescriptorInContext(td, context, scope);
+                    break;
+                }
+
+                case PilotOpcode.GetSequenceLen:
+                {
+                    var val = stack[--sp];
+                    EnsureStackCapacity(ref stack, sp + 1);
+                    int len = val.Kind == PilotValueKind.List ? val.AsList().Count
+                            : val.Kind == PilotValueKind.Tuple ? val.AsTuple().Count
+                            : -1;
+                    stack[sp++] = PilotValue.FromInt(len);
+                    break;
+                }
+
+                case PilotOpcode.SliceSublist:
+                {
+                    var val = stack[--sp];
+                    int start = inst.Operand;
+                    int suffix = inst.Extra;
+                    IReadOnlyList<PilotValue> items = val.Kind == PilotValueKind.List ? val.AsList()
+                        : val.Kind == PilotValueKind.Tuple ? val.AsTuple()
+                        : Array.Empty<PilotValue>();
+                    int end = items.Count - suffix;
+                    var sub = new List<PilotValue>(Math.Max(0, end - start));
+                    for (int i = start; i < end; i++)
+                    {
+                        sub.Add(items[i]);
+                    }
+                    EnsureStackCapacity(ref stack, sp + 1);
+                    stack[sp++] = PilotValue.FromList(sub);
+                    break;
+                }
+
+                case PilotOpcode.CheckKeywordTag:
+                {
+                    var val = stack[--sp];
+                    var targetKw = PilotKeyword.Intern(identifiers[inst.Operand]);
+                    bool matched = false;
+                    if (inst.Extra < 0)
+                    {
+                        if (val.Kind == PilotValueKind.Keyword)
+                        {
+                            matched = val.AsKeyword().Equals(targetKw);
+                        }
+                        else if (val.Kind == PilotValueKind.KeywordVariant)
+                        {
+                            var kv = val.AsKeywordVariant();
+                            matched = kv.Fields.Length == 0 && kv.Keyword.Equals(targetKw);
+                        }
+                    }
+                    else
+                    {
+                        if (val.Kind == PilotValueKind.KeywordVariant)
+                        {
+                            var kv = val.AsKeywordVariant();
+                            matched = kv.Fields.Length == inst.Extra && kv.Keyword.Equals(targetKw);
+                        }
+                        else if (val.Kind == PilotValueKind.Tuple)
+                        {
+                            var tup = val.AsTuple();
+                            matched = tup.Count == inst.Extra + 1 &&
+                                      tup[0].Kind == PilotValueKind.Keyword &&
+                                      tup[0].AsKeyword().Equals(targetKw);
+                        }
+                        else if (val.Kind == PilotValueKind.Adt)
+                        {
+                            var vd = val.GetAdtVariantDefinition();
+                            matched = vd.Arity == inst.Extra &&
+                                      string.Equals(vd.Name, targetKw.Name, StringComparison.OrdinalIgnoreCase);
+                        }
+                    }
+                    EnsureStackCapacity(ref stack, sp + 1);
+                    stack[sp++] = PilotValue.FromBool(matched);
+                    break;
+                }
+
+                case PilotOpcode.CheckRecordType:
+                {
+                    var val = stack[--sp];
+                    string expectedName = identifiers[inst.Operand];
+                    bool matched = CheckRuntimeTypeMatch(val, expectedName, inst.Extra, context);
+                    EnsureStackCapacity(ref stack, sp + 1);
+                    stack[sp++] = PilotValue.FromBool(matched);
+                    break;
+                }
             }
         }
 
         return sp > 0 ? stack[--sp] : PilotValue.Undefined;
+    }
+
+    private static void DeclareTypeDescriptorInContext(
+        PilotBytecodeTypeDescriptor td,
+        PilotExecutionContext context,
+        PilotScope scope)
+    {
+        if (td.IsRecord)
+        {
+            if (!context.RecordDefinitions.TryGetValue(td.Name, out var recDef) ||
+                recDef.Fields.Count != td.RecordFields.Count)
+            {
+                var fields = new List<PilotAdtFieldDefinition>(td.RecordFields.Count);
+                for (int i = 0; i < td.RecordFields.Count; i++)
+                {
+                    fields.Add(new PilotAdtFieldDefinition(td.RecordFields[i].Name, td.RecordFields[i].TypeName, i));
+                }
+                recDef = new PilotRecordDefinition(td.Name, fields, td.GenericParameters);
+                context.RecordDefinitions[td.Name] = recDef;
+                RefreshLayouts(context);
+            }
+
+            var ctorVal = PilotValue.FromFunction(recDef.ConstructorFunction);
+            scope.ForceSet(td.Name, ctorVal);
+            return;
+        }
+
+        if (!context.AdtDefinitions.TryGetValue(td.Name, out var adtDef) ||
+            adtDef.Variants.Count != td.Variants.Count)
+        {
+            adtDef = new PilotAdtDefinition(td.Name, td.GenericParameters);
+            foreach (var vd in td.Variants)
+            {
+                var fields = new List<PilotAdtFieldDefinition>(vd.Fields.Count);
+                for (int i = 0; i < vd.Fields.Count; i++)
+                {
+                    fields.Add(new PilotAdtFieldDefinition(vd.Fields[i].Name, vd.Fields[i].TypeName, i));
+                }
+                adtDef.AddVariant(vd.Name, fields);
+            }
+            context.AdtDefinitions[td.Name] = adtDef;
+            RefreshLayouts(context);
+        }
+
+        scope.ForceSet(td.Name, PilotValue.FromAdtType(adtDef));
+        foreach (var variant in adtDef.Variants)
+        {
+            context.VariantDefinitions[variant.Name] = variant;
+            PilotValue varVal = variant.IsUnit
+                ? variant.UnitSingleton
+                : PilotValue.FromFunction(variant.ConstructorFunction!);
+            scope.ForceSet(variant.Name, varVal);
+        }
+    }
+
+    private static void RefreshLayouts(PilotExecutionContext context)
+    {
+        foreach (var adt in context.AdtDefinitions.Values)
+        {
+            adt.Layout = PilotAdtMemoryLayout.ComputeForAdt(adt, context.AdtDefinitions, context.RecordDefinitions);
+        }
+        foreach (var rec in context.RecordDefinitions.Values)
+        {
+            rec.Layout = PilotAdtMemoryLayout.ComputeForRecord(rec, context.AdtDefinitions, context.RecordDefinitions);
+        }
+    }
+
+    private static bool CheckRuntimeTypeMatch(
+        PilotValue val,
+        string expectedName,
+        int expectedArity,
+        PilotExecutionContext context)
+    {
+        // Primitive type checks
+        switch (expectedName)
+        {
+            case "int" or "i8" or "i16" or "i32" or "i64":
+                return val.Kind == PilotValueKind.Int;
+            case "uint" or "u8" or "u16" or "u32" or "u64":
+                return val.Kind is PilotValueKind.Int or PilotValueKind.UInt;
+            case "float" or "f16" or "f32" or "f64" or "double":
+                return val.Kind is PilotValueKind.Float or PilotValueKind.Int;
+            case "number":
+                return val.IsNumber;
+            case "decimal":
+                return val.Kind == PilotValueKind.Decimal;
+            case "str" or "string":
+                return val.Kind == PilotValueKind.String;
+            case "char_or_str":
+                return val.Kind is PilotValueKind.String or PilotValueKind.Char;
+            case "bool":
+                return val.Kind == PilotValueKind.Bool;
+            case "char":
+                return val.Kind == PilotValueKind.Char;
+            case "list" or "List" or "array" or "Array":
+                return val.Kind == PilotValueKind.List;
+            case "tuple" or "Tuple":
+                return val.Kind == PilotValueKind.Tuple;
+            case "map" or "Map" or "dict" or "Dict":
+                return val.Kind == PilotValueKind.Map;
+            case "set" or "Set":
+                return val.Kind == PilotValueKind.Set;
+        }
+
+        // Typestate pattern: `Conn[Open]`
+        int lb = expectedName.IndexOf('[');
+        if (lb > 0 && expectedName.EndsWith("]", StringComparison.Ordinal))
+        {
+            string baseCls = expectedName[..lb].Trim();
+            string stateArg = expectedName[(lb + 1)..^1].Trim();
+            if (val.Kind == PilotValueKind.Object)
+            {
+                var obj = val.AsObject();
+                return MatchesClassHierarchy(obj.ClassDef, baseCls, context) &&
+                       string.Equals(obj.CurrentState, stateArg, StringComparison.Ordinal);
+            }
+            return false;
+        }
+
+        // Qualified ADT variant: `Shape.Circle` or `Shape.Origin`
+        string? parentAdt = null;
+        string target = expectedName;
+        int dot = expectedName.IndexOf('.');
+        if (dot > 0)
+        {
+            parentAdt = expectedName[..dot];
+            target = expectedName[(dot + 1)..];
+        }
+
+        if (val.Kind == PilotValueKind.Record)
+        {
+            var rd = val.GetRecordDefinition();
+            if (parentAdt != null) return false;
+            return string.Equals(rd.Name, target, StringComparison.Ordinal) &&
+                   (expectedArity < 0 || rd.Fields.Count == expectedArity);
+        }
+
+        if (val.Kind == PilotValueKind.Adt)
+        {
+            var vd = val.GetAdtVariantDefinition();
+            if (parentAdt != null && !string.Equals(vd.ParentAdt.Name, parentAdt, StringComparison.Ordinal))
+            {
+                return false;
+            }
+            if (string.Equals(vd.Name, target, StringComparison.Ordinal))
+            {
+                return expectedArity < 0 || vd.Arity == expectedArity;
+            }
+            if (parentAdt == null && expectedArity < 0 && string.Equals(vd.ParentAdt.Name, target, StringComparison.Ordinal))
+            {
+                return true;
+            }
+            return false;
+        }
+
+        if (val.Kind == PilotValueKind.Object)
+        {
+            return parentAdt == null && MatchesClassHierarchy(val.AsObject().ClassDef, target, context);
+        }
+
+        return false;
+    }
+
+    private static bool MatchesClassHierarchy(PilotClassDefinition? cls, string targetName, PilotExecutionContext context)
+    {
+        while (cls != null)
+        {
+            if (string.Equals(cls.Name, targetName, StringComparison.Ordinal))
+                return true;
+            if (!string.IsNullOrEmpty(cls.BaseClassName) &&
+                context.Environment.TryResolve(cls.BaseClassName, out var bVal) &&
+                bVal.Kind == PilotValueKind.Function && bVal.AsFunction().ClassDef != null)
+            {
+                cls = bVal.AsFunction().ClassDef;
+            }
+            else
+            {
+                break;
+            }
+        }
+        return false;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -818,6 +1196,21 @@ public sealed class PilVirtualMachine
         if (callee.Kind == PilotValueKind.MethodGroup)
         {
             return callee.AsMethodGroup().Invoke(context, args);
+        }
+
+        if (callee.Kind == PilotValueKind.Keyword)
+        {
+            if (args.Count > 0 && args[0].Kind is PilotValueKind.Map or PilotValueKind.Object or PilotValueKind.Null)
+            {
+                var defaultVal = args.Count > 1 ? args[1] : PilotValue.Undefined;
+                return callee.AsKeyword().Invoke(args[0], defaultVal);
+            }
+            if (args.Count > 0)
+            {
+                var fieldArr = args is PilotValue[] arr ? arr : new List<PilotValue>(args).ToArray();
+                return PilotValue.FromKeywordVariant(new PilotKeywordVariant(callee.AsKeyword(), fieldArr));
+            }
+            return PilotValue.Null;
         }
 
         if (callee.Kind == PilotValueKind.Object)

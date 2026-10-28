@@ -29,5 +29,9 @@ public enum PilotValueKind
     Foreign,
     MethodGroup,
     NativeArray,
-    NativeMap
+    NativeMap,
+    Adt,
+    AdtType,
+    Record,
+    KeywordVariant
 }

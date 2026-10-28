@@ -58,6 +58,33 @@ public readonly struct PilotValue : IEquatable<PilotValue>
     public static PilotValue FromMethodGroup(PilotMethodGroup mg) => new(PilotValueKind.MethodGroup, mg, 0, 0);
     public static PilotValue FromNativeArray(Pilot.Runtime.NativeMemory.PilotNativeArray na) => new(PilotValueKind.NativeArray, na, 0, 0);
     public static PilotValue FromNativeMap(Pilot.Runtime.NativeMemory.PilotNativeMap nm) => new(PilotValueKind.NativeMap, nm, 0, 0);
+    public static PilotValue FromAdtType(PilotAdtDefinition adtDef) => new(PilotValueKind.AdtType, adtDef, 0, 0);
+    public static PilotValue FromAdtUnit(PilotAdtVariantDefinition variantDef) => new(PilotValueKind.Adt, variantDef, 0, 0);
+    public static PilotValue FromAdtBoxed(PilotAdtInstance instance) => new(PilotValueKind.Adt, instance, instance.Variant.Tag, 0);
+    public static PilotValue FromRecordUnboxedEmpty(PilotRecordDefinition recDef) => new(PilotValueKind.Record, recDef, 0, 0);
+    public static PilotValue FromRecordUnboxedPairF64(PilotRecordDefinition recDef, double f0, double f1) =>
+        new(PilotValueKind.Record, recDef, BitConverter.DoubleToInt64Bits(f0), f1);
+    public static PilotValue FromRecordBoxed(PilotRecordInstance instance) => new(PilotValueKind.Record, instance, 0, 0);
+    public static PilotValue FromKeywordVariant(PilotKeywordVariant kwVar) => new(PilotValueKind.KeywordVariant, kwVar, 0, 0);
+
+    public static bool TryCreateUnboxedAdtSingle(PilotAdtVariantDefinition variantDef, PilotValue field0, out PilotValue result)
+    {
+        switch (field0.Kind)
+        {
+            case PilotValueKind.Float:
+                result = new PilotValue(PilotValueKind.Adt, variantDef.FloatSlot, 0, field0._floating);
+                return true;
+            case PilotValueKind.Int:
+            case PilotValueKind.UInt:
+            case PilotValueKind.Bool:
+            case PilotValueKind.Char:
+                result = new PilotValue(PilotValueKind.Adt, variantDef, field0._integer, (double)(int)field0.Kind);
+                return true;
+            default:
+                result = Undefined;
+                return false;
+        }
+    }
 
     #endregion
 
@@ -144,6 +171,73 @@ public readonly struct PilotValue : IEquatable<PilotValue>
     public Pilot.Runtime.NativeMemory.PilotNativeMap AsNativeMap() => _reference as Pilot.Runtime.NativeMemory.PilotNativeMap ?? throw new InvalidCastException($"Expected NativeMap, got {Kind}");
     public object? AsForeign() => _reference;
 
+    public bool IsUnboxedInline =>
+        (Kind == PilotValueKind.Adt && _reference is PilotAdtVariantDefinition or PilotAdtFloatSlot) ||
+        (Kind == PilotValueKind.Record && _reference is PilotRecordDefinition);
+
+    public PilotAdtDefinition AsAdtType() => _reference as PilotAdtDefinition ?? throw new InvalidCastException($"Expected AdtType, got {Kind}");
+    public PilotKeywordVariant AsKeywordVariant() => _reference as PilotKeywordVariant ?? throw new InvalidCastException($"Expected KeywordVariant, got {Kind}");
+
+    public PilotAdtVariantDefinition GetAdtVariantDefinition()
+    {
+        if (Kind != PilotValueKind.Adt) throw new InvalidCastException($"Expected Adt, got {Kind}");
+        if (_reference is PilotAdtVariantDefinition vd) return vd;
+        if (_reference is PilotAdtFloatSlot fs) return fs.Variant;
+        return ((PilotAdtInstance)_reference!).Variant;
+    }
+
+    public int GetAdtTag() => Kind == PilotValueKind.Adt ? GetAdtVariantDefinition().Tag : -1;
+
+    public int GetAdtFieldCount() => Kind == PilotValueKind.Adt ? GetAdtVariantDefinition().Arity : 0;
+
+    public PilotValue GetAdtField(int index)
+    {
+        if (Kind != PilotValueKind.Adt) return Undefined;
+        if (_reference is PilotAdtFloatSlot)
+        {
+            return index == 0 ? FromFloat(_floating) : Undefined;
+        }
+        if (_reference is PilotAdtVariantDefinition vd)
+        {
+            if (index != 0 || vd.Arity == 0) return Undefined;
+            return ((PilotValueKind)(int)_floating) switch
+            {
+                PilotValueKind.Int => FromInt(_integer),
+                PilotValueKind.UInt => FromUInt(unchecked((ulong)_integer)),
+                PilotValueKind.Bool => FromBool(_integer != 0),
+                PilotValueKind.Char => FromChar((char)_integer),
+                _ => FromInt(_integer)
+            };
+        }
+        var inst = (PilotAdtInstance)_reference!;
+        return index >= 0 && index < inst.Fields.Length ? inst.Fields[index] : Undefined;
+    }
+
+    public PilotRecordDefinition GetRecordDefinition()
+    {
+        if (Kind != PilotValueKind.Record) throw new InvalidCastException($"Expected Record, got {Kind}");
+        if (_reference is PilotRecordDefinition rd) return rd;
+        return ((PilotRecordInstance)_reference!).Definition;
+    }
+
+    public int GetRecordFieldCount() => Kind == PilotValueKind.Record ? GetRecordDefinition().Fields.Count : 0;
+
+    public PilotValue GetRecordField(int index)
+    {
+        if (Kind != PilotValueKind.Record) return Undefined;
+        if (_reference is PilotRecordDefinition rd)
+        {
+            if (rd.CanUnboxPairF64)
+            {
+                if (index == 0) return FromFloat(BitConverter.Int64BitsToDouble(_integer));
+                if (index == 1) return FromFloat(_floating);
+            }
+            return Undefined;
+        }
+        var inst = (PilotRecordInstance)_reference!;
+        return index >= 0 && index < inst.Fields.Length ? inst.Fields[index] : Undefined;
+    }
+
     #endregion
 
     #region Operators
@@ -202,6 +296,14 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             return FromBool(a.IsTrue && b.IsTrue);
 
         return FromInt(a.AsInt() & b.AsInt());
+    }
+
+    public static PilotValue operator ^(PilotValue a, PilotValue b)
+    {
+        if (a.Kind == PilotValueKind.Bool && b.Kind == PilotValueKind.Bool)
+            return FromBool(a.IsTrue ^ b.IsTrue);
+
+        return FromInt(a.AsInt() ^ b.AsInt());
     }
 
     public static PilotValue operator +(PilotValue a, PilotValue b)
@@ -347,28 +449,36 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             ? a._integer < b._integer
             : (a.Kind == PilotValueKind.Float || b.Kind == PilotValueKind.Float)
                 ? a.AsFloat() < b.AsFloat()
-                : a.AsInt() < b.AsInt();
+                : (a.Kind is PilotValueKind.String or PilotValueKind.Char && b.Kind is PilotValueKind.String or PilotValueKind.Char)
+                    ? string.CompareOrdinal(a.ToString(), b.ToString()) < 0
+                    : a.AsInt() < b.AsInt();
 
     public static bool operator <=(PilotValue a, PilotValue b) =>
         (a.Kind == PilotValueKind.Int && b.Kind == PilotValueKind.Int)
             ? a._integer <= b._integer
             : (a.Kind == PilotValueKind.Float || b.Kind == PilotValueKind.Float)
                 ? a.AsFloat() <= b.AsFloat()
-                : a.AsInt() <= b.AsInt();
+                : (a.Kind is PilotValueKind.String or PilotValueKind.Char && b.Kind is PilotValueKind.String or PilotValueKind.Char)
+                    ? string.CompareOrdinal(a.ToString(), b.ToString()) <= 0
+                    : a.AsInt() <= b.AsInt();
 
     public static bool operator >(PilotValue a, PilotValue b) =>
         (a.Kind == PilotValueKind.Int && b.Kind == PilotValueKind.Int)
             ? a._integer > b._integer
             : (a.Kind == PilotValueKind.Float || b.Kind == PilotValueKind.Float)
                 ? a.AsFloat() > b.AsFloat()
-                : a.AsInt() > b.AsInt();
+                : (a.Kind is PilotValueKind.String or PilotValueKind.Char && b.Kind is PilotValueKind.String or PilotValueKind.Char)
+                    ? string.CompareOrdinal(a.ToString(), b.ToString()) > 0
+                    : a.AsInt() > b.AsInt();
 
     public static bool operator >=(PilotValue a, PilotValue b) =>
         (a.Kind == PilotValueKind.Int && b.Kind == PilotValueKind.Int)
             ? a._integer >= b._integer
             : (a.Kind == PilotValueKind.Float || b.Kind == PilotValueKind.Float)
                 ? a.AsFloat() >= b.AsFloat()
-                : a.AsInt() >= b.AsInt();
+                : (a.Kind is PilotValueKind.String or PilotValueKind.Char && b.Kind is PilotValueKind.String or PilotValueKind.Char)
+                    ? string.CompareOrdinal(a.ToString(), b.ToString()) >= 0
+                    : a.AsInt() >= b.AsInt();
 
     #endregion
 
@@ -416,6 +526,10 @@ public readonly struct PilotValue : IEquatable<PilotValue>
                 if (idx < 0) idx += s.Length;
                 return (idx >= 0 && idx < s.Length) ? FromChar(s[idx]) : Undefined;
             }
+            if (Kind is PilotValueKind.AdtType or PilotValueKind.Function or PilotValueKind.MethodGroup)
+            {
+                return this;
+            }
             return Undefined;
         }
         set
@@ -449,6 +563,84 @@ public readonly struct PilotValue : IEquatable<PilotValue>
 
     public PilotValue GetMember(string memberName, PilotExecutionContext? context = null)
     {
+        if (Kind == PilotValueKind.AdtType)
+        {
+            var adt = (PilotAdtDefinition)_reference!;
+            if (adt.TryGetVariant(memberName, out var variant) && variant != null)
+            {
+                return variant.IsUnit ? variant.UnitSingleton : FromFunction(variant.ConstructorFunction!);
+            }
+            return memberName switch
+            {
+                "name" => FromString(adt.Name),
+                "tag_bytes" => FromInt(adt.Layout.TagBytes),
+                "size_of" => FromInt(adt.Layout.TotalSizeBytes),
+                "align_of" => FromInt(adt.Layout.AlignmentBytes),
+                "is_recursive" => FromBool(adt.Layout.IsRecursive),
+                _ => ResolveRootMember(memberName)
+            };
+        }
+
+        if (Kind == PilotValueKind.Adt)
+        {
+            var vd = GetAdtVariantDefinition();
+            int fIdx = vd.GetFieldIndex(memberName);
+            if (fIdx >= 0)
+            {
+                return GetAdtField(fIdx);
+            }
+            return memberName switch
+            {
+                "tag" => FromInt(vd.Tag),
+                "variant" or "variant_name" => FromString(vd.Name),
+                "adt_name" => FromString(vd.ParentAdt.Name),
+                "is_unboxed" => FromBool(IsUnboxedInline),
+                _ => ResolveExtensionOrRoot(memberName, context)
+            };
+        }
+
+        if (Kind == PilotValueKind.Record)
+        {
+            var rd = GetRecordDefinition();
+            int fIdx = rd.GetFieldIndex(memberName);
+            if (fIdx >= 0)
+            {
+                return GetRecordField(fIdx);
+            }
+            if (rd.Methods.TryGetValue(memberName, out var recMethod))
+            {
+                var self = this;
+                return FromFunction(PilotFunction.CreateNative(memberName, (ctx, args) =>
+                {
+                    if (recMethod.Parameters.Count > 0 && recMethod.Parameters[0].Name == "self")
+                    {
+                        var fullArgs = new List<PilotValue>(args.Count + 1) { self };
+                        fullArgs.AddRange(args);
+                        return recMethod.Invoke(ctx, fullArgs);
+                    }
+                    return recMethod.Invoke(ctx, args);
+                }));
+            }
+            return memberName switch
+            {
+                "is_unboxed" => FromBool(IsUnboxedInline),
+                "size_of" => FromInt(rd.Layout.TotalSizeBytes),
+                _ => ResolveExtensionOrRoot(memberName, context)
+            };
+        }
+
+        if (Kind == PilotValueKind.KeywordVariant)
+        {
+            var kv = (PilotKeywordVariant)_reference!;
+            return memberName switch
+            {
+                "keyword" or "tag" => FromKeyword(kv.Keyword),
+                "value" => kv.Fields.Length > 0 ? kv.Fields[0] : Null,
+                "values" or "fields" => FromList(new List<PilotValue>(kv.Fields)),
+                _ => ResolveExtensionOrRoot(memberName, context)
+            };
+        }
+
         if (Kind == PilotValueKind.Object)
         {
             return ((PilotObject)_reference!).GetMember(memberName, context);
@@ -869,8 +1061,84 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             PilotValueKind.Range => Equals(_reference, other._reference),
             PilotValueKind.Matrix => Equals(_reference, other._reference),
             PilotValueKind.Object => Equals(_reference, other._reference),
+            PilotValueKind.Adt => EqualsAdt(other),
+            PilotValueKind.Record => EqualsRecord(other),
+            PilotValueKind.KeywordVariant => _reference is PilotKeywordVariant kv && other._reference is PilotKeywordVariant okv && kv.Equals(okv),
             _ => ReferenceEquals(_reference, other._reference)
         };
+    }
+
+    private bool EqualsAdt(PilotValue other)
+    {
+        var vA = GetAdtVariantDefinition();
+        var vB = other.GetAdtVariantDefinition();
+        if (!ReferenceEquals(vA, vB) && !(vA.Tag == vB.Tag && vA.Name == vB.Name && vA.ParentAdt.Name == vB.ParentAdt.Name))
+            return false;
+        int arity = vA.Arity;
+        for (int i = 0; i < arity; i++)
+        {
+            if (!GetAdtField(i).Equals(other.GetAdtField(i)))
+                return false;
+        }
+        return true;
+    }
+
+    private bool EqualsRecord(PilotValue other)
+    {
+        var rA = GetRecordDefinition();
+        var rB = other.GetRecordDefinition();
+        if (rA.Name != rB.Name || rA.Fields.Count != rB.Fields.Count)
+            return false;
+        int count = rA.Fields.Count;
+        for (int i = 0; i < count; i++)
+        {
+            if (!GetRecordField(i).Equals(other.GetRecordField(i)))
+                return false;
+        }
+        return true;
+    }
+
+    private int ComputeAdtHashCode()
+    {
+        var vd = GetAdtVariantDefinition();
+        var hc = new HashCode();
+        hc.Add(vd.ParentAdt.Name, StringComparer.Ordinal);
+        hc.Add(vd.Tag);
+        for (int i = 0; i < vd.Arity; i++) hc.Add(GetAdtField(i));
+        return hc.ToHashCode();
+    }
+
+    private int ComputeRecordHashCode()
+    {
+        var rd = GetRecordDefinition();
+        var hc = new HashCode();
+        hc.Add(rd.Name, StringComparer.Ordinal);
+        for (int i = 0; i < rd.Fields.Count; i++) hc.Add(GetRecordField(i));
+        return hc.ToHashCode();
+    }
+
+    private string FormatAdt()
+    {
+        if (_reference is PilotAdtInstance inst) return inst.ToString();
+        var vd = GetAdtVariantDefinition();
+        if (vd.Arity == 0) return vd.Name;
+        var f0 = GetAdtField(0);
+        string? fName = vd.Fields[0].Name;
+        return fName != null ? $"{vd.Name}({fName}: {f0})" : $"{vd.Name}({f0})";
+    }
+
+    private string FormatRecord()
+    {
+        if (_reference is PilotRecordInstance inst) return inst.ToString();
+        var rd = GetRecordDefinition();
+        if (rd.Fields.Count == 0) return $"{rd.Name}()";
+        var parts = new string[rd.Fields.Count];
+        for (int i = 0; i < rd.Fields.Count; i++)
+        {
+            string? fName = rd.Fields[i].Name;
+            parts[i] = fName != null ? $"{fName}: {GetRecordField(i)}" : GetRecordField(i).ToString();
+        }
+        return $"{rd.Name}({string.Join(", ", parts)})";
     }
 
     private static bool EqualsList(List<PilotValue> a, List<PilotValue> b)
@@ -907,6 +1175,8 @@ public readonly struct PilotValue : IEquatable<PilotValue>
         PilotValueKind.Int or PilotValueKind.UInt or PilotValueKind.Char => _integer.GetHashCode(),
         PilotValueKind.Float => _floating.GetHashCode(),
         PilotValueKind.String => ((string)_reference!).GetHashCode(StringComparison.Ordinal),
+        PilotValueKind.Adt => ComputeAdtHashCode(),
+        PilotValueKind.Record => ComputeRecordHashCode(),
         _ => _reference?.GetHashCode() ?? 0
     };
 
@@ -936,6 +1206,10 @@ public readonly struct PilotValue : IEquatable<PilotValue>
         PilotValueKind.Lazy => _reference!.ToString()!,
         PilotValueKind.Future => _reference!.ToString()!,
         PilotValueKind.MethodGroup => _reference!.ToString()!,
+        PilotValueKind.Adt => FormatAdt(),
+        PilotValueKind.AdtType => _reference!.ToString()!,
+        PilotValueKind.Record => FormatRecord(),
+        PilotValueKind.KeywordVariant => _reference!.ToString()!,
         PilotValueKind.Foreign => _reference?.ToString() ?? "null",
         _ => "<unknown>"
     };

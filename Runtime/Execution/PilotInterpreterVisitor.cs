@@ -734,18 +734,30 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
         if (info.Kind == TargetAssignmentKind.MemberAccess)
         {
+            PilotValue receiverVal = PilotValue.Undefined;
+            bool evaluatedReceiver = false;
             try
             {
-                var receiverVal = EvaluateAtomExprPrefix(info.AtomExpr!, info.ReceiverTrailerCount);
+                receiverVal = EvaluateAtomExprPrefix(info.AtomExpr!, info.ReceiverTrailerCount);
+                evaluatedReceiver = true;
+            }
+            catch
+            {
+                // Fallback to scope
+            }
+
+            if (evaluatedReceiver)
+            {
+                if (receiverVal.Kind is PilotValueKind.Record or PilotValueKind.Adt or PilotValueKind.KeywordVariant)
+                {
+                    throw new PilotRuntimeException(
+                        $"[PILOT101] Cannot mutate field '{info.Identifier}' on immutable {receiverVal.Kind.ToString().ToLowerInvariant()} value.");
+                }
                 if (receiverVal.Kind == PilotValueKind.Object)
                 {
                     receiverVal.AsObject().SetMember(info.Identifier!, value);
                     return;
                 }
-            }
-            catch
-            {
-                // Fallback to scope
             }
         }
         else if (info.Kind == TargetAssignmentKind.IndexAccess)
@@ -1189,6 +1201,282 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         return PilotValue.FromFunction(macroFunction);
     }
 
+    public override PilotValue VisitType_alias_stmt(PilotParser.Type_alias_stmtContext context)
+    {
+        string typeName = context.identifier().GetText();
+        var genericParams = ExtractGenericParamNames(context.generic_params());
+
+        if (context.adt_sum_body() != null)
+        {
+            var adtDef = new PilotAdtDefinition(typeName, genericParams);
+            var sumBody = context.adt_sum_body();
+            for (int i = 0; i < sumBody.ChildCount; i++)
+            {
+                var child = sumBody.GetChild(i);
+                if (child is PilotParser.IdentifierContext unitId)
+                {
+                    adtDef.AddVariant(unitId.GetText(), Array.Empty<PilotAdtFieldDefinition>());
+                }
+                else if (child is PilotParser.Adt_variantContext vCtx)
+                {
+                    adtDef.AddVariant(vCtx.identifier().GetText(), ExtractAdtFields(vCtx.adt_field_list(), vCtx.struct_member()));
+                }
+                else if (child is PilotParser.Adt_variant_payloadContext vpCtx)
+                {
+                    adtDef.AddVariant(vpCtx.identifier().GetText(), ExtractAdtFields(vpCtx.adt_field_list(), vpCtx.struct_member()));
+                }
+            }
+            return RegisterAdtDefinition(adtDef, registerUnqualifiedVariants: true);
+        }
+
+        // Check if a union type alias consists purely of undeclared PascalCase unit variant names (e.g. `type Status = Pending | Running | Done`)
+        var unionCtx = context.type_spec()?.union_type();
+        var branches = unionCtx?.intersection_type();
+        if (branches != null && branches.Length >= 2)
+        {
+            var unitNames = new List<string>(branches.Length);
+            bool allUnitConstructors = true;
+            foreach (var b in branches)
+            {
+                string txt = b.GetText().Trim();
+                if (string.IsNullOrEmpty(txt) ||
+                    !char.IsUpper(txt[0]) ||
+                    !txt.All(c => char.IsLetterOrDigit(c) || c == '_') ||
+                    IsKnownTypeOrBinding(txt))
+                {
+                    allUnitConstructors = false;
+                    break;
+                }
+                unitNames.Add(txt);
+            }
+
+            if (allUnitConstructors)
+            {
+                var adtDef = new PilotAdtDefinition(typeName, genericParams);
+                foreach (var uName in unitNames)
+                {
+                    adtDef.AddVariant(uName, Array.Empty<PilotAdtFieldDefinition>());
+                }
+                return RegisterAdtDefinition(adtDef, registerUnqualifiedVariants: true);
+            }
+        }
+
+        return PilotValue.Undefined;
+    }
+
+    public override PilotValue VisitEnum_def(PilotParser.Enum_defContext context)
+    {
+        string enumName = context.identifier().GetText();
+        var genericParams = ExtractGenericParamNames(context.generic_params());
+        var adtDef = new PilotAdtDefinition(enumName, genericParams);
+
+        if (context.enum_suite()?.enum_member() != null)
+        {
+            foreach (var member in context.enum_suite().enum_member())
+            {
+                string varName = member.identifier().GetText();
+                var fields = ExtractAdtFields(member.adt_field_list(), member.struct_member());
+                adtDef.AddVariant(varName, fields);
+            }
+        }
+
+        return RegisterAdtDefinition(adtDef, registerUnqualifiedVariants: true);
+    }
+
+    public override PilotValue VisitRecord_def(PilotParser.Record_defContext context)
+    {
+        string recName = context.identifier().GetText();
+        var genericParams = ExtractGenericParamNames(context.generic_params());
+        var fields = ExtractAdtFields(context.adt_field_list(), context.struct_member());
+        var recDef = new PilotRecordDefinition(recName, fields, genericParams);
+
+        if (context.stmt() != null && context.stmt().Length > 0)
+        {
+            Context.Environment.PushScope($"RecordDef:{recName}");
+            try
+            {
+                foreach (var stmt in context.stmt())
+                {
+                    var funcDef = stmt.compound_stmt()?.func_def();
+                    if (funcDef != null)
+                    {
+                        var fnVal = VisitFunc_def(funcDef);
+                        if (fnVal.Kind == PilotValueKind.Function)
+                        {
+                            recDef.Methods[fnVal.AsFunction().Name] = fnVal.AsFunction();
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                Context.Environment.PopScope();
+            }
+        }
+
+        Context.RecordDefinitions[recName] = recDef;
+        RefreshAllAdtAndRecordLayouts();
+
+        var ctorVal = PilotValue.FromFunction(recDef.ConstructorFunction);
+        Context.Environment.CurrentScope.Declare(recName, ctorVal);
+        return ctorVal;
+    }
+
+    public override PilotValue VisitStruct_def(PilotParser.Struct_defContext context)
+    {
+        string structName = context.identifier().GetText();
+        var classDef = new PilotClassDefinition(structName);
+        foreach (var member in context.struct_member())
+        {
+            string fName = member.identifier().GetText();
+            string? fType = member.type_annotation()?.type_spec()?.GetText();
+            PilotValue initVal = member.test() != null ? Visit(member.test()) : DefaultValueForType(fType);
+            classDef.StaticFields[fName] = initVal;
+            if (!string.IsNullOrEmpty(fType))
+            {
+                _ = fType!;
+            }
+        }
+
+        if (context.suite()?.stmt() != null)
+        {
+            Context.Environment.PushScope($"StructDef:{structName}");
+            try
+            {
+                foreach (var stmt in context.suite().stmt())
+                {
+                    if (stmt.compound_stmt()?.func_def() is { } fd)
+                    {
+                        var fnVal = VisitFunc_def(fd);
+                        if (fnVal.Kind == PilotValueKind.Function)
+                            classDef.Methods[fnVal.AsFunction().Name] = fnVal.AsFunction();
+                    }
+                    else if (stmt.simple_stmt()?.small_stmt() is { } smalls)
+                    {
+                        foreach (var sm in smalls)
+                        {
+                            if (sm.let_stmt() is { } ls && ls.binding_pattern()?.identifier() is { } lid)
+                            {
+                                string fn = lid.GetText();
+                                string? ft = ls.type_annotation()?.type_spec()?.GetText();
+                                classDef.StaticFields[fn] = ls.test() != null ? Visit(ls.test()) : DefaultValueForType(ft);
+                            }
+                            else if (sm.var_stmt() is { } vs && vs.binding_pattern()?.identifier() is { } vid)
+                            {
+                                string fn = vid.GetText();
+                                string? ft = vs.type_annotation()?.type_spec()?.GetText();
+                                classDef.StaticFields[fn] = vs.test() != null ? Visit(vs.test()) : DefaultValueForType(ft);
+                            }
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                Context.Environment.PopScope();
+            }
+        }
+
+        var ctor = PilotValue.CreateClassConstructor(classDef);
+        Context.Environment.CurrentScope.Declare(structName, ctor);
+        return ctor;
+    }
+
+    private static PilotValue DefaultValueForType(string? typeName) => typeName?.Trim().ToLowerInvariant() switch
+    {
+        "int" or "i8" or "i16" or "i32" or "i64" or "u8" or "u16" or "u32" or "u64" or "uint" => PilotValue.FromInt(0),
+        "float" or "f32" or "f64" or "double" => PilotValue.FromFloat(0.0),
+        "bool" => PilotValue.False,
+        "str" or "string" => PilotValue.FromString(""),
+        _ => PilotValue.Null
+    };
+
+    private PilotValue RegisterAdtDefinition(PilotAdtDefinition adtDef, bool registerUnqualifiedVariants)
+    {
+        Context.AdtDefinitions[adtDef.Name] = adtDef;
+        RefreshAllAdtAndRecordLayouts();
+
+        var adtTypeVal = PilotValue.FromAdtType(adtDef);
+        Context.Environment.CurrentScope.Declare(adtDef.Name, adtTypeVal);
+
+        foreach (var variant in adtDef.Variants)
+        {
+            Context.VariantDefinitions[variant.Name] = variant;
+            if (registerUnqualifiedVariants)
+            {
+                PilotValue varVal = variant.IsUnit
+                    ? variant.UnitSingleton
+                    : PilotValue.FromFunction(variant.ConstructorFunction!);
+                Context.Environment.CurrentScope.Declare(variant.Name, varVal);
+            }
+        }
+
+        return adtTypeVal;
+    }
+
+    private void RefreshAllAdtAndRecordLayouts()
+    {
+        foreach (var adt in Context.AdtDefinitions.Values)
+        {
+            adt.Layout = PilotAdtMemoryLayout.ComputeForAdt(adt, Context.AdtDefinitions, Context.RecordDefinitions);
+        }
+        foreach (var rec in Context.RecordDefinitions.Values)
+        {
+            rec.Layout = PilotAdtMemoryLayout.ComputeForRecord(rec, Context.AdtDefinitions, Context.RecordDefinitions);
+        }
+    }
+
+    private bool IsKnownTypeOrBinding(string name)
+    {
+        if (name is "int" or "i8" or "i16" or "i32" or "i64" or "uint" or "u8" or "u16" or "u32" or "u64"
+            or "float" or "f8" or "f16" or "f32" or "f64" or "double" or "decimal"
+            or "str" or "string" or "bool" or "char" or "bytes" or "any" or "dynamic" or "void"
+            or "Duration" or "Frequency" or "MemorySize")
+        {
+            return true;
+        }
+        if (Context.AdtDefinitions.ContainsKey(name) || Context.RecordDefinitions.ContainsKey(name))
+            return true;
+        if (Context.Environment.CurrentScope.TryResolve(name, out _))
+            return true;
+        return false;
+    }
+
+    private static IReadOnlyList<string> ExtractGenericParamNames(PilotParser.Generic_paramsContext? gpCtx)
+    {
+        if (gpCtx == null) return Array.Empty<string>();
+        return gpCtx.generic_param().Select(gp => gp.identifier().GetText()).ToArray();
+    }
+
+    private static IReadOnlyList<PilotAdtFieldDefinition> ExtractAdtFields(
+        PilotParser.Adt_field_listContext? fieldList,
+        PilotParser.Struct_memberContext[]? structMembers)
+    {
+        var result = new List<PilotAdtFieldDefinition>();
+        if (fieldList?.adt_field() != null)
+        {
+            var adtFields = fieldList.adt_field();
+            for (int i = 0; i < adtFields.Length; i++)
+            {
+                var f = adtFields[i];
+                string? fName = f.identifier()?.GetText();
+                string fType = f.type_spec().GetText();
+                result.Add(new PilotAdtFieldDefinition(fName, fType, i, f.test()));
+            }
+        }
+        else if (structMembers != null && structMembers.Length > 0)
+        {
+            for (int i = 0; i < structMembers.Length; i++)
+            {
+                var m = structMembers[i];
+                string fName = m.identifier().GetText();
+                string fType = m.type_annotation()?.type_spec()?.GetText() ?? "any";
+                result.Add(new PilotAdtFieldDefinition(fName, fType, i, m.test()));
+            }
+        }
+        return result;
+    }
+
     public override PilotValue VisitExtension_def(PilotParser.Extension_defContext context)
     {
         string extName = context.identifier()?.GetText() ?? "AnonymousExtension";
@@ -1347,20 +1635,37 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
     {
         var tests = context.test();
         var suites = context.suite();
+        var patterns = context.pattern();
 
-        // Main if condition
-        if (Visit(tests[0]).IsTrue)
+        for (int i = 0; i < tests.Length; i++)
         {
-            return Visit(suites[0]);
-        }
-
-        // Elif / Else If branches
-        int elifCount = tests.Length - 1;
-        for (int i = 0; i < elifCount; i++)
-        {
-            if (Visit(tests[i + 1]).IsTrue)
+            var branchPat = FindBranchPattern(patterns, tests[i], i > 0 ? suites[i - 1] : null);
+            if (branchPat != null)
             {
-                return Visit(suites[i + 1]);
+                var rhsVal = Visit(tests[i]);
+                if (IsBareOptionalBindingPattern(branchPat) && (rhsVal.IsNull || rhsVal.IsUndefined))
+                {
+                    continue;
+                }
+
+                Context.Environment.PushScope("if_let");
+                try
+                {
+                    var branchGuard = FindBranchPatternGuard(context.pattern_guard(), tests[i], suites[i]);
+                    if (PilotPatternMatcher.Match(branchPat, rhsVal, Context.Environment.CurrentScope, this) &&
+                        (branchGuard == null || Visit(branchGuard.test()).IsTrue))
+                    {
+                        return Visit(suites[i]);
+                    }
+                }
+                finally
+                {
+                    Context.Environment.PopScope();
+                }
+            }
+            else if (Visit(tests[i]).IsTrue)
+            {
+                return Visit(suites[i]);
             }
         }
 
@@ -1373,29 +1678,133 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         return PilotValue.Undefined;
     }
 
+    private static PilotParser.PatternContext? FindBranchPattern(
+        PilotParser.PatternContext[]? patterns,
+        PilotParser.TestContext branchTest,
+        PilotParser.SuiteContext? prevSuite)
+    {
+        if (patterns == null || patterns.Length == 0) return null;
+        int minToken = prevSuite != null ? prevSuite.Stop.TokenIndex : -1;
+        int maxToken = branchTest.Start.TokenIndex;
+        for (int i = 0; i < patterns.Length; i++)
+        {
+            int patStart = patterns[i].Start.TokenIndex;
+            if (patStart > minToken && patStart < maxToken)
+            {
+                return patterns[i];
+            }
+        }
+        return null;
+    }
+
+    private static PilotParser.Pattern_guardContext? FindBranchPatternGuard(
+        PilotParser.Pattern_guardContext[]? guards,
+        PilotParser.TestContext branchTest,
+        PilotParser.SuiteContext branchSuite)
+    {
+        if (guards == null || guards.Length == 0) return null;
+        int minToken = branchTest.Stop.TokenIndex;
+        int maxToken = branchSuite.Start.TokenIndex;
+        for (int i = 0; i < guards.Length; i++)
+        {
+            int gTok = guards[i].Start.TokenIndex;
+            if (gTok > minToken && gTok < maxToken)
+            {
+                return guards[i];
+            }
+        }
+        return null;
+    }
+
+    private bool IsBareOptionalBindingPattern(PilotParser.PatternContext pat)
+    {
+        var orBranches = pat.or_pattern()?.and_pattern();
+        if (orBranches == null || orBranches.Length != 1) return false;
+        var notBranches = orBranches[0].not_pattern();
+        if (notBranches == null || notBranches.Length != 1 || notBranches[0].NOT() != null || notBranches[0].AT() != null) return false;
+        var prim = notBranches[0].primary_pattern();
+        var tv = prim?.type_or_var_pattern();
+        if (tv == null) return false;
+        if (tv.dotted_name() == null && tv.identifier() != null) return true;
+        if (tv.dotted_name() != null &&
+            tv.dotted_name().identifier().Length == 1 &&
+            tv.generic_pattern_suffix() == null &&
+            tv.LPAR() == null &&
+            tv.property_pattern() == null &&
+            tv.identifier() == null)
+        {
+            string id = tv.dotted_name().GetText();
+            return !Context.VariantDefinitions.ContainsKey(id) &&
+                   !Context.AdtDefinitions.ContainsKey(id) &&
+                   !Context.RecordDefinitions.ContainsKey(id);
+        }
+        return false;
+    }
+
     public override PilotValue VisitWhile_stmt(PilotParser.While_stmtContext context)
     {
         PilotValue lastVal = PilotValue.Undefined;
         var condNode = context.test(0);
         var bodyNode = context.suite(0);
-        while (Visit(condNode).IsTrue)
+        var patNode = context.pattern();
+
+        while (true)
         {
-            Context.Environment.PushScope("while");
-            try
+            if (patNode != null)
             {
-                lastVal = Visit(bodyNode);
+                var rhsVal = Visit(condNode);
+                if (IsBareOptionalBindingPattern(patNode) && (rhsVal.IsNull || rhsVal.IsUndefined))
+                {
+                    break;
+                }
+
+                Context.Environment.PushScope("while_let");
+                try
+                {
+                    if (!PilotPatternMatcher.Match(patNode, rhsVal, Context.Environment.CurrentScope, this) ||
+                        (context.pattern_guard() != null && !Visit(context.pattern_guard().test()).IsTrue))
+                    {
+                        break;
+                    }
+                    lastVal = Visit(bodyNode);
+                }
+                catch (PilotBreakSignal)
+                {
+                    break;
+                }
+                catch (PilotContinueSignal)
+                {
+                    continue;
+                }
+                finally
+                {
+                    Context.Environment.PopScope();
+                }
             }
-            catch (PilotBreakSignal)
+            else
             {
-                break;
-            }
-            catch (PilotContinueSignal)
-            {
-                continue;
-            }
-            finally
-            {
-                Context.Environment.PopScope();
+                if (!Visit(condNode).IsTrue)
+                {
+                    break;
+                }
+
+                Context.Environment.PushScope("while");
+                try
+                {
+                    lastVal = Visit(bodyNode);
+                }
+                catch (PilotBreakSignal)
+                {
+                    break;
+                }
+                catch (PilotContinueSignal)
+                {
+                    continue;
+                }
+                finally
+                {
+                    Context.Environment.PopScope();
+                }
             }
 
             if (Context.PendingFlow != PilotFlowSignalKind.None)
@@ -1827,11 +2236,39 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
     public override PilotValue VisitGuard_stmt(PilotParser.Guard_stmtContext context)
     {
         PilotValue condVal;
-        if (context.LET() != null && context.pattern() != null)
+        if ((context.LET() != null || context.VAR() != null) && context.pattern() != null)
         {
             var rhs = Visit(context.test());
-            bool matched = PilotPatternMatcher.Match(context.pattern(), rhs, Context.Environment.CurrentScope, this);
-            condVal = PilotValue.FromBool(matched);
+            if (IsBareOptionalBindingPattern(context.pattern()) && (rhs.IsNull || rhs.IsUndefined))
+            {
+                condVal = PilotValue.False;
+            }
+            else
+            {
+                var staging = Context.Environment.PushScope("guard_let_staging");
+                bool matched;
+                try
+                {
+                    matched = PilotPatternMatcher.Match(context.pattern(), rhs, staging, this);
+                    if (matched && context.pattern_guard() != null)
+                    {
+                        matched = Visit(context.pattern_guard().test()).IsTrue;
+                    }
+                }
+                finally
+                {
+                    Context.Environment.PopScope();
+                }
+                if (matched)
+                {
+                    bool isConst = context.VAR() == null;
+                    foreach (var kvp in staging.GetLocalBindings())
+                    {
+                        Context.Environment.CurrentScope.DeclareOrShadow(kvp.Key, kvp.Value.Value, isConst: isConst);
+                    }
+                }
+                condVal = PilotValue.FromBool(matched);
+            }
         }
         else
         {
@@ -2303,7 +2740,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         if (bitor.Length > 1)
         {
             var endVal = Visit(bitor[1]);
-            bool inclusive = context.DOTDOT_EQUAL() != null;
+            bool inclusive = context.DOTDOT_EQUAL() != null || context.ELLIPSIS() != null;
             return PilotValue.FromRange(new PilotRange(startVal.AsInt(), endVal.AsInt(), 1, inclusive));
         }
 
@@ -2975,10 +3412,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                     {
                         var pType = fn.Parameters[i].TypeName;
                         if (!string.IsNullOrWhiteSpace(pType) &&
-                            !pType.Equals("list", StringComparison.OrdinalIgnoreCase) &&
-                            !pType.Equals("array", StringComparison.OrdinalIgnoreCase) &&
-                            !pType.Equals("any", StringComparison.OrdinalIgnoreCase) &&
-                            !pType.Equals("dynamic", StringComparison.OrdinalIgnoreCase) &&
+                            !IsCollectionOrTupleParameterType(pType, fn.Parameters[i].Name, fn) &&
                             (posArgs[i].Kind is PilotValueKind.List or PilotValueKind.Tuple or PilotValueKind.Set))
                         {
                             if (ReferenceEquals(eachPos, EmptyEachPos)) eachPos = new HashSet<int>();
@@ -3042,12 +3476,17 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         }
         else if (current.Kind == PilotValueKind.Keyword)
         {
-            // Clojure-like keyword invocation: (:key map [default])
-            if (posArgs.Count > 0)
+            // Clojure-like keyword invocation on Map/Object/Null: (:key map [default])
+            if (posArgs.Count > 0 && posArgs[0].Kind is PilotValueKind.Map or PilotValueKind.Object or PilotValueKind.Null)
             {
                 var target = posArgs[0];
                 var defaultVal = posArgs.Count > 1 ? posArgs[1] : PilotValue.Undefined;
                 return current.AsKeyword().Invoke(target, defaultVal);
+            }
+            // Keyword-tagged variant constructor: :ok([1, 2, 3]), :err("timeout")
+            if (posArgs.Count > 0)
+            {
+                return PilotValue.FromKeywordVariant(new PilotKeywordVariant(current.AsKeyword(), posArgs.ToArray()));
             }
             return PilotValue.Null;
         }
@@ -3146,7 +3585,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         {
             var arg = args[i];
             bool isEach = arg.EACH() != null || arg.REPEAT() != null || arg.DOTDOT() != null;
-            if (arg.identifier() != null && arg.EQUAL() != null && arg.test() != null)
+            if (arg.identifier() != null && (arg.EQUAL() != null || arg.COLON() != null) && arg.test() != null)
             {
                 string key = arg.identifier().GetText();
                 var val = Visit(arg.test());
@@ -3264,10 +3703,41 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     #region Atoms, Literals & Collections
 
+    private static bool IsCollectionOrTupleParameterType(string pType, string paramName, PilotFunction fn)
+    {
+        string t = pType.Trim();
+        if (t.Equals("list", StringComparison.OrdinalIgnoreCase) ||
+            t.Equals("array", StringComparison.OrdinalIgnoreCase) ||
+            t.Equals("set", StringComparison.OrdinalIgnoreCase) ||
+            t.Equals("tuple", StringComparison.OrdinalIgnoreCase) ||
+            t.Equals("any", StringComparison.OrdinalIgnoreCase) ||
+            t.Equals("dynamic", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (t.EndsWith("[]", StringComparison.Ordinal) ||
+            t.StartsWith("List[", StringComparison.OrdinalIgnoreCase) ||
+            t.StartsWith("List<", StringComparison.OrdinalIgnoreCase) ||
+            t.StartsWith("Array[", StringComparison.OrdinalIgnoreCase) ||
+            t.StartsWith("Set[", StringComparison.OrdinalIgnoreCase) ||
+            t.StartsWith("[", StringComparison.Ordinal) ||
+            t.StartsWith("(", StringComparison.Ordinal))
+        {
+            return true;
+        }
+        // Generic parameter on ADT/record constructor (e.g. Const(value: T) where T = List[int])
+        if (t.Length == 1 && char.IsUpper(t[0]) && fn.AstBody == null)
+        {
+            return true;
+        }
+        return false;
+    }
+
     public override PilotValue VisitAtom(PilotParser.AtomContext context)
     {
         if (context.literal() != null) return Visit(context.literal());
         if (context.symbol_literal() != null) return VisitSymbol_literal(context.symbol_literal());
+        if (context.match_stmt() != null) return VisitMatch_stmt(context.match_stmt());
         if (context.identifier() != null) return ResolveIdentifier(context.identifier().GetText());
         if (context.collection_expr() != null) return VisitCollection_expr(context.collection_expr());
         if (context.LPAR() != null && context.testlist_comp() != null) return VisitTestlist_comp(context.testlist_comp());

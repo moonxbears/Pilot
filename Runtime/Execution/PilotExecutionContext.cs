@@ -53,6 +53,9 @@ public sealed class PilotExecutionContext
     public int AutoRepeatDepth { get; set; }
     public bool IsAutoRepeatActive => AutoRepeatDepth > 0;
     public Pilot.Runtime.Adapters.PilotTypeAdapterRegistry TypeAdapters { get; } = Pilot.Runtime.Adapters.PilotTypeAdapterRegistry.Default;
+    public Dictionary<string, PilotAdtDefinition> AdtDefinitions { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, PilotRecordDefinition> RecordDefinitions { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, PilotAdtVariantDefinition> VariantDefinitions { get; } = new(StringComparer.Ordinal);
 
     public bool TryResolveContextual(string name, out PilotValue value)
     {
