@@ -18,8 +18,9 @@ public sealed class PilotParameter
     public bool IsKwArgs { get; }
     public bool IsContextual { get; }
     public bool IsEach { get; }
+    public bool IsComptime { get; init; }
 
-    public PilotParameter(string name, string? typeName = null, PilotValue? defaultValue = null, bool isParams = false, bool isKwArgs = false, bool isContextual = false, bool isEach = false)
+    public PilotParameter(string name, string? typeName = null, PilotValue? defaultValue = null, bool isParams = false, bool isKwArgs = false, bool isContextual = false, bool isEach = false, bool isComptime = false)
     {
         Name = name;
         TypeName = typeName;
@@ -28,6 +29,7 @@ public sealed class PilotParameter
         IsKwArgs = isKwArgs;
         IsContextual = isContextual;
         IsEach = isEach;
+        IsComptime = isComptime;
     }
 }
 
@@ -53,6 +55,9 @@ public sealed class PilotFunction
     public IReadOnlyDictionary<string, PilotValue>? Captures { get; private set; }
     public PilotClassDefinition? ClassDef { get; set; }
     public Pilot.Runtime.Bytecode.PilotBytecodeChunk? BytecodeChunk { get; set; }
+    public PilotValue[][]? LexicalDisplay { get; internal set; }
+    public bool IsComptime { get; set; }
+    public bool ContractsStaticallyDischarged { get; set; }
     public int PatchVersion { get; private set; } = 0;
     public string? ReturnTypeSpec { get; set; }
     public string? SuccessTypeSpec { get; set; }

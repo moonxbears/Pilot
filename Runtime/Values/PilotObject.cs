@@ -19,6 +19,20 @@ public sealed class PilotClassDefinition
     public Dictionary<string, PilotClassDefinition> States { get; } = new(StringComparer.Ordinal);
     public string? InitialState { get; set; }
     public List<PilotFunction> GenerativeMacros { get; } = new();
+    public List<string> OrderedFieldNames { get; } = new();
+    public Dictionary<string, int> FieldSlotIndices { get; } = new(StringComparer.Ordinal);
+
+    public int RegisterFieldSlot(string fieldName)
+    {
+        if (FieldSlotIndices.TryGetValue(fieldName, out int existing))
+        {
+            return existing;
+        }
+        int idx = OrderedFieldNames.Count;
+        OrderedFieldNames.Add(fieldName);
+        FieldSlotIndices[fieldName] = idx;
+        return idx;
+    }
 
     public PilotClassDefinition(string name, string? baseClassName = null)
     {
@@ -380,7 +394,10 @@ public sealed class PilotClassDefinition
 
         foreach (var kvp in StaticFields)
         {
-            instance.Fields[kvp.Key] = kvp.Value.CloneValue();
+            int slot = RegisterFieldSlot(kvp.Key);
+            var cloned = kvp.Value.CloneValue();
+            instance.Fields[kvp.Key] = cloned;
+            instance.SetFieldSlotDirect(slot, cloned);
         }
     }
 
@@ -396,6 +413,8 @@ public sealed class PilotObject : IEquatable<PilotObject>
 
     public PilotClassDefinition? ClassDef { get; }
     public string? CurrentState { get; set; }
+    public bool IsFrozen { get; set; }
+    public PilotValue[]? FieldSlots { get; private set; }
     public string TypeName => ClassDef?.Name ?? "object";
     public string FullTypeName => !string.IsNullOrEmpty(CurrentState) ? $"{TypeName}[{CurrentState}]" : TypeName;
     public Dictionary<string, PilotValue> Fields { get; } = new(StringComparer.Ordinal);
@@ -410,6 +429,70 @@ public sealed class PilotObject : IEquatable<PilotObject>
         if (classDef?.InitialState != null)
         {
             CurrentState = classDef.InitialState;
+        }
+    }
+
+    public PilotValue GetFieldSlot(int slotIndex, string? fallbackName = null)
+    {
+        if (FieldSlots != null && (uint)slotIndex < (uint)FieldSlots.Length)
+        {
+            var val = FieldSlots[slotIndex];
+            if (val.Kind != PilotValueKind.Null || (fallbackName != null && Fields.ContainsKey(fallbackName)))
+            {
+                return val;
+            }
+        }
+        if (fallbackName != null && Fields.TryGetValue(fallbackName, out var dictVal))
+        {
+            return dictVal;
+        }
+        if (ClassDef != null && (uint)slotIndex < (uint)ClassDef.OrderedFieldNames.Count)
+        {
+            string fieldName = ClassDef.OrderedFieldNames[slotIndex];
+            if (Fields.TryGetValue(fieldName, out var bySlotName))
+            {
+                return bySlotName;
+            }
+        }
+        return PilotValue.Undefined;
+    }
+
+    public void SetFieldSlotDirect(int slotIndex, PilotValue value)
+    {
+        if (slotIndex < 0) return;
+        if (FieldSlots == null)
+        {
+            int size = Math.Max(slotIndex + 1, ClassDef?.OrderedFieldNames.Count ?? (slotIndex + 1));
+            FieldSlots = new PilotValue[size];
+        }
+        else if (slotIndex >= FieldSlots.Length)
+        {
+            var resized = new PilotValue[slotIndex + 1];
+            Array.Copy(FieldSlots, resized, FieldSlots.Length);
+            FieldSlots = resized;
+        }
+        FieldSlots[slotIndex] = value;
+    }
+
+    public void SetFieldSlot(int slotIndex, PilotValue value, string? fieldName = null)
+    {
+        if (IsFrozen)
+        {
+            throw new InvalidOperationException($"Cannot mutate field on compile-time frozen object '{TypeName}'.");
+        }
+        SetFieldSlotDirect(slotIndex, value);
+        string? resolvedName = fieldName ??
+            (ClassDef != null && (uint)slotIndex < (uint)ClassDef.OrderedFieldNames.Count
+                ? ClassDef.OrderedFieldNames[slotIndex]
+                : null);
+        if (resolvedName != null)
+        {
+            if (Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordObjectFieldWrite(this, resolvedName, value))
+            {
+                return;
+            }
+            Fields[resolvedName] = value;
+            Pilot.Runtime.Reactive.PilotSignalGraph.NotifyObjectPropertyChanged(this, resolvedName, value);
         }
     }
 
@@ -571,7 +654,15 @@ public sealed class PilotObject : IEquatable<PilotObject>
         {
             return;
         }
+        if (IsFrozen)
+        {
+            throw new InvalidOperationException($"Cannot mutate field '{memberName}' on compile-time frozen object '{TypeName}'.");
+        }
         Fields[memberName] = value;
+        if (ClassDef != null && ClassDef.FieldSlotIndices.TryGetValue(memberName, out int slot))
+        {
+            SetFieldSlotDirect(slot, value);
+        }
         Pilot.Runtime.Reactive.PilotSignalGraph.NotifyObjectPropertyChanged(this, memberName, value);
     }
 

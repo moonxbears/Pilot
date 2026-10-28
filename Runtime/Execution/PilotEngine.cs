@@ -206,7 +206,7 @@ public sealed class PilotEngine : IPilotEngine
         var methodVisitor = context.GetOrCreateVisitor();
 
         // Design-by-Contract: 1. Evaluate Preconditions (requires)
-        if (function.HasRequiresContracts)
+        if (function.HasRequiresContracts && !function.ContractsStaticallyDischarged)
         {
             var reqs = function.RequiresContracts;
             for (int i = 0; i < reqs.Count; i++)
@@ -225,7 +225,7 @@ public sealed class PilotEngine : IPilotEngine
 
         // Design-by-Contract: 2. Pre-evaluate and snapshot old(...) expressions only if EnsuresContracts exist
         Dictionary<string, PilotValue>? previousSnapshots = null;
-        bool hasEnsures = function.HasEnsuresContracts;
+        bool hasEnsures = function.HasEnsuresContracts && !function.ContractsStaticallyDischarged;
         if (hasEnsures)
         {
             var snapshots = new Dictionary<string, PilotValue>(StringComparer.Ordinal);

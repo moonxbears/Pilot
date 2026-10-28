@@ -29,6 +29,8 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
     private readonly Dictionary<string, (PilotBytecodeTypeDescriptor Adt, int Tag, PilotSerializedVariantDescriptor Variant)> _variantLookup = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PilotBytecodeTypeDescriptor> _recordDescriptors = new(StringComparer.Ordinal);
     private readonly HashSet<string> _classAndStructNames = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _contextualParameters = new(StringComparer.Ordinal);
+    private Pilot.Analysis.Comptime.PilotStaticDemotionReport? _demotionReport;
 
     internal PilotBytecodeChunk Chunk => _chunk;
     internal bool IsFunction => _isFunction;
@@ -94,11 +96,37 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         }
     }
 
+    internal bool TryResolveUpvalueSlot(string name, out int slot, out int depthDelta)
+    {
+        int depth = 1;
+        var curr = _parent;
+        while (curr != null)
+        {
+            if (curr._isFunction && curr._chunk.TryGetLocalSlot(name, out slot))
+            {
+                depthDelta = depth;
+                return true;
+            }
+            if (curr._isFunction)
+            {
+                depth++;
+            }
+            curr = curr._parent;
+        }
+        slot = -1;
+        depthDelta = 0;
+        return false;
+    }
+
     internal void EmitRestoreBinding(string name)
     {
         if (_isFunction && _chunk.TryGetLocalSlot(name, out int slot))
         {
             _chunk.Emit(PilotOpcode.StoreLocal, slot);
+        }
+        else if (_isFunction && TryResolveUpvalueSlot(name, out int upSlot, out int depth))
+        {
+            _chunk.Emit(PilotOpcode.StoreUpvalue, upSlot, extra: depth);
         }
         else
         {
@@ -109,9 +137,19 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     internal void EmitLoadBindingOrUndefined(string name)
     {
-        if (_isFunction && _chunk.TryGetLocalSlot(name, out int slot))
+        if (_contextualParameters.Contains(name))
+        {
+            int ctxSlot = Pilot.Runtime.Execution.PilotExecutionContext.InternContextSlotId(name);
+            int idIdx = _chunk.AddIdentifier(name);
+            _chunk.Emit(PilotOpcode.LoadContextSlot, ctxSlot, extra: idIdx);
+        }
+        else if (_isFunction && _chunk.TryGetLocalSlot(name, out int slot))
         {
             _chunk.Emit(PilotOpcode.LoadLocal, slot);
+        }
+        else if (_isFunction && TryResolveUpvalueSlot(name, out int upSlot, out int depth))
+        {
+            _chunk.Emit(PilotOpcode.LoadUpvalue, upSlot, extra: depth);
         }
         else
         {
@@ -239,6 +277,7 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         _chunk = new PilotBytecodeChunk(name);
         _parent = parent;
         _isFunction = isFunction;
+        _demotionReport = parent?._demotionReport;
     }
 
     /// <summary>
@@ -247,6 +286,21 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
     public static PilotBytecodeChunk Compile(PilotParser.ProgramContext program, string? source = null)
     {
         var compiler = new PilotBytecodeCompiler("<program>");
+        try
+        {
+            var typeEngine = new Pilot.Analysis.TypeSystem.PilotTypeInferenceEngine();
+            typeEngine.VisitProgram(program);
+            var contractVerifier = new Pilot.Analysis.ContractVerification.PilotContractVerifier();
+            contractVerifier.VisitProgram(program);
+            var comptimeEvaluator = new Pilot.Analysis.Comptime.PilotComptimeEvaluator();
+            comptimeEvaluator.EvaluateProgram(program);
+            compiler._demotionReport = Pilot.Analysis.Comptime.PilotStaticDemotionPass.Analyze(
+                program, typeEngine, contractVerifier, comptimeEvaluator);
+        }
+        catch
+        {
+            // Keep compilation resilient if static analysis encounters partial syntax
+        }
         compiler.PrescanProgramTypeDeclarations(program);
         compiler.VisitProgram(program);
         compiler._chunk.Emit(PilotOpcode.Halt);
@@ -260,9 +314,17 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         PilotParser.SuiteContext suite,
         IReadOnlyList<string>? parameters = null,
         string name = "<func>",
-        PilotBytecodeCompiler? parent = null)
+        PilotBytecodeCompiler? parent = null,
+        IReadOnlyList<string>? contextualParameters = null)
     {
         var compiler = new PilotBytecodeCompiler(name, parent, isFunction: true);
+        if (contextualParameters != null)
+        {
+            foreach (var cp in contextualParameters)
+            {
+                compiler._contextualParameters.Add(cp);
+            }
+        }
         if (parameters != null)
         {
             foreach (var p in parameters)
@@ -577,6 +639,12 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         if (context.const_stmt() != null) return Visit(context.const_stmt());
         if (context.flow_stmt() != null) return Visit(context.flow_stmt());
         if (context.type_alias_stmt() != null) return Visit(context.type_alias_stmt());
+        if (context.assert_stmt() != null) return Visit(context.assert_stmt());
+        if (context.pass_stmt() != null)
+        {
+            if (!_discardExpressionResult) _chunk.Emit(PilotOpcode.ConstNull);
+            return null;
+        }
 
         int fallback = _chunk.AddAstFallback(context);
         _chunk.Emit(PilotOpcode.EvalAst, fallback);
@@ -594,6 +662,9 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         if (context.guard_stmt() != null) return Visit(context.guard_stmt());
         if (context.enum_def() != null) return Visit(context.enum_def());
         if (context.record_def() != null) return Visit(context.record_def());
+        if (context.comptime_stmt() != null) return Visit(context.comptime_stmt());
+        if (context.with_stmt() != null && IsPureContextWithStmt(context.with_stmt()))
+            return VisitWith_stmt(context.with_stmt());
 
         if (context.class_def() != null)
         {
@@ -735,6 +806,10 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         {
             CompileVariableDeclaration(name, context.test());
         }
+        else if (TryCompileIrrefutableDestructuring(context.binding_pattern(), context.test(), isMutable: false))
+        {
+            return null;
+        }
         else
         {
             if (_isFunction && !string.IsNullOrEmpty(name))
@@ -758,6 +833,10 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         if (!string.IsNullOrEmpty(name) && !IsSliceBufferTypeAnnotation(context.type_annotation()))
         {
             CompileVariableDeclaration(name, context.test());
+        }
+        else if (TryCompileIrrefutableDestructuring(context.binding_pattern(), context.test(), isMutable: true))
+        {
+            return null;
         }
         else
         {
@@ -783,6 +862,10 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         {
             CompileVariableDeclaration(name, context.test());
         }
+        else if (TryCompileIrrefutableDestructuring(context.binding_pattern(), context.test(), isMutable: false))
+        {
+            return null;
+        }
         else
         {
             if (_isFunction && !string.IsNullOrEmpty(name))
@@ -791,6 +874,195 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
             _chunk.Emit(PilotOpcode.EvalAst, fallback);
             _chunk.Emit(PilotOpcode.Pop);
         }
+        return null;
+    }
+
+    private bool TryCompileIrrefutableDestructuring(
+        PilotParser.Binding_patternContext? pat,
+        PilotParser.TestContext? rhs,
+        bool isMutable)
+    {
+        if (pat == null || rhs == null) return false;
+        var items = pat.tuple_pattern()?.binding_pattern_item() ?? pat.list_pattern()?.binding_pattern_item();
+        if (items == null || items.Length == 0) return false;
+
+        foreach (var item in items)
+        {
+            if (item.DOTDOT() != null || item.STAR() != null || item.binding_pattern()?.identifier() == null)
+            {
+                return false;
+            }
+        }
+
+        bool prevDiscard = _discardExpressionResult;
+        _discardExpressionResult = false;
+        Visit(rhs);
+        _discardExpressionResult = prevDiscard;
+
+        int tempSlot = AllocateTempSlot("destruct");
+        _chunk.Emit(PilotOpcode.StoreLocal, tempSlot);
+
+        for (int i = 0; i < items.Length; i++)
+        {
+            string id = items[i].binding_pattern().identifier().GetText();
+            if (id == "_") continue;
+            _chunk.Emit(PilotOpcode.LoadLocal, tempSlot);
+            _chunk.Emit(PilotOpcode.GetAdtField, i);
+            EmitStoreBinding(id, isMutable);
+        }
+
+        return true;
+    }
+
+    public override object? VisitAssert_stmt(PilotParser.Assert_stmtContext context)
+    {
+        if (context.COMPTIME() != null ||
+            (_demotionReport != null && _demotionReport.ElidedContractNodes.Contains(context)))
+        {
+            if (!_discardExpressionResult)
+            {
+                _chunk.Emit(PilotOpcode.ConstTrue);
+            }
+            return null;
+        }
+
+        var tests = context.test();
+        if (tests == null || tests.Length == 0) return null;
+
+        bool prevDiscard = _discardExpressionResult;
+        _discardExpressionResult = false;
+        Visit(tests[0]);
+        int hasMsg = 0;
+        if (tests.Length > 1)
+        {
+            Visit(tests[1]);
+            hasMsg = 1;
+        }
+        _discardExpressionResult = prevDiscard;
+
+        _chunk.Emit(PilotOpcode.AssertCheck, context.Start.Line, extra: hasMsg);
+        if (!_discardExpressionResult)
+        {
+            _chunk.Emit(PilotOpcode.ConstTrue);
+        }
+        return null;
+    }
+
+    public override object? VisitComptime_stmt(PilotParser.Comptime_stmtContext context)
+    {
+        if (_demotionReport != null && _demotionReport.MaterializedComptimeValues.TryGetValue(context, out var preVal))
+        {
+            if (!_discardExpressionResult)
+            {
+                EmitLiteralConstant(preVal);
+            }
+            return null;
+        }
+
+        bool prevDiscard = _discardExpressionResult;
+        _discardExpressionResult = false;
+        if (context.if_stmt() != null)
+        {
+            Visit(context.if_stmt());
+        }
+        else if (context.for_stmt() != null)
+        {
+            Visit(context.for_stmt());
+        }
+        else if (context.stmt() is { Length: > 0 } stmts)
+        {
+            for (int i = 0; i < stmts.Length; i++)
+            {
+                _discardExpressionResult = (i < stmts.Length - 1);
+                Visit(stmts[i]);
+            }
+        }
+        else
+        {
+            _chunk.Emit(PilotOpcode.ConstNull);
+        }
+        _chunk.Emit(PilotOpcode.FreezeTop);
+        _discardExpressionResult = prevDiscard;
+        if (_discardExpressionResult)
+        {
+            _chunk.Emit(PilotOpcode.Pop);
+        }
+        return null;
+    }
+
+    public override object? VisitComptime_expr(PilotParser.Comptime_exprContext context)
+    {
+        if (_demotionReport != null && _demotionReport.MaterializedComptimeValues.TryGetValue(context, out var preVal))
+        {
+            EmitLiteralConstant(preVal);
+            return null;
+        }
+
+        bool prevDiscard = _discardExpressionResult;
+        _discardExpressionResult = false;
+        if (context.test() != null)
+        {
+            Visit(context.test());
+        }
+        else if (context.stmt() is { Length: > 0 } stmts)
+        {
+            for (int i = 0; i < stmts.Length; i++)
+            {
+                _discardExpressionResult = (i < stmts.Length - 1);
+                Visit(stmts[i]);
+            }
+        }
+        else
+        {
+            _chunk.Emit(PilotOpcode.ConstNull);
+        }
+        _chunk.Emit(PilotOpcode.FreezeTop);
+        _discardExpressionResult = prevDiscard;
+        return null;
+    }
+
+    private static bool IsPureContextWithStmt(PilotParser.With_stmtContext ctx)
+    {
+        if (ctx.ASYNC() != null) return false;
+        var items = ctx.with_item();
+        if (items == null || items.Length == 0) return false;
+        foreach (var item in items)
+        {
+            if (item.CONTEXT() == null || item.with_context_binding() == null || item.with_context_binding().Length == 0)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public override object? VisitWith_stmt(PilotParser.With_stmtContext context)
+    {
+        var pushedSlots = new List<(int SlotId, int IdIdx)>();
+        bool prevDiscard = _discardExpressionResult;
+        _discardExpressionResult = false;
+
+        foreach (var item in context.with_item())
+        {
+            foreach (var cb in item.with_context_binding())
+            {
+                string key = cb.identifier().GetText();
+                int slotId = Pilot.Runtime.Execution.PilotExecutionContext.InternContextSlotId(key);
+                int idIdx = _chunk.AddIdentifier(key);
+                Visit(cb.test());
+                _chunk.Emit(PilotOpcode.PushContextSlot, slotId, extra: idIdx);
+                pushedSlots.Add((slotId, idIdx));
+            }
+        }
+
+        _discardExpressionResult = prevDiscard;
+        Visit(context.suite());
+
+        for (int i = pushedSlots.Count - 1; i >= 0; i--)
+        {
+            _chunk.Emit(PilotOpcode.PopContextSlot, pushedSlots[i].SlotId, extra: pushedSlots[i].IdIdx);
+        }
+
         return null;
     }
 
@@ -846,7 +1118,14 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         _discardExpressionResult = false;
         if (initExpr != null)
         {
-            Visit(initExpr);
+            if (_demotionReport != null && _demotionReport.MaterializedComptimeValues.TryGetValue(initExpr, out var preVal))
+            {
+                EmitLiteralConstant(preVal);
+            }
+            else
+            {
+                Visit(initExpr);
+            }
         }
         else
         {
@@ -937,6 +1216,10 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
             {
                 _chunk.Emit(PilotOpcode.StoreLocal, targetSlot);
             }
+            else if (_isFunction && TryResolveUpvalueSlot(idName, out int upSlot, out int depth))
+            {
+                _chunk.Emit(PilotOpcode.StoreUpvalue, upSlot, extra: depth);
+            }
             else
             {
                 int idIndex = _chunk.AddIdentifier(idName);
@@ -1004,6 +1287,10 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
             {
                 _chunk.Emit(PilotOpcode.LoadLocal, slot);
             }
+            else if (_isFunction && TryResolveUpvalueSlot(idName, out int upLoadSlot, out int loadDepth))
+            {
+                _chunk.Emit(PilotOpcode.LoadUpvalue, upLoadSlot, extra: loadDepth);
+            }
             else
             {
                 int idIndex = _chunk.AddIdentifier(idName);
@@ -1027,6 +1314,10 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
             if (_isFunction && _chunk.TryGetLocalSlot(idName, out int storeSlot))
             {
                 _chunk.Emit(PilotOpcode.StoreLocal, storeSlot);
+            }
+            else if (_isFunction && TryResolveUpvalueSlot(idName, out int upStoreSlot, out int storeDepth))
+            {
+                _chunk.Emit(PilotOpcode.StoreUpvalue, upStoreSlot, extra: storeDepth);
             }
             else
             {
@@ -1374,16 +1665,22 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         string funcName = context.identifier().GetText();
 
         var paramNames = new List<string>();
+        var contextualParams = new List<string>();
         var parameters = context.parameters()?.parameter();
         if (parameters != null)
         {
             foreach (var p in parameters)
             {
-                paramNames.Add(p.identifier()?.GetText() ?? "arg");
+                string pName = p.identifier()?.GetText() ?? "arg";
+                paramNames.Add(pName);
+                if (p.CONTEXT() != null)
+                {
+                    contextualParams.Add(pName);
+                }
             }
         }
 
-        var nestedChunk = CompileSuite(context.suite(), paramNames, funcName, this);
+        var nestedChunk = CompileSuite(context.suite(), paramNames, funcName, this, contextualParams);
         nestedChunk.FuncDefContext = context;
         int chunkIndex = _chunk.AddNestedChunk(nestedChunk);
 

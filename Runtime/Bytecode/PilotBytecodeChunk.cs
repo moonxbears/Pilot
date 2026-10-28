@@ -493,7 +493,8 @@ public sealed class PilotBytecodeChunk
             case PilotValueKind.List:
             {
                 var list = value.AsList();
-                writer.Write(list.Count);
+                int encodedCount = value.IsFrozen ? -(list.Count + 1) : list.Count;
+                writer.Write(encodedCount);
                 foreach (var item in list) WriteValue(writer, item);
                 break;
             }
@@ -502,6 +503,26 @@ public sealed class PilotBytecodeChunk
                 var tuple = value.AsTuple();
                 writer.Write(tuple.Count);
                 foreach (var item in tuple) WriteValue(writer, item);
+                break;
+            }
+            case PilotValueKind.Map:
+            {
+                var map = value.AsMap();
+                writer.Write(value.IsFrozen);
+                writer.Write(map.Count);
+                foreach (var kvp in map)
+                {
+                    WriteValue(writer, kvp.Key);
+                    WriteValue(writer, kvp.Value);
+                }
+                break;
+            }
+            case PilotValueKind.Set:
+            {
+                var set = value.AsSet();
+                writer.Write(value.IsFrozen);
+                writer.Write(set.Count);
+                foreach (var item in set) WriteValue(writer, item);
                 break;
             }
             case PilotValueKind.Range:
@@ -537,6 +558,8 @@ public sealed class PilotBytecodeChunk
             PilotValueKind.KeywordVariant => ReadKeywordVariant(reader),
             PilotValueKind.List => ReadList(reader),
             PilotValueKind.Tuple => ReadTuple(reader),
+            PilotValueKind.Map => ReadMap(reader),
+            PilotValueKind.Set => ReadSet(reader),
             PilotValueKind.Range => ReadRange(reader),
             _ => PilotValue.Null
         };
@@ -553,13 +576,42 @@ public sealed class PilotBytecodeChunk
 
     private static PilotValue ReadList(BinaryReader reader)
     {
-        int count = reader.ReadInt32();
+        int rawCount = reader.ReadInt32();
+        bool isFrozen = rawCount < 0;
+        int count = isFrozen ? (-rawCount - 1) : rawCount;
         var list = new List<PilotValue>(count);
         for (int i = 0; i < count; i++)
         {
             list.Add(ReadValue(reader));
         }
-        return PilotValue.FromList(list);
+        return isFrozen ? PilotValue.FromFrozenList(list) : PilotValue.FromList(list);
+    }
+
+    private static PilotValue ReadMap(BinaryReader reader)
+    {
+        bool isFrozen = reader.ReadBoolean();
+        int count = reader.ReadInt32();
+        var dict = new Dictionary<PilotValue, PilotValue>(count);
+        for (int i = 0; i < count; i++)
+        {
+            var k = ReadValue(reader);
+            var v = ReadValue(reader);
+            dict[k] = v;
+        }
+        return isFrozen ? PilotValue.FromFrozenMap(new PilotFrozenMap(dict)) : PilotValue.FromMap(dict);
+    }
+
+    private static PilotValue ReadSet(BinaryReader reader)
+    {
+        bool isFrozen = reader.ReadBoolean();
+        int count = reader.ReadInt32();
+        var set = new HashSet<PilotValue>(count);
+        for (int i = 0; i < count; i++)
+        {
+            set.Add(ReadValue(reader));
+        }
+        var val = PilotValue.FromSet(set);
+        return isFrozen ? val.Freeze() : val;
     }
 
     private static PilotValue ReadTuple(BinaryReader reader)

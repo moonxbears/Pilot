@@ -1043,7 +1043,8 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 bool isKwargs = p.DOUBLESTAR() != null;
                 bool isContextual = p.CONTEXT() != null;
                 bool isEach = p.EACH() != null || p.REPEAT() != null;
-                paramList.Add(new PilotParameter(pName, pType, defaultVal, isParams, isKwargs, isContextual, isEach));
+                bool isComptime = p.COMPTIME() != null;
+                paramList.Add(new PilotParameter(pName, pType, defaultVal, isParams, isKwargs, isContextual, isEach, isComptime));
             }
         }
 
@@ -1066,6 +1067,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             isAsync: context.ASYNC() != null,
             isGenerator: isGen);
         function.IsVectorized = isVectorized;
+        function.IsComptime = context.COMPTIME() != null;
         function.SourceBodyText = context.suite()?.GetText();
         if (context.type_spec() != null)
         {
@@ -3332,12 +3334,74 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         var cond = Visit(tests[0]);
         if (!cond.IsTrue)
         {
+            string prefix = context.COMPTIME() != null ? "[COMPTIME008] Compile-time assertion failed: " : "";
             string message = tests.Length > 1
-                ? Visit(tests[1]).ToString()
-                : $"Assertion failed: '{tests[0].GetText()}' evaluated to false.";
+                ? prefix + Visit(tests[1]).ToString()
+                : $"{prefix}Assertion failed: '{tests[0].GetText()}' evaluated to false.";
             throw new PilotAssertionException(message, context.Start.Line, context.Start.Column);
         }
         return PilotValue.True;
+    }
+
+    public override PilotValue VisitComptime_stmt(PilotParser.Comptime_stmtContext context)
+    {
+        if (context.if_stmt() != null)
+        {
+            return VisitIf_stmt(context.if_stmt()).Freeze();
+        }
+        if (context.for_stmt() != null)
+        {
+            return VisitFor_stmt(context.for_stmt()).Freeze();
+        }
+        return EvaluateComptimeStatements(context.stmt()).Freeze();
+    }
+
+    public override PilotValue VisitComptime_expr(PilotParser.Comptime_exprContext context)
+    {
+        if (context.test() != null)
+        {
+            return Visit(context.test()).Freeze();
+        }
+        return EvaluateComptimeStatements(context.stmt()).Freeze();
+    }
+
+    private PilotValue EvaluateComptimeStatements(PilotParser.StmtContext[]? stmts)
+    {
+        if (stmts == null || stmts.Length == 0)
+        {
+            return PilotValue.Null;
+        }
+
+        Context.Environment.PushScope("comptime");
+        bool prevComptime = Context.IsComptimeEvaluation;
+        int prevBudget = Context.ComptimeStepBudget;
+        Context.IsComptimeEvaluation = true;
+        if (Context.ComptimeStepBudget <= 0)
+        {
+            Context.ComptimeStepBudget = 1_000_000;
+        }
+        try
+        {
+            PilotValue last = PilotValue.Undefined;
+            for (int i = 0; i < stmts.Length; i++)
+            {
+                last = Visit(stmts[i]);
+                if (Context.PendingFlow == PilotFlowSignalKind.Return)
+                {
+                    var ret = Context.PendingReturnValue;
+                    Context.PendingFlow = PilotFlowSignalKind.None;
+                    Context.PendingReturnValue = PilotValue.Undefined;
+                    return ret.Freeze();
+                }
+            }
+            return last.Freeze();
+        }
+        finally
+        {
+            Context.IsComptimeEvaluation = prevComptime;
+            Context.ComptimeStepBudget = prevBudget;
+            Context.Environment.PopScope();
+        }
     }
 
     public override PilotValue VisitFlow_stmt(PilotParser.Flow_stmtContext context)
@@ -3486,8 +3550,60 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     #region Expressions & Operators
 
+    private PilotValue UnwrapAndVisit(IParseTree node)
+    {
+        while (node.ChildCount == 1)
+        {
+            if (node is PilotParser.Atom_exprContext)
+            {
+                var child0 = node.GetChild(0);
+                if (child0 is PilotParser.AtomContext atomCtx)
+                {
+                    return VisitAtom(atomCtx);
+                }
+                break;
+            }
+
+            if (node is PilotParser.TestContext
+                or PilotParser.Pipe_exprContext
+                or PilotParser.Set_query_exprContext
+                or PilotParser.Coalesce_exprContext
+                or PilotParser.Or_testContext
+                or PilotParser.And_testContext
+                or PilotParser.Not_testContext
+                or PilotParser.ComparisonContext
+                or PilotParser.Range_exprContext
+                or PilotParser.Bitor_exprContext
+                or PilotParser.Bitxor_exprContext
+                or PilotParser.Bitand_exprContext
+                or PilotParser.Shift_exprContext
+                or PilotParser.Arith_exprContext
+                or PilotParser.TermContext
+                or PilotParser.FactorContext
+                or PilotParser.PowerContext)
+            {
+                node = node.GetChild(0);
+                continue;
+            }
+
+            break;
+        }
+
+        if (node is PilotParser.AtomContext directAtom)
+        {
+            return VisitAtom(directAtom);
+        }
+
+        return Visit(node);
+    }
+
     public override PilotValue VisitTest(PilotParser.TestContext context)
     {
+        if (context.ChildCount == 1)
+        {
+            return UnwrapAndVisit(context.GetChild(0));
+        }
+
         if (context.lambda_expr() != null)
         {
             return Visit(context.lambda_expr());
@@ -3496,12 +3612,12 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         var pipeExprs = context.pipe_expr();
         if (pipeExprs?.Length > 0)
         {
-            var primaryVal = Visit(pipeExprs[0]);
+            var primaryVal = UnwrapAndVisit(pipeExprs[0]);
 
             // Ternary expression: expr IF condition ELSE alt
             if (context.IF() != null && pipeExprs.Length > 1 && context.test() != null)
             {
-                var conditionVal = Visit(pipeExprs[1]);
+                var conditionVal = UnwrapAndVisit(pipeExprs[1]);
                 return conditionVal.IsTrue ? primaryVal : Visit(context.test());
             }
 
@@ -3526,7 +3642,8 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 bool isKwargs = p.DOUBLESTAR() != null;
                 bool isContextual = p.CONTEXT() != null;
                 bool isEach = p.EACH() != null || p.REPEAT() != null;
-                paramList.Add(new PilotParameter(pName, pType, defaultVal, isParams, isKwargs, isContextual, isEach));
+                bool isComptime = p.COMPTIME() != null;
+                paramList.Add(new PilotParameter(pName, pType, defaultVal, isParams, isKwargs, isContextual, isEach, isComptime));
             }
         }
         else if (context.identifier() != null)
@@ -3589,12 +3706,18 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitPipe_expr(PilotParser.Pipe_exprContext context)
     {
+        int childCount = context.ChildCount;
+        if (childCount == 1)
+        {
+            return UnwrapAndVisit(context.GetChild(0));
+        }
+
         var queries = context.set_query_expr();
-        var val = Visit(queries[0]);
+        var val = UnwrapAndVisit(queries[0]);
 
         for (int i = 1; i < queries.Length; i++)
         {
-            var next = Visit(queries[i]);
+            var next = UnwrapAndVisit(queries[i]);
             if (next.Kind == PilotValueKind.Function)
             {
                 val = next.AsFunction().Invoke(Context, new[] { val });
@@ -3606,6 +3729,10 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitSet_query_expr(PilotParser.Set_query_exprContext context)
     {
+        if (context.ChildCount == 1)
+        {
+            return UnwrapAndVisit(context.GetChild(0));
+        }
         if (context.coalesce_expr()?.Length > 0)
         {
             return Visit(context.coalesce_expr(0));
@@ -3615,18 +3742,23 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitCoalesce_expr(PilotParser.Coalesce_exprContext context)
     {
+        if (context.ChildCount == 1)
+        {
+            return UnwrapAndVisit(context.GetChild(0));
+        }
         return VisitCoalesceExprPrefix(context, stopBeforeCatch: null);
     }
 
     private PilotValue VisitCoalesceExprPrefix(PilotParser.Coalesce_exprContext context, PilotParser.Catch_clauseContext? stopBeforeCatch)
     {
-        var tests = context.or_test();
-        if (tests == null || tests.Length == 0) return PilotValue.Undefined;
+        int childCount = context.ChildCount;
+        if (childCount == 0) return PilotValue.Undefined;
+        if (childCount == 1) return UnwrapAndVisit(context.GetChild(0));
 
-        var val = Visit(tests[0]);
+        var val = UnwrapAndVisit(context.GetChild(0));
         if (Context.PendingFlow != PilotFlowSignalKind.None) return Context.PendingReturnValue;
 
-        for (int i = 1; i < context.ChildCount; i++)
+        for (int i = 1; i < childCount; i++)
         {
             var child = context.GetChild(i);
             if (ReferenceEquals(child, stopBeforeCatch))
@@ -3638,7 +3770,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             {
                 if (val.IsNull || val.IsUndefined)
                 {
-                    val = Visit(rhsOrTest);
+                    val = UnwrapAndVisit(rhsOrTest);
                     if (Context.PendingFlow != PilotFlowSignalKind.None) return Context.PendingReturnValue;
                 }
             }
@@ -3694,13 +3826,14 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitOr_test(PilotParser.Or_testContext context)
     {
-        var tests = context.and_test();
-        var val = Visit(tests[0]);
+        int childCount = context.ChildCount;
+        if (childCount == 1) return UnwrapAndVisit(context.GetChild(0));
 
-        for (int i = 1; i < tests.Length; i++)
+        var val = UnwrapAndVisit(context.GetChild(0));
+        for (int i = 2; i < childCount; i += 2)
         {
             if (val.IsTrue) return val;
-            val = Visit(tests[i]);
+            val = UnwrapAndVisit(context.GetChild(i));
         }
 
         return val;
@@ -3708,13 +3841,14 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitAnd_test(PilotParser.And_testContext context)
     {
-        var tests = context.not_test();
-        var val = Visit(tests[0]);
+        int childCount = context.ChildCount;
+        if (childCount == 1) return UnwrapAndVisit(context.GetChild(0));
 
-        for (int i = 1; i < tests.Length; i++)
+        var val = UnwrapAndVisit(context.GetChild(0));
+        for (int i = 2; i < childCount; i += 2)
         {
             if (!val.IsTrue) return val;
-            val = Visit(tests[i]);
+            val = UnwrapAndVisit(context.GetChild(i));
         }
 
         return val;
@@ -3722,6 +3856,10 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitNot_test(PilotParser.Not_testContext context)
     {
+        if (context.ChildCount == 1)
+        {
+            return UnwrapAndVisit(context.GetChild(0));
+        }
         if (context.NOT() != null || context.EXCLAMATION() != null)
         {
             return !Visit(context.not_test());
@@ -3735,26 +3873,18 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitComparison(PilotParser.ComparisonContext context)
     {
-        var ranges = context.range_expr();
-        var left = Visit(ranges[0]);
-
-        if (ranges.Length == 1 && context.pattern()?.Length == 0)
+        int childCount = context.ChildCount;
+        if (childCount == 1)
         {
-            return left;
+            return UnwrapAndVisit(context.GetChild(0));
         }
 
-        // IS / IS NOT pattern
-        if (context.IS()?.Length > 0 && context.pattern()?.Length > 0)
-        {
-            bool matched = PilotPatternMatcher.Match(context.pattern(0), left, Context.Environment.CurrentScope, this);
-            return context.NOT()?.Length > 0 ? PilotValue.FromBool(!matched) : PilotValue.FromBool(matched);
-        }
+        var left = UnwrapAndVisit(context.GetChild(0));
 
-        // Comparison operators: ==, !=, <, <=, >, >=, in, not in
-        if (context.comp_op()?.Length > 0 && ranges.Length > 1)
+        // Fast-path binary comparison: left comp_op right
+        if (childCount == 3 && context.GetChild(1) is PilotParser.Comp_opContext op)
         {
-            var op = context.comp_op(0);
-            var right = Visit(ranges[1]);
+            var right = UnwrapAndVisit(context.GetChild(2));
 
             if (op.EQEQUAL() != null) return PilotValue.FromBool(left == right);
             if (op.NOTEQUAL() != null) return PilotValue.FromBool(left != right);
@@ -3764,6 +3894,39 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             if (op.GREATEREQUAL() != null) return PilotValue.FromBool(left >= right);
 
             if (op.IN() != null)
+            {
+                bool isNotIn = op.NOT() != null;
+                bool contains = false;
+                if (right.Kind == PilotValueKind.List) contains = right.AsList().Contains(left);
+                else if (right.Kind == PilotValueKind.Set) contains = right.AsSet().Contains(left);
+                else if (right.Kind == PilotValueKind.Map) contains = right.AsMap().ContainsKey(left);
+                else if (right.Kind == PilotValueKind.String) contains = right.AsString().Contains(left.ToString());
+                return PilotValue.FromBool(isNotIn ? !contains : contains);
+            }
+        }
+
+        // IS / IS NOT pattern
+        if (context.IS()?.Length > 0 && context.pattern()?.Length > 0)
+        {
+            bool matched = PilotPatternMatcher.Match(context.pattern(0), left, Context.Environment.CurrentScope, this);
+            return context.NOT()?.Length > 0 ? PilotValue.FromBool(!matched) : PilotValue.FromBool(matched);
+        }
+
+        // Fallback comparison operators
+        var ranges = context.range_expr();
+        if (context.comp_op()?.Length > 0 && ranges.Length > 1)
+        {
+            var fallbackOp = context.comp_op(0);
+            var right = UnwrapAndVisit(ranges[1]);
+
+            if (fallbackOp.EQEQUAL() != null) return PilotValue.FromBool(left == right);
+            if (fallbackOp.NOTEQUAL() != null) return PilotValue.FromBool(left != right);
+            if (fallbackOp.LESS() != null) return PilotValue.FromBool(left < right);
+            if (fallbackOp.LESSEQUAL() != null) return PilotValue.FromBool(left <= right);
+            if (fallbackOp.GREATER() != null) return PilotValue.FromBool(left > right);
+            if (fallbackOp.GREATEREQUAL() != null) return PilotValue.FromBool(left >= right);
+
+            if (fallbackOp.IN() != null)
             {
                 if (right.Kind == PilotValueKind.List) return PilotValue.FromBool(right.AsList().Contains(left));
                 if (right.Kind == PilotValueKind.Set) return PilotValue.FromBool(right.AsSet().Contains(left));
@@ -3778,28 +3941,26 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitRange_expr(PilotParser.Range_exprContext context)
     {
-        var bitor = context.bitor_expr();
-        var startVal = Visit(bitor[0]);
-
-        if (bitor.Length > 1)
+        if (context.ChildCount == 1)
         {
-            var endVal = Visit(bitor[1]);
-            bool inclusive = context.DOTDOT_LESS() == null;
-            return PilotValue.FromRange(new PilotRange(startVal.AsInt(), endVal.AsInt(), 1, inclusive));
+            return UnwrapAndVisit(context.GetChild(0));
         }
 
-        return startVal;
+        var startVal = UnwrapAndVisit(context.GetChild(0));
+        var endVal = UnwrapAndVisit(context.GetChild(2));
+        bool inclusive = context.DOTDOT_LESS() == null;
+        return PilotValue.FromRange(new PilotRange(startVal.AsInt(), endVal.AsInt(), 1, inclusive));
     }
 
     public override PilotValue VisitBitor_expr(PilotParser.Bitor_exprContext context)
     {
-        var xors = context.bitxor_expr();
-        var val = Visit(xors[0]);
+        int childCount = context.ChildCount;
+        if (childCount == 1) return UnwrapAndVisit(context.GetChild(0));
 
-        for (int i = 1; i < xors.Length; i++)
+        var val = UnwrapAndVisit(context.GetChild(0));
+        for (int i = 2; i < childCount; i += 2)
         {
-            var rhs = Visit(xors[i]);
-            val = val | rhs;
+            val = val | UnwrapAndVisit(context.GetChild(i));
         }
 
         return val;
@@ -3807,12 +3968,13 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitBitxor_expr(PilotParser.Bitxor_exprContext context)
     {
-        var ands = context.bitand_expr();
-        var val = Visit(ands[0]);
+        int childCount = context.ChildCount;
+        if (childCount == 1) return UnwrapAndVisit(context.GetChild(0));
 
-        for (int i = 1; i < ands.Length; i++)
+        var val = UnwrapAndVisit(context.GetChild(0));
+        for (int i = 2; i < childCount; i += 2)
         {
-            var rhs = Visit(ands[i]);
+            var rhs = UnwrapAndVisit(context.GetChild(i));
             val = PilotValue.FromInt(val.AsInt() ^ rhs.AsInt());
         }
 
@@ -3821,13 +3983,13 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitBitand_expr(PilotParser.Bitand_exprContext context)
     {
-        var shifts = context.shift_expr();
-        var val = Visit(shifts[0]);
+        int childCount = context.ChildCount;
+        if (childCount == 1) return UnwrapAndVisit(context.GetChild(0));
 
-        for (int i = 1; i < shifts.Length; i++)
+        var val = UnwrapAndVisit(context.GetChild(0));
+        for (int i = 2; i < childCount; i += 2)
         {
-            var rhs = Visit(shifts[i]);
-            val = val & rhs;
+            val = val & UnwrapAndVisit(context.GetChild(i));
         }
 
         return val;
@@ -3835,13 +3997,14 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitShift_expr(PilotParser.Shift_exprContext context)
     {
-        var ariths = context.arith_expr();
-        var val = Visit(ariths[0]);
+        int childCount = context.ChildCount;
+        if (childCount == 1) return UnwrapAndVisit(context.GetChild(0));
 
-        for (int i = 1; i < ariths.Length; i++)
+        var val = UnwrapAndVisit(context.GetChild(0));
+        for (int i = 1; i < childCount; i += 2)
         {
-            var rhs = Visit(ariths[i]);
-            var opNode = context.GetChild(2 * i - 1) as ITerminalNode;
+            var rhs = UnwrapAndVisit(context.GetChild(i + 1));
+            var opNode = context.GetChild(i) as ITerminalNode;
             int opType = opNode?.Symbol.Type ?? 0;
             if (opType == PilotParser.LEFTSHIFT) val = PilotValue.FromInt(val.AsInt() << (int)rhs.AsInt());
             else if (opType == PilotParser.RIGHTSHIFT) val = PilotValue.FromInt(val.AsInt() >> (int)rhs.AsInt());
@@ -3852,13 +4015,14 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitArith_expr(PilotParser.Arith_exprContext context)
     {
-        var terms = context.term();
-        var val = Visit(terms[0]);
+        int childCount = context.ChildCount;
+        if (childCount == 1) return UnwrapAndVisit(context.GetChild(0));
 
-        for (int i = 1; i < terms.Length; i++)
+        var val = UnwrapAndVisit(context.GetChild(0));
+        for (int i = 1; i < childCount; i += 2)
         {
-            var rhs = Visit(terms[i]);
-            var opNode = context.GetChild(2 * i - 1) as ITerminalNode;
+            var rhs = UnwrapAndVisit(context.GetChild(i + 1));
+            var opNode = context.GetChild(i) as ITerminalNode;
             int opType = opNode?.Symbol.Type ?? 0;
             if (opType == PilotParser.PLUS) val = val + rhs;
             else if (opType == PilotParser.MINUS) val = val - rhs;
@@ -3869,21 +4033,23 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitTerm(PilotParser.TermContext context)
     {
-        var factors = context.factor();
-        var val = Visit(factors[0]);
+        int childCount = context.ChildCount;
+        if (childCount == 1) return UnwrapAndVisit(context.GetChild(0));
 
-        for (int i = 1; i < factors.Length; i++)
+        var val = UnwrapAndVisit(context.GetChild(0));
+        for (int i = 1; i < childCount; i += 2)
         {
-            var opNode = context.GetChild(2 * i - 1) as ITerminalNode;
+            var opNode = context.GetChild(i) as ITerminalNode;
             int opType = opNode?.Symbol.Type ?? 0;
+            var factorChild = (PilotParser.FactorContext)context.GetChild(i + 1);
             if (opType == PilotParser.ARROW)
             {
                 // Structural Projection: source -> {field1, field2}
-                val = EvaluateProjection(val, factors[i]);
+                val = EvaluateProjection(val, factorChild);
                 continue;
             }
 
-            var rhs = Visit(factors[i]);
+            var rhs = UnwrapAndVisit(factorChild);
             if (opType == PilotParser.STAR) val = val * rhs;
             else if (opType == PilotParser.SLASH)
             {
@@ -4045,6 +4211,11 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     public override PilotValue VisitAtom_expr(PilotParser.Atom_exprContext context)
     {
+        if (context.ChildCount == 1 && context.GetChild(0) is PilotParser.AtomContext singleAtom)
+        {
+            return VisitAtom(singleAtom);
+        }
+
         PilotValue current;
         int startTrailerIdx = 0;
 
@@ -5027,6 +5198,9 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         if (context.match_stmt() != null) return VisitMatch_stmt(context.match_stmt());
         if (context.with_stmt() != null) return VisitWith_stmt(context.with_stmt());
         if (context.for_stmt() != null) return VisitFor_stmt(context.for_stmt());
+        if (context.insert_stmt() != null) return VisitInsert_stmt(context.insert_stmt());
+        if (context.update_stmt() != null) return VisitUpdate_stmt(context.update_stmt());
+        if (context.delete_stmt() != null) return VisitDelete_stmt(context.delete_stmt());
         if (context.block() != null) return VisitBlock(context.block());
         if (context.DOT() != null && context.identifier() != null)
         {
@@ -5044,6 +5218,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         if (context.LBRACE() != null && context.dictorsetmaker() == null) return PilotValue.FromMap(new Dictionary<PilotValue, PilotValue>());
         if (context.nameof_expr() != null) return PilotValue.FromString(context.nameof_expr().dotted_name()?.GetText() ?? context.nameof_expr().test()?.GetText() ?? "");
         if (context.inline_foreign_block() != null) return VisitInline_foreign_block(context.inline_foreign_block());
+        if (context.comptime_expr() != null) return VisitComptime_expr(context.comptime_expr());
         if (context.quote_expr() != null) return PilotValue.FromString(context.quote_expr().GetText());
         if (context.quasiquote_expr() != null) return PilotValue.FromString(context.quasiquote_expr().GetText());
         if (context.splice_expr() != null) return ResolveIdentifier(context.splice_expr().GetText().TrimStart('$', '@'));

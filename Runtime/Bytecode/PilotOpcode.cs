@@ -262,5 +262,69 @@ public enum PilotOpcode : byte
     /// a deep `?.` / `?[]` / `?()` optional chain in a single jump).
     /// If present, unwraps one `Option` layer in-place and continues.
     /// </summary>
-    JumpIfNullShortCircuit
+    JumpIfNullShortCircuit,
+
+    // =========================================================================
+    // Milestone 19: Static Demotion, Lexical Upvalues, Field Slots & Comptime
+    // =========================================================================
+
+    /// <summary>
+    /// Loads a lexical variable from an enclosing frame's slot array in O(1) via `(depthDelta, slotIndex)`.
+    /// Operand: slot index, Extra: lexical depth delta (1 = immediate parent frame).
+    /// </summary>
+    LoadUpvalue,
+
+    /// <summary>
+    /// Stores the top value on the stack into an enclosing frame's slot array in O(1) via `(depthDelta, slotIndex)`.
+    /// Operand: slot index, Extra: lexical depth delta (1 = immediate parent frame).
+    /// </summary>
+    StoreUpvalue,
+
+    /// <summary>
+    /// Gets a field from a struct, class, or record by compile-time slot index in O(1) without string hashing.
+    /// Operand: field slot index, Extra: fallback identifier pool index (or -1).
+    /// </summary>
+    GetFieldSlot,
+
+    /// <summary>
+    /// Sets a field on a struct or class by compile-time slot index in O(1) without string hashing.
+    /// Operand: field slot index, Extra: fallback identifier pool index (or -1).
+    /// </summary>
+    SetFieldSlot,
+
+    /// <summary>
+    /// Constructs a record or struct instance directly from `Extra` field values on the stack.
+    /// Operand: type descriptor index, Extra: field count.
+    /// </summary>
+    ConstructStruct,
+
+    /// <summary>
+    /// Loads a contextual dependency (`context`) from the O(1) integer display slot table.
+    /// Operand: context slot ID, Extra: identifier pool index.
+    /// </summary>
+    LoadContextSlot,
+
+    /// <summary>
+    /// Pushes a contextual binding (`with context k = v`) onto the O(1) integer display slot table.
+    /// Operand: context slot ID, Extra: identifier pool index.
+    /// </summary>
+    PushContextSlot,
+
+    /// <summary>
+    /// Pops and restores a contextual binding (`with context`) from the O(1) integer display slot table.
+    /// Operand: context slot ID, Extra: identifier pool index.
+    /// </summary>
+    PopContextSlot,
+
+    /// <summary>
+    /// Recursively freezes the top value on the stack into an immutable `.rodata` representation
+    /// (converting maps into <see cref="Pilot.Runtime.Values.PilotFrozenMap"/> perfect-hash tables).
+    /// </summary>
+    FreezeTop,
+
+    /// <summary>
+    /// Verifies a runtime assertion (`assert cond[, msg]`) that could not be statically discharged.
+    /// Operand: source line, Extra: 1 if custom message is on stack, 0 otherwise.
+    /// </summary>
+    AssertCheck
 }

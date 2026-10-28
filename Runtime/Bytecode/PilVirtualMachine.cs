@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -39,11 +40,11 @@ public sealed class PilVirtualMachine
             throw new PilotRecursionException($"Stack overflow: exceeded maximum call depth ({context.Options.MaxCallDepth}).");
         }
 
-        var stack = new PilotValue[DefaultStackCapacity];
+        var stack = ArrayPool<PilotValue>.Shared.Rent(64);
         int sp = 0;
 
         int localCount = Math.Max(chunk.LocalCount, arguments?.Count ?? 0);
-        var locals = new PilotValue[localCount];
+        var locals = localCount == 0 ? Array.Empty<PilotValue>() : new PilotValue[localCount];
 
         var instructions = chunk.Instructions;
         int instCount = instructions.Count;
@@ -59,7 +60,7 @@ public sealed class PilVirtualMachine
             }
         }
 
-        if (chunk.LocalSlotMap.Count > 0)
+        if (chunk.LocalSlotMap.Count > 0 && (calleeFunction == null || chunk.AstFallbackNodes.Count > 0))
         {
             int argCount = arguments?.Count ?? 0;
             foreach (var (locName, slot) in chunk.LocalSlotMap)
@@ -73,8 +74,20 @@ public sealed class PilVirtualMachine
 
         int ip = 0;
 
+        try
+        {
         while (ip < instCount)
         {
+            if (context.IsComptimeEvaluation)
+            {
+                context.ComptimeStepsExecuted++;
+                if (context.ComptimeStepBudget > 0 && context.ComptimeStepsExecuted > context.ComptimeStepBudget)
+                {
+                    throw new PilotRuntimeException(
+                        $"[COMPTIME009] Compile-time evaluation exceeded deterministic step budget ({context.ComptimeStepBudget} instructions).");
+                }
+            }
+
             ref readonly var inst = ref System.Runtime.InteropServices.CollectionsMarshal.AsSpan(instructions)[ip++];
 
             switch (inst.Opcode)
@@ -564,10 +577,18 @@ public sealed class PilVirtualMachine
                 case PilotOpcode.Call:
                 {
                     int argc = inst.Operand;
-                    var callArgs = new PilotValue[argc];
-                    for (int a = argc - 1; a >= 0; a--)
+                    PilotValue[] callArgs;
+                    if (argc == 0)
                     {
-                        callArgs[a] = stack[--sp];
+                        callArgs = Array.Empty<PilotValue>();
+                    }
+                    else
+                    {
+                        callArgs = new PilotValue[argc];
+                        for (int a = argc - 1; a >= 0; a--)
+                        {
+                            callArgs[a] = stack[--sp];
+                        }
                     }
                     var callee = stack[--sp];
                     var callResult = InvokeCallable(callee, callArgs, context);
@@ -580,10 +601,18 @@ public sealed class PilVirtualMachine
                 {
                     string methodName = identifiers[inst.Operand];
                     int argc = inst.Extra;
-                    var callArgs = new PilotValue[argc];
-                    for (int a = argc - 1; a >= 0; a--)
+                    PilotValue[] callArgs;
+                    if (argc == 0)
                     {
-                        callArgs[a] = stack[--sp];
+                        callArgs = Array.Empty<PilotValue>();
+                    }
+                    else
+                    {
+                        callArgs = new PilotValue[argc];
+                        for (int a = argc - 1; a >= 0; a--)
+                        {
+                            callArgs[a] = stack[--sp];
+                        }
                     }
                     var target = stack[--sp];
                     var callResult = InvokeMethod(target, methodName, callArgs, context);
@@ -593,9 +622,11 @@ public sealed class PilVirtualMachine
                 }
 
                 case PilotOpcode.Return:
+                    SyncLocalsToScopeIfNeeded(chunk, locals, scope, calleeFunction);
                     return PilotValue.Undefined;
 
                 case PilotOpcode.ReturnValue:
+                    SyncLocalsToScopeIfNeeded(chunk, locals, scope, calleeFunction);
                     return sp > 0 ? stack[--sp] : PilotValue.Undefined;
 
                 case PilotOpcode.MakeClosure:
@@ -623,7 +654,18 @@ public sealed class PilVirtualMachine
                         isAsync: isAsync,
                         isGenerator: isGen);
                     fn.BytecodeChunk = nestedChunk;
+                    fn.IsComptime = nestedChunk.FuncDefContext?.COMPTIME() != null;
                     fn.SourceBodyText = nestedChunk.FuncDefContext?.suite()?.GetText();
+
+                    // Milestone 19.1.1: Attach O(1) lexical upvalue display array
+                    var parentDisplay = calleeFunction?.LexicalDisplay;
+                    var display = new PilotValue[(parentDisplay?.Length ?? 0) + 1][];
+                    display[0] = locals;
+                    if (parentDisplay != null && parentDisplay.Length > 0)
+                    {
+                        Array.Copy(parentDisplay, 0, display, 1, parentDisplay.Length);
+                    }
+                    fn.LexicalDisplay = display;
 
                     if (nestedChunk.FuncDefContext != null)
                     {
@@ -688,8 +730,9 @@ public sealed class PilVirtualMachine
                 {
                     int count = inst.Operand;
                     var list = new List<PilotValue>(count);
-                    for (int i = 0; i < count; i++) list.Add(PilotValue.Null);
-                    for (int i = count - 1; i >= 0; i--) list[i] = stack[--sp];
+                    int baseIdx = sp - count;
+                    for (int i = 0; i < count; i++) list.Add(stack[baseIdx + i]);
+                    sp = baseIdx;
                     EnsureStackCapacity(ref stack, sp + 1);
                     stack[sp++] = PilotValue.FromList(list);
                     break;
@@ -698,7 +741,7 @@ public sealed class PilVirtualMachine
                 case PilotOpcode.BuildTuple:
                 {
                     int count = inst.Operand;
-                    var arr = new PilotValue[count];
+                    var arr = count == 0 ? Array.Empty<PilotValue>() : new PilotValue[count];
                     for (int i = count - 1; i >= 0; i--) arr[i] = stack[--sp];
                     EnsureStackCapacity(ref stack, sp + 1);
                     stack[sp++] = PilotValue.FromTuple(arr);
@@ -709,17 +752,14 @@ public sealed class PilVirtualMachine
                 {
                     int pairCount = inst.Operand;
                     var map = new Dictionary<PilotValue, PilotValue>(pairCount);
-                    var pairs = new (PilotValue Key, PilotValue Val)[pairCount];
-                    for (int i = pairCount - 1; i >= 0; i--)
-                    {
-                        var val = stack[--sp];
-                        var key = stack[--sp];
-                        pairs[i] = (key, val);
-                    }
+                    int baseIdx = sp - (pairCount * 2);
                     for (int i = 0; i < pairCount; i++)
                     {
-                        map[pairs[i].Key] = pairs[i].Val;
+                        var key = stack[baseIdx + (i * 2)];
+                        var val = stack[baseIdx + (i * 2) + 1];
+                        map[key] = val;
                     }
+                    sp = baseIdx;
                     EnsureStackCapacity(ref stack, sp + 1);
                     stack[sp++] = PilotValue.FromMap(map);
                     break;
@@ -780,6 +820,11 @@ public sealed class PilVirtualMachine
                     var idx = stack[--sp];
                     var target = stack[--sp];
                     EnsureStackCapacity(ref stack, sp + 1);
+                    if (target.TryGetFrozenMap(out var fm))
+                    {
+                        stack[sp++] = fm.TryLookupFast(idx, out var fmVal) ? fmVal : PilotValue.Undefined;
+                        break;
+                    }
                     stack[sp++] = target[idx];
                     break;
                 }
@@ -789,6 +834,10 @@ public sealed class PilVirtualMachine
                     var val = stack[--sp];
                     var idx = stack[--sp];
                     var target = stack[--sp];
+                    if (target.IsFrozen && target.Kind is PilotValueKind.List or PilotValueKind.Map)
+                    {
+                        throw new PilotRuntimeException("Cannot mutate a compile-time frozen collection (.rodata).");
+                    }
                     target[idx] = val;
                     break;
                 }
@@ -852,6 +901,7 @@ public sealed class PilVirtualMachine
                 }
 
                 case PilotOpcode.Halt:
+                    SyncLocalsToScopeIfNeeded(chunk, locals, scope, calleeFunction);
                     return sp > 0 ? stack[--sp] : PilotValue.Undefined;
 
                 // =====================================================================
@@ -1149,10 +1199,198 @@ public sealed class PilVirtualMachine
                     }
                     break;
                 }
+
+                // =====================================================================
+                // Milestone 19: Static Demotion, Lexical Upvalues, Field Slots & Comptime
+                // =====================================================================
+
+                case PilotOpcode.LoadUpvalue:
+                {
+                    EnsureStackCapacity(ref stack, sp + 1);
+                    var disp = calleeFunction?.LexicalDisplay;
+                    int depthIdx = inst.Extra - 1;
+                    if (disp != null && (uint)depthIdx < (uint)disp.Length && (uint)inst.Operand < (uint)disp[depthIdx].Length)
+                    {
+                        stack[sp++] = disp[depthIdx][inst.Operand];
+                    }
+                    else
+                    {
+                        stack[sp++] = PilotValue.Undefined;
+                    }
+                    break;
+                }
+
+                case PilotOpcode.StoreUpvalue:
+                {
+                    var val = stack[--sp];
+                    var disp = calleeFunction?.LexicalDisplay;
+                    int depthIdx = inst.Extra - 1;
+                    if (disp != null && (uint)depthIdx < (uint)disp.Length && (uint)inst.Operand < (uint)disp[depthIdx].Length)
+                    {
+                        disp[depthIdx][inst.Operand] = val;
+                    }
+                    break;
+                }
+
+                case PilotOpcode.GetFieldSlot:
+                {
+                    var target = stack[--sp];
+                    if (target.IsFailure) target = target.UnwrapFailure();
+                    EnsureStackCapacity(ref stack, sp + 1);
+                    if (target.Kind == PilotValueKind.Record)
+                    {
+                        stack[sp++] = target.GetRecordField(inst.Operand);
+                    }
+                    else if (target.Kind == PilotValueKind.Adt)
+                    {
+                        stack[sp++] = target.GetAdtField(inst.Operand);
+                    }
+                    else if (target.Kind == PilotValueKind.Object)
+                    {
+                        string? fbName = inst.Extra >= 0 && inst.Extra < identifiers.Count ? identifiers[inst.Extra] : null;
+                        stack[sp++] = target.AsObject().GetFieldSlot(inst.Operand, fbName);
+                    }
+                    else if (inst.Extra >= 0 && inst.Extra < identifiers.Count)
+                    {
+                        stack[sp++] = target.GetMember(identifiers[inst.Extra], context);
+                    }
+                    else
+                    {
+                        stack[sp++] = PilotValue.Undefined;
+                    }
+                    break;
+                }
+
+                case PilotOpcode.SetFieldSlot:
+                {
+                    var val = stack[--sp];
+                    var target = stack[--sp];
+                    if (target.Kind is PilotValueKind.Record or PilotValueKind.Adt or PilotValueKind.KeywordVariant)
+                    {
+                        string fName = inst.Extra >= 0 && inst.Extra < identifiers.Count ? identifiers[inst.Extra] : $"#{inst.Operand}";
+                        throw new PilotRuntimeException(
+                            $"[PILOT101] Cannot mutate field '{fName}' on immutable {target.Kind.ToString().ToLowerInvariant()} value.");
+                    }
+                    if (target.Kind == PilotValueKind.Object)
+                    {
+                        string? fbName = inst.Extra >= 0 && inst.Extra < identifiers.Count ? identifiers[inst.Extra] : null;
+                        target.AsObject().SetFieldSlot(inst.Operand, val, fbName);
+                    }
+                    break;
+                }
+
+                case PilotOpcode.ConstructStruct:
+                {
+                    string typeName = identifiers[inst.Operand];
+                    int argc = inst.Extra;
+                    var fieldArgs = new PilotValue[argc];
+                    for (int a = argc - 1; a >= 0; a--)
+                    {
+                        fieldArgs[a] = stack[--sp];
+                    }
+                    EnsureStackCapacity(ref stack, sp + 1);
+                    if (context.RecordDefinitions.TryGetValue(typeName, out var recDef))
+                    {
+                        stack[sp++] = recDef.Instantiate(fieldArgs);
+                    }
+                    else if (scope.TryResolve(typeName, out var ctorVal) && ctorVal.Kind == PilotValueKind.Function)
+                    {
+                        stack[sp++] = ctorVal.AsFunction().Invoke(context, fieldArgs);
+                    }
+                    else
+                    {
+                        stack[sp++] = PilotValue.Null;
+                    }
+                    break;
+                }
+
+                case PilotOpcode.LoadContextSlot:
+                {
+                    string? fbName = inst.Extra >= 0 && inst.Extra < identifiers.Count ? identifiers[inst.Extra] : null;
+                    EnsureStackCapacity(ref stack, sp + 1);
+                    if (context.TryResolveContextSlot(inst.Operand, fbName, out var ctxVal))
+                    {
+                        stack[sp++] = ctxVal;
+                    }
+                    else
+                    {
+                        stack[sp++] = PilotValue.Undefined;
+                    }
+                    break;
+                }
+
+                case PilotOpcode.PushContextSlot:
+                {
+                    var val = stack[--sp];
+                    string? fbName = inst.Extra >= 0 && inst.Extra < identifiers.Count ? identifiers[inst.Extra] : null;
+                    context.PushContextDisplaySlot(inst.Operand, fbName, val);
+                    break;
+                }
+
+                case PilotOpcode.PopContextSlot:
+                {
+                    context.PopContextDisplaySlot(inst.Operand);
+                    break;
+                }
+
+                case PilotOpcode.FreezeTop:
+                {
+                    if (sp > 0)
+                    {
+                        stack[sp - 1] = stack[sp - 1].Freeze();
+                    }
+                    break;
+                }
+
+                case PilotOpcode.AssertCheck:
+                {
+                    string? msg = null;
+                    if (inst.Extra == 1 && sp > 0)
+                    {
+                        msg = stack[--sp].ToString();
+                    }
+                    var cond = stack[--sp];
+                    if (!cond.IsTrue)
+                    {
+                        throw new PilotRuntimeException(
+                            string.IsNullOrEmpty(msg)
+                                ? $"Assertion failed at line {inst.Operand}."
+                                : $"Assertion failed at line {inst.Operand}: {msg}");
+                    }
+                    break;
+                }
             }
         }
 
+        SyncLocalsToScopeIfNeeded(chunk, locals, scope, calleeFunction);
         return sp > 0 ? stack[--sp] : PilotValue.Undefined;
+        }
+        finally
+        {
+            ArrayPool<PilotValue>.Shared.Return(stack, clearArray: false);
+        }
+    }
+
+    private static void SyncLocalsToScopeIfNeeded(
+        PilotBytecodeChunk chunk,
+        PilotValue[] locals,
+        PilotScope scope,
+        PilotFunction? calleeFunction)
+    {
+        if (calleeFunction != null || chunk.LocalSlotMap.Count == 0)
+        {
+            return;
+        }
+        foreach (var (locName, slot) in chunk.LocalSlotMap)
+        {
+            if (!string.IsNullOrEmpty(locName) && !locName.StartsWith("<") && (uint)slot < (uint)locals.Length)
+            {
+                if (!scope.Assign(locName, locals[slot]))
+                {
+                    scope.Declare(locName, locals[slot]);
+                }
+            }
+        }
     }
 
     private static void DeclareTypeDescriptorInContext(
@@ -1348,7 +1586,10 @@ public sealed class PilVirtualMachine
     {
         if (required >= stack.Length)
         {
-            Array.Resize(ref stack, stack.Length * 2);
+            var next = ArrayPool<PilotValue>.Shared.Rent(stack.Length * 2);
+            Array.Copy(stack, 0, next, 0, stack.Length);
+            ArrayPool<PilotValue>.Shared.Return(stack, clearArray: false);
+            stack = next;
         }
     }
 
@@ -1514,7 +1755,8 @@ public sealed class PilVirtualMachine
                 bool isKwargs = p.DOUBLESTAR() != null;
                 bool isContextual = p.CONTEXT() != null;
                 bool isEach = p.EACH() != null || p.REPEAT() != null;
-                astList[i] = new PilotParameter(pName, pType, defaultVal, isParams, isKwargs, isContextual, isEach);
+                bool isComptime = p.COMPTIME() != null;
+                astList[i] = new PilotParameter(pName, pType, defaultVal, isParams, isKwargs, isContextual, isEach, isComptime);
             }
             return astList;
         }

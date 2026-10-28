@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Antlr4.Runtime;
+using Pilot.Analysis.Comptime;
 using Pilot.Analysis.ContractVerification;
 using Pilot.Analysis.DimensionalAnalysis;
 using Pilot.Analysis.Loops;
@@ -27,19 +28,22 @@ public sealed class PilotStaticAnalysisResult
     public IReadOnlyList<PilotTypeConstraint> TypeConstraints => TypeEngine?.Constraints ?? Array.Empty<PilotTypeConstraint>();
     public IReadOnlyList<PilotMonomorphizedCallSite> MonomorphizedCallSites => TypeEngine?.MonomorphizedCallSites ?? Array.Empty<PilotMonomorphizedCallSite>();
     public IReadOnlyList<PilotInlayHint> InlayHints => TypeEngine?.InlayHints ?? Array.Empty<PilotInlayHint>();
+    public PilotStaticDemotionReport? DemotionReport { get; }
 
     public PilotStaticAnalysisResult(
         IEnumerable<PilotAnalysisDiagnostic> diagnostics,
         IReadOnlyDictionary<string, PilotType> inferredTypes,
         IReadOnlyDictionary<string, string>? inferredFunctionReturnTypes = null,
         IReadOnlyDictionary<PilotParser.For_stmtContext, PilotForLoopInfo>? loopInfos = null,
-        PilotTypeInferenceEngine? typeEngine = null)
+        PilotTypeInferenceEngine? typeEngine = null,
+        PilotStaticDemotionReport? demotionReport = null)
     {
         Diagnostics.AddRange(diagnostics);
         InferredTypes = inferredTypes;
         InferredFunctionReturnTypes = inferredFunctionReturnTypes ?? new Dictionary<string, string>(StringComparer.Ordinal);
         LoopInfos = loopInfos ?? new Dictionary<PilotParser.For_stmtContext, PilotForLoopInfo>();
         TypeEngine = typeEngine;
+        DemotionReport = demotionReport;
     }
 }
 
@@ -99,7 +103,13 @@ public static class PilotAnalysisPipeline
         loopAnalyzer.CheckProgram(program);
         diagnostics.AddRange(loopAnalyzer.Diagnostics);
 
-        return new PilotStaticAnalysisResult(diagnostics, typeEngine.InferredTypes, errorFlow.InferredFunctionReturnTypes, loopAnalyzer.LoopInfos, typeEngine);
+        // 9. Compile-Time Execution & Static Demotion Audit (Milestone 19: COMPTIME001–COMPTIME010)
+        var comptimeEvaluator = new PilotComptimeEvaluator();
+        comptimeEvaluator.EvaluateProgram(program);
+        var demotionReport = PilotStaticDemotionPass.Analyze(program, typeEngine, contractVerifier, comptimeEvaluator);
+        diagnostics.AddRange(demotionReport.Diagnostics);
+
+        return new PilotStaticAnalysisResult(diagnostics, typeEngine.InferredTypes, errorFlow.InferredFunctionReturnTypes, loopAnalyzer.LoopInfos, typeEngine, demotionReport);
     }
 
     /// <summary>

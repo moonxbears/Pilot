@@ -70,8 +70,10 @@ public readonly struct PilotValue : IEquatable<PilotValue>
     public static PilotValue FromKeyword(PilotKeyword keyword) => new(PilotValueKind.Keyword, keyword, 0, 0);
     public static PilotValue FromKeyword(string text) => new(PilotValueKind.Keyword, PilotKeyword.Intern(text), 0, 0);
     public static PilotValue FromList(List<PilotValue> list) => new(PilotValueKind.List, list ?? new List<PilotValue>(), 0, 0);
+    public static PilotValue FromFrozenList(List<PilotValue> list) => new(PilotValueKind.List, list ?? new List<PilotValue>(), 1, 0);
     public static PilotValue FromTuple(IReadOnlyList<PilotValue> tuple) => new(PilotValueKind.Tuple, tuple ?? Array.Empty<PilotValue>(), 0, 0);
-    public static PilotValue FromMap(Dictionary<PilotValue, PilotValue> map) => new(PilotValueKind.Map, map ?? new Dictionary<PilotValue, PilotValue>(), 0, 0);
+    public static PilotValue FromMap(Dictionary<PilotValue, PilotValue> map) => new(PilotValueKind.Map, map ?? new Dictionary<PilotValue, PilotValue>(), map is PilotFrozenMap ? 1 : 0, 0);
+    public static PilotValue FromFrozenMap(PilotFrozenMap map) => new(PilotValueKind.Map, map, 1, 0);
     public static PilotValue FromSet(HashSet<PilotValue> set) => new(PilotValueKind.Set, set ?? new HashSet<PilotValue>(), 0, 0);
     public static PilotValue FromRange(PilotRange range) => new(PilotValueKind.Range, range, 0, 0);
     public static PilotValue FromMatrix(PilotMatrix matrix) => new(PilotValueKind.Matrix, matrix, 0, 0);
@@ -295,6 +297,80 @@ public readonly struct PilotValue : IEquatable<PilotValue>
     public Pilot.Runtime.NativeMemory.PilotNativeMap AsNativeMap() => _reference as Pilot.Runtime.NativeMemory.PilotNativeMap ?? throw new InvalidCastException($"Expected NativeMap, got {Kind}");
     public Pilot.Runtime.NativeMemory.PilotSharedBuffer AsSliceBuffer() => _reference as Pilot.Runtime.NativeMemory.PilotSharedBuffer ?? throw new InvalidCastException($"Expected SliceBuffer, got {Kind}");
     public object? AsForeign() => _reference;
+
+    public bool IsFrozen =>
+        _reference is PilotFrozenMap ||
+        (Kind is PilotValueKind.List or PilotValueKind.Map or PilotValueKind.Set && _integer != 0) ||
+        Kind is PilotValueKind.Null or PilotValueKind.Undefined or PilotValueKind.Bool or PilotValueKind.Int or
+                PilotValueKind.UInt or PilotValueKind.Float or PilotValueKind.Decimal or PilotValueKind.Char or
+                PilotValueKind.String or PilotValueKind.Keyword or PilotValueKind.KeywordVariant or
+                PilotValueKind.Tuple or PilotValueKind.Range or PilotValueKind.Record or PilotValueKind.Adt;
+
+    public bool TryGetFrozenMap(out PilotFrozenMap frozenMap)
+    {
+        if (Kind == PilotValueKind.Map && _reference is PilotFrozenMap fm)
+        {
+            frozenMap = fm;
+            return true;
+        }
+        frozenMap = null!;
+        return false;
+    }
+
+    /// <summary>
+    /// Recursively converts a runtime value into a compile-time frozen `.rodata` representation (`19.2`),
+    /// upgrading maps to <see cref="PilotFrozenMap"/> displacement perfect-hash tables and marking
+    /// lists/sets as immutable.
+    /// </summary>
+    public PilotValue Freeze()
+    {
+        switch (Kind)
+        {
+            case PilotValueKind.List:
+            {
+                var src = AsList();
+                var frozen = new List<PilotValue>(src.Count);
+                for (int i = 0; i < src.Count; i++) frozen.Add(src[i].Freeze());
+                return FromFrozenList(frozen);
+            }
+            case PilotValueKind.Tuple:
+            {
+                var src = AsTuple();
+                var frozen = new PilotValue[src.Count];
+                for (int i = 0; i < src.Count; i++) frozen[i] = src[i].Freeze();
+                return new PilotValue(PilotValueKind.Tuple, frozen, 1, 0);
+            }
+            case PilotValueKind.Map:
+            {
+                if (_reference is PilotFrozenMap existingFm)
+                {
+                    return FromFrozenMap(existingFm);
+                }
+                var src = AsMap();
+                var dict = new Dictionary<PilotValue, PilotValue>(src.Count);
+                foreach (var kvp in src)
+                {
+                    dict[kvp.Key.Freeze()] = kvp.Value.Freeze();
+                }
+                return FromFrozenMap(new PilotFrozenMap(dict));
+            }
+            case PilotValueKind.Set:
+            {
+                var src = AsSet();
+                var set = new HashSet<PilotValue>(src.Count);
+                foreach (var item in src) set.Add(item.Freeze());
+                return new PilotValue(PilotValueKind.Set, set, 1, 0);
+            }
+            case PilotValueKind.Object:
+            {
+                var obj = AsObject();
+                obj.IsFrozen = true;
+                return this;
+            }
+            default:
+                return this;
+        }
+    }
 
     public bool IsUnboxedInline =>
         Kind is PilotValueKind.Null or PilotValueKind.Bool or PilotValueKind.Int or PilotValueKind.UInt or PilotValueKind.Float or PilotValueKind.Char ||
@@ -1092,6 +1168,7 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             {
                 "length" or "Length" or "count" or "Count" => FromInt(list.Count),
                 "is_empty" or "IsEmpty" => FromBool(list.Count == 0),
+                "is_frozen" or "IsFrozen" => FromBool(_integer != 0),
                 "to_native" or "as_native" or "ToNative" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => FromNativeArray(new Pilot.Runtime.NativeMemory.PilotNativeArray(list)))),
                 "append" or "Append" or "push" or "Push" => FromFunction(CreateAppendFunction(memberName, list)),
                 "sum" or "Sum" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => ComputeCollectionSum(list))),
@@ -1173,6 +1250,10 @@ public readonly struct PilotValue : IEquatable<PilotValue>
         {
             var map = (Dictionary<PilotValue, PilotValue>)_reference!;
             var strKey = FromString(memberName);
+            if (map is PilotFrozenMap fm && fm.TryLookupFast(strKey, out var fastVal))
+            {
+                return fastVal;
+            }
             if (map.TryGetValue(strKey, out var foundVal))
             {
                 return foundVal;
@@ -1182,6 +1263,9 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             {
                 "length" or "Length" or "count" or "Count" => FromInt(map.Count),
                 "is_empty" or "IsEmpty" => FromBool(map.Count == 0),
+                "is_frozen" or "IsFrozen" => FromBool(map is PilotFrozenMap || _integer != 0),
+                "is_perfect_hash" or "IsPerfectHash" => FromBool(map is PilotFrozenMap pfm && pfm.IsPerfectHash),
+                "table_size" or "TableSize" => FromInt(map is PilotFrozenMap pfm2 ? pfm2.TableSize : map.Count),
                 "to_native" or "as_native" or "ToNative" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => FromNativeMap(new Pilot.Runtime.NativeMemory.PilotNativeMap(map)))),
                 "keys" or "Keys" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => FromList(new List<PilotValue>(map.Keys)))),
                 "values" or "Values" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => FromList(new List<PilotValue>(map.Values)))),
@@ -1829,7 +1913,12 @@ public readonly struct PilotValue : IEquatable<PilotValue>
                 var list = receiver.AsList();
                 switch (memberName)
                 {
+                    case "is_frozen" or "IsFrozen" when argc == 0:
+                        result = FromBool(receiver.IsFrozen);
+                        return true;
                     case "append" or "Append" or "push" or "Push" when argc == 1:
+                        if (receiver._integer != 0)
+                            throw new InvalidOperationException("Cannot mutate a compile-time frozen list (.rodata).");
                         if (!Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordListAppend(list, args[0]))
                             list.Add(args[0]);
                         result = Null;

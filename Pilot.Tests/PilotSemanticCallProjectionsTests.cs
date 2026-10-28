@@ -65,7 +65,7 @@ dual
 
         // Verify Common Subexpression Elimination (CSE) extracted shared `(velocity * velocity)` intermediate
         Assert.NotEmpty(dualPayload.CseSchedule);
-        Assert.Contains(dualPayload.CseSchedule, b => b.Expression.ToSExpr() == "(* velocity velocity)" && b.ReferenceCount >= 2);
+        Assert.Contains(dualPayload.CseSchedule, b => b.Expression.ToSExpr() == "Mul(Sym(\"velocity\"), Sym(\"velocity\"))" && b.ReferenceCount >= 2);
     }
 
     [Fact]
@@ -267,10 +267,24 @@ let d = opaque_energy!@(10.0, 5.0)
         Assert.Contains(analysis001.TypeInference.Diagnostics, d => d.Code == "QUOTE001");
     }
 
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "Pilot.csproj")))
+            {
+                return dir.FullName;
+            }
+            dir = dir.Parent;
+        }
+        return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+    }
+
     [Fact]
     public void EndToEnd_TestSuite35_And_Showcase23_ExecuteCleanly()
     {
-        string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+        string repoRoot = FindRepoRoot();
         string test35 = File.ReadAllText(Path.Combine(repoRoot, "tests", "35_semantic_call_projections.pilot"));
         var (res35, out35) = RunScript(test35);
         Assert.True(res35.Success, FormatFailure(res35));

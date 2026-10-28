@@ -95,13 +95,33 @@ public sealed class PilotEffectDiff
 /// </summary>
 public sealed class ShadowEffectContext
 {
+    internal readonly struct ObjectFieldKey : IEquatable<ObjectFieldKey>
+    {
+        public readonly PilotObject Obj;
+        public readonly string Field;
+
+        public ObjectFieldKey(PilotObject obj, string field)
+        {
+            Obj = obj;
+            Field = field;
+        }
+
+        public bool Equals(ObjectFieldKey other) =>
+            ReferenceEquals(Obj, other.Obj) && string.Equals(Field, other.Field, StringComparison.Ordinal);
+
+        public override bool Equals(object? obj) => obj is ObjectFieldKey other && Equals(other);
+
+        public override int GetHashCode() =>
+            HashCode.Combine(RuntimeHelpers.GetHashCode(Obj), StringComparer.Ordinal.GetHashCode(Field));
+    }
+
     public ShadowEffectContext? Parent { get; }
     public string FunctionName { get; }
     public List<PilotEffectDiff> Diffs { get; } = new();
 
     internal readonly HashSet<PilotObject> NewlyAllocatedObjects = new(ReferenceEqualityComparer.Instance);
     internal readonly HashSet<PilotScope> LocalDryRunScopes = new(ReferenceEqualityComparer.Instance);
-    internal readonly Dictionary<(PilotObject Obj, string Field), PilotValue> ObjectFieldOverlay = new();
+    internal readonly Dictionary<ObjectFieldKey, PilotValue> ObjectFieldOverlay = new();
     internal readonly Dictionary<List<PilotValue>, List<PilotValue>> ListOverlay = new(ReferenceEqualityComparer.Instance);
     internal readonly Dictionary<Dictionary<PilotValue, PilotValue>, Dictionary<PilotValue, PilotValue>> MapOverlay = new(ReferenceEqualityComparer.Instance);
     internal readonly Dictionary<(PilotSharedBuffer Buf, int Index), PilotValue> BufferOverlay = new();
@@ -194,7 +214,7 @@ public sealed class PilotEffectPlan
             {
                 "IsCommitted" or "is_committed" or "isCommitted" => PilotValue.FromBool(IsCommitted),
                 "IsRolledBack" or "is_rolled_back" or "isRolledBack" => PilotValue.FromBool(IsRolledBack),
-                _ => null
+                _ => default(PilotValue?)
             }
         };
 
@@ -245,19 +265,23 @@ public static class PilotEffectDryRunEngine
 
     public static bool IsDryRunActive => _currentShadow != null && !_isCommitting;
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void NotifyObjectCreated(PilotObject obj)
     {
-        if (_currentShadow != null && !_isCommitting)
+        var shadow = _currentShadow;
+        if (shadow != null && !_isCommitting)
         {
-            _currentShadow.NewlyAllocatedObjects.Add(obj);
+            shadow.NewlyAllocatedObjects.Add(obj);
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void NotifyScopeCreated(PilotScope scope)
     {
-        if (_currentShadow != null && !_isCommitting)
+        var shadow = _currentShadow;
+        if (shadow != null && !_isCommitting)
         {
-            _currentShadow.LocalDryRunScopes.Add(scope);
+            shadow.LocalDryRunScopes.Add(scope);
         }
     }
 
@@ -342,12 +366,20 @@ public static class PilotEffectDryRunEngine
 
     #region CoW Object Field Interception (StoreField)
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool TryReadObjectField(PilotObject obj, string fieldName, out PilotValue shadowValue)
     {
-        var shadow = CurrentShadow;
+        var shadow = _currentShadow;
+        if (shadow == null || _isCommitting)
+        {
+            shadowValue = PilotValue.Undefined;
+            return false;
+        }
+
+        var key = new ShadowEffectContext.ObjectFieldKey(obj, fieldName);
         while (shadow != null)
         {
-            if (shadow.ObjectFieldOverlay.TryGetValue((obj, fieldName), out shadowValue))
+            if (shadow.ObjectFieldOverlay.TryGetValue(key, out shadowValue))
             {
                 return true;
             }
@@ -358,10 +390,11 @@ public static class PilotEffectDryRunEngine
         return false;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool TryRecordObjectFieldWrite(PilotObject obj, string fieldName, PilotValue newValue)
     {
-        var shadow = CurrentShadow;
-        if (shadow == null) return false;
+        var shadow = _currentShadow;
+        if (shadow == null || _isCommitting) return false;
 
         // Objects allocated internally during this dry-run can mutate their own fields directly
         if (shadow.NewlyAllocatedObjects.Contains(obj))
@@ -373,7 +406,7 @@ public static class PilotEffectDryRunEngine
             ? existingShadow
             : (obj.Fields.TryGetValue(fieldName, out var liveVal) ? liveVal : PilotValue.Undefined);
 
-        shadow.ObjectFieldOverlay[(obj, fieldName)] = newValue;
+        shadow.ObjectFieldOverlay[new ShadowEffectContext.ObjectFieldKey(obj, fieldName)] = newValue;
         string targetDesc = $"{obj.TypeName}.{fieldName}";
         string summary = $"{targetDesc}: {oldValue} -> {newValue}";
 
@@ -393,9 +426,16 @@ public static class PilotEffectDryRunEngine
 
     #region CoW Scope Variable Interception (VarWrite)
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool TryReadScopeVariable(PilotScope definingScope, string name, out PilotValue shadowValue)
     {
-        var shadow = CurrentShadow;
+        var shadow = _currentShadow;
+        if (shadow == null || _isCommitting)
+        {
+            shadowValue = PilotValue.Undefined;
+            return false;
+        }
+
         while (shadow != null)
         {
             if (shadow.ScopeVarOverlay.TryGetValue((definingScope, name), out shadowValue))
@@ -409,14 +449,15 @@ public static class PilotEffectDryRunEngine
         return false;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool TryRecordScopeVariableWrite(
         PilotScope definingScope,
         string name,
         PilotValue currentLiveValue,
         PilotValue newValue)
     {
-        var shadow = CurrentShadow;
-        if (shadow == null) return false;
+        var shadow = _currentShadow;
+        if (shadow == null || _isCommitting) return false;
 
         // Scopes created inside the dry-run (e.g., local function frame) mutate their own local variables normally
         if (shadow.LocalDryRunScopes.Contains(definingScope))

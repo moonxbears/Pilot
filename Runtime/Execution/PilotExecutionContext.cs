@@ -63,6 +63,83 @@ public sealed class PilotExecutionContext
     public Stack<Dictionary<string, PilotValue>> ContextualBindings { get; } = new();
     public Dictionary<string, PilotValue> OldSnapshots => _oldSnapshots ??= new(StringComparer.Ordinal);
 
+    // Milestone 19.1.7: O(1) Integer Display Slot Table for Contextual DI
+    private static readonly Dictionary<string, int> GlobalContextSlotIds = new(StringComparer.Ordinal);
+    private static readonly List<string> GlobalContextSlotNames = new();
+    private static readonly object ContextSlotLock = new();
+    private PilotValue[] _contextDisplaySlots = new PilotValue[32];
+    private readonly Stack<(int SlotId, PilotValue PreviousValue)> _contextSlotHistory = new();
+
+    // Milestone 19.2: Deterministic Comptime Execution Budget & Sandboxing
+    public bool IsComptimeEvaluation { get; set; }
+    public int ComptimeStepBudget { get; set; }
+    public int ComptimeStepsExecuted { get; set; }
+
+    public static int InternContextSlotId(string name)
+    {
+        lock (ContextSlotLock)
+        {
+            if (GlobalContextSlotIds.TryGetValue(name, out int id))
+            {
+                return id;
+            }
+            id = GlobalContextSlotNames.Count;
+            GlobalContextSlotNames.Add(name);
+            GlobalContextSlotIds[name] = id;
+            return id;
+        }
+    }
+
+    public void PushContextDisplaySlot(int slotId, string? name, PilotValue value)
+    {
+        if (slotId >= _contextDisplaySlots.Length)
+        {
+            int newLen = Math.Max(slotId + 1, _contextDisplaySlots.Length * 2);
+            Array.Resize(ref _contextDisplaySlots, newLen);
+        }
+        _contextSlotHistory.Push((slotId, _contextDisplaySlots[slotId]));
+        _contextDisplaySlots[slotId] = value;
+        if (!string.IsNullOrEmpty(name))
+        {
+            ContextualBindings.Push(new Dictionary<string, PilotValue>(StringComparer.Ordinal) { [name] = value });
+        }
+    }
+
+    public void PopContextDisplaySlot(int slotId, bool popDictionary = true)
+    {
+        if (_contextSlotHistory.Count > 0)
+        {
+            var top = _contextSlotHistory.Pop();
+            if ((uint)top.SlotId < (uint)_contextDisplaySlots.Length)
+            {
+                _contextDisplaySlots[top.SlotId] = top.PreviousValue;
+            }
+        }
+        if (popDictionary && ContextualBindings.Count > 0)
+        {
+            ContextualBindings.Pop();
+        }
+    }
+
+    public bool TryResolveContextSlot(int slotId, string? fallbackName, out PilotValue value)
+    {
+        if ((uint)slotId < (uint)_contextDisplaySlots.Length)
+        {
+            var slotVal = _contextDisplaySlots[slotId];
+            if (slotVal.Kind != PilotValueKind.Null && !slotVal.IsUndefined)
+            {
+                value = slotVal;
+                return true;
+            }
+        }
+        if (!string.IsNullOrEmpty(fallbackName))
+        {
+            return TryResolveContextual(fallbackName, out value);
+        }
+        value = PilotValue.Undefined;
+        return false;
+    }
+
     internal Dictionary<string, PilotValue>? SwapOldSnapshots(Dictionary<string, PilotValue>? next)
     {
         var prev = _oldSnapshots;
@@ -79,6 +156,18 @@ public sealed class PilotExecutionContext
 
     public bool TryResolveContextual(string name, out PilotValue value)
     {
+        // 0. O(1) Integer Display Slot Table fast path (Milestone 19.1.7)
+        int slotId = InternContextSlotId(name);
+        if ((uint)slotId < (uint)_contextDisplaySlots.Length)
+        {
+            var slotVal = _contextDisplaySlots[slotId];
+            if (slotVal.Kind != PilotValueKind.Null && !slotVal.IsUndefined)
+            {
+                value = slotVal;
+                return true;
+            }
+        }
+
         // 1. Search active ContextualBindings stack frames from top to bottom
         if (ContextualBindings.Count > 0)
         {

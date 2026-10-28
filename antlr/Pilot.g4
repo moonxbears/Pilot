@@ -31,7 +31,7 @@ identifier
     | SPAWN | PARALLEL | ATOMIC | SYNC | LOCK | ISOLATE
     | CHAN | CHANNEL | ASYNC | AWAIT | ACTOR | MACRO | QUOTE | SPLICE
     | DEFMACRO | DEFKEYWORD | QUASIQUOTE | UNQUOTE | UNQUOTE_SPLICING
-    | MATCH | CASE | TYPE | PURE | MUT | IMMUT | LET | VAR | CONST
+    | MATCH | CASE | TYPE | PURE | COMPTIME | MUT | IMMUT | LET | VAR | CONST
     | GUARD | DEFER | INSERT | UPDATE | DELETE | VALUES | SET_KW
     | RETURNING | CONFLICT | DO | NOTHING | OVER | PARTITION | WINDOW
     | TRANSACTION | COMMIT | ROLLBACK | SAVEPOINT | TO | CONNECT | DATABASE | MODEL
@@ -105,6 +105,7 @@ compound_stmt
     | macro_def
     | extern_def
     | inline_foreign_block
+    | comptime_stmt
     | quote_stmt
     | guard_stmt
     | defer_stmt
@@ -364,7 +365,7 @@ augassign
 // =============================================================================
 
 func_def
-    : decorators? declaration_modifier* (PURE | ASYNC)? (DEF | FN) identifier generic_params? parameters (ARROW type_spec)? where_type_clause? COLON? contract_clause* (COLON | FAT_ARROW)? (suite | SEMI)?
+    : decorators? declaration_modifier* (PURE | COMPTIME | ASYNC)? (DEF | FN) identifier generic_params? parameters (ARROW type_spec)? where_type_clause? COLON? contract_clause* (COLON | FAT_ARROW)? (suite | SEMI)?
     ;
 
 contract_clause
@@ -377,7 +378,7 @@ parameters
     ;
 
 parameter
-    : CONTEXT? (EACH | REPEAT)? (PARAMS | REF)? (STAR | DOUBLESTAR)? (identifier | splice_expr) type_annotation? (EQUAL test)?
+    : (CONTEXT | COMPTIME)? (EACH | REPEAT)? (PARAMS | REF)? (STAR | DOUBLESTAR)? (identifier | splice_expr) type_annotation? (EQUAL test)?
     ;
 
 class_def
@@ -488,6 +489,14 @@ adapter_def
 // Compile-Time Metaprogramming / Macros (Lisp Homoiconicity)
 macro_def
     : decorators? declaration_modifier* (MACRO | DEFMACRO | DEFKEYWORD) EXCLAMATION? identifier generic_params? parameters? (ARROW type_spec)? (COLON | FAT_ARROW)? suite
+    ;
+
+comptime_stmt
+    : COMPTIME COLON? (LBRACE stmt* RBRACE | if_stmt | for_stmt)
+    ;
+
+comptime_expr
+    : COMPTIME COLON? (LBRACE stmt* RBRACE | LPAR test RPAR)
     ;
 
 quote_stmt
@@ -701,7 +710,7 @@ pass_stmt
     ;
 
 assert_stmt
-    : ASSERT test (COMMA test)?
+    : COMPTIME? ASSERT test (COMMA test)?
     ;
 
 steal_stmt
@@ -1233,6 +1242,7 @@ subscript
 
 atom
     : inline_foreign_block
+    | comptime_expr
     | quote_expr
     | quasiquote_expr
     | splice_expr
@@ -1244,6 +1254,12 @@ atom
     | match_stmt
     | with_stmt
     | for_stmt
+    | sql_query_expr
+    | query_expr
+    | lookup_expr
+    | insert_stmt
+    | update_stmt
+    | delete_stmt
     | DOT identifier
     | identifier
     | LPAR overloadable_op RPAR
@@ -1251,12 +1267,6 @@ atom
     | collection_expr
     | LBRACE dictorsetmaker? RBRACE
     | block
-    | sql_query_expr
-    | query_expr
-    | lookup_expr
-    | insert_stmt
-    | update_stmt
-    | delete_stmt
     | RAW_DSL_BLOCK
     ;
 
@@ -1381,6 +1391,7 @@ REF         : 'ref';
 DYNAMIC     : 'dynamic';
 SYMBOL      : 'symbol';
 PURE        : 'pure';
+COMPTIME    : 'comptime';
 MUT         : 'mut';
 IMMUT       : 'immut';
 PROPERTY    : 'property';

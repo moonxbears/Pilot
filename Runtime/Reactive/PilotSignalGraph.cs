@@ -121,7 +121,7 @@ public abstract class PilotSignalNode
             "Name" or "name" => PilotValue.FromString(Name),
             "IsComputed" or "is_computed" or "isComputed" => PilotValue.FromBool(this is PilotComputedSignal),
             "EvalCount" or "eval_count" or "evalCount" => PilotValue.FromInt(this is PilotComputedSignal cs ? cs.EvaluationCount : Version),
-            _ => null
+            _ => default(PilotValue?)
         };
     }
 
@@ -297,7 +297,7 @@ public static class PilotSignalGraph
         }
     }
 
-    private sealed class ObjectPropertyKey : IEquatable<ObjectPropertyKey>
+    private readonly struct ObjectPropertyKey : IEquatable<ObjectPropertyKey>
     {
         public readonly PilotObject Target;
         public readonly string PropertyName;
@@ -308,8 +308,7 @@ public static class PilotSignalGraph
             PropertyName = propertyName;
         }
 
-        public bool Equals(ObjectPropertyKey? other) =>
-            other != null &&
+        public bool Equals(ObjectPropertyKey other) =>
             ReferenceEquals(Target, other.Target) &&
             string.Equals(PropertyName, other.PropertyName, StringComparison.Ordinal);
 
@@ -319,7 +318,7 @@ public static class PilotSignalGraph
             HashCode.Combine(RuntimeHelpers.GetHashCode(Target), StringComparer.Ordinal.GetHashCode(PropertyName));
     }
 
-    private sealed class ScopeVariableKey : IEquatable<ScopeVariableKey>
+    private readonly struct ScopeVariableKey : IEquatable<ScopeVariableKey>
     {
         public readonly PilotScope Scope;
         public readonly string VariableName;
@@ -330,8 +329,7 @@ public static class PilotSignalGraph
             VariableName = variableName;
         }
 
-        public bool Equals(ScopeVariableKey? other) =>
-            other != null &&
+        public bool Equals(ScopeVariableKey other) =>
             ReferenceEquals(Scope, other.Scope) &&
             string.Equals(VariableName, other.VariableName, StringComparison.Ordinal);
 
@@ -344,6 +342,8 @@ public static class PilotSignalGraph
     private static readonly object SyncLock = new();
     private static readonly Dictionary<ObjectPropertyKey, PilotSourceSignal> PropertySignals = new();
     private static readonly Dictionary<ScopeVariableKey, PilotSourceSignal> VariableSignals = new();
+    private static volatile bool _hasPropertySignals;
+    private static volatile bool _hasVariableSignals;
 
     [ThreadStatic]
     private static SortedSet<PilotComputedSignal>? _dirtyQueue;
@@ -367,6 +367,7 @@ public static class PilotSignalGraph
                 var initVal = target.Fields.TryGetValue(propertyName, out var v) ? v : target.GetMember(propertyName);
                 sig = new PilotSourceSignal($"{target.TypeName}.{propertyName}", initVal, boundObject: target, boundPropertyName: propertyName);
                 PropertySignals[key] = sig;
+                _hasPropertySignals = true;
             }
             return sig;
         }
@@ -382,13 +383,17 @@ public static class PilotSignalGraph
                 definingScope.TryResolve(variableName, out var initVal);
                 sig = new PilotSourceSignal(variableName, initVal, boundScope: definingScope, boundVariableName: variableName);
                 VariableSignals[key] = sig;
+                _hasVariableSignals = true;
             }
             return sig;
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void NotifyObjectPropertyChanged(PilotObject target, string propertyName, PilotValue newValue)
     {
+        if (!_hasPropertySignals) return;
+
         PilotSourceSignal? sig;
         lock (SyncLock)
         {
@@ -399,8 +404,11 @@ public static class PilotSignalGraph
         sig?.Set(newValue, fromBackingStoreNotification: true);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void NotifyScopeVariableChanged(PilotScope definingScope, string variableName, PilotValue newValue)
     {
+        if (!_hasVariableSignals) return;
+
         PilotSourceSignal? sig;
         lock (SyncLock)
         {
