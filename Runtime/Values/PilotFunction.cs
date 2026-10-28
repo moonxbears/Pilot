@@ -156,6 +156,41 @@ public sealed class PilotFunction
         throw new InvalidOperationException($"Cannot invoke function '{Name}': no executable body or host delegate available.");
     }
 
+    public PilotValue Invoke(
+        PilotExecutionContext context,
+        IReadOnlyList<PilotValue> positionalArgs,
+        IReadOnlyDictionary<string, PilotValue>? namedArgs)
+    {
+        if (namedArgs == null || namedArgs.Count == 0 || Parameters == null || Parameters.Count == 0)
+        {
+            return Invoke(context, positionalArgs);
+        }
+
+        var bound = new List<PilotValue>(Parameters.Count);
+        int posIdx = 0;
+        for (int i = 0; i < Parameters.Count; i++)
+        {
+            var p = Parameters[i];
+            if (namedArgs.TryGetValue(p.Name, out var namedVal))
+            {
+                bound.Add(namedVal);
+            }
+            else if (posIdx < positionalArgs.Count)
+            {
+                bound.Add(positionalArgs[posIdx++]);
+            }
+            else if (p.DefaultValue.HasValue)
+            {
+                bound.Add(p.DefaultValue.Value);
+            }
+        }
+        while (posIdx < positionalArgs.Count)
+        {
+            bound.Add(positionalArgs[posIdx++]);
+        }
+        return Invoke(context, bound);
+    }
+
     /// <summary>
     /// Returns a canonical parameter signature key (arity + parameter types) for overload &amp; hot-patch matching.
     /// </summary>

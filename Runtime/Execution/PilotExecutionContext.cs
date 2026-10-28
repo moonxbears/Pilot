@@ -19,6 +19,7 @@ public sealed class PilotExecutionContext
     public IPilotEngine Engine { get; }
     public PilotExecutionOptions Options { get; }
     public PilotEnvironment Environment { get; }
+    public PilotScope CurrentScope => Environment.CurrentScope;
     public Pilot.Runtime.HotReload.PilotHotReloadSession HotReload => _hotReload ??= new Pilot.Runtime.HotReload.PilotHotReloadSession(this);
     public Stack<Action> DeferStack { get; } = new();
     public int CallDepth { get; set; }

@@ -1876,8 +1876,10 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         }
 
         var trailers = context.trailer();
-        if (trailers != null && RequiresAtomExprAstFallback(context, trailers))
+        int effectiveTrailerLen = PilotParser.GetEffectiveTrailerCount(context);
+        if (trailers != null && effectiveTrailerLen > 0 && RequiresAtomExprAstFallback(context, trailers, effectiveTrailerLen))
         {
+            PreallocateCascadeFallbackBindings(trailers, effectiveTrailerLen);
             int fallback = _chunk.AddAstFallback(context);
             _chunk.Emit(PilotOpcode.EvalAst, fallback);
             return null;
@@ -1885,21 +1887,28 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
         Visit(context.atom());
 
-        if (trailers != null && trailers.Length > 0)
+        if (trailers != null && effectiveTrailerLen > 0)
         {
             var shortCircuitJumps = new List<int>();
-            for (int i = 0; i < trailers.Length; i++)
+            for (int i = 0; i < effectiveTrailerLen; i++)
             {
                 var trailer = trailers[i];
+                bool isSafeCascade = trailer.cascade_trailer()?.SAFE_CASCADE() != null;
                 bool isOptional = trailer.SAFE_NAV() != null ||
+                                  isSafeCascade ||
                                   (trailer.QUESTION() != null && (trailer.LSQB() != null || trailer.LPAR() != null));
                 if (isOptional)
                 {
                     shortCircuitJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfNullShortCircuit));
                 }
 
+                // Cascade Chaining: ..method(args), ..let out = method(args), ..method(args) -> out, ..prop = val, ..[idx] = val
+                if (trailer.cascade_trailer() is { } cascade)
+                {
+                    CompileCascadeTrailer(cascade, shortCircuitJumps);
+                }
                 // Method / Function / Variant / Record Call: (args) or ?(args) or ?.(args)
-                if (trailer.LPAR() != null)
+                else if (trailer.LPAR() != null)
                 {
                     var args = trailer.arglist()?.argument();
                     var orderedTests = OrderCallArgumentExpressions(context, trailers, i, args);
@@ -1914,7 +1923,7 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
                 {
                     string member = trailer.identifier().GetText();
                     // Peek ahead: is next trailer a standard call?
-                    if (i + 1 < trailers.Length &&
+                    if (i + 1 < effectiveTrailerLen &&
                         trailers[i + 1].LPAR() != null &&
                         trailers[i + 1].SAFE_NAV() == null &&
                         trailers[i + 1].QUESTION() == null &&
@@ -1966,20 +1975,28 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         return null;
     }
 
-    private bool RequiresAtomExprAstFallback(PilotParser.Atom_exprContext context, PilotParser.TrailerContext[] trailers)
+    private bool RequiresAtomExprAstFallback(PilotParser.Atom_exprContext context, PilotParser.TrailerContext[] trailers, int effectiveLen)
     {
         if (context.atom()?.identifier()?.GetText() is "keyword" or "symbol" or "old")
         {
             return true;
         }
 
-        for (int i = 0; i < trailers.Length; i++)
+        for (int i = 0; i < effectiveLen; i++)
         {
             var t = trailers[i];
-            if (t.call_quote_op() != null || t.STAR() != null || t.cascade_trailer() != null ||
+            if (t.call_quote_op() != null || t.STAR() != null ||
                 t.unit_expr() != null || t.over_clause() != null)
             {
                 return true;
+            }
+            if (t.cascade_trailer() is { } cascade)
+            {
+                if (RequiresCascadeAstFallback(cascade))
+                {
+                    return true;
+                }
+                continue;
             }
             if (t.LSQB() != null)
             {
@@ -2012,6 +2029,282 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
             }
         }
         return false;
+    }
+
+    private bool RequiresCascadeAstFallback(PilotParser.Cascade_trailerContext cascade)
+    {
+        var target = cascade.cascade_target();
+        if (target == null) return false;
+
+        if (target.binding_pattern() is { } pat && pat.identifier() == null)
+        {
+            return true;
+        }
+
+        if (target.LPAR() != null)
+        {
+            string mName = target.dotted_name()?.GetText() ?? "";
+
+            // Potential `obj..field = global_fn(args)` disambiguation case
+            if (!mName.Contains('.') &&
+                target.binding_pattern()?.identifier() != null &&
+                target.LET() == null &&
+                target.VAR() == null &&
+                target.WALRUS() == null &&
+                target.EQUAL() != null &&
+                _chunk.TryGetLocalSlot(mName, out _))
+            {
+                return true;
+            }
+
+            var args = target.arglist()?.argument();
+            if (args != null)
+            {
+                if (HasNamedArguments(args)) return true;
+                foreach (var a in args)
+                {
+                    if (a.TILDE() != null || a.EACH() != null || a.REPEAT() != null || a.DOTDOT() != null ||
+                        a.STAR() != null || a.DOUBLESTAR() != null || a.test() == null)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        if (target.LSQB() != null)
+        {
+            var subList = target.subscriptlist();
+            var sub = subList?.subscript(0);
+            if (sub == null || subList!.subscript().Length != 1 ||
+                sub.DOTDOT() != null || sub.DOTDOT_EQUAL() != null || sub.test()?.Length != 1)
+            {
+                return true;
+            }
+        }
+
+        if (target.EQUAL() != null && target.test() != null)
+        {
+            foreach (var hc in PilotParser.ExtractHoistedCascades(target.test()))
+            {
+                if (RequiresCascadeAstFallback(hc))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private void PreallocateCascadeFallbackBindings(PilotParser.TrailerContext[] trailers, int effectiveLen)
+    {
+        for (int i = 0; i < effectiveLen; i++)
+        {
+            if (trailers[i].cascade_trailer() is { } cascade)
+            {
+                PreallocateSingleCascadeBindings(cascade);
+            }
+        }
+    }
+
+    private void PreallocateSingleCascadeBindings(PilotParser.Cascade_trailerContext cascade)
+    {
+        var target = cascade.cascade_target();
+        if (target == null) return;
+
+        if (target.binding_pattern() is { } pat)
+        {
+            bool isImmutable = target.LET() != null || (target.WALRUS() != null && target.VAR() == null);
+            foreach (var id in ExtractBindingIdentifiers(pat))
+            {
+                if (isImmutable)
+                {
+                    _immutableBindings.Add(id);
+                    _mutableBindings.Remove(id);
+                }
+                else
+                {
+                    _mutableBindings.Add(id);
+                    if (target.VAR() != null) _immutableBindings.Remove(id);
+                }
+
+                if (_isFunction && !string.IsNullOrEmpty(id))
+                {
+                    _chunk.GetOrAllocateLocalSlot(id);
+                }
+            }
+        }
+
+        if (target.LPAR() == null && target.EQUAL() != null && target.test() != null)
+        {
+            foreach (var hc in PilotParser.ExtractHoistedCascades(target.test()))
+            {
+                PreallocateSingleCascadeBindings(hc);
+            }
+        }
+    }
+
+    private void CompileCascadeTrailer(PilotParser.Cascade_trailerContext cascade, List<int> shortCircuitJumps)
+    {
+        var target = cascade.cascade_target();
+        if (target == null) return;
+
+        // 1. Cascaded method call: ..method(args), ..let out = method(args), ..out = method(args), or ..method(args) -> out
+        if (target.dotted_name() != null && target.LPAR() != null)
+        {
+            var segments = target.dotted_name().identifier();
+            _chunk.Emit(PilotOpcode.Dup);
+            for (int s = 0; s < segments.Length - 1; s++)
+            {
+                int segId = _chunk.AddIdentifier(segments[s].GetText());
+                _chunk.Emit(PilotOpcode.GetMember, segId);
+            }
+
+            var callArgs = target.arglist()?.argument();
+            int argCount = callArgs?.Length ?? 0;
+            if (callArgs != null)
+            {
+                for (int a = 0; a < callArgs.Length; a++)
+                {
+                    Visit(callArgs[a].test());
+                }
+            }
+            int memberId = _chunk.AddIdentifier(segments[^1].GetText());
+            _chunk.Emit(PilotOpcode.CallPrimIntrinsic, memberId, extra: argCount);
+
+            if (target.binding_pattern() is { } pat)
+            {
+                EmitCascadeCaptureStore(target, pat);
+            }
+            else
+            {
+                _chunk.Emit(PilotOpcode.Pop);
+            }
+            return;
+        }
+
+        // 2. Cascaded property read capture: ..let out = prop or ..prop -> out (supports multi-segment `headers.Length`)
+        if (target.dotted_name() != null && target.LPAR() == null && target.binding_pattern() is { } propPat)
+        {
+            _chunk.Emit(PilotOpcode.Dup);
+            foreach (var seg in target.dotted_name().identifier())
+            {
+                int memberId = _chunk.AddIdentifier(seg.GetText());
+                _chunk.Emit(PilotOpcode.GetMember, memberId);
+            }
+            EmitCascadeCaptureStore(target, propPat);
+            return;
+        }
+
+        // 3. Cascaded property write: ..prop = expr
+        if (target.dotted_name() != null && target.LPAR() == null && target.EQUAL() != null && target.test() != null)
+        {
+            var segments = target.dotted_name().identifier();
+            _chunk.Emit(PilotOpcode.Dup);
+            for (int s = 0; s < segments.Length - 1; s++)
+            {
+                int segId = _chunk.AddIdentifier(segments[s].GetText());
+                _chunk.Emit(PilotOpcode.GetMember, segId);
+            }
+            Visit(target.test());
+            int memberId = _chunk.AddIdentifier(segments[^1].GetText());
+            _chunk.Emit(PilotOpcode.SetMember, memberId);
+
+            foreach (var hc in PilotParser.ExtractHoistedCascades(target.test()))
+            {
+                if (hc.SAFE_CASCADE() != null)
+                {
+                    shortCircuitJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfNullShortCircuit));
+                }
+                CompileCascadeTrailer(hc, shortCircuitJumps);
+            }
+            return;
+        }
+
+        // 4. Cascaded index write: ..[idx] = expr
+        if (target.LSQB() != null && target.subscriptlist() != null && target.EQUAL() != null && target.test() != null)
+        {
+            var sub = target.subscriptlist().subscript(0);
+            _chunk.Emit(PilotOpcode.Dup);
+            Visit(sub.test(0));
+            Visit(target.test());
+            _chunk.Emit(PilotOpcode.SetIndex);
+
+            foreach (var hc in PilotParser.ExtractHoistedCascades(target.test()))
+            {
+                if (hc.SAFE_CASCADE() != null)
+                {
+                    shortCircuitJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfNullShortCircuit));
+                }
+                CompileCascadeTrailer(hc, shortCircuitJumps);
+            }
+        }
+    }
+
+    private void EmitCascadeCaptureStore(
+        PilotParser.Cascade_targetContext target,
+        PilotParser.Binding_patternContext pat)
+    {
+        string idName = pat.identifier().GetText();
+        bool hasLet = target.LET() != null || (target.WALRUS() != null && target.VAR() == null);
+        bool hasVar = target.VAR() != null;
+
+        if (hasLet)
+        {
+            _immutableBindings.Add(idName);
+            _mutableBindings.Remove(idName);
+            if (_isFunction)
+            {
+                int slot = _chunk.GetOrAllocateLocalSlot(idName);
+                _chunk.Emit(PilotOpcode.StoreLocal, slot);
+            }
+            else
+            {
+                int idIdx = _chunk.AddIdentifier(idName);
+                _chunk.Emit(PilotOpcode.DeclareNamed, idIdx);
+            }
+            return;
+        }
+
+        if (hasVar)
+        {
+            _mutableBindings.Add(idName);
+            _immutableBindings.Remove(idName);
+            if (_isFunction)
+            {
+                int slot = _chunk.GetOrAllocateLocalSlot(idName);
+                _chunk.Emit(PilotOpcode.StoreLocal, slot);
+            }
+            else
+            {
+                int idIdx = _chunk.AddIdentifier(idName);
+                _chunk.Emit(PilotOpcode.DeclareNamed, idIdx);
+            }
+            return;
+        }
+
+        // Direct variable capture (`..out = m()` or `..m() -> out`): assign if existing mutable, error if immutable, else declare
+        if (IsImmutable(idName))
+        {
+            throw new PilotCompilationException(
+                $"Cannot reassign immutable binding '{idName}' (declared with 'let' or 'const'). Use 'var' if mutation is intended.",
+                pat.Start.Line,
+                pat.Start.Column);
+        }
+
+        _mutableBindings.Add(idName);
+        if (_isFunction)
+        {
+            int slot = _chunk.GetOrAllocateLocalSlot(idName);
+            _chunk.Emit(PilotOpcode.StoreLocal, slot);
+        }
+        else
+        {
+            int idIdx = _chunk.AddIdentifier(idName);
+            _chunk.Emit(PilotOpcode.StoreNamed, idIdx);
+        }
     }
 
     private static bool HasNamedArguments(PilotParser.ArgumentContext[]? args)

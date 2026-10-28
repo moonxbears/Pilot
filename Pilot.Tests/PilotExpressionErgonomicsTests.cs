@@ -273,4 +273,67 @@ public class PilotExpressionErgonomicsTests
         RunInterpreter(source);
         RunBytecode(source);
     }
+
+    [Fact]
+    public void SelfReturningCascade_WithMomentaryOutputAssignment_WorksInInterpreterBytecodeAndTypeInference()
+    {
+        string code = @"
+            class SessionBuilder {
+                var log: str[] = [];
+                var retries: int = 0;
+
+                def connect(self, host: str) -> void {
+                    self.log.append($""connect:{host}"");
+                }
+
+                def authenticate(self, user: str) -> str {
+                    let tok = $""tok:{user}"";
+                    self.log.append($""auth:{tok}"");
+                    return tok;
+                }
+
+                def bump_retry(self) -> int {
+                    self.retries += 1;
+                    return self.retries;
+                }
+
+                def finalize_with(self, token: str, attempt: int) -> void {
+                    self.log.append($""final:{token}:{attempt}"");
+                }
+            }
+
+            def run_session() -> str {
+                var captured_retry = 0;
+                let session = SessionBuilder()
+                    ..connect(""db.internal"")
+                    ..let token = authenticate(""svc"")
+                    ..bump_retry() -> let first_try
+                    ..captured_retry = bump_retry()
+                    ..retries = captured_retry + 5
+                    ..let final_retries = retries
+                    ..finalize_with(token, first_try + final_retries);
+
+                let maybe_none: SessionBuilder? = none;
+                let skipped = maybe_none?..connect(""unused"");
+
+                let list_self = [10, 20]
+                    ..append(30)
+                    ..[0] = 99
+                    ..let list_len = Length;
+
+                return $""{session.log.Length}|{session.log[2]}|{token}|{captured_retry}|{final_retries}|{skipped == null}|{list_self[0]}|{list_len}"";
+            }
+
+            let summary = run_session();
+        ";
+
+        var analysis = PilotAnalysisPipeline.AnalyzeSource(code);
+        Assert.DoesNotContain(analysis.Diagnostics, d => d.IsError);
+
+        var ctx = RunInterpreter(code);
+        Assert.Equal("3|final:tok:svc:8|tok:svc|2|7|true|99|3", ctx.Environment.Resolve("summary").AsString());
+
+        var (vmRes, _) = RunBytecode(code + "\nsummary;");
+        Assert.Equal("3|final:tok:svc:8|tok:svc|2|7|true|99|3", vmRes.AsString());
+    }
 }

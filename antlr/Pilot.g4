@@ -332,7 +332,7 @@ adt_field
     ;
 
 annassign_stmt
-    : {_input.LA(1) != PilotLexer.COLON}? test {((ITokenStream)_input).LT(-1).Line == ((ITokenStream)_input).LT(1).Line}? COLON type_spec (EQUAL test)?
+    : {_input.La(1) != PilotLexer.COLON}? test {_input.Lt(-1).Line == _input.Lt(1).Line}? COLON type_spec (EQUAL test)?
     ;
 
 expr_stmt
@@ -1206,7 +1206,10 @@ cascade_trailer
     ;
 
 cascade_target
-    : ( (LET | VAR)? binding_pattern (EQUAL | WALRUS) )? dotted_name (LSQB type_arguments RSQB)? LPAR arglist? RPAR (ARROW binding_pattern)?
+    : (LET | VAR)? binding_pattern (EQUAL | WALRUS) dotted_name (LSQB type_arguments RSQB)? LPAR arglist? RPAR
+    | dotted_name (LSQB type_arguments RSQB)? LPAR arglist? RPAR (ARROW (LET | VAR)? binding_pattern)?
+    | (LET | VAR) binding_pattern (EQUAL | WALRUS) dotted_name
+    | dotted_name ARROW (LET | VAR)? binding_pattern
     | dotted_name EQUAL test
     | LSQB subscriptlist RSQB EQUAL test
     ;

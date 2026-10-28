@@ -484,7 +484,7 @@ Synthesizing C-ABI `CallFrame` structs (`M17` `!&`), checking `IDifferentiable` 
 
 ---
 
-## Milestone 17: First-Class Keywords, Reified Special Forms & Core Homoiconic Call-Quoting (`:kw`, `!`, `!!`, `~`, `!&`)
+## Milestone 17: First-Class Keywords, Reified Special Forms & Core Homoiconic Call-Quoting (`:kw`, `!`, `!!`, `~`, `!&`) — `COMPLETE`
 **Goal**: Make keywords (`:ns/kw`), finalized AST nodes, types, contracts, scopes, and special forms first-class citizens, and implement **Core Homoiconic Call-Quoting Modes 0–4** (`fn(a)`, `fn!(a)`, `fn!!(a)`, `fn!!(~a, b)`, `fn!&(a)`) with zero-whitespace maximal-munch lexing.
 - **Lexer Constraint**: `#` is strictly reserved for preprocessor directives / language quotes / comments and **MUST NOT** be used in any call-quoting token (`!&` is used for C-ABI Call-Frames).
 
@@ -492,8 +492,8 @@ Synthesizing C-ABI `CallFrame` structs (`M17` `!&`), checking `IDifferentiable` 
 Placed *after* `M11`–`M16` finalize Pilot's AST and static type inference, `M17` reifies the **complete, final Pilot AST** once (no rework!) and implements all core syntactic/ABI call-quoting modes (`!`, `!!`, `~`, `!&`), while cleanly separating the three heavy domain runtimes (`!^` Reactive, `!@` Autodiff, `!?` CoW Shadow Sandbox) into `M18`.
 
 ### 17.1: Pervasive First-Class Keywords & Reified Language Citizens
-- [ ] **First-Class Interned Keywords (`PilotKeyword`)**: Support `:kw` and namespaced `:ns/kw` across maps (`{ :id: 101, :user/role: :admin }`), callable lookup (`:user/role(u, default=:guest)`), keyword hierarchies (`:admin.Derive(:user)`, `:admin.IsA(:user)`), and keyword-dispatched method groups.
-- [ ] **Reified Special Forms, Types, Contracts, Operators & Scopes**: Allow referencing special forms (`keyword(guard)`, `defkeyword retry(...)`), types (`let T = int | str;`), contracts, operators (`(+)`), and lexical scopes (`current_scope()`) as first-class values.
+- [x] **First-Class Interned Keywords (`PilotKeyword`)**: Support `:kw` and namespaced `:ns/kw` across maps (`{ :id: 101, :user/role: :admin }`), callable lookup (`:user/role(u, default=:guest)`), keyword hierarchies (`:admin.Derive(:user)`, `:admin.IsA(:user)`), and keyword-dispatched method groups.
+- [x] **Reified Special Forms, Types, Contracts, Operators & Scopes**: Allow referencing special forms (`keyword(guard)`, `defkeyword retry(...)`), types (`let T = int | str;`), contracts, operators (`(+)`), and lexical scopes (`current_scope()`) as first-class values.
 
 ### 17.2: Call-Quoting Lexer & Parser Grammar (`antlr/Pilot.g4`)
 Tokenize call-quoting operators **only when immediately followed by `(` with zero whitespace** (resolving `!expr`, `a != b`, and `fn(a)?` unambiguously, and unifying `macro_call` per Conflict Resolution #1):
@@ -526,13 +526,13 @@ public enum CallQuoteKind
     EffectDryRun = 6     // fn!?(a, b)    -> EffectPlan<TReturn>        (Implemented in M18)
 }
 ```
-- [ ] **Mode 1 — `ShallowQuote` (`fn!(a, b)`)**: Do not execute `fn`; emit lightweight `CallExpr<TReturn>(fnPtr, fnMetadataId, evaluatedArgs)`.
-- [ ] **Modes 2 & 3 — `DeepSplice` & Quasiquote (`fn!!(a, b)` & `fn!!(~a, b)`)**:
+- [x] **Mode 1 — `ShallowQuote` (`fn!(a, b)`)**: Do not execute `fn`; emit lightweight `CallExpr<TReturn>(fnPtr, fnMetadataId, evaluatedArgs)`.
+- [x] **Modes 2 & 3 — `DeepSplice` & Quasiquote (`fn!!(a, b)` & `fn!!(~a, b)`)**:
   - Load white-box body AST from `.pilc` / module metadata (`QUOTE001` if external FFI without AST; `QUOTE002` if `~arg` used outside `!!`).
   - Clone body AST with hygienic **alpha-renaming** of locals; for `~arg`, evaluate eagerly in caller scope, substitute `ConstVal`, and run **Constant Folding & Dead-Branch Elimination** (`ComputeImpulse!!(~10.0, v)` $\rightarrow$ `Mul(5.0, Mul(Sym("v"), Sym("v")))`).
-- [ ] **Mode 4 — `AbiFrame` (`fn!&(a, b)`) — Zero-Marshalling C-ABI Struct**:
+- [x] **Mode 4 — `AbiFrame` (`fn!&(a, b)`) — Zero-Marshalling C-ABI Struct**:
   - Enforce `unmanaged` / `repr(C)` parameter layouts (`QUOTE003`), synthesize module-level `[StructLayout(LayoutKind.Sequential)]` struct `CallFrame_<FnName>_<Hash> { uint FnId; T_0 P_0; ... }` (100% stack-allocated, 0 heap/GC headers), and emit static `FnId` dispatch trampoline.
-- [ ] **Acceptance Tests (Cases 1–5)**: Verify Lexer Inequality/Hash Safety, `!`, `!!`, `!!(~a, b)`, and 12-byte `CallFrame_ComputeImpulse` `!&` struct in `Pilot.Tests/PilotCallQuotingCoreTests.cs`.
+- [x] **Acceptance Tests (Cases 1–5)**: Verify Lexer Inequality/Hash Safety, `!`, `!!`, `!!(~a, b)`, and 12-byte `CallFrame_ComputeImpulse` `!&` struct in `Pilot.Tests/PilotCallQuotingCoreTests.cs`.
 
 ---
 
@@ -543,16 +543,16 @@ public enum CallQuoteKind
 Each of `!^`, `!@`, and `!?` is a substantial compiler/runtime subsystem (`Runtime/Reactive/`, `Analysis/Autodiff/`, `Runtime/Effects/`) rather than a minor parser tweak; dedicating `M18` gives each engine proper architectural rigor before `M19`'s `comptime` pass.
 
 ### Sub-Tasks & Deliverables
-- [ ] **18.1: Mode 5 — `ReactiveSignal` (`fn!^(a, b) -> Signal[TReturn]`)**
+- [x] **18.1: Mode 5 — `ReactiveSignal` (`fn!^(a, b) -> Signal[TReturn]`)**
   - Build a lightweight push-pull glitch-free topological `Signal[T]` & `ComputedSignal[T]` runtime (`Runtime/Reactive/PilotSignalGraph.cs`).
   - Walk argument ASTs in `fn!^(...)` to extract observable LValue property paths / `Signal[U]` dependencies (enforcing **`QUOTE005`** when zero observable inputs exist) and emit `ComputedSignal<TReturn>`.
-- [ ] **18.2: Mode 6 — `SymbolicAdjoint` (`fn!@(a, b) -> Dual[TReturn, Grad_<FnId>]`)**
+- [x] **18.2: Mode 6 — `SymbolicAdjoint` (`fn!@(a, b) -> Dual[TReturn, Grad_<FnId>]`)**
   - Implement a compile-time **Symbolic / Adjoint Differentiation Pass** (`Analysis/Autodiff/PilotSymbolicDifferentiator.cs`) over white-box `ResolvedSymbol.Body` ASTs (enforcing **`QUOTE001`** on missing ASTs and **`QUOTE004`** on unbounded loops or impure I/O).
   - Run **Common Subexpression Elimination (CSE)** across primal and partial derivative expressions $\frac{\partial \text{fn}}{\partial P_i}$ so shared intermediates execute once in CPU registers, emitting an unboxed sequential `Dual_<FnId>` value struct (`0` heap allocations).
-- [ ] **18.3: Mode 7 — `EffectDryRun` (`fn!?(a, b) -> EffectPlan[TReturn]`)**
+- [x] **18.3: Mode 7 — `EffectDryRun` (`fn!?(a, b) -> EffectPlan[TReturn]`)**
   - Synthesize shadow-instrumented `fn__DryRun` clones that redirect `StoreField`, `ArrayWrite`, `DatabaseExec` (in-memory & SQL savepoint dry-run), and `FileWrite` operations into a thread-local Copy-on-Write `ShadowEffectContext` diff log without mutating live memory.
   - Return `EffectPlan[TReturn] { Value: TReturn, Diffs: EffectDiff[] }` with `.Commit()` and `.Inspect()` methods.
-- [ ] **18.4: Acceptance Tests (Cases 6–7 + Signal Graph)**: Verify `ComputeImpulse!@(10.0, 5.0)` $\rightarrow$ `(125.0, 12.5, 50.0)`, `MutateRecord!?(rec, 42)` zero live mutation, and reactive `ComputeImpulse!^(ship.Mass, ship.Vel)` updates in `Pilot.Tests/PilotSemanticCallProjectionsTests.cs`.
+- [x] **18.4: Acceptance Tests (Cases 6–7 + Signal Graph)**: Verify `ComputeImpulse!@(10.0, 5.0)` $\rightarrow$ `(125.0, 12.5, 50.0)`, `MutateRecord!?(rec, 42)` zero live mutation, and reactive `ComputeImpulse!^(ship.Mass, ship.Vel)` updates in `Pilot.Tests/PilotSemanticCallProjectionsTests.cs`.
 
 ---
 

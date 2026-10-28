@@ -18,10 +18,12 @@ public sealed class PilotStaticAnalysisResult
 {
     public bool HasErrors => Diagnostics.Exists(d => d.IsError);
     public List<PilotAnalysisDiagnostic> Diagnostics { get; } = new();
+    public IReadOnlyList<PilotAnalysisDiagnostic> TypeDiagnostics => Diagnostics;
     public IReadOnlyDictionary<string, PilotType> InferredTypes { get; }
     public IReadOnlyDictionary<string, string> InferredFunctionReturnTypes { get; }
     public IReadOnlyDictionary<PilotParser.For_stmtContext, PilotForLoopInfo> LoopInfos { get; }
     public PilotTypeInferenceEngine? TypeEngine { get; }
+    public PilotTypeInferenceEngine TypeInference => TypeEngine!;
     public IReadOnlyList<PilotTypeConstraint> TypeConstraints => TypeEngine?.Constraints ?? Array.Empty<PilotTypeConstraint>();
     public IReadOnlyList<PilotMonomorphizedCallSite> MonomorphizedCallSites => TypeEngine?.MonomorphizedCallSites ?? Array.Empty<PilotMonomorphizedCallSite>();
     public IReadOnlyList<PilotInlayHint> InlayHints => TypeEngine?.InlayHints ?? Array.Empty<PilotInlayHint>();

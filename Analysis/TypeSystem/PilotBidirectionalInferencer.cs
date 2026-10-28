@@ -292,6 +292,7 @@ public sealed class PilotBidirectionalInferencer
     private readonly Stack<(List<PilotType> FlowTypes, PilotType? ExpectedType, PilotSourceSpan? ExpectedOrigin)> _loopFlowContextStack = new();
     private readonly PilotForLoopAnalyzer _loopAnalyzer = new();
     private readonly HashSet<string> _externFunctionNames = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _mutableVariableNames = new(StringComparer.Ordinal);
     private bool _suppressDiagnostics;
 
     public IReadOnlyDictionary<string, PilotNominalTypeLayout> NominalLayouts => _nominalLayouts;
@@ -1381,6 +1382,10 @@ public sealed class PilotBidirectionalInferencer
 
         if (!string.IsNullOrEmpty(name))
         {
+            if (declCtx is PilotParser.Var_stmtContext)
+            {
+                _mutableVariableNames.Add(name);
+            }
             _engine.SetVariableType(name, finalType);
             SetFlowNarrowedType(name, finalType, declCtx.Start?.Line);
 
@@ -2965,6 +2970,14 @@ public sealed class PilotBidirectionalInferencer
                 }
                 return PilotType.ResultOf(PilotType.Any, errT);
             }
+            if (calleeName == "signal")
+            {
+                var sigArgs = trailers[0].arglist()?.argument();
+                PilotType elemType = (sigArgs != null && sigArgs.Length > 0 && sigArgs[0].test() is { } sTest)
+                    ? Synthesize(sTest)
+                    : PilotType.Any;
+                return new PilotType(PilotTypeKind.Collection, "Signal", new[] { elemType });
+            }
             if (calleeName is "shared_buffer" or "slice_buffer")
             {
                 var bufArgs = trailers[0].arglist()?.argument();
@@ -2994,8 +3007,9 @@ public sealed class PilotBidirectionalInferencer
 
         PilotType currentType = SynthesizeAtom(ctx.atom());
         string? rootVarName = ctx.atom()?.identifier()?.GetText();
+        int effectiveTrailerLen = PilotParser.GetEffectiveTrailerCount(ctx);
 
-        for (int i = 0; i < trailers.Length; i++)
+        for (int i = 0; i < effectiveTrailerLen; i++)
         {
             var tr = trailers[i];
             currentType = _engine.ResolveType(currentType);
@@ -3090,6 +3104,12 @@ public sealed class PilotBidirectionalInferencer
                 continue;
             }
 
+            if (tr.cascade_trailer() is { } cascade)
+            {
+                currentType = SynthesizeCascadeStep(cascade, tr, currentType, rootVarName);
+                continue;
+            }
+
             if (tr.LPAR() != null)
             {
                 var callArgs = tr.arglist()?.argument();
@@ -3099,6 +3119,159 @@ public sealed class PilotBidirectionalInferencer
         }
 
         return _engine.ResolveType(currentType);
+    }
+
+    private PilotType SynthesizeCascadeStep(
+        PilotParser.Cascade_trailerContext cascade,
+        PilotParser.TrailerContext tr,
+        PilotType currentType,
+        string? rootVarName)
+    {
+        bool isSafeCascade = cascade.SAFE_CASCADE() != null;
+        PilotType receiverCore = isSafeCascade && currentType.Kind == PilotTypeKind.Option && currentType.TypeArguments.Count == 1
+            ? currentType.TypeArguments[0]
+            : currentType;
+
+        var target = cascade.cascade_target();
+        if (target != null)
+        {
+            if (target.dotted_name() != null && target.LPAR() != null)
+            {
+                var segments = target.dotted_name().identifier();
+                PilotType stepReceiver = receiverCore;
+                for (int s = 0; s < segments.Length - 1; s++)
+                {
+                    stepReceiver = LookupFieldType(stepReceiver, segments[s].GetText());
+                }
+                string methodName = segments[^1].GetText();
+                var callArgs = target.arglist()?.argument();
+
+                PilotType callRetType;
+                if (TryInferCollectionHigherOrderMethod(stepReceiver, methodName, callArgs, tr, out var hoType))
+                {
+                    callRetType = hoType;
+                }
+                else
+                {
+                    callRetType = ResolveMemberMethodCall(stepReceiver, segments.Length == 1 ? rootVarName : null, methodName, callArgs, tr);
+                    if (callRetType.Kind == PilotTypeKind.Any)
+                    {
+                        callRetType = InferBuiltinCascadeMemberReturnType(stepReceiver, methodName);
+                    }
+                }
+
+                if (target.binding_pattern() is { } capPat)
+                {
+                    BindCascadePatternInInference(target, capPat, _engine.ResolveType(callRetType));
+                }
+            }
+            else if (target.dotted_name() != null && target.LPAR() == null && target.binding_pattern() is { } propCapPat)
+            {
+                PilotType propType = receiverCore;
+                foreach (var seg in target.dotted_name().identifier())
+                {
+                    string segName = seg.GetText();
+                    var nextType = LookupFieldType(propType, segName);
+                    if (nextType.Kind == PilotTypeKind.Any)
+                    {
+                        nextType = InferBuiltinCascadeMemberReturnType(propType, segName);
+                    }
+                    propType = nextType;
+                }
+                BindCascadePatternInInference(target, propCapPat, _engine.ResolveType(propType));
+            }
+            else if (target.dotted_name() != null && target.LPAR() == null && target.EQUAL() != null && target.test() != null)
+            {
+                var segments = target.dotted_name().identifier();
+                PilotType stepReceiver = receiverCore;
+                for (int s = 0; s < segments.Length - 1; s++)
+                {
+                    stepReceiver = LookupFieldType(stepReceiver, segments[s].GetText());
+                }
+                string propName = segments[^1].GetText();
+                PilotType fieldType = LookupFieldType(stepReceiver, propName);
+                if (fieldType.Kind != PilotTypeKind.Any)
+                    Check(target.test(), fieldType, PilotSourceSpan.FromContext(target, $"cascade field '{propName}'"));
+                else
+                    Synthesize(target.test());
+
+                foreach (var hc in PilotParser.ExtractHoistedCascades(target.test()))
+                {
+                    receiverCore = SynthesizeCascadeStep(hc, tr, receiverCore, rootVarName);
+                }
+            }
+            else if (target.LSQB() != null && target.subscriptlist() != null && target.test() != null)
+            {
+                foreach (var sub in target.subscriptlist().subscript())
+                {
+                    if (sub.test() is { Length: > 0 } sTests)
+                        Synthesize(sTests[0]);
+                }
+                Synthesize(target.test());
+
+                foreach (var hc in PilotParser.ExtractHoistedCascades(target.test()))
+                {
+                    receiverCore = SynthesizeCascadeStep(hc, tr, receiverCore, rootVarName);
+                }
+            }
+        }
+
+        if (!string.IsNullOrEmpty(rootVarName))
+        {
+            var narrowedSelf = LookupFlowAwareType(rootVarName, tr.Start?.Line);
+            if (narrowedSelf.Kind != PilotTypeKind.Any && narrowedSelf.ActiveTypestate != null)
+            {
+                receiverCore = narrowedSelf;
+            }
+        }
+        return isSafeCascade && currentType.Kind == PilotTypeKind.Option
+            ? PilotType.OptionOf(receiverCore)
+            : receiverCore;
+    }
+
+    private void BindCascadePatternInInference(
+        PilotParser.Cascade_targetContext target,
+        PilotParser.Binding_patternContext capPat,
+        PilotType capturedType)
+    {
+        if (capPat.identifier() is { } capId)
+        {
+            string varName = capId.GetText();
+            _engine.SetVariableType(varName, capturedType);
+            SetFlowNarrowedType(varName, capturedType, capPat.Start?.Line);
+            if ((target.LET() != null || target.VAR() != null) &&
+                capturedType.Kind != PilotTypeKind.Any &&
+                capId.Start != null)
+            {
+                AddInlayHint(
+                    capId.Start.Line - 1,
+                    capId.Start.Column + varName.Length,
+                    $": {capturedType}",
+                    PilotInlayHintKind.Type);
+            }
+        }
+        else
+        {
+            BindDestructuringPattern(capPat, capturedType);
+        }
+    }
+
+    private static PilotType InferBuiltinCascadeMemberReturnType(PilotType receiverCore, string memberName)
+    {
+        return memberName switch
+        {
+            "len" or "length" or "Length" or "count" or "Count" or "capacity" or "data_ptr" or "header_ptr"
+                or "element_size" or "stride" or "byte_length" or "byte_capacity" or "abi_header_size"
+                or "managed_list_allocations" or "BitLength" => PilotType.Int,
+            "contains" or "Contains" or "contains_key" or "ContainsKey" or "is_shared_memory"
+                or "is_zero_copy" or "IsBlank" or "Toggle" => PilotType.Bool,
+            "to_string" or "ToString" or "shared_name" or "backing_path" or "Trim" or "ToLower"
+                or "ToUpper" or "Replace" or "ToHex" => PilotType.String,
+            "append" or "add" or "Add" or "clear" or "Clear" or "reset" => PilotType.Void,
+            "open_view" or "slice" or "ensure_shared" => receiverCore,
+            "pop" when receiverCore.Kind == PilotTypeKind.Collection && receiverCore.TypeArguments.Count > 0 => receiverCore.TypeArguments[^1],
+            _ => PilotType.Any
+        };
     }
 
     private bool TryRecordRowPolymorphicFieldAccess(string varName, string fieldName, out PilotType fieldType)
@@ -3365,16 +3538,54 @@ public sealed class PilotBidirectionalInferencer
             }
         }
 
-        if (quoteKind == Pilot.Analysis.CallQuoting.CallQuoteKind.DeepSplice &&
+        if ((quoteKind == Pilot.Analysis.CallQuoting.CallQuoteKind.DeepSplice ||
+             quoteKind == Pilot.Analysis.CallQuoting.CallQuoteKind.SymbolicAdjoint) &&
             !string.IsNullOrEmpty(calleeName) &&
             (_externFunctionNames.Contains(calleeName) || !_functionGroups.ContainsKey(calleeName)) &&
             !_suppressDiagnostics)
         {
             if (_externFunctionNames.Contains(calleeName))
             {
+                string opStr = quoteKind == Pilot.Analysis.CallQuoting.CallQuoteKind.SymbolicAdjoint ? "!@" : "!!";
+                string verbStr = quoteKind == Pilot.Analysis.CallQuoting.CallQuoteKind.SymbolicAdjoint ? "differentiate" : "deep-splice";
                 _engine.ReportDiagnostic(
                     "QUOTE001",
-                    $"Cannot deep-splice '{calleeName}!!(...)': target function '{calleeName}' is an external FFI or native intrinsic without a white-box Pilot AST body.",
+                    $"Cannot {verbStr} '{calleeName}{opStr}(...)': target function '{calleeName}' is an external FFI or native intrinsic without a white-box Pilot AST body.",
+                    callTrailer.Start.Line,
+                    callTrailer.Start.Column);
+            }
+        }
+
+        if (quoteKind == Pilot.Analysis.CallQuoting.CallQuoteKind.SymbolicAdjoint &&
+            !string.IsNullOrEmpty(calleeName) &&
+            _functionGroups.TryGetValue(calleeName, out var adjSchemes) &&
+            adjSchemes.Count > 0 &&
+            !_suppressDiagnostics)
+        {
+            var adjScheme = adjSchemes[0];
+            if (!Pilot.Analysis.Autodiff.PilotSymbolicDifferentiator.ValidateDifferentiableBody(adjScheme.Context.suite(), out string? nonDiffReason))
+            {
+                _engine.ReportDiagnostic(
+                    "QUOTE004",
+                    $"Cannot differentiate '{calleeName}!@(...)': function body contains non-differentiable construct ({nonDiffReason}).",
+                    callTrailer.Start.Line,
+                    callTrailer.Start.Column);
+            }
+        }
+
+        if (quoteKind == Pilot.Analysis.CallQuoting.CallQuoteKind.ReactiveSignal && !_suppressDiagnostics)
+        {
+            bool hasObservable = Pilot.Runtime.Reactive.PilotSignalGraph.HasStaticObservableInput(
+                args,
+                ident => _mutableVariableNames.Contains(ident) ||
+                         (_engine.TryLookupType(ident, out var idType) &&
+                          (string.Equals(idType.Name, "Signal", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(idType.Name, "ComputedSignal", StringComparison.OrdinalIgnoreCase))));
+            if (!hasObservable)
+            {
+                _engine.ReportDiagnostic(
+                    "QUOTE005",
+                    $"Reactive signal call quote '{calleeName}!^(...)' requires at least one observable input (Signal[T], object property path 'obj.Prop', or mutable 'var' binding), but all arguments are constant or immutable.",
                     callTrailer.Start.Line,
                     callTrailer.Start.Column);
             }
@@ -3404,7 +3615,7 @@ public sealed class PilotBidirectionalInferencer
 
         PilotType underlyingReturn = PilotType.Any;
         bool prevSuppress = _suppressDiagnostics;
-        if (quoteKind == Pilot.Analysis.CallQuoting.CallQuoteKind.DeepSplice)
+        if (quoteKind is Pilot.Analysis.CallQuoting.CallQuoteKind.DeepSplice or Pilot.Analysis.CallQuoting.CallQuoteKind.ReactiveSignal)
         {
             _suppressDiagnostics = true;
         }
@@ -3468,9 +3679,9 @@ public sealed class PilotBidirectionalInferencer
             Pilot.Analysis.CallQuoting.CallQuoteKind.ReactiveSignal =>
                 new PilotType(PilotTypeKind.Collection, "Signal", new[] { underlyingReturn }),
             Pilot.Analysis.CallQuoting.CallQuoteKind.SymbolicAdjoint =>
-                new PilotType(PilotTypeKind.Collection, "Pullback", new[] { underlyingReturn }),
+                new PilotType(PilotTypeKind.Collection, "Dual", new[] { underlyingReturn }),
             Pilot.Analysis.CallQuoting.CallQuoteKind.EffectDryRun =>
-                new PilotType(PilotTypeKind.Collection, "DryRunPlan", new[] { underlyingReturn }),
+                new PilotType(PilotTypeKind.Collection, "EffectPlan", new[] { underlyingReturn }),
             _ => underlyingReturn
         };
     }
@@ -3919,6 +4130,21 @@ public sealed class PilotBidirectionalInferencer
             fieldType = qualified;
             offset = 0;
             return true;
+        }
+
+        if (resolved.Kind == PilotTypeKind.Collection &&
+            resolved.TypeArguments.Count > 0 &&
+            (string.Equals(resolved.Name, "Signal", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(resolved.Name, "ComputedSignal", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(resolved.Name, "Dual", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(resolved.Name, "EffectPlan", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (fieldName is "Value" or "value" or "primal")
+            {
+                fieldType = resolved.TypeArguments[0];
+                offset = 0;
+                return true;
+            }
         }
 
         if (resolved.Kind == PilotTypeKind.Collection &&

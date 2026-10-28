@@ -384,7 +384,28 @@ public sealed class PilotLspServer
                             int dotIdx = prefix.LastIndexOf('.');
                             if (dotIdx >= 0)
                             {
-                                string exprPrefix = prefix.Substring(0, dotIdx).Trim();
+                                string exprPrefix = prefix.Substring(0, dotIdx).TrimEnd('.', '?').Trim();
+
+                                // Multi-line cascade continuation (`..method()` or `..let out = ` on indented continuation lines)
+                                if (string.IsNullOrEmpty(exprPrefix) && prefix.TrimStart().StartsWith(".."))
+                                {
+                                    for (int prev = line - 1; prev >= Math.Max(0, line - 15); prev--)
+                                    {
+                                        string prevTrim = lines[prev].Trim();
+                                        if (string.IsNullOrEmpty(prevTrim) || prevTrim.StartsWith("//") || prevTrim.StartsWith("#"))
+                                            continue;
+                                        if (prevTrim.StartsWith("..") || prevTrim.StartsWith("?.."))
+                                            continue;
+                                        int cascadePos = prevTrim.IndexOf("..", StringComparison.Ordinal);
+                                        if (cascadePos > 0)
+                                        {
+                                            prevTrim = prevTrim.Substring(0, cascadePos).TrimEnd('?').Trim();
+                                        }
+                                        exprPrefix = prevTrim;
+                                        break;
+                                    }
+                                }
+
                                 int wordStart = exprPrefix.Length - 1;
                                 while (wordStart >= 0 && (char.IsLetterOrDigit(exprPrefix[wordStart]) || exprPrefix[wordStart] == '_'))
                                     wordStart--;

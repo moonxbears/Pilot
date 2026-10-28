@@ -515,6 +515,13 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     private void DeclareTuplePattern(PilotParser.Tuple_patternContext context, PilotValue val, bool isConst)
     {
+        if (val.Kind == PilotValueKind.Object &&
+            val.AsObject().Fields.TryGetValue("__dual_tuple__", out var dualTuple) &&
+            dualTuple.Kind == PilotValueKind.Tuple)
+        {
+            val = dualTuple;
+        }
+
         if (val.Kind != PilotValueKind.Tuple && val.Kind != PilotValueKind.List)
         {
             throw new Pilot.Runtime.ControlFlow.PilotPatternMatchingException(
@@ -805,13 +812,15 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         for (int i = 0; i < trailerCount; i++)
         {
             var trailer = trailers[i];
+            bool isSafeCascade = trailer.cascade_trailer()?.SAFE_CASCADE() != null;
             bool isOptional = trailer.SAFE_NAV() != null ||
+                              isSafeCascade ||
                               (trailer.QUESTION() != null && (trailer.LSQB() != null || trailer.LPAR() != null));
             if (isOptional)
             {
                 if (current.IsNull || current.IsUndefined)
                 {
-                    return PilotValue.Undefined;
+                    return isSafeCascade ? PilotValue.Null : PilotValue.Undefined;
                 }
                 current = current.UnwrapOption();
             }
@@ -4098,16 +4107,19 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             current = Visit(context.atom());
         }
 
-        for (int i = startTrailerIdx; i < trailers!.Length; i++)
+        int effectiveTrailerLen = PilotParser.GetEffectiveTrailerCount(context);
+        for (int i = startTrailerIdx; i < effectiveTrailerLen; i++)
         {
             var trailer = trailers[i];
+            bool isSafeCascade = trailer.cascade_trailer()?.SAFE_CASCADE() != null;
             bool isOptional = trailer.SAFE_NAV() != null ||
+                              isSafeCascade ||
                               (trailer.QUESTION() != null && (trailer.LSQB() != null || trailer.LPAR() != null));
             if (isOptional)
             {
                 if (current.IsNull || current.IsUndefined)
                 {
-                    return PilotValue.Undefined;
+                    return isSafeCascade ? PilotValue.Null : PilotValue.Undefined;
                 }
                 current = current.UnwrapOption();
             }
@@ -4142,7 +4154,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                 string memberName = trailer.identifier().GetText();
 
                 // Fast-path direct member call: receiver.method(args) or receiver?.method(args) without allocating an intermediate PilotFunction
-                if (i + 1 < trailers.Length &&
+                if (i + 1 < effectiveTrailerLen &&
                     trailers[i + 1].LPAR() != null &&
                     trailers[i + 1].call_quote_op() == null &&
                     trailers[i + 1].STAR() == null &&
@@ -4376,51 +4388,195 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
 
     private PilotValue EvaluateCascade(PilotValue receiver, PilotParser.Cascade_trailerContext cascadeCtx)
     {
+        if (cascadeCtx.SAFE_CASCADE() == null && (receiver.IsNull || receiver.IsUndefined))
+        {
+            throw new PilotNullReferenceException(
+                "Cannot apply cascade operator '..' on null or undefined value. Use '?..' for safe cascade.",
+                cascadeCtx.Start.Line,
+                cascadeCtx.Start.Column);
+        }
+
         var target = cascadeCtx.cascade_target();
         if (target == null) return receiver;
 
-        // Cascade method call: ..func(args) or ..let res = func(args) or ..func(args) -> res
+        // Cascade method call: ..func(args), ..let res = func(args), ..res = func(args), or ..func(args) -> res
         if (target.dotted_name() != null && target.LPAR() != null)
         {
-            string methodName = target.dotted_name().GetText();
-            var member = receiver.GetMember(methodName, Context);
-            var (posArgs, namedArgs) = EvaluateCallArguments(target.arglist());
-
-            PilotValue callResult = PilotValue.Undefined;
-            if (member.Kind == PilotValueKind.Function)
+            var segments = target.dotted_name().identifier();
+            PilotValue callReceiver = receiver;
+            for (int s = 0; s < segments.Length - 1; s++)
             {
-                var boundArgs = BindArgumentsToFunction(member.AsFunction(), posArgs, namedArgs);
-                callResult = member.AsFunction().Invoke(Context, boundArgs);
+                callReceiver = callReceiver.GetMember(segments[s].GetText(), Context);
             }
-            else if (member.Kind == PilotValueKind.MethodGroup)
-            {
-                callResult = member.AsMethodGroup().Invoke(Context, posArgs, namedArgs, isBroadcast: false);
-            }
-
-            // Bind intermediate return value if requested: (let res = func()) or func() -> res
+            string methodName = segments[^1].GetText();
             var binding = target.binding_pattern();
-            if (binding?.Length > 0)
+
+            // Disambiguate `obj..field = global_fn(args)` when `obj` has `field` and does NOT have method `global_fn`
+            if (segments.Length == 1 &&
+                binding?.identifier() is { } lhsId &&
+                target.LET() == null &&
+                target.VAR() == null &&
+                target.WALRUS() == null &&
+                target.EQUAL() != null &&
+                receiver.Kind == PilotValueKind.Object &&
+                receiver.AsObject().Fields.ContainsKey(lhsId.GetText()) &&
+                receiver.GetMember(methodName, Context).IsUndefined)
             {
-                DeclareBinding(binding[0], callResult, isConst: false);
+                PilotValue globalCallee = PilotValue.Undefined;
+                if (Context.Environment.CurrentScope.TryResolve(methodName, out var scopedCallee))
+                {
+                    globalCallee = scopedCallee;
+                }
+                else if (Context.Options.Builtins.TryGet(methodName, out var builtinFn))
+                {
+                    globalCallee = PilotValue.FromFunction(builtinFn);
+                }
+
+                if (globalCallee.Kind is PilotValueKind.Function or PilotValueKind.MethodGroup)
+                {
+                    var (gPos, gNamed) = EvaluateCallArguments(target.arglist());
+                    PilotValue propAssignVal = globalCallee.Kind == PilotValueKind.Function
+                        ? globalCallee.AsFunction().Invoke(Context, BindArgumentsToFunction(globalCallee.AsFunction(), gPos, gNamed))
+                        : globalCallee.AsMethodGroup().Invoke(Context, gPos, gNamed, isBroadcast: false);
+                    receiver.AsObject().SetMember(lhsId.GetText(), propAssignVal);
+                    return receiver;
+                }
             }
 
-            // In cascade chaining, return receiver self!
+            if (!TryInvokeDirectMemberCall(callReceiver, methodName, target.arglist(), out var callResult))
+            {
+                var member = callReceiver.GetMember(methodName, Context);
+                var (posArgs, namedArgs) = EvaluateCallArguments(target.arglist());
+
+                callResult = PilotValue.Undefined;
+                if (member.Kind == PilotValueKind.Function)
+                {
+                    var boundArgs = BindArgumentsToFunction(member.AsFunction(), posArgs, namedArgs);
+                    callResult = member.AsFunction().Invoke(Context, boundArgs);
+                }
+                else if (member.Kind == PilotValueKind.MethodGroup)
+                {
+                    callResult = member.AsMethodGroup().Invoke(Context, posArgs, namedArgs, isBroadcast: false);
+                }
+                else if ((namedArgs == null || namedArgs.Count == 0) &&
+                         PilotValue.TryInvokePrimitiveIntrinsic(
+                             callReceiver,
+                             methodName,
+                             System.Runtime.InteropServices.CollectionsMarshal.AsSpan(posArgs),
+                             Context,
+                             out var primResult))
+                {
+                    callResult = primResult;
+                }
+            }
+
+            // Momentarily interrupt chaining to bind/assign method output while preserving receiver self
+            if (binding != null)
+            {
+                BindCascadeCapturedValue(target, binding, callResult);
+            }
+
+            return receiver;
+        }
+
+        // Cascade property read capture: ..let val = prop or ..prop -> val (supports multi-segment `headers.Length`)
+        if (target.dotted_name() != null && target.LPAR() == null && target.binding_pattern() is { } propBinding)
+        {
+            PilotValue propVal = receiver;
+            foreach (var seg in target.dotted_name().identifier())
+            {
+                propVal = propVal.GetMember(seg.GetText(), Context);
+            }
+            BindCascadeCapturedValue(target, propBinding, propVal);
             return receiver;
         }
 
         // Cascade property assignment: ..prop = val
         if (target.dotted_name() != null && target.EQUAL() != null && target.test() != null)
         {
-            string propName = target.dotted_name().GetText();
-            var propVal = Visit(target.test());
-            if (receiver.Kind == PilotValueKind.Object)
+            var segments = target.dotted_name().identifier();
+            PilotValue assignTarget = receiver;
+            for (int s = 0; s < segments.Length - 1; s++)
             {
-                receiver.AsObject().SetMember(propName, propVal);
+                assignTarget = assignTarget.GetMember(segments[s].GetText(), Context);
             }
-            return receiver;
+            string propName = segments[^1].GetText();
+            var propVal = Visit(target.test());
+            if (assignTarget.Kind is PilotValueKind.Record or PilotValueKind.Adt or PilotValueKind.KeywordVariant)
+            {
+                throw new PilotRuntimeException(
+                    $"[PILOT101] Cannot mutate field '{propName}' on immutable {assignTarget.Kind.ToString().ToLowerInvariant()} value.");
+            }
+            if (assignTarget.Kind == PilotValueKind.Object)
+            {
+                assignTarget.AsObject().SetMember(propName, propVal);
+            }
+
+            return ApplyHoistedCascades(receiver, PilotParser.ExtractHoistedCascades(target.test()));
+        }
+
+        // Cascade index assignment: ..[idx] = val
+        if (target.LSQB() != null && target.subscriptlist() != null && target.EQUAL() != null && target.test() != null)
+        {
+            var subCtx = target.subscriptlist().subscript(0);
+            if (subCtx?.test()?.Length > 0)
+            {
+                var idxVal = Visit(subCtx.test(0));
+                var rhsVal = Visit(target.test());
+                receiver[idxVal] = rhsVal;
+            }
+            return ApplyHoistedCascades(receiver, PilotParser.ExtractHoistedCascades(target.test()));
         }
 
         return receiver;
+    }
+
+    private PilotValue ApplyHoistedCascades(
+        PilotValue receiver,
+        IReadOnlyList<PilotParser.Cascade_trailerContext> hoisted)
+    {
+        PilotValue current = receiver;
+        for (int i = 0; i < hoisted.Count; i++)
+        {
+            var hc = hoisted[i];
+            if (hc.SAFE_CASCADE() != null)
+            {
+                if (current.IsNull || current.IsUndefined)
+                {
+                    return PilotValue.Null;
+                }
+                current = current.UnwrapOption();
+            }
+            current = EvaluateCascade(current, hc);
+            if (Context.PendingFlow != PilotFlowSignalKind.None)
+            {
+                return Context.PendingReturnValue;
+            }
+        }
+        return current;
+    }
+
+    private void BindCascadeCapturedValue(
+        PilotParser.Cascade_targetContext target,
+        PilotParser.Binding_patternContext binding,
+        PilotValue value)
+    {
+        if (target.LET() != null || (target.WALRUS() != null && target.VAR() == null))
+        {
+            DeclareBinding(binding, value, isConst: true);
+        }
+        else if (target.VAR() != null)
+        {
+            DeclareBinding(binding, value, isConst: false);
+        }
+        else if (binding.identifier() is { } simpleId)
+        {
+            Context.Environment.CurrentScope.GetOrDeclareBinding(simpleId.GetText(), value);
+        }
+        else
+        {
+            DeclareBinding(binding, value, isConst: false);
+        }
     }
 
     private PilotValue DispatchCall(
@@ -5516,6 +5672,67 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             }
         }
         return string.Empty;
+    }
+
+    public override PilotValue VisitInsert_stmt(PilotParser.Insert_stmtContext context)
+    {
+        string table = context.dotted_name()?.GetText() ?? "table";
+        var rowValues = new List<PilotValue>();
+        if (context.insert_values_group() is { Length: > 0 } groups)
+        {
+            foreach (var g in groups)
+            {
+                if (g.testlist()?.test() is { Length: > 0 } tests)
+                {
+                    foreach (var t in tests)
+                    {
+                        rowValues.Add(Visit(t));
+                    }
+                }
+            }
+        }
+
+        var payload = PilotValue.FromList(rowValues);
+        Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordDatabaseExec(
+            "INSERT",
+            table,
+            context.GetText(),
+            payload);
+        return PilotValue.FromInt(1);
+    }
+
+    public override PilotValue VisitUpdate_stmt(PilotParser.Update_stmtContext context)
+    {
+        string table = context.dotted_name()?.GetText() ?? "table";
+        var updates = new Dictionary<PilotValue, PilotValue>();
+        if (context.set_assignment_list()?.set_assignment() is { Length: > 0 } assigns)
+        {
+            foreach (var a in assigns)
+            {
+                string col = a.dotted_name()?.GetText() ?? "col";
+                var v = a.test() != null ? Visit(a.test()) : PilotValue.Null;
+                updates[PilotValue.FromString(col)] = v;
+            }
+        }
+
+        var payload = PilotValue.FromMap(updates);
+        Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordDatabaseExec(
+            "UPDATE",
+            table,
+            context.GetText(),
+            payload);
+        return PilotValue.FromInt(1);
+    }
+
+    public override PilotValue VisitDelete_stmt(PilotParser.Delete_stmtContext context)
+    {
+        string table = context.dotted_name()?.GetText() ?? "table";
+        Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordDatabaseExec(
+            "DELETE",
+            table,
+            context.GetText(),
+            PilotValue.FromInt(1));
+        return PilotValue.FromInt(1);
     }
 
     #endregion

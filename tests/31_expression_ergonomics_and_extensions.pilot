@@ -151,4 +151,39 @@ assert ctx_res == "pg_mock:silent";
 let piped_slug = "  Hello World  " |> .Trim() |> .ToLower() |> .Replace(" ", "-");
 assert piped_slug == "hello-world";
 
+// 5. Self-Returning Cascade (`..`) with Momentary Interruption for Output Assignment
+class RequestBuilder {
+    var headers: str[] = [];
+    var retries: int = 0;
+
+    def add_header(self, k: str, v: str) -> void {
+        self.headers.append($"{k}:{v}");
+    }
+
+    def issue_token(self, user: str) -> str {
+        return $"tok_{user}_{self.headers.Length}";
+    }
+
+    def reserve_attempt(self) -> int {
+        self.retries += 1;
+        return self.retries;
+    }
+}
+
+var last_attempt = 0;
+let built_req = RequestBuilder()
+    ..add_header("Accept", "application/json")
+    ..let auth_token = issue_token("alice")
+    ..add_header("Authorization", auth_token)
+    ..reserve_attempt() -> let first_try
+    ..last_attempt = reserve_attempt()
+    ..let header_count = headers.Length;
+
+assert built_req.headers.Length == 2;
+assert built_req.headers[1] == "Authorization:tok_alice_1";
+assert auth_token == "tok_alice_1";
+assert first_try == 1;
+assert last_attempt == 2;
+assert header_count == 2;
+
 print("All Milestone 14 expression ergonomics and zero-cost extensions verified!");

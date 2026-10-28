@@ -35,5 +35,6 @@ let abi_frame = ComputeImpulse!&(10.0, 4.0)
 println()
 println(f"3. Mode 0 Direct       : {direct}")
 println(f"4. Mode 1 Shallow (!)  : {shallow} => eval() = {shallow.eval()}")
-println(f"5. Mode 3 Quasiquote(!!): {deep_folded.to_string()} => eval(v=4) = {deep_folded.eval({ 'v': 4.0 })}")
+let bindings = { "v": 4.0 }
+println(f"5. Mode 3 Quasiquote(!!): {deep_folded.to_string()} => eval(v=4) = {deep_folded.eval(bindings)}")
 println(f"6. Mode 4 ABI Frame(!&): {abi_frame} (size={abi_frame.size_bytes}B) => dispatch() = {abi_frame.dispatch()}")

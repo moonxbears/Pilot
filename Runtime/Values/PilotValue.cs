@@ -617,7 +617,7 @@ public readonly struct PilotValue : IEquatable<PilotValue>
         {
             if (Kind == PilotValueKind.List)
             {
-                var list = (List<PilotValue>)_reference!;
+                var list = Pilot.Runtime.Effects.PilotEffectDryRunEngine.GetReadableList((List<PilotValue>)_reference!);
                 int idx = (int)index.AsInt();
                 if (idx < 0) idx += list.Count;
                 return (idx >= 0 && idx < list.Count) ? list[idx] : Undefined;
@@ -632,13 +632,15 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             if (Kind == PilotValueKind.Map)
             {
                 var map = (Dictionary<PilotValue, PilotValue>)_reference!;
-                return map.TryGetValue(index, out var v) ? v : Undefined;
+                return Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryReadMapEntry(map, index, out var v) ? v : Undefined;
             }
             if (Kind == PilotValueKind.NativeArray)
             {
                 var na = (Pilot.Runtime.NativeMemory.PilotNativeArray)_reference!;
                 int idx = (int)index.AsInt();
                 if (idx < 0) idx += na.Length;
+                if (idx >= 0 && idx < na.Length && Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryReadNativeArrayElement(na, idx, out var shadowElem))
+                    return shadowElem;
                 return (idx >= 0 && idx < na.Length) ? na.GetValue(idx) : Undefined;
             }
             if (Kind == PilotValueKind.NativeMap)
@@ -655,7 +657,18 @@ public readonly struct PilotValue : IEquatable<PilotValue>
                     if (r.Step == 1)
                         return FromSliceBuffer(sb.SliceView((int)r.Start, (int)r.Count));
                 }
-                return sb.GetElement((int)index.AsInt());
+                int idx = (int)index.AsInt();
+                if (Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryReadSliceBufferElement(sb, idx, out var shadowBufElem))
+                    return shadowBufElem;
+                return sb.GetElement(idx);
+            }
+            if (Kind == PilotValueKind.Object)
+            {
+                var obj = (PilotObject)_reference!;
+                if (obj.Fields.TryGetValue("__dual_tuple__", out var dualTuple) && dualTuple.Kind == PilotValueKind.Tuple)
+                {
+                    return dualTuple[index];
+                }
             }
             if (Kind == PilotValueKind.String)
             {
@@ -677,7 +690,11 @@ public readonly struct PilotValue : IEquatable<PilotValue>
                 var na = (Pilot.Runtime.NativeMemory.PilotNativeArray)_reference!;
                 int idx = (int)index.AsInt();
                 if (idx < 0) idx += na.Length;
-                if (idx >= 0 && idx < na.Length) na.SetValue(idx, value);
+                if (idx >= 0 && idx < na.Length)
+                {
+                    if (!Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordNativeArrayWrite(na, idx, value))
+                        na.SetValue(idx, value);
+                }
             }
             else if (Kind == PilotValueKind.NativeMap)
             {
@@ -687,19 +704,25 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             else if (Kind == PilotValueKind.SliceBuffer)
             {
                 var sb = (Pilot.Runtime.NativeMemory.PilotSharedBuffer)_reference!;
-                sb.SetElement((int)index.AsInt(), value);
+                int idx = (int)index.AsInt();
+                if (!Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordSliceBufferWrite(sb, idx, value))
+                    sb.SetElement(idx, value);
             }
             else if (Kind == PilotValueKind.List)
             {
                 var list = (List<PilotValue>)_reference!;
                 int idx = (int)index.AsInt();
-                if (idx < 0) idx += list.Count;
-                if (idx >= 0 && idx < list.Count) list[idx] = value;
+                if (!Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordListIndexWrite(list, idx, value))
+                {
+                    if (idx < 0) idx += list.Count;
+                    if (idx >= 0 && idx < list.Count) list[idx] = value;
+                }
             }
             else if (Kind == PilotValueKind.Map)
             {
                 var map = (Dictionary<PilotValue, PilotValue>)_reference!;
-                map[index] = value;
+                if (!Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordMapWrite(map, index, value))
+                    map[index] = value;
             }
         }
     }
@@ -1807,7 +1830,8 @@ public readonly struct PilotValue : IEquatable<PilotValue>
                 switch (memberName)
                 {
                     case "append" or "Append" or "push" or "Push" when argc == 1:
-                        list.Add(args[0]);
+                        if (!Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordListAppend(list, args[0]))
+                            list.Add(args[0]);
                         result = Null;
                         return true;
                     case "pop" or "Pop" when argc == 0:
@@ -1948,7 +1972,8 @@ public readonly struct PilotValue : IEquatable<PilotValue>
                 }
                 else
                 {
-                    list.Add(first);
+                    if (!Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordListAppend(list, first))
+                        list.Add(first);
                 }
             }
             return Null;
@@ -2103,6 +2128,16 @@ public readonly struct PilotValue : IEquatable<PilotValue>
                 return EqualsList(((Pilot.Runtime.NativeMemory.PilotSharedBuffer)_reference!).ToPilotValueList(), (List<PilotValue>)other._reference!);
             if (Kind == PilotValueKind.List && other.Kind == PilotValueKind.SliceBuffer)
                 return EqualsList((List<PilotValue>)_reference!, ((Pilot.Runtime.NativeMemory.PilotSharedBuffer)other._reference!).ToPilotValueList());
+            if (Kind == PilotValueKind.Object && other.Kind == PilotValueKind.Tuple &&
+                ((PilotObject)_reference!).Fields.TryGetValue("__dual_tuple__", out var dtA) && dtA.Kind == PilotValueKind.Tuple)
+                return dtA.Equals(other);
+            if (Kind == PilotValueKind.Tuple && other.Kind == PilotValueKind.Object &&
+                ((PilotObject)other._reference!).Fields.TryGetValue("__dual_tuple__", out var dtB) && dtB.Kind == PilotValueKind.Tuple)
+                return Equals(dtB);
+            if (Kind == PilotValueKind.Object && ((PilotObject)_reference!).NativePayload is Pilot.Runtime.Reactive.PilotSignalNode sigA)
+                return sigA.Read().Equals(other);
+            if (other.Kind == PilotValueKind.Object && ((PilotObject)other._reference!).NativePayload is Pilot.Runtime.Reactive.PilotSignalNode sigB)
+                return Equals(sigB.Read());
             return false;
         }
 

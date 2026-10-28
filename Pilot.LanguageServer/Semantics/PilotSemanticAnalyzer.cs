@@ -2860,8 +2860,11 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             currentType = $"Future[{funcSym.TypeName}]";
         }
 
-        foreach (var trailer in context.trailer())
+        var trailers = context.trailer();
+        int effectiveTrailerLen = PilotParser.GetEffectiveTrailerCount(context);
+        for (int ti = 0; ti < effectiveTrailerLen; ti++)
         {
+            var trailer = trailers[ti];
             if (trailer.cascade_trailer() is { } cascade)
             {
                 VisitCascade_trailer(cascade, currentType ?? "any");
@@ -3187,18 +3190,48 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         var target = cascade.cascade_target();
         if (target == null) return;
 
+        if (target.LET() is { } letNode)
+        {
+            AddSemanticToken(letNode.Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        }
+        if (target.VAR() is { } varNode)
+        {
+            AddSemanticToken(varNode.Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        }
+
         string memberType = "any";
         if (target.dotted_name() is { } dotted)
         {
             string methodName = dotted.GetText();
-            AddSemanticToken(dotted.Start, PilotSemanticTokenLegend.TypeMethod, 0);
+            bool isCall = target.LPAR() != null;
 
-            string baseTypeName = receiverType.TrimEnd('?');
+            string baseTypeName = StripGenericSuffixForLookup(receiverType.TrimEnd('?'));
             var typeSym = _currentScope.Resolve(baseTypeName);
             if (typeSym != null && typeSym.Members.TryGetValue(methodName, out var memberSym))
             {
                 AddSymbolReference(dotted.Start, memberSym);
+                AddSemanticToken(dotted.Start, GetSemanticTokenTypeForSymbol(memberSym), 0);
                 memberType = memberSym.TypeName;
+            }
+            else if (RootObjectMethods.TryGetValue(methodName, out var rootMethod))
+            {
+                if (RootMethodSymbols.TryGetValue(methodName, out var rootMethodSym))
+                {
+                    AddSymbolReference(dotted.Start, rootMethodSym);
+                }
+                AddSemanticToken(dotted.Start, PilotSemanticTokenLegend.TypeMethod, 0);
+                memberType = rootMethod.ReturnType;
+            }
+            else
+            {
+                AddSemanticToken(dotted.Start, isCall ? PilotSemanticTokenLegend.TypeMethod : PilotSemanticTokenLegend.TypeProperty, 0);
+                memberType = methodName switch
+                {
+                    "len" or "length" or "Length" or "count" or "Count" => "int",
+                    "contains" or "Contains" or "contains_key" or "ContainsKey" => "bool",
+                    "append" or "add" or "Add" or "clear" or "Clear" => "void",
+                    _ => "any"
+                };
             }
         }
 
@@ -3207,17 +3240,55 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
             Visit(target.arglist());
         }
 
+        if (target.subscriptlist() != null)
+        {
+            Visit(target.subscriptlist());
+        }
+
         if (target.test() != null)
         {
             Visit(target.test());
+            if (target.LPAR() == null && target.EQUAL() != null)
+            {
+                foreach (var hc in PilotParser.ExtractHoistedCascades(target.test()))
+                {
+                    VisitCascade_trailer(hc, receiverType);
+                }
+            }
         }
 
-        var patterns = target.binding_pattern();
-        if (patterns.Length > 0)
+        if (target.binding_pattern() is { } assignPattern)
         {
-            bool isMut = target.VAR() != null;
-            var assignPattern = patterns[0];
-            DeclareBindingPattern(assignPattern, target, memberType, isMut, isConstant: false, "Cascaded method result assigned to");
+            bool hasExplicitLet = target.LET() != null || (target.WALRUS() != null && target.VAR() == null);
+            bool hasExplicitVar = target.VAR() != null;
+
+            if (hasExplicitLet)
+            {
+                DeclareBindingPattern(assignPattern, target, memberType, isMutable: false, isConstant: false, "Cascaded result captured in");
+            }
+            else if (hasExplicitVar)
+            {
+                DeclareBindingPattern(assignPattern, target, memberType, isMutable: true, isConstant: false, "Cascaded result captured in");
+            }
+            else if (assignPattern.identifier() is { } existingId &&
+                     _currentScope.Resolve(existingId.GetText()) is { } existingSym &&
+                     existingSym.Kind is PilotSymbolKind.Variable or PilotSymbolKind.Parameter)
+            {
+                AddSymbolReference(existingId.Start, existingSym);
+                AddSemanticToken(existingId.Start, GetSemanticTokenTypeForSymbol(existingSym), existingSym.IsMutable ? 0 : PilotSemanticTokenLegend.ModReadonly);
+                if (!existingSym.IsMutable)
+                {
+                    AddDiagnostic(
+                        existingId.Start,
+                        PilotDiagnosticSeverity.Error,
+                        PilotDiagnosticCatalog.ImmutableReassignment,
+                        $"Cannot assign cascaded result to immutable variable '{existingSym.Name}'. Declare it with 'var' or use '..let {existingSym.Name} = ...' to introduce a new binding.");
+                }
+            }
+            else
+            {
+                DeclareBindingPattern(assignPattern, target, memberType, isMutable: true, isConstant: false, "Cascaded result captured in");
+            }
         }
     }
 
@@ -3643,7 +3714,9 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
     private static bool SimpleStmtExits(PilotParser.Simple_stmtContext simple)
     {
-        return simple.small_stmt().Any(s => s.flow_stmt() != null);
+        return simple.small_stmt().Any(s =>
+            s.flow_stmt() is { } fl &&
+            (fl.RETURN() != null || fl.RAISE() != null || fl.BREAK() != null || fl.CONTINUE() != null));
     }
 
     public override string? VisitSimple_stmt(PilotParser.Simple_stmtContext context)

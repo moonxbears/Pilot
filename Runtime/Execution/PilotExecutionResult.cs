@@ -14,6 +14,7 @@ public sealed class PilotExecutionResult
     public string StandardOutput { get; }
     public string StandardError { get; }
     public IReadOnlyList<string> Diagnostics { get; }
+    public string ErrorMessage => Diagnostics.Count > 0 ? string.Join(System.Environment.NewLine, Diagnostics) : StandardError;
     public TimeSpan Elapsed { get; }
     public PilotExecutionContext? Context { get; set; }
 

@@ -400,10 +400,13 @@ public sealed class PilotObject : IEquatable<PilotObject>
     public string FullTypeName => !string.IsNullOrEmpty(CurrentState) ? $"{TypeName}[{CurrentState}]" : TypeName;
     public Dictionary<string, PilotValue> Fields { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, PilotValue> ContractSubstitutes { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public object? NativePayload { get; set; }
+    public Func<string, PilotValue?>? DynamicMemberResolver { get; set; }
 
     public PilotObject(PilotClassDefinition? classDef = null)
     {
         ClassDef = classDef;
+        Pilot.Runtime.Effects.PilotEffectDryRunEngine.NotifyObjectCreated(this);
         if (classDef?.InitialState != null)
         {
             CurrentState = classDef.InitialState;
@@ -412,6 +415,14 @@ public sealed class PilotObject : IEquatable<PilotObject>
 
     public PilotValue GetMember(string memberName, PilotExecutionContext? context = null)
     {
+        if (Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryReadObjectField(this, memberName, out var shadowVal))
+        {
+            return shadowVal;
+        }
+        if (DynamicMemberResolver != null && DynamicMemberResolver(memberName) is { } dynamicVal)
+        {
+            return dynamicVal;
+        }
         if (Fields.TryGetValue(memberName, out var fieldVal))
         {
             return fieldVal;
@@ -556,7 +567,12 @@ public sealed class PilotObject : IEquatable<PilotObject>
 
     public void SetMember(string memberName, PilotValue value)
     {
+        if (Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordObjectFieldWrite(this, memberName, value))
+        {
+            return;
+        }
         Fields[memberName] = value;
+        Pilot.Runtime.Reactive.PilotSignalGraph.NotifyObjectPropertyChanged(this, memberName, value);
     }
 
     private PilotValue BindMethodValue(PilotFunction unbound)

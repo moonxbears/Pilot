@@ -1047,6 +1047,87 @@ public sealed class PilotBuiltinRegistry
             })));
             return PilotValue.FromObject(scopeObj);
         });
+
+        // ─── Milestone 18: Reactive Signals (!^), Symbolic Autodiff (!@) & CoW Effect Dry-Runs (!?) ───
+        Register("signal", (_, args) =>
+        {
+            var initVal = args.Count > 0 ? args[0] : PilotValue.Null;
+            string sigName = args.Count > 1 ? args[1].ToString() : "signal";
+            var src = Pilot.Runtime.Reactive.PilotSignalGraph.CreateSourceSignal(sigName, initVal);
+            return PilotValue.FromObject(src.ToPilotObject());
+        }, "initial_value", "name");
+
+        Register("batch", (ctx, args) =>
+        {
+            if (args.Count > 0 && args[0].Kind == PilotValueKind.Function)
+            {
+                var fn = args[0].AsFunction();
+                return Pilot.Runtime.Reactive.PilotSignalGraph.Batch(() => fn.Invoke(ctx, Array.Empty<PilotValue>()));
+            }
+            return PilotValue.Null;
+        }, "callback");
+
+        Register("write_file", (_, args) =>
+        {
+            if (args.Count < 2) return PilotValue.False;
+            string path = args[0].ToString();
+            string content = args[1].ToString();
+            if (!Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordFileWrite(path, content, append: false))
+            {
+                System.IO.File.WriteAllText(path, content);
+            }
+            return PilotValue.True;
+        }, "path", "content");
+
+        Register("append_file", (_, args) =>
+        {
+            if (args.Count < 2) return PilotValue.False;
+            string path = args[0].ToString();
+            string content = args[1].ToString();
+            if (!Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordFileWrite(path, content, append: true))
+            {
+                System.IO.File.AppendAllText(path, content);
+            }
+            return PilotValue.True;
+        }, "path", "content");
+
+        Register("read_file", (_, args) =>
+        {
+            if (args.Count < 1) return PilotValue.Null;
+            string path = args[0].ToString();
+            if (Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryReadFileContent(path, out var shadowContent))
+            {
+                return shadowContent != null ? PilotValue.FromString(shadowContent) : PilotValue.Null;
+            }
+            return System.IO.File.Exists(path)
+                ? PilotValue.FromString(System.IO.File.ReadAllText(path))
+                : PilotValue.Null;
+        }, "path");
+
+        Register("delete_file", (_, args) =>
+        {
+            if (args.Count < 1) return PilotValue.False;
+            string path = args[0].ToString();
+            if (!Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordFileDelete(path))
+            {
+                if (System.IO.File.Exists(path))
+                    System.IO.File.Delete(path);
+            }
+            return PilotValue.True;
+        }, "path");
+
+        Register("db_exec", (_, args) =>
+        {
+            if (args.Count < 1) return PilotValue.FromInt(0);
+            string sql = args[0].ToString();
+            string table = args.Count > 1 ? args[1].ToString() : "sql";
+            Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordDatabaseExec(
+                "EXEC",
+                table,
+                sql,
+                PilotValue.FromString(sql));
+            return PilotValue.FromInt(1);
+        }, "sql", "table");
     }
 
     public static PilotFunction GetOperatorFunction(string op)

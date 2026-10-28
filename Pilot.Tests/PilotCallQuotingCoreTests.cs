@@ -93,6 +93,29 @@ assert(folded_val == 80.0)
     }
 
     [Fact]
+    public void Case3b_Deep_Splice_Hygienic_AlphaRenaming_And_DeadBranchElimination()
+    {
+        string code = @"
+def ClampedScale(mode: int, x: f64) -> f64 {
+    let scale = 3.0
+    if mode > 0 {
+        return scale * x
+    } else {
+        return 0.0
+    }
+}
+
+let scale = 999.0
+let dbe_ast = ClampedScale!!(~1, input_val)
+assert(dbe_ast.to_string() == ""Mul(3.0, Sym(\""input_val\""))"")
+assert(dbe_ast.eval({ ""input_val"": 7.0 }) == 21.0)
+";
+        var engine = new PilotEngine();
+        var result = engine.Execute(code);
+        Assert.True(result.Success, FormatFailure(result));
+    }
+
+    [Fact]
     public unsafe void Case4_ZeroMarshalling_CAbi_Sequential_Struct_Projection_Mode4()
     {
         Assert.Equal(12, sizeof(CallFrame_ComputeImpulse));

@@ -30,3 +30,22 @@ let weights = [:low, :high, :low].Map(match { case :low => 10, case :high => 100
 
 println($"Hex={hex}, Bits={bits}, Lerp={lerped}, Flag={flag_label}, Period={period_sec}s, Bytes={buf_bytes}");
 println($"Badge={badge}, Dist={dist}, Route={route}, Mean={weights.Mean()}");
+
+// 4. Self-Returning Cascade (`..`) with Momentary Output Capture vs Pipeline (`|>`)
+class PacketBuilder {
+    var parts: str[] = [];
+    def add_header(self, h: str) -> void { self.parts.append(h); }
+    def push_payload(self, body: str) -> int { self.parts.append(body); return body.Length; }
+    def seal(self, payload_bytes: int, checksum: str) -> void { self.parts.append($"len={payload_bytes}:{checksum}"); }
+    def checksum_tag(self) -> str => $"crc{self.parts.Length}";
+}
+
+var recorded_len = 0;
+let pkt = PacketBuilder()
+    ..add_header("SYN")
+    ..let body_len = push_payload("HELLO-PILOT")
+    ..checksum_tag() -> let tag
+    ..recorded_len = push_payload("ACK")
+    ..seal(body_len + recorded_len, tag);
+
+println($"Cascade self parts={pkt.parts}, captured body_len={body_len}, recorded_len={recorded_len}, tag={tag}");

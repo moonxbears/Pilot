@@ -1,0 +1,38 @@
+// ============================================================================
+// Showcase 23: Semantic Call Projections (!^ Reactive, !@ Autodiff, !? Dry-Run)
+// ============================================================================
+
+def ComputeImpulse(mass: float, velocity: float) -> float:
+    return 0.5 * mass * (velocity * velocity)
+
+// 1. Mode 6 (!@): Compile-time Symbolic Adjoint Differentiation + CSE
+let (ke, dMass, dVel) = ComputeImpulse!@(10.0, 5.0)
+println(f"Symbolic Adjoint ComputeImpulse!@(10.0, 5.0) => Value={ke}, dMass={dMass}, dVel={dVel}")
+
+// 2. Mode 7 (!?): Copy-on-Write Transactional Effect Dry-Run
+class Account:
+    def __init__(self, balance: int):
+        self.Balance = balance
+
+def TransferBonus(acct, bonus: int) -> int:
+    acct.Balance = acct.Balance + bonus
+    return acct.Balance
+
+let acct = Account(100)
+let dryRun = TransferBonus!?(acct, 50)
+println(f"DryRun Inspect: {dryRun.Inspect()}")
+println(f"Live balance before Commit(): {acct.Balance}")
+dryRun.Commit()
+println(f"Live balance after Commit():  {acct.Balance}")
+
+// 3. Mode 5 (!^): Glitch-Free Push-Pull Reactive Signal Graph
+class Spacecraft:
+    def __init__(self, m: float, v: float):
+        self.Mass = m
+        self.Vel = v
+
+let craft = Spacecraft(10.0, 5.0)
+let liveImpulse = ComputeImpulse!^(craft.Mass, craft.Vel)
+println(f"Initial Reactive Impulse: {liveImpulse.Value}")
+craft.Mass = 16.0
+println(f"After craft.Mass = 16.0:  {liveImpulse.Value}")

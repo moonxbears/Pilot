@@ -981,4 +981,108 @@ def process_data(data: SliceBuffer[f64]) -> SliceBuffer[f64] {
         Assert.NotNull(tSym);
         Assert.Equal(PilotSymbolKind.TypeParameter, tSym.Kind);
     }
+
+    [Fact]
+    public void Test_Showcase20_Yield_Before_If_Has_Zero_UnreachableCode_Warnings()
+    {
+        string showcase20Path = System.IO.Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..",
+            "examples", "showcase", "20_dynamic_for_expressions_and_c_abi.pilot");
+        string code = System.IO.File.ReadAllText(showcase20Path);
+
+        var analysis = PilotSemanticAnalyzer.Analyze(code, showcase20Path);
+        Assert.DoesNotContain(analysis.Diagnostics, d => d.Code == PilotDiagnosticCatalog.UnreachableCode);
+        Assert.DoesNotContain(analysis.Diagnostics, d => d.Severity == PilotDiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void Test_Cascade_Self_Returning_Chaining_And_Momentary_Variable_Capture_Lsp()
+    {
+        string code = @"
+class PipelineBuilder {
+    var steps: int = 0
+    def add_step(self, label: str) -> int {
+        self.steps = self.steps + 1
+        return self.steps
+    }
+    def describe(self, id: int) -> str {
+        return ""ok""
+    }
+}
+
+var existing_step = 0
+let builder = PipelineBuilder()
+    ..add_step(""init"")
+    ..let first_id = add_step(""auth"")
+    ..describe(first_id) -> let desc_msg
+    ..existing_step = add_step(""done"")
+";
+        var analysis = PilotSemanticAnalyzer.Analyze(code);
+        Assert.DoesNotContain(analysis.Diagnostics, d => d.Severity == PilotDiagnosticSeverity.Error);
+
+        Assert.Equal("PipelineBuilder", analysis.RootScope.Symbols["builder"].TypeName);
+        Assert.Equal("int", analysis.RootScope.Symbols["first_id"].TypeName);
+        Assert.False(analysis.RootScope.Symbols["first_id"].IsMutable);
+        Assert.Equal("str", analysis.RootScope.Symbols["desc_msg"].TypeName);
+        Assert.False(analysis.RootScope.Symbols["desc_msg"].IsMutable);
+
+        // Verify LSP completion works on both `builder..` and multi-line indented `..`
+        var server = new PilotLspServer();
+        string docUri = "inmemory://test_cascade_completion.pilot";
+        string completionCode = code + "\r\nbuilder..\r\n    ..\r\n";
+        server.ProcessMessage(new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["method"] = "textDocument/didOpen",
+            ["params"] = new JsonObject
+            {
+                ["textDocument"] = new JsonObject
+                {
+                    ["uri"] = docUri,
+                    ["languageId"] = "pilot",
+                    ["version"] = 1,
+                    ["text"] = completionCode
+                }
+            }
+        }.ToJsonString());
+
+        string[] compLines = completionCode.Split("\r\n");
+        int singleLineIdx = Array.FindIndex(compLines, l => l == "builder..");
+        var singleResp = server.ProcessMessage(new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["id"] = 201,
+            ["method"] = "textDocument/completion",
+            ["params"] = new JsonObject
+            {
+                ["textDocument"] = new JsonObject { ["uri"] = docUri },
+                ["position"] = new JsonObject { ["line"] = singleLineIdx, ["character"] = 9 }
+            }
+        }.ToJsonString());
+        var singleLabels = JsonNode.Parse(singleResp[0])!["result"]!.AsArray()
+            .Select(i => i?["label"]?.GetValue<string>()).ToList();
+        Assert.Contains("add_step", singleLabels);
+        Assert.Contains("describe", singleLabels);
+
+        var multiResp = server.ProcessMessage(new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["id"] = 202,
+            ["method"] = "textDocument/completion",
+            ["params"] = new JsonObject
+            {
+                ["textDocument"] = new JsonObject { ["uri"] = docUri },
+                ["position"] = new JsonObject { ["line"] = singleLineIdx + 1, ["character"] = 6 }
+            }
+        }.ToJsonString());
+        var multiLabels = JsonNode.Parse(multiResp[0])!["result"]!.AsArray()
+            .Select(i => i?["label"]?.GetValue<string>()).ToList();
+        Assert.Contains("add_step", multiLabels);
+        Assert.Contains("describe", multiLabels);
+
+        // Verify immutable reassignment diagnostic when assigning mid-cascade to a `let` variable without `..let`
+        string badCode = code + "\r\nlet locked = 0\r\nbuilder..locked = add_step(\"fail\")\r\n";
+        var badAnalysis = PilotSemanticAnalyzer.Analyze(badCode);
+        Assert.Contains(badAnalysis.Diagnostics, d => d.Code == PilotDiagnosticCatalog.ImmutableReassignment);
+    }
 }

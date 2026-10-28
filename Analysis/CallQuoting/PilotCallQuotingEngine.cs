@@ -113,6 +113,8 @@ public sealed class PilotCallExpr
         return PilotValue.FromObject(obj);
     }
 
+    public string ToSExpr() => ToString();
+
     public override string ToString() =>
         $"CallExpr({FunctionName}, [{string.Join(", ", EvaluatedArgs.Select(PilotAstExpr.FormatScalarValue))}])";
 }
@@ -565,6 +567,8 @@ public sealed class PilotAstExpr
         };
     }
 
+    public string ToSExpr() => ToString();
+
     public override string ToString()
     {
         switch (NodeKind)
@@ -823,6 +827,8 @@ public sealed class PilotAbiCallFrame
         return PilotValue.FromObject(obj);
     }
 
+    public string ToSExpr() => ToString();
+
     public override string ToString() =>
         $"{StructName} {{ FnId = 0x{FnId:X8}, Size = {SizeBytes}B, Args = [{string.Join(", ", ArgumentValues.Select(PilotAstExpr.FormatScalarValue))}] }}";
 }
@@ -979,6 +985,24 @@ public static class PilotCallQuotingEngine
             case CallQuoteKind.AbiFrame:
             {
                 return BuildAbiCallFrame(fn, effectiveName, fnId, args, trailer, visitor).ToPilotObject();
+            }
+
+            case CallQuoteKind.ReactiveSignal:
+            {
+                var sig = Pilot.Runtime.Reactive.PilotSignalGraph.CreateReactiveCallSignal(fn, effectiveName, args, trailer, visitor);
+                return PilotValue.FromObject(sig.ToPilotObject());
+            }
+
+            case CallQuoteKind.SymbolicAdjoint:
+            {
+                var dual = Pilot.Analysis.Autodiff.PilotSymbolicDifferentiator.EvaluateSymbolicAdjoint(fn, effectiveName, fnId, args, trailer, visitor);
+                return PilotValue.FromObject(dual.ToPilotObject());
+            }
+
+            case CallQuoteKind.EffectDryRun:
+            {
+                var plan = Pilot.Runtime.Effects.PilotEffectDryRunEngine.EvaluateEffectDryRun(fn, effectiveName, args, trailer, visitor);
+                return PilotValue.FromObject(plan.ToPilotObject());
             }
 
             default:
@@ -1238,6 +1262,15 @@ public static class PilotCallQuotingEngine
     }
 
     #region ParseTree -> Symbolic AST Conversion with Hygienic Alpha-Renaming
+
+    public static IParseTree? ParseSnippetToSuite(string snippet) =>
+        PilotParser.GetOrParseSnippet(snippet);
+
+    public static PilotAstExpr ExtractSymbolicBodyAst(
+        IParseTree bodyTree,
+        Dictionary<string, PilotAstExpr> envSubstitutions,
+        Dictionary<string, string> alphaRenames) =>
+        ConvertFunctionBodyToSymbolicAst(bodyTree, envSubstitutions, alphaRenames);
 
     private static PilotAstExpr ConvertFunctionBodyToSymbolicAst(
         IParseTree bodyTree,

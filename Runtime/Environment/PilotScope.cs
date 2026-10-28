@@ -18,6 +18,7 @@ public sealed class PilotScope
     {
         Parent = parent;
         ScopeName = scopeName;
+        Pilot.Runtime.Effects.PilotEffectDryRunEngine.NotifyScopeCreated(this);
     }
 
     public bool Declare(string name, PilotValue value, bool isConst = false, string? typeName = null)
@@ -78,12 +79,35 @@ public sealed class PilotScope
                 {
                     throw new InvalidOperationException($"Cannot assign to immutable binding '{name}' (declared with 'let' or 'const'). Use 'var' if mutation is intended.");
                 }
+                if (Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryRecordScopeVariableWrite(current, name, binding.Value, value))
+                {
+                    return true;
+                }
                 binding.Value = value;
+                Pilot.Runtime.Reactive.PilotSignalGraph.NotifyScopeVariableChanged(current, name, value);
                 return true;
             }
             current = current.Parent;
         }
 
+        return false;
+    }
+
+    public bool TryResolveBinding(string name, out PilotScope definingScope, out PilotBinding binding)
+    {
+        var current = this;
+        while (current != null)
+        {
+            if (current._bindings.TryGetValue(name, out binding!))
+            {
+                definingScope = current;
+                return true;
+            }
+            current = current.Parent;
+        }
+
+        definingScope = this;
+        binding = null!;
         return false;
     }
 
@@ -94,6 +118,11 @@ public sealed class PilotScope
         {
             if (current._bindings.TryGetValue(name, out var binding))
             {
+                if (Pilot.Runtime.Effects.PilotEffectDryRunEngine.TryReadScopeVariable(current, name, out var shadowVal))
+                {
+                    value = shadowVal;
+                    return true;
+                }
                 value = binding.Value;
                 return true;
             }

@@ -80,4 +80,107 @@ public partial class PilotParser
 
         return tree;
     }
+
+    /// <summary>
+    /// Returns the number of trailers on <paramref name="atomExpr"/> that belong directly to <paramref name="atomExpr"/>,
+    /// excluding any trailing <c>..cascade</c> suffix that belongs to an enclosing unparenthesized <c>..prop = rhs</c>
+    /// or <c>..[idx] = rhs</c> cascade target.
+    /// </summary>
+    public static int GetEffectiveTrailerCount(Atom_exprContext atomExpr)
+    {
+        var trailers = atomExpr.trailer();
+        if (trailers == null || trailers.Length == 0)
+        {
+            return 0;
+        }
+
+        int suffixStart = trailers.Length;
+        while (suffixStart > 0 && trailers[suffixStart - 1].cascade_trailer() != null)
+        {
+            suffixStart--;
+        }
+
+        if (suffixStart == trailers.Length)
+        {
+            return trailers.Length;
+        }
+
+        return IsRightmostUnparenthesizedLeafOfCascadeAssign(atomExpr) ? suffixStart : trailers.Length;
+    }
+
+    /// <summary>
+    /// Extracts any trailing <see cref="Cascade_trailerContext"/> nodes that were syntactically attached to the
+    /// rightmost unparenthesized leaf of a <c>..prop = rhs</c> or <c>..[idx] = rhs</c> assignment so they execute
+    /// against the outer cascade receiver.
+    /// </summary>
+    public static IReadOnlyList<Cascade_trailerContext> ExtractHoistedCascades(TestContext? rhs)
+    {
+        if (rhs == null)
+        {
+            return Array.Empty<Cascade_trailerContext>();
+        }
+
+        Antlr4.Runtime.Tree.IParseTree cur = rhs;
+        while (cur is ParserRuleContext rc && rc is not Atom_exprContext)
+        {
+            if (rc.ChildCount == 0)
+            {
+                return Array.Empty<Cascade_trailerContext>();
+            }
+            cur = rc.GetChild(rc.ChildCount - 1);
+        }
+
+        if (cur is not Atom_exprContext atomExpr)
+        {
+            return Array.Empty<Cascade_trailerContext>();
+        }
+
+        var trailers = atomExpr.trailer();
+        if (trailers == null || trailers.Length == 0)
+        {
+            return Array.Empty<Cascade_trailerContext>();
+        }
+
+        int suffixStart = trailers.Length;
+        while (suffixStart > 0 && trailers[suffixStart - 1].cascade_trailer() != null)
+        {
+            suffixStart--;
+        }
+
+        if (suffixStart == trailers.Length)
+        {
+            return Array.Empty<Cascade_trailerContext>();
+        }
+
+        var hoisted = new List<Cascade_trailerContext>(trailers.Length - suffixStart);
+        for (int i = suffixStart; i < trailers.Length; i++)
+        {
+            hoisted.Add(trailers[i].cascade_trailer());
+        }
+        return hoisted;
+    }
+
+    private static bool IsRightmostUnparenthesizedLeafOfCascadeAssign(Atom_exprContext atomExpr)
+    {
+        ParserRuleContext cur = atomExpr;
+        while (cur.Parent is ParserRuleContext parent)
+        {
+            if (parent is Cascade_targetContext ct &&
+                ct.EQUAL() != null &&
+                ct.LPAR() == null &&
+                ct.test() == cur)
+            {
+                return true;
+            }
+
+            if (parent is AtomContext || parent.ChildCount == 0 || parent.GetChild(parent.ChildCount - 1) != cur)
+            {
+                return false;
+            }
+
+            cur = parent;
+        }
+
+        return false;
+    }
 }
