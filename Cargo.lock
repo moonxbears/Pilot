@@ -21,10 +21,21 @@ version = "1.1.0"
 dependencies = [
  "pilot-arena",
  "pilot-ast",
+ "pilot-fmt",
  "pilot-intern",
  "pilot-lexer",
  "pilot-parser",
  "pilot-span",
+ "pilot-syntax",
+]
+
+[[package]]
+name = "pilot-fmt"
+version = "1.1.0"
+dependencies = [
+ "pilot-lexer",
+ "pilot-span",
+ "pilot-syntax",
 ]
 
 [[package]]
@@ -56,3 +67,13 @@ dependencies = [
 [[package]]
 name = "pilot-span"
 version = "1.1.0"
+
+[[package]]
+name = "pilot-syntax"
+version = "1.1.0"
+dependencies = [
+ "pilot-ast",
+ "pilot-intern",
+ "pilot-lexer",
+ "pilot-span",
+]

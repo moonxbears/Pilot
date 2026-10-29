@@ -8,7 +8,7 @@ use pilot_lexer::{tokenize, TokenTape};
 use pilot_parser::parse as parse_pilot;
 use pilot_span::{ByteSpan, LineIndex};
 
-pub const PILOT_FFI_ABI_VERSION: u32 = 3001;
+pub const PILOT_FFI_ABI_VERSION: u32 = 3101;
 
 /// Opaque C-ABI handle owning a parsed `AstArena` and `LineIndex`.
 pub struct PilotFfiArenaHandle {
@@ -218,6 +218,129 @@ pub unsafe extern "C" fn pilot_token_tape_free(handle: *mut PilotFfiTokenTapeHan
     }
 }
 
+// =========================================================================
+// Milestone 31: Lossless CST & Native Wadler-Lindig Formatter C-ABI Exports
+// =========================================================================
+
+/// Opaque C-ABI handle owning a lossless `ParsedCst`.
+pub struct PilotFfiCstHandle {
+    pub cst: pilot_syntax::ParsedCst,
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_cst_parse(
+    utf8_ptr: *const u8,
+    utf8_len: usize,
+) -> *mut PilotFfiCstHandle {
+    let slice: &[u8] = if utf8_ptr.is_null() || utf8_len == 0 {
+        &[]
+    } else {
+        core::slice::from_raw_parts(utf8_ptr, utf8_len)
+    };
+    let src = core::str::from_utf8(slice).unwrap_or("");
+    let cst = pilot_syntax::parse_cst(src);
+    Box::into_raw(Box::new(PilotFfiCstHandle { cst }))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_cst_free(handle: *mut PilotFfiCstHandle) {
+    if !handle.is_null() {
+        drop(Box::from_raw(handle));
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_cst_diagnostic_count(handle: *const PilotFfiCstHandle) -> usize {
+    if handle.is_null() {
+        return 0;
+    }
+    (*handle).cst.diagnostics.len()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_cst_has_missing_ident(handle: *const PilotFfiCstHandle) -> bool {
+    if handle.is_null() {
+        return false;
+    }
+    (*handle).cst.root.descendants().any(|e| e.kind() == pilot_syntax::SyntaxKind::MissingIdent)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_cst_has_missing_rparen(handle: *const PilotFfiCstHandle) -> bool {
+    if handle.is_null() {
+        return false;
+    }
+    (*handle).cst.root.descendants().any(|e| e.kind() == pilot_syntax::SyntaxKind::MissingRParen)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_cst_to_text(
+    handle: *const PilotFfiCstHandle,
+    out_len: *mut usize,
+) -> *mut u8 {
+    if handle.is_null() {
+        if !out_len.is_null() {
+            *out_len = 0;
+        }
+        return core::ptr::null_mut();
+    }
+    let text = (*handle).cst.to_text();
+    let bytes = text.into_bytes();
+    if !out_len.is_null() {
+        *out_len = bytes.len();
+    }
+    let mut boxed = bytes.into_boxed_slice();
+    let ptr = boxed.as_mut_ptr();
+    core::mem::forget(boxed);
+    ptr
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_format_source(
+    utf8_ptr: *const u8,
+    utf8_len: usize,
+    use_colon_suites: i32,
+    emit_semicolons: bool,
+    out_len: *mut usize,
+    out_modified: *mut bool,
+) -> *mut u8 {
+    let slice: &[u8] = if utf8_ptr.is_null() || utf8_len == 0 {
+        &[]
+    } else {
+        core::slice::from_raw_parts(utf8_ptr, utf8_len)
+    };
+    let src = core::str::from_utf8(slice).unwrap_or("");
+    let options = pilot_fmt::FormatOptions {
+        use_colon_suites: match use_colon_suites {
+            1 => Some(true),
+            0 => Some(false),
+            _ => None,
+        },
+        emit_semicolons,
+        ..Default::default()
+    };
+    let result = pilot_fmt::format_source(src, &options);
+    if !out_modified.is_null() {
+        *out_modified = result.was_modified;
+    }
+    let bytes = result.formatted_code.into_bytes();
+    if !out_len.is_null() {
+        *out_len = bytes.len();
+    }
+    let mut boxed = bytes.into_boxed_slice();
+    let ptr = boxed.as_mut_ptr();
+    core::mem::forget(boxed);
+    ptr
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_free_string(ptr: *mut u8, len: usize) {
+    if !ptr.is_null() && len > 0 {
+        let slice = core::slice::from_raw_parts_mut(ptr, len);
+        drop(Box::from_raw(slice as *mut [u8]));
+    }
+}
+
 /// Builds a statement/expression `AstArena` from UTF-8 source for Milestone 28 C-ABI verification
 /// (full Stage 1 SIMD modal lexer & Stage 2 Pratt parser land in M29–M30).
 pub fn parse_lightweight_skeleton_to_arena(src: &str) -> AstArena {
@@ -353,7 +476,7 @@ mod tests {
         unsafe {
             let handle = pilot_parse_utf8_to_arena(src.as_ptr(), src.len());
             assert!(!handle.is_null());
-            assert_eq!(pilot_ffi_abi_version(), 3001);
+            assert_eq!(pilot_ffi_abi_version(), 3101);
             assert_eq!(pilot_ffi_sizeof_ast_node(), 16);
 
             let mut node_len = 0usize;
@@ -397,6 +520,38 @@ mod tests {
             assert_eq!(kinds[0], pilot_lexer::TokenKind::KwDef as u16);
 
             pilot_token_tape_free(handle);
+        }
+    }
+
+    #[test]
+    fn ffi_c_abi_lossless_cst_and_format() {
+        let src = b"// Test comment\ndef run(x: i64) -> i64 {\n    return x + 1;\n}\n";
+        unsafe {
+            // Test CST parsing and roundtrip text
+            let cst_handle = pilot_cst_parse(src.as_ptr(), src.len());
+            assert!(!cst_handle.is_null());
+            assert_eq!(pilot_cst_diagnostic_count(cst_handle), 0);
+
+            let mut out_len = 0usize;
+            let text_ptr = pilot_cst_to_text(cst_handle, &mut out_len);
+            assert!(!text_ptr.is_null());
+            assert_eq!(out_len, src.len());
+
+            let text_bytes = core::slice::from_raw_parts(text_ptr, out_len);
+            assert_eq!(text_bytes, src.as_slice());
+            pilot_free_string(text_ptr, out_len);
+            pilot_cst_free(cst_handle);
+
+            // Test native Wadler-Lindig formatter
+            let mut fmt_len = 0usize;
+            let mut modified = false;
+            let fmt_ptr = pilot_format_source(src.as_ptr(), src.len(), 1, false, &mut fmt_len, &mut modified);
+            assert!(!fmt_ptr.is_null());
+            assert!(fmt_len > 0);
+            let fmt_slice = core::slice::from_raw_parts(fmt_ptr, fmt_len);
+            let fmt_str = core::str::from_utf8(fmt_slice).unwrap();
+            assert!(fmt_str.contains("def run(x: i64) -> i64:"));
+            pilot_free_string(fmt_ptr, fmt_len);
         }
     }
 }

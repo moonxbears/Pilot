@@ -925,14 +925,14 @@ interface TreeSink {
 ```
 
 ### Sub-Tasks & Deliverables
-- [ ] **31.1: Immutable Width-Relative Green Tree + Lazy Red Cursor Façade**
+- [x] **31.1: Immutable Width-Relative Green Tree + Lazy Red Cursor Façade**
   - Implement `GreenNode` / `GreenToken` (storing `SyntaxKind`, relative UTF-8 `text_len: u32`, and inline child slice, with global interning for common punctuation/keywords/spaces so repeated tokens allocate **0 bytes**) and lazy `SyntaxNode` Red cursors computing absolute byte offsets and parent pointers on demand.
   - Enforce the **Lossless Round-Trip Invariant** across all test files: `cst.root().to_text() == original_utf8_source` byte-for-byte (including `#if` inactive blocks, comments, blank lines, and `:` vs. `{}` suites).
-- [ ] **31.2: Resilient Panic-Free Error Recovery & Missing-Token Synthesis**
+- [x] **31.2: Resilient Panic-Free Error Recovery & Missing-Token Synthesis**
   - **`TokenSet` (`u128` Bitmask) Anchor Recovery**: Maintain stacked synchronization sets (`STMT_RECOVERY`, `DECL_RECOVERY`, `PARAM_RECOVERY`, `ARG_RECOVERY`, `MATCH_ARM_RECOVERY`), wrapping unexpected tokens inside `SyntaxKind::ErrorNode` without discarding outer blocks.
   - **IDE Cursor & Completion Synthesis**: Synthesize zero-width `MissingIdent` on trailing `user.` and `MissingRParen`/`MissingRBrace` on unclosed headers (`if (x > 0 {`) so downstream type inference and dot-completion work seamlessly inside broken editor buffers.
   - **Anti-Cascade Diagnostic Cooldown & Rich Spans**: Suppress secondary error cascades until synchronization succeeds; emit multi-span diagnostics with Damerau-Levenshtein keyword fix-it hints (`gurd` $\rightarrow$ `guard`).
-- [ ] **31.3: Native Wadler-Lindig Pretty-Printer (`pilot fmt` Port)**
+- [x] **31.3: Native Wadler-Lindig Pretty-Printer (`pilot fmt` Port)**
   - Replace `Formatting/PilotFormatter.cs` with `crates/pilot-fmt` using a Wadler-Lindig document algebra over the lossless Red-Green CST (> 200 MB/s formatting throughput while preserving 100% of comments, `#region` blocks, and suite conventions).
 
 ---

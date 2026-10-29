@@ -7,6 +7,8 @@ members = [
     "crates/pilot-ast",
     "crates/pilot-lexer",
     "crates/pilot-parser",
+    "crates/pilot-syntax",
+    "crates/pilot-fmt",
     "crates/pilot-ffi",
 ]
 

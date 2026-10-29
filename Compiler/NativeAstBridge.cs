@@ -776,11 +776,55 @@ public sealed unsafe class NativeTokenTapeView : IDisposable
 }
 
 /// <summary>
+/// Milestone 31.1: Managed wrapper around a native lossless Red-Green Concrete Syntax Tree (CST).
+/// </summary>
+public sealed class NativeCstView : IDisposable
+{
+    private IntPtr _handle;
+
+    internal NativeCstView(IntPtr handle)
+    {
+        _handle = handle;
+    }
+
+    public IntPtr Handle => _handle;
+    public nuint DiagnosticCount => NativeAstBridge.GetCstDiagnosticCount(_handle);
+    public bool HasMissingIdent => NativeAstBridge.GetCstHasMissingIdent(_handle);
+    public bool HasMissingRParen => NativeAstBridge.GetCstHasMissingRParen(_handle);
+
+    public string ToText()
+    {
+        return NativeAstBridge.GetCstText(_handle);
+    }
+
+    public void Dispose()
+    {
+        var h = _handle;
+        if (h != IntPtr.Zero)
+        {
+            _handle = IntPtr.Zero;
+            NativeAstBridge.FreeCst(h);
+        }
+        GC.SuppressFinalize(this);
+    }
+
+    ~NativeCstView()
+    {
+        var h = _handle;
+        if (h != IntPtr.Zero)
+        {
+            _handle = IntPtr.Zero;
+            NativeAstBridge.FreeCst(h);
+        }
+    }
+}
+
+/// <summary>
 /// Milestone 28.4 &amp; 29.5: Zero-copy C-ABI strangler-fig bridge between C# and the Rust <c>pilot-ffi</c> crate.
 /// </summary>
 public static unsafe class NativeAstBridge
 {
-    public const uint ExpectedAbiVersion = 3001;
+    public const uint ExpectedAbiVersion = 3101;
 
     private static readonly object SyncLock = new();
     private static IntPtr _libraryHandle;
@@ -802,6 +846,15 @@ public static unsafe class NativeAstBridge
     private static delegate* unmanaged[Cdecl]<IntPtr, NativeByteSpan*> _fnTokenTapeSpansPtr;
     private static delegate* unmanaged[Cdecl]<IntPtr, uint*> _fnTokenTapeBracketLinksPtr;
     private static delegate* unmanaged[Cdecl]<IntPtr, void> _fnTokenTapeFree;
+
+    private static delegate* unmanaged[Cdecl]<byte*, nuint, IntPtr> _fnCstParse;
+    private static delegate* unmanaged[Cdecl]<IntPtr, void> _fnCstFree;
+    private static delegate* unmanaged[Cdecl]<IntPtr, nuint> _fnCstDiagnosticCount;
+    private static delegate* unmanaged[Cdecl]<IntPtr, byte> _fnCstHasMissingIdent;
+    private static delegate* unmanaged[Cdecl]<IntPtr, byte> _fnCstHasMissingRParen;
+    private static delegate* unmanaged[Cdecl]<IntPtr, nuint*, byte*> _fnCstToText;
+    private static delegate* unmanaged[Cdecl]<byte*, nuint, int, byte, nuint*, byte*, byte*> _fnFormatSource;
+    private static delegate* unmanaged[Cdecl]<byte*, nuint, void> _fnFreeString;
 
     static NativeAstBridge()
     {
@@ -950,6 +1003,119 @@ public static unsafe class NativeAstBridge
         }
     }
 
+    /// <summary>
+    /// Milestone 31.1: Parses UTF-8 Pilot source code into a lossless Red-Green Concrete Syntax Tree (CST).
+    /// </summary>
+    public static NativeCstView ParseUtf8ToCst(string source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        byte[] utf8 = Encoding.UTF8.GetBytes(source);
+        EnsureLoaded();
+
+        IntPtr handle;
+        fixed (byte* ptr = utf8)
+        {
+            handle = _fnCstParse(ptr, (nuint)utf8.Length);
+        }
+
+        if (handle == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("pilot_cst_parse returned a null handle.");
+        }
+
+        return new NativeCstView(handle);
+    }
+
+    /// <summary>
+    /// Milestone 31.3: Formats Pilot source code using native Wadler-Lindig CST pretty-printer.
+    /// </summary>
+    public static (string FormattedCode, bool WasModified) FormatSourceNative(
+        string source,
+        bool? useColonSuites = null,
+        bool emitSemicolons = true)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        byte[] utf8 = Encoding.UTF8.GetBytes(source);
+        EnsureLoaded();
+
+        int colonMode = useColonSuites switch
+        {
+            true => 1,
+            false => 0,
+            null => -1,
+        };
+
+        nuint outLen = 0;
+        byte wasModifiedByte = 0;
+        byte* resultPtr;
+
+        fixed (byte* ptr = utf8)
+        {
+            resultPtr = _fnFormatSource(ptr, (nuint)utf8.Length, colonMode, emitSemicolons ? (byte)1 : (byte)0, &outLen, &wasModifiedByte);
+        }
+
+        if (resultPtr == null || outLen == 0)
+        {
+            return (string.Empty, false);
+        }
+
+        try
+        {
+            string formatted = Encoding.UTF8.GetString(resultPtr, (int)outLen);
+            return (formatted, wasModifiedByte != 0);
+        }
+        finally
+        {
+            _fnFreeString(resultPtr, outLen);
+        }
+    }
+
+    internal static nuint GetCstDiagnosticCount(IntPtr handle)
+    {
+        EnsureLoaded();
+        return _fnCstDiagnosticCount(handle);
+    }
+
+    internal static bool GetCstHasMissingIdent(IntPtr handle)
+    {
+        EnsureLoaded();
+        return _fnCstHasMissingIdent(handle) != 0;
+    }
+
+    internal static bool GetCstHasMissingRParen(IntPtr handle)
+    {
+        EnsureLoaded();
+        return _fnCstHasMissingRParen(handle) != 0;
+    }
+
+    internal static string GetCstText(IntPtr handle)
+    {
+        EnsureLoaded();
+        nuint len = 0;
+        byte* ptr = _fnCstToText(handle, &len);
+        if (ptr == null || len == 0)
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            return Encoding.UTF8.GetString(ptr, (int)len);
+        }
+        finally
+        {
+            _fnFreeString(ptr, len);
+        }
+    }
+
+    internal static void FreeCst(IntPtr handle)
+    {
+        if (handle != IntPtr.Zero && _fnCstFree != null)
+        {
+            _fnCstFree(handle);
+        }
+    }
+
     private static void EnsureLoaded()
     {
         if (_libraryHandle != IntPtr.Zero)
@@ -985,6 +1151,15 @@ public static unsafe class NativeAstBridge
             _fnTokenTapeSpansPtr = (delegate* unmanaged[Cdecl]<IntPtr, NativeByteSpan*>)NativeLibrary.GetExport(lib, "pilot_token_tape_spans_ptr");
             _fnTokenTapeBracketLinksPtr = (delegate* unmanaged[Cdecl]<IntPtr, uint*>)NativeLibrary.GetExport(lib, "pilot_token_tape_bracket_links_ptr");
             _fnTokenTapeFree = (delegate* unmanaged[Cdecl]<IntPtr, void>)NativeLibrary.GetExport(lib, "pilot_token_tape_free");
+
+            _fnCstParse = (delegate* unmanaged[Cdecl]<byte*, nuint, IntPtr>)NativeLibrary.GetExport(lib, "pilot_cst_parse");
+            _fnCstFree = (delegate* unmanaged[Cdecl]<IntPtr, void>)NativeLibrary.GetExport(lib, "pilot_cst_free");
+            _fnCstDiagnosticCount = (delegate* unmanaged[Cdecl]<IntPtr, nuint>)NativeLibrary.GetExport(lib, "pilot_cst_diagnostic_count");
+            _fnCstHasMissingIdent = (delegate* unmanaged[Cdecl]<IntPtr, byte>)NativeLibrary.GetExport(lib, "pilot_cst_has_missing_ident");
+            _fnCstHasMissingRParen = (delegate* unmanaged[Cdecl]<IntPtr, byte>)NativeLibrary.GetExport(lib, "pilot_cst_has_missing_rparen");
+            _fnCstToText = (delegate* unmanaged[Cdecl]<IntPtr, nuint*, byte*>)NativeLibrary.GetExport(lib, "pilot_cst_to_text");
+            _fnFormatSource = (delegate* unmanaged[Cdecl]<byte*, nuint, int, byte, nuint*, byte*, byte*>)NativeLibrary.GetExport(lib, "pilot_format_source");
+            _fnFreeString = (delegate* unmanaged[Cdecl]<byte*, nuint, void>)NativeLibrary.GetExport(lib, "pilot_free_string");
 
             uint abi = _fnAbiVersion();
             if (abi != ExpectedAbiVersion)

@@ -1,0 +1,13 @@
+[package]
+name = "pilot-syntax"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Lossless Red-Green Concrete Syntax Tree (CST), TreeSink, and Resilient Parsing for Pilot"
+
+[dependencies]
+pilot-span = { path = "../pilot-span" }
+pilot-lexer = { path = "../pilot-lexer" }
+pilot-ast = { path = "../pilot-ast" }
+pilot-intern = { path = "../pilot-intern" }
