@@ -75,12 +75,17 @@ class PilotLspClient implements vscode.Disposable {
     private statusBar: vscode.StatusBarItem;
     private outputChannel: vscode.OutputChannel;
     private extensionPath: string;
+    private semanticTokensEmitter?: vscode.EventEmitter<void>;
 
     constructor(extensionPath: string, diagnostics: vscode.DiagnosticCollection, statusBar: vscode.StatusBarItem, outputChannel: vscode.OutputChannel) {
         this.extensionPath = extensionPath;
         this.diagnostics = diagnostics;
         this.statusBar = statusBar;
         this.outputChannel = outputChannel;
+    }
+
+    public setSemanticTokensEmitter(emitter: vscode.EventEmitter<void>): void {
+        this.semanticTokensEmitter = emitter;
     }
 
     public async start(): Promise<void> {
@@ -146,6 +151,10 @@ class PilotLspClient implements vscode.Disposable {
         });
         this.process.on('exit', (code) => {
             this.outputChannel.appendLine(`[Pilot LSP] Process exited with code ${code}`);
+            for (const [id, p] of this.pending) {
+                p.resolve(null);
+            }
+            this.pending.clear();
             if (this.process === spawnedProcess) {
                 this.process = null;
                 this.statusBar.text = '$(sync~spin) Pilot LSP (Restarting...)';
@@ -179,6 +188,9 @@ class PilotLspClient implements vscode.Disposable {
             if (doc.languageId === 'pilot') {
                 this.notifyDidOpen(doc);
             }
+        }
+        if (this.semanticTokensEmitter) {
+            this.semanticTokensEmitter.fire();
         }
     }
 
@@ -219,7 +231,22 @@ class PilotLspClient implements vscode.Disposable {
         const message = `Content-Length: ${byteLen}\r\n\r\n${payload}`;
 
         return new Promise((resolve, reject) => {
-            this.pending.set(id, { resolve, reject });
+            const timer = setTimeout(() => {
+                if (this.pending.has(id)) {
+                    this.pending.delete(id);
+                    resolve(null);
+                }
+            }, 3000);
+            this.pending.set(id, {
+                resolve: (val) => {
+                    clearTimeout(timer);
+                    resolve(val);
+                },
+                reject: (err) => {
+                    clearTimeout(timer);
+                    reject(err);
+                }
+            });
             this.process!.stdin.write(message, 'utf8');
         });
     }
@@ -330,17 +357,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const client = new PilotLspClient(context.extensionPath, diagnostics, statusBar, outputChannel);
     context.subscriptions.push(diagnostics, outputChannel, statusBar, client);
 
+    const semanticTokensEmitter = new vscode.EventEmitter<void>();
+    client.setSemanticTokensEmitter(semanticTokensEmitter);
+
     await client.start();
 
     context.subscriptions.push(
+        semanticTokensEmitter,
         vscode.commands.registerCommand('pilot.restartLanguageServer', async () => {
             statusBar.text = '$(sync~spin) Pilot LSP';
             await client.start();
+            semanticTokensEmitter.fire();
             vscode.window.showInformationMessage('Pilot Language Server restarted.');
         }),
         vscode.workspace.onDidOpenTextDocument((doc) => {
             if (doc.languageId === 'pilot') {
                 client.notifyDidOpen(doc);
+                semanticTokensEmitter.fire();
             }
         }),
         vscode.workspace.onDidChangeTextDocument((e) => {
@@ -352,6 +385,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (doc.languageId === 'pilot') {
                 client.notifyDidClose(doc);
             }
+        }),
+        vscode.window.onDidChangeActiveTextEditor((editor) => {
+            if (editor && editor.document.languageId === 'pilot') {
+                client.notifyDidOpen(editor.document);
+                semanticTokensEmitter.fire();
+            }
         })
     );
 
@@ -362,6 +401,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.languages.registerDocumentSemanticTokensProvider(
             selector,
             {
+                onDidChangeSemanticTokens: semanticTokensEmitter.event,
                 async provideDocumentSemanticTokens(document: vscode.TextDocument): Promise<vscode.SemanticTokens> {
                     const res = await client.sendRequest('textDocument/semanticTokens/full', {
                         textDocument: { uri: document.uri.toString() }
