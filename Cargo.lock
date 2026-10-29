@@ -172,6 +172,7 @@ dependencies = [
  "pilot-arena",
  "pilot-ast",
  "pilot-intern",
+ "pilot-parser",
  "pilot-span",
 ]
 

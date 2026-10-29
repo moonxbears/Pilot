@@ -15,6 +15,9 @@ pub mod contracts;
 pub mod dimensions;
 pub mod comptime;
 pub mod pipeline;
+pub mod autodiff;
+pub mod quoting;
+pub mod macros;
 
 pub use diagnostics::{AnalysisDiagnostic, DiagnosticSeverity};
 pub use types::{TypeArena, TypeId, TypeKind};
@@ -26,10 +29,17 @@ pub use contracts::{ContractVerifier, Interval};
 pub use dimensions::{DimensionChecker, DimensionVector};
 pub use comptime::{CallFrameLayoutInfo, ComptimeEvaluator, QuoteKind, StaticDemotedSlot};
 pub use pipeline::{AnalysisPipeline, AnalysisResult};
+pub use autodiff::{DualValue, SymbolicDifferentiator, SymbolicExpr};
+pub use quoting::{
+    AstSpliceResult, CallFrameLayout, CallQuotingEngine, EffectDiff, EffectPlan,
+    ReactiveSignalNode, ShallowCallDescriptor,
+};
+pub use macros::{DecoratorKind, MacroExpander, SynthesizedMember};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
     use pilot_span::ByteSpan;
 
     #[test]
@@ -206,5 +216,151 @@ def test_match_incomplete(x: int) -> int {
         let res2 = AnalysisPipeline::analyze(&arena2, arena2.root);
         let match_errors: Vec<_> = res2.diagnostics.iter().filter(|d| d.code == "MATCH001").collect();
         assert!(!match_errors.is_empty(), "Expected MATCH001 for match without default/wildcard");
+    }
+
+    #[test]
+    fn test_symbolic_differentiation_compute_impulse() {
+        // E = 0.5 * mass * (velocity * velocity)
+        let half = SymbolicExpr::Const(0.5);
+        let mass = SymbolicExpr::Var("mass".to_string());
+        let vel = SymbolicExpr::Var("velocity".to_string());
+        let vel2 = SymbolicExpr::Binary("*".to_string(), Box::new(vel.clone()), Box::new(vel.clone()));
+        let half_mass = SymbolicExpr::Binary("*".to_string(), Box::new(half), Box::new(mass));
+        let impulse = SymbolicExpr::Binary("*".to_string(), Box::new(half_mass), Box::new(vel2));
+
+        let mut env = std::collections::HashMap::new();
+        env.insert("mass".to_string(), 10.0);
+        env.insert("velocity".to_string(), 5.0);
+
+        let dual = SymbolicDifferentiator::differentiate_function(
+            &impulse,
+            &["mass", "velocity"],
+            &env,
+        );
+
+        assert_eq!(dual.value, 125.0);
+        assert_eq!(dual.get_gradient("mass"), Some(12.5));
+        assert_eq!(dual.get_gradient("velocity"), Some(50.0));
+        assert!(dual.cse_count >= 1, "Expected CSE to eliminate (velocity * velocity)");
+    }
+
+    #[test]
+    fn test_call_quoting_projection_modes() {
+        // Mode 1: Shallow
+        let shallow = ShallowCallDescriptor {
+            fn_name: "ComputeImpulse".to_string(),
+            return_type: "f64".to_string(),
+            evaluated_args: vec![10.0, 4.0],
+            span: ByteSpan::new(0, 10),
+        };
+        assert_eq!(shallow.eval(), 80.0);
+
+        // Mode 2: Deep Splice
+        let mut inlined = HashMap::new();
+        inlined.insert("mass".to_string(), 10.0);
+        let splice = AstSpliceResult {
+            fn_name: "ComputeImpulse".to_string(),
+            representation: "Mul(5.0, Mul(Sym(\"v\"), Sym(\"v\")))".to_string(),
+            inlined_constants: inlined,
+            free_vars: vec!["v".to_string()],
+        };
+        let mut env = HashMap::new();
+        env.insert("v".to_string(), 4.0);
+        assert_eq!(splice.eval(&env), 80.0);
+
+        // Mode 3: Call Frame Layout (12 bytes for 2 floats)
+        let frame = CallQuotingEngine::synthesize_call_frame(
+            "ComputeImpulse",
+            &[("mass", 4), ("velocity", 4)],
+            vec![10.0, 4.0],
+        );
+        assert_eq!(frame.size_bytes, 8); // 4 + 4 aligned
+        assert_eq!(frame.dispatch(), 80.0);
+
+        // Mode 4: Reactive Signal Node
+        let mut sig = ReactiveSignalNode::new("impulseSig", 125.0, 1, vec!["ship.Mass".to_string()]);
+        assert_eq!(sig.value, 125.0);
+        assert_eq!(sig.rank, 1);
+        sig.update(250.0);
+        assert_eq!(sig.value, 250.0);
+        assert_eq!(sig.eval_count, 2);
+
+        // Mode 5: Transactional Effect Plan
+        let plan = EffectPlan {
+            value: 52,
+            diffs: vec![EffectDiff {
+                kind: "StoreField".to_string(),
+                target: "rec".to_string(),
+                field_name: "Val".to_string(),
+                old_value: 10,
+                new_value: 42,
+            }],
+        };
+        assert_eq!(plan.diff_count(), 1);
+        assert_eq!(plan.commit(), 52);
+    }
+
+    #[test]
+    fn test_compile_time_decorator_derives() {
+        let mut expander = MacroExpander::new();
+        let span = ByteSpan::new(0, 10);
+
+        // @builder
+        let builder_members = expander.derive_decorator(
+            &DecoratorKind::Builder,
+            "User",
+            &[("name", "str"), ("age", "int")],
+            span,
+        );
+        assert!(builder_members.iter().any(|m| m.name == "with_name"));
+        assert!(builder_members.iter().any(|m| m.name == "with_age"));
+        assert!(builder_members.iter().any(|m| m.name == "build"));
+
+        // @json
+        let json_members = expander.derive_decorator(
+            &DecoratorKind::Json,
+            "User",
+            &[("name", "str")],
+            span,
+        );
+        assert!(json_members.iter().any(|m| m.name == "to_json"));
+        assert!(json_members.iter().any(|m| m.name == "from_json"));
+
+        // @observable
+        let obs_members = expander.derive_decorator(
+            &DecoratorKind::Observable,
+            "Ship",
+            &[("Mass", "float"), ("Vel", "float")],
+            span,
+        );
+        assert!(obs_members.iter().any(|m| m.name == "notify_Mass_changed"));
+
+        // @equality
+        let eq_members = expander.derive_decorator(
+            &DecoratorKind::Equality,
+            "Point",
+            &[("x", "float"), ("y", "float")],
+            span,
+        );
+        assert!(eq_members.iter().any(|m| m.name == "equals"));
+        assert!(eq_members.iter().any(|m| m.name == "hash_code"));
+    }
+
+    #[test]
+    fn test_static_demotion_pass_and_comptime_side_effects() {
+        let code = r#"
+def calculate(a: int, b: int) -> int {
+    let x = a + b
+    var y = x * 2
+    return y
+}
+"#;
+        let arena = pilot_parser::parse(code);
+        let mut comptime = ComptimeEvaluator::new();
+        comptime.demote_arena(&arena, arena.root);
+
+        assert!(comptime.demoted_slots.iter().any(|s| s.var_name == "x" && s.is_read_only));
+        assert!(comptime.demoted_slots.iter().any(|s| s.var_name == "y" && !s.is_read_only));
+        assert!(comptime.diagnostics.is_empty());
     }
 }

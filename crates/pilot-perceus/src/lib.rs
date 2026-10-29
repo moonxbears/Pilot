@@ -51,6 +51,101 @@ impl PerceusOptimizer {
             elided_retains: self.arc.elided_retains_count(),
         }
     }
+
+    /// Analyzes memory allocation escape states and enforces `@hard_realtime` / `noalloc` contracts across `AstArena`.
+    pub fn analyze_arena(
+        &mut self,
+        arena: &pilot_ast::AstArena,
+        root: pilot_ast::NodeId,
+    ) -> Vec<pilot_analysis::AnalysisDiagnostic> {
+        let mut diags = Vec::new();
+        if root.is_none() {
+            return diags;
+        }
+
+        self.traverse_node(arena, root, false);
+        diags.extend(self.realtime.diagnostics.clone());
+        diags
+    }
+
+    fn traverse_node(
+        &mut self,
+        arena: &pilot_ast::AstArena,
+        node_id: pilot_ast::NodeId,
+        mut in_noalloc: bool,
+    ) {
+        if node_id.is_none() {
+            return;
+        }
+        let node = *arena.node(node_id);
+        let span = arena.span(node_id);
+
+        match node.node_kind() {
+            pilot_ast::NodeKind::FnDecl => {
+                let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                in_noalloc = name.contains("dsp") || name.contains("realtime") || name.contains("noalloc");
+                let fn_len = node.flags as usize;
+                if fn_len > 0 {
+                    let fn_children = arena.children_slice(node.rhs, fn_len as u32);
+                    for &c in fn_children {
+                        self.traverse_node(arena, pilot_ast::NodeId(c), in_noalloc);
+                    }
+                }
+                return;
+            }
+            pilot_ast::NodeKind::ListExpr | pilot_ast::NodeKind::MapExpr => {
+                let state = if in_noalloc {
+                    EscapeState::Global
+                } else {
+                    EscapeState::Stack
+                };
+                self.escape.record_allocation("container_lit", "HeapContainer", state);
+                if in_noalloc {
+                    self.realtime.verify_noalloc_block("realtime_block", EscapeState::Global, span);
+                }
+            }
+            pilot_ast::NodeKind::CallExpr => {
+                let callee = *arena.node(pilot_ast::NodeId(node.lhs));
+                if callee.node_kind() == pilot_ast::NodeKind::IdentExpr {
+                    let cname = arena.interner.resolve(pilot_intern::SymbolId(callee.lhs));
+                    if cname == "malloc" || cname == "spawn" {
+                        if in_noalloc {
+                            self.realtime.verify_noalloc_block(cname, EscapeState::Global, span);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Recursively traverse children
+        match node.node_kind() {
+            pilot_ast::NodeKind::Program | pilot_ast::NodeKind::BlockExpr => {
+                let children = arena.children_slice(node.lhs, node.rhs);
+                for &c in children {
+                    self.traverse_node(arena, pilot_ast::NodeId(c), in_noalloc);
+                }
+            }
+            pilot_ast::NodeKind::LetStmt | pilot_ast::NodeKind::VarStmt => {
+                self.traverse_node(arena, pilot_ast::NodeId(node.rhs), in_noalloc);
+            }
+            pilot_ast::NodeKind::BinaryExpr => {
+                self.traverse_node(arena, pilot_ast::NodeId(node.lhs), in_noalloc);
+                self.traverse_node(arena, pilot_ast::NodeId(node.rhs), in_noalloc);
+            }
+            pilot_ast::NodeKind::UnaryExpr => {
+                self.traverse_node(arena, pilot_ast::NodeId(node.lhs), in_noalloc);
+            }
+            pilot_ast::NodeKind::ReturnStmt | pilot_ast::NodeKind::YieldStmt => {
+                self.traverse_node(arena, pilot_ast::NodeId(node.lhs), in_noalloc);
+            }
+            pilot_ast::NodeKind::IfExpr => {
+                self.traverse_node(arena, pilot_ast::NodeId(node.lhs), in_noalloc);
+                self.traverse_node(arena, pilot_ast::NodeId(node.rhs), in_noalloc);
+            }
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]
@@ -118,5 +213,21 @@ mod tests {
         optimizer.realtime.verify_noalloc_block("dsp_process", EscapeState::Global, span);
         assert_eq!(optimizer.realtime.diagnostics.len(), 1);
         assert_eq!(optimizer.realtime.diagnostics[0].code, "PILOT104");
+    }
+
+    #[test]
+    fn test_perceus_optimizer_analyze_arena_catches_noalloc_heap_escape() {
+        let code = r#"
+def dsp_process_signal(x: float) -> float {
+    let buf = [1.0, 2.0, 3.0]
+    return x
+}
+"#;
+        let arena = pilot_parser::parse(code);
+        let mut optimizer = PerceusOptimizer::new();
+        let diags = optimizer.analyze_arena(&arena, arena.root);
+
+        assert!(!diags.is_empty(), "Expected PILOT104 for heap allocation inside dsp_process_signal");
+        assert_eq!(diags[0].code, "PILOT104");
     }
 }

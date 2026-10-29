@@ -139,8 +139,8 @@ flowchart TD
 | **M35** | Native Codegen Backends (`LLVM`/`WASM`/`C-ABI`), Bidirectional Transpilers & Polyglot FFI (Core) | Phase D | ✅ **Completed** | `crates/pilot-codegen/`, `crates/pilot-transpile/`, `crates/pilot-polyglot/` |
 | **M36** | Standalone Rust `pilot` CLI, Full `.NET` Retirement & Hardware Performance Gate | Phase D | ✅ **Completed** | `crates/pilot-cli/`, `crates/pilot-bench/` |
 | **M37** | Full AST Type Inference, Pattern Exhaustiveness, Null/Error Flow & Contract/Dimension Walkers | Phase E | ✅ **Completed** | `crates/pilot-analysis/`, `crates/pilot-cli/` (`pilot check`) |
-| **M38** | Symbolic Autodiff (`!@`), Call-Quoting (`!`, `!!`, `!&`, `!^`, `!?`), Macros, Demotion & Perceus Pass | Phase E | 🎯 **Next Up** | `crates/pilot-analysis/`, `crates/pilot-perceus/` |
-| **M39** | AST-to-Bytecode Compiler, Full `PilVM` v3 Execution, Runtime Intrinsics & Live `pilot test` | Phase E | 📋 **Planned** | `crates/pilot-vm/`, `crates/pilot-rt/`, `crates/pilot-cli/` (`pilot test`/`repl`) |
+| **M38** | Symbolic Autodiff (`!@`), Call-Quoting (`!`, `!!`, `!&`, `!^`, `!?`), Macros, Demotion & Perceus Pass | Phase E | ✅ **Completed** | `crates/pilot-analysis/`, `crates/pilot-perceus/` |
+| **M39** | AST-to-Bytecode Compiler, Full `PilVM` v3 Execution, Runtime Intrinsics & Live `pilot test` | Phase E | 🎯 **Next Up** | `crates/pilot-vm/`, `crates/pilot-rt/`, `crates/pilot-cli/` (`pilot test`/`repl`) |
 | **M40** | True AST-Driven Native Codegen (`C11/C23`, `LLVM IR`, `WASM/WASI`, `ASM`) & Linkable `libpilot_rt` | Phase E | 📋 **Planned** | `crates/pilot-codegen/`, `crates/pilot-rt/` |
 | **M41** | Full AST Bidirectional Transpilers (`pilot --emit` / `--from`) & Foreign AST Ingesters | Phase E | 📋 **Planned** | `crates/pilot-transpile/`, `crates/pilot-cli/` |
 | **M42** | Live Polyglot Execution Bridges, Native DB Drivers (`PostgreSQL`/`SQLite`) & Yield-Bridges | Phase E | 📋 **Planned** | `crates/pilot-polyglot/`, `crates/pilot-rt/` |
@@ -1102,22 +1102,22 @@ struct PilotVal {
 - `CodeGen/Builtins/{Builder,Equality,Json,Metadata,Observable,Repr}Generator.cs` & `CodeGen/Engine/PilotCodeGeneratorPipeline.cs` (410 lines)
 
 ### Sub-Tasks & Deliverables
-- [ ] **38.1: Compile-Time Symbolic Differentiation Engine (`!@` — `crates/pilot-analysis/src/autodiff.rs`)**
+- [x] **38.1: Compile-Time Symbolic Differentiation Engine (`!@` — `crates/pilot-analysis/src/autodiff.rs`)**
   - Port `PilotSymbolicDifferentiator.cs` over `AstArena`:
     - Symbolic forward and reverse-mode (`grad`, `jacobian`, `vjp`) AST differentiation rules for `+`, `-`, `*` (product rule), `/` (quotient rule), `**` (power/logarithmic differentiation), unary `-`, and `std.math` intrinsics (`sin`, `cos`, `tan`, `exp`, `ln`, `sqrt`, `abs`, `sigmoid`, `relu`, `tanh`).
     - Multi-variable gradient tuple synthesis, algebraic simplification ($0 \cdot x \rightarrow 0$, $1 \cdot x \rightarrow x$, $x + 0 \rightarrow x$, constant folding), and Common Subexpression Elimination (CSE) hoisting shared sub-derivatives into local `let` bindings.
     - Automatic fallback to unboxed `Dual(val, tangent)` forward-mode arithmetic on opaque loops/FFI calls, emitting `AD001`–`AD004` diagnostics on non-differentiable side effects.
-- [ ] **38.2: Call-Quoting Projections (`!`, `!!`, `!&`, `!^`, `!?` — `crates/pilot-analysis/src/quoting.rs`)**
+- [x] **38.2: Call-Quoting Projections (`!`, `!!`, `!&`, `!^`, `!?` — `crates/pilot-analysis/src/quoting.rs`)**
   - Port `PilotCallQuotingEngine.cs` over `AstArena` inspecting `AstNode.flags` (`CallQuoteKind`):
     - `ShallowQuote` (`fn!(a, b)`): Reify typed `CallExpr[TReturn]` AST descriptors with source spans and resolved parameter metadata.
     - `DeepSplice` (`fn!!(~a, b)`): Clone callee AST body hygienically, evaluate `~arg` unquoted expressions at compile time, constant-fold branches, and inline the specialized AST at the call site.
     - `CallFrameLayout` (`fn!&(a, b)`): Synthesize zero-marshalling C-ABI `CallFrame_<FnId>` struct descriptors with exact 8/16-byte aligned field offsets.
     - `ObservableLValue` (`fn!^(a, b)`): Extract LValue dependency paths and construct reactive `Signal[T]` topological subscription nodes (`REACT001`–`REACT003`).
     - `CoWDryRun` (`fn!?(a, b)`): Rewrite state/table/I/O mutations inside the call graph to target a transactional `ShadowEffectContext` returning `EffectPlan[TReturn]`.
-- [ ] **38.3: Homoiconic Macros (`defmacro`, `quote`, `dsl`) & Compile-Time Decorator Generators (`@builder`, `@json`, `@observable`, `@equality`, `@repr`, `@metadata`)**
+- [x] **38.3: Homoiconic Macros (`defmacro`, `quote`, `dsl`) & Compile-Time Decorator Generators (`@builder`, `@json`, `@observable`, `@equality`, `@repr`, `@metadata`)**
   - Implement AST-to-AST macro expansion for `defmacro`, `quote`/`quasiquote`/`~`, `defkeyword` hierarchies, and `dsl` blocks.
   - Port `CodeGen/Builtins/*` as native Rust AST-to-AST derive passes that synthesize builder methods, structural equality, zero-copy JSON serialization/deserialization, reactive property notifications, and string representations directly into `AstArena` (zero Roslyn dependency).
-- [ ] **38.4: Compiler-Wide Static Demotion (`M19`) & Automatic Perceus Escape/ARC Pass (`comptime.rs`, `crates/pilot-perceus`)**
+- [x] **38.4: Compiler-Wide Static Demotion (`M19`) & Automatic Perceus Escape/ARC Pass (`comptime.rs`, `crates/pilot-perceus`)**
   - Port `PilotStaticDemotionPass.cs`: resolve lexical variables to `(frame_depth, slot_index)` coordinates, struct/class fields to fixed byte offsets, `:ns/kw` keywords to `u32` IDs, and method groups/adapters to direct function indices.
   - Connect `pilot-perceus` (`EscapeAnalyzer` + `PerceusArcInserter` + `RealtimeChecker`) to walk the typed `AstArena`, automatically classifying allocations into `EscapeState::Stack` (Tier 0), `EscapeState::Region` (Tier 1 `BumpRegion`), or `EscapeState::Global` (Tier 2 Perceus `dup`/`drop`/`drop_reuse`), and enforcing `@zero_runtime` / `--comptime-audit` (`COMPTIME001`–`COMPTIME010`) and `noalloc` / `@hard_realtime` (`PILOT104`).
 

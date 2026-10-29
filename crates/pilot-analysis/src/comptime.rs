@@ -94,4 +94,62 @@ impl ComptimeEvaluator {
             is_read_only,
         });
     }
+
+    /// Performs the Milestone 19 compiler-wide static demotion pass across `AstArena`.
+    pub fn demote_arena(&mut self, arena: &pilot_ast::AstArena, root: pilot_ast::NodeId) {
+        if root.is_none() {
+            return;
+        }
+
+        let mut current_depth: u32 = 0;
+        let mut slot_counter: u32 = 0;
+
+        for i in 0..arena.nodes.len() {
+            let node_id = pilot_ast::NodeId(i as u32);
+            let node = *arena.node(node_id);
+            let span = arena.span(node_id);
+
+            match node.node_kind() {
+                pilot_ast::NodeKind::FnDecl => {
+                    current_depth += 1;
+                    slot_counter = 0;
+                }
+                pilot_ast::NodeKind::LetStmt => {
+                    let sym = pilot_intern::SymbolId(node.lhs);
+                    let var_name = arena.interner.resolve(sym);
+                    self.record_demoted_slot(var_name, current_depth, slot_counter, true);
+                    slot_counter += 1;
+                }
+                pilot_ast::NodeKind::VarStmt => {
+                    let sym = pilot_intern::SymbolId(node.lhs);
+                    let var_name = arena.interner.resolve(sym);
+                    self.record_demoted_slot(var_name, current_depth, slot_counter, false);
+                    slot_counter += 1;
+                }
+                pilot_ast::NodeKind::ParamDecl => {
+                    let sym = pilot_intern::SymbolId(node.lhs);
+                    let var_name = arena.interner.resolve(sym);
+                    self.record_demoted_slot(var_name, current_depth, slot_counter, true);
+                    slot_counter += 1;
+                }
+                pilot_ast::NodeKind::ComptimeExpr => {
+                    // Check if comptime block contains illegal dynamic constructs
+                    let inner_id = pilot_ast::NodeId(node.lhs);
+                    if inner_id.is_some() {
+                        let inner_node = *arena.node(inner_id);
+                        if inner_node.node_kind() == pilot_ast::NodeKind::CallExpr {
+                            let callee = *arena.node(pilot_ast::NodeId(inner_node.lhs));
+                            if callee.node_kind() == pilot_ast::NodeKind::IdentExpr {
+                                let cname = arena.interner.resolve(pilot_intern::SymbolId(callee.lhs));
+                                if cname == "print" || cname == "write" || cname == "malloc" {
+                                    self.report_comptime_side_effect(cname, span);
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }

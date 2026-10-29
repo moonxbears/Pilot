@@ -9,3 +9,6 @@ pilot-ast = { path = "../pilot-ast" }
 pilot-intern = { path = "../pilot-intern" }
 pilot-span = { path = "../pilot-span" }
 pilot-analysis = { path = "../pilot-analysis" }
+
+[dev-dependencies]
+pilot-parser = { path = "../pilot-parser" }

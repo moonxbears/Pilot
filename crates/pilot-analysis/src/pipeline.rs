@@ -68,8 +68,20 @@ impl AnalysisPipeline {
         diagnostics.extend(dim_checker.diagnostics);
         diagnostics.extend(contract_verifier.diagnostics);
 
+        // 6. Homoiconic Call-Quoting Projections
+        let mut quoting_engine = crate::quoting::CallQuotingEngine::new();
+        for i in 0..arena.nodes.len() {
+            let node_id = NodeId(i as u32);
+            let node = *arena.node(node_id);
+            if node.node_kind() == pilot_ast::NodeKind::CallExpr {
+                quoting_engine.project_call(arena, node_id);
+            }
+        }
+        diagnostics.extend(quoting_engine.diagnostics);
+
         // 7. Comptime Evaluator & Static Demotion Pass
-        let comptime = ComptimeEvaluator::new();
+        let mut comptime = ComptimeEvaluator::new();
+        comptime.demote_arena(arena, root);
         diagnostics.extend(comptime.diagnostics);
         diagnostics.extend(infer_engine.diagnostics);
 
