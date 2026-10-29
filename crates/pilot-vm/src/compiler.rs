@@ -50,15 +50,17 @@ impl BytecodeCompiler {
 
         // Resolve call patches
         for &(call_idx, ref fn_name) in &compiler.call_patches {
+            let inst = compiler.instructions[call_idx];
+            let dst = inst.dst();
             if let Some(&(entry, _)) = compiler.fn_entries.get(fn_name) {
-                let inst = compiler.instructions[call_idx];
-                let dst = inst.dst();
                 compiler.instructions[call_idx] = Instruction::encode(
                     Opcode::Call,
                     dst,
                     (entry >> 8) as u8,
                     (entry & 0xFF) as u8,
                 );
+            } else {
+                compiler.instructions[call_idx] = Instruction::encode(Opcode::Nop, dst, 0, 0);
             }
         }
 
