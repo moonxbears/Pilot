@@ -9,7 +9,7 @@ using Pilot.Transpilation.Licensing;
 namespace Pilot.Transpilation.Ingesters;
 
 /// <summary>
-/// Milestone 20.4: Structured AST frontends for Python 3, Rust, C11, C++20, JavaScript/TypeScript, and Lua.
+/// Milestone 20.4: Structured AST frontends for Python 3, Rust, C11, C++20, JavaScript/TypeScript, Lua, Java 21+, and Ruby 3.2+.
 /// Parses foreign declarations, control flow, ADTs, <c>Option&lt;T&gt;</c>/<c>Result&lt;T, E&gt;</c>, and expressions
 /// into <see cref="PilotIrModule"/>, applies <c>--strict-pilot</c> upgrades, formats via <c>PilotFormatter</c>,
 /// and validates with <see cref="PilotIngestValidator"/>.
@@ -50,6 +50,8 @@ public static partial class ForeignAstIngester
                 "ts" or "typescript" => "TypeScript",
                 "js" or "javascript" => "JavaScript",
                 "lua" => "Lua",
+                "java" => "Java",
+                "ruby" or "rb" => "Ruby",
                 _ => sourceLanguage
             };
             module.HeaderComments.Add($"// Converted & optimized from {displayLang} to Pilot");
@@ -74,6 +76,12 @@ public static partial class ForeignAstIngester
                 break;
             case "lua":
                 ParseLuaModule(foreignSource, module, options);
+                break;
+            case "java":
+                ParseJavaModule(foreignSource, module, options);
+                break;
+            case "ruby" or "rb":
+                ParseRubyModule(foreignSource, module, options);
                 break;
             default:
                 return TranspilationResult.CreateFailure($"Unsupported foreign source language '{sourceLanguage}'.", "pilot", lic);
@@ -1153,6 +1161,1598 @@ public static partial class ForeignAstIngester
     }
 
     // ========================================================================
+    // 6. JAVA 21+ AST FRONTEND
+    // ========================================================================
+
+    private static void ParseJavaModule(string source, PilotIrModule module, TranspilationOptions options)
+    {
+        var sealedAdts = new Dictionary<string, PilotIrAdtDefStmt>(StringComparer.Ordinal);
+        var topStmts = new List<PilotIrStmt>();
+        var mainTailStmts = new List<PilotIrStmt>();
+
+        ParseJavaItems(source, topStmts, sealedAdts, mainTailStmts);
+        topStmts.AddRange(mainTailStmts);
+        module.Statements.AddRange(topStmts);
+    }
+
+    private static void ParseJavaItems(
+        string source,
+        List<PilotIrStmt> targetStmts,
+        Dictionary<string, PilotIrAdtDefStmt> sealedAdts,
+        List<PilotIrStmt> mainTailStmts)
+    {
+        var items = SplitIntoBraceItems(source);
+        foreach (var item in items)
+        {
+            string rawHead = item.Header.Trim();
+            if (string.IsNullOrWhiteSpace(rawHead) && string.IsNullOrWhiteSpace(item.Body))
+                continue;
+
+            if (rawHead.StartsWith("//", StringComparison.Ordinal))
+            {
+                if (!rawHead.StartsWith("// Code transpiled", StringComparison.Ordinal))
+                    targetStmts.Add(new PilotIrCommentStmt { CommentText = rawHead, Line = item.Line });
+                continue;
+            }
+
+            string head = StripJavaAnnotations(rawHead);
+            if (string.IsNullOrWhiteSpace(head) && !item.HasBraces)
+                continue;
+
+            if (head.StartsWith("package ", StringComparison.Ordinal))
+                continue;
+
+            if (head.StartsWith("import ", StringComparison.Ordinal))
+            {
+                string impTarget = head["import ".Length..].Trim().TrimEnd(';');
+                if (impTarget.StartsWith("java.", StringComparison.Ordinal) ||
+                    impTarget.StartsWith("javax.", StringComparison.Ordinal) ||
+                    impTarget.StartsWith("static java.", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                string mapped = PilotLibraryMapper.TranslateForeignLibrariesToPilot(head, "java");
+                if (mapped.StartsWith("//", StringComparison.Ordinal))
+                    targetStmts.Add(new PilotIrCommentStmt { CommentText = mapped, Line = item.Line });
+                continue;
+            }
+
+            if (item.HasBraces)
+            {
+                // 1. Sealed interface ADT root: [public] sealed interface Shape [permits Circle, Rect]
+                var sealedMatch = JavaSealedInterfaceRegex().Match(head);
+                if (sealedMatch.Success)
+                {
+                    string adtName = sealedMatch.Groups[1].Value;
+                    var adt = new PilotIrAdtDefStmt { Line = item.Line, Name = adtName };
+                    sealedAdts[adtName] = adt;
+                    targetStmts.Add(adt);
+                    if (!string.IsNullOrWhiteSpace(item.Body))
+                        ParseJavaItems(item.Body, targetStmts, sealedAdts, mainTailStmts);
+                    continue;
+                }
+
+                // 2. Java record: [public] [static] record Circle(double r) [implements Shape]
+                var recMatch = JavaRecordHeaderRegex().Match(head);
+                if (recMatch.Success)
+                {
+                    string recName = recMatch.Groups[1].Value;
+                    string rawComponents = recMatch.Groups[2].Value;
+                    string implClause = recMatch.Groups[3].Value.Trim();
+
+                    var fields = new List<(string Name, string Type)>();
+                    foreach (var comp in SplitTopLevelComma(rawComponents))
+                    {
+                        string ct = StripJavaAnnotations(comp.Trim());
+                        if (ct.StartsWith("final ", StringComparison.Ordinal))
+                            ct = ct["final ".Length..].Trim();
+                        if (string.IsNullOrEmpty(ct)) continue;
+                        int lastSpace = FindLastTopLevelSpace(ct);
+                        if (lastSpace > 0)
+                        {
+                            string fType = MapForeignType(ct[..lastSpace].Trim(), "java");
+                            string fName = ct[(lastSpace + 1)..].Trim();
+                            fields.Add((fName, fType));
+                        }
+                    }
+
+                    string? parentAdt = null;
+                    if (!string.IsNullOrEmpty(implClause))
+                    {
+                        foreach (var iface in SplitTopLevelComma(implClause))
+                        {
+                            string cleanIface = StripGenericArgs(iface.Trim());
+                            if (sealedAdts.ContainsKey(cleanIface))
+                            {
+                                parentAdt = cleanIface;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (parentAdt != null && string.IsNullOrWhiteSpace(item.Body))
+                    {
+                        sealedAdts[parentAdt].Variants.Add(new PilotIrAdtVariant(recName, fields));
+                        continue;
+                    }
+
+                    var recCls = new PilotIrClassDefStmt
+                    {
+                        Line = item.Line,
+                        Kind = PilotTypeDeclKind.Record,
+                        Name = recName
+                    };
+                    foreach (var (fn, ft) in fields)
+                        recCls.Fields.Add(new PilotIrFieldDecl(fn, ft, IsMutable: false));
+                    targetStmts.Add(recCls);
+                    continue;
+                }
+
+                // 3. Java enum: [public] enum Priority { Low(1), Medium(2); ... }
+                var enumMatch = JavaEnumHeaderRegex().Match(head);
+                if (enumMatch.Success)
+                {
+                    targetStmts.Add(ParseJavaEnum(enumMatch.Groups[1].Value, item.Body, item.Line));
+                    continue;
+                }
+
+                // 4. Java class: ProgramModule wrapper, *PilotExtensions, or regular class
+                var clsMatch = JavaClassHeaderRegex().Match(head);
+                if (clsMatch.Success)
+                {
+                    string clsName = clsMatch.Groups[1].Value;
+                    string baseType = clsMatch.Groups[2].Value.Trim();
+
+                    if (clsName == "PilotMatrix")
+                        continue;
+
+                    if (clsName == "ProgramModule")
+                    {
+                        ParseJavaItems(item.Body, targetStmts, sealedAdts, mainTailStmts);
+                        continue;
+                    }
+
+                    if (clsName.EndsWith("PilotExtensions", StringComparison.Ordinal))
+                    {
+                        string rawTarget = clsName[..^"PilotExtensions".Length];
+                        string extTarget = MapForeignType(rawTarget, "java");
+                        var extStmt = targetStmts.OfType<PilotIrExtensionDefStmt>()
+                            .FirstOrDefault(e => e.TargetType == extTarget);
+                        if (extStmt == null)
+                        {
+                            extStmt = new PilotIrExtensionDefStmt { Line = item.Line, TargetType = extTarget };
+                            targetStmts.Add(extStmt);
+                        }
+
+                        var innerItems = new List<PilotIrStmt>();
+                        ParseJavaItems(item.Body, innerItems, sealedAdts, mainTailStmts);
+                        foreach (var m in innerItems.OfType<PilotIrFuncDefStmt>())
+                        {
+                            m.IsStatic = false;
+                            if (m.Parameters.Count > 0 && m.Parameters[0].Name is "self_val" or "self")
+                                m.Parameters[0] = new PilotIrParameter("self");
+                            else
+                                m.Parameters.Insert(0, new PilotIrParameter("self"));
+                            extStmt.Methods.Add(m);
+                        }
+                        continue;
+                    }
+
+                    targetStmts.Add(ParseJavaClass(clsName, baseType, item.Body, item.Line, sealedAdts, mainTailStmts));
+                    continue;
+                }
+
+                // 5. Java static/module method header (e.g. inside ProgramModule)
+                if (TryParseJavaMethodHeader(head, enclosingClassName: null, item.Line, out var javaFn, out bool isCtor) && !isCtor)
+                {
+                    var bodyStmts = ParseBraceDelimitedBlock(item.Body, "java", out _);
+                    if ((javaFn!.Name == "main" && javaFn.IsStatic) ||
+                        (javaFn.Name == "RunMain" && javaFn.IsStatic && javaFn.Parameters.Count == 0))
+                    {
+                        mainTailStmts.AddRange(bodyStmts);
+                        continue;
+                    }
+
+                    javaFn.IsStatic = false;
+                    javaFn.Body.AddRange(bodyStmts);
+                    targetStmts.Add(javaFn);
+                    continue;
+                }
+
+                // 6. Control flow block
+                if (TryParseControlFlowBlock(head, item.Body, item.TrailingBranches, "java", item.Line, out var cf))
+                {
+                    targetStmts.Add(cf!);
+                    continue;
+                }
+            }
+
+            // Simple field/constant/statement
+            string cleanedSimple = StripJavaModifiersForTopVar(head);
+            var simpleStmt = ParseForeignSimpleStmt(cleanedSimple, "java", item.Line);
+            if (simpleStmt != null)
+                targetStmts.Add(simpleStmt);
+        }
+    }
+
+    private static PilotIrEnumDefStmt ParseJavaEnum(string name, string body, int line)
+    {
+        var en = new PilotIrEnumDefStmt { Line = line, Name = name };
+        int semiIdx = FindTopLevelChar(body, ';');
+        string constantsSection = semiIdx >= 0 ? body[..semiIdx] : body;
+
+        foreach (var raw in SplitTopLevelComma(constantsSection))
+        {
+            string entry = StripJavaAnnotations(raw.Trim());
+            if (string.IsNullOrEmpty(entry) || entry.StartsWith("//", StringComparison.Ordinal))
+                continue;
+
+            // Strip any line comments preceding the enum constant
+            var entryLines = entry.Split('\n').Select(l => l.Trim()).Where(l => !l.StartsWith("//", StringComparison.Ordinal)).ToList();
+            entry = string.Join(" ", entryLines).Trim();
+            if (string.IsNullOrEmpty(entry))
+                continue;
+
+            int openP = entry.IndexOf('(');
+            if (openP > 0 && entry.EndsWith(")", StringComparison.Ordinal))
+            {
+                string mName = entry[..openP].Trim();
+                string argStr = entry[(openP + 1)..^1].Trim();
+                var args = SplitTopLevelComma(argStr);
+                PilotIrExpr? valExpr = args.Count == 1 ? ParseForeignExpr(args[0], "java") : null;
+                en.Members.Add((mName, valExpr));
+            }
+            else
+            {
+                int eq = entry.IndexOf('=');
+                if (eq > 0)
+                    en.Members.Add((entry[..eq].Trim(), ParseForeignExpr(entry[(eq + 1)..].Trim(), "java")));
+                else
+                    en.Members.Add((entry, null));
+            }
+        }
+        return en;
+    }
+
+    private static PilotIrClassDefStmt ParseJavaClass(
+        string clsName,
+        string baseType,
+        string body,
+        int line,
+        Dictionary<string, PilotIrAdtDefStmt> sealedAdts,
+        List<PilotIrStmt> mainTailStmts)
+    {
+        var cls = new PilotIrClassDefStmt { Line = line, Kind = PilotTypeDeclKind.Class, Name = clsName };
+        if (!string.IsNullOrEmpty(baseType) && baseType != "Object")
+            cls.BaseTypes.Add(MapForeignType(baseType, "java"));
+
+        foreach (var mItem in SplitIntoBraceItems(body))
+        {
+            string rawH = mItem.Header.Trim();
+            if (string.IsNullOrWhiteSpace(rawH) || rawH.StartsWith("//", StringComparison.Ordinal))
+                continue;
+
+            string h = StripJavaAnnotations(rawH);
+            if (mItem.HasBraces)
+            {
+                if (TryParseJavaMethodHeader(h, clsName, mItem.Line, out var methodFn, out bool isCtor))
+                {
+                    var mBody = ParseBraceDelimitedBlock(mItem.Body, "java", out _);
+                    if (isCtor)
+                    {
+                        bool allTrivialFieldAssigns = mBody.All(s =>
+                            s is PilotIrAssignStmt
+                            {
+                                Target: PilotIrMemberAccessExpr { Target: PilotIrIdentifierExpr { Name: "self" or "this" } }
+                            });
+                        if (!allTrivialFieldAssigns && mBody.Count > 0)
+                        {
+                            methodFn!.Name = "__init__";
+                            methodFn.Parameters.Insert(0, new PilotIrParameter("self"));
+                            methodFn.Body.AddRange(mBody);
+                            cls.Methods.Add(methodFn);
+                        }
+                        continue;
+                    }
+
+                    if (methodFn!.Name == "main" && methodFn.IsStatic)
+                    {
+                        mainTailStmts.AddRange(mBody);
+                        continue;
+                    }
+
+                    if (!methodFn.IsStatic && (methodFn.Parameters.Count == 0 || methodFn.Parameters[0].Name != "self"))
+                        methodFn.Parameters.Insert(0, new PilotIrParameter("self"));
+
+                    methodFn.Body.AddRange(mBody);
+                    cls.Methods.Add(methodFn);
+                }
+            }
+            else
+            {
+                // Field declaration
+                string fieldClean = StripJavaModifiersForTopVar(h);
+                if (TryParseVariableDeclaration(fieldClean, "java", mItem.Line, out var fDecl) && fDecl != null)
+                {
+                    if (!cls.Fields.Any(f => f.Name == fDecl.Name))
+                    {
+                        cls.Fields.Add(new PilotIrFieldDecl(
+                            fDecl.Name,
+                            fDecl.DeclaredType ?? "any",
+                            fDecl.Initializer,
+                            IsMutable: fDecl.Kind == PilotVarDeclKind.Var));
+                    }
+                }
+            }
+        }
+        return cls;
+    }
+
+    private static bool TryParseJavaMethodHeader(
+        string rawHeader,
+        string? enclosingClassName,
+        int line,
+        out PilotIrFuncDefStmt? fn,
+        out bool isConstructor)
+    {
+        fn = null;
+        isConstructor = false;
+        string h = StripJavaAnnotations(rawHeader.Trim());
+
+        if (h.StartsWith("if ") || h.StartsWith("if(") ||
+            h.StartsWith("for ") || h.StartsWith("for(") ||
+            h.StartsWith("while ") || h.StartsWith("while(") ||
+            h.StartsWith("switch ") || h.StartsWith("switch(") ||
+            h.StartsWith("catch ") || h.StartsWith("catch(") ||
+            h == "try" || h == "else" || h == "finally" || h == "static")
+        {
+            return false;
+        }
+
+        // Strip trailing 'throws ...'
+        int closeParen = h.LastIndexOf(')');
+        if (closeParen < 0)
+            return false;
+
+        string afterParen = h[(closeParen + 1)..].Trim();
+        if (!string.IsNullOrEmpty(afterParen) && !afterParen.StartsWith("throws ", StringComparison.Ordinal))
+            return false;
+
+        int openParen = FindMatchingOpenParen(h, closeParen);
+        if (openParen <= 0)
+            return false;
+
+        string beforeParen = h[..openParen].Trim();
+        string rawParams = h[(openParen + 1)..closeParen].Trim();
+
+        bool isStatic = false;
+        while (true)
+        {
+            if (beforeParen.StartsWith("public ", StringComparison.Ordinal)) beforeParen = beforeParen["public ".Length..].TrimStart();
+            else if (beforeParen.StartsWith("private ", StringComparison.Ordinal)) beforeParen = beforeParen["private ".Length..].TrimStart();
+            else if (beforeParen.StartsWith("protected ", StringComparison.Ordinal)) beforeParen = beforeParen["protected ".Length..].TrimStart();
+            else if (beforeParen.StartsWith("static ", StringComparison.Ordinal)) { isStatic = true; beforeParen = beforeParen["static ".Length..].TrimStart(); }
+            else if (beforeParen.StartsWith("final ", StringComparison.Ordinal)) beforeParen = beforeParen["final ".Length..].TrimStart();
+            else if (beforeParen.StartsWith("synchronized ", StringComparison.Ordinal)) beforeParen = beforeParen["synchronized ".Length..].TrimStart();
+            else if (beforeParen.StartsWith("default ", StringComparison.Ordinal)) beforeParen = beforeParen["default ".Length..].TrimStart();
+            else break;
+        }
+
+        var genericParams = new List<string>();
+        if (beforeParen.StartsWith("<", StringComparison.Ordinal))
+        {
+            int closeGen = FindMatchingCloseAngle(beforeParen, 0);
+            if (closeGen > 0)
+            {
+                foreach (var gp in SplitTopLevelComma(beforeParen[1..closeGen]))
+                {
+                    string gpName = gp.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0].Trim();
+                    if (!string.IsNullOrEmpty(gpName))
+                        genericParams.Add(gpName);
+                }
+                beforeParen = beforeParen[(closeGen + 1)..].TrimStart();
+            }
+        }
+
+        if (enclosingClassName != null && beforeParen == enclosingClassName)
+        {
+            isConstructor = true;
+            fn = new PilotIrFuncDefStmt { Line = line, Name = enclosingClassName };
+        }
+        else
+        {
+            int lastSpace = FindLastTopLevelSpace(beforeParen);
+            if (lastSpace <= 0)
+                return false;
+
+            string rawRet = beforeParen[..lastSpace].Trim();
+            string mName = beforeParen[(lastSpace + 1)..].Trim();
+            if (!IsIdentifier(mName))
+                return false;
+
+            string mappedRet = MapForeignType(rawRet, "java");
+            fn = new PilotIrFuncDefStmt
+            {
+                Line = line,
+                Name = mName,
+                IsStatic = isStatic,
+                DeclaredReturnType = mappedRet is "void" or "auto" ? null : mappedRet
+            };
+            fn.GenericParams.AddRange(genericParams);
+        }
+
+        if (!string.IsNullOrEmpty(rawParams))
+        {
+            foreach (var p in SplitTopLevelComma(rawParams))
+            {
+                string pt = StripJavaAnnotations(p.Trim());
+                if (pt.StartsWith("final ", StringComparison.Ordinal))
+                    pt = pt["final ".Length..].Trim();
+                if (string.IsNullOrEmpty(pt))
+                    continue;
+
+                int pSpace = FindLastTopLevelSpace(pt);
+                if (pSpace > 0)
+                {
+                    string rawPType = pt[..pSpace].Trim();
+                    string pName = pt[(pSpace + 1)..].Trim();
+                    bool isVarargs = rawPType.EndsWith("...", StringComparison.Ordinal);
+                    if (isVarargs)
+                        rawPType = rawPType[..^3].Trim();
+                    fn.Parameters.Add(new PilotIrParameter(pName, MapForeignType(rawPType, "java"), IsVariadic: isVarargs));
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static string StripJavaAnnotations(string s)
+    {
+        string cur = s.TrimStart();
+        while (cur.StartsWith("@", StringComparison.Ordinal))
+        {
+            int i = 1;
+            while (i < cur.Length && (char.IsLetterOrDigit(cur[i]) || cur[i] is '_' or '.'))
+                i++;
+            if (i < cur.Length && cur[i] == '(')
+            {
+                int close = FindMatchingCloseParen(cur, i);
+                i = close >= i ? close + 1 : cur.Length;
+            }
+            cur = cur[i..].TrimStart();
+        }
+        return cur;
+    }
+
+    private static string StripJavaModifiersForTopVar(string s)
+    {
+        string cur = StripJavaAnnotations(s.Trim());
+        while (true)
+        {
+            if (cur.StartsWith("public ", StringComparison.Ordinal)) cur = cur["public ".Length..].TrimStart();
+            else if (cur.StartsWith("private ", StringComparison.Ordinal)) cur = cur["private ".Length..].TrimStart();
+            else if (cur.StartsWith("protected ", StringComparison.Ordinal)) cur = cur["protected ".Length..].TrimStart();
+            else if (cur.StartsWith("static ", StringComparison.Ordinal)) cur = cur["static ".Length..].TrimStart();
+            else if (cur.StartsWith("volatile ", StringComparison.Ordinal)) cur = cur["volatile ".Length..].TrimStart();
+            else if (cur.StartsWith("transient ", StringComparison.Ordinal)) cur = cur["transient ".Length..].TrimStart();
+            else break;
+        }
+        return cur;
+    }
+
+    private static string StripGenericArgs(string typeName)
+    {
+        int lt = typeName.IndexOf('<');
+        return lt > 0 ? typeName[..lt].Trim() : typeName;
+    }
+
+    private static int FindLastTopLevelSpace(string s)
+    {
+        int depth = 0;
+        for (int i = s.Length - 1; i >= 0; i--)
+        {
+            char c = s[i];
+            if (c is '>' or ')' or ']') depth++;
+            else if (c is '<' or '(' or '[') depth = Math.Max(0, depth - 1);
+            else if (char.IsWhiteSpace(c) && depth == 0)
+                return i;
+        }
+        return -1;
+    }
+
+    private static int FindMatchingOpenParen(string s, int closeIdx)
+    {
+        int depth = 0;
+        for (int i = closeIdx; i >= 0; i--)
+        {
+            if (s[i] == ')') depth++;
+            else if (s[i] == '(')
+            {
+                depth--;
+                if (depth == 0) return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int FindMatchingCloseAngle(string s, int openIdx)
+    {
+        int depth = 0;
+        for (int i = openIdx; i < s.Length; i++)
+        {
+            if (s[i] == '<') depth++;
+            else if (s[i] == '>')
+            {
+                depth--;
+                if (depth == 0) return i;
+            }
+        }
+        return -1;
+    }
+
+    // ========================================================================
+    // 7. RUBY 3.2+ AST FRONTEND
+    // ========================================================================
+
+    private static void ParseRubyModule(string source, PilotIrModule module, TranspilationOptions options)
+    {
+        var rawLines = source.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+        var logicalLines = PrepareRubyLogicalLines(rawLines);
+        int idx = 0;
+        var declaredScope = new HashSet<string>(StringComparer.Ordinal);
+        var parsed = ParseRubySuite(logicalLines, ref idx, stopOnBranchOrEnd: false, declaredScope);
+        module.Statements.AddRange(PostProcessRubyStatements(parsed));
+    }
+
+    private static List<(string Text, int LineNo)> PrepareRubyLogicalLines(string[] rawLines)
+    {
+        var merged = new List<(string Text, int LineNo)>();
+        var current = new StringBuilder();
+        int startLine = 1;
+        int bracketDepth = 0;
+
+        for (int i = 0; i < rawLines.Length; i++)
+        {
+            string trimmed = rawLines[i].Trim();
+            if (bracketDepth == 0)
+            {
+                if (string.IsNullOrWhiteSpace(trimmed))
+                {
+                    merged.Add(("", i + 1));
+                    continue;
+                }
+                if (trimmed.StartsWith("#", StringComparison.Ordinal))
+                {
+                    if (!trimmed.StartsWith("# frozen_string_literal:", StringComparison.Ordinal) &&
+                        !trimmed.StartsWith("# Code transpiled", StringComparison.Ordinal))
+                        merged.Add((trimmed, i + 1));
+                    continue;
+                }
+                startLine = i + 1;
+                current.Clear();
+                current.Append(StripTrailingRubyComment(trimmed));
+            }
+            else
+            {
+                current.Append(' ').Append(StripTrailingRubyComment(trimmed));
+            }
+
+            bracketDepth = CountRubyUnclosedBrackets(current.ToString());
+            if (bracketDepth <= 0)
+            {
+                bracketDepth = 0;
+                foreach (var sub in SplitRubyTopLevelSemicolons(current.ToString()))
+                {
+                    if (!string.IsNullOrWhiteSpace(sub))
+                        merged.Add((sub.Trim(), startLine));
+                }
+            }
+        }
+
+        if (bracketDepth > 0 && current.Length > 0)
+        {
+            merged.Add((current.ToString().Trim(), startLine));
+        }
+
+        return merged;
+    }
+
+    private static string StripTrailingRubyComment(string line)
+    {
+        bool inSingle = false;
+        bool inDouble = false;
+        int interpDepth = 0;
+        for (int i = 0; i < line.Length; i++)
+        {
+            char c = line[i];
+            if (c == '\\' && i + 1 < line.Length) { i++; continue; }
+            if (c == '\'' && !inDouble)
+            {
+                inSingle = !inSingle;
+            }
+            else if (c == '"' && !inSingle && interpDepth == 0)
+            {
+                inDouble = !inDouble;
+            }
+            else if (inDouble && c == '#' && i + 1 < line.Length && line[i + 1] == '{')
+            {
+                interpDepth++;
+                i++;
+            }
+            else if (interpDepth > 0 && c == '{')
+            {
+                interpDepth++;
+            }
+            else if (interpDepth > 0 && c == '}')
+            {
+                interpDepth--;
+            }
+            else if (c == '#' && !inSingle && !inDouble && interpDepth == 0)
+            {
+                return line[..i].TrimEnd();
+            }
+        }
+        return line;
+    }
+
+    private static int CountRubyUnclosedBrackets(string s)
+    {
+        int depth = 0;
+        bool inSingle = false;
+        bool inDouble = false;
+        int interpDepth = 0;
+        for (int i = 0; i < s.Length; i++)
+        {
+            char c = s[i];
+            if (c == '\\' && i + 1 < s.Length) { i++; continue; }
+            if (c == '\'' && !inDouble) inSingle = !inSingle;
+            else if (c == '"' && !inSingle && interpDepth == 0) inDouble = !inDouble;
+            else if (inDouble && c == '#' && i + 1 < s.Length && s[i + 1] == '{') { interpDepth++; i++; }
+            else if (interpDepth > 0 && c == '}') interpDepth--;
+            else if (!inSingle && !inDouble)
+            {
+                if (c is '(' or '[' or '{') depth++;
+                else if (c is ')' or ']' or '}') depth--;
+            }
+        }
+        return depth;
+    }
+
+    private static List<string> SplitRubyTopLevelSemicolons(string s)
+    {
+        var parts = new List<string>();
+        int depth = 0;
+        bool inSingle = false;
+        bool inDouble = false;
+        int interpDepth = 0;
+        int start = 0;
+
+        for (int i = 0; i < s.Length; i++)
+        {
+            char c = s[i];
+            if (c == '\\' && i + 1 < s.Length) { i++; continue; }
+            if (c == '\'' && !inDouble) inSingle = !inSingle;
+            else if (c == '"' && !inSingle && interpDepth == 0) inDouble = !inDouble;
+            else if (inDouble && c == '#' && i + 1 < s.Length && s[i + 1] == '{') { interpDepth++; i++; }
+            else if (interpDepth > 0 && c == '}') interpDepth--;
+            else if (!inSingle && !inDouble)
+            {
+                if (c is '(' or '[' or '{') depth++;
+                else if (c is ')' or ']' or '}') depth = Math.Max(0, depth - 1);
+                else if (c == ';' && depth == 0)
+                {
+                    parts.Add(s[start..i]);
+                    start = i + 1;
+                }
+            }
+        }
+        parts.Add(s[start..]);
+        return parts;
+    }
+
+    private static bool IsRubyBlockStopToken(string text)
+    {
+        return text == "end" ||
+               text == "else" ||
+               text == "ensure" ||
+               text == "rescue" ||
+               text.StartsWith("elsif ", StringComparison.Ordinal) ||
+               text.StartsWith("when ", StringComparison.Ordinal) ||
+               text.StartsWith("in ", StringComparison.Ordinal) ||
+               text.StartsWith("rescue ", StringComparison.Ordinal);
+    }
+
+    private static List<PilotIrStmt> ParseRubySuite(
+        List<(string Text, int LineNo)> lines,
+        ref int idx,
+        bool stopOnBranchOrEnd,
+        HashSet<string> declaredVars)
+    {
+        var stmts = new List<PilotIrStmt>();
+        var pendingTrivia = new List<PilotTrivia>();
+
+        while (idx < lines.Count)
+        {
+            var (text, lineNo) = lines[idx];
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                pendingTrivia.Add(new PilotTrivia(PilotTriviaKind.BlankLine, "", lineNo));
+                idx++;
+                continue;
+            }
+
+            if (text.StartsWith("#", StringComparison.Ordinal))
+            {
+                pendingTrivia.Add(new PilotTrivia(PilotTriviaKind.LineComment, "//" + text[1..], lineNo));
+                idx++;
+                continue;
+            }
+
+            if (stopOnBranchOrEnd && IsRubyBlockStopToken(text))
+                break;
+
+            idx++;
+
+            if (text == "end")
+                break;
+
+            if (text.StartsWith("require ", StringComparison.Ordinal) ||
+                text.StartsWith("require(", StringComparison.Ordinal) ||
+                text.StartsWith("require_relative ", StringComparison.Ordinal))
+            {
+                string mapped = PilotLibraryMapper.TranslateForeignLibrariesToPilot(text, "ruby");
+                if (mapped.StartsWith("//", StringComparison.Ordinal))
+                {
+                    var cmt = new PilotIrCommentStmt { CommentText = mapped, Line = lineNo };
+                    AttachTrivia(cmt, pendingTrivia);
+                    stmts.Add(cmt);
+                }
+                continue;
+            }
+
+            // 1. module Name ... end (Enum or namespace module)
+            if (text.StartsWith("module ", StringComparison.Ordinal))
+            {
+                string modName = text["module ".Length..].Trim();
+                var innerStmts = ParseRubySuite(lines, ref idx, stopOnBranchOrEnd: true, new HashSet<string>(StringComparer.Ordinal));
+                ConsumeRubyEnd(lines, ref idx);
+
+                if (innerStmts.Count > 0 && innerStmts.All(s => s is PilotIrVarDeclStmt vd && vd.Name.Length > 0 && char.IsUpper(vd.Name[0])))
+                {
+                    var en = new PilotIrEnumDefStmt { Line = lineNo, Name = modName };
+                    AttachTrivia(en, pendingTrivia);
+                    foreach (var vd in innerStmts.Cast<PilotIrVarDeclStmt>())
+                        en.Members.Add((vd.Name, vd.Initializer));
+                    stmts.Add(en);
+                }
+                else
+                {
+                    stmts.AddRange(innerStmts);
+                }
+                continue;
+            }
+
+            // 2. class Name [< Base] ... end
+            if (text.StartsWith("class ", StringComparison.Ordinal))
+            {
+                string clsHeader = text["class ".Length..].Trim();
+                string clsName = clsHeader;
+                string? baseName = null;
+                int ltIdx = clsHeader.IndexOf('<');
+                if (ltIdx > 0)
+                {
+                    clsName = clsHeader[..ltIdx].Trim();
+                    baseName = clsHeader[(ltIdx + 1)..].Trim();
+                }
+
+                var rawBody = ParseRubySuite(lines, ref idx, stopOnBranchOrEnd: true, new HashSet<string>(StringComparer.Ordinal));
+                ConsumeRubyEnd(lines, ref idx);
+
+                if (clsName == "PilotMatrix")
+                {
+                    pendingTrivia.Clear();
+                    continue;
+                }
+
+                string? openExtTarget = clsName switch
+                {
+                    "Integer" or "Fixnum" or "Bignum" => "i64",
+                    "Float" or "Numeric" => "f64",
+                    "String" => "str",
+                    "Array" => "list",
+                    "Hash" => "map",
+                    _ => null
+                };
+
+                if (openExtTarget != null && rawBody.All(s => s is PilotIrFuncDefStmt))
+                {
+                    var ext = stmts.OfType<PilotIrExtensionDefStmt>().FirstOrDefault(e => e.TargetType == openExtTarget);
+                    if (ext == null)
+                    {
+                        ext = new PilotIrExtensionDefStmt { Line = lineNo, TargetType = openExtTarget };
+                        AttachTrivia(ext, pendingTrivia);
+                        stmts.Add(ext);
+                    }
+                    foreach (var m in rawBody.Cast<PilotIrFuncDefStmt>())
+                    {
+                        if (m.Parameters.Count == 0 || m.Parameters[0].Name != "self")
+                            m.Parameters.Insert(0, new PilotIrParameter("self"));
+                        ext.Methods.Add(m);
+                    }
+                    continue;
+                }
+
+                var cls = new PilotIrClassDefStmt { Line = lineNo, Kind = PilotTypeDeclKind.Class, Name = clsName };
+                if (!string.IsNullOrEmpty(baseName))
+                    cls.BaseTypes.Add(baseName);
+                AttachTrivia(cls, pendingTrivia);
+
+                foreach (var bs in rawBody)
+                {
+                    if (bs is PilotIrVarDeclStmt fieldMarker && fieldMarker.Name.StartsWith("__attr__", StringComparison.Ordinal))
+                    {
+                        string fName = fieldMarker.Name["__attr__".Length..];
+                        if (!cls.Fields.Any(f => f.Name == fName))
+                            cls.Fields.Add(new PilotIrFieldDecl(fName, "any"));
+                    }
+                    else if (bs is PilotIrFuncDefStmt m)
+                    {
+                        if (m.Name == "initialize")
+                        {
+                            bool allSimpleAssign = true;
+                            foreach (var initS in m.Body)
+                            {
+                                if (initS is PilotIrAssignStmt { Target: PilotIrMemberAccessExpr { Target: PilotIrIdentifierExpr { Name: "self" } } mem } ass)
+                                {
+                                    var matchingParam = m.Parameters.FirstOrDefault(p => p.Name == mem.MemberName);
+                                    var existingIdx = cls.Fields.FindIndex(f => f.Name == mem.MemberName);
+                                    PilotIrExpr? defVal = matchingParam?.DefaultValue;
+                                    if (defVal is PilotIrLiteralExpr { Kind: PilotLiteralKind.Null })
+                                        defVal = null;
+                                    if (existingIdx >= 0)
+                                    {
+                                        if (defVal != null)
+                                            cls.Fields[existingIdx] = cls.Fields[existingIdx] with { DefaultValue = defVal };
+                                    }
+                                    else
+                                    {
+                                        cls.Fields.Add(new PilotIrFieldDecl(mem.MemberName, "any", defVal));
+                                    }
+                                }
+                                else
+                                {
+                                    allSimpleAssign = false;
+                                }
+                            }
+                            if (allSimpleAssign)
+                                continue;
+                            m.Name = "__init__";
+                        }
+
+                        if (!m.IsStatic && (m.Parameters.Count == 0 || m.Parameters[0].Name != "self"))
+                            m.Parameters.Insert(0, new PilotIrParameter("self"));
+                        cls.Methods.Add(m);
+                    }
+                }
+                stmts.Add(cls);
+                continue;
+            }
+
+            // 3. def [self.]name[(params)] ... [rescue ...] [ensure ...] end
+            if (text.StartsWith("def ", StringComparison.Ordinal))
+            {
+                var fn = ParseRubyFuncHeader(text["def ".Length..].Trim(), lineNo);
+                AttachTrivia(fn, pendingTrivia);
+
+                var fnScope = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var p in fn.Parameters)
+                    fnScope.Add(p.Name);
+
+                var fnBody = ParseRubySuite(lines, ref idx, stopOnBranchOrEnd: true, fnScope);
+                if (idx < lines.Count && (lines[idx].Text == "rescue" || lines[idx].Text.StartsWith("rescue ", StringComparison.Ordinal) || lines[idx].Text == "ensure"))
+                {
+                    var wrappedTry = ParseRubyRescueEnsureTail(fnBody, lines, ref idx, fnScope, lineNo);
+                    fnBody = new List<PilotIrStmt> { wrappedTry };
+                }
+                else
+                {
+                    ConsumeRubyEnd(lines, ref idx);
+                }
+
+                ApplyRubyImplicitReturn(fnBody);
+                fn.Body.AddRange(fnBody);
+                stmts.Add(fn);
+                continue;
+            }
+
+            // 4. if / elsif / else / end  AND  unless / else / end
+            if (text.StartsWith("if ", StringComparison.Ordinal) || text.StartsWith("unless ", StringComparison.Ordinal))
+            {
+                bool isUnless = text.StartsWith("unless ", StringComparison.Ordinal);
+                string condStr = text[(isUnless ? "unless ".Length : "if ".Length)..].Trim();
+                if (condStr.EndsWith(" then", StringComparison.Ordinal))
+                    condStr = condStr[..^" then".Length].Trim();
+
+                PilotIrExpr condExpr = ParseForeignExpr(condStr, "ruby");
+                if (isUnless)
+                    condExpr = new PilotIrUnaryExpr { Operator = "not", Operand = condExpr };
+
+                var ifStmt = new PilotIrIfStmt { Line = lineNo, Condition = condExpr };
+                AttachTrivia(ifStmt, pendingTrivia);
+                ifStmt.ThenBody.AddRange(ParseRubySuite(lines, ref idx, stopOnBranchOrEnd: true, declaredVars));
+
+                while (idx < lines.Count)
+                {
+                    string branchTok = lines[idx].Text;
+                    if (branchTok.StartsWith("elsif ", StringComparison.Ordinal))
+                    {
+                        idx++;
+                        string eCond = branchTok["elsif ".Length..].Trim();
+                        if (eCond.EndsWith(" then", StringComparison.Ordinal))
+                            eCond = eCond[..^" then".Length].Trim();
+                        var eBody = ParseRubySuite(lines, ref idx, stopOnBranchOrEnd: true, declaredVars);
+                        ifStmt.ElifBranches.Add((ParseForeignExpr(eCond, "ruby"), eBody));
+                    }
+                    else if (branchTok == "else")
+                    {
+                        idx++;
+                        ifStmt.ElseBody.AddRange(ParseRubySuite(lines, ref idx, stopOnBranchOrEnd: true, declaredVars));
+                        break;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+                ConsumeRubyEnd(lines, ref idx);
+                stmts.Add(ifStmt);
+                continue;
+            }
+
+            // 5. while / until
+            if (text.StartsWith("while ", StringComparison.Ordinal) || text.StartsWith("until ", StringComparison.Ordinal))
+            {
+                bool isUntil = text.StartsWith("until ", StringComparison.Ordinal);
+                string condStr = text[(isUntil ? "until ".Length : "while ".Length)..].Trim();
+                if (condStr.EndsWith(" do", StringComparison.Ordinal))
+                    condStr = condStr[..^" do".Length].Trim();
+
+                PilotIrExpr condExpr = ParseForeignExpr(condStr, "ruby");
+                if (isUntil)
+                    condExpr = new PilotIrUnaryExpr { Operator = "not", Operand = condExpr };
+
+                var ws = new PilotIrWhileStmt { Line = lineNo, Condition = condExpr };
+                AttachTrivia(ws, pendingTrivia);
+                ws.Body.AddRange(ParseRubySuite(lines, ref idx, stopOnBranchOrEnd: true, declaredVars));
+                ConsumeRubyEnd(lines, ref idx);
+                stmts.Add(ws);
+                continue;
+            }
+
+            // 6. for x in iter [do] ... end
+            if (text.StartsWith("for ", StringComparison.Ordinal))
+            {
+                string inner = text["for ".Length..].Trim();
+                if (inner.EndsWith(" do", StringComparison.Ordinal))
+                    inner = inner[..^" do".Length].Trim();
+                int inIdx = FindTopLevelKeyword(inner, " in ");
+                if (inIdx > 0)
+                {
+                    string targetPart = inner[..inIdx].Trim();
+                    string iterPart = inner[(inIdx + 4)..].Trim();
+                    var fs = new PilotIrForStmt
+                    {
+                        Line = lineNo,
+                        Iterable = ParseRubyIterable(iterPart)
+                    };
+                    foreach (var tv in targetPart.Split(',').Select(v => v.Trim()))
+                    {
+                        if (!string.IsNullOrEmpty(tv))
+                        {
+                            fs.TargetVars.Add(tv);
+                            declaredVars.Add(tv);
+                        }
+                    }
+                    AttachTrivia(fs, pendingTrivia);
+                    fs.Body.AddRange(ParseRubySuite(lines, ref idx, stopOnBranchOrEnd: true, declaredVars));
+                    ConsumeRubyEnd(lines, ref idx);
+                    stmts.Add(fs);
+                    continue;
+                }
+            }
+
+            // 7. Ruby block iterators: iter.each do |x| ... end  AND  n.times do |i| ... end
+            var eachMatch = RubyEachBlockRegex().Match(text);
+            if (eachMatch.Success)
+            {
+                string recv = eachMatch.Groups[1].Value.Trim();
+                string iterKind = eachMatch.Groups[2].Value;
+                string blockVars = eachMatch.Groups[3].Value.Trim();
+
+                PilotIrExpr iterExpr = iterKind == "times"
+                    ? new PilotIrRangeExpr
+                    {
+                        Start = new PilotIrLiteralExpr { Kind = PilotLiteralKind.Integer, RawValue = "0" },
+                        End = ParseForeignExpr(recv, "ruby"),
+                        IsInclusive = false
+                    }
+                    : ParseRubyIterable(UnwrapOuterParens(recv));
+
+                var fs = new PilotIrForStmt { Line = lineNo, Iterable = iterExpr };
+                foreach (var bv in blockVars.Split(',').Select(v => v.Trim()))
+                {
+                    if (!string.IsNullOrEmpty(bv))
+                    {
+                        fs.TargetVars.Add(bv);
+                        declaredVars.Add(bv);
+                    }
+                }
+                if (fs.TargetVars.Count == 0)
+                    fs.TargetVars.Add("_i");
+                AttachTrivia(fs, pendingTrivia);
+                fs.Body.AddRange(ParseRubySuite(lines, ref idx, stopOnBranchOrEnd: true, declaredVars));
+                ConsumeRubyEnd(lines, ref idx);
+                stmts.Add(fs);
+                continue;
+            }
+
+            // 8. case scrutinee ... when/in/else ... end
+            if (text.StartsWith("case ", StringComparison.Ordinal))
+            {
+                string scrut = text["case ".Length..].Trim();
+                var ms = new PilotIrMatchStmt { Line = lineNo, Scrutinee = ParseForeignExpr(scrut, "ruby") };
+                AttachTrivia(ms, pendingTrivia);
+
+                while (idx < lines.Count && lines[idx].Text != "end")
+                {
+                    if (string.IsNullOrWhiteSpace(lines[idx].Text) || lines[idx].Text.StartsWith("#", StringComparison.Ordinal))
+                    {
+                        idx++;
+                        continue;
+                    }
+
+                    string armLine = lines[idx].Text;
+                    if (armLine.StartsWith("when ", StringComparison.Ordinal) || armLine.StartsWith("in ", StringComparison.Ordinal))
+                    {
+                        bool isIn = armLine.StartsWith("in ", StringComparison.Ordinal);
+                        idx++;
+                        string patRaw = armLine[(isIn ? "in ".Length : "when ".Length)..].Trim();
+                        List<PilotIrStmt> armBody;
+                        int thenIdx = FindTopLevelKeyword(patRaw, " then ");
+                        if (thenIdx > 0)
+                        {
+                            string inlineBody = patRaw[(thenIdx + " then ".Length)..].Trim();
+                            patRaw = patRaw[..thenIdx].Trim();
+                            armBody = new List<PilotIrStmt>();
+                            var inlineStmt = ParseRubySimpleStmt(inlineBody, lineNo, declaredVars);
+                            if (inlineStmt != null) armBody.Add(inlineStmt);
+                        }
+                        else
+                        {
+                            if (patRaw.EndsWith(" then", StringComparison.Ordinal))
+                                patRaw = patRaw[..^" then".Length].Trim();
+                            armBody = ParseRubySuite(lines, ref idx, stopOnBranchOrEnd: true, declaredVars);
+                        }
+
+                        PilotIrExpr? guard = null;
+                        int guardIf = FindTopLevelKeyword(patRaw, " if ");
+                        if (guardIf > 0)
+                        {
+                            guard = ParseForeignExpr(patRaw[(guardIf + 4)..].Trim(), "ruby");
+                            patRaw = patRaw[..guardIf].Trim();
+                        }
+
+                        ms.Arms.Add(new PilotIrMatchArm(ParseRubyPattern(patRaw), guard, armBody));
+                    }
+                    else if (armLine == "else")
+                    {
+                        idx++;
+                        var elseBody = ParseRubySuite(lines, ref idx, stopOnBranchOrEnd: true, declaredVars);
+                        ms.Arms.Add(new PilotIrMatchArm(new PilotIrWildcardPattern(), null, elseBody));
+                        break;
+                    }
+                    else
+                    {
+                        idx++;
+                    }
+                }
+                ConsumeRubyEnd(lines, ref idx);
+                stmts.Add(ms);
+                continue;
+            }
+
+            // 9. begin ... rescue ... ensure ... end
+            if (text == "begin")
+            {
+                var tryBody = ParseRubySuite(lines, ref idx, stopOnBranchOrEnd: true, declaredVars);
+                var tr = ParseRubyRescueEnsureTail(tryBody, lines, ref idx, declaredVars, lineNo);
+                AttachTrivia(tr, pendingTrivia);
+                stmts.Add(tr);
+                continue;
+            }
+
+            // 10. attr_accessor / attr_reader / attr_writer inside class
+            if (text.StartsWith("attr_accessor ", StringComparison.Ordinal) ||
+                text.StartsWith("attr_reader ", StringComparison.Ordinal) ||
+                text.StartsWith("attr_writer ", StringComparison.Ordinal))
+            {
+                int sp = text.IndexOf(' ');
+                foreach (var sym in SplitTopLevelComma(text[(sp + 1)..]))
+                {
+                    string fName = sym.Trim().TrimStart(':').Trim('\'', '"');
+                    if (IsIdentifier(fName))
+                        stmts.Add(new PilotIrVarDeclStmt { Line = lineNo, Name = "__attr__" + fName });
+                }
+                continue;
+            }
+
+            var simple = ParseRubySimpleStmt(text, lineNo, declaredVars);
+            if (simple != null)
+            {
+                AttachTrivia(simple, pendingTrivia);
+                stmts.Add(simple);
+            }
+        }
+
+        return stmts;
+    }
+
+    private static void ConsumeRubyEnd(List<(string Text, int LineNo)> lines, ref int idx)
+    {
+        while (idx < lines.Count && (string.IsNullOrWhiteSpace(lines[idx].Text) || lines[idx].Text.StartsWith("#", StringComparison.Ordinal)))
+            idx++;
+        if (idx < lines.Count && lines[idx].Text == "end")
+            idx++;
+    }
+
+    private static PilotIrFuncDefStmt ParseRubyFuncHeader(string header, int lineNo)
+    {
+        bool isStatic = false;
+        if (header.StartsWith("self.", StringComparison.Ordinal))
+        {
+            isStatic = true;
+            header = header["self.".Length..].Trim();
+        }
+
+        string name = header;
+        string rawParams = "";
+        int openP = header.IndexOf('(');
+        if (openP > 0)
+        {
+            name = header[..openP].Trim();
+            int closeP = FindMatchingCloseParen(header, openP);
+            if (closeP > openP)
+                rawParams = header[(openP + 1)..closeP];
+        }
+        else
+        {
+            int spaceIdx = header.IndexOf(' ');
+            if (spaceIdx > 0)
+            {
+                name = header[..spaceIdx].Trim();
+                rawParams = header[(spaceIdx + 1)..].Trim();
+            }
+        }
+
+        var fn = new PilotIrFuncDefStmt
+        {
+            Line = lineNo,
+            Name = name,
+            IsStatic = isStatic
+        };
+
+        foreach (var p in SplitTopLevelComma(rawParams))
+        {
+            string pt = p.Trim();
+            if (string.IsNullOrEmpty(pt) || pt.StartsWith("&", StringComparison.Ordinal))
+                continue;
+
+            bool isVariadic = pt.StartsWith("*", StringComparison.Ordinal) && !pt.StartsWith("**", StringComparison.Ordinal);
+            pt = pt.TrimStart('*');
+
+            PilotIrExpr? defVal = null;
+            int eqIdx = FindTopLevelSingleEquals(pt);
+            if (eqIdx > 0)
+            {
+                defVal = ParseForeignExpr(pt[(eqIdx + 1)..].Trim(), "ruby");
+                pt = pt[..eqIdx].Trim();
+            }
+            else if (pt.Contains(':'))
+            {
+                int colon = pt.IndexOf(':');
+                string kwDefault = pt[(colon + 1)..].Trim();
+                if (!string.IsNullOrEmpty(kwDefault))
+                    defVal = ParseForeignExpr(kwDefault, "ruby");
+                pt = pt[..colon].Trim();
+            }
+
+            if (!string.IsNullOrEmpty(pt))
+                fn.Parameters.Add(new PilotIrParameter(pt, null, defVal, IsVariadic: isVariadic));
+        }
+
+        return fn;
+    }
+
+    private static PilotIrTryStmt ParseRubyRescueEnsureTail(
+        List<PilotIrStmt> tryBody,
+        List<(string Text, int LineNo)> lines,
+        ref int idx,
+        HashSet<string> declaredVars,
+        int lineNo)
+    {
+        var tr = new PilotIrTryStmt { Line = lineNo };
+        tr.TryBody.AddRange(tryBody);
+
+        while (idx < lines.Count)
+        {
+            string tok = lines[idx].Text;
+            if (tok == "rescue" || tok.StartsWith("rescue ", StringComparison.Ordinal))
+            {
+                idx++;
+                string clause = tok.Length > 6 ? tok["rescue".Length..].Trim() : "";
+                string? exType = null;
+                string exVar = "err";
+                if (clause.Contains("=>", StringComparison.Ordinal))
+                {
+                    var parts = clause.Split("=>", 2);
+                    string rawType = parts[0].Trim();
+                    if (!string.IsNullOrEmpty(rawType) && rawType is not ("StandardError" or "RuntimeError"))
+                        exType = rawType;
+                    if (!string.IsNullOrEmpty(parts[1].Trim()))
+                        exVar = parts[1].Trim();
+                }
+                else if (!string.IsNullOrEmpty(clause) && clause is not ("StandardError" or "RuntimeError"))
+                {
+                    exType = clause;
+                }
+                declaredVars.Add(exVar);
+                var cBody = ParseRubySuite(lines, ref idx, stopOnBranchOrEnd: true, declaredVars);
+                tr.Catches.Add(new PilotIrCatchClause(exType, exVar, cBody));
+            }
+            else if (tok == "ensure")
+            {
+                idx++;
+                tr.FinallyBody.AddRange(ParseRubySuite(lines, ref idx, stopOnBranchOrEnd: true, declaredVars));
+                break;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        ConsumeRubyEnd(lines, ref idx);
+        return tr;
+    }
+
+    private static void ApplyRubyImplicitReturn(List<PilotIrStmt> body)
+    {
+        if (body.Count == 0)
+            return;
+
+        var last = body[^1];
+        if (last is PilotIrExprStmt es &&
+            es.Expression is not PilotIrCallExpr { LibraryCallKind: PilotLibraryCallKind.Println or PilotLibraryCallKind.Print } &&
+            !(es.Expression is PilotIrCallExpr { Callee: PilotIrMemberAccessExpr { MemberName: "push" or "append" } }))
+        {
+            body[^1] = new PilotIrReturnStmt { Line = es.Line, Value = es.Expression };
+        }
+        else if (last is PilotIrIfStmt ifs && ifs.ElseBody.Count > 0)
+        {
+            ApplyRubyImplicitReturn(ifs.ThenBody);
+            foreach (var (_, eb) in ifs.ElifBranches)
+                ApplyRubyImplicitReturn(eb);
+            ApplyRubyImplicitReturn(ifs.ElseBody);
+        }
+    }
+
+    private static PilotIrStmt? ParseRubySimpleStmt(string rawText, int lineNo, HashSet<string> declaredVars)
+    {
+        string s = PilotLibraryMapper.TranslateForeignLibrariesToPilot(rawText.Trim(), "ruby");
+        if (string.IsNullOrWhiteSpace(s))
+            return null;
+
+        // 1. Ruby assertion idiom: raise ["msg"] unless cond
+        int unlessIdx = FindTopLevelKeyword(s, " unless ");
+        if (unlessIdx > 0)
+        {
+            string actionPart = s[..unlessIdx].Trim();
+            string condPart = s[(unlessIdx + " unless ".Length)..].Trim();
+            if (actionPart.StartsWith("raise", StringComparison.Ordinal))
+            {
+                string msgPart = actionPart.Length > 5 ? actionPart["raise".Length..].Trim() : "";
+                var msgArgs = SplitTopLevelComma(msgPart);
+                string? cleanMsg = msgArgs.Count > 0 ? msgArgs[^1].Trim() : null;
+                PilotIrExpr? msgExpr = !string.IsNullOrEmpty(cleanMsg) && cleanMsg != "\"Assertion failed\"" && cleanMsg != "RuntimeError"
+                    ? ParseForeignExpr(cleanMsg, "ruby")
+                    : null;
+                return new PilotIrAssertStmt
+                {
+                    Line = lineNo,
+                    Condition = ParseForeignExpr(condPart, "ruby"),
+                    Message = msgExpr
+                };
+            }
+
+            var innerStmt = ParseRubySimpleStmt(actionPart, lineNo, declaredVars);
+            if (innerStmt != null)
+            {
+                var guardIf = new PilotIrIfStmt
+                {
+                    Line = lineNo,
+                    Condition = new PilotIrUnaryExpr { Operator = "not", Operand = ParseForeignExpr(condPart, "ruby") }
+                };
+                guardIf.ThenBody.Add(innerStmt);
+                return guardIf;
+            }
+        }
+
+        // 2. Postfix 'if': return x if cond / raise "err" if cond / next if cond / break if cond
+        int postIfIdx = FindTopLevelKeyword(s, " if ");
+        if (postIfIdx > 0 &&
+            (s.StartsWith("return", StringComparison.Ordinal) ||
+             s.StartsWith("raise", StringComparison.Ordinal) ||
+             s.StartsWith("next", StringComparison.Ordinal) ||
+             s.StartsWith("break", StringComparison.Ordinal)))
+        {
+            string actionPart = s[..postIfIdx].Trim();
+            string condPart = s[(postIfIdx + " if ".Length)..].Trim();
+            var innerStmt = ParseRubySimpleStmt(actionPart, lineNo, declaredVars);
+            if (innerStmt != null)
+            {
+                var postIf = new PilotIrIfStmt
+                {
+                    Line = lineNo,
+                    Condition = ParseForeignExpr(condPart, "ruby")
+                };
+                postIf.ThenBody.Add(innerStmt);
+                return postIf;
+            }
+        }
+
+        if (s == "next") return new PilotIrContinueStmt { Line = lineNo };
+        if (s == "break") return new PilotIrBreakStmt { Line = lineNo };
+
+        if (s == "return" || s.StartsWith("return ", StringComparison.Ordinal))
+        {
+            string valPart = s.Length > 6 ? s["return".Length..].Trim() : "";
+            return new PilotIrReturnStmt
+            {
+                Line = lineNo,
+                Value = !string.IsNullOrEmpty(valPart) ? ParseForeignExpr(valPart, "ruby") : null
+            };
+        }
+
+        if (s == "raise" || s.StartsWith("raise ", StringComparison.Ordinal))
+        {
+            string errPart = s.Length > 5 ? s["raise".Length..].Trim() : "";
+            var errArgs = SplitTopLevelComma(errPart);
+            string payload = errArgs.Count > 1 ? errArgs[^1].Trim() : errPart;
+            return new PilotIrRaiseStmt
+            {
+                Line = lineNo,
+                Value = !string.IsNullOrEmpty(payload) ? ParseForeignExpr(payload, "ruby") : null
+            };
+        }
+
+        // 3. Ruby shovel array append: arr << val -> arr.push(val)
+        int shovelIdx = FindTopLevelOperator(s, "<<");
+        if (shovelIdx > 0 && FindTopLevelSingleEquals(s) < 0)
+        {
+            string recv = s[..shovelIdx].Trim();
+            string pushed = s[(shovelIdx + 2)..].Trim();
+            var pushCall = new PilotIrCallExpr
+            {
+                Line = lineNo,
+                Callee = new PilotIrMemberAccessExpr
+                {
+                    Target = ParseForeignExpr(recv, "ruby"),
+                    MemberName = "push"
+                }
+            };
+            pushCall.Arguments.Add(new PilotIrCallArg(null, ParseForeignExpr(pushed, "ruby")));
+            return new PilotIrExprStmt { Line = lineNo, Expression = pushCall };
+        }
+
+        // 4. Augmented assignment
+        foreach (var aug in new[] { "+=", "-=", "*=", "/=", "%=", "**=" })
+        {
+            int augIdx = FindTopLevelOperator(s, aug);
+            if (augIdx > 0)
+            {
+                return new PilotIrAssignStmt
+                {
+                    Line = lineNo,
+                    Target = ParseForeignExpr(s[..augIdx].Trim(), "ruby"),
+                    Operator = aug,
+                    Value = ParseForeignExpr(s[(augIdx + aug.Length)..].Trim(), "ruby")
+                };
+            }
+        }
+
+        // 5. Variable/Constant/Struct assignment
+        int eqIdx = FindTopLevelSingleEquals(s);
+        if (eqIdx > 0)
+        {
+            string lhs = s[..eqIdx].Trim();
+            string rhs = s[(eqIdx + 1)..].Trim();
+
+            // Struct.new / Data.define / Class.new -> Record
+            if (IsIdentifier(lhs) && char.IsUpper(lhs[0]))
+            {
+                if ((rhs.StartsWith("Struct.new(", StringComparison.Ordinal) || rhs.StartsWith("Data.define(", StringComparison.Ordinal)) &&
+                    rhs.EndsWith(")", StringComparison.Ordinal))
+                {
+                    int openP = rhs.IndexOf('(');
+                    var rec = new PilotIrClassDefStmt { Line = lineNo, Kind = PilotTypeDeclKind.Record, Name = lhs };
+                    foreach (var sym in SplitTopLevelComma(rhs[(openP + 1)..^1]))
+                    {
+                        string fName = sym.Trim().TrimStart(':').Trim('\'', '"');
+                        if (IsIdentifier(fName))
+                            rec.Fields.Add(new PilotIrFieldDecl(fName, "any", IsMutable: false));
+                    }
+                    return rec;
+                }
+
+                if (rhs is "Class.new" or "Data.define" or "Struct.new(nil)")
+                {
+                    return new PilotIrClassDefStmt { Line = lineNo, Kind = PilotTypeDeclKind.Record, Name = lhs };
+                }
+
+                if (rhs.StartsWith("[", StringComparison.Ordinal) && rhs.EndsWith("].freeze", StringComparison.Ordinal))
+                {
+                    return new PilotIrTypeAliasStmt
+                    {
+                        Line = lineNo,
+                        Name = lhs,
+                        TargetType = "__ruby_adt_union__" + rhs[1..^"].freeze".Length]
+                    };
+                }
+            }
+
+            if (IsIdentifier(lhs) && !lhs.StartsWith("@", StringComparison.Ordinal))
+            {
+                bool isConst = lhs.All(c => char.IsUpper(c) || c == '_' || char.IsDigit(c)) && lhs.Any(char.IsUpper);
+                if (!declaredVars.Contains(lhs))
+                {
+                    declaredVars.Add(lhs);
+                    return new PilotIrVarDeclStmt
+                    {
+                        Line = lineNo,
+                        Kind = isConst ? PilotVarDeclKind.Const : PilotVarDeclKind.Let,
+                        Name = lhs,
+                        Initializer = ParseForeignExpr(rhs, "ruby")
+                    };
+                }
+            }
+
+            return new PilotIrAssignStmt
+            {
+                Line = lineNo,
+                Target = ParseForeignExpr(lhs, "ruby"),
+                Operator = "=",
+                Value = ParseForeignExpr(rhs, "ruby")
+            };
+        }
+
+        // Ruby bare command-style puts / print without parens: puts "hello"
+        if (s.StartsWith("puts ", StringComparison.Ordinal) || s.StartsWith("print ", StringComparison.Ordinal))
+        {
+            bool isPrintln = s.StartsWith("puts ", StringComparison.Ordinal);
+            string argStr = s[(isPrintln ? "puts ".Length : "print ".Length)..].Trim();
+            var pCall = new PilotIrCallExpr
+            {
+                Line = lineNo,
+                Callee = new PilotIrIdentifierExpr { Name = isPrintln ? "println" : "print" },
+                LibraryCallKind = isPrintln ? PilotLibraryCallKind.Println : PilotLibraryCallKind.Print
+            };
+            foreach (var a in SplitTopLevelComma(argStr))
+                pCall.Arguments.Add(new PilotIrCallArg(null, ParseForeignExpr(a, "ruby")));
+            return new PilotIrExprStmt { Line = lineNo, Expression = pCall };
+        }
+
+        return new PilotIrExprStmt
+        {
+            Line = lineNo,
+            Expression = ParseForeignExpr(s, "ruby")
+        };
+    }
+
+    private static List<PilotIrStmt> PostProcessRubyStatements(List<PilotIrStmt> stmts)
+    {
+        var result = new List<PilotIrStmt>();
+        foreach (var s in stmts)
+        {
+            if (s is PilotIrTypeAliasStmt ta && ta.TargetType.StartsWith("__ruby_adt_union__", StringComparison.Ordinal))
+            {
+                string rawNames = ta.TargetType["__ruby_adt_union__".Length..];
+                var armNames = SplitTopLevelComma(rawNames).Select(a => a.Trim()).Where(a => a.Length > 0).ToList();
+                var matchedRecords = new List<PilotIrClassDefStmt>();
+                foreach (var arm in armNames)
+                {
+                    var rec = result.OfType<PilotIrClassDefStmt>()
+                        .FirstOrDefault(c => c.Name == arm && c.Kind == PilotTypeDeclKind.Record && c.Methods.Count == 0);
+                    if (rec != null)
+                        matchedRecords.Add(rec);
+                }
+
+                if (matchedRecords.Count == armNames.Count && matchedRecords.Count > 0)
+                {
+                    var adt = new PilotIrAdtDefStmt { Line = ta.Line, Name = ta.Name };
+                    foreach (var mr in matchedRecords)
+                    {
+                        result.Remove(mr);
+                        adt.Variants.Add(new PilotIrAdtVariant(
+                            mr.Name,
+                            mr.Fields.Select(f => (f.Name, f.TypeAnnotation)).ToList()));
+                    }
+                    result.Add(adt);
+                    continue;
+                }
+            }
+            result.Add(s);
+        }
+        return result;
+    }
+
+    private static PilotIrExpr ParseRubyIterable(string rawIter)
+    {
+        string s = UnwrapOuterParens(rawIter.Trim());
+        int exclIdx = FindTopLevelOperator(s, "...");
+        if (exclIdx > 0)
+        {
+            return new PilotIrRangeExpr
+            {
+                Start = ParseForeignExpr(s[..exclIdx].Trim(), "ruby"),
+                End = ParseForeignExpr(s[(exclIdx + 3)..].Trim(), "ruby"),
+                IsInclusive = false
+            };
+        }
+        int inclIdx = FindTopLevelOperator(s, "..");
+        if (inclIdx > 0)
+        {
+            return new PilotIrRangeExpr
+            {
+                Start = ParseForeignExpr(s[..inclIdx].Trim(), "ruby"),
+                End = ParseForeignExpr(s[(inclIdx + 2)..].Trim(), "ruby"),
+                IsInclusive = true
+            };
+        }
+        return ParseForeignExpr(s, "ruby");
+    }
+
+    private static PilotIrPattern ParseRubyPattern(string patRaw)
+    {
+        string p = patRaw.Trim();
+        if (p == "nil")
+            return new PilotIrOptionPattern { IsSome = false };
+        if (p == "Object")
+            return new PilotIrWildcardPattern();
+
+        // Ruby 3 pattern matching: Circle[r] or Circle(r)
+        int openBr = p.IndexOf('[');
+        if (openBr > 0 && p.EndsWith("]", StringComparison.Ordinal) && char.IsUpper(p[0]))
+        {
+            string vName = p[..openBr].Trim();
+            var vp = new PilotIrVariantPattern { VariantName = vName };
+            foreach (var sub in SplitTopLevelComma(p[(openBr + 1)..^1]))
+                vp.Arguments.Add((null, ParseRubyPattern(sub)));
+            return vp;
+        }
+
+        if (p.Contains(','))
+        {
+            var orPat = new PilotIrOrPattern();
+            foreach (var alt in SplitTopLevelComma(p))
+                orPat.Alternatives.Add(ParseForeignPattern(alt));
+            return orPat;
+        }
+
+        return ParseForeignPattern(p);
+    }
+
+    // ========================================================================
     // SHARED STRUCTURED BRACE-BLOCK RECURSIVE-DESCENT PARSER (Rust, C, C++, JS, Lua)
     // ========================================================================
 
@@ -2091,6 +3691,32 @@ public static partial class ForeignAstIngester
                 return true;
             }
 
+            // Java enhanced-for: for (var x : items) / for (final String x : items)
+            if (lang == "java")
+            {
+                int colonIdx = FindTopLevelChar(inner, ':');
+                if (colonIdx > 0)
+                {
+                    string lhsFor = StripJavaAnnotations(inner[..colonIdx].Trim());
+                    if (lhsFor.StartsWith("final ", StringComparison.Ordinal))
+                        lhsFor = lhsFor["final ".Length..].Trim();
+                    int spIdx = FindLastTopLevelSpace(lhsFor);
+                    string loopVar = spIdx > 0 ? lhsFor[(spIdx + 1)..].Trim() : lhsFor;
+                    if (IsIdentifier(loopVar))
+                    {
+                        var fs = new PilotIrForStmt
+                        {
+                            Line = line,
+                            Iterable = ParseForeignExpr(inner[(colonIdx + 1)..].Trim(), lang)
+                        };
+                        fs.TargetVars.Add(loopVar);
+                        fs.Body.AddRange(ParseBraceDelimitedBlock(body, lang, out _));
+                        stmt = fs;
+                        return true;
+                    }
+                }
+            }
+
             // C++ range-for: const auto& x : items
             var cppFor = CppRangeForRegex().Match(inner);
             if (cppFor.Success)
@@ -2184,8 +3810,33 @@ public static partial class ForeignAstIngester
             {
                 if (ch.StartsWith("catch"))
                 {
-                    string v = UnwrapOuterParens(ch["catch".Length..].Trim());
-                    tr.Catches.Add(new PilotIrCatchClause(null, string.IsNullOrEmpty(v) ? "err" : v, ParseBraceDelimitedBlock(cb, lang, out _)));
+                    string v = StripJavaAnnotations(UnwrapOuterParens(ch["catch".Length..].Trim()));
+                    if (v.StartsWith("final ", StringComparison.Ordinal))
+                        v = v["final ".Length..].Trim();
+                    string? exType = null;
+                    string exVar = "err";
+                    if (!string.IsNullOrEmpty(v))
+                    {
+                        int lastSp = FindLastTopLevelSpace(v);
+                        if (lastSp > 0)
+                        {
+                            string rawExType = v[..lastSp].Trim();
+                            string candVar = v[(lastSp + 1)..].Trim();
+                            if (IsIdentifier(candVar))
+                                exVar = candVar;
+                            if (!rawExType.Contains('|') &&
+                                rawExType is not ("Exception" or "RuntimeException" or "Throwable" or "Error") &&
+                                IsIdentifier(rawExType))
+                            {
+                                exType = rawExType;
+                            }
+                        }
+                        else if (IsIdentifier(v))
+                        {
+                            exVar = v;
+                        }
+                    }
+                    tr.Catches.Add(new PilotIrCatchClause(exType, exVar, ParseBraceDelimitedBlock(cb, lang, out _)));
                 }
                 else if (ch == "finally")
                 {
@@ -2201,6 +3852,12 @@ public static partial class ForeignAstIngester
 
     private static void ParseMatchArms(string body, string lang, List<PilotIrMatchArm> arms)
     {
+        if (lang == "java")
+        {
+            ParseJavaSwitchArms(body, arms);
+            return;
+        }
+
         var lines = body.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries);
         foreach (var raw in lines)
         {
@@ -2234,6 +3891,173 @@ public static partial class ForeignAstIngester
         }
     }
 
+    private static void ParseJavaSwitchArms(string body, List<PilotIrMatchArm> arms)
+    {
+        if (body.Contains("->", StringComparison.Ordinal))
+        {
+            foreach (var item in SplitIntoBraceItems(body))
+            {
+                string ah = item.Header.Trim();
+                if (string.IsNullOrWhiteSpace(ah) || ah.StartsWith("//", StringComparison.Ordinal))
+                    continue;
+
+                int arrowIdx = ah.IndexOf("->", StringComparison.Ordinal);
+                if (arrowIdx < 0)
+                    continue;
+
+                string patRaw = ah[..arrowIdx].Trim();
+                if (patRaw.StartsWith("case ", StringComparison.Ordinal))
+                    patRaw = patRaw["case ".Length..].Trim();
+
+                PilotIrExpr? guard = null;
+                int whenIdx = FindTopLevelKeyword(patRaw, " when ");
+                if (whenIdx > 0)
+                {
+                    guard = ParseForeignExpr(patRaw[(whenIdx + " when ".Length)..].Trim(), "java");
+                    patRaw = patRaw[..whenIdx].Trim();
+                }
+
+                var pat = ParseJavaSwitchPattern(patRaw);
+                if (item.HasBraces)
+                {
+                    var armStmts = ParseBraceDelimitedBlock(item.Body, "java", out _);
+                    arms.Add(new PilotIrMatchArm(pat, guard, armStmts));
+                }
+                else
+                {
+                    string rhs = ah[(arrowIdx + 2)..].Trim();
+                    var armStmts = new List<PilotIrStmt>();
+                    var singleStmt = ParseForeignSimpleStmt(rhs, "java", item.Line);
+                    if (singleStmt != null)
+                        armStmts.Add(singleStmt);
+                    arms.Add(new PilotIrMatchArm(pat, guard, armStmts));
+                }
+            }
+            return;
+        }
+
+        // Classic colon switch: case 1: ... break; default: ...
+        string? activeLabel = null;
+        var activeStmts = new List<PilotIrStmt>();
+        void FlushColonArm()
+        {
+            if (activeLabel == null)
+                return;
+            var cleaned = activeStmts.Where(st => st is not PilotIrBreakStmt).ToList();
+            arms.Add(new PilotIrMatchArm(ParseJavaSwitchPattern(activeLabel), null, cleaned));
+            activeLabel = null;
+            activeStmts = new List<PilotIrStmt>();
+        }
+
+        foreach (var item in SplitIntoBraceItems(body))
+        {
+            string h = item.Header.Trim();
+            if (string.IsNullOrWhiteSpace(h) || h.StartsWith("//", StringComparison.Ordinal))
+                continue;
+
+            var labels = new List<string>();
+            while (true)
+            {
+                if (h.StartsWith("case ", StringComparison.Ordinal))
+                {
+                    int cIdx = FindTopLevelChar(h, ':');
+                    if (cIdx > 0)
+                    {
+                        labels.Add(h["case ".Length..cIdx].Trim());
+                        h = h[(cIdx + 1)..].Trim();
+                        continue;
+                    }
+                }
+                else if (h.StartsWith("default", StringComparison.Ordinal))
+                {
+                    int cIdx = FindTopLevelChar(h, ':');
+                    if (cIdx >= "default".Length)
+                    {
+                        labels.Add("default");
+                        h = h[(cIdx + 1)..].Trim();
+                        continue;
+                    }
+                }
+                break;
+            }
+
+            if (labels.Count > 0)
+            {
+                FlushColonArm();
+                activeLabel = string.Join(", ", labels);
+            }
+
+            if (!string.IsNullOrWhiteSpace(h) || item.HasBraces)
+            {
+                if (item.HasBraces && TryParseControlFlowBlock(h, item.Body, item.TrailingBranches, "java", item.Line, out var cf) && cf != null)
+                {
+                    activeStmts.Add(cf);
+                }
+                else if (!string.IsNullOrWhiteSpace(h))
+                {
+                    var st = ParseForeignSimpleStmt(h, "java", item.Line);
+                    if (st != null)
+                        activeStmts.Add(st);
+                }
+            }
+        }
+        FlushColonArm();
+    }
+
+    private static PilotIrPattern ParseJavaSwitchPattern(string patRaw)
+    {
+        string p = patRaw.Trim();
+        if (p is "default" or "_")
+            return new PilotIrWildcardPattern();
+        if (p == "null")
+            return new PilotIrOptionPattern { IsSome = false };
+
+        var commaAlts = SplitTopLevelComma(p);
+        if (commaAlts.Count > 1)
+        {
+            var orPat = new PilotIrOrPattern();
+            foreach (var alt in commaAlts)
+                orPat.Alternatives.Add(ParseJavaSwitchPattern(alt));
+            return orPat;
+        }
+
+        int openP = p.IndexOf('(');
+        if (openP > 0 && p.EndsWith(")", StringComparison.Ordinal) && char.IsUpper(p[0]))
+        {
+            string vName = p[..openP].Trim();
+            var vp = new PilotIrVariantPattern { VariantName = vName };
+            foreach (var comp in SplitTopLevelComma(p[(openP + 1)..^1]))
+            {
+                string ct = StripJavaAnnotations(comp.Trim());
+                if (ct.StartsWith("final ", StringComparison.Ordinal))
+                    ct = ct["final ".Length..].Trim();
+                int sp = FindLastTopLevelSpace(ct);
+                if (sp > 0 && IsIdentifier(ct[(sp + 1)..].Trim()))
+                {
+                    string bName = ct[(sp + 1)..].Trim();
+                    vp.Arguments.Add((null, bName == "_" ? new PilotIrWildcardPattern() : new PilotIrBindingPattern { Name = bName }));
+                }
+                else
+                {
+                    vp.Arguments.Add((null, ParseJavaSwitchPattern(ct)));
+                }
+            }
+            return vp;
+        }
+
+        int topSp = FindLastTopLevelSpace(p);
+        if (topSp > 0 && IsIdentifier(p[(topSp + 1)..].Trim()))
+        {
+            string rawT = p[..topSp].Trim();
+            string bName = p[(topSp + 1)..].Trim();
+            if (rawT == "Object")
+                return new PilotIrOptionPattern { IsSome = true, InnerPattern = bName == "_opt" ? new PilotIrWildcardPattern() : new PilotIrBindingPattern { Name = bName } };
+            return new PilotIrBindingPattern { Name = bName, TypeName = rawT == "var" ? null : MapForeignType(rawT, "java") };
+        }
+
+        return ParseForeignPattern(p);
+    }
+
     private static PilotIrStmt? ParseForeignSimpleStmt(string rawLine, string lang, int line)
     {
         string s = PilotLibraryMapper.TranslateForeignLibrariesToPilot(rawLine.Trim().TrimEnd(';'), lang);
@@ -2258,10 +4082,23 @@ public static partial class ForeignAstIngester
             string val = s["throw ".Length..].Trim();
             if (val.StartsWith("new Error(") && val.EndsWith(")"))
                 val = val["new Error(".Length..^1];
+            else if (lang == "java" && val.StartsWith("new ", StringComparison.Ordinal) && val.EndsWith(")", StringComparison.Ordinal))
+            {
+                int openEx = val.IndexOf('(');
+                if (openEx > 4 && FindMatchingCloseParen(val, openEx) == val.Length - 1)
+                {
+                    val = val[(openEx + 1)..^1].Trim();
+                    if (val.StartsWith("String.valueOf(", StringComparison.Ordinal) && val.EndsWith(")", StringComparison.Ordinal) &&
+                        FindMatchingCloseParen(val, "String.valueOf".Length) == val.Length - 1)
+                    {
+                        val = val["String.valueOf(".Length..^1].Trim();
+                    }
+                }
+            }
             return new PilotIrRaiseStmt
             {
                 Line = line,
-                Value = ParseForeignExpr(val, lang)
+                Value = string.IsNullOrEmpty(val) ? null : ParseForeignExpr(val, lang)
             };
         }
 
@@ -2283,6 +4120,72 @@ public static partial class ForeignAstIngester
                 Condition = ParseForeignExpr(assertParts[0], lang),
                 Message = assertParts.Count > 1 ? ParseForeignExpr(assertParts[1], lang) : null
             };
+        }
+
+        // Java assert & single-line assertion: assert cond [: msg]  OR  if (!(cond)) throw new AssertionError(...)
+        if (lang == "java")
+        {
+            if (s.StartsWith("assert ", StringComparison.Ordinal))
+            {
+                string assertRest = s["assert ".Length..].Trim();
+                int colon = FindTopLevelChar(assertRest, ':');
+                return new PilotIrAssertStmt
+                {
+                    Line = line,
+                    Condition = ParseForeignExpr(colon > 0 ? assertRest[..colon].Trim() : assertRest, lang),
+                    Message = colon > 0 ? ParseForeignExpr(assertRest[(colon + 1)..].Trim(), lang) : null
+                };
+            }
+
+            if (s.StartsWith("if (!(", StringComparison.Ordinal) && s.Contains("throw new ", StringComparison.Ordinal))
+            {
+                int throwIdx = s.IndexOf("throw new ", StringComparison.Ordinal);
+                string condPart = s["if (!(".Length..throwIdx].Trim();
+                if (condPart.EndsWith("))", StringComparison.Ordinal))
+                    condPart = condPart[..^2].Trim();
+                string afterNew = s[(throwIdx + "throw new ".Length)..].Trim();
+                int openEx = afterNew.IndexOf('(');
+                string msgPart = (openEx > 0 && afterNew.EndsWith(")", StringComparison.Ordinal))
+                    ? afterNew[(openEx + 1)..^1].Trim()
+                    : "";
+                if (msgPart.StartsWith("String.valueOf(", StringComparison.Ordinal) && msgPart.EndsWith(")", StringComparison.Ordinal) &&
+                    FindMatchingCloseParen(msgPart, "String.valueOf".Length) == msgPart.Length - 1)
+                {
+                    msgPart = msgPart["String.valueOf(".Length..^1].Trim();
+                }
+                PilotIrExpr? msgExpr = (!string.IsNullOrEmpty(msgPart) &&
+                                        msgPart != "\"Assertion failed\"" &&
+                                        msgPart != "\"Contract requires failed\"")
+                    ? ParseForeignExpr(msgPart, lang)
+                    : null;
+                return new PilotIrAssertStmt
+                {
+                    Line = line,
+                    Condition = ParseForeignExpr(condPart, lang),
+                    Message = msgExpr
+                };
+            }
+
+            // Java list index assignment: arr.set((int)(idx), val) -> arr[idx] = val
+            int setIdx = s.LastIndexOf(".set(", StringComparison.Ordinal);
+            if (setIdx > 0 && s.EndsWith(")", StringComparison.Ordinal) && FindMatchingCloseParen(s, setIdx + 4) == s.Length - 1)
+            {
+                var setArgs = SplitTopLevelComma(s[(setIdx + 5)..^1]);
+                if (setArgs.Count == 2)
+                {
+                    return new PilotIrAssignStmt
+                    {
+                        Line = line,
+                        Target = new PilotIrIndexExpr
+                        {
+                            Target = ParseForeignExpr(s[..setIdx], lang),
+                            Index = ParseForeignExpr(setArgs[0], lang)
+                        },
+                        Operator = "=",
+                        Value = ParseForeignExpr(setArgs[1], lang)
+                    };
+                }
+            }
         }
 
         // JS single-line assertion: if (!(cond)) throw new Error(...)
@@ -2428,6 +4331,51 @@ public static partial class ForeignAstIngester
     private static bool TryParseVariableDeclaration(string s, string lang, int line, out PilotIrVarDeclStmt? decl)
     {
         decl = null;
+
+        // Java 21+ variable & field declarations: [final] var/long/List<T>/TypeName x [= rhs]
+        if (lang == "java")
+        {
+            string cur = StripJavaModifiersForTopVar(s);
+            bool isFinal = false;
+            if (cur.StartsWith("final ", StringComparison.Ordinal))
+            {
+                isFinal = true;
+                cur = cur["final ".Length..].TrimStart();
+            }
+
+            int eqIdx = FindTopLevelSingleEquals(cur);
+            string lhs = eqIdx > 0 ? cur[..eqIdx].Trim() : cur.Trim();
+            string? rhs = eqIdx > 0 ? cur[(eqIdx + 1)..].Trim() : null;
+
+            int lastSp = FindLastTopLevelSpace(lhs);
+            if (lastSp > 0)
+            {
+                string rawType = lhs[..lastSp].Trim();
+                string varName = lhs[(lastSp + 1)..].Trim();
+                if (IsIdentifier(varName) && IsValidJavaTypeSyntax(rawType))
+                {
+                    bool isConst = isFinal &&
+                                   varName.All(c => char.IsUpper(c) || c == '_' || char.IsDigit(c)) &&
+                                   varName.Any(char.IsUpper);
+                    var jKind = !isFinal
+                        ? PilotVarDeclKind.Var
+                        : (isConst ? PilotVarDeclKind.Const : PilotVarDeclKind.Let);
+                    string? mappedType = rawType is "var" or "Object" ? null : MapForeignType(rawType, "java");
+
+                    decl = new PilotIrVarDeclStmt
+                    {
+                        Line = line,
+                        Kind = jKind,
+                        Name = varName,
+                        DeclaredType = mappedType,
+                        Initializer = rhs != null ? ParseForeignExpr(rhs, "java") : null,
+                        IsMutated = jKind == PilotVarDeclKind.Var
+                    };
+                    return true;
+                }
+            }
+            return false;
+        }
 
         // C / C++ typed variable and field declarations: [constexpr|const] int64_t x = 10  OR  double r  OR  int64_t val{}
         if (lang is "c" or "cpp")
@@ -2924,6 +4872,273 @@ public static partial class ForeignAstIngester
                 return list;
             }
         }
+        else if (lang == "java")
+        {
+            if ((s.StartsWith("System.out.println(", StringComparison.Ordinal) || s.StartsWith("System.out.print(", StringComparison.Ordinal)) &&
+                s.EndsWith(")", StringComparison.Ordinal) &&
+                FindMatchingCloseParen(s, s.IndexOf('(')) == s.Length - 1)
+            {
+                bool isPrintln = s.StartsWith("System.out.println(", StringComparison.Ordinal);
+                string inner = s[(s.IndexOf('(') + 1)..^1];
+                var pCall = new PilotIrCallExpr
+                {
+                    Callee = new PilotIrIdentifierExpr { Name = isPrintln ? "println" : "print" },
+                    LibraryCallKind = isPrintln ? PilotLibraryCallKind.Println : PilotLibraryCallKind.Print
+                };
+                foreach (var a in SplitTopLevelComma(inner))
+                    pCall.Arguments.Add(new PilotIrCallArg(null, ParseForeignExpr(a, lang)));
+                return pCall;
+            }
+
+            if (s.StartsWith("String.format(", StringComparison.Ordinal) &&
+                s.EndsWith(")", StringComparison.Ordinal) &&
+                FindMatchingCloseParen(s, "String.format".Length) == s.Length - 1)
+            {
+                return ConvertFormatArgsToInterpolated(s["String.format(".Length..^1], lang);
+            }
+
+            var jRangeComp = JavaRangeStreamCompRegex().Match(s);
+            if (jRangeComp.Success)
+            {
+                bool isInc = jRangeComp.Groups[1].Value == "rangeClosed";
+                string startRaw = jRangeComp.Groups[2].Value.Trim();
+                string endRaw = jRangeComp.Groups[3].Value.Trim();
+                string filterRaw = jRangeComp.Groups[4].Value.Trim();
+                string mapVar = jRangeComp.Groups[5].Value.Trim();
+                string mapBody = jRangeComp.Groups[6].Value.Trim();
+
+                var fe = new PilotIrForExpr
+                {
+                    Iterable = new PilotIrRangeExpr
+                    {
+                        Start = ParseForeignExpr(startRaw, lang),
+                        End = ParseForeignExpr(endRaw, lang),
+                        IsInclusive = isInc
+                    },
+                    FilterCondition = !string.IsNullOrEmpty(filterRaw) ? ParseForeignExpr(filterRaw, lang) : null,
+                    YieldExpr = ParseForeignExpr(mapBody, lang)
+                };
+                fe.TargetVars.Add(mapVar);
+                return fe;
+            }
+
+            var jRangeOnly = JavaRangeStreamOnlyRegex().Match(s);
+            if (jRangeOnly.Success)
+            {
+                return new PilotIrRangeExpr
+                {
+                    Start = ParseForeignExpr(jRangeOnly.Groups[2].Value.Trim(), lang),
+                    End = ParseForeignExpr(jRangeOnly.Groups[3].Value.Trim(), lang),
+                    IsInclusive = jRangeOnly.Groups[1].Value == "rangeClosed"
+                };
+            }
+
+            var jColComp = JavaColStreamCompRegex().Match(s);
+            if (jColComp.Success)
+            {
+                string srcRaw = jColComp.Groups[1].Value.Trim();
+                string filterRaw = jColComp.Groups[2].Value.Trim();
+                string mapVar = jColComp.Groups[3].Value.Trim();
+                string mapBody = jColComp.Groups[4].Value.Trim();
+
+                var fe = new PilotIrForExpr
+                {
+                    Iterable = ParseForeignExpr(srcRaw, lang),
+                    FilterCondition = !string.IsNullOrEmpty(filterRaw) ? ParseForeignExpr(filterRaw, lang) : null,
+                    YieldExpr = ParseForeignExpr(mapBody, lang)
+                };
+                fe.TargetVars.Add(mapVar);
+                return fe;
+            }
+
+            // Java Optional
+            if (s == "Optional.empty()")
+                return new PilotIrLiteralExpr { Kind = PilotLiteralKind.None, RawValue = "none" };
+            if ((s.StartsWith("Optional.of(", StringComparison.Ordinal) || s.StartsWith("Optional.ofNullable(", StringComparison.Ordinal)) &&
+                s.EndsWith(")", StringComparison.Ordinal) &&
+                FindMatchingCloseParen(s, s.IndexOf('(')) == s.Length - 1)
+            {
+                var someCall = new PilotIrCallExpr
+                {
+                    Callee = new PilotIrIdentifierExpr { Name = "some" },
+                    LibraryCallKind = PilotLibraryCallKind.SomeConstructor
+                };
+                someCall.Arguments.Add(new PilotIrCallArg(null, ParseForeignExpr(s[(s.IndexOf('(') + 1)..^1], lang)));
+                return someCall;
+            }
+
+            // Java collection constructors & factories
+            if (s is "new ArrayList<>()" or "new ArrayList<Object>()" or "List.of()" or "Collections.emptyList()")
+                return new PilotIrCollectionExpr { Kind = PilotCollectionKind.List };
+            if (s is "new HashSet<>()" or "new HashSet<Object>()" or "Set.of()" or "Collections.emptySet()")
+                return new PilotIrCollectionExpr { Kind = PilotCollectionKind.Set };
+            if (s is "new HashMap<>()" or "new HashMap<Object, Object>()" or "Map.of()" or "Collections.emptyMap()")
+                return new PilotIrCollectionExpr { Kind = PilotCollectionKind.Map };
+
+            if (TryExtractJavaCollectionArgs(s, out var colKind, out string colArgsStr))
+            {
+                var colExpr = new PilotIrCollectionExpr { Kind = colKind };
+                if (colKind == PilotCollectionKind.Map)
+                {
+                    var mapItems = SplitTopLevelComma(colArgsStr);
+                    if (mapItems.All(mi => mi.StartsWith("Map.entry(", StringComparison.Ordinal) && mi.EndsWith(")", StringComparison.Ordinal)))
+                    {
+                        foreach (var mi in mapItems)
+                        {
+                            var kv = SplitTopLevelComma(mi["Map.entry(".Length..^1]);
+                            if (kv.Count == 2)
+                                colExpr.MapEntries.Add((ParseForeignExpr(kv[0], lang), ParseForeignExpr(kv[1], lang)));
+                        }
+                    }
+                    else
+                    {
+                        for (int k = 0; k + 1 < mapItems.Count; k += 2)
+                            colExpr.MapEntries.Add((ParseForeignExpr(mapItems[k], lang), ParseForeignExpr(mapItems[k + 1], lang)));
+                    }
+                }
+                else
+                {
+                    foreach (var el in SplitTopLevelComma(colArgsStr))
+                        colExpr.Elements.Add(ParseForeignExpr(el, lang));
+                }
+                return colExpr;
+            }
+        }
+        else if (lang == "ruby")
+        {
+            if ((s.StartsWith("puts(", StringComparison.Ordinal) || s.StartsWith("print(", StringComparison.Ordinal)) &&
+                s.EndsWith(")", StringComparison.Ordinal) &&
+                FindMatchingCloseParen(s, s.IndexOf('(')) == s.Length - 1)
+            {
+                bool isPrintln = s.StartsWith("puts(", StringComparison.Ordinal);
+                string inner = s[(s.IndexOf('(') + 1)..^1];
+                var pCall = new PilotIrCallExpr
+                {
+                    Callee = new PilotIrIdentifierExpr { Name = isPrintln ? "println" : "print" },
+                    LibraryCallKind = isPrintln ? PilotLibraryCallKind.Println : PilotLibraryCallKind.Print
+                };
+                foreach (var a in SplitTopLevelComma(inner))
+                    pCall.Arguments.Add(new PilotIrCallArg(null, ParseForeignExpr(a, lang)));
+                return pCall;
+            }
+
+            // Ruby double-quoted string with #{...} interpolation
+            if (s.Length >= 2 && s[0] == '"' && s[^1] == '"' && IsSingleQuotedRubyString(s, '"') && ContainsUnescapedRubyInterp(s[1..^1]))
+            {
+                return ParseRubyInterpolatedString(s[1..^1]);
+            }
+
+            // Ruby single-quoted string '...'
+            if (s.Length >= 2 && s[0] == '\'' && s[^1] == '\'' && IsSingleQuotedRubyString(s, '\''))
+            {
+                string rawContent = s[1..^1].Replace("\\'", "'");
+                string escaped = rawContent.Replace("\"", "\\\"");
+                return new PilotIrLiteralExpr
+                {
+                    Kind = PilotLiteralKind.String,
+                    RawValue = $"\"{escaped}\"",
+                    StringContent = rawContent
+                };
+            }
+
+            // Ruby symbol literal :sym
+            if (s.Length >= 2 && s[0] == ':' && IsIdentifier(s[1..]))
+            {
+                return new PilotIrLiteralExpr
+                {
+                    Kind = PilotLiteralKind.Keyword,
+                    RawValue = s
+                };
+            }
+
+            // Ruby Enumerable comprehension: (iter)[.select { |x| cond }].map { |x| proj }
+            var rbComp = RubyEnumCompRegex().Match(s);
+            if (rbComp.Success)
+            {
+                string srcRaw = rbComp.Groups[1].Value.Trim();
+                string filterRaw = rbComp.Groups[2].Value.Trim();
+                string mapVar = rbComp.Groups[3].Value.Trim();
+                string mapBody = rbComp.Groups[4].Value.Trim();
+
+                var fe = new PilotIrForExpr
+                {
+                    Iterable = ParseRubyIterable(srcRaw),
+                    FilterCondition = !string.IsNullOrEmpty(filterRaw) ? ParseForeignExpr(filterRaw, lang) : null,
+                    YieldExpr = ParseForeignExpr(mapBody, lang)
+                };
+                fe.TargetVars.Add(mapVar);
+                return fe;
+            }
+
+            // Ruby exclusive/inclusive range expression: a...b or a..b
+            int exclRange = FindTopLevelOperator(s, "...");
+            if (exclRange > 0)
+            {
+                return new PilotIrRangeExpr
+                {
+                    Start = ParseForeignExpr(s[..exclRange].Trim(), lang),
+                    End = ParseForeignExpr(s[(exclRange + 3)..].Trim(), lang),
+                    IsInclusive = false
+                };
+            }
+            int inclRange = FindTopLevelOperator(s, "..");
+            if (inclRange > 0)
+            {
+                return new PilotIrRangeExpr
+                {
+                    Start = ParseForeignExpr(s[..inclRange].Trim(), lang),
+                    End = ParseForeignExpr(s[(inclRange + 2)..].Trim(), lang),
+                    IsInclusive = true
+                };
+            }
+
+            // Ruby [a, b, c].uniq -> set literal
+            if (s.StartsWith("[", StringComparison.Ordinal) && s.EndsWith("].uniq", StringComparison.Ordinal))
+            {
+                var setExpr = new PilotIrCollectionExpr { Kind = PilotCollectionKind.Set };
+                foreach (var el in SplitTopLevelComma(s[1..^"].uniq".Length]))
+                    setExpr.Elements.Add(ParseForeignExpr(el, lang));
+                return setExpr;
+            }
+
+            // Ruby Hash literal: {} or { k => v, ... } or { k: v, ... }
+            if (s.StartsWith("{", StringComparison.Ordinal) && s.EndsWith("}", StringComparison.Ordinal))
+            {
+                string inner = s[1..^1].Trim();
+                var map = new PilotIrCollectionExpr { Kind = PilotCollectionKind.Map };
+                if (string.IsNullOrEmpty(inner))
+                    return map;
+
+                var entries = SplitTopLevelComma(inner);
+                foreach (var entry in entries)
+                {
+                    int rocket = FindTopLevelOperator(entry, "=>");
+                    if (rocket > 0)
+                    {
+                        map.MapEntries.Add((
+                            ParseForeignExpr(entry[..rocket].Trim(), lang),
+                            ParseForeignExpr(entry[(rocket + 2)..].Trim(), lang)));
+                    }
+                    else
+                    {
+                        int colon = FindTopLevelChar(entry, ':');
+                        if (colon > 0 && IsIdentifier(entry[..colon].Trim()))
+                        {
+                            string kName = entry[..colon].Trim();
+                            var keyLit = new PilotIrLiteralExpr
+                            {
+                                Kind = PilotLiteralKind.String,
+                                RawValue = $"\"{kName}\"",
+                                StringContent = kName
+                            };
+                            map.MapEntries.Add((keyLit, ParseForeignExpr(entry[(colon + 1)..].Trim(), lang)));
+                        }
+                    }
+                }
+                if (map.MapEntries.Count > 0)
+                    return map;
+            }
+        }
 
         // Normalize foreign operators to Pilot syntax and parse via PilotTranspileIrBuilder
         string normalized = NormalizeForeignExpressionToPilot(s, lang);
@@ -2992,6 +5207,60 @@ public static partial class ForeignAstIngester
             s = Regex.Replace(s, @"\bself_val\b", "self");
             s = Regex.Replace(s, @"(?:std::)?pow\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)", "(($1) ** ($2))");
         }
+        else if (lang == "java")
+        {
+            s = RewriteBalancedTwoArgCall(s, "!Objects.equals", "!=");
+            s = RewriteBalancedTwoArgCall(s, "Objects.equals", "==");
+            s = RewriteBalancedTwoArgCall(s, "Math.pow", "**");
+            s = TransformOutsideStringLiterals(s, seg =>
+            {
+                seg = Regex.Replace(seg, @"\b[A-Za-z_][A-Za-z0-9_]*PilotExtensions\.([A-Za-z_][A-Za-z0-9_]*)\(\s*([^,()]+)\s*,\s*([^)]*)\)", "($2).$1($3)");
+                seg = Regex.Replace(seg, @"\b[A-Za-z_][A-Za-z0-9_]*PilotExtensions\.([A-Za-z_][A-Za-z0-9_]*)\(\s*([^,()]+)\s*\)", "($2).$1()");
+                seg = Regex.Replace(seg, @"\bnew\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?\s*\(", "$1(");
+                seg = Regex.Replace(seg, @"\bString\.valueOf\(\s*([^()]+)\s*\)", "($1)");
+                seg = Regex.Replace(seg, @"\.get\(\s*\(int\)\s*\(([^()]+)\)\s*\)", "[$1]");
+                seg = Regex.Replace(seg, @"\.get\(\s*\(int\)\s*([A-Za-z0-9_.]+)\s*\)", "[$1]");
+                seg = Regex.Replace(seg, @"\.get\(\s*([^,()]+)\s*\)", "[$1]");
+                seg = Regex.Replace(seg, @"\.subList\(\s*\(int\)\s*\(([^()]+)\)\s*,\s*\(int\)\s*\(([^()]+)\)\s*\)", "[$1:$2]");
+                seg = Regex.Replace(seg, @"\.(?:size|length)\(\)", ".length");
+                seg = Regex.Replace(seg, @"!([A-Za-z_][A-Za-z0-9_.]*)\.contains\(\s*([^()]+)\s*\)", "(($2) not in $1)");
+                seg = Regex.Replace(seg, @"([A-Za-z_][A-Za-z0-9_.]*)\.contains\(\s*([^()]+)\s*\)", "(($2) in $1)");
+                seg = Regex.Replace(seg, @"\((?:long|int|short|byte|double|float)\)\s*\(([^()]+)\)", "($1)");
+                seg = Regex.Replace(seg, @"\((?:long|int|short|byte|double|float)\)\s*([A-Za-z0-9_.]+)", "$1");
+                seg = Regex.Replace(seg, @"\b([0-9]+)[Ll]\b", "$1");
+                seg = Regex.Replace(seg, @"\b([0-9]+\.[0-9]+)[FfDd]\b", "$1");
+                seg = Regex.Replace(seg, @"\bthis\b", "self");
+                seg = Regex.Replace(seg, @"\bself_val\b", "self");
+                seg = seg.Replace("&&", " and ").Replace("||", " or ");
+                return seg;
+            });
+        }
+        else if (lang == "ruby")
+        {
+            s = ConvertEmbeddedRubyStringsInExpr(s);
+            s = TransformOutsideStringLiterals(s, seg =>
+            {
+                seg = Regex.Replace(seg, @"!(@?[A-Za-z_][A-Za-z0-9_.]*)\.nil\?", "($1 != null)");
+                seg = Regex.Replace(seg, @"(@?[A-Za-z_][A-Za-z0-9_.]*)\.nil\?", "($1 == null)");
+                seg = Regex.Replace(seg, @"\.nil\?", " == null");
+                seg = Regex.Replace(seg, @"(@?[A-Za-z_][A-Za-z0-9_.]*)\.empty\?", "(len($1) == 0)");
+                seg = Regex.Replace(seg, @"\bnil\b", "null");
+                seg = Regex.Replace(seg, @"@([A-Za-z_][A-Za-z0-9_]*)", "self.$1");
+                seg = seg.Replace("&.", "?.");
+                seg = seg.Replace("::", ".");
+                seg = Regex.Replace(seg, @"\b([A-Za-z_][A-Za-z0-9_]*)\.new\s*\(", "$1(");
+                seg = Regex.Replace(seg, @"\b([A-Za-z_][A-Za-z0-9_]*)\.new\b", "$1()");
+                seg = Regex.Replace(seg, @"\(([^()]+)\)\.div\(\s*([^()]+)\s*\)", "(($1) // ($2))");
+                seg = Regex.Replace(seg, @"([A-Za-z0-9_.]+)\.div\(\s*([^()]+)\s*\)", "(($1) // ($2))");
+                seg = Regex.Replace(seg, @"\(([^()]+)\)\.(abs|floor|ceil|round)\b", "$2($1)");
+                seg = Regex.Replace(seg, @"([A-Za-z_][A-Za-z0-9_.]*)\.(abs|floor|ceil|round)\b", "$2($1)");
+                seg = Regex.Replace(seg, @"!([A-Za-z_][A-Za-z0-9_.]*)\.include\?\(\s*([^()]+)\s*\)", "(($2) not in $1)");
+                seg = Regex.Replace(seg, @"([A-Za-z_][A-Za-z0-9_.]*)\.include\?\(\s*([^()]+)\s*\)", "(($2) in $1)");
+                seg = Regex.Replace(seg, @"\.size\b", ".length");
+                seg = seg.Replace("&&", " and ").Replace("||", " or ");
+                return seg;
+            });
+        }
 
         if (lang is "c" or "cpp" or "js" or "rust")
         {
@@ -3016,11 +5285,12 @@ public static partial class ForeignAstIngester
 
             if (parts.Count == 1)
             {
+                string plainFmt = fmt.Replace("%%", "%");
                 return new PilotIrLiteralExpr
                 {
                     Kind = PilotLiteralKind.String,
-                    RawValue = $"\"{fmt}\"",
-                    StringContent = fmt
+                    RawValue = $"\"{plainFmt}\"",
+                    StringContent = plainFmt
                 };
             }
 
@@ -3033,6 +5303,7 @@ public static partial class ForeignAstIngester
             int argIdx = 0;
             string replaced = FormatPlaceholderRegex().Replace(fmt, _ =>
                 argIdx < args.Count ? $"{{{NormalizeForeignExpressionToPilot(args[argIdx++], lang)}}}" : "");
+            replaced = replaced.Replace("%%", "%");
             return PilotTranspileIrBuilder.ParseInterpolatedString(replaced);
         }
 
@@ -3044,6 +5315,9 @@ public static partial class ForeignAstIngester
         string t = rawType.Trim();
         if (string.IsNullOrEmpty(t))
             return "any";
+
+        if (t.EndsWith("[]", StringComparison.Ordinal))
+            return $"[{MapForeignType(t[..^2], lang)}]";
 
         // Python Final[T], Optional[T], List[T], Dict[K, V]
         if (t.StartsWith("Final[") && t.EndsWith("]"))
@@ -3063,35 +5337,59 @@ public static partial class ForeignAstIngester
                 return $"{{{MapForeignType(kv[0], lang)}: {MapForeignType(kv[1], lang)}}}";
         }
 
-        // Rust Option<T>, Result<T, E>, Vec<T>
-        if (t.StartsWith("Option<") && t.EndsWith(">"))
-            return MapForeignType(t["Option<".Length..^1], lang) + "?";
+        // Rust / Java / C++ generic types: Option<T>, Optional<T>, Result<T, E>, Vec<T>, List<T>, Set<T>, Map<K, V>
+        if ((t.StartsWith("Option<", StringComparison.Ordinal) || t.StartsWith("Optional<", StringComparison.Ordinal) || t.StartsWith("java.util.Optional<", StringComparison.Ordinal)) && t.EndsWith(">", StringComparison.Ordinal))
+            return MapForeignType(t[(t.IndexOf('<') + 1)..^1], lang) + "?";
         if (t.StartsWith("Result<") && t.EndsWith(">"))
         {
             var okErr = SplitTopLevelComma(t["Result<".Length..^1]);
             if (okErr.Count == 2)
                 return $"{MapForeignType(okErr[0], lang)} ! {MapForeignType(okErr[1], lang)}";
         }
-        if ((t.StartsWith("Vec<") || t.StartsWith("std::vector<")) && t.EndsWith(">"))
+        if ((t.StartsWith("Vec<", StringComparison.Ordinal) ||
+             t.StartsWith("std::vector<", StringComparison.Ordinal) ||
+             t.StartsWith("List<", StringComparison.Ordinal) ||
+             t.StartsWith("ArrayList<", StringComparison.Ordinal) ||
+             t.StartsWith("LinkedList<", StringComparison.Ordinal) ||
+             t.StartsWith("java.util.List<", StringComparison.Ordinal)) && t.EndsWith(">", StringComparison.Ordinal))
+        {
             return $"[{MapForeignType(t[(t.IndexOf('<') + 1)..^1], lang)}]";
+        }
+        if ((t.StartsWith("Set<", StringComparison.Ordinal) ||
+             t.StartsWith("HashSet<", StringComparison.Ordinal) ||
+             t.StartsWith("java.util.Set<", StringComparison.Ordinal)) && t.EndsWith(">", StringComparison.Ordinal))
+        {
+            return $"set[{MapForeignType(t[(t.IndexOf('<') + 1)..^1], lang)}]";
+        }
+        if ((t.StartsWith("Map<", StringComparison.Ordinal) ||
+             t.StartsWith("HashMap<", StringComparison.Ordinal) ||
+             t.StartsWith("LinkedHashMap<", StringComparison.Ordinal) ||
+             t.StartsWith("java.util.Map<", StringComparison.Ordinal)) && t.EndsWith(">", StringComparison.Ordinal))
+        {
+            var kv = SplitTopLevelComma(t[(t.IndexOf('<') + 1)..^1]);
+            if (kv.Count == 2)
+                return $"{{{MapForeignType(kv[0], lang)}: {MapForeignType(kv[1], lang)}}}";
+        }
 
         return t switch
         {
-            "int8_t" or "i8" => "i8",
-            "int16_t" or "i16" => "i16",
+            "int8_t" or "i8" or "byte" or "Byte" => "i8",
+            "int16_t" or "i16" or "short" or "Short" => "i16",
             "int32_t" or "i32" => "i32",
-            "int64_t" or "i64" or "isize" or "long" => "i64",
+            "int64_t" or "i64" or "isize" or "long" or "Long" => "i64",
             "uint8_t" or "u8" => "u8",
             "uint16_t" or "u16" => "u16",
             "uint32_t" or "u32" => "u32",
             "uint64_t" or "u64" or "usize" or "size_t" => "u64",
-            "int" or "number" => "int",
-            "float" => lang == "python" ? "float" : "f32",
-            "double" or "f64" => "f64",
-            "bool" or "boolean" => "bool",
-            "String" or "&str" or "std::string" or "string" or "const char*" or "const char *" or "char*" => "str",
-            "None" or "()" or "void" => "void",
-            "Any" => "any",
+            "int" or "Integer" or "number" => "int",
+            "float" or "Float" => lang == "python" ? "float" : "f32",
+            "double" or "Double" or "f64" => "f64",
+            "bool" or "boolean" or "Boolean" => "bool",
+            "String" or "CharSequence" or "char" or "Character" or "&str" or "std::string" or "string" or "const char*" or "const char *" or "char*" => "str",
+            "BigDecimal" or "java.math.BigDecimal" => "decimal",
+            "PilotMatrix" => "Matrix",
+            "None" or "()" or "void" or "Void" => "void",
+            "Any" or "Object" or "?" => "any",
             _ => t
         };
     }
@@ -3388,6 +5686,325 @@ public static partial class ForeignAstIngester
         return true;
     }
 
+    private static bool IsValidJavaTypeSyntax(string rawType)
+    {
+        if (string.IsNullOrWhiteSpace(rawType))
+            return false;
+        if (!(char.IsLetter(rawType[0]) || rawType[0] == '_'))
+            return false;
+        if (rawType is "return" or "throw" or "if" or "else" or "while" or "for" or "switch" or "case" or "new" or "assert" or "package" or "import")
+            return false;
+
+        int angle = 0;
+        int bracket = 0;
+        foreach (char c in rawType)
+        {
+            if (c == '<') angle++;
+            else if (c == '>') { angle--; if (angle < 0) return false; }
+            else if (c == '[') bracket++;
+            else if (c == ']') { bracket--; if (bracket < 0) return false; }
+            else if (!(char.IsLetterOrDigit(c) || c is '_' or '.' or ',' or '?' or ' '))
+                return false;
+        }
+        return angle == 0 && bracket == 0;
+    }
+
+    private static bool TryExtractJavaCollectionArgs(string s, out PilotCollectionKind kind, out string innerArgs)
+    {
+        kind = PilotCollectionKind.List;
+        innerArgs = "";
+        string cur = s.Trim();
+
+        if (cur.StartsWith("new ArrayList", StringComparison.Ordinal) && cur.EndsWith(")", StringComparison.Ordinal))
+        {
+            int openP = cur.IndexOf('(');
+            if (openP > 0 && FindMatchingCloseParen(cur, openP) == cur.Length - 1)
+                cur = cur[(openP + 1)..^1].Trim();
+        }
+        else if (cur.StartsWith("new HashSet", StringComparison.Ordinal) && cur.EndsWith(")", StringComparison.Ordinal))
+        {
+            kind = PilotCollectionKind.Set;
+            int openP = cur.IndexOf('(');
+            if (openP > 0 && FindMatchingCloseParen(cur, openP) == cur.Length - 1)
+                cur = cur[(openP + 1)..^1].Trim();
+        }
+        else if (cur.StartsWith("new HashMap", StringComparison.Ordinal) && cur.EndsWith(")", StringComparison.Ordinal))
+        {
+            kind = PilotCollectionKind.Map;
+            int openP = cur.IndexOf('(');
+            if (openP > 0 && FindMatchingCloseParen(cur, openP) == cur.Length - 1)
+                cur = cur[(openP + 1)..^1].Trim();
+        }
+
+        if ((cur.StartsWith("Arrays.asList(", StringComparison.Ordinal) || cur.StartsWith("List.of(", StringComparison.Ordinal)) &&
+            cur.EndsWith(")", StringComparison.Ordinal) &&
+            FindMatchingCloseParen(cur, cur.IndexOf('(')) == cur.Length - 1)
+        {
+            innerArgs = cur[(cur.IndexOf('(') + 1)..^1];
+            return true;
+        }
+
+        if (cur.StartsWith("Set.of(", StringComparison.Ordinal) &&
+            cur.EndsWith(")", StringComparison.Ordinal) &&
+            FindMatchingCloseParen(cur, "Set.of".Length) == cur.Length - 1)
+        {
+            kind = PilotCollectionKind.Set;
+            innerArgs = cur["Set.of(".Length..^1];
+            return true;
+        }
+
+        if ((cur.StartsWith("Map.ofEntries(", StringComparison.Ordinal) || cur.StartsWith("Map.of(", StringComparison.Ordinal)) &&
+            cur.EndsWith(")", StringComparison.Ordinal) &&
+            FindMatchingCloseParen(cur, cur.IndexOf('(')) == cur.Length - 1)
+        {
+            kind = PilotCollectionKind.Map;
+            innerArgs = cur[(cur.IndexOf('(') + 1)..^1];
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string RewriteBalancedTwoArgCall(string s, string callPrefix, string infixOp)
+    {
+        string token = callPrefix + "(";
+        int searchFrom = 0;
+        while (searchFrom < s.Length)
+        {
+            int idx = s.IndexOf(token, searchFrom, StringComparison.Ordinal);
+            if (idx < 0)
+                break;
+
+            if (idx > 0 && (char.IsLetterOrDigit(s[idx - 1]) || s[idx - 1] == '_'))
+            {
+                searchFrom = idx + token.Length;
+                continue;
+            }
+
+            int openP = idx + callPrefix.Length;
+            int closeP = FindMatchingCloseParen(s, openP);
+            if (closeP <= openP)
+                break;
+
+            var args = SplitTopLevelComma(s[(openP + 1)..closeP]);
+            if (args.Count == 2)
+            {
+                string replacement = $"(({args[0].Trim()}) {infixOp} ({args[1].Trim()}))";
+                s = s[..idx] + replacement + s[(closeP + 1)..];
+                searchFrom = idx + replacement.Length;
+            }
+            else
+            {
+                searchFrom = closeP + 1;
+            }
+        }
+        return s;
+    }
+
+    private static string TransformOutsideStringLiterals(string s, Func<string, string> transform)
+    {
+        var sb = new StringBuilder(s.Length);
+        int codeStart = 0;
+        int i = 0;
+        while (i < s.Length)
+        {
+            char c = s[i];
+            if (c is '"' or '\'')
+            {
+                if (i > codeStart)
+                    sb.Append(transform(s[codeStart..i]));
+
+                char quote = c;
+                int strStart = i;
+                i++;
+                while (i < s.Length)
+                {
+                    if (s[i] == '\\' && i + 1 < s.Length) { i += 2; continue; }
+                    if (s[i] == quote) { i++; break; }
+                    i++;
+                }
+                sb.Append(s[strStart..i]);
+                codeStart = i;
+            }
+            else
+            {
+                i++;
+            }
+        }
+        if (codeStart < s.Length)
+            sb.Append(transform(s[codeStart..]));
+        return sb.ToString();
+    }
+
+    private static bool IsSingleQuotedRubyString(string s, char quote)
+    {
+        int interpDepth = 0;
+        for (int i = 1; i < s.Length - 1; i++)
+        {
+            char c = s[i];
+            if (c == '\\' && i + 1 < s.Length - 1) { i++; continue; }
+            if (quote == '"' && c == '#' && i + 1 < s.Length - 1 && s[i + 1] == '{')
+            {
+                interpDepth++;
+                i++;
+                continue;
+            }
+            if (interpDepth > 0)
+            {
+                if (c == '{') interpDepth++;
+                else if (c == '}') interpDepth--;
+                continue;
+            }
+            if (c == quote)
+                return false;
+        }
+        return interpDepth == 0;
+    }
+
+    private static bool ContainsUnescapedRubyInterp(string inner)
+    {
+        for (int i = 0; i + 1 < inner.Length; i++)
+        {
+            if (inner[i] == '\\') { i++; continue; }
+            if (inner[i] == '#' && inner[i + 1] == '{')
+                return true;
+        }
+        return false;
+    }
+
+    private static PilotIrInterpolatedStringExpr ParseRubyInterpolatedString(string inner)
+    {
+        var fstr = new PilotIrInterpolatedStringExpr();
+        var litBuf = new StringBuilder();
+        int i = 0;
+        while (i < inner.Length)
+        {
+            if (inner[i] == '\\' && i + 2 < inner.Length && inner[i + 1] == '#' && inner[i + 2] == '{')
+            {
+                litBuf.Append("#{");
+                i += 3;
+                continue;
+            }
+            if (inner[i] == '\\' && i + 1 < inner.Length)
+            {
+                litBuf.Append(inner[i]).Append(inner[i + 1]);
+                i += 2;
+                continue;
+            }
+            if (inner[i] == '#' && i + 1 < inner.Length && inner[i + 1] == '{')
+            {
+                if (litBuf.Length > 0)
+                {
+                    fstr.Parts.Add(new PilotIrFStringPart(false, litBuf.ToString()));
+                    litBuf.Clear();
+                }
+
+                i += 2;
+                int depth = 1;
+                int holeStart = i;
+                while (i < inner.Length && depth > 0)
+                {
+                    if (inner[i] == '{') depth++;
+                    else if (inner[i] == '}') depth--;
+                    if (depth > 0) i++;
+                }
+                string holeRaw = inner[holeStart..i].Trim();
+                if (i < inner.Length && inner[i] == '}')
+                    i++;
+
+                string? fmtSpec = null;
+                if (holeRaw.StartsWith("sprintf(\"%", StringComparison.Ordinal) && holeRaw.EndsWith(")", StringComparison.Ordinal))
+                {
+                    var spArgs = SplitTopLevelComma(holeRaw["sprintf(".Length..^1]);
+                    if (spArgs.Count == 2 && spArgs[0].StartsWith("\"%", StringComparison.Ordinal) && spArgs[0].EndsWith("\"", StringComparison.Ordinal))
+                    {
+                        fmtSpec = spArgs[0][2..^1];
+                        holeRaw = spArgs[1].Trim();
+                    }
+                }
+
+                string normHole = NormalizeForeignExpressionToPilot(holeRaw, "ruby");
+                fstr.Parts.Add(new PilotIrFStringPart(true, normHole, ParseForeignExpr(holeRaw, "ruby"), fmtSpec));
+                continue;
+            }
+
+            litBuf.Append(inner[i]);
+            i++;
+        }
+
+        if (litBuf.Length > 0)
+            fstr.Parts.Add(new PilotIrFStringPart(false, litBuf.ToString()));
+
+        return fstr;
+    }
+
+    private static string ConvertEmbeddedRubyStringsInExpr(string s)
+    {
+        var sb = new StringBuilder(s.Length);
+        int i = 0;
+        while (i < s.Length)
+        {
+            if (s[i] == '\'')
+            {
+                int start = i + 1;
+                i++;
+                var content = new StringBuilder();
+                while (i < s.Length)
+                {
+                    if (s[i] == '\\' && i + 1 < s.Length)
+                    {
+                        if (s[i + 1] == '\'') content.Append('\'');
+                        else content.Append(s[i]).Append(s[i + 1]);
+                        i += 2;
+                        continue;
+                    }
+                    if (s[i] == '\'') { i++; break; }
+                    if (s[i] == '"') content.Append("\\\"");
+                    else content.Append(s[i]);
+                    i++;
+                }
+                sb.Append('"').Append(content).Append('"');
+            }
+            else if (s[i] == '"')
+            {
+                int strStart = i;
+                i++;
+                int interpDepth = 0;
+                while (i < s.Length)
+                {
+                    if (s[i] == '\\' && i + 1 < s.Length) { i += 2; continue; }
+                    if (s[i] == '#' && i + 1 < s.Length && s[i + 1] == '{') { interpDepth++; i += 2; continue; }
+                    if (interpDepth > 0 && s[i] == '{') { interpDepth++; i++; continue; }
+                    if (interpDepth > 0 && s[i] == '}') { interpDepth--; i++; continue; }
+                    if (interpDepth == 0 && s[i] == '"') { i++; break; }
+                    i++;
+                }
+                string fullLit = s[strStart..i];
+                if (fullLit.Length >= 2 && fullLit[^1] == '"' && ContainsUnescapedRubyInterp(fullLit[1..^1]))
+                {
+                    var parsed = ParseRubyInterpolatedString(fullLit[1..^1]);
+                    sb.Append("f\"");
+                    foreach (var p in parsed.Parts)
+                    {
+                        if (!p.IsInterpolation) sb.Append(p.LiteralText);
+                        else sb.Append('{').Append(p.LiteralText).Append('}');
+                    }
+                    sb.Append('"');
+                }
+                else
+                {
+                    sb.Append(fullLit);
+                }
+            }
+            else
+            {
+                sb.Append(s[i]);
+                i++;
+            }
+        }
+        return sb.ToString();
+    }
+
     [GeneratedRegex(@"^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^,]+),\s*(.+)$")]
     private static partial Regex LuaNumForRegex();
     [GeneratedRegex(@"^(?:_|\w+)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(?:i?pairs\(\s*([^)]+)\s*\)|(.+))$")]
@@ -3402,7 +6019,7 @@ public static partial class ForeignAstIngester
     private static partial Regex JsFnHeaderRegex();
     [GeneratedRegex(@"^(?:static\s+)?(?:inline\s+)?(?:constexpr\s+)?([A-Za-z_][A-Za-z0-9_:<>*&\s]*?)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)$")]
     private static partial Regex CFnHeaderRegex();
-    [GeneratedRegex(@"^(?:int64_t|int32_t|int|size_t|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);\s*\1\s*(<=|<)\s*([^;]+);\s*(?:\+\+\1|\1\+\+|\1\s*\+=\s*1)$")]
+    [GeneratedRegex(@"^(?:int64_t|int32_t|long|int|short|byte|size_t|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);\s*\1\s*(<=|<)\s*([^;]+);\s*(?:\+\+\1|\1\+\+|\1\s*\+=\s*1)$")]
     private static partial Regex CStyleForRegex();
     [GeneratedRegex(@"^(?:const\s+)?(?:auto|int64_t|int|std::string)\s*&?\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)$")]
     private static partial Regex CppRangeForRegex();
@@ -3424,6 +6041,24 @@ public static partial class ForeignAstIngester
     private static partial Regex JsArrayFromCompRegex();
     [GeneratedRegex(@"^\(function\(\)\s*local\s+__res\s*=\s*\{\}\s*;\s*for\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^,]+),\s*(.+?)\s+do\s+(?:if\s+(.+?)\s+then\s+)?table\.insert\(__res,\s*(.+?)\)\s*(?:end\s+)?end\s*;\s*return\s+__res\s+end\)\(\)$")]
     private static partial Regex LuaIifeCompRegex();
+    [GeneratedRegex(@"^(?:(?:public|protected|private|static|abstract)\s+)*sealed\s+interface\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]+>)?(?:\s+permits\s+.+)?$")]
+    private static partial Regex JavaSealedInterfaceRegex();
+    [GeneratedRegex(@"^(?:(?:public|protected|private|static|final)\s+)*record\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]+>)?\s*\((.*)\)(?:\s+implements\s+(.+))?$")]
+    private static partial Regex JavaRecordHeaderRegex();
+    [GeneratedRegex(@"^(?:(?:public|protected|private|static)\s+)*enum\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+implements\s+.+)?$")]
+    private static partial Regex JavaEnumHeaderRegex();
+    [GeneratedRegex(@"^(?:(?:public|protected|private|static|final|abstract|sealed|non-sealed)\s+)*class\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]+>)?(?:\s+extends\s+([A-Za-z_][A-Za-z0-9_.<>]*))?(?:\s+(?:implements|permits)\s+.+)?$")]
+    private static partial Regex JavaClassHeaderRegex();
+    [GeneratedRegex(@"^(.+?)\.(each|times)\s+do(?:\s*\|\s*([^|]*)\|\s*)?$")]
+    private static partial Regex RubyEachBlockRegex();
+    [GeneratedRegex(@"^(?:LongStream|IntStream)\.(rangeClosed|range)\((.+?),\s*(.+?)\)(?:\.filter\([A-Za-z_][A-Za-z0-9_]*\s*->\s*(.+?)\))?\.map\(([A-Za-z_][A-Za-z0-9_]*)\s*->\s*(.+?)\)\.boxed\(\)\.(?:collect\(Collectors\.toList\(\)\)|toList\(\))$")]
+    private static partial Regex JavaRangeStreamCompRegex();
+    [GeneratedRegex(@"^(?:LongStream|IntStream)\.(rangeClosed|range)\((.+?),\s*(.+?)\)\.boxed\(\)\.(?:collect\(Collectors\.toList\(\)\)|toList\(\))$")]
+    private static partial Regex JavaRangeStreamOnlyRegex();
+    [GeneratedRegex(@"^(.+?)\.stream\(\)(?:\.filter\([A-Za-z_][A-Za-z0-9_]*\s*->\s*(.+?)\))?\.map\(([A-Za-z_][A-Za-z0-9_]*)\s*->\s*(.+?)\)\.(?:collect\(Collectors\.toList\(\)\)|toList\(\))$")]
+    private static partial Regex JavaColStreamCompRegex();
+    [GeneratedRegex(@"^(.+?)(?:\.(?:select|filter)\s*\{\s*\|[A-Za-z_][A-Za-z0-9_]*\|\s*(.+?)\s*\})?\.map\s*\{\s*\|([A-Za-z_][A-Za-z0-9_]*)\|\s*(.+?)\s*\}$")]
+    private static partial Regex RubyEnumCompRegex();
     [GeneratedRegex(@"`([^`]*)`")]
     private static partial Regex JsTemplateRegex();
     [GeneratedRegex(@"(\{\:?[^\}]*\}|%[0-9.]*(?:lld|ld|zu|d|i|u|f|g|s))")]

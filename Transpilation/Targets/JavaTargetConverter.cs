@@ -81,6 +81,7 @@ public sealed class JavaTargetConverter : ITargetLanguageConverter
         private readonly PilotIrModule _module;
         private readonly TranspilationOptions _options;
         private readonly HashSet<string> _knownTypeDecls = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, HashSet<string>> _adtVariants = new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _extensionMethods = new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _localJavaTypes = new(StringComparer.Ordinal);
         private HashSet<string> _activeMutatedNames = new(StringComparer.Ordinal);
@@ -99,8 +100,14 @@ public sealed class JavaTargetConverter : ITargetLanguageConverter
             foreach (var adt in module.Statements.OfType<PilotIrAdtDefStmt>())
             {
                 _knownTypeDecls.Add(adt.Name);
+                var variants = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var v in adt.Variants)
+                {
                     _knownTypeDecls.Add(v.Name);
+                    variants.Add(v.Name);
+                }
+                if (variants.Count > 0)
+                    _adtVariants[adt.Name] = variants;
             }
 
             foreach (var ext in module.Statements.OfType<PilotIrExtensionDefStmt>())
@@ -136,6 +143,9 @@ public sealed class JavaTargetConverter : ITargetLanguageConverter
                     topTypes.Add(stmt);
                 else if (stmt is PilotIrFuncDefStmt)
                     moduleMembers.Add(stmt);
+                else if (stmt is PilotIrVarDeclStmt { Kind: PilotVarDeclKind.Const } cv &&
+                         (cv.ComptimeFoldedLiteral != null || cv.Initializer is PilotIrLiteralExpr))
+                    moduleMembers.Add(stmt);
                 else
                     topExecutableStmts.Add(stmt);
             }
@@ -160,7 +170,7 @@ public sealed class JavaTargetConverter : ITargetLanguageConverter
             foreach (var m in moduleMembers)
             {
                 EmitLeadingComments(sb, m);
-                string ms = EmitStmt(m);
+                string ms = m is PilotIrVarDeclStmt cv ? EmitStaticModuleConst(cv) : EmitStmt(m);
                 if (!string.IsNullOrWhiteSpace(ms))
                 {
                     sb.AppendLine(ms);
@@ -180,13 +190,7 @@ public sealed class JavaTargetConverter : ITargetLanguageConverter
                 sb.AppendLine($"{Indent}public static void main(String[] args){throwsClause}");
                 sb.AppendLine($"{Indent}{{");
                 _indent++;
-                foreach (var s in topExecutableStmts)
-                {
-                    EmitLeadingComments(sb, s);
-                    string line = EmitStmt(s);
-                    if (!string.IsNullOrWhiteSpace(line))
-                        sb.AppendLine(line);
-                }
+                EmitStatementSequence(sb, topExecutableStmts);
                 _indent--;
                 sb.AppendLine($"{Indent}}}");
             }
@@ -311,6 +315,33 @@ public sealed class JavaTargetConverter : ITargetLanguageConverter
             return $"{Indent}{finalPrefix}{typeStr} {v.Name} = {rhsVal};";
         }
 
+        private string EmitStaticModuleConst(PilotIrVarDeclStmt v)
+        {
+            string typeStr;
+            if (!string.IsNullOrEmpty(v.DeclaredType) && v.DeclaredType is not ("auto" or "any"))
+            {
+                typeStr = MapType(v.DeclaredType!);
+            }
+            else if (v.Initializer is PilotIrLiteralExpr lit)
+            {
+                typeStr = lit.Kind switch
+                {
+                    PilotLiteralKind.Integer => "long",
+                    PilotLiteralKind.Float => "double",
+                    PilotLiteralKind.Boolean => "boolean",
+                    PilotLiteralKind.String => "String",
+                    _ => "Object"
+                };
+            }
+            else
+            {
+                typeStr = "long";
+            }
+
+            string rhsVal = v.ComptimeFoldedLiteral ?? (v.Initializer != null ? EmitExpr(v.Initializer) : DefaultJavaValue(typeStr));
+            return $"{Indent}public static final {typeStr} {v.Name} = {rhsVal};";
+        }
+
         private string EmitAssignStmt(PilotIrAssignStmt a)
         {
             if (a.Operator == "=" && a.Target is PilotIrIndexExpr ix)
@@ -388,13 +419,7 @@ public sealed class JavaTargetConverter : ITargetLanguageConverter
                 {
                     sb.AppendLine($"{Indent}if (!({EmitExpr(req)})) throw new IllegalArgumentException(\"Contract requires failed\");");
                 }
-                foreach (var s in f.Body)
-                {
-                    EmitLeadingComments(sb, s);
-                    string line = EmitStmt(s);
-                    if (!string.IsNullOrWhiteSpace(line))
-                        sb.AppendLine(line);
-                }
+                EmitStatementSequence(sb, f.Body);
             }
             finally
             {
@@ -617,13 +642,7 @@ public sealed class JavaTargetConverter : ITargetLanguageConverter
             {
                 sb.AppendLine($"{Indent}if (!({EmitExpr(f.WhereFilter)})) continue;");
             }
-            foreach (var s in f.Body)
-            {
-                EmitLeadingComments(sb, s);
-                string line = EmitStmt(s);
-                if (!string.IsNullOrWhiteSpace(line))
-                    sb.AppendLine(line);
-            }
+            EmitStatementSequence(sb, f.Body);
             _indent--;
             sb.AppendLine($"{Indent}}}");
 
@@ -646,6 +665,52 @@ public sealed class JavaTargetConverter : ITargetLanguageConverter
             return "long";
         }
 
+        private bool IsPatternSwitchExhaustive(PilotIrMatchStmt m)
+        {
+            if (m.Arms.Any(a => a.Guard == null && a.Pattern is PilotIrWildcardPattern or PilotIrBindingPattern))
+                return true;
+
+            foreach (var variants in _adtVariants.Values)
+            {
+                if (variants.All(vn => m.Arms.Any(a =>
+                        a.Guard == null && a.Pattern is PilotIrVariantPattern vp && vp.VariantName == vn)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool BlockDefinitelyTerminates(IReadOnlyList<PilotIrStmt> stmts) =>
+            stmts.Any(StmtDefinitelyTerminates);
+
+        private bool StmtDefinitelyTerminates(PilotIrStmt stmt) => stmt switch
+        {
+            PilotIrReturnStmt or PilotIrRaiseStmt or PilotIrBreakStmt or PilotIrContinueStmt => true,
+            PilotIrIfStmt ifs => ifs.ElseBody.Count > 0 &&
+                                 BlockDefinitelyTerminates(ifs.ThenBody) &&
+                                 ifs.ElifBranches.All(b => BlockDefinitelyTerminates(b.Body)) &&
+                                 BlockDefinitelyTerminates(ifs.ElseBody),
+            PilotIrMatchStmt m => m.Arms.Count > 0 &&
+                                  IsPatternSwitchExhaustive(m) &&
+                                  m.Arms.All(a => BlockDefinitelyTerminates(a.Body)),
+            _ => false
+        };
+
+        private void EmitStatementSequence(StringBuilder sb, IReadOnlyList<PilotIrStmt> stmts)
+        {
+            foreach (var s in stmts)
+            {
+                EmitLeadingComments(sb, s);
+                string line = EmitStmt(s);
+                if (!string.IsNullOrWhiteSpace(line))
+                    sb.AppendLine(line);
+                if (StmtDefinitelyTerminates(s))
+                    break;
+            }
+        }
+
         private string EmitMatchStmt(PilotIrMatchStmt m)
         {
             bool usePatternSwitch = m.Arms.Count > 0 && m.Arms.All(a =>
@@ -664,6 +729,10 @@ public sealed class JavaTargetConverter : ITargetLanguageConverter
                     string header = pat == "_" ? "default ->" : $"case {pat}{guard} ->";
                     sb.AppendLine($"{Indent}{header}");
                     EmitBlock(sb, arm.Body);
+                }
+                if (!IsPatternSwitchExhaustive(m))
+                {
+                    sb.AppendLine($"{Indent}default -> {{}}");
                 }
                 _indent--;
                 sb.Append($"{Indent}}}");
@@ -743,13 +812,7 @@ public sealed class JavaTargetConverter : ITargetLanguageConverter
         {
             sb.AppendLine($"{Indent}{{");
             _indent++;
-            foreach (var s in stmts)
-            {
-                EmitLeadingComments(sb, s);
-                string line = EmitStmt(s);
-                if (!string.IsNullOrWhiteSpace(line))
-                    sb.AppendLine(line);
-            }
+            EmitStatementSequence(sb, stmts);
             _indent--;
             sb.AppendLine($"{Indent}}}");
         }

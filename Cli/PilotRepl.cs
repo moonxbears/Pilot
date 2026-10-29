@@ -41,7 +41,7 @@ public sealed class PilotRepl
         Console.WriteLine("     \"Beautiful code you can make your own without sacrificing speed\"  ");
         Console.WriteLine("==================================================================");
         Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine("Commands: :help, :version, :scope, :reset, :emit <python|csharp|rust>, :exit");
+        Console.WriteLine("Commands: :help, :version, :scope, :reset, :emit <python|csharp|rust|java|ruby|js|c|cpp|lua>, :exit");
         Console.WriteLine("Type any expression or statement and press Enter.\n");
         Console.ResetColor();
 
@@ -182,7 +182,7 @@ public sealed class PilotRepl
                 Console.WriteLine("  :scope, :vars               List variables declared in current session");
                 Console.WriteLine("  :reset                      Reset environment and variables");
                 Console.WriteLine("  :clear                      Clear the terminal screen");
-                Console.WriteLine("  :emit <python|csharp|rust>  Transpile code snippet to target");
+                Console.WriteLine("  :emit <target>              Transpile code snippet (python, csharp, rust, java, ruby, js, c, cpp, lua)");
                 Console.WriteLine("  :exit, :quit                Exit the REPL");
                 Console.ResetColor();
                 return true;
@@ -223,7 +223,7 @@ public sealed class PilotRepl
             case ":emit":
                 if (string.IsNullOrEmpty(arg))
                 {
-                    Console.WriteLine("Usage: :emit <python|csharp|rust>");
+                    Console.WriteLine("Usage: :emit <python|csharp|rust|java|ruby|js|ts|c|cpp|lua>");
                     return true;
                 }
                 Console.WriteLine($"Enter Pilot code to transpile to {arg} (end with empty line):");

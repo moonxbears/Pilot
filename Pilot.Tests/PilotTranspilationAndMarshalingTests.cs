@@ -79,6 +79,55 @@ public class PilotTranspilationAndMarshalingTests
         Assert.Contains("let mut sum: i64 = a + b;", result.Code);
     }
 
+    [Fact]
+    public void Test_Transpilation_Pilot_To_Java()
+    {
+        string pilotCode = @"
+            class Account {
+                let balance: f64 = 1000.0;
+                def get_balance(self) -> f64 {
+                    return self.balance;
+                }
+            }
+
+            def add_bonus(amount: f64) -> f64 {
+                let bonus: f64 = amount * 0.1;
+                return amount + bonus;
+            }
+        ";
+
+        var result = _engine.TranspileTo(pilotCode, "java", new TranspilationOptions().WithNamespace("com.banking"));
+        Assert.True(result.Success, string.Join("; ", result.Diagnostics));
+        Assert.Contains("package com.banking;", result.Code);
+        Assert.Contains("public static class Account", result.Code);
+        Assert.Contains("public double get_balance()", result.Code);
+        Assert.Contains("public static double add_bonus(double amount)", result.Code);
+    }
+
+    [Fact]
+    public void Test_Transpilation_Pilot_To_Ruby()
+    {
+        string pilotCode = @"
+            class Account {
+                let owner: str = ""Alice"";
+                def greet(self) -> str {
+                    return f""Hello {self.owner}"";
+                }
+            }
+
+            let acc = Account(""Bob"");
+            println(acc.greet());
+        ";
+
+        var result = _engine.TranspileTo(pilotCode, "ruby");
+        Assert.True(result.Success, string.Join("; ", result.Diagnostics));
+        Assert.Contains("# frozen_string_literal: true", result.Code);
+        Assert.Contains("class Account", result.Code);
+        Assert.Contains("attr_accessor :owner", result.Code);
+        Assert.Contains("\"Hello #{@owner}\"", result.Code);
+        Assert.Contains("Account.new(\"Bob\")", result.Code);
+    }
+
     #endregion
 
     #region Compile-Time Ingestion: Target Languages -> Pilot
@@ -137,6 +186,58 @@ pub fn multiply(a: i64, b: i64) -> i64 {
         Assert.True(result.Success, string.Join("; ", result.Diagnostics));
         Assert.Contains("def multiply(a: i64, b: i64) -> i64 {", result.Code);
         Assert.Contains("let res = a * b;", result.Code);
+    }
+
+    [Fact]
+    public void Test_Ingestion_Java_To_Pilot()
+    {
+        string javaCode = @"
+package com.demo;
+import java.util.*;
+
+public class MathHelper {
+    public static long classify(int code) {
+        final long baseVal = code * 2;
+        switch (code) {
+            case 1 -> {
+                return 10;
+            }
+            default -> {
+                return baseVal;
+            }
+        }
+    }
+}
+";
+
+        var result = _engine.TranspileFrom(javaCode, "java");
+        Assert.True(result.Success, string.Join("; ", result.Diagnostics));
+        Assert.Contains("class MathHelper", result.Code);
+        Assert.Contains("def classify(code: int) -> i64", result.Code);
+        Assert.Contains("match code", result.Code);
+    }
+
+    [Fact]
+    public void Test_Ingestion_Ruby_To_Pilot()
+    {
+        string rubyCode = @"
+# frozen_string_literal: true
+class Greeter
+  attr_accessor :prefix
+  def initialize(prefix = ""Hi"")
+    @prefix = prefix
+  end
+  def format_msg(name)
+    ""#{@prefix}, #{name}!""
+  end
+end
+";
+
+        var result = _engine.TranspileFrom(rubyCode, "ruby");
+        Assert.True(result.Success, string.Join("; ", result.Diagnostics));
+        Assert.Contains("class Greeter", result.Code);
+        Assert.Contains("def format_msg(self, name)", result.Code);
+        Assert.Contains("return f\"{self.prefix}, {name}!\";", result.Code);
     }
 
     #endregion

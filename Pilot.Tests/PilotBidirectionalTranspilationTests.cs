@@ -165,7 +165,7 @@ def check_val(x: i64) -> i64 {
             println(f""Result is {ans}"");
         ";
 
-        string[] targets = { "python", "csharp", "rust", "c", "cpp", "js", "lua" };
+        string[] targets = { "python", "csharp", "rust", "c", "cpp", "js", "lua", "java", "ruby" };
         foreach (var target in targets)
         {
             var res = TranspilationRegistry.Default.Transpile(pilotCode, target);
@@ -189,6 +189,14 @@ def check_val(x: i64) -> i64 {
         var lua = TranspilationRegistry.Default.Transpile(pilotCode, "lua").Code;
         Assert.Contains("for i = 1, 5 do", lua);
         Assert.Contains("string.format(\"Result is %s\", tostring(ans))", lua);
+
+        var java = TranspilationRegistry.Default.Transpile(pilotCode, "java").Code;
+        Assert.Contains("for (long i = 1; i <= 5; ++i)", java);
+        Assert.Contains("System.out.println(String.format(\"Result is %s\", ans))", java);
+
+        var ruby = TranspilationRegistry.Default.Transpile(pilotCode, "ruby").Code;
+        Assert.Contains("for i in 1..5", ruby);
+        Assert.Contains("puts(\"Result is #{ans}\")", ruby);
     }
 
     [Fact]
@@ -226,6 +234,20 @@ def check_val(x: i64) -> i64 {
         Assert.Contains("Circle(f64)", rs.Code);
         Assert.Contains("pub trait i64Ext", rs.Code);
         Assert.Contains(".into_iter().filter(|&x| x > 2).map(|x| x * x).collect::<Vec<_>>()", rs.Code);
+
+        var java = TranspilationRegistry.Default.Transpile(pilotCode, "java");
+        Assert.True(java.Success);
+        Assert.Contains("public sealed interface Shape permits Circle, Rect {}", java.Code);
+        Assert.Contains("public record Circle(double r) implements Shape {}", java.Code);
+        Assert.Contains("public static final class i64PilotExtensions", java.Code);
+        Assert.Contains("LongStream.rangeClosed(1, 6).filter(x -> x > 2).map(x -> x * x).boxed().collect(Collectors.toList())", java.Code);
+
+        var rb = TranspilationRegistry.Default.Transpile(pilotCode, "ruby");
+        Assert.True(rb.Success);
+        Assert.Contains("Circle = Struct.new(:r)", rb.Code);
+        Assert.Contains("Shape = [Circle, Rect].freeze", rb.Code);
+        Assert.Contains("class Integer", rb.Code);
+        Assert.Contains("(1..6).select { |x| x > 2 }.map { |x| x * x }", rb.Code);
     }
 
     [Fact]
@@ -236,7 +258,7 @@ def check_val(x: i64) -> i64 {
             let mat = zeros(2, 2);
         ";
 
-        foreach (var target in new[] { "python", "js", "rust", "cpp", "c", "lua", "csharp" })
+        foreach (var target in new[] { "python", "js", "rust", "cpp", "c", "lua", "csharp", "java", "ruby" })
         {
             var res = TranspilationRegistry.Default.Transpile(pilotCode, target);
             Assert.True(res.Success);
@@ -246,6 +268,14 @@ def check_val(x: i64) -> i64 {
 
         var pyRes = TranspilationRegistry.Default.Transpile(pilotCode, "python");
         Assert.Contains("np.zeros((2, 2))", pyRes.Code);
+
+        var javaRes = TranspilationRegistry.Default.Transpile(pilotCode, "java");
+        Assert.Contains("PilotMatrix.zeros(2, 2)", javaRes.Code);
+        Assert.Contains("final class PilotMatrix", javaRes.Code);
+
+        var rbRes = TranspilationRegistry.Default.Transpile(pilotCode, "ruby");
+        Assert.Contains("PilotMatrix.zeros(2, 2)", rbRes.Code);
+        Assert.Contains("class PilotMatrix", rbRes.Code);
     }
 
     // ========================================================================
@@ -354,6 +384,36 @@ local function factorial(n)
     end
     return acc
 end
+",
+            ["java"] = @"
+public sealed interface Shape permits Circle, Rect {}
+public record Circle(double r) implements Shape {}
+public record Rect(double w, double h) implements Shape {}
+
+class ProgramModule {
+    public static long factorial(long n) {
+        long acc = 1;
+        for (long i = 1; i <= n; ++i) {
+            acc = acc * i;
+        }
+        return acc;
+    }
+}
+",
+            ["ruby"] = @"
+# frozen_string_literal: true
+module Status
+  Idle = 0
+  Active = 1
+end
+
+def factorial(n)
+  acc = 1
+  for i in 1..n
+    acc = acc * i
+  end
+  acc
+end
 "
         };
 
@@ -394,6 +454,60 @@ def process_item(val: int) -> int:
         Assert.Contains("let unmodified =", res.Code);
         // 4. Append loop upgraded to comprehension '[x * 10 for x in ...]'
         Assert.Contains("[x * 10 for x in", res.Code);
+    }
+
+    [Fact]
+    public void Test_20_4_StrictPilot_Upgrades_Java_And_Ruby_NullGuards_Raises_And_AppendLoops()
+    {
+        var strictOpts = new TranspilationOptions { StrictPilot = true };
+
+        string javaSource = @"
+class Processor {
+    public static long processItem(Long val) {
+        if (val == null) {
+            return -1;
+        }
+        if (val < 0) {
+            throw new IllegalArgumentException(""negative input"");
+        }
+        final long doubled = val * 2;
+        var out = new ArrayList<>();
+        for (long x = 1; x <= 4; ++x) {
+            out.add(x * 10);
+        }
+        return doubled;
+    }
+}
+";
+        var javaRes = TranspilationRegistry.Default.Ingest(javaSource, "java", strictOpts);
+        Assert.True(javaRes.Success, string.Join("; ", javaRes.Diagnostics));
+        Assert.Contains("guard some val else", javaRes.Code);
+        Assert.Contains("! Error", javaRes.Code);
+        Assert.Contains("return fail(\"negative input\")", javaRes.Code);
+        Assert.Contains("[x * 10 for x in 1..4]", javaRes.Code);
+
+        string rubySource = @"
+def process_item(val)
+  if val.nil?
+    return -1
+  end
+  if val < 0
+    raise ""negative input""
+  end
+  doubled = val * 2
+  out = []
+  for x in 1..4
+    out << x * 10
+  end
+  return doubled
+end
+";
+        var rubyRes = TranspilationRegistry.Default.Ingest(rubySource, "ruby", strictOpts);
+        Assert.True(rubyRes.Success, string.Join("; ", rubyRes.Diagnostics));
+        Assert.Contains("guard some val else", rubyRes.Code);
+        Assert.Contains("! Error", rubyRes.Code);
+        Assert.Contains("return fail(\"negative input\")", rubyRes.Code);
+        Assert.Contains("[x * 10 for x in 1..4]", rubyRes.Code);
     }
 
     // ========================================================================
@@ -469,6 +583,73 @@ def process_item(val: int) -> int:
             string noticesMd = File.ReadAllText(noticesPath);
             Assert.Contains("MIT", noticesMd);
             Assert.Contains("FastMath Authors", noticesMd);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+                Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
+    public void Test_20_5_LicenseVerifier_Maven_PomXml_Ruby_Gemspec_And_LibraryScaffolding()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "pilot_java_rb_pkg_" + Guid.NewGuid().ToString("N"));
+        string javaSrcDir = Path.Combine(tempRoot, "java_lib");
+        string javaPilotOut = Path.Combine(tempRoot, "java_lib_pilot");
+        string rubySrcDir = Path.Combine(tempRoot, "ruby_gem");
+        string rubyPilotOut = Path.Combine(tempRoot, "ruby_gem_pilot");
+        string gplRubyDir = Path.Combine(tempRoot, "gpl_gem");
+        string javaTargetOut = Path.Combine(tempRoot, "emitted_java_pkg");
+        string rubyTargetOut = Path.Combine(tempRoot, "emitted_ruby_pkg");
+
+        Directory.CreateDirectory(javaSrcDir);
+        Directory.CreateDirectory(rubySrcDir);
+        Directory.CreateDirectory(gplRubyDir);
+
+        try
+        {
+            // 1. Maven pom.xml license detection + Java library ingestion
+            File.WriteAllText(Path.Combine(javaSrcDir, "pom.xml"),
+                "<project><licenses><license><name>Apache-2.0</name></license></licenses></project>");
+            File.WriteAllText(Path.Combine(javaSrcDir, "VecOps.java"),
+                "public class VecOps { public static long scale(long x) { return x * 4; } }");
+
+            var permissive = new TranspilationOptions { LicensePolicy = PilotLicensePolicy.Permissive };
+            var javaIngest = PilotLibraryTranspiler.IngestLibraryToPilot(javaSrcDir, javaPilotOut, "auto", permissive);
+            Assert.True(javaIngest.Success, string.Join("; ", javaIngest.Diagnostics));
+            Assert.Equal("Apache-2.0", javaIngest.LicenseInfo?.SpdxIdentifier);
+            Assert.True(File.Exists(Path.Combine(javaPilotOut, "VecOps.pilot")));
+
+            // 2. Ruby .gemspec license detection + Ruby library ingestion
+            File.WriteAllText(Path.Combine(rubySrcDir, "ruby_gem.gemspec"),
+                "Gem::Specification.new do |spec|\n  spec.name = 'ruby_gem'\n  spec.license = 'MIT'\nend\n");
+            File.WriteAllText(Path.Combine(rubySrcDir, "helpers.rb"),
+                "def quad(x)\n  x * 4\nend\n");
+
+            var rbIngest = PilotLibraryTranspiler.IngestLibraryToPilot(rubySrcDir, rubyPilotOut, "auto", permissive);
+            Assert.True(rbIngest.Success, string.Join("; ", rbIngest.Diagnostics));
+            Assert.Equal("MIT", rbIngest.LicenseInfo?.SpdxIdentifier);
+            Assert.True(File.Exists(Path.Combine(rubyPilotOut, "helpers.pilot")));
+
+            // 3. Copyleft .gemspec rejected under --viable-license-only
+            File.WriteAllText(Path.Combine(gplRubyDir, "gpl.gemspec"),
+                "Gem::Specification.new do |s|\n  s.license = 'GPL-3.0-only'\nend\n");
+            File.WriteAllText(Path.Combine(gplRubyDir, "bad.rb"), "def f(x); x; end\n");
+            var gplRes = PilotLibraryTranspiler.IngestLibraryToPilot(gplRubyDir, Path.Combine(tempRoot, "gpl_out"), "ruby", permissive);
+            Assert.False(gplRes.Success);
+            Assert.Contains(gplRes.Diagnostics, d => d.Contains("INGEST_LIC001"));
+
+            // 4. Emit Pilot library to Java (pom.xml) and Ruby (.gemspec) packages
+            var javaEmitLib = PilotLibraryTranspiler.TranspilePilotLibraryToTarget(rubyPilotOut, javaTargetOut, "java");
+            Assert.True(javaEmitLib.Success, string.Join("; ", javaEmitLib.Diagnostics));
+            Assert.True(File.Exists(Path.Combine(javaTargetOut, "pom.xml")));
+            Assert.True(File.Exists(Path.Combine(javaTargetOut, "helpers.java")));
+
+            var rbEmitLib = PilotLibraryTranspiler.TranspilePilotLibraryToTarget(javaPilotOut, rubyTargetOut, "ruby");
+            Assert.True(rbEmitLib.Success, string.Join("; ", rbEmitLib.Diagnostics));
+            Assert.True(Directory.GetFiles(rubyTargetOut, "*.gemspec").Length == 1);
+            Assert.True(File.Exists(Path.Combine(rubyTargetOut, "VecOps.rb")));
         }
         finally
         {
@@ -610,6 +791,46 @@ def process_item(val: int) -> int:
     }
 
     [Fact]
+    public void Test_20_6_CompilerInTheLoop_Javac_Java21_Compile_And_Execute_Verification()
+    {
+        string pilotCode = @"
+            type Shape = Circle(r: f64) | Rect(w: f64, h: f64);
+
+            extend i64 {
+                def doubled(self) -> i64 {
+                    return self * 2;
+                }
+            }
+
+            def area_approx(s: Shape) -> f64 {
+                match s {
+                    case Circle(r) => {
+                        return 3.0 * r * r;
+                    }
+                    case Rect(w, h) => {
+                        return w * h;
+                    }
+                }
+                return 0.0;
+            }
+
+            let mat = eye(3);
+            let sq = [x * x for x in 1..5 if x > 2];
+            let d = (21).doubled();
+            let a = area_approx(Rect(4.0, 5.0));
+            assert d == 42;
+            assert a == 20.0;
+            println(f""Doubled={d}, Area={a}"");
+        ";
+
+        var javaRes = TranspilationRegistry.Default.Transpile(pilotCode, "java");
+        Assert.True(javaRes.Success, string.Join("; ", javaRes.Diagnostics));
+
+        // Compile & execute via OpenJDK 21 single-file source launcher (JEP 330)
+        VerifyExternalTool("java", "\"{0}\"", ".java", javaRes.Code);
+    }
+
+    [Fact]
     public void Test_20_6_Bidirectional_RoundTrip_Foreign_To_Pilot_Executes_In_VirtualMachine()
     {
         var foreignPrograms = new (string Lang, string Code)[]
@@ -683,6 +904,26 @@ local function compute_triangular(n)
     end
     return acc
 end
+"),
+            ("java", @"
+class ProgramModule {
+    public static long compute_triangular(long n) {
+        long acc = 0;
+        for (long i = 1; i <= n; ++i) {
+            acc += i;
+        }
+        return acc;
+    }
+}
+"),
+            ("ruby", @"
+def compute_triangular(n)
+  acc = 0
+  for i in 1..n
+    acc += i
+  end
+  acc
+end
 ")
         };
 
@@ -717,11 +958,12 @@ end
         Assert.Equal(6, origExec.Context!.Environment.CurrentScope.Resolve("g").AsInt());
         Assert.Equal(53, origExec.Context.Environment.CurrentScope.Resolve("weighted").AsInt());
 
-        // 2. Verify all 8 persisted emitted files exist and pass external compiler / syntax gates
+        // 2. Verify all 10 persisted emitted files exist and pass external compiler / syntax gates
         var expectedEmitted = new[]
         {
             "source.py", "source.cs", "source.rs", "source.c",
-            "source.cpp", "source.js", "source.ts", "source.lua"
+            "source.cpp", "source.js", "source.ts", "source.lua",
+            "source.java", "source.rb"
         };
         foreach (var file in expectedEmitted)
         {
@@ -735,9 +977,11 @@ end
         string emittedC = File.ReadAllText(Path.Combine(samplesRoot, "emitted", "source.c"));
         string emittedCpp = File.ReadAllText(Path.Combine(samplesRoot, "emitted", "source.cpp"));
         string emittedJs = File.ReadAllText(Path.Combine(samplesRoot, "emitted", "source.js"));
+        string emittedJava = File.ReadAllText(Path.Combine(samplesRoot, "emitted", "source.java"));
 
         VerifyExternalTool("python3", "\"{0}\"", ".py", emittedPy);
         VerifyExternalTool("node", "\"{0}\"", ".js", emittedJs);
+        VerifyExternalTool("java", "\"{0}\"", ".java", emittedJava);
         VerifyExternalTool("clang", "-std=c11 -fsyntax-only \"{0}\"", ".c", emittedC);
         VerifyExternalTool("clang++", "-std=c++20 -fsyntax-only \"{0}\"", ".cpp", emittedCpp);
 
@@ -762,7 +1006,7 @@ end
         var csErrors = csComp.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
         Assert.True(csErrors.Count == 0, $"Roslyn C# errors in source.cs:\n{string.Join("\n", csErrors)}");
 
-        // 3. Execute all 9 ingested-back .pilot files in PilotEngine and verify identical runtime state
+        // 3. Execute all 11 ingested-back .pilot files in PilotEngine and verify identical runtime state
         var ingestedFiles = new[]
         {
             "from_python.pilot",
@@ -773,7 +1017,9 @@ end
             "from_cpp.pilot",
             "from_js.pilot",
             "from_ts.pilot",
-            "from_lua.pilot"
+            "from_lua.pilot",
+            "from_java.pilot",
+            "from_ruby.pilot"
         };
 
         foreach (var pilotFile in ingestedFiles)

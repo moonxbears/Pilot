@@ -66,6 +66,8 @@ public static partial class PilotLibraryMapper
                 {
                     "python" or "py" => $"print({string.Join(", ", args)})",
                     "csharp" or "cs" => $"Console.WriteLine({string.Join(", ", args)})",
+                    "java" => $"System.out.println({string.Join(", ", args)})",
+                    "ruby" or "rb" => $"puts({string.Join(", ", args)})",
                     "js" or "javascript" or "ts" or "typescript" => $"console.log({string.Join(", ", args)})",
                     "lua" => $"print({string.Join(", ", args)})",
                     "rust" or "rs" => args.Count > 0 ? $"println!(\"{{:?}}\", {a0})" : "println!()",
@@ -80,6 +82,8 @@ public static partial class PilotLibraryMapper
                 {
                     "python" or "py" => args.Count > 0 ? $"print({a0}, end=\"\")" : "print(\"\", end=\"\")",
                     "csharp" or "cs" => $"Console.Write({string.Join(", ", args)})",
+                    "java" => $"System.out.print({string.Join(", ", args)})",
+                    "ruby" or "rb" => $"print({string.Join(", ", args)})",
                     "js" or "javascript" or "ts" or "typescript" => $"process.stdout.write(String({a0}))",
                     "lua" => $"io.write(tostring({a0}))",
                     "rust" or "rs" => $"print!(\"{{:?}}\", {a0})",
@@ -95,6 +99,8 @@ public static partial class PilotLibraryMapper
                     "python" or "py" => $"np.zeros(({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)}))",
                     "js" or "javascript" or "ts" or "typescript" => $"PilotMatrix.zeros({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
                     "lua" => $"PilotMatrix.zeros({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
+                    "java" => $"PilotMatrix.zeros({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
+                    "ruby" or "rb" => $"PilotMatrix.zeros({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
                     "rust" or "rs" => $"PilotMatrix::zeros({a0} as usize, {(string.IsNullOrEmpty(a1) ? a0 : a1)} as usize)",
                     "cpp" or "c++" => $"PilotMatrix::zeros({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
                     "c" => $"pilot_matrix_zeros({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
@@ -109,6 +115,8 @@ public static partial class PilotLibraryMapper
                     "python" or "py" => $"np.ones(({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)}))",
                     "js" or "javascript" or "ts" or "typescript" => $"PilotMatrix.ones({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
                     "lua" => $"PilotMatrix.ones({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
+                    "java" => $"PilotMatrix.ones({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
+                    "ruby" or "rb" => $"PilotMatrix.ones({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
                     "rust" or "rs" => $"PilotMatrix::ones({a0} as usize, {(string.IsNullOrEmpty(a1) ? a0 : a1)} as usize)",
                     "cpp" or "c++" => $"PilotMatrix::ones({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
                     "c" => $"pilot_matrix_ones({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
@@ -123,6 +131,8 @@ public static partial class PilotLibraryMapper
                     "python" or "py" => $"np.eye({a0})",
                     "js" or "javascript" or "ts" or "typescript" => $"PilotMatrix.eye({a0})",
                     "lua" => $"PilotMatrix.eye({a0})",
+                    "java" => $"PilotMatrix.eye({a0})",
+                    "ruby" or "rb" => $"PilotMatrix.eye({a0})",
                     "rust" or "rs" => $"PilotMatrix::eye({a0} as usize)",
                     "cpp" or "c++" => $"PilotMatrix::eye({a0})",
                     "c" => $"pilot_matrix_eye({a0})",
@@ -151,6 +161,16 @@ public static partial class PilotLibraryMapper
                 if (lang is "js" or "javascript" or "ts" or "typescript")
                 {
                     rendered = $"PilotMatrix.fromArray({a0})";
+                    return true;
+                }
+                if (lang == "java")
+                {
+                    rendered = $"PilotMatrix.fromList({a0})";
+                    return true;
+                }
+                if (lang is "ruby" or "rb")
+                {
+                    rendered = $"PilotMatrix.from_array({a0})";
                     return true;
                 }
                 if (lang == "lua")
@@ -184,6 +204,8 @@ public static partial class PilotLibraryMapper
                     "python" or "py" => $"json.dumps({a0})",
                     "js" or "javascript" or "ts" or "typescript" => $"JSON.stringify({a0})",
                     "csharp" or "cs" => $"System.Text.Json.JsonSerializer.Serialize({a0})",
+                    "java" => $"String.valueOf({a0})",
+                    "ruby" or "rb" => $"JSON.generate({a0})",
                     "rust" or "rs" => $"format!(\"{{:?}}\", {a0})",
                     _ => $"json_dumps({a0})"
                 };
@@ -195,6 +217,8 @@ public static partial class PilotLibraryMapper
                     "python" or "py" => $"json.loads({a0})",
                     "js" or "javascript" or "ts" or "typescript" => $"JSON.parse({a0})",
                     "csharp" or "cs" => $"System.Text.Json.JsonSerializer.Deserialize<object>({a0})",
+                    "java" => a0,
+                    "ruby" or "rb" => $"JSON.parse({a0})",
                     _ => $"json_loads({a0})"
                 };
                 return true;
@@ -205,6 +229,8 @@ public static partial class PilotLibraryMapper
                     "python" or "py" => $"open({a0}, encoding=\"utf-8\").read()",
                     "js" or "javascript" or "ts" or "typescript" => $"fs.readFileSync({a0}, \"utf8\")",
                     "csharp" or "cs" => $"System.IO.File.ReadAllText({a0})",
+                    "java" => $"Files.readString(Path.of({a0}))",
+                    "ruby" or "rb" => $"File.read({a0}, encoding: \"UTF-8\")",
                     "rust" or "rs" => $"std::fs::read_to_string({a0}).unwrap_or_default()",
                     _ => $"read_text({a0})"
                 };
@@ -216,8 +242,23 @@ public static partial class PilotLibraryMapper
                     "python" or "py" => $"open({a0}, \"w\", encoding=\"utf-8\").write({a1})",
                     "js" or "javascript" or "ts" or "typescript" => $"fs.writeFileSync({a0}, {a1})",
                     "csharp" or "cs" => $"System.IO.File.WriteAllText({a0}, {a1})",
+                    "java" => $"Files.writeString(Path.of({a0}), {a1})",
+                    "ruby" or "rb" => $"File.write({a0}, {a1})",
                     "rust" or "rs" => $"std::fs::write({a0}, {a1}).unwrap()",
                     _ => $"write_text({a0}, {a1})"
+                };
+                return true;
+
+            case PilotLibraryCallKind.FileExists:
+                rendered = lang switch
+                {
+                    "python" or "py" => $"os.path.exists({a0})",
+                    "js" or "javascript" or "ts" or "typescript" => $"fs.existsSync({a0})",
+                    "csharp" or "cs" => $"System.IO.File.Exists({a0})",
+                    "java" => $"Files.exists(Path.of({a0}))",
+                    "ruby" or "rb" => $"File.exist?({a0})",
+                    "rust" or "rs" => $"std::path::Path::new({a0}).exists()",
+                    _ => $"file_exists({a0})"
                 };
                 return true;
 
@@ -241,6 +282,8 @@ public static partial class PilotLibraryMapper
                 {
                     "python" or "py" => fn == "abs" ? $"abs({a0})" : $"math.{fn}({a0})",
                     "js" or "javascript" or "ts" or "typescript" => $"Math.{fn}({a0})",
+                    "java" => $"Math.{fn}({a0})",
+                    "ruby" or "rb" => fn is "abs" or "floor" or "ceil" ? $"({a0}).{fn}" : $"Math.{fn}({a0})",
                     "lua" => $"math.{fn}({a0})",
                     "csharp" or "cs" => $"Math.{csFn}({a0})",
                     "rust" or "rs" => $"({a0} as f64).{fn}()",
@@ -257,6 +300,8 @@ public static partial class PilotLibraryMapper
                     "js" or "javascript" or "ts" or "typescript" => $"{a0}.length",
                     "lua" => $"#{a0}",
                     "csharp" or "cs" => $"{a0}.Count",
+                    "java" => $"{a0}.size()",
+                    "ruby" or "rb" => $"{a0}.length",
                     "rust" or "rs" => $"({a0}.len() as i64)",
                     "cpp" or "c++" => $"static_cast<int64_t>({a0}.size())",
                     _ => $"len({a0})"
@@ -277,6 +322,8 @@ public static partial class PilotLibraryMapper
                 {
                     "rust" or "rs" => $"Err({a0})",
                     "csharp" or "cs" => $"PilotResult.Fail({a0})",
+                    "java" => $"Map.of(\"ok\", false, \"error\", {a0})",
+                    "ruby" or "rb" => $"{{ ok: false, error: {a0} }}",
                     "js" or "javascript" or "ts" or "typescript" => $"{{ ok: false, error: {a0} }}",
                     "lua" => $"{{ ok = false, error = {a0} }}",
                     _ => $"fail({a0})"
@@ -401,9 +448,9 @@ public static partial class PilotLibraryMapper
                 return $"// [Native Pilot Library Equivalent] {trimmed}";
             }
         }
-        if (trimmed.Contains("require(", StringComparison.Ordinal))
+        if (trimmed.Contains("require(", StringComparison.Ordinal) || trimmed.StartsWith("require ", StringComparison.Ordinal))
         {
-            if (MyRegex4().IsMatch(trimmed))
+            if (MyRegex4().IsMatch(trimmed) || RubyRequireStdRegex().IsMatch(trimmed))
             {
                 return $"// [Native Pilot Library Equivalent] {trimmed}";
             }
@@ -494,6 +541,23 @@ public static partial class PilotLibraryMapper
         // Concurrency: tokio::spawn / std::async / asyncio.create_task -> spawn
         s = ConcurrencyRegex1().Replace(s, "spawn($1)");
 
+        // Java & Ruby PilotMatrix / Files / JSON / Math ecosystem calls -> Pilot built-ins
+        if (sourceLang is "java" or "ruby" or "rb")
+        {
+            s = PilotMatrixZerosCallRegex().Replace(s, "zeros($1, $2)");
+            s = PilotMatrixOnesCallRegex().Replace(s, "ones($1, $2)");
+            s = PilotMatrixEyeCallRegex().Replace(s, "eye($1)");
+            s = PilotMatrixFromCallRegex().Replace(s, "matrix($1)");
+            s = RubyJsonGenRegex().Replace(s, "json.dumps($1)");
+            s = JavaFilesReadRegex().Replace(s, "read_text($1)");
+            s = JavaFilesWriteRegex().Replace(s, "write_text($1, $2)");
+            s = JavaFilesExistsRegex().Replace(s, "file_exists($1)");
+            s = RubyFileReadRegex().Replace(s, "read_text($1)");
+            s = RubyFileWriteRegex().Replace(s, "write_text($1, $2)");
+            s = RubyFileExistRegex().Replace(s, "file_exists($1)");
+            s = JavaRubyMathFnRegex().Replace(s, "$1($2)");
+        }
+
         return s;
     }
 
@@ -583,6 +647,22 @@ public static partial class PilotLibraryMapper
                 s = Regex.Replace(s, @"\bzeros\(\s*([^,)]+)\s*,\s*([^,)]+)(?:\s*,\s*""[^""]+"")?\s*\)", "pilot_matrix_zeros($1, $2)");
                 s = Regex.Replace(s, @"\bones\(\s*([^,)]+)\s*,\s*([^,)]+)(?:\s*,\s*""[^""]+"")?\s*\)", "pilot_matrix_ones($1, $2)");
                 s = Regex.Replace(s, @"\beye\(\s*([^,)]+)(?:\s*,\s*""[^""]+"")?\s*\)", "pilot_matrix_eye($1)");
+                break;
+
+            case "java":
+                s = Regex.Replace(s, @"\bmatrix\(\s*(\[.+\])(?:\s*,\s*""[^""]+"")?\s*\)", "PilotMatrix.fromList($1)");
+                s = Regex.Replace(s, @"\bzeros\(\s*([^,)]+)\s*,\s*([^,)]+)(?:\s*,\s*""[^""]+"")?\s*\)", "PilotMatrix.zeros($1, $2)");
+                s = Regex.Replace(s, @"\bones\(\s*([^,)]+)\s*,\s*([^,)]+)(?:\s*,\s*""[^""]+"")?\s*\)", "PilotMatrix.ones($1, $2)");
+                s = Regex.Replace(s, @"\beye\(\s*([^,)]+)(?:\s*,\s*""[^""]+"")?\s*\)", "PilotMatrix.eye($1)");
+                break;
+
+            case "ruby" or "rb":
+                s = Regex.Replace(s, @"\bmatrix\(\s*(\[.+\])(?:\s*,\s*""[^""]+"")?\s*\)", "PilotMatrix.from_array($1)");
+                s = Regex.Replace(s, @"\bzeros\(\s*([^,)]+)\s*,\s*([^,)]+)(?:\s*,\s*""[^""]+"")?\s*\)", "PilotMatrix.zeros($1, $2)");
+                s = Regex.Replace(s, @"\bones\(\s*([^,)]+)\s*,\s*([^,)]+)(?:\s*,\s*""[^""]+"")?\s*\)", "PilotMatrix.ones($1, $2)");
+                s = Regex.Replace(s, @"\beye\(\s*([^,)]+)(?:\s*,\s*""[^""]+"")?\s*\)", "PilotMatrix.eye($1)");
+                s = Regex.Replace(s, @"\b(?:json\.dumps|json_dumps)\(", "JSON.generate(");
+                s = Regex.Replace(s, @"\b(?:json\.loads|json_loads)\(", "JSON.parse(");
                 break;
         }
 
@@ -754,6 +834,67 @@ impl PilotMatrix {
 }
 """,
 
+        "java" => """
+final class PilotMatrix {
+    public final long rows;
+    public final long cols;
+    public final double[] data;
+    public PilotMatrix(long rows, long cols) {
+        this.rows = rows;
+        this.cols = cols;
+        this.data = new double[(int)(rows * cols)];
+    }
+    public static PilotMatrix zeros(long r, long c) { return new PilotMatrix(r, c); }
+    public static PilotMatrix ones(long r, long c) {
+        PilotMatrix m = new PilotMatrix(r, c);
+        Arrays.fill(m.data, 1.0);
+        return m;
+    }
+    public static PilotMatrix eye(long n) {
+        PilotMatrix m = new PilotMatrix(n, n);
+        for (int i = 0; i < (int)n; i++) m.data[i * (int)n + i] = 1.0;
+        return m;
+    }
+    public static PilotMatrix fromList(List<? extends List<? extends Number>> arr) {
+        int r = arr.size();
+        int c = r > 0 ? arr.get(0).size() : 0;
+        PilotMatrix m = new PilotMatrix(r, c);
+        for (int i = 0; i < r; i++)
+            for (int j = 0; j < c; j++)
+                m.data[i * c + j] = arr.get(i).get(j).doubleValue();
+        return m;
+    }
+    public double get(long r, long c) { return data[(int)(r * cols + c)]; }
+    public void set(long r, long c, double v) { data[(int)(r * cols + c)] = v; }
+}
+""",
+
+        "ruby" or "rb" => """
+class PilotMatrix
+  attr_reader :rows, :cols, :shape, :data
+  def initialize(rows, cols, fill = 0.0)
+    @rows = rows
+    @cols = cols
+    @shape = [rows, cols]
+    @data = Array.new(rows * cols, fill)
+  end
+  def self.zeros(r, c = r); PilotMatrix.new(r, c, 0.0); end
+  def self.ones(r, c = r); PilotMatrix.new(r, c, 1.0); end
+  def self.eye(n)
+    m = PilotMatrix.zeros(n, n)
+    (0...n).each { |i| m.data[i * n + i] = 1.0 }
+    m
+  end
+  def self.from_array(arr)
+    r = arr.length
+    c = r > 0 ? arr[0].length : 0
+    m = PilotMatrix.zeros(r, c)
+    (0...r).each { |i| (0...c).each { |j| m.data[i * c + j] = arr[i][j].to_f } }
+    m
+  end
+end
+""",
+
         _ => string.Empty
     };
     [GeneratedRegex(@"\b(matrix|zeros|ones|eye|matrix2x2|matrix3x3|matrix4x4)\b", RegexOptions.Compiled)]
@@ -842,5 +983,31 @@ impl PilotMatrix {
     private static partial Regex FileIORegex6();
     [GeneratedRegex(@"\b(?:tokio::spawn|asyncio\.create_task|std::async)\(\s*([^)]+)\s*\)")]
     private static partial Regex ConcurrencyRegex1();
+    [GeneratedRegex(@"^require(?:\(|\s+)['""](json|matrix|set|fileutils|pathname)['""]\)?$")]
+    private static partial Regex RubyRequireStdRegex();
+    [GeneratedRegex(@"\bPilotMatrix\.zeros\(\s*([^,)]+)\s*,\s*([^)]+)\s*\)")]
+    private static partial Regex PilotMatrixZerosCallRegex();
+    [GeneratedRegex(@"\bPilotMatrix\.ones\(\s*([^,)]+)\s*,\s*([^)]+)\s*\)")]
+    private static partial Regex PilotMatrixOnesCallRegex();
+    [GeneratedRegex(@"\bPilotMatrix\.eye\(\s*([^)]+)\s*\)")]
+    private static partial Regex PilotMatrixEyeCallRegex();
+    [GeneratedRegex(@"\bPilotMatrix\.(?:fromList|from_array)\(\s*(.+)\s*\)")]
+    private static partial Regex PilotMatrixFromCallRegex();
+    [GeneratedRegex(@"\bJSON\.generate\(\s*([^)]+)\s*\)")]
+    private static partial Regex RubyJsonGenRegex();
+    [GeneratedRegex(@"\bFiles\.readString\(\s*Path\.of\(\s*([^)]+)\s*\)\s*\)")]
+    private static partial Regex JavaFilesReadRegex();
+    [GeneratedRegex(@"\bFiles\.writeString\(\s*Path\.of\(\s*([^)]+)\s*\)\s*,\s*([^)]+)\s*\)")]
+    private static partial Regex JavaFilesWriteRegex();
+    [GeneratedRegex(@"\bFiles\.exists\(\s*Path\.of\(\s*([^)]+)\s*\)\s*\)")]
+    private static partial Regex JavaFilesExistsRegex();
+    [GeneratedRegex(@"\bFile\.read\(\s*([^,)]+)(?:\s*,\s*encoding:\s*['""][^'""]+['""])?\s*\)")]
+    private static partial Regex RubyFileReadRegex();
+    [GeneratedRegex(@"\bFile\.write\(\s*([^,]+)\s*,\s*([^)]+)\s*\)")]
+    private static partial Regex RubyFileWriteRegex();
+    [GeneratedRegex(@"\bFile\.exist\?\(\s*([^)]+)\s*\)")]
+    private static partial Regex RubyFileExistRegex();
+    [GeneratedRegex(@"\bMath\.(sqrt|sin|cos|abs|floor|ceil)\(\s*([^)]+)\s*\)")]
+    private static partial Regex JavaRubyMathFnRegex();
 
 }

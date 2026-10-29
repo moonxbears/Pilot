@@ -118,6 +118,12 @@ public static partial class PilotLicenseVerifier
     [GeneratedRegex(@"<PackageLicenseExpression>([^<]+)</PackageLicenseExpression>", RegexOptions.IgnoreCase)]
     private static partial Regex CsprojLicenseRegex();
 
+    [GeneratedRegex(@"<license>\s*<name>([^<]+)</name>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    private static partial Regex PomLicenseRegex();
+
+    [GeneratedRegex(@"\.licenses?\s*=\s*(?:\[\s*)?['""]([^'""]+)['""]", RegexOptions.IgnoreCase)]
+    private static partial Regex GemspecLicenseRegex();
+
     /// <summary>
     /// Verifies the license of a single source code string (and optional file path).
     /// </summary>
@@ -377,6 +383,31 @@ public static partial class PilotLicenseVerifier
                 if (m.Success)
                 {
                     return (m.Groups[1].Value.Trim(), Path.GetFileName(csproj), null);
+                }
+            }
+
+            // 5. Check pom.xml (Java / Maven)
+            string pomXml = Path.Combine(currentDir, "pom.xml");
+            if (File.Exists(pomXml))
+            {
+                string content = File.ReadAllText(pomXml);
+                var m = PomLicenseRegex().Match(content);
+                if (m.Success)
+                {
+                    string rawPomLic = m.Groups[1].Value.Trim();
+                    string classified = ClassifyLicenseText(rawPomLic);
+                    return (!string.IsNullOrEmpty(classified) ? classified : rawPomLic, "pom.xml", null);
+                }
+            }
+
+            // 6. Check *.gemspec (Ruby / Bundler)
+            foreach (var gemspec in Directory.EnumerateFiles(currentDir, "*.gemspec", SearchOption.TopDirectoryOnly))
+            {
+                string content = File.ReadAllText(gemspec);
+                var m = GemspecLicenseRegex().Match(content);
+                if (m.Success)
+                {
+                    return (m.Groups[1].Value.Trim(), Path.GetFileName(gemspec), null);
                 }
             }
 

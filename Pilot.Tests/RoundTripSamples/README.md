@@ -1,6 +1,6 @@
-# Pilot 8-Language Bidirectional Round-Trip Samples
+# Pilot 10-Language Bidirectional Round-Trip Samples
 
-This folder contains the persisted artifacts from emitting [`00_source.pilot`](./00_source.pilot) across all **8 target languages** (`pilot --emit <lang>`) and ingesting every emitted file back into Pilot (`pilot --from <lang>`).
+This folder contains the persisted artifacts from emitting [`00_source.pilot`](./00_source.pilot) across all **10 target languages** (`pilot --emit <lang>`) and ingesting every emitted file back into Pilot (`pilot --from <lang>`).
 
 ## 1. Canonical Pilot Input
 - [`00_source.pilot`](./00_source.pilot) — Exercises `enum`, `type` ADTs, `extend`, `class` methods, typed functions, `while` / `for i in a..b`, `if` / `elif` / `else`, operator precedence, filtered list comprehensions `[x * x for x in 1..6 if x > 2]`, `f"..."` string interpolation, and `assert`.
@@ -16,6 +16,8 @@ This folder contains the persisted artifacts from emitting [`00_source.pilot`](.
 | JavaScript (ES2024+) | `--emit js` | [`emitted/source.js`](./emitted/source.js) |
 | TypeScript | `--emit ts` | [`emitted/source.ts`](./emitted/source.ts) |
 | Lua 5.4 / LuaJIT | `--emit lua` | [`emitted/source.lua`](./emitted/source.lua) |
+| Java 21+ | `--emit java` | [`emitted/source.java`](./emitted/source.java) |
+| Ruby 3.2+ | `--emit ruby` | [`emitted/source.rb`](./emitted/source.rb) |
 
 ## 3. Ingested-Back Pilot Files (`pilot --from <lang>`)
 | Source Language | CLI Flag | Ingested Pilot File |
@@ -29,3 +31,5 @@ This folder contains the persisted artifacts from emitting [`00_source.pilot`](.
 | JavaScript | `--from js` | [`ingested_back/from_js.pilot`](./ingested_back/from_js.pilot) |
 | TypeScript | `--from ts` | [`ingested_back/from_ts.pilot`](./ingested_back/from_ts.pilot) |
 | Lua | `--from lua` | [`ingested_back/from_lua.pilot`](./ingested_back/from_lua.pilot) |
+| Java 21+ | `--from java` | [`ingested_back/from_java.pilot`](./ingested_back/from_java.pilot) |
+| Ruby 3.2+ | `--from ruby` | [`ingested_back/from_ruby.pilot`](./ingested_back/from_ruby.pilot) |

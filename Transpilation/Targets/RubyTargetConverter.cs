@@ -91,8 +91,10 @@ public sealed class RubyTargetConverter : ITargetLanguageConverter
         private readonly TranspilationOptions _options;
         private readonly HashSet<string> _knownClassesAndVariants = new(StringComparer.Ordinal);
         private readonly HashSet<string> _knownFunctions = new(StringComparer.Ordinal);
+        private HashSet<string> _activeClassFields = new(StringComparer.Ordinal);
         private int _indent;
         private bool _inMethod;
+        private bool _inInstanceMethod;
 
         public RubyIrEmitter(PilotIrModule module, TranspilationOptions options)
         {
@@ -248,7 +250,9 @@ public sealed class RubyTargetConverter : ITargetLanguageConverter
             sb.AppendLine($"{Indent}def {receiverPrefix}{fnName}{paramSuffix}");
             _indent++;
             bool prevInMethod = _inMethod;
+            bool prevInInstanceMethod = _inInstanceMethod;
             _inMethod = true;
+            _inInstanceMethod = isMethod && !isStaticMethod;
             try
             {
                 foreach (var req in f.RequiresClauses)
@@ -266,6 +270,7 @@ public sealed class RubyTargetConverter : ITargetLanguageConverter
             finally
             {
                 _inMethod = prevInMethod;
+                _inInstanceMethod = prevInInstanceMethod;
             }
             _indent--;
             sb.Append($"{Indent}end");
@@ -285,6 +290,20 @@ public sealed class RubyTargetConverter : ITargetLanguageConverter
             sb.AppendLine($"{Indent}class {c.Name}{inheritance}");
             _indent++;
 
+            var methodNames = new HashSet<string>(c.Methods.Select(m => m.Name), StringComparer.Ordinal);
+            var classFields = new HashSet<string>(c.Fields.Select(f => f.Name), StringComparer.Ordinal);
+            foreach (var m in c.Methods)
+            {
+                foreach (var assign in m.Body.OfType<PilotIrAssignStmt>())
+                {
+                    if (assign.Target is PilotIrMemberAccessExpr { Target: PilotIrIdentifierExpr { Name: "self" or "this" } } ma &&
+                        !methodNames.Contains(ma.MemberName))
+                    {
+                        classFields.Add(ma.MemberName);
+                    }
+                }
+            }
+
             if (c.Fields.Count > 0)
             {
                 sb.AppendLine($"{Indent}attr_accessor {string.Join(", ", c.Fields.Select(f => ":" + f.Name))}");
@@ -303,9 +322,18 @@ public sealed class RubyTargetConverter : ITargetLanguageConverter
                 }
             }
 
-            foreach (var m in c.Methods)
+            var prevFields = _activeClassFields;
+            _activeClassFields = classFields;
+            try
             {
-                sb.AppendLine(EmitFuncDef(m, isMethod: true, isStaticMethod: m.IsStatic));
+                foreach (var m in c.Methods)
+                {
+                    sb.AppendLine(EmitFuncDef(m, isMethod: true, isStaticMethod: m.IsStatic));
+                }
+            }
+            finally
+            {
+                _activeClassFields = prevFields;
             }
 
             _indent--;
@@ -733,6 +761,14 @@ public sealed class RubyTargetConverter : ITargetLanguageConverter
 
         private string EmitMemberAccess(PilotIrMemberAccessExpr m)
         {
+            if (_inInstanceMethod &&
+                !m.IsSafeNavigation &&
+                m.Target is PilotIrIdentifierExpr { Name: "self" or "this" } &&
+                _activeClassFields.Contains(m.MemberName))
+            {
+                return $"@{m.MemberName}";
+            }
+
             string target = EmitExpr(m.Target, PilotIrPrecedence.Postfix);
             if (PilotLibraryMapper.TryFormatAstMemberAccess(target, m.MemberName, "ruby", out string mapped))
                 return mapped;

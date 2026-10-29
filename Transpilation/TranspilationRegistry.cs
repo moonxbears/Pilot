@@ -30,6 +30,9 @@ public sealed class TranspilationRegistry
         Register(new CppTargetConverter("c++"));
         Register(new RustTargetConverter("rust"));
         Register(new RustTargetConverter("rs"));
+        Register(new JavaTargetConverter("java"));
+        Register(new RubyTargetConverter("ruby"));
+        Register(new RubyTargetConverter("rb"));
         Register(new CSharpTargetConverter());
         _converters["cs"] = new CSharpTargetConverter();
     }
@@ -119,6 +122,24 @@ public sealed class TranspilationRegistry
                 }
             }
         }
+        else if (lang == "java")
+        {
+            // Keep ProgramModule as the first top-level class so JEP 330 `java file.java` executes ProgramModule.main
+            return code.TrimEnd() + Environment.NewLine + Environment.NewLine + preamble.Trim() + Environment.NewLine;
+        }
+        else if (lang is "ruby" or "rb")
+        {
+            int lastReq = code.LastIndexOf("require ", StringComparison.Ordinal);
+            int anchor = lastReq >= 0 ? lastReq : code.IndexOf("# frozen_string_literal:", StringComparison.Ordinal);
+            if (anchor >= 0)
+            {
+                int lineEnd = code.IndexOf('\n', anchor);
+                if (lineEnd >= 0)
+                {
+                    return code[..(lineEnd + 1)] + Environment.NewLine + preamble.Trim() + Environment.NewLine + code[(lineEnd + 1)..];
+                }
+            }
+        }
         return preamble.Trim() + Environment.NewLine + Environment.NewLine + code;
     }
 
@@ -138,6 +159,8 @@ public sealed class TranspilationRegistry
             ".cpp" or ".cc" or ".cxx" or ".hpp" => "cpp",
             ".rs" => "rust",
             ".cs" => "csharp",
+            ".java" => "java",
+            ".rb" => "ruby",
             _ => "python"
         };
     }
@@ -155,6 +178,8 @@ public sealed class TranspilationRegistry
         "cpp" or "c++" => ".cpp",
         "rust" or "rs" => ".rs",
         "csharp" or "cs" => ".cs",
+        "java" => ".java",
+        "ruby" or "rb" => ".rb",
         _ => ".txt"
     };
 }

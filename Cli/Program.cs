@@ -1207,8 +1207,8 @@ public static class Program
         Console.WriteLine("  pilot --tokens <file>                # Dump lexical token stream");
         Console.WriteLine("  pilot --tree <file>                  # Print hierarchical AST");
         Console.WriteLine("  pilot --repl                         # Start interactive REPL");
-        Console.WriteLine("  pilot --emit <target> <file>         # Transpile to target (python, csharp, rust)");
-        Console.WriteLine("  pilot --from <lang> <file>           # Ingest foreign code to Pilot");
+        Console.WriteLine("  pilot --emit <target> <file>         # Transpile to target (python, csharp, rust, c, cpp, js, ts, lua, java, ruby)");
+        Console.WriteLine("  pilot --from <lang> <file>           # Ingest foreign code to Pilot (auto, python, csharp, rust, c, cpp, js, ts, lua, java, ruby)");
         Console.WriteLine("  pilot -D <symbol> <file>             # Predefine compilation symbol");
         Console.WriteLine("  pilot --all                          # Run all test scripts in tests/");
         Console.WriteLine("==================================================================\n");

@@ -30,7 +30,7 @@ public static class PilotLibraryTranspiler
 {
     private static readonly string[] ForeignExtensions =
     {
-        ".py", ".lua", ".js", ".mjs", ".ts", ".c", ".h", ".cpp", ".hpp", ".cc", ".rs", ".cs"
+        ".py", ".lua", ".js", ".mjs", ".ts", ".c", ".h", ".cpp", ".hpp", ".cc", ".rs", ".cs", ".java", ".rb"
     };
 
     /// <summary>
@@ -349,6 +349,46 @@ edition = "2024"
 }
 """);
                     generated.Add(pkgJson);
+                }
+                break;
+
+            case "java":
+                string pomXml = Path.Combine(outDir, "pom.xml");
+                if (!File.Exists(pomXml))
+                {
+                    File.WriteAllText(pomXml, $"""
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.pilot.generated</groupId>
+  <artifactId>{libName}</artifactId>
+  <version>1.0.0</version>
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+</project>
+""");
+                    generated.Add(pomXml);
+                }
+                break;
+
+            case "ruby" or "rb":
+                string gemspec = Path.Combine(outDir, $"{libName}.gemspec");
+                if (!File.Exists(gemspec))
+                {
+                    File.WriteAllText(gemspec, $"""
+Gem::Specification.new do |spec|
+  spec.name          = "{libName}"
+  spec.version       = "1.0.0"
+  spec.summary       = "Ruby gem transpiled from Pilot library '{libName}'"
+  spec.authors       = ["Pilot Toolchain"]
+  spec.files         = Dir["**/*.rb"]
+  spec.required_ruby_version = ">= 3.2.0"
+end
+""");
+                    generated.Add(gemspec);
                 }
                 break;
         }
