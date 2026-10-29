@@ -60,6 +60,17 @@ flowchart TD
         M36["M36: Standalone Rust pilot CLI, Full .NET Removal & 500+ MB/s Gate"]
     end
 
+    subgraph PhaseE ["Phase E: Full Semantic, Runtime, Codegen & Ecosystem Parity in Pure Rust (M37 – M44)"]
+        M37["M37: Full AST Type Inference, Exhaustiveness, Null/Error Flow & Contract/Unit Walkers"]
+        M38["M38: Symbolic Autodiff (!@), Call-Quoting (!, !!, !&, !^, !?), Macros, Demotion & Perceus"]
+        M39["M39: AST-to-Bytecode Compiler, Full PilVM v3 Execution, Intrinsics & Live pilot test"]
+        M40["M40: True AST-Driven Native Codegen (C11/C23, LLVM IR, WASM, ASM) & libpilot_rt"]
+        M41["M41: Full AST Bidirectional Transpilers (--emit / --from) & Foreign AST Ingesters"]
+        M42["M42: Live Polyglot Execution Bridges, Native DB Drivers (Postgres/SQLite) & Yield-Bridges"]
+        M43["M43: Production LSP Loop, Native DAP (M22), Package/Venv Manager (M8/M27) & Stdlib (M24)"]
+        M44["M44: Profiler & CST Auto-Optimizer (M25) and Self-Hosted pilotc Bootstrap (M26)"]
+    end
+
     M1 --> M2 --> M3 --> M4 --> M5 --> M6 --> M7 --> M8 --> M9 --> M10
     M10 --> M11
     M11 --> M12
@@ -79,6 +90,10 @@ flowchart TD
     M32 & M35 & M22 --> M36
     M24 & M35 --> M26
     M8 & M24 & M36 --> M27
+    M36 --> M37 --> M38
+    M38 --> M39 & M40 & M41
+    M39 --> M42 & M43
+    M40 & M43 --> M44
 ```
 
 ---
@@ -108,21 +123,29 @@ flowchart TD
 | **M19** | Rigorous Runtime-to-Compile-Time Demotion & `comptime` Audit | Phase B | ✅ **Completed** | `Analysis/Comptime/`, `Compiler/`, `Transpilation/PilotOptimizer.cs` |
 | **M20** | Accurate Bidirectional Language Transpilation & Library Ingestion (`--emit` / `--from`) | Phase C | ✅ **Completed** | `Transpilation/`, `Formatting/PilotFormatter.cs`, `Cli/Program.cs` |
 | **M21** | Core Native Standard Library (`std.core`, `collections`, `mem`, `io`, `fs`, `math`) | Phase C | ✅ **Completed** | `stdlib/core/`, `stdlib/collections/`, `stdlib/io/`, `stdlib/math/` |
-| **M22** | Debug Adapter Protocol (DAP) & VS Code GUI Breakpoints *(Targets Native `M34` VM)* | Phase C | 📋 **Planned** | `crates/pilot-dap/`, `vscode-pilot/` |
-| **M23** | Deep LLVM / WASM Runtime Linking & Native Binary Toolchain (`pilot build`) | Phase C | 🔗 **Unified w/ M34–M35** | `crates/pilot-rt/`, `crates/pilot-codegen/` |
-| **M24** | Extended Systems, Networking, HTTP & Crypto Standard Library | Phase C | 🚧 **In Progress** | `stdlib/net/`, `stdlib/http/`, `stdlib/crypto/`, `stdlib/formats/` |
-| **M25** | Advanced Performance Analysis & Trivia-Preserving Auto-Optimizer (`pilot perf`) | Phase C | 📋 **Planned** | `crates/pilot-perf/`, `crates/pilot-fmt/` |
-| **M26** | Self-Hosted Pilot Compiler (`pilotc` Written in Pilot) | Phase C | 📋 **Planned** | `selfhost/` (`lexer.pilot`, `parser.pilot`, `analyzer.pilot`, `pilotc.pilot`) |
-| **M27** | Package Registry Hosting & Distribution Architecture | Phase C | 🔍 **Evaluating** | `crates/pilot-pkg/`, Registry Spec |
-| **M28** | Native Rust Workspace Foundation, 16B Arena AST ABI & `SLL -> LL` Golden Oracle | Phase D | ✅ **Completed** | `Cargo.toml`, `crates/pilot-arena`, `pilot-span`, `pilot-ast`, `pilot-ffi`, `Compiler/NativeAstBridge.cs` |
-| **M29** | Stage 1 — Zero-Copy SIMD Preprocessor, Structural Indexer & Modal Lexer (`1+ GB/s`) | Phase D | ✅ **Completed** | `crates/pilot-lexer/`, `crates/pilot-ffi/`, `PilotPhaseDLexerTests.cs` |
-| **M30** | Stage 2 — Hand-Written Recursive Descent + Pratt (TDOP) Parser & ANTLR Removal (`500+ MB/s`) | Phase D | ✅ **Completed** | `crates/pilot-parser/`, `crates/pilot-ffi/`, `PilotPhaseDParserTests.cs` |
-| **M31** | Lossless Red-Green Concrete Syntax Tree (CST), Error Resilience & Native `pilot fmt` | Phase D | 🎯 **Next Up** | `crates/pilot-syntax/`, `crates/pilot-fmt/` |
-| **M32** | Sub-Millisecond Incremental Reparsing, `Salsa`-Style Query DB & Native `pilot-lsp` | Phase D | 📋 **Planned** | `crates/pilot-incremental/`, `crates/pilot-db/`, `crates/pilot-lsp/` |
-| **M33** | Native Static Analysis, Bidirectional Inference, Perceus Escape Pass & `comptime` | Phase D | 📋 **Planned** | `crates/pilot-analysis/`, `crates/pilot-perceus/` |
-| **M34** | Worry-Free Zero-GC Native Runtime (Perceus + Arenas) & Register-Based `PilVM` v3 | Phase D | 📋 **Planned** | `crates/pilot-rt/`, `crates/pilot-vm/` |
-| **M35** | Native Codegen Backends (`LLVM`/`WASM`/`C-ABI`), Bidirectional Transpilers & Polyglot FFI | Phase D | 📋 **Planned** | `crates/pilot-codegen/`, `crates/pilot-transpile/`, `crates/pilot-polyglot/` |
-| **M36** | Standalone Rust `pilot` CLI, Full `.NET` Retirement & 500+ MB/s Performance Gate | Phase D | 📋 **Planned** | `crates/pilot-cli/`, `crates/pilot-bench/` |
+| **M22** | Debug Adapter Protocol (DAP) & VS Code GUI Breakpoints *(Unified w/ `M43`)* | Phase C | 📋 **Planned (`M43.2`)** | `crates/pilot-dap/`, `vscode-pilot/` |
+| **M23** | Deep LLVM / WASM Runtime Linking & Native Binary Toolchain (`pilot build`) | Phase C | 🔗 **Unified w/ `M34`–`M35` & `M40`** | `crates/pilot-rt/`, `crates/pilot-codegen/` |
+| **M24** | Extended Systems, Networking, HTTP & Crypto Standard Library *(Unified w/ `M43`)* | Phase C | 🚧 **In Progress (`M43.4`)** | `stdlib/net/`, `stdlib/http/`, `stdlib/crypto/`, `stdlib/formats/` |
+| **M25** | Advanced Performance Analysis & Trivia-Preserving Auto-Optimizer (`pilot perf`) | Phase C | 📋 **Planned (`M44.1`)** | `crates/pilot-perf/`, `crates/pilot-fmt/` |
+| **M26** | Self-Hosted Pilot Compiler (`pilotc` Written in Pilot) | Phase C | 📋 **Planned (`M44.2`)** | `selfhost/` (`lexer.pilot`, `parser.pilot`, `analyzer.pilot`, `pilotc.pilot`) |
+| **M27** | Package Registry Hosting & Distribution Architecture | Phase C | 🔍 **Planned (`M43.3`)** | `crates/pilot-pkg/`, Registry Spec |
+| **M28** | Native Rust Workspace Foundation, 16B Arena AST ABI & `SLL -> LL` Golden Oracle | Phase D | ✅ **Completed** | `Cargo.toml`, `crates/pilot-arena`, `pilot-span`, `pilot-ast`, `pilot-ffi` |
+| **M29** | Stage 1 — Zero-Copy SIMD Preprocessor, Structural Indexer & Modal Lexer (`1+ GB/s`) | Phase D | ✅ **Completed** | `crates/pilot-lexer/`, `crates/pilot-ffi/` |
+| **M30** | Stage 2 — Hand-Written Recursive Descent + Pratt (TDOP) Parser & ANTLR Removal (`500+ MB/s`) | Phase D | ✅ **Completed** | `crates/pilot-parser/`, `crates/pilot-ffi/` |
+| **M31** | Lossless Red-Green Concrete Syntax Tree (CST), Error Resilience & Native `pilot fmt` | Phase D | ✅ **Completed** | `crates/pilot-syntax/`, `crates/pilot-fmt/` |
+| **M32** | Sub-Millisecond Incremental Reparsing, `Salsa`-Style Query DB & Native `pilot-lsp` | Phase D | ✅ **Completed** | `crates/pilot-incremental/`, `crates/pilot-db/`, `crates/pilot-lsp/` |
+| **M33** | Native Static Analysis, Bidirectional Inference, Perceus Escape Pass & `comptime` (Core Types) | Phase D | ✅ **Completed** | `crates/pilot-analysis/`, `crates/pilot-perceus/` |
+| **M34** | Worry-Free Zero-GC Native Runtime (Perceus + Arenas) & Register-Based `PilVM` v3 (Core VM) | Phase D | ✅ **Completed** | `crates/pilot-rt/`, `crates/pilot-vm/` |
+| **M35** | Native Codegen Backends (`LLVM`/`WASM`/`C-ABI`), Bidirectional Transpilers & Polyglot FFI (Core) | Phase D | ✅ **Completed** | `crates/pilot-codegen/`, `crates/pilot-transpile/`, `crates/pilot-polyglot/` |
+| **M36** | Standalone Rust `pilot` CLI, Full `.NET` Retirement & Hardware Performance Gate | Phase D | ✅ **Completed** | `crates/pilot-cli/`, `crates/pilot-bench/` |
+| **M37** | Full AST Type Inference, Pattern Exhaustiveness, Null/Error Flow & Contract/Dimension Walkers | Phase E | 🎯 **Next Up** | `crates/pilot-analysis/`, `crates/pilot-cli/` (`pilot check`) |
+| **M38** | Symbolic Autodiff (`!@`), Call-Quoting (`!`, `!!`, `!&`, `!^`, `!?`), Macros, Demotion & Perceus Pass | Phase E | 📋 **Planned** | `crates/pilot-analysis/`, `crates/pilot-perceus/` |
+| **M39** | AST-to-Bytecode Compiler, Full `PilVM` v3 Execution, Runtime Intrinsics & Live `pilot test` | Phase E | 📋 **Planned** | `crates/pilot-vm/`, `crates/pilot-rt/`, `crates/pilot-cli/` (`pilot test`/`repl`) |
+| **M40** | True AST-Driven Native Codegen (`C11/C23`, `LLVM IR`, `WASM/WASI`, `ASM`) & Linkable `libpilot_rt` | Phase E | 📋 **Planned** | `crates/pilot-codegen/`, `crates/pilot-rt/` |
+| **M41** | Full AST Bidirectional Transpilers (`pilot --emit` / `--from`) & Foreign AST Ingesters | Phase E | 📋 **Planned** | `crates/pilot-transpile/`, `crates/pilot-cli/` |
+| **M42** | Live Polyglot Execution Bridges, Native DB Drivers (`PostgreSQL`/`SQLite`) & Yield-Bridges | Phase E | 📋 **Planned** | `crates/pilot-polyglot/`, `crates/pilot-rt/` |
+| **M43** | Production `pilot-lsp` Loop, Native DAP (`M22`), Package/Venv Manager (`M8`/`M27`) & Stdlib (`M24`) | Phase E | 📋 **Planned** | `crates/pilot-lsp/`, `crates/pilot-dap/`, `crates/pilot-pkg/`, `stdlib/` |
+| **M44** | Profiler & Trivia-Preserving CST Auto-Optimizer (`M25`) and Self-Hosted `pilotc` Bootstrap (`M26`) | Phase E | 📋 **Planned** | `crates/pilot-perf/`, `selfhost/` |
 
 ---
 
@@ -1031,5 +1054,197 @@ struct PilotVal {
     - **AST Peak Memory Overhead**: **$\le 1.5\times$ raw UTF-8 source byte size** (a $> 10\times$ reduction vs. legacy ANTLR/.NET).
     - **Incremental LSP Keystroke Latency (`LosslessCstSink` + `pilot-db` Early Cutoff)**: **$p99 < 1.0\text{ ms}$** reparse + diagnostic refresh on 50,000-line files.
     - **Runtime GC Pause Guarantee**: **Strictly `0.0 ms`** (zero tracing GC in binary; verified zero-heap counter inside `@hard_realtime` / `noalloc` blocks).
+
+---
+
+## Phase E: Full Semantic, Runtime, Codegen & Ecosystem Parity in Pure Rust (M37 – M44)
+
+> **Phase E Purpose & Scope**: While Phase D (`M28`–`M36`) stood up the 18-crate zero-GC Rust workspace, the 500+ MB/s SIMD/Pratt frontend, the Red-Green CST + `pilot fmt`, the 16-byte `PilotVal` / `AstNode` memory layouts, and retired `.NET`/ANTLR, several downstream compiler passes, bytecode/native lowerers, and CLI subcommands currently operate over foundational scaffolds rather than full AST-driven implementations.
+> **Phase E** systematically ports 100% of the remaining semantic depth from `v1.x-dotnet-archive` into pure Rust and hooks every pass end-to-end into `AstArena`, `PilVM` v3, `pilot-codegen`, `pilot-lsp`, and `pilot-cli`.
+
+---
+
+## Milestone 37: Full AST Type Inference, Pattern Exhaustiveness, Null/Error Flow & Contract/Dimension Walkers (`pilot-analysis`)
+**Goal**: Upgrade `crates/pilot-analysis` from a 14-node foundation to full AST traversal across all 80+ `NodeKind`s, connect every semantic verifier to walk the live `AstArena` inside `AnalysisPipeline::analyze`, and wire `AnalysisPipeline` into `pilot check`, `pilot build`, `pilot run`, and `pilot-lsp`.
+
+### Legacy C# Modules Ported & Wired (`v1.x-dotnet-archive`)
+- `Analysis/TypeSystem/PilotBidirectionalInferencer.cs` (4,497 lines) & `PilotTypeInferenceEngine.cs`
+- `Analysis/PatternMatching/PilotExhaustivenessChecker.cs` (2,076 lines)
+- `Analysis/TypeSystem/PilotNullSafetyAnalyzer.cs` (1,481 lines) & `PilotErrorFlowAnalyzer.cs` (1,353 lines)
+- `Analysis/Loops/PilotForLoopAnalyzer.cs` (473 lines), `Analysis/Ownership/PilotBorrowChecker.cs` (503 lines), `Analysis/DimensionalAnalysis/PilotDimensionChecker.cs` (344 lines), & `Analysis/ContractVerification/PilotContractVerifier.cs` (353 lines)
+
+### Sub-Tasks & Deliverables
+- [ ] **37.1: Complete `AstArena` Coverage in `TypeInferenceEngine` (`crates/pilot-analysis/src/infer.rs`)**
+  - Extend `synth` and `check` from the current 14 basic `NodeKind`s to cover all declaration, expression, type, and pattern kinds:
+    - **Declarations & Type Definitions**: `TypeDecl` (sum ADTs & structural records), `StructDecl`, `ClassDecl` (including algebraic class math `|`, `-`, `&` and `state` typestate transitions), `InterfaceDecl`, `ExtendDecl` (`extend`/`extension ... on ...`), and `AdapterDecl` (`adapter A -> B`).
+    - **Calls, Generics, Method Groups & Context DI**: `CallExpr` (overload resolution, generic type parameter unification, first-class `MethodGroup` currying/filtering/union `|`/`*`, scalar-to-collection `each`/`auto_repeat` vectorization, and `context` parameter resolution), `MemberExpr`, `SafeMemberExpr` (`?.`), `IndexExpr`, `LambdaExpr`, `PipeExpr` (`|>`), `CascadeExpr` (`..`), and `DtoArrow` (`->`).
+    - **Control Flow & Error/Optional Expressions**: `MatchExpr` (unifying arm types & binding pattern variables), `ForExpr` (inferring `CollectionYield`, `ScalarBreak`, and `Void` schedules), `GuardStmt` (`guard some x else` dominator flow narrowing), `TryUnwrap` (postfix `?` early propagation), and `CatchExpr` (`expr catch err => ...`).
+    - **Mutual Recursion & Error-Set Inference**: Tarjan SCC decomposition over call graphs to infer polymorphic signatures and automatic `! ErrorSet` unions without explicit annotations.
+- [ ] **37.2: AST-Connected Pattern Exhaustiveness, Null Safety & Error Flow Passes (`patterns.rs`, `null_error.rs`)**
+  - Connect `MarangetChecker` to walk every `NodeKind::MatchExpr` in `AstArena`, constructing pattern matrices over ADTs, nested tuples/records, `T?` (`some`/`none`), slices (`[head, ..tail]`), and integer ranges (`a..b`, `a..<b`) to emit `MATCH001` (missing witness) and `MATCH002` (redundant arm).
+  - Connect `NullSafetyAnalyzer` (`NULL001`–`NULL005`) and `ErrorFlowAnalyzer` (`ERR001`–`ERR005`) to traverse `AstArena` statements/expressions, enforcing safe unwrapping of `T?`, must-use handling of `T ! E`, and `ERR005` stratification of `try`/`raise` outside FFI/actor boundaries.
+- [ ] **37.3: AST-Connected `ForExpr` Schedule, Borrow, Dimension & Contract Walkers (`loops.rs`, `dimensions.rs`, `contracts.rs`)**
+  - Walk `NodeKind::ForExpr` to classify loops into Tier 1 (`FixedScalar`), Tier 2 (`MutableBounds` with `continue r, ...`), and Tier 3 (`WorklistStack` with `...children`), emitting `LOOP001`–`LOOP004`.
+  - Walk physical unit literals (`250ms`, `64KB`, `100Hz`) and unit-annotated types across binary/call expressions to enforce SI exponent algebra (`DIM001`).
+  - Walk `requires`/`ensures` clauses on `FnDecl` and call sites using abstract interval propagation (`Interval`) to discharge provable contracts and report `CONTRACT001`–`CONTRACT002` and `DIV001`–`DIV002`.
+- [ ] **37.4: End-to-End Hook-Up in `AnalysisPipeline::analyze` & `pilot check` (`pipeline.rs`, `crates/pilot-cli/src/main.rs`)**
+  - Replace the disconnected instantiations in `AnalysisPipeline::analyze` and the dummy `TypeArena` check in `cmd_check` (`crates/pilot-cli/src/main.rs`) with full `AnalysisPipeline::analyze(&arena, root)` execution, reporting rich line/column diagnostics (`pilot-span::LineIndex`) and gating `pilot build` / `pilot run`.
+
+---
+
+## Milestone 38: Symbolic Autodiff (`!@`), Call-Quoting (`!`, `!!`, `!&`, `!^`, `!?`), Macros, Static Demotion & Perceus Pass (`pilot-analysis` & `pilot-perceus`)
+**Goal**: Port Pilot's compile-time metaprogramming, symbolic calculus differentiator, compile-time decorator generators, static slot demotion pass, and automatic Perceus escape/ARC insertion onto `AstArena`.
+
+### Legacy C# Modules Ported & Wired (`v1.x-dotnet-archive`)
+- `Analysis/Autodiff/PilotSymbolicDifferentiator.cs` (801 lines)
+- `Analysis/CallQuoting/PilotCallQuotingEngine.cs` (1,736 lines)
+- `Analysis/Comptime/PilotComptimeEvaluator.cs` (572 lines) & `PilotStaticDemotionPass.cs` (887 lines)
+- `CodeGen/Builtins/{Builder,Equality,Json,Metadata,Observable,Repr}Generator.cs` & `CodeGen/Engine/PilotCodeGeneratorPipeline.cs` (410 lines)
+
+### Sub-Tasks & Deliverables
+- [ ] **38.1: Compile-Time Symbolic Differentiation Engine (`!@` — `crates/pilot-analysis/src/autodiff.rs`)**
+  - Port `PilotSymbolicDifferentiator.cs` over `AstArena`:
+    - Symbolic forward and reverse-mode (`grad`, `jacobian`, `vjp`) AST differentiation rules for `+`, `-`, `*` (product rule), `/` (quotient rule), `**` (power/logarithmic differentiation), unary `-`, and `std.math` intrinsics (`sin`, `cos`, `tan`, `exp`, `ln`, `sqrt`, `abs`, `sigmoid`, `relu`, `tanh`).
+    - Multi-variable gradient tuple synthesis, algebraic simplification ($0 \cdot x \rightarrow 0$, $1 \cdot x \rightarrow x$, $x + 0 \rightarrow x$, constant folding), and Common Subexpression Elimination (CSE) hoisting shared sub-derivatives into local `let` bindings.
+    - Automatic fallback to unboxed `Dual(val, tangent)` forward-mode arithmetic on opaque loops/FFI calls, emitting `AD001`–`AD004` diagnostics on non-differentiable side effects.
+- [ ] **38.2: Call-Quoting Projections (`!`, `!!`, `!&`, `!^`, `!?` — `crates/pilot-analysis/src/quoting.rs`)**
+  - Port `PilotCallQuotingEngine.cs` over `AstArena` inspecting `AstNode.flags` (`CallQuoteKind`):
+    - `ShallowQuote` (`fn!(a, b)`): Reify typed `CallExpr[TReturn]` AST descriptors with source spans and resolved parameter metadata.
+    - `DeepSplice` (`fn!!(~a, b)`): Clone callee AST body hygienically, evaluate `~arg` unquoted expressions at compile time, constant-fold branches, and inline the specialized AST at the call site.
+    - `CallFrameLayout` (`fn!&(a, b)`): Synthesize zero-marshalling C-ABI `CallFrame_<FnId>` struct descriptors with exact 8/16-byte aligned field offsets.
+    - `ObservableLValue` (`fn!^(a, b)`): Extract LValue dependency paths and construct reactive `Signal[T]` topological subscription nodes (`REACT001`–`REACT003`).
+    - `CoWDryRun` (`fn!?(a, b)`): Rewrite state/table/I/O mutations inside the call graph to target a transactional `ShadowEffectContext` returning `EffectPlan[TReturn]`.
+- [ ] **38.3: Homoiconic Macros (`defmacro`, `quote`, `dsl`) & Compile-Time Decorator Generators (`@builder`, `@json`, `@observable`, `@equality`, `@repr`, `@metadata`)**
+  - Implement AST-to-AST macro expansion for `defmacro`, `quote`/`quasiquote`/`~`, `defkeyword` hierarchies, and `dsl` blocks.
+  - Port `CodeGen/Builtins/*` as native Rust AST-to-AST derive passes that synthesize builder methods, structural equality, zero-copy JSON serialization/deserialization, reactive property notifications, and string representations directly into `AstArena` (zero Roslyn dependency).
+- [ ] **38.4: Compiler-Wide Static Demotion (`M19`) & Automatic Perceus Escape/ARC Pass (`comptime.rs`, `crates/pilot-perceus`)**
+  - Port `PilotStaticDemotionPass.cs`: resolve lexical variables to `(frame_depth, slot_index)` coordinates, struct/class fields to fixed byte offsets, `:ns/kw` keywords to `u32` IDs, and method groups/adapters to direct function indices.
+  - Connect `pilot-perceus` (`EscapeAnalyzer` + `PerceusArcInserter` + `RealtimeChecker`) to walk the typed `AstArena`, automatically classifying allocations into `EscapeState::Stack` (Tier 0), `EscapeState::Region` (Tier 1 `BumpRegion`), or `EscapeState::Global` (Tier 2 Perceus `dup`/`drop`/`drop_reuse`), and enforcing `@zero_runtime` / `--comptime-audit` (`COMPTIME001`–`COMPTIME010`) and `noalloc` / `@hard_realtime` (`PILOT104`).
+
+---
+
+## Milestone 39: AST-to-Bytecode Compiler, Full `PilVM` v3 Execution, Runtime Intrinsics & Live `pilot test` / `pilot repl` (`pilot-vm` & `pilot-rt`)
+**Goal**: Build the complete `AstArena` $\rightarrow$ `.pilc` v3 register bytecode compiler, expand `PilVirtualMachine` and `pilot-rt` with full call frames, Perceus heap containers, relational `Table[T]` SQL/LINQ execution, and stdlib intrinsics, and hook `PilVM` into `pilot test`, `pilot run`, `comptime`, and `pilot repl`.
+
+### Legacy C# Modules Ported & Wired (`v1.x-dotnet-archive`)
+- `Compiler/PilotBytecodeCompiler.cs` & `Compiler/PilotMatchBytecodeLowerer.cs`
+- `Runtime/Bytecode/PilVirtualMachine.cs`, `PilotOpcode.cs`, & `Runtime/Execution/PilotInterpreterVisitor.cs`
+- `Runtime/Values/{PilotAdt,PilotFrozenMap,PilotFunction,PilotGenerator,PilotKeyword,PilotLazy,PilotMatrix,PilotMethodGroup,PilotObject,PilotRange}.cs`
+- `Runtime/Stdlib/{PilotStdlibIntrinsics,PilotStdlibResolver,PilotDfaRegexEngine}.cs`, `Runtime/Builtins/PilotBuiltinRegistry.cs`, & `Testing/PilotTestRunner.cs`
+
+### Sub-Tasks & Deliverables
+- [ ] **39.1: Two-Phase `AstArena` $\rightarrow$ `.pilc` v3 Register Bytecode Compiler (`crates/pilot-vm/src/compiler.rs`)**
+  - Lower all Pilot declarations, statements, and expressions from the demoted `AstArena` into 32-bit fixed-width 3-address `PilVM` v3 instructions:
+    - Register allocation over `(frame_depth, slot_index)` locals, upvalue capture tables for closures/lambdas, and `defer`/`guard` LIFO cleanup unwind blocks.
+    - Pattern matching jump-table lowering (`PilotMatchBytecodeLowerer`), `T?` / `T ! E` postfix `?` early-return branching, and 3-tier `ForExpr` loops (`FixedScalar` register counters, `MutableBounds` `RangeWindow` updates, `WorklistStack` pushes).
+    - Compile-time evaluation of `comptime { ... }` blocks during compilation, baking resulting `FrozenMap`s, arrays, and scalars into `.pilc` v3 `.rodata` constant pools.
+- [ ] **39.2: Complete `PilVirtualMachine` Register Engine & Perceus Heap Values (`crates/pilot-rt` & `crates/pilot-vm`)**
+  - Expand `Opcode` & `PilVirtualMachine::run` (`crates/pilot-vm/src/vm.rs`) to execute:
+    - Call frame stack (`Opcode::Call`, `TailCall`, `CallClosure`, `CallIntrinsic`, `Yield`, `Resume`), exception/panic recovery across `isolate` supervisors, and `requires`/`ensures` contract checks.
+    - Perceus ARC + `BumpRegion`-backed runtime containers in `pilot-rt`: `PilotList`, `PilotMap`, `PilotFrozenMap`, `PilotSet`, `PilotTuple`, `PilotAdt` (tag + inline/heap fields), `PilotObject` / `PilotRecord`, SIMD `PilotMatrix`, `SliceBuffer`, `RangeWindow`, and resumable `PilotGenerator` coroutines.
+    - In-memory relational `Table[T]` engine with B-Tree/Hash primary/secondary indexes, MVCC `transaction`/`savepoint` rollback, and compiled LINQ/SQL query operators (`from`, `where`, `join`, `group by`, `order by`, `select`, set union `|`, intersection `&`, difference `-`).
+- [ ] **39.3: Built-In Intrinsics, `std.*` Module Loader & DFA Regex Engine (`crates/pilot-rt/src/stdlib.rs`)**
+  - Port `PilotBuiltinRegistry.cs`, `PilotStdlibIntrinsics.cs`, `PilotStdlibResolver.cs`, and `PilotDfaRegexEngine.cs` (`print`, `len`, `range`, `assert`, `typeof`, math/trig/matrix ops, string/regex ops, file/path I/O, JSON parse/stringify, `spawn`/`chan`/`select`, `Signal`, and `ShadowEffectContext` dry-runs).
+- [ ] **39.4: Live `pilot test` Assertion Runner & Stateful `pilot repl` Cutover (`crates/pilot-cli/src/main.rs`)**
+  - Upgrade `cmd_test` in `crates/pilot-cli/src/main.rs` from syntax-only `parse(&src)` checking to full compilation + `PilVirtualMachine` execution of every test file in `tests/01_type_safety.pilot` through `tests/36_comptime_and_static_demotion.pilot` and `examples/showcase/`, verifying 100% of runtime assertions pass.
+  - Upgrade `cmd_repl` to maintain persistent `TypeInferenceEngine` + `PilVirtualMachine` register/global state across multiline inputs.
+
+---
+
+## Milestone 40: True AST-Driven Native Codegen Backends (`C11/C23`, `LLVM IR`, `WASM/WASI`, `ASM`) & Linkable `libpilot_rt` (`pilot-codegen`)
+**Goal**: Replace line-by-line text substitution in `driver.rs` and hardcoded stubs in `llvm.rs`/`wasm.rs` with full, typed `AstArena`-driven code generators linked against a standalone C-ABI runtime library (`libpilot_rt.a`).
+
+### Legacy C# Modules Ported & Wired (`v1.x-dotnet-archive`)
+- `Native/PilotNativeCompiler.cs`, `Native/Llvm/PilotLlvmEmitter.cs`, `Native/CAbi/PilotCAbiEmitter.cs`, `Native/Wasm/PilotWasmEmitter.cs`, `Native/Assembly/PilotAssemblyEmitter.cs`, & `Runtime/CppBackend/PilotCppBackend.cs`
+
+### Sub-Tasks & Deliverables
+- [ ] **40.1: Linkable Static/Shared C-ABI Runtime Library (`crates/pilot-rt/src/c_abi.rs` — Completes `M23.1`)**
+  - Export `#[no_mangle] pub extern "C"` symbols from `pilot-rt` (`pilot_rt_region_enter`, `pilot_rt_region_exit`, `pilot_rt_alloc_arc`, `pilot_rt_dup`, `pilot_rt_drop`, `pilot_rt_drop_reuse`, `pilot_rt_str_concat`, `pilot_rt_list_*`, `pilot_rt_map_*`, `pilot_rt_table_*`, `pilot_rt_chan_*`, `pilot_rt_print_*`, `pilot_rt_panic_contract`) and emit `pilot_runtime.h` + `libpilot_rt.a`.
+- [ ] **40.2: Full `AstArena`-Driven C11/C23 Emitter (`crates/pilot-codegen/src/c_target.rs`)**
+  - Replace `lower_pilot_to_c` string replacements in `driver.rs` with a complete recursive `AstArena` walker backed by `AnalysisResult` types and `pilot-perceus` annotations:
+    - Emit C structs for records/classes, tagged unions for ADTs, niche-optimized `T?` optionals, register-returned `Result_<T, E>` structs for `T ! E`, `Dual` structs for `!@`, and `CallFrame_<FnId>` structs for `!&`.
+    - Lower `match` jump tables, 3-tier `ForExpr` loops, `guard`/`defer` cleanup labels, closures/upvalue structs, and Perceus `pilot_rt_dup` / `pilot_rt_drop_reuse` calls.
+- [ ] **40.3: Full `AstArena`-Driven LLVM IR & Native Assembly Emitters (`llvm.rs`, `asm.rs` — Completes `M23.2`)**
+  - Replace the hardcoded `ret i64 42` stub in `LlvmEmitter::emit_arena_program` (`crates/pilot-codegen/src/llvm.rs`) with full SSA basic-block generation from `AstArena` (`alloca`/`phi`, `getelementptr` on ADTs/records, `switch` for `match`, `<4 x float>` SIMD intrinsics for `Matrix`, Perceus RC calls, and `!dbg` DWARF debug metadata).
+  - Port `PilotAssemblyEmitter.cs` (`crates/pilot-codegen/src/asm.rs`) for direct x86_64 SysV/Win64 and ARM64 AAPCS64 assembly emission (`--target asm`).
+- [ ] **40.4: Full `AstArena`-Driven WebAssembly (`.wasm` + WASI + JS/TS Bindings — `wasm.rs`, Completes `M23.3`)**
+  - Lower `AstArena` functions, linear memory `SliceBuffer` layouts, and `wasi_snapshot_preview1` imports into valid `.wat` and binary `.wasm` modules alongside auto-generated `.mjs` and `.d.ts` zero-copy TypeScript bindings.
+
+---
+
+## Milestone 41: Full AST Bidirectional Transpilers (`pilot --emit` / `--from`) & Foreign AST Ingesters (`pilot-transpile`)
+**Goal**: Connect `crates/pilot-transpile` to the full typed `AstArena`, port all 7 foreign language recursive-descent AST ingesters (`pilot --from <lang>`), and wire `--emit` and `--from` flags into `pilot-cli`.
+
+### Legacy C# Modules Ported & Wired (`v1.x-dotnet-archive`)
+- `Transpilation/Ir/PilotTranspileIr.cs`, `Transpilation/PilotLibraryMapper.cs`, `Transpilation/PilotLibraryTranspiler.cs`, & `Transpilation/PilotOptimizer.cs`
+- `Transpilation/Targets/{C,Cpp,CSharp,Rust,Python,JavaScript,Lua,Java,Ruby}TargetConverter.cs`
+- `Transpilation/Ingesters/{CSharpAstIngester,ForeignAstIngester,PilotIngestValidator}.cs`
+
+### Sub-Tasks & Deliverables
+- [ ] **41.1: `AstArena` $\rightarrow$ Canonical Typed `TranspileIr` Lowerer (`crates/pilot-transpile/src/ir.rs`)**
+  - Expand `IrModule`/`IrFunction`/`IrStmt`/`IrExpr` to represent the complete Pilot language (ADTs, structs, classes, `extend`, `T?`, `T ! E`, `match`, `ForExpr` 3-tier loops, `guard`/`defer`, f-strings, pipes `|>`, cascades `..`, comprehensions, and `PilotLibraryMapper` stdlib intrinsics) lowered directly from `AstArena` + `AnalysisResult`.
+- [ ] **41.2: Precedence-Accurate 7-Target Emitters (`crates/pilot-transpile/src/emitters.rs`)**
+  - Upgrade C11/C23, C++20, C#, Rust, Python 3.10+, JavaScript (ESM), and Lua emitters to lower all `TranspileIr` constructs idiomatically (e.g., Rust `enum`/`Option`/`Result`/`?`; C# `record`/`switch` expressions; Python `dataclass`/`match`; C tagged unions + `SliceBuffer`).
+- [ ] **41.3: Zero-Roslyn Foreign Language AST Ingesters (`crates/pilot-transpile/src/ingest.rs`)**
+  - Port recursive-descent foreign AST ingesters for **C, C++, C#, Rust, Python, JS/TS, and Lua** $\rightarrow$ `AstArena` $\rightarrow$ `pilot-fmt` lossless pretty-printer.
+  - Implement `--strict-pilot` idiom upgrading (lifting foreign `try`/`throw`/`Err`/`None` into `T ! E`, `T?`, `guard some x else`, and `let` vs. `var`) and mandatory post-ingest `pilot-parser` validation (`INGEST001`–`INGEST010`).
+- [ ] **41.4: CLI Wiring & Compiler-in-the-Loop Round-Trip Verification (`crates/pilot-cli/src/main.rs`)**
+  - Wire `pilot --emit <target> <file.pilot>` and `pilot --from <lang> [--strict-pilot] [--viable-license-only] <input>` into `pilot-cli`, and verify emitted outputs against `clang`, `clang++`, `rustc`, `python3 -m py_compile`, and `node --check`.
+
+---
+
+## Milestone 42: Live Polyglot Execution Bridges, Native Database Drivers (`PostgreSQL`/`SQLite`) & Resumable Yield-Bridges (`pilot-polyglot`)
+**Goal**: Replace the placeholder stub in `ExternalPolyglotBridge::execute_snippet` with live polyglot execution, bidirectional variable marshalling, resumable coroutine yield-bridges, and native database execution for `postgresql {}`, `mysql {}`, and `sqlite {}` blocks.
+
+### Legacy C# Modules Ported & Wired (`v1.x-dotnet-archive`)
+- `Runtime/Interop/{PolyglotRegistry,PolyglotTypeBridge,IPolyglotProvider,IPolyglotTypeConverter}.cs`
+
+### Sub-Tasks & Deliverables
+- [ ] **42.1: Live Foreign Runtime Subprocess, IPC & Shared-Memory Execution (`crates/pilot-polyglot/src/bridge.rs`)**
+  - Implement real execution drivers in `ExternalPolyglotBridge` for inline `python { ... }`, `js { ... }`, `lua { ... }`, `c { ... }`, `cpp { ... }`, `rust { ... }`, `java { ... }`, `asm { ... }`, and out-of-process `csharp { ... }` blocks.
+  - Compile inline `c`/`cpp`/`rust`/`asm` blocks into cached shared libraries (`.so`/`.dylib`/`.dll`) loaded via `FfiLoader` (`dlopen`/`LoadLibrary`) and execute scripting blocks via persistent warm worker processes over zero-copy shared memory (`mmap` / `SliceBuffer<T>`).
+- [ ] **42.2: Bidirectional Variable Injection, Type Bridging & Resumable Yield-Bridges (`crates/pilot-polyglot/src/marshal.rs`)**
+  - Port `PolyglotTypeBridge.cs`: automatically inject captured Pilot lexical variables into foreign blocks, marshal mutated values and return results back into `PilotVal` registers, and stream resumable `yield` generator values across language boundaries without materializing full arrays.
+- [ ] **42.3: Native SQL Wire-Protocol & Embedded Database Drivers (`crates/pilot-polyglot/src/db.rs`)**
+  - Implement native pure-Rust PostgreSQL v3 wire-protocol client (`postgresql { ... }`), MySQL client (`mysql { ... }`), and SQLite C-ABI/embedded engine (`sqlite { ... }`) with parameterized `$1` / `@var` binding from Pilot scopes, `transaction`/`savepoint` integration, and typed `Table[T]` row materialization.
+
+---
+
+## Milestone 43: Production `pilot-lsp` Loop, Native DAP Debugger (`M22`), Package/Venv Manager (`M8`/`M27`) & Extended Stdlib (`M24`)
+**Goal**: Replace the remaining CLI subcommand stubs (`cmd_lsp`, `cmd_debug`, `cmd_pkg`, `cmd_venv`) with production servers and package/environment managers, and complete `M22`, `M24`, and `M27`.
+
+### Legacy C# Modules Ported & Wired (`v1.x-dotnet-archive`)
+- `Pilot.LanguageServer/Lsp/PilotLspServer.cs`, `PilotDiagnosticCatalog.cs`, & `PilotSemanticAnalyzer.cs`
+- `Debugging/{PilotDebugger,PilotCliDebugger,PilotBreakpoint,PilotCallStack,PilotStackFrame}.cs`
+- `Runtime/Packaging/{PilotPackageManager,PilotPackageManifest,PilotPackageLock}.cs`, `Adapters/BaseInteropPackageAdapter.cs`, & `Runtime/Venv/PilotVirtualEnvironment.cs`
+
+### Sub-Tasks & Deliverables
+- [ ] **43.1: Production Stdio `Content-Length` JSON-RPC Loop & Deep Semantic LSP (`crates/pilot-lsp`)**
+  - Upgrade `pilot-lsp` and `pilot lsp` (`cmd_lsp`) to run a persistent `Content-Length`-framed `stdin`/`stdout` JSON-RPC 2.0 loop connected to `pilot-db` and `AnalysisPipeline` (`M37`–`M38`), delivering live diagnostics, inferred type hover, go-to-definition, find-references, workspace symbols, dot/`:kw` completion, inlay hints, and quick-fixes.
+- [ ] **43.2: Native Debug Adapter Protocol (DAP) Server & Interactive CLI Debugger (`crates/pilot-dap` — Completes `M22`)**
+  - Create `crates/pilot-dap` and wire `pilot debug [--dap] <file.pilot>` to `PilVirtualMachine::set_hook` (`M39`):
+    - Support line, conditional, hit-count, and logpoint breakpoints, `threads`, `stackTrace`, `scopes`, `variables` (mapping `(frame_depth, slot_index)` back to variable names and inspecting ADTs/`T?`/`T ! E`/`SliceBuffer`), `continue`, `next`, `stepIn`, `stepOut`, `evaluate`, and live `fn!?(...)` shadow dry-runs in the VS Code Debug Console.
+- [ ] **43.3: Native Package Manager (`pilot pkg`) & Virtual Environment Manager (`pilot venv` — Ports `M8` & Completes `M27`)**
+  - Create `crates/pilot-pkg` porting `PilotPackageManager.cs` and `PilotVirtualEnvironment.cs` and replacing the stubs in `cmd_pkg` / `cmd_venv`:
+    - Parse/write `pilot.json` manifests and `pilot.lock.json` lockfiles (with SHA-256 + Ed25519 signature verification), pack/unpack `.pilpkg` archives, resolve dependency graphs, and bridge foreign packages (`Cargo`, `pip`, `npm`, `NuGet`, `Maven`, `LuaRocks`).
+    - Generate isolated `pilotvenv.cfg` virtual environments with cross-platform `activate`, `activate.ps1`, and `activate.bat` scripts and `.pilot_modules` resolution.
+- [ ] **43.4: Extended Systems, Networking, HTTP & Crypto Standard Library Native Bindings (Completes `M24`)**
+  - Complete `stdlib/time/`, `stdlib/crypto/` (`sha256`, `sha512`, `blake3`, `hmac`, `ed25519`, CSPRNG), `stdlib/net/` (TCP/UDP sockets), and `stdlib/http/` (`http.get`, `http.post`, declarative `http.Server` with `context` middleware) bound to `pilot-rt` native OS intrinsics.
+
+---
+
+## Milestone 44: Profiler & Trivia-Preserving CST Auto-Optimizer (`M25`) and Self-Hosted `pilotc` Bootstrap (`M26`)
+**Goal**: Complete the final two flagship milestones (`M25` and `M26`) atop the fully wired Phase E Rust compiler, runtime, and native codegen backends.
+
+### Sub-Tasks & Deliverables
+- [ ] **44.1: Multi-Target Profiler, WCET Analyzer & Trivia-Preserving CST Source Optimizer (`crates/pilot-perf` — Completes `M25`)**
+  - Upgrade `pilot perf` (`cmd_perf`) to support:
+    - `pilot perf profile <file.pilot>`: Per-function/loop/line execution timing, allocation tracking, and Speedscope / Chrome Tracing flamegraph JSON export across `PilVM` v3 and native AOT binaries.
+    - `pilot perf analyze <file.pilot>`: Static/dynamic Tier-2 heap allocation audit, $O(N^2)$ loop detection, unindexed `Table` scan warnings, and `@hard_realtime` WCET verification (`PERF001`–`PERF020`).
+    - `pilot perf optimize [--diff|--apply] <file.pilot>`: Trivia-preserving Red-Green CST rewrites (`pilot-syntax` + `pilot-fmt`) hoisting loop-invariant expressions to `comptime { ... }`, converting `list.append` loops to `FixedScalar` `SliceBuffer` comprehensions, and feeding `.pilprof` traces into `pilot build --pgo`.
+- [ ] **44.2: Self-Hosted Pilot Compiler Written in Pilot (`selfhost/pilotc.pilot` — Completes `M26`)**
+  - Implement `selfhost/lexer.pilot`, `selfhost/preprocessor.pilot`, `selfhost/ast.pilot`, `selfhost/parser.pilot`, `selfhost/analyzer.pilot`, `selfhost/emitter.pilot`, and `selfhost/pilotc.pilot`.
+  - Perform the 3-stage bootstrap gate: compile `selfhost/pilotc.pilot` with the Rust `pilot` compiler (`stage1`), compile `pilotc.pilot` with `stage1` (`stage2`), compile `pilotc.pilot` with `stage2` (`stage3`), and verify byte-identical `stage2 == stage3` fixed-point convergence across all 36 `.pilot` test suites.
+
 
 

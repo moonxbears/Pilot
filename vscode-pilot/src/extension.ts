@@ -70,7 +70,7 @@ class PilotLspClient implements vscode.Disposable {
     private process: cp.ChildProcessWithoutNullStreams | null = null;
     private nextId = 1;
     private pending = new Map<number, { resolve: (val: any) => void; reject: (err: any) => void }>();
-    private buffer = Buffer.alloc(0);
+    private buffer: Buffer<any> = Buffer.alloc(0);
     private diagnostics: vscode.DiagnosticCollection;
     private statusBar: vscode.StatusBarItem;
     private outputChannel: vscode.OutputChannel;
@@ -104,6 +104,7 @@ class PilotLspClient implements vscode.Disposable {
         }
 
         let nativeLsp = '';
+        let nativeLspArgs: string[] = [];
         if (customPath && fs.existsSync(customPath) && !customPath.endsWith('.dll') && !customPath.endsWith('.csproj')) {
             nativeLsp = customPath;
         } else {
@@ -115,10 +116,20 @@ class PilotLspClient implements vscode.Disposable {
             }
         }
 
+        // Fallback to checking `pilot lsp` if standalone `pilot-lsp` binary isn't found
+        if (!nativeLsp) {
+            const pilotBin = resolvePilotExecutionPrefix(this.extensionPath);
+            const unquotedPilot = pilotBin.replace(/^"(.*)"$/, '$1');
+            if (unquotedPilot !== 'pilot' && fs.existsSync(unquotedPilot)) {
+                nativeLsp = unquotedPilot;
+                nativeLspArgs = ['lsp'];
+            }
+        }
+
         if (nativeLsp) {
-            this.outputChannel.appendLine(`[Pilot LSP] Starting native standalone server: ${nativeLsp}`);
+            this.outputChannel.appendLine(`[Pilot LSP] Starting server: ${nativeLsp} ${nativeLspArgs.join(' ')}`);
             const workingDir = wsRoot || path.dirname(nativeLsp);
-            this.process = cp.spawn(nativeLsp, [], {
+            this.process = cp.spawn(nativeLsp, nativeLspArgs, {
                 cwd: workingDir,
                 stdio: ['pipe', 'pipe', 'pipe']
             });
@@ -223,7 +234,7 @@ class PilotLspClient implements vscode.Disposable {
     }
 
     private onData(chunk: Buffer): void {
-        this.buffer = this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk]);
+        this.buffer = (this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk])) as Buffer;
 
         while (true) {
             const headerEnd = this.buffer.indexOf('\r\n\r\n');
