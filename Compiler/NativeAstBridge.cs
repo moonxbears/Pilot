@@ -780,7 +780,7 @@ public sealed unsafe class NativeTokenTapeView : IDisposable
 /// </summary>
 public static unsafe class NativeAstBridge
 {
-    public const uint ExpectedAbiVersion = 2901;
+    public const uint ExpectedAbiVersion = 3001;
 
     private static readonly object SyncLock = new();
     private static IntPtr _libraryHandle;

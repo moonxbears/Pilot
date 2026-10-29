@@ -16,3 +16,4 @@ pilot-span = { path = "../pilot-span" }
 pilot-intern = { path = "../pilot-intern" }
 pilot-ast = { path = "../pilot-ast" }
 pilot-lexer = { path = "../pilot-lexer" }
+pilot-parser = { path = "../pilot-parser" }

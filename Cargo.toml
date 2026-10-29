@@ -6,6 +6,7 @@ members = [
     "crates/pilot-intern",
     "crates/pilot-ast",
     "crates/pilot-lexer",
+    "crates/pilot-parser",
     "crates/pilot-ffi",
 ]
 

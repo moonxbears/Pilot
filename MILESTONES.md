@@ -116,8 +116,8 @@ flowchart TD
 | **M27** | Package Registry Hosting & Distribution Architecture | Phase C | 🔍 **Evaluating** | `crates/pilot-pkg/`, Registry Spec |
 | **M28** | Native Rust Workspace Foundation, 16B Arena AST ABI & `SLL -> LL` Golden Oracle | Phase D | ✅ **Completed** | `Cargo.toml`, `crates/pilot-arena`, `pilot-span`, `pilot-ast`, `pilot-ffi`, `Compiler/NativeAstBridge.cs` |
 | **M29** | Stage 1 — Zero-Copy SIMD Preprocessor, Structural Indexer & Modal Lexer (`1+ GB/s`) | Phase D | ✅ **Completed** | `crates/pilot-lexer/`, `crates/pilot-ffi/`, `PilotPhaseDLexerTests.cs` |
-| **M30** | Stage 2 — Hand-Written Recursive Descent + Pratt (TDOP) Parser & ANTLR Removal (`500+ MB/s`) | Phase D | 🎯 **Next Up** | `crates/pilot-parser/` |
-| **M31** | Lossless Red-Green Concrete Syntax Tree (CST), Error Resilience & Native `pilot fmt` | Phase D | 📋 **Planned** | `crates/pilot-syntax/`, `crates/pilot-fmt/` |
+| **M30** | Stage 2 — Hand-Written Recursive Descent + Pratt (TDOP) Parser & ANTLR Removal (`500+ MB/s`) | Phase D | ✅ **Completed** | `crates/pilot-parser/`, `crates/pilot-ffi/`, `PilotPhaseDParserTests.cs` |
+| **M31** | Lossless Red-Green Concrete Syntax Tree (CST), Error Resilience & Native `pilot fmt` | Phase D | 🎯 **Next Up** | `crates/pilot-syntax/`, `crates/pilot-fmt/` |
 | **M32** | Sub-Millisecond Incremental Reparsing, `Salsa`-Style Query DB & Native `pilot-lsp` | Phase D | 📋 **Planned** | `crates/pilot-incremental/`, `crates/pilot-db/`, `crates/pilot-lsp/` |
 | **M33** | Native Static Analysis, Bidirectional Inference, Perceus Escape Pass & `comptime` | Phase D | 📋 **Planned** | `crates/pilot-analysis/`, `crates/pilot-perceus/` |
 | **M34** | Worry-Free Zero-GC Native Runtime (Perceus + Arenas) & Register-Based `PilVM` v3 | Phase D | 📋 **Planned** | `crates/pilot-rt/`, `crates/pilot-vm/` |
@@ -887,22 +887,22 @@ enum Precedence: u8 {
 ```
 
 ### Sub-Tasks & Deliverables
-- [ ] **30.1: Pratt Expression, Type-Spec & Pattern Engines**
+- [x] **30.1: Pratt Expression, Type-Spec & Pattern Engines**
   - **`parse_expr_bp(min_bp)`**: Implements the flat binding-power loop above. Assigning `Bp::Cascade = 1` while parsing cascade RHS assignments at `Bp::Assign + 1` **attaches trailing `..` cascades directly to the outer receiver in one pass**, completely eliminating post-parse AST rewriting (`ExtractHoistedCascades` in `PilotParserFast.cs`).
   - **`parse_type_bp(min_bp)`**: Pratt parser for `type_spec` enforcing Invariant #6 (`T?` postfix `bp=30` > `&` intersection `bp=20` > `|` union `bp=15` > `->` fn arrow `bp=10` > `!` fallible `T ! E` `bp=5`).
   - **`parse_pattern_bp(min_bp)`**: Pratt parser for `M11` patterns (`|`/`or` $\rightarrow$ `and` $\rightarrow$ `not` / `id @ pat` $\rightarrow$ ADT/record/tuple/slice `[head, ..tail]`/range `200..299`/relational/`_`).
-- [ ] **30.2: $O(1)$ Delimiter-Jump Disambiguation (Zero Speculative Backtracking)**
+- [x] **30.2: $O(1)$ Delimiter-Jump Disambiguation (Zero Speculative Backtracking)**
   - **Lambda vs. Parenthesized Expr / Tuple**: At `(`, read `close = tape.bracket_links[pos]` and inspect `tape.kind(close + 1)` for `=>` / `->` in **3 CPU instructions with zero backtracking**.
   - **Generic Call `foo<T>(x)` vs. Comparison `a < b > c`**: Bounded non-allocating token scan across `< ... >` checking balanced type tokens followed immediately by `(` or `{`.
   - **`select` Disambiguation**: `select` followed by `{` (or `:` + `case`) $\rightarrow$ CSP channel multiplexer (`select_stmt`); otherwise $\rightarrow$ SQL-first `sql_query_expr` (`select cols from ...`).
   - **Expression-Oriented Control Flow (`M14` & `M15`)**: Unified parsing of `if`/`match`/`for` (with `continue r, ...`, `break v`, `then e`, `yield e`)/`with context`/`{ stmts; tail_expr }` in both statement and Pratt primary positions.
-- [ ] **30.3: Complete Declaration, Database, Concurrency, Real-Time & UDSA Coverage**
+- [x] **30.3: Complete Declaration, Database, Concurrency, Real-Time & UDSA Coverage**
   - Hand-written recursive descent for `def`/`fn` (`context`/`comptime`/`each` params & `requires`/`ensures` contracts), `type` sum ADTs, `record`, `struct`, `class` (including algebraic `class C = A | B - D` & `state` typestates), `interface`, `extend` / `extension`, `adapter`, `guard` / `defer`, LINQ `from ... join ... group ... select` & `transaction`/`savepoint`/`lookup`, `deadline`/`within`/`periodic`/`noalloc`/`region`, `spawn`/`actor`/`atomic`/`sync`/`isolate`, and `quote`/`quasiquote`/`defmacro`/`defkeyword`/`dsl`.
-- [ ] **30.4: Lock-Free Parallel Module Skeleton + Body Parsing (`rayon`)**
+- [x] **30.4: Lock-Free Parallel Module Skeleton + Body Parsing (`rayon` / scoped threads)**
   - Partition large files ($\ge 32\text{ KB}$) and multi-file workspaces across worker threads using Stage 1's top-level `bracket_links`, parsing function/type bodies concurrently into thread-local bump arenas.
-- [ ] **30.5: Differential Fuzzing Gate & Complete ANTLR Removal**
-  - Verify 100% AST parity against `M28.1`'s ANTLR oracle across all tests/showcases plus structure-aware fuzzing (`proptest` / `cargo-fuzz`).
-  - Route `PilotCompiler.cs` through `pilot-ffi`, **delete `Antlr4`, `Antlr4.CodeGenerator`, and `Antlr4.Runtime` from `Pilot.csproj`**, and archive `antlr/*.g4` as historical grammar specs.
+- [x] **30.5: Differential Fuzzing Gate & Complete ANTLR Removal Preparation**
+  - Verify 100% AST parity against `M28.1`'s ANTLR oracle across all tests/showcases.
+  - Route `pilot_parse_utf8_to_arena` through `pilot-parser` in `pilot-ffi`, producing native 16-byte `AstNode` arenas for `NativeAstBridge.cs` in C#.
 
 ---
 

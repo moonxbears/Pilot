@@ -23,6 +23,7 @@ dependencies = [
  "pilot-ast",
  "pilot-intern",
  "pilot-lexer",
+ "pilot-parser",
  "pilot-span",
 ]
 
@@ -38,6 +39,17 @@ name = "pilot-lexer"
 version = "1.1.0"
 dependencies = [
  "pilot-intern",
+ "pilot-span",
+]
+
+[[package]]
+name = "pilot-parser"
+version = "1.1.0"
+dependencies = [
+ "pilot-arena",
+ "pilot-ast",
+ "pilot-intern",
+ "pilot-lexer",
  "pilot-span",
 ]
 

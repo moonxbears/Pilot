@@ -5,9 +5,10 @@
 
 use pilot_ast::{AstArena, AstNode, BinaryOp, NodeId, NodeKind};
 use pilot_lexer::{tokenize, TokenTape};
+use pilot_parser::parse as parse_pilot;
 use pilot_span::{ByteSpan, LineIndex};
 
-pub const PILOT_FFI_ABI_VERSION: u32 = 2901;
+pub const PILOT_FFI_ABI_VERSION: u32 = 3001;
 
 /// Opaque C-ABI handle owning a parsed `AstArena` and `LineIndex`.
 pub struct PilotFfiArenaHandle {
@@ -47,7 +48,7 @@ pub unsafe extern "C" fn pilot_parse_utf8_to_arena(
 
     let line_index = LineIndex::new(slice);
     let src = core::str::from_utf8(slice).unwrap_or("");
-    let arena = parse_lightweight_skeleton_to_arena(src);
+    let arena = parse_pilot(src);
 
     Box::into_raw(Box::new(PilotFfiArenaHandle { arena, line_index }))
 }
@@ -352,7 +353,7 @@ mod tests {
         unsafe {
             let handle = pilot_parse_utf8_to_arena(src.as_ptr(), src.len());
             assert!(!handle.is_null());
-            assert_eq!(pilot_ffi_abi_version(), 2901);
+            assert_eq!(pilot_ffi_abi_version(), 3001);
             assert_eq!(pilot_ffi_sizeof_ast_node(), 16);
 
             let mut node_len = 0usize;

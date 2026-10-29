@@ -627,6 +627,21 @@ impl AstArena {
                     out.push_str("(Kw :?)");
                 }
             }
+            NodeKind::ImportDecl
+            | NodeKind::FromImportDecl
+            | NodeKind::FnDecl
+            | NodeKind::TypeAdtDecl
+            | NodeKind::RecordDecl
+            | NodeKind::StructDecl
+            | NodeKind::ClassDecl
+            | NodeKind::InterfaceDecl
+            | NodeKind::ExtendDecl => {
+                out.push('(');
+                out.push_str(kind.name());
+                out.push(' ');
+                out.push_str(self.interner.resolve(SymbolId(n.lhs)));
+                out.push(')');
+            }
             NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
                 out.push('(');
                 out.push_str(kind.name());
