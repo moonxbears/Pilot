@@ -1,0 +1,8 @@
+[package]
+name = "pilot-rt"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pilot-arena = { path = "../pilot-arena" }
+pilot-intern = { path = "../pilot-intern" }

@@ -53,8 +53,10 @@ dependencies = [
  "pilot-lsp",
  "pilot-parser",
  "pilot-perceus",
+ "pilot-rt",
  "pilot-span",
  "pilot-syntax",
+ "pilot-vm",
 ]
 
 [[package]]
@@ -125,6 +127,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilot-rt"
+version = "0.1.0"
+dependencies = [
+ "pilot-arena",
+ "pilot-intern",
+]
+
+[[package]]
 name = "pilot-span"
 version = "1.1.0"
 
@@ -135,5 +145,15 @@ dependencies = [
  "pilot-ast",
  "pilot-intern",
  "pilot-lexer",
+ "pilot-span",
+]
+
+[[package]]
+name = "pilot-vm"
+version = "0.1.0"
+dependencies = [
+ "pilot-arena",
+ "pilot-intern",
+ "pilot-rt",
  "pilot-span",
 ]

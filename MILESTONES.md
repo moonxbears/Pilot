@@ -988,15 +988,15 @@ struct PilotVal {
 ```
 
 ### Sub-Tasks & Deliverables
-- [ ] **34.1: 16-Byte Unboxed C-ABI Value Representation (`PilotVal`)**
+- [x] **34.1: 16-Byte Unboxed C-ABI Value Representation (`PilotVal`)**
   - Define `#[repr(C)] pub struct PilotVal { pub tag_meta: u64, pub payload: u64 }` (`16 bytes`, `Copy`):
     - Stores `i8`..`i64`, `u8`..`u64`, `f32`/`f64`, `bool`, `char`, `KeywordId`, **Inline Short Strings (SSO up to 14 UTF-8 bytes directly inside `PilotVal`, 0 heap allocations!)**, niche-optimized `T?`, and unboxed small `T ! E` / ADTs directly in CPU registers.
-- [ ] **34.2: 3-Tier Deterministic Memory Engine (`pilot-rt` — Completes `M23.1`)**
+- [x] **34.2: 3-Tier Deterministic Memory Engine (`pilot-rt` — Completes `M23.1`)**
   - Thread-local 64KB slab **Bump Region Arenas** + **Perceus Non-Atomic / Atomic ARC Header** (`rc: u32`, `type_tag: u16`, `flags: u16` separating fast single-thread non-atomic `rc` from `spawn`-shared atomic `rc`!) + thread-cached size-class allocator + **Bounded Bacon-Rajan Trial-Deletion Cycle Collector** running strictly outside real-time zones (**0 global heap scans, 0.0 ms stop-the-world GC pauses**).
-- [ ] **34.3: Register-Based `PilVM` v3 & `.pilc` v3 Zero-Copy `mmap` Binary Format**
+- [x] **34.3: Register-Based `PilVM` v3 & `.pilc` v3 Zero-Copy `mmap` Binary Format**
   - Upgrade to **32-bit fixed-width 3-address register instructions** (`ADD_I64 r_dst, r_a, r_b`, `CALL_PRIM_INTRINSIC`, $O(1)$ ADT jump tables, inline method-group caches) with tail-call / jump-table dispatch.
   - Zero-deserialization `.pilc` v3 binary format: 64-byte aligned `.rodata` `comptime` pools, interned symbol tables, and register code pages **`mmap`-executed directly from disk in $< 0.2\text{ ms}$**.
-- [ ] **34.4: Native Concurrency, Channels, Generators, Reactive Signals (`!^`) & Dry-Run Sandbox (`!?`)**
+- [x] **34.4: Native Concurrency, Channels, Generators, Reactive Signals (`!^`) & Dry-Run Sandbox (`!?`)**
   - Native work-stealing `spawn`/`await` scheduler, MPMC `chan`/`select` multiplexers, resumable register-frame `yield` coroutines, topological `Signal[T]` graphs (`M18.1`), CoW `ShadowEffectContext` dry-runs (`M18.3`), B-Tree/Hash-indexed `Table[T]` SQL/LINQ engine, SIMD `Matrix` ops, and `VMHook` debugger traps for `M22` (DAP).
 
 ---

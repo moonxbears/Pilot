@@ -14,6 +14,8 @@ members = [
     "crates/pilot-lsp",
     "crates/pilot-analysis",
     "crates/pilot-perceus",
+    "crates/pilot-rt",
+    "crates/pilot-vm",
     "crates/pilot-ffi",
 ]
 

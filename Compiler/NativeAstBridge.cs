@@ -559,6 +559,37 @@ public readonly struct NativeByteSpan : IEquatable<NativeByteSpan>
 }
 
 /// <summary>
+/// Milestone 34.1: 16-byte unboxed universal Pilot value representation.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 8, Size = 16)]
+public readonly struct NativePilotVal : IEquatable<NativePilotVal>
+{
+    public readonly ulong TagMeta;
+    public readonly ulong Payload;
+
+    public NativePilotVal(ulong tagMeta, ulong payload)
+    {
+        TagMeta = tagMeta;
+        Payload = payload;
+    }
+
+    public byte Tag => (byte)(TagMeta & 0xFF);
+    public bool IsNull => Tag == 0;
+    public bool IsInt => Tag == 3;
+    public bool IsFloat => Tag == 5;
+    public bool IsSsoStr => Tag == 8;
+
+    public long? AsInt => NativeAstBridge.PilotValAsInt(this);
+    public double? AsFloat => NativeAstBridge.PilotValAsFloat(this);
+
+    public override string ToString() => NativeAstBridge.PilotValToString(this);
+
+    public bool Equals(NativePilotVal other) => TagMeta == other.TagMeta && Payload == other.Payload;
+    public override bool Equals(object? obj) => obj is NativePilotVal other && Equals(other);
+    public override int GetHashCode() => HashCode.Combine(TagMeta, Payload);
+}
+
+/// <summary>
 /// Zero-copy disposable view over a native Rust <c>PilotFfiArenaHandle*</c> returned by <c>pilot-ffi</c>.
 /// Exposes <see cref="Nodes"/>, <see cref="Spans"/>, and <see cref="ExtraChildren"/> directly as
 /// <see cref="ReadOnlySpan{T}"/> slices over native memory with zero per-node marshalling.
@@ -1005,11 +1036,53 @@ public sealed class NativePerceusHandle : IDisposable
 }
 
 /// <summary>
+/// Milestone 34.3: Managed wrapper around the register-based PilVirtualMachine.
+/// </summary>
+public sealed class NativeVmHandle : IDisposable
+{
+    private IntPtr _handle;
+
+    internal NativeVmHandle(IntPtr handle)
+    {
+        _handle = handle;
+    }
+
+    public IntPtr Handle => _handle;
+
+    public NativePilotVal ExecuteBytes(ReadOnlySpan<byte> bytes)
+    {
+        ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
+        return NativeAstBridge.VmExecuteBytes(_handle, bytes);
+    }
+
+    public void Dispose()
+    {
+        var h = _handle;
+        if (h != IntPtr.Zero)
+        {
+            _handle = IntPtr.Zero;
+            NativeAstBridge.FreeVm(h);
+        }
+        GC.SuppressFinalize(this);
+    }
+
+    ~NativeVmHandle()
+    {
+        var h = _handle;
+        if (h != IntPtr.Zero)
+        {
+            _handle = IntPtr.Zero;
+            NativeAstBridge.FreeVm(h);
+        }
+    }
+}
+
+/// <summary>
 /// Milestone 28.4 &amp; 29.5: Zero-copy C-ABI strangler-fig bridge between C# and the Rust <c>pilot-ffi</c> crate.
 /// </summary>
 public static unsafe class NativeAstBridge
 {
-    public const uint ExpectedAbiVersion = 3301;
+    public const uint ExpectedAbiVersion = 3401;
 
     private static readonly object SyncLock = new();
     private static IntPtr _libraryHandle;
@@ -1066,6 +1139,20 @@ public static unsafe class NativeAstBridge
     private static delegate* unmanaged[Cdecl]<IntPtr, nuint> _fnPerceusDropReuseCount;
     private static delegate* unmanaged[Cdecl]<IntPtr, nuint> _fnPerceusElidedRetainCount;
 
+    private static delegate* unmanaged[Cdecl]<long, NativePilotVal> _fnValFromInt;
+    private static delegate* unmanaged[Cdecl]<double, NativePilotVal> _fnValFromFloat;
+    private static delegate* unmanaged[Cdecl]<byte, NativePilotVal> _fnValFromBool;
+    private static delegate* unmanaged[Cdecl]<byte*, nuint, NativePilotVal> _fnValFromStr;
+    private static delegate* unmanaged[Cdecl]<NativePilotVal, nuint*, byte*> _fnValToStr;
+    private static delegate* unmanaged[Cdecl]<NativePilotVal, byte> _fnValIsSso;
+    private static delegate* unmanaged[Cdecl]<NativePilotVal, long*, byte> _fnValAsInt;
+    private static delegate* unmanaged[Cdecl]<NativePilotVal, double*, byte> _fnValAsFloat;
+    private static delegate* unmanaged[Cdecl]<NativePilotVal, NativePilotVal, NativePilotVal> _fnValAdd;
+
+    private static delegate* unmanaged[Cdecl]<IntPtr> _fnVmNew;
+    private static delegate* unmanaged[Cdecl]<IntPtr, void> _fnVmFree;
+    private static delegate* unmanaged[Cdecl]<IntPtr, byte*, nuint, NativePilotVal> _fnVmExecuteBytes;
+
     static NativeAstBridge()
     {
         // Compile-time / class-load hardware size check (Invariant #9)
@@ -1076,6 +1163,10 @@ public static unsafe class NativeAstBridge
         if (Unsafe.SizeOf<NativeByteSpan>() != 8)
         {
             throw new InvalidOperationException($"NativeByteSpan must be strictly 8 bytes, got {Unsafe.SizeOf<NativeByteSpan>()}.");
+        }
+        if (Unsafe.SizeOf<NativePilotVal>() != 16)
+        {
+            throw new InvalidOperationException($"NativePilotVal must be strictly 16 bytes, got {Unsafe.SizeOf<NativePilotVal>()}.");
         }
     }
 
@@ -1539,6 +1630,111 @@ public static unsafe class NativeAstBridge
         }
     }
 
+    public static NativePilotVal CreatePilotValInt(long val)
+    {
+        EnsureLoaded();
+        return _fnValFromInt(val);
+    }
+
+    public static NativePilotVal CreatePilotValFloat(double val)
+    {
+        EnsureLoaded();
+        return _fnValFromFloat(val);
+    }
+
+    public static NativePilotVal CreatePilotValBool(bool val)
+    {
+        EnsureLoaded();
+        return _fnValFromBool((byte)(val ? 1 : 0));
+    }
+
+    public static NativePilotVal CreatePilotValString(string s)
+    {
+        EnsureLoaded();
+        byte[] bytes = Encoding.UTF8.GetBytes(s);
+        fixed (byte* ptr = bytes)
+        {
+            return _fnValFromStr(ptr, (nuint)bytes.Length);
+        }
+    }
+
+    public static NativePilotVal AddPilotVal(NativePilotVal a, NativePilotVal b)
+    {
+        EnsureLoaded();
+        return _fnValAdd(a, b);
+    }
+
+    public static bool PilotValIsSso(NativePilotVal val)
+    {
+        EnsureLoaded();
+        return _fnValIsSso(val) != 0;
+    }
+
+    public static NativeVmHandle CreateVm()
+    {
+        EnsureLoaded();
+        IntPtr h = _fnVmNew();
+        return new NativeVmHandle(h);
+    }
+
+    internal static long? PilotValAsInt(NativePilotVal val)
+    {
+        EnsureLoaded();
+        long res = 0;
+        if (_fnValAsInt(val, &res) != 0)
+        {
+            return res;
+        }
+        return null;
+    }
+
+    internal static double? PilotValAsFloat(NativePilotVal val)
+    {
+        EnsureLoaded();
+        double res = 0;
+        if (_fnValAsFloat(val, &res) != 0)
+        {
+            return res;
+        }
+        return null;
+    }
+
+    internal static string PilotValToString(NativePilotVal val)
+    {
+        EnsureLoaded();
+        nuint len = 0;
+        byte* ptr = _fnValToStr(val, &len);
+        if (ptr == null || len == 0)
+        {
+            return string.Empty;
+        }
+        try
+        {
+            return Encoding.UTF8.GetString(ptr, (int)len);
+        }
+        finally
+        {
+            _fnFreeString(ptr, len);
+        }
+    }
+
+    internal static NativePilotVal VmExecuteBytes(IntPtr vm, ReadOnlySpan<byte> bytes)
+    {
+        EnsureLoaded();
+        fixed (byte* ptr = bytes)
+        {
+            return _fnVmExecuteBytes(vm, ptr, (nuint)bytes.Length);
+        }
+    }
+
+    internal static void FreeVm(IntPtr vm)
+    {
+        if (vm != IntPtr.Zero && _fnVmFree != null)
+        {
+            _fnVmFree(vm);
+        }
+    }
+
     private static void EnsureLoaded()
     {
         if (_libraryHandle != IntPtr.Zero)
@@ -1608,6 +1804,20 @@ public static unsafe class NativeAstBridge
             _fnPerceusGlobalAllocCount = (delegate* unmanaged[Cdecl]<IntPtr, nuint>)NativeLibrary.GetExport(lib, "pilot_perceus_global_alloc_count");
             _fnPerceusDropReuseCount = (delegate* unmanaged[Cdecl]<IntPtr, nuint>)NativeLibrary.GetExport(lib, "pilot_perceus_drop_reuse_count");
             _fnPerceusElidedRetainCount = (delegate* unmanaged[Cdecl]<IntPtr, nuint>)NativeLibrary.GetExport(lib, "pilot_perceus_elided_retain_count");
+
+            _fnValFromInt = (delegate* unmanaged[Cdecl]<long, NativePilotVal>)NativeLibrary.GetExport(lib, "pilot_val_from_int");
+            _fnValFromFloat = (delegate* unmanaged[Cdecl]<double, NativePilotVal>)NativeLibrary.GetExport(lib, "pilot_val_from_float");
+            _fnValFromBool = (delegate* unmanaged[Cdecl]<byte, NativePilotVal>)NativeLibrary.GetExport(lib, "pilot_val_from_bool");
+            _fnValFromStr = (delegate* unmanaged[Cdecl]<byte*, nuint, NativePilotVal>)NativeLibrary.GetExport(lib, "pilot_val_from_str");
+            _fnValToStr = (delegate* unmanaged[Cdecl]<NativePilotVal, nuint*, byte*>)NativeLibrary.GetExport(lib, "pilot_val_to_str");
+            _fnValIsSso = (delegate* unmanaged[Cdecl]<NativePilotVal, byte>)NativeLibrary.GetExport(lib, "pilot_val_is_sso");
+            _fnValAsInt = (delegate* unmanaged[Cdecl]<NativePilotVal, long*, byte>)NativeLibrary.GetExport(lib, "pilot_val_as_int");
+            _fnValAsFloat = (delegate* unmanaged[Cdecl]<NativePilotVal, double*, byte>)NativeLibrary.GetExport(lib, "pilot_val_as_float");
+            _fnValAdd = (delegate* unmanaged[Cdecl]<NativePilotVal, NativePilotVal, NativePilotVal>)NativeLibrary.GetExport(lib, "pilot_val_add");
+
+            _fnVmNew = (delegate* unmanaged[Cdecl]<IntPtr>)NativeLibrary.GetExport(lib, "pilot_vm_new");
+            _fnVmFree = (delegate* unmanaged[Cdecl]<IntPtr, void>)NativeLibrary.GetExport(lib, "pilot_vm_free");
+            _fnVmExecuteBytes = (delegate* unmanaged[Cdecl]<IntPtr, byte*, nuint, NativePilotVal>)NativeLibrary.GetExport(lib, "pilot_vm_execute_bytes");
 
             uint abi = _fnAbiVersion();
             if (abi != ExpectedAbiVersion)

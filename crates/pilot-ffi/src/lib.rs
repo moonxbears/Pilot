@@ -8,7 +8,7 @@ use pilot_lexer::{tokenize, TokenTape};
 use pilot_parser::parse as parse_pilot;
 use pilot_span::{ByteSpan, LineIndex};
 
-pub const PILOT_FFI_ABI_VERSION: u32 = 3301;
+pub const PILOT_FFI_ABI_VERSION: u32 = 3401;
 
 /// Opaque C-ABI handle owning a parsed `AstArena` and `LineIndex`.
 pub struct PilotFfiArenaHandle {
@@ -612,6 +612,105 @@ pub unsafe extern "C" fn pilot_perceus_elided_retain_count(handle: *const PilotF
     (*handle).report.elided_retains
 }
 
+#[no_mangle]
+pub extern "C" fn pilot_val_from_int(val: i64) -> pilot_rt::PilotVal {
+    pilot_rt::PilotVal::from_int(val)
+}
+
+#[no_mangle]
+pub extern "C" fn pilot_val_from_float(val: f64) -> pilot_rt::PilotVal {
+    pilot_rt::PilotVal::from_float(val)
+}
+
+#[no_mangle]
+pub extern "C" fn pilot_val_from_bool(val: u8) -> pilot_rt::PilotVal {
+    pilot_rt::PilotVal::from_bool(val != 0)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_val_from_str(str_ptr: *const u8, str_len: usize) -> pilot_rt::PilotVal {
+    let s = if str_ptr.is_null() || str_len == 0 {
+        ""
+    } else {
+        core::str::from_utf8(core::slice::from_raw_parts(str_ptr, str_len)).unwrap_or("")
+    };
+    pilot_rt::PilotVal::from_str(s)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_val_to_str(val: pilot_rt::PilotVal, out_len: *mut usize) -> *mut u8 {
+    let s = val.to_string_repr();
+    let bytes = s.into_bytes();
+    if !out_len.is_null() {
+        *out_len = bytes.len();
+    }
+    let mut boxed = bytes.into_boxed_slice();
+    let ptr = boxed.as_mut_ptr();
+    core::mem::forget(boxed);
+    ptr
+}
+
+#[no_mangle]
+pub extern "C" fn pilot_val_is_sso(val: pilot_rt::PilotVal) -> u8 {
+    if val.is_sso_str() { 1 } else { 0 }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_val_as_int(val: pilot_rt::PilotVal, out_val: *mut i64) -> u8 {
+    if let Some(i) = val.as_int() {
+        if !out_val.is_null() { *out_val = i; }
+        1
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_val_as_float(val: pilot_rt::PilotVal, out_val: *mut f64) -> u8 {
+    if let Some(f) = val.as_float() {
+        if !out_val.is_null() { *out_val = f; }
+        1
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn pilot_val_add(a: pilot_rt::PilotVal, b: pilot_rt::PilotVal) -> pilot_rt::PilotVal {
+    a.add(b).unwrap_or(pilot_rt::PilotVal::NULL)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_vm_new() -> *mut pilot_vm::PilVirtualMachine {
+    Box::into_raw(Box::new(pilot_vm::PilVirtualMachine::new()))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_vm_free(vm: *mut pilot_vm::PilVirtualMachine) {
+    if !vm.is_null() {
+        drop(Box::from_raw(vm));
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_vm_execute_bytes(
+    vm: *mut pilot_vm::PilVirtualMachine,
+    bytes_ptr: *const u8,
+    bytes_len: usize,
+) -> pilot_rt::PilotVal {
+    if vm.is_null() || bytes_ptr.is_null() || bytes_len == 0 {
+        return pilot_rt::PilotVal::NULL;
+    }
+    let slice = core::slice::from_raw_parts(bytes_ptr, bytes_len);
+    match pilot_vm::PilcBinary::load_from_bytes(slice) {
+        Ok(bin) => {
+            (*vm).load_binary(bin);
+            (*vm).run()
+        }
+        Err(_) => pilot_rt::PilotVal::NULL,
+    }
+}
+
 /// Builds a statement/expression `AstArena` from UTF-8 source for Milestone 28 C-ABI verification
 /// (full Stage 1 SIMD modal lexer & Stage 2 Pratt parser land in M29–M30).
 pub fn parse_lightweight_skeleton_to_arena(src: &str) -> AstArena {
@@ -747,7 +846,7 @@ mod tests {
         unsafe {
             let handle = pilot_parse_utf8_to_arena(src.as_ptr(), src.len());
             assert!(!handle.is_null());
-            assert_eq!(pilot_ffi_abi_version(), 3301);
+            assert_eq!(pilot_ffi_abi_version(), 3401);
             assert_eq!(pilot_ffi_sizeof_ast_node(), 16);
 
             let mut node_len = 0usize;
@@ -902,6 +1001,52 @@ mod tests {
             pilot_perceus_free(perceus);
 
             pilot_arena_free(arena);
+        }
+    }
+
+    #[test]
+    fn ffi_c_abi_runtime_and_register_vm() {
+        unsafe {
+            // 1. Unboxed 16-byte PilotVal & SSO
+            let a = pilot_val_from_int(10);
+            let b = pilot_val_from_int(32);
+            let c = pilot_val_add(a, b);
+            let mut res_int = 0i64;
+            assert_eq!(pilot_val_as_int(c, &mut res_int), 1);
+            assert_eq!(res_int, 42);
+
+            let sso_str = b"hello_pilot";
+            let sso_val = pilot_val_from_str(sso_str.as_ptr(), sso_str.len());
+            assert_eq!(pilot_val_is_sso(sso_val), 1);
+
+            let mut out_len = 0usize;
+            let str_ptr = pilot_val_to_str(sso_val, &mut out_len);
+            assert!(!str_ptr.is_null());
+            assert_eq!(out_len, sso_str.len());
+            let extracted = core::str::from_utf8(core::slice::from_raw_parts(str_ptr, out_len)).unwrap();
+            assert_eq!(extracted, "hello_pilot");
+            pilot_free_string(str_ptr, out_len);
+
+            // 2. Register VM Execution
+            let vm = pilot_vm_new();
+            assert!(!vm.is_null());
+
+            let bin = pilot_vm::PilcBinary::new(
+                vec![pilot_rt::PilotVal::from_int(10), pilot_rt::PilotVal::from_int(32)],
+                vec![
+                    pilot_vm::Instruction::encode(pilot_vm::Opcode::LoadConst, 1, 0, 0),
+                    pilot_vm::Instruction::encode(pilot_vm::Opcode::LoadConst, 2, 0, 1),
+                    pilot_vm::Instruction::encode(pilot_vm::Opcode::AddI64, 3, 1, 2),
+                    pilot_vm::Instruction::encode(pilot_vm::Opcode::Ret, 0, 3, 0),
+                ],
+            );
+            let bytes = bin.serialize();
+            let vm_res = pilot_vm_execute_bytes(vm, bytes.as_ptr(), bytes.len());
+            let mut vm_res_int = 0i64;
+            assert_eq!(pilot_val_as_int(vm_res, &mut vm_res_int), 1);
+            assert_eq!(vm_res_int, 42);
+
+            pilot_vm_free(vm);
         }
     }
 }
