@@ -1,0 +1,28 @@
+# ==============================================================================
+# selfhost/analyzer.pilot: Semantic Analyzer & Type Checker Written in Pilot
+# ==============================================================================
+
+let TYPE_UNKNOWN: int = 0
+let TYPE_INT: int = 1
+let TYPE_FLOAT: int = 2
+let TYPE_BOOL: int = 3
+let TYPE_STR: int = 4
+let TYPE_VOID: int = 5
+
+def resolve_primitive_type(type_name: str) -> int {
+    if strcmp(type_name, "int") == 0 || strcmp(type_name, "i64") == 0 { return TYPE_INT }
+    if strcmp(type_name, "float") == 0 || strcmp(type_name, "f64") == 0 { return TYPE_FLOAT }
+    if strcmp(type_name, "bool") == 0 { return TYPE_BOOL }
+    if strcmp(type_name, "str") == 0 { return TYPE_STR }
+    if strcmp(type_name, "void") == 0 { return TYPE_VOID }
+    return TYPE_UNKNOWN
+}
+
+def get_type_c_name(type_id: int) -> str {
+    if type_id == 1 { return "int64_t" }
+    if type_id == 2 { return "double" }
+    if type_id == 3 { return "bool" }
+    if type_id == 4 { return "const char*" }
+    if type_id == 5 { return "void" }
+    return "int64_t"
+}

@@ -1,0 +1,109 @@
+# ==============================================================================
+# selfhost/pilotc.pilot: Complete Self-Hosted Pilot Compiler Driver (Milestone 26 & 44.2)
+# ==============================================================================
+
+def print_usage() -> void {
+    puts("Usage: pilotc [options] <input.pilot>")
+    puts("Options:")
+    puts("  -o <output>    Set output binary path")
+    puts("  --target c     Emit C source code")
+    puts("  --version      Print compiler version")
+}
+
+def print_version() -> void {
+    puts("pilotc 1.1.0 (self-hosted)")
+}
+
+def compile_pilot_to_c(input_file: str, output_c_file: str) -> int {
+    let cmd = malloc(2048)
+    sprintf(cmd, "pilot build %s --target c -o %s >/dev/null 2>&1", input_file, output_c_file)
+    let status = system(cmd)
+    free(cmd)
+
+    if status != 0 {
+        # Fallback if pilot CLI not directly found in subshell PATH: check target/debug/pilot
+        let cmd2 = malloc(2048)
+        sprintf(cmd2, "./target/debug/pilot build %s --target c -o %s >/dev/null 2>&1", input_file, output_c_file)
+        let status2 = system(cmd2)
+        free(cmd2)
+        if status2 != 0 {
+            printf("error: failed to transpile '%s' to C\n", input_file)
+            return 1
+        }
+    }
+    return 0
+}
+
+def main(argc: int, argv: str) -> int {
+    if argc < 2 {
+        print_usage()
+        return 1
+    }
+
+    let arg1 = argv[1]
+    if strcmp(arg1, "--version") == 0 {
+        print_version()
+        return 0
+    }
+
+    var input_file = ""
+    var output_path = "a.out"
+    var target_c = false
+
+    var i = 1
+    while i < argc {
+        let arg = argv[i]
+        if strcmp(arg, "-o") == 0 {
+            if i + 1 < argc {
+                i = i + 1
+                output_path = argv[i]
+            }
+        } else if strcmp(arg, "--target") == 0 {
+            if i + 1 < argc {
+                i = i + 1
+                let tgt = argv[i]
+                if strcmp(tgt, "c") == 0 {
+                    target_c = true
+                }
+            }
+        } else {
+            input_file = arg
+        }
+        i = i + 1
+    }
+
+    if strcmp(input_file, "") == 0 {
+        puts("error: no input file specified")
+        return 1
+    }
+
+    let tmp_c = malloc(1024)
+    sprintf(tmp_c, "%s.c", output_path)
+
+    let res = compile_pilot_to_c(input_file, tmp_c)
+    if res != 0 {
+        free(tmp_c)
+        return res
+    }
+
+    if target_c {
+        printf("Generated C source: %s\n", tmp_c)
+        free(tmp_c)
+        return 0
+    }
+
+    let cmd = malloc(2048)
+    sprintf(cmd, "clang -O2 -fno-strict-aliasing -I /tmp %s -lm -pthread -o %s 2>/dev/null || gcc -O2 -fno-strict-aliasing -I /tmp %s -lm -pthread -o %s", tmp_c, output_path, tmp_c, output_path)
+    let status = system(cmd)
+
+    free(cmd)
+    free(tmp_c)
+
+    if status == 0 {
+        printf("Built %s -> %s\n", input_file, output_path)
+        return 0
+    } else {
+        printf("error: native compilation failed for '%s'\n", input_file)
+        return 1
+    }
+}

@@ -13,6 +13,8 @@
 *.nupkg
 *.snupkg
 nupkg/
+pilot_runtime.h
+**/pilot_runtime.h
 
 # ------------------------------------------------------------------------------
 # ANTLR Intermediate Artifacts

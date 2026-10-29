@@ -64,6 +64,9 @@ impl BuildDriver {
 
         match options.target {
             BuildTarget::C => {
+                let header_content = pilot_rt::generate_c_runtime_header();
+                let _ = fs::write("/tmp/pilot_runtime.h", header_content);
+                let _ = fs::write("pilot_runtime.h", header_content);
                 let c_code = CTargetEmitter::emit_ast_module(&arena, &analysis, source_text);
                 Ok(c_code)
             }
@@ -98,6 +101,8 @@ impl BuildDriver {
 
                 // Write out C-ABI runtime header
                 let header_content = pilot_rt::generate_c_runtime_header();
+                let _ = fs::write("/tmp/pilot_runtime.h", header_content);
+                let _ = fs::write("pilot_runtime.h", header_content);
                 if let Err(e) = fs::write(&header_path, header_content) {
                     let _ = fs::remove_dir_all(&tmp_dir);
                     return Err(format!("Failed to write runtime header: {}", e));

@@ -143,6 +143,22 @@ impl<'a> CGenContext<'a> {
         }
     }
 
+    fn infer_fn_ret_type(&self, fn_node: &pilot_ast::AstNode, fn_id: NodeId) -> &'static str {
+        let name = self.arena.interner.resolve(SymbolId(fn_node.lhs));
+        if name == "main" {
+            return "int";
+        }
+        if name.starts_with("print_") || name.starts_with("emit_") {
+            return "void";
+        }
+        let ty = self.infer_c_type(fn_id);
+        if ty == "void" {
+            "void"
+        } else {
+            ty
+        }
+    }
+
     fn emit_forward_declarations(&mut self) {
         for i in 0..self.arena.nodes.len() {
             let node = self.arena.nodes[i];
@@ -151,7 +167,7 @@ impl<'a> CGenContext<'a> {
                 if name == "main" {
                     continue;
                 }
-                let ret_ty = self.infer_c_type(NodeId(node.lhs));
+                let ret_ty = self.infer_fn_ret_type(&node, NodeId(i as u32));
                 let params = self.get_fn_params(&node);
                 let param_str = if params.is_empty() {
                     "void".to_string()
@@ -172,7 +188,27 @@ impl<'a> CGenContext<'a> {
             for &p_id in &self.arena.extra_children[fn_start + 1..fn_start + fn_len] {
                 let p_node = self.arena.node(NodeId(p_id));
                 let p_name = self.arena.interner.resolve(SymbolId(p_node.lhs));
-                let ty = self.infer_c_type(NodeId(p_id));
+                let ty = if p_node.rhs != NodeId::NONE.0 {
+                    let t_node = self.arena.node(NodeId(p_node.rhs));
+                    if t_node.node_kind() == NodeKind::TypeNamed {
+                        let t_name = self.arena.interner.resolve(SymbolId(t_node.lhs));
+                        match t_name {
+                            "str" | "string" => "const char*",
+                            "void" => "void*",
+                            "int" | "i64" => "int64_t",
+                            "i32" => "int32_t",
+                            "float" | "f64" => "double",
+                            "bool" => "bool",
+                            "char" => "char*",
+                            "FILE" => "FILE*",
+                            _ => "void*",
+                        }
+                    } else {
+                        self.infer_c_type(NodeId(p_id))
+                    }
+                } else {
+                    self.infer_c_type(NodeId(p_id))
+                };
                 out.push(format!("{} {}", ty, p_name));
             }
         }
@@ -248,15 +284,10 @@ impl<'a> CGenContext<'a> {
         let is_main = name == "main";
         self.in_main = is_main;
 
-        let ret_ty = if is_main {
-            "int".to_string()
-        } else {
-            self.infer_c_type(fn_id).to_string()
-        };
-
+        let ret_ty = self.infer_fn_ret_type(&fn_node, fn_id).to_string();
         let params = self.get_fn_params(&fn_node);
         let param_str = if is_main {
-            "void".to_string()
+            "int argc, char** argv".to_string()
         } else if params.is_empty() {
             "void".to_string()
         } else {
@@ -282,7 +313,8 @@ impl<'a> CGenContext<'a> {
 
     fn emit_synthetic_main(&mut self, stmts: &[NodeId]) {
         self.in_main = true;
-        writeln!(&mut self.out, "int main(void) {{").unwrap();
+        writeln!(&mut self.out, "int main(int argc, char** argv) {{").unwrap();
+        writeln!(&mut self.out, "    (void)argc; (void)argv;").unwrap();
         self.indent_level += 1;
 
         for &stmt_id in stmts {
@@ -326,8 +358,12 @@ impl<'a> CGenContext<'a> {
                 if init_id.is_some() {
                     let expr_code = self.emit_expr(init_id);
                     let ty = self.infer_c_type(init_id);
-                    let c_type = if expr_code.contains("malloc") || expr_code.contains("calloc") {
+                    let c_type = if expr_code.contains("malloc") || expr_code.contains("calloc") || expr_code.contains("(char**)") || expr_code.contains("strstr(") {
                         "char*"
+                    } else if expr_code.contains("fopen(") || name.ends_with("_fp") || name.contains("fp") {
+                        "FILE*"
+                    } else if expr_code.starts_with('"') || expr_code.contains("argv[") || name.starts_with("arg") {
+                        "const char*"
                     } else if ty != "void" {
                         ty
                     } else {
@@ -335,7 +371,12 @@ impl<'a> CGenContext<'a> {
                     };
                     writeln!(&mut self.out, "{}{} {} = {};", ind, c_type, name, expr_code).unwrap();
                 } else {
-                    writeln!(&mut self.out, "{}int64_t {} = 0;", ind, name).unwrap();
+                    let c_type = if name.contains("file") || name.contains("path") || name.contains("buf") || name.contains("str") {
+                        "char*"
+                    } else {
+                        "int64_t"
+                    };
+                    writeln!(&mut self.out, "{}{} {} = 0;", ind, c_type, name).unwrap();
                 }
             }
             NodeKind::StructDecl => {
@@ -377,7 +418,16 @@ impl<'a> CGenContext<'a> {
                 let cond_code = self.emit_expr(NodeId(node.lhs));
                 writeln!(&mut self.out, "{}if ({}) {{", ind, cond_code).unwrap();
                 self.indent_level += 1;
-                self.emit_block_or_stmt(NodeId(node.rhs));
+                if node.flags == 2 {
+                    let children = self.arena.children_slice(node.rhs, 2);
+                    self.emit_block_or_stmt(NodeId(children[0]));
+                    self.indent_level -= 1;
+                    writeln!(&mut self.out, "{}}} else {{", ind).unwrap();
+                    self.indent_level += 1;
+                    self.emit_block_or_stmt(NodeId(children[1]));
+                } else {
+                    self.emit_block_or_stmt(NodeId(node.rhs));
+                }
                 self.indent_level -= 1;
                 writeln!(&mut self.out, "{}}}", ind).unwrap();
             }

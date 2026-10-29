@@ -1,0 +1,21 @@
+[package]
+name = "pilot-perf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Multi-target profiler, WCET analyzer & trivia-preserving CST source optimizer for Pilot"
+
+[lib]
+name = "pilot_perf"
+path = "src/lib.rs"
+
+[dependencies]
+pilot-span = { path = "../pilot-span" }
+pilot-ast = { path = "../pilot-ast" }
+pilot-parser = { path = "../pilot-parser" }
+pilot-syntax = { path = "../pilot-syntax" }
+pilot-fmt = { path = "../pilot-fmt" }
+pilot-analysis = { path = "../pilot-analysis" }
+pilot-vm = { path = "../pilot-vm" }
+pilot-rt = { path = "../pilot-rt" }

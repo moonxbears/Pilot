@@ -98,6 +98,39 @@ impl TypeInferenceEngine {
 
         let fn_clock = self.types.function_of(vec![TypeId::I64, TypeId::ANY], TypeId::I64);
         self.define_var("clock_gettime", fn_clock);
+
+        let fn_puts = self.types.function_of(vec![TypeId::ANY], TypeId::VOID);
+        self.define_var("puts", fn_puts);
+
+        let fn_printf = self.types.function_of(vec![TypeId::ANY], TypeId::VOID);
+        self.define_var("printf", fn_printf);
+
+        let fn_sprintf = self.types.function_of(vec![TypeId::ANY], TypeId::I64);
+        self.define_var("sprintf", fn_sprintf);
+
+        let fn_fopen = self.types.function_of(vec![TypeId::ANY, TypeId::ANY], TypeId::ANY);
+        self.define_var("fopen", fn_fopen);
+
+        let fn_fclose = self.types.function_of(vec![TypeId::ANY], TypeId::I64);
+        self.define_var("fclose", fn_fclose);
+
+        let fn_fputs = self.types.function_of(vec![TypeId::ANY, TypeId::ANY], TypeId::I64);
+        self.define_var("fputs", fn_fputs);
+
+        let fn_fgets = self.types.function_of(vec![TypeId::ANY, TypeId::ANY, TypeId::ANY], TypeId::ANY);
+        self.define_var("fgets", fn_fgets);
+
+        let fn_strcmp = self.types.function_of(vec![TypeId::ANY, TypeId::ANY], TypeId::I64);
+        self.define_var("strcmp", fn_strcmp);
+
+        let fn_strlen = self.types.function_of(vec![TypeId::ANY], TypeId::I64);
+        self.define_var("strlen", fn_strlen);
+
+        let fn_system = self.types.function_of(vec![TypeId::ANY], TypeId::I64);
+        self.define_var("system", fn_system);
+
+        let fn_exit = self.types.function_of(vec![TypeId::I64], TypeId::VOID);
+        self.define_var("exit", fn_exit);
         self.define_var("CLOCK_MONOTONIC", TypeId::I64);
 
         // Result and Option constructors
@@ -502,8 +535,17 @@ impl TypeInferenceEngine {
             NodeKind::IfExpr => {
                 let cond_node = NodeId(node.lhs);
                 self.check(arena, cond_node, TypeId::BOOL);
-                let then_node = NodeId(node.rhs);
-                self.synth(arena, then_node)
+                let (then_node, else_node) = if node.flags == 2 {
+                    let children = arena.children_slice(node.rhs, 2);
+                    (NodeId(children[0]), NodeId(children[1]))
+                } else {
+                    (NodeId(node.rhs), NodeId::NONE)
+                };
+                let t_then = self.synth(arena, then_node);
+                if else_node.is_some() {
+                    self.synth(arena, else_node);
+                }
+                t_then
             }
 
             NodeKind::WhileStmt => {

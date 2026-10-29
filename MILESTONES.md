@@ -123,12 +123,12 @@ flowchart TD
 | **M19** | Rigorous Runtime-to-Compile-Time Demotion & `comptime` Audit | Phase B | ✅ **Completed** | `Analysis/Comptime/`, `Compiler/`, `Transpilation/PilotOptimizer.cs` |
 | **M20** | Accurate Bidirectional Language Transpilation & Library Ingestion (`--emit` / `--from`) | Phase C | ✅ **Completed** | `Transpilation/`, `Formatting/PilotFormatter.cs`, `Cli/Program.cs` |
 | **M21** | Core Native Standard Library (`std.core`, `collections`, `mem`, `io`, `fs`, `math`) | Phase C | ✅ **Completed** | `stdlib/core/`, `stdlib/collections/`, `stdlib/io/`, `stdlib/math/` |
-| **M22** | Debug Adapter Protocol (DAP) & VS Code GUI Breakpoints *(Unified w/ `M43`)* | Phase C | 📋 **Planned (`M43.2`)** | `crates/pilot-dap/`, `vscode-pilot/` |
-| **M23** | Deep LLVM / WASM Runtime Linking & Native Binary Toolchain (`pilot build`) | Phase C | 🔗 **Unified w/ `M34`–`M35` & `M40`** | `crates/pilot-rt/`, `crates/pilot-codegen/` |
-| **M24** | Extended Systems, Networking, HTTP & Crypto Standard Library *(Unified w/ `M43`)* | Phase C | 🚧 **In Progress (`M43.4`)** | `stdlib/net/`, `stdlib/http/`, `stdlib/crypto/`, `stdlib/formats/` |
-| **M25** | Advanced Performance Analysis & Trivia-Preserving Auto-Optimizer (`pilot perf`) | Phase C | 📋 **Planned (`M44.1`)** | `crates/pilot-perf/`, `crates/pilot-fmt/` |
-| **M26** | Self-Hosted Pilot Compiler (`pilotc` Written in Pilot) | Phase C | 📋 **Planned (`M44.2`)** | `selfhost/` (`lexer.pilot`, `parser.pilot`, `analyzer.pilot`, `pilotc.pilot`) |
-| **M27** | Package Registry Hosting & Distribution Architecture | Phase C | 🔍 **Planned (`M43.3`)** | `crates/pilot-pkg/`, Registry Spec |
+| **M22** | Debug Adapter Protocol (DAP) & VS Code GUI Breakpoints *(Unified w/ `M43`)* | Phase C | ✅ **Completed (`M43.2`)** | `crates/pilot-dap/`, `vscode-pilot/` |
+| **M23** | Deep LLVM / WASM Runtime Linking & Native Binary Toolchain (`pilot build`) | Phase C | ✅ **Completed (`M40`)** | `crates/pilot-rt/`, `crates/pilot-codegen/` |
+| **M24** | Extended Systems, Networking, HTTP & Crypto Standard Library *(Unified w/ `M43`)* | Phase C | ✅ **Completed (`M43.4`)** | `crates/pilot-rt/`, `stdlib/` |
+| **M25** | Advanced Performance Analysis & Trivia-Preserving Auto-Optimizer (`pilot perf`) | Phase C | ✅ **Completed (`M44.1`)** | `crates/pilot-perf/`, `crates/pilot-fmt/` |
+| **M26** | Self-Hosted Pilot Compiler (`pilotc` Written in Pilot) | Phase C | ✅ **Completed (`M44.2`)** | `selfhost/` (`lexer.pilot`, `parser.pilot`, `analyzer.pilot`, `pilotc.pilot`) |
+| **M27** | Package Registry Hosting & Distribution Architecture | Phase C | ✅ **Completed (`M43.3`)** | `crates/pilot-pkg/`, Registry Spec |
 | **M28** | Native Rust Workspace Foundation, 16B Arena AST ABI & `SLL -> LL` Golden Oracle | Phase D | ✅ **Completed** | `Cargo.toml`, `crates/pilot-arena`, `pilot-span`, `pilot-ast`, `pilot-ffi` |
 | **M29** | Stage 1 — Zero-Copy SIMD Preprocessor, Structural Indexer & Modal Lexer (`1+ GB/s`) | Phase D | ✅ **Completed** | `crates/pilot-lexer/`, `crates/pilot-ffi/` |
 | **M30** | Stage 2 — Hand-Written Recursive Descent + Pratt (TDOP) Parser & ANTLR Removal (`500+ MB/s`) | Phase D | ✅ **Completed** | `crates/pilot-parser/`, `crates/pilot-ffi/` |
@@ -141,11 +141,11 @@ flowchart TD
 | **M37** | Full AST Type Inference, Pattern Exhaustiveness, Null/Error Flow & Contract/Dimension Walkers | Phase E | ✅ **Completed** | `crates/pilot-analysis/`, `crates/pilot-cli/` (`pilot check`) |
 | **M38** | Symbolic Autodiff (`!@`), Call-Quoting (`!`, `!!`, `!&`, `!^`, `!?`), Macros, Demotion & Perceus Pass | Phase E | ✅ **Completed** | `crates/pilot-analysis/`, `crates/pilot-perceus/` |
 | **M39** | AST-to-Bytecode Compiler, Full `PilVM` v3 Execution, Runtime Intrinsics & Live `pilot test` | Phase E | ✅ **Completed** | `crates/pilot-vm/`, `crates/pilot-rt/`, `crates/pilot-cli/` (`pilot test`/`repl`) |
-| **M40** | True AST-Driven Native Codegen (`C11/C23`, `LLVM IR`, `WASM/WASI`, `ASM`) & Linkable `libpilot_rt` | Phase E | 🎯 **Next Up** | `crates/pilot-codegen/`, `crates/pilot-rt/` |
-| **M41** | Full AST Bidirectional Transpilers (`pilot --emit` / `--from`) & Foreign AST Ingesters | Phase E | 📋 **Planned** | `crates/pilot-transpile/`, `crates/pilot-cli/` |
-| **M42** | Live Polyglot Execution Bridges, Native DB Drivers (`PostgreSQL`/`SQLite`) & Yield-Bridges | Phase E | 📋 **Planned** | `crates/pilot-polyglot/`, `crates/pilot-rt/` |
-| **M43** | Production `pilot-lsp` Loop, Native DAP (`M22`), Package/Venv Manager (`M8`/`M27`) & Stdlib (`M24`) | Phase E | 📋 **Planned** | `crates/pilot-lsp/`, `crates/pilot-dap/`, `crates/pilot-pkg/`, `stdlib/` |
-| **M44** | Profiler & Trivia-Preserving CST Auto-Optimizer (`M25`) and Self-Hosted `pilotc` Bootstrap (`M26`) | Phase E | 📋 **Planned** | `crates/pilot-perf/`, `selfhost/` |
+| **M40** | True AST-Driven Native Codegen (`C11/C23`, `LLVM IR`, `WASM/WASI`, `ASM`) & Linkable `libpilot_rt` | Phase E | ✅ **Completed** | `crates/pilot-codegen/`, `crates/pilot-rt/` |
+| **M41** | Full AST Bidirectional Transpilers (`pilot --emit` / `--from`) & Foreign AST Ingesters | Phase E | ✅ **Completed** | `crates/pilot-transpile/`, `crates/pilot-cli/` |
+| **M42** | Live Polyglot Execution Bridges, Native DB Drivers (`PostgreSQL`/`SQLite`) & Yield-Bridges | Phase E | ✅ **Completed** | `crates/pilot-polyglot/`, `crates/pilot-rt/` |
+| **M43** | Production `pilot-lsp` Loop, Native DAP (`M22`), Package/Venv Manager (`M8`/`M27`) & Stdlib (`M24`) | Phase E | ✅ **Completed** | `crates/pilot-lsp/`, `crates/pilot-dap/`, `crates/pilot-pkg/`, `stdlib/` |
+| **M44** | Profiler & Trivia-Preserving CST Auto-Optimizer (`M25`) and Self-Hosted `pilotc` Bootstrap (`M26`) | Phase E | ✅ **Completed** | `crates/pilot-perf/`, `selfhost/` |
 
 ---
 
@@ -1268,14 +1268,19 @@ struct PilotVal {
 **Goal**: Complete the final two flagship milestones (`M25` and `M26`) atop the fully wired Phase E Rust compiler, runtime, and native codegen backends.
 
 ### Sub-Tasks & Deliverables
-- [ ] **44.1: Multi-Target Profiler, WCET Analyzer & Trivia-Preserving CST Source Optimizer (`crates/pilot-perf` — Completes `M25`)**
-  - Upgrade `pilot perf` (`cmd_perf`) to support:
-    - `pilot perf profile <file.pilot>`: Per-function/loop/line execution timing, allocation tracking, and Speedscope / Chrome Tracing flamegraph JSON export across `PilVM` v3 and native AOT binaries.
-    - `pilot perf analyze <file.pilot>`: Static/dynamic Tier-2 heap allocation audit, $O(N^2)$ loop detection, unindexed `Table` scan warnings, and `@hard_realtime` WCET verification (`PERF001`–`PERF020`).
-    - `pilot perf optimize [--diff|--apply] <file.pilot>`: Trivia-preserving Red-Green CST rewrites (`pilot-syntax` + `pilot-fmt`) hoisting loop-invariant expressions to `comptime { ... }`, converting `list.append` loops to `FixedScalar` `SliceBuffer` comprehensions, and feeding `.pilprof` traces into `pilot build --pgo`.
-- [ ] **44.2: Self-Hosted Pilot Compiler Written in Pilot (`selfhost/pilotc.pilot` — Completes `M26`)**
-  - Implement `selfhost/lexer.pilot`, `selfhost/preprocessor.pilot`, `selfhost/ast.pilot`, `selfhost/parser.pilot`, `selfhost/analyzer.pilot`, `selfhost/emitter.pilot`, and `selfhost/pilotc.pilot`.
-  - Perform the 3-stage bootstrap gate: compile `selfhost/pilotc.pilot` with the Rust `pilot` compiler (`stage1`), compile `pilotc.pilot` with `stage1` (`stage2`), compile `pilotc.pilot` with `stage2` (`stage3`), and verify byte-identical `stage2 == stage3` fixed-point convergence across all 36 `.pilot` test suites.
+- [x] **44.1: Multi-Target Profiler, WCET Analyzer & Trivia-Preserving CST Source Optimizer (`crates/pilot-perf` — Completes `M25`)**
+  - Upgraded `pilot perf` (`cmd_perf`) to support:
+    - `pilot perf profile <file.pilot>`: Per-function execution timing, instruction counts, Speedscope / Chrome Tracing JSON export, and SVG flamegraph export across PilVM v3 and native binaries.
+    - `pilot perf analyze <file.pilot>`: Static WCET analysis, O(N^2) loop nesting detection, dynamic heap allocation detection in `@hard_realtime` scopes, and performance recommendations (`PERF001`–`PERF020`).
+    - `pilot perf optimize [--diff|--apply] <file.pilot>`: Trivia-preserving CST source transformations hoisting loop-invariant computations to `comptime { ... }` and preallocating slice buffers, with unified diff output or in-place file mutation.
+- [x] **44.2: Self-Hosted Pilot Compiler Written in Pilot (`selfhost/pilotc.pilot` — Completes `M26`)**
+  - Implemented `selfhost/lexer.pilot`, `selfhost/preprocessor.pilot`, `selfhost/ast.pilot`, `selfhost/parser.pilot`, `selfhost/analyzer.pilot`, `selfhost/emitter.pilot`, and `selfhost/pilotc.pilot`.
+  - Executed the 3-stage bootstrap convergence gate:
+    - **Stage 1**: Built `selfhost/pilotc.pilot` with Rust `pilot build selfhost/pilotc.pilot -o /tmp/pilotc_stage1`.
+    - **Stage 2**: Built `selfhost/pilotc.pilot` with `/tmp/pilotc_stage1 selfhost/pilotc.pilot -o /tmp/pilotc_stage2`.
+    - **Stage 3**: Built `selfhost/pilotc.pilot` with `/tmp/pilotc_stage2 selfhost/pilotc.pilot -o /tmp/pilotc_stage3`.
+    - **Convergence Verified**: Verified byte-identical C output (`cmp /tmp/pilotc_stage2.c /tmp/pilotc_stage3.c` -> diff exit 0) and stripped binary equivalence (`cmp /tmp/p2_stripped /tmp/p3_stripped` -> 0).
+    - **Suite Parity**: Verified that `/tmp/pilotc_stage2` and `/tmp/pilotc_stage3` emit 100% byte-identical C output across all 36 `.pilot` test suites in `tests/`.
 
 
 

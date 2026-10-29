@@ -1,0 +1,58 @@
+# ==============================================================================
+# selfhost/ast.pilot: AST Node Definitions & Arena Layout for Self-Hosted Pilot
+# ==============================================================================
+
+# Node Kind Constants
+let NODE_UNKNOWN: int = 0
+let NODE_INT_LIT: int = 1
+let NODE_FLOAT_LIT: int = 2
+let NODE_STR_LIT: int = 3
+let NODE_BOOL_LIT: int = 4
+let NODE_IDENT: int = 5
+
+let NODE_LET_STMT: int = 101
+let NODE_VAR_STMT: int = 102
+let NODE_ASSIGN_STMT: int = 103
+let NODE_RETURN_STMT: int = 104
+let NODE_IF_STMT: int = 105
+let NODE_WHILE_STMT: int = 106
+let NODE_FN_DECL: int = 107
+let NODE_EXPR_STMT: int = 108
+let NODE_PROGRAM: int = 109
+
+let NODE_BINARY_EXPR: int = 201
+let NODE_UNARY_EXPR: int = 202
+let NODE_CALL_EXPR: int = 203
+let NODE_MEMBER_EXPR: int = 204
+let NODE_INDEX_EXPR: int = 205
+
+# Binary Operator Constants
+let OP_ADD: int = 1
+let OP_SUB: int = 2
+let OP_MUL: int = 3
+let OP_DIV: int = 4
+let OP_MOD: int = 5
+let OP_EQ: int = 8
+let OP_NE: int = 9
+let OP_LT: int = 10
+let OP_LE: int = 11
+let OP_GT: int = 12
+let OP_GE: int = 13
+let OP_AND: int = 14
+let OP_OR: int = 15
+
+def get_node_kind_name(kind: int) -> str {
+    if kind == 1 { return "IntLit" }
+    if kind == 2 { return "FloatLit" }
+    if kind == 3 { return "StrLit" }
+    if kind == 4 { return "BoolLit" }
+    if kind == 5 { return "Ident" }
+    if kind == 101 { return "LetStmt" }
+    if kind == 104 { return "ReturnStmt" }
+    if kind == 105 { return "IfStmt" }
+    if kind == 106 { return "WhileStmt" }
+    if kind == 107 { return "FnDecl" }
+    if kind == 201 { return "BinaryExpr" }
+    if kind == 203 { return "CallExpr" }
+    return "Unknown"
+}

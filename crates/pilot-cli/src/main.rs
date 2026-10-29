@@ -384,6 +384,14 @@ fn cmd_test(args: &[String]) {
             let mut vm = pilot_vm::PilVirtualMachine::new();
             vm.load_binary(binary);
 
+            let mut steps = 0usize;
+            vm.set_hook(Some(Box::new(move |_pc, _ins, _regs| {
+                steps += 1;
+                if steps > 100_000 {
+                    panic!("execution step limit reached (100,000 instructions)");
+                }
+            })));
+
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 vm.run()
             }));
@@ -638,10 +646,118 @@ fn cmd_lsp(_args: &[String]) {
 
 fn cmd_perf(args: &[String]) {
     if args.is_empty() {
-        eprintln!("error: missing file argument for 'pilot perf'.");
+        eprintln!("Usage: pilot perf <subcommand|file.pilot> [args...]");
+        eprintln!("Subcommands:");
+        eprintln!("  profile <file.pilot> [--flamegraph <out.svg>]");
+        eprintln!("  analyze <file.pilot>");
+        eprintln!("  optimize <file.pilot> [--diff|--apply]");
+        eprintln!("  benchmark <file.pilot>");
         std::process::exit(1);
     }
-    let file_path = &args[0];
+
+    let subcmd = &args[0];
+    if subcmd == "profile" {
+        if args.len() < 2 {
+            eprintln!("Usage: pilot perf profile <file.pilot> [--flamegraph <out.svg>]");
+            std::process::exit(1);
+        }
+        let file_path = &args[1];
+        let src = match fs::read_to_string(file_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to read file '{}': {}", file_path, e);
+                std::process::exit(1);
+            }
+        };
+
+        match pilot_perf::ExecutionProfiler::profile_source(&src, file_path) {
+            Ok(report) => {
+                if let Some(pos) = args.iter().position(|a| a == "--flamegraph") {
+                    if pos + 1 < args.len() {
+                        let out_path = &args[pos + 1];
+                        let svg = report.export_flamegraph_svg();
+                        let _ = fs::write(out_path, svg);
+                        println!("Flamegraph exported to: {}", out_path);
+                    }
+                } else {
+                    println!("{}", report.format_text_report());
+                }
+            }
+            Err(e) => {
+                eprintln!("Profiler error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if subcmd == "analyze" {
+        if args.len() < 2 {
+            eprintln!("Usage: pilot perf analyze <file.pilot>");
+            std::process::exit(1);
+        }
+        let file_path = &args[1];
+        let src = match fs::read_to_string(file_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to read file '{}': {}", file_path, e);
+                std::process::exit(1);
+            }
+        };
+
+        let arena = parse(&src);
+        let diags = pilot_perf::StaticWcetAnalyzer::analyze(&src, &arena);
+        if diags.is_empty() {
+            println!("No performance anti-patterns or WCET bottlenecks detected in '{}'.", file_path);
+        } else {
+            println!("Found {} performance diagnostic(s) in '{}':", diags.len(), file_path);
+            for d in diags {
+                println!("  [{}] {} (at bytes {}..{})", d.code, d.message, d.span.start, d.span.end);
+                println!("    Recommendation: {}", d.recommendation);
+            }
+        }
+        return;
+    }
+
+    if subcmd == "optimize" {
+        if args.len() < 2 {
+            eprintln!("Usage: pilot perf optimize <file.pilot> [--diff|--apply]");
+            std::process::exit(1);
+        }
+        let file_path = &args[1];
+        let src = match fs::read_to_string(file_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to read file '{}': {}", file_path, e);
+                std::process::exit(1);
+            }
+        };
+
+        let optimized = pilot_perf::CstSourceOptimizer::optimize_source(&src);
+        let apply = args.iter().any(|a| a == "--apply");
+        if apply {
+            if let Err(e) = fs::write(file_path, &optimized) {
+                eprintln!("error: failed to write optimized file '{}': {}", file_path, e);
+                std::process::exit(1);
+            }
+            println!("Applied optimizations to '{}'.", file_path);
+        } else {
+            let diff = pilot_perf::CstSourceOptimizer::generate_diff(file_path, &src, &optimized);
+            print!("{}", diff);
+        }
+        return;
+    }
+
+    let file_path = if subcmd == "benchmark" {
+        if args.len() < 2 {
+            eprintln!("Usage: pilot perf benchmark <file.pilot>");
+            std::process::exit(1);
+        }
+        &args[1]
+    } else {
+        subcmd
+    };
+
     let src = match fs::read_to_string(file_path) {
         Ok(s) => s,
         Err(e) => {
@@ -800,6 +916,7 @@ fn cmd_from(args: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pilot_transpile::LicenseVerifier;
 
     #[test]
     fn test_pilot_cli_help_and_version() {
@@ -835,5 +952,27 @@ mod tests {
         let _ = fs::remove_file(tmp_out_py);
         let _ = fs::remove_file(tmp_rs);
         let _ = fs::remove_file(tmp_out_pilot);
+    }
+
+    #[test]
+    fn test_cmd_perf_subcommands() {
+        let tmp_file = "/tmp/test_perf.pilot";
+        fs::write(tmp_file, "def compute() -> i64 {\n    let mut x = 0;\n    for i in 0..10 {\n        let k = 1024 * 1024;\n        x = x + 1;\n    }\n    return x;\n}\n").unwrap();
+
+        cmd_perf(&["analyze".to_string(), tmp_file.to_string()]);
+        cmd_perf(&["profile".to_string(), tmp_file.to_string()]);
+        let flamegraph_path = "/tmp/test_flamegraph.svg";
+        cmd_perf(&["profile".to_string(), tmp_file.to_string(), "--flamegraph".to_string(), flamegraph_path.to_string()]);
+        assert!(fs::metadata(flamegraph_path).is_ok());
+
+        cmd_perf(&["optimize".to_string(), tmp_file.to_string()]);
+        cmd_perf(&["optimize".to_string(), tmp_file.to_string(), "--apply".to_string()]);
+        let optimized = fs::read_to_string(tmp_file).unwrap();
+        assert!(optimized.contains("comptime"));
+
+        cmd_perf(&["benchmark".to_string(), tmp_file.to_string()]);
+
+        let _ = fs::remove_file(tmp_file);
+        let _ = fs::remove_file(flamegraph_path);
     }
 }

@@ -21,6 +21,7 @@ members = [
     "crates/pilot-polyglot",
     "crates/pilot-dap",
     "crates/pilot-pkg",
+    "crates/pilot-perf",
     "crates/pilot-ffi",
     "crates/pilot-cli",
     "crates/pilot-bench",

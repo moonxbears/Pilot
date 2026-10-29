@@ -1,0 +1,50 @@
+# ==============================================================================
+# selfhost/preprocessor.pilot: Preprocessor Engine Written in Pilot
+# ==============================================================================
+
+def is_directive_line(line: str) -> bool {
+    if line[0] == 35 { # '#' character
+        return true
+    }
+    return false
+}
+
+def is_comment_line(line: str) -> bool {
+    let mut i = 0
+    while line[i] == 32 || line[i] == 9 { # space or tab
+        i = i + 1
+    }
+    if line[i] == 35 { # '#' comment
+        if line[i + 1] != 100 && line[i + 1] != 105 && line[i + 1] != 117 && line[i + 1] != 101 {
+            # Not #define, #if, #undef, #else, #endif
+            return true
+        }
+    }
+    if line[i] == 47 && line[i + 1] == 47 { # '//' comment
+        return true
+    }
+    return false
+}
+
+def preprocess_strip_comments(src: str, out_buf: str) -> int {
+    let len = strlen(src)
+    let mut out_len = 0
+    let mut in_comment = false
+
+    let mut i = 0
+    while i < len {
+        if src[i] == 47 && i + 1 < len && src[i + 1] == 47 {
+            in_comment = true
+        }
+        if src[i] == 10 { # newline
+            in_comment = false
+        }
+        if !in_comment {
+            out_buf[out_len] = src[i]
+            out_len = out_len + 1
+        }
+        i = i + 1
+    }
+    out_buf[out_len] = 0
+    return out_len
+}

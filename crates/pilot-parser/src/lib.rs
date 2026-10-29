@@ -544,7 +544,8 @@ impl<'a> Parser<'a> {
                 TokenKind::Equal => {
                     self.advance();
                     let rhs = self.parse_expr();
-                    let span = ByteSpan::new(self.arena.span(expr).start, self.arena.span(rhs).end);
+                    let end = if rhs.is_some() { self.arena.span(rhs).end } else { self.arena.span(expr).end };
+                    let span = ByteSpan::new(self.arena.span(expr).start, end);
                     return self.arena.alloc_node(NodeKind::AssignStmt, 0, span, expr.0, rhs.0);
                 }
                 TokenKind::PlusEqual
@@ -562,7 +563,8 @@ impl<'a> Parser<'a> {
                     };
                     self.advance();
                     let rhs = self.parse_expr();
-                    let span = ByteSpan::new(self.arena.span(expr).start, self.arena.span(rhs).end);
+                    let end = if rhs.is_some() { self.arena.span(rhs).end } else { self.arena.span(expr).end };
+                    let span = ByteSpan::new(self.arena.span(expr).start, end);
                     let bin_expr = self.arena.alloc_node(NodeKind::BinaryExpr, op as u16, span, expr.0, rhs.0);
                     return self.arena.alloc_node(NodeKind::AssignStmt, 0, span, expr.0, bin_expr.0);
                 }
@@ -896,7 +898,7 @@ impl<'a> Parser<'a> {
         self.advance(); // consume 'if'
         let cond = self.parse_expr();
         let then_branch = self.parse_block_expr();
-        let _else_branch = if self.at(TokenKind::KwElse) {
+        let else_branch = if self.at(TokenKind::KwElse) {
             self.advance();
             if self.at(TokenKind::KwIf) {
                 self.parse_if_expr()
@@ -906,7 +908,13 @@ impl<'a> Parser<'a> {
         } else {
             NodeId::NONE
         };
-        self.arena.alloc_node(NodeKind::IfExpr, 0, start_span, cond.0, then_branch.0)
+
+        if else_branch.is_some() {
+            let (slice_start, slice_len) = self.arena.alloc_child_slice(&[then_branch, else_branch]);
+            self.arena.alloc_node(NodeKind::IfExpr, slice_len as u16, start_span, cond.0, slice_start)
+        } else {
+            self.arena.alloc_node(NodeKind::IfExpr, 0, start_span, cond.0, then_branch.0)
+        }
     }
 
     fn parse_match_expr(&mut self) -> NodeId {

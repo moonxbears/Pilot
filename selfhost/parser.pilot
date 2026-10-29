@@ -1,0 +1,37 @@
+# ==============================================================================
+# selfhost/parser.pilot: Pratt & Statement Parser Written in Pilot
+# ==============================================================================
+
+# Operator Precedence Levels
+let PREC_NONE: int = 0
+let PREC_ASSIGN: int = 1
+let PREC_OR: int = 2
+let PREC_AND: int = 3
+let PREC_EQUALITY: int = 4
+let PREC_COMPARISON: int = 5
+let PREC_TERM: int = 6
+let PREC_FACTOR: int = 7
+let PREC_UNARY: int = 8
+let PREC_CALL: int = 9
+
+def get_binary_precedence(tok_kind: int) -> int {
+    if tok_kind == 12 || tok_kind == 13 || tok_kind == 14 { return PREC_FACTOR } # *, /, %
+    if tok_kind == 10 || tok_kind == 11 { return PREC_TERM }                    # +, -
+    if tok_kind >= 18 && tok_kind <= 21 { return PREC_COMPARISON }              # <, <=, >, >=
+    if tok_kind == 16 || tok_kind == 17 { return PREC_EQUALITY }                # ==, !=
+    return PREC_NONE
+}
+
+def parse_literal_int(s: str) -> int {
+    let mut val: int = 0
+    let mut i = 0
+    let len = strlen(s)
+    while i < len {
+        let c = s[i]
+        if c >= 48 && c <= 57 {
+            val = val * 10 + (c - 48)
+        }
+        i = i + 1
+    }
+    return val
+}

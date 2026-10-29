@@ -1,0 +1,83 @@
+# ==============================================================================
+# selfhost/lexer.pilot: Tokenizer & Scanner Written in Pilot
+# ==============================================================================
+
+let TOK_EOF: int = 0
+let TOK_INT: int = 1
+let TOK_FLOAT: int = 2
+let TOK_STR: int = 3
+let TOK_IDENT: int = 4
+let TOK_KEYWORD: int = 5
+
+let TOK_PLUS: int = 10
+let TOK_MINUS: int = 11
+let TOK_STAR: int = 12
+let TOK_SLASH: int = 13
+let TOK_PERCENT: int = 14
+let TOK_EQUAL: int = 15
+let TOK_EQEQ: int = 16
+let TOK_NE: int = 17
+let TOK_LT: int = 18
+let TOK_LE: int = 19
+let TOK_GT: int = 20
+let TOK_GE: int = 21
+let TOK_ARROW: int = 22
+
+let TOK_LPAREN: int = 30
+let TOK_RPAREN: int = 31
+let TOK_LBRACE: int = 32
+let TOK_RBRACE: int = 33
+let TOK_LBRACKET: int = 34
+let TOK_RBRACKET: int = 35
+let TOK_COMMA: int = 36
+let TOK_COLON: int = 37
+let TOK_SEMICOLON: int = 38
+
+def is_digit(c: int) -> bool {
+    return c >= 48 && c <= 57
+}
+
+def is_alpha(c: int) -> bool {
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95
+}
+
+def is_alphanumeric(c: int) -> bool {
+    return is_alpha(c) || is_digit(c)
+}
+
+def is_keyword(s: str) -> bool {
+    if strcmp(s, "def") == 0 { return true }
+    if strcmp(s, "let") == 0 { return true }
+    if strcmp(s, "var") == 0 { return true }
+    if strcmp(s, "return") == 0 { return true }
+    if strcmp(s, "if") == 0 { return true }
+    if strcmp(s, "else") == 0 { return true }
+    if strcmp(s, "while") == 0 { return true }
+    if strcmp(s, "for") == 0 { return true }
+    if strcmp(s, "in") == 0 { return true }
+    if strcmp(s, "import") == 0 { return true }
+    if strcmp(s, "from") == 0 { return true }
+    if strcmp(s, "comptime") == 0 { return true }
+    return false
+}
+
+def get_token_kind_name(kind: int) -> str {
+    if kind == 0 { return "EOF" }
+    if kind == 1 { return "INT" }
+    if kind == 2 { return "FLOAT" }
+    if kind == 3 { return "STR" }
+    if kind == 4 { return "IDENT" }
+    if kind == 5 { return "KEYWORD" }
+    if kind == 10 { return "PLUS" }
+    if kind == 11 { return "MINUS" }
+    if kind == 12 { return "STAR" }
+    if kind == 13 { return "SLASH" }
+    if kind == 15 { return "EQUAL" }
+    if kind == 16 { return "EQEQ" }
+    if kind == 22 { return "ARROW" }
+    if kind == 30 { return "LPAREN" }
+    if kind == 31 { return "RPAREN" }
+    if kind == 32 { return "LBRACE" }
+    if kind == 33 { return "RBRACE" }
+    return "UNKNOWN"
+}

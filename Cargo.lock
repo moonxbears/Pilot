@@ -55,6 +55,7 @@ dependencies = [
  "pilot-lsp",
  "pilot-parser",
  "pilot-perceus",
+ "pilot-perf",
  "pilot-pkg",
  "pilot-polyglot",
  "pilot-rt",
@@ -192,6 +193,20 @@ dependencies = [
  "pilot-intern",
  "pilot-parser",
  "pilot-span",
+]
+
+[[package]]
+name = "pilot-perf"
+version = "1.1.0"
+dependencies = [
+ "pilot-analysis",
+ "pilot-ast",
+ "pilot-fmt",
+ "pilot-parser",
+ "pilot-rt",
+ "pilot-span",
+ "pilot-syntax",
+ "pilot-vm",
 ]
 
 [[package]]

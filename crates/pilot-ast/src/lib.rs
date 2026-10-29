@@ -541,7 +541,11 @@ impl AstArena {
 
     #[inline]
     pub fn span(&self, id: NodeId) -> ByteSpan {
-        self.spans[id.0 as usize]
+        if id.is_none() || id.0 as usize >= self.spans.len() {
+            ByteSpan::default()
+        } else {
+            self.spans[id.0 as usize]
+        }
     }
 
     #[inline]

@@ -208,7 +208,14 @@ impl BytecodeCompiler {
                 let r_cond = self.compile_node(arena, NodeId(node.lhs));
                 let jump_false_idx = self.emit(Opcode::JumpIfFalse, 0, r_cond, 0);
 
-                let then_reg = self.compile_node(arena, NodeId(node.rhs));
+                let (then_node, else_node) = if node.flags == 2 {
+                    let children = arena.children_slice(node.rhs, 2);
+                    (NodeId(children[0]), NodeId(children[1]))
+                } else {
+                    (NodeId(node.rhs), NodeId::NONE)
+                };
+
+                let then_reg = self.compile_node(arena, then_node);
                 let jump_end_idx = self.emit(Opcode::Jump, 0, 0, 0);
 
                 let else_pos = self.instructions.len() as u16;
@@ -219,6 +226,10 @@ impl BytecodeCompiler {
                     r_cond,
                     (else_pos & 0xFF) as u8,
                 );
+
+                if else_node.is_some() {
+                    self.compile_node(arena, else_node);
+                }
 
                 // Patch JumpEnd target
                 let end_pos = self.instructions.len() as u16;
@@ -273,7 +284,16 @@ impl BytecodeCompiler {
                 if fn_len > 0 {
                     let fn_children = arena.children_slice(node.rhs, fn_len as u32);
                     let body_node = NodeId(fn_children[0]);
+                    let skip_jump = self.emit(Opcode::Jump, 0, 0, 0);
                     self.compile_node(arena, body_node);
+                    self.emit(Opcode::Ret, 0, 0, 0);
+                    let skip_target = self.instructions.len() as u16;
+                    self.instructions[skip_jump] = Instruction::encode(
+                        Opcode::Jump,
+                        0,
+                        (skip_target >> 8) as u8,
+                        (skip_target & 0xFF) as u8,
+                    );
                 }
                 0
             }
