@@ -342,6 +342,30 @@ static inline void* pilot_rt_region_alloc(void* region, size_t size, size_t alig
 }
 static inline void pilot_rt_region_exit(void* region) { free(region); }
 
+/* Zero-Marshalling Contiguous Shared Memory SliceBuffer (Milestone 15, 20, 23, 28, 35) */
+typedef struct {
+    void* ptr;
+    size_t len;
+    size_t capacity;
+} PilotSliceBuffer;
+
+static inline PilotSliceBuffer pilot_rt_slice_create(size_t capacity, size_t elem_size) {
+    PilotSliceBuffer buf;
+    buf.ptr = malloc(capacity * elem_size);
+    buf.len = 0;
+    buf.capacity = capacity;
+    return buf;
+}
+
+static inline void pilot_rt_slice_free(PilotSliceBuffer* buf) {
+    if (buf && buf->ptr) {
+        free(buf->ptr);
+        buf->ptr = NULL;
+        buf->len = 0;
+        buf->capacity = 0;
+    }
+}
+
 /* Memory Tier 2: Perceus Precise ARC & Drop Reuse */
 static inline void* pilot_rt_alloc_arc(size_t payload_size) {
     size_t* p = (size_t*)malloc(sizeof(size_t) * 2 + payload_size);

@@ -833,6 +833,18 @@ pub unsafe extern "C" fn pilot_polyglot_execute(
     ptr
 }
 
+/// Allocates a contiguous shared-memory `SliceBuffer<u8>` over C-ABI (Milestone 15 & 35).
+#[no_mangle]
+pub unsafe extern "C" fn pilot_slice_buffer_create(capacity: usize) -> pilot_polyglot::SliceBuffer<u8> {
+    pilot_polyglot::SliceBuffer::with_capacity(capacity)
+}
+
+/// Frees a contiguous shared-memory `SliceBuffer<u8>` over C-ABI without re-allocation.
+#[no_mangle]
+pub unsafe extern "C" fn pilot_slice_buffer_free(buf: pilot_polyglot::SliceBuffer<u8>) {
+    drop(buf);
+}
+
 /// Builds a statement/expression `AstArena` from UTF-8 source for Milestone 28 C-ABI verification
 /// (full Stage 1 SIMD modal lexer & Stage 2 Pratt parser land in M29–M30).
 pub fn parse_lightweight_skeleton_to_arena(src: &str) -> AstArena {
