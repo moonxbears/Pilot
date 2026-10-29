@@ -22,6 +22,10 @@ impl AnalysisResult {
     pub fn has_errors(&self) -> bool {
         self.diagnostics.iter().any(|d| d.is_error())
     }
+
+    pub fn is_ok(&self) -> bool {
+        !self.has_errors()
+    }
 }
 
 pub struct AnalysisPipeline;
@@ -35,38 +39,39 @@ impl AnalysisPipeline {
         if root.is_some() {
             infer_engine.synth(arena, root);
         }
-        diagnostics.extend(infer_engine.diagnostics);
 
         // 2. Pattern Exhaustiveness & Redundancy Checking
-        // Walk match expressions in AST
-        let match_checker = MarangetChecker::new(Vec::new());
-        // Add basic structural pattern check if match nodes exist
-        // (In real runs, match nodes are populated from AST)
-        let match_diags = match_checker.check(arena.span(root));
-        diagnostics.extend(match_diags);
-
-        // 3. Null Safety & Error Flow Checks
-        let null_safety = NullSafetyAnalyzer::new();
-        diagnostics.extend(null_safety.diagnostics);
-
-        let error_flow = ErrorFlowAnalyzer::new();
-        diagnostics.extend(error_flow.diagnostics);
-
-        // 4. Loop Analysis
+        let mut null_safety = NullSafetyAnalyzer::new();
+        let mut error_flow = ErrorFlowAnalyzer::new();
         let loop_analyzer = LoopAnalyzer::new();
+        let mut dim_checker = DimensionChecker::new();
+        let mut contract_verifier = ContractVerifier::new();
+
+        for i in 0..arena.nodes.len() {
+            let node_id = NodeId(i as u32);
+            let node = *arena.node(node_id);
+
+            if node.node_kind() == pilot_ast::NodeKind::MatchExpr {
+                let match_diags = MarangetChecker::check_match_expr(arena, node_id, Vec::new());
+                diagnostics.extend(match_diags);
+            }
+
+            null_safety.check_node(arena, node_id, &infer_engine);
+            error_flow.check_node(arena, node_id, &infer_engine);
+            dim_checker.check_node(arena, node_id, &infer_engine);
+            contract_verifier.check_node(arena, node_id);
+        }
+
+        diagnostics.extend(null_safety.diagnostics);
+        diagnostics.extend(error_flow.diagnostics);
         diagnostics.extend(loop_analyzer.diagnostics);
-
-        // 5. Contract Verifier
-        let contract_verifier = ContractVerifier::new();
-        diagnostics.extend(contract_verifier.diagnostics);
-
-        // 6. Dimensional Analysis
-        let dim_checker = DimensionChecker::new();
         diagnostics.extend(dim_checker.diagnostics);
+        diagnostics.extend(contract_verifier.diagnostics);
 
         // 7. Comptime Evaluator & Static Demotion Pass
         let comptime = ComptimeEvaluator::new();
         diagnostics.extend(comptime.diagnostics);
+        diagnostics.extend(infer_engine.diagnostics);
 
         AnalysisResult {
             diagnostics,

@@ -93,4 +93,23 @@ impl ContractVerifier {
             ));
         }
     }
+
+    pub fn check_node(&mut self, arena: &pilot_ast::AstArena, node_id: pilot_ast::NodeId) {
+        let node = *arena.node(node_id);
+        if node.node_kind() == pilot_ast::NodeKind::BinaryExpr {
+            let op = node.flags;
+            if op == 4 || op == 5 {
+                let rhs = pilot_ast::NodeId(node.rhs);
+                if rhs.is_some() {
+                    let rhs_node = *arena.node(rhs);
+                    if rhs_node.node_kind() == pilot_ast::NodeKind::IntLit {
+                        let v = arena.i64_pool.get(rhs_node.lhs as usize).copied().unwrap_or(0);
+                        if v == 0 {
+                            self.check_division_by_zero(Interval::point(0.0), arena.span(node_id));
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -439,18 +439,6 @@ impl<'a> Lexer<'a> {
                 self.push_token(TokenKind::StrLit, TokenFlags::NONE, span);
                 return;
             }
-            if b == b'{' {
-                // If escaped `{{`, treat as literal brace
-                if cur + 1 < self.bytes.len() && self.bytes[cur + 1] == b'{' {
-                    cur += 2;
-                    continue;
-                }
-                cur += 1;
-                let span = ByteSpan::new(seg_start as u32, cur as u32);
-                self.cursor = cur;
-                self.push_token(TokenKind::FStrStart, TokenFlags::NONE, span);
-                return;
-            }
             cur += 1;
         }
 

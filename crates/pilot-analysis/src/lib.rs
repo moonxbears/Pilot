@@ -122,4 +122,89 @@ mod tests {
         assert_eq!(layout.param_offsets[2], ("flag".to_string(), 16, 1));
         assert_eq!(layout.total_size_bytes, 24);
     }
+
+    #[test]
+    fn test_infer_full_ast_pipeline_clean() {
+        let code = r#"
+def fib(n: int) -> int {
+    if n <= 1 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+let res = fib(10)
+"#;
+        let arena = pilot_parser::parse(code);
+        let result = AnalysisPipeline::analyze(&arena, arena.root);
+        assert!(result.is_ok(), "Expected clean analysis, got: {:?}", result.diagnostics);
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn test_infer_type_mismatch_diagnostics() {
+        let code = r#"
+let a: int = 10
+let b: str = "hello"
+let c = a + b
+"#;
+        let arena = pilot_parser::parse(code);
+        let result = AnalysisPipeline::analyze(&arena, arena.root);
+        assert!(!result.is_ok());
+        let type_errors: Vec<_> = result.diagnostics.iter().filter(|d| d.code == "TYPE002").collect();
+        assert!(!type_errors.is_empty(), "Expected TYPE002 diagnostic for a + b");
+    }
+
+    #[test]
+    fn test_infer_unresolved_identifier_diagnostics() {
+        let code = r#"
+let y = undeclared_variable + 5
+"#;
+        let arena = pilot_parser::parse(code);
+        let result = AnalysisPipeline::analyze(&arena, arena.root);
+        assert!(!result.is_ok());
+        let unres_errors: Vec<_> = result.diagnostics.iter().filter(|d| d.code == "TYPE001").collect();
+        assert!(!unres_errors.is_empty(), "Expected TYPE001 diagnostic for undeclared_variable");
+    }
+
+    #[test]
+    fn test_contract_verifier_division_by_zero() {
+        let code = r#"
+def div_test(x: int) -> int {
+    return x / 0
+}
+"#;
+        let arena = pilot_parser::parse(code);
+        let result = AnalysisPipeline::analyze(&arena, arena.root);
+        assert!(!result.is_ok());
+        let div_errors: Vec<_> = result.diagnostics.iter().filter(|d| d.code == "DIV001").collect();
+        assert!(!div_errors.is_empty(), "Expected DIV001 static division by zero error");
+    }
+
+    #[test]
+    fn test_pattern_exhaustiveness_ast_walk() {
+        let code_exhaustive = r#"
+def test_match(x: int) -> int {
+    match x {
+        case 0 { return 10 }
+        case _ { return 20 }
+    }
+}
+"#;
+        let arena1 = pilot_parser::parse(code_exhaustive);
+        let res1 = AnalysisPipeline::analyze(&arena1, arena1.root);
+        let match_diags: Vec<_> = res1.diagnostics.iter().filter(|d| d.code.starts_with("MATCH")).collect();
+        assert!(match_diags.is_empty(), "Expected exhaustive match, got: {:?}", match_diags);
+
+        let code_non_exhaustive = r#"
+def test_match_incomplete(x: int) -> int {
+    match x {
+        case 0 { return 10 }
+    }
+}
+"#;
+        let arena2 = pilot_parser::parse(code_non_exhaustive);
+        let res2 = AnalysisPipeline::analyze(&arena2, arena2.root);
+        let match_errors: Vec<_> = res2.diagnostics.iter().filter(|d| d.code == "MATCH001").collect();
+        assert!(!match_errors.is_empty(), "Expected MATCH001 for match without default/wildcard");
+    }
 }

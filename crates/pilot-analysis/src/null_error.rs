@@ -59,6 +59,38 @@ impl NullSafetyAnalyzer {
             span,
         ));
     }
+
+    pub fn check_node(
+        &mut self,
+        arena: &pilot_ast::AstArena,
+        node_id: pilot_ast::NodeId,
+        infer: &crate::infer::TypeInferenceEngine,
+    ) {
+        let node = *arena.node(node_id);
+        match node.node_kind() {
+            pilot_ast::NodeKind::MemberExpr => {
+                let target = pilot_ast::NodeId(node.lhs);
+                if let Some(&ty) = infer.inferred_node_types.get(&target.0) {
+                    if let crate::types::TypeKind::Option(_) = infer.types.get(infer.types.prune(ty)) {
+                        // Check if safe navigation (flags == 1)
+                        if node.flags == 0 {
+                            let member_name = arena.interner.resolve(pilot_intern::SymbolId(node.rhs));
+                            self.report_unsafe_deref(member_name, arena.span(node_id));
+                        }
+                    }
+                }
+            }
+            pilot_ast::NodeKind::IndexExpr => {
+                let target = pilot_ast::NodeId(node.lhs);
+                if let Some(&ty) = infer.inferred_node_types.get(&target.0) {
+                    if let crate::types::TypeKind::Option(_) = infer.types.get(infer.types.prune(ty)) {
+                        self.report_unsafe_deref("indexed value", arena.span(node_id));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 pub struct ErrorFlowAnalyzer {
@@ -108,5 +140,24 @@ impl ErrorFlowAnalyzer {
             format!("Error set mismatch: caller expects '! {}', but callee can throw '! {}'", expected, actual),
             span,
         ));
+    }
+
+    pub fn check_node(
+        &mut self,
+        arena: &pilot_ast::AstArena,
+        node_id: pilot_ast::NodeId,
+        infer: &crate::infer::TypeInferenceEngine,
+    ) {
+        let node = *arena.node(node_id);
+        if node.node_kind() == pilot_ast::NodeKind::ExprStmt {
+            let inner = pilot_ast::NodeId(node.lhs);
+            if inner.is_some() {
+                if let Some(&ty) = infer.inferred_node_types.get(&inner.0) {
+                    if let crate::types::TypeKind::Result { .. } = infer.types.get(infer.types.prune(ty)) {
+                        self.report_must_use_result("Result", arena.span(node_id));
+                    }
+                }
+            }
+        }
     }
 }

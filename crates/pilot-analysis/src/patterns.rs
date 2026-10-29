@@ -116,4 +116,49 @@ impl MarangetChecker {
 
         diags
     }
+
+    /// Checks a MatchExpr node in the AstArena for exhaustiveness and redundancy.
+    pub fn check_match_expr(
+        arena: &pilot_ast::AstArena,
+        match_id: pilot_ast::NodeId,
+        all_variants: Vec<String>,
+    ) -> Vec<AnalysisDiagnostic> {
+        let node = *arena.node(match_id);
+        let children = arena.children_slice(node.lhs, node.rhs);
+        if children.len() <= 1 {
+            return Vec::new();
+        }
+
+        let mut checker = Self::new(all_variants);
+        for &arm_id in &children[1..] {
+            let arm_node = *arena.node(pilot_ast::NodeId(arm_id));
+            let pat_id = pilot_ast::NodeId(arm_node.lhs);
+            let pat_case = if pat_id.is_some() {
+                let pat_node = *arena.node(pat_id);
+                match pat_node.node_kind() {
+                    pilot_ast::NodeKind::PatWildcard
+                    | pilot_ast::NodeKind::PatBind
+                    | pilot_ast::NodeKind::PatSlice => PatternCase::Wildcard,
+                    pilot_ast::NodeKind::PatVariant => {
+                        let name = arena
+                            .interner
+                            .resolve(pilot_intern::SymbolId(pat_node.lhs))
+                            .to_string();
+                        PatternCase::Variant(name)
+                    }
+                    pilot_ast::NodeKind::PatLiteral => PatternCase::Literal("lit".to_string()),
+                    pilot_ast::NodeKind::PatTuple => PatternCase::Tuple(Vec::new()),
+                    _ => PatternCase::Wildcard,
+                }
+            } else {
+                PatternCase::Wildcard
+            };
+
+            let span = arena.span(pilot_ast::NodeId(arm_id));
+            let has_guard = arm_node.flags != 0;
+            checker.add_arm(pat_case, has_guard, span);
+        }
+
+        checker.check(arena.span(match_id))
+    }
 }

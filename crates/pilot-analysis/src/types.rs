@@ -74,6 +74,10 @@ pub enum TypeKind {
         base: TypeId,
         state_name: String,
     },
+    Adt {
+        name: String,
+        variants: Vec<(String, Vec<TypeId>)>,
+    },
     Void,
     Never,
     Any,
@@ -182,6 +186,10 @@ impl TypeArena {
 
     pub fn typestate_of(&mut self, base: TypeId, state_name: String) -> TypeId {
         self.alloc(TypeKind::Typestate { base, state_name })
+    }
+
+    pub fn adt_of(&mut self, name: String, variants: Vec<(String, Vec<TypeId>)>) -> TypeId {
+        self.alloc(TypeKind::Adt { name, variants })
     }
 
     pub fn row_record_of(
@@ -311,6 +319,13 @@ impl TypeArena {
                 let base = self.unify(b1, b2)?;
                 Ok(self.unit_of(base, u1))
             }
+            (TypeKind::Adt { name: n1, .. }, TypeKind::Adt { name: n2, .. }) => {
+                if n1 == n2 {
+                    Ok(a)
+                } else {
+                    Err(format!("ADT type mismatch: '{}' vs '{}'", n1, n2))
+                }
+            }
             _ => Err(format!("Cannot unify type {:?} with {:?}", self.get(a), self.get(b))),
         }
     }
@@ -394,6 +409,7 @@ impl TypeArena {
             TypeKind::Typestate { base, state_name } => {
                 format!("{}@{}", self.display(*base), state_name)
             }
+            TypeKind::Adt { name, .. } => name.clone(),
         }
     }
 }

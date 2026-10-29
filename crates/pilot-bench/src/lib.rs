@@ -6,14 +6,6 @@
 //! 3. Incremental LSP Keystroke Latency: p99 < 1.0 ms reparse + early-cutoff refresh.
 //! 4. Runtime GC Pause Guarantee: strictly 0.0 ms (zero tracing GC).
 
-use std::time::Instant;
-
-use pilot_ast::AstNode;
-use pilot_db::{Database, FileId};
-use pilot_incremental::TextEdit;
-use pilot_parser::parse;
-use pilot_rt::{BumpRegion, PilotVal};
-
 /// Generates a realistic multi-line Pilot benchmark corpus.
 pub fn generate_benchmark_corpus(lines: usize) -> String {
     let mut out = String::with_capacity(lines * 96);
@@ -49,6 +41,12 @@ pub fn generate_benchmark_corpus(lines: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
+    use pilot_ast::AstNode;
+    use pilot_db::{Database, FileId};
+    use pilot_incremental::TextEdit;
+    use pilot_parser::parse;
+    use pilot_rt::{BumpRegion, PilotVal};
 
     #[test]
     fn test_batch_parse_throughput_and_ast_memory_overhead() {

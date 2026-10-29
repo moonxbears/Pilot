@@ -138,8 +138,8 @@ flowchart TD
 | **M34** | Worry-Free Zero-GC Native Runtime (Perceus + Arenas) & Register-Based `PilVM` v3 (Core VM) | Phase D | ✅ **Completed** | `crates/pilot-rt/`, `crates/pilot-vm/` |
 | **M35** | Native Codegen Backends (`LLVM`/`WASM`/`C-ABI`), Bidirectional Transpilers & Polyglot FFI (Core) | Phase D | ✅ **Completed** | `crates/pilot-codegen/`, `crates/pilot-transpile/`, `crates/pilot-polyglot/` |
 | **M36** | Standalone Rust `pilot` CLI, Full `.NET` Retirement & Hardware Performance Gate | Phase D | ✅ **Completed** | `crates/pilot-cli/`, `crates/pilot-bench/` |
-| **M37** | Full AST Type Inference, Pattern Exhaustiveness, Null/Error Flow & Contract/Dimension Walkers | Phase E | 🎯 **Next Up** | `crates/pilot-analysis/`, `crates/pilot-cli/` (`pilot check`) |
-| **M38** | Symbolic Autodiff (`!@`), Call-Quoting (`!`, `!!`, `!&`, `!^`, `!?`), Macros, Demotion & Perceus Pass | Phase E | 📋 **Planned** | `crates/pilot-analysis/`, `crates/pilot-perceus/` |
+| **M37** | Full AST Type Inference, Pattern Exhaustiveness, Null/Error Flow & Contract/Dimension Walkers | Phase E | ✅ **Completed** | `crates/pilot-analysis/`, `crates/pilot-cli/` (`pilot check`) |
+| **M38** | Symbolic Autodiff (`!@`), Call-Quoting (`!`, `!!`, `!&`, `!^`, `!?`), Macros, Demotion & Perceus Pass | Phase E | 🎯 **Next Up** | `crates/pilot-analysis/`, `crates/pilot-perceus/` |
 | **M39** | AST-to-Bytecode Compiler, Full `PilVM` v3 Execution, Runtime Intrinsics & Live `pilot test` | Phase E | 📋 **Planned** | `crates/pilot-vm/`, `crates/pilot-rt/`, `crates/pilot-cli/` (`pilot test`/`repl`) |
 | **M40** | True AST-Driven Native Codegen (`C11/C23`, `LLVM IR`, `WASM/WASI`, `ASM`) & Linkable `libpilot_rt` | Phase E | 📋 **Planned** | `crates/pilot-codegen/`, `crates/pilot-rt/` |
 | **M41** | Full AST Bidirectional Transpilers (`pilot --emit` / `--from`) & Foreign AST Ingesters | Phase E | 📋 **Planned** | `crates/pilot-transpile/`, `crates/pilot-cli/` |
@@ -1074,20 +1074,20 @@ struct PilotVal {
 - `Analysis/Loops/PilotForLoopAnalyzer.cs` (473 lines), `Analysis/Ownership/PilotBorrowChecker.cs` (503 lines), `Analysis/DimensionalAnalysis/PilotDimensionChecker.cs` (344 lines), & `Analysis/ContractVerification/PilotContractVerifier.cs` (353 lines)
 
 ### Sub-Tasks & Deliverables
-- [ ] **37.1: Complete `AstArena` Coverage in `TypeInferenceEngine` (`crates/pilot-analysis/src/infer.rs`)**
+- [x] **37.1: Complete `AstArena` Coverage in `TypeInferenceEngine` (`crates/pilot-analysis/src/infer.rs`)**
   - Extend `synth` and `check` from the current 14 basic `NodeKind`s to cover all declaration, expression, type, and pattern kinds:
     - **Declarations & Type Definitions**: `TypeDecl` (sum ADTs & structural records), `StructDecl`, `ClassDecl` (including algebraic class math `|`, `-`, `&` and `state` typestate transitions), `InterfaceDecl`, `ExtendDecl` (`extend`/`extension ... on ...`), and `AdapterDecl` (`adapter A -> B`).
     - **Calls, Generics, Method Groups & Context DI**: `CallExpr` (overload resolution, generic type parameter unification, first-class `MethodGroup` currying/filtering/union `|`/`*`, scalar-to-collection `each`/`auto_repeat` vectorization, and `context` parameter resolution), `MemberExpr`, `SafeMemberExpr` (`?.`), `IndexExpr`, `LambdaExpr`, `PipeExpr` (`|>`), `CascadeExpr` (`..`), and `DtoArrow` (`->`).
     - **Control Flow & Error/Optional Expressions**: `MatchExpr` (unifying arm types & binding pattern variables), `ForExpr` (inferring `CollectionYield`, `ScalarBreak`, and `Void` schedules), `GuardStmt` (`guard some x else` dominator flow narrowing), `TryUnwrap` (postfix `?` early propagation), and `CatchExpr` (`expr catch err => ...`).
     - **Mutual Recursion & Error-Set Inference**: Tarjan SCC decomposition over call graphs to infer polymorphic signatures and automatic `! ErrorSet` unions without explicit annotations.
-- [ ] **37.2: AST-Connected Pattern Exhaustiveness, Null Safety & Error Flow Passes (`patterns.rs`, `null_error.rs`)**
+- [x] **37.2: AST-Connected Pattern Exhaustiveness, Null Safety & Error Flow Passes (`patterns.rs`, `null_error.rs`)**
   - Connect `MarangetChecker` to walk every `NodeKind::MatchExpr` in `AstArena`, constructing pattern matrices over ADTs, nested tuples/records, `T?` (`some`/`none`), slices (`[head, ..tail]`), and integer ranges (`a..b`, `a..<b`) to emit `MATCH001` (missing witness) and `MATCH002` (redundant arm).
   - Connect `NullSafetyAnalyzer` (`NULL001`–`NULL005`) and `ErrorFlowAnalyzer` (`ERR001`–`ERR005`) to traverse `AstArena` statements/expressions, enforcing safe unwrapping of `T?`, must-use handling of `T ! E`, and `ERR005` stratification of `try`/`raise` outside FFI/actor boundaries.
-- [ ] **37.3: AST-Connected `ForExpr` Schedule, Borrow, Dimension & Contract Walkers (`loops.rs`, `dimensions.rs`, `contracts.rs`)**
+- [x] **37.3: AST-Connected `ForExpr` Schedule, Borrow, Dimension & Contract Walkers (`loops.rs`, `dimensions.rs`, `contracts.rs`)**
   - Walk `NodeKind::ForExpr` to classify loops into Tier 1 (`FixedScalar`), Tier 2 (`MutableBounds` with `continue r, ...`), and Tier 3 (`WorklistStack` with `...children`), emitting `LOOP001`–`LOOP004`.
   - Walk physical unit literals (`250ms`, `64KB`, `100Hz`) and unit-annotated types across binary/call expressions to enforce SI exponent algebra (`DIM001`).
   - Walk `requires`/`ensures` clauses on `FnDecl` and call sites using abstract interval propagation (`Interval`) to discharge provable contracts and report `CONTRACT001`–`CONTRACT002` and `DIV001`–`DIV002`.
-- [ ] **37.4: End-to-End Hook-Up in `AnalysisPipeline::analyze` & `pilot check` (`pipeline.rs`, `crates/pilot-cli/src/main.rs`)**
+- [x] **37.4: End-to-End Hook-Up in `AnalysisPipeline::analyze` & `pilot check` (`pipeline.rs`, `crates/pilot-cli/src/main.rs`)**
   - Replace the disconnected instantiations in `AnalysisPipeline::analyze` and the dummy `TypeArena` check in `cmd_check` (`crates/pilot-cli/src/main.rs`) with full `AnalysisPipeline::analyze(&arena, root)` execution, reporting rich line/column diagnostics (`pilot-span::LineIndex`) and gating `pilot build` / `pilot run`.
 
 ---

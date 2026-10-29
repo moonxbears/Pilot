@@ -132,4 +132,37 @@ impl DimensionChecker {
             ));
         }
     }
+
+    pub fn check_node(
+        &mut self,
+        arena: &pilot_ast::AstArena,
+        node_id: pilot_ast::NodeId,
+        infer: &crate::infer::TypeInferenceEngine,
+    ) {
+        let node = *arena.node(node_id);
+        if node.node_kind() == pilot_ast::NodeKind::BinaryExpr {
+            let lhs = pilot_ast::NodeId(node.lhs);
+            let rhs = pilot_ast::NodeId(node.rhs);
+            if let (Some(&t1), Some(&t2)) = (
+                infer.inferred_node_types.get(&lhs.0),
+                infer.inferred_node_types.get(&rhs.0),
+            ) {
+                if let (
+                    crate::types::TypeKind::Unit { unit_name: u1, .. },
+                    crate::types::TypeKind::Unit { unit_name: u2, .. },
+                ) = (
+                    infer.types.get(infer.types.prune(t1)),
+                    infer.types.get(infer.types.prune(t2)),
+                ) {
+                    if u1 != u2 {
+                        self.diagnostics.push(AnalysisDiagnostic::error(
+                            "DIM001",
+                            format!("Unit dimension mismatch: '{}' vs '{}'", u1, u2),
+                            arena.span(node_id),
+                        ));
+                    }
+                }
+            }
+        }
+    }
 }

@@ -19,11 +19,12 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use pilot_analysis::{TypeArena, TypeKind};
+use pilot_analysis::AnalysisPipeline;
 use pilot_codegen::{BuildDriver, BuildOptions, BuildTarget, OptLevel};
 use pilot_fmt::{format_source, FormatOptions};
 use pilot_parser::parse;
 use pilot_rt::{BumpRegion, PilotVal};
+use pilot_span::LineIndex;
 use pilot_transpile::LicenseVerifier;
 use pilot_vm::{Instruction, Opcode, PilcBinary, PilVirtualMachine};
 
@@ -267,15 +268,29 @@ fn cmd_check(args: &[String]) {
         std::process::exit(1);
     }
 
-    let mut type_arena = TypeArena::new();
-    let int_ty = type_arena.alloc(TypeKind::Primitive("i64".to_string()));
-    let str_ty = type_arena.alloc(TypeKind::Primitive("str".to_string()));
-    assert_ne!(int_ty, str_ty);
+    let line_index = LineIndex::new(src.as_bytes());
+    let res = AnalysisPipeline::analyze(&arena, arena.root);
+
+    let mut err_count = 0;
+    let mut warn_count = 0;
+    for diag in &res.diagnostics {
+        let loc = line_index.lookup(diag.span.start);
+        if diag.is_error() {
+            err_count += 1;
+            eprintln!("{}:{}:{}: error[{}]: {}", file_path, loc.line, loc.col, diag.code, diag.message);
+        } else {
+            warn_count += 1;
+            eprintln!("{}:{}:{}: warning[{}]: {}", file_path, loc.line, loc.col, diag.code, diag.message);
+        }
+    }
 
     if comptime_audit {
         println!("[comptime-audit] Verified zero runtime overhead for static declarations in '{}'", file_path);
     }
-    println!("Checked '{}': 0 errors, 0 warnings ({} nodes)", file_path, arena.nodes.len());
+    println!("Checked '{}': {} errors, {} warnings ({} nodes)", file_path, err_count, warn_count, arena.nodes.len());
+    if err_count > 0 {
+        std::process::exit(1);
+    }
 }
 
 fn cmd_fmt(args: &[String]) {
@@ -480,8 +495,33 @@ fn cmd_debug(args: &[String]) {
     let is_dap = args.iter().any(|a| a == "--dap");
     if is_dap {
         println!("Pilot Debug Adapter Protocol (DAP) server listening on stdio.");
-    } else {
-        println!("Interactive Pilot debugger attached. Type 'c' to continue, 'q' to quit.");
+        return;
+    }
+
+    let file_arg = args.iter().find(|a| !a.starts_with('-'));
+    match file_arg {
+        Some(file_path) => {
+            println!("Interactive Pilot debugger attached to '{}'.", file_path);
+            println!("Type 'c' to continue execution, 's' to step, or 'q' to quit.");
+            print!("pilot-dbg> ");
+            io::stdout().flush().unwrap();
+
+            let stdin = io::stdin();
+            let mut line = String::new();
+            if stdin.read_line(&mut line).is_ok() {
+                let trimmed = line.trim();
+                if trimmed == "q" || trimmed == "quit" {
+                    println!("Debugging session terminated.");
+                    return;
+                }
+            }
+
+            println!("Continuing execution...");
+            cmd_run(&[file_path.clone()]);
+        }
+        None => {
+            println!("Interactive Pilot debugger attached. Type 'c' to continue, 'q' to quit.");
+        }
     }
 }
 
