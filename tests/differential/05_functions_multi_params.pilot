@@ -1,0 +1,12 @@
+# Differential Suite 05: Multi-Parameter Function Dispatch
+
+def eval_cubic(a: int, b: int, c: int, d: int, x: int) -> int {
+    let term3 = a * x * x * x
+    let term2 = b * x * x
+    let term1 = c * x
+    return term3 + term2 + term1 + d
+}
+
+def main() -> int {
+    return eval_cubic(2, 3, 4, 5, 3)
+}

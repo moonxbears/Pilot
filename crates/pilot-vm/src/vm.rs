@@ -11,6 +11,7 @@ pub struct PilVirtualMachine {
     pub constants: Vec<PilotVal>,
     pub instructions: Vec<Instruction>,
     pub pc: usize,
+    pub call_stack: Vec<(usize, [PilotVal; 256], u8)>,
     pub hook: Option<VmHook>,
 }
 
@@ -27,6 +28,7 @@ impl PilVirtualMachine {
             constants: Vec::new(),
             instructions: Vec::new(),
             pc: 0,
+            call_stack: Vec::with_capacity(64),
             hook: None,
         }
     }
@@ -35,6 +37,7 @@ impl PilVirtualMachine {
         self.constants = binary.constants;
         self.instructions = binary.instructions;
         self.pc = 0;
+        self.call_stack.clear();
         self.registers = [PilotVal::NULL; 256];
     }
 
@@ -155,14 +158,22 @@ impl PilVirtualMachine {
                     self.registers[dst] = PilotVal::from_bool(!b);
                 }
                 Opcode::And => {
-                    let a = self.registers[src1].as_bool().unwrap_or(false);
-                    let b = self.registers[src2].as_bool().unwrap_or(false);
-                    self.registers[dst] = PilotVal::from_bool(a && b);
+                    if let (Some(a), Some(b)) = (self.registers[src1].as_int(), self.registers[src2].as_int()) {
+                        self.registers[dst] = PilotVal::from_int(a & b);
+                    } else {
+                        let a = self.registers[src1].as_bool().unwrap_or(false);
+                        let b = self.registers[src2].as_bool().unwrap_or(false);
+                        self.registers[dst] = PilotVal::from_bool(a && b);
+                    }
                 }
                 Opcode::Or => {
-                    let a = self.registers[src1].as_bool().unwrap_or(false);
-                    let b = self.registers[src2].as_bool().unwrap_or(false);
-                    self.registers[dst] = PilotVal::from_bool(a || b);
+                    if let (Some(a), Some(b)) = (self.registers[src1].as_int(), self.registers[src2].as_int()) {
+                        self.registers[dst] = PilotVal::from_int(a | b);
+                    } else {
+                        let a = self.registers[src1].as_bool().unwrap_or(false);
+                        let b = self.registers[src2].as_bool().unwrap_or(false);
+                        self.registers[dst] = PilotVal::from_bool(a || b);
+                    }
                 }
                 Opcode::Print => {
                     let val = self.registers[src1];
@@ -183,27 +194,53 @@ impl PilVirtualMachine {
                         panic!("Assertion failed in PilVM execution");
                     }
                 }
+                Opcode::Xor => {
+                    let a = self.registers[src1].as_int().unwrap_or(0);
+                    let b = self.registers[src2].as_int().unwrap_or(0);
+                    self.registers[dst] = PilotVal::from_int(a ^ b);
+                }
+                Opcode::Shl => {
+                    let a = self.registers[src1].as_int().unwrap_or(0);
+                    let b = self.registers[src2].as_int().unwrap_or(0);
+                    self.registers[dst] = PilotVal::from_int(a << b);
+                }
+                Opcode::Shr => {
+                    let a = self.registers[src1].as_int().unwrap_or(0);
+                    let b = self.registers[src2].as_int().unwrap_or(0);
+                    self.registers[dst] = PilotVal::from_int(a >> b);
+                }
                 Opcode::Jump => {
                     let target = ((src1 as u16) << 8 | (src2 as u16)) as usize;
                     self.pc = target;
                 }
                 Opcode::JumpIfTrue => {
-                    if self.registers[src1].as_bool().unwrap_or(false) {
+                    let cond = self.registers[src1].as_bool().unwrap_or_else(|| self.registers[src1].as_int().map_or(false, |i| i != 0));
+                    if cond {
                         let target = ((dst as u16) << 8 | (src2 as u16)) as usize;
                         self.pc = target;
                     }
                 }
                 Opcode::JumpIfFalse => {
-                    if !self.registers[src1].as_bool().unwrap_or(false) {
+                    let cond = self.registers[src1].as_bool().unwrap_or_else(|| self.registers[src1].as_int().map_or(false, |i| i != 0));
+                    if !cond {
                         let target = ((dst as u16) << 8 | (src2 as u16)) as usize;
                         self.pc = target;
                     }
                 }
                 Opcode::Call => {
-                    // Function calls in register VM
+                    let target = ((src1 as u16) << 8 | (src2 as u16)) as usize;
+                    self.call_stack.push((self.pc, self.registers, ins.dst()));
+                    self.pc = target;
                 }
                 Opcode::Ret => {
-                    return self.registers[src1];
+                    let ret_val = if src1 != 0 { self.registers[src1] } else { self.registers[0] };
+                    if let Some((ret_pc, saved_regs, dst_reg)) = self.call_stack.pop() {
+                        self.registers = saved_regs;
+                        self.registers[dst_reg as usize] = ret_val;
+                        self.pc = ret_pc;
+                    } else {
+                        return ret_val;
+                    }
                 }
                 Opcode::Halt => {
                     break;

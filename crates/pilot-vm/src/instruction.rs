@@ -34,6 +34,9 @@ pub enum Opcode {
     Or = 28,
     Print = 29,
     Assert = 30,
+    Xor = 31,
+    Shl = 32,
+    Shr = 33,
 }
 
 impl Opcode {
@@ -69,6 +72,9 @@ impl Opcode {
             28 => Self::Or,
             29 => Self::Print,
             30 => Self::Assert,
+            31 => Self::Xor,
+            32 => Self::Shl,
+            33 => Self::Shr,
             _ => Self::Nop,
         }
     }

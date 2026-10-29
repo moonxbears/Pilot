@@ -1,0 +1,12 @@
+# Differential Suite 06: Contract Invariants & Assertions
+
+def checked_divide(numerator: int, denominator: int) -> int {
+    assert(denominator > 0)
+    return numerator / denominator
+}
+
+def main() -> int {
+    let q1 = checked_divide(100, 5)
+    let q2 = checked_divide(84, 2)
+    return q1 + q2
+}

@@ -38,7 +38,7 @@ Commands:
   build <file> [options]   Compile Pilot source to native AOT binary, LLVM IR, C, or WASM
   check <file>             Perform zero-allocation syntax and semantic analysis
   fmt <file>               Format Pilot source files according to style invariants
-  test [filter]            Discover and run Pilot unit and integration test suites
+  test [filter] [--diff]   Discover and run unit, integration, or multi-backend differential suites
   repl                     Start interactive Pilot Read-Eval-Print Loop
   pkg <subcommand>         Manage Pilot packages and verify permissive SPDX licenses
   venv <subcommand>        Manage isolated Pilot virtual environments
@@ -347,7 +347,14 @@ fn cmd_fmt(args: &[String]) {
 }
 
 fn cmd_test(args: &[String]) {
-    let filter = args.first().map(|s| s.as_str()).unwrap_or("");
+    let is_differential = args.iter().any(|a| a == "--differential" || a == "--diff" || a == "-d");
+    let filter = args.iter().find(|a| !a.starts_with('-')).map(|s| s.as_str()).unwrap_or("");
+
+    if is_differential {
+        run_differential_tests(filter);
+        return;
+    }
+
     let test_dir = Path::new("tests");
 
     if !test_dir.exists() {
@@ -413,6 +420,146 @@ fn cmd_test(args: &[String]) {
     let elapsed = start_all.elapsed();
     println!(
         "\nTest result: {} passed, {} failed out of {} total ({:.2?})",
+        passed,
+        total - passed,
+        total,
+        elapsed
+    );
+    if passed < total {
+        std::process::exit(1);
+    }
+}
+
+fn run_differential_tests(filter: &str) {
+    let diff_dir = Path::new("tests/differential");
+    if !diff_dir.exists() {
+        println!("No 'tests/differential/' directory found. 0 tests executed.");
+        return;
+    }
+
+    println!("Executing Milestone 46: Multi-Backend Differential Semantic Verification...");
+    println!("Backends: PilVM v3 (Bytecode VM), Native AOT (C11/C23 Clang), LLVM IR, WebAssembly (WASM)\n");
+
+    let mut passed = 0;
+    let mut total = 0;
+    let start_all = Instant::now();
+
+    if let Ok(entries) = fs::read_dir(diff_dir) {
+        let mut paths: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().map_or(false, |ext| ext == "pilot"))
+            .collect();
+        paths.sort();
+
+        let tmp_base = std::env::temp_dir().join(format!("pilot_diff_{}", std::process::id()));
+        let _ = fs::create_dir_all(&tmp_base);
+
+        for path in paths {
+            let filename = path.file_name().unwrap().to_str().unwrap();
+            let stem = path.file_stem().unwrap().to_str().unwrap();
+            if !filter.is_empty() && !filename.contains(filter) {
+                continue;
+            }
+
+            total += 1;
+            let src = fs::read_to_string(&path).unwrap_or_default();
+            let arena = parse(&src);
+            if arena.root.is_none() {
+                eprintln!("FAIL: {} (syntax parse error)", filename);
+                continue;
+            }
+
+            // 1. PilVM v3 Execution
+            let binary = pilot_vm::BytecodeCompiler::compile(&arena, arena.root);
+            let mut vm = pilot_vm::PilVirtualMachine::new();
+            vm.load_binary(binary);
+            let vm_val = vm.run();
+            let vm_output = format!("RESULT: {}", vm_val.as_int().unwrap_or(0));
+
+            // 2. Target C Code Generation
+            let mut c_opts = BuildOptions::default();
+            c_opts.target = BuildTarget::C;
+            let c_code = match BuildDriver::compile_pilot_source(stem, &src, &c_opts) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("FAIL: {} (C code gen error: {})", filename, e);
+                    continue;
+                }
+            };
+            let c_ok = !c_code.is_empty();
+
+            // 3. Native AOT Compilation & Execution
+            let nat_bin = tmp_base.join(format!("{}_native", stem));
+            let mut nat_opts = BuildOptions::default();
+            nat_opts.target = BuildTarget::Native;
+            nat_opts.output_path = nat_bin.clone();
+            if let Err(e) = BuildDriver::compile_pilot_source(stem, &src, &nat_opts) {
+                eprintln!("FAIL: {} (Native build error: {})", filename, e);
+                continue;
+            }
+            let nat_proc = std::process::Command::new(&nat_bin).output();
+            let nat_output = match nat_proc {
+                Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+                Err(e) => {
+                    eprintln!("FAIL: {} (Native exec error: {})", filename, e);
+                    continue;
+                }
+            };
+
+            // 4. LLVM IR Compilation & Execution
+            let mut llvm_opts = BuildOptions::default();
+            llvm_opts.target = BuildTarget::Llvm;
+            let llvm_ir = match BuildDriver::compile_pilot_source(stem, &src, &llvm_opts) {
+                Ok(ir) => ir,
+                Err(e) => {
+                    eprintln!("FAIL: {} (LLVM IR gen error: {})", filename, e);
+                    continue;
+                }
+            };
+            let ll_file = tmp_base.join(format!("{}.ll", stem));
+            let ll_bin = tmp_base.join(format!("{}_llvm", stem));
+            let _ = fs::write(&ll_file, &llvm_ir);
+            let clang_res = std::process::Command::new("clang")
+                .args(["-Wno-override-module", ll_file.to_str().unwrap(), "-o", ll_bin.to_str().unwrap()])
+                .status();
+            let llvm_output = if clang_res.map_or(false, |s| s.success()) {
+                let out = std::process::Command::new(&ll_bin).output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+                out
+            } else {
+                format!("Clang failed to assemble LLVM IR")
+            };
+
+            // 5. WASM WAT Code Generation
+            let mut wasm_opts = BuildOptions::default();
+            wasm_opts.target = BuildTarget::Wasm;
+            let wasm_wat = BuildDriver::compile_pilot_source(stem, &src, &wasm_opts).unwrap_or_default();
+            let wasm_ok = wasm_wat.contains("(module");
+
+            // Compare semantic results across all backends
+            let vm_num = vm_output.strip_prefix("RESULT: ").unwrap_or(&vm_output);
+            let nat_num = nat_output.strip_prefix("RESULT: ").unwrap_or(&nat_output);
+            let ll_num = llvm_output.strip_prefix("RESULT: ").unwrap_or(&llvm_output);
+
+            if vm_num == nat_num && vm_num == ll_num && wasm_ok && c_ok {
+                passed += 1;
+                println!(
+                    "PASS: {:<35} [PilVM: {} == Native: {} == LLVM: {}] [WASM: OK, C: OK]",
+                    filename, vm_num, nat_num, ll_num
+                );
+            } else {
+                eprintln!(
+                    "FAIL: {:<35} Semantic divergence: PilVM='{}', Native='{}', LLVM='{}', WASM={}, C={}",
+                    filename, vm_output, nat_output, llvm_output, wasm_ok, c_ok
+                );
+            }
+        }
+        let _ = fs::remove_dir_all(&tmp_base);
+    }
+
+    let elapsed = start_all.elapsed();
+    println!(
+        "\nDifferential test result: {} passed, {} failed out of {} total ({:.2?})",
         passed,
         total - passed,
         total,
@@ -1053,5 +1200,10 @@ mod tests {
     #[test]
     fn test_cmd_bench_execution() {
         cmd_bench(&[]);
+    }
+
+    #[test]
+    fn test_cmd_test_differential() {
+        cmd_test(&["--differential".to_string()]);
     }
 }

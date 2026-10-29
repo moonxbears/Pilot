@@ -334,6 +334,35 @@ pub fn generate_c_runtime_header() -> &'static str {
 extern "C" {
 #endif
 
+/* Standard Pilot Option/Result & Keyword Macros */
+#ifndef Ok
+#define Ok(x) ((int64_t)(intptr_t)(x))
+#endif
+#ifndef Err
+#define Err(x) ((int64_t)(intptr_t)(x))
+#endif
+#ifndef Some
+#define Some(x) ((int64_t)(intptr_t)(x))
+#endif
+#ifndef None
+#define None 0LL
+#endif
+#ifndef null
+#define null NULL
+#endif
+#ifndef async
+#define async
+#endif
+#ifndef await
+#define await
+#endif
+#ifndef pure
+#define pure
+#endif
+#ifndef noalloc
+#define noalloc
+#endif
+
 /* Memory Tier 1: Bump Regions */
 static inline void* pilot_rt_region_enter(void) { return malloc(65536); }
 static inline void* pilot_rt_region_alloc(void* region, size_t size, size_t align) {

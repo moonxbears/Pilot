@@ -42,14 +42,15 @@ impl LlvmEmitter {
         writeln!(&mut self.out, "target triple = \"x86_64-unknown-linux-gnu\"").unwrap();
         writeln!(&mut self.out).unwrap();
 
-        // Declare runtime intrinsics
+        // Declare runtime intrinsics & stdout format
+        writeln!(&mut self.out, "@str_fmt = private unnamed_addr constant [14 x i8] c\"RESULT: %lld\\0A\\00\", align 1").unwrap();
+        writeln!(&mut self.out, "declare i32 @printf(ptr, ...)").unwrap();
         writeln!(&mut self.out, "declare void @pilot_rt_dup(ptr %ptr)").unwrap();
         writeln!(&mut self.out, "declare void @pilot_rt_drop(ptr %ptr, ptr %dtor)").unwrap();
         writeln!(&mut self.out, "declare ptr @pilot_rt_alloc_arc(i64 %size)").unwrap();
         writeln!(&mut self.out, "declare ptr @pilot_rt_region_enter()").unwrap();
         writeln!(&mut self.out, "declare void @pilot_rt_region_exit(ptr %reg)").unwrap();
-        writeln!(&mut self.out, "declare void @pilot_rt_print_i64(i64 %val)").unwrap();
-        writeln!(&mut self.out).unwrap();
+        writeln!(&mut self.out, "define void @pilot_rt_print_i64(i64 %val) {{\nentry:\n  call i32 (ptr, ...) @printf(ptr @str_fmt, i64 %val)\n  ret void\n}}\n").unwrap();
     }
 
     pub fn emit_function(&mut self, name: &str, ret_type: &str, params: &[(&str, &str)], body_instructions: &[&str]) {
@@ -100,7 +101,8 @@ impl LlvmEmitter {
                 self.lower_stmt_to_llvm(arena, stmt_id, &mut body, &mut ret_val);
             }
 
-            body.push(format!("ret i64 {}", ret_val));
+            body.push(format!("call void @pilot_rt_print_i64(i64 {})", ret_val));
+            body.push("ret i64 0".to_string());
             let body_slices: Vec<&str> = body.iter().map(|s| s.as_str()).collect();
             self.emit_function("main", "i64", &[], &body_slices);
         }
@@ -139,12 +141,47 @@ impl LlvmEmitter {
             }
         }
 
-        if !body_instructions.iter().any(|ins| ins.starts_with("ret ")) {
+        if fn_name == "main" {
+            let mut modified = false;
+            for i in 0..body_instructions.len() {
+                if body_instructions[i].starts_with("ret i64 ") {
+                    let val = body_instructions[i].strip_prefix("ret i64 ").unwrap_or("0").to_string();
+                    body_instructions[i] = format!("call void @pilot_rt_print_i64(i64 {})", val);
+                    modified = true;
+                    break;
+                }
+            }
+            if modified {
+                body_instructions.push("ret i64 0".to_string());
+            } else {
+                body_instructions.push(format!("call void @pilot_rt_print_i64(i64 {})", ret_val));
+                body_instructions.push("ret i64 0".to_string());
+            }
+        } else if !body_instructions.iter().any(|ins| ins.starts_with("ret ")) {
             body_instructions.push(format!("ret i64 {}", ret_val));
+        } else if let Some(last) = body_instructions.last() {
+            if last.ends_with(':') {
+                body_instructions.push(format!("ret i64 {}", ret_val));
+            }
         }
 
         let body_slices: Vec<&str> = body_instructions.iter().map(|s| s.as_str()).collect();
         self.emit_function(fn_name, "i64", &params, &body_slices);
+    }
+
+    fn lower_stmt_or_block(&mut self, arena: &AstArena, id: NodeId, body: &mut Vec<String>, ret_val: &mut String) {
+        if id.is_none() {
+            return;
+        }
+        let node = arena.node(id);
+        if node.node_kind() == NodeKind::BlockExpr {
+            let child_ids = arena.children_slice(node.lhs, node.rhs);
+            for &c_raw in child_ids {
+                self.lower_stmt_to_llvm(arena, NodeId(c_raw), body, ret_val);
+            }
+        } else {
+            self.lower_stmt_to_llvm(arena, id, body, ret_val);
+        }
     }
 
     fn lower_stmt_to_llvm(&mut self, arena: &AstArena, id: NodeId, body: &mut Vec<String>, ret_val: &mut String) {
@@ -191,6 +228,53 @@ impl LlvmEmitter {
             NodeKind::ExprStmt => {
                 self.lower_expr_to_llvm(arena, NodeId(node.lhs), body);
             }
+            NodeKind::IfExpr => {
+                let cond_val = self.lower_expr_to_llvm(arena, NodeId(node.lhs), body);
+                let cond_bool = self.next_temp();
+                body.push(format!("{} = icmp ne i64 {}, 0", cond_bool, cond_val));
+                let uid = self.temp_counter;
+                self.temp_counter += 1;
+                let then_lbl = format!("if_then_{}", uid);
+                let else_lbl = format!("if_else_{}", uid);
+                let merge_lbl = format!("if_merge_{}", uid);
+
+                if node.flags == 2 {
+                    let children = arena.children_slice(node.rhs, 2);
+                    body.push(format!("br i1 {}, label %{}, label %{}", cond_bool, then_lbl, else_lbl));
+                    body.push(format!("{}:", then_lbl));
+                    self.lower_stmt_or_block(arena, NodeId(children[0]), body, ret_val);
+                    body.push(format!("br label %{}", merge_lbl));
+                    body.push(format!("{}:", else_lbl));
+                    self.lower_stmt_or_block(arena, NodeId(children[1]), body, ret_val);
+                    body.push(format!("br label %{}", merge_lbl));
+                } else {
+                    body.push(format!("br i1 {}, label %{}, label %{}", cond_bool, then_lbl, merge_lbl));
+                    body.push(format!("{}:", then_lbl));
+                    self.lower_stmt_or_block(arena, NodeId(node.rhs), body, ret_val);
+                    body.push(format!("br label %{}", merge_lbl));
+                }
+                body.push(format!("{}:", merge_lbl));
+            }
+            NodeKind::WhileStmt => {
+                let uid = self.temp_counter;
+                self.temp_counter += 1;
+                let hdr_lbl = format!("while_hdr_{}", uid);
+                let body_lbl = format!("while_body_{}", uid);
+                let end_lbl = format!("while_end_{}", uid);
+
+                body.push(format!("br label %{}", hdr_lbl));
+                body.push(format!("{}:", hdr_lbl));
+                let cond_val = self.lower_expr_to_llvm(arena, NodeId(node.lhs), body);
+                let cond_bool = self.next_temp();
+                body.push(format!("{} = icmp ne i64 {}, 0", cond_bool, cond_val));
+                body.push(format!("br i1 {}, label %{}, label %{}", cond_bool, body_lbl, end_lbl));
+
+                body.push(format!("{}:", body_lbl));
+                self.lower_stmt_or_block(arena, NodeId(node.rhs), body, ret_val);
+                body.push(format!("br label %{}", hdr_lbl));
+
+                body.push(format!("{}:", end_lbl));
+            }
             _ => {}
         }
     }
@@ -232,8 +316,8 @@ impl LlvmEmitter {
                     11 => "icmp sle i64",
                     12 => "icmp sgt i64",
                     13 => "icmp sge i64",
-                    16 => "and i64",
-                    17 => "or i64",
+                    14 | 16 => "and i64",
+                    15 | 17 => "or i64",
                     18 => "xor i64",
                     19 => "shl i64",
                     20 => "ashr i64",
@@ -276,11 +360,22 @@ impl LlvmEmitter {
                     let val = if arg_vals.is_empty() { "0".to_string() } else { arg_vals[0].split_whitespace().nth(1).unwrap_or("0").to_string() };
                     body.push(format!("call void @pilot_rt_print_i64(i64 {})", val));
                     "0".to_string()
+                } else if callee_name == "assert" {
+                    "0".to_string()
                 } else {
                     let res = self.next_temp();
                     body.push(format!("{} = call i64 @{}({})", res, callee_name, arg_vals.join(", ")));
                     res
                 }
+            }
+            NodeKind::IfExpr => {
+                let cond_val = self.lower_expr_to_llvm(arena, NodeId(node.lhs), body);
+                let cond_bool = self.next_temp();
+                body.push(format!("{} = icmp ne i64 {}, 0", cond_bool, cond_val));
+                let then_val = self.lower_expr_to_llvm(arena, NodeId(node.rhs), body);
+                let res = self.next_temp();
+                body.push(format!("{} = select i1 {}, i64 {}, i64 0", res, cond_bool, then_val));
+                res
             }
             _ => "0".to_string(),
         }

@@ -118,6 +118,15 @@ impl<'a> Parser<'a> {
     }
 
     #[inline]
+    fn prev_span(&self) -> ByteSpan {
+        if self.pos > 0 && self.pos - 1 < self.tape.len() {
+            self.tape.span(self.pos - 1)
+        } else {
+            self.span()
+        }
+    }
+
+    #[inline]
     fn text(&self) -> &'a str {
         if self.pos < self.tape.len() {
             self.tape.text(self.pos, self.src)
@@ -219,6 +228,43 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_stmt_or_decl(&mut self) -> NodeId {
+        while self.at(TokenKind::At) {
+            self.advance();
+            if self.is_ident_like() {
+                self.advance();
+                if self.at(TokenKind::LParen) {
+                    self.advance();
+                    while !self.at_end() && !self.at(TokenKind::RParen) {
+                        self.advance();
+                    }
+                    if self.at(TokenKind::RParen) {
+                        self.advance();
+                    }
+                }
+            }
+            self.consume_semi_or_newlines();
+        }
+
+        if self.is_ident_like() {
+            let txt = self.text();
+            if txt == "async" || txt == "pure" || txt == "atomic" {
+                let next_pos = self.pos + 1;
+                if next_pos < self.tape.len() && (self.tape.kind(next_pos) == TokenKind::KwDef || self.tape.kind(next_pos) == TokenKind::KwFn) {
+                    self.advance();
+                    return self.parse_fn_decl();
+                }
+            } else if txt == "actor" {
+                self.advance();
+                return self.parse_class_decl();
+            } else if txt == "noalloc" || txt == "region" {
+                self.advance();
+                if self.is_ident_like() {
+                    self.advance();
+                }
+                return self.parse_block_expr();
+            }
+        }
+
         let k = self.peek();
         match k {
             TokenKind::KwImport => self.parse_import_stmt(),
@@ -243,8 +289,26 @@ impl<'a> Parser<'a> {
             TokenKind::KwFor => self.parse_for_stmt(),
             TokenKind::KwIf => self.parse_if_expr(),
             TokenKind::KwMatch => self.parse_match_expr(),
+            TokenKind::KwAssert => self.parse_assert_stmt(),
             _ => self.parse_expr_stmt(),
         }
+    }
+
+    fn parse_assert_stmt(&mut self) -> NodeId {
+        let start_span = self.span();
+        self.advance(); // consume 'assert'
+        let has_paren = self.at(TokenKind::LParen);
+        if has_paren {
+            self.advance();
+        }
+        let cond = self.parse_expr();
+        if has_paren {
+            self.expect(TokenKind::RParen);
+        }
+        let callee = self.arena.alloc_ident("assert", start_span);
+        let (arg_start, arg_len) = self.arena.alloc_child_slice(&[callee, cond]);
+        let call_node = self.arena.alloc_node(NodeKind::CallExpr, 0, start_span, arg_start, arg_len);
+        self.arena.alloc_node(NodeKind::ExprStmt, 0, start_span, call_node.0, 0)
     }
 
     fn parse_import_stmt(&mut self) -> NodeId {
@@ -610,7 +674,7 @@ impl<'a> Parser<'a> {
             self.advance();
         }
 
-        self.arena.alloc_list_node(NodeKind::BlockExpr, 0, start_span, &children)
+        self.arena.alloc_list_node(NodeKind::BlockExpr, 0, ByteSpan::new(start_span.start, self.prev_span().end), &children)
     }
 
     // =========================================================================
@@ -792,7 +856,7 @@ impl<'a> Parser<'a> {
                 if items.len() == 1 {
                     items[0]
                 } else {
-                    self.arena.alloc_list_node(NodeKind::TupleExpr, 0, span, &items)
+                    self.arena.alloc_list_node(NodeKind::TupleExpr, 0, ByteSpan::new(span.start, self.prev_span().end), &items)
                 }
             }
             TokenKind::LBracket => {
@@ -812,7 +876,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 self.expect(TokenKind::RBracket);
-                self.arena.alloc_list_node(NodeKind::ListExpr, 0, span, &items)
+                self.arena.alloc_list_node(NodeKind::ListExpr, 0, ByteSpan::new(span.start, self.prev_span().end), &items)
             }
             TokenKind::Minus
             | TokenKind::Plus
@@ -990,8 +1054,13 @@ impl<'a> Parser<'a> {
             TokenKind::LessEqual => Some((BinaryOp::Le, ExprPrecedence::Comparison as u8, false)),
             TokenKind::Greater => Some((BinaryOp::Gt, ExprPrecedence::Comparison as u8, false)),
             TokenKind::GreaterEqual => Some((BinaryOp::Ge, ExprPrecedence::Comparison as u8, false)),
-            TokenKind::KwAnd | TokenKind::Amper => Some((BinaryOp::And, ExprPrecedence::LogicalAnd as u8, false)),
-            TokenKind::KwOr | TokenKind::Vbar => Some((BinaryOp::Or, ExprPrecedence::LogicalOr as u8, false)),
+            TokenKind::KwAnd => Some((BinaryOp::And, ExprPrecedence::LogicalAnd as u8, false)),
+            TokenKind::KwOr => Some((BinaryOp::Or, ExprPrecedence::LogicalOr as u8, false)),
+            TokenKind::Amper => Some((BinaryOp::BitAnd, ExprPrecedence::BitAnd as u8, false)),
+            TokenKind::Vbar => Some((BinaryOp::BitOr, ExprPrecedence::BitOr as u8, false)),
+            TokenKind::Caret => Some((BinaryOp::BitXor, ExprPrecedence::BitXor as u8, false)),
+            TokenKind::ShiftLeft => Some((BinaryOp::Shl, ExprPrecedence::Shift as u8, false)),
+            TokenKind::ShiftRight => Some((BinaryOp::Shr, ExprPrecedence::Shift as u8, false)),
             TokenKind::PipeForward => Some((BinaryOp::Pipe, ExprPrecedence::Pipe as u8, false)),
             TokenKind::Coalesce => Some((BinaryOp::Coalesce, ExprPrecedence::Coalesce as u8, true)),
             TokenKind::DotDot | TokenKind::DotDotEqual => Some((BinaryOp::RangeInclusive, ExprPrecedence::Range as u8, false)),
@@ -1070,6 +1139,23 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let err = self.parse_type_bp(TypePrecedence::Fallible as u8 + 1);
                 lhs = self.arena.alloc_node(NodeKind::TypeFallible, 0, span, lhs.0, err.0);
+                continue;
+            }
+
+            if k == TokenKind::LBracket {
+                let start_span = self.span();
+                self.advance();
+                let mut type_args = Vec::new();
+                while !self.at_end() && !self.at(TokenKind::RBracket) {
+                    let t = self.parse_type();
+                    type_args.push(t);
+                    if self.at(TokenKind::Comma) {
+                        self.advance();
+                    }
+                }
+                self.expect(TokenKind::RBracket);
+                let span = ByteSpan::new(start_span.start, self.prev_span().end);
+                lhs = self.arena.alloc_list_node(NodeKind::TypeList, 0, span, &type_args);
                 continue;
             }
 

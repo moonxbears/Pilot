@@ -1,0 +1,25 @@
+# Differential Suite 04: Conditionals & Branching Logic
+
+def classify_value(x: int, y: int) -> int {
+    if x > 100 {
+        if y > 50 {
+            return 1
+        } else {
+            return 2
+        }
+    } else {
+        if y > 50 {
+            return 3
+        } else {
+            return 4
+        }
+    }
+}
+
+def main() -> int {
+    let r1 = classify_value(120, 60)
+    let r2 = classify_value(120, 20)
+    let r3 = classify_value(50, 80)
+    let r4 = classify_value(10, 10)
+    return r1 * 1000 + r2 * 100 + r3 * 10 + r4
+}

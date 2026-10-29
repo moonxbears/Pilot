@@ -1,0 +1,14 @@
+# Differential Suite 01: Arithmetic Precedence & Bitwise Invariants
+
+def compute_expression(a: int, b: int, c: int) -> int {
+    let p1 = a + b * c
+    let p2 = (a + b) * c
+    let p3 = c % b + a / 2
+    let p4 = (a ^ b) | (c & 15)
+    return p1 + p2 + p3 + p4
+}
+
+def main() -> int {
+    let res = compute_expression(10, 4, 7)
+    return res
+}
