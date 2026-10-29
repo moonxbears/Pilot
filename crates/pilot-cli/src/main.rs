@@ -25,7 +25,7 @@ use pilot_fmt::{format_source, FormatOptions};
 use pilot_parser::parse;
 use pilot_rt::{BumpRegion, PilotVal};
 use pilot_span::LineIndex;
-use pilot_transpile::LicenseVerifier;
+use pilot_transpile::{ForeignAstIngester, IngestOptions, IrModule, LicenseVerifier, TargetLanguage, Transpiler};
 use pilot_vm::{Instruction, Opcode, PilcBinary, PilVirtualMachine};
 
 fn print_help() {
@@ -45,6 +45,8 @@ Commands:
   debug [--dap]            Launch debug adapter or interactive debugger
   lsp                      Start native JSON-RPC Language Server Protocol service
   perf <file>              Benchmark parse throughput and peak AST memory overhead
+  --emit <lang> <file>     Transpile Pilot source to C, C++, C#, Rust, Python, JS, or Lua
+  --from <lang> <file>     Ingest foreign source code into canonical Pilot syntax
 
 Flags:
   -v, --version            Display version and toolchain build metadata
@@ -68,6 +70,8 @@ fn main() {
     match args[0].as_str() {
         "-v" | "--version" | "version" => print_version(),
         "-h" | "--help" | "help" => print_help(),
+        "--emit" | "emit" => cmd_emit(&args[1..]),
+        "--from" | "from" => cmd_from(&args[1..]),
         "run" => cmd_run(&args[1..]),
         "build" => cmd_build(&args[1..]),
         "check" => cmd_check(&args[1..]),
@@ -585,6 +589,133 @@ fn cmd_perf(args: &[String]) {
     println!("  Parse Throughput:  {:.2} MB/s", mb_per_sec);
 }
 
+fn cmd_emit(args: &[String]) {
+    if args.len() < 2 {
+        eprintln!("Usage: pilot --emit <target> <file.pilot> [-o <output>]");
+        std::process::exit(1);
+    }
+    let target_name = &args[0];
+    let file_path = &args[1];
+
+    let target = match TargetLanguage::parse(target_name) {
+        Some(t) => t,
+        None => {
+            eprintln!("error: unknown target language '{}'. Valid targets: c, cpp, csharp, rust, python, js, lua", target_name);
+            std::process::exit(1);
+        }
+    };
+
+    let src = fs::read_to_string(file_path).unwrap_or_else(|e| {
+        eprintln!("error: cannot read '{}': {}", file_path, e);
+        std::process::exit(1);
+    });
+
+    let arena = parse(&src);
+    let root = arena.root;
+    let analysis = AnalysisPipeline::analyze(&arena, root);
+
+    let module_name = Path::new(file_path).file_stem().and_then(|s| s.to_str()).unwrap_or("module");
+    let ir_mod = IrModule::from_ast(&arena, &analysis, module_name);
+    let emitted = Transpiler::emit_module(&ir_mod, target);
+
+    let mut out_path = None;
+    let mut i = 2;
+    while i < args.len() {
+        if args[i] == "-o" && i + 1 < args.len() {
+            out_path = Some(&args[i + 1]);
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+
+    if let Some(dest) = out_path {
+        fs::write(dest, &emitted).unwrap_or_else(|e| {
+            eprintln!("error: failed to write '{}': {}", dest, e);
+            std::process::exit(1);
+        });
+        println!("Emitted {:?} -> {}", target, dest);
+    } else {
+        print!("{}", emitted);
+    }
+}
+
+fn cmd_from(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("Usage: pilot --from <lang> [--strict-pilot] [--viable-license-only] <input_file> [-o <output>]");
+        std::process::exit(1);
+    }
+    let lang_str = &args[0];
+    let lang = match TargetLanguage::parse(lang_str) {
+        Some(t) => t,
+        None => {
+            eprintln!("error: unsupported foreign language '{}'. Valid: c, cpp, csharp, rust, python, js, lua", lang_str);
+            std::process::exit(1);
+        }
+    };
+
+    let mut strict_pilot = false;
+    let mut viable_license_only = false;
+    let mut file_path = None;
+    let mut out_path = None;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--strict-pilot" => { strict_pilot = true; i += 1; }
+            "--viable-license-only" => { viable_license_only = true; i += 1; }
+            "-o" => {
+                if i + 1 < args.len() {
+                    out_path = Some(&args[i + 1]);
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            other => {
+                if !other.starts_with('-') && file_path.is_none() {
+                    file_path = Some(other);
+                }
+                i += 1;
+            }
+        }
+    }
+
+    let input_path = file_path.unwrap_or_else(|| {
+        eprintln!("error: missing input file for 'pilot --from'");
+        std::process::exit(1);
+    });
+
+    let src = fs::read_to_string(input_path).unwrap_or_else(|e| {
+        eprintln!("error: cannot read '{}': {}", input_path, e);
+        std::process::exit(1);
+    });
+
+    let opts = IngestOptions {
+        strict_pilot,
+        viable_license_only,
+        license_spdx: Some("MIT".to_string()),
+    };
+
+    match ForeignAstIngester::ingest_to_pilot_source(&src, lang, &opts) {
+        Ok(pilot_src) => {
+            if let Some(dest) = out_path {
+                fs::write(dest, &pilot_src).unwrap_or_else(|e| {
+                    eprintln!("error: failed to write '{}': {}", dest, e);
+                    std::process::exit(1);
+                });
+                println!("Ingested {:?} -> {}", lang, dest);
+            } else {
+                print!("{}", pilot_src);
+            }
+        }
+        Err(e) => {
+            eprintln!("error: ingestion failed: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -599,5 +730,29 @@ mod tests {
     fn test_license_audit_logic() {
         assert!(LicenseVerifier::is_viable_license("MIT"));
         assert!(!LicenseVerifier::is_viable_license("GPL-3.0"));
+    }
+
+    #[test]
+    fn test_cmd_emit_and_from_cli() {
+        let tmp_pilot = "/tmp/test_emit_input.pilot";
+        fs::write(tmp_pilot, "def add(a: int, b: int) -> int { return a + b }").unwrap();
+
+        let tmp_out_py = "/tmp/test_emit_output.py";
+        cmd_emit(&["python".to_string(), tmp_pilot.to_string(), "-o".to_string(), tmp_out_py.to_string()]);
+        let py_content = fs::read_to_string(tmp_out_py).unwrap();
+        assert!(py_content.contains("def add(a, b):"));
+
+        let tmp_rs = "/tmp/test_from_input.rs";
+        fs::write(tmp_rs, "pub fn mul(x: i64, y: i64) -> i64 { x * y }").unwrap();
+
+        let tmp_out_pilot = "/tmp/test_from_output.pilot";
+        cmd_from(&["rust".to_string(), "--strict-pilot".to_string(), tmp_rs.to_string(), "-o".to_string(), tmp_out_pilot.to_string()]);
+        let pilot_content = fs::read_to_string(tmp_out_pilot).unwrap();
+        assert!(pilot_content.contains("def mul"));
+
+        let _ = fs::remove_file(tmp_pilot);
+        let _ = fs::remove_file(tmp_out_py);
+        let _ = fs::remove_file(tmp_rs);
+        let _ = fs::remove_file(tmp_out_pilot);
     }
 }

@@ -7,3 +7,6 @@ edition = "2021"
 pilot-ast = { path = "../pilot-ast" }
 pilot-span = { path = "../pilot-span" }
 pilot-intern = { path = "../pilot-intern" }
+pilot-analysis = { path = "../pilot-analysis" }
+pilot-parser = { path = "../pilot-parser" }
+pilot-fmt = { path = "../pilot-fmt" }

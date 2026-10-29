@@ -767,6 +767,7 @@ pub unsafe extern "C" fn pilot_transpile_sample(target: u8, out_len: *mut usize)
 
     let module = pilot_transpile::IrModule {
         name: "TranspiledMod".to_string(),
+        type_decls: Vec::new(),
         functions: vec![pilot_transpile::IrFunction {
             name: "compute".to_string(),
             ret_type: pilot_transpile::IrType::Int,

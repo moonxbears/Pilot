@@ -5,10 +5,12 @@
 pub mod ir;
 pub mod emitters;
 pub mod licensing;
+pub mod ingest;
 
 pub use ir::{IrExpr, IrFunction, IrModule, IrStmt, IrType, TargetLanguage};
 pub use emitters::Transpiler;
 pub use licensing::LicenseVerifier;
+pub use ingest::{ForeignAstIngester, IngestOptions};
 
 #[cfg(test)]
 mod tests {
@@ -17,6 +19,7 @@ mod tests {
     fn sample_module() -> IrModule {
         IrModule {
             name: "MathRoutines".to_string(),
+            type_decls: Vec::new(),
             functions: vec![IrFunction {
                 name: "calculate".to_string(),
                 ret_type: IrType::Int,
@@ -87,5 +90,51 @@ mod tests {
         assert!(LicenseVerifier::is_viable_license("BSD-3-Clause"));
         assert!(!LicenseVerifier::is_viable_license("GPL-3.0"));
         assert!(!LicenseVerifier::is_viable_license("Proprietary"));
+    }
+
+    #[test]
+    fn test_ast_to_transpile_ir_lowerer() {
+        let code = "def add_nums(x: int, y: int) -> int { return x + y; }";
+        let arena = pilot_parser::parse(code);
+        let root = arena.root;
+        let analysis = pilot_analysis::pipeline::AnalysisPipeline::analyze(&arena, root);
+
+        let module = IrModule::from_ast(&arena, &analysis, "test_mod");
+        assert_eq!(module.functions.len(), 1);
+        assert_eq!(module.functions[0].name, "add_nums");
+        assert_eq!(module.functions[0].params.len(), 2);
+
+        // Verify lowering to Python
+        let py = Transpiler::emit_module(&module, TargetLanguage::Python);
+        assert!(py.contains("def add_nums(x, y):"));
+        assert!(py.contains("return (x + y)"));
+    }
+
+    #[test]
+    fn test_foreign_ast_ingesters_and_strict_pilot() {
+        let opts = IngestOptions {
+            strict_pilot: true,
+            viable_license_only: true,
+            license_spdx: Some("MIT".to_string()),
+        };
+
+        // 1. Rust ingestion
+        let rs_src = "pub fn compute(val: i64) -> Option<i64> {\n    let mut x = val;\n    x\n}";
+        let pilot_rs = ForeignAstIngester::ingest_to_pilot_source(rs_src, TargetLanguage::Rust, &opts).unwrap();
+        assert!(pilot_rs.contains("def compute"));
+        assert!(pilot_rs.contains("var x = val;"));
+
+        // 2. Python ingestion
+        let py_src = "def process(item):\n    x = item\n    return x\n";
+        let pilot_py = ForeignAstIngester::ingest_to_pilot_source(py_src, TargetLanguage::Python, &opts).unwrap();
+        assert!(pilot_py.contains("def process(item) {"));
+        assert!(pilot_py.contains("let x = item"));
+
+        // 3. JavaScript ingestion
+        let js_src = "function greet(name) {\n    const msg = name;\n    console.log(msg);\n}";
+        let pilot_js = ForeignAstIngester::ingest_to_pilot_source(js_src, TargetLanguage::JavaScript, &opts).unwrap();
+        assert!(pilot_js.contains("def greet(name)"));
+        assert!(pilot_js.contains("let msg = name;"));
+        assert!(pilot_js.contains("println(msg);"));
     }
 }

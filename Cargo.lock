@@ -211,8 +211,11 @@ dependencies = [
 name = "pilot-transpile"
 version = "0.1.0"
 dependencies = [
+ "pilot-analysis",
  "pilot-ast",
+ "pilot-fmt",
  "pilot-intern",
+ "pilot-parser",
  "pilot-span",
 ]
 
