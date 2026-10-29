@@ -5,11 +5,13 @@
 pub mod llvm;
 pub mod c_target;
 pub mod wasm;
+pub mod asm;
 pub mod driver;
 
 pub use llvm::LlvmEmitter;
 pub use c_target::CTargetEmitter;
 pub use wasm::WasmEmitter;
+pub use asm::AsmEmitter;
 pub use driver::{BuildDriver, BuildOptions, BuildTarget, OptLevel};
 
 #[cfg(test)]
@@ -63,5 +65,29 @@ mod tests {
         opts.target = BuildTarget::Wasm;
         let wasm_art = BuildDriver::compile_source_to_artifact("test", &opts).unwrap();
         assert!(wasm_art.contains("(module"));
+
+        opts.target = BuildTarget::Asm;
+        let asm_art = BuildDriver::compile_source_to_artifact("test", &opts).unwrap();
+        assert!(asm_art.contains(".file\t\"test.pilot\""));
+    }
+
+    #[test]
+    fn test_asm_emitter_vector_synthesis() {
+        let arena = pilot_parser::parse("def calc(a: int, b: int) -> int { return a + b }");
+        let asm = AsmEmitter::emit_assembly(&arena, "calc_mod", 3, true).unwrap();
+        assert!(asm.contains(".file\t\"calc_mod.pilot\""));
+        assert!(asm.contains(".globl\tcalc"));
+        assert!(asm.contains("AVX"));
+    }
+
+    #[test]
+    fn test_wasm_emitter_bindings_and_binary() {
+        let emitter = WasmEmitter::new();
+        let wasm_bytes = emitter.assemble_minimal_wasm(42);
+        assert_eq!(&wasm_bytes[0..4], &[0x00, 0x61, 0x73, 0x6D]); // \0asm magic
+
+        let (mjs, d_ts) = WasmEmitter::generate_bindings("pilot_app");
+        assert!(mjs.contains("loadPilotModule"));
+        assert!(d_ts.contains("export interface PilotModule"));
     }
 }

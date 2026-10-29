@@ -70,6 +70,7 @@ dependencies = [
  "pilot-ast",
  "pilot-intern",
  "pilot-parser",
+ "pilot-perceus",
  "pilot-rt",
  "pilot-span",
 ]

@@ -9,11 +9,17 @@ pub mod value;
 pub mod memory;
 pub mod concurrency;
 pub mod stdlib;
+pub mod c_abi;
 
 pub use value::{PilotVal, TAG_INT, TAG_FLOAT, TAG_BOOL, TAG_SSO_STR, TAG_NULL};
 pub use memory::{ArcHeader, BumpRegion, FLAG_ATOMIC};
 pub use concurrency::{Channel, ShadowEffectContext, Signal};
 pub use stdlib::{PilotDfaRegex, PilotStdlibIntrinsics, PilotStdlibResolver};
+pub use c_abi::{
+    generate_c_runtime_header, pilot_rt_alloc_arc, pilot_rt_drop, pilot_rt_drop_reuse,
+    pilot_rt_dup, pilot_rt_print_f64, pilot_rt_print_i64, pilot_rt_region_alloc,
+    pilot_rt_region_enter, pilot_rt_region_exit,
+};
 
 #[cfg(test)]
 mod tests {
@@ -131,5 +137,37 @@ mod tests {
         assert!(PilotStdlibResolver::is_stdlib_module("std.math"));
         assert!(PilotStdlibResolver::is_stdlib_module("std.core"));
         assert!(!PilotStdlibResolver::is_stdlib_module("unknown.module"));
+    }
+
+    #[test]
+    fn test_c_abi_regions_arc_and_drop_reuse() {
+        unsafe {
+            // Region alloc
+            let region = pilot_rt_region_enter();
+            let ptr1 = pilot_rt_region_alloc(region, 64, 8);
+            assert!(!ptr1.is_null());
+            pilot_rt_region_exit(region);
+
+            // ARC alloc & dup
+            let arc_ptr = pilot_rt_alloc_arc(32);
+            assert!(!arc_ptr.is_null());
+            let dup_ptr = pilot_rt_dup(arc_ptr);
+            assert_eq!(arc_ptr, dup_ptr);
+
+            // Drop 1 reference
+            pilot_rt_drop(arc_ptr, None);
+
+            // Drop-reuse on uniquely owned pointer (recycles without allocation)
+            let reused_ptr = pilot_rt_drop_reuse(arc_ptr, 32);
+            assert_eq!(arc_ptr, reused_ptr);
+
+            // Final drop
+            pilot_rt_drop(reused_ptr, None);
+
+            // Header check
+            let header = generate_c_runtime_header();
+            assert!(header.contains("pilot_rt_region_enter"));
+            assert!(header.contains("pilot_rt_drop_reuse"));
+        }
     }
 }

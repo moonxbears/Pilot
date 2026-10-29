@@ -3,6 +3,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use crate::asm::AsmEmitter;
 use crate::c_target::CTargetEmitter;
 use crate::llvm::LlvmEmitter;
 use crate::wasm::WasmEmitter;
@@ -13,6 +14,7 @@ pub enum BuildTarget {
     Llvm,
     Wasm,
     C,
+    Asm,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -56,52 +58,53 @@ impl BuildDriver {
         source_text: &str,
         options: &BuildOptions,
     ) -> Result<String, String> {
-        if source_text.trim().is_empty() {
-            return match options.target {
-                BuildTarget::Llvm | BuildTarget::Native => {
-                    let mut emitter = LlvmEmitter::new();
-                    emitter.emit_module_header(module_name);
-                    emitter.emit_function("main", "i64", &[], &["ret i64 0"]);
-                    Ok(emitter.finish())
-                }
-                BuildTarget::C => {
-                    let mut emitter = CTargetEmitter::new();
-                    emitter.emit_header();
-                    emitter.emit_function("int", "main", &[], "  return 0;\n");
-                    Ok(emitter.finish())
-                }
-                BuildTarget::Wasm => {
-                    let mut emitter = WasmEmitter::new();
-                    Ok(emitter.emit_wat_module(module_name, 0))
-                }
-            };
-        }
-
-        // Lower real Pilot source to C
-        let c_code = lower_pilot_to_c(source_text);
+        let arena = pilot_parser::parse(source_text);
+        let root = arena.root;
+        let analysis = pilot_analysis::pipeline::AnalysisPipeline::analyze(&arena, root);
 
         match options.target {
-            BuildTarget::C => Ok(c_code),
+            BuildTarget::C => {
+                let c_code = CTargetEmitter::emit_ast_module(&arena, &analysis, source_text);
+                Ok(c_code)
+            }
             BuildTarget::Llvm => {
                 let mut emitter = LlvmEmitter::new();
-                emitter.emit_module_header(module_name);
-                emitter.emit_function("main", "i64", &[], &["ret i64 0"]);
-                Ok(emitter.finish())
+                Ok(emitter.emit_arena_program(&arena, module_name))
             }
             BuildTarget::Wasm => {
                 let mut emitter = WasmEmitter::new();
-                Ok(emitter.emit_wat_module(module_name, 0))
+                Ok(emitter.emit_wat_from_ast(&arena, module_name))
+            }
+            BuildTarget::Asm => {
+                let opt = match options.opt_level {
+                    OptLevel::O0 => 0,
+                    OptLevel::O2 => 2,
+                    OptLevel::O3 => 3,
+                };
+                AsmEmitter::emit_assembly(&arena, module_name, opt, true)
             }
             BuildTarget::Native => {
-                // Compile C code using clang or gcc into native machine code
+                let c_code = CTargetEmitter::emit_ast_module(&arena, &analysis, source_text);
                 let opt_flag = match options.opt_level {
                     OptLevel::O0 => "-O0",
                     OptLevel::O2 => "-O2",
                     OptLevel::O3 => "-O3",
                 };
 
-                let tmp_c = format!("/tmp/pilot_{}_{}.c", module_name, std::process::id());
+                let tmp_dir = std::env::temp_dir().join(format!("pilot_build_{}", std::process::id()));
+                let _ = fs::create_dir_all(&tmp_dir);
+                let tmp_c = tmp_dir.join(format!("{}.c", module_name));
+                let header_path = tmp_dir.join("pilot_runtime.h");
+
+                // Write out C-ABI runtime header
+                let header_content = pilot_rt::generate_c_runtime_header();
+                if let Err(e) = fs::write(&header_path, header_content) {
+                    let _ = fs::remove_dir_all(&tmp_dir);
+                    return Err(format!("Failed to write runtime header: {}", e));
+                }
+
                 if let Err(e) = fs::write(&tmp_c, &c_code) {
+                    let _ = fs::remove_dir_all(&tmp_dir);
                     return Err(format!("Failed to write temporary C source: {}", e));
                 }
 
@@ -111,11 +114,21 @@ impl BuildDriver {
                     "gcc"
                 };
 
+                let inc_flag = format!("-I{}", tmp_dir.display());
                 let status = Command::new(compiler)
-                    .args([opt_flag, "-fno-strict-aliasing", &tmp_c, "-o", options.output_path.to_str().unwrap_or("a.out")])
+                    .args([
+                        opt_flag,
+                        "-fno-strict-aliasing",
+                        &inc_flag,
+                        tmp_c.to_str().unwrap(),
+                        "-lm",
+                        "-pthread",
+                        "-o",
+                        options.output_path.to_str().unwrap_or("a.out"),
+                    ])
                     .status();
 
-                let _ = fs::remove_file(&tmp_c);
+                let _ = fs::remove_dir_all(&tmp_dir);
 
                 match status {
                     Ok(s) if s.success() => Ok(format!("Compiled native binary -> {:?}", options.output_path)),
@@ -124,211 +137,5 @@ impl BuildDriver {
                 }
             }
         }
-    }
-}
-
-fn lower_pilot_to_c(src: &str) -> String {
-    let mut out = String::with_capacity(src.len() * 2 + 1024);
-    out.push_str("/* Generated by Pilot Compiler (C11/C23 Backend) */\n");
-    out.push_str("#include <stdint.h>\n");
-    out.push_str("#include <stdbool.h>\n");
-    out.push_str("#include <stddef.h>\n");
-    out.push_str("#include <stdio.h>\n");
-    out.push_str("#include <stdlib.h>\n");
-    out.push_str("#include <string.h>\n");
-    out.push_str("#include <time.h>\n\n");
-
-    let lines: Vec<&str> = src.lines().collect();
-
-    // Determine if the file explicitly defines a `main` function (e.g. `def main()` or `fn main()`)
-    let has_explicit_main = lines.iter().any(|l| {
-        let trimmed = l.trim();
-        (trimmed.starts_with("def main") || trimmed.starts_with("fn main")) && trimmed.contains('(')
-    });
-
-    let mut in_fn = false;
-    let mut fn_depth: usize = 0;
-    let mut top_level_statements: Vec<String> = Vec::new();
-
-    let mut in_main_fn = false;
-
-    for line in lines {
-        let trimmed = line.trim();
-        if trimmed.starts_with("//") || trimmed.starts_with('#') || trimmed.is_empty() {
-            if in_fn || has_explicit_main {
-                out.push_str(line);
-                out.push('\n');
-            }
-            continue;
-        }
-
-        // Function definition
-        if (trimmed.starts_with("def ") || trimmed.starts_with("fn ")) && trimmed.contains('(') {
-            let rest = if trimmed.starts_with("def ") { &trimmed[4..] } else { &trimmed[3..] };
-            let fn_name = rest.split('(').next().unwrap().trim();
-            in_fn = true;
-            fn_depth = trimmed.matches('{').count().saturating_sub(trimmed.matches('}').count());
-            if fn_name == "main" {
-                in_main_fn = true;
-                out.push_str("int main(void) {\n");
-                continue;
-            } else {
-                in_main_fn = false;
-                let ret_ty = if let Some(idx) = rest.rfind("->") {
-                    let ty_part = rest[idx + 2..].split('{').next().unwrap().trim();
-                    map_type(ty_part)
-                } else {
-                    "void".to_string()
-                };
-
-                let param_str = rest.split('(').nth(1).unwrap().split(')').next().unwrap();
-                let params: Vec<String> = if param_str.trim().is_empty() {
-                    vec!["void".to_string()]
-                } else {
-                    param_str.split(',').map(|p| {
-                        let parts: Vec<&str> = p.split(':').collect();
-                        if parts.len() == 2 {
-                            format!("{} {}", map_type(parts[1].trim()), parts[0].trim())
-                        } else {
-                            format!("int64_t {}", p.trim())
-                        }
-                    }).collect()
-                };
-
-                out.push_str(&format!("{} {}({}) {{\n", ret_ty, fn_name, params.join(", ")));
-                continue;
-            }
-        }
-
-        let was_in_fn = in_fn;
-        if in_fn {
-            let open_cnt = trimmed.matches('{').count();
-            let close_cnt = trimmed.matches('}').count();
-            fn_depth = (fn_depth + open_cnt).saturating_sub(close_cnt);
-            if fn_depth == 0 {
-                in_fn = false;
-                in_main_fn = false;
-            }
-        }
-
-        // Statements translation
-        let mut translated = line.to_string();
-        if translated.trim().starts_with("if ") && translated.contains('{') {
-            let tr = translated.trim();
-            let cond = tr.strip_prefix("if ").unwrap().split('{').next().unwrap().trim();
-            if !cond.starts_with('(') || !cond.ends_with(')') {
-                translated = format!("    if ({}) {{", cond);
-            }
-        }
-        if translated.trim().starts_with("while ") && translated.contains('{') {
-            let tr = translated.trim();
-            let cond = tr.strip_prefix("while ").unwrap().split('{').next().unwrap().trim();
-            if !cond.starts_with('(') || !cond.ends_with(')') {
-                translated = format!("    while ({}) {{", cond);
-            }
-        }
-
-        if translated.contains("let ") || translated.contains("var ") {
-            let is_let = translated.contains("let ");
-            let kw = if is_let { "let " } else { "var " };
-            if let Some(pos) = translated.find(kw) {
-                let prefix = &translated[..pos];
-                let remainder = &translated[pos + kw.len()..];
-                if let Some(eq_pos) = remainder.find('=') {
-                    let var_part = &remainder[..eq_pos];
-                    let val_part = &remainder[eq_pos + 1..];
-                    let var_name = if let Some(colon_pos) = var_part.find(':') {
-                        var_part[..colon_pos].trim()
-                    } else {
-                        var_part.trim()
-                    };
-                    translated = format!("{}__auto_type {} ={}", prefix, var_name, val_part);
-                } else {
-                    translated = translated.replace("let ", "__auto_type ").replace("var ", "__auto_type ");
-                }
-            }
-        }
-
-        if translated.contains("println!(") {
-            translated = translated.replace("println!(", "printf(");
-            if let Some(end_idx) = translated.rfind(')') {
-                translated.insert_str(end_idx, ", \"\\n\"");
-            }
-        } else if translated.contains("println(") {
-            let tr = translated.trim().trim_end_matches(';');
-            if let Some(inner) = tr.strip_prefix("println(").and_then(|s| s.strip_suffix(')')) {
-                // Check if inner is a single string literal e.g. "..."
-                let inner_trim = inner.trim();
-                if inner_trim.starts_with('"') && inner_trim.ends_with('"') && !inner_trim.contains('%') {
-                    let unquoted = &inner_trim[1..inner_trim.len() - 1];
-                    translated = format!("    printf(\"{}\\n\");", unquoted);
-                } else if !inner_trim.contains(',') {
-                    translated = format!("    printf(\"%s\\n\", (const char*)({}));", inner_trim);
-                } else {
-                    translated = translated.replace("println(", "printf(");
-                    if let Some(end_idx) = translated.rfind(')') {
-                        translated.insert_str(end_idx, ", \"\\n\"");
-                    }
-                }
-            } else {
-                translated = translated.replace("println(", "printf(");
-                if let Some(end_idx) = translated.rfind(')') {
-                    translated.insert_str(end_idx, ", \"\\n\"");
-                }
-            }
-        } else if translated.contains("print(") {
-            translated = translated.replace("print(", "printf(");
-        }
-
-        let is_ret = in_main_fn && translated.trim().starts_with("return ");
-        if is_ret {
-            let tr = translated.trim().to_string();
-            let ret_val = tr.strip_prefix("return ").unwrap().trim_end_matches(';').trim();
-            if ret_val != "0" {
-                out.push_str(&format!("    printf(\"RESULT: %lld\\n\", (long long)({}));\n", ret_val));
-                out.push_str("    return 0;\n");
-                continue;
-            }
-        }
-
-        let needs_semi = {
-            let t = translated.trim();
-            !t.ends_with(';') && !t.ends_with('{') && !t.ends_with('}') && !t.is_empty()
-        };
-        if needs_semi {
-            translated.push(';');
-        }
-
-        if was_in_fn || has_explicit_main {
-            out.push_str(&translated);
-            out.push('\n');
-        } else {
-            // Collect top-level statements for implicit main
-            top_level_statements.push(translated);
-        }
-    }
-
-    // Synthesize `main` if top-level script statements exist
-    if !has_explicit_main {
-        out.push_str("\nint main(void) {\n");
-        for stmt in top_level_statements {
-            out.push_str("    ");
-            out.push_str(&stmt.trim_start());
-            out.push('\n');
-        }
-        out.push_str("    return 0;\n}\n");
-    }
-
-    out
-}
-
-fn map_type(ty: &str) -> String {
-    match ty {
-        "int" | "i64" => "int64_t".to_string(),
-        "float" | "f64" => "double".to_string(),
-        "bool" => "bool".to_string(),
-        "str" | "string" => "const char*".to_string(),
-        "void" => "void".to_string(),
-        other => other.to_string(),
     }
 }

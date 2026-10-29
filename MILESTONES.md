@@ -1151,24 +1151,32 @@ struct PilotVal {
 
 ---
 
-## Milestone 40: True AST-Driven Native Codegen Backends (`C11/C23`, `LLVM IR`, `WASM/WASI`, `ASM`) & Linkable `libpilot_rt` (`pilot-codegen`)
+## Milestone 40: True AST-Driven Native Codegen Backends (`C11/C23`, `LLVM IR`, `WASM/WASI`, `ASM`) & Linkable `libpilot_rt` (`pilot-codegen`) — **COMPLETED**
 **Goal**: Replace line-by-line text substitution in `driver.rs` and hardcoded stubs in `llvm.rs`/`wasm.rs` with full, typed `AstArena`-driven code generators linked against a standalone C-ABI runtime library (`libpilot_rt.a`).
 
 ### Legacy C# Modules Ported & Wired (`v1.x-dotnet-archive`)
 - `Native/PilotNativeCompiler.cs`, `Native/Llvm/PilotLlvmEmitter.cs`, `Native/CAbi/PilotCAbiEmitter.cs`, `Native/Wasm/PilotWasmEmitter.cs`, `Native/Assembly/PilotAssemblyEmitter.cs`, & `Runtime/CppBackend/PilotCppBackend.cs`
 
 ### Sub-Tasks & Deliverables
-- [ ] **40.1: Linkable Static/Shared C-ABI Runtime Library (`crates/pilot-rt/src/c_abi.rs` — Completes `M23.1`)**
+- [x] **40.1: Linkable Static/Shared C-ABI Runtime Library (`crates/pilot-rt/src/c_abi.rs` — Completes `M23.1`)**
   - Export `#[no_mangle] pub extern "C"` symbols from `pilot-rt` (`pilot_rt_region_enter`, `pilot_rt_region_exit`, `pilot_rt_alloc_arc`, `pilot_rt_dup`, `pilot_rt_drop`, `pilot_rt_drop_reuse`, `pilot_rt_str_concat`, `pilot_rt_list_*`, `pilot_rt_map_*`, `pilot_rt_table_*`, `pilot_rt_chan_*`, `pilot_rt_print_*`, `pilot_rt_panic_contract`) and emit `pilot_runtime.h` + `libpilot_rt.a`.
-- [ ] **40.2: Full `AstArena`-Driven C11/C23 Emitter (`crates/pilot-codegen/src/c_target.rs`)**
+- [x] **40.2: Full `AstArena`-Driven C11/C23 Emitter (`crates/pilot-codegen/src/c_target.rs`)**
   - Replace `lower_pilot_to_c` string replacements in `driver.rs` with a complete recursive `AstArena` walker backed by `AnalysisResult` types and `pilot-perceus` annotations:
     - Emit C structs for records/classes, tagged unions for ADTs, niche-optimized `T?` optionals, register-returned `Result_<T, E>` structs for `T ! E`, `Dual` structs for `!@`, and `CallFrame_<FnId>` structs for `!&`.
     - Lower `match` jump tables, 3-tier `ForExpr` loops, `guard`/`defer` cleanup labels, closures/upvalue structs, and Perceus `pilot_rt_dup` / `pilot_rt_drop_reuse` calls.
-- [ ] **40.3: Full `AstArena`-Driven LLVM IR & Native Assembly Emitters (`llvm.rs`, `asm.rs` — Completes `M23.2`)**
+- [x] **40.3: Full `AstArena`-Driven LLVM IR & Native Assembly Emitters (`llvm.rs`, `asm.rs` — Completes `M23.2`)**
   - Replace the hardcoded `ret i64 42` stub in `LlvmEmitter::emit_arena_program` (`crates/pilot-codegen/src/llvm.rs`) with full SSA basic-block generation from `AstArena` (`alloca`/`phi`, `getelementptr` on ADTs/records, `switch` for `match`, `<4 x float>` SIMD intrinsics for `Matrix`, Perceus RC calls, and `!dbg` DWARF debug metadata).
   - Port `PilotAssemblyEmitter.cs` (`crates/pilot-codegen/src/asm.rs`) for direct x86_64 SysV/Win64 and ARM64 AAPCS64 assembly emission (`--target asm`).
-- [ ] **40.4: Full `AstArena`-Driven WebAssembly (`.wasm` + WASI + JS/TS Bindings — `wasm.rs`, Completes `M23.3`)**
+- [x] **40.4: Full `AstArena`-Driven WebAssembly (`.wasm` + WASI + JS/TS Bindings — `wasm.rs`, Completes `M23.3`)**
   - Lower `AstArena` functions, linear memory `SliceBuffer` layouts, and `wasi_snapshot_preview1` imports into valid `.wat` and binary `.wasm` modules alongside auto-generated `.mjs` and `.d.ts` zero-copy TypeScript bindings.
+
+### Verification Notes
+- Verified `pilot_rt::c_abi`: Bump regions, ARC retain/release, and drop-guided reuse executed without allocations.
+- Verified `pilot_codegen::c_target`: Compiled and executed `crates/pilot-bench/suite/sieve.pilot` natively via clang producing exact prime count (`PRIMES: 148933`) and `fib.pilot` (`RESULT: 14930352`).
+- Verified `pilot_codegen::llvm`: Full typed SSA emission with `@pilot_rt_dup` and `@pilot_rt_drop` intrinsics.
+- Verified `pilot_codegen::asm`: Ported vector x86_64 AVX2/FMA assembly generation with compiler toolchain detection.
+- Verified `pilot_codegen::wasm`: Valid `.wat`, standalone `.wasm` binary assembly, and TypeScript/ESM bindings generation.
+- Verified workspace: All tests passed across all 18 crates.
 
 ---
 
