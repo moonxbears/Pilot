@@ -1,0 +1,23 @@
+[package]
+name = "pilot-lsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Standalone zero-GC native language server for Pilot"
+
+[[bin]]
+name = "pilot-lsp"
+path = "src/main.rs"
+
+[lib]
+name = "pilot_lsp"
+path = "src/lib.rs"
+
+[dependencies]
+pilot-span = { path = "../pilot-span" }
+pilot-lexer = { path = "../pilot-lexer" }
+pilot-syntax = { path = "../pilot-syntax" }
+pilot-fmt = { path = "../pilot-fmt" }
+pilot-incremental = { path = "../pilot-incremental" }
+pilot-db = { path = "../pilot-db" }

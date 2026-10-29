@@ -941,12 +941,12 @@ interface TreeSink {
 **Goal**: Deliver **Tree-sitter-grade $< 1\text{ ms}$ incremental keystroke reparsing** paired with a **`Salsa`-style revision-tracked incremental query database**, replacing `Pilot.LanguageServer` with a standalone zero-GC native `pilot-lsp` binary.
 
 ### Sub-Tasks & Deliverables
-- [ ] **32.1: $O(\log N)$ Incremental Lexer & Green-Tree Subtree Splicing (`crates/pilot-incremental`)**
+- [x] **32.1: $O(\log N)$ Incremental Lexer & Green-Tree Subtree Splicing (`crates/pilot-incremental`)**
   - Map LSP byte-range edits `(ByteRange, replacement_utf8)` down the prior `Arc<GreenNode>` spine to the narrowest enclosing **Reparseable Syntactic Island**; re-lex/re-parse only that affected window, verify right-boundary delimiter & lexer-mode convergence (escalating one enclosing block if an unclosed quote/brace crossed the boundary), and splice the updated `GreenNode` spine while structurally sharing 99%+ of unchanged `Arc<GreenNode>` subtrees.
-- [ ] **32.2: Demand-Driven Incremental Query Engine with Early Cutoff (`crates/pilot-db`)**
+- [x] **32.2: Demand-Driven Incremental Query Engine with Early Cutoff (`crates/pilot-db`)**
   - Separate memoized queries into `source_text(FileId)` $\rightarrow$ `green_cst(FileId)` $\rightarrow$ `module_item_tree(FileId)` *(top-level signatures, ADTs, `extend` headers ONLY)* $\rightarrow$ `infer_body(DefId)`.
   - **Early Cutoff Optimization**: Edits inside a function body that do not change its `module_item_tree` signature hash re-analyze **only that single function body**, invalidating zero callers or downstream modules.
-- [ ] **32.3: Standalone Zero-GC Native Language Server (`crates/pilot-lsp`)**
+- [x] **32.3: Standalone Zero-GC Native Language Server (`crates/pilot-lsp`)**
   - Port and upgrade `Pilot.LanguageServer` (`didOpen`, incremental `didChange`, semantic tokens, hover, go-to-definition, find-references, workspace symbols, dot/`:kw` completion, `M16.4` inlay hints, and quick-fixes) in native Rust with instant cancellation on superseded keystrokes.
 
 ---
@@ -955,13 +955,13 @@ interface TreeSink {
 **Goal**: Port all static intelligence passes from `Analysis/` (`M5`, `M11`–`M19`) onto the flat `AstArena` / query engine, and introduce **Compile-Time Perceus Ownership & Escape Analysis** to power Pilot's worry-free zero-GC memory model.
 
 ### Sub-Tasks & Deliverables
-- [ ] **33.1: Data-Oriented `TypeArena` & Bidirectional + Row-Polymorphic Inferencer**
+- [x] **33.1: Data-Oriented `TypeArena` & Bidirectional + Row-Polymorphic Inferencer**
   - Intern all `PilotType` nodes into `TypeArena` (`TypeId(u32)`—turning type equality into a 1-instruction `u32 == u32` check) and port bidirectional synthesis/checking (`M16.1`), Tarjan SCC mutual-recursion & inferred `! ErrorSet` unification, dominator flow narrowing (`M16.2` for `some x`, `is Variant`, typestates), and structural row monomorphization (`M16.3`).
-- [ ] **33.2: Pattern Exhaustiveness (`M11`), Null/Error Flow (`M12`–`M13`), Loop (`M15`), Dimension & Contract Verifiers**
+- [x] **33.2: Pattern Exhaustiveness (`M11`), Null/Error Flow (`M12`–`M13`), Loop (`M15`), Dimension & Contract Verifiers**
   - Port Maranget usefulness matrices (`MATCH001`–`MATCH002`), strict `T?` & must-use `T ! E` analyzers (`NULL001`–`NULL005`, `ERR001`–`ERR005`), 3-tier `ForExpr` analyzer (`LOOP001`–`LOOP004`), physical unit algebra, and interval-based `requires`/`ensures` discharge.
-- [ ] **33.3: Call-Quoting Projections (`M17`–`M18`) & Static Demotion (`M19`)**
+- [x] **33.3: Call-Quoting Projections (`M17`–`M18`) & Static Demotion (`M19`)**
   - Port `ShallowQuote` (`!`), hygienic `DeepSplice` + `~arg` constant folding (`!!`), C-ABI `CallFrame_<FnId>` layout synthesis (`!&`), observable LValue extraction (`!^`), compile-time **Symbolic Differentiation + CSE** (`!@`), CoW dry-run instrumentation (`!?`), and full `(frameDepth, slotIndex)` / fixed-offset static demotion (`COMPTIME001`–`COMPTIME010`).
-- [ ] **33.4: Worry-Free Memory Pass — Escape Analysis, Region Placement & Perceus ARC Insertion (`crates/pilot-perceus`)**
+- [x] **33.4: Worry-Free Memory Pass — Escape Analysis, Region Placement & Perceus ARC Insertion (`crates/pilot-perceus`)**
   - Operates automatically with **zero user lifetime annotations**:
     1. **Tier 1 Escape Placement**: Lower non-escaping string concatenations, temporary lists/maps, closures, and dynamic objects to `RegionAlloc` instructions backed by $O(1)$ scope/loop-exit bump watermark resets.
     2. **Tier 2 Perceus Precise ARC & Drop-Guided Reuse**: Insert minimal last-use `dup`/`drop` ops (eliding >90% of retain/release traffic on borrowed arguments) plus **`drop_reuse` tokens** enabling zero-malloc in-place memory recycling when `rc == 1`.

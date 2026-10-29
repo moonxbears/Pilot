@@ -122,6 +122,21 @@ impl LineIndex {
     pub fn line_starts(&self) -> &[u32] {
         &self.line_starts
     }
+
+    #[inline]
+    pub fn offset_to_line_col(&self, byte_offset: u32) -> (u32, u32) {
+        let loc = self.lookup(byte_offset);
+        (loc.line, loc.col)
+    }
+
+    #[inline]
+    pub fn line_col_to_offset(&self, line: u32, col: u32) -> Option<u32> {
+        if line == 0 || col == 0 {
+            return None;
+        }
+        let line_start = self.line_starts.get((line - 1) as usize).copied()?;
+        Some((line_start + (col - 1)).min(self.source_len))
+    }
 }
 
 #[inline]

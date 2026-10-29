@@ -9,6 +9,11 @@ members = [
     "crates/pilot-parser",
     "crates/pilot-syntax",
     "crates/pilot-fmt",
+    "crates/pilot-incremental",
+    "crates/pilot-db",
+    "crates/pilot-lsp",
+    "crates/pilot-analysis",
+    "crates/pilot-perceus",
     "crates/pilot-ffi",
 ]
 

@@ -1,0 +1,13 @@
+[package]
+name = "pilot-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Salsa-style revision-tracked incremental query database with early cutoff for Pilot"
+
+[dependencies]
+pilot-span = { path = "../pilot-span" }
+pilot-lexer = { path = "../pilot-lexer" }
+pilot-syntax = { path = "../pilot-syntax" }
+pilot-incremental = { path = "../pilot-incremental" }

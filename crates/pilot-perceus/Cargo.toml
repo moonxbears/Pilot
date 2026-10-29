@@ -1,0 +1,11 @@
+[package]
+name = "pilot-perceus"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pilot-arena = { path = "../pilot-arena" }
+pilot-ast = { path = "../pilot-ast" }
+pilot-intern = { path = "../pilot-intern" }
+pilot-span = { path = "../pilot-span" }
+pilot-analysis = { path = "../pilot-analysis" }

@@ -575,6 +575,7 @@ public sealed unsafe class NativeAstArenaView : IDisposable
 
     public uint RootId { get; }
     public uint LineCount { get; }
+    public IntPtr Handle => _handle;
 
     internal NativeAstArenaView(
         IntPtr handle,
@@ -820,11 +821,195 @@ public sealed class NativeCstView : IDisposable
 }
 
 /// <summary>
+/// Milestone 32.2: Managed wrapper around the demand-driven incremental database with early cutoff.
+/// </summary>
+public sealed class NativeDatabaseHandle : IDisposable
+{
+    private IntPtr _handle;
+
+    internal NativeDatabaseHandle(IntPtr handle)
+    {
+        _handle = handle;
+    }
+
+    public IntPtr Handle => _handle;
+
+    public void SetSource(uint fileId, string source)
+    {
+        ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
+        NativeAstBridge.DbSetSource(_handle, fileId, source);
+    }
+
+    public void ApplyEdit(uint fileId, uint start, uint end, string replacement)
+    {
+        ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
+        NativeAstBridge.DbApplyEdit(_handle, fileId, start, end, replacement);
+    }
+
+    public nuint EarlyCutoffCount
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
+            return NativeAstBridge.DbEarlyCutoffCount(_handle);
+        }
+    }
+
+    public ulong GetSignatureHash(uint fileId)
+    {
+        ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
+        return NativeAstBridge.DbSignatureHash(_handle, fileId);
+    }
+
+    public void Dispose()
+    {
+        var h = _handle;
+        if (h != IntPtr.Zero)
+        {
+            _handle = IntPtr.Zero;
+            NativeAstBridge.FreeDb(h);
+        }
+        GC.SuppressFinalize(this);
+    }
+
+    ~NativeDatabaseHandle()
+    {
+        var h = _handle;
+        if (h != IntPtr.Zero)
+        {
+            _handle = IntPtr.Zero;
+            NativeAstBridge.FreeDb(h);
+        }
+    }
+}
+
+/// <summary>
+/// Milestone 32.3: Managed wrapper around the native zero-GC language server.
+/// </summary>
+public sealed class NativeLspServerHandle : IDisposable
+{
+    private IntPtr _handle;
+
+    internal NativeLspServerHandle(IntPtr handle)
+    {
+        _handle = handle;
+    }
+
+    public IntPtr Handle => _handle;
+
+    public string? SendMessage(string jsonMsg)
+    {
+        ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
+        return NativeAstBridge.LspHandleMessage(_handle, jsonMsg);
+    }
+
+    public void Dispose()
+    {
+        var h = _handle;
+        if (h != IntPtr.Zero)
+        {
+            _handle = IntPtr.Zero;
+            NativeAstBridge.FreeLsp(h);
+        }
+        GC.SuppressFinalize(this);
+    }
+
+    ~NativeLspServerHandle()
+    {
+        var h = _handle;
+        if (h != IntPtr.Zero)
+        {
+            _handle = IntPtr.Zero;
+            NativeAstBridge.FreeLsp(h);
+        }
+    }
+}
+
+/// <summary>
+/// Milestone 33.1–33.3: Managed wrapper around static analysis results.
+/// </summary>
+public sealed class NativeAnalysisHandle : IDisposable
+{
+    private IntPtr _handle;
+
+    internal NativeAnalysisHandle(IntPtr handle)
+    {
+        _handle = handle;
+    }
+
+    public IntPtr Handle => _handle;
+    public nuint DiagnosticCount => NativeAstBridge.AnalysisDiagnosticCount(_handle);
+    public bool HasErrors => NativeAstBridge.AnalysisHasErrors(_handle);
+
+    public void Dispose()
+    {
+        var h = _handle;
+        if (h != IntPtr.Zero)
+        {
+            _handle = IntPtr.Zero;
+            NativeAstBridge.FreeAnalysis(h);
+        }
+        GC.SuppressFinalize(this);
+    }
+
+    ~NativeAnalysisHandle()
+    {
+        var h = _handle;
+        if (h != IntPtr.Zero)
+        {
+            _handle = IntPtr.Zero;
+            NativeAstBridge.FreeAnalysis(h);
+        }
+    }
+}
+
+/// <summary>
+/// Milestone 33.4: Managed wrapper around Perceus optimizer results.
+/// </summary>
+public sealed class NativePerceusHandle : IDisposable
+{
+    private IntPtr _handle;
+
+    internal NativePerceusHandle(IntPtr handle)
+    {
+        _handle = handle;
+    }
+
+    public IntPtr Handle => _handle;
+    public nuint RegionAllocCount => NativeAstBridge.PerceusRegionAllocCount(_handle);
+    public nuint StackAllocCount => NativeAstBridge.PerceusStackAllocCount(_handle);
+    public nuint GlobalAllocCount => NativeAstBridge.PerceusGlobalAllocCount(_handle);
+    public nuint DropReuseCount => NativeAstBridge.PerceusDropReuseCount(_handle);
+    public nuint ElidedRetainCount => NativeAstBridge.PerceusElidedRetainCount(_handle);
+
+    public void Dispose()
+    {
+        var h = _handle;
+        if (h != IntPtr.Zero)
+        {
+            _handle = IntPtr.Zero;
+            NativeAstBridge.FreePerceus(h);
+        }
+        GC.SuppressFinalize(this);
+    }
+
+    ~NativePerceusHandle()
+    {
+        var h = _handle;
+        if (h != IntPtr.Zero)
+        {
+            _handle = IntPtr.Zero;
+            NativeAstBridge.FreePerceus(h);
+        }
+    }
+}
+
+/// <summary>
 /// Milestone 28.4 &amp; 29.5: Zero-copy C-ABI strangler-fig bridge between C# and the Rust <c>pilot-ffi</c> crate.
 /// </summary>
 public static unsafe class NativeAstBridge
 {
-    public const uint ExpectedAbiVersion = 3101;
+    public const uint ExpectedAbiVersion = 3301;
 
     private static readonly object SyncLock = new();
     private static IntPtr _libraryHandle;
@@ -855,6 +1040,31 @@ public static unsafe class NativeAstBridge
     private static delegate* unmanaged[Cdecl]<IntPtr, nuint*, byte*> _fnCstToText;
     private static delegate* unmanaged[Cdecl]<byte*, nuint, int, byte, nuint*, byte*, byte*> _fnFormatSource;
     private static delegate* unmanaged[Cdecl]<byte*, nuint, void> _fnFreeString;
+
+    private static delegate* unmanaged[Cdecl]<IntPtr, byte*, nuint, uint, uint, byte*, nuint, ulong*, nuint*, IntPtr> _fnIncrementalReparse;
+    private static delegate* unmanaged[Cdecl]<IntPtr> _fnDbNew;
+    private static delegate* unmanaged[Cdecl]<IntPtr, void> _fnDbFree;
+    private static delegate* unmanaged[Cdecl]<IntPtr, uint, byte*, nuint, void> _fnDbSetSource;
+    private static delegate* unmanaged[Cdecl]<IntPtr, uint, uint, uint, byte*, nuint, void> _fnDbApplyEdit;
+    private static delegate* unmanaged[Cdecl]<IntPtr, nuint> _fnDbEarlyCutoffCount;
+    private static delegate* unmanaged[Cdecl]<IntPtr, uint, ulong> _fnDbSignatureHash;
+
+    private static delegate* unmanaged[Cdecl]<IntPtr> _fnLspNew;
+    private static delegate* unmanaged[Cdecl]<IntPtr, void> _fnLspFree;
+    private static delegate* unmanaged[Cdecl]<IntPtr, byte*, nuint, nuint*, byte*> _fnLspHandleMessage;
+
+    private static delegate* unmanaged[Cdecl]<IntPtr, IntPtr> _fnAnalysisRun;
+    private static delegate* unmanaged[Cdecl]<IntPtr, void> _fnAnalysisFree;
+    private static delegate* unmanaged[Cdecl]<IntPtr, nuint> _fnAnalysisDiagnosticCount;
+    private static delegate* unmanaged[Cdecl]<IntPtr, byte> _fnAnalysisHasErrors;
+
+    private static delegate* unmanaged[Cdecl]<IntPtr, IntPtr> _fnPerceusRun;
+    private static delegate* unmanaged[Cdecl]<IntPtr, void> _fnPerceusFree;
+    private static delegate* unmanaged[Cdecl]<IntPtr, nuint> _fnPerceusRegionAllocCount;
+    private static delegate* unmanaged[Cdecl]<IntPtr, nuint> _fnPerceusStackAllocCount;
+    private static delegate* unmanaged[Cdecl]<IntPtr, nuint> _fnPerceusGlobalAllocCount;
+    private static delegate* unmanaged[Cdecl]<IntPtr, nuint> _fnPerceusDropReuseCount;
+    private static delegate* unmanaged[Cdecl]<IntPtr, nuint> _fnPerceusElidedRetainCount;
 
     static NativeAstBridge()
     {
@@ -1116,6 +1326,219 @@ public static unsafe class NativeAstBridge
         }
     }
 
+    /// <summary>
+    /// Milestone 32.1: Incrementally updates a native CST with sub-millisecond subtree splicing.
+    /// </summary>
+    public static NativeCstView ReparseIncremental(
+        NativeCstView oldCst,
+        string oldSource,
+        uint start,
+        uint end,
+        string replacement,
+        out ulong reparseMicros,
+        out nuint reusedNodes)
+    {
+        ArgumentNullException.ThrowIfNull(oldCst);
+        ArgumentNullException.ThrowIfNull(oldSource);
+        ArgumentNullException.ThrowIfNull(replacement);
+        EnsureLoaded();
+
+        byte[] oldBytes = Encoding.UTF8.GetBytes(oldSource);
+        byte[] repBytes = Encoding.UTF8.GetBytes(replacement);
+
+        ulong micros = 0;
+        nuint reused = 0;
+        IntPtr newHandle;
+
+        fixed (byte* oldPtr = oldBytes)
+        fixed (byte* repPtr = repBytes)
+        {
+            newHandle = _fnIncrementalReparse(
+                oldCst.Handle,
+                oldPtr,
+                (nuint)oldBytes.Length,
+                start,
+                end,
+                repPtr,
+                (nuint)repBytes.Length,
+                &micros,
+                &reused);
+        }
+
+        reparseMicros = micros;
+        reusedNodes = reused;
+
+        if (newHandle == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("pilot_incremental_reparse returned null.");
+        }
+
+        return new NativeCstView(newHandle);
+    }
+
+    public static NativeDatabaseHandle CreateDatabase()
+    {
+        EnsureLoaded();
+        IntPtr h = _fnDbNew();
+        return new NativeDatabaseHandle(h);
+    }
+
+    public static NativeLspServerHandle CreateLspServer()
+    {
+        EnsureLoaded();
+        IntPtr h = _fnLspNew();
+        return new NativeLspServerHandle(h);
+    }
+
+    internal static void DbSetSource(IntPtr db, uint fileId, string source)
+    {
+        EnsureLoaded();
+        byte[] bytes = Encoding.UTF8.GetBytes(source);
+        fixed (byte* ptr = bytes)
+        {
+            _fnDbSetSource(db, fileId, ptr, (nuint)bytes.Length);
+        }
+    }
+
+    internal static void DbApplyEdit(IntPtr db, uint fileId, uint start, uint end, string replacement)
+    {
+        EnsureLoaded();
+        byte[] repBytes = Encoding.UTF8.GetBytes(replacement);
+        fixed (byte* ptr = repBytes)
+        {
+            _fnDbApplyEdit(db, fileId, start, end, ptr, (nuint)repBytes.Length);
+        }
+    }
+
+    internal static nuint DbEarlyCutoffCount(IntPtr db)
+    {
+        EnsureLoaded();
+        return _fnDbEarlyCutoffCount(db);
+    }
+
+    internal static ulong DbSignatureHash(IntPtr db, uint fileId)
+    {
+        EnsureLoaded();
+        return _fnDbSignatureHash(db, fileId);
+    }
+
+    internal static void FreeDb(IntPtr db)
+    {
+        if (db != IntPtr.Zero && _fnDbFree != null)
+        {
+            _fnDbFree(db);
+        }
+    }
+
+    internal static string? LspHandleMessage(IntPtr server, string jsonMsg)
+    {
+        EnsureLoaded();
+        byte[] msgBytes = Encoding.UTF8.GetBytes(jsonMsg);
+        nuint outLen = 0;
+        byte* resultPtr;
+
+        fixed (byte* ptr = msgBytes)
+        {
+            resultPtr = _fnLspHandleMessage(server, ptr, (nuint)msgBytes.Length, &outLen);
+        }
+
+        if (resultPtr == null || outLen == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Encoding.UTF8.GetString(resultPtr, (int)outLen);
+        }
+        finally
+        {
+            _fnFreeString(resultPtr, outLen);
+        }
+    }
+
+    internal static void FreeLsp(IntPtr server)
+    {
+        if (server != IntPtr.Zero && _fnLspFree != null)
+        {
+            _fnLspFree(server);
+        }
+    }
+
+    public static NativeAnalysisHandle RunAnalysis(NativeAstArenaView arena)
+    {
+        ArgumentNullException.ThrowIfNull(arena);
+        EnsureLoaded();
+        IntPtr h = _fnAnalysisRun(arena.Handle);
+        return new NativeAnalysisHandle(h);
+    }
+
+    public static NativePerceusHandle RunPerceus(NativeAstArenaView arena)
+    {
+        ArgumentNullException.ThrowIfNull(arena);
+        EnsureLoaded();
+        IntPtr h = _fnPerceusRun(arena.Handle);
+        return new NativePerceusHandle(h);
+    }
+
+    internal static nuint AnalysisDiagnosticCount(IntPtr handle)
+    {
+        EnsureLoaded();
+        return _fnAnalysisDiagnosticCount(handle);
+    }
+
+    internal static bool AnalysisHasErrors(IntPtr handle)
+    {
+        EnsureLoaded();
+        return _fnAnalysisHasErrors(handle) != 0;
+    }
+
+    internal static void FreeAnalysis(IntPtr handle)
+    {
+        if (handle != IntPtr.Zero && _fnAnalysisFree != null)
+        {
+            _fnAnalysisFree(handle);
+        }
+    }
+
+    internal static nuint PerceusRegionAllocCount(IntPtr handle)
+    {
+        EnsureLoaded();
+        return _fnPerceusRegionAllocCount(handle);
+    }
+
+    internal static nuint PerceusStackAllocCount(IntPtr handle)
+    {
+        EnsureLoaded();
+        return _fnPerceusStackAllocCount(handle);
+    }
+
+    internal static nuint PerceusGlobalAllocCount(IntPtr handle)
+    {
+        EnsureLoaded();
+        return _fnPerceusGlobalAllocCount(handle);
+    }
+
+    internal static nuint PerceusDropReuseCount(IntPtr handle)
+    {
+        EnsureLoaded();
+        return _fnPerceusDropReuseCount(handle);
+    }
+
+    internal static nuint PerceusElidedRetainCount(IntPtr handle)
+    {
+        EnsureLoaded();
+        return _fnPerceusElidedRetainCount(handle);
+    }
+
+    internal static void FreePerceus(IntPtr handle)
+    {
+        if (handle != IntPtr.Zero && _fnPerceusFree != null)
+        {
+            _fnPerceusFree(handle);
+        }
+    }
+
     private static void EnsureLoaded()
     {
         if (_libraryHandle != IntPtr.Zero)
@@ -1160,6 +1583,31 @@ public static unsafe class NativeAstBridge
             _fnCstToText = (delegate* unmanaged[Cdecl]<IntPtr, nuint*, byte*>)NativeLibrary.GetExport(lib, "pilot_cst_to_text");
             _fnFormatSource = (delegate* unmanaged[Cdecl]<byte*, nuint, int, byte, nuint*, byte*, byte*>)NativeLibrary.GetExport(lib, "pilot_format_source");
             _fnFreeString = (delegate* unmanaged[Cdecl]<byte*, nuint, void>)NativeLibrary.GetExport(lib, "pilot_free_string");
+
+            _fnIncrementalReparse = (delegate* unmanaged[Cdecl]<IntPtr, byte*, nuint, uint, uint, byte*, nuint, ulong*, nuint*, IntPtr>)NativeLibrary.GetExport(lib, "pilot_incremental_reparse");
+            _fnDbNew = (delegate* unmanaged[Cdecl]<IntPtr>)NativeLibrary.GetExport(lib, "pilot_db_new");
+            _fnDbFree = (delegate* unmanaged[Cdecl]<IntPtr, void>)NativeLibrary.GetExport(lib, "pilot_db_free");
+            _fnDbSetSource = (delegate* unmanaged[Cdecl]<IntPtr, uint, byte*, nuint, void>)NativeLibrary.GetExport(lib, "pilot_db_set_source");
+            _fnDbApplyEdit = (delegate* unmanaged[Cdecl]<IntPtr, uint, uint, uint, byte*, nuint, void>)NativeLibrary.GetExport(lib, "pilot_db_apply_edit");
+            _fnDbEarlyCutoffCount = (delegate* unmanaged[Cdecl]<IntPtr, nuint>)NativeLibrary.GetExport(lib, "pilot_db_early_cutoff_count");
+            _fnDbSignatureHash = (delegate* unmanaged[Cdecl]<IntPtr, uint, ulong>)NativeLibrary.GetExport(lib, "pilot_db_signature_hash");
+
+            _fnLspNew = (delegate* unmanaged[Cdecl]<IntPtr>)NativeLibrary.GetExport(lib, "pilot_lsp_new");
+            _fnLspFree = (delegate* unmanaged[Cdecl]<IntPtr, void>)NativeLibrary.GetExport(lib, "pilot_lsp_free");
+            _fnLspHandleMessage = (delegate* unmanaged[Cdecl]<IntPtr, byte*, nuint, nuint*, byte*>)NativeLibrary.GetExport(lib, "pilot_lsp_handle_message");
+
+            _fnAnalysisRun = (delegate* unmanaged[Cdecl]<IntPtr, IntPtr>)NativeLibrary.GetExport(lib, "pilot_analysis_run");
+            _fnAnalysisFree = (delegate* unmanaged[Cdecl]<IntPtr, void>)NativeLibrary.GetExport(lib, "pilot_analysis_free");
+            _fnAnalysisDiagnosticCount = (delegate* unmanaged[Cdecl]<IntPtr, nuint>)NativeLibrary.GetExport(lib, "pilot_analysis_diagnostic_count");
+            _fnAnalysisHasErrors = (delegate* unmanaged[Cdecl]<IntPtr, byte>)NativeLibrary.GetExport(lib, "pilot_analysis_has_errors");
+
+            _fnPerceusRun = (delegate* unmanaged[Cdecl]<IntPtr, IntPtr>)NativeLibrary.GetExport(lib, "pilot_perceus_run");
+            _fnPerceusFree = (delegate* unmanaged[Cdecl]<IntPtr, void>)NativeLibrary.GetExport(lib, "pilot_perceus_free");
+            _fnPerceusRegionAllocCount = (delegate* unmanaged[Cdecl]<IntPtr, nuint>)NativeLibrary.GetExport(lib, "pilot_perceus_region_alloc_count");
+            _fnPerceusStackAllocCount = (delegate* unmanaged[Cdecl]<IntPtr, nuint>)NativeLibrary.GetExport(lib, "pilot_perceus_stack_alloc_count");
+            _fnPerceusGlobalAllocCount = (delegate* unmanaged[Cdecl]<IntPtr, nuint>)NativeLibrary.GetExport(lib, "pilot_perceus_global_alloc_count");
+            _fnPerceusDropReuseCount = (delegate* unmanaged[Cdecl]<IntPtr, nuint>)NativeLibrary.GetExport(lib, "pilot_perceus_drop_reuse_count");
+            _fnPerceusElidedRetainCount = (delegate* unmanaged[Cdecl]<IntPtr, nuint>)NativeLibrary.GetExport(lib, "pilot_perceus_elided_retain_count");
 
             uint abi = _fnAbiVersion();
             if (abi != ExpectedAbiVersion)
