@@ -115,8 +115,8 @@ flowchart TD
 | **M26** | Self-Hosted Pilot Compiler (`pilotc` Written in Pilot) | Phase C | 📋 **Planned** | `selfhost/` (`lexer.pilot`, `parser.pilot`, `analyzer.pilot`, `pilotc.pilot`) |
 | **M27** | Package Registry Hosting & Distribution Architecture | Phase C | 🔍 **Evaluating** | `crates/pilot-pkg/`, Registry Spec |
 | **M28** | Native Rust Workspace Foundation, 16B Arena AST ABI & `SLL -> LL` Golden Oracle | Phase D | ✅ **Completed** | `Cargo.toml`, `crates/pilot-arena`, `pilot-span`, `pilot-ast`, `pilot-ffi`, `Compiler/NativeAstBridge.cs` |
-| **M29** | Stage 1 — Zero-Copy SIMD Preprocessor, Structural Indexer & Modal Lexer (`1+ GB/s`) | Phase D | 🎯 **Next Up** | `crates/pilot-lexer/` |
-| **M30** | Stage 2 — Hand-Written Recursive Descent + Pratt (TDOP) Parser & ANTLR Removal (`500+ MB/s`) | Phase D | 📋 **Planned** | `crates/pilot-parser/` |
+| **M29** | Stage 1 — Zero-Copy SIMD Preprocessor, Structural Indexer & Modal Lexer (`1+ GB/s`) | Phase D | ✅ **Completed** | `crates/pilot-lexer/`, `crates/pilot-ffi/`, `PilotPhaseDLexerTests.cs` |
+| **M30** | Stage 2 — Hand-Written Recursive Descent + Pratt (TDOP) Parser & ANTLR Removal (`500+ MB/s`) | Phase D | 🎯 **Next Up** | `crates/pilot-parser/` |
 | **M31** | Lossless Red-Green Concrete Syntax Tree (CST), Error Resilience & Native `pilot fmt` | Phase D | 📋 **Planned** | `crates/pilot-syntax/`, `crates/pilot-fmt/` |
 | **M32** | Sub-Millisecond Incremental Reparsing, `Salsa`-Style Query DB & Native `pilot-lsp` | Phase D | 📋 **Planned** | `crates/pilot-incremental/`, `crates/pilot-db/`, `crates/pilot-lsp/` |
 | **M33** | Native Static Analysis, Bidirectional Inference, Perceus Escape Pass & `comptime` | Phase D | 📋 **Planned** | `crates/pilot-analysis/`, `crates/pilot-perceus/` |
@@ -835,22 +835,22 @@ struct TokenTape {
 ```
 
 ### Sub-Tasks & Deliverables
-- [ ] **29.1: Portable SIMD / SWAR Character-Class & Delimiter Scanner**
+- [x] **29.1: Portable SIMD / SWAR Character-Class & Delimiter Scanner**
   - Implement 32-byte (`AVX2` / `AVX-512`) and 16-byte (`SSE2` / ARM `NEON`) vectorized scanners (with 64-bit SWAR scalar fallback) over 64-byte `\0`-padded UTF-8 buffers (`mmap` or single read):
     - Vectorized whitespace (`' '`, `'\t'`, `'\r'`, `'\n'`) & ASCII identifier (`[A-Za-z0-9_]`) run-length bitmask (`tzcnt` / `trailing_zeros`).
     - Vectorized fast-forward scanning for string quotes (`"`, `'`), triple-quotes (`"""`, `'''`), line comments (`#`, `//`), and block comments (`/* ... */`).
-- [ ] **29.2: Zero-Copy In-Place Preprocessor State Machine (`PREPROC001`–`PREPROC011`)**
+- [x] **29.2: Zero-Copy In-Place Preprocessor State Machine (`PREPROC001`–`PREPROC011`)**
   - Evaluate `#define`, `#undef`, `#if`, `#elif`, `#else`, `#endif`, `#region`, `#endregion`, `#error`, `#warning`, `#pragma`, `#line`, and `#nullable` directly on `ByteSpan` slices when `#` is the first non-whitespace byte on a line; skip inactive `#if` branches via SIMD `#`+newline scanning while recording `#region` and `#pragma warning` metadata in side tables (**0 bytes of source string copying**).
-- [ ] **29.3: Unified `{}` Brace & Pythonic `:` Indentation State Machine**
+- [x] **29.3: Unified `{}` Brace & Pythonic `:` Indentation State Machine**
   - Track delimiter nesting depth (`()`, `[]`, `{}`) alongside an indentation column stack (`SmallVec<[u16; 16]>`):
     - Automatically suppress virtual newline/indentation tokens inside `( ... )`, `[ ... ]`, and `{ ... }`.
     - When a block header ends a logical line with `:`, push the indented suite column and emit zero-width `VirtualLBrace` / `VirtualRBrace` tokens into the `TokenTape` at exact byte offsets—preserving 100% of original UTF-8 coordinates for diagnostics, LSP, and `pilot fmt`.
-- [ ] **29.4: Pilot Modal Lexing, Call-Quoting Maximal-Munch & Perfect-Hash Keywords**
+- [x] **29.4: Pilot Modal Lexing, Call-Quoting Maximal-Munch & Perfect-Hash Keywords**
   - **140+ Contextual Keywords in $O(1)$**: Compile-time length-partitioned `u64` word comparison / perfect hash table mapping `[u8]` slices to `TokenKind` with a `TokenFlags::IS_CONTEXTUAL_IDENT` bit (replacing ANTLR's 45-branch `identifier` rule with a 1-cycle bitmask check).
   - **Call-Quoting Disambiguation (`M17` Invariant)**: Emit `CallQuoteDeep` (`!!`), `CallQuoteAbi` (`!&`), `CallQuoteReact` (`!^`), `CallQuoteAdjoint` (`!@`), `CallQuoteEffect` (`!?`), and `CallQuoteShallow` (`!`) **if and only if** `input[pos + op_len] == b'('` with zero intervening whitespace; otherwise emit `!` / `!=` cleanly.
   - **Dimensional & Numeric Literals**: Single-pass scanning of `HEX`/`BIN`/`OCT`/`INTEGER`/`FLOAT` plus immediate suffix classification for `DURATION_LITERAL` (`ns`, `us`, `ms`, `s`, `min`, `h`), `FREQUENCY_LITERAL` (`Hz`, `kHz`, `MHz`, `GHz`), and `MEMORY_LITERAL` (`B`, `KB`, `MB`, `GB`, `TB`).
   - **Lexer Mode Stack**: Nested interpolated f-strings (`f"hello {items.Map(x => f'{x}')}"`) and raw polyglot fences (```` ```sql ... ``` ```` and balanced-brace foreign language blocks).
-- [ ] **29.5: Stage 1 SoA `TokenTape` & Balanced Delimiter Jump Table (`bracket_links`)**
+- [x] **29.5: Stage 1 SoA `TokenTape` & Balanced Delimiter Jump Table (`bracket_links`)**
   - Emit dense SoA arrays (`kinds: Vec<TokenKind>`, `flags: Vec<TokenFlags>`, `offsets: Vec<u32>`) plus `bracket_links: Vec<u32>` mapping every opening `(`, `[`, `{` token index directly to its matching close token index in $O(1)$.
 
 ---

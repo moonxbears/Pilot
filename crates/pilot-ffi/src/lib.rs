@@ -4,13 +4,20 @@
 //! inspect them directly via `ReadOnlySpan<NativeAstNode>` (`sizeof == 16`) with zero per-node marshalling.
 
 use pilot_ast::{AstArena, AstNode, BinaryOp, NodeId, NodeKind};
+use pilot_lexer::{tokenize, TokenTape};
 use pilot_span::{ByteSpan, LineIndex};
 
-pub const PILOT_FFI_ABI_VERSION: u32 = 2801;
+pub const PILOT_FFI_ABI_VERSION: u32 = 2901;
 
 /// Opaque C-ABI handle owning a parsed `AstArena` and `LineIndex`.
 pub struct PilotFfiArenaHandle {
     pub arena: AstArena,
+    pub line_index: LineIndex,
+}
+
+/// Opaque C-ABI handle owning a scanned `TokenTape` and `LineIndex`.
+pub struct PilotFfiTokenTapeHandle {
+    pub tape: TokenTape,
     pub line_index: LineIndex,
 }
 
@@ -139,6 +146,72 @@ pub unsafe extern "C" fn pilot_arena_lookup_line_col(
 
 #[no_mangle]
 pub unsafe extern "C" fn pilot_arena_free(handle: *mut PilotFfiArenaHandle) {
+    if !handle.is_null() {
+        drop(Box::from_raw(handle));
+    }
+}
+
+/// Tokenizes a UTF-8 buffer into a contiguous `TokenTape` handle.
+#[no_mangle]
+pub unsafe extern "C" fn pilot_tokenize_utf8(
+    utf8_ptr: *const u8,
+    utf8_len: usize,
+) -> *mut PilotFfiTokenTapeHandle {
+    let slice: &[u8] = if utf8_ptr.is_null() || utf8_len == 0 {
+        &[]
+    } else {
+        core::slice::from_raw_parts(utf8_ptr, utf8_len)
+    };
+
+    let line_index = LineIndex::new(slice);
+    let src = core::str::from_utf8(slice).unwrap_or("");
+    let tape = tokenize(src);
+
+    Box::into_raw(Box::new(PilotFfiTokenTapeHandle { tape, line_index }))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_token_tape_len(handle: *const PilotFfiTokenTapeHandle) -> u32 {
+    if handle.is_null() {
+        return 0;
+    }
+    (*handle).tape.len() as u32
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_token_tape_kinds_ptr(handle: *const PilotFfiTokenTapeHandle) -> *const u16 {
+    if handle.is_null() {
+        return core::ptr::null();
+    }
+    (*handle).tape.kinds.as_ptr() as *const u16
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_token_tape_flags_ptr(handle: *const PilotFfiTokenTapeHandle) -> *const u16 {
+    if handle.is_null() {
+        return core::ptr::null();
+    }
+    (*handle).tape.flags.as_ptr() as *const u16
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_token_tape_spans_ptr(handle: *const PilotFfiTokenTapeHandle) -> *const ByteSpan {
+    if handle.is_null() {
+        return core::ptr::null();
+    }
+    (*handle).tape.spans.as_ptr()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_token_tape_bracket_links_ptr(handle: *const PilotFfiTokenTapeHandle) -> *const u32 {
+    if handle.is_null() {
+        return core::ptr::null();
+    }
+    (*handle).tape.bracket_links.as_ptr()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_token_tape_free(handle: *mut PilotFfiTokenTapeHandle) {
     if !handle.is_null() {
         drop(Box::from_raw(handle));
     }
@@ -279,7 +352,7 @@ mod tests {
         unsafe {
             let handle = pilot_parse_utf8_to_arena(src.as_ptr(), src.len());
             assert!(!handle.is_null());
-            assert_eq!(pilot_ffi_abi_version(), 2801);
+            assert_eq!(pilot_ffi_abi_version(), 2901);
             assert_eq!(pilot_ffi_sizeof_ast_node(), 16);
 
             let mut node_len = 0usize;
@@ -298,6 +371,31 @@ mod tests {
             assert_eq!((ln, cl), (2, 1));
 
             pilot_arena_free(handle);
+        }
+    }
+
+    #[test]
+    fn ffi_c_abi_zero_copy_token_tape() {
+        let src = b"def compute(a: i64) -> i64 { return a * 2; }\n";
+        unsafe {
+            let handle = pilot_tokenize_utf8(src.as_ptr(), src.len());
+            assert!(!handle.is_null());
+
+            let len = pilot_token_tape_len(handle);
+            assert!(len >= 12);
+
+            let kinds_ptr = pilot_token_tape_kinds_ptr(handle);
+            let spans_ptr = pilot_token_tape_spans_ptr(handle);
+            let links_ptr = pilot_token_tape_bracket_links_ptr(handle);
+
+            assert!(!kinds_ptr.is_null());
+            assert!(!spans_ptr.is_null());
+            assert!(!links_ptr.is_null());
+
+            let kinds = core::slice::from_raw_parts(kinds_ptr, len as usize);
+            assert_eq!(kinds[0], pilot_lexer::TokenKind::KwDef as u16);
+
+            pilot_token_tape_free(handle);
         }
     }
 }

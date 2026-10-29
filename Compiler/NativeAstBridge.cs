@@ -102,6 +102,310 @@ public enum NativeNodeKind : ushort
 }
 
 /// <summary>
+/// 16-bit representation of all lexical tokens in Pilot matching <c>pilot_lexer::TokenKind</c>.
+/// </summary>
+public enum NativeTokenKind : ushort
+{
+    Eof = 0,
+    Newline = 1,
+    VirtualLBrace = 2,
+    VirtualRBrace = 3,
+    Comment = 4,
+    BlockComment = 5,
+    Shebang = 6,
+    ErrorToken = 7,
+
+    Ident = 20,
+    KeywordLit = 21,
+    IntLit = 22,
+    HexIntLit = 23,
+    BinIntLit = 24,
+    OctIntLit = 25,
+    FloatLit = 26,
+    StrLit = 27,
+    TripleStrLit = 28,
+    FStrStart = 29,
+    FStrMiddle = 30,
+    FStrEnd = 31,
+    DurationLit = 32,
+    FrequencyLit = 33,
+    MemoryLit = 34,
+    RawDslBlock = 35,
+
+    KwLet = 60,
+    KwVar = 61,
+    KwConst = 62,
+    KwDef = 63,
+    KwFn = 64,
+    KwClass = 65,
+    KwStruct = 66,
+    KwRecord = 67,
+    KwInterface = 68,
+    KwProtocol = 69,
+    KwEnum = 70,
+    KwActor = 71,
+    KwType = 72,
+    KwRef = 73,
+    KwDynamic = 74,
+    KwSymbol = 75,
+    KwPure = 76,
+    KwComptime = 77,
+    KwMut = 78,
+    KwImmut = 79,
+    KwProperty = 80,
+    KwGet = 81,
+    KwOperator = 82,
+    KwExtension = 83,
+    KwExtend = 84,
+    KwState = 85,
+    KwIf = 86,
+    KwElif = 87,
+    KwElse = 88,
+    KwThen = 89,
+    KwWhile = 90,
+    KwFor = 91,
+    KwIn = 92,
+    KwMatch = 93,
+    KwCase = 94,
+    KwWhen = 95,
+    KwReturn = 96,
+    KwYield = 97,
+    KwBreak = 98,
+    KwContinue = 99,
+    KwPass = 100,
+    KwRaise = 101,
+    KwTry = 102,
+    KwCatch = 103,
+    KwFinally = 104,
+    KwWith = 105,
+    KwAs = 106,
+    KwAssert = 107,
+    KwImport = 108,
+    KwFrom = 109,
+    KwGlobal = 110,
+    KwLambda = 111,
+    KwAnd = 112,
+    KwOr = 113,
+    KwNot = 114,
+    KwIs = 115,
+    KwGuard = 116,
+    KwDefer = 117,
+    KwContext = 118,
+    KwRequires = 119,
+
+    KwEnsures = 120,
+    KwAsync = 121,
+    KwAwait = 122,
+    KwSpawn = 123,
+    KwParallel = 124,
+    KwChan = 125,
+    KwChannel = 126,
+    KwAtomic = 127,
+    KwSync = 128,
+    KwLock = 129,
+    KwIsolate = 130,
+    KwRealtime = 131,
+    KwDeadline = 132,
+    KwOnMissed = 133,
+    KwWithin = 134,
+    KwFallback = 135,
+    KwPeriod = 136,
+    KwPeriodic = 137,
+    KwPriority = 138,
+    KwJitter = 139,
+    KwBounded = 140,
+    KwNoalloc = 141,
+    KwStackalloc = 142,
+    KwRegion = 143,
+    KwWcet = 144,
+    KwHardRt = 145,
+    KwSoftRt = 146,
+    KwPublic = 147,
+    KwPrivate = 148,
+    KwProtected = 149,
+    KwInternal = 150,
+    KwStatic = 151,
+    KwPartial = 152,
+    KwSteal = 153,
+    KwContracts = 154,
+    KwDelegate = 155,
+    KwParams = 156,
+    KwArgs = 157,
+    KwKwargs = 158,
+    KwNameof = 159,
+    KwEach = 160,
+    KwRepeat = 161,
+    KwAdapter = 162,
+    KwConverter = 163,
+    KwDefault = 164,
+    KwTimeout = 165,
+    KwSelect = 166,
+    KwWhere = 167,
+    KwJoin = 168,
+    KwInner = 169,
+    KwLeft = 170,
+    KwRight = 171,
+    KwFull = 172,
+    KwCross = 173,
+    KwOuter = 174,
+    KwOn = 175,
+    KwGroup = 176,
+    KwBy = 177,
+    KwHaving = 178,
+    KwOrder = 179,
+    KwAsc = 180,
+    KwDesc = 181,
+    KwAscending = 182,
+    KwDescending = 183,
+    KwLimit = 184,
+    KwOffset = 185,
+    KwInto = 186,
+    KwDistinct = 187,
+    KwUnion = 188,
+    KwAll = 189,
+    KwIntersect = 190,
+    KwExcept = 191,
+    KwDifference = 192,
+    KwIndex = 193,
+    KwIndexed = 194,
+    KwLookup = 195,
+    KwTable = 196,
+    KwSchema = 197,
+    KwInsert = 198,
+    KwUpdate = 199,
+
+    KwDelete = 200,
+    KwValues = 201,
+    KwSet = 202,
+    KwReturning = 203,
+    KwConflict = 204,
+    KwDo = 205,
+    KwNothing = 206,
+    KwOver = 207,
+    KwPartition = 208,
+    KwWindow = 209,
+    KwTransaction = 210,
+    KwCommit = 211,
+    KwRollback = 212,
+    KwSavepoint = 213,
+    KwTo = 214,
+    KwConnect = 215,
+    KwDatabase = 216,
+    KwModel = 217,
+    KwDsl = 218,
+    KwDomain = 219,
+    KwUnit = 220,
+    KwMacro = 221,
+    KwDefmacro = 222,
+    KwDefkeyword = 223,
+    KwQuote = 224,
+    KwQuasiquote = 225,
+    KwSplice = 226,
+    KwUnquote = 227,
+    KwUnquoteSplicing = 228,
+    KwExtern = 229,
+    KwModule = 230,
+    KwLib = 231,
+    KwTrue = 232,
+    KwFalse = 233,
+    KwSome = 234,
+    KwNone = 235,
+    KwNull = 236,
+    KwUndefined = 237,
+
+    LParen = 240,
+    RParen = 241,
+    LBracket = 242,
+    RBracket = 243,
+    LBrace = 244,
+    RBrace = 245,
+    Colon = 246,
+    Semicolon = 247,
+    Comma = 248,
+    Dot = 249,
+    At = 250,
+    Question = 251,
+    Exclamation = 252,
+    Tilde = 253,
+    Dollar = 254,
+    Backquote = 255,
+    Underscore = 256,
+    Walrus = 257,
+    ArrowLeft = 258,
+
+    Plus = 270,
+    Minus = 271,
+    Star = 272,
+    Slash = 273,
+    Percent = 274,
+    DoubleStar = 275,
+    DoubleSlash = 276,
+    Equal = 277,
+    EqEqual = 278,
+    NotEqual = 279,
+    Less = 280,
+    LessEqual = 281,
+    Greater = 282,
+    GreaterEqual = 283,
+    Amper = 284,
+    Vbar = 285,
+    Caret = 286,
+    ShiftLeft = 287,
+    ShiftRight = 288,
+    PlusEqual = 289,
+    MinusEqual = 290,
+    StarEqual = 291,
+    SlashEqual = 292,
+    PercentEqual = 293,
+    DoubleStarEqual = 294,
+    DoubleSlashEqual = 295,
+    AmperEqual = 296,
+    VbarEqual = 297,
+    CaretEqual = 298,
+    ShiftLeftEqual = 299,
+    ShiftRightEqual = 300,
+    CoalesceEqual = 301,
+    Coalesce = 302,
+    SafeNav = 303,
+    SafeCascade = 304,
+    PipeForward = 305,
+    PipeBackward = 306,
+    Arrow = 307,
+    FatArrow = 308,
+    JsonGetText = 309,
+    JsonContains = 310,
+    JsonContained = 311,
+    DotDot = 312,
+    DotDotEqual = 313,
+    DotDotLess = 314,
+    Ellipsis = 315,
+
+    CallQuoteShallow = 320,
+    CallQuoteDeep = 321,
+    CallQuoteAbi = 322,
+    CallQuoteReact = 323,
+    CallQuoteAdjoint = 324,
+    CallQuoteEffect = 325,
+}
+
+/// <summary>
+/// Bitflags associated with each emitted token matching <c>pilot_lexer::TokenFlags</c>.
+/// </summary>
+[Flags]
+public enum NativeTokenFlags : ushort
+{
+    None = 0,
+    IsKeyword = 1 << 0,
+    IsContextualIdent = 1 << 1,
+    IsVirtual = 1 << 2,
+    IsDelimiterOpen = 1 << 3,
+    IsDelimiterClose = 1 << 4,
+    PrecedingWhitespace = 1 << 5,
+    TrailingWhitespace = 1 << 6,
+    IsDimensional = 1 << 7,
+}
+
+/// <summary>
 /// Milestone 17 &amp; 18 Unified Call-Quote Projection Kind (Invariant #1) matching <c>pilot_ast::CallQuoteKind</c>.
 /// </summary>
 public enum NativeCallQuoteKind : byte
@@ -372,11 +676,111 @@ public sealed unsafe class NativeAstArenaView : IDisposable
 }
 
 /// <summary>
-/// Milestone 28.4: Zero-copy C-ABI strangler-fig bridge between C# and the Rust <c>pilot-ffi</c> crate.
+/// Zero-copy disposable view over a native Rust <c>PilotFfiTokenTapeHandle*</c> returned by <c>pilot-ffi</c>.
+/// Exposes <see cref="Kinds"/>, <see cref="Flags"/>, <see cref="Spans"/>, and <see cref="BracketLinks"/> directly as
+/// <see cref="ReadOnlySpan{T}"/> slices over native memory with zero per-node marshalling.
+/// </summary>
+public sealed unsafe class NativeTokenTapeView : IDisposable
+{
+    private IntPtr _handle;
+    private readonly NativeTokenKind* _kindsPtr;
+    private readonly ushort* _flagsPtr;
+    private readonly NativeByteSpan* _spansPtr;
+    private readonly uint* _bracketLinksPtr;
+    private readonly int _len;
+
+    internal NativeTokenTapeView(
+        IntPtr handle,
+        NativeTokenKind* kindsPtr,
+        ushort* flagsPtr,
+        NativeByteSpan* spansPtr,
+        uint* bracketLinksPtr,
+        int len)
+    {
+        _handle = handle;
+        _kindsPtr = kindsPtr;
+        _flagsPtr = flagsPtr;
+        _spansPtr = spansPtr;
+        _bracketLinksPtr = bracketLinksPtr;
+        _len = len;
+    }
+
+    public int Length => _len;
+
+    public ReadOnlySpan<NativeTokenKind> Kinds
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
+            return _kindsPtr == null || _len <= 0 ? ReadOnlySpan<NativeTokenKind>.Empty : new ReadOnlySpan<NativeTokenKind>(_kindsPtr, _len);
+        }
+    }
+
+    public ReadOnlySpan<ushort> Flags
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
+            return _flagsPtr == null || _len <= 0 ? ReadOnlySpan<ushort>.Empty : new ReadOnlySpan<ushort>(_flagsPtr, _len);
+        }
+    }
+
+    public ReadOnlySpan<NativeByteSpan> Spans
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
+            return _spansPtr == null || _len <= 0 ? ReadOnlySpan<NativeByteSpan>.Empty : new ReadOnlySpan<NativeByteSpan>(_spansPtr, _len);
+        }
+    }
+
+    public ReadOnlySpan<uint> BracketLinks
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_handle == IntPtr.Zero, this);
+            return _bracketLinksPtr == null || _len <= 0 ? ReadOnlySpan<uint>.Empty : new ReadOnlySpan<uint>(_bracketLinksPtr, _len);
+        }
+    }
+
+    public uint? GetMatchingBracket(int index)
+    {
+        var links = BracketLinks;
+        if (index >= 0 && index < links.Length && links[index] != uint.MaxValue)
+        {
+            return links[index];
+        }
+        return null;
+    }
+
+    public void Dispose()
+    {
+        var h = _handle;
+        if (h != IntPtr.Zero)
+        {
+            _handle = IntPtr.Zero;
+            NativeAstBridge.FreeTokenTape(h);
+        }
+        GC.SuppressFinalize(this);
+    }
+
+    ~NativeTokenTapeView()
+    {
+        var h = _handle;
+        if (h != IntPtr.Zero)
+        {
+            _handle = IntPtr.Zero;
+            NativeAstBridge.FreeTokenTape(h);
+        }
+    }
+}
+
+/// <summary>
+/// Milestone 28.4 &amp; 29.5: Zero-copy C-ABI strangler-fig bridge between C# and the Rust <c>pilot-ffi</c> crate.
 /// </summary>
 public static unsafe class NativeAstBridge
 {
-    public const uint ExpectedAbiVersion = 2801;
+    public const uint ExpectedAbiVersion = 2901;
 
     private static readonly object SyncLock = new();
     private static IntPtr _libraryHandle;
@@ -390,6 +794,14 @@ public static unsafe class NativeAstBridge
     private static delegate* unmanaged[Cdecl]<IntPtr, uint> _fnArenaLineCount;
     private static delegate* unmanaged[Cdecl]<IntPtr, uint, uint*, uint*, void> _fnArenaLookupLineCol;
     private static delegate* unmanaged[Cdecl]<IntPtr, void> _fnArenaFree;
+
+    private static delegate* unmanaged[Cdecl]<byte*, nuint, IntPtr> _fnTokenizeUtf8;
+    private static delegate* unmanaged[Cdecl]<IntPtr, uint> _fnTokenTapeLen;
+    private static delegate* unmanaged[Cdecl]<IntPtr, NativeTokenKind*> _fnTokenTapeKindsPtr;
+    private static delegate* unmanaged[Cdecl]<IntPtr, ushort*> _fnTokenTapeFlagsPtr;
+    private static delegate* unmanaged[Cdecl]<IntPtr, NativeByteSpan*> _fnTokenTapeSpansPtr;
+    private static delegate* unmanaged[Cdecl]<IntPtr, uint*> _fnTokenTapeBracketLinksPtr;
+    private static delegate* unmanaged[Cdecl]<IntPtr, void> _fnTokenTapeFree;
 
     static NativeAstBridge()
     {
@@ -469,6 +881,50 @@ public static unsafe class NativeAstBridge
             lineCount);
     }
 
+    /// <summary>
+    /// Tokenizes a UTF-8 string into a native Rust <c>TokenTape</c> and returns a zero-copy
+    /// <see cref="NativeTokenTapeView"/> over its contiguous token kind, flag, span, and bracket links buffers.
+    /// </summary>
+    public static NativeTokenTapeView TokenizeUtf8(string source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        byte[] utf8 = Encoding.UTF8.GetBytes(source);
+        return TokenizeUtf8(utf8);
+    }
+
+    /// <summary>
+    /// Tokenizes a raw UTF-8 byte span into a native Rust <c>TokenTape</c> and returns a zero-copy
+    /// <see cref="NativeTokenTapeView"/> over its contiguous token kind, flag, span, and bracket links buffers.
+    /// </summary>
+    public static NativeTokenTapeView TokenizeUtf8(ReadOnlySpan<byte> utf8Bytes)
+    {
+        EnsureLoaded();
+        IntPtr handle;
+        fixed (byte* ptr = utf8Bytes)
+        {
+            handle = _fnTokenizeUtf8(ptr, (nuint)utf8Bytes.Length);
+        }
+
+        if (handle == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("pilot_tokenize_utf8 returned a null token tape handle.");
+        }
+
+        uint len = _fnTokenTapeLen(handle);
+        var kindsPtr = _fnTokenTapeKindsPtr(handle);
+        var flagsPtr = _fnTokenTapeFlagsPtr(handle);
+        var spansPtr = _fnTokenTapeSpansPtr(handle);
+        var linksPtr = _fnTokenTapeBracketLinksPtr(handle);
+
+        return new NativeTokenTapeView(
+            handle,
+            kindsPtr,
+            flagsPtr,
+            spansPtr,
+            linksPtr,
+            (int)len);
+    }
+
     internal static (uint Line, uint Col) LookupLineCol(IntPtr handle, uint byteOffset)
     {
         EnsureLoaded();
@@ -483,6 +939,14 @@ public static unsafe class NativeAstBridge
         if (handle != IntPtr.Zero && _fnArenaFree != null)
         {
             _fnArenaFree(handle);
+        }
+    }
+
+    internal static void FreeTokenTape(IntPtr handle)
+    {
+        if (handle != IntPtr.Zero && _fnTokenTapeFree != null)
+        {
+            _fnTokenTapeFree(handle);
         }
     }
 
@@ -513,6 +977,14 @@ public static unsafe class NativeAstBridge
             _fnArenaLineCount = (delegate* unmanaged[Cdecl]<IntPtr, uint>)NativeLibrary.GetExport(lib, "pilot_arena_line_count");
             _fnArenaLookupLineCol = (delegate* unmanaged[Cdecl]<IntPtr, uint, uint*, uint*, void>)NativeLibrary.GetExport(lib, "pilot_arena_lookup_line_col");
             _fnArenaFree = (delegate* unmanaged[Cdecl]<IntPtr, void>)NativeLibrary.GetExport(lib, "pilot_arena_free");
+
+            _fnTokenizeUtf8 = (delegate* unmanaged[Cdecl]<byte*, nuint, IntPtr>)NativeLibrary.GetExport(lib, "pilot_tokenize_utf8");
+            _fnTokenTapeLen = (delegate* unmanaged[Cdecl]<IntPtr, uint>)NativeLibrary.GetExport(lib, "pilot_token_tape_len");
+            _fnTokenTapeKindsPtr = (delegate* unmanaged[Cdecl]<IntPtr, NativeTokenKind*>)NativeLibrary.GetExport(lib, "pilot_token_tape_kinds_ptr");
+            _fnTokenTapeFlagsPtr = (delegate* unmanaged[Cdecl]<IntPtr, ushort*>)NativeLibrary.GetExport(lib, "pilot_token_tape_flags_ptr");
+            _fnTokenTapeSpansPtr = (delegate* unmanaged[Cdecl]<IntPtr, NativeByteSpan*>)NativeLibrary.GetExport(lib, "pilot_token_tape_spans_ptr");
+            _fnTokenTapeBracketLinksPtr = (delegate* unmanaged[Cdecl]<IntPtr, uint*>)NativeLibrary.GetExport(lib, "pilot_token_tape_bracket_links_ptr");
+            _fnTokenTapeFree = (delegate* unmanaged[Cdecl]<IntPtr, void>)NativeLibrary.GetExport(lib, "pilot_token_tape_free");
 
             uint abi = _fnAbiVersion();
             if (abi != ExpectedAbiVersion)

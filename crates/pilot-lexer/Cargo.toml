@@ -1,0 +1,11 @@
+[package]
+name = "pilot-lexer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Stage 1 Zero-Copy SIMD Preprocessor, Structural Indexer & Modal Lexer for Pilot"
+
+[dependencies]
+pilot-span = { path = "../pilot-span" }
+pilot-intern = { path = "../pilot-intern" }
