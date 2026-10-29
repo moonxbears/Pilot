@@ -7,12 +7,14 @@ pub mod c_target;
 pub mod wasm;
 pub mod asm;
 pub mod driver;
+pub mod gpu;
 
 pub use llvm::LlvmEmitter;
 pub use c_target::CTargetEmitter;
 pub use wasm::WasmEmitter;
 pub use asm::AsmEmitter;
 pub use driver::{BuildDriver, BuildOptions, BuildTarget, OptLevel};
+pub use gpu::{GpuBackend, GpuEmitter, GpuVendor};
 
 #[cfg(test)]
 mod tests {
@@ -91,5 +93,55 @@ mod tests {
         let (mjs, d_ts) = WasmEmitter::generate_bindings("pilot_app");
         assert!(mjs.contains("loadPilotModule"));
         assert!(d_ts.contains("export interface PilotModule"));
+    }
+
+    #[test]
+    fn test_gpu_emitters_all_three_approaches() {
+        let arena = pilot_parser::parse("
+@kernel
+def vec_add(a: *float, b: *float, c: *float, n: int) {
+    let idx = gpu_global_id()
+    if idx < n {
+        c[idx] = a[idx] + b[idx]
+    }
+}
+");
+        // Approach A: CUDA, HIP, OpenCL, OpenMP
+        let cuda_code = GpuEmitter::emit_cuda(&arena, "vec_add");
+        assert!(cuda_code.contains("__global__ void vec_add"));
+        assert!(cuda_code.contains("blockIdx.x * blockDim.x + threadIdx.x"));
+        assert!(cuda_code.contains("cudaMalloc"));
+
+        let hip_code = GpuEmitter::emit_hip(&arena, "vec_add");
+        assert!(hip_code.contains("__global__ void vec_add"));
+        assert!(hip_code.contains("hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x"));
+        assert!(hip_code.contains("hipMalloc"));
+
+        let cl_code = GpuEmitter::emit_opencl(&arena, "vec_add");
+        assert!(cl_code.contains("__kernel void vec_add"));
+        assert!(cl_code.contains("get_global_id(0)"));
+
+        let omp_code = GpuEmitter::emit_openmp(&arena, "vec_add");
+        assert!(omp_code.contains("#pragma omp target teams distribute parallel for simd"));
+
+        // Approach B: WebGPU WGSL & Vulkan SPIR-V
+        let wgsl_code = GpuEmitter::emit_wgsl(&arena, "vec_add");
+        assert!(wgsl_code.contains("@compute @workgroup_size(64, 1, 1)"));
+        assert!(wgsl_code.contains("fn vec_add(@builtin(global_invocation_id)"));
+
+        let spirv_code = GpuEmitter::emit_spirv(&arena, "vec_add");
+        assert!(spirv_code.contains("OpCapability Shader"));
+        assert!(spirv_code.contains("OpEntryPoint GLCompute"));
+
+        // Approach C: Direct LLVM IR for NVPTX and AMDGPU
+        let nvptx_ir = GpuEmitter::emit_nvptx_llvm_ir(&arena, "vec_add");
+        assert!(nvptx_ir.contains("target triple = \"nvptx64-nvidia-cuda\""));
+        assert!(nvptx_ir.contains("!nvvm.annotations"));
+        assert!(nvptx_ir.contains("@llvm.nvvm.read.ptx.sreg.tid.x()"));
+
+        let amdgpu_ir = GpuEmitter::emit_amdgpu_llvm_ir(&arena, "vec_add");
+        assert!(amdgpu_ir.contains("target triple = \"amdgcn-amd-amdhsa\""));
+        assert!(amdgpu_ir.contains("define amdgpu_kernel void @vec_add"));
+        assert!(amdgpu_ir.contains("@llvm.amdgcn.workitem.id.x()"));
     }
 }

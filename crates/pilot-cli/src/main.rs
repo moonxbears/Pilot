@@ -137,12 +137,16 @@ fn cmd_run(args: &[String]) {
         std::process::id()
     );
     let use_burst = args.iter().any(|a| a == "--burst");
+    let use_gpu = args.iter().any(|a| a == "--gpu");
     let opts = BuildOptions {
         target: BuildTarget::Native,
         opt_level: OptLevel::O3,
         output_path: PathBuf::from(&tmp_bin),
         pgo_trace: None,
         burst: use_burst,
+        gpu: use_gpu,
+        gpu_backend: None,
+        gpu_arch: None,
     };
 
     let module_name = Path::new(file_path).file_stem().and_then(|s| s.to_str()).unwrap_or("app");
@@ -194,43 +198,79 @@ fn cmd_build(args: &[String]) {
     let mut opt_level = OptLevel::O2;
     let mut output_path = PathBuf::from("a.out");
     let mut burst = false;
+    let mut gpu = false;
+    let mut gpu_backend: Option<pilot_codegen::GpuBackend> = None;
+    let mut gpu_arch: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
-        match args[i].as_str() {
-            "--burst" => burst = true,
-            "--target" => {
-                if i + 1 < args.len() {
-                    target = match args[i + 1].as_str() {
-                        "llvm" => BuildTarget::Llvm,
-                        "c" => BuildTarget::C,
-                        "wasm" => BuildTarget::Wasm,
-                        "native" => BuildTarget::Native,
-                        other => {
-                            eprintln!("error: unknown build target '{}'. Expected: native, llvm, c, wasm", other);
-                            std::process::exit(1);
-                        }
-                    };
-                    i += 1;
+        let arg = &args[i];
+        if arg == "--burst" {
+            burst = true;
+        } else if arg == "--gpu" {
+            gpu = true;
+        } else if let Some(val) = arg.strip_prefix("--gpu-backend=") {
+            gpu_backend = pilot_codegen::GpuBackend::from_str(val);
+        } else if arg == "--gpu-backend" {
+            if i + 1 < args.len() {
+                gpu_backend = pilot_codegen::GpuBackend::from_str(&args[i + 1]);
+                i += 1;
+            }
+        } else if let Some(val) = arg.strip_prefix("--gpu-arch=") {
+            gpu_arch = Some(val.to_string());
+        } else if arg == "--gpu-arch" {
+            if i + 1 < args.len() {
+                gpu_arch = Some(args[i + 1].clone());
+                i += 1;
+            }
+        } else if let Some(val) = arg.strip_prefix("--target=") {
+            target = match val {
+                "llvm" => BuildTarget::Llvm,
+                "c" => BuildTarget::C,
+                "wasm" => BuildTarget::Wasm,
+                "native" => BuildTarget::Native,
+                "gpu" => BuildTarget::Gpu,
+                other => {
+                    eprintln!("error: unknown build target '{}'. Expected: native, llvm, c, wasm, gpu", other);
+                    std::process::exit(1);
                 }
+            };
+        } else if arg == "--target" {
+            if i + 1 < args.len() {
+                target = match args[i + 1].as_str() {
+                    "llvm" => BuildTarget::Llvm,
+                    "c" => BuildTarget::C,
+                    "wasm" => BuildTarget::Wasm,
+                    "native" => BuildTarget::Native,
+                    "gpu" => BuildTarget::Gpu,
+                    other => {
+                        eprintln!("error: unknown build target '{}'. Expected: native, llvm, c, wasm, gpu", other);
+                        std::process::exit(1);
+                    }
+                };
+                i += 1;
             }
-            "-o" | "--output" => {
-                if i + 1 < args.len() {
-                    output_path = PathBuf::from(&args[i + 1]);
-                    i += 1;
-                }
+        } else if arg == "-o" || arg == "--output" {
+            if i + 1 < args.len() {
+                output_path = PathBuf::from(&args[i + 1]);
+                i += 1;
             }
-            "-O0" => opt_level = OptLevel::O0,
-            "-O2" => opt_level = OptLevel::O2,
-            "-O3" => opt_level = OptLevel::O3,
-            flag if flag.starts_with('-') => {
-                eprintln!("warning: unrecognized flag '{}' ignored.", flag);
-            }
-            path => {
-                file_path = path;
-            }
+        } else if arg == "-O0" {
+            opt_level = OptLevel::O0;
+        } else if arg == "-O2" {
+            opt_level = OptLevel::O2;
+        } else if arg == "-O3" {
+            opt_level = OptLevel::O3;
+        } else if arg.starts_with('-') {
+            eprintln!("warning: unrecognized flag '{}' ignored.", arg);
+        } else {
+            file_path = arg;
         }
         i += 1;
+    }
+
+    if gpu && target == BuildTarget::Native {
+        target = BuildTarget::Gpu;
     }
 
     if file_path.is_empty() {
@@ -249,12 +289,15 @@ fn cmd_build(args: &[String]) {
         output_path: output_path.clone(),
         pgo_trace: None,
         burst,
+        gpu,
+        gpu_backend,
+        gpu_arch,
     };
 
     let src = fs::read_to_string(file_path).unwrap_or_default();
     match BuildDriver::compile_pilot_source(module_name, &src, &opts) {
         Ok(art) => {
-            if opts.target != BuildTarget::Native {
+            if opts.target != BuildTarget::Native && !art.starts_with("Compiled ") {
                 if let Err(e) = fs::write(&output_path, art) {
                     eprintln!("error: failed to write output artifact to '{:?}': {}", output_path, e);
                     std::process::exit(1);
@@ -1033,20 +1076,57 @@ fn cmd_emit(args: &[String]) {
     let target_name = &args[0];
     let file_path = &args[1];
 
-    let target = match TargetLanguage::parse(target_name) {
-        Some(t) => t,
-        None => {
-            eprintln!("error: unknown target language '{}'. Valid targets: c, cpp, csharp, rust, python, js, lua", target_name);
-            std::process::exit(1);
-        }
-    };
-
     let src = fs::read_to_string(file_path).unwrap_or_else(|e| {
         eprintln!("error: cannot read '{}': {}", file_path, e);
         std::process::exit(1);
     });
 
     let arena = parse(&src);
+    let module_name = Path::new(file_path).file_stem().and_then(|s| s.to_str()).unwrap_or("module");
+
+    // Check if emitting a GPU target
+    if let Some(gpu_be) = pilot_codegen::GpuBackend::from_str(target_name) {
+        let emitted = match gpu_be {
+            pilot_codegen::GpuBackend::Cuda => pilot_codegen::GpuEmitter::emit_cuda(&arena, module_name),
+            pilot_codegen::GpuBackend::Hip => pilot_codegen::GpuEmitter::emit_hip(&arena, module_name),
+            pilot_codegen::GpuBackend::OpenCl => pilot_codegen::GpuEmitter::emit_opencl(&arena, module_name),
+            pilot_codegen::GpuBackend::OpenMp => pilot_codegen::GpuEmitter::emit_openmp(&arena, module_name),
+            pilot_codegen::GpuBackend::Wgsl => pilot_codegen::GpuEmitter::emit_wgsl(&arena, module_name),
+            pilot_codegen::GpuBackend::Spirv => pilot_codegen::GpuEmitter::emit_spirv(&arena, module_name),
+            pilot_codegen::GpuBackend::Nvptx => pilot_codegen::GpuEmitter::emit_nvptx_llvm_ir(&arena, module_name),
+            pilot_codegen::GpuBackend::Amdgpu => pilot_codegen::GpuEmitter::emit_amdgpu_llvm_ir(&arena, module_name),
+        };
+
+        let mut out_path = None;
+        let mut i = 2;
+        while i < args.len() {
+            if args[i] == "-o" && i + 1 < args.len() {
+                out_path = Some(&args[i + 1]);
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+
+        if let Some(dest) = out_path {
+            fs::write(dest, &emitted).unwrap_or_else(|e| {
+                eprintln!("error: failed to write '{}': {}", dest, e);
+                std::process::exit(1);
+            });
+            println!("Emitted GPU {} -> {}", gpu_be.display_name(), dest);
+        } else {
+            print!("{}", emitted);
+        }
+        return;
+    }
+
+    let target = match TargetLanguage::parse(target_name) {
+        Some(t) => t,
+        None => {
+            eprintln!("error: unknown target language '{}'. Valid targets: c, cpp, csharp, rust, python, js, lua, cuda, hip, opencl, openmp, wgsl, spirv, nvptx, amdgpu", target_name);
+            std::process::exit(1);
+        }
+    };
     let root = arena.root;
     let analysis = AnalysisPipeline::analyze(&arena, root);
 

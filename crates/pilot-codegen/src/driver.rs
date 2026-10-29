@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use crate::asm::AsmEmitter;
 use crate::c_target::CTargetEmitter;
+use crate::gpu::{GpuBackend, GpuEmitter};
 use crate::llvm::LlvmEmitter;
 use crate::wasm::WasmEmitter;
 
@@ -15,6 +16,7 @@ pub enum BuildTarget {
     Wasm,
     C,
     Asm,
+    Gpu,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -31,6 +33,9 @@ pub struct BuildOptions {
     pub output_path: PathBuf,
     pub pgo_trace: Option<PathBuf>,
     pub burst: bool,
+    pub gpu: bool,
+    pub gpu_backend: Option<GpuBackend>,
+    pub gpu_arch: Option<String>,
 }
 
 impl Default for BuildOptions {
@@ -41,6 +46,9 @@ impl Default for BuildOptions {
             output_path: PathBuf::from("a.out"),
             pgo_trace: None,
             burst: false,
+            gpu: false,
+            gpu_backend: None,
+            gpu_arch: None,
         }
     }
 }
@@ -87,6 +95,69 @@ impl BuildDriver {
                     OptLevel::O3 => 3,
                 };
                 AsmEmitter::emit_assembly(&arena, module_name, opt, true)
+            }
+            BuildTarget::Gpu => {
+                let backend = options.gpu_backend.unwrap_or_else(|| {
+                    let (vendor, _) = GpuEmitter::detect_hardware();
+                    GpuEmitter::best_backend_for_vendor(vendor)
+                });
+
+                match backend {
+                    GpuBackend::Cuda => Ok(GpuEmitter::emit_cuda(&arena, module_name)),
+                    GpuBackend::Hip => Ok(GpuEmitter::emit_hip(&arena, module_name)),
+                    GpuBackend::OpenCl => Ok(GpuEmitter::emit_opencl(&arena, module_name)),
+                    GpuBackend::OpenMp => Ok(GpuEmitter::emit_openmp(&arena, module_name)),
+                    GpuBackend::Wgsl => Ok(GpuEmitter::emit_wgsl(&arena, module_name)),
+                    GpuBackend::Spirv => Ok(GpuEmitter::emit_spirv(&arena, module_name)),
+                    GpuBackend::Nvptx => {
+                        let ir = GpuEmitter::emit_nvptx_llvm_ir(&arena, module_name);
+                        let ext = options.output_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        if ext == "ptx" {
+                            let arch = options.gpu_arch.as_deref().unwrap_or("sm_52");
+                            let mut child = Command::new("clang")
+                                .args(["-x", "ir", "-", "--target=nvptx64-nvidia-cuda", &format!("-march={}", arch), "-S", "-o", options.output_path.to_str().unwrap()])
+                                .stdin(std::process::Stdio::piped())
+                                .spawn()
+                                .map_err(|e| format!("Failed to spawn clang for PTX: {}", e))?;
+                            if let Some(mut stdin) = child.stdin.take() {
+                                use std::io::Write;
+                                let _ = stdin.write_all(ir.as_bytes());
+                            }
+                            let status = child.wait().map_err(|e| format!("Clang PTX failed: {}", e))?;
+                            if status.success() {
+                                Ok(format!("Compiled PTX -> {:?}", options.output_path))
+                            } else {
+                                Err("Clang failed to assemble PTX".to_string())
+                            }
+                        } else {
+                            Ok(ir)
+                        }
+                    }
+                    GpuBackend::Amdgpu => {
+                        let ir = GpuEmitter::emit_amdgpu_llvm_ir(&arena, module_name);
+                        let ext = options.output_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        if ext == "s" || ext == "o" {
+                            let arch = options.gpu_arch.as_deref().unwrap_or("gfx908");
+                            let mut child = Command::new("clang")
+                                .args(["-x", "ir", "-", "--target=amdgcn-amd-amdhsa", &format!("-mcpu={}", arch), "-nogpulib", "-S", "-o", options.output_path.to_str().unwrap()])
+                                .stdin(std::process::Stdio::piped())
+                                .spawn()
+                                .map_err(|e| format!("Failed to spawn clang for AMDGPU: {}", e))?;
+                            if let Some(mut stdin) = child.stdin.take() {
+                                use std::io::Write;
+                                let _ = stdin.write_all(ir.as_bytes());
+                            }
+                            let status = child.wait().map_err(|e| format!("Clang AMDGPU failed: {}", e))?;
+                            if status.success() {
+                                Ok(format!("Compiled AMDGPU assembly -> {:?}", options.output_path))
+                            } else {
+                                Err("Clang failed to assemble AMDGPU".to_string())
+                            }
+                        } else {
+                            Ok(ir)
+                        }
+                    }
+                }
             }
             BuildTarget::Native => {
                 let c_code = CTargetEmitter::emit_ast_module(&arena, &analysis, source_text);

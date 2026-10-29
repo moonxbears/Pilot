@@ -7,6 +7,7 @@
 //! - O(1) delimiter jump table disambiguation using `TokenTape::bracket_links`.
 
 use pilot_ast::*;
+use pilot_intern::SymbolId;
 use pilot_lexer::{tokenize, TokenFlags, TokenKind, TokenTape};
 use pilot_span::ByteSpan;
 
@@ -1083,6 +1084,16 @@ impl<'a> Parser<'a> {
 
         loop {
             let k = self.peek();
+            if k == TokenKind::Star {
+                let span = self.span();
+                self.advance();
+                let inner_node = self.arena.node(lhs);
+                let inner_name = self.arena.interner.resolve(SymbolId(inner_node.lhs));
+                let ptr_str = format!("{}*", inner_name);
+                let ptr_sym = self.arena.interner.intern(&ptr_str);
+                lhs = self.arena.alloc_node(NodeKind::TypeNamed, 0, span, ptr_sym.0, 0);
+                continue;
+            }
             if k == TokenKind::Question {
                 // PostfixOptional: T? (bp = 30)
                 if (TypePrecedence::PostfixOptional as u8) < min_bp {
@@ -1167,7 +1178,19 @@ impl<'a> Parser<'a> {
 
     fn parse_type_prefix(&mut self) -> NodeId {
         let span = self.span();
-        if self.is_ident_like() {
+        if self.at(TokenKind::Star) {
+            self.advance();
+            let inner = self.parse_type_prefix();
+            let ptr_str = if inner.is_some() {
+                let in_node = self.arena.node(inner);
+                let in_name = self.arena.interner.resolve(SymbolId(in_node.lhs));
+                format!("*{}", in_name)
+            } else {
+                "*void".to_string()
+            };
+            let inner_sym = self.arena.interner.intern(&ptr_str);
+            self.arena.alloc_node(NodeKind::TypeNamed, 0, span, inner_sym.0, 0)
+        } else if self.is_ident_like() {
             let name = self.text();
             self.advance();
             let sym = self.arena.interner.intern(name);
