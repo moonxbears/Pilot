@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <EnableDefaultAntlrItems>false</EnableDefaultAntlrItems>
-    <DefaultItemExcludes>$(DefaultItemExcludes);Pilot.Tests\**;Pilot.LanguageServer\**;vscode-pilot\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Pilot.Tests\**;Pilot.LanguageServer\**;vscode-pilot\**;crates\**;target\**</DefaultItemExcludes>
     <NoWarn>$(NoWarn);CS3021</NoWarn>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>pilot</ToolCommandName>

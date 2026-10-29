@@ -41,11 +41,23 @@ flowchart TD
         M20["M20: Accurate Bidirectional Transpilation & Library Ingestion (--emit / --from)"]
         M21["M21: Core Native Standard Library (Bootstrapped via M20 + Curated)"]
         M22["M22: Debug Adapter Protocol (DAP) & VS Code GUI Breakpoints"]
-        M23["M23: Deep LLVM / WASM Runtime Linking & Native Binary Toolchain"]
+        M23["M23: Deep LLVM / WASM Runtime Linking (Unified w/ M34–M35)"]
         M24["M24: Extended Systems, Net, HTTP & Crypto Standard Library"]
         M25["M25: Performance Profiling & Trivia-Preserving Auto-Optimizer (pilot perf)"]
         M26["M26: Self-Hosted Pilot Compiler (pilotc Written in Pilot)"]
         M27["M27: Package Registry Hosting & Distribution (Evaluation)"]
+    end
+
+    subgraph PhaseD ["Phase D: Zero-GC Rust Core, 500+ MB/s SIMD/Pratt Frontend & .NET/ANTLR Decoupling (M28 – M36)"]
+        M28["M28: Rust Workspace, 16B Arena AST ABI & SLL->LL Golden Oracle"]
+        M29["M29: Stage 1 SIMD Preprocessor, Modal Lexer & Bracket Indexer"]
+        M30["M30: Stage 2 Recursive Descent + Pratt Parser & ANTLR Removal"]
+        M31["M31: Lossless Red-Green CST, Error Resilience & Native pilot fmt"]
+        M32["M32: Sub-ms Incremental Reparser, Salsa DB & Native pilot-lsp"]
+        M33["M33: Rust Static Analysis, Type Inference, Perceus Escape & comptime"]
+        M34["M34: Worry-Free Zero-GC Runtime (Perceus + Arenas) & Register PilVM v3"]
+        M35["M35: Native LLVM/WASM/C-ABI Backends, Transpilers & Polyglot FFI"]
+        M36["M36: Standalone Rust pilot CLI, Full .NET Removal & 500+ MB/s Gate"]
     end
 
     M1 --> M2 --> M3 --> M4 --> M5 --> M6 --> M7 --> M8 --> M9 --> M10
@@ -55,11 +67,18 @@ flowchart TD
     M12 --> M15
     M14 & M15 --> M16
     M16 --> M17 --> M18 --> M19
-    M19 --> M20 & M22 & M23
-    M20 --> M21
-    M20 & M23 --> M25
-    M21 & M23 --> M24 & M26
-    M8 & M24 --> M27
+    M19 --> M20 --> M21
+    M21 --> M24 & M28
+    M28 --> M29 --> M30
+    M30 --> M31 & M33
+    M31 --> M32
+    M33 --> M34
+    M34 --> M35 & M22
+    M23 -.-> M34 & M35
+    M31 & M35 --> M25
+    M32 & M35 & M22 --> M36
+    M24 & M35 --> M26
+    M8 & M24 & M36 --> M27
 ```
 
 ---
@@ -89,62 +108,73 @@ flowchart TD
 | **M19** | Rigorous Runtime-to-Compile-Time Demotion & `comptime` Audit | Phase B | ✅ **Completed** | `Analysis/Comptime/`, `Compiler/`, `Transpilation/PilotOptimizer.cs` |
 | **M20** | Accurate Bidirectional Language Transpilation & Library Ingestion (`--emit` / `--from`) | Phase C | ✅ **Completed** | `Transpilation/`, `Formatting/PilotFormatter.cs`, `Cli/Program.cs` |
 | **M21** | Core Native Standard Library (`std.core`, `collections`, `mem`, `io`, `fs`, `math`) | Phase C | ✅ **Completed** | `stdlib/core/`, `stdlib/collections/`, `stdlib/io/`, `stdlib/math/` |
-| **M22** | Debug Adapter Protocol (DAP) & VS Code GUI Breakpoints | Phase C | 🎯 **Next Up** | `Debugging/Dap/`, `Debugging/PilotDebugger.cs`, `vscode-pilot/` |
-| **M23** | Deep LLVM / WASM Runtime Linking & Native Binary Toolchain (`pilot build`) | Phase C | 📋 **Planned** | `Native/Llvm/`, `Native/Wasm/`, `Native/Runtime/` |
-| **M24** | Extended Systems, Networking, HTTP & Crypto Standard Library | Phase C | 📋 **Planned** | `stdlib/net/`, `stdlib/http/`, `stdlib/crypto/`, `stdlib/formats/` |
-| **M25** | Advanced Performance Analysis & Trivia-Preserving Auto-Optimizer (`pilot perf`) | Phase C | 📋 **Planned** | `Analysis/Performance/`, `Transpilation/PilotOptimizer.cs` |
+| **M22** | Debug Adapter Protocol (DAP) & VS Code GUI Breakpoints *(Targets Native `M34` VM)* | Phase C | 📋 **Planned** | `crates/pilot-dap/`, `vscode-pilot/` |
+| **M23** | Deep LLVM / WASM Runtime Linking & Native Binary Toolchain (`pilot build`) | Phase C | 🔗 **Unified w/ M34–M35** | `crates/pilot-rt/`, `crates/pilot-codegen/` |
+| **M24** | Extended Systems, Networking, HTTP & Crypto Standard Library | Phase C | 🚧 **In Progress** | `stdlib/net/`, `stdlib/http/`, `stdlib/crypto/`, `stdlib/formats/` |
+| **M25** | Advanced Performance Analysis & Trivia-Preserving Auto-Optimizer (`pilot perf`) | Phase C | 📋 **Planned** | `crates/pilot-perf/`, `crates/pilot-fmt/` |
 | **M26** | Self-Hosted Pilot Compiler (`pilotc` Written in Pilot) | Phase C | 📋 **Planned** | `selfhost/` (`lexer.pilot`, `parser.pilot`, `analyzer.pilot`, `pilotc.pilot`) |
-| **M27** | Package Registry Hosting & Distribution Architecture | Phase C | 🔍 **Evaluating** | `Runtime/Packaging/`, Registry Spec |
+| **M27** | Package Registry Hosting & Distribution Architecture | Phase C | 🔍 **Evaluating** | `crates/pilot-pkg/`, Registry Spec |
+| **M28** | Native Rust Workspace Foundation, 16B Arena AST ABI & `SLL -> LL` Golden Oracle | Phase D | ✅ **Completed** | `Cargo.toml`, `crates/pilot-arena`, `pilot-span`, `pilot-ast`, `pilot-ffi`, `Compiler/NativeAstBridge.cs` |
+| **M29** | Stage 1 — Zero-Copy SIMD Preprocessor, Structural Indexer & Modal Lexer (`1+ GB/s`) | Phase D | 🎯 **Next Up** | `crates/pilot-lexer/` |
+| **M30** | Stage 2 — Hand-Written Recursive Descent + Pratt (TDOP) Parser & ANTLR Removal (`500+ MB/s`) | Phase D | 📋 **Planned** | `crates/pilot-parser/` |
+| **M31** | Lossless Red-Green Concrete Syntax Tree (CST), Error Resilience & Native `pilot fmt` | Phase D | 📋 **Planned** | `crates/pilot-syntax/`, `crates/pilot-fmt/` |
+| **M32** | Sub-Millisecond Incremental Reparsing, `Salsa`-Style Query DB & Native `pilot-lsp` | Phase D | 📋 **Planned** | `crates/pilot-incremental/`, `crates/pilot-db/`, `crates/pilot-lsp/` |
+| **M33** | Native Static Analysis, Bidirectional Inference, Perceus Escape Pass & `comptime` | Phase D | 📋 **Planned** | `crates/pilot-analysis/`, `crates/pilot-perceus/` |
+| **M34** | Worry-Free Zero-GC Native Runtime (Perceus + Arenas) & Register-Based `PilVM` v3 | Phase D | 📋 **Planned** | `crates/pilot-rt/`, `crates/pilot-vm/` |
+| **M35** | Native Codegen Backends (`LLVM`/`WASM`/`C-ABI`), Bidirectional Transpilers & Polyglot FFI | Phase D | 📋 **Planned** | `crates/pilot-codegen/`, `crates/pilot-transpile/`, `crates/pilot-polyglot/` |
+| **M36** | Standalone Rust `pilot` CLI, Full `.NET` Retirement & 500+ MB/s Performance Gate | Phase D | 📋 **Planned** | `crates/pilot-cli/`, `crates/pilot-bench/` |
 
 ---
 
-## Concurrency Schedule & Prerequisite Matrix (`M11` – `M27`)
+## Concurrency Schedule & Prerequisite Matrix (`M11` – `M36`)
 
-To parallelize work across sessions, branches, or subagents **without dependency inversions or shared-file merge conflicts** (especially on `antlr/Pilot.g4`), follow these verified execution waves:
+To parallelize work across sessions, branches, or subagents **without dependency inversions, shared-file merge conflicts, or throwaway C#-to-Rust rewrites**, follow these verified execution waves:
 
 ### 1. Parallel Execution Waves
 
 | Wave | Concurrent Milestones (Zero Conflict Within Wave) | Unlocks After | Why Safe Together |
 | :--- | :--- | :--- | :--- |
-| **Wave 1** | **`M11`** *(+ optional early design/UI work on `M22.1`/`M22.4` Core DAP & `M27` Registry RFC)* | `M1`–`M10` *(Done)* | `M11` owns `Pilot.g4` ADT/`match` foundations; `M22` DAP transport & `M27` RFC touch disjoint paths. |
-| **Wave 2** | **`M12`** | `M11` | Builds `T?` (`some \| none`) atop `M11` tagged unions and cleans up `trailer: EXCLAMATION` (`x!`). |
-| **Wave 3** *(2-Way Parallel)* | **Track A**: **`M13`** (`T ! E`) $\rightarrow$ **`M14`** (Literals, `extend`, `?.`, Expr Flow)<br>**Track B**: **`M15`** (Dynamic `for` Exprs + C-ABI `RangeWindow`/`SliceBuffer`) | `M12` | `M15` only needs `M11` + `M12` (`T?` for `ScalarBreak`) and edits isolated `for_stmt`/`flow_stmt` + `Runtime/NativeMemory/`, completely independent of `M13`/`M14`. |
-| **Wave 4** | **`M16`** (Advanced Bidirectional Type Inference) | `M14` & `M15` *(all of `M11`–`M15`)* | Unifies static inference across every Phase A construct (`match`, `T?`, `T ! E`, `extend`, `if`/`for` exprs). |
-| **Wave 5** | **`M17`** (`:kw`, Reified Forms & Core Call-Quoting `!`, `!!`, `~`, `!&`) | `M16` | Reifies the complete Phase A AST once and uses `M16` resolved types for `CallFrame_<FnId>` (`!&`). |
-| **Wave 6** *(3 Internal Sub-Tracks)* | **`M18`** (`18.1` Signals `!^` $\parallel$ `18.2` Autodiff `!@` $\parallel$ `18.3` Dry-Run `!?`) | `M17` | Extends `M17` `CallQuoteKind`; `Runtime/Reactive/`, `Analysis/Autodiff/`, and `Runtime/Effects/` are 100% disjoint. |
-| **Wave 7** | **`M19`** (Runtime-to-`comptime` Demotion & Audit) | `M18` | Freezes `Pilot.g4` (`comptime`) and bakes static slots, offsets, `.rodata`, and `!@`/`!!` folding compiler-wide. |
-| **Wave 8** *(3-Way Parallel)* | **`M20`** (`--emit` / `--from` Library Transpilers + `pilot fmt`)<br>**`M22`** (Full DAP + Slot/Dry-Run Watch)<br>**`M23`** (`pilot build` + `libpilot_rt` LLVM/WASM) | `M19` | **100% disjoint directories**: `Transpilation/`+`Formatting/` vs. `Debugging/`+`vscode-pilot/` vs. `Native/`. Putting `M20` ahead of `M21` lets `stdlib/` bootstrap from donor libraries. |
-| **Wave 9** *(Parallel as Ready)* | **`M21`** (Core `stdlib/` — *unlocks right after `M20`*)<br>**`M25`** (`pilot perf` — *unlocks after `M20` & `M23`*) | `M20` *(for `M21`)*;<br>`M20` & `M23` *(for `M25`)* | `M21` (`stdlib/`) starts immediately once `M20` finishes (even while `M22`/`M23` are still running) and runs cleanly alongside `M25` (`Analysis/Performance/`). |
-| **Wave 10** *(3-Way Parallel)* | **`M24`** (Extended Net/HTTP/Crypto `stdlib/`)<br>**`M26`** (Self-Hosted `pilotc` Compiler)<br>*(+ **`M25`** if still active)* | `M21` & `M23` | **100% disjoint directories**: `stdlib/net\|http\|crypto/` vs. `selfhost/` vs. `Analysis/Performance/`. |
-| **Wave 11** | **`M27`** (Package Registry Implementation & Ed25519 Signing) | `M8` *(Done)* & `M24` | Uses `M24` `std.http`, `std.formats.json`, and `std.crypto` Ed25519 verification. |
+| **Wave 1** | **`M11`** *(✅ Done)* | `M1`–`M10` *(Done)* | `M11` owned `Pilot.g4` ADT/`match` foundations. |
+| **Wave 2** | **`M12`** *(✅ Done)* | `M11` | Built `T?` (`some \| none`) atop `M11` tagged unions and cleaned up `trailer: EXCLAMATION` (`x!`). |
+| **Wave 3** *(2-Way Parallel)* | **Track A**: **`M13`** (`T ! E`) $\rightarrow$ **`M14`** *(✅ Done)*<br>**Track B**: **`M15`** *(✅ Done)* | `M12` | `M15` edited isolated `for_stmt`/`flow_stmt` + `Runtime/NativeMemory/`, independent of `M13`/`M14`. |
+| **Wave 4** | **`M16`** *(✅ Done)* | `M14` & `M15` | Unified static inference across every Phase A construct (`match`, `T?`, `T ! E`, `extend`, `if`/`for` exprs). |
+| **Wave 5** | **`M17`** *(✅ Done)* | `M16` | Reified the complete Phase A AST once and used `M16` resolved types for `CallFrame_<FnId>` (`!&`). |
+| **Wave 6** *(3 Internal Sub-Tracks)* | **`M18`** *(✅ Done)* | `M17` | Extended `M17` `CallQuoteKind` across disjoint `Runtime/Reactive/`, `Analysis/Autodiff/`, and `Runtime/Effects/`. |
+| **Wave 7** | **`M19`** *(✅ Done)* | `M18` | Froze `Pilot.g4` (`comptime`) and baked static slots, offsets, `.rodata`, and `!@`/`!!` folding compiler-wide. |
+| **Wave 8 – 9** | **`M20`** $\rightarrow$ **`M21`** *(✅ Done)* | `M19` | Completed bidirectional `--emit`/`--from`, `pilot fmt`, and bootstrapped Core `stdlib/`. |
+| **Wave 10** *(Active Entry Wave)* | **`M28`** (Rust Workspace + 16B AST + `SLL -> LL` Oracle) $\parallel$ **`M24`** (Extended `.pilot` `stdlib/`) | `M21` *(Done)* | `M24` writes pure `.pilot` files in `stdlib/`, 100% disjoint from `crates/` and `Compiler/PilotParserFast.cs`. |
+| **Wave 11** | **`M29`** (Stage 1 SIMD Lexer/Preprocessor) $\rightarrow$ **`M30`** (Stage 2 Pratt Parser & ANTLR Removal) | `M28` | Replaces ANTLR cleanly via zero-copy C-ABI bridge; all existing C# tests immediately run on the 500+ MB/s Rust parser! |
+| **Wave 12** *(2-Way Parallel)* | **Track A**: **`M31`** (Lossless Red-Green CST + `pilot fmt`) $\rightarrow$ **`M32`** (Incremental Engine + `pilot-lsp`)<br>**Track B**: **`M33`** (Rust Static Analysis, Bidirectional Inference & Perceus Escape Pass) | `M30` | `pilot-syntax`/`pilot-lsp` (CST/IDE track) and `pilot-analysis`/`pilot-perceus` (typed `AstArena` track) touch 100% disjoint crates! |
+| **Wave 13** | **`M34`** (Zero-GC Runtime `pilot-rt` + Register `PilVM` v3) | `M33` | Consumes `M33` static slot coordinates + Perceus `RegionAlloc`/`dup`/`drop_reuse` annotations. |
+| **Wave 14** *(2-Way Parallel)* | **`M35`** (`pilot build` LLVM/WASM [absorbs **`M23`**] + Rust Transpilers + Polyglot FFI)<br>**`M22`** (Native Rust DAP Server + VS Code Breakpoints) | `M34` | `pilot-codegen`/`pilot-transpile` and `pilot-dap`/`vscode-pilot/` are 100% disjoint and target the final Rust VM/runtime directly (0 throwaway C# code!). |
+| **Wave 15** *(3-Way Parallel)* | **`M36`** (Unified `pilot` CLI + `.NET` Removal + 500 MB/s Gate)<br>**`M25`** (`pilot perf` Profiler & CST Auto-Optimizer)<br>**`M26`** (Self-Hosted `pilotc` in Pilot) | `M31`, `M32`, `M35`, `M22` | `M25` uses `M31` Rust CST + `M35` native binaries; `M26` mirrors `M29`–`M30`'s Pratt + Arena architecture in `.pilot` and links via `M35` `pilot build`! |
+| **Wave 16** | **`M27`** (Package Registry Implementation & Ed25519 Signing) | `M8` *(Done)*, `M24`, `M36` | Uses standalone native `pilot pkg` CLI + `M24` `std.http`, `std.formats.json`, and `std.crypto` Ed25519 verification. |
 
 ### 2. Per-Milestone Exact Prerequisites
 
 | Milestone | Must Be Completed Before Starting | Can Run Concurrently With |
 | :--- | :--- | :--- |
-| **`M11`** (ADTs & Exhaustive `match`) | `M1`–`M10` *(✅ Completed)* | `M22.1`/`M22.4` (Core DAP/Gutter UI), `M27` (Architecture RFC) |
-| **`M12`** (Null-Safety `T?`) | `M11` *(✅ Completed)* | `M22.1`/`M22.4`, `M27` (RFC) |
-| **`M13`** (Values-First Errors `T ! E`) | `M11`, `M12` *(✅ Completed)* | **`M15`** |
-| **`M14`** (Literals, `extend`, `?.`, Expr Flow) | `M11`, `M12` *(✅ Completed)*, `M13` | **`M15`** |
-| **`M15`** (Dynamic `for` & Zero-Marshalling C-ABI) | `M11`, `M12` *(✅ Completed)* | **`M13`**, **`M14`** |
-| **`M16`** (Advanced Type Inference) | `M11`, `M12`, `M13`, `M14`, `M15` | `M20.4` *(optional early foreign-AST parser prototyping)*, `M22.1`/`M22.4` |
-| **`M17`** (Keywords & Core Call-Quoting) | `M11`–`M16` | `M20.4` *(foreign-AST parser prototyping)*, `M22.1`/`M22.4` |
-| **`M18`** (`!^`, `!@`, `!?` Projections) | `M11`–`M17` | Internal 3-way split (`18.1` $\parallel$ `18.2` $\parallel$ `18.3`) |
-| **`M19`** (`comptime` Demotion & Audit) | `M11`–`M18` | `M22.1`/`M22.4`, `M27` (RFC) |
-| **`M20`** (Bidirectional `--emit` / `--from` + `pilot fmt`) | `M11`–`M19` | **`M22`**, **`M23`** |
-| **`M21`** (Core `stdlib/` — Bootstrapped via `M20`) | `M11`–`M19`, **`M20`** | **`M22`**, **`M23`**, **`M25`** |
-| **`M22`** (DAP & VS Code GUI Breakpoints) | `M18`, `M19` *(full watch/slot support; `M9` for core UI)* | **`M20`**, **`M21`**, **`M23`**, **`M24`**, **`M25`**, **`M26`** |
-| **`M23`** (LLVM/WASM Linking & `pilot build`) | `M7` *(Done)*, `M15`, `M17`, `M19` | **`M20`**, **`M21`**, **`M22`** |
-| **`M24`** (Extended Net/HTTP/Crypto `stdlib/`) | **`M20`**, **`M21`**, **`M23`** | **`M22`**, **`M25`**, **`M26`** |
-| **`M25`** (`pilot perf` & Auto-Optimizer) | `M19`, **`M20`**, **`M23`** | **`M21`**, **`M22`**, **`M24`**, **`M26`** |
-| **`M26`** (Self-Hosted `pilotc`) | **`M21`**, **`M23`** | **`M22`**, **`M24`**, **`M25`** |
-| **`M27`** (Package Registry Hosting & Signing) | `M8` *(Done)*, **`M24`** | `M22`, `M25`, `M26` |
+| **`M11` – `M21`** *(Completed Foundation – Core `stdlib/`)* | Sequential & parallel waves `1`–`9` *(✅ All Completed)* | — |
+| **`M24`** (Extended Net/HTTP/Crypto `stdlib/`) | **`M20`**, **`M21`** *(✅ Completed; OS socket FFI binds cleanly once `M34`/`M35` land)* | **`M28`**, **`M29`**, **`M30`**, **`M31`**, **`M32`**, **`M33`**, **`M34`** |
+| **`M28`** (Rust Workspace, 16B AST ABI & Oracle) | **`M21`** *(✅ Completed)* | **`M24`**, `M22.4` (VS Code Gutter UI), `M27` (RFC) |
+| **`M29`** (Stage 1 SIMD Preprocessor & Modal Lexer) | **`M28`** | **`M24`**, `M22.4`, `M27` (RFC) |
+| **`M30`** (Stage 2 Pratt Parser & ANTLR Removal) | **`M28`**, **`M29`** | **`M24`**, `M22.4`, `M27` (RFC) |
+| **`M31`** (Lossless Red-Green CST & Native `pilot fmt`) | **`M30`** | **`M33`**, **`M24`** |
+| **`M32`** (Sub-ms Incremental Engine & Native `pilot-lsp`) | **`M31`** | **`M33`**, **`M34`**, **`M24`** |
+| **`M33`** (Rust Static Analysis, Perceus Escape & `comptime`) | **`M30`** | **`M31`**, **`M32`**, **`M24`** |
+| **`M34`** (Zero-GC Runtime `pilot-rt` & Register `PilVM` v3) | **`M33`** | **`M31`**, **`M32`**, **`M24`** |
+| **`M35`** (`pilot build` [absorbs **`M23`**], Transpilers & FFI) | **`M34`** | **`M22`**, **`M32`**, **`M24`** |
+| **`M22`** (Native Rust DAP & VS Code GUI Breakpoints) | **`M34`** *(core UI `22.4` can start anytime after `M9`)* | **`M35`**, **`M32`**, **`M24`** |
+| **`M25`** (`pilot perf` Profiler & CST Auto-Optimizer) | **`M31`**, **`M35`** | **`M36`**, **`M26`**, **`M22`** |
+| **`M26`** (Self-Hosted `pilotc` Written in Pilot) | **`M21`** *(✅)*, **`M24`**, **`M35`** | **`M36`**, **`M25`**, **`M22`** |
+| **`M36`** (Standalone `pilot` CLI, `.NET` Removal & 500 MB/s Gate) | **`M32`**, **`M35`**, **`M22`** | **`M25`**, **`M26`** |
+| **`M27`** (Package Registry Hosting & Signing) | `M8` *(✅)*, **`M24`**, **`M36`** | **`M25`**, **`M26`** |
 
 ---
 
 ## Cross-Milestone Conflict Resolutions & Architectural Invariants
 
-During architectural review against `antlr/Pilot.g4`, seven concrete syntax/semantic collisions and ordering hazards were identified and resolved. **All future implementation sessions must preserve these invariants**:
+During architectural review against `antlr/Pilot.g4` and the Phase D zero-GC native migration, eleven concrete syntax, memory, and sequencing invariants were established. **All future implementation sessions must preserve these invariants**:
 
 1. **Resolution of the Triple `!` Collision (`macro_call` vs. Unsafe Non-Null `x!` vs. `ShallowQuote` `fn!(...)`)**:
    - **Dropped Feature**: The unchecked postfix non-null assertion `trailer: EXCLAMATION` (`x!` in `Pilot.g4` line 1098) **is removed**. It directly violated `M12` (zero `NullReferenceException`s) and created an unresolvable parse/semantic ambiguity with `fn!(args)` when `fn` is an optional callable. Safe narrowing (`guard some x else`, `if x != none`), `??`, or explicit `.OrPanic("reason")` replace it.
@@ -165,6 +195,14 @@ During architectural review against `antlr/Pilot.g4`, seven concrete syntax/sema
    - **Invariant**: In `type_spec`, postfix `?` (`Optional`) binds tighter than `|`/`&` (`Union`/`Intersection`), which bind tighter than infix `!` (`Fallible`). Thus `User? ! IoError | ParseError` unambiguously parses as `(Option[User]) ! (IoError | ParseError)`.
 7. **Unified Error Stratification (No Split Ecosystem Between `raise` and `T ! E`)**:
    - **Invariant**: All recoverable errors in native Pilot and `stdlib/` use `T ! E` return values (`M13`). Unrecoverable contract/invariant bugs use `panic(...)` / `requires` traps. Legacy `try` / `except` / `raise` is strictly scoped to foreign polyglot FFI boundaries (`python {}`, `csharp {}`, `js {}`) and actor/thread fault-isolation supervisors (`isolate`), enforced by lint `ERR005`.
+8. **Modern Native Two-Stage Parsing (`M29` + `M30`) vs. Transitional ANTLR `SLL -> LL` (`M28.1`)**:
+   - **Invariant**: ANTLR4's `PredictionMode.SLL` $\rightarrow$ `PredictionMode.LL` retry is activated strictly in `M28.1` as a transitional C# differential oracle and deleted in `M30.5`. The permanent Rust frontend uses **Native Structural Two-Stage Parsing**: **Stage 1 (`pilot-lexer`)** performs single-pass SIMD UTF-8 scanning, in-place `#if` masking, `:`/`{}` virtual brace tracking, and precomputes a **Balanced Delimiter Jump Table (`bracket_links`)**; **Stage 2 (`pilot-parser`)** uses `bracket_links` for $O(1)$ zero-backtracking lookahead (e.g., `(a, b) =>` lambdas vs. `(a, b)` tuples) and parses expressions/types/patterns via flat **Pratt (TDOP)** binding-power loops (including native `Bp::Cascade = 1` binding that eliminates post-parse `ExtractHoistedCascades` AST rewriting).
+9. **Pointer-Free 16-Byte Arena AST (`NodeId(u32)`) & Zero-Cost Monomorphized `TreeSink`**:
+   - **Invariant**: No Rust compiler crate may use heap-allocated pointer graphs (`Box<Expr>`, `Rc`, or self-referential `'ast` lifetimes) for AST/IR/Type nodes. All nodes are `Copy` structs (`16 bytes` for `AstNode`) indexed by 32-bit typed handles (`NodeId`, `TokenId`, `SymbolId`, `TypeId`) in chunked bump arenas (`Send + Sync`). `pilot-parser` is generic over `TreeSink`, monomorphizing into `FastAstSink` (zero trivia materialization, $\ge 500\text{ MB/s}$ batch throughput) and `LosslessCstSink` (Red-Green CST for `pilot-lsp`, `pilot fmt`, and `pilot perf optimize`).
+10. **Worry-Free 3-Tier Deterministic Zero-GC Runtime Memory (`M33.4` + `M34`)**:
+    - **Invariant**: Removing the `.NET` CLR and tracing GC MUST NOT force `.pilot` application developers to write manual `free()` calls or pervasive lifetime annotations. Memory is managed deterministically across three tiers: **Tier 0** (`16-byte` register `PilotVal` with 14-byte inline SSO strings & niche-unboxed `T?`/`T ! E`), **Tier 1** (compile-time escape-analyzed thread-local lexical bump arenas freed in $O(1)$ at scope/loop exit), and **Tier 2** (compile-time Perceus ARC with `drop_reuse` in-place recycling + bounded non-blocking trial-deletion cycle collection outside `@hard_realtime` / `noalloc` scopes).
+11. **Zero-Throwaway Strangler-Fig Migration & External C# Isolation (`M28` – `M36`)**:
+    - **Invariant**: Do NOT implement unstarted tooling (`M22` DAP, `M23` `pilot build` linking, `M25` `pilot perf`) against legacy C#/ANTLR classes; build them directly atop the Phase D Rust crates (`pilot-vm`, `pilot-rt`, `pilot-codegen`, `pilot-syntax`). During `M28`–`M35`, Rust crates expose C-ABI entry points so 100% of existing tests remain green. In `M35.3`, `csharp {}` inline polyglot blocks become an optional out-of-process external bridge (like `python {}` / `js {}`), removing `Microsoft.CodeAnalysis.CSharp` and `.NET` completely in `M36`.
 
 ---
 
@@ -222,7 +260,7 @@ During architectural review against `antlr/Pilot.g4`, seven concrete syntax/sema
 
 ---
 
-# Part II: Upcoming Strategic Milestones (M11 – M27)
+# Part II: Strategic Milestones (M11 – M36)
 
 ---
 
@@ -632,10 +670,11 @@ Placed immediately after `M16` (Bidirectional Inference) and `M17`–`M18` (Meta
 
 ## Milestone 22: Debug Adapter Protocol (DAP) & VS Code GUI Breakpoints
 **Goal**: Upgrade debugging from CLI sessions to full visual IDE debugging in VS Code using the official Debug Adapter Protocol (DAP).
+> **Phase D Alignment Note (Invariant #11)**: Implemented directly in native zero-GC Rust (`crates/pilot-dap`) against `M34`'s register-based `PilVM` v3 (`VMHook`) rather than legacy C#, avoiding duplicate work (`22.4` VS Code extension TypeScript UI may run anytime).
 
 ### Sub-Tasks & Deliverables
-- [ ] **22.1: DAP Protocol Server (`Debugging/Dap/PilotDapServer.cs`)** — JSON-RPC / `Content-Length` server (`pilot debug --dap`) handling `initialize`, `launch`, `setBreakpoints` (conditional, hit-count, logpoints), `threads`, `stackTrace`, `scopes`, `variables`, `continue`, `next`, `stepIn`, `stepOut`, `evaluate`, `readMemory`, and `disconnect`.
-- [ ] **22.2: PilVM & Slot-Mapped Debugger Hooks (`Debugging/PilotDebugger.cs`)** — Map `M19` compile-time `(frameDepth, slotIndex)` registers back to source variable names and erased typestate/unit metadata.
+- [ ] **22.1: DAP Protocol Server (`crates/pilot-dap` — replaces legacy `Debugging/Dap/PilotDapServer.cs`)** — JSON-RPC / `Content-Length` server (`pilot debug --dap`) handling `initialize`, `launch`, `setBreakpoints` (conditional, hit-count, logpoints), `threads`, `stackTrace`, `scopes`, `variables`, `continue`, `next`, `stepIn`, `stepOut`, `evaluate`, `readMemory`, and `disconnect`.
+- [ ] **22.2: PilVM & Slot-Mapped Debugger Hooks (`crates/pilot-vm/src/debug.rs`)** — Map `M19`/`M33` compile-time `(frameDepth, slotIndex)` registers back to source variable names and erased typestate/unit metadata.
 - [ ] **22.3: Rich Watch & Live Dry-Run (`!?`) Inspection** — Inspect ADTs, `T?`, `T ! E`, `SliceBuffer<T>`, `RangeWindow<TIter>` worklists, and evaluate `fn!?(...)` shadow dry-runs live in the Debug Console without mutating paused program state.
 - [ ] **22.4: VS Code Gutter Breakpoints (`vscode-pilot/`)** — Enable `.pilot` red-dot breakpoints and connect `PilotDebugAdapterDescriptorFactory` to `pilot debug --dap`.
 
@@ -643,20 +682,21 @@ Placed immediately after `M16` (Bidirectional Inference) and `M17`–`M18` (Meta
 
 ## Milestone 23: Deep LLVM / WASM Runtime Linking & Native Binary Toolchain (`pilot build`)
 **Goal**: Evolve Pilot's LLVM IR, WebAssembly, and C-ABI emitters into a complete native compilation toolchain (`pilot build`) linking against `libpilot_rt` to produce standalone native executables, shared libraries, and `.wasm` + WASI modules.
+> **Phase D Unification Note (Invariant #11)**: Unified directly into **`M34.2` (`crates/pilot-rt` zero-GC runtime)** and **`M35.1` (`crates/pilot-codegen` native LLVM/WASM/C-ABI driver)** so LLVM/WASM linking is built once against the final Perceus + Arena runtime rather than twice across C# and Rust.
 
 ### Why This Precedes M24, M25 & M26 (Cart-Before-the-Horse Fix)
-Moving `pilot build` *ahead* of Extended Systems/Net `stdlib` (`M24`), `pilot perf` (`M25`), and Self-Hosting (`M26`) ensures OS sockets/crypto have a working C-ABI native runtime (`libpilot_rt`) to link against, `pilot perf` can profile real native binaries (`--pgo`), and `pilotc` can bootstrap standalone native executables.
+Moving `pilot build` *ahead* of Extended Systems/Net `stdlib` (`M24` OS linking), `pilot perf` (`M25`), and Self-Hosting (`M26`) ensures OS sockets/crypto have a working C-ABI native runtime (`libpilot_rt`) to link against, `pilot perf` can profile real native binaries (`--pgo`), and `pilotc` can bootstrap standalone native executables.
 
 ### Sub-Tasks & Deliverables
-- [ ] **23.1: Linkable C-ABI Native Runtime (`Native/Runtime/pilot_runtime.c` & `.h`)** — Arena/RC memory allocator, `SliceBuffer<T>`, `RangeWindow<TIter>`, `CallFrame_<FnId>` dispatch trampolines, unboxed ADT/`T?`/`T ! E` helpers, `.rodata` `comptime` pools, OS file/socket/clock shims, and contract panic traps.
-- [ ] **23.2: Complete LLVM IR Lowering & DWARF Debug Info (`PilotLlvmEmitter.cs`)** — Tagged ADTs, niche-optimized `T?` pointers, register-returned `T ! E` and `Dual` structs, SIMD `<4 x float>` matrices, 3-tier `ForExpr` CFGs, and `!dbg` DWARF metadata for `lldb`/`gdb`/DAP.
-- [ ] **23.3: Binary `.wasm` + WASI & JS/TS Host Bindings (`PilotWasmEmitter.cs`)** — Direct `.wasm` binary emission, `SharedArrayBuffer` linear memory, `wasi_snapshot_preview1` imports, and `.mjs` + `.d.ts` zero-copy `SliceBuffer` wrappers.
-- [ ] **23.4: Unified `pilot build` Driver** — `pilot build <file.pilot> [--target native|llvm|wasm|c] [-O0|-O2|-O3] [--pgo <trace>] [-o <out>]` auto-invoking `clang`/`llc`/`lld`/`wasm-ld`.
+- [ ] **23.1: Linkable C-ABI Native Runtime (`crates/pilot-rt` — unifies `Native/Runtime/pilot_runtime.h` w/ `M34.2`)** — Perceus ARC + bump-arena memory allocator, `SliceBuffer<T>`, `RangeWindow<TIter>`, `CallFrame_<FnId>` dispatch trampolines, unboxed ADT/`T?`/`T ! E` helpers, `.rodata` `comptime` pools, OS file/socket/clock shims, and contract panic traps.
+- [ ] **23.2: Complete LLVM IR Lowering & DWARF Debug Info (`crates/pilot-codegen/src/llvm.rs` — `M35.1`)** — Tagged ADTs, niche-optimized `T?` pointers, register-returned `T ! E` and `Dual` structs, SIMD `<4 x float>` matrices, 3-tier `ForExpr` CFGs, and `!dbg` DWARF metadata for `lldb`/`gdb`/DAP.
+- [ ] **23.3: Binary `.wasm` + WASI & JS/TS Host Bindings (`crates/pilot-codegen/src/wasm.rs` — `M35.1`)** — Direct `.wasm` binary emission, `SharedArrayBuffer` linear memory, `wasi_snapshot_preview1` imports, and `.mjs` + `.d.ts` zero-copy `SliceBuffer` wrappers.
+- [ ] **23.4: Unified `pilot build` Driver (`M35.1`)** — `pilot build <file.pilot> [--target native|llvm|wasm|c] [-O0|-O2|-O3] [--pgo <trace>] [-o <out>]` auto-invoking `clang`/`llc`/`lld`/`wasm-ld`.
 
 ---
 
 ## Milestone 24: Extended Systems, Networking, HTTP & Cryptography Standard Library
-**Goal**: Expand `stdlib/` with production networking, web, serialization, time, and cryptographic libraries—bootstrapping pure parser/codec/crypto state machines via `M20` (`--strict-pilot --viable-license-only`) from permissive Python/Rust/C11 donors and linking OS/network primitives against `M21` Core `stdlib` and `M23` `libpilot_rt`.
+**Goal**: Expand `stdlib/` with production networking, web, serialization, time, and cryptographic libraries—bootstrapping pure parser/codec/crypto state machines via `M20` (`--strict-pilot --viable-license-only`) from permissive Python/Rust/C11 donors and linking OS/network primitives against `M21` Core `stdlib` and `M23`/`M34` `libpilot_rt`.
 
 ### Sub-Tasks & Deliverables
 - [ ] **24.1: `std.time`** — Monotonic `Instant`, dimensional `Duration` interop, `DateTime`, timezones, and timers.
@@ -667,30 +707,32 @@ Moving `pilot build` *ahead* of Extended Systems/Net `stdlib` (`M24`), `pilot pe
 ---
 
 ## Milestone 25: Advanced Performance Analysis, Profiling & Trivia-Preserving Auto-Optimizer (`pilot perf`)
-**Goal**: Deliver an end-to-end performance suite that **measures and profiles** AST, PilVM, and `M23` native binaries, and **safely rewrites Pilot source code** using `M20`'s lossless `PilotFormatter` CST while preserving user comments and formatting.
+**Goal**: Deliver an end-to-end performance suite that **measures and profiles** AST, PilVM, and `M23`/`M35` native binaries, and **safely rewrites Pilot source code** using `M31`'s lossless Red-Green CST (`crates/pilot-fmt`) while preserving user comments and formatting.
+> **Phase D Alignment Note (Invariant #11)**: Built in native Rust (`crates/pilot-perf`) directly atop `M31`'s lossless Red-Green CST and `M34`/`M35` native execution engines.
 
 ### Sub-Tasks & Deliverables
-- [ ] **25.1: Multi-Target Profiler & Flamegraphs (`Analysis/Performance/PilotProfiler.cs`)** — Per-function, per-loop, and per-line wall-clock, CPU cycle, instruction, and branch metrics across PilVM and native runs (`pilot perf profile <file.pilot>` exporting Speedscope / Chrome Tracing JSON).
-- [ ] **25.2: Static & Dynamic Allocation, WCET & Complexity Analyzer (`PilotPerfAnalyzer.cs`)** — Detect heap allocations, remaining `dynamic` fallbacks, accidental $O(N^2)$ nested loops, unindexed `Table` scans, and `@hard_realtime` WCET/jitter budgets.
+- [ ] **25.1: Multi-Target Profiler & Flamegraphs (`crates/pilot-perf/src/profiler.rs`)** — Per-function, per-loop, and per-line wall-clock, CPU cycle, instruction, and branch metrics across `PilVM` v3 and native runs (`pilot perf profile <file.pilot>` exporting Speedscope / Chrome Tracing JSON).
+- [ ] **25.2: Static & Dynamic Allocation, WCET & Complexity Analyzer (`crates/pilot-perf/src/analyzer.rs`)** — Detect Tier-2 heap allocations, remaining `dynamic` fallbacks, accidental $O(N^2)$ nested loops, unindexed `Table` scans, and `@hard_realtime` WCET/jitter budgets.
 - [ ] **25.3: Automated Trivia-Preserving Source Optimizer (`pilot perf optimize [--diff|--apply]`)**:
-  - Built atop `Formatting/PilotFormatter.cs` (`M20.2`) so in-place rewrites never strip user comments or brace/colon style:
+  - Built atop `crates/pilot-syntax` & `crates/pilot-fmt` (`M31.1`–`M31.3`) so in-place rewrites never strip user comments or brace/colon style:
     - Rewrite pure startup computations and loop-invariant calls into `comptime { ... }` (`M19`) or staged `fn!!(~invariant, x)` splices (`M17`).
     - Rewrite imperative `list.append` loops into pre-allocated `FixedScalar` `for` expressions (`SliceBuffer<T>`).
     - Rewrite bounded recursive traversals into `MutableBounds` / `WorklistStack` (`RangeWindow<TIter>`) loops.
     - Promote short-lived escaping buffers to `stackalloc` / `region` arenas, vectorize scalar loops (`each` / SIMD / `@burst`), and push predicates/indexes into `Table` queries.
-- [ ] **25.4: Profile-Guided Optimization (`pilot build --pgo`) & VS Code CodeLens Quick-Fixes** — Feed `.pilprof` traces into `M23` native/bytecode specialization, run before/after benchmarks to prove speedups, and surface one-click `PERF001`–`PERF020` Quick Fixes in VS Code.
+- [ ] **25.4: Profile-Guided Optimization (`pilot build --pgo`) & VS Code CodeLens Quick-Fixes** — Feed `.pilprof` traces into `M35` native/bytecode specialization, run before/after benchmarks to prove speedups, and surface one-click `PERF001`–`PERF020` Quick Fixes in VS Code.
 
 ---
 
 ## Milestone 26: Self-Hosted Pilot Compiler (`pilotc` Written in Pilot)
-**Goal**: Write the Pilot compiler in Pilot itself (`selfhost/`), achieving full self-hosting and proving that ADTs (`M11`), `T?` (`M12`), `T ! E` (`M13`), `ForExpr` + `SliceBuffer` (`M15`), call-quoting (`M17`), `comptime` (`M19`), Core `stdlib` (`M21`), and `pilot build` (`M23`) can express a fast, zero-overhead production compiler.
+**Goal**: Write the Pilot compiler in Pilot itself (`selfhost/`), achieving full self-hosting and proving that ADTs (`M11`), `T?` (`M12`), `T ! E` (`M13`), `ForExpr` + `SliceBuffer` (`M15`), call-quoting (`M17`), `comptime` (`M19`), Core `stdlib` (`M21`), and `pilot build` (`M23`/`M35`) can express a fast, zero-overhead production compiler.
+> **Phase D Synergy Note**: `selfhost/` directly mirrors `M29`–`M30`'s clean Two-Stage Structural Scanner + Pratt (TDOP) + 16B `SliceBuffer<AstNode>` Arena design in idiomatic Pilot, bootstrapping `stage1` via the native Rust `pilot` compiler (`M35`) rather than the retired C# compiler!
 
 ### Sub-Tasks & Deliverables
-- [ ] **26.1: Stage 1 Scanner & Preprocessor (`selfhost/lexer.pilot`, `preprocessor.pilot`)** — Tokenize all Pilot tokens (including `:kw`, `...`, `..<`, maximal-munch `!!`/`!&`/`!^`/`!@`/`!?`/`!` with `(` lookahead, dimensional literals, and `#define`/`#if`) using zero-copy UTF-8 slices, `MutableBounds` loops, and `Token[] ! LexError`.
-- [ ] **26.2: Stage 1 Parser (`selfhost/parser.pilot`, `ast.pilot`)** — Represent Pilot AST nodes with unboxed Pilot ADTs (`type Expr`, `type Stmt`, `type Decl`) and `T?` optional fields.
-- [ ] **26.3: Stage 1 Bidirectional Type Inferencer, Exhaustiveness & `comptime` Lowerer (`selfhost/analyzer.pilot`, `comptime.pilot`)** — Implement `M11`–`M19` static analysis, `ForExpr` 3-tier inference, `CallQuoteKind` projections, and static slot/offset demotion in pure Pilot.
-- [ ] **26.4: Stage 1 `.pilc` Bytecode & C-ABI/LLVM Emitter (`selfhost/emitter.pilot`)** — Emit `.pilc` v2 chunks and native C-ABI / LLVM IR linkable via `M23` `libpilot_rt`.
-- [ ] **26.5: Fixed-Point Bootstrap Verification** — Compile `selfhost/pilotc.pilot` with the C# reference compiler (`stage1`), compile `pilotc.pilot` with `stage1` (`stage2`), compile `pilotc.pilot` with `stage2` (`stage3`), and verify byte-identical `stage2 == stage3` fixed-point output across all integration tests.
+- [ ] **26.1: Stage 1 Scanner & Preprocessor (`selfhost/lexer.pilot`, `preprocessor.pilot`)** — Tokenize all Pilot tokens (including `:kw`, `...`, `..<`, maximal-munch `!!`/`!&`/`!^`/`!@`/`!?`/`!` with `(` lookahead, dimensional literals, `#define`/`#if`, and `bracket_links` jump indices) using zero-copy UTF-8 slices, `MutableBounds` loops, and `TokenTape ! LexError`.
+- [ ] **26.2: Stage 2 Pratt & Recursive-Descent Parser (`selfhost/parser.pilot`, `ast.pilot`)** — Represent Pilot AST nodes with unboxed Pilot ADTs / `SliceBuffer<AstNode>` arenas and `T?` optional handles using `M30`'s Pratt binding-power table.
+- [ ] **26.3: Bidirectional Type Inferencer, Exhaustiveness, Perceus & `comptime` Lowerer (`selfhost/analyzer.pilot`, `comptime.pilot`)** — Implement `M11`–`M19` + `M33.4` static analysis, `ForExpr` 3-tier inference, `CallQuoteKind` projections, Perceus escape placement, and static slot/offset demotion in pure Pilot.
+- [ ] **26.4: `.pilc` v3 Bytecode & C-ABI/LLVM Emitter (`selfhost/emitter.pilot`)** — Emit `.pilc` v3 chunks and native C-ABI / LLVM IR linkable via `M34`/`M35` `libpilot_rt`.
+- [ ] **26.5: Fixed-Point Bootstrap Verification** — Compile `selfhost/pilotc.pilot` with the Rust reference compiler (`stage1`), compile `pilotc.pilot` with `stage1` (`stage2`), compile `pilotc.pilot` with `stage2` (`stage3`), and verify byte-identical `stage2 == stage3` fixed-point output across all integration tests.
 
 ---
 
@@ -713,5 +755,281 @@ Moving `pilot build` *ahead* of Extended Systems/Net `stdlib` (`M24`), `pilot pe
 
 ### Sub-Tasks (Once Option is Selected)
 - [ ] Select primary registry hosting model (or hybrid **Option A Git Index + Option D Self-Hosted Pilot Server**).
-- [ ] Implement `pilot pkg search <query>`, `pilot pkg login`, and `pilot pkg publish` CLI commands.
-- [ ] Add SHA-256 checksum & `std.crypto` Ed25519 signature verification to `pilot.lock.json` and `PilotPackageManager`.
+- [ ] Implement `pilot pkg search <query>`, `pilot pkg login`, and `pilot pkg publish` CLI commands in `crates/pilot-pkg`.
+- [ ] Add SHA-256 checksum & `std.crypto` Ed25519 signature verification to `pilot.lock.json` and `pilot-pkg`.
+
+---
+
+## Phase D: Zero-GC Native Architecture, 500+ MB/s SIMD/Pratt Frontend & Full `.NET`/ANTLR Decoupling (M28 – M36)
+
+> **Phase D Architectural North Star & Philosophy**: Eliminate 100% of ANTLR4 and `.NET` CLR/GC dependencies by migrating Pilot's frontend, semantic query engine, runtime/VM, AOT backends, LSP, and CLI to an idiomatic, **worry-free, zero-GC architecture** via incremental C-ABI Strangler-Fig stages.
+> In full alignment with **Pilot's core philosophy** (unboxed value representations, structural typing, `T?` null-safety, values-first errors `T ! E`, zero-marshalling `SliceBuffer` C-ABI, and homoiconic clarity):
+> - **Syntax & AST**: Represented as unboxed, cache-packed `SliceBuffer[AstNode]` structures with $O(1)$ token and delimiter indexing.
+> - **Two-Stage Parsing**: Stage 1 SIMD structural tokenization with bracket jump tables $\rightarrow$ Stage 2 $O(1)$-lookahead Recursive Descent + Pratt (TDOP) expression/type binding power.
+> - **Error Resilience & Tooling**: Lossless Red-Green Concrete Syntax Trees (CST) preserving 100% trivia for formatting (`pilot fmt`), sub-millisecond query-driven incremental reparsing for language tooling, and panic-free error recovery with synthesized missing tokens.
+> - **Deterministic Zero-GC Memory**: 3-Tier automatic model (16-byte unboxed SSO registers $\rightarrow$ lexical bump arenas $\rightarrow$ compile-time Perceus ARC with in-place reuse), ensuring **zero GC pauses, zero manual `free()` calls, and zero lifetime annotation friction**.
+
+---
+
+## Milestone 28: Zero-GC Architecture Foundation, Canonical 16B Arena AST ABI & Differential Oracle
+**Goal**: Stand up the native workspace, define the cache-packed 16-byte `AstNode` / `ByteSpan` / interning architecture and zero-copy C-ABI Strangler-Fig bridge, and activate two-stage `SLL -> LL` parsing in C# `Compiler/PilotParserFast.cs` strictly as a fast **Differential Conformance Oracle**.
+
+### Why This Comes First (No Cart Before the Horse)
+Decoupling a 1,723-line grammar (`antlr/Pilot.g4`) and 306 ANTLR call sites without regressions requires (1) an exact canonical AST target independent of `ParserRuleContext`, (2) a zero-copy C-ABI bridge so existing C# subsystems can consume the native frontend immediately, and (3) an automated differential test harness comparing ANTLR vs. the new engine across every valid and invalid `.pilot` input.
+
+### Hardware-Packed AST Node Layout & Pilot Philosophy
+In Pilot's idiomatic syntax philosophy (unboxed structs, concise field declarations, zero-pointer `SliceBuffer` arena storage):
+```pilot
+// Canonical Pilot representation: unboxed 16-byte node layout (4 nodes per 64-byte L1 cache line)
+struct AstNode {
+    let kind: u16;          // 0..65535 syntax/node kinds
+    let flags: u16;         // CallQuoteKind, operator precedence, mutability
+    let span_start: u32;    // token index or byte offset in UTF-8 buffer
+    let lhs: u32;           // child NodeId, SymbolId, or literal pool index
+    let rhs: u32;           // child NodeId, or slice index into extra_children
+}
+
+// Zero-copy arena slice in Pilot:
+type NodeArena = SliceBuffer[AstNode];
+```
+In the native systems implementation (`crates/pilot-ast/src/node.rs`):
+```rust
+#[repr(C, align(8))]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct AstNode {
+    pub kind: NodeKind,      // u16: 0..65535 expression/statement/type/pattern kinds
+    pub flags: u16,          // u16: CallQuoteKind, mutability, operator / precedence bits
+    pub span_start: u32,     // u32: token index or UTF-8 byte offset (up to 4 GB per file)
+    pub lhs: u32,            // u32: child NodeId, SymbolId, or literal pool index
+    pub rhs: u32,            // u32: child NodeId, or slice index into extra_children: Vec<u32>
+} // 16 bytes (4 nodes per 64-byte L1 cache line), 0 raw pointers, 0 individual heap frees!
+```
+
+### Sub-Tasks & Deliverables
+- [x] **28.1: Transitional C# `SLL -> LL` Fast Path & Differential Conformance Harness**
+  - Update `ParseProgramFast()` and `ParseTestFast()` in `Compiler/PilotParserFast.cs` to execute `PredictionMode.Sll` with `BailErrorStrategy` first, rewinding `CommonTokenStream` and falling back to `PredictionMode.Ll` only on `ParseCanceledException` / `RecognitionException`.
+  - Build a canonical S-expression / JSON AST normalizer and 16-byte arena lowerer over ANTLR `ProgramContext` (`Compiler/PilotAstOracle.cs`) to serve as the golden reference oracle across all 36+ suites in `tests/`, 17+ showcase scripts in `examples/showcase/`, and `stdlib/`.
+- [x] **28.2: Native Workspace & Zero-Dependency Memory Primitives (`crates/`)**
+  - Initialize root `Cargo.toml` and foundational crates: `pilot-arena` (64KB page-aligned bump allocator + resettable thread-local pools), `pilot-span` (`FileId(u16)`, `ByteSpan { start: u32, end: u32 }`, SIMD newline-offset line-index lookup), and `pilot-intern` (sharded UTF-8 string & `:ns/kw` keyword interner yielding `Copy` 32-bit `SymbolId` and `KeywordId`).
+- [x] **28.3: 16-Byte Cache-Packed Flat `AstArena` & Grammar Invariant Freeze (`crates/pilot-ast`)**
+  - Implement `AstNode` (`16 bytes`, `Copy`), `NodeKind` (`u16`), side-table pools (`extra_children: Vec<u32>`, `f64_pool: Vec<f64>`, `span_pool: Vec<ByteSpan>`), and typed zero-cost view wrappers (`ExprView`, `StmtView`, `TypeSpecView`, `PatternView`) carrying zero lifetimes beyond `&AstArena`.
+  - Encode Cross-Milestone Architectural Invariants #1–#9 directly into `NodeKind` and operator binding-power tables.
+- [x] **28.4: Zero-Copy C-ABI Strangler-Fig Bridge (`crates/pilot-ffi` + C# `NativeAstBridge`)**
+  - Export `pilot_parse_utf8_to_arena(...)` via C-ABI returning contiguous `AstNode*` / `ByteSpan*` buffers directly readable as `ReadOnlySpan<NativeAstNode>` in C# (`Compiler/NativeAstBridge.cs`) with zero per-node marshalling, verified via `Pilot.Tests/PilotPhaseDFoundationTests.cs`.
+
+---
+
+## Milestone 29: Stage 1 — Zero-Copy SIMD Preprocessor, Structural Indexer & Modal Lexer (`pilot-lexer`)
+**Goal**: Achieve **1.0 – 2.5+ GB/s** lexical & structural scanning throughput in `crates/pilot-lexer` by fusing preprocessing (`#if`/`#define`), `:` indentation vs. `{}` brace tracking, modal tokenization, and balanced-delimiter indexing into a **single zero-allocation SIMD pass** over raw UTF-8 bytes.
+
+### Why Fusing Preprocessing & Lexing Matters (Pilot Syntax Philosophy)
+In Pilot, code blocks can be expressed either with Pythonic indentation (`:`) or structured braces (`{}`), alongside first-class `:ns/kw` keywords, units of measure (`250ms`, `64KB`), and call-quoting forms (`!`, `!!`, `!&`). Legacy `Preprocessing/PilotPreprocessor.cs` desugared colon blocks via heap string re-allocation. In the new engine, the modal lexer scans raw UTF-8 directly, emitting virtual suite delimiters into a contiguous `TokenTape` with zero string copies:
+```pilot
+// In Pilot's mental model:
+struct TokenTape {
+    let kinds: SliceBuffer[u8];         // TokenKind enum
+    let flags: SliceBuffer[u8];         // Contextual keyword / whitespace flags
+    let offsets: SliceBuffer[u32];      // Byte offsets into immutable source buffer
+    let bracket_links: SliceBuffer[u32];// O(1) jump index to matching close delimiter
+}
+```
+
+### Sub-Tasks & Deliverables
+- [ ] **29.1: Portable SIMD / SWAR Character-Class & Delimiter Scanner**
+  - Implement 32-byte (`AVX2` / `AVX-512`) and 16-byte (`SSE2` / ARM `NEON`) vectorized scanners (with 64-bit SWAR scalar fallback) over 64-byte `\0`-padded UTF-8 buffers (`mmap` or single read):
+    - Vectorized whitespace (`' '`, `'\t'`, `'\r'`, `'\n'`) & ASCII identifier (`[A-Za-z0-9_]`) run-length bitmask (`tzcnt` / `trailing_zeros`).
+    - Vectorized fast-forward scanning for string quotes (`"`, `'`), triple-quotes (`"""`, `'''`), line comments (`#`, `//`), and block comments (`/* ... */`).
+- [ ] **29.2: Zero-Copy In-Place Preprocessor State Machine (`PREPROC001`–`PREPROC011`)**
+  - Evaluate `#define`, `#undef`, `#if`, `#elif`, `#else`, `#endif`, `#region`, `#endregion`, `#error`, `#warning`, `#pragma`, `#line`, and `#nullable` directly on `ByteSpan` slices when `#` is the first non-whitespace byte on a line; skip inactive `#if` branches via SIMD `#`+newline scanning while recording `#region` and `#pragma warning` metadata in side tables (**0 bytes of source string copying**).
+- [ ] **29.3: Unified `{}` Brace & Pythonic `:` Indentation State Machine**
+  - Track delimiter nesting depth (`()`, `[]`, `{}`) alongside an indentation column stack (`SmallVec<[u16; 16]>`):
+    - Automatically suppress virtual newline/indentation tokens inside `( ... )`, `[ ... ]`, and `{ ... }`.
+    - When a block header ends a logical line with `:`, push the indented suite column and emit zero-width `VirtualLBrace` / `VirtualRBrace` tokens into the `TokenTape` at exact byte offsets—preserving 100% of original UTF-8 coordinates for diagnostics, LSP, and `pilot fmt`.
+- [ ] **29.4: Pilot Modal Lexing, Call-Quoting Maximal-Munch & Perfect-Hash Keywords**
+  - **140+ Contextual Keywords in $O(1)$**: Compile-time length-partitioned `u64` word comparison / perfect hash table mapping `[u8]` slices to `TokenKind` with a `TokenFlags::IS_CONTEXTUAL_IDENT` bit (replacing ANTLR's 45-branch `identifier` rule with a 1-cycle bitmask check).
+  - **Call-Quoting Disambiguation (`M17` Invariant)**: Emit `CallQuoteDeep` (`!!`), `CallQuoteAbi` (`!&`), `CallQuoteReact` (`!^`), `CallQuoteAdjoint` (`!@`), `CallQuoteEffect` (`!?`), and `CallQuoteShallow` (`!`) **if and only if** `input[pos + op_len] == b'('` with zero intervening whitespace; otherwise emit `!` / `!=` cleanly.
+  - **Dimensional & Numeric Literals**: Single-pass scanning of `HEX`/`BIN`/`OCT`/`INTEGER`/`FLOAT` plus immediate suffix classification for `DURATION_LITERAL` (`ns`, `us`, `ms`, `s`, `min`, `h`), `FREQUENCY_LITERAL` (`Hz`, `kHz`, `MHz`, `GHz`), and `MEMORY_LITERAL` (`B`, `KB`, `MB`, `GB`, `TB`).
+  - **Lexer Mode Stack**: Nested interpolated f-strings (`f"hello {items.Map(x => f'{x}')}"`) and raw polyglot fences (```` ```sql ... ``` ```` and balanced-brace foreign language blocks).
+- [ ] **29.5: Stage 1 SoA `TokenTape` & Balanced Delimiter Jump Table (`bracket_links`)**
+  - Emit dense SoA arrays (`kinds: Vec<TokenKind>`, `flags: Vec<TokenFlags>`, `offsets: Vec<u32>`) plus `bracket_links: Vec<u32>` mapping every opening `(`, `[`, `{` token index directly to its matching close token index in $O(1)$.
+
+---
+
+## Milestone 30: Stage 2 — Hand-Written Recursive Descent + Pratt (TDOP) Parser & ANTLR Removal (`pilot-parser`)
+**Goal**: Build Pilot's **500+ MB/s** hand-written Recursive Descent + **Pratt (Top-Down Operator Precedence)** parser in `crates/pilot-parser`, verify 100% parity against the `M28` ANTLR oracle across every language construct, and **permanently delete ANTLR from the repository**.
+
+### Pratt Binding-Power Table in Pilot Syntax Terms
+Pilot's rich expression ergonomics (piping `|>`, cascade chaining `..`, safe navigation `?.`, coalesce `??`, fallible `catch`, range expressions `0..<n`, call-quoting `fn!(a)`, and pattern matches) are structured into unambiguous operator binding powers:
+```pilot
+// Conceptual Pratt precedence hierarchy in Pilot:
+// Higher binding power binds tighter:
+enum Precedence: u8 {
+    Lowest        = 0,
+    Cascade       = 1,   // .. and ?.. on outer receiver (binds looser than =)
+    Assign        = 2,   // =, +=, -=, *=, /=, ??=, := (Right-assoc)
+    LambdaTernary = 4,   // =>, expr if cond else alt (Right-assoc)
+    CatchRecovery = 6,   // expr catch default / expr catch err => ... (M13)
+    Pipe          = 8,   // |> (Left), <| (Right), fluent |> .Method()
+    Coalesce      = 10,  // ?? (Right-assoc)
+    LogicalOr     = 12,  // or, ||
+    LogicalAnd    = 14,  // and, &&
+    LogicalNot    = 16,  // not (Prefix)
+    Comparison    = 18,  // ==, !=, <, <=, >, >=, is, in, not in (Chained)
+    ArrowDto      = 20,  // -> DTO projection, ->> JSON extract
+    Range         = 22,  // .., ..=, ..< (M15.1)
+    Bitwise       = 24,  // |, ^, & (bp: 24, 26, 28), <<, >> (bp: 30)
+    Arithmetic    = 32,  // +, - (bp: 32), *, /, //, % (bp: 34)
+    UnaryPrefix   = 36,  // -, +, ~, !, await, some, ref, *
+    Power         = 38,  // ** (Right-assoc)
+    PostfixLed    = 40   // .prop, ?.prop, [idx], ?[idx], (args), ?(args),
+                         // !(shallow), !!(deep), !&(abi), !^(react), !@(autodiff), !?(dryrun), postfix ?
+}
+```
+
+### Sub-Tasks & Deliverables
+- [ ] **30.1: Pratt Expression, Type-Spec & Pattern Engines**
+  - **`parse_expr_bp(min_bp)`**: Implements the flat binding-power loop above. Assigning `Bp::Cascade = 1` while parsing cascade RHS assignments at `Bp::Assign + 1` **attaches trailing `..` cascades directly to the outer receiver in one pass**, completely eliminating post-parse AST rewriting (`ExtractHoistedCascades` in `PilotParserFast.cs`).
+  - **`parse_type_bp(min_bp)`**: Pratt parser for `type_spec` enforcing Invariant #6 (`T?` postfix `bp=30` > `&` intersection `bp=20` > `|` union `bp=15` > `->` fn arrow `bp=10` > `!` fallible `T ! E` `bp=5`).
+  - **`parse_pattern_bp(min_bp)`**: Pratt parser for `M11` patterns (`|`/`or` $\rightarrow$ `and` $\rightarrow$ `not` / `id @ pat` $\rightarrow$ ADT/record/tuple/slice `[head, ..tail]`/range `200..299`/relational/`_`).
+- [ ] **30.2: $O(1)$ Delimiter-Jump Disambiguation (Zero Speculative Backtracking)**
+  - **Lambda vs. Parenthesized Expr / Tuple**: At `(`, read `close = tape.bracket_links[pos]` and inspect `tape.kind(close + 1)` for `=>` / `->` in **3 CPU instructions with zero backtracking**.
+  - **Generic Call `foo<T>(x)` vs. Comparison `a < b > c`**: Bounded non-allocating token scan across `< ... >` checking balanced type tokens followed immediately by `(` or `{`.
+  - **`select` Disambiguation**: `select` followed by `{` (or `:` + `case`) $\rightarrow$ CSP channel multiplexer (`select_stmt`); otherwise $\rightarrow$ SQL-first `sql_query_expr` (`select cols from ...`).
+  - **Expression-Oriented Control Flow (`M14` & `M15`)**: Unified parsing of `if`/`match`/`for` (with `continue r, ...`, `break v`, `then e`, `yield e`)/`with context`/`{ stmts; tail_expr }` in both statement and Pratt primary positions.
+- [ ] **30.3: Complete Declaration, Database, Concurrency, Real-Time & UDSA Coverage**
+  - Hand-written recursive descent for `def`/`fn` (`context`/`comptime`/`each` params & `requires`/`ensures` contracts), `type` sum ADTs, `record`, `struct`, `class` (including algebraic `class C = A | B - D` & `state` typestates), `interface`, `extend` / `extension`, `adapter`, `guard` / `defer`, LINQ `from ... join ... group ... select` & `transaction`/`savepoint`/`lookup`, `deadline`/`within`/`periodic`/`noalloc`/`region`, `spawn`/`actor`/`atomic`/`sync`/`isolate`, and `quote`/`quasiquote`/`defmacro`/`defkeyword`/`dsl`.
+- [ ] **30.4: Lock-Free Parallel Module Skeleton + Body Parsing (`rayon`)**
+  - Partition large files ($\ge 32\text{ KB}$) and multi-file workspaces across worker threads using Stage 1's top-level `bracket_links`, parsing function/type bodies concurrently into thread-local bump arenas.
+- [ ] **30.5: Differential Fuzzing Gate & Complete ANTLR Removal**
+  - Verify 100% AST parity against `M28.1`'s ANTLR oracle across all tests/showcases plus structure-aware fuzzing (`proptest` / `cargo-fuzz`).
+  - Route `PilotCompiler.cs` through `pilot-ffi`, **delete `Antlr4`, `Antlr4.CodeGenerator`, and `Antlr4.Runtime` from `Pilot.csproj`**, and archive `antlr/*.g4` as historical grammar specs.
+
+---
+
+## Milestone 31: Lossless Red-Green Concrete Syntax Tree (CST), Error Resilience & Native `pilot fmt` (`pilot-syntax`)
+**Goal**: Equip `pilot-parser` with **industrial IDE fault tolerance** (never aborting on incomplete/broken code) and a **Roslyn / `rowan`-style Lossless Red-Green Concrete Syntax Tree** via monomorphized `TreeSink` specialization, powering a 100x faster, 100% trivia-preserving native `pilot fmt`.
+
+### CST Architecture & Pilot Code Formatting Philosophy
+In Pilot, developer experience is paramount: code formatting and refactoring must never destroy developer comments, blank lines, or personal brace vs. colon style. The parser implements a zero-cost dual-sink architecture:
+```pilot
+// In Pilot's structural model:
+interface TreeSink {
+    def on_node(kind: u16, span: ByteSpan);
+    def on_token(kind: u16, span: ByteSpan);
+    def on_error(msg: str, span: ByteSpan);
+}
+
+// Monomorphized implementations:
+// 1. FastAstSink: Strips trivia, emits 16-byte AstNodes directly for 500+ MB/s batch compilation
+// 2. LosslessCstSink: Constructs immutable GreenTree preserving 100% comments, whitespace, and #regions
+```
+
+### Sub-Tasks & Deliverables
+- [ ] **31.1: Immutable Width-Relative Green Tree + Lazy Red Cursor Façade**
+  - Implement `GreenNode` / `GreenToken` (storing `SyntaxKind`, relative UTF-8 `text_len: u32`, and inline child slice, with global interning for common punctuation/keywords/spaces so repeated tokens allocate **0 bytes**) and lazy `SyntaxNode` Red cursors computing absolute byte offsets and parent pointers on demand.
+  - Enforce the **Lossless Round-Trip Invariant** across all test files: `cst.root().to_text() == original_utf8_source` byte-for-byte (including `#if` inactive blocks, comments, blank lines, and `:` vs. `{}` suites).
+- [ ] **31.2: Resilient Panic-Free Error Recovery & Missing-Token Synthesis**
+  - **`TokenSet` (`u128` Bitmask) Anchor Recovery**: Maintain stacked synchronization sets (`STMT_RECOVERY`, `DECL_RECOVERY`, `PARAM_RECOVERY`, `ARG_RECOVERY`, `MATCH_ARM_RECOVERY`), wrapping unexpected tokens inside `SyntaxKind::ErrorNode` without discarding outer blocks.
+  - **IDE Cursor & Completion Synthesis**: Synthesize zero-width `MissingIdent` on trailing `user.` and `MissingRParen`/`MissingRBrace` on unclosed headers (`if (x > 0 {`) so downstream type inference and dot-completion work seamlessly inside broken editor buffers.
+  - **Anti-Cascade Diagnostic Cooldown & Rich Spans**: Suppress secondary error cascades until synchronization succeeds; emit multi-span diagnostics with Damerau-Levenshtein keyword fix-it hints (`gurd` $\rightarrow$ `guard`).
+- [ ] **31.3: Native Wadler-Lindig Pretty-Printer (`pilot fmt` Port)**
+  - Replace `Formatting/PilotFormatter.cs` with `crates/pilot-fmt` using a Wadler-Lindig document algebra over the lossless Red-Green CST (> 200 MB/s formatting throughput while preserving 100% of comments, `#region` blocks, and suite conventions).
+
+---
+
+## Milestone 32: Sub-Millisecond Incremental Reparsing & Demand-Driven Semantic Engine (`pilot-incremental` & `pilot-lsp`)
+**Goal**: Deliver **Tree-sitter-grade $< 1\text{ ms}$ incremental keystroke reparsing** paired with a **`Salsa`-style revision-tracked incremental query database**, replacing `Pilot.LanguageServer` with a standalone zero-GC native `pilot-lsp` binary.
+
+### Sub-Tasks & Deliverables
+- [ ] **32.1: $O(\log N)$ Incremental Lexer & Green-Tree Subtree Splicing (`crates/pilot-incremental`)**
+  - Map LSP byte-range edits `(ByteRange, replacement_utf8)` down the prior `Arc<GreenNode>` spine to the narrowest enclosing **Reparseable Syntactic Island**; re-lex/re-parse only that affected window, verify right-boundary delimiter & lexer-mode convergence (escalating one enclosing block if an unclosed quote/brace crossed the boundary), and splice the updated `GreenNode` spine while structurally sharing 99%+ of unchanged `Arc<GreenNode>` subtrees.
+- [ ] **32.2: Demand-Driven Incremental Query Engine with Early Cutoff (`crates/pilot-db`)**
+  - Separate memoized queries into `source_text(FileId)` $\rightarrow$ `green_cst(FileId)` $\rightarrow$ `module_item_tree(FileId)` *(top-level signatures, ADTs, `extend` headers ONLY)* $\rightarrow$ `infer_body(DefId)`.
+  - **Early Cutoff Optimization**: Edits inside a function body that do not change its `module_item_tree` signature hash re-analyze **only that single function body**, invalidating zero callers or downstream modules.
+- [ ] **32.3: Standalone Zero-GC Native Language Server (`crates/pilot-lsp`)**
+  - Port and upgrade `Pilot.LanguageServer` (`didOpen`, incremental `didChange`, semantic tokens, hover, go-to-definition, find-references, workspace symbols, dot/`:kw` completion, `M16.4` inlay hints, and quick-fixes) in native Rust with instant cancellation on superseded keystrokes.
+
+---
+
+## Milestone 33: Native Static Analysis, Bidirectional Inference, Perceus Escape Analysis & `comptime` (`pilot-analysis`)
+**Goal**: Port all static intelligence passes from `Analysis/` (`M5`, `M11`–`M19`) onto the flat `AstArena` / query engine, and introduce **Compile-Time Perceus Ownership & Escape Analysis** to power Pilot's worry-free zero-GC memory model.
+
+### Sub-Tasks & Deliverables
+- [ ] **33.1: Data-Oriented `TypeArena` & Bidirectional + Row-Polymorphic Inferencer**
+  - Intern all `PilotType` nodes into `TypeArena` (`TypeId(u32)`—turning type equality into a 1-instruction `u32 == u32` check) and port bidirectional synthesis/checking (`M16.1`), Tarjan SCC mutual-recursion & inferred `! ErrorSet` unification, dominator flow narrowing (`M16.2` for `some x`, `is Variant`, typestates), and structural row monomorphization (`M16.3`).
+- [ ] **33.2: Pattern Exhaustiveness (`M11`), Null/Error Flow (`M12`–`M13`), Loop (`M15`), Dimension & Contract Verifiers**
+  - Port Maranget usefulness matrices (`MATCH001`–`MATCH002`), strict `T?` & must-use `T ! E` analyzers (`NULL001`–`NULL005`, `ERR001`–`ERR005`), 3-tier `ForExpr` analyzer (`LOOP001`–`LOOP004`), physical unit algebra, and interval-based `requires`/`ensures` discharge.
+- [ ] **33.3: Call-Quoting Projections (`M17`–`M18`) & Static Demotion (`M19`)**
+  - Port `ShallowQuote` (`!`), hygienic `DeepSplice` + `~arg` constant folding (`!!`), C-ABI `CallFrame_<FnId>` layout synthesis (`!&`), observable LValue extraction (`!^`), compile-time **Symbolic Differentiation + CSE** (`!@`), CoW dry-run instrumentation (`!?`), and full `(frameDepth, slotIndex)` / fixed-offset static demotion (`COMPTIME001`–`COMPTIME010`).
+- [ ] **33.4: Worry-Free Memory Pass — Escape Analysis, Region Placement & Perceus ARC Insertion (`crates/pilot-perceus`)**
+  - Operates automatically with **zero user lifetime annotations**:
+    1. **Tier 1 Escape Placement**: Lower non-escaping string concatenations, temporary lists/maps, closures, and dynamic objects to `RegionAlloc` instructions backed by $O(1)$ scope/loop-exit bump watermark resets.
+    2. **Tier 2 Perceus Precise ARC & Drop-Guided Reuse**: Insert minimal last-use `dup`/`drop` ops (eliding >90% of retain/release traffic on borrowed arguments) plus **`drop_reuse` tokens** enabling zero-malloc in-place memory recycling when `rc == 1`.
+    3. **`@hard_realtime` & `noalloc` Static Proof**: Statically guarantee `noalloc` blocks execute strictly within Tier 0 registers and pre-allocated stack/`region` buffers (`PILOT104`).
+
+---
+
+## Milestone 34: Worry-Free Zero-GC Native Runtime & Register-Based `PilVM` v3 (`pilot-rt` & `pilot-vm`)
+**Goal**: Replace C#'s GC-managed `PilotValue.cs` and stack-based `PilVirtualMachine.cs` with a **100% zero-GC native C-ABI runtime (`pilot-rt`)** and a **fast 3-address register virtual machine (`pilot-vm`, `.pilc` v3)**—shared identically across bytecode execution, `comptime` folding, and AOT native binaries.
+
+### Unboxed Value Layout in Pilot Syntax Terms
+Pilot's runtime value model achieves zero heap allocation for 90%+ of program operations by packing data directly into 16-byte CPU register pairs:
+```pilot
+// Conceptual unboxed PilotVal in Pilot:
+struct PilotVal {
+    let tag_meta: u64;  // Type tag, SSO length, niche bits, or GC flags
+    let payload: u64;   // Integer, float, char, bool, KeywordId, or inline string bytes
+}
+
+// In Pilot's runtime philosophy:
+// - Up to 14 bytes of UTF-8 strings live INLINE inside PilotVal (zero heap alloc!)
+// - Optionals (T?) exploit bit niches (none is 0 bytes of overhead)
+// - Fallibles (T ! E) and unboxed ADTs return directly in registers
+```
+
+### Sub-Tasks & Deliverables
+- [ ] **34.1: 16-Byte Unboxed C-ABI Value Representation (`PilotVal`)**
+  - Define `#[repr(C)] pub struct PilotVal { pub tag_meta: u64, pub payload: u64 }` (`16 bytes`, `Copy`):
+    - Stores `i8`..`i64`, `u8`..`u64`, `f32`/`f64`, `bool`, `char`, `KeywordId`, **Inline Short Strings (SSO up to 14 UTF-8 bytes directly inside `PilotVal`, 0 heap allocations!)**, niche-optimized `T?`, and unboxed small `T ! E` / ADTs directly in CPU registers.
+- [ ] **34.2: 3-Tier Deterministic Memory Engine (`pilot-rt` — Completes `M23.1`)**
+  - Thread-local 64KB slab **Bump Region Arenas** + **Perceus Non-Atomic / Atomic ARC Header** (`rc: u32`, `type_tag: u16`, `flags: u16` separating fast single-thread non-atomic `rc` from `spawn`-shared atomic `rc`!) + thread-cached size-class allocator + **Bounded Bacon-Rajan Trial-Deletion Cycle Collector** running strictly outside real-time zones (**0 global heap scans, 0.0 ms stop-the-world GC pauses**).
+- [ ] **34.3: Register-Based `PilVM` v3 & `.pilc` v3 Zero-Copy `mmap` Binary Format**
+  - Upgrade to **32-bit fixed-width 3-address register instructions** (`ADD_I64 r_dst, r_a, r_b`, `CALL_PRIM_INTRINSIC`, $O(1)$ ADT jump tables, inline method-group caches) with tail-call / jump-table dispatch.
+  - Zero-deserialization `.pilc` v3 binary format: 64-byte aligned `.rodata` `comptime` pools, interned symbol tables, and register code pages **`mmap`-executed directly from disk in $< 0.2\text{ ms}$**.
+- [ ] **34.4: Native Concurrency, Channels, Generators, Reactive Signals (`!^`) & Dry-Run Sandbox (`!?`)**
+  - Native work-stealing `spawn`/`await` scheduler, MPMC `chan`/`select` multiplexers, resumable register-frame `yield` coroutines, topological `Signal[T]` graphs (`M18.1`), CoW `ShadowEffectContext` dry-runs (`M18.3`), B-Tree/Hash-indexed `Table[T]` SQL/LINQ engine, SIMD `Matrix` ops, and `VMHook` debugger traps for `M22` (DAP).
+
+---
+
+## Milestone 35: Native Codegen Backends (`LLVM`/`WASM`/`C-ABI`), Bidirectional Transpilers & Polyglot FFI (`pilot-codegen` & `pilot-transpile`)
+**Goal**: Complete **`M23` (`pilot build`)** and port **`M6`/`M20` (`--emit` / `--from`)** and **`M3` (Polyglot Interop)** into native Rust—eliminating the 40+ MB `Microsoft.CodeAnalysis.CSharp` (Roslyn) dependency while preserving 100% of Pilot's multi-language capabilities.
+
+### Sub-Tasks & Deliverables
+- [ ] **35.1: Unified Native AOT Driver (`pilot build` — Completes `M23.2`–`M23.4`)**
+  - Emit optimized **LLVM IR** (with `!dbg` DWARF metadata, SIMD `<4 x float>`/`<8 x float>`, register-returned `T ! E` & `Dual` structs, Perceus `dup`/`drop_reuse` intrinsics), **C11/C23**, **x86_64/ARM64 ASM**, and **Binary `.wasm` + WASI + `.mjs`/`.d.ts` bindings**, linking against `libpilot_rt.a` (`M34.2`) to produce standalone zero-dependency executables.
+- [ ] **35.2: Native Rust Bidirectional Transpilers & Zero-Roslyn Foreign Ingesters (`pilot --emit` / `pilot --from`)**
+  - Port `PilotTranspileIr` and all 7 target emitters (`c`, `cpp`, `csharp`, `rust`, `python`, `js`, `lua`) into `crates/pilot-transpile` (> 100 MB/s).
+  - Replace `Microsoft.CodeAnalysis.CSharp` in `--from csharp` (alongside Rust, C/C++, Python, JS/TS, and Lua ingesters) with zero-GC native Rust recursive-descent AST ingesters + `--strict-pilot` idiom upgrading + `--viable-license-only` SPDX verification (`M20.4`–`M20.6`).
+- [ ] **35.3: Zero-.NET Polyglot Interop & Optional External C# Bridge (`crates/pilot-polyglot`)**
+  - Native C-ABI `dlopen`/`LoadLibrary` FFI + zero-marshalling shared-memory (`SliceBuffer<T>`, `RangeWindow<TIter>` from `M15.3`) bridges for C, C++, Rust, Python, JS, Lua, Java, and PostgreSQL/MySQL/SQLite.
+  - **Externalized C# Polyglot Adapter**: Demote `csharp { ... }` inline blocks from in-process CLR hosting to an **optional out-of-process external bridge** (invoked via zero-copy `mmap` IPC only when a script executes `csharp {}` and `dotnet` is present on the user's machine—matching `python {}` and `js {}`).
+
+---
+
+## Milestone 36: Standalone Rust `pilot` CLI, Full `.NET` Retirement & 500+ MB/s Performance Certification
+**Goal**: Cut over the entire CLI, test runner, REPL, package manager (`pilot pkg`), virtual environments (`pilot venv`), DAP server (`M22`), and VS Code extension bundle to the single standalone Rust binary (`pilot`), **retire all C# / `.NET` project files**, and certify every speed and memory target in CI.
+
+### Sub-Tasks & Deliverables
+- [ ] **36.1: Unified Zero-Dependency `pilot` Native CLI (`< 15 MB` Binary, `< 2 ms` Cold Start)**
+  - Consolidate `pilot run`, `pilot build`, `pilot check [--comptime-audit]`, `pilot fmt`, `pilot test`, `pilot repl` (with live Red-Green multiline syntax highlighting & completion), `pilot pkg`, `pilot venv`, `pilot debug --dap` (`M22`), and `pilot perf` (`M25`) into `crates/pilot-cli`.
+- [ ] **36.2: Full Regression Parity Gate & Complete `.NET` Removal**
+  - Verify 100% green execution across all `.pilot` test suites (`01`–`36+`), showcase scripts (`01`–`22+`), `stdlib/` suites, round-trip `--emit`/`--from` compiler-in-the-loop gates, `pilot-lsp` tests, and `pilot-dap` breakpoint tests.
+  - Tag a permanent `v1.x-dotnet-archive` Git reference, then remove `Pilot.csproj`, `Pilot.Tests/`, `Pilot.LanguageServer/`, `Pilot.sln*`, and legacy C# directories—leaving a clean, zero-.NET Rust + Pilot repository and updating `vscode-pilot` to bundle native `pilot` + `pilot-lsp`.
+- [ ] **36.3: Automated Hardware Throughput & Memory Certification (`crates/pilot-bench`)**
+  - Enforce hard CI benchmark gates (`criterion` + custom global allocator byte counters):
+    - **Batch Parse Throughput (`Stage 1 SIMD + Stage 2 Pratt`, `FastAstSink`)**: **$\ge 500\text{ MB/s}$ single-core** and **$\ge 2.0\text{ GB/s}$ multi-core** across 100,000-line Pilot benchmark corpora.
+    - **AST Peak Memory Overhead**: **$\le 1.5\times$ raw UTF-8 source byte size** (a $> 10\times$ reduction vs. legacy ANTLR/.NET).
+    - **Incremental LSP Keystroke Latency (`LosslessCstSink` + `pilot-db` Early Cutoff)**: **$p99 < 1.0\text{ ms}$** reparse + diagnostic refresh on 50,000-line files.
+    - **Runtime GC Pause Guarantee**: **Strictly `0.0 ms`** (zero tracing GC in binary; verified zero-heap counter inside `@hard_realtime` / `noalloc` blocks).
+
+

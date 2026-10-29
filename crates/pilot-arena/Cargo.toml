@@ -1,0 +1,9 @@
+[package]
+name = "pilot-arena"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Milestone 28.2: 64KB page-aligned bump allocator, typed u32 handle arenas, and resettable thread-local pools for Pilot's zero-GC compiler."
+
+[lib]
+path = "src/lib.rs"

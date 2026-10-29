@@ -1,0 +1,12 @@
+[package]
+name = "pilot-intern"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Milestone 28.2: Contiguous zero-copy UTF-8 string and hierarchical :ns/kw keyword interner yielding 32-bit SymbolId and KeywordId handles."
+
+[dependencies]
+pilot-span = { path = "../pilot-span" }
+
+[lib]
+path = "src/lib.rs"

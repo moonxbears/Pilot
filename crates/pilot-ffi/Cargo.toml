@@ -1,0 +1,17 @@
+[package]
+name = "pilot-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Milestone 28.4: Zero-copy C-ABI Strangler-Fig bridge exporting contiguous 16-byte AstNode* and ByteSpan* buffers to C# LibraryImport."
+
+[lib]
+name = "pilot_ffi"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pilot-arena = { path = "../pilot-arena" }
+pilot-span = { path = "../pilot-span" }
+pilot-intern = { path = "../pilot-intern" }
+pilot-ast = { path = "../pilot-ast" }

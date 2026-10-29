@@ -1,0 +1,9 @@
+[package]
+name = "pilot-span"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Milestone 28.2: Compact FileId(u16), 8-byte C-ABI ByteSpan, and SIMD/SWAR newline line-index lookup."
+
+[lib]
+path = "src/lib.rs"

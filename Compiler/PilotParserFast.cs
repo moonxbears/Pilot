@@ -1,32 +1,155 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading;
 using Antlr4.Runtime;
 using Antlr4.Runtime.Atn;
+using Antlr4.Runtime.Misc;
 
 namespace Pilot;
 
 /// <summary>
-/// High-performance two-stage parsing (SLL with automatic LL fallback) and
-/// expression AST caching extensions for <see cref="PilotParser"/>.
+/// Milestone 28.1: High-performance two-stage parsing (<c>PredictionMode.SLL</c> with automatic
+/// <c>PredictionMode.LL</c> fallback) and expression AST caching extensions for <see cref="PilotParser"/>.
+/// Serves as the transitional C# differential conformance oracle until ANTLR removal in M30.5.
 /// </summary>
 public partial class PilotParser
 {
     private static readonly ConcurrentDictionary<string, TestContext> CachedExpressions = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, ProgramContext> CachedSnippets = new(StringComparer.Ordinal);
 
-    /// <summary>
-    /// Parses a complete Pilot program using ANTLR4's two-stage SLL -> LL parsing strategy.
-    /// Valid programs parse in SLL mode without full-context ATN overhead; if any syntax
-    /// error or SLL conflict occurs, the stream is rewound and re-parsed with full LL mode
-    /// and all original error listeners attached.
-    /// </summary>
-    public ProgramContext ParseProgramFast() => program();
+    private static long _sllFastPathHits;
+    private static long _llFallbackRetries;
 
     /// <summary>
-    /// Parses a single Pilot expression (<see cref="TestContext"/>).
+    /// Number of parses that succeeded directly in Stage 1 (<see cref="PredictionMode.SLL"/>) without full-context ATN overhead.
     /// </summary>
-    public TestContext ParseTestFast() => test();
+    public static long SllFastPathHits => Interlocked.Read(ref _sllFastPathHits);
+
+    /// <summary>
+    /// Number of parses that encountered an SLL conflict or syntax error and rewound to Stage 2 (<see cref="PredictionMode.LL"/>).
+    /// </summary>
+    public static long LlFallbackRetries => Interlocked.Read(ref _llFallbackRetries);
+
+    public static void ResetFastParseCountersForTesting()
+    {
+        Interlocked.Exchange(ref _sllFastPathHits, 0);
+        Interlocked.Exchange(ref _llFallbackRetries, 0);
+    }
+
+    /// <summary>
+    /// Parses a complete Pilot program using ANTLR4's two-stage <c>SLL -&gt; LL</c> parsing strategy.
+    /// Valid programs parse in <see cref="PredictionMode.SLL"/> mode with <see cref="BailErrorStrategy"/>;
+    /// if any syntax error or SLL ambiguity occurs, the token stream is rewound and re-parsed in
+    /// <see cref="PredictionMode.LL"/> mode with all original error listeners restored.
+    /// </summary>
+    public ProgramContext ParseProgramFast()
+    {
+        var tokenStream = _input;
+        if (tokenStream == null)
+        {
+            return program();
+        }
+
+        // Ensure BufferedTokenStream has initialized its initial token position (otherwise Index is -1)
+        _ = tokenStream.La(1);
+        int startTokenIndex = Math.Max(0, tokenStream.Index);
+#pragma warning disable CS0618
+        var savedListeners = new List<IAntlrErrorListener<IToken>>(ErrorListeners);
+#pragma warning restore CS0618
+        var savedErrorHandler = ErrorHandler;
+        var savedPredictionMode = Interpreter.PredictionMode;
+
+        try
+        {
+            RemoveErrorListeners();
+            ErrorHandler = new BailErrorStrategy();
+            Interpreter.PredictionMode = PredictionMode.Sll;
+
+            var tree = program();
+            Interlocked.Increment(ref _sllFastPathHits);
+            RestoreParserState(savedListeners, savedErrorHandler, savedPredictionMode);
+            return tree;
+        }
+        catch (Exception ex) when (ex is ParseCanceledException or RecognitionException)
+        {
+            Interlocked.Increment(ref _llFallbackRetries);
+            RewindTokenStream(tokenStream, startTokenIndex);
+            RestoreParserState(savedListeners, savedErrorHandler, savedPredictionMode);
+            Interpreter.PredictionMode = PredictionMode.Ll;
+            return program();
+        }
+    }
+
+    /// <summary>
+    /// Parses a single Pilot expression (<see cref="TestContext"/>) using two-stage <c>SLL -&gt; LL</c> prediction.
+    /// </summary>
+    public TestContext ParseTestFast()
+    {
+        var tokenStream = _input;
+        if (tokenStream == null)
+        {
+            return test();
+        }
+
+        // Ensure BufferedTokenStream has initialized its initial token position (otherwise Index is -1)
+        _ = tokenStream.La(1);
+        int startTokenIndex = Math.Max(0, tokenStream.Index);
+#pragma warning disable CS0618
+        var savedListeners = new List<IAntlrErrorListener<IToken>>(ErrorListeners);
+#pragma warning restore CS0618
+        var savedErrorHandler = ErrorHandler;
+        var savedPredictionMode = Interpreter.PredictionMode;
+
+        try
+        {
+            RemoveErrorListeners();
+            ErrorHandler = new BailErrorStrategy();
+            Interpreter.PredictionMode = PredictionMode.Sll;
+
+            var expr = test();
+            Interlocked.Increment(ref _sllFastPathHits);
+            RestoreParserState(savedListeners, savedErrorHandler, savedPredictionMode);
+            return expr;
+        }
+        catch (Exception ex) when (ex is ParseCanceledException or RecognitionException)
+        {
+            Interlocked.Increment(ref _llFallbackRetries);
+            RewindTokenStream(tokenStream, startTokenIndex);
+            RestoreParserState(savedListeners, savedErrorHandler, savedPredictionMode);
+            Interpreter.PredictionMode = PredictionMode.Ll;
+            return test();
+        }
+    }
+
+    private void RestoreParserState(
+        List<IAntlrErrorListener<IToken>> savedListeners,
+        IAntlrErrorStrategy savedErrorHandler,
+        PredictionMode savedPredictionMode)
+    {
+        RemoveErrorListeners();
+        foreach (var listener in savedListeners)
+        {
+            AddErrorListener(listener);
+        }
+
+        ErrorHandler = savedErrorHandler is BailErrorStrategy
+            ? new DefaultErrorStrategy()
+            : savedErrorHandler;
+        Interpreter.PredictionMode = savedPredictionMode;
+    }
+
+    private static void RewindTokenStream(ITokenStream tokenStream, int startTokenIndex)
+    {
+        if (startTokenIndex == 0 && tokenStream is BufferedTokenStream buffered)
+        {
+            buffered.Reset();
+        }
+        else
+        {
+            tokenStream.Seek(startTokenIndex);
+        }
+    }
 
     /// <summary>
     /// Parses and caches an expression string into a reusable <see cref="TestContext"/> AST.
