@@ -371,10 +371,27 @@ fn cmd_test(args: &[String]) {
             let src = fs::read_to_string(&path).unwrap_or_default();
             let arena = parse(&src);
             if arena.root.is_none() {
-                eprintln!("FAIL: {}", filename);
-            } else {
-                passed += 1;
-                println!("PASS: {} ({} nodes)", filename, arena.nodes.len());
+                eprintln!("FAIL: {} (syntax parse error)", filename);
+                continue;
+            }
+
+            // Compile to PilVM v3 bytecode and run
+            let binary = pilot_vm::BytecodeCompiler::compile(&arena, arena.root);
+            let mut vm = pilot_vm::PilVirtualMachine::new();
+            vm.load_binary(binary);
+
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                vm.run()
+            }));
+
+            match res {
+                Ok(_) => {
+                    passed += 1;
+                    println!("PASS: {} ({} nodes, {} instructions)", filename, arena.nodes.len(), vm.instructions.len());
+                }
+                Err(_) => {
+                    eprintln!("FAIL: {} (runtime assertion failure)", filename);
+                }
             }
         }
     }
@@ -399,6 +416,7 @@ fn cmd_repl() {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut region = BumpRegion::new();
+    let mut vm = pilot_vm::PilVirtualMachine::new();
 
     loop {
         print!("pilot> ");
@@ -426,18 +444,18 @@ fn cmd_repl() {
             continue;
         }
         let arena = parse(trimmed);
+        let binary = pilot_vm::BytecodeCompiler::compile(&arena, arena.root);
+        vm.load_binary(binary);
+        let res = vm.run();
 
-        // Evaluate sample expression
-        if let Ok(num) = trimmed.parse::<i64>() {
-            let v = PilotVal::from_int(num);
-            println!("=> {} : int", v.as_int().unwrap());
-        } else if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
-            let inner = &trimmed[1..trimmed.len() - 1];
-            if let Some(v) = PilotVal::from_str_sso(inner) {
-                v.with_str(|s| println!("=> \"{}\" : str", s));
-            } else {
-                println!("=> \"{}\" : str", inner);
-            }
+        if let Some(i) = res.as_int() {
+            println!("=> {} : int", i);
+        } else if let Some(f) = res.as_float() {
+            println!("=> {} : float", f);
+        } else if let Some(b) = res.as_bool() {
+            println!("=> {} : bool", b);
+        } else if res.is_sso_str() {
+            res.with_str(|s| println!("=> \"{}\" : str", s));
         } else {
             println!("=> ok ({} nodes evaluated)", arena.nodes.len());
         }

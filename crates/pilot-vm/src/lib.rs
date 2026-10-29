@@ -8,10 +8,12 @@
 pub mod instruction;
 pub mod pilc;
 pub mod vm;
+pub mod compiler;
 
 pub use instruction::{Instruction, Opcode};
 pub use pilc::{PilcBinary, PILC_V3_MAGIC, PILC_V3_VERSION};
 pub use vm::{PilVirtualMachine, VmHook};
+pub use compiler::BytecodeCompiler;
 
 #[cfg(test)]
 mod tests {
@@ -70,6 +72,24 @@ mod tests {
         vm.load_binary(binary);
 
         let res = vm.run();
+        assert_eq!(res.as_int(), Some(42));
+    }
+
+    #[test]
+    fn test_ast_to_bytecode_compilation_and_execution() {
+        let code = r#"
+let a = 15
+let b = 27
+let c = a + b
+return c
+"#;
+        let arena = pilot_parser::parse(code);
+        let binary = BytecodeCompiler::compile(&arena, arena.root);
+
+        let mut vm = PilVirtualMachine::new();
+        vm.load_binary(binary);
+        let res = vm.run();
+
         assert_eq!(res.as_int(), Some(42));
     }
 }

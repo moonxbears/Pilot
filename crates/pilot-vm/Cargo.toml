@@ -6,5 +6,9 @@ edition = "2021"
 [dependencies]
 pilot-rt = { path = "../pilot-rt" }
 pilot-arena = { path = "../pilot-arena" }
+pilot-ast = { path = "../pilot-ast" }
 pilot-intern = { path = "../pilot-intern" }
 pilot-span = { path = "../pilot-span" }
+
+[dev-dependencies]
+pilot-parser = { path = "../pilot-parser" }

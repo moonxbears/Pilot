@@ -22,6 +22,18 @@ pub enum Opcode {
     Call = 16,
     Ret = 17,
     Halt = 18,
+    CmpGt = 19,
+    CmpLe = 20,
+    CmpGe = 21,
+    CmpNe = 22,
+    RemI64 = 23,
+    NegI64 = 24,
+    NegF64 = 25,
+    Not = 26,
+    And = 27,
+    Or = 28,
+    Print = 29,
+    Assert = 30,
 }
 
 impl Opcode {
@@ -45,6 +57,18 @@ impl Opcode {
             16 => Self::Call,
             17 => Self::Ret,
             18 => Self::Halt,
+            19 => Self::CmpGt,
+            20 => Self::CmpLe,
+            21 => Self::CmpGe,
+            22 => Self::CmpNe,
+            23 => Self::RemI64,
+            24 => Self::NegI64,
+            25 => Self::NegF64,
+            26 => Self::Not,
+            27 => Self::And,
+            28 => Self::Or,
+            29 => Self::Print,
+            30 => Self::Assert,
             _ => Self::Nop,
         }
     }

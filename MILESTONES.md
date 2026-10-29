@@ -140,8 +140,8 @@ flowchart TD
 | **M36** | Standalone Rust `pilot` CLI, Full `.NET` Retirement & Hardware Performance Gate | Phase D | ✅ **Completed** | `crates/pilot-cli/`, `crates/pilot-bench/` |
 | **M37** | Full AST Type Inference, Pattern Exhaustiveness, Null/Error Flow & Contract/Dimension Walkers | Phase E | ✅ **Completed** | `crates/pilot-analysis/`, `crates/pilot-cli/` (`pilot check`) |
 | **M38** | Symbolic Autodiff (`!@`), Call-Quoting (`!`, `!!`, `!&`, `!^`, `!?`), Macros, Demotion & Perceus Pass | Phase E | ✅ **Completed** | `crates/pilot-analysis/`, `crates/pilot-perceus/` |
-| **M39** | AST-to-Bytecode Compiler, Full `PilVM` v3 Execution, Runtime Intrinsics & Live `pilot test` | Phase E | 🎯 **Next Up** | `crates/pilot-vm/`, `crates/pilot-rt/`, `crates/pilot-cli/` (`pilot test`/`repl`) |
-| **M40** | True AST-Driven Native Codegen (`C11/C23`, `LLVM IR`, `WASM/WASI`, `ASM`) & Linkable `libpilot_rt` | Phase E | 📋 **Planned** | `crates/pilot-codegen/`, `crates/pilot-rt/` |
+| **M39** | AST-to-Bytecode Compiler, Full `PilVM` v3 Execution, Runtime Intrinsics & Live `pilot test` | Phase E | ✅ **Completed** | `crates/pilot-vm/`, `crates/pilot-rt/`, `crates/pilot-cli/` (`pilot test`/`repl`) |
+| **M40** | True AST-Driven Native Codegen (`C11/C23`, `LLVM IR`, `WASM/WASI`, `ASM`) & Linkable `libpilot_rt` | Phase E | 🎯 **Next Up** | `crates/pilot-codegen/`, `crates/pilot-rt/` |
 | **M41** | Full AST Bidirectional Transpilers (`pilot --emit` / `--from`) & Foreign AST Ingesters | Phase E | 📋 **Planned** | `crates/pilot-transpile/`, `crates/pilot-cli/` |
 | **M42** | Live Polyglot Execution Bridges, Native DB Drivers (`PostgreSQL`/`SQLite`) & Yield-Bridges | Phase E | 📋 **Planned** | `crates/pilot-polyglot/`, `crates/pilot-rt/` |
 | **M43** | Production `pilot-lsp` Loop, Native DAP (`M22`), Package/Venv Manager (`M8`/`M27`) & Stdlib (`M24`) | Phase E | 📋 **Planned** | `crates/pilot-lsp/`, `crates/pilot-dap/`, `crates/pilot-pkg/`, `stdlib/` |
@@ -1133,19 +1133,19 @@ struct PilotVal {
 - `Runtime/Stdlib/{PilotStdlibIntrinsics,PilotStdlibResolver,PilotDfaRegexEngine}.cs`, `Runtime/Builtins/PilotBuiltinRegistry.cs`, & `Testing/PilotTestRunner.cs`
 
 ### Sub-Tasks & Deliverables
-- [ ] **39.1: Two-Phase `AstArena` $\rightarrow$ `.pilc` v3 Register Bytecode Compiler (`crates/pilot-vm/src/compiler.rs`)**
+- [x] **39.1: Two-Phase `AstArena` $\rightarrow$ `.pilc` v3 Register Bytecode Compiler (`crates/pilot-vm/src/compiler.rs`)**
   - Lower all Pilot declarations, statements, and expressions from the demoted `AstArena` into 32-bit fixed-width 3-address `PilVM` v3 instructions:
     - Register allocation over `(frame_depth, slot_index)` locals, upvalue capture tables for closures/lambdas, and `defer`/`guard` LIFO cleanup unwind blocks.
     - Pattern matching jump-table lowering (`PilotMatchBytecodeLowerer`), `T?` / `T ! E` postfix `?` early-return branching, and 3-tier `ForExpr` loops (`FixedScalar` register counters, `MutableBounds` `RangeWindow` updates, `WorklistStack` pushes).
     - Compile-time evaluation of `comptime { ... }` blocks during compilation, baking resulting `FrozenMap`s, arrays, and scalars into `.pilc` v3 `.rodata` constant pools.
-- [ ] **39.2: Complete `PilVirtualMachine` Register Engine & Perceus Heap Values (`crates/pilot-rt` & `crates/pilot-vm`)**
+- [x] **39.2: Complete `PilVirtualMachine` Register Engine & Perceus Heap Values (`crates/pilot-rt` & `crates/pilot-vm`)**
   - Expand `Opcode` & `PilVirtualMachine::run` (`crates/pilot-vm/src/vm.rs`) to execute:
     - Call frame stack (`Opcode::Call`, `TailCall`, `CallClosure`, `CallIntrinsic`, `Yield`, `Resume`), exception/panic recovery across `isolate` supervisors, and `requires`/`ensures` contract checks.
     - Perceus ARC + `BumpRegion`-backed runtime containers in `pilot-rt`: `PilotList`, `PilotMap`, `PilotFrozenMap`, `PilotSet`, `PilotTuple`, `PilotAdt` (tag + inline/heap fields), `PilotObject` / `PilotRecord`, SIMD `PilotMatrix`, `SliceBuffer`, `RangeWindow`, and resumable `PilotGenerator` coroutines.
     - In-memory relational `Table[T]` engine with B-Tree/Hash primary/secondary indexes, MVCC `transaction`/`savepoint` rollback, and compiled LINQ/SQL query operators (`from`, `where`, `join`, `group by`, `order by`, `select`, set union `|`, intersection `&`, difference `-`).
-- [ ] **39.3: Built-In Intrinsics, `std.*` Module Loader & DFA Regex Engine (`crates/pilot-rt/src/stdlib.rs`)**
+- [x] **39.3: Built-In Intrinsics, `std.*` Module Loader & DFA Regex Engine (`crates/pilot-rt/src/stdlib.rs`)**
   - Port `PilotBuiltinRegistry.cs`, `PilotStdlibIntrinsics.cs`, `PilotStdlibResolver.cs`, and `PilotDfaRegexEngine.cs` (`print`, `len`, `range`, `assert`, `typeof`, math/trig/matrix ops, string/regex ops, file/path I/O, JSON parse/stringify, `spawn`/`chan`/`select`, `Signal`, and `ShadowEffectContext` dry-runs).
-- [ ] **39.4: Live `pilot test` Assertion Runner & Stateful `pilot repl` Cutover (`crates/pilot-cli/src/main.rs`)**
+- [x] **39.4: Live `pilot test` Assertion Runner & Stateful `pilot repl` Cutover (`crates/pilot-cli/src/main.rs`)**
   - Upgrade `cmd_test` in `crates/pilot-cli/src/main.rs` from syntax-only `parse(&src)` checking to full compilation + `PilVirtualMachine` execution of every test file in `tests/01_type_safety.pilot` through `tests/36_comptime_and_static_demotion.pilot` and `examples/showcase/`, verifying 100% of runtime assertions pass.
   - Upgrade `cmd_repl` to maintain persistent `TypeInferenceEngine` + `PilVirtualMachine` register/global state across multiline inputs.
 

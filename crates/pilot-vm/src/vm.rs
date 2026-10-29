@@ -118,6 +118,71 @@ impl PilVirtualMachine {
                     let b = self.registers[src2].as_int().unwrap_or(0);
                     self.registers[dst] = PilotVal::from_bool(a < b);
                 }
+                Opcode::CmpGt => {
+                    let a = self.registers[src1].as_int().unwrap_or(0);
+                    let b = self.registers[src2].as_int().unwrap_or(0);
+                    self.registers[dst] = PilotVal::from_bool(a > b);
+                }
+                Opcode::CmpLe => {
+                    let a = self.registers[src1].as_int().unwrap_or(0);
+                    let b = self.registers[src2].as_int().unwrap_or(0);
+                    self.registers[dst] = PilotVal::from_bool(a <= b);
+                }
+                Opcode::CmpGe => {
+                    let a = self.registers[src1].as_int().unwrap_or(0);
+                    let b = self.registers[src2].as_int().unwrap_or(0);
+                    self.registers[dst] = PilotVal::from_bool(a >= b);
+                }
+                Opcode::CmpNe => {
+                    let eq = self.registers[src1] == self.registers[src2];
+                    self.registers[dst] = PilotVal::from_bool(!eq);
+                }
+                Opcode::RemI64 => {
+                    let a = self.registers[src1].as_int().unwrap_or(0);
+                    let b = self.registers[src2].as_int().unwrap_or(1);
+                    self.registers[dst] = PilotVal::from_int(if b != 0 { a % b } else { 0 });
+                }
+                Opcode::NegI64 => {
+                    let a = self.registers[src1].as_int().unwrap_or(0);
+                    self.registers[dst] = PilotVal::from_int(-a);
+                }
+                Opcode::NegF64 => {
+                    let a = self.registers[src1].as_float().unwrap_or(0.0);
+                    self.registers[dst] = PilotVal::from_float(-a);
+                }
+                Opcode::Not => {
+                    let b = self.registers[src1].as_bool().unwrap_or(false);
+                    self.registers[dst] = PilotVal::from_bool(!b);
+                }
+                Opcode::And => {
+                    let a = self.registers[src1].as_bool().unwrap_or(false);
+                    let b = self.registers[src2].as_bool().unwrap_or(false);
+                    self.registers[dst] = PilotVal::from_bool(a && b);
+                }
+                Opcode::Or => {
+                    let a = self.registers[src1].as_bool().unwrap_or(false);
+                    let b = self.registers[src2].as_bool().unwrap_or(false);
+                    self.registers[dst] = PilotVal::from_bool(a || b);
+                }
+                Opcode::Print => {
+                    let val = self.registers[src1];
+                    if let Some(i) = val.as_int() {
+                        println!("{}", i);
+                    } else if let Some(f) = val.as_float() {
+                        println!("{}", f);
+                    } else if let Some(b) = val.as_bool() {
+                        println!("{}", b);
+                    } else {
+                        println!("{:?}", val);
+                    }
+                }
+                Opcode::Assert => {
+                    let ok = self.registers[src1].as_bool().unwrap_or(false)
+                        || self.registers[src1].as_int().unwrap_or(0) != 0;
+                    if !ok {
+                        panic!("Assertion failed in PilVM execution");
+                    }
+                }
                 Opcode::Jump => {
                     let target = ((src1 as u16) << 8 | (src2 as u16)) as usize;
                     self.pc = target;

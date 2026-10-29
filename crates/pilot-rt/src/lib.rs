@@ -8,10 +8,12 @@
 pub mod value;
 pub mod memory;
 pub mod concurrency;
+pub mod stdlib;
 
 pub use value::{PilotVal, TAG_INT, TAG_FLOAT, TAG_BOOL, TAG_SSO_STR, TAG_NULL};
 pub use memory::{ArcHeader, BumpRegion, FLAG_ATOMIC};
 pub use concurrency::{Channel, ShadowEffectContext, Signal};
+pub use stdlib::{PilotDfaRegex, PilotStdlibIntrinsics, PilotStdlibResolver};
 
 #[cfg(test)]
 mod tests {
@@ -110,5 +112,24 @@ mod tests {
         ctx.commit();
         assert!(ctx.is_committed());
         assert_eq!(ctx.read("account_id").unwrap().as_int(), Some(42));
+    }
+
+    #[test]
+    fn test_stdlib_intrinsics_and_dfa_regex() {
+        // Intrinsics
+        assert_eq!(PilotStdlibIntrinsics::type_name(PilotVal::from_int(42)), "int");
+        assert_eq!(PilotStdlibIntrinsics::type_name(PilotVal::from_float(3.14)), "float");
+        assert_eq!(PilotStdlibIntrinsics::math_sqrt(16.0), 4.0);
+
+        // DFA Regex
+        let regex = PilotDfaRegex::compile("^hello.*world$");
+        assert!(regex.is_match("hello world"));
+        assert!(regex.is_match("hello beautiful world"));
+        assert!(!regex.is_match("bye world"));
+
+        // Module resolution
+        assert!(PilotStdlibResolver::is_stdlib_module("std.math"));
+        assert!(PilotStdlibResolver::is_stdlib_module("std.core"));
+        assert!(!PilotStdlibResolver::is_stdlib_module("unknown.module"));
     }
 }
