@@ -126,7 +126,7 @@ impl BytecodeCompiler {
                         self.fn_entries.insert(fn_name, (entry_pc, params.clone()));
 
                         self.var_slots.clear();
-                        self.next_reg = (params.len() + 1).max(1) as u8;
+                        self.next_reg = 17; // Local variables start at r17; r1..=16 are reserved for call arguments
 
                         // Save incoming arguments from r1..=params.len() into dedicated local slots
                         for (i, p) in params.iter().enumerate() {
@@ -150,7 +150,7 @@ impl BytecodeCompiler {
                 );
 
                 self.var_slots.clear();
-                self.next_reg = 1;
+                self.next_reg = 17; // Local variables start at r17; r1..=16 are reserved for call arguments
 
                 if let Some(&(main_entry, _)) = self.fn_entries.get("main") {
                     let dst = self.alloc_reg();

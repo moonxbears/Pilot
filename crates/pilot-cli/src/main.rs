@@ -97,11 +97,13 @@ fn main() {
 }
 
 fn cmd_run(args: &[String]) {
-    if args.is_empty() {
+    let use_vm = args.iter().any(|a| a == "--vm" || a == "--interp");
+    let file_arg = args.iter().find(|a| !a.starts_with("--"));
+    if file_arg.is_none() {
         eprintln!("error: missing file argument for 'pilot run'.");
         std::process::exit(1);
     }
-    let file_path = &args[0];
+    let file_path = file_arg.unwrap();
     let src = match fs::read_to_string(file_path) {
         Ok(s) => s,
         Err(e) => {
@@ -115,6 +117,17 @@ fn cmd_run(args: &[String]) {
     if arena.root.is_none() {
         eprintln!("{}: error: failed to construct AST program", file_path);
         std::process::exit(1);
+    }
+
+    if use_vm {
+        let binary = pilot_vm::BytecodeCompiler::compile(&arena, arena.root);
+        let mut vm = pilot_vm::PilVirtualMachine::new();
+        vm.load_binary(binary);
+        let val = vm.run();
+        if let Some(i) = val.as_int() {
+            println!("RESULT: {}", i);
+        }
+        return;
     }
 
     // Compile and execute directly
