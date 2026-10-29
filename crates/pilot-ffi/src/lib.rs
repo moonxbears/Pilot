@@ -8,7 +8,7 @@ use pilot_lexer::{tokenize, TokenTape};
 use pilot_parser::parse as parse_pilot;
 use pilot_span::{ByteSpan, LineIndex};
 
-pub const PILOT_FFI_ABI_VERSION: u32 = 3401;
+pub const PILOT_FFI_ABI_VERSION: u32 = 3501;
 
 /// Opaque C-ABI handle owning a parsed `AstArena` and `LineIndex`.
 pub struct PilotFfiArenaHandle {
@@ -711,6 +711,127 @@ pub unsafe extern "C" fn pilot_vm_execute_bytes(
     }
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn pilot_codegen_build(
+    name_ptr: *const u8,
+    name_len: usize,
+    target: u8,
+    out_len: *mut usize,
+) -> *mut u8 {
+    let name = if name_ptr.is_null() || name_len == 0 {
+        "main"
+    } else {
+        core::str::from_utf8(core::slice::from_raw_parts(name_ptr, name_len)).unwrap_or("main")
+    };
+
+    let build_target = match target {
+        0 => pilot_codegen::BuildTarget::Llvm,
+        1 => pilot_codegen::BuildTarget::C,
+        2 => pilot_codegen::BuildTarget::Wasm,
+        _ => pilot_codegen::BuildTarget::Native,
+    };
+
+    let opts = pilot_codegen::BuildOptions {
+        target: build_target,
+        ..Default::default()
+    };
+
+    let res = pilot_codegen::BuildDriver::compile_source_to_artifact(name, &opts).unwrap_or_default();
+    let bytes = res.into_bytes();
+    if !out_len.is_null() {
+        *out_len = bytes.len();
+    }
+    let mut boxed = bytes.into_boxed_slice();
+    let ptr = boxed.as_mut_ptr();
+    core::mem::forget(boxed);
+    ptr
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_transpile_sample(target: u8, out_len: *mut usize) -> *mut u8 {
+    let lang = match target {
+        0 => pilot_transpile::TargetLanguage::C,
+        1 => pilot_transpile::TargetLanguage::Cpp,
+        2 => pilot_transpile::TargetLanguage::CSharp,
+        3 => pilot_transpile::TargetLanguage::Rust,
+        4 => pilot_transpile::TargetLanguage::Python,
+        5 => pilot_transpile::TargetLanguage::JavaScript,
+        6 => pilot_transpile::TargetLanguage::Lua,
+        _ => {
+            if !out_len.is_null() {
+                *out_len = 0;
+            }
+            return core::ptr::null_mut();
+        }
+    };
+
+    let module = pilot_transpile::IrModule {
+        name: "TranspiledMod".to_string(),
+        functions: vec![pilot_transpile::IrFunction {
+            name: "compute".to_string(),
+            ret_type: pilot_transpile::IrType::Int,
+            params: vec![("x".to_string(), pilot_transpile::IrType::Int)],
+            body: vec![
+                pilot_transpile::IrStmt::Return(Some(pilot_transpile::IrExpr::Binary {
+                    op: "*".to_string(),
+                    lhs: Box::new(pilot_transpile::IrExpr::Var("x".to_string())),
+                    rhs: Box::new(pilot_transpile::IrExpr::LitInt(2)),
+                })),
+            ],
+        }],
+    };
+
+    let s = pilot_transpile::Transpiler::emit_module(&module, lang);
+    let bytes = s.into_bytes();
+    if !out_len.is_null() {
+        *out_len = bytes.len();
+    }
+    let mut boxed = bytes.into_boxed_slice();
+    let ptr = boxed.as_mut_ptr();
+    core::mem::forget(boxed);
+    ptr
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_polyglot_verify_spdx(spdx_ptr: *const u8, spdx_len: usize) -> u8 {
+    if spdx_ptr.is_null() || spdx_len == 0 {
+        return 0;
+    }
+    let s = core::str::from_utf8(core::slice::from_raw_parts(spdx_ptr, spdx_len)).unwrap_or("");
+    if pilot_transpile::LicenseVerifier::is_viable_license(s) { 1 } else { 0 }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_polyglot_execute(
+    lang_ptr: *const u8,
+    lang_len: usize,
+    code_ptr: *const u8,
+    code_len: usize,
+    out_len: *mut usize,
+) -> *mut u8 {
+    let lang = if lang_ptr.is_null() || lang_len == 0 {
+        "python"
+    } else {
+        core::str::from_utf8(core::slice::from_raw_parts(lang_ptr, lang_len)).unwrap_or("python")
+    };
+    let code = if code_ptr.is_null() || code_len == 0 {
+        ""
+    } else {
+        core::str::from_utf8(core::slice::from_raw_parts(code_ptr, code_len)).unwrap_or("")
+    };
+
+    let bridge = pilot_polyglot::ExternalPolyglotBridge::new();
+    let res = bridge.execute_snippet(lang, code).unwrap_or_else(|e| e);
+    let bytes = res.into_bytes();
+    if !out_len.is_null() {
+        *out_len = bytes.len();
+    }
+    let mut boxed = bytes.into_boxed_slice();
+    let ptr = boxed.as_mut_ptr();
+    core::mem::forget(boxed);
+    ptr
+}
+
 /// Builds a statement/expression `AstArena` from UTF-8 source for Milestone 28 C-ABI verification
 /// (full Stage 1 SIMD modal lexer & Stage 2 Pratt parser land in M29–M30).
 pub fn parse_lightweight_skeleton_to_arena(src: &str) -> AstArena {
@@ -846,7 +967,7 @@ mod tests {
         unsafe {
             let handle = pilot_parse_utf8_to_arena(src.as_ptr(), src.len());
             assert!(!handle.is_null());
-            assert_eq!(pilot_ffi_abi_version(), 3401);
+            assert_eq!(pilot_ffi_abi_version(), 3501);
             assert_eq!(pilot_ffi_sizeof_ast_node(), 16);
 
             let mut node_len = 0usize;
@@ -1047,6 +1168,45 @@ mod tests {
             assert_eq!(vm_res_int, 42);
 
             pilot_vm_free(vm);
+        }
+    }
+
+    #[test]
+    fn ffi_c_abi_codegen_transpile_and_polyglot() {
+        unsafe {
+            // 1. Codegen build
+            let name = b"test_mod";
+            let mut out_len = 0usize;
+            let llvm_ptr = pilot_codegen_build(name.as_ptr(), name.len(), 0, &mut out_len);
+            assert!(!llvm_ptr.is_null());
+            assert!(out_len > 0);
+            let llvm_str = core::str::from_utf8(core::slice::from_raw_parts(llvm_ptr, out_len)).unwrap();
+            assert!(llvm_str.contains("define i64 @main"));
+            pilot_free_string(llvm_ptr, out_len);
+
+            // 2. Transpiler
+            let mut tr_len = 0usize;
+            let rs_ptr = pilot_transpile_sample(3, &mut tr_len); // target 3 = Rust
+            assert!(!rs_ptr.is_null());
+            let rs_str = core::str::from_utf8(core::slice::from_raw_parts(rs_ptr, tr_len)).unwrap();
+            assert!(rs_str.contains("pub fn compute(x: i64) -> i64 {"));
+            pilot_free_string(rs_ptr, tr_len);
+
+            // 3. Polyglot SPDX License & Execution
+            let mit = b"MIT";
+            assert_eq!(pilot_polyglot_verify_spdx(mit.as_ptr(), mit.len()), 1);
+
+            let gpl = b"GPL-3.0";
+            assert_eq!(pilot_polyglot_verify_spdx(gpl.as_ptr(), gpl.len()), 0);
+
+            let lang = b"python";
+            let code = b"x = 10";
+            let mut ex_len = 0usize;
+            let ex_ptr = pilot_polyglot_execute(lang.as_ptr(), lang.len(), code.as_ptr(), code.len(), &mut ex_len);
+            assert!(!ex_ptr.is_null());
+            let ex_str = core::str::from_utf8(core::slice::from_raw_parts(ex_ptr, ex_len)).unwrap();
+            assert!(ex_str.contains("chars of python out-of-process"));
+            pilot_free_string(ex_ptr, ex_len);
         }
     }
 }

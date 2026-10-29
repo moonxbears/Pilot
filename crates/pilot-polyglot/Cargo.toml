@@ -1,0 +1,8 @@
+[package]
+name = "pilot-polyglot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pilot-rt = { path = "../pilot-rt" }
+pilot-span = { path = "../pilot-span" }

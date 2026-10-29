@@ -16,6 +16,9 @@ members = [
     "crates/pilot-perceus",
     "crates/pilot-rt",
     "crates/pilot-vm",
+    "crates/pilot-codegen",
+    "crates/pilot-transpile",
+    "crates/pilot-polyglot",
     "crates/pilot-ffi",
 ]
 

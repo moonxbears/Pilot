@@ -29,6 +29,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilot-codegen"
+version = "0.1.0"
+dependencies = [
+ "pilot-analysis",
+ "pilot-ast",
+ "pilot-intern",
+ "pilot-rt",
+ "pilot-span",
+]
+
+[[package]]
 name = "pilot-db"
 version = "1.1.0"
 dependencies = [
@@ -45,6 +56,7 @@ dependencies = [
  "pilot-analysis",
  "pilot-arena",
  "pilot-ast",
+ "pilot-codegen",
  "pilot-db",
  "pilot-fmt",
  "pilot-incremental",
@@ -53,9 +65,11 @@ dependencies = [
  "pilot-lsp",
  "pilot-parser",
  "pilot-perceus",
+ "pilot-polyglot",
  "pilot-rt",
  "pilot-span",
  "pilot-syntax",
+ "pilot-transpile",
  "pilot-vm",
 ]
 
@@ -127,6 +141,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilot-polyglot"
+version = "0.1.0"
+dependencies = [
+ "pilot-rt",
+ "pilot-span",
+]
+
+[[package]]
 name = "pilot-rt"
 version = "0.1.0"
 dependencies = [
@@ -145,6 +167,15 @@ dependencies = [
  "pilot-ast",
  "pilot-intern",
  "pilot-lexer",
+ "pilot-span",
+]
+
+[[package]]
+name = "pilot-transpile"
+version = "0.1.0"
+dependencies = [
+ "pilot-ast",
+ "pilot-intern",
  "pilot-span",
 ]
 

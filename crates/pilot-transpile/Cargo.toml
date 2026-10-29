@@ -1,0 +1,9 @@
+[package]
+name = "pilot-transpile"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pilot-ast = { path = "../pilot-ast" }
+pilot-span = { path = "../pilot-span" }
+pilot-intern = { path = "../pilot-intern" }

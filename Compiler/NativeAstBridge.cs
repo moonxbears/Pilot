@@ -1082,7 +1082,7 @@ public sealed class NativeVmHandle : IDisposable
 /// </summary>
 public static unsafe class NativeAstBridge
 {
-    public const uint ExpectedAbiVersion = 3401;
+    public const uint ExpectedAbiVersion = 3501;
 
     private static readonly object SyncLock = new();
     private static IntPtr _libraryHandle;
@@ -1152,6 +1152,11 @@ public static unsafe class NativeAstBridge
     private static delegate* unmanaged[Cdecl]<IntPtr> _fnVmNew;
     private static delegate* unmanaged[Cdecl]<IntPtr, void> _fnVmFree;
     private static delegate* unmanaged[Cdecl]<IntPtr, byte*, nuint, NativePilotVal> _fnVmExecuteBytes;
+
+    private static delegate* unmanaged[Cdecl]<byte*, nuint, byte, nuint*, byte*> _fnCodegenBuild;
+    private static delegate* unmanaged[Cdecl]<byte, nuint*, byte*> _fnTranspileSample;
+    private static delegate* unmanaged[Cdecl]<byte*, nuint, byte> _fnPolyglotVerifySpdx;
+    private static delegate* unmanaged[Cdecl]<byte*, nuint, byte*, nuint, nuint*, byte*> _fnPolyglotExecute;
 
     static NativeAstBridge()
     {
@@ -1735,6 +1740,58 @@ public static unsafe class NativeAstBridge
         }
     }
 
+    public static string BuildModule(string moduleName, byte target)
+    {
+        EnsureLoaded();
+        byte[] nameBytes = Encoding.UTF8.GetBytes(moduleName);
+        nuint outLen = 0;
+        byte* ptr;
+        fixed (byte* p = nameBytes)
+        {
+            ptr = _fnCodegenBuild(p, (nuint)nameBytes.Length, target, &outLen);
+        }
+        if (ptr == null || outLen == 0) return string.Empty;
+        try { return Encoding.UTF8.GetString(ptr, (int)outLen); }
+        finally { _fnFreeString(ptr, outLen); }
+    }
+
+    public static string TranspileSample(byte target)
+    {
+        EnsureLoaded();
+        nuint outLen = 0;
+        byte* ptr = _fnTranspileSample(target, &outLen);
+        if (ptr == null || outLen == 0) return string.Empty;
+        try { return Encoding.UTF8.GetString(ptr, (int)outLen); }
+        finally { _fnFreeString(ptr, outLen); }
+    }
+
+    public static bool VerifySpdxLicense(string spdxId)
+    {
+        EnsureLoaded();
+        byte[] bytes = Encoding.UTF8.GetBytes(spdxId);
+        fixed (byte* p = bytes)
+        {
+            return _fnPolyglotVerifySpdx(p, (nuint)bytes.Length) != 0;
+        }
+    }
+
+    public static string PolyglotExecute(string language, string code)
+    {
+        EnsureLoaded();
+        byte[] langBytes = Encoding.UTF8.GetBytes(language);
+        byte[] codeBytes = Encoding.UTF8.GetBytes(code);
+        nuint outLen = 0;
+        byte* ptr;
+        fixed (byte* pLang = langBytes)
+        fixed (byte* pCode = codeBytes)
+        {
+            ptr = _fnPolyglotExecute(pLang, (nuint)langBytes.Length, pCode, (nuint)codeBytes.Length, &outLen);
+        }
+        if (ptr == null || outLen == 0) return string.Empty;
+        try { return Encoding.UTF8.GetString(ptr, (int)outLen); }
+        finally { _fnFreeString(ptr, outLen); }
+    }
+
     private static void EnsureLoaded()
     {
         if (_libraryHandle != IntPtr.Zero)
@@ -1818,6 +1875,11 @@ public static unsafe class NativeAstBridge
             _fnVmNew = (delegate* unmanaged[Cdecl]<IntPtr>)NativeLibrary.GetExport(lib, "pilot_vm_new");
             _fnVmFree = (delegate* unmanaged[Cdecl]<IntPtr, void>)NativeLibrary.GetExport(lib, "pilot_vm_free");
             _fnVmExecuteBytes = (delegate* unmanaged[Cdecl]<IntPtr, byte*, nuint, NativePilotVal>)NativeLibrary.GetExport(lib, "pilot_vm_execute_bytes");
+
+            _fnCodegenBuild = (delegate* unmanaged[Cdecl]<byte*, nuint, byte, nuint*, byte*>)NativeLibrary.GetExport(lib, "pilot_codegen_build");
+            _fnTranspileSample = (delegate* unmanaged[Cdecl]<byte, nuint*, byte*>)NativeLibrary.GetExport(lib, "pilot_transpile_sample");
+            _fnPolyglotVerifySpdx = (delegate* unmanaged[Cdecl]<byte*, nuint, byte>)NativeLibrary.GetExport(lib, "pilot_polyglot_verify_spdx");
+            _fnPolyglotExecute = (delegate* unmanaged[Cdecl]<byte*, nuint, byte*, nuint, nuint*, byte*>)NativeLibrary.GetExport(lib, "pilot_polyglot_execute");
 
             uint abi = _fnAbiVersion();
             if (abi != ExpectedAbiVersion)

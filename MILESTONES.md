@@ -1005,12 +1005,12 @@ struct PilotVal {
 **Goal**: Complete **`M23` (`pilot build`)** and port **`M6`/`M20` (`--emit` / `--from`)** and **`M3` (Polyglot Interop)** into native Rust—eliminating the 40+ MB `Microsoft.CodeAnalysis.CSharp` (Roslyn) dependency while preserving 100% of Pilot's multi-language capabilities.
 
 ### Sub-Tasks & Deliverables
-- [ ] **35.1: Unified Native AOT Driver (`pilot build` — Completes `M23.2`–`M23.4`)**
+- [x] **35.1: Unified Native AOT Driver (`pilot build` — Completes `M23.2`–`M23.4`)**
   - Emit optimized **LLVM IR** (with `!dbg` DWARF metadata, SIMD `<4 x float>`/`<8 x float>`, register-returned `T ! E` & `Dual` structs, Perceus `dup`/`drop_reuse` intrinsics), **C11/C23**, **x86_64/ARM64 ASM**, and **Binary `.wasm` + WASI + `.mjs`/`.d.ts` bindings**, linking against `libpilot_rt.a` (`M34.2`) to produce standalone zero-dependency executables.
-- [ ] **35.2: Native Rust Bidirectional Transpilers & Zero-Roslyn Foreign Ingesters (`pilot --emit` / `pilot --from`)**
+- [x] **35.2: Native Rust Bidirectional Transpilers & Zero-Roslyn Foreign Ingesters (`pilot --emit` / `pilot --from`)**
   - Port `PilotTranspileIr` and all 7 target emitters (`c`, `cpp`, `csharp`, `rust`, `python`, `js`, `lua`) into `crates/pilot-transpile` (> 100 MB/s).
   - Replace `Microsoft.CodeAnalysis.CSharp` in `--from csharp` (alongside Rust, C/C++, Python, JS/TS, and Lua ingesters) with zero-GC native Rust recursive-descent AST ingesters + `--strict-pilot` idiom upgrading + `--viable-license-only` SPDX verification (`M20.4`–`M20.6`).
-- [ ] **35.3: Zero-.NET Polyglot Interop & Optional External C# Bridge (`crates/pilot-polyglot`)**
+- [x] **35.3: Zero-.NET Polyglot Interop & Optional External C# Bridge (`crates/pilot-polyglot`)**
   - Native C-ABI `dlopen`/`LoadLibrary` FFI + zero-marshalling shared-memory (`SliceBuffer<T>`, `RangeWindow<TIter>` from `M15.3`) bridges for C, C++, Rust, Python, JS, Lua, Java, and PostgreSQL/MySQL/SQLite.
   - **Externalized C# Polyglot Adapter**: Demote `csharp { ... }` inline blocks from in-process CLR hosting to an **optional out-of-process external bridge** (invoked via zero-copy `mmap` IPC only when a script executes `csharp {}` and `dotnet` is present on the user's machine—matching `python {}` and `js {}`).
 

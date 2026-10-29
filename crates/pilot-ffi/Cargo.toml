@@ -26,3 +26,6 @@ pilot-analysis = { path = "../pilot-analysis" }
 pilot-perceus = { path = "../pilot-perceus" }
 pilot-rt = { path = "../pilot-rt" }
 pilot-vm = { path = "../pilot-vm" }
+pilot-codegen = { path = "../pilot-codegen" }
+pilot-transpile = { path = "../pilot-transpile" }
+pilot-polyglot = { path = "../pilot-polyglot" }
