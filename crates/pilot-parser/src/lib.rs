@@ -71,6 +71,35 @@ pub fn parse_parallel(src: &str) -> AstArena {
     })
 }
 
+#[inline]
+pub fn is_polyglot_lang(name: &str) -> bool {
+    matches!(
+        name,
+        "python"
+            | "py"
+            | "csharp"
+            | "cs"
+            | "rust"
+            | "rs"
+            | "js"
+            | "javascript"
+            | "ts"
+            | "typescript"
+            | "java"
+            | "asm"
+            | "assembly"
+            | "cpp"
+            | "c++"
+            | "c"
+            | "lua"
+            | "sql"
+            | "postgres"
+            | "postgresql"
+            | "mysql"
+            | "sqlite"
+    )
+}
+
 pub struct Parser<'a> {
     src: &'a str,
     tape: TokenTape,
@@ -201,6 +230,170 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn peek_is_polyglot_block(&self) -> bool {
+        if !self.is_ident_like() || !is_polyglot_lang(self.text()) {
+            return false;
+        }
+        let mut lookahead = self.pos + 1;
+        while lookahead < self.tape.len() && self.tape.kind(lookahead) == TokenKind::Newline {
+            lookahead += 1;
+        }
+        if lookahead < self.tape.len() {
+            let k = self.tape.kind(lookahead);
+            k == TokenKind::LBrace
+                || k == TokenKind::RawDslBlock
+                || k == TokenKind::TripleStrLit
+                || k == TokenKind::StrLit
+        } else {
+            false
+        }
+    }
+
+    fn parse_polyglot_block(&mut self) -> NodeId {
+        let start_span = self.span();
+        let lang = self.text().to_string();
+        self.advance(); // consume language identifier
+        self.skip_whitespace_and_comments();
+        while self.at(TokenKind::Newline) {
+            self.advance();
+        }
+
+        let mut flags = 0u16;
+        let code_str: String;
+        let end_pos: u32;
+
+        if self.at(TokenKind::LBrace) {
+            let open_pos = self.pos;
+            let open_span = self.span();
+            let close_pos = self.tape.bracket_links[open_pos] as usize;
+            if close_pos > open_pos && close_pos < self.tape.len() {
+                let close_span = self.tape.span(close_pos);
+                let raw_content = &self.src[open_span.end as usize..close_span.start as usize];
+                code_str = raw_content.to_string();
+                end_pos = close_span.end;
+                self.pos = close_pos + 1;
+            } else {
+                // Fallback: scan to matching RBrace
+                self.advance();
+                let mut depth = 1;
+                let start_idx = open_span.end as usize;
+                while !self.at_end() && depth > 0 {
+                    if self.at(TokenKind::LBrace) {
+                        depth += 1;
+                    } else if self.at(TokenKind::RBrace) {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    self.advance();
+                }
+                let end_idx = if self.at(TokenKind::RBrace) {
+                    let s = self.span().start as usize;
+                    self.advance();
+                    s
+                } else {
+                    self.src.len()
+                };
+                code_str = self.src[start_idx..end_idx.min(self.src.len())].to_string();
+                end_pos = self.prev_span().end;
+            }
+        } else if self.at(TokenKind::RawDslBlock) {
+            let raw = self.text();
+            let trimmed = raw.trim_start_matches('`').trim_end_matches('`');
+            let cleaned = if let Some(newline_idx) = trimmed.find('\n') {
+                &trimmed[newline_idx + 1..]
+            } else {
+                trimmed
+            };
+            code_str = cleaned.to_string();
+            end_pos = self.span().end;
+            self.advance();
+        } else if self.at(TokenKind::TripleStrLit) {
+            let raw = self.text();
+            let cleaned = if raw.starts_with("\"\"\"") {
+                raw.trim_matches('"')
+            } else {
+                raw.trim_matches('\'')
+            };
+            code_str = cleaned.to_string();
+            end_pos = self.span().end;
+            self.advance();
+        } else if self.at(TokenKind::StrLit) {
+            let raw = self.text();
+            let cleaned = raw.trim_matches('"').trim_matches('\'');
+            code_str = cleaned.to_string();
+            end_pos = self.span().end;
+            self.advance();
+        } else {
+            code_str = String::new();
+            end_pos = start_span.end;
+        }
+
+        if code_str.contains("yield") {
+            flags |= 1;
+        }
+
+        let full_span = ByteSpan::new(start_span.start, end_pos);
+        self.arena.alloc_polyglot_block(&lang, &code_str, flags, full_span)
+    }
+
+    fn parse_extern_decl(&mut self) -> NodeId {
+        let start_span = self.span();
+        self.advance(); // consume 'extern'
+
+        // Optional lang target: "rust" or rust
+        if self.at(TokenKind::StrLit) || self.is_ident_like() {
+            self.advance();
+        }
+        // Optional kind: 'lib' | 'assembly' | 'module'
+        if self.is_ident_like() {
+            let t = self.text();
+            if t == "lib" || t == "assembly" || t == "module" {
+                self.advance();
+                // target path or name
+                if self.at(TokenKind::StrLit) || self.is_ident_like() {
+                    self.advance();
+                }
+            }
+        }
+        if self.at(TokenKind::Colon) {
+            self.advance();
+        }
+
+        if self.at(TokenKind::LBrace) {
+            self.advance();
+            let mut members = Vec::new();
+            while !self.at_end() && !self.at(TokenKind::RBrace) {
+                while self.is_ident_like() {
+                    let m = self.text();
+                    if m == "public" || m == "private" || m == "protected" || m == "internal" || m == "static" {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                let member = self.parse_stmt_or_decl();
+                if member.is_some() {
+                    members.push(member);
+                }
+                self.consume_semi_or_newlines();
+            }
+            self.expect(TokenKind::RBrace);
+            self.arena.alloc_list_node(NodeKind::Program, 0, ByteSpan::new(start_span.start, self.prev_span().end), &members)
+        } else {
+            while self.is_ident_like() {
+                let m = self.text();
+                if m == "public" || m == "private" || m == "protected" || m == "internal" || m == "static" {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            self.parse_stmt_or_decl()
+        }
+    }
+
     /// Entry point: parses an entire Pilot program.
     pub fn parse_program(&mut self) -> AstArena {
         self.skip_whitespace_and_comments();
@@ -214,7 +407,16 @@ impl<'a> Parser<'a> {
             let start_pos = self.pos;
             let node = self.parse_stmt_or_decl();
             if node.is_some() {
-                top_children.push(node);
+                if self.arena.node(node).node_kind() == NodeKind::Program {
+                    let s = self.arena.node(node).lhs;
+                    let l = self.arena.node(node).rhs;
+                    let sub_children = self.arena.children_slice(s, l).to_vec();
+                    for c in sub_children {
+                        top_children.push(NodeId(c));
+                    }
+                } else {
+                    top_children.push(node);
+                }
             }
             if self.pos == start_pos {
                 self.advance();
@@ -244,6 +446,23 @@ impl<'a> Parser<'a> {
                 }
             }
             self.consume_semi_or_newlines();
+        }
+
+        while self.is_ident_like() {
+            let txt = self.text();
+            if txt == "public" || txt == "private" || txt == "protected" || txt == "internal" || txt == "static" {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        if self.at(TokenKind::KwExtern) || (self.is_ident_like() && self.text() == "extern") {
+            return self.parse_extern_decl();
+        }
+
+        if self.peek_is_polyglot_block() {
+            return self.parse_polyglot_block();
         }
 
         if self.is_ident_like() {
@@ -316,12 +535,28 @@ impl<'a> Parser<'a> {
         let start_span = self.span();
         self.advance(); // consume 'import'
         let mut path = String::new();
+        let mut alias = None;
+
         while !self.at_end() && !self.at(TokenKind::Semicolon) && !self.at(TokenKind::Newline) {
+            if self.at(TokenKind::KwAs) {
+                self.advance(); // consume 'as'
+                if self.is_ident_like() {
+                    alias = Some(self.text().to_string());
+                    self.advance();
+                }
+                break;
+            }
             path.push_str(self.text());
             self.advance();
         }
-        let sym = self.arena.interner.intern(&path);
-        self.arena.alloc_node(NodeKind::ImportDecl, 0, start_span, sym.0, 0)
+
+        let path_sym = self.arena.interner.intern(&path);
+        let alias_sym = if let Some(ref a) = alias {
+            self.arena.interner.intern(a).0
+        } else {
+            u32::MAX
+        };
+        self.arena.alloc_node(NodeKind::ImportDecl, 0, ByteSpan::new(start_span.start, self.prev_span().end), path_sym.0, alias_sym)
     }
 
     fn parse_from_import_stmt(&mut self) -> NodeId {
@@ -332,14 +567,40 @@ impl<'a> Parser<'a> {
             path.push_str(self.text());
             self.advance();
         }
-        let sym = self.arena.interner.intern(&path);
+        let _path_sym = self.arena.interner.intern(&path);
+
+        let mut imported_symbols = Vec::new();
         if self.at(TokenKind::KwImport) {
-            self.advance();
-            while !self.at_end() && !self.at(TokenKind::Semicolon) && !self.at(TokenKind::Newline) {
+            self.advance(); // consume 'import'
+            if self.at(TokenKind::LParen) {
+                self.advance();
+            }
+            while !self.at_end() && !self.at(TokenKind::Semicolon) && !self.at(TokenKind::Newline) && !self.at(TokenKind::RParen) {
+                if self.is_ident_like() {
+                    let mut name = self.text().to_string();
+                    self.advance();
+                    if self.at(TokenKind::KwAs) {
+                        self.advance();
+                        if self.is_ident_like() {
+                            name = self.text().to_string();
+                            self.advance();
+                        }
+                    }
+                    let sym_node = self.arena.alloc_ident(&name, self.prev_span());
+                    imported_symbols.push(sym_node);
+                } else if self.at(TokenKind::Star) {
+                    self.advance();
+                } else if self.at(TokenKind::Comma) {
+                    self.advance();
+                } else {
+                    self.advance();
+                }
+            }
+            if self.at(TokenKind::RParen) {
                 self.advance();
             }
         }
-        self.arena.alloc_node(NodeKind::FromImportDecl, 0, start_span, sym.0, 0)
+        self.arena.alloc_list_node(NodeKind::FromImportDecl, 0, ByteSpan::new(start_span.start, self.prev_span().end), &imported_symbols)
     }
 
     fn parse_fn_decl(&mut self) -> NodeId {
@@ -751,6 +1012,10 @@ impl<'a> Parser<'a> {
     fn parse_expr_prefix(&mut self) -> NodeId {
         let k = self.peek();
         let span = self.span();
+
+        if self.peek_is_polyglot_block() {
+            return self.parse_polyglot_block();
+        }
 
         if self.is_ident_like() {
             let name = self.text();

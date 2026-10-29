@@ -515,6 +515,9 @@ impl<'a> CGenContext<'a> {
                     writeln!(&mut self.out, "{}{};", ind, expr_code).unwrap();
                 }
             }
+            NodeKind::PolyglotBlock => {
+                writeln!(&mut self.out, "{}/* polyglot block */", ind).unwrap();
+            }
             _ => {
                 let span = self.arena.span(id);
                 if (span.end as usize) <= self.source.len() && span.start < span.end {
@@ -573,6 +576,7 @@ impl<'a> CGenContext<'a> {
             }
             NodeKind::LambdaExpr => "0LL".to_string(),
             NodeKind::BlockExpr => "0LL".to_string(),
+            NodeKind::PolyglotBlock => "0LL".to_string(),
             NodeKind::BinaryExpr => {
                 let lhs = self.emit_expr(NodeId(node.lhs));
                 let rhs = self.emit_expr(NodeId(node.rhs));

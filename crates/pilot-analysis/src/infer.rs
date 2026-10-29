@@ -261,6 +261,13 @@ impl TypeInferenceEngine {
                 base: TypeId::I64,
                 unit_name: "dim".to_string(),
             }),
+            NodeKind::PolyglotBlock => {
+                if (node.flags & 1) != 0 {
+                    self.types.function_of(vec![TypeId::ANY], TypeId::ANY)
+                } else {
+                    TypeId::ANY
+                }
+            },
 
             // --- Identifier & Variable Lookup ---
             NodeKind::IdentExpr => {
@@ -292,6 +299,9 @@ impl TypeInferenceEngine {
                 if (8..=15).contains(&op) {
                     let _ = self.types.unify(lhs_ty, rhs_ty);
                     TypeId::BOOL
+                } else if op == 1 && lhs_ty == TypeId::STR {
+                    // String concatenation: "prefix " + expr produces str
+                    TypeId::STR
                 } else {
                     match self.types.unify(lhs_ty, rhs_ty) {
                         Ok(unified) => unified,
@@ -384,6 +394,24 @@ impl TypeInferenceEngine {
                             let cls_name = arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
                             let ty = self.types.alloc(TypeKind::Primitive(cls_name.clone()));
                             self.type_defs.insert(cls_name, ty);
+                        }
+                        NodeKind::ImportDecl => {
+                            if child_node.rhs != u32::MAX {
+                                let alias = arena.interner.resolve(SymbolId(child_node.rhs)).to_string();
+                                self.define_var(&alias, TypeId::ANY);
+                                self.type_defs.insert(alias, TypeId::ANY);
+                            }
+                        }
+                        NodeKind::FromImportDecl => {
+                            let sub_children = arena.children_slice(child_node.lhs, child_node.rhs);
+                            for &sym_id in sub_children {
+                                let sym_node = arena.node(NodeId(sym_id));
+                                if sym_node.node_kind() == NodeKind::IdentExpr {
+                                    let name = arena.interner.resolve(SymbolId(sym_node.lhs)).to_string();
+                                    self.define_var(&name, TypeId::ANY);
+                                    self.type_defs.insert(name, TypeId::ANY);
+                                }
+                            }
                         }
                         _ => {}
                     }

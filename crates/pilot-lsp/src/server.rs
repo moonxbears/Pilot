@@ -529,7 +529,11 @@ impl LspServer {
 
                     // Identifiers (function / type / decorator / variable)
                     SyntaxKind::Ident => {
-                        if prev_non_trivia_kind == SyntaxKind::At {
+                        let end_offset = (token.offset() + token.text_len()) as usize;
+                        let remainder = src.get(end_offset..).unwrap_or("").trim_start();
+                        if pilot_parser::is_polyglot_lang(token.text()) && (remainder.starts_with('{') || remainder.starts_with("```") || remainder.starts_with("\"\"\"")) {
+                            Some(15) // keyword
+                        } else if prev_non_trivia_kind == SyntaxKind::At {
                             Some(22) // decorator
                         } else if prev_non_trivia_kind == SyntaxKind::KwClass {
                             Some(2) // class

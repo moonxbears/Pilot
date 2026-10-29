@@ -366,6 +366,12 @@ impl BytecodeCompiler {
             }
 
             NodeKind::FnDecl => 0,
+            NodeKind::PolyglotBlock => {
+                let const_idx = self.add_constant(PilotVal::from_int(0));
+                let dst = self.alloc_reg();
+                self.emit(Opcode::LoadConst, dst, (const_idx >> 8) as u8, (const_idx & 0xFF) as u8);
+                dst
+            }
 
             NodeKind::CallExpr => {
                 let arg_start = node.lhs as usize;

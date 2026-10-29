@@ -456,6 +456,10 @@ impl IrModule {
                 let s = arena.interner.resolve(SymbolId(node.lhs)).to_string();
                 IrExpr::LitStr(s)
             }
+            NodeKind::PolyglotBlock => {
+                let s = arena.interner.resolve(SymbolId(node.rhs)).to_string();
+                IrExpr::LitStr(s)
+            }
             NodeKind::IdentExpr => {
                 let name = arena.interner.resolve(SymbolId(node.lhs)).to_string();
                 IrExpr::Var(name)

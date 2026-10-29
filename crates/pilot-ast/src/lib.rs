@@ -98,6 +98,7 @@ pub enum NodeKind {
     MapExpr = 219,
     RangeExpr = 220,
     ComptimeExpr = 221,
+    PolyglotBlock = 222,
 
     // --- Atomic Literals & Identifiers (300..349) ---
     IdentExpr = 300,
@@ -186,6 +187,7 @@ impl NodeKind {
             219 => Self::MapExpr,
             220 => Self::RangeExpr,
             221 => Self::ComptimeExpr,
+            222 => Self::PolyglotBlock,
             300 => Self::IdentExpr,
             301 => Self::IntLit,
             302 => Self::FloatLit,
@@ -265,6 +267,7 @@ impl NodeKind {
             Self::MapExpr => "MapExpr",
             Self::RangeExpr => "RangeExpr",
             Self::ComptimeExpr => "ComptimeExpr",
+            Self::PolyglotBlock => "PolyglotBlock",
             Self::IdentExpr => "IdentExpr",
             Self::IntLit => "IntLit",
             Self::FloatLit => "FloatLit",
@@ -535,6 +538,13 @@ impl AstArena {
     }
 
     #[inline]
+    pub fn alloc_polyglot_block(&mut self, lang: &str, code: &str, flags: u16, span: ByteSpan) -> NodeId {
+        let lang_sym = self.interner.intern(lang);
+        let code_sym = self.interner.intern(code);
+        self.alloc_node(NodeKind::PolyglotBlock, flags, span, lang_sym.0, code_sym.0)
+    }
+
+    #[inline]
     pub fn node(&self, id: NodeId) -> &AstNode {
         &self.nodes[id.0 as usize]
     }
@@ -601,6 +611,11 @@ impl AstArena {
             }
             NodeKind::IdentExpr => {
                 out.push_str("(Ident ");
+                out.push_str(self.interner.resolve(SymbolId(n.lhs)));
+                out.push(')');
+            }
+            NodeKind::PolyglotBlock => {
+                out.push_str("(PolyglotBlock ");
                 out.push_str(self.interner.resolve(SymbolId(n.lhs)));
                 out.push(')');
             }

@@ -510,6 +510,7 @@ impl SyntaxKind {
             NodeKind::PatWildcard => SyntaxKind::PatWildcard,
             NodeKind::PatBind => SyntaxKind::PatBind,
             NodeKind::PatLiteral => SyntaxKind::PatLiteral,
+            NodeKind::PolyglotBlock => SyntaxKind::RawDslBlock,
             _ => SyntaxKind::ErrorNode,
         }
     }
