@@ -1,0 +1,1627 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.formats — Zero-Copy-Friendly `json`, `toml`, `csv` & `env` State-Machine Parsers & Serializers (`T ! ParseError`)
+// Bootstrapped via M20 (`--from python|rust --strict-pilot --viable-license-only`) from CPython `json`/`tomllib`/`csv`
+// (PSF-2.0) and MIT TOML/dotenv state machines, curated for Pilot Invariant #7 (`T ! ParseError`) & `SliceBuffer<u8>`.
+
+type ParseError = Syntax(format_name: str, msg: str, line: i64, col: i64)
+                | PrematureEof(format_name: str, line: i64, col: i64)
+                | BadEscape(format_name: str, seq: str, line: i64, col: i64)
+                | BadNumber(format_name: str, raw: str, line: i64, col: i64)
+                | DuplicateKey(format_name: str, key: str, line: i64, col: i64);
+
+def format_parse_error(err: ParseError) -> str {
+    return match err {
+        case ParseError.Syntax(fmt, msg, ln, cl) => f"[{fmt} {ln}:{cl}] SyntaxError: {msg}",
+        case ParseError.PrematureEof(fmt, ln, cl) => f"[{fmt} {ln}:{cl}] PrematureEof",
+        case ParseError.BadEscape(fmt, seq, ln, cl) => f"[{fmt} {ln}:{cl}] BadEscape: '{seq}'",
+        case ParseError.BadNumber(fmt, raw, ln, cl) => f"[{fmt} {ln}:{cl}] BadNumber: '{raw}'",
+        case ParseError.DuplicateKey(fmt, key, ln, cl) => f"[{fmt} {ln}:{cl}] DuplicateKey: '{key}'"
+    };
+}
+
+const _HEX_UPPER_FMT: str = "0123456789ABCDEF";
+
+def __coerce_format_text(src, fmt_name: str) -> str ! ParseError {
+    let kind: str = type_of(src);
+    if kind == "slicebuffer" {
+        let bad_idx: i64 = __utf8_validate_slice(src);
+        if bad_idx >= 0 {
+            return fail(ParseError.Syntax(fmt_name, "invalid UTF-8 byte sequence", 1, bad_idx + 1));
+        }
+        return ok(__utf8_decode_slice(src));
+    }
+    if kind == "object" {
+        let buf = src.raw_buffer();
+        let bad_idx: i64 = __utf8_validate_slice(buf);
+        if bad_idx >= 0 {
+            return fail(ParseError.Syntax(fmt_name, "invalid UTF-8 byte sequence", 1, bad_idx + 1));
+        }
+        return ok(__utf8_decode_slice(buf));
+    }
+    return ok(str(src));
+}
+
+def __fmt_hex_digit(code: i64) -> i64 {
+    if code >= 48 and code <= 57 {
+        return code - 48;
+    }
+    if code >= 97 and code <= 102 {
+        return 10 + (code - 97);
+    }
+    if code >= 65 and code <= 70 {
+        return 10 + (code - 65);
+    }
+    return -1;
+}
+
+def __is_ascii_digit(code: i64) -> bool {
+    return code >= 48 and code <= 57;
+}
+
+class __FormatCursor {
+    def __init__(self, fmt_name: str, src: str) {
+        self.fmt_name = fmt_name;
+        self.src = src;
+        self.total = len(src);
+        self.pos = 0;
+        self.line = 1;
+        self.col = 1;
+    }
+
+    def is_eof(self) -> bool {
+        return self.pos >= self.total;
+    }
+
+    def peek_code(self) -> i64 {
+        if self.pos >= self.total {
+            return -1;
+        }
+        return __str_char_code(self.src, self.pos);
+    }
+
+    def peek_at(self, rel: i64) -> i64 {
+        let idx: i64 = self.pos + rel;
+        if idx < 0 or idx >= self.total {
+            return -1;
+        }
+        return __str_char_code(self.src, idx);
+    }
+
+    def advance(self) -> i64 {
+        if self.pos >= self.total {
+            return -1;
+        }
+        let code: i64 = __str_char_code(self.src, self.pos);
+        self.pos = self.pos + 1;
+        if code == 10 {
+            self.line = self.line + 1;
+            self.col = 1;
+        } else {
+            self.col = self.col + 1;
+        }
+        return code;
+    }
+
+    def slice_span(self, start_idx: i64, end_idx: i64) -> str {
+        return __str_slice(self.src, start_idx, end_idx);
+    }
+}
+
+// ============================================================================
+// 1. JSON (RFC 8259) Recursive-Descent Parser, Path Accessor & Serializer
+// ============================================================================
+
+def __json_skip_ws(cur: any) {
+    while !cur.is_eof() {
+        let c: i64 = cur.peek_code();
+        if c == 32 or c == 9 or c == 10 or c == 13 {
+            cur.advance();
+        } else {
+            break;
+        }
+    }
+}
+
+def __json_read_hex4(cur: any, esc_line: i64, esc_col: i64) -> i64 ! ParseError {
+    var acc: i64 = 0;
+    for _k in 0..<4 {
+        if cur.is_eof() {
+            return fail(ParseError.PrematureEof(cur.fmt_name, cur.line, cur.col));
+        }
+        let hc: i64 = cur.advance();
+        let nib: i64 = __fmt_hex_digit(hc);
+        if nib < 0 {
+            return fail(ParseError.BadEscape(cur.fmt_name, "\\u" + __char_from_code(hc), esc_line, esc_col));
+        }
+        acc = (acc << 4) | nib;
+    }
+    return ok(acc);
+}
+
+def __json_parse_string(cur: any) -> str ! ParseError {
+    let open_ln: i64 = cur.line;
+    let open_cl: i64 = cur.col;
+    let _open = cur.advance(); // '"'
+    var chunks = [];
+    var span_start: i64 = cur.pos;
+
+    while !cur.is_eof() {
+        let c: i64 = cur.peek_code();
+        if c == 34 {
+            if cur.pos > span_start {
+                chunks.append(cur.slice_span(span_start, cur.pos));
+            }
+            let _close = cur.advance();
+            var out: str = "";
+            for ch_part in chunks {
+                out = out + ch_part;
+            }
+            return ok(out);
+        }
+        if c >= 0 and c < 32 {
+            return fail(ParseError.Syntax(cur.fmt_name, "unescaped control character in string", cur.line, cur.col));
+        }
+        if c == 92 {
+            if cur.pos > span_start {
+                chunks.append(cur.slice_span(span_start, cur.pos));
+            }
+            let esc_ln: i64 = cur.line;
+            let esc_cl: i64 = cur.col;
+            let _bs = cur.advance(); // '\'
+            if cur.is_eof() {
+                return fail(ParseError.PrematureEof(cur.fmt_name, esc_ln, esc_cl));
+            }
+            let esc: i64 = cur.advance();
+            if esc == 34 {
+                chunks.append("\"");
+            } elif esc == 92 {
+                chunks.append("\\");
+            } elif esc == 47 {
+                chunks.append("/");
+            } elif esc == 98 {
+                chunks.append(__char_from_code(8));
+            } elif esc == 102 {
+                chunks.append(__char_from_code(12));
+            } elif esc == 110 {
+                chunks.append("\n");
+            } elif esc == 114 {
+                chunks.append("\r");
+            } elif esc == 116 {
+                chunks.append("\t");
+            } elif esc == 117 {
+                let u1: i64 = __json_read_hex4(cur, esc_ln, esc_cl)?;
+                if u1 >= 55296 and u1 <= 56319 {
+                    // High UTF-16 surrogate (0xD800..0xDBFF): check for \uDC00..0xDFFF low surrogate
+                    if cur.peek_code() == 92 and cur.peek_at(1) == 117 {
+                        let _bs2 = cur.advance();
+                        let _u2_ch = cur.advance();
+                        let u2: i64 = __json_read_hex4(cur, esc_ln, esc_cl)?;
+                        if u2 < 56320 or u2 > 57343 {
+                            return fail(ParseError.BadEscape(cur.fmt_name, "unpaired UTF-16 surrogate", esc_ln, esc_cl));
+                        }
+                        let codepoint: i64 = 65536 + ((u1 - 55296) << 10) + (u2 - 56320);
+                        chunks.append(__char_from_code(codepoint));
+                    } else {
+                        return fail(ParseError.BadEscape(cur.fmt_name, "unpaired high UTF-16 surrogate", esc_ln, esc_cl));
+                    }
+                } elif u1 >= 56320 and u1 <= 57343 {
+                    return fail(ParseError.BadEscape(cur.fmt_name, "unpaired low UTF-16 surrogate", esc_ln, esc_cl));
+                } else {
+                    chunks.append(__char_from_code(u1));
+                }
+            } else {
+                return fail(ParseError.BadEscape(cur.fmt_name, "\\" + __char_from_code(esc), esc_ln, esc_cl));
+            }
+            span_start = cur.pos;
+        } else {
+            cur.advance();
+        }
+    }
+
+    return fail(ParseError.PrematureEof(cur.fmt_name, open_ln, open_cl));
+}
+
+def __json_parse_number(cur: any) -> any ! ParseError {
+    let start_pos: i64 = cur.pos;
+    let start_ln: i64 = cur.line;
+    let start_cl: i64 = cur.col;
+    var is_float: bool = false;
+
+    if cur.peek_code() == 45 {
+        cur.advance();
+    }
+
+    if cur.is_eof() or !__is_ascii_digit(cur.peek_code()) {
+        let raw_bad = cur.slice_span(start_pos, min(cur.pos + 1, cur.total));
+        return fail(ParseError.BadNumber("json", raw_bad, start_ln, start_cl));
+    }
+
+    if cur.peek_code() == 48 {
+        cur.advance();
+        // Leading zero followed by another digit is invalid in RFC 8259
+        if __is_ascii_digit(cur.peek_code()) {
+            cur.advance();
+            let raw_lz = cur.slice_span(start_pos, cur.pos);
+            return fail(ParseError.BadNumber("json", raw_lz, start_ln, start_cl));
+        }
+    } else {
+        while __is_ascii_digit(cur.peek_code()) {
+            cur.advance();
+        }
+    }
+
+    // Fractional part `.digits`
+    if cur.peek_code() == 46 {
+        is_float = true;
+        cur.advance();
+        if !__is_ascii_digit(cur.peek_code()) {
+            let raw_frac = cur.slice_span(start_pos, cur.pos);
+            return fail(ParseError.BadNumber("json", raw_frac, start_ln, start_cl));
+        }
+        while __is_ascii_digit(cur.peek_code()) {
+            cur.advance();
+        }
+    }
+
+    // Exponent part `e`/`E` [+/-] digits
+    let ec: i64 = cur.peek_code();
+    if ec == 101 or ec == 69 {
+        is_float = true;
+        cur.advance();
+        let sc: i64 = cur.peek_code();
+        if sc == 43 or sc == 45 {
+            cur.advance();
+        }
+        if !__is_ascii_digit(cur.peek_code()) {
+            let raw_exp = cur.slice_span(start_pos, cur.pos);
+            return fail(ParseError.BadNumber("json", raw_exp, start_ln, start_cl));
+        }
+        while __is_ascii_digit(cur.peek_code()) {
+            cur.advance();
+        }
+    }
+
+    let raw_num = cur.slice_span(start_pos, cur.pos);
+    if !is_float {
+        let int_opt = __parse_int_strict(raw_num, 10);
+        if __opt_is_some(int_opt) {
+            return ok(__opt_unwrap(int_opt));
+        }
+    }
+    let flt_opt = __parse_float_strict(raw_num);
+    if __opt_is_some(flt_opt) {
+        return ok(__opt_unwrap(flt_opt));
+    }
+    return fail(ParseError.BadNumber("json", raw_num, start_ln, start_cl));
+}
+
+def __json_parse_value(cur: any, strict_unique_keys: bool) -> any ! ParseError {
+    __json_skip_ws(cur);
+    if cur.is_eof() {
+        return fail(ParseError.PrematureEof("json", cur.line, cur.col));
+    }
+
+    let c: i64 = cur.peek_code();
+    if c == 34 {
+        let sv = __json_parse_string(cur)?;
+        return ok(sv);
+    }
+    if c == 123 {
+        let ov = __json_parse_object(cur, strict_unique_keys)?;
+        return ok(ov);
+    }
+    if c == 91 {
+        let av = __json_parse_array(cur, strict_unique_keys)?;
+        return ok(av);
+    }
+    if c == 45 or __is_ascii_digit(c) {
+        let nv = __json_parse_number(cur)?;
+        return ok(nv);
+    }
+    if c == 116 {
+        // "true"
+        let ln: i64 = cur.line;
+        let cl: i64 = cur.col;
+        if (cur.pos + 4) <= cur.total and cur.slice_span(cur.pos, cur.pos + 4) == "true" {
+            for _i in 0..<4 { cur.advance(); }
+            return ok(true);
+        }
+        return fail(ParseError.Syntax("json", "invalid literal (expected 'true')", ln, cl));
+    }
+    if c == 102 {
+        // "false"
+        let ln: i64 = cur.line;
+        let cl: i64 = cur.col;
+        if (cur.pos + 5) <= cur.total and cur.slice_span(cur.pos, cur.pos + 5) == "false" {
+            for _i in 0..<5 { cur.advance(); }
+            return ok(false);
+        }
+        return fail(ParseError.Syntax("json", "invalid literal (expected 'false')", ln, cl));
+    }
+    if c == 110 {
+        // "null"
+        let ln: i64 = cur.line;
+        let cl: i64 = cur.col;
+        if (cur.pos + 4) <= cur.total and cur.slice_span(cur.pos, cur.pos + 4) == "null" {
+            for _i in 0..<4 { cur.advance(); }
+            return ok(null);
+        }
+        return fail(ParseError.Syntax("json", "invalid literal (expected 'null')", ln, cl));
+    }
+
+    return fail(ParseError.Syntax("json", "unexpected token '" + __char_from_code(c) + "'", cur.line, cur.col));
+}
+
+def __json_parse_array(cur: any, strict_unique_keys: bool) -> list ! ParseError {
+    let open_ln: i64 = cur.line;
+    let open_cl: i64 = cur.col;
+    cur.advance(); // '['
+    __json_skip_ws(cur);
+    var items = [];
+    if cur.peek_code() == 93 {
+        cur.advance();
+        return ok(items);
+    }
+
+    while true {
+        if cur.is_eof() {
+            return fail(ParseError.PrematureEof("json", open_ln, open_cl));
+        }
+        let elem_res = __json_parse_value(cur, strict_unique_keys);
+        if __result_is_err(elem_res) {
+            return fail(__result_unwrap_err(elem_res));
+        }
+        items.append(__result_unwrap_ok(elem_res));
+        __json_skip_ws(cur);
+        if cur.is_eof() {
+            return fail(ParseError.PrematureEof("json", cur.line, cur.col));
+        }
+        let next_c: i64 = cur.peek_code();
+        if next_c == 44 {
+            let comma_ln: i64 = cur.line;
+            let comma_cl: i64 = cur.col;
+            cur.advance();
+            __json_skip_ws(cur);
+            if cur.peek_code() == 93 {
+                return fail(ParseError.Syntax("json", "trailing comma in array", comma_ln, comma_cl));
+            }
+        } elif next_c == 93 {
+            cur.advance();
+            return ok(items);
+        } else {
+            return fail(ParseError.Syntax("json", "expected ',' or ']' in array", cur.line, cur.col));
+        }
+    }
+    return ok(items);
+}
+
+def __json_parse_object(cur: any, strict_unique_keys: bool) -> map ! ParseError {
+    let open_ln: i64 = cur.line;
+    let open_cl: i64 = cur.col;
+    cur.advance(); // '{'
+    __json_skip_ws(cur);
+    var obj = {};
+    if cur.peek_code() == 125 {
+        cur.advance();
+        return ok(obj);
+    }
+
+    while true {
+        __json_skip_ws(cur);
+        if cur.is_eof() {
+            return fail(ParseError.PrematureEof("json", open_ln, open_cl));
+        }
+        if cur.peek_code() != 34 {
+            return fail(ParseError.Syntax("json", "expected double-quoted object key", cur.line, cur.col));
+        }
+        let key_ln: i64 = cur.line;
+        let key_cl: i64 = cur.col;
+        let key: str = __json_parse_string(cur)?;
+        if strict_unique_keys and obj.contains_key(key) {
+            return fail(ParseError.DuplicateKey("json", key, key_ln, key_cl));
+        }
+
+        __json_skip_ws(cur);
+        if cur.peek_code() != 58 {
+            return fail(ParseError.Syntax("json", "expected ':' after object key", cur.line, cur.col));
+        }
+        cur.advance(); // ':'
+        let val_res = __json_parse_value(cur, strict_unique_keys);
+        if __result_is_err(val_res) {
+            return fail(__result_unwrap_err(val_res));
+        }
+        obj[key] = __result_unwrap_ok(val_res);
+
+        __json_skip_ws(cur);
+        if cur.is_eof() {
+            return fail(ParseError.PrematureEof("json", cur.line, cur.col));
+        }
+        let sep: i64 = cur.peek_code();
+        if sep == 44 {
+            let comma_ln: i64 = cur.line;
+            let comma_cl: i64 = cur.col;
+            cur.advance();
+            __json_skip_ws(cur);
+            if cur.peek_code() == 125 {
+                return fail(ParseError.Syntax("json", "trailing comma in object", comma_ln, comma_cl));
+            }
+        } elif sep == 125 {
+            cur.advance();
+            return ok(obj);
+        } else {
+            return fail(ParseError.Syntax("json", "expected ',' or '}' in object", cur.line, cur.col));
+        }
+    }
+    return ok(obj);
+}
+
+def json_parse(src, strict_unique_keys: bool = false) -> any ! ParseError {
+    let text = __coerce_format_text(src, "json")?;
+    var cur = __FormatCursor("json", text);
+    let root_res = __json_parse_value(cur, strict_unique_keys);
+    if __result_is_err(root_res) {
+        return fail(__result_unwrap_err(root_res));
+    }
+    __json_skip_ws(cur);
+    if !cur.is_eof() {
+        return fail(ParseError.Syntax("json", "unexpected trailing content", cur.line, cur.col));
+    }
+    return ok(__result_unwrap_ok(root_res));
+}
+
+def __json_escape_str(s: str) -> str {
+    var out: str = "\"";
+    let n: i64 = len(s);
+    for i in 0..<n {
+        let c: i64 = __str_char_code(s, i);
+        if c == 34 {
+            out = out + "\\\"";
+        } elif c == 92 {
+            out = out + "\\\\";
+        } elif c == 8 {
+            out = out + "\\b";
+        } elif c == 12 {
+            out = out + "\\f";
+        } elif c == 10 {
+            out = out + "\\n";
+        } elif c == 13 {
+            out = out + "\\r";
+        } elif c == 9 {
+            out = out + "\\t";
+        } elif c >= 0 and c < 32 {
+            let hi: i64 = (c >> 4) & 15;
+            let lo: i64 = c & 15;
+            out = out + "\\u00" + __str_slice(_HEX_UPPER_FMT, hi, hi + 1) + __str_slice(_HEX_UPPER_FMT, lo, lo + 1);
+        } else {
+            out = out + __str_slice(s, i, i + 1);
+        }
+    }
+    return out + "\"";
+}
+
+def __spaces(count: i64) -> str {
+    if count <= 0 {
+        return "";
+    }
+    var out: str = "";
+    for _i in 0..<count {
+        out = out + " ";
+    }
+    return out;
+}
+
+def __json_emit(val, pretty: bool, indent_spaces: i64, depth: i64) -> str {
+    if __opt_is_none(val) {
+        return "null";
+    }
+    let kind: str = type_of(val);
+    if kind == "bool" {
+        return if val { "true" } else { "false" };
+    }
+    if kind == "int" or kind == "uint" {
+        return str(val);
+    }
+    if kind == "float" or kind == "decimal" {
+        if isnan(val) or isinf(val) {
+            return "null";
+        }
+        return str(val);
+    }
+    if kind == "string" or kind == "char" {
+        return __json_escape_str(str(val));
+    }
+    if kind == "keyword" {
+        return __json_escape_str(name(val));
+    }
+    if kind == "list" or kind == "tuple" or kind == "set" {
+        let count: i64 = len(val);
+        if count == 0 {
+            return "[]";
+        }
+        let pad_inner: str = if pretty { __spaces((depth + 1) * indent_spaces) } else { "" };
+        let pad_outer: str = if pretty { __spaces(depth * indent_spaces) } else { "" };
+        var out: str = if pretty { "[\n" } else { "[" };
+        var idx: i64 = 0;
+        for item in val {
+            if idx > 0 {
+                out = out + (if pretty { ",\n" } else { "," });
+            }
+            out = out + pad_inner + __json_emit(item, pretty, indent_spaces, depth + 1);
+            idx = idx + 1;
+        }
+        if pretty {
+            out = out + "\n" + pad_outer + "]";
+        } else {
+            out = out + "]";
+        }
+        return out;
+    }
+    if kind == "map" or kind == "object" {
+        let entries = __map_entries_sorted(val);
+        let count: i64 = len(entries);
+        if count == 0 {
+            return "{}";
+        }
+        let pad_inner: str = if pretty { __spaces((depth + 1) * indent_spaces) } else { "" };
+        let pad_outer: str = if pretty { __spaces(depth * indent_spaces) } else { "" };
+        let kv_sep: str = if pretty { ": " } else { ":" };
+        var out: str = if pretty { "{\n" } else { "{" };
+        for i in 0..<count {
+            if i > 0 {
+                out = out + (if pretty { ",\n" } else { "," });
+            }
+            let pair = entries[i];
+            out = out + pad_inner + __json_escape_str(str(pair[0])) + kv_sep + __json_emit(pair[1], pretty, indent_spaces, depth + 1);
+        }
+        if pretty {
+            out = out + "\n" + pad_outer + "}";
+        } else {
+            out = out + "}";
+        }
+        return out;
+    }
+    return __json_escape_str(str(val));
+}
+
+def json_stringify(val, pretty: bool = false, indent_spaces: i64 = 2) -> str {
+    return __json_emit(val, pretty, max(0, indent_spaces), 0);
+}
+
+def json_get_path(doc, dotted_path: str) {
+    if len(dotted_path) == 0 {
+        return some(doc);
+    }
+    let segments: [str] = __str_split(dotted_path, ".");
+    var cur_val = doc;
+    for seg in segments {
+        if __opt_is_none(cur_val) {
+            return none;
+        }
+        let k_type: str = type_of(cur_val);
+        if k_type == "map" {
+            if cur_val.contains_key(seg) {
+                cur_val = cur_val[seg];
+            } else {
+                return none;
+            }
+        } elif k_type == "list" or k_type == "tuple" {
+            let idx_opt = __parse_int_strict(seg, 10);
+            if __opt_is_none(idx_opt) {
+                return none;
+            }
+            let idx: i64 = __opt_unwrap(idx_opt);
+            if idx < 0 or idx >= len(cur_val) {
+                return none;
+            }
+            cur_val = cur_val[idx];
+        } else {
+            return none;
+        }
+    }
+    return some(cur_val);
+}
+
+// ============================================================================
+// 2. TOML v1.0 Parser & Serializer
+// ============================================================================
+
+def __is_toml_bare_key_char(c: i64) -> bool {
+    if (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) {
+        return true;
+    }
+    return c == 95 or c == 45;
+}
+
+def __toml_skip_inline_ws(cur: any) {
+    while !cur.is_eof() {
+        let c: i64 = cur.peek_code();
+        if c == 32 or c == 9 {
+            cur.advance();
+        } else {
+            break;
+        }
+    }
+}
+
+def __toml_skip_ws_and_comments(cur: any) {
+    while !cur.is_eof() {
+        let c: i64 = cur.peek_code();
+        if c == 32 or c == 9 or c == 10 or c == 13 {
+            cur.advance();
+        } elif c == 35 {
+            while !cur.is_eof() and cur.peek_code() != 10 {
+                cur.advance();
+            }
+        } else {
+            break;
+        }
+    }
+}
+
+def __toml_skip_inline_comment(cur: any) {
+    __toml_skip_inline_ws(cur);
+    if cur.peek_code() == 35 {
+        while !cur.is_eof() and cur.peek_code() != 10 {
+            cur.advance();
+        }
+    }
+}
+
+def __toml_parse_literal_string(cur: any) -> str ! ParseError {
+    let start_ln: i64 = cur.line;
+    let start_cl: i64 = cur.col;
+    if cur.peek_code() == 39 and cur.peek_at(1) == 39 and cur.peek_at(2) == 39 {
+        // Multi-line literal string '''...'''
+        for _i in 0..<3 { cur.advance(); }
+        if cur.peek_code() == 13 and cur.peek_at(1) == 10 {
+            cur.advance();
+            cur.advance();
+        } elif cur.peek_code() == 10 {
+            cur.advance();
+        }
+        let body_start: i64 = cur.pos;
+        while !cur.is_eof() {
+            if cur.peek_code() == 39 and cur.peek_at(1) == 39 and cur.peek_at(2) == 39 {
+                let s = cur.slice_span(body_start, cur.pos);
+                for _k in 0..<3 { cur.advance(); }
+                return ok(s);
+            }
+            cur.advance();
+        }
+        return fail(ParseError.PrematureEof("toml", start_ln, start_cl));
+    }
+
+    // Single-line literal string '...'
+    cur.advance();
+    let body_start: i64 = cur.pos;
+    while !cur.is_eof() {
+        let c: i64 = cur.peek_code();
+        if c == 39 {
+            let s = cur.slice_span(body_start, cur.pos);
+            cur.advance();
+            return ok(s);
+        }
+        if c == 10 or c == 13 {
+            return fail(ParseError.Syntax("toml", "newline in single-line literal string", cur.line, cur.col));
+        }
+        cur.advance();
+    }
+    return fail(ParseError.PrematureEof("toml", start_ln, start_cl));
+}
+
+def __toml_parse_basic_string(cur: any) -> str ! ParseError {
+    let start_ln: i64 = cur.line;
+    let start_cl: i64 = cur.col;
+    if cur.peek_code() == 34 and cur.peek_at(1) == 34 and cur.peek_at(2) == 34 {
+        // Multi-line basic string """..."""
+        for _i in 0..<3 { cur.advance(); }
+        if cur.peek_code() == 13 and cur.peek_at(1) == 10 {
+            cur.advance();
+            cur.advance();
+        } elif cur.peek_code() == 10 {
+            cur.advance();
+        }
+        var out: str = "";
+        while !cur.is_eof() {
+            if cur.peek_code() == 34 and cur.peek_at(1) == 34 and cur.peek_at(2) == 34 {
+                for _k in 0..<3 { cur.advance(); }
+                return ok(out);
+            }
+            let c: i64 = cur.advance();
+            if c == 92 {
+                if cur.is_eof() {
+                    return fail(ParseError.PrematureEof("toml", start_ln, start_cl));
+                }
+                let esc: i64 = cur.advance();
+                if esc == 110 { out = out + "\n"; }
+                elif esc == 114 { out = out + "\r"; }
+                elif esc == 116 { out = out + "\t"; }
+                elif esc == 34 { out = out + "\""; }
+                elif esc == 92 { out = out + "\\"; }
+                elif esc == 10 or esc == 13 {
+                    // Line-ending backslash trims following whitespace/newlines
+                    while !cur.is_eof() and (cur.peek_code() == 32 or cur.peek_code() == 9 or cur.peek_code() == 10 or cur.peek_code() == 13) {
+                        cur.advance();
+                    }
+                } else {
+                    return fail(ParseError.BadEscape("toml", "\\" + __char_from_code(esc), cur.line, cur.col));
+                }
+            } else {
+                out = out + __char_from_code(c);
+            }
+        }
+        return fail(ParseError.PrematureEof("toml", start_ln, start_cl));
+    }
+
+    let sv = __json_parse_string(cur)?;
+    return ok(sv);
+}
+
+def __toml_parse_key_segment(cur: any) -> str ! ParseError {
+    __toml_skip_inline_ws(cur);
+    if cur.is_eof() {
+        return fail(ParseError.PrematureEof("toml", cur.line, cur.col));
+    }
+    let c: i64 = cur.peek_code();
+    if c == 34 {
+        let qk = __json_parse_string(cur)?;
+        return ok(qk);
+    }
+    if c == 39 {
+        let lk = __toml_parse_literal_string(cur)?;
+        return ok(lk);
+    }
+    let start_pos: i64 = cur.pos;
+    while __is_toml_bare_key_char(cur.peek_code()) {
+        cur.advance();
+    }
+    if cur.pos == start_pos {
+        return fail(ParseError.Syntax("toml", "expected TOML key", cur.line, cur.col));
+    }
+    return ok(cur.slice_span(start_pos, cur.pos));
+}
+
+def __toml_parse_dotted_key(cur: any) -> [str] ! ParseError {
+    var parts = [];
+    let first = __toml_parse_key_segment(cur)?;
+    parts.append(first);
+    while true {
+        __toml_skip_inline_ws(cur);
+        if cur.peek_code() == 46 {
+            cur.advance();
+            let seg = __toml_parse_key_segment(cur)?;
+            parts.append(seg);
+        } else {
+            break;
+        }
+    }
+    return ok(parts);
+}
+
+def __toml_clean_underscores(raw: str, fmt_name: str, ln: i64, cl: i64) -> str ! ParseError {
+    let n: i64 = len(raw);
+    if n == 0 {
+        return fail(ParseError.BadNumber(fmt_name, raw, ln, cl));
+    }
+    var clean: str = "";
+    for i in 0..<n {
+        let c: i64 = __str_char_code(raw, i);
+        if c == 95 {
+            if i == 0 or (i + 1) >= n {
+                return fail(ParseError.BadNumber(fmt_name, raw, ln, cl));
+            }
+            let prev_c: i64 = __str_char_code(raw, i - 1);
+            let next_c: i64 = __str_char_code(raw, i + 1);
+            if prev_c == 95 or prev_c == 46 or prev_c == 43 or prev_c == 45 or next_c == 95 or next_c == 46 {
+                return fail(ParseError.BadNumber(fmt_name, raw, ln, cl));
+            }
+        } else {
+            clean = clean + __str_slice(raw, i, i + 1);
+        }
+    }
+    return ok(clean);
+}
+
+def __toml_parse_scalar_or_number(cur: any) -> any ! ParseError {
+    let start_pos: i64 = cur.pos;
+    let ln: i64 = cur.line;
+    let cl: i64 = cur.col;
+
+    while !cur.is_eof() {
+        let c: i64 = cur.peek_code();
+        if c == 32 or c == 9 or c == 10 or c == 13 or c == 44 or c == 93 or c == 125 or c == 35 {
+            break;
+        }
+        cur.advance();
+    }
+
+    let raw = cur.slice_span(start_pos, cur.pos);
+    if len(raw) == 0 {
+        return fail(ParseError.Syntax("toml", "expected value", ln, cl));
+    }
+    if raw == "true" {
+        return ok(true);
+    }
+    if raw == "false" {
+        return ok(false);
+    }
+    if raw == "inf" or raw == "+inf" or raw == "-inf" or raw == "nan" or raw == "+nan" or raw == "-nan" {
+        let sp_opt = __parse_float_strict(raw);
+        return ok(__opt_unwrap(sp_opt));
+    }
+
+    // Radix prefixes `0x`, `0o`, `0b`
+    if len(raw) > 2 and __str_slice(raw, 0, 1) == "0" {
+        let pfx = __str_slice(raw, 0, 2);
+        if pfx == "0x" or pfx == "0X" or pfx == "0o" or pfx == "0O" or pfx == "0b" or pfx == "0B" {
+            let digits_raw = __str_slice(raw, 2, len(raw));
+            let digits_clean = __toml_clean_underscores(digits_raw, "toml", ln, cl)?;
+            let radix: i64 = if pfx == "0x" or pfx == "0X" { 16 } elif pfx == "0o" or pfx == "0O" { 8 } else { 2 };
+            let rx_opt = __parse_int_strict(digits_clean, radix);
+            if __opt_is_none(rx_opt) {
+                return fail(ParseError.BadNumber("toml", raw, ln, cl));
+            }
+            return ok(__opt_unwrap(rx_opt));
+        }
+    }
+
+    let cleaned = __toml_clean_underscores(raw, "toml", ln, cl)?;
+    let has_dot: bool = __str_index_of(cleaned, ".", 0) >= 0;
+    let has_e: bool = __str_index_of(cleaned, "e", 0) >= 0 or __str_index_of(cleaned, "E", 0) >= 0;
+    if has_dot or has_e {
+        let flt_opt = __parse_float_strict(cleaned);
+        if __opt_is_none(flt_opt) {
+            return fail(ParseError.BadNumber("toml", raw, ln, cl));
+        }
+        return ok(__opt_unwrap(flt_opt));
+    }
+
+    let int_opt = __parse_int_strict(cleaned, 10);
+    if __opt_is_none(int_opt) {
+        return fail(ParseError.BadNumber("toml", raw, ln, cl));
+    }
+    return ok(__opt_unwrap(int_opt));
+}
+
+def __toml_set_dotted(target_tbl: any, key_parts: [str], val: any, ln: i64, cl: i64) -> bool ! ParseError {
+    var cur_tbl = target_tbl;
+    let n: i64 = len(key_parts);
+    for i in 0..<(n - 1) {
+        let seg: str = key_parts[i];
+        if cur_tbl.contains_key(seg) {
+            let existing = cur_tbl[seg];
+            if type_of(existing) != "map" {
+                return fail(ParseError.DuplicateKey("toml", seg, ln, cl));
+            }
+            cur_tbl = existing;
+        } else {
+            var next_tbl = {};
+            cur_tbl[seg] = next_tbl;
+            cur_tbl = next_tbl;
+        }
+    }
+    let leaf: str = key_parts[n - 1];
+    if cur_tbl.contains_key(leaf) {
+        return fail(ParseError.DuplicateKey("toml", leaf, ln, cl));
+    }
+    cur_tbl[leaf] = val;
+    return ok(true);
+}
+
+def __toml_parse_value(cur: any) -> any ! ParseError {
+    __toml_skip_inline_ws(cur);
+    if cur.is_eof() {
+        return fail(ParseError.PrematureEof("toml", cur.line, cur.col));
+    }
+    let c: i64 = cur.peek_code();
+    if c == 34 {
+        let bs = __toml_parse_basic_string(cur)?;
+        return ok(bs);
+    }
+    if c == 39 {
+        let ls = __toml_parse_literal_string(cur)?;
+        return ok(ls);
+    }
+    if c == 91 {
+        // Array `[ ... ]` (comments & newlines permitted inside TOML arrays)
+        let open_ln: i64 = cur.line;
+        let open_cl: i64 = cur.col;
+        cur.advance();
+        var arr = [];
+        __toml_skip_ws_and_comments(cur);
+        if cur.peek_code() == 93 {
+            cur.advance();
+            return ok(arr);
+        }
+        while true {
+            __toml_skip_ws_and_comments(cur);
+            if cur.is_eof() {
+                return fail(ParseError.PrematureEof("toml", open_ln, open_cl));
+            }
+            if cur.peek_code() == 93 {
+                // Trailing comma allowed in TOML arrays!
+                cur.advance();
+                return ok(arr);
+            }
+            let elem = __toml_parse_value(cur)?;
+            arr.append(elem);
+            __toml_skip_ws_and_comments(cur);
+            if cur.is_eof() {
+                return fail(ParseError.PrematureEof("toml", open_ln, open_cl));
+            }
+            if cur.peek_code() == 44 {
+                cur.advance();
+            } elif cur.peek_code() == 93 {
+                cur.advance();
+                return ok(arr);
+            } else {
+                return fail(ParseError.Syntax("toml", "expected ',' or ']' in array", cur.line, cur.col));
+            }
+        }
+    }
+    if c == 123 {
+        // Inline table `{ k = v, ... }`
+        let open_ln: i64 = cur.line;
+        let open_cl: i64 = cur.col;
+        cur.advance();
+        var inl = {};
+        __toml_skip_inline_ws(cur);
+        if cur.peek_code() == 125 {
+            cur.advance();
+            return ok(inl);
+        }
+        while true {
+            __toml_skip_inline_ws(cur);
+            if cur.is_eof() {
+                return fail(ParseError.PrematureEof("toml", open_ln, open_cl));
+            }
+            let k_ln: i64 = cur.line;
+            let k_cl: i64 = cur.col;
+            let k_parts = __toml_parse_dotted_key(cur)?;
+            __toml_skip_inline_ws(cur);
+            if cur.peek_code() != 61 {
+                return fail(ParseError.Syntax("toml", "expected '=' in inline table", cur.line, cur.col));
+            }
+            cur.advance();
+            let v = __toml_parse_value(cur)?;
+            let _ok = __toml_set_dotted(inl, k_parts, v, k_ln, k_cl)?;
+            __toml_skip_inline_ws(cur);
+            if cur.peek_code() == 44 {
+                cur.advance();
+            } elif cur.peek_code() == 125 {
+                cur.advance();
+                return ok(inl);
+            } else {
+                return fail(ParseError.Syntax("toml", "expected ',' or '}' in inline table", cur.line, cur.col));
+            }
+        }
+    }
+
+    let sv = __toml_parse_scalar_or_number(cur)?;
+    return ok(sv);
+}
+
+def __toml_resolve_table_header(root_doc: any, key_parts: [str], is_array_table: bool, ln: i64, cl: i64) -> map ! ParseError {
+    var cur_tbl = root_doc;
+    let n: i64 = len(key_parts);
+    for i in 0..<(n - 1) {
+        let seg: str = key_parts[i];
+        if cur_tbl.contains_key(seg) {
+            let existing = cur_tbl[seg];
+            if type_of(existing) == "map" {
+                cur_tbl = existing;
+            } elif type_of(existing) == "list" and len(existing) > 0 {
+                cur_tbl = existing[len(existing) - 1];
+            } else {
+                return fail(ParseError.DuplicateKey("toml", seg, ln, cl));
+            }
+        } else {
+            var sub = {};
+            cur_tbl[seg] = sub;
+            cur_tbl = sub;
+        }
+    }
+
+    let leaf: str = key_parts[n - 1];
+    if is_array_table {
+        var elem_tbl = {};
+        if cur_tbl.contains_key(leaf) {
+            let existing_arr = cur_tbl[leaf];
+            if type_of(existing_arr) != "list" {
+                return fail(ParseError.DuplicateKey("toml", leaf, ln, cl));
+            }
+            existing_arr.append(elem_tbl);
+        } else {
+            cur_tbl[leaf] = [elem_tbl];
+        }
+        return ok(elem_tbl);
+    }
+
+    if cur_tbl.contains_key(leaf) {
+        let existing_tbl = cur_tbl[leaf];
+        if type_of(existing_tbl) != "map" {
+            return fail(ParseError.DuplicateKey("toml", leaf, ln, cl));
+        }
+        return ok(existing_tbl);
+    }
+    var created = {};
+    cur_tbl[leaf] = created;
+    return ok(created);
+}
+
+def toml_parse(src) -> map ! ParseError {
+    let text = __coerce_format_text(src, "toml")?;
+    var cur = __FormatCursor("toml", text);
+    var root = {};
+    var active_table = root;
+
+    while true {
+        __toml_skip_ws_and_comments(cur);
+        if cur.is_eof() {
+            break;
+        }
+
+        if cur.peek_code() == 91 {
+            let hdr_ln: i64 = cur.line;
+            let hdr_cl: i64 = cur.col;
+            cur.advance(); // '['
+            var is_aot: bool = false;
+            if cur.peek_code() == 91 {
+                is_aot = true;
+                cur.advance(); // second '['
+            }
+            let hdr_parts = __toml_parse_dotted_key(cur)?;
+            __toml_skip_inline_ws(cur);
+            if is_aot {
+                if cur.peek_code() != 93 or cur.peek_at(1) != 93 {
+                    return fail(ParseError.Syntax("toml", "expected ']]' closing array-of-tables header", cur.line, cur.col));
+                }
+                cur.advance();
+                cur.advance();
+            } else {
+                if cur.peek_code() != 93 {
+                    return fail(ParseError.Syntax("toml", "expected ']' closing table header", cur.line, cur.col));
+                }
+                cur.advance();
+            }
+            active_table = __toml_resolve_table_header(root, hdr_parts, is_aot, hdr_ln, hdr_cl)?;
+        } else {
+            let k_ln: i64 = cur.line;
+            let k_cl: i64 = cur.col;
+            let k_parts = __toml_parse_dotted_key(cur)?;
+            __toml_skip_inline_ws(cur);
+            if cur.peek_code() != 61 {
+                return fail(ParseError.Syntax("toml", "expected '=' after key", cur.line, cur.col));
+            }
+            cur.advance(); // '='
+            let val = __toml_parse_value(cur)?;
+            let _ok = __toml_set_dotted(active_table, k_parts, val, k_ln, k_cl)?;
+        }
+
+        __toml_skip_inline_comment(cur);
+        if !cur.is_eof() {
+            let eol: i64 = cur.peek_code();
+            if eol == 13 and cur.peek_at(1) == 10 {
+                cur.advance();
+                cur.advance();
+            } elif eol == 10 {
+                cur.advance();
+            } else {
+                return fail(ParseError.Syntax("toml", "expected newline after statement", cur.line, cur.col));
+            }
+        }
+    }
+
+    return ok(root);
+}
+
+def __toml_format_key(k: str) -> str {
+    if len(k) == 0 {
+        return "\"\"";
+    }
+    for i in 0..<len(k) {
+        if !__is_toml_bare_key_char(__str_char_code(k, i)) {
+            return __json_escape_str(k);
+        }
+    }
+    return k;
+}
+
+def __toml_format_value(val) -> str {
+    let kind: str = type_of(val);
+    if kind == "bool" {
+        return if val { "true" } else { "false" };
+    }
+    if kind == "int" or kind == "uint" {
+        return str(val);
+    }
+    if kind == "float" or kind == "decimal" {
+        if isnan(val) {
+            return "nan";
+        }
+        if isinf(val) {
+            return if val < 0.0 { "-inf" } else { "inf" };
+        }
+        return str(val);
+    }
+    if kind == "string" or kind == "char" {
+        return __json_escape_str(str(val));
+    }
+    if kind == "list" or kind == "tuple" {
+        var parts = [];
+        for item in val {
+            parts.append(__toml_format_value(item));
+        }
+        var out: str = "[";
+        for i in 0..<len(parts) {
+            if i > 0 { out = out + ", "; }
+            out = out + parts[i];
+        }
+        return out + "]";
+    }
+    if kind == "map" or kind == "object" {
+        let entries = __map_entries_sorted(val);
+        var out: str = "{ ";
+        for i in 0..<len(entries) {
+            if i > 0 { out = out + ", "; }
+            let pair = entries[i];
+            out = out + __toml_format_key(str(pair[0])) + " = " + __toml_format_value(pair[1]);
+        }
+        return out + " }";
+    }
+    return __json_escape_str(str(val));
+}
+
+def __toml_emit_table(tbl, section_prefix: str) -> str {
+    let entries = __map_entries_sorted(tbl);
+    var scalars_out: str = "";
+    var subtables = [];
+
+    for pair in entries {
+        let k: str = str(pair[0]);
+        let v = pair[1];
+        if __opt_is_none(v) {
+            continue;
+        }
+        if type_of(v) == "map" or type_of(v) == "object" {
+            subtables.append((k, v));
+        } else {
+            scalars_out = scalars_out + __toml_format_key(k) + " = " + __toml_format_value(v) + "\n";
+        }
+    }
+
+    var full_out: str = "";
+    if len(section_prefix) > 0 and (len(scalars_out) > 0 or len(subtables) == 0) {
+        full_out = "[" + section_prefix + "]\n" + scalars_out;
+    } else {
+        full_out = scalars_out;
+    }
+
+    for sub in subtables {
+        let sub_k = __toml_format_key(sub[0]);
+        let next_prefix = if len(section_prefix) > 0 { section_prefix + "." + sub_k } else { sub_k };
+        let rendered_sub = __toml_emit_table(sub[1], next_prefix);
+        if len(full_out) > 0 and len(rendered_sub) > 0 {
+            full_out = full_out + "\n";
+        }
+        full_out = full_out + rendered_sub;
+    }
+    return full_out;
+}
+
+def toml_stringify(doc) -> str {
+    return __toml_emit_table(doc, "");
+}
+
+// ============================================================================
+// 3. CSV / TSV (RFC 4180) State-Machine Parser & Serializer
+// ============================================================================
+
+def csv_parse(src, delimiter: str = ",") -> [[str]] ! ParseError {
+    let text = __coerce_format_text(src, "csv")?;
+    if len(delimiter) != 1 {
+        return fail(ParseError.Syntax("csv", "delimiter must be a single character", 1, 1));
+    }
+    if delimiter == "\"" or delimiter == "\n" or delimiter == "\r" {
+        return fail(ParseError.Syntax("csv", "invalid CSV delimiter character", 1, 1));
+    }
+
+    let delim_code: i64 = __str_char_code(delimiter, 0);
+    let n: i64 = len(text);
+    if n == 0 {
+        return ok([]);
+    }
+
+    var rows = [];
+    var cur_row = [];
+    var field: str = "";
+    var in_quotes: bool = false;
+    var at_field_start: bool = true;
+    var quote_open_ln: i64 = 1;
+    var quote_open_cl: i64 = 1;
+    var ln: i64 = 1;
+    var cl: i64 = 1;
+    var i: i64 = 0;
+
+    while i < n {
+        let c: i64 = __str_char_code(text, i);
+        if in_quotes {
+            if c == 34 {
+                if (i + 1) < n and __str_char_code(text, i + 1) == 34 {
+                    // Escaped `""` -> literal `"`
+                    field = field + "\"";
+                    i = i + 2;
+                    cl = cl + 2;
+                } else {
+                    in_quotes = false;
+                    i = i + 1;
+                    cl = cl + 1;
+                    // After closing quote, next char (if not EOF) must be delimiter or newline
+                    if i < n {
+                        let after_q: i64 = __str_char_code(text, i);
+                        if after_q != delim_code and after_q != 10 and after_q != 13 {
+                            return fail(ParseError.Syntax("csv", "unexpected character after closing quote", ln, cl));
+                        }
+                    }
+                }
+            } else {
+                field = field + __str_slice(text, i, i + 1);
+                i = i + 1;
+                if c == 10 {
+                    ln = ln + 1;
+                    cl = 1;
+                } else {
+                    cl = cl + 1;
+                }
+            }
+        } else {
+            if c == 34 {
+                if !at_field_start {
+                    return fail(ParseError.Syntax("csv", "unescaped quote inside unquoted field", ln, cl));
+                }
+                in_quotes = true;
+                at_field_start = false;
+                quote_open_ln = ln;
+                quote_open_cl = cl;
+                i = i + 1;
+                cl = cl + 1;
+            } elif c == delim_code {
+                cur_row.append(field);
+                field = "";
+                at_field_start = true;
+                i = i + 1;
+                cl = cl + 1;
+            } elif c == 13 or c == 10 {
+                cur_row.append(field);
+                rows.append(cur_row);
+                cur_row = [];
+                field = "";
+                at_field_start = true;
+                if c == 13 and (i + 1) < n and __str_char_code(text, i + 1) == 10 {
+                    i = i + 2;
+                } else {
+                    i = i + 1;
+                }
+                ln = ln + 1;
+                cl = 1;
+            } else {
+                field = field + __str_slice(text, i, i + 1);
+                at_field_start = false;
+                i = i + 1;
+                cl = cl + 1;
+            }
+        }
+    }
+
+    if in_quotes {
+        return fail(ParseError.PrematureEof("csv", quote_open_ln, quote_open_cl));
+    }
+
+    if len(cur_row) > 0 or len(field) > 0 or !at_field_start {
+        cur_row.append(field);
+        rows.append(cur_row);
+    }
+
+    return ok(rows);
+}
+
+def csv_parse_records(src, delimiter: str = ",") -> [map] ! ParseError {
+    let rows = csv_parse(src, delimiter)?;
+    if len(rows) == 0 {
+        return ok([]);
+    }
+    let headers = rows[0];
+    let col_count: i64 = len(headers);
+    var records = [];
+    for r_idx in 1..<len(rows) {
+        let row = rows[r_idx];
+        if len(row) != col_count {
+            return fail(ParseError.Syntax("csv", f"row {r_idx + 1} has {len(row)} columns, expected {col_count}", r_idx + 1, 1));
+        }
+        var rec = {};
+        for c_idx in 0..<col_count {
+            rec[headers[c_idx]] = row[c_idx];
+        }
+        records.append(rec);
+    }
+    return ok(records);
+}
+
+def __csv_format_cell(val, delimiter: str) -> str {
+    let s: str = if __opt_is_none(val) { "" } else { str(val) };
+    let needs_quote: bool = __str_index_of(s, delimiter, 0) >= 0 or
+                            __str_index_of(s, "\"", 0) >= 0 or
+                            __str_index_of(s, "\n", 0) >= 0 or
+                            __str_index_of(s, "\r", 0) >= 0;
+    if !needs_quote {
+        return s;
+    }
+    return "\"" + __str_replace(s, "\"", "\"\"") + "\"";
+}
+
+def csv_stringify(rows, delimiter: str = ",") -> str {
+    var out: str = "";
+    for r_idx in 0..<len(rows) {
+        if r_idx > 0 {
+            out = out + "\n";
+        }
+        let row = rows[r_idx];
+        var line: str = "";
+        for c_idx in 0..<len(row) {
+            if c_idx > 0 {
+                line = line + delimiter;
+            }
+            line = line + __csv_format_cell(row[c_idx], delimiter);
+        }
+        out = out + line;
+    }
+    return out;
+}
+
+def csv_stringify_records(records, headers, delimiter: str = ",") -> str {
+    var all_rows = [];
+    all_rows.append(headers);
+    for rec in records {
+        var row = [];
+        for h in headers {
+            if rec.contains_key(h) {
+                row.append(rec[h]);
+            } else {
+                row.append("");
+            }
+        }
+        all_rows.append(row);
+    }
+    return csv_stringify(all_rows, delimiter);
+}
+
+// ============================================================================
+// 4. `.env` / Dotenv Parser (with `${VAR:-default}` Expansion) & Serializer
+// ============================================================================
+
+def __is_env_key_start(c: i64) -> bool {
+    return (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95;
+}
+
+def __is_env_key_char(c: i64) -> bool {
+    return __is_env_key_start(c) or (c >= 48 and c <= 57) or c == 46;
+}
+
+def __env_expand_vars(raw_val: str, env_map) -> str {
+    let n: i64 = len(raw_val);
+    var out: str = "";
+    var i: i64 = 0;
+    while i < n {
+        let c: i64 = __str_char_code(raw_val, i);
+        if c == 92 and (i + 1) < n and __str_char_code(raw_val, i + 1) == 36 {
+            out = out + "$";
+            i = i + 2;
+        } elif c == 36 and (i + 1) < n {
+            let next_c: i64 = __str_char_code(raw_val, i + 1);
+            if next_c == 123 {
+                // `${VAR}` or `${VAR:-fallback}`
+                let close_idx: i64 = __str_index_of(raw_val, "}", i + 2);
+                if close_idx > (i + 2) {
+                    let expr = __str_slice(raw_val, i + 2, close_idx);
+                    let def_sep: i64 = __str_index_of(expr, ":-", 0);
+                    var var_name: str = expr;
+                    var fallback: str = "";
+                    if def_sep >= 0 {
+                        var_name = __str_slice(expr, 0, def_sep);
+                        fallback = __str_slice(expr, def_sep + 2, len(expr));
+                    }
+                    if env_map.contains_key(var_name) and len(str(env_map[var_name])) > 0 {
+                        out = out + str(env_map[var_name]);
+                    } else {
+                        out = out + fallback;
+                    }
+                    i = close_idx + 1;
+                    continue;
+                }
+            } elif __is_env_key_start(next_c) {
+                var j: i64 = i + 2;
+                while j < n and __is_env_key_char(__str_char_code(raw_val, j)) {
+                    j = j + 1;
+                }
+                let var_name = __str_slice(raw_val, i + 1, j);
+                if env_map.contains_key(var_name) {
+                    out = out + str(env_map[var_name]);
+                }
+                i = j;
+                continue;
+            }
+            out = out + "$";
+            i = i + 1;
+        } else {
+            out = out + __str_slice(raw_val, i, i + 1);
+            i = i + 1;
+        }
+    }
+    return out;
+}
+
+def env_parse(src, expand_vars: bool = true) -> map ! ParseError {
+    let text = __coerce_format_text(src, "env")?;
+    var cur = __FormatCursor("env", text);
+    var env_map = {};
+
+    while true {
+        __toml_skip_ws_and_comments(cur);
+        if cur.is_eof() {
+            break;
+        }
+
+        let stmt_ln: i64 = cur.line;
+        let stmt_cl: i64 = cur.col;
+
+        // Optional `export ` prefix
+        if (cur.pos + 7) <= cur.total and cur.slice_span(cur.pos, cur.pos + 6) == "export" {
+            let after_exp: i64 = cur.peek_at(6);
+            if after_exp == 32 or after_exp == 9 {
+                for _i in 0..<6 { cur.advance(); }
+                __toml_skip_inline_ws(cur);
+            }
+        }
+
+        if !__is_env_key_start(cur.peek_code()) {
+            return fail(ParseError.Syntax("env", "invalid environment variable name", cur.line, cur.col));
+        }
+        let k_start: i64 = cur.pos;
+        while __is_env_key_char(cur.peek_code()) {
+            cur.advance();
+        }
+        let key: str = cur.slice_span(k_start, cur.pos);
+
+        __toml_skip_inline_ws(cur);
+        if cur.peek_code() != 61 {
+            return fail(ParseError.Syntax("env", f"expected '=' after '{key}'", stmt_ln, stmt_cl));
+        }
+        cur.advance(); // '='
+        __toml_skip_inline_ws(cur);
+
+        var val_str: str = "";
+        let vc: i64 = cur.peek_code();
+        if vc == 39 {
+            // Single-quoted literal value (never expanded)
+            let q_ln: i64 = cur.line;
+            let q_cl: i64 = cur.col;
+            cur.advance();
+            let v_start: i64 = cur.pos;
+            var closed: bool = false;
+            while !cur.is_eof() {
+                if cur.peek_code() == 39 {
+                    val_str = cur.slice_span(v_start, cur.pos);
+                    cur.advance();
+                    closed = true;
+                    break;
+                }
+                cur.advance();
+            }
+            if !closed {
+                return fail(ParseError.PrematureEof("env", q_ln, q_cl));
+            }
+            __toml_skip_inline_comment(cur);
+        } elif vc == 34 {
+            // Double-quoted value (supports multi-line + escapes + optional var expansion)
+            let q_ln: i64 = cur.line;
+            let q_cl: i64 = cur.col;
+            cur.advance();
+            var raw_dq: str = "";
+            var closed: bool = false;
+            while !cur.is_eof() {
+                let ch_c: i64 = cur.advance();
+                if ch_c == 34 {
+                    closed = true;
+                    break;
+                }
+                if ch_c == 92 {
+                    if cur.is_eof() {
+                        return fail(ParseError.PrematureEof("env", q_ln, q_cl));
+                    }
+                    let esc: i64 = cur.advance();
+                    if esc == 110 { raw_dq = raw_dq + "\n"; }
+                    elif esc == 114 { raw_dq = raw_dq + "\r"; }
+                    elif esc == 116 { raw_dq = raw_dq + "\t"; }
+                    elif esc == 34 { raw_dq = raw_dq + "\""; }
+                    elif esc == 92 { raw_dq = raw_dq + "\\"; }
+                    elif esc == 36 { raw_dq = raw_dq + "\\$"; }
+                    else { raw_dq = raw_dq + __char_from_code(esc); }
+                } else {
+                    raw_dq = raw_dq + __char_from_code(ch_c);
+                }
+            }
+            if !closed {
+                return fail(ParseError.PrematureEof("env", q_ln, q_cl));
+            }
+            val_str = if expand_vars { __env_expand_vars(raw_dq, env_map) } else { __str_replace(raw_dq, "\\$", "$") };
+            __toml_skip_inline_comment(cur);
+        } else {
+            // Unquoted value up to newline or ` #` inline comment
+            let u_start: i64 = cur.pos;
+            while !cur.is_eof() {
+                let uc: i64 = cur.peek_code();
+                if uc == 10 or uc == 13 {
+                    break;
+                }
+                if uc == 35 {
+                    // Treat `#` at start of value or preceded by whitespace as comment
+                    let prev_idx: i64 = cur.pos - 1;
+                    let prev_c: i64 = if prev_idx >= u_start { __str_char_code(cur.src, prev_idx) } else { 32 };
+                    if prev_c == 32 or prev_c == 9 {
+                        break;
+                    }
+                }
+                cur.advance();
+            }
+            let raw_uq = __str_trim(cur.slice_span(u_start, cur.pos), 0);
+            val_str = if expand_vars { __env_expand_vars(raw_uq, env_map) } else { raw_uq };
+            __toml_skip_inline_comment(cur);
+        }
+
+        env_map[key] = val_str;
+
+        if !cur.is_eof() {
+            if cur.peek_code() == 13 and cur.peek_at(1) == 10 {
+                cur.advance();
+                cur.advance();
+            } elif cur.peek_code() == 10 {
+                cur.advance();
+            } else {
+                return fail(ParseError.Syntax("env", "unexpected trailing characters on line", cur.line, cur.col));
+            }
+        }
+    }
+
+    return ok(env_map);
+}
+
+def env_stringify(vars_map) -> str {
+    let entries = __map_entries_sorted(vars_map);
+    var out: str = "";
+    for i in 0..<len(entries) {
+        if i > 0 {
+            out = out + "\n";
+        }
+        let pair = entries[i];
+        let k: str = str(pair[0]);
+        let v: str = if __opt_is_none(pair[1]) { "" } else { str(pair[1]) };
+        let needs_q: bool = __str_index_of(v, " ", 0) >= 0 or
+                            __str_index_of(v, "#", 0) >= 0 or
+                            __str_index_of(v, "\"", 0) >= 0 or
+                            __str_index_of(v, "'", 0) >= 0 or
+                            __str_index_of(v, "\n", 0) >= 0 or
+                            __str_index_of(v, "\r", 0) >= 0 or
+                            __str_index_of(v, "\t", 0) >= 0;
+        if needs_q {
+            var esc: str = __str_replace(v, "\\", "\\\\");
+            esc = __str_replace(esc, "\"", "\\\"");
+            esc = __str_replace(esc, "\n", "\\n");
+            esc = __str_replace(esc, "\r", "\\r");
+            esc = __str_replace(esc, "\t", "\\t");
+            out = out + k + "=\"" + esc + "\"";
+        } else {
+            out = out + k + "=" + v;
+        }
+    }
+    return out;
+}

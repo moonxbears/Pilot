@@ -1,0 +1,251 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.itertools — Eager & Lazy Sequence/Range Combinators
+
+def enumerate(items, start: i64 = 0) {
+    var out = [];
+    var idx: i64 = start;
+    for item in items {
+        out.append((idx, item));
+        idx = idx + 1;
+    }
+    return out;
+}
+
+def zip(seq_a, seq_b) {
+    var list_a = [x for x in seq_a];
+    var list_b = [y for y in seq_b];
+    let n: i64 = min(len(list_a), len(list_b));
+    var out = [];
+    for i in 0..<n {
+        out.append((list_a[i], list_b[i]));
+    }
+    return out;
+}
+
+def zip_longest(seq_a, seq_b, fill_val = none) {
+    var list_a = [x for x in seq_a];
+    var list_b = [y for y in seq_b];
+    let n: i64 = max(len(list_a), len(list_b));
+    var out = [];
+    for i in 0..<n {
+        let va = if i < len(list_a) { list_a[i] } else { fill_val };
+        let vb = if i < len(list_b) { list_b[i] } else { fill_val };
+        out.append((va, vb));
+    }
+    return out;
+}
+
+def chain(seq_a, seq_b) {
+    var out = [];
+    for x in seq_a {
+        out.append(x);
+    }
+    for y in seq_b {
+        out.append(y);
+    }
+    return out;
+}
+
+def flatten(nested_seqs) {
+    var out = [];
+    for sub in nested_seqs {
+        for item in sub {
+            out.append(item);
+        }
+    }
+    return out;
+}
+
+def chunk(items, size: i64) {
+    if size <= 0 {
+        panic("itertools.chunk requires size > 0");
+    }
+    var src = [x for x in items];
+    let n: i64 = len(src);
+    var batches = [];
+    var i: i64 = 0;
+    while i < n {
+        let end_idx: i64 = min(i + size, n);
+        var batch = [];
+        for j in i..<end_idx {
+            batch.append(src[j]);
+        }
+        batches.append(batch);
+        i = end_idx;
+    }
+    return batches;
+}
+
+def window(items, width: i64, step: i64 = 1) {
+    if width <= 0 or step <= 0 {
+        panic("itertools.window requires width > 0 and step > 0");
+    }
+    var src = [x for x in items];
+    let n: i64 = len(src);
+    var wins = [];
+    var i: i64 = 0;
+    while i + width <= n {
+        var w = [];
+        for j in i..<(i + width) {
+            w.append(src[j]);
+        }
+        wins.append(w);
+        i = i + step;
+    }
+    return wins;
+}
+
+def group_by(items, key_fn) {
+    var groups = {};
+    for item in items {
+        let k = key_fn(item);
+        if groups.contains_key(k) {
+            groups[k].append(item);
+        } else {
+            groups[k] = [item];
+        }
+    }
+    return groups;
+}
+
+def frequencies(items) {
+    var counts = {};
+    for item in items {
+        if counts.contains_key(item) {
+            counts[item] = counts[item] + 1;
+        } else {
+            counts[item] = 1;
+        }
+    }
+    return counts;
+}
+
+def take(items, count: i64) {
+    if count <= 0 {
+        return [];
+    }
+    var out = [];
+    var seen: i64 = 0;
+    for item in items {
+        if seen >= count {
+            break;
+        }
+        out.append(item);
+        seen = seen + 1;
+    }
+    return out;
+}
+
+def drop(items, count: i64) {
+    var out = [];
+    var idx: i64 = 0;
+    for item in items {
+        if idx >= count {
+            out.append(item);
+        }
+        idx = idx + 1;
+    }
+    return out;
+}
+
+def take_while(items, pred_fn) {
+    var out = [];
+    for item in items {
+        if !pred_fn(item) {
+            break;
+        }
+        out.append(item);
+    }
+    return out;
+}
+
+def drop_while(items, pred_fn) {
+    var out = [];
+    var dropping: bool = true;
+    for item in items {
+        if dropping and pred_fn(item) {
+            continue;
+        }
+        dropping = false;
+        out.append(item);
+    }
+    return out;
+}
+
+def unique(items) {
+    var seen = {};
+    var out = [];
+    for item in items {
+        if !seen.contains_key(item) {
+            seen[item] = true;
+            out.append(item);
+        }
+    }
+    return out;
+}
+
+def partition(items, pred_fn) {
+    var yes = [];
+    var no = [];
+    for item in items {
+        if pred_fn(item) {
+            yes.append(item);
+        } else {
+            no.append(item);
+        }
+    }
+    return (yes, no);
+}
+
+def scan(items, initial, folder_fn) {
+    var acc = initial;
+    var out = [];
+    for item in items {
+        acc = folder_fn(acc, item);
+        out.append(acc);
+    }
+    return out;
+}
+
+def reduce(items, initial, folder_fn) {
+    var acc = initial;
+    for item in items {
+        acc = folder_fn(acc, item);
+    }
+    return acc;
+}
+
+// Lazy coroutine generator combinators (`yield`)
+def lazy_map(items, fn_map) {
+    for item in items {
+        yield fn_map(item);
+    }
+}
+
+def lazy_filter(items, pred_fn) {
+    for item in items {
+        if pred_fn(item) {
+            yield item;
+        }
+    }
+}
+
+def lazy_take(items, limit: i64) {
+    var count: i64 = 0;
+    for item in items {
+        if count >= limit {
+            break;
+        }
+        yield item;
+        count = count + 1;
+    }
+}
+
+def lazy_chain(seq_a, seq_b) {
+    for x in seq_a {
+        yield x;
+    }
+    for y in seq_b {
+        yield y;
+    }
+}

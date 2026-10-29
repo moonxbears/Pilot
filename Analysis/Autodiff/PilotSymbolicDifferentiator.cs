@@ -499,22 +499,52 @@ public static class PilotSymbolicDifferentiator
 
             case PilotAstNodeKind.Call:
             {
-                string fnName = (expr.CalleeName ?? "").ToLowerInvariant();
+                string rawCallee = expr.CalleeName ?? "";
+                string fnName = rawCallee.Split('.')[^1].ToLowerInvariant();
                 if (expr.Children.Count == 0)
                     return PilotAstExpr.Const(PilotValue.FromFloat(0.0), "float");
 
                 var u = expr.Children[0];
                 var du = Differentiate(u, wrtVar);
+                var one = PilotAstExpr.Const(PilotValue.FromFloat(1.0), "float");
 
                 return fnName switch
                 {
                     "sin" => PilotAstExpr.Mul(PilotAstExpr.Call("cos", new[] { u }, "float"), du),
                     "cos" => PilotAstExpr.Mul(PilotAstExpr.Unary("-", PilotAstExpr.Call("sin", new[] { u }, "float"), "float"), du),
+                    "tan" => PilotAstExpr.Div(
+                        du,
+                        PilotAstExpr.Mul(PilotAstExpr.Call("cos", new[] { u }, "float"), PilotAstExpr.Call("cos", new[] { u }, "float"))),
+                    "asin" => PilotAstExpr.Div(
+                        du,
+                        PilotAstExpr.Call("sqrt", new[] { PilotAstExpr.Sub(one, PilotAstExpr.Mul(u, u)) }, "float")),
+                    "acos" => PilotAstExpr.Unary("-", PilotAstExpr.Div(
+                        du,
+                        PilotAstExpr.Call("sqrt", new[] { PilotAstExpr.Sub(one, PilotAstExpr.Mul(u, u)) }, "float")), "float"),
+                    "atan" => PilotAstExpr.Div(du, PilotAstExpr.Add(one, PilotAstExpr.Mul(u, u))),
+                    "sinh" => PilotAstExpr.Mul(PilotAstExpr.Call("cosh", new[] { u }, "float"), du),
+                    "cosh" => PilotAstExpr.Mul(PilotAstExpr.Call("sinh", new[] { u }, "float"), du),
+                    "tanh" => PilotAstExpr.Mul(
+                        PilotAstExpr.Sub(one, PilotAstExpr.Mul(PilotAstExpr.Call("tanh", new[] { u }, "float"), PilotAstExpr.Call("tanh", new[] { u }, "float"))),
+                        du),
                     "exp" => PilotAstExpr.Mul(PilotAstExpr.Call("exp", new[] { u }, "float"), du),
                     "log" or "ln" => PilotAstExpr.Div(du, u),
+                    "log2" => PilotAstExpr.Div(du, PilotAstExpr.Mul(u, PilotAstExpr.Const(PilotValue.FromFloat(Math.Log(2.0)), "float"))),
+                    "log10" => PilotAstExpr.Div(du, PilotAstExpr.Mul(u, PilotAstExpr.Const(PilotValue.FromFloat(Math.Log(10.0)), "float"))),
                     "sqrt" => PilotAstExpr.Div(
                         du,
                         PilotAstExpr.Mul(PilotAstExpr.Const(PilotValue.FromFloat(2.0), "float"), PilotAstExpr.Call("sqrt", new[] { u }, "float"))),
+                    "cbrt" => PilotAstExpr.Div(
+                        du,
+                        PilotAstExpr.Mul(
+                            PilotAstExpr.Const(PilotValue.FromFloat(3.0), "float"),
+                            PilotAstExpr.Mul(PilotAstExpr.Call("cbrt", new[] { u }, "float"), PilotAstExpr.Call("cbrt", new[] { u }, "float")))),
+                    "sigmoid" => PilotAstExpr.Mul(
+                        PilotAstExpr.Mul(
+                            PilotAstExpr.Call("sigmoid", new[] { u }, "float"),
+                            PilotAstExpr.Sub(one, PilotAstExpr.Call("sigmoid", new[] { u }, "float"))),
+                        du),
+                    "softplus" => PilotAstExpr.Mul(PilotAstExpr.Call("sigmoid", new[] { u }, "float"), du),
                     "abs" => PilotAstExpr.If(
                         PilotAstExpr.Binary(">=", u, PilotAstExpr.Const(PilotValue.FromFloat(0.0), "float"), "bool"),
                         du,
@@ -732,7 +762,7 @@ public static class PilotSymbolicDifferentiator
 
             case PilotAstNodeKind.Call:
             {
-                string callee = (expr.CalleeName ?? "").ToLowerInvariant();
+                string callee = (expr.CalleeName ?? "").Split('.')[^1].ToLowerInvariant();
                 var args = expr.Children.Select(c => EvaluateSymbolicAstWithEnv(c, env, context)).ToList();
                 double a0 = args.Count > 0 ? args[0].AsFloat() : 0.0;
                 return callee switch
@@ -740,9 +770,21 @@ public static class PilotSymbolicDifferentiator
                     "sin" => PilotValue.FromFloat(Math.Sin(a0)),
                     "cos" => PilotValue.FromFloat(Math.Cos(a0)),
                     "tan" => PilotValue.FromFloat(Math.Tan(a0)),
+                    "asin" => PilotValue.FromFloat(Math.Asin(a0)),
+                    "acos" => PilotValue.FromFloat(Math.Acos(a0)),
+                    "atan" => PilotValue.FromFloat(Math.Atan(a0)),
+                    "atan2" when args.Count >= 2 => PilotValue.FromFloat(Math.Atan2(a0, args[1].AsFloat())),
+                    "sinh" => PilotValue.FromFloat(Math.Sinh(a0)),
+                    "cosh" => PilotValue.FromFloat(Math.Cosh(a0)),
+                    "tanh" => PilotValue.FromFloat(Math.Tanh(a0)),
                     "exp" => PilotValue.FromFloat(Math.Exp(a0)),
                     "log" or "ln" => PilotValue.FromFloat(Math.Log(a0)),
+                    "log2" => PilotValue.FromFloat(Math.Log2(a0)),
+                    "log10" => PilotValue.FromFloat(Math.Log10(a0)),
                     "sqrt" => PilotValue.FromFloat(Math.Sqrt(a0)),
+                    "cbrt" => PilotValue.FromFloat(Math.Cbrt(a0)),
+                    "sigmoid" => PilotValue.FromFloat(1.0 / (1.0 + Math.Exp(-a0))),
+                    "softplus" => PilotValue.FromFloat(Math.Log(1.0 + Math.Exp(a0))),
                     "abs" => PilotValue.FromFloat(Math.Abs(a0)),
                     "relu" => PilotValue.FromFloat(Math.Max(0.0, a0)),
                     "pow" when args.Count >= 2 => PilotValue.FromFloat(Math.Pow(a0, args[1].AsFloat())),

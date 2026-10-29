@@ -376,6 +376,9 @@ public sealed class PilotBidirectionalInferencer
                     RegisterFunctionStub(funcDef);
                 }
                 return;
+            case PilotParser.Import_stmtContext impStmt:
+                PrescanImportedDeclarations(impStmt);
+                return;
             case PilotParser.Extern_defContext externDef:
                 if (externDef.extern_member() != null)
                 {
@@ -411,6 +414,100 @@ public sealed class PilotBidirectionalInferencer
         for (int i = 0; i < node.ChildCount; i++)
         {
             PrescanProgramDeclarations(node.GetChild(i));
+        }
+    }
+
+    private readonly HashSet<string> _prescannedImports = new(StringComparer.Ordinal);
+
+    private void PrescanImportedDeclarations(PilotParser.Import_stmtContext imp)
+    {
+        if (imp.import_name()?.dotted_as_names()?.dotted_as_name() is { } specs)
+        {
+            foreach (var spec in specs)
+            {
+                string dotted = spec.dotted_name().GetText();
+                string? alias = spec.identifier()?.GetText();
+                if (!string.IsNullOrEmpty(alias))
+                {
+                    _engine.SetVariableType(alias!, PilotType.Any);
+                }
+                else
+                {
+                    string[] parts = dotted.Split('.', StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length > 0) _engine.SetVariableType(parts[0], PilotType.Any);
+                    if (parts.Length > 1) _engine.SetVariableType(parts[^1], PilotType.Any);
+                }
+
+                if (Pilot.Runtime.Stdlib.PilotStdlibResolver.TryGetParsedModuleAst(dotted, 0, null, out var modAst, out string modId) &&
+                    modAst != null && _prescannedImports.Add(modId))
+                {
+                    PrescanModuleTypesOnly(modAst);
+                }
+            }
+        }
+        else if (imp.import_from() is { } fromCtx)
+        {
+            int dots = fromCtx.DOT()?.Length ?? 0;
+            string dotted = fromCtx.dotted_name()?.GetText() ?? string.Empty;
+            bool star = fromCtx.STAR() != null;
+            var aliasMap = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (!star && fromCtx.import_as_names()?.import_as_name() is { } items)
+            {
+                foreach (var it in items)
+                {
+                    var ids = it.identifier();
+                    string orig = ids[0].GetText();
+                    string bound = ids.Length > 1 ? ids[1].GetText() : orig;
+                    aliasMap[orig] = bound;
+                    _engine.SetVariableType(bound, PilotType.Any);
+                }
+            }
+
+            if (Pilot.Runtime.Stdlib.PilotStdlibResolver.TryGetParsedModuleAst(dotted, dots, null, out var modAst, out string modId) &&
+                modAst != null)
+            {
+                if (_prescannedImports.Add(modId))
+                {
+                    PrescanModuleTypesOnly(modAst);
+                }
+                if (modAst.stmt() != null)
+                {
+                    foreach (var st in modAst.stmt())
+                    {
+                        if (st.compound_stmt()?.func_def() is { } fn)
+                        {
+                            string fnName = fn.identifier().GetText();
+                            if (star || aliasMap.ContainsKey(fnName))
+                            {
+                                RegisterFunctionStub(fn);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void PrescanModuleTypesOnly(PilotParser.ProgramContext modAst)
+    {
+        if (modAst.stmt() == null) return;
+        foreach (var st in modAst.stmt())
+        {
+            if (st.compound_stmt() is { } comp)
+            {
+                if (comp.struct_def() is { } sd) RegisterStructLayout(sd);
+                else if (comp.record_def() is { } rd) RegisterRecordLayout(rd);
+                else if (comp.class_def() is { } cd) RegisterClassLayout(cd);
+                else if (comp.enum_def() is { } ed) RegisterEnumLayout(ed);
+            }
+            else if (st.simple_stmt()?.small_stmt() is { } sms)
+            {
+                foreach (var sm in sms)
+                {
+                    if (sm.type_alias_stmt() is { } ta) RegisterTypeAliasLayout(ta);
+                    else if (sm.import_stmt() is { } nestedImp) PrescanImportedDeclarations(nestedImp);
+                }
+            }
         }
     }
 
@@ -1500,7 +1597,7 @@ public sealed class PilotBidirectionalInferencer
                     _engine.PopScope();
                 }
 
-                SetFlowNarrowedType(varName, narrowed, (ctx.Stop?.Line ?? ctx.Start.Line) + 1);
+                SetFlowNarrowedType(varName, narrowed, (ctx.Stop?.Line ?? ctx.Start?.Line ?? 0) + 1);
                 return;
             }
 
@@ -1516,7 +1613,7 @@ public sealed class PilotBidirectionalInferencer
                 _engine.PopScope();
             }
 
-            int contLine = (ctx.Stop?.Line ?? ctx.Start.Line) + 1;
+            int contLine = (ctx.Stop?.Line ?? ctx.Start?.Line ?? 0) + 1;
             foreach (var kvp in trueNarrow)
                 SetFlowNarrowedType(kvp.Key, kvp.Value, contLine);
             foreach (var kvp in patBinds)
@@ -1710,7 +1807,7 @@ public sealed class PilotBidirectionalInferencer
                 BindMatchPatternVariables(arm.pattern(), remainingScrutineeType, arm.Start?.Line);
                 if (scrutineeVar != null && TryExtractPatternNarrowedType(arm.pattern(), remainingScrutineeType, out var armNarrowed))
                 {
-                    SetFlowNarrowedType(scrutineeVar, armNarrowed, arm.suite()?.Start?.Line ?? arm.Start.Line);
+                    SetFlowNarrowedType(scrutineeVar, armNarrowed, arm.suite()?.Start?.Line ?? arm.Start?.Line);
                     if (arm.test() == null)
                     {
                         remainingScrutineeType = remainingScrutineeType.SubtractType(armNarrowed);
@@ -1722,7 +1819,7 @@ public sealed class PilotBidirectionalInferencer
             {
                 var (trueN, _, _) = ExtractConditionNarrowing(arm.test());
                 foreach (var kvp in trueN)
-                    SetFlowNarrowedType(kvp.Key, kvp.Value, arm.suite()?.Start?.Line ?? arm.Start.Line);
+                    SetFlowNarrowedType(kvp.Key, kvp.Value, arm.suite()?.Start?.Line ?? arm.Start?.Line);
             }
 
             if (arm.suite() != null)

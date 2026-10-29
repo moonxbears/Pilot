@@ -175,6 +175,21 @@ public static class PilotNativeCompiler
                     return PilotNativeResult.CreateSuccess(options.Target, outPath, transRes.Code);
                 }
 
+                case NativeCompilationTarget.CppSource:
+                {
+                    var transRes = TranspilationRegistry.Default.Transpile(source, "cpp");
+                    if (!transRes.Success)
+                    {
+                        return PilotNativeResult.CreateFailure(options.Target, transRes.Diagnostics);
+                    }
+                    string? outPath = options.OutputPath;
+                    if (!string.IsNullOrEmpty(outPath))
+                    {
+                        File.WriteAllText(outPath, transRes.Code);
+                    }
+                    return PilotNativeResult.CreateSuccess(options.Target, outPath, transRes.Code);
+                }
+
                 case NativeCompilationTarget.NativeExecutable:
                 default:
                 {

@@ -1,0 +1,231 @@
+// SPDX-License-Identifier: MIT
+// std.text — Zero-Copy UTF-8 StrSlice Views (`SliceBuffer<u8>`), Comptime DFA Regex & String Algorithms
+
+// Zero-copy UTF-8 string view backed directly by unmanaged/mmap `SliceBuffer<u8>`
+class StrSlice {
+    def __init__(self, utf8_buf) {
+        self._buf = utf8_buf;
+    }
+
+    def byte_len(self) -> i64 {
+        return __slice_len(self._buf);
+    }
+
+    def data_ptr(self) -> i64 {
+        return __slice_ptr(self._buf);
+    }
+
+    def is_empty(self) -> bool {
+        return __slice_len(self._buf) == 0;
+    }
+
+    def rune_count(self) -> i64 {
+        return __utf8_rune_count(self._buf);
+    }
+
+    def is_char_boundary(self, byte_offset: i64) -> bool {
+        return __utf8_is_valid_boundary(self._buf, byte_offset);
+    }
+
+    def byte_at(self, idx: i64) {
+        return __slice_get(self._buf, idx);
+    }
+
+    // Zero-copy UTF-8 sub-slice (`DataPtr + start_byte`) returning `StrSlice?` (`none` if invalid UTF-8 boundary)
+    def subslice(self, start_byte: i64, byte_length: i64) {
+        let total: i64 = __slice_len(self._buf);
+        if start_byte < 0 or byte_length < 0 or (start_byte + byte_length) > total {
+            return none;
+        }
+        if !__utf8_is_valid_boundary(self._buf, start_byte) or !__utf8_is_valid_boundary(self._buf, start_byte + byte_length) {
+            return none;
+        }
+        let view = __slice_subview(self._buf, start_byte, byte_length);
+        return some(StrSlice(view));
+    }
+
+    def to_str(self) -> str {
+        return __utf8_decode_slice(self._buf);
+    }
+
+    def raw_buffer(self) {
+        return self._buf;
+    }
+}
+
+def str_slice(text: str) {
+    return StrSlice(__utf8_encode_slice(text));
+}
+
+def as_utf8_slice(text: str) {
+    return __utf8_encode_slice(text);
+}
+
+def str_slice_from_bytes(utf8_buf) {
+    return StrSlice(utf8_buf);
+}
+
+// Comptime-compatible Thompson NFA -> Powerset DFA Regex Wrapper
+class Regex {
+    def __init__(self, pattern_or_dfa) {
+        if type_of(pattern_or_dfa) == "string" {
+            self.dfa = compile_regex(pattern_or_dfa);
+        } else {
+            self.dfa = pattern_or_dfa;
+        }
+    }
+
+    def pattern(self) -> str {
+        return self.dfa.pattern;
+    }
+
+    def state_count(self) -> i64 {
+        return self.dfa.state_count;
+    }
+
+    def is_match(self, text: str) -> bool {
+        return __dfa_is_match(self.dfa, text);
+    }
+
+    def find(self, text: str, start_idx: i64 = 0) {
+        return __dfa_find(self.dfa, text, start_idx);
+    }
+
+    def find_all(self, text: str) {
+        return __dfa_find_all(self.dfa, text);
+    }
+
+    def find_spans(self, text: str) {
+        return __dfa_find_spans(self.dfa, text);
+    }
+
+    def replace_all(self, text: str, replacement: str) -> str {
+        return __dfa_replace_all(self.dfa, text, replacement);
+    }
+
+    def split(self, text: str) {
+        return __dfa_split(self.dfa, text);
+    }
+}
+
+def regex(pattern: str) {
+    return compile_regex(pattern);
+}
+
+def regex_is_match(re_or_pat, text: str) -> bool {
+    return __dfa_is_match(re_or_pat, text);
+}
+
+def regex_find(re_or_pat, text: str, start_idx: i64 = 0) {
+    return __dfa_find(re_or_pat, text, start_idx);
+}
+
+def regex_find_all(re_or_pat, text: str) {
+    return __dfa_find_all(re_or_pat, text);
+}
+
+def regex_find_spans(re_or_pat, text: str) {
+    return __dfa_find_spans(re_or_pat, text);
+}
+
+def regex_replace_all(re_or_pat, text: str, replacement: str) -> str {
+    return __dfa_replace_all(re_or_pat, text, replacement);
+}
+
+def regex_split(re_or_pat, text: str) {
+    return __dfa_split(re_or_pat, text);
+}
+
+// Pure String Manipulation Utilities
+def trim(s: str) -> str {
+    return __str_trim(s, 0);
+}
+
+def trim_start(s: str) -> str {
+    return __str_trim(s, -1);
+}
+
+def trim_end(s: str) -> str {
+    return __str_trim(s, 1);
+}
+
+def to_upper(s: str) -> str {
+    return __str_case(s, true);
+}
+
+def to_lower(s: str) -> str {
+    return __str_case(s, false);
+}
+
+def split(s: str, sep: str = " ") {
+    return __str_split(s, sep);
+}
+
+def lines(s: str) {
+    let normalized = __str_replace(s, "\r\n", "\n");
+    return __str_split(normalized, "\n");
+}
+
+def join(parts, sep: str = "") -> str {
+    var out: str = "";
+    var first: bool = true;
+    for p in parts {
+        if !first {
+            out = out + sep;
+        }
+        out = out + str(p);
+        first = false;
+    }
+    return out;
+}
+
+def replace(s: str, old_sub: str, new_sub: str) -> str {
+    return __str_replace(s, old_sub, new_sub);
+}
+
+def index_of(s: str, sub: str, start: i64 = 0) -> i64 {
+    return __str_index_of(s, sub, start);
+}
+
+def last_index_of(s: str, sub: str) -> i64 {
+    return __str_last_index_of(s, sub);
+}
+
+def contains(s: str, sub: str) -> bool {
+    return __str_index_of(s, sub, 0) >= 0;
+}
+
+def starts_with(s: str, prefix: str) -> bool {
+    let plen: i64 = len(prefix);
+    if plen > len(s) {
+        return false;
+    }
+    return __str_slice(s, 0, plen) == prefix;
+}
+
+def ends_with(s: str, suffix: str) -> bool {
+    let slen: i64 = len(s);
+    let suflen: i64 = len(suffix);
+    if suflen > slen {
+        return false;
+    }
+    return __str_slice(s, slen - suflen, slen) == suffix;
+}
+
+def pad_left(s: str, width: i64, fill_char: str = " ") -> str {
+    let cur: i64 = len(s);
+    if cur >= width {
+        return s;
+    }
+    let ch = if len(fill_char) > 0 { __str_slice(fill_char, 0, 1) } else { " " };
+    return (ch * (width - cur)) + s;
+}
+
+def pad_right(s: str, width: i64, fill_char: str = " ") -> str {
+    let cur: i64 = len(s);
+    if cur >= width {
+        return s;
+    }
+    let ch = if len(fill_char) > 0 { __str_slice(fill_char, 0, 1) } else { " " };
+    return s + (ch * (width - cur));
+}

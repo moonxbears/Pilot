@@ -1128,6 +1128,8 @@ public sealed class PilotBuiltinRegistry
                 PilotValue.FromString(sql));
             return PilotValue.FromInt(1);
         }, "sql", "table");
+
+        Pilot.Runtime.Stdlib.PilotStdlibIntrinsics.RegisterAll(this);
     }
 
     public static PilotFunction GetOperatorFunction(string op)

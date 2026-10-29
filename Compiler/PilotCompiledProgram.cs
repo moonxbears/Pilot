@@ -338,7 +338,11 @@ public sealed class PilotCompiledProgram : IPilotProgram
         }
 
         PilotParser.ProgramContext? tree = null;
-        if (bytecodeChunk == null && !string.IsNullOrEmpty(source))
+        bool hasBurstDecorator = !string.IsNullOrEmpty(source) &&
+                                 (source.Contains("@burst", StringComparison.OrdinalIgnoreCase) ||
+                                  source.Contains("@native_fast", StringComparison.OrdinalIgnoreCase));
+        bool needsAstRehydration = bytecodeChunk != null && (hasBurstDecorator || NeedsAstFallbackRehydration(bytecodeChunk));
+        if ((bytecodeChunk == null || needsAstRehydration) && !string.IsNullOrEmpty(source))
         {
             var inputStream = new AntlrInputStream(source);
             var lexer = new PilotLexer(inputStream);
@@ -354,9 +358,34 @@ public sealed class PilotCompiledProgram : IPilotProgram
             {
                 throw new InvalidOperationException($"Corrupt compiled program AST: {string.Join("; ", errorTracker.Errors)}");
             }
+
+            if (needsAstRehydration)
+            {
+                bytecodeChunk = PilotBytecodeCompiler.Compile(tree, source);
+            }
         }
 
         return new PilotCompiledProgram(source, tree, string.IsNullOrEmpty(filePath) ? null : filePath, compiledAt, symbols, bytecodeChunk, compilerVersion);
+    }
+
+    private static bool NeedsAstFallbackRehydration(Pilot.Runtime.Bytecode.PilotBytecodeChunk chunk)
+    {
+        bool checkEvalAst = chunk.AstFallbackNodes.Count == 0;
+        for (int i = 0; i < chunk.Instructions.Count; i++)
+        {
+            var op = chunk.Instructions[i].Opcode;
+            if ((checkEvalAst && op == Pilot.Runtime.Bytecode.PilotOpcode.EvalAst) ||
+                (chunk.FuncDefContext == null && op == Pilot.Runtime.Bytecode.PilotOpcode.Yield))
+            {
+                return true;
+            }
+        }
+        for (int i = 0; i < chunk.NestedChunks.Count; i++)
+        {
+            if (NeedsAstFallbackRehydration(chunk.NestedChunks[i]))
+                return true;
+        }
+        return false;
     }
 
     public static PilotCompiledProgram Load(string filePath)

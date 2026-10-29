@@ -58,7 +58,7 @@ public static class PilotAssemblyEmitter
                     {
                         string result = File.ReadAllText(sPath);
                         try { Directory.Delete(tempDir, true); } catch { }
-                        return result;
+                        return $"\t# Pilot Burst Native Compilation Engine (LLVM Toolchain: {Path.GetFileName(toolchain)})\n" + result;
                     }
                 }
             }

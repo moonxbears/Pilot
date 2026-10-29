@@ -31,6 +31,7 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
     private readonly Dictionary<string, PilotRecordDefinition> _records = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<string>> _classTypestates = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PilotType> _functionReturnTypes = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _visitedImports = new(StringComparer.Ordinal);
     private readonly Stack<Dictionary<string, PilotType>> _localScopes = new();
 
     public IReadOnlyList<PilotAnalysisDiagnostic> Diagnostics => _diagnostics;
@@ -85,6 +86,9 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
                     _functionReturnTypes[funcDef.identifier().GetText()] = ParseRichType(funcDef.type_spec().GetText());
                 }
                 break;
+            case PilotParser.Import_stmtContext impStmt:
+                CollectImportedDeclarations(impStmt);
+                break;
         }
 
         for (int i = 0; i < node.ChildCount; i++)
@@ -93,6 +97,32 @@ public sealed class PilotExhaustivenessChecker : PilotBaseVisitor<object?>
         }
 
         RefreshLayouts();
+    }
+
+    private void CollectImportedDeclarations(PilotParser.Import_stmtContext imp)
+    {
+        if (imp.import_name()?.dotted_as_names()?.dotted_as_name() is { } specs)
+        {
+            foreach (var spec in specs)
+            {
+                string dotted = spec.dotted_name().GetText();
+                if (Pilot.Runtime.Stdlib.PilotStdlibResolver.TryGetParsedModuleAst(dotted, 0, null, out var modAst, out string modId) &&
+                    modAst != null && _visitedImports.Add(modId))
+                {
+                    CollectDeclarations(modAst);
+                }
+            }
+        }
+        else if (imp.import_from() is { } fromCtx)
+        {
+            int dots = fromCtx.DOT()?.Length ?? 0;
+            string dotted = fromCtx.dotted_name()?.GetText() ?? string.Empty;
+            if (Pilot.Runtime.Stdlib.PilotStdlibResolver.TryGetParsedModuleAst(dotted, dots, null, out var modAst, out string modId) &&
+                modAst != null && _visitedImports.Add(modId))
+            {
+                CollectDeclarations(modAst);
+            }
+        }
     }
 
     private void RegisterTypeAliasAdt(PilotParser.Type_alias_stmtContext ctx)

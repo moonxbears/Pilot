@@ -145,4 +145,21 @@
     </ItemGroup>
   </Target>
 
+  <ItemGroup>
+    <Content Include="stdlib\**\*" Exclude="stdlib\.pilc-cache\**\*;stdlib\.pilc-precompiled\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <_PilotStdlibSources Include="stdlib\**\*.pilot" />
+    <_PilotCppRuntimeSources Include="Native\Runtime\pilot_runtime.cpp;Native\Runtime\pilot_runtime.h" />
+  </ItemGroup>
+
+  <Target Name="PrecompilePilotStdlibAndCppRuntime"
+          AfterTargets="Build"
+          Inputs="@(_PilotStdlibSources);@(_PilotCppRuntimeSources);$(TargetPath)"
+          Outputs="$(OutDir)stdlib\.pilc-precompiled\stdlib.pilcbundle">
+    <Exec Command="dotnet &quot;$(TargetPath)&quot; compile --precompile-stdlib &quot;$(OutDir)stdlib/.pilc-precompiled&quot; --build-cpp-runtime &quot;$(OutDir)native&quot;"
+          StandardOutputImportance="high" />
+  </Target>
+
 </Project>

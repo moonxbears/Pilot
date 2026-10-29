@@ -1,0 +1,287 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.math — Differentiable Elementary Math (`!@`), Constants, Number Theory & Welford Statistics
+
+const PI: f64 = 3.14159265358979323846;
+const TAU: f64 = 6.28318530717958647692;
+const E: f64 = 2.71828182845904523536;
+const SQRT2: f64 = 1.41421356237309504880;
+const SQRT3: f64 = 1.73205080756887729352;
+const LN2: f64 = 0.69314718055994530942;
+const LN10: f64 = 2.30258509299404568402;
+const PHI: f64 = 1.61803398874989484820;
+const DEG_TO_RAD: f64 = 0.01745329251994329577;
+const RAD_TO_DEG: f64 = 57.2957795130823208768;
+
+// Differentiable Elementary Functions (supported natively by `fn!@(...)` Symbolic Adjoint Engine)
+def deg_to_rad(deg: f64) -> f64 {
+    return deg * DEG_TO_RAD;
+}
+
+def rad_to_deg(rad: f64) -> f64 {
+    return rad * RAD_TO_DEG;
+}
+
+def sigmoid(x: f64) -> f64 {
+    return 1.0 / (1.0 + exp(-x));
+}
+
+def softplus(x: f64) -> f64 {
+    if x > 20.0 {
+        return x;
+    }
+    return ln(1.0 + exp(x));
+}
+
+def relu(x: f64) -> f64 {
+    if x > 0.0 {
+        return x;
+    }
+    return 0.0;
+}
+
+def lerp(a: f64, b: f64, t: f64) -> f64 {
+    return a + (b - a) * t;
+}
+
+def clamp(x: f64, lo: f64, hi: f64) -> f64 {
+    if x < lo {
+        return lo;
+    }
+    if x > hi {
+        return hi;
+    }
+    return x;
+}
+
+def smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
+    let t: f64 = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+def approx_eq(a: f64, b: f64, eps: f64 = 0.000000001) -> bool {
+    return abs(a - b) <= eps;
+}
+
+def sign(x: f64) -> i64 {
+    if x > 0.0 {
+        return 1;
+    }
+    if x < 0.0 {
+        return -1;
+    }
+    return 0;
+}
+
+// Number Theory & Discrete Combinatorics
+def gcd(a: i64, b: i64) -> i64 {
+    var x: i64 = abs(a);
+    var y: i64 = abs(b);
+    while y != 0 {
+        let t: i64 = x % y;
+        x = y;
+        y = t;
+    }
+    return x;
+}
+
+def lcm(a: i64, b: i64) -> i64 {
+    if a == 0 or b == 0 {
+        return 0;
+    }
+    return abs((a / gcd(a, b)) * b);
+}
+
+def ipow(base_val: i64, exp_val: i64) -> i64 {
+    if exp_val < 0 {
+        panic("math.ipow requires non-negative exponent");
+    }
+    var result: i64 = 1;
+    var b: i64 = base_val;
+    var e: i64 = exp_val;
+    while e > 0 {
+        if (e & 1) == 1 {
+            result = result * b;
+        }
+        b = b * b;
+        e = e >> 1;
+    }
+    return result;
+}
+
+def factorial(n: i64) -> i64 {
+    if n < 0 {
+        panic("math.factorial requires n >= 0");
+    }
+    var acc: i64 = 1;
+    for i in 2..n {
+        acc = acc * i;
+    }
+    return acc;
+}
+
+def binomial(n: i64, k: i64) -> i64 {
+    if k < 0 or k > n {
+        return 0;
+    }
+    var r: i64 = k;
+    if r > n - r {
+        r = n - r;
+    }
+    var res: i64 = 1;
+    for i in 1..r {
+        res = (res * (n - r + i)) / i;
+    }
+    return res;
+}
+
+def is_prime(n: i64) -> bool {
+    if n < 2 {
+        return false;
+    }
+    if n == 2 or n == 3 {
+        return true;
+    }
+    if (n % 2) == 0 or (n % 3) == 0 {
+        return false;
+    }
+    var d: i64 = 5;
+    while d * d <= n {
+        if (n % d) == 0 or (n % (d + 2)) == 0 {
+            return false;
+        }
+        d = d + 6;
+    }
+    return true;
+}
+
+// Numerically Stable Welford Statistics (PSF-2.0 CPython statistics scaffold)
+def sum(values) -> f64 {
+    var total: f64 = 0.0;
+    for v in values {
+        total = total + float(v);
+    }
+    return total;
+}
+
+def mean(values) {
+    let n: i64 = len(values);
+    if n == 0 {
+        return none;
+    }
+    return some(sum(values) / float(n));
+}
+
+def variance(values) {
+    let n: i64 = len(values);
+    if n == 0 {
+        return none;
+    }
+    var count: i64 = 0;
+    var mu: f64 = 0.0;
+    var m2: f64 = 0.0;
+    for raw in values {
+        let x: f64 = float(raw);
+        count = count + 1;
+        let delta: f64 = x - mu;
+        mu = mu + (delta / float(count));
+        let delta2: f64 = x - mu;
+        m2 = m2 + delta * delta2;
+    }
+    return some(m2 / float(count));
+}
+
+def sample_variance(values) {
+    let n: i64 = len(values);
+    if n < 2 {
+        return none;
+    }
+    let pop = variance(values);
+    if some pv = pop {
+        return some((pv * float(n)) / float(n - 1));
+    }
+    return none;
+}
+
+def stdev(values) {
+    let v = variance(values);
+    if some pv = v {
+        return some(sqrt(pv));
+    }
+    return none;
+}
+
+def _sorted_floats(values) {
+    var arr = [float(v) for v in values];
+    let n: i64 = len(arr);
+    // Insertion sort / Shell-gap sort for clean zero-dependency median/quantile
+    var gap: i64 = n >> 1;
+    while gap > 0 {
+        for i in gap..<n {
+            let temp: f64 = arr[i];
+            var j: i64 = i;
+            while j >= gap and arr[j - gap] > temp {
+                arr[j] = arr[j - gap];
+                j = j - gap;
+            }
+            arr[j] = temp;
+        }
+        gap = gap >> 1;
+    }
+    return arr;
+}
+
+def median(values) {
+    let n: i64 = len(values);
+    if n == 0 {
+        return none;
+    }
+    let sorted = _sorted_floats(values);
+    let mid: i64 = n >> 1;
+    if (n % 2) == 1 {
+        return some(sorted[mid]);
+    }
+    return some((sorted[mid - 1] + sorted[mid]) * 0.5);
+}
+
+def quantile(values, q: f64) {
+    let n: i64 = len(values);
+    if n == 0 or q < 0.0 or q > 1.0 {
+        return none;
+    }
+    let sorted = _sorted_floats(values);
+    if n == 1 {
+        return some(sorted[0]);
+    }
+    let pos: f64 = q * float(n - 1);
+    let lo: i64 = floor(pos);
+    let hi: i64 = ceil(pos);
+    if lo == hi {
+        return some(sorted[lo]);
+    }
+    let frac: f64 = pos - float(lo);
+    return some(sorted[lo] + (sorted[hi] - sorted[lo]) * frac);
+}
+
+def correlation(xs, ys) {
+    let n: i64 = len(xs);
+    if n < 2 or len(ys) != n {
+        return none;
+    }
+    let mx = __opt_unwrap(mean(xs));
+    let my = __opt_unwrap(mean(ys));
+    var cov: f64 = 0.0;
+    var vx: f64 = 0.0;
+    var vy: f64 = 0.0;
+    for i in 0..<n {
+        let dx: f64 = float(xs[i]) - mx;
+        let dy: f64 = float(ys[i]) - my;
+        cov = cov + dx * dy;
+        vx = vx + dx * dx;
+        vy = vy + dy * dy;
+    }
+    let denom: f64 = sqrt(vx * vy);
+    if denom == 0.0 {
+        return none;
+    }
+    return some(cov / denom);
+}

@@ -1,0 +1,93 @@
+// SPDX-License-Identifier: MIT
+// std.result — Values-First Fallible Return (T ! E) Combinators
+// Adheres to Pilot Invariant #7: zero stack unwinding, register-represented `ok(v)` / `fail(e)`.
+
+def is_ok(res) -> bool {
+    return __result_is_ok(res);
+}
+
+def is_err(res) -> bool {
+    return __result_is_err(res);
+}
+
+def unwrap(res) {
+    return __result_unwrap_ok(res);
+}
+
+def unwrap_err(res) {
+    return __result_unwrap_err(res);
+}
+
+def expect(res, msg: str) {
+    if __result_is_err(res) {
+        panic(f"{msg}: {__result_unwrap_err(res)}");
+    }
+    return __result_unwrap_ok(res);
+}
+
+def unwrap_or(res, fallback) {
+    if __result_is_ok(res) {
+        return __result_unwrap_ok(res);
+    }
+    return fallback;
+}
+
+def unwrap_or_else(res, recovery_fn) {
+    if __result_is_ok(res) {
+        return __result_unwrap_ok(res);
+    }
+    return recovery_fn(__result_unwrap_err(res));
+}
+
+def map_ok(res, transform_fn) -> any ! any {
+    if __result_is_ok(res) {
+        return ok(transform_fn(__result_unwrap_ok(res)));
+    }
+    return res;
+}
+
+def map_err(res, err_fn) -> any ! any {
+    if __result_is_err(res) {
+        return fail(err_fn(__result_unwrap_err(res)));
+    }
+    return res;
+}
+
+def and_then(res, next_fn) -> any ! any {
+    if __result_is_ok(res) {
+        return next_fn(__result_unwrap_ok(res));
+    }
+    return res;
+}
+
+def or_else(res, recover_fn) -> any ! any {
+    if __result_is_err(res) {
+        return recover_fn(__result_unwrap_err(res));
+    }
+    return res;
+}
+
+def ok_option(res) {
+    if __result_is_ok(res) {
+        return some(__result_unwrap_ok(res));
+    }
+    return none;
+}
+
+def err_option(res) {
+    if __result_is_err(res) {
+        return some(__result_unwrap_err(res));
+    }
+    return none;
+}
+
+def collect_ok(results) -> any ! any {
+    var acc = [];
+    for item in results {
+        if __result_is_err(item) {
+            return item;
+        }
+        acc.append(__result_unwrap_ok(item));
+    }
+    return ok(acc);
+}

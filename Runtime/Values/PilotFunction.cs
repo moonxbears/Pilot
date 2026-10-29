@@ -51,6 +51,7 @@ public sealed class PilotFunction
     public bool IsGenerator { get; private set; }
     public bool IsVectorized { get; set; }
     public bool IsBurstCompiled { get; set; }
+    public bool IsNativeCppBurst { get; set; }
     public Func<IReadOnlyList<PilotValue>, PilotValue>? BurstKernel { get; set; }
     public IReadOnlyDictionary<string, PilotValue>? Captures { get; private set; }
     public PilotClassDefinition? ClassDef { get; set; }

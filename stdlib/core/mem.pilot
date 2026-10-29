@@ -1,0 +1,170 @@
+// SPDX-License-Identifier: MIT
+// std.mem — Contiguous Zero-Copy SliceBuffer<T>, RangeWindow & .rodata Frozen Memory Primitives
+
+def alloc_slice(capacity: i64, elem_type: str = "f64", initial_length: i64 = 0) {
+    return slice_buffer(capacity, elem_type, initial_length);
+}
+
+def shared_slice(name_or_path: str, capacity: i64, elem_type: str = "f64", initial_length: i64 = 0) {
+    return shared_buffer(name_or_path, capacity, elem_type, initial_length);
+}
+
+def slice_len(buf) -> i64 {
+    return __slice_len(buf);
+}
+
+def slice_cap(buf) -> i64 {
+    return __slice_cap(buf);
+}
+
+def slice_stride(buf) -> i64 {
+    return __slice_stride(buf);
+}
+
+def slice_ptr(buf) -> i64 {
+    return __slice_ptr(buf);
+}
+
+def slice_is_readonly(buf) -> bool {
+    return __slice_is_readonly(buf);
+}
+
+def slice_get(buf, idx: i64) {
+    return __slice_get(buf, idx);
+}
+
+def slice_set(buf, idx: i64, val) {
+    return __slice_set(buf, idx, val);
+}
+
+def slice_push(buf, val) {
+    return __slice_push(buf, val);
+}
+
+def slice_clear(buf) {
+    return __slice_clear(buf);
+}
+
+def slice_subview(buf, start: i64, length: i64) {
+    return __slice_subview(buf, start, length);
+}
+
+def slice_to_list(buf) {
+    return __slice_to_list(buf);
+}
+
+def cpp_backend_available() -> bool {
+    return __cpp_backend_available();
+}
+
+def cpp_simd_bits() -> i64 {
+    return __cpp_simd_bits();
+}
+
+def slice_sum(buf) {
+    return __slice_sum(buf);
+}
+
+def slice_dot(a, b) -> f64 {
+    return __slice_dot(a, b);
+}
+
+def slice_saxpy(alpha: f64, x, y) {
+    return __slice_saxpy(alpha, x, y);
+}
+
+def slice_scale(alpha: f64, buf) {
+    return __slice_scale(alpha, buf);
+}
+
+def slice_sort(buf) {
+    return __slice_sort(buf);
+}
+
+def slice_welford(buf) {
+    return __slice_welford(buf);
+}
+
+def freeze(val) {
+    return __freeze_value(val);
+}
+
+def is_frozen(val) -> bool {
+    return __is_frozen(val);
+}
+
+def is_perfect_hash(map_val) -> bool {
+    return __is_perfect_hash_map(map_val);
+}
+
+def frozen_table_size(map_val) -> i64 {
+    return __frozen_map_table_size(map_val);
+}
+
+def sizeof(type_name: str) -> i64 {
+    return sizeof_type(type_name);
+}
+
+// Half-open [start, end_idx) range window for work-stealing & zero-allocation index partitioning
+class RangeWindow {
+    def __init__(self, start: i64, end_idx: i64) {
+        self.start = start;
+        if end_idx < start {
+            self.end_idx = start;
+        } else {
+            self.end_idx = end_idx;
+        }
+    }
+
+    def len(self) -> i64 {
+        return self.end_idx - self.start;
+    }
+
+    def is_empty(self) -> bool {
+        return self.end_idx <= self.start;
+    }
+
+    def contains(self, idx: i64) -> bool {
+        return idx >= self.start and idx < self.end_idx;
+    }
+
+    def at(self, offset: i64) {
+        let actual: i64 = self.start + offset;
+        if offset < 0 or actual >= self.end_idx {
+            return none;
+        }
+        return some(actual);
+    }
+
+    def split_mid(self) {
+        let mid: i64 = self.start + ((self.end_idx - self.start) >> 1);
+        return (RangeWindow(self.start, mid), RangeWindow(mid, self.end_idx));
+    }
+
+    def split_chunks(self, chunk_size: i64) {
+        if chunk_size <= 0 {
+            panic("RangeWindow.split_chunks requires chunk_size > 0");
+        }
+        var out = [];
+        var cur: i64 = self.start;
+        while cur < self.end_idx {
+            var next_end: i64 = cur + chunk_size;
+            if next_end > self.end_idx {
+                next_end = self.end_idx;
+            }
+            out.append(RangeWindow(cur, next_end));
+            cur = next_end;
+        }
+        return out;
+    }
+
+    def to_list(self) {
+        var items = [];
+        var i: i64 = self.start;
+        while i < self.end_idx {
+            items.append(i);
+            i += 1;
+        }
+        return items;
+    }
+}

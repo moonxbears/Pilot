@@ -76,6 +76,7 @@ public sealed class PilotErrorFlowAnalyzer : PilotBaseVisitor<string>
     private readonly Dictionary<string, List<string>> _adtVariants = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _variantToAdt = new(StringComparer.Ordinal);
     private readonly HashSet<string> _records = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _visitedImports = new(StringComparer.Ordinal);
     private readonly List<(string FromType, string ToType)> _adapters = new();
     private readonly List<PilotAnalysisDiagnostic> _diagnostics = new();
     private ErrorScope _currentScope = new(null);
@@ -123,11 +124,112 @@ public sealed class PilotErrorFlowAnalyzer : PilotBaseVisitor<string>
             case PilotParser.Func_defContext fn:
                 RegisterFunction(fn);
                 break;
+            case PilotParser.Import_stmtContext imp:
+                PrescanImportStmt(imp);
+                break;
         }
 
         for (int i = 0; i < node.ChildCount; i++)
         {
             PrescanDeclarations(node.GetChild(i));
+        }
+    }
+
+    private void PrescanImportStmt(PilotParser.Import_stmtContext imp)
+    {
+        if (imp.import_name()?.dotted_as_names()?.dotted_as_name() is { } specs)
+        {
+            foreach (var spec in specs)
+            {
+                string dotted = spec.dotted_name().GetText();
+                string? alias = spec.identifier()?.GetText();
+                if (Pilot.Runtime.Stdlib.PilotStdlibResolver.TryGetParsedModuleAst(dotted, 0, null, out var modAst, out string modId) &&
+                    modAst != null)
+                {
+                    var prefixes = new List<string>();
+                    if (!string.IsNullOrEmpty(alias))
+                    {
+                        prefixes.Add(alias!);
+                    }
+                    else
+                    {
+                        prefixes.Add(dotted);
+                        string[] segs = dotted.Split('.', StringSplitOptions.RemoveEmptyEntries);
+                        if (segs.Length > 1) prefixes.Add(segs[^1]);
+                    }
+                    PrescanImportedModule(modAst, modId, prefixes, directNames: null, importAll: false);
+                }
+            }
+        }
+        else if (imp.import_from() is { } fromCtx)
+        {
+            int dots = fromCtx.DOT()?.Length ?? 0;
+            string dotted = fromCtx.dotted_name()?.GetText() ?? string.Empty;
+            if (Pilot.Runtime.Stdlib.PilotStdlibResolver.TryGetParsedModuleAst(dotted, dots, null, out var modAst, out string modId) &&
+                modAst != null)
+            {
+                bool star = fromCtx.STAR() != null;
+                var directMap = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (!star && fromCtx.import_as_names()?.import_as_name() is { } items)
+                {
+                    foreach (var it in items)
+                    {
+                        var ids = it.identifier();
+                        string orig = ids[0].GetText();
+                        string bound = ids.Length > 1 ? ids[1].GetText() : orig;
+                        directMap[orig] = bound;
+                    }
+                }
+                PrescanImportedModule(modAst, modId, Array.Empty<string>(), directMap, star);
+            }
+        }
+    }
+
+    private void PrescanImportedModule(
+        PilotParser.ProgramContext modAst,
+        string modId,
+        IReadOnlyList<string> modulePrefixes,
+        Dictionary<string, string>? directNames,
+        bool importAll)
+    {
+        bool firstVisit = _visitedImports.Add(modId);
+        if (modAst.stmt() == null) return;
+
+        foreach (var st in modAst.stmt())
+        {
+            if (firstVisit && st.simple_stmt()?.small_stmt() is { } sms)
+            {
+                foreach (var sm in sms)
+                {
+                    if (sm.type_alias_stmt() is { } ta) RegisterTypeAlias(ta);
+                    else if (sm.import_stmt() is { } nestedImp) PrescanImportStmt(nestedImp);
+                }
+            }
+            if (st.compound_stmt() is { } comp)
+            {
+                if (firstVisit)
+                {
+                    if (comp.enum_def() is { } en) RegisterEnum(en);
+                    else if (comp.record_def() is { } rec) _records.Add(rec.identifier().GetText());
+                    else if (comp.struct_def() is { } sd) _records.Add(sd.identifier().GetText());
+                }
+                if (comp.func_def() is { } fn)
+                {
+                    string fnName = fn.identifier().GetText();
+                    if (importAll)
+                    {
+                        RegisterFunction(fn, fnName);
+                    }
+                    else if (directNames != null && directNames.TryGetValue(fnName, out string? boundName))
+                    {
+                        RegisterFunction(fn, boundName);
+                    }
+                    foreach (string pref in modulePrefixes)
+                    {
+                        RegisterFunction(fn, $"{pref}.{fnName}");
+                    }
+                }
+            }
         }
     }
 
@@ -202,9 +304,9 @@ public sealed class PilotErrorFlowAnalyzer : PilotBaseVisitor<string>
         }
     }
 
-    private void RegisterFunction(PilotParser.Func_defContext fn)
+    private void RegisterFunction(PilotParser.Func_defContext fn, string? overrideName = null)
     {
-        string name = fn.identifier().GetText();
+        string name = !string.IsNullOrEmpty(overrideName) ? overrideName! : fn.identifier().GetText();
         string rawRet = fn.type_spec()?.GetText().Trim() ?? "void";
         bool allowExceptions = fn.decorators()?.decorator()?.Any(d =>
         {
@@ -971,6 +1073,12 @@ public sealed class PilotErrorFlowAnalyzer : PilotBaseVisitor<string>
                         continue;
                     }
                 }
+                else if (i > 0 && _functions.TryGetValue(exprPrefix, out var dottedFnInfo))
+                {
+                    currentType = dottedFnInfo.EffectiveReturnType;
+                    exprPrefix += $"({tr.arglist()?.GetText() ?? ""})";
+                    continue;
+                }
 
                 exprPrefix += $"({tr.arglist()?.GetText() ?? ""})";
             }
@@ -991,6 +1099,11 @@ public sealed class PilotErrorFlowAnalyzer : PilotBaseVisitor<string>
                 if (member is "is_ok" or "IsOk" or "is_err" or "IsErr" or "is_fail" or "IsFail")
                 {
                     currentType = "bool";
+                    if (nextIsCall)
+                    {
+                        Visit(trailers[i + 1]);
+                        i++;
+                    }
                     continue;
                 }
                 if (nextIsCall && member is "parse_int" or "ParseInt")

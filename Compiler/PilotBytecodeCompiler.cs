@@ -362,10 +362,11 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     #region Pre-Scan & Type Descriptor Registration
 
-    private void PrescanProgramTypeDeclarations(PilotParser.ProgramContext program)
+    private void PrescanProgramTypeDeclarations(PilotParser.ProgramContext program, HashSet<string>? visitedModules = null)
     {
         var stmts = program.stmt();
         if (stmts == null) return;
+        visitedModules ??= new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var stmt in stmts)
         {
@@ -397,7 +398,37 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
                     {
                         RegisterAdtCompileTime(adtTd);
                     }
+                    else if (sm.import_stmt() is { } impCtx)
+                    {
+                        PrescanImportedModuleTypes(impCtx, visitedModules);
+                    }
                 }
+            }
+        }
+    }
+
+    private void PrescanImportedModuleTypes(PilotParser.Import_stmtContext impCtx, HashSet<string> visitedModules)
+    {
+        if (impCtx.import_name()?.dotted_as_names()?.dotted_as_name() is { } specs)
+        {
+            foreach (var spec in specs)
+            {
+                string dotted = spec.dotted_name().GetText();
+                if (Pilot.Runtime.Stdlib.PilotStdlibResolver.TryGetParsedModuleAst(dotted, 0, null, out var modAst, out string modId) &&
+                    modAst != null && visitedModules.Add(modId))
+                {
+                    PrescanProgramTypeDeclarations(modAst, visitedModules);
+                }
+            }
+        }
+        else if (impCtx.import_from() is { } fromCtx)
+        {
+            int dots = fromCtx.DOT()?.Length ?? 0;
+            string dotted = fromCtx.dotted_name()?.GetText() ?? string.Empty;
+            if (Pilot.Runtime.Stdlib.PilotStdlibResolver.TryGetParsedModuleAst(dotted, dots, null, out var modAst, out string modId) &&
+                modAst != null && visitedModules.Add(modId))
+            {
+                PrescanProgramTypeDeclarations(modAst, visitedModules);
             }
         }
     }
@@ -3182,7 +3213,34 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         {
             return str;
         }
-        return str.Replace("\\n", "\n").Replace("\\r", "\r").Replace("\\t", "\t").Replace("\\\"", "\"").Replace("\\'", "'").Replace("\\\\", "\\");
+        var sb = new System.Text.StringBuilder(str.Length);
+        for (int i = 0; i < str.Length; i++)
+        {
+            char c = str[i];
+            if (c == '\\' && i + 1 < str.Length)
+            {
+                char next = str[++i];
+                switch (next)
+                {
+                    case 'n': sb.Append('\n'); break;
+                    case 'r': sb.Append('\r'); break;
+                    case 't': sb.Append('\t'); break;
+                    case '0': sb.Append('\0'); break;
+                    case '\\': sb.Append('\\'); break;
+                    case '"': sb.Append('"'); break;
+                    case '\'': sb.Append('\''); break;
+                    default:
+                        sb.Append('\\');
+                        sb.Append(next);
+                        break;
+                }
+            }
+            else
+            {
+                sb.Append(c);
+            }
+        }
+        return sb.ToString();
     }
 
     private static string StripQuotes(string s)

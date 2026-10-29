@@ -63,9 +63,24 @@ public sealed class PilotComptimeEvaluator : PilotBaseVisitor<object?>
     {
         if (program?.stmt() == null) return;
 
-        // Pass 1: Register pure/comptime type definitions and function declarations in sandbox
+        // Pass 1: Register imports, pure/comptime type definitions, and function declarations in sandbox
         foreach (var stmt in program.stmt())
         {
+            if (stmt.simple_stmt()?.small_stmt() is { } smalls)
+            {
+                foreach (var sm in smalls)
+                {
+                    if (sm.import_stmt() is { } imp && imp.foreign_import_stmt() == null)
+                    {
+                        TryExecuteInSandbox(imp);
+                    }
+                    else if (sm.type_alias_stmt() != null)
+                    {
+                        TryExecuteInSandbox(sm);
+                    }
+                }
+            }
+
             var comp = stmt.compound_stmt();
             if (comp == null) continue;
 

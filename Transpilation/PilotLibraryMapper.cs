@@ -434,6 +434,10 @@ public static partial class PilotLibraryMapper
         // A. Import & Header Stripping / Native Mapping
         // ---------------------------------------------------------------------
         var trimmed = s.Trim();
+        if (TryMapForeignStdlibImportToPilot(trimmed, sourceLang, out string? mappedPilotStdImport))
+        {
+            return mappedPilotStdImport!;
+        }
         if (trimmed.StartsWith("import ", StringComparison.Ordinal) || trimmed.StartsWith("from ", StringComparison.Ordinal))
         {
             if (MyRegex2().IsMatch(trimmed))
@@ -667,6 +671,152 @@ public static partial class PilotLibraryMapper
         }
 
         return s;
+    }
+
+    /// <summary>
+    /// Milestone 21.1: Maps a native Pilot <c>std.*</c> module import (e.g. <c>std.math</c>, <c>std.collections</c>)
+    /// to the idiomatic target ecosystem import/header statement during <c>--emit &lt;target&gt;</c>.
+    /// </summary>
+    public static string MapPilotStdModuleToTarget(string stdModule, string targetLang)
+    {
+        string mod = stdModule.Trim();
+        string lang = targetLang.ToLowerInvariant();
+        return (mod, lang) switch
+        {
+            ("std.math", "python" or "py") => "import math, statistics",
+            ("std.math", "rust" or "rs") => "use std::f64::consts;",
+            ("std.math", "c") => "#include <math.h>",
+            ("std.math", "cpp" or "c++") => "#include <cmath>",
+            ("std.math", "csharp" or "cs") => "using static System.Math;",
+            ("std.math", "js" or "javascript" or "ts" or "typescript") => "// Math (built-in global)",
+            ("std.math", "lua") => "local math = require(\"math\")",
+
+            ("std.collections", "python" or "py") => "from collections import deque, defaultdict\nimport heapq, bisect",
+            ("std.collections", "rust" or "rs") => "use std::collections::{VecDeque, BinaryHeap, BTreeMap, HashMap};",
+            ("std.collections", "cpp" or "c++") => "#include <deque>\n#include <queue>\n#include <map>",
+            ("std.collections", "csharp" or "cs") => "using System.Collections.Generic;",
+
+            ("std.itertools", "python" or "py") => "import itertools",
+            ("std.itertools", "rust" or "rs") => "// std::iter::Iterator combinators",
+            ("std.itertools", "csharp" or "cs") => "using System.Linq;",
+
+            ("std.text", "python" or "py") => "import re",
+            ("std.text", "rust" or "rs") => "use std::str;",
+            ("std.text", "cpp" or "c++") => "#include <string_view>\n#include <regex>",
+            ("std.text", "csharp" or "cs") => "using System.Text;\nusing System.Text.RegularExpressions;",
+
+            ("std.random", "python" or "py") => "import random",
+            ("std.random", "rust" or "rs") => "// seeded PRNG (SplitMix64 / PcgRng)",
+            ("std.random", "cpp" or "c++") => "#include <random>",
+            ("std.random", "csharp" or "cs") => "using System;",
+
+            ("std.io", "python" or "py") => "import io",
+            ("std.io", "rust" or "rs") => "use std::io::{self, BufRead, BufReader, BufWriter, Write};",
+            ("std.io", "c") => "#include <stdio.h>",
+            ("std.io", "cpp" or "c++") => "#include <iostream>\n#include <fstream>",
+            ("std.io", "csharp" or "cs") => "using System.IO;",
+
+            ("std.fs", "python" or "py") => "import os, glob, mmap",
+            ("std.fs", "rust" or "rs") => "use std::fs;",
+            ("std.fs", "cpp" or "c++") => "#include <filesystem>",
+            ("std.fs", "csharp" or "cs") => "using System.IO;\nusing System.IO.MemoryMappedFiles;",
+            ("std.fs", "js" or "javascript" or "ts" or "typescript") => "const fs = require(\"fs\");",
+
+            ("std.path", "python" or "py") => "from pathlib import Path",
+            ("std.path", "rust" or "rs") => "use std::path::{Path, PathBuf};",
+            ("std.path", "cpp" or "c++") => "#include <filesystem>",
+            ("std.path", "csharp" or "cs") => "using System.IO;",
+            ("std.path", "js" or "javascript" or "ts" or "typescript") => "const path = require(\"path\");",
+
+            ("std.encoding", "python" or "py") => "import base64, binascii, urllib.parse",
+            ("std.encoding", "rust" or "rs") => "// std.encoding: base64 / hex / RFC-3986 url codecs",
+            ("std.encoding", "csharp" or "cs") => "using System;\nusing System.Text;",
+            ("std.encoding", "js" or "javascript" or "ts" or "typescript") => "// std.encoding: Buffer / URL / URLSearchParams",
+            ("std.encoding", "java") => "import java.util.Base64;\nimport java.net.URI;\nimport java.net.URLEncoder;\nimport java.net.URLDecoder;",
+            ("std.encoding", "ruby" or "rb") => "require \"base64\"\nrequire \"uri\"\nrequire \"cgi\"",
+
+            ("std.formats", "python" or "py") => "import json, csv, tomllib",
+            ("std.formats", "rust" or "rs") => "// std.formats: serde_json / toml / csv / dotenv",
+            ("std.formats", "csharp" or "cs") => "using System.Text.Json;",
+            ("std.formats", "js" or "javascript" or "ts" or "typescript") => "// std.formats: JSON / TOML / CSV / dotenv",
+            ("std.formats", "java") => "// std.formats: JSON / TOML / CSV / dotenv",
+            ("std.formats", "ruby" or "rb") => "require \"json\"\nrequire \"csv\"",
+
+            _ => $"// {mod}"
+        };
+    }
+
+    /// <summary>
+    /// Milestone 21.1 &amp; 24.2: Maps foreign standard-library imports (Python <c>collections</c>/<c>itertools</c>/<c>pathlib</c>/<c>re</c>/<c>random</c>/<c>base64</c>/<c>csv</c>/<c>tomllib</c>,
+    /// Rust <c>std::collections</c>/<c>std::path</c>/<c>std::io</c>, C <c>&lt;math.h&gt;</c>) directly to native Pilot <c>import std.*</c>.
+    /// </summary>
+    public static bool TryMapForeignStdlibImportToPilot(string trimmedLine, string sourceLang, out string? pilotImport)
+    {
+        pilotImport = null;
+        string clean = trimmedLine.TrimEnd(';').Trim();
+        switch (clean)
+        {
+            case "import collections":
+            case "from collections import deque":
+            case "import heapq":
+            case "import bisect":
+            case "use std::collections::VecDeque":
+            case "use std::collections::BinaryHeap":
+            case "use std::collections::BTreeMap":
+                pilotImport = "import std.collections;";
+                return true;
+            case "import itertools":
+                pilotImport = "import std.itertools;";
+                return true;
+            case "import re":
+                pilotImport = "import std.text;";
+                return true;
+            case "import statistics":
+            case "#include <math.h>":
+            case "#include <cmath>":
+                pilotImport = "import std.math;";
+                return true;
+            case "import random":
+                pilotImport = "import std.random;";
+                return true;
+            case "import pathlib":
+            case "from pathlib import Path":
+            case "use std::path::Path":
+            case "use std::path::PathBuf":
+                pilotImport = "import std.path;";
+                return true;
+            case "import io":
+            case "use std::io":
+                pilotImport = "import std.io;";
+                return true;
+            case "import glob":
+            case "import mmap":
+                pilotImport = "import std.fs;";
+                return true;
+            case "import base64":
+            case "import binascii":
+            case "import urllib.parse":
+            case "from urllib.parse import urlparse":
+            case "from urllib.parse import quote, unquote":
+            case "import java.util.Base64":
+            case "require \"base64\"":
+            case "require 'base64'":
+            case "require \"uri\"":
+            case "require 'uri'":
+                pilotImport = "import std.encoding;";
+                return true;
+            case "import csv":
+            case "import tomllib":
+            case "import tomli":
+            case "import dotenv":
+            case "from dotenv import dotenv_values":
+            case "require \"csv\"":
+            case "require 'csv'":
+                pilotImport = "import std.formats;";
+                return true;
+            default:
+                return false;
+        }
     }
 
     private static string MapPilotTypeToNumpy(string pType) => pType.ToLowerInvariant() switch

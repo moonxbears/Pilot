@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: MIT
+// std.core — Fundamental Comparison ADTs, Scalar Combinators & Contract Helpers
+
+type Ordering = Less | Equal | Greater;
+
+def identity(x) {
+    return x;
+}
+
+def compare(a, b) -> Ordering {
+    if a < b {
+        return Ordering.Less;
+    } elif a > b {
+        return Ordering.Greater;
+    }
+    return Ordering.Equal;
+}
+
+def is_less(ord: Ordering) -> bool {
+    return match ord {
+        case Ordering.Less => true,
+        case Ordering.Equal => false,
+        case Ordering.Greater => false
+    };
+}
+
+def is_equal(ord: Ordering) -> bool {
+    return match ord {
+        case Ordering.Less => false,
+        case Ordering.Equal => true,
+        case Ordering.Greater => false
+    };
+}
+
+def is_greater(ord: Ordering) -> bool {
+    return match ord {
+        case Ordering.Less => false,
+        case Ordering.Equal => false,
+        case Ordering.Greater => true
+    };
+}
+
+def reverse_ordering(ord: Ordering) -> Ordering {
+    return match ord {
+        case Ordering.Less => Ordering.Greater,
+        case Ordering.Equal => Ordering.Equal,
+        case Ordering.Greater => Ordering.Less
+    };
+}
+
+def clamp(val, lo, hi) {
+    if val < lo {
+        return lo;
+    }
+    if val > hi {
+        return hi;
+    }
+    return val;
+}
+
+def min_val(a, b) {
+    if a <= b {
+        return a;
+    }
+    return b;
+}
+
+def max_val(a, b) {
+    if a >= b {
+        return a;
+    }
+    return b;
+}
+
+def swap_pair(pair) {
+    return (pair[1], pair[0]);
+}
+
+def check_invariant(cond: bool, msg: str) {
+    if !cond {
+        panic(msg);
+    }
+}

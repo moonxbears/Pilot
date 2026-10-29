@@ -1,0 +1,95 @@
+// SPDX-License-Identifier: MIT
+// std.option — Zero-Overhead Niche-Optimized Nullable (T?) Combinators
+// Adheres to Pilot Invariant #2: presence checks use __opt_is_some / `if some`, never postfix `!`.
+
+def is_some(opt) -> bool {
+    return __opt_is_some(opt);
+}
+
+def is_none(opt) -> bool {
+    return __opt_is_none(opt);
+}
+
+def unwrap(opt) {
+    return __opt_unwrap(opt);
+}
+
+def expect(opt, msg: str) {
+    if __opt_is_none(opt) {
+        panic(msg);
+    }
+    return __opt_unwrap(opt);
+}
+
+def unwrap_or(opt, fallback) {
+    if __opt_is_some(opt) {
+        return __opt_unwrap(opt);
+    }
+    return fallback;
+}
+
+def unwrap_or_else(opt, fallback_fn) {
+    if __opt_is_some(opt) {
+        return __opt_unwrap(opt);
+    }
+    return fallback_fn();
+}
+
+def map(opt, transform_fn) {
+    if __opt_is_some(opt) {
+        return some(transform_fn(__opt_unwrap(opt)));
+    }
+    return none;
+}
+
+def and_then(opt, flat_fn) {
+    if __opt_is_some(opt) {
+        return flat_fn(__opt_unwrap(opt));
+    }
+    return none;
+}
+
+def or_else(opt, alt_fn) {
+    if __opt_is_some(opt) {
+        return opt;
+    }
+    return alt_fn();
+}
+
+def filter(opt, pred_fn) {
+    if __opt_is_some(opt) {
+        let v = __opt_unwrap(opt);
+        if pred_fn(v) {
+            return opt;
+        }
+    }
+    return none;
+}
+
+def zip(opt_a, opt_b) {
+    if __opt_is_some(opt_a) and __opt_is_some(opt_b) {
+        return some((__opt_unwrap(opt_a), __opt_unwrap(opt_b)));
+    }
+    return none;
+}
+
+def flatten(nested_opt) {
+    if __opt_is_some(nested_opt) {
+        return __opt_unwrap(nested_opt);
+    }
+    return none;
+}
+
+def ok_or(opt, err_val) -> any ! any {
+    if __opt_is_some(opt) {
+        return ok(__opt_unwrap(opt));
+    }
+    return fail(err_val);
+}
+
+def to_list(opt) {
+    if __opt_is_some(opt) {
+        return [__opt_unwrap(opt)];
+    }
+    return [];
+}

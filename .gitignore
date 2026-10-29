@@ -72,3 +72,5 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .agents/.ai_index_stamp
+**/.pilc-cache/
+**/.pilc-precompiled/

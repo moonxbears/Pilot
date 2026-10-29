@@ -32,6 +32,7 @@ public sealed unsafe class PilotSharedBuffer : IDisposable, IEquatable<PilotShar
     private MemoryMappedFile? _mmf;
     private MemoryMappedViewAccessor? _accessor;
     private bool _pointerAcquired;
+    private bool _isReadOnlyMmap;
     private PilotSharedBuffer? _keepAliveParent;
     private bool _disposed;
 
@@ -40,6 +41,7 @@ public sealed unsafe class PilotSharedBuffer : IDisposable, IEquatable<PilotShar
     public string? BackingPath { get; private set; }
     public string? SharedName { get; private set; }
     public bool IsSharedMmap => _accessor != null;
+    public bool IsReadOnly => _isReadOnlyMmap || (_keepAliveParent?.IsReadOnly ?? false);
     public bool OwnsNativeMemory => _ownsNativeData;
 
     /// <summary>
@@ -131,6 +133,61 @@ public sealed unsafe class PilotSharedBuffer : IDisposable, IEquatable<PilotShar
         string fullPath = ResolveBackingFilePath(nameOrPath, out string logicalName);
         nuint effectiveCap = capacity == 0 ? 1u : capacity;
         buf.MapBackingFile(fullPath, logicalName, effectiveCap, initialLength ?? 0u);
+        return buf;
+    }
+
+    /// <summary>
+    /// Milestone 21.5: Maps an existing file read-only via OS <c>mmap</c> into a zero-copy
+    /// <see cref="PilotSharedBuffer"/> without padding or mutating file size.
+    /// </summary>
+    public static PilotSharedBuffer MapExistingFileReadOnly(
+        string filePath,
+        PilotSharedElementKind kind = PilotSharedElementKind.UInt8)
+    {
+        string fullPath = Path.GetFullPath(filePath);
+        if (!File.Exists(fullPath))
+            throw new FileNotFoundException($"File not found for read-only mmap: '{fullPath}'.", fullPath);
+
+        var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        long fileBytes = fs.Length;
+        int stride = GetStride(kind);
+        nuint elemCount = (nuint)(fileBytes / stride);
+        if (fileBytes == 0 || elemCount == 0)
+        {
+            fs.Dispose();
+            var empty = AllocateUnmanaged(0, kind, 0);
+            empty.BackingPath = fullPath;
+            empty._isReadOnlyMmap = true;
+            return empty;
+        }
+
+        long viewBytes = (long)(elemCount * (nuint)stride);
+        var mmf = MemoryMappedFile.CreateFromFile(
+            fs,
+            mapName: null,
+            capacity: 0,
+            MemoryMappedFileAccess.Read,
+            HandleInheritability.None,
+            leaveOpen: false);
+
+        var accessor = mmf.CreateViewAccessor(0, viewBytes, MemoryMappedFileAccess.Read);
+        byte* rawPtr = null;
+        accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref rawPtr);
+        rawPtr += accessor.PointerOffset;
+
+        var buf = new PilotSharedBuffer(kind)
+        {
+            _mmf = mmf,
+            _accessor = accessor,
+            _pointerAcquired = true,
+            _ownsNativeData = false,
+            _isReadOnlyMmap = true,
+            BackingPath = fullPath,
+            SharedName = Path.GetFileName(fullPath)
+        };
+        buf._abiHeader->DataPtr = rawPtr;
+        buf._abiHeader->Capacity = elemCount;
+        buf._abiHeader->Length = elemCount;
         return buf;
     }
 
@@ -337,6 +394,8 @@ public sealed unsafe class PilotSharedBuffer : IDisposable, IEquatable<PilotShar
     public void YieldElement(PilotValue value)
     {
         EnsureNotDisposed();
+        if (IsReadOnly)
+            throw new InvalidOperationException("Cannot write to a read-only mmap SliceBuffer.");
         EnsureCapacityForYield();
         int idx = checked((int)_abiHeader->Length);
         WriteRawUnchecked(idx, value);
@@ -368,6 +427,8 @@ public sealed unsafe class PilotSharedBuffer : IDisposable, IEquatable<PilotShar
     public void SetElement(int index, PilotValue value)
     {
         EnsureNotDisposed();
+        if (IsReadOnly)
+            throw new InvalidOperationException("Cannot write to a read-only mmap SliceBuffer.");
         if (index < 0) index += Length;
         if (index < 0)
             return;

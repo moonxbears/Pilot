@@ -1,0 +1,154 @@
+// SPDX-License-Identifier: MIT AND Apache-2.0
+// std.random — Deterministic Seeded PRNGs (`SplitMix64` & `PcgRng` PCG-XSH-RR)
+// Bootstrapped via M20 (`--from c --strict-pilot --viable-license-only`) from Vigna SplitMix64 & O'Neill PCG32.
+
+// Two's-complement signed 64-bit representations of canonical SplitMix64 & PCG64 constants:
+// 0x9E3779B97F4A7C15 = -7046029254386353131
+// 0xBF58476D1CE4E5B9 = -4658895280553007687
+// 0x94D049BB133111EB = -7723592293110705685
+const _SM64_GAMMA: i64 = -7046029254386353131;
+const _SM64_MUL1: i64 = -4658895280553007687;
+const _SM64_MUL2: i64 = -7723592293110705685;
+const _PCG_MUL: i64 = 6364136223846793005;
+const _PCG_INC_DEFAULT: i64 = 1442695040888963407;
+const _MASK_32: i64 = 4294967295;
+const _MASK_53: i64 = 9007199254740991;
+const _INV_2POW53: f64 = 1.0 / 9007199254740992.0;
+
+// Logical unsigned right shift for 64-bit signed two's-complement integers (`1 <= shift <= 62`)
+def _ushr64(x: i64, shift: i64) -> i64 {
+    let mask: i64 = (1 << (64 - shift)) - 1;
+    return (x >> shift) & mask;
+}
+
+// Sebastiano Vigna's SplitMix64 — Fast 64-bit state PRNG & seed mixer
+class SplitMix64 {
+    def __init__(self, seed: i64 = 42) {
+        self._state = seed;
+    }
+
+    def next_bits64(self) -> i64 {
+        self._state = self._state + _SM64_GAMMA;
+        var z: i64 = self._state;
+        z = (z ^ _ushr64(z, 30)) * _SM64_MUL1;
+        z = (z ^ _ushr64(z, 27)) * _SM64_MUL2;
+        return z ^ _ushr64(z, 31);
+    }
+
+    def next_u32(self) -> i64 {
+        return _ushr64(self.next_bits64(), 32) & _MASK_32;
+    }
+
+    def next_float(self) -> f64 {
+        let bits53: i64 = _ushr64(self.next_bits64(), 11) & _MASK_53;
+        return float(bits53) * _INV_2POW53;
+    }
+
+    def next_int(self, lo: i64, hi_inclusive: i64) -> i64 {
+        if hi_inclusive <= lo {
+            return lo;
+        }
+        let span: i64 = (hi_inclusive - lo) + 1;
+        let r: i64 = self.next_bits64() & 9223372036854775807;
+        return lo + (r % span);
+    }
+}
+
+// Melissa O'Neill's PCG-XSH-RR (64-bit state -> 32-bit statistically uniform output)
+class PcgRng {
+    def __init__(self, seed: i64 = 42, stream: i64 = 54) {
+        self._state = 0;
+        self._inc = (stream << 1) | 1;
+        if self._inc == 0 {
+            self._inc = _PCG_INC_DEFAULT;
+        }
+        let _warmup0 = self.next_u32();
+        self._state = self._state + seed;
+        let _warmup1 = self.next_u32();
+    }
+
+    def next_u32(self) -> i64 {
+        let oldstate: i64 = self._state;
+        self._state = oldstate * _PCG_MUL + self._inc;
+        let xorshifted: i64 = _ushr64(_ushr64(oldstate, 18) ^ oldstate, 27) & _MASK_32;
+        let rot: i64 = _ushr64(oldstate, 59) & 31;
+        if rot == 0 {
+            return xorshifted;
+        }
+        let right_part: i64 = xorshifted >> rot;
+        let left_part: i64 = (xorshifted << (32 - rot)) & _MASK_32;
+        return (right_part | left_part) & _MASK_32;
+    }
+
+    def next_float(self) -> f64 {
+        let hi21: i64 = self.next_u32() >> 11;
+        let lo32: i64 = self.next_u32();
+        let bits53: i64 = ((hi21 << 32) | lo32) & _MASK_53;
+        return float(bits53) * _INV_2POW53;
+    }
+
+    def next_range(self, lo: f64, hi: f64) -> f64 {
+        return lo + (hi - lo) * self.next_float();
+    }
+
+    def next_int(self, lo: i64, hi_inclusive: i64) -> i64 {
+        if hi_inclusive <= lo {
+            return lo;
+        }
+        let span: i64 = (hi_inclusive - lo) + 1;
+        let hi31: i64 = self.next_u32() & 2147483647;
+        let lo32: i64 = self.next_u32();
+        let r63: i64 = (hi31 << 32) | lo32;
+        return lo + (r63 % span);
+    }
+
+    def next_bool(self, probability: f64 = 0.5) -> bool {
+        return self.next_float() < probability;
+    }
+
+    // Box-Muller Gaussian normal variate N(mean_val, std_dev^2)
+    def next_gaussian(self, mean_val: f64 = 0.0, std_dev: f64 = 1.0) -> f64 {
+        var u1: f64 = self.next_float();
+        while u1 <= 0.000000000001 {
+            u1 = self.next_float();
+        }
+        let u2: f64 = self.next_float();
+        let mag: f64 = sqrt(-2.0 * ln(u1));
+        let z0: f64 = mag * cos(6.28318530717958647692 * u2);
+        return mean_val + z0 * std_dev;
+    }
+
+    def choice(self, items) {
+        let n: i64 = len(items);
+        if n == 0 {
+            return none;
+        }
+        let idx: i64 = self.next_int(0, n - 1);
+        return some(items[idx]);
+    }
+
+    // Fisher-Yates unbiased shuffle (returns new shuffled list)
+    def shuffle(self, items) {
+        var arr = [x for x in items];
+        let n: i64 = len(arr);
+        var i: i64 = n - 1;
+        while i > 0 {
+            let j: i64 = self.next_int(0, i);
+            let tmp = arr[i];
+            arr[i] = arr[j];
+            arr[j] = tmp;
+            i = i - 1;
+        }
+        return arr;
+    }
+
+    def sample(self, items, k: i64) {
+        let shuf = self.shuffle(items);
+        let limit: i64 = min(max(0, k), len(shuf));
+        var out = [];
+        for i in 0..<limit {
+            out.append(shuf[i]);
+        }
+        return out;
+    }
+}

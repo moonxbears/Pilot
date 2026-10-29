@@ -2000,6 +2000,89 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         return null;
     }
 
+    public override string? VisitImport_name(PilotParser.Import_nameContext context)
+    {
+        if (context.IMPORT() != null)
+            AddSemanticToken(context.IMPORT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
+        var specs = context.dotted_as_names()?.dotted_as_name();
+        if (specs != null)
+        {
+            foreach (var spec in specs)
+            {
+                string dotted = spec.dotted_name().GetText();
+                if (spec.AS() != null)
+                    AddSemanticToken(spec.AS().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
+                var parts = spec.dotted_name().identifier();
+                foreach (var pid in parts)
+                {
+                    AddSemanticToken(pid.Start, PilotSemanticTokenLegend.TypeNamespace, 0);
+                }
+
+                var asId = spec.identifier();
+                if (asId != null)
+                {
+                    string aliasName = asId.GetText();
+                    var sym = CreateSymbol(asId, context, aliasName, PilotSymbolKind.Module, dotted, "Pilot Standard Library", $"import {dotted} as {aliasName}", $"Imported Pilot module `{dotted}`.");
+                    RegisterSymbol(sym, PilotSemanticTokenLegend.TypeNamespace, PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModDefinition);
+                }
+                else if (parts.Length > 0)
+                {
+                    var leafId = parts[^1];
+                    string leafName = leafId.GetText();
+                    var sym = CreateSymbol(leafId, context, leafName, PilotSymbolKind.Module, dotted, "Pilot Standard Library", $"import {dotted}", $"Imported Pilot module `{dotted}`.");
+                    RegisterSymbol(sym, PilotSemanticTokenLegend.TypeNamespace, PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModDefinition);
+                    if (parts.Length > 1)
+                    {
+                        var rootId = parts[0];
+                        var rootSym = CreateSymbol(rootId, context, rootId.GetText(), PilotSymbolKind.Module, parts[0].GetText(), "Pilot Standard Library", $"namespace {parts[0].GetText()}", $"Pilot namespace `{parts[0].GetText()}`.");
+                        RegisterSymbol(rootSym, PilotSemanticTokenLegend.TypeNamespace, 0);
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    public override string? VisitImport_from(PilotParser.Import_fromContext context)
+    {
+        if (context.FROM() != null)
+            AddSemanticToken(context.FROM().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.IMPORT() != null)
+            AddSemanticToken(context.IMPORT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+
+        string dotted = context.dotted_name()?.GetText() ?? string.Empty;
+        if (context.dotted_name()?.identifier() is { } modIds)
+        {
+            foreach (var mid in modIds)
+            {
+                AddSemanticToken(mid.Start, PilotSemanticTokenLegend.TypeNamespace, 0);
+            }
+        }
+
+        var items = context.import_as_names()?.import_as_name();
+        if (items != null)
+        {
+            foreach (var item in items)
+            {
+                if (item.AS() != null)
+                    AddSemanticToken(item.AS().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+                var ids = item.identifier();
+                var origId = ids[0];
+                var bindId = ids.Length > 1 ? ids[1] : origId;
+                string origName = origId.GetText();
+                string bindName = bindId.GetText();
+
+                var kind = char.IsUpper(origName[0]) ? PilotSymbolKind.Class : PilotSymbolKind.Function;
+                int tokType = kind == PilotSymbolKind.Class ? PilotSemanticTokenLegend.TypeClass : PilotSemanticTokenLegend.TypeFunction;
+                var sym = CreateSymbol(bindId, context, bindName, kind, "any", "Pilot Module Import", $"from {dotted} import {origName}", $"Imported `{origName}` from `{dotted}`.");
+                RegisterSymbol(sym, tokType, PilotSemanticTokenLegend.ModDeclaration | PilotSemanticTokenLegend.ModDefinition);
+            }
+        }
+        return null;
+    }
+
     public override string? VisitExtern_def(PilotParser.Extern_defContext context)
     {
         AddSemanticToken(context.EXTERN().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);

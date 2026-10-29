@@ -486,6 +486,43 @@ public sealed class PilotAstExpr
                 return Right!.Evaluate(nextBindings, ctx);
             }
 
+            case PilotAstNodeKind.Call:
+            {
+                var envDict = bindings is Dictionary<string, PilotValue> d
+                    ? d
+                    : new Dictionary<string, PilotValue>(bindings, StringComparer.Ordinal);
+                if (ctx != null)
+                {
+                    return Pilot.Analysis.Autodiff.PilotSymbolicDifferentiator.EvaluateSymbolicAstWithEnv(this, envDict, ctx);
+                }
+                string fnShort = (CalleeName ?? "").Split('.')[^1].ToLowerInvariant();
+                var argVals = Children.Select(c => c.Evaluate(bindings, ctx)).ToList();
+                double a0 = argVals.Count > 0 ? argVals[0].AsFloat() : 0.0;
+                return fnShort switch
+                {
+                    "sin" => PilotValue.FromFloat(Math.Sin(a0)),
+                    "cos" => PilotValue.FromFloat(Math.Cos(a0)),
+                    "tan" => PilotValue.FromFloat(Math.Tan(a0)),
+                    "asin" => PilotValue.FromFloat(Math.Asin(a0)),
+                    "acos" => PilotValue.FromFloat(Math.Acos(a0)),
+                    "atan" => PilotValue.FromFloat(Math.Atan(a0)),
+                    "sinh" => PilotValue.FromFloat(Math.Sinh(a0)),
+                    "cosh" => PilotValue.FromFloat(Math.Cosh(a0)),
+                    "tanh" => PilotValue.FromFloat(Math.Tanh(a0)),
+                    "exp" => PilotValue.FromFloat(Math.Exp(a0)),
+                    "log" or "ln" => PilotValue.FromFloat(Math.Log(a0)),
+                    "log2" => PilotValue.FromFloat(Math.Log2(a0)),
+                    "log10" => PilotValue.FromFloat(Math.Log10(a0)),
+                    "sqrt" => PilotValue.FromFloat(Math.Sqrt(a0)),
+                    "cbrt" => PilotValue.FromFloat(Math.Cbrt(a0)),
+                    "abs" => PilotValue.FromFloat(Math.Abs(a0)),
+                    "sigmoid" => PilotValue.FromFloat(1.0 / (1.0 + Math.Exp(-a0))),
+                    "softplus" => PilotValue.FromFloat(Math.Log(1.0 + Math.Exp(a0))),
+                    "pow" when argVals.Count >= 2 => PilotValue.FromFloat(Math.Pow(a0, argVals[1].AsFloat())),
+                    _ => PilotValue.Null
+                };
+            }
+
             default:
                 return PilotValue.Null;
         }
@@ -1596,6 +1633,44 @@ public static class PilotCallQuotingEngine
                         }
                     }
                     return PilotAstExpr.Call(fnName, argAsts);
+                }
+
+                // Support dotted module calls & constants like `math.sin(x)`, `std.math.tanh(x)`, `math.PI`
+                if (aeCtx.atom()?.identifier() != null)
+                {
+                    var parts = new List<string> { aeCtx.atom().identifier().GetText() };
+                    int tIdx = 0;
+                    while (tIdx < trailers.Length && trailers[tIdx].DOT() != null && trailers[tIdx].identifier() != null && trailers[tIdx].LPAR() == null)
+                    {
+                        parts.Add(trailers[tIdx].identifier().GetText());
+                        tIdx++;
+                    }
+                    if (tIdx == trailers.Length - 1 && trailers[tIdx].LPAR() != null)
+                    {
+                        string dottedFn = string.Join(".", parts);
+                        var callArgs = trailers[tIdx].arglist()?.argument();
+                        var argAsts = new List<PilotAstExpr>();
+                        if (callArgs != null)
+                        {
+                            foreach (var ca in callArgs)
+                            {
+                                if (ca.test() != null)
+                                    argAsts.Add(ConvertParseTreeToSymbolicAst(ca.test(), envSubstitutions, alphaRenames));
+                            }
+                        }
+                        return PilotAstExpr.Call(dottedFn, argAsts);
+                    }
+                    if (tIdx == trailers.Length && parts.Count >= 2)
+                    {
+                        string lastSeg = parts[^1];
+                        if (lastSeg == "PI") return PilotAstExpr.Const(PilotValue.FromFloat(Math.PI), "float");
+                        if (lastSeg == "TAU") return PilotAstExpr.Const(PilotValue.FromFloat(Math.Tau), "float");
+                        if (lastSeg == "E") return PilotAstExpr.Const(PilotValue.FromFloat(Math.E), "float");
+                        if (lastSeg == "SQRT2") return PilotAstExpr.Const(PilotValue.FromFloat(Math.Sqrt(2.0)), "float");
+                        if (lastSeg == "LN2") return PilotAstExpr.Const(PilotValue.FromFloat(Math.Log(2.0)), "float");
+                        if (lastSeg == "LN10") return PilotAstExpr.Const(PilotValue.FromFloat(Math.Log(10.0)), "float");
+                        return PilotAstExpr.Sym(string.Join(".", parts));
+                    }
                 }
                 return ConvertParseTreeToSymbolicAst(aeCtx.atom(), envSubstitutions, alphaRenames);
             }

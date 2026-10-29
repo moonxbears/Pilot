@@ -138,6 +138,10 @@ public static class PilotScriptContext
     {
         // 2. Script path and module entry name
         scope.Declare("script_path", PilotValue.FromString(scriptPath ?? string.Empty));
+        if (!string.IsNullOrWhiteSpace(scriptPath) && !scope.ContainsLocal("__file__"))
+        {
+            scope.Declare("__file__", PilotValue.FromString(Path.GetFullPath(scriptPath)));
+        }
         if (!scope.TryResolve("__name__", out _))
         {
             scope.Declare("__name__", PilotValue.FromString("__main__"));

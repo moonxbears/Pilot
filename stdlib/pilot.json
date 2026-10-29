@@ -1,0 +1,74 @@
+{
+  "name": "pilot-stdlib",
+  "version": "1.0.0",
+  "license": "MIT",
+  "description": "Foundational zero-external-dependency native Pilot standard library (bootstrapped via M20 --strict-pilot --viable-license-only and curated).",
+  "modules": {
+    "std.core": "core/core.pilot",
+    "std.option": "core/option.pilot",
+    "std.result": "core/result.pilot",
+    "std.mem": "core/mem.pilot",
+    "std.meta": "core/meta.pilot",
+    "std.collections": "collections/collections.pilot",
+    "std.itertools": "collections/itertools.pilot",
+    "std.text": "text/text.pilot",
+    "std.math": "math/math.pilot",
+    "std.random": "math/random.pilot",
+    "std.io": "io/io.pilot",
+    "std.fs": "io/fs.pilot",
+    "std.path": "io/path.pilot",
+    "std.encoding": "encoding/encoding.pilot",
+    "std.formats": "formats/formats.pilot"
+  },
+  "provenance": [
+    {
+      "target_module": "std.collections",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/bisect.py & Lib/heapq.py (binary search & binary min-heap sifting)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.collections",
+      "donor_ecosystem": "rust",
+      "donor_origin": "Rust alloc::collections::VecDeque / RingBuffer & SWAR 64-bit BitSet popcount",
+      "spdx_license": "MIT OR Apache-2.0",
+      "bootstrap_flags": "--from rust --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.math",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/statistics.py & Euclid GCD/LCM (Welford numerically stable variance)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.random",
+      "donor_ecosystem": "c",
+      "donor_origin": "Sebastiano Vigna SplitMix64 (CC0/MIT) & Melissa O'Neill PCG-XSH-RR (Apache-2.0/MIT)",
+      "spdx_license": "MIT AND Apache-2.0",
+      "bootstrap_flags": "--from c --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.path",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/posixpath.py & Lib/fnmatch.py (lexical normalization & glob matching)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.encoding",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/base64.py & Lib/urllib/parse.py (RFC-4648 hex/base64/base64url & RFC-3986 percent/URL codecs)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.formats",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/json/scanner.py, Lib/tomllib/_parser.py & Lib/csv.py (RFC-8259 JSON, TOML v1.0, RFC-4180 CSV & dotenv state machines)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    }
+  ]
+}

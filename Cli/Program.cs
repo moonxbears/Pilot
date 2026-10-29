@@ -503,10 +503,30 @@ public static class Program
         string? outputFile = null;
         var symbols = new List<string>();
         bool emitGenerated = false;
+        bool precompileStdlib = false;
+        string? stdlibOutDir = null;
+        bool buildCppRuntime = false;
+        string? cppRuntimeOutDir = null;
 
         for (int i = 0; i < args.Length; i++)
         {
-            if ((args[i] == "-o" || args[i] == "--output") && i + 1 < args.Length)
+            if (args[i] == "--precompile-stdlib")
+            {
+                precompileStdlib = true;
+                if (i + 1 < args.Length && !args[i + 1].StartsWith("-"))
+                {
+                    stdlibOutDir = args[++i];
+                }
+            }
+            else if (args[i] == "--build-cpp-runtime")
+            {
+                buildCppRuntime = true;
+                if (i + 1 < args.Length && !args[i + 1].StartsWith("-"))
+                {
+                    cppRuntimeOutDir = args[++i];
+                }
+            }
+            else if ((args[i] == "-o" || args[i] == "--output") && i + 1 < args.Length)
             {
                 outputFile = args[++i];
             }
@@ -522,6 +542,54 @@ public static class Program
             {
                 inputFile = args[i];
             }
+        }
+
+        if (precompileStdlib || buildCppRuntime)
+        {
+            if (precompileStdlib)
+            {
+                string targetDir = !string.IsNullOrWhiteSpace(stdlibOutDir)
+                    ? Path.GetFullPath(stdlibOutDir)
+                    : Path.Combine(AppContext.BaseDirectory, "stdlib", ".pilc-precompiled");
+                string bundlePath = Pilot.Runtime.Stdlib.PilotStdlibResolver.BuildPrecompiledStdlibBundle(targetDir);
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"[STDLIB PRECOMPILE] Emitted precompiled .pilc bundle -> '{bundlePath}' ({new FileInfo(bundlePath).Length} bytes)");
+                Console.ResetColor();
+            }
+
+            if (buildCppRuntime)
+            {
+                string? rtSrcDir = Pilot.Runtime.CppBackend.PilotCppBackend.LocateRuntimeSourceDirectory();
+                string? cxx = Pilot.Runtime.CppBackend.PilotCppBackend.ProbeCppCompiler();
+                if (rtSrcDir == null || cxx == null)
+                {
+                    Console.WriteLine("[CPP BACKEND] Skipping build-time C++20 runtime compilation (no host C++20 compiler or source tree).");
+                }
+                else
+                {
+                    string outDir = !string.IsNullOrWhiteSpace(cppRuntimeOutDir)
+                        ? Path.GetFullPath(cppRuntimeOutDir)
+                        : Path.Combine(AppContext.BaseDirectory, "native");
+                    Directory.CreateDirectory(outDir);
+                    string outLib = Path.Combine(outDir, Pilot.Runtime.CppBackend.PilotCppBackend.SharedLibraryFileName);
+                    string cppPath = Path.Combine(rtSrcDir, "pilot_runtime.cpp");
+                    if (Pilot.Runtime.CppBackend.PilotCppBackend.CompileCppFileToSharedLibrary(cppPath, rtSrcDir, outLib, out string? err))
+                    {
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine($"[CPP BACKEND] Compiled C++20 shared runtime ({cxx}) -> '{outLib}'");
+                        Console.ResetColor();
+                    }
+                    else
+                    {
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.WriteLine($"[CPP BACKEND] Warning: failed to build optional C++20 runtime: {err}");
+                        Console.ResetColor();
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(inputFile))
+                return 0;
         }
 
         if (string.IsNullOrEmpty(inputFile))

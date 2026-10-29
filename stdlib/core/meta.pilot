@@ -1,0 +1,113 @@
+// SPDX-License-Identifier: MIT
+// std.meta — Homoiconic Call-Quoting (`!`, `!!`, `!?`, `!@`) & Keyword Hierarchy Reflection
+
+def call_name(quoted_call) -> str {
+    return quoted_call.fn_name;
+}
+
+def call_id(quoted_call) -> i64 {
+    return quoted_call.fn_id;
+}
+
+def call_args(quoted_call) {
+    return quoted_call.args;
+}
+
+def call_return_type(quoted_call) -> str {
+    return quoted_call.return_type;
+}
+
+def invoke_call(quoted_call) {
+    return quoted_call.invoke();
+}
+
+def ast_sexpr(ast_node) -> str {
+    return ast_node.s_expr;
+}
+
+def ast_infix(ast_node) -> str {
+    return ast_node.infix;
+}
+
+def ast_symbols(ast_node) {
+    return ast_node.symbols;
+}
+
+def fold_ast(ast_node) {
+    return __ast_fold(ast_node);
+}
+
+def subst_ast(ast_node, sym_name, replacement) {
+    return __ast_subst(ast_node, sym_name, replacement);
+}
+
+def diff_ast(ast_node, wrt_var) {
+    return __ast_diff(ast_node, wrt_var);
+}
+
+def eval_ast(ast_node, bindings = {}) {
+    return __ast_eval(ast_node, bindings);
+}
+
+def plan_value(effect_plan) {
+    return effect_plan.value;
+}
+
+def plan_diffs(effect_plan) {
+    return effect_plan.diffs;
+}
+
+def plan_diff_count(effect_plan) -> i64 {
+    return effect_plan.diff_count;
+}
+
+def plan_is_pure(effect_plan) -> bool {
+    return effect_plan.is_pure;
+}
+
+def inspect_plan(effect_plan) -> str {
+    return effect_plan.inspect();
+}
+
+def commit_plan(effect_plan) {
+    return effect_plan.commit();
+}
+
+def rollback_plan(effect_plan) -> bool {
+    return effect_plan.rollback();
+}
+
+def kw_intern(name_str: str, ns_str = none) {
+    if __opt_is_some(ns_str) {
+        return keyword(__opt_unwrap(ns_str), name_str);
+    }
+    return keyword(name_str);
+}
+
+def kw_derive(child_kw, parent_kw) {
+    return derive(child_kw, parent_kw);
+}
+
+def kw_underive(child_kw, parent_kw) {
+    return underive(child_kw, parent_kw);
+}
+
+def kw_isa(child_kw, ancestor_kw) -> bool {
+    return isa(child_kw, ancestor_kw);
+}
+
+def kw_parents(kw) {
+    return __kw_parents(kw);
+}
+
+def kw_ancestors(kw) {
+    return __kw_ancestors(kw);
+}
+
+def kw_descendants(kw) {
+    return __kw_descendants(kw);
+}
+
+def kw_distance(child_kw, ancestor_kw) -> i64 {
+    return __kw_distance(child_kw, ancestor_kw);
+}

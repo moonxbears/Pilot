@@ -1,0 +1,308 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.path — Cross-Platform Lexical Path Manipulation (PSF-2.0 CPython posixpath/pathlib scaffold)
+
+def separator() -> str {
+    if __os_is_windows() {
+        return "\\";
+    }
+    return "/";
+}
+
+def _to_slashes(raw: str) -> str {
+    return __str_replace(raw, "\\", "/");
+}
+
+def _has_windows_drive(clean: str) -> bool {
+    if len(clean) < 2 {
+        return false;
+    }
+    let c0: i64 = __str_char_code(clean, 0);
+    let c1: i64 = __str_char_code(clean, 1);
+    let is_alpha: bool = (c0 >= 65 and c0 <= 90) or (c0 >= 97 and c0 <= 122);
+    return is_alpha and c1 == 58;
+}
+
+def is_absolute(raw_path: str) -> bool {
+    let s = _to_slashes(raw_path);
+    if len(s) == 0 {
+        return false;
+    }
+    if __str_slice(s, 0, 1) == "/" {
+        return true;
+    }
+    if _has_windows_drive(s) {
+        if len(s) == 2 {
+            return true;
+        }
+        return __str_slice(s, 2, 3) == "/";
+    }
+    return false;
+}
+
+def normalize(raw_path: str) -> str {
+    let slashed = _to_slashes(raw_path);
+    if len(slashed) == 0 {
+        return ".";
+    }
+
+    var prefix: str = "";
+    var rest: str = slashed;
+
+    if _has_windows_drive(slashed) {
+        prefix = __str_slice(slashed, 0, 2);
+        rest = __str_slice(slashed, 2, len(slashed));
+        if len(rest) > 0 and __str_slice(rest, 0, 1) == "/" {
+            prefix = prefix + "/";
+            rest = __str_slice(rest, 1, len(rest));
+        }
+    } elif __str_slice(slashed, 0, 1) == "/" {
+        prefix = "/";
+        rest = __str_slice(slashed, 1, len(slashed));
+    }
+
+    let raw_parts = __str_split(rest, "/");
+    var stack = [];
+    let rooted: bool = len(prefix) > 0 and __str_slice(prefix, len(prefix) - 1, len(prefix)) == "/";
+
+    for seg in raw_parts {
+        if len(seg) == 0 or seg == "." {
+            continue;
+        }
+        if seg == ".." {
+            let n: i64 = len(stack);
+            if n > 0 and stack[n - 1] != ".." {
+                stack.remove_at(n - 1);
+            } elif !rooted {
+                stack.append("..");
+            }
+        } else {
+            stack.append(seg);
+        }
+    }
+
+    var joined: str = "";
+    for i in 0..<len(stack) {
+        if i > 0 {
+            joined = joined + "/";
+        }
+        joined = joined + stack[i];
+    }
+
+    if len(prefix) > 0 {
+        if len(joined) == 0 {
+            return prefix;
+        }
+        return prefix + joined;
+    }
+
+    if len(joined) == 0 {
+        return ".";
+    }
+    return joined;
+}
+
+def join(base_path: str, child_path: str) -> str {
+    if len(child_path) == 0 {
+        return normalize(base_path);
+    }
+    if is_absolute(child_path) {
+        return normalize(child_path);
+    }
+    if len(base_path) == 0 or base_path == "." {
+        return normalize(child_path);
+    }
+    let clean_base = _to_slashes(base_path);
+    if __str_slice(clean_base, len(clean_base) - 1, len(clean_base)) == "/" {
+        return normalize(clean_base + child_path);
+    }
+    return normalize(clean_base + "/" + child_path);
+}
+
+def join_all(segments) -> str {
+    var acc: str = "";
+    for seg in segments {
+        if len(acc) == 0 {
+            acc = str(seg);
+        } else {
+            acc = join(acc, str(seg));
+        }
+    }
+    if len(acc) == 0 {
+        return ".";
+    }
+    return acc;
+}
+
+def parent(raw_path: str) {
+    let norm = normalize(raw_path);
+    if norm == "/" or norm == "." {
+        return none;
+    }
+    if _has_windows_drive(norm) and (len(norm) == 2 or len(norm) == 3) {
+        return none;
+    }
+    let slash_idx: i64 = __str_last_index_of(norm, "/");
+    if slash_idx < 0 {
+        return some(".");
+    }
+    if slash_idx == 0 {
+        return some("/");
+    }
+    if slash_idx == 2 and _has_windows_drive(norm) {
+        return some(__str_slice(norm, 0, 3));
+    }
+    return some(__str_slice(norm, 0, slash_idx));
+}
+
+def file_name(raw_path: str) {
+    let norm = normalize(raw_path);
+    if norm == "/" or norm == "." {
+        return none;
+    }
+    if _has_windows_drive(norm) and len(norm) <= 3 {
+        return none;
+    }
+    let slash_idx: i64 = __str_last_index_of(norm, "/");
+    if slash_idx < 0 {
+        return some(norm);
+    }
+    let tail = __str_slice(norm, slash_idx + 1, len(norm));
+    if len(tail) == 0 {
+        return none;
+    }
+    return some(tail);
+}
+
+def extension(raw_path: str) {
+    let fname_opt = file_name(raw_path);
+    if __opt_is_none(fname_opt) {
+        return none;
+    }
+    let fname = __opt_unwrap(fname_opt);
+    let dot_idx: i64 = __str_last_index_of(fname, ".");
+    if dot_idx <= 0 or dot_idx == len(fname) - 1 {
+        return none;
+    }
+    return some(__str_slice(fname, dot_idx + 1, len(fname)));
+}
+
+def stem(raw_path: str) {
+    let fname_opt = file_name(raw_path);
+    if __opt_is_none(fname_opt) {
+        return none;
+    }
+    let fname = __opt_unwrap(fname_opt);
+    let dot_idx: i64 = __str_last_index_of(fname, ".");
+    if dot_idx <= 0 {
+        return some(fname);
+    }
+    return some(__str_slice(fname, 0, dot_idx));
+}
+
+def with_extension(raw_path: str, new_ext: str) -> str {
+    let par_opt = parent(raw_path);
+    let st_opt = stem(raw_path);
+    let base_stem = if __opt_is_some(st_opt) { __opt_unwrap(st_opt) } else { normalize(raw_path) };
+    let clean_ext = if len(new_ext) > 0 and __str_slice(new_ext, 0, 1) == "." {
+        __str_slice(new_ext, 1, len(new_ext))
+    } else {
+        new_ext
+    };
+    let updated_name = if len(clean_ext) > 0 { f"{base_stem}.{clean_ext}" } else { base_stem };
+    if __opt_is_some(par_opt) {
+        let p = __opt_unwrap(par_opt);
+        if p == "." {
+            return updated_name;
+        }
+        return join(p, updated_name);
+    }
+    return updated_name;
+}
+
+def components(raw_path: str) {
+    let norm = normalize(raw_path);
+    var out = [];
+    var rest: str = norm;
+    if _has_windows_drive(norm) {
+        if len(norm) >= 3 and __str_slice(norm, 2, 3) == "/" {
+            out.append(__str_slice(norm, 0, 3));
+            rest = __str_slice(norm, 3, len(norm));
+        } else {
+            out.append(__str_slice(norm, 0, 2));
+            rest = __str_slice(norm, 2, len(norm));
+        }
+    } elif __str_slice(norm, 0, 1) == "/" {
+        out.append("/");
+        rest = __str_slice(norm, 1, len(norm));
+    }
+    if len(rest) > 0 and rest != "." {
+        for part in __str_split(rest, "/") {
+            if len(part) > 0 {
+                out.append(part);
+            }
+        }
+    } elif norm == "." {
+        out.append(".");
+    }
+    return out;
+}
+
+def relative_to(target_path: str, base_path: str) {
+    let norm_t = normalize(target_path);
+    let norm_b = normalize(base_path);
+    if norm_t == norm_b {
+        return some(".");
+    }
+    let prefix = if norm_b == "/" { "/" } else { norm_b + "/" };
+    if len(norm_t) > len(prefix) and __str_slice(norm_t, 0, len(prefix)) == prefix {
+        return some(__str_slice(norm_t, len(prefix), len(norm_t)));
+    }
+    return none;
+}
+
+// Object-oriented cross-platform `Path` value wrapper
+class Path {
+    def __init__(self, raw_path: str) {
+        self.raw = normalize(raw_path);
+    }
+
+    def to_str(self) -> str {
+        return self.raw;
+    }
+
+    def is_absolute(self) -> bool {
+        return is_absolute(self.raw);
+    }
+
+    def join(self, child: str) {
+        return Path(join(self.raw, child));
+    }
+
+    def parent(self) {
+        let p = parent(self.raw);
+        if some pv = p {
+            return some(Path(pv));
+        }
+        return none;
+    }
+
+    def file_name(self) {
+        return file_name(self.raw);
+    }
+
+    def stem(self) {
+        return stem(self.raw);
+    }
+
+    def extension(self) {
+        return extension(self.raw);
+    }
+
+    def with_extension(self, ext: str) {
+        return Path(with_extension(self.raw, ext));
+    }
+
+    def components(self) {
+        return components(self.raw);
+    }
+}

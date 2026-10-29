@@ -1,0 +1,687 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.encoding — Zero-Copy Byte/UTF-8 Codecs (`hex`, `base64`, `base64url`) & RFC-3986 `url` / Query Parsers
+// Bootstrapped via M20 (`--from python|rust --strict-pilot --viable-license-only`) from CPython `base64`/`urllib.parse`
+// (PSF-2.0) and Rust RFC-4648 codec tables (MIT/Apache-2.0), curated for Pilot `T ! DecodeError` & `SliceBuffer<u8>`.
+
+type DecodeError = InvalidChar(ch: str, offset: i64)
+                 | InvalidLength(len_val: i64, msg: str)
+                 | InvalidPadding(offset: i64, msg: str)
+                 | InvalidUtf8(offset: i64, msg: str)
+                 | BadPercentEscape(seq: str, offset: i64);
+
+def format_decode_error(err: DecodeError) -> str {
+    return match err {
+        case DecodeError.InvalidChar(ch, off) => f"InvalidChar('{ch}' at byte {off})",
+        case DecodeError.InvalidLength(n, msg) => f"InvalidLength({n}): {msg}",
+        case DecodeError.InvalidPadding(off, msg) => f"InvalidPadding(at {off}): {msg}",
+        case DecodeError.InvalidUtf8(off, msg) => f"InvalidUtf8(at {off}): {msg}",
+        case DecodeError.BadPercentEscape(seq, off) => f"BadPercentEscape('{seq}' at {off})"
+    };
+}
+
+const _HEX_LOWER: str = "0123456789abcdef";
+const _HEX_UPPER: str = "0123456789ABCDEF";
+const _B64_STD: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const _B64_URL: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+def __to_utf8_bytes(data: any) -> any {
+    let kind: str = type_of(data);
+    if kind == "slicebuffer" {
+        return data;
+    }
+    if kind == "list" or kind == "tuple" {
+        let count: i64 = len(data);
+        var buf = slice_buffer(count, "u8");
+        for i in 0..<count {
+            __slice_push(buf, int(data[i]) & 255);
+        }
+        return buf;
+    }
+    if kind == "object" {
+        return data.raw_buffer();
+    }
+    return __utf8_encode_slice(str(data));
+}
+
+def __decode_utf8_strict(buf) -> str ! DecodeError {
+    let bad_idx: i64 = __utf8_validate_slice(buf);
+    if bad_idx >= 0 {
+        return fail(DecodeError.InvalidUtf8(bad_idx, "invalid UTF-8 byte sequence"));
+    }
+    return ok(__utf8_decode_slice(buf));
+}
+
+def __coerce_encoded_str(encoded) -> str ! DecodeError {
+    let kind: str = type_of(encoded);
+    if kind == "string" {
+        return ok(encoded);
+    }
+    if kind == "slicebuffer" {
+        let s = __decode_utf8_strict(encoded)?;
+        return ok(s);
+    }
+    if kind == "object" {
+        let s = __decode_utf8_strict(encoded.raw_buffer())?;
+        return ok(s);
+    }
+    return ok(str(encoded));
+}
+
+def __hex_nibble(code: i64) -> i64 {
+    if code >= 48 and code <= 57 {
+        return code - 48;
+    }
+    if code >= 97 and code <= 102 {
+        return 10 + (code - 97);
+    }
+    if code >= 65 and code <= 70 {
+        return 10 + (code - 65);
+    }
+    return -1;
+}
+
+def __b64_sextet(code: i64, url_safe: bool) -> i64 {
+    if code >= 65 and code <= 90 {
+        return code - 65;
+    }
+    if code >= 97 and code <= 122 {
+        return 26 + (code - 97);
+    }
+    if code >= 48 and code <= 57 {
+        return 52 + (code - 48);
+    }
+    if url_safe {
+        if code == 45 {
+            return 62;
+        }
+        if code == 95 {
+            return 63;
+        }
+    } else {
+        if code == 43 {
+            return 62;
+        }
+        if code == 47 {
+            return 63;
+        }
+    }
+    return -1;
+}
+
+def __is_unreserved_rfc3986(b: i64) -> bool {
+    if (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or (b >= 48 and b <= 57) {
+        return true;
+    }
+    // '-' (45), '.' (46), '_' (95), '~' (126)
+    return b == 45 or b == 46 or b == 95 or b == 126;
+}
+
+// ============================================================================
+// 1. Hexadecimal Codec (RFC 4648 §8)
+// ============================================================================
+
+def hex_encode(data, upper: bool = false) -> str {
+    let buf = __to_utf8_bytes(data);
+    let n: i64 = __slice_len(buf);
+    if n == 0 {
+        return "";
+    }
+    let alphabet: str = if upper { _HEX_UPPER } else { _HEX_LOWER };
+    var out_bytes = slice_buffer(n * 2, "u8");
+    for i in 0..<n {
+        let b: i64 = __slice_byte_at(buf, i);
+        let hi: i64 = (b >> 4) & 15;
+        let lo: i64 = b & 15;
+        __slice_push(out_bytes, __str_char_code(alphabet, hi));
+        __slice_push(out_bytes, __str_char_code(alphabet, lo));
+    }
+    return __utf8_decode_slice(out_bytes);
+}
+
+def hex_decode_bytes(encoded_in) -> SliceBuffer ! DecodeError {
+    let encoded: str = __coerce_encoded_str(encoded_in)?;
+    let n: i64 = len(encoded);
+    if (n % 2) != 0 {
+        return fail(DecodeError.InvalidLength(n, "hex input must have an even number of characters"));
+    }
+    var out_buf = slice_buffer(n / 2, "u8");
+    var i: i64 = 0;
+    while i < n {
+        let c_hi: i64 = __str_char_code(encoded, i);
+        let v_hi: i64 = __hex_nibble(c_hi);
+        if v_hi < 0 {
+            return fail(DecodeError.InvalidChar(__str_slice(encoded, i, i + 1), i));
+        }
+        let c_lo: i64 = __str_char_code(encoded, i + 1);
+        let v_lo: i64 = __hex_nibble(c_lo);
+        if v_lo < 0 {
+            return fail(DecodeError.InvalidChar(__str_slice(encoded, i + 1, i + 2), i + 1));
+        }
+        __slice_push(out_buf, (v_hi << 4) | v_lo);
+        i = i + 2;
+    }
+    return ok(out_buf);
+}
+
+def hex_decode(encoded) -> str ! DecodeError {
+    let buf = hex_decode_bytes(encoded)?;
+    let decoded = __decode_utf8_strict(buf)?;
+    return ok(decoded);
+}
+
+// ============================================================================
+// 2. Base64 & Base64URL Codecs (RFC 4648 §4 & §5)
+// ============================================================================
+
+def __b64_encode_core(data, alphabet: str, pad: bool) -> str {
+    let buf = __to_utf8_bytes(data);
+    let n: i64 = __slice_len(buf);
+    if n == 0 {
+        return "";
+    }
+    let out_cap: i64 = ((n + 2) / 3) * 4;
+    var out_bytes = slice_buffer(out_cap, "u8");
+    var i: i64 = 0;
+    while (i + 3) <= n {
+        let b0: i64 = __slice_byte_at(buf, i);
+        let b1: i64 = __slice_byte_at(buf, i + 1);
+        let b2: i64 = __slice_byte_at(buf, i + 2);
+        let triple: i64 = (b0 << 16) | (b1 << 8) | b2;
+        __slice_push(out_bytes, __str_char_code(alphabet, (triple >> 18) & 63));
+        __slice_push(out_bytes, __str_char_code(alphabet, (triple >> 12) & 63));
+        __slice_push(out_bytes, __str_char_code(alphabet, (triple >> 6) & 63));
+        __slice_push(out_bytes, __str_char_code(alphabet, triple & 63));
+        i = i + 3;
+    }
+
+    let rem: i64 = n - i;
+    if rem == 1 {
+        let b0: i64 = __slice_byte_at(buf, i);
+        __slice_push(out_bytes, __str_char_code(alphabet, (b0 >> 2) & 63));
+        __slice_push(out_bytes, __str_char_code(alphabet, (b0 & 3) << 4));
+        if pad {
+            __slice_push(out_bytes, 61);
+            __slice_push(out_bytes, 61);
+        }
+    } elif rem == 2 {
+        let b0: i64 = __slice_byte_at(buf, i);
+        let b1: i64 = __slice_byte_at(buf, i + 1);
+        let pair: i64 = (b0 << 8) | b1;
+        __slice_push(out_bytes, __str_char_code(alphabet, (pair >> 10) & 63));
+        __slice_push(out_bytes, __str_char_code(alphabet, (pair >> 4) & 63));
+        __slice_push(out_bytes, __str_char_code(alphabet, (pair & 15) << 2));
+        if pad {
+            __slice_push(out_bytes, 61);
+        }
+    }
+
+    return __utf8_decode_slice(out_bytes);
+}
+
+def __b64_decode_core(encoded: str, url_safe: bool) -> SliceBuffer ! DecodeError {
+    // Collect non-CR/LF characters alongside original string offsets
+    var codes = [];
+    var offsets = [];
+    let raw_len: i64 = len(encoded);
+    for idx in 0..<raw_len {
+        let c: i64 = __str_char_code(encoded, idx);
+        if c == 10 or c == 13 {
+            continue;
+        }
+        codes.append(c);
+        offsets.append(idx);
+    }
+
+    let n: i64 = len(codes);
+    if n == 0 {
+        return ok(slice_buffer(0, "u8"));
+    }
+
+    if !url_safe and (n % 4) != 0 {
+        return fail(DecodeError.InvalidLength(n, "standard base64 input length must be a multiple of 4"));
+    }
+    if (n % 4) == 1 {
+        return fail(DecodeError.InvalidLength(n, "base64 input length mod 4 cannot equal 1"));
+    }
+
+    // Virtual padding for unpadded base64url
+    let rem4: i64 = n % 4;
+    if rem4 == 2 {
+        codes.append(61);
+        offsets.append(raw_len);
+        codes.append(61);
+        offsets.append(raw_len);
+    } elif rem4 == 3 {
+        codes.append(61);
+        offsets.append(raw_len);
+    }
+
+    let total: i64 = len(codes);
+    var out_buf = slice_buffer((total / 4) * 3, "u8");
+    var q: i64 = 0;
+    while q < total {
+        let is_last: bool = (q + 4) == total;
+        let c0: i64 = codes[q];
+        let c1: i64 = codes[q + 1];
+        let c2: i64 = codes[q + 2];
+        let c3: i64 = codes[q + 3];
+
+        if c0 == 61 {
+            return fail(DecodeError.InvalidPadding(offsets[q], "unexpected '=' at start of base64 quantum"));
+        }
+        if c1 == 61 {
+            return fail(DecodeError.InvalidPadding(offsets[q + 1], "unexpected '=' at second position of base64 quantum"));
+        }
+        if !is_last and (c2 == 61 or c3 == 61) {
+            let bad_off: i64 = if c2 == 61 { offsets[q + 2] } else { offsets[q + 3] };
+            return fail(DecodeError.InvalidPadding(bad_off, "padding '=' only allowed in final base64 quantum"));
+        }
+        if c2 == 61 and c3 != 61 {
+            return fail(DecodeError.InvalidPadding(offsets[q + 2], "'=' must be followed by '=' in final base64 quantum"));
+        }
+
+        let s0: i64 = __b64_sextet(c0, url_safe);
+        if s0 < 0 {
+            let off0: i64 = offsets[q];
+            return fail(DecodeError.InvalidChar(__str_slice(encoded, off0, off0 + 1), off0));
+        }
+        let s1: i64 = __b64_sextet(c1, url_safe);
+        if s1 < 0 {
+            let off1: i64 = offsets[q + 1];
+            return fail(DecodeError.InvalidChar(__str_slice(encoded, off1, off1 + 1), off1));
+        }
+
+        if c2 == 61 {
+            // 2 chars + "==" -> 1 byte (RFC 4648 §3.5: low 4 bits of s1 must be 0)
+            if (s1 & 15) != 0 {
+                return fail(DecodeError.InvalidPadding(offsets[q + 1], "non-zero trailing pad bits in 2-char base64 quantum"));
+            }
+            __slice_push(out_buf, ((s0 << 2) | (s1 >> 4)) & 255);
+        } elif c3 == 61 {
+            // 3 chars + "=" -> 2 bytes (RFC 4648 §3.5: low 2 bits of s2 must be 0)
+            let s2: i64 = __b64_sextet(c2, url_safe);
+            if s2 < 0 {
+                let off2: i64 = offsets[q + 2];
+                return fail(DecodeError.InvalidChar(__str_slice(encoded, off2, off2 + 1), off2));
+            }
+            if (s2 & 3) != 0 {
+                return fail(DecodeError.InvalidPadding(offsets[q + 2], "non-zero trailing pad bits in 3-char base64 quantum"));
+            }
+            __slice_push(out_buf, ((s0 << 2) | (s1 >> 4)) & 255);
+            __slice_push(out_buf, (((s1 & 15) << 4) | (s2 >> 2)) & 255);
+        } else {
+            // Full 4 chars -> 3 bytes
+            let s2: i64 = __b64_sextet(c2, url_safe);
+            if s2 < 0 {
+                let off2: i64 = offsets[q + 2];
+                return fail(DecodeError.InvalidChar(__str_slice(encoded, off2, off2 + 1), off2));
+            }
+            let s3: i64 = __b64_sextet(c3, url_safe);
+            if s3 < 0 {
+                let off3: i64 = offsets[q + 3];
+                return fail(DecodeError.InvalidChar(__str_slice(encoded, off3, off3 + 1), off3));
+            }
+            let triple: i64 = (s0 << 18) | (s1 << 12) | (s2 << 6) | s3;
+            __slice_push(out_buf, (triple >> 16) & 255);
+            __slice_push(out_buf, (triple >> 8) & 255);
+            __slice_push(out_buf, triple & 255);
+        }
+
+        q = q + 4;
+    }
+
+    return ok(out_buf);
+}
+
+def base64_encode(data) -> str {
+    return __b64_encode_core(data, _B64_STD, true);
+}
+
+def base64_decode_bytes(encoded_in) -> SliceBuffer ! DecodeError {
+    let encoded: str = __coerce_encoded_str(encoded_in)?;
+    let out_buf = __b64_decode_core(encoded, false)?;
+    return ok(out_buf);
+}
+
+def base64_decode(encoded) -> str ! DecodeError {
+    let buf = base64_decode_bytes(encoded)?;
+    let decoded = __decode_utf8_strict(buf)?;
+    return ok(decoded);
+}
+
+def base64url_encode(data, pad: bool = false) -> str {
+    return __b64_encode_core(data, _B64_URL, pad);
+}
+
+def base64url_decode_bytes(encoded_in) -> SliceBuffer ! DecodeError {
+    let encoded: str = __coerce_encoded_str(encoded_in)?;
+    let out_buf = __b64_decode_core(encoded, true)?;
+    return ok(out_buf);
+}
+
+def base64url_decode(encoded) -> str ! DecodeError {
+    let buf = base64url_decode_bytes(encoded)?;
+    let decoded = __decode_utf8_strict(buf)?;
+    return ok(decoded);
+}
+
+// ============================================================================
+// 3. RFC 3986 Percent-Encoding, Query Strings & Structured `Url`
+// ============================================================================
+
+def url_encode(text: str, space_as_plus: bool = false) -> str {
+    let buf = __utf8_encode_slice(text);
+    let n: i64 = __slice_len(buf);
+    if n == 0 {
+        return "";
+    }
+    var out_bytes = slice_buffer(n * 3, "u8");
+    for i in 0..<n {
+        let b: i64 = __slice_byte_at(buf, i);
+        if __is_unreserved_rfc3986(b) {
+            __slice_push(out_bytes, b);
+        } elif b == 32 and space_as_plus {
+            __slice_push(out_bytes, 43);
+        } else {
+            __slice_push(out_bytes, 37);
+            __slice_push(out_bytes, __str_char_code(_HEX_UPPER, (b >> 4) & 15));
+            __slice_push(out_bytes, __str_char_code(_HEX_UPPER, b & 15));
+        }
+    }
+    return __utf8_decode_slice(out_bytes);
+}
+
+def url_decode_bytes(encoded_in, plus_as_space: bool = false) -> SliceBuffer ! DecodeError {
+    let src_bytes = __to_utf8_bytes(encoded_in);
+    let n: i64 = __slice_len(src_bytes);
+    var out_buf = slice_buffer(n, "u8");
+    var i: i64 = 0;
+    while i < n {
+        let b: i64 = __slice_byte_at(src_bytes, i);
+        if b == 43 and plus_as_space {
+            __slice_push(out_buf, 32);
+            i = i + 1;
+        } elif b == 37 {
+            if (i + 2) >= n {
+                let rem_seq = __utf8_decode_slice(src_bytes, i, n - i);
+                return fail(DecodeError.BadPercentEscape(rem_seq, i));
+            }
+            let hi: i64 = __hex_nibble(__slice_byte_at(src_bytes, i + 1));
+            let lo: i64 = __hex_nibble(__slice_byte_at(src_bytes, i + 2));
+            if hi < 0 or lo < 0 {
+                let bad_seq = __utf8_decode_slice(src_bytes, i, 3);
+                return fail(DecodeError.BadPercentEscape(bad_seq, i));
+            }
+            __slice_push(out_buf, (hi << 4) | lo);
+            i = i + 3;
+        } else {
+            __slice_push(out_buf, b);
+            i = i + 1;
+        }
+    }
+    return ok(out_buf);
+}
+
+def url_decode(encoded, plus_as_space: bool = false) -> str ! DecodeError {
+    let buf = url_decode_bytes(encoded, plus_as_space)?;
+    let decoded = __decode_utf8_strict(buf)?;
+    return ok(decoded);
+}
+
+def query_encode(params) -> str {
+    let entries = if type_of(params) == "map" or type_of(params) == "object" {
+        __map_entries_sorted(params)
+    } else {
+        params
+    };
+    var out: str = "";
+    var first: bool = true;
+    for pair in entries {
+        let k_enc = url_encode(str(pair[0]), true);
+        let v_enc = url_encode(str(pair[1]), true);
+        if !first {
+            out = out + "&";
+        }
+        out = out + k_enc + "=" + v_enc;
+        first = false;
+    }
+    return out;
+}
+
+def query_parse(query_str: str) -> map ! DecodeError {
+    var clean: str = query_str;
+    if len(clean) > 0 and __str_slice(clean, 0, 1) == "?" {
+        clean = __str_slice(clean, 1, len(clean));
+    }
+    var out = {};
+    if len(clean) == 0 {
+        return ok(out);
+    }
+    let parts: [str] = __str_split(clean, "&");
+    for part in parts {
+        if len(part) == 0 {
+            continue;
+        }
+        let eq_idx: i64 = __str_index_of(part, "=", 0);
+        if eq_idx < 0 {
+            let k = url_decode(part, true)?;
+            out[k] = "";
+        } else {
+            let raw_k = __str_slice(part, 0, eq_idx);
+            let raw_v = __str_slice(part, eq_idx + 1, len(part));
+            let k = url_decode(raw_k, true)?;
+            let v = url_decode(raw_v, true)?;
+            out[k] = v;
+        }
+    }
+    return ok(out);
+}
+
+def query_parse_multi(query_str: str) -> map ! DecodeError {
+    var clean: str = query_str;
+    if len(clean) > 0 and __str_slice(clean, 0, 1) == "?" {
+        clean = __str_slice(clean, 1, len(clean));
+    }
+    var out = {};
+    if len(clean) == 0 {
+        return ok(out);
+    }
+    let parts: [str] = __str_split(clean, "&");
+    for part in parts {
+        if len(part) == 0 {
+            continue;
+        }
+        let eq_idx: i64 = __str_index_of(part, "=", 0);
+        var k: str = "";
+        var v: str = "";
+        if eq_idx < 0 {
+            k = url_decode(part, true)?;
+        } else {
+            k = url_decode(__str_slice(part, 0, eq_idx), true)?;
+            v = url_decode(__str_slice(part, eq_idx + 1, len(part)), true)?;
+        }
+        if out.contains_key(k) {
+            out[k].append(v);
+        } else {
+            out[k] = [v];
+        }
+    }
+    return ok(out);
+}
+
+class Url {
+    def __init__(
+        self,
+        scheme: str,
+        userinfo: str,
+        host: str,
+        port_opt,
+        path: str,
+        query: str,
+        fragment: str
+    ) {
+        self.scheme = scheme;
+        self.userinfo = userinfo;
+        self.host = host;
+        self.port = port_opt;
+        self.path = path;
+        self.query = query;
+        self.fragment = fragment;
+    }
+
+    def has_port(self) -> bool {
+        return __opt_is_some(self.port);
+    }
+
+    def port_or(self, default_port: i64) -> i64 {
+        if __opt_is_some(self.port) {
+            return __opt_unwrap(self.port);
+        }
+        return default_port;
+    }
+
+    def origin(self) -> str {
+        if len(self.scheme) == 0 or len(self.host) == 0 {
+            return "";
+        }
+        var res: str = self.scheme + "://" + self.host;
+        if __opt_is_some(self.port) {
+            res = res + ":" + str(__opt_unwrap(self.port));
+        }
+        return res;
+    }
+
+    def query_params(self) -> map ! DecodeError {
+        return query_parse(self.query);
+    }
+
+    def with_query(self, params) {
+        let q_str = if type_of(params) == "string" { params } else { query_encode(params) };
+        return Url(self.scheme, self.userinfo, self.host, self.port, self.path, q_str, self.fragment);
+    }
+
+    def to_str(self) -> str {
+        var out: str = "";
+        if len(self.scheme) > 0 {
+            out = out + self.scheme + ":";
+        }
+        if len(self.host) > 0 or len(self.scheme) > 0 {
+            if len(self.host) > 0 {
+                out = out + "//";
+                if len(self.userinfo) > 0 {
+                    out = out + self.userinfo + "@";
+                }
+                out = out + self.host;
+                if __opt_is_some(self.port) {
+                    out = out + ":" + str(__opt_unwrap(self.port));
+                }
+            }
+        }
+        out = out + self.path;
+        if len(self.query) > 0 {
+            out = out + "?" + self.query;
+        }
+        if len(self.fragment) > 0 {
+            out = out + "#" + self.fragment;
+        }
+        return out;
+    }
+}
+
+def parse_url(raw_url: str) -> Url ! DecodeError {
+    if len(raw_url) == 0 {
+        return fail(DecodeError.InvalidLength(0, "empty URL"));
+    }
+
+    var rest: str = raw_url;
+    var fragment: str = "";
+    var query: str = "";
+    var scheme: str = "";
+    var userinfo: str = "";
+    var host: str = "";
+    var port_opt = none;
+    var path_part: str = "";
+
+    // 1. Extract `#fragment`
+    let hash_idx: i64 = __str_index_of(rest, "#", 0);
+    if hash_idx >= 0 {
+        fragment = __str_slice(rest, hash_idx + 1, len(rest));
+        rest = __str_slice(rest, 0, hash_idx);
+    }
+
+    // 2. Extract `?query`
+    let q_idx: i64 = __str_index_of(rest, "?", 0);
+    if q_idx >= 0 {
+        query = __str_slice(rest, q_idx + 1, len(rest));
+        rest = __str_slice(rest, 0, q_idx);
+    }
+
+    // 3. Extract `scheme://` (or `scheme:`)
+    let s_sep: i64 = __str_index_of(rest, "://", 0);
+    if s_sep > 0 {
+        scheme = __str_case(__str_slice(rest, 0, s_sep), false);
+        let after_scheme = __str_slice(rest, s_sep + 3, len(rest));
+        let slash_idx: i64 = __str_index_of(after_scheme, "/", 0);
+        var authority: str = "";
+        if slash_idx >= 0 {
+            authority = __str_slice(after_scheme, 0, slash_idx);
+            path_part = __str_slice(after_scheme, slash_idx, len(after_scheme));
+        } else {
+            authority = after_scheme;
+            path_part = "";
+        }
+
+        // Extract optional `userinfo@`
+        let at_idx: i64 = __str_last_index_of(authority, "@");
+        var host_port: str = authority;
+        if at_idx >= 0 {
+            userinfo = __str_slice(authority, 0, at_idx);
+            host_port = __str_slice(authority, at_idx + 1, len(authority));
+        }
+
+        // IPv6 `[::1]:port` vs regular `host:port`
+        if len(host_port) > 0 and __str_slice(host_port, 0, 1) == "[" {
+            let close_br: i64 = __str_index_of(host_port, "]", 0);
+            if close_br < 0 {
+                return fail(DecodeError.InvalidChar("[", s_sep + 3));
+            }
+            host = __str_slice(host_port, 0, close_br + 1);
+            if (close_br + 1) < len(host_port) {
+                if __str_slice(host_port, close_br + 1, close_br + 2) != ":" {
+                    return fail(DecodeError.InvalidChar(__str_slice(host_port, close_br + 1, close_br + 2), close_br + 1));
+                }
+                let p_raw = __str_slice(host_port, close_br + 2, len(host_port));
+                let p_parsed = __parse_int_strict(p_raw, 10);
+                if __opt_is_none(p_parsed) {
+                    return fail(DecodeError.InvalidChar(p_raw, close_br + 2));
+                }
+                let p_val: i64 = __opt_unwrap(p_parsed);
+                if p_val < 0 or p_val > 65535 {
+                    return fail(DecodeError.InvalidLength(p_val, "URL port must be in 0..65535"));
+                }
+                port_opt = some(p_val);
+            }
+        } else {
+            let colon_idx: i64 = __str_last_index_of(host_port, ":");
+            if colon_idx >= 0 {
+                host = __str_slice(host_port, 0, colon_idx);
+                let p_raw = __str_slice(host_port, colon_idx + 1, len(host_port));
+                let p_parsed = __parse_int_strict(p_raw, 10);
+                if __opt_is_none(p_parsed) {
+                    return fail(DecodeError.InvalidChar(p_raw, colon_idx + 1));
+                }
+                let p_val: i64 = __opt_unwrap(p_parsed);
+                if p_val < 0 or p_val > 65535 {
+                    return fail(DecodeError.InvalidLength(p_val, "URL port must be in 0..65535"));
+                }
+                port_opt = some(p_val);
+            } else {
+                host = host_port;
+            }
+        }
+    } else {
+        path_part = rest;
+    }
+
+    return ok(Url(scheme, userinfo, host, port_opt, path_part, query, fragment));
+}

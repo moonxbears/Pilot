@@ -111,6 +111,12 @@ public sealed class PilotEngine : IPilotEngine
                 context.Environment.GlobalScope.Declare(kvp.Key, PilotValue.FromFunction(kvp.Value));
             }
 
+            if (!string.IsNullOrWhiteSpace(options.SourceFilePath) &&
+                !context.Environment.GlobalScope.ContainsLocal("__file__"))
+            {
+                context.Environment.GlobalScope.Declare("__file__", PilotValue.FromString(Path.GetFullPath(options.SourceFilePath)));
+            }
+
             var visitor = context.GetOrCreateVisitor();
             var resultValue = visitor.VisitProgram(tree);
             if (context.PendingFlow == PilotFlowSignalKind.Return)
@@ -162,6 +168,8 @@ public sealed class PilotEngine : IPilotEngine
         }
 
         string source = File.ReadAllText(filePath);
+        options ??= new PilotExecutionOptions();
+        options.SourceFilePath ??= Path.GetFullPath(filePath);
         return Execute(source, options);
     }
 

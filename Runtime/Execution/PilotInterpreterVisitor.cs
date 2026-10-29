@@ -205,6 +205,16 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         return initialVal;
     }
 
+    public override PilotValue VisitImport_name(PilotParser.Import_nameContext context)
+    {
+        return Pilot.Runtime.Stdlib.PilotStdlibResolver.ExecuteImportName(context, Context);
+    }
+
+    public override PilotValue VisitImport_from(PilotParser.Import_fromContext context)
+    {
+        return Pilot.Runtime.Stdlib.PilotStdlibResolver.ExecuteImportFrom(context, Context);
+    }
+
     private PilotValue EvaluateDeclarationInitializer(
         PilotParser.Type_annotationContext? typeAnn,
         PilotParser.TestContext? rhsExpr)
@@ -1265,6 +1275,27 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                         Visit(stmt);
                     }
                 }
+
+                // Prevent `self` instance methods from shadowing enclosing module/global functions (e.g. `len`, `stem`)
+                // inside method bodies; instance methods are dispatched via `self.<method>(...)`.
+                foreach (var kvp in classDef.Methods)
+                {
+                    if (kvp.Value.Parameters.Count > 0 && kvp.Value.Parameters[0].Name == "self")
+                    {
+                        Context.Environment.CurrentScope.RemoveLocal(kvp.Key);
+                    }
+                }
+                foreach (var kvp in classDef.MethodGroups)
+                {
+                    var overloads = kvp.Value.GetOverloadValues();
+                    if (overloads.Count > 0 &&
+                        overloads.All(ov => ov.Kind == PilotValueKind.Function &&
+                                            ov.AsFunction().Parameters.Count > 0 &&
+                                            ov.AsFunction().Parameters[0].Name == "self"))
+                    {
+                        Context.Environment.CurrentScope.RemoveLocal(kvp.Key);
+                    }
+                }
             }
         }
         finally
@@ -1350,6 +1381,25 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
                     else
                     {
                         Visit(stmt);
+                    }
+                }
+
+                foreach (var kvp in stateDef.Methods)
+                {
+                    if (kvp.Value.Parameters.Count > 0 && kvp.Value.Parameters[0].Name == "self")
+                    {
+                        Context.Environment.CurrentScope.RemoveLocal(kvp.Key);
+                    }
+                }
+                foreach (var kvp in stateDef.MethodGroups)
+                {
+                    var overloads = kvp.Value.GetOverloadValues();
+                    if (overloads.Count > 0 &&
+                        overloads.All(ov => ov.Kind == PilotValueKind.Function &&
+                                            ov.AsFunction().Parameters.Count > 0 &&
+                                            ov.AsFunction().Parameters[0].Name == "self"))
+                    {
+                        Context.Environment.CurrentScope.RemoveLocal(kvp.Key);
                     }
                 }
             }
@@ -4282,7 +4332,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         int effectiveTrailerLen = PilotParser.GetEffectiveTrailerCount(context);
         for (int i = startTrailerIdx; i < effectiveTrailerLen; i++)
         {
-            var trailer = trailers[i];
+            var trailer = trailers![i];
             bool isSafeCascade = trailer.cascade_trailer()?.SAFE_CASCADE() != null;
             bool isOptional = trailer.SAFE_NAV() != null ||
                               isSafeCascade ||
@@ -5021,6 +5071,14 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         if (val.Kind == PilotValueKind.Tuple) return val.AsTuple().ToList();
         if (val.Kind == PilotValueKind.Set) return val.AsSet().ToList();
         if (val.Kind == PilotValueKind.Range) return val.AsRange().Select(PilotValue.FromInt).ToList();
+        if (val.Kind == PilotValueKind.Generator) return val.AsGenerator().ToList();
+        if (val.Kind == PilotValueKind.SliceBuffer)
+        {
+            var sb = val.AsSliceBuffer();
+            var sbItems = new List<PilotValue>(sb.Length);
+            for (int i = 0; i < sb.Length; i++) sbItems.Add(sb.GetElement(i));
+            return sbItems;
+        }
         if (val.Kind == PilotValueKind.String) return val.AsString().Select(PilotValue.FromChar).ToList();
         return new List<PilotValue> { val };
     }
@@ -5560,7 +5618,34 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         {
             return str;
         }
-        return str.Replace("\\n", "\n").Replace("\\r", "\r").Replace("\\t", "\t").Replace("\\\"", "\"").Replace("\\\\", "\\");
+        var sb = new System.Text.StringBuilder(str.Length);
+        for (int i = 0; i < str.Length; i++)
+        {
+            char c = str[i];
+            if (c == '\\' && i + 1 < str.Length)
+            {
+                char next = str[++i];
+                switch (next)
+                {
+                    case 'n': sb.Append('\n'); break;
+                    case 'r': sb.Append('\r'); break;
+                    case 't': sb.Append('\t'); break;
+                    case '0': sb.Append('\0'); break;
+                    case '\\': sb.Append('\\'); break;
+                    case '"': sb.Append('"'); break;
+                    case '\'': sb.Append('\''); break;
+                    default:
+                        sb.Append('\\');
+                        sb.Append(next);
+                        break;
+                }
+            }
+            else
+            {
+                sb.Append(c);
+            }
+        }
+        return sb.ToString();
     }
 
     public override PilotValue VisitCollection_expr(PilotParser.Collection_exprContext context)

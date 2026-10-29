@@ -287,12 +287,29 @@ public sealed class PilotTypeInferenceEngine : PilotBaseVisitor<PilotType>
             return PilotType.WithTypestate(parsedBase, unitPart);
         }
 
+        if (typeStr.StartsWith('[') && typeStr.EndsWith(']') && typeStr.Length >= 2)
+        {
+            return PilotType.ListOf(ParseTypeString(typeStr[1..^1]));
+        }
+
+        if (typeStr.StartsWith('{') && typeStr.EndsWith('}') && typeStr.Contains(':'))
+        {
+            var kvParts = SplitTopLevelByChar(typeStr[1..^1], ':');
+            if (kvParts.Count == 2)
+            {
+                return PilotType.MapOf(ParseTypeString(kvParts[0].Trim()), ParseTypeString(kvParts[1].Trim()));
+            }
+        }
+
         return typeStr.ToLowerInvariant() switch
         {
-            "int" or "i32" or "i64" or "long" => PilotType.Int,
+            "int" or "i32" or "i64" or "u8" or "u16" or "u32" or "u64" or "i8" or "i16" or "long" => PilotType.Int,
             "float" or "f32" or "f64" or "double" => PilotType.Float,
             "str" or "string" => PilotType.String,
             "bool" or "boolean" => PilotType.Bool,
+            "map" or "dict" => PilotType.MapOf(PilotType.Any, PilotType.Any),
+            "list" => PilotType.ListOf(PilotType.Any),
+            "slicebuffer" => new PilotType(PilotTypeKind.Collection, "SliceBuffer", new[] { PilotType.Any }),
             "void" => PilotType.Void,
             "null" or "none" => PilotType.Null,
             "any" => PilotType.Any,

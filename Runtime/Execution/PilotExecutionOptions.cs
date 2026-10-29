@@ -27,6 +27,11 @@ public sealed class PilotExecutionOptions
     public bool StrictMode { get; set; } = false;
 
     /// <summary>
+    /// Optional source file path for relative module resolution and diagnostics.
+    /// </summary>
+    public string? SourceFilePath { get; set; }
+
+    /// <summary>
     /// Optional initial scope to execute code within.
     /// </summary>
     public Pilot.Runtime.Environment.PilotScope? InitialScope { get; set; }

@@ -953,6 +953,8 @@ public readonly struct PilotValue : IEquatable<PilotValue>
             if (memberName == "patch_version") return FromInt(fn.PatchVersion);
             if (memberName == "signature") return FromString(fn.GetSignatureKey());
             if (memberName is "name" or "Name") return FromString(fn.Name);
+            if (memberName is "is_burst" or "IsBurst") return FromBool(fn.IsBurstCompiled);
+            if (memberName is "is_native_burst" or "IsNativeBurst") return FromBool(fn.IsNativeCppBurst);
             if (memberName is "is_macro" or "IsMacro" or "is_special_form" or "IsSpecialForm") return FromBool(fn.IsMacro);
             if (memberName is "check" or "Check" or "matches" or "Matches")
             {
@@ -1171,6 +1173,17 @@ public readonly struct PilotValue : IEquatable<PilotValue>
                 "is_frozen" or "IsFrozen" => FromBool(_integer != 0),
                 "to_native" or "as_native" or "ToNative" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => FromNativeArray(new Pilot.Runtime.NativeMemory.PilotNativeArray(list)))),
                 "append" or "Append" or "push" or "Push" => FromFunction(CreateAppendFunction(memberName, list)),
+                "insert" or "Insert" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    if (self._integer != 0)
+                        throw new InvalidOperationException("Cannot mutate a compile-time frozen list (.rodata).");
+                    if (args.Count < 2) return Null;
+                    int idx = (int)args[0].AsInt();
+                    if (idx < 0) idx = Math.Max(0, list.Count + idx);
+                    if (idx > list.Count) idx = list.Count;
+                    list.Insert(idx, args[1]);
+                    return Null;
+                }, "index", "item")),
                 "sum" or "Sum" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => ComputeCollectionSum(list))),
                 "map" or "Map" => FromFunction(PilotFunction.CreateNative(memberName, (ctx, args) =>
                 {
@@ -1214,13 +1227,30 @@ public readonly struct PilotValue : IEquatable<PilotValue>
                     rev.Reverse();
                     return FromList(rev);
                 })),
-                "pop" or "Pop" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) =>
+                "pop" or "Pop" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
                 {
+                    if (self._integer != 0)
+                        throw new InvalidOperationException("Cannot mutate a compile-time frozen list (.rodata).");
                     if (list.Count == 0) return Undefined;
-                    var last = list[^1];
-                    list.RemoveAt(list.Count - 1);
-                    return last;
-                })),
+                    int idx = args.Count > 0 ? (int)args[0].AsInt() : list.Count - 1;
+                    if (idx < 0) idx += list.Count;
+                    if (idx < 0 || idx >= list.Count) return Undefined;
+                    var removed = list[idx];
+                    list.RemoveAt(idx);
+                    return removed;
+                }, "index")),
+                "remove_at" or "RemoveAt" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    if (self._integer != 0)
+                        throw new InvalidOperationException("Cannot mutate a compile-time frozen list (.rodata).");
+                    if (args.Count == 0 || list.Count == 0) return Undefined;
+                    int idx = (int)args[0].AsInt();
+                    if (idx < 0) idx += list.Count;
+                    if (idx < 0 || idx >= list.Count) return Undefined;
+                    var removed = list[idx];
+                    list.RemoveAt(idx);
+                    return removed;
+                }, "index")),
                 "clear" or "Clear" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) =>
                 {
                     list.Clear();
@@ -1271,6 +1301,13 @@ public readonly struct PilotValue : IEquatable<PilotValue>
                 "values" or "Values" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) => FromList(new List<PilotValue>(map.Values)))),
                 "contains_key" or "ContainsKey" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
                     FromBool(args.Count > 0 && map.ContainsKey(args[0])))),
+                "get_or" or "GetOr" => FromFunction(PilotFunction.CreateNative(memberName, (_, args) =>
+                {
+                    if (args.Count == 0) return Null;
+                    if (map is PilotFrozenMap fmGet && fmGet.TryLookupFast(args[0], out var fv)) return fv;
+                    if (map.TryGetValue(args[0], out var mv)) return mv;
+                    return args.Count > 1 ? args[1] : Null;
+                }, "key", "default")),
                 "clear" or "Clear" => FromFunction(PilotFunction.CreateNative(memberName, (_, _) =>
                 {
                     map.Clear();
@@ -1923,10 +1960,58 @@ public readonly struct PilotValue : IEquatable<PilotValue>
                             list.Add(args[0]);
                         result = Null;
                         return true;
-                    case "pop" or "Pop" when argc == 0:
-                        if (list.Count == 0) result = Undefined;
-                        else { result = list[^1]; list.RemoveAt(list.Count - 1); }
+                    case "insert" or "Insert" when argc == 2:
+                    {
+                        if (receiver._integer != 0)
+                            throw new InvalidOperationException("Cannot mutate a compile-time frozen list (.rodata).");
+                        int idx = (int)args[0].AsInt();
+                        if (idx < 0) idx = Math.Max(0, list.Count + idx);
+                        if (idx > list.Count) idx = list.Count;
+                        list.Insert(idx, args[1]);
+                        result = Null;
                         return true;
+                    }
+                    case "pop" or "Pop" when argc is 0 or 1:
+                    {
+                        if (receiver._integer != 0)
+                            throw new InvalidOperationException("Cannot mutate a compile-time frozen list (.rodata).");
+                        if (list.Count == 0)
+                        {
+                            result = Undefined;
+                        }
+                        else
+                        {
+                            int idx = argc > 0 ? (int)args[0].AsInt() : list.Count - 1;
+                            if (idx < 0) idx += list.Count;
+                            if (idx < 0 || idx >= list.Count)
+                            {
+                                result = Undefined;
+                            }
+                            else
+                            {
+                                result = list[idx];
+                                list.RemoveAt(idx);
+                            }
+                        }
+                        return true;
+                    }
+                    case "remove_at" or "RemoveAt" when argc == 1:
+                    {
+                        if (receiver._integer != 0)
+                            throw new InvalidOperationException("Cannot mutate a compile-time frozen list (.rodata).");
+                        int idx = (int)args[0].AsInt();
+                        if (idx < 0) idx += list.Count;
+                        if (idx < 0 || idx >= list.Count)
+                        {
+                            result = Undefined;
+                        }
+                        else
+                        {
+                            result = list[idx];
+                            list.RemoveAt(idx);
+                        }
+                        return true;
+                    }
                     case "clear" or "Clear" when argc == 0:
                         list.Clear();
                         result = Null;

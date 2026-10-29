@@ -1,0 +1,601 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.collections — Bootstrapped via M20 (`--from python|rust --strict-pilot --viable-license-only`) & Curated
+// Containers: Deque, PriorityQueue, OrderedMap, MultiMap, RingBuffer, BitSet, FrozenMap + bisect algorithms.
+
+// Binary search leftmost insertion point in sorted list (PSF-2.0 CPython bisect scaffold)
+def bisect_left(arr, target) -> i64 {
+    var lo: i64 = 0;
+    var hi: i64 = len(arr);
+    while lo < hi {
+        let mid: i64 = (lo + hi) >> 1;
+        if arr[mid] < target {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo;
+}
+
+// Binary search rightmost insertion point in sorted list (PSF-2.0 CPython bisect scaffold)
+def bisect_right(arr, target) -> i64 {
+    var lo: i64 = 0;
+    var hi: i64 = len(arr);
+    while lo < hi {
+        let mid: i64 = (lo + hi) >> 1;
+        if target < arr[mid] {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    return lo;
+}
+
+// Amortized O(1) circular-buffer Double-Ended Queue (MIT/Apache-2.0 Rust VecDeque scaffold)
+class Deque {
+    def __init__(self, initial_cap: i64 = 8) {
+        var cap: i64 = 8;
+        while cap < initial_cap {
+            cap = cap * 2;
+        }
+        var buf = [];
+        for _idx in 0..<cap {
+            buf.append(none);
+        }
+        self._buf = buf;
+        self._cap = cap;
+        self._head = 0;
+        self._size = 0;
+    }
+
+    def len(self) -> i64 {
+        return self._size;
+    }
+
+    def is_empty(self) -> bool {
+        return self._size == 0;
+    }
+
+    def _grow(self) {
+        let old_cap: i64 = self._cap;
+        let new_cap: i64 = old_cap * 2;
+        var next_buf = [];
+        for _idx in 0..<new_cap {
+            next_buf.append(none);
+        }
+        for i in 0..<self._size {
+            let idx: i64 = (self._head + i) % old_cap;
+            next_buf[i] = self._buf[idx];
+        }
+        self._buf = next_buf;
+        self._cap = new_cap;
+        self._head = 0;
+    }
+
+    def push_back(self, item) {
+        if self._size == self._cap {
+            self._grow();
+        }
+        let tail: i64 = (self._head + self._size) % self._cap;
+        self._buf[tail] = item;
+        self._size = self._size + 1;
+    }
+
+    def push_front(self, item) {
+        if self._size == self._cap {
+            self._grow();
+        }
+        self._head = (self._head - 1 + self._cap) % self._cap;
+        self._buf[self._head] = item;
+        self._size = self._size + 1;
+    }
+
+    def pop_front(self) {
+        if self._size == 0 {
+            return none;
+        }
+        let item = self._buf[self._head];
+        self._buf[self._head] = none;
+        self._head = (self._head + 1) % self._cap;
+        self._size = self._size - 1;
+        return some(item);
+    }
+
+    def pop_back(self) {
+        if self._size == 0 {
+            return none;
+        }
+        let tail: i64 = (self._head + self._size - 1) % self._cap;
+        let item = self._buf[tail];
+        self._buf[tail] = none;
+        self._size = self._size - 1;
+        return some(item);
+    }
+
+    def peek_front(self) {
+        if self._size == 0 {
+            return none;
+        }
+        return some(self._buf[self._head]);
+    }
+
+    def peek_back(self) {
+        if self._size == 0 {
+            return none;
+        }
+        let tail: i64 = (self._head + self._size - 1) % self._cap;
+        return some(self._buf[tail]);
+    }
+
+    def at(self, index: i64) {
+        if index < 0 or index >= self._size {
+            return none;
+        }
+        let idx: i64 = (self._head + index) % self._cap;
+        return some(self._buf[idx]);
+    }
+
+    def clear(self) {
+        for i in 0..<self._cap {
+            self._buf[i] = none;
+        }
+        self._head = 0;
+        self._size = 0;
+    }
+
+    def to_list(self) {
+        var out = [];
+        for i in 0..<self._size {
+            let idx: i64 = (self._head + i) % self._cap;
+            out.append(self._buf[idx]);
+        }
+        return out;
+    }
+}
+
+// Binary Min-Heap Priority Queue (PSF-2.0 CPython heapq sift scaffold)
+class PriorityQueue {
+    def __init__(self) {
+        self._heap = [];
+        self._seq = 0;
+    }
+
+    def len(self) -> i64 {
+        return len(self._heap);
+    }
+
+    def is_empty(self) -> bool {
+        return len(self._heap) == 0;
+    }
+
+    def _less(self, entry_a, entry_b) -> bool {
+        if entry_a[0] < entry_b[0] {
+            return true;
+        }
+        if entry_a[0] > entry_b[0] {
+            return false;
+        }
+        return entry_a[1] < entry_b[1];
+    }
+
+    def push(self, priority, value) {
+        let entry = (priority, self._seq, value);
+        self._seq = self._seq + 1;
+        self._heap.append(entry);
+        var idx: i64 = len(self._heap) - 1;
+        while idx > 0 {
+            let parent: i64 = (idx - 1) >> 1;
+            if self._less(self._heap[idx], self._heap[parent]) {
+                let tmp = self._heap[parent];
+                self._heap[parent] = self._heap[idx];
+                self._heap[idx] = tmp;
+                idx = parent;
+            } else {
+                break;
+            }
+        }
+    }
+
+    def peek(self) {
+        if len(self._heap) == 0 {
+            return none;
+        }
+        return some(self._heap[0][2]);
+    }
+
+    def peek_with_priority(self) {
+        if len(self._heap) == 0 {
+            return none;
+        }
+        let top = self._heap[0];
+        return some((top[0], top[2]));
+    }
+
+    def pop(self) {
+        let n: i64 = len(self._heap);
+        if n == 0 {
+            return none;
+        }
+        let top_val = self._heap[0][2];
+        let last_entry = self._heap[n - 1];
+        self._heap.remove_at(n - 1);
+        let new_len: i64 = len(self._heap);
+        if new_len > 0 {
+            self._heap[0] = last_entry;
+            var idx: i64 = 0;
+            while true {
+                let left: i64 = 2 * idx + 1;
+                let right: i64 = left + 1;
+                var smallest: i64 = idx;
+                if left < new_len and self._less(self._heap[left], self._heap[smallest]) {
+                    smallest = left;
+                }
+                if right < new_len and self._less(self._heap[right], self._heap[smallest]) {
+                    smallest = right;
+                }
+                if smallest == idx {
+                    break;
+                }
+                let tmp = self._heap[idx];
+                self._heap[idx] = self._heap[smallest];
+                self._heap[smallest] = tmp;
+                idx = smallest;
+            }
+        }
+        return some(top_val);
+    }
+}
+
+// Sorted Key-Value Map supporting O(log N) lookup, floor/ceiling keys, and inclusive range queries
+class OrderedMap {
+    def __init__(self) {
+        self._keys = [];
+        self._vals = [];
+    }
+
+    def len(self) -> i64 {
+        return len(self._keys);
+    }
+
+    def is_empty(self) -> bool {
+        return len(self._keys) == 0;
+    }
+
+    def put(self, key, val) {
+        let idx: i64 = bisect_left(self._keys, key);
+        if idx < len(self._keys) and self._keys[idx] == key {
+            self._vals[idx] = val;
+        } else {
+            self._keys.insert(idx, key);
+            self._vals.insert(idx, val);
+        }
+    }
+
+    def get(self, key) {
+        let idx: i64 = bisect_left(self._keys, key);
+        if idx < len(self._keys) and self._keys[idx] == key {
+            return some(self._vals[idx]);
+        }
+        return none;
+    }
+
+    def contains_key(self, key) -> bool {
+        let idx: i64 = bisect_left(self._keys, key);
+        return idx < len(self._keys) and self._keys[idx] == key;
+    }
+
+    def remove(self, key) {
+        let idx: i64 = bisect_left(self._keys, key);
+        if idx < len(self._keys) and self._keys[idx] == key {
+            let old_val = self._vals[idx];
+            self._keys.remove_at(idx);
+            self._vals.remove_at(idx);
+            return some(old_val);
+        }
+        return none;
+    }
+
+    def min_entry(self) {
+        if len(self._keys) == 0 {
+            return none;
+        }
+        return some((self._keys[0], self._vals[0]));
+    }
+
+    def max_entry(self) {
+        let n: i64 = len(self._keys);
+        if n == 0 {
+            return none;
+        }
+        return some((self._keys[n - 1], self._vals[n - 1]));
+    }
+
+    def range_entries(self, lo_key, hi_key) {
+        let start_idx: i64 = bisect_left(self._keys, lo_key);
+        let end_idx: i64 = bisect_right(self._keys, hi_key);
+        var out = [];
+        for i in start_idx..<end_idx {
+            out.append((self._keys[i], self._vals[i]));
+        }
+        return out;
+    }
+
+    def keys(self) {
+        return [k for k in self._keys];
+    }
+
+    def values(self) {
+        return [v for v in self._vals];
+    }
+}
+
+// One-to-Many Associative MultiMap (key -> list of values)
+class MultiMap {
+    def __init__(self) {
+        self._data = {};
+        self._total = 0;
+    }
+
+    def put(self, key, val) {
+        if self._data.contains_key(key) {
+            self._data[key].append(val);
+        } else {
+            self._data[key] = [val];
+        }
+        self._total = self._total + 1;
+    }
+
+    def get_all(self, key) {
+        if self._data.contains_key(key) {
+            return self._data[key];
+        }
+        return [];
+    }
+
+    def contains_key(self, key) -> bool {
+        return self._data.contains_key(key) and len(self._data[key]) > 0;
+    }
+
+    def key_count(self) -> i64 {
+        return len(self._data.keys());
+    }
+
+    def total_values(self) -> i64 {
+        return self._total;
+    }
+
+    def remove_key(self, key) {
+        if self._data.contains_key(key) {
+            let bucket = self._data[key];
+            let removed_count: i64 = len(bucket);
+            self._data[key] = [];
+            self._total = self._total - removed_count;
+            return bucket;
+        }
+        return [];
+    }
+}
+
+// Fixed-Capacity RingBuffer with non-allocating overwrite and bounded try_push
+class RingBuffer {
+    def __init__(self, capacity: i64) {
+        if capacity <= 0 {
+            panic("RingBuffer capacity must be > 0");
+        }
+        var slots = [];
+        for _idx in 0..<capacity {
+            slots.append(none);
+        }
+        self._slots = slots;
+        self._cap = capacity;
+        self._head = 0;
+        self._count = 0;
+    }
+
+    def len(self) -> i64 {
+        return self._count;
+    }
+
+    def capacity(self) -> i64 {
+        return self._cap;
+    }
+
+    def is_empty(self) -> bool {
+        return self._count == 0;
+    }
+
+    def is_full(self) -> bool {
+        return self._count == self._cap;
+    }
+
+    def try_push(self, item) -> bool {
+        if self._count == self._cap {
+            return false;
+        }
+        let write_idx: i64 = (self._head + self._count) % self._cap;
+        self._slots[write_idx] = item;
+        self._count = self._count + 1;
+        return true;
+    }
+
+    def push_overwrite(self, item) {
+        if self._count < self._cap {
+            let write_idx: i64 = (self._head + self._count) % self._cap;
+            self._slots[write_idx] = item;
+            self._count = self._count + 1;
+            return none;
+        }
+        let evicted = self._slots[self._head];
+        self._slots[self._head] = item;
+        self._head = (self._head + 1) % self._cap;
+        return some(evicted);
+    }
+
+    def pop(self) {
+        if self._count == 0 {
+            return none;
+        }
+        let item = self._slots[self._head];
+        self._slots[self._head] = none;
+        self._head = (self._head + 1) % self._cap;
+        self._count = self._count - 1;
+        return some(item);
+    }
+
+    def to_list(self) {
+        var out = [];
+        for i in 0..<self._count {
+            out.append(self._slots[(self._head + i) % self._cap]);
+        }
+        return out;
+    }
+}
+
+// 62-bit Word-Packed Dense BitSet with SWAR/Kernighan popcount & bitwise algebra
+class BitSet {
+    def __init__(self, bit_capacity: i64 = 62) {
+        var word_count: i64 = (bit_capacity + 61) / 62;
+        if word_count < 1 {
+            word_count = 1;
+        }
+        var words = [];
+        for _idx in 0..<word_count {
+            words.append(0);
+        }
+        self._words = words;
+    }
+
+    def _ensure_bit(self, bit_idx: i64) {
+        if bit_idx < 0 {
+            panic("BitSet index must be >= 0");
+        }
+        let word_idx: i64 = bit_idx / 62;
+        while len(self._words) <= word_idx {
+            self._words.append(0);
+        }
+    }
+
+    def set(self, bit_idx: i64) {
+        self._ensure_bit(bit_idx);
+        let w: i64 = bit_idx / 62;
+        let offset: i64 = bit_idx % 62;
+        self._words[w] = self._words[w] | (1 << offset);
+    }
+
+    def clear_bit(self, bit_idx: i64) {
+        if bit_idx < 0 {
+            return;
+        }
+        let w: i64 = bit_idx / 62;
+        if w >= len(self._words) {
+            return;
+        }
+        let offset: i64 = bit_idx % 62;
+        self._words[w] = self._words[w] & ~(1 << offset);
+    }
+
+    def test(self, bit_idx: i64) -> bool {
+        if bit_idx < 0 {
+            return false;
+        }
+        let w: i64 = bit_idx / 62;
+        if w >= len(self._words) {
+            return false;
+        }
+        let offset: i64 = bit_idx % 62;
+        return ((self._words[w] >> offset) & 1) == 1;
+    }
+
+    def count_ones(self) -> i64 {
+        var total: i64 = 0;
+        for w in self._words {
+            var x: i64 = w;
+            while x > 0 {
+                x = x & (x - 1);
+                total = total + 1;
+            }
+        }
+        return total;
+    }
+
+    def union_with(self, other) {
+        let max_len: i64 = max(len(self._words), len(other._words));
+        var res = BitSet(max_len * 62);
+        for i in 0..<max_len {
+            let a: i64 = if i < len(self._words) { self._words[i] } else { 0 };
+            let b: i64 = if i < len(other._words) { other._words[i] } else { 0 };
+            res._words[i] = a | b;
+        }
+        return res;
+    }
+
+    def intersect_with(self, other) {
+        let min_len: i64 = min(len(self._words), len(other._words));
+        var res = BitSet(max(1, min_len) * 62);
+        for i in 0..<min_len {
+            res._words[i] = self._words[i] & other._words[i];
+        }
+        return res;
+    }
+
+    def to_list(self) {
+        var bits = [];
+        for w_idx in 0..<len(self._words) {
+            let word: i64 = self._words[w_idx];
+            if word != 0 {
+                for b in 0..<62 {
+                    if ((word >> b) & 1) == 1 {
+                        bits.append(w_idx * 62 + b);
+                    }
+                }
+            }
+        }
+        return bits;
+    }
+}
+
+// Compile-Time / Runtime Displacement Perfect-Hash FrozenMap (.rodata wrapper)
+def freeze_map(entries) {
+    return __freeze_value(entries);
+}
+
+class FrozenMap {
+    def __init__(self, entries) {
+        self._table = __freeze_value(entries);
+    }
+
+    def get(self, key) {
+        if self._table.contains_key(key) {
+            return some(self._table[key]);
+        }
+        return none;
+    }
+
+    def get_or(self, key, default_val) {
+        if self._table.contains_key(key) {
+            return self._table[key];
+        }
+        return default_val;
+    }
+
+    def contains_key(self, key) -> bool {
+        return self._table.contains_key(key);
+    }
+
+    def len(self) -> i64 {
+        return len(self._table.keys());
+    }
+
+    def is_perfect_hash(self) -> bool {
+        return __is_perfect_hash_map(self._table);
+    }
+
+    def table_size(self) -> i64 {
+        return __frozen_map_table_size(self._table);
+    }
+
+    def raw_map(self) {
+        return self._table;
+    }
+}

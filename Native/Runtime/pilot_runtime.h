@@ -18,6 +18,14 @@ extern "C" {
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(_WIN32) || defined(__CYGWIN__)
+  #define PILOT_API __declspec(dllexport)
+#elif defined(__GNUC__) || defined(__clang__)
+  #define PILOT_API __attribute__((visibility("default")))
+#else
+  #define PILOT_API
+#endif
+
 /* --- Basic Types --- */
 typedef int64_t  pilot_int_t;
 typedef double   pilot_float_t;
@@ -174,6 +182,62 @@ static inline void pilot_list_destroy(pilot_list_t* list) {
         pilot_free(list);
     }
 }
+
+/* --- Milestone 21+: C++20 `libpilot_rt` Shared Accelerator C-ABI --- */
+PILOT_API int32_t pilot_rt_version(void);
+PILOT_API int32_t pilot_rt_simd_width_bits(void);
+
+PILOT_API double  pilot_rt_slice_sum_f64(const double* data, size_t len);
+PILOT_API int64_t pilot_rt_slice_sum_i64(const int64_t* data, size_t len);
+PILOT_API double  pilot_rt_slice_dot_f64(const double* a, const double* b, size_t len);
+PILOT_API void    pilot_rt_slice_saxpy_f64(double alpha, const double* x, double* y, size_t len);
+PILOT_API void    pilot_rt_slice_scale_f64(double alpha, double* data, size_t len);
+PILOT_API void    pilot_rt_slice_fill_f64(double* data, size_t len, double value);
+PILOT_API void    pilot_rt_slice_fill_i64(int64_t* data, size_t len, int64_t value);
+PILOT_API void    pilot_rt_slice_sort_f64(double* data, size_t len);
+PILOT_API void    pilot_rt_slice_sort_i64(int64_t* data, size_t len);
+
+PILOT_API void    pilot_rt_welford_f64(
+    const double* data,
+    size_t len,
+    double* out_mean,
+    double* out_m2,
+    double* out_min,
+    double* out_max);
+
+PILOT_API void    pilot_rt_integrate_vectors_f64(
+    double* positions,
+    double* velocities,
+    double dt,
+    double drag,
+    size_t count);
+
+/* Returns: 1 = matched (*out_start, *out_end), 0 = no match, -1 = fallback to Unicode predicate matcher */
+PILOT_API int32_t pilot_rt_dfa_find_utf16(
+    const int32_t* ascii_table_128,
+    const uint8_t* accept_flags,
+    int32_t state_count,
+    int32_t has_non_ascii,
+    int32_t anchored_start,
+    int32_t anchored_end,
+    const uint16_t* text,
+    int32_t text_len,
+    int32_t start_at,
+    int32_t* out_start,
+    int32_t* out_end);
+
+PILOT_API int32_t pilot_rt_dfa_find_utf8(
+    const int32_t* ascii_table_128,
+    const uint8_t* accept_flags,
+    int32_t state_count,
+    int32_t has_non_ascii,
+    int32_t anchored_start,
+    int32_t anchored_end,
+    const uint8_t* bytes,
+    int32_t byte_len,
+    int32_t start_at,
+    int32_t* out_start,
+    int32_t* out_end);
 
 #ifdef __cplusplus
 }

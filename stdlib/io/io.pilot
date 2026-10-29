@@ -1,0 +1,206 @@
+// SPDX-License-Identifier: MIT
+// std.io — Values-First `IoError` ADT, Null-Safe (`T?`) EOF Streams & Fallible (`! IoError`) Buffered I/O
+// Adheres to Pilot Invariant #7: zero `raise`/`try`/`except`; recoverable failures return `T ! IoError`.
+
+type IoError = NotFound(path: str)
+             | PermissionDenied(path: str)
+             | InvalidPath(msg: str)
+             | AlreadyExists(path: str)
+             | UnexpectedEof(msg: str)
+             | Other(msg: str);
+
+def format_io_error(err: IoError) -> str {
+    return match err {
+        case IoError.NotFound(p) => f"NotFound: {p}",
+        case IoError.PermissionDenied(p) => f"PermissionDenied: {p}",
+        case IoError.InvalidPath(m) => f"InvalidPath: {m}",
+        case IoError.AlreadyExists(p) => f"AlreadyExists: {p}",
+        case IoError.UnexpectedEof(m) => f"UnexpectedEof: {m}",
+        case IoError.Other(m) => f"IoError: {m}"
+    };
+}
+
+// In-memory UTF-8 text accumulator
+class StringBuffer {
+    def __init__(self, initial: str = "") {
+        self._chunks = [];
+        self._len = 0;
+        if len(initial) > 0 {
+            self._chunks.append(initial);
+            self._len = len(initial);
+        }
+    }
+
+    def len(self) -> i64 {
+        return self._len;
+    }
+
+    def is_empty(self) -> bool {
+        return self._len == 0;
+    }
+
+    def write(self, text: str) {
+        if len(text) > 0 {
+            self._chunks.append(text);
+            self._len = self._len + len(text);
+        }
+    }
+
+    def write_line(self, line: str = "") {
+        self.write(line + "\n");
+    }
+
+    def clear(self) {
+        self._chunks = [];
+        self._len = 0;
+    }
+
+    def to_str(self) -> str {
+        var out: str = "";
+        for c in self._chunks {
+            out = out + c;
+        }
+        return out;
+    }
+}
+
+// Null-safe (`none` on EOF) buffered text & byte reader
+class BufferedReader {
+    def __init__(self, content: str, source_path: str = "<memory>") {
+        self._text = content;
+        self._bytes = __utf8_encode_slice(content);
+        self._char_pos = 0;
+        self._byte_pos = 0;
+        self.source_path = source_path;
+    }
+
+    def is_eof(self) -> bool {
+        return self._char_pos >= len(self._text);
+    }
+
+    // Returns `str?`: `some(line)` (without trailing `\r\n` / `\n`) or `none` when at EOF
+    def read_line(self) {
+        let total: i64 = len(self._text);
+        if self._char_pos >= total {
+            return none;
+        }
+        let nl_idx: i64 = __str_index_of(self._text, "\n", self._char_pos);
+        if nl_idx < 0 {
+            let rem = __str_slice(self._text, self._char_pos, total);
+            self._char_pos = total;
+            self._byte_pos = __slice_len(self._bytes);
+            return some(rem);
+        }
+        var line_end: i64 = nl_idx;
+        if line_end > self._char_pos and __str_slice(self._text, line_end - 1, line_end) == "\r" {
+            line_end = line_end - 1;
+        }
+        let line_str = __str_slice(self._text, self._char_pos, line_end);
+        self._char_pos = nl_idx + 1;
+        return some(line_str);
+    }
+
+    def read_lines(self) {
+        var lines = [];
+        while !self.is_eof() {
+            let next_l = self.read_line();
+            if some ln_val = next_l {
+                lines.append(ln_val);
+            } else {
+                break;
+            }
+        }
+        return lines;
+    }
+
+    // Zero-copy subview over the reader's `SliceBuffer<u8>` (`none` at byte EOF)
+    def read_bytes(self, max_bytes: i64) {
+        let total_b: i64 = __slice_len(self._bytes);
+        if self._byte_pos >= total_b or max_bytes <= 0 {
+            return none;
+        }
+        let count: i64 = min(max_bytes, total_b - self._byte_pos);
+        let view = __slice_subview(self._bytes, self._byte_pos, count);
+        self._byte_pos = self._byte_pos + count;
+        return some(view);
+    }
+
+    def read_remaining(self) -> str {
+        let total: i64 = len(self._text);
+        if self._char_pos >= total {
+            return "";
+        }
+        let rem = __str_slice(self._text, self._char_pos, total);
+        self._char_pos = total;
+        return rem;
+    }
+}
+
+def open_reader(path: str) -> BufferedReader ! IoError {
+    let raw_res = __fs_read_text(path);
+    if __result_is_err(raw_res) {
+        return fail(__result_unwrap_err(raw_res));
+    }
+    return ok(BufferedReader(__result_unwrap_ok(raw_res), path));
+}
+
+def reader_from_string(content: str) {
+    return BufferedReader(content, "<string>");
+}
+
+// Fallible (`! IoError`) buffered file writer (participates in `fn!?(...)` CoW shadow dry-runs!)
+class BufferedWriter {
+    def __init__(self, target_path: str, append_mode: bool = false) {
+        self.target_path = target_path;
+        self.append_mode = append_mode;
+        self._buffer = StringBuffer("");
+        self._flushed_once = false;
+        self._closed = false;
+    }
+
+    def buffered_len(self) -> i64 {
+        return self._buffer.len();
+    }
+
+    def write(self, text: str) {
+        if self._closed {
+            panic("BufferedWriter.write called on closed writer");
+        }
+        self._buffer.write(text);
+    }
+
+    def write_line(self, line: str = "") {
+        self.write(line + "\n");
+    }
+
+    def flush(self) -> i64 ! IoError {
+        if self._buffer.is_empty() and self._flushed_once {
+            return ok(0);
+        }
+        let payload = self._buffer.to_str();
+        let should_append: bool = self.append_mode or self._flushed_once;
+        let write_res = __fs_write_text(self.target_path, payload, should_append);
+        if __result_is_err(write_res) {
+            return fail(__result_unwrap_err(write_res));
+        }
+        self._buffer.clear();
+        self._flushed_once = true;
+        return ok(__result_unwrap_ok(write_res));
+    }
+
+    def close(self) -> i64 ! IoError {
+        if self._closed {
+            return ok(0);
+        }
+        let flushed = self.flush()?;
+        self._closed = true;
+        return ok(flushed);
+    }
+}
+
+def open_writer(path: str, append_mode: bool = false) -> BufferedWriter ! IoError {
+    if len(path) == 0 {
+        return fail(IoError.InvalidPath("empty path"));
+    }
+    return ok(BufferedWriter(path, append_mode));
+}

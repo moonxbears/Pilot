@@ -88,8 +88,8 @@ flowchart TD
 | **M18** | Semantic Call Projections: Signals (`!^`), Autodiff (`!@`) & Dry-Runs (`!?`) | Phase B | ✅ **Completed** | `Analysis/Autodiff/`, `Runtime/Reactive/`, `Runtime/Effects/` |
 | **M19** | Rigorous Runtime-to-Compile-Time Demotion & `comptime` Audit | Phase B | ✅ **Completed** | `Analysis/Comptime/`, `Compiler/`, `Transpilation/PilotOptimizer.cs` |
 | **M20** | Accurate Bidirectional Language Transpilation & Library Ingestion (`--emit` / `--from`) | Phase C | ✅ **Completed** | `Transpilation/`, `Formatting/PilotFormatter.cs`, `Cli/Program.cs` |
-| **M21** | Core Native Standard Library (`std.core`, `collections`, `mem`, `io`, `fs`, `math`) | Phase C | 🎯 **Next Up** | `stdlib/core/`, `stdlib/collections/`, `stdlib/io/`, `stdlib/math/` |
-| **M22** | Debug Adapter Protocol (DAP) & VS Code GUI Breakpoints | Phase C | 📋 **Planned** | `Debugging/Dap/`, `Debugging/PilotDebugger.cs`, `vscode-pilot/` |
+| **M21** | Core Native Standard Library (`std.core`, `collections`, `mem`, `io`, `fs`, `math`) | Phase C | ✅ **Completed** | `stdlib/core/`, `stdlib/collections/`, `stdlib/io/`, `stdlib/math/` |
+| **M22** | Debug Adapter Protocol (DAP) & VS Code GUI Breakpoints | Phase C | 🎯 **Next Up** | `Debugging/Dap/`, `Debugging/PilotDebugger.cs`, `vscode-pilot/` |
 | **M23** | Deep LLVM / WASM Runtime Linking & Native Binary Toolchain (`pilot build`) | Phase C | 📋 **Planned** | `Native/Llvm/`, `Native/Wasm/`, `Native/Runtime/` |
 | **M24** | Extended Systems, Networking, HTTP & Crypto Standard Library | Phase C | 📋 **Planned** | `stdlib/net/`, `stdlib/http/`, `stdlib/crypto/`, `stdlib/formats/` |
 | **M25** | Advanced Performance Analysis & Trivia-Preserving Auto-Optimizer (`pilot perf`) | Phase C | 📋 **Planned** | `Analysis/Performance/`, `Transpilation/PilotOptimizer.cs` |
@@ -622,11 +622,11 @@ Placed immediately after `M16` (Bidirectional Inference) and `M17`–`M18` (Meta
 - **Rust / C11 Donors** (`MIT` / `Apache-2.0`): Scaffold unboxed, zero-GC value-semantic containers and low-level memory/PRNG routines (`Deque`, `RingBuffer`, `BitSet`, `SliceBuffer` helpers, `PCG`/`SplitMix64` PRNGs) where `Option<T>` and `Result<T, E>` map 1:1 onto Pilot's `T?` and `T ! E`.
 
 ### Sub-Tasks & Deliverables
-- [ ] **21.1: `std.*` Module Resolver, Precompiled `.pilc` Stdlib Cache & `PilotLibraryMapper` Registration**
-- [ ] **21.2: `std.core`, `std.option`, `std.result`, `std.mem` & `std.meta`** — Combinators for `T?`, `T ! E`, `SliceBuffer<T>`, `RangeWindow<TIter>`, `CallExpr` / `AstExpr` / `EffectPlan` reflection, and keyword hierarchies.
-- [ ] **21.3: `std.collections` & `std.itertools`** — Bootstrapped & curated `Deque`, `PriorityQueue`, `OrderedMap`, `MultiMap`, `RingBuffer`, `BitSet`, `FrozenMap`, and lazy/eager range combinators (`zip`, `chain`, `chunk`, `window`, `group_by`).
-- [ ] **21.4: `std.text`, `std.math` & `std.random`** — UTF-8 zero-copy string slices, regex (`comptime` DFA compilation), `IDifferentiable` elementary math (`PI`, `E`, `TAU`, trig, stats), and seeded PRNGs.
-- [ ] **21.5: `std.io`, `std.fs` & `std.path`** — Fallible (`! IoError`), null-safe buffered streams, `fs.mmap` zero-copy file views, directory traversal, globbing, and cross-platform `Path` manipulation.
+- [x] **21.1: `std.*` Module Resolver, Precompiled `.pilc` Stdlib Cache & `PilotLibraryMapper` Registration**
+- [x] **21.2: `std.core`, `std.option`, `std.result`, `std.mem` & `std.meta`** — Combinators for `T?`, `T ! E`, `SliceBuffer<T>`, `RangeWindow<TIter>`, `CallExpr` / `AstExpr` / `EffectPlan` reflection, and keyword hierarchies.
+- [x] **21.3: `std.collections` & `std.itertools`** — Bootstrapped & curated `Deque`, `PriorityQueue`, `OrderedMap`, `MultiMap`, `RingBuffer`, `BitSet`, `FrozenMap`, and lazy/eager range combinators (`zip`, `chain`, `chunk`, `window`, `group_by`).
+- [x] **21.4: `std.text`, `std.math` & `std.random`** — UTF-8 zero-copy string slices, regex (`comptime` DFA compilation), `IDifferentiable` elementary math (`PI`, `E`, `TAU`, trig, stats), and seeded PRNGs.
+- [x] **21.5: `std.io`, `std.fs` & `std.path`** — Fallible (`! IoError`), null-safe buffered streams, `fs.mmap` zero-copy file views, directory traversal, globbing, and cross-platform `Path` manipulation.
 
 ---
 
@@ -660,7 +660,7 @@ Moving `pilot build` *ahead* of Extended Systems/Net `stdlib` (`M24`), `pilot pe
 
 ### Sub-Tasks & Deliverables
 - [ ] **24.1: `std.time`** — Monotonic `Instant`, dimensional `Duration` interop, `DateTime`, timezones, and timers.
-- [ ] **24.2: `std.formats` & `std.encoding`** — Bootstrapped & curated zero-copy `json`, `toml`, `csv`, `env` parsers (returning `T ! ParseError`) plus `base64`, `hex`, and RFC-3986 `url` codecs.
+- [x] **24.2: `std.formats` & `std.encoding`** — Bootstrapped & curated zero-copy `json`, `toml`, `csv`, `env` parsers (returning `T ! ParseError`) plus `base64`, `hex`, and RFC-3986 `url` codecs.
 - [ ] **24.3: `std.crypto`** — Permissive Rust/C11-bootstrapped & `comptime`-table-verified `sha256`, `sha512`, `blake3`, `hmac`, CSPRNG, and Ed25519 signature verification.
 - [ ] **24.4: `std.net` & `std.http`** — TCP/UDP sockets, ergonomic HTTP client (`http.get`, `http.post` $\rightarrow$ `Response ! HttpError`), and declarative `http.Server` with `context`-injected request/middleware pipelines.
 
