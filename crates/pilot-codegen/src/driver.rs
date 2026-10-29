@@ -120,10 +120,18 @@ impl BuildDriver {
                 };
 
                 let inc_flag = format!("-I{}", tmp_dir.display());
-                let status = Command::new(compiler)
+                let mut cmd = Command::new(compiler);
+                cmd.arg(opt_flag)
+                    .arg("-fno-strict-aliasing")
+                    .arg("-fomit-frame-pointer")
+                    .arg("-fno-math-errno");
+
+                if options.opt_level == OptLevel::O3 {
+                    cmd.arg("-march=native");
+                }
+
+                let status = cmd
                     .args([
-                        opt_flag,
-                        "-fno-strict-aliasing",
                         &inc_flag,
                         tmp_c.to_str().unwrap(),
                         "-lm",

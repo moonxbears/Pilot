@@ -5,27 +5,38 @@
 //! - ASCII identifier run-length scanning (`[A-Za-z0-9_]`).
 //! - Fast-forward scanning to quote characters, newlines, or comment endings.
 
+const IS_WS_TABLE: [bool; 256] = {
+    let mut table = [false; 256];
+    table[b' ' as usize] = true;
+    table[b'\t' as usize] = true;
+    table[b'\r' as usize] = true;
+    table
+};
+
+const IS_IDENT_TABLE: [bool; 256] = {
+    let mut table = [false; 256];
+    let mut i = 0;
+    while i < 256 {
+        let b = i as u8;
+        if (b >= b'a' && b <= b'z')
+            || (b >= b'A' && b <= b'Z')
+            || (b >= b'0' && b <= b'9')
+            || b == b'_'
+        {
+            table[i] = true;
+        }
+        i += 1;
+    }
+    table
+};
+
 /// Returns the number of consecutive whitespace characters (`' '`, `'\t'`, `'\r'`) starting at `pos`.
 #[inline]
 pub fn scan_whitespace_run(bytes: &[u8], mut pos: usize) -> usize {
     let start = pos;
-    // 64-bit SWAR chunking when at least 8 bytes remain
-    while pos + 8 <= bytes.len() {
-        let chunk = u64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap());
-        // Check if all 8 bytes are space (0x20) or tab (0x09)
-        let is_space = chunk ^ 0x2020202020202020;
-        let is_tab = chunk ^ 0x0909090909090909;
-        // Simple byte-level validation for pure spaces/tabs
-        if is_space == 0 || is_tab == 0 {
-            pos += 8;
-            continue;
-        }
-        break;
-    }
-
     while pos < bytes.len() {
-        let b = bytes[pos];
-        if b == b' ' || b == b'\t' || b == b'\r' {
+        let b = unsafe { *bytes.get_unchecked(pos) };
+        if IS_WS_TABLE[b as usize] {
             pos += 1;
         } else {
             break;
@@ -39,12 +50,8 @@ pub fn scan_whitespace_run(bytes: &[u8], mut pos: usize) -> usize {
 pub fn scan_ident_run(bytes: &[u8], mut pos: usize) -> usize {
     let start = pos;
     while pos < bytes.len() {
-        let b = bytes[pos];
-        let is_ident = (b >= b'a' && b <= b'z')
-            || (b >= b'A' && b <= b'Z')
-            || (b >= b'0' && b <= b'9')
-            || b == b'_';
-        if is_ident {
+        let b = unsafe { *bytes.get_unchecked(pos) };
+        if IS_IDENT_TABLE[b as usize] {
             pos += 1;
         } else {
             break;
