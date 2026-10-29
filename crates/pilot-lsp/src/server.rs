@@ -169,17 +169,37 @@ impl LspServer {
         }
     }
 
+    pub const TOKEN_TYPES: &'static [&'static str] = &[
+        "namespace",     // 0
+        "type",          // 1
+        "class",         // 2
+        "enum",          // 3
+        "interface",     // 4
+        "struct",        // 5
+        "typeParameter", // 6
+        "parameter",     // 7
+        "variable",      // 8
+        "property",      // 9
+        "enumMember",    // 10
+        "event",         // 11
+        "function",      // 12
+        "method",        // 13
+        "macro",         // 14
+        "keyword",       // 15
+        "modifier",      // 16
+        "comment",       // 17
+        "string",        // 18
+        "number",        // 19
+        "regexp",        // 20
+        "operator",      // 21
+        "decorator",     // 22
+    ];
+
     fn handle_initialize(&self, id: Option<&JsonValue>) -> JsonValue {
-        let token_types = vec![
-            JsonValue::String("keyword".to_string()),
-            JsonValue::String("type".to_string()),
-            JsonValue::String("function".to_string()),
-            JsonValue::String("variable".to_string()),
-            JsonValue::String("string".to_string()),
-            JsonValue::String("number".to_string()),
-            JsonValue::String("comment".to_string()),
-            JsonValue::String("operator".to_string()),
-        ];
+        let token_types: Vec<JsonValue> = Self::TOKEN_TYPES
+            .iter()
+            .map(|&s| JsonValue::String(s.to_string()))
+            .collect();
 
         let capabilities = JsonValue::Object(vec![
             ("textDocumentSync".to_string(), JsonValue::Number(2.0)), // Incremental
@@ -476,29 +496,108 @@ impl LspServer {
             None => return JsonValue::Object(vec![("data".to_string(), JsonValue::Array(Vec::new()))]),
         };
 
+        let src = match self.db.source_text(file_id) {
+            Some(s) => s,
+            None => return JsonValue::Object(vec![("data".to_string(), JsonValue::Array(Vec::new()))]),
+        };
+
         let root = SyntaxNode::new_root(green);
         let mut data = Vec::new();
         let mut prev_line = 0u32;
         let mut prev_col = 0u32;
+        let mut prev_non_trivia_kind = SyntaxKind::Eof;
 
         for elem in root.descendants() {
             if let SyntaxElement::Token(token) = elem {
                 let k = token.kind();
+                if k == SyntaxKind::Whitespace || k == SyntaxKind::Newline {
+                    continue;
+                }
+
                 let type_idx = match k {
-                    SyntaxKind::KwLet | SyntaxKind::KwVar | SyntaxKind::KwConst | SyntaxKind::KwDef | SyntaxKind::KwFn | SyntaxKind::KwReturn | SyntaxKind::KwIf | SyntaxKind::KwElse | SyntaxKind::KwWhile | SyntaxKind::KwFor | SyntaxKind::KwMatch | SyntaxKind::KwClass | SyntaxKind::KwStruct | SyntaxKind::KwImport => Some(0), // keyword
-                    SyntaxKind::TypeNamed | SyntaxKind::KwType => Some(1), // type
-                    SyntaxKind::Ident => Some(3), // variable/identifier
-                    SyntaxKind::StrLit | SyntaxKind::TripleStrLit => Some(4), // string
-                    SyntaxKind::IntLit | SyntaxKind::FloatLit | SyntaxKind::HexIntLit | SyntaxKind::BinIntLit | SyntaxKind::OctIntLit => Some(5), // number
-                    SyntaxKind::LineComment | SyntaxKind::BlockComment => Some(6), // comment
-                    SyntaxKind::Plus | SyntaxKind::Minus | SyntaxKind::Star | SyntaxKind::Slash | SyntaxKind::Equal | SyntaxKind::EqEqual | SyntaxKind::Arrow => Some(7), // operator
+                    // Keywords (15)
+                    k if (k as u16 >= SyntaxKind::KwLet as u16 && k as u16 <= SyntaxKind::KwDefault as u16) => {
+                        match k {
+                            SyntaxKind::KwClass => Some(2), // class
+                            SyntaxKind::KwStruct | SyntaxKind::KwRecord => Some(5), // struct
+                            SyntaxKind::KwInterface | SyntaxKind::KwProtocol => Some(4), // interface
+                            SyntaxKind::KwEnum => Some(3), // enum
+                            SyntaxKind::KwType => Some(1), // type
+                            _ => Some(15), // keyword
+                        }
+                    }
+
+                    // Identifiers (function / type / decorator / variable)
+                    SyntaxKind::Ident => {
+                        if prev_non_trivia_kind == SyntaxKind::At {
+                            Some(22) // decorator
+                        } else if prev_non_trivia_kind == SyntaxKind::KwClass {
+                            Some(2) // class
+                        } else if prev_non_trivia_kind == SyntaxKind::KwStruct || prev_non_trivia_kind == SyntaxKind::KwRecord {
+                            Some(5) // struct
+                        } else if prev_non_trivia_kind == SyntaxKind::KwInterface || prev_non_trivia_kind == SyntaxKind::KwProtocol {
+                            Some(4) // interface
+                        } else if prev_non_trivia_kind == SyntaxKind::KwEnum {
+                            Some(3) // enum
+                        } else if prev_non_trivia_kind == SyntaxKind::KwType {
+                            Some(1) // type
+                        } else if prev_non_trivia_kind == SyntaxKind::KwDef || prev_non_trivia_kind == SyntaxKind::KwFn {
+                            Some(12) // function definition
+                        } else {
+                            let end_offset = (token.offset() + token.text_len()) as usize;
+                            let remainder = src.get(end_offset..).unwrap_or("").trim_start();
+                            if remainder.starts_with('(') {
+                                Some(12) // function call
+                            } else if token.text().starts_with(char::is_uppercase) {
+                                Some(1) // type (PascalCase)
+                            } else {
+                                Some(8) // variable
+                            }
+                        }
+                    }
+
+                    // Strings (18)
+                    SyntaxKind::StrLit
+                    | SyntaxKind::TripleStrLit
+                    | SyntaxKind::FStrStart
+                    | SyntaxKind::FStrMiddle
+                    | SyntaxKind::FStrEnd => Some(18), // string
+
+                    // Numbers (19)
+                    SyntaxKind::IntLit
+                    | SyntaxKind::HexIntLit
+                    | SyntaxKind::BinIntLit
+                    | SyntaxKind::OctIntLit
+                    | SyntaxKind::FloatLit
+                    | SyntaxKind::DurationLit
+                    | SyntaxKind::FrequencyLit
+                    | SyntaxKind::MemoryLit => Some(19), // number
+
+                    // Comments (17)
+                    SyntaxKind::LineComment | SyntaxKind::BlockComment | SyntaxKind::Shebang => Some(17), // comment
+
+                    // Operators (21)
+                    k if (k as u16 >= SyntaxKind::Plus as u16 && k as u16 <= SyntaxKind::DotDotLess as u16) => Some(21), // operator
+
+                    // Decorators (22)
+                    SyntaxKind::At => Some(22), // decorator
+
                     _ => None,
                 };
 
+                prev_non_trivia_kind = k;
+
                 if let Some(t_idx) = type_idx {
+                    if token.text_len() == 0 {
+                        continue;
+                    }
                     let (line_1, col_1) = line_index.offset_to_line_col(token.offset());
-                    let line_0 = line_1 - 1;
-                    let col_0 = col_1 - 1;
+                    let line_0 = line_1.saturating_sub(1);
+                    let col_0 = col_1.saturating_sub(1);
+
+                    if line_0 < prev_line || (line_0 == prev_line && col_0 < prev_col) {
+                        continue;
+                    }
 
                     let delta_line = line_0 - prev_line;
                     let delta_col = if delta_line == 0 { col_0 - prev_col } else { col_0 };

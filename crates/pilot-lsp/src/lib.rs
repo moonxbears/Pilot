@@ -53,6 +53,11 @@ mod tests {
         );
         let sem_resp = server.handle_message(&sem_req).expect("Expected semantic tokens response");
         assert!(sem_resp.contains("data"));
+        // Standard VSCode legend indices: keyword = 15, function = 12, variable = 8, type = 1
+        assert!(sem_resp.contains("15")); // keyword 'def'
+        assert!(sem_resp.contains("12")); // function 'compute'
+        assert!(sem_resp.contains("8"));  // variable 'x'
+        assert!(sem_resp.contains("1"));  // type 'i64'
 
         // 5. Completion
         let comp_req = format!(
