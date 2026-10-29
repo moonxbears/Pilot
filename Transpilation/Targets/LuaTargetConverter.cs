@@ -2,18 +2,19 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
-using Antlr4.Runtime;
-using Pilot.Diagnostics;
-using Pilot.Preprocessing;
+using Pilot.Analysis;
+using Pilot.Analysis.TypeSystem;
+using Pilot.Transpilation.Ingesters;
+using Pilot.Transpilation.Ir;
 
 namespace Pilot.Transpilation.Targets;
 
 /// <summary>
-/// Bidirectional optimizing compile-time code converter between Pilot and Lua 5.4 / LuaJIT.
-/// Emits register-allocated 'local' bindings, native numeric 'for' loops, and metatable classes.
+/// Milestone 20.3 &amp; 20.4: AST-driven bidirectional code converter between Pilot and Lua 5.4 / LuaJIT.
+/// Emits register-allocated <c>local</c> bindings, native numeric <c>for</c> loops, metatable classes,
+/// <c>string.format</c> interpolations, and IIFE comprehensions.
 /// </summary>
-public sealed partial class LuaTargetConverter : ITargetLanguageConverter
+public sealed class LuaTargetConverter : ITargetLanguageConverter
 {
     public string Language => "lua";
     public string TargetLanguage => Language;
@@ -21,33 +22,24 @@ public sealed partial class LuaTargetConverter : ITargetLanguageConverter
 
     public TranspilationResult TranspileSource(string pilotSource, TranspilationOptions options)
     {
-        var preproc = PilotPreprocessor.Preprocess(pilotSource, "");
-        if (preproc.HasErrors)
+        var (module, errors) = PilotTranspileIrBuilder.BuildFromSource(pilotSource, options);
+        if (module == null || errors.Count > 0)
         {
-            return TranspilationResult.CreateFailure(
-                preproc.Diagnostics.Select(d => d.Message),
-                TargetLanguage);
+            return TranspilationResult.CreateFailure(errors, TargetLanguage);
         }
 
-        var inputStream = new AntlrInputStream(preproc.PreprocessedSource);
-        var lexer = new PilotLexer(inputStream);
-        var tokenStream = new CommonTokenStream(lexer);
-        var parser = new PilotParser(tokenStream);
-
-        var errorTracker = new ErrorTracker();
-        parser.RemoveErrorListeners();
-        parser.AddErrorListener(errorTracker);
-
-        var tree = parser.ParseProgramFast();
-        if (errorTracker.HasErrors)
-        {
-            return TranspilationResult.CreateFailure(errorTracker.Errors, TargetLanguage);
-        }
-
-        return Transpile(tree, options);
+        return TranspileModule(module, options);
     }
 
     public TranspilationResult Transpile(PilotParser.ProgramContext programAst, TranspilationOptions options)
+    {
+        PilotStaticAnalysisResult? analysis = null;
+        try { analysis = PilotAnalysisPipeline.Analyze(programAst); } catch { }
+        var module = PilotTranspileIrBuilder.Build(programAst, null, analysis, options);
+        return TranspileModule(module, options);
+    }
+
+    public TranspilationResult TranspileModule(PilotIrModule module, TranspilationOptions options)
     {
         var sb = new StringBuilder();
         if (options.EmitHeaderComments)
@@ -57,145 +49,35 @@ public sealed partial class LuaTargetConverter : ITargetLanguageConverter
             sb.AppendLine();
         }
 
-        var visitor = new PilotToLuaVisitor(options);
-        string code = visitor.VisitProgram(programAst);
-        sb.Append(code);
+        var emitter = new LuaIrEmitter(module, options);
+        sb.Append(emitter.EmitModule());
 
         return TranspilationResult.CreateSuccess(sb.ToString().TrimEnd() + Environment.NewLine, TargetLanguage);
     }
 
-    public TranspilationResult IngestToPilot(string foreignSource, TranspilationOptions options)
+    public TranspilationResult IngestToPilot(string foreignSource, TranspilationOptions options) =>
+        ForeignAstIngester.Ingest(foreignSource, SourceLanguage, options);
+
+    private sealed class LuaIrEmitter
     {
-        var sb = new StringBuilder();
-        if (options.EmitHeaderComments)
-        {
-            sb.AppendLine("// Converted & optimized from Lua to Pilot");
-            sb.AppendLine();
-        }
-
-        var lines = foreignSource.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-        foreach (var line in lines)
-        {
-            string trimmed = line.Trim();
-            int indent = line.TakeWhile(char.IsWhiteSpace).Count();
-            string pad = new string(' ', indent);
-
-            if (string.IsNullOrWhiteSpace(trimmed))
-            {
-                sb.AppendLine();
-                continue;
-            }
-
-            if (trimmed.StartsWith("--"))
-            {
-                sb.AppendLine($"{pad}//{trimmed[2..]}");
-                continue;
-            }
-
-            if (trimmed == "end")
-            {
-                sb.AppendLine($"{pad}}}");
-                continue;
-            }
-
-            string converted = ConvertLuaLineToPilot(trimmed);
-            sb.AppendLine($"{pad}{converted}");
-        }
-
-        string optimized = PilotOptimizer.OptimizeIngestedPilotCode(sb.ToString());
-        return TranspilationResult.CreateSuccess(optimized, "pilot");
-    }
-
-    private static string ConvertLuaLineToPilot(string line)
-    {
-        string res = line;
-
-        // Operators and literals
-        res = res.Replace("~=", "!=").Replace(" nil", " null").Replace("=nil", "=null");
-        res = MyRegex().Replace(res, " + ");
-
-        // local function name(args) -> def name(args) {
-        var localFn = MyRegex1().Match(res);
-        if (localFn.Success)
-        {
-            string fnName = localFn.Groups[1].Value.Replace(":", ".");
-            return $"def {fnName}({localFn.Groups[2].Value}) {{";
-        }
-
-        // Numeric for: for i = a, b do -> for i in a..b {
-        var numFor = MyRegex2().Match(res);
-        if (numFor.Success)
-        {
-            return $"for {numFor.Groups[1].Value} in {numFor.Groups[2].Value.Trim()}..{numFor.Groups[3].Value.Trim()} {{";
-        }
-
-        // Generic for: for _, v in ipairs(list) do -> for v in list {
-        var genFor = MyRegex3().Match(res);
-        if (genFor.Success)
-        {
-            string coll = !string.IsNullOrEmpty(genFor.Groups[2].Value) ? genFor.Groups[2].Value : genFor.Groups[3].Value;
-            return $"for {genFor.Groups[1].Value} in {coll.Trim()} {{";
-        }
-
-        // elseif cond then -> } elif cond {
-        var elifMatch = MyRegex4().Match(res);
-        if (elifMatch.Success)
-        {
-            return $"}} elif {elifMatch.Groups[1].Value} {{";
-        }
-
-        // if cond then -> if cond {
-        var ifMatch = MyRegex5().Match(res);
-        if (ifMatch.Success)
-        {
-            return $"if {ifMatch.Groups[1].Value} {{";
-        }
-
-        if (res == "else")
-        {
-            return "} else {";
-        }
-
-        // while cond do -> while cond {
-        var whileMatch = MyRegex6().Match(res);
-        if (whileMatch.Success)
-        {
-            return $"while {whileMatch.Groups[1].Value} {{";
-        }
-
-        // local x = val -> let x = val
-        if (res.StartsWith("local "))
-        {
-            res = "let " + res["local ".Length..];
-        }
-
-        // print(...) -> println(...)
-        if (res.StartsWith("print("))
-        {
-            res = "println(" + res["print(".Length..];
-        }
-
-        return res;
-    }
-
-    private sealed partial class PilotToLuaVisitor
-    {
+        private readonly PilotIrModule _module;
         private readonly TranspilationOptions _options;
         private int _indent;
 
-        public PilotToLuaVisitor(TranspilationOptions options)
+        public LuaIrEmitter(PilotIrModule module, TranspilationOptions options)
         {
+            _module = module;
             _options = options;
         }
 
         private string Indent => string.Concat(Enumerable.Repeat(_options.IndentString, _indent));
 
-        public string VisitProgram(PilotParser.ProgramContext ctx)
+        public string EmitModule()
         {
             var sb = new StringBuilder();
-            foreach (var stmt in ctx.stmt())
+            foreach (var stmt in _module.Statements)
             {
-                string s = VisitStmt(stmt);
+                string s = EmitStmt(stmt);
                 if (!string.IsNullOrWhiteSpace(s))
                 {
                     sb.AppendLine(s);
@@ -204,325 +86,386 @@ public sealed partial class LuaTargetConverter : ITargetLanguageConverter
             return sb.ToString();
         }
 
-        public string VisitStmt(PilotParser.StmtContext ctx)
+        public string EmitStmt(PilotIrStmt stmt) => stmt switch
         {
-            if (ctx.compound_stmt() != null) return VisitCompoundStmt(ctx.compound_stmt());
-            if (ctx.simple_stmt() != null) return VisitSimpleStmt(ctx.simple_stmt());
-            return string.Empty;
+            PilotIrCommentStmt c => $"{Indent}--{c.CommentText.TrimStart('/')}",
+            PilotIrVarDeclStmt v => EmitVarDecl(v),
+            PilotIrAssignStmt a => EmitAssign(a),
+            PilotIrFuncDefStmt f => EmitFuncDef(f, classOwner: null),
+            PilotIrClassDefStmt c => EmitClassDef(c),
+            PilotIrAdtDefStmt adt => EmitAdtDef(adt),
+            PilotIrEnumDefStmt en => EmitEnumDef(en),
+            PilotIrExtensionDefStmt ext => EmitExtensionDef(ext),
+            PilotIrIfStmt ifs => EmitIfStmt(ifs),
+            PilotIrGuardStmt g => EmitGuardStmt(g),
+            PilotIrWhileStmt w => EmitWhileStmt(w),
+            PilotIrForStmt f => EmitForStmt(f),
+            PilotIrMatchStmt m => EmitMatchStmt(m),
+            PilotIrDeferStmt d => $"-- [defer] {string.Join("; ", d.Body.Select(s => EmitStmt(s).Trim()))}",
+            PilotIrReturnStmt r => r.Value != null ? $"{Indent}return {EmitExpr(r.Value)}" : $"{Indent}return",
+            PilotIrRaiseStmt rs => rs.Value != null ? $"{Indent}error({EmitExpr(rs.Value)})" : $"{Indent}error(\"error\")",
+            PilotIrBreakStmt => $"{Indent}break",
+            PilotIrPassStmt => $"{Indent}-- pass",
+            PilotIrAssertStmt a => a.Message != null
+                ? $"{Indent}assert({EmitExpr(a.Condition)}, {EmitExpr(a.Message)})"
+                : $"{Indent}assert({EmitExpr(a.Condition)})",
+            PilotIrComptimeStmt ct => string.Join(Environment.NewLine, ct.Body.Select(EmitStmt)),
+            PilotIrExprStmt e => $"{Indent}{EmitExpr(e.Expression)}",
+            _ => ""
+        };
+
+        private string EmitVarDecl(PilotIrVarDeclStmt v)
+        {
+            if (v.TupleDestructureNames.Count > 1)
+            {
+                string lhs = string.Join(", ", v.TupleDestructureNames);
+                string rhs = v.Initializer != null ? EmitExpr(v.Initializer) : "nil";
+                return $"{Indent}local {lhs} = table.unpack({rhs})";
+            }
+
+            string rhsVal = v.ComptimeFoldedLiteral ?? (v.Initializer != null ? EmitExpr(v.Initializer) : "nil");
+            if (v.Kind == PilotVarDeclKind.Const)
+            {
+                return $"{Indent}local {v.Name} <const> = {rhsVal}";
+            }
+            return $"{Indent}local {v.Name} = {rhsVal}";
         }
 
-        public string VisitSimpleStmt(PilotParser.Simple_stmtContext ctx)
+        private string EmitAssign(PilotIrAssignStmt a)
+        {
+            string target = EmitExpr(a.Target);
+            string val = EmitExpr(a.Value);
+            return a.Operator switch
+            {
+                "+=" => $"{Indent}{target} = {target} + ({val})",
+                "-=" => $"{Indent}{target} = {target} - ({val})",
+                "*=" => $"{Indent}{target} = {target} * ({val})",
+                "/=" => $"{Indent}{target} = {target} / ({val})",
+                _ => $"{Indent}{target} = {val}"
+            };
+        }
+
+        private string EmitFuncDef(PilotIrFuncDefStmt f, string? classOwner)
+        {
+            var paramList = f.Parameters
+                .Where(p => classOwner == null || p.Name is not ("self" or "this"))
+                .Select(p => p.IsVariadic ? "..." : p.Name)
+                .ToList();
+
+            string header = classOwner != null
+                ? $"function {classOwner}:{f.Name}({string.Join(", ", paramList)})"
+                : $"local function {f.Name}({string.Join(", ", paramList)})";
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"{Indent}{header}");
+            _indent++;
+            foreach (var req in f.RequiresClauses)
+                sb.AppendLine($"{Indent}assert({EmitExpr(req)})");
+            foreach (var s in f.Body)
+            {
+                string line = EmitStmt(s);
+                if (!string.IsNullOrWhiteSpace(line))
+                    sb.AppendLine(line);
+            }
+            _indent--;
+            sb.Append($"{Indent}end");
+            return sb.ToString();
+        }
+
+        private string EmitClassDef(PilotIrClassDefStmt c)
         {
             var sb = new StringBuilder();
-            foreach (var small in ctx.small_stmt())
+            sb.AppendLine($"{Indent}local {c.Name} = {{}}");
+            sb.AppendLine($"{Indent}{c.Name}.__index = {c.Name}");
+            sb.AppendLine($"{Indent}function {c.Name}.new(init)");
+            sb.AppendLine($"{Indent}{_options.IndentString}return setmetatable(init or {{}}, {c.Name})");
+            sb.AppendLine($"{Indent}end");
+            foreach (var m in c.Methods)
             {
-                string s = VisitSmallStmt(small);
-                if (!string.IsNullOrWhiteSpace(s))
-                {
-                    sb.AppendLine(Indent + s);
-                }
+                sb.AppendLine(EmitFuncDef(m, classOwner: c.Name));
             }
             return sb.ToString().TrimEnd();
         }
 
-        public string VisitSmallStmt(PilotParser.Small_stmtContext ctx)
+        private string EmitAdtDef(PilotIrAdtDefStmt adt)
         {
-            if (ctx.let_stmt() != null)
-            {
-                string name = ctx.let_stmt().binding_pattern().GetText();
-                string? val = ctx.let_stmt().test()?.GetText();
-                return val != null ? $"local {name} = {TranslateExpr(val)}" : $"local {name} = nil";
-            }
-            if (ctx.var_stmt() != null)
-            {
-                string name = ctx.var_stmt().binding_pattern().GetText();
-                string? val = ctx.var_stmt().test()?.GetText();
-                return val != null ? $"local {name} = {TranslateExpr(val)}" : $"local {name} = nil";
-            }
-            if (ctx.const_stmt() != null)
-            {
-                string name = ctx.const_stmt().binding_pattern().GetText();
-                string val = ctx.const_stmt().test().GetText();
-                return $"local {name} <const> = {TranslateExpr(val)}";
-            }
-            if (ctx.guard_stmt() != null)
-            {
-                return VisitGuardStmt(ctx.guard_stmt(), inlineIndent: false);
-            }
-            if (ctx.defer_stmt() != null)
-            {
-                string body = ctx.defer_stmt().small_stmt() != null
-                    ? VisitSmallStmt(ctx.defer_stmt().small_stmt())
-                    : TranslateExpr(ctx.defer_stmt().GetText()["defer".Length..].Trim());
-                return $"-- [defer] {body}";
-            }
-            if (ctx.flow_stmt() != null)
-            {
-                var flow = ctx.flow_stmt();
-                if (flow.RETURN() != null)
-                {
-                    string ret = flow.testlist() != null ? TranslateExpr(flow.testlist().GetText()) : "";
-                    return string.IsNullOrEmpty(ret) ? "return" : $"return {ret}";
-                }
-                if (flow.BREAK() != null) return "break";
-                if (flow.RAISE() != null)
-                {
-                    string err = flow.test() != null && flow.test().Length > 0 ? TranslateExpr(flow.test(0).GetText()) : "\"error\"";
-                    return $"error({err})";
-                }
-            }
-            if (ctx.assert_stmt() != null)
-            {
-                var tests = ctx.assert_stmt().test();
-                return tests.Length > 1
-                    ? $"assert({TranslateExpr(tests[0].GetText())}, {TranslateExpr(tests[1].GetText())})"
-                    : $"assert({TranslateExpr(tests[0].GetText())})";
-            }
-            if (ctx.expr_stmt() != null)
-            {
-                return TranslateExpr(ctx.expr_stmt().GetText().TrimEnd(';'));
-            }
-            return "-- " + ctx.GetText().TrimEnd(';');
-        }
-
-        public string VisitCompoundStmt(PilotParser.Compound_stmtContext ctx)
-        {
-            if (ctx.func_def() != null) return VisitFuncDef(ctx.func_def());
-            if (ctx.class_def() != null) return VisitClassDef(ctx.class_def());
-            if (ctx.if_stmt() != null) return VisitIfStmt(ctx.if_stmt());
-            if (ctx.while_stmt() != null) return VisitWhileStmt(ctx.while_stmt());
-            if (ctx.for_stmt() != null) return VisitForStmt(ctx.for_stmt());
-            if (ctx.guard_stmt() != null) return VisitGuardStmt(ctx.guard_stmt(), inlineIndent: true);
-            if (ctx.match_stmt() != null) return VisitMatchStmt(ctx.match_stmt());
-            if (ctx.inline_foreign_block() != null) return VisitForeignBlock(ctx.inline_foreign_block());
-            return Indent + "-- " + ctx.GetText();
-        }
-
-        private string VisitGuardStmt(PilotParser.Guard_stmtContext ctx, bool inlineIndent)
-        {
-            string prefix = inlineIndent ? Indent : "";
-            string cond = ctx.test() != null ? TranslateExpr(ctx.test().GetText()) : "true";
             var sb = new StringBuilder();
-            sb.AppendLine($"{prefix}if not ({cond}) then");
-            sb.Append(VisitSuite(ctx.suite()));
-            sb.Append($"{Indent}end");
+            foreach (var v in adt.Variants)
+            {
+                var fNames = v.Fields.Select(f => f.Name).ToList();
+                var pairs = new List<string> { $"_tag = \"{v.Name}\"" };
+                pairs.AddRange(fNames.Select(n => $"{n} = {n}"));
+                sb.AppendLine($"{Indent}local function {v.Name}({string.Join(", ", fNames)})");
+                sb.AppendLine($"{Indent}{_options.IndentString}return {{ {string.Join(", ", pairs)} }}");
+                sb.AppendLine($"{Indent}end");
+            }
+            return sb.ToString().TrimEnd();
+        }
+
+        private string EmitEnumDef(PilotIrEnumDefStmt en)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"{Indent}local {en.Name} = {{");
+            _indent++;
+            for (int i = 0; i < en.Members.Count; i++)
+            {
+                var (mName, mVal) = en.Members[i];
+                string val = mVal != null ? EmitExpr(mVal) : i.ToString();
+                sb.AppendLine($"{Indent}{mName} = {val},");
+            }
+            _indent--;
+            sb.Append($"{Indent}}}");
             return sb.ToString();
         }
 
-        public string VisitFuncDef(PilotParser.Func_defContext ctx)
+        private string EmitExtensionDef(PilotIrExtensionDefStmt ext)
         {
-            string name = ctx.identifier().GetText();
-            var paramList = new List<string>();
-
-            if (ctx.parameters()?.parameter() != null)
-            {
-                foreach (var p in ctx.parameters().parameter())
-                {
-                    string pName = p.identifier()?.GetText() ?? "arg";
-                    paramList.Add(pName);
-                }
-            }
-
             var sb = new StringBuilder();
-            sb.AppendLine($"{Indent}local function {name}({string.Join(", ", paramList)})");
-            sb.Append(VisitSuite(ctx.suite()));
-            sb.Append($"{Indent}end");
-            return sb.ToString();
+            foreach (var m in ext.Methods)
+            {
+                if (m.Parameters.Count == 0 || m.Parameters[0].Name is not ("self" or "this"))
+                    m.Parameters.Insert(0, new PilotIrParameter("self"));
+                sb.AppendLine(EmitFuncDef(m, classOwner: null));
+            }
+            return sb.ToString().TrimEnd();
         }
 
-        public string VisitClassDef(PilotParser.Class_defContext ctx)
+        private string EmitIfStmt(PilotIrIfStmt ifs)
         {
-            string name = ctx.identifier().GetText();
             var sb = new StringBuilder();
-            sb.AppendLine($"{Indent}local {name} = {{}}");
-            sb.AppendLine($"{Indent}{name}.__index = {name}");
-            sb.AppendLine($"{Indent}function {name}.new(init)");
-            sb.AppendLine($"{Indent}{_options.IndentString}return setmetatable(init or {{}}, {name})");
-            sb.Append($"{Indent}end");
-            return sb.ToString();
-        }
+            sb.AppendLine($"{Indent}if {EmitExpr(ifs.Condition)} then");
+            EmitSuite(sb, ifs.ThenBody);
 
-        public string VisitIfStmt(PilotParser.If_stmtContext ctx)
-        {
-            var tests = ctx.test();
-            var suites = ctx.suite();
-            var sb = new StringBuilder();
-
-            sb.AppendLine($"{Indent}if {TranslateExpr(tests[0].GetText())} then");
-            sb.Append(VisitSuite(suites[0]));
-
-            for (int i = 1; i < tests.Length; i++)
+            foreach (var (cond, body) in ifs.ElifBranches)
             {
-                sb.AppendLine($"{Indent}elseif {TranslateExpr(tests[i].GetText())} then");
-                sb.Append(VisitSuite(suites[i]));
+                sb.AppendLine($"{Indent}elseif {EmitExpr(cond)} then");
+                EmitSuite(sb, body);
             }
-
-            if (suites.Length > tests.Length)
+            if (ifs.ElseBody.Count > 0)
             {
                 sb.AppendLine($"{Indent}else");
-                sb.Append(VisitSuite(suites[^1]));
+                EmitSuite(sb, ifs.ElseBody);
             }
-
             sb.Append($"{Indent}end");
             return sb.ToString();
         }
 
-        public string VisitWhileStmt(PilotParser.While_stmtContext ctx)
+        private string EmitGuardStmt(PilotIrGuardStmt g)
         {
             var sb = new StringBuilder();
-            sb.AppendLine($"{Indent}while {TranslateExpr(ctx.test(0).GetText())} do");
-            sb.Append(VisitSuite(ctx.suite(0)));
-            sb.Append($"{Indent}end");
-            return sb.ToString();
-        }
-
-        public string VisitForStmt(PilotParser.For_stmtContext ctx)
-        {
-            var sb = new StringBuilder();
-            string target = ctx.for_target().GetText();
-            string rawIter = ctx.test(0).GetText();
-
-            // Optimize inclusive range 'a..b' or 'range(a, b)' into native Lua numeric 'for i = a, b do'
-            if (PilotOptimizer.TryParseRangeExpr(rawIter, out string startR, out string endR))
+            if (g.IsSomeBinding && !string.IsNullOrEmpty(g.BoundVariable))
             {
-                sb.AppendLine($"{Indent}for {target} = {TranslateExpr(startR)}, {TranslateExpr(endR)} do");
-            }
-            else if (PilotOptimizer.TryParseRangeCall(rawIter, out string startC, out string stopC))
-            {
-                sb.AppendLine($"{Indent}for {target} = {TranslateExpr(startC)}, {TranslateExpr(stopC)} - 1 do");
+                sb.AppendLine($"{Indent}local {g.BoundVariable} = {EmitExpr(g.ConditionOrSource)}");
+                string cond = $"{g.BoundVariable} == nil";
+                if (g.PatternGuard != null)
+                    cond += $" or not ({EmitExpr(g.PatternGuard)})";
+                sb.AppendLine($"{Indent}if {cond} then");
             }
             else
             {
-                sb.AppendLine($"{Indent}for _, {target} in ipairs({TranslateExpr(rawIter)}) do");
+                sb.AppendLine($"{Indent}if not ({EmitExpr(g.ConditionOrSource)}) then");
             }
-
-            sb.Append(VisitSuite(ctx.suite(0)));
+            EmitSuite(sb, g.ElseBody);
             sb.Append($"{Indent}end");
             return sb.ToString();
         }
 
-        public string VisitMatchStmt(PilotParser.Match_stmtContext ctx)
+        private string EmitWhileStmt(PilotIrWhileStmt w)
         {
             var sb = new StringBuilder();
-            string subject = TranslateExpr(ctx.test().GetText());
-            string matchVar = "__match_val";
-            sb.AppendLine($"{Indent}local {matchVar} = {subject}");
-
-            if (ctx.match_suite()?.match_arm() != null)
-            {
-                var arms = ctx.match_suite().match_arm();
-                for (int i = 0; i < arms.Length; i++)
-                {
-                    string pat = arms[i].pattern().GetText();
-                    string kw = i == 0 ? "if" : "elseif";
-                    if (pat == "_" || pat == "default")
-                    {
-                        sb.AppendLine($"{Indent}else");
-                    }
-                    else
-                    {
-                        sb.AppendLine($"{Indent}{kw} {matchVar} == {TranslateExpr(pat)} then");
-                    }
-                    sb.Append(VisitSuite(arms[i].suite()));
-                }
-                if (arms.Length > 0)
-                {
-                    sb.Append($"{Indent}end");
-                }
-            }
+            sb.AppendLine($"{Indent}while {EmitExpr(w.Condition)} do");
+            EmitSuite(sb, w.Body);
+            sb.Append($"{Indent}end");
             return sb.ToString();
         }
 
-        private string VisitForeignBlock(PilotParser.Inline_foreign_blockContext ctx)
+        private string EmitForStmt(PilotIrForStmt f)
         {
-            string lang = ctx.foreign_language().GetText().ToLowerInvariant();
-            if (lang == "lua" && ctx.stmt() != null && ctx.stmt().Length > 0)
+            var sb = new StringBuilder();
+            string target = f.TargetVars.Count > 0 ? f.TargetVars[0] : "_item";
+            if (f.Iterable is PilotIrRangeExpr r)
             {
-                var sb = new StringBuilder();
-                foreach (var s in ctx.stmt())
-                {
-                    sb.AppendLine(VisitStmt(s));
-                }
-                return sb.ToString().TrimEnd();
+                string start = EmitExpr(r.Start);
+                string end = r.IsInclusive ? EmitExpr(r.End) : $"{EmitExpr(r.End)} - 1";
+                string step = r.Step != null ? $", {EmitExpr(r.Step)}" : "";
+                sb.AppendLine($"{Indent}for {target} = {start}, {end}{step} do");
             }
-            return $"{Indent}-- [polyglot:{lang}] {ctx.GetText()}";
+            else
+            {
+                sb.AppendLine($"{Indent}for _, {target} in ipairs({EmitExpr(f.Iterable)}) do");
+            }
+            EmitSuite(sb, f.Body);
+            sb.Append($"{Indent}end");
+            return sb.ToString();
         }
 
-        private string VisitSuite(PilotParser.SuiteContext? ctx)
+        private string EmitMatchStmt(PilotIrMatchStmt m)
         {
-            if (ctx == null) return string.Empty;
-
-            _indent++;
             var sb = new StringBuilder();
-            if (ctx.simple_stmt() != null)
+            string matchVar = "__match_val";
+            sb.AppendLine($"{Indent}local {matchVar} = {EmitExpr(m.Scrutinee)}");
+            for (int i = 0; i < m.Arms.Count; i++)
             {
-                sb.AppendLine(VisitSimpleStmt(ctx.simple_stmt()));
+                var arm = m.Arms[i];
+                string kw = i == 0 ? "if" : "elseif";
+                if (arm.Pattern is PilotIrWildcardPattern or PilotIrBindingPattern)
+                    sb.AppendLine(i == 0 ? $"{Indent}if true then" : $"{Indent}else");
+                else if (arm.Pattern is PilotIrLiteralPattern lit)
+                    sb.AppendLine($"{Indent}{kw} {matchVar} == {EmitExpr(lit.Literal)} then");
+                else
+                    sb.AppendLine(i == 0 ? $"{Indent}if true then" : $"{Indent}else");
+                EmitSuite(sb, arm.Body);
             }
-            else if (ctx.stmt() != null && ctx.stmt().Length > 0)
+            if (m.Arms.Count > 0)
+                sb.Append($"{Indent}end");
+            return sb.ToString();
+        }
+
+        private void EmitSuite(StringBuilder sb, List<PilotIrStmt> stmts)
+        {
+            _indent++;
+            foreach (var s in stmts)
             {
-                foreach (var s in ctx.stmt())
-                {
-                    string res = VisitStmt(s);
-                    if (!string.IsNullOrWhiteSpace(res))
-                        sb.AppendLine(res);
-                }
+                string line = EmitStmt(s);
+                if (!string.IsNullOrWhiteSpace(line))
+                    sb.AppendLine(line);
             }
             _indent--;
-            return sb.ToString();
         }
 
-        private static string TranslateExpr(string expr)
+        public string EmitExpr(PilotIrExpr expr, PilotIrPrecedence parentPrec = PilotIrPrecedence.Lowest)
         {
-            string s = PilotOptimizer.FoldConstantsAndNormalize(expr);
-
-            // Convert f"Hello {name}" -> string.format("Hello %s", tostring(name))
-            if (s.StartsWith("f\"", StringComparison.Ordinal) && s.EndsWith("\"", StringComparison.Ordinal))
+            string core = expr switch
             {
-                string inner = s[2..^1];
-                var args = new List<string>();
-                string fmt = MyRegex().Replace(inner, m =>
+                PilotIrLiteralExpr lit => EmitLiteral(lit),
+                PilotIrInterpolatedStringExpr fstr => EmitInterpolatedString(fstr),
+                PilotIrIdentifierExpr id => id.Name switch
                 {
-                    args.Add($"tostring({m.Groups[1].Value.Trim()})");
-                    return "%s";
-                });
-                return args.Count > 0
-                    ? $"string.format(\"{fmt}\", {string.Join(", ", args)})"
-                    : $"\"{fmt}\"";
-            }
+                    "null" or "none" or "None" or "undefined" => "nil",
+                    "true" or "True" => "true",
+                    "false" or "False" => "false",
+                    "this" => "self",
+                    _ => id.Name
+                },
+                PilotIrUnaryExpr u => u.Operator is "!" or "not"
+                    ? $"not {EmitExpr(u.Operand, u.Precedence)}"
+                    : $"{u.Operator}{EmitExpr(u.Operand, u.Precedence)}",
+                PilotIrBinaryExpr b => EmitBinary(b),
+                PilotIrCallExpr c => EmitCall(c),
+                PilotIrMemberAccessExpr m => EmitMemberAccess(m),
+                PilotIrIndexExpr ix => $"{EmitExpr(ix.Target, PilotIrPrecedence.Postfix)}[{EmitExpr(ix.Index)}]",
+                PilotIrPostfixTryExpr pt => pt.CatchFallbackExpr != null
+                    ? $"({EmitExpr(pt.Operand, PilotIrPrecedence.LogicalOr)} or {EmitExpr(pt.CatchFallbackExpr, PilotIrPrecedence.LogicalOr)})"
+                    : EmitExpr(pt.Operand, parentPrec),
+                PilotIrCollectionExpr col => EmitCollection(col),
+                PilotIrLambdaExpr lam => $"function({string.Join(", ", lam.Parameters.Select(p => p.Name))}) return {(lam.BodyExpr != null ? EmitExpr(lam.BodyExpr) : "nil")} end",
+                PilotIrForExpr fe => EmitForExpr(fe),
+                PilotIrIfExpr ie => $"({EmitExpr(ie.Condition)} and {EmitExpr(ie.ThenBranch)} or {EmitExpr(ie.ElseBranch)})",
+                _ => "nil"
+            };
 
-            if (s.StartsWith("println(", StringComparison.Ordinal))
-            {
-                string inner = s["println(".Length..^1];
-                return $"print({TranslateExpr(inner)})";
-            }
-
-            s = s.Replace("!=", "~=")
-                 .Replace("null", "nil")
-                 .Replace("None", "nil")
-                 .Replace("&&", " and ")
-                 .Replace("||", " or ");
-
-            return s;
+            if (parentPrec != PilotIrPrecedence.Lowest && expr.Precedence < parentPrec)
+                return $"({core})";
+            return core;
         }
 
-        [GeneratedRegex(@"\{([^}]+)\}")]
-        private static partial Regex MyRegex();
+        private static string EmitLiteral(PilotIrLiteralExpr lit) => lit.Kind switch
+        {
+            PilotLiteralKind.Null or PilotLiteralKind.None => "nil",
+            PilotLiteralKind.Boolean => lit.RawValue is "true" or "True" ? "true" : "false",
+            PilotLiteralKind.DimensionalUnit => (lit.NormalizedNumericValue ?? 0.0).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            _ => lit.RawValue
+        };
 
+        private string EmitInterpolatedString(PilotIrInterpolatedStringExpr fstr)
+        {
+            var fmt = new StringBuilder("\"");
+            var args = new List<string>();
+            foreach (var p in fstr.Parts)
+            {
+                if (!p.IsInterpolation)
+                {
+                    fmt.Append(p.LiteralText);
+                }
+                else
+                {
+                    fmt.Append("%s");
+                    string inner = p.Expression != null ? EmitExpr(p.Expression) : p.LiteralText;
+                    args.Add($"tostring({inner})");
+                }
+            }
+            fmt.Append('"');
+            return args.Count > 0
+                ? $"string.format({fmt}, {string.Join(", ", args)})"
+                : fmt.ToString();
+        }
+
+        private string EmitBinary(PilotIrBinaryExpr b)
+        {
+            if (b.Operator == "|>")
+                return $"{EmitExpr(b.Right, PilotIrPrecedence.Postfix)}({EmitExpr(b.Left)})";
+            if (b.Operator == "??")
+                return $"({EmitExpr(b.Left, PilotIrPrecedence.LogicalOr)} or {EmitExpr(b.Right, PilotIrPrecedence.LogicalOr)})";
+
+            bool isStringConcat = b.Operator == "+" &&
+                (b.Left.ResolvedType == PilotType.String || b.Right.ResolvedType == PilotType.String ||
+                 b.Left is PilotIrLiteralExpr { Kind: PilotLiteralKind.String } ||
+                 b.Right is PilotIrLiteralExpr { Kind: PilotLiteralKind.String });
+
+            string luaOp = isStringConcat ? ".." : b.Operator switch
+            {
+                "!=" => "~=",
+                "&&" or "and" => "and",
+                "||" or "or" => "or",
+                "**" => "^",
+                _ => b.Operator
+            };
+
+            string left = EmitExpr(b.Left, b.Precedence);
+            var rightMinPrec = b.Operator is "-" or "/" or "%"
+                ? (PilotIrPrecedence)((int)b.Precedence + 1)
+                : b.Precedence;
+            string right = EmitExpr(b.Right, rightMinPrec);
+            return $"{left} {luaOp} {right}";
+        }
+
+        private string EmitCall(PilotIrCallExpr c)
+        {
+            var renderedArgs = c.Arguments.Select(a => EmitExpr(a.Value)).ToList();
+            if (PilotLibraryMapper.TryFormatAstLibraryCall(c.LibraryCallKind, renderedArgs, "lua", out string mapped))
+                return mapped;
+
+            if (c.Callee is PilotIrMemberAccessExpr mem && mem.MemberName is "append" or "push")
+                return $"table.insert({EmitExpr(mem.Target, PilotIrPrecedence.Postfix)}, {string.Join(", ", renderedArgs)})";
+
+            string callee = EmitExpr(c.Callee, PilotIrPrecedence.Postfix);
+            return $"{callee}({string.Join(", ", renderedArgs)})";
+        }
+
+        private string EmitMemberAccess(PilotIrMemberAccessExpr m)
+        {
+            string target = EmitExpr(m.Target, PilotIrPrecedence.Postfix);
+            if (PilotLibraryMapper.TryFormatAstMemberAccess(target, m.MemberName, "lua", out string mapped))
+                return mapped;
+            return $"{target}.{m.MemberName}";
+        }
+
+        private string EmitCollection(PilotIrCollectionExpr col) => col.Kind switch
+        {
+            PilotCollectionKind.Map => $"{{ {string.Join(", ", col.MapEntries.Select(kv => $"[{EmitExpr(kv.Key)}] = {EmitExpr(kv.Value)}"))} }}",
+            _ => $"{{ {string.Join(", ", col.Elements.Select(e => EmitExpr(e)))} }}"
+        };
+
+        private string EmitForExpr(PilotIrForExpr fe)
+        {
+            string target = fe.TargetVars.Count > 0 ? fe.TargetVars[0] : "x";
+            string loopHeader = fe.Iterable is PilotIrRangeExpr r
+                ? $"for {target} = {EmitExpr(r.Start)}, {(r.IsInclusive ? EmitExpr(r.End) : $"{EmitExpr(r.End)} - 1")} do"
+                : $"for _, {target} in ipairs({EmitExpr(fe.Iterable)}) do";
+            string filter = fe.FilterCondition != null
+                ? $"if {EmitExpr(fe.FilterCondition)} then table.insert(__res, {EmitExpr(fe.YieldExpr)}) end"
+                : $"table.insert(__res, {EmitExpr(fe.YieldExpr)})";
+            return $"(function() local __res = {{}}; {loopHeader} {filter} end; return __res end)()";
+        }
     }
-
-    [GeneratedRegex(@"\s+\.\.\s+")]
-    private static partial Regex MyRegex();
-    [GeneratedRegex(@"^(?:local\s+)?function\s+([A-Za-z0-9_.:]+)\s*\((.*)\)\s*$")]
-    private static partial Regex MyRegex1();
-    [GeneratedRegex(@"^for\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^,]+),\s*([^\s]+)\s+do$")]
-    private static partial Regex MyRegex2();
-    [GeneratedRegex(@"^for\s+(?:[A-Za-z_][A-Za-z0-9_]*\s*,\s*)?([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(?:i?pairs\((.+)\)|(.+))\s+do$")]
-    private static partial Regex MyRegex3();
-    [GeneratedRegex(@"^elseif\s+(.+?)\s+then$")]
-    private static partial Regex MyRegex4();
-    [GeneratedRegex(@"^if\s+(.+?)\s+then$")]
-    private static partial Regex MyRegex5();
-    [GeneratedRegex(@"^while\s+(.+?)\s+do$")]
-    private static partial Regex MyRegex6();
-
 }

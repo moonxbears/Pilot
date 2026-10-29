@@ -84,6 +84,12 @@ public static class Program
             return ExecuteCheckSubcommand(checkArgs);
         }
 
+        // 2h. Formatter subcommand: pilot fmt <file.pilot|dir> [--check] [--colon]
+        if (args.Length > 0 && (args[0] == "fmt" || args[0] == "format" || args[0] == "--fmt"))
+        {
+            return ExecuteFormatSubcommand(args.Skip(1).ToArray());
+        }
+
         // 3. Script run subcommand: pilot run <file.pilot|file.pilc> [--patch <patch.pilot|.pilc>] [args...]
         if (args.Length > 1 && (args[0] == "run"))
         {
@@ -126,7 +132,7 @@ public static class Program
         }
 
         // 4. Direct script execution if first argument is a file: pilot script.pilot [args...] or pilot script.pilc [args...]
-        bool hasToolingFlags = args.Any(a => a is "--emit" or "--target" or "--from" or "--ingest" or "--tokens" or "--tree");
+        bool hasToolingFlags = args.Any(a => a is "--emit" or "--target" or "--from" or "--ingest" or "--tokens" or "--tree" or "--strict-pilot" or "--viable-license-only" or "--license-policy");
         if (!hasToolingFlags && args.Length > 0 && !args[0].StartsWith("-") &&
             (args[0].EndsWith(".pilot", StringComparison.OrdinalIgnoreCase) ||
              args[0].EndsWith(".pilc", StringComparison.OrdinalIgnoreCase) ||
@@ -147,6 +153,8 @@ public static class Program
         bool showTree = false;
         bool execute = false;
         bool startRepl = false;
+        bool strictPilot = false;
+        var licensePolicy = Pilot.Transpilation.Licensing.PilotLicensePolicy.Any;
         string? emitTarget = null;
         string? fromSource = null;
         string? targetFile = null;
@@ -160,6 +168,15 @@ public static class Program
             else if (args[i] == "--tree") showTree = true;
             else if (args[i] == "--exec" || args[i] == "--run") execute = true;
             else if (args[i] == "--repl" || args[i] == "-i") startRepl = true;
+            else if (args[i] == "--strict-pilot") strictPilot = true;
+            else if (args[i] == "--viable-license-only")
+            {
+                licensePolicy = Pilot.Transpilation.Licensing.PilotLicensePolicy.Permissive;
+            }
+            else if (args[i] == "--license-policy" && i + 1 < args.Length)
+            {
+                licensePolicy = Pilot.Transpilation.Licensing.PilotLicenseVerifier.ParsePolicy(args[++i]);
+            }
             else if ((args[i] == "--emit" || args[i] == "--target") && i + 1 < args.Length)
             {
                 emitTarget = args[++i];
@@ -194,17 +211,31 @@ public static class Program
             return new PilotRepl().Run();
         }
 
+        var transpileOptions = new Pilot.Transpilation.TranspilationOptions
+        {
+            StrictPilot = strictPilot,
+            LicensePolicy = licensePolicy,
+            SourceFilePath = targetFile
+        };
+
         if (!string.IsNullOrEmpty(fromSource) && !string.IsNullOrEmpty(targetFile) && Directory.Exists(targetFile))
         {
             string outDir = outputFile ?? (targetFile.TrimEnd('/', '\\') + "_pilot");
-            var libRes = Pilot.Transpilation.PilotLibraryTranspiler.IngestLibraryToPilot(targetFile, outDir, fromSource);
+            var libRes = Pilot.Transpilation.PilotLibraryTranspiler.IngestLibraryToPilot(targetFile, outDir, fromSource, transpileOptions);
+            if (!libRes.Success)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"[LIBRARY INGEST FAIL] {string.Join("; ", libRes.Diagnostics)}");
+                Console.ResetColor();
+                return 1;
+            }
             Console.WriteLine($"[LIBRARY INGEST] Converted {libRes.GeneratedFiles.Count} files into '{outDir}'");
-            return libRes.Success ? 0 : 1;
+            return 0;
         }
         if (!string.IsNullOrEmpty(emitTarget) && !string.IsNullOrEmpty(targetFile) && Directory.Exists(targetFile))
         {
             string outDir = outputFile ?? (targetFile.TrimEnd('/', '\\') + "_" + emitTarget);
-            var libRes = Pilot.Transpilation.PilotLibraryTranspiler.TranspilePilotLibraryToTarget(targetFile, outDir, emitTarget);
+            var libRes = Pilot.Transpilation.PilotLibraryTranspiler.TranspilePilotLibraryToTarget(targetFile, outDir, emitTarget, transpileOptions);
             Console.WriteLine($"[LIBRARY EMIT] Transpiled {libRes.GeneratedFiles.Count} files into '{outDir}'");
             return libRes.Success ? 0 : 1;
         }
@@ -214,7 +245,7 @@ public static class Program
             string resolvedSourceLang = string.Equals(fromSource, "auto", StringComparison.OrdinalIgnoreCase)
                 ? Pilot.Transpilation.TranspilationRegistry.InferLanguageFromPath(targetFile)
                 : fromSource;
-            var result = Pilot.Transpilation.TranspilationRegistry.Default.Ingest(foreignCode, resolvedSourceLang);
+            var result = Pilot.Transpilation.TranspilationRegistry.Default.Ingest(foreignCode, resolvedSourceLang, transpileOptions);
             if (!result.Success)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
@@ -290,6 +321,64 @@ public static class Program
             return 1;
         }
         return 0;
+    }
+
+    private static int ExecuteFormatSubcommand(string[] args)
+    {
+        string? targetPath = null;
+        bool checkOnly = false;
+        bool preferColon = false;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--check") checkOnly = true;
+            else if (args[i] == "--colon") preferColon = true;
+            else if (!args[i].StartsWith("-")) targetPath = args[i];
+        }
+
+        targetPath ??= Directory.GetCurrentDirectory();
+        var files = new List<string>();
+        if (File.Exists(targetPath))
+        {
+            files.Add(targetPath);
+        }
+        else if (Directory.Exists(targetPath))
+        {
+            files.AddRange(Directory.GetFiles(targetPath, "*.pilot", SearchOption.AllDirectories)
+                .Where(f => !f.Contains(".pilot_modules") && !f.Contains(".pilot_venv")));
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[FMT ERROR] File or directory not found: '{targetPath}'");
+            Console.ResetColor();
+            return 1;
+        }
+
+        var fmtOptions = new Pilot.Formatting.PilotFormatterOptions
+        {
+            UseColonSuites = preferColon ? true : null
+        };
+
+        int changedCount = 0;
+        foreach (var file in files)
+        {
+            var res = Pilot.Formatting.PilotFormatter.FormatFile(file, checkOnly, fmtOptions);
+            if (!res.Success)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"[FMT ERROR] {file}: {string.Join("; ", res.Diagnostics)}");
+                Console.ResetColor();
+                return 1;
+            }
+            if (res.WasModified)
+            {
+                changedCount++;
+                Console.WriteLine(checkOnly ? $"[WOULD FORMAT] {file}" : $"[FORMATTED] {file}");
+            }
+        }
+
+        return checkOnly && changedCount > 0 ? 1 : 0;
     }
 
     private static int ExecuteBuildSubcommand(string[] args)

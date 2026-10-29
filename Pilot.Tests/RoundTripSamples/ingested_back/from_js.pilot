@@ -1,0 +1,51 @@
+// Converted & optimized from JavaScript to Pilot
+
+// Code transpiled & optimized from Pilot to JavaScript (ES2024+)
+enum Priority { Low = 1, Medium = 2, High = 3 }
+def Circle(r) {
+    return {"_tag": "Circle", "r": r};
+}
+def Rect(w, h) {
+    return {"_tag": "Rect", "w": w, "h": h};
+}
+class Counter {
+    def step(self, x, delta) {
+        return x + delta;
+    }
+}
+def gcd(a, b) {
+    var x = a;
+    var y = b;
+    while y != 0 {
+        const rem = x % y;
+        x = y;
+        y = rem;
+    }
+    return x;
+}
+def compute_weighted_sum(limit, scale) {
+    const base_bonus = (limit + 2) * scale;
+    var total = base_bonus;
+    for i in 1..limit {
+        if i % 2 == 0 {
+            total += i * scale;
+        } elif i == 5 {
+            total += 10;
+        } else {
+            total += i;
+        }
+    }
+    return total;
+}
+const BASE_SCALE = 3;
+const g = gcd(48, 18);
+const weighted = compute_weighted_sum(5, BASE_SCALE);
+const squares = [x * x for x in 1..6 if x > 2];
+assert g == 6;
+assert weighted == 53;
+println(f"GCD={g}, Weighted={weighted}");
+extend int {
+    def doubled(self) {
+        return self * 2;
+    }
+}

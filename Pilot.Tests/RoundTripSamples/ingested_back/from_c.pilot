@@ -1,0 +1,45 @@
+// Converted & optimized from C to Pilot
+
+enum Priority { Low = 1, Medium = 2, High = 3 }
+type Shape = Circle(r: f64) | Rect(w: f64, h: f64);
+extend i64 {
+    def doubled(self) -> i64 {
+        return self * 2;
+    }
+}
+struct Counter {
+    def step(self, x: i64, delta: i64) -> i64 {
+        return x + delta;
+    }
+}
+def gcd(a: i64, b: i64) -> i64 {
+    var x: i64 = a;
+    var y: i64 = b;
+    while y != 0 {
+        let rem: i64 = x % y;
+        x = y;
+        y = rem;
+    }
+    return x;
+}
+def compute_weighted_sum(limit: i64, scale: i64) -> i64 {
+    let base_bonus: i64 = (limit + 2) * scale;
+    var total: i64 = base_bonus;
+    for i in 1..limit {
+        if i % 2 == 0 {
+            total += i * scale;
+        } elif i == 5 {
+            total += 10;
+        } else {
+            total += i;
+        }
+    }
+    return total;
+}
+const BASE_SCALE: i64 = 3;
+let g: i64 = gcd(48, 18);
+let weighted: i64 = compute_weighted_sum(5, BASE_SCALE);
+let squares: i64 = 0;
+assert g == 6;
+assert weighted == 53;
+println(f"GCD={g}, Weighted={weighted}");

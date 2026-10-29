@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using Pilot.Transpilation.Licensing;
 
 namespace Pilot.Transpilation;
 
@@ -15,14 +16,15 @@ public sealed class LibraryTranspilationSummary
     public string SourceDirectory { get; init; } = "";
     public string OutputDirectory { get; init; } = "";
     public string Language { get; init; } = "";
+    public PilotLicenseCheckResult? LicenseInfo { get; init; }
     public List<string> GeneratedFiles { get; } = new();
     public List<string> Diagnostics { get; } = new();
 }
 
 /// <summary>
 /// Full multi-file library and package directory transpiler.
-/// Converts entire foreign libraries (e.g. a Python/NumPy package, Rust crate, C/C++ library, JS/Lua module tree)
-/// into a native Pilot package (with pilot.json) and vice versa.
+/// Converts entire foreign libraries (e.g. a Python/NumPy package, Rust crate, C/C++ library, JS/Lua module tree, C# project)
+/// into a native Pilot package (with <c>pilot.json</c> and <c>THIRD_PARTY_NOTICES.md</c>) and vice versa.
 /// </summary>
 public static class PilotLibraryTranspiler
 {
@@ -33,6 +35,7 @@ public static class PilotLibraryTranspiler
 
     /// <summary>
     /// Ingests an entire foreign library directory (or single file) into an equivalent Pilot library directory.
+    /// Enforces <see cref="TranspilationOptions.LicensePolicy"/> (<c>--viable-license-only</c>) when configured.
     /// </summary>
     public static LibraryTranspilationSummary IngestLibraryToPilot(
         string sourcePath,
@@ -40,49 +43,102 @@ public static class PilotLibraryTranspiler
         string sourceLang = "auto",
         TranspilationOptions? options = null)
     {
-        var summary = new LibraryTranspilationSummary
-        {
-            SourceDirectory = Path.GetFullPath(sourcePath),
-            OutputDirectory = Path.GetFullPath(outputDir),
-            Language = "pilot"
-        };
+        options ??= new TranspilationOptions();
+        string fullSourcePath = Path.GetFullPath(sourcePath);
+        string fullOutDir = Path.GetFullPath(outputDir);
 
         if (File.Exists(sourcePath))
         {
-            Directory.CreateDirectory(outputDir);
+            string code = File.ReadAllText(sourcePath);
+            var fileOpts = new TranspilationOptions
+            {
+                IndentString = options.IndentString,
+                EmitHeaderComments = options.EmitHeaderComments,
+                GenerateTypeAnnotations = options.GenerateTypeAnnotations,
+                TargetNamespaceOrModule = options.TargetNamespaceOrModule,
+                Optimize = options.Optimize,
+                StrictPilot = options.StrictPilot,
+                LicensePolicy = options.LicensePolicy,
+                PreferColonSuites = options.PreferColonSuites,
+                FormatOutput = options.FormatOutput,
+                SourceFilePath = fullSourcePath
+            };
+            foreach (var spdx in options.CustomSpdxAllowlist)
+                fileOpts.CustomSpdxAllowlist.Add(spdx);
+
             string lang = string.Equals(sourceLang, "auto", StringComparison.OrdinalIgnoreCase)
                 ? TranspilationRegistry.InferLanguageFromPath(sourcePath)
                 : sourceLang;
-            string code = File.ReadAllText(sourcePath);
-            var res = TranspilationRegistry.Default.Ingest(code, lang, options);
+
+            var res = TranspilationRegistry.Default.Ingest(code, lang, fileOpts);
             if (!res.Success)
             {
-                summary.Diagnostics.AddRange(res.Diagnostics);
-                return new LibraryTranspilationSummary { Success = false, SourceDirectory = summary.SourceDirectory, OutputDirectory = summary.OutputDirectory };
+                var failSummary = new LibraryTranspilationSummary
+                {
+                    Success = false,
+                    SourceDirectory = fullSourcePath,
+                    OutputDirectory = fullOutDir,
+                    Language = "pilot",
+                    LicenseInfo = res.LicenseInfo
+                };
+                failSummary.Diagnostics.AddRange(res.Diagnostics);
+                return failSummary;
             }
 
+            Directory.CreateDirectory(outputDir);
             string outFile = Path.Combine(outputDir, Path.ChangeExtension(Path.GetFileName(sourcePath), ".pilot"));
             File.WriteAllText(outFile, res.Code);
-            summary.GeneratedFiles.Add(outFile);
-            return new LibraryTranspilationSummary
+
+            var singleSummary = new LibraryTranspilationSummary
             {
                 Success = true,
-                SourceDirectory = summary.SourceDirectory,
-                OutputDirectory = summary.OutputDirectory,
-                Language = "pilot"
+                SourceDirectory = fullSourcePath,
+                OutputDirectory = fullOutDir,
+                Language = "pilot",
+                LicenseInfo = res.LicenseInfo
             };
+            singleSummary.GeneratedFiles.Add(outFile);
+            return singleSummary;
         }
 
         if (!Directory.Exists(sourcePath))
         {
-            summary.Diagnostics.Add($"Source directory not found: '{sourcePath}'");
-            return new LibraryTranspilationSummary { Success = false, SourceDirectory = summary.SourceDirectory, OutputDirectory = summary.OutputDirectory };
+            var missing = new LibraryTranspilationSummary
+            {
+                Success = false,
+                SourceDirectory = fullSourcePath,
+                OutputDirectory = fullOutDir,
+                Language = "pilot"
+            };
+            missing.Diagnostics.Add($"Source directory not found: '{sourcePath}'");
+            return missing;
+        }
+
+        // Verify directory license policy before ingesting files
+        var dirLicense = PilotLicenseVerifier.VerifyDirectory(
+            fullSourcePath,
+            options.LicensePolicy,
+            options.CustomSpdxAllowlist);
+        if (!dirLicense.IsAllowed)
+        {
+            var rejected = new LibraryTranspilationSummary
+            {
+                Success = false,
+                SourceDirectory = fullSourcePath,
+                OutputDirectory = fullOutDir,
+                Language = "pilot",
+                LicenseInfo = dirLicense
+            };
+            if (!string.IsNullOrEmpty(dirLicense.DiagnosticMessage))
+                rejected.Diagnostics.Add(dirLicense.DiagnosticMessage);
+            return rejected;
         }
 
         Directory.CreateDirectory(outputDir);
-        string fullSourceRoot = Path.GetFullPath(sourcePath);
+        var generatedFiles = new List<string>();
+        var diagnostics = new List<string>();
 
-        var sourceFiles = Directory.GetFiles(fullSourceRoot, "*.*", SearchOption.AllDirectories)
+        var sourceFiles = Directory.GetFiles(fullSourcePath, "*.*", SearchOption.AllDirectories)
             .Where(f => ForeignExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
             .Where(f => !f.Contains(Path.DirectorySeparatorChar + "node_modules" + Path.DirectorySeparatorChar) &&
                         !f.Contains(Path.DirectorySeparatorChar + ".git" + Path.DirectorySeparatorChar) &&
@@ -99,7 +155,7 @@ public static class PilotLibraryTranspiler
             if (!TranspilationRegistry.Default.TryGet(fileLang, out _))
                 continue;
 
-            string relPath = Path.GetRelativePath(fullSourceRoot, file);
+            string relPath = Path.GetRelativePath(fullSourcePath, file);
             string baseName = Path.GetFileNameWithoutExtension(file);
             if (baseName == "__init__")
                 baseName = "mod";
@@ -110,52 +166,90 @@ public static class PilotLibraryTranspiler
 
             string outPilotFile = Path.Combine(targetSubDir, baseName + ".pilot");
             string foreignCode = File.ReadAllText(file);
-            var res = TranspilationRegistry.Default.Ingest(foreignCode, fileLang, options);
 
+            // File-level ingestion uses LicensePolicy.Any if directory license was already verified,
+            // unless the file itself has a conflicting SPDX header.
+            var fileOpts = new TranspilationOptions
+            {
+                IndentString = options.IndentString,
+                EmitHeaderComments = options.EmitHeaderComments,
+                GenerateTypeAnnotations = options.GenerateTypeAnnotations,
+                TargetNamespaceOrModule = options.TargetNamespaceOrModule,
+                Optimize = options.Optimize,
+                StrictPilot = options.StrictPilot,
+                LicensePolicy = dirLicense.SpdxIdentifier != "UNKNOWN" && dirLicense.SpdxIdentifier != "NOASSERTION" ? PilotLicensePolicy.Any : options.LicensePolicy,
+                PreferColonSuites = options.PreferColonSuites,
+                FormatOutput = options.FormatOutput,
+                SourceFilePath = file
+            };
+            foreach (var spdx in options.CustomSpdxAllowlist)
+                fileOpts.CustomSpdxAllowlist.Add(spdx);
+
+            var res = TranspilationRegistry.Default.Ingest(foreignCode, fileLang, fileOpts);
             if (res.Success)
             {
                 File.WriteAllText(outPilotFile, res.Code);
-                summary.GeneratedFiles.Add(outPilotFile);
+                generatedFiles.Add(outPilotFile);
             }
             else
             {
-                summary.Diagnostics.AddRange(res.Diagnostics);
+                diagnostics.AddRange(res.Diagnostics);
             }
         }
 
-        // Generate a pilot.json manifest for the newly ingested Pilot library
-        string pkgName = new DirectoryInfo(fullSourceRoot).Name.ToLowerInvariant();
+        // Generate a pilot.json manifest with SPDX provenance for the newly ingested Pilot library
+        string pkgName = new DirectoryInfo(fullSourcePath).Name.ToLowerInvariant();
         string manifestPath = Path.Combine(outputDir, "pilot.json");
         if (!File.Exists(manifestPath))
         {
-            string entryPoint = summary.GeneratedFiles.Count > 0
-                ? Path.GetRelativePath(outputDir, summary.GeneratedFiles[0]).Replace('\\', '/')
+            string entryPoint = generatedFiles.Count > 0
+                ? Path.GetRelativePath(outputDir, generatedFiles[0]).Replace('\\', '/')
                 : "main.pilot";
+            string spdxId = dirLicense.SpdxIdentifier;
+            string provLoc = dirLicense.DetectedFromLocation.Replace('\\', '/');
             string manifestJson = $$"""
 {
   "name": "{{pkgName}}",
   "version": "1.0.0",
+  "license": "{{spdxId}}",
   "description": "Library transpiled & optimized into native Pilot from '{{pkgName}}'",
   "entryPoint": "{{entryPoint}}",
+  "provenance": {
+    "spdxIdentifier": "{{spdxId}}",
+    "detectedFrom": "{{provLoc}}",
+    "sourceDirectory": "{{fullSourcePath.Replace('\\', '/')}}"
+  },
   "dependencies": {}
 }
 """;
             File.WriteAllText(manifestPath, manifestJson);
-            summary.GeneratedFiles.Add(manifestPath);
+            generatedFiles.Add(manifestPath);
         }
 
-        return new LibraryTranspilationSummary
+        if (dirLicense.SpdxIdentifier != "UNKNOWN" || options.LicensePolicy != PilotLicensePolicy.Any)
         {
-            Success = summary.Diagnostics.Count == 0,
-            SourceDirectory = summary.SourceDirectory,
-            OutputDirectory = summary.OutputDirectory,
-            Language = "pilot"
+            string noticesPath = Path.Combine(outputDir, "THIRD_PARTY_NOTICES.md");
+            string noticesContent = PilotLicenseVerifier.GenerateThirdPartyNotices(pkgName, fullSourcePath, dirLicense);
+            File.WriteAllText(noticesPath, noticesContent);
+            generatedFiles.Add(noticesPath);
+        }
+
+        var result = new LibraryTranspilationSummary
+        {
+            Success = diagnostics.Count == 0,
+            SourceDirectory = fullSourcePath,
+            OutputDirectory = fullOutDir,
+            Language = "pilot",
+            LicenseInfo = dirLicense
         };
+        result.GeneratedFiles.AddRange(generatedFiles);
+        result.Diagnostics.AddRange(diagnostics);
+        return result;
     }
 
     /// <summary>
     /// Transpiles an entire Pilot library directory into a target language package directory
-    /// (Python package, Rust crate, C/C++ project, JS ESM package, or Lua module tree).
+    /// (Python package, Rust crate, C/C++ project, JS ESM package, C# project, or Lua module tree).
     /// </summary>
     public static LibraryTranspilationSummary TranspilePilotLibraryToTarget(
         string pilotDir,

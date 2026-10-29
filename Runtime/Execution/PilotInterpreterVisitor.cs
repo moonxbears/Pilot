@@ -5571,6 +5571,21 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             return PilotValue.FromList(new List<PilotValue>());
         }
 
+        if (context.comp_for() != null)
+        {
+            var resultList = new List<PilotValue>();
+            Context.Environment.PushScope("ListComp");
+            try
+            {
+                EvaluateCompFor(context.comp_for(), elements[0].test(), resultList);
+            }
+            finally
+            {
+                Context.Environment.PopScope();
+            }
+            return PilotValue.FromList(resultList);
+        }
+
         var list = new List<PilotValue>(elements.Length);
         foreach (var el in elements)
         {
@@ -5592,6 +5607,62 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
         }
 
         return PilotValue.FromList(list);
+    }
+
+    private void EvaluateCompFor(
+        PilotParser.Comp_forContext compFor,
+        PilotParser.TestContext yieldExpr,
+        List<PilotValue> output)
+    {
+        var iterVal = Visit(compFor.test());
+        var items = ExtractCollectionItems(iterVal);
+        var targets = compFor.exprlist().test();
+
+        foreach (var item in items)
+        {
+            if (targets.Length == 1)
+            {
+                var binding = Context.Environment.CurrentScope.GetOrDeclareBinding(targets[0].GetText(), item);
+                binding.Value = item;
+            }
+            else if (item.Kind == PilotValueKind.Tuple)
+            {
+                var tup = item.AsTuple();
+                for (int i = 0; i < targets.Length && i < tup.Count; i++)
+                {
+                    var binding = Context.Environment.CurrentScope.GetOrDeclareBinding(targets[i].GetText(), tup[i]);
+                    binding.Value = tup[i];
+                }
+            }
+
+            EvaluateCompIter(compFor.comp_iter(), yieldExpr, output);
+        }
+    }
+
+    private void EvaluateCompIter(
+        PilotParser.Comp_iterContext? compIter,
+        PilotParser.TestContext yieldExpr,
+        List<PilotValue> output)
+    {
+        if (compIter == null)
+        {
+            output.Add(Visit(yieldExpr));
+            return;
+        }
+
+        if (compIter.comp_if() is { } compIf)
+        {
+            if (Visit(compIf.test()).IsTrue)
+            {
+                EvaluateCompIter(compIf.comp_iter(), yieldExpr, output);
+            }
+            return;
+        }
+
+        if (compIter.comp_for() is { } nestedFor)
+        {
+            EvaluateCompFor(nestedFor, yieldExpr, output);
+        }
     }
 
     public override PilotValue VisitDictorsetmaker(PilotParser.DictorsetmakerContext context)

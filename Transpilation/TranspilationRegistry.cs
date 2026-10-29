@@ -7,7 +7,7 @@ namespace Pilot.Transpilation;
 
 /// <summary>
 /// Registry of active compile-time target language converters for Pilot.
-/// Supports Python, Lua, JavaScript, C++, C, Rust, and C#.
+/// Supports Python, Lua, JavaScript/TypeScript, C++, C, Rust, and C#.
 /// </summary>
 public sealed class TranspilationRegistry
 {
@@ -23,12 +23,15 @@ public sealed class TranspilationRegistry
         Register(new LuaTargetConverter());
         Register(new JavaScriptTargetConverter("js"));
         Register(new JavaScriptTargetConverter("javascript"));
+        Register(new JavaScriptTargetConverter("ts"));
+        Register(new JavaScriptTargetConverter("typescript"));
         Register(new CTargetConverter());
         Register(new CppTargetConverter("cpp"));
         Register(new CppTargetConverter("c++"));
         Register(new RustTargetConverter("rust"));
         Register(new RustTargetConverter("rs"));
         Register(new CSharpTargetConverter());
+        _converters["cs"] = new CSharpTargetConverter();
     }
 
     public void Register(ITargetLanguageConverter converter)
@@ -59,28 +62,22 @@ public sealed class TranspilationRegistry
         if (!res.Success)
             return res;
 
-        string mappedCode = PilotLibraryMapper.TranslatePilotLibrariesToTarget(res.Code, targetLanguage);
+        string emittedCode = res.Code;
         if (PilotLibraryMapper.UsesMatrixPrimitives(pilotSource))
         {
             string preamble = PilotLibraryMapper.GetMatrixRuntimePreamble(targetLanguage);
-            if (!string.IsNullOrEmpty(preamble) && !mappedCode.Contains(preamble.Trim(), StringComparison.Ordinal))
+            if (!string.IsNullOrEmpty(preamble) && !emittedCode.Contains(preamble.Trim(), StringComparison.Ordinal))
             {
-                mappedCode = InjectPreambleAfterHeaders(mappedCode, preamble, targetLanguage);
+                emittedCode = InjectPreambleAfterHeaders(emittedCode, preamble, targetLanguage);
             }
         }
-        return TranspilationResult.CreateSuccess(mappedCode, res.TargetLanguage);
+        return TranspilationResult.CreateSuccess(emittedCode, res.TargetLanguage);
     }
 
     public TranspilationResult Ingest(string foreignSource, string sourceLanguage, TranspilationOptions? options = null)
     {
         var converter = Get(sourceLanguage);
-        var lines = foreignSource.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-        for (int i = 0; i < lines.Length; i++)
-        {
-            lines[i] = PilotLibraryMapper.TranslateForeignLibrariesToPilot(lines[i], sourceLanguage);
-        }
-        string preMapped = string.Join(Environment.NewLine, lines);
-        return converter.IngestToPilot(preMapped, options ?? new TranspilationOptions());
+        return converter.IngestToPilot(foreignSource, options ?? new TranspilationOptions());
     }
 
     private static string InjectPreambleAfterHeaders(string code, string preamble, string targetLang)
@@ -110,6 +107,18 @@ public sealed class TranspilationRegistry
                 }
             }
         }
+        else if (lang is "js" or "javascript" or "ts" or "typescript")
+        {
+            int useStrict = code.IndexOf("\"use strict\";", StringComparison.Ordinal);
+            if (useStrict >= 0)
+            {
+                int lineEnd = code.IndexOf('\n', useStrict);
+                if (lineEnd >= 0)
+                {
+                    return code[..(lineEnd + 1)] + Environment.NewLine + preamble.Trim() + Environment.NewLine + code[(lineEnd + 1)..];
+                }
+            }
+        }
         return preamble.Trim() + Environment.NewLine + Environment.NewLine + code;
     }
 
@@ -123,7 +132,8 @@ public sealed class TranspilationRegistry
         {
             ".py" => "python",
             ".lua" => "lua",
-            ".js" or ".mjs" or ".cjs" or ".ts" => "js",
+            ".js" or ".mjs" or ".cjs" => "js",
+            ".ts" => "ts",
             ".c" or ".h" => "c",
             ".cpp" or ".cc" or ".cxx" or ".hpp" => "cpp",
             ".rs" => "rust",
@@ -140,6 +150,7 @@ public sealed class TranspilationRegistry
         "python" or "py" => ".py",
         "lua" => ".lua",
         "js" or "javascript" => ".js",
+        "ts" or "typescript" => ".ts",
         "c" => ".c",
         "cpp" or "c++" => ".cpp",
         "rust" or "rs" => ".rs",

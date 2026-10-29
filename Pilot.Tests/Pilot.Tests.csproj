@@ -24,4 +24,9 @@
     <ProjectReference Include="..\Pilot.LanguageServer\Pilot.LanguageServer.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="RoundTripSamples/**" />
+    <None Include="RoundTripSamples/**" />
+  </ItemGroup>
+
 </Project>

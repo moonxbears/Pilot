@@ -1,0 +1,51 @@
+// Converted & optimized from Python to Pilot
+
+// Code transpiled & optimized from Pilot to Python 3
+// Target: Python 3.10+ (typed)
+
+// Pilot Bidirectional Multi-Language Round-Trip Showcase
+// Exercises enums, ADTs, type extensions, classes, typed functions,
+// while/for loops, elif branching, precedence, comprehensions, f-strings, and assertions.
+enum Priority { Low = 1, Medium = 2, High = 3 }
+type Shape = Circle(r: float) | Rect(w: float, h: float);
+extend i64 {
+    def doubled(self) -> int {
+        return self * 2;
+    }
+}
+class Counter {
+    def step(self, x: int, delta: int) -> int {
+        return x + delta;
+    }
+}
+def gcd(a: int, b: int) -> int {
+    var x: int = a;
+    var y: int = b;
+    while y != 0 {
+        let rem: int = x % y;
+        x = y;
+        y = rem;
+    }
+    return x;
+}
+def compute_weighted_sum(limit: int, scale: int) -> int {
+    let base_bonus: int = (limit + 2) * scale;
+    var total: int = base_bonus;
+    for i in 1..limit {
+        if i % 2 == 0 {
+            total += i * scale;
+        } elif i == 5 {
+            total += 10;
+        } else {
+            total += i;
+        }
+    }
+    return total;
+}
+const BASE_SCALE: int = 3;
+let g: int = gcd(48, 18);
+let weighted: int = compute_weighted_sum(5, BASE_SCALE);
+let squares = [x * x for x in 1..<7 if x > 2];
+assert g == 6;
+assert weighted == 53;
+println(f"GCD={g}, Weighted={weighted}");

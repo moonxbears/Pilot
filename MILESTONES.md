@@ -84,11 +84,11 @@ flowchart TD
 | **M14** | Unified Expression Ergonomics, Class-Like Literals & Zero-Cost `extend` | Phase A | ✅ **Completed** | `antlr/Pilot.g4`, `Runtime/Values/PilotValue.cs`, `Compiler/` |
 | **M15** | Dynamic-Schedule `for` Expressions & Zero-Marshalling C-ABI Guarantees | Phase A | ✅ **Completed** | `antlr/Pilot.g4`, `Analysis/Loops/`, `Runtime/NativeMemory/`, `Native/` |
 | **M16** | Advanced Type Inference (Bidirectional, Flow-Narrowing & Row Polymorphism) | Phase B | ✅ **Completed** | `Analysis/TypeSystem/`, `Pilot.LanguageServer/` |
-| **M17** | First-Class Keywords, Reified Forms & Core Call-Quoting (`:kw`, `!`, `!!`, `~`, `!&`) | Phase B | 🎯 **Next Up** | `Runtime/Values/PilotKeyword.cs`, `Analysis/CallQuoting/`, `Native/` |
-| **M18** | Semantic Call Projections: Signals (`!^`), Autodiff (`!@`) & Dry-Runs (`!?`) | Phase B | 📋 **Planned** | `Analysis/Autodiff/`, `Runtime/Reactive/`, `Runtime/Effects/` |
-| **M19** | Rigorous Runtime-to-Compile-Time Demotion & `comptime` Audit | Phase B | 📋 **Planned** | `Analysis/Comptime/`, `Compiler/`, `Transpilation/PilotOptimizer.cs` |
-| **M20** | Accurate Bidirectional Language Transpilation & Library Ingestion (`--emit` / `--from`) | Phase C | 📋 **Planned** | `Transpilation/`, `Formatting/PilotFormatter.cs`, `Cli/Program.cs` |
-| **M21** | Core Native Standard Library (`std.core`, `collections`, `mem`, `io`, `fs`, `math`) | Phase C | 📋 **Planned** | `stdlib/core/`, `stdlib/collections/`, `stdlib/io/`, `stdlib/math/` |
+| **M17** | First-Class Keywords, Reified Forms & Core Call-Quoting (`:kw`, `!`, `!!`, `~`, `!&`) | Phase B | ✅ **Completed** | `Runtime/Values/PilotKeyword.cs`, `Analysis/CallQuoting/`, `Native/` |
+| **M18** | Semantic Call Projections: Signals (`!^`), Autodiff (`!@`) & Dry-Runs (`!?`) | Phase B | ✅ **Completed** | `Analysis/Autodiff/`, `Runtime/Reactive/`, `Runtime/Effects/` |
+| **M19** | Rigorous Runtime-to-Compile-Time Demotion & `comptime` Audit | Phase B | ✅ **Completed** | `Analysis/Comptime/`, `Compiler/`, `Transpilation/PilotOptimizer.cs` |
+| **M20** | Accurate Bidirectional Language Transpilation & Library Ingestion (`--emit` / `--from`) | Phase C | ✅ **Completed** | `Transpilation/`, `Formatting/PilotFormatter.cs`, `Cli/Program.cs` |
+| **M21** | Core Native Standard Library (`std.core`, `collections`, `mem`, `io`, `fs`, `math`) | Phase C | 🎯 **Next Up** | `stdlib/core/`, `stdlib/collections/`, `stdlib/io/`, `stdlib/math/` |
 | **M22** | Debug Adapter Protocol (DAP) & VS Code GUI Breakpoints | Phase C | 📋 **Planned** | `Debugging/Dap/`, `Debugging/PilotDebugger.cs`, `vscode-pilot/` |
 | **M23** | Deep LLVM / WASM Runtime Linking & Native Binary Toolchain (`pilot build`) | Phase C | 📋 **Planned** | `Native/Llvm/`, `Native/Wasm/`, `Native/Runtime/` |
 | **M24** | Extended Systems, Networking, HTTP & Crypto Standard Library | Phase C | 📋 **Planned** | `stdlib/net/`, `stdlib/http/`, `stdlib/crypto/`, `stdlib/formats/` |
@@ -589,27 +589,27 @@ Placed immediately after `M16` (Bidirectional Inference) and `M17`–`M18` (Meta
 2. **Force Multiplier for `M21` & `M24` (`stdlib/` Bootstrapping)**: Having `PilotLibraryTranspiler` fully operational *first* lets `M21` and `M24` automatically scaffold standard library modules from battle-tested Python, Rust, and C11 donor libraries with minimal manual hookup while stress-testing `--from` on real production code.
 
 ### Sub-Tasks & Deliverables
-- [ ] **20.1: Canonical Typed Transpilation IR (`Transpilation/Ir/PilotTranspileIr.cs`)**
+- [x] **20.1: Canonical Typed Transpilation IR (`Transpilation/Ir/PilotTranspileIr.cs`)**
   - Run the full `PilotPreprocessor` $\rightarrow$ `PilotParser` $\rightarrow$ `PilotAnalysisPipeline` (`M16` inferred types + `M19` static demotion/`comptime` folding) *before* emission so every node carries its resolved `PilotType`, operator precedence, mutability (`let` vs `var`), and C-ABI layout (`SliceBuffer<T>`, `RangeWindow<TIter>`).
-- [ ] **20.2: Lossless Trivia-Preserving Pilot CST/AST Formatter (`Formatting/PilotFormatter.cs` / `pilot fmt`)**
+- [x] **20.2: Lossless Trivia-Preserving Pilot CST/AST Formatter (`Formatting/PilotFormatter.cs` / `pilot fmt`)**
   - Build a canonical Pilot pretty-printer and Concrete Syntax Tree (CST) trivia round-tripper preserving comments, blank lines, and brace/colon suite conventions—used both by `pilot --from` to emit clean `.pilot` source and by `M25` (`pilot perf optimize --apply`) for safe in-place source rewrites.
-- [ ] **20.3: Full AST-Driven Target Emitters (`pilot --emit c|cpp|csharp|rust|python|js|lua`)**
+- [x] **20.3: Full AST-Driven Target Emitters (`pilot --emit c|cpp|csharp|rust|python|js|lua`)**
   - Rewrite all 7 target emitters (`CTargetConverter`, `CppTargetConverter`, `CSharpTargetConverter`, `RustTargetConverter`, `PythonTargetConverter`, `JavaScriptTargetConverter`, `LuaTargetConverter`) using structured target AST writers with precedence-aware parenthesization (**zero calls to raw `ctx.GetText()`**):
     - **Expressions, Operators & Interpolation**: Accurate token spacing, operator mapping (`and`/`or`/`not`, `**`, `//`, `??`, `?.`, `|>`), interpolated strings (`f"Hi {x}"` $\rightarrow$ C# `$"Hi {x}"`, Rust `format!("Hi {}", x)`, JS `` `Hi ${x}` ``, Python `f"Hi {x}"`, C `snprintf`), and `..` vs `..<` range bounds.
     - **ADTs, `T?`, `T ! E`, `extend` & `ForExpr`**: Idiomatic lowering per target (Rust `enum` / `Option<T>` / `Result<T, E>` / `?`; C# `record` / `T?` / static extensions; C11/C++20 tagged unions, `SliceBuffer`, and `RangeWindow` loops; Python `dataclass` / `match` / `Optional`).
     - **AST-Scoped `PilotLibraryMapper`**: Move ecosystem/API translation (`matrix`, `zeros`, `Table`, math, JSON, I/O) onto typed AST `CallExpr` and `Import` nodes so string literals and comments are never corrupted.
-- [ ] **20.4: Real Lexer/Parser Foreign Language & Library Ingesters (`pilot --from <lang> [--strict-pilot]`)**
+- [x] **20.4: Real Lexer/Parser Foreign Language & Library Ingesters (`pilot --from <lang> [--strict-pilot]`)**
   - Replace line-splitting regexes in `Targets/*` and `PilotLibraryTranspiler.IngestLibraryToPilot` with structured foreign-language AST parsers:
     - **C#**: Roslyn (`Microsoft.CodeAnalysis.CSharp`) syntax tree walker $\rightarrow$ `PilotAst` (`record`, `T?`, `?.`, `??`, LINQ, extension methods $\rightarrow$ `extend`, `switch` $\rightarrow$ `match`).
     - **Rust, C11/C++20, Python 3, JS/TS & Lua**: Dedicated grammar/recursive-descent AST frontends mapping foreign enums/structs (`enum` $\rightarrow$ Pilot ADT, `Option<T>` $\rightarrow$ `T?`, `Result<T, E>`/`?` $\rightarrow$ `T ! E` + `?`, Python comprehensions $\rightarrow$ `ForExpr` `CollectionYield`) into `PilotAst`, emitted via `PilotFormatter`.
   - **`--strict-pilot` Idiom Upgrade Flag**: Automatically lift foreign `raise ValueError(...)` / `Err(...)` into `return fail(...)` (`-> T ! ErrorSet`), `Optional` / `None` checks into `T?` + `guard some x else`, and mutability-analyzed locals into `let` vs `var` so ingested code obeys `M12`, `M13`, and `M19` zero-overhead rules.
   - **Mandatory Post-Ingest Parse Gate**: Validate every generated `.pilot` output through `PilotLexer` + `PilotParser` before returning success (`INGEST001`–`INGEST010`).
-- [ ] **20.5: Viable License Restriction CLI Flag (`--viable-license-only` / `--license-policy <permissive|spdx-allowlist|any>`)**
+- [x] **20.5: Viable License Restriction CLI Flag (`--viable-license-only` / `--license-policy <permissive|spdx-allowlist|any>`)**
   - Add opt-in license enforcement flags to `Cli/Program.cs` (`pilot --from <lang> --viable-license-only <path>` and `--license-policy <policy>`, defaulting to `any` so developers can freely convert private/internal codebases):
     - Inspect repository `LICENSE` / `COPYING` files, package manifests (`pyproject.toml`, `Cargo.toml`, `package.json`, `.csproj`), and per-file `SPDX-License-Identifier` headers.
     - When `--viable-license-only` (or `--license-policy permissive`) is active, allow redistributable permissive licenses (`MIT`, `Apache-2.0`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `PSF-2.0`, `Zlib`, `0BSD`, `CC0-1.0`, `Unlicense`) and reject copyleft, proprietary, or unidentified/missing licenses (`GPL-*`, `LGPL-*`, `AGPL-*`, `SSPL-*`, `EUPL-*`) with diagnostics **`INGEST_LIC001`–`INGEST_LIC003`**.
     - Automatically record SPDX license provenance in `pilot.json` and emit `THIRD_PARTY_NOTICES.md` attribution headers in the output package directory.
-- [ ] **20.6: Compiler-in-the-Loop Round-Trip Verification (`Pilot.Tests/PilotBidirectionalTranspilationTests.cs`)**
+- [x] **20.6: Compiler-in-the-Loop Round-Trip Verification (`Pilot.Tests/PilotBidirectionalTranspilationTests.cs`)**
   - Compile/syntax-check every `--emit` output against real target toolchains (`Roslyn` C#, `rustc --emit=metadata`, `clang -std=c11 -fsyntax-only`, `clang++ -std=c++20 -fsyntax-only`, `python -m py_compile`, `node --check`, `luac -p`) and execute ingested `--from` programs in `PilVirtualMachine` to verify behavioral equivalence.
 
 ---

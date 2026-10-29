@@ -2,19 +2,19 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
-using Antlr4.Runtime;
-using Pilot.Diagnostics;
-using Pilot.Preprocessing;
+using Pilot.Analysis;
+using Pilot.Transpilation.Ingesters;
+using Pilot.Transpilation.Ir;
 
 namespace Pilot.Transpilation.Targets;
 
 /// <summary>
-/// Bidirectional optimizing compile-time code converter between Pilot and Rust (2024 Edition).
-/// Performs mutability analysis to emit immutable 'let' vs 'let mut', inclusive ranges 'a..=b',
-/// and hardware-exact scalar types.
+/// Milestone 20.3 &amp; 20.4: AST-driven bidirectional code converter between Pilot and Rust (2024 Edition).
+/// Emits directly from <see cref="PilotIrModule"/> with precedence-aware parenthesization,
+/// <c>#[derive(Debug, Clone, PartialEq)]</c> enum ADTs, <c>Option&lt;T&gt;</c>/<c>Result&lt;T, E&gt;</c>,
+/// extension traits for <c>extend</c>, and iterator chains for <c>ForExpr</c>.
 /// </summary>
-public sealed partial class RustTargetConverter : ITargetLanguageConverter
+public sealed class RustTargetConverter : ITargetLanguageConverter
 {
     public string Language { get; }
     public string TargetLanguage => Language;
@@ -27,431 +27,662 @@ public sealed partial class RustTargetConverter : ITargetLanguageConverter
 
     public TranspilationResult TranspileSource(string pilotSource, TranspilationOptions options)
     {
-        var preproc = PilotPreprocessor.Preprocess(pilotSource, "");
-        if (preproc.HasErrors)
+        var (module, errors) = PilotTranspileIrBuilder.BuildFromSource(pilotSource, options);
+        if (module == null || errors.Count > 0)
         {
-            return TranspilationResult.CreateFailure(
-                preproc.Diagnostics.Select(d => d.Message),
-                TargetLanguage);
+            return TranspilationResult.CreateFailure(errors, TargetLanguage);
         }
 
-        var inputStream = new AntlrInputStream(preproc.PreprocessedSource);
-        var lexer = new PilotLexer(inputStream);
-        var tokenStream = new CommonTokenStream(lexer);
-        var parser = new PilotParser(tokenStream);
-
-        var errorTracker = new ErrorTracker();
-        parser.RemoveErrorListeners();
-        parser.AddErrorListener(errorTracker);
-
-        var tree = parser.ParseProgramFast();
-        if (errorTracker.HasErrors)
-        {
-            return TranspilationResult.CreateFailure(errorTracker.Errors, TargetLanguage);
-        }
-
-        return Transpile(tree, options);
+        return TranspileModule(module, options);
     }
 
     public TranspilationResult Transpile(PilotParser.ProgramContext programAst, TranspilationOptions options)
+    {
+        PilotStaticAnalysisResult? analysis = null;
+        try { analysis = PilotAnalysisPipeline.Analyze(programAst); } catch { }
+        var module = PilotTranspileIrBuilder.Build(programAst, null, analysis, options);
+        return TranspileModule(module, options);
+    }
+
+    public TranspilationResult TranspileModule(PilotIrModule module, TranspilationOptions options)
     {
         var sb = new StringBuilder();
         if (options.EmitHeaderComments)
         {
             sb.AppendLine("// Code transpiled & optimized from Pilot to Rust (2024 Edition)");
-            sb.AppendLine("#![allow(unused_variables, dead_code)]");
+            sb.AppendLine("#![allow(unused_variables, dead_code, non_snake_case, non_camel_case_types)]");
             sb.AppendLine();
         }
 
-        var mutatedVars = PilotOptimizer.AnalyzeMutatedVariables(programAst);
-        var visitor = new PilotToRustVisitor(options, mutatedVars);
-        string code = visitor.VisitProgram(programAst);
-        sb.Append(code);
+        var emitter = new RustIrEmitter(module, options);
+        sb.Append(emitter.EmitModule());
 
         return TranspilationResult.CreateSuccess(sb.ToString().TrimEnd() + Environment.NewLine, TargetLanguage);
     }
 
-    public TranspilationResult IngestToPilot(string foreignSource, TranspilationOptions options)
+    public TranspilationResult IngestToPilot(string foreignSource, TranspilationOptions options) =>
+        ForeignAstIngester.Ingest(foreignSource, SourceLanguage, options);
+
+    private sealed class RustIrEmitter
     {
-        var sb = new StringBuilder();
-        if (options.EmitHeaderComments)
-        {
-            sb.AppendLine("// Converted & optimized from Rust to Pilot");
-            sb.AppendLine();
-        }
-
-        var lines = foreignSource.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-        foreach (var line in lines)
-        {
-            string trimmed = line.Trim();
-            if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#!"))
-            {
-                sb.AppendLine();
-                continue;
-            }
-
-            string converted = ConvertRustLineToPilot(trimmed, options.Optimize);
-            int indent = line.TakeWhile(char.IsWhiteSpace).Count();
-            sb.AppendLine(new string(' ', indent) + converted);
-        }
-
-        string outputCode = options.Optimize ? PilotOptimizer.OptimizeIngestedPilotCode(sb.ToString()) : sb.ToString().TrimEnd() + Environment.NewLine;
-        return TranspilationResult.CreateSuccess(outputCode, "pilot");
-    }
-
-    private static string ConvertRustLineToPilot(string line, bool optimize = false)
-    {
-        string res = optimize ? line.TrimEnd(';') : line;
-
-        // Visibility & Functions
-        res = res.Replace("pub fn ", "def ").Replace("fn ", "def ");
-        res = res.Replace("pub struct ", "class ").Replace("struct ", "class ");
-
-        // Inclusive range a..=b -> a..b
-        res = res.Replace("..=", "..");
-
-        // Variables
-        res = res.Replace("let mut ", optimize ? "var " : "let ");
-
-        // println!("Hello {}", x) -> println(f"Hello {x}")
-        var printMatch = MyRegex().Match(res);
-        if (printMatch.Success)
-        {
-            string fmt = printMatch.Groups[1].Value;
-            string argsStr = printMatch.Groups[2].Value;
-            if (!string.IsNullOrWhiteSpace(argsStr))
-            {
-                var args = argsStr.Split(',').Select(a => a.Trim()).ToArray();
-                int idx = 0;
-                string fstr = MyRegex1().Replace(fmt, _ => idx < args.Length ? $"{{{args[idx++]}}}" : "");
-                return $"println(f\"{fstr}\")";
-            }
-            return $"println(\"{fmt}\")";
-        }
-
-        res = res.Replace("println!", "println").Replace("print!", "print");
-
-        return res;
-    }
-
-    private sealed class PilotToRustVisitor
-    {
+        private readonly PilotIrModule _module;
         private readonly TranspilationOptions _options;
-        private readonly HashSet<string> _mutatedVars;
+        private readonly Dictionary<string, string> _variantToAdt = new(StringComparer.Ordinal);
         private int _indent;
+        private bool _currentFuncReturnsResult;
 
-        public PilotToRustVisitor(TranspilationOptions options, HashSet<string> mutatedVars)
+        public RustIrEmitter(PilotIrModule module, TranspilationOptions options)
         {
+            _module = module;
             _options = options;
-            _mutatedVars = mutatedVars;
+            foreach (var adt in module.Statements.OfType<PilotIrAdtDefStmt>())
+            {
+                foreach (var v in adt.Variants)
+                    _variantToAdt[v.Name] = adt.Name;
+            }
         }
 
         private string Indent => string.Concat(Enumerable.Repeat(_options.IndentString, _indent));
 
-        public string VisitProgram(PilotParser.ProgramContext ctx)
+        public string EmitModule()
         {
             var sb = new StringBuilder();
-            foreach (var stmt in ctx.stmt())
+            var topDecls = new List<PilotIrStmt>();
+            var mainStmts = new List<PilotIrStmt>();
+            bool hasExplicitMain = _module.Statements.OfType<PilotIrFuncDefStmt>().Any(f => f.Name == "main");
+
+            foreach (var stmt in _module.Statements)
             {
-                string s = VisitStmt(stmt);
+                if (stmt is PilotIrFuncDefStmt or PilotIrClassDefStmt or PilotIrAdtDefStmt or
+                            PilotIrEnumDefStmt or PilotIrTypeAliasStmt or PilotIrExtensionDefStmt)
+                {
+                    topDecls.Add(stmt);
+                }
+                else
+                {
+                    mainStmts.Add(stmt);
+                }
+            }
+
+            foreach (var decl in topDecls)
+            {
+                string s = EmitStmt(decl);
                 if (!string.IsNullOrWhiteSpace(s))
                 {
                     sb.AppendLine(s);
+                    sb.AppendLine();
                 }
             }
+
+            if (mainStmts.Count > 0 && !hasExplicitMain)
+            {
+                sb.AppendLine("pub fn main() {");
+                _indent = 1;
+                foreach (var s in mainStmts)
+                {
+                    string line = EmitStmt(s);
+                    if (!string.IsNullOrWhiteSpace(line))
+                        sb.AppendLine(line);
+                }
+                _indent = 0;
+                sb.AppendLine("}");
+            }
+
             return sb.ToString();
         }
 
-        public string VisitStmt(PilotParser.StmtContext ctx)
+        public string EmitStmt(PilotIrStmt stmt) => stmt switch
         {
-            if (ctx.compound_stmt() != null) return VisitCompoundStmt(ctx.compound_stmt());
-            if (ctx.simple_stmt() != null) return VisitSimpleStmt(ctx.simple_stmt());
-            return string.Empty;
+            PilotIrCommentStmt c => $"{Indent}//{c.CommentText.TrimStart('/')}",
+            PilotIrVarDeclStmt v => EmitVarDecl(v),
+            PilotIrAssignStmt a => $"{Indent}{EmitExpr(a.Target)} {a.Operator} {EmitExpr(a.Value)};",
+            PilotIrFuncDefStmt f => EmitFuncDef(f, isTraitImpl: false),
+            PilotIrClassDefStmt c => EmitClassDef(c),
+            PilotIrAdtDefStmt adt => EmitAdtDef(adt),
+            PilotIrEnumDefStmt en => EmitEnumDef(en),
+            PilotIrTypeAliasStmt ta => $"{Indent}pub type {ta.Name} = {MapType(ta.TargetType)};",
+            PilotIrExtensionDefStmt ext => EmitExtensionDef(ext),
+            PilotIrIfStmt ifs => EmitIfStmt(ifs),
+            PilotIrGuardStmt g => EmitGuardStmt(g),
+            PilotIrWhileStmt w => EmitWhileStmt(w),
+            PilotIrForStmt f => EmitForStmt(f),
+            PilotIrMatchStmt m => EmitMatchStmt(m),
+            PilotIrDeferStmt d => string.Join(Environment.NewLine, d.Body.Select(EmitStmt)),
+            PilotIrReturnStmt r => EmitReturnStmt(r),
+            PilotIrRaiseStmt rs => rs.Value != null
+                ? (_currentFuncReturnsResult ? $"{Indent}return Err({EmitExpr(rs.Value)}.into());" : $"{Indent}panic!(\"{{:?}}\", {EmitExpr(rs.Value)});")
+                : $"{Indent}panic!(\"error\");",
+            PilotIrBreakStmt => $"{Indent}break;",
+            PilotIrContinueStmt => $"{Indent}continue;",
+            PilotIrPassStmt => $"{Indent}// pass",
+            PilotIrAssertStmt a => a.Message != null
+                ? $"{Indent}assert!({EmitExpr(a.Condition)}, \"{{}}\", {EmitExpr(a.Message)});"
+                : $"{Indent}assert!({EmitExpr(a.Condition)});",
+            PilotIrComptimeStmt ct => string.Join(Environment.NewLine, ct.Body.Select(EmitStmt)),
+            PilotIrExprStmt e => $"{Indent}{EmitExpr(e.Expression)};",
+            _ => ""
+        };
+
+        private string EmitVarDecl(PilotIrVarDeclStmt v)
+        {
+            if (v.TupleDestructureNames.Count > 1)
+            {
+                string lhs = $"({string.Join(", ", v.TupleDestructureNames)})";
+                string rhs = v.Initializer != null ? EmitExpr(v.Initializer) : "Default::default()";
+                return $"{Indent}let {lhs} = {rhs};";
+            }
+
+            string rhsVal = v.ComptimeFoldedLiteral ?? (v.Initializer != null ? EmitExpr(v.Initializer) : "");
+            if (v.Kind == PilotVarDeclKind.Const)
+            {
+                string cType = !string.IsNullOrEmpty(v.DeclaredType) ? MapType(v.DeclaredType) : "i64";
+                return $"{Indent}const {v.Name}: {cType} = {rhsVal};";
+            }
+
+            string typeAnnot = !string.IsNullOrEmpty(v.DeclaredType) ? $": {MapType(v.DeclaredType)}" : "";
+            string mutKw;
+            if (v.Kind == PilotVarDeclKind.Var)
+            {
+                mutKw = "let mut";
+            }
+            else
+            {
+                mutKw = _options.Optimize ? (v.IsMutated ? "let mut" : "let") : "let mut";
+            }
+
+            return !string.IsNullOrEmpty(rhsVal)
+                ? $"{Indent}{mutKw} {v.Name}{typeAnnot} = {rhsVal};"
+                : $"{Indent}let mut {v.Name}{typeAnnot};";
         }
 
-        public string VisitSimpleStmt(PilotParser.Simple_stmtContext ctx)
+        private string EmitReturnStmt(PilotIrReturnStmt r)
         {
-            var sb = new StringBuilder();
-            foreach (var small in ctx.small_stmt())
+            if (r.Value == null)
+                return $"{Indent}return;";
+            if (_currentFuncReturnsResult &&
+                r.Value is not PilotIrCallExpr { LibraryCallKind: PilotLibraryCallKind.FailConstructor })
             {
-                string s = VisitSmallStmt(small);
-                if (!string.IsNullOrWhiteSpace(s))
-                {
-                    sb.AppendLine(Indent + s);
-                }
+                string val = EmitExpr(r.Value);
+                if (!val.StartsWith("Ok(") && !val.StartsWith("Err("))
+                    return $"{Indent}return Ok({val});";
             }
-            return sb.ToString().TrimEnd();
+            return $"{Indent}return {EmitExpr(r.Value)};";
         }
 
-        public string VisitSmallStmt(PilotParser.Small_stmtContext ctx)
+        private string EmitFuncDef(PilotIrFuncDefStmt f, bool isTraitImpl)
         {
-            if (ctx.let_stmt() != null)
-            {
-                string name = ctx.let_stmt().binding_pattern().GetText();
-                string? type = ctx.let_stmt().type_annotation()?.type_spec()?.GetText();
-                string? val = ctx.let_stmt().test()?.GetText();
-                string typeAnnot = !string.IsNullOrEmpty(type) ? $": {MapType(type)}" : "";
-                string valStr = val != null ? FormatExpr(val) : "";
-                string mutKw = _options.Optimize ? (_mutatedVars.Contains(name) ? "let mut" : "let") : "let mut";
-                return val != null ? $"{mutKw} {name}{typeAnnot} = {valStr};" : $"let mut {name}{typeAnnot};";
-            }
-            if (ctx.var_stmt() != null)
-            {
-                string name = ctx.var_stmt().binding_pattern().GetText();
-                string? type = ctx.var_stmt().type_annotation()?.type_spec()?.GetText();
-                string? val = ctx.var_stmt().test()?.GetText();
-                string typeAnnot = !string.IsNullOrEmpty(type) ? $": {MapType(type)}" : "";
-                return val != null ? $"let mut {name}{typeAnnot} = {FormatExpr(val)};" : $"let mut {name}{typeAnnot};";
-            }
-            if (ctx.const_stmt() != null)
-            {
-                string name = ctx.const_stmt().binding_pattern().GetText();
-                string? type = ctx.const_stmt().type_annotation()?.type_spec()?.GetText();
-                string val = ctx.const_stmt().test().GetText();
-                string typeStr = !string.IsNullOrEmpty(type) ? MapType(type) : "i64";
-                return $"const {name}: {typeStr} = {FormatExpr(val)};";
-            }
-            if (ctx.guard_stmt() != null)
-            {
-                return VisitGuardStmt(ctx.guard_stmt(), inlineIndent: false);
-            }
-            if (ctx.flow_stmt() != null)
-            {
-                var flow = ctx.flow_stmt();
-                if (flow.RETURN() != null)
-                {
-                    string ret = flow.testlist() != null ? FormatExpr(flow.testlist().GetText()) : "";
-                    return string.IsNullOrEmpty(ret) ? "return;" : $"return {ret};";
-                }
-                if (flow.BREAK() != null) return "break;";
-                if (flow.CONTINUE() != null) return "continue;";
-            }
-            if (ctx.assert_stmt() != null)
-            {
-                var tests = ctx.assert_stmt().test();
-                return $"assert!({FormatExpr(tests[0].GetText())});";
-            }
-            if (ctx.expr_stmt() != null)
-            {
-                string expr = ctx.expr_stmt().GetText().TrimEnd(';');
-                if (expr.StartsWith("println("))
-                {
-                    string inner = expr["println(".Length..^1].Trim();
-                    if (inner.StartsWith("f\"") && inner.EndsWith("\""))
-                    {
-                        return $"println!(\"{inner[2..^1]}\");";
-                    }
-                    if (inner.StartsWith("\"") && inner.EndsWith("\""))
-                    {
-                        return $"println!({inner});";
-                    }
-                    return $"println!(\"{{:?}}\", {FormatExpr(inner)});";
-                }
-                if (expr.StartsWith("print("))
-                {
-                    expr = "print!" + expr["print".Length..];
-                }
-                return FormatExpr(expr) + ";";
-            }
-            return ctx.GetText().TrimEnd(';') + ";";
-        }
+            bool prevResult = _currentFuncReturnsResult;
+            _currentFuncReturnsResult = (f.DeclaredReturnType ?? "").Contains('!');
 
-        public string VisitCompoundStmt(PilotParser.Compound_stmtContext ctx)
-        {
-            if (ctx.func_def() != null) return VisitFuncDef(ctx.func_def());
-            if (ctx.class_def() != null) return VisitClassDef(ctx.class_def());
-            if (ctx.if_stmt() != null) return VisitIfStmt(ctx.if_stmt());
-            if (ctx.while_stmt() != null) return VisitWhileStmt(ctx.while_stmt());
-            if (ctx.for_stmt() != null) return VisitForStmt(ctx.for_stmt());
-            if (ctx.guard_stmt() != null) return VisitGuardStmt(ctx.guard_stmt(), inlineIndent: true);
-            if (ctx.match_stmt() != null) return VisitMatchStmt(ctx.match_stmt());
-            if (ctx.inline_foreign_block() != null) return VisitForeignBlock(ctx.inline_foreign_block());
-            return Indent + "// " + ctx.GetText();
-        }
-
-        private string VisitGuardStmt(PilotParser.Guard_stmtContext ctx, bool inlineIndent)
-        {
-            string prefix = inlineIndent ? Indent : "";
-            string cond = ctx.test() != null ? FormatExpr(ctx.test().GetText()) : "true";
-            var sb = new StringBuilder();
-            sb.AppendLine($"{prefix}if !({cond})");
-            sb.Append(VisitSuite(ctx.suite()));
-            return sb.ToString().TrimEnd();
-        }
-
-        public string VisitFuncDef(PilotParser.Func_defContext ctx)
-        {
-            string name = ctx.identifier().GetText();
             var paramList = new List<string>();
-
-            if (ctx.parameters()?.parameter() != null)
+            foreach (var p in f.Parameters)
             {
-                foreach (var p in ctx.parameters().parameter())
+                if (p.Name is "self" or "this")
                 {
-                    string pName = p.identifier()?.GetText() ?? p.splice_expr()?.GetText() ?? "arg";
-                    string? pType = p.type_annotation()?.type_spec()?.GetText();
-                    string typeStr = !string.IsNullOrEmpty(pType) ? MapType(pType) : "i64";
-                    paramList.Add($"{pName}: {typeStr}");
+                    paramList.Add("&self");
+                    continue;
                 }
+                string pType = !string.IsNullOrEmpty(p.TypeAnnotation) ? MapType(p.TypeAnnotation) : "i64";
+                string mutMod = p.IsMutable || f.MutatedLocals.Contains(p.Name) ? "mut " : "";
+                paramList.Add($"{mutMod}{p.Name}: {pType}");
             }
 
-            string? retType = ctx.type_spec()?.GetText();
-            string retStr = !string.IsNullOrEmpty(retType) && retType != "void" ? $" -> {MapType(retType)}" : "";
+            string? retType = f.DeclaredReturnType;
+            string retStr = !string.IsNullOrEmpty(retType) && retType != "void"
+                ? $" -> {MapType(retType)}"
+                : "";
+            string pubMod = isTraitImpl ? "" : "pub ";
+            string genPart = f.GenericParams.Count > 0 ? $"<{string.Join(", ", f.GenericParams)}>" : "";
 
             var sb = new StringBuilder();
-            sb.AppendLine($"{Indent}pub fn {name}({string.Join(", ", paramList)}){retStr}");
-            sb.Append(VisitSuite(ctx.suite()));
-            return sb.ToString();
-        }
-
-        public string VisitClassDef(PilotParser.Class_defContext ctx)
-        {
-            string name = ctx.identifier().GetText();
-            var sb = new StringBuilder();
-            sb.AppendLine($"{Indent}pub struct {name} {{}}");
-            sb.AppendLine($"{Indent}impl {name}");
-            sb.Append(VisitSuite(ctx.suite()));
-            return sb.ToString();
-        }
-
-        public string VisitIfStmt(PilotParser.If_stmtContext ctx)
-        {
-            var tests = ctx.test();
-            var suites = ctx.suite();
-            var sb = new StringBuilder();
-
-            sb.AppendLine($"{Indent}if {FormatExpr(tests[0].GetText())}");
-            sb.Append(VisitSuite(suites[0]));
-
-            for (int i = 1; i < tests.Length; i++)
-            {
-                sb.AppendLine($"{Indent}else if {FormatExpr(tests[i].GetText())}");
-                sb.Append(VisitSuite(suites[i]));
-            }
-
-            if (suites.Length > tests.Length)
-            {
-                sb.AppendLine($"{Indent}else");
-                sb.Append(VisitSuite(suites[^1]));
-            }
-
-            return sb.ToString();
-        }
-
-        public string VisitWhileStmt(PilotParser.While_stmtContext ctx)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine($"{Indent}while {FormatExpr(ctx.test(0).GetText())}");
-            sb.Append(VisitSuite(ctx.suite(0)));
-            return sb.ToString();
-        }
-
-        public string VisitForStmt(PilotParser.For_stmtContext ctx)
-        {
-            var sb = new StringBuilder();
-            string target = ctx.for_target().GetText();
-            string rawIter = ctx.test(0).GetText();
-
-            string iterable = PilotOptimizer.TryParseRangeExpr(rawIter, out string startR, out string endR)
-                ? $"{FormatExpr(startR)}..={FormatExpr(endR)}"
-                : FormatExpr(rawIter);
-
-            sb.AppendLine($"{Indent}for {target} in {iterable}");
-            sb.Append(VisitSuite(ctx.suite(0)));
-            return sb.ToString();
-        }
-
-        public string VisitMatchStmt(PilotParser.Match_stmtContext ctx)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine($"{Indent}match {FormatExpr(ctx.test().GetText())} {{");
+            sb.AppendLine($"{Indent}{pubMod}fn {f.Name}{genPart}({string.Join(", ", paramList)}){retStr}");
+            sb.AppendLine($"{Indent}{{");
             _indent++;
-            if (ctx.match_suite()?.match_arm() != null)
+            foreach (var req in f.RequiresClauses)
+                sb.AppendLine($"{Indent}assert!({EmitExpr(req)});");
+            foreach (var s in f.Body)
             {
-                foreach (var arm in ctx.match_suite().match_arm())
+                string line = EmitStmt(s);
+                if (!string.IsNullOrWhiteSpace(line))
+                    sb.AppendLine(line);
+            }
+            _indent--;
+            sb.Append($"{Indent}}}");
+
+            _currentFuncReturnsResult = prevResult;
+            return sb.ToString();
+        }
+
+        private string EmitClassDef(PilotIrClassDefStmt c)
+        {
+            var sb = new StringBuilder();
+            string genPart = c.GenericParams.Count > 0 ? $"<{string.Join(", ", c.GenericParams)}>" : "";
+            sb.AppendLine($"{Indent}#[derive(Debug, Clone, PartialEq)]");
+            if (c.Fields.Count == 0)
+            {
+                sb.AppendLine($"{Indent}pub struct {c.Name}{genPart} {{}}");
+            }
+            else
+            {
+                sb.AppendLine($"{Indent}pub struct {c.Name}{genPart} {{");
+                _indent++;
+                foreach (var f in c.Fields)
                 {
-                    string pattern = arm.pattern().GetText();
-                    string guard = arm.test() != null ? $" if {FormatExpr(arm.test().GetText())}" : "";
-                    sb.AppendLine($"{Indent}{pattern}{guard} => {{");
-                    _indent++;
-                    sb.AppendLine(VisitSuite(arm.suite()).Trim());
-                    _indent--;
-                    sb.AppendLine($"{Indent}}},");
+                    sb.AppendLine($"{Indent}pub {f.Name}: {MapType(f.TypeAnnotation)},");
+                }
+                _indent--;
+                sb.AppendLine($"{Indent}}}");
+            }
+
+            if (c.Methods.Count > 0)
+            {
+                sb.AppendLine($"{Indent}impl{genPart} {c.Name}{genPart}");
+                sb.AppendLine($"{Indent}{{");
+                _indent++;
+                foreach (var m in c.Methods)
+                {
+                    sb.AppendLine(EmitFuncDef(m, isTraitImpl: false));
+                }
+                _indent--;
+                sb.Append($"{Indent}}}");
+            }
+            return sb.ToString().TrimEnd();
+        }
+
+        private string EmitAdtDef(PilotIrAdtDefStmt adt)
+        {
+            var sb = new StringBuilder();
+            string genPart = adt.GenericParams.Count > 0 ? $"<{string.Join(", ", adt.GenericParams)}>" : "";
+            sb.AppendLine($"{Indent}#[derive(Debug, Clone, PartialEq)]");
+            sb.AppendLine($"{Indent}pub enum {adt.Name}{genPart} {{");
+            _indent++;
+            foreach (var v in adt.Variants)
+            {
+                if (v.Fields.Count == 0)
+                {
+                    sb.AppendLine($"{Indent}{v.Name},");
+                }
+                else
+                {
+                    string fields = string.Join(", ", v.Fields.Select(f => MapType(f.Type)));
+                    sb.AppendLine($"{Indent}{v.Name}({fields}),");
                 }
             }
             _indent--;
-            sb.AppendLine($"{Indent}}}");
+            sb.Append($"{Indent}}}");
             return sb.ToString();
         }
 
-        private string VisitForeignBlock(PilotParser.Inline_foreign_blockContext ctx)
+        private string EmitEnumDef(PilotIrEnumDefStmt en)
         {
-            string lang = ctx.foreign_language().GetText().ToLowerInvariant();
-            if (lang == "rust" && ctx.stmt() != null && ctx.stmt().Length > 0)
+            var sb = new StringBuilder();
+            sb.AppendLine($"{Indent}#[derive(Debug, Clone, Copy, PartialEq, Eq)]");
+            sb.AppendLine($"{Indent}pub enum {en.Name} {{");
+            _indent++;
+            foreach (var (mName, mVal) in en.Members)
             {
-                var sb = new StringBuilder();
-                foreach (var s in ctx.stmt())
+                string valPart = mVal != null ? $" = {EmitExpr(mVal)}" : "";
+                sb.AppendLine($"{Indent}{mName}{valPart},");
+            }
+            _indent--;
+            sb.Append($"{Indent}}}");
+            return sb.ToString();
+        }
+
+        private string EmitExtensionDef(PilotIrExtensionDefStmt ext)
+        {
+            var sb = new StringBuilder();
+            string traitName = $"{ext.ExtensionName ?? ext.TargetType}Ext";
+            string targetRustType = MapType(ext.TargetType);
+
+            sb.AppendLine($"{Indent}pub trait {traitName} {{");
+            _indent++;
+            foreach (var m in ext.Methods)
+            {
+                var pList = new List<string> { "&self" };
+                foreach (var p in m.Parameters)
                 {
-                    sb.AppendLine(VisitStmt(s));
+                    if (p.Name is not ("self" or "this"))
+                        pList.Add($"{p.Name}: {MapType(p.TypeAnnotation ?? "i64")}");
+                }
+                string ret = !string.IsNullOrEmpty(m.DeclaredReturnType) && m.DeclaredReturnType != "void"
+                    ? $" -> {MapType(m.DeclaredReturnType)}"
+                    : "";
+                sb.AppendLine($"{Indent}fn {m.Name}({string.Join(", ", pList)}){ret};");
+            }
+            _indent--;
+            sb.AppendLine($"{Indent}}}");
+            sb.AppendLine();
+            sb.AppendLine($"{Indent}impl {traitName} for {targetRustType} {{");
+            _indent++;
+            foreach (var m in ext.Methods)
+            {
+                if (m.Parameters.Count == 0 || m.Parameters[0].Name is not ("self" or "this"))
+                    m.Parameters.Insert(0, new PilotIrParameter("self"));
+                sb.AppendLine(EmitFuncDef(m, isTraitImpl: true));
+            }
+            _indent--;
+            sb.Append($"{Indent}}}");
+            return sb.ToString();
+        }
+
+        private string EmitIfStmt(PilotIrIfStmt ifs)
+        {
+            var sb = new StringBuilder();
+            if (!string.IsNullOrEmpty(ifs.OptionalBindingVar))
+                sb.AppendLine($"{Indent}if let Some({ifs.OptionalBindingVar}) = {EmitExpr(ifs.Condition)}");
+            else
+                sb.AppendLine($"{Indent}if {EmitExpr(ifs.Condition)}");
+            EmitBlock(sb, ifs.ThenBody);
+
+            foreach (var (cond, body) in ifs.ElifBranches)
+            {
+                sb.AppendLine($"{Indent}else if {EmitExpr(cond)}");
+                EmitBlock(sb, body);
+            }
+            if (ifs.ElseBody.Count > 0)
+            {
+                sb.AppendLine($"{Indent}else");
+                EmitBlock(sb, ifs.ElseBody);
+            }
+            return sb.ToString().TrimEnd();
+        }
+
+        private string EmitGuardStmt(PilotIrGuardStmt g)
+        {
+            var sb = new StringBuilder();
+            if (g.IsSomeBinding && !string.IsNullOrEmpty(g.BoundVariable))
+            {
+                sb.AppendLine($"{Indent}let Some({g.BoundVariable}) = {EmitExpr(g.ConditionOrSource)} else {{");
+                _indent++;
+                foreach (var s in g.ElseBody)
+                    sb.AppendLine(EmitStmt(s));
+                _indent--;
+                sb.AppendLine($"{Indent}}};");
+                if (g.PatternGuard != null)
+                {
+                    sb.AppendLine($"{Indent}if !({EmitExpr(g.PatternGuard)})");
+                    EmitBlock(sb, g.ElseBody);
                 }
                 return sb.ToString().TrimEnd();
             }
-            return $"{Indent}// [polyglot:{lang}] {ctx.GetText()}";
+
+            sb.AppendLine($"{Indent}if !({EmitExpr(g.ConditionOrSource)})");
+            EmitBlock(sb, g.ElseBody);
+            return sb.ToString().TrimEnd();
         }
 
-        private string VisitSuite(PilotParser.SuiteContext ctx)
+        private string EmitWhileStmt(PilotIrWhileStmt w)
         {
-            if (ctx == null) return $"{Indent}{{\n{Indent}}}\n";
-
             var sb = new StringBuilder();
+            sb.AppendLine($"{Indent}while {EmitExpr(w.Condition)}");
+            EmitBlock(sb, w.Body);
+            return sb.ToString().TrimEnd();
+        }
+
+        private string EmitForStmt(PilotIrForStmt f)
+        {
+            var sb = new StringBuilder();
+            string target = f.TargetVars.Count > 0 ? string.Join(", ", f.TargetVars) : "_item";
+            sb.AppendLine($"{Indent}for {target} in {EmitExpr(f.Iterable)}");
             sb.AppendLine($"{Indent}{{");
             _indent++;
-
-            if (ctx.simple_stmt() != null)
+            if (f.WhereFilter != null)
+                sb.AppendLine($"{Indent}if !({EmitExpr(f.WhereFilter)}) {{ continue; }}");
+            foreach (var s in f.Body)
             {
-                sb.AppendLine(VisitSimpleStmt(ctx.simple_stmt()));
+                string line = EmitStmt(s);
+                if (!string.IsNullOrWhiteSpace(line))
+                    sb.AppendLine(line);
             }
-            else if (ctx.stmt() != null && ctx.stmt().Length > 0)
-            {
-                foreach (var s in ctx.stmt())
-                {
-                    string res = VisitStmt(s);
-                    if (!string.IsNullOrWhiteSpace(res))
-                        sb.AppendLine(res);
-                }
-            }
-
             _indent--;
-            sb.AppendLine($"{Indent}}}");
+            sb.Append($"{Indent}}}");
             return sb.ToString();
         }
 
-        private static string FormatExpr(string expr)
+        private string EmitMatchStmt(PilotIrMatchStmt m)
         {
-            string formatted = PilotOptimizer.FoldConstantsAndNormalize(expr);
-            if (formatted.StartsWith("f\"") && formatted.EndsWith("\""))
+            var sb = new StringBuilder();
+            sb.AppendLine($"{Indent}match {EmitExpr(m.Scrutinee)} {{");
+            _indent++;
+            foreach (var arm in m.Arms)
             {
-                return $"format!(\"{formatted[2..^1]}\")";
-            }
-
-            foreach (var op in new[] { "==", "!=", "<=", ">=", "+", "-", "*", "/", "%" })
-            {
-                if (formatted.Contains(op) && !formatted.Contains($" {op} "))
+                string pat = EmitPattern(arm.Pattern);
+                string guard = arm.Guard != null ? $" if {EmitExpr(arm.Guard)}" : "";
+                sb.AppendLine($"{Indent}{pat}{guard} => {{");
+                _indent++;
+                foreach (var s in arm.Body)
                 {
-                    formatted = formatted.Replace(op, $" {op} ");
+                    string line = EmitStmt(s);
+                    if (!string.IsNullOrWhiteSpace(line))
+                        sb.AppendLine(line);
+                }
+                _indent--;
+                sb.AppendLine($"{Indent}}},");
+            }
+            _indent--;
+            sb.Append($"{Indent}}}");
+            return sb.ToString();
+        }
+
+        private string EmitPattern(PilotIrPattern pat) => pat switch
+        {
+            PilotIrWildcardPattern => "_",
+            PilotIrLiteralPattern lit => EmitExpr(lit.Literal),
+            PilotIrBindingPattern b => b.IsMutable ? $"mut {b.Name}" : b.Name,
+            PilotIrOptionPattern opt => opt.IsSome
+                ? $"Some({(opt.InnerPattern != null ? EmitPattern(opt.InnerPattern) : "_")})"
+                : "None",
+            PilotIrVariantPattern vp => EmitVariantPattern(vp),
+            PilotIrRangePattern rp => $"{EmitExpr(rp.Start)}{(rp.IsInclusive ? "..=" : "..")}{EmitExpr(rp.End)}",
+            PilotIrOrPattern orp => string.Join(" | ", orp.Alternatives.Select(EmitPattern)),
+            PilotIrTuplePattern tp => $"({string.Join(", ", tp.Elements.Select(EmitPattern))})",
+            _ => "_"
+        };
+
+        private string EmitVariantPattern(PilotIrVariantPattern vp)
+        {
+            string prefix = !string.IsNullOrEmpty(vp.TypeName)
+                ? $"{vp.TypeName}::{vp.VariantName}"
+                : (_variantToAdt.TryGetValue(vp.VariantName, out var adt) ? $"{adt}::{vp.VariantName}" : vp.VariantName);
+            if (vp.Arguments.Count == 0)
+                return prefix;
+            return $"{prefix}({string.Join(", ", vp.Arguments.Select(a => EmitPattern(a.SubPattern)))})";
+        }
+
+        private void EmitBlock(StringBuilder sb, List<PilotIrStmt> stmts)
+        {
+            sb.AppendLine($"{Indent}{{");
+            _indent++;
+            foreach (var s in stmts)
+            {
+                string line = EmitStmt(s);
+                if (!string.IsNullOrWhiteSpace(line))
+                    sb.AppendLine(line);
+            }
+            _indent--;
+            sb.AppendLine($"{Indent}}}");
+        }
+
+        public string EmitExpr(PilotIrExpr expr, PilotIrPrecedence parentPrec = PilotIrPrecedence.Lowest)
+        {
+            string core = expr switch
+            {
+                PilotIrLiteralExpr lit => EmitLiteral(lit),
+                PilotIrInterpolatedStringExpr fstr => EmitInterpolatedString(fstr, isPrintln: false),
+                PilotIrIdentifierExpr id => id.Name switch
+                {
+                    "null" or "none" or "None" or "undefined" => "None",
+                    "this" => "self",
+                    _ => _variantToAdt.TryGetValue(id.Name, out var adt) ? $"{adt}::{id.Name}" : id.Name
+                },
+                PilotIrUnaryExpr u => EmitUnary(u),
+                PilotIrBinaryExpr b => EmitBinary(b),
+                PilotIrRangeExpr r => $"{EmitExpr(r.Start, PilotIrPrecedence.Range)}{(r.IsInclusive ? "..=" : "..")}{EmitExpr(r.End, PilotIrPrecedence.Range)}",
+                PilotIrCallExpr c => EmitCall(c),
+                PilotIrMemberAccessExpr m => EmitMemberAccess(m),
+                PilotIrIndexExpr ix => $"{EmitExpr(ix.Target, PilotIrPrecedence.Postfix)}[{EmitExpr(ix.Index)} as usize]",
+                PilotIrPostfixTryExpr pt => EmitPostfixTry(pt),
+                PilotIrCollectionExpr col => EmitCollection(col),
+                PilotIrLambdaExpr lam => $"|{string.Join(", ", lam.Parameters.Select(p => p.Name))}| {(lam.BodyExpr != null ? EmitExpr(lam.BodyExpr) : "{}")}",
+                PilotIrForExpr fe => EmitForExpr(fe),
+                PilotIrIfExpr ie => $"if {EmitExpr(ie.Condition)} {{ {EmitExpr(ie.ThenBranch)} }} else {{ {EmitExpr(ie.ElseBranch)} }}",
+                _ => "()"
+            };
+
+            if (parentPrec != PilotIrPrecedence.Lowest && expr.Precedence < parentPrec)
+                return $"({core})";
+            return core;
+        }
+
+        private static string EmitLiteral(PilotIrLiteralExpr lit) => lit.Kind switch
+        {
+            PilotLiteralKind.Null or PilotLiteralKind.None => "None",
+            PilotLiteralKind.Boolean => lit.RawValue is "true" or "True" ? "true" : "false",
+            PilotLiteralKind.DimensionalUnit => (lit.NormalizedNumericValue ?? 0.0).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            _ => lit.RawValue
+        };
+
+        private string EmitInterpolatedString(PilotIrInterpolatedStringExpr fstr, bool isPrintln)
+        {
+            var fmt = new StringBuilder("\"");
+            var args = new List<string>();
+            foreach (var part in fstr.Parts)
+            {
+                if (!part.IsInterpolation)
+                {
+                    fmt.Append(part.LiteralText);
+                }
+                else
+                {
+                    fmt.Append("{}");
+                    args.Add(part.Expression != null ? EmitExpr(part.Expression) : part.LiteralText);
                 }
             }
-            return formatted;
+            fmt.Append('"');
+            string macro = isPrintln ? "println!" : "format!";
+            return args.Count > 0
+                ? $"{macro}({fmt}, {string.Join(", ", args)})"
+                : $"{macro}({fmt})";
+        }
+
+        private string EmitUnary(PilotIrUnaryExpr u)
+        {
+            string op = u.Operator is "not" ? "!" : u.Operator;
+            return $"{op}{EmitExpr(u.Operand, u.Precedence)}";
+        }
+
+        private string EmitBinary(PilotIrBinaryExpr b)
+        {
+            if (b.Operator == "**")
+                return $"({EmitExpr(b.Left)} as f64).powf({EmitExpr(b.Right)} as f64)";
+            if (b.Operator == "|>")
+                return $"{EmitExpr(b.Right, PilotIrPrecedence.Postfix)}({EmitExpr(b.Left)})";
+            if (b.Operator == "??")
+                return $"{EmitExpr(b.Left, PilotIrPrecedence.Postfix)}.unwrap_or({EmitExpr(b.Right)})";
+
+            string rsOp = b.Operator switch
+            {
+                "and" => "&&",
+                "or" => "||",
+                "//" => "/",
+                _ => b.Operator
+            };
+            string left = EmitExpr(b.Left, b.Precedence);
+            var rightMinPrec = b.Operator is "-" or "/" or "//" or "%"
+                ? (PilotIrPrecedence)((int)b.Precedence + 1)
+                : b.Precedence;
+            string right = EmitExpr(b.Right, rightMinPrec);
+            return $"{left} {rsOp} {right}";
+        }
+
+        private string EmitCall(PilotIrCallExpr c)
+        {
+            if (c.LibraryCallKind == PilotLibraryCallKind.Println && c.Arguments.Count == 1)
+            {
+                var arg0 = c.Arguments[0].Value;
+                if (arg0 is PilotIrInterpolatedStringExpr fstr)
+                    return EmitInterpolatedString(fstr, isPrintln: true);
+                if (arg0 is PilotIrLiteralExpr { Kind: PilotLiteralKind.String } sLit)
+                    return $"println!({sLit.RawValue})";
+                return $"println!(\"{{:?}}\", {EmitExpr(arg0)})";
+            }
+
+            var renderedArgs = c.Arguments.Select(a => EmitExpr(a.Value)).ToList();
+            if (PilotLibraryMapper.TryFormatAstLibraryCall(c.LibraryCallKind, renderedArgs, "rust", out string mapped))
+                return mapped;
+
+            if (c.Callee is PilotIrMemberAccessExpr mem && mem.MemberName is "append")
+            {
+                return $"{EmitExpr(mem.Target, PilotIrPrecedence.Postfix)}.push({string.Join(", ", renderedArgs)})";
+            }
+
+            string callee = EmitExpr(c.Callee, PilotIrPrecedence.Postfix);
+            if (_variantToAdt.TryGetValue(callee, out var adt))
+            {
+                return $"{adt}::{callee}({string.Join(", ", renderedArgs)})";
+            }
+            return $"{callee}({string.Join(", ", renderedArgs)})";
+        }
+
+        private string EmitMemberAccess(PilotIrMemberAccessExpr m)
+        {
+            string target = EmitExpr(m.Target, PilotIrPrecedence.Postfix);
+            if (PilotLibraryMapper.TryFormatAstMemberAccess(target, m.MemberName, "rust", out string mapped))
+                return mapped;
+            return $"{target}.{m.MemberName}";
+        }
+
+        private string EmitPostfixTry(PilotIrPostfixTryExpr pt)
+        {
+            string op = EmitExpr(pt.Operand, PilotIrPrecedence.Postfix);
+            if (pt.IsQuestionPropagate)
+                return $"{op}?";
+            if (pt.CatchFallbackExpr != null)
+            {
+                string errVar = pt.CatchVarName ?? "_err";
+                return $"{op}.unwrap_or_else(|{errVar}| {EmitExpr(pt.CatchFallbackExpr)})";
+            }
+            return $"{op}?";
+        }
+
+        private string EmitCollection(PilotIrCollectionExpr col) => col.Kind switch
+        {
+            PilotCollectionKind.List => $"vec![{string.Join(", ", col.Elements.Select(e => EmitExpr(e)))}]",
+            PilotCollectionKind.Tuple => $"({string.Join(", ", col.Elements.Select(e => EmitExpr(e)))})",
+            _ => $"vec![{string.Join(", ", col.Elements.Select(e => EmitExpr(e)))}]"
+        };
+
+        private string EmitForExpr(PilotIrForExpr fe)
+        {
+            string target = fe.TargetVars.Count > 0 ? fe.TargetVars[0] : "x";
+            string src = EmitExpr(fe.Iterable, PilotIrPrecedence.Postfix);
+            string iterChain = $"({src}).into_iter()";
+            if (fe.FilterCondition != null)
+                iterChain += $".filter(|&{target}| {EmitExpr(fe.FilterCondition)})";
+            iterChain += $".map(|{target}| {EmitExpr(fe.YieldExpr)}).collect::<Vec<_>>()";
+            return iterChain;
         }
 
         private string MapType(string pilotType)
         {
-            if (_options.TypeMappings.TryGetValue(pilotType, out var mapped))
-            {
+            string t = pilotType.Trim();
+            if (_options.TypeMappings.TryGetValue(t, out var mapped))
                 return mapped;
-            }
 
-            return pilotType switch
+            if (t.EndsWith("?"))
+                return $"Option<{MapType(t[..^1])}>";
+            if (t.Contains('!'))
+            {
+                var parts = t.Split('!', 2);
+                string okT = MapType(parts[0].Trim());
+                string errT = MapType(parts[1].Trim());
+                return $"Result<{okT}, {errT}>";
+            }
+            if (t.StartsWith("list[") && t.EndsWith("]"))
+                return $"Vec<{MapType(t[5..^1])}>";
+
+            return t switch
             {
                 "i8" => "i8",
                 "u8" => "u8",
@@ -463,17 +694,12 @@ public sealed partial class RustTargetConverter : ITargetLanguageConverter
                 "u64" or "uint" => "u64",
                 "f32" or "float" => "f32",
                 "f64" or "double" => "f64",
-                "str" or "string" => "String",
+                "str" or "string" or "Error" => "String",
                 "bool" => "bool",
                 "void" => "()",
-                "list" => "Vec<Box<dyn std::any::Any>>",
-                _ => pilotType
+                "list" => "Vec<i64>",
+                _ => t
             };
         }
     }
-
-    [GeneratedRegex(@"^println!\(\s*""([^""]*)""\s*(?:,\s*(.+))?\)$")]
-    private static partial Regex MyRegex();
-    [GeneratedRegex(@"\{\}")]
-    private static partial Regex MyRegex1();
 }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using Pilot.Transpilation.Ir;
 
 namespace Pilot.Transpilation;
 
@@ -11,8 +12,8 @@ namespace Pilot.Transpilation;
 /// (PilotMatrix, LINQ/SQL queries, parallel_map, spawn, json, file I/O, math) and foreign libraries:
 /// - Python: numpy (np), pandas (pd), math, json, pathlib/os, concurrent.futures, functools
 /// - Rust: ndarray, nalgebra, serde_json, rayon, std::fs, std::thread
-/// - C++: Eigen, std::filesystem, std::async, nlohmann::json, <cmath>
-/// - C: <math.h>, <stdio.h>, <stdlib.h>, PilotMatrix C11 runtime
+/// - C++: Eigen, std::filesystem, std::async, nlohmann::json, &lt;cmath&gt;
+/// - C: &lt;math.h&gt;, &lt;stdio.h&gt;, &lt;stdlib.h&gt;, PilotMatrix C11 runtime
 /// - JavaScript: mathjs, lodash (_), JSON, fs, Promise
 /// - Lua: math, cjson, table, io
 /// </summary>
@@ -29,12 +30,295 @@ public static partial class PilotLibraryMapper
     private static readonly Regex JsonPrimitivesRegex = MyRegex1();
 
     /// <summary>
+    /// Milestone 20.3: AST-scoped library call formatter.
+    /// Translates <see cref="PilotIrCallExpr"/> nodes carrying <see cref="PilotLibraryCallKind"/>
+    /// into target ecosystem API calls without touching string literals or comments.
+    /// </summary>
+    public static bool TryFormatAstLibraryCall(
+        PilotIrCallExpr call,
+        string targetLang,
+        Func<PilotIrExpr, string> renderExpr,
+        out string rendered)
+    {
+        var args = call.Arguments.Select(a => renderExpr(a.Value)).ToList();
+        return TryFormatAstLibraryCall(call.LibraryCallKind, args, targetLang, out rendered, call);
+    }
+
+    public static bool TryFormatAstLibraryCall(
+        PilotLibraryCallKind kind,
+        IReadOnlyList<string> args,
+        string targetLang,
+        out string rendered,
+        PilotIrCallExpr? call = null)
+    {
+        rendered = "";
+        if (kind == PilotLibraryCallKind.None)
+            return false;
+
+        string lang = targetLang.ToLowerInvariant();
+        string a0 = args.Count > 0 ? args[0] : "";
+        string a1 = args.Count > 1 ? args[1] : "";
+
+        switch (kind)
+        {
+            case PilotLibraryCallKind.Println:
+                rendered = lang switch
+                {
+                    "python" or "py" => $"print({string.Join(", ", args)})",
+                    "csharp" or "cs" => $"Console.WriteLine({string.Join(", ", args)})",
+                    "js" or "javascript" or "ts" or "typescript" => $"console.log({string.Join(", ", args)})",
+                    "lua" => $"print({string.Join(", ", args)})",
+                    "rust" or "rs" => args.Count > 0 ? $"println!(\"{{:?}}\", {a0})" : "println!()",
+                    "cpp" or "c++" => args.Count > 0 ? $"std::cout << {a0} << '\\n'" : "std::cout << '\\n'",
+                    "c" => args.Count > 0 ? $"printf(\"%lld\\n\", (long long)({a0}))" : "printf(\"\\n\")",
+                    _ => $"println({string.Join(", ", args)})"
+                };
+                return true;
+
+            case PilotLibraryCallKind.Print:
+                rendered = lang switch
+                {
+                    "python" or "py" => args.Count > 0 ? $"print({a0}, end=\"\")" : "print(\"\", end=\"\")",
+                    "csharp" or "cs" => $"Console.Write({string.Join(", ", args)})",
+                    "js" or "javascript" or "ts" or "typescript" => $"process.stdout.write(String({a0}))",
+                    "lua" => $"io.write(tostring({a0}))",
+                    "rust" or "rs" => $"print!(\"{{:?}}\", {a0})",
+                    "cpp" or "c++" => $"std::cout << {a0}",
+                    "c" => $"printf(\"%lld\", (long long)({a0}))",
+                    _ => $"print({string.Join(", ", args)})"
+                };
+                return true;
+
+            case PilotLibraryCallKind.MatrixZeros:
+                rendered = lang switch
+                {
+                    "python" or "py" => $"np.zeros(({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)}))",
+                    "js" or "javascript" or "ts" or "typescript" => $"PilotMatrix.zeros({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
+                    "lua" => $"PilotMatrix.zeros({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
+                    "rust" or "rs" => $"PilotMatrix::zeros({a0} as usize, {(string.IsNullOrEmpty(a1) ? a0 : a1)} as usize)",
+                    "cpp" or "c++" => $"PilotMatrix::zeros({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
+                    "c" => $"pilot_matrix_zeros({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
+                    "csharp" or "cs" => $"PilotMatrix.Zeros({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
+                    _ => $"zeros({string.Join(", ", args)})"
+                };
+                return true;
+
+            case PilotLibraryCallKind.MatrixOnes:
+                rendered = lang switch
+                {
+                    "python" or "py" => $"np.ones(({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)}))",
+                    "js" or "javascript" or "ts" or "typescript" => $"PilotMatrix.ones({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
+                    "lua" => $"PilotMatrix.ones({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
+                    "rust" or "rs" => $"PilotMatrix::ones({a0} as usize, {(string.IsNullOrEmpty(a1) ? a0 : a1)} as usize)",
+                    "cpp" or "c++" => $"PilotMatrix::ones({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
+                    "c" => $"pilot_matrix_ones({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
+                    "csharp" or "cs" => $"PilotMatrix.Ones({a0}, {(string.IsNullOrEmpty(a1) ? a0 : a1)})",
+                    _ => $"ones({string.Join(", ", args)})"
+                };
+                return true;
+
+            case PilotLibraryCallKind.MatrixEye:
+                rendered = lang switch
+                {
+                    "python" or "py" => $"np.eye({a0})",
+                    "js" or "javascript" or "ts" or "typescript" => $"PilotMatrix.eye({a0})",
+                    "lua" => $"PilotMatrix.eye({a0})",
+                    "rust" or "rs" => $"PilotMatrix::eye({a0} as usize)",
+                    "cpp" or "c++" => $"PilotMatrix::eye({a0})",
+                    "c" => $"pilot_matrix_eye({a0})",
+                    "csharp" or "cs" => $"PilotMatrix.Eye({a0})",
+                    _ => $"eye({a0})"
+                };
+                return true;
+
+            case PilotLibraryCallKind.MatrixCreate:
+                if (lang is "python" or "py")
+                {
+                    if (call != null && call.Arguments.Count > 1 && call.Arguments[1].Value is PilotIrLiteralExpr dtypeLit)
+                    {
+                        rendered = $"np.array({a0}, dtype=np.{MapPilotTypeToNumpy(dtypeLit.StringContent)})";
+                        return true;
+                    }
+                    if (!string.IsNullOrEmpty(a1))
+                    {
+                        string rawType = a1.Trim('"', '\'');
+                        rendered = $"np.array({a0}, dtype=np.{MapPilotTypeToNumpy(rawType)})";
+                        return true;
+                    }
+                    rendered = $"np.array({a0})";
+                    return true;
+                }
+                if (lang is "js" or "javascript" or "ts" or "typescript")
+                {
+                    rendered = $"PilotMatrix.fromArray({a0})";
+                    return true;
+                }
+                if (lang == "lua")
+                {
+                    rendered = $"PilotMatrix.from_table({a0.Replace('[', '{').Replace(']', '}')})";
+                    return true;
+                }
+                if (lang is "rust" or "rs")
+                {
+                    rendered = $"PilotMatrix::from_rows(&{a0})";
+                    return true;
+                }
+                if (lang is "cpp" or "c++")
+                {
+                    rendered = $"PilotMatrix({a0.Replace('[', '{').Replace(']', '}')})";
+                    return true;
+                }
+                return false;
+
+            case PilotLibraryCallKind.MatrixVectorize:
+                if (lang is "python" or "py")
+                {
+                    rendered = $"np.vectorize({a0})";
+                    return true;
+                }
+                return false;
+
+            case PilotLibraryCallKind.JsonDumps:
+                rendered = lang switch
+                {
+                    "python" or "py" => $"json.dumps({a0})",
+                    "js" or "javascript" or "ts" or "typescript" => $"JSON.stringify({a0})",
+                    "csharp" or "cs" => $"System.Text.Json.JsonSerializer.Serialize({a0})",
+                    "rust" or "rs" => $"format!(\"{{:?}}\", {a0})",
+                    _ => $"json_dumps({a0})"
+                };
+                return true;
+
+            case PilotLibraryCallKind.JsonLoads:
+                rendered = lang switch
+                {
+                    "python" or "py" => $"json.loads({a0})",
+                    "js" or "javascript" or "ts" or "typescript" => $"JSON.parse({a0})",
+                    "csharp" or "cs" => $"System.Text.Json.JsonSerializer.Deserialize<object>({a0})",
+                    _ => $"json_loads({a0})"
+                };
+                return true;
+
+            case PilotLibraryCallKind.FileReadText:
+                rendered = lang switch
+                {
+                    "python" or "py" => $"open({a0}, encoding=\"utf-8\").read()",
+                    "js" or "javascript" or "ts" or "typescript" => $"fs.readFileSync({a0}, \"utf8\")",
+                    "csharp" or "cs" => $"System.IO.File.ReadAllText({a0})",
+                    "rust" or "rs" => $"std::fs::read_to_string({a0}).unwrap_or_default()",
+                    _ => $"read_text({a0})"
+                };
+                return true;
+
+            case PilotLibraryCallKind.FileWriteText:
+                rendered = lang switch
+                {
+                    "python" or "py" => $"open({a0}, \"w\", encoding=\"utf-8\").write({a1})",
+                    "js" or "javascript" or "ts" or "typescript" => $"fs.writeFileSync({a0}, {a1})",
+                    "csharp" or "cs" => $"System.IO.File.WriteAllText({a0}, {a1})",
+                    "rust" or "rs" => $"std::fs::write({a0}, {a1}).unwrap()",
+                    _ => $"write_text({a0}, {a1})"
+                };
+                return true;
+
+            case PilotLibraryCallKind.MathSqrt:
+            case PilotLibraryCallKind.MathSin:
+            case PilotLibraryCallKind.MathCos:
+            case PilotLibraryCallKind.MathAbs:
+            case PilotLibraryCallKind.MathFloor:
+            case PilotLibraryCallKind.MathCeil:
+                string fn = kind switch
+                {
+                    PilotLibraryCallKind.MathSqrt => "sqrt",
+                    PilotLibraryCallKind.MathSin => "sin",
+                    PilotLibraryCallKind.MathCos => "cos",
+                    PilotLibraryCallKind.MathAbs => "abs",
+                    PilotLibraryCallKind.MathFloor => "floor",
+                    _ => "ceil"
+                };
+                string csFn = char.ToUpperInvariant(fn[0]) + fn[1..];
+                rendered = lang switch
+                {
+                    "python" or "py" => fn == "abs" ? $"abs({a0})" : $"math.{fn}({a0})",
+                    "js" or "javascript" or "ts" or "typescript" => $"Math.{fn}({a0})",
+                    "lua" => $"math.{fn}({a0})",
+                    "csharp" or "cs" => $"Math.{csFn}({a0})",
+                    "rust" or "rs" => $"({a0} as f64).{fn}()",
+                    "cpp" or "c++" => $"std::{fn}({a0})",
+                    "c" => fn == "abs" ? $"fabs((double)({a0}))" : $"{fn}((double)({a0}))",
+                    _ => $"{fn}({a0})"
+                };
+                return true;
+
+            case PilotLibraryCallKind.Len:
+                rendered = lang switch
+                {
+                    "python" or "py" => $"len({a0})",
+                    "js" or "javascript" or "ts" or "typescript" => $"{a0}.length",
+                    "lua" => $"#{a0}",
+                    "csharp" or "cs" => $"{a0}.Count",
+                    "rust" or "rs" => $"({a0}.len() as i64)",
+                    "cpp" or "c++" => $"static_cast<int64_t>({a0}.size())",
+                    _ => $"len({a0})"
+                };
+                return true;
+
+            case PilotLibraryCallKind.SomeConstructor:
+                rendered = lang switch
+                {
+                    "rust" or "rs" => $"Some({a0})",
+                    "cpp" or "c++" => $"std::make_optional({a0})",
+                    _ => a0
+                };
+                return true;
+
+            case PilotLibraryCallKind.FailConstructor:
+                rendered = lang switch
+                {
+                    "rust" or "rs" => $"Err({a0})",
+                    "csharp" or "cs" => $"PilotResult.Fail({a0})",
+                    "js" or "javascript" or "ts" or "typescript" => $"{{ ok: false, error: {a0} }}",
+                    "lua" => $"{{ ok = false, error = {a0} }}",
+                    _ => $"fail({a0})"
+                };
+                return true;
+        }
+
+        return false;
+    }
+
+    public static bool TryFormatAstMemberAccess(
+        PilotIrMemberAccessExpr mem,
+        string targetLang,
+        Func<PilotIrExpr, string> renderExpr,
+        out string rendered) =>
+        TryFormatAstMemberAccess(renderExpr(mem.Target), mem.MemberName, targetLang, out rendered);
+
+    public static bool TryFormatAstMemberAccess(
+        string targetRendered,
+        string memberName,
+        string targetLang,
+        out string rendered)
+    {
+        rendered = "";
+        string lang = targetLang.ToLowerInvariant();
+        if (memberName == "element_type" && (lang is "python" or "py"))
+        {
+            rendered = $"{targetRendered}.dtype.name";
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Detects whether a Pilot program AST/source uses native matrix/linear-algebra constructs
     /// (matrix, zeros, ones, eye) so target emitters can inject ecosystem imports or runtime shims.
+    /// Ignores occurrences inside string literals or comments.
     /// </summary>
     public static bool UsesMatrixPrimitives(string pilotSource)
     {
-        return MatrixPrimitivesRegex.IsMatch(pilotSource);
+        string stripped = StripStringsAndComments(pilotSource);
+        return MatrixPrimitivesRegex.IsMatch(stripped);
     }
 
     /// <summary>
@@ -42,7 +326,45 @@ public static partial class PilotLibraryMapper
     /// </summary>
     public static bool UsesJsonPrimitives(string pilotSource)
     {
-        return JsonPrimitivesRegex.IsMatch(pilotSource);
+        string stripped = StripStringsAndComments(pilotSource);
+        return JsonPrimitivesRegex.IsMatch(stripped);
+    }
+
+    private static string StripStringsAndComments(string src)
+    {
+        if (string.IsNullOrEmpty(src)) return src;
+        var sb = new StringBuilder(src.Length);
+        bool inStr = false;
+        bool inLineComment = false;
+        for (int i = 0; i < src.Length; i++)
+        {
+            char c = src[i];
+            if (inLineComment)
+            {
+                if (c == '\n') { inLineComment = false; sb.Append('\n'); }
+                continue;
+            }
+            if (inStr)
+            {
+                if (c == '\\' && i + 1 < src.Length) { i++; continue; }
+                if (c == '"') inStr = false;
+                continue;
+            }
+            if (c == '/' && i + 1 < src.Length && src[i + 1] == '/')
+            {
+                inLineComment = true;
+                i++;
+                continue;
+            }
+            if (c == '"')
+            {
+                inStr = true;
+                sb.Append("\"\"");
+                continue;
+            }
+            sb.Append(c);
+        }
+        return sb.ToString();
     }
 
     // =========================================================================

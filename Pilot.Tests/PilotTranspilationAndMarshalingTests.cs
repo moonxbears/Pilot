@@ -119,7 +119,7 @@ public class MathUtil
         var result = _engine.TranspileFrom(csharpCode, "csharp");
         Assert.True(result.Success, string.Join("; ", result.Diagnostics));
         Assert.Contains("class MathUtil", result.Code);
-        Assert.Contains("def DoubleVal(int x)", result.Code);
+        Assert.Contains("def DoubleVal(x: int)", result.Code);
         Assert.Contains("let result = x * 2;", result.Code);
     }
 
