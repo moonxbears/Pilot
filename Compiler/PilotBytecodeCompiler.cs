@@ -1242,7 +1242,14 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
                 int memberId = _chunk.AddIdentifier(member);
                 CompileAtomExprPrefix(atomExpr, trailers.Length - 1);
                 _chunk.Emit(PilotOpcode.Swap);
-                _chunk.Emit(PilotOpcode.SetMember, memberId);
+                if (_demotionReport != null && _demotionReport.FieldAccesses.TryGetValue(lastTrailer, out var fa))
+                {
+                    _chunk.Emit(PilotOpcode.SetFieldSlot, fa.FieldSlotIndex, extra: memberId);
+                }
+                else
+                {
+                    _chunk.Emit(PilotOpcode.SetMember, memberId);
+                }
                 return;
             }
 
@@ -2103,6 +2110,53 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         var factors = context.factor();
         if (factors == null || factors.Length == 0) return null;
 
+        if (context.ARROW()?.Length > 0)
+        {
+            if (_demotionReport != null &&
+                _demotionReport.ProjectionPlans.TryGetValue(context, out var plan) &&
+                _demotionReport.NominalFieldLayouts.TryGetValue(plan.TargetType, out var targetFields) &&
+                factors.Length == 2)
+            {
+                Visit(factors[0]);
+                int srcSlot = AllocateTempSlot("proj_src");
+                _chunk.Emit(PilotOpcode.StoreLocal, srcSlot);
+
+                for (int t = 0; t < targetFields.Count; t++)
+                {
+                    int srcFieldSlot = -1;
+                    string? fName = null;
+                    for (int m = 0; m < plan.FieldMappings.Count; m++)
+                    {
+                        if (plan.FieldMappings[m].TargetSlot == t)
+                        {
+                            srcFieldSlot = plan.FieldMappings[m].SourceSlot;
+                            fName = plan.FieldMappings[m].FieldName;
+                            break;
+                        }
+                    }
+
+                    if (srcFieldSlot >= 0 && fName != null)
+                    {
+                        _chunk.Emit(PilotOpcode.LoadLocal, srcSlot);
+                        int fId = _chunk.AddIdentifier(fName);
+                        _chunk.Emit(PilotOpcode.GetFieldSlot, srcFieldSlot, extra: fId);
+                    }
+                    else
+                    {
+                        _chunk.Emit(PilotOpcode.ConstNull);
+                    }
+                }
+
+                int typeId = _chunk.AddIdentifier(plan.TargetType);
+                _chunk.Emit(PilotOpcode.ConstructStruct, typeId, extra: targetFields.Count);
+                return null;
+            }
+
+            int fb = _chunk.AddAstFallback(context);
+            _chunk.Emit(PilotOpcode.EvalAst, fb);
+            return null;
+        }
+
         Visit(factors[0]);
         for (int i = 1; i < factors.Length; i++)
         {
@@ -2165,6 +2219,12 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     public override object? VisitAtom_expr(PilotParser.Atom_exprContext context)
     {
+        if (_demotionReport != null && _demotionReport.MaterializedComptimeValues.TryGetValue(context, out var preAtomVal))
+        {
+            EmitLiteralConstant(preAtomVal);
+            return null;
+        }
+
         if (context.atom()?.DOT() != null && context.atom()?.identifier() != null)
         {
             int fallback = _chunk.AddAstFallback(context);
@@ -2197,6 +2257,12 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
                 if (isOptional)
                 {
                     shortCircuitJumps.Add(_chunk.EmitJump(PilotOpcode.JumpIfNullShortCircuit));
+                }
+
+                // Unit expression `<m/s>`: erased at compile time after PilotDimensionChecker (Milestone 19.1.4)
+                if (trailer.unit_expr() != null)
+                {
+                    continue;
                 }
 
                 // Cascade Chaining: ..method(args), ..let out = method(args), ..method(args) -> out, ..prop = val, ..[idx] = val
@@ -2243,10 +2309,17 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
                     else
                     {
                         int memberId = _chunk.AddIdentifier(member);
-                        _chunk.Emit(PilotOpcode.GetMember, memberId);
+                        if (_demotionReport != null && _demotionReport.FieldAccesses.TryGetValue(trailer, out var fa))
+                        {
+                            _chunk.Emit(PilotOpcode.GetFieldSlot, fa.FieldSlotIndex, extra: memberId);
+                        }
+                        else
+                        {
+                            _chunk.Emit(PilotOpcode.GetMember, memberId);
+                        }
                     }
                 }
-                // Subscript Access: [index] or ?[index] or ?.[index]
+                // Subscript Access: [index] or [start..end] or ?[index] or ?.[index]
                 else if (trailer.LSQB() != null)
                 {
                     var subCtx = trailer.subscriptlist()?.subscript(0);
@@ -2254,6 +2327,12 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
                     {
                         Visit(subCtx.test(0));
                         _chunk.Emit(PilotOpcode.GetIndex);
+                    }
+                    else if (subCtx != null && subCtx.test()?.Length == 2 && (subCtx.DOTDOT() != null || subCtx.DOTDOT_EQUAL() != null))
+                    {
+                        Visit(subCtx.test(0));
+                        Visit(subCtx.test(1));
+                        _chunk.Emit(PilotOpcode.Slice, subCtx.DOTDOT_EQUAL() != null ? 0 : 1);
                     }
                 }
                 // Postfix `?` early-return error/none propagation (Milestone 13.2)
@@ -2283,7 +2362,7 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         {
             var t = trailers[i];
             if (t.call_quote_op() != null || t.STAR() != null ||
-                t.unit_expr() != null || t.over_clause() != null)
+                t.over_clause() != null)
             {
                 return true;
             }
@@ -2298,8 +2377,13 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
             if (t.LSQB() != null)
             {
                 var sub = t.subscriptlist()?.subscript(0);
-                if (sub == null || t.subscriptlist().subscript().Length != 1 ||
-                    sub.DOTDOT() != null || sub.DOTDOT_EQUAL() != null || sub.test()?.Length != 1)
+                if (sub == null || t.subscriptlist().subscript().Length != 1)
+                {
+                    return true;
+                }
+                bool isSingleIdx = sub.DOTDOT() == null && sub.DOTDOT_EQUAL() == null && sub.test()?.Length == 1;
+                bool isTwoBoundSlice = (sub.DOTDOT() != null || sub.DOTDOT_EQUAL() != null) && sub.test()?.Length == 2;
+                if (!isSingleIdx && !isTwoBoundSlice)
                 {
                     return true;
                 }
@@ -2705,6 +2789,20 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
 
     public override object? VisitAtom(PilotParser.AtomContext context)
     {
+        if (context.comptime_expr() != null)
+        {
+            return VisitComptime_expr(context.comptime_expr());
+        }
+
+        if (context.with_stmt() != null && IsPureContextWithStmt(context.with_stmt()))
+        {
+            bool prevDiscard = _discardExpressionResult;
+            _discardExpressionResult = false;
+            VisitWith_stmt(context.with_stmt());
+            _discardExpressionResult = prevDiscard;
+            return null;
+        }
+
         if (context.if_stmt() != null)
         {
             bool prevDiscard = _discardExpressionResult;
@@ -2774,15 +2872,7 @@ public sealed class PilotBytecodeCompiler : PilotBaseVisitor<object?>
         if (context.identifier() != null)
         {
             string id = context.identifier().GetText();
-            if (_isFunction && _chunk.TryGetLocalSlot(id, out int slot))
-            {
-                _chunk.Emit(PilotOpcode.LoadLocal, slot);
-            }
-            else
-            {
-                int idIndex = _chunk.AddIdentifier(id);
-                _chunk.Emit(PilotOpcode.LoadNamed, idIndex);
-            }
+            EmitLoadBindingOrUndefined(id);
             return null;
         }
 

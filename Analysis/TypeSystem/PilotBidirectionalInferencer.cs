@@ -1330,6 +1330,19 @@ public sealed class PilotBidirectionalInferencer
             AnalyzeFunctionBodyFinal(fnDef);
             return _engine.TryLookupType(fnDef.identifier().GetText(), out var ft) ? ft : PilotType.Void;
         }
+        if (comp.comptime_stmt() is { } ctStmt)
+        {
+            if (ctStmt.if_stmt() is { } ctIf) return AnalyzeIfStmt(ctIf, null, null, returnTypes);
+            if (ctStmt.for_stmt() is { } ctFor) return AnalyzeForStmt(ctFor, null, null, returnTypes);
+            if (ctStmt.stmt() is { Length: > 0 } ctStmts)
+            {
+                PilotType last = PilotType.Void;
+                var ctRets = new List<PilotType>();
+                foreach (var s in ctStmts) last = AnalyzeStatement(s, ctRets);
+                return ctRets.Count > 0 ? JoinTypes(ctRets) : last;
+            }
+            return PilotType.Void;
+        }
         return PilotType.Void;
     }
 
@@ -2849,6 +2862,12 @@ public sealed class PilotBidirectionalInferencer
         var factors = ctx.factor();
         if (factors == null || factors.Length == 0) return PilotType.Any;
 
+        if (ctx.ARROW()?.Length > 0)
+        {
+            SynthesizeFactor(factors[0]);
+            return PilotTypeInferenceEngine.ParseTypeString(factors[^1].GetText().Trim());
+        }
+
         PilotType current = SynthesizeFactor(factors[0]);
         for (int i = 1; i < factors.Length; i++)
         {
@@ -4011,6 +4030,23 @@ public sealed class PilotBidirectionalInferencer
             return AnalyzeMatchStmt(matchStmt, null, null, null);
         if (ctx.for_stmt() is { } forStmt)
             return AnalyzeForStmt(forStmt, null, null, null);
+        if (ctx.comptime_expr() is { } ctExpr)
+        {
+            if (ctExpr.test() != null)
+                return Synthesize(ctExpr.test());
+            if (ctExpr.stmt() is { Length: > 0 } ctStmts)
+            {
+                _engine.PushScope();
+                PushFlowScope();
+                var ctRets = new List<PilotType>();
+                PilotType last = PilotType.Void;
+                foreach (var s in ctStmts) last = AnalyzeStatement(s, ctRets);
+                PopFlowScope();
+                _engine.PopScope();
+                return ctRets.Count > 0 ? JoinTypes(ctRets) : last;
+            }
+            return PilotType.Void;
+        }
 
         return PilotType.Any;
     }

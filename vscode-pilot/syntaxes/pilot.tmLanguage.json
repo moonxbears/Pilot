@@ -145,7 +145,7 @@
     "declarations": {
       "patterns": [
         {
-          "match": "\\b((?:(?:public|private|protected|internal|static|partial)\\s+)?(?:async\\s+|pure\\s+)?)(def|fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "match": "\\b((?:(?:public|private|protected|internal|static|partial)\\s+)?(?:comptime\\s+|async\\s+|pure\\s+)?)(def|fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
             "1": { "name": "storage.modifier.pilot" },
             "2": { "name": "keyword.declaration.function.pilot" },
@@ -252,7 +252,7 @@
         },
         {
           "name": "keyword.control.flow.pilot",
-          "match": "\\b(guard|defer|if|elif|else|then|for|while|match|case|when|try|except|finally|with|as|return|yield|raise|break|continue|pass|assert|import|from|global|in|is|some)\\b"
+          "match": "\\b(comptime|guard|defer|if|elif|else|then|for|while|match|case|when|try|except|finally|with|as|return|yield|raise|break|continue|pass|assert|import|from|global|in|is|some)\\b"
         },
         {
           "name": "keyword.operator.logical.pilot",

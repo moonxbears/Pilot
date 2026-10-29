@@ -157,7 +157,7 @@ public sealed class PilotFrozenMap : Dictionary<PilotValue, PilotValue>
                 PilotValueKind.Int or PilotValueKind.UInt or PilotValueKind.Bool or PilotValueKind.Char =>
                     Mix64((ulong)key.AsInt()),
                 PilotValueKind.Keyword =>
-                    Mix64((ulong)key.AsKeyword().Id ^ 0x9E3779B97F4A7C15UL),
+                    Fnv1aString(key.AsKeyword().FullName) ^ 0x9E3779B9u,
                 PilotValueKind.String =>
                     Fnv1aString(key.AsString()),
                 _ => (uint)key.GetHashCode()

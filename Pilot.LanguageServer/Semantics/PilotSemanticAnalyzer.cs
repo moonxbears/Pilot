@@ -398,7 +398,9 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                 or "NULL001" or "NULL002" or "NULL003" or "NULL004" or "NULL005"
                 or "ERR001" or "ERR002" or "ERR003" or "ERR004"
                 or "LOOP001" or "LOOP002" or "LOOP003" or "LOOP004"
-                or "TYPE008")
+                or "TYPE008"
+                or "COMPTIME001" or "COMPTIME002" or "COMPTIME003" or "COMPTIME004" or "COMPTIME005"
+                or "COMPTIME006" or "COMPTIME007" or "COMPTIME008" or "COMPTIME009" or "COMPTIME010")
             {
                 analyzer._result.Diagnostics.Add(new PilotDiagnostic
                 {
@@ -1269,8 +1271,10 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
     {
         var idCtx = context.identifier();
         string name = idCtx.GetText();
+        if (context.COMPTIME() != null)
+            AddSemanticToken(context.COMPTIME().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
         bool isAsync = context.ASYNC() != null;
-        bool isPure = context.PURE() != null;
+        bool isPure = context.PURE() != null || context.COMPTIME() != null;
         bool isStatic = context.declaration_modifier().Any(m => m.STATIC() != null);
         bool isHardRt = false;
         bool isSoftRt = false;
@@ -1343,6 +1347,8 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                     string pName = pId?.GetText() ?? pSplice?.GetText() ?? "_";
                     var tokenForSym = pId?.Start ?? pSplice?.Start;
 
+                    if (param.COMPTIME() != null)
+                        AddSemanticToken(param.COMPTIME().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
                     if (param.CONTEXT() != null)
                         AddSemanticToken(param.CONTEXT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
                     if (param.EACH() != null)
@@ -1682,6 +1688,8 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                 {
                     var pId = param.identifier();
                     string pName = pId.GetText();
+                    if (param.COMPTIME() != null)
+                        AddSemanticToken(param.COMPTIME().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
                     if (param.CONTEXT() != null)
                         AddSemanticToken(param.CONTEXT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
                     if (param.EACH() != null)
@@ -1831,6 +1839,46 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         if (context.suite() != null) Visit(context.suite());
         if (context.test() != null) Visit(context.test());
         return "AstNode";
+    }
+
+    public override string? VisitComptime_stmt(PilotParser.Comptime_stmtContext context)
+    {
+        if (context.COMPTIME() != null)
+            AddSemanticToken(context.COMPTIME().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.if_stmt() != null) return Visit(context.if_stmt());
+        if (context.for_stmt() != null) return Visit(context.for_stmt());
+        string? lastType = "void";
+        if (context.stmt() is { Length: > 0 } stmts)
+        {
+            using (EnterScope("comptime_stmt", context, inFunction: true))
+            {
+                foreach (var s in stmts)
+                    lastType = Visit(s) ?? lastType;
+            }
+        }
+        return lastType;
+    }
+
+    public override string? VisitComptime_expr(PilotParser.Comptime_exprContext context)
+    {
+        if (context.COMPTIME() != null)
+            AddSemanticToken(context.COMPTIME().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
+        if (context.test() != null)
+            return Visit(context.test()) ?? "any";
+        string? lastType = "any";
+        if (context.stmt() is { Length: > 0 } stmts)
+        {
+            using (EnterScope("comptime_expr", context, inFunction: true))
+            {
+                foreach (var s in stmts)
+                {
+                    string? st = Visit(s);
+                    if (!string.IsNullOrEmpty(st) && st != "void")
+                        lastType = st;
+                }
+            }
+        }
+        return lastType;
     }
 
     public override string? VisitQuasiquote_expr(PilotParser.Quasiquote_exprContext context)
@@ -2079,6 +2127,8 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
                     var pId = param.identifier();
                     if (pId == null) continue;
                     string pName = pId.GetText();
+                    if (param.COMPTIME() != null)
+                        AddSemanticToken(param.COMPTIME().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
                     if (param.CONTEXT() != null)
                         AddSemanticToken(param.CONTEXT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
                     if (param.EACH() != null)
@@ -2576,6 +2626,8 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
 
     public override string? VisitAssert_stmt(PilotParser.Assert_stmtContext context)
     {
+        if (context.COMPTIME() != null)
+            AddSemanticToken(context.COMPTIME().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
         if (context.ASSERT() != null)
             AddSemanticToken(context.ASSERT().Symbol, PilotSemanticTokenLegend.TypeKeyword, 0);
         return base.VisitAssert_stmt(context);
@@ -3316,6 +3368,11 @@ public sealed class PilotSemanticAnalyzer : PilotBaseVisitor<string?>
         if (context.inline_foreign_block() is { } ifb)
         {
             return VisitInline_foreign_block(ifb);
+        }
+
+        if (context.comptime_expr() is { } cte)
+        {
+            return VisitComptime_expr(cte);
         }
 
         if (context.quote_expr() is { } qe)

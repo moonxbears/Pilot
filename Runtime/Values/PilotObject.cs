@@ -379,6 +379,18 @@ public sealed class PilotClassDefinition
                 argsWithSelf[i + 1] = constructorArgs[i];
             }
             initFunc.Invoke(context, argsWithSelf);
+            return instance;
+        }
+
+        if (constructorArgs.Count > 0 && OrderedFieldNames.Count > 0)
+        {
+            int count = Math.Min(constructorArgs.Count, OrderedFieldNames.Count);
+            for (int i = 0; i < count; i++)
+            {
+                string fName = OrderedFieldNames[i];
+                instance.Fields[fName] = constructorArgs[i];
+                instance.SetFieldSlotDirect(i, constructorArgs[i]);
+            }
         }
 
         return instance;

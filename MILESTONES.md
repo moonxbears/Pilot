@@ -563,7 +563,7 @@ Each of `!^`, `!@`, and `!?` is a substantial compiler/runtime subsystem (`Runti
 Placed immediately after `M16` (Bidirectional Inference) and `M17`–`M18` (Metaprogramming & Projections), the compiler now knows static types across the entire language and freezes `Pilot.g4`, allowing it to bake all static layouts, offsets, jump tables, and `comptime` data *before* bidirectional `--emit`/`--from` library transpilers (`M20`), DAP (`M22`), and `pilot build` (`M23`) fan out in parallel.
 
 ### Sub-Tasks & Deliverables
-- [ ] **19.1: Compiler-Wide Runtime-to-Compile-Time Demotion Matrix (`Analysis/Comptime/PilotStaticDemotionPass.cs`)**
+- [x] **19.1: Compiler-Wide Runtime-to-Compile-Time Demotion Matrix (`Analysis/Comptime/PilotStaticDemotionPass.cs`)**
   1. **Lexical Variables & Struct/Class Fields**: Demote `Dictionary<string, PilotValue>` lookups to compile-time `(frameDepth, slotIndex)` register coordinates and fixed byte offsets.
   2. **Method Groups, Primitive Intrinsics, `extend` & Contracts**: Resolve overloads, extensions, `steal` compositions, and contracts statically to direct function indices / compact vtable slots.
   3. **Type Adapters & DTO Arrow Projections (`->`)**: Compile `PilotTypeAdapterRegistry` chains and `src -> TargetDto` mappings into inline field-to-field register moves (0 runtime reflection).
@@ -572,9 +572,9 @@ Placed immediately after `M16` (Bidirectional Inference) and `M17`–`M18` (Meta
   6. **Design-by-Contract (`requires` / `ensures`)**: Discharge statically provable contracts via interval/algebraic analysis in `PilotContractVerifier`, eliding proven checks in release builds.
   7. **Contextual DI (`context` / `with context`)**: Thread statically resolved contexts as hidden register parameters; use $O(1)$ indexed thread-local display slots when dynamic.
   8. **Pattern Matching, Keywords & Native SQL Queries**: Lower `match` and `:kw` switches to integer jump tables (`u32` compile-time keyword IDs) and pre-compile in-memory `Table` / SQL query execution plans at compile time.
-- [ ] **19.2: First-Class `comptime` Execution & Frozen `.rodata` Materialization**
+- [x] **19.2: First-Class `comptime` Execution & Frozen `.rodata` Materialization**
   - Execute `comptime { ... }` blocks, `comptime` parameters, and pure `const` initializers inside `PilVirtualMachine` during compilation, serializing resulting arrays, `FrozenMap` perfect-hash tables, and lookup tables directly into `.pilc` constant pools and native `.rodata` pages (**0 ms startup cost**).
-- [ ] **19.3: Runtime-Leak Verification CLI (`pilot check --comptime-audit` & `@zero_runtime`)**
+- [x] **19.3: Runtime-Leak Verification CLI (`pilot check --comptime-audit` & `@zero_runtime`)**
   - Emit a line-by-line report of any remaining dynamic lookup, heap box, or runtime check (`COMPTIME001`–`COMPTIME010`) and enforce `@zero_runtime` / `@hard_realtime` purity at compile time.
 
 ---

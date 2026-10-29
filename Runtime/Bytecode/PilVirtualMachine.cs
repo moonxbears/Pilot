@@ -1291,7 +1291,7 @@ public sealed class PilVirtualMachine
                     EnsureStackCapacity(ref stack, sp + 1);
                     if (context.RecordDefinitions.TryGetValue(typeName, out var recDef))
                     {
-                        stack[sp++] = recDef.Instantiate(fieldArgs);
+                        stack[sp++] = recDef.Instantiate(context, fieldArgs);
                     }
                     else if (scope.TryResolve(typeName, out var ctorVal) && ctorVal.Kind == PilotValueKind.Function)
                     {

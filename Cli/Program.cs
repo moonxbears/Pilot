@@ -77,6 +77,13 @@ public static class Program
             return ExecuteBenchmarkSubcommand(args.Skip(1).ToArray());
         }
 
+        // 2g. Static check & comptime audit subcommand: pilot check [--comptime-audit] <file.pilot>
+        if (args.Length > 0 && (args[0] == "check" || args[0] == "--check" || args[0] == "--comptime-audit"))
+        {
+            var checkArgs = args[0] == "--comptime-audit" ? args : args.Skip(1).ToArray();
+            return ExecuteCheckSubcommand(checkArgs);
+        }
+
         // 3. Script run subcommand: pilot run <file.pilot|file.pilc> [--patch <patch.pilot|.pilc>] [args...]
         if (args.Length > 1 && (args[0] == "run"))
         {
@@ -1107,6 +1114,7 @@ public static class Program
         Console.WriteLine("  pilot pkg list                       # List all dependencies");
         Console.WriteLine("  pilot pkg pack [out.pilpkg]          # Package project into distributable archive");
         Console.WriteLine("\nTooling & Analysis Usage:");
+        Console.WriteLine("  pilot check [--comptime-audit] <file># Static verification & compile-time demotion audit");
         Console.WriteLine("  pilot --tokens <file>                # Dump lexical token stream");
         Console.WriteLine("  pilot --tree <file>                  # Print hierarchical AST");
         Console.WriteLine("  pilot --repl                         # Start interactive REPL");
@@ -1225,5 +1233,148 @@ public static class Program
         }
 
         return 0;
+    }
+
+    public static int ExecuteCheckSubcommand(string[] args)
+    {
+        bool comptimeAudit = false;
+        string? targetFile = null;
+        var definedSymbols = new List<string>();
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] is "--comptime-audit" or "--audit")
+            {
+                comptimeAudit = true;
+            }
+            else if ((args[i] == "-D" || args[i] == "--define") && i + 1 < args.Length)
+            {
+                definedSymbols.Add(args[++i]);
+            }
+            else if (!args[i].StartsWith("-"))
+            {
+                targetFile ??= args[i];
+            }
+        }
+
+        if (string.IsNullOrEmpty(targetFile) || !File.Exists(targetFile))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[CHECK ERROR] Target file not found: '{targetFile ?? "<missing>"}'");
+            Console.ResetColor();
+            return 1;
+        }
+
+        string source = File.ReadAllText(targetFile);
+        var preproc = PilotPreprocessor.Preprocess(
+            source,
+            targetFile,
+            new PilotPreprocessorOptions(definedSymbols));
+
+        if (preproc.HasErrors)
+        {
+            foreach (var err in preproc.Diagnostics)
+            {
+                Console.WriteLine($"[{err.Code}] Line {err.Line}:{err.Column} - {err.Message}");
+            }
+            return 1;
+        }
+
+        var inputStream = new AntlrInputStream(preproc.PreprocessedSource);
+        var lexer = new PilotLexer(inputStream);
+        lexer.RemoveErrorListeners();
+        var tokenStream = new CommonTokenStream(lexer);
+        var parser = new PilotParser(tokenStream);
+        var errorListener = new ErrorTracker();
+        parser.RemoveErrorListeners();
+        parser.AddErrorListener(errorListener);
+
+        var tree = parser.ParseProgramFast();
+        if (errorListener.HasErrors)
+        {
+            foreach (var err in errorListener.Errors)
+            {
+                Console.WriteLine($"[SYNTAX ERROR] {err}");
+            }
+            return 1;
+        }
+
+        var analysis = Pilot.Analysis.PilotAnalysisPipeline.Analyze(tree);
+        var chunk = PilotBytecodeCompiler.Compile(tree, preproc.PreprocessedSource);
+        var report = analysis.DemotionReport;
+
+        var allDiagnostics = new List<Pilot.Analysis.TypeSystem.PilotAnalysisDiagnostic>(analysis.Diagnostics);
+
+        // Verify that @zero_runtime / @hard_realtime functions have 0 EvalAst bytecode fallbacks (COMPTIME007)
+        if (report != null)
+        {
+            foreach (var nested in chunk.NestedChunks)
+            {
+                if (report.FunctionSummaries.TryGetValue(nested.Name, out var fnSum) &&
+                    (fnSum.IsZeroRuntime || fnSum.IsHardRealtime))
+                {
+                    int evalAstCount = nested.Instructions.Count(ins => ins.Opcode == Pilot.Runtime.Bytecode.PilotOpcode.EvalAst);
+                    if (evalAstCount > 0)
+                    {
+                        int line = nested.FuncDefContext?.Start?.Line ?? 1;
+                        allDiagnostics.Add(new Pilot.Analysis.TypeSystem.PilotAnalysisDiagnostic(
+                            "COMPTIME007",
+                            $"Function '{nested.Name}' is marked '@zero_runtime' / '@hard_realtime' but emitted {evalAstCount} 'EvalAst' interpreter fallback instruction(s).",
+                            line, 0, isError: true));
+                    }
+                }
+            }
+        }
+
+        if (comptimeAudit && report != null)
+        {
+            int totalEvalAst = chunk.Instructions.Count(i => i.Opcode == Pilot.Runtime.Bytecode.PilotOpcode.EvalAst)
+                + chunk.NestedChunks.Sum(nc => nc.Instructions.Count(i => i.Opcode == Pilot.Runtime.Bytecode.PilotOpcode.EvalAst));
+            int totalInstructions = chunk.Instructions.Count + chunk.NestedChunks.Sum(nc => nc.Instructions.Count);
+            int frozenPerfMaps = report.MaterializedComptimeValues.Values
+                .Select(v => v.TryGetFrozenMap(out var fm) && fm.IsPerfectHash ? fm : null)
+                .Where(fm => fm != null)
+                .Distinct(ReferenceEqualityComparer.Instance)
+                .Count();
+
+            Console.WriteLine($"=== Pilot Compile-Time Demotion & .rodata Audit: {Path.GetFileName(targetFile)} ===");
+            Console.WriteLine($"  Variable Coordinates Demoted : {report.VariableCoordinates.Count}");
+            Console.WriteLine($"  Static Field Accesses        : {report.FieldAccesses.Count} ({report.NominalFieldLayouts.Count} nominal layouts)");
+            Console.WriteLine($"  DTO '->' Projection Plans    : {report.ProjectionPlans.Count}");
+            Console.WriteLine($"  Unit Annotations Erased      : {report.ErasedUnitCount}");
+            Console.WriteLine($"  Contracts Statically Elided  : {report.ElidedContractNodes.Count} ({report.FullyDischargedFunctions.Count} functions fully discharged)");
+            Console.WriteLine($"  Materialized .rodata Values  : {report.MaterializedComptimeValues.Count} (Frozen Perfect-Hash Maps: {frozenPerfMaps})");
+            Console.WriteLine($"  PilVM Instructions Emitted   : {totalInstructions} (EvalAst Fallbacks: {totalEvalAst})");
+
+            if (report.FunctionSummaries.Count > 0)
+            {
+                Console.WriteLine("\n  Per-Function Static Demotion Summary:");
+                foreach (var kv in report.FunctionSummaries.Values)
+                {
+                    string modeTag = kv.IsZeroRuntime ? " [@zero_runtime]" : kv.IsHardRealtime ? " [@hard_realtime]" : "";
+                    Console.WriteLine(
+                        $"    - {kv.FunctionName}{modeTag}: locals={kv.LocalSlotCount}, upvalues={kv.UpvalueCaptureCount}, " +
+                        $"fieldSlots={kv.StaticFieldAccessCount}, projections={kv.StaticProjectionCount}, " +
+                        $"elidedContracts={kv.ElidedContractCount}, ctxSlots={kv.ContextSlotLoadCount}, " +
+                        $"dynamicLeaks={kv.DynamicFallbackCount}");
+                }
+            }
+            Console.WriteLine("========================================================================");
+        }
+
+        foreach (var d in allDiagnostics)
+        {
+            string sev = d.IsError ? "ERROR" : "WARN";
+            Console.WriteLine($"[{d.Code}] ({sev}) Line {d.Line}:{d.Column} - {d.Message}");
+        }
+
+        bool hasErrors = allDiagnostics.Any(d => d.IsError);
+        if (!hasErrors)
+        {
+            Console.WriteLine($"[CHECK PASS] '{Path.GetFileName(targetFile)}' verified with 0 errors.");
+            return 0;
+        }
+
+        return 1;
     }
 }

@@ -37,8 +37,8 @@ public sealed class PilotComptimeEvaluator : PilotBaseVisitor<object?>
 
     private static readonly HashSet<string> ImpureBuiltins = new(StringComparer.OrdinalIgnoreCase)
     {
-        "read_file", "write_file", "append_file", "delete_file", "http_get", "http_post",
-        "exec_shell", "spawn_process", "input", "sleep", "shared_buffer"
+        "print", "println", "read_file", "write_file", "append_file", "delete_file",
+        "http_get", "http_post", "exec_shell", "spawn_process", "input", "sleep", "shared_buffer"
     };
 
     public PilotComptimeEvaluator(int stepBudget = DefaultStepBudget)
@@ -51,7 +51,7 @@ public sealed class PilotComptimeEvaluator : PilotBaseVisitor<object?>
             StandardError = writer,
             MaxCallDepth = 256
         };
-        _sandboxEngine = new PilotEngine(options);
+        _sandboxEngine = new PilotEngine();
         _sandboxContext = new PilotExecutionContext(_sandboxEngine, options)
         {
             IsComptimeEvaluation = true,
@@ -124,7 +124,15 @@ public sealed class PilotComptimeEvaluator : PilotBaseVisitor<object?>
         if (!string.IsNullOrEmpty(name) && rhs != null)
         {
             Visit(rhs);
-            if (!ContainsImpureCall(rhs) && !ReferencesDynamicRuntimeLocal(rhs))
+            PilotValue existingFrozen = default;
+            if (TryUnwrapSingleAtomExpr(rhs) is { } innerAtom &&
+                innerAtom.atom()?.comptime_expr() is { } innerCtExpr &&
+                _precomputedValues.TryGetValue(innerCtExpr, out existingFrozen))
+            {
+                _constValues[name] = existingFrozen;
+                _sandboxContext.Environment.CurrentScope.Declare(name, existingFrozen);
+            }
+            else if (!ContainsImpureCall(rhs) && !ReferencesDynamicRuntimeLocal(rhs))
             {
                 if (TryEvaluateNodeInSandbox(rhs, out var val, out _))
                 {

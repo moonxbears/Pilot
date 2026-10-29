@@ -1,0 +1,128 @@
+// =============================================================================
+// Showcase 24: First-Class `comptime`, Perfect-Hash `.rodata` & `@zero_runtime`
+// =============================================================================
+// Demonstrates Milestone 19:
+//   1. `comptime def`, `comptime { ... }`, `comptime(...)`, and `comptime assert`
+//   2. Frozen `.rodata` collections & minimal perfect-hash lookup tables (`PilotFrozenMap`)
+//   3. `comptime` function parameters for compile-time specialization
+//   4. Compiler-wide Runtime-to-Compile-Time Demotion:
+//      - (depthDelta, slotIndex) closure upvalue displays (`LoadUpvalue`/`StoreUpvalue`)
+//      - O(1) static field slot indexing (`GetFieldSlot`/`SetFieldSlot`)
+//      - Zero-reflection DTO `->` struct projections (`ConstructStruct`)
+//      - Compile-time `<unit_expr>` erasure & proven contract elision
+//      - O(1) integer-indexed `with context(...)` display slots
+//   5. `@zero_runtime` static verification guarantee
+// =============================================================================
+
+println("==================================================================");
+println(" Showcase 24: Comptime Execution, .rodata & @zero_runtime Demotion");
+println("==================================================================");
+
+// -----------------------------------------------------------------------------
+// 1. Compile-Time Execution (`comptime def`, `comptime { ... }`, `comptime assert`)
+// -----------------------------------------------------------------------------
+comptime def crc8_byte(data: int) -> int {
+    var crc = data;
+    for bit in 0..<8 {
+        if (crc & 0x80) != 0 {
+            crc = ((crc << 1) ^ 0x07) & 0xFF;
+        } else {
+            crc = (crc << 1) & 0xFF;
+        }
+    }
+    return crc;
+}
+
+// Materialized into `.rodata` at compile time as an immutable frozen array
+const CRC8_PREVIEW = comptime {
+    var table = [];
+    for i in 0..<16 {
+        table.append(crc8_byte(i));
+    }
+    return table;
+};
+
+comptime assert CRC8_PREVIEW[0] == 0, "CRC8(0) must be 0";
+comptime assert CRC8_PREVIEW[1] == 7, "CRC8(1) must be 0x07";
+
+println(f"[1] Frozen CRC8 .rodata table (is_frozen={CRC8_PREVIEW.is_frozen}): {CRC8_PREVIEW[0]}, {CRC8_PREVIEW[1]}, {CRC8_PREVIEW[2]}, {CRC8_PREVIEW[3]}");
+
+// -----------------------------------------------------------------------------
+// 2. Minimal Perfect-Hash `.rodata` Map (`PilotFrozenMap`)
+// -----------------------------------------------------------------------------
+const CAN_BUS_IDS = comptime({
+    "motor_torque": 0x101,
+    "wheel_speed":  0x102,
+    "battery_soc":  0x201,
+    "imu_accel":    0x301,
+    "lidar_sync":   0x401,
+    "estop_cmd":    0x001
+});
+
+println(f"[2] CAN_BUS_IDS frozen={CAN_BUS_IDS.is_frozen}, perfect_hash={CAN_BUS_IDS.is_perfect_hash}, table_size={CAN_BUS_IDS.table_size}");
+println(f"    estop_cmd=0x{CAN_BUS_IDS['estop_cmd']}, lidar_sync=0x{CAN_BUS_IDS['lidar_sync']}");
+
+// -----------------------------------------------------------------------------
+// 3. `comptime` Function Parameters & Static Contract Elision
+// -----------------------------------------------------------------------------
+def fixed_fir_filter(sample: int, comptime taps: int) -> int requires taps > 0 && taps <= 16 {
+    var acc = 0;
+    for k in 1..=taps {
+        acc += sample * k;
+    }
+    return acc;
+}
+
+let filtered = fixed_fir_filter(10, 4); // 10*(1+2+3+4) = 100
+println(f"[3] Unrolled 4-tap FIR output: {filtered}");
+
+// -----------------------------------------------------------------------------
+// 4. `@zero_runtime` Static Struct Slots, DTO `->` Projection & Unit Erasure
+// -----------------------------------------------------------------------------
+struct ImuPacket {
+    var timestamp_us: int;
+    var sensor_name: str;
+    var accel_mps2: float;
+}
+
+struct ControlSample {
+    var accel_mps2: float;
+    var timestamp_us: int;
+}
+
+@zero_runtime
+def process_imu_packet(pkt: ImuPacket) -> ControlSample {
+    let gravity_comp = 9.81<m/s**2>;
+    pkt.accel_mps2 = pkt.accel_mps2 - gravity_comp;
+    return pkt -> ControlSample;
+}
+
+var raw_imu = ImuPacket(125000, "imu_primary", 14.81);
+let sample = process_imu_packet(raw_imu);
+println(f"[4] @zero_runtime DTO projection: timestamp={sample.timestamp_us}us, net_accel={sample.accel_mps2} m/s^2");
+
+// -----------------------------------------------------------------------------
+// 5. O(1) Lexical Upvalue Display & Contextual DI Display Slots
+// -----------------------------------------------------------------------------
+def scale_signal(val: float, context gain: float = 1.0) -> float {
+    return val * gain;
+}
+
+def run_control_loop(initial_offset: float) -> float {
+    var bias = initial_offset;
+    def apply_bias(x: float) -> float {
+        bias += 0.5;
+        return x + bias;
+    }
+
+    var out = 0.0;
+    with context(gain = 4.0) {
+        out = scale_signal(apply_bias(sample.accel_mps2));
+    }
+    return out;
+}
+
+let loop_out = run_control_loop(1.5);
+println(f"[5] Control loop output with upvalue + context display slot: {loop_out}");
+assert loop_out == 28.0;
+println("=== Showcase 24 Complete ===");

@@ -1588,6 +1588,7 @@ public sealed class PilotInterpreterVisitor : PilotBaseVisitor<PilotValue>
             string fName = member.identifier().GetText();
             string? fType = member.type_annotation()?.type_spec()?.GetText();
             PilotValue initVal = member.test() != null ? Visit(member.test()) : DefaultValueForType(fType);
+            classDef.RegisterFieldSlot(fName);
             classDef.StaticFields[fName] = initVal;
             if (!string.IsNullOrEmpty(fType))
             {

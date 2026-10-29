@@ -210,6 +210,20 @@ public static class PilotDiagnosticCatalog
     public const string NondifferentiableAdjointCallQuote = "QUOTE004";
     public const string UnhandledEffectInDryRunQuote = "QUOTE005";
 
+    // =========================================================================
+    // COMPTIME Series: Runtime-to-Compile-Time Demotion & Comptime Audit (Milestone 19)
+    // =========================================================================
+    public const string DynamicScopeLookupInZeroRuntime = "COMPTIME001";
+    public const string DynamicMemberLookupInZeroRuntime = "COMPTIME002";
+    public const string DynamicMethodDispatchInZeroRuntime = "COMPTIME003";
+    public const string UnloweredDtoProjectionInZeroRuntime = "COMPTIME004";
+    public const string UnprovenRuntimeContractInZeroRuntime = "COMPTIME005";
+    public const string DynamicContextMapInZeroRuntime = "COMPTIME006";
+    public const string AstFallbackInZeroRuntime = "COMPTIME007";
+    public const string ComptimeAssertFailed = "COMPTIME008";
+    public const string ImpureOrExceededComptimeExecution = "COMPTIME009";
+    public const string NonConstantComptimeArgument = "COMPTIME010";
+
     private static readonly Dictionary<string, PilotDiagnosticDescriptor> Descriptors = new(StringComparer.Ordinal);
 
     static PilotDiagnosticCatalog()
@@ -331,6 +345,18 @@ public static class PilotDiagnosticCatalog
         Register(new(NonUnmanagedParameterInAbiCallFrame, "ABI Call-Frame requires unmanaged / repr(C) parameter layout", "CallQuoting", PilotDiagnosticSeverity.Error, "ABI Call-Frame '{0}!&(...)' requires unmanaged / repr(C) parameter layouts, but parameter '{1}' has type '{2}'.", "Zero-allocation C-ABI call frames ('fn!&(...)') pack arguments into a sequential struct and forbid managed heap references.", "Use unmanaged scalar/struct types or 'fn!(...)'"));
         Register(new(NondifferentiableAdjointCallQuote, "Symbolic adjoint call quote requires differentiable body", "CallQuoting", PilotDiagnosticSeverity.Error, "Cannot differentiate '{0}!@(...)': function body contains non-differentiable construct ({1}).", "Symbolic adjoint differentiation ('fn!@(...)') requires pure, bounded white-box expressions without unbounded loops or impure I/O."));
         Register(new(UnhandledEffectInDryRunQuote, "Reactive signal call quote requires observable input", "CallQuoting", PilotDiagnosticSeverity.Error, "Reactive signal call quote '{0}!^(...)' requires at least one observable input (Signal[T], object property path 'obj.Prop', or mutable 'var' binding).", "Reactive signal projection ('fn!^(...)') requires at least one observable dependency."));
+
+        // COMPTIME Series: Milestone 19 Runtime-to-Compile-Time Demotion & Comptime Audit (COMPTIME001–COMPTIME010)
+        Register(new(DynamicScopeLookupInZeroRuntime, "Dynamic variable lookup in '@zero_runtime' scope", "Comptime", PilotDiagnosticSeverity.Error, "{0}", "All variable accesses inside '@zero_runtime' / '@hard_realtime' scopes must lower to static local slots or lexical display upvalue indices."));
+        Register(new(DynamicMemberLookupInZeroRuntime, "Dynamic dictionary field lookup in '@zero_runtime' scope", "Comptime", PilotDiagnosticSeverity.Error, "{0}", "Field access inside '@zero_runtime' / '@hard_realtime' scopes requires a statically known struct/class/record layout."));
+        Register(new(DynamicMethodDispatchInZeroRuntime, "Unmonomorphized dynamic dispatch in '@zero_runtime' scope", "Comptime", PilotDiagnosticSeverity.Error, "{0}", "Method and contract calls inside '@zero_runtime' / '@hard_realtime' scopes must resolve statically."));
+        Register(new(UnloweredDtoProjectionInZeroRuntime, "Dynamic DTO '->' projection in '@zero_runtime' scope", "Comptime", PilotDiagnosticSeverity.Error, "{0}", "DTO '->' projections inside '@zero_runtime' / '@hard_realtime' scopes require statically known source and target field slots."));
+        Register(new(UnprovenRuntimeContractInZeroRuntime, "Unproven runtime contract in '@zero_runtime' scope", "Comptime", PilotDiagnosticSeverity.Error, "{0}", "Contracts inside '@zero_runtime' / '@hard_realtime' scopes must be statically discharged at compile time."));
+        Register(new(DynamicContextMapInZeroRuntime, "Dynamic 'with' resource in '@zero_runtime' scope", "Comptime", PilotDiagnosticSeverity.Error, "{0}", "Only static 'with context(key = val)' display slots are permitted inside '@zero_runtime' / '@hard_realtime' scopes."));
+        Register(new(AstFallbackInZeroRuntime, "AST interpreter fallback in '@zero_runtime' scope", "Comptime", PilotDiagnosticSeverity.Error, "{0}", "Constructs requiring 'EvalAst' interpreter fallback are forbidden inside '@zero_runtime' / '@hard_realtime' scopes."));
+        Register(new(ComptimeAssertFailed, "Compile-time assertion failed", "Comptime", PilotDiagnosticSeverity.Error, "{0}", "A 'comptime assert' statement evaluated to false during compilation."));
+        Register(new(ImpureOrExceededComptimeExecution, "Impure operation or step budget exceeded in 'comptime'", "Comptime", PilotDiagnosticSeverity.Error, "{0}", "Compile-time execution forbids non-deterministic I/O, FFI, and unbounded loops exceeding the step budget."));
+        Register(new(NonConstantComptimeArgument, "Non-constant argument passed to 'comptime' parameter", "Comptime", PilotDiagnosticSeverity.Error, "{0}", "Parameters marked 'comptime' require a compile-time constant or 'comptime(...)' expression at every call site."));
     }
 
     public static PilotDiagnosticDescriptor? GetDescriptor(string code) =>
