@@ -30,6 +30,7 @@ pub struct BuildOptions {
     pub opt_level: OptLevel,
     pub output_path: PathBuf,
     pub pgo_trace: Option<PathBuf>,
+    pub burst: bool,
 }
 
 impl Default for BuildOptions {
@@ -39,6 +40,7 @@ impl Default for BuildOptions {
             opt_level: OptLevel::O2,
             output_path: PathBuf::from("a.out"),
             pgo_trace: None,
+            burst: false,
         }
     }
 }
@@ -126,7 +128,13 @@ impl BuildDriver {
                     .arg("-fomit-frame-pointer")
                     .arg("-fno-math-errno");
 
-                if options.opt_level == OptLevel::O3 {
+                if options.burst || source_text.contains("@burst") {
+                    cmd.arg("-mavx2")
+                        .arg("-mfma")
+                        .arg("-ffast-math")
+                        .arg("-march=native")
+                        .arg("-O3");
+                } else if options.opt_level == OptLevel::O3 {
                     cmd.arg("-march=native");
                 }
 

@@ -136,11 +136,13 @@ fn cmd_run(args: &[String]) {
         Path::new(file_path).file_stem().and_then(|s| s.to_str()).unwrap_or("app"),
         std::process::id()
     );
+    let use_burst = args.iter().any(|a| a == "--burst");
     let opts = BuildOptions {
         target: BuildTarget::Native,
         opt_level: OptLevel::O3,
         output_path: PathBuf::from(&tmp_bin),
         pgo_trace: None,
+        burst: use_burst,
     };
 
     let module_name = Path::new(file_path).file_stem().and_then(|s| s.to_str()).unwrap_or("app");
@@ -191,10 +193,12 @@ fn cmd_build(args: &[String]) {
     let mut target = BuildTarget::Native;
     let mut opt_level = OptLevel::O2;
     let mut output_path = PathBuf::from("a.out");
+    let mut burst = false;
 
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "--burst" => burst = true,
             "--target" => {
                 if i + 1 < args.len() {
                     target = match args[i + 1].as_str() {
@@ -244,6 +248,7 @@ fn cmd_build(args: &[String]) {
         opt_level,
         output_path: output_path.clone(),
         pgo_trace: None,
+        burst,
     };
 
     let src = fs::read_to_string(file_path).unwrap_or_default();

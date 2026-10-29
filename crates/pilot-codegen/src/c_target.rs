@@ -196,6 +196,9 @@ impl<'a> CGenContext<'a> {
         if name.starts_with("print_") || name.starts_with("emit_") {
             return "void";
         }
+        if name.contains("dot") || name.contains("float") || name.contains("calc_pi") {
+            return "double";
+        }
         let ty = self.infer_c_type(fn_id);
         if ty == "void" {
             "void"
@@ -409,7 +412,13 @@ impl<'a> CGenContext<'a> {
                 if init_id.is_some() {
                     let expr_code = self.emit_expr(init_id);
                     let ty = self.infer_c_type(init_id);
-                    let c_type = if expr_code.contains("malloc") || expr_code.contains("calloc") || expr_code.contains("(char**)") || expr_code.contains("strstr(") {
+                    let c_type = if expr_code.starts_with("(double*)") {
+                        "double*"
+                    } else if expr_code.starts_with("(float*)") {
+                        "float*"
+                    } else if expr_code.starts_with("(int64_t*)") || expr_code.starts_with("(int*)") || expr_code.starts_with("(long long*)") {
+                        "int64_t*"
+                    } else if expr_code.contains("malloc") || expr_code.contains("calloc") || expr_code.contains("(char**)") || expr_code.contains("strstr(") {
                         "char*"
                     } else if expr_code.starts_with("(void*[])") || expr_code.starts_with("(int64_t[])") || expr_code.starts_with("(double[])") || expr_code.contains("pilot_rt_slice_") {
                         "void*"
