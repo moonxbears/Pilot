@@ -1,0 +1,47 @@
+def run_sieve(limit: int) -> int {
+    let is_prime = (char*)malloc(limit + 1)
+    memset(is_prime, 1, limit + 1)
+    is_prime[0] = 0
+    is_prime[1] = 0
+
+    let p = 2
+    while p * p <= limit {
+        if is_prime[p] != 0 {
+            let i = p * p
+            while i <= limit {
+                is_prime[i] = 0
+                i = i + p
+            }
+        }
+        p = p + 1
+    }
+
+    let count = 0
+    let j = 2
+    while j <= limit {
+        if is_prime[j] != 0 {
+            count = count + 1
+        }
+        j = j + 1
+    }
+
+    free(is_prime)
+    return count
+}
+
+def main() -> int {
+    let limit = 2000000
+    let iterations = 30
+    struct timespec start, end
+    clock_gettime(CLOCK_MONOTONIC, &start)
+    let it = 0
+    let count = 0
+    while it < iterations {
+        count = run_sieve(limit)
+        it = it + 1
+    }
+    clock_gettime(CLOCK_MONOTONIC, &end)
+    let elapsed_ms = (end.tv_sec - start.tv_sec) * 1000.0 + (end.tv_nsec - start.tv_nsec) / 1000000.0
+    printf("PRIMES: %lld | TIME: %.3f ms (across %d iterations)\n", (long long)count, elapsed_ms, (int)iterations)
+    return 0
+}

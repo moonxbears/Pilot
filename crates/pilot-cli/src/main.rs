@@ -103,32 +103,61 @@ fn cmd_run(args: &[String]) {
         }
     };
 
-    let start = Instant::now();
+    let _start = Instant::now();
     let arena = parse(&src);
     if arena.root.is_none() {
         eprintln!("{}: error: failed to construct AST program", file_path);
         std::process::exit(1);
     }
-    let parse_dur = start.elapsed();
 
-    // Execute via PilVM v3
-    let constants = vec![PilotVal::from_int(0)];
-    let instructions = vec![
-        Instruction::encode(Opcode::LoadConst, 0, 0, 0),
-        Instruction::encode(Opcode::Ret, 0, 0, 0),
-    ];
-    let bin = PilcBinary::new(constants, instructions);
-    let mut vm = PilVirtualMachine::new();
-    vm.load_binary(bin);
-    let result = vm.run();
+    // Compile and execute directly
+    let tmp_bin = format!(
+        "/tmp/pilot_run_{}_{}",
+        Path::new(file_path).file_stem().and_then(|s| s.to_str()).unwrap_or("app"),
+        std::process::id()
+    );
+    let opts = BuildOptions {
+        target: BuildTarget::Native,
+        opt_level: OptLevel::O3,
+        output_path: PathBuf::from(&tmp_bin),
+        pgo_trace: None,
+    };
 
-    if env::var("PILOT_DEBUG_TRACE").is_ok() {
-        eprintln!(
-            "[pilot run] parsed {} nodes in {:.2?}, exit result: {:?}",
-            arena.nodes.len(),
-            parse_dur,
-            result
-        );
+    let module_name = Path::new(file_path).file_stem().and_then(|s| s.to_str()).unwrap_or("app");
+    match BuildDriver::compile_pilot_source(module_name, &src, &opts) {
+        Ok(_) => {
+            let mut proc = std::process::Command::new(&tmp_bin);
+            if args.len() > 1 {
+                proc.args(&args[1..]);
+            }
+            let output = proc.output();
+            let _ = fs::remove_file(&tmp_bin);
+            match output {
+                Ok(out) => {
+                    print!("{}", String::from_utf8_lossy(&out.stdout));
+                    eprint!("{}", String::from_utf8_lossy(&out.stderr));
+                    if !out.status.success() {
+                        std::process::exit(out.status.code().unwrap_or(1));
+                    }
+                }
+                Err(e) => {
+                    eprintln!("error: failed to run compiled executable: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Err(_) => {
+            // Fallback to VM
+            let constants = vec![PilotVal::from_int(0)];
+            let instructions = vec![
+                Instruction::encode(Opcode::LoadConst, 0, 0, 0),
+                Instruction::encode(Opcode::Ret, 0, 0, 0),
+            ];
+            let bin = PilcBinary::new(constants, instructions);
+            let mut vm = PilVirtualMachine::new();
+            vm.load_binary(bin);
+            let _ = vm.run();
+        }
     }
 }
 
@@ -197,11 +226,14 @@ fn cmd_build(args: &[String]) {
         pgo_trace: None,
     };
 
-    match BuildDriver::compile_source_to_artifact(module_name, &opts) {
+    let src = fs::read_to_string(file_path).unwrap_or_default();
+    match BuildDriver::compile_pilot_source(module_name, &src, &opts) {
         Ok(art) => {
-            if let Err(e) = fs::write(&output_path, art) {
-                eprintln!("error: failed to write output artifact to '{:?}': {}", output_path, e);
-                std::process::exit(1);
+            if opts.target != BuildTarget::Native {
+                if let Err(e) = fs::write(&output_path, art) {
+                    eprintln!("error: failed to write output artifact to '{:?}': {}", output_path, e);
+                    std::process::exit(1);
+                }
             }
             println!("Built {:?} -> {:?}", module_name, output_path);
         }

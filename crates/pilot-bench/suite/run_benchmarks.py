@@ -80,10 +80,9 @@ def main():
     cargo_env = {"PATH": f"{os.path.expanduser('~/.cargo/bin')}:{os.environ.get('PATH', '')}"}
     run_cmd([cargo, "build", "--release", "-p", "pilot-cli"], env=cargo_env)
 
-    # Compile Pilot AOT benchmarks via clang backend
-    # Emit transpiled C and compile with clang -O3
-    run_cmd(["clang", "-O3", "-fno-strict-aliasing", os.path.join(SUITE_DIR, "fib.c"), "-o", os.path.join(SUITE_DIR, "fib_pilot_aot")])
-    run_cmd(["clang", "-O3", "-fno-strict-aliasing", os.path.join(SUITE_DIR, "sieve.c"), "-o", os.path.join(SUITE_DIR, "sieve_pilot_aot")])
+    # Compile Pilot AOT benchmarks via pilot build
+    run_cmd([PILOT_BIN, "build", os.path.join(SUITE_DIR, "fib.pilot"), "-o", os.path.join(SUITE_DIR, "fib_pilot_aot"), "-O3"])
+    run_cmd([PILOT_BIN, "build", os.path.join(SUITE_DIR, "sieve.pilot"), "-o", os.path.join(SUITE_DIR, "sieve_pilot_aot"), "-O3"])
 
     # Empty hello world binaries for cold start measurement
     with open(os.path.join(SUITE_DIR, "empty.c"), "w") as f:
@@ -95,6 +94,37 @@ def main():
     run_cmd([rustc, "-C", "opt-level=3", os.path.join(SUITE_DIR, "empty.rs"), "-o", os.path.join(SUITE_DIR, "empty_rs")])
 
     print("Compilation complete.\n")
+
+    # ---------------------------------------------------------
+    # 0.5. Verify Mathematical & Output Correctness
+    # ---------------------------------------------------------
+    print("[Verification] Mathematical Correctness Across All Runtimes:")
+    all_fib_targets = [
+        ("Pilot (Native AOT)", [os.path.join(SUITE_DIR, "fib_pilot_aot")]),
+        ("C (Clang -O3)", [os.path.join(SUITE_DIR, "fib_c")]),
+        ("Rust (opt-level=3)", [os.path.join(SUITE_DIR, "fib_rs")]),
+        ("Node.js (V8 JIT)", ["node", os.path.join(SUITE_DIR, "fib.js")]),
+        ("Python 3.12", ["python3", os.path.join(SUITE_DIR, "fib.py")]),
+    ]
+    for label, cmd in all_fib_targets:
+        res = run_cmd(cmd)
+        assert res.returncode == 0, f"{label} fib failed with exit code {res.returncode}"
+        assert "14930352" in res.stdout, f"{label} fib computed incorrect result: {res.stdout}"
+        print(f"  ✓ {label:<20}: fib(36) == 14930352 (PASSED)")
+
+    all_sieve_targets = [
+        ("Pilot (Native AOT)", [os.path.join(SUITE_DIR, "sieve_pilot_aot")]),
+        ("C (Clang -O3)", [os.path.join(SUITE_DIR, "sieve_c")]),
+        ("Rust (opt-level=3)", [os.path.join(SUITE_DIR, "sieve_rs")]),
+        ("Node.js (V8 JIT)", ["node", os.path.join(SUITE_DIR, "sieve.js")]),
+        ("Python 3.12", ["python3", os.path.join(SUITE_DIR, "sieve.py")]),
+    ]
+    for label, cmd in all_sieve_targets:
+        res = run_cmd(cmd)
+        assert res.returncode == 0, f"{label} sieve failed with exit code {res.returncode}"
+        assert "148933" in res.stdout, f"{label} sieve computed incorrect prime count: {res.stdout}"
+        print(f"  ✓ {label:<20}: primes(2,000,000) == 148933 (PASSED)")
+    print()
 
     # ---------------------------------------------------------
     # 1. Cold-Start Initialization & Toolchain Latency
