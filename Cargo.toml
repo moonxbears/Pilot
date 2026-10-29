@@ -20,6 +20,8 @@ members = [
     "crates/pilot-transpile",
     "crates/pilot-polyglot",
     "crates/pilot-ffi",
+    "crates/pilot-cli",
+    "crates/pilot-bench",
 ]
 
 [workspace.package]

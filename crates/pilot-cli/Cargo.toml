@@ -1,0 +1,26 @@
+[package]
+name = "pilot-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pilot"
+path = "src/main.rs"
+
+[dependencies]
+pilot-span = { path = "../pilot-span" }
+pilot-intern = { path = "../pilot-intern" }
+pilot-ast = { path = "../pilot-ast" }
+pilot-lexer = { path = "../pilot-lexer" }
+pilot-parser = { path = "../pilot-parser" }
+pilot-syntax = { path = "../pilot-syntax" }
+pilot-fmt = { path = "../pilot-fmt" }
+pilot-analysis = { path = "../pilot-analysis" }
+pilot-perceus = { path = "../pilot-perceus" }
+pilot-rt = { path = "../pilot-rt" }
+pilot-vm = { path = "../pilot-vm" }
+pilot-codegen = { path = "../pilot-codegen" }
+pilot-transpile = { path = "../pilot-transpile" }
+pilot-polyglot = { path = "../pilot-polyglot" }
+pilot-lsp = { path = "../pilot-lsp" }

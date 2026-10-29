@@ -44,26 +44,23 @@ function resolvePilotExecutionPrefix(extensionPath: string, configuredPilotPath?
 
     const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
     const repoRoot = path.resolve(extensionPath, '..');
-    const dotnetConfig = vscode.workspace.getConfiguration('pilot.languageServer');
-    const dotnetCmd = dotnetConfig.get<string>('dotnetPath') || 'dotnet';
 
-    const dllCandidates: string[] = [];
+    const nativeCandidates: string[] = [
+        path.join(extensionPath, 'server', 'pilot'),
+        path.join(repoRoot, 'target', 'release', 'pilot'),
+        path.join(repoRoot, 'target', 'debug', 'pilot'),
+    ];
     if (wsRoot) {
-        dllCandidates.push(
-            path.join(wsRoot, 'bin', 'Debug', 'net10.0', 'Pilot.dll'),
-            path.join(wsRoot, 'bin', 'Release', 'net10.0', 'Pilot.dll')
+        nativeCandidates.push(
+            path.join(wsRoot, 'target', 'release', 'pilot'),
+            path.join(wsRoot, 'target', 'debug', 'pilot')
         );
     }
-    dllCandidates.push(
-        path.join(repoRoot, 'bin', 'Debug', 'net10.0', 'Pilot.dll'),
-        path.join(repoRoot, 'bin', 'Release', 'net10.0', 'Pilot.dll'),
-        path.join(extensionPath, 'server', 'Pilot.dll')
-    );
 
-    const newestDll = pickNewestExistingFile(dllCandidates);
-    if (newestDll) {
-        const dotnetRef = dotnetCmd.includes(' ') ? `"${dotnetCmd}"` : dotnetCmd;
-        return `${dotnetRef} "${newestDll}"`;
+    for (const bin of nativeCandidates) {
+        if (fs.existsSync(bin)) {
+            return `"${bin}"`;
+        }
     }
 
     return 'pilot';
@@ -90,65 +87,46 @@ class PilotLspClient implements vscode.Disposable {
         this.stop();
 
         const config = vscode.workspace.getConfiguration('pilot.languageServer');
-        const dotnetPath = config.get<string>('dotnetPath') || 'dotnet';
         const customPath = config.get<string>('serverPath') || '';
         const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
         const repoRoot = path.resolve(this.extensionPath, '..');
 
-        const bundledDll = path.join(this.extensionPath, 'server', 'Pilot.LanguageServer.dll');
-        const wsDebugDll = wsRoot ? path.join(wsRoot, 'Pilot.LanguageServer', 'bin', 'Debug', 'net10.0', 'Pilot.LanguageServer.dll') : '';
-        const wsReleaseDll = wsRoot ? path.join(wsRoot, 'Pilot.LanguageServer', 'bin', 'Release', 'net10.0', 'Pilot.LanguageServer.dll') : '';
-        const repoDebugDll = path.join(repoRoot, 'Pilot.LanguageServer', 'bin', 'Debug', 'net10.0', 'Pilot.LanguageServer.dll');
-        const repoReleaseDll = path.join(repoRoot, 'Pilot.LanguageServer', 'bin', 'Release', 'net10.0', 'Pilot.LanguageServer.dll');
-        const wsCsproj = wsRoot ? path.join(wsRoot, 'Pilot.LanguageServer', 'Pilot.LanguageServer.csproj') : '';
-        const repoCsproj = path.join(repoRoot, 'Pilot.LanguageServer', 'Pilot.LanguageServer.csproj');
-
-        let serverDll = '';
-        let serverCsproj = '';
-
-        if (customPath) {
-            if (customPath.endsWith('.dll') && fs.existsSync(customPath)) {
-                serverDll = customPath;
-            } else if (customPath.endsWith('.csproj') && fs.existsSync(customPath)) {
-                serverCsproj = customPath;
-            }
+        const nativeCandidates: string[] = [
+            path.join(this.extensionPath, 'server', 'pilot-lsp'),
+            path.join(repoRoot, 'target', 'release', 'pilot-lsp'),
+            path.join(repoRoot, 'target', 'debug', 'pilot-lsp'),
+        ];
+        if (wsRoot) {
+            nativeCandidates.push(
+                path.join(wsRoot, 'target', 'release', 'pilot-lsp'),
+                path.join(wsRoot, 'target', 'debug', 'pilot-lsp')
+            );
         }
 
-        if (!serverDll && !serverCsproj) {
-            serverDll = pickNewestExistingFile([
-                wsDebugDll,
-                wsReleaseDll,
-                repoDebugDll,
-                repoReleaseDll,
-                bundledDll
-            ]);
-            if (!serverDll) {
-                if (wsCsproj && fs.existsSync(wsCsproj)) {
-                    serverCsproj = wsCsproj;
-                } else if (fs.existsSync(repoCsproj)) {
-                    serverCsproj = repoCsproj;
+        let nativeLsp = '';
+        if (customPath && fs.existsSync(customPath) && !customPath.endsWith('.dll') && !customPath.endsWith('.csproj')) {
+            nativeLsp = customPath;
+        } else {
+            for (const candidate of nativeCandidates) {
+                if (fs.existsSync(candidate)) {
+                    nativeLsp = candidate;
+                    break;
                 }
             }
         }
 
-        let args: string[];
-        if (serverDll) {
-            args = [serverDll];
-            this.outputChannel.appendLine(`[Pilot LSP] Starting server from DLL: ${serverDll}`);
-        } else if (serverCsproj) {
-            args = ['run', '--project', serverCsproj];
-            this.outputChannel.appendLine(`[Pilot LSP] Starting server from project: ${serverCsproj}`);
+        if (nativeLsp) {
+            this.outputChannel.appendLine(`[Pilot LSP] Starting native standalone server: ${nativeLsp}`);
+            const workingDir = wsRoot || path.dirname(nativeLsp);
+            this.process = cp.spawn(nativeLsp, [], {
+                cwd: workingDir,
+                stdio: ['pipe', 'pipe', 'pipe']
+            });
         } else {
             this.statusBar.text = '$(error) Pilot LSP (Not Found)';
-            vscode.window.showErrorMessage(`Pilot Language Server not found. Looked in bundled '${bundledDll}' and custom setting.`);
+            vscode.window.showErrorMessage(`Pilot Language Server (pilot-lsp) not found.`);
             return;
         }
-
-        const workingDir = wsRoot || path.dirname(serverDll || serverCsproj);
-        this.process = cp.spawn(dotnetPath, args, {
-            cwd: workingDir,
-            stdio: ['pipe', 'pipe', 'pipe']
-        });
 
         const spawnedProcess = this.process;
         this.process.stdout.on('data', (chunk: Buffer) => this.onData(chunk));

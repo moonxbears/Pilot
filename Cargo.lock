@@ -29,6 +29,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "pilot-bench"
+version = "1.1.0"
+dependencies = [
+ "pilot-ast",
+ "pilot-db",
+ "pilot-incremental",
+ "pilot-lexer",
+ "pilot-parser",
+ "pilot-rt",
+ "pilot-syntax",
+]
+
+[[package]]
+name = "pilot-cli"
+version = "1.1.0"
+dependencies = [
+ "pilot-analysis",
+ "pilot-ast",
+ "pilot-codegen",
+ "pilot-fmt",
+ "pilot-intern",
+ "pilot-lexer",
+ "pilot-lsp",
+ "pilot-parser",
+ "pilot-perceus",
+ "pilot-polyglot",
+ "pilot-rt",
+ "pilot-span",
+ "pilot-syntax",
+ "pilot-transpile",
+ "pilot-vm",
+]
+
+[[package]]
 name = "pilot-codegen"
 version = "0.1.0"
 dependencies = [

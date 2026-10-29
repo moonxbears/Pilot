@@ -669,19 +669,40 @@ impl<'a> Parser<'a> {
             }
             TokenKind::LParen => {
                 self.advance();
-                let expr = self.parse_expr();
-                self.expect(TokenKind::RParen);
-                expr
-            }
-            TokenKind::LBracket => {
-                self.advance();
                 let mut items = Vec::new();
-                while !self.at_end() && !self.at(TokenKind::RBracket) {
+                while !self.at_end() && !self.at(TokenKind::RParen) {
+                    let start_pos = self.pos;
                     let item = self.parse_expr();
                     if item.is_some() {
                         items.push(item);
                     }
                     if self.at(TokenKind::Comma) {
+                        self.advance();
+                    }
+                    if self.pos == start_pos {
+                        self.advance();
+                    }
+                }
+                self.expect(TokenKind::RParen);
+                if items.len() == 1 {
+                    items[0]
+                } else {
+                    self.arena.alloc_list_node(NodeKind::TupleExpr, 0, span, &items)
+                }
+            }
+            TokenKind::LBracket => {
+                self.advance();
+                let mut items = Vec::new();
+                while !self.at_end() && !self.at(TokenKind::RBracket) {
+                    let start_pos = self.pos;
+                    let item = self.parse_expr();
+                    if item.is_some() {
+                        items.push(item);
+                    }
+                    if self.at(TokenKind::Comma) {
+                        self.advance();
+                    }
+                    if self.pos == start_pos {
                         self.advance();
                     }
                 }
@@ -731,11 +752,15 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::LParen);
         let mut args = Vec::new();
         while !self.at_end() && !self.at(TokenKind::RParen) {
+            let start_pos = self.pos;
             let arg = self.parse_expr();
             if arg.is_some() {
                 args.push(arg);
             }
             if self.at(TokenKind::Comma) {
+                self.advance();
+            }
+            if self.pos == start_pos {
                 self.advance();
             }
         }
@@ -1005,5 +1030,12 @@ mod tests {
         assert_eq!(calls[0].flags, CallQuoteKind::ShallowQuote as u16);
         assert_eq!(calls[1].flags, CallQuoteKind::DeepSplice as u16);
         assert_eq!(calls[2].flags, CallQuoteKind::AbiFrame as u16);
+    }
+
+    #[test]
+    fn test_parse_01_type_safety() {
+        let src = std::fs::read_to_string("../../tests/01_type_safety.pilot").unwrap();
+        let arena = parse(&src);
+        assert!(arena.nodes.len() > 10);
     }
 }

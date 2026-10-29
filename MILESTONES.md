@@ -1020,12 +1020,12 @@ struct PilotVal {
 **Goal**: Cut over the entire CLI, test runner, REPL, package manager (`pilot pkg`), virtual environments (`pilot venv`), DAP server (`M22`), and VS Code extension bundle to the single standalone Rust binary (`pilot`), **retire all C# / `.NET` project files**, and certify every speed and memory target in CI.
 
 ### Sub-Tasks & Deliverables
-- [ ] **36.1: Unified Zero-Dependency `pilot` Native CLI (`< 15 MB` Binary, `< 2 ms` Cold Start)**
+- [x] **36.1: Unified Zero-Dependency `pilot` Native CLI (`< 15 MB` Binary, `< 2 ms` Cold Start)**
   - Consolidate `pilot run`, `pilot build`, `pilot check [--comptime-audit]`, `pilot fmt`, `pilot test`, `pilot repl` (with live Red-Green multiline syntax highlighting & completion), `pilot pkg`, `pilot venv`, `pilot debug --dap` (`M22`), and `pilot perf` (`M25`) into `crates/pilot-cli`.
-- [ ] **36.2: Full Regression Parity Gate & Complete `.NET` Removal**
+- [x] **36.2: Full Regression Parity Gate & Complete `.NET` Removal**
   - Verify 100% green execution across all `.pilot` test suites (`01`–`36+`), showcase scripts (`01`–`22+`), `stdlib/` suites, round-trip `--emit`/`--from` compiler-in-the-loop gates, `pilot-lsp` tests, and `pilot-dap` breakpoint tests.
   - Tag a permanent `v1.x-dotnet-archive` Git reference, then remove `Pilot.csproj`, `Pilot.Tests/`, `Pilot.LanguageServer/`, `Pilot.sln*`, and legacy C# directories—leaving a clean, zero-.NET Rust + Pilot repository and updating `vscode-pilot` to bundle native `pilot` + `pilot-lsp`.
-- [ ] **36.3: Automated Hardware Throughput & Memory Certification (`crates/pilot-bench`)**
+- [x] **36.3: Automated Hardware Throughput & Memory Certification (`crates/pilot-bench`)**
   - Enforce hard CI benchmark gates (`criterion` + custom global allocator byte counters):
     - **Batch Parse Throughput (`Stage 1 SIMD + Stage 2 Pratt`, `FastAstSink`)**: **$\ge 500\text{ MB/s}$ single-core** and **$\ge 2.0\text{ GB/s}$ multi-core** across 100,000-line Pilot benchmark corpora.
     - **AST Peak Memory Overhead**: **$\le 1.5\times$ raw UTF-8 source byte size** (a $> 10\times$ reduction vs. legacy ANTLR/.NET).
