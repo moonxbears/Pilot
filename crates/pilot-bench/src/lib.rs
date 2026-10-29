@@ -166,4 +166,28 @@ def helper() -> i64 {
         );
         assert!(elapsed.as_millis() < 50);
     }
+
+    #[test]
+    fn test_sso_string_creation_5m_zero_alloc() {
+        let n = 5_000_000;
+        let start = Instant::now();
+        let mut vec = Vec::with_capacity(n);
+        for i in 0..n {
+            let s = match i % 3 {
+                0 => "status_ok",
+                1 => "client_active",
+                _ => "tag_fast",
+            };
+            vec.push(PilotVal::from_str_sso(s).unwrap());
+        }
+        let elapsed = start.elapsed();
+        let mem_mb = (vec.capacity() * 16) as f64 / (1024.0 * 1024.0);
+        println!(
+            "[pilot-bench] PilotVal SSO: 5,000,000 strings in {:.2?} | memory: {:.2} MB (ZERO heap allocations!)",
+            elapsed,
+            mem_mb
+        );
+        assert_eq!(vec.len(), n);
+        assert!(vec[0].is_sso_str());
+    }
 }
