@@ -10,15 +10,22 @@ pub mod memory;
 pub mod concurrency;
 pub mod stdlib;
 pub mod c_abi;
+pub mod crypto;
+pub mod time;
+pub mod net;
 
 pub use value::{PilotVal, TAG_INT, TAG_FLOAT, TAG_BOOL, TAG_SSO_STR, TAG_NULL};
 pub use memory::{ArcHeader, BumpRegion, FLAG_ATOMIC};
 pub use concurrency::{Channel, ShadowEffectContext, Signal};
 pub use stdlib::{PilotDfaRegex, PilotStdlibIntrinsics, PilotStdlibResolver};
+pub use crypto::{blake3, ed25519_sign, ed25519_verify, hmac_sha256, random_bytes, sha256, sha512};
+pub use time::{monotonic_micros, now_millis, now_nanos, sleep_ms, timespec_now};
+pub use net::{http_get, http_post, tcp_connect, tcp_listen, udp_bind, HttpResponse};
 pub use c_abi::{
-    generate_c_runtime_header, pilot_rt_alloc_arc, pilot_rt_drop, pilot_rt_drop_reuse,
-    pilot_rt_dup, pilot_rt_print_f64, pilot_rt_print_i64, pilot_rt_region_alloc,
-    pilot_rt_region_enter, pilot_rt_region_exit,
+    generate_c_runtime_header, pilot_rt_alloc_arc, pilot_rt_crypto_random_bytes,
+    pilot_rt_crypto_sha256, pilot_rt_drop, pilot_rt_drop_reuse, pilot_rt_dup, pilot_rt_print_f64,
+    pilot_rt_print_i64, pilot_rt_region_alloc, pilot_rt_region_enter, pilot_rt_region_exit,
+    pilot_rt_sleep_ms, pilot_rt_time_now_ns,
 };
 
 #[cfg(test)]
@@ -169,5 +176,39 @@ mod tests {
             assert!(header.contains("pilot_rt_region_enter"));
             assert!(header.contains("pilot_rt_drop_reuse"));
         }
+    }
+
+    #[test]
+    fn test_crypto_sha256_blake3_and_random() {
+        let empty_hash = sha256(b"");
+        // Standard SHA-256 of empty string: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        let hex = empty_hash.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+        assert_eq!(hex, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+
+        let b3 = blake3(b"hello world");
+        assert_eq!(b3.len(), 32);
+
+        let hmac = hmac_sha256(b"secret", b"message");
+        assert_eq!(hmac.len(), 32);
+
+        let rand = random_bytes(16);
+        assert_eq!(rand.len(), 16);
+    }
+
+    #[test]
+    fn test_time_and_http_response() {
+        let t_ns = now_nanos();
+        assert!(t_ns > 0);
+
+        let t_ms = now_millis();
+        assert!(t_ms > 0);
+
+        let (sec, nsec) = timespec_now();
+        assert!(sec > 0);
+        assert!(nsec < 1_000_000_000);
+
+        let resp = HttpResponse::ok(b"{\"status\":\"ok\"}", "application/json");
+        assert_eq!(resp.status, 200);
+        assert_eq!(resp.text(), "{\"status\":\"ok\"}");
     }
 }

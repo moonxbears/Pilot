@@ -9,7 +9,7 @@ pub mod json;
 pub mod server;
 
 pub use json::{parse_json, JsonValue};
-pub use server::LspServer;
+pub use server::{run_stdio_server, LspServer};
 
 #[cfg(test)]
 mod tests {
@@ -91,5 +91,26 @@ mod tests {
         );
         let def_resp = server.handle_message(&def_req).expect("Expected definition response");
         assert!(def_resp.contains(uri));
+
+        // Inlay Hints
+        let inlay_req = format!(
+            r#"{{"jsonrpc":"2.0","id":11,"method":"textDocument/inlayHint","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":2,"character":0}}}}}}}}"#,
+            uri
+        );
+        let inlay_resp = server.handle_message(&inlay_req).expect("Expected inlay hint response");
+        assert!(inlay_resp.contains("result"));
+
+        // Code Action
+        let ca_req = format!(
+            r#"{{"jsonrpc":"2.0","id":12,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":0,"character":0}}}},"context":{{"diagnostics":[]}}}}}}"#,
+            uri
+        );
+        let ca_resp = server.handle_message(&ca_req).expect("Expected code action response");
+        assert!(ca_resp.contains("Format Document"));
+
+        // Diagnostics notification published
+        let notifs = server.take_pending_notifications();
+        assert!(!notifs.is_empty());
+        assert!(notifs[0].contains("textDocument/publishDiagnostics"));
     }
 }

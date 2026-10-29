@@ -25,7 +25,7 @@ use pilot_fmt::{format_source, FormatOptions};
 use pilot_parser::parse;
 use pilot_rt::{BumpRegion, PilotVal};
 use pilot_span::LineIndex;
-use pilot_transpile::{ForeignAstIngester, IngestOptions, IrModule, LicenseVerifier, TargetLanguage, Transpiler};
+use pilot_transpile::{ForeignAstIngester, IngestOptions, IrModule, TargetLanguage, Transpiler};
 use pilot_vm::{Instruction, Opcode, PilcBinary, PilVirtualMachine};
 
 fn print_help() {
@@ -469,25 +469,98 @@ fn cmd_repl() {
 
 fn cmd_pkg(args: &[String]) {
     if args.is_empty() {
-        eprintln!("Usage: pilot pkg <install|build|audit> [package_name]");
+        eprintln!("Usage: pilot pkg <init|add|install|pack|unpack|audit> [args]");
         return;
     }
     match args[0].as_str() {
-        "install" => {
-            let pkg = args.get(1).map(|s| s.as_str()).unwrap_or("package");
-            println!("Installed package '{}' (viable license: MIT).", pkg);
+        "init" => {
+            let name = args.get(1).map(|s| s.as_str()).unwrap_or("my_package");
+            let manifest = pilot_pkg::PackageManifest::create_default(name);
+            if let Err(e) = manifest.save("pilot.json") {
+                eprintln!("error: failed to save pilot.json: {}", e);
+            } else {
+                let _ = fs::create_dir_all("src");
+                let main_path = "src/main.pilot";
+                if !Path::new(main_path).exists() {
+                    let _ = fs::write(main_path, "def main() {\n    println(\"Hello from Pilot package!\");\n}\n");
+                }
+                let lock = pilot_pkg::PackageLock::generate(&manifest);
+                let _ = lock.save("pilot.lock.json");
+                println!("Initialized new Pilot package '{}' (pilot.json, pilot.lock.json)", name);
+            }
         }
-        "build" => {
-            println!("Built package in current workspace.");
+        "add" => {
+            if args.len() < 2 {
+                eprintln!("Usage: pilot pkg add <package_spec> (e.g. math-lib@1.0.0, pip:requests@2.31.0, cargo:serde@1.0)");
+                return;
+            }
+            let spec_str = &args[1];
+            let spec = pilot_pkg::parse_package_spec(spec_str, None);
+            let mut manifest = pilot_pkg::PackageManifest::load("pilot.json")
+                .unwrap_or_else(|_| pilot_pkg::PackageManifest::create_default("pilot_project"));
+
+            if spec.ecosystem == "pilot" {
+                manifest.dependencies.insert(spec.name.clone(), spec.version.clone());
+            } else {
+                manifest.interop_dependencies
+                    .entry(spec.ecosystem.clone())
+                    .or_default()
+                    .insert(spec.name.clone(), spec.version.clone());
+            }
+            let _ = manifest.save("pilot.json");
+            let lock = pilot_pkg::PackageLock::generate(&manifest);
+            let _ = lock.save("pilot.lock.json");
+            println!("Added dependency '{}' (version: {}) [ecosystem: {}]", spec.name, spec.version, spec.ecosystem);
+        }
+        "install" => {
+            let manifest = match pilot_pkg::PackageManifest::load("pilot.json") {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("error: {}", e);
+                    return;
+                }
+            };
+            let lock = pilot_pkg::PackageLock::generate(&manifest);
+            let _ = lock.save("pilot.lock.json");
+            println!("Resolved and verified {} dependencies in pilot.lock.json.", lock.packages.len());
+        }
+        "pack" => {
+            let out_file = args.get(1).map(|s| s.as_str()).unwrap_or("package.pilpkg");
+            match pilot_pkg::pack_directory(".", out_file) {
+                Ok(n) => println!("Packed {} files into '{}'.", n, out_file),
+                Err(e) => eprintln!("error: failed to pack directory: {}", e),
+            }
+        }
+        "unpack" => {
+            if args.len() < 2 {
+                eprintln!("Usage: pilot pkg unpack <file.pilpkg> [dest_dir]");
+                return;
+            }
+            let pkg_file = &args[1];
+            let dest_dir = args.get(2).map(|s| s.as_str()).unwrap_or(".");
+            match pilot_pkg::unpack_archive(pkg_file, dest_dir) {
+                Ok(n) => println!("Unpacked {} files to '{}'.", n, dest_dir),
+                Err(e) => eprintln!("error: failed to unpack archive: {}", e),
+            }
         }
         "audit" => {
-            let check_mit = LicenseVerifier::is_viable_license("MIT");
-            let check_gpl = LicenseVerifier::is_viable_license("GPL-3.0");
-            assert!(check_mit);
-            assert!(!check_gpl);
-            println!("Package license audit passed: 100% compliant with '--viable-license-only'.");
+            let manifest = pilot_pkg::PackageManifest::load("pilot.json")
+                .unwrap_or_else(|_| pilot_pkg::PackageManifest::create_default("current_project"));
+            let report = pilot_pkg::audit_manifest_licenses(&manifest);
+            if report.is_compliant {
+                println!("Package license audit passed: 100% compliant with '--viable-license-only'.");
+                for (pkg, lic) in report.compliant_packages {
+                    println!("  [OK] {} ({})", pkg, lic);
+                }
+            } else {
+                eprintln!("Package license audit failed: non-viable licenses detected:");
+                for (pkg, lic) in report.non_compliant_packages {
+                    eprintln!("  [FAIL] {} ({})", pkg, lic);
+                }
+                std::process::exit(1);
+            }
         }
-        other => eprintln!("error: unknown pkg action '{}'. Expected: install, build, audit", other),
+        other => eprintln!("error: unknown pkg action '{}'. Expected: init, add, install, pack, unpack, audit", other),
     }
 }
 
@@ -499,15 +572,32 @@ fn cmd_venv(args: &[String]) {
     match args[0].as_str() {
         "init" => {
             let name = args.get(1).map(|s| s.as_str()).unwrap_or(".venv");
-            let p = Path::new(name);
-            let _ = fs::create_dir_all(p.join("bin"));
-            println!("Initialized virtual environment in '{}'", name);
+            match pilot_pkg::init_venv(name, None, false) {
+                Ok(p) => {
+                    println!("Initialized Pilot virtual environment in '{}'", p.display());
+                    println!("Activation scripts:");
+                    println!("  POSIX:      source {}/bin/activate", name);
+                    println!("  PowerShell: {}/bin/activate.ps1", name);
+                    println!("  Windows:    {}\\bin\\activate.bat", name);
+                }
+                Err(e) => eprintln!("error: failed to initialize venv: {}", e),
+            }
         }
         "activate" => {
-            println!("Activated Pilot virtual environment.");
+            if let Some(active) = pilot_pkg::get_active_venv() {
+                println!("Active Pilot virtual environment: {}", active.display());
+            } else {
+                println!("No virtual environment currently active. Run 'source .venv/bin/activate' to activate.");
+            }
         }
         "list" => {
-            println!("Available virtual environments:\n  - .venv (active)");
+            let active_str = pilot_pkg::get_active_venv()
+                .map(|p| format!(" (active: {})", p.display()))
+                .unwrap_or_default();
+            println!("Virtual environments in workspace{}:", active_str);
+            if Path::new(".venv").exists() {
+                println!("  - .venv");
+            }
         }
         other => eprintln!("error: unknown venv action '{}'. Expected: init, activate, list", other),
     }
@@ -516,43 +606,34 @@ fn cmd_venv(args: &[String]) {
 fn cmd_debug(args: &[String]) {
     let is_dap = args.iter().any(|a| a == "--dap");
     if is_dap {
-        println!("Pilot Debug Adapter Protocol (DAP) server listening on stdio.");
+        let stdin = io::stdin();
+        let reader = io::BufReader::new(stdin.lock());
+        let stdout = io::stdout();
+        let writer = io::BufWriter::new(stdout.lock());
+        let _ = pilot_dap::run_dap_stdio_server(reader, writer);
         return;
     }
 
     let file_arg = args.iter().find(|a| !a.starts_with('-'));
     match file_arg {
         Some(file_path) => {
-            println!("Interactive Pilot debugger attached to '{}'.", file_path);
-            println!("Type 'c' to continue execution, 's' to step, or 'q' to quit.");
-            print!("pilot-dbg> ");
-            io::stdout().flush().unwrap();
-
-            let stdin = io::stdin();
-            let mut line = String::new();
-            if stdin.read_line(&mut line).is_ok() {
-                let trimmed = line.trim();
-                if trimmed == "q" || trimmed == "quit" {
-                    println!("Debugging session terminated.");
-                    return;
-                }
-            }
-
-            println!("Continuing execution...");
-            cmd_run(&[file_path.clone()]);
+            let fp = file_path.clone();
+            let _ = pilot_dap::run_cli_debugger(file_path, move || {
+                cmd_run(&[fp.clone()]);
+            });
         }
         None => {
-            println!("Interactive Pilot debugger attached. Type 'c' to continue, 'q' to quit.");
+            eprintln!("Usage: pilot debug [--dap] <file.pilot>");
         }
     }
 }
 
 fn cmd_lsp(_args: &[String]) {
-    println!("Starting Pilot Language Server (pilot-lsp) on stdio...");
-    let mut server = pilot_lsp::LspServer::new();
-    let init_json = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#;
-    let resp = server.handle_message(init_json);
-    println!("LSP Server initialized: {:?}", resp);
+    let stdin = io::stdin();
+    let reader = io::BufReader::new(stdin.lock());
+    let stdout = io::stdout();
+    let writer = io::BufWriter::new(stdout.lock());
+    let _ = pilot_lsp::run_stdio_server(reader, writer);
 }
 
 fn cmd_perf(args: &[String]) {

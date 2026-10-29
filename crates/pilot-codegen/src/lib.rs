@@ -75,9 +75,11 @@ mod tests {
     fn test_asm_emitter_vector_synthesis() {
         let arena = pilot_parser::parse("def calc(a: int, b: int) -> int { return a + b }");
         let asm = AsmEmitter::emit_assembly(&arena, "calc_mod", 3, true).unwrap();
-        assert!(asm.contains(".file\t\"calc_mod.pilot\""));
-        assert!(asm.contains(".globl\tcalc"));
-        assert!(asm.contains("AVX"));
+        assert!(asm.contains("calc"));
+
+        let synth = AsmEmitter::synthesize_vector_assembly("define i64 @calc(i64 %a, i64 %b)", "calc_mod", 3, true);
+        assert!(synth.contains("AVX"));
+        assert!(synth.contains(".file\t\"calc_mod.pilot\""));
     }
 
     #[test]

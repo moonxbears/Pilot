@@ -16,6 +16,7 @@ pub struct LspServer {
     line_indices: HashMap<FileId, LineIndex>,
     next_file_id: u32,
     pub shutdown_requested: bool,
+    pub pending_notifications: Vec<String>,
 }
 
 impl LspServer {
@@ -27,7 +28,12 @@ impl LspServer {
             line_indices: HashMap::new(),
             next_file_id: 1,
             shutdown_requested: false,
+            pending_notifications: Vec::new(),
         }
+    }
+
+    pub fn take_pending_notifications(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_notifications)
     }
 
     fn get_or_create_file_id(&mut self, uri: &str) -> FileId {
@@ -120,6 +126,22 @@ impl LspServer {
                     Some(make_response(id, JsonValue::Array(Vec::new())).serialize())
                 }
             }
+            Some("textDocument/inlayHint") => {
+                if let Some(p) = params {
+                    let res = self.handle_inlay_hint(p);
+                    Some(make_response(id, res).serialize())
+                } else {
+                    Some(make_response(id, JsonValue::Array(Vec::new())).serialize())
+                }
+            }
+            Some("textDocument/codeAction") => {
+                if let Some(p) = params {
+                    let res = self.handle_code_action(p);
+                    Some(make_response(id, res).serialize())
+                } else {
+                    Some(make_response(id, JsonValue::Array(Vec::new())).serialize())
+                }
+            }
             Some("textDocument/semanticTokens/full") => {
                 if let Some(p) = params {
                     let res = self.handle_semantic_tokens_full(p);
@@ -172,6 +194,8 @@ impl LspServer {
             ("definitionProvider".to_string(), JsonValue::Bool(true)),
             ("documentSymbolProvider".to_string(), JsonValue::Bool(true)),
             ("documentFormattingProvider".to_string(), JsonValue::Bool(true)),
+            ("inlayHintProvider".to_string(), JsonValue::Bool(true)),
+            ("codeActionProvider".to_string(), JsonValue::Bool(true)),
             ("semanticTokensProvider".to_string(), JsonValue::Object(vec![
                 ("legend".to_string(), JsonValue::Object(vec![
                     ("tokenTypes".to_string(), JsonValue::Array(token_types)),
@@ -207,6 +231,7 @@ impl LspServer {
         let file_id = self.get_or_create_file_id(uri);
         self.line_indices.insert(file_id, LineIndex::new(text.as_bytes()));
         self.db.set_source(file_id, text);
+        self.emit_diagnostics_for_file(file_id, uri);
     }
 
     fn handle_did_change(&mut self, params: &JsonValue) {
@@ -255,6 +280,7 @@ impl LspServer {
                 self.line_indices.insert(file_id, LineIndex::new(replacement.as_bytes()));
             }
         }
+        self.emit_diagnostics_for_file(file_id, uri);
     }
 
     fn handle_hover(&self, params: &JsonValue) -> JsonValue {
@@ -505,6 +531,183 @@ impl LspServer {
         let byte_offset = li.line_col_to_offset(line + 1, col + 1)?;
         Some((file_id, byte_offset))
     }
+
+    fn handle_inlay_hint(&self, params: &JsonValue) -> JsonValue {
+        let uri = match params.get("textDocument").and_then(|d| d.get("uri")).and_then(|u| u.as_str()) {
+            Some(u) => u,
+            None => return JsonValue::Array(Vec::new()),
+        };
+        let file_id = match self.uri_to_file_id.get(uri) {
+            Some(&id) => id,
+            None => return JsonValue::Array(Vec::new()),
+        };
+        let src = match self.db.source_text(file_id) {
+            Some(s) => s,
+            None => return JsonValue::Array(Vec::new()),
+        };
+
+        let arena = pilot_parser::parse(&src);
+        let root = pilot_ast::NodeId(if arena.nodes.is_empty() { 0 } else { (arena.nodes.len() - 1) as u32 });
+        let analysis = pilot_analysis::AnalysisPipeline::analyze(&arena, root);
+
+        let mut hints = Vec::new();
+        let li = match self.line_indices.get(&file_id) {
+            Some(l) => l,
+            None => return JsonValue::Array(Vec::new()),
+        };
+
+        for (node_idx, node) in arena.nodes.iter().enumerate() {
+            if node.kind == pilot_ast::NodeKind::LetStmt as u16 || node.kind == pilot_ast::NodeKind::VarStmt as u16 {
+                if let Some(&ty_id) = analysis.inferred_types.get(&(node_idx as u32)) {
+                    let type_name = match analysis.types.get(ty_id) {
+                        pilot_analysis::TypeKind::Primitive(p) => p.clone(),
+                        pilot_analysis::TypeKind::Collection { element, .. } => format!("List[{}]", element.0),
+                        pilot_analysis::TypeKind::Map { key, value } => format!("Map[{}, {}]", key.0, value.0),
+                        pilot_analysis::TypeKind::Option(inner) => format!("{}?", inner.0),
+                        _ => "any".to_string(),
+                    };
+
+                    let span = arena.spans[node_idx];
+                    let (line, col) = li.offset_to_line_col(span.end);
+                    hints.push(JsonValue::Object(vec![
+                        ("position".to_string(), JsonValue::Object(vec![
+                            ("line".to_string(), JsonValue::Number(line.saturating_sub(1) as f64)),
+                            ("character".to_string(), JsonValue::Number(col.saturating_sub(1) as f64)),
+                        ])),
+                        ("label".to_string(), JsonValue::String(format!(": {}", type_name))),
+                        ("kind".to_string(), JsonValue::Number(1.0)),
+                        ("paddingLeft".to_string(), JsonValue::Bool(true)),
+                    ]));
+                }
+            }
+        }
+
+        JsonValue::Array(hints)
+    }
+
+    fn handle_code_action(&self, params: &JsonValue) -> JsonValue {
+        let uri = match params.get("textDocument").and_then(|d| d.get("uri")).and_then(|u| u.as_str()) {
+            Some(u) => u,
+            None => return JsonValue::Array(Vec::new()),
+        };
+        let _ = uri;
+
+        let actions = vec![
+            JsonValue::Object(vec![
+                ("title".to_string(), JsonValue::String("Format Document with pilot fmt".to_string())),
+                ("kind".to_string(), JsonValue::String("source.fixAll".to_string())),
+                ("command".to_string(), JsonValue::Object(vec![
+                    ("title".to_string(), JsonValue::String("Format Document".to_string())),
+                    ("command".to_string(), JsonValue::String("editor.action.formatDocument".to_string())),
+                ])),
+            ]),
+        ];
+
+        JsonValue::Array(actions)
+    }
+
+    fn emit_diagnostics_for_file(&mut self, file_id: FileId, uri: &str) {
+        let src = match self.db.source_text(file_id) {
+            Some(s) => s,
+            None => return,
+        };
+
+        let arena = pilot_parser::parse(&src);
+        let root = pilot_ast::NodeId(if arena.nodes.is_empty() { 0 } else { (arena.nodes.len() - 1) as u32 });
+        let analysis = pilot_analysis::AnalysisPipeline::analyze(&arena, root);
+
+        let mut diags_json = Vec::new();
+        if let Some(li) = self.line_indices.get(&file_id) {
+            for diag in analysis.diagnostics {
+                let span = diag.span;
+                let (sl, sc) = li.offset_to_line_col(span.start);
+                let (el, ec) = li.offset_to_line_col(span.end.max(span.start));
+                let s_line = sl.saturating_sub(1);
+                let s_col = sc.saturating_sub(1);
+                let e_line = el.saturating_sub(1);
+                let e_col = ec.saturating_sub(1);
+
+                let sev = match diag.severity {
+                    pilot_analysis::DiagnosticSeverity::Error => 1.0,
+                    pilot_analysis::DiagnosticSeverity::Warning => 2.0,
+                    pilot_analysis::DiagnosticSeverity::Info => 3.0,
+                    pilot_analysis::DiagnosticSeverity::Hint => 4.0,
+                };
+
+                diags_json.push(JsonValue::Object(vec![
+                    ("range".to_string(), make_range(s_line, s_col, e_line, e_col)),
+                    ("severity".to_string(), JsonValue::Number(sev)),
+                    ("message".to_string(), JsonValue::String(diag.message)),
+                    ("source".to_string(), JsonValue::String("pilot".to_string())),
+                ]));
+            }
+        }
+
+        let notif = JsonValue::Object(vec![
+            ("jsonrpc".to_string(), JsonValue::String("2.0".to_string())),
+            ("method".to_string(), JsonValue::String("textDocument/publishDiagnostics".to_string())),
+            ("params".to_string(), JsonValue::Object(vec![
+                ("uri".to_string(), JsonValue::String(uri.to_string())),
+                ("diagnostics".to_string(), JsonValue::Array(diags_json)),
+            ])),
+        ]);
+        self.pending_notifications.push(notif.serialize());
+    }
+}
+
+/// Runs a persistent `Content-Length`-framed JSON-RPC 2.0 loop reading from `reader` and writing to `writer`.
+pub fn run_stdio_server<R: std::io::BufRead, W: std::io::Write>(mut reader: R, mut writer: W) -> std::io::Result<()> {
+    let mut server = LspServer::new();
+    loop {
+        if server.shutdown_requested {
+            break;
+        }
+
+        let mut line = String::new();
+        let bytes_read = reader.read_line(&mut line)?;
+        if bytes_read == 0 {
+            break; // EOF
+        }
+
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("Content-Length:") {
+            let content_len: usize = match rest.trim().parse() {
+                Ok(len) => len,
+                Err(_) => continue,
+            };
+
+            // Read headers until empty line
+            loop {
+                line.clear();
+                let n = reader.read_line(&mut line)?;
+                if n == 0 || line.trim().is_empty() {
+                    break;
+                }
+            }
+
+            // Read exact payload bytes
+            let mut payload = vec![0u8; content_len];
+            reader.read_exact(&mut payload)?;
+            let raw_json = String::from_utf8_lossy(&payload);
+
+            if let Some(resp) = server.handle_message(&raw_json) {
+                let out = format!("Content-Length: {}\r\n\r\n{}", resp.len(), resp);
+                writer.write_all(out.as_bytes())?;
+            }
+
+            for notif in server.take_pending_notifications() {
+                let out = format!("Content-Length: {}\r\n\r\n{}", notif.len(), notif);
+                writer.write_all(out.as_bytes())?;
+            }
+
+            writer.flush()?;
+        }
+    }
+    Ok(())
 }
 
 fn make_response(id: Option<JsonValue>, result: JsonValue) -> JsonValue {

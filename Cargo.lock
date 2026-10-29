@@ -48,12 +48,14 @@ dependencies = [
  "pilot-analysis",
  "pilot-ast",
  "pilot-codegen",
+ "pilot-dap",
  "pilot-fmt",
  "pilot-intern",
  "pilot-lexer",
  "pilot-lsp",
  "pilot-parser",
  "pilot-perceus",
+ "pilot-pkg",
  "pilot-polyglot",
  "pilot-rt",
  "pilot-span",
@@ -73,6 +75,18 @@ dependencies = [
  "pilot-perceus",
  "pilot-rt",
  "pilot-span",
+]
+
+[[package]]
+name = "pilot-dap"
+version = "1.1.0"
+dependencies = [
+ "pilot-analysis",
+ "pilot-ast",
+ "pilot-parser",
+ "pilot-rt",
+ "pilot-span",
+ "pilot-vm",
 ]
 
 [[package]]
@@ -146,10 +160,13 @@ dependencies = [
 name = "pilot-lsp"
 version = "1.1.0"
 dependencies = [
+ "pilot-analysis",
+ "pilot-ast",
  "pilot-db",
  "pilot-fmt",
  "pilot-incremental",
  "pilot-lexer",
+ "pilot-parser",
  "pilot-span",
  "pilot-syntax",
 ]
@@ -175,6 +192,14 @@ dependencies = [
  "pilot-intern",
  "pilot-parser",
  "pilot-span",
+]
+
+[[package]]
+name = "pilot-pkg"
+version = "1.1.0"
+dependencies = [
+ "pilot-rt",
+ "pilot-transpile",
 ]
 
 [[package]]

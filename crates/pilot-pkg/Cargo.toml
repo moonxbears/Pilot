@@ -1,0 +1,15 @@
+[package]
+name = "pilot-pkg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Native package manager & virtual environment manager for Pilot"
+
+[lib]
+name = "pilot_pkg"
+path = "src/lib.rs"
+
+[dependencies]
+pilot-rt = { path = "../pilot-rt" }
+pilot-transpile = { path = "../pilot-transpile" }

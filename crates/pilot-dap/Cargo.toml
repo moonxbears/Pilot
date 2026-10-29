@@ -1,0 +1,23 @@
+[package]
+name = "pilot-dap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Native Debug Adapter Protocol (DAP) server & interactive debugger for Pilot"
+
+[[bin]]
+name = "pilot-dap"
+path = "src/main.rs"
+
+[lib]
+name = "pilot_dap"
+path = "src/lib.rs"
+
+[dependencies]
+pilot-rt = { path = "../pilot-rt" }
+pilot-vm = { path = "../pilot-vm" }
+pilot-ast = { path = "../pilot-ast" }
+pilot-parser = { path = "../pilot-parser" }
+pilot-analysis = { path = "../pilot-analysis" }
+pilot-span = { path = "../pilot-span" }

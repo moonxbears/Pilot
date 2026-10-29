@@ -288,6 +288,35 @@ pub unsafe extern "C" fn pilot_rt_chan_free(chan_ptr: *mut c_void) {
     }
 }
 
+#[no_mangle]
+pub extern "C" fn pilot_rt_time_now_ns() -> u64 {
+    crate::time::now_nanos()
+}
+
+#[no_mangle]
+pub extern "C" fn pilot_rt_sleep_ms(ms: u64) {
+    crate::time::sleep_ms(ms);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_rt_crypto_sha256(data: *const u8, len: usize, out_hash: *mut u8) {
+    if data.is_null() || out_hash.is_null() {
+        return;
+    }
+    let slice = core::slice::from_raw_parts(data, len);
+    let hash = crate::crypto::sha256(slice);
+    core::ptr::copy_nonoverlapping(hash.as_ptr(), out_hash, 32);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pilot_rt_crypto_random_bytes(out_ptr: *mut u8, len: usize) {
+    if out_ptr.is_null() || len == 0 {
+        return;
+    }
+    let bytes = crate::crypto::random_bytes(len);
+    core::ptr::copy_nonoverlapping(bytes.as_ptr(), out_ptr, len);
+}
+
 /// Generates the canonical `pilot_runtime.h` C header for native compilation.
 pub fn generate_c_runtime_header() -> &'static str {
     r#"/* Pilot Language Native C-ABI Runtime Header (C11 / C23) */
@@ -365,6 +394,17 @@ static inline void pilot_rt_str_free(char* ptr) { free(ptr); }
 static inline void pilot_rt_print_i64(int64_t val) { printf("%lld\n", (long long)val); }
 static inline void pilot_rt_print_f64(double val) { printf("%f\n", val); }
 static inline void pilot_rt_print_str(const char* s) { printf("%s\n", s ? s : ""); }
+static inline uint64_t pilot_rt_time_now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
+static inline void pilot_rt_sleep_ms(uint64_t ms) {
+    struct timespec ts;
+    ts.tv_sec = (time_t)(ms / 1000);
+    ts.tv_nsec = (long)((ms % 1000) * 1000000);
+    nanosleep(&ts, NULL);
+}
 static inline void pilot_rt_panic_contract(const char* msg, const char* file, uint32_t line) {
     fprintf(stderr, "Pilot runtime panic: %s at %s:%u\n", msg ? msg : "failed", file ? file : "<unknown>", line);
     exit(101);

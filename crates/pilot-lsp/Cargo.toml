@@ -21,3 +21,6 @@ pilot-syntax = { path = "../pilot-syntax" }
 pilot-fmt = { path = "../pilot-fmt" }
 pilot-incremental = { path = "../pilot-incremental" }
 pilot-db = { path = "../pilot-db" }
+pilot-parser = { path = "../pilot-parser" }
+pilot-ast = { path = "../pilot-ast" }
+pilot-analysis = { path = "../pilot-analysis" }
