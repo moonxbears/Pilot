@@ -127,7 +127,7 @@ pub fn scan_raw_tokens<'a>(src: &'a str) -> Vec<RawToken<'a>> {
             continue;
         }
 
-        // 5. Triple Strings (""" or ''')
+        // 5. Triple Strings (""" or ''') or F-Triple Strings (f""" or f''')
         if (b == b'"' || b == b'\'') && cur + 2 < bytes.len() && bytes[cur + 1] == b && bytes[cur + 2] == b {
             cur += 3;
             while cur + 2 < bytes.len() {
@@ -139,6 +139,57 @@ pub fn scan_raw_tokens<'a>(src: &'a str) -> Vec<RawToken<'a>> {
             }
             tokens.push(RawToken {
                 kind: SyntaxKind::TripleStrLit,
+                text: &src[start..cur],
+                span: ByteSpan::new(start as u32, cur as u32),
+            });
+            continue;
+        }
+
+        // 5b. Interpolated F-Strings: f"...", f'...', $"...", $'...'
+        if (b == b'f' || b == b'F' || b == b'$')
+            && cur + 1 < bytes.len()
+            && (bytes[cur + 1] == b'"' || bytes[cur + 1] == b'\'')
+        {
+            let quote = bytes[cur + 1];
+            // Check for f""" or f'''
+            if cur + 3 < bytes.len() && bytes[cur + 2] == quote && bytes[cur + 3] == quote {
+                cur += 4;
+                while cur + 2 < bytes.len() {
+                    if bytes[cur] == quote && bytes[cur + 1] == quote && bytes[cur + 2] == quote {
+                        cur += 3;
+                        break;
+                    }
+                    cur += 1;
+                }
+                tokens.push(RawToken {
+                    kind: SyntaxKind::TripleStrLit,
+                    text: &src[start..cur],
+                    span: ByteSpan::new(start as u32, cur as u32),
+                });
+                continue;
+            }
+
+            cur += 2;
+            let mut escaped = false;
+            while cur < bytes.len() {
+                let c = bytes[cur];
+                if escaped {
+                    escaped = false;
+                    cur += 1;
+                } else if c == b'\\' {
+                    escaped = true;
+                    cur += 1;
+                } else if c == quote {
+                    cur += 1;
+                    break;
+                } else if c == b'\n' || c == b'\r' {
+                    break;
+                } else {
+                    cur += 1;
+                }
+            }
+            tokens.push(RawToken {
+                kind: SyntaxKind::FStrStart,
                 text: &src[start..cur],
                 span: ByteSpan::new(start as u32, cur as u32),
             });
@@ -174,31 +225,141 @@ pub fn scan_raw_tokens<'a>(src: &'a str) -> Vec<RawToken<'a>> {
             continue;
         }
 
-        // 7. Numbers (Int, Hex, Bin, Oct, Float)
-        if b >= b'0' && b <= b'9' {
+        // 7. Numbers & Dimensional Literals (Int, Hex, Bin, Oct, Float, Duration, Frequency, Memory)
+        if b.is_ascii_digit() {
+            if b == b'0' && cur + 1 < bytes.len() {
+                let spec = bytes[cur + 1];
+                if spec == b'x' || spec == b'X' {
+                    cur += 2;
+                    while cur < bytes.len() && (bytes[cur].is_ascii_hexdigit() || bytes[cur] == b'_') {
+                        cur += 1;
+                    }
+                    tokens.push(RawToken {
+                        kind: SyntaxKind::HexIntLit,
+                        text: &src[start..cur],
+                        span: ByteSpan::new(start as u32, cur as u32),
+                    });
+                    continue;
+                } else if spec == b'b' || spec == b'B' {
+                    cur += 2;
+                    while cur < bytes.len() && (bytes[cur] == b'0' || bytes[cur] == b'1' || bytes[cur] == b'_') {
+                        cur += 1;
+                    }
+                    tokens.push(RawToken {
+                        kind: SyntaxKind::BinIntLit,
+                        text: &src[start..cur],
+                        span: ByteSpan::new(start as u32, cur as u32),
+                    });
+                    continue;
+                } else if spec == b'o' || spec == b'O' {
+                    cur += 2;
+                    while cur < bytes.len() && ((bytes[cur] >= b'0' && bytes[cur] <= b'7') || bytes[cur] == b'_') {
+                        cur += 1;
+                    }
+                    tokens.push(RawToken {
+                        kind: SyntaxKind::OctIntLit,
+                        text: &src[start..cur],
+                        span: ByteSpan::new(start as u32, cur as u32),
+                    });
+                    continue;
+                }
+            }
+
             let mut is_float = false;
-            cur += 1;
-            if cur < bytes.len() && (bytes[cur] == b'x' || bytes[cur] == b'X' || bytes[cur] == b'b' || bytes[cur] == b'B' || bytes[cur] == b'o' || bytes[cur] == b'O') {
+            while cur < bytes.len() && (bytes[cur].is_ascii_digit() || bytes[cur] == b'_') {
                 cur += 1;
-                while cur < bytes.len() && (bytes[cur].is_ascii_alphanumeric() || bytes[cur] == b'_') {
+            }
+            if cur + 1 < bytes.len() && bytes[cur] == b'.' && bytes[cur + 1].is_ascii_digit() {
+                is_float = true;
+                cur += 1;
+                while cur < bytes.len() && (bytes[cur].is_ascii_digit() || bytes[cur] == b'_') {
                     cur += 1;
                 }
-            } else {
-                while cur < bytes.len() {
-                    let c = bytes[cur];
-                    if c >= b'0' && c <= b'9' || c == b'_' {
+            }
+            if cur < bytes.len() && (bytes[cur] == b'e' || bytes[cur] == b'E') {
+                let mut exp_cur = cur + 1;
+                if exp_cur < bytes.len() && (bytes[exp_cur] == b'+' || bytes[exp_cur] == b'-') {
+                    exp_cur += 1;
+                }
+                if exp_cur < bytes.len() && bytes[exp_cur].is_ascii_digit() {
+                    is_float = true;
+                    cur = exp_cur + 1;
+                    while cur < bytes.len() && (bytes[cur].is_ascii_digit() || bytes[cur] == b'_') {
                         cur += 1;
-                    } else if c == b'.' && !is_float && cur + 1 < bytes.len() && bytes[cur + 1] >= b'0' && bytes[cur + 1] <= b'9' {
-                        is_float = true;
-                        cur += 2;
-                    } else {
-                        break;
                     }
                 }
             }
-            let kind = if is_float { SyntaxKind::FloatLit } else { SyntaxKind::IntLit };
+
+            // Check for physical unit suffix (Duration, Frequency, Memory) not followed by ident chars
+            let rem = &src[cur..];
+            let (dim_kind, dim_len) = if rem.starts_with("min")
+                || rem.starts_with("GHz")
+                || rem.starts_with("MHz")
+                || rem.starts_with("kHz")
+            {
+                let k = if rem.starts_with("min") {
+                    SyntaxKind::DurationLit
+                } else {
+                    SyntaxKind::FrequencyLit
+                };
+                (Some(k), 3)
+            } else if rem.starts_with("ns") || rem.starts_with("us") || rem.starts_with("ms") {
+                (Some(SyntaxKind::DurationLit), 2)
+            } else if rem.starts_with("Hz") {
+                (Some(SyntaxKind::FrequencyLit), 2)
+            } else if rem.starts_with("TB")
+                || rem.starts_with("GB")
+                || rem.starts_with("MB")
+                || rem.starts_with("KB")
+            {
+                (Some(SyntaxKind::MemoryLit), 2)
+            } else if rem.starts_with('s') || rem.starts_with('h') {
+                (Some(SyntaxKind::DurationLit), 1)
+            } else if rem.starts_with('B') {
+                (Some(SyntaxKind::MemoryLit), 1)
+            } else {
+                (None, 0)
+            };
+
+            let kind = if let Some(dk) = dim_kind {
+                let after = cur + dim_len;
+                let followed_by_ident =
+                    after < bytes.len() && (bytes[after].is_ascii_alphanumeric() || bytes[after] == b'_');
+                if !followed_by_ident {
+                    cur = after;
+                    dk
+                } else if is_float {
+                    SyntaxKind::FloatLit
+                } else {
+                    SyntaxKind::IntLit
+                }
+            } else if is_float {
+                SyntaxKind::FloatLit
+            } else {
+                SyntaxKind::IntLit
+            };
+
             tokens.push(RawToken {
                 kind,
+                text: &src[start..cur],
+                span: ByteSpan::new(start as u32, cur as u32),
+            });
+            continue;
+        }
+
+        // 7b. First-Class Keyword Literals (:keyword or :ns/keyword)
+        if b == b':'
+            && cur + 1 < bytes.len()
+            && (bytes[cur + 1].is_ascii_alphabetic() || bytes[cur + 1] == b'_')
+        {
+            cur += 1;
+            while cur < bytes.len()
+                && (bytes[cur].is_ascii_alphanumeric() || bytes[cur] == b'_' || bytes[cur] == b'/')
+            {
+                cur += 1;
+            }
+            tokens.push(RawToken {
+                kind: SyntaxKind::KeywordLit,
                 text: &src[start..cur],
                 span: ByteSpan::new(start as u32, cur as u32),
             });
@@ -212,7 +373,9 @@ pub fn scan_raw_tokens<'a>(src: &'a str) -> Vec<RawToken<'a>> {
                 cur += 1;
             }
             let ident = &src[start..cur];
-            let kind = if let Some((kw, _)) = lookup_keyword(ident) {
+            let kind = if ident == "_" {
+                SyntaxKind::Underscore
+            } else if let Some((kw, _)) = lookup_keyword(ident) {
                 SyntaxKind::from_token_kind(kw)
             } else {
                 SyntaxKind::Ident
@@ -226,124 +389,85 @@ pub fn scan_raw_tokens<'a>(src: &'a str) -> Vec<RawToken<'a>> {
         }
 
         // 9. Call Quotes and Multi-character Operators
-        let (kind, len) = match b {
-            b'!' => {
-                if cur + 2 < bytes.len() && bytes[cur + 1] == b'!' && bytes[cur + 2] == b'(' {
-                    (SyntaxKind::CallQuoteDeep, 2)
-                } else if cur + 2 < bytes.len() && bytes[cur + 1] == b'&' && bytes[cur + 2] == b'(' {
-                    (SyntaxKind::CallQuoteAbi, 2)
-                } else if cur + 2 < bytes.len() && bytes[cur + 1] == b'^' && bytes[cur + 2] == b'(' {
-                    (SyntaxKind::CallQuoteReact, 2)
-                } else if cur + 2 < bytes.len() && bytes[cur + 1] == b'@' && bytes[cur + 2] == b'(' {
-                    (SyntaxKind::CallQuoteAdjoint, 2)
-                } else if cur + 2 < bytes.len() && bytes[cur + 1] == b'?' && bytes[cur + 2] == b'(' {
-                    (SyntaxKind::CallQuoteEffect, 2)
-                } else if cur + 1 < bytes.len() && bytes[cur + 1] == b'(' {
-                    (SyntaxKind::CallQuoteShallow, 1)
-                } else if cur + 1 < bytes.len() && bytes[cur + 1] == b'=' {
-                    (SyntaxKind::NotEqual, 2)
-                } else {
-                    (SyntaxKind::Exclamation, 1)
-                }
-            }
-            b'=' => {
-                if cur + 1 < bytes.len() && bytes[cur + 1] == b'=' {
-                    (SyntaxKind::EqEqual, 2)
-                } else if cur + 1 < bytes.len() && bytes[cur + 1] == b'>' {
-                    (SyntaxKind::FatArrow, 2)
-                } else {
-                    (SyntaxKind::Equal, 1)
-                }
-            }
-            b'<' => {
-                if cur + 1 < bytes.len() && bytes[cur + 1] == b'=' {
-                    (SyntaxKind::LessEqual, 2)
-                } else if cur + 1 < bytes.len() && bytes[cur + 1] == b'-' {
-                    (SyntaxKind::ArrowLeft, 2)
-                } else if cur + 1 < bytes.len() && bytes[cur + 1] == b'|' {
-                    (SyntaxKind::PipeBackward, 2)
-                } else {
-                    (SyntaxKind::Less, 1)
-                }
-            }
-            b'>' => {
-                if cur + 1 < bytes.len() && bytes[cur + 1] == b'=' {
-                    (SyntaxKind::GreaterEqual, 2)
-                } else {
-                    (SyntaxKind::Greater, 1)
-                }
-            }
-            b'-' => {
-                if cur + 1 < bytes.len() && bytes[cur + 1] == b'>' {
-                    (SyntaxKind::Arrow, 2)
-                } else {
-                    (SyntaxKind::Minus, 1)
-                }
-            }
-            b'|' => {
-                if cur + 1 < bytes.len() && bytes[cur + 1] == b'>' {
-                    (SyntaxKind::PipeForward, 2)
-                } else {
-                    (SyntaxKind::Vbar, 1)
-                }
-            }
-            b'.' => {
-                if cur + 2 < bytes.len() && bytes[cur + 1] == b'.' && bytes[cur + 2] == b'=' {
-                    (SyntaxKind::DotDotEqual, 3)
-                } else if cur + 2 < bytes.len() && bytes[cur + 1] == b'.' && bytes[cur + 2] == b'<' {
-                    (SyntaxKind::DotDotLess, 3)
-                } else if cur + 1 < bytes.len() && bytes[cur + 1] == b'.' {
-                    (SyntaxKind::DotDot, 2)
-                } else {
-                    (SyntaxKind::Dot, 1)
-                }
-            }
-            b'?' => {
-                if cur + 1 < bytes.len() && bytes[cur + 1] == b'?' {
-                    (SyntaxKind::Coalesce, 2)
-                } else if cur + 1 < bytes.len() && bytes[cur + 1] == b'.' {
-                    (SyntaxKind::SafeNav, 2)
-                } else {
-                    (SyntaxKind::Question, 1)
-                }
-            }
-            b':' => {
-                if cur + 1 < bytes.len() && bytes[cur + 1] == b'=' {
-                    (SyntaxKind::Walrus, 2)
-                } else {
-                    (SyntaxKind::Colon, 1)
-                }
-            }
-            b'*' => {
-                if cur + 1 < bytes.len() && bytes[cur + 1] == b'*' {
-                    (SyntaxKind::DoubleStar, 2)
-                } else {
-                    (SyntaxKind::Star, 1)
-                }
-            }
-            b'/' => {
-                if cur + 1 < bytes.len() && bytes[cur + 1] == b'/' {
-                    (SyntaxKind::DoubleSlash, 2)
-                } else {
-                    (SyntaxKind::Slash, 1)
-                }
-            }
-            b'+' => (SyntaxKind::Plus, 1),
-            b'%' => (SyntaxKind::Percent, 1),
-            b'&' => (SyntaxKind::Ampersand, 1),
-            b'^' => (SyntaxKind::Caret, 1),
-            b'~' => (SyntaxKind::Tilde, 1),
-            b'$' => (SyntaxKind::Dollar, 1),
-            b'@' => (SyntaxKind::At, 1),
-            b'(' => (SyntaxKind::LParen, 1),
-            b')' => (SyntaxKind::RParen, 1),
-            b'{' => (SyntaxKind::LBrace, 1),
-            b'}' => (SyntaxKind::RBrace, 1),
-            b'[' => (SyntaxKind::LBracket, 1),
-            b']' => (SyntaxKind::RBracket, 1),
-            b';' => (SyntaxKind::Semicolon, 1),
-            b',' => (SyntaxKind::Comma, 1),
-            _ => (SyntaxKind::ErrorToken, 1),
+        let b1 = if cur + 1 < bytes.len() { bytes[cur + 1] } else { 0 };
+        let b2 = if cur + 2 < bytes.len() { bytes[cur + 2] } else { 0 };
+
+        let (kind, len) = match (b, b1, b2) {
+            (b'!', b'!', b'(') => (SyntaxKind::CallQuoteDeep, 2),
+            (b'!', b'&', b'(') => (SyntaxKind::CallQuoteAbi, 2),
+            (b'!', b'^', b'(') => (SyntaxKind::CallQuoteReact, 2),
+            (b'!', b'@', b'(') => (SyntaxKind::CallQuoteAdjoint, 2),
+            (b'!', b'?', b'(') => (SyntaxKind::CallQuoteEffect, 2),
+            (b'-', b'>', b'>') => (SyntaxKind::JsonGetText, 3),
+            (b'?', b'.', b'.') => (SyntaxKind::Cascade, 3),
+            (b'?', b'?', b'=') => (SyntaxKind::CoalesceEqual, 3),
+            (b'.', b'.', b'=') => (SyntaxKind::DotDotEqual, 3),
+            (b'.', b'.', b'<') => (SyntaxKind::DotDotLess, 3),
+            (b'.', b'.', b'.') => (SyntaxKind::Ellipsis, 3),
+            (b'*', b'*', b'=') => (SyntaxKind::DoubleStarEqual, 3),
+            (b'/', b'/', b'=') => (SyntaxKind::DoubleSlashEqual, 3),
+            (b'<', b'<', b'=') => (SyntaxKind::ShiftLeftEqual, 3),
+            (b'>', b'>', b'=') => (SyntaxKind::ShiftRightEqual, 3),
+            _ => match (b, b1) {
+                (b'!', b'(') => (SyntaxKind::CallQuoteShallow, 1),
+                (b'!', b'=') | (b'<', b'>') => (SyntaxKind::NotEqual, 2),
+                (b'=', b'=') => (SyntaxKind::EqEqual, 2),
+                (b'=', b'>') => (SyntaxKind::FatArrow, 2),
+                (b'<', b'=') => (SyntaxKind::LessEqual, 2),
+                (b'<', b'-') => (SyntaxKind::ArrowLeft, 2),
+                (b'<', b'|') => (SyntaxKind::PipeBackward, 2),
+                (b'<', b'<') => (SyntaxKind::ShiftLeft, 2),
+                (b'<', b'@') => (SyntaxKind::JsonContained, 2),
+                (b'>', b'=') => (SyntaxKind::GreaterEqual, 2),
+                (b'>', b'>') => (SyntaxKind::ShiftRight, 2),
+                (b'-', b'>') => (SyntaxKind::Arrow, 2),
+                (b'-', b'=') => (SyntaxKind::MinusEqual, 2),
+                (b'+', b'=') => (SyntaxKind::PlusEqual, 2),
+                (b'*', b'*') => (SyntaxKind::DoubleStar, 2),
+                (b'*', b'=') => (SyntaxKind::StarEqual, 2),
+                (b'/', b'/') => (SyntaxKind::DoubleSlash, 2),
+                (b'/', b'=') => (SyntaxKind::SlashEqual, 2),
+                (b'%', b'=') => (SyntaxKind::PercentEqual, 2),
+                (b'&', b'=') => (SyntaxKind::AmperEqual, 2),
+                (b'|', b'>') => (SyntaxKind::PipeForward, 2),
+                (b'|', b'=') => (SyntaxKind::VbarEqual, 2),
+                (b'^', b'=') => (SyntaxKind::CaretEqual, 2),
+                (b'@', b'>') => (SyntaxKind::JsonContains, 2),
+                (b'.', b'.') => (SyntaxKind::DotDot, 2),
+                (b'?', b'?') => (SyntaxKind::Coalesce, 2),
+                (b'?', b'.') => (SyntaxKind::SafeNav, 2),
+                (b':', b'=') => (SyntaxKind::Walrus, 2),
+                _ => match b {
+                    b'!' => (SyntaxKind::Exclamation, 1),
+                    b'=' => (SyntaxKind::Equal, 1),
+                    b'<' => (SyntaxKind::Less, 1),
+                    b'>' => (SyntaxKind::Greater, 1),
+                    b'-' => (SyntaxKind::Minus, 1),
+                    b'|' => (SyntaxKind::Vbar, 1),
+                    b'.' => (SyntaxKind::Dot, 1),
+                    b'?' => (SyntaxKind::Question, 1),
+                    b':' => (SyntaxKind::Colon, 1),
+                    b'*' => (SyntaxKind::Star, 1),
+                    b'/' => (SyntaxKind::Slash, 1),
+                    b'+' => (SyntaxKind::Plus, 1),
+                    b'%' => (SyntaxKind::Percent, 1),
+                    b'&' => (SyntaxKind::Ampersand, 1),
+                    b'^' => (SyntaxKind::Caret, 1),
+                    b'~' => (SyntaxKind::Tilde, 1),
+                    b'$' => (SyntaxKind::Dollar, 1),
+                    b'@' => (SyntaxKind::At, 1),
+                    b'`' => (SyntaxKind::Backquote, 1),
+                    b'(' => (SyntaxKind::LParen, 1),
+                    b')' => (SyntaxKind::RParen, 1),
+                    b'{' => (SyntaxKind::LBrace, 1),
+                    b'}' => (SyntaxKind::RBrace, 1),
+                    b'[' => (SyntaxKind::LBracket, 1),
+                    b']' => (SyntaxKind::RBracket, 1),
+                    b';' => (SyntaxKind::Semicolon, 1),
+                    b',' => (SyntaxKind::Comma, 1),
+                    _ => (SyntaxKind::ErrorToken, 1),
+                },
+            },
         };
 
         cur += len;
@@ -454,6 +578,11 @@ impl<'a, 't> CstParser<'a, 't> {
 
     fn at(&self, kind: SyntaxKind) -> bool {
         self.peek() == kind
+    }
+
+    fn at_ident_like(&self) -> bool {
+        let k = self.peek();
+        k.is_ident_like() || k == SyntaxKind::Underscore
     }
 
     fn emit_trivia(&mut self) {
@@ -605,7 +734,7 @@ impl<'a, 't> CstParser<'a, 't> {
         self.sink.start_node(SyntaxKind::FnDecl);
         self.advance(); // 'def' or 'fn'
 
-        if self.at(SyntaxKind::Ident) {
+        if self.at_ident_like() {
             self.advance(); // function name
         } else {
             self.sink.token(SyntaxKind::MissingIdent, "");
@@ -644,7 +773,7 @@ impl<'a, 't> CstParser<'a, 't> {
     fn parse_class_decl(&mut self) {
         self.sink.start_node(SyntaxKind::ClassDecl);
         self.advance(); // 'class'
-        if self.at(SyntaxKind::Ident) {
+        if self.at_ident_like() {
             self.advance();
         }
         self.parse_block_or_colon_suite();
@@ -654,7 +783,7 @@ impl<'a, 't> CstParser<'a, 't> {
     fn parse_struct_decl(&mut self) {
         self.sink.start_node(SyntaxKind::StructDecl);
         self.advance(); // 'struct'
-        if self.at(SyntaxKind::Ident) {
+        if self.at_ident_like() {
             self.advance();
         }
         self.parse_block_or_colon_suite();
@@ -664,7 +793,7 @@ impl<'a, 't> CstParser<'a, 't> {
     fn parse_record_decl(&mut self) {
         self.sink.start_node(SyntaxKind::RecordDecl);
         self.advance(); // 'record'
-        if self.at(SyntaxKind::Ident) {
+        if self.at_ident_like() {
             self.advance();
         }
         self.parse_block_or_colon_suite();
@@ -674,7 +803,7 @@ impl<'a, 't> CstParser<'a, 't> {
     fn parse_interface_decl(&mut self) {
         self.sink.start_node(SyntaxKind::InterfaceDecl);
         self.advance(); // 'interface'
-        if self.at(SyntaxKind::Ident) {
+        if self.at_ident_like() {
             self.advance();
         }
         self.parse_block_or_colon_suite();
@@ -684,7 +813,7 @@ impl<'a, 't> CstParser<'a, 't> {
     fn parse_extend_decl(&mut self) {
         self.sink.start_node(SyntaxKind::ExtendDecl);
         self.advance(); // 'extend'
-        if self.at(SyntaxKind::Ident) {
+        if self.at_ident_like() {
             self.advance();
         }
         self.parse_block_or_colon_suite();
@@ -694,7 +823,7 @@ impl<'a, 't> CstParser<'a, 't> {
     fn parse_type_adt_decl(&mut self) {
         self.sink.start_node(SyntaxKind::TypeAdtDecl);
         self.advance(); // 'type'
-        if self.at(SyntaxKind::Ident) {
+        if self.at_ident_like() {
             self.advance();
         }
         if self.at(SyntaxKind::Equal) {
@@ -713,8 +842,36 @@ impl<'a, 't> CstParser<'a, 't> {
         self.sink.start_node(node_kind);
         self.advance(); // 'let', 'var', or 'const'
 
-        if self.at(SyntaxKind::Ident) {
+        if self.at(SyntaxKind::KwMut) || self.at(SyntaxKind::KwImmut) {
             self.advance();
+        }
+
+        if self.at(SyntaxKind::LParen) {
+            self.advance();
+            while !self.at_end() && !self.at(SyntaxKind::RParen) {
+                self.advance();
+            }
+            if self.at(SyntaxKind::RParen) {
+                self.advance();
+            }
+        } else if self.at(SyntaxKind::LBracket) {
+            self.advance();
+            while !self.at_end() && !self.at(SyntaxKind::RBracket) {
+                self.advance();
+            }
+            if self.at(SyntaxKind::RBracket) {
+                self.advance();
+            }
+        } else if self.at_ident_like() {
+            self.advance();
+            while self.at(SyntaxKind::Comma) {
+                self.advance();
+                if self.at_ident_like() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
         } else {
             self.sink.token(SyntaxKind::MissingIdent, "");
             self.sink.error(SyntaxDiagnostic::new("Expected variable identifier", self.peek_span()));
@@ -810,8 +967,24 @@ impl<'a, 't> CstParser<'a, 't> {
     fn parse_for_stmt(&mut self) {
         self.sink.start_node(SyntaxKind::ForStmt);
         self.advance(); // 'for'
-        if self.at(SyntaxKind::Ident) {
+        if self.at(SyntaxKind::LParen) {
             self.advance();
+            while !self.at_end() && !self.at(SyntaxKind::RParen) {
+                self.advance();
+            }
+            if self.at(SyntaxKind::RParen) {
+                self.advance();
+            }
+        } else if self.at_ident_like() {
+            self.advance();
+            while self.at(SyntaxKind::Comma) {
+                self.advance();
+                if self.at_ident_like() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
         }
         if self.at(SyntaxKind::KwIn) {
             self.advance();
@@ -877,14 +1050,45 @@ impl<'a, 't> CstParser<'a, 't> {
         while !self.at_end() {
             let k = self.peek();
             let prec = match k {
-                SyntaxKind::Plus | SyntaxKind::Minus => 10,
-                SyntaxKind::Star | SyntaxKind::Slash | SyntaxKind::Percent | SyntaxKind::DoubleSlash => 20,
                 SyntaxKind::DoubleStar => 25,
-                SyntaxKind::EqEqual | SyntaxKind::NotEqual | SyntaxKind::Less | SyntaxKind::LessEqual | SyntaxKind::Greater | SyntaxKind::GreaterEqual => 5,
-                SyntaxKind::KwAnd | SyntaxKind::Ampersand => 4,
+                SyntaxKind::Star | SyntaxKind::Slash | SyntaxKind::Percent | SyntaxKind::DoubleSlash => 20,
+                SyntaxKind::Plus | SyntaxKind::Minus => 10,
+                SyntaxKind::ShiftLeft | SyntaxKind::ShiftRight => 8,
+                SyntaxKind::DotDot | SyntaxKind::DotDotEqual | SyntaxKind::DotDotLess => 7,
+                SyntaxKind::EqEqual
+                | SyntaxKind::NotEqual
+                | SyntaxKind::Less
+                | SyntaxKind::LessEqual
+                | SyntaxKind::Greater
+                | SyntaxKind::GreaterEqual
+                | SyntaxKind::KwIs
+                | SyntaxKind::KwIn
+                | SyntaxKind::KwAs
+                | SyntaxKind::JsonGetText
+                | SyntaxKind::JsonContains
+                | SyntaxKind::JsonContained => 5,
+                SyntaxKind::KwAnd | SyntaxKind::Ampersand | SyntaxKind::Caret => 4,
                 SyntaxKind::KwOr | SyntaxKind::Vbar => 3,
-                SyntaxKind::PipeForward => 2,
-                SyntaxKind::Coalesce => 1,
+                SyntaxKind::PipeForward | SyntaxKind::PipeBackward | SyntaxKind::Cascade => 2,
+                SyntaxKind::Coalesce
+                | SyntaxKind::Equal
+                | SyntaxKind::PlusEqual
+                | SyntaxKind::MinusEqual
+                | SyntaxKind::StarEqual
+                | SyntaxKind::SlashEqual
+                | SyntaxKind::PercentEqual
+                | SyntaxKind::DoubleStarEqual
+                | SyntaxKind::DoubleSlashEqual
+                | SyntaxKind::AmperEqual
+                | SyntaxKind::VbarEqual
+                | SyntaxKind::CaretEqual
+                | SyntaxKind::ShiftLeftEqual
+                | SyntaxKind::ShiftRightEqual
+                | SyntaxKind::CoalesceEqual
+                | SyntaxKind::Walrus
+                | SyntaxKind::ArrowLeft
+                | SyntaxKind::FatArrow
+                | SyntaxKind::Arrow => 1,
                 _ => break,
             };
 
@@ -900,21 +1104,60 @@ impl<'a, 't> CstParser<'a, 't> {
     fn parse_unary_or_primary(&mut self) {
         let k = self.peek();
         match k {
-            SyntaxKind::Minus | SyntaxKind::Plus | SyntaxKind::Exclamation | SyntaxKind::Tilde | SyntaxKind::KwNot => {
+            SyntaxKind::Minus
+            | SyntaxKind::Plus
+            | SyntaxKind::Exclamation
+            | SyntaxKind::Tilde
+            | SyntaxKind::KwNot
+            | SyntaxKind::KwAwait
+            | SyntaxKind::KwSpawn
+            | SyntaxKind::KwRef
+            | SyntaxKind::KwMut
+            | SyntaxKind::DotDot
+            | SyntaxKind::Ellipsis => {
                 self.advance();
                 self.parse_unary_or_primary();
             }
-            SyntaxKind::Ident => {
+            SyntaxKind::KwIf => {
+                self.parse_if_expr();
+            }
+            SyntaxKind::IntLit
+            | SyntaxKind::HexIntLit
+            | SyntaxKind::BinIntLit
+            | SyntaxKind::OctIntLit
+            | SyntaxKind::FloatLit
+            | SyntaxKind::DurationLit
+            | SyntaxKind::FrequencyLit
+            | SyntaxKind::MemoryLit
+            | SyntaxKind::KeywordLit
+            | SyntaxKind::StrLit
+            | SyntaxKind::FStrStart
+            | SyntaxKind::TripleStrLit
+            | SyntaxKind::RawDslBlock
+            | SyntaxKind::KwTrue
+            | SyntaxKind::KwFalse
+            | SyntaxKind::KwNone
+            | SyntaxKind::KwNull
+            | SyntaxKind::KwSome
+            | SyntaxKind::KwUndefined => {
                 self.advance();
                 self.parse_postfix_chain();
             }
-            SyntaxKind::IntLit | SyntaxKind::HexIntLit | SyntaxKind::BinIntLit | SyntaxKind::OctIntLit | SyntaxKind::FloatLit | SyntaxKind::StrLit | SyntaxKind::TripleStrLit | SyntaxKind::KwTrue | SyntaxKind::KwFalse | SyntaxKind::KwNone | SyntaxKind::KwNull => {
+            k if k.is_ident_like() || k == SyntaxKind::Underscore => {
                 self.advance();
                 self.parse_postfix_chain();
             }
             SyntaxKind::LParen => {
                 self.advance();
-                self.parse_expr();
+                while !self.at_end() && !self.at(SyntaxKind::RParen) {
+                    let start_pos = self.pos;
+                    self.parse_expr();
+                    if self.at(SyntaxKind::Comma) {
+                        self.advance();
+                    } else if self.pos == start_pos {
+                        self.recover_unexpected();
+                    }
+                }
                 if self.at(SyntaxKind::RParen) {
                     self.advance();
                 } else {
@@ -926,9 +1169,12 @@ impl<'a, 't> CstParser<'a, 't> {
             SyntaxKind::LBracket => {
                 self.advance();
                 while !self.at_end() && !self.at(SyntaxKind::RBracket) {
+                    let start_pos = self.pos;
                     self.parse_expr();
                     if self.at(SyntaxKind::Comma) {
                         self.advance();
+                    } else if self.pos == start_pos {
+                        self.recover_unexpected();
                     }
                 }
                 if self.at(SyntaxKind::RBracket) {
@@ -938,9 +1184,6 @@ impl<'a, 't> CstParser<'a, 't> {
                     self.sink.error(SyntaxDiagnostic::with_fix("Expected ']' closing list", self.peek_span(), "]"));
                 }
                 self.parse_postfix_chain();
-            }
-            SyntaxKind::KwIf => {
-                self.parse_if_expr();
             }
             SyntaxKind::LBrace => {
                 self.parse_block_or_colon_suite();
@@ -993,7 +1236,7 @@ impl<'a, 't> CstParser<'a, 't> {
             if k == SyntaxKind::Dot || k == SyntaxKind::SafeNav {
                 self.sink.start_node(SyntaxKind::MemberExpr);
                 self.advance(); // consume '.' or '?.'
-                if self.at(SyntaxKind::Ident) {
+                if self.at_ident_like() {
                     self.advance();
                 } else {
                     // Milestone 31.2: Synthesize MissingIdent on trailing dot for IDE completion!
@@ -1012,9 +1255,12 @@ impl<'a, 't> CstParser<'a, 't> {
                 if self.at(SyntaxKind::LParen) {
                     self.advance(); // '('
                     while !self.at_end() && !self.at(SyntaxKind::RParen) {
+                        let start_pos = self.pos;
                         self.parse_expr();
                         if self.at(SyntaxKind::Comma) {
                             self.advance();
+                        } else if self.pos == start_pos {
+                            self.recover_unexpected();
                         }
                     }
                     if self.at(SyntaxKind::RParen) {

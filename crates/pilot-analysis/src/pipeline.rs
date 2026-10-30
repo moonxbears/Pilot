@@ -65,12 +65,22 @@ impl AnalysisPipeline {
                             }
                             if pat_node.node_kind() == pilot_ast::NodeKind::PatVariant {
                                 let name = arena.interner.resolve(pilot_intern::SymbolId(pat_node.lhs));
+                                if name == "some" || name == "none" {
+                                    all_variants = vec!["some".to_string(), "none".to_string()];
+                                    break;
+                                }
                                 if let Some((adt_name, _)) = infer_engine.adt_variants.get(name) {
                                     for (v, (a, _)) in &infer_engine.adt_variants {
                                         if a == adt_name && !all_variants.contains(v) {
                                             all_variants.push(v.clone());
                                         }
                                     }
+                                    break;
+                                }
+                            } else if pat_node.node_kind() == pilot_ast::NodeKind::PatLiteral {
+                                let lit_id = pilot_ast::NodeId(pat_node.lhs);
+                                if lit_id.is_some() && arena.node(lit_id).node_kind() == pilot_ast::NodeKind::NoneLit {
+                                    all_variants = vec!["some".to_string(), "none".to_string()];
                                     break;
                                 }
                             }

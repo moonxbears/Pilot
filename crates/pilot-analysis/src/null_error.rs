@@ -72,10 +72,25 @@ impl NullSafetyAnalyzer {
                 let target = pilot_ast::NodeId(node.lhs);
                 if let Some(&ty) = infer.inferred_node_types.get(&target.0) {
                     if let crate::types::TypeKind::Option(_) = infer.types.get(infer.types.prune(ty)) {
-                        // Check if safe navigation (flags == 1)
+                        // Check if safe navigation (flags == 1) or intrinsic Option member
                         if node.flags == 0 {
                             let member_name = arena.interner.resolve(pilot_intern::SymbolId(node.rhs));
-                            self.report_unsafe_deref(member_name, arena.span(node_id));
+                            if !matches!(
+                                member_name,
+                                "is_some"
+                                    | "is_none"
+                                    | "is_unboxed"
+                                    | "OrPanic"
+                                    | "or_panic"
+                                    | "UnwrapOr"
+                                    | "unwrap_or"
+                                    | "unwrap"
+                                    | "expect"
+                                    | "map"
+                                    | "and_then"
+                            ) {
+                                self.report_unsafe_deref(member_name, arena.span(node_id));
+                            }
                         }
                     }
                 }

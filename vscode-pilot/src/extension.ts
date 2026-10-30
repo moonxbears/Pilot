@@ -112,11 +112,15 @@ class PilotLspClient implements vscode.Disposable {
         let nativeLspArgs: string[] = [];
         if (customPath && fs.existsSync(customPath) && !customPath.endsWith('.dll') && !customPath.endsWith('.csproj')) {
             nativeLsp = customPath;
+            if (path.basename(customPath) === 'pilot') {
+                nativeLspArgs = ['lsp'];
+            }
         } else {
-            for (const candidate of nativeCandidates) {
-                if (fs.existsSync(candidate)) {
-                    nativeLsp = candidate;
-                    break;
+            const newest = pickNewestExistingFile(nativeCandidates);
+            if (newest) {
+                nativeLsp = newest;
+                if (path.basename(newest) === 'pilot') {
+                    nativeLspArgs = ['lsp'];
                 }
             }
         }
@@ -415,6 +419,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ),
         vscode.languages.registerHoverProvider(selector, {
             async provideHover(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.Hover | null> {
+                client.notifyDidOpen(document);
                 const res = await client.sendRequest('textDocument/hover', {
                     textDocument: { uri: document.uri.toString() },
                     position: { line: position.line, character: position.character }
@@ -422,7 +427,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 if (!res || !res.contents) {
                     return null;
                 }
-                const md = new vscode.MarkdownString(res.contents.value);
+                let hoverStr = '';
+                if (typeof res.contents === 'string') {
+                    hoverStr = res.contents;
+                } else if (res.contents && typeof res.contents.value === 'string') {
+                    hoverStr = res.contents.value;
+                } else if (Array.isArray(res.contents)) {
+                    hoverStr = res.contents
+                        .map((c: any) => (typeof c === 'string' ? c : (c?.value ?? '')))
+                        .filter(Boolean)
+                        .join('\n\n');
+                }
+                if (!hoverStr.trim()) {
+                    return null;
+                }
+                const md = new vscode.MarkdownString(hoverStr);
+                md.isTrusted = true;
+                md.supportHtml = true;
                 if (res.range) {
                     const range = new vscode.Range(
                         res.range.start.line,
@@ -437,6 +458,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         vscode.languages.registerDefinitionProvider(selector, {
             async provideDefinition(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.Location | null> {
+                client.notifyDidOpen(document);
                 const res = await client.sendRequest('textDocument/definition', {
                     textDocument: { uri: document.uri.toString() },
                     position: { line: position.line, character: position.character }
@@ -455,6 +477,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         vscode.languages.registerDocumentSymbolProvider(selector, {
             async provideDocumentSymbols(document: vscode.TextDocument): Promise<vscode.DocumentSymbol[]> {
+                client.notifyDidOpen(document);
                 const res = await client.sendRequest('textDocument/documentSymbol', {
                     textDocument: { uri: document.uri.toString() }
                 });
@@ -493,6 +516,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             selector,
             {
                 async provideCompletionItems(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.CompletionItem[]> {
+                    client.notifyDidOpen(document);
                     const res = await client.sendRequest('textDocument/completion', {
                         textDocument: { uri: document.uri.toString() },
                         position: { line: position.line, character: position.character }
@@ -503,7 +527,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     return res.map((item: any) => {
                         const ci = new vscode.CompletionItem(item.label, (item.kind || 6) - 1);
                         ci.detail = item.detail;
-                        if (item.documentation?.value) {
+                        if (typeof item.documentation === 'string') {
+                            ci.documentation = new vscode.MarkdownString(item.documentation);
+                        } else if (item.documentation?.value) {
                             ci.documentation = new vscode.MarkdownString(item.documentation.value);
                         }
                         return ci;
@@ -516,6 +542,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             selector,
             {
                 async provideSignatureHelp(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.SignatureHelp | null> {
+                    client.notifyDidOpen(document);
                     const res = await client.sendRequest('textDocument/signatureHelp', {
                         textDocument: { uri: document.uri.toString() },
                         position: { line: position.line, character: position.character }
@@ -542,6 +569,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             selector,
             {
                 async provideInlayHints(document: vscode.TextDocument, range: vscode.Range): Promise<vscode.InlayHint[]> {
+                    client.notifyDidOpen(document);
                     const res = await client.sendRequest('textDocument/inlayHint', {
                         textDocument: { uri: document.uri.toString() },
                         range: {

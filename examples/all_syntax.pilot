@@ -279,6 +279,11 @@ def run_omnibus_showcase() -> void {
     let identity_set = {10, 20, 30, 40}
     let matrix_2d = [[1.0, 2.0], [3.0, 4.0]]
 
+    // C# Collection Expressions with spread syntax (..)
+    let spread_list = [0, ..numbers_list, 99]
+    let combined_map = {..string_map, "delta": 4}
+    let combined_set = {..identity_set, 50, 60}
+
     // Slicing and indexing
     let first_elem = numbers_list[0]
     let sliced_sublist = numbers_list[1..4]
@@ -403,8 +408,12 @@ def run_omnibus_showcase() -> void {
     }
 
     // --- 6.11 Functional Programming, Closures & Pipelining (|>, <|) ---
-    let add_five = lambda x: x + 5
-    let double_val = lambda x: x * 2
+    // C#-style fat-arrow lambdas (x => expr, (a, b) => expr)
+    let add_five = x => x + 5
+    let double_val = (x) => x * 2
+    let sum_pair = (a, b) => a + b
+    let get_answer = () => 42
+    let legacy_lambda = lambda x: x + 5
 
     // Forward pipeline operator (|>)
     let piped_value = 10 |> add_five |> double_val

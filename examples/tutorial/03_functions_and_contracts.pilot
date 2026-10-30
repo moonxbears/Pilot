@@ -17,9 +17,16 @@ def format_log(msg: str, level: str = "INFO") -> str {
 def square(x: int) -> int => x * x;
 def is_even(n: int) -> bool => n % 2 == 0;
 
-// --- 4. First-Class Lambdas ---
-let multiplier = lambda x: x * 3;
+// --- 4. First-Class C#-Style Lambdas (=>) ---
+// Pilot supports modern C#-style fat-arrow lambdas:
+let multiplier = x => x * 3;
+let add_two = (a, b) => a + b;
+let get_magic = () => 42;
+let typed_lambda = (a: int, b: int) => a + b;
+let block_lambda = (x) => { return x * 2; };
+
 let transformed = multiplier(10)
+let combined_nums = add_two(15, 25)
 
 // --- 5. Design-by-Contract: requires & ensures ---
 // Preconditions (requires) and Postconditions (ensures) are verified at boundaries.

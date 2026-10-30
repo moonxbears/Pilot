@@ -114,8 +114,26 @@ for count in 1..5 {
 }
 ```
 
-### 2.4 Comprehensions
-Construct transformed collections with concise syntax:
+### 2.4 C# Collection Expressions with Spread (`..`)
+Pilot natively supports modern C# 12+ collection expressions with the spread operator (`..`):
+```pilot
+let row_a = [1, 2, 3]
+let row_b = [4, 5, 6]
+
+// Combining collections with spread '..'
+let combined = [..row_a, ..row_b]
+let padded = [0, ..row_a, 99, ..row_b, 100]
+
+// Spreading inside dictionaries and sets
+let base_cfg = {"host": "localhost", "port": "8080"}
+let full_cfg = {..base_cfg, "ssl": "true", "timeout": "30s"}
+
+let base_set = {10, 20}
+let full_set = {..base_set, 30, 40}
+```
+
+### 2.5 Comprehensions
+Construct transformed collections with inline filtering:
 ```pilot
 // List comprehension
 let squares = [x * x for x in [1, 2, 3, 4, 5] if x % 2 != 0]
@@ -145,11 +163,26 @@ def add(a: int, b: int) -> int {
 def square(x: int) -> int => x * x;
 ```
 
-### 3.2 Lambdas
-Anonymous first-class functions:
+### 3.2 C#-Style Lambdas (`=>`)
+Pilot natively supports modern C#-style fat-arrow lambdas:
 ```pilot
-let double_fn = lambda x: x * 2;
-let result = double_fn(21) // 42
+// Single parameter (parentheses optional)
+let double_fn = x => x * 2;
+
+// Multiple parameters
+let add_fn = (a, b) => a + b;
+
+// Zero parameters
+let get_magic = () => 42;
+
+// Explicit parameter types
+let typed_add = (a: int, b: int) => a + b;
+
+// Block bodies
+let block_lambda = (x) => {
+    let doubled = x * 2;
+    return doubled;
+};
 ```
 
 ### 3.3 Design-by-Contract (`requires` & `ensures`)

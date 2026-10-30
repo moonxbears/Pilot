@@ -469,6 +469,12 @@ pub struct AstArena {
     pub f64_pool: Vec<f64>,
     pub interner: Interner,
     pub root: NodeId,
+    /// Optional explicit type spec `NodeId` for `LetStmt`, `VarStmt`, `ConstDecl`, `FnDecl` (return type), or `ParamDecl`.
+    pub type_annotations: std::collections::HashMap<u32, NodeId>,
+    /// Iterable expression `NodeId` for `ForExpr` nodes (`for x in <iter>`).
+    pub for_iter_nodes: std::collections::HashMap<u32, NodeId>,
+    /// Declared `(field_name, field_type_node)` pairs for `RecordDecl`, `StructDecl`, `ClassDecl`, and `InterfaceDecl`.
+    pub record_fields: std::collections::HashMap<u32, Vec<(SymbolId, NodeId)>>,
 }
 
 impl AstArena {
@@ -485,6 +491,9 @@ impl AstArena {
             f64_pool: Vec::with_capacity(expected_nodes / 8),
             interner: Interner::with_capacity(expected_nodes / 2, expected_nodes * 8),
             root: NodeId::NONE,
+            type_annotations: std::collections::HashMap::new(),
+            for_iter_nodes: std::collections::HashMap::new(),
+            record_fields: std::collections::HashMap::new(),
         }
     }
 

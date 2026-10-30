@@ -239,7 +239,19 @@ fn extract_item_tree(file_id: FileId, root: &SyntaxNode) -> ItemTree {
 
     for node in root.child_nodes() {
         let k = node.kind();
-        if matches!(k, SyntaxKind::FnDecl | SyntaxKind::ClassDecl | SyntaxKind::StructDecl | SyntaxKind::RecordDecl | SyntaxKind::TypeAdtDecl | SyntaxKind::ImportDecl) {
+        if matches!(
+            k,
+            SyntaxKind::FnDecl
+                | SyntaxKind::ClassDecl
+                | SyntaxKind::StructDecl
+                | SyntaxKind::RecordDecl
+                | SyntaxKind::TypeAdtDecl
+                | SyntaxKind::InterfaceDecl
+                | SyntaxKind::ExtendDecl
+                | SyntaxKind::ImportDecl
+                | SyntaxKind::FromImportDecl
+                | SyntaxKind::ConstDecl
+        ) {
             let name = node.tokens().find(|t| t.kind() == SyntaxKind::Ident).map(|t| t.text().to_string()).unwrap_or_else(|| "anon".to_string());
 
             // Build signature text excluding the inner BlockExpr body

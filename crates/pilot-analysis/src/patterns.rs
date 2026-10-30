@@ -134,7 +134,7 @@ impl MarangetChecker {
     ) -> Vec<AnalysisDiagnostic> {
         let node = *arena.node(match_id);
         let children = arena.children_slice(node.lhs, node.rhs);
-        if children.len() <= 1 {
+        if children.len() <= 1 || pilot_ast::NodeId(children[0]).is_none() {
             return Vec::new();
         }
 
@@ -147,11 +147,19 @@ impl MarangetChecker {
                 if pat_node.node_kind() == pilot_ast::NodeKind::PatBind && pat_node.flags == 1 && pat_node.rhs != 0 {
                     pat_node = *arena.node(pilot_ast::NodeId(pat_node.rhs));
                 }
-                let has_subpats = pat_node.flags > 0;
+                let has_nested_refinement = if pat_node.node_kind() == pilot_ast::NodeKind::PatVariant && pat_node.flags > 0 {
+                    let subs = arena.children_slice(pat_node.rhs, pat_node.flags as u32);
+                    subs.iter().any(|&s| {
+                        let sk = arena.node(pilot_ast::NodeId(s)).node_kind();
+                        !matches!(sk, pilot_ast::NodeKind::PatBind | pilot_ast::NodeKind::PatWildcard)
+                    })
+                } else {
+                    false
+                };
                 let case = match pat_node.node_kind() {
                     pilot_ast::NodeKind::PatWildcard
-                    | pilot_ast::NodeKind::PatBind
-                    | pilot_ast::NodeKind::PatSlice => PatternCase::Wildcard,
+                    | pilot_ast::NodeKind::PatBind => PatternCase::Wildcard,
+                    pilot_ast::NodeKind::PatSlice => PatternCase::Tuple(Vec::new()),
                     pilot_ast::NodeKind::PatVariant => {
                         let name = arena
                             .interner
@@ -159,13 +167,20 @@ impl MarangetChecker {
                             .to_string();
                         PatternCase::Variant(name)
                     }
-                    pilot_ast::NodeKind::PatLiteral => PatternCase::Literal("lit".to_string()),
+                    pilot_ast::NodeKind::PatLiteral => {
+                        let lit_id = pilot_ast::NodeId(pat_node.lhs);
+                        if lit_id.is_some() && arena.node(lit_id).node_kind() == pilot_ast::NodeKind::NoneLit {
+                            PatternCase::Variant("none".to_string())
+                        } else {
+                            PatternCase::Literal("lit".to_string())
+                        }
+                    }
                     pilot_ast::NodeKind::PatRange => PatternCase::Literal("range".to_string()),
                     pilot_ast::NodeKind::PatOr => PatternCase::Literal("or".to_string()),
                     pilot_ast::NodeKind::PatTuple => PatternCase::Tuple(Vec::new()),
                     _ => PatternCase::Wildcard,
                 };
-                (case, has_subpats)
+                (case, has_nested_refinement)
             } else {
                 (PatternCase::Wildcard, false)
             };

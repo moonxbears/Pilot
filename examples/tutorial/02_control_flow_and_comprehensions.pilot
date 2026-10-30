@@ -37,7 +37,20 @@ for i in 0..<3 {
     println(f"Iteration: {i}")
 }
 
-// --- 5. Collection Comprehensions ---
+// --- 5. C# Collection Expressions with Spread Elements (..) ---
+// Pilot supports modern C# 12+ collection expressions with spread syntax (..):
+let row_a = [1, 2, 3]
+let row_b = [4, 5, 6]
+let combined_list = [..row_a, ..row_b]
+let surrounded = [0, ..row_a, 99, ..row_b, 100]
+
+// Dictionary and Set spreading:
+let base_dict = {"host": "localhost", "port": "8080"}
+let extended_dict = {..base_dict, "ssl": "true", "timeout": "30s"}
+let base_set = {10, 20}
+let extended_set = {..base_set, 30, 40}
+
+// --- 6. Collection Comprehensions ---
 // List comprehension: [expr for var in iterable (if condition)?]
 let raw_numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 let odd_squares = [x * x for x in raw_numbers if x % 2 != 0]

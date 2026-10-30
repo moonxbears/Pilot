@@ -16,6 +16,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_sieve_did_open() {
+        let mut server = LspServer::new();
+        let src = std::fs::read_to_string("../../crates/pilot-bench/suite/sieve.pilot")
+            .or_else(|_| std::fs::read_to_string("crates/pilot-bench/suite/sieve.pilot"))
+            .expect("read sieve.pilot");
+        
+        let json_src = src.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "");
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"file:///sieve.pilot","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+            json_src
+        );
+        server.handle_message(&did_open);
+    }
+
+    #[test]
     fn test_lsp_server_initialize_did_open_hover_and_semantic_tokens() {
         let mut server = LspServer::new();
 
@@ -165,5 +180,114 @@ mod tests {
         let sig_resp = server.handle_message(&sig_req).expect("Expected signature help response");
         assert!(sig_resp.contains("recorder"));
         assert!(sig_resp.contains("val: any"));
+    }
+
+    #[test]
+    fn test_comprehensive_hover_inference_inlay_and_semantic_tokens() {
+        let mut server = LspServer::new();
+        let uri = "file:///workspace/comprehensive.pilot";
+        let code = "\
+record Point(x: f64, y: f64)
+type Shape =
+    | Circle(radius: f64)
+    | PointShape
+
+def add(a: int, b: int) -> int {
+    return a + b
+}
+
+let c = add(10, 20)
+let explicit_val: f64 = 3.14
+let scores: List[int] = [10, 20, 30]
+let (px, py) = (100, 200)
+let [head, ..tail] = scores
+let pt = Point(1.5, 2.5)
+let pt_x = pt.x
+let msg = f\"Result is {c}\"
+let wait_time = 250ms
+let tag = :ready
+let q = !(add(1, 2))
+for score in scores {
+    println(score)
+}
+";
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+            uri,
+            code.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+        );
+        server.handle_message(&did_open);
+
+        let mut hover_at = |line: u32, col: u32| -> String {
+            let req = format!(
+                r#"{{"jsonrpc":"2.0","id":100,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}}}}}"#,
+                uri, line, col
+            );
+            server.handle_message(&req).expect("hover response")
+        };
+
+        // 1. Record declaration & fields: `record Point(x: f64, y: f64)`
+        let h_record = hover_at(0, 8);
+        assert!(h_record.contains("record Point") && h_record.contains("x: f64"), "got: {}", h_record);
+
+        // 2. ADT & Variant: `type Shape = | Circle(radius: f64)`
+        let h_adt = hover_at(1, 6);
+        assert!(h_adt.contains("type Shape") && h_adt.contains("Circle(f64)"), "got: {}", h_adt);
+        let h_variant = hover_at(2, 8);
+        assert!(h_variant.contains("(variant) Circle: (f64) -> Shape"), "got: {}", h_variant);
+
+        // 3. Function & Parameter inference: `def add(a: int, b: int) -> int`
+        let h_fn = hover_at(5, 5);
+        assert!(h_fn.contains("def add(a: i64, b: i64) -> i64"), "got: {}", h_fn);
+        let h_param = hover_at(5, 8);
+        assert!(h_param.contains("(parameter) a: i64"), "got: {}", h_param);
+        let h_param_use = hover_at(6, 11);
+        assert!(h_param_use.contains("(parameter) a: i64"), "got: {}", h_param_use);
+
+        // 4. Variable `c` (must NOT be shadowed by polyglot `c` block!)
+        let h_var_c = hover_at(9, 4);
+        assert!(h_var_c.contains("let c: i64"), "got: {}", h_var_c);
+
+        // 5. Generic List[int] type annotation
+        let h_scores = hover_at(11, 5);
+        assert!(h_scores.contains("let scores: List[i64]"), "got: {}", h_scores);
+
+        // 6. Destructured tuple & slice bindings
+        let h_px = hover_at(12, 6);
+        assert!(h_px.contains("let px: i64"), "got: {}", h_px);
+        let h_head = hover_at(13, 6);
+        assert!(h_head.contains("let head: i64"), "got: {}", h_head);
+        let h_tail = hover_at(13, 14);
+        assert!(h_tail.contains("let ..tail: List[i64]"), "got: {}", h_tail);
+
+        // 7. Member access `pt.x`
+        let h_member = hover_at(15, 14);
+        assert!(h_member.contains(".x: f64"), "got: {}", h_member);
+
+        // 8. Variable inside interpolated f-string `f"Result is {c}"`
+        let h_fstr_var = hover_at(16, 23);
+        assert!(h_fstr_var.contains("let c: i64"), "got: {}", h_fstr_var);
+
+        // 9. Dimensional literal `250ms` & Keyword literal `:ready` & Call-Quote `!(...)`
+        let h_dim = hover_at(17, 17);
+        assert!(h_dim.contains("250ms: i64<Duration>"), "got: {}", h_dim);
+        let h_sym = hover_at(18, 12);
+        assert!(h_sym.contains(":ready: keyword"), "got: {}", h_sym);
+        let h_quote = hover_at(19, 8);
+        assert!(h_quote.contains("Shallow Call Descriptor"), "got: {}", h_quote);
+
+        // 10. For loop variable `for score in scores`
+        let h_for_var = hover_at(20, 5);
+        assert!(h_for_var.contains("for score: i64"), "got: {}", h_for_var);
+
+        // 11. Inlay hints: should include `: i64` for `let c = ...` at character 5 (right after `let c`),
+        // and should NOT include `explicit_val` or `scores` (already annotated) or `: any`.
+        let inlay_req = format!(
+            r#"{{"jsonrpc":"2.0","id":101,"method":"textDocument/inlayHint","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":25,"character":0}}}}}}}}"#,
+            uri
+        );
+        let inlay_resp = server.handle_message(&inlay_req).expect("inlay response");
+        assert!(!inlay_resp.contains(": any"), "Inlay hints must never emit ': any': {}", inlay_resp);
+        assert!(inlay_resp.contains(r#""line":9,"character":5"#), "Inlay hint for 'let c' should be at line 9, char 5: {}", inlay_resp);
     }
 }
