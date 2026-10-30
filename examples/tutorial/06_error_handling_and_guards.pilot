@@ -1,0 +1,49 @@
+// =============================================================================
+// Tutorial 06: Modern Error Handling, Guards, Defer & Null Safety
+// =============================================================================
+
+// --- 1. Safe Navigation (?.) and Null Coalesce (??) ---
+let nullable_text: str? = none
+let length_display = nullable_text?.Length ?? "Default Length"
+println(f"Display: {length_display}")
+
+// Coalesce assignment (??=) assigns only if current value is null/none
+var fallback_config: str? = none
+fallback_config ??= "production.env"
+
+// --- 2. Flat Happy-Path Early Exit with Guard ---
+// Guard statements enforce preconditions without deep if/else nesting.
+def process_user_id(raw_id: int?) -> str {
+    guard raw_id != none else {
+        return "ERROR: Missing user ID"
+    }
+    return f"Processing user ID: {raw_id}"
+}
+
+println(process_user_id(none))
+println(process_user_id(42))
+
+// --- 3. Scope Cleanup with Defer ---
+// Defer ensures statements run when the enclosing function or block exits,
+// regardless of whether exit happened normally or via early return.
+def run_transaction() -> void {
+    println("Acquiring database connection lock...")
+    defer {
+        println("Releasing database connection lock (deferred cleanup).")
+    }
+    println("Executing transactional operations...")
+}
+
+run_transaction()
+
+// --- 4. Structured Exceptions (try / except / finally) ---
+try {
+    let divisor = 0
+    if divisor == 0 {
+        raise "DivideByZeroException"
+    }
+} except err {
+    println(f"Caught handled exception: {err}")
+} finally {
+    println("Finally block executed regardless of exception state.")
+}

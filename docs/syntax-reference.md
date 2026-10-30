@@ -4,7 +4,7 @@
 
 ---
 
-This reference provides a complete specification of Pilot's syntax, grammar rules, statement forms, type system expressions, and operator precedence hierarchy as defined in [`antlr/Pilot.g4`](../antlr/Pilot.g4) and executed by [`Runtime/Execution/PilotInterpreterVisitor.cs`](../Runtime/Execution/PilotInterpreterVisitor.cs).
+This reference provides a complete specification of Pilot's syntax, grammar rules, statement forms, type system expressions, and operator precedence hierarchy as defined in [`antlr/Pilot.g4`](../antlr/Pilot.g4) and executed by the PilVM v3 bytecode virtual machine and native AOT compiler pipeline.
 
 ## Table of Contents
 
@@ -110,9 +110,9 @@ record_pattern_field  ::= (identifier | STRING) (':' binding_pattern)? ('=' test
 pattern_assign_stmt   ::= (tuple_pattern | list_pattern | record_pattern) '=' test
 ```
 
-**Exact Runtime Destructuring Rules (`PilotInterpreterVisitor.cs`)**:
-- **List/Tuple Patterns**: Verify that the right-hand side is a `List` or `Tuple`. If no rest element (`..rest` or `*rest`) is present, the element count must match **exactly** or `PilotPatternMatchingException` (`MatchError`) is thrown. If a rest element is present (`[head, ..middle, tail] = seq`), `head` binds prefix items, `tail` binds suffix items, and `middle` binds all remaining interior items as a new `list`.
-- **Record Patterns**: Verify that the right-hand side is a `Map` or `Object`. Extracts each named property (`{ "id": user_id, "meta": { "role": role = "guest" }, **rest } = payload`). If a required key is missing and has no `= default` expression, `PilotPatternMatchingException` is thrown. `**rest` collects all unvisited keys into a new `map`.
+**Exact Runtime Destructuring Rules**:
+- **List/Tuple Patterns**: Verify that the right-hand side is a `List` or `Tuple`. If no rest element (`..rest` or `*rest`) is present, the element count must match **exactly** or `MatchError` is thrown. If a rest element is present (`[head, ..middle, tail] = seq`), `head` binds prefix items, `tail` binds suffix items, and `middle` binds all remaining interior items as a new `list`.
+- **Record Patterns**: Verify that the right-hand side is a `Map` or `Object`. Extracts each named property (`{ "id": user_id, "meta": { "role": role = "guest" }, **rest } = payload`). If a required key is missing and has no `= default` expression, `MatchError` is thrown. `**rest` collects all unvisited keys into a new `map`.
 
 ---
 
@@ -258,16 +258,17 @@ guard_stmt ::= 'guard' ('let' pattern '=' test | test) 'else' ':'? suite
 ```ebnf
 defer_stmt ::= 'defer' (':'? suite | small_stmt | test)
 ```
-- Pushes the deferred action onto the active execution context's LIFO defer stack (`Context.PushDefer`).
-- Guaranteed to execute in **reverse registration order (LIFO)** inside the `finally` block of function invocation (`PilotEngine.InvokeFunction`) or program termination (`VisitProgram`), even if an exception or early `return` occurs.
+- Pushes the deferred action onto the active execution frame's LIFO defer stack.
+- Guaranteed to execute in **reverse registration order (LIFO)** upon exiting the enclosing function frame or script scope, even if an exception or early `return` occurs.
 
 ### 7.4 Exception Handling (`try_stmt`)
 ```ebnf
-try_stmt      ::= 'try' ':'? suite except_clause* ('else' ':'? suite)? ('finally' ':'? suite)?
+try_stmt      ::= 'try' ':'? suite (except_clause | catch_clause)* ('else' ':'? suite)? ('finally' ':'? suite)?
 except_clause ::= 'except' ((type_spec ('as' identifier)?) | ('as' identifier))? ':'? suite
+catch_clause  ::= 'catch' ('(' identifier? ')')? ':'? suite
 ```
-- **`except` Clauses**: Evaluated in order when a runtime exception occurs (control-flow signals like `return`/`break`/`continue`/`yield` bypass `except`).
-  - Catch all with binding: `except as err { ... }` or `except err { ... }` (if `err` is not a known exception type name, Pilot binds the error payload to `err`).
+- **`except` & `catch` Clauses**: Evaluated in order when a runtime exception occurs (control-flow signals like `return`/`break`/`continue`/`yield` bypass exception blocks).
+  - Catch all with binding: `except as err { ... }` or `catch (err) { ... }`.
   - Catch specific type: `except DivideByZeroError as err { ... }` or `except TypeError { ... }`.
 - **`else` Clause**: Runs only if the `try` block completed without throwing any exception.
 - **`finally` Clause**: Always runs before exiting the `try` statement.

@@ -134,6 +134,14 @@ impl LspServer {
                     Some(make_response(id, JsonValue::Array(Vec::new())).serialize())
                 }
             }
+            Some("textDocument/signatureHelp") => {
+                if let Some(p) = params {
+                    let res = self.handle_signature_help(p);
+                    Some(make_response(id, res).serialize())
+                } else {
+                    Some(make_response(id, JsonValue::Null).serialize())
+                }
+            }
             Some("textDocument/codeAction") => {
                 if let Some(p) = params {
                     let res = self.handle_code_action(p);
@@ -195,8 +203,26 @@ impl LspServer {
         "decorator",     // 22
     ];
 
+    pub const TOKEN_MODIFIERS: &'static [&'static str] = &[
+        "declaration",    // 0
+        "definition",     // 1
+        "readonly",       // 2
+        "static",         // 3
+        "deprecated",     // 4
+        "abstract",       // 5
+        "async",          // 6
+        "modification",   // 7
+        "documentation",  // 8
+        "defaultLibrary", // 9
+    ];
+
     fn handle_initialize(&self, id: Option<&JsonValue>) -> JsonValue {
         let token_types: Vec<JsonValue> = Self::TOKEN_TYPES
+            .iter()
+            .map(|&s| JsonValue::String(s.to_string()))
+            .collect();
+
+        let token_modifiers: Vec<JsonValue> = Self::TOKEN_MODIFIERS
             .iter()
             .map(|&s| JsonValue::String(s.to_string()))
             .collect();
@@ -211,6 +237,12 @@ impl LspServer {
                     JsonValue::String(":".to_string()),
                 ])),
             ])),
+            ("signatureHelpProvider".to_string(), JsonValue::Object(vec![
+                ("triggerCharacters".to_string(), JsonValue::Array(vec![
+                    JsonValue::String("(".to_string()),
+                    JsonValue::String(",".to_string()),
+                ])),
+            ])),
             ("definitionProvider".to_string(), JsonValue::Bool(true)),
             ("documentSymbolProvider".to_string(), JsonValue::Bool(true)),
             ("documentFormattingProvider".to_string(), JsonValue::Bool(true)),
@@ -219,7 +251,7 @@ impl LspServer {
             ("semanticTokensProvider".to_string(), JsonValue::Object(vec![
                 ("legend".to_string(), JsonValue::Object(vec![
                     ("tokenTypes".to_string(), JsonValue::Array(token_types)),
-                    ("tokenModifiers".to_string(), JsonValue::Array(Vec::new())),
+                    ("tokenModifiers".to_string(), JsonValue::Array(token_modifiers)),
                 ])),
                 ("full".to_string(), JsonValue::Bool(true)),
             ])),
@@ -309,41 +341,237 @@ impl LspServer {
             None => return JsonValue::Null,
         };
 
+        let src = match self.db.source_text(file_id) {
+            Some(s) => s,
+            None => return JsonValue::Null,
+        };
+
         let green = match self.db.green_cst(file_id) {
             Some(g) => g,
             None => return JsonValue::Null,
         };
 
         let root = SyntaxNode::new_root(green);
-        let token = match root.find_token_at_offset(byte_offset) {
-            Some(t) => t,
+        let mut token = root.find_token_at_offset(byte_offset);
+        if token.as_ref().map(|t| t.kind().is_trivia()).unwrap_or(true) && byte_offset > 0 {
+            if let Some(prev) = root.find_token_at_offset(byte_offset - 1) {
+                if !prev.kind().is_trivia() {
+                    token = Some(prev);
+                }
+            }
+        }
+
+        let txt = match token {
+            Some(ref t) => t.text(),
             None => return JsonValue::Null,
         };
 
-        let txt = token.text();
-
-        // 1. Check keywords
-        if let Some((domain, summary)) = get_keyword_doc(txt) {
-            let md = format!("**Pilot Keyword**: `{}` ({})\n\n{}", txt, domain, summary);
-            return JsonValue::Object(vec![
-                ("contents".to_string(), JsonValue::Object(vec![
-                    ("kind".to_string(), JsonValue::String("markdown".to_string())),
-                    ("value".to_string(), JsonValue::String(md)),
-                ])),
-            ]);
+        // 1. Built-in standard library functions
+        if let Some((sig, summary)) = get_builtin_doc(txt) {
+            let md = format!("```pilot\n{}\n```\n\n{}", sig, summary);
+            return make_hover_card(&md);
         }
 
-        // 2. Check top-level items in file
+        // 2. Polyglot engine blocks
+        if let Some(doc) = get_polyglot_doc(txt) {
+            let md = format!("**Pilot Polyglot Block**: `{}`\n\n{}", txt, doc);
+            return make_hover_card(&md);
+        }
+
+        // 3. Types and primitives
+        if let Some(doc) = get_type_doc(txt) {
+            let md = format!("**Pilot Type**: `{}`\n\n{}", txt, doc);
+            return make_hover_card(&md);
+        }
+
+        // 4. Pilot Keywords
+        if let Some((domain, summary)) = get_keyword_doc(txt) {
+            let md = format!("**Pilot Keyword**: `{}` ({})\n\n{}", txt, domain, summary);
+            return make_hover_card(&md);
+        }
+
+        // 5. AST-based Type Analysis (Functions, Parameters, Variables, Classes, Structs)
+        let arena = pilot_parser::parse(&src);
+        let root_id = pilot_ast::NodeId(if arena.nodes.is_empty() { 0 } else { (arena.nodes.len() - 1) as u32 });
+        let analysis = pilot_analysis::AnalysisPipeline::analyze(&arena, root_id);
+
+        // 5a. Functions in file (definitions & call-sites)
+        for (idx, node) in arena.nodes.iter().enumerate() {
+            if node.node_kind() == pilot_ast::NodeKind::FnDecl {
+                let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                if name == txt {
+                    let fn_start = node.rhs;
+                    let fn_len = node.flags as usize;
+                    let mut param_strs = Vec::new();
+                    if fn_len > 0 {
+                        let fn_children = arena.children_slice(fn_start, fn_len as u32);
+                        for &p_id in &fn_children[1..] {
+                            let p_node = *arena.node(pilot_ast::NodeId(p_id));
+                            let p_name = arena.interner.resolve(pilot_intern::SymbolId(p_node.lhs));
+                            let p_ty = if p_node.rhs != 0 {
+                                analysis.inferred_types.get(&p_id).copied().unwrap_or(pilot_analysis::TypeId::ANY)
+                            } else {
+                                pilot_analysis::TypeId::ANY
+                            };
+                            param_strs.push(format!("{}: {}", p_name, analysis.types.display(p_ty)));
+                        }
+                    }
+                    let ret_ty = analysis.inferred_types.get(&(idx as u32)).copied().unwrap_or(pilot_analysis::TypeId::ANY);
+                    let ret_str = if let pilot_analysis::TypeKind::Function { ret, .. } = analysis.types.get(ret_ty) {
+                        analysis.types.display(*ret)
+                    } else {
+                        analysis.types.display(ret_ty)
+                    };
+                    let sig = format!("def {}({}) -> {}", name, param_strs.join(", "), ret_str);
+                    let md = format!("```pilot\n{}\n```\n\n*Pilot Function Declaration*", sig);
+                    return make_hover_card(&md);
+                }
+            }
+        }
+
+        // 5b. Parameters
+        for (idx, node) in arena.nodes.iter().enumerate() {
+            if node.node_kind() == pilot_ast::NodeKind::ParamDecl {
+                let p_name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                if p_name == txt {
+                    let ty_id = analysis.inferred_types.get(&(idx as u32)).copied().unwrap_or(pilot_analysis::TypeId::ANY);
+                    let ty_str = analysis.types.display(ty_id);
+                    let md = format!("```pilot\n(parameter) {}: {}\n```", p_name, ty_str);
+                    return make_hover_card(&md);
+                }
+            }
+        }
+
+        // 5c. Variables (let, var, const)
+        for (idx, node) in arena.nodes.iter().enumerate() {
+            let nk = node.node_kind();
+            if matches!(nk, pilot_ast::NodeKind::LetStmt | pilot_ast::NodeKind::VarStmt | pilot_ast::NodeKind::ConstDecl) {
+                let var_name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                if var_name == txt {
+                    let ty_id = analysis.inferred_types.get(&(idx as u32)).copied().unwrap_or(pilot_analysis::TypeId::ANY);
+                    let ty_str = analysis.types.display(ty_id);
+                    let kw = match nk {
+                        pilot_ast::NodeKind::LetStmt => "let",
+                        pilot_ast::NodeKind::VarStmt => "var",
+                        pilot_ast::NodeKind::ConstDecl => "const",
+                        _ => "let",
+                    };
+                    let md = format!("```pilot\n{} {}: {}\n```\n\n*Pilot Variable*", kw, var_name, ty_str);
+                    return make_hover_card(&md);
+                }
+            }
+        }
+
+        // 6. Top-level definitions in ItemTree fallback
         if let Some(item_tree) = self.db.module_item_tree(file_id) {
             for item in &item_tree.items {
                 if item.name == txt {
                     let md = format!("**Pilot Definition**: `{}`\n```pilot\n{}\n```", item.name, item.signature_text);
-                    return JsonValue::Object(vec![
-                        ("contents".to_string(), JsonValue::Object(vec![
-                            ("kind".to_string(), JsonValue::String("markdown".to_string())),
-                            ("value".to_string(), JsonValue::String(md)),
-                        ])),
-                    ]);
+                    return make_hover_card(&md);
+                }
+            }
+        }
+
+        JsonValue::Null
+    }
+
+    fn handle_signature_help(&self, params: &JsonValue) -> JsonValue {
+        let (file_id, byte_offset) = match self.get_file_and_offset(params) {
+            Some(res) => res,
+            None => return JsonValue::Null,
+        };
+
+        let src = match self.db.source_text(file_id) {
+            Some(s) => s,
+            None => return JsonValue::Null,
+        };
+
+        let offset = (byte_offset as usize).min(src.len());
+        let prefix = &src[..offset];
+
+        let mut depth = 0i32;
+        let mut open_paren_idx = None;
+        let mut comma_count = 0u32;
+
+        let bytes = prefix.as_bytes();
+        for i in (0..bytes.len()).rev() {
+            let b = bytes[i];
+            if b == b')' {
+                depth += 1;
+            } else if b == b'(' {
+                if depth == 0 {
+                    open_paren_idx = Some(i);
+                    break;
+                }
+                depth -= 1;
+            } else if b == b',' && depth == 0 {
+                comma_count += 1;
+            }
+        }
+
+        let paren_idx = match open_paren_idx {
+            Some(idx) => idx,
+            None => return JsonValue::Null,
+        };
+
+        let before_paren = prefix[..paren_idx].trim_end();
+        let fn_name_start = before_paren.rfind(|c: char| !c.is_alphanumeric() && c != '_')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let fn_name = &before_paren[fn_name_start..];
+        if fn_name.is_empty() {
+            return JsonValue::Null;
+        }
+
+        // 1. Built-in functions
+        if let Some((sig, summary)) = get_builtin_doc(fn_name) {
+            let param_list = extract_params_from_sig(sig);
+            return make_signature_help_resp(sig, summary, &param_list, comma_count);
+        }
+
+        // 2. AST Functions
+        let arena = pilot_parser::parse(&src);
+        let root_id = pilot_ast::NodeId(if arena.nodes.is_empty() { 0 } else { (arena.nodes.len() - 1) as u32 });
+        let analysis = pilot_analysis::AnalysisPipeline::analyze(&arena, root_id);
+
+        for (idx, node) in arena.nodes.iter().enumerate() {
+            if node.node_kind() == pilot_ast::NodeKind::FnDecl {
+                let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                if name == fn_name {
+                    let fn_start = node.rhs;
+                    let fn_len = node.flags as usize;
+                    let mut param_strs = Vec::new();
+                    if fn_len > 0 {
+                        let fn_children = arena.children_slice(fn_start, fn_len as u32);
+                        for &p_id in &fn_children[1..] {
+                            let p_node = *arena.node(pilot_ast::NodeId(p_id));
+                            let p_name = arena.interner.resolve(pilot_intern::SymbolId(p_node.lhs));
+                            let p_ty = if p_node.rhs != 0 {
+                                analysis.inferred_types.get(&p_id).copied().unwrap_or(pilot_analysis::TypeId::ANY)
+                            } else {
+                                pilot_analysis::TypeId::ANY
+                            };
+                            param_strs.push(format!("{}: {}", p_name, analysis.types.display(p_ty)));
+                        }
+                    }
+                    let ret_ty = analysis.inferred_types.get(&(idx as u32)).copied().unwrap_or(pilot_analysis::TypeId::ANY);
+                    let ret_str = if let pilot_analysis::TypeKind::Function { ret, .. } = analysis.types.get(ret_ty) {
+                        analysis.types.display(*ret)
+                    } else {
+                        analysis.types.display(ret_ty)
+                    };
+                    let sig = format!("{}({}) -> {}", name, param_strs.join(", "), ret_str);
+                    return make_signature_help_resp(&sig, "Pilot Function Declaration", &param_strs, comma_count);
+                }
+            }
+        }
+
+        // 3. ItemTree fallback
+        if let Some(item_tree) = self.db.module_item_tree(file_id) {
+            for item in &item_tree.items {
+                if item.name == fn_name {
+                    let param_list = extract_params_from_sig(&item.signature_text);
+                    return make_signature_help_resp(&item.signature_text, "Pilot Definition", &param_list, comma_count);
                 }
             }
         }
@@ -354,7 +582,17 @@ impl LspServer {
     fn handle_completion(&self, params: &JsonValue) -> JsonValue {
         let mut items = Vec::new();
 
-        // Keyword completions
+        // 1. Built-in functions
+        for (name, sig, summary) in BUILTIN_DOCS.iter() {
+            items.push(JsonValue::Object(vec![
+                ("label".to_string(), JsonValue::String(name.to_string())),
+                ("kind".to_string(), JsonValue::Number(3.0)), // Function
+                ("detail".to_string(), JsonValue::String(sig.to_string())),
+                ("documentation".to_string(), JsonValue::String(summary.to_string())),
+            ]));
+        }
+
+        // 2. Keyword completions
         for (kw, (domain, summary)) in KEYWORD_DOCS.iter() {
             items.push(JsonValue::Object(vec![
                 ("label".to_string(), JsonValue::String(kw.to_string())),
@@ -364,7 +602,27 @@ impl LspServer {
             ]));
         }
 
-        // Top-level module symbols
+        // 3. Polyglot engines
+        for (lang, desc) in POLYGLOT_DOCS.iter() {
+            items.push(JsonValue::Object(vec![
+                ("label".to_string(), JsonValue::String(lang.to_string())),
+                ("kind".to_string(), JsonValue::Number(14.0)), // Keyword
+                ("detail".to_string(), JsonValue::String("Polyglot Engine".to_string())),
+                ("documentation".to_string(), JsonValue::String(desc.to_string())),
+            ]));
+        }
+
+        // 4. Primitive types
+        for (ty, desc) in TYPE_DOCS.iter() {
+            items.push(JsonValue::Object(vec![
+                ("label".to_string(), JsonValue::String(ty.to_string())),
+                ("kind".to_string(), JsonValue::Number(7.0)), // Class / Interface / Type
+                ("detail".to_string(), JsonValue::String("Pilot Type".to_string())),
+                ("documentation".to_string(), JsonValue::String(desc.to_string())),
+            ]));
+        }
+
+        // 5. Top-level module symbols & variables
         if let Some((file_id, _)) = self.get_file_and_offset(params) {
             if let Some(item_tree) = self.db.module_item_tree(file_id) {
                 for item in &item_tree.items {
@@ -373,6 +631,20 @@ impl LspServer {
                         ("kind".to_string(), JsonValue::Number(3.0)), // Function
                         ("detail".to_string(), JsonValue::String(item.signature_text.clone())),
                     ]));
+                }
+            }
+            if let Some(src) = self.db.source_text(file_id) {
+                let arena = pilot_parser::parse(&src);
+                for node in &arena.nodes {
+                    let nk = node.node_kind();
+                    if matches!(nk, pilot_ast::NodeKind::LetStmt | pilot_ast::NodeKind::VarStmt) {
+                        let var_name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                        items.push(JsonValue::Object(vec![
+                            ("label".to_string(), JsonValue::String(var_name.to_string())),
+                            ("kind".to_string(), JsonValue::Number(6.0)), // Variable
+                            ("detail".to_string(), JsonValue::String("Variable".to_string())),
+                        ]));
+                    }
                 }
             }
         }
@@ -476,14 +748,102 @@ impl LspServer {
         ])
     }
 
-    fn handle_semantic_tokens_full(&self, params: &JsonValue) -> JsonValue {
+    fn decode_uri_path(uri: &str) -> Option<String> {
+        let stripped = uri.strip_prefix("file://")?;
+        let mut path = String::new();
+        let bytes = stripped.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' && i + 2 < bytes.len() {
+                if let Ok(b) = u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..=i + 2]).unwrap_or(""), 16) {
+                    path.push(b as char);
+                    i += 3;
+                    continue;
+                }
+            }
+            path.push(bytes[i] as char);
+            i += 1;
+        }
+        Some(path)
+    }
+
+    fn is_pilot_primitive_type(s: &str) -> bool {
+        matches!(
+            s,
+            "int"
+                | "i64"
+                | "i32"
+                | "i16"
+                | "i8"
+                | "uint"
+                | "u64"
+                | "u32"
+                | "u16"
+                | "u8"
+                | "float"
+                | "f64"
+                | "f32"
+                | "f16"
+                | "f8"
+                | "str"
+                | "string"
+                | "char"
+                | "bool"
+                | "void"
+                | "any"
+                | "symbol"
+                | "list"
+                | "map"
+                | "dict"
+                | "set"
+                | "tuple"
+                | "range"
+                | "bytes"
+                | "bytearray"
+                | "dynamic"
+                | "decimal"
+                | "double"
+                | "complex"
+                | "frozenset"
+                | "Table"
+                | "Dataset"
+                | "Relation"
+                | "Channel"
+                | "Chan"
+                | "Result"
+                | "Option"
+                | "Span"
+                | "Memory"
+                | "SliceBuffer"
+                | "SharedBuffer"
+                | "RangeWindow"
+                | "NativeArray"
+                | "NativeMap"
+                | "AstNode"
+        )
+    }
+
+    fn handle_semantic_tokens_full(&mut self, params: &JsonValue) -> JsonValue {
         let uri = match params.get("textDocument").and_then(|d| d.get("uri")).and_then(|u| u.as_str()) {
             Some(u) => u,
             None => return JsonValue::Object(vec![("data".to_string(), JsonValue::Array(Vec::new()))]),
         };
-        let file_id = match self.uri_to_file_id.get(uri) {
-            Some(&id) => id,
-            None => return JsonValue::Object(vec![("data".to_string(), JsonValue::Array(Vec::new()))]),
+        let file_id = match self.uri_to_file_id.get(uri).copied() {
+            Some(id) => id,
+            None => {
+                if let Some(path) = Self::decode_uri_path(uri) {
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        let id = self.get_or_create_file_id(uri);
+                        self.line_indices.insert(id, LineIndex::new(content.as_bytes()));
+                        self.db.set_source(id, &content);
+                        id
+                    } else {
+                        return JsonValue::Object(vec![("data".to_string(), JsonValue::Array(Vec::new()))]);
+                    }
+                } else {
+                    return JsonValue::Object(vec![("data".to_string(), JsonValue::Array(Vec::new()))]);
+                }
+            }
         };
 
         let green = match self.db.green_cst(file_id) {
@@ -514,58 +874,90 @@ impl LspServer {
                     continue;
                 }
 
-                let type_idx = match k {
-                    // Keywords (15)
+                let token_desc: Option<(u32, u32)> = match k {
+                    // Keywords (15) and Modifiers (16)
                     k if (k as u16 >= SyntaxKind::KwLet as u16 && k as u16 <= SyntaxKind::KwDefault as u16) => {
                         match k {
-                            SyntaxKind::KwClass => Some(2), // class
-                            SyntaxKind::KwStruct | SyntaxKind::KwRecord => Some(5), // struct
-                            SyntaxKind::KwInterface | SyntaxKind::KwProtocol => Some(4), // interface
-                            SyntaxKind::KwEnum => Some(3), // enum
-                            SyntaxKind::KwType => Some(1), // type
-                            _ => Some(15), // keyword
+                            SyntaxKind::KwPure
+                            | SyntaxKind::KwComptime
+                            | SyntaxKind::KwMut
+                            | SyntaxKind::KwImmut
+                            | SyntaxKind::KwRef
+                            | SyntaxKind::KwDynamic
+                            | SyntaxKind::KwAsync => Some((16, 0)), // modifier
+                            _ => Some((15, 0)), // keyword
                         }
                     }
 
-                    // Identifiers (function / type / decorator / variable)
+                    // Identifiers (function / method / type / class / struct / property / decorator / variable)
                     SyntaxKind::Ident => {
+                        let text = token.text();
                         let end_offset = (token.offset() + token.text_len()) as usize;
                         let remainder = src.get(end_offset..).unwrap_or("").trim_start();
-                        if pilot_parser::is_polyglot_lang(token.text()) && (remainder.starts_with('{') || remainder.starts_with("```") || remainder.starts_with("\"\"\"")) {
-                            Some(15) // keyword
+
+                        if pilot_parser::is_polyglot_lang(text) && (remainder.starts_with('{') || remainder.starts_with("```") || remainder.starts_with("\"\"\"")) {
+                            Some((15, 0)) // keyword
+                        } else if matches!(text, "public" | "private" | "protected" | "internal" | "static" | "partial" | "readonly" | "override" | "virtual" | "abstract" | "sealed") {
+                            Some((16, 0)) // modifier
                         } else if prev_non_trivia_kind == SyntaxKind::At {
-                            Some(22) // decorator
-                        } else if prev_non_trivia_kind == SyntaxKind::KwClass {
-                            Some(2) // class
+                            Some((22, 0)) // decorator
+                        } else if prev_non_trivia_kind == SyntaxKind::KwClass || prev_non_trivia_kind == SyntaxKind::KwActor || prev_non_trivia_kind == SyntaxKind::KwState {
+                            Some((2, 3)) // class (declaration + definition)
                         } else if prev_non_trivia_kind == SyntaxKind::KwStruct || prev_non_trivia_kind == SyntaxKind::KwRecord {
-                            Some(5) // struct
+                            Some((5, 3)) // struct (declaration + definition)
                         } else if prev_non_trivia_kind == SyntaxKind::KwInterface || prev_non_trivia_kind == SyntaxKind::KwProtocol {
-                            Some(4) // interface
+                            Some((4, 3)) // interface (declaration + definition)
                         } else if prev_non_trivia_kind == SyntaxKind::KwEnum {
-                            Some(3) // enum
-                        } else if prev_non_trivia_kind == SyntaxKind::KwType {
-                            Some(1) // type
+                            Some((3, 3)) // enum (declaration + definition)
+                        } else if prev_non_trivia_kind == SyntaxKind::KwType || prev_non_trivia_kind == SyntaxKind::KwExtend || prev_non_trivia_kind == SyntaxKind::KwExtension {
+                            Some((1, 3)) // type (declaration + definition)
+                        } else if prev_non_trivia_kind == SyntaxKind::KwProperty {
+                            Some((9, 3)) // property (declaration + definition)
+                        } else if prev_non_trivia_kind == SyntaxKind::KwMacro {
+                            Some((14, 3)) // macro (declaration + definition)
                         } else if prev_non_trivia_kind == SyntaxKind::KwDef || prev_non_trivia_kind == SyntaxKind::KwFn {
-                            Some(12) // function definition
-                        } else {
-                            let end_offset = (token.offset() + token.text_len()) as usize;
-                            let remainder = src.get(end_offset..).unwrap_or("").trim_start();
+                            Some((12, 3)) // function definition
+                        } else if prev_non_trivia_kind == SyntaxKind::Dot || prev_non_trivia_kind == SyntaxKind::SafeNav || prev_non_trivia_kind == SyntaxKind::Cascade || prev_non_trivia_kind == SyntaxKind::DotDot {
                             if remainder.starts_with('(') {
-                                Some(12) // function call
-                            } else if token.text().starts_with(char::is_uppercase) {
-                                Some(1) // type (PascalCase)
+                                Some((13, 0)) // method
                             } else {
-                                Some(8) // variable
+                                Some((9, 0)) // property
                             }
+                        } else if remainder.starts_with('(') {
+                            if text.starts_with(char::is_uppercase) {
+                                Some((2, 0)) // class constructor call
+                            } else {
+                                Some((12, 0)) // function call
+                            }
+                        } else if Self::is_pilot_primitive_type(text) {
+                            Some((1, 512)) // type (defaultLibrary)
+                        } else if text.starts_with(char::is_uppercase) {
+                            if text.chars().all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit()) && text.len() > 1 {
+                                Some((8, 4)) // constant (variable + readonly)
+                            } else {
+                                Some((1, 0)) // type
+                            }
+                        } else if text == "self" || text == "this" {
+                            Some((8, 4)) // variable + readonly
+                        } else if prev_non_trivia_kind == SyntaxKind::KwLet || prev_non_trivia_kind == SyntaxKind::KwVar {
+                            Some((8, 1)) // variable declaration
+                        } else if prev_non_trivia_kind == SyntaxKind::KwConst {
+                            Some((8, 5)) // variable declaration + readonly
+                        } else {
+                            Some((8, 0)) // variable
                         }
                     }
 
                     // Strings (18)
                     SyntaxKind::StrLit
                     | SyntaxKind::TripleStrLit
+                    | SyntaxKind::RawDslBlock
                     | SyntaxKind::FStrStart
                     | SyntaxKind::FStrMiddle
-                    | SyntaxKind::FStrEnd => Some(18), // string
+                    | SyntaxKind::FStrEnd => Some((18, 0)), // string
+
+                    // Keyword literal / symbols (10: enumMember)
+                    SyntaxKind::KeywordLit => Some((10, 0)),
 
                     // Numbers (19)
                     SyntaxKind::IntLit
@@ -575,23 +967,24 @@ impl LspServer {
                     | SyntaxKind::FloatLit
                     | SyntaxKind::DurationLit
                     | SyntaxKind::FrequencyLit
-                    | SyntaxKind::MemoryLit => Some(19), // number
+                    | SyntaxKind::MemoryLit => Some((19, 0)), // number
 
                     // Comments (17)
-                    SyntaxKind::LineComment | SyntaxKind::BlockComment | SyntaxKind::Shebang => Some(17), // comment
+                    SyntaxKind::LineComment | SyntaxKind::BlockComment | SyntaxKind::Shebang => Some((17, 0)), // comment
 
                     // Operators (21)
-                    k if (k as u16 >= SyntaxKind::Plus as u16 && k as u16 <= SyntaxKind::DotDotLess as u16) => Some(21), // operator
+                    k if (k as u16 >= SyntaxKind::Plus as u16 && k as u16 <= SyntaxKind::DotDotLess as u16)
+                        || (k as u16 >= SyntaxKind::CallQuoteShallow as u16 && k as u16 <= SyntaxKind::CallQuoteEffect as u16) => Some((21, 0)), // operator
 
                     // Decorators (22)
-                    SyntaxKind::At => Some(22), // decorator
+                    SyntaxKind::At => Some((22, 0)), // decorator
 
                     _ => None,
                 };
 
                 prev_non_trivia_kind = k;
 
-                if let Some(t_idx) = type_idx {
+                if let Some((t_idx, m_bits)) = token_desc {
                     if token.text_len() == 0 {
                         continue;
                     }
@@ -610,7 +1003,7 @@ impl LspServer {
                     data.push(JsonValue::Number(delta_col as f64));
                     data.push(JsonValue::Number(token.text_len() as f64));
                     data.push(JsonValue::Number(t_idx as f64));
-                    data.push(JsonValue::Number(0.0)); // tokenModifiers
+                    data.push(JsonValue::Number(m_bits as f64));
 
                     prev_line = line_0;
                     prev_col = col_0;
@@ -662,13 +1055,7 @@ impl LspServer {
         for (node_idx, node) in arena.nodes.iter().enumerate() {
             if node.kind == pilot_ast::NodeKind::LetStmt as u16 || node.kind == pilot_ast::NodeKind::VarStmt as u16 {
                 if let Some(&ty_id) = analysis.inferred_types.get(&(node_idx as u32)) {
-                    let type_name = match analysis.types.get(ty_id) {
-                        pilot_analysis::TypeKind::Primitive(p) => p.clone(),
-                        pilot_analysis::TypeKind::Collection { element, .. } => format!("List[{}]", element.0),
-                        pilot_analysis::TypeKind::Map { key, value } => format!("Map[{}, {}]", key.0, value.0),
-                        pilot_analysis::TypeKind::Option(inner) => format!("{}?", inner.0),
-                        _ => "any".to_string(),
-                    };
+                    let type_name = analysis.types.display(ty_id);
 
                     let span = arena.spans[node_idx];
                     let (line, col) = li.offset_to_line_col(span.end);
@@ -834,9 +1221,115 @@ fn make_range(start_line: u32, start_col: u32, end_line: u32, end_col: u32) -> J
     ])
 }
 
+fn make_hover_card(md: &str) -> JsonValue {
+    JsonValue::Object(vec![
+        ("contents".to_string(), JsonValue::Object(vec![
+            ("kind".to_string(), JsonValue::String("markdown".to_string())),
+            ("value".to_string(), JsonValue::String(md.to_string())),
+        ])),
+    ])
+}
+
+fn extract_params_from_sig(sig: &str) -> Vec<String> {
+    if let Some(open) = sig.find('(') {
+        if let Some(close) = sig[open..].find(')') {
+            let inner = &sig[open + 1..open + close];
+            if !inner.trim().is_empty() {
+                return inner.split(',').map(|s| s.trim().to_string()).collect();
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn make_signature_help_resp(sig: &str, doc: &str, params: &[String], active_param: u32) -> JsonValue {
+    let param_objs: Vec<JsonValue> = params
+        .iter()
+        .map(|p| JsonValue::Object(vec![("label".to_string(), JsonValue::String(p.clone()))]))
+        .collect();
+
+    let sig_info = JsonValue::Object(vec![
+        ("label".to_string(), JsonValue::String(sig.to_string())),
+        ("documentation".to_string(), JsonValue::String(doc.to_string())),
+        ("parameters".to_string(), JsonValue::Array(param_objs)),
+    ]);
+
+    JsonValue::Object(vec![
+        ("signatures".to_string(), JsonValue::Array(vec![sig_info])),
+        ("activeSignature".to_string(), JsonValue::Number(0.0)),
+        ("activeParameter".to_string(), JsonValue::Number(active_param as f64)),
+    ])
+}
+
 fn get_keyword_doc(ident: &str) -> Option<(&'static str, &'static str)> {
     KEYWORD_DOCS.iter().find(|(k, _)| *k == ident).map(|(_, v)| *v)
 }
+
+fn get_builtin_doc(ident: &str) -> Option<(&'static str, &'static str)> {
+    BUILTIN_DOCS.iter().find(|(k, _, _)| *k == ident).map(|(_, sig, sum)| (*sig, *sum))
+}
+
+fn get_polyglot_doc(ident: &str) -> Option<&'static str> {
+    POLYGLOT_DOCS.iter().find(|(k, _)| *k == ident).map(|(_, v)| *v)
+}
+
+fn get_type_doc(ident: &str) -> Option<&'static str> {
+    TYPE_DOCS.iter().find(|(k, _)| *k == ident).map(|(_, v)| *v)
+}
+
+const BUILTIN_DOCS: &[(&str, &str, &str)] = &[
+    ("println", "println(val: any) -> void", "Prints values to standard output followed by a newline."),
+    ("print", "print(val: any) -> void", "Prints values to standard output without a trailing newline."),
+    ("panic", "panic(msg: str) -> never", "Aborts program execution immediately with an unrecoverable error message."),
+    ("assert", "assert(condition: bool, msg: str = \"\") -> void", "Asserts that condition is true; aborts with an assertion failure if false."),
+    ("len", "len(collection: any) -> int", "Returns the number of elements in a list, map, string, or collection."),
+    ("range", "range(start: int, end: int, step: int = 1) -> List[int]", "Generates an iterable sequence of integers from `start` up to `end`."),
+    ("typeof", "typeof(val: any) -> str", "Returns the runtime type name of the given value."),
+    ("append", "append(item: any) -> void", "Appends an element to the end of a list or buffer."),
+    ("malloc", "malloc(size: int) -> *void", "Allocates unmanaged heap memory of the given byte size."),
+    ("free", "free(ptr: *void) -> void", "Frees previously allocated unmanaged heap memory."),
+    ("memset", "memset(dest: *void, val: int, count: int) -> *void", "Fills memory block with the given byte value."),
+    ("clock_gettime", "clock_gettime(clock_id: int) -> int", "Returns high-resolution system clock timestamp in nanoseconds."),
+];
+
+const POLYGLOT_DOCS: &[(&str, &str)] = &[
+    ("python", "Inline Python block with zero-copy bidirectional variable binding and generator/coroutine yield bridges."),
+    ("js", "Inline JavaScript engine execution block with seamless host data interchange."),
+    ("lua", "Ultra-fast embedded Lua runtime block for high-throughput scripting."),
+    ("java", "JVM polyglot execution block supporting Java class and method interop."),
+    ("c", "Zero-overhead native C code block compiled and linked directly into the binary."),
+    ("cpp", "Native C++ execution block with template, class, and STL support."),
+    ("asm", "Inline assembly block using machine registers and SIMD instructions."),
+    ("rust", "Inline Rust block compiled natively with Perceus memory management semantics."),
+    ("csharp", "Inline .NET/C# execution block with CLR interop."),
+    ("ruby", "Inline Ruby scripting block with dynamic evaluation."),
+    ("go", "Inline Go execution block with goroutine support."),
+    ("zig", "Inline Zig execution block with compile-time metaprogramming."),
+];
+
+const TYPE_DOCS: &[(&str, &str)] = &[
+    ("str", "UTF-8 string with SSO (Small String Optimization, <= 23 bytes inline, zero allocations) and Perceus refcounting."),
+    ("int", "64-bit signed two's complement integer (`i64`)."),
+    ("i64", "64-bit signed integer."),
+    ("i32", "32-bit signed integer."),
+    ("i16", "16-bit signed integer."),
+    ("i8", "8-bit signed integer."),
+    ("u64", "64-bit unsigned integer."),
+    ("u32", "32-bit unsigned integer."),
+    ("u16", "16-bit unsigned integer."),
+    ("u8", "8-bit unsigned byte."),
+    ("float", "64-bit IEEE 754 double-precision floating-point number (`f64`)."),
+    ("f64", "64-bit IEEE 754 double-precision floating-point number."),
+    ("f32", "32-bit IEEE 754 single-precision floating-point number."),
+    ("bool", "Boolean logical value (`true` or `false`)."),
+    ("void", "Represents the absence of a value or void return type."),
+    ("any", "Dynamic row-polymorphic open type capable of holding any Pilot value."),
+    ("never", "Bottom type representing a computation that never completes or halts."),
+    ("List", "Dynamic growable array with O(1) amortized append and Perceus in-place reuse."),
+    ("Map", "Robin Hood hashed key-value map with cache-coherent flat storage."),
+    ("Option", "Optional value type representing `Some(T)` or `None`."),
+    ("Result", "Error handling type representing either `Ok(T)` or `Err(E)`."),
+];
 
 const KEYWORD_DOCS: &[(&str, (&str, &str))] = &[
     ("let", ("Core / Type Safety", "`let <name>: <type> = <expr>` — Declares an immutable binding.")),

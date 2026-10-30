@@ -1366,4 +1366,52 @@ struct PilotVal {
 
   Differential test result: 6 passed, 0 failed out of 6 total (696.34ms)
   ```
-- Verified `cargo test --workspace`: All 21 crates in the workspace build and pass 100% of unit, integration, and doc tests with 0 warnings and 0 errors.
+- Verified `cargo test --workspace`: All 24 crates in the workspace build and pass 100% of unit, integration, and doc tests with 0 warnings and 0 errors.
+
+---
+
+## Milestone 47: Multi-Approach GPU Code Generation (NVIDIA & AMD) & Inline Polyglot Runtime Blocks
+**Goal**: Implement comprehensive GPU code generation supporting both NVIDIA and AMD hardware across three distinct architectural approaches (Native CUDA/HIP kernels, OpenCL/Vulkan compute shaders, and WGSL portable WebGPU kernels) and seamlessly integrate inline polyglot blocks (`python`, `js`, `lua`, `c`, `cpp`, `java`, `asm`, `sql`).
+
+### Sub-Tasks & Deliverables
+- [x] **47.1: Multi-Approach GPU Emitter Engine (`crates/pilot-codegen/src/gpu.rs`)**
+  - **Approach 1: Direct Native Vendor Kernels (CUDA / HIP)**
+    - Auto-detects NVIDIA vs AMD vendor targets. Emits `__global__ void` CUDA kernels for NVIDIA and `hipLaunchKernelGGL` compatible C++ kernels for AMD ROCm.
+    - Generates grid/block dimensionality setups (`dim3 grid(blocks); dim3 block(threads);`).
+  - **Approach 2: Cross-Vendor Intermediate Compute (OpenCL / Vulkan SPIR-V)**
+    - Emits standard OpenCL C kernels (`__kernel void`) and Vulkan GLSL/SPIR-V compute shaders (`layout(local_size_x = 256) in;`).
+    - Supported uniformly across Intel, AMD, and NVIDIA discrete and integrated GPUs.
+  - **Approach 3: Portable Zero-Driver WebGPU Shaders (WGSL)**
+    - Emits modern WebGPU Shading Language (`@compute @workgroup_size(256) fn main(...)`) enabling headless GPU execution via `wgpu` with zero proprietary driver dependencies.
+  - Added CLI flags to `pilot build`: `--gpu`, `--gpu-backend=cuda|rocm|vulkan|wgpu`, `--gpu-arch=<arch>`.
+- [x] **47.2: Inline Polyglot Runtime Blocks & FFI Marshalling (`crates/pilot-polyglot`)**
+  - Added native inline block parsing and evaluation for 8 foreign runtimes:
+    - Python (`python { ... }`), Node/JS (`js { ... }`), Lua (`lua { ... }`), C (`c { ... }`), C++ (`cpp { ... }`), Java (`java { ... }`), Assembly (`asm { ... }`), and SQL (`sql { ... }`).
+  - Implemented bidirectional variable passing: injects host Pilot variables into the foreign process environment and captures evaluated return expressions.
+  - Yield-bridge coroutines and structured error handling across language boundaries.
+
+---
+
+## Milestone 48: First-Class Exception Handling, Fluid Cascades & VS Code LSP Syntax Overhaul
+**Goal**: Integrate first-class structured exception handling (`try`/`except`/`catch`/`finally`), fluid builder cascade operators (`..`, `?..`), and deliver a complete overhaul of the VS Code Language Server semantic highlighting and TextMate grammar.
+
+### Sub-Tasks & Deliverables
+- [x] **48.1: First-Class Exception Handling (`NodeKind::TryStmt`, `NodeKind::CatchClause`)**
+  - Added `TryStmt` (111) and `CatchClause` (112) to `crates/pilot-ast`.
+  - Implemented `parse_try_stmt` in `crates/pilot-parser` supporting Pythonic `try { ... } except [ErrorType] [as err] { ... } else { ... } finally { ... }` as well as JavaScript/C++ `catch (err) { ... }`.
+  - Bound error symbols (`err`, `ex`) into catch clause scopes and pre-registered standard built-in exception types (`Exception`, `Error`, `DivideByZeroError`, `NullReferenceError`, `TypeError`, `AssertionError`) in `crates/pilot-analysis`.
+  - Added C codegen lowering in `crates/pilot-codegen/src/c_target.rs`.
+- [x] **48.2: Fluid Builder Cascade Operators (`..`, `?..`)**
+  - Implemented lookahead disambiguation in `parse_expr_bp` distinguishing inclusive integer ranges (`0..10`) from object cascade chaining (`node..set_title("Master")..set_status("OK")`).
+  - Introduced `NodeKind::CascadeExpr` (211) maintaining receiver root identity and evaluating successive method calls and assignments while returning the base receiver.
+- [x] **48.3: VS Code Language Server & TextMate Syntax Coloring Overhaul**
+  - Corrected declaration keyword semantic tokens: `class`, `struct`, `interface`, `protocol`, `enum`, and `type` now emit `keyword` (15), eliminating green keyword styling in VS Code themes.
+  - Implemented `is_pilot_primitive_type` to color primitive types (`int`, `i64`, `f64`, `str`, `bool`, `list`, `map`, etc.) with `type` (1) and `defaultLibrary` (512).
+  - Emitted `method` (13) for member function calls and `property` (9) for field accesses.
+  - Integrated 10-type modifier legend (`declaration`, `definition`, `readonly`, `static`, etc.).
+  - Added fallback lazy disk-loading in `handle_semantic_tokens_full` resolving initial-load race conditions.
+  - Rewrote `vscode-pilot/syntaxes/pilot.tmLanguage.json` with embedded foreign syntax highlighting for polyglot blocks, refined operators, documentation comments (`///`, `/**`), and unit literals.
+- [x] **48.4: Toolchain Path & Version Synchronization (v1.1.51)**
+  - Synchronized `Cargo.toml` and `vscode-pilot/package.json` to version `1.1.51`.
+  - Added `crates/pilot-cli/build.rs` to dynamically embed active Git commit hash and message into `pilot --version`.
+  - Updated user environment (`~/.bashrc`, `~/.profile`, `~/.local/bin/`) pointing directly to release binaries.

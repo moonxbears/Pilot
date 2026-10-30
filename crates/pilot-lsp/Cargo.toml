@@ -23,4 +23,5 @@ pilot-incremental = { path = "../pilot-incremental" }
 pilot-db = { path = "../pilot-db" }
 pilot-parser = { path = "../pilot-parser" }
 pilot-ast = { path = "../pilot-ast" }
+pilot-intern = { path = "../pilot-intern" }
 pilot-analysis = { path = "../pilot-analysis" }

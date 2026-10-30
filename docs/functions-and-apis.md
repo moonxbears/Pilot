@@ -309,18 +309,18 @@ Defined in [`Runtime/Generative/PilotClassNode.cs`](../Runtime/Generative/PilotC
 
 ## 6. Design-by-Contract Intrinsics (`old` & `result`)
 
-Inside `ensures` postcondition clauses on functions (`PilotEngine.InvokeFunction` and `PilotInterpreterVisitor.VisitAtom_expr`):
+Inside `ensures` postcondition clauses on functions:
 
 | Intrinsic | Context | Exact Behavior |
 | :--- | :--- | :--- |
-| **`old(expr)`** | `ensures` clause | Before the function body executes, `PilotEngine.SnapshotOldCalls` scans all `ensures` AST nodes for `old(...)` calls, evaluates `expr` in the pre-execution call scope, clones the value (`CloneValue()`), and stores it in `functionContext.OldSnapshots`. When `ensures` runs after the body completes, `old(expr)` returns that pre-state snapshot. |
-| **`result`** | `ensures` clause | Automatically bound in the function's call scope to the return value produced by the function body before `ensures` clauses are evaluated (e.g., `ensures result > 0`). |
+| **`old(expr)`** | `ensures` clause | Evaluates `expr` in the pre-execution scope before the function body executes, capturing a snapshot. When postconditions execute after completion, `old(expr)` yields that pre-state snapshot. |
+| **`result`** | `ensures` clause | Automatically bound in the function's postcondition scope to the return value produced by the function body (e.g., `ensures result > 0`). |
 
 ---
 
-## 7. Standard Contracts & Delegated Interfaces (`PilotContractRegistry`)
+## 7. Standard Contracts & Delegated Interfaces
 
-Defined in [`Runtime/Contracts/PilotContractRegistry.cs`](../Runtime/Contracts/PilotContractRegistry.cs). When a class delegates a contract to a field or substitute (`IList.Contracts = _items`, `contracts for IList = _items`, or `delegate IList to _items`), Pilot automatically synthesizes forwarding methods for all methods in that contract not explicitly overridden on the class:
+When a class delegates a contract to a field or substitute (`IList.Contracts = _items`, `contracts for IList = _items`, or `delegate IList to _items`), Pilot automatically synthesizes forwarding methods for all methods in that contract not explicitly overridden on the class:
 
 | Contract Name | Synthesized Forwarding Methods | Special Behavior |
 | :--- | :--- | :--- |

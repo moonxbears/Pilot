@@ -1,0 +1,592 @@
+# ==============================================================================
+# Pilot Omnibus Syntax Showcase: Complete Language Specification in a Single File
+# ==============================================================================
+# This file demonstrates every syntactic construct, keyword, operator, and grammar
+# production available in the Pilot programming language.
+
+# ==============================================================================
+# 1. Preprocessor Directives
+# ==============================================================================
+#define PILOT_OMNIBUS_SHOWCASE
+#define FEATURE_EXPERIMENTAL
+#undef LEGACY_MODE
+#pragma once
+
+#region Type System and Model Definitions
+
+# ==============================================================================
+# 2. Foreign Module Imports & Library Declarations
+# ==============================================================================
+import math
+import sys as system
+from std.collections import HashMap
+
+// Polyglot Foreign Imports
+import python:numpy as np
+from python:math import sin, cos, pi as PI
+import csharp:System.Text.Json as Json
+import rust:"libpilot_core" as core_rs
+
+// Foreign Interface & ABI Declarations
+extern "c" lib "libc" fn pilot_puts(msg: str) -> i32;
+
+extern "rust" lib "libphysics" {
+    fn simulate_step(dt: f32) -> void;
+    fn get_particle_count() -> i32;
+    fn compute_impulse(mass: f32, velocity: f32) -> f32;
+}
+
+extern "csharp" assembly "System.Data" {
+    class SqlConnection {
+        public def open() -> void;
+        public def close() -> void;
+    }
+}
+
+# ==============================================================================
+# 3. Type Definitions: Records, Structs, Classes, Interfaces, ADTs & Actors
+# ==============================================================================
+
+// Value-Semantic Unboxed Records
+record Point(x: f64, y: f64);
+record Config(host: str, port: int, secure: bool);
+
+// Memory Structs with Type Annotations
+struct Vector3 {
+    let x: f64
+    let y: f64
+    let z: f64
+
+    operator +(other: Vector3) -> Vector3 {
+        return Vector3(self.x + other.x, self.y + other.y, self.z + other.z);
+    }
+}
+
+// Interface Contracts (Parameterized / Generics)
+interface Serializable {
+    def serialize() -> str;
+}
+
+interface Deserializable[T] {
+    def deserialize(payload: str) -> T;
+}
+
+// Algebraic Data Types (Sum Types / Tagged Unions)
+type Shape =
+    | Circle(radius: f64)
+    | Rectangle(width: f64, height: f64)
+    | Polygon(points: Point[])
+    | Origin;
+
+// Enumerations with Payloads
+enum ConnectionState {
+    Disconnected,
+    Connecting,
+    Connected,
+    Reconnecting(int)
+}
+
+// Full OOP Class with Typestates, Properties, Methods, and Builders
+class NetworkNode {
+    private var _id: int = 0
+    private var _name: str = "node"
+    private var _status: str = "idle"
+    public var tags: str[] = []
+
+    // Typestate definitions inside class
+    state Initialized {
+        def connect(self) -> void { pass; }
+    }
+    state Connected {
+        def transmit(self, data: str) -> void { pass; }
+    }
+
+    public def __init__(self, id: int, name: str) -> void {
+        self._id = id
+        self._name = name
+        self._status = "initialized"
+    }
+
+    public property status: str {
+        get { return self._status; }
+        set(val) { self._status = val; }
+    }
+
+    public def get_id(self) -> int {
+        return self._id
+    }
+
+    public def get_name(self) -> str {
+        return self._name
+    }
+
+    // Fluid builder-pattern methods for cascade chaining (..)
+    public def set_title(self, title: str) -> NetworkNode {
+        self._name = title
+        return self
+    }
+
+    public def set_status(self, st: str) -> NetworkNode {
+        self._status = st
+        return self
+    }
+
+    public def add_tag(self, tag: str) -> NetworkNode {
+        self.tags.append(tag)
+        return self
+    }
+}
+
+// Concurrency Actor
+actor EventBus {
+    var event_count: int = 0
+
+    async fn publish(topic: str, payload: str) -> void {
+        self.event_count += 1
+    }
+}
+
+// Scoped Lexical Extension
+extension StringHelpers on str {
+    def shout(self) -> str {
+        return self + "!"
+    }
+}
+
+// Type Adapter Conversion
+adapter str -> int {
+    return 42
+}
+
+#endregion Type System and Model Definitions
+
+# ==============================================================================
+# 4. Global Variables, Constants, and Modifiers
+# ==============================================================================
+public const MAX_CONNECTIONS: int = 4096
+public let APP_NAME: str = "Pilot Omnibus"
+private var g_transaction_id: int = 1000
+
+# ==============================================================================
+# 5. Functions, Decorators, Design-by-Contract & Closures
+# ==============================================================================
+
+// Pure mathematical function
+pure def square(x: int) -> int {
+    return x * x
+}
+
+// Generic function with Type Parameters
+def identity[T](val: T) -> T {
+    return val
+}
+
+// Compile-time evaluable function
+comptime def compute_factorial(n: int) -> int {
+    var acc = 1
+    for i in 2..=n {
+        acc = acc * i
+    }
+    return acc
+}
+
+const FACT_5: int = comptime(compute_factorial(5))
+
+// Design-by-Contract function with requires, ensures, and old()
+def safe_bank_withdraw(var balance: int, amount: int) -> int
+    requires amount > 0 and balance >= amount
+    ensures result == old(balance) - amount
+{
+    balance = balance - amount
+    return balance
+}
+
+// Recursive function
+def factorial(n: int) -> int {
+    if n <= 1 {
+        return 1
+    }
+    return n * factorial(n - 1)
+}
+
+// Asynchronous function
+async def fetch_remote_status(endpoint: str) -> str {
+    return "ONLINE: " + endpoint
+}
+
+// Contextual parameter function for Dependency Injection
+def get_service_data(context db: str) -> str {
+    return "Data queried from: " + db
+}
+
+// Function with homoiconic call-quoting capabilities
+def ComputeImpulse(mass: float, velocity: float) -> float {
+    return 0.5 * mass * velocity * velocity
+}
+
+// Compile-Time AST Macro
+macro log_metric(name, value) {
+    print(name + ": " + value)
+}
+
+# ==============================================================================
+# 6. Demonstrating All Statement & Expression Syntax
+# ==============================================================================
+def run_omnibus_showcase() -> void {
+    print("=== Pilot Omnibus Syntax Tour ===")
+
+    // --- 6.1 Variable Bindings & Primitives ---
+    let immutable_int: int = 42
+    let hex_val: int = 0x2A
+    let bin_val: int = 0b101010
+    let oct_val: int = 0o52
+    let float_val: float = 3.1415926535
+    let scientific: float = 1.0e-4
+    let boolean_val: bool = true
+    let char_val: char = 'P'
+    let raw_string: str = """Multiple lines
+    of string data
+    without escaping"""
+    let f_string: str = f"Interpolated integer: {immutable_int}, float: {float_val}"
+
+    var mutable_counter: int = 0
+    mutable_counter += 1
+    mutable_counter *= 2
+
+    // Dynamic typing and reference binding
+    dynamic dynamic_target = "Dynamic typed string"
+    ref counter_ref = mutable_counter
+
+    // Walrus operator assignment expression (:=)
+    if (let computed_val := immutable_int * 2) > 50 {
+        mutable_counter += computed_val
+    }
+
+    // --- 6.2 Real-Time Duration, Frequency & Memory Literals ---
+    let clk_ns = 25ns
+    let sensor_us = 250us
+    let cycle_ms = 10ms
+    let timeout_s = 2s
+    let freq_khz = 50kHz
+    let freq_ghz = 2.4GHz
+    let buffer_kb = 64KB
+    let cache_mb = 16MB
+
+    // --- 6.3 Collections & Data Structures ---
+    let numbers_list: int[] = [1, 2, 3, 4, 5]
+    let string_map: map = {"alpha": 1, "beta": 2, "gamma": 3}
+    let number_tuple = (10, "tuple_element", true, 3.14)
+    let identity_set = {10, 20, 30, 40}
+    let matrix_2d = [[1.0, 2.0], [3.0, 4.0]]
+
+    // Slicing and indexing
+    let first_elem = numbers_list[0]
+    let sliced_sublist = numbers_list[1..4]
+    let map_lookup = string_map["alpha"]
+
+    // Collection comprehensions
+    let squares = [x * x for x in numbers_list if x % 2 != 0]
+    let mapped_dict = {f"k_{x}": x * 10 for x in numbers_list}
+    let unique_set = {x for x in numbers_list}
+
+    // --- 6.4 Destructuring Unpacking ---
+    let (tup_a, tup_b, tup_c, tup_d) = number_tuple
+    let [head, ..tail] = numbers_list
+
+    // --- 6.5 Control Flow: if / elif / else & Ternary ---
+    let category = "medium"
+    if immutable_int > 100 {
+        category = "high"
+    } elif immutable_int < 0 {
+        category = "negative"
+    } else {
+        category = "standard"
+    }
+
+    // Ternary expression (expr if cond else alt)
+    let ternary_result = "approved" if mutable_counter > 10 else "pending"
+
+    // --- 6.6 Loops: while, for, labeled break/continue, bounded ---
+    var loop_i = 0
+    while loop_i < 5 {
+        loop_i += 1
+    }
+
+    // Bounded loop for real-time safety verification
+    var bounded_i = 0
+    while bounded_i < 100 bounded 100 {
+        bounded_i += 1
+    }
+
+    // For loop over range and collections
+    var sum = 0
+    for num in 0..10 {
+        sum += num
+    }
+
+    // Labeled nested loops with early exit
+    outer_loop: for r in 0..5 {
+        inner_loop: for c in 0..5 {
+            if r == 2 and c == 2 {
+                break outer_loop
+            } elif c == 1 {
+                continue inner_loop
+            }
+        }
+    }
+
+    // --- 6.7 Guard & Defer ---
+    guard immutable_int > 0 else {
+        print("Guard assertion failed!")
+        return
+    }
+
+    // LIFO Defer cleanup stack
+    defer {
+        print("Execution completed: running LIFO defer cleanup step 2")
+    }
+    defer {
+        print("Execution completed: running LIFO defer cleanup step 1")
+    }
+
+    // --- 6.8 Exception Handling: try / except / catch / else / finally / raise / assert ---
+    assert(immutable_int == 42, "Sanity check on immutable_int")
+
+    var caught_flag = false
+    try {
+        if immutable_int < 0 {
+            raise "Negative value error"
+        }
+    } except UserError as err {
+        caught_flag = true
+        print(f"Caught user error: {err}")
+    } else {
+        print("Try block executed without exceptions")
+    } finally {
+        print("Finally block executed unconditionally")
+    }
+
+    // Modern catch(err) syntax
+    try {
+        let temp = 100
+    } catch (e) {
+        print(f"Caught exception: {e}")
+    }
+
+    // --- 6.9 Fluid Builder Cascades (..) & Safe Cascades (?..) ---
+    let node = NetworkNode(1, "gateway_primary")
+    node..set_title("Master Controller")..set_status("Synchronized")..add_tag("cluster-a")..add_tag("ha-master")
+
+    let maybe_node: NetworkNode? = node
+    maybe_node?..set_status("Safe cascade verified")
+
+    // --- 6.10 Pattern Matching (match / case / when / or-patterns) ---
+    let shape_inst: Shape = Rectangle(10.0, 10.0)
+    let shape_desc = match shape_inst {
+        case Origin => "origin"
+        case Circle(r) => f"circle radius {r}"
+        case Rectangle(w, h) when w == h => f"square of side {w}"
+        case Rectangle(w, h) => f"rectangle {w}x{h}"
+        case Polygon([]) => "empty polygon"
+        case Polygon([head_pt, ..tail_pts]) => f"polygon with head ({head_pt.x}, {head_pt.y})"
+        case _ => "unknown shape"
+    }
+
+    // Primitive pattern match with or-pattern (|) and ranges (..=)
+    let score = 85
+    let grade = match score {
+        case 90..=100 => "A"
+        case 80..=89 => "B"
+        case 70..=79 => "C"
+        case 0 | 1 | 2 => "Critical Failure"
+        case _ => "Passing"
+    }
+
+    // --- 6.11 Functional Programming, Closures & Pipelining (|>, <|) ---
+    let add_five = lambda x: x + 5
+    let double_val = lambda x: x * 2
+
+    // Forward pipeline operator (|>)
+    let piped_value = 10 |> add_five |> double_val
+    print(f"Pipelined result ( (10 + 5) * 2 ): {piped_value}")
+
+    // Backward pipeline operator (<|)
+    let rev_piped = double_val <| 25
+
+    // --- 6.12 Binary, Logical & Bitwise Operators ---
+    let arithmetic = (10 + 5 - 2) * 4 / 2 // 3 % 2 ** 3
+    let bitwise = (0b1100 & 0b1010) | (0b0011 ^ 0b0001) << 1 >> 1
+    let bit_not = ~bitwise
+    let logical = (true and not false) or (false && true) || (!false)
+    let comparison = (10 < 20) and (20 <= 20) and (30 > 15) and (15 >= 15) and (10 == 10) and (10 != 5)
+
+    // Null-safety & coalescing
+    let nullable_val: str? = null
+    let fallback_val = nullable_val ?? "default_text"
+    let forced_non_null = fallback_val!
+
+    // --- 6.13 Real-Time & Deterministic Memory Regions ---
+    noalloc {
+        let local_val = 100
+        let double_local = local_val * 2
+    }
+
+    region TransientArena {
+        let arena_scratch = [1, 2, 3]
+    }
+
+    // Real-Time Scheduling Blocks
+    deadline 50ms {
+        let d_val = 10
+    }
+
+    within 100ms {
+        let w_val = 20
+    }
+
+    periodic 10ms priority 1 jitter 50us {
+        let p_val = 30
+    }
+
+    // --- 6.14 Concurrency, Channels & Multiplexing ---
+    let ch = Channel[int](10)
+    spawn {
+        ch <- 42
+    }
+    let received_data = <-ch
+
+    atomic {
+        mutable_counter += 1
+    }
+    sync {
+        let sync_var = 1
+    }
+    isolate {
+        let iso_var = 2
+    }
+
+    select {
+        case val = <-ch => {
+            print(f"Channel read: {val}")
+        }
+        case ch <- 100 => {
+            print("Channel write")
+        }
+        timeout 100ms => {
+            print("Channel select timeout")
+        }
+    }
+
+    // --- 6.15 In-Memory Database & Relational SQL Queries ---
+    let users_table = [
+        {"id": 1, "name": "Alice", "role": "admin", "active": true},
+        {"id": 2, "name": "Bob", "role": "engineer", "active": true},
+        {"id": 3, "name": "Charlie", "role": "guest", "active": false}
+    ]
+
+    // LINQ-Style declarative relational query
+    let active_admins = from u in users_table
+        where u["active"] == true and u["role"] == "admin"
+        order by u["name"] ascending
+        select u["name"]
+
+    // SQL-First embedded query block
+    let engineer_names = select u["name"] from users_table as u where u["role"] == "engineer"
+
+    // Relational Set Operations
+    let combined_users = active_admins union all engineer_names
+    let intersect_users = active_admins intersect engineer_names
+    let except_users = active_admins except engineer_names
+
+    // Database ACID transaction block
+    database app_db = connect("memory://")
+    transaction {
+        savepoint sp1
+        commit
+        rollback to savepoint sp1
+    }
+
+    // Table Mutation Statements
+    insert into app_db.users (id, name) values (10, "Dave") on conflict do nothing
+    update app_db.users set active = false where id == 10
+    delete from app_db.users where id == 999
+
+    // --- 6.16 Scoped Contexts & Lexical Extensions ---
+    with extension StringHelpers {
+        let shouted_text = "pilot language".shout()
+    }
+
+    with context db = "production_cluster_db" {
+        let service_resp = get_service_data()
+    }
+
+    // --- 6.17 Metaprogramming, Quoting & Homoiconic Forms ---
+    let status_keyword = :active
+    let role_keyword = :user/role
+
+    // Homoiconic Quoting
+    let quoted_ast = quote { 1 + 2 * 3 }
+
+    // Quasiquoting with splicing
+    let spliced_ast = quasiquote {
+        100 + $(quoted_ast)
+    }
+
+    // Call Quoting Modes (!, !!, ~, !&, !^, !@, !?)
+    let shallow_quoted = ComputeImpulse!(10.0, 5.0)
+    let deep_quoted = ComputeImpulse!!(~10.0, v)
+    let abi_frame = ComputeImpulse!&(10.0, 5.0)
+    let reactive_graph = ComputeImpulse!^(10.0, 5.0)
+    let adjoint_dual = ComputeImpulse!@(10.0, 5.0)
+    let dry_run_plan = ComputeImpulse!?(10.0, 5.0)
+
+    // Nameof operator
+    let class_type_name = nameof(NetworkNode)
+
+    // Macro call
+    log_metric!("cpu_utilization", "85%")
+
+    // --- 6.18 Inline Polyglot Blocks ---
+    python {
+        print("Executing inline Python 3.12 interop block")
+    }
+
+    js {
+        console.log("Executing inline JavaScript V8 interop block");
+    }
+
+    c {
+        /* inline C11 block */
+        printf("Executing inline C11 block\n");
+    }
+
+    cpp {
+        // inline C++20 block
+    }
+
+    rust {
+        // inline Rust block
+    }
+
+    lua {
+        -- inline Lua block
+        print("Executing inline Lua 5.4 block")
+    }
+
+    asm {
+        // inline x86_64 / aarch64 assembly block
+    }
+
+    sql {
+        SELECT 1 AS status;
+    }
+
+    print("=== Pilot Omnibus Syntax Tour Finished Successfully ===")
+}
+
+# ==============================================================================
+# 7. Entry Point
+# ==============================================================================
+def main() -> void {
+    run_omnibus_showcase()
+}

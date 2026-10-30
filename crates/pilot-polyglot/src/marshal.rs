@@ -387,9 +387,33 @@ impl PolyglotTypeBridge {
         preamble
     }
 
+    /// Dedents a multi-line code block by stripping the common leading whitespace.
+    pub fn dedent(code: &str) -> String {
+        let lines: Vec<&str> = code.lines().collect();
+        let min_indent = lines
+            .iter()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| line.chars().take_while(|c| c.is_whitespace()).count())
+            .min()
+            .unwrap_or(0);
+
+        lines
+            .iter()
+            .map(|line| {
+                if line.len() >= min_indent {
+                    &line[min_indent..]
+                } else {
+                    line.trim_start()
+                }
+            })
+            .collect::<Vec<&str>>()
+            .join("\n")
+    }
+
     /// Wraps foreign code with variable injection and result extraction sentinel epilogues.
     pub fn wrap_script(language: &str, code: &str, vars: &HashMap<String, PolyglotVal>) -> String {
-        let trimmed = code.trim();
+        let dedented = Self::dedent(code);
+        let trimmed = dedented.trim();
         let preamble = Self::inject_variables(language, vars);
 
         match language.to_ascii_lowercase().as_str() {

@@ -357,6 +357,15 @@ impl<'a> CGenContext<'a> {
         if is_main {
             let ind = self.indent();
             writeln!(&mut self.out, "{}return 0;", ind).unwrap();
+        } else if ret_ty != "void" {
+            let ind = self.indent();
+            if ret_ty.contains('*') {
+                writeln!(&mut self.out, "{}return NULL;", ind).unwrap();
+            } else if ret_ty == "double" || ret_ty == "float" {
+                writeln!(&mut self.out, "{}return 0.0;", ind).unwrap();
+            } else {
+                writeln!(&mut self.out, "{}return 0;", ind).unwrap();
+            }
         }
 
         self.indent_level -= 1;
@@ -508,6 +517,12 @@ impl<'a> CGenContext<'a> {
                 self.emit_block_or_stmt(NodeId(node.rhs));
                 self.indent_level -= 1;
                 writeln!(&mut self.out, "{}}}", ind).unwrap();
+            }
+            NodeKind::TryStmt => {
+                let children = self.arena.children_slice(node.lhs, node.rhs);
+                if !children.is_empty() {
+                    self.emit_block_or_stmt(NodeId(children[0]));
+                }
             }
             NodeKind::ExprStmt => {
                 let expr_code = self.emit_expr(NodeId(node.lhs));
@@ -666,6 +681,11 @@ impl<'a> CGenContext<'a> {
                 let cond = self.emit_expr(NodeId(node.lhs));
                 let then_b = self.emit_expr(NodeId(node.rhs));
                 format!("(({}) ? ({}) : 0)", cond, then_b)
+            }
+            NodeKind::CascadeExpr => {
+                let op = self.emit_expr(NodeId(node.rhs));
+                let receiver = self.emit_expr(NodeId(node.lhs));
+                format!("({}, {})", op, receiver)
             }
             _ => {
                 let span = self.arena.span(id);

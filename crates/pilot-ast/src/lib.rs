@@ -74,6 +74,8 @@ pub enum NodeKind {
     ContinueStmt = 108,
     YieldStmt = 109,
     ExprStmt = 110,
+    TryStmt = 111,
+    CatchClause = 112,
 
     // --- Expressions (200..299) ---
     BlockExpr = 200,
@@ -165,6 +167,8 @@ impl NodeKind {
             108 => Self::ContinueStmt,
             109 => Self::YieldStmt,
             110 => Self::ExprStmt,
+            111 => Self::TryStmt,
+            112 => Self::CatchClause,
             200 => Self::BlockExpr,
             201 => Self::IfExpr,
             202 => Self::MatchExpr,
@@ -245,6 +249,8 @@ impl NodeKind {
             Self::ContinueStmt => "ContinueStmt",
             Self::YieldStmt => "YieldStmt",
             Self::ExprStmt => "ExprStmt",
+            Self::TryStmt => "TryStmt",
+            Self::CatchClause => "CatchClause",
             Self::BlockExpr => "BlockExpr",
             Self::IfExpr => "IfExpr",
             Self::MatchExpr => "MatchExpr",
@@ -381,6 +387,8 @@ pub enum BinaryOp {
     Coalesce = 22,
     RangeInclusive = 23, // a..b / a..=b (Invariant #3)
     RangeHalfOpen = 24,  // a..<b        (Invariant #3)
+    Is = 25,             // a is Pattern / a is Type
+    Walrus = 26,         // a := b
 }
 
 impl BinaryOp {
@@ -410,6 +418,8 @@ impl BinaryOp {
             Self::Coalesce => "??",
             Self::RangeInclusive => "..",
             Self::RangeHalfOpen => "..<",
+            Self::Is => "is",
+            Self::Walrus => ":=",
         }
     }
 }
@@ -561,6 +571,9 @@ impl AstArena {
     #[inline]
     pub fn children_slice(&self, start: u32, len: u32) -> &[u32] {
         let s = start as usize;
+        if s >= self.extra_children.len() || len == 0 {
+            return &[];
+        }
         let e = (s + len as usize).min(self.extra_children.len());
         &self.extra_children[s..e]
     }

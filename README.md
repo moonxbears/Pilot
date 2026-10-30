@@ -103,53 +103,34 @@ Explore the complete, navigable Pilot documentation suite in [`docs/index.md`](d
 
 ```
 Pilot/
-├── antlr/
-│   └── Pilot.g4                 # Master ANTLR4 compiler grammar
-├── Cli/
-│   ├── Program.cs               # Production CLI entrypoint (run, compile, debug, pkg, repl, all)
-│   └── PilotRepl.cs             # Interactive REPL session
-├── Compiler/
-│   ├── PilotCompiler.cs         # Two-phase AST compiler
-│   └── PilotCompiledProgram.cs  # Serialized binary program format (.pilc)
-├── Debugging/
-│   ├── PilotDebugger.cs         # Core debugger engine (breakpoints, call stacks, locals)
-│   └── PilotCliDebugger.cs      # Interactive CLI debugger terminal
-├── Preprocessing/
-│   └── PilotPreprocessor.cs     # Macro preprocessor with #define, #if, #region directives
-├── Runtime/
-│   ├── Adapters/
-│   │   └── PilotTypeAdapterRegistry.cs # Argument type adapters & converters
-│   ├── Builtins/
-│   │   └── PilotBuiltinRegistry.cs    # Global built-in functions
-│   ├── Contracts/
-│   │   └── PilotContractRegistry.cs   # Contract delegation (IList, IEquatable) & method stealing
-│   ├── ControlFlow/
-│   │   └── PilotExceptions.cs         # Typed exceptions (PilotTypeException, PilotNullReferenceException)
-│   ├── Environment/
-│   │   ├── PilotScope.cs              # Lexical symbol scopes
-│   │   └── PilotEnvironment.cs        # Scoped runtime environment
-│   ├── Execution/
-│   │   ├── PilotEngine.cs             # Main execution engine
-│   │   ├── PilotExecutionContext.cs    # Execution context state & contextual parameter frames
-│   │   └── PilotInterpreterVisitor.cs # High-performance ANTLR AST visitor
-│   ├── Interop/
-│   │   └── PolyglotRegistry.cs        # Extended providers (JS, Java, ASM, C++, C, Lua, SQL)
-│   ├── Packaging/
-│   │   ├── PilotPackageManifest.cs    # pilot.json model
-│   │   ├── PilotPackageLock.cs        # pilot.lock.json lockfile model
-│   │   ├── PilotPackageManager.cs     # Universal package manager
-│   │   └── Adapters/                  # Adopted interop adapters (NuGet, npm, pip, cargo, maven, luarocks)
-│   └── Values/
-│       ├── PilotValue.cs              # High-performance value union struct
-│       ├── PilotFunction.cs           # First-class function & coroutine representation
-│       ├── PilotMethodGroup.cs        # Auto-routing method group switchboard
-│       └── PilotObject.cs             # Prototypal and class-based object instances
-├── Pilot.LanguageServer/              # Production JSON-RPC 2.0 Language Server (LSP)
-│   └── Semantics/
-│       └── PilotSemanticAnalyzer.cs   # Semantic token provider, type checker, diagnostics
-├── Pilot.Tests/                       # Automated xUnit test suite (217 tests, 0 warnings)
-├── tests/                             # 26 end-to-end integration test suites (.pilot)
-└── vscode-pilot/                      # Visual Studio Code syntax & language extension
+├── crates/
+│   ├── pilot-arena/         # High-performance 64KB slab bump allocator & generational typed arenas
+│   ├── pilot-span/          # Zero-copy SIMD SWAR source spans & fast LineIndex
+│   ├── pilot-intern/        # Thread-safe lock-free symbol & keyword interner
+│   ├── pilot-ast/           # Strictly 16-byte cache-line aligned AST nodes and flat AstArena
+│   ├── pilot-lexer/         # Zero-allocation SIMD-accelerated lexer (140+ tokens)
+│   ├── pilot-parser/        # Predictive recursive-descent & Pratt expression parser
+│   ├── pilot-syntax/        # Rowan-style lossless concrete syntax tree (CST) & green trees
+│   ├── pilot-fmt/           # Zero-allocation CST code formatter & style engine
+│   ├── pilot-incremental/   # Salsa-style query memoization with early-cutoff recomputation
+│   ├── pilot-db/            # In-memory relational database, table indexing, & query engine
+│   ├── pilot-analysis/      # Hindley-Milner type inference, pattern exhaustiveness, & contracts
+│   ├── pilot-perceus/       # Perceus reference counting with static reuse & drop specialization
+│   ├── pilot-vm/            # 32-bit register bytecode PilVM v3 and JIT/interpreter
+│   ├── pilot-codegen/       # LLVM IR, C11/C23, WASM, and multi-approach GPU emitters (CUDA/HIP/Vulkan/WGSL)
+│   ├── pilot-transpile/     # High-fidelity bidirectional transpilation to 7 languages
+│   ├── pilot-polyglot/      # Zero-copy FFI bridge for Python, JS, Lua, C, C++, Java, ASM, SQL
+│   ├── pilot-dap/           # Debug Adapter Protocol (DAP) server & interactive terminal debugger
+│   ├── pilot-lsp/           # JSON-RPC Language Server Protocol service & semantic analyzer
+│   ├── pilot-pkg/           # Package manager & permissive SPDX license compliance verifier
+│   ├── pilot-bench/         # Nanosecond benchmark harness & cross-language comparative runner
+│   ├── pilot-perf/          # Profiler, worst-case execution time (WCET) analyzer, & CST auto-optimizer
+│   ├── pilot-ffi/           # Stable C-ABI foreign function interface & C header exports
+│   ├── pilot-rt/            # Zero-overhead runtime, networking, and memory primitives
+│   └── pilot-cli/           # Unified toolchain CLI entrypoint (`pilot`)
+├── examples/                # 24+ comprehensive showcase scripts demonstrating all language features
+├── tests/                   # 36 end-to-end integration and differential semantic test suites
+└── vscode-pilot/            # Production Visual Studio Code extension with native LSP & DAP
 ```
 
 ---
@@ -157,34 +138,49 @@ Pilot/
 ## Getting Started & Installation
 
 ### Prerequisites
-- [.NET 10 SDK](https://dotnet.microsoft.com/) (or .NET 8 / 9+)
+- [Rust 1.80+](https://rustup.rs/) (Cargo toolchain)
+- Optional: C/C++ compiler (`clang` or `gcc`) for Native AOT and LLVM IR compilation
 
 ### Build & Verification
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/pilot.git
-cd pilot
+git clone https://github.com/pilot-lang/pilot.git
+cd Pilot
 
-# Build solution
-dotnet build Pilot.slnx
+# Build release binaries (pilot and pilot-lsp)
+cargo build --release
 
-# Run all unit tests (217 unit tests)
-dotnet test
+# Run all crate unit and integration test suites
+cargo test --all
 
-# Run all integration test suites (26 suites)
-dotnet run --project Pilot.csproj -- --all
+# Run all 36 end-to-end language test suites
+cargo run --bin pilot -- test
+
+# Run multi-backend differential semantic verification
+cargo run --bin pilot -- test --differential
 ```
 
 ### CLI Command Summary
 ```bash
-pilot <file.pilot> [args...]       # Run script file directly
-pilot <file.pilc> [args...]        # Run precompiled binary directly
-pilot run <file.pilot> [args...]   # Explicit script execution
-pilot debug <file.pilot>           # Start interactive CLI debugger session
-pilot compile <file> [-o <out>]    # Precompile to binary format (.pilc)
-pilot -c "<code>"                  # Execute inline code string
-pilot --repl                       # Launch interactive REPL
-pilot pkg <subcommand>             # Universal Package Manager
+pilot run <file> [args...]                    # Execute a Pilot program directly via PilVM v3
+pilot build <file> [options]                  # Compile to native AOT binary, LLVM IR, C, WASM, or GPU
+  --target=native|llvm|c|wasm|gpu             # Select compilation backend (default: native)
+  --burst                                     # Enable Burst SIMD vectorization pass
+  --gpu --gpu-backend=cuda|rocm|vulkan|wgpu   # Multi-approach GPU kernel generation (NVIDIA & AMD)
+  -o, --output <file>                         # Set output binary path
+  -O0 | -O2 | -O3                             # Optimization level
+pilot check <file>                            # Zero-allocation syntax and semantic analysis
+pilot fmt <file>                              # Format source files according to style invariants
+pilot test [filter] [--diff]                  # Discover and run unit, integration, or differential suites
+pilot repl                                    # Start interactive Pilot Read-Eval-Print Loop
+pilot pkg <subcommand>                        # Universal Package Manager & SPDX license verifier
+pilot venv <subcommand>                       # Manage isolated Pilot virtual environments
+pilot debug [--dap]                           # Launch debug adapter or interactive debugger
+pilot lsp                                     # Native Language Server Protocol (LSP) service
+pilot perf <subcommand>                       # Performance profiling, WCET, & CST auto-optimizer
+pilot bench                                   # Hardware throughput & cross-language comparative benchmark
+pilot --emit <lang> <file>                    # Transpile Pilot to C, C++, C#, Rust, Python, JS, or Lua
+pilot --from <lang> <file>                    # Ingest foreign source code into canonical Pilot syntax
 ```
 
 ---
@@ -685,36 +681,42 @@ Debugger Commands:
 
 Interactive REPL:
 ```bash
-pilot --repl
+pilot repl
 ```
 
 ---
 
 ## Language Server Protocol (LSP) & Tooling
 
-Pilot includes a standalone JSON-RPC 2.0 Language Server communicating over standard I/O:
+Pilot includes a standalone, zero-GC native JSON-RPC 2.0 Language Server communicating over standard I/O:
 
 ```bash
-dotnet run --project Pilot.LanguageServer/Pilot.LanguageServer.csproj
+pilot lsp
+# or directly via binary:
+pilot-lsp
 ```
 
 Features:
-- **Semantic Tokens Provider**: High-fidelity semantic highlighting.
-- **Type Checker & Diagnostics**: Immutability enforcement, type checking, guard/defer checks.
-- **VS Code Extension**: Located in `vscode-pilot/` with syntax definitions and language configurations.
+- **23-Type Semantic Tokens Provider**: High-fidelity semantic highlighting with modifier bitmasks (`declaration`, `definition`, `readonly`, `static`, `defaultLibrary`).
+- **Interactive Hover & Signature Help**: Type hints, docstrings, and active parameter indexing for built-in, polyglot, and user-defined functions.
+- **Incremental CST & Early Cutoff Synchronization**: Sub-millisecond Salsa-style query recomputation (`pilot-incremental` and `pilot-db`).
+- **VS Code Extension**: Located in `vscode-pilot/` with full Language Server Protocol (LSP) and Debug Adapter Protocol (DAP) integration.
 
 ---
 
 ## Running the Test Suites
 
-Pilot is validated through 217 unit tests and 26 end-to-end integration test suites:
+Pilot is validated through unit test suites across all 24 crates, 36 end-to-end language integration test suites, and multi-backend differential verification:
 
 ```bash
-# Run unit tests
-dotnet test
+# Run all crate unit & integration tests
+cargo test --all
 
-# Run all 26 integration suites
-dotnet run --project Pilot.csproj -- --all
+# Run all 36 language integration test suites
+pilot test
+
+# Run multi-backend differential semantic verification (PilVM vs Native AOT vs LLVM vs WASM)
+pilot test --differential
 ```
 
 ---
@@ -723,34 +725,41 @@ dotnet run --project Pilot.csproj -- --all
 
 ```mermaid
 flowchart TD
-    Source[".pilot Source File / Code String"] --> Preproc["PilotPreprocessor (#define, #if)"]
-    Preproc --> Lexer["PilotLexer (ANTLR4 Lexical Stream)"]
-    Lexer --> Parser["PilotParser (AST Concrete Tree)"]
-    Parser --> ModeCheck{"Execution Mode"}
+    Source[".pilot Source File / Code String"] --> Lexer["pilot-lexer\n(Zero-Alloc SIMD Lexer)"]
+    Lexer --> Parser["pilot-parser\n(Pratt & Recursive Descent)"]
+    Parser --> CST["pilot-syntax\n(Rowan Lossless CST)"]
+    Parser --> AST["pilot-ast\n(16-Byte Flat AstArena)"]
     
-    ModeCheck -->|Direct Scripting| Visitor["PilotInterpreterVisitor (AST Execution)"]
-    ModeCheck -->|AOT Compilation| Compiler["PilotCompiler -> PilotCompiledProgram (.pilc)"]
-    ModeCheck -->|Interactive Debug| Debugger["PilotDebugger / PilotCliDebugger"]
-    ModeCheck -->|Language Server| LSP["PilotSemanticAnalyzer / PilotLspServer"]
+    AST --> Analysis["pilot-analysis\n(HM Type Inference, Contracts & Exhaustiveness)"]
+    AST --> Perceus["pilot-perceus\n(Zero-GC Reference Counting & Reuse)"]
     
-    Visitor --> Scope["Lexical Scopes & Contextual Frames"]
-    Visitor --> Adapters["PilotTypeAdapterRegistry (Argument Adaptation)"]
-    Visitor --> PkgManager["PilotPackageManager (.pilot_modules)"]
-    Visitor --> Polyglot["PolyglotRegistry (JS, Lua, SQL, Python, C#, Rust)"]
+    Analysis --> ModeCheck{"Execution Backend"}
     
-    Compiler --> Bin["Precompiled Binary File (.pilc)"]
-    Bin --> FastExec["PilotCompiledProgram.Run()"]
+    ModeCheck -->|PilVM v3 Bytecode| VM["pilot-vm\n(32-Bit Register Bytecode VM)"]
+    ModeCheck -->|Native AOT| CCodeGen["pilot-codegen (C11/C23 Native Driver)"]
+    ModeCheck -->|LLVM IR| LLVM["pilot-codegen (LLVM IR Direct Emitter)"]
+    ModeCheck -->|WebAssembly| WASM["pilot-codegen (WASM + WASI)"]
+    ModeCheck -->|GPU Kernels| GPU["pilot-codegen (CUDA, ROCm, Vulkan, WGSL)"]
+    ModeCheck -->|Transpilation| Transpile["pilot-transpile (C, C++, C#, Rust, Python, JS, Lua)"]
+    
+    Source --> Incremental["pilot-incremental & pilot-db\n(Salsa Early-Cutoff Engine)"]
+    Incremental --> LSP["pilot-lsp\n(23-Type Semantic Tokens & Hover)"]
+    AST --> DAP["pilot-dap\n(Debug Adapter Protocol Server)"]
 ```
 
-1. **Preprocessing (`PilotPreprocessor`)**:
-   Processes directives (`#define`, `#undef`, `#if`, `#else`, `#endif`, `#region`), filtering active lines and recording macro definitions.
-2. **Lexing & Parsing (`antlr/Pilot.g4`)**:
-   Transforms preprocessed characters into a token stream and generates a concrete syntax tree (CST).
-3. **Semantic Analysis & Scope Resolution (`PilotEnvironment`)**:
-   Tracks hierarchical symbol scopes, closures, contextual parameter stacks (`ContextualBindings`), and active lexical extensions (`ActiveExtensions`).
-4. **Type Adaptation & Method Dispatch (`PilotTypeAdapterRegistry` & `PilotMethodGroup`)**:
-   Evaluates function calls, resolves exact or adapted argument types, and performs repeated call unrolling over collections when singular arguments are expected.
-5. **Polyglot Execution (`PolyglotRegistry`)**:
-   Routes foreign blocks (`postgresql`, `js`, `lua`, `python`, etc.) to dedicated language adapters, returning structured rows and native Pilot objects.
+1. **Zero-Allocation Lexing (`pilot-lexer`)**:
+   Transforms UTF-8 source characters into SIMD-accelerated token streams with string-interning and zero heap allocations.
+2. **Predictive Parsing & Lossless CST (`pilot-parser` & `pilot-syntax`)**:
+   Constructs a Rowan-style lossless Concrete Syntax Tree (`GreenNode`) and simultaneously lowers into cache-packed 16-byte `AstNode` entries in `AstArena`.
+3. **Static Analysis & Type Inference (`pilot-analysis`)**:
+   Performs bidirectional Hindley-Milner type inference, pattern exhaustiveness checking, Design-by-Contract verification, and static `@comptime` demotion.
+4. **Perceus Linear Reference Counting (`pilot-perceus`)**:
+   Inserts compile-time drop specializations and in-place buffer reuses, guaranteeing zero-GC pauses and real-time determinism.
+5. **Multi-Backend Code Generation (`pilot-codegen` & `pilot-vm`)**:
+   Executes directly in the 32-bit register `PilVirtualMachine`, or compiles to Native AOT binaries (Clang/GCC), LLVM IR, WebAssembly (WASI), or GPU compute shaders (CUDA/HIP/Vulkan/WGSL).
+6. **Polyglot Execution (`pilot-polyglot`)**:
+   Bridges foreign execution blocks (`python`, `js`, `lua`, `c`, `cpp`, `java`, `asm`, `sql`) with zero-marshalling shared-memory `SliceBuffer<T>`.
+7. **IDE Services (`pilot-lsp` & `pilot-dap`)**:
+   Provides incremental LSP diagnostics, semantic highlighting, hover cards, code formatting, and DAP interactive debugging.
 6. **Package Resolution (`PilotPackageManager`)**:
    Loads native Pilot modules and adopted interop dependencies from `.pilot_modules/` or system feeds based on `pilot.json` and `pilot.lock.json`.

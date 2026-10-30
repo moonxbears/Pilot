@@ -30,7 +30,10 @@ use pilot_vm::{Instruction, Opcode, PilcBinary, PilVirtualMachine};
 
 fn print_help() {
     println!(
-        r#"Pilot Language Compiler & Toolchain (v1.1.0 Native AOT)
+        concat!(
+            "Pilot Language Compiler & Toolchain (v",
+            env!("CARGO_PKG_VERSION"),
+            r#" Native AOT)
 Usage: pilot <command> [options] [arguments]
 
 Commands:
@@ -53,12 +56,16 @@ Flags:
   -v, --version            Display version and toolchain build metadata
   -h, --help               Display this help overview
 "#
+        )
     );
 }
 
 fn print_version() {
-    println!("Pilot 1.1.0 (x86_64-unknown-linux-gnu, Standalone Native AOT, Zero-GC)");
-    println!("Commit: 8a4b159 (Phase D Final Release)");
+    let version = env!("CARGO_PKG_VERSION");
+    let commit = option_env!("PILOT_GIT_HASH").unwrap_or("578fa99");
+    let desc = option_env!("PILOT_GIT_DESC").unwrap_or("main");
+    println!("Pilot {} (x86_64-unknown-linux-gnu, Standalone Native AOT, Zero-GC)", version);
+    println!("Commit: {} ({})", commit, desc);
 }
 
 fn main() {
@@ -632,7 +639,7 @@ fn run_differential_tests(filter: &str) {
 }
 
 fn cmd_repl() {
-    println!("Pilot 1.1.0 Interactive REPL");
+    println!("Pilot {} Interactive REPL", env!("CARGO_PKG_VERSION"));
     println!("Type Pilot expressions, definitions, or ':quit' to exit.\n");
 
     let stdin = io::stdin();

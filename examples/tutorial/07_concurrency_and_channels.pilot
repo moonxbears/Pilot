@@ -1,0 +1,43 @@
+// =============================================================================
+// Tutorial 07: Concurrency, Asynchronous Tasks, Channels & Multiplexing
+// =============================================================================
+
+// --- 1. Communication Channels (chan[T]) ---
+// Pilot uses CSP-style typed channels for thread-safe message passing.
+let data_ch: chan[int] = Channel(10)
+let control_ch: chan[str] = Channel(5)
+
+// --- 2. Asynchronous Functions and Tasks ---
+async def compute_telemetry(sensor_id: int) -> int {
+    println(f"Computing telemetry for sensor {sensor_id}...")
+    return sensor_id * 100
+}
+
+// Spawning asynchronous concurrent tasks
+spawn compute_telemetry(1)
+spawn compute_telemetry(2)
+
+// --- 3. Sending and Receiving Messages ---
+// Send operator: `channel <- value`
+data_ch <- 42
+control_ch <- "STATUS_OK"
+
+// Receive operator: `val = <-channel`
+let received_val = <-data_ch
+println(f"Received from data channel: {received_val}")
+
+// --- 4. Event Multiplexing with Select ---
+// Multiplexes across multiple channels with optional timeout and default branches.
+select {
+    case msg = <-control_ch => {
+        println(f"Handled control signal: {msg}")
+    }
+    timeout 50ms => {
+        println("Timed out waiting on channels.")
+    }
+    default => {
+        println("Channels idle; proceeding.")
+    }
+}
+
+println("Tutorial 07 completed successfully.")

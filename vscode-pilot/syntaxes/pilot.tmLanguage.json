@@ -6,6 +6,7 @@
     { "include": "#preprocessor" },
     { "include": "#comments" },
     { "include": "#raw-dsl" },
+    { "include": "#polyglot-blocks" },
     { "include": "#strings" },
     { "include": "#decorators" },
     { "include": "#adt-variants" },
@@ -19,11 +20,10 @@
     { "include": "#keywords-realtime" },
     { "include": "#keywords-udsa" },
     { "include": "#keywords-csharp" },
-    { "include": "#keywords-interop" },
     { "include": "#constants" },
     { "include": "#types" },
-    { "include": "#operators" },
     { "include": "#function-calls" },
+    { "include": "#operators" },
     { "include": "#variables" }
   ],
   "repository": {
@@ -42,17 +42,26 @@
     "comments": {
       "patterns": [
         {
+          "name": "comment.block.documentation.pilot",
+          "begin": "/\\*\\*",
+          "end": "\\*/"
+        },
+        {
+          "name": "comment.line.documentation.pilot",
+          "match": "///.*$"
+        },
+        {
           "name": "comment.block.pilot",
           "begin": "/\\*",
           "end": "\\*/"
         },
         {
-          "name": "comment.line.number-sign.pilot",
-          "match": "#.*$"
-        },
-        {
           "name": "comment.line.double-slash.pilot",
           "match": "//.*$"
+        },
+        {
+          "name": "comment.line.number-sign.pilot",
+          "match": "#.*$"
         }
       ]
     },
@@ -65,40 +74,161 @@
         }
       ]
     },
+    "polyglot-blocks": {
+      "patterns": [
+        {
+          "begin": "\\b(python|py)\\s*(\\{)",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.foreign.pilot" },
+            "2": { "name": "punctuation.section.block.begin.pilot" }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": { "name": "punctuation.section.block.end.pilot" }
+          },
+          "patterns": [
+            { "include": "source.python" },
+            { "include": "$self" }
+          ]
+        },
+        {
+          "begin": "\\b(js|javascript)\\s*(\\{)",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.foreign.pilot" },
+            "2": { "name": "punctuation.section.block.begin.pilot" }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": { "name": "punctuation.section.block.end.pilot" }
+          },
+          "patterns": [
+            { "include": "source.js" },
+            { "include": "$self" }
+          ]
+        },
+        {
+          "begin": "\\b(sql|postgres|postgresql)\\s*(\\{)",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.foreign.pilot" },
+            "2": { "name": "punctuation.section.block.begin.pilot" }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": { "name": "punctuation.section.block.end.pilot" }
+          },
+          "patterns": [
+            { "include": "source.sql" },
+            { "include": "$self" }
+          ]
+        },
+        {
+          "begin": "\\b(c|cpp)\\s*(\\{)",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.foreign.pilot" },
+            "2": { "name": "punctuation.section.block.begin.pilot" }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": { "name": "punctuation.section.block.end.pilot" }
+          },
+          "patterns": [
+            { "include": "source.c" },
+            { "include": "$self" }
+          ]
+        },
+        {
+          "begin": "\\b(lua)\\s*(\\{)",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.foreign.pilot" },
+            "2": { "name": "punctuation.section.block.begin.pilot" }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": { "name": "punctuation.section.block.end.pilot" }
+          },
+          "patterns": [
+            { "include": "source.lua" },
+            { "include": "$self" }
+          ]
+        },
+        {
+          "begin": "\\b(java)\\s*(\\{)",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.foreign.pilot" },
+            "2": { "name": "punctuation.section.block.begin.pilot" }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": { "name": "punctuation.section.block.end.pilot" }
+          },
+          "patterns": [
+            { "include": "source.java" },
+            { "include": "$self" }
+          ]
+        },
+        {
+          "name": "keyword.control.foreign.pilot",
+          "match": "\\b(extern|assembly|module|lib)\\b"
+        },
+        {
+          "name": "keyword.control.foreign.pilot",
+          "match": "\\b(python|csharp|rust|js|javascript|java|asm|cpp|c|lua|sql|postgres|postgresql|mysql)\\s*(?=\\{|\"\"\"|```|:)"
+        }
+      ]
+    },
     "strings": {
       "patterns": [
         {
+          "name": "string.quoted.raw.pilot",
+          "begin": "([rR])(\"\"\"|''')",
+          "beginCaptures": {
+            "1": { "name": "storage.type.string.pilot" }
+          },
+          "end": "\\2"
+        },
+        {
+          "name": "string.quoted.raw.pilot",
+          "begin": "([rR])\"",
+          "beginCaptures": {
+            "1": { "name": "storage.type.string.pilot" }
+          },
+          "end": "\""
+        },
+        {
           "name": "string.quoted.triple.pilot",
-          "begin": "([fFrR$]{0,3})(\"\"\"|''')",
+          "begin": "([fF$]{0,2})(\"\"\"|''')",
           "beginCaptures": {
             "1": { "name": "storage.type.string.pilot" }
           },
           "end": "\\2",
           "patterns": [
+            { "name": "constant.character.escape.brace.pilot", "match": "\\{\\{|\\}\\}" },
             { "include": "#string-interpolation" },
             { "name": "constant.character.escape.pilot", "match": "\\\\." }
           ]
         },
         {
           "name": "string.quoted.double.pilot",
-          "begin": "([fFrR$]{0,3})\"",
+          "begin": "([fF$]{0,2})\"",
           "beginCaptures": {
             "1": { "name": "storage.type.string.pilot" }
           },
           "end": "\"",
           "patterns": [
+            { "name": "constant.character.escape.brace.pilot", "match": "\\{\\{|\\}\\}" },
             { "include": "#string-interpolation" },
             { "name": "constant.character.escape.pilot", "match": "\\\\." }
           ]
         },
         {
           "name": "string.quoted.single.pilot",
-          "begin": "([fFrR$]{0,3})'",
+          "begin": "([fF$]{0,2})'",
           "beginCaptures": {
             "1": { "name": "storage.type.string.pilot" }
           },
           "end": "'",
           "patterns": [
+            { "name": "constant.character.escape.brace.pilot", "match": "\\{\\{|\\}\\}" },
             { "include": "#string-interpolation" },
             { "name": "constant.character.escape.pilot", "match": "\\\\." }
           ]
@@ -145,7 +275,7 @@
     "declarations": {
       "patterns": [
         {
-          "match": "\\b((?:(?:public|private|protected|internal|static|partial)\\s+)?(?:comptime\\s+|async\\s+|pure\\s+)?)(def|fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "match": "\\b((?:(?:public|private|protected|internal|static|partial|comptime|async|pure|override|virtual|abstract|sealed|final|readonly)\\s+)*)(def|fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
             "1": { "name": "storage.modifier.pilot" },
             "2": { "name": "keyword.declaration.function.pilot" },
@@ -153,7 +283,7 @@
           }
         },
         {
-          "match": "\\b((?:(?:public|private|protected|internal|static|partial)\\s+)?)(class|struct|record|interface|protocol|enum|actor|model|table|schema|unit|dsl|domain|macro|type|extension|adapter|converter|database|state)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "match": "\\b((?:(?:public|private|protected|internal|static|partial|comptime|async|pure|override|virtual|abstract|sealed|final|readonly)\\s+)*)(class|struct|record|interface|protocol|enum|actor|model|table|schema|unit|dsl|domain|macro|type|extension|adapter|converter|database|state)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
             "1": { "name": "storage.modifier.pilot" },
             "2": { "name": "keyword.declaration.type.pilot" },
@@ -161,7 +291,7 @@
           }
         },
         {
-          "match": "\\b((?:(?:public|private|protected|internal|static|partial)\\s+)?)(property)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "match": "\\b((?:(?:public|private|protected|internal|static|partial|readonly)\\s+)*)(property)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
             "1": { "name": "storage.modifier.pilot" },
             "2": { "name": "keyword.declaration.property.pilot" },
@@ -169,21 +299,15 @@
           }
         },
         {
-          "match": "\\b(public|private|protected|internal|static|partial|ref|dynamic|params)\\b",
+          "match": "\\b(public|private|protected|internal|static|partial|comptime|pure|async|override|virtual|abstract|sealed|final|readonly|mut|immut|ref|dynamic|params)\\b",
           "name": "storage.modifier.pilot"
         },
         {
-          "match": "\\b(let|var|some)\\s+([A-Z][a-zA-Z0-9_]*)(?=\\s*[\\(\\[\\{])",
+          "match": "\\b(let|var|const|mut|immut)\\s+(?:(mut)\\s+)?([a-zA-Z_][a-zA-Z0-9_]*)(?!\\s*\\()",
           "captures": {
             "1": { "name": "storage.type.variable.pilot" },
-            "2": { "name": "entity.name.type.variant.pilot" }
-          }
-        },
-        {
-          "match": "\\b(let|var|const|mut|immut)\\s+([a-zA-Z_][a-zA-Z0-9_]*)(?!\\s*\\()",
-          "captures": {
-            "1": { "name": "storage.type.variable.pilot" },
-            "2": { "name": "variable.other.readwrite.pilot" }
+            "2": { "name": "storage.modifier.pilot" },
+            "3": { "name": "variable.other.readwrite.pilot" }
           }
         },
         {
@@ -203,16 +327,25 @@
     "realtime-literals": {
       "patterns": [
         {
-          "name": "constant.numeric.duration.pilot",
-          "match": "\\b[0-9]+(\\.[0-9]+)?(ns|us|ms|s|min|h)\\b"
+          "match": "\\b([0-9]+(?:\\.[0-9]+)?)(ns|us|ms|s|min|h)\\b",
+          "captures": {
+            "1": { "name": "constant.numeric.duration.pilot" },
+            "2": { "name": "keyword.other.unit.duration.pilot" }
+          }
         },
         {
-          "name": "constant.numeric.frequency.pilot",
-          "match": "\\b[0-9]+(\\.[0-9]+)?(Hz|kHz|MHz|GHz)\\b"
+          "match": "\\b([0-9]+(?:\\.[0-9]+)?)(Hz|kHz|MHz|GHz)\\b",
+          "captures": {
+            "1": { "name": "constant.numeric.frequency.pilot" },
+            "2": { "name": "keyword.other.unit.frequency.pilot" }
+          }
         },
         {
-          "name": "constant.numeric.memory.pilot",
-          "match": "\\b[0-9]+(B|KB|MB|GB|TB)\\b"
+          "match": "\\b([0-9]+(?:\\.[0-9]+)?)(B|KB|MB|GB|TB)\\b",
+          "captures": {
+            "1": { "name": "constant.numeric.memory.pilot" },
+            "2": { "name": "keyword.other.unit.memory.pilot" }
+          }
         }
       ]
     },
@@ -252,7 +385,7 @@
         },
         {
           "name": "keyword.control.flow.pilot",
-          "match": "\\b(comptime|guard|defer|if|elif|else|then|for|while|match|case|when|try|except|finally|with|as|return|yield|raise|break|continue|pass|assert|import|from|global|in|is|some)\\b"
+          "match": "\\b(comptime|guard|defer|if|elif|else|then|for|while|loop|match|case|when|try|except|catch|finally|with|as|return|yield|raise|throw|break|continue|pass|assert|import|from|global|in|is|some|default)\\b"
         },
         {
           "name": "keyword.operator.logical.pilot",
@@ -272,7 +405,7 @@
       "patterns": [
         {
           "name": "keyword.control.concurrency.pilot",
-          "match": "\\b(async|await|spawn|parallel|chan|channel|actor|atomic|sync|lock|isolate|timeout|default)\\b"
+          "match": "\\b(async|await|spawn|parallel|chan|channel|actor|atomic|sync|lock|isolate|timeout)\\b"
         }
       ]
     },
@@ -296,26 +429,7 @@
       "patterns": [
         {
           "name": "keyword.other.csharp.pilot",
-          "match": "\\b(property|get|operator|extension|adapter|converter|each|repeat|context|requires|ensures|state|pure|lambda|nameof|params|args|kwargs|static|partial|steal|contracts|delegate)\\b"
-        }
-      ]
-    },
-    "keywords-interop": {
-      "patterns": [
-        {
-          "name": "keyword.control.foreign.pilot",
-          "match": "\\b(extern|assembly|module|lib)\\b"
-        },
-        {
-          "name": "support.class.foreign.pilot",
-          "match": "\\b(python|csharp|rust|js|javascript|java|asm|cpp|c|lua|sql|postgres|postgresql|mysql)\\b"
-        },
-        {
-          "name": "meta.foreign.target.pilot",
-          "match": "\\b(python|csharp|rust|c|cpp|js|lua):",
-          "captures": {
-            "1": { "name": "support.class.foreign.pilot" }
-          }
+          "match": "\\b(property|get|set|operator|extension|adapter|converter|each|repeat|context|requires|ensures|state|pure|lambda|nameof|params|args|kwargs|static|partial|steal|contracts|delegate)\\b"
         }
       ]
     },
@@ -323,7 +437,15 @@
       "patterns": [
         {
           "name": "constant.language.pilot",
-          "match": "\\b(True|False|true|false|None|none|null|undefined|self)\\b"
+          "match": "\\b(True|False|true|false|None|none|null|undefined)\\b"
+        },
+        {
+          "name": "variable.language.pilot",
+          "match": "\\b(self|this|super)\\b"
+        },
+        {
+          "name": "constant.other.caps.pilot",
+          "match": "\\b[A-Z][A-Z0-9_]{2,}\\b"
         }
       ]
     },
@@ -331,11 +453,37 @@
       "patterns": [
         {
           "name": "support.type.primitive.pilot",
-          "match": "\\b(char|str|string|i8|i16|i32|int|i64|u8|u16|u32|uint|u64|f8|f16|f32|float|f64|decimal|double|complex|tuple|Tuple|list|List|range|map|Map|dict|Dict|set|Set|frozenset|bool|bytes|bytearray|memoryview|null|none|undefined|void|any|symbol|dynamic|Table|Dataset|Relation|Channel|Chan|Result|Option|Span|Memory|SliceBuffer|SharedBuffer|RangeWindow|NativeArray|NativeMap|AstNode|matrix\\d+x\\d+)\\b"
+          "match": "\\b(char|str|string|i8|i16|i32|int|i64|u8|u16|u32|uint|u64|f8|f16|f32|float|f64|decimal|double|complex|tuple|Tuple|list|List|range|map|Map|dict|Dict|set|Set|frozenset|bool|bytes|bytearray|memoryview|void|any|symbol|dynamic|Table|Dataset|Relation|Channel|Chan|Result|Option|Span|Memory|SliceBuffer|SharedBuffer|RangeWindow|NativeArray|NativeMap|AstNode|matrix\\d+x\\d+)\\b"
         },
         {
           "name": "entity.name.type.pilot",
-          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b(?=\\s*(?:\\[|\\?))"
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "function-calls": {
+      "patterns": [
+        {
+          "name": "entity.name.function.macro.pilot",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)(?:!!|!&|!\\^|!@|!\\?|!)\\s*(?=[\\(\\{\\[])"
+        },
+        {
+          "match": "(?<=\\.)([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+          "captures": {
+            "1": { "name": "entity.name.function.member.pilot" }
+          }
+        },
+        {
+          "match": "(?<=\\.)([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "variable.other.property.pilot" }
+          }
+        },
+        {
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+          "captures": {
+            "1": { "name": "entity.name.function.call.pilot" }
+          }
         }
       ]
     },
@@ -355,7 +503,7 @@
         },
         {
           "name": "keyword.operator.nullsafe.pilot",
-          "match": "(\\?\\?=|\\?\\?|\\?\\.|\\?)"
+          "match": "(\\?\\?=|\\?\\?|!\\.|\\?\\.|!\\?|\\?)"
         },
         {
           "name": "keyword.operator.jsonb.pilot",
@@ -376,20 +524,14 @@
         {
           "name": "keyword.operator.assignment.pilot",
           "match": "(:=|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|<<=|>>=|\\*\\*=|//=|=)"
-        }
-      ]
-    },
-    "function-calls": {
-      "patterns": [
-        {
-          "name": "entity.name.function.macro.pilot",
-          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)(?:!!|!&|!\\^|!@|!\\?|!)\\s*(?=[\\(\\{\\[])"
         },
         {
-          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
-          "captures": {
-            "1": { "name": "entity.name.function.call.pilot" }
-          }
+          "name": "keyword.operator.arithmetic.pilot",
+          "match": "(\\+|-|\\*\\*|\\*|//|/|%)"
+        },
+        {
+          "name": "keyword.operator.bitwise.pilot",
+          "match": "(<<|>>|&|\\||\\^|~)"
         }
       ]
     },

@@ -15,6 +15,7 @@ pub enum PatternCase {
 pub struct MatchArm {
     pub pattern: PatternCase,
     pub guard: bool,
+    pub has_subpats: bool,
     pub span: ByteSpan,
 }
 
@@ -33,9 +34,14 @@ impl MarangetChecker {
     }
 
     pub fn add_arm(&mut self, pattern: PatternCase, guard: bool, span: ByteSpan) {
+        self.add_arm_full(pattern, guard, false, span);
+    }
+
+    pub fn add_arm_full(&mut self, pattern: PatternCase, guard: bool, has_subpats: bool, span: ByteSpan) {
         self.arms.push(MatchArm {
             pattern,
             guard,
+            has_subpats,
             span,
         });
     }
@@ -66,7 +72,7 @@ impl MarangetChecker {
                     }
                 }
                 PatternCase::Variant(name) => {
-                    if covered_variants.contains(name) && !arm.guard {
+                    if covered_variants.contains(name) && !arm.guard && !arm.has_subpats {
                         diags.push(AnalysisDiagnostic::warning(
                             "MATCH002",
                             format!("Redundant match arm: variant '{}' is already handled", name),
@@ -106,11 +112,14 @@ impl MarangetChecker {
                 }
             } else if !self.arms.is_empty() {
                 // If there are no declared variants and no wildcard, literal matches are non-exhaustive
-                diags.push(AnalysisDiagnostic::error(
-                    "MATCH001",
-                    "Non-exhaustive pattern match: missing wildcard '_' or default case",
-                    match_span,
-                ));
+                let has_literals = self.arms.iter().any(|a| matches!(a.pattern, PatternCase::Literal(_)));
+                if has_literals {
+                    diags.push(AnalysisDiagnostic::error(
+                        "MATCH001",
+                        "Non-exhaustive pattern match: missing wildcard '_' or default case",
+                        match_span,
+                    ));
+                }
             }
         }
 
@@ -133,9 +142,13 @@ impl MarangetChecker {
         for &arm_id in &children[1..] {
             let arm_node = *arena.node(pilot_ast::NodeId(arm_id));
             let pat_id = pilot_ast::NodeId(arm_node.lhs);
-            let pat_case = if pat_id.is_some() {
-                let pat_node = *arena.node(pat_id);
-                match pat_node.node_kind() {
+            let (pat_case, has_subpats) = if pat_id.is_some() {
+                let mut pat_node = *arena.node(pat_id);
+                if pat_node.node_kind() == pilot_ast::NodeKind::PatBind && pat_node.flags == 1 && pat_node.rhs != 0 {
+                    pat_node = *arena.node(pilot_ast::NodeId(pat_node.rhs));
+                }
+                let has_subpats = pat_node.flags > 0;
+                let case = match pat_node.node_kind() {
                     pilot_ast::NodeKind::PatWildcard
                     | pilot_ast::NodeKind::PatBind
                     | pilot_ast::NodeKind::PatSlice => PatternCase::Wildcard,
@@ -147,16 +160,19 @@ impl MarangetChecker {
                         PatternCase::Variant(name)
                     }
                     pilot_ast::NodeKind::PatLiteral => PatternCase::Literal("lit".to_string()),
+                    pilot_ast::NodeKind::PatRange => PatternCase::Literal("range".to_string()),
+                    pilot_ast::NodeKind::PatOr => PatternCase::Literal("or".to_string()),
                     pilot_ast::NodeKind::PatTuple => PatternCase::Tuple(Vec::new()),
                     _ => PatternCase::Wildcard,
-                }
+                };
+                (case, has_subpats)
             } else {
-                PatternCase::Wildcard
+                (PatternCase::Wildcard, false)
             };
 
             let span = arena.span(pilot_ast::NodeId(arm_id));
             let has_guard = arm_node.flags != 0;
-            checker.add_arm(pat_case, has_guard, span);
+            checker.add_arm_full(pat_case, has_guard, has_subpats, span);
         }
 
         checker.check(arena.span(match_id))

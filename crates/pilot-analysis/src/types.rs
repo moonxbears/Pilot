@@ -22,6 +22,16 @@ impl TypeId {
     pub const fn is_primitive(self) -> bool {
         self.0 <= 9
     }
+
+    #[inline]
+    pub const fn is_integer(self) -> bool {
+        self.0 == Self::I64.0 || self.0 == Self::I32.0
+    }
+
+    #[inline]
+    pub const fn is_float(self) -> bool {
+        self.0 == Self::F64.0 || self.0 == Self::F32.0
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]

@@ -1,0 +1,38 @@
+// =============================================================================
+// Tutorial 04: Collections, Pattern Matching & Destructuring
+// =============================================================================
+
+// --- 1. Collection Types ---
+let numbers_list: int[] = [10, 20, 30, 40]
+let user_tuple = (101, "Alice", true)
+let config_map = {"host": "127.0.0.1", "port": "8080"}
+
+// --- 2. Tuple and Slice Destructuring ---
+let (user_id, username, is_admin) = user_tuple
+let [head, ..tail] = numbers_list
+
+println(f"User {user_id} ({username}), Head element: {head}")
+
+// --- 3. Algebraic Data Types (ADTs / Enums) ---
+type Shape =
+    | Circle(radius: float)
+    | Rectangle(width: float, height: float)
+    | Point;
+
+// --- 4. Pattern Matching with Match / Case / When ---
+def describe_shape(s: Shape) -> str {
+    return match s {
+        case Point => "Single coordinate point"
+        case Circle(r) when r > 50.0 => f"Large circle radius={r}"
+        case Circle(r) => f"Standard circle radius={r}"
+        case Rectangle(w, h) when w == h => f"Square of side {w}"
+        case Rectangle(w, h) => f"Rectangle {w}x{h}"
+        case _ => "Unknown shape"
+    }
+}
+
+let c = Circle(12.5)
+let r = Rectangle(10.0, 10.0)
+
+println(describe_shape(c))
+println(describe_shape(r))

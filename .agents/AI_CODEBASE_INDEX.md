@@ -8,37 +8,31 @@
 
 | Subsystem / Task | Primary Entry Files | Key Notes |
 | :--- | :--- | :--- |
-| **Roadmap, Concurrency & Invariants** | `MILESTONES.md` | Single source of truth for M1–M27 status, parallel waves, and grammar invariants. |
-| **Master Lexer & Parser Grammar** | `antlr/Pilot.g4`, `Compiler/PilotParserFast.cs` | ANTLR4 combined grammar (generated C# parser goes to `obj/` on `dotnet build`). |
-| **Preprocessor (`#define`, `#if`, `#pragma`)** | `Preprocessing/PilotPreprocessor.cs` | Runs before lexing; emits `PREPROC001`–`PREPROC011`. |
-| **Tree-Walk AST Interpreter** | `Runtime/Execution/PilotInterpreterVisitor.cs`, `Runtime/Execution/PilotEngine.cs` | Evaluates statements/expressions in AST mode; pattern matching in `PilotPatternMatcher.cs`. |
-| **Runtime Values & Primitives** | `Runtime/Values/PilotValue.cs`, `PilotValueKind.cs`, `PilotAdt.cs`, `PilotObject.cs`, `PilotFrozenMap.cs` | Also `PilotFunction.cs`, `PilotMethodGroup.cs`, `PilotKeyword.cs`, `PilotMatrix.cs`, `PilotRange.cs`, `PilotGenerator.cs`, `PilotLazy.cs`. |
-| **Bytecode Compiler & `.pilc` Format** | `Compiler/PilotBytecodeCompiler.cs`, `Compiler/PilotCompiledProgram.cs`, `Runtime/Bytecode/PilotOpcode.cs` | Two-phase AST -> PilVM chunk compiler and `.pilc` v2 serializer. |
-| **PilVM Virtual Machine** | `Runtime/Bytecode/PilVirtualMachine.cs`, `Runtime/Bytecode/PilotBytecodeChunk.cs` | Stack/register bytecode VM execution loop. |
-| **Static Analysis, Comptime, Demotion, Type Inference & Call-Quoting** | `Analysis/PilotAnalysisPipeline.cs`, `Analysis/Comptime/PilotStaticDemotionPass.cs`, `Analysis/Comptime/PilotComptimeEvaluator.cs`, `Analysis/TypeSystem/PilotTypeInferenceEngine.cs`, `PilotBidirectionalInferencer.cs`, `PilotType.cs`, `Analysis/CallQuoting/PilotCallQuotingEngine.cs`, `Analysis/Autodiff/PilotSymbolicDifferentiator.cs`, `Runtime/Reactive/PilotSignalGraph.cs`, `Runtime/Effects/PilotEffectDryRunEngine.cs` | Orchestrates comptime evaluation, `.rodata` frozen perfect-hash tables, `@zero_runtime` demotion audit, bidirectional/HM inference, Tarjan SCC fixed-point, flow narrowing, row polymorphism, call-quoting modes 0–7 (`!`, `!!`, `~`, `!&`, `!^`, `!@`, `!?`), exhaustiveness, borrow checking, dimensions, and contracts. |
-| **Exhaustive Pattern Matching** | `Analysis/PatternMatching/PilotExhaustivenessChecker.cs`, `Runtime/Execution/PilotPatternMatcher.cs` | Compile-time usefulness/exhaustiveness checking + runtime destructuring. |
-| **Ownership, Loops, Units & Contracts** | `Analysis/Ownership/PilotBorrowChecker.cs`, `Analysis/Loops/PilotForLoopAnalyzer.cs`, `Analysis/DimensionalAnalysis/PilotDimensionChecker.cs`, `Analysis/ContractVerification/PilotContractVerifier.cs` | Runtime contracts registry in `Runtime/Contracts/PilotContractRegistry.cs`; loop ABI types in `Runtime/NativeMemory/PilotLoopAbiTypes.cs`. |
-| **Built-in Functions & Host Scripting** | `Runtime/Builtins/PilotBuiltinRegistry.cs`, `Scripting/PilotScriptContext.cs`, `Scripting/PilotScript.cs` | Global intrinsics (`println`, `len`, `json`, `venv`, `matrix`, file/OS helpers). |
-| **Type Adapters & Extensions** | `Runtime/Adapters/PilotTypeAdapterRegistry.cs`, `Runtime/Extensions/PilotLexicalExtension.cs` | First-class `adapter` conversion chains & `extension ... on ...` dispatch. |
-| **Compile-Time `@` Code Generators** | `CodeGen/Engine/PilotCodeGeneratorPipeline.cs`, `CodeGen/Builtins/*.cs` | `@builder`, `@equality`, `@json`, `@metadata`, `@observable`, `@repr`. |
-| **Bidirectional Source Transpilers** | `Transpilation/TranspilationRegistry.cs`, `PilotLibraryTranspiler.cs`, `PilotLibraryMapper.cs`, `Transpilation/Targets/*` | `--emit <target>` and `--from <lang>` for C, C++, C#, Rust, Python, JS, Lua + `PilotOptimizer.cs`. |
-| **Native AOT & Zero-Copy Shared Memory** | `Native/PilotNativeCompiler.cs`, `Native/Llvm/PilotLlvmEmitter.cs`, `Native/Wasm/PilotWasmEmitter.cs`, `Native/CAbi/PilotCAbiEmitter.cs`, `Native/Assembly/PilotAssemblyEmitter.cs`, `Runtime/NativeMemory/PilotSharedBuffer.cs`, `Runtime/NativeMemory/PilotLoopAbiTypes.cs` | Native C header in `Native/Runtime/pilot_runtime.h`; 24-byte C-ABI `SliceBuffer<T>` / `mmap` IPC in `PilotSharedBuffer.cs`; Burst in `Runtime/Burst/PilotBurstEngine.cs`. |
-| **Polyglot Interop Blocks** | `Runtime/Interop/PolyglotRegistry.cs`, `Runtime/Interop/PolyglotTypeBridge.cs` | Inline Python, JS, Java, Lua, C, C++, ASM, C#, Rust, PostgreSQL, MySQL + yield bridges. |
-| **Packages (`pkg`) & Virtual Envs (`venv`)** | `Runtime/Packaging/PilotPackageManager.cs`, `Runtime/Packaging/Adapters/BaseInteropPackageAdapter.cs`, `Runtime/Venv/PilotVirtualEnvironment.cs` | `.pilpkg`, `pilot.json`, `pilot.lock.json`, foreign package adoption, `pilotvenv.cfg`. |
-| **Debugger & Hot Reload** | `Debugging/PilotDebugger.cs`, `Debugging/PilotCliDebugger.cs`, `Runtime/HotReload/PilotHotReloader.cs` | Breakpoints, stepping, call stack, state-preserving hot reload. |
-| **LSP Server & Semantic Diagnostics** | `Pilot.LanguageServer/Lsp/PilotLspServer.cs`, `Pilot.LanguageServer/Semantics/PilotSemanticAnalyzer.cs`, `PilotDiagnosticCatalog.cs`, `PilotSymbol.cs` | Hover, completion, semantic tokens, go-to-def, code actions, quick fixes. |
-| **VS Code Extension** | `vscode-pilot/src/extension.ts`, `vscode-pilot/syntaxes/pilot.tmLanguage.json`, `vscode-pilot/package.json` | LSP client, Run/Debug editor buttons, `launch.json` provider, TextMate grammar. |
-| **CLI Driver & Interactive REPL** | `Cli/Program.cs`, `Cli/PilotRepl.cs` | All `pilot` subcommands and flags. |
-| **Automated Tests** | `Pilot.Tests/*.cs`, `tests/*.pilot`, `Testing/PilotTestRunner.cs` | Run `dotnet test --filter FullyQualifiedName~<TestClass>` for fast targeted verification. |
+| **Roadmap, Concurrency & Invariants** | `MILESTONES.md` | Single source of truth for M1–M48 status, architecture invariants. |
+| **Master Lexer & Tokenizer** | `crates/pilot-lexer/src/lib.rs` | Zero-allocation zero-copy token stream, logos/regex-based lexer. |
+| **CST & Concrete Syntax Nodes** | `crates/pilot-syntax/src/lib.rs` | Red-green syntax tree nodes, `SyntaxKind`, lossless trivia. |
+| **Parser & AST Arena** | `crates/pilot-parser/src/lib.rs`, `crates/pilot-ast/src/lib.rs` | Recursive descent Pratt parser, 16-byte cache-line packed `AstNode` arena. |
+| **Semantic Analysis & Type Inference** | `crates/pilot-analysis/src/pipeline.rs`, `infer.rs`, `patterns.rs` | Bidirectional HM type inference, pattern exhaustiveness, typestate verification. |
+| **Perceus Linear Memory Management** | `crates/pilot-perceus/src/lib.rs` | Zero-GC Perceus reference counting, in-place reuse, uniqueness typing. |
+| **PilVM Virtual Machine & Bytecode** | `crates/pilot-vm/src/lib.rs`, `crates/pilot-bytecode/src/lib.rs` | High-throughput bytecode VM, chunk compiler, frame stack execution. |
+| **Native AOT & GPU Code Generation** | `crates/pilot-codegen/src/lib.rs`, `c_target.rs`, `llvm.rs`, `wasm.rs`, `gpu.rs` | Native C11, LLVM IR, WASM, and GPU (CUDA, ROCm, Vulkan, WGSL) code generators. |
+| **Polyglot Interoperability Engine** | `crates/pilot-polyglot/src/lib.rs`, `bridge.rs`, `marshal.rs` | Inline Python, JS, Lua, Java, C, C++, ASM execution with cross-language marshalling. |
+| **Incremental Computation & Salsa DB** | `crates/pilot-db/src/lib.rs` | Salsa-based incremental computation database, AST/Type queries. |
+| **Language Server Protocol (LSP)** | `crates/pilot-lsp/src/lib.rs`, `server.rs` | Native LSP server (30+ capabilities, 23-type semantic tokens, signatures, hover). |
+| **Standard Library & Builtin Intrinsics** | `crates/pilot-stdlib/src/lib.rs`, `crates/pilot-runtime/src/lib.rs` | Core standard library, system calls, collections, I/O primitives. |
+| **Package Management & Virtual Envs** | `crates/pilot-pkg/src/lib.rs`, `crates/pilot-venv/src/lib.rs` | `.pilpkg` package resolution, lockfiles, virtual environments. |
+| **CLI Driver & Interactive REPL** | `crates/pilot-cli/src/main.rs`, `crates/pilot-repl/src/lib.rs` | 14 CLI commands (`run`, `build`, `check`, `fmt`, `test`, `repl`, `lsp`, etc.). |
+| **VS Code Extension** | `vscode-pilot/src/extension.ts`, `vscode-pilot/syntaxes/pilot.tmLanguage.json` | Native LSP client launcher, TextMate grammar, debugger integration. |
+| **Integration & Differential Test Suites** | `tests/*.pilot`, `tests/differential/*.pilot`, `crates/pilot-cli/src/main.rs` | `cargo test --all`, `pilot test`, `pilot test --differential` (PilVM, Native, LLVM, WASM). |
 
 ### Cross-Layer Checklist When Adding/Modifying a Language Feature
-1. **Grammar**: `antlr/Pilot.g4` (check `MILESTONES.md` Conflict Resolutions first; run `dotnet build Pilot.csproj` to regenerate ANTLR parser).
-2. **Static Analysis**: `Analysis/TypeSystem/PilotTypeInferenceEngine.cs` (+ `PilotExhaustivenessChecker.cs` / `PilotBorrowChecker.cs` if applicable).
-3. **AST Execution**: `Runtime/Execution/PilotInterpreterVisitor.cs` (+ `Runtime/Values/PilotValue.cs` if new value representation).
-4. **Bytecode & VM**: `Runtime/Bytecode/PilotOpcode.cs` -> `Compiler/PilotBytecodeCompiler.cs` -> `Runtime/Bytecode/PilVirtualMachine.cs` (+ `PilotCompiledProgram.cs` if serialized).
-5. **IDE / LSP**: `Pilot.LanguageServer/Semantics/PilotSemanticAnalyzer.cs` + `PilotDiagnosticCatalog.cs` (+ `vscode-pilot/syntaxes/pilot.tmLanguage.json` for highlighting).
-6. **Codegen / Emitters (if applicable)**: `Native/*Emitter.cs` and `Transpilation/Targets/*TargetConverter.cs`.
-7. **Tests**: Add xUnit tests in `Pilot.Tests/` and `.pilot` script in `tests/`.
+1. **Lexer / Syntax**: `crates/pilot-syntax/src/lib.rs` (`SyntaxKind`), `crates/pilot-lexer/src/lib.rs` (`TokenKind`).
+2. **Parser & AST**: `crates/pilot-parser/src/lib.rs`, `crates/pilot-ast/src/lib.rs` (`NodeKind`, 16-byte `AstNode` arena).
+3. **Static Analysis & Type System**: `crates/pilot-analysis/src/infer.rs`, `patterns.rs`, `pipeline.rs`.
+4. **Perceus Memory Lowering**: `crates/pilot-perceus/src/lib.rs`.
+5. **Execution & Codegen**: `crates/pilot-vm/src/lib.rs` (PilVM bytecode execution) & `crates/pilot-codegen/src/` (`c_target.rs`, `llvm.rs`, `wasm.rs`, `gpu.rs`).
+6. **LSP & Tooling**: `crates/pilot-lsp/src/server.rs` (semantic tokens, hover, diagnostics) + `vscode-pilot/syntaxes/pilot.tmLanguage.json`.
+7. **Verification**: Run `cargo test --all`, `cargo run --bin pilot -- test`, and `cargo run --bin pilot -- test --differential`.
 <!-- END MANUAL NOTES -->
 
 ---

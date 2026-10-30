@@ -102,16 +102,16 @@ cascade_arm
 
 ## 4. Runtime Execution Mechanics
 
-### 4.1 `PilotValue` & Sized Primitive Coercion
-All runtime values are represented by the immutable `readonly struct PilotValue` ([`PilotValue.cs`](../../Runtime/Values/PilotValue.cs)):
-- **Zero-Allocation Unboxed Scalars**: `Int` (`long`), `Float` (`double`), `Bool` (`bool`), `None`, `Undefined`, and sized primitives (`I8`–`I64`, `U8`–`U64`, `F8`–`F64`) store their payload directly in the `8`-byte `_scalarBits` field with zero heap allocation.
-- **Declaration Type Coercion**: When a variable declaration includes a type annotation (`let x: u8 = 300` or `let flag: f32 = 3.14159`), `PilotInterpreterVisitor.CoerceToDeclaredType` immediately converts and clamps/truncates the value to the target `PilotValueKind` (`U8`, `F32`, etc.).
-- **Truthiness (`IsTruthy`)**:
+### 4.1 Value Representation & Sized Primitive Coercion
+All runtime values in PilVM and Native AOT follow zero-overhead representation:
+- **Zero-Allocation Unboxed Scalars**: `int` (`i64`), `float` (`f64`), `bool`, `none`, and sized numeric primitives (`i8`–`i64`, `u8`–`u64`, `f16`–`f64`) store their payloads unboxed in machine registers or 64-bit tagged words with zero heap allocation.
+- **Declaration Type Coercion**: When a variable declaration includes a type annotation (`let x: u8 = 300` or `let flag: f32 = 3.14159`), [`pilot-analysis`](../../crates/pilot-analysis/src/infer.rs) verifies the assignment, and code generators emit the corresponding clamping/truncation or cast instruction.
+- **Truthiness**:
   - `false`, `null`/`none`, `undefined`, `0`, `0.0`, `""`, empty `list` (`[]`), empty `map` (`{}`), and empty `set` evaluate to `false`.
   - All non-zero numbers, non-empty strings, non-empty collections, functions, classes, and objects evaluate to `true`.
 
 ### 4.2 Collections (`list`, `tuple`, `map`, `set`, `range`)
-- **Lists (`[a, b, ..rest]`)**: Backed by `List<PilotValue>`. Supports negative indexing (`items[-1]` accesses `items[items.Count - 1]`), slice syntax (`items[1:4:1]`), and spread unpacking (`..rest` or `*rest`).
+- **Lists (`[a, b, ..rest]`)**: Managed via Perceus linear reference counting. Supports negative indexing (`items[-1]`), slice syntax (`items[1:4:1]`), and spread unpacking (`..rest` or `*rest`).
 - **Tuples (`(a, b)`)**: Fixed-order heterogeneous sequences. Can be unpacked directly (`let a, b = (1, 2)`).
 - **Maps (`{"k": v, **other}`)**: Backed by `Dictionary<PilotValue, PilotValue>`. Supports custom value-equality keys when objects implement `IEquatable` (via `PilotValue.Equals` and `PilotValue.GetHashCode`).
 - **Sets (`{1, 2, 3}`)**: Backed by `HashSet<PilotValue>`. Non-empty braces without colons construct a `set`; `{}` constructs an empty `map`.
@@ -143,7 +143,7 @@ All runtime values are represented by the immutable `readonly struct PilotValue`
 
 ## 6. Complete Runnable Examples
 
-See [`examples/showcase/01_core_syntax_and_types.pilot`](../../examples/showcase/01_core_syntax_and_types.pilot) for the full executable showcase.
+See [`examples/showcase/01_types_variables_control_flow.pilot`](../../examples/showcase/01_types_variables_control_flow.pilot) for the full executable showcase.
 
 ```pilot
 // 1. Gradual typing, sized primitives, and union/nullable types
@@ -160,7 +160,19 @@ let full_list = [1, ..base_items, 4]
 let defaults = {"host": "localhost", "port": active_port}
 let config = {**defaults, "tls": true}
 
-// 3. Object cascade (..) with target capture (->) and safe navigation (?.)
+// 3. Fluid Builder Cascade Pattern (..)
+class SystemProfile {
+    var title: str = "Default Node"
+    var status: str = "Pending"
+
+    def set_title(t: str) { self.title = t; }
+    def set_status(s: str) { self.status = s; }
+}
+
+let node = SystemProfile()
+node..set_title("Master Controller")..set_status("Synchronized")
+
+// Object cascade (..) with target capture (->) and safe navigation (?.)
 let packet = []
     ..append("SYN")
     ..append("ACK") -> captured_packet

@@ -441,10 +441,59 @@ impl ExternalPolyglotBridge {
         let mut ret = PolyglotVal::Null;
         let mut captured = vars.clone();
 
-        if trimmed.starts_with("return ") {
-            let expr = trimmed["return ".len()..].trim().trim_end_matches(';').trim();
-            if let Ok(i) = expr.parse::<i64>() {
-                ret = PolyglotVal::Int(i);
+        // Parse any local variables in the snippet: e.g. int a = 150; let x = 25;
+        let mut local_ints: HashMap<String, i64> = HashMap::new();
+        let mut local_strs: HashMap<String, String> = HashMap::new();
+        for (k, v) in vars {
+            if let Some(i) = v.as_int() {
+                local_ints.insert(k.clone(), i);
+            }
+            if let Some(s) = v.as_str() {
+                local_strs.insert(k.clone(), s.to_string());
+            }
+        }
+
+        let lines: Vec<&str> = trimmed.split(|c| c == '\n' || c == ';').map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+        for line in &lines {
+            if let Some(eq_idx) = line.find('=') {
+                if !line.contains("==") {
+                    let left_part = line[..eq_idx].trim();
+                    let var_name = left_part.split_whitespace().last().unwrap_or(left_part);
+                    let right_expr = line[eq_idx + 1..].trim();
+
+                    // String concatenation or literal
+                    if right_expr.contains('+') && (right_expr.contains('"') || right_expr.contains('\'') || local_strs.contains_key(var_name)) {
+                        let mut joined = String::new();
+                        for part in right_expr.split('+') {
+                            let p = part.trim().trim_matches('"').trim_matches('\'');
+                            if let Some(s) = local_strs.get(p) {
+                                joined.push_str(s);
+                            } else {
+                                joined.push_str(p);
+                            }
+                        }
+                        local_strs.insert(var_name.to_string(), joined.clone());
+                        captured.insert(var_name.to_string(), PolyglotVal::String(joined));
+                    } else if let Some(val) = eval_math_with_locals(right_expr, &local_ints) {
+                        local_ints.insert(var_name.to_string(), val);
+                        captured.insert(var_name.to_string(), PolyglotVal::Int(val));
+                    } else if right_expr.starts_with('"') && right_expr.ends_with('"') && right_expr.len() >= 2 {
+                        let s = right_expr[1..right_expr.len() - 1].to_string();
+                        local_strs.insert(var_name.to_string(), s.clone());
+                        captured.insert(var_name.to_string(), PolyglotVal::String(s));
+                    }
+                }
+            }
+        }
+
+        // Check for return statement
+        if let Some(idx) = trimmed.rfind("return ") {
+            let after = &trimmed[idx + "return ".len()..];
+            let end = after.find(';').unwrap_or(after.len());
+            let expr = after[..end].trim();
+
+            if let Some(val) = eval_math_with_locals(expr, &local_ints) {
+                ret = PolyglotVal::Int(val);
             } else if let Ok(f) = expr.parse::<f64>() {
                 ret = PolyglotVal::Float(f);
             } else if expr == "true" {
@@ -455,25 +504,8 @@ impl ExternalPolyglotBridge {
                 ret = PolyglotVal::String(expr[1..expr.len() - 1].to_string());
             } else if let Some(v) = vars.get(expr) {
                 ret = v.clone();
-            }
-        } else {
-            // Check trailing assignment: capturedVal = myPilotVariable;
-            let lines: Vec<&str> = trimmed.split('\n').collect();
-            if let Some(&last_line) = lines.last() {
-                let l_trim = last_line.trim().trim_end_matches(';');
-                if let Some(eq_idx) = l_trim.find('=') {
-                    if !l_trim.contains("==") {
-                        let var_name = l_trim[..eq_idx].trim().to_string();
-                        let expr = l_trim[eq_idx + 1..].trim();
-                        if let Some(v) = vars.get(expr) {
-                            captured.insert(var_name, v.clone());
-                        } else if let Ok(i) = expr.parse::<i64>() {
-                            captured.insert(var_name, PolyglotVal::Int(i));
-                        } else if expr.starts_with('"') && expr.ends_with('"') && expr.len() >= 2 {
-                            captured.insert(var_name, PolyglotVal::String(expr[1..expr.len() - 1].to_string()));
-                        }
-                    }
-                }
+            } else if let Some(s) = local_strs.get(expr) {
+                ret = PolyglotVal::String(s.clone());
             }
         }
 
@@ -488,4 +520,39 @@ impl ExternalPolyglotBridge {
 fn rand_nonce() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(42)
+}
+
+fn eval_math_with_locals(expr: &str, locals: &HashMap<String, i64>) -> Option<i64> {
+    let clean = expr.trim().trim_end_matches(';').trim();
+    if let Ok(i) = clean.parse::<i64>() {
+        return Some(i);
+    }
+    if let Some(val) = locals.get(clean) {
+        return Some(*val);
+    }
+    if let Some(pos) = clean.find('+') {
+        let left = eval_math_with_locals(&clean[..pos], locals)?;
+        let right = eval_math_with_locals(&clean[pos + 1..], locals)?;
+        return Some(left + right);
+    }
+    if let Some(pos) = clean.rfind('-') {
+        if pos > 0 {
+            let left = eval_math_with_locals(&clean[..pos], locals)?;
+            let right = eval_math_with_locals(&clean[pos + 1..], locals)?;
+            return Some(left - right);
+        }
+    }
+    if let Some(pos) = clean.find('*') {
+        let left = eval_math_with_locals(&clean[..pos], locals)?;
+        let right = eval_math_with_locals(&clean[pos + 1..], locals)?;
+        return Some(left * right);
+    }
+    if let Some(pos) = clean.find('/') {
+        let left = eval_math_with_locals(&clean[..pos], locals)?;
+        let right = eval_math_with_locals(&clean[pos + 1..], locals)?;
+        if right != 0 {
+            return Some(left / right);
+        }
+    }
+    None
 }

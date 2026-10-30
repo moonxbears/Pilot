@@ -196,6 +196,44 @@ impl Database {
     }
 }
 
+fn collect_header_tokens(node: &SyntaxNode, tokens: &mut Vec<String>) -> bool {
+    for elem in node.children() {
+        match elem {
+            pilot_syntax::SyntaxElement::Node(child) => {
+                if child.kind() == SyntaxKind::BlockExpr {
+                    return true;
+                }
+                if collect_header_tokens(&child, tokens) {
+                    return true;
+                }
+            }
+            pilot_syntax::SyntaxElement::Token(tok) => {
+                let k = tok.kind();
+                if !matches!(k, SyntaxKind::Whitespace | SyntaxKind::Newline | SyntaxKind::BlockComment | SyntaxKind::LineComment) {
+                    tokens.push(tok.text().to_string());
+                }
+            }
+        }
+    }
+    false
+}
+
+fn format_signature_tokens(tokens: &[String]) -> String {
+    let mut out = String::new();
+    for (i, tok) in tokens.iter().enumerate() {
+        if i > 0 {
+            let prev = &tokens[i - 1];
+            let no_space_before = tok == "(" || tok == ")" || tok == "," || tok == ":" || tok == "]" || tok == ">" || tok == ";";
+            let no_space_after = prev == "(" || prev == "[" || prev == "<" || prev == "@";
+            if !no_space_before && !no_space_after {
+                out.push(' ');
+            }
+        }
+        out.push_str(tok);
+    }
+    out
+}
+
 fn extract_item_tree(file_id: FileId, root: &SyntaxNode) -> ItemTree {
     let mut items = Vec::new();
 
@@ -205,13 +243,13 @@ fn extract_item_tree(file_id: FileId, root: &SyntaxNode) -> ItemTree {
             let name = node.tokens().find(|t| t.kind() == SyntaxKind::Ident).map(|t| t.text().to_string()).unwrap_or_else(|| "anon".to_string());
 
             // Build signature text excluding the inner BlockExpr body
-            let mut sig_parts = Vec::new();
-            for tok in node.tokens() {
-                if !matches!(tok.kind(), SyntaxKind::Whitespace | SyntaxKind::Newline | SyntaxKind::BlockComment | SyntaxKind::LineComment) {
-                    sig_parts.push(tok.text().to_string());
-                }
-            }
-            let sig_text = sig_parts.join(" ");
+            let mut header_toks = Vec::new();
+            collect_header_tokens(&node, &mut header_toks);
+            let sig_text = if !header_toks.is_empty() {
+                format_signature_tokens(&header_toks)
+            } else {
+                format!("{:?} {}", k, name)
+            };
 
             items.push(ItemSignature {
                 name,

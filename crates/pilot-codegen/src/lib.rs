@@ -1,6 +1,6 @@
-//! Milestone 35.1: Unified Native Codegen Backends (`pilot-codegen`).
+//! Milestone 35.1 & Milestone 47: Unified Native & GPU Codegen Backends (`pilot-codegen`).
 //!
-//! Emits optimized LLVM IR, C11/C23, and WebAssembly + WASI modules.
+//! Emits optimized LLVM IR, C11/C23, WebAssembly + WASI modules, and multi-approach GPU kernels (CUDA, ROCm/HIP, Vulkan/SPIR-V, WGSL).
 
 pub mod llvm;
 pub mod c_target;

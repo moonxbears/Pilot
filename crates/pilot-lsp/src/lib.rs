@@ -1,9 +1,9 @@
-//! Milestone 32.3: Zero-GC Standalone Native Language Server (`pilot-lsp`).
+//! Milestone 32.3 & Milestone 48: Zero-GC Standalone Native Language Server (`pilot-lsp`).
 //!
 //! Provides:
 //! - Complete JSON-RPC 2.0 language server protocol implementation.
 //! - Sub-millisecond incremental didChange synchronization.
-//! - CST semantic tokens, hover cards, dot-completion, go-to-definition, and formatting.
+//! - 23-type semantic tokens with modifiers, interactive hover cards, dot-completion, signature help, go-to-definition, and formatting.
 
 pub mod json;
 pub mod server;
@@ -117,5 +117,53 @@ mod tests {
         let notifs = server.take_pending_notifications();
         assert!(!notifs.is_empty());
         assert!(notifs[0].contains("textDocument/publishDiagnostics"));
+    }
+
+    #[test]
+    fn test_hover_12_polyglot() {
+        let mut server = LspServer::new();
+        let uri = "file:///workspace/12_polyglot.pilot";
+        let code = std::fs::read_to_string("examples/showcase/12_polyglot_interoperability.pilot")
+            .or_else(|_| std::fs::read_to_string("../../examples/showcase/12_polyglot_interoperability.pilot"))
+            .unwrap();
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+            uri,
+            code.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+        );
+        server.handle_message(&did_open);
+
+        // Hover over 'recorder' at line 27 (0-indexed), char 5
+        let hover_req = format!(
+            r#"{{"jsonrpc":"2.0","id":20,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":27,"character":5}}}}}}"#,
+            uri
+        );
+        let resp = server.handle_message(&hover_req).expect("Expected hover response");
+        assert!(resp.contains("def recorder(val: any) -> any"));
+
+        // Hover over 'pilot_greeting' at line 12 (0-indexed line 11), char 6
+        let hover_req3 = format!(
+            r#"{{"jsonrpc":"2.0","id":22,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":11,"character":6}}}}}}"#,
+            uri
+        );
+        let resp3 = server.handle_message(&hover_req3).expect("Expected hover response");
+        assert!(resp3.contains("let pilot_greeting: str"));
+
+        // Hover over 'sequence_trace' at line 27 (0-indexed line 26), char 6
+        let hover_req4 = format!(
+            r#"{{"jsonrpc":"2.0","id":23,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":26,"character":6}}}}}}"#,
+            uri
+        );
+        let resp4 = server.handle_message(&hover_req4).expect("Expected hover response");
+        assert!(resp4.contains("let sequence_trace: List"));
+
+        // Signature help inside recorder("Step 1...") at line 36 (0-indexed line 35), char 15
+        let sig_req = format!(
+            r#"{{"jsonrpc":"2.0","id":24,"method":"textDocument/signatureHelp","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":35,"character":15}}}}}}"#,
+            uri
+        );
+        let sig_resp = server.handle_message(&sig_req).expect("Expected signature help response");
+        assert!(sig_resp.contains("recorder"));
+        assert!(sig_resp.contains("val: any"));
     }
 }

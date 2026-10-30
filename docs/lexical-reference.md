@@ -4,7 +4,7 @@
 
 ---
 
-This reference provides a complete specification of the lexical structure of the Pilot programming language as defined in [`antlr/Pilot.g4`](../antlr/Pilot.g4) and [`Preprocessing/PilotPreprocessor.cs`](../Preprocessing/PilotPreprocessor.cs).
+This reference provides a complete specification of the lexical structure of the Pilot programming language as implemented in the native compiler pipeline (`pilot-lexer`, `pilot-syntax`, `pilot-parser`).
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ This reference provides a complete specification of the lexical structure of the
 
 ## 1. Compilation Pipeline & Character Encoding
 
-Pilot source files (`.pilot`) are encoded in **UTF-8**. Before the ANTLR4 lexer (`PilotLexer`) tokenizes the input stream, the source text passes through [`PilotPreprocessor`](../Preprocessing/PilotPreprocessor.cs), which evaluates conditional compilation blocks while preserving a strict **1:1 line-number mapping** (inactive lines and directives are replaced with blank lines so parser diagnostics and debugger breakpoints always match the original source line).
+Pilot source files (`.pilot`) are encoded in **UTF-8**. The source text is tokenized into zero-copy lexical tokens by [`pilot-lexer`](../crates/pilot-lexer/src/lib.rs) with full position tracking and trivia preservation while maintaining strict line-number mapping.
 
 ---
 
@@ -43,7 +43,7 @@ All whitespace, comments, and explicit line-continuation sequences are routed to
 
 ## 3. Preprocessor Directives & Diagnostics
 
-Preprocessor directives begin with `#` (with optional leading whitespace) and are processed by [`PilotPreprocessor.Preprocess()`](../Preprocessing/PilotPreprocessor.cs).
+Preprocessor directives begin with `#` (with optional leading whitespace) and are evaluated prior to AST construction.
 
 ### 3.1 Supported Directives
 
@@ -180,6 +180,7 @@ All other keyword tokens listed in Section 5 can be used both for their syntacti
 | `raise` | `RAISE` | Throws a `PilotUserException` (`raise "Error"` or `raise CustomError("msg") from cause`). |
 | `try` | `TRY` | Opens a protected exception-handling block. |
 | `except` | `EXCEPT` | Catches exceptions in a `try` block (`except TypeError as e { ... }`), or computes set difference in database queries. |
+| `catch` | `CATCH` | Catches exceptions in a `try` block (`catch (e) { ... }` or `catch { ... }`). |
 | `finally` | `FINALLY` | Block in a `try` statement guaranteed to execute regardless of whether an exception or return occurred. |
 | `with` | `WITH` | Scoped context manager for lexical extensions (`with extension E`), DI bindings (`with context k = v`), `with auto_repeat`, or resources. |
 | `as` | `AS` | Binds an alias in `import`, `except`, `with`, and SQL/LINQ `SELECT` / `FROM` / `JOIN` clauses. |

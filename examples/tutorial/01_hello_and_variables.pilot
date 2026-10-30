@@ -1,0 +1,38 @@
+// =============================================================================
+// Tutorial 01: Hello World, Variables, Immutability & Primitive Literals
+// =============================================================================
+
+// In Pilot, statements can be terminated with newlines or semicolons.
+println("Hello, Pilot!")
+
+// --- 1. Variables and Immutability ---
+// Variables declared with 'let' are immutable by default (compile-time checked).
+let language = "Pilot"
+let version_major = 1
+let pi = 3.14159265359
+
+// Variables declared with 'var' can be reassigned.
+var counter = 0
+counter += 1
+println(f"Counter incremented: {counter}")
+
+// --- 2. Type Annotations (Optional) ---
+// Pilot features bidirectional type inference, but explicit types are supported.
+let strict_int: int = 42
+let strict_float: float = 2.718
+let is_ready: bool = true
+let initial_char: char = 'P'
+
+// --- 3. Real-Time Hardware & Memory Literals ---
+// Pilot has first-class duration, frequency, and byte-size numeric literals.
+let clock_ns = 25ns
+let poll_interval_ms = 10ms
+let timeout_sec = 2s
+let cpu_freq = 3.6GHz
+let l1_cache = 64KB
+let ring_buffer = 16MB
+
+// --- 4. String Interpolation ---
+// Format strings use pythonic f"..." or C#-style $"..." syntax.
+let greeting = f"Welcome to {language} {version_major}! PI is approximately {pi}"
+println(greeting)

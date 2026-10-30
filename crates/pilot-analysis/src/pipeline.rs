@@ -52,7 +52,32 @@ impl AnalysisPipeline {
             let node = *arena.node(node_id);
 
             if node.node_kind() == pilot_ast::NodeKind::MatchExpr {
-                let match_diags = MarangetChecker::check_match_expr(arena, node_id, Vec::new());
+                let children = arena.children_slice(node.lhs, node.rhs);
+                let mut all_variants = Vec::new();
+                if !children.is_empty() {
+                    for &arm_id in &children[1..] {
+                        let arm_node = *arena.node(pilot_ast::NodeId(arm_id));
+                        let pat_id = pilot_ast::NodeId(arm_node.lhs);
+                        if pat_id.is_some() {
+                            let mut pat_node = *arena.node(pat_id);
+                            if pat_node.node_kind() == pilot_ast::NodeKind::PatBind && pat_node.flags == 1 && pat_node.rhs != 0 {
+                                pat_node = *arena.node(pilot_ast::NodeId(pat_node.rhs));
+                            }
+                            if pat_node.node_kind() == pilot_ast::NodeKind::PatVariant {
+                                let name = arena.interner.resolve(pilot_intern::SymbolId(pat_node.lhs));
+                                if let Some((adt_name, _)) = infer_engine.adt_variants.get(name) {
+                                    for (v, (a, _)) in &infer_engine.adt_variants {
+                                        if a == adt_name && !all_variants.contains(v) {
+                                            all_variants.push(v.clone());
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                let match_diags = MarangetChecker::check_match_expr(arena, node_id, all_variants);
                 diagnostics.extend(match_diags);
             }
 

@@ -403,6 +403,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             {
                 onDidChangeSemanticTokens: semanticTokensEmitter.event,
                 async provideDocumentSemanticTokens(document: vscode.TextDocument): Promise<vscode.SemanticTokens> {
+                    client.notifyDidOpen(document);
                     const res = await client.sendRequest('textDocument/semanticTokens/full', {
                         textDocument: { uri: document.uri.toString() }
                     });
@@ -510,6 +511,60 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 }
             },
             '.', ':', '@', '<'
+        ),
+        vscode.languages.registerSignatureHelpProvider(
+            selector,
+            {
+                async provideSignatureHelp(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.SignatureHelp | null> {
+                    const res = await client.sendRequest('textDocument/signatureHelp', {
+                        textDocument: { uri: document.uri.toString() },
+                        position: { line: position.line, character: position.character }
+                    });
+                    if (!res || !Array.isArray(res.signatures) || res.signatures.length === 0) {
+                        return null;
+                    }
+                    const sigHelp = new vscode.SignatureHelp();
+                    sigHelp.activeSignature = res.activeSignature ?? 0;
+                    sigHelp.activeParameter = res.activeParameter ?? 0;
+                    sigHelp.signatures = res.signatures.map((s: any) => {
+                        const si = new vscode.SignatureInformation(s.label, s.documentation ? new vscode.MarkdownString(s.documentation) : undefined);
+                        if (Array.isArray(s.parameters)) {
+                            si.parameters = s.parameters.map((p: any) => new vscode.ParameterInformation(p.label));
+                        }
+                        return si;
+                    });
+                    return sigHelp;
+                }
+            },
+            '(', ','
+        ),
+        vscode.languages.registerInlayHintsProvider(
+            selector,
+            {
+                async provideInlayHints(document: vscode.TextDocument, range: vscode.Range): Promise<vscode.InlayHint[]> {
+                    const res = await client.sendRequest('textDocument/inlayHint', {
+                        textDocument: { uri: document.uri.toString() },
+                        range: {
+                            start: { line: range.start.line, character: range.start.character },
+                            end: { line: range.end.line, character: range.end.character }
+                        }
+                    });
+                    if (!Array.isArray(res)) {
+                        return [];
+                    }
+                    return res.map((item: any) => {
+                        const pos = new vscode.Position(item.position.line, item.position.character);
+                        const hint = new vscode.InlayHint(
+                            pos,
+                            item.label,
+                            item.kind === 2 ? vscode.InlayHintKind.Parameter : vscode.InlayHintKind.Type
+                        );
+                        hint.paddingLeft = !!item.paddingLeft;
+                        hint.paddingRight = !!item.paddingRight;
+                        return hint;
+                    });
+                }
+            }
         )
     );
 
@@ -620,6 +675,168 @@ class PilotDebugConfigurationProvider implements vscode.DebugConfigurationProvid
     }
 }
 
+class PilotDebugAdapter implements vscode.DebugAdapter {
+    private sendMessageEmitter = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
+    readonly onDidSendMessage: vscode.Event<vscode.DebugProtocolMessage> = this.sendMessageEmitter.event;
+    private childProcess: cp.ChildProcess | null = null;
+    private seq = 1;
+
+    constructor(
+        private extensionPath: string,
+        private session: vscode.DebugSession
+    ) {}
+
+    handleMessage(message: any): void {
+        if (message.type === 'request') {
+            this.handleRequest(message);
+        }
+    }
+
+    private sendResponse(request: any, body?: any): void {
+        this.sendMessageEmitter.fire({
+            seq: this.seq++,
+            type: 'response',
+            request_seq: request.seq,
+            command: request.command,
+            success: true,
+            body
+        });
+    }
+
+    private sendEvent(event: string, body?: any): void {
+        this.sendMessageEmitter.fire({
+            seq: this.seq++,
+            type: 'event',
+            event,
+            body
+        });
+    }
+
+    private handleRequest(request: any): void {
+        switch (request.command) {
+            case 'initialize': {
+                this.sendResponse(request, {
+                    supportsConfigurationDoneRequest: true,
+                    supportsTerminateRequest: true
+                });
+                this.sendEvent('initialized');
+                break;
+            }
+            case 'launch': {
+                this.sendResponse(request);
+                this.startProcess();
+                break;
+            }
+            case 'configurationDone': {
+                this.sendResponse(request);
+                break;
+            }
+            case 'threads': {
+                this.sendResponse(request, {
+                    threads: [{ id: 1, name: 'Main Thread' }]
+                });
+                break;
+            }
+            case 'disconnect':
+            case 'terminate': {
+                if (this.childProcess) {
+                    try {
+                        this.childProcess.kill();
+                    } catch {}
+                    this.childProcess = null;
+                }
+                this.sendResponse(request);
+                this.sendEvent('terminated');
+                break;
+            }
+            default: {
+                this.sendResponse(request);
+                break;
+            }
+        }
+    }
+
+    private startProcess(): void {
+        const config = this.session.configuration;
+        let program = config.program || '${file}';
+        if (program === '${file}' && vscode.window.activeTextEditor) {
+            program = vscode.window.activeTextEditor.document.fileName;
+        }
+
+        const mode = config.mode || 'run';
+        const rawArgs = Array.isArray(config.args) ? config.args : (config.args ? [config.args] : []);
+        let pilotExe = resolvePilotExecutionPrefix(this.extensionPath, config.pilotPath);
+        if (pilotExe.startsWith('"') && pilotExe.endsWith('"')) {
+            pilotExe = pilotExe.slice(1, -1);
+        }
+
+        const cmdArgs = [mode, program, ...rawArgs];
+        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || path.dirname(program);
+
+        this.sendEvent('output', {
+            category: 'console',
+            output: `[Pilot] Running: ${pilotExe} ${cmdArgs.join(' ')}\n`
+        });
+
+        try {
+            const home = process.env.HOME || '';
+            const cargoPath = home ? `${home}/.cargo/bin:` : '';
+            this.childProcess = cp.spawn(pilotExe, cmdArgs, {
+                cwd,
+                env: { ...process.env, PATH: `${cargoPath}${process.env.PATH}` }
+            });
+
+            this.childProcess.stdout?.on('data', (data) => {
+                this.sendEvent('output', {
+                    category: 'stdout',
+                    output: data.toString()
+                });
+            });
+
+            this.childProcess.stderr?.on('data', (data) => {
+                this.sendEvent('output', {
+                    category: 'stderr',
+                    output: data.toString()
+                });
+            });
+
+            this.childProcess.on('error', (err) => {
+                this.sendEvent('output', {
+                    category: 'stderr',
+                    output: `Error launching Pilot process: ${err.message}\n`
+                });
+                this.sendEvent('terminated');
+            });
+
+            this.childProcess.on('close', (code) => {
+                this.sendEvent('output', {
+                    category: 'console',
+                    output: `\n[Pilot process completed with exit code ${code ?? 0}]\n`
+                });
+                this.sendEvent('exited', { exitCode: code ?? 0 });
+                this.sendEvent('terminated');
+                this.childProcess = null;
+            });
+        } catch (err: any) {
+            this.sendEvent('output', {
+                category: 'stderr',
+                output: `Failed to spawn process: ${err?.message || err}\n`
+            });
+            this.sendEvent('terminated');
+        }
+    }
+
+    dispose(): void {
+        if (this.childProcess) {
+            try {
+                this.childProcess.kill();
+            } catch {}
+            this.childProcess = null;
+        }
+        this.sendMessageEmitter.dispose();
+    }
+}
+
 class PilotDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory {
     private extensionPath: string;
 
@@ -628,34 +845,7 @@ class PilotDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescripto
     }
 
     createDebugAdapterDescriptor(session: vscode.DebugSession): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
-        const config = session.configuration;
-        let program = config.program || '${file}';
-        if (program === '${file}' && vscode.window.activeTextEditor) {
-            program = vscode.window.activeTextEditor.document.fileName;
-        }
-
-        const mode = config.mode || 'run';
-        const args = Array.isArray(config.args) ? config.args.join(' ') : (config.args || '');
-        const pilotExe = resolvePilotExecutionPrefix(this.extensionPath, config.pilotPath);
-
-        const terminalName = mode === 'debug' ? 'Pilot Debugger' : 'Pilot Runner';
-        let terminal = vscode.window.terminals.find(t => t.name === terminalName);
-        if (!terminal) {
-            terminal = vscode.window.createTerminal(terminalName);
-        }
-        terminal.show();
-
-        if (mode === 'debug') {
-            terminal.sendText(`${pilotExe} debug "${program}" ${args}`.trim());
-        } else {
-            terminal.sendText(`${pilotExe} run "${program}" ${args}`.trim());
-        }
-
-        return new vscode.DebugAdapterInlineImplementation({
-            onDidSendMessage: new vscode.EventEmitter<any>().event,
-            handleMessage: () => {},
-            dispose: () => {}
-        });
+        return new vscode.DebugAdapterInlineImplementation(new PilotDebugAdapter(this.extensionPath, session));
     }
 }
 
@@ -679,6 +869,14 @@ async function addOrUpdateLaunchJson(showNotice = true): Promise<void> {
             mode: 'run',
             program: '${file}',
             args: []
+        },
+        {
+            type: 'pilot',
+            request: 'launch',
+            name: 'Pilot: Run Current File (VM)',
+            mode: 'run',
+            program: '${file}',
+            args: ['--vm']
         },
         {
             type: 'pilot',

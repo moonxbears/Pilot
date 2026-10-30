@@ -1,12 +1,18 @@
 # Pilot Language Documentation Hub
 
-[**Home**](index.md) | [**Milestones & Roadmap**](../MILESTONES.md) | [**Lexical Reference**](lexical-reference.md) | [**Syntax Reference**](syntax-reference.md) | [**Functions & API Reference**](functions-and-apis.md) | [**Main README**](../README.md)
+[**Home**](index.md) | [**Tutorial Guide**](tutorial/index.md) | [**Milestones & Roadmap**](../MILESTONES.md) | [**Lexical Reference**](lexical-reference.md) | [**Syntax Reference**](syntax-reference.md) | [**Functions & API Reference**](functions-and-apis.md) | [**Main README**](../README.md)
 
 ---
 
 Welcome to the comprehensive, navigable documentation for the **Pilot Programming Language**. This documentation covers every language concept, lexical token, grammar production, operator, built-in function, type method, runtime contract, and CLI tool in the Pilot ecosystem.
 
 ## Quick Navigation
+
+### Learning & Getting Started
+
+| Guide | Description | Key Contents |
+| :--- | :--- | :--- |
+| [**Step-by-Step Tutorial**](tutorial/index.md) | Incremental, code-first tutorial from beginner basics to advanced systems | 7 Progressive hands-on lessons with runnable code examples: variables, control flow, functions, contracts, pattern matching, classes, cascades, error handling, and CSP channels. |
 
 ### Core Reference Manuals
 
@@ -48,46 +54,41 @@ Each concept guide provides an in-depth explanation of the feature's design, the
 ```mermaid
 flowchart LR
     subgraph Frontend["1. Lexical & Syntax Frontend"]
-        Pre["Preprocessor\n(#define, #if, #region)"]
-        Lex["PilotLexer\n(Keywords, Literals, Units)"]
-        Parse["PilotParser\n(Concrete Syntax Tree)"]
-        Pre --> Lex --> Parse
+        Lex["pilot-lexer\n(SIMD Zero-Alloc Tokens)"]
+        Parse["pilot-parser\n(Pratt & Recursive Descent)"]
+        CST["pilot-syntax\n(Lossless Rowan CST)"]
+        AST["pilot-ast\n(16-Byte Flat AstArena)"]
+        Lex --> Parse --> CST & AST
     end
 
-    subgraph CoreRuntime["2. Execution & Type Engine"]
-        Visitor["PilotInterpreterVisitor"]
-        Env["Lexical Scopes &\nContextual DI Frames"]
-        MG["PilotMethodGroup\n(Switchboard, Sieve, Union)"]
-        Adapt["PilotTypeAdapterRegistry\n(Adapters & Auto-Repeat)"]
-        Contract["Contract & Pre/Post\nValidator (old, ensures)"]
-        Visitor --> Env
-        Visitor --> MG
-        Visitor --> Adapt
-        Visitor --> Contract
+    subgraph CoreRuntime["2. Analysis & Memory Model"]
+        Analysis["pilot-analysis\n(HM Inference & Exhaustiveness)"]
+        Perceus["pilot-perceus\n(Zero-GC Ref Counting & Reuse)"]
+        DBQuery["pilot-db & pilot-incremental\n(Salsa Early-Cutoff Recompute)"]
+        AST --> Analysis --> Perceus
+        AST --> DBQuery
     end
 
-    subgraph Subsystems["3. Specialized Subsystems"]
-        DB["Database & LINQ\nQuery Engine"]
-        Conc["Concurrency, Channels,\nGenerators & Lazy"]
-        RT["Real-Time & Matrix\nSubsystem"]
-        Poly["Polyglot Registry\n(Python, C#, JS, SQL, ASM...)"]
-        Meta["Lisp Macros &\nGenerative AST"]
+    subgraph Backends["3. Multi-Target Execution Backends"]
+        VM["pilot-vm\n(32-Bit Register PilVM v3)"]
+        AOT["pilot-codegen\n(Native C11/C23 & LLVM IR)"]
+        WASM["pilot-codegen\n(WebAssembly + WASI)"]
+        GPU["pilot-codegen\n(CUDA, ROCm, Vulkan, WGSL)"]
+        Poly["pilot-polyglot\n(Python, JS, Lua, C, C++, Java, ASM, SQL)"]
+        Transpile["pilot-transpile\n(Bidirectional 7-Language Transpiler)"]
     end
 
-    subgraph Tooling["4. Toolchain & Packaging"]
-        Comp["PilotCompiler (.pilc)"]
-        Pkg["Package Manager (pilot pkg)"]
-        Venv["Virtual Env (pilot venv)"]
-        Dbg["CLI Debugger & REPL"]
-        LSP["Language Server (LSP)"]
+    subgraph Tooling["4. Native Toolchain & Developer Experience"]
+        CLI["pilot CLI Driver\n(run, build, check, fmt, test, bench, perf)"]
+        DAP["pilot-dap\n(Debug Adapter Protocol Server)"]
+        LSP["pilot-lsp\n(23-Type Semantic Tokens & Hover)"]
+        Pkg["pilot-pkg\n(SPDX License & Universal Packaging)"]
     end
 
-    Parse --> Visitor
-    Parse --> Comp
-    Parse --> LSP
-    Visitor --> DB & Conc & RT & Poly & Meta
-    Visitor --> Dbg
-    Pkg --> Venv
+    AST --> VM & AOT & WASM & GPU & Poly & Transpile
+    DBQuery --> LSP
+    AST --> DAP
+    CLI --> VM & AOT & WASM & GPU & LSP & DAP & Pkg
 ```
 
 ---

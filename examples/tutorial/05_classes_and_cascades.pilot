@@ -1,0 +1,52 @@
+// =============================================================================
+// Tutorial 05: Object-Oriented Programming, Properties & Fluid Cascades (..)
+// =============================================================================
+
+// --- 1. Classes and Constructors ---
+class NetworkPacket {
+    var source_id: int = 0
+    var destination_id: int = 0
+    var payload: str = ""
+    var encrypted: bool = false
+
+    def set_source(self, src: int) -> void {
+        self.source_id = src
+    }
+
+    def set_destination(self, dst: int) -> void {
+        self.destination_id = dst
+    }
+
+    def attach_payload(self, data: str) -> void {
+        self.payload = data
+    }
+
+    def set_encrypted(self, state: bool) -> void {
+        self.encrypted = state
+    }
+}
+
+// --- 2. Fluid Builder Cascades (..) ---
+// The cascade operator (..) invokes methods on an object while returning
+// the receiver itself, eliminating repetitive boilerplate variables.
+let packet = NetworkPacket()
+packet..set_source(101)..set_destination(202)..attach_payload("SENSOR_TELEMETRY")..set_encrypted(true)
+
+println(f"Configured packet for destination: {packet.destination_id}")
+
+// --- 3. Nullable References and Safe Cascades (?..) ---
+let maybe_packet: NetworkPacket? = packet
+maybe_packet?..attach_payload("SAFE_UPDATE")
+
+// --- 4. Protocols / Interfaces and Extensions ---
+interface Describable {
+    def describe(self) -> str;
+}
+
+extend NetworkPacket {
+    def summary(self) -> str {
+        return f"Packet[src={self.source_id}, dst={self.destination_id}]"
+    }
+}
+
+println(packet.summary())

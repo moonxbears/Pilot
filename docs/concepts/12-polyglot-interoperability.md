@@ -61,19 +61,19 @@ extern_block
 
 ## 4. Runtime Execution Mechanics
 
-### 4.1 Two Execution Forms in `VisitInline_foreign_block`
-In [`PilotInterpreterVisitor.cs`](../../Runtime/Execution/PilotInterpreterVisitor.cs):
+### 4.1 Two Execution Forms in Polyglot Blocks
+In [`crates/pilot-polyglot/src/bridge.rs`](../../crates/pilot-polyglot/src/bridge.rs) and [`crates/pilot-codegen/src/c_target.rs`](../../crates/pilot-codegen/src/c_target.rs):
 1. **AST-Integrated Brace Form (`python { ... }`, `js { ... }`, `rust { ... }`)**:
-   - The statements inside `{ ... }` are parsed into Pilot's unified AST and executed in the current `PilotExecutionContext`.
-   - Because they share the live `PilotExecutionContext`, any `yield` statement inside `python { yield x }` or `js { yield y }` interacts directly with `PilotGenerator.Yield(val)`, enabling **zero-copy resumable polyglot coroutines** across language blocks!
+   - The statements inside `{ ... }` are parsed into Pilot's unified AST (`NodeKind::PolyglotBlock`) and executed in the active scope.
+   - Any `yield` statement inside `python { yield x }` or `js { yield y }` interacts directly with Pilot's generator mechanics, enabling **zero-copy resumable polyglot coroutines** across language blocks.
 2. **Raw / Triple-String Form (`python """..."""` or ````python ```...``` ````)**:
-   - Extracted as raw source text (`ExtractForeignCode`).
-   - All currently visible variables in `Context.GetAllVisibleBindings()` are snapshotted into a dictionary and passed to `Context.Engine.Polyglot.ExecuteBlock(lang, rawCode, scopeVars)`.
-   - Any variables mutated or created in `scopeVars` are written back into the active Pilot scope (`Context.AssignOrDefine`), and the final expression result is returned.
+   - Extracted as raw source text.
+   - All currently visible bindings in the active frame are snapshotted into a foreign environment map and passed to [`pilot-polyglot::bridge`](../../crates/pilot-polyglot/src/bridge.rs).
+   - Any variables mutated or created in the foreign scope are written back into the active Pilot scope, and the final expression result is returned.
 
-### 4.2 `PolyglotRegistry` & Foreign Module Imports (`import lang:module`)
-In [`PolyglotRegistry.cs`](../../Runtime/Interop/PolyglotRegistry.cs):
-- Executing `import python:math as py_math` calls `PolyglotRegistry.ImportModule("python", "math")`, returning a `map` of callable `PilotFunction` and constant bindings:
+### 4.2 Polyglot Bridge & Foreign Module Imports (`import lang:module`)
+In [`crates/pilot-polyglot/src/marshal.rs`](../../crates/pilot-polyglot/src/marshal.rs):
+- Executing `import python:math as py_math` calls the polyglot bridge import mechanism, returning a map of callable function and constant bindings:
   - `python:math`: `sqrt(x)`, `sin(x)`, `cos(x)`, `pow(x, y)`, `floor(x)`, `ceil(x)`, `abs(x)`, `pi`, `e`
   - `python:json`: `dumps(val)`, `loads(str)`
   - `python:os`: `getcwd()`, `getenv(name)`

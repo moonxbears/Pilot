@@ -144,6 +144,90 @@ impl TypeInferenceEngine {
         self.define_var("null", TypeId::NULL);
         self.define_var("True", TypeId::BOOL);
         self.define_var("False", TypeId::BOOL);
+
+        self.define_var("some", fn_some);
+        self.define_var("none", TypeId::NULL);
+        self.define_var("nil", TypeId::NULL);
+        self.define_var("ok", fn_ok);
+        self.define_var("err", fn_err);
+        self.define_var("true", TypeId::BOOL);
+        self.define_var("false", TypeId::BOOL);
+
+        // Concurrency & Async
+        let fn_async = self.types.function_of(vec![TypeId::ANY], TypeId::ANY);
+        self.define_var("async", fn_async);
+        self.define_var("await", fn_async);
+        self.define_var("spawn", fn_async);
+        self.define_var("atomic", fn_async);
+        self.define_var("sync", fn_async);
+        self.define_var("isolate", fn_async);
+        self.define_var("select", fn_async);
+        self.define_var("parallel", fn_async);
+        self.define_var("timeout", fn_async);
+        self.define_var("yield_execution", fn_async);
+
+        // Realtime
+        self.define_var("deadline", fn_async);
+        self.define_var("within", fn_async);
+        self.define_var("periodic", fn_async);
+        self.define_var("priority", fn_async);
+        self.define_var("jitter", fn_async);
+        self.define_var("stackalloc", fn_async);
+        self.define_var("bounded", fn_async);
+        self.define_var("on_missed", fn_async);
+        self.define_var("fallback", fn_async);
+
+        // Meta, Keywords & DSL
+        self.define_var("default", fn_async);
+        self.define_var("keyword", fn_async);
+        self.define_var("defkeyword", fn_async);
+        self.define_var("pure", fn_async);
+        self.define_var("noalloc", fn_async);
+        self.define_var("unsafe", fn_async);
+        self.define_var("current_scope", TypeId::ANY);
+
+        // Polyglot
+        self.define_var("js", fn_async);
+        self.define_var("lua", fn_async);
+        self.define_var("python", fn_async);
+        self.define_var("java", fn_async);
+        self.define_var("c", fn_async);
+        self.define_var("cpp", fn_async);
+        self.define_var("asm", fn_async);
+        self.define_var("rust", fn_async);
+        self.define_var("csharp", fn_async);
+        self.define_var("sql", fn_async);
+        self.define_var("postgres", fn_async);
+        self.define_var("postgresql", fn_async);
+        self.define_var("mysql", fn_async);
+        self.define_var("sqlite", fn_async);
+
+        // Types and math constants
+        self.define_var("PI", TypeId::F64);
+        self.define_var("E", TypeId::F64);
+        self.define_var("Math", TypeId::ANY);
+        self.define_var("undefined", TypeId::ANY);
+        self.define_var("Channel", fn_async);
+        self.define_var("Chan", fn_async);
+        self.define_var("old", fn_async);
+        self.define_var("result", TypeId::ANY);
+        self.define_var("Exception", TypeId::ANY);
+        self.define_var("Error", TypeId::ANY);
+        self.define_var("DivideByZeroError", TypeId::ANY);
+        self.define_var("NullReferenceError", TypeId::ANY);
+        self.define_var("TypeError", TypeId::ANY);
+        self.define_var("AssertionError", TypeId::ANY);
+        self.type_defs.insert("Channel".to_string(), TypeId::ANY);
+        self.type_defs.insert("Chan".to_string(), TypeId::ANY);
+        self.type_defs.insert("Exception".to_string(), TypeId::ANY);
+        self.type_defs.insert("Error".to_string(), TypeId::ANY);
+        self.type_defs.insert("DivideByZeroError".to_string(), TypeId::ANY);
+        self.type_defs.insert("NullReferenceError".to_string(), TypeId::ANY);
+        self.type_defs.insert("TypeError".to_string(), TypeId::ANY);
+        self.type_defs.insert("AssertionError".to_string(), TypeId::ANY);
+        self.type_defs.insert("list".to_string(), self.types.list_of(TypeId::ANY));
+        self.type_defs.insert("map".to_string(), TypeId::ANY);
+        self.type_defs.insert("tuple".to_string(), TypeId::ANY);
     }
 
     pub fn enter_scope(&mut self) {
@@ -176,6 +260,9 @@ impl TypeInferenceEngine {
             if let Some(&ty) = scope.bindings.get(name) {
                 return Some(ty);
             }
+        }
+        if name == "self" || name == "this" {
+            return Some(TypeId::ANY);
         }
         self.type_defs.get(name).copied()
     }
@@ -273,7 +360,9 @@ impl TypeInferenceEngine {
             NodeKind::IdentExpr => {
                 let sym = SymbolId(node.lhs);
                 let name = arena.interner.resolve(sym);
-                if let Some(t) = self.lookup_var(name) {
+                if name == "_" {
+                    TypeId::ANY
+                } else if let Some(t) = self.lookup_var(name) {
                     t
                 } else if let Some(&t) = self.type_defs.get(name) {
                     t
@@ -292,16 +381,69 @@ impl TypeInferenceEngine {
 
             // --- Arithmetic & Logical Binary Expressions ---
             NodeKind::BinaryExpr => {
+                let op = node.flags;
+                if op == 26 {
+                    // BinaryOp::Walrus (pat := val or let pat := val)
+                    let val_ty = self.synth(arena, NodeId(node.rhs));
+                    let lhs = NodeId(node.lhs);
+                    self.bind_pattern_vars(arena, lhs);
+                    let lhs_node = *arena.node(lhs);
+                    if lhs_node.node_kind() == NodeKind::IdentExpr || lhs_node.node_kind() == NodeKind::PatBind {
+                        let name = arena.interner.resolve(SymbolId(lhs_node.lhs));
+                        self.define_var(name, val_ty);
+                    }
+                    return val_ty;
+                }
+                if op == 25 {
+                    // BinaryOp::Is (e.g. s is Circle(r))
+                    let rhs = NodeId(node.rhs);
+                    let rhs_node = *arena.node(rhs);
+                    if rhs_node.node_kind() == NodeKind::CallExpr {
+                        let arg_start = rhs_node.lhs as usize;
+                        let arg_len = rhs_node.rhs as usize;
+                        if arg_len > 1 && arg_start + arg_len <= arena.extra_children.len() {
+                            for &arg_id in &arena.extra_children[arg_start + 1..arg_start + arg_len] {
+                                let a_node = *arena.node(NodeId(arg_id));
+                                if a_node.node_kind() == NodeKind::IdentExpr {
+                                    let a_name = arena.interner.resolve(SymbolId(a_node.lhs));
+                                    self.define_var(a_name, TypeId::ANY);
+                                }
+                            }
+                        }
+                    } else {
+                        self.bind_pattern_vars(arena, rhs);
+                    }
+                    return TypeId::BOOL;
+                }
                 let lhs_ty = self.synth(arena, NodeId(node.lhs));
                 let rhs_ty = self.synth(arena, NodeId(node.rhs));
-                let op = node.flags;
                 // Comparison operators (Eq=8..Ge=13) and logical operators (And=14, Or=15)
                 if (8..=15).contains(&op) {
                     let _ = self.types.unify(lhs_ty, rhs_ty);
                     TypeId::BOOL
                 } else if op == 1 && lhs_ty == TypeId::STR {
-                    // String concatenation: "prefix " + expr produces str
+                    // String concatenation (str + any -> str)
                     TypeId::STR
+                } else if (lhs_ty.is_integer() && rhs_ty.is_float()) || (lhs_ty.is_float() && rhs_ty.is_integer()) {
+                    // Automatic numeric widening: int <op> float -> f64
+                    TypeId::F64
+                } else if op == 17 || op == 16 || op == 2 {
+                    // Algebraic class union (|), intersection (&), and subtraction (-)
+                    lhs_ty
+                } else if op == 21 {
+                    // BinaryOp::Pipe (|>)
+                    if let TypeKind::Function { ret, .. } = self.types.get(rhs_ty).clone() {
+                        ret
+                    } else {
+                        TypeId::ANY
+                    }
+                } else if op == 22 {
+                    // BinaryOp::Coalesce (??)
+                    if lhs_ty == TypeId::NULL {
+                        rhs_ty
+                    } else {
+                        lhs_ty
+                    }
                 } else {
                     match self.types.unify(lhs_ty, rhs_ty) {
                         Ok(unified) => unified,
@@ -326,18 +468,17 @@ impl TypeInferenceEngine {
                     let var = self.types.new_var(0);
                     self.types.list_of(var)
                 } else {
-                    let first_ty = self.synth(arena, NodeId(children[0]));
+                    let mut elem_ty = self.synth(arena, NodeId(children[0]));
                     for &c in &children[1..] {
                         let c_ty = self.synth(arena, NodeId(c));
-                        if let Err(e) = self.types.unify(first_ty, c_ty) {
-                            self.diagnostics.push(AnalysisDiagnostic::error(
-                                "TYPE003",
-                                format!("Homogeneity violation in list literal: {}", e),
-                                arena.span(NodeId(c)),
-                            ));
+                        match self.types.unify(elem_ty, c_ty) {
+                            Ok(unified) => elem_ty = unified,
+                            Err(_) => {
+                                elem_ty = TypeId::ANY;
+                            }
                         }
                     }
-                    self.types.list_of(first_ty)
+                    self.types.list_of(elem_ty)
                 }
             }
 
@@ -374,7 +515,22 @@ impl TypeInferenceEngine {
                     match child_node.node_kind() {
                         NodeKind::FnDecl => {
                             let fn_name = arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
-                            let fn_ty = self.types.function_of(Vec::new(), TypeId::ANY);
+                            let fn_start = child_node.rhs;
+                            let fn_len = child_node.flags as usize;
+                            let mut param_tys = Vec::new();
+                            if fn_len > 0 {
+                                let fn_children = arena.children_slice(fn_start, fn_len as u32);
+                                for &p_id in &fn_children[1..] {
+                                    let p_node = *arena.node(NodeId(p_id));
+                                    let p_ty = if p_node.rhs != 0 {
+                                        self.resolve_type_spec(arena, NodeId(p_node.rhs))
+                                    } else {
+                                        TypeId::ANY
+                                    };
+                                    param_tys.push(p_ty);
+                                }
+                            }
+                            let fn_ty = self.types.function_of(param_tys, TypeId::ANY);
                             self.define_var(&fn_name, fn_ty);
                         }
                         NodeKind::RecordDecl | NodeKind::StructDecl => {
@@ -388,12 +544,36 @@ impl TypeInferenceEngine {
                         NodeKind::TypeAdtDecl => {
                             let adt_name = arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
                             let adt_ty = self.types.adt_of(adt_name.clone(), Vec::new());
-                            self.type_defs.insert(adt_name, adt_ty);
+                            self.type_defs.insert(adt_name.clone(), adt_ty);
+
+                            let var_start = child_node.rhs as usize;
+                            let var_len = child_node.flags as usize;
+                            if var_len > 0 && var_start + var_len <= arena.extra_children.len() {
+                                for &v_id in &arena.extra_children[var_start..var_start + var_len] {
+                                    let v_node = arena.node(NodeId(v_id));
+                                    if v_node.node_kind() == NodeKind::AdtVariant {
+                                        let v_name = arena.interner.resolve(SymbolId(v_node.lhs)).to_string();
+                                        let param_len = v_node.flags as usize;
+                                        self.adt_variants.insert(v_name.clone(), (adt_name.clone(), Vec::new()));
+                                        if param_len == 0 {
+                                            self.define_var(&v_name, adt_ty);
+                                        } else {
+                                            let mut p_tys = Vec::new();
+                                            for _ in 0..param_len {
+                                                p_tys.push(TypeId::ANY);
+                                            }
+                                            let ctor_ty = self.types.function_of(p_tys, adt_ty);
+                                            self.define_var(&v_name, ctor_ty);
+                                        }
+                                    }
+                                }
+                            }
                         }
                         NodeKind::ClassDecl | NodeKind::InterfaceDecl => {
                             let cls_name = arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
                             let ty = self.types.alloc(TypeKind::Primitive(cls_name.clone()));
-                            self.type_defs.insert(cls_name, ty);
+                            self.type_defs.insert(cls_name.clone(), ty);
+                            self.define_var(&cls_name, ty);
                         }
                         NodeKind::ImportDecl => {
                             if child_node.rhs != u32::MAX {
@@ -413,6 +593,14 @@ impl TypeInferenceEngine {
                                 }
                             }
                         }
+                        NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
+                            if child_node.flags == 1 {
+                                self.bind_pattern_vars(arena, NodeId(child_node.lhs));
+                            } else {
+                                let name = arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
+                                self.define_var(&name, TypeId::ANY);
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -430,7 +618,13 @@ impl TypeInferenceEngine {
                 let children = arena.children_slice(node.lhs, node.rhs);
                 let mut last_ty = TypeId::VOID;
                 for &c in children {
-                    last_ty = self.synth(arena, NodeId(c));
+                    let child_node = *arena.node(NodeId(c));
+                    let ty = self.synth(arena, NodeId(c));
+                    if child_node.node_kind() == NodeKind::ReturnStmt {
+                        last_ty = ty;
+                    } else if last_ty == TypeId::VOID {
+                        last_ty = ty;
+                    }
                 }
                 self.exit_scope();
                 last_ty
@@ -445,18 +639,45 @@ impl TypeInferenceEngine {
                 }
             }
 
+            NodeKind::TryStmt => {
+                let children = arena.children_slice(node.lhs, node.rhs);
+                for &child_id in children {
+                    self.synth(arena, NodeId(child_id));
+                }
+                TypeId::VOID
+            }
+
+            NodeKind::CatchClause => {
+                let var_sym = SymbolId(node.lhs);
+                let body_node = NodeId(node.rhs);
+                self.enter_scope();
+                if var_sym.0 != 0 {
+                    let var_name = arena.interner.resolve(var_sym);
+                    self.define_var(var_name, TypeId::ANY);
+                }
+                if body_node.is_some() {
+                    self.synth(arena, body_node);
+                }
+                self.exit_scope();
+                TypeId::VOID
+            }
+
             // --- Variable Declarations & Assignments ---
             NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
-                let sym = SymbolId(node.lhs);
-                let name = arena.interner.resolve(sym).to_string();
                 let init_node = NodeId(node.rhs);
                 let val_ty = if init_node.is_some() {
                     self.synth(arena, init_node)
                 } else {
                     TypeId::ANY
                 };
-                self.define_var(&name, val_ty);
-                TypeId::VOID
+                if node.flags == 1 {
+                    self.bind_pattern_vars(arena, NodeId(node.lhs));
+                } else {
+                    let sym = SymbolId(node.lhs);
+                    let name = arena.interner.resolve(sym).to_string();
+                    self.define_var(&name, val_ty);
+                }
+                val_ty
             }
 
             NodeKind::AssignStmt => {
@@ -495,7 +716,11 @@ impl TypeInferenceEngine {
                 let fn_start = node.rhs;
                 let fn_len = node.flags as usize;
 
+                let fn_placeholder = self.types.function_of(Vec::new(), TypeId::ANY);
+                self.define_var(&fn_name, fn_placeholder);
+
                 self.enter_scope();
+                let mut param_tys = Vec::new();
                 let body_ty = if fn_len > 0 {
                     let fn_children = arena.children_slice(fn_start, fn_len as u32);
                     let body_node = NodeId(fn_children[0]);
@@ -505,9 +730,10 @@ impl TypeInferenceEngine {
                         let p_ty = if p_node.rhs != 0 {
                             self.resolve_type_spec(arena, NodeId(p_node.rhs))
                         } else {
-                            TypeId::I64
+                            TypeId::ANY
                         };
                         self.define_var(&p_name, p_ty);
+                        param_tys.push(p_ty);
                     }
                     self.synth(arena, body_node)
                 } else {
@@ -516,7 +742,7 @@ impl TypeInferenceEngine {
                 };
                 self.exit_scope();
 
-                let fn_ty = self.types.function_of(Vec::new(), body_ty);
+                let fn_ty = self.types.function_of(param_tys, body_ty);
                 self.define_var(&fn_name, fn_ty);
                 fn_ty
             }
@@ -543,7 +769,8 @@ impl TypeInferenceEngine {
                 let sym = SymbolId(node.lhs);
                 let name = arena.interner.resolve(sym).to_string();
                 let ty = self.types.alloc(TypeKind::Primitive(name.clone()));
-                self.type_defs.insert(name, ty);
+                self.type_defs.insert(name.clone(), ty);
+                self.define_var(&name, ty);
                 let body = NodeId(node.rhs);
                 if body.is_some() {
                     self.synth(arena, body);
@@ -706,7 +933,8 @@ impl TypeInferenceEngine {
 
             NodeKind::CascadeExpr => {
                 let receiver_ty = self.synth(arena, NodeId(node.lhs));
-                let _ = self.synth(arena, NodeId(node.rhs));
+                let rhs_id = NodeId(node.rhs);
+                self.synth_cascade_op(arena, rhs_id);
                 receiver_ty
             }
 
@@ -788,8 +1016,12 @@ impl TypeInferenceEngine {
             }
 
             NodeKind::MatchArm => {
+                let pat_node = NodeId(node.lhs);
                 let body_node = NodeId(node.rhs);
                 self.enter_scope();
+                if pat_node.is_some() {
+                    self.bind_pattern_vars(arena, pat_node);
+                }
                 let arm_ty = self.synth(arena, body_node);
                 self.exit_scope();
                 arm_ty
@@ -825,6 +1057,94 @@ impl TypeInferenceEngine {
                 ),
                 arena.span(node_id),
             ));
+        }
+    }
+
+    /// Binds variables declared inside a pattern into the current scope.
+    pub fn bind_pattern_vars(&mut self, arena: &AstArena, pat_id: NodeId) {
+        if pat_id.is_none() {
+            return;
+        }
+        let node = *arena.node(pat_id);
+        match node.node_kind() {
+            NodeKind::PatBind => {
+                let name = arena.interner.resolve(SymbolId(node.lhs)).to_string();
+                if name != "_" {
+                    self.define_var(&name, TypeId::ANY);
+                }
+                if node.flags == 1 && node.rhs != 0 {
+                    self.bind_pattern_vars(arena, NodeId(node.rhs));
+                }
+            }
+            NodeKind::PatVariant => {
+                let start = node.rhs as usize;
+                let len = node.flags as usize;
+                if len > 0 && start + len <= arena.extra_children.len() {
+                    for &sub_id in &arena.extra_children[start..start + len] {
+                        self.bind_pattern_vars(arena, NodeId(sub_id));
+                    }
+                }
+            }
+            NodeKind::PatTuple | NodeKind::PatSlice => {
+                let start = node.lhs as usize;
+                let len = node.rhs as usize;
+                if len > 0 && start + len <= arena.extra_children.len() {
+                    for &sub_id in &arena.extra_children[start..start + len] {
+                        self.bind_pattern_vars(arena, NodeId(sub_id));
+                    }
+                } else if node.lhs != 0 {
+                    let name = arena.interner.resolve(SymbolId(node.lhs)).to_string();
+                    if name != "_" && !name.is_empty() {
+                        self.define_var(&name, TypeId::ANY);
+                    }
+                }
+            }
+            NodeKind::PatOr => {
+                self.bind_pattern_vars(arena, NodeId(node.lhs));
+                self.bind_pattern_vars(arena, NodeId(node.rhs));
+            }
+            NodeKind::IdentExpr => {
+                let name = arena.interner.resolve(SymbolId(node.lhs)).to_string();
+                if name != "_" && !name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                    self.define_var(&name, TypeId::ANY);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn synth_cascade_op(&mut self, arena: &AstArena, op_id: NodeId) {
+        if op_id.is_none() {
+            return;
+        }
+        let op_node = *arena.node(op_id);
+        match op_node.node_kind() {
+            NodeKind::CallExpr => {
+                let arg_start = op_node.lhs as usize;
+                let arg_len = op_node.rhs as usize;
+                // Callee is at arg_start (method name on receiver); synthesize arguments without global lookup of method name
+                if arg_len > 1 && arg_start + arg_len <= arena.extra_children.len() {
+                    for &arg_id in &arena.extra_children[arg_start + 1..arg_start + arg_len] {
+                        self.synth(arena, NodeId(arg_id));
+                    }
+                }
+            }
+            NodeKind::IdentExpr => {
+                // Member property access on receiver in cascade
+            }
+            NodeKind::CascadeExpr => {
+                self.synth_cascade_op(arena, NodeId(op_node.lhs));
+                self.synth_cascade_op(arena, NodeId(op_node.rhs));
+            }
+            NodeKind::BinaryExpr => {
+                self.synth(arena, NodeId(op_node.rhs));
+            }
+            NodeKind::LetStmt | NodeKind::VarStmt => {
+                self.synth(arena, op_id);
+            }
+            _ => {
+                self.synth(arena, op_id);
+            }
         }
     }
 

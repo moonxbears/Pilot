@@ -17,11 +17,11 @@ dependencies = [
 
 [[package]]
 name = "pilot-arena"
-version = "1.1.0"
+version = "1.1.51"
 
 [[package]]
 name = "pilot-ast"
-version = "1.1.0"
+version = "1.1.51"
 dependencies = [
  "pilot-arena",
  "pilot-intern",
@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "pilot-bench"
-version = "1.1.0"
+version = "1.1.51"
 dependencies = [
  "pilot-ast",
  "pilot-db",
@@ -43,7 +43,7 @@ dependencies = [
 
 [[package]]
 name = "pilot-cli"
-version = "1.1.0"
+version = "1.1.51"
 dependencies = [
  "pilot-analysis",
  "pilot-ast",
@@ -75,13 +75,14 @@ dependencies = [
  "pilot-intern",
  "pilot-parser",
  "pilot-perceus",
+ "pilot-polyglot",
  "pilot-rt",
  "pilot-span",
 ]
 
 [[package]]
 name = "pilot-dap"
-version = "1.1.0"
+version = "1.1.51"
 dependencies = [
  "pilot-analysis",
  "pilot-ast",
@@ -93,7 +94,7 @@ dependencies = [
 
 [[package]]
 name = "pilot-db"
-version = "1.1.0"
+version = "1.1.51"
 dependencies = [
  "pilot-incremental",
  "pilot-lexer",
@@ -103,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "pilot-ffi"
-version = "1.1.0"
+version = "1.1.51"
 dependencies = [
  "pilot-analysis",
  "pilot-arena",
@@ -127,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "pilot-fmt"
-version = "1.1.0"
+version = "1.1.51"
 dependencies = [
  "pilot-lexer",
  "pilot-span",
@@ -136,7 +137,7 @@ dependencies = [
 
 [[package]]
 name = "pilot-incremental"
-version = "1.1.0"
+version = "1.1.51"
 dependencies = [
  "pilot-lexer",
  "pilot-span",
@@ -145,14 +146,14 @@ dependencies = [
 
 [[package]]
 name = "pilot-intern"
-version = "1.1.0"
+version = "1.1.51"
 dependencies = [
  "pilot-span",
 ]
 
 [[package]]
 name = "pilot-lexer"
-version = "1.1.0"
+version = "1.1.51"
 dependencies = [
  "pilot-intern",
  "pilot-span",
@@ -160,13 +161,14 @@ dependencies = [
 
 [[package]]
 name = "pilot-lsp"
-version = "1.1.0"
+version = "1.1.51"
 dependencies = [
  "pilot-analysis",
  "pilot-ast",
  "pilot-db",
  "pilot-fmt",
  "pilot-incremental",
+ "pilot-intern",
  "pilot-lexer",
  "pilot-parser",
  "pilot-span",
@@ -175,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "pilot-parser"
-version = "1.1.0"
+version = "1.1.51"
 dependencies = [
  "pilot-arena",
  "pilot-ast",
@@ -198,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "pilot-perf"
-version = "1.1.0"
+version = "1.1.51"
 dependencies = [
  "pilot-analysis",
  "pilot-ast",
@@ -212,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "pilot-pkg"
-version = "1.1.0"
+version = "1.1.51"
 dependencies = [
  "pilot-rt",
  "pilot-transpile",
@@ -236,11 +238,11 @@ dependencies = [
 
 [[package]]
 name = "pilot-span"
-version = "1.1.0"
+version = "1.1.51"
 
 [[package]]
 name = "pilot-syntax"
-version = "1.1.0"
+version = "1.1.51"
 dependencies = [
  "pilot-ast",
  "pilot-intern",

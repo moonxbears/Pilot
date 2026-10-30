@@ -21,9 +21,9 @@ Pilot combines three complementary mechanisms to keep error handling and resourc
 | `GUARD`, `ELSE` | `guard`, `else` | Precondition invariant check or pattern-binding guard |
 | `LET`, `VAR` | `let`, `var` | Pattern-binding form of `guard` (`guard let ... = ... else`) |
 | `DEFER` | `defer` | Schedules a block or statement for LIFO scope-exit execution |
-| `TRY`, `EXCEPT`, `FINALLY` | `try`, `except`, `finally` | Structured exception handling blocks |
+| `TRY`, `EXCEPT`, `CATCH`, `FINALLY` | `try`, `except`, `catch`, `finally` | Structured exception handling blocks (`except` & `catch` supported) |
 | `AS` | `as` | Binds the caught exception message or `with` resource variable |
-| `RAISE` | `raise` | Raises a runtime `UserError` (`PilotUserException`) |
+| `RAISE` | `raise` | Raises a runtime user error |
 | `ASSERT` | `assert` | Evaluates an invariant and raises `AssertionError` on failure |
 | `WITH`, `ASYNC` | `with`, `async` | Deterministic resource management block |
 
@@ -48,13 +48,14 @@ defer_stmt
 // Structured Exception Handling
 try_stmt
     : TRY suite
-      ( (except_clause suite)+ (ELSE suite)? (FINALLY suite)?
+      ( (catch_or_except_clause suite)+ (ELSE suite)? (FINALLY suite)?
       | FINALLY suite
       )
     ;
 
-except_clause
+catch_or_except_clause
     : EXCEPT (expr (AS IDENTIFIER)?)?
+    | CATCH (LPAREN IDENTIFIER? RPAREN)?
     ;
 
 // Raise & Assert Statements
@@ -78,25 +79,23 @@ with_item
 
 ---
 
-## 4. Runtime Execution Mechanics
+## 4. Compiler & Runtime Execution Mechanics
 
-### 4.1 `guard` Execution (`VisitGuard_stmt`)
-In [`PilotInterpreterVisitor.cs`](../../Runtime/Execution/PilotInterpreterVisitor.cs):
-1. **Boolean Guard (`guard expr else suite`)**: Evaluates `expr`. If `condition.IsTruthy()` is `true`, execution continues to the next statement. If `false`, the `else` `suite` is executed.
-2. **Pattern Guard (`guard let pattern = expr else suite`)**: Evaluates `expr` and runs `PilotPatternMatcher.BindPatternTarget(pattern, val, Context, isConst: false)`.
-   - If the pattern matches, all extracted variables are bound directly into the **current enclosing scope**, and execution continues.
-   - If `BindPatternTarget` throws `PilotPatternMatchingException` or if the single bound variable evaluates to `null`/`none`/`undefined`, the exception is caught and the `else` `suite` executes.
+### 4.1 `guard` Execution & Lowering
+In [`crates/pilot-parser/src/lib.rs`](../../crates/pilot-parser/src/lib.rs) and [`crates/pilot-analysis/src/infer.rs`](../../crates/pilot-analysis/src/infer.rs):
+1. **Boolean Guard (`guard expr else suite`)**: Evaluates `expr`. If the condition evaluates to truthy, execution continues past the guard. If falsy, the `else` block executes and diverges control flow (`return`, `break`, `continue`, `raise`).
+2. **Pattern Guard (`guard let pattern = expr else suite`)**: Evaluates `expr` and binds pattern variables directly into the current scope via [`pilot-analysis::patterns`](../../crates/pilot-analysis/src/patterns.rs). If pattern binding fails, the `else` block executes.
 
-### 4.2 `defer` LIFO Stack (`PushDefer` & `ExecuteDefers`)
-`PilotExecutionContext` maintains two LIFO `Stack<Action>` queues:
-- **Inside a Function Call**: `PushFrame` initializes a per-frame `_deferStack`. Each `defer` statement pushes an `Action` closure (`() => Visit(body)`) onto the current frame's stack. When `PopFrame()` runs inside the `finally` block of `CallFunction`, `ExecuteDefers()` pops and invokes every deferred action in reverse registration order.
-- **At the Global Script Level**: If `defer` is executed outside any function, `Context.PushDefer` pushes onto `_globalDefers`, which `ExecuteGlobalDefers()` drains inside the `finally` block of `VisitProgram`.
+### 4.2 `defer` LIFO Scope Cleanup
+In Pilot's Perceus linear memory model and PilVM v3 runtime:
+- `defer` statements produce `NodeKind::DeferStmt` AST nodes.
+- Each activation frame maintains a LIFO unwinding stack. Deferred blocks execute in reverse registration order whenever the enclosing function or block exits—regardless of whether exit occurred via normal fallthrough, early `return`, or an uncaught exception.
 
 ```mermaid
 sequenceDiagram
-    participant Fn as Function Body
+    participant Fn as Function Scope
     participant Stack as Frame Defer Stack (LIFO)
-    participant Exit as PopFrame (finally)
+    participant Exit as Scope Exit / Unwind
 
     Fn->>Stack: defer { log("1. Close DB") }
     Fn->>Stack: defer { log("2. Flush Cache") }
@@ -106,28 +105,30 @@ sequenceDiagram
     Exit->>Stack: Pop & Execute ("1. Close DB")
 ```
 
-### 4.3 Exception Hierarchy & `try`/`except` Matching
-All runtime errors inherit from `PilotRuntimeException` ([`PilotExceptions.cs`](../../Runtime/ControlFlow/PilotExceptions.cs)), which carries an `ExceptionType` string identifier:
+### 4.3 Exception Hierarchy & `try` / `except` / `catch` Matching
+Structured exception handling in Pilot is represented by `NodeKind::TryStmt` (111) and `NodeKind::CatchClause` (112) in [`crates/pilot-ast/src/lib.rs`](../../crates/pilot-ast/src/lib.rs):
 
-| Exception Type Name | C# Exception Class | Trigger Condition |
+| Exception Type Name | Category | Trigger Condition |
 | :--- | :--- | :--- |
-| `TypeError` | `PilotTypeException` | Invalid operand types, typestate violation, invalid call target |
-| `DivideByZeroError` | `PilotDivideByZeroException` | `/`, `//`, or `%` with a zero divisor |
-| `IndexError` | `PilotIndexOutOfRangeException` | Out-of-bounds list, tuple, string, or matrix index |
-| `KeyError` | `PilotKeyNotFoundException` | Missing key lookup on a `map` |
-| `NullReferenceError` | `PilotNullReferenceException` | Member access or call on `null`/`none`/`undefined` without `?.` |
-| `AssertionError` | `PilotAssertionException` | `assert` statement or `assert()` call failed |
-| `RecursionError` | `PilotRecursionLimitException` | Call stack depth exceeded `MaxCallDepth` (`256`) |
-| `ContractError` | `PilotContractException` | `requires`, `ensures`, or contract interface violation |
-| `TimeoutError` | `PilotTimeoutException` | `Future.get_result(ms)` or `bounded` loop limit exceeded |
-| `MatchError` | `PilotPatternMatchingException` | Destructuring pattern mismatch |
-| `ContextError` | `PilotContextException` | Unbound `context` parameter with no default value |
-| `UserError` | `PilotUserException` | Raised explicitly by `raise expr` (carries `.ThrownValue`) |
+| `TypeError` | Type Violation | Invalid operand types, typestate violation, invalid call target |
+| `DivideByZeroError` | Arithmetic Error | `/`, `//`, or `%` with a zero divisor |
+| `IndexError` | Bounds Check | Out-of-bounds list, tuple, string, or matrix index |
+| `KeyError` | Key Lookup | Missing key lookup on a `map` |
+| `NullReferenceError` | Null Check | Member access or call on `null`/`none`/`undefined` without `?.` |
+| `AssertionError` | Invariant Check | `assert` statement or `assert()` call failed |
+| `RecursionError` | Stack Overflow | Call stack depth exceeded configured recursion limit |
+| `ContractError` | Contract Violation | `requires`, `ensures`, or contract interface violation |
+| `TimeoutError` | Concurrency | `bounded` loop limit or asynchronous timeout exceeded |
+| `MatchError` | Pattern Mismatch | Inexhaustive or failed destructuring pattern mismatch |
+| `ContextError` | Context Parameter | Unbound `context` parameter with no default value |
+| `UserError` | Application Error | Raised explicitly by `raise expr` |
 
-When an `except TypeName as err:` clause is evaluated:
-- An bare `except:` catches any `PilotRuntimeException`.
-- `except DivideByZeroError as err:` matches if the identifier (`DivideByZeroError`) equals `ex.ExceptionType`, equals `"Exception"` or `"Error"`, or matches the thrown value's type/string.
-- If `as err` is specified, `err` is bound to `ex.ThrownValue` (for `PilotUserException` when non-null) or `PilotValue.FromString(ex.Message)`.
+When a `try` block encounters an exception:
+- `except TypeName as err:` clauses match when the runtime exception matches `TypeName` or a parent category.
+- `catch (err)` or bare `except:` acts as a universal catch-all handler.
+- If `as err` or `catch (err)` binds an identifier, the error payload is assigned to that scoped symbol in the catch block.
+- Optional `else` blocks execute if and only if no exception occurred within the `try` body.
+- Optional `finally` blocks execute unconditionally upon exiting the `try` / `except` / `else` construct.
 
 ---
 
@@ -137,8 +138,8 @@ When an `except TypeName as err:` clause is evaluated:
 | :--- | :--- | :--- |
 | `assert` (statement) | `assert cond [, message]` | Evaluates `cond`; raises `AssertionError` with optional `message` if falsy. |
 | `assert` (function) | `assert(cond[, message]) -> none` | Functional form of `assert` usable inside expressions or pipelines. |
-| `raise` (statement) | `raise value` | Wraps `value` in a `PilotUserException` (`UserError`) and unwinds the stack. |
-| `IDisposable` cleanup | `with expr as var { ... }` | Automatically invokes `close()` or `dispose()` on `PilotObject` instances when exiting the `with` block. |
+| `raise` (statement) | `raise value` | Raises a runtime exception with `value` payload and unwinds the active stack frame. |
+| Context Manager cleanup | `with expr as var { ... }` | Deterministically invokes `close()` or `dispose()` when exiting the `with` block. |
 
 ---
 

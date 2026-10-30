@@ -1,0 +1,51 @@
+// =============================================================================
+// Tutorial 02: Control Flow, Loops, Ranges, Comprehensions & Walrus Operator
+// =============================================================================
+
+// --- 1. If / Elif / Else Expressions ---
+// In Pilot, if-statements are expressions that evaluate to a value.
+let score = 88
+let grade = if score >= 90 {
+    "A"
+} elif score >= 80 {
+    "B"
+} elif score >= 70 {
+    "C"
+} else {
+    "F"
+}
+println(f"Score {score} yields grade {grade}")
+
+// --- 2. Inline Assignment Expression (The Walrus Operator `:=`) ---
+let threshold = 50
+if (let sample_reading := score * 2) > 100 {
+    println(f"Sample reading {sample_reading} exceeds threshold {threshold}")
+}
+
+// --- 3. While Loops ---
+var countdown = 3
+while countdown > 0 {
+    println(f"T-minus {countdown}...")
+    countdown -= 1
+}
+
+// --- 4. For-in Loops and Range Expressions ---
+// Range operators:
+//   `0..5`   -> Inclusive range [0, 5] (0, 1, 2, 3, 4, 5)
+//   `0..<5`  -> Half-open range [0, 5) (0, 1, 2, 3, 4)
+for i in 0..<3 {
+    println(f"Iteration: {i}")
+}
+
+// --- 5. Collection Comprehensions ---
+// List comprehension: [expr for var in iterable (if condition)?]
+let raw_numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+let odd_squares = [x * x for x in raw_numbers if x % 2 != 0]
+
+// Set comprehension: {expr for var in iterable}
+let unique_tags = {tag for tag in ["io", "net", "io", "crypto"]}
+
+// Dict/Map comprehension: {key: value for var in iterable}
+let indexed_map = {f"item_{n}": n * 10 for n in [1, 2, 3]}
+
+println("Tutorial 02 completed successfully.")
