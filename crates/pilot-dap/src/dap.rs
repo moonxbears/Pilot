@@ -2,6 +2,7 @@
 
 use std::io::{BufRead, Write};
 use crate::debugger::{DebuggerState, PilotDebugger};
+use crate::json::JsonParser;
 
 /// Standalone DAP protocol dispatcher.
 pub struct DapServer {
@@ -31,11 +32,20 @@ impl DapServer {
         }
     }
 
-    /// Handles an incoming DAP request string and returns the JSON-RPC response string.
+    /// Handles an incoming DAP request string and returns the response string.
+    pub fn drain_events(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_events)
+    }
+
     pub fn handle_message(&mut self, raw_json: &str) -> Option<String> {
-        let trimmed = raw_json.trim();
-        let command = extract_json_string(trimmed, "command")?;
-        let seq = extract_json_number(trimmed, "seq").unwrap_or(1.0) as i64;
+        let msg = match JsonParser::parse(raw_json) {
+            Ok(v) => v,
+            Err(_) => return None,
+        };
+
+        let command = msg.get("command").and_then(|c| c.as_str())?.to_string();
+        let seq = msg.get("seq").and_then(|s| s.as_u64()).unwrap_or(1) as i64;
+        let args = msg.get("arguments");
 
         match command.as_str() {
             "initialize" => {
@@ -44,9 +54,9 @@ impl DapServer {
                     "supportsConfigurationDoneRequest": true,
                     "supportsConditionalBreakpoints": true,
                     "supportsHitConditionalBreakpoints": true,
-                    "supportsLogPoints": true,
+                    "supportsLogPoints": false,
                     "supportsEvaluateForHovers": true,
-                    "supportsSetVariable": true,
+                    "supportsSetVariable": false,
                     "supportsTerminateRequest": true
                 }"#;
                 let resp = format_dap_response(seq, "initialize", true, body);
@@ -54,70 +64,66 @@ impl DapServer {
                 Some(resp)
             }
             "launch" => {
-                if let Some(prog) = extract_json_string(trimmed, "program") {
-                    self.program_path = Some(prog.clone());
-                    self.debugger.push_frame("main", &prog, 1, 1);
+                let prog = args.and_then(|a| a.get("program")).and_then(|p| p.as_str()).unwrap_or("");
+                let stop = args.and_then(|a| a.get("stopOnEntry")).and_then(|s| s.as_bool()).unwrap_or(false);
+
+                self.stop_on_entry = stop;
+                if !prog.is_empty() {
+                    self.program_path = Some(prog.to_string());
+                    let _ = self.debugger.load_program(prog);
                 }
-                if let Some(stop) = extract_json_bool(trimmed, "stopOnEntry") {
-                    self.stop_on_entry = stop;
-                }
+
                 let resp = format_dap_response(seq, "launch", true, "{}");
+
                 if self.stop_on_entry {
                     self.pending_events.push(format_dap_event(
                         "stopped",
                         r#"{"reason":"entry","threadId":1,"allThreadsStopped":true}"#,
                     ));
                 }
+
                 Some(resp)
             }
             "setBreakpoints" => {
-                let file = extract_json_string(trimmed, "path").unwrap_or_default();
-                self.debugger.clear_breakpoints_for_file(&file);
-
+                let file = args.and_then(|a| a.get("source")).and_then(|s| s.get("path")).and_then(|p| p.as_str()).unwrap_or("");
                 let mut lines = Vec::new();
-                if let Some(bp_idx) = trimmed.find("\"breakpoints\"") {
-                    let after_bp = &trimmed[bp_idx..];
-                    if let Some(lbracket) = after_bp.find('[') {
-                        if let Some(rbracket) = after_bp.find(']') {
-                            let array_content = &after_bp[lbracket + 1..rbracket];
-                            for obj in array_content.split('}') {
-                                if let Some(l_num) = extract_json_number(obj, "line") {
-                                    lines.push(l_num as u32);
-                                }
-                            }
+
+                if let Some(bps) = args.and_then(|a| a.get("breakpoints")).and_then(|b| b.as_array()) {
+                    for bp in bps {
+                        if let Some(l) = bp.get("line").and_then(|n| n.as_u64()) {
+                            let cond = bp.get("condition").and_then(|c| c.as_str()).map(|s| s.to_string());
+                            lines.push((l as u32, cond));
+                        }
+                    }
+                } else if let Some(line_nums) = args.and_then(|a| a.get("lines")).and_then(|l| l.as_array()) {
+                    for l in line_nums {
+                        if let Some(num) = l.as_u64() {
+                            lines.push((num as u32, None));
                         }
                     }
                 }
 
-                if lines.is_empty() {
-                    if let Some(lines_idx) = trimmed.find("\"lines\"") {
-                        let after_l = &trimmed[lines_idx..];
-                        if let Some(lbracket) = after_l.find('[') {
-                            if let Some(rbracket) = after_l.find(']') {
-                                for part in after_l[lbracket + 1..rbracket].split(',') {
-                                    if let Ok(l) = part.trim().parse::<u32>() {
-                                        lines.push(l);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                self.debugger.clear_breakpoints_for_file(file);
 
-                let mut verified_bps = Vec::new();
-                for l in lines {
-                    let bp = self.debugger.set_breakpoint(&file, l, None, None, None);
-                    verified_bps.push(format!(
+                let mut verified = Vec::new();
+                for (line, cond) in lines {
+                    let bp = self.debugger.set_breakpoint(file, line, cond, None, None);
+                    verified.push(format!(
                         r#"{{"id":{},"verified":true,"line":{}}}"#,
                         bp.id, bp.line
                     ));
                 }
 
-                let body = format!(r#"{{"breakpoints":[{}]}}"#, verified_bps.join(","));
+                let body = format!(r#"{{"breakpoints":[{}]}}"#, verified.join(","));
                 Some(format_dap_response(seq, "setBreakpoints", true, &body))
             }
             "configurationDone" => {
                 let resp = format_dap_response(seq, "configurationDone", true, "{}");
+                if !self.stop_on_entry && self.debugger.state == DebuggerState::Running {
+                    self.debugger.continue_exec();
+                    self.drain_outputs();
+                    self.check_execution_state();
+                }
                 Some(resp)
             }
             "threads" => {
@@ -140,91 +146,130 @@ impl DapServer {
                 Some(format_dap_response(seq, "stackTrace", true, &body))
             }
             "scopes" => {
-                let body = r#"{"scopes":[{"name":"Locals","variablesReference":1,"expensive":false}]}"#;
+                let body = r#"{"scopes":[{"name":"Locals","variablesReference":1000,"expensive":false},{"name":"Globals","variablesReference":2000,"expensive":false}]}"#;
                 Some(format_dap_response(seq, "scopes", true, body))
             }
             "variables" => {
-                let mut vars_json = Vec::new();
-                if let Some(frame) = self.debugger.current_frame() {
-                    for (k, v) in &frame.locals {
-                        let ty = match v.tag() {
-                            pilot_rt::value::TAG_INT => "i64",
-                            pilot_rt::value::TAG_FLOAT => "f64",
-                            pilot_rt::value::TAG_BOOL => "bool",
-                            pilot_rt::value::TAG_SSO_STR | pilot_rt::value::TAG_HEAP_STR => "str",
-                            _ => "any",
-                        };
-                        vars_json.push(format!(
-                            r#"{{"name":"{}","value":"{}","type":"{}","variablesReference":0}}"#,
-                            k, v.to_string_repr(), ty
+                let var_ref = args.and_then(|a| a.get("variablesReference")).and_then(|v| v.as_u64()).unwrap_or(0);
+                let mut vars = Vec::new();
+
+                if var_ref == 1 || var_ref == 1000 {
+                    // Locals
+                    if let Some(frame) = self.debugger.current_frame() {
+                        for (k, v) in &frame.locals {
+                            let ty = frame.local_types.get(k).map(|s| s.as_str()).unwrap_or("any");
+                            vars.push(format!(
+                                r#"{{"name":"{}","value":{},"type":"{}","variablesReference":0}}"#,
+                                k, escape_json_str(&v.to_string_repr()), ty
+                            ));
+                        }
+                    }
+                } else if var_ref == 2 || var_ref == 2000 {
+                    // Globals
+                    for (k, v) in &self.debugger.globals {
+                        let ty = self.debugger.global_types.get(k).map(|s| s.as_str()).unwrap_or("any");
+                        vars.push(format!(
+                            r#"{{"name":"{}","value":{},"type":"{}","variablesReference":0}}"#,
+                            k, escape_json_str(&v.to_string_repr()), ty
                         ));
                     }
                 }
-                let body = format!(r#"{{"variables":[{}]}}"#, vars_json.join(","));
+
+                let body = format!(r#"{{"variables":[{}]}}"#, vars.join(","));
                 Some(format_dap_response(seq, "variables", true, &body))
             }
             "continue" => {
                 self.debugger.continue_exec();
-                Some(format_dap_response(seq, "continue", true, r#"{"allThreadsContinued":true}"#))
+                self.drain_outputs();
+                let resp = format_dap_response(seq, "continue", true, r#"{"allThreadsContinued":true}"#);
+                self.check_execution_state();
+                Some(resp)
             }
             "next" => {
                 self.debugger.step_over();
-                self.pending_events.push(format_dap_event(
-                    "stopped",
-                    r#"{"reason":"step","threadId":1,"allThreadsStopped":true}"#,
-                ));
-                Some(format_dap_response(seq, "next", true, "{}"))
+                self.drain_outputs();
+                let resp = format_dap_response(seq, "next", true, "{}");
+                self.check_execution_state();
+                Some(resp)
             }
             "stepIn" => {
                 self.debugger.step_into();
-                self.pending_events.push(format_dap_event(
-                    "stopped",
-                    r#"{"reason":"step","threadId":1,"allThreadsStopped":true}"#,
-                ));
-                Some(format_dap_response(seq, "stepIn", true, "{}"))
+                self.drain_outputs();
+                let resp = format_dap_response(seq, "stepIn", true, "{}");
+                self.check_execution_state();
+                Some(resp)
             }
             "stepOut" => {
                 self.debugger.step_out();
-                self.pending_events.push(format_dap_event(
-                    "stopped",
-                    r#"{"reason":"step","threadId":1,"allThreadsStopped":true}"#,
-                ));
-                Some(format_dap_response(seq, "stepOut", true, "{}"))
+                self.drain_outputs();
+                let resp = format_dap_response(seq, "stepOut", true, "{}");
+                self.check_execution_state();
+                Some(resp)
             }
             "pause" => {
                 self.debugger.pause();
+                let resp = format_dap_response(seq, "pause", true, "{}");
                 self.pending_events.push(format_dap_event(
                     "stopped",
                     r#"{"reason":"pause","threadId":1,"allThreadsStopped":true}"#,
                 ));
-                Some(format_dap_response(seq, "pause", true, "{}"))
+                Some(resp)
             }
             "evaluate" => {
-                let expr = extract_json_string(trimmed, "expression").unwrap_or_default();
-                let frame_id = extract_json_number(trimmed, "frameId").map(|n| n as u32);
-                match self.debugger.evaluate(&expr, frame_id) {
+                let expr = args.and_then(|a| a.get("expression")).and_then(|e| e.as_str()).unwrap_or("");
+                let frame_id = args.and_then(|a| a.get("frameId")).and_then(|f| f.as_u64()).map(|n| n as u32);
+                match self.debugger.evaluate(expr, frame_id) {
                     Ok((val, ty)) => {
                         let body = format!(
-                            r#"{{"result":"{}","type":"{}","variablesReference":0}}"#,
-                            val.to_string_repr(),
+                            r#"{{"result":{},"type":"{}","variablesReference":0}}"#,
+                            escape_json_str(&val.to_string_repr()),
                             ty
                         );
                         Some(format_dap_response(seq, "evaluate", true, &body))
                     }
                     Err(e) => {
-                        let body = format!(r#"{{"message":"{}"}}"#, e);
+                        let body = format!(r#"{{"message":{}}}"#, escape_json_str(&e));
                         Some(format_dap_response(seq, "evaluate", false, &body))
                     }
                 }
             }
-            "disconnect" => {
-                self.debugger.state = DebuggerState::Terminated;
+            "disconnect" | "terminate" => {
                 self.should_exit = true;
-                Some(format_dap_response(seq, "disconnect", true, "{}"))
+                let resp = format_dap_response(seq, &command, true, "{}");
+                self.pending_events.push(format_dap_event("terminated", "{}"));
+                Some(resp)
             }
             _ => {
                 Some(format_dap_response(seq, &command, false, r#"{"message":"Command not supported"}"#))
             }
+        }
+    }
+
+    fn drain_outputs(&mut self) {
+        for out in std::mem::take(&mut self.debugger.pending_outputs) {
+            let ev = format!(
+                r#"{{"category":"stdout","output":{}}}"#,
+                escape_json_str(&out)
+            );
+            self.pending_events.push(format_dap_event("output", &ev));
+        }
+    }
+
+    fn check_execution_state(&mut self) {
+        match &self.debugger.state {
+            DebuggerState::Paused(reason) => {
+                let ev = format!(
+                    r#"{{"reason":"{}","threadId":1,"allThreadsStopped":true}}"#,
+                    reason
+                );
+                self.pending_events.push(format_dap_event("stopped", &ev));
+            }
+            DebuggerState::Terminated => {
+                self.pending_events.push(format_dap_event("exited", r#"{"exitCode":0}"#));
+                self.pending_events.push(format_dap_event("terminated", "{}"));
+                self.should_exit = true;
+            }
+            DebuggerState::Running => {}
         }
     }
 }
@@ -247,43 +292,21 @@ fn format_dap_event(event_name: &str, body_json: &str) -> String {
     )
 }
 
-fn extract_json_string(json: &str, key: &str) -> Option<String> {
-    let pattern = format!("\"{}\"", key);
-    let key_idx = json.find(&pattern)?;
-    let after = &json[key_idx + pattern.len()..];
-    let colon_idx = after.find(':')?;
-    let rest = after[colon_idx + 1..].trim();
-    if rest.starts_with('"') {
-        let end_quote = rest[1..].find('"')?;
-        Some(rest[1..=end_quote].to_string())
-    } else {
-        None
+fn escape_json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            _ => out.push(c),
+        }
     }
-}
-
-fn extract_json_number(json: &str, key: &str) -> Option<f64> {
-    let pattern = format!("\"{}\"", key);
-    let key_idx = json.find(&pattern)?;
-    let after = &json[key_idx + pattern.len()..];
-    let colon_idx = after.find(':')?;
-    let rest = after[colon_idx + 1..].trim();
-    let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '-' || *c == '.').collect();
-    num_str.parse::<f64>().ok()
-}
-
-fn extract_json_bool(json: &str, key: &str) -> Option<bool> {
-    let pattern = format!("\"{}\"", key);
-    let key_idx = json.find(&pattern)?;
-    let after = &json[key_idx + pattern.len()..];
-    let colon_idx = after.find(':')?;
-    let rest = after[colon_idx + 1..].trim();
-    if rest.starts_with("true") {
-        Some(true)
-    } else if rest.starts_with("false") {
-        Some(false)
-    } else {
-        None
-    }
+    out.push('"');
+    out
 }
 
 /// Runs the DAP JSON-RPC stdio event loop.

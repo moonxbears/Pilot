@@ -1,0 +1,2 @@
+[console_scripts]
+pilot-kernel = pilot_kernel.__main__:main

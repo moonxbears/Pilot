@@ -192,7 +192,7 @@ pub fn lookup_keyword(ident: &str) -> Option<(TokenKind, bool)> {
         },
         9 => match bytes {
             b"interface" => Some((TokenKind::KwInterface, false)),
-            b"extension" => Some((TokenKind::KwExtension, false)),
+            b"extension" => Some((TokenKind::KwExtension, true)),
             b"on_missed" => Some((TokenKind::KwOnMissed, true)),
             b"protected" => Some((TokenKind::KwProtected, true)),
             b"contracts" => Some((TokenKind::KwContracts, true)),

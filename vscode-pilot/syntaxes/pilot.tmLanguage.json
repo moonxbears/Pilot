@@ -385,7 +385,7 @@
         },
         {
           "name": "keyword.control.flow.pilot",
-          "match": "\\b(comptime|guard|defer|if|elif|else|then|for|while|loop|match|case|when|try|except|catch|finally|with|as|return|yield|raise|throw|break|continue|pass|assert|import|from|global|in|is|some|default)\\b"
+          "match": "\\b(panic|comptime|guard|defer|if|elif|else|then|for|while|loop|match|case|when|try|except|catch|finally|with|as|return|yield|raise|throw|break|continue|pass|assert|import|from|global|in|is|some|default)\\b"
         },
         {
           "name": "keyword.operator.logical.pilot",

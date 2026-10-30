@@ -6,6 +6,7 @@
 //! - Call stack unwinding, locals inspection, and variable expression evaluation.
 //! - Interactive CLI debugger for terminal sessions.
 
+pub mod json;
 pub mod debugger;
 pub mod dap;
 
@@ -172,7 +173,7 @@ mod tests {
 
         // Frame and local evaluation
         dbg.push_frame("compute", "main.pilot", 10, 4);
-        dbg.set_local("answer", PilotVal::from_int(42));
+        dbg.set_local("answer", PilotVal::from_int(42), "i64");
 
         let (val, ty) = dbg.evaluate("answer", None).unwrap();
         assert_eq!(val.as_int(), Some(42));
@@ -207,5 +208,136 @@ mod tests {
         let stack_msg = r#"{"seq":4,"type":"request","command":"stackTrace","arguments":{"threadId":1}}"#;
         let stack_resp = dap.handle_message(stack_msg).unwrap();
         assert!(stack_resp.contains("stackFrames"));
+    }
+
+    #[test]
+    fn test_dap_full_stepping_and_variables_flow() {
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_debug_script.pilot");
+        let script = "let x = 10\nlet y = 20\nlet z = x + y\n";
+        std::fs::write(&test_file, script).unwrap();
+        let file_path = test_file.to_str().unwrap().to_string();
+
+        let mut dap = DapServer::new();
+        dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
+
+        // Set breakpoint on line 2 (let y = 20)
+        let bp_req = format!(
+            r#"{{"seq":2,"type":"request","command":"setBreakpoints","arguments":{{"source":{{"path":"{}"}},"breakpoints":[{{"line":2}}]}}}}"#,
+            file_path
+        );
+        let bp_resp = dap.handle_message(&bp_req).unwrap();
+        assert!(bp_resp.contains("\"verified\":true"));
+
+        // Launch
+        let launch_req = format!(
+            r#"{{"seq":3,"type":"request","command":"launch","arguments":{{"program":"{}","stopOnEntry":false}}}}"#,
+            file_path
+        );
+        dap.handle_message(&launch_req).unwrap();
+
+        // ConfigurationDone starts execution
+        dap.handle_message(r#"{"seq":4,"type":"request","command":"configurationDone"}"#).unwrap();
+
+        // Check that stopped event was emitted for breakpoint
+        let events = dap.drain_events();
+        let stopped = events.iter().any(|e| e.contains("\"event\":\"stopped\"") && e.contains("\"breakpoint\""));
+        assert!(stopped, "Expected stopped event on breakpoint");
+
+        // Inspect call stack
+        let stack_resp = dap.handle_message(r#"{"seq":5,"type":"request","command":"stackTrace","arguments":{"threadId":1}}"#).unwrap();
+        assert!(stack_resp.contains("test_debug_script.pilot"));
+        assert!(stack_resp.contains("\"line\":2"));
+
+        // Inspect scopes
+        let scopes_resp = dap.handle_message(r#"{"seq":6,"type":"request","command":"scopes","arguments":{"frameId":1}}"#).unwrap();
+        assert!(scopes_resp.contains("Locals"));
+
+        // Inspect variables (x should be 10)
+        let vars_resp = dap.handle_message(r#"{"seq":7,"type":"request","command":"variables","arguments":{"variablesReference":1}}"#).unwrap();
+        assert!(vars_resp.contains("\"name\":\"x\""));
+        assert!(vars_resp.contains("\"value\":\"10\""));
+
+        // Evaluate expression
+        let eval_resp = dap.handle_message(r#"{"seq":8,"type":"request","command":"evaluate","arguments":{"expression":"x","frameId":1}}"#).unwrap();
+        assert!(eval_resp.contains("\"result\":\"10\""));
+
+        // Step over (next)
+        dap.handle_message(r#"{"seq":9,"type":"request","command":"next","arguments":{"threadId":1}}"#).unwrap();
+        let step_events = dap.drain_events();
+        assert!(step_events.iter().any(|e| e.contains("\"event\":\"stopped\"")));
+
+        // After stepping over line 2, line is 3, and y should be 20
+        let vars_resp2 = dap.handle_message(r#"{"seq":10,"type":"request","command":"variables","arguments":{"variablesReference":1}}"#).unwrap();
+        assert!(vars_resp2.contains("\"name\":\"y\""));
+        assert!(vars_resp2.contains("\"value\":\"20\""));
+
+        // Continue to completion
+        dap.handle_message(r#"{"seq":11,"type":"request","command":"continue","arguments":{"threadId":1}}"#).unwrap();
+        let final_events = dap.drain_events();
+        assert!(final_events.iter().any(|e| e.contains("\"event\":\"terminated\"")));
+
+        let _ = std::fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_function_debugging_and_call_stack() {
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_calc_suite.pilot");
+        let script = "fn calculate(a: int, b: int) -> int {\n    let temp = a * 2\n    let result = temp + b\n    return result\n}\n\nlet x = 5\nlet y = 12\nlet ans = calculate(x, y)\n";
+        std::fs::write(&test_file, script).unwrap();
+        let file_path = test_file.to_str().unwrap().to_string();
+
+        let mut dap = DapServer::new();
+        dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
+
+        // Set breakpoint on line 3 (inside calculate)
+        let bp_req = format!(
+            r#"{{"seq":2,"type":"request","command":"setBreakpoints","arguments":{{"source":{{"path":"{}"}},"breakpoints":[{{"line":3}}]}}}}"#,
+            file_path
+        );
+        let bp_resp = dap.handle_message(&bp_req).unwrap();
+        assert!(bp_resp.contains("\"verified\":true"));
+
+        // Launch
+        let launch_req = format!(
+            r#"{{"seq":3,"type":"request","command":"launch","arguments":{{"program":"{}","stopOnEntry":false}}}}"#,
+            file_path
+        );
+        dap.handle_message(&launch_req).unwrap();
+
+        // ConfigurationDone
+        dap.handle_message(r#"{"seq":4,"type":"request","command":"configurationDone"}"#).unwrap();
+
+        // Stopped at line 3 inside calculate
+        let events = dap.drain_events();
+        assert!(events.iter().any(|e| e.contains("\"event\":\"stopped\"") && e.contains("\"breakpoint\"")));
+
+        // Verify call stack: frame 2 is calculate at line 3, frame 1 is main at line 9
+        let stack_resp = dap.handle_message(r#"{"seq":5,"type":"request","command":"stackTrace","arguments":{"threadId":1}}"#).unwrap();
+        assert!(stack_resp.contains("\"name\":\"calculate\""));
+        assert!(stack_resp.contains("\"line\":3"));
+
+        // Verify locals in calculate
+        let vars_resp = dap.handle_message(r#"{"seq":6,"type":"request","command":"variables","arguments":{"variablesReference":1000}}"#).unwrap();
+        assert!(vars_resp.contains("\"name\":\"temp\""));
+        assert!(vars_resp.contains("\"value\":\"10\""));
+
+        // Step over
+        dap.handle_message(r#"{"seq":7,"type":"request","command":"next","arguments":{"threadId":1}}"#).unwrap();
+        let step_evs = dap.drain_events();
+        assert!(step_evs.iter().any(|e| e.contains("\"event\":\"stopped\"") && e.contains("\"step\"")));
+
+        // Verify result variable computed
+        let vars_resp2 = dap.handle_message(r#"{"seq":8,"type":"request","command":"variables","arguments":{"variablesReference":1000}}"#).unwrap();
+        assert!(vars_resp2.contains("\"name\":\"result\""));
+        assert!(vars_resp2.contains("\"value\":\"22\""));
+
+        // Continue to completion
+        dap.handle_message(r#"{"seq":9,"type":"request","command":"continue","arguments":{"threadId":1}}"#).unwrap();
+        let term_evs = dap.drain_events();
+        assert!(term_evs.iter().any(|e| e.contains("\"event\":\"terminated\"")));
+
+        let _ = std::fs::remove_file(test_file);
     }
 }

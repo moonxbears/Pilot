@@ -1,0 +1,11 @@
+setup.py
+pilot_kernel/__init__.py
+pilot_kernel/__main__.py
+pilot_kernel/install.py
+pilot_kernel/kernel.py
+pilot_kernel.egg-info/PKG-INFO
+pilot_kernel.egg-info/SOURCES.txt
+pilot_kernel.egg-info/dependency_links.txt
+pilot_kernel.egg-info/entry_points.txt
+pilot_kernel.egg-info/requires.txt
+pilot_kernel.egg-info/top_level.txt

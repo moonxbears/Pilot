@@ -3,80 +3,100 @@
 // Adheres to Pilot Invariant #7: zero stack unwinding, register-represented `ok(v)` / `fail(e)`.
 
 def is_ok(res) -> bool {
-    return __result_is_ok(res);
+    return match res {
+        case ok(_) => true,
+        case fail(_) => false,
+        case _ => true
+    };
 }
 
 def is_err(res) -> bool {
-    return __result_is_err(res);
+    return match res {
+        case fail(_) => true,
+        case _ => false
+    };
 }
 
 def unwrap(res) {
-    return __result_unwrap_ok(res);
+    return match res {
+        case ok(v) => v,
+        case fail(e) => panic(f"called unwrap on error: {e}"),
+        case v => v
+    };
 }
 
 def unwrap_err(res) {
-    return __result_unwrap_err(res);
+    return match res {
+        case fail(e) => e,
+        case _ => panic("called unwrap_err on ok value")
+    };
 }
 
+// Runtime intrinsic aliases for interop
+def __result_is_ok(res) -> bool { return is_ok(res); }
+def __result_is_err(res) -> bool { return is_err(res); }
+def __result_unwrap_ok(res) { return unwrap(res); }
+def __result_unwrap_err(res) { return unwrap_err(res); }
+
 def expect(res, msg: str) {
-    if __result_is_err(res) {
-        panic(f"{msg}: {__result_unwrap_err(res)}");
+    if is_err(res) {
+        panic(f"{msg}: {unwrap_err(res)}");
     }
-    return __result_unwrap_ok(res);
+    return unwrap(res);
 }
 
 def unwrap_or(res, fallback) {
-    if __result_is_ok(res) {
-        return __result_unwrap_ok(res);
+    if is_ok(res) {
+        return unwrap(res);
     }
     return fallback;
 }
 
 def unwrap_or_else(res, recovery_fn) {
-    if __result_is_ok(res) {
-        return __result_unwrap_ok(res);
+    if is_ok(res) {
+        return unwrap(res);
     }
-    return recovery_fn(__result_unwrap_err(res));
+    return recovery_fn(unwrap_err(res));
 }
 
 def map_ok(res, transform_fn) -> any ! any {
-    if __result_is_ok(res) {
-        return ok(transform_fn(__result_unwrap_ok(res)));
+    if is_ok(res) {
+        return ok(transform_fn(unwrap(res)));
     }
     return res;
 }
 
 def map_err(res, err_fn) -> any ! any {
-    if __result_is_err(res) {
-        return fail(err_fn(__result_unwrap_err(res)));
+    if is_err(res) {
+        return fail(err_fn(unwrap_err(res)));
     }
     return res;
 }
 
 def and_then(res, next_fn) -> any ! any {
-    if __result_is_ok(res) {
-        return next_fn(__result_unwrap_ok(res));
+    if is_ok(res) {
+        return next_fn(unwrap(res));
     }
     return res;
 }
 
 def or_else(res, recover_fn) -> any ! any {
-    if __result_is_err(res) {
-        return recover_fn(__result_unwrap_err(res));
+    if is_err(res) {
+        return recover_fn(unwrap_err(res));
     }
     return res;
 }
 
 def ok_option(res) {
-    if __result_is_ok(res) {
-        return some(__result_unwrap_ok(res));
+    if is_ok(res) {
+        return some(unwrap(res));
     }
     return none;
 }
 
 def err_option(res) {
-    if __result_is_err(res) {
-        return some(__result_unwrap_err(res));
+    if is_err(res) {
+        return some(unwrap_err(res));
     }
     return none;
 }
@@ -84,10 +104,10 @@ def err_option(res) {
 def collect_ok(results) -> any ! any {
     var acc = [];
     for item in results {
-        if __result_is_err(item) {
+        if is_err(item) {
             return item;
         }
-        acc.append(__result_unwrap_ok(item));
+        acc.append(unwrap(item));
     }
     return ok(acc);
 }

@@ -1,3 +1,4 @@
+from core import min, max;
 // SPDX-License-Identifier: MIT AND PSF-2.0
 // std.collections — Bootstrapped via M20 (`--from python|rust --strict-pilot --viable-license-only`) & Curated
 // Containers: Deque, PriorityQueue, OrderedMap, MultiMap, RingBuffer, BitSet, FrozenMap + bisect algorithms.
@@ -272,7 +273,7 @@ class OrderedMap {
         }
     }
 
-    def get(self, key) {
+    def gets(self, key) {
         let idx: i64 = bisect_left(self._keys, key);
         if idx < len(self._keys) and self._keys[idx] == key {
             return some(self._vals[idx]);
@@ -476,7 +477,7 @@ class BitSet {
         }
     }
 
-    def set(self, bit_idx: i64) {
+    def sets(self, bit_idx: i64) {
         self._ensure_bit(bit_idx);
         let w: i64 = bit_idx / 62;
         let offset: i64 = bit_idx % 62;
@@ -565,7 +566,7 @@ class FrozenMap {
         self._table = __freeze_value(entries);
     }
 
-    def get(self, key) {
+    def gets(self, key) {
         if self._table.contains_key(key) {
             return some(self._table[key]);
         }

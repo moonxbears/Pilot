@@ -288,6 +288,191 @@ impl TypeInferenceEngine {
         self.type_defs.insert("list".to_string(), self.types.list_of(TypeId::ANY));
         self.type_defs.insert("map".to_string(), TypeId::ANY);
         self.type_defs.insert("tuple".to_string(), TypeId::ANY);
+
+        // Standard Math Functions
+        let fn_math_1 = self.types.function_of(vec![TypeId::F64], TypeId::F64);
+        let fn_math_2 = self.types.function_of(vec![TypeId::F64, TypeId::F64], TypeId::F64);
+        let fn_math_pred = self.types.function_of(vec![TypeId::F64], TypeId::BOOL);
+        let fn_any_2 = self.types.function_of(vec![TypeId::ANY, TypeId::ANY], TypeId::ANY);
+        let fn_any_1 = self.types.function_of(vec![TypeId::ANY], TypeId::ANY);
+
+        self.define_var("sqrt", fn_math_1);
+        self.define_var("sin", fn_math_1);
+        self.define_var("cos", fn_math_1);
+        self.define_var("tan", fn_math_1);
+        self.define_var("exp", fn_math_1);
+        self.define_var("ln", fn_math_1);
+        self.define_var("log", fn_math_1);
+        self.define_var("floor", fn_math_1);
+        self.define_var("ceil", fn_math_1);
+        self.define_var("pow", fn_math_2);
+        self.define_var("isnan", fn_math_pred);
+        self.define_var("isinf", fn_math_pred);
+        self.define_var("abs", fn_any_1);
+        self.define_var("min", fn_any_2);
+        self.define_var("max", fn_any_2);
+
+        // Core / Reflection / Type Builtins
+        let fn_typeof = self.types.function_of(vec![TypeId::ANY], TypeId::STR);
+        self.define_var("typeof", fn_typeof);
+        self.define_var("type_of", fn_typeof);
+        self.define_var("str", fn_typeof);
+        self.define_var("name", fn_typeof);
+
+        let fn_slice_buf = self.types.function_of(vec![TypeId::I64, TypeId::STR, TypeId::I64], TypeId::ANY);
+        self.define_var("slice_buffer", fn_slice_buf);
+
+        let fn_compile_regex = self.types.function_of(vec![TypeId::STR], TypeId::ANY);
+        self.define_var("compile_regex", fn_compile_regex);
+
+        // Option & Result Intrinsics
+        let fn_pred_any = self.types.function_of(vec![TypeId::ANY], TypeId::BOOL);
+        self.define_var("__opt_is_some", fn_pred_any);
+        self.define_var("__opt_is_none", fn_pred_any);
+        self.define_var("__opt_unwrap", fn_any_1);
+        self.define_var("__result_is_ok", fn_pred_any);
+        self.define_var("__result_is_err", fn_pred_any);
+        self.define_var("__result_unwrap_ok", fn_any_1);
+        self.define_var("__result_unwrap_err", fn_any_1);
+
+        // String Intrinsics
+        let fn_str_slice = self.types.function_of(vec![TypeId::STR, TypeId::I64, TypeId::I64], TypeId::STR);
+        self.define_var("__str_slice", fn_str_slice);
+        let fn_str_code = self.types.function_of(vec![TypeId::STR, TypeId::I64], TypeId::I64);
+        self.define_var("__str_char_code", fn_str_code);
+        let fn_char_code = self.types.function_of(vec![TypeId::I64], TypeId::STR);
+        self.define_var("__char_from_code", fn_char_code);
+        let fn_str_index = self.types.function_of(vec![TypeId::STR, TypeId::STR, TypeId::I64], TypeId::I64);
+        self.define_var("__str_index_of", fn_str_index);
+        self.define_var("__str_last_index_of", fn_str_index);
+        let fn_str_replace = self.types.function_of(vec![TypeId::STR, TypeId::STR, TypeId::STR], TypeId::STR);
+        self.define_var("__str_replace", fn_str_replace);
+        let list_str = self.types.list_of(TypeId::STR);
+        let fn_str_split = self.types.function_of(vec![TypeId::STR, TypeId::STR], list_str);
+        let fn_str_1 = self.types.function_of(vec![TypeId::STR], TypeId::STR);
+        let fn_str_case = self.types.function_of(vec![TypeId::STR, TypeId::BOOL], TypeId::STR);
+
+        // OS & Filesystem Intrinsics
+        let fn_void_str = self.types.function_of(vec![], TypeId::STR);
+        let fn_void_bool = self.types.function_of(vec![], TypeId::BOOL);
+        let fn_fs_pred = self.types.function_of(vec![TypeId::STR], TypeId::BOOL);
+        let fn_fs_size = self.types.function_of(vec![TypeId::STR], TypeId::I64);
+        let fn_fs_read = self.types.function_of(vec![TypeId::STR], TypeId::ANY);
+        let fn_fs_write = self.types.function_of(vec![TypeId::STR, TypeId::STR], TypeId::ANY);
+        let fn_fs_copy = self.types.function_of(vec![TypeId::STR, TypeId::STR], TypeId::ANY);
+        let fn_list_dir = self.types.function_of(vec![TypeId::STR], list_str);
+
+        // Memory & Slice Intrinsics
+        let fn_slice_i64 = self.types.function_of(vec![TypeId::ANY], TypeId::I64);
+        let fn_slice_get = self.types.function_of(vec![TypeId::ANY, TypeId::I64], TypeId::ANY);
+        let fn_slice_byte_at = self.types.function_of(vec![TypeId::ANY, TypeId::I64], TypeId::I64);
+        let fn_slice_set = self.types.function_of(vec![TypeId::ANY, TypeId::I64, TypeId::ANY], TypeId::VOID);
+        let fn_slice_push = self.types.function_of(vec![TypeId::ANY, TypeId::ANY], TypeId::VOID);
+        let fn_slice_clear = self.types.function_of(vec![TypeId::ANY], TypeId::VOID);
+        let fn_slice_subview = self.types.function_of(vec![TypeId::ANY, TypeId::I64, TypeId::I64], TypeId::ANY);
+        let fn_slice_dot = self.types.function_of(vec![TypeId::ANY, TypeId::ANY], TypeId::F64);
+        let fn_slice_saxpy = self.types.function_of(vec![TypeId::F64, TypeId::ANY, TypeId::ANY], TypeId::ANY);
+        let fn_slice_scale = self.types.function_of(vec![TypeId::F64, TypeId::ANY], TypeId::ANY);
+        let fn_simd_bits = self.types.function_of(vec![], TypeId::I64);
+
+        // DFA & Regex Intrinsics
+        let fn_dfa_match = self.types.function_of(vec![TypeId::ANY, TypeId::STR], TypeId::BOOL);
+        let fn_dfa_find = self.types.function_of(vec![TypeId::ANY, TypeId::STR, TypeId::I64], TypeId::ANY);
+        let fn_dfa_find_all = self.types.function_of(vec![TypeId::ANY, TypeId::STR], list_str);
+        let fn_dfa_find_spans = self.types.function_of(vec![TypeId::ANY, TypeId::STR], TypeId::ANY);
+        let fn_dfa_split = self.types.function_of(vec![TypeId::ANY, TypeId::STR], list_str);
+        let fn_dfa_replace_all = self.types.function_of(vec![TypeId::ANY, TypeId::STR, TypeId::STR], TypeId::STR);
+
+        // UTF-8 & Parsing Intrinsics
+        let fn_utf8_encode = self.types.function_of(vec![TypeId::STR], TypeId::ANY);
+        let fn_utf8_decode = self.types.function_of(vec![TypeId::ANY], TypeId::STR);
+        let fn_utf8_boundary = self.types.function_of(vec![TypeId::ANY, TypeId::I64], TypeId::BOOL);
+        let fn_parse_int = self.types.function_of(vec![TypeId::STR, TypeId::I64], TypeId::ANY);
+        let fn_parse_float = self.types.function_of(vec![TypeId::STR], TypeId::ANY);
+
+        // Metaprogramming & Reflection Intrinsics
+        let fn_ast_subst = self.types.function_of(vec![TypeId::ANY, TypeId::STR, TypeId::ANY], TypeId::ANY);
+        let fn_ast_diff = self.types.function_of(vec![TypeId::ANY, TypeId::STR], TypeId::ANY);
+        let fn_ast_eval = self.types.function_of(vec![TypeId::ANY, TypeId::ANY], TypeId::ANY);
+        let fn_kw_dist = self.types.function_of(vec![TypeId::ANY, TypeId::ANY], TypeId::I64);
+        let fn_isa = self.types.function_of(vec![TypeId::ANY, TypeId::ANY], TypeId::BOOL);
+
+        self.define_var("__str_split", fn_str_split);
+        self.define_var("__str_trim", fn_str_1);
+        self.define_var("__str_case", fn_str_case);
+
+        self.define_var("__os_cwd", fn_void_str);
+        self.define_var("__os_temp_dir", fn_void_str);
+        self.define_var("__os_is_windows", fn_void_bool);
+        self.define_var("__fs_exists", fn_fs_pred);
+        self.define_var("__fs_is_file", fn_fs_pred);
+        self.define_var("__fs_is_dir", fn_fs_pred);
+        self.define_var("__fs_file_size", fn_fs_size);
+        self.define_var("__fs_read_text", fn_fs_read);
+        self.define_var("__fs_read_bytes", fn_fs_read);
+        self.define_var("__fs_list_dir", fn_list_dir);
+        self.define_var("__fs_walk_dir", fn_list_dir);
+        self.define_var("__fs_mmap_read", fn_fs_read);
+        self.define_var("__fs_mmap_rw", fn_fs_read);
+        self.define_var("__fs_write_text", fn_fs_write);
+        self.define_var("__fs_copy_file", fn_fs_copy);
+        self.define_var("__fs_move_file", fn_fs_copy);
+        self.define_var("__fs_remove_file", fn_fs_read);
+        self.define_var("__fs_mkdir", fn_fs_read);
+        self.define_var("__fs_rmdir", fn_fs_read);
+
+        self.define_var("__slice_len", fn_slice_i64);
+        self.define_var("__slice_cap", fn_slice_i64);
+        self.define_var("__slice_stride", fn_slice_i64);
+        self.define_var("__slice_ptr", fn_slice_i64);
+        self.define_var("__slice_is_readonly", fn_pred_any);
+        self.define_var("__slice_get", fn_slice_get);
+        self.define_var("__slice_byte_at", fn_slice_byte_at);
+        self.define_var("__slice_set", fn_slice_set);
+        self.define_var("__slice_push", fn_slice_push);
+        self.define_var("__slice_clear", fn_slice_clear);
+        self.define_var("__slice_subview", fn_slice_subview);
+        self.define_var("__slice_to_list", fn_any_1);
+        self.define_var("__slice_sum", fn_any_1);
+        self.define_var("__slice_dot", fn_slice_dot);
+        self.define_var("__slice_saxpy", fn_slice_saxpy);
+        self.define_var("__slice_scale", fn_slice_scale);
+        self.define_var("__slice_sort", fn_any_1);
+        self.define_var("__slice_welford", fn_any_1);
+        self.define_var("__cpp_backend_available", fn_void_bool);
+        self.define_var("__cpp_simd_bits", fn_simd_bits);
+        self.define_var("__freeze_value", fn_any_1);
+        self.define_var("__is_frozen", fn_pred_any);
+        self.define_var("__is_perfect_hash_map", fn_pred_any);
+        self.define_var("__frozen_map_table_size", fn_slice_i64);
+
+        self.define_var("__dfa_is_match", fn_dfa_match);
+        self.define_var("__dfa_find", fn_dfa_find);
+        self.define_var("__dfa_find_all", fn_dfa_find_all);
+        self.define_var("__dfa_find_spans", fn_dfa_find_spans);
+        self.define_var("__dfa_split", fn_dfa_split);
+        self.define_var("__dfa_replace_all", fn_dfa_replace_all);
+
+        self.define_var("__utf8_encode_slice", fn_utf8_encode);
+        self.define_var("__utf8_decode_slice", fn_utf8_decode);
+        self.define_var("__utf8_validate_slice", fn_pred_any);
+        self.define_var("__utf8_rune_count", fn_slice_i64);
+        self.define_var("__utf8_is_valid_boundary", fn_utf8_boundary);
+        self.define_var("__parse_int_strict", fn_parse_int);
+        self.define_var("__parse_float_strict", fn_parse_float);
+        self.define_var("__map_entries_sorted", fn_any_1);
+
+        self.define_var("__ast_fold", fn_any_1);
+        self.define_var("__ast_subst", fn_ast_subst);
+        self.define_var("__ast_diff", fn_ast_diff);
+        self.define_var("__ast_eval", fn_ast_eval);
+        self.define_var("__kw_parents", fn_any_1);
+        self.define_var("__kw_ancestors", fn_any_1);
+        self.define_var("__kw_descendants", fn_any_1);
+        self.define_var("__kw_distance", fn_kw_dist);
+        self.define_var("derive", fn_any_1);
+        self.define_var("underive", fn_any_1);
+        self.define_var("isa", fn_isa);
     }
 
     pub fn enter_scope(&mut self) {

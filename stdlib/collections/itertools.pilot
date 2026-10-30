@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT AND PSF-2.0
 // std.itertools — Eager & Lazy Sequence/Range Combinators
 
+from core import min, max
 def enumerate(items, start: i64 = 0) {
     var out = [];
     var idx: i64 = start;

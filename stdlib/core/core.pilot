@@ -58,14 +58,14 @@ def clamp(val, lo, hi) {
     return val;
 }
 
-def min_val(a, b) {
+def min(a, b) {
     if a <= b {
         return a;
     }
     return b;
 }
 
-def max_val(a, b) {
+def max(a, b) {
     if a >= b {
         return a;
     }

@@ -826,6 +826,10 @@ impl LspServer {
                 return make_hover_card(&md);
             }
             (None, None) => {
+                if let Some((sig, summary)) = get_builtin_doc(txt) {
+                    let md = format!("```pilot\n{}\n```\n\n{}", sig, summary);
+                    return make_hover_card(&md);
+                }
                 if let Some(ident_ty) = cursor_ident_ty {
                     let md = format!("```pilot\n{}: {}\n```\n\n*Pilot Binding*", txt, analysis.types.display(ident_ty));
                     return make_hover_card(&md);
@@ -1325,9 +1329,13 @@ impl LspServer {
                         } else if remainder.starts_with('(') {
                             if text.starts_with(char::is_uppercase) {
                                 Some((2, 0)) // class constructor call
+                            } else if get_builtin_doc(text).is_some() {
+                                Some((12, 512)) // builtin function call + defaultLibrary
                             } else {
                                 Some((12, 0)) // function call
                             }
+                        } else if get_builtin_doc(text).is_some() {
+                            Some((12, 512)) // builtin function identifier + defaultLibrary
                         } else if Self::is_pilot_primitive_type(text) {
                             Some((1, 512)) // type (defaultLibrary)
                         } else if text.starts_with(char::is_uppercase) {
@@ -1804,6 +1812,25 @@ const BUILTIN_DOCS: &[(&str, &str, &str)] = &[
     ("len", "len(collection: any) -> int", "Returns the number of elements in a list, map, string, or collection."),
     ("range", "range(start: int, end: int, step: int = 1) -> List[int]", "Generates an iterable sequence of integers from `start` up to `end`."),
     ("typeof", "typeof(val: any) -> str", "Returns the runtime type name of the given value."),
+    ("type_of", "type_of(val: any) -> str", "Returns the runtime type name of the given value (alias for typeof)."),
+    ("sqrt", "sqrt(x: float) -> float", "Returns the non-negative square root of a floating-point number."),
+    ("sin", "sin(x: float) -> float", "Computes the sine of a floating-point angle in radians."),
+    ("cos", "cos(x: float) -> float", "Computes the cosine of a floating-point angle in radians."),
+    ("tan", "tan(x: float) -> float", "Computes the tangent of a floating-point angle in radians."),
+    ("exp", "exp(x: float) -> float", "Computes the natural exponential function e^x."),
+    ("ln", "ln(x: float) -> float", "Computes the natural logarithm (base e) of a positive number."),
+    ("log", "log(x: float) -> float", "Computes the natural logarithm (base e) of a positive number."),
+    ("floor", "floor(x: float) -> float", "Returns the largest integer less than or equal to x."),
+    ("ceil", "ceil(x: float) -> float", "Returns the smallest integer greater than or equal to x."),
+    ("pow", "pow(base: float, exponent: float) -> float", "Raises a number to the specified power."),
+    ("isnan", "isnan(x: float) -> bool", "Returns true if the float value is NaN (Not a Number)."),
+    ("isinf", "isinf(x: float) -> bool", "Returns true if the float value is positive or negative infinity."),
+    ("is_some", "is_some(opt: Option[T]) -> bool", "Returns true if the option contains a present value."),
+    ("is_none", "is_none(opt: Option[T]) -> bool", "Returns true if the option is none."),
+    ("unwrap", "unwrap(opt_or_res: any) -> any", "Extracts the contained value, aborting with a panic if none or error."),
+    ("is_ok", "is_ok(res: Result[T, E]) -> bool", "Returns true if the result represents success."),
+    ("is_err", "is_err(res: Result[T, E]) -> bool", "Returns true if the result represents an error."),
+    ("unwrap_err", "unwrap_err(res: Result[T, E]) -> E", "Extracts the contained error value, aborting with a panic if ok."),
     ("append", "append(collection: any, item: any) -> void", "Appends an element to the end of a list or buffer."),
     ("sum", "sum(collection: any) -> int | float", "Calculates the sum of all elements in the collection."),
     ("min", "min(a: any, b: any) -> any", "Returns the lesser of two values, or smallest item in a collection."),

@@ -4,6 +4,12 @@
     "description": "Syntax highlighting, semantic analysis, type checking, and Language Server (LSP) integration for the Pilot programming language.",
     "version": "1.1.51",
     "publisher": "pilot-lang",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/moonxbears/Pilot.git",
+        "directory": "vscode-pilot"
+    },
     "engines": {
         "vscode": "^1.85.0"
     },
@@ -181,6 +187,11 @@
                     "type": "string",
                     "default": "",
                     "description": "Optional explicit path to the pilot compiler executable."
+                },
+                "pilot.dap.serverPath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Optional explicit path to pilot-dap or pilot executable."
                 }
             }
         }
@@ -191,7 +202,9 @@
         "typescript": "^7.0.2"
     },
     "scripts": {
+        "vscode:prepublish": "npm run compile",
         "compile": "tsc -p .",
-        "watch": "tsc -watch -p ."
+        "watch": "tsc -watch -p .",
+        "package": "vsce package"
     }
 }

@@ -629,10 +629,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 vscode.window.showErrorMessage('No active Pilot file to debug.');
                 return;
             }
-            const pilotCmd = resolvePilotExecutionPrefix(context.extensionPath);
-            let terminal = vscode.window.terminals.find(t => t.name === 'Pilot Debugger') || vscode.window.createTerminal('Pilot Debugger');
-            terminal.show();
-            terminal.sendText(`${pilotCmd} debug "${filePath}"`);
+            if (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.isDirty) {
+                await vscode.window.activeTextEditor.document.save();
+            }
+            await vscode.debug.startDebugging(undefined, {
+                type: 'pilot',
+                name: 'Pilot: Debug Current File',
+                request: 'launch',
+                program: filePath,
+                stopOnEntry: false
+            });
         }),
         vscode.commands.registerCommand('pilot.createLaunchConfig', async () => {
             await addOrUpdateLaunchJson(true);
@@ -682,21 +688,24 @@ class PilotDebugConfigurationProvider implements vscode.DebugConfigurationProvid
             const editor = vscode.window.activeTextEditor;
             if (editor && editor.document.languageId === 'pilot') {
                 config.type = 'pilot';
-                config.name = 'Pilot: Run Current File';
+                config.name = 'Pilot: Debug Current File';
                 config.request = 'launch';
-                config.mode = 'run';
-                config.program = '${file}';
-                config.args = [];
+                config.program = editor.document.fileName;
+                config.stopOnEntry = false;
             } else {
                 return null;
             }
         }
 
-        if (!config.program) {
-            config.program = '${file}';
+        if (!config.program || config.program === '${file}') {
+            if (vscode.window.activeTextEditor) {
+                config.program = vscode.window.activeTextEditor.document.fileName;
+            } else {
+                config.program = '${file}';
+            }
         }
-        if (!config.mode) {
-            config.mode = 'run';
+        if (config.stopOnEntry === undefined) {
+            config.stopOnEntry = false;
         }
 
         return config;
@@ -873,6 +882,44 @@ class PilotDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescripto
     }
 
     createDebugAdapterDescriptor(session: vscode.DebugSession): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
+        const config = session.configuration;
+        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+        const repoRoot = path.resolve(this.extensionPath, '..');
+
+        // Check if custom DAP or Pilot path is configured
+        const userDap = vscode.workspace.getConfiguration('pilot').get<string>('dap.serverPath');
+        if (userDap && fs.existsSync(userDap)) {
+            return new vscode.DebugAdapterExecutable(userDap, []);
+        }
+
+        // 1. Look for standalone pilot-dap binary
+        const dapCandidates: string[] = [
+            path.join(this.extensionPath, 'server', 'pilot-dap'),
+            path.join(repoRoot, 'target', 'release', 'pilot-dap'),
+            path.join(repoRoot, 'target', 'debug', 'pilot-dap'),
+        ];
+        if (wsRoot) {
+            dapCandidates.push(
+                path.join(wsRoot, 'target', 'release', 'pilot-dap'),
+                path.join(wsRoot, 'target', 'debug', 'pilot-dap'),
+            );
+        }
+
+        const newestDap = pickNewestExistingFile(dapCandidates);
+        if (newestDap) {
+            return new vscode.DebugAdapterExecutable(newestDap, []);
+        }
+
+        // 2. Look for pilot binary with 'debug --dap'
+        let pilotExe = resolvePilotExecutionPrefix(this.extensionPath, config.pilotPath);
+        if (pilotExe.startsWith('"') && pilotExe.endsWith('"')) {
+            pilotExe = pilotExe.slice(1, -1);
+        }
+        if (pilotExe && (pilotExe === 'pilot' || fs.existsSync(pilotExe))) {
+            return new vscode.DebugAdapterExecutable(pilotExe, ['debug', '--dap']);
+        }
+
+        // Fallback to inline adapter if no native binary found
         return new vscode.DebugAdapterInlineImplementation(new PilotDebugAdapter(this.extensionPath, session));
     }
 }

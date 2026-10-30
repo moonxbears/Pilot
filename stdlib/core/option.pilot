@@ -1,64 +1,85 @@
 // SPDX-License-Identifier: MIT
 // std.option — Zero-Overhead Niche-Optimized Nullable (T?) Combinators
-// Adheres to Pilot Invariant #2: presence checks use __opt_is_some / `if some`, never postfix `!`.
+// Adheres to Pilot Invariant #2: presence checks use native `match`, `if some`, or `is_some`.
 
 def is_some(opt) -> bool {
-    return __opt_is_some(opt);
+    return match opt {
+        case some(_) => true,
+        case none => false,
+        case _ => opt != none
+    };
 }
 
 def is_none(opt) -> bool {
-    return __opt_is_none(opt);
+    return match opt {
+        case none => true,
+        case _ => opt == none
+    };
 }
 
 def unwrap(opt) {
-    return __opt_unwrap(opt);
+    return match opt {
+        case some(v) => v,
+        case none => panic("called unwrap on none"),
+        case v => {
+            if v == none {
+                panic("called unwrap on none");
+            }
+            v
+        }
+    };
 }
 
+// Runtime intrinsic aliases for interop
+def __opt_is_some(opt) -> bool { return is_some(opt); }
+def __opt_is_none(opt) -> bool { return is_none(opt); }
+def __opt_unwrap(opt) { return unwrap(opt); }
+
 def expect(opt, msg: str) {
-    if __opt_is_none(opt) {
+    if is_none(opt) {
         panic(msg);
     }
-    return __opt_unwrap(opt);
+    return unwrap(opt);
 }
 
 def unwrap_or(opt, fallback) {
-    if __opt_is_some(opt) {
-        return __opt_unwrap(opt);
+    if is_some(opt) {
+        return unwrap(opt);
     }
     return fallback;
 }
 
 def unwrap_or_else(opt, fallback_fn) {
-    if __opt_is_some(opt) {
-        return __opt_unwrap(opt);
+    if is_some(opt) {
+        return unwrap(opt);
     }
     return fallback_fn();
 }
 
 def map(opt, transform_fn) {
-    if __opt_is_some(opt) {
-        return some(transform_fn(__opt_unwrap(opt)));
+    if is_some(opt) {
+        return some(transform_fn(unwrap(opt)));
     }
     return none;
 }
 
 def and_then(opt, flat_fn) {
-    if __opt_is_some(opt) {
-        return flat_fn(__opt_unwrap(opt));
+    if is_some(opt) {
+        return flat_fn(unwrap(opt));
     }
     return none;
 }
 
 def or_else(opt, alt_fn) {
-    if __opt_is_some(opt) {
+    if is_some(opt) {
         return opt;
     }
     return alt_fn();
 }
 
 def filter(opt, pred_fn) {
-    if __opt_is_some(opt) {
-        let v = __opt_unwrap(opt);
+    if is_some(opt) {
+        let v = unwrap(opt);
         if pred_fn(v) {
             return opt;
         }
@@ -67,29 +88,29 @@ def filter(opt, pred_fn) {
 }
 
 def zip(opt_a, opt_b) {
-    if __opt_is_some(opt_a) and __opt_is_some(opt_b) {
-        return some((__opt_unwrap(opt_a), __opt_unwrap(opt_b)));
+    if is_some(opt_a) and is_some(opt_b) {
+        return some((unwrap(opt_a), unwrap(opt_b)));
     }
     return none;
 }
 
 def flatten(nested_opt) {
-    if __opt_is_some(nested_opt) {
-        return __opt_unwrap(nested_opt);
+    if is_some(nested_opt) {
+        return unwrap(nested_opt);
     }
     return none;
 }
 
 def ok_or(opt, err_val) -> any ! any {
-    if __opt_is_some(opt) {
-        return ok(__opt_unwrap(opt));
+    if is_some(opt) {
+        return ok(unwrap(opt));
     }
     return fail(err_val);
 }
 
 def to_list(opt) {
-    if __opt_is_some(opt) {
-        return [__opt_unwrap(opt)];
+    if is_some(opt) {
+        return [unwrap(opt)];
     }
     return [];
 }
