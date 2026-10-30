@@ -107,6 +107,9 @@ impl TypeInferenceEngine {
         let fn_assert = self.types.function_of(vec![TypeId::BOOL], TypeId::VOID);
         self.define_var("assert", fn_assert);
 
+        let fn_panic = self.types.function_of(vec![TypeId::STR], TypeId::NEVER);
+        self.define_var("panic", fn_panic);
+
         let fn_len = self.types.function_of(vec![TypeId::ANY], TypeId::I64);
         self.define_var("len", fn_len);
 
