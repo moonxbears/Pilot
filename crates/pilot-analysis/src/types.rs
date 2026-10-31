@@ -79,6 +79,7 @@ pub enum TypeKind {
         fields: Vec<(String, TypeId)>, // sorted by field name for canonical identity
         is_open: bool,
         tail_var: Option<u32>,
+        name: Option<String>,
     },
     Typestate {
         base: TypeId,
@@ -98,6 +99,7 @@ pub enum TypeKind {
 pub struct TypeArena {
     types: Vec<TypeKind>,
     type_map: HashMap<TypeKind, TypeId>,
+    pub nominal_names: HashMap<TypeId, String>,
     next_var_id: u32,
     subst: HashMap<u32, TypeId>,
 }
@@ -113,6 +115,7 @@ impl TypeArena {
         let mut arena = Self {
             types: Vec::with_capacity(64),
             type_map: HashMap::with_capacity(64),
+            nominal_names: HashMap::new(),
             next_var_id: 100,
             subst: HashMap::new(),
         };
@@ -202,18 +205,37 @@ impl TypeArena {
         self.alloc(TypeKind::Adt { name, variants })
     }
 
+    pub fn register_nominal_name(&mut self, id: TypeId, name: String) {
+        self.nominal_names.insert(id, name);
+    }
+
     pub fn row_record_of(
+        &mut self,
+        fields: Vec<(String, TypeId)>,
+        is_open: bool,
+        tail_var: Option<u32>,
+    ) -> TypeId {
+        self.row_record_with_name(fields, is_open, tail_var, None)
+    }
+
+    pub fn row_record_with_name(
         &mut self,
         mut fields: Vec<(String, TypeId)>,
         is_open: bool,
         tail_var: Option<u32>,
+        name: Option<String>,
     ) -> TypeId {
         fields.sort_by(|a, b| a.0.cmp(&b.0));
-        self.alloc(TypeKind::RowRecord {
+        let id = self.alloc(TypeKind::RowRecord {
             fields,
             is_open,
             tail_var,
-        })
+            name: name.clone(),
+        });
+        if let Some(n) = name {
+            self.nominal_names.insert(id, n);
+        }
+        id
     }
 
     /// Forms a canonical, flattened, and deduplicated Union type from a set of types.
@@ -319,9 +341,9 @@ impl TypeArena {
                 let pr_types: Vec<_> = types.into_iter().map(|t| self.deep_prune(t)).collect();
                 self.union_of(pr_types)
             }
-            TypeKind::RowRecord { fields, is_open, tail_var } => {
+            TypeKind::RowRecord { fields, is_open, tail_var, name } => {
                 let pr_fields: Vec<_> = fields.into_iter().map(|(n, t)| (n, self.deep_prune(t))).collect();
-                self.row_record_of(pr_fields, is_open, tail_var)
+                self.row_record_with_name(pr_fields, is_open, tail_var, name)
             }
             _ => pruned,
         }
@@ -390,8 +412,8 @@ impl TypeArena {
                 Ok(self.function_of(unified_params, ret))
             }
             (
-                TypeKind::RowRecord { fields: f1, is_open: open1, tail_var: t1 },
-                TypeKind::RowRecord { fields: f2, is_open: open2, tail_var: t2 }
+                TypeKind::RowRecord { fields: f1, is_open: open1, tail_var: t1, name: n1 },
+                TypeKind::RowRecord { fields: f2, is_open: open2, tail_var: t2, name: n2 }
             ) => {
                 // Structural row unification
                 let mut merged_fields = HashMap::new();
@@ -419,7 +441,8 @@ impl TypeArena {
                 sorted.sort_by(|x, y| x.0.cmp(&y.0));
                 let is_open = open1 && open2;
                 let tail = if is_open { t1.or(t2) } else { None };
-                Ok(self.row_record_of(sorted, is_open, tail))
+                let resolved_name = n1.clone().or_else(|| n2.clone());
+                Ok(self.row_record_with_name(sorted, is_open, tail, resolved_name))
             }
             (TypeKind::RowRecord { fields, .. }, TypeKind::Map { key, value })
             | (TypeKind::Map { key, value }, TypeKind::RowRecord { fields, .. }) => {
@@ -507,7 +530,7 @@ impl TypeArena {
     ) -> Result<TypeId, String> {
         let row_type = self.prune(row_type);
         match self.get(row_type).clone() {
-            TypeKind::RowRecord { fields, .. } => {
+            TypeKind::RowRecord { fields, name, .. } => {
                 let mut map: HashMap<String, TypeId> = fields.into_iter().collect();
                 for (k, v) in required_fields {
                     if let Some(existing) = map.get(k) {
@@ -519,7 +542,7 @@ impl TypeArena {
                 }
                 let mut res: Vec<(String, TypeId)> = map.into_iter().collect();
                 res.sort_by(|a, b| a.0.cmp(&b.0));
-                Ok(self.row_record_of(res, false, None))
+                Ok(self.row_record_with_name(res, false, None, name))
             }
             _ => Err("Target is not a row record".to_string()),
         }
@@ -527,6 +550,11 @@ impl TypeArena {
 
     pub fn display(&self, id: TypeId) -> String {
         let id = self.prune(id);
+        if !id.is_primitive() {
+            if let Some(name) = self.nominal_names.get(&id) {
+                return name.clone();
+            }
+        }
         match self.get(id) {
             TypeKind::Void => "void".to_string(),
             TypeKind::Never => "never".to_string(),
@@ -563,7 +591,10 @@ impl TypeArena {
                 t_str.join(" | ")
             }
             TypeKind::TypeVar { id, .. } => format!("'T{}", id),
-            TypeKind::RowRecord { fields, is_open, .. } => {
+            TypeKind::RowRecord { fields, is_open, name, .. } => {
+                if let Some(n) = name {
+                    return n.clone();
+                }
                 let f_str: Vec<String> = fields
                     .iter()
                     .map(|(k, v)| format!("{}: {}", k, self.display(*v)))
@@ -578,6 +609,24 @@ impl TypeArena {
                 format!("{}@{}", self.display(*base), state_name)
             }
             TypeKind::Adt { name, .. } => name.clone(),
+        }
+    }
+
+    pub fn display_structural(&self, id: TypeId) -> String {
+        let id = self.prune(id);
+        match self.get(id) {
+            TypeKind::RowRecord { fields, is_open, .. } => {
+                let f_str: Vec<String> = fields
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, self.display(*v)))
+                    .collect();
+                if *is_open {
+                    format!("{{ {}, .. }}", f_str.join(", "))
+                } else {
+                    format!("{{ {} }}", f_str.join(", "))
+                }
+            }
+            _ => self.display(id),
         }
     }
 }

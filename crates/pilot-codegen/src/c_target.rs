@@ -263,7 +263,18 @@ impl<'a> CGenContext<'a> {
                     if self.declared_types.insert(name.to_string()) {
                         writeln!(&mut self.out, "typedef struct {} {{", name).unwrap();
                         let mut has_fields = false;
-                        if node.rhs != 0 {
+                        if let Some(rec_fields) = self.arena.record_fields.get(&(i as u32)) {
+                            for &(f_sym, f_ty_node) in rec_fields {
+                                let f_name = self.arena.interner.resolve(f_sym);
+                                let f_ty = if f_ty_node.is_some() {
+                                    self.resolve_c_type_from_spec(f_ty_node)
+                                } else {
+                                    "int64_t".to_string()
+                                };
+                                writeln!(&mut self.out, "    {} {};", f_ty, f_name).unwrap();
+                                has_fields = true;
+                            }
+                        } else if NodeId(node.rhs).is_some() && node.rhs != 0 {
                             let body = *self.arena.node(NodeId(node.rhs));
                             if body.node_kind() == NodeKind::BlockExpr {
                                 let children = self.arena.children_slice(body.lhs, body.rhs);

@@ -661,4 +661,82 @@ for e in emp_records {
         assert!(result2.is_ok(), "Expected clean analysis for parameterized sql(conn), got: {:?}", result2.diagnostics);
         assert_eq!(arena2.polyglot_conns.len(), 1);
     }
+
+    #[test]
+    fn test_nominal_type_display_vs_structural_representation() {
+        let code = r#"
+struct OddHeader {
+    var tag: u8
+    var flags: u8
+    var pad: u8
+}
+
+struct TransformFrame {
+    var x: i32
+    var y: i32
+    var z: i32
+    var weight: i64
+    var mask: u16
+    var hop: u8
+    var pad: u8
+}
+
+def step_frame(var f: TransformFrame, h: OddHeader, delta: i32) -> TransformFrame {
+    f.x = f.x + delta
+    return f
+}
+
+let f0 = TransformFrame(10, 20, 0x55, 7, 3, 1, 0);
+let h0 = OddHeader(3, 0x0F, 0xAA);
+let f1 = step_frame(f0, h0, 4);
+var arena: TransformFrame[] = [f0, f1];
+"#;
+        let arena = pilot_parser::parse(code);
+        let result = AnalysisPipeline::analyze(&arena, arena.root);
+        assert!(result.is_ok(), "Expected clean analysis: {:?}", result.diagnostics);
+
+        let mut f0_ty = None;
+        let mut h0_ty = None;
+        let mut f1_ty = None;
+        let mut arena_ty = None;
+        let mut step_frame_ty = None;
+
+        for (idx, node) in arena.nodes.iter().enumerate() {
+            match node.node_kind() {
+                pilot_ast::NodeKind::LetStmt | pilot_ast::NodeKind::VarStmt => {
+                    let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                    match name {
+                        "f0" => f0_ty = result.inferred_types.get(&(idx as u32)).copied(),
+                        "h0" => h0_ty = result.inferred_types.get(&(idx as u32)).copied(),
+                        "f1" => f1_ty = result.inferred_types.get(&(idx as u32)).copied(),
+                        "arena" => arena_ty = result.inferred_types.get(&(idx as u32)).copied(),
+                        _ => {}
+                    }
+                }
+                pilot_ast::NodeKind::FnDecl => {
+                    let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                    if name == "step_frame" {
+                        step_frame_ty = result.inferred_types.get(&(idx as u32)).copied();
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        assert!(f0_ty.is_some());
+        assert_eq!(result.types.display(f0_ty.unwrap()), "TransformFrame");
+        assert_eq!(result.types.display(h0_ty.unwrap()), "OddHeader");
+        assert_eq!(result.types.display(f1_ty.unwrap()), "TransformFrame");
+        assert_eq!(result.types.display(arena_ty.unwrap()), "List[TransformFrame]");
+
+        let sf_str = result.types.display(step_frame_ty.unwrap());
+        assert_eq!(sf_str, "(TransformFrame, OddHeader, i64) -> TransformFrame");
+
+        // Verify structural display returns full dictionary makeup
+        let structural = result.types.display_structural(f0_ty.unwrap());
+        assert!(structural.contains("weight: i64"));
+        assert!(structural.contains("mask: i64") || structural.contains("mask: u16"));
+        assert!(structural.starts_with("{ "));
+        assert!(structural.ends_with(" }"));
+    }
 }

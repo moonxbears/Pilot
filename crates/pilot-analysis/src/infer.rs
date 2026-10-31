@@ -1188,8 +1188,9 @@ impl TypeInferenceEngine {
                             let rec_name = arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
                             let fields = self.collect_decl_fields(arena, NodeId(c));
                             self.struct_fields.insert(rec_name.clone(), fields.clone());
-                            let ty = self.types.row_record_of(fields.clone(), true, None);
+                            let ty = self.types.row_record_with_name(fields.clone(), true, None, Some(rec_name.clone()));
                             self.type_defs.insert(rec_name.clone(), ty);
+                            self.types.register_nominal_name(ty, rec_name.clone());
                             let data_fields: Vec<TypeId> = fields
                                 .iter()
                                 .filter(|(n, t)| n != "this[]" && !matches!(self.types.get(self.types.prune(*t)), TypeKind::Function { .. }))
@@ -1246,11 +1247,13 @@ impl TypeInferenceEngine {
                                 }
                             }
                             let adt_ty = self.types.adt_of(adt_name.clone(), adt_variants_list);
+                            self.types.register_nominal_name(adt_ty, adt_name.clone());
                             self.type_defs.insert(adt_name.clone(), adt_ty);
                         }
                         NodeKind::ClassDecl | NodeKind::InterfaceDecl => {
                             let cls_name = arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
                             let ty = self.types.alloc(TypeKind::Primitive(cls_name.clone()));
+                            self.types.register_nominal_name(ty, cls_name.clone());
                             self.type_defs.insert(cls_name.clone(), ty);
                             let fields = self.collect_decl_fields(arena, NodeId(c));
                             self.struct_fields.insert(cls_name.clone(), fields);
@@ -1489,8 +1492,9 @@ impl TypeInferenceEngine {
                 let name = arena.interner.resolve(sym).to_string();
                 let fields = self.collect_decl_fields(arena, node_id);
                 self.struct_fields.insert(name.clone(), fields.clone());
-                let ty = self.types.row_record_of(fields.clone(), true, None);
+                let ty = self.types.row_record_with_name(fields.clone(), true, None, Some(name.clone()));
                 self.type_defs.insert(name.clone(), ty);
+                self.types.register_nominal_name(ty, name.clone());
                 let data_fields: Vec<TypeId> = fields
                     .iter()
                     .filter(|(n, t)| n != "this[]" && !matches!(self.types.get(self.types.prune(*t)), TypeKind::Function { .. }))
@@ -1522,6 +1526,7 @@ impl TypeInferenceEngine {
                     .get(&name)
                     .copied()
                     .unwrap_or_else(|| self.types.adt_of(name.clone(), Vec::new()));
+                self.types.register_nominal_name(ty, name.clone());
                 self.type_defs.insert(name, ty);
                 ty
             }
@@ -1530,6 +1535,7 @@ impl TypeInferenceEngine {
                 let sym = SymbolId(node.lhs);
                 let name = arena.interner.resolve(sym).to_string();
                 let ty = self.types.alloc(TypeKind::Primitive(name.clone()));
+                self.types.register_nominal_name(ty, name.clone());
                 self.type_defs.insert(name.clone(), ty);
                 let fields = self.collect_decl_fields(arena, node_id);
                 self.struct_fields.insert(name.clone(), fields);

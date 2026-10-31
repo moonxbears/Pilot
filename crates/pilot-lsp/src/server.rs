@@ -781,7 +781,7 @@ impl LspServer {
                             .get(&(idx as u32))
                             .copied()
                             .unwrap_or(pilot_analysis::TypeId::ANY);
-                        let fields_str = analysis.types.display(ty_id);
+                        let fields_str = analysis.types.display_structural(ty_id);
                         let md = format!("```pilot\n{} {} {}\n```\n\n*Pilot Value Type*", kw, name, fields_str);
                         return make_hover_card(&md);
                     }

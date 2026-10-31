@@ -716,4 +716,46 @@ for t in transactions {
         println!("total_hardware_spend hover: {}", resp_spend);
         assert!(resp_spend.contains("total_hardware_spend: f64"), "Expected f64, got: {}", resp_spend);
     }
+
+    #[test]
+    fn test_nominal_class_and_struct_hover_display() {
+        let mut server = LspServer::new();
+        let uri = "file:///workspace/nominal_test.pilot";
+        let code = "struct TransformFrame {\n    var x: i32\n    var y: i32\n    var weight: i64\n}\n\nlet f0 = TransformFrame(10, 20, 7);\nvar arena: TransformFrame[] = [f0];\n";
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+            uri,
+            code.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+        );
+        server.handle_message(&did_open);
+
+        // 1. Hover on variable f0 (line 6, character 4)
+        let hover_f0 = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":6,"character":4}}}}}}"#,
+            uri
+        );
+        let resp_f0 = server.handle_message(&hover_f0).expect("Hover on f0");
+        println!("f0 hover: {}", resp_f0);
+        assert!(resp_f0.contains("f0: TransformFrame"), "Expected clean nominal type TransformFrame, got: {}", resp_f0);
+        assert!(!resp_f0.contains("weight: i64"), "Variable hover should NOT dump internal fields dictionary: {}", resp_f0);
+
+        // 2. Hover on variable arena (line 7, character 4)
+        let hover_arena = format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":7,"character":4}}}}}}"#,
+            uri
+        );
+        let resp_arena = server.handle_message(&hover_arena).expect("Hover on arena");
+        println!("arena hover: {}", resp_arena);
+        assert!(resp_arena.contains("arena: List[TransformFrame]"), "Expected List[TransformFrame], got: {}", resp_arena);
+
+        // 3. Hover on struct declaration definition itself (line 0, character 8)
+        let hover_decl = format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":8}}}}}}"#,
+            uri
+        );
+        let resp_decl = server.handle_message(&hover_decl).expect("Hover on struct declaration");
+        println!("decl hover: {}", resp_decl);
+        assert!(resp_decl.contains("struct TransformFrame {"), "Declaration hover should show fields: {}", resp_decl);
+        assert!(resp_decl.contains("weight: i64"));
+    }
 }
