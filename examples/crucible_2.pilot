@@ -1,0 +1,275 @@
+// ============================================================================
+// CRUCIBLE-II: MONOMORPHIZATION, CLOSURES & SLICE ALIASING SPECIFICATION
+// Expected 64-bit Output: 0x008A00D00160015E
+// ============================================================================
+
+// --- PILLAR 1: GENERIC MONOMORPHIZATION, LAYOUT INVERSION & ZST STRIDE ---
+
+struct Empty {
+} // Zero-Sized Type: sizeof(Empty) == 0, alignof(Empty) == 1
+
+struct Pair_u8_i32 {
+    var first: u8
+    var second: i32
+    var tag: u8 // Trailing 1-byte field forces tail-padding calculation per <A, B>
+}
+
+struct Pair_i32_u8 {
+    var first: i32
+    var second: u8
+    var tag: u8
+}
+
+// Returns a newly monomorphized Pair<B, A> with inverted field alignments
+def swap_pair(p: Pair_u8_i32) -> Pair_i32_u8 {
+    return Pair_i32_u8(p.second, p.first, p.tag + 1)
+}
+
+struct Pair_Empty_i16 {
+    var first: Empty
+    var second: i16
+    var tag: u8
+}
+
+struct Pair_u8_u8 {
+    var first: u8
+    var second: u8
+    var tag: u8
+}
+
+struct Pair_Nested {
+    var first: Pair_u8_u8
+    var second: i32
+    var tag: u8
+}
+
+def test_pillar_1() -> u64 {
+    // 1. Invert <u8, i32> (12 bytes) into <i32, u8> (8 bytes)
+    let p0 = Pair_u8_i32(5, 200, 9)
+    let p1 = swap_pair(p0) // first: 200, second: 5, tag: 10 -> 215
+    let swap_sum: i32 = p1.first + i32(p1.second) + i32(p1.tag)
+
+    // 2. Array of generic structs containing a Zero-Sized Type (ZST)
+    let z_arr: Pair_Empty_i16[] = [
+        Pair_Empty_i16(Empty(), 11, 1),
+        Pair_Empty_i16(Empty(), 22, 2),
+        Pair_Empty_i16(Empty(), 33, 3)
+    ]
+    var zst_sum: i32 = 0
+    for i in 0..3 {
+        zst_sum = zst_sum + i32(z_arr[i].second) + i32(z_arr[i].tag)
+    } // (11+1) + (22+2) + (33+3) = 72
+
+    // 3. Nested generic instantiation
+    let nested = Pair_Nested(
+        Pair_u8_u8(4, 6, 1),
+        50,
+        2
+    )
+    let nest_sum: i32 = i32(nested.first.first) + i32(nested.first.second)
+                      + i32(nested.first.tag) + nested.second + i32(nested.tag) // 63
+
+    let total = swap_sum + zst_sum + nest_sum
+    return u64(total) & 0xFFFF // Expected: 215 + 72 + 63 = 350 (0x015E)
+}
+
+// --- PILLAR 2: ESCAPING CLOSURES, LIVE MUTABLE UPVALUES & LOOP CAPTURES ---
+
+class Stepper {
+    var current: i32 = 0
+    var step: i32 = 0
+}
+
+def make_stepper(base: i32, step: i32) -> Stepper {
+    let s = Stepper()
+    s.current = base
+    s.step = step
+    return s
+}
+
+def step_invoke(s: Stepper, delta: i32) -> i32 {
+    s.current = s.current + s.step + delta
+    return s.current
+}
+
+class TallyCell {
+    var value: i32 = 0
+}
+
+def bump(cell: TallyCell, v: i32) -> i32 {
+    cell.value = cell.value + v
+    return cell.value
+}
+
+class LoopEnv {
+    var local_i: i32 = 0
+}
+
+def loop_invoke(env: LoopEnv, x: i32) -> i32 {
+    return x + env.local_i
+}
+
+def test_pillar_2() -> u64 {
+    // 1. Escaping stateful closure
+    let stepper = make_stepper(100, 5)
+    let c1 = step_invoke(stepper, 2) // 100 + 5 + 2 = 107
+    let c2 = step_invoke(stepper, 3) // 107 + 5 + 3 = 115
+
+    // 2. Shared mutable upvalue in active frame (must capture by ref/cell, not stale copy)
+    let outer_tally = TallyCell()
+    outer_tally.value = 20
+    let b1 = bump(outer_tally, 4)               // outer_tally = 24, b1 = 24
+    outer_tally.value = outer_tally.value + 10 // Mutate outside closure -> 34
+    let b2 = bump(outer_tally, 6)               // Must see 34 + 6 = 40, NOT 24 + 6 = 30
+
+    // 3. Per-iteration lexical binding inside a loop
+    var funcs: LoopEnv[] = [LoopEnv(), LoopEnv(), LoopEnv()]
+    for i in 0..3 {
+        let env = LoopEnv()
+        env.local_i = (i32(i) + 1) * 10 // 10, 20, 30
+        funcs[int(i)] = env
+    }
+    // Each closure captured a fresh per-iteration heap environment
+    let loop_cap = loop_invoke(funcs[0], 1) + loop_invoke(funcs[1], 2) + loop_invoke(funcs[2], 3) // 11 + 22 + 33 = 66
+
+    let total = c1 + c2 + b1 + b2 + loop_cap
+    return u64(total) & 0xFFFF // Expected: 107 + 115 + 24 + 40 + 66 = 352 (0x0160)
+}
+
+// --- PILLAR 3: TRANSITIVE SUB-SLICING, ZERO-LENGTH VIEWS & ALIAS ROTATION ---
+
+struct Slice_i32 {
+    var data: i32[]
+    var offset: int
+    var len: int
+}
+
+def make_slice(arr: i32[], start: int, end: int) -> Slice_i32 {
+    return Slice_i32(arr, start, end - start)
+}
+
+def sub_slice(s: Slice_i32, start: int, end: int) -> Slice_i32 {
+    return Slice_i32(s.data, s.offset + start, end - start)
+}
+
+def slice_get(s: Slice_i32, i: int) -> i32 {
+    return s.data[s.offset + i]
+}
+
+def slice_set(s: Slice_i32, i: int, val: i32) -> void {
+    s.data[s.offset + i] = val
+}
+
+def rotate_left_one(slice: Slice_i32) -> void {
+    let n = slice.len
+    if n <= 1 { return }
+    let first = slice_get(slice, 0)
+    for i in 0..(n - 1) {
+        slice_set(slice, i, slice_get(slice, i + 1))
+    }
+    slice_set(slice, n - 1, first)
+}
+
+def test_pillar_3() -> u64 {
+    var data: i32[] = [10, 20, 30, 40, 50, 60, 70, 80]
+
+    // 1. Transitive sub-slice: s2 is a window into s1, which is a window into data
+    let s1 = make_slice(data, 1, 7) // [20, 30, 40, 50, 60, 70], len = 6
+    let s1_len = s1.len
+
+    let s2 = sub_slice(s1, 2, 5)   // [40, 50, 60] (data[3..6]), len = 3
+    let s2_len = s2.len
+
+    // Mutate through inner window s2
+    slice_set(s2, 0, slice_get(s2, 0) + 5)  // data[3] (s1[2]) becomes 45
+    slice_set(s2, 2, slice_get(s2, 2) - 10) // data[5] (s1[4]) becomes 50
+
+    // 2. Degenerate zero-length slice must have len 0 and execute 0 loop iterations
+    let empty = sub_slice(s2, 1, 1)
+    var empty_sum: i32 = 0
+    for i in 0..empty.len {
+        empty_sum = empty_sum + slice_get(empty, i) + 999
+    }
+
+    // 3. In-place rotation on s1 must reflect s2's mutations and update data
+    rotate_left_one(s1) // s1 becomes [30, 45, 50, 50, 70, 20]
+
+    let total = data[1] + data[2] + data[4] + data[6] + (s1_len * 10) + s2_len + i64(empty_sum)
+    return u64(total) & 0xFFFF // Expected: 30 + 45 + 50 + 20 + 60 + 3 + 0 = 208 (0x00D0)
+}
+
+// --- PILLAR 4: GENERIC HIGHER-ORDER SLICE WINDOWING ---
+
+struct Slice_i16 {
+    var data: i16[]
+    var offset: int
+    var len: int
+}
+
+def make_slice_i16(arr: i16[], start: int, end: int) -> Slice_i16 {
+    return Slice_i16(arr, start, end - start)
+}
+
+def sub_slice_i16(s: Slice_i16, start: int, end: int) -> Slice_i16 {
+    return Slice_i16(s.data, s.offset + start, end - start)
+}
+
+def slice_get_i16(s: Slice_i16, i: int) -> i16 {
+    return s.data[s.offset + i]
+}
+
+class FoldContext {
+    var win_count: i32 = 0
+    var weight: i32 = 0
+}
+
+def fold_callback(ctx: FoldContext, w: Slice_i16) -> i32 {
+    ctx.win_count = ctx.win_count + 1
+    return (i32(slice_get_i16(w, 0)) + i32(slice_get_i16(w, 2))) * ctx.weight
+}
+
+def window_fold(items: Slice_i16, win_size: int, ctx: FoldContext) -> i32 {
+    var acc: i32 = 0
+    let limit = items.len - win_size + 1
+    for i in 0..limit {
+        let win = sub_slice_i16(items, i, i + win_size)
+        acc = acc + fold_callback(ctx, win)
+    }
+    return acc
+}
+
+def test_pillar_4() -> u64 {
+    var vals: i16[] = [2, 4, 6, 8, 10]
+    let ctx = FoldContext()
+    ctx.win_count = 0
+    ctx.weight = 3
+
+    let items = make_slice_i16(vals, 0, 5)
+    let fold_sum = window_fold(items, 3, ctx)
+
+    let total = fold_sum + (ctx.win_count * 10)
+    return u64(total) & 0xFFFF // Expected: 108 + 30 = 138 (0x008A)
+}
+
+def main() -> u64 {
+    let p1 = test_pillar_1()
+    let p2 = test_pillar_2()
+    let p3 = test_pillar_3()
+    let p4 = test_pillar_4()
+
+    print("--- CRUCIBLE-II TORTURE BENCHMARK ---")
+    print("Pillar 1 (Expected 350 / 0x015E):")
+    print(p1)
+    print("Pillar 2 (Expected 352 / 0x0160):")
+    print(p2)
+    print("Pillar 3 (Expected 208 / 0x00D0):")
+    print(p3)
+    print("Pillar 4 (Expected 138 / 0x008A):")
+    print(p4)
+
+    let combined = (p4 << 48) | (p3 << 32) | (p2 << 16) | p1
+    print("Combined 64-bit Output (Expected 38844440162337118 / 0x008A00D00160015E):")
+    print(combined)
+
+    return combined
+}

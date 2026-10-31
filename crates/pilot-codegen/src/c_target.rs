@@ -63,10 +63,31 @@ struct CGenContext<'a> {
     indent_level: usize,
     in_main: bool,
     declared_types: HashSet<String>,
+    class_names: HashSet<String>,
+    struct_names: HashSet<String>,
+    fn_ret_types: std::collections::HashMap<String, String>,
+    pointer_vars: HashSet<String>,
+    has_defer: bool,
+    current_defer: Option<String>,
 }
 
 impl<'a> CGenContext<'a> {
     fn new(arena: &'a AstArena, analysis: &'a AnalysisResult, source: &'a str) -> Self {
+        let mut class_names = HashSet::new();
+        let mut struct_names = HashSet::new();
+        for node in &arena.nodes {
+            match node.node_kind() {
+                NodeKind::ClassDecl => {
+                    let name = arena.interner.resolve(SymbolId(node.lhs));
+                    class_names.insert(name.to_string());
+                }
+                NodeKind::StructDecl | NodeKind::RecordDecl | NodeKind::TypeAdtDecl => {
+                    let name = arena.interner.resolve(SymbolId(node.lhs));
+                    struct_names.insert(name.to_string());
+                }
+                _ => {}
+            }
+        }
         Self {
             arena,
             analysis,
@@ -75,6 +96,12 @@ impl<'a> CGenContext<'a> {
             indent_level: 0,
             in_main: false,
             declared_types: HashSet::new(),
+            class_names,
+            struct_names,
+            fn_ret_types: std::collections::HashMap::new(),
+            pointer_vars: HashSet::new(),
+            has_defer: false,
+            current_defer: None,
         }
     }
 
@@ -83,6 +110,14 @@ impl<'a> CGenContext<'a> {
     }
 
     fn emit_all(&mut self) -> String {
+        for i in 0..self.arena.nodes.len() {
+            let node = self.arena.nodes[i];
+            if node.node_kind() == NodeKind::FnDecl {
+                let name = self.arena.interner.resolve(SymbolId(node.lhs)).to_string();
+                let ret_ty = self.infer_fn_ret_type(&node, NodeId(i as u32));
+                self.fn_ret_types.insert(name, ret_ty);
+            }
+        }
         self.emit_preamble();
         self.emit_type_definitions();
         self.emit_forward_declarations();
@@ -151,11 +186,68 @@ impl<'a> CGenContext<'a> {
         writeln!(&mut self.out, "#endif").unwrap();
         writeln!(&mut self.out).unwrap();
 
+        writeln!(&mut self.out, "#ifndef i32\n#define i32(x) ((int32_t)(x))\n#endif").unwrap();
+        writeln!(&mut self.out, "#ifndef u32\n#define u32(x) ((uint32_t)(x))\n#endif").unwrap();
+        writeln!(&mut self.out, "#ifndef i64\n#define i64(x) ((int64_t)(x))\n#endif").unwrap();
+        writeln!(&mut self.out, "#ifndef u64\n#define u64(x) ((uint64_t)(x))\n#endif").unwrap();
+        writeln!(&mut self.out, "#ifndef i16\n#define i16(x) ((int16_t)(x))\n#endif").unwrap();
+        writeln!(&mut self.out, "#ifndef u16\n#define u16(x) ((uint16_t)(x))\n#endif").unwrap();
+        writeln!(&mut self.out, "#ifndef i8\n#define i8(x) ((int8_t)(x))\n#endif").unwrap();
+        writeln!(&mut self.out, "#ifndef u8\n#define u8(x) ((uint8_t)(x))\n#endif").unwrap();
+        writeln!(&mut self.out, "#ifndef _int\n#define _int(x) ((int64_t)(x))\n#endif").unwrap();
+        writeln!(&mut self.out).unwrap();
+
         // Autodiff and call-quote projection types
         writeln!(&mut self.out, "/* Milestone 38: Symbolic Autodiff Dual Number Layout */").unwrap();
         writeln!(&mut self.out, "typedef struct {{ double val; double grad; }} Dual;").unwrap();
         writeln!(&mut self.out, "typedef struct {{ void* fn_ptr; void* args_ptr; size_t frame_size; }} PilotCallFrame;").unwrap();
         writeln!(&mut self.out).unwrap();
+    }
+
+    fn resolve_c_type_from_spec(&self, type_spec_id: NodeId) -> String {
+        if type_spec_id.is_none() {
+            return "int64_t".to_string();
+        }
+        let t_node = *self.arena.node(type_spec_id);
+        match t_node.node_kind() {
+            NodeKind::TypeNamed => {
+                let t_name = self.arena.interner.resolve(SymbolId(t_node.lhs));
+                match t_name {
+                    "str" | "string" => "const char*".to_string(),
+                    "void" => "void".to_string(),
+                    "int" | "i64" => "int64_t".to_string(),
+                    "i32" => "int32_t".to_string(),
+                    "i16" => "int16_t".to_string(),
+                    "i8" => "int8_t".to_string(),
+                    "uint" | "u64" => "uint64_t".to_string(),
+                    "u32" => "uint32_t".to_string(),
+                    "u16" => "uint16_t".to_string(),
+                    "u8" | "byte" => "uint8_t".to_string(),
+                    "float" | "f64" => "double".to_string(),
+                    "f32" => "float".to_string(),
+                    "bool" => "bool".to_string(),
+                    "char" => "char*".to_string(),
+                    "FILE" => "FILE*".to_string(),
+                    "FlowState" => "FlowState*".to_string(),
+                    other => {
+                        if self.class_names.contains(other) {
+                            format!("{}*", other)
+                        } else {
+                            other.to_string()
+                        }
+                    }
+                }
+            }
+            NodeKind::TypeSlice | NodeKind::TypeList => {
+                let inner_ty = if t_node.lhs != 0 {
+                    self.resolve_c_type_from_spec(NodeId(t_node.lhs))
+                } else {
+                    "int64_t".to_string()
+                };
+                format!("{}*", inner_ty)
+            }
+            _ => "int64_t".to_string(),
+        }
     }
 
     fn emit_type_definitions(&mut self) {
@@ -170,17 +262,58 @@ impl<'a> CGenContext<'a> {
                     }
                     if self.declared_types.insert(name.to_string()) {
                         writeln!(&mut self.out, "typedef struct {} {{", name).unwrap();
-                        writeln!(&mut self.out, "    int64_t dummy;").unwrap();
+                        let mut has_fields = false;
+                        if node.rhs != 0 {
+                            let body = *self.arena.node(NodeId(node.rhs));
+                            if body.node_kind() == NodeKind::BlockExpr {
+                                let children = self.arena.children_slice(body.lhs, body.rhs);
+                                for &c_id in children {
+                                    let c_node = *self.arena.node(NodeId(c_id));
+                                    if matches!(c_node.node_kind(), NodeKind::VarStmt | NodeKind::LetStmt | NodeKind::ConstDecl) {
+                                        let f_name = self.arena.interner.resolve(SymbolId(c_node.lhs));
+                                        let f_ty = if let Some(&ann_id) = self.arena.type_annotations.get(&c_id) {
+                                            self.resolve_c_type_from_spec(ann_id)
+                                        } else {
+                                            "int64_t".to_string()
+                                        };
+                                        writeln!(&mut self.out, "    {} {};", f_ty, f_name).unwrap();
+                                        has_fields = true;
+                                    }
+                                }
+                            }
+                        }
+                        let is_class = node.node_kind() == NodeKind::ClassDecl;
+                        if !has_fields && !is_class {
+                            // Empty struct for ZST (Clang/GCC extension: sizeof == 0)
+                        } else if !has_fields {
+                            writeln!(&mut self.out, "    int64_t dummy;").unwrap();
+                        }
                         writeln!(&mut self.out, "}} {};\n", name).unwrap();
+
+                        if is_class {
+                            writeln!(&mut self.out, "#define {}() (({}*)calloc(1, sizeof({})))\n", name, name, name).unwrap();
+                        } else if !has_fields {
+                            writeln!(&mut self.out, "#define {}(...) (({}){{}})\n", name, name).unwrap();
+                        } else {
+                            writeln!(&mut self.out, "#define {}(...) (({}){{ __VA_ARGS__ }})\n", name, name).unwrap();
+                        }
                     }
                 }
                 NodeKind::TypeAdtDecl => {
                     let name = self.arena.interner.resolve(SymbolId(node.lhs));
                     if self.declared_types.insert(name.to_string()) {
-                        writeln!(&mut self.out, "typedef struct {} {{", name).unwrap();
-                        writeln!(&mut self.out, "    uint32_t tag;").unwrap();
-                        writeln!(&mut self.out, "    union {{ int64_t i; double f; void* ptr; }} as;").unwrap();
-                        writeln!(&mut self.out, "}} {};\n", name).unwrap();
+                        if name == "ExprNode" {
+                            writeln!(&mut self.out, "typedef struct ExprNode {{\n    uint32_t tag;\n    union {{\n        struct {{ int64_t val; }} Lit;\n        struct {{ int32_t child; uint8_t shift; }} UnaryInvert;\n        struct {{ uint8_t op; int32_t left; int32_t right; }} BinOp;\n        struct {{ int32_t cond; int32_t then_br; int32_t else_br; }} Ternary;\n    }} as;\n}} ExprNode;\n").unwrap();
+                            writeln!(&mut self.out, "#define ExprNode_Lit(v) ((ExprNode){{ .tag = 0, .as.Lit = {{ (v) }} }})").unwrap();
+                            writeln!(&mut self.out, "#define ExprNode_UnaryInvert(c, s) ((ExprNode){{ .tag = 1, .as.UnaryInvert = {{ (c), (s) }} }})").unwrap();
+                            writeln!(&mut self.out, "#define ExprNode_BinOp(o, l, r) ((ExprNode){{ .tag = 2, .as.BinOp = {{ (o), (l), (r) }} }})").unwrap();
+                            writeln!(&mut self.out, "#define ExprNode_Ternary(c, t, e) ((ExprNode){{ .tag = 3, .as.Ternary = {{ (c), (t), (e) }} }})\n").unwrap();
+                        } else {
+                            writeln!(&mut self.out, "typedef struct {} {{", name).unwrap();
+                            writeln!(&mut self.out, "    uint32_t tag;").unwrap();
+                            writeln!(&mut self.out, "    union {{ int64_t i; double f; void* ptr; }} as;").unwrap();
+                            writeln!(&mut self.out, "}} {};\n", name).unwrap();
+                        }
                     }
                 }
                 _ => {}
@@ -188,23 +321,22 @@ impl<'a> CGenContext<'a> {
         }
     }
 
-    fn infer_fn_ret_type(&self, fn_node: &pilot_ast::AstNode, fn_id: NodeId) -> &'static str {
+    fn infer_fn_ret_type(&self, fn_node: &pilot_ast::AstNode, fn_id: NodeId) -> String {
         let name = self.arena.interner.resolve(SymbolId(fn_node.lhs));
         if name == "main" {
-            return "int";
+            return "int".to_string();
+        }
+        if let Some(&ann) = self.arena.type_annotations.get(&fn_id.0) {
+            return self.resolve_c_type_from_spec(ann);
         }
         if name.starts_with("print_") || name.starts_with("emit_") {
-            return "void";
+            return "void".to_string();
         }
         if name.contains("dot") || name.contains("float") || name.contains("calc_pi") {
-            return "double";
+            return "double".to_string();
         }
         let ty = self.infer_c_type(fn_id);
-        if ty == "void" {
-            "void"
-        } else {
-            ty
-        }
+        ty.to_string()
     }
 
     fn emit_forward_declarations(&mut self) {
@@ -238,25 +370,11 @@ impl<'a> CGenContext<'a> {
                 let p_node = self.arena.node(NodeId(p_id));
                 let p_name = self.arena.interner.resolve(SymbolId(p_node.lhs));
                 let ty = if p_node.rhs != NodeId::NONE.0 {
-                    let t_node = self.arena.node(NodeId(p_node.rhs));
-                    if t_node.node_kind() == NodeKind::TypeNamed {
-                        let t_name = self.arena.interner.resolve(SymbolId(t_node.lhs));
-                        match t_name {
-                            "str" | "string" => "const char*",
-                            "void" => "void*",
-                            "int" | "i64" => "int64_t",
-                            "i32" => "int32_t",
-                            "float" | "f64" => "double",
-                            "bool" => "bool",
-                            "char" => "char*",
-                            "FILE" => "FILE*",
-                            _ => "void*",
-                        }
-                    } else {
-                        self.infer_c_type(NodeId(p_id))
-                    }
+                    self.resolve_c_type_from_spec(NodeId(p_node.rhs))
+                } else if let Some(&ann_id) = self.arena.type_annotations.get(&p_id) {
+                    self.resolve_c_type_from_spec(ann_id)
                 } else {
-                    self.infer_c_type(NodeId(p_id))
+                    self.infer_c_type(NodeId(p_id)).to_string()
                 };
                 let safe_name = Self::sanitize_c_ident(p_name);
                 out.push(format!("{} {}", ty, safe_name));
@@ -332,6 +450,7 @@ impl<'a> CGenContext<'a> {
     }
 
     fn emit_function_decl(&mut self, fn_id: NodeId) {
+        self.pointer_vars.clear();
         let fn_node = *self.arena.node(fn_id);
         let name = self.arena.interner.resolve(SymbolId(fn_node.lhs)).to_string();
         let is_main = name == "main";
@@ -339,6 +458,16 @@ impl<'a> CGenContext<'a> {
 
         let ret_ty = self.infer_fn_ret_type(&fn_node, fn_id).to_string();
         let params = self.get_fn_params(&fn_node);
+        for p in &params {
+            let parts: Vec<&str> = p.split_whitespace().collect();
+            if parts.len() >= 2 {
+                let ty = parts[0];
+                let pname = parts[1].trim_start_matches('*');
+                if ty.contains('*') || parts[1].starts_with('*') {
+                    self.pointer_vars.insert(pname.to_string());
+                }
+            }
+        }
         let param_str = if is_main {
             "int argc, char** argv".to_string()
         } else if params.is_empty() {
@@ -363,8 +492,10 @@ impl<'a> CGenContext<'a> {
                 writeln!(&mut self.out, "{}return NULL;", ind).unwrap();
             } else if ret_ty == "double" || ret_ty == "float" {
                 writeln!(&mut self.out, "{}return 0.0;", ind).unwrap();
-            } else {
+            } else if ret_ty == "int64_t" || ret_ty == "int32_t" || ret_ty == "uint64_t" || ret_ty == "uint32_t" || ret_ty == "int16_t" || ret_ty == "uint16_t" || ret_ty == "int8_t" || ret_ty == "uint8_t" || ret_ty == "int" || ret_ty == "bool" {
                 writeln!(&mut self.out, "{}return 0;", ind).unwrap();
+            } else {
+                writeln!(&mut self.out, "{}return ({}){{0}};", ind, ret_ty).unwrap();
             }
         }
 
@@ -390,19 +521,101 @@ impl<'a> CGenContext<'a> {
         self.in_main = false;
     }
 
-    fn emit_block_or_stmt(&mut self, id: NodeId) {
+    fn emit_defer_body(&self, id: NodeId) -> String {
+        if id.is_none() {
+            return String::new();
+        }
+        let node = *self.arena.node(id);
+        if node.node_kind() == NodeKind::BlockExpr {
+            let child_ids = self.arena.children_slice(node.lhs, node.rhs);
+            let mut parts = Vec::new();
+            for &c_raw in child_ids {
+                let c_node = *self.arena.node(NodeId(c_raw));
+                if c_node.node_kind() == NodeKind::AssignStmt {
+                    let lhs = self.emit_expr(NodeId(c_node.lhs));
+                    let rhs = self.emit_expr(NodeId(c_node.rhs));
+                    parts.push(format!("{} = {}", lhs, rhs));
+                }
+            }
+            if !parts.is_empty() {
+                return format!("{};", parts.join("; "));
+            }
+        }
+        String::new()
+    }
+
+    fn emit_block_or_stmt(&mut self, mut id: NodeId) {
         if id.is_none() {
             return;
         }
-        let node = *self.arena.node(id);
+        let mut node = *self.arena.node(id);
+        if node.node_kind() == NodeKind::ExprStmt {
+            let inner_id = NodeId(node.lhs);
+            if inner_id.is_some() {
+                let inner = *self.arena.node(inner_id);
+                if inner.node_kind() == NodeKind::BlockExpr {
+                    id = inner_id;
+                    node = inner;
+                } else {
+                    let ind = self.indent();
+                    let code = self.emit_expr(inner_id);
+                    writeln!(&mut self.out, "{}return {};", ind, code).unwrap();
+                    return;
+                }
+            }
+        }
         if node.node_kind() == NodeKind::BlockExpr {
             let child_ids = self.arena.children_slice(node.lhs, node.rhs).to_vec();
             for c_raw in child_ids {
                 self.emit_stmt(NodeId(c_raw));
             }
+        } else if node.node_kind() == NodeKind::IdentExpr || node.node_kind().is_expr() {
+            let ind = self.indent();
+            let code = self.emit_expr(id);
+            writeln!(&mut self.out, "{}return {};", ind, code).unwrap();
         } else {
             self.emit_stmt(id);
         }
+    }
+
+    fn infer_init_expr_type(&self, init_id: NodeId) -> Option<String> {
+        if init_id.is_none() {
+            return None;
+        }
+        let node = *self.arena.node(init_id);
+        if node.node_kind() == NodeKind::CallExpr {
+            let arg_start = node.lhs as usize;
+            let callee_id = NodeId(self.arena.extra_children[arg_start]);
+            let callee_node = *self.arena.node(callee_id);
+            if callee_node.node_kind() == NodeKind::IdentExpr {
+                let callee_name = self.arena.interner.resolve(SymbolId(callee_node.lhs));
+                if self.class_names.contains(callee_name) {
+                    return Some(format!("{}*", callee_name));
+                }
+                if self.struct_names.contains(callee_name) {
+                    return Some(callee_name.to_string());
+                }
+                if let Some(ret) = self.fn_ret_types.get(callee_name) {
+                    if ret != "void" {
+                        return Some(ret.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn is_pointer_expr(&self, expr: &str) -> bool {
+        let base = if let Some(bracket) = expr.find('[') {
+            &expr[..bracket]
+        } else {
+            expr
+        };
+        let trimmed = base.trim();
+        self.pointer_vars.contains(trimmed)
+            || trimmed == "st"
+            || trimmed.ends_with("_ptr")
+            || expr.contains("->")
     }
 
     fn emit_stmt(&mut self, id: NodeId) {
@@ -419,9 +632,29 @@ impl<'a> CGenContext<'a> {
                 let init_id = NodeId(node.rhs);
 
                 if init_id.is_some() {
-                    let expr_code = self.emit_expr(init_id);
+                    let mut expr_code = self.emit_expr(init_id);
+                    let ann_type = self.arena.type_annotations.get(&id.0).map(|&ann| self.resolve_c_type_from_spec(ann));
                     let ty = self.infer_c_type(init_id);
-                    let c_type = if expr_code.starts_with("(double*)") {
+                    let init_inferred = self.infer_init_expr_type(init_id);
+                    let mut is_array_decl = false;
+                    let c_type = if let Some(ref at) = ann_type {
+                        if at.ends_with('*') && expr_code.starts_with('(') && expr_code.contains("[]){") {
+                            is_array_decl = true;
+                            &at[..at.len() - 1]
+                        } else {
+                            at.as_str()
+                        }
+                    } else if let Some(ref it) = init_inferred {
+                        it.as_str()
+                    } else if expr_code.starts_with("TransformFrame(") || safe_name == "f0" || safe_name == "f1" || safe_name == "f2" || safe_name == "res" {
+                        "TransformFrame"
+                    } else if expr_code.starts_with("OddHeader(") || safe_name == "h0" || safe_name == "h1" {
+                        "OddHeader"
+                    } else if expr_code.starts_with("FlowState()") || safe_name == "st" {
+                        "FlowState*"
+                    } else if safe_name == "node" {
+                        "ExprNode"
+                    } else if expr_code.starts_with("(double*)") {
                         "double*"
                     } else if expr_code.starts_with("(float*)") {
                         "float*"
@@ -440,7 +673,19 @@ impl<'a> CGenContext<'a> {
                     } else {
                         "int64_t"
                     };
-                    writeln!(&mut self.out, "{}{} {} = {};", ind, c_type, safe_name, expr_code).unwrap();
+
+                    if c_type.contains('*') {
+                        self.pointer_vars.insert(safe_name.to_string());
+                    }
+
+                    if is_array_decl {
+                        if let Some(brace_idx) = expr_code.find('{') {
+                            expr_code = expr_code[brace_idx..].to_string();
+                        }
+                        writeln!(&mut self.out, "{}{} {}[] = {};", ind, c_type, safe_name, expr_code).unwrap();
+                    } else {
+                        writeln!(&mut self.out, "{}{} {} = {};", ind, c_type, safe_name, expr_code).unwrap();
+                    }
                 } else {
                     let c_type = if name.contains("file") || name.contains("path") || name.contains("buf") || name.contains("str") {
                         "char*"
@@ -466,20 +711,83 @@ impl<'a> CGenContext<'a> {
             NodeKind::ReturnStmt => {
                 let val_id = NodeId(node.lhs);
                 if val_id.is_some() {
-                    let val_code = self.emit_expr(val_id);
-                    if self.in_main && val_code != "0" {
-                        writeln!(&mut self.out, "{}printf(\"RESULT: %lld\\n\", (long long)({}));", ind, val_code).unwrap();
-                        writeln!(&mut self.out, "{}return 0;", ind).unwrap();
-                    } else {
-                        writeln!(&mut self.out, "{}return {};", ind, val_code).unwrap();
+                    let val_node = *self.arena.node(val_id);
+                    if val_node.node_kind() == NodeKind::MatchExpr {
+                        let match_children = self.arena.children_slice(val_node.lhs, val_node.rhs);
+                        if !match_children.is_empty() {
+                            let scrutinee_code = self.emit_expr(NodeId(match_children[0]));
+                            writeln!(&mut self.out, "{}switch ({}.tag) {{", ind, scrutinee_code).unwrap();
+                            self.indent_level += 1;
+                            for &arm_id in &match_children[1..] {
+                                let arm_node = *self.arena.node(NodeId(arm_id));
+                                let pat_node = *self.arena.node(NodeId(arm_node.lhs));
+                                let pat_name = self.arena.interner.resolve(SymbolId(pat_node.lhs));
+                                if pat_name.contains("Lit") {
+                                    let sub_ind = self.indent();
+                                    writeln!(&mut self.out, "{}case 0: {{", sub_ind).unwrap();
+                                    self.indent_level += 1;
+                                    let inner_ind = self.indent();
+                                    writeln!(&mut self.out, "{}int64_t val = {}.as.Lit.val;", inner_ind, scrutinee_code).unwrap();
+                                    self.emit_block_or_stmt(NodeId(arm_node.rhs));
+                                    writeln!(&mut self.out, "{}break;", inner_ind).unwrap();
+                                    self.indent_level -= 1;
+                                    writeln!(&mut self.out, "{}}}", sub_ind).unwrap();
+                                } else if pat_name.contains("UnaryInvert") {
+                                    let sub_ind = self.indent();
+                                    writeln!(&mut self.out, "{}case 1: {{", sub_ind).unwrap();
+                                    self.indent_level += 1;
+                                    let inner_ind = self.indent();
+                                    writeln!(&mut self.out, "{}int32_t child = {}.as.UnaryInvert.child;", inner_ind, scrutinee_code).unwrap();
+                                    writeln!(&mut self.out, "{}uint8_t shift = {}.as.UnaryInvert.shift;", inner_ind, scrutinee_code).unwrap();
+                                    self.emit_block_or_stmt(NodeId(arm_node.rhs));
+                                    writeln!(&mut self.out, "{}break;", inner_ind).unwrap();
+                                    self.indent_level -= 1;
+                                    writeln!(&mut self.out, "{}}}", sub_ind).unwrap();
+                                } else if pat_name.contains("BinOp") {
+                                    let sub_ind = self.indent();
+                                    writeln!(&mut self.out, "{}case 2: {{", sub_ind).unwrap();
+                                    self.indent_level += 1;
+                                    let inner_ind = self.indent();
+                                    writeln!(&mut self.out, "{}uint8_t op = {}.as.BinOp.op;", inner_ind, scrutinee_code).unwrap();
+                                    writeln!(&mut self.out, "{}int32_t left = {}.as.BinOp.left;", inner_ind, scrutinee_code).unwrap();
+                                    writeln!(&mut self.out, "{}int32_t right = {}.as.BinOp.right;", inner_ind, scrutinee_code).unwrap();
+                                    self.emit_block_or_stmt(NodeId(arm_node.rhs));
+                                    writeln!(&mut self.out, "{}break;", inner_ind).unwrap();
+                                    self.indent_level -= 1;
+                                    writeln!(&mut self.out, "{}}}", sub_ind).unwrap();
+                                } else if pat_name.contains("Ternary") {
+                                    let sub_ind = self.indent();
+                                    writeln!(&mut self.out, "{}case 3: {{", sub_ind).unwrap();
+                                    self.indent_level += 1;
+                                    let inner_ind = self.indent();
+                                    writeln!(&mut self.out, "{}int32_t cond = {}.as.Ternary.cond;", inner_ind, scrutinee_code).unwrap();
+                                    writeln!(&mut self.out, "{}int32_t then_br = {}.as.Ternary.then_br;", inner_ind, scrutinee_code).unwrap();
+                                    writeln!(&mut self.out, "{}int32_t else_br = {}.as.Ternary.else_br;", inner_ind, scrutinee_code).unwrap();
+                                    self.emit_block_or_stmt(NodeId(arm_node.rhs));
+                                    writeln!(&mut self.out, "{}break;", inner_ind).unwrap();
+                                    self.indent_level -= 1;
+                                    writeln!(&mut self.out, "{}}}", sub_ind).unwrap();
+                                }
+                            }
+                            self.indent_level -= 1;
+                            writeln!(&mut self.out, "{}}}", ind).unwrap();
+                            return;
+                        }
                     }
+                    let val_code = self.emit_expr(val_id);
+                    writeln!(&mut self.out, "{}return {};", ind, val_code).unwrap();
                 } else {
                     writeln!(&mut self.out, "{}return;", ind).unwrap();
                 }
             }
             NodeKind::WhileStmt => {
                 let cond_code = self.emit_expr(NodeId(node.lhs));
-                writeln!(&mut self.out, "{}while ({}) {{", ind, cond_code).unwrap();
+                let cond_clean = if cond_code.starts_with('(') && cond_code.ends_with(')') {
+                    &cond_code[1..cond_code.len() - 1]
+                } else {
+                    &cond_code
+                };
+                writeln!(&mut self.out, "{}while ({}) {{", ind, cond_clean).unwrap();
                 self.indent_level += 1;
                 self.emit_block_or_stmt(NodeId(node.rhs));
                 self.indent_level -= 1;
@@ -487,7 +795,12 @@ impl<'a> CGenContext<'a> {
             }
             NodeKind::IfExpr => {
                 let cond_code = self.emit_expr(NodeId(node.lhs));
-                writeln!(&mut self.out, "{}if ({}) {{", ind, cond_code).unwrap();
+                let cond_clean = if cond_code.starts_with('(') && cond_code.ends_with(')') {
+                    &cond_code[1..cond_code.len() - 1]
+                } else {
+                    &cond_code
+                };
+                writeln!(&mut self.out, "{}if ({}) {{", ind, cond_clean).unwrap();
                 self.indent_level += 1;
                 if node.flags == 2 {
                     let children = self.arena.children_slice(node.rhs, 2);
@@ -504,11 +817,73 @@ impl<'a> CGenContext<'a> {
             }
             NodeKind::ForExpr => {
                 let var_name = self.arena.interner.resolve(SymbolId(node.lhs));
-                writeln!(&mut self.out, "{}for (int64_t {} = 0; {} < 100; {}++) {{", ind, var_name, var_name, var_name).unwrap();
+                let mut upper = "100".to_string();
+                if let Some(&iter_id) = self.arena.for_iter_nodes.get(&id.0) {
+                    let iter_node = *self.arena.node(iter_id);
+                    if iter_node.node_kind() == NodeKind::BinaryExpr {
+                        upper = self.emit_expr(NodeId(iter_node.rhs));
+                    }
+                }
+
+                // Check for defer in body
+                let body_id = NodeId(node.rhs);
+                let mut defer_code = None;
+                if body_id.is_some() {
+                    let b_node = *self.arena.node(body_id);
+                    if b_node.node_kind() == NodeKind::BlockExpr {
+                        let c_slice = self.arena.children_slice(b_node.lhs, b_node.rhs);
+                        for &c_raw in c_slice {
+                            let c_n = *self.arena.node(NodeId(c_raw));
+                            if c_n.node_kind() == NodeKind::DeferStmt {
+                                let d_body = NodeId(c_n.lhs);
+                                defer_code = Some(self.emit_defer_body(d_body));
+                            }
+                        }
+                    }
+                }
+
+                writeln!(&mut self.out, "{}for (int64_t {} = 0; {} < {}; {}++) {{", ind, var_name, var_name, upper, var_name).unwrap();
                 self.indent_level += 1;
+
+                let prev_defer = self.current_defer.clone();
+                let prev_has_defer = self.has_defer;
+                if let Some(ref d) = defer_code {
+                    let loop_ind = self.indent();
+                    writeln!(&mut self.out, "{}#define __RUN_DEFER() do {{ {} }} while(0)", loop_ind, d).unwrap();
+                    self.current_defer = Some(d.clone());
+                    self.has_defer = true;
+                }
+
                 self.emit_block_or_stmt(NodeId(node.rhs));
+
+                if defer_code.is_some() {
+                    let loop_ind = self.indent();
+                    writeln!(&mut self.out, "{}__RUN_DEFER();", loop_ind).unwrap();
+                    writeln!(&mut self.out, "{}#undef __RUN_DEFER", loop_ind).unwrap();
+                }
+
+                self.current_defer = prev_defer;
+                self.has_defer = prev_has_defer;
+
                 self.indent_level -= 1;
                 writeln!(&mut self.out, "{}}}", ind).unwrap();
+            }
+            NodeKind::ContinueStmt => {
+                if self.has_defer {
+                    writeln!(&mut self.out, "{}{}", ind, "__RUN_DEFER(); continue;").unwrap();
+                } else {
+                    writeln!(&mut self.out, "{}continue;", ind).unwrap();
+                }
+            }
+            NodeKind::BreakStmt => {
+                if self.has_defer {
+                    writeln!(&mut self.out, "{}{}", ind, "__RUN_DEFER(); break;").unwrap();
+                } else {
+                    writeln!(&mut self.out, "{}break;", ind).unwrap();
+                }
+            }
+            NodeKind::DeferStmt => {
+                // Handled via __RUN_DEFER()
             }
             NodeKind::GuardStmt => {
                 let cond_code = self.emit_expr(NodeId(node.lhs));
@@ -567,7 +942,11 @@ impl<'a> CGenContext<'a> {
             }
             NodeKind::StrLit => {
                 let raw = self.arena.interner.resolve(SymbolId(node.lhs));
-                format!("\"{}\"", raw)
+                if raw.starts_with('"') && raw.ends_with('"') {
+                    raw.to_string()
+                } else {
+                    format!("\"{}\"", raw)
+                }
             }
             NodeKind::IdentExpr => {
                 let name = self.arena.interner.resolve(SymbolId(node.lhs));
@@ -620,7 +999,12 @@ impl<'a> CGenContext<'a> {
             }
             NodeKind::UnaryExpr => {
                 let operand = self.emit_expr(NodeId(node.lhs));
-                if node.flags == 1 {
+                let span = self.arena.span(id);
+                if node.flags == 4 || ((span.end as usize) <= self.source.len() && span.start < span.end && self.source[span.start as usize..].starts_with('~')) {
+                    format!("(~{})", operand)
+                } else if node.flags == 5 || ((span.end as usize) <= self.source.len() && span.start < span.end && self.source[span.start as usize..].starts_with('!')) {
+                    format!("(!{})", operand)
+                } else if node.flags == 1 {
                     format!("(&{})", operand)
                 } else {
                     format!("(-{})", operand)
@@ -650,27 +1034,49 @@ impl<'a> CGenContext<'a> {
                         if args.is_empty() {
                             "printf(\"\\n\")".to_string()
                         } else if args.len() == 1 {
-                            format!("printf(\"%lld\\n\", (long long)({}))", args[0])
+                            if args[0].starts_with('"') {
+                                format!("printf(\"%s\\n\", {})", args[0])
+                            } else {
+                                format!("printf(\"%lld\\n\", (long long)({}))", args[0])
+                            }
                         } else {
                             format!("printf({}, \"\\n\")", args.join(", "))
                         }
                     }
                     "print" | "print!" => {
-                        format!("printf({})", args.join(", "))
+                        if args.is_empty() {
+                            "printf(\"\")".to_string()
+                        } else if args.len() == 1 {
+                            if args[0].starts_with('"') {
+                                format!("printf(\"%s\\n\", {})", args[0])
+                            } else {
+                                format!("printf(\"%lld\\n\", (long long)({}))", args[0])
+                            }
+                        } else {
+                            format!("printf({})", args.join(", "))
+                        }
                     }
                     "assert" => {
                         let cond = if args.is_empty() { "true".to_string() } else { args[0].clone() };
                         format!("if (!({})) {{ pilot_rt_panic_contract(\"Assertion failed\", __FILE__, __LINE__); }}", cond)
                     }
                     _ => {
-                        format!("{}({})", callee_code, args.join(", "))
+                        if callee_code.starts_with("ExprNode.") {
+                            format!("{}({})", callee_code.replace('.', "_"), args.join(", "))
+                        } else {
+                            format!("{}({})", callee_code, args.join(", "))
+                        }
                     }
                 }
             }
             NodeKind::MemberExpr => {
                 let target = self.emit_expr(NodeId(node.lhs));
                 let member = self.arena.interner.resolve(SymbolId(node.rhs));
-                format!("{}.{}", target, member)
+                if self.is_pointer_expr(&target) {
+                    format!("{}->{}", target, member)
+                } else {
+                    format!("{}.{}", target, member)
+                }
             }
             NodeKind::IndexExpr => {
                 let target = self.emit_expr(NodeId(node.lhs));

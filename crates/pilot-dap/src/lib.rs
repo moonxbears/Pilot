@@ -347,7 +347,9 @@ mod tests {
         dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
 
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let path = format!("{}/../../examples/mytest.pilot", manifest_dir);
+        let test_src = "for x in 15..20:\n    println(x)\n\nfor j in [1, 2, 3, 4, 5]{\n    println(j)\n}\n\nvar myvar : int = 0\nwhile (true) {\n    if (myvar >= 20){\n        break;\n    }\n    println(f\"true - {myvar}\")\n    myvar += 1\n}\n";
+        let path = format!("{}/../../examples/dap_myvar_test.pilot", manifest_dir);
+        let _ = std::fs::write(&path, test_src);
         let path = std::fs::canonicalize(&path).unwrap().to_str().unwrap().to_string();
 
         // Set breakpoint on line 13: println(f"true - {myvar}")
@@ -397,6 +399,7 @@ mod tests {
         // Check variables again: myvar should now be 1
         let vars_resp2 = dap.handle_message(r#"{"seq":8,"type":"request","command":"variables","arguments":{"variablesReference":1000}}"#).unwrap();
         assert!(vars_resp2.contains("\"value\":\"1\""), "Expected myvar to be 1 after += 1, got: {}", vars_resp2);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

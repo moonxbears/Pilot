@@ -1,0 +1,121 @@
+// =============================================================================
+// Showcase 34: SQL Datasets & Compile-Time Column Property Inference
+// =============================================================================
+// Demonstrates:
+//   1. Parameterized Database Blocks:
+//      - `sql(conn) { ... }`, `postgresql(conn) { ... }`, `mysql(conn) { ... }`
+//   2. Compile-Time SQL Query Analysis & Type Inference:
+//      - Column names and expressions (`count(*) as total`, `u.salary * 1.1`)
+//        synthesize concrete typed `RowRecord` fields at compile time.
+//   3. Direct Property & Indexer Access:
+//      - Accessing `row.name` or `row["name"]` yields static types with zero `any` fallback.
+//   4. Fluid In-Memory Table & Dataset Emulation:
+//      - Uniform query chaining (`.where()`, `.limit()`, `.first()`) across
+//        in-memory collections and external databases.
+// =============================================================================
+
+println("==================================================================");
+println(" Showcase 34: SQL Datasets & Compile-Time Column Inference        ");
+println("==================================================================");
+
+// -----------------------------------------------------------------------------
+// 1. Parameterized SQL Connection Block with Compile-Time Inferred Row Record
+// -----------------------------------------------------------------------------
+let pg_conn = "postgres://app_user:secret@localhost:5432/corp_metrics";
+let sql_conn: str = "sqlite://home/moony/Documents/dev/personal/crm_entities.db";
+println("\n[1] Executing Parameterized SQL Block with Compile-Time Inference:");
+
+let metrics_dataset = sqlite(sql_conn) {
+    select 'Record ID'
+    from companies
+};
+
+println("Dataset returned from query block. Inferred row properties:");
+println("  - id: int");
+println("  - name: str");
+println("  - total_events: int");
+println("  - adjusted_revenue: float");
+
+// -----------------------------------------------------------------------------
+// 2. Chained Query Methods on Query Result
+// -----------------------------------------------------------------------------
+println("\n[2] Applying Native Query Methods (.where, .limit):");
+let filtered_metrics = metrics_dataset
+    .where(r => r.id > 1)
+    .limit(3);
+
+for record in metrics_dataset {
+    println("  Metric #" + record.id + " [" + record.name + "] -> events=" + record.total_events);
+}
+
+// -----------------------------------------------------------------------------
+// 3. In-Memory Relational Table & Dataset Emulation
+// -----------------------------------------------------------------------------
+println("\n[3] In-Memory Relational Table Operations:");
+
+class Table {
+    var rows: list = [];
+
+    def __init__(self, initial_records: list = []) {
+        self.rows = initial_records;
+    }
+
+    def insert(self, record) -> Table {
+        self.rows.append(record);
+        return self;
+    }
+
+    def where(self, pred) -> Table {
+        let matched = [];
+        for r in self.rows {
+            if pred(r) {
+                matched.append(r);
+            }
+        }
+        return Table(matched);
+    }
+
+    def select(self, map_fn) -> list {
+        let out = [];
+        for r in self.rows {
+            out.append(map_fn(r));
+        }
+        return out;
+    }
+
+    def limit(self, count: int) -> Table {
+        let res = [];
+        let n = if count < self.rows.length { count } else { self.rows.length };
+        for i in 0..<n {
+            res.append(self.rows[i]);
+        }
+        return Table(res);
+    }
+
+    def first(self) {
+        return if self.rows.length > 0 { self.rows[0] } else { null };
+    }
+}
+
+let customer_table = Table([
+    { "id": 101, "name": "Acme Corp",  "tier": "Enterprise", "mrr": 4500.0 },
+    { "id": 102, "name": "Beta Labs",  "tier": "Growth",     "mrr": 1200.0 },
+    { "id": 103, "name": "Gamma Devs", "tier": "Enterprise", "mrr": 8900.0 }
+]);
+
+let enterprise_customers = customer_table
+    .where(c => c["tier"] == "Enterprise")
+    .where(c => c["mrr"] > 2000.0)
+    .limit(5);
+
+println("Filtered Enterprise Customers:");
+for cust in enterprise_customers.rows {
+    println("  " + cust["name"] + " -> MRR: $" + cust["mrr"]);
+}
+
+let top_enterprise = enterprise_customers.first();
+if top_enterprise != null {
+    println("\nTop Enterprise Account: " + top_enterprise["name"]);
+}
+
+println("\n>>> Showcase 34 Execution Complete! <<<\n");

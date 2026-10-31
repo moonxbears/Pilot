@@ -1,0 +1,87 @@
+// Test 38: SQL Query Analysis, Dataset Operations & Compile-Time Column Inference
+// Demonstrates compile-time RowRecord property synthesis from SQL projection targets,
+// parameterized database blocks `sql(conn) { ... }`, and query chaining methods.
+
+// 1. Parameterized connection block with column aliases and aggregations
+let pg_conn = "postgres://app:secret@localhost:5432/production";
+
+let report = sql(pg_conn) {
+    select
+        tb.id,
+        tb.name,
+        count(*) as total_count,
+        tb.amount * 1.15 as adjusted_amount
+    from system_metrics as tb
+    where tb.id in (1, 2, 3, 4, 5);
+};
+
+// 2. Chained query methods on query result dataset
+let filtered_report = report
+    .where(row => row.id > 1)
+    .limit(3);
+
+// 3. Compile-time typed column property verification
+for r in filtered_report {
+    // Statically inferred typed properties via dot notation:
+    let r_id: int = r.id;
+    let r_name: str = r.name;
+    let r_count: int = r.total_count;
+    let r_adj: float = r.adjusted_amount;
+
+    // Statically inferred typed properties via string indexer:
+    let r_id_idx: int = r["id"];
+    let r_name_idx: str = r["name"];
+
+    assert(r_id >= 1);
+}
+
+// 4. In-memory Table and Dataset emulation with concise identifiers
+class Table {
+    var rows: list = [];
+
+    def __init__(self, initial_items: list = []) {
+        self.rows = initial_items;
+    }
+
+    def insert(self, row) -> Table {
+        self.rows.append(row);
+        return self;
+    }
+
+    def where(self, pred) -> Table {
+        let matched = [];
+        for item in self.rows {
+            if pred(item) {
+                matched.append(item);
+            }
+        }
+        return Table(matched);
+    }
+
+    def limit(self, count: int) -> Table {
+        let result = [];
+        let limit_val = if count < self.rows.length { count } else { self.rows.length };
+        for i in 0..<limit_val {
+            result.append(self.rows[i]);
+        }
+        return Table(result);
+    }
+
+    def first(self) {
+        return if self.rows.length > 0 { self.rows[0] } else { null };
+    }
+}
+
+let customers = Table([
+    { "id": 1, "name": "Alice", "score": 850 },
+    { "id": 2, "name": "Bob",   "score": 620 },
+    { "id": 3, "name": "Carol", "score": 910 }
+]);
+
+let vips = customers
+    .where(c => c["score"] > 800)
+    .limit(5);
+
+let top_vip = vips.first();
+assert(top_vip != null);
+assert(top_vip["name"] == "Alice");

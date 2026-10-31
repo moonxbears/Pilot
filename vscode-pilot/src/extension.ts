@@ -656,6 +656,314 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
         }
     } catch {}
+
+    // Setup Pilot GUI Test Explorer & Test Suite integration
+    setupPilotTesting(context);
+}
+
+function setupPilotTesting(context: vscode.ExtensionContext): void {
+    const testController = vscode.tests.createTestController('pilotTestController', 'Pilot Tests');
+    context.subscriptions.push(testController);
+
+    function isTestFile(uri: vscode.Uri, content?: string): boolean {
+        const p = uri.fsPath.replace(/\\/g, '/');
+        if (!p.endsWith('.pilot')) {
+            return false;
+        }
+        if (p.includes('/tests/') || p.includes('/test/') || /\btest_[\w-]+\.pilot$/.test(p) || /_test\.pilot$/.test(p)) {
+            return true;
+        }
+        if (content) {
+            if (/^\s*(?:(?:pure|async|inline)\s+)?(?:def|fn)\s+test_\w+\s*\(/m.test(content) || /@test\b/.test(content)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function updateTestItemForUri(uri: vscode.Uri) {
+        if (!uri.fsPath.endsWith('.pilot')) return;
+        let content: string;
+        try {
+            content = fs.readFileSync(uri.fsPath, 'utf8');
+        } catch {
+            return;
+        }
+
+        if (!isTestFile(uri, content)) {
+            testController.items.delete(uri.toString());
+            return;
+        }
+
+        const fileId = uri.toString();
+        const baseName = path.basename(uri.fsPath);
+        let fileItem = testController.items.get(fileId);
+        if (!fileItem) {
+            fileItem = testController.createTestItem(fileId, baseName, uri);
+            testController.items.add(fileItem);
+        }
+
+        // Set range for file item at line 0
+        fileItem.range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 0));
+
+        // Extract suite description if present
+        const suiteMatch = content.match(/^(?:#|\/\/)\s*(?:Test\s+)?(Suite\s+\d+:[^\r\n]+)/m);
+        if (suiteMatch) {
+            fileItem.description = suiteMatch[1].trim();
+        } else {
+            const headingMatch = content.match(/^(?:#|\/\/)\s*={3,}\s*\r?\n(?:#|\/\/)\s*([^\r\n=]+)/m);
+            if (headingMatch) {
+                fileItem.description = headingMatch[1].trim();
+            } else {
+                fileItem.description = undefined;
+            }
+        }
+
+        // Parse child tests (test functions or test sections)
+        const lines = content.split(/\r?\n/);
+        const fnRegex = /^\s*(?:(?:pure|async|inline)\s+)?(?:def|fn)\s+(test_\w+)\s*\(/;
+        const childItems: vscode.TestItem[] = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const m = line.match(fnRegex);
+            if (m) {
+                const fnName = m[1];
+                const col = line.indexOf(fnName);
+                const childId = `${fileId}::${fnName}`;
+                const childItem = testController.createTestItem(childId, fnName, uri);
+                childItem.range = new vscode.Range(new vscode.Position(i, col), new vscode.Position(i, col + fnName.length));
+                childItems.push(childItem);
+            }
+        }
+
+        if (childItems.length === 0) {
+            // Also recognize section headers like "# 1. Primitive & Compound Types" as nested runnable checkpoints
+            const sectionRegex = /^(?:#|\/\/)\s*(?:---|===)?\s*(\d+\.[\w\s&,\(\)\-]+?)(?:\s*(?:---|===)|$)/;
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const m = line.match(sectionRegex);
+                if (m) {
+                    const secName = m[1].trim();
+                    const childId = `${fileId}::sec_${i}`;
+                    const childItem = testController.createTestItem(childId, secName, uri);
+                    childItem.range = new vscode.Range(new vscode.Position(i, 0), new vscode.Position(i, line.length));
+                    childItems.push(childItem);
+                }
+            }
+        }
+
+        fileItem.children.replace(childItems);
+        fileItem.canResolveChildren = false;
+    }
+
+    async function discoverAllTests() {
+        const uris = await vscode.workspace.findFiles('**/*.pilot', '**/target/**');
+        for (const uri of uris) {
+            updateTestItemForUri(uri);
+        }
+    }
+
+    testController.resolveHandler = async (item?: vscode.TestItem) => {
+        if (!item) {
+            await discoverAllTests();
+        } else if (item.uri) {
+            updateTestItemForUri(item.uri);
+        }
+    };
+
+    testController.refreshHandler = async () => {
+        await discoverAllTests();
+    };
+
+    // Watch workspace for .pilot files
+    const watcher = vscode.workspace.createFileSystemWatcher('**/*.pilot');
+    watcher.onDidCreate(uri => updateTestItemForUri(uri));
+    watcher.onDidChange(uri => updateTestItemForUri(uri));
+    watcher.onDidDelete(uri => testController.items.delete(uri.toString()));
+    context.subscriptions.push(watcher);
+
+    vscode.workspace.onDidChangeTextDocument(e => {
+        if (e.document.languageId === 'pilot') {
+            updateTestItemForUri(e.document.uri);
+        }
+    });
+
+    async function runTestExecution(request: vscode.TestRunRequest, token: vscode.CancellationToken): Promise<void> {
+        const run = testController.createTestRun(request);
+        const pilotBin = resolvePilotExecutionPrefix(context.extensionPath).replace(/^"|"$/g, '');
+
+        const filesToRun = new Map<string, { fileItem: vscode.TestItem; childItems: vscode.TestItem[] }>();
+
+        function collectItem(item: vscode.TestItem) {
+            if (request.exclude && request.exclude.includes(item)) return;
+            const uri = item.uri;
+            if (!uri) return;
+
+            const fileId = item.id.includes('::') ? item.id.split('::')[0] : item.id;
+            const fileItem = testController.items.get(fileId) || (item.uri.toString() === item.id ? item : undefined);
+            if (!fileItem) return;
+
+            if (!filesToRun.has(fileId)) {
+                filesToRun.set(fileId, { fileItem, childItems: [] });
+            }
+            if (item.id.includes('::')) {
+                filesToRun.get(fileId)!.childItems.push(item);
+            }
+        }
+
+        if (request.include && request.include.length > 0) {
+            for (const item of request.include) {
+                collectItem(item);
+            }
+        } else {
+            testController.items.forEach(item => collectItem(item));
+        }
+
+        for (const [fileId, { fileItem, childItems }] of filesToRun) {
+            if (token.isCancellationRequested) break;
+
+            run.started(fileItem);
+            if (childItems.length > 0) {
+                childItems.forEach(c => run.started(c));
+            } else {
+                fileItem.children.forEach(c => run.started(c));
+            }
+
+            const filePath = fileItem.uri!.fsPath;
+            const cwd = vscode.workspace.getWorkspaceFolder(fileItem.uri!)?.uri.fsPath || path.dirname(filePath);
+
+            await new Promise<void>((resolve) => {
+                const proc = cp.spawn(pilotBin, ['test', '--json', filePath], {
+                    cwd,
+                    env: { ...process.env, RUST_BACKTRACE: '1' }
+                });
+
+                let stdoutBuf = '';
+                let stderrBuf = '';
+                let testPassed = false;
+                let testFailed = false;
+                let durationMs = 0;
+                let failMsg = '';
+
+                proc.stdout.on('data', data => {
+                    const text = data.toString();
+                    stdoutBuf += text;
+                    const lines = text.split(/\r?\n/);
+                    for (const line of lines) {
+                        if (!line.trim().startsWith('{')) continue;
+                        try {
+                            const ev = JSON.parse(line.trim());
+                            if (ev.event === 'pass') {
+                                testPassed = true;
+                                durationMs = ev.duration_ms || 0;
+                                run.appendOutput(`\r\n\x1b[32m✔ PASS\x1b[0m: ${fileItem.label} (${durationMs.toFixed(2)}ms, ${ev.nodes || 0} nodes, ${ev.instructions || 0} instrs)\r\n`);
+                            } else if (ev.event === 'fail') {
+                                testFailed = true;
+                                durationMs = ev.duration_ms || 0;
+                                failMsg = ev.error || 'Test assertion failure';
+                                run.appendOutput(`\r\n\x1b[31m✖ FAIL\x1b[0m: ${fileItem.label} (${durationMs.toFixed(2)}ms): ${failMsg}\r\n`);
+                            }
+                        } catch {
+                            // Non-json stdout line
+                        }
+                    }
+                });
+
+                proc.stderr.on('data', data => {
+                    stderrBuf += data.toString();
+                });
+
+                proc.on('close', code => {
+                    if (testFailed || code !== 0) {
+                        const message = new vscode.TestMessage(failMsg || stderrBuf.trim() || `Test failed with exit code ${code}`);
+                        run.failed(fileItem, message, durationMs);
+                        if (childItems.length > 0) {
+                            childItems.forEach(c => run.failed(c, message, durationMs));
+                        } else {
+                            fileItem.children.forEach(c => run.failed(c, message, durationMs));
+                        }
+                    } else {
+                        run.passed(fileItem, durationMs);
+                        if (childItems.length > 0) {
+                            childItems.forEach(c => run.passed(c, durationMs));
+                        } else {
+                            fileItem.children.forEach(c => run.passed(c, durationMs));
+                        }
+                    }
+                    resolve();
+                });
+
+                proc.on('error', err => {
+                    const message = new vscode.TestMessage(`Failed to execute pilot test: ${err.message}`);
+                    run.failed(fileItem, message, 0);
+                    resolve();
+                });
+            });
+        }
+
+        run.end();
+    }
+
+    testController.createRunProfile('Run Tests', vscode.TestRunProfileKind.Run, (request, token) => {
+        return runTestExecution(request, token);
+    }, true);
+
+    testController.createRunProfile('Debug Tests', vscode.TestRunProfileKind.Debug, async (request, token) => {
+        let targetItem = request.include?.[0];
+        if (!targetItem) {
+            for (const [, item] of testController.items) {
+                targetItem = item;
+                break;
+            }
+        }
+        if (!targetItem || !targetItem.uri) {
+            vscode.window.showErrorMessage('No test selected to debug.');
+            return;
+        }
+
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(targetItem.uri);
+        await vscode.debug.startDebugging(workspaceFolder, {
+            type: 'pilot',
+            name: `Debug Test: ${targetItem.label}`,
+            request: 'launch',
+            program: targetItem.uri.fsPath,
+            stopOnEntry: false
+        });
+    }, false);
+
+    // Initial discovery
+    discoverAllTests();
+
+    // Register test commands
+    context.subscriptions.push(
+        vscode.commands.registerCommand('pilot.runAllTests', async () => {
+            const request = new vscode.TestRunRequest();
+            await runTestExecution(request, new vscode.CancellationTokenSource().token);
+        }),
+        vscode.commands.registerCommand('pilot.runCurrentTest', async (uri?: vscode.Uri) => {
+            let targetUri = uri || vscode.window.activeTextEditor?.document.uri;
+            if (!targetUri) {
+                vscode.window.showErrorMessage('No active Pilot test file to run.');
+                return;
+            }
+            let item = testController.items.get(targetUri.toString());
+            if (!item) {
+                updateTestItemForUri(targetUri);
+                item = testController.items.get(targetUri.toString());
+            }
+            if (item) {
+                const request = new vscode.TestRunRequest([item]);
+                await runTestExecution(request, new vscode.CancellationTokenSource().token);
+            } else {
+                vscode.window.showErrorMessage('The current file is not recognized as a Pilot test file.');
+            }
+        }),
+        vscode.commands.registerCommand('pilot.refreshTests', async () => {
+            await discoverAllTests();
+            vscode.window.showInformationMessage('Pilot tests refreshed in Test Explorer.');
+        })
+    );
 }
 
 class PilotDebugConfigurationProvider implements vscode.DebugConfigurationProvider {

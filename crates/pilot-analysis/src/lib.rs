@@ -591,4 +591,74 @@ for t in transactions {
         assert!(hw_display.contains("amount: f64"), "Expected amount: f64, got: {}", hw_display);
         assert!(hw_display.contains("category: str"), "Expected category: str, got: {}", hw_display);
     }
+
+    #[test]
+    fn test_compile_time_sql_query_type_inference() {
+        let code = r#"
+let psql_records = postgresql {
+    select id, name, count(*) as total_count, amount * 1.1 as adjusted_amount
+    from system_metrics tb
+    where tb.id in (1, 2, 3, 4, 5);
+}
+
+for row in psql_records {
+    let r_id = row.id;
+    let r_name = row.name;
+    let r_total = row.total_count;
+    let r_adj = row.adjusted_amount;
+}
+"#;
+        let arena = pilot_parser::parse(code);
+        let result = AnalysisPipeline::analyze(&arena, arena.root);
+        assert!(result.is_ok(), "Expected clean analysis, got: {:?}", result.diagnostics);
+
+        let mut psql_ty = None;
+        let mut r_id_ty = None;
+        let mut r_name_ty = None;
+        let mut r_total_ty = None;
+        let mut r_adj_ty = None;
+
+        for (idx, node) in arena.nodes.iter().enumerate() {
+            if node.node_kind() == pilot_ast::NodeKind::LetStmt {
+                let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                match name {
+                    "psql_records" => psql_ty = result.inferred_types.get(&(idx as u32)).copied(),
+                    "r_id" => r_id_ty = result.inferred_types.get(&(idx as u32)).copied(),
+                    "r_name" => r_name_ty = result.inferred_types.get(&(idx as u32)).copied(),
+                    "r_total" => r_total_ty = result.inferred_types.get(&(idx as u32)).copied(),
+                    "r_adj" => r_adj_ty = result.inferred_types.get(&(idx as u32)).copied(),
+                    _ => {}
+                }
+            }
+        }
+
+        assert_eq!(r_id_ty, Some(TypeId::I64));
+        assert_eq!(r_name_ty, Some(TypeId::STR));
+        assert_eq!(r_total_ty, Some(TypeId::I64));
+        assert_eq!(r_adj_ty, Some(TypeId::F64));
+
+        let psql_display = result.types.display(psql_ty.unwrap());
+        assert!(psql_display.contains("id: i64"));
+        assert!(psql_display.contains("name: str"));
+        assert!(psql_display.contains("total_count: i64"));
+        assert!(psql_display.contains("adjusted_amount: f64"));
+
+        // Test parameterized connection syntax: sql(conn) { ... }
+        let conn_code = r#"
+let pg_db = "postgres://localhost:5432/app";
+let emp_records = sql(pg_db) {
+    select emp_id, emp_name, salary from staff;
+};
+
+for e in emp_records {
+    let eid = e.emp_id;
+    let ename = e.emp_name;
+    let esal = e.salary;
+}
+"#;
+        let arena2 = pilot_parser::parse(conn_code);
+        let result2 = AnalysisPipeline::analyze(&arena2, arena2.root);
+        assert!(result2.is_ok(), "Expected clean analysis for parameterized sql(conn), got: {:?}", result2.diagnostics);
+        assert_eq!(arena2.polyglot_conns.len(), 1);
+    }
 }

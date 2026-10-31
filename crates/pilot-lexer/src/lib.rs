@@ -59,6 +59,26 @@ mod tests {
     }
 
     #[test]
+    fn test_lex_all_syntax_brackets() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/all_syntax.pilot");
+        let src = std::fs::read_to_string(&path).unwrap();
+        let tape = tokenize(&src);
+        for i in 0..tape.len() {
+            if tape.kind(i) == TokenKind::Ident {
+                let span = tape.span(i);
+                let s = &src[span.start as usize..span.end as usize];
+                if s == "run_omnibus_showcase" {
+                    println!("run_omnibus_showcase found at tok {}", i);
+                    if let Some(next_lbrace) = (i..tape.len()).find(|&idx| tape.kind(idx) == TokenKind::LBrace) {
+                        let matching = tape.bracket_links[next_lbrace];
+                        println!("next lbrace: {}, matching rbrace: {}", next_lbrace, matching);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn test_pythonic_indentation_virtual_braces() {
         let code = "if true:\n    let x = 10\n    return x\nlet y = 20";
         let tape = tokenize(code);

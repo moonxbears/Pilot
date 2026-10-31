@@ -22,7 +22,10 @@
         "onDebug",
         "onCommand:pilot.runCurrentFile",
         "onCommand:pilot.debugCurrentFile",
-        "onCommand:pilot.createLaunchConfig"
+        "onCommand:pilot.createLaunchConfig",
+        "onCommand:pilot.runAllTests",
+        "onCommand:pilot.runCurrentTest",
+        "onCommand:pilot.refreshTests"
     ],
     "main": "./out/extension.js",
     "contributes": {
@@ -75,6 +78,21 @@
             {
                 "command": "pilot.createLaunchConfig",
                 "title": "Pilot: Add Run \u0026 Debug Configurations to launch.json"
+            },
+            {
+                "command": "pilot.runAllTests",
+                "title": "Pilot: Run All Tests",
+                "icon": "$(run-all)"
+            },
+            {
+                "command": "pilot.runCurrentTest",
+                "title": "Pilot: Run Current Test File",
+                "icon": "$(play)"
+            },
+            {
+                "command": "pilot.refreshTests",
+                "title": "Pilot: Refresh Tests",
+                "icon": "$(refresh)"
             }
         ],
         "menus": {
@@ -88,6 +106,18 @@
                     "command": "pilot.debugCurrentFile",
                     "when": "resourceExtname == .pilot",
                     "group": "navigation@2"
+                },
+                {
+                    "command": "pilot.runCurrentTest",
+                    "when": "resourceExtname == .pilot",
+                    "group": "navigation@3"
+                }
+            ],
+            "editor/context": [
+                {
+                    "command": "pilot.runCurrentTest",
+                    "when": "resourceExtname == .pilot",
+                    "group": "navigation@3"
                 }
             ]
         },

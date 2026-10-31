@@ -177,6 +177,15 @@ impl BytecodeCompiler {
                 last_reg
             }
 
+            NodeKind::TupleExpr => {
+                let items = arena.children_slice(node.lhs, node.rhs);
+                let mut last_reg = 0;
+                for &item_id in items {
+                    last_reg = self.compile_node(arena, NodeId(item_id));
+                }
+                last_reg
+            }
+
             NodeKind::IntLit => {
                 let val = arena.i64_pool.get(node.lhs as usize).copied().unwrap_or(0);
                 let const_idx = self.add_constant(PilotVal::from_int(val));
@@ -196,6 +205,14 @@ impl BytecodeCompiler {
             NodeKind::BoolLit => {
                 let val = node.lhs != 0;
                 let const_idx = self.add_constant(PilotVal::from_bool(val));
+                let dst = self.alloc_reg();
+                self.emit(Opcode::LoadConst, dst, (const_idx >> 8) as u8, (const_idx & 0xFF) as u8);
+                dst
+            }
+
+            NodeKind::StrLit => {
+                let s = arena.interner.resolve(SymbolId(node.lhs));
+                let const_idx = self.add_constant(PilotVal::from_str(s));
                 let dst = self.alloc_reg();
                 self.emit(Opcode::LoadConst, dst, (const_idx >> 8) as u8, (const_idx & 0xFF) as u8);
                 dst
@@ -254,6 +271,9 @@ impl BytecodeCompiler {
             NodeKind::BinaryExpr => {
                 let r_lhs = self.compile_node(arena, NodeId(node.lhs));
                 let r_rhs = self.compile_node(arena, NodeId(node.rhs));
+                if r_lhs == 0 || r_rhs == 0 {
+                    return 0;
+                }
                 let dst = self.alloc_reg();
 
                 let op = node.flags;
@@ -365,6 +385,30 @@ impl BytecodeCompiler {
                 0
             }
 
+            NodeKind::ExprStmt => {
+                let expr_id = NodeId(node.lhs);
+                if expr_id.is_some() {
+                    let expr_node = *arena.node(expr_id);
+                    if expr_node.node_kind() == NodeKind::CallExpr {
+                        let arg_start = expr_node.lhs as usize;
+                        let arg_len = expr_node.rhs as usize;
+                        if arg_len > 0 && arg_start < arena.extra_children.len() {
+                            let callee_id = NodeId(arena.extra_children[arg_start]);
+                            let callee_node = *arena.node(callee_id);
+                            if callee_node.node_kind() == NodeKind::IdentExpr {
+                                let name = arena.interner.resolve(SymbolId(callee_node.lhs));
+                                if name == "assert" {
+                                    return 0;
+                                }
+                            }
+                        }
+                    }
+                    self.compile_node(arena, expr_id)
+                } else {
+                    0
+                }
+            }
+
             NodeKind::FnDecl => 0,
             NodeKind::PolyglotBlock => {
                 let const_idx = self.add_constant(PilotVal::from_int(0));
@@ -382,8 +426,21 @@ impl BytecodeCompiler {
                     if callee_node.node_kind() == NodeKind::IdentExpr {
                         let name = arena.interner.resolve(SymbolId(callee_node.lhs));
                         if name == "assert" && arg_len > 1 {
-                            let r_cond = self.compile_node(arena, NodeId(arena.extra_children[arg_start + 1]));
-                            self.emit(Opcode::Assert, 0, r_cond, 0);
+                            let cond_arg = NodeId(arena.extra_children[arg_start + 1]);
+                            let cond_node = *arena.node(cond_arg);
+                            let r_cond = if cond_node.node_kind() == NodeKind::TupleExpr {
+                                let items = arena.children_slice(cond_node.lhs, cond_node.rhs);
+                                if !items.is_empty() {
+                                    self.compile_node(arena, NodeId(items[0]))
+                                } else {
+                                    0
+                                }
+                            } else {
+                                self.compile_node(arena, cond_arg)
+                            };
+                            if r_cond != 0 {
+                                self.emit(Opcode::Assert, 0, r_cond, 0);
+                            }
                             return 0;
                         } else if (name == "print" || name == "println") && arg_len > 1 {
                             let r_arg = self.compile_node(arena, NodeId(arena.extra_children[arg_start + 1]));

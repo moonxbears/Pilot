@@ -244,6 +244,12 @@ impl<'a> Parser<'a> {
             return false;
         }
         let mut lookahead = self.pos + 1;
+        if lookahead < self.tape.len() && self.tape.kind(lookahead) == TokenKind::LParen {
+            let close_p = self.tape.bracket_links[lookahead] as usize;
+            if close_p > lookahead && close_p < self.tape.len() {
+                lookahead = close_p + 1;
+            }
+        }
         while lookahead < self.tape.len() && self.tape.kind(lookahead) == TokenKind::Newline {
             lookahead += 1;
         }
@@ -263,6 +269,15 @@ impl<'a> Parser<'a> {
         let lang = self.text().to_string();
         self.advance(); // consume language identifier
         self.skip_whitespace_and_comments();
+        let mut conn_node = NodeId::NONE;
+        if self.at(TokenKind::LParen) {
+            self.advance();
+            conn_node = self.parse_expr();
+            if self.at(TokenKind::RParen) {
+                self.advance();
+            }
+            self.skip_whitespace_and_comments();
+        }
         while self.at(TokenKind::Newline) {
             self.advance();
         }
@@ -344,7 +359,11 @@ impl<'a> Parser<'a> {
         }
 
         let full_span = ByteSpan::new(start_span.start, end_pos);
-        self.arena.alloc_polyglot_block(&lang, &code_str, flags, full_span)
+        let block_id = self.arena.alloc_polyglot_block(&lang, &code_str, flags, full_span);
+        if conn_node.is_some() {
+            self.arena.polyglot_conns.insert(block_id.0, conn_node);
+        }
+        block_id
     }
 
     fn parse_extern_decl(&mut self) -> NodeId {
@@ -562,7 +581,17 @@ impl<'a> Parser<'a> {
         let k = self.peek();
         match k {
             TokenKind::KwImport => self.parse_import_stmt(),
-            TokenKind::KwFrom => self.parse_from_import_stmt(),
+            TokenKind::KwFrom => {
+                if self.is_from_import_lookahead() {
+                    self.parse_from_import_stmt()
+                } else {
+                    self.parse_query_expr()
+                }
+            }
+            TokenKind::KwDatabase => self.parse_database_stmt(),
+            TokenKind::KwTransaction => self.parse_transaction_stmt(),
+            TokenKind::KwSavepoint | TokenKind::KwCommit | TokenKind::KwRollback => self.parse_transaction_op_stmt(),
+            TokenKind::KwInsert | TokenKind::KwUpdate | TokenKind::KwDelete => self.parse_sql_mutation_stmt(),
             TokenKind::KwDef | TokenKind::KwFn | TokenKind::KwDefkeyword => self.parse_fn_decl(),
             TokenKind::KwClass | TokenKind::KwActor | TokenKind::KwState => self.parse_class_decl(),
             TokenKind::KwStruct => self.parse_struct_decl(),
@@ -638,11 +667,172 @@ impl<'a> Parser<'a> {
         self.arena.alloc_node(NodeKind::ImportDecl, 0, ByteSpan::new(start_span.start, self.prev_span().end), path_sym.0, alias_sym)
     }
 
+    fn is_from_import_lookahead(&self) -> bool {
+        let mut p = self.pos + 1;
+        while p < self.tape.len() {
+            let k = self.tape.kind(p);
+            if k == TokenKind::KwImport {
+                return true;
+            }
+            if k == TokenKind::Newline || k == TokenKind::Semicolon || k == TokenKind::RBrace || k == TokenKind::Eof {
+                return false;
+            }
+            p += 1;
+        }
+        false
+    }
+
+    fn parse_database_stmt(&mut self) -> NodeId {
+        let start_span = self.span();
+        self.advance(); // consume 'database'
+        if self.is_ident_like() && self.peek_ahead(1) == TokenKind::Equal {
+            let name = self.text();
+            self.advance();
+            let sym = self.arena.interner.intern(name);
+            self.advance(); // consume '='
+            let init = self.parse_expr();
+            let end_pos = self.prev_span().end.max(start_span.end);
+            self.arena.alloc_node(NodeKind::VarStmt, 0, ByteSpan::new(start_span.start, end_pos), sym.0, init.0)
+        } else {
+            self.parse_expr_stmt()
+        }
+    }
+
+    fn parse_transaction_stmt(&mut self) -> NodeId {
+        self.advance(); // consume 'transaction'
+        if self.at(TokenKind::LBrace) || self.at(TokenKind::VirtualLBrace) {
+            self.parse_block_expr()
+        } else {
+            self.parse_stmt_or_decl()
+        }
+    }
+
+    fn parse_transaction_op_stmt(&mut self) -> NodeId {
+        let start_span = self.span();
+        self.advance(); // consume 'savepoint', 'commit', or 'rollback'
+        while !self.at_end() && !self.at(TokenKind::Newline) && !self.at(TokenKind::Semicolon) && !self.at(TokenKind::RBrace) {
+            let prev_end = self.span().end as usize;
+            self.advance();
+            let cur_start = self.span().start as usize;
+            if prev_end <= cur_start && cur_start <= self.src.len() && self.src[prev_end..cur_start].contains('\n') {
+                break;
+            }
+        }
+        let end_pos = self.prev_span().end.max(start_span.end);
+        let raw_txt = &self.src[start_span.start as usize..end_pos as usize];
+        let sym = self.arena.interner.intern(raw_txt);
+        let ident = self.arena.alloc_node(NodeKind::IdentExpr, 0, ByteSpan::new(start_span.start, end_pos), sym.0, 0);
+        self.arena.alloc_node(NodeKind::ExprStmt, 0, ByteSpan::new(start_span.start, end_pos), ident.0, 0)
+    }
+
+    fn parse_sql_mutation_stmt(&mut self) -> NodeId {
+        let start_span = self.span();
+        while !self.at_end() && !self.at(TokenKind::Newline) && !self.at(TokenKind::Semicolon) && !self.at(TokenKind::RBrace) {
+            let prev_end = self.span().end as usize;
+            self.advance();
+            let cur_start = self.span().start as usize;
+            if prev_end <= cur_start && cur_start <= self.src.len() && self.src[prev_end..cur_start].contains('\n') {
+                break;
+            }
+        }
+        let end_pos = self.prev_span().end.max(start_span.end);
+        let raw_sql = &self.src[start_span.start as usize..end_pos as usize];
+        let block_id = self.arena.alloc_polyglot_block("sql", raw_sql, 0, ByteSpan::new(start_span.start, end_pos));
+        self.arena.alloc_node(NodeKind::ExprStmt, 0, ByteSpan::new(start_span.start, end_pos), block_id.0, 0)
+    }
+
+    fn parse_query_expr(&mut self) -> NodeId {
+        let start_span = self.span();
+        let mut depth_paren = 0;
+        let mut depth_bracket = 0;
+        let mut depth_brace = 0;
+
+        while !self.at_end() {
+            let k = self.peek();
+            match k {
+                TokenKind::LParen => depth_paren += 1,
+                TokenKind::RParen => {
+                    if depth_paren == 0 {
+                        break;
+                    }
+                    depth_paren -= 1;
+                }
+                TokenKind::LBracket => depth_bracket += 1,
+                TokenKind::RBracket => {
+                    if depth_bracket == 0 {
+                        break;
+                    }
+                    depth_bracket -= 1;
+                }
+                TokenKind::LBrace | TokenKind::VirtualLBrace => depth_brace += 1,
+                TokenKind::RBrace | TokenKind::VirtualRBrace => {
+                    if depth_brace == 0 {
+                        break;
+                    }
+                    depth_brace -= 1;
+                }
+                TokenKind::Semicolon => break,
+                TokenKind::KwUnion | TokenKind::KwIntersect | TokenKind::KwExcept => {
+                    if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 {
+                        break;
+                    }
+                }
+                TokenKind::Newline => {
+                    if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 {
+                        // Lookahead to see if next line continues the query
+                        let mut p = self.pos + 1;
+                        while p < self.tape.len() && self.tape.kind(p) == TokenKind::Newline {
+                            p += 1;
+                        }
+                        if p < self.tape.len() {
+                            let next_k = self.tape.kind(p);
+                            let is_continuation = matches!(
+                                next_k,
+                                TokenKind::KwWhere
+                                    | TokenKind::KwOrder
+                                    | TokenKind::KwGroup
+                                    | TokenKind::KwSelect
+                                    | TokenKind::KwLimit
+                                    | TokenKind::KwOffset
+                                    | TokenKind::KwJoin
+                                    | TokenKind::KwFrom
+                                    | TokenKind::KwHaving
+                                    | TokenKind::KwWith
+                                    | TokenKind::KwInto
+                                    | TokenKind::KwOn
+                                    | TokenKind::KwAs
+                                    | TokenKind::KwAsc
+                                    | TokenKind::KwDesc
+                                    | TokenKind::KwAscending
+                                    | TokenKind::KwDescending
+                            ) || (next_k == TokenKind::Ident && {
+                                let txt = &self.src[self.tape.span(p).start as usize..self.tape.span(p).end as usize];
+                                matches!(txt, "where" | "order" | "group" | "select" | "limit" | "offset" | "join" | "from" | "having" | "with" | "into" | "on" | "as" | "ascending" | "descending" | "asc" | "desc")
+                            });
+                            if !is_continuation {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            }
+            self.advance();
+        }
+
+        let end_pos = self.prev_span().end.max(start_span.start);
+        let raw_query = &self.src[start_span.start as usize..end_pos as usize];
+        let full_span = ByteSpan::new(start_span.start, end_pos);
+        self.arena.alloc_polyglot_block("sql", raw_query, 0, full_span)
+    }
+
     fn parse_from_import_stmt(&mut self) -> NodeId {
         let start_span = self.span();
         self.advance(); // consume 'from'
         let mut path = String::new();
-        while !self.at_end() && !self.at(TokenKind::KwImport) {
+        while !self.at_end() && !self.at(TokenKind::KwImport) && !self.at(TokenKind::Newline) && !self.at(TokenKind::Semicolon) {
             path.push_str(self.text());
             self.advance();
         }
@@ -829,6 +1019,12 @@ impl<'a> Parser<'a> {
                 self.advance();
             }
         }
+        if self.at(TokenKind::Colon) {
+            self.advance();
+            while !self.at_end() && !self.at(TokenKind::LBrace) && !self.at(TokenKind::Newline) && !self.at(TokenKind::Equal) {
+                self.advance();
+            }
+        }
         if self.at(TokenKind::Less) {
             self.advance();
             while !self.at_end() && !self.at(TokenKind::LBrace) && !self.at(TokenKind::Equal) {
@@ -839,10 +1035,12 @@ impl<'a> Parser<'a> {
             self.advance(); // consume '='
             let expr = self.parse_expr();
             self.consume_semi_or_newlines();
-            return self.arena.alloc_node(NodeKind::ClassDecl, 0, start_span, sym.0, expr.0);
+            let span = ByteSpan::new(start_span.start, self.arena.span(expr).end);
+            return self.arena.alloc_node(NodeKind::ClassDecl, 0, span, sym.0, expr.0);
         }
         let body = self.parse_block_expr();
-        self.arena.alloc_node(NodeKind::ClassDecl, 0, start_span, sym.0, body.0)
+        let span = ByteSpan::new(start_span.start, self.arena.span(body).end);
+        self.arena.alloc_node(NodeKind::ClassDecl, 0, span, sym.0, body.0)
     }
 
     fn parse_struct_decl(&mut self) -> NodeId {
@@ -870,7 +1068,8 @@ impl<'a> Parser<'a> {
             return self.arena.alloc_node(NodeKind::StructDecl, 0, span, sym.0, 0);
         }
         let body = self.parse_block_expr();
-        self.arena.alloc_node(NodeKind::StructDecl, 0, start_span, sym.0, body.0)
+        let span = ByteSpan::new(start_span.start, self.arena.span(body).end);
+        self.arena.alloc_node(NodeKind::StructDecl, 0, span, sym.0, body.0)
     }
 
     fn parse_record_decl(&mut self) -> NodeId {
@@ -958,7 +1157,8 @@ impl<'a> Parser<'a> {
             }
         }
         let body = self.parse_block_expr();
-        self.arena.alloc_node(NodeKind::InterfaceDecl, 0, start_span, sym.0, body.0)
+        let span = ByteSpan::new(start_span.start, self.arena.span(body).end);
+        self.arena.alloc_node(NodeKind::InterfaceDecl, 0, span, sym.0, body.0)
     }
 
     fn parse_extend_decl(&mut self) -> NodeId {
@@ -992,7 +1192,8 @@ impl<'a> Parser<'a> {
             self.advance();
         }
         let body = self.parse_block_expr();
-        self.arena.alloc_node(NodeKind::ExtendDecl, 0, start_span, sym.0, body.0)
+        let span = ByteSpan::new(start_span.start, self.arena.span(body).end);
+        self.arena.alloc_node(NodeKind::ExtendDecl, 0, span, sym.0, body.0)
     }
 
     fn parse_type_adt_decl(&mut self) -> NodeId {
@@ -1151,13 +1352,6 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::Colon) {
             self.advance();
             ty_node = self.parse_type();
-            while !self.at_end()
-                && !self.at(TokenKind::Equal)
-                && !self.at(TokenKind::Semicolon)
-                && !self.at(TokenKind::Newline)
-            {
-                self.advance();
-            }
         }
 
         let init = if self.at(TokenKind::Equal) {
@@ -1722,15 +1916,27 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_adapter_decl(&mut self) -> NodeId {
-        let _start_span = self.span();
+        let start_span = self.span();
         self.advance(); // consume 'adapter'
+        let mut name_parts = Vec::new();
         while !self.at_end() && !self.at(TokenKind::LBrace) && !self.at(TokenKind::Colon) && !self.at(TokenKind::Newline) {
+            if self.is_ident_like() {
+                name_parts.push(self.text().to_string());
+            }
             self.advance();
         }
         if self.at(TokenKind::Colon) {
             self.advance();
         }
-        self.parse_block_expr()
+        let body = self.parse_block_expr();
+        let adapter_name = if name_parts.is_empty() {
+            "__pilot_adapter".to_string()
+        } else {
+            format!("__pilot_adapter_{}", name_parts.join("_"))
+        };
+        let sym = self.arena.interner.intern(&adapter_name);
+        let (fn_start, fn_len) = self.arena.alloc_child_slice(&[body]);
+        self.arena.alloc_node(NodeKind::FnDecl, fn_len as u16, start_span, sym.0, fn_start)
     }
 
     fn parse_select_stmt(&mut self) -> NodeId {
@@ -1755,7 +1961,7 @@ impl<'a> Parser<'a> {
                         self.advance(); // consume ident
                         self.advance(); // consume '='
                     }
-                    let _chan_expr = self.parse_expr();
+                    let _chan_expr = self.parse_expr_bp(ExprPrecedence::Assign as u8 + 1);
                     if self.at(TokenKind::FatArrow) {
                         self.advance();
                     }
@@ -1770,7 +1976,14 @@ impl<'a> Parser<'a> {
                     arms.push(arm_body);
                 } else if self.is_ident_like() && self.text() == "timeout" {
                     self.advance();
-                    let _duration = self.parse_expr();
+                    let _duration = self.parse_expr_bp(ExprPrecedence::Assign as u8 + 1);
+                    if self.at(TokenKind::FatArrow) {
+                        self.advance();
+                    }
+                    let body = self.parse_block_expr();
+                    arms.push(body);
+                } else if self.at(TokenKind::KwDefault) || (self.is_ident_like() && self.text() == "default") {
+                    self.advance();
                     if self.at(TokenKind::FatArrow) {
                         self.advance();
                     }
@@ -1837,6 +2050,10 @@ impl<'a> Parser<'a> {
         let start_span = self.span();
         self.advance(); // consume 'while'
         let cond = self.parse_expr();
+        if self.at(TokenKind::KwBounded) || (self.is_ident_like() && self.text() == "bounded") {
+            self.advance();
+            let _bound = self.parse_expr();
+        }
         let body = self.parse_block_expr();
         self.arena.alloc_node(NodeKind::WhileStmt, 0, start_span, cond.0, body.0)
     }
@@ -1861,6 +2078,10 @@ impl<'a> Parser<'a> {
         let iter_expr = self.parse_expr();
         if has_paren && self.at(TokenKind::RParen) {
             self.advance();
+        }
+        if self.at(TokenKind::KwBounded) || (self.is_ident_like() && self.text() == "bounded") {
+            self.advance();
+            let _bound = self.parse_expr();
         }
         let body = self.parse_block_expr();
         if self.at(TokenKind::KwThen) {
@@ -1960,7 +2181,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_expr_bp(&mut self, min_bp: u8) -> NodeId {
-        let mut lhs = self.parse_expr_prefix();
+        let mut lhs = self.parse_expr_prefix(min_bp);
         if lhs.is_none() {
             return NodeId::NONE;
         }
@@ -2287,6 +2508,9 @@ impl<'a> Parser<'a> {
             }
 
             self.advance();
+            if op == BinaryOp::Union && (self.at(TokenKind::KwAll) || (self.is_ident_like() && self.text() == "all")) {
+                self.advance();
+            }
             let next_min_bp = if r_assoc { bp } else { bp + 1 };
             let rhs = self.parse_expr_bp(next_min_bp);
             let span = self.arena.span(lhs);
@@ -2324,7 +2548,7 @@ impl<'a> Parser<'a> {
         false
     }
 
-    fn parse_expr_prefix(&mut self) -> NodeId {
+    fn parse_expr_prefix(&mut self, min_bp: u8) -> NodeId {
         let k = self.peek();
         let span = self.span();
 
@@ -2340,7 +2564,10 @@ impl<'a> Parser<'a> {
 
         if self.is_ident_like() {
             // Check for C# single-parameter lambda: x => expr
-            if self.pos + 1 < self.tape.len() && self.tape.kind(self.pos + 1) == TokenKind::FatArrow {
+            if min_bp <= (ExprPrecedence::Assign as u8)
+                && self.pos + 1 < self.tape.len()
+                && self.tape.kind(self.pos + 1) == TokenKind::FatArrow
+            {
                 let p_name = self.text();
                 self.advance(); // consume ident
                 let sym = self.arena.interner.intern(p_name);
@@ -2539,7 +2766,7 @@ impl<'a> Parser<'a> {
                     {
                         self.pos = lookahead + 1;
                         self.skip_whitespace_and_comments();
-                        return self.parse_expr_prefix();
+                        return self.parse_expr_prefix(min_bp);
                     }
                 }
 
@@ -2664,11 +2891,17 @@ impl<'a> Parser<'a> {
             | TokenKind::KwNot
             | TokenKind::KwEach
             | TokenKind::Amper
-            | TokenKind::KwRef => {
-                let is_amper = k == TokenKind::Amper || k == TokenKind::KwRef;
+            | TokenKind::KwRef
+            | TokenKind::ArrowLeft => {
+                let flags = match k {
+                    TokenKind::Amper | TokenKind::KwRef => 1,
+                    TokenKind::ArrowLeft => 3,
+                    TokenKind::Tilde => 4,
+                    TokenKind::Exclamation | TokenKind::KwNot => 5,
+                    _ => 0,
+                };
                 self.advance();
                 let operand = self.parse_expr_bp(ExprPrecedence::UnaryPrefix as u8);
-                let flags = if is_amper { 1 } else { 0 };
                 self.arena.alloc_node(NodeKind::UnaryExpr, flags, span, operand.0, 0)
             }
             TokenKind::KwComptime => {
@@ -2676,13 +2909,21 @@ impl<'a> Parser<'a> {
                 if self.at(TokenKind::LBrace) {
                     self.parse_block_expr()
                 } else {
-                    self.parse_expr_prefix()
+                    self.parse_expr_prefix(min_bp)
                 }
             }
             TokenKind::KwFor => self.parse_for_stmt(),
             TokenKind::KwIf => self.parse_if_expr(),
             TokenKind::KwMatch => self.parse_match_expr(),
             TokenKind::KwLambda => self.parse_lambda_expr(),
+            TokenKind::KwFrom => self.parse_query_expr(),
+            TokenKind::KwSelect => {
+                if self.peek_ahead(1) == TokenKind::LBrace {
+                    self.parse_select_stmt()
+                } else {
+                    self.parse_query_expr()
+                }
+            }
             TokenKind::KwLet | TokenKind::KwVar => {
                 let is_binding = if self.pos + 2 < self.tape.len() {
                     let k2 = self.tape.kind(self.pos + 2);
@@ -3031,6 +3272,10 @@ impl<'a> Parser<'a> {
             TokenKind::KwIs => Some((BinaryOp::Is, ExprPrecedence::Comparison as u8, false)),
             TokenKind::KwIn => Some((BinaryOp::Eq, ExprPrecedence::Comparison as u8, false)),
             TokenKind::Walrus => Some((BinaryOp::Walrus, ExprPrecedence::Assign as u8, true)),
+            TokenKind::ArrowLeft => Some((BinaryOp::Send, ExprPrecedence::Pipe as u8, false)),
+            TokenKind::KwUnion => Some((BinaryOp::Union, ExprPrecedence::BitOr as u8, false)),
+            TokenKind::KwIntersect => Some((BinaryOp::Intersect, ExprPrecedence::BitOr as u8, false)),
+            TokenKind::KwExcept => Some((BinaryOp::Except, ExprPrecedence::BitOr as u8, false)),
             _ => None,
         }
     }
@@ -3174,7 +3419,9 @@ impl<'a> Parser<'a> {
                         self.arena.alloc_list_node(NodeKind::TypeTuple, 0, span, &type_args)
                     }
                     _ => {
-                        if type_args.len() == 1 {
+                        if type_args.is_empty() {
+                            self.arena.alloc_node(NodeKind::TypeSlice, 0, span, lhs.0, 0)
+                        } else if type_args.len() == 1 {
                             self.arena.alloc_node(NodeKind::TypeList, 0, span, type_args[0].0, 0)
                         } else {
                             self.arena.alloc_list_node(NodeKind::TypeList, 0, span, &type_args)
@@ -3212,6 +3459,10 @@ impl<'a> Parser<'a> {
         } else if self.at(TokenKind::LBracket) {
             self.advance();
             let elem = self.parse_type();
+            if self.at(TokenKind::Semicolon) {
+                self.advance();
+                let _len = self.parse_expr();
+            }
             self.expect(TokenKind::RBracket);
             self.arena.alloc_node(NodeKind::TypeList, 0, span, elem.0, 0)
         } else if self.at(TokenKind::LBrace) {
@@ -3342,10 +3593,10 @@ impl<'a> Parser<'a> {
             || self.at(TokenKind::KwNone)
             || self.at(TokenKind::KwNull)
         {
-            let lit = self.parse_expr_prefix();
+            let lit = self.parse_expr_prefix(ExprPrecedence::Lowest as u8);
             if self.at(TokenKind::DotDot) || self.at(TokenKind::DotDotLess) || self.at(TokenKind::DotDotEqual) {
                 self.advance();
-                let end_lit = self.parse_expr_prefix();
+                let end_lit = self.parse_expr_prefix(ExprPrecedence::Lowest as u8);
                 self.arena.alloc_node(NodeKind::PatRange, 0, span, lit.0, end_lit.0)
             } else {
                 self.arena.alloc_node(NodeKind::PatLiteral, 0, span, lit.0, 0)
@@ -3480,7 +3731,46 @@ mod tests {
     #[test]
     fn test_parse_01_type_safety() {
         let src = std::fs::read_to_string("../../tests/01_type_safety.pilot").unwrap();
+        let tape = pilot_lexer::tokenize(&src);
+        for i in 0..tape.len() {
+            let sp = tape.span(i);
+            if sp.start >= 14890 && sp.start <= 15250 {
+                println!("  token {:?}: '{}' [{}:{}]", tape.kind(i), &src[sp.start as usize..sp.end as usize], sp.start, sp.end);
+            }
+        }
         let arena = parse(&src);
         assert!(arena.nodes.len() > 10);
+    }
+
+    #[test]
+    fn test_parse_all_syntax() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/all_syntax.pilot");
+        let src = std::fs::read_to_string(&path).unwrap();
+        let arena = parse(&src);
+        let root = arena.node(arena.root);
+        let children = arena.children_slice(root.lhs, root.rhs);
+        let top_fn_names: Vec<_> = children
+            .iter()
+            .map(|&c| arena.node(NodeId(c)))
+            .filter(|n| n.node_kind() == NodeKind::FnDecl)
+            .map(|n| arena.interner.resolve(SymbolId(n.lhs)))
+            .collect();
+        println!("Top FN names: {:?}", top_fn_names);
+        assert!(top_fn_names.contains(&"run_omnibus_showcase"));
+        assert!(top_fn_names.contains(&"main"));
+    }
+
+    #[test]
+    fn test_parse_crucible_200() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/crucible_200.pilot");
+        let src = std::fs::read_to_string(&path).unwrap();
+        let arena = parse(&src);
+        let root = arena.node(arena.root);
+        let children = arena.children_slice(root.lhs, root.rhs);
+        let top_kinds: Vec<_> = children
+            .iter()
+            .map(|&c| (arena.node(NodeId(c)).node_kind(), arena.interner.resolve(SymbolId(arena.node(NodeId(c)).lhs))))
+            .collect();
+        println!("Crucible top nodes ({}): {:?}", children.len(), top_kinds);
     }
 }

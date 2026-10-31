@@ -55,6 +55,30 @@ pub struct CodeActionQuery;
 #[lsp_capability("semanticTokensProvider")]
 pub struct SemanticTokensFullQuery;
 
+#[derive(LspQuery)]
+#[lsp_method("textDocument/references")]
+#[lsp_capability("referencesProvider")]
+pub struct ReferencesQuery;
+
+#[derive(LspQuery)]
+#[lsp_method("textDocument/implementation")]
+#[lsp_capability("implementationProvider")]
+pub struct ImplementationQuery;
+
+#[derive(LspQuery)]
+#[lsp_method("textDocument/declaration")]
+#[lsp_capability("declarationProvider")]
+pub struct DeclarationQuery;
+
+#[derive(LspQuery)]
+#[lsp_method("textDocument/prepareRename")]
+pub struct PrepareRenameQuery;
+
+#[derive(LspQuery)]
+#[lsp_method("textDocument/rename")]
+#[lsp_capability("renameProvider")]
+pub struct RenameQuery;
+
 pub struct LspServer {
     db: Database,
     uri_to_file_id: HashMap<String, FileId>,
@@ -63,6 +87,7 @@ pub struct LspServer {
     next_file_id: u32,
     pub shutdown_requested: bool,
     pub pending_notifications: Vec<String>,
+    pub workspace_folders: Vec<String>,
 }
 
 impl LspServer {
@@ -75,6 +100,7 @@ impl LspServer {
             next_file_id: 1,
             shutdown_requested: false,
             pending_notifications: Vec::new(),
+            workspace_folders: Vec::new(),
         }
     }
 
@@ -110,7 +136,7 @@ impl LspServer {
 
         match method {
             Some("initialize") => {
-                let resp = self.handle_initialize(id.as_ref());
+                let resp = self.handle_initialize(id.as_ref(), params);
                 Some(resp.serialize())
             }
             Some("initialized") => None,
@@ -208,6 +234,46 @@ impl LspServer {
                     Some(make_response(id, JsonValue::Object(vec![("data".to_string(), JsonValue::Array(Vec::new()))])).serialize())
                 }
             }
+            Some(ReferencesQuery::LSP_METHOD) => {
+                if let Some(p) = params {
+                    let res = self.handle_references(p);
+                    Some(make_response(id, res).serialize())
+                } else {
+                    Some(make_response(id, JsonValue::Array(Vec::new())).serialize())
+                }
+            }
+            Some(ImplementationQuery::LSP_METHOD) => {
+                if let Some(p) = params {
+                    let res = self.handle_implementation(p);
+                    Some(make_response(id, res).serialize())
+                } else {
+                    Some(make_response(id, JsonValue::Array(Vec::new())).serialize())
+                }
+            }
+            Some(DeclarationQuery::LSP_METHOD) => {
+                if let Some(p) = params {
+                    let res = self.handle_definition(p);
+                    Some(make_response(id, res).serialize())
+                } else {
+                    Some(make_response(id, JsonValue::Null).serialize())
+                }
+            }
+            Some(PrepareRenameQuery::LSP_METHOD) => {
+                if let Some(p) = params {
+                    let res = self.handle_prepare_rename(p);
+                    Some(make_response(id, res).serialize())
+                } else {
+                    Some(make_response(id, JsonValue::Null).serialize())
+                }
+            }
+            Some(RenameQuery::LSP_METHOD) => {
+                if let Some(p) = params {
+                    let res = self.handle_rename(p);
+                    Some(make_response(id, res).serialize())
+                } else {
+                    Some(make_response(id, JsonValue::Null).serialize())
+                }
+            }
             _ => {
                 // If it was a request with an id, return MethodNotFound
                 if let Some(req_id) = id {
@@ -266,7 +332,25 @@ impl LspServer {
         "defaultLibrary", // 9
     ];
 
-    fn handle_initialize(&self, id: Option<&JsonValue>) -> JsonValue {
+    fn handle_initialize(&mut self, id: Option<&JsonValue>, params: Option<&JsonValue>) -> JsonValue {
+        if let Some(p) = params {
+            if let Some(root_uri) = p.get("rootUri").and_then(|u| u.as_str()) {
+                self.workspace_folders.push(root_uri.to_string());
+            } else if let Some(root_path) = p.get("rootPath").and_then(|u| u.as_str()) {
+                self.workspace_folders.push(format!("file://{}", root_path));
+            }
+            if let Some(folders) = p.get("workspaceFolders").and_then(|f| f.as_array()) {
+                for f in folders {
+                    if let Some(uri) = f.get("uri").and_then(|u| u.as_str()) {
+                        if !self.workspace_folders.contains(&uri.to_string()) {
+                            self.workspace_folders.push(uri.to_string());
+                        }
+                    }
+                }
+            }
+            self.discover_workspace_files();
+        }
+
         let token_types: Vec<JsonValue> = Self::TOKEN_TYPES
             .iter()
             .map(|&s| JsonValue::String(s.to_string()))
@@ -294,6 +378,12 @@ impl LspServer {
                 ])),
             ])),
             ("definitionProvider".to_string(), JsonValue::Bool(true)),
+            ("declarationProvider".to_string(), JsonValue::Bool(true)),
+            ("implementationProvider".to_string(), JsonValue::Bool(true)),
+            ("referencesProvider".to_string(), JsonValue::Bool(true)),
+            ("renameProvider".to_string(), JsonValue::Object(vec![
+                ("prepareProvider".to_string(), JsonValue::Bool(true)),
+            ])),
             ("documentSymbolProvider".to_string(), JsonValue::Bool(true)),
             ("documentFormattingProvider".to_string(), JsonValue::Bool(true)),
             ("inlayHintProvider".to_string(), JsonValue::Bool(true)),
@@ -1173,7 +1263,792 @@ impl LspServer {
         JsonValue::Array(items)
     }
 
+    fn span_of_name(src: &str, span: pilot_span::ByteSpan, name: &str, line_index: &LineIndex) -> JsonValue {
+        let start = span.start as usize;
+        let end = span.end as usize;
+        if start < src.len() && end <= src.len() && start <= end {
+            if let Some(sub) = src.get(start..end) {
+                if let Some(offset) = sub.find(name) {
+                    let sym_start = (start + offset) as u32;
+                    let sym_end = sym_start + name.len() as u32;
+                    let (sl, sc) = line_index.offset_to_line_col(sym_start);
+                    let (el, ec) = line_index.offset_to_line_col(sym_end);
+                    return make_range(sl.saturating_sub(1), sc.saturating_sub(1), el.saturating_sub(1), ec.saturating_sub(1));
+                }
+            }
+        }
+        let (sl, sc) = line_index.offset_to_line_col(span.start);
+        let (el, ec) = line_index.offset_to_line_col(span.start + name.len() as u32);
+        make_range(sl.saturating_sub(1), sc.saturating_sub(1), el.saturating_sub(1), ec.saturating_sub(1))
+    }
+
+    fn find_member_in_type(
+        &self,
+        file_id: FileId,
+        arena: &pilot_ast::AstArena,
+        src: &str,
+        line_index: &LineIndex,
+        type_name: &str,
+        member_name: &str,
+    ) -> Option<JsonValue> {
+        let uri = self.file_id_to_uri.get(&file_id).cloned().unwrap_or_default();
+
+        for (idx, node) in arena.nodes.iter().enumerate() {
+            let is_target_type = match node.node_kind() {
+                pilot_ast::NodeKind::ClassDecl
+                | pilot_ast::NodeKind::StructDecl
+                | pilot_ast::NodeKind::InterfaceDecl
+                | pilot_ast::NodeKind::RecordDecl => {
+                    arena.interner.resolve(pilot_intern::SymbolId(node.lhs)) == type_name
+                }
+                _ => false,
+            };
+
+            if is_target_type {
+                if node.node_kind() == pilot_ast::NodeKind::RecordDecl {
+                    if let Some(fields) = arena.record_fields.get(&(idx as u32)) {
+                        for (f_sym, _) in fields {
+                            if arena.interner.resolve(*f_sym) == member_name {
+                                for (p_idx, p_node) in arena.nodes.iter().enumerate() {
+                                    if p_node.node_kind() == pilot_ast::NodeKind::ParamDecl && p_node.lhs == f_sym.0 {
+                                        let range = Self::span_of_name(src, arena.spans[p_idx], member_name, line_index);
+                                        return Some(JsonValue::Object(vec![
+                                            ("uri".to_string(), JsonValue::String(uri.clone())),
+                                            ("range".to_string(), range),
+                                        ]));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let body_id = pilot_ast::NodeId(node.rhs);
+                if body_id.is_some() {
+                    let body_node = *arena.node(body_id);
+                    if body_node.node_kind() == pilot_ast::NodeKind::BlockExpr {
+                        let children = arena.children_slice(body_node.lhs, body_node.rhs);
+                        for &child_id in children {
+                            let child_node = *arena.node(pilot_ast::NodeId(child_id));
+                            let c_span = arena.spans[child_id as usize];
+                            match child_node.node_kind() {
+                                pilot_ast::NodeKind::FnDecl => {
+                                    let fn_name = arena.interner.resolve(pilot_intern::SymbolId(child_node.lhs));
+                                    if fn_name == member_name || (fn_name == "this[]" && member_name == "this") {
+                                        let range = Self::span_of_name(src, c_span, member_name, line_index);
+                                        return Some(JsonValue::Object(vec![
+                                            ("uri".to_string(), JsonValue::String(uri.clone())),
+                                            ("range".to_string(), range),
+                                        ]));
+                                    }
+                                }
+                                pilot_ast::NodeKind::LetStmt
+                                | pilot_ast::NodeKind::VarStmt
+                                | pilot_ast::NodeKind::ConstDecl => {
+                                    let field_name = arena.interner.resolve(pilot_intern::SymbolId(child_node.lhs));
+                                    if field_name == member_name {
+                                        let range = Self::span_of_name(src, c_span, member_name, line_index);
+                                        return Some(JsonValue::Object(vec![
+                                            ("uri".to_string(), JsonValue::String(uri.clone())),
+                                            ("range".to_string(), range),
+                                        ]));
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+
+            if node.node_kind() == pilot_ast::NodeKind::ExtendDecl {
+                let ext_target = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                if ext_target == type_name {
+                    let body_id = pilot_ast::NodeId(node.rhs);
+                    if body_id.is_some() {
+                        let body_node = *arena.node(body_id);
+                        if body_node.node_kind() == pilot_ast::NodeKind::BlockExpr {
+                            let children = arena.children_slice(body_node.lhs, body_node.rhs);
+                            for &child_id in children {
+                                let child_node = *arena.node(pilot_ast::NodeId(child_id));
+                                let c_span = arena.spans[child_id as usize];
+                                if child_node.node_kind() == pilot_ast::NodeKind::FnDecl {
+                                    let fn_name = arena.interner.resolve(pilot_intern::SymbolId(child_node.lhs));
+                                    if fn_name == member_name {
+                                        let range = Self::span_of_name(src, c_span, member_name, line_index);
+                                        return Some(JsonValue::Object(vec![
+                                            ("uri".to_string(), JsonValue::String(uri.clone())),
+                                            ("range".to_string(), range),
+                                        ]));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn find_member_anywhere(
+        &self,
+        file_id: FileId,
+        arena: &pilot_ast::AstArena,
+        src: &str,
+        line_index: &LineIndex,
+        member_name: &str,
+    ) -> Option<JsonValue> {
+        let uri = self.file_id_to_uri.get(&file_id).cloned().unwrap_or_default();
+        for (idx, node) in arena.nodes.iter().enumerate() {
+            if node.node_kind() == pilot_ast::NodeKind::FnDecl {
+                let fn_name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                if fn_name == member_name {
+                    let range = Self::span_of_name(src, arena.spans[idx], member_name, line_index);
+                    return Some(JsonValue::Object(vec![
+                        ("uri".to_string(), JsonValue::String(uri)),
+                        ("range".to_string(), range),
+                    ]));
+                }
+            }
+        }
+        None
+    }
+
+    fn find_member_in_workspace(&mut self, current_file_id: FileId, member_name: &str) -> Option<JsonValue> {
+        let other_files: Vec<(FileId, String)> = self
+            .file_id_to_uri
+            .iter()
+            .filter(|(&id, _)| id != current_file_id)
+            .map(|(&id, u)| (id, u.clone()))
+            .collect();
+
+        for (other_id, other_uri) in other_files {
+            if let (Some(mod_analysis), Some(src), Some(li)) = (
+                self.db.module_analysis(other_id),
+                self.db.source_text(other_id),
+                self.line_indices.get(&other_id),
+            ) {
+                let arena = &mod_analysis.arena;
+                for (idx, node) in arena.nodes.iter().enumerate() {
+                    if node.node_kind() == pilot_ast::NodeKind::FnDecl {
+                        let fn_name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                        if fn_name == member_name {
+                            let range = Self::span_of_name(&src, arena.spans[idx], member_name, li);
+                            return Some(JsonValue::Object(vec![
+                                ("uri".to_string(), JsonValue::String(other_uri)),
+                                ("range".to_string(), range),
+                            ]));
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn find_symbol_in_workspace(&mut self, current_file_id: FileId, sym_name: &str) -> Option<JsonValue> {
+        let other_files: Vec<(FileId, String)> = self
+            .file_id_to_uri
+            .iter()
+            .filter(|(&id, _)| id != current_file_id)
+            .map(|(&id, u)| (id, u.clone()))
+            .collect();
+
+        for (other_id, other_uri) in other_files {
+            if let (Some(other_mod), Some(o_src), Some(o_li)) = (
+                self.db.module_analysis(other_id),
+                self.db.source_text(other_id),
+                self.line_indices.get(&other_id),
+            ) {
+                let o_arena = &other_mod.arena;
+                for (idx, node) in o_arena.nodes.iter().enumerate() {
+                    let matches_ident = match node.node_kind() {
+                        pilot_ast::NodeKind::FnDecl
+                        | pilot_ast::NodeKind::ClassDecl
+                        | pilot_ast::NodeKind::StructDecl
+                        | pilot_ast::NodeKind::RecordDecl
+                        | pilot_ast::NodeKind::InterfaceDecl
+                        | pilot_ast::NodeKind::TypeAdtDecl
+                        | pilot_ast::NodeKind::ConstDecl => {
+                            o_arena.interner.resolve(pilot_intern::SymbolId(node.lhs)) == sym_name
+                        }
+                        _ => false,
+                    };
+                    if matches_ident {
+                        let range = Self::span_of_name(&o_src, o_arena.spans[idx], sym_name, o_li);
+                        return Some(JsonValue::Object(vec![
+                            ("uri".to_string(), JsonValue::String(other_uri)),
+                            ("range".to_string(), range),
+                        ]));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn discover_workspace_files(&mut self) {
+        let roots = self.workspace_folders.clone();
+        for root_uri in roots {
+            if let Some(root_path) = Self::decode_uri_path(&root_uri) {
+                let p = std::path::Path::new(&root_path);
+                if p.is_dir() {
+                    self.scan_dir_pilot_files(p);
+                }
+            }
+        }
+    }
+
+    fn scan_dir_pilot_files(&mut self, dir: &std::path::Path) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            let file_name = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
+            if file_name.starts_with('.')
+                || file_name == "target"
+                || file_name == "node_modules"
+                || file_name == "bin"
+                || file_name == "obj"
+            {
+                continue;
+            }
+            if path.is_dir() {
+                self.scan_dir_pilot_files(&path);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("pilot") {
+                let uri = format!("file://{}", path.to_string_lossy());
+                self.ensure_file_loaded(&uri);
+            }
+        }
+    }
+
     fn handle_definition(&mut self, params: &JsonValue) -> JsonValue {
+        let (file_id, byte_offset) = match self.get_file_and_offset(params) {
+            Some(res) => res,
+            None => return JsonValue::Null,
+        };
+
+        let src = match self.db.source_text(file_id) {
+            Some(s) => s,
+            None => return JsonValue::Null,
+        };
+
+        let green = match self.db.green_cst(file_id) {
+            Some(g) => g,
+            None => return JsonValue::Null,
+        };
+
+        let root = SyntaxNode::new_root(green);
+        let mut token = root.find_token_at_offset(byte_offset);
+        if token.as_ref().map(|t| t.kind().is_trivia()).unwrap_or(true) && byte_offset > 0 {
+            if let Some(prev) = root.find_token_at_offset(byte_offset - 1) {
+                if !prev.kind().is_trivia() {
+                    token = Some(prev);
+                }
+            }
+        }
+
+        let tok = match token {
+            Some(ref t) => t,
+            None => return JsonValue::Null,
+        };
+
+        let txt = tok.text();
+        if txt.is_empty() || tok.kind().is_trivia() || !txt.chars().next().map_or(false, |c| c.is_alphabetic() || c == '_') {
+            return JsonValue::Null;
+        }
+
+        let uri = self.file_id_to_uri.get(&file_id).cloned().unwrap_or_default();
+        let line_index = match self.line_indices.get(&file_id) {
+            Some(li) => li.clone(),
+            None => return JsonValue::Null,
+        };
+
+        let is_after_dot = {
+            let tok_start = tok.offset() as usize;
+            let before = src.get(..tok_start).unwrap_or("").trim_end();
+            before.ends_with('.') || before.ends_with("?.") || before.ends_with("..")
+        };
+
+        let local_result = {
+            let mod_analysis = match self.db.module_analysis(file_id) {
+                Some(m) => m,
+                None => return JsonValue::Null,
+            };
+            let arena = &mod_analysis.arena;
+            let analysis = &mod_analysis.analysis;
+
+            let mut res: Option<JsonValue> = None;
+
+            // 1. Member Access Navigation (obj.method, obj.property, obj..method)
+            if is_after_dot {
+                let receiver_word = {
+                    let tok_start = tok.offset() as usize;
+                    let before = src.get(..tok_start).unwrap_or("").trim_end();
+                    let dot_trimmed = before.trim_end_matches('.').trim_end_matches('?').trim_end();
+                    dot_trimmed
+                        .split(|c: char| !c.is_alphanumeric() && c != '_')
+                        .filter(|s| !s.is_empty())
+                        .last()
+                        .map(|s| s.to_string())
+                };
+
+                let mut target_ty_name: Option<String> = None;
+                if let Some(ref r_name) = receiver_word {
+                    if r_name == "self" || r_name == "this" {
+                        for (c_idx, c_node) in arena.nodes.iter().enumerate() {
+                            if matches!(
+                                c_node.node_kind(),
+                                pilot_ast::NodeKind::ClassDecl
+                                    | pilot_ast::NodeKind::StructDecl
+                                    | pilot_ast::NodeKind::InterfaceDecl
+                                    | pilot_ast::NodeKind::ExtendDecl
+                            ) {
+                                let c_span = arena.spans[c_idx];
+                                if byte_offset >= c_span.start && byte_offset <= c_span.end {
+                                    target_ty_name = Some(arena.interner.resolve(pilot_intern::SymbolId(c_node.lhs)).to_string());
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        for (idx, node) in arena.nodes.iter().enumerate() {
+                            if matches!(
+                                node.node_kind(),
+                                pilot_ast::NodeKind::LetStmt
+                                    | pilot_ast::NodeKind::VarStmt
+                                    | pilot_ast::NodeKind::ParamDecl
+                                    | pilot_ast::NodeKind::IdentExpr
+                            ) {
+                                if arena.interner.resolve(pilot_intern::SymbolId(node.lhs)) == r_name {
+                                    if let Some(&ty) = analysis.inferred_types.get(&(idx as u32)) {
+                                        let pruned = analysis.types.prune(ty);
+                                        match analysis.types.get(pruned) {
+                                            pilot_analysis::TypeKind::Primitive(n) => {
+                                                target_ty_name = Some(n.clone());
+                                                break;
+                                            }
+                                            pilot_analysis::TypeKind::Adt { name, .. } => {
+                                                target_ty_name = Some(name.clone());
+                                                break;
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let Some(ref type_name) = target_ty_name {
+                    if let Some(loc) = self.find_member_in_type(file_id, arena, &src, &line_index, type_name, txt) {
+                        res = Some(loc);
+                    }
+                }
+
+                if res.is_none() {
+                    if let Some(loc) = self.find_member_anywhere(file_id, arena, &src, &line_index, txt) {
+                        res = Some(loc);
+                    }
+                }
+            }
+
+            // 2. Self / This Navigation
+            if res.is_none() && (txt == "self" || txt == "this") {
+                for (c_idx, c_node) in arena.nodes.iter().enumerate() {
+                    if matches!(
+                        c_node.node_kind(),
+                        pilot_ast::NodeKind::ClassDecl
+                            | pilot_ast::NodeKind::StructDecl
+                            | pilot_ast::NodeKind::InterfaceDecl
+                            | pilot_ast::NodeKind::ExtendDecl
+                    ) {
+                        let c_span = arena.spans[c_idx];
+                        if byte_offset >= c_span.start && byte_offset <= c_span.end {
+                            let name = arena.interner.resolve(pilot_intern::SymbolId(c_node.lhs));
+                            let range = Self::span_of_name(&src, c_span, name, &line_index);
+                            res = Some(JsonValue::Object(vec![
+                                ("uri".to_string(), JsonValue::String(uri.clone())),
+                                ("range".to_string(), range),
+                            ]));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 3. Local Variables, Parameters, Pattern Bindings, For-Loop Variables
+            if res.is_none() {
+                let mut best_local_decl: Option<usize> = None;
+                for (idx, node) in arena.nodes.iter().enumerate() {
+                    let nk = node.node_kind();
+                    if matches!(
+                        nk,
+                        pilot_ast::NodeKind::LetStmt
+                            | pilot_ast::NodeKind::VarStmt
+                            | pilot_ast::NodeKind::ConstDecl
+                            | pilot_ast::NodeKind::ParamDecl
+                            | pilot_ast::NodeKind::PatBind
+                            | pilot_ast::NodeKind::ForExpr
+                    ) {
+                        let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                        if name == txt {
+                            let span = arena.spans[idx];
+                            if span.start <= byte_offset {
+                                best_local_decl = Some(idx);
+                            } else if best_local_decl.is_none() {
+                                best_local_decl = Some(idx);
+                            }
+                        }
+                    }
+                }
+
+                if let Some(idx) = best_local_decl {
+                    let range = Self::span_of_name(&src, arena.spans[idx], txt, &line_index);
+                    res = Some(JsonValue::Object(vec![
+                        ("uri".to_string(), JsonValue::String(uri.clone())),
+                        ("range".to_string(), range),
+                    ]));
+                }
+            }
+
+            // 4. Functions, Methods, Indexers
+            if res.is_none() {
+                for (idx, node) in arena.nodes.iter().enumerate() {
+                    if node.node_kind() == pilot_ast::NodeKind::FnDecl {
+                        let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                        if name == txt || (name == "this[]" && txt == "this") {
+                            let range = Self::span_of_name(&src, arena.spans[idx], txt, &line_index);
+                            res = Some(JsonValue::Object(vec![
+                                ("uri".to_string(), JsonValue::String(uri.clone())),
+                                ("range".to_string(), range),
+                            ]));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 5. Classes, Structs, Interfaces, Records, Type ADTs, ADT Variants
+            if res.is_none() {
+                for (idx, node) in arena.nodes.iter().enumerate() {
+                    if matches!(
+                        node.node_kind(),
+                        pilot_ast::NodeKind::ClassDecl
+                            | pilot_ast::NodeKind::StructDecl
+                            | pilot_ast::NodeKind::InterfaceDecl
+                            | pilot_ast::NodeKind::RecordDecl
+                            | pilot_ast::NodeKind::TypeAdtDecl
+                            | pilot_ast::NodeKind::AdtVariant
+                    ) {
+                        let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                        if name == txt {
+                            let range = Self::span_of_name(&src, arena.spans[idx], txt, &line_index);
+                            res = Some(JsonValue::Object(vec![
+                                ("uri".to_string(), JsonValue::String(uri.clone())),
+                                ("range".to_string(), range),
+                            ]));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 6. Fallback to ItemTree
+            if res.is_none() {
+                if let Some(item_tree) = self.db.module_item_tree(file_id) {
+                    for item in &item_tree.items {
+                        if item.name == txt {
+                            let (line, col) = line_index.offset_to_line_col(tok.offset());
+                            let range = make_range(line - 1, col - 1, line - 1, col - 1 + txt.len() as u32);
+                            res = Some(JsonValue::Object(vec![
+                                ("uri".to_string(), JsonValue::String(uri.clone())),
+                                ("range".to_string(), range),
+                            ]));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            res
+        };
+
+        if let Some(loc) = local_result {
+            return loc;
+        }
+
+        // 7. Workspace search fallback
+        if is_after_dot {
+            if let Some(loc) = self.find_member_in_workspace(file_id, txt) {
+                return loc;
+            }
+        } else {
+            if let Some(loc) = self.find_symbol_in_workspace(file_id, txt) {
+                return loc;
+            }
+        }
+
+        JsonValue::Null
+    }
+
+    fn handle_references(&mut self, params: &JsonValue) -> JsonValue {
+        let (file_id, byte_offset) = match self.get_file_and_offset(params) {
+            Some(res) => res,
+            None => return JsonValue::Array(Vec::new()),
+        };
+
+        let include_decl = params
+            .get("context")
+            .and_then(|c| c.get("includeDeclaration"))
+            .and_then(|b| b.as_bool())
+            .unwrap_or(true);
+
+        let green = match self.db.green_cst(file_id) {
+            Some(g) => g,
+            None => return JsonValue::Array(Vec::new()),
+        };
+
+        let root = SyntaxNode::new_root(green);
+        let mut token = root.find_token_at_offset(byte_offset);
+        if token.as_ref().map(|t| t.kind().is_trivia()).unwrap_or(true) && byte_offset > 0 {
+            if let Some(prev) = root.find_token_at_offset(byte_offset - 1) {
+                if !prev.kind().is_trivia() {
+                    token = Some(prev);
+                }
+            }
+        }
+
+        let tok = match token {
+            Some(ref t) => t,
+            None => return JsonValue::Array(Vec::new()),
+        };
+
+        let sym_name = tok.text().to_string();
+        if sym_name.is_empty() || tok.kind().is_trivia() || !sym_name.chars().next().map_or(false, |c| c.is_alphabetic() || c == '_') {
+            return JsonValue::Array(Vec::new());
+        }
+
+        // Determine if sym_name is a local variable/parameter in an enclosing function
+        let mut local_scope_span: Option<pilot_span::ByteSpan> = None;
+        if let Some(mod_analysis) = self.db.module_analysis(file_id) {
+            let arena = &mod_analysis.arena;
+            for (idx, node) in arena.nodes.iter().enumerate() {
+                if node.node_kind() == pilot_ast::NodeKind::FnDecl {
+                    let fn_span = arena.spans[idx];
+                    if byte_offset >= fn_span.start && byte_offset <= fn_span.end {
+                        let mut is_local = false;
+                        let fn_start = node.rhs;
+                        let fn_len = node.flags as usize;
+                        if fn_len > 0 {
+                            let children = arena.children_slice(fn_start, fn_len as u32);
+                            for &p_id in &children[1..] {
+                                let p_node = *arena.node(pilot_ast::NodeId(p_id));
+                                if p_node.node_kind() == pilot_ast::NodeKind::ParamDecl {
+                                    if arena.interner.resolve(pilot_intern::SymbolId(p_node.lhs)) == sym_name {
+                                        is_local = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if !is_local {
+                            for (n_idx, n) in arena.nodes.iter().enumerate() {
+                                let n_span = arena.spans[n_idx];
+                                if n_span.start >= fn_span.start && n_span.end <= fn_span.end {
+                                    match n.node_kind() {
+                                        pilot_ast::NodeKind::LetStmt
+                                        | pilot_ast::NodeKind::VarStmt
+                                        | pilot_ast::NodeKind::PatBind => {
+                                            if arena.interner.resolve(pilot_intern::SymbolId(n.lhs)) == sym_name {
+                                                is_local = true;
+                                                break;
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                        if is_local {
+                            local_scope_span = Some(fn_span);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut results = Vec::new();
+        let mut visited: std::collections::HashSet<(String, u32, u32)> = std::collections::HashSet::new();
+
+        // 1. Collect references from current file
+        let current_uri = self.file_id_to_uri.get(&file_id).cloned().unwrap_or_default();
+        if let Some(li) = self.line_indices.get(&file_id) {
+            for elem in root.descendants() {
+                if let SyntaxElement::Token(t) = elem {
+                    if !t.kind().is_trivia() && t.text() == sym_name {
+                        let offset = t.offset();
+                        let len = t.text_len();
+
+                        if let Some(span) = local_scope_span {
+                            if offset < span.start || offset + len > span.end {
+                                continue;
+                            }
+                        }
+
+                        if !include_decl && offset == tok.offset() {
+                            continue;
+                        }
+
+                        let (sl, sc) = li.offset_to_line_col(offset);
+                        let (el, ec) = li.offset_to_line_col(offset + len);
+                        let s_line = sl.saturating_sub(1);
+                        let s_col = sc.saturating_sub(1);
+                        let e_line = el.saturating_sub(1);
+                        let e_col = ec.saturating_sub(1);
+
+                        if visited.insert((current_uri.clone(), s_line, s_col)) {
+                            results.push(JsonValue::Object(vec![
+                                ("uri".to_string(), JsonValue::String(current_uri.clone())),
+                                ("range".to_string(), make_range(s_line, s_col, e_line, e_col)),
+                            ]));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. If not local, collect across all other loaded workspace files
+        if local_scope_span.is_none() {
+            let other_files: Vec<(FileId, String)> = self
+                .file_id_to_uri
+                .iter()
+                .filter(|(&id, _)| id != file_id)
+                .map(|(&id, u)| (id, u.clone()))
+                .collect();
+
+            for (other_id, other_uri) in other_files {
+                if let (Some(o_green), Some(o_li)) = (self.db.green_cst(other_id), self.line_indices.get(&other_id)) {
+                    let o_root = SyntaxNode::new_root(o_green);
+                    for elem in o_root.descendants() {
+                        if let SyntaxElement::Token(t) = elem {
+                            if !t.kind().is_trivia() && t.text() == sym_name {
+                                let offset = t.offset();
+                                let len = t.text_len();
+                                let (sl, sc) = o_li.offset_to_line_col(offset);
+                                let (el, ec) = o_li.offset_to_line_col(offset + len);
+                                let s_line = sl.saturating_sub(1);
+                                let s_col = sc.saturating_sub(1);
+                                let e_line = el.saturating_sub(1);
+                                let e_col = ec.saturating_sub(1);
+
+                                if visited.insert((other_uri.clone(), s_line, s_col)) {
+                                    results.push(JsonValue::Object(vec![
+                                        ("uri".to_string(), JsonValue::String(other_uri.clone())),
+                                        ("range".to_string(), make_range(s_line, s_col, e_line, e_col)),
+                                    ]));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        JsonValue::Array(results)
+    }
+
+    fn handle_implementation(&mut self, params: &JsonValue) -> JsonValue {
+        let (file_id, byte_offset) = match self.get_file_and_offset(params) {
+            Some(res) => res,
+            None => return JsonValue::Array(Vec::new()),
+        };
+
+        let green = match self.db.green_cst(file_id) {
+            Some(g) => g,
+            None => return JsonValue::Array(Vec::new()),
+        };
+
+        let root = SyntaxNode::new_root(green);
+        let mut token = root.find_token_at_offset(byte_offset);
+        if token.as_ref().map(|t| t.kind().is_trivia()).unwrap_or(true) && byte_offset > 0 {
+            if let Some(prev) = root.find_token_at_offset(byte_offset - 1) {
+                if !prev.kind().is_trivia() {
+                    token = Some(prev);
+                }
+            }
+        }
+
+        let tok = match token {
+            Some(ref t) => t,
+            None => return JsonValue::Array(Vec::new()),
+        };
+
+        let sym_name = tok.text().to_string();
+        if sym_name.is_empty() || tok.kind().is_trivia() || !sym_name.chars().next().map_or(false, |c| c.is_alphabetic() || c == '_') {
+            return JsonValue::Array(Vec::new());
+        }
+
+        let mut results = Vec::new();
+        let all_files: Vec<(FileId, String)> = self
+            .file_id_to_uri
+            .iter()
+            .map(|(&id, u)| (id, u.clone()))
+            .collect();
+
+        for (fid, f_uri) in all_files {
+            if let (Some(mod_analysis), Some(src), Some(li)) = (
+                self.db.module_analysis(fid),
+                self.db.source_text(fid),
+                self.line_indices.get(&fid),
+            ) {
+                let arena = &mod_analysis.arena;
+                for (idx, node) in arena.nodes.iter().enumerate() {
+                    match node.node_kind() {
+                        pilot_ast::NodeKind::ClassDecl | pilot_ast::NodeKind::StructDecl => {
+                            let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                            let span = arena.spans[idx];
+                            if let Some(slice) = src.get(span.start as usize..span.end as usize) {
+                                if slice.contains(&format!(": {}", sym_name))
+                                    || slice.contains(&format!(":{}", sym_name))
+                                    || slice.contains(&format!("implements {}", sym_name))
+                                    || slice.contains(&format!("with {}", sym_name))
+                                {
+                                    let range = Self::span_of_name(&src, span, name, li);
+                                    results.push(JsonValue::Object(vec![
+                                        ("uri".to_string(), JsonValue::String(f_uri.clone())),
+                                        ("range".to_string(), range),
+                                    ]));
+                                }
+                            }
+                        }
+                        pilot_ast::NodeKind::ExtendDecl => {
+                            let target = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                            if target == sym_name {
+                                let span = arena.spans[idx];
+                                let range = Self::span_of_name(&src, span, target, li);
+                                results.push(JsonValue::Object(vec![
+                                    ("uri".to_string(), JsonValue::String(f_uri.clone())),
+                                    ("range".to_string(), range),
+                                ]));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        JsonValue::Array(results)
+    }
+
+    fn handle_prepare_rename(&mut self, params: &JsonValue) -> JsonValue {
         let (file_id, byte_offset) = match self.get_file_and_offset(params) {
             Some(res) => res,
             None => return JsonValue::Null,
@@ -1185,30 +2060,115 @@ impl LspServer {
         };
 
         let root = SyntaxNode::new_root(green);
-        let token = match root.find_token_at_offset(byte_offset) {
-            Some(t) => t,
-            None => return JsonValue::Null,
-        };
-
-        let txt = token.text();
-        let uri = self.file_id_to_uri.get(&file_id).cloned().unwrap_or_default();
-        let line_index = self.line_indices.get(&file_id);
-
-        if let Some(item_tree) = self.db.module_item_tree(file_id) {
-            for item in &item_tree.items {
-                if item.name == txt {
-                    // Found item definition
-                    let (line, col) = line_index.map(|li| li.offset_to_line_col(token.offset())).unwrap_or((1, 1));
-                    let range = make_range(line - 1, col - 1, line - 1, col - 1 + txt.len() as u32);
-                    return JsonValue::Object(vec![
-                        ("uri".to_string(), JsonValue::String(uri)),
-                        ("range".to_string(), range),
-                    ]);
+        let mut token = root.find_token_at_offset(byte_offset);
+        if token.as_ref().map(|t| t.kind().is_trivia()).unwrap_or(true) && byte_offset > 0 {
+            if let Some(prev) = root.find_token_at_offset(byte_offset - 1) {
+                if !prev.kind().is_trivia() {
+                    token = Some(prev);
                 }
             }
         }
 
-        JsonValue::Null
+        let tok = match token {
+            Some(ref t) => t,
+            None => return JsonValue::Null,
+        };
+
+        let txt = tok.text();
+        if tok.kind().is_trivia() || !txt.chars().next().map_or(false, |c| c.is_alphabetic() || c == '_') {
+            return JsonValue::Null;
+        }
+
+        if (tok.kind().is_keyword() && !tok.kind().is_contextual_keyword())
+            || txt == "self"
+            || txt == "this"
+            || txt == "field"
+            || txt == "value"
+        {
+            return JsonValue::Null;
+        }
+
+        let line_index = match self.line_indices.get(&file_id) {
+            Some(li) => li,
+            None => return JsonValue::Null,
+        };
+
+        let offset = tok.offset();
+        let len = tok.text_len();
+        let (sl, sc) = line_index.offset_to_line_col(offset);
+        let (el, ec) = line_index.offset_to_line_col(offset + len);
+        let range = make_range(sl.saturating_sub(1), sc.saturating_sub(1), el.saturating_sub(1), ec.saturating_sub(1));
+
+        JsonValue::Object(vec![
+            ("range".to_string(), range),
+            ("placeholder".to_string(), JsonValue::String(txt.to_string())),
+        ])
+    }
+
+    fn handle_rename(&mut self, params: &JsonValue) -> JsonValue {
+        let (_file_id, _) = match self.get_file_and_offset(params) {
+            Some(res) => res,
+            None => return JsonValue::Null,
+        };
+
+        let new_name = match params.get("newName").and_then(|n| n.as_str()) {
+            Some(n) => n.trim(),
+            None => return JsonValue::Null,
+        };
+
+        if new_name.is_empty() || !is_valid_identifier(new_name) {
+            return JsonValue::Null;
+        }
+
+        let mut ref_params = params.clone();
+        if let JsonValue::Object(ref mut map) = ref_params {
+            map.push((
+                "context".to_string(),
+                JsonValue::Object(vec![("includeDeclaration".to_string(), JsonValue::Bool(true))]),
+            ));
+        }
+
+        let refs = self.handle_references(&ref_params);
+        let ref_array = match refs {
+            JsonValue::Array(a) => a,
+            _ => return JsonValue::Null,
+        };
+
+        if ref_array.is_empty() {
+            return JsonValue::Null;
+        }
+
+        let mut changes_map: HashMap<String, Vec<JsonValue>> = HashMap::new();
+        for loc in ref_array {
+            if let JsonValue::Object(fields) = loc {
+                let uri_val = fields
+                    .iter()
+                    .find(|(k, _)| k == "uri")
+                    .and_then(|(_, v)| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let range_val = fields
+                    .into_iter()
+                    .find(|(k, _)| k == "range")
+                    .map(|(_, v)| v)
+                    .unwrap_or(JsonValue::Null);
+
+                if !uri_val.is_empty() && range_val != JsonValue::Null {
+                    let edit = JsonValue::Object(vec![
+                        ("range".to_string(), range_val),
+                        ("newText".to_string(), JsonValue::String(new_name.to_string())),
+                    ]);
+                    changes_map.entry(uri_val).or_default().push(edit);
+                }
+            }
+        }
+
+        let mut changes_json = Vec::new();
+        for (uri, edits) in changes_map {
+            changes_json.push((uri, JsonValue::Array(edits)));
+        }
+
+        JsonValue::Object(vec![("changes".to_string(), JsonValue::Object(changes_json))])
     }
 
     fn handle_document_symbol(&mut self, params: &JsonValue) -> JsonValue {
@@ -1640,9 +2600,8 @@ impl LspServer {
             Some(u) => u,
             None => return JsonValue::Array(Vec::new()),
         };
-        let _ = uri;
 
-        let actions = vec![
+        let mut actions = vec![
             JsonValue::Object(vec![
                 ("title".to_string(), JsonValue::String("Format Document with pilot fmt".to_string())),
                 ("kind".to_string(), JsonValue::String("source.fixAll".to_string())),
@@ -1652,6 +2611,32 @@ impl LspServer {
                 ])),
             ]),
         ];
+
+        // Check if a range was selected to offer "Extract Variable" refactoring
+        if let Some(range) = params.get("range") {
+            let s_line = range.get("start").and_then(|p| p.get("line")).and_then(|l| l.as_u64()).unwrap_or(0);
+            let s_char = range.get("start").and_then(|p| p.get("character")).and_then(|c| c.as_u64()).unwrap_or(0);
+            let e_line = range.get("end").and_then(|p| p.get("line")).and_then(|l| l.as_u64()).unwrap_or(0);
+            let e_char = range.get("end").and_then(|p| p.get("character")).and_then(|c| c.as_u64()).unwrap_or(0);
+
+            if s_line != e_line || s_char != e_char {
+                let extract_action = JsonValue::Object(vec![
+                    ("title".to_string(), JsonValue::String("Refactor: Extract Local Variable (`let extracted = ...`)".to_string())),
+                    ("kind".to_string(), JsonValue::String("refactor.extract.variable".to_string())),
+                    ("edit".to_string(), JsonValue::Object(vec![
+                        ("changes".to_string(), JsonValue::Object(vec![
+                            (uri.to_string(), JsonValue::Array(vec![
+                                JsonValue::Object(vec![
+                                    ("range".to_string(), range.clone()),
+                                    ("newText".to_string(), JsonValue::String("extracted".to_string())),
+                                ]),
+                            ])),
+                        ])),
+                    ])),
+                ]);
+                actions.push(extract_action);
+            }
+        }
 
         JsonValue::Array(actions)
     }
@@ -1751,6 +2736,57 @@ fn make_response(id: Option<JsonValue>, result: JsonValue) -> JsonValue {
         ("id".to_string(), id.unwrap_or(JsonValue::Null)),
         ("result".to_string(), result),
     ])
+}
+
+fn is_valid_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    for c in chars {
+        if !c.is_ascii_alphanumeric() && c != '_' {
+            return false;
+        }
+    }
+    !matches!(
+        name,
+        "def"
+            | "class"
+            | "struct"
+            | "interface"
+            | "record"
+            | "extend"
+            | "type"
+            | "enum"
+            | "let"
+            | "var"
+            | "const"
+            | "return"
+            | "if"
+            | "else"
+            | "while"
+            | "for"
+            | "in"
+            | "break"
+            | "continue"
+            | "yield"
+            | "match"
+            | "try"
+            | "catch"
+            | "finally"
+            | "except"
+            | "import"
+            | "from"
+            | "as"
+            | "true"
+            | "false"
+            | "null"
+            | "self"
+            | "this"
+            | "field"
+            | "value"
+    )
 }
 
 fn make_range(start_line: u32, start_col: u32, end_line: u32, end_col: u32) -> JsonValue {

@@ -10,8 +10,9 @@ pub mod server;
 
 pub use json::{parse_json, JsonValue};
 pub use server::{
-    run_stdio_server, CodeActionQuery, CompletionQuery, DefinitionQuery, DocumentSymbolQuery,
-    FormattingQuery, HoverQuery, InlayHintQuery, LspServer, SemanticTokensFullQuery,
+    run_stdio_server, CodeActionQuery, CompletionQuery, DeclarationQuery, DefinitionQuery,
+    DocumentSymbolQuery, FormattingQuery, HoverQuery, ImplementationQuery, InlayHintQuery,
+    LspServer, PrepareRenameQuery, ReferencesQuery, RenameQuery, SemanticTokensFullQuery,
     SignatureHelpQuery,
 };
 
@@ -436,6 +437,239 @@ for score in scores {
         assert_eq!(SignatureHelpQuery::LSP_METHOD, "textDocument/signatureHelp");
         assert_eq!(CodeActionQuery::LSP_METHOD, "textDocument/codeAction");
         assert_eq!(SemanticTokensFullQuery::LSP_METHOD, "textDocument/semanticTokens/full");
+        assert_eq!(ReferencesQuery::LSP_METHOD, "textDocument/references");
+        assert_eq!(ReferencesQuery::LSP_CAPABILITY, Some("referencesProvider"));
+        assert_eq!(ImplementationQuery::LSP_METHOD, "textDocument/implementation");
+        assert_eq!(ImplementationQuery::LSP_CAPABILITY, Some("implementationProvider"));
+        assert_eq!(DeclarationQuery::LSP_METHOD, "textDocument/declaration");
+        assert_eq!(DeclarationQuery::LSP_CAPABILITY, Some("declarationProvider"));
+        assert_eq!(PrepareRenameQuery::LSP_METHOD, "textDocument/prepareRename");
+        assert_eq!(RenameQuery::LSP_METHOD, "textDocument/rename");
+        assert_eq!(RenameQuery::LSP_CAPABILITY, Some("renameProvider"));
+    }
+
+    #[test]
+    fn test_object_definition_navigation_methods_and_properties() {
+        let mut server = LspServer::new();
+        let uri = "file:///workspace/bank.pilot";
+        let code = r#"class BankAccount {
+    property holder: str
+    property balance: float
+
+    def deposit(amount: float) -> float {
+        self.balance = self.balance + amount;
+        return self.balance;
+    }
+}
+
+let acct = BankAccount("Alice", 100.0);
+acct.deposit(50.0);
+let b = acct.balance;
+"#;
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+            uri,
+            code.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+        );
+        server.handle_message(&did_open);
+
+        // 1. Navigate to class definition from instantiation `BankAccount` at line 10, char 14
+        let def_class = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":10,"character":14}}}}}}"#,
+            uri
+        );
+        let resp_class = server.handle_message(&def_class).expect("Definition for BankAccount");
+        println!("def BankAccount: {}", resp_class);
+        assert!(resp_class.contains(r#""line":0"#), "Expected line 0 for class BankAccount, got: {}", resp_class);
+
+        // 2. Navigate to variable `acct` from receiver `acct.deposit` at line 11, char 1
+        let def_acct = format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":11,"character":1}}}}}}"#,
+            uri
+        );
+        let resp_acct = server.handle_message(&def_acct).expect("Definition for acct");
+        println!("def acct: {}", resp_acct);
+        assert!(resp_acct.contains(r#""line":10"#), "Expected line 10 for let acct, got: {}", resp_acct);
+
+        // 3. Navigate to method `deposit` from `acct.deposit` at line 11, char 6
+        let def_deposit = format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":11,"character":6}}}}}}"#,
+            uri
+        );
+        let resp_deposit = server.handle_message(&def_deposit).expect("Definition for deposit method");
+        println!("def deposit: {}", resp_deposit);
+        assert!(resp_deposit.contains(r#""line":4"#), "Expected line 4 for def deposit, got: {}", resp_deposit);
+
+        // 4. Navigate to property `balance` from `acct.balance` at line 12, char 15
+        let def_balance = format!(
+            r#"{{"jsonrpc":"2.0","id":4,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":12,"character":15}}}}}}"#,
+            uri
+        );
+        let resp_balance = server.handle_message(&def_balance).expect("Definition for balance property");
+        println!("def balance: {}", resp_balance);
+        assert!(resp_balance.contains(r#""line":2"#), "Expected line 2 for property balance, got: {}", resp_balance);
+
+        // 5. Navigate from `self` inside method body at line 5, char 9
+        let def_self = format!(
+            r#"{{"jsonrpc":"2.0","id":5,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":5,"character":9}}}}}}"#,
+            uri
+        );
+        let resp_self = server.handle_message(&def_self).expect("Definition for self");
+        println!("def self: {}", resp_self);
+        assert!(resp_self.contains(r#""line":0"#), "Expected line 0 for self -> BankAccount, got: {}", resp_self);
+    }
+
+    #[test]
+    fn test_find_all_references() {
+        let mut server = LspServer::new();
+        let uri = "file:///workspace/calc.pilot";
+        let code = r#"def calculate(x: i64) -> i64 {
+    let result = x * 2;
+    return result + x;
+}
+
+let val = calculate(5);
+let total = calculate(10);
+"#;
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+            uri,
+            code.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+        );
+        server.handle_message(&did_open);
+
+        // Find all references for `calculate` with includeDeclaration: true
+        let ref_calc = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/references","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":5}},"context":{{"includeDeclaration":true}}}}}}"#,
+            uri
+        );
+        let resp_calc = server.handle_message(&ref_calc).expect("References for calculate");
+        println!("references calculate: {}", resp_calc);
+        // Expect 3 occurrences: line 0 (decl), line 5 (call), line 6 (call)
+        assert!(resp_calc.contains(r#""line":0"#), "Missing decl reference on line 0");
+        assert!(resp_calc.contains(r#""line":5"#), "Missing call reference on line 5");
+        assert!(resp_calc.contains(r#""line":6"#), "Missing call reference on line 6");
+
+        // Find all references for local variable `result`
+        let ref_result = format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/references","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":1,"character":9}},"context":{{"includeDeclaration":true}}}}}}"#,
+            uri
+        );
+        let resp_result = server.handle_message(&ref_result).expect("References for result");
+        println!("references result: {}", resp_result);
+        assert!(resp_result.contains(r#""line":1"#));
+        assert!(resp_result.contains(r#""line":2"#));
+    }
+
+    #[test]
+    fn test_find_implementation() {
+        let mut server = LspServer::new();
+        let uri = "file:///workspace/shapes.pilot";
+        let code = r#"interface IShape {
+    def area() -> float;
+}
+
+class Circle : IShape {
+    property radius: float
+    def area() -> float {
+        return 3.14159 * self.radius * self.radius;
+    }
+}
+
+extend IShape {
+    def description() -> str {
+        return "Shape";
+    }
+}
+"#;
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+            uri,
+            code.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+        );
+        server.handle_message(&did_open);
+
+        // Find implementation of IShape at line 0, char 12
+        let impl_req = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/implementation","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":12}}}}}}"#,
+            uri
+        );
+        let resp_impl = server.handle_message(&impl_req).expect("Implementations for IShape");
+        println!("implementations IShape: {}", resp_impl);
+        assert!(resp_impl.contains(r#""line":4"#), "Expected Circle class implementing IShape on line 4");
+        assert!(resp_impl.contains(r#""line":11"#), "Expected extend IShape block on line 11");
+    }
+
+    #[test]
+    fn test_rename_refactoring_and_prepare_rename() {
+        let mut server = LspServer::new();
+        let uri = "file:///workspace/refactor.pilot";
+        let code = r#"def compute(val: i64) -> i64 {
+    let intermediate = val + 1;
+    return intermediate * 2;
+}
+
+let out = compute(10);
+"#;
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+            uri,
+            code.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+        );
+        server.handle_message(&did_open);
+
+        // 1. Prepare rename on `intermediate` at line 1, char 10
+        let prep_req = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/prepareRename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":1,"character":10}}}}}}"#,
+            uri
+        );
+        let prep_resp = server.handle_message(&prep_req).expect("Prepare rename response");
+        println!("prepare rename: {}", prep_resp);
+        assert!(prep_resp.contains("intermediate"), "Expected placeholder 'intermediate'");
+        assert!(prep_resp.contains(r#""line":1"#));
+
+        // 2. Perform rename to `subtotal`
+        let rename_req = format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":1,"character":10}},"newName":"subtotal"}}}}"#,
+            uri
+        );
+        let rename_resp = server.handle_message(&rename_req).expect("Rename response");
+        println!("rename result: {}", rename_resp);
+        assert!(rename_resp.contains("subtotal"), "Expected newText 'subtotal' in WorkspaceEdit");
+        assert!(rename_resp.contains("changes"), "Expected changes map in WorkspaceEdit");
+        assert!(rename_resp.contains(uri), "Expected uri key in changes map");
+
+        // 3. Prepare rename on keyword 'def' must be rejected (null)
+        let prep_kw = format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/prepareRename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":1}}}}}}"#,
+            uri
+        );
+        let prep_kw_resp = server.handle_message(&prep_kw).expect("Prepare rename on keyword");
+        println!("prepare rename keyword: {}", prep_kw_resp);
+        assert!(prep_kw_resp.contains(r#""result":null"#), "Keywords must not be renameable");
+    }
+
+    #[test]
+    fn test_code_action_extract_variable() {
+        let mut server = LspServer::new();
+        let uri = "file:///workspace/action.pilot";
+        let code = "let total = 10 * 20 + 30;\n";
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+            uri,
+            code.replace('\n', "\\n")
+        );
+        server.handle_message(&did_open);
+
+        // Request code actions on non-empty range `10 * 20` (line 0, col 12 to line 0, col 19)
+        let ca_req = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":0,"character":12}},"end":{{"line":0,"character":19}}}},"context":{{"diagnostics":[]}}}}}}"#,
+            uri
+        );
+        let ca_resp = server.handle_message(&ca_req).expect("CodeAction response");
+        println!("code action: {}", ca_resp);
+        assert!(ca_resp.contains("Extract Local Variable"), "Expected extract variable refactoring");
+        assert!(ca_resp.contains("refactor.extract.variable"));
     }
 
     #[test]

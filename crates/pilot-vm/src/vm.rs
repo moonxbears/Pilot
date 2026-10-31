@@ -63,9 +63,18 @@ impl PilVirtualMachine {
             match ins.opcode() {
                 Opcode::Nop => {}
                 Opcode::AddI64 => {
-                    let a = unsafe { self.registers.get_unchecked(src1).as_int().unwrap_or(0) };
-                    let b = unsafe { self.registers.get_unchecked(src2).as_int().unwrap_or(0) };
-                    unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_int(a.wrapping_add(b)) };
+                    let r1 = unsafe { *self.registers.get_unchecked(src1) };
+                    let r2 = unsafe { *self.registers.get_unchecked(src2) };
+                    if r1.is_sso_str() || r2.is_sso_str() || r1.tag() == 9 || r2.tag() == 9 {
+                        let s1 = r1.to_string_repr();
+                        let s2 = r2.to_string_repr();
+                        let combined = format!("{}{}", s1, s2);
+                        unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_str(&combined) };
+                    } else {
+                        let a = r1.as_int().unwrap_or(0);
+                        let b = r2.as_int().unwrap_or(0);
+                        unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_int(a.wrapping_add(b)) };
+                    }
                 }
                 Opcode::SubI64 => {
                     let a = unsafe { self.registers.get_unchecked(src1).as_int().unwrap_or(0) };
@@ -186,8 +195,10 @@ impl PilVirtualMachine {
                         println!("{}", f);
                     } else if let Some(b) = val.as_bool() {
                         println!("{}", b);
+                    } else if let Some(s) = val.with_str(|s| s.to_string()) {
+                        println!("{}", s);
                     } else {
-                        println!("{:?}", val);
+                        println!("{}", val.to_string_repr());
                     }
                 }
                 Opcode::Assert => {

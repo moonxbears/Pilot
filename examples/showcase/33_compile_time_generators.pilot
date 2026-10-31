@@ -1,0 +1,88 @@
+// =============================================================================
+// Showcase 33: Compile-Time Generator Metaprogramming & In-Class Unrolling
+// =============================================================================
+// Demonstrates compile-time member synthesis and loop unrolling inside classes
+// and structs via `generator:` and `comptime:` blocks:
+//   1. Heterogeneous Iterable Unrolling:
+//      - Loop over mixed string literals and numeric ranges (e.g. `["test", "also_test", 1..3]`)
+//   2. Templated Member Field Synthesis:
+//      - `var f"field_{i}": int = 0` creates type-checked instance fields
+//   3. Templated Method Synthesis:
+//      - `def f"get_{i}"(self) -> int` and `def f"set_{i}"(self, v: int)`
+//   4. Key-Value Configuration Tuple Unpacking:
+//      - `for (k, v) in [("width", 1920), ("height", 1080)]`
+//   5. Compile-Time Conditional Branching:
+//      - `if i is str { ... } else { ... }` dynamically emits specialized members
+// =============================================================================
+
+println("==================================================================");
+println(" Showcase 33: Compile-Time Generator Metaprogramming             ");
+println("==================================================================");
+
+// -----------------------------------------------------------------------------
+// 1. Class definition using in-class compile-time generator blocks
+// -----------------------------------------------------------------------------
+class Apples {
+    // Unroll fields and accessors over mixed string tags and numeric ranges
+    generator:
+        for i in ["test", "also_test", 1..=3] {
+            var f"field_{i}": int = 0;
+
+            def f"get_{i}"(self) -> int {
+                return self.f"field_{i}";
+            }
+
+            def f"set_{i}"(self, v: int) {
+                self.f"field_{i}" = v;
+            }
+        }
+
+    // Unroll configuration settings from key-value tuple pairs
+    generator:
+        for (prop, default_val) in [("width", 1920), ("height", 1080), ("fps", 60)] {
+            var f"cfg_{prop}": int = default_val;
+
+            def f"get_{prop}"(self) -> int {
+                return self.f"cfg_{prop}";
+            }
+        }
+
+    // Unroll with compile-time type-based conditional branching
+    generator:
+        for tag in ["alpha", 42] {
+            if tag is str {
+                var f"is_str_{tag}": bool = true;
+            } else {
+                var f"num_{tag}": int = 999;
+            }
+        }
+}
+
+// -----------------------------------------------------------------------------
+// 2. Verification and Execution
+// -----------------------------------------------------------------------------
+let apple = Apples();
+
+println("\n[1] Generated Heterogeneous Fields & Methods:");
+apple.set_test(42);
+apple.set_also_test(84);
+apple.set_1(100);
+apple.set_2(200);
+apple.set_3(300);
+
+println("  apple.get_test()      -> " + apple.get_test());
+println("  apple.get_also_test() -> " + apple.get_also_test());
+println("  apple.get_1()         -> " + apple.get_1());
+println("  apple.get_2()         -> " + apple.get_2());
+println("  apple.get_3()         -> " + apple.get_3());
+
+println("\n[2] Generated Key-Value Configuration Properties:");
+println("  Width:  " + apple.get_width());
+println("  Height: " + apple.get_height());
+println("  FPS:    " + apple.get_fps());
+
+println("\n[3] Compile-Time Conditional Branches:");
+println("  apple.is_str_alpha -> " + apple.is_str_alpha);
+println("  apple.num_42       -> " + apple.num_42);
+
+println("\nAll compile-time generator demonstrations executed successfully!");

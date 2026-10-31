@@ -209,7 +209,7 @@ impl BuildDriver {
                     cmd.arg("-march=native");
                 }
 
-                let status = cmd
+                let output = cmd
                     .args([
                         &inc_flag,
                         tmp_c.to_str().unwrap(),
@@ -218,13 +218,16 @@ impl BuildDriver {
                         "-o",
                         options.output_path.to_str().unwrap_or("a.out"),
                     ])
-                    .status();
+                    .output();
 
                 let _ = fs::remove_dir_all(&tmp_dir);
 
-                match status {
-                    Ok(s) if s.success() => Ok(format!("Compiled native binary -> {:?}", options.output_path)),
-                    Ok(s) => Err(format!("C compiler failed with exit code: {}", s)),
+                match output {
+                    Ok(out) if out.status.success() => Ok(format!("Compiled native binary -> {:?}", options.output_path)),
+                    Ok(out) => {
+                        let err_msg = String::from_utf8_lossy(&out.stderr);
+                        Err(format!("C compiler failed with exit code: {}\n{}", out.status, err_msg))
+                    }
                     Err(e) => Err(format!("Failed to spawn C compiler: {}", e)),
                 }
             }

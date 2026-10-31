@@ -23,10 +23,9 @@ use pilot_analysis::AnalysisPipeline;
 use pilot_codegen::{BuildDriver, BuildOptions, BuildTarget, OptLevel};
 use pilot_fmt::{format_source, FormatOptions};
 use pilot_parser::parse;
-use pilot_rt::{BumpRegion, PilotVal};
+use pilot_rt::BumpRegion;
 use pilot_span::LineIndex;
 use pilot_transpile::{ForeignAstIngester, IngestOptions, IrModule, TargetLanguage, Transpiler};
-use pilot_vm::{Instruction, Opcode, PilcBinary, PilVirtualMachine};
 
 fn print_help() {
     println!(
@@ -132,7 +131,9 @@ fn cmd_run(args: &[String]) {
         vm.load_binary(binary);
         let val = vm.run();
         if let Some(i) = val.as_int() {
-            println!("RESULT: {}", i);
+            if i != 0 {
+                println!("RESULT: {}", i);
+            }
         }
         return;
     }
@@ -181,15 +182,15 @@ fn cmd_run(args: &[String]) {
         }
         Err(_) => {
             // Fallback to VM
-            let constants = vec![PilotVal::from_int(0)];
-            let instructions = vec![
-                Instruction::encode(Opcode::LoadConst, 0, 0, 0),
-                Instruction::encode(Opcode::Ret, 0, 0, 0),
-            ];
-            let bin = PilcBinary::new(constants, instructions);
-            let mut vm = PilVirtualMachine::new();
-            vm.load_binary(bin);
-            let _ = vm.run();
+            let binary = pilot_vm::BytecodeCompiler::compile(&arena, arena.root);
+            let mut vm = pilot_vm::PilVirtualMachine::new();
+            vm.load_binary(binary);
+            let val = vm.run();
+            if let Some(i) = val.as_int() {
+                if i != 0 {
+                    println!("RESULT: {}", i);
+                }
+            }
         }
     }
 }
@@ -416,83 +417,190 @@ fn cmd_fmt(args: &[String]) {
 
 fn cmd_test(args: &[String]) {
     let is_differential = args.iter().any(|a| a == "--differential" || a == "--diff" || a == "-d");
-    let filter = args.iter().find(|a| !a.starts_with('-')).map(|s| s.as_str()).unwrap_or("");
+    let is_json = args.iter().any(|a| a == "--json");
+    let positional_args: Vec<&str> = args.iter().filter(|a| !a.starts_with('-')).map(|s| s.as_str()).collect();
 
     if is_differential {
+        let filter = positional_args.first().copied().unwrap_or("");
         run_differential_tests(filter);
         return;
     }
 
-    let test_dir = Path::new("tests");
+    let mut paths: Vec<PathBuf> = Vec::new();
 
-    if !test_dir.exists() {
-        println!("No 'tests/' directory found. 0 tests executed.");
+    if positional_args.is_empty() {
+        let test_dir = Path::new("tests");
+        if test_dir.exists() {
+            if let Ok(entries) = fs::read_dir(test_dir) {
+                for e in entries.flatten() {
+                    let p = e.path();
+                    if p.extension().map_or(false, |ext| ext == "pilot") {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    } else {
+        for &target in &positional_args {
+            let p = Path::new(target);
+            if p.is_file() {
+                paths.push(p.to_path_buf());
+            } else if p.is_dir() {
+                if let Ok(entries) = fs::read_dir(p) {
+                    for e in entries.flatten() {
+                        let sub_p = e.path();
+                        if sub_p.extension().map_or(false, |ext| ext == "pilot") {
+                            paths.push(sub_p);
+                        }
+                    }
+                }
+            } else {
+                // Treat target as a filter search in "tests/"
+                let test_dir = Path::new("tests");
+                if test_dir.exists() {
+                    if let Ok(entries) = fs::read_dir(test_dir) {
+                        for e in entries.flatten() {
+                            let sub_p = e.path();
+                            if sub_p.extension().map_or(false, |ext| ext == "pilot") {
+                                let filename = sub_p.file_name().and_then(|f| f.to_str()).unwrap_or("");
+                                if filename.contains(target) || sub_p.to_string_lossy().contains(target) {
+                                    paths.push(sub_p);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    paths.sort();
+    paths.dedup();
+
+    if paths.is_empty() {
+        if is_json {
+            println!(r#"{{"event":"summary","passed":0,"failed":0,"total":0,"duration_ms":0.0}}"#);
+        } else {
+            println!("No matching test files found. 0 tests executed.");
+        }
         return;
     }
 
     let mut passed = 0;
-    let mut total = 0;
+    let total = paths.len();
     let start_all = Instant::now();
 
-    if let Ok(entries) = fs::read_dir(test_dir) {
-        let mut paths: Vec<_> = entries
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().map_or(false, |ext| ext == "pilot"))
-            .collect();
-        paths.sort();
+    for path in &paths {
+        let filename = path.file_name().and_then(|f| f.to_str()).unwrap_or("unknown.pilot");
+        let path_str = path.to_string_lossy();
+        let file_start = Instant::now();
 
-        for path in paths {
-            let filename = path.file_name().unwrap().to_str().unwrap();
-            if !filter.is_empty() && !filename.contains(filter) {
-                continue;
-            }
+        if is_json {
+            println!(
+                r#"{{"event":"start","file":"{}","name":"{}"}}"#,
+                path_str, filename
+            );
+        }
 
-            total += 1;
-            let src = fs::read_to_string(&path).unwrap_or_default();
-            let arena = parse(&src);
-            if arena.root.is_none() {
-                eprintln!("FAIL: {} (syntax parse error)", filename);
-                continue;
-            }
-
-            // Compile to PilVM v3 bytecode and run
-            let binary = pilot_vm::BytecodeCompiler::compile(&arena, arena.root);
-            let mut vm = pilot_vm::PilVirtualMachine::new();
-            vm.load_binary(binary);
-
-            let mut steps = 0usize;
-            vm.set_hook(Some(Box::new(move |_pc, _ins, _regs| {
-                steps += 1;
-                if steps > 100_000 {
-                    panic!("execution step limit reached (100,000 instructions)");
+        let src = match fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                let dur = file_start.elapsed().as_secs_f64() * 1000.0;
+                if is_json {
+                    println!(
+                        r#"{{"event":"fail","file":"{}","name":"{}","duration_ms":{:.2},"error":"failed to read file: {}"}}"#,
+                        path_str, filename, dur, e
+                    );
+                } else {
+                    eprintln!("FAIL: {} (failed to read file: {})", filename, e);
                 }
-            })));
+                continue;
+            }
+        };
 
-            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                vm.run()
-            }));
+        let arena = parse(&src);
+        if arena.root.is_none() {
+            let dur = file_start.elapsed().as_secs_f64() * 1000.0;
+            if is_json {
+                println!(
+                    r#"{{"event":"fail","file":"{}","name":"{}","duration_ms":{:.2},"error":"syntax parse error"}}"#,
+                    path_str, filename, dur
+                );
+            } else {
+                eprintln!("FAIL: {} (syntax parse error)", filename);
+            }
+            continue;
+        }
 
-            match res {
-                Ok(_) => {
-                    passed += 1;
+        // Compile to PilVM v3 bytecode and run
+        let binary = pilot_vm::BytecodeCompiler::compile(&arena, arena.root);
+        let mut vm = pilot_vm::PilVirtualMachine::new();
+        vm.load_binary(binary);
+
+        let mut steps = 0usize;
+        vm.set_hook(Some(Box::new(move |_pc, _ins, _regs| {
+            steps += 1;
+            if steps > 100_000 {
+                panic!("execution step limit reached (100,000 instructions)");
+            }
+        })));
+
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            vm.run()
+        }));
+
+        let dur = file_start.elapsed().as_secs_f64() * 1000.0;
+        match res {
+            Ok(_) => {
+                passed += 1;
+                if is_json {
+                    println!(
+                        r#"{{"event":"pass","file":"{}","name":"{}","duration_ms":{:.2},"nodes":{},"instructions":{}}}"#,
+                        path_str, filename, dur, arena.nodes.len(), vm.instructions.len()
+                    );
+                } else {
                     println!("PASS: {} ({} nodes, {} instructions)", filename, arena.nodes.len(), vm.instructions.len());
                 }
-                Err(_) => {
-                    eprintln!("FAIL: {} (runtime assertion failure)", filename);
+            }
+            Err(payload) => {
+                let err_msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = payload.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "runtime assertion failure".to_string()
+                };
+
+                if is_json {
+                    let escaped = err_msg.replace('\"', "\\\"").replace('\n', " ");
+                    println!(
+                        r#"{{"event":"fail","file":"{}","name":"{}","duration_ms":{:.2},"error":"{}"}}"#,
+                        path_str, filename, dur, escaped
+                    );
+                } else {
+                    eprintln!("FAIL: {} ({})", filename, err_msg);
                 }
             }
         }
     }
 
     let elapsed = start_all.elapsed();
-    println!(
-        "\nTest result: {} passed, {} failed out of {} total ({:.2?})",
-        passed,
-        total - passed,
-        total,
-        elapsed
-    );
+    let total_dur = elapsed.as_secs_f64() * 1000.0;
+    if is_json {
+        println!(
+            r#"{{"event":"summary","passed":{},"failed":{},"total":{},"duration_ms":{:.2}}}"#,
+            passed, total - passed, total, total_dur
+        );
+    } else {
+        println!(
+            "\nTest result: {} passed, {} failed out of {} total ({:.2?})",
+            passed,
+            total - passed,
+            total,
+            elapsed
+        );
+    }
+
     if passed < total {
         std::process::exit(1);
     }

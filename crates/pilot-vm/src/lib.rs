@@ -92,4 +92,15 @@ return c
 
         assert_eq!(res.as_int(), Some(42));
     }
+
+    #[test]
+    fn test_all_syntax() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/all_syntax.pilot");
+        let src = std::fs::read_to_string(&path).unwrap();
+        let arena = pilot_parser::parse(&src);
+        let binary = BytecodeCompiler::compile(&arena, arena.root);
+        let mut vm = PilVirtualMachine::new();
+        vm.load_binary(binary);
+        let _val = vm.run();
+    }
 }

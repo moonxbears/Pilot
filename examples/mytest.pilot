@@ -1,23 +1,17 @@
-for x in 15..20:
-    println(x)
-
-for j in [1, 2, 3, 4, 5]{
-    println(j)
+class apples {
+    generator:
+        for i in ["test", "also_test", 1..10] {
+            var f"field_{i}": int = 0;
+            def f"get_{i}"(self) -> int {
+                return self.f"field_{i}";
+            }
+        }
 }
 
-var myvar : int = 0
-while (true) {    
-    if (myvar >= 20){
-        break;
-    }
-        println(f"true - {myvar}")
-        myvar += 1
-}
-while (true) {    
-    if (myvar >= 20){
-        break;
-    }
-    
-    println(f"true - {myvar}")
-    myvar += 1
-}
+let a = apples();
+a.field_test = 42;
+a.field_also_test = 84;
+a.field_1 = 100;
+print(a.get_test());
+print(a.get_also_test());
+print(a.get_1());

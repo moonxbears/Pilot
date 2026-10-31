@@ -292,6 +292,12 @@ impl TypeInferenceEngine {
         self.type_defs.insert("list".to_string(), self.types.list_of(TypeId::ANY));
         self.type_defs.insert("map".to_string(), TypeId::ANY);
         self.type_defs.insert("tuple".to_string(), TypeId::ANY);
+        let list_any = self.types.list_of(TypeId::ANY);
+        let fn_table = self.types.function_of(vec![TypeId::ANY], list_any);
+        self.define_var("Table", fn_table);
+        self.define_var("Dataset", fn_table);
+        self.type_defs.insert("Table".to_string(), list_any);
+        self.type_defs.insert("Dataset".to_string(), list_any);
 
         // Standard Math Functions
         let fn_math_1 = self.types.function_of(vec![TypeId::F64], TypeId::F64);
@@ -860,10 +866,22 @@ impl TypeInferenceEngine {
                 })
             }
             NodeKind::PolyglotBlock => {
+                if let Some(&conn_node) = arena.polyglot_conns.get(&node_id.0) {
+                    let _ = self.synth(arena, conn_node);
+                }
+
                 if (node.flags & 1) != 0 {
                     self.types.function_of(vec![TypeId::ANY], TypeId::ANY)
                 } else {
-                    TypeId::ANY
+                    let lang_sym = SymbolId(node.lhs);
+                    let lang = arena.interner.resolve(lang_sym);
+                    if matches!(lang, "sql" | "postgres" | "postgresql" | "mysql" | "sqlite" | "db" | "database") {
+                        let code_sym = SymbolId(node.rhs);
+                        let code_str = arena.interner.resolve(code_sym);
+                        self.infer_sql_query_type(code_str)
+                    } else {
+                        TypeId::ANY
+                    }
                 }
             }
 
@@ -1782,7 +1800,7 @@ impl TypeInferenceEngine {
                 }
 
                 // 1. Check RowRecord fields
-                if let TypeKind::RowRecord { fields, .. } = self.types.get(pruned) {
+                if let TypeKind::RowRecord { fields, is_open, .. } = self.types.get(pruned) {
                     if let Some((_, f_ty)) = fields.iter().find(|(k, _)| k == member_name) {
                         let base_res = *f_ty;
                         let res = if is_safe_nav && !matches!(self.types.get(self.types.prune(base_res)), TypeKind::Option(_)) {
@@ -1792,6 +1810,9 @@ impl TypeInferenceEngine {
                         };
                         self.inferred_node_types.insert(node_id.0, res);
                         return res;
+                    } else if *is_open {
+                        self.inferred_node_types.insert(node_id.0, TypeId::ANY);
+                        return TypeId::ANY;
                     }
                 }
 
@@ -1869,6 +1890,39 @@ impl TypeInferenceEngine {
                         }
                         "clear" => {
                             let res = self.types.function_of(vec![], TypeId::VOID);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "where" | "filter" => {
+                            let pred_fn = self.types.function_of(vec![element], TypeId::BOOL);
+                            let res = self.types.function_of(vec![pred_fn], pruned);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "limit" | "take" => {
+                            let res = self.types.function_of(vec![TypeId::I64], pruned);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "skip" | "offset" => {
+                            let res = self.types.function_of(vec![TypeId::I64], pruned);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "first" => {
+                            let opt_elem = self.types.option_of(element);
+                            let res = self.types.function_of(vec![], opt_elem);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "order" | "order_by" | "sort" => {
+                            let res = self.types.function_of(vec![TypeId::ANY], pruned);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "select" | "map" => {
+                            let ret_list = self.types.list_of(TypeId::ANY);
+                            let res = self.types.function_of(vec![TypeId::ANY], ret_list);
                             self.inferred_node_types.insert(node_id.0, res);
                             return res;
                         }
@@ -2517,4 +2571,203 @@ impl TypeInferenceEngine {
             self.narrow_var(var_name, narrowed);
         }
     }
+
+    /// Compile-time SQL query analyzer and RowRecord column property synthesizer.
+    pub fn infer_sql_query_type(&mut self, query: &str) -> TypeId {
+        let mut clean_lines = Vec::new();
+        for line in query.lines() {
+            let l = line.trim();
+            if !l.starts_with("--") && !l.starts_with('#') {
+                clean_lines.push(line);
+            }
+        }
+        let cleaned = clean_lines.join(" ");
+        let trimmed = cleaned.trim().trim_end_matches(';').trim();
+        let upper = trimmed.to_ascii_uppercase();
+
+        if upper.starts_with("SELECT") {
+            let from_idx_opt = find_sql_keyword_outside_parens(&upper, "FROM");
+            let select_part = if let Some(f_idx) = from_idx_opt {
+                trimmed["SELECT".len()..f_idx].trim()
+            } else {
+                trimmed["SELECT".len()..].trim()
+            };
+
+            let targets = split_sql_outside_parens(select_part, ',');
+            let mut fields: Vec<(String, TypeId)> = Vec::new();
+
+            for raw_target in targets {
+                let target = raw_target.trim();
+                if target.is_empty() {
+                    continue;
+                }
+
+                if target == "*" {
+                    let row_rec = self.types.row_record_of(vec![], true, None);
+                    return self.types.list_of(row_rec);
+                }
+
+                let (col_name, col_ty) = parse_sql_column_target(target);
+                fields.push((col_name, col_ty));
+            }
+
+            fields.sort_by(|a, b| a.0.cmp(&b.0));
+            fields.dedup_by(|a, b| a.0 == b.0);
+
+            let row_rec = self.types.row_record_of(fields, true, None);
+            return self.types.list_of(row_rec);
+        }
+
+        if upper.starts_with("INSERT") || upper.starts_with("UPDATE") || upper.starts_with("DELETE") {
+            if let Some(ret_idx) = upper.find("RETURNING") {
+                let ret_part = trimmed[ret_idx + "RETURNING".len()..].trim();
+                let mut fields: Vec<(String, TypeId)> = Vec::new();
+                for raw_t in split_sql_outside_parens(ret_part, ',') {
+                    let t = raw_t.trim();
+                    if !t.is_empty() {
+                        let (cname, cty) = parse_sql_column_target(t);
+                        fields.push((cname, cty));
+                    }
+                }
+                fields.sort_by(|a, b| a.0.cmp(&b.0));
+                fields.dedup_by(|a, b| a.0 == b.0);
+                let row_rec = self.types.row_record_of(fields, true, None);
+                return self.types.list_of(row_rec);
+            }
+            return TypeId::I64;
+        }
+
+        TypeId::ANY
+    }
+}
+
+fn find_sql_keyword_outside_parens(s: &str, kw: &str) -> Option<usize> {
+    let mut depth = 0;
+    let bytes = s.as_bytes();
+    let kw_bytes = kw.as_bytes();
+    let kw_len = kw_bytes.len();
+    let mut i = 0;
+
+    while i + kw_len <= bytes.len() {
+        match bytes[i] {
+            b'(' => depth += 1,
+            b')' if depth > 0 => depth -= 1,
+            _ => {
+                if depth == 0 && &bytes[i..i + kw_len] == kw_bytes {
+                    let before_ok = i == 0 || bytes[i - 1].is_ascii_whitespace();
+                    let after_ok = i + kw_len == bytes.len() || bytes[i + kw_len].is_ascii_whitespace();
+                    if before_ok && after_ok {
+                        return Some(i);
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+fn split_sql_outside_parens(s: &str, delimiter: char) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0;
+    let mut start = 0;
+
+    for (i, c) in s.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' if depth > 0 => depth -= 1,
+            d if d == delimiter && depth == 0 => {
+                parts.push(&s[start..i]);
+                start = i + c.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    if start < s.len() {
+        parts.push(&s[start..]);
+    }
+    parts
+}
+
+fn parse_sql_column_target(target: &str) -> (String, TypeId) {
+    let upper = target.to_ascii_uppercase();
+
+    // 1. Extract expression and column name (checking `AS <alias>`)
+    let (expr_part, col_name) = if let Some(as_idx) = upper.rfind(" AS ") {
+        let expr = target[..as_idx].trim();
+        let alias = target[as_idx + 4..].trim().trim_matches('\"').trim_matches('`').trim_matches('\'');
+        (expr, alias.to_string())
+    } else {
+        let unaliased = if let Some(dot_idx) = target.rfind('.') {
+            target[dot_idx + 1..].trim()
+        } else {
+            target.trim()
+        };
+        let cleaned = if unaliased.to_ascii_uppercase().starts_with("COUNT(") {
+            "count".to_string()
+        } else if unaliased.to_ascii_uppercase().starts_with("SUM(") {
+            "sum".to_string()
+        } else if unaliased.to_ascii_uppercase().starts_with("AVG(") {
+            "avg".to_string()
+        } else if unaliased.to_ascii_uppercase().starts_with("MIN(") {
+            "min".to_string()
+        } else if unaliased.to_ascii_uppercase().starts_with("MAX(") {
+            "max".to_string()
+        } else {
+            let last_tok = unaliased.split_whitespace().last().unwrap_or(unaliased);
+            last_tok.trim_matches('\"').trim_matches('`').trim_matches('\'').to_string()
+        };
+        (target, cleaned)
+    };
+
+    // 2. Infer column type
+    let expr_upper = expr_part.to_ascii_uppercase();
+    let col_lower = col_name.to_ascii_lowercase();
+
+    let ty = if expr_upper.starts_with("COUNT(") || expr_upper == "COUNT(*)" {
+        TypeId::I64
+    } else if expr_upper.starts_with("AVG(") {
+        TypeId::F64
+    } else if expr_part.contains('.') && expr_part.chars().any(|c| c.is_ascii_digit()) {
+        TypeId::F64
+    } else if col_lower.contains("amount")
+        || col_lower.contains("salary")
+        || col_lower.contains("price")
+        || col_lower.contains("cost")
+        || col_lower.contains("balance")
+        || col_lower.contains("total")
+        || col_lower.contains("ratio")
+        || col_lower.contains("rate")
+        || col_lower.contains("percent")
+        || col_lower.contains("spend")
+        || col_lower.contains("revenue")
+        || (col_lower.contains("score") && expr_part.contains('/'))
+    {
+        TypeId::F64
+    } else if col_lower == "id"
+        || col_lower.ends_with("_id")
+        || col_lower.starts_with("id_")
+        || col_lower.contains("count")
+        || col_lower.contains("age")
+        || col_lower.contains("qty")
+        || col_lower.contains("quantity")
+        || col_lower.contains("num")
+        || (col_lower.contains("status") && !col_lower.contains("text"))
+        || col_lower.contains("offset")
+        || col_lower.contains("limit")
+        || col_lower.contains("score")
+    {
+        TypeId::I64
+    } else if col_lower.starts_with("is_")
+        || col_lower.starts_with("has_")
+        || col_lower == "active"
+        || col_lower == "enabled"
+        || col_lower == "valid"
+    {
+        TypeId::BOOL
+    } else {
+        TypeId::STR
+    };
+
+    (col_name, ty)
 }

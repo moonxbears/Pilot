@@ -310,6 +310,12 @@ impl NodeKind {
         let v = self as u16;
         v >= 400 && v <= 409
     }
+
+    #[inline]
+    pub const fn is_expr(self) -> bool {
+        let v = self as u16;
+        (v >= 200 && v <= 349) && v != Self::MatchArm as u16
+    }
 }
 
 /// Milestone 17 & 18 Unified Call-Quote Projection Kind (Invariant #1).
@@ -395,6 +401,10 @@ pub enum BinaryOp {
     RangeHalfOpen = 24,  // a..<b        (Invariant #3)
     Is = 25,             // a is Pattern / a is Type
     Walrus = 26,         // a := b
+    Send = 27,           // ch <- val
+    Union = 28,          // a union b / a union all b
+    Intersect = 29,      // a intersect b
+    Except = 30,         // a except b
 }
 
 impl BinaryOp {
@@ -426,6 +436,10 @@ impl BinaryOp {
             Self::RangeHalfOpen => "..<",
             Self::Is => "is",
             Self::Walrus => ":=",
+            Self::Send => "<-",
+            Self::Union => "union",
+            Self::Intersect => "intersect",
+            Self::Except => "except",
         }
     }
 }
@@ -483,6 +497,8 @@ pub struct AstArena {
     pub for_then_nodes: std::collections::HashMap<u32, NodeId>,
     /// Declared `(field_name, field_type_node)` pairs for `RecordDecl`, `StructDecl`, `ClassDecl`, and `InterfaceDecl`.
     pub record_fields: std::collections::HashMap<u32, Vec<(SymbolId, NodeId)>>,
+    /// Optional connection / scope argument `NodeId` for `PolyglotBlock` (e.g. `postgresql(conn) { ... }` or `sql(conn) { ... }`).
+    pub polyglot_conns: std::collections::HashMap<u32, NodeId>,
 }
 
 impl AstArena {
@@ -503,6 +519,7 @@ impl AstArena {
             for_iter_nodes: std::collections::HashMap::new(),
             for_then_nodes: std::collections::HashMap::new(),
             record_fields: std::collections::HashMap::new(),
+            polyglot_conns: std::collections::HashMap::new(),
         }
     }
 
