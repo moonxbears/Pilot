@@ -44,6 +44,73 @@ mod tests {
     }
 
     #[test]
+    fn test_c_target_builtin_member_methods() {
+        let src = r#"
+let s = "hello world";
+let parts = s.split(" ");
+let joined = parts.join("-");
+let rep = s.replace("world", "pilot");
+let t = s.trim();
+let up = s.to_upper();
+let low = s.to_lower();
+let sw = s.starts_with("he");
+let ew = s.ends_with("ld");
+let c = s.contains("ll");
+let idx = s.index_of("w");
+let sub = s.substring(0, 5);
+let rep_s = s.repeat(2);
+let is_d = s.is_digit();
+let is_a = s.is_alpha();
+
+let items = ["a", "b", "c"];
+items.push("d");
+let popped = items.pop();
+items.reverse();
+let f = items.first();
+let l = items.last();
+
+let num = -42;
+let a_val = num.abs();
+let cl = num.clamp(0, 100);
+let str_val = num.to_string();
+
+let fl = 3.7;
+let fl_floor = fl.floor();
+let fl_ceil = fl.ceil();
+let fl_round = fl.round();
+"#;
+        let arena = pilot_parser::parse(src);
+        let analysis = pilot_analysis::pipeline::AnalysisPipeline::analyze(&arena, arena.root);
+        let c_code = CTargetEmitter::emit_ast_module(&arena, &analysis, src);
+
+        assert!(c_code.contains("pilot_rt_str_split"));
+        assert!(c_code.contains("pilot_rt_list_join"));
+        assert!(c_code.contains("pilot_rt_str_replace"));
+        assert!(c_code.contains("pilot_rt_str_trim"));
+        assert!(c_code.contains("pilot_rt_str_to_upper"));
+        assert!(c_code.contains("pilot_rt_str_to_lower"));
+        assert!(c_code.contains("pilot_rt_str_starts_with"));
+        assert!(c_code.contains("pilot_rt_str_ends_with"));
+        assert!(c_code.contains("pilot_rt_str_contains"));
+        assert!(c_code.contains("pilot_rt_str_index_of"));
+        assert!(c_code.contains("pilot_rt_str_substring"));
+        assert!(c_code.contains("pilot_rt_str_repeat"));
+        assert!(c_code.contains("pilot_rt_str_is_digit"));
+        assert!(c_code.contains("pilot_rt_str_is_alpha"));
+        assert!(c_code.contains("pilot_rt_list_push"));
+        assert!(c_code.contains("pilot_rt_list_pop"));
+        assert!(c_code.contains("pilot_rt_list_reverse"));
+        assert!(c_code.contains("pilot_rt_list_first"));
+        assert!(c_code.contains("pilot_rt_list_last"));
+        assert!(c_code.contains("pilot_rt_int_abs"));
+        assert!(c_code.contains("pilot_rt_int_clamp"));
+        assert!(c_code.contains("pilot_rt_int_to_str"));
+        assert!(c_code.contains("floor"));
+        assert!(c_code.contains("ceil"));
+        assert!(c_code.contains("round"));
+    }
+
+    #[test]
     fn test_wasm_emitter_generates_wat_with_wasi() {
         let mut emitter = WasmEmitter::new();
         let wat = emitter.emit_wat_module("app", 42);

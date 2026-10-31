@@ -59,6 +59,159 @@ impl PilotStdlibIntrinsics {
     pub fn math_ln(x: f64) -> f64 {
         if x > 0.0 { x.ln() } else { f64::NAN }
     }
+
+    pub fn str_split<'a>(s: &'a str, sep: &str) -> Vec<&'a str> {
+        if sep.is_empty() {
+            s.split("").filter(|p| !p.is_empty()).collect()
+        } else {
+            s.split(sep).collect()
+        }
+    }
+
+    pub fn str_join(items: &[&str], sep: &str) -> String {
+        items.join(sep)
+    }
+
+    pub fn str_replace(s: &str, old: &str, new: &str) -> String {
+        s.replace(old, new)
+    }
+
+    pub fn str_trim(s: &str) -> &str {
+        s.trim()
+    }
+
+    pub fn str_trim_start(s: &str) -> &str {
+        s.trim_start()
+    }
+
+    pub fn str_trim_end(s: &str) -> &str {
+        s.trim_end()
+    }
+
+    pub fn str_to_upper(s: &str) -> String {
+        s.to_uppercase()
+    }
+
+    pub fn str_to_lower(s: &str) -> String {
+        s.to_lowercase()
+    }
+
+    pub fn str_starts_with(s: &str, prefix: &str) -> bool {
+        s.starts_with(prefix)
+    }
+
+    pub fn str_ends_with(s: &str, suffix: &str) -> bool {
+        s.ends_with(suffix)
+    }
+
+    pub fn str_contains(s: &str, sub: &str) -> bool {
+        s.contains(sub)
+    }
+
+    pub fn str_index_of(s: &str, sub: &str) -> Option<usize> {
+        s.find(sub)
+    }
+
+    pub fn str_last_index_of(s: &str, sub: &str) -> Option<usize> {
+        s.rfind(sub)
+    }
+
+    pub fn str_substring(s: &str, start: usize, len: usize) -> String {
+        let chars: Vec<char> = s.chars().collect();
+        if start >= chars.len() {
+            return String::new();
+        }
+        let end = (start + len).min(chars.len());
+        chars[start..end].iter().collect()
+    }
+
+    pub fn str_repeat(s: &str, count: usize) -> String {
+        s.repeat(count)
+    }
+
+    pub fn str_pad_start(s: &str, target_len: usize, pad_char: char) -> String {
+        let cur_len = s.chars().count();
+        if cur_len >= target_len {
+            s.to_string()
+        } else {
+            let pad_count = target_len - cur_len;
+            let mut res: String = std::iter::repeat(pad_char).take(pad_count).collect();
+            res.push_str(s);
+            res
+        }
+    }
+
+    pub fn str_pad_end(s: &str, target_len: usize, pad_char: char) -> String {
+        let cur_len = s.chars().count();
+        if cur_len >= target_len {
+            s.to_string()
+        } else {
+            let pad_count = target_len - cur_len;
+            let mut res = s.to_string();
+            res.extend(std::iter::repeat(pad_char).take(pad_count));
+            res
+        }
+    }
+
+    pub fn str_is_digit(s: &str) -> bool {
+        !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
+    }
+
+    pub fn str_is_alpha(s: &str) -> bool {
+        !s.is_empty() && s.chars().all(|c| c.is_ascii_alphabetic())
+    }
+
+    pub fn str_is_alphanumeric(s: &str) -> bool {
+        !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric())
+    }
+
+    pub fn str_to_int(s: &str) -> Option<i64> {
+        s.trim().parse::<i64>().ok()
+    }
+
+    pub fn str_to_float(s: &str) -> Option<f64> {
+        s.trim().parse::<f64>().ok()
+    }
+
+    pub fn int_abs(x: i64) -> i64 {
+        x.abs()
+    }
+
+    pub fn int_clamp(x: i64, min: i64, max: i64) -> i64 {
+        x.clamp(min, max)
+    }
+
+    pub fn int_min(a: i64, b: i64) -> i64 {
+        a.min(b)
+    }
+
+    pub fn int_max(a: i64, b: i64) -> i64 {
+        a.max(b)
+    }
+
+    pub fn float_abs(x: f64) -> f64 {
+        x.abs()
+    }
+
+    pub fn float_clamp(x: f64, min: f64, max: f64) -> f64 {
+        x.clamp(min, max)
+    }
+
+    pub fn float_round(x: f64) -> f64 {
+        x.round()
+    }
+
+    pub fn float_floor(x: f64) -> f64 {
+        x.floor()
+    }
+
+    pub fn float_ceil(x: f64) -> f64 {
+        x.ceil()
+    }
+
+    pub fn float_trunc(x: f64) -> f64 {
+        x.trunc()
+    }
 }
 
 /// Linear-time DFA regular expression matcher.

@@ -770,6 +770,34 @@ def test_queries() {
     }
 
     #[test]
+    fn test_builtin_type_methods_inference() {
+        let code = r#"
+def test_builtins() {
+    let s = "hello,world"
+    let parts = s.split(",")
+    let joined = parts.join("-")
+    let rep = s.replace("world", "pilot")
+    let trimmed = s.trim()
+    let is_emp = s.is_empty()
+    let has_lo = s.contains("lo")
+    let idx = s.index_of("world")
+
+    let num = -42
+    let abs_val = num.abs()
+    let clamped = num.clamp(0, 100)
+    let s_num = num.to_string()
+
+    let f = 3.14
+    let r = f.round()
+    let fl = f.floor()
+}
+"#;
+        let arena = pilot_parser::parse(code);
+        let result = AnalysisPipeline::analyze(&arena, arena.root);
+        assert!(result.is_ok(), "Expected clean analysis for built-in methods, got: {:?}", result.diagnostics);
+    }
+
+    #[test]
     fn test_all_syntax_pilot_clean_analysis() {
         let src = std::fs::read_to_string("../../examples/all_syntax.pilot")
             .or_else(|_| std::fs::read_to_string("examples/all_syntax.pilot"))

@@ -1958,6 +1958,27 @@ impl TypeInferenceEngine {
                             self.inferred_node_types.insert(node_id.0, res);
                             return res;
                         }
+                        "join" => {
+                            let res = self.types.function_of(vec![TypeId::STR], TypeId::STR);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "reverse" => {
+                            let res = self.types.function_of(vec![], TypeId::VOID);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "slice" => {
+                            let res = self.types.function_of(vec![TypeId::I64, TypeId::I64], pruned);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "last" => {
+                            let opt_elem = self.types.option_of(element);
+                            let res = self.types.function_of(vec![], opt_elem);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
                         _ => {}
                     }
                 }
@@ -1994,6 +2015,186 @@ impl TypeInferenceEngine {
                         }
                         "clear" => {
                             let res = self.types.function_of(vec![], TypeId::VOID);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        _ => {}
+                    }
+                }
+
+                // String built-in methods
+                if pruned == TypeId::STR || matches!(self.types.get(pruned), TypeKind::Primitive(p) if p == "str" || p == "string") {
+                    let str_ret = if is_safe_nav {
+                        self.types.option_of(TypeId::STR)
+                    } else {
+                        TypeId::STR
+                    };
+                    match member_name {
+                        "split" => {
+                            let str_list = self.types.list_of(TypeId::STR);
+                            let res = self.types.function_of(vec![TypeId::STR], str_list);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "join" => {
+                            let str_list = self.types.list_of(TypeId::STR);
+                            let res = self.types.function_of(vec![str_list], str_ret);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "replace" | "Replace" => {
+                            let res = self.types.function_of(vec![TypeId::STR, TypeId::STR], str_ret);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "trim" | "Trim" | "trim_start" | "trim_left" | "TrimStart" | "trim_end" | "trim_right" | "TrimEnd" | "to_upper" | "ToUpper" | "to_lower" | "ToLower" => {
+                            let res = self.types.function_of(vec![], str_ret);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "starts_with" | "StartsWith" | "ends_with" | "EndsWith" | "contains" | "Contains" => {
+                            let res = self.types.function_of(vec![TypeId::STR], TypeId::BOOL);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "index_of" | "IndexOf" | "last_index_of" | "LastIndexOf" => {
+                            let res = self.types.function_of(vec![TypeId::STR], TypeId::I64);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "substring" | "Substring" | "slice" | "Slice" => {
+                            let res = self.types.function_of(vec![TypeId::I64, TypeId::I64], str_ret);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "repeat" => {
+                            let res = self.types.function_of(vec![TypeId::I64], str_ret);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "pad_start" | "PadStart" | "pad_end" | "PadEnd" => {
+                            let res = self.types.function_of(vec![TypeId::I64, TypeId::STR], str_ret);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "is_digit" | "IsDigit" | "is_alpha" | "IsAlpha" | "is_alphanumeric" | "IsAlphanumeric" | "is_empty" | "IsEmpty" => {
+                            let res = self.types.function_of(vec![], TypeId::BOOL);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "char_at" | "CharAt" => {
+                            let res = self.types.function_of(vec![TypeId::I64], str_ret);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "chars" | "Chars" => {
+                            let str_list = self.types.list_of(TypeId::STR);
+                            let res = self.types.function_of(vec![], str_list);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "to_int" | "ToInt" => {
+                            let res = self.types.function_of(vec![], TypeId::I64);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "to_float" | "ToFloat" => {
+                            let res = self.types.function_of(vec![], TypeId::F64);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "to_string" | "to_str" | "ToString" => {
+                            let res = self.types.function_of(vec![], str_ret);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "len" | "length" | "Length" => {
+                            self.inferred_node_types.insert(node_id.0, TypeId::I64);
+                            return TypeId::I64;
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Integer built-in methods
+                if pruned == TypeId::I64 || pruned == TypeId::I32 || matches!(self.types.get(pruned), TypeKind::Primitive(p) if p == "int" || p == "i64" || p == "i32") {
+                    match member_name {
+                        "abs" | "Abs" => {
+                            let res = self.types.function_of(vec![], TypeId::I64);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "clamp" | "Clamp" => {
+                            let res = self.types.function_of(vec![TypeId::I64, TypeId::I64], TypeId::I64);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "min" | "Min" | "max" | "Max" => {
+                            let res = self.types.function_of(vec![TypeId::I64], TypeId::I64);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "to_string" | "to_str" | "ToString" | "ToHex" | "to_hex" | "to_bin" => {
+                            let res = self.types.function_of(vec![], TypeId::STR);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "to_float" | "ToFloat" => {
+                            let res = self.types.function_of(vec![], TypeId::F64);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "BitLength" | "bit_length" => {
+                            let res = self.types.function_of(vec![], TypeId::I64);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Float built-in methods
+                if pruned == TypeId::F64 || pruned == TypeId::F32 || matches!(self.types.get(pruned), TypeKind::Primitive(p) if p == "float" || p == "f64" || p == "f32") {
+                    match member_name {
+                        "abs" | "Abs" | "round" | "Round" | "floor" | "Floor" | "ceil" | "Ceil" | "trunc" | "Trunc" | "sqrt" | "Sqrt" => {
+                            let res = self.types.function_of(vec![], TypeId::F64);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "clamp" | "Clamp" => {
+                            let res = self.types.function_of(vec![TypeId::F64, TypeId::F64], TypeId::F64);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "min" | "Min" | "max" | "Max" | "pow" | "Pow" => {
+                            let res = self.types.function_of(vec![TypeId::F64], TypeId::F64);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "to_string" | "to_str" | "ToString" => {
+                            let res = self.types.function_of(vec![], TypeId::STR);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "to_int" | "ToInt" => {
+                            let res = self.types.function_of(vec![], TypeId::I64);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Bool built-in methods
+                if pruned == TypeId::BOOL || matches!(self.types.get(pruned), TypeKind::Primitive(p) if p == "bool") {
+                    match member_name {
+                        "to_string" | "to_str" | "ToString" => {
+                            let res = self.types.function_of(vec![], TypeId::STR);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "toggle" | "Toggle" => {
+                            let res = self.types.function_of(vec![], TypeId::BOOL);
                             self.inferred_node_types.insert(node_id.0, res);
                             return res;
                         }

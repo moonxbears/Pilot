@@ -329,6 +329,8 @@ pub fn generate_c_runtime_header() -> &'static str {
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -395,6 +397,258 @@ static inline void pilot_rt_slice_free(PilotSliceBuffer* buf) {
     }
 }
 
+/* Dynamic List Representation */
+typedef struct PilotList {
+    void** items;
+    size_t len;
+    size_t cap;
+} PilotList;
+
+typedef PilotList* list;
+
+static inline PilotList* pilot_rt_list_new(void) {
+    PilotList* l = (PilotList*)malloc(sizeof(PilotList));
+    if (!l) return NULL;
+    l->len = 0;
+    l->cap = 8;
+    l->items = (void**)malloc(sizeof(void*) * l->cap);
+    return l;
+}
+
+static inline PilotList* pilot_rt_list_with_capacity(size_t cap) {
+    PilotList* l = (PilotList*)malloc(sizeof(PilotList));
+    if (!l) return NULL;
+    if (cap < 4) cap = 4;
+    l->len = 0;
+    l->cap = cap;
+    l->items = (void**)malloc(sizeof(void*) * l->cap);
+    return l;
+}
+
+static inline PilotList* pilot_rt_list_from_array(size_t count, void** items) {
+    PilotList* l = pilot_rt_list_with_capacity(count);
+    if (!l) return NULL;
+    for (size_t i = 0; i < count; i++) {
+        l->items[i] = items[i];
+    }
+    l->len = count;
+    return l;
+}
+
+#define PILOT_LIST_OF(...) pilot_rt_list_from_array(sizeof((void*[]){__VA_ARGS__}) / sizeof(void*), (void*[]){__VA_ARGS__})
+
+static inline void pilot_rt_list_push(PilotList* l, void* item) {
+    if (!l) return;
+    if (l->len >= l->cap) {
+        l->cap = (l->cap == 0) ? 8 : (l->cap * 2);
+        l->items = (void**)realloc(l->items, sizeof(void*) * l->cap);
+    }
+    l->items[l->len++] = item;
+}
+
+static inline void* pilot_rt_list_pop(PilotList* l) {
+    if (!l || l->len == 0) return NULL;
+    return l->items[--l->len];
+}
+
+static inline void* pilot_rt_list_get(const PilotList* l, int64_t index) {
+    if (!l) return NULL;
+    if (index < 0) index += (int64_t)l->len;
+    if (index < 0 || (size_t)index >= l->len) return NULL;
+    return l->items[(size_t)index];
+}
+
+static inline void pilot_rt_list_set(PilotList* l, int64_t index, void* val) {
+    if (!l) return;
+    if (index < 0) index += (int64_t)l->len;
+    if (index < 0 || (size_t)index >= l->len) return;
+    l->items[(size_t)index] = val;
+}
+
+static inline void pilot_rt_list_insert(PilotList* l, int64_t index, void* item) {
+    if (!l) return;
+    if (index < 0) index = 0;
+    if ((size_t)index > l->len) index = (int64_t)l->len;
+    if (l->len >= l->cap) {
+        l->cap = (l->cap == 0) ? 8 : (l->cap * 2);
+        l->items = (void**)realloc(l->items, sizeof(void*) * l->cap);
+    }
+    memmove(&l->items[index + 1], &l->items[index], (l->len - (size_t)index) * sizeof(void*));
+    l->items[index] = item;
+    l->len++;
+}
+
+static inline void* pilot_rt_list_remove(PilotList* l, int64_t index) {
+    if (!l || l->len == 0) return NULL;
+    if (index < 0) index += (int64_t)l->len;
+    if (index < 0 || (size_t)index >= l->len) return NULL;
+    void* val = l->items[index];
+    memmove(&l->items[index], &l->items[index + 1], (l->len - (size_t)index - 1) * sizeof(void*));
+    l->len--;
+    return val;
+}
+
+static inline void pilot_rt_list_clear(PilotList* l) {
+    if (l) l->len = 0;
+}
+
+static inline void pilot_rt_list_reverse(PilotList* l) {
+    if (!l || l->len <= 1) return;
+    size_t i = 0, j = l->len - 1;
+    while (i < j) {
+        void* tmp = l->items[i];
+        l->items[i] = l->items[j];
+        l->items[j] = tmp;
+        i++;
+        j--;
+    }
+}
+
+static inline bool pilot_rt_list_contains(const PilotList* l, void* item) {
+    if (!l) return false;
+    for (size_t i = 0; i < l->len; i++) {
+        if (l->items[i] == item) return true;
+        if (item && l->items[i] && (uintptr_t)item > 0x10000 && (uintptr_t)l->items[i] > 0x10000) {
+            if (strcmp((const char*)l->items[i], (const char*)item) == 0) return true;
+        }
+    }
+    return false;
+}
+
+static inline int64_t pilot_rt_list_index_of(const PilotList* l, void* item) {
+    if (!l) return -1;
+    for (size_t i = 0; i < l->len; i++) {
+        if (l->items[i] == item) return (int64_t)i;
+        if (item && l->items[i] && (uintptr_t)item > 0x10000 && (uintptr_t)l->items[i] > 0x10000) {
+            if (strcmp((const char*)l->items[i], (const char*)item) == 0) return (int64_t)i;
+        }
+    }
+    return -1;
+}
+
+static inline PilotList* pilot_rt_list_slice(const PilotList* l, int64_t start, int64_t count) {
+    if (!l) return pilot_rt_list_new();
+    if (start < 0) start += (int64_t)l->len;
+    if (start < 0) start = 0;
+    if ((size_t)start >= l->len || count <= 0) return pilot_rt_list_new();
+    size_t actual_count = (size_t)count;
+    if ((size_t)start + actual_count > l->len) {
+        actual_count = l->len - (size_t)start;
+    }
+    PilotList* res = pilot_rt_list_with_capacity(actual_count);
+    for (size_t i = 0; i < actual_count; i++) {
+        res->items[i] = l->items[(size_t)start + i];
+    }
+    res->len = actual_count;
+    return res;
+}
+
+static inline void* pilot_rt_list_first(const PilotList* l) {
+    if (!l || l->len == 0) return NULL;
+    return l->items[0];
+}
+
+static inline void* pilot_rt_list_last(const PilotList* l) {
+    if (!l || l->len == 0) return NULL;
+    return l->items[l->len - 1];
+}
+
+static inline void pilot_rt_list_free(PilotList* l) {
+    if (l) {
+        if (l->items) free(l->items);
+        free(l);
+    }
+}
+
+static inline char* pilot_rt_list_join(const PilotList* l, const char* sep) {
+    if (!l || l->len == 0) {
+        char* empty = (char*)malloc(1);
+        if (empty) empty[0] = '\0';
+        return empty;
+    }
+    const char* separator = sep ? sep : "";
+    size_t sep_len = strlen(separator);
+    size_t total_len = 0;
+    for (size_t i = 0; i < l->len; i++) {
+        const char* str = (const char*)l->items[i];
+        if (str && (uintptr_t)str > 0x10000) total_len += strlen(str);
+        else total_len += 24;
+        if (i + 1 < l->len) total_len += sep_len;
+    }
+    char* out = (char*)malloc(total_len + 1);
+    if (!out) return NULL;
+    out[0] = '\0';
+    size_t curr = 0;
+    for (size_t i = 0; i < l->len; i++) {
+        const char* str = (const char*)l->items[i];
+        char temp_num[32];
+        if (!str || (uintptr_t)str <= 0x10000) {
+            snprintf(temp_num, sizeof(temp_num), "%lld", (long long)(intptr_t)str);
+            str = temp_num;
+        }
+        size_t slen = strlen(str);
+        memcpy(out + curr, str, slen);
+        curr += slen;
+        if (i + 1 < l->len) {
+            memcpy(out + curr, separator, sep_len);
+            curr += sep_len;
+        }
+    }
+    out[curr] = '\0';
+    return out;
+}
+
+static inline char* pilot_rt_list_to_str(const PilotList* l) {
+    if (!l) {
+        char* n = (char*)malloc(5);
+        if (n) strcpy(n, "null");
+        return n;
+    }
+    size_t cap = 64;
+    char* buf = (char*)malloc(cap);
+    if (!buf) return NULL;
+    strcpy(buf, "[");
+    size_t curr = 1;
+    for (size_t i = 0; i < l->len; i++) {
+        char item_buf[64];
+        const char* item_str = NULL;
+        void* item = l->items[i];
+        if ((uintptr_t)item > 0x10000 && (uintptr_t)item < 0x7FFFFFFFFFFFLL) {
+            const char* s = (const char*)item;
+            if (s[0] >= 32 && s[0] <= 126) {
+                snprintf(item_buf, sizeof(item_buf), "\"%s\"", s);
+                item_str = item_buf;
+            }
+        }
+        if (!item_str) {
+            snprintf(item_buf, sizeof(item_buf), "%lld", (long long)(intptr_t)item);
+            item_str = item_buf;
+        }
+        size_t slen = strlen(item_str);
+        if (curr + slen + 4 >= cap) {
+            cap = (curr + slen + 4) * 2;
+            buf = (char*)realloc(buf, cap);
+        }
+        memcpy(buf + curr, item_str, slen);
+        curr += slen;
+        if (i + 1 < l->len) {
+            memcpy(buf + curr, ", ", 2);
+            curr += 2;
+        }
+    }
+    buf[curr++] = ']';
+    buf[curr] = '\0';
+    return buf;
+}
+
+static inline void pilot_rt_print_list(const PilotList* l) {
+    char* str = pilot_rt_list_to_str(l);
+    if (str) {
+        printf("%s\n", str);
+        free(str);
+    }
+}
+
 /* Memory Tier 2: Perceus Precise ARC & Drop Reuse */
 static inline void* pilot_rt_alloc_arc(size_t payload_size) {
     size_t* p = (size_t*)malloc(sizeof(size_t) * 2 + payload_size);
@@ -429,6 +683,309 @@ static inline void* pilot_rt_drop_reuse(void* ptr, size_t required_size) {
 }
 
 /* Strings & Intrinsics */
+static inline int64_t pilot_rt_str_len(const char* s) {
+    return s ? (int64_t)strlen(s) : 0;
+}
+
+static inline bool pilot_rt_str_is_empty(const char* s) {
+    return !s || s[0] == '\0';
+}
+
+static inline bool pilot_rt_str_contains(const char* s, const char* sub) {
+    if (!s || !sub) return false;
+    return strstr(s, sub) != NULL;
+}
+
+static inline bool pilot_rt_str_starts_with(const char* s, const char* prefix) {
+    if (!s || !prefix) return false;
+    size_t pre_len = strlen(prefix);
+    size_t s_len = strlen(s);
+    if (pre_len > s_len) return false;
+    return strncmp(s, prefix, pre_len) == 0;
+}
+
+static inline bool pilot_rt_str_ends_with(const char* s, const char* suffix) {
+    if (!s || !suffix) return false;
+    size_t suf_len = strlen(suffix);
+    size_t s_len = strlen(s);
+    if (suf_len > s_len) return false;
+    return strcmp(s + (s_len - suf_len), suffix) == 0;
+}
+
+static inline int64_t pilot_rt_str_index_of(const char* s, const char* sub) {
+    if (!s || !sub) return -1;
+    const char* found = strstr(s, sub);
+    return found ? (int64_t)(found - s) : -1;
+}
+
+static inline int64_t pilot_rt_str_last_index_of(const char* s, const char* sub) {
+    if (!s || !sub) return -1;
+    size_t sub_len = strlen(sub);
+    size_t s_len = strlen(s);
+    if (sub_len > s_len) return -1;
+    for (int64_t i = (int64_t)(s_len - sub_len); i >= 0; i--) {
+        if (strncmp(s + i, sub, sub_len) == 0) return i;
+    }
+    return -1;
+}
+
+static inline char* pilot_rt_str_to_upper(const char* s) {
+    if (!s) return NULL;
+    size_t len = strlen(s);
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) return NULL;
+    for (size_t i = 0; i < len; i++) {
+        buf[i] = (char)((s[i] >= 'a' && s[i] <= 'z') ? (s[i] - 32) : s[i]);
+    }
+    buf[len] = '\0';
+    return buf;
+}
+
+static inline char* pilot_rt_str_to_lower(const char* s) {
+    if (!s) return NULL;
+    size_t len = strlen(s);
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) return NULL;
+    for (size_t i = 0; i < len; i++) {
+        buf[i] = (char)((s[i] >= 'A' && s[i] <= 'Z') ? (s[i] + 32) : s[i]);
+    }
+    buf[len] = '\0';
+    return buf;
+}
+
+static inline char* pilot_rt_str_trim(const char* s) {
+    if (!s) return NULL;
+    while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') s++;
+    size_t len = strlen(s);
+    while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t' || s[len - 1] == '\r' || s[len - 1] == '\n')) len--;
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) return NULL;
+    memcpy(buf, s, len);
+    buf[len] = '\0';
+    return buf;
+}
+
+static inline char* pilot_rt_str_trim_start(const char* s) {
+    if (!s) return NULL;
+    while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') s++;
+    size_t len = strlen(s);
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) return NULL;
+    memcpy(buf, s, len);
+    buf[len] = '\0';
+    return buf;
+}
+
+static inline char* pilot_rt_str_trim_end(const char* s) {
+    if (!s) return NULL;
+    size_t len = strlen(s);
+    while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t' || s[len - 1] == '\r' || s[len - 1] == '\n')) len--;
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) return NULL;
+    memcpy(buf, s, len);
+    buf[len] = '\0';
+    return buf;
+}
+
+static inline char* pilot_rt_str_replace(const char* s, const char* old_sub, const char* new_sub) {
+    if (!s) return NULL;
+    if (!old_sub || old_sub[0] == '\0') {
+        size_t len = strlen(s);
+        char* buf = (char*)malloc(len + 1);
+        if (buf) memcpy(buf, s, len + 1);
+        return buf;
+    }
+    const char* replacement = new_sub ? new_sub : "";
+    size_t old_len = strlen(old_sub);
+    size_t new_len = strlen(replacement);
+    size_t count = 0;
+    const char* tmp = s;
+    while ((tmp = strstr(tmp, old_sub)) != NULL) {
+        count++;
+        tmp += old_len;
+    }
+    size_t result_len = strlen(s) + count * (new_len > old_len ? (new_len - old_len) : 0);
+    char* result = (char*)malloc(result_len + 1);
+    if (!result) return NULL;
+    char* dst = result;
+    const char* src = s;
+    while ((tmp = strstr(src, old_sub)) != NULL) {
+        size_t chunk = (size_t)(tmp - src);
+        memcpy(dst, src, chunk);
+        dst += chunk;
+        memcpy(dst, replacement, new_len);
+        dst += new_len;
+        src = tmp + old_len;
+    }
+    strcpy(dst, src);
+    return result;
+}
+
+static inline char* pilot_rt_str_substring(const char* s, int64_t start, int64_t count) {
+    if (!s) return NULL;
+    int64_t s_len = (int64_t)strlen(s);
+    if (start < 0) start += s_len;
+    if (start < 0) start = 0;
+    if (start >= s_len || count <= 0) {
+        char* empty = (char*)malloc(1);
+        if (empty) empty[0] = '\0';
+        return empty;
+    }
+    if (start + count > s_len) count = s_len - start;
+    char* buf = (char*)malloc((size_t)count + 1);
+    if (!buf) return NULL;
+    memcpy(buf, s + start, (size_t)count);
+    buf[count] = '\0';
+    return buf;
+}
+
+static inline char* pilot_rt_str_repeat(const char* s, int64_t count) {
+    if (!s || count <= 0) {
+        char* empty = (char*)malloc(1);
+        if (empty) empty[0] = '\0';
+        return empty;
+    }
+    size_t s_len = strlen(s);
+    size_t total = s_len * (size_t)count;
+    char* buf = (char*)malloc(total + 1);
+    if (!buf) return NULL;
+    for (int64_t i = 0; i < count; i++) {
+        memcpy(buf + i * s_len, s, s_len);
+    }
+    buf[total] = '\0';
+    return buf;
+}
+
+static inline char* pilot_rt_str_pad_start(const char* s, int64_t target_len, const char* pad_char) {
+    if (!s) s = "";
+    int64_t s_len = (int64_t)strlen(s);
+    if (s_len >= target_len) {
+        char* res = (char*)malloc(s_len + 1);
+        if (res) strcpy(res, s);
+        return res;
+    }
+    char ch = (pad_char && pad_char[0] != '\0') ? pad_char[0] : ' ';
+    int64_t pad_amount = target_len - s_len;
+    char* buf = (char*)malloc((size_t)target_len + 1);
+    if (!buf) return NULL;
+    memset(buf, ch, (size_t)pad_amount);
+    memcpy(buf + pad_amount, s, (size_t)s_len);
+    buf[target_len] = '\0';
+    return buf;
+}
+
+static inline char* pilot_rt_str_pad_end(const char* s, int64_t target_len, const char* pad_char) {
+    if (!s) s = "";
+    int64_t s_len = (int64_t)strlen(s);
+    if (s_len >= target_len) {
+        char* res = (char*)malloc(s_len + 1);
+        if (res) strcpy(res, s);
+        return res;
+    }
+    char ch = (pad_char && pad_char[0] != '\0') ? pad_char[0] : ' ';
+    int64_t pad_amount = target_len - s_len;
+    char* buf = (char*)malloc((size_t)target_len + 1);
+    if (!buf) return NULL;
+    memcpy(buf, s, (size_t)s_len);
+    memset(buf + s_len, ch, (size_t)pad_amount);
+    buf[target_len] = '\0';
+    return buf;
+}
+
+static inline bool pilot_rt_str_is_digit(const char* s) {
+    if (!s || s[0] == '\0') return false;
+    for (size_t i = 0; s[i] != '\0'; i++) {
+        if (s[i] < '0' || s[i] > '9') return false;
+    }
+    return true;
+}
+
+static inline bool pilot_rt_str_is_alpha(const char* s) {
+    if (!s || s[0] == '\0') return false;
+    for (size_t i = 0; s[i] != '\0'; i++) {
+        if (!((s[i] >= 'a' && s[i] <= 'z') || (s[i] >= 'A' && s[i] <= 'Z'))) return false;
+    }
+    return true;
+}
+
+static inline bool pilot_rt_str_is_alphanumeric(const char* s) {
+    if (!s || s[0] == '\0') return false;
+    for (size_t i = 0; s[i] != '\0'; i++) {
+        char c = s[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) return false;
+    }
+    return true;
+}
+
+static inline int64_t pilot_rt_str_to_int(const char* s) {
+    if (!s) return 0;
+    return (int64_t)strtoll(s, NULL, 10);
+}
+
+static inline double pilot_rt_str_to_float(const char* s) {
+    if (!s) return 0.0;
+    return strtod(s, NULL);
+}
+
+static inline char* pilot_rt_str_char_at(const char* s, int64_t index) {
+    if (!s) return NULL;
+    int64_t s_len = (int64_t)strlen(s);
+    if (index < 0) index += s_len;
+    if (index < 0 || index >= s_len) {
+        char* empty = (char*)malloc(1);
+        if (empty) empty[0] = '\0';
+        return empty;
+    }
+    char* buf = (char*)malloc(2);
+    if (!buf) return NULL;
+    buf[0] = s[index];
+    buf[1] = '\0';
+    return buf;
+}
+
+static inline PilotList* pilot_rt_str_chars(const char* s) {
+    if (!s) return pilot_rt_list_new();
+    size_t len = strlen(s);
+    PilotList* list = pilot_rt_list_with_capacity(len);
+    for (size_t i = 0; i < len; i++) {
+        char* ch = (char*)malloc(2);
+        if (ch) {
+            ch[0] = s[i];
+            ch[1] = '\0';
+            pilot_rt_list_push(list, ch);
+        }
+    }
+    return list;
+}
+
+static inline PilotList* pilot_rt_str_split(const char* s, const char* sep) {
+    if (!s) return pilot_rt_list_new();
+    if (!sep || sep[0] == '\0') {
+        return pilot_rt_str_chars(s);
+    }
+    size_t sep_len = strlen(sep);
+    PilotList* list = pilot_rt_list_new();
+    const char* cur = s;
+    const char* found;
+    while ((found = strstr(cur, sep)) != NULL) {
+        size_t part_len = (size_t)(found - cur);
+        char* part = (char*)malloc(part_len + 1);
+        if (part) {
+            memcpy(part, cur, part_len);
+            part[part_len] = '\0';
+            pilot_rt_list_push(list, part);
+        }
+        cur = found + sep_len;
+    }
+    size_t rem_len = strlen(cur);
+    char* rem = (char*)malloc(rem_len + 1);
+    if (rem) {
+        memcpy(rem, cur, rem_len + 1);
+        pilot_rt_list_push(list, rem);
+    }
+    return list;
+}
+
 static inline char* pilot_rt_str_concat(const char* s1, const char* s2) {
     const char* str1 = s1 ? s1 : "";
     const char* str2 = s2 ? s2 : "";
@@ -444,6 +1001,90 @@ static inline char* pilot_rt_str_concat(const char* s1, const char* s2) {
 }
 
 static inline void pilot_rt_str_free(char* ptr) { free(ptr); }
+
+/* Math & Conversions */
+static inline int64_t pilot_rt_int_abs(int64_t x) { return x < 0 ? -x : x; }
+static inline int64_t pilot_rt_int_clamp(int64_t x, int64_t min_v, int64_t max_v) {
+    if (x < min_v) return min_v;
+    if (x > max_v) return max_v;
+    return x;
+}
+static inline int64_t pilot_rt_int_min(int64_t a, int64_t b) { return a < b ? a : b; }
+static inline int64_t pilot_rt_int_max(int64_t a, int64_t b) { return a > b ? a : b; }
+
+static inline char* pilot_rt_int_to_str(int64_t x) {
+    char* buf = (char*)malloc(32);
+    if (!buf) return NULL;
+    snprintf(buf, 32, "%lld", (long long)x);
+    return buf;
+}
+
+static inline char* pilot_rt_int_to_hex(int64_t x) {
+    char* buf = (char*)malloc(32);
+    if (!buf) return NULL;
+    snprintf(buf, 32, "0x%llX", (unsigned long long)x);
+    return buf;
+}
+
+static inline char* pilot_rt_int_to_bin(int64_t x) {
+    char* buf = (char*)malloc(68);
+    if (!buf) return NULL;
+    if (x == 0) {
+        strcpy(buf, "0b0");
+        return buf;
+    }
+    char tmp[65];
+    int idx = 0;
+    uint64_t ux = (uint64_t)x;
+    while (ux > 0) {
+        tmp[idx++] = (ux & 1) ? '1' : '0';
+        ux >>= 1;
+    }
+    buf[0] = '0';
+    buf[1] = 'b';
+    int out_idx = 2;
+    for (int i = idx - 1; i >= 0; i--) {
+        buf[out_idx++] = tmp[i];
+    }
+    buf[out_idx] = '\0';
+    return buf;
+}
+
+static inline int64_t pilot_rt_int_bit_length(int64_t x) {
+    if (x == 0) return 0;
+    uint64_t ux = (uint64_t)(x < 0 ? -x : x);
+    int64_t bits = 0;
+    while (ux > 0) {
+        bits++;
+        ux >>= 1;
+    }
+    return bits;
+}
+
+static inline double pilot_rt_float_abs(double x) { return fabs(x); }
+static inline double pilot_rt_float_clamp(double x, double min_v, double max_v) {
+    if (x < min_v) return min_v;
+    if (x > max_v) return max_v;
+    return x;
+}
+static inline double pilot_rt_float_min(double a, double b) { return a < b ? a : b; }
+static inline double pilot_rt_float_max(double a, double b) { return a > b ? a : b; }
+static inline double pilot_rt_float_round(double x) { return round(x); }
+static inline double pilot_rt_float_floor(double x) { return floor(x); }
+static inline double pilot_rt_float_ceil(double x) { return ceil(x); }
+static inline double pilot_rt_float_trunc(double x) { return trunc(x); }
+
+static inline char* pilot_rt_float_to_str(double x) {
+    char* buf = (char*)malloc(40);
+    if (!buf) return NULL;
+    snprintf(buf, 40, "%g", x);
+    return buf;
+}
+
+static inline char* pilot_rt_bool_to_str(bool b) {
+    return (char*)(b ? "true" : "false");
+}
+
 static inline void pilot_rt_print_i64(int64_t val) { printf("%lld\n", (long long)val); }
 static inline void pilot_rt_print_f64(double val) { printf("%f\n", val); }
 static inline void pilot_rt_print_str(const char* s) { printf("%s\n", s ? s : ""); }

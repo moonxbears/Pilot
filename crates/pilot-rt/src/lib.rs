@@ -144,6 +144,33 @@ mod tests {
         assert!(PilotStdlibResolver::is_stdlib_module("std.math"));
         assert!(PilotStdlibResolver::is_stdlib_module("std.core"));
         assert!(!PilotStdlibResolver::is_stdlib_module("unknown.module"));
+
+        // Extended string and numeric intrinsics
+        assert_eq!(PilotStdlibIntrinsics::str_split("hello,world", ","), vec!["hello", "world"]);
+        assert_eq!(PilotStdlibIntrinsics::str_join(&["a", "b", "c"], "-"), "a-b-c");
+        assert_eq!(PilotStdlibIntrinsics::str_replace("hello world", "world", "pilot"), "hello pilot");
+        assert_eq!(PilotStdlibIntrinsics::str_trim("   pilot   "), "pilot");
+        assert_eq!(PilotStdlibIntrinsics::str_to_upper("pilot"), "PILOT");
+        assert_eq!(PilotStdlibIntrinsics::str_to_lower("PILOT"), "pilot");
+        assert!(PilotStdlibIntrinsics::str_starts_with("hello world", "hello"));
+        assert!(PilotStdlibIntrinsics::str_ends_with("hello world", "world"));
+        assert!(PilotStdlibIntrinsics::str_contains("hello world", "lo wo"));
+        assert_eq!(PilotStdlibIntrinsics::str_index_of("hello world", "world"), Some(6));
+        assert_eq!(PilotStdlibIntrinsics::str_repeat("ab", 3), "ababab");
+        assert_eq!(PilotStdlibIntrinsics::str_substring("pilot", 1, 3), "ilo");
+        assert!(PilotStdlibIntrinsics::str_is_digit("12345"));
+        assert!(!PilotStdlibIntrinsics::str_is_digit("123a45"));
+        assert!(PilotStdlibIntrinsics::str_is_alpha("hello"));
+        assert!(!PilotStdlibIntrinsics::str_is_alpha("hello12"));
+        assert_eq!(PilotStdlibIntrinsics::str_to_int("42"), Some(42));
+        assert_eq!(PilotStdlibIntrinsics::str_to_float("3.14"), Some(3.14));
+        assert_eq!(PilotStdlibIntrinsics::int_abs(-50), 50);
+        assert_eq!(PilotStdlibIntrinsics::int_clamp(150, 0, 100), 100);
+        assert_eq!(PilotStdlibIntrinsics::float_abs(-2.5), 2.5);
+        assert_eq!(PilotStdlibIntrinsics::float_clamp(12.5, 0.0, 10.0), 10.0);
+        assert_eq!(PilotStdlibIntrinsics::float_round(3.7), 4.0);
+        assert_eq!(PilotStdlibIntrinsics::float_floor(3.7), 3.0);
+        assert_eq!(PilotStdlibIntrinsics::float_ceil(3.2), 4.0);
     }
 
     #[test]

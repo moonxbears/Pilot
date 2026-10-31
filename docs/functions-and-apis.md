@@ -15,16 +15,19 @@ This reference catalogs **every available function, built-in module, scripting g
 5. [Built-in Type Member Methods & Properties](#5-built-in-type-member-methods--properties)
    - [5.1 `str` (String)](#51-str-string)
    - [5.2 `list` (Dynamic Array / List)](#52-list-dynamic-array--list)
-   - [5.3 `map` (Dictionary / Hash Map)](#53-map-dictionary--hash-map)
-   - [5.4 `set` (Unique Hash Set)](#54-set-unique-hash-set)
-   - [5.5 `matrix` (`PilotMatrix`)](#55-matrix-pilotmatrix)
-   - [5.6 `range` (`PilotRange`)](#56-range-pilotrange)
-   - [5.7 `MethodGroup` (`PilotMethodGroup`)](#57-methodgroup-pilotmethodgroup)
-   - [5.8 `Generator` (`PilotGenerator`)](#58-generator-pilotgenerator)
-   - [5.9 `Lazy` (`PilotLazy`)](#59-lazy-pilotlazy)
-   - [5.10 `Future` (`PilotFuture`)](#510-future-pilotfuture)
-   - [5.11 `Object` (`PilotObject` Class Instances)](#511-object-pilotobject-class-instances)
-   - [5.12 `ClassNode` (`PilotClassNode` Generative AST Reflection)](#512-classnode-pilotclassnode-generative-ast-reflection)
+   - [5.3 `int` (64-Bit Integer)](#53-int-64-bit-integer)
+   - [5.4 `float` (64-Bit Floating-Point)](#54-float-64-bit-floating-point)
+   - [5.5 `bool` (Boolean)](#55-bool-boolean)
+   - [5.6 `map` (Dictionary / Hash Map)](#56-map-dictionary--hash-map)
+   - [5.7 `set` (Unique Hash Set)](#57-set-unique-hash-set)
+   - [5.8 `matrix` (`PilotMatrix`)](#58-matrix-pilotmatrix)
+   - [5.9 `range` (`PilotRange`)](#59-range-pilotrange)
+   - [5.10 `MethodGroup` (`PilotMethodGroup`)](#510-methodgroup-pilotmethodgroup)
+   - [5.11 `Generator` (`PilotGenerator`)](#511-generator-pilotgenerator)
+   - [5.12 `Lazy` (`PilotLazy`)](#512-lazy-pilotlazy)
+   - [5.13 `Future` (`PilotFuture`)](#513-future-pilotfuture)
+   - [5.14 `Object` (`PilotObject` Class Instances)](#514-object-pilotobject-class-instances)
+   - [5.15 `ClassNode` (`PilotClassNode` Generative AST Reflection)](#515-classnode-pilotclassnode-generative-ast-reflection)
 6. [Design-by-Contract Intrinsics (`old` & `result`)](#6-design-by-contract-intrinsics-old--result)
 7. [Standard Contracts & Delegated Interfaces (`PilotContractRegistry`)](#7-standard-contracts--delegated-interfaces-pilotcontractregistry)
 8. [Built-in Type Adapters (`PilotTypeAdapterRegistry`)](#8-built-in-type-adapters-pilottypeadapterregistry)
@@ -187,37 +190,106 @@ To support Python, C#, and Rust idioms seamlessly, each root method recognizes s
 ## 5. Built-in Type Member Methods & Properties
 
 ### 5.1 `str` (String)
-Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt) ([`value.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt/src/value.rs)) and [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm):
-- **Indexing**: `s[i]` returns the `char` at index `i` (supports negative indices `s[-1]` counting from the end; returns `undefined` if out of bounds).
+Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt) ([`c_abi.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt/src/c_abi.rs), [`stdlib.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt/src/stdlib.rs)), [`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis), [`pilot-codegen`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-codegen), and [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm):
+- **Indexing**: `s[i]` returns the `char` / 1-character string at index `i` (supports negative indices `s[-1]` counting from the end; returns `undefined` or `""` if out of bounds).
 - **Operators**: `s1 + s2` (concatenation), `s * n` (repeats string `n` times), `sub in s` (substring check).
+- **Interpolation**: Native string concatenation and interpolation convert integers, floats, booleans, and lists automatically.
 
 | Member / Method | Aliases | Return Type | Exact Behavior |
 | :--- | :--- | :--- | :--- |
-| **`s.length`** | *(property)* | `int` | Number of UTF-16 characters in `s`. |
-| **`s.to_upper()`** | `s.ToUpper()` | `str` | Returns a copy of `s` converted to uppercase (`ToUpperInvariant()`). |
-| **`s.to_lower()`** | `s.ToLower()` | `str` | Returns a copy of `s` converted to lowercase (`ToLowerInvariant()`). |
+| **`s.len()`** | `s.length` *(property)* | `int` | Number of characters in `s`. |
+| **`s.is_empty()`** | — | `bool` | Returns `true` if `s` has length `0`, otherwise `false`. |
+| **`s.contains(substr)`** | `s.Contains(substr)` | `bool` | Returns `true` if `substr` occurs within `s`. |
+| **`s.starts_with(prefix)`** | `s.StartsWith(prefix)` | `bool` | Returns `true` if `s` begins with `prefix`. |
+| **`s.ends_with(suffix)`** | `s.EndsWith(suffix)` | `bool` | Returns `true` if `s` ends with `suffix`. |
+| **`s.index_of(substr)`** | `s.IndexOf(substr)` | `int` | Returns the first 0-based index of `substr` in `s`, or `-1` if not found. |
+| **`s.last_index_of(substr)`** | `s.LastIndexOf(substr)` | `int` | Returns the last 0-based index of `substr` in `s`, or `-1` if not found. |
+| **`s.to_upper()`** | `s.ToUpper()` | `str` | Returns a copy of `s` converted to uppercase. |
+| **`s.to_lower()`** | `s.ToLower()` | `str` | Returns a copy of `s` converted to lowercase. |
 | **`s.trim()`** | `s.Trim()` | `str` | Removes leading and trailing whitespace from `s`. |
-| **`s.starts_with(prefix)`** | `s.StartsWith(prefix)` | `bool` | Returns `true` if `s` begins with `prefix.ToString()`. |
-| **`s.ends_with(suffix)`** | `s.EndsWith(suffix)` | `bool` | Returns `true` if `s` ends with `suffix.ToString()`. |
-| **`s.contains(substr)`** | `s.Contains(substr)` | `bool` | Returns `true` if `substr.ToString()` occurs within `s`. |
+| **`s.trim_start()`** | `s.TrimStart()` | `str` | Removes leading whitespace from `s`. |
+| **`s.trim_end()`** | `s.TrimEnd()` | `str` | Removes trailing whitespace from `s`. |
+| **`s.replace(old, new)`** | `s.Replace(old, new)` | `str` | Returns a new string with all occurrences of `old` replaced with `new`. |
+| **`s.split(sep)`** | `s.Split(sep)` | `list<str>` | Splits `s` into a list of strings by delimiter `sep` (or by whitespace if `sep` is `" "`). |
+| **`s.join(items)`** | `s.Join(items)` | `str` | Joins the elements of `items` (`list<str>`) using `s` as the separator delimiter. |
+| **`s.substring(start, end?)`** | `s.slice(start, end)` | `str` | Returns a sub-string from index `start` up to `end` (or string end if omitted). Supports negative indices. |
+| **`s.repeat(count)`** | — | `str` | Returns a new string containing `s` repeated `count` times. |
+| **`s.pad_start(len, pad_char)`** | `s.PadLeft(len, pad_char)` | `str` | Prepends `pad_char` to `s` until the total length reaches `len`. |
+| **`s.pad_end(len, pad_char)`** | `s.PadRight(len, pad_char)` | `str` | Appends `pad_char` to `s` until the total length reaches `len`. |
+| **`s.is_digit()`** | `s.IsDigit()` | `bool` | Returns `true` if all characters in non-empty `s` are ASCII digits (`0`–`9`). |
+| **`s.is_alpha()`** | `s.IsAlpha()` | `bool` | Returns `true` if all characters in non-empty `s` are alphabetic (`a`–`z`, `A`–`Z`). |
+| **`s.is_alphanumeric()`** | `s.IsAlphanumeric()` | `bool` | Returns `true` if all characters in non-empty `s` are alphanumeric (`0`–`9`, `a`–`z`, `A`–`Z`). |
+| **`s.char_at(index)`** | `s.CharAt(index)` | `str` | Returns the 1-character string at 0-based `index` (supports negative indices). |
+| **`s.chars()`** | `s.Chars()` | `list<str>` | Returns a list containing each individual character of `s` as a 1-character string. |
+| **`s.to_int()`** | `s.ToInt()` | `int` | Parses string to a 64-bit signed integer (supports decimal, `0x` hex, and `0b` binary). |
+| **`s.to_float()`** | `s.ToFloat()` | `float` | Parses string to a 64-bit IEEE 754 floating-point number. |
+| **`s.to_string()`** | `s.ToString()` | `str` | Returns a copy of `s`. |
 
 ### 5.2 `list` (Dynamic Array / List)
-Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt) ([`value.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt/src/value.rs)) and [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm):
+Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt) ([`c_abi.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt/src/c_abi.rs), [`stdlib.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt/src/stdlib.rs)), [`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis), [`pilot-codegen`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-codegen), and [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm):
 - **Indexing**: `list[i]` reads or writes element at `i` (supports negative indexing `list[-1]`).
 - **Operators**: `list1 + list2` (returns a new concatenated list), `x in list` (membership check), `[..list1, 4]` (spread).
 
 | Member / Method | Aliases | Return Type | Exact Behavior |
 | :--- | :--- | :--- | :--- |
-| **`list.length`** | `list.count` *(property)* | `int` | Number of elements currently in the list. |
-| **`list.append(item)`** | `list.push(item)` | `null` | Appends `item` to the end of the list in place. If `with auto_repeat` is active and `item` is a collection (`list`/`tuple`/`set`), unrolls and appends each element individually. |
-| **`list.append.each(items)`** | `list.append.repeat(items)`, `list.append.broadcast(items)` | `null` | Sub-methods on `append`/`push` that unroll a collection `items` and append each element to `list`. |
-| **`list.map(callable)`** | — | `list` | Applies `callable` (either a `PilotFunction` or a **`PilotMethodGroup` switchboard**) to each element in `list` and returns a new `list` of results. |
-| **`list.pop()`** | — | `any` | Removes and returns the last element of `list` (or `undefined` if empty). |
-| **`list.clear()`** | — | `null` | Removes all elements from `list` in place. |
+| **`list.len()`** | `list.length`, `list.count` *(property)* | `int` | Number of elements currently in the list. |
+| **`list.is_empty()`** | — | `bool` | Returns `true` if the list contains 0 elements, otherwise `false`. |
+| **`list.append(item)`** | `list.push(item)`, `list.add(item)` | `null` | Appends `item` to the end of the list in place. |
+| **`list.pop()`** | — | `T` / `any` | Removes and returns the last element of the list (or `undefined`/`null` if empty). |
+| **`list.insert(index, item)`** | — | `null` | Inserts `item` at 0-based `index` in place, shifting existing elements right. |
+| **`list.remove(index)`** | — | `T` / `any` | Removes and returns the element at 0-based `index`, shifting subsequent elements left. |
+| **`list.clear()`** | — | `null` | Removes all elements from the list in place, resetting length to `0`. |
+| **`list.reverse()`** | — | `list` | Reverses the elements of the list in place and returns the list instance. |
+| **`list.contains(item)`** | `list.Contains(item)` | `bool` | Returns `true` if `item` equals any element in the list. |
+| **`list.index_of(item)`** | `list.IndexOf(item)` | `int` | Returns the 0-based index of the first occurrence of `item`, or `-1` if not found. |
+| **`list.slice(start, end?)`** | — | `list` | Returns a new sub-list containing elements from index `start` up to `end` (supports negative indices). |
+| **`list.first()`** | — | `T` / `any` | Returns the first element of the list (or `undefined`/`null` if empty). |
+| **`list.last()`** | — | `T` / `any` | Returns the last element of the list (or `undefined`/`null` if empty). |
+| **`list.join(sep)`** | `list.Join(sep)` | `str` | Joins string elements of the list using `sep` as delimiter. |
+| **`list.map(callable)`** | — | `list` | Applies `callable` (a function, lambda, or method group) to each element and returns a new `list`. |
 
-> **Note**: When a class delegates `IList` to a backing `list` field (`IList.Contracts = _data`), the delegated contract also exposes `.add(x)`, `.remove(x)`, `.pop(idx?)`, `.count()`, `.length()`, `.get(idx)`, `.set(idx, val)`, `.clear()`, `.contains(x)`, and `.insert(idx, val)`.
+### 5.3 `int` (64-Bit Integer)
+Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt), [`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis), and [`pilot-codegen`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-codegen):
 
-### 5.3 `map` (Dictionary / Hash Map)
+| Member / Method | Aliases | Return Type | Exact Behavior |
+| :--- | :--- | :--- | :--- |
+| **`n.abs()`** | `n.Abs()` | `int` | Returns the absolute value of `n` (`|n|`). |
+| **`n.clamp(min, max)`** | `n.Clamp(min, max)` | `int` | Restricts `n` to the closed interval `[min, max]`. |
+| **`n.min(other)`** | `n.Min(other)` | `int` | Returns the smaller of `n` and `other`. |
+| **`n.max(other)`** | `n.Max(other)` | `int` | Returns the larger of `n` and `other`. |
+| **`n.to_string()`** | `n.to_str()`, `n.ToString()` | `str` | Converts `n` to its base-10 decimal string representation. |
+| **`n.to_float()`** | `n.ToFloat()` | `float` | Converts `n` to a 64-bit IEEE 754 floating-point number. |
+| **`n.to_hex()`** | `n.ToHex()` | `str` | Converts `n` to a lowercase hexadecimal string with `0x` prefix (e.g. `0xff`). |
+| **`n.to_bin()`** | `n.ToBin()` | `str` | Converts `n` to a binary string with `0b` prefix (e.g. `0b1010`). |
+| **`n.bit_length()`** | `n.BitLength()` | `int` | Returns the number of bits necessary to represent `n` in binary (excluding sign). |
+
+### 5.4 `float` (64-Bit Floating-Point)
+Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt), [`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis), and [`pilot-codegen`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-codegen):
+
+| Member / Method | Aliases | Return Type | Exact Behavior |
+| :--- | :--- | :--- | :--- |
+| **`f.abs()`** | `f.Abs()` | `float` | Returns the absolute value of `f` (`|f|`). |
+| **`f.clamp(min, max)`** | `f.Clamp(min, max)` | `float` | Restricts `f` to the closed interval `[min, max]`. |
+| **`f.min(other)`** | `f.Min(other)` | `float` | Returns the smaller of `f` and `other`. |
+| **`f.max(other)`** | `f.Max(other)` | `float` | Returns the larger of `f` and `other`. |
+| **`f.round()`** | `f.Round()` | `float` | Rounds `f` to the nearest integer value (half-way cases round away from zero). |
+| **`f.floor()`** | `f.Floor()` | `float` | Rounds `f` downward toward negative infinity ($\lfloor f \rfloor$). |
+| **`f.ceil()`** | `f.Ceil()` | `float` | Rounds `f` upward toward positive infinity ($\lceil f \rceil$). |
+| **`f.trunc()`** | `f.Trunc()` | `float` | Truncates the fractional part of `f` toward zero. |
+| **`f.sqrt()`** | `f.Sqrt()` | `float` | Computes the square root ($\sqrt{f}$). |
+| **`f.pow(exp)`** | `f.Pow(exp)` | `float` | Computes $f^{\text{exp}}$. |
+| **`f.to_string()`** | `f.to_str()`, `f.ToString()` | `str` | Converts `f` to its decimal string representation. |
+| **`f.to_int()`** | `f.ToInt()` | `int` | Truncates `f` toward zero and casts to a 64-bit signed integer. |
+
+### 5.5 `bool` (Boolean)
+Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt), [`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis), and [`pilot-codegen`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-codegen):
+
+| Member / Method | Aliases | Return Type | Exact Behavior |
+| :--- | :--- | :--- | :--- |
+| **`b.to_string()`** | `b.to_str()`, `b.ToString()` | `str` | Returns `"true"` or `"false"`. |
+| **`b.toggle()`** | `b.Toggle()` | `bool` | Returns the logical negation (`!b`). |
+
+### 5.6 `map` (Dictionary / Hash Map)
 Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt) and [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm):
 - **Bracket Indexing**: `map[key]` reads or sets the value associated with `key` (returns `undefined` if not found).
 - **Dot Property Access**: `map.key_name` first checks if `"key_name"` exists as a string key in `map` and returns its value before falling back to map methods.
@@ -231,7 +303,7 @@ Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crat
 | **`map.contains_key(key)`** | `map.ContainsKey(key)` | `bool` | Returns `true` if `key` exists in the map. |
 | **`map.clear()`** | — | `null` | Removes all key-value entries from the map in place. |
 
-### 5.4 `set` (Unique Hash Set)
+### 5.7 `set` (Unique Hash Set)
 Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt) and [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm):
 - **Literal Syntax**: `{ 1, 2, 3 }` (braces with elements without `:` colons create a `set`; `{}` creates an empty `map`).
 
@@ -242,7 +314,7 @@ Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crat
 | **`set.contains(item)`** | `set.Contains(item)` | `bool` | Returns `true` if `item` is a member of the set. |
 | **`set.clear()`** | — | `null` | Removes all elements from the set in place. |
 
-### 5.5 `matrix` (`PilotMatrix`)
+### 5.8 `matrix` (`PilotMatrix`)
 Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt) and [`std.numpy`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/numpy/numpy.pilot):
 - Constructed via `matrix(rows, cols)`, `eye(size)`, `zeros(rows, cols)`, `ones(rows, cols)`.
 - **Supported Operators**:
@@ -253,12 +325,12 @@ Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crat
   - `A == B`: Structural equality comparing dimensions and elements within `1e-9` tolerance.
   - `len(A)`: Returns `Rows * Cols`.
 
-### 5.6 `range` (`PilotRange`)
+### 5.9 `range` (`PilotRange`)
 - Constructed via `start..end` (half-open), `start..=end` (inclusive), or `range(start, end, step)`.
 - `len(r)` returns the total number of integers in the range.
 - Directly iterable in `for i in 0..10` and unpackable via spread `[..0..5]` -> `[0, 1, 2, 3, 4]`.
 
-### 5.7 `MethodGroup` (`PilotMethodGroup`)
+### 5.10 `MethodGroup` (`PilotMethodGroup`)
 Implemented in [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm) and [`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis):
 
 | Member / Operator | Type | Exact Behavior |
@@ -269,7 +341,7 @@ Implemented in [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crat
 | **`mg1 \| mg2`** | `MethodGroup` | Merges two method groups or functions into a unified fallback overload set. |
 | **`mg(partial_args)`** | `MethodGroup` | **Signature Sieve Currying**: When called with partial positional or named arguments that do not completely satisfy an overload, filters the group down to compatible overloads with those arguments pre-bound. |
 
-### 5.8 `Generator` (`PilotGenerator`)
+### 5.11 `Generator` (`PilotGenerator`)
 Implemented in [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm):
 
 | Member / Method | Type | Exact Behavior |
@@ -280,7 +352,7 @@ Implemented in [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crat
 | **`gen.is_done`** | `bool` *(property)* | `true` if `State` is `Completed` or `Closed`, otherwise `false`. |
 | **`gen.state`** | `str` *(property)* | Current lifecycle state string: `"suspended"`, `"running"`, `"completed"`, or `"closed"`. |
 
-### 5.9 `Lazy` (`PilotLazy`)
+### 5.12 `Lazy` (`PilotLazy`)
 Implemented in [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm):
 
 | Member / Method | Type | Exact Behavior |
@@ -290,7 +362,7 @@ Implemented in [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crat
 | **`l.is_evaluated`** | `bool` *(property)* | `true` if the lazy thunk has already been evaluated and cached, `false` otherwise. |
 | **`l.<any_member>`** | `any` | Accessing any other member on a `PilotLazy` automatically forces evaluation and forwards the member lookup to the inner `Value`. |
 
-### 5.10 `Future` (`PilotFuture`)
+### 5.13 `Future` (`PilotFuture`)
 Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt) and [`std.asyncio`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/asyncio/asyncio.pilot):
 
 | Member / Method | Type | Exact Behavior |
@@ -301,7 +373,7 @@ Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crat
 | **`f.is_completed`** | `bool` *(property)* | `true` if the task has finished execution. |
 | **`f.is_faulted`** | `bool` *(property)* | `true` if the task terminated with an unhandled exception. |
 
-### 5.11 `Object` (`PilotObject` Class Instances)
+### 5.14 `Object` (`PilotObject` Class Instances)
 Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt) ([`value.rs`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt/src/value.rs)) and [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm):
 
 | Member / Method | Type | Exact Behavior |
@@ -310,7 +382,7 @@ Implemented in [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crat
 | **`obj.transition_to(newState)`** | `fn(str) -> Object` | Transitions the instance's `CurrentState` to `newState` and returns `self`, unlocking methods in the target `state` block and locking out methods exclusive to previous states. |
 | **`__init__(self, ...)`** | Constructor | Automatically invoked when instantiating `ClassName(...)` (also supports `constructor(self, ...)` or a method matching `ClassName`). |
 
-### 5.12 `ClassNode` (`PilotClassNode` Generative AST Reflection)
+### 5.15 `ClassNode` (`PilotClassNode` Generative AST Reflection)
 Implemented in [`pilot-ast`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-ast) and [`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis). Passed as the `ast` argument to macros defined inside a class body:
 
 | Member / Method | Type | Exact Behavior |

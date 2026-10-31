@@ -214,6 +214,7 @@ impl<'a> CGenContext<'a> {
                 let t_name = self.arena.interner.resolve(SymbolId(t_node.lhs));
                 match t_name {
                     "str" | "string" => "const char*".to_string(),
+                    "list" | "List" => "PilotList*".to_string(),
                     "void" => "void".to_string(),
                     "int" | "i64" => "int64_t".to_string(),
                     "i32" => "int32_t".to_string(),
@@ -411,6 +412,7 @@ impl<'a> CGenContext<'a> {
                         TypeKind::Primitive(p) if p == "float" => "double",
                         TypeKind::Primitive(p) if p == "bool" => "bool",
                         TypeKind::Primitive(p) if p == "str" => "const char*",
+                        TypeKind::Collection { .. } => "PilotList*",
                         _ => "int64_t",
                     }
                 }
@@ -613,7 +615,371 @@ impl<'a> CGenContext<'a> {
                 }
             }
         }
+        if node.node_kind() == NodeKind::ListExpr {
+            return Some("PilotList*".to_string());
+        }
         None
+    }
+
+    fn infer_list_elem_type(&self, id: NodeId) -> &'static str {
+        if id.is_some() {
+            if let Some(&ty) = self.analysis.inferred_types.get(&id.0) {
+                let pruned = self.analysis.types.prune(ty);
+                if let TypeKind::Collection { element, .. } = self.analysis.types.get(pruned).clone() {
+                    let elem_pruned = self.analysis.types.prune(element);
+                    if elem_pruned == TypeId::STR || matches!(self.analysis.types.get(elem_pruned), TypeKind::Primitive(p) if p == "str" || p == "string") {
+                        return "const char*";
+                    }
+                    if elem_pruned == TypeId::F64 || elem_pruned == TypeId::F32 || matches!(self.analysis.types.get(elem_pruned), TypeKind::Primitive(p) if p == "float" || p == "f64" || p == "f32") {
+                        return "double";
+                    }
+                }
+            }
+        }
+        "int64_t"
+    }
+
+    fn is_string_expr(&self, id: NodeId, code: &str) -> bool {
+        if code.starts_with('"')
+            || code.contains("((const char*)")
+            || code.contains("(char*)")
+            || code.contains("pilot_rt_str_concat")
+            || code.contains("pilot_rt_str_to_upper")
+            || code.contains("pilot_rt_str_to_lower")
+            || code.contains("pilot_rt_str_trim")
+            || code.contains("pilot_rt_str_replace")
+            || code.contains("pilot_rt_str_substring")
+            || code.contains("pilot_rt_str_repeat")
+            || code.contains("pilot_rt_str_pad_")
+            || code.contains("pilot_rt_str_char_at")
+            || code.contains("pilot_rt_list_join")
+            || code.contains("pilot_rt_int_to_str")
+            || code.contains("pilot_rt_float_to_str")
+            || code.contains("pilot_rt_bool_to_str")
+            || code.contains("pilot_rt_list_to_str")
+            || code.contains("pilot_rt_int_to_hex")
+            || code.contains("pilot_rt_int_to_bin")
+        {
+            return true;
+        }
+        if id.is_some() {
+            if let Some(&ty) = self.analysis.inferred_types.get(&id.0) {
+                let mut pruned = self.analysis.types.prune(ty);
+                if let TypeKind::Option(inner) = *self.analysis.types.get(pruned) {
+                    pruned = self.analysis.types.prune(inner);
+                }
+                if pruned == TypeId::STR {
+                    return true;
+                }
+                if matches!(self.analysis.types.get(pruned), TypeKind::Primitive(p) if p == "str" || p == "string") {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn is_float_expr(&self, id: NodeId, code: &str) -> bool {
+        if code.contains("pilot_rt_str_to_float") || code.contains("pilot_rt_float_") || code.starts_with("round(") || code.starts_with("floor(") || code.starts_with("ceil(") || code.starts_with("sqrt(") {
+            return true;
+        }
+        if id.is_some() {
+            if let Some(&ty) = self.analysis.inferred_types.get(&id.0) {
+                if ty == TypeId::F64 || ty == TypeId::F32 {
+                    return true;
+                }
+                let pruned = self.analysis.types.prune(ty);
+                if matches!(self.analysis.types.get(pruned), TypeKind::Primitive(p) if p == "float" || p == "f64" || p == "f32") {
+                    return true;
+                }
+            }
+        }
+        code.contains('.') && !code.starts_with('"') && !code.contains("pilot_rt_")
+    }
+
+    fn is_bool_expr(&self, id: NodeId, code: &str) -> bool {
+        if code == "true"
+            || code == "false"
+            || code.contains("pilot_rt_str_starts_with")
+            || code.contains("pilot_rt_str_ends_with")
+            || code.contains("pilot_rt_str_contains")
+            || code.contains("pilot_rt_str_is_")
+            || code.contains("pilot_rt_list_contains")
+        {
+            return true;
+        }
+        if id.is_some() {
+            if let Some(&ty) = self.analysis.inferred_types.get(&id.0) {
+                if ty == TypeId::BOOL {
+                    return true;
+                }
+                let pruned = self.analysis.types.prune(ty);
+                if matches!(self.analysis.types.get(pruned), TypeKind::Primitive(p) if p == "bool") {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn is_list_expr(&self, id: NodeId, code: &str) -> bool {
+        if code.starts_with("PILOT_LIST_OF") || code.starts_with("pilot_rt_list_") || code.contains("pilot_rt_str_split") || code.contains("pilot_rt_str_chars") {
+            return true;
+        }
+        if id.is_some() {
+            if let Some(&ty) = self.analysis.inferred_types.get(&id.0) {
+                let pruned = self.analysis.types.prune(ty);
+                if matches!(self.analysis.types.get(pruned), TypeKind::Collection { .. }) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn to_string_c_code(&self, id: NodeId, code: &str) -> String {
+        if self.is_string_expr(id, code) {
+            code.to_string()
+        } else if self.is_float_expr(id, code) {
+            format!("pilot_rt_float_to_str({})", code)
+        } else if self.is_bool_expr(id, code) {
+            format!("pilot_rt_bool_to_str({})", code)
+        } else if self.is_list_expr(id, code) {
+            format!("pilot_rt_list_to_str({})", code)
+        } else {
+            format!("pilot_rt_int_to_str((int64_t)({}))", code)
+        }
+    }
+
+    fn emit_member_method_call(&self, target_id: NodeId, target_code: &str, member_name: &str, args: &[String]) -> Option<String> {
+        match member_name {
+            "split" => {
+                let sep = args.get(0).map(|s| s.as_str()).unwrap_or("\"\"");
+                Some(format!("pilot_rt_str_split({}, {})", target_code, sep))
+            }
+            "join" | "Join" => {
+                if self.is_list_expr(target_id, target_code) {
+                    let sep = args.get(0).map(|s| s.as_str()).unwrap_or("\"\"");
+                    Some(format!("pilot_rt_list_join({}, {})", target_code, sep))
+                } else {
+                    let list_arg = args.get(0).map(|s| s.as_str()).unwrap_or("NULL");
+                    Some(format!("pilot_rt_list_join({}, {})", list_arg, target_code))
+                }
+            }
+            "replace" | "Replace" => {
+                let old_s = args.get(0).map(|s| s.as_str()).unwrap_or("\"\"");
+                let new_s = args.get(1).map(|s| s.as_str()).unwrap_or("\"\"");
+                Some(format!("pilot_rt_str_replace({}, {}, {})", target_code, old_s, new_s))
+            }
+            "trim" | "Trim" => Some(format!("pilot_rt_str_trim({})", target_code)),
+            "trim_start" | "trim_left" | "TrimStart" => Some(format!("pilot_rt_str_trim_start({})", target_code)),
+            "trim_end" | "trim_right" | "TrimEnd" => Some(format!("pilot_rt_str_trim_end({})", target_code)),
+            "to_upper" | "ToUpper" => Some(format!("pilot_rt_str_to_upper({})", target_code)),
+            "to_lower" | "ToLower" => Some(format!("pilot_rt_str_to_lower({})", target_code)),
+            "starts_with" | "StartsWith" => {
+                let pre = args.get(0).map(|s| s.as_str()).unwrap_or("\"\"");
+                Some(format!("pilot_rt_str_starts_with({}, {})", target_code, pre))
+            }
+            "ends_with" | "EndsWith" => {
+                let suf = args.get(0).map(|s| s.as_str()).unwrap_or("\"\"");
+                Some(format!("pilot_rt_str_ends_with({}, {})", target_code, suf))
+            }
+            "contains" | "Contains" => {
+                let item = args.get(0).map(|s| s.as_str()).unwrap_or("\"\"");
+                if self.is_list_expr(target_id, target_code) {
+                    Some(format!("pilot_rt_list_contains({}, (void*)(intptr_t)({}))", target_code, item))
+                } else {
+                    Some(format!("pilot_rt_str_contains({}, {})", target_code, item))
+                }
+            }
+            "index_of" | "IndexOf" => {
+                let item = args.get(0).map(|s| s.as_str()).unwrap_or("\"\"");
+                if self.is_list_expr(target_id, target_code) {
+                    Some(format!("pilot_rt_list_index_of({}, (void*)(intptr_t)({}))", target_code, item))
+                } else {
+                    Some(format!("pilot_rt_str_index_of({}, {})", target_code, item))
+                }
+            }
+            "last_index_of" | "LastIndexOf" => {
+                let item = args.get(0).map(|s| s.as_str()).unwrap_or("\"\"");
+                Some(format!("pilot_rt_str_last_index_of({}, {})", target_code, item))
+            }
+            "substring" | "Substring" => {
+                let start = args.get(0).map(|s| s.as_str()).unwrap_or("0LL");
+                let count = args.get(1).map(|s| s.as_str()).unwrap_or("0LL");
+                Some(format!("pilot_rt_str_substring({}, {}, {})", target_code, start, count))
+            }
+            "slice" | "Slice" => {
+                let start = args.get(0).map(|s| s.as_str()).unwrap_or("0LL");
+                let count = args.get(1).map(|s| s.as_str()).unwrap_or("0LL");
+                if self.is_list_expr(target_id, target_code) {
+                    Some(format!("pilot_rt_list_slice({}, {}, {})", target_code, start, count))
+                } else {
+                    Some(format!("pilot_rt_str_substring({}, {}, {})", target_code, start, count))
+                }
+            }
+            "repeat" => {
+                let count = args.get(0).map(|s| s.as_str()).unwrap_or("1LL");
+                Some(format!("pilot_rt_str_repeat({}, {})", target_code, count))
+            }
+            "pad_start" | "PadStart" => {
+                let target_len = args.get(0).map(|s| s.as_str()).unwrap_or("0LL");
+                let pad_char = args.get(1).map(|s| s.as_str()).unwrap_or("\" \"");
+                Some(format!("pilot_rt_str_pad_start({}, {}, {})", target_code, target_len, pad_char))
+            }
+            "pad_end" | "PadEnd" => {
+                let target_len = args.get(0).map(|s| s.as_str()).unwrap_or("0LL");
+                let pad_char = args.get(1).map(|s| s.as_str()).unwrap_or("\" \"");
+                Some(format!("pilot_rt_str_pad_end({}, {}, {})", target_code, target_len, pad_char))
+            }
+            "is_digit" | "IsDigit" => Some(format!("pilot_rt_str_is_digit({})", target_code)),
+            "is_alpha" | "IsAlpha" => Some(format!("pilot_rt_str_is_alpha({})", target_code)),
+            "is_alphanumeric" | "IsAlphanumeric" => Some(format!("pilot_rt_str_is_alphanumeric({})", target_code)),
+            "char_at" | "CharAt" => {
+                let idx = args.get(0).map(|s| s.as_str()).unwrap_or("0LL");
+                Some(format!("pilot_rt_str_char_at({}, {})", target_code, idx))
+            }
+            "chars" | "Chars" => Some(format!("pilot_rt_str_chars({})", target_code)),
+            "is_empty" | "IsEmpty" => {
+                if self.is_list_expr(target_id, target_code) {
+                    Some(format!("((({}) == NULL) || (((PilotList*)({}))->len == 0))", target_code, target_code))
+                } else {
+                    Some(format!("pilot_rt_str_is_empty({})", target_code))
+                }
+            }
+            "len" | "length" | "Length" | "count" => {
+                if self.is_list_expr(target_id, target_code) {
+                    Some(format!("((({}) != NULL) ? (int64_t)(((PilotList*)({}))->len) : 0LL)", target_code, target_code))
+                } else {
+                    Some(format!("pilot_rt_str_len({})", target_code))
+                }
+            }
+            "append" | "push" | "add" => {
+                let item = args.get(0).map(|s| s.as_str()).unwrap_or("0LL");
+                Some(format!("pilot_rt_list_push({}, (void*)(intptr_t)({}))", target_code, item))
+            }
+            "pop" => {
+                let elem_ty = self.infer_list_elem_type(target_id);
+                if elem_ty == "const char*" {
+                    Some(format!("((const char*)pilot_rt_list_pop({}))", target_code))
+                } else if elem_ty == "double" {
+                    Some(format!("(*((double*)&(pilot_rt_list_pop({}))))", target_code))
+                } else {
+                    Some(format!("((int64_t)(intptr_t)pilot_rt_list_pop({}))", target_code))
+                }
+            }
+            "insert" => {
+                let idx = args.get(0).map(|s| s.as_str()).unwrap_or("0LL");
+                let item = args.get(1).map(|s| s.as_str()).unwrap_or("0LL");
+                Some(format!("pilot_rt_list_insert({}, {}, (void*)(intptr_t)({}))", target_code, idx, item))
+            }
+            "remove" => {
+                let idx = args.get(0).map(|s| s.as_str()).unwrap_or("0LL");
+                let elem_ty = self.infer_list_elem_type(target_id);
+                if elem_ty == "const char*" {
+                    Some(format!("((const char*)pilot_rt_list_remove({}, {}))", target_code, idx))
+                } else {
+                    Some(format!("((int64_t)(intptr_t)pilot_rt_list_remove({}, {}))", target_code, idx))
+                }
+            }
+            "clear" => Some(format!("pilot_rt_list_clear({})", target_code)),
+            "reverse" => Some(format!("pilot_rt_list_reverse({})", target_code)),
+            "first" => {
+                let elem_ty = self.infer_list_elem_type(target_id);
+                if elem_ty == "const char*" {
+                    Some(format!("((const char*)pilot_rt_list_first({}))", target_code))
+                } else {
+                    Some(format!("((int64_t)(intptr_t)pilot_rt_list_first({}))", target_code))
+                }
+            }
+            "last" => {
+                let elem_ty = self.infer_list_elem_type(target_id);
+                if elem_ty == "const char*" {
+                    Some(format!("((const char*)pilot_rt_list_last({}))", target_code))
+                } else {
+                    Some(format!("((int64_t)(intptr_t)pilot_rt_list_last({}))", target_code))
+                }
+            }
+            "abs" | "Abs" => {
+                if self.is_float_expr(target_id, target_code) {
+                    Some(format!("pilot_rt_float_abs({})", target_code))
+                } else {
+                    Some(format!("pilot_rt_int_abs({})", target_code))
+                }
+            }
+            "clamp" | "Clamp" => {
+                if self.is_float_expr(target_id, target_code) {
+                    let min_v = args.get(0).map(|s| s.as_str()).unwrap_or("0.0");
+                    let max_v = args.get(1).map(|s| s.as_str()).unwrap_or("0.0");
+                    Some(format!("pilot_rt_float_clamp({}, {}, {})", target_code, min_v, max_v))
+                } else {
+                    let min_v = args.get(0).map(|s| s.as_str()).unwrap_or("0LL");
+                    let max_v = args.get(1).map(|s| s.as_str()).unwrap_or("0LL");
+                    Some(format!("pilot_rt_int_clamp({}, {}, {})", target_code, min_v, max_v))
+                }
+            }
+            "min" | "Min" => {
+                let other = args.get(0).map(|s| s.as_str()).unwrap_or("0LL");
+                if self.is_float_expr(target_id, target_code) {
+                    Some(format!("pilot_rt_float_min({}, {})", target_code, other))
+                } else {
+                    Some(format!("pilot_rt_int_min({}, {})", target_code, other))
+                }
+            }
+            "max" | "Max" => {
+                let other = args.get(0).map(|s| s.as_str()).unwrap_or("0LL");
+                if self.is_float_expr(target_id, target_code) {
+                    Some(format!("pilot_rt_float_max({}, {})", target_code, other))
+                } else {
+                    Some(format!("pilot_rt_int_max({}, {})", target_code, other))
+                }
+            }
+            "round" | "Round" => Some(format!("round({})", target_code)),
+            "floor" | "Floor" => Some(format!("floor({})", target_code)),
+            "ceil" | "Ceil" => Some(format!("ceil({})", target_code)),
+            "trunc" | "Trunc" => Some(format!("trunc({})", target_code)),
+            "sqrt" | "Sqrt" => Some(format!("sqrt({})", target_code)),
+            "pow" | "Pow" => {
+                let exp = args.get(0).map(|s| s.as_str()).unwrap_or("1.0");
+                Some(format!("pow({}, {})", target_code, exp))
+            }
+            "to_string" | "to_str" | "ToString" => {
+                if self.is_float_expr(target_id, target_code) {
+                    Some(format!("pilot_rt_float_to_str({})", target_code))
+                } else if self.is_bool_expr(target_id, target_code) {
+                    Some(format!("pilot_rt_bool_to_str({})", target_code))
+                } else if self.is_string_expr(target_id, target_code) {
+                    Some(target_code.to_string())
+                } else if self.is_list_expr(target_id, target_code) {
+                    Some(format!("pilot_rt_list_to_str({})", target_code))
+                } else {
+                    Some(format!("pilot_rt_int_to_str({})", target_code))
+                }
+            }
+            "to_int" | "ToInt" => {
+                if self.is_string_expr(target_id, target_code) {
+                    Some(format!("pilot_rt_str_to_int({})", target_code))
+                } else if self.is_float_expr(target_id, target_code) {
+                    Some(format!("((int64_t)({}))", target_code))
+                } else {
+                    Some(target_code.to_string())
+                }
+            }
+            "to_float" | "ToFloat" => {
+                if self.is_string_expr(target_id, target_code) {
+                    Some(format!("pilot_rt_str_to_float({})", target_code))
+                } else if !self.is_float_expr(target_id, target_code) {
+                    Some(format!("((double)({}))", target_code))
+                } else {
+                    Some(target_code.to_string())
+                }
+            }
+            "to_hex" | "ToHex" => Some(format!("pilot_rt_int_to_hex({})", target_code)),
+            "to_bin" => Some(format!("pilot_rt_int_to_bin({})", target_code)),
+            "bit_length" | "BitLength" => Some(format!("pilot_rt_int_bit_length({})", target_code)),
+            "toggle" | "Toggle" => Some(format!("(!({}))", target_code)),
+            _ => None,
+        }
     }
 
     fn is_pointer_expr(&self, expr: &str) -> bool {
@@ -671,8 +1037,10 @@ impl<'a> CGenContext<'a> {
                         "float*"
                     } else if expr_code.starts_with("(int64_t*)") || expr_code.starts_with("(int*)") || expr_code.starts_with("(long long*)") {
                         "int64_t*"
-                    } else if expr_code.contains("malloc") || expr_code.contains("calloc") || expr_code.contains("(char**)") || expr_code.contains("strstr(") {
+                    } else if expr_code.contains("malloc") || expr_code.contains("calloc") || expr_code.contains("(char**)") || expr_code.contains("strstr(") || expr_code.contains("pilot_rt_str_") || expr_code.contains("pilot_rt_list_join") || expr_code.contains("pilot_rt_int_to_str") || expr_code.contains("pilot_rt_float_to_str") {
                         "char*"
+                    } else if expr_code.starts_with("PILOT_LIST_OF") || expr_code.starts_with("pilot_rt_list_") || expr_code.starts_with("pilot_rt_str_split") || expr_code.starts_with("pilot_rt_str_chars") {
+                        "PilotList*"
                     } else if expr_code.starts_with("(void*[])") || expr_code.starts_with("(int64_t[])") || expr_code.starts_with("(double[])") || expr_code.contains("pilot_rt_slice_") {
                         "void*"
                     } else if expr_code.contains("fopen(") || name.ends_with("_fp") || name.contains("fp") {
@@ -715,6 +1083,17 @@ impl<'a> CGenContext<'a> {
                 }
             }
             NodeKind::AssignStmt => {
+                let lhs_node = *self.arena.node(NodeId(node.lhs));
+                if lhs_node.node_kind() == NodeKind::IndexExpr {
+                    let target_id = NodeId(lhs_node.lhs);
+                    let target = self.emit_expr(target_id);
+                    let idx = self.emit_expr(NodeId(lhs_node.rhs));
+                    let rhs_code = self.emit_expr(NodeId(node.rhs));
+                    if self.is_list_expr(target_id, &target) {
+                        writeln!(&mut self.out, "{}pilot_rt_list_set({}, {}, (void*)(intptr_t)({}));", ind, target, idx, rhs_code).unwrap();
+                        return;
+                    }
+                }
                 let lhs_code = self.emit_expr(NodeId(node.lhs));
                 let rhs_code = self.emit_expr(NodeId(node.rhs));
                 writeln!(&mut self.out, "{}{} = {};", ind, lhs_code, rhs_code).unwrap();
@@ -972,11 +1351,17 @@ impl<'a> CGenContext<'a> {
                 let child_ids = self.arena.children_slice(node.lhs, node.rhs);
                 let items: Vec<String> = child_ids.iter().map(|&id| self.emit_expr(NodeId(id))).collect();
                 if items.is_empty() {
-                    "0LL".to_string()
+                    "pilot_rt_list_new()".to_string()
                 } else {
-                    let is_float = items.iter().any(|s| s.contains('.'));
-                    let elem_ty = if is_float { "double" } else { "int64_t" };
-                    format!("({}[]){{ {} }}", elem_ty, items.join(", "))
+                    let wrapped_items: Vec<String> = items.iter().enumerate().map(|(idx, it)| {
+                        let cid = NodeId(child_ids[idx]);
+                        if self.is_string_expr(cid, it) {
+                            format!("(void*)({})", it)
+                        } else {
+                            format!("(void*)(intptr_t)({})", it)
+                        }
+                    }).collect();
+                    format!("PILOT_LIST_OF({})", wrapped_items.join(", "))
                 }
             }
             NodeKind::LambdaExpr => "0LL".to_string(),
@@ -1006,6 +1391,15 @@ impl<'a> CGenContext<'a> {
                     20 => ">>",
                     _ => "+",
                 };
+                if op == "+" {
+                    let lhs_id = NodeId(node.lhs);
+                    let rhs_id = NodeId(node.rhs);
+                    if self.is_string_expr(lhs_id, &lhs) || self.is_string_expr(rhs_id, &rhs) {
+                        let s_lhs = self.to_string_c_code(lhs_id, &lhs);
+                        let s_rhs = self.to_string_c_code(rhs_id, &rhs);
+                        return format!("pilot_rt_str_concat({}, {})", s_lhs, s_rhs);
+                    }
+                }
                 format!("({} {} {})", lhs, op, rhs)
             }
             NodeKind::UnaryExpr => {
@@ -1025,12 +1419,26 @@ impl<'a> CGenContext<'a> {
                 let arg_start = node.lhs as usize;
                 let arg_len = node.rhs as usize;
                 let callee_id = NodeId(self.arena.extra_children[arg_start]);
-                let callee_code = self.emit_expr(callee_id);
 
                 let mut args = Vec::new();
                 for &arg_id in &self.arena.extra_children[arg_start + 1..arg_start + arg_len] {
                     args.push(self.emit_expr(NodeId(arg_id)));
                 }
+
+                // Handle call on MemberExpr (method calls)
+                if self.arena.node(callee_id).node_kind() == NodeKind::MemberExpr {
+                    let member_node = *self.arena.node(callee_id);
+                    let target_id = NodeId(member_node.lhs);
+                    let member_sym = SymbolId(member_node.rhs);
+                    let member_name = self.arena.interner.resolve(member_sym);
+                    let target_code = self.emit_expr(target_id);
+
+                    if let Some(emitted) = self.emit_member_method_call(target_id, &target_code, member_name, &args) {
+                        return emitted;
+                    }
+                }
+
+                let callee_code = self.emit_expr(callee_id);
 
                 // Handle call-quoting (Milestone 38)
                 if node.flags == CallQuoteKind::SymbolicAdjoint as u16 {
@@ -1045,10 +1453,18 @@ impl<'a> CGenContext<'a> {
                         if args.is_empty() {
                             "printf(\"\\n\")".to_string()
                         } else if args.len() == 1 {
-                            if args[0].starts_with('"') {
-                                format!("printf(\"%s\\n\", {})", args[0])
+                            let arg = &args[0];
+                            let arg_id = NodeId(self.arena.extra_children[arg_start + 1]);
+                            if self.is_string_expr(arg_id, arg) {
+                                format!("printf(\"%s\\n\", {})", arg)
+                            } else if self.is_bool_expr(arg_id, arg) {
+                                format!("printf(\"%s\\n\", ({}) ? \"true\" : \"false\")", arg)
+                            } else if self.is_float_expr(arg_id, arg) {
+                                format!("printf(\"%g\\n\", (double)({}))", arg)
+                            } else if self.is_list_expr(arg_id, arg) {
+                                format!("pilot_rt_print_list((const PilotList*)({}))", arg)
                             } else {
-                                format!("printf(\"%lld\\n\", (long long)({}))", args[0])
+                                format!("printf(\"%lld\\n\", (long long)({}))", arg)
                             }
                         } else {
                             format!("printf({}, \"\\n\")", args.join(", "))
@@ -1058,13 +1474,75 @@ impl<'a> CGenContext<'a> {
                         if args.is_empty() {
                             "printf(\"\")".to_string()
                         } else if args.len() == 1 {
-                            if args[0].starts_with('"') {
-                                format!("printf(\"%s\\n\", {})", args[0])
+                            let arg = &args[0];
+                            let arg_id = NodeId(self.arena.extra_children[arg_start + 1]);
+                            if self.is_string_expr(arg_id, arg) {
+                                format!("printf(\"%s\", {})", arg)
+                            } else if self.is_bool_expr(arg_id, arg) {
+                                format!("printf(\"%s\", ({}) ? \"true\" : \"false\")", arg)
+                            } else if self.is_float_expr(arg_id, arg) {
+                                format!("printf(\"%g\", (double)({}))", arg)
+                            } else if self.is_list_expr(arg_id, arg) {
+                                format!("{{ char* _s = pilot_rt_list_to_str((const PilotList*)({})); if (_s) {{ printf(\"%s\", _s); free(_s); }} }}", arg)
                             } else {
-                                format!("printf(\"%lld\\n\", (long long)({}))", args[0])
+                                format!("printf(\"%lld\", (long long)({}))", arg)
                             }
                         } else {
                             format!("printf({})", args.join(", "))
+                        }
+                    }
+                    "len" if args.len() == 1 => {
+                        let arg = &args[0];
+                        let arg_id = NodeId(self.arena.extra_children[arg_start + 1]);
+                        if self.is_list_expr(arg_id, arg) {
+                            format!("((({}) != NULL) ? (int64_t)(((PilotList*)({}))->len) : 0LL)", arg, arg)
+                        } else {
+                            format!("pilot_rt_str_len({})", arg)
+                        }
+                    }
+                    "abs" if args.len() == 1 => {
+                        let arg = &args[0];
+                        let arg_id = NodeId(self.arena.extra_children[arg_start + 1]);
+                        if self.is_float_expr(arg_id, arg) {
+                            format!("pilot_rt_float_abs({})", arg)
+                        } else {
+                            format!("pilot_rt_int_abs({})", arg)
+                        }
+                    }
+                    "clamp" if args.len() == 3 => {
+                        let arg = &args[0];
+                        let min_v = &args[1];
+                        let max_v = &args[2];
+                        let arg_id = NodeId(self.arena.extra_children[arg_start + 1]);
+                        if self.is_float_expr(arg_id, arg) {
+                            format!("pilot_rt_float_clamp({}, {}, {})", arg, min_v, max_v)
+                        } else {
+                            format!("pilot_rt_int_clamp({}, {}, {})", arg, min_v, max_v)
+                        }
+                    }
+                    "min" if args.len() == 2 => {
+                        format!("pilot_rt_int_min({}, {})", args[0], args[1])
+                    }
+                    "max" if args.len() == 2 => {
+                        format!("pilot_rt_int_max({}, {})", args[0], args[1])
+                    }
+                    "str" if args.len() == 1 => {
+                        self.to_string_c_code(NodeId(self.arena.extra_children[arg_start + 1]), &args[0])
+                    }
+                    "int" if args.len() == 1 => {
+                        let arg_id = NodeId(self.arena.extra_children[arg_start + 1]);
+                        if self.is_string_expr(arg_id, &args[0]) {
+                            format!("pilot_rt_str_to_int({})", args[0])
+                        } else {
+                            format!("((int64_t)({}))", args[0])
+                        }
+                    }
+                    "float" if args.len() == 1 => {
+                        let arg_id = NodeId(self.arena.extra_children[arg_start + 1]);
+                        if self.is_string_expr(arg_id, &args[0]) {
+                            format!("pilot_rt_str_to_float({})", args[0])
+                        } else {
+                            format!("((double)({}))", args[0])
                         }
                     }
                     "assert" => {
@@ -1081,18 +1559,55 @@ impl<'a> CGenContext<'a> {
                 }
             }
             NodeKind::MemberExpr => {
-                let target = self.emit_expr(NodeId(node.lhs));
+                let target_node_id = NodeId(node.lhs);
+                let target = self.emit_expr(target_node_id);
                 let member = self.arena.interner.resolve(SymbolId(node.rhs));
-                if self.is_pointer_expr(&target) {
-                    format!("{}->{}", target, member)
-                } else {
-                    format!("{}.{}", target, member)
+
+                match member {
+                    "len" | "length" | "Length" | "count" => {
+                        if self.is_list_expr(target_node_id, &target) {
+                            format!("((({}) != NULL) ? (int64_t)(((PilotList*)({}))->len) : 0LL)", target, target)
+                        } else {
+                            format!("pilot_rt_str_len({})", target)
+                        }
+                    }
+                    "is_empty" | "IsEmpty" => {
+                        if self.is_list_expr(target_node_id, &target) {
+                            format!("((({}) == NULL) || (((PilotList*)({}))->len == 0))", target, target)
+                        } else {
+                            format!("pilot_rt_str_is_empty({})", target)
+                        }
+                    }
+                    _ => {
+                        if self.is_pointer_expr(&target) {
+                            format!("{}->{}", target, member)
+                        } else {
+                            format!("{}.{}", target, member)
+                        }
+                    }
                 }
             }
             NodeKind::IndexExpr => {
-                let target = self.emit_expr(NodeId(node.lhs));
-                let idx = self.emit_expr(NodeId(node.rhs));
-                format!("{}[{}]", target, idx)
+                let target_id = NodeId(node.lhs);
+                let target = self.emit_expr(target_id);
+                let idx_id = NodeId(node.rhs);
+                let idx = self.emit_expr(idx_id);
+                if self.is_list_expr(target_id, &target) {
+                    if let Some(&ty) = self.analysis.inferred_types.get(&target_id.0) {
+                        let pruned = self.analysis.types.prune(ty);
+                        if let TypeKind::Collection { element, .. } = self.analysis.types.get(pruned).clone() {
+                            let elem_pruned = self.analysis.types.prune(element);
+                            if elem_pruned == TypeId::STR || matches!(self.analysis.types.get(elem_pruned), TypeKind::Primitive(p) if p == "str" || p == "string") {
+                                return format!("((const char*)pilot_rt_list_get({}, {}))", target, idx);
+                            }
+                        }
+                    }
+                    format!("((int64_t)(intptr_t)pilot_rt_list_get({}, {}))", target, idx)
+                } else if self.is_string_expr(target_id, &target) {
+                    format!("pilot_rt_str_char_at({}, {})", target, idx)
+                } else {
+                    format!("{}[{}]", target, idx)
+                }
             }
             NodeKind::IfExpr => {
                 let cond = self.emit_expr(NodeId(node.lhs));
