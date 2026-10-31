@@ -77,3 +77,12 @@ Thumbs.db
 .agents/.ai_index_stamp
 **/.pilc-cache/
 **/.pilc-precompiled/
+all_syntax.c
+all_syntax.cpp
+.gitignore
+.gitignore
+all_syntax.js
+all_syntax.cs
+all_syntax.lua
+all_syntax.py
+all_syntax.rs

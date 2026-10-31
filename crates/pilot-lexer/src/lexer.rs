@@ -475,6 +475,8 @@ impl<'a> Lexer<'a> {
 
         // 2-character operators
         let (kind, len) = match (b, b1) {
+            (b'&', b'&') => (TokenKind::DoubleAmper, 2),
+            (b'|', b'|') => (TokenKind::DoublePipe, 2),
             (b':', b'=') => (TokenKind::Walrus, 2),
             (b'<', b'-') => (TokenKind::ArrowLeft, 2),
             (b'-', b'>') => (TokenKind::Arrow, 2),

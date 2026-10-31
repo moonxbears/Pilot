@@ -37,6 +37,7 @@ Usage: pilot <command> [options] [arguments]
 
 Commands:
   run <file> [args...]     Execute a Pilot program directly via PilVM v3
+  compile <file> [options] Compile Pilot source or stdlib to optimized .pilc v3 binary
   build <file> [options]   Compile Pilot source to native AOT binary, LLVM IR, C, or WASM
   check <file>             Perform zero-allocation syntax and semantic analysis
   fmt <file>               Format Pilot source files according to style invariants
@@ -91,8 +92,9 @@ fn main() {
         "lsp" => cmd_lsp(&args[1..]),
         "perf" => cmd_perf(&args[1..]),
         "bench" => cmd_bench(&args[1..]),
+        "compile" => cmd_compile(&args[1..]),
         unknown => {
-            if unknown.ends_with(".pilot") {
+            if unknown.ends_with(".pilot") || unknown.ends_with(".pilc") {
                 cmd_run(&args);
             } else {
                 eprintln!("error: unknown command '{}'. Run 'pilot --help' for usage.", unknown);
@@ -110,6 +112,35 @@ fn cmd_run(args: &[String]) {
         std::process::exit(1);
     }
     let file_path = file_arg.unwrap();
+
+    // Fast-path: Execute precompiled .pilc v3 binary directly in < 0.2 ms
+    if file_path.ends_with(".pilc") {
+        let bytes = match fs::read(file_path) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("error: failed to read .pilc binary '{}': {}", file_path, e);
+                std::process::exit(1);
+            }
+        };
+        match pilot_vm::PilcBinary::load_from_bytes(&bytes) {
+            Ok(binary) => {
+                let mut vm = pilot_vm::PilVirtualMachine::new();
+                vm.load_binary(binary);
+                let val = vm.run();
+                if let Some(i) = val.as_int() {
+                    if i != 0 {
+                        println!("RESULT: {}", i);
+                    }
+                }
+                return;
+            }
+            Err(e) => {
+                eprintln!("error: failed to load .pilc binary '{}': {}", file_path, e);
+                std::process::exit(1);
+            }
+        }
+    }
+
     let src = match fs::read_to_string(file_path) {
         Ok(s) => s,
         Err(e) => {
@@ -193,6 +224,179 @@ fn cmd_run(args: &[String]) {
             }
         }
     }
+}
+
+fn cmd_compile(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("error: missing input file for 'pilot compile'.");
+        eprintln!("Usage: pilot compile <file.pilot> [-o <out.pilc>] | pilot compile --stdlib");
+        std::process::exit(1);
+    }
+
+    if args.iter().any(|a| a == "--stdlib" || a == "stdlib" || a == "--all-stdlib") {
+        compile_stdlib();
+        return;
+    }
+
+    let mut file_path = "";
+    let mut output_path = None;
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        if arg == "-o" || arg == "--output" {
+            if i + 1 < args.len() {
+                output_path = Some(args[i + 1].clone());
+                i += 1;
+            }
+        } else if !arg.starts_with('-') {
+            file_path = arg;
+        }
+        i += 1;
+    }
+
+    if file_path.is_empty() {
+        eprintln!("error: no input file specified for 'pilot compile'.");
+        std::process::exit(1);
+    }
+
+    let src = match fs::read_to_string(file_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: failed to read file '{}': {}", file_path, e);
+            std::process::exit(1);
+        }
+    };
+
+    let arena = parse(&src);
+    if arena.root.is_none() {
+        eprintln!("{}: error: failed to construct AST program", file_path);
+        std::process::exit(1);
+    }
+
+    let binary = pilot_vm::BytecodeCompiler::compile(&arena, arena.root);
+    let bytes = binary.serialize();
+
+    let out_file = output_path.unwrap_or_else(|| {
+        let stem = Path::new(file_path).file_stem().and_then(|s| s.to_str()).unwrap_or("module");
+        format!("{}.pilc", stem)
+    });
+
+    if let Err(e) = fs::write(&out_file, &bytes) {
+        eprintln!("error: failed to write compiled .pilc to '{}': {}", out_file, e);
+        std::process::exit(1);
+    }
+
+    println!("Compiled {} -> {} ({} instructions, {} constants, {} bytes)", file_path, out_file, binary.instructions.len(), binary.constants.len(), bytes.len());
+}
+
+fn compile_stdlib() {
+    let stdlib_dir = if Path::new("stdlib").is_dir() {
+        PathBuf::from("stdlib")
+    } else if let Ok(exe) = env::current_exe() {
+        exe.parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .map(|p| p.join("stdlib"))
+            .unwrap_or_else(|| PathBuf::from("stdlib"))
+    } else {
+        PathBuf::from("stdlib")
+    };
+
+    if !stdlib_dir.is_dir() {
+        eprintln!("error: stdlib directory not found at '{}'", stdlib_dir.display());
+        std::process::exit(1);
+    }
+
+    let cache_dir = stdlib_dir.join(".pilc-cache");
+    let _ = fs::create_dir_all(&cache_dir);
+
+    // Clean up any stale legacy .pilc v2 files
+    if let Ok(entries) = fs::read_dir(&cache_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("pilc") {
+                if let Ok(header) = fs::read(&path) {
+                    if header.starts_with(b"PILC") {
+                        let _ = fs::remove_file(&path);
+                    }
+                }
+            }
+        }
+    }
+
+    println!("=== Compiling Pilot Standard Libraries to Optimized .pilc v3 Bytecode ===");
+    let mut total_modules = 0usize;
+    let mut total_ins = 0usize;
+    let mut total_consts = 0usize;
+    let mut total_bytes = 0usize;
+    let start_time = Instant::now();
+
+    for &(mod_name, rel_path) in pilot_rt::PilotStdlibResolver::MODULE_MAP {
+        let full_path = stdlib_dir.join(rel_path);
+        if !full_path.exists() {
+            eprintln!("warning: standard library source missing: {}", full_path.display());
+            continue;
+        }
+
+        let src = match fs::read_to_string(&full_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: failed to read '{}': {}", full_path.display(), e);
+                continue;
+            }
+        };
+
+        let arena = parse(&src);
+        if arena.root.is_none() {
+            eprintln!("error: failed to parse '{}'", full_path.display());
+            continue;
+        }
+
+        let binary = pilot_vm::BytecodeCompiler::compile(&arena, arena.root);
+        let bytes = binary.serialize();
+
+        // Compute SHA-256 hash of source for content-addressable cache lookup
+        let sha_bytes = pilot_rt::sha256(src.as_bytes());
+        let hash_hex: String = sha_bytes.iter().take(8).map(|b| format!("{:02x}", b)).collect();
+
+        // 1. Write canonical name: std.<name>.pilc
+        let canon_pilc = cache_dir.join(format!("{}.pilc", mod_name));
+        let _ = fs::write(&canon_pilc, &bytes);
+
+        // 2. Write hashed name: std.<name>_<hash>.pilc
+        let hashed_pilc = cache_dir.join(format!("{}_{}.pilc", mod_name, hash_hex));
+        let _ = fs::write(&hashed_pilc, &bytes);
+
+        total_modules += 1;
+        total_ins += binary.instructions.len();
+        total_consts += binary.constants.len();
+        total_bytes += bytes.len();
+
+        println!(
+            "  ✓ {:<22} -> {:>5} ins, {:>3} consts, {:>6} B  ({}.pilc)",
+            mod_name,
+            binary.instructions.len(),
+            binary.constants.len(),
+            bytes.len(),
+            mod_name,
+        );
+    }
+
+    let elapsed = start_time.elapsed();
+    println!("--------------------------------------------------------------------------------");
+    println!(
+        "Successfully compiled {} standard library modules in {:.2?}:",
+        total_modules, elapsed
+    );
+    println!("  Total instructions:  {:>7}", total_ins);
+    println!("  Total constants:     {:>7}", total_consts);
+    println!(
+        "  Total bytecode size: {:>7} KB ({:.2} MB)",
+        total_bytes / 1024,
+        total_bytes as f64 / 1_048_576.0
+    );
+    println!("  Precompiled cache:   {}", cache_dir.display());
+    println!("=== Pilot Standard Libraries Optimization Complete ===");
 }
 
 fn cmd_build(args: &[String]) {

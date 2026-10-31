@@ -739,4 +739,44 @@ var arena: TransformFrame[] = [f0, f1];
         assert!(structural.starts_with("{ "));
         assert!(structural.ends_with(" }"));
     }
+
+    #[test]
+    fn test_relational_queries_and_acid_transactions() {
+        let code = r#"
+def test_queries() {
+    let users_table = [{"name": "Alice", "role": "admin", "active": true}]
+    let active_admins = from u in users_table
+        where u["active"] == true and u["role"] == "admin"
+        order by u["name"] ascending
+        select u["name"]
+
+    let engineer_names = select u["name"] from users_table as u where u["role"] == "engineer"
+
+    let combined_users = active_admins union all engineer_names
+    let intersect_users = active_admins intersect engineer_names
+    let except_users = active_admins except engineer_names
+
+    database app_db = connect("memory://")
+    transaction {
+        savepoint sp1
+        commit
+        rollback to savepoint sp1
+    }
+}
+"#;
+        let arena = pilot_parser::parse(code);
+        let result = AnalysisPipeline::analyze(&arena, arena.root);
+        assert!(result.is_ok(), "Expected clean analysis for relational queries and acid transaction, got: {:?}", result.diagnostics);
+    }
+
+    #[test]
+    fn test_all_syntax_pilot_clean_analysis() {
+        let src = std::fs::read_to_string("../../examples/all_syntax.pilot")
+            .or_else(|_| std::fs::read_to_string("examples/all_syntax.pilot"))
+            .expect("read all_syntax.pilot");
+        let arena = pilot_parser::parse(&src);
+        let result = AnalysisPipeline::analyze(&arena, arena.root);
+        let errors: Vec<_> = result.diagnostics.iter().filter(|d| d.severity == DiagnosticSeverity::Error).collect();
+        assert!(errors.is_empty(), "Expected 0 errors on all_syntax.pilot, got: {:?}", errors);
+    }
 }

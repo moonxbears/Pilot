@@ -215,6 +215,13 @@ pub struct PilotStdlibResolver;
 impl PilotStdlibResolver {
     pub const MODULES: &'static [&'static str] = &[
         "std.core",
+        "std.option",
+        "std.result",
+        "std.mem",
+        "std.meta",
+        "std.collections",
+        "std.itertools",
+        "std.text",
         "std.math",
         "std.random",
         "std.io",
@@ -224,14 +231,7 @@ impl PilotStdlibResolver {
         "std.shutil",
         "std.os",
         "std.sys",
-        "std.collections",
-        "std.itertools",
         "std.functools",
-        "std.text",
-        "std.time",
-        "std.crypto",
-        "std.encoding",
-        "std.formats",
         "std.json",
         "std.csv",
         "std.pickle",
@@ -241,6 +241,8 @@ impl PilotStdlibResolver {
         "std.threading",
         "std.multiprocessing",
         "std.asyncio",
+        "std.encoding",
+        "std.formats",
         "std.socket",
         "std.urllib",
         "std.http",
@@ -252,9 +254,58 @@ impl PilotStdlibResolver {
         "std.pandas",
         "std.matplotlib",
         "std.scikit",
+        "std.time",
+        "std.crypto",
+    ];
+
+    pub const MODULE_MAP: &'static [(&'static str, &'static str)] = &[
+        ("std.core", "core/core.pilot"),
+        ("std.option", "core/option.pilot"),
+        ("std.result", "core/result.pilot"),
+        ("std.mem", "core/mem.pilot"),
+        ("std.meta", "core/meta.pilot"),
+        ("std.collections", "collections/collections.pilot"),
+        ("std.itertools", "collections/itertools.pilot"),
+        ("std.text", "text/text.pilot"),
+        ("std.math", "math/math.pilot"),
+        ("std.random", "math/random.pilot"),
+        ("std.io", "io/io.pilot"),
+        ("std.fs", "io/fs.pilot"),
+        ("std.path", "io/path.pilot"),
+        ("std.pathlib", "io/pathlib.pilot"),
+        ("std.shutil", "io/shutil.pilot"),
+        ("std.os", "os/os.pilot"),
+        ("std.sys", "sys/sys.pilot"),
+        ("std.functools", "functools/functools.pilot"),
+        ("std.json", "json/json.pilot"),
+        ("std.csv", "csv/csv.pilot"),
+        ("std.pickle", "pickle/pickle.pilot"),
+        ("std.tomllib", "tomllib/tomllib.pilot"),
+        ("std.secrets", "secrets/secrets.pilot"),
+        ("std.decimal", "decimal/decimal.pilot"),
+        ("std.threading", "threading/threading.pilot"),
+        ("std.multiprocessing", "multiprocessing/multiprocessing.pilot"),
+        ("std.asyncio", "asyncio/asyncio.pilot"),
+        ("std.encoding", "encoding/encoding.pilot"),
+        ("std.formats", "formats/formats.pilot"),
+        ("std.socket", "socket/socket.pilot"),
+        ("std.urllib", "urllib/urllib.pilot"),
+        ("std.http", "http/http.pilot"),
+        ("std.request", "request/request.pilot"),
+        ("std.unittest", "unittest/unittest.pilot"),
+        ("std.logging", "logging/logging.pilot"),
+        ("std.timeit", "timeit/timeit.pilot"),
+        ("std.numpy", "numpy/numpy.pilot"),
+        ("std.pandas", "pandas/pandas.pilot"),
+        ("std.matplotlib", "matplotlib/matplotlib.pilot"),
+        ("std.scikit", "scikit/scikit.pilot"),
     ];
 
     pub fn is_stdlib_module(name: &str) -> bool {
         Self::MODULES.contains(&name)
+    }
+
+    pub fn get_module_relative_path(name: &str) -> Option<&'static str> {
+        Self::MODULE_MAP.iter().find(|(m, _)| *m == name).map(|(_, p)| *p)
     }
 }

@@ -760,6 +760,8 @@ impl SyntaxKind {
             TokenKind::CallQuoteReact => SyntaxKind::CallQuoteReact,
             TokenKind::CallQuoteAdjoint => SyntaxKind::CallQuoteAdjoint,
             TokenKind::CallQuoteEffect => SyntaxKind::CallQuoteEffect,
+            TokenKind::DoubleAmper => SyntaxKind::KwAnd,
+            TokenKind::DoublePipe => SyntaxKind::KwOr,
         }
     }
 

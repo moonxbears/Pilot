@@ -215,6 +215,12 @@ impl TypeInferenceEngine {
         self.define_var("default", fn_async);
         self.define_var("keyword", fn_async);
         self.define_var("defkeyword", fn_async);
+        self.define_var("quote", TypeId::ANY);
+        self.define_var("quasiquote", TypeId::ANY);
+        let fn_connect = self.types.function_of(vec![TypeId::STR], TypeId::ANY);
+        self.define_var("connect", fn_connect);
+        let fn_nameof = self.types.function_of(vec![TypeId::ANY], TypeId::STR);
+        self.define_var("nameof", fn_nameof);
         self.define_var("pure", fn_async);
         self.define_var("noalloc", fn_async);
         self.define_var("unsafe", fn_async);
@@ -939,6 +945,10 @@ impl TypeInferenceEngine {
                     // BinaryOp::Is (e.g. s is Circle(r))
                     let lhs_ty = self.synth(arena, NodeId(node.lhs));
                     let rhs = NodeId(node.rhs);
+                    if rhs.is_none() || (rhs.0 as usize) >= arena.nodes.len() {
+                        self.inferred_node_types.insert(node_id.0, TypeId::BOOL);
+                        return TypeId::BOOL;
+                    }
                     let rhs_node = *arena.node(rhs);
                     if rhs_node.node_kind() == NodeKind::CallExpr {
                         let arg_start = rhs_node.lhs as usize;
@@ -1096,6 +1106,22 @@ impl TypeInferenceEngine {
                     elem_types.push(self.synth(arena, NodeId(c)));
                 }
                 self.types.tuple_of(elem_types)
+            }
+
+            NodeKind::MapExpr if node.flags == 1 => {
+                let children = arena.children_slice(node.lhs, node.rhs);
+                let elem_ty = if let Some(&first) = children.first() {
+                    self.synth(arena, NodeId(first))
+                } else {
+                    TypeId::ANY
+                };
+                for &child in children {
+                    let _ = self.synth(arena, NodeId(child));
+                }
+                self.types.alloc(TypeKind::Collection {
+                    element: elem_ty,
+                    kind: crate::types::CollectionKind::Set,
+                })
             }
 
             NodeKind::MapExpr => {
@@ -2484,6 +2510,13 @@ impl TypeInferenceEngine {
                     self.bind_destructuring_expr(arena, NodeId(c), TypeId::ANY);
                 }
             }
+            NodeKind::MapExpr if node.flags == 1 => {
+                let children = arena.children_slice(node.lhs, node.rhs).to_vec();
+                for c in children {
+                    self.bind_destructuring_expr(arena, NodeId(c), TypeId::ANY);
+                }
+            }
+
             NodeKind::MapExpr => {
                 let children = arena.children_slice(node.lhs, node.rhs).to_vec();
                 for chunk in children.chunks(2) {

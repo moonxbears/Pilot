@@ -294,6 +294,8 @@ pub enum TokenKind {
     CallQuoteReact = 323,   // fn!^(...)
     CallQuoteAdjoint = 324, // fn!@(...)
     CallQuoteEffect = 325,  // fn!?(...)
+    DoubleAmper = 326,      // &&
+    DoublePipe = 327,       // ||
 }
 
 impl TokenKind {

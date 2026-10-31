@@ -14,7 +14,7 @@ pub mod crypto;
 pub mod time;
 pub mod net;
 
-pub use value::{PilotVal, TAG_INT, TAG_FLOAT, TAG_BOOL, TAG_SSO_STR, TAG_NULL};
+pub use value::{PilotVal, TAG_INT, TAG_FLOAT, TAG_BOOL, TAG_SSO_STR, TAG_HEAP_STR, TAG_NULL};
 pub use memory::{ArcHeader, BumpRegion, FLAG_ATOMIC};
 pub use concurrency::{Channel, ShadowEffectContext, Signal};
 pub use stdlib::{PilotDfaRegex, PilotStdlibIntrinsics, PilotStdlibResolver};
