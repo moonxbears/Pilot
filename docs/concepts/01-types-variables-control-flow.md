@@ -38,7 +38,7 @@ Pilot's core execution layer combines the approachable readability of Python and
 
 ## 3. Exact Syntax & Grammar Rules
 
-From [`Pilot.g4`](../../antlr/Pilot.g4):
+Formal Grammar Specification ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)):
 
 ```antlr
 // Variable, Constant & Type Alias Declarations

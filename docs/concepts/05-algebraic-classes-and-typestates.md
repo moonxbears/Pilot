@@ -32,7 +32,7 @@ Traditional object-oriented inheritance (`class Child : Parent`) forces rigid hi
 
 ## 3. Exact Syntax & Grammar Rules
 
-From [`Pilot.g4`](../../antlr/Pilot.g4):
+Formal Grammar Specification ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)):
 
 ```antlr
 // Standard & Algebraic Class Declarations
@@ -77,20 +77,20 @@ state_block
 
 ## 4. Runtime Execution Mechanics
 
-### 4.1 `PilotClass` & Algebraic Evaluation (`EvaluateClassExpr`)
-In [`PilotInterpreterVisitor.cs`](../../Runtime/Execution/PilotInterpreterVisitor.cs), `EvaluateClassExpr` constructs a new `PilotClass` (`Runtime/Values/PilotObject.cs`) by cloning and combining member dictionaries (`Fields`, `Methods`, `Properties`, `StateMethods`, `InitialState`, `Contracts`):
+### 4.1 Algebraic Class Evaluation
+In the class compilation and evaluation pipeline ([`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis) and [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm)), algebraic expressions construct a new class definition by combining member records:
 - **Union (`A | B`)**: Copies all members of `A`, then overlays all members of `B` (right-hand side wins on name collisions, or merges overloads). If `class U = A | B { ... }` also includes a trailing body suite, the body members are applied on top of the composed class.
 - **Difference (`A - B` or `A - "member_name"`)**: Copies all members of `A`, then removes every field, method, property, or state method present in `B` (or matching `"member_name"`).
 - **Intersection (`A & B`)**: Copies only fields, methods, properties, and state methods whose names exist in **both** `A` and `B`.
 
 ### 4.2 Typestate Enforcement & Lifecycle Transitions
-When a `PilotClass` contains one or more `state Name { ... }` blocks:
-1. **Initialization**: `PilotClass.InitialState` is set to the name of the first `state` block declared in the class. When `InstantiateClass` constructs a `PilotObject`, `instance.CurrentState = cls.InitialState`.
-2. **State-Scoped Method Storage**: Methods defined inside `state Open { ... }` are stored in `cls.StateMethods["Open"]` rather than the global `cls.Methods` table. Methods defined outside any `state` block remain available in all states.
-3. **Runtime Dispatch Verification**: When `obj.method(args)` is called on a `PilotObject` (`EvaluateObjectMember` in `PilotInterpreterVisitor.cs`):
-   - First, `cls.ResolveMethodForState(memberName, obj.CurrentState)` checks if `memberName` is an always-available method or belongs to `obj.CurrentState`.
-   - If not found, `cls.FindStatesContainingMethod(memberName)` checks if the method exists in **another** state of the class.
-   - If it exists in another state (e.g., `"Open"` while `CurrentState` is `"Closed"`), Pilot raises a descriptive `PilotTypeException` (`TypeError`):
+When a class contains one or more `state Name { ... }` blocks:
+1. **Initialization**: The initial state is set to the name of the first `state` block declared in the class. When constructing an object instance, `instance.CurrentState = cls.InitialState`.
+2. **State-Scoped Method Storage**: Methods defined inside `state Open { ... }` are stored in state-scoped dispatch tables rather than global method tables. Methods defined outside any `state` block remain available in all states.
+3. **Runtime Dispatch Verification**: When `obj.method(args)` is called on an instance:
+   - First, the runtime checks if `memberName` is an always-available method or belongs to `obj.CurrentState`.
+   - If not found, the runtime checks if the method exists in **another** state of the class.
+   - If it exists in another state (e.g., `"Open"` while `CurrentState` is `"Closed"`), Pilot raises a descriptive `TypeError`:
      `Method 'send' is only available in state(s) [Open], but object of class 'Connection' is currently in state 'Closed'.`
 
 ```mermaid

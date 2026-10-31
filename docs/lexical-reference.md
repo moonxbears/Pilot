@@ -93,7 +93,7 @@ Standard identifiers match the regular expression:
 Identifiers begin with an ASCII letter (`a`–`z`, `A`–`Z`) or underscore (`_`), followed by zero or more letters, digits (`0`–`9`), or underscores.
 
 ### 4.2 Contextual Keyword Resolution (`identifier` Rule)
-Because Pilot spans multiple domains (relational queries, real-time scheduling, concurrency, polyglot FFI, and metaprogramming), the parser rule `identifier` (lines 23–47 of [`Pilot.g4`](../antlr/Pilot.g4)) permits domain-specific keywords to also function as ordinary variable, field, parameter, and function names when used in identifier positions.
+Because Pilot spans multiple domains (relational queries, real-time scheduling, concurrency, polyglot FFI, and metaprogramming), the contextual identifier parser in [`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser) permits domain-specific keywords to also function as ordinary variable, field, parameter, and function names when used in identifier positions.
 
 **Strict Reserved Words** (tokens that are *not* part of the `identifier` fallback rule and cannot be used as variable names):
 - Control flow: `if`, `elif`, `else`, `while`, `for`, `in`, `return`, `yield`, `break`, `continue`, `pass`, `raise`, `try`, `finally`, `with`, `as`, `assert`, `import`, `global`, `lambda`

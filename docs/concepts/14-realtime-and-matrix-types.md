@@ -34,7 +34,7 @@ Pilot bridges high-level application logic with embedded, robotics, aerospace, a
 
 ## 3. Exact Syntax & Grammar Rules
 
-From [`Pilot.g4`](../../antlr/Pilot.g4):
+Formal Grammar Specification ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)):
 
 ```antlr
 // 1. Hard & Soft Real-Time Blocks
@@ -72,8 +72,8 @@ primary_type
 
 ## 4. Runtime Execution Mechanics
 
-### 4.1 Dimensional Literal Normalization (`ParseDurationMs`, `ParseFrequencyHz`, `ParseMemoryBytes`)
-In [`PilotInterpreterVisitor.cs`](../../Runtime/Execution/PilotInterpreterVisitor.cs):
+### 4.1 Dimensional Literal Normalization
+In the lexer and parser frontend ([`pilot-lexer`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-lexer) and [`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)):
 - **`DURATION_LITERAL`**: Normalized to **milliseconds (`float`)**:
   - `1000ns` → `0.001`, `500us` → `0.5`, `25ms` → `25.0`, `2s` → `2000.0`, `1min` → `60000.0`, `1h` → `3600000.0`.
 - **`FREQUENCY_LITERAL`**: Normalized to **Hertz (`float`)**:
@@ -81,19 +81,19 @@ In [`PilotInterpreterVisitor.cs`](../../Runtime/Execution/PilotInterpreterVisito
 - **`MEMORY_LITERAL`**: Normalized to **exact bytes (`int` / `long`)** using binary powers of `1024`:
   - `512B` → `512`, `64KB` → `65536`, `16MB` → `16777216`, `2GB` → `2147483648`, `1TB` → `1099511627776`.
 
-### 4.2 Real-Time Block Execution (`VisitRealtime_block`) & Bounded Loops
-- **`deadline <ms> { ... } on_missed { ... }`**: Measures high-resolution elapsed time around the body using `Stopwatch.GetTimestamp()`. If elapsed milliseconds exceed the deadline budget and an `on_missed` suite is present, the `on_missed` recovery block is immediately executed.
-- **`within <ms> { ... } fallback { ... }`**: Executes the primary block; if elapsed time exceeds the budget or a `PilotTimeoutException` is thrown, executes the `fallback` / `on_missed` / `timeout` block.
-- **`bounded(max_iters) while` / `for`**: Maintains an iteration counter on the loop. If iterations exceed `max_iters` (default `10,000` when `(N)` is omitted), raises a catchable `PilotTimeoutException` (`TimeoutError`: `"Bounded loop exceeded maximum iteration count"`).
+### 4.2 Real-Time Block Execution & Bounded Loops
+- **`deadline <ms> { ... } on_missed { ... }`**: Measures high-resolution elapsed time around the body using monotonic timers. If elapsed milliseconds exceed the deadline budget and an `on_missed` suite is present, the `on_missed` recovery block is immediately executed.
+- **`within <ms> { ... } fallback { ... }`**: Executes the primary block; if elapsed time exceeds the budget or a `TimeoutError` is thrown, executes the fallback recovery block.
+- **`bounded(max_iters) while` / `for`**: Maintains an iteration counter on the loop. If iterations exceed `max_iters` (default `10,000` when `(N)` is omitted), raises a catchable `TimeoutError` (`"Bounded loop exceeded maximum iteration count"`).
 
-### 4.3 Sized Bit-Width Primitives & `PilotMatrix` Operations
-- **Sized Primitives (`PilotValue.cs`)**:
-  - `i8` (`sbyte`), `i16` (`short`), `i32` (`int`), `i64` (`long`)
-  - `u8` (`byte`), `u16` (`ushort`), `u32` (`uint`), `u64` (`ulong`)
-  - `f8` (8-bit quantized float rounded to 3 digits), `f16` (`System.Half`), `f32` (`float`), `f64` (`double`)
-  - Arithmetic between two identically-sized primitives preserves the exact `PilotValueKind` (`u8 + u8 -> u8`, `f32 * f32 -> f32`) via `WrapArithmeticResult`.
-- **Contiguous 2D Matrices (`PilotMatrix.cs`)**:
-  - Backed by a flat row-major `double[] Data` array of size `Rows * Cols` and an `ElementType` (`"f64"`, `"f32"`, `"i32"`, etc.).
+### 4.3 Sized Bit-Width Primitives & Matrix Operations
+- **Sized Primitives ([`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt))**:
+  - `i8`, `i16`, `i32`, `i64`
+  - `u8`, `u16`, `u32`, `u64`
+  - `f8`, `f16`, `f32`, `f64`
+  - Arithmetic between two identically-sized primitives preserves the exact bit width (`u8 + u8 -> u8`, `f32 * f32 -> f32`).
+- **Contiguous 2D Matrices ([`std.numpy`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/numpy/numpy.pilot) & [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt))**:
+  - Backed by a flat row-major array of size `Rows * Cols` and an element type (`"f64"`, `"f32"`, `"i32"`, etc.).
   - Supports 2D indexing (`m[r, c]` and `m[r, c] = val`), 1D row slicing (`m[r]` returns row `r` as a `list`), matrix addition (`A + B`), matrix subtraction (`A - B`), matrix dot-product multiplication (`A * B` where `A.Cols == B.Rows`), and scalar multiplication (`A * k` or `k * A`).
 
 ---

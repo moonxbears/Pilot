@@ -32,7 +32,7 @@ Pilot embraces Lisp's **"Code is Data, Data is Code"** philosophy while preservi
 
 ## 3. Exact Syntax & Grammar Rules
 
-From [`Pilot.g4`](../../antlr/Pilot.g4):
+Formal Grammar Specification ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)):
 
 ```antlr
 // 1. Macro Declarations & Macro Invocation (name!(args))
@@ -77,22 +77,22 @@ dsl_block
 ## 4. Runtime Execution Mechanics
 
 ### 4.1 S-Expression Lists & Dynamic `eval(code)`
-In [`PilotBuiltinRegistry.cs`](../../Runtime/Builtins/PilotBuiltinRegistry.cs) and [`PilotInterpreterVisitor.cs`](../../Runtime/Execution/PilotInterpreterVisitor.cs):
+In the metaprogramming runtime ([`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm) and [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt)):
 - **Cells & Lists**: `cons(head, tail)` prepends `head` to a `list` `tail` (or creates a 2-element pair `[head, tail]`). `car(list)` returns `list[0]` (or `none` if empty), and `cdr(list)` returns `list[1..]` as a new `list`.
-- **Atoms & Symbols**: `atom(x)` returns `true` for any scalar (`int`, `float`, `bool`, `str`, `symbol`, `none`) or empty list `[]`, and `false` for non-empty lists. `:name` and `symbol("name")` create `PilotValue` instances with `Kind == PilotValueKind.Symbol`. `gensym(prefix?)` uses an atomic counter (`Interlocked.Increment`) to produce collision-free symbols (`:G__1`, `:G__2`).
-- **Live `eval(code)`**: Invoking `eval(str_or_quote)` parses and executes the Pilot expression or statement block inside the caller's live `PilotExecutionContext` via `Context.Engine.EvaluateExpression(src, Context)`.
+- **Atoms & Symbols**: `atom(x)` returns `true` for any scalar (`int`, `float`, `bool`, `str`, `symbol`, `none`) or empty list `[]`, and `false` for non-empty lists. `:name` and `symbol("name")` create symbol values. `gensym(prefix?)` uses an atomic counter to produce collision-free symbols (`:G__1`, `:G__2`).
+- **Live `eval(code)`**: Invoking `eval(str_or_quote)` parses and executes the Pilot expression or statement block inside the caller's live execution context.
 
-### 4.2 Quoting, Quasiquoting & Unquote Substitution (`SubstituteUnquotes`)
-In `VisitQuote_expr` (`PilotInterpreterVisitor.cs`):
+### 4.2 Quoting, Quasiquoting & Unquote Substitution
+In the AST expression evaluator:
 - **`quote(expr)`**: Returns the raw source representation of `expr` without evaluating it.
-- **`quasiquote(expr)` / `` `(expr) ``**: Walks the source text via `SubstituteUnquotes`:
+- **`quasiquote(expr)` / `` `(expr) ``**: Evaluates substitutions:
   - Every `$var`, `$(expr)`, `unquote(expr)`, or `splice(expr)` is evaluated in the current scope and formatted into the code template.
   - Every `$@list` or `unquote_splicing(list)` evaluates the list and splices its comma-separated elements directly into the template.
 
-### 4.3 Universal Root Object Dispatch (`TryEvaluateUniversalRootMethod`)
-Before checking type-specific methods on **any** `PilotValue`, `EvaluatePostfix` checks `TryEvaluateUniversalRootMethod`:
-- Every value (`42`, `"hello"`, `[1, 2]`, `{"a": 1}`, or custom `Class` instance) responds to `.to_string()`, `.type_of()`, `.hash()`, `.clone()`, `.equals(other)`, and `.to_json()`.
-- On custom `PilotObject` instances, if the class defines its own `to_string`, `equals`, or `hash` method (or delegates `IEquatable`), the class's implementation is invoked; otherwise, Pilot falls back to the structural Universal Root Object implementation (`CloneValue` deep-copies fields/collections; `SerializeToJson` recursively emits RFC 8259 JSON).
+### 4.3 Universal Root Object Dispatch
+Before checking type-specific methods on any value, the runtime checks universal root methods:
+- Every value (`42`, `"hello"`, `[1, 2]`, `{"a": 1}`, or custom class instance) responds to `.to_string()`, `.type_of()`, `.hash()`, `.clone()`, `.equals(other)`, and `.to_json()`.
+- On custom class instances, if the class defines its own `to_string`, `equals`, or `hash` method (or delegates `IEquatable`), the class's implementation is invoked; otherwise, Pilot falls back to the structural Universal Root Object implementation (deep-copying fields/collections and recursively emitting RFC 8259 JSON).
 
 ---
 

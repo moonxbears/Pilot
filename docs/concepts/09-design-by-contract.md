@@ -27,7 +27,7 @@ Pilot unifies Eiffel-style **Design-by-Contract (DbC)** with zero-boilerplate **
 
 ## 3. Exact Syntax & Grammar Rules
 
-From [`Pilot.g4`](../../antlr/Pilot.g4):
+Formal Grammar Specification ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)):
 
 ```antlr
 // 1. Preconditions & Postconditions on Functions/Methods
@@ -59,8 +59,8 @@ steal_stmt
 
 ## 4. Runtime Execution Mechanics
 
-### 4.1 Preconditions, `old(expr)` Snapshots & Postconditions (`CallFunction`)
-In [`PilotInterpreterVisitor.cs`](../../Runtime/Execution/PilotInterpreterVisitor.cs), every call to a `PilotFunction` with `RequiresClauses` or `EnsuresClauses` executes a strict 4-step protocol:
+### 4.1 Preconditions, `old(expr)` Snapshots & Postconditions
+In [`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis) and [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm), every call to a function with `requires` or `ensures` clauses executes a strict 5-step protocol:
 
 ```mermaid
 sequenceDiagram
@@ -77,8 +77,8 @@ sequenceDiagram
     Frame-->>Caller: Return returnValue (or raise ContractError if ensures failed)
 ```
 
-### 4.2 Built-In Standard Contracts (`PilotContractRegistry`)
-[`PilotContractRegistry.cs`](../../Runtime/Contracts/PilotContractRegistry.cs) defines 7 standard contracts and their method signatures:
+### 4.2 Built-In Standard Contracts
+The standard contract engine ([`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis)) defines 7 standard contracts and their method signatures:
 - **`IList`**: `len`, `get`, `set`, `append`, `remove`, `contains`, `clear`
   - **Runtime Integration**: When an object delegates or implements `IList`, global `len(obj)`, subscript `obj[i]`, subscript assignment `obj[i] = v`, and `for x in obj` automatically dispatch through the `IList` contract (or its delegated target field)!
 - **`IEquatable`**: `equals`, `hash`

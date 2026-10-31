@@ -30,7 +30,7 @@ In most languages, overloaded functions exist only as a compile-time name-resolu
 
 ## 3. Exact Syntax & Grammar Rules
 
-From [`Pilot.g4`](../../antlr/Pilot.g4):
+Formal Grammar Specification ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)):
 
 ```antlr
 // Function / Overload Definitions
@@ -57,18 +57,18 @@ trailer
 
 ## 4. Runtime Execution Mechanics
 
-### 4.1 Automatic Promotion in `VisitFunc_def`
-When `PilotInterpreterVisitor.VisitFunc_def` executes (`PilotInterpreterVisitor.cs`):
-- It checks `Context.TryResolveInCurrentScope(name, out var existing)`.
-- If `existing` is already a `PilotValueKind.Function`, both the existing `PilotFunction` and the new `PilotFunction` are wrapped into a `PilotMethodGroup` (`PilotValue.FromMethodGroup`).
-- If `existing` is already a `PilotValueKind.MethodGroup`, `group.AddOverload(fn)` appends or replaces an overload with an identical signature key (`GetSignatureKey(fn)`).
+### 4.1 Automatic Promotion in Function Definition
+When a function definition is evaluated in the runtime ([`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm) and [`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis)):
+- It checks if an existing binding exists in the current scope for `name`.
+- If an existing function exists with the same name, both are merged into a `MethodGroup`.
+- If a `MethodGroup` already exists, the new overload is registered or replaces an overload with an identical signature key.
 
-### 4.2 Overload Dispatch & The Signature Sieve (`InvokeMethodGroup`)
-When a `PilotMethodGroup` is called with arguments `args`:
-1. **Prepend Bound Arguments**: If the group was previously narrowed via the Signature Sieve, `group.BoundArguments` are prepended to `args`.
-2. **Exact Overload Search (`TryMatchOverload`)**: Iterates through `group.Overloads` in registration order, checking parameter count (accounting for defaults and variadic `*args`), `ref` compatibility, and parameter type annotations via `MatchesTypeAnnotation(arg, param.TypeAnnotation)`. The first matching `PilotFunction` is invoked.
-3. **Type Adapter Fallback**: If no overload matches directly, `PilotInterpreterVisitor` checks `PilotTypeAdapterRegistry` to see if converting an argument via a registered `adapter` satisfies a single-parameter overload.
-4. **Signature Sieve (`CanPartiallyMatch`)**: If `args.Count > 0` and no full overload matched, `InvokeMethodGroup` filters `group.Overloads` to find all overloads whose **required parameter count is strictly greater than `effectiveArgs.Count`** and whose leading parameters match the types of `effectiveArgs`. If one or more candidates survive, it returns a new `PilotMethodGroup` containing only the surviving overloads and `BoundArguments = effectiveArgs`.
+### 4.2 Overload Dispatch & The Signature Sieve
+When a `MethodGroup` is called with arguments `args`:
+1. **Prepend Bound Arguments**: If the group was previously narrowed via the Signature Sieve, pre-bound arguments are prepended to `args`.
+2. **Exact Overload Search**: Iterates through overloads in registration order, checking parameter count (accounting for defaults and variadic `*args`), `ref` compatibility, and parameter type annotations. The first matching function is invoked.
+3. **Type Adapter Fallback**: If no overload matches directly, the runtime checks the type adapter registry to see if converting an argument via a registered `adapter` satisfies an overload.
+4. **Signature Sieve**: If arguments are provided and no full overload matched, the runtime filters overloads to find all candidates whose **required parameter count is strictly greater than `args.len()`** and whose leading parameters match the types of `args`. If one or more candidates survive, it returns a new `MethodGroup` containing only the surviving overloads with the arguments pre-bound.
 
 ```mermaid
 flowchart TD

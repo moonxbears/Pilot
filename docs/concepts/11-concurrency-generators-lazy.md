@@ -30,7 +30,7 @@ Pilot provides three distinct execution models for deferred, incremental, and mu
 
 ## 3. Exact Syntax & Grammar Rules
 
-From [`Pilot.g4`](../../antlr/Pilot.g4):
+Formal Grammar Specification ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)):
 
 ```antlr
 // 1. Yield Expression & Statement
@@ -69,13 +69,13 @@ concurrency_block
 
 ## 4. Runtime Execution Mechanics
 
-### 4.1 True Stateful Coroutines (`PilotGenerator`)
-In [`PilotGenerator.cs`](../../Runtime/Values/PilotGenerator.cs) and `CallFunction` (`PilotInterpreterVisitor.cs`):
-- **Generator Detection (`ContainsYield`)**: Before executing a `PilotFunction`, `PilotInterpreterVisitor` scans its AST body (ignoring nested inner `func_def`s) for any `yield_stmt` or `yield_expr`. If present, calling the function does **not** run the body immediately; instead, it returns `PilotValue.FromGenerator(new PilotGenerator(...))` in state `Created`.
-- **Two-Way Handshake (`ResumeGate` & `CallerGate`)**:
-  1. Calling `gen.next()` (or `next(gen)` or iterating in a `for` loop) signals `_resumeGate` and waits on `_callerGate`.
-  2. The generator worker thread executes until `VisitYield_stmt` / `VisitYield_expr` calls `gen.Yield(val)`, which stores `_currentValue = val`, transitions state to `Suspended`, signals `_callerGate`, and blocks on `_resumeGate`.
-  3. Calling `gen.send(sentVal)` passes `sentVal` into the suspended `Yield(val)` call, which becomes the return value of the `(yield ...)` expression inside the generator!
+### 4.1 True Stateful Coroutines (`Generator`)
+In the runtime engine ([`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm)):
+- **Generator Detection**: Before executing a function, the compiler checks for any `yield` statement or expression. If present, calling the function returns a `Generator` object in state `Created`.
+- **Two-Way Handshake**:
+  1. Calling `gen.next()` (or `next(gen)` or iterating in a `for` loop) signals the generator coroutine to advance.
+  2. The generator coroutine executes until it reaches a `yield val`, transitions state to `Suspended`, and returns `val` to the caller.
+  3. Calling `gen.send(sentVal)` passes `sentVal` into the suspended `yield` expression, which becomes the return value of the `(yield ...)` expression inside the generator!
   4. When the generator body returns or `gen.close()` is called, state transitions to `Completed` and `gen.is_done` becomes `true`.
 
 ```mermaid
@@ -89,17 +89,17 @@ stateDiagram-v2
     Running --> Faulted : unhandled exception
 ```
 
-### 4.2 Thread-Isolated Futures (`PilotFuture`) & `parallel_map`
-In [`PilotFuture.cs`](../../Runtime/Concurrency/PilotFuture.cs):
-- **`spawn(fn, args...)`**: Creates a cloned `PilotExecutionContext` via `Context.CloneIsolated()` so the background `Task.Run` thread has its own independent call-frame stack while reading current variable bindings safely.
-- **Awaiting**: Both `await fut` (` unary_expr`) and `fut.await()` / `fut.get_result(timeout_ms)` block until the task finishes, re-raising any uncaught background `PilotRuntimeException` on the awaiting thread.
-- **`parallel_map(fn, list)`**: Allocates `PilotValue[] results = new PilotValue[items.Count]` and uses `Parallel.For` where each worker creates its own isolated `PilotInterpreterVisitor(Context.CloneIsolated())` and writes to `results[i]`.
+### 4.2 Thread-Isolated Futures (`Future`) & `parallel_map`
+In [`pilot-rt`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-rt) and [`std.asyncio`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/asyncio/asyncio.pilot):
+- **`spawn(fn, args...)`**: Creates an isolated execution context so the background thread has its own independent call stack while reading variable bindings safely.
+- **Awaiting**: Both `await fut` and `fut.await()` / `fut.get_result(timeout_ms)` block until the task finishes, propagating any uncaught background exceptions on the awaiting thread.
+- **`parallel_map(fn, list)`**: Evaluates items across a worker pool concurrently and writes results to a synchronized result array in original order.
 
-### 4.3 Transparent Memoized Lazy Values (`PilotLazy`)
-In [`PilotLazy.cs`](../../Runtime/Values/PilotLazy.cs):
-- Created via `lazy(fn, args...)`. Stores a thread-safe `Func<PilotValue>` factory guarded by `_lock`.
-- Accessing `.value` or `.eval()` evaluates the factory once, caches `_cachedValue`, and sets `IsEvaluated = true`.
-- **Transparent Forwarding**: In `EvaluatePostfix` (`PilotInterpreterVisitor.cs`), if a member access (`lazy_val.prop`) or subscript (`lazy_val[0]`) is performed on a `PilotLazy` value for any member other than `value`, `eval`, or `is_evaluated`, Pilot automatically forces `lazy_val.Evaluate()` and forwards the access to the underlying value!
+### 4.3 Transparent Memoized Lazy Values (`Lazy`)
+In the runtime ([`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm)):
+- Created via `lazy(fn, args...)`. Stores a deferred computation thunk.
+- Accessing `.value` or `.eval()` evaluates the thunk once, caches the result, and sets `is_evaluated = true`.
+- **Transparent Forwarding**: If a member access (`lazy_val.prop`) or subscript (`lazy_val[0]`) is performed on a lazy value for any member other than `value`, `eval`, or `is_evaluated`, Pilot automatically forces evaluation and forwards the access to the underlying value!
 
 ---
 

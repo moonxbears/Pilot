@@ -21,7 +21,7 @@ Welcome to the comprehensive, navigable documentation for the **Pilot Programmin
 | [**Milestones & Roadmap**](../MILESTONES.md) | Dependency-verified roadmap, concurrency schedule, and conflict-resolution tracker across sessions | Completed milestones (M1–M21) and Phase A–D roadmap (M11–M36: ADTs, `T?` null-safety, `T ! E` value errors, `extend`, dynamic-schedule `for` & C-ABI slices, bidirectional type inference, `:kw` & call-quoting, `!^`/`!@`/`!?` projections, `comptime` demotion, bidirectional `--emit`/`--from` transpilers, `stdlib`, DAP, `pilot build`, `pilot perf`, self-hosted `pilotc`, package registry, and **Phase D M28–M36 zero-GC Rust migration + 500+ MB/s SIMD/Pratt frontend + Red-Green incremental CST + Perceus/Arena runtime**) |
 | [**Lexical Reference**](lexical-reference.md) | Complete specification of Pilot's lexical structure and preprocessor | 140+ Keywords, Contextual Keywords, Numeric/Dimensional/String Literals, Operators, Delimiters, Comments, and Preprocessor Directives (`#define`, `#if`, `#region`, `#pragma`) |
 | [**Syntax Reference**](syntax-reference.md) | Formal grammar rules, statement forms, type expressions, and operator precedence | Program structure, Type annotations, Declarations, Functions, Classes, Pattern Matching, Database queries, Concurrency blocks, Real-Time constructs, and Full Precedence Table |
-| [**Functions & API Reference**](functions-and-apis.md) | Every global function, module, scripting utility, type method, and contract | Global Built-ins, `json` & `venv` modules, Scripting Host API (`args`, `env`, `cwd`, file I/O), Root Object methods, Collection/String/Matrix/Async methods, Standard Contracts, and Exceptions |
+| [**Functions & API Reference**](functions-and-apis.md) | Every global function, module, scripting utility, type method, contract, and standard library module | Global Built-ins, `json` & `venv` modules, Scripting Host API (`args`, `env`, `cwd`, file I/O), 40 Native Standard Library Modules (`std.core`, `std.io`, `std.math`, `std.collections`, `std.asyncio`, `std.json`, `std.http`, `std.numpy`, `std.pandas`, etc.), `PilotStdlibResolver`, Linkable C-ABI Runtime (`libpilot_rt.a`, `libpilot_rt.so`), Root Object methods, Collection/String/Matrix/Async methods, Standard Contracts, and Exceptions |
 
 ---
 
@@ -45,12 +45,12 @@ Each concept guide provides an in-depth explanation of the feature's design, the
 | **12** | [**Deep Polyglot Interoperability**](concepts/12-polyglot-interoperability.md) | Inline execution blocks for Python, C#, Rust, JavaScript, Java, Lua, C, C++, Assembly, and SQL, plus bidirectional variable sharing, yield-bridge coroutines, and `extern` FFI. | [`12_polyglot_interoperability.pilot`](../examples/showcase/12_polyglot_interoperability.pilot) |
 | **13** | [**Metaprogramming, Macros & Lisp Primitives**](concepts/13-metaprogramming-and-lisp.md) | Homoiconic AST manipulation (`quote`, `quasiquote`, `unquote`, `splice`), S-expression primitives (`cons`, `car`, `cdr`, `atom`, `gensym`, `eval`), and root object reflection. | [`13_metaprogramming_and_lisp.pilot`](../examples/showcase/13_metaprogramming_and_lisp.pilot) |
 | **14** | [**Real-Time Determinism, Units & Matrices**](concepts/14-realtime-and-matrix-types.md) | Hard/soft real-time blocks (`deadline`, `within`, `periodic`, `noalloc`, `region`, `stackalloc`), dimensional literals (`ns`, `kHz`, `MB`), custom `unit` algebra, and `matrix` types. | [`14_realtime_and_matrix_types.pilot`](../examples/showcase/14_realtime_and_matrix_types.pilot) |
-| **15** | [**Packaging, Virtual Environments & Toolchain**](concepts/15-packaging-venv-and-tooling.md) | Universal Package Manager (`pilot pkg` for native + NuGet, npm, pip, Cargo, Maven, LuaRocks), `pilot venv` sandboxing, AOT `.pilc` compiler, interactive debugger, REPL, and LSP. | [`15_virtual_environment_and_packaging.pilot`](../examples/showcase/15_virtual_environment_and_packaging.pilot) |
-
+| **15** | [**Packaging, Virtual Environments & Toolchain**](concepts/15-packaging-venv-and-tooling.md) | Universal Package Manager (`pilot pkg` for native + NuGet, npm, pip, Cargo, Maven, LuaRocks), `pilot venv` sandboxing, AOT `.pilc` v3 bytecode compiler (`pilot compile`), stdlib precompilation (`pilot compile --stdlib`), linkable C-ABI runtime (`libpilot_rt.a`/`libpilot_rt.so`), interactive debugger, REPL, and LSP. | [`15_virtual_environment_and_packaging.pilot`](../examples/showcase/15_virtual_environment_and_packaging.pilot) |
+ 
 ---
-
+ 
 ## Language Architecture Map
-
+ 
 ```mermaid
 flowchart LR
     subgraph Frontend["1. Lexical & Syntax Frontend"]
@@ -70,16 +70,17 @@ flowchart LR
     end
 
     subgraph Backends["3. Multi-Target Execution Backends"]
-        VM["pilot-vm\n(32-Bit Register PilVM v3)"]
+        VM["pilot-vm\n(32-Bit Register PilVM v3 & .pilc Bytecode)"]
         AOT["pilot-codegen\n(Native C11/C23 & LLVM IR)"]
         WASM["pilot-codegen\n(WebAssembly + WASI)"]
         GPU["pilot-codegen\n(CUDA, ROCm, Vulkan, WGSL)"]
         Poly["pilot-polyglot\n(Python, JS, Lua, C, C++, Java, ASM, SQL)"]
         Transpile["pilot-transpile\n(Bidirectional 7-Language Transpiler)"]
+        RT["pilot-rt\n(Linkable C-ABI libpilot_rt.a & 40 stdlib modules)"]
     end
 
     subgraph Tooling["4. Native Toolchain & Developer Experience"]
-        CLI["pilot CLI Driver\n(run, build, check, fmt, test, bench, perf)"]
+        CLI["pilot CLI Driver\n(run, compile, build, check, fmt, test, bench, perf)"]
         DAP["pilot-dap\n(Debug Adapter Protocol Server)"]
         LSP["pilot-lsp\n(23-Type Semantic Tokens & Hover)"]
         Pkg["pilot-pkg\n(SPDX License & Universal Packaging)"]
@@ -88,7 +89,7 @@ flowchart LR
     AST --> VM & AOT & WASM & GPU & Poly & Transpile
     DBQuery --> LSP
     AST --> DAP
-    CLI --> VM & AOT & WASM & GPU & LSP & DAP & Pkg
+    CLI --> VM & AOT & WASM & GPU & LSP & DAP & Pkg & RT
 ```
 
 ---

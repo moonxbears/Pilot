@@ -28,7 +28,7 @@ Pilot provides three high-leverage structural and metaprogramming tools for shap
 
 ## 3. Exact Syntax & Grammar Rules
 
-From [`Pilot.g4`](../../antlr/Pilot.g4):
+Formal Grammar Specification ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)):
 
 ```antlr
 // 1. Structural Projection Expression
@@ -63,24 +63,24 @@ macro_def
 
 ## 4. Runtime Execution Mechanics
 
-### 4.1 Structural Projections (`VisitProjection_expr` & `EvaluateProjection`)
-In [`PilotInterpreterVisitor.cs`](../../Runtime/Execution/PilotInterpreterVisitor.cs):
-- When `target -> { f1, f2 }` (or `target -> ["f1", "f2"]`) is evaluated, `EvaluateProjection` iterates over the requested field names and constructs a new `Dictionary<PilotValue, PilotValue>` (`map`):
-  - **On a `PilotObject`**: Evaluates `EvaluateObjectMember(obj, field)`. If the member is a field or `get` property, its value is stored under `"f1"`. If the member is a zero-argument method, it is automatically invoked (`CallFunction(fn, [])`) and its return value is projected into the resulting `map`.
+### 4.1 Structural Projections
+In the expression evaluation engine ([`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm)):
+- When `target -> { f1, f2 }` (or `target -> ["f1", "f2"]`) is evaluated, the runtime iterates over the requested field names and constructs a new `map`:
+  - **On an Object**: Evaluates member lookups on `target`. If the member is a field or `get` property, its value is stored under `"f1"`. If the member is a zero-argument method, it is automatically invoked and its return value is projected into the resulting `map`.
   - **On a `map`**: Copies matching string keys into the new projected `map`, or sets `none` if absent.
 
-### 4.2 Scoped Lexical Extensions (`PilotLexicalExtension`)
-In [`PilotLexicalExtension.cs`](../../Runtime/Extensions/PilotLexicalExtension.cs) and `PilotExecutionContext`:
-1. **Declaration (`VisitExtension_decl`)**: Creates a `PilotLexicalExtension(name, targetType)` containing all `def` methods inside the block, where each method binds `self` to the receiver instance. The extension is registered in `Context.DefineExtension(ext)`.
-2. **Scoped Activation (`with extension Name`)**: `VisitWith_stmt` calls `Context.PushExtension("Name")` on entry and `Context.PopExtension("Name")` in the `finally` block.
-3. **Member Dispatch (`TryResolveExtensionMethod`)**: Whenever a method call `val.method(args)` is evaluated on **any** `PilotValue` (`str`, `int`, `list`, or custom `Class`), `PilotInterpreterVisitor` searches `Context.ActiveExtensions` in LIFO order. If an active extension targets `val.TypeName` (or `"any"` / `"dynamic"` / `"object"`), the extension method is bound with `self = val` and invoked. Outside the `with extension` block, calling `val.method()` fails with a normal `TypeError`.
+### 4.2 Scoped Lexical Extensions
+In the runtime context ([`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis) and [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm)):
+1. **Declaration**: An `extension Name on TargetType` block registers all `def` methods inside the block, where each method binds `self` to the receiver instance.
+2. **Scoped Activation (`with extension Name`)**: Pushes `Name` onto the active extension stack on entry and pops it on exit.
+3. **Member Dispatch**: Whenever a method call `val.method(args)` is evaluated on any value (`str`, `int`, `list`, or custom `Class`), the runtime searches active extensions in LIFO order. If an active extension targets `val.TypeName` (or `"any"` / `"dynamic"` / `"object"`), the extension method is bound with `self = val` and invoked. Outside the `with extension` block, calling `val.method()` fails with a normal `TypeError`.
 
-### 4.3 Compile-Time Generative Classes (`PilotClassNode`)
-In [`PilotClassNode.cs`](../../Runtime/Generative/PilotClassNode.cs) and `VisitClass_def`:
-1. When a `class` is evaluated, any `macro name(ast)` blocks declared in the class body are registered in `pilotClass.ClassMacros`.
-2. Next, `VisitClass_def` collects all `ClassMacros` from every base class (top-down along the inheritance chain) plus the class's own `ClassMacros`.
-3. If any class macros exist, `pilotClass` is wrapped in a `PilotClassNode` (`Kind == PilotValueKind.ClassNode`) and passed as the `ast` argument to each macro function (`CallFunction(macroFn, [PilotValue.FromClassNode(classNode)])`).
-4. Inside the macro body, calling `ast.add_field(name, default)` or `ast.add_method(name, fn)` mutates the underlying `PilotClass` directly before any instances are ever constructed!
+### 4.3 Compile-Time Generative Classes
+In [`pilot-ast`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-ast) and [`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis):
+1. When a `class` is evaluated, any `macro name(ast)` blocks declared in the class body are registered as class macros.
+2. Next, the compiler collects all class macros from every base class (top-down along the inheritance chain) plus the class's own class macros.
+3. If any class macros exist, the class blueprint is wrapped in an AST reflection node and passed as the `ast` argument to each macro function.
+4. Inside the macro body, calling `ast.add_field(name, default)` or `ast.add_method(name, fn)` mutates the underlying class blueprint directly before any instances are ever constructed!
 
 ---
 

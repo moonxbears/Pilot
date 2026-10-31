@@ -31,7 +31,7 @@ Pilot is engineered as a **universal polyglot glue language**. Rather than forci
 
 ## 3. Exact Syntax & Grammar Rules
 
-From [`Pilot.g4`](../../antlr/Pilot.g4):
+Formal Grammar Specification ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)):
 
 ```antlr
 // 1. Inline Polyglot Blocks (Statement or Expression)
@@ -92,8 +92,8 @@ In [`crates/pilot-polyglot/src/marshal.rs`](../../crates/pilot-polyglot/src/mars
 | :--- | :--- | :--- |
 | Inline Polyglot Block | `<lang> { ... }` or `<lang> """..."""` | Executes embedded foreign code with shared scope variables and return value. |
 | Foreign Module Import | `import <lang>:<module> [as <alias>]` | Imports a foreign ecosystem library as a Pilot namespace map. |
-| Emit Foreign Code | `pilot --emit <python\|csharp\|rust> file.pilot` | Transpiles a `.pilot` source file into idiomatic Python, C#, or Rust (`Transpilation/PilotEmitter.cs`). |
-| Import Foreign File | `pilot --from <python\|csharp\|rust\|js> file.ext` | Converts foreign source code into `.pilot` syntax (`Transpilation/ForeignToPilotImporter.cs`). |
+| Emit Foreign Code | `pilot --emit <python\|js\|csharp\|cpp\|c\|rust\|lua> file.pilot [-o out]` | Transpiles a `.pilot` source file into idiomatic target code ([`pilot-transpile`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-transpile)). |
+| Import Foreign File | `pilot --from <python\|js\|csharp\|rust\|c\|cpp> file.ext [-o out.pilot]` | Ingests foreign source code into canonical Pilot syntax ([`pilot-transpile`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-transpile)). |
 
 ---
 

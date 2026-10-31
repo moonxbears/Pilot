@@ -34,7 +34,7 @@ Pilot treats relational and in-memory querying as a first-class language capabil
 
 ## 3. Exact Syntax & Grammar Rules
 
-From [`Pilot.g4`](../../antlr/Pilot.g4):
+Formal Grammar Specification ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)):
 
 ```antlr
 // 1. LINQ-Style & SQL-First Query Expressions
@@ -87,8 +87,8 @@ lookup_expr
 
 ## 4. Runtime Execution Mechanics
 
-### 4.1 In-Memory Query Execution Pipeline (`ExecuteSingleQuery`)
-In [`PilotInterpreterVisitor.cs`](../../Runtime/Execution/PilotInterpreterVisitor.cs), `VisitQuery_expr` evaluates relational queries directly over any in-memory collection (`list` of `map`s, `list` of `PilotObject` instances, `set`, or `range`):
+### 4.1 In-Memory Query Execution Pipeline
+In the relational query engine ([`pilot-db`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-db) and [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm)), queries evaluate directly over any in-memory collection (`list` of `map`s, records, or table rows):
 
 ```mermaid
 flowchart LR

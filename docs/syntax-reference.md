@@ -4,7 +4,7 @@
 
 ---
 
-This reference provides a complete specification of Pilot's syntax, grammar rules, statement forms, type system expressions, and operator precedence hierarchy as defined in [`antlr/Pilot.g4`](../antlr/Pilot.g4) and executed by the PilVM v3 bytecode virtual machine and native AOT compiler pipeline.
+This reference provides a complete specification of Pilot's syntax, grammar rules, statement forms, type system expressions, and operator precedence hierarchy as implemented in the zero-allocation lexer and Pratt parser ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)) and executed by the PilVM v3 bytecode virtual machine and native AOT compiler pipeline.
 
 ## Table of Contents
 
@@ -308,7 +308,7 @@ primary_pattern     ::= relational_pattern
                       | '_'
 ```
 
-### All Supported Pattern Forms (`PilotPatternMatcher.cs`)
+### All Supported Pattern Forms (`pilot-analysis` & `pilot-vm`)
 
 | Pattern Type | Syntax | Match Semantics |
 | :--- | :--- | :--- |
@@ -441,7 +441,7 @@ dsl_stmt        ::= ('dsl' | 'domain') identifier (parameters | '(' dsl_args? ')
 
 ## 13. Expression Hierarchy & Operator Precedence Table
 
-The following table lists all expression operators in [`antlr/Pilot.g4`](../antlr/Pilot.g4) from **highest precedence (1)** to **lowest precedence (17)**:
+The following table lists all expression operators in the Pratt parser ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)) from **highest precedence (1)** to **lowest precedence (17)**:
 
 | Level | Grammar Rule | Operators / Syntax | Associativity | Description |
 | :---: | :--- | :--- | :---: | :--- |

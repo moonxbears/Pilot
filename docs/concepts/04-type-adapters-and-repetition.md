@@ -29,7 +29,7 @@ Pilot eliminates boilerplate data-plumbing code in two major areas:
 
 ## 3. Exact Syntax & Grammar Rules
 
-From [`Pilot.g4`](../../antlr/Pilot.g4):
+Formal Grammar Specification ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)):
 
 ```antlr
 // First-Class Type Adapter Declaration
@@ -59,17 +59,17 @@ argument
 
 ## 4. Runtime Execution Mechanics
 
-### 4.1 `PilotTypeAdapterRegistry` & Structural Hydration
-[`PilotTypeAdapterRegistry.cs`](../../Runtime/Adapters/PilotTypeAdapterRegistry.cs) maintains a lookup table keyed by `(NormalizeTypeName(fromType), NormalizeTypeName(toType))`:
+### 4.1 Type Adapter Registry & Structural Hydration
+The runtime type adapter registry ([`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis) and [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm)) maintains a lookup table keyed by `(NormalizeTypeName(fromType), NormalizeTypeName(toType))`:
 - **Built-in Default Adapters**: Registered automatically at startup for `(str -> int)`, `(str -> float)`, `(str -> bool)` (`"true"`, `"1"`, `"yes"`, `"y"`, `"on"` -> `true`; `"false"`, `"0"`, `"no"`, `"n"`, `"off"` -> `false`), `(int -> str)`, `(float -> str)`, `(bool -> str)`, `(int -> float)`, `(float -> int)`, `(list -> set)`, and `(set -> list)`.
-- **Declarative `adapter A -> B` Blocks**: Executed by `VisitAdapter_decl`. Creates a synthetic single-parameter `PilotFunction` with parameter `self` and registers it in `Context.Engine.TypeAdapters`.
+- **Declarative `adapter A -> B` Blocks**: Creates a synthetic single-parameter conversion function with parameter `self` and registers it in the active type adapter registry.
 - **Automatic Consultation Points**:
-  1. **Typed Variable Declarations (`let x: Target = expr`)**: If `expr`'s runtime type differs from `Target`, `CoerceToDeclaredType` calls `TypeAdapters.TryConvert` and falls back to structural `map -> Class` hydration.
-  2. **Typed Function Parameters (`def f(x: Target)`)**: `BindParameters` automatically invokes matching adapters when an argument's runtime type does not match `Target`.
-  3. **Explicit `expr as Target`**: `VisitCast_expr` runs user/built-in adapters, or hydrates a `Class` instance by matching `map` keys to class fields and properties.
+  1. **Typed Variable Declarations (`let x: Target = expr`)**: If `expr`'s runtime type differs from `Target`, the runtime calls type adapter coercion and falls back to structural `map -> Class` hydration.
+  2. **Typed Function Parameters (`def f(x: Target)`)**: Parameter binding automatically invokes matching adapters when an argument's runtime type does not match `Target`.
+  3. **Explicit `expr as Target`**: Runs user/built-in adapters, or hydrates a `Class` instance by matching `map` keys to class fields and properties.
 
 ### 4.2 Five Modes of Scalar-to-Collection Repetition
-In [`PilotInterpreterVisitor.cs`](../../Runtime/Execution/PilotInterpreterVisitor.cs), `IsRepeatableCollection` recognizes `list`, `tuple`, `set`, and `range`. When repetition is triggered:
+In the execution engine ([`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm)), collection repetition recognizes `list`, `tuple`, `set`, and `range`. When repetition is triggered:
 - If the function calls return non-`none` values, they are collected and returned as a new `list`.
 - If all calls return `none` (e.g., `logger.append.each(items)`), `none` is returned.
 

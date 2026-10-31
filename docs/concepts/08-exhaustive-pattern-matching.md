@@ -29,7 +29,7 @@ Pilot treats **Structural Destructuring** and **Pattern Matching** as unified, p
 
 ## 3. Exact Syntax & Grammar Rules
 
-From [`Pilot.g4`](../../antlr/Pilot.g4):
+Formal Grammar Specification ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)):
 
 ```antlr
 // 1. Destructuring Declarations & Standalone Assignments
@@ -84,21 +84,21 @@ case_clause
 
 ## 4. Runtime Execution Mechanics
 
-### 4.1 Deep Destructuring Engine (`PilotPatternMatcher.BindPatternTarget`)
-In [`PilotPatternMatcher.cs`](../../Runtime/Execution/PilotPatternMatcher.cs):
-- **Record Patterns (`BindRecordPattern`)**:
-  - Accepts either a `map` (`Dictionary<PilotValue, PilotValue>`) or a `PilotObject` (`Class` instance).
+### 4.1 Deep Destructuring Engine
+In [`pilot-analysis`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-analysis) and [`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm):
+- **Record Patterns**:
+  - Accepts either a `map` or a class instance.
   - Shorthand `{ name, role = "user" }` looks up key/field `"name"` and binds variable `name`.
   - Explicit `{ "user_id": id, "profile": { "city": city = "UTC" } }` looks up `"user_id"` and recursively matches `"profile"` against the nested pattern.
-  - If a key/field is missing and no `= default_expr` is provided, raises `PilotPatternMatchingException` (`MatchError`).
+  - If a key/field is missing and no `= default_expr` is provided, raises `MatchError`.
   - If `**rest` is present on a `map`, all keys not explicitly matched by earlier fields are copied into a new `map` and bound to `rest`.
-- **Sequence Patterns (`BindListPattern`)**:
-  - Accepts `list`, `tuple`, or `range` (materializing ranges into elements).
+- **Sequence Patterns**:
+  - Accepts `list`, `tuple`, or `range`.
   - Without a rest element (`..rest` or `*rest`), the collection length must equal the number of pattern elements (unless trailing elements specify `= default_expr`), otherwise `MatchError` is raised.
-  - With a rest element (`[first, ..middle, last]`), `beforeCount` leading elements and `afterCount` trailing elements are bound first, and the slice `[beforeCount .. len - afterCount]` is bound to `middle` as a `list`.
+  - With a rest element (`[first, ..middle, last]`), leading and trailing elements are bound first, and the remaining slice is bound to `middle` as a `list`.
 
-### 4.2 `match` & `is` Pattern Evaluation (`MatchPattern`)
-`PilotPatternMatcher.MatchPattern` evaluates a `PilotParser.PatternContext` against a runtime `PilotValue` and returns a `bool` while populating a `bindings` dictionary:
+### 4.2 `match` & `is` Pattern Evaluation
+Pattern matching evaluates patterns against runtime values and binds matched variables:
 1. **Or-Pattern (`p1 | p2` / `p1 or p2`)**: Short-circuits on the first sub-pattern that matches.
 2. **And-Pattern (`p1 and p2`)**: Requires all sub-patterns to match (e.g., `> 0 and < 100`).
 3. **Not-Pattern (`not p`)**: Succeeds when `p` does not match.

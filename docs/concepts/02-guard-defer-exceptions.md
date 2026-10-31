@@ -31,7 +31,7 @@ Pilot combines three complementary mechanisms to keep error handling and resourc
 
 ## 3. Exact Syntax & Grammar Rules
 
-From [`Pilot.g4`](../../antlr/Pilot.g4):
+Formal Grammar Specification ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)):
 
 ```antlr
 // Guard Statement (Boolean Condition or Pattern Unpacking)

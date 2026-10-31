@@ -29,7 +29,7 @@ Pilot solves this with **First-Class Contextual Parameters (`context`)** and **S
 
 ## 3. Exact Syntax & Grammar Rules
 
-From [`Pilot.g4`](../../antlr/Pilot.g4):
+Formal Grammar Specification ([`pilot-parser`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-parser)):
 
 ```antlr
 // Contextual Parameter Modifier in Function Definitions
@@ -53,16 +53,16 @@ with_item
 
 ## 4. Runtime Execution Mechanics
 
-### 4.1 Context Stack Management (`PilotExecutionContext`)
-In [`PilotExecutionContext.cs`](../../Runtime/Execution/PilotExecutionContext.cs):
-- The execution context maintains `_contextStack`, a `Dictionary<string, Stack<PilotValue>>` mapping each contextual variable name to a LIFO stack of bound values.
-- When `with context db = prod_db` is entered (`VisitWith_stmt` in [`PilotInterpreterVisitor.cs`](../../Runtime/Execution/PilotInterpreterVisitor.cs)):
-  1. `prod_db` is evaluated and pushed via `Context.PushContextValue("db", val)`.
-  2. The `with` body `suite` executes. Any nested `with context db = replica_db` pushes onto the same `"db"` stack, shadowing the outer value for the inner scope.
-  3. Inside the `finally` block of `VisitWith_stmt`, `Context.PopContextValue("db")` pops the value, restoring the previous binding immediately.
+### 4.1 Context Stack Management
+In the execution context ([`pilot-vm`](file:///home/moony/Documents/dev/projects/Pilot/crates/pilot-vm)):
+- The execution context maintains a contextual frame stack mapping each contextual variable name to a LIFO stack of bound values.
+- When `with context db = prod_db` is entered:
+  1. `prod_db` is evaluated and pushed onto the context stack for `"db"`.
+  2. The `with` body executes. Any nested `with context db = replica_db` pushes onto the same `"db"` stack, shadowing the outer value for the inner scope.
+  3. On scope exit, the value is popped, restoring the previous binding immediately.
 
-### 4.2 Four-Stage Resolution Order (`BindParameters`)
-When a function with `PilotParameter.IsContext == true` is called, `BindParameters` resolves the parameter using a strict 4-stage priority order:
+### 4.2 Four-Stage Resolution Order
+When a function with a `context` parameter is called, parameter binding resolves the argument using a strict 4-stage priority order:
 
 ```mermaid
 flowchart TD
