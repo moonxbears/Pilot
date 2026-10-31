@@ -705,16 +705,21 @@ impl LspServer {
                 } else {
                     "property"
                 };
-                let extra_doc = match txt {
-                    "len" | "length" | "count" => "\n\nReturns the number of elements or bytes in the receiver.",
-                    "size_of" => "\n\nCompile-time size in bytes of the value or type layout.",
-                    "tag_bytes" => "\n\nNumber of discriminant tag bytes used by an algebraic data type.",
-                    "is_unboxed" => "\n\n`true` if the ADT or struct is unboxed inline without heap allocation.",
-                    "is_recursive" => "\n\n`true` if the type contains recursive indirection.",
-                    "is_empty" => "\n\n`true` if the collection or string contains zero elements.",
-                    "is_some" | "is_none" => "\n\nChecks whether an `Option[T]` contains a value.",
-                    "is_ok" | "is_err" => "\n\nChecks whether a `Result[T, E]` is `Ok` or `Err`.",
-                    _ => "",
+                let builtin_method_doc = get_builtin_method_doc(txt);
+                let extra_doc = if let Some((_, doc)) = builtin_method_doc {
+                    format!("\n\n{}", doc)
+                } else {
+                    match txt {
+                        "len" | "length" | "count" => "\n\nReturns the number of elements or bytes in the receiver.".to_string(),
+                        "size_of" => "\n\nCompile-time size in bytes of the value or type layout.".to_string(),
+                        "tag_bytes" => "\n\nNumber of discriminant tag bytes used by an algebraic data type.".to_string(),
+                        "is_unboxed" => "\n\n`true` if the ADT or struct is unboxed inline without heap allocation.".to_string(),
+                        "is_recursive" => "\n\n`true` if the type contains recursive indirection.".to_string(),
+                        "is_empty" => "\n\n`true` if the collection or string contains zero elements.".to_string(),
+                        "is_some" | "is_none" => "\n\nChecks whether an `Option[T]` contains a value.".to_string(),
+                        "is_ok" | "is_err" => "\n\nChecks whether a `Result[T, E]` is `Ok` or `Err`.".to_string(),
+                        _ => String::new(),
+                    }
                 };
                 let md = format!(
                     "```pilot\n({}) {}.{}: {}\n```\n\n*Pilot Member Access*{}",
@@ -1193,6 +1198,158 @@ impl LspServer {
     fn handle_completion(&mut self, params: &JsonValue) -> JsonValue {
         let mut items = Vec::new();
 
+        let (file_id_opt, byte_offset_opt) = match self.get_file_and_offset(params) {
+            Some((fid, off)) => (Some(fid), Some(off)),
+            None => (None, None),
+        };
+
+        let mut is_dot = false;
+        let mut receiver_ty_name: Option<String> = None;
+        let mut user_type_members: Vec<(String, String)> = Vec::new();
+
+        if let (Some(file_id), Some(byte_offset)) = (file_id_opt, byte_offset_opt) {
+            if let Some(src) = self.db.source_text(file_id) {
+                let offset = (byte_offset as usize).min(src.len());
+                let before = &src[..offset];
+                let trimmed = before.trim_end();
+
+                let (dot_detected, receiver_expr) = if trimmed.ends_with('.') && !trimmed.ends_with("..") {
+                    (true, trimmed[..trimmed.len() - 1].trim_end())
+                } else if trimmed.ends_with("?.") {
+                    (true, trimmed[..trimmed.len() - 2].trim_end())
+                } else {
+                    let word_start = before.rfind(|c: char| !c.is_alphanumeric() && c != '_').map(|i| i + 1).unwrap_or(0);
+                    let before_word = before[..word_start].trim_end();
+                    if before_word.ends_with('.') && !before_word.ends_with("..") {
+                        (true, before_word[..before_word.len() - 1].trim_end())
+                    } else if before_word.ends_with("?.") {
+                        (true, before_word[..before_word.len() - 2].trim_end())
+                    } else {
+                        (false, "")
+                    }
+                };
+
+                if dot_detected {
+                    is_dot = true;
+                    if receiver_expr.ends_with('"') {
+                        receiver_ty_name = Some("str".to_string());
+                    } else if receiver_expr.ends_with(']') {
+                        receiver_ty_name = Some("list".to_string());
+                    } else if receiver_expr == "true" || receiver_expr == "false" {
+                        receiver_ty_name = Some("bool".to_string());
+                    } else if !receiver_expr.is_empty() && receiver_expr.chars().all(|c| c.is_ascii_digit()) {
+                        receiver_ty_name = Some("int".to_string());
+                    } else if receiver_expr.contains('.') && receiver_expr.chars().all(|c| c.is_ascii_digit() || c == '.') {
+                        receiver_ty_name = Some("float".to_string());
+                    } else {
+                        let ident_start = receiver_expr.rfind(|c: char| !c.is_alphanumeric() && c != '_').map(|i| i + 1).unwrap_or(0);
+                        let ident_name = &receiver_expr[ident_start..];
+                        if !ident_name.is_empty() {
+                            if let Some(mod_analysis) = self.db.module_analysis(file_id) {
+                                let arena = &mod_analysis.arena;
+                                let analysis = &mod_analysis.analysis;
+
+                                for (idx, node) in arena.nodes.iter().enumerate() {
+                                    let nk = node.node_kind();
+                                    if matches!(nk, pilot_ast::NodeKind::LetStmt | pilot_ast::NodeKind::VarStmt) {
+                                        let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                                        if name == ident_name {
+                                            if let Some(&ty_id) = analysis.inferred_types.get(&(idx as u32)).or_else(|| analysis.inferred_types.get(&node.rhs)) {
+                                                receiver_ty_name = Some(analysis.types.display(ty_id));
+                                                break;
+                                            }
+                                        }
+                                    } else if nk == pilot_ast::NodeKind::FnDecl {
+                                        let fn_start = node.rhs;
+                                        let fn_len = node.flags as usize;
+                                        if fn_len > 0 {
+                                            let fn_children = arena.children_slice(fn_start, fn_len as u32);
+                                            for &p_id in &fn_children[1..] {
+                                                let p_node = *arena.node(pilot_ast::NodeId(p_id));
+                                                let p_name = arena.interner.resolve(pilot_intern::SymbolId(p_node.lhs));
+                                                if p_name == ident_name {
+                                                    if let Some(&ty_id) = analysis.inferred_types.get(&p_id) {
+                                                        receiver_ty_name = Some(analysis.types.display(ty_id));
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if let Some(ref ty_str) = receiver_ty_name {
+                                    for node in &arena.nodes {
+                                        let nk = node.node_kind();
+                                        if matches!(nk, pilot_ast::NodeKind::ClassDecl | pilot_ast::NodeKind::StructDecl | pilot_ast::NodeKind::RecordDecl) {
+                                            let c_name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                                            if c_name == ty_str {
+                                                let body_id = pilot_ast::NodeId(node.rhs);
+                                                if body_id.is_some() {
+                                                    let body_node = *arena.node(body_id);
+                                                    if body_node.node_kind() == pilot_ast::NodeKind::BlockExpr {
+                                                        let children = arena.children_slice(body_node.lhs, body_node.rhs);
+                                                        for &child_id in children {
+                                                            let child_node = *arena.node(pilot_ast::NodeId(child_id));
+                                                            if child_node.node_kind() == pilot_ast::NodeKind::FnDecl {
+                                                                let m_name = arena.interner.resolve(pilot_intern::SymbolId(child_node.lhs));
+                                                                user_type_members.push((m_name.to_string(), "Method".to_string()));
+                                                            } else if matches!(child_node.node_kind(), pilot_ast::NodeKind::LetStmt | pilot_ast::NodeKind::VarStmt) {
+                                                                let f_name = arena.interner.resolve(pilot_intern::SymbolId(child_node.lhs));
+                                                                user_type_members.push((f_name.to_string(), "Property".to_string()));
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if is_dot {
+            let normalized = receiver_ty_name.as_deref().unwrap_or("").to_lowercase();
+            let method_docs: &[(&str, &str, &str)] = if normalized.contains("str") {
+                STR_METHOD_DOCS
+            } else if normalized.contains("list") {
+                LIST_METHOD_DOCS
+            } else if normalized == "int" || normalized == "i64" || normalized == "i32" || normalized == "u64" || normalized == "u32" || normalized == "uint" {
+                INT_METHOD_DOCS
+            } else if normalized == "float" || normalized == "f64" || normalized == "f32" {
+                FLOAT_METHOD_DOCS
+            } else if normalized == "bool" {
+                BOOL_METHOD_DOCS
+            } else {
+                ALL_BUILTIN_METHOD_DOCS
+            };
+
+            for (name, sig, summary) in method_docs.iter() {
+                items.push(JsonValue::Object(vec![
+                    ("label".to_string(), JsonValue::String(name.to_string())),
+                    ("kind".to_string(), JsonValue::Number(2.0)), // Method
+                    ("detail".to_string(), JsonValue::String(sig.to_string())),
+                    ("documentation".to_string(), JsonValue::String(summary.to_string())),
+                    ("insertText".to_string(), JsonValue::String(name.to_string())),
+                ]));
+            }
+
+            for (m_name, kind_str) in user_type_members {
+                let kind_num = if kind_str == "Method" { 2.0 } else { 5.0 };
+                items.push(JsonValue::Object(vec![
+                    ("label".to_string(), JsonValue::String(m_name)),
+                    ("kind".to_string(), JsonValue::Number(kind_num)),
+                    ("detail".to_string(), JsonValue::String(kind_str)),
+                ]));
+            }
+
+            return JsonValue::Array(items);
+        }
+
         // 1. Built-in functions
         for (name, sig, summary) in BUILTIN_DOCS.iter() {
             items.push(JsonValue::Object(vec![
@@ -1203,7 +1360,17 @@ impl LspServer {
             ]));
         }
 
-        // 2. Keyword completions
+        // 2. Built-in type methods (global completions)
+        for (name, sig, summary) in ALL_BUILTIN_METHOD_DOCS.iter() {
+            items.push(JsonValue::Object(vec![
+                ("label".to_string(), JsonValue::String(name.to_string())),
+                ("kind".to_string(), JsonValue::Number(2.0)), // Method
+                ("detail".to_string(), JsonValue::String(sig.to_string())),
+                ("documentation".to_string(), JsonValue::String(summary.to_string())),
+            ]));
+        }
+
+        // 3. Keyword completions
         for (kw, (domain, summary)) in KEYWORD_DOCS.iter() {
             items.push(JsonValue::Object(vec![
                 ("label".to_string(), JsonValue::String(kw.to_string())),
@@ -1213,7 +1380,7 @@ impl LspServer {
             ]));
         }
 
-        // 3. Polyglot engines
+        // 4. Polyglot engines
         for (lang, desc) in POLYGLOT_DOCS.iter() {
             items.push(JsonValue::Object(vec![
                 ("label".to_string(), JsonValue::String(lang.to_string())),
@@ -1223,7 +1390,7 @@ impl LspServer {
             ]));
         }
 
-        // 4. Primitive types
+        // 5. Primitive types
         for (ty, desc) in TYPE_DOCS.iter() {
             items.push(JsonValue::Object(vec![
                 ("label".to_string(), JsonValue::String(ty.to_string())),
@@ -1233,8 +1400,8 @@ impl LspServer {
             ]));
         }
 
-        // 5. Top-level module symbols & variables
-        if let Some((file_id, _)) = self.get_file_and_offset(params) {
+        // 6. Top-level module symbols & variables
+        if let Some(file_id) = file_id_opt {
             if let Some(item_tree) = self.db.module_item_tree(file_id) {
                 for item in &item_tree.items {
                     items.push(JsonValue::Object(vec![
@@ -2906,7 +3073,18 @@ fn get_keyword_doc(ident: &str) -> Option<(&'static str, &'static str)> {
 }
 
 fn get_builtin_doc(ident: &str) -> Option<(&'static str, &'static str)> {
-    BUILTIN_DOCS.iter().find(|(k, _, _)| *k == ident).map(|(_, sig, sum)| (*sig, *sum))
+    BUILTIN_DOCS
+        .iter()
+        .find(|(k, _, _)| *k == ident)
+        .map(|(_, sig, sum)| (*sig, *sum))
+        .or_else(|| get_builtin_method_doc(ident))
+}
+
+fn get_builtin_method_doc(ident: &str) -> Option<(&'static str, &'static str)> {
+    ALL_BUILTIN_METHOD_DOCS
+        .iter()
+        .find(|(k, _, _)| *k == ident)
+        .map(|(_, sig, sum)| (*sig, *sum))
 }
 
 fn get_polyglot_doc(ident: &str) -> Option<&'static str> {
@@ -3024,6 +3202,147 @@ const BUILTIN_DOCS: &[(&str, &str, &str)] = &[
     ("sizeof_type", "sizeof_type(type_name: str) -> int", "Returns the compile-time C-ABI byte size of the specified type."),
     ("fail", "fail(err: E) -> T ! E", "Constructs an error return value for a fallible `T ! E` function."),
     ("shared_buffer", "shared_buffer(name: str, count: int, dtype: symbol) -> SharedBuffer", "Allocates a cross-language zero-copy shared memory buffer with a 24-byte C-ABI header."),
+];
+
+pub const STR_METHOD_DOCS: &[(&str, &str, &str)] = &[
+    ("split", "split(sep: str = \" \") -> List[str]", "Splits string into a list of substrings separated by delimiter `sep`."),
+    ("join", "join(items: List[str]) -> str", "Joins elements of `items` into a single string using this string as delimiter."),
+    ("replace", "replace(old: str, new: str) -> str", "Returns a copy of the string with all occurrences of `old` replaced with `new`."),
+    ("trim", "trim() -> str", "Removes leading and trailing whitespace from the string."),
+    ("trim_start", "trim_start() -> str", "Removes leading whitespace from the string."),
+    ("trim_end", "trim_end() -> str", "Removes trailing whitespace from the string."),
+    ("to_upper", "to_upper() -> str", "Returns a copy of the string converted to uppercase."),
+    ("to_lower", "to_lower() -> str", "Returns a copy of the string converted to lowercase."),
+    ("starts_with", "starts_with(prefix: str) -> bool", "Returns `true` if the string starts with the given `prefix`."),
+    ("ends_with", "ends_with(suffix: str) -> bool", "Returns `true` if the string ends with the given `suffix`."),
+    ("contains", "contains(substr: str) -> bool", "Returns `true` if the string contains the specified `substr`."),
+    ("index_of", "index_of(substr: str) -> int", "Returns the 0-based index of the first occurrence of `substr`, or -1 if not found."),
+    ("last_index_of", "last_index_of(substr: str) -> int", "Returns the 0-based index of the last occurrence of `substr`, or -1 if not found."),
+    ("substring", "substring(start: int, end: int = -1) -> str", "Returns a substring from `start` up to `end`. Supports negative indexing."),
+    ("slice", "slice(start: int, end: int = -1) -> str", "Returns a substring from `start` up to `end`. Supports negative indexing."),
+    ("repeat", "repeat(count: int) -> str", "Returns a copy of the string repeated `count` times."),
+    ("pad_start", "pad_start(len: int, pad_char: str = \" \") -> str", "Prepends `pad_char` to the string until the total length reaches `len`."),
+    ("pad_end", "pad_end(len: int, pad_char: str = \" \") -> str", "Appends `pad_char` to the string until the total length reaches `len`."),
+    ("is_digit", "is_digit() -> bool", "Returns `true` if all characters in the string are ASCII digits (`0-9`)."),
+    ("is_alpha", "is_alpha() -> bool", "Returns `true` if all characters in the string are alphabetic (`a-z`, `A-Z`)."),
+    ("is_alphanumeric", "is_alphanumeric() -> bool", "Returns `true` if all characters in the string are alphanumeric (`0-9`, `a-z`, `A-Z`)."),
+    ("is_empty", "is_empty() -> bool", "Returns `true` if the string contains zero characters."),
+    ("char_at", "char_at(index: int) -> str", "Returns the 1-character string at the 0-based `index` (supports negative indexing)."),
+    ("chars", "chars() -> List[str]", "Returns a list containing each character of the string as a single-character string."),
+    ("to_int", "to_int() -> int", "Parses string to a 64-bit signed integer (supports decimal, `0x` hex, and `0b` binary)."),
+    ("to_float", "to_float() -> float", "Parses string to a 64-bit IEEE 754 floating-point number."),
+    ("to_string", "to_string() -> str", "Returns a copy of the string."),
+    ("len", "len() -> int", "Returns the length of the string in characters."),
+];
+
+pub const LIST_METHOD_DOCS: &[(&str, &str, &str)] = &[
+    ("append", "append(item: T) -> void", "Appends `item` to the end of the list in place."),
+    ("push", "push(item: T) -> void", "Appends `item` to the end of the list in place (alias for `append`)."),
+    ("add", "add(item: T) -> void", "Appends `item` to the end of the list in place (alias for `append`)."),
+    ("pop", "pop() -> T", "Removes and returns the last element of the list, or `null` if empty."),
+    ("insert", "insert(index: int, item: T) -> void", "Inserts `item` at 0-based `index` in place, shifting subsequent elements right."),
+    ("remove", "remove(index: int) -> T", "Removes and returns the element at 0-based `index`, shifting subsequent elements left."),
+    ("clear", "clear() -> void", "Removes all elements from the list in place, resetting length to 0."),
+    ("reverse", "reverse() -> List[T]", "Reverses the elements of the list in place and returns the list."),
+    ("contains", "contains(item: T) -> bool", "Returns `true` if `item` equals any element in the list."),
+    ("index_of", "index_of(item: T) -> int", "Returns the 0-based index of the first occurrence of `item`, or -1 if not found."),
+    ("slice", "slice(start: int, end: int = -1) -> List[T]", "Returns a sublist containing elements from `start` up to `end`. Supports negative indexing."),
+    ("join", "join(sep: str) -> str", "Joins string elements of the list using `sep` as delimiter."),
+    ("first", "first() -> T", "Returns the first element of the list, or `null` if empty."),
+    ("last", "last() -> T", "Returns the last element of the list, or `null` if empty."),
+    ("is_empty", "is_empty() -> bool", "Returns `true` if the list contains zero elements."),
+    ("len", "len() -> int", "Returns the number of elements currently in the list."),
+    ("map", "map(transform: (T) => U) -> List[U]", "Applies `transform` to each element and returns a new list of results."),
+];
+
+pub const INT_METHOD_DOCS: &[(&str, &str, &str)] = &[
+    ("abs", "abs() -> int", "Returns the absolute magnitude of the integer (|n|)."),
+    ("clamp", "clamp(min: int, max: int) -> int", "Restricts the integer within the closed interval `[min, max]`."),
+    ("min", "min(other: int) -> int", "Returns the smaller of this integer and `other`."),
+    ("max", "max(other: int) -> int", "Returns the larger of this integer and `other`."),
+    ("to_string", "to_string() -> str", "Converts the integer to its base-10 decimal string representation."),
+    ("to_str", "to_str() -> str", "Converts the integer to its decimal string representation (alias for `to_string`)."),
+    ("to_float", "to_float() -> float", "Converts the integer to a 64-bit IEEE 754 floating-point number."),
+    ("to_hex", "to_hex() -> str", "Converts the integer to a lowercase hexadecimal string with `0x` prefix."),
+    ("to_bin", "to_bin() -> str", "Converts the integer to a binary string with `0b` prefix."),
+    ("bit_length", "bit_length() -> int", "Returns the number of bits necessary to represent the integer in binary (excluding sign)."),
+];
+
+pub const FLOAT_METHOD_DOCS: &[(&str, &str, &str)] = &[
+    ("abs", "abs() -> float", "Returns the absolute magnitude of the float (|f|)."),
+    ("clamp", "clamp(min: float, max: float) -> float", "Restricts the float within the closed interval `[min, max]`."),
+    ("min", "min(other: float) -> float", "Returns the smaller of this float and `other`."),
+    ("max", "max(other: float) -> float", "Returns the larger of this float and `other`."),
+    ("round", "round() -> float", "Rounds the float to the nearest integer value."),
+    ("floor", "floor() -> float", "Rounds the float downward toward negative infinity (floor)."),
+    ("ceil", "ceil() -> float", "Rounds the float upward toward positive infinity (ceil)."),
+    ("trunc", "trunc() -> float", "Truncates the fractional part of the float toward zero."),
+    ("sqrt", "sqrt() -> float", "Computes the non-negative square root of the float."),
+    ("pow", "pow(exp: float) -> float", "Computes the float raised to the power of `exp`."),
+    ("to_string", "to_string() -> str", "Converts the float to its decimal string representation."),
+    ("to_str", "to_str() -> str", "Converts the float to its decimal string representation (alias for `to_string`)."),
+    ("to_int", "to_int() -> int", "Truncates the float toward zero and casts to a 64-bit signed integer."),
+];
+
+pub const BOOL_METHOD_DOCS: &[(&str, &str, &str)] = &[
+    ("toggle", "toggle() -> bool", "Returns the logical negation (`!b`) of the boolean value."),
+    ("to_string", "to_string() -> str", "Returns `\"true\"` or `\"false\"`."),
+    ("to_str", "to_str() -> str", "Returns `\"true\"` or `\"false\"` (alias for `to_string`)."),
+];
+
+pub const ALL_BUILTIN_METHOD_DOCS: &[(&str, &str, &str)] = &[
+    ("split", "split(sep: str = \" \") -> List[str]", "Splits string into a list of substrings separated by delimiter `sep`."),
+    ("join", "join(items: List[str]) -> str", "Joins elements of `items` into a single string using this string as delimiter."),
+    ("replace", "replace(old: str, new: str) -> str", "Returns a copy of the string with all occurrences of `old` replaced with `new`."),
+    ("trim", "trim() -> str", "Removes leading and trailing whitespace from the string."),
+    ("trim_start", "trim_start() -> str", "Removes leading whitespace from the string."),
+    ("trim_end", "trim_end() -> str", "Removes trailing whitespace from the string."),
+    ("to_upper", "to_upper() -> str", "Returns a copy of the string converted to uppercase."),
+    ("to_lower", "to_lower() -> str", "Returns a copy of the string converted to lowercase."),
+    ("starts_with", "starts_with(prefix: str) -> bool", "Returns `true` if the string starts with the given `prefix`."),
+    ("ends_with", "ends_with(suffix: str) -> bool", "Returns `true` if the string ends with the given `suffix`."),
+    ("contains", "contains(substr: str) -> bool", "Returns `true` if the string contains the specified `substr`."),
+    ("index_of", "index_of(substr: str) -> int", "Returns the 0-based index of the first occurrence of `substr`, or -1 if not found."),
+    ("last_index_of", "last_index_of(substr: str) -> int", "Returns the 0-based index of the last occurrence of `substr`, or -1 if not found."),
+    ("substring", "substring(start: int, end: int = -1) -> str", "Returns a substring from `start` up to `end`. Supports negative indexing."),
+    ("slice", "slice(start: int, end: int = -1) -> str", "Returns a substring from `start` up to `end`. Supports negative indexing."),
+    ("repeat", "repeat(count: int) -> str", "Returns a copy of the string repeated `count` times."),
+    ("pad_start", "pad_start(len: int, pad_char: str = \" \") -> str", "Prepends `pad_char` to the string until the total length reaches `len`."),
+    ("pad_end", "pad_end(len: int, pad_char: str = \" \") -> str", "Appends `pad_char` to the string until the total length reaches `len`."),
+    ("is_digit", "is_digit() -> bool", "Returns `true` if all characters in the string are ASCII digits (`0-9`)."),
+    ("is_alpha", "is_alpha() -> bool", "Returns `true` if all characters in the string are alphabetic (`a-z`, `A-Z`)."),
+    ("is_alphanumeric", "is_alphanumeric() -> bool", "Returns `true` if all characters in the string are alphanumeric (`0-9`, `a-z`, `A-Z`)."),
+    ("is_empty", "is_empty() -> bool", "Returns `true` if the string or collection contains zero characters/elements."),
+    ("char_at", "char_at(index: int) -> str", "Returns the 1-character string at the 0-based `index` (supports negative indexing)."),
+    ("chars", "chars() -> List[str]", "Returns a list containing each character of the string as a single-character string."),
+    ("to_int", "to_int() -> int", "Parses or converts value to a 64-bit signed integer."),
+    ("to_float", "to_float() -> float", "Parses or converts value to a 64-bit IEEE 754 floating-point number."),
+    ("to_string", "to_string() -> str", "Converts value to its string representation."),
+    ("to_str", "to_str() -> str", "Converts value to its string representation (alias for `to_string`)."),
+    ("append", "append(item: T) -> void", "Appends `item` to the end of the list in place."),
+    ("push", "push(item: T) -> void", "Appends `item` to the end of the list in place (alias for `append`)."),
+    ("add", "add(item: T) -> void", "Appends `item` to the end of the list in place (alias for `append`)."),
+    ("pop", "pop() -> T", "Removes and returns the last element of the list, or `null` if empty."),
+    ("insert", "insert(index: int, item: T) -> void", "Inserts `item` at 0-based `index` in place, shifting subsequent elements right."),
+    ("remove", "remove(index: int) -> T", "Removes and returns the element at 0-based `index`, shifting subsequent elements left."),
+    ("clear", "clear() -> void", "Removes all elements from the list in place, resetting length to 0."),
+    ("reverse", "reverse() -> List[T]", "Reverses the elements of the list in place and returns the list."),
+    ("first", "first() -> T", "Returns the first element of the list, or `null` if empty."),
+    ("last", "last() -> T", "Returns the last element of the list, or `null` if empty."),
+    ("abs", "abs() -> int | float", "Returns the absolute magnitude of the numeric value (|x|)."),
+    ("clamp", "clamp(min: T, max: T) -> T", "Restricts the numeric value within the closed interval `[min, max]`."),
+    ("min", "min(other: T) -> T", "Returns the smaller of this value and `other`."),
+    ("max", "max(other: T) -> T", "Returns the larger of this value and `other`."),
+    ("round", "round() -> float", "Rounds the float to the nearest integer value."),
+    ("floor", "floor() -> float", "Rounds the float downward toward negative infinity (floor)."),
+    ("ceil", "ceil() -> float", "Rounds the float upward toward positive infinity (ceil)."),
+    ("trunc", "trunc() -> float", "Truncates the fractional part of the float toward zero."),
+    ("sqrt", "sqrt() -> float", "Computes the non-negative square root of the float."),
+    ("pow", "pow(exp: float) -> float", "Computes the float raised to the power of `exp`."),
+    ("to_hex", "to_hex() -> str", "Converts the integer to a lowercase hexadecimal string with `0x` prefix."),
+    ("to_bin", "to_bin() -> str", "Converts the integer to a binary string with `0b` prefix."),
+    ("bit_length", "bit_length() -> int", "Returns the number of bits necessary to represent the integer in binary."),
+    ("toggle", "toggle() -> bool", "Returns the logical negation (`!b`) of the boolean value."),
 ];
 
 const POLYGLOT_DOCS: &[(&str, &str)] = &[

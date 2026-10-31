@@ -758,4 +758,68 @@ for t in transactions {
         assert!(resp_decl.contains("struct TransformFrame {"), "Declaration hover should show fields: {}", resp_decl);
         assert!(resp_decl.contains("weight: i64"));
     }
+
+    #[test]
+    fn test_builtin_type_methods_lsp_completion_hover_and_signature_help() {
+        let mut server = LspServer::new();
+        let uri = "file:///workspace/builtin_methods.pilot";
+        let code = "let text = \"hello\"\ntext.\nlet nums = [1, 2, 3]\nnums.\nlet n = 42\nn.\nlet p = text.split(\",\")\n";
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+            uri,
+            code.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+        );
+        server.handle_message(&did_open);
+
+        // 1. Dot-completion on string variable `text.` (line 1, char 5)
+        let comp_str_req = format!(
+            r#"{{"jsonrpc":"2.0","id":101,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":1,"character":5}}}}}}"#,
+            uri
+        );
+        let comp_str_resp = server.handle_message(&comp_str_req).expect("String dot-completion response");
+        assert!(comp_str_resp.contains("split"), "Expected 'split' in string completions, got: {}", comp_str_resp);
+        assert!(comp_str_resp.contains("replace"), "Expected 'replace' in string completions");
+        assert!(comp_str_resp.contains("trim"), "Expected 'trim' in string completions");
+        assert!(comp_str_resp.contains("starts_with"), "Expected 'starts_with' in string completions");
+        assert!(!comp_str_resp.contains("keyword"), "Dot completions should not contain keywords");
+
+        // 2. Dot-completion on list variable `nums.` (line 3, char 5)
+        let comp_list_req = format!(
+            r#"{{"jsonrpc":"2.0","id":102,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":3,"character":5}}}}}}"#,
+            uri
+        );
+        let comp_list_resp = server.handle_message(&comp_list_req).expect("List dot-completion response");
+        assert!(comp_list_resp.contains("append") || comp_list_resp.contains("push"), "Expected 'push' in list completions");
+        assert!(comp_list_resp.contains("pop"), "Expected 'pop' in list completions");
+        assert!(comp_list_resp.contains("reverse"), "Expected 'reverse' in list completions");
+        assert!(comp_list_resp.contains("slice"), "Expected 'slice' in list completions");
+
+        // 3. Dot-completion on int variable `n.` (line 5, char 2)
+        let comp_int_req = format!(
+            r#"{{"jsonrpc":"2.0","id":103,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":5,"character":2}}}}}}"#,
+            uri
+        );
+        let comp_int_resp = server.handle_message(&comp_int_req).expect("Int dot-completion response");
+        assert!(comp_int_resp.contains("abs"), "Expected 'abs' in int completions");
+        assert!(comp_int_resp.contains("clamp"), "Expected 'clamp' in int completions");
+        assert!(comp_int_resp.contains("to_hex"), "Expected 'to_hex' in int completions");
+        assert!(comp_int_resp.contains("to_bin"), "Expected 'to_bin' in int completions");
+
+        // 4. Hover over `split` in `let p = text.split(",")` (line 6, char 14)
+        let hover_split_req = format!(
+            r#"{{"jsonrpc":"2.0","id":104,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":6,"character":14}}}}}}"#,
+            uri
+        );
+        let hover_split_resp = server.handle_message(&hover_split_req).expect("Hover split response");
+        assert!(hover_split_resp.contains("split"), "Expected split hover, got: {}", hover_split_resp);
+        assert!(hover_split_resp.contains("Splits string into a list of substrings"), "Expected method doc in hover: {}", hover_split_resp);
+
+        // 5. Signature help inside `text.split(",")` (line 6, char 19)
+        let sig_split_req = format!(
+            r#"{{"jsonrpc":"2.0","id":105,"method":"textDocument/signatureHelp","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":6,"character":19}}}}}}"#,
+            uri
+        );
+        let sig_split_resp = server.handle_message(&sig_split_req).expect("Signature help split response");
+        assert!(sig_split_resp.contains("split(sep: str"), "Expected split signature help, got: {}", sig_split_resp);
+    }
 }
