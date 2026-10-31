@@ -705,9 +705,23 @@ impl LspServer {
                 } else {
                     "property"
                 };
-                let builtin_method_doc = get_builtin_method_doc(txt);
+                let is_primitive_target = target_str.contains("str")
+                    || target_str.contains("list")
+                    || target_str == "int"
+                    || target_str == "i64"
+                    || target_str == "i32"
+                    || target_str == "float"
+                    || target_str == "f64"
+                    || target_str == "bool";
+                let builtin_method_doc = if is_primitive_target {
+                    get_builtin_method_doc(txt)
+                } else {
+                    None
+                };
                 let extra_doc = if let Some((_, doc)) = builtin_method_doc {
                     format!("\n\n{}", doc)
+                } else if !is_primitive_target && target_str != "any" && !target_str.is_empty() {
+                    format!("\n\nDeclared on `{}`", target_str)
                 } else {
                     match txt {
                         "len" | "length" | "count" => "\n\nReturns the number of elements or bytes in the receiver.".to_string(),
@@ -1205,7 +1219,7 @@ impl LspServer {
 
         let mut is_dot = false;
         let mut receiver_ty_name: Option<String> = None;
-        let mut user_type_members: Vec<(String, String)> = Vec::new();
+        let mut user_type_members: Vec<(String, String, String, f64)> = Vec::new();
 
         if let (Some(file_id), Some(byte_offset)) = (file_id_opt, byte_offset_opt) {
             if let Some(src) = self.db.source_text(file_id) {
@@ -1249,28 +1263,80 @@ impl LspServer {
                                 let arena = &mod_analysis.arena;
                                 let analysis = &mod_analysis.analysis;
 
-                                for (idx, node) in arena.nodes.iter().enumerate() {
-                                    let nk = node.node_kind();
-                                    if matches!(nk, pilot_ast::NodeKind::LetStmt | pilot_ast::NodeKind::VarStmt) {
-                                        let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
-                                        if name == ident_name {
-                                            if let Some(&ty_id) = analysis.inferred_types.get(&(idx as u32)).or_else(|| analysis.inferred_types.get(&node.rhs)) {
-                                                receiver_ty_name = Some(analysis.types.display(ty_id));
+                                // 1. Check if receiver is `self` or `this` inside an enclosing class/struct/record
+                                if ident_name == "self" || ident_name == "this" {
+                                    for (c_idx, c_node) in arena.nodes.iter().enumerate() {
+                                        if matches!(c_node.node_kind(), pilot_ast::NodeKind::ClassDecl | pilot_ast::NodeKind::StructDecl | pilot_ast::NodeKind::RecordDecl) {
+                                            let c_span = arena.spans[c_idx];
+                                            if byte_offset >= c_span.start && byte_offset <= c_span.end {
+                                                let c_name = arena.interner.resolve(pilot_intern::SymbolId(c_node.lhs));
+                                                receiver_ty_name = Some(c_name.to_string());
                                                 break;
                                             }
                                         }
-                                    } else if nk == pilot_ast::NodeKind::FnDecl {
-                                        let fn_start = node.rhs;
-                                        let fn_len = node.flags as usize;
-                                        if fn_len > 0 {
-                                            let fn_children = arena.children_slice(fn_start, fn_len as u32);
-                                            for &p_id in &fn_children[1..] {
-                                                let p_node = *arena.node(pilot_ast::NodeId(p_id));
-                                                let p_name = arena.interner.resolve(pilot_intern::SymbolId(p_node.lhs));
-                                                if p_name == ident_name {
-                                                    if let Some(&ty_id) = analysis.inferred_types.get(&p_id) {
-                                                        receiver_ty_name = Some(analysis.types.display(ty_id));
+                                    }
+                                }
+
+                                // 2. Check if receiver is itself a class/struct/record name (e.g. `Apples.`)
+                                if receiver_ty_name.is_none() {
+                                    for c_node in &arena.nodes {
+                                        if matches!(c_node.node_kind(), pilot_ast::NodeKind::ClassDecl | pilot_ast::NodeKind::StructDecl | pilot_ast::NodeKind::RecordDecl | pilot_ast::NodeKind::InterfaceDecl) {
+                                            let c_name = arena.interner.resolve(pilot_intern::SymbolId(c_node.lhs));
+                                            if c_name == ident_name {
+                                                receiver_ty_name = Some(c_name.to_string());
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 3. Check variable declarations (`let a = ...`)
+                                if receiver_ty_name.is_none() {
+                                    for (idx, node) in arena.nodes.iter().enumerate() {
+                                        let nk = node.node_kind();
+                                        if matches!(nk, pilot_ast::NodeKind::LetStmt | pilot_ast::NodeKind::VarStmt) {
+                                            let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                                            if name == ident_name {
+                                                if let Some(&ty_id) = analysis.inferred_types.get(&(idx as u32)).or_else(|| analysis.inferred_types.get(&node.rhs)) {
+                                                    let d = analysis.types.display(ty_id);
+                                                    if d != "any" {
+                                                        receiver_ty_name = Some(d);
                                                         break;
+                                                    }
+                                                }
+                                                // Fallback: check if init expression was a constructor call `ClassName(...)`
+                                                let init_id = pilot_ast::NodeId(node.rhs);
+                                                if init_id.is_some() {
+                                                    let init_node = *arena.node(init_id);
+                                                    if init_node.node_kind() == pilot_ast::NodeKind::CallExpr {
+                                                        let c_slice = arena.children_slice(init_node.lhs, init_node.rhs);
+                                                        if !c_slice.is_empty() {
+                                                            let callee = *arena.node(pilot_ast::NodeId(c_slice[0]));
+                                                            if callee.node_kind() == pilot_ast::NodeKind::IdentExpr {
+                                                                let ctor_name = arena.interner.resolve(pilot_intern::SymbolId(callee.lhs));
+                                                                receiver_ty_name = Some(ctor_name.to_string());
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else if nk == pilot_ast::NodeKind::FnDecl {
+                                            let fn_start = node.rhs;
+                                            let fn_len = node.flags as usize;
+                                            if fn_len > 0 {
+                                                let fn_children = arena.children_slice(fn_start, fn_len as u32);
+                                                for &p_id in &fn_children[1..] {
+                                                    let p_node = *arena.node(pilot_ast::NodeId(p_id));
+                                                    let p_name = arena.interner.resolve(pilot_intern::SymbolId(p_node.lhs));
+                                                    if p_name == ident_name {
+                                                        if let Some(&ty_id) = analysis.inferred_types.get(&p_id) {
+                                                            let d = analysis.types.display(ty_id);
+                                                            if d != "any" {
+                                                                receiver_ty_name = Some(d);
+                                                                break;
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
@@ -1278,12 +1344,39 @@ impl LspServer {
                                     }
                                 }
 
+                                // 4. If receiver_ty_name is found, populate declared members from struct_fields & AST
                                 if let Some(ref ty_str) = receiver_ty_name {
-                                    for node in &arena.nodes {
+                                    if let Some(fields) = analysis.struct_fields.get(ty_str) {
+                                        for (f_name, f_ty) in fields {
+                                            let is_fn = matches!(analysis.types.get(analysis.types.prune(*f_ty)), pilot_analysis::TypeKind::Function { .. });
+                                            let sig = format!("{}: {}", f_name, analysis.types.display(*f_ty));
+                                            let kind_num = if is_fn { 2.0 } else { 5.0 };
+                                            let doc = format!("Declared on `{}`", ty_str);
+                                            user_type_members.push((f_name.clone(), sig, doc, kind_num));
+                                        }
+                                    }
+
+                                    for (c_idx, node) in arena.nodes.iter().enumerate() {
                                         let nk = node.node_kind();
-                                        if matches!(nk, pilot_ast::NodeKind::ClassDecl | pilot_ast::NodeKind::StructDecl | pilot_ast::NodeKind::RecordDecl) {
+                                        if matches!(nk, pilot_ast::NodeKind::ClassDecl | pilot_ast::NodeKind::StructDecl | pilot_ast::NodeKind::RecordDecl | pilot_ast::NodeKind::InterfaceDecl) {
                                             let c_name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
                                             if c_name == ty_str {
+                                                if let Some(r_fields) = arena.record_fields.get(&(c_idx as u32)) {
+                                                    for &(f_sym, f_ty_node) in r_fields {
+                                                        let f_name = arena.interner.resolve(f_sym).to_string();
+                                                        if !user_type_members.iter().any(|m| m.0 == f_name) {
+                                                            let f_ty = if f_ty_node.is_some() {
+                                                                analysis.inferred_types.get(&f_ty_node.0).copied().unwrap_or(pilot_analysis::TypeId::ANY)
+                                                            } else {
+                                                                pilot_analysis::TypeId::ANY
+                                                            };
+                                                            let sig = format!("{}: {}", f_name, analysis.types.display(f_ty));
+                                                            let doc = format!("Record field on `{}`", c_name);
+                                                            user_type_members.push((f_name, sig, doc, 5.0));
+                                                        }
+                                                    }
+                                                }
+
                                                 let body_id = pilot_ast::NodeId(node.rhs);
                                                 if body_id.is_some() {
                                                     let body_node = *arena.node(body_id);
@@ -1292,11 +1385,63 @@ impl LspServer {
                                                         for &child_id in children {
                                                             let child_node = *arena.node(pilot_ast::NodeId(child_id));
                                                             if child_node.node_kind() == pilot_ast::NodeKind::FnDecl {
-                                                                let m_name = arena.interner.resolve(pilot_intern::SymbolId(child_node.lhs));
-                                                                user_type_members.push((m_name.to_string(), "Method".to_string()));
+                                                                let m_name = arena.interner.resolve(pilot_intern::SymbolId(child_node.lhs)).to_string();
+                                                                if !user_type_members.iter().any(|m| m.0 == m_name) {
+                                                                    let fn_start = child_node.rhs;
+                                                                    let fn_len = child_node.flags as usize;
+                                                                    let mut param_strs = Vec::new();
+                                                                    if fn_len > 0 {
+                                                                        let fn_children = arena.children_slice(fn_start, fn_len as u32);
+                                                                        for &p_id in &fn_children[1..] {
+                                                                            let p_node = *arena.node(pilot_ast::NodeId(p_id));
+                                                                            let p_name = arena.interner.resolve(pilot_intern::SymbolId(p_node.lhs));
+                                                                            if p_name == "self" || p_name == "this" {
+                                                                                continue;
+                                                                            }
+                                                                            let p_ty = analysis.inferred_types.get(&p_id).copied().unwrap_or(pilot_analysis::TypeId::ANY);
+                                                                            param_strs.push(format!("{}: {}", p_name, analysis.types.display(p_ty)));
+                                                                        }
+                                                                    }
+                                                                    let ret_ty = analysis.inferred_types.get(&child_id).copied().unwrap_or(pilot_analysis::TypeId::ANY);
+                                                                    let ret_str = if let pilot_analysis::TypeKind::Function { ret, .. } = analysis.types.get(analysis.types.prune(ret_ty)) {
+                                                                        analysis.types.display(*ret)
+                                                                    } else {
+                                                                        analysis.types.display(ret_ty)
+                                                                    };
+                                                                    let sig = format!("def {}({}) -> {}", m_name, param_strs.join(", "), ret_str);
+                                                                    let doc = format!("Method declared on `{}`", c_name);
+                                                                    user_type_members.push((m_name, sig, doc, 2.0));
+                                                                }
                                                             } else if matches!(child_node.node_kind(), pilot_ast::NodeKind::LetStmt | pilot_ast::NodeKind::VarStmt) {
-                                                                let f_name = arena.interner.resolve(pilot_intern::SymbolId(child_node.lhs));
-                                                                user_type_members.push((f_name.to_string(), "Property".to_string()));
+                                                                let f_name = arena.interner.resolve(pilot_intern::SymbolId(child_node.lhs)).to_string();
+                                                                if !user_type_members.iter().any(|m| m.0 == f_name) {
+                                                                    let prop_ty = analysis.inferred_types.get(&child_id).copied().unwrap_or(pilot_analysis::TypeId::ANY);
+                                                                    let sig = format!("{}: {}", f_name, analysis.types.display(prop_ty));
+                                                                    let doc = format!("Property on `{}`", c_name);
+                                                                    user_type_members.push((f_name, sig, doc, 5.0));
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else if nk == pilot_ast::NodeKind::ExtendDecl {
+                                            let ext_name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                                            if ext_name == ty_str {
+                                                let body_id = pilot_ast::NodeId(node.rhs);
+                                                if body_id.is_some() {
+                                                    let body_node = *arena.node(body_id);
+                                                    if body_node.node_kind() == pilot_ast::NodeKind::BlockExpr {
+                                                        let children = arena.children_slice(body_node.lhs, body_node.rhs);
+                                                        for &child_id in children {
+                                                            let child_node = *arena.node(pilot_ast::NodeId(child_id));
+                                                            if child_node.node_kind() == pilot_ast::NodeKind::FnDecl {
+                                                                let m_name = arena.interner.resolve(pilot_intern::SymbolId(child_node.lhs)).to_string();
+                                                                if !user_type_members.iter().any(|m| m.0 == m_name) {
+                                                                    let sig = format!("def {}(...) -> any", m_name);
+                                                                    let doc = format!("Extension method on `{}`", ext_name);
+                                                                    user_type_members.push((m_name, sig, doc, 2.0));
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -1314,6 +1459,51 @@ impl LspServer {
 
         if is_dot {
             let normalized = receiver_ty_name.as_deref().unwrap_or("").to_lowercase();
+            let is_user_class = !user_type_members.is_empty()
+                || (!normalized.is_empty()
+                    && !normalized.contains("str")
+                    && !normalized.contains("list")
+                    && normalized != "int"
+                    && normalized != "i64"
+                    && normalized != "i32"
+                    && normalized != "u64"
+                    && normalized != "u32"
+                    && normalized != "uint"
+                    && normalized != "float"
+                    && normalized != "f64"
+                    && normalized != "f32"
+                    && normalized != "bool"
+                    && normalized != "any");
+
+            if is_user_class {
+                // 1. User-defined methods and properties
+                for (name, sig, doc, kind_num) in user_type_members {
+                    items.push(JsonValue::Object(vec![
+                        ("label".to_string(), JsonValue::String(name.clone())),
+                        ("kind".to_string(), JsonValue::Number(kind_num)),
+                        ("detail".to_string(), JsonValue::String(sig)),
+                        ("documentation".to_string(), JsonValue::String(doc)),
+                        ("insertText".to_string(), JsonValue::String(name)),
+                    ]));
+                }
+
+                // 2. Universal Root Object methods inherited by all Pilot classes
+                for (name, sig, summary) in ROOT_OBJECT_METHOD_DOCS.iter() {
+                    if !items.iter().any(|it| it.get("label").and_then(|l| l.as_str()) == Some(name)) {
+                        items.push(JsonValue::Object(vec![
+                            ("label".to_string(), JsonValue::String(name.to_string())),
+                            ("kind".to_string(), JsonValue::Number(2.0)), // Method
+                            ("detail".to_string(), JsonValue::String(sig.to_string())),
+                            ("documentation".to_string(), JsonValue::String(summary.to_string())),
+                            ("insertText".to_string(), JsonValue::String(name.to_string())),
+                        ]));
+                    }
+                }
+
+                return JsonValue::Array(items);
+            }
+
+            // Primitive types
             let method_docs: &[(&str, &str, &str)] = if normalized.contains("str") {
                 STR_METHOD_DOCS
             } else if normalized.contains("list") {
@@ -1325,7 +1515,7 @@ impl LspServer {
             } else if normalized == "bool" {
                 BOOL_METHOD_DOCS
             } else {
-                ALL_BUILTIN_METHOD_DOCS
+                ROOT_OBJECT_METHOD_DOCS
             };
 
             for (name, sig, summary) in method_docs.iter() {
@@ -1335,15 +1525,6 @@ impl LspServer {
                     ("detail".to_string(), JsonValue::String(sig.to_string())),
                     ("documentation".to_string(), JsonValue::String(summary.to_string())),
                     ("insertText".to_string(), JsonValue::String(name.to_string())),
-                ]));
-            }
-
-            for (m_name, kind_str) in user_type_members {
-                let kind_num = if kind_str == "Method" { 2.0 } else { 5.0 };
-                items.push(JsonValue::Object(vec![
-                    ("label".to_string(), JsonValue::String(m_name)),
-                    ("kind".to_string(), JsonValue::Number(kind_num)),
-                    ("detail".to_string(), JsonValue::String(kind_str)),
                 ]));
             }
 
@@ -3233,6 +3414,7 @@ pub const STR_METHOD_DOCS: &[(&str, &str, &str)] = &[
     ("to_float", "to_float() -> float", "Parses string to a 64-bit IEEE 754 floating-point number."),
     ("to_string", "to_string() -> str", "Returns a copy of the string."),
     ("len", "len() -> int", "Returns the length of the string in characters."),
+    ("range", "range(end: str, inclusive: bool = true) -> List[str]", "Generates a sequence of strings from this string to `end` using bijective alphabetical enumeration (supports `\"a\"..\"z\"`, `\"z\"..\"a\"`, `\"a\"..\"zzza\"`, `\"a\"..\"Z\"`, `\"A\"..\"z\"`)."),
 ];
 
 pub const LIST_METHOD_DOCS: &[(&str, &str, &str)] = &[
@@ -3288,6 +3470,15 @@ pub const BOOL_METHOD_DOCS: &[(&str, &str, &str)] = &[
     ("toggle", "toggle() -> bool", "Returns the logical negation (`!b`) of the boolean value."),
     ("to_string", "to_string() -> str", "Returns `\"true\"` or `\"false\"`."),
     ("to_str", "to_str() -> str", "Returns `\"true\"` or `\"false\"` (alias for `to_string`)."),
+];
+
+pub const ROOT_OBJECT_METHOD_DOCS: &[(&str, &str, &str)] = &[
+    ("to_string", "to_string() -> str", "Returns the string representation of this object."),
+    ("type_of", "type_of() -> str", "Returns the runtime type name of this object."),
+    ("hash", "hash() -> int", "Returns the structural hash code of this object."),
+    ("clone", "clone() -> any", "Performs a shallow copy of this object."),
+    ("equals", "equals(other: any) -> bool", "Performs structural equality comparison with `other`."),
+    ("to_json", "to_json(formatted: bool = false) -> str", "Serializes this object instance directly to a JSON string."),
 ];
 
 pub const ALL_BUILTIN_METHOD_DOCS: &[(&str, &str, &str)] = &[

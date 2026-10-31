@@ -986,6 +986,141 @@ static inline PilotList* pilot_rt_str_split(const char* s, const char* sep) {
     return list;
 }
 
+static inline PilotList* pilot_rt_str_range(const char* start, const char* end, bool inclusive) {
+    if (!start || !end) return pilot_rt_list_new();
+    size_t s_len = strlen(start);
+    size_t e_len = strlen(end);
+    if (s_len == 0 || e_len == 0) return pilot_rt_list_new();
+
+    char s0 = start[0];
+    char e0 = end[0];
+
+    bool s_lower = (s0 >= 'a' && s0 <= 'z');
+    bool s_upper = (s0 >= 'A' && s0 <= 'Z');
+    bool s_digit = (s0 >= '0' && s0 <= '9');
+
+    bool e_lower = (e0 >= 'a' && e0 <= 'z');
+    bool e_upper = (e0 >= 'A' && e0 <= 'Z');
+    bool e_digit = (e0 >= '0' && e0 <= '9');
+
+    char alpha[64];
+    size_t M = 0;
+
+    if (s_digit && e_digit) {
+        for (char c = '0'; c <= '9'; c++) alpha[M++] = c;
+    } else if (s_lower && e_lower) {
+        for (char c = 'a'; c <= 'z'; c++) alpha[M++] = c;
+    } else if (s_upper && e_upper) {
+        for (char c = 'A'; c <= 'Z'; c++) alpha[M++] = c;
+    } else if (s_lower && e_upper) {
+        if (s0 <= 'm') {
+            for (char c = 'a'; c <= 'z'; c++) alpha[M++] = c;
+            for (char c = 'A'; c <= 'Z'; c++) alpha[M++] = c;
+        } else {
+            for (char c = 'A'; c <= 'Z'; c++) alpha[M++] = c;
+            for (char c = 'a'; c <= 'z'; c++) alpha[M++] = c;
+        }
+    } else if (s_upper && e_lower) {
+        if (s0 <= 'M') {
+            for (char c = 'A'; c <= 'Z'; c++) alpha[M++] = c;
+            for (char c = 'a'; c <= 'z'; c++) alpha[M++] = c;
+        } else {
+            for (char c = 'a'; c <= 'z'; c++) alpha[M++] = c;
+            for (char c = 'A'; c <= 'Z'; c++) alpha[M++] = c;
+        }
+    } else {
+        for (char c = 'a'; c <= 'z'; c++) alpha[M++] = c;
+    }
+
+    if (M == 0) return pilot_rt_list_new();
+
+    uint64_t s_rank = 0;
+    uint64_t s_pow = 1;
+    for (size_t k = 1; k < s_len; k++) {
+        s_pow *= M;
+        s_rank += s_pow;
+    }
+    uint64_t s_offset = 0;
+    for (size_t i = 0; i < s_len; i++) {
+        int64_t idx = -1;
+        for (size_t k = 0; k < M; k++) { if (alpha[k] == start[i]) { idx = (int64_t)k; break; } }
+        if (idx < 0) idx = 0;
+        s_offset = s_offset * M + (uint64_t)idx;
+    }
+    s_rank += s_offset;
+
+    uint64_t e_rank = 0;
+    uint64_t e_pow = 1;
+    for (size_t k = 1; k < e_len; k++) {
+        e_pow *= M;
+        e_rank += e_pow;
+    }
+    uint64_t e_offset = 0;
+    for (size_t i = 0; i < e_len; i++) {
+        int64_t idx = -1;
+        for (size_t k = 0; k < M; k++) { if (alpha[k] == end[i]) { idx = (int64_t)k; break; } }
+        if (idx < 0) idx = 0;
+        e_offset = e_offset * M + (uint64_t)idx;
+    }
+    e_rank += e_offset;
+
+    PilotList* list = pilot_rt_list_new();
+
+    if (s_rank <= e_rank) {
+        uint64_t limit = inclusive ? e_rank : (e_rank > 0 ? e_rank - 1 : 0);
+        if (inclusive || e_rank > s_rank) {
+            for (uint64_t r = s_rank; r <= limit; r++) {
+                uint64_t _r = r;
+                size_t _L = 1;
+                uint64_t _p = M;
+                while (_r >= _p) {
+                    _r -= _p;
+                    _L++;
+                    _p *= M;
+                }
+                char* _res = (char*)malloc(_L + 1);
+                if (_res) {
+                    _res[_L] = '\0';
+                    for (size_t _j = 0; _j < _L; _j++) {
+                        _res[_L - 1 - _j] = alpha[_r % M];
+                        _r /= M;
+                    }
+                    pilot_rt_list_push(list, _res);
+                }
+                if (list->len >= 1000000) break;
+            }
+        }
+    } else {
+        uint64_t limit = inclusive ? e_rank : e_rank + 1;
+        if (inclusive || s_rank > e_rank) {
+            uint64_t r = s_rank;
+            while (1) {
+                uint64_t _r = r;
+                size_t _L = 1;
+                uint64_t _p = M;
+                while (_r >= _p) {
+                    _r -= _p;
+                    _L++;
+                    _p *= M;
+                }
+                char* _res = (char*)malloc(_L + 1);
+                if (_res) {
+                    _res[_L] = '\0';
+                    for (size_t _j = 0; _j < _L; _j++) {
+                        _res[_L - 1 - _j] = alpha[_r % M];
+                        _r /= M;
+                    }
+                    pilot_rt_list_push(list, _res);
+                }
+                if (list->len >= 1000000 || r == limit) break;
+                r--;
+            }
+        }
+    }
+
+    return list;
+}
+
 static inline char* pilot_rt_str_concat(const char* s1, const char* s2) {
     const char* str1 = s1 ? s1 : "";
     const char* str2 = s2 ? s2 : "";

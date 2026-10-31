@@ -169,6 +169,142 @@ impl PilotStdlibIntrinsics {
         s.trim().parse::<i64>().ok()
     }
 
+    /// Generates a sequence of strings from `start` to `end` using bijective alphabetical enumeration.
+    ///
+    /// Supports:
+    /// - `"a".."z"`: 26 lowercase characters
+    /// - `"z".."a"`: 26 lowercase characters in reverse
+    /// - `"a".."zzza"`: Bijective base-26 shortlex combinations (`"a"`..`"z"`, `"aa"`..`"zz"`, `"aaa"`..`"zzz"`, `"aaaa"`..`"zzza"`)
+    /// - `"a".."Z"`: 52 combinations from `"a"`..`"z"` followed by `"A"`..`"Z"`
+    /// - `"A".."z"`: 52 combinations from `"A"`..`"Z"` followed by `"a"`..`"z"`
+    /// - `"Z".."a"`: 52 combinations in reverse from `"Z"`..`"A"` followed by `"z"`..`"a"`
+    /// - `"z".."A"`: 52 combinations in reverse from `"z"`..`"a"` followed by `"Z"`..`"A"`
+    pub fn str_range(start: &str, end: &str, inclusive: bool) -> Vec<String> {
+        if start.is_empty() || end.is_empty() {
+            return Vec::new();
+        }
+
+        let s0 = start.chars().next().unwrap();
+        let e0 = end.chars().next().unwrap();
+
+        let s_lower = s0.is_ascii_lowercase();
+        let s_upper = s0.is_ascii_uppercase();
+        let s_digit = s0.is_ascii_digit();
+
+        let e_lower = e0.is_ascii_lowercase();
+        let e_upper = e0.is_ascii_uppercase();
+        let e_digit = e0.is_ascii_digit();
+
+        let mut alpha = Vec::new();
+
+        if s_digit && e_digit {
+            for c in '0'..='9' { alpha.push(c); }
+        } else if s_lower && e_lower {
+            for c in 'a'..='z' { alpha.push(c); }
+        } else if s_upper && e_upper {
+            for c in 'A'..='Z' { alpha.push(c); }
+        } else if s_lower && e_upper {
+            if s0 <= 'm' {
+                // "a".."Z": a..z then A..Z (52 combinations)
+                for c in 'a'..='z' { alpha.push(c); }
+                for c in 'A'..='Z' { alpha.push(c); }
+            } else {
+                // "z".."A": reverse of A..z -> alphabet is A..Z then a..z
+                for c in 'A'..='Z' { alpha.push(c); }
+                for c in 'a'..='z' { alpha.push(c); }
+            }
+        } else if s_upper && e_lower {
+            if s0 <= 'M' {
+                // "A".."z": A..Z then a..z (52 combinations)
+                for c in 'A'..='Z' { alpha.push(c); }
+                for c in 'a'..='z' { alpha.push(c); }
+            } else {
+                // "Z".."a": reverse of a..Z -> alphabet is a..z then A..Z
+                for c in 'a'..='z' { alpha.push(c); }
+                for c in 'A'..='Z' { alpha.push(c); }
+            }
+        } else {
+            for c in 'a'..='z' { alpha.push(c); }
+        }
+
+        let m = alpha.len() as u64;
+        if m == 0 {
+            return Vec::new();
+        }
+
+        let str_to_rank = |s: &str| -> Option<u64> {
+            let s_chars: Vec<char> = s.chars().collect();
+            let l = s_chars.len();
+            if l == 0 { return None; }
+            let mut rank: u64 = 0;
+            let mut power: u64 = 1;
+            for _ in 1..l {
+                power = power.checked_mul(m)?;
+                rank = rank.checked_add(power)?;
+            }
+            let mut offset: u64 = 0;
+            for &c in &s_chars {
+                let idx = alpha.iter().position(|&x| x == c)? as u64;
+                offset = offset.checked_mul(m)?.checked_add(idx)?;
+            }
+            rank.checked_add(offset)
+        };
+
+        let rank_to_str = |mut rank: u64| -> String {
+            let mut l = 1;
+            let mut power = m;
+            while rank >= power {
+                rank -= power;
+                l += 1;
+                match power.checked_mul(m) {
+                    Some(next) => power = next,
+                    None => break,
+                }
+            }
+            let mut digits = Vec::with_capacity(l);
+            for _ in 0..l {
+                digits.push((rank % m) as usize);
+                rank /= m;
+            }
+            digits.reverse();
+            digits.into_iter().map(|d| alpha[d]).collect()
+        };
+
+        let s_rank = match str_to_rank(start) {
+            Some(r) => r,
+            None => return Vec::new(),
+        };
+        let e_rank = match str_to_rank(end) {
+            Some(r) => r,
+            None => return Vec::new(),
+        };
+
+        let mut res = Vec::new();
+        const MAX_ITEMS: usize = 1_000_000;
+
+        if s_rank <= e_rank {
+            let limit = if inclusive { e_rank } else { if e_rank > 0 { e_rank - 1 } else { 0 } };
+            if inclusive || e_rank > s_rank {
+                for r in s_rank..=limit {
+                    res.push(rank_to_str(r));
+                    if res.len() >= MAX_ITEMS { break; }
+                }
+            }
+        } else {
+            let limit = if inclusive { e_rank } else { e_rank + 1 };
+            if inclusive || s_rank > e_rank {
+                let mut r = s_rank;
+                loop {
+                    res.push(rank_to_str(r));
+                    if res.len() >= MAX_ITEMS || r == limit { break; }
+                    r -= 1;
+                }
+            }
+        }
+
+        res
+    }
+
     pub fn str_to_float(s: &str) -> Option<f64> {
         s.trim().parse::<f64>().ok()
     }

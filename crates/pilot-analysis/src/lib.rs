@@ -807,4 +807,22 @@ def test_builtins() {
         let errors: Vec<_> = result.diagnostics.iter().filter(|d| d.severity == DiagnosticSeverity::Error).collect();
         assert!(errors.is_empty(), "Expected 0 errors on all_syntax.pilot, got: {:?}", errors);
     }
+
+    #[test]
+    fn test_string_range_type_inference() {
+        let code = r#"
+def check_ranges() {
+    let forward = "a".."z"
+    let reverse = "z".."a"
+    let mixed = "a".."Z"
+    let big = "a".."zzza"
+    for ch in "a".."z" {
+        let upper = ch.to_upper()
+    }
+}
+"#;
+        let arena = pilot_parser::parse(code);
+        let result = AnalysisPipeline::analyze(&arena, arena.root);
+        assert!(result.is_ok(), "Expected clean string range analysis, got: {:?}", result.diagnostics);
+    }
 }

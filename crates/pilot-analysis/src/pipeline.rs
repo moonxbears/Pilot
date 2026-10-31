@@ -16,6 +16,7 @@ pub struct AnalysisResult {
     pub diagnostics: Vec<AnalysisDiagnostic>,
     pub types: TypeArena,
     pub inferred_types: HashMap<u32, TypeId>,
+    pub struct_fields: HashMap<String, Vec<(String, TypeId)>>,
 }
 
 impl AnalysisResult {
@@ -125,6 +126,7 @@ impl AnalysisPipeline {
             diagnostics,
             types: infer_engine.types,
             inferred_types: infer_engine.inferred_node_types,
+            struct_fields: infer_engine.struct_fields,
         }
     }
 }

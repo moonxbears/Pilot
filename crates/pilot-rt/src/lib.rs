@@ -238,4 +238,69 @@ mod tests {
         assert_eq!(resp.status, 200);
         assert_eq!(resp.text(), "{\"status\":\"ok\"}");
     }
+
+    #[test]
+    fn test_str_range_combinations() {
+        // 1. Single letter lowercase a..z (26 elements)
+        let a_to_z = PilotStdlibIntrinsics::str_range("a", "z", true);
+        assert_eq!(a_to_z.len(), 26);
+        assert_eq!(a_to_z.first().unwrap(), "a");
+        assert_eq!(a_to_z.last().unwrap(), "z");
+
+        // 2. Reverse z..a (26 elements)
+        let z_to_a = PilotStdlibIntrinsics::str_range("z", "a", true);
+        assert_eq!(z_to_a.len(), 26);
+        assert_eq!(z_to_a.first().unwrap(), "z");
+        assert_eq!(z_to_a.last().unwrap(), "a");
+        assert_eq!(z_to_a[1], "y");
+
+        // 3. Multi-character bijective combinations: a..aa (27 elements)
+        let a_to_aa = PilotStdlibIntrinsics::str_range("a", "aa", true);
+        assert_eq!(a_to_aa.len(), 27);
+        assert_eq!(a_to_aa[25], "z");
+        assert_eq!(a_to_aa[26], "aa");
+
+        // 4. a..zzza transitions from a..z (length 1), aa..zz (length 2), aaa..zzz (length 3), up to zzza (length 4)
+        let a_to_ab = PilotStdlibIntrinsics::str_range("a", "ab", true);
+        assert_eq!(a_to_ab.len(), 28);
+        assert_eq!(a_to_ab[25], "z");
+        assert_eq!(a_to_ab[26], "aa");
+        assert_eq!(a_to_ab[27], "ab");
+
+        // 5. a..Z -> 52 combinations: a..z then A..Z
+        let a_to_big_z = PilotStdlibIntrinsics::str_range("a", "Z", true);
+        assert_eq!(a_to_big_z.len(), 52);
+        assert_eq!(a_to_big_z[0], "a");
+        assert_eq!(a_to_big_z[25], "z");
+        assert_eq!(a_to_big_z[26], "A");
+        assert_eq!(a_to_big_z[51], "Z");
+
+        // 6. A..z -> 52 combinations: A..Z then a..z
+        let big_a_to_z = PilotStdlibIntrinsics::str_range("A", "z", true);
+        assert_eq!(big_a_to_z.len(), 52);
+        assert_eq!(big_a_to_z[0], "A");
+        assert_eq!(big_a_to_z[25], "Z");
+        assert_eq!(big_a_to_z[26], "a");
+        assert_eq!(big_a_to_z[51], "z");
+
+        // 7. Z..a -> reverse of a..Z: Z..A then z..a
+        let rev_z_to_a = PilotStdlibIntrinsics::str_range("Z", "a", true);
+        assert_eq!(rev_z_to_a.len(), 52);
+        assert_eq!(rev_z_to_a[0], "Z");
+        assert_eq!(rev_z_to_a[25], "A");
+        assert_eq!(rev_z_to_a[26], "z");
+        assert_eq!(rev_z_to_a[51], "a");
+
+        // 8. z..A -> reverse of A..z: z..a then Z..A
+        let rev_small_z_to_big_a = PilotStdlibIntrinsics::str_range("z", "A", true);
+        assert_eq!(rev_small_z_to_big_a.len(), 52);
+        assert_eq!(rev_small_z_to_big_a[0], "z");
+        assert_eq!(rev_small_z_to_big_a[25], "a");
+        assert_eq!(rev_small_z_to_big_a[26], "Z");
+        assert_eq!(rev_small_z_to_big_a[51], "A");
+
+        // 9. Half-open a..<c (a, b)
+        let half_open = PilotStdlibIntrinsics::str_range("a", "c", false);
+        assert_eq!(half_open, vec!["a", "b"]);
+    }
 }

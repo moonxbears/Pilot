@@ -740,6 +740,8 @@ impl TypeInferenceEngine {
             && arena.node(NodeId(p_node.rhs)).node_kind().is_type_spec();
         if p_has_type {
             self.resolve_type_spec(arena, NodeId(p_node.rhs))
+        } else if (p_name == "self" || p_name == "this") && self.lookup_var(&p_name).is_some() {
+            self.lookup_var(&p_name).unwrap()
         } else {
             let mut accessed_fields = Vec::new();
             self.collect_member_fields(arena, body_node, &p_name, &mut accessed_fields);
@@ -1053,6 +1055,21 @@ impl TypeInferenceEngine {
                         rhs_ty
                     } else {
                         lhs_ty
+                    }
+                } else if op == 23 || op == 24 {
+                    // BinaryOp::RangeInclusive (..) and BinaryOp::RangeHalfOpen (..<)
+                    if p_lhs == TypeId::STR && p_rhs == TypeId::STR {
+                        let res = self.types.list_of(TypeId::STR);
+                        self.inferred_node_types.insert(node_id.0, res);
+                        return res;
+                    } else if p_lhs.is_integer() || p_rhs.is_integer() {
+                        let res = self.types.list_of(TypeId::I64);
+                        self.inferred_node_types.insert(node_id.0, res);
+                        return res;
+                    } else {
+                        let res = self.types.list_of(p_lhs);
+                        self.inferred_node_types.insert(node_id.0, res);
+                        return res;
                     }
                 } else {
                     match self.types.unify(lhs_ty, rhs_ty) {
@@ -1792,6 +1809,7 @@ impl TypeInferenceEngine {
                     }
                     TypeKind::RowRecord { .. } => callee_ty,
                     TypeKind::Adt { .. } => callee_ty,
+                    TypeKind::Primitive(ref name) if self.type_defs.contains_key(name) || self.struct_fields.contains_key(name) => callee_ty,
                     _ => TypeId::ANY,
                 };
                 self.inferred_node_types.insert(node_id.0, res);

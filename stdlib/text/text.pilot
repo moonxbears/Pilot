@@ -229,3 +229,13 @@ def pad_right(s: str, width: i64, fill_char: str = " ") -> str {
     let ch = if len(fill_char) > 0 { __str_slice(fill_char, 0, 1) } else { " " };
     return s + (ch * (width - cur));
 }
+
+// Generates a sequence of strings from `start` to `end` using bijective alphabetical enumeration.
+// Supports: "a".."z", "z".."a", "a".."zzza", "a".."Z" (52 combos), "A".."z", "Z".."a", "z".."A".
+def str_range(start: str, end: str, inclusive: bool = true) {
+    if inclusive {
+        return start..end;
+    } else {
+        return start..<end;
+    }
+}

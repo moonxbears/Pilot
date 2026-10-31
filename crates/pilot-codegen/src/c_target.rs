@@ -1400,6 +1400,16 @@ impl<'a> CGenContext<'a> {
                         return format!("pilot_rt_str_concat({}, {})", s_lhs, s_rhs);
                     }
                 }
+                if node.flags == 23 || node.flags == 24 {
+                    let lhs_id = NodeId(node.lhs);
+                    let rhs_id = NodeId(node.rhs);
+                    let is_inclusive = if node.flags == 23 { "true" } else { "false" };
+                    if self.is_string_expr(lhs_id, &lhs) || self.is_string_expr(rhs_id, &rhs) {
+                        let s_lhs = self.to_string_c_code(lhs_id, &lhs);
+                        let s_rhs = self.to_string_c_code(rhs_id, &rhs);
+                        return format!("pilot_rt_str_range({}, {}, {})", s_lhs, s_rhs, is_inclusive);
+                    }
+                }
                 format!("({} {} {})", lhs, op, rhs)
             }
             NodeKind::UnaryExpr => {

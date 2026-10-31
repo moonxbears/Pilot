@@ -822,4 +822,67 @@ for t in transactions {
         let sig_split_resp = server.handle_message(&sig_split_req).expect("Signature help split response");
         assert!(sig_split_resp.contains("split(sep: str"), "Expected split signature help, got: {}", sig_split_resp);
     }
+
+    #[test]
+    fn test_user_class_completion_context_isolation() {
+        let mut server = LspServer::new();
+        let uri = "file:///workspace/apples.pilot";
+        let code = "class Apples {\n    var variety: str = \"Honeycrisp\"\n    var count: int = 10\n    def pick(self, amount: int) -> int {\n        self.\n        return amount\n    }\n}\nlet a = Apples()\na.\n";
+        // Line 0: class Apples {
+        // Line 1:     var variety: str = "Honeycrisp"
+        // Line 2:     var count: int = 10
+        // Line 3:     def pick(self, amount: int) -> int {
+        // Line 4:         self.
+        // Line 5:         return amount
+        // Line 6:     }
+        // Line 7: }
+        // Line 8: let a = Apples()
+        // Line 9: a.
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+            uri,
+            code.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+        );
+        server.handle_message(&did_open);
+
+        // Test 1: Dot-completion on user class instance `a.` (line 9, char 2)
+        let comp_req = format!(
+            r#"{{"jsonrpc":"2.0","id":201,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":9,"character":2}}}}}}"#,
+            uri
+        );
+        let comp_resp = server.handle_message(&comp_req).expect("User class dot-completion response");
+
+        // 1a. Must include declared class members
+        assert!(comp_resp.contains("variety"), "Expected 'variety' in Apples completion, got: {}", comp_resp);
+        assert!(comp_resp.contains("count"), "Expected 'count' in Apples completion");
+        assert!(comp_resp.contains("pick"), "Expected 'pick' in Apples completion");
+
+        // 1b. Must include root object methods
+        assert!(comp_resp.contains("to_string"), "Expected 'to_string' root method in Apples completion");
+        assert!(comp_resp.contains("type_of"), "Expected 'type_of' root method in Apples completion");
+        assert!(comp_resp.contains("hash"), "Expected 'hash' root method in Apples completion");
+        assert!(comp_resp.contains("to_json"), "Expected 'to_json' root method in Apples completion");
+
+        // 1c. Must NOT leak primitive methods from string, list, int, float, bool
+        assert!(!comp_resp.contains("\"split\""), "Apples must not show string method 'split': {}", comp_resp);
+        assert!(!comp_resp.contains("\"replace\""), "Apples must not show string method 'replace'");
+        assert!(!comp_resp.contains("\"clamp\""), "Apples must not show int method 'clamp'");
+        assert!(!comp_resp.contains("\"reverse\""), "Apples must not show list method 'reverse'");
+        assert!(!comp_resp.contains("\"toggle\""), "Apples must not show bool method 'toggle'");
+        assert!(!comp_resp.contains("\"push\""), "Apples must not show list method 'push'");
+        assert!(!comp_resp.contains("\"pop\""), "Apples must not show list method 'pop'");
+        assert!(!comp_resp.contains("\"abs\""), "Apples must not show math method 'abs'");
+
+        // Test 2: Dot-completion on `self.` inside method body (line 4, char 13)
+        let comp_self_req = format!(
+            r#"{{"jsonrpc":"2.0","id":202,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":4,"character":13}}}}}}"#,
+            uri
+        );
+        let comp_self_resp = server.handle_message(&comp_self_req).expect("self dot-completion response");
+        assert!(comp_self_resp.contains("variety"), "Expected 'variety' in self. completion, got: {}", comp_self_resp);
+        assert!(comp_self_resp.contains("count"), "Expected 'count' in self. completion");
+        assert!(comp_self_resp.contains("pick"), "Expected 'pick' in self. completion");
+        assert!(!comp_self_resp.contains("\"split\""), "self inside Apples must not show string method 'split': {}", comp_self_resp);
+        assert!(!comp_self_resp.contains("\"clamp\""), "self inside Apples must not show int method 'clamp'");
+    }
 }
