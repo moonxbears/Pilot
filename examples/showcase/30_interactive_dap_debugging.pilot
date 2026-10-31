@@ -1,0 +1,103 @@
+// =============================================================================
+// Showcase 30: Interactive Debug Adapter Protocol (DAP) & GUI Debugging
+// =============================================================================
+// Demonstrates Milestones 22 & 43:
+//   1. Full Debug Adapter Protocol (DAP) Implementation:
+//      - Native integration with VS Code GUI debugger via `pilot-dap`
+//   2. Breakpoints & Flow Control:
+//      - Line breakpoints, conditional breakpoints, and hit count limits
+//      - Step Over (`next`), Step In (`stepIn`), Step Out (`stepOut`), Continue
+//   3. Three-Tier Scope Inspection:
+//      - Locals: Active stack frame bindings
+//      - Registers: Virtual machine register allocations (r0..r63)
+//      - Globals: Module-level variables and imported declarations
+//   4. Interactive Variable Evaluation & Watch Expressions:
+//      - Dynamic expressions evaluated in live stack frame context
+// =============================================================================
+
+println("==================================================================");
+println(" Showcase 30: Interactive Debug Adapter Protocol (DAP) Debugging  ");
+println("==================================================================");
+
+// -----------------------------------------------------------------------------
+// 1. Nested Function Stack Frames
+// -----------------------------------------------------------------------------
+def compute_factor(base: int, exponent: int) -> int {
+    // Breakpoint: inspect base, exponent, and local product in VS Code DAP
+    var product = 1;
+    for i in 0..exponent {
+        product = product * base;
+    }
+    return product;
+}
+
+def analyze_sample_series(name: str, values: List[int]) -> int {
+    // Breakpoint: Step Into compute_factor from this stack frame
+    var total_accum = 0;
+    for val in values {
+        let scaled = compute_factor(val, 2);
+        total_accum = total_accum + scaled;
+    }
+    return total_accum;
+}
+
+let series_name = "TelemetryClusterA";
+let readings = [2, 3, 4, 5];
+
+println("\n[1] Executing Nested Call Frames (Traceable in DAP Call Stack):");
+let analysis_result = analyze_sample_series(series_name, readings);
+println("  Series Name:       " + series_name);
+println("  Analysis Aggregate: " + analysis_result);
+
+// -----------------------------------------------------------------------------
+// 2. Structured Data Model for Watch Expressions
+// -----------------------------------------------------------------------------
+class DiagnosticSession {
+    var session_id: int;
+    var target_node: str;
+    var error_count: int = 0;
+    var is_active: bool = true;
+
+    def __init__(self, id: int, node: str) {
+        this.session_id = id;
+        this.target_node = node;
+    }
+
+    def record_fault(code: int) {
+        this.error_count = this.error_count + 1;
+    }
+
+    def health_score() -> float {
+        if this.error_count == 0 {
+            return 100.0;
+        }
+        return 100.0 / float(this.error_count + 1);
+    }
+}
+
+let session = DiagnosticSession(4001, "worker-node-03");
+session.record_fault(101);
+session.record_fault(102);
+
+println("\n[2] Inspected Object State (Visible in DAP Variables View):");
+println("  Session ID:    " + session.session_id);
+println("  Target Node:   " + session.target_node);
+println("  Fault Count:   " + session.error_count);
+println("  Health Score:  " + session.health_score() + "%");
+
+// -----------------------------------------------------------------------------
+// 3. Conditional Breakpoint Demonstration Invariant
+// -----------------------------------------------------------------------------
+var accumulated_sum = 0;
+for counter in 1..10 {
+    accumulated_sum = accumulated_sum + counter;
+    // Set conditional breakpoint in VS Code: `counter == 5`
+    if counter == 5 {
+        println("\n[3] Reached Conditional Breakpoint Trigger point (counter == 5):");
+        println("  Intermediate Sum: " + accumulated_sum);
+    }
+}
+
+println("\n  Final Loop Sum: " + accumulated_sum);
+
+println("\n>>> Showcase 30 Complete! <<<\n");

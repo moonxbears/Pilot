@@ -856,7 +856,16 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 - `examples/showcase/22_homoiconic_call_quoting.pilot` (40 L)
 - `examples/showcase/23_semantic_call_projections.pilot` (38 L)
 - `examples/showcase/24_comptime_and_zero_runtime.pilot` (128 L)
+- `examples/showcase/25_csharp_indexers_and_properties.pilot` (119 L)
+- `examples/showcase/26_multi_target_transpilation.pilot` (80 L)
+- `examples/showcase/27_fluid_cascades_and_advanced_expressions.pilot` (122 L)
+- `examples/showcase/28_zero_gc_perceus_and_realtime_arenas.pilot` (97 L)
+- `examples/showcase/29_symbolic_autodiff_and_signal_graphs.pilot` (111 L)
+- `examples/showcase/30_interactive_dap_debugging.pilot` (103 L)
+- `examples/showcase/31_standard_library_and_networking.pilot` (126 L)
+- `examples/showcase/32_heterogeneous_inference_and_relational_datasets.pilot` (79 L)
 - `examples/showcase/run_all.ps1` (14 L)
+- `examples/showcase/run_all.sh` (27 L)
 
 ### Native
 - `Native/Assembly/PilotAssemblyEmitter.cs` (213 L) — class `PilotAssemblyEmitter`:L13

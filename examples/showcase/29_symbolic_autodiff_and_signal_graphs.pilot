@@ -1,0 +1,111 @@
+// =============================================================================
+// Showcase 29: Symbolic Autodiff, Gradient Optimization & Reactive Graphs
+// =============================================================================
+// Demonstrates Milestone 38:
+//   1. Compile-Time Symbolic Adjoint Differentiation (`!@`):
+//      - Dual-number automatic differentiation with Common Subexpression Elimination (CSE)
+//      - Computes analytic gradients for optimization and machine learning
+//   2. Push-Pull Reactive Signal Graphs (`!^`):
+//      - Glitch-free reactive signal propagation when dependency inputs change
+//   3. Transactional Model Weight Dry-Runs (`!?`):
+//      - Verifies state transitions in sandbox before committing changes
+//   4. C-ABI Call Frame Synthesis (`!&`):
+//      - Zero-copy C-ABI layout synthesis with direct dispatch
+// =============================================================================
+
+println("==================================================================");
+println(" Showcase 29: Symbolic Autodiff & Reactive Optimization Graphs    ");
+println("==================================================================");
+
+// -----------------------------------------------------------------------------
+// 1. Loss Function with Analytic Gradient Differentiation (!@)
+// -----------------------------------------------------------------------------
+def quadratic_loss(weight: float, target: float) -> float {
+    let diff = weight - target;
+    return diff * diff;
+}
+
+// Compute forward loss and exact gradients with respect to (weight, target)
+let current_weight = 4.5;
+let target_val = 2.0;
+
+let (loss_val, d_weight, d_target) = quadratic_loss!@(current_weight, target_val);
+
+println("\n[1] Compile-Time Symbolic Autodiff (!@):");
+println("  Current Weight:      " + current_weight);
+println("  Target Goal:         " + target_val);
+println("  Forward Loss:        " + loss_val);
+println("  dLoss/dWeight (grad): " + d_weight);
+println("  dLoss/dTarget:       " + d_target);
+
+// Perform one gradient descent step
+let learning_rate = 0.1;
+let next_weight = current_weight - (learning_rate * d_weight);
+println("  Updated Weight:      " + next_weight);
+
+// -----------------------------------------------------------------------------
+// 2. Glitch-Free Reactive Signal Node Graph (!^)
+// -----------------------------------------------------------------------------
+class SensorRig {
+    var raw_voltage: float;
+    var cal_factor: float;
+
+    def __init__(self, v: float, cal: float) {
+        this.raw_voltage = v;
+        this.cal_factor = cal;
+    }
+}
+
+def compute_calibrated_pressure(voltage: float, calibration: float) -> float {
+    return voltage * calibration * 101.325;
+}
+
+let rig = SensorRig(1.05, 0.98);
+let live_pressure = compute_calibrated_pressure!^(rig.raw_voltage, rig.cal_factor);
+
+println("\n[2] Push-Pull Reactive Signal Graph (!^):");
+println("  Initial Calibrated Pressure: " + live_pressure.Value + " kPa");
+
+// Update input parameter: signal graph auto-propagates
+rig.raw_voltage = 1.20;
+println("  After Sensor Voltage Step:   " + live_pressure.Value + " kPa");
+
+// -----------------------------------------------------------------------------
+// 3. Transactional Copy-on-Write Model Update Dry-Run (!?)
+// -----------------------------------------------------------------------------
+class Hyperparameters {
+    var epochs: int = 100;
+    var batch_size: int = 64;
+    var alpha: float = 0.001;
+
+    def update_policy(new_alpha: float, new_batch: int) -> bool {
+        this.alpha = new_alpha;
+        this.batch_size = new_batch;
+        return true;
+    }
+}
+
+let hparams = Hyperparameters();
+let dry_run_txn = hparams.update_policy!?(0.005, 128);
+
+println("\n[3] Transactional CoW Dry-Run Execution (!?):");
+println("  Inspection Log:               " + dry_run_txn.Inspect());
+println("  Live Alpha Before Commit:     " + hparams.alpha);
+
+dry_run_txn.Commit();
+println("  Live Alpha After Commit():    " + hparams.alpha);
+println("  Live Batch Size After Commit: " + hparams.batch_size);
+
+// -----------------------------------------------------------------------------
+// 4. Low-Level C-ABI Frame Dispatch (!&)
+// -----------------------------------------------------------------------------
+def fast_dot_product(a: float, b: float) -> float {
+    return a * b;
+}
+
+let abi_descriptor = fast_dot_product!&(3.5, 4.0);
+println("\n[4] Zero-Marshalling C-ABI Call Frame (!&):");
+println("  Synthesized ABI Size:  " + abi_descriptor.size_bytes + " bytes");
+println("  Direct Frame Dispatch: " + abi_descriptor.dispatch());
+
+println("\n>>> Showcase 29 Complete! <<<\n");

@@ -459,6 +459,59 @@ impl LspServer {
         }
 
         // 0b. Operators & punctuation hover
+        if tok_kind == SyntaxKind::LBracket || tok_kind == SyntaxKind::RBracket {
+            if let Some(mod_analysis) = self.db.module_analysis(file_id) {
+                let arena = &mod_analysis.arena;
+                let analysis = &mod_analysis.analysis;
+                for (idx, node) in arena.nodes.iter().enumerate() {
+                    if node.node_kind() == pilot_ast::NodeKind::IndexExpr {
+                        let span = arena.spans[idx];
+                        if byte_offset >= span.start && byte_offset <= span.end {
+                            let mut indexer_sig: Option<(Vec<String>, String)> = None;
+                            for (fn_idx, fn_node) in arena.nodes.iter().enumerate() {
+                                if fn_node.node_kind() == pilot_ast::NodeKind::FnDecl {
+                                    let name = arena.interner.resolve(pilot_intern::SymbolId(fn_node.lhs));
+                                    if name == "this[]" {
+                                        let fn_start = fn_node.rhs;
+                                        let fn_len = fn_node.flags as usize;
+                                        let mut param_strs = Vec::new();
+                                        if fn_len > 0 {
+                                            let fn_children = arena.children_slice(fn_start, fn_len as u32);
+                                            for &p_id in &fn_children[1..] {
+                                                let p_node = *arena.node(pilot_ast::NodeId(p_id));
+                                                let p_name = arena.interner.resolve(pilot_intern::SymbolId(p_node.lhs));
+                                                let p_ty = analysis
+                                                    .inferred_types
+                                                    .get(&p_id)
+                                                    .copied()
+                                                    .unwrap_or(pilot_analysis::TypeId::ANY);
+                                                param_strs.push(format!("{}: {}", p_name, analysis.types.display(p_ty)));
+                                            }
+                                        }
+                                        let ret_ty = analysis
+                                            .inferred_types
+                                            .get(&(fn_idx as u32))
+                                            .copied()
+                                            .unwrap_or(pilot_analysis::TypeId::ANY);
+                                        let ret_str = if let pilot_analysis::TypeKind::Function { ret, .. } = analysis.types.get(analysis.types.prune(ret_ty)) {
+                                            analysis.types.display(*ret)
+                                        } else {
+                                            analysis.types.display(ret_ty)
+                                        };
+                                        indexer_sig = Some((param_strs, ret_str));
+                                        break;
+                                    }
+                                }
+                            }
+                            if let Some((param_strs, ret_str)) = indexer_sig {
+                                let md = format!("```pilot\nproperty this[{}]: {}\n```\n\n*Pilot Indexer Access*", param_strs.join(", "), ret_str);
+                                return make_hover_card(&md);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if let Some((op_title, op_desc)) = get_operator_doc(raw_txt) {
             let md = format!("**Pilot Operator**: `{}` ({})\n\n{}", raw_txt, op_title, op_desc);
             return make_hover_card(&md);
@@ -585,7 +638,9 @@ impl LspServer {
         for (idx, node) in arena.nodes.iter().enumerate() {
             if node.node_kind() == pilot_ast::NodeKind::FnDecl {
                 let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
-                if name == txt {
+                let span = arena.spans[idx];
+                let is_indexer_match = name == "this[]" && txt == "this" && byte_offset >= span.start && byte_offset <= span.end;
+                if name == txt || is_indexer_match {
                     let fn_start = node.rhs;
                     let fn_len = node.flags as usize;
                     let mut param_strs = Vec::new();
@@ -612,6 +667,11 @@ impl LspServer {
                     } else {
                         analysis.types.display(ret_ty)
                     };
+                    if name == "this[]" {
+                        let sig = format!("property this[{}]: {}", param_strs.join(", "), ret_str);
+                        let md = format!("```pilot\n{}\n```\n\n*Pilot Indexer*", sig);
+                        return make_hover_card(&md);
+                    }
                     let sig = format!("def {}({}) -> {}", name, param_strs.join(", "), ret_str);
                     let md = format!("```pilot\n{}\n```\n\n*Pilot Function*", sig);
                     return make_hover_card(&md);
@@ -807,7 +867,7 @@ impl LspServer {
                                 .unwrap_or(pilot_analysis::TypeId::ANY);
                             let pruned = analysis.types.prune(iter_ty);
                             match analysis.types.get(pruned).clone() {
-                                pilot_analysis::TypeKind::Collection { element, .. } => element,
+                                pilot_analysis::TypeKind::Collection { element, .. } => analysis.types.prune(element),
                                 pilot_analysis::TypeKind::Map { key, value } => {
                                     let _ = (key, value);
                                     pilot_analysis::TypeId::ANY
@@ -849,11 +909,7 @@ impl LspServer {
                     let md = format!("```pilot\n(parameter) {}: {}\n```\n\n*Pilot Parameter*", txt, analysis.types.display(p_ty));
                     return make_hover_card(&md);
                 } else {
-                    let final_ty = if v_ty != pilot_analysis::TypeId::ANY {
-                        v_ty
-                    } else {
-                        cursor_ident_ty.unwrap_or(v_ty)
-                    };
+                    let final_ty = cursor_ident_ty.unwrap_or(v_ty);
                     let md = format!("```pilot\n{}: {}\n```\n\n*{}*", v_prefix, analysis.types.display(final_ty), v_desc);
                     return make_hover_card(&md);
                 }
@@ -870,11 +926,7 @@ impl LspServer {
                 return make_hover_card(&md);
             }
             (None, Some((v_prefix, v_ty, _, v_desc))) => {
-                let final_ty = if v_ty != pilot_analysis::TypeId::ANY {
-                    v_ty
-                } else {
-                    cursor_ident_ty.unwrap_or(v_ty)
-                };
+                let final_ty = cursor_ident_ty.unwrap_or(v_ty);
                 let md = format!("```pilot\n{}: {}\n```\n\n*{}*", v_prefix, analysis.types.display(final_ty), v_desc);
                 return make_hover_card(&md);
             }

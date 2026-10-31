@@ -12,6 +12,8 @@ pub struct DapServer {
     pub stop_on_entry: bool,
     pub should_exit: bool,
     pub pending_events: Vec<String>,
+    pub next_var_ref: u64,
+    pub var_ref_cache: std::collections::HashMap<u64, Vec<(String, String, String, u64)>>,
 }
 
 impl Default for DapServer {
@@ -29,6 +31,8 @@ impl DapServer {
             stop_on_entry: false,
             should_exit: false,
             pending_events: Vec::new(),
+            next_var_ref: 3000,
+            var_ref_cache: std::collections::HashMap::new(),
         }
     }
 
@@ -50,6 +54,8 @@ impl DapServer {
         match command.as_str() {
             "initialize" => {
                 self.is_initialized = true;
+                self.var_ref_cache.clear();
+                self.next_var_ref = 3000;
                 let body = r#"{
                     "supportsConfigurationDoneRequest": true,
                     "supportsConditionalBreakpoints": true,
@@ -68,6 +74,8 @@ impl DapServer {
                 let stop = args.and_then(|a| a.get("stopOnEntry")).and_then(|s| s.as_bool()).unwrap_or(false);
 
                 self.stop_on_entry = stop;
+                self.var_ref_cache.clear();
+                self.next_var_ref = 3000;
                 if !prog.is_empty() {
                     self.program_path = Some(prog.to_string());
                     let _ = self.debugger.load_program(prog);
@@ -146,31 +154,92 @@ impl DapServer {
                 Some(format_dap_response(seq, "stackTrace", true, &body))
             }
             "scopes" => {
-                let body = r#"{"scopes":[{"name":"Locals","variablesReference":1000,"expensive":false},{"name":"Globals","variablesReference":2000,"expensive":false}]}"#;
-                Some(format_dap_response(seq, "scopes", true, body))
+                let frame_id = args.and_then(|a| a.get("frameId")).and_then(|f| f.as_u64()).unwrap_or(0);
+                let current_id = self.debugger.call_stack.last().map(|f| f.id as u64).unwrap_or(1);
+                let locals_ref = if frame_id == 0 || frame_id == current_id {
+                    1000
+                } else {
+                    10000 + frame_id
+                };
+                let globals_ref = 2000;
+                let body = format!(
+                    r#"{{"scopes":[{{"name":"Locals","variablesReference":{},"expensive":false}},{{"name":"Globals","variablesReference":{},"expensive":false}}]}}"#,
+                    locals_ref, globals_ref
+                );
+                Some(format_dap_response(seq, "scopes", true, &body))
             }
             "variables" => {
                 let var_ref = args.and_then(|a| a.get("variablesReference")).and_then(|v| v.as_u64()).unwrap_or(0);
                 let mut vars = Vec::new();
 
-                if var_ref == 1 || var_ref == 1000 {
-                    // Locals
-                    if let Some(frame) = self.debugger.current_frame() {
-                        for (k, v) in &frame.locals {
-                            let ty = frame.local_types.get(k).map(|s| s.as_str()).unwrap_or("any");
-                            vars.push(format!(
-                                r#"{{"name":"{}","value":{},"type":"{}","variablesReference":0}}"#,
-                                k, escape_json_str(&v.to_string_repr()), ty
-                            ));
-                        }
+                if let Some(children) = self.var_ref_cache.get(&var_ref).cloned() {
+                    for (c_name, c_val, c_ty, child_ref) in children {
+                        vars.push(format!(
+                            r#"{{"name":{},"value":{},"type":"{}","variablesReference":{}}}"#,
+                            escape_json_str(&c_name),
+                            escape_json_str(&c_val),
+                            c_ty,
+                            child_ref
+                        ));
                     }
                 } else if var_ref == 2 || var_ref == 2000 {
                     // Globals
-                    for (k, v) in &self.debugger.globals {
-                        let ty = self.debugger.global_types.get(k).map(|s| s.as_str()).unwrap_or("any");
+                    let raw_globals: Vec<(String, String, String)> = {
+                        let mut g: Vec<_> = self.debugger.globals.iter().map(|(k, v)| {
+                            let ty = self.debugger.global_types.get(k).cloned().unwrap_or_else(|| "any".to_string());
+                            (k.clone(), v.to_string_repr(), ty)
+                        }).collect();
+                        g.sort_by(|a, b| a.0.cmp(&b.0));
+                        g
+                    };
+                    for (k, val_str, ty) in raw_globals {
+                        let child_ref = self.resolve_child_ref(&k, &val_str);
                         vars.push(format!(
-                            r#"{{"name":"{}","value":{},"type":"{}","variablesReference":0}}"#,
-                            k, escape_json_str(&v.to_string_repr()), ty
+                            r#"{{"name":{},"value":{},"type":"{}","variablesReference":{}}}"#,
+                            escape_json_str(&k),
+                            escape_json_str(&val_str),
+                            ty,
+                            child_ref
+                        ));
+                    }
+                } else {
+                    // Locals
+                    let raw_locals: Vec<(String, String, String)> = {
+                        let frame = if var_ref >= 10000 {
+                            let target_fid = (var_ref - 10000) as u32;
+                            self.debugger.call_stack.iter().find(|f| f.id == target_fid)
+                        } else {
+                            self.debugger.call_stack.last()
+                        };
+
+                        if let Some(frame) = frame {
+                            let mut l: Vec<_> = frame.locals.iter().map(|(k, v)| {
+                                let ty = frame.local_types.get(k)
+                                    .or_else(|| self.debugger.global_types.get(k))
+                                    .cloned()
+                                    .unwrap_or_else(|| {
+                                        if v.is_int() { "int".to_string() }
+                                        else if v.is_float() { "float".to_string() }
+                                        else if v.is_bool() { "bool".to_string() }
+                                        else { "any".to_string() }
+                                    });
+                                (k.clone(), v.to_string_repr(), ty)
+                            }).collect();
+                            l.sort_by(|a, b| a.0.cmp(&b.0));
+                            l
+                        } else {
+                            Vec::new()
+                        }
+                    };
+
+                    for (k, val_str, ty) in raw_locals {
+                        let child_ref = self.resolve_child_ref(&k, &val_str);
+                        vars.push(format!(
+                            r#"{{"name":{},"value":{},"type":"{}","variablesReference":{}}}"#,
+                            escape_json_str(&k),
+                            escape_json_str(&val_str),
+                            ty,
+                            child_ref
                         ));
                     }
                 }
@@ -179,6 +248,8 @@ impl DapServer {
                 Some(format_dap_response(seq, "variables", true, &body))
             }
             "continue" => {
+                self.var_ref_cache.clear();
+                self.next_var_ref = 3000;
                 self.debugger.continue_exec();
                 self.drain_outputs();
                 let resp = format_dap_response(seq, "continue", true, r#"{"allThreadsContinued":true}"#);
@@ -186,6 +257,8 @@ impl DapServer {
                 Some(resp)
             }
             "next" => {
+                self.var_ref_cache.clear();
+                self.next_var_ref = 3000;
                 self.debugger.step_over();
                 self.drain_outputs();
                 let resp = format_dap_response(seq, "next", true, "{}");
@@ -193,6 +266,8 @@ impl DapServer {
                 Some(resp)
             }
             "stepIn" => {
+                self.var_ref_cache.clear();
+                self.next_var_ref = 3000;
                 self.debugger.step_into();
                 self.drain_outputs();
                 let resp = format_dap_response(seq, "stepIn", true, "{}");
@@ -200,6 +275,8 @@ impl DapServer {
                 Some(resp)
             }
             "stepOut" => {
+                self.var_ref_cache.clear();
+                self.next_var_ref = 3000;
                 self.debugger.step_out();
                 self.drain_outputs();
                 let resp = format_dap_response(seq, "stepOut", true, "{}");
@@ -253,6 +330,39 @@ impl DapServer {
             );
             self.pending_events.push(format_dap_event("output", &ev));
         }
+    }
+
+    fn resolve_child_ref(&mut self, name: &str, val_str: &str) -> u64 {
+        if let Some(compound) = self.debugger.compound_values.get(val_str).or_else(|| self.debugger.compound_values.get(name)).cloned() {
+            self.cache_compound_children(&compound, 0)
+        } else {
+            0
+        }
+    }
+
+    fn cache_compound_children(&mut self, compound: &crate::debugger::DebugCompoundVal, depth: usize) -> u64 {
+        if depth > 10 {
+            return 0;
+        }
+        let children = compound.to_children();
+        if children.is_empty() {
+            return 0;
+        }
+        let ref_id = self.next_var_ref;
+        self.next_var_ref += 1;
+
+        let mut cached_children = Vec::new();
+        for (c_name, c_val, c_ty) in children {
+            let child_ref = if let Some(child_compound) = self.debugger.compound_values.get(&c_val).or_else(|| self.debugger.compound_values.get(&c_name)).cloned() {
+                self.cache_compound_children(&child_compound, depth + 1)
+            } else {
+                0
+            };
+            cached_children.push((c_name, c_val, c_ty, child_ref));
+        }
+
+        self.var_ref_cache.insert(ref_id, cached_children);
+        ref_id
     }
 
     fn check_execution_state(&mut self) {

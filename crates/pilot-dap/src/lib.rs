@@ -340,4 +340,292 @@ mod tests {
 
         let _ = std::fs::remove_file(test_file);
     }
+
+    #[test]
+    fn test_mytest_pilot_debugging() {
+        let mut dap = DapServer::new();
+        dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
+
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let path = format!("{}/../../examples/mytest.pilot", manifest_dir);
+        let path = std::fs::canonicalize(&path).unwrap().to_str().unwrap().to_string();
+
+        // Set breakpoint on line 13: println(f"true - {myvar}")
+        let bp_req = format!(
+            r#"{{"seq":2,"type":"request","command":"setBreakpoints","arguments":{{"source":{{"path":"{}"}},"breakpoints":[{{"line":13}}]}}}}"#,
+            path
+        );
+        let bp_resp = dap.handle_message(&bp_req).unwrap();
+        assert!(bp_resp.contains("\"verified\":true"));
+
+        let launch_req = format!(
+            r#"{{"seq":3,"type":"request","command":"launch","arguments":{{"program":"{}","stopOnEntry":false}}}}"#,
+            path
+        );
+        dap.handle_message(&launch_req).unwrap();
+
+        if let Some(frame) = dap.debugger.current_frame() {
+            println!("Initial frame stmts count: {}", frame.stmts.len());
+            for (nid, l, c) in &frame.stmts {
+                println!("  stmt nid: {:?}, line: {}, col: {}", nid, l, c);
+            }
+        }
+
+        dap.handle_message(r#"{"seq":4,"type":"request","command":"configurationDone"}"#).unwrap();
+
+        let events = dap.drain_events();
+        println!("Events after configurationDone: {:?}", events);
+        let stopped = events.iter().any(|e| e.contains("\"event\":\"stopped\"") && e.contains("\"breakpoint\""));
+        assert!(stopped, "Expected stopped event on breakpoint at line 13. Events: {:?}", events);
+
+        // Inspect variables in Locals
+        let vars_resp = dap.handle_message(r#"{"seq":5,"type":"request","command":"variables","arguments":{"variablesReference":1000}}"#).unwrap();
+        
+        // Assert that myvar is NOT null and has actual value "0" and type "int"
+        assert!(vars_resp.contains("\"name\":\"myvar\""), "Expected myvar in variables: {}", vars_resp);
+        assert!(vars_resp.contains("\"value\":\"0\""), "Expected myvar value to be '0', got: {}", vars_resp);
+        assert!(vars_resp.contains("\"type\":\"int\""), "Expected myvar type to be 'int', got: {}", vars_resp);
+
+        // Step over line 13 (println)
+        dap.handle_message(r#"{"seq":6,"type":"request","command":"next","arguments":{"threadId":1}}"#).unwrap();
+        dap.drain_events();
+
+        // Step over line 14 (myvar += 1)
+        dap.handle_message(r#"{"seq":7,"type":"request","command":"next","arguments":{"threadId":1}}"#).unwrap();
+        dap.drain_events();
+
+        // Check variables again: myvar should now be 1
+        let vars_resp2 = dap.handle_message(r#"{"seq":8,"type":"request","command":"variables","arguments":{"variablesReference":1000}}"#).unwrap();
+        assert!(vars_resp2.contains("\"value\":\"1\""), "Expected myvar to be 1 after += 1, got: {}", vars_resp2);
+    }
+
+    #[test]
+    fn test_compound_data_types_and_destructuring() {
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_compounds.pilot");
+        let script = "record Point(x: float, y: float)\n\nlet pt = Point(1.5, 2.5)\nlet numbers = [10, 20, 30]\nlet mytup = (100, \"pilot\")\nlet myunit = 250ms\nlet mykw = :ready\nlet (px, py) = (11, 22)\nlet [head, ..tail] = [1, 2, 3, 4]\nlet myvar = 42\nprintln(f\"done - {myvar}\")\n";
+        std::fs::write(&test_file, script).unwrap();
+        let file_path = test_file.to_str().unwrap().to_string();
+
+        let mut dap = DapServer::new();
+        dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
+
+        // Set breakpoint on line 11: println(f"done - {myvar}")
+        let bp_req = format!(
+            r#"{{"seq":2,"type":"request","command":"setBreakpoints","arguments":{{"source":{{"path":"{}"}},"breakpoints":[{{"line":11}}]}}}}"#,
+            file_path
+        );
+        dap.handle_message(&bp_req).unwrap();
+
+        let launch_req = format!(
+            r#"{{"seq":3,"type":"request","command":"launch","arguments":{{"program":"{}","stopOnEntry":false}}}}"#,
+            file_path
+        );
+        dap.handle_message(&launch_req).unwrap();
+        dap.handle_message(r#"{"seq":4,"type":"request","command":"configurationDone"}"#).unwrap();
+
+        let events = dap.drain_events();
+        let stopped = events.iter().any(|e| e.contains("\"event\":\"stopped\"") && e.contains("\"breakpoint\""));
+        assert!(stopped, "Expected stopped event on breakpoint at line 11. Events: {:?}", events);
+
+        // Request locals
+        let vars_resp = dap.handle_message(r#"{"seq":5,"type":"request","command":"variables","arguments":{"variablesReference":1000}}"#).unwrap();
+
+        // 1. Verify myvar
+        assert!(vars_resp.contains("\"name\":\"myvar\""));
+        assert!(vars_resp.contains("\"value\":\"42\""));
+        assert!(vars_resp.contains("\"type\":\"int\""));
+
+        // 2. Verify record pt
+        assert!(vars_resp.contains("\"name\":\"pt\""));
+        assert!(vars_resp.contains("\"type\":\"Point\""));
+        assert!(vars_resp.contains("Point(x: 1.5, y: 2.5)"));
+
+        // 3. Verify list numbers
+        assert!(vars_resp.contains("\"name\":\"numbers\""));
+        assert!(vars_resp.contains("[10, 20, 30]"));
+
+        // 4. Verify tuple mytup
+        assert!(vars_resp.contains("\"name\":\"mytup\""));
+        assert!(vars_resp.contains("(100, pilot)"));
+
+        // 5. Verify unit literal
+        assert!(vars_resp.contains("\"name\":\"myunit\""));
+        assert!(vars_resp.contains("\"value\":\"250ms\""));
+        assert!(vars_resp.contains("\"type\":\"Duration\""));
+
+        // 6. Verify keyword literal
+        assert!(vars_resp.contains("\"name\":\"mykw\""));
+        assert!(vars_resp.contains("\"value\":\":ready\""));
+        assert!(vars_resp.contains("\"type\":\"keyword\""));
+
+        // 7. Verify destructuring (px, py)
+        assert!(vars_resp.contains("\"name\":\"px\""));
+        assert!(vars_resp.contains("\"value\":\"11\""));
+        assert!(vars_resp.contains("\"name\":\"py\""));
+        assert!(vars_resp.contains("\"value\":\"22\""));
+
+        // 8. Verify slice destructuring [head, ..tail]
+        assert!(vars_resp.contains("\"name\":\"head\""));
+        assert!(vars_resp.contains("\"value\":\"1\""));
+        assert!(vars_resp.contains("\"name\":\"tail\""));
+        assert!(vars_resp.contains("[2, 3, 4]"));
+
+        // 9. Verify expand child variables of pt (Point)
+        let pt_children_resp = dap.handle_message(r#"{"seq":6,"type":"request","command":"variables","arguments":{"variablesReference":3002}}"#).unwrap();
+        assert!(pt_children_resp.contains("\"name\":\"x\""));
+        assert!(pt_children_resp.contains("\"value\":\"1.5\""));
+        assert!(pt_children_resp.contains("\"name\":\"y\""));
+        assert!(pt_children_resp.contains("\"value\":\"2.5\""));
+
+        // 10. Verify expand child variables of numbers (List)
+        let num_children_resp = dap.handle_message(r#"{"seq":7,"type":"request","command":"variables","arguments":{"variablesReference":3001}}"#).unwrap();
+        assert!(num_children_resp.contains("\"name\":\"[0]\""));
+        assert!(num_children_resp.contains("\"value\":\"10\""));
+        assert!(num_children_resp.contains("\"name\":\"[1]\""));
+        assert!(num_children_resp.contains("\"value\":\"20\""));
+        assert!(num_children_resp.contains("\"name\":\"[2]\""));
+        assert!(num_children_resp.contains("\"value\":\"30\""));
+
+        // 11. Verify evaluate expressions in debugger
+        let eval_pt_x = dap.handle_message(r#"{"seq":8,"type":"request","command":"evaluate","arguments":{"expression":"pt.x","frameId":1}}"#).unwrap();
+        assert!(eval_pt_x.contains("\"result\":\"1.5\""));
+
+        let eval_list = dap.handle_message(r#"{"seq":9,"type":"request","command":"evaluate","arguments":{"expression":"numbers[1]","frameId":1}}"#).unwrap();
+        assert!(eval_list.contains("\"result\":\"20\""));
+
+        let eval_comp = dap.handle_message(r#"{"seq":10,"type":"request","command":"evaluate","arguments":{"expression":"px + py","frameId":1}}"#).unwrap();
+        assert!(eval_comp.contains("\"result\":\"33\""));
+
+        let _ = std::fs::remove_file(test_file);
+    }
+
+    #[test]
+    #[ignore = "Showcase 20 assertion failure repro from request 7"]
+    fn test_showcase_20_reproduce() {
+        let mut dap = DapServer::new();
+        dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let path = format!("{}/../../examples/showcase/20_dynamic_for_expressions_and_c_abi.pilot", manifest_dir);
+        let path = std::fs::canonicalize(&path).unwrap().to_str().unwrap().to_string();
+
+        dap.handle_message(&format!(
+            r#"{{"seq":2,"type":"request","command":"launch","arguments":{{"program":"{}","stopOnEntry":false}}}}"#,
+            path
+        )).unwrap();
+        dap.handle_message(r#"{"seq":3,"type":"request","command":"configurationDone"}"#).unwrap();
+
+        let events = dap.drain_events();
+        for ev in &events {
+            println!("EV: {}", ev);
+            assert!(!ev.contains("Assertion Error"), "Unexpected assertion failure in showcase 20: {}", ev);
+        }
+
+        let combined_output = events.join("\n");
+        assert!(combined_output.contains("Cubes (1..5): [1, 8, 27, 64, 125]"));
+        assert!(combined_output.contains("Pivoted (0..2 -> 8..10): [0, 1, 2, 8, 9, 10]"));
+        assert!(combined_output.contains("Resumable LIFO Worklist: [1, 2, 100, 101, 3, 4]"));
+        assert!(combined_output.contains("Port 8080 index: 2, Port 3000 fallback: -1"));
+        assert!(combined_output.contains("24-byte C-ABI SliceBuffer: [10, 20, 30, 40, 50, 60], managed_lists=0"));
+        assert!(combined_output.contains("Shared view 1 (@0x7fff1000): [115.5, 40.0, 33.25, 40.0, 50.0, 60.0]"));
+        assert!(combined_output.contains("Shared view 2 (@0x7fff2000): [115.5, 40.0, 33.25, 40.0, 50.0, 60.0]"));
+    }
+
+    #[test]
+    fn test_showcase_21_dap_inferred_variable_types() {
+        let mut dap = DapServer::new();
+        dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let path = format!("{}/../../examples/showcase/21_advanced_type_inference.pilot", manifest_dir);
+        let path = std::fs::canonicalize(&path).unwrap().to_str().unwrap().to_string();
+
+        dap.handle_message(&format!(
+            r#"{{"seq":2,"type":"request","command":"setBreakpoints","arguments":{{"source":{{"path":"{}"}},"breakpoints":[{{"line":15}}]}}}}"#,
+            path
+        )).unwrap();
+
+        dap.handle_message(&format!(
+            r#"{{"seq":3,"type":"request","command":"launch","arguments":{{"program":"{}","stopOnEntry":false}}}}"#,
+            path
+        )).unwrap();
+        dap.handle_message(r#"{"seq":4,"type":"request","command":"configurationDone"}"#).unwrap();
+
+        // Execution should hit the breakpoint at line 15
+        assert!(matches!(dap.debugger.state, DebuggerState::Paused(_)));
+
+        // Get threads -> stackTrace -> scopes -> variables
+        let stack_resp = dap.handle_message(r#"{"seq":5,"type":"request","command":"stackTrace","arguments":{"threadId":1}}"#).unwrap();
+        assert!(stack_resp.contains("\"id\":1"));
+
+        let scopes_resp = dap.handle_message(r#"{"seq":6,"type":"request","command":"scopes","arguments":{"frameId":1}}"#).unwrap();
+        assert!(scopes_resp.contains("\"variablesReference\":1000"));
+
+        let vars_resp = dap.handle_message(r#"{"seq":7,"type":"request","command":"variables","arguments":{"variablesReference":1000}}"#).unwrap();
+        println!("Vars response at line 15: {}", vars_resp);
+
+        // Check frame_area: value 2073600 (1920 * 1080), type "int"
+        assert!(vars_resp.contains(r#"{"name":"frame_area","value":"2073600","type":"int","variablesReference":0}"#), "Expected frame_area to be int: {}", vars_resp);
+
+        // Check canvas_area: value 100 (12.5 * 8.0), type "float"
+        assert!(vars_resp.contains(r#"{"name":"canvas_area","value":"100","type":"float","variablesReference":0}"#), "Expected canvas_area to be float: {}", vars_resp);
+    }
+
+    #[test]
+    fn test_heterogeneous_collection_dap() {
+        let mut dap = DapServer::new();
+        dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
+        let test_file = "/tmp/test_heterogeneous_dap.pilot";
+        std::fs::write(test_file, "let mylist = [\"apples\", 5, 2];\nlet x = 1;\n").unwrap();
+
+        dap.handle_message(&format!(
+            r#"{{"seq":2,"type":"request","command":"setBreakpoints","arguments":{{"source":{{"path":"{}"}},"breakpoints":[{{"line":2}}]}}}}"#,
+            test_file
+        )).unwrap();
+
+        dap.handle_message(&format!(
+            r#"{{"seq":3,"type":"request","command":"launch","arguments":{{"program":"{}","stopOnEntry":false}}}}"#,
+            test_file
+        )).unwrap();
+        dap.handle_message(r#"{"seq":4,"type":"request","command":"configurationDone"}"#).unwrap();
+
+        assert!(matches!(dap.debugger.state, DebuggerState::Paused(_)));
+
+        let vars_resp = dap.handle_message(r#"{"seq":7,"type":"request","command":"variables","arguments":{"variablesReference":1000}}"#).unwrap();
+        println!("DAP vars response: {}", vars_resp);
+
+        assert!(vars_resp.contains("\"name\":\"mylist\""), "Expected mylist variable: {}", vars_resp);
+        assert!(vars_resp.contains("List[str | int]") || vars_resp.contains("List[i64 | str]"),
+            "Expected constrained union type for mylist: {}", vars_resp);
+
+        let _ = std::fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_indexer_dap() {
+        let mut dap = DapServer::new();
+        dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
+        let test_file = "/tmp/test_indexer_dap.pilot";
+        std::fs::write(test_file, "let map = {\"alpha\": 10, \"beta\": 20};\nlet item = map[\"alpha\"];\nmap[\"alpha\"] = 99;\nlet updated = map[\"alpha\"];\n").unwrap();
+
+        dap.handle_message(&format!(
+            r#"{{"seq":2,"type":"request","command":"setBreakpoints","arguments":{{"source":{{"path":"{}"}},"breakpoints":[{{"line":4}}]}}}}"#,
+            test_file
+        )).unwrap();
+
+        dap.handle_message(&format!(
+            r#"{{"seq":3,"type":"request","command":"launch","arguments":{{"program":"{}","stopOnEntry":false}}}}"#,
+            test_file
+        )).unwrap();
+        dap.handle_message(r#"{"seq":4,"type":"request","command":"configurationDone"}"#).unwrap();
+
+        assert!(matches!(dap.debugger.state, DebuggerState::Paused(_)));
+
+        let vars_resp = dap.handle_message(r#"{"seq":7,"type":"request","command":"variables","arguments":{"variablesReference":1000}}"#).unwrap();
+        println!("DAP indexer vars response: {}", vars_resp);
+
+        assert!(vars_resp.contains("\"name\":\"item\""), "Expected item variable: {}", vars_resp);
+        assert!(vars_resp.contains("\"value\":\"10\""), "Expected item value 10: {}", vars_resp);
+
+        let _ = std::fs::remove_file(test_file);
+    }
 }

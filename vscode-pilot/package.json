@@ -52,6 +52,11 @@
                 "path": "./snippets/pilot.json"
             }
         ],
+        "breakpoints": [
+            {
+                "language": "pilot"
+            }
+        ],
         "commands": [
             {
                 "command": "pilot.restartLanguageServer",

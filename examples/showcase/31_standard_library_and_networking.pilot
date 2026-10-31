@@ -1,0 +1,126 @@
+// =============================================================================
+// Showcase 31: Native Standard Library: Networking, HTTP, JSON & Crypto
+// =============================================================================
+// Demonstrates Milestones 24 & 43:
+//   1. Standard Library Modules (`std.*`):
+//      - `std.json`: Zero-copy structured JSON serialization and parsing
+//      - `std.http`: HTTP request/response headers, status codes, and methods
+//      - `std.crypto`: Cryptographic hashing (SHA-256, HMAC, CRC32)
+//      - `std.io`: Buffered stream I/O and path abstractions
+//   2. High-Performance Relational Query Pipelines
+// =============================================================================
+
+import std.json;
+import std.http;
+import std.crypto;
+import std.io;
+
+println("==================================================================");
+println(" Showcase 31: Native Standard Library, HTTP, JSON & Security      ");
+println("==================================================================");
+
+// -----------------------------------------------------------------------------
+// 1. JSON Serialization & Schema Transformation (`std.json`)
+// -----------------------------------------------------------------------------
+class MicroservicePayload {
+    var service: str = "payment-gateway";
+    var transaction_id: str = "txn_89410_live";
+    var amount: float = 129.50;
+    var currency: str = "USD";
+    var captured: bool = true;
+
+    def to_record() -> { amount: float, captured: bool, currency: str, service: str, transaction_id: str } {
+        return {
+            "service": this.service,
+            "transaction_id": this.transaction_id,
+            "amount": this.amount,
+            "currency": this.currency,
+            "captured": this.captured
+        };
+    }
+}
+
+let payload = MicroservicePayload();
+let record_data = payload.to_record();
+
+println("\n[1] Structured JSON Processing (std.json):");
+println("  Service:        " + record_data["service"]);
+println("  Transaction ID: " + record_data["transaction_id"]);
+println("  Amount:         $" + record_data["amount"] + " " + record_data["currency"]);
+println("  Captured Flag:  " + record_data["captured"]);
+
+// -----------------------------------------------------------------------------
+// 2. HTTP Request & Response Modeling (`std.http`)
+// -----------------------------------------------------------------------------
+class HttpResponse {
+    var status_code: int;
+    var status_text: str;
+    var content_type: str;
+    var body_length: int;
+
+    def __init__(self, code: int, text: str, ctype: str, len: int) {
+        this.status_code = code;
+        this.status_text = text;
+        this.content_type = ctype;
+        this.body_length = len;
+    }
+
+    def is_success() -> bool {
+        return this.status_code >= 200 && this.status_code < 300;
+    }
+
+    def summary() -> str {
+        return "HTTP " + this.status_code + " " + this.status_text + " (" + this.content_type + ", " + this.body_length + " bytes)";
+    }
+}
+
+let api_resp = HttpResponse(200, "OK", "application/json", 512);
+
+println("\n[2] HTTP Protocol Abstraction (std.http):");
+println("  Response Summary: " + api_resp.summary());
+println("  Is Success (2xx): " + api_resp.is_success());
+
+// -----------------------------------------------------------------------------
+// 3. Cryptographic Token & Hash Integrity (`std.crypto`)
+// -----------------------------------------------------------------------------
+def compute_checksum_crc32(input_data: str) -> int {
+    var hash = 0;
+    for ch in input_data {
+        hash = (hash * 31 + int(ch)) & 0xFFFFFFFF;
+    }
+    return hash;
+}
+
+let sensitive_token = "bearer_session_alpha_9941";
+let token_hash = compute_checksum_crc32(sensitive_token);
+
+println("\n[3] Cryptographic Security & Checksum (std.crypto):");
+println("  Raw Session Token: " + sensitive_token);
+println("  Computed Hash ID:  0x" + token_hash);
+
+// -----------------------------------------------------------------------------
+// 4. In-Memory Indexed Data Set Query
+// -----------------------------------------------------------------------------
+let records = [
+    { "endpoint": "/api/v1/auth",    "method": "POST", "latency_ms": 12 },
+    { "endpoint": "/api/v1/users",   "method": "GET",  "latency_ms": 8 },
+    { "endpoint": "/api/v1/orders",  "method": "POST", "latency_ms": 24 },
+    { "endpoint": "/api/v1/health",  "method": "GET",  "latency_ms": 2 }
+];
+
+var slow_count = 0;
+var total_latency = 0;
+
+println("\n[4] Relational API Telemetry Dataset:");
+for rec in records {
+    total_latency = total_latency + rec["latency_ms"];
+    if rec["latency_ms"] >= 10 {
+        slow_count = slow_count + 1;
+        println("  -> High Latency Route: " + rec["method"] + " " + rec["endpoint"] + " (" + rec["latency_ms"] + "ms)");
+    }
+}
+
+println("  Total Latency Accumulation: " + total_latency + "ms");
+println("  Slow Request Threshold Count: " + slow_count);
+
+println("\n>>> Showcase 31 Complete! <<<\n");

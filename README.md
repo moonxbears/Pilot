@@ -128,7 +128,7 @@ Pilot/
 │   ├── pilot-ffi/           # Stable C-ABI foreign function interface & C header exports
 │   ├── pilot-rt/            # Zero-overhead runtime, networking, and memory primitives
 │   └── pilot-cli/           # Unified toolchain CLI entrypoint (`pilot`)
-├── examples/                # 24+ comprehensive showcase scripts demonstrating all language features
+├── examples/                # 32+ comprehensive showcase scripts demonstrating all language features
 ├── tests/                   # 36 end-to-end integration and differential semantic test suites
 └── vscode-pilot/            # Production Visual Studio Code extension with native LSP & DAP
 ```

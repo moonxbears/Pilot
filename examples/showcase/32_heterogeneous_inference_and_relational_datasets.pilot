@@ -1,0 +1,79 @@
+// =============================================================================
+// Showcase 32: Heterogeneous Type Inference & Relational Dataset Processing
+// =============================================================================
+// Demonstrates Milestones 16 & 37:
+//   1. Heterogeneous Union Collection Inference:
+//      - Constrains mixed-type collections to `List[T1 | T2]` without falling back to `any`
+//   2. Anonymous Relational Row Records:
+//      - Object literals with static keys infer concrete `RowRecord` types
+//      - Fully compatible with `Map` and structural row polymorphism
+//   3. Static String Field Key Indexing:
+//      - `row["amount"]` directly returns static `float`, enabling typed arithmetic
+//        without manual unwrapping or runtime option checks
+//   4. Flow-Directed Method Inference:
+//      - `list.append(item)` constrains unassigned element type variables (`'T`)
+//        to the concrete record type through bidirectional flow unification
+// =============================================================================
+
+println("==================================================================");
+println(" Showcase 32: Heterogeneous Inference & Relational Datasets       ");
+println("==================================================================");
+
+// -----------------------------------------------------------------------------
+// 1. Constrained Heterogeneous Collection Union Inference
+// -----------------------------------------------------------------------------
+let mixed_catalog = ["SKU-902", 450, "SKU-903", 120, "SKU-904", 890];
+let first_entry = mixed_catalog[0];
+let second_entry = mixed_catalog[1];
+
+println("\n[1] Heterogeneous List (Inferred as List[str | int]):");
+println("  First Item (str): " + first_entry);
+println("  Second Item (int): " + second_entry);
+
+// -----------------------------------------------------------------------------
+// 2. Anonymous Relational Row Records
+// -----------------------------------------------------------------------------
+let warehouse_inventory = [
+    { "sku": "PILOT-CPU-01", "stock": 45,  "unit_cost": 299.95, "department": "Silicon" },
+    { "sku": "PILOT-GPU-02", "stock": 18,  "unit_cost": 749.50, "department": "Silicon" },
+    { "sku": "PILOT-MEM-08", "stock": 120, "unit_cost": 89.00,  "department": "Memory" },
+    { "sku": "PILOT-SSD-01", "stock": 64,  "unit_cost": 139.99, "department": "Storage" }
+];
+
+println("\n[2] Warehouse Relational Inventory Dataset:");
+for item in warehouse_inventory {
+    println("  " + item["sku"] + " [" + item["department"] + "] -> " + item["stock"] + " units @ $" + item["unit_cost"]);
+}
+
+// -----------------------------------------------------------------------------
+// 3. Flow-Directed Collection Mutation & Aggregate Arithmetic
+// -----------------------------------------------------------------------------
+let silicon_items = [];
+var total_silicon_value = 0.0;
+
+for entry in warehouse_inventory {
+    if entry["department"] == "Silicon" {
+        silicon_items.append(entry);
+        let item_value = float(entry["stock"]) * entry["unit_cost"];
+        total_silicon_value = total_silicon_value + item_value;
+    }
+}
+
+println("\n[3] Filtered Silicon Department Records (Inferred Concrete List):");
+for si in silicon_items {
+    println("  -> Qualified: " + si["sku"] + " (stock: " + si["stock"] + ")");
+}
+println("  Total Silicon Department Valuation: $" + total_silicon_value);
+
+// -----------------------------------------------------------------------------
+// 4. Structural Row Record Polymorphism
+// -----------------------------------------------------------------------------
+def format_sku_label(labeled) -> str {
+    return "LABEL [" + labeled.department + "] " + labeled.sku;
+}
+
+let sample_label = format_sku_label(warehouse_inventory[0]);
+println("\n[4] Row-Polymorphic Record Formatting:");
+println("  " + sample_label);
+
+println("\n>>> Showcase 32 Complete! <<<\n");

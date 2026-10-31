@@ -1,0 +1,122 @@
+// =============================================================================
+// Showcase 27: First-Class Fluid Cascades, Pipeline Operators & Fallback Expressions
+// =============================================================================
+// Demonstrates Milestones 14 & 48:
+//   1. Fluid Method Cascades (`..`):
+//      - Smalltalk / Dart-style receiver retention across multi-mutation calls
+//   2. Cascade Result Binding (`..method() -> let binding`):
+//      - Extracts intermediate returns without losing fluent chaining
+//   3. Pipeline Operator (`|>`):
+//      - Left-to-right function application: `x |> f |> g`
+//   4. Null-Coalescing (`??`) and Safe Navigation (`?.`, `?[...]`):
+//      - Defensive access with localized default fallback
+//   5. Exception Recovery Expression (`catch`):
+//      - Localized inline error fallback without heavy try-catch blocks
+// =============================================================================
+
+println("==================================================================");
+println(" Showcase 27: Fluid Cascades, Pipeline & Advanced Expressions     ");
+println("==================================================================");
+
+// -----------------------------------------------------------------------------
+// 1. Fluid Method Cascades (`..`) on Configurable Client
+// -----------------------------------------------------------------------------
+class HttpClientConfig {
+    var host: str = "localhost";
+    var port: int = 80;
+    var use_tls: bool = false;
+    var timeout_ms: int = 5000;
+    var auth_token: str = "";
+
+    def set_host(h: str) {
+        this.host = h;
+    }
+
+    def set_port(p: int) {
+        this.port = p;
+    }
+
+    def enable_tls() {
+        this.use_tls = true;
+    }
+
+    def generate_session_token() -> str {
+        this.auth_token = "tok_live_98a72b";
+        return this.auth_token;
+    }
+
+    def describe() -> str {
+        let scheme = "https" if this.use_tls else "http";
+        return scheme + "://" + this.host + ":" + this.port + " (timeout=" + this.timeout_ms + "ms)";
+    }
+}
+
+let client = HttpClientConfig()
+    ..set_host("api.telemetry.pilot.dev")
+    ..set_port(443)
+    ..enable_tls()
+    ..generate_session_token() -> let session_key;
+
+println("\n[1] Fluid Cascaded Client Configuration:");
+println("  Endpoint:    " + client.describe());
+println("  Bound Token: " + session_key);
+
+// -----------------------------------------------------------------------------
+// 2. Functional Pipeline Operator (`|>`)
+// -----------------------------------------------------------------------------
+def sanitize_metric(value: float) -> float {
+    return value if value >= 0.0 else 0.0;
+}
+
+def amplify_gain(signal: float) -> float {
+    return signal * 2.5;
+}
+
+def quantize_sample(reading: float) -> int {
+    return int(reading + 0.5);
+}
+
+let raw_input = 14.8;
+let final_signal = raw_input
+    |> sanitize_metric
+    |> amplify_gain
+    |> quantize_sample;
+
+println("\n[2] Pipeline Operator (|>) Transformation:");
+println("  Raw Input:    " + raw_input);
+println("  Final Signal: " + final_signal);
+
+// -----------------------------------------------------------------------------
+// 3. Null-Coalescing (`??`) and Safe Navigation (`?.`)
+// -----------------------------------------------------------------------------
+class ServerProfile {
+    var region: str? = none;
+    var fallback_region: str = "us-east-1";
+}
+
+let profile = ServerProfile();
+let resolved_region = profile.region ?? profile.fallback_region;
+let safe_len = profile.region?.len ?? 0;
+
+println("\n[3] Null-Safety Coalescing & Safe Navigation:");
+println("  Resolved Region: " + resolved_region);
+println("  Region Length:   " + safe_len);
+
+// -----------------------------------------------------------------------------
+// 4. Inline Exception Recovery Expression (`catch`)
+// -----------------------------------------------------------------------------
+def load_port_from_env(env_var: str) -> int {
+    if env_var == "INVALID" {
+        raise "Invalid port string format";
+    }
+    return 8080;
+}
+
+let configured_port = load_port_from_env("INVALID") catch 3000;
+let standard_port = load_port_from_env("VALID") catch 3000;
+
+println("\n[4] Localized Exception Recovery (catch):");
+println("  Configured Port (recovered from error): " + configured_port);
+println("  Standard Port (normal path):            " + standard_port);
+
+println("\n>>> Showcase 27 Complete! <<<\n");

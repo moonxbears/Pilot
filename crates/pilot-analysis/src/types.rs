@@ -216,6 +216,62 @@ impl TypeArena {
         })
     }
 
+    /// Forms a canonical, flattened, and deduplicated Union type from a set of types.
+    pub fn union_of(&mut self, types: Vec<TypeId>) -> TypeId {
+        let mut flattened = Vec::new();
+        for t in types {
+            let pruned = self.prune(t);
+            if pruned == TypeId::ANY {
+                return TypeId::ANY;
+            }
+            if pruned == TypeId::NEVER || pruned == TypeId::VOID {
+                continue;
+            }
+            if let TypeKind::Union(inner) = self.get(pruned).clone() {
+                for u in inner {
+                    let u_pruned = self.prune(u);
+                    if !flattened.contains(&u_pruned) {
+                        flattened.push(u_pruned);
+                    }
+                }
+            } else if !flattened.contains(&pruned) {
+                flattened.push(pruned);
+            }
+        }
+        if flattened.is_empty() {
+            TypeId::NEVER
+        } else if flattened.len() == 1 {
+            flattened[0]
+        } else {
+            flattened.sort_by_key(|t| t.0);
+            self.alloc(TypeKind::Union(flattened))
+        }
+    }
+
+    /// Unifies all types if they are mutually compatible; otherwise forms a constrained Union.
+    pub fn unify_or_union_all(&mut self, types: Vec<TypeId>) -> TypeId {
+        if types.is_empty() {
+            return self.new_var(0);
+        }
+        let mut unified = self.prune(types[0]);
+        let mut all_unified = true;
+        for &t in &types[1..] {
+            let prev_subst = self.subst.clone();
+            match self.unify(unified, t) {
+                Ok(u) => unified = u,
+                Err(_) => {
+                    self.subst = prev_subst;
+                    all_unified = false;
+                    break;
+                }
+            }
+        }
+        if all_unified {
+            return unified;
+        }
+        self.union_of(types)
+    }
+
     /// Resolves any assigned type substitutions for a given TypeId.
     pub fn prune(&self, mut id: TypeId) -> TypeId {
         while let TypeKind::TypeVar { id: var_id, .. } = self.get(id) {
@@ -226,6 +282,49 @@ impl TypeArena {
             }
         }
         id
+    }
+
+    /// Recursively substitutes all type variables across nested composite types.
+    pub fn deep_prune(&mut self, ty: TypeId) -> TypeId {
+        let pruned = self.prune(ty);
+        match self.get(pruned).clone() {
+            TypeKind::Collection { kind, element } => {
+                let e = self.deep_prune(element);
+                self.alloc(TypeKind::Collection { kind, element: e })
+            }
+            TypeKind::Map { key, value } => {
+                let k = self.deep_prune(key);
+                let v = self.deep_prune(value);
+                self.alloc(TypeKind::Map { key: k, value: v })
+            }
+            TypeKind::Tuple(elems) => {
+                let pr_elems: Vec<_> = elems.into_iter().map(|e| self.deep_prune(e)).collect();
+                self.alloc(TypeKind::Tuple(pr_elems))
+            }
+            TypeKind::Option(inner) => {
+                let inn = self.deep_prune(inner);
+                self.alloc(TypeKind::Option(inn))
+            }
+            TypeKind::Result { ok, err } => {
+                let o = self.deep_prune(ok);
+                let e = self.deep_prune(err);
+                self.alloc(TypeKind::Result { ok: o, err: e })
+            }
+            TypeKind::Function { params, ret } => {
+                let pr_params: Vec<_> = params.into_iter().map(|p| self.deep_prune(p)).collect();
+                let pr_ret = self.deep_prune(ret);
+                self.alloc(TypeKind::Function { params: pr_params, ret: pr_ret })
+            }
+            TypeKind::Union(types) => {
+                let pr_types: Vec<_> = types.into_iter().map(|t| self.deep_prune(t)).collect();
+                self.union_of(pr_types)
+            }
+            TypeKind::RowRecord { fields, is_open, tail_var } => {
+                let pr_fields: Vec<_> = fields.into_iter().map(|(n, t)| (n, self.deep_prune(t))).collect();
+                self.row_record_of(pr_fields, is_open, tail_var)
+            }
+            _ => pruned,
+        }
     }
 
     /// Unifies two types in the arena, recording type variable substitutions.
@@ -309,11 +408,26 @@ impl TypeArena {
                         return Err(format!("Closed row record missing field '{}'", name));
                     }
                 }
+                if !open2 {
+                    for (name, _) in &f1 {
+                        if !f2.iter().any(|(n, _)| n == name) {
+                            return Err(format!("Closed row record missing field '{}'", name));
+                        }
+                    }
+                }
                 let mut sorted: Vec<(String, TypeId)> = merged_fields.into_iter().collect();
                 sorted.sort_by(|x, y| x.0.cmp(&y.0));
                 let is_open = open1 && open2;
                 let tail = if is_open { t1.or(t2) } else { None };
                 Ok(self.row_record_of(sorted, is_open, tail))
+            }
+            (TypeKind::RowRecord { fields, .. }, TypeKind::Map { key, value })
+            | (TypeKind::Map { key, value }, TypeKind::RowRecord { fields, .. }) => {
+                let unified_key = self.unify(key, TypeId::STR)?;
+                let field_tys: Vec<TypeId> = fields.into_iter().map(|(_, t)| t).collect();
+                let record_val_ty = self.unify_or_union_all(field_tys);
+                let unified_val = self.unify(value, record_val_ty)?;
+                Ok(self.map_of(unified_key, unified_val))
             }
             (TypeKind::Typestate { base: b1, state_name: s1 }, TypeKind::Typestate { base: b2, state_name: s2 }) => {
                 if s1 != s2 {
@@ -335,6 +449,50 @@ impl TypeArena {
                 } else {
                     Err(format!("ADT type mismatch: '{}' vs '{}'", n1, n2))
                 }
+            }
+            (TypeKind::Union(types_a), TypeKind::Union(types_b)) => {
+                let all_a_in_b = types_a.iter().all(|ta| types_b.contains(ta));
+                let all_b_in_a = types_b.iter().all(|tb| types_a.contains(tb));
+                if all_a_in_b && all_b_in_a {
+                    return Ok(a);
+                }
+                let mut can_sub = true;
+                for &ta in &types_a {
+                    let mut found = false;
+                    for &tb in &types_b {
+                        let prev_subst = self.subst.clone();
+                        if self.unify(ta, tb).is_ok() {
+                            found = true;
+                            break;
+                        }
+                        self.subst = prev_subst;
+                    }
+                    if !found {
+                        can_sub = false;
+                        break;
+                    }
+                }
+                if can_sub {
+                    Ok(b)
+                } else {
+                    Err(format!("Cannot unify union '{}' with '{}'", self.display(a), self.display(b)))
+                }
+            }
+            (TypeKind::Union(types), _) => {
+                for &u in &types {
+                    self.unify(u, b)?;
+                }
+                Ok(b)
+            }
+            (_, TypeKind::Union(types)) => {
+                for &u in &types {
+                    let prev_subst = self.subst.clone();
+                    if self.unify(a, u).is_ok() {
+                        return Ok(b);
+                    }
+                    self.subst = prev_subst;
+                }
+                Err(format!("Type '{}' is not a member of union '{}'", self.display(a), self.display(b)))
             }
             _ => Err(format!("Cannot unify type {:?} with {:?}", self.get(a), self.get(b))),
         }

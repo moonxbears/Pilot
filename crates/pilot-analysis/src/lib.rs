@@ -219,6 +219,102 @@ def test_match_incomplete(x: int) -> int {
     }
 
     #[test]
+    fn test_showcase_21_row_polymorphism_inference() {
+        let code = r#"
+record Frame2D(width: int, height: int, name: str);
+record Canvas2D(width: float, height: float);
+
+def compute_area(surface) => surface.width * surface.height;
+
+let frame_area = compute_area(Frame2D(1920, 1080, "HD"));
+let canvas_area = compute_area(Canvas2D(12.5, 8.0));
+"#;
+        let arena = pilot_parser::parse(code);
+        let result = AnalysisPipeline::analyze(&arena, arena.root);
+        assert!(result.is_ok(), "Expected clean analysis: {:?}", result.diagnostics);
+
+        let mut frame_area_ty = None;
+        let mut canvas_area_ty = None;
+        let mut surface_ty = None;
+        for (idx, node) in arena.nodes.iter().enumerate() {
+            if node.node_kind() == pilot_ast::NodeKind::LetStmt {
+                let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                if name == "frame_area" {
+                    frame_area_ty = result.inferred_types.get(&(idx as u32)).copied();
+                } else if name == "canvas_area" {
+                    canvas_area_ty = result.inferred_types.get(&(idx as u32)).copied();
+                }
+            } else if node.node_kind() == pilot_ast::NodeKind::ParamDecl {
+                let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                if name == "surface" {
+                    surface_ty = result.inferred_types.get(&(idx as u32)).copied();
+                }
+            }
+        }
+
+        assert_eq!(frame_area_ty, Some(TypeId::I64), "frame_area should infer to int (i64)");
+        assert_eq!(canvas_area_ty, Some(TypeId::F64), "canvas_area should infer to float (f64)");
+        assert!(surface_ty.is_some(), "surface param type should be inferred");
+        let surf_disp = result.types.display(surface_ty.unwrap());
+        assert!(surf_disp.contains("width") && surf_disp.contains("height"), "surface should infer row record: {}", surf_disp);
+    }
+
+    #[test]
+    fn test_heterogeneous_collection_union_inference() {
+        let code = r#"
+let mylist = ["apples", 5, 2];
+let first_elem = mylist[0];
+let mymap = {"name": "Pilot", "count": 42};
+let branch_val = "ok" if true else 404;
+"#;
+        let arena = pilot_parser::parse(code);
+        let result = AnalysisPipeline::analyze(&arena, arena.root);
+        assert!(result.is_ok(), "Expected clean analysis: {:?}", result.diagnostics);
+
+        let mut mylist_ty = None;
+        let mut first_elem_ty = None;
+        let mut mymap_ty = None;
+        let mut branch_val_ty = None;
+
+        for (idx, node) in arena.nodes.iter().enumerate() {
+            if node.node_kind() == pilot_ast::NodeKind::LetStmt {
+                let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                match name {
+                    "mylist" => mylist_ty = result.inferred_types.get(&(idx as u32)).copied(),
+                    "first_elem" => first_elem_ty = result.inferred_types.get(&(idx as u32)).copied(),
+                    "mymap" => mymap_ty = result.inferred_types.get(&(idx as u32)).copied(),
+                    "branch_val" => branch_val_ty = result.inferred_types.get(&(idx as u32)).copied(),
+                    _ => {}
+                }
+            }
+        }
+
+        assert!(mylist_ty.is_some(), "mylist should be inferred");
+        let mylist_disp = result.types.display(mylist_ty.unwrap());
+        println!("mylist inferred type: {}", mylist_disp);
+        assert!(mylist_disp.contains("List[") && mylist_disp.contains("str") && mylist_disp.contains("i64"),
+            "Expected List[str | i64] (or int), got: {}", mylist_disp);
+
+        assert!(first_elem_ty.is_some(), "first_elem should be inferred");
+        let first_disp = result.types.display(first_elem_ty.unwrap());
+        println!("first_elem inferred type: {}", first_disp);
+        assert!(first_disp.contains("str") && first_disp.contains("i64"),
+            "Expected str | i64, got: {}", first_disp);
+
+        assert!(mymap_ty.is_some(), "mymap should be inferred");
+        let mymap_disp = result.types.display(mymap_ty.unwrap());
+        println!("mymap inferred type: {}", mymap_disp);
+        assert!(mymap_disp.contains("name: str") && mymap_disp.contains("count: i64"),
+            "Expected {{ count: i64, name: str }}, got: {}", mymap_disp);
+
+        assert!(branch_val_ty.is_some(), "branch_val should be inferred");
+        let branch_disp = result.types.display(branch_val_ty.unwrap());
+        println!("branch_val inferred type: {}", branch_disp);
+        assert!(branch_disp.contains("str") && branch_disp.contains("i64"),
+            "Expected str | i64, got: {}", branch_disp);
+    }
+
+    #[test]
     fn test_symbolic_differentiation_compute_impulse() {
         // E = 0.5 * mass * (velocity * velocity)
         let half = SymbolicExpr::Const(0.5);
@@ -362,5 +458,137 @@ def calculate(a: int, b: int) -> int {
         assert!(comptime.demoted_slots.iter().any(|s| s.var_name == "x" && s.is_read_only));
         assert!(comptime.demoted_slots.iter().any(|s| s.var_name == "y" && !s.is_read_only));
         assert!(comptime.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_custom_indexer_inference() {
+        let code = r#"
+class MemoryCache {
+    property this[key: str]: int {
+        get => 42;
+        set(v) => {};
+    }
+}
+
+class Matrix {
+    property this[row: int, col: int]: float => 3.14;
+}
+
+class SimpleBuffer {
+    this[idx: int]: str => "item";
+}
+
+let cache = MemoryCache()
+let item = cache["hello"]
+cache["test"] = 100
+
+let mat = Matrix()
+let val = mat[1, 2]
+
+let buf = SimpleBuffer()
+let entry = buf[0]
+"#;
+        let arena = pilot_parser::parse(code);
+        let result = AnalysisPipeline::analyze(&arena, arena.root);
+        assert!(result.is_ok(), "Expected clean analysis, got: {:?}", result.diagnostics);
+
+        // Find `item` node and assert inferred type is int
+        let mut item_ty = None;
+        let mut val_ty = None;
+        let mut entry_ty = None;
+
+        for (idx, node) in arena.nodes.iter().enumerate() {
+            if node.node_kind() == pilot_ast::NodeKind::LetStmt {
+                let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                if name == "item" {
+                    item_ty = result.inferred_types.get(&(idx as u32)).copied();
+                } else if name == "val" {
+                    val_ty = result.inferred_types.get(&(idx as u32)).copied();
+                } else if name == "entry" {
+                    entry_ty = result.inferred_types.get(&(idx as u32)).copied();
+                }
+            }
+        }
+
+        assert_eq!(item_ty, Some(TypeId::I64));
+        assert_eq!(val_ty, Some(TypeId::F64));
+        assert_eq!(entry_ty, Some(TypeId::STR));
+    }
+
+    #[test]
+    fn test_indexer_diagnostics() {
+        // Test type mismatch in indexer argument
+        let code_mismatch = r#"
+class Cache {
+    property this[key: str]: int => 0;
+}
+let c = Cache()
+let bad = c[123]
+"#;
+        let arena_m = pilot_parser::parse(code_mismatch);
+        let res_m = AnalysisPipeline::analyze(&arena_m, arena_m.root);
+        assert!(!res_m.is_ok(), "Diagnostics: {:?}", res_m.diagnostics);
+        assert!(res_m.diagnostics.iter().any(|d| d.code == "TYPE001"));
+
+        // Test argument count mismatch in multi-dimensional indexer
+        let code_count = r#"
+class Grid {
+    property this[r: int, c: int]: float => 1.0;
+}
+let g = Grid()
+let bad = g[5]
+"#;
+        let arena_c = pilot_parser::parse(code_count);
+        let res_c = AnalysisPipeline::analyze(&arena_c, arena_c.root);
+        assert!(!res_c.is_ok());
+        assert!(res_c.diagnostics.iter().any(|d| d.code == "IDX001"));
+    }
+
+    #[test]
+    fn test_relational_record_indexing_and_collection_append_inference() {
+        let code = r#"
+let transactions = [
+    { "id": 1, "customer": "Alice", "amount": 250.0, "category": "Hardware" },
+    { "id": 2, "customer": "Bob",   "amount": 420.0, "category": "Software" }
+];
+let hardware_txns = [];
+var total_hardware_spend = 0.0;
+
+for t in transactions {
+    if t["category"] == "Hardware" {
+        hardware_txns.append(t);
+        total_hardware_spend = total_hardware_spend + t["amount"];
+    }
+}
+"#;
+        let arena = pilot_parser::parse(code);
+        let result = AnalysisPipeline::analyze(&arena, arena.root);
+        assert!(result.is_ok(), "Expected clean analysis, got: {:?}", result.diagnostics);
+
+        let mut hw_txns_ty = None;
+        let mut total_spend_ty = None;
+
+        for (idx, node) in arena.nodes.iter().enumerate() {
+            if node.node_kind() == pilot_ast::NodeKind::LetStmt {
+                let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                if name == "hardware_txns" {
+                    hw_txns_ty = result.inferred_types.get(&(idx as u32)).copied();
+                }
+            } else if node.node_kind() == pilot_ast::NodeKind::VarStmt {
+                let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
+                if name == "total_hardware_spend" {
+                    total_spend_ty = result.inferred_types.get(&(idx as u32)).copied();
+                }
+            }
+        }
+
+        assert_eq!(total_spend_ty, Some(TypeId::F64));
+        assert!(hw_txns_ty.is_some());
+        let hw_ty = hw_txns_ty.unwrap();
+        let hw_display = result.types.display(hw_ty);
+        assert!(!hw_display.contains("'T"), "Expected concrete inferred type without unconstrained type variables, got: {}", hw_display);
+        assert!(hw_display.contains("List["), "Expected List type, got: {}", hw_display);
+        assert!(hw_display.contains("amount: f64"), "Expected amount: f64, got: {}", hw_display);
+        assert!(hw_display.contains("category: str"), "Expected category: str, got: {}", hw_display);
     }
 }

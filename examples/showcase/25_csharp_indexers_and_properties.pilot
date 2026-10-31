@@ -1,0 +1,119 @@
+// =============================================================================
+// Showcase 25: C#-Style Configurable Indexers & Self-Backed Properties
+// =============================================================================
+// Demonstrates:
+//   1. Advanced Multi-Dimensional Indexers:
+//      - `property this[row: int, col: int]: float { get => ...; set(v) => ...; }`
+//   2. Dictionary / Associative Indexers:
+//      - `property this[key: str]: int { get => ...; set(v) => ...; }`
+//   3. Concise Expression-Bodied Indexers:
+//      - `this[idx: int]: str => ...;`
+//   4. Self-Backed Fields with Contextual `field` and `value` Keywords:
+//      - `property balance: float { get => field; set => field = value; }`
+//   5. Computed Expression-Bodied Properties:
+//      - `property area: float => this.width * this.height;`
+//   6. Structural Row Record Indexing with Exact Static Type Retention
+// =============================================================================
+
+println("==================================================================");
+println(" Showcase 25: Advanced Indexers & Self-Backed Property Fields     ");
+println("==================================================================");
+
+// -----------------------------------------------------------------------------
+// 1. Multi-Dimensional Grid Indexer
+// -----------------------------------------------------------------------------
+class Matrix2D {
+    var data: List[float] = [
+        1.0, 0.0,
+        0.0, 1.0
+    ];
+
+    property this[row: int, col: int]: float {
+        get => this.data[row * 2 + col];
+        set(v) => {
+            this.data[row * 2 + col] = v;
+        };
+    }
+}
+
+let mat = Matrix2D();
+println("\n[1] 2D Matrix Identity Cell at (0, 0):");
+println("  mat[0, 0] = " + mat[0, 0]);
+println("  mat[0, 1] = " + mat[0, 1]);
+
+mat[0, 1] = 4.5;
+println("  After mat[0, 1] = 4.5 -> " + mat[0, 1]);
+
+// -----------------------------------------------------------------------------
+// 2. Associative Cache Indexer
+// -----------------------------------------------------------------------------
+class MetricCache {
+    property this[metric_name: str]: int {
+        get => 100;
+        set(v) => {};
+    }
+}
+
+let metrics = MetricCache();
+println("\n[2] MetricCache Associative Indexer:");
+println("  metrics['cpu_usage'] = " + metrics["cpu_usage"]);
+println("  metrics['mem_usage'] = " + metrics["mem_usage"]);
+
+// -----------------------------------------------------------------------------
+// 3. Concise Expression-Bodied Indexer
+// -----------------------------------------------------------------------------
+class FibonacciSeries {
+    this[index: int]: int => index * 10;
+}
+
+let fib = FibonacciSeries();
+println("\n[3] Concise Series Indexer:");
+println("  fib[3] = " + fib[3]);
+println("  fib[7] = " + fib[7]);
+
+// -----------------------------------------------------------------------------
+// 4. Self-Backed Property Fields with `field` & `value`
+// -----------------------------------------------------------------------------
+class BankAccount {
+    property holder: str {
+        get => field;
+        set => field = value;
+    }
+
+    property balance: float {
+        get => field;
+        set => field = value if value >= 0.0 else 0.0;
+    }
+
+    property account_summary: str => this.holder + " has balance $" + this.balance;
+}
+
+let acct = BankAccount();
+acct.holder = "Alice Vance";
+acct.balance = 2500.75;
+
+println("\n[4] Self-Backed Properties with Contextual 'field' and 'value':");
+println("  " + acct.account_summary);
+
+// Attempt negative deposit (validation sets to 0.0)
+acct.balance = -50.0;
+println("  After invalid assignment balance = -50.0 -> " + acct.balance);
+
+// -----------------------------------------------------------------------------
+// 5. Structural Row Record Indexing with Static Type Retention
+// -----------------------------------------------------------------------------
+let transaction = {
+    "txn_id": 9801,
+    "merchant": "Apex Hardware Corp",
+    "total": 349.50,
+    "verified": true
+};
+
+let total_amt = transaction["total"];
+let merchant_name = transaction["merchant"];
+let is_verified = transaction["verified"];
+
+println("\n[5] Structural Row Record Static Field Indexing:");
+println("  Transaction #" + transaction["txn_id"] + " at " + merchant_name + " for $" + total_amt + " (verified: " + is_verified + ")");
+
+println("\n>>> Showcase 25 Complete! <<<\n");

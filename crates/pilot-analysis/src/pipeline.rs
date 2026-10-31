@@ -39,6 +39,7 @@ impl AnalysisPipeline {
         if root.is_some() {
             infer_engine.synth(arena, root);
         }
+        infer_engine.finalize_inferred_types();
 
         // 2. Pattern Exhaustiveness & Redundancy Checking
         let mut null_safety = NullSafetyAnalyzer::new();

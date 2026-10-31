@@ -303,6 +303,127 @@ for score in scores {
     }
 
     #[test]
+    fn test_showcase_21_hover() {
+        let mut server = LspServer::new();
+        let uri = "file:///workspace/21_advanced_type_inference.pilot";
+        let code = std::fs::read_to_string("examples/showcase/21_advanced_type_inference.pilot")
+            .or_else(|_| std::fs::read_to_string("../../examples/showcase/21_advanced_type_inference.pilot"))
+            .unwrap();
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+            uri,
+            code.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+        );
+        server.handle_message(&did_open);
+
+        // Hover over 'frame_area' at line 11 (0-indexed), char 6
+        let hover_req_fa = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":11,"character":6}}}}}}"#,
+            uri
+        );
+        let resp_fa = server.handle_message(&hover_req_fa).expect("Expected hover response for frame_area");
+        println!("frame_area hover: {}", resp_fa);
+        assert!(resp_fa.contains("let frame_area: i64"), "Expected i64 for frame_area, got: {}", resp_fa);
+
+        // Hover over 'canvas_area' at line 12 (0-indexed), char 6
+        let hover_req_ca = format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":12,"character":6}}}}}}"#,
+            uri
+        );
+        let resp_ca = server.handle_message(&hover_req_ca).expect("Expected hover response for canvas_area");
+        println!("canvas_area hover: {}", resp_ca);
+        assert!(resp_ca.contains("let canvas_area: f64"), "Expected f64 for canvas_area, got: {}", resp_ca);
+
+        // Hover over 'compute_area' at line 9 (0-indexed), char 6
+        let hover_req_fn = format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":9,"character":6}}}}}}"#,
+            uri
+        );
+        let resp_fn = server.handle_message(&hover_req_fn).expect("Expected hover response for compute_area");
+        println!("compute_area hover: {}", resp_fn);
+
+        // Hover over 'surface' at line 9 (0-indexed), char 18
+        let hover_req_surf = format!(
+            r#"{{"jsonrpc":"2.0","id":4,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":9,"character":18}}}}}}"#,
+            uri
+        );
+        let resp_surf = server.handle_message(&hover_req_surf).expect("Expected hover response for surface");
+        println!("surface hover: {}", resp_surf);
+    }
+
+    #[test]
+    fn test_heterogeneous_collection_hover() {
+        let mut server = LspServer::new();
+        let uri = "file:///workspace/test_unions.pilot";
+        let code = "let mylist = [\"apples\", 5, 2];\nlet item = mylist[0];\n";
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+            uri,
+            code.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+        );
+        server.handle_message(&did_open);
+
+        // Hover over 'mylist' at line 0, char 6
+        let hover_req = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":6}}}}}}"#,
+            uri
+        );
+        let resp = server.handle_message(&hover_req).expect("Expected hover response for mylist");
+        println!("mylist hover: {}", resp);
+        assert!(resp.contains("let mylist: List[i64 | str]"), "Expected List[i64 | str], got: {}", resp);
+
+        // Hover over 'item' at line 1, char 6
+        let hover_item = format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":1,"character":6}}}}}}"#,
+            uri
+        );
+        let resp_item = server.handle_message(&hover_item).expect("Expected hover response for item");
+        println!("item hover: {}", resp_item);
+        assert!(resp_item.contains("let item: i64 | str"), "Expected i64 | str, got: {}", resp_item);
+    }
+
+    #[test]
+    fn test_indexer_hover() {
+        let mut server = LspServer::new();
+        let uri = "file:///workspace/test_indexer.pilot";
+        let code = "class MemoryCache {\n    property this[key: str]: int {\n        get => 42;\n        set(v) => {};\n    }\n}\nlet cache = MemoryCache();\nlet val = cache[\"foo\"];\n";
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+            uri,
+            code.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+        );
+        server.handle_message(&did_open);
+
+        // Hover over 'this' in indexer declaration at line 1, char 14
+        let hover_this = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":1,"character":14}}}}}}"#,
+            uri
+        );
+        let resp_this = server.handle_message(&hover_this).expect("Expected hover response for this indexer");
+        println!("this hover: {}", resp_this);
+        assert!(resp_this.contains("property this[key: str]: i64"), "Expected property this[key: str]: i64, got: {}", resp_this);
+        assert!(resp_this.contains("Pilot Indexer"), "Expected Pilot Indexer, got: {}", resp_this);
+
+        // Hover over '[' at line 7, char 15
+        let hover_bracket = format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":7,"character":15}}}}}}"#,
+            uri
+        );
+        let resp_bracket = server.handle_message(&hover_bracket).expect("Expected hover response for indexer bracket");
+        println!("bracket hover: {}", resp_bracket);
+        assert!(resp_bracket.contains("property this[key: str]: i64"), "Expected property this[key: str]: i64, got: {}", resp_bracket);
+
+        // Hover over 'val' at line 7, char 5
+        let hover_val = format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":7,"character":5}}}}}}"#,
+            uri
+        );
+        let resp_val = server.handle_message(&hover_val).expect("Expected hover response for val");
+        println!("val hover: {}", resp_val);
+        assert!(resp_val.contains("let val: i64"), "Expected let val: i64, got: {}", resp_val);
+    }
+
+    #[test]
     fn test_proc_macro_lsp_query_endpoints() {
         assert_eq!(HoverQuery::LSP_METHOD, "textDocument/hover");
         assert_eq!(HoverQuery::LSP_CAPABILITY, Some("hoverProvider"));
@@ -315,5 +436,50 @@ for score in scores {
         assert_eq!(SignatureHelpQuery::LSP_METHOD, "textDocument/signatureHelp");
         assert_eq!(CodeActionQuery::LSP_METHOD, "textDocument/codeAction");
         assert_eq!(SemanticTokensFullQuery::LSP_METHOD, "textDocument/semanticTokens/full");
+    }
+
+    #[test]
+    fn test_database_showcase_10_hover_types() {
+        let mut server = LspServer::new();
+        let uri = "file:///workspace/10_database.pilot";
+        let code = r#"let transactions = [
+    { "id": 1, "customer": "Alice", "amount": 250.0, "category": "Hardware" },
+    { "id": 2, "customer": "Bob",   "amount": 420.0, "category": "Software" }
+];
+let hardware_txns = [];
+var total_hardware_spend = 0.0;
+for t in transactions {
+    if t["category"] == "Hardware" {
+        hardware_txns.append(t);
+        total_hardware_spend = total_hardware_spend + t["amount"];
+    }
+}
+"#;
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+            uri,
+            code.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+        );
+        server.handle_message(&did_open);
+
+        // Hover over 'hardware_txns' at line 4, char 5
+        let hover_hw = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":4,"character":5}}}}}}"#,
+            uri
+        );
+        let resp_hw = server.handle_message(&hover_hw).expect("Expected hover response for hardware_txns");
+        println!("hardware_txns hover: {}", resp_hw);
+        assert!(!resp_hw.contains("'T"), "Expected concrete inferred type without unconstrained type variable, got: {}", resp_hw);
+        assert!(resp_hw.contains("hardware_txns: List["), "Expected List type, got: {}", resp_hw);
+        assert!(resp_hw.contains("amount: f64"), "Expected amount: f64 in record, got: {}", resp_hw);
+
+        // Hover over 'total_hardware_spend' at line 5, char 5
+        let hover_spend = format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":5,"character":5}}}}}}"#,
+            uri
+        );
+        let resp_spend = server.handle_message(&hover_spend).expect("Expected hover response for total_hardware_spend");
+        println!("total_hardware_spend hover: {}", resp_spend);
+        assert!(resp_spend.contains("total_hardware_spend: f64"), "Expected f64, got: {}", resp_spend);
     }
 }

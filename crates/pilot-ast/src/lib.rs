@@ -304,6 +304,12 @@ impl NodeKind {
             Self::ErrorNode => "ErrorNode",
         }
     }
+
+    #[inline]
+    pub const fn is_type_spec(self) -> bool {
+        let v = self as u16;
+        v >= 400 && v <= 409
+    }
 }
 
 /// Milestone 17 & 18 Unified Call-Quote Projection Kind (Invariant #1).
@@ -473,6 +479,8 @@ pub struct AstArena {
     pub type_annotations: std::collections::HashMap<u32, NodeId>,
     /// Iterable expression `NodeId` for `ForExpr` nodes (`for x in <iter>`).
     pub for_iter_nodes: std::collections::HashMap<u32, NodeId>,
+    /// Optional completion `then` clause expression `NodeId` for `ForExpr` nodes (`for ... { ... } then <expr>`).
+    pub for_then_nodes: std::collections::HashMap<u32, NodeId>,
     /// Declared `(field_name, field_type_node)` pairs for `RecordDecl`, `StructDecl`, `ClassDecl`, and `InterfaceDecl`.
     pub record_fields: std::collections::HashMap<u32, Vec<(SymbolId, NodeId)>>,
 }
@@ -493,6 +501,7 @@ impl AstArena {
             root: NodeId::NONE,
             type_annotations: std::collections::HashMap::new(),
             for_iter_nodes: std::collections::HashMap::new(),
+            for_then_nodes: std::collections::HashMap::new(),
             record_fields: std::collections::HashMap::new(),
         }
     }

@@ -555,6 +555,10 @@ impl<'a> Parser<'a> {
             }
         }
 
+        if self.peek_is_indexer_decl() {
+            return self.parse_indexer_decl(self.span());
+        }
+
         let k = self.peek();
         match k {
             TokenKind::KwImport => self.parse_import_stmt(),
@@ -1315,9 +1319,48 @@ impl<'a> Parser<'a> {
         self.parse_block_expr()
     }
 
+    fn peek_is_indexer_decl(&self) -> bool {
+        if !self.is_ident_like() || self.text() != "this" {
+            return false;
+        }
+        if self.peek_ahead(1) != TokenKind::LBracket {
+            return false;
+        }
+        let mut depth = 0;
+        let mut idx = 1;
+        while self.pos + idx < self.tape.len() {
+            let k = self.tape.kind(self.pos + idx);
+            if k == TokenKind::LBracket {
+                depth += 1;
+            } else if k == TokenKind::RBracket {
+                depth -= 1;
+                if depth == 0 {
+                    idx += 1;
+                    while self.pos + idx < self.tape.len() && self.tape.kind(self.pos + idx) == TokenKind::Newline {
+                        idx += 1;
+                    }
+                    if self.pos + idx < self.tape.len() {
+                        let after_k = self.tape.kind(self.pos + idx);
+                        if after_k == TokenKind::Colon || after_k == TokenKind::LBrace || after_k == TokenKind::FatArrow {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+            } else if k == TokenKind::Semicolon || k == TokenKind::Eof {
+                return false;
+            }
+            idx += 1;
+        }
+        false
+    }
+
     fn parse_property_decl(&mut self) -> NodeId {
         let start_span = self.span();
         self.advance(); // consume 'property'
+        if self.is_ident_like() && self.text() == "this" && self.peek_ahead(1) == TokenKind::LBracket {
+            return self.parse_indexer_decl(start_span);
+        }
         let name = self.text();
         self.advance();
         let sym = self.arena.interner.intern(name);
@@ -1326,10 +1369,22 @@ impl<'a> Parser<'a> {
             self.advance();
             prop_ty = self.parse_type();
         }
+        if self.at(TokenKind::FatArrow) {
+            self.advance();
+            let expr = self.parse_expr();
+            let ret = self.arena.alloc_node(NodeKind::ReturnStmt, 0, start_span, expr.0, 0);
+            let body = self.arena.alloc_list_node(NodeKind::BlockExpr, 0, start_span, &[ret]);
+            let fn_node = self.arena.alloc_node(NodeKind::FnDecl, 0, start_span, sym.0, body.0);
+            if prop_ty.is_some() {
+                self.arena.type_annotations.insert(fn_node.0, prop_ty);
+            }
+            return fn_node;
+        }
         if self.at(TokenKind::LBrace) {
             self.advance();
             let mut stmts = Vec::new();
             while !self.at_end() && !self.at(TokenKind::RBrace) {
+                let loop_start_pos = self.pos;
                 self.consume_semi_or_newlines();
                 if self.at(TokenKind::RBrace) || self.at_end() {
                     break;
@@ -1359,8 +1414,7 @@ impl<'a> Parser<'a> {
                     }
                     let set_body = if self.at(TokenKind::FatArrow) {
                         self.advance();
-                        let expr = self.parse_expr();
-                        self.arena.alloc_node(NodeKind::ExprStmt, 0, span, expr.0, 0)
+                        self.parse_expr_stmt()
                     } else {
                         self.parse_block_expr()
                     };
@@ -1373,6 +1427,9 @@ impl<'a> Parser<'a> {
                     stmts.push(self.parse_stmt_or_decl());
                 }
                 self.consume_semi_or_newlines();
+                if self.pos == loop_start_pos {
+                    self.advance();
+                }
             }
             self.expect(TokenKind::RBrace);
             let body = self.arena.alloc_list_node(NodeKind::BlockExpr, 0, start_span, &stmts);
@@ -1384,6 +1441,165 @@ impl<'a> Parser<'a> {
         }
         let body = self.parse_block_expr();
         let fn_node = self.arena.alloc_node(NodeKind::FnDecl, 0, start_span, sym.0, body.0);
+        if prop_ty.is_some() {
+            self.arena.type_annotations.insert(fn_node.0, prop_ty);
+        }
+        fn_node
+    }
+
+    fn parse_indexer_decl(&mut self, start_span: ByteSpan) -> NodeId {
+        self.advance(); // consume 'this'
+        self.expect(TokenKind::LBracket);
+
+        let mut params = Vec::new();
+        while !self.at_end() && !self.at(TokenKind::RBracket) {
+            self.consume_semi_or_newlines();
+            if self.at(TokenKind::RBracket) || self.at_end() {
+                break;
+            }
+            if self.is_ident_like() {
+                let p_span = self.span();
+                let p_name = self.text();
+                self.advance();
+                let p_sym = self.arena.interner.intern(p_name);
+                let mut type_node = NodeId::NONE;
+                if self.at(TokenKind::Colon) {
+                    self.advance();
+                    type_node = self.parse_type();
+                }
+                let p_end = self.prev_span().end.max(p_span.end);
+                let p_node = self.arena.alloc_node(
+                    NodeKind::ParamDecl,
+                    0,
+                    ByteSpan::new(p_span.start, p_end),
+                    p_sym.0,
+                    type_node.0,
+                );
+                params.push(p_node);
+            } else {
+                self.advance();
+            }
+            if self.at(TokenKind::Comma) {
+                self.advance();
+            }
+        }
+        self.expect(TokenKind::RBracket);
+
+        let mut prop_ty = NodeId::NONE;
+        if self.at(TokenKind::Colon) {
+            self.advance();
+            prop_ty = self.parse_type();
+        }
+
+        self.consume_semi_or_newlines();
+
+        let indexer_sym = self.arena.interner.intern("this[]");
+
+        if self.at(TokenKind::FatArrow) {
+            self.advance();
+            let expr = self.parse_expr();
+            let ret = self.arena.alloc_node(NodeKind::ReturnStmt, 0, start_span, expr.0, 0);
+            let body = self.arena.alloc_list_node(NodeKind::BlockExpr, 0, start_span, &[ret]);
+            let mut all_fn = Vec::with_capacity(1 + params.len());
+            all_fn.push(body);
+            all_fn.extend(params);
+            let (fn_start, fn_len) = self.arena.alloc_child_slice(&all_fn);
+            let end_span = self.prev_span();
+            let fn_span = ByteSpan::new(start_span.start, end_span.end);
+            let fn_node = self.arena.alloc_node(NodeKind::FnDecl, fn_len as u16, fn_span, indexer_sym.0, fn_start);
+            if prop_ty.is_some() {
+                self.arena.type_annotations.insert(fn_node.0, prop_ty);
+            }
+            return fn_node;
+        }
+
+        if self.at(TokenKind::LBrace) {
+            self.advance();
+            let mut stmts = Vec::new();
+            while !self.at_end() && !self.at(TokenKind::RBrace) {
+                let loop_start_pos = self.pos;
+                self.consume_semi_or_newlines();
+                if self.at(TokenKind::RBrace) || self.at_end() {
+                    break;
+                }
+                let span = self.span();
+                if self.text() == "get" {
+                    self.advance();
+                    let get_body = if self.at(TokenKind::FatArrow) {
+                        self.advance();
+                        let expr = self.parse_expr();
+                        self.arena.alloc_node(NodeKind::ReturnStmt, 0, span, expr.0, 0)
+                    } else {
+                        self.parse_block_expr()
+                    };
+                    let get_sym = self.arena.interner.intern("get");
+                    let mut get_all = Vec::with_capacity(1 + params.len());
+                    get_all.push(get_body);
+                    get_all.extend(params.clone());
+                    let (fn_start, fn_len) = self.arena.alloc_child_slice(&get_all);
+                    let getter_fn = self.arena.alloc_node(NodeKind::FnDecl, fn_len as u16, span, get_sym.0, fn_start);
+                    if prop_ty.is_some() {
+                        self.arena.type_annotations.insert(getter_fn.0, prop_ty);
+                    }
+                    stmts.push(getter_fn);
+                } else if self.text() == "set" {
+                    self.advance();
+                    let mut p_sym = self.arena.interner.intern("value");
+                    if self.at(TokenKind::LParen) {
+                        self.advance();
+                        if self.is_ident_like() {
+                            let p_name = self.text();
+                            self.advance();
+                            p_sym = self.arena.interner.intern(p_name);
+                        }
+                        self.expect(TokenKind::RParen);
+                    }
+                    let set_body = if self.at(TokenKind::FatArrow) {
+                        self.advance();
+                        self.parse_expr_stmt()
+                    } else {
+                        self.parse_block_expr()
+                    };
+                    let set_sym = self.arena.interner.intern("set");
+                    let val_node = self.arena.alloc_node(NodeKind::ParamDecl, 0, span, p_sym.0, prop_ty.0);
+                    let mut set_all = Vec::with_capacity(1 + params.len() + 1);
+                    set_all.push(set_body);
+                    set_all.extend(params.clone());
+                    set_all.push(val_node);
+                    let (fn_start, fn_len) = self.arena.alloc_child_slice(&set_all);
+                    let setter_fn = self.arena.alloc_node(NodeKind::FnDecl, fn_len as u16, span, set_sym.0, fn_start);
+                    stmts.push(setter_fn);
+                } else {
+                    stmts.push(self.parse_stmt_or_decl());
+                }
+                self.consume_semi_or_newlines();
+                if self.pos == loop_start_pos {
+                    self.advance();
+                }
+            }
+            self.expect(TokenKind::RBrace);
+            let body = self.arena.alloc_list_node(NodeKind::BlockExpr, 0, start_span, &stmts);
+            let mut all_fn = Vec::with_capacity(1 + params.len());
+            all_fn.push(body);
+            all_fn.extend(params);
+            let (fn_start, fn_len) = self.arena.alloc_child_slice(&all_fn);
+            let end_span = self.prev_span();
+            let fn_span = ByteSpan::new(start_span.start, end_span.end);
+            let fn_node = self.arena.alloc_node(NodeKind::FnDecl, fn_len as u16, fn_span, indexer_sym.0, fn_start);
+            if prop_ty.is_some() {
+                self.arena.type_annotations.insert(fn_node.0, prop_ty);
+            }
+            return fn_node;
+        }
+
+        let body = self.parse_block_expr();
+        let mut all_fn = Vec::with_capacity(1 + params.len());
+        all_fn.push(body);
+        all_fn.extend(params);
+        let (fn_start, fn_len) = self.arena.alloc_child_slice(&all_fn);
+        let end_span = self.prev_span();
+        let fn_span = ByteSpan::new(start_span.start, end_span.end);
+        let fn_node = self.arena.alloc_node(NodeKind::FnDecl, fn_len as u16, fn_span, indexer_sym.0, fn_start);
         if prop_ty.is_some() {
             self.arena.type_annotations.insert(fn_node.0, prop_ty);
         }
@@ -1840,9 +2056,30 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 self.advance();
-                let idx = self.parse_expr();
+                let mut indices = Vec::new();
+                if !self.at(TokenKind::RBracket) {
+                    indices.push(self.parse_expr());
+                    while self.at(TokenKind::Comma) {
+                        self.advance();
+                        if self.at(TokenKind::RBracket) {
+                            break;
+                        }
+                        indices.push(self.parse_expr());
+                    }
+                }
                 self.expect(TokenKind::RBracket);
-                let span = self.arena.span(lhs);
+                let idx = if indices.is_empty() {
+                    NodeId::NONE
+                } else if indices.len() == 1 {
+                    indices[0]
+                } else {
+                    let tuple_span = ByteSpan::new(
+                        self.arena.span(indices[0]).start,
+                        self.arena.span(*indices.last().unwrap()).end,
+                    );
+                    self.arena.alloc_list_node(NodeKind::TupleExpr, 0, tuple_span, &indices)
+                };
+                let span = ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end);
                 lhs = self.arena.alloc_node(NodeKind::IndexExpr, 0, span, lhs.0, idx.0);
                 continue;
             }

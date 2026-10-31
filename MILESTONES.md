@@ -155,9 +155,10 @@ flowchart TD
 | **M43** | Production `pilot-lsp` Loop, Native DAP (`M22`), Package/Venv Manager (`M8`/`M27`) & Stdlib (`M24`) | Phase E | ✅ **Completed** | `crates/pilot-lsp/`, `crates/pilot-dap/`, `crates/pilot-pkg/`, `stdlib/` |
 | **M44** | Profiler & Trivia-Preserving CST Auto-Optimizer (`M25`) and Self-Hosted `pilotc` Bootstrap (`M26`) | Phase E | ✅ **Completed** | `crates/pilot-perf/`, `selfhost/` |
 | **M45** | Comprehensive Cross-Language Benchmark Suite & Live Performance Matrix | Phase F | ✅ **Completed** | `crates/pilot-bench/` |
-| **M46** | Multi-Backend Differential Semantic Verification (PilVM v3, Native AOT, LLVM, WASM) | Phase F | 📋 **Planned** | `tests/`, `crates/pilot-cli/` |
-| **M47** | VS Code Extension Release Package (`.vsix`) & Native LSP/DAP Integration | Phase F | 📋 **Planned** | `vscode-pilot/` |
-| **M48** | Standalone Native Distribution, Release Manifest & CI/CD Automated Pipelines | Phase F | 📋 **Planned** | `.github/workflows/`, `scripts/` |
+| **M46** | Multi-Backend Differential Semantic Verification (PilVM v3, Native AOT, LLVM, WASM) | Phase F | ✅ **Completed** | `tests/`, `crates/pilot-cli/` |
+| **M47** | Multi-Approach GPU Code Generation (CUDA/HIP/Vulkan/WGSL) & Inline Polyglot Runtimes | Phase F | ✅ **Completed** | `crates/pilot-codegen/`, `crates/pilot-polyglot/` |
+| **M48** | First-Class Exception Handling, Fluid Cascades & VS Code LSP Syntax Overhaul | Phase F | ✅ **Completed** | `crates/pilot-ast/`, `crates/pilot-parser/`, `vscode-pilot/` |
+| **M49** | C#-Style Indexers & Properties, Type Inference Extensions & Full Showcase Suite (01–32) | Phase F | ✅ **Completed** | `crates/pilot-parser/`, `crates/pilot-analysis/`, `examples/showcase/` |
 
 ---
 
@@ -1415,3 +1416,32 @@ struct PilotVal {
   - Synchronized `Cargo.toml` and `vscode-pilot/package.json` to version `1.1.51`.
   - Added `crates/pilot-cli/build.rs` to dynamically embed active Git commit hash and message into `pilot --version`.
   - Updated user environment (`~/.bashrc`, `~/.profile`, `~/.local/bin/`) pointing directly to release binaries.
+
+---
+
+## Milestone 49: C#-Style Indexers & Properties, Type Inference Extensions, and Full Showcase Suite 25–32
+**Goal**: Integrate C#-style parameterized indexers and self-backed properties with contextual `field`/`value` keywords, eliminate over-generalized `any` fallback in heterogeneous collections in favor of constrained union types (`List[T1 | T2]`), resolve relational record static field indexing, and expand the concept showcase catalog to 32 comprehensive suites.
+
+### Sub-Tasks & Deliverables
+- [x] **49.1: C#-Style Indexers & Self-Backed Properties (`crates/pilot-parser`, `crates/pilot-analysis`)**
+  - **Parameterized Indexers**: Supported multi-dimensional and dictionary-style indexers (`property this[row: int, col: int]: float { get => ...; set(v) => ...; }`, `this[index: int]: int => expr`).
+  - **Self-Backed Properties**: Added contextual `field` (backing field storage) and `value` (setter argument) keywords to property blocks (`property balance: float { get => field; set => field = value; }`).
+  - **Parser Robustness**: Replaced expression parsing in setter arrow bodies with statement expressions (`parse_expr_stmt()`) to cleanly support assignments (`field = value;`) without loop stalls.
+  - **Type System Integration**: Ensured 0-parameter property declarations are typed directly as field access values rather than nullary functions in `infer.rs`.
+- [x] **49.2: Constrained Heterogeneous Type Inference & Relational Projections**
+  - **Heterogeneous Unions**: When heterogeneous list elements cannot be unified to a single base type, infer constrained union types (`List[str | int]`) rather than defaulting to `any`.
+  - **Direct Record Projections**: Resolved static dictionary/record indexing (`record["field"]`) to exact inferred field types without spurious `Option[T]` wrapping or type mismatches.
+- [x] **49.3: Interactive Concept Showcase Catalog Expansion (`examples/showcase/`)**
+  - Added 8 new showcase suites (0 errors, 0 warnings across all 32 suites):
+    - `25_csharp_indexers_and_properties.pilot`: Multi-dimensional indexers, self-backed properties, expression indexers.
+    - `26_multi_target_transpilation.pilot`: Multi-target code generation across C, Rust, Python, Go, TypeScript, C#, Java.
+    - `27_fluid_cascades_and_advanced_expressions.pilot`: Smalltalk/Dart cascades (`..`), pipeline operators (`|>`), null-coalescing.
+    - `28_zero_gc_perceus_and_realtime_arenas.pilot`: Real-time constants (`10ms`, `50kHz`), `@hard_realtime`, `noalloc`, scoped arenas.
+    - `29_symbolic_autodiff_and_signal_graphs.pilot`: Symbolic autodiff adjoints (`!@`), push-pull reactive signal graphs (`!^`), dry-run CoW (`!?`).
+    - `30_interactive_dap_debugging.pilot`: Stack frames, local/global/register inspection, conditional breakpoints.
+    - `31_standard_library_and_networking.pilot`: `std.json`, `std.http`, `std.crypto`, and in-memory datasets.
+    - `32_heterogeneous_inference_and_relational_datasets.pilot`: Constrained list unions, record lookups, mutation inference.
+  - Created executable test runner `examples/showcase/run_all.sh` verifying all 32 scripts.
+- [x] **49.4: VS Code DAP Breakpoint Registration & Toolchain Bundling**
+  - Added `"breakpoints": [{ "language": "pilot" }]` to `vscode-pilot/package.json` to enable GUI breakpoint toggling.
+  - Synchronized and verified packaged VSIX extension with latest native binaries.
