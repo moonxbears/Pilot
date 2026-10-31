@@ -1,0 +1,131 @@
+import std.threading as threading;
+import std.multiprocessing as multiprocessing;
+import std.asyncio as asyncio;
+
+def test_threading() {
+    // 1. Thread lifecycle
+    var work_done: bool = false;
+    let t = threading.Thread(() => {
+        work_done = true;
+    }, "worker-1");
+
+    t.start();
+    t.join();
+
+    // 2. Locks & Semaphores
+    let lock = threading.Lock();
+    lock.acquire();
+    let is_locked: bool = lock.locked();
+    lock.release();
+
+    let rlock = threading.RLock();
+    rlock.acquire();
+    rlock.acquire(); // Re-entrant
+    rlock.release();
+    rlock.release();
+
+    let sem = threading.Semaphore(2);
+    sem.acquire();
+    let sem_val: i64 = sem.value();
+    sem.release();
+
+    // 3. Events & Barriers
+    let ev = threading.Event();
+    ev.set();
+    let is_set: bool = ev.is_set();
+    ev.clear();
+
+    let barrier = threading.Barrier(2);
+    let idx: i64 = barrier.wait();
+
+    // 4. Thread Local Storage
+    let local_store = threading.ThreadLocal();
+    local_store.put("request_id", "req-12345");
+    let req_id = local_store.gets("request_id", "none");
+
+    // 5. Active threads enumeration
+    let cur = threading.current_thread();
+    let count: i64 = threading.active_count();
+}
+
+def test_multiprocessing() {
+    // 1. Process lifecycle
+    var child_done: bool = false;
+    let p = multiprocessing.Process(() => {
+        child_done = true;
+    }, "compute-proc-1");
+
+    p.start();
+    let pid: i64 = p.pid;
+    p.join();
+
+    // 2. Queue & Pipes
+    let q = multiprocessing.Queue(10);
+    q.put("message_payload");
+    let msg = q.gets();
+
+    let pipe_pair = multiprocessing.Pipe();
+    let tx = pipe_pair[0];
+    let rx = pipe_pair[1];
+    tx.send("packet-alpha");
+    let received = rx.recv();
+
+    // 3. Worker Pool
+    let pool = multiprocessing.Pool(4);
+    let mapped = pool.map((x) => x * 10, [1, 2, 3, 4]);
+    let applied = pool.apply((a, b) => a + b, [20, 22]); // 42
+    pool.close();
+
+    // 4. Shared state & CPU inspection
+    let shared_val = multiprocessing.Value("i", 100);
+    let cpus: i64 = multiprocessing.cpu_count();
+}
+
+def test_asyncio() {
+    // 1. Event Loop & run()
+    let result = asyncio.run(() => {
+        return "async_task_completed";
+    });
+
+    // 2. Tasks & Futures
+    let loop = asyncio.new_event_loop();
+    let fut = loop.create_future();
+    fut.set_result(42);
+    let val: i64 = fut.result();
+
+    let t = loop.create_task(() => {
+        return 100;
+    }, "subtask");
+    let res = loop.run_until_complete(t);
+    loop.close();
+
+    // 3. Async Combinators
+    let gathered = asyncio.gather([
+        () => 10,
+        () => 20,
+        () => 30
+    ]);
+
+    let timeout_res = asyncio.wait_for(() => "fast_result", 1.0);
+
+    // 4. Async Synchronization
+    let async_lock = asyncio.AsyncLock();
+    async_lock.acquire();
+    let locked: bool = async_lock.locked();
+    async_lock.release();
+
+    let async_ev = asyncio.AsyncEvent();
+    async_ev.set();
+    let event_ready: bool = async_ev.is_set();
+
+    let async_q = asyncio.AsyncQueue(5);
+    async_q.put("job-1");
+    let job = async_q.gets();
+}
+
+def main() {
+    test_threading();
+    test_multiprocessing();
+    test_asyncio();
+    print("All threading, multiprocessing, and asyncio tests executed cleanly!");
+}

@@ -1,0 +1,45 @@
+import std.os as os;
+import std.sys as sys;
+import std.pathlib as pathlib;
+import std.shutil as shutil;
+
+def main() -> int {
+    // 1. std.os verification
+    let os_name = os.name();
+    let os_sep = os.sep();
+    let is_win = os.is_windows();
+    let is_posix = os.is_posix();
+    let cwd_str = os.getcwd();
+    let home_str = os.homedir();
+    let temp_str = os.tempdir();
+    let pid = os.getpid();
+    let cpus = os.cpu_count();
+    let devnull = os.devnull();
+
+    // 2. std.sys verification
+    let plat = sys.platform();
+    let arch_name = sys.arch();
+    let byte_order = sys.byteorder();
+    let is_64 = sys.is_64bit();
+    let ver = sys.version();
+    let max_int = sys.maxsize();
+
+    // 3. std.pathlib verification
+    let p = pathlib.Path("src/main.pilot");
+    let p_parent = p.parent();
+    let p_name = p.name();
+    let p_stem = p.stem();
+    let p_suffix = p.suffix();
+    let p_posix = p.as_posix();
+    let p_is_abs = p.is_absolute();
+    let p_is_rel = p.is_relative();
+    let p_child = p_parent.join("test.pilot");
+
+    // 4. std.shutil verification
+    let du = shutil.disk_usage(".");
+    let which_sh = shutil.which("sh");
+    let formats = shutil.get_archive_formats();
+
+    println("All four standard library modules verified successfully!");
+    return 0;
+}

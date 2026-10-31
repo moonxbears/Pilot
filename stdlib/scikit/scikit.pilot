@@ -1,0 +1,822 @@
+// SPDX-License-Identifier: MIT AND BSD-3-Clause
+// std.scikit — Multi-OS Machine Learning & Statistical Modeling Toolkit
+// Modeled after Python's `scikit-learn` package (scikit-learn License: BSD-3-Clause)
+// Compatible with Linux, Windows, macOS, Android, iOS, and WebAssembly targets.
+
+import std.math as math;
+
+// ============================================================================
+// Internal Helper: Matrix & Vector Normalization
+// ============================================================================
+
+def _to_2d_float_matrix(X: any) -> [[f64]] {
+    let t = type_of(X);
+    var matrix: [[f64]] = [];
+    if t == "object" {
+        // ndarray or DataFrame
+        let rows = X.shape[0];
+        let cols = X.shape[1];
+        for r in 0..<rows {
+            var row: [f64] = [];
+            for c in 0..<cols {
+                row.append(float(X.at2d(r, c)));
+            }
+            matrix.append(row);
+        }
+        return matrix;
+    }
+    if t == "list" {
+        if len(X) == 0 {
+            return [];
+        }
+        let first_t = type_of(X[0]);
+        if first_t == "list" {
+            for r in X {
+                var row: [f64] = [];
+                for val in r {
+                    row.append(float(val));
+                }
+                matrix.append(row);
+            }
+            return matrix;
+        }
+        // 1D array converted to (N, 1) column vector
+        for val in X {
+            matrix.append([float(val)]);
+        }
+        return matrix;
+    }
+    return matrix;
+}
+
+def _to_1d_float_vector(y: any) -> [f64] {
+    let t = type_of(y);
+    var vec: [f64] = [];
+    if t == "object" {
+        for v in y.data {
+            vec.append(float(v));
+        }
+        return vec;
+    }
+    if t == "list" {
+        for v in y {
+            vec.append(float(v));
+        }
+        return vec;
+    }
+    return vec;
+}
+
+def _euclidean_dist(a: [f64], b: [f64]) -> f64 {
+    var s: f64 = 0.0;
+    let n = min(len(a), len(b));
+    for i in 0..<n {
+        let diff = a[i] - b[i];
+        s = s + diff * diff;
+    }
+    return sqrt(s);
+}
+
+def _sigmoid(z: f64) -> f64 {
+    if z < -40.0 { return 0.0; }
+    if z > 40.0 { return 1.0; }
+    return 1.0 / (1.0 + exp(-z));
+}
+
+// ============================================================================
+// 1. Preprocessing (Python: sklearn.preprocessing)
+// ============================================================================
+
+class StandardScaler {
+    def __init__(with_mean: bool = true, with_std: bool = true) {
+        self.with_mean = with_mean;
+        self.with_std = with_std;
+        self.mean_ = [];
+        self.scale_ = [];
+        self.n_samples_seen_ = 0;
+    }
+
+    def fit(X: any) {
+        let mat = _to_2d_float_matrix(X);
+        let n_samples = len(mat);
+        if n_samples == 0 {
+            return;
+        }
+        let n_features = len(mat[0]);
+        self.n_samples_seen_ = n_samples;
+        self.mean_ = [];
+        self.scale_ = [];
+
+        for c in 0..<n_features {
+            var col_sum: f64 = 0.0;
+            for r in 0..<n_samples {
+                col_sum = col_sum + mat[r][c];
+            }
+            let m = col_sum / float(n_samples);
+            self.mean_.append(m);
+
+            var var_sum: f64 = 0.0;
+            for r in 0..<n_samples {
+                let diff = mat[r][c] - m;
+                var_sum = var_sum + diff * diff;
+            }
+            let s = sqrt(var_sum / float(n_samples));
+            self.scale_.append(if s > 0.00000001 { s } else { 1.0 });
+        }
+    }
+
+    def transform(X: any) -> [[f64]] {
+        let mat = _to_2d_float_matrix(X);
+        var out: [[f64]] = [];
+        for row in mat {
+            var scaled_row: [f64] = [];
+            for c in 0..<len(row) {
+                var v = row[c];
+                if self.with_mean and c < len(self.mean_) {
+                    v = v - self.mean_[c];
+                }
+                if self.with_std and c < len(self.scale_) {
+                    v = v / self.scale_[c];
+                }
+                scaled_row.append(v);
+            }
+            out.append(scaled_row);
+        }
+        return out;
+    }
+
+    def fit_transform(X: any) -> [[f64]] {
+        self.fit(X);
+        return self.transform(X);
+    }
+
+    def inverse_transform(X: any) -> [[f64]] {
+        let mat = _to_2d_float_matrix(X);
+        var out: [[f64]] = [];
+        for row in mat {
+            var original_row: [f64] = [];
+            for c in 0..<len(row) {
+                var v = row[c];
+                if self.with_std and c < len(self.scale_) {
+                    v = v * self.scale_[c];
+                }
+                if self.with_mean and c < len(self.mean_) {
+                    v = v + self.mean_[c];
+                }
+                original_row.append(v);
+            }
+            out.append(original_row);
+        }
+        return out;
+    }
+}
+
+class MinMaxScaler {
+    def __init__(feature_min: f64 = 0.0, feature_max: f64 = 1.0) {
+        self.feature_min = feature_min;
+        self.feature_max = feature_max;
+        self.data_min_ = [];
+        self.data_max_ = [];
+        self.data_range_ = [];
+    }
+
+    def fit(X: any) {
+        let mat = _to_2d_float_matrix(X);
+        let n_samples = len(mat);
+        if n_samples == 0 {
+            return;
+        }
+        let n_features = len(mat[0]);
+        self.data_min_ = [];
+        self.data_max_ = [];
+        self.data_range_ = [];
+
+        for c in 0..<n_features {
+            var col_min = mat[0][c];
+            var col_max = mat[0][c];
+            for r in 1..<n_samples {
+                let v = mat[r][c];
+                if v < col_min { col_min = v; }
+                if v > col_max { col_max = v; }
+            }
+            self.data_min_.append(col_min);
+            self.data_max_.append(col_max);
+            let rng = col_max - col_min;
+            self.data_range_.append(if rng > 0.00000001 { rng } else { 1.0 });
+        }
+    }
+
+    def transform(X: any) -> [[f64]] {
+        let mat = _to_2d_float_matrix(X);
+        let target_diff = self.feature_max - self.feature_min;
+        var out: [[f64]] = [];
+        for row in mat {
+            var scaled_row: [f64] = [];
+            for c in 0..<len(row) {
+                let std_val = (row[c] - self.data_min_[c]) / self.data_range_[c];
+                let scaled_val = std_val * target_diff + self.feature_min;
+                scaled_row.append(scaled_val);
+            }
+            out.append(scaled_row);
+        }
+        return out;
+    }
+
+    def fit_transform(X: any) -> [[f64]] {
+        self.fit(X);
+        return self.transform(X);
+    }
+}
+
+class LabelEncoder {
+    def __init__() {
+        self.classes_ = [];
+    }
+
+    def fit(y: [any]) {
+        self.classes_ = [];
+        for val in y {
+            var found = false;
+            for cls in self.classes_ {
+                if cls == val {
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                self.classes_.append(val);
+            }
+        }
+    }
+
+    def transform(y: [any]) -> [i64] {
+        var out: [i64] = [];
+        for val in y {
+            var encoded: i64 = -1;
+            for idx in 0..<len(self.classes_) {
+                if self.classes_[idx] == val {
+                    encoded = idx;
+                    break;
+                }
+            }
+            out.append(encoded);
+        }
+        return out;
+    }
+
+    def fit_transform(y: [any]) -> [i64] {
+        self.fit(y);
+        return self.transform(y);
+    }
+
+    def inverse_transform(y: [i64]) -> [any] {
+        var out: [any] = [];
+        for idx in y {
+            if idx >= 0 and idx < len(self.classes_) {
+                out.append(self.classes_[idx]);
+            } else {
+                out.append(none);
+            }
+        }
+        return out;
+    }
+}
+
+// ============================================================================
+// 2. Metrics (Python: sklearn.metrics)
+// ============================================================================
+
+def mean_squared_error(y_true: any, y_pred: any) -> f64 {
+    let t = _to_1d_float_vector(y_true);
+    let p = _to_1d_float_vector(y_pred);
+    let n = min(len(t), len(p));
+    if n == 0 { return 0.0; }
+    var sum_err: f64 = 0.0;
+    for i in 0..<n {
+        let diff = t[i] - p[i];
+        sum_err = sum_err + diff * diff;
+    }
+    return sum_err / float(n);
+}
+
+def mean_absolute_error(y_true: any, y_pred: any) -> f64 {
+    let t = _to_1d_float_vector(y_true);
+    let p = _to_1d_float_vector(y_pred);
+    let n = min(len(t), len(p));
+    if n == 0 { return 0.0; }
+    var sum_err: f64 = 0.0;
+    for i in 0..<n {
+        let diff = t[i] - p[i];
+        sum_err = sum_err + (if diff >= 0.0 { diff } else { -diff });
+    }
+    return sum_err / float(n);
+}
+
+def r2_score(y_true: any, y_pred: any) -> f64 {
+    let t = _to_1d_float_vector(y_true);
+    let p = _to_1d_float_vector(y_pred);
+    let n = min(len(t), len(p));
+    if n == 0 { return 0.0; }
+
+    var sum_t: f64 = 0.0;
+    for v in t { sum_t = sum_t + v; }
+    let mean_t = sum_t / float(n);
+
+    var ss_tot: f64 = 0.0;
+    var ss_res: f64 = 0.0;
+    for i in 0..<n {
+        let diff_tot = t[i] - mean_t;
+        ss_tot = ss_tot + diff_tot * diff_tot;
+        let diff_res = t[i] - p[i];
+        ss_res = ss_res + diff_res * diff_res;
+    }
+
+    if ss_tot == 0.0 { return 1.0; }
+    return 1.0 - (ss_res / ss_tot);
+}
+
+def accuracy_score(y_true: any, y_pred: any) -> f64 {
+    let t = _to_1d_float_vector(y_true);
+    let p = _to_1d_float_vector(y_pred);
+    let n = min(len(t), len(p));
+    if n == 0 { return 0.0; }
+    var correct: i64 = 0;
+    for i in 0..<n {
+        if t[i] == p[i] {
+            correct = correct + 1;
+        }
+    }
+    return float(correct) / float(n);
+}
+
+def confusion_matrix(y_true: any, y_pred: any) -> [[i64]] {
+    let t = _to_1d_float_vector(y_true);
+    let p = _to_1d_float_vector(y_pred);
+    let n = min(len(t), len(p));
+
+    var tn: i64 = 0;
+    var fp: i64 = 0;
+    var fn: i64 = 0;
+    var tp: i64 = 0;
+
+    for i in 0..<n {
+        let actual = int(t[i]);
+        let pred = int(p[i]);
+        if actual == 0 and pred == 0 { tn = tn + 1; }
+        if actual == 0 and pred == 1 { fp = fp + 1; }
+        if actual == 1 and pred == 0 { fn = fn + 1; }
+        if actual == 1 and pred == 1 { tp = tp + 1; }
+    }
+
+    return [[tn, fp], [fn, tp]];
+}
+
+def precision_score(y_true: any, y_pred: any) -> f64 {
+    let cm = confusion_matrix(y_true, y_pred);
+    let tp = float(cm[1][1]);
+    let fp = float(cm[0][1]);
+    if (tp + fp) == 0.0 { return 0.0; }
+    return tp / (tp + fp);
+}
+
+def recall_score(y_true: any, y_pred: any) -> f64 {
+    let cm = confusion_matrix(y_true, y_pred);
+    let tp = float(cm[1][1]);
+    let fn_val = float(cm[1][0]);
+    if (tp + fn_val) == 0.0 { return 0.0; }
+    return tp / (tp + fn_val);
+}
+
+def f1_score(y_true: any, y_pred: any) -> f64 {
+    let prec = precision_score(y_true, y_pred);
+    let rec = recall_score(y_true, y_pred);
+    if (prec + rec) == 0.0 { return 0.0; }
+    return 2.0 * (prec * rec) / (prec + rec);
+}
+
+// ============================================================================
+// 3. Linear Models (Python: sklearn.linear_model)
+// ============================================================================
+
+class LinearRegression {
+    def __init__(fit_intercept: bool = true) {
+        self.fit_intercept = fit_intercept;
+        self.coef_ = [];
+        self.intercept_ = 0.0;
+    }
+
+    def fit(X: any, y: any) {
+        let mat = _to_2d_float_matrix(X);
+        let targets = _to_1d_float_vector(y);
+        let n_samples = len(mat);
+        if n_samples == 0 { return; }
+        let n_features = len(mat[0]);
+
+        // Gradient descent optimization for multivariate linear regression
+        self.coef_ = [];
+        for _ in 0..<n_features { self.coef_.append(0.0); }
+        self.intercept_ = 0.0;
+
+        let alpha: f64 = 0.01;
+        let epochs: i64 = 500;
+
+        for _ in 0..<epochs {
+            var grad_coef: [f64] = [];
+            for _ in 0..<n_features { grad_coef.append(0.0); }
+            var grad_intercept: f64 = 0.0;
+
+            for r in 0..<n_samples {
+                var pred = self.intercept_;
+                for c in 0..<n_features {
+                    pred = pred + self.coef_[c] * mat[r][c];
+                }
+                let err = pred - targets[r];
+                grad_intercept = grad_intercept + err;
+                for c in 0..<n_features {
+                    grad_coef[c] = grad_coef[c] + err * mat[r][c];
+                }
+            }
+
+            if self.fit_intercept {
+                self.intercept_ = self.intercept_ - (alpha / float(n_samples)) * grad_intercept;
+            }
+            for c in 0..<n_features {
+                self.coef_[c] = self.coef_[c] - (alpha / float(n_samples)) * grad_coef[c];
+            }
+        }
+    }
+
+    def predict(X: any) -> [f64] {
+        let mat = _to_2d_float_matrix(X);
+        var preds: [f64] = [];
+        for row in mat {
+            var pred = self.intercept_;
+            for c in 0..<len(self.coef_) {
+                if c < len(row) {
+                    pred = pred + self.coef_[c] * row[c];
+                }
+            }
+            preds.append(pred);
+        }
+        return preds;
+    }
+
+    def score(X: any, y: any) -> f64 {
+        let preds = self.predict(X);
+        let targets = _to_1d_float_vector(y);
+        return r2_score(targets, preds);
+    }
+}
+
+class LogisticRegression {
+    def __init__(learning_rate: f64 = 0.1, max_iter: i64 = 500) {
+        self.learning_rate = learning_rate;
+        self.max_iter = max_iter;
+        self.coef_ = [];
+        self.intercept_ = 0.0;
+    }
+
+    def fit(X: any, y: any) {
+        let mat = _to_2d_float_matrix(X);
+        let targets = _to_1d_float_vector(y);
+        let n_samples = len(mat);
+        if n_samples == 0 { return; }
+        let n_features = len(mat[0]);
+
+        self.coef_ = [];
+        for _ in 0..<n_features { self.coef_.append(0.0); }
+        self.intercept_ = 0.0;
+
+        for _ in 0..<self.max_iter {
+            var grad_coef: [f64] = [];
+            for _ in 0..<n_features { grad_coef.append(0.0); }
+            var grad_intercept: f64 = 0.0;
+
+            for r in 0..<n_samples {
+                var z = self.intercept_;
+                for c in 0..<n_features {
+                    z = z + self.coef_[c] * mat[r][c];
+                }
+                let p = _sigmoid(z);
+                let err = p - targets[r];
+                grad_intercept = grad_intercept + err;
+                for c in 0..<n_features {
+                    grad_coef[c] = grad_coef[c] + err * mat[r][c];
+                }
+            }
+
+            self.intercept_ = self.intercept_ - (self.learning_rate / float(n_samples)) * grad_intercept;
+            for c in 0..<n_features {
+                self.coef_[c] = self.coef_[c] - (self.learning_rate / float(n_samples)) * grad_coef[c];
+            }
+        }
+    }
+
+    def predict_proba(X: any) -> [[f64]] {
+        let mat = _to_2d_float_matrix(X);
+        var out: [[f64]] = [];
+        for row in mat {
+            var z = self.intercept_;
+            for c in 0..<len(self.coef_) {
+                if c < len(row) {
+                    z = z + self.coef_[c] * row[c];
+                }
+            }
+            let p1 = _sigmoid(z);
+            out.append([1.0 - p1, p1]);
+        }
+        return out;
+    }
+
+    def predict(X: any) -> [i64] {
+        let probas = self.predict_proba(X);
+        var preds: [i64] = [];
+        for p in probas {
+            if p[1] >= 0.5 {
+                preds.append(1);
+            } else {
+                preds.append(0);
+            }
+        }
+        return preds;
+    }
+
+    def score(X: any, y: any) -> f64 {
+        let preds = self.predict(X);
+        let targets = _to_1d_float_vector(y);
+        return accuracy_score(targets, preds);
+    }
+}
+
+// ============================================================================
+// 3. Nearest Neighbors (Python: sklearn.neighbors.KNeighborsClassifier)
+// ============================================================================
+
+class KNeighborsClassifier {
+    def __init__(n_neighbors: i64 = 5) {
+        self.n_neighbors = n_neighbors;
+        self.X_train_ = [];
+        self.y_train_ = [];
+    }
+
+    def fit(X: any, y: any) {
+        self.X_train_ = _to_2d_float_matrix(X);
+        self.y_train_ = _to_1d_float_vector(y);
+    }
+
+    def predict(X: any) -> [any] {
+        let test_mat = _to_2d_float_matrix(X);
+        var preds = [];
+
+        for row in test_mat {
+            // Compute distances to all training points
+            var dist_pairs: [[f64, i64]] = [];
+            for i in 0..<len(self.X_train_) {
+                let d = _euclidean_dist(row, self.X_train_[i]);
+                dist_pairs.append([d, i]);
+            }
+
+            // Partial sort / find k smallest distances
+            let k = min(self.n_neighbors, len(dist_pairs));
+            for i in 0..<k {
+                var min_pos = i;
+                for j in (i + 1)..<len(dist_pairs) {
+                    if dist_pairs[j][0] < dist_pairs[min_pos][0] {
+                        min_pos = j;
+                    }
+                }
+                let temp = dist_pairs[i];
+                dist_pairs[i] = dist_pairs[min_pos];
+                dist_pairs[min_pos] = temp;
+            }
+
+            // Majority vote among top k
+            var vote_counts = {};
+            for i in 0..<k {
+                let train_idx = dist_pairs[i][1];
+                let label = str(self.y_train_[train_idx]);
+                if vote_counts.contains_key(label) {
+                    vote_counts[label] = vote_counts[label] + 1;
+                } else {
+                    vote_counts[label] = 1;
+                }
+            }
+
+            var best_label = "";
+            var best_count: i64 = -1;
+            for lbl in vote_counts.keys() {
+                if vote_counts[lbl] > best_count {
+                    best_count = vote_counts[lbl];
+                    best_label = lbl;
+                }
+            }
+            preds.append(float(best_label));
+        }
+
+        return preds;
+    }
+
+    def score(X: any, y: any) -> f64 {
+        let preds = self.predict(X);
+        let targets = _to_1d_float_vector(y);
+        return accuracy_score(targets, preds);
+    }
+}
+
+// ============================================================================
+// 4. Clustering (Python: sklearn.cluster.KMeans)
+// ============================================================================
+
+class KMeans {
+    def __init__(n_clusters: i64 = 3, max_iter: i64 = 100, tol: f64 = 0.0001) {
+        self.n_clusters = n_clusters;
+        self.max_iter = max_iter;
+        self.tol = tol;
+        self.cluster_centers_ = [];
+        self.labels_ = [];
+        self.inertia_ = 0.0;
+    }
+
+    def fit(X: any) {
+        let mat = _to_2d_float_matrix(X);
+        let n_samples = len(mat);
+        if n_samples == 0 { return; }
+        let n_features = len(mat[0]);
+        let k = min(self.n_clusters, n_samples);
+
+        // Initialize centers with first k samples
+        self.cluster_centers_ = [];
+        for i in 0..<k {
+            var center: [f64] = [];
+            for c in 0..<n_features {
+                center.append(mat[i][c]);
+            }
+            self.cluster_centers_.append(center);
+        }
+
+        self.labels_ = [];
+        for _ in 0..<n_samples { self.labels_.append(0); }
+
+        for _ in 0..<self.max_iter {
+            var changed = false;
+
+            // Assignment step
+            for r in 0..<n_samples {
+                var best_c: i64 = 0;
+                var best_d = _euclidean_dist(mat[r], self.cluster_centers_[0]);
+                for c in 1..<k {
+                    let d = _euclidean_dist(mat[r], self.cluster_centers_[c]);
+                    if d < best_d {
+                        best_d = d;
+                        best_c = c;
+                    }
+                }
+                if self.labels_[r] != best_c {
+                    self.labels_[r] = best_c;
+                    changed = true;
+                }
+            }
+
+            // Update step
+            for c in 0..<k {
+                var cluster_count: i64 = 0;
+                var new_center: [f64] = [];
+                for _ in 0..<n_features { new_center.append(0.0); }
+
+                for r in 0..<n_samples {
+                    if self.labels_[r] == c {
+                        cluster_count = cluster_count + 1;
+                        for f in 0..<n_features {
+                            new_center[f] = new_center[f] + mat[r][f];
+                        }
+                    }
+                }
+
+                if cluster_count > 0 {
+                    for f in 0..<n_features {
+                        self.cluster_centers_[c][f] = new_center[f] / float(cluster_count);
+                    }
+                }
+            }
+
+            if !changed {
+                break;
+            }
+        }
+
+        // Compute inertia (sum of squared distances to closest center)
+        self.inertia_ = 0.0;
+        for r in 0..<n_samples {
+            let c_idx = self.labels_[r];
+            let d = _euclidean_dist(mat[r], self.cluster_centers_[c_idx]);
+            self.inertia_ = self.inertia_ + d * d;
+        }
+    }
+
+    def predict(X: any) -> [i64] {
+        let mat = _to_2d_float_matrix(X);
+        var preds: [i64] = [];
+        for row in mat {
+            var best_c: i64 = 0;
+            var best_d = _euclidean_dist(row, self.cluster_centers_[0]);
+            for c in 1..<len(self.cluster_centers_) {
+                let d = _euclidean_dist(row, self.cluster_centers_[c]);
+                if d < best_d {
+                    best_d = d;
+                    best_c = c;
+                }
+            }
+            preds.append(best_c);
+        }
+        return preds;
+    }
+
+    def fit_predict(X: any) -> [i64] {
+        self.fit(X);
+        return self.labels_;
+    }
+}
+
+// ============================================================================
+// 5. Model Selection (Python: sklearn.model_selection)
+// ============================================================================
+
+def train_test_split(
+    X: any,
+    y: any,
+    test_size: f64 = 0.25,
+    shuffle: bool = true,
+    random_state: i64 = 42
+) -> [any] {
+    let mat = _to_2d_float_matrix(X);
+    let targets = _to_1d_float_vector(y);
+    let n = len(mat);
+
+    var indices: [i64] = [];
+    for i in 0..<n { indices.append(i); }
+
+    if shuffle {
+        // Deterministic pseudo-random shuffle based on random_state
+        var seed = random_state;
+        for i in 0..<n {
+            seed = (seed * 6364136223846793005 + 1442695040888963407) & 9223372036854775807;
+            let j = seed % n;
+            let temp = indices[i];
+            indices[i] = indices[j];
+            indices[j] = temp;
+        }
+    }
+
+    let n_test = int(float(n) * test_size);
+    let n_train = n - n_test;
+
+    var X_train: [[f64]] = [];
+    var y_train: [f64] = [];
+    var X_test: [[f64]] = [];
+    var y_test: [f64] = [];
+
+    for i in 0..<n_train {
+        let idx = indices[i];
+        X_train.append(mat[idx]);
+        y_train.append(targets[idx]);
+    }
+    for i in n_train..<n {
+        let idx = indices[i];
+        X_test.append(mat[idx]);
+        y_test.append(targets[idx]);
+    }
+
+    return [X_train, X_test, y_train, y_test];
+}
+
+class KFold {
+    def __init__(n_splits: i64 = 5, shuffle: bool = false) {
+        self.n_splits = n_splits;
+        self.shuffle = shuffle;
+    }
+
+    def split(X: any) -> [any] {
+        let mat = _to_2d_float_matrix(X);
+        let n = len(mat);
+        let fold_size = n / self.n_splits;
+        var folds: [any] = [];
+
+        for i in 0..<self.n_splits {
+            let start = i * fold_size;
+            let end = if i == self.n_splits - 1 { n } else { (i + 1) * fold_size };
+
+            var train_idx: [i64] = [];
+            var test_idx: [i64] = [];
+
+            for j in 0..<n {
+                if j >= start and j < end {
+                    test_idx.append(j);
+                } else {
+                    train_idx.append(j);
+                }
+            }
+            folds.append([train_idx, test_idx]);
+        }
+        return folds;
+    }
+}

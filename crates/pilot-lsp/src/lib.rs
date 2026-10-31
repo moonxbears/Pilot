@@ -9,7 +9,11 @@ pub mod json;
 pub mod server;
 
 pub use json::{parse_json, JsonValue};
-pub use server::{run_stdio_server, LspServer};
+pub use server::{
+    run_stdio_server, CodeActionQuery, CompletionQuery, DefinitionQuery, DocumentSymbolQuery,
+    FormattingQuery, HoverQuery, InlayHintQuery, LspServer, SemanticTokensFullQuery,
+    SignatureHelpQuery,
+};
 
 #[cfg(test)]
 mod tests {
@@ -289,5 +293,27 @@ for score in scores {
         let inlay_resp = server.handle_message(&inlay_req).expect("inlay response");
         assert!(!inlay_resp.contains(": any"), "Inlay hints must never emit ': any': {}", inlay_resp);
         assert!(inlay_resp.contains(r#""line":9,"character":5"#), "Inlay hint for 'let c' should be at line 9, char 5: {}", inlay_resp);
+
+        // 12. Verify that all hover & inlay queries hit the memoized ModuleAnalysis in `pilot-db`
+        assert!(
+            server.analysis_cache_hits() >= 10,
+            "Expected >= 10 memoized analysis cache hits, got {}",
+            server.analysis_cache_hits()
+        );
+    }
+
+    #[test]
+    fn test_proc_macro_lsp_query_endpoints() {
+        assert_eq!(HoverQuery::LSP_METHOD, "textDocument/hover");
+        assert_eq!(HoverQuery::LSP_CAPABILITY, Some("hoverProvider"));
+        assert_eq!(CompletionQuery::LSP_METHOD, "textDocument/completion");
+        assert_eq!(CompletionQuery::LSP_CAPABILITY, Some("completionProvider"));
+        assert_eq!(DefinitionQuery::LSP_METHOD, "textDocument/definition");
+        assert_eq!(DocumentSymbolQuery::LSP_METHOD, "textDocument/documentSymbol");
+        assert_eq!(FormattingQuery::LSP_METHOD, "textDocument/formatting");
+        assert_eq!(InlayHintQuery::LSP_METHOD, "textDocument/inlayHint");
+        assert_eq!(SignatureHelpQuery::LSP_METHOD, "textDocument/signatureHelp");
+        assert_eq!(CodeActionQuery::LSP_METHOD, "textDocument/codeAction");
+        assert_eq!(SemanticTokensFullQuery::LSP_METHOD, "textDocument/semanticTokens/full");
     }
 }

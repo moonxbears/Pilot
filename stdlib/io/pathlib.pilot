@@ -1,0 +1,302 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.pathlib — Object-Oriented Filesystem Paths across Linux, Windows, macOS, Android, iOS
+// Modeled after Python's `pathlib` module (CPython Lib/pathlib/__init__.py scaffold)
+
+from std.io import IoError;
+import std.path as std_path;
+import std.fs as std_fs;
+import std.os as std_os;
+
+// ============================================================================
+// Object-Oriented Path Class (Python: pathlib.Path, pathlib.PurePath)
+// ============================================================================
+
+class Path {
+    def __init__(self, raw_path: str = "") {
+        if len(raw_path) == 0 {
+            self.raw = ".";
+        } else {
+            self.raw = std_path.normalize(raw_path);
+        }
+    }
+
+    def to_str(self) -> str {
+        return self.raw;
+    }
+
+    // Path concatenation & child path resolution (Python: path / "sub" or path.joinpath("sub"))
+    def join(self, child: str) -> Path {
+        return Path(std_path.join(self.raw, child));
+    }
+
+    def join_path(self, other: Path) -> Path {
+        return Path(std_path.join(self.raw, other.to_str()));
+    }
+
+    def slash(self, child: str) -> Path {
+        return self.join(child);
+    }
+
+    // Structural decompositions (Python: path.parts, path.parent, path.parents)
+    def parts(self) -> [str] {
+        return std_path.split_all(self.raw);
+    }
+
+    def parent(self) -> Path {
+        return Path(std_path.dirname(self.raw));
+    }
+
+    def parents(self) -> [Path] {
+        var result = [];
+        var curr = self.parent();
+        while curr.to_str() != "." and curr.to_str() != "/" and curr.to_str() != self.to_str() {
+            result.append(curr);
+            let next_p = curr.parent();
+            if next_p.to_str() == curr.to_str() {
+                break;
+            }
+            curr = next_p;
+        }
+        return result;
+    }
+
+    def name(self) -> str {
+        return std_path.basename(self.raw);
+    }
+
+    def stem(self) -> str {
+        let n = self.name();
+        let dot = std_path.splitext(n);
+        return dot[0];
+    }
+
+    def suffix(self) -> str {
+        return std_path.extension(self.raw);
+    }
+
+    def suffixes(self) -> [str] {
+        let n = self.name();
+        let split = __str_split(n, ".");
+        var out = [];
+        if len(split) > 1 {
+            for i in 1..<len(split) {
+                out.append("." + split[i]);
+            }
+        }
+        return out;
+    }
+
+    // Component replacement (Python: with_name, with_stem, with_suffix)
+    def with_name(self, new_name: str) -> Path {
+        let p = self.parent();
+        return p.join(new_name);
+    }
+
+    def with_stem(self, new_stem: str) -> Path {
+        let ext = self.suffix();
+        return self.with_name(new_stem + ext);
+    }
+
+    def with_suffix(self, new_suffix: str) -> Path {
+        let st = self.stem();
+        if len(new_suffix) > 0 and __str_slice(new_suffix, 0, 1) != "." {
+            return self.with_name(st + "." + new_suffix);
+        }
+        return self.with_name(st + new_suffix);
+    }
+
+    // Path queries & platform invariants
+    def is_absolute(self) -> bool {
+        return std_path.is_absolute(self.raw);
+    }
+
+    def is_relative(self) -> bool {
+        return !self.is_absolute();
+    }
+
+    def is_reserved(self) -> bool {
+        // Windows reserved device names: CON, PRN, AUX, NUL, COM1-9, LPT1-9
+        if !std_os.is_windows() {
+            return false;
+        }
+        let st = __str_case(self.stem(), false);
+        if st == "con" or st == "prn" or st == "aux" or st == "nul" {
+            return true;
+        }
+        if len(st) == 4 {
+            let pfx = __str_slice(st, 0, 3);
+            let sfx = __str_slice(st, 3, 4);
+            if (pfx == "com" or pfx == "lpt") and (sfx >= "1" and sfx <= "9") {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    def has_drive(self) -> bool {
+        let d = self.drive();
+        return len(d) > 0;
+    }
+
+    def drive(self) -> str {
+        if len(self.raw) >= 2 {
+            let c0 = __str_char_code(self.raw, 0);
+            let c1 = __str_char_code(self.raw, 1);
+            let is_alpha = (c0 >= 65 and c0 <= 90) or (c0 >= 97 and c0 <= 122);
+            if is_alpha and c1 == 58 {
+                return __str_slice(self.raw, 0, 2);
+            }
+        }
+        return "";
+    }
+
+    def as_posix(self) -> str {
+        return __str_replace(self.raw, "\\", "/");
+    }
+
+    def as_uri(self) -> str {
+        let posix_p = self.as_posix();
+        if __str_slice(posix_p, 0, 1) == "/" {
+            return "file://" + posix_p;
+        }
+        return "file:///" + posix_p;
+    }
+
+    def relative_to(self, base_path: str) -> Path {
+        return Path(std_path.relpath(self.raw, base_path));
+    }
+
+    def match_glob(self, pattern: str) -> bool {
+        return std_path.glob_match(pattern, self.raw);
+    }
+
+    // Filesystem interaction & status
+    def exists(self) -> bool {
+        return std_fs.exists(self.raw);
+    }
+
+    def is_file(self) -> bool {
+        return std_fs.is_file(self.raw);
+    }
+
+    def is_dir(self) -> bool {
+        return std_fs.is_dir(self.raw);
+    }
+
+    def is_symlink(self) -> bool {
+        return std_fs.is_file(self.raw) and !std_fs.is_dir(self.raw);
+    }
+
+    def file_size(self) -> i64 {
+        match std_fs.file_size(self.raw) {
+            ok(s) => s,
+            fail(_) => 0,
+        }
+    }
+
+    // Reading & Writing
+    def read_text(self) -> str ! IoError {
+        return std_fs.read_text(self.raw);
+    }
+
+    def write_text(self, data: str) -> i64 ! IoError {
+        return std_fs.write_text(self.raw, data);
+    }
+
+    def read_bytes(self) -> SliceBuffer ! IoError {
+        return std_fs.read_bytes(self.raw);
+    }
+
+    def touch(self, exist_ok: bool = true) -> bool {
+        if self.exists() {
+            return exist_ok;
+        }
+        match std_fs.write_text(self.raw, "") {
+            ok(_) => true,
+            fail(_) => false,
+        }
+    }
+
+    def mkdir(self, parents: bool = false, exist_ok: bool = false) -> bool ! IoError {
+        if exist_ok and self.exists() {
+            return ok(true);
+        }
+        return std_fs.create_dir(self.raw, parents);
+    }
+
+    def unlink(self, missing_ok: bool = false) -> bool ! IoError {
+        if !self.exists() {
+            if missing_ok {
+                return ok(false);
+            }
+            return fail(IoError.NotFound(self.raw));
+        }
+        return std_fs.remove_file(self.raw);
+    }
+
+    def rmdir(self) -> bool ! IoError {
+        return std_fs.remove_dir(self.raw, false);
+    }
+
+    def rename(self, target: str) -> Path ! IoError {
+        let res = std_fs.move_file(self.raw, target, true)?;
+        return ok(Path(target));
+    }
+
+    def replace(self, target: str) -> Path ! IoError {
+        return self.rename(target);
+    }
+
+    // Directory traversal & Globbing
+    def iterdir(self) -> [Path] {
+        let entries = std_fs.list_dir(self.raw);
+        var result = [];
+        for e in entries {
+            result.append(self.join(e));
+        }
+        return result;
+    }
+
+    def glob(self, pattern: str) -> [Path] {
+        let entries = std_fs.list_dir(self.raw);
+        var result = [];
+        for e in entries {
+            if std_path.glob_match(pattern, e) {
+                result.append(self.join(e));
+            }
+        }
+        return result;
+    }
+
+    def rglob(self, pattern: str) -> [Path] {
+        let all_files = std_fs.walk_dir(self.raw);
+        var result = [];
+        for f in all_files {
+            let base = std_path.basename(f);
+            if std_path.glob_match(pattern, base) or std_path.glob_match(pattern, f) {
+                result.append(Path(f));
+            }
+        }
+        return result;
+    }
+}
+
+// ============================================================================
+// Factory Functions (Python: Path.cwd(), Path.home())
+// ============================================================================
+
+def path(raw: str = "") -> Path {
+    return Path(raw);
+}
+
+def cwd() -> Path {
+    return Path(std_os.getcwd());
+}
+
+def home() -> Path {
+    return Path(std_os.homedir());
+}
+
+def temp() -> Path {
+    return Path(std_os.tempdir());
+}

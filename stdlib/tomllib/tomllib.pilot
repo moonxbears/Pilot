@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.tomllib — Parse TOML Files and Strings
+//
+// Donor Origin: CPython Lib/tomllib/ (PEP 680, Python Software Foundation License 2.0)
+// Native TOML v1.0.0 parser and serializer for configuration files.
+//
+// Target OS Platforms:
+//   - Linux, Windows, macOS, Android, iOS, and WebAssembly
+
+from formats import toml_parse, toml_stringify, ParseError;
+import fs as std_fs;
+
+/// Subclass of ParseError raised when a TOML document cannot be parsed.
+/// Python reference: tomllib.TOMLDecodeError
+class TOMLDecodeError {
+    def __init__(self, msg: str, line: i64 = 1, col: i64 = 1) {
+        self.msg = msg;
+        self.line = line;
+        self.col = col;
+    }
+
+    def to_string(self) -> str {
+        return f"TOMLDecodeError: {self.msg} (at line {self.line}, column {self.col})";
+    }
+}
+
+/// Parses a TOML string into a native Pilot map/dictionary.
+/// Python reference: tomllib.loads(s, /)
+def loads(s: str) -> map ! TOMLDecodeError {
+    match toml_parse(s) {
+        ok(tbl) => ok(tbl),
+        fail(err) => {
+            match err {
+                case ParseError.Syntax(_, msg, ln, cl) => fail(TOMLDecodeError(msg, ln, cl)),
+                case ParseError.PrematureEof(_, ln, cl) => fail(TOMLDecodeError("Premature end of TOML document", ln, cl)),
+                case ParseError.BadEscape(_, seq, ln, cl) => fail(TOMLDecodeError(f"Invalid escape sequence: {seq}", ln, cl)),
+                case ParseError.BadNumber(_, raw, ln, cl) => fail(TOMLDecodeError(f"Invalid TOML number: {raw}", ln, cl)),
+                case ParseError.DuplicateKey(_, key, ln, cl) => fail(TOMLDecodeError(f"Duplicate key or re-defined table: {key}", ln, cl))
+            }
+        }
+    }
+}
+
+/// Parses a TOML document from a filesystem path.
+/// Python reference: tomllib.load(fp, /)
+def load(file_path: str) -> map ! TOMLDecodeError {
+    let text_res = std_fs.read_text(file_path);
+    if __result_is_err(text_res) {
+        return fail(TOMLDecodeError(f"Could not read TOML file: {file_path}", 1, 1));
+    }
+    let content: str = __result_unwrap_ok(text_res);
+    return loads(content);
+}
+
+/// Serializes a Pilot dictionary into a valid TOML document string.
+def dumps(doc) -> str {
+    return toml_stringify(doc);
+}
+
+/// Serializes a Pilot dictionary into a TOML document and writes it to a file.
+def dump(doc, file_path: str) -> bool {
+    let content = dumps(doc);
+    let write_res = std_fs.write_text(file_path, content);
+    return !__result_is_err(write_res);
+}

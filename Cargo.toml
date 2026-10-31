@@ -11,6 +11,7 @@ members = [
     "crates/pilot-fmt",
     "crates/pilot-incremental",
     "crates/pilot-db",
+    "crates/pilot-lsp-macros",
     "crates/pilot-lsp",
     "crates/pilot-analysis",
     "crates/pilot-perceus",

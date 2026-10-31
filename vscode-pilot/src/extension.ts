@@ -383,6 +383,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.workspace.onDidChangeTextDocument((e) => {
             if (e.document.languageId === 'pilot') {
                 client.notifyDidChange(e.document);
+                semanticTokensEmitter.fire();
             }
         }),
         vscode.workspace.onDidCloseTextDocument((doc) => {

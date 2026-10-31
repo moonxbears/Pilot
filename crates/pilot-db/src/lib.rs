@@ -9,8 +9,20 @@
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
+use pilot_analysis::{AnalysisPipeline, AnalysisResult};
+use pilot_ast::{AstArena, NodeId};
 use pilot_incremental::{reparse_incremental, TextEdit};
+use pilot_lsp_macros::lsp_query;
+use pilot_span::ByteSpan;
 use pilot_syntax::{parse_cst, GreenNode, SyntaxKind, SyntaxNode};
+
+/// Memoized full-module AST + bidirectional static analysis result for a file revision.
+pub struct ModuleAnalysis {
+    pub arena: AstArena,
+    pub root_id: NodeId,
+    pub analysis: AnalysisResult,
+    pub analyzed_revision: Revision,
+}
 
 /// Unique 32-bit identifier for a source file in the query database.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -65,6 +77,7 @@ struct FileEntry {
     cst: Arc<GreenNode>,
     item_tree: Arc<ItemTree>,
     body_analyses: HashMap<String, Arc<BodyAnalysis>>,
+    module_analysis: Option<Arc<ModuleAnalysis>>,
     source_revision: Revision,
     signature_revision: Revision,
 }
@@ -74,6 +87,7 @@ pub struct Database {
     current_revision: Revision,
     files: HashMap<FileId, FileEntry>,
     pub early_cutoff_count: usize,
+    pub analysis_cache_hits: usize,
 }
 
 impl Database {
@@ -82,6 +96,7 @@ impl Database {
             current_revision: Revision(1),
             files: HashMap::new(),
             early_cutoff_count: 0,
+            analysis_cache_hits: 0,
         }
     }
 
@@ -101,6 +116,7 @@ impl Database {
             cst: green,
             item_tree,
             body_analyses: HashMap::new(),
+            module_analysis: None,
             source_revision: self.current_revision,
             signature_revision: self.current_revision,
         };
@@ -125,6 +141,7 @@ impl Database {
         entry.source = Arc::from(reparse_res.new_source.as_str());
         entry.cst = reparse_res.new_root.clone();
         entry.source_revision = self.current_revision;
+        entry.module_analysis = None;
 
         // Step 2: Extract new ItemTree and inspect signature hash
         let new_syntax_root = SyntaxNode::new_root(entry.cst.clone());
@@ -156,6 +173,34 @@ impl Database {
     /// Query: returns the ItemTree (signatures and item headers) for a file.
     pub fn module_item_tree(&self, file_id: FileId) -> Option<Arc<ItemTree>> {
         self.files.get(&file_id).map(|e| e.item_tree.clone())
+    }
+
+    /// Query: returns the memoized full-module AST + bidirectional `AnalysisResult` for a file.
+    /// Evaluates at most once per `source_revision` and serves subsequent IDE queries in $O(1)$.
+    pub fn module_analysis(&mut self, file_id: FileId) -> Option<Arc<ModuleAnalysis>> {
+        let entry = self.files.get_mut(&file_id)?;
+        if let Some(ref cached) = entry.module_analysis {
+            if cached.analyzed_revision == entry.source_revision {
+                self.analysis_cache_hits += 1;
+                return Some(cached.clone());
+            }
+        }
+
+        let arena = pilot_parser::parse(&entry.source);
+        let root_id = NodeId(if arena.nodes.is_empty() {
+            0
+        } else {
+            (arena.nodes.len() - 1) as u32
+        });
+        let analysis = AnalysisPipeline::analyze(&arena, root_id);
+        let module_analysis = Arc::new(ModuleAnalysis {
+            arena,
+            root_id,
+            analysis,
+            analyzed_revision: entry.source_revision,
+        });
+        entry.module_analysis = Some(module_analysis.clone());
+        Some(module_analysis)
     }
 
     /// Query: analyzes a specific function body in a file on demand.
@@ -194,6 +239,53 @@ impl Database {
         entry.body_analyses.insert(fn_name.to_string(), analysis.clone());
         Some(analysis)
     }
+}
+
+/// Auto-registered compiler query for `textDocument/publishDiagnostics`.
+/// Converts compiler diagnostics via `#[derive(IntoLspDiagnostic)]` (`to_lsp_wire`).
+#[lsp_query("textDocument/publishDiagnostics")]
+pub fn diagnostics_query(db: &mut Database, file_id: FileId) -> Vec<(ByteSpan, u8, String, String)> {
+    let Some(mod_analysis) = db.module_analysis(file_id) else {
+        return Vec::new();
+    };
+    mod_analysis
+        .analysis
+        .diagnostics
+        .iter()
+        .map(|d| {
+            let (span, sev, code, msg) = d.to_lsp_wire();
+            (span, sev, code.to_string(), msg.to_string())
+        })
+        .collect()
+}
+
+/// Auto-registered compiler query for `textDocument/hover` type lookup at a byte offset.
+#[lsp_query("textDocument/hover")]
+pub fn type_at_offset_query(db: &mut Database, file_id: FileId, byte_offset: u32) -> Option<String> {
+    let mod_analysis = db.module_analysis(file_id)?;
+    let mut best_match: Option<(u32, u32)> = None; // (node_idx, span_len)
+
+    for (idx, span) in mod_analysis.arena.spans.iter().enumerate() {
+        if byte_offset >= span.start && byte_offset <= span.end {
+            let len = span.end.saturating_sub(span.start);
+            if mod_analysis.analysis.inferred_types.contains_key(&(idx as u32)) {
+                if best_match.map_or(true, |(_, best_len)| len <= best_len) {
+                    best_match = Some((idx as u32, len));
+                }
+            }
+        }
+    }
+
+    let (node_idx, _) = best_match?;
+    let ty_id = *mod_analysis.analysis.inferred_types.get(&node_idx)?;
+    let pruned = mod_analysis.analysis.types.prune(ty_id);
+    Some(mod_analysis.analysis.types.display(pruned))
+}
+
+/// Auto-registered compiler query for `textDocument/documentSymbol`.
+#[lsp_query("textDocument/documentSymbol")]
+pub fn document_symbols_query(db: &Database, file_id: FileId) -> Option<Arc<ItemTree>> {
+    db.module_item_tree(file_id)
 }
 
 fn collect_header_tokens(node: &SyntaxNode, tokens: &mut Vec<String>) -> bool {
@@ -320,5 +412,29 @@ mod tests {
         assert_eq!(db.early_cutoff_count, 0);
         let new_hash = db.module_item_tree(file_id).unwrap().signature_hash;
         assert_ne!(orig_hash, new_hash, "Signature hash must change when editing function signature");
+    }
+
+    #[test]
+    fn test_memoized_module_analysis_and_lsp_queries() {
+        let mut db = Database::new();
+        let file_id = FileId(10);
+        let code = "def add(a: i64, b: i64) -> i64 {\n    return a + b\n}\nlet result = add(1, 2)\n";
+        db.set_source(file_id, code);
+
+        // Verify proc-macro generated constants
+        assert_eq!(DIAGNOSTICS_QUERY_LSP_METHOD, "textDocument/publishDiagnostics");
+        assert_eq!(TYPE_AT_OFFSET_QUERY_LSP_METHOD, "textDocument/hover");
+        assert_eq!(DOCUMENT_SYMBOLS_QUERY_LSP_METHOD, "textDocument/documentSymbol");
+
+        // First call computes and caches ModuleAnalysis
+        let diags = diagnostics_query(&mut db, file_id);
+        assert!(diags.is_empty());
+        assert_eq!(db.analysis_cache_hits, 0);
+
+        // Second call hits the memoized cache in O(1)
+        let offset = code.find("result").unwrap() as u32;
+        let ty = type_at_offset_query(&mut db, file_id, offset);
+        assert_eq!(ty.as_deref(), Some("i64"));
+        assert_eq!(db.analysis_cache_hits, 1);
     }
 }

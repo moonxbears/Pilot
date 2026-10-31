@@ -1,0 +1,686 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.urllib — Multi-OS URL Handling, Parsing, and Network Client Toolkit
+// Modeled after Python's `urllib` package (CPython Lib/urllib/parse.py, request.py, error.py, response.py)
+// Compatible with Linux, Windows, macOS, Android, iOS, and WebAssembly targets.
+
+// ============================================================================
+// 1. Errors & Exceptions (Python: urllib.error)
+// ============================================================================
+
+class URLError {
+    def __init__(reason: str) {
+        self.reason = reason;
+        self.args = [reason];
+    }
+
+    def to_str() -> str {
+        return f"<URLError: {self.reason}>";
+    }
+}
+
+class HTTPError {
+    def __init__(url: str, code: i64, msg: str, hdrs: map, fp: any) {
+        self.url = url;
+        self.code = code;
+        self.msg = msg;
+        self.reason = msg;
+        self.hdrs = hdrs;
+        self.headers = hdrs;
+        self.fp = fp;
+        self.args = [code, msg];
+    }
+
+    def to_str() -> str {
+        return f"<HTTPError {self.code}: {self.msg}>";
+    }
+}
+
+// ============================================================================
+// 2. URL Parsing & Splitting (Python: urllib.parse)
+// ============================================================================
+
+const _HEX_CHARS: str = "0123456789ABCDEF";
+
+def _hex_to_int(ch: str) -> i64 {
+    let c = __str_char_code(ch, 0);
+    // 0-9
+    if c >= 48 and c <= 57 {
+        return c - 48;
+    }
+    // a-f
+    if c >= 97 and c <= 102 {
+        return c - 97 + 10;
+    }
+    // A-F
+    if c >= 65 and c <= 70 {
+        return c - 65 + 10;
+    }
+    return -1;
+}
+
+def _int_to_hex(b: i64) -> str {
+    let hi = (b >> 4) & 15;
+    let lo = b & 15;
+    return __str_slice(_HEX_CHARS, hi, hi + 1) + __str_slice(_HEX_CHARS, lo, lo + 1);
+}
+
+def _is_unreserved(b: i64) -> bool {
+    // A-Z
+    if b >= 65 and b <= 90 { return true; }
+    // a-z
+    if b >= 97 and b <= 122 { return true; }
+    // 0-9
+    if b >= 48 and b <= 57 { return true; }
+    // - _ . ~
+    if b == 45 or b == 95 or b == 46 or b == 126 { return true; }
+    return false;
+}
+
+/// Quotes characters in a string according to RFC 3986 percent-encoding.
+def quote(text: str, safe: str = "/") -> str {
+    var out: str = "";
+    let n = len(text);
+    for i in 0..<n {
+        let ch = __str_slice(text, i, i + 1);
+        let b = __str_char_code(ch, 0);
+        if _is_unreserved(b) or __str_index_of(safe, ch, 0) >= 0 {
+            out = out + ch;
+        } else {
+            out = out + "%" + _int_to_hex(b);
+        }
+    }
+    return out;
+}
+
+/// Quotes characters in a string, turning spaces into '+' (Python: quote_plus).
+def quote_plus(text: str, safe: str = "") -> str {
+    var out: str = "";
+    let n = len(text);
+    for i in 0..<n {
+        let ch = __str_slice(text, i, i + 1);
+        if ch == " " {
+            out = out + "+";
+        } else {
+            let b = __str_char_code(ch, 0);
+            if _is_unreserved(b) or __str_index_of(safe, ch, 0) >= 0 {
+                out = out + ch;
+            } else {
+                out = out + "%" + _int_to_hex(b);
+            }
+        }
+    }
+    return out;
+}
+
+/// Unquotes percent-encoded characters in a string (Python: unquote).
+def unquote(text: str) -> str {
+    var out: str = "";
+    let n = len(text);
+    var i: i64 = 0;
+    while i < n {
+        let ch = __str_slice(text, i, i + 1);
+        if ch == "%" and i + 2 < n {
+            let h1 = _hex_to_int(__str_slice(text, i + 1, i + 2));
+            let h2 = _hex_to_int(__str_slice(text, i + 2, i + 3));
+            if h1 >= 0 and h2 >= 0 {
+                let code = (h1 << 4) | h2;
+                out = out + __char_from_code(code);
+                i = i + 3;
+                continue;
+            }
+        }
+        out = out + ch;
+        i = i + 1;
+    }
+    return out;
+}
+
+/// Unquotes percent-encoded characters in a string, replacing '+' with space (Python: unquote_plus).
+def unquote_plus(text: str) -> str {
+    var unplussed: str = "";
+    let n = len(text);
+    for i in 0..<n {
+        let ch = __str_slice(text, i, i + 1);
+        if ch == "+" {
+            unplussed = unplussed + " ";
+        } else {
+            unplussed = unplussed + ch;
+        }
+    }
+    return unquote(unplussed);
+}
+
+/// URL encodes a map or list of pairs into a query string (Python: urllib.parse.urlencode).
+def urlencode(query: any, doseq: bool = false) -> str {
+    var out: str = "";
+    var first: bool = true;
+
+    if type_of(query) == "map" {
+        for k in query.keys() {
+            let v = query[k];
+            if doseq and type_of(v) == "list" {
+                for item in v {
+                    if !first { out = out + "&"; }
+                    out = out + quote_plus(str(k)) + "=" + quote_plus(str(item));
+                    first = false;
+                }
+            } else {
+                if !first { out = out + "&"; }
+                out = out + quote_plus(str(k)) + "=" + quote_plus(str(v));
+                first = false;
+            }
+        }
+    } elif type_of(query) == "list" {
+        for pair in query {
+            let k = pair[0];
+            let v = pair[1];
+            if doseq and type_of(v) == "list" {
+                for item in v {
+                    if !first { out = out + "&"; }
+                    out = out + quote_plus(str(k)) + "=" + quote_plus(str(item));
+                    first = false;
+                }
+            } else {
+                if !first { out = out + "&"; }
+                out = out + quote_plus(str(k)) + "=" + quote_plus(str(v));
+                first = false;
+            }
+        }
+    }
+    return out;
+}
+
+/// Parses a query string into a map where values are lists of strings (Python: parse_qs).
+def parse_qs(qs: str, keep_blank_values: bool = false) -> map {
+    var out = {};
+    var clean: str = qs;
+    if len(clean) > 0 and __str_slice(clean, 0, 1) == "?" {
+        clean = __str_slice(clean, 1, len(clean));
+    }
+    if len(clean) == 0 {
+        return out;
+    }
+    let pairs: [str] = __str_split(clean, "&");
+    for pair in pairs {
+        if len(pair) == 0 { continue; }
+        let eq_idx: i64 = __str_index_of(pair, "=", 0);
+        var k: str = "";
+        var v: str = "";
+        if eq_idx < 0 {
+            if keep_blank_values {
+                k = unquote_plus(pair);
+                v = "";
+            } else {
+                continue;
+            }
+        } else {
+            k = unquote_plus(__str_slice(pair, 0, eq_idx));
+            v = unquote_plus(__str_slice(pair, eq_idx + 1, len(pair)));
+        }
+        if out.contains_key(k) {
+            out[k].append(v);
+        } else {
+            out[k] = [v];
+        }
+    }
+    return out;
+}
+
+/// Parses a query string into a list of [key, value] pairs (Python: parse_qsl).
+def parse_qsl(qs: str, keep_blank_values: bool = false) -> [[str]] {
+    var out = [];
+    var clean: str = qs;
+    if len(clean) > 0 and __str_slice(clean, 0, 1) == "?" {
+        clean = __str_slice(clean, 1, len(clean));
+    }
+    if len(clean) == 0 {
+        return out;
+    }
+    let pairs: [str] = __str_split(clean, "&");
+    for pair in pairs {
+        if len(pair) == 0 { continue; }
+        let eq_idx: i64 = __str_index_of(pair, "=", 0);
+        var k: str = "";
+        var v: str = "";
+        if eq_idx < 0 {
+            if keep_blank_values {
+                k = unquote_plus(pair);
+                v = "";
+                out.append([k, v]);
+            }
+        } else {
+            k = unquote_plus(__str_slice(pair, 0, eq_idx));
+            v = unquote_plus(__str_slice(pair, eq_idx + 1, len(pair)));
+            out.append([k, v]);
+        }
+    }
+    return out;
+}
+
+class ParseResult {
+    def __init__(scheme: str, netloc: str, path: str, params: str, query: str, fragment: str) {
+        self.scheme = scheme;
+        self.netloc = netloc;
+        self.path = path;
+        self.params = params;
+        self.query = query;
+        self.fragment = fragment;
+    }
+
+    def hostname() -> str {
+        var h = self.netloc;
+        if __str_index_of(h, "@", 0) >= 0 {
+            let at_idx = __str_index_of(h, "@", 0);
+            h = __str_slice(h, at_idx + 1, len(h));
+        }
+        if __str_index_of(h, ":", 0) >= 0 {
+            let c_idx = __str_index_of(h, ":", 0);
+            h = __str_slice(h, 0, c_idx);
+        }
+        return h;
+    }
+
+    def port() -> i64 {
+        var h = self.netloc;
+        if __str_index_of(h, "@", 0) >= 0 {
+            let at_idx = __str_index_of(h, "@", 0);
+            h = __str_slice(h, at_idx + 1, len(h));
+        }
+        if __str_index_of(h, ":", 0) >= 0 {
+            let c_idx = __str_index_of(h, ":", 0);
+            let p_str = __str_slice(h, c_idx + 1, len(h));
+            return int(p_str);
+        }
+        if self.scheme == "https" { return 443; }
+        if self.scheme == "http" { return 80; }
+        return 0;
+    }
+
+    def username() -> str {
+        if __str_index_of(self.netloc, "@", 0) >= 0 {
+            let at_idx = __str_index_of(self.netloc, "@", 0);
+            let userinfo = __str_slice(self.netloc, 0, at_idx);
+            if __str_index_of(userinfo, ":", 0) >= 0 {
+                let c_idx = __str_index_of(userinfo, ":", 0);
+                return __str_slice(userinfo, 0, c_idx);
+            }
+            return userinfo;
+        }
+        return "";
+    }
+
+    def password() -> str {
+        if __str_index_of(self.netloc, "@", 0) >= 0 {
+            let at_idx = __str_index_of(self.netloc, "@", 0);
+            let userinfo = __str_slice(self.netloc, 0, at_idx);
+            if __str_index_of(userinfo, ":", 0) >= 0 {
+                let c_idx = __str_index_of(userinfo, ":", 0);
+                return __str_slice(userinfo, c_idx + 1, len(userinfo));
+            }
+        }
+        return "";
+    }
+
+    def geturl() -> str {
+        return urlunparse(self);
+    }
+
+    def to_str() -> str {
+        return f"ParseResult(scheme='{self.scheme}', netloc='{self.netloc}', path='{self.path}', params='{self.params}', query='{self.query}', fragment='{self.fragment}')";
+    }
+}
+
+class SplitResult {
+    def __init__(scheme: str, netloc: str, path: str, query: str, fragment: str) {
+        self.scheme = scheme;
+        self.netloc = netloc;
+        self.path = path;
+        self.query = query;
+        self.fragment = fragment;
+    }
+
+    def hostname() -> str {
+        var h = self.netloc;
+        if __str_index_of(h, "@", 0) >= 0 {
+            let at_idx = __str_index_of(h, "@", 0);
+            h = __str_slice(h, at_idx + 1, len(h));
+        }
+        if __str_index_of(h, ":", 0) >= 0 {
+            let c_idx = __str_index_of(h, ":", 0);
+            h = __str_slice(h, 0, c_idx);
+        }
+        return h;
+    }
+
+    def port() -> i64 {
+        var h = self.netloc;
+        if __str_index_of(h, "@", 0) >= 0 {
+            let at_idx = __str_index_of(h, "@", 0);
+            h = __str_slice(h, at_idx + 1, len(h));
+        }
+        if __str_index_of(h, ":", 0) >= 0 {
+            let c_idx = __str_index_of(h, ":", 0);
+            let p_str = __str_slice(h, c_idx + 1, len(h));
+            return int(p_str);
+        }
+        if self.scheme == "https" { return 443; }
+        if self.scheme == "http" { return 80; }
+        return 0;
+    }
+
+    def geturl() -> str {
+        return urlunsplit(self);
+    }
+
+    def to_str() -> str {
+        return f"SplitResult(scheme='{self.scheme}', netloc='{self.netloc}', path='{self.path}', query='{self.query}', fragment='{self.fragment}')";
+    }
+}
+
+/// Parses a URL into 6 components: (scheme, netloc, path, params, query, fragment).
+def urlparse(urlstring: str, default_scheme: str = "", allow_fragments: bool = true) -> ParseResult {
+    var rem: str = urlstring;
+    var scheme: str = default_scheme;
+    var netloc: str = "";
+    var path: str = "";
+    var params: str = "";
+    var query: str = "";
+    var fragment: str = "";
+
+    // Fragment
+    if allow_fragments {
+        let hash_idx: i64 = __str_index_of(rem, "#", 0);
+        if hash_idx >= 0 {
+            fragment = __str_slice(rem, hash_idx + 1, len(rem));
+            rem = __str_slice(rem, 0, hash_idx);
+        }
+    }
+
+    // Scheme
+    let colon_idx: i64 = __str_index_of(rem, ":", 0);
+    let slash_idx: i64 = __str_index_of(rem, "/", 0);
+    if colon_idx >= 0 and (slash_idx < 0 or colon_idx < slash_idx) {
+        scheme = __str_slice(rem, 0, colon_idx);
+        rem = __str_slice(rem, colon_idx + 1, len(rem));
+    }
+
+    // Netloc
+    if len(rem) >= 2 and __str_slice(rem, 0, 2) == "//" {
+        rem = __str_slice(rem, 2, len(rem));
+        let next_slash = __str_index_of(rem, "/", 0);
+        let next_q = __str_index_of(rem, "?", 0);
+        var end_netloc = len(rem);
+        if next_slash >= 0 and next_slash < end_netloc {
+            end_netloc = next_slash;
+        }
+        if next_q >= 0 and next_q < end_netloc {
+            end_netloc = next_q;
+        }
+        netloc = __str_slice(rem, 0, end_netloc);
+        rem = __str_slice(rem, end_netloc, len(rem));
+    }
+
+    // Query
+    let q_idx = __str_index_of(rem, "?", 0);
+    if q_idx >= 0 {
+        query = __str_slice(rem, q_idx + 1, len(rem));
+        rem = __str_slice(rem, 0, q_idx);
+    }
+
+    // Params (e.g. path;params)
+    let semi_idx = __str_index_of(rem, ";", 0);
+    if semi_idx >= 0 {
+        params = __str_slice(rem, semi_idx + 1, len(rem));
+        path = __str_slice(rem, 0, semi_idx);
+    } else {
+        path = rem;
+    }
+
+    return ParseResult(scheme, netloc, path, params, query, fragment);
+}
+
+/// Assembles a 6-tuple/ParseResult back into a complete URL string.
+def urlunparse(parts: ParseResult) -> str {
+    var out: str = "";
+    if len(parts.scheme) > 0 {
+        out = out + parts.scheme + ":";
+    }
+    if len(parts.netloc) > 0 or (len(parts.scheme) > 0 and (parts.scheme == "http" or parts.scheme == "https")) {
+        out = out + "//" + parts.netloc;
+    }
+    out = out + parts.path;
+    if len(parts.params) > 0 {
+        out = out + ";" + parts.params;
+    }
+    if len(parts.query) > 0 {
+        out = out + "?" + parts.query;
+    }
+    if len(parts.fragment) > 0 {
+        out = out + "#" + parts.fragment;
+    }
+    return out;
+}
+
+/// Parses a URL into 5 components: (scheme, netloc, path, query, fragment).
+def urlsplit(urlstring: str, default_scheme: str = "", allow_fragments: bool = true) -> SplitResult {
+    let p = urlparse(urlstring, default_scheme, allow_fragments);
+    let full_path = if len(p.params) > 0 { p.path + ";" + p.params } else { p.path };
+    return SplitResult(p.scheme, p.netloc, full_path, p.query, p.fragment);
+}
+
+/// Assembles a SplitResult back into a complete URL string.
+def urlunsplit(parts: SplitResult) -> str {
+    var out: str = "";
+    if len(parts.scheme) > 0 {
+        out = out + parts.scheme + ":";
+    }
+    if len(parts.netloc) > 0 or (len(parts.scheme) > 0 and (parts.scheme == "http" or parts.scheme == "https")) {
+        out = out + "//" + parts.netloc;
+    }
+    out = out + parts.path;
+    if len(parts.query) > 0 {
+        out = out + "?" + parts.query;
+    }
+    if len(parts.fragment) > 0 {
+        out = out + "#" + parts.fragment;
+    }
+    return out;
+}
+
+/// Joins a base URL and a possibly relative URL according to RFC 3986.
+def urljoin(base: str, url: str, allow_fragments: bool = true) -> str {
+    if len(base) == 0 {
+        return url;
+    }
+    if len(url) == 0 {
+        return base;
+    }
+    let b = urlparse(base, "", allow_fragments);
+    let u = urlparse(url, "", allow_fragments);
+
+    if len(u.scheme) > 0 and u.scheme != b.scheme {
+        return url;
+    }
+    let scheme = if len(u.scheme) > 0 { u.scheme } else { b.scheme };
+    if len(u.netloc) > 0 {
+        return urlunparse(ParseResult(scheme, u.netloc, u.path, u.params, u.query, u.fragment));
+    }
+    let netloc = b.netloc;
+    var path = u.path;
+    if len(path) == 0 {
+        path = b.path;
+        let query = if len(u.query) > 0 { u.query } else { b.query };
+        return urlunparse(ParseResult(scheme, netloc, path, u.params, query, u.fragment));
+    }
+
+    if __str_slice(path, 0, 1) != "/" {
+        let last_slash = __str_last_index_of(b.path, "/", 0);
+        if last_slash >= 0 {
+            path = __str_slice(b.path, 0, last_slash + 1) + path;
+        } else {
+            path = "/" + path;
+        }
+    }
+    return urlunparse(ParseResult(scheme, netloc, path, u.params, u.query, u.fragment));
+}
+
+// ============================================================================
+// 3. HTTP Request & Response (Python: urllib.request)
+// ============================================================================
+
+class Request {
+    def __init__(
+        url: str,
+        data: any = none,
+        headers: map = {},
+        origin_req_host: str = "",
+        unverifiable: bool = false,
+        method: str = ""
+    ) {
+        self.url = url;
+        self.data = data;
+        self.headers = {};
+        for k in headers.keys() {
+            self.headers[k] = headers[k];
+        }
+        self.origin_req_host = origin_req_host;
+        self.unverifiable = unverifiable;
+        self._method = method;
+    }
+
+    def add_header(key: str, val: str) {
+        self.headers[key] = val;
+    }
+
+    def get_header(key: str, default_val: str = "") -> str {
+        if self.headers.contains_key(key) {
+            return str(self.headers[key]);
+        }
+        return default_val;
+    }
+
+    def has_header(key: str) -> bool {
+        return self.headers.contains_key(key);
+    }
+
+    def get_full_url() -> str {
+        return self.url;
+    }
+
+    def get_method() -> str {
+        if len(self._method) > 0 {
+            return self._method;
+        }
+        if self.data != none {
+            return "POST";
+        }
+        return "GET";
+    }
+}
+
+class HTTPResponse {
+    def __init__(url: str, status: i64, reason: str, headers: map, body: str) {
+        self.url = url;
+        self.status = status;
+        self.code = status;
+        self.reason = reason;
+        self.headers = headers;
+        self.body = body;
+    }
+
+    def read() -> str {
+        return self.body;
+    }
+
+    def getcode() -> i64 {
+        return self.status;
+    }
+
+    def geturl() -> str {
+        return self.url;
+    }
+
+    def info() -> map {
+        return self.headers;
+    }
+
+    def get_header(name: str, default_val: str = "") -> str {
+        if self.headers.contains_key(name) {
+            return str(self.headers[name]);
+        }
+        return default_val;
+    }
+
+    def close() {
+        // No-op for synchronous read response
+    }
+}
+
+/// Synchronously opens a URL or Request object (Python: urllib.request.urlopen).
+def urlopen(url: any, data: any = none, timeout: f64 = 30.0) -> HTTPResponse {
+    var target_url: str = "";
+    var method: str = "GET";
+    var content_type: str = "application/x-www-form-urlencoded";
+    var body_str: str = "";
+
+    if type_of(url) == "string" {
+        target_url = url;
+        if data != none {
+            method = "POST";
+            body_str = str(data);
+        }
+    } elif type_of(url) == "object" {
+        target_url = url.get_full_url();
+        method = url.get_method();
+        if url.has_header("Content-Type") {
+            content_type = url.get_header("Content-Type");
+        }
+        if url.data != none {
+            body_str = str(url.data);
+        }
+    } else {
+        target_url = str(url);
+    }
+
+    var resp_map: any = 0;
+    if method == "POST" {
+        resp_map = __net_http_post(target_url, body_str, content_type);
+    } else {
+        resp_map = __net_http_get(target_url);
+    }
+
+    var status: i64 = 200;
+    var reason: str = "OK";
+    var r_headers: map = {};
+    var body: str = "";
+
+    if type_of(resp_map) == "map" {
+        if resp_map.contains_key("status") { status = int(resp_map["status"]); }
+        if resp_map.contains_key("reason") { reason = str(resp_map["reason"]); }
+        if resp_map.contains_key("headers") { r_headers = resp_map["headers"]; }
+        if resp_map.contains_key("body") { body = str(resp_map["body"]); }
+    }
+
+    return HTTPResponse(target_url, status, reason, r_headers, body);
+}
+
+/// Retrieves a resource at `url` and saves it to a local file (Python: urllib.request.urlretrieve).
+def urlretrieve(url: str, filename: str = "") -> [any] {
+    let resp = urlopen(url);
+    var dest: str = filename;
+    if len(dest) == 0 {
+        let p = urlparse(url);
+        let last_slash = __str_last_index_of(p.path, "/", 0);
+        if last_slash >= 0 {
+            dest = __str_slice(p.path, last_slash + 1, len(p.path));
+        }
+        if len(dest) == 0 {
+            dest = "downloaded_file";
+        }
+    }
+
+    let body = resp.read();
+    __fs_write_text(dest, body);
+
+    return [dest, resp.headers];
+}

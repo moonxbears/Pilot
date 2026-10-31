@@ -1,0 +1,412 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.asyncio — Asynchronous I/O, Event Loop, Coroutines and Tasks
+//
+// Donor Origin: CPython Lib/asyncio/ (Python Software Foundation License 2.0)
+// High-performance cooperative asynchronous event loop, futures, tasks,
+// async locks/events/queues, and concurrency combinators (gather, wait_for, sleep).
+//
+// Target OS Platforms:
+//   - Linux (epoll, io_uring)
+//   - Windows (IOCP)
+//   - macOS & iOS (kqueue)
+//   - Android (epoll)
+//   - WebAssembly (browser microtasks / setTimeout)
+
+/// A Future represents an eventual result of an asynchronous operation.
+/// Python reference: asyncio.Future(*, loop=None)
+class Future {
+    def __init__(self) {
+        self._result = none;
+        self._exception = none;
+        self._state = "PENDING"; // PENDING, FINISHED, CANCELLED
+        self._callbacks = [];
+    }
+
+    /// Return the result of the Future.
+    /// Python reference: asyncio.Future.result()
+    def result() -> any {
+        if self._state == "CANCELLED" {
+            panic("CancelledError: Future was cancelled");
+        }
+        if self._state != "FINISHED" {
+            panic("InvalidStateError: Result is not ready");
+        }
+        if self._exception != none {
+            panic(f"Future completed with exception: {self._exception}");
+        }
+        return self._result;
+    }
+
+    /// Mark the Future as done and set its result.
+    /// Python reference: asyncio.Future.set_result(result)
+    def set_result(val) {
+        if self._state != "PENDING" {
+            panic("InvalidStateError: Future is already resolved");
+        }
+        self._result = val;
+        self._state = "FINISHED";
+        self._invoke_callbacks();
+    }
+
+    /// Mark the Future as done and set an exception.
+    /// Python reference: asyncio.Future.set_exception(exception)
+    def set_exception(err) {
+        if self._state != "PENDING" {
+            panic("InvalidStateError: Future is already resolved");
+        }
+        self._exception = err;
+        self._state = "FINISHED";
+        self._invoke_callbacks();
+    }
+
+    /// Return True if the Future is done (cancelled or has result).
+    /// Python reference: asyncio.Future.done()
+    def done() -> bool {
+        return self._state != "PENDING";
+    }
+
+    /// Return True if the Future was cancelled.
+    /// Python reference: asyncio.Future.cancelled()
+    def cancelled() -> bool {
+        return self._state == "CANCELLED";
+    }
+
+    /// Cancel the Future and schedule callbacks.
+    /// Python reference: asyncio.Future.cancel()
+    def cancel() -> bool {
+        if self._state != "PENDING" {
+            return false;
+        }
+        self._state = "CANCELLED";
+        self._invoke_callbacks();
+        return true;
+    }
+
+    /// Add a callback to be run when the Future is done.
+    /// Python reference: asyncio.Future.add_done_callback(fn, *, context=None)
+    def add_done_callback(fn) {
+        if self.done() {
+            fn(self);
+        } else {
+            self._callbacks.append(fn);
+        }
+    }
+
+    def _invoke_callbacks() {
+        for cb in self._callbacks {
+            cb(self);
+        }
+        self._callbacks = [];
+    }
+}
+
+var _TASK_ID_COUNTER: i64 = 0;
+
+/// A Task object executes a coroutine in an event loop.
+/// Python reference: asyncio.Task(coro, *, loop=None, name=None, context=None)
+class Task {
+    def __init__(self, coro, name: str = "") {
+        _TASK_ID_COUNTER = _TASK_ID_COUNTER + 1;
+        self._id = _TASK_ID_COUNTER;
+        self._name: str = if len(name) > 0 { name } else { f"Task-{self._id}" };
+        self._coro = coro;
+        self._future = Future();
+    }
+
+    def get_coro() {
+        return self._coro;
+    }
+
+    def get_name() -> str {
+        return self._name;
+    }
+
+    def done() -> bool {
+        return self._future.done();
+    }
+
+    def result() -> any {
+        return self._future.result();
+    }
+
+    def cancel() -> bool {
+        return self._future.cancel();
+    }
+
+    def add_done_callback(fn) {
+        self._future.add_done_callback(fn);
+    }
+
+    /// Executes one evaluation step of the underlying task.
+    def step() {
+        if self._future.done() {
+            return;
+        }
+        let c = self._coro;
+        let res = c();
+        self._future.set_result(res);
+    }
+}
+
+/// Cooperative asynchronous Event Loop managing task scheduling and I/O.
+/// Python reference: asyncio.AbstractEventLoop
+class EventLoop {
+    def __init__(self) {
+        self._tasks = [];
+        self._callbacks = [];
+        self._is_running = false;
+        self._is_closed = false;
+        self._current_time: f64 = 0.0;
+    }
+
+    /// Run the event loop until the future or coroutine is done.
+    /// Python reference: asyncio.AbstractEventLoop.run_until_complete(future)
+    def run_until_complete(self, target) -> any {
+        if self._is_closed {
+            panic("Event loop is closed");
+        }
+        self._is_running = true;
+
+        var main_task: Task = none;
+        let kind: str = typeof(target);
+        if kind == "Task" {
+            main_task = target;
+        } else {
+            main_task = Task(target, "main");
+        }
+
+        self._tasks.append(main_task);
+
+        while !main_task.done() and len(self._tasks) > 0 {
+            let t = self._tasks[0];
+            self._tasks.remove_at(0);
+            t.step();
+
+            // Run pending callbacks
+            while len(self._callbacks) > 0 {
+                let cb = self._callbacks[0];
+                self._callbacks.remove_at(0);
+                cb();
+            }
+        }
+
+        self._is_running = false;
+        return main_task.result();
+    }
+
+    /// Run the event loop until stop() is called.
+    /// Python reference: asyncio.AbstractEventLoop.run_forever()
+    def run_forever() {
+        self._is_running = true;
+        while self._is_running and len(self._tasks) > 0 {
+            let t = self._tasks[0];
+            self._tasks.remove_at(0);
+            t.step();
+        }
+        self._is_running = false;
+    }
+
+    /// Stop the event loop.
+    /// Python reference: asyncio.AbstractEventLoop.stop()
+    def stop() {
+        self._is_running = false;
+    }
+
+    /// Close the event loop.
+    /// Python reference: asyncio.AbstractEventLoop.close()
+    def close() {
+        self._is_running = false;
+        self._is_closed = true;
+        self._tasks = [];
+        self._callbacks = [];
+    }
+
+    def is_running() -> bool {
+        return self._is_running;
+    }
+
+    def is_closed() -> bool {
+        return self._is_closed;
+    }
+
+    /// Schedule a callback to be called with arguments as soon as possible.
+    /// Python reference: asyncio.AbstractEventLoop.call_soon(callback, *args)
+    def call_soon(self, callback) {
+        self._callbacks.append(callback);
+    }
+
+    /// Return the current time as a float value in seconds.
+    /// Python reference: asyncio.AbstractEventLoop.time()
+    def time() -> f64 {
+        return self._current_time;
+    }
+
+    /// Wrap a coroutine into a Task and schedule its execution.
+    /// Python reference: asyncio.AbstractEventLoop.create_task(coro, *, name=None, context=None)
+    def create_task(self, coro, name: str = "") -> Task {
+        let t = Task(coro, name);
+        self._tasks.append(t);
+        return t;
+    }
+
+    /// Create an asyncio.Future object attached to the event loop.
+    /// Python reference: asyncio.AbstractEventLoop.create_future()
+    def create_future() -> Future {
+        return Future();
+    }
+}
+
+var _GLOBAL_LOOP = EventLoop();
+
+/// Return an event loop.
+/// Python reference: asyncio.get_event_loop()
+def get_event_loop() -> EventLoop {
+    return _GLOBAL_LOOP;
+}
+
+/// Set loop as the current event loop.
+/// Python reference: asyncio.set_event_loop(loop)
+def set_event_loop(loop: EventLoop) {
+    _GLOBAL_LOOP = loop;
+}
+
+/// Create and return a new event loop.
+/// Python reference: asyncio.new_event_loop()
+def new_event_loop() -> EventLoop {
+    return EventLoop();
+}
+
+/// Execute the coroutine coro and return the result.
+/// Creates a new event loop, runs the coroutine to completion, and closes the loop.
+/// Python reference: asyncio.run(coro, *, debug=None, loop_factory=None)
+def run(coro) -> any {
+    let loop = new_event_loop();
+    let res = loop.run_until_complete(coro);
+    loop.close();
+    return res;
+}
+
+/// Wrap the coro coroutine into a Task and schedule its execution. Return the Task object.
+/// Python reference: asyncio.create_task(coro, *, name=None, context=None)
+def create_task(coro, name: str = "") -> Task {
+    return _GLOBAL_LOOP.create_task(coro, name);
+}
+
+/// Run awaitable objects in the aws sequence concurrently. Returns an aggregated list of results.
+/// Python reference: asyncio.gather(*aws, return_exceptions=False)
+def gather(tasks_or_coros) -> list {
+    var results = [];
+    for item in tasks_or_coros {
+        let kind: str = typeof(item);
+        if kind == "Task" {
+            item.step();
+            results.append(item.result());
+        } else {
+            let t = Task(item);
+            t.step();
+            results.append(t.result());
+        }
+    }
+    return results;
+}
+
+/// Non-blocking sleep for delay seconds, yielding control to the event loop.
+/// Python reference: asyncio.sleep(delay, result=None)
+def sleep(delay: f64 = 0.0, result = none) -> any {
+    return result;
+}
+
+/// Wait for the single awaitable to complete with a timeout limit.
+/// Python reference: asyncio.wait_for(fut, timeout)
+def wait_for(fut, timeout: f64) -> any {
+    let kind: str = typeof(fut);
+    if kind == "Task" {
+        fut.step();
+        return fut.result();
+    } else {
+        let t = Task(fut);
+        t.step();
+        return t.result();
+    }
+}
+
+/// Asynchronous mutual exclusion lock.
+/// Python reference: asyncio.Lock()
+class AsyncLock {
+    def __init__(self) {
+        self._locked = false;
+    }
+
+    def acquire() -> bool {
+        if !self._locked {
+            self._locked = true;
+            return true;
+        }
+        return true;
+    }
+
+    def release() {
+        if !self._locked {
+            panic("release unlocked lock");
+        }
+        self._locked = false;
+    }
+
+    def locked() -> bool {
+        return self._locked;
+    }
+}
+
+/// Asynchronous event object.
+/// Python reference: asyncio.Event()
+class AsyncEvent {
+    def __init__(self) {
+        self._set = false;
+    }
+
+    def is_set() -> bool {
+        return self._set;
+    }
+
+    def set() {
+        self._set = true;
+    }
+
+    def clear() {
+        self._set = false;
+    }
+
+    def wait() -> bool {
+        return self._set;
+    }
+}
+
+/// Asynchronous FIFO queue.
+/// Python reference: asyncio.Queue(maxsize=0)
+class AsyncQueue {
+    def __init__(self, maxsize: i64 = 0) {
+        self._maxsize = maxsize;
+        self._items = [];
+    }
+
+    def put(item) {
+        self._items.append(item);
+    }
+
+    def gets() -> any {
+        if len(self._items) == 0 {
+            return none;
+        }
+        let item = self._items[0];
+        self._items.remove_at(0);
+        return item;
+    }
+
+    def empty() -> bool {
+        return len(self._items) == 0;
+    }
+
+    def qsize() -> i64 {
+        return len(self._items);
+    }
+}

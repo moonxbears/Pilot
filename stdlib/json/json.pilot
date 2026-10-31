@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.json — JSON (JavaScript Object Notation) Encoder and Decoder
+//
+// Donor Origin: CPython Lib/json/ (Python Software Foundation License 2.0)
+// High-performance JSON serialization and deserialization implementing RFC-8259.
+//
+// Target OS Platforms:
+//   - Linux (x86_64, aarch64, riscv64)
+//   - Windows (x86_64, aarch64)
+//   - macOS (Apple Silicon arm64, Intel x86_64)
+//   - Android (aarch64, armv7, x86_64)
+//   - iOS (arm64)
+//   - WebAssembly (wasm32-wasi, wasm32-unknown)
+
+from formats import json_parse, json_stringify, json_get_path, ParseError;
+import fs as std_fs;
+
+/// Subclass of ParseError / Exception raised when JSON decoding fails.
+/// Python reference: json.JSONDecodeError(msg, doc, pos)
+class JSONDecodeError {
+    def __init__(self, msg: str, doc: str = "", pos: i64 = 0, lineno: i64 = 1, colno: i64 = 1) {
+        self.msg = msg;
+        self.doc = doc;
+        self.pos = pos;
+        self.lineno = lineno;
+        self.colno = colno;
+    }
+
+    def to_string(self) -> str {
+        return f"JSONDecodeError: {self.msg} (line {self.lineno} column {self.colno} char {self.pos})";
+    }
+}
+
+/// Deserializes a JSON string into native Pilot data types (map, list, str, i64, f64, bool, none).
+/// Python reference: json.loads(s, *, cls=None, object_hook=None, parse_float=None, parse_int=None, parse_constant=None, object_pairs_hook=None, **kw)
+def loads(s: str, strict_unique_keys: bool = false) -> any ! JSONDecodeError {
+    match json_parse(s, strict_unique_keys) {
+        ok(val) => ok(val),
+        fail(err) => {
+            match err {
+                case ParseError.Syntax(_, msg, ln, cl) => fail(JSONDecodeError(msg, s, 0, ln, cl)),
+                case ParseError.PrematureEof(_, ln, cl) => fail(JSONDecodeError("Unexpected end of JSON input", s, 0, ln, cl)),
+                case ParseError.BadEscape(_, seq, ln, cl) => fail(JSONDecodeError(f"Invalid escape sequence: {seq}", s, 0, ln, cl)),
+                case ParseError.BadNumber(_, raw, ln, cl) => fail(JSONDecodeError(f"Invalid JSON number: {raw}", s, 0, ln, cl)),
+                case ParseError.DuplicateKey(_, key, ln, cl) => fail(JSONDecodeError(f"Duplicate object key: {key}", s, 0, ln, cl))
+            }
+        }
+    }
+}
+
+/// Serializes an object hierarchy to a JSON formatted string.
+/// Python reference: json.dumps(obj, *, skipkeys=False, ensure_ascii=True, check_circular=True, allow_nan=True, cls=None, indent=None, separators=None, default=None, sort_keys=False, **kw)
+def dumps(obj, indent: i64 = -1, sort_keys: bool = false) -> str {
+    let pretty: bool = indent >= 0;
+    let spaces: i64 = if indent >= 0 { indent } else { 2 };
+    return json_stringify(obj, pretty, spaces);
+}
+
+/// Deserializes JSON from a filesystem path or file reader.
+/// Python reference: json.load(fp, *, cls=None, object_hook=None, parse_float=None, parse_int=None, parse_constant=None, object_pairs_hook=None, **kw)
+def load(file_path: str, strict_unique_keys: bool = false) -> any ! JSONDecodeError {
+    let text_res = std_fs.read_text(file_path);
+    if __result_is_err(text_res) {
+        return fail(JSONDecodeError(f"Failed to read file: {file_path}", "", 0, 1, 1));
+    }
+    let content: str = __result_unwrap_ok(text_res);
+    return loads(content, strict_unique_keys);
+}
+
+/// Serializes an object as a JSON formatted stream and writes it to a file.
+/// Python reference: json.dump(obj, fp, *, skipkeys=False, ensure_ascii=True, check_circular=True, allow_nan=True, cls=None, indent=None, separators=None, default=None, sort_keys=False, **kw)
+def dump(obj, file_path: str, indent: i64 = -1, sort_keys: bool = false) -> bool {
+    let content = dumps(obj, indent, sort_keys);
+    let write_res = std_fs.write_text(file_path, content);
+    return !__result_is_err(write_res);
+}
+
+/// Extensible JSON decoder class.
+/// Python reference: json.JSONDecoder(*, object_hook=None, parse_float=None, parse_int=None, parse_constant=None, strict=True, object_pairs_hook=None)
+class JSONDecoder {
+    def __init__(self, strict_unique_keys: bool = false) {
+        self.strict_unique_keys = strict_unique_keys;
+    }
+
+    def decode(self, s: str) -> any ! JSONDecodeError {
+        return loads(s, self.strict_unique_keys);
+    }
+}
+
+/// Extensible JSON encoder class.
+/// Python reference: json.JSONEncoder(*, skipkeys=False, ensure_ascii=True, check_circular=True, sort_keys=False, indent=None, separators=None, default=None)
+class JSONEncoder {
+    def __init__(self, indent: i64 = -1, sort_keys: bool = false) {
+        self.indent = indent;
+        self.sort_keys = sort_keys;
+    }
+
+    def encode(self, obj) -> str {
+        return dumps(obj, self.indent, self.sort_keys);
+    }
+}
+
+/// Queries a nested JSON document using a dotted path syntax (e.g. "data.users.0.name").
+def get_path(doc, dotted_path: str) {
+    return json_get_path(doc, dotted_path);
+}

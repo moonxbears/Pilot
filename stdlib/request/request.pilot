@@ -1,0 +1,320 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.request — High-Level Multi-OS HTTP Client Library
+// Modeled after Python's `requests` package & `urllib.request`
+// Compatible with Linux, Windows, macOS, Android, iOS, and WebAssembly targets.
+
+import std.urllib as urllib;
+
+// ============================================================================
+// 1. Exceptions & Errors (Python: requests.exceptions)
+// ============================================================================
+
+class RequestException {
+    def __init__(message: str = "") {
+        self.message = message;
+        self.args = [message];
+    }
+
+    def to_str() -> str {
+        return f"<RequestException: {self.message}>";
+    }
+}
+
+class HTTPError {
+    def __init__(message: str = "", response: any = none) {
+        self.message = message;
+        self.response = response;
+        self.args = [message];
+    }
+
+    def to_str() -> str {
+        return f"<HTTPError: {self.message}>";
+    }
+}
+
+class ConnectionError {
+    def __init__(message: str = "") {
+        self.message = message;
+        self.args = [message];
+    }
+
+    def to_str() -> str {
+        return f"<ConnectionError: {self.message}>";
+    }
+}
+
+class Timeout {
+    def __init__(message: str = "") {
+        self.message = message;
+        self.args = [message];
+    }
+
+    def to_str() -> str {
+        return f"<Timeout: {self.message}>";
+    }
+}
+
+class TooManyRedirects {
+    def __init__(message: str = "") {
+        self.message = message;
+    }
+}
+
+class URLRequired {
+    def __init__(message: str = "A valid URL is required") {
+        self.message = message;
+    }
+}
+
+// ============================================================================
+// 2. HTTP Response Object (Python: requests.Response)
+// ============================================================================
+
+class Response {
+    def __init__(url: str, status_code: i64, reason: str, headers: map, content: str) {
+        self.url = url;
+        self.status_code = status_code;
+        self.reason = reason;
+        self.headers = headers;
+        self.content = content;
+        self.text = content;
+        self.encoding = "utf-8";
+        self.ok = (status_code >= 200 and status_code < 400);
+        self.cookies = {};
+        self._parse_cookies();
+    }
+
+    def _parse_cookies() {
+        for k in self.headers.keys() {
+            if __str_case(k, false) == "set-cookie" {
+                let cookie_str = str(self.headers[k]);
+                let parts: [str] = __str_split(cookie_str, ";");
+                if len(parts) > 0 {
+                    let eq = __str_index_of(parts[0], "=", 0);
+                    if eq >= 0 {
+                        let ck = __str_trim(__str_slice(parts[0], 0, eq));
+                        let cv = __str_trim(__str_slice(parts[0], eq + 1, len(parts[0])));
+                        self.cookies[ck] = cv;
+                    }
+                }
+            }
+        }
+    }
+
+    def get_header(name: str, default_val: str = "") -> str {
+        let lower = __str_case(name, false);
+        for k in self.headers.keys() {
+            if __str_case(k, false) == lower {
+                return str(self.headers[k]);
+            }
+        }
+        return default_val;
+    }
+
+    def raise_for_status() {
+        if self.status_code >= 400 and self.status_code < 500 {
+            fail(HTTPError(f"Client Error: {self.status_code} {self.reason} for url: {self.url}", self));
+        } elif self.status_code >= 500 and self.status_code < 600 {
+            fail(HTTPError(f"Server Error: {self.status_code} {self.reason} for url: {self.url}", self));
+        }
+    }
+
+    def to_str() -> str {
+        return f"<Response [{self.status_code}]>";
+    }
+}
+
+// ============================================================================
+// 3. HTTP Client Session (Python: requests.Session)
+// ============================================================================
+
+class Session {
+    def __init__() {
+        self.headers = {
+            "User-Agent": "Pilot-Requests/1.1.0",
+            "Accept-Encoding": "identity",
+            "Accept": "*/*",
+            "Connection": "keep-alive"
+        };
+        self.cookies = {};
+        self.auth = none;
+        self.timeout = 30.0;
+    }
+
+    def request(
+        method: str,
+        url: str,
+        params: any = none,
+        data: any = none,
+        json: any = none,
+        headers: map = {},
+        timeout: f64 = -1.0
+    ) -> Response {
+        var req_url = url;
+        if params != none {
+            let qs = urllib.urlencode(params);
+            if len(qs) > 0 {
+                if __str_index_of(req_url, "?", 0) >= 0 {
+                    req_url = req_url + "&" + qs;
+                } else {
+                    req_url = req_url + "?" + qs;
+                }
+            }
+        }
+
+        var req_headers = {};
+        for k in self.headers.keys() {
+            req_headers[k] = self.headers[k];
+        }
+        for k in headers.keys() {
+            req_headers[k] = headers[k];
+        }
+
+        // Add cookies
+        if len(self.cookies) > 0 {
+            var cookie_str = "";
+            var first = true;
+            for ck in self.cookies.keys() {
+                if !first { cookie_str = cookie_str + "; "; }
+                cookie_str = cookie_str + ck + "=" + str(self.cookies[ck]);
+                first = false;
+            }
+            req_headers["Cookie"] = cookie_str;
+        }
+
+        var body_str = "";
+        var content_type = "application/x-www-form-urlencoded";
+
+        if json != none {
+            content_type = "application/json";
+            body_str = str(json);
+            req_headers["Content-Type"] = content_type;
+        } elif data != none {
+            if type_of(data) == "map" {
+                body_str = urllib.urlencode(data);
+                req_headers["Content-Type"] = "application/x-www-form-urlencoded";
+            } else {
+                body_str = str(data);
+            }
+        }
+
+        let m = __str_case(method, true);
+        var resp_map: any = 0;
+
+        if m == "POST" or m == "PUT" or m == "PATCH" {
+            resp_map = __net_http_post(req_url, body_str, content_type);
+        } else {
+            resp_map = __net_http_get(req_url);
+        }
+
+        var status: i64 = 200;
+        var reason: str = "OK";
+        var r_headers: map = {};
+        var body: str = "";
+
+        if type_of(resp_map) == "map" {
+            if resp_map.contains_key("status") { status = int(resp_map["status"]); }
+            if resp_map.contains_key("reason") { reason = str(resp_map["reason"]); }
+            if resp_map.contains_key("headers") { r_headers = resp_map["headers"]; }
+            if resp_map.contains_key("body") { body = str(resp_map["body"]); }
+        }
+
+        let response = Response(req_url, status, reason, r_headers, body);
+
+        // Update session cookies from response
+        for ck in response.cookies.keys() {
+            self.cookies[ck] = response.cookies[ck];
+        }
+
+        return response;
+    }
+
+    def get_req(url: str, params: any = none, headers: map = {}, timeout: f64 = -1.0) -> Response {
+        return self.request("GET", url, params, none, none, headers, timeout);
+    }
+
+    def post(url: str, data: any = none, json: any = none, headers: map = {}, timeout: f64 = -1.0) -> Response {
+        return self.request("POST", url, none, data, json, headers, timeout);
+    }
+
+    def put(url: str, data: any = none, json: any = none, headers: map = {}, timeout: f64 = -1.0) -> Response {
+        return self.request("PUT", url, none, data, json, headers, timeout);
+    }
+
+    def patch(url: str, data: any = none, json: any = none, headers: map = {}, timeout: f64 = -1.0) -> Response {
+        return self.request("PATCH", url, none, data, json, headers, timeout);
+    }
+
+    def delete(url: str, headers: map = {}, timeout: f64 = -1.0) -> Response {
+        return self.request("DELETE", url, none, none, none, headers, timeout);
+    }
+
+    def head(url: str, headers: map = {}, timeout: f64 = -1.0) -> Response {
+        return self.request("HEAD", url, none, none, none, headers, timeout);
+    }
+
+    def options(url: str, headers: map = {}, timeout: f64 = -1.0) -> Response {
+        return self.request("OPTIONS", url, none, none, none, headers, timeout);
+    }
+
+    def close() {
+        // Clear session state
+        self.cookies = {};
+    }
+}
+
+// ============================================================================
+// 4. Functional Request API (Python: requests.get, requests.post, etc.)
+// ============================================================================
+
+def session() -> Session {
+    return Session();
+}
+
+def request(
+    method: str,
+    url: str,
+    params: any = none,
+    data: any = none,
+    json: any = none,
+    headers: map = {},
+    timeout: f64 = 30.0
+) -> Response {
+    let s = Session();
+    return s.request(method, url, params, data, json, headers, timeout);
+}
+
+def get_req(url: str, params: any = none, headers: map = {}, timeout: f64 = 30.0) -> Response {
+    let s = Session();
+    return s.get_req(url, params, headers, timeout);
+}
+
+def post(url: str, data: any = none, json: any = none, headers: map = {}, timeout: f64 = 30.0) -> Response {
+    let s = Session();
+    return s.post(url, data, json, headers, timeout);
+}
+
+def put(url: str, data: any = none, json: any = none, headers: map = {}, timeout: f64 = 30.0) -> Response {
+    let s = Session();
+    return s.put(url, data, json, headers, timeout);
+}
+
+def patch(url: str, data: any = none, json: any = none, headers: map = {}, timeout: f64 = 30.0) -> Response {
+    let s = Session();
+    return s.patch(url, data, json, headers, timeout);
+}
+
+def delete(url: str, headers: map = {}, timeout: f64 = 30.0) -> Response {
+    let s = Session();
+    return s.delete(url, headers, timeout);
+}
+
+def head(url: str, headers: map = {}, timeout: f64 = 30.0) -> Response {
+    let s = Session();
+    return s.head(url, headers, timeout);
+}
+
+def options(url: str, headers: map = {}, timeout: f64 = 30.0) -> Response {
+    let s = Session();
+    return s.options(url, headers, timeout);
+}

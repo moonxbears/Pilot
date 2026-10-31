@@ -1,5 +1,6 @@
 //! Analysis diagnostics and error reporting.
 
+use pilot_lsp_macros::IntoLspDiagnostic;
 use pilot_span::ByteSpan;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -10,7 +11,20 @@ pub enum DiagnosticSeverity {
     Hint,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+impl DiagnosticSeverity {
+    /// Converts compiler diagnostic severity directly into the LSP `DiagnosticSeverity` integer code.
+    #[inline]
+    pub const fn as_lsp_code(self) -> u8 {
+        match self {
+            DiagnosticSeverity::Error => 1,
+            DiagnosticSeverity::Warning => 2,
+            DiagnosticSeverity::Info => 3,
+            DiagnosticSeverity::Hint => 4,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, IntoLspDiagnostic)]
 pub struct AnalysisDiagnostic {
     pub code: String,
     pub message: String,

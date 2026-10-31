@@ -1,0 +1,10 @@
+[package]
+name = "pilot-lsp-macros"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Procedural macros (#[derive(LspQuery)], #[lsp_query], #[derive(IntoLspDiagnostic)]) for auto-generating Pilot LSP JSON-RPC endpoints from compiler queries"
+
+[lib]
+proc-macro = true

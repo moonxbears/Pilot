@@ -1,0 +1,359 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.unittest — Multi-OS Unit Testing Framework
+// Modeled after Python's `unittest` module (CPython Lib/unittest/case.py, suite.py, runner.py, result.py)
+// Compatible with Linux, Windows, macOS, Android, iOS, and WebAssembly targets.
+
+// ============================================================================
+// 1. Exceptions & Signals (Python: unittest.case.SkipTest, AssertionError)
+// ============================================================================
+
+class AssertionError {
+    def __init__(message: str = "") {
+        self.message = message;
+        self.args = [message];
+    }
+
+    def to_str() -> str {
+        return f"AssertionError: {self.message}";
+    }
+}
+
+class SkipTest {
+    def __init__(reason: str = "") {
+        self.reason = reason;
+        self.args = [reason];
+    }
+
+    def to_str() -> str {
+        return f"SkipTest: {self.reason}";
+    }
+}
+
+// ============================================================================
+// 2. Test Result Collector (Python: unittest.result.TestResult)
+// ============================================================================
+
+class TestResult {
+    def __init__() {
+        self.testsRun = 0;
+        self.failures = [];
+        self.errors = [];
+        self.skipped = [];
+        self.shouldStop = false;
+    }
+
+    def startTest(test: any) {
+        self.testsRun = self.testsRun + 1;
+    }
+
+    def stopTest(test: any) {
+        // Post-test hook
+    }
+
+    def addSuccess(test: any) {
+        // Success hook
+    }
+
+    def addFailure(test: any, err: str) {
+        self.failures.append([test, err]);
+    }
+
+    def addError(test: any, err: str) {
+        self.errors.append([test, err]);
+    }
+
+    def addSkip(test: any, reason: str) {
+        self.skipped.append([test, reason]);
+    }
+
+    def wasSuccessful() -> bool {
+        return len(self.failures) == 0 and len(self.errors) == 0;
+    }
+
+    def stop() {
+        self.shouldStop = true;
+    }
+
+    def to_str() -> str {
+        return f"<TestResult run={self.testsRun} errors={len(self.errors)} failures={len(self.failures)} skipped={len(self.skipped)}>";
+    }
+}
+
+// ============================================================================
+// 3. Test Case Base Class (Python: unittest.case.TestCase)
+// ============================================================================
+
+class TestCase {
+    def __init__(methodName: str = "runTest") {
+        self._testMethodName = methodName;
+    }
+
+    def setUp() {
+        // Hook called immediately before calling the test method
+    }
+
+    def tearDown() {
+        // Hook called immediately after calling the test method
+    }
+
+    def setUpClass() {
+        // Hook called before running tests in a class
+    }
+
+    def tearDownClass() {
+        // Hook called after running tests in a class
+    }
+
+    def shortDescription() -> str {
+        return self._testMethodName;
+    }
+
+    def id() -> str {
+        return self._testMethodName;
+    }
+
+    // --- Assertions ---
+
+    def fail_test(msg: str = "") {
+        let err_msg = if len(msg) > 0 { msg } else { "Test failed." };
+        fail(AssertionError(err_msg));
+    }
+
+    def assertTrue(expr: bool, msg: str = "") {
+        if !expr {
+            let err_msg = if len(msg) > 0 { msg } else { "Expected True, but found False" };
+            fail(AssertionError(err_msg));
+        }
+    }
+
+    def assertFalse(expr: bool, msg: str = "") {
+        if expr {
+            let err_msg = if len(msg) > 0 { msg } else { "Expected False, but found True" };
+            fail(AssertionError(err_msg));
+        }
+    }
+
+    def assertEqual(first: any, second: any, msg: str = "") {
+        if first != second {
+            let err_msg = if len(msg) > 0 { msg } else { f"{first} != {second}" };
+            fail(AssertionError(err_msg));
+        }
+    }
+
+    def assertNotEqual(first: any, second: any, msg: str = "") {
+        if first == second {
+            let err_msg = if len(msg) > 0 { msg } else { f"{first} == {second}" };
+            fail(AssertionError(err_msg));
+        }
+    }
+
+    def assertIs(first: any, second: any, msg: str = "") {
+        if first != second {
+            let err_msg = if len(msg) > 0 { msg } else { f"{first} is not {second}" };
+            fail(AssertionError(err_msg));
+        }
+    }
+
+    def assertIsNot(first: any, second: any, msg: str = "") {
+        if first == second {
+            let err_msg = if len(msg) > 0 { msg } else { f"unexpectedly identical: {first}" };
+            fail(AssertionError(err_msg));
+        }
+    }
+
+    def assertIsNone(expr: any, msg: str = "") {
+        if expr != none {
+            let err_msg = if len(msg) > 0 { msg } else { f"Expected None, got {expr}" };
+            fail(AssertionError(err_msg));
+        }
+    }
+
+    def assertIsNotNone(expr: any, msg: str = "") {
+        if expr == none {
+            let err_msg = if len(msg) > 0 { msg } else { "Expected not None, but got None" };
+            fail(AssertionError(err_msg));
+        }
+    }
+
+    def assertIn(member: any, container: any, msg: str = "") {
+        var found = false;
+        let c_type = type_of(container);
+        if c_type == "string" {
+            found = (__str_index_of(str(container), str(member), 0) >= 0);
+        } elif c_type == "list" {
+            for item in container {
+                if item == member {
+                    found = true;
+                    break;
+                }
+            }
+        } elif c_type == "map" {
+            found = container.contains_key(member);
+        }
+        if !found {
+            let err_msg = if len(msg) > 0 { msg } else { f"{member} not found in {container}" };
+            fail(AssertionError(err_msg));
+        }
+    }
+
+    def assertNotIn(member: any, container: any, msg: str = "") {
+        var found = false;
+        let c_type = type_of(container);
+        if c_type == "string" {
+            found = (__str_index_of(str(container), str(member), 0) >= 0);
+        } elif c_type == "list" {
+            for item in container {
+                if item == member {
+                    found = true;
+                    break;
+                }
+            }
+        } elif c_type == "map" {
+            found = container.contains_key(member);
+        }
+        if found {
+            let err_msg = if len(msg) > 0 { msg } else { f"{member} unexpectedly found in {container}" };
+            fail(AssertionError(err_msg));
+        }
+    }
+
+    def assertAlmostEqual(first: f64, second: f64, places: i64 = 7, msg: str = "") {
+        let diff = if first >= second { first - second } else { second - first };
+        var tol = 1.0;
+        for _ in 0..<places {
+            tol = tol / 10.0;
+        }
+        if diff >= tol {
+            let err_msg = if len(msg) > 0 { msg } else { f"{first} != {second} within {places} places" };
+            fail(AssertionError(err_msg));
+        }
+    }
+
+    def assertNotAlmostEqual(first: f64, second: f64, places: i64 = 7, msg: str = "") {
+        let diff = if first >= second { first - second } else { second - first };
+        var tol = 1.0;
+        for _ in 0..<places {
+            tol = tol / 10.0;
+        }
+        if diff < tol {
+            let err_msg = if len(msg) > 0 { msg } else { f"{first} == {second} within {places} places" };
+            fail(AssertionError(err_msg));
+        }
+    }
+
+    def assertGreater(a: any, b: any, msg: str = "") {
+        if !(a > b) {
+            let err_msg = if len(msg) > 0 { msg } else { f"{a} not greater than {b}" };
+            fail(AssertionError(err_msg));
+        }
+    }
+
+    def assertGreaterEqual(a: any, b: any, msg: str = "") {
+        if !(a >= b) {
+            let err_msg = if len(msg) > 0 { msg } else { f"{a} not greater than or equal to {b}" };
+            fail(AssertionError(err_msg));
+        }
+    }
+
+    def assertLess(a: any, b: any, msg: str = "") {
+        if !(a < b) {
+            let err_msg = if len(msg) > 0 { msg } else { f"{a} not less than {b}" };
+            fail(AssertionError(err_msg));
+        }
+    }
+
+    def assertLessEqual(a: any, b: any, msg: str = "") {
+        if !(a <= b) {
+            let err_msg = if len(msg) > 0 { msg } else { f"{a} not less than or equal to {b}" };
+            fail(AssertionError(err_msg));
+        }
+    }
+
+    def run(result: any = none) -> TestResult {
+        var res = if result != none { result } else { TestResult() };
+        res.startTest(self);
+        self.setUp();
+        // Subclasses execute their test code here
+        self.tearDown();
+        res.addSuccess(self);
+        res.stopTest(self);
+        return res;
+    }
+}
+
+// ============================================================================
+// 4. Test Suite (Python: unittest.suite.TestSuite)
+// ============================================================================
+
+class TestSuite {
+    def __init__(tests: [any] = []) {
+        self._tests = [];
+        for t in tests {
+            self._tests.append(t);
+        }
+    }
+
+    def addTest(test: any) {
+        self._tests.append(test);
+    }
+
+    def addTests(tests: [any]) {
+        for t in tests {
+            self._tests.append(t);
+        }
+    }
+
+    def countTestCases() -> i64 {
+        return len(self._tests);
+    }
+
+    def run(result: any = none) -> TestResult {
+        var res = if result != none { result } else { TestResult() };
+        for test in self._tests {
+            if res.shouldStop {
+                break;
+            }
+            test.run(res);
+        }
+        return res;
+    }
+}
+
+// ============================================================================
+// 5. Test Runner (Python: unittest.runner.TextTestRunner)
+// ============================================================================
+
+class TextTestRunner {
+    def __init__(verbosity: i64 = 1) {
+        self.verbosity = verbosity;
+    }
+
+    def run(test: any) -> TestResult {
+        let result = TestResult();
+        let start_time = __time_perf_counter();
+
+        test.run(result);
+
+        let elapsed = __time_perf_counter() - start_time;
+
+        if self.verbosity > 0 {
+            print("----------------------------------------------------------------------");
+            print(f"Ran {result.testsRun} tests in {elapsed}s");
+            print("");
+            if result.wasSuccessful() {
+                print("OK");
+            } else {
+                print(f"FAILED (failures={len(result.failures)}, errors={len(result.errors)})");
+            }
+        }
+
+        return result;
+    }
+}
+
+/// Convenience function to execute a TestSuite or TestCase directly.
+def main(suite: any = none, verbosity: i64 = 1) -> TestResult {
+    let runner = TextTestRunner(verbosity);
+    let target = if suite != none { suite } else { TestSuite() };
+    return runner.run(target);
+}

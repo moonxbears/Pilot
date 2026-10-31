@@ -1,0 +1,149 @@
+// SPDX-License-Identifier: MIT
+// Integration Test: std.unittest, std.logging, std.timeit
+// Multi-OS validation across Linux, Windows, macOS, Android, iOS, and WebAssembly.
+
+import std.unittest as unittest;
+import std.logging as logging;
+import std.timeit as timeit;
+
+// ============================================================================
+// 1. Test std.unittest
+// ============================================================================
+
+class MathTestCase : unittest.TestCase {
+    def __init__() {
+        self._testMethodName = "MathTestCase";
+    }
+
+    def test_arithmetic() {
+        self.assertEqual(2 + 2, 4, "2 + 2 must equal 4");
+        self.assertNotEqual(2 * 3, 7, "2 * 3 != 7");
+        self.assertTrue(10 > 5, "10 is greater than 5");
+        self.assertFalse(3 > 9, "3 is not greater than 9");
+        self.assertIn("pilot", "hello pilot world", "substring check");
+        self.assertNotIn("rust", "hello pilot world", "absence check");
+        self.assertIsNone(none, "must be none");
+        self.assertIsNotNone(42, "must not be none");
+        self.assertAlmostEqual(3.14159265, 3.1415927, 5, "almost equal to 5 decimal places");
+    }
+
+    def run(result: any = none) -> unittest.TestResult {
+        var r = if result != none { result } else { unittest.TestResult() };
+        r.startTest(self);
+        self.setUp();
+        self.test_arithmetic();
+        self.tearDown();
+        r.addSuccess(self);
+        r.stopTest(self);
+        return r;
+    }
+}
+
+def test_unittest_suite() {
+    print("=== Testing std.unittest ===");
+    let case = MathTestCase();
+    let suite = unittest.TestSuite();
+    suite.addTest(case);
+    assert(suite.countTestCases() == 1, "suite should contain 1 test case");
+
+    let runner = unittest.TextTestRunner(1);
+    let result = runner.run(suite);
+
+    assert(result.wasSuccessful(), "MathTestCase must pass successfully");
+    assert(result.testsRun == 1, "1 test must have run");
+    assert(len(result.failures) == 0, "No failures expected");
+    assert(len(result.errors) == 0, "No errors expected");
+    print("std.unittest passed!");
+}
+
+// ============================================================================
+// 2. Test std.logging
+// ============================================================================
+
+def test_logging_suite() {
+    print("=== Testing std.logging ===");
+
+    // Level conversions
+    assert(logging.getLevelName(logging.DEBUG) == "DEBUG", "DEBUG name match");
+    assert(logging.getLevelName(logging.INFO) == "INFO", "INFO name match");
+    assert(logging.getLevelName(logging.WARNING) == "WARNING", "WARNING name match");
+    assert(logging.getLevelName(logging.ERROR) == "ERROR", "ERROR name match");
+    assert(logging.getLevelName(logging.CRITICAL) == "CRITICAL", "CRITICAL name match");
+
+    assert(logging.getLevelByName("info") == 20, "infoByName is 20");
+    assert(logging.getLevelByName("ERROR") == 40, "errorByName is 40");
+
+    // Logger configuration
+    let log = logging.getLogger("test_logger");
+    log.setLevel(logging.DEBUG);
+    assert(log.isEnabledFor(logging.DEBUG), "logger should be enabled for DEBUG");
+    assert(log.isEnabledFor(logging.INFO), "logger should be enabled for INFO");
+
+    // Handler and Formatter
+    let fmt = logging.Formatter("[%(levelname)s] %(name)s - %(message)s");
+    let handler = logging.StreamHandler(logging.DEBUG);
+    handler.setFormatter(fmt);
+    log.addHandler(handler);
+
+    // Filter
+    let filter = logging.Filter("test_logger");
+    log.addFilter(filter);
+
+    // Logging calls
+    log.debug("Debugging diagnostic trace");
+    log.info("Informational event processed");
+    log.warning("Warning condition detected");
+    log.error("Recoverable error handled");
+    log.critical("Critical security condition");
+
+    // Module-level basicConfig
+    logging.basicConfig(logging.INFO, "%(levelname)s:%(message)s");
+    logging.info("Root logger basicConfig message");
+
+    print("std.logging passed!");
+}
+
+// ============================================================================
+// 3. Test std.timeit
+// ============================================================================
+
+def dummy_compute() -> i64 {
+    var total: i64 = 0;
+    for i in 0..<100 {
+        total = total + i;
+    }
+    return total;
+}
+
+def test_timeit_suite() {
+    print("=== Testing std.timeit ===");
+
+    let t0 = timeit.default_timer();
+    assert(t0 >= 0.0, "default_timer returns non-negative float");
+
+    // Timer execution
+    let t = timeit.Timer(dummy_compute);
+    let elapsed = t.timeit(500);
+    assert(elapsed >= 0.0, "timeit elapsed is non-negative");
+
+    // Repeat execution
+    let runs = t.repeat(3, 100);
+    assert(len(runs) == 3, "repeat should return 3 results");
+    for r in runs {
+        assert(r >= 0.0, "individual run timing non-negative");
+    }
+
+    // Top-level functions
+    let quick_time = timeit.timeit(dummy_compute, none, 100);
+    assert(quick_time >= 0.0, "convenience timeit non-negative");
+
+    print("std.timeit passed!");
+}
+
+def main() {
+    print("Starting integration tests for unittest, logging, and timeit...");
+    test_unittest_suite();
+    test_logging_suite();
+    test_timeit_suite();
+    print("ALL TESTS IN std.unittest, std.logging, AND std.timeit PASSED!");
+}

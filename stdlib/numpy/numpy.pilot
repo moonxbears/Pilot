@@ -1,0 +1,585 @@
+// SPDX-License-Identifier: MIT AND BSD-3-Clause
+// std.numpy — Multi-OS High-Performance Multidimensional Array & Math Library
+// Modeled after Python's `numpy` package (NumPy License: BSD-3-Clause)
+// Compatible with Linux, Windows, macOS, Android, iOS, and WebAssembly targets.
+
+const pi: f64 = 3.14159265358979323846;
+const e: f64 = 2.71828182845904523536;
+
+// ============================================================================
+// 1. Multidimensional Array (Python: numpy.ndarray)
+// ============================================================================
+
+class ndarray {
+    def __init__(data: [f64], shape: [i64], dtype: str = "float64") {
+        self.data = data;
+        self.shape = shape;
+        self.ndim = len(shape);
+        self.dtype = dtype;
+
+        var total_size: i64 = 1;
+        for dim in shape {
+            total_size = total_size * dim;
+        }
+        self.size = total_size;
+    }
+
+    def item(index: i64) -> f64 {
+        if index >= 0 and index < len(self.data) {
+            return self.data[index];
+        }
+        return 0.0;
+    }
+
+    def at2d(r: i64, c: i64) -> f64 {
+        if self.ndim == 2 and r >= 0 and r < self.shape[0] and c >= 0 and c < self.shape[1] {
+            let idx = r * self.shape[1] + c;
+            return self.data[idx];
+        }
+        return 0.0;
+    }
+
+    def set2d(r: i64, c: i64, val: f64) {
+        if self.ndim == 2 and r >= 0 and r < self.shape[0] and c >= 0 and c < self.shape[1] {
+            let idx = r * self.shape[1] + c;
+            self.data[idx] = val;
+        }
+    }
+
+    def reshape(new_shape: [i64]) -> ndarray {
+        var new_size: i64 = 1;
+        for dim in new_shape {
+            new_size = new_size * dim;
+        }
+        if new_size != self.size {
+            // Dimension mismatch, return clone of current
+            return ndarray(self.data, self.shape, self.dtype);
+        }
+        return ndarray(self.data, new_shape, self.dtype);
+    }
+
+    def flatten() -> ndarray {
+        return ndarray(self.data, [self.size], self.dtype);
+    }
+
+    def tolist() -> [any] {
+        if self.ndim == 1 {
+            var out = [];
+            for val in self.data {
+                out.append(val);
+            }
+            return out;
+        }
+        if self.ndim == 2 {
+            var out_2d = [];
+            let rows = self.shape[0];
+            let cols = self.shape[1];
+            for r in 0..<rows {
+                var row_list = [];
+                for c in 0..<cols {
+                    row_list.append(self.at2d(r, c));
+                }
+                out_2d.append(row_list);
+            }
+            return out_2d;
+        }
+        var flat_out = [];
+        for val in self.data {
+            flat_out.append(val);
+        }
+        return flat_out;
+    }
+
+    def transpose() -> ndarray {
+        if self.ndim != 2 {
+            return ndarray(self.data, self.shape, self.dtype);
+        }
+        let rows = self.shape[0];
+        let cols = self.shape[1];
+        var transposed_data: [f64] = [];
+        for c in 0..<cols {
+            for r in 0..<rows {
+                transposed_data.append(self.at2d(r, c));
+            }
+        }
+        return ndarray(transposed_data, [cols, rows], self.dtype);
+    }
+
+    def sum() -> f64 {
+        var s: f64 = 0.0;
+        for val in self.data {
+            s = s + val;
+        }
+        return s;
+    }
+
+    def mean() -> f64 {
+        if self.size == 0 {
+            return 0.0;
+        }
+        return self.sum() / self.size;
+    }
+
+    def variance() -> f64 {
+        if self.size == 0 {
+            return 0.0;
+        }
+        let avg = self.mean();
+        var variance_sum: f64 = 0.0;
+        for val in self.data {
+            let diff = val - avg;
+            variance_sum = variance_sum + diff * diff;
+        }
+        return variance_sum / self.size;
+    }
+
+    def std() -> f64 {
+        return sqrt(self.variance());
+    }
+
+    def min() -> f64 {
+        if len(self.data) == 0 {
+            return 0.0;
+        }
+        var m = self.data[0];
+        for val in self.data {
+            if val < m {
+                m = val;
+            }
+        }
+        return m;
+    }
+
+    def max() -> f64 {
+        if len(self.data) == 0 {
+            return 0.0;
+        }
+        var m = self.data[0];
+        for val in self.data {
+            if val > m {
+                m = val;
+            }
+        }
+        return m;
+    }
+
+    def argmin() -> i64 {
+        if len(self.data) == 0 {
+            return -1;
+        }
+        var best_idx: i64 = 0;
+        var min_val = self.data[0];
+        for i in 1..<len(self.data) {
+            if self.data[i] < min_val {
+                min_val = self.data[i];
+                best_idx = i;
+            }
+        }
+        return best_idx;
+    }
+
+    def argmax() -> i64 {
+        if len(self.data) == 0 {
+            return -1;
+        }
+        var best_idx: i64 = 0;
+        var max_val = self.data[0];
+        for i in 1..<len(self.data) {
+            if self.data[i] > max_val {
+                max_val = self.data[i];
+                best_idx = i;
+            }
+        }
+        return best_idx;
+    }
+
+    def add(other: any) -> ndarray {
+        let t = type_of(other);
+        var res_data: [f64] = [];
+        if t == "int" or t == "float" {
+            let scalar = float(other);
+            for val in self.data {
+                res_data.append(val + scalar);
+            }
+        } elif t == "object" {
+            for i in 0..<self.size {
+                res_data.append(self.data[i] + other.data[i]);
+            }
+        }
+        return ndarray(res_data, self.shape, self.dtype);
+    }
+
+    def sub(other: any) -> ndarray {
+        let t = type_of(other);
+        var res_data: [f64] = [];
+        if t == "int" or t == "float" {
+            let scalar = float(other);
+            for val in self.data {
+                res_data.append(val - scalar);
+            }
+        } elif t == "object" {
+            for i in 0..<self.size {
+                res_data.append(self.data[i] - other.data[i]);
+            }
+        }
+        return ndarray(res_data, self.shape, self.dtype);
+    }
+
+    def mul(other: any) -> ndarray {
+        let t = type_of(other);
+        var res_data: [f64] = [];
+        if t == "int" or t == "float" {
+            let scalar = float(other);
+            for val in self.data {
+                res_data.append(val * scalar);
+            }
+        } elif t == "object" {
+            for i in 0..<self.size {
+                res_data.append(self.data[i] * other.data[i]);
+            }
+        }
+        return ndarray(res_data, self.shape, self.dtype);
+    }
+
+    def div(other: any) -> ndarray {
+        let t = type_of(other);
+        var res_data: [f64] = [];
+        if t == "int" or t == "float" {
+            let scalar = float(other);
+            for val in self.data {
+                res_data.append(val / scalar);
+            }
+        } elif t == "object" {
+            for i in 0..<self.size {
+                res_data.append(self.data[i] / other.data[i]);
+            }
+        }
+        return ndarray(res_data, self.shape, self.dtype);
+    }
+
+    def dot(other: ndarray) -> ndarray {
+        if self.ndim == 2 and other.ndim == 2 {
+            let m = self.shape[0];
+            let k = self.shape[1];
+            let n = other.shape[1];
+            var out_data: [f64] = [];
+            for r in 0..<m {
+                for c in 0..<n {
+                    var dot_sum: f64 = 0.0;
+                    for i in 0..<k {
+                        dot_sum = dot_sum + self.at2d(r, i) * other.at2d(i, c);
+                    }
+                    out_data.append(dot_sum);
+                }
+            }
+            return ndarray(out_data, [m, n]);
+        }
+        var dot_sum: f64 = 0.0;
+        let count = min(self.size, other.size);
+        for i in 0..<count {
+            dot_sum = dot_sum + self.data[i] * other.data[i];
+        }
+        return ndarray([dot_sum], [1]);
+    }
+
+    def to_str() -> str {
+        if self.ndim == 1 {
+            var s = "array([";
+            var first = true;
+            for val in self.data {
+                if !first { s = s + ", "; }
+                s = s + str(val);
+                first = false;
+            }
+            s = s + "])";
+            return s;
+        }
+        if self.ndim == 2 {
+            var s = "array([";
+            let rows = self.shape[0];
+            let cols = self.shape[1];
+            for r in 0..<rows {
+                if r > 0 { s = s + ",\n       "; }
+                s = s + "[";
+                for c in 0..<cols {
+                    if c > 0 { s = s + ", "; }
+                    s = s + str(self.at2d(r, c));
+                }
+                s = s + "]";
+            }
+            s = s + "])";
+            return s;
+        }
+        return f"array(shape={self.shape}, size={self.size})";
+    }
+}
+
+// ============================================================================
+// 2. Array Creation Routines (Python: numpy.array, zeros, ones, arange, etc.)
+// ============================================================================
+
+def array(data: any) -> ndarray {
+    let t = type_of(data);
+    if t == "object" {
+        return data;
+    }
+    if t == "list" {
+        if len(data) == 0 {
+            return ndarray([], [0]);
+        }
+        let first_elem_type = type_of(data[0]);
+        if first_elem_type == "list" {
+            // 2D Array
+            let rows = len(data);
+            let cols = len(data[0]);
+            var flat_data: [f64] = [];
+            for row in data {
+                for item in row {
+                    flat_data.append(float(item));
+                }
+            }
+            return ndarray(flat_data, [rows, cols]);
+        }
+        // 1D Array
+        var flat_data: [f64] = [];
+        for item in data {
+            flat_data.append(float(item));
+        }
+        return ndarray(flat_data, [len(data)]);
+    }
+    return ndarray([float(data)], [1]);
+}
+
+def zeros(shape: any) -> ndarray {
+    var dims: [i64] = [];
+    if type_of(shape) == "int" {
+        dims = [int(shape)];
+    } elif type_of(shape) == "list" {
+        for d in shape {
+            dims.append(int(d));
+        }
+    }
+    var total: i64 = 1;
+    for d in dims { total = total * d; }
+    var data: [f64] = [];
+    for _ in 0..<total {
+        data.append(0.0);
+    }
+    return ndarray(data, dims);
+}
+
+def ones(shape: any) -> ndarray {
+    var dims: [i64] = [];
+    if type_of(shape) == "int" {
+        dims = [int(shape)];
+    } elif type_of(shape) == "list" {
+        for d in shape {
+            dims.append(int(d));
+        }
+    }
+    var total: i64 = 1;
+    for d in dims { total = total * d; }
+    var data: [f64] = [];
+    for _ in 0..<total {
+        data.append(1.0);
+    }
+    return ndarray(data, dims);
+}
+
+def full(shape: any, fill_value: f64) -> ndarray {
+    var dims: [i64] = [];
+    if type_of(shape) == "int" {
+        dims = [int(shape)];
+    } elif type_of(shape) == "list" {
+        for d in shape {
+            dims.append(int(d));
+        }
+    }
+    var total: i64 = 1;
+    for d in dims { total = total * d; }
+    var data: [f64] = [];
+    for _ in 0..<total {
+        data.append(fill_value);
+    }
+    return ndarray(data, dims);
+}
+
+def arange(start: f64, stop: f64 = 0.0, step: f64 = 1.0) -> ndarray {
+    var s = start;
+    var e = stop;
+    var st = step;
+    if stop == 0.0 and step == 1.0 and start > 0.0 {
+        e = start;
+        s = 0.0;
+    }
+    var data: [f64] = [];
+    var cur = s;
+    if st > 0.0 {
+        while cur < e {
+            data.append(cur);
+            cur = cur + st;
+        }
+    } elif st < 0.0 {
+        while cur > e {
+            data.append(cur);
+            cur = cur + st;
+        }
+    }
+    return ndarray(data, [len(data)]);
+}
+
+def linspace(start: f64, stop: f64, num: i64 = 50) -> ndarray {
+    if num <= 0 {
+        return ndarray([], [0]);
+    }
+    if num == 1 {
+        return ndarray([start], [1]);
+    }
+    let step = (stop - start) / float(num - 1);
+    var data: [f64] = [];
+    for i in 0..<num {
+        data.append(start + float(i) * step);
+    }
+    return ndarray(data, [num]);
+}
+
+def eye(n: i64, m: i64 = -1) -> ndarray {
+    let cols = if m > 0 { m } else { n };
+    var data: [f64] = [];
+    for r in 0..<n {
+        for c in 0..<cols {
+            if r == c {
+                data.append(1.0);
+            } else {
+                data.append(0.0);
+            }
+        }
+    }
+    return ndarray(data, [n, cols]);
+}
+
+def identity(n: i64) -> ndarray {
+    return eye(n, n);
+}
+
+// ============================================================================
+// 3. Mathematical & Linear Algebra Functions (Python: numpy.dot, matmul, etc.)
+// ============================================================================
+
+def matmul(a: ndarray, b: ndarray) -> ndarray {
+    // 2D x 2D matrix multiplication
+    if a.ndim == 2 and b.ndim == 2 {
+        let m = a.shape[0];
+        let k = a.shape[1];
+        let n = b.shape[1];
+        var out_data: [f64] = [];
+        for r in 0..<m {
+            for c in 0..<n {
+                var dot_sum: f64 = 0.0;
+                for i in 0..<k {
+                    dot_sum = dot_sum + a.at2d(r, i) * b.at2d(i, c);
+                }
+                out_data.append(dot_sum);
+            }
+        }
+        return ndarray(out_data, [m, n]);
+    }
+    // 1D x 1D vector dot product
+    if a.ndim == 1 and b.ndim == 1 {
+        var dot_sum: f64 = 0.0;
+        let n = min(a.size, b.size);
+        for i in 0..<n {
+            dot_sum = dot_sum + a.data[i] * b.data[i];
+        }
+        return ndarray([dot_sum], [1]);
+    }
+    return ndarray([], [0]);
+}
+
+def dot(a: ndarray, b: ndarray) -> any {
+    if a.ndim == 1 and b.ndim == 1 {
+        let res = matmul(a, b);
+        return res.item(0);
+    }
+    return matmul(a, b);
+}
+
+def sin_arr(a: ndarray) -> ndarray {
+    var out: [f64] = [];
+    for val in a.data { out.append(sin(val)); }
+    return ndarray(out, a.shape, a.dtype);
+}
+
+def cos_arr(a: ndarray) -> ndarray {
+    var out: [f64] = [];
+    for val in a.data { out.append(cos(val)); }
+    return ndarray(out, a.shape, a.dtype);
+}
+
+def exp_arr(a: ndarray) -> ndarray {
+    var out: [f64] = [];
+    for val in a.data { out.append(exp(val)); }
+    return ndarray(out, a.shape, a.dtype);
+}
+
+def sqrt_arr(a: ndarray) -> ndarray {
+    var out: [f64] = [];
+    for val in a.data { out.append(sqrt(val)); }
+    return ndarray(out, a.shape, a.dtype);
+}
+
+def sum_arr(a: ndarray) -> f64 {
+    return a.sum();
+}
+
+def mean_arr(a: ndarray) -> f64 {
+    return a.mean();
+}
+
+def std_arr(a: ndarray) -> f64 {
+    return a.std();
+}
+
+def min_arr(a: ndarray) -> f64 {
+    return a.min();
+}
+
+def max_arr(a: ndarray) -> f64 {
+    return a.max();
+}
+
+def clip(a: ndarray, a_min: f64, a_max: f64) -> ndarray {
+    var out: [f64] = [];
+    for val in a.data {
+        if val < a_min {
+            out.append(a_min);
+        } elif val > a_max {
+            out.append(a_max);
+        } else {
+            out.append(val);
+        }
+    }
+    return ndarray(out, a.shape, a.dtype);
+}
+
+def concatenate(arrays: [ndarray], axis: i64 = 0) -> ndarray {
+    if len(arrays) == 0 {
+        return ndarray([], [0]);
+    }
+    if axis == 0 {
+        var merged_data: [f64] = [];
+        var total_rows: i64 = 0;
+        let cols = if arrays[0].ndim == 2 { arrays[0].shape[1] } else { 1 };
+        for arr in arrays {
+            for v in arr.data {
+                merged_data.append(v);
+            }
+            total_rows = total_rows + (if arr.ndim == 2 { arr.shape[0] } else { arr.size });
+        }
+        if arrays[0].ndim == 2 {
+            return ndarray(merged_data, [total_rows, cols]);
+        }
+        return ndarray(merged_data, [total_rows]);
+    }
+    return arrays[0];
+}

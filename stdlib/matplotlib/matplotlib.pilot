@@ -1,0 +1,338 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.matplotlib — Multi-OS Cross-Platform Visualization & Plotting Library
+// Modeled after Python's `matplotlib.pyplot` (Matplotlib PSF-Compatible License)
+// Compatible with Linux, Windows, macOS, Android, iOS, and WebAssembly targets.
+
+// ============================================================================
+// 1. Plot Data Object
+// ============================================================================
+
+class PlotData {
+    def __init__(x: [f64], y: [f64], label: str = "", marker: str = "*", color: str = "blue", kind: str = "line") {
+        self.x = x;
+        self.y = y;
+        self.label = label;
+        self.marker = marker;
+        self.color = color;
+        self.kind = kind;
+    }
+}
+
+// ============================================================================
+// 2. Figure (Canvas & Rendering Engine)
+// ============================================================================
+
+class Figure {
+    def __init__(width: i64 = 60, height: i64 = 15) {
+        self.width = width;
+        self.height = height;
+        self.title_str = "";
+        self.xlabel_str = "";
+        self.ylabel_str = "";
+        self.show_grid = false;
+        self.show_legend = false;
+        self.plots = [];
+    }
+
+    def add_plot(p: PlotData) {
+        self.plots.append(p);
+    }
+
+    def clear() {
+        self.title_str = "";
+        self.xlabel_str = "";
+        self.ylabel_str = "";
+        self.show_grid = false;
+        self.show_legend = false;
+        self.plots = [];
+    }
+
+    def get_bounds() -> [f64] {
+        var min_x: f64 = 0.0;
+        var max_x: f64 = 1.0;
+        var min_y: f64 = 0.0;
+        var max_y: f64 = 1.0;
+        var first: bool = true;
+
+        for p in self.plots {
+            for vx in p.x {
+                if first or vx < min_x { min_x = vx; }
+                if first or vx > max_x { max_x = vx; }
+            }
+            for vy in p.y {
+                if first or vy < min_y { min_y = vy; }
+                if first or vy > max_y { max_y = vy; }
+                first = false;
+            }
+        }
+
+        if min_x == max_x { max_x = min_x + 1.0; }
+        if min_y == max_y { max_y = min_y + 1.0; }
+
+        return [min_x, max_x, min_y, max_y];
+    }
+
+    /// Renders the figure as an ASCII chart for headless/terminal environments.
+    def render_ascii() -> str {
+        let bounds = self.get_bounds();
+        let min_x = bounds[0];
+        let max_x = bounds[1];
+        let min_y = bounds[2];
+        let max_y = bounds[3];
+
+        let w = self.width;
+        let h = self.height;
+
+        // Initialize 2D grid
+        var grid_rows = [];
+        for r in 0..<h {
+            var row_chars = [];
+            for c in 0..<w {
+                if self.show_grid and (r % 4 == 0 or c % 10 == 0) {
+                    row_chars.append(".");
+                } else {
+                    row_chars.append(" ");
+                }
+            }
+            grid_rows.append(row_chars);
+        }
+
+        // Plot points
+        for p in self.plots {
+            let n = min(len(p.x), len(p.y));
+            let m_char = if len(p.marker) > 0 { __str_slice(p.marker, 0, 1) } else { "*" };
+            for i in 0..<n {
+                let px = p.x[i];
+                let py = p.y[i];
+
+                let col = int(((px - min_x) / (max_x - min_x)) * float(w - 1));
+                let row = int(((max_y - py) / (max_y - min_y)) * float(h - 1));
+
+                if row >= 0 and row < h and col >= 0 and col < w {
+                    grid_rows[row][col] = m_char;
+                }
+            }
+        }
+
+        // Format output
+        var out = "";
+        if len(self.title_str) > 0 {
+            out = out + "        " + self.title_str + "\n";
+        }
+
+        for r in 0..<h {
+            let y_val = max_y - (float(r) / float(h - 1)) * (max_y - min_y);
+            var row_s = "";
+            for c in 0..<w {
+                row_s = row_s + grid_rows[r][c];
+            }
+            out = out + f"{y_val} | " + row_s + "\n";
+        }
+
+        // X-axis border
+        out = out + "       +" + "-" * w + "\n";
+        out = out + f"        {min_x}" + " " * (w - 15) + f"{max_x}\n";
+
+        if len(self.xlabel_str) > 0 {
+            out = out + "        " + self.xlabel_str + "\n";
+        }
+
+        if self.show_legend and len(self.plots) > 0 {
+            out = out + "\nLegend:\n";
+            for p in self.plots {
+                if len(p.label) > 0 {
+                    out = out + f"  [{p.marker}] {p.label} ({p.color})\n";
+                }
+            }
+        }
+
+        return out;
+    }
+
+    /// Renders the figure as vector SVG markup.
+    def render_svg() -> str {
+        let bounds = self.get_bounds();
+        let min_x = bounds[0];
+        let max_x = bounds[1];
+        let min_y = bounds[2];
+        let max_y = bounds[3];
+
+        let svg_w = 600;
+        let svg_h = 400;
+        let pad = 50;
+        let plot_w = svg_w - 2 * pad;
+        let plot_h = svg_h - 2 * pad;
+
+        var svg = f"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{svg_w}\" height=\"{svg_h}\">\n";
+        svg = svg + f"  <rect width=\"100%\" height=\"100%\" fill=\"#ffffff\" />\n";
+
+        // Title
+        if len(self.title_str) > 0 {
+            svg = svg + f"  <text x=\"{svg_w / 2}\" y=\"30\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"16\" font-weight=\"bold\">{self.title_str}</text>\n";
+        }
+
+        // Axes
+        svg = svg + f"  <line x1=\"{pad}\" y1=\"{pad + plot_h}\" x2=\"{pad + plot_w}\" y2=\"{pad + plot_h}\" stroke=\"#333333\" stroke-width=\"2\" />\n";
+        svg = svg + f"  <line x1=\"{pad}\" y1=\"{pad}\" x2=\"{pad}\" y2=\"{pad + plot_h}\" stroke=\"#333333\" stroke-width=\"2\" />\n";
+
+        // Plots
+        for p in self.plots {
+            let n = min(len(p.x), len(p.y));
+            if p.kind == "line" and n > 1 {
+                var pts = "";
+                for i in 0..<n {
+                    let cx = float(pad) + ((p.x[i] - min_x) / (max_x - min_x)) * float(plot_w);
+                    let cy = float(pad + plot_h) - ((p.y[i] - min_y) / (max_y - min_y)) * float(plot_h);
+                    pts = pts + f"{cx},{cy} ";
+                }
+                svg = svg + f"  <polyline fill=\"none\" stroke=\"{p.color}\" stroke-width=\"2\" points=\"{pts}\" />\n";
+            }
+            // Scatter dots
+            for i in 0..<n {
+                let cx = float(pad) + ((p.x[i] - min_x) / (max_x - min_x)) * float(plot_w);
+                let cy = float(pad + plot_h) - ((p.y[i] - min_y) / (max_y - min_y)) * float(plot_h);
+                svg = svg + f"  <circle cx=\"{cx}\" cy=\"{cy}\" r=\"3\" fill=\"{p.color}\" />\n";
+            }
+        }
+
+        svg = svg + "</svg>\n";
+        return svg;
+    }
+
+    def savefig(filename: str) {
+        if filename.ends_with(".svg") {
+            let content = self.render_svg();
+            __fs_write_text(filename, content);
+        } else {
+            let content = self.render_ascii();
+            __fs_write_text(filename, content);
+        }
+    }
+}
+
+// ============================================================================
+// 3. Functional Pyplot Interface (Python: matplotlib.pyplot)
+// ============================================================================
+
+var _CURRENT_FIG: Figure = Figure(60, 15);
+
+def figure(figsize: [i64] = [60, 15]) -> Figure {
+    _CURRENT_FIG = Figure(figsize[0], figsize[1]);
+    return _CURRENT_FIG;
+}
+
+def plot(x: any, y: any = none, label: str = "", marker: str = "*", color: str = "blue") {
+    var xs: [f64] = [];
+    var ys: [f64] = [];
+
+    if y == none {
+        // x represents y values, x values are 0..n
+        let t_x = type_of(x);
+        let items = if t_x == "object" { x.data } else { x };
+        for i in 0..<len(items) {
+            xs.append(float(i));
+            ys.append(float(items[i]));
+        }
+    } else {
+        let t_x = type_of(x);
+        let items_x = if t_x == "object" { x.data } else { x };
+        let t_y = type_of(y);
+        let items_y = if t_y == "object" { y.data } else { y };
+        let count = min(len(items_x), len(items_y));
+        for i in 0..<count {
+            xs.append(float(items_x[i]));
+            ys.append(float(items_y[i]));
+        }
+    }
+
+    _CURRENT_FIG.add_plot(PlotData(xs, ys, label, marker, color, "line"));
+}
+
+def scatter(x: any, y: any, label: str = "", marker: str = "o", color: str = "red") {
+    var xs: [f64] = [];
+    var ys: [f64] = [];
+    let items_x = if type_of(x) == "object" { x.data } else { x };
+    let items_y = if type_of(y) == "object" { y.data } else { y };
+    let count = min(len(items_x), len(items_y));
+    for i in 0..<count {
+        xs.append(float(items_x[i]));
+        ys.append(float(items_y[i]));
+    }
+    _CURRENT_FIG.add_plot(PlotData(xs, ys, label, marker, color, "scatter"));
+}
+
+def bar(categories: [any], values: [any], label: str = "", color: str = "green") {
+    var xs: [f64] = [];
+    var ys: [f64] = [];
+    for i in 0..<len(categories) {
+        xs.append(float(i));
+        ys.append(float(values[i]));
+    }
+    _CURRENT_FIG.add_plot(PlotData(xs, ys, label, "|", color, "bar"));
+}
+
+def hist(data: any, bins: i64 = 10, label: str = "", color: str = "purple") {
+    let items = if type_of(data) == "object" { data.data } else { data };
+    if len(items) == 0 {
+        return;
+    }
+    var min_v = float(items[0]);
+    var max_v = float(items[0]);
+    for v in items {
+        let fv = float(v);
+        if fv < min_v { min_v = fv; }
+        if fv > max_v { max_v = fv; }
+    }
+    if min_v == max_v { max_v = min_v + 1.0; }
+
+    var bin_counts: [f64] = [];
+    for _ in 0..<bins { bin_counts.append(0.0); }
+
+    let bin_w = (max_v - min_v) / float(bins);
+    for v in items {
+        let fv = float(v);
+        var b_idx = int((fv - min_v) / bin_w);
+        if b_idx >= bins { b_idx = bins - 1; }
+        if b_idx < 0 { b_idx = 0; }
+        bin_counts[b_idx] = bin_counts[b_idx] + 1.0;
+    }
+
+    var xs: [f64] = [];
+    for i in 0..<bins {
+        xs.append(min_v + float(i) * bin_w);
+    }
+    _CURRENT_FIG.add_plot(PlotData(xs, bin_counts, label, "#", color, "hist"));
+}
+
+def title(label: str) {
+    _CURRENT_FIG.title_str = label;
+}
+
+def xlabel(label: str) {
+    _CURRENT_FIG.xlabel_str = label;
+}
+
+def ylabel(label: str) {
+    _CURRENT_FIG.ylabel_str = label;
+}
+
+def grid(enable: bool = true) {
+    _CURRENT_FIG.show_grid = enable;
+}
+
+def legend() {
+    _CURRENT_FIG.show_legend = true;
+}
+
+def show() {
+    let output = _CURRENT_FIG.render_ascii();
+    print(output);
+}
+
+def savefig(filename: str) {
+    _CURRENT_FIG.savefig(filename);
+}
+
+def clf() {
+    _CURRENT_FIG.clear();
+}

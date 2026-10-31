@@ -1,0 +1,156 @@
+// SPDX-License-Identifier: MIT
+// Integration Test: std.socket, std.urllib, std.http, std.request
+// Multi-OS validation for networking primitives across Linux, Windows, macOS, Android, iOS, and WebAssembly.
+
+import std.socket as socket;
+import std.urllib as urllib;
+import std.http as http;
+import std.request as request;
+
+def test_socket_module() {
+    print("=== Testing std.socket ===");
+    assert(socket.AF_INET == 2, "AF_INET should be 2");
+    assert(socket.AF_INET6 == 10 or socket.AF_INET6 == 30 or socket.AF_INET6 == 23 or socket.AF_INET6 == 28, "AF_INET6 constant check");
+    assert(socket.SOCK_STREAM == 1, "SOCK_STREAM should be 1");
+    assert(socket.SOCK_DGRAM == 2, "SOCK_DGRAM should be 2");
+
+    // Address conversion
+    let packed = socket.inet_aton("127.0.0.1");
+    assert(len(packed) == 4, "Packed IP should have 4 bytes");
+    let unpacked = socket.inet_ntoa(packed);
+    assert(unpacked == "127.0.0.1", "Unpacked IP should match 127.0.0.1");
+
+    // Socket instance
+    let sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
+    sock.settimeout(5.0);
+    assert(sock.family == socket.AF_INET, "Socket family match");
+    assert(sock.type == socket.SOCK_STREAM, "Socket type match");
+    sock.close();
+    print("std.socket passed!");
+}
+
+def test_urllib_module() {
+    print("=== Testing std.urllib ===");
+
+    // 1. Quoting
+    let raw = "hello world! / test & value";
+    let q = urllib.quote(raw, "/");
+    assert(q == "hello%20world!%20/%20test%20&%20value", "quote check");
+    let uq = urllib.unquote(q);
+    assert(uq == raw, "unquote check");
+
+    let qp = urllib.quote_plus("hello world");
+    assert(qp == "hello+world", "quote_plus check");
+    let uqp = urllib.unquote_plus(qp);
+    assert(uqp == "hello world", "unquote_plus check");
+
+    // 2. Query encoding & decoding
+    let query_map = {"name": "pilot", "version": "1.1"};
+    let encoded_qs = urllib.urlencode(query_map);
+    assert(encoded_qs == "name=pilot&version=1.1" or encoded_qs == "version=1.1&name=pilot", "urlencode check");
+
+    let parsed_qs = urllib.parse_qs("name=pilot&tag=fast&tag=safe");
+    assert(parsed_qs["name"][0] == "pilot", "parse_qs key name");
+    assert(len(parsed_qs["tag"]) == 2, "parse_qs list values");
+
+    // 3. urlparse and urlunparse
+    let url_str = "https://user:pass@example.com:8080/path/to/page;param?key=val#section";
+    let p = urllib.urlparse(url_str);
+    assert(p.scheme == "https", "scheme check");
+    assert(p.hostname() == "example.com", "hostname check");
+    assert(p.port() == 8080, "port check");
+    assert(p.username() == "user", "username check");
+    assert(p.password() == "pass", "password check");
+    assert(p.path == "/path/to/page", "path check");
+    assert(p.params == "param", "params check");
+    assert(p.query == "key=val", "query check");
+    assert(p.fragment == "section", "fragment check");
+
+    let rebuilt = urllib.urlunparse(p);
+    assert(rebuilt == url_str, "urlunparse roundtrip");
+
+    // 4. urljoin
+    let joined = urllib.urljoin("https://example.com/dir/index.html", "sub/page.html");
+    assert(joined == "https://example.com/dir/sub/page.html", "urljoin check");
+
+    // 5. Request object
+    let req = urllib.Request("https://httpbin.org/get", none, {"User-Agent": "Pilot"});
+    assert(req.get_method() == "GET", "default method is GET");
+    assert(req.has_header("User-Agent"), "has User-Agent header");
+    assert(req.get_header("User-Agent") == "Pilot", "header value match");
+
+    print("std.urllib passed!");
+}
+
+def test_http_module() {
+    print("=== Testing std.http ===");
+
+    // 1. Status codes & phrases
+    assert(http.HTTP_OK == 200, "HTTP_OK is 200");
+    assert(http.HTTP_NOT_FOUND == 404, "HTTP_NOT_FOUND is 404");
+    assert(http.status_phrase(200) == "OK", "status_phrase for 200");
+    assert(http.status_phrase(404) == "Not Found", "status_phrase for 404");
+
+    // 2. HTTPConnection
+    let conn = http.HTTPConnection("example.com", 80);
+    conn.connect();
+    conn.putrequest("GET", "/index.html");
+    conn.putheader("Host", "example.com");
+    conn.endheaders();
+    let resp = conn.getresponse();
+    assert(resp.status == 200, "HTTPConnection mock response status 200");
+    conn.close();
+
+    // 3. SimpleCookie
+    let cookie = http.SimpleCookie();
+    cookie.load("session_id=xyz123; user=alice");
+    let c1 = cookie.get_cookie("session_id");
+    assert(c1.value == "xyz123", "cookie session_id match");
+
+    // 4. BaseHTTPRequestHandler mock
+    let raw_req = "GET /api/test HTTP/1.1\r\nHost: localhost\r\nAccept: text/plain\r\n\r\n";
+    let handler = http.BaseHTTPRequestHandler(raw_req);
+    assert(handler.command == "GET", "handler command GET");
+    assert(handler.path == "/api/test", "handler path match");
+    assert(handler.headers["Host"] == "localhost", "handler header match");
+    handler.send_response(200);
+    handler.send_header("Content-Type", "application/json");
+    handler.end_headers();
+    handler.write_body("{\"ok\": true}");
+    let rendered = handler.render_response();
+    assert(len(rendered) > 0, "rendered response is non-empty");
+
+    print("std.http passed!");
+}
+
+def test_request_module() {
+    print("=== Testing std.request ===");
+
+    // 1. Session & Request
+    let s = request.session();
+    s.headers["Authorization"] = "Bearer token123";
+
+    // Test request building and response mock handling
+    let resp = s.request("GET", "http://example.com/test", {"filter": "active"});
+    assert(resp.status_code == 200, "resp status 200");
+    assert(resp.ok, "resp ok flag is true");
+    assert(resp.reason == "OK", "resp reason OK");
+
+    // Functional helpers
+    let r_get = request.get_req("http://example.com/api");
+    assert(r_get.ok, "get_req response ok");
+
+    let r_post = request.post("http://example.com/api", {"data": "hello"});
+    assert(r_post.status_code == 200, "post response status 200");
+
+    print("std.request passed!");
+}
+
+def main() {
+    print("Starting network stdlib tests...");
+    test_socket_module();
+    test_urllib_module();
+    test_http_module();
+    test_request_module();
+    print("ALL NETWORK STDLIB TESTS PASSED SUCCESSFULLY!");
+}

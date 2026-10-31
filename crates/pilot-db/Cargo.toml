@@ -11,3 +11,8 @@ pilot-span = { path = "../pilot-span" }
 pilot-lexer = { path = "../pilot-lexer" }
 pilot-syntax = { path = "../pilot-syntax" }
 pilot-incremental = { path = "../pilot-incremental" }
+pilot-ast = { path = "../pilot-ast" }
+pilot-parser = { path = "../pilot-parser" }
+pilot-intern = { path = "../pilot-intern" }
+pilot-analysis = { path = "../pilot-analysis" }
+pilot-lsp-macros = { path = "../pilot-lsp-macros" }

@@ -1,13 +1,59 @@
 //! Milestone 32.3: Zero-GC Standalone Native Language Server (`pilot-lsp`).
 
 use std::collections::HashMap;
-use pilot_db::{Database, FileId};
+use pilot_db::{diagnostics_query, Database, FileId};
 use pilot_fmt::{format_source, FormatOptions};
 use pilot_incremental::TextEdit;
+use pilot_lsp_macros::LspQuery;
 use pilot_span::LineIndex;
 use pilot_syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
 
 use crate::json::{parse_json, JsonValue};
+
+#[derive(LspQuery)]
+#[lsp_method("textDocument/hover")]
+#[lsp_capability("hoverProvider")]
+pub struct HoverQuery;
+
+#[derive(LspQuery)]
+#[lsp_method("textDocument/completion")]
+#[lsp_capability("completionProvider")]
+pub struct CompletionQuery;
+
+#[derive(LspQuery)]
+#[lsp_method("textDocument/definition")]
+#[lsp_capability("definitionProvider")]
+pub struct DefinitionQuery;
+
+#[derive(LspQuery)]
+#[lsp_method("textDocument/documentSymbol")]
+#[lsp_capability("documentSymbolProvider")]
+pub struct DocumentSymbolQuery;
+
+#[derive(LspQuery)]
+#[lsp_method("textDocument/formatting")]
+#[lsp_capability("documentFormattingProvider")]
+pub struct FormattingQuery;
+
+#[derive(LspQuery)]
+#[lsp_method("textDocument/inlayHint")]
+#[lsp_capability("inlayHintProvider")]
+pub struct InlayHintQuery;
+
+#[derive(LspQuery)]
+#[lsp_method("textDocument/signatureHelp")]
+#[lsp_capability("signatureHelpProvider")]
+pub struct SignatureHelpQuery;
+
+#[derive(LspQuery)]
+#[lsp_method("textDocument/codeAction")]
+#[lsp_capability("codeActionProvider")]
+pub struct CodeActionQuery;
+
+#[derive(LspQuery)]
+#[lsp_method("textDocument/semanticTokens/full")]
+#[lsp_capability("semanticTokensProvider")]
+pub struct SemanticTokensFullQuery;
 
 pub struct LspServer {
     db: Database,
@@ -34,6 +80,10 @@ impl LspServer {
 
     pub fn take_pending_notifications(&mut self) -> Vec<String> {
         std::mem::take(&mut self.pending_notifications)
+    }
+
+    pub fn analysis_cache_hits(&self) -> usize {
+        self.db.analysis_cache_hits
     }
 
     fn get_or_create_file_id(&mut self, uri: &str) -> FileId {
@@ -86,7 +136,7 @@ impl LspServer {
                 }
                 None
             }
-            Some("textDocument/hover") => {
+            Some(HoverQuery::LSP_METHOD) => {
                 if let Some(p) = params {
                     let res = self.handle_hover(p);
                     Some(make_response(id, res).serialize())
@@ -94,7 +144,7 @@ impl LspServer {
                     Some(make_response(id, JsonValue::Null).serialize())
                 }
             }
-            Some("textDocument/completion") => {
+            Some(CompletionQuery::LSP_METHOD) => {
                 if let Some(p) = params {
                     let res = self.handle_completion(p);
                     Some(make_response(id, res).serialize())
@@ -102,7 +152,7 @@ impl LspServer {
                     Some(make_response(id, JsonValue::Array(Vec::new())).serialize())
                 }
             }
-            Some("textDocument/definition") => {
+            Some(DefinitionQuery::LSP_METHOD) => {
                 if let Some(p) = params {
                     let res = self.handle_definition(p);
                     Some(make_response(id, res).serialize())
@@ -110,7 +160,7 @@ impl LspServer {
                     Some(make_response(id, JsonValue::Null).serialize())
                 }
             }
-            Some("textDocument/documentSymbol") => {
+            Some(DocumentSymbolQuery::LSP_METHOD) => {
                 if let Some(p) = params {
                     let res = self.handle_document_symbol(p);
                     Some(make_response(id, res).serialize())
@@ -118,7 +168,7 @@ impl LspServer {
                     Some(make_response(id, JsonValue::Array(Vec::new())).serialize())
                 }
             }
-            Some("textDocument/formatting") => {
+            Some(FormattingQuery::LSP_METHOD) => {
                 if let Some(p) = params {
                     let res = self.handle_formatting(p);
                     Some(make_response(id, res).serialize())
@@ -126,7 +176,7 @@ impl LspServer {
                     Some(make_response(id, JsonValue::Array(Vec::new())).serialize())
                 }
             }
-            Some("textDocument/inlayHint") => {
+            Some(InlayHintQuery::LSP_METHOD) => {
                 if let Some(p) = params {
                     let res = self.handle_inlay_hint(p);
                     Some(make_response(id, res).serialize())
@@ -134,7 +184,7 @@ impl LspServer {
                     Some(make_response(id, JsonValue::Array(Vec::new())).serialize())
                 }
             }
-            Some("textDocument/signatureHelp") => {
+            Some(SignatureHelpQuery::LSP_METHOD) => {
                 if let Some(p) = params {
                     let res = self.handle_signature_help(p);
                     Some(make_response(id, res).serialize())
@@ -142,7 +192,7 @@ impl LspServer {
                     Some(make_response(id, JsonValue::Null).serialize())
                 }
             }
-            Some("textDocument/codeAction") => {
+            Some(CodeActionQuery::LSP_METHOD) => {
                 if let Some(p) = params {
                     let res = self.handle_code_action(p);
                     Some(make_response(id, res).serialize())
@@ -150,7 +200,7 @@ impl LspServer {
                     Some(make_response(id, JsonValue::Array(Vec::new())).serialize())
                 }
             }
-            Some("textDocument/semanticTokens/full") => {
+            Some(SemanticTokensFullQuery::LSP_METHOD) => {
                 if let Some(p) = params {
                     let res = self.handle_semantic_tokens_full(p);
                     Some(make_response(id, res).serialize())
@@ -466,10 +516,13 @@ impl LspServer {
             }
         }
 
-        // Run AST & Bidirectional Type Inference
-        let arena = pilot_parser::parse(&src);
-        let root_id = pilot_ast::NodeId(if arena.nodes.is_empty() { 0 } else { (arena.nodes.len() - 1) as u32 });
-        let analysis = pilot_analysis::AnalysisPipeline::analyze(&arena, root_id);
+        // Query Memoized AST & Bidirectional Type Inference from `pilot-db`
+        let mod_analysis = match self.db.module_analysis(file_id) {
+            Some(m) => m,
+            None => return JsonValue::Null,
+        };
+        let arena = &mod_analysis.arena;
+        let analysis = &mod_analysis.analysis;
 
         // 1. Member access hover (`obj.member` or `obj?.member`)
         if is_after_dot {
@@ -871,6 +924,20 @@ impl LspServer {
             }
         }
 
+        // 11. Automatic Compiler CST SyntaxKind Fallback (for any new keyword/modifier/operator added to `pilot-syntax`)
+        if tok_kind.is_modifier_keyword() {
+            let md = format!("**Pilot Modifier Keyword**: `{}` (`SyntaxKind::{:?}`)", txt, tok_kind);
+            return make_hover_card(&md);
+        }
+        if tok_kind.is_keyword() {
+            let md = format!("**Pilot Keyword**: `{}` (`SyntaxKind::{:?}`)", txt, tok_kind);
+            return make_hover_card(&md);
+        }
+        if tok_kind.is_operator() {
+            let md = format!("**Pilot Operator**: `{}` (`SyntaxKind::{:?}`)", raw_txt, tok_kind);
+            return make_hover_card(&md);
+        }
+
         JsonValue::Null
     }
 
@@ -928,10 +995,13 @@ impl LspServer {
             return make_signature_help_resp(sig, summary, &param_list, comma_count);
         }
 
-        // 2. AST Functions
-        let arena = pilot_parser::parse(&src);
-        let root_id = pilot_ast::NodeId(if arena.nodes.is_empty() { 0 } else { (arena.nodes.len() - 1) as u32 });
-        let analysis = pilot_analysis::AnalysisPipeline::analyze(&arena, root_id);
+        // 2. AST Functions (via memoized `pilot-db` ModuleAnalysis)
+        let mod_analysis = match self.db.module_analysis(file_id) {
+            Some(m) => m,
+            None => return JsonValue::Null,
+        };
+        let arena = &mod_analysis.arena;
+        let analysis = &mod_analysis.analysis;
 
         for (idx, node) in arena.nodes.iter().enumerate() {
             if node.node_kind() == pilot_ast::NodeKind::FnDecl {
@@ -1032,8 +1102,8 @@ impl LspServer {
                     ]));
                 }
             }
-            if let Some(src) = self.db.source_text(file_id) {
-                let arena = pilot_parser::parse(&src);
+            if let Some(mod_analysis) = self.db.module_analysis(file_id) {
+                let arena = &mod_analysis.arena;
                 for node in &arena.nodes {
                     let nk = node.node_kind();
                     if matches!(nk, pilot_ast::NodeKind::LetStmt | pilot_ast::NodeKind::VarStmt) {
@@ -1460,9 +1530,12 @@ impl LspServer {
             None => return JsonValue::Array(Vec::new()),
         };
 
-        let arena = pilot_parser::parse(&src);
-        let root = pilot_ast::NodeId(if arena.nodes.is_empty() { 0 } else { (arena.nodes.len() - 1) as u32 });
-        let analysis = pilot_analysis::AnalysisPipeline::analyze(&arena, root);
+        let mod_analysis = match self.db.module_analysis(file_id) {
+            Some(m) => m,
+            None => return JsonValue::Array(Vec::new()),
+        };
+        let arena = &mod_analysis.arena;
+        let analysis = &mod_analysis.analysis;
 
         let mut hints = Vec::new();
         let li = match self.line_indices.get(&file_id) {
@@ -1532,19 +1605,11 @@ impl LspServer {
     }
 
     fn emit_diagnostics_for_file(&mut self, file_id: FileId, uri: &str) {
-        let src = match self.db.source_text(file_id) {
-            Some(s) => s,
-            None => return,
-        };
-
-        let arena = pilot_parser::parse(&src);
-        let root = pilot_ast::NodeId(if arena.nodes.is_empty() { 0 } else { (arena.nodes.len() - 1) as u32 });
-        let analysis = pilot_analysis::AnalysisPipeline::analyze(&arena, root);
+        let raw_diags = diagnostics_query(&mut self.db, file_id);
 
         let mut diags_json = Vec::new();
         if let Some(li) = self.line_indices.get(&file_id) {
-            for diag in analysis.diagnostics {
-                let span = diag.span;
+            for (span, sev_code, _code, message) in raw_diags {
                 let (sl, sc) = li.offset_to_line_col(span.start);
                 let (el, ec) = li.offset_to_line_col(span.end.max(span.start));
                 let s_line = sl.saturating_sub(1);
@@ -1552,17 +1617,10 @@ impl LspServer {
                 let e_line = el.saturating_sub(1);
                 let e_col = ec.saturating_sub(1);
 
-                let sev = match diag.severity {
-                    pilot_analysis::DiagnosticSeverity::Error => 1.0,
-                    pilot_analysis::DiagnosticSeverity::Warning => 2.0,
-                    pilot_analysis::DiagnosticSeverity::Info => 3.0,
-                    pilot_analysis::DiagnosticSeverity::Hint => 4.0,
-                };
-
                 diags_json.push(JsonValue::Object(vec![
                     ("range".to_string(), make_range(s_line, s_col, e_line, e_col)),
-                    ("severity".to_string(), JsonValue::Number(sev)),
-                    ("message".to_string(), JsonValue::String(diag.message)),
+                    ("severity".to_string(), JsonValue::Number(sev_code as f64)),
+                    ("message".to_string(), JsonValue::String(message)),
                     ("source".to_string(), JsonValue::String("pilot".to_string())),
                 ]));
             }
@@ -1570,7 +1628,7 @@ impl LspServer {
 
         let notif = JsonValue::Object(vec![
             ("jsonrpc".to_string(), JsonValue::String("2.0".to_string())),
-            ("method".to_string(), JsonValue::String("textDocument/publishDiagnostics".to_string())),
+            ("method".to_string(), JsonValue::String(pilot_db::DIAGNOSTICS_QUERY_LSP_METHOD.to_string())),
             ("params".to_string(), JsonValue::Object(vec![
                 ("uri".to_string(), JsonValue::String(uri.to_string())),
                 ("diagnostics".to_string(), JsonValue::Array(diags_json)),

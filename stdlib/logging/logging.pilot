@@ -1,0 +1,514 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.logging — Multi-OS Flexible Logging Framework
+// Modeled after Python's `logging` module (CPython Lib/logging/__init__.py, handlers.py)
+// Compatible with Linux, Windows, macOS, Android, iOS, and WebAssembly targets.
+
+// ============================================================================
+// 1. Log Levels & Constants (Python: logging.CRITICAL, ERROR, etc.)
+// ============================================================================
+
+const CRITICAL: i64 = 50;
+const FATAL: i64 = 50;
+const ERROR: i64 = 40;
+const WARNING: i64 = 30;
+const WARN: i64 = 30;
+const INFO: i64 = 20;
+const DEBUG: i64 = 10;
+const NOTSET: i64 = 0;
+
+def getLevelName(level: i64) -> str {
+    if level >= 50 { return "CRITICAL"; }
+    if level >= 40 { return "ERROR"; }
+    if level >= 30 { return "WARNING"; }
+    if level >= 20 { return "INFO"; }
+    if level >= 10 { return "DEBUG"; }
+    return "NOTSET";
+}
+
+def getLevelByName(name: str) -> i64 {
+    let upper = __str_case(name, true);
+    if upper == "CRITICAL" or upper == "FATAL" { return 50; }
+    if upper == "ERROR" { return 40; }
+    if upper == "WARNING" or upper == "WARN" { return 30; }
+    if upper == "INFO" { return 20; }
+    if upper == "DEBUG" { return 10; }
+    return 0;
+}
+
+// ============================================================================
+// 2. LogRecord (Python: logging.LogRecord)
+// ============================================================================
+
+class LogRecord {
+    def __init__(self, name: str, levelno: i64, msg: str) {
+        self.name = name;
+        self.levelno = levelno;
+        self.levelname = getLevelName(levelno);
+        self.msg = msg;
+        self.message = msg;
+        self.created = __time_perf_counter();
+        self.msecs = (self.created - int(self.created)) * 1000.0;
+    }
+
+    def getMessage(self) -> str {
+        return self.msg;
+    }
+
+    def to_str(self) -> str {
+        return f"<LogRecord: {self.name}, {self.levelname}, \"{self.msg}\">";
+    }
+}
+
+// ============================================================================
+// 3. Formatter & Filters (Python: logging.Formatter, Filter)
+// ============================================================================
+
+class Formatter {
+    def __init__(self, fmt: str = "%(levelname)s:%(name)s:%(message)s", datefmt: str = "") {
+        self._fmt = fmt;
+        self.datefmt = datefmt;
+    }
+
+    def formatTime(self, rec: any, datefmt: str = "") -> str {
+        return str(rec.created);
+    }
+
+    def format(self, rec: any) -> str {
+        var s = self._fmt;
+        s = __str_replace(s, "%(name)s", rec.name);
+        s = __str_replace(s, "%(levelname)s", rec.levelname);
+        s = __str_replace(s, "%(levelno)d", str(rec.levelno));
+        s = __str_replace(s, "%(message)s", rec.getMessage());
+        s = __str_replace(s, "%(asctime)s", self.formatTime(rec, self.datefmt));
+        return s;
+    }
+}
+
+class Filter {
+    def __init__(self, name: str = "") {
+        self.name = name;
+    }
+
+    def filter(self, rec: any) -> bool {
+        if len(self.name) == 0 {
+            return true;
+        }
+        if self.name == rec.name {
+            return true;
+        }
+        if __str_index_of(rec.name, self.name + ".", 0) == 0 {
+            return true;
+        }
+        return false;
+    }
+}
+
+// ============================================================================
+// 4. Log Handlers (Python: logging.Handler, StreamHandler, FileHandler)
+// ============================================================================
+
+class Handler {
+    def __init__(self, level: i64 = NOTSET) {
+        self.level = level;
+        self.formatter = Formatter();
+        self.filters = [];
+    }
+
+    def setLevel(self, level: i64) {
+        self.level = level;
+    }
+
+    def setFormatter(self, fmt: Formatter) {
+        self.formatter = fmt;
+    }
+
+    def addFilter(self, filter: Filter) {
+        self.filters.append(filter);
+    }
+
+    def removeFilter(self, filter: Filter) {
+        var filtered = [];
+        for f in self.filters {
+            if f != filter {
+                filtered.append(f);
+            }
+        }
+        self.filters = filtered;
+    }
+
+    def filter(self, rec: any) -> bool {
+        for f in self.filters {
+            if !f.filter(rec) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    def format(self, rec: any) -> str {
+        return self.formatter.format(rec);
+    }
+
+    def emit(self, rec: any) {
+        // Base handler no-op
+    }
+
+    def handle(self, rec: any) -> bool {
+        if rec.levelno < self.level {
+            return false;
+        }
+        if !self.filter(rec) {
+            return false;
+        }
+        self.emit(rec);
+        return true;
+    }
+
+    def flush(self) {
+        // Flush buffer
+    }
+
+    def close(self) {
+        // Close resources
+    }
+}
+
+class StreamHandler {
+    def __init__(self, level: i64 = NOTSET) {
+        self.level = level;
+        self.formatter = Formatter();
+        self.filters = [];
+    }
+
+    def setLevel(self, level: i64) {
+        self.level = level;
+    }
+
+    def setFormatter(self, fmt: Formatter) {
+        self.formatter = fmt;
+    }
+
+    def addFilter(self, filter: Filter) {
+        self.filters.append(filter);
+    }
+
+    def removeFilter(self, filter: Filter) {
+        var filtered = [];
+        for f in self.filters {
+            if f != filter {
+                filtered.append(f);
+            }
+        }
+        self.filters = filtered;
+    }
+
+    def filter(self, rec: any) -> bool {
+        for f in self.filters {
+            if !f.filter(rec) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    def format(self, rec: any) -> str {
+        return self.formatter.format(rec);
+    }
+
+    def emit(self, rec: any) {
+        let msg = self.format(rec);
+        print(msg);
+    }
+
+    def handle(self, rec: any) -> bool {
+        if rec.levelno < self.level {
+            return false;
+        }
+        if !self.filter(rec) {
+            return false;
+        }
+        self.emit(rec);
+        return true;
+    }
+
+    def flush(self) {}
+    def close(self) {}
+}
+
+class FileHandler {
+    def __init__(self, filename: str, mode: str = "a", level: i64 = NOTSET) {
+        self.filename = filename;
+        self.mode = mode;
+        self.level = level;
+        self.formatter = Formatter();
+        self.filters = [];
+    }
+
+    def setLevel(self, level: i64) {
+        self.level = level;
+    }
+
+    def setFormatter(self, fmt: Formatter) {
+        self.formatter = fmt;
+    }
+
+    def addFilter(self, filter: Filter) {
+        self.filters.append(filter);
+    }
+
+    def removeFilter(self, filter: Filter) {
+        var filtered = [];
+        for f in self.filters {
+            if f != filter {
+                filtered.append(f);
+            }
+        }
+        self.filters = filtered;
+    }
+
+    def filter(self, rec: any) -> bool {
+        for f in self.filters {
+            if !f.filter(rec) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    def format(self, rec: any) -> str {
+        return self.formatter.format(rec);
+    }
+
+    def emit(self, rec: any) {
+        let msg = self.format(rec) + "\n";
+        __fs_write_text(self.filename, msg);
+    }
+
+    def handle(self, rec: any) -> bool {
+        if rec.levelno < self.level {
+            return false;
+        }
+        if !self.filter(rec) {
+            return false;
+        }
+        self.emit(rec);
+        return true;
+    }
+
+    def flush(self) {}
+    def close(self) {}
+}
+
+class NullHandler {
+    def __init__(self) {
+        self.level = NOTSET;
+        self.formatter = Formatter();
+        self.filters = [];
+    }
+
+    def setLevel(self, level: i64) {}
+    def setFormatter(self, fmt: Formatter) {}
+    def addFilter(self, filter: Filter) {}
+    def removeFilter(self, filter: Filter) {}
+    def handle(self, rec: any) -> bool { return false; }
+    def emit(self, rec: any) {}
+    def flush(self) {}
+    def close(self) {}
+}
+
+// ============================================================================
+// 5. Logger (Python: logging.Logger)
+// ============================================================================
+
+class Logger {
+    def __init__(self, name: str, level: i64 = NOTSET) {
+        self.name = name;
+        self.level = level;
+        self.parent = none;
+        self.handlers = [];
+        self.filters = [];
+        self.disabled = false;
+        self.propagate = true;
+    }
+
+    def setLevel(self, level: i64) {
+        self.level = level;
+    }
+
+    def isEnabledFor(self, level: i64) -> bool {
+        if self.disabled {
+            return false;
+        }
+        return level >= self.getEffectiveLevel();
+    }
+
+    def getEffectiveLevel(self) -> i64 {
+        if self.level != NOTSET {
+            return self.level;
+        }
+        if self.parent != none {
+            return self.parent.getEffectiveLevel();
+        }
+        return INFO;
+    }
+
+    def addHandler(self, h: any) {
+        self.handlers.append(h);
+    }
+
+    def removeHandler(self, h: any) {
+        var remaining = [];
+        for item in self.handlers {
+            if item != h {
+                remaining.append(item);
+            }
+        }
+        self.handlers = remaining;
+    }
+
+    def addFilter(self, f: Filter) {
+        self.filters.append(f);
+    }
+
+    def removeFilter(self, f: Filter) {
+        var remaining = [];
+        for item in self.filters {
+            if item != f {
+                remaining.append(item);
+            }
+        }
+        self.filters = remaining;
+    }
+
+    def filter(self, rec: any) -> bool {
+        for f in self.filters {
+            if !f.filter(rec) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    def callHandlers(self, rec: any) {
+        for h in self.handlers {
+            h.handle(rec);
+        }
+        if self.propagate and self.parent != none {
+            self.parent.callHandlers(rec);
+        }
+    }
+
+    def handle(self, rec: any) {
+        if self.disabled {
+            return;
+        }
+        if self.filter(rec) {
+            self.callHandlers(rec);
+        }
+    }
+
+    def makeRecord(self, name: str, level: i64, msg: str) -> LogRecord {
+        return LogRecord(name, level, msg);
+    }
+
+    def log(self, level: i64, msg: str) {
+        if self.isEnabledFor(level) {
+            let rec = self.makeRecord(self.name, level, msg);
+            self.handle(rec);
+        }
+    }
+
+    def debug(self, msg: str) {
+        self.log(DEBUG, msg);
+    }
+
+    def info(self, msg: str) {
+        self.log(INFO, msg);
+    }
+
+    def warning(self, msg: str) {
+        self.log(WARNING, msg);
+    }
+
+    def warn(self, msg: str) {
+        self.log(WARNING, msg);
+    }
+
+    def error(self, msg: str) {
+        self.log(ERROR, msg);
+    }
+
+    def critical(self, msg: str) {
+        self.log(CRITICAL, msg);
+    }
+
+    def fatal(self, msg: str) {
+        self.log(CRITICAL, msg);
+    }
+}
+
+// ============================================================================
+// 6. Global Logger Registry & Helpers (Python: logging.getLogger, basicConfig)
+// ============================================================================
+
+class _LoggerManager {
+    def __init__(self) {
+        self.root = Logger("root", WARNING);
+        self.root.addHandler(StreamHandler(NOTSET));
+        self.loggers = {};
+    }
+
+    def getLogger(self, name: str = "") -> Logger {
+        if len(name) == 0 or name == "root" {
+            return self.root;
+        }
+        if self.loggers.contains_key(name) {
+            return self.loggers[name];
+        }
+        let logger = Logger(name, NOTSET);
+        logger.parent = self.root;
+        self.loggers[name] = logger;
+        return logger;
+    }
+}
+
+var _MANAGER: _LoggerManager = _LoggerManager();
+
+def getLogger(name: str = "root") -> Logger {
+    return _MANAGER.getLogger(name);
+}
+
+def basicConfig(level: i64 = INFO, format: str = "", filename: str = "") {
+    let root = getLogger("root");
+    root.setLevel(level);
+    root.handlers = [];
+
+    let fmt_str = if len(format) > 0 { format } else { "%(levelname)s:%(name)s:%(message)s" };
+    let formatter = Formatter(fmt_str);
+
+    if len(filename) > 0 {
+        let fh = FileHandler(filename, "a", level);
+        fh.setFormatter(formatter);
+        root.addHandler(fh);
+    } else {
+        let sh = StreamHandler(level);
+        sh.setFormatter(formatter);
+        root.addHandler(sh);
+    }
+}
+
+def debug(msg: str) { getLogger("root").debug(msg); }
+def info(msg: str) { getLogger("root").info(msg); }
+def warning(msg: str) { getLogger("root").warning(msg); }
+def warn(msg: str) { getLogger("root").warn(msg); }
+def error(msg: str) { getLogger("root").error(msg); }
+def critical(msg: str) { getLogger("root").critical(msg); }
+def fatal(msg: str) { getLogger("root").fatal(msg); }
+def log(level: i64, msg: str) { getLogger("root").log(level, msg); }
+
+def disable(level: i64 = CRITICAL) {
+    let root = getLogger("root");
+    if level >= CRITICAL {
+        root.disabled = true;
+    }
+}

@@ -10,6 +10,7 @@ dependencies = [
  "pilot-ast",
  "pilot-intern",
  "pilot-lexer",
+ "pilot-lsp-macros",
  "pilot-parser",
  "pilot-span",
  "pilot-syntax",
@@ -97,8 +98,13 @@ dependencies = [
 name = "pilot-db"
 version = "1.1.51"
 dependencies = [
+ "pilot-analysis",
+ "pilot-ast",
  "pilot-incremental",
+ "pilot-intern",
  "pilot-lexer",
+ "pilot-lsp-macros",
+ "pilot-parser",
  "pilot-span",
  "pilot-syntax",
 ]
@@ -171,10 +177,15 @@ dependencies = [
  "pilot-incremental",
  "pilot-intern",
  "pilot-lexer",
+ "pilot-lsp-macros",
  "pilot-parser",
  "pilot-span",
  "pilot-syntax",
 ]
+
+[[package]]
+name = "pilot-lsp-macros"
+version = "1.1.51"
 
 [[package]]
 name = "pilot-parser"

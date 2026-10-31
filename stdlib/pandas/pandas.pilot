@@ -1,0 +1,448 @@
+// SPDX-License-Identifier: MIT AND BSD-3-Clause
+// std.pandas — Multi-OS Data Structures & Data Analysis Library
+// Modeled after Python's `pandas` package (pandas License: BSD-3-Clause)
+// Compatible with Linux, Windows, macOS, Android, iOS, and WebAssembly targets.
+
+import std.csv as csv;
+
+// ============================================================================
+// 1. One-Dimensional Labeled Series (Python: pandas.Series)
+// ============================================================================
+
+class Series {
+    def __init__(data: [any], index: [any] = [], name: str = "") {
+        self.data = [];
+        for item in data {
+            self.data.append(item);
+        }
+        self.name = name;
+        self.index = [];
+        if len(index) == len(self.data) {
+            for idx in index {
+                self.index.append(idx);
+            }
+        } else {
+            for i in 0..<len(self.data) {
+                self.index.append(i);
+            }
+        }
+    }
+
+    def iloc(pos: i64) -> any {
+        if pos >= 0 and pos < len(self.data) {
+            return self.data[pos];
+        }
+        return none;
+    }
+
+    def at(idx_key: any) -> any {
+        for i in 0..<len(self.index) {
+            if self.index[i] == idx_key {
+                return self.data[i];
+            }
+        }
+        return none;
+    }
+
+    def count() -> i64 {
+        return len(self.data);
+    }
+
+    def head(n: i64 = 5) -> Series {
+        let limit = min(n, len(self.data));
+        var sub_data = [];
+        var sub_idx = [];
+        for i in 0..<limit {
+            sub_data.append(self.data[i]);
+            sub_idx.append(self.index[i]);
+        }
+        return Series(sub_data, sub_idx, self.name);
+    }
+
+    def tail(n: i64 = 5) -> Series {
+        let total = len(self.data);
+        let start = max(0, total - n);
+        var sub_data = [];
+        var sub_idx = [];
+        for i in start..<total {
+            sub_data.append(self.data[i]);
+            sub_idx.append(self.index[i]);
+        }
+        return Series(sub_data, sub_idx, self.name);
+    }
+
+    def sum() -> f64 {
+        var s: f64 = 0.0;
+        for val in self.data {
+            s = s + float(val);
+        }
+        return s;
+    }
+
+    def mean() -> f64 {
+        if len(self.data) == 0 {
+            return 0.0;
+        }
+        return self.sum() / float(len(self.data));
+    }
+
+    def min() -> any {
+        if len(self.data) == 0 {
+            return none;
+        }
+        var m = self.data[0];
+        for val in self.data {
+            if val < m {
+                m = val;
+            }
+        }
+        return m;
+    }
+
+    def max() -> any {
+        if len(self.data) == 0 {
+            return none;
+        }
+        var m = self.data[0];
+        for val in self.data {
+            if val > m {
+                m = val;
+            }
+        }
+        return m;
+    }
+
+    def describe() -> map {
+        return {
+            "count": len(self.data),
+            "mean": self.mean(),
+            "min": self.min(),
+            "max": self.max()
+        };
+    }
+
+    def to_list() -> [any] {
+        var out = [];
+        for val in self.data {
+            out.append(val);
+        }
+        return out;
+    }
+
+    def to_dict() -> map {
+        var out = {};
+        for i in 0..<len(self.data) {
+            let k = str(self.index[i]);
+            out[k] = self.data[i];
+        }
+        return out;
+    }
+
+    def to_str() -> str {
+        var s = "";
+        let limit = min(10, len(self.data));
+        for i in 0..<limit {
+            s = s + f"{self.index[i]}    {self.data[i]}\n";
+        }
+        if len(self.data) > limit {
+            s = s + f"... ({len(self.data) - limit} more items)\n";
+        }
+        s = s + f"Name: {self.name}, Length: {len(self.data)}";
+        return s;
+    }
+}
+
+// ============================================================================
+// 2. Two-Dimensional Labeled DataFrame (Python: pandas.DataFrame)
+// ============================================================================
+
+class DataFrame {
+    def __init__(data: map, columns: [str] = [], index: [any] = []) {
+        self.data = {};
+        self.columns = [];
+        self.index = [];
+
+        var num_rows: i64 = 0;
+        // Populate columns and count rows
+        if len(columns) > 0 {
+            for col in columns {
+                self.columns.append(col);
+                if data.contains_key(col) {
+                    let col_list = data[col];
+                    self.data[col] = col_list;
+                    if len(col_list) > num_rows {
+                        num_rows = len(col_list);
+                    }
+                } else {
+                    self.data[col] = [];
+                }
+            }
+        } else {
+            for col in data.keys() {
+                self.columns.append(col);
+                let col_list = data[col];
+                self.data[col] = col_list;
+                if len(col_list) > num_rows {
+                    num_rows = len(col_list);
+                }
+            }
+        }
+
+        if len(index) == num_rows {
+            for idx in index {
+                self.index.append(idx);
+            }
+        } else {
+            for i in 0..<num_rows {
+                self.index.append(i);
+            }
+        }
+    }
+
+    def shape() -> [i64, i64] {
+        return [len(self.index), len(self.columns)];
+    }
+
+    def col(name: str) -> Series {
+        if self.data.contains_key(name) {
+            return Series(self.data[name], self.index, name);
+        }
+        return Series([], [], name);
+    }
+
+    def iloc(row_idx: i64) -> map {
+        var row = {};
+        if row_idx >= 0 and row_idx < len(self.index) {
+            for c in self.columns {
+                let col_list = self.data[c];
+                if row_idx < len(col_list) {
+                    row[c] = col_list[row_idx];
+                } else {
+                    row[c] = none;
+                }
+            }
+        }
+        return row;
+    }
+
+    def head(n: i64 = 5) -> DataFrame {
+        let limit = min(n, len(self.index));
+        var sub_data = {};
+        for c in self.columns {
+            var sub_list = [];
+            let full_list = self.data[c];
+            for i in 0..<limit {
+                if i < len(full_list) {
+                    sub_list.append(full_list[i]);
+                }
+            }
+            sub_data[c] = sub_list;
+        }
+        var sub_index = [];
+        for i in 0..<limit {
+            sub_index.append(self.index[i]);
+        }
+        return DataFrame(sub_data, self.columns, sub_index);
+    }
+
+    def tail(n: i64 = 5) -> DataFrame {
+        let total = len(self.index);
+        let start = max(0, total - n);
+        var sub_data = {};
+        for c in self.columns {
+            var sub_list = [];
+            let full_list = self.data[c];
+            for i in start..<total {
+                if i < len(full_list) {
+                    sub_list.append(full_list[i]);
+                }
+            }
+            sub_data[c] = sub_list;
+        }
+        var sub_index = [];
+        for i in start..<total {
+            sub_index.append(self.index[i]);
+        }
+        return DataFrame(sub_data, self.columns, sub_index);
+    }
+
+    def select(col_names: [str]) -> DataFrame {
+        var sub_data = {};
+        var valid_cols = [];
+        for c in col_names {
+            if self.data.contains_key(c) {
+                sub_data[c] = self.data[c];
+                valid_cols.append(c);
+            }
+        }
+        return DataFrame(sub_data, valid_cols, self.index);
+    }
+
+    def drop(column_name: str) -> DataFrame {
+        var sub_data = {};
+        var valid_cols = [];
+        for c in self.columns {
+            if c != column_name {
+                sub_data[c] = self.data[c];
+                valid_cols.append(c);
+            }
+        }
+        return DataFrame(sub_data, valid_cols, self.index);
+    }
+
+    def assign(column_name: str, values: [any]) -> DataFrame {
+        var new_data = {};
+        var new_cols = [];
+        for c in self.columns {
+            new_data[c] = self.data[c];
+            new_cols.append(c);
+        }
+        if !new_data.contains_key(column_name) {
+            new_cols.append(column_name);
+        }
+        new_data[column_name] = values;
+        return DataFrame(new_data, new_cols, self.index);
+    }
+
+    def describe() -> map {
+        var stats = {};
+        for c in self.columns {
+            let s = self.col(c);
+            stats[c] = s.describe();
+        }
+        return stats;
+    }
+
+    def to_csv(filepath: str = "") -> str {
+        var csv_text = "";
+        // Header
+        var first = true;
+        for c in self.columns {
+            if !first { csv_text = csv_text + ","; }
+            csv_text = csv_text + c;
+            first = false;
+        }
+        csv_text = csv_text + "\n";
+
+        // Rows
+        for i in 0..<len(self.index) {
+            first = true;
+            for c in self.columns {
+                if !first { csv_text = csv_text + ","; }
+                let col_list = self.data[c];
+                if i < len(col_list) {
+                    csv_text = csv_text + str(col_list[i]);
+                }
+                first = false;
+            }
+            csv_text = csv_text + "\n";
+        }
+
+        if len(filepath) > 0 {
+            __fs_write_text(filepath, csv_text);
+        }
+        return csv_text;
+    }
+
+    def to_dict() -> map {
+        var out = {};
+        for c in self.columns {
+            out[c] = self.data[c];
+        }
+        return out;
+    }
+
+    def to_str() -> str {
+        var s = "   ";
+        for c in self.columns {
+            s = s + f"{c}   ";
+        }
+        s = s + "\n";
+        let limit = min(5, len(self.index));
+        for i in 0..<limit {
+            s = s + f"{self.index[i]}  ";
+            for c in self.columns {
+                let col_list = self.data[c];
+                if i < len(col_list) {
+                    s = s + f"{col_list[i]}   ";
+                }
+            }
+            s = s + "\n";
+        }
+        if len(self.index) > limit {
+            s = s + f"... [{len(self.index)} rows x {len(self.columns)} columns]";
+        }
+        return s;
+    }
+}
+
+// ============================================================================
+// 3. DataFrame Constructors & I/O (Python: pandas.read_csv, DataFrame)
+// ============================================================================
+
+def read_csv(filepath: str) -> DataFrame {
+    let content = __fs_read_text(filepath);
+    let lines: [str] = __str_split(content, "\n");
+    if len(lines) == 0 or len(lines[0]) == 0 {
+        return DataFrame({}, []);
+    }
+
+    // Header row
+    let header_line = __str_trim(lines[0]);
+    let cols: [str] = __str_split(header_line, ",");
+    var col_names = [];
+    var data_map = {};
+    for col in cols {
+        let clean_c = __str_trim(col);
+        col_names.append(clean_c);
+        data_map[clean_c] = [];
+    }
+
+    // Data rows
+    for r_idx in 1..<len(lines) {
+        let row_line = __str_trim(lines[r_idx]);
+        if len(row_line) == 0 { continue; }
+        let cells: [str] = __str_split(row_line, ",");
+        for c_idx in 0..<len(col_names) {
+            let c_name = col_names[c_idx];
+            if c_idx < len(cells) {
+                let cell_val = __str_trim(cells[c_idx]);
+                data_map[c_name].append(cell_val);
+            }
+        }
+    }
+
+    return DataFrame(data_map, col_names);
+}
+
+def from_dict(d: map) -> DataFrame {
+    var cols = [];
+    for k in d.keys() {
+        cols.append(k);
+    }
+    return DataFrame(d, cols);
+}
+
+def from_records(entries: [map]) -> DataFrame {
+    if len(entries) == 0 {
+        return DataFrame({}, []);
+    }
+    var cols = [];
+    for k in entries[0].keys() {
+        cols.append(k);
+    }
+    var data_map = {};
+    for c in cols {
+        data_map[c] = [];
+    }
+    for item in entries {
+        for c in cols {
+            if item.contains_key(c) {
+                data_map[c].append(item[c]);
+            } else {
+                data_map[c].append(none);
+            }
+        }
+    }
+    return DataFrame(data_map, cols);
+}

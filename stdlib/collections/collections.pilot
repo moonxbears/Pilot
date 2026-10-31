@@ -1,7 +1,17 @@
-from core import min, max;
 // SPDX-License-Identifier: MIT AND PSF-2.0
-// std.collections — Bootstrapped via M20 (`--from python|rust --strict-pilot --viable-license-only`) & Curated
-// Containers: Deque, PriorityQueue, OrderedMap, MultiMap, RingBuffer, BitSet, FrozenMap + bisect algorithms.
+// std.collections — High-Performance Native Data Structures & Containers
+//
+// Donor Origins:
+//   - CPython Lib/collections/__init__.py: Counter, defaultdict, OrderedDict, ChainMap, deque, namedtuple
+//   - CPython Lib/bisect.py: bisect_left, bisect_right
+//   - CPython Lib/heapq.py: PriorityQueue (binary min-heap sift algorithms)
+//   - Rust alloc::collections::VecDeque: Deque / RingBuffer
+//   - Displacement Perfect-Hash / SWAR 64-bit BitSet
+//
+// Target OS Platforms:
+//   - Linux, Windows, macOS, Android, iOS, and WebAssembly
+
+from core import min, max, some, none;
 
 // Binary search leftmost insertion point in sorted list (PSF-2.0 CPython bisect scaffold)
 def bisect_left(arr, target) -> i64 {
@@ -152,6 +162,48 @@ class Deque {
             out.append(self._buf[idx]);
         }
         return out;
+    }
+
+    /// Appends all elements from the given collection to the right side of the deque.
+    /// Python reference: collections.deque.extend
+    def extend_all(self, items) {
+        for item in items {
+            self.push_back(item);
+        }
+    }
+
+    /// Appends elements from the given collection to the left side of the deque.
+    /// Python reference: collections.deque.extendleft
+    def extend_left(self, items) {
+        for item in items {
+            self.push_front(item);
+        }
+    }
+
+    /// Rotates the deque n steps to the right. If steps is negative, rotates to the left.
+    /// Python reference: collections.deque.rotate
+    def rotate(self, steps: i64 = 1) {
+        if self._size <= 1 or steps == 0 {
+            return;
+        }
+        var s: i64 = steps;
+        if s > 0 {
+            let count: i64 = s % self._size;
+            for _i in 0..<count {
+                let it = self.pop_back();
+                if it.is_some() {
+                    self.push_front(it.unwrap());
+                }
+            }
+        } else {
+            let count: i64 = (0 - s) % self._size;
+            for _j in 0..<count {
+                let it = self.pop_front();
+                if it.is_some() {
+                    self.push_back(it.unwrap());
+                }
+            }
+        }
     }
 }
 
@@ -599,4 +651,527 @@ class FrozenMap {
     def raw_map(self) {
         return self._table;
     }
+}
+
+// =========================================================================
+// Python CPython Lib/collections/__init__.py Standard Containers
+// =========================================================================
+
+/// Dict subclass for counting hashable items.
+/// Python reference: collections.Counter
+class Counter {
+    def __init__(self, initial = none) {
+        self._counts = {};
+        if initial != none {
+            self.update(initial);
+        }
+    }
+
+    /// Returns the count for the given element, or 0 if absent.
+    def count_for(self, elem) -> i64 {
+        if self._counts.contains_key(elem) {
+            let c: i64 = self._counts[elem];
+            return c;
+        }
+        return 0;
+    }
+
+    /// Returns some(count) if present, or none.
+    def gets(self, elem) {
+        if self._counts.contains_key(elem) {
+            let c: i64 = self._counts[elem];
+            return some(c);
+        }
+        return none;
+    }
+
+    /// Returns count if present, or default_val.
+    def get_or(self, elem, default_val: i64 = 0) -> i64 {
+        if self._counts.contains_key(elem) {
+            let c: i64 = self._counts[elem];
+            return c;
+        }
+        return default_val;
+    }
+
+    /// Sets the count for an element directly.
+    def sets(self, elem, count: i64) {
+        self._counts[elem] = count;
+    }
+
+    /// Increments the count for an element by amount (default 1).
+    def increment(self, elem, amount: i64 = 1) {
+        let cur: i64 = self.count_for(elem);
+        self._counts[elem] = cur + amount;
+    }
+
+    /// Decrements the count for an element by amount (default 1).
+    def decrement(self, elem, amount: i64 = 1) {
+        let cur: i64 = self.count_for(elem);
+        self._counts[elem] = cur - amount;
+    }
+
+    /// Computes the sum of all counts.
+    /// Python reference: collections.Counter.total
+    def total(self) -> i64 {
+        var sum: i64 = 0;
+        for k in self._counts.keys() {
+            let c: i64 = self._counts[k];
+            sum = sum + c;
+        }
+        return sum;
+    }
+
+    /// List the n most common elements and their counts from the most common to the least.
+    /// If n is negative or omitted, returns all elements.
+    /// Python reference: collections.Counter.most_common
+    def most_common(self, n: i64 = -1) {
+        var pairs = [];
+        for k in self._counts.keys() {
+            let c: i64 = self._counts[k];
+            pairs.append((k, c));
+        }
+        let total_pairs: i64 = len(pairs);
+        for i in 0..<total_pairs {
+            var max_idx: i64 = i;
+            for j in (i + 1)..<total_pairs {
+                let count_j: i64 = pairs[j][1];
+                let count_max: i64 = pairs[max_idx][1];
+                if count_j > count_max {
+                    max_idx = j;
+                }
+            }
+            if max_idx != i {
+                let tmp = pairs[i];
+                pairs[i] = pairs[max_idx];
+                pairs[max_idx] = tmp;
+            }
+        }
+        if n < 0 or n >= total_pairs {
+            return pairs;
+        }
+        var out = [];
+        for i in 0..<n {
+            out.append(pairs[i]);
+        }
+        return out;
+    }
+
+    /// Produces a flat list of elements repeating each element as many times as its count.
+    /// Elements with count <= 0 are omitted.
+    /// Python reference: collections.Counter.elements
+    def elements(self) {
+        var out = [];
+        for k in self._counts.keys() {
+            let c: i64 = self._counts[k];
+            if c > 0 {
+                for _rep in 0..<c {
+                    out.append(k);
+                }
+            }
+        }
+        return out;
+    }
+
+    /// Adds counts from another iterable, mapping, or Counter.
+    /// Python reference: collections.Counter.update
+    def update(self, other) {
+        let ty: string = typeof(other);
+        if ty == "map" {
+            for k in other.keys() {
+                let c: i64 = other[k];
+                self.increment(k, c);
+            }
+        } else {
+            for elem in other {
+                self.increment(elem, 1);
+            }
+        }
+    }
+
+    /// Subtracts counts from another iterable, mapping, or Counter.
+    /// Counts can become zero or negative.
+    /// Python reference: collections.Counter.subtract
+    def subtract(self, other) {
+        let ty: string = typeof(other);
+        if ty == "map" {
+            for k in other.keys() {
+                let c: i64 = other[k];
+                self.decrement(k, c);
+            }
+        } else {
+            for elem in other {
+                self.decrement(elem, 1);
+            }
+        }
+    }
+
+    /// Resets all counts.
+    def clear(self) {
+        self._counts = {};
+    }
+
+    /// Returns list of all unique elements recorded in the counter.
+    def keys(self) {
+        return self._counts.keys();
+    }
+
+    /// Returns list of all counts.
+    def values(self) {
+        var vals = [];
+        for k in self._counts.keys() {
+            vals.append(self._counts[k]);
+        }
+        return vals;
+    }
+
+    /// Returns list of (elem, count) pairs.
+    def items(self) {
+        var res = [];
+        for k in self._counts.keys() {
+            res.append((k, self._counts[k]));
+        }
+        return res;
+    }
+
+    /// Returns number of distinct elements tracked.
+    def len(self) -> i64 {
+        return len(self._counts.keys());
+    }
+
+    /// Checks if the element is present in the counter.
+    def contains_key(self, elem) -> bool {
+        return self._counts.contains_key(elem);
+    }
+}
+
+/// Dictionary that calls a factory function to supply missing values.
+/// Python reference: collections.defaultdict
+class DefaultDict {
+    def __init__(self, default_factory) {
+        self._factory = default_factory;
+        self._data = {};
+    }
+
+    /// Retrieves value for key, or calls factory, stores result, and returns it.
+    def gets(self, key) {
+        if self._data.contains_key(key) {
+            return self._data[key];
+        }
+        let factory = self._factory;
+        let val = factory();
+        self._data[key] = val;
+        return val;
+    }
+
+    /// Returns value if key present, else fallback without mutating the map.
+    def get_or(self, key, fallback) {
+        if self._data.contains_key(key) {
+            return self._data[key];
+        }
+        return fallback;
+    }
+
+    /// Stores key-value pair.
+    def put(self, key, val) {
+        self._data[key] = val;
+    }
+
+    /// Checks if key is present.
+    def contains_key(self, key) -> bool {
+        return self._data.contains_key(key);
+    }
+
+    /// Removes key and returns some(previous_val) or none.
+    def remove(self, key) {
+        if self._data.contains_key(key) {
+            let old_val = self._data[key];
+            self._data.remove(key);
+            return some(old_val);
+        }
+        return none;
+    }
+
+    /// Returns list of keys.
+    def keys(self) {
+        return self._data.keys();
+    }
+
+    /// Returns list of values.
+    def values(self) {
+        var vals = [];
+        for k in self._data.keys() {
+            vals.append(self._data[k]);
+        }
+        return vals;
+    }
+
+    /// Returns list of (key, value) pairs.
+    def items(self) {
+        var res = [];
+        for k in self._data.keys() {
+            res.append((k, self._data[k]));
+        }
+        return res;
+    }
+
+    /// Returns number of entries.
+    def len(self) -> i64 {
+        return len(self._data.keys());
+    }
+
+    /// Clears all entries.
+    def clear(self) {
+        self._data = {};
+    }
+}
+
+/// Dictionary that preserves the order entries were added.
+/// Python reference: collections.OrderedDict
+class OrderedDict {
+    def __init__(self) {
+        self._keys = [];
+        self._data = {};
+    }
+
+    /// Inserts or updates an entry. If new, appends to keys order.
+    def put(self, key, val) {
+        if !self._data.contains_key(key) {
+            self._keys.append(key);
+        }
+        self._data[key] = val;
+    }
+
+    /// Retrieves some(val) if key is present, else none.
+    def gets(self, key) {
+        if self._data.contains_key(key) {
+            return some(self._data[key]);
+        }
+        return none;
+    }
+
+    /// Retrieves val if key is present, else default_val.
+    def get_or(self, key, default_val) {
+        if self._data.contains_key(key) {
+            return self._data[key];
+        }
+        return default_val;
+    }
+
+    /// Checks if key exists.
+    def contains_key(self, key) -> bool {
+        return self._data.contains_key(key);
+    }
+
+    /// Removes key and its associated value, maintaining remaining order.
+    def remove(self, key) {
+        if self._data.contains_key(key) {
+            let val = self._data[key];
+            self._data.remove(key);
+            let n: i64 = len(self._keys);
+            for i in 0..<n {
+                if self._keys[i] == key {
+                    self._keys.remove_at(i);
+                    break;
+                }
+            }
+            return some(val);
+        }
+        return none;
+    }
+
+    /// Removes and returns a (key, value) pair.
+    /// If last is true, returns in LIFO order (last inserted).
+    /// If last is false, returns in FIFO order (first inserted).
+    /// Python reference: collections.OrderedDict.popitem
+    def popitem(self, last: bool = true) {
+        let n: i64 = len(self._keys);
+        if n == 0 {
+            return none;
+        }
+        let idx: i64 = if last { n - 1 } else { 0 };
+        let k = self._keys[idx];
+        let v = self._data[k];
+        self._keys.remove_at(idx);
+        self._data.remove(k);
+        return some((k, v));
+    }
+
+    /// Moves an existing key to either end of the ordered dictionary.
+    /// If last is true, moves to the right end; if false, moves to the beginning.
+    /// Python reference: collections.OrderedDict.move_to_end
+    def move_to_end(self, key, last: bool = true) {
+        if !self._data.contains_key(key) {
+            panic("OrderedDict.move_to_end: key not found");
+        }
+        let n: i64 = len(self._keys);
+        for i in 0..<n {
+            if self._keys[i] == key {
+                self._keys.remove_at(i);
+                break;
+            }
+        }
+        if last {
+            self._keys.append(key);
+        } else {
+            self._keys.insert(0, key);
+        }
+    }
+
+    /// Returns keys in insertion order.
+    def keys(self) {
+        return [k for k in self._keys];
+    }
+
+    /// Returns values in insertion order.
+    def values(self) {
+        return [self._data[k] for k in self._keys];
+    }
+
+    /// Returns (key, value) pairs in insertion order.
+    def items(self) {
+        return [(k, self._data[k]) for k in self._keys];
+    }
+
+    /// Returns number of entries.
+    def len(self) -> i64 {
+        return len(self._keys);
+    }
+
+    /// Returns true if empty.
+    def is_empty(self) -> bool {
+        return len(self._keys) == 0;
+    }
+
+    /// Clears all entries.
+    def clear(self) {
+        self._keys = [];
+        self._data = {};
+    }
+}
+
+/// A ChainMap groups multiple dicts or mappings together to create a single, updateable view.
+/// Python reference: collections.ChainMap
+class ChainMap {
+    def __init__(self, maps_list = none) {
+        if maps_list == none {
+            self._maps = [{}];
+        } else {
+            self._maps = [m for m in maps_list];
+        }
+    }
+
+    /// Searches maps in chain order and returns some(value) or none.
+    def gets(self, key) {
+        for m in self._maps {
+            if m.contains_key(key) {
+                return some(m[key]);
+            }
+        }
+        return none;
+    }
+
+    /// Searches maps in chain order and returns value or default_val.
+    def get_or(self, key, default_val) {
+        for m in self._maps {
+            if m.contains_key(key) {
+                return m[key];
+            }
+        }
+        return default_val;
+    }
+
+    /// Returns true if key is found in any chained mapping.
+    def contains_key(self, key) -> bool {
+        for m in self._maps {
+            if m.contains_key(key) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Updates or inserts key into the primary (first) mapping.
+    def put(self, key, val) {
+        if len(self._maps) == 0 {
+            self._maps.append({});
+        }
+        self._maps[0][key] = val;
+    }
+
+    /// Returns a new ChainMap with a new map prepended at the front.
+    /// Python reference: collections.ChainMap.new_child
+    def new_child(self, child_map = none) -> ChainMap {
+        var new_maps = [];
+        if child_map != none {
+            new_maps.append(child_map);
+        } else {
+            new_maps.append({});
+        }
+        for m in self._maps {
+            new_maps.append(m);
+        }
+        return ChainMap(new_maps);
+    }
+
+    /// Returns a new ChainMap containing all of the maps in the current instance except the first.
+    /// Python reference: collections.ChainMap.parents
+    def parents(self) -> ChainMap {
+        var new_maps = [];
+        let n: i64 = len(self._maps);
+        for i in 1..<n {
+            new_maps.append(self._maps[i]);
+        }
+        return ChainMap(new_maps);
+    }
+
+    /// Returns list of all underlying mappings.
+    def maps(self) {
+        return self._maps;
+    }
+
+    /// Returns unique list of all keys across all mappings.
+    def keys(self) {
+        var seen = {};
+        var out = [];
+        for m in self._maps {
+            for k in m.keys() {
+                if !seen.contains_key(k) {
+                    seen[k] = true;
+                    out.append(k);
+                }
+            }
+        }
+        return out;
+    }
+
+    /// Returns list of all (key, value) pairs resolved through the chain.
+    def items(self) {
+        var out = [];
+        let all_keys = self.keys();
+        for k in all_keys {
+            let v = self.get_or(k, none);
+            out.append((k, v));
+        }
+        return out;
+    }
+
+    /// Total number of unique keys.
+    def len(self) -> i64 {
+        return len(self.keys());
+    }
+}
+
+/// Factory function for creating lightweight tuple-like named records.
+/// Python reference: collections.namedtuple(typename, field_names)
+def namedtuple(type_name: string, field_names) {
+    let fields = [f for f in field_names];
+    return (values) => {
+        var record = {};
+        let n: i64 = min(len(fields), len(values));
+        for i in 0..<n {
+            record[fields[i]] = values[i];
+        }
+        return record;
+    };
 }

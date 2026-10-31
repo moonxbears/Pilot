@@ -361,6 +361,33 @@ impl TypeInferenceEngine {
         let fn_fs_write = self.types.function_of(vec![TypeId::STR, TypeId::STR], TypeId::ANY);
         let fn_fs_copy = self.types.function_of(vec![TypeId::STR, TypeId::STR], TypeId::ANY);
         let fn_list_dir = self.types.function_of(vec![TypeId::STR], list_str);
+        let list_i64 = self.types.list_of(TypeId::I64);
+        let fn_crypto_bytes = self.types.function_of(vec![TypeId::I64], list_i64);
+        self.define_var("__crypto_random_bytes", fn_crypto_bytes);
+
+        // Network Intrinsics
+        let fn_net_http_get = self.types.function_of(vec![TypeId::STR], TypeId::ANY);
+        let fn_net_http_post = self.types.function_of(vec![TypeId::STR, TypeId::STR, TypeId::STR], TypeId::ANY);
+        let fn_net_connect = self.types.function_of(vec![TypeId::STR, TypeId::I64], TypeId::ANY);
+        let fn_net_listen = self.types.function_of(vec![TypeId::STR, TypeId::I64], TypeId::ANY);
+        let fn_net_hostname = self.types.function_of(vec![], TypeId::STR);
+        let fn_net_hostbyname = self.types.function_of(vec![TypeId::STR], TypeId::STR);
+        self.define_var("__net_http_get", fn_net_http_get);
+        self.define_var("__net_http_post", fn_net_http_post);
+        self.define_var("__net_tcp_connect", fn_net_connect);
+        self.define_var("__net_tcp_listen", fn_net_listen);
+        self.define_var("__net_gethostname", fn_net_hostname);
+        self.define_var("__net_gethostbyname", fn_net_hostbyname);
+
+        // Time & Timer Intrinsics
+        let fn_time_i64 = self.types.function_of(vec![], TypeId::I64);
+        let fn_time_f64 = self.types.function_of(vec![], TypeId::F64);
+        let fn_sleep_ms = self.types.function_of(vec![TypeId::I64], TypeId::VOID);
+        self.define_var("__time_now_ns", fn_time_i64);
+        self.define_var("__time_now_micros", fn_time_i64);
+        self.define_var("__time_now_millis", fn_time_i64);
+        self.define_var("__time_perf_counter", fn_time_f64);
+        self.define_var("__time_sleep_ms", fn_sleep_ms);
 
         // Memory & Slice Intrinsics
         let fn_slice_i64 = self.types.function_of(vec![TypeId::ANY], TypeId::I64);
@@ -404,6 +431,43 @@ impl TypeInferenceEngine {
         self.define_var("__os_cwd", fn_void_str);
         self.define_var("__os_temp_dir", fn_void_str);
         self.define_var("__os_is_windows", fn_void_bool);
+
+        let fn_void_i64 = self.types.function_of(vec![], TypeId::I64);
+        let fn_str_str = self.types.function_of(vec![TypeId::STR], TypeId::STR);
+        let fn_str_str_bool = self.types.function_of(vec![TypeId::STR, TypeId::STR], TypeId::BOOL);
+        let fn_str_bool = self.types.function_of(vec![TypeId::STR], TypeId::BOOL);
+        let fn_str_i64 = self.types.function_of(vec![TypeId::STR], TypeId::I64);
+        let fn_void_list_str = self.types.function_of(vec![], list_str);
+        let fn_i64_void = self.types.function_of(vec![TypeId::I64], TypeId::VOID);
+        let fn_void_void = self.types.function_of(vec![], TypeId::VOID);
+
+        self.define_var("__os_platform", fn_void_str);
+        self.define_var("__os_arch", fn_void_str);
+        self.define_var("__os_family", fn_void_str);
+        self.define_var("__os_is_linux", fn_void_bool);
+        self.define_var("__os_is_macos", fn_void_bool);
+        self.define_var("__os_is_android", fn_void_bool);
+        self.define_var("__os_is_ios", fn_void_bool);
+        self.define_var("__os_getenv", fn_str_str);
+        self.define_var("__os_setenv", fn_str_str_bool);
+        self.define_var("__os_unsetenv", fn_str_bool);
+        self.define_var("__os_environ", fn_void_list_str);
+        self.define_var("__os_getpid", fn_void_i64);
+        self.define_var("__os_getppid", fn_void_i64);
+        self.define_var("__os_getuid", fn_void_i64);
+        self.define_var("__os_getgid", fn_void_i64);
+        self.define_var("__os_cpu_count", fn_void_i64);
+        self.define_var("__os_system", fn_str_i64);
+        self.define_var("__os_homedir", fn_void_str);
+        self.define_var("__os_chdir", fn_str_bool);
+        self.define_var("__os_disk_usage", fn_fs_read);
+        self.define_var("__os_abort", fn_void_void);
+        self.define_var("__sys_argv", fn_void_list_str);
+        self.define_var("__sys_exit", fn_i64_void);
+        self.define_var("__sys_executable", fn_void_str);
+        self.define_var("__sys_pointer_size", fn_void_i64);
+        self.define_var("__sys_byteorder", fn_void_str);
+
         self.define_var("__fs_exists", fn_fs_pred);
         self.define_var("__fs_is_file", fn_fs_pred);
         self.define_var("__fs_is_dir", fn_fs_pred);

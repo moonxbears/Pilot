@@ -17,14 +17,109 @@
     "std.io": "io/io.pilot",
     "std.fs": "io/fs.pilot",
     "std.path": "io/path.pilot",
+    "std.pathlib": "io/pathlib.pilot",
+    "std.shutil": "io/shutil.pilot",
+    "std.os": "os/os.pilot",
+    "std.sys": "sys/sys.pilot",
+    "std.functools": "functools/functools.pilot",
+    "std.json": "json/json.pilot",
+    "std.csv": "csv/csv.pilot",
+    "std.pickle": "pickle/pickle.pilot",
+    "std.tomllib": "tomllib/tomllib.pilot",
+    "std.secrets": "secrets/secrets.pilot",
+    "std.decimal": "decimal/decimal.pilot",
+    "std.threading": "threading/threading.pilot",
+    "std.multiprocessing": "multiprocessing/multiprocessing.pilot",
+    "std.asyncio": "asyncio/asyncio.pilot",
     "std.encoding": "encoding/encoding.pilot",
-    "std.formats": "formats/formats.pilot"
+    "std.formats": "formats/formats.pilot",
+    "std.socket": "socket/socket.pilot",
+    "std.urllib": "urllib/urllib.pilot",
+    "std.http": "http/http.pilot",
+    "std.request": "request/request.pilot",
+    "std.unittest": "unittest/unittest.pilot",
+    "std.logging": "logging/logging.pilot",
+    "std.timeit": "timeit/timeit.pilot",
+    "std.numpy": "numpy/numpy.pilot",
+    "std.pandas": "pandas/pandas.pilot",
+    "std.matplotlib": "matplotlib/matplotlib.pilot",
+    "std.scikit": "scikit/scikit.pilot"
   },
   "provenance": [
     {
+      "target_module": "std.os",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/os.py (cross-platform OS constants, environ, pid, cwd, multi-os platform detection)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.sys",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/sys (argv, platform, arch, byteorder, exit, stdio file descriptors)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.pathlib",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/pathlib/__init__.py (object-oriented Path, pure path algebra, multi-os queries)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.shutil",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/shutil.py (copyfile, copytree, rmtree, move, disk_usage, which executable search)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
       "target_module": "std.collections",
       "donor_ecosystem": "python",
-      "donor_origin": "CPython Lib/bisect.py & Lib/heapq.py (binary search & binary min-heap sifting)",
+      "donor_origin": "CPython Lib/collections/__init__.py (Counter, defaultdict, OrderedDict, ChainMap, deque, namedtuple), Lib/bisect.py & Lib/heapq.py",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.itertools",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/itertools.py (accumulate, batched, chain, compress, dropwhile, filterfalse, groupby, islice, pairwise, starmap, takewhile, tee, product, permutations, combinations, combinations_with_replacement)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.functools",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/functools.py (partial, reduce, lru_cache, cache, singledispatch, cmp_to_key)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.json",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/json/ (loads, dumps, load, dump, JSONDecoder, JSONEncoder, JSONDecodeError)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.csv",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/csv.py (reader, writer, DictReader, DictWriter, excel, unix, QUOTE_MINIMAL/ALL/NONNUMERIC/NONE)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.pickle",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/pickle.py (dumps, loads, dump, load, Pickler, Unpickler, HIGHEST/DEFAULT_PROTOCOL)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.tomllib",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/tomllib/ (loads, load, TOMLDecodeError, PEP 680)",
       "spdx_license": "PSF-2.0",
       "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
     },
@@ -36,9 +131,51 @@
       "bootstrap_flags": "--from rust --strict-pilot --viable-license-only"
     },
     {
+      "target_module": "std.secrets",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/secrets.py (token_bytes, token_hex, token_urlsafe, randbelow, randbits, compare_digest, PEP 506)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.decimal",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/decimal.py (Decimal, Context, ROUND_HALF_EVEN, IEEE 854)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.threading",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/threading.py (Thread, Lock, RLock, Semaphore, BoundedSemaphore, Event, Barrier, ThreadLocal)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.multiprocessing",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/multiprocessing/ (Process, Queue, Pipe, Pool, Value, Array, cpu_count)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.asyncio",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/asyncio/ (EventLoop, Future, Task, run, gather, sleep, wait_for, AsyncLock, AsyncEvent, AsyncQueue)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
       "target_module": "std.math",
       "donor_ecosystem": "python",
-      "donor_origin": "CPython Lib/statistics.py & Euclid GCD/LCM (Welford numerically stable variance)",
+      "donor_origin": "CPython Lib/math.py & Lib/statistics.py (fabs, copysign, trunc, fmod, hypot, dist, comb, perm, isclose, prod, degrees, radians, Welford variance/mean)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.random",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/random.py (seed, random, uniform, randint, randrange, choice, choices, shuffle, sample, gauss, normalvariate, triangular)",
       "spdx_license": "PSF-2.0",
       "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
     },
@@ -68,6 +205,83 @@
       "donor_ecosystem": "python",
       "donor_origin": "CPython Lib/json/scanner.py, Lib/tomllib/_parser.py & Lib/csv.py (RFC-8259 JSON, TOML v1.0, RFC-4180 CSV & dotenv state machines)",
       "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.socket",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/socket.py & Modules/socketmodule.c (BSD socket family/type constants, address tuples, create_connection, inet_aton/inet_ntoa)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.urllib",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/urllib/parse.py, request.py, error.py, response.py (RFC-3986 parse, split, join, quote, urlencode, urlopen, urlretrieve)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.http",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/http/client.py, server.py, cookies.py (HTTPStatus codes/phrases, HTTPConnection, HTTPSConnection, BaseHTTPRequestHandler, SimpleCookie)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.request",
+      "donor_ecosystem": "python",
+      "donor_origin": "Python requests / urllib3 (Session, Response, request/get/post/put/patch/delete/head/options, cookie handling, raise_for_status)",
+      "spdx_license": "PSF-2.0 AND Apache-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.unittest",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/unittest/ (TestCase, TestSuite, TestResult, TextTestRunner, assertions, test lifecycle hooks)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.logging",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/logging/ (Logger, Handler, StreamHandler, FileHandler, Formatter, Filter, LogRecord, basicConfig)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.timeit",
+      "donor_ecosystem": "python",
+      "donor_origin": "CPython Lib/timeit.py (Timer, default_timer, timeit, repeat, autorange)",
+      "spdx_license": "PSF-2.0",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.numpy",
+      "donor_ecosystem": "python",
+      "donor_origin": "NumPy (ndarray, shape, reshape, transpose, dot, matmul, zeros, ones, arange, linspace, eye, math & stats reducers)",
+      "spdx_license": "BSD-3-Clause",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.pandas",
+      "donor_ecosystem": "python",
+      "donor_origin": "pandas (Series, DataFrame, shape, head, tail, describe, select, drop, assign, read_csv, to_csv, from_dict)",
+      "spdx_license": "BSD-3-Clause",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.matplotlib",
+      "donor_ecosystem": "python",
+      "donor_origin": "Matplotlib (pyplot, Figure, plot, scatter, bar, hist, title, xlabel, ylabel, grid, legend, show, savefig, SVG/ASCII renderers)",
+      "spdx_license": "PSF-2.0 AND BSD-3-Clause",
+      "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
+    },
+    {
+      "target_module": "std.scikit",
+      "donor_ecosystem": "python",
+      "donor_origin": "scikit-learn (LinearRegression, LogisticRegression, KMeans, KNeighborsClassifier, StandardScaler, MinMaxScaler, LabelEncoder, train_test_split, KFold, metrics)",
+      "spdx_license": "BSD-3-Clause",
       "bootstrap_flags": "--from python --strict-pilot --viable-license-only"
     }
   ]

@@ -1,0 +1,104 @@
+import std.collections as collections;
+import std.itertools as itertools;
+import std.functools as functools;
+
+def test_collections() {
+    // 1. Counter (CPython collections.Counter)
+    let c = collections.Counter(["apple", "banana", "apple", "cherry", "apple", "banana"]);
+    c.increment("orange", 2);
+    let top = c.most_common(2);
+    let tot: i64 = c.total();
+
+    // 2. DefaultDict (CPython collections.defaultdict)
+    let dd = collections.DefaultDict(() => 0);
+    dd.put("score", 100);
+    let score = dd.gets("score");
+    let missing = dd.gets("lives"); // defaults to 0
+
+    // 3. OrderedDict (CPython collections.OrderedDict)
+    let od = collections.OrderedDict();
+    od.put("first", 1);
+    od.put("second", 2);
+    od.put("third", 3);
+    od.move_to_end("first", true); // move to end
+    let popped = od.popitem(true); // pops last
+
+    // 4. ChainMap (CPython collections.ChainMap)
+    let base_cfg = { "theme": "dark", "port": 8080 };
+    let user_cfg = { "port": 9000 };
+    let cm = collections.ChainMap([user_cfg, base_cfg]);
+    let port = cm.get_or("port", 3000);
+    let theme = cm.get_or("theme", "light");
+
+    // 5. Deque extensions (CPython collections.deque)
+    let dq = collections.Deque();
+    dq.push_back(10);
+    dq.extend_all([20, 30, 40]);
+    dq.extend_left([5, 1]);
+    dq.rotate(2);
+}
+
+def test_itertools() {
+    // 1. accumulate (CPython itertools.accumulate)
+    let running_sums = itertools.accumulate([1, 2, 3, 4, 5]);
+
+    // 2. batched & chunk (CPython itertools.batched)
+    let batches = itertools.batched([10, 20, 30, 40, 50, 60, 70], 3);
+
+    // 3. compress (CPython itertools.compress)
+    let compressed = itertools.compress(["A", "B", "C", "D"], [true, false, true, false]);
+
+    // 4. pairwise (CPython itertools.pairwise)
+    let pairs = itertools.pairwise([1, 2, 3, 4]);
+
+    // 5. islice (CPython itertools.islice)
+    let sliced = itertools.islice([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 2, 8, 2);
+
+    // 6. starmap (CPython itertools.starmap)
+    let sums = itertools.starmap((a, b) => a + b, [(1, 2), (3, 4), (5, 6)]);
+
+    // 7. Combinatorics: product, permutations, combinations
+    let prod = itertools.product([1, 2], ["x", "y"]);
+    let perms = itertools.permutations([1, 2, 3], 2);
+    let combs = itertools.combinations([1, 2, 3, 4], 2);
+    let combs_rep = itertools.combinations_with_replacement([1, 2, 3], 2);
+}
+
+def test_functools() {
+    // 1. partial (CPython functools.partial)
+    let add_three = (a, b, c) => a + b + c;
+    let p = functools.partial(add_three, [10, 20]);
+    let res = p.call1(30);
+
+    // 2. reduce (CPython functools.reduce)
+    let sum = functools.reduce([1, 2, 3, 4, 5], 0, (acc, x) => acc + x);
+
+    // 3. lru_cache (CPython functools.lru_cache)
+    let cache = functools.lru_cache(100);
+    let fib_val = cache.get_or_compute(10, (n) => n * 2);
+    let info = cache.cache_info();
+
+    // 4. compose & pipe (Functional Algebra)
+    let double_it = (x) => x * 2;
+    let add_five = (x) => x + 5;
+    let comp = functools.compose(double_it, add_five); // (x + 5) * 2
+    let piped = functools.pipe(10, [add_five, double_it]); // (10 + 5) * 2 = 30
+
+    // 5. curry2 & flip
+    let sub = (a, b) => a - b;
+    let curried_sub = functools.curry2(sub);
+    let flipped_sub = functools.flip(sub);
+
+    // 6. singledispatch (CPython functools.singledispatch)
+    let dispatcher = functools.singledispatch((x) => f"default: {x}");
+    dispatcher.register("i64", (x) => f"integer: {x}");
+    dispatcher.register("str", (x) => f"string: {x}");
+    let d_res = dispatcher.invoke(42);
+}
+
+def main() {
+    test_collections();
+    test_itertools();
+    test_functools();
+    print("All functional stdlib modules executed cleanly!");
+}

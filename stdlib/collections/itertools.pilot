@@ -1,7 +1,19 @@
 // SPDX-License-Identifier: MIT AND PSF-2.0
 // std.itertools — Eager & Lazy Sequence/Range Combinators
+//
+// Donor Origin: CPython Lib/itertools.py (Python Software Foundation License 2.0)
+// High-performance, memory-efficient combinatorial & sequence building blocks
+// targeting Linux, Windows, macOS, Android, iOS, and WebAssembly.
+//
+// API Reference Mappings to Python itertools:
+//   - Infinite Iterators: count, cycle, repeat
+//   - Shortest-Input Combinators: accumulate, batched, chain, compress, dropwhile (drop_while),
+//     filterfalse (filter_false), groupby (group_by), islice, pairwise, starmap, takewhile (take_while),
+//     tee, zip_longest
+//   - Combinatoric Generators: product, permutations, combinations, combinations_with_replacement
+//   - Extended Sequence Utilities: chunk, window, frequencies, partition, scan, reduce, unique
 
-from core import min, max
+from core import min, max;
 def enumerate(items, start: i64 = 0) {
     var out = [];
     var idx: i64 = start;
@@ -249,4 +261,301 @@ def lazy_chain(seq_a, seq_b) {
     for y in seq_b {
         yield y;
     }
+}
+
+// =========================================================================
+// Python CPython Lib/itertools.py Combinators & Cross-Platform Utilities
+// =========================================================================
+
+/// Returns accumulated sums (or cumulative results of func).
+/// Python reference: itertools.accumulate(iterable[, func, *, initial])
+def accumulate(items, func = none, initial = none) {
+    var out = [];
+    let pool = [x for x in items];
+    let n: i64 = len(pool);
+    if n == 0 {
+        if initial != none {
+            out.append(initial);
+        }
+        return out;
+    }
+
+    var total = if initial != none { initial } else { pool[0] };
+    out.append(total);
+
+    let start: i64 = if initial != none { 0 } else { 1 };
+    for i in start..<n {
+        let item = pool[i];
+        if func != none {
+            total = func(total, item);
+        } else {
+            total = total + item;
+        }
+        out.append(total);
+    }
+    return out;
+}
+
+/// Batches items into non-overlapping batches of length n.
+/// Python reference: itertools.batched(iterable, n) (Python 3.12+)
+def batched(items, n: i64) {
+    return chunk(items, n);
+}
+
+/// Filters elements from data returning only those that have a corresponding
+/// element in selectors evaluating to true.
+/// Python reference: itertools.compress(data, selectors)
+def compress(data, selectors) {
+    var out = [];
+    let sel_list = [s for s in selectors];
+    let sel_len: i64 = len(sel_list);
+    var idx: i64 = 0;
+    for item in data {
+        if idx >= sel_len {
+            break;
+        }
+        let s = sel_list[idx];
+        if s == true or s == 1 {
+            out.append(item);
+        }
+        idx = idx + 1;
+    }
+    return out;
+}
+
+/// Drops elements while pred_fn returns true; returns remaining elements.
+/// Python reference: itertools.dropwhile(predicate, iterable)
+def dropwhile(pred_fn, items) {
+    return drop_while(items, pred_fn);
+}
+
+/// Yields elements while pred_fn returns true; stops on first false.
+/// Python reference: itertools.takewhile(predicate, iterable)
+def takewhile(pred_fn, items) {
+    return take_while(items, pred_fn);
+}
+
+/// Yields elements from items where pred_fn evaluates to false.
+/// Python reference: itertools.filterfalse(predicate, iterable)
+def filter_false(pred_fn, items) {
+    var out = [];
+    for item in items {
+        if !pred_fn(item) {
+            out.append(item);
+        }
+    }
+    return out;
+}
+
+/// Alias for filter_false matching Python CPython naming convention.
+/// Python reference: itertools.filterfalse(predicate, iterable)
+def filterfalse(pred_fn, items) {
+    return filter_false(pred_fn, items);
+}
+
+/// Groups consecutive keys or items matching Python itertools.groupby behavior.
+/// Python reference: itertools.groupby(iterable, key=None)
+def groupby(items, key_fn = none) {
+    if key_fn == none {
+        return group_by(items, (x) => x);
+    }
+    return group_by(items, key_fn);
+}
+
+/// Slices an iterable with start, stop, and step without loading all elements.
+/// Python reference: itertools.islice(iterable, [start,] stop [, step])
+def islice(items, start: i64, stop: i64 = -1, step: i64 = 1) {
+    if step <= 0 {
+        panic("itertools.islice step must be > 0");
+    }
+    var out = [];
+    let pool = [x for x in items];
+    let n: i64 = len(pool);
+    let end_idx: i64 = if stop < 0 or stop > n { n } else { stop };
+    var i: i64 = start;
+    while i < end_idx {
+        out.append(pool[i]);
+        i = i + step;
+    }
+    return out;
+}
+
+/// Returns successive overlapping pairs: (s0, s1), (s1, s2), (s2, s3)...
+/// Python reference: itertools.pairwise(iterable) (Python 3.10+)
+def pairwise(items) {
+    let pool = [x for x in items];
+    let n: i64 = len(pool);
+    var out = [];
+    if n < 2 {
+        return out;
+    }
+    for i in 0..<(n - 1) {
+        out.append((pool[i], pool[i + 1]));
+    }
+    return out;
+}
+
+/// Computes func on tuple pairs: func(pair[0], pair[1]).
+/// Python reference: itertools.starmap(func, iterable)
+def starmap(func, pairs) {
+    var out = [];
+    for p in pairs {
+        out.append(func(p[0], p[1]));
+    }
+    return out;
+}
+
+/// Returns n independent shallow copies of items.
+/// Python reference: itertools.tee(iterable, n=2)
+def tee(items, n: i64 = 2) {
+    let pool = [x for x in items];
+    var copies = [];
+    for _i in 0..<n {
+        copies.append([x for x in pool]);
+    }
+    return copies;
+}
+
+/// Cycles through items count times.
+/// Python reference: itertools.cycle(iterable)
+def cycle(items, count: i64 = 1) {
+    var out = [];
+    let pool = [x for x in items];
+    for _c in 0..<count {
+        for x in pool {
+            out.append(x);
+        }
+    }
+    return out;
+}
+
+/// Repeats item times times.
+/// Python reference: itertools.repeat(object[, times])
+def repeat(item, times: i64 = 1) {
+    var out = [];
+    for _i in 0..<times {
+        out.append(item);
+    }
+    return out;
+}
+
+/// Infinite integer counter coroutine.
+/// Python reference: itertools.count(start=0, step=1)
+def count(start: i64 = 0, step: i64 = 1) {
+    var current: i64 = start;
+    while true {
+        yield current;
+        current = current + step;
+    }
+}
+
+/// Cartesian product of input sequences: (a, b) for all a in seq_a and b in seq_b.
+/// Python reference: itertools.product(*iterables)
+def product(seq_a, seq_b) {
+    var out = [];
+    for a in seq_a {
+        for b in seq_b {
+            out.append((a, b));
+        }
+    }
+    return out;
+}
+
+def _perm_rec(pool, r: i64, used, current, out) {
+    if len(current) == r {
+        out.append([x for x in current]);
+        return;
+    }
+    let n: i64 = len(pool);
+    for i in 0..<n {
+        if !used[i] {
+            used[i] = true;
+            current.append(pool[i]);
+            _perm_rec(pool, r, used, current, out);
+            current.remove_at(len(current) - 1);
+            used[i] = false;
+        }
+    }
+}
+
+/// Generates all successive r-length permutations of elements in items.
+/// Python reference: itertools.permutations(iterable, r=None)
+def permutations(items, r: i64 = -1) {
+    let pool = [x for x in items];
+    let n: i64 = len(pool);
+    let target_r: i64 = if r < 0 { n } else { r };
+    if target_r < 0 or target_r > n {
+        return [];
+    }
+    if target_r == 0 {
+        return [[]];
+    }
+    var used = [];
+    for _i in 0..<n {
+        used.append(false);
+    }
+    var out = [];
+    var current = [];
+    _perm_rec(pool, target_r, used, current, out);
+    return out;
+}
+
+def _comb_rec(pool, r: i64, start_idx: i64, current, out) {
+    if len(current) == r {
+        out.append([x for x in current]);
+        return;
+    }
+    let n: i64 = len(pool);
+    for i in start_idx..<n {
+        current.append(pool[i]);
+        _comb_rec(pool, r, i + 1, current, out);
+        current.remove_at(len(current) - 1);
+    }
+}
+
+/// Generates all successive r-length combinations of elements from items.
+/// Python reference: itertools.combinations(iterable, r)
+def combinations(items, r: i64) {
+    let pool = [x for x in items];
+    let n: i64 = len(pool);
+    if r < 0 or r > n {
+        return [];
+    }
+    if r == 0 {
+        return [[]];
+    }
+    var out = [];
+    var current = [];
+    _comb_rec(pool, r, 0, current, out);
+    return out;
+}
+
+def _comb_rep_rec(pool, r: i64, start_idx: i64, current, out) {
+    if len(current) == r {
+        out.append([x for x in current]);
+        return;
+    }
+    let n: i64 = len(pool);
+    for i in start_idx..<n {
+        current.append(pool[i]);
+        _comb_rep_rec(pool, r, i, current, out);
+        current.remove_at(len(current) - 1);
+    }
+}
+
+/// Generates all successive r-length combinations allowing individual elements to be repeated.
+/// Python reference: itertools.combinations_with_replacement(iterable, r)
+def combinations_with_replacement(items, r: i64) {
+    let pool = [x for x in items];
+    let n: i64 = len(pool);
+    if r < 0 or (n == 0 and r > 0) {
+        return [];
+    }
+    if r == 0 {
+        return [[]];
+    }
+    var out = [];
+    var current = [];
+    _comb_rep_rec(pool, r, 0, current, out);
+    return out;
 }

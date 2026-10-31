@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: MIT AND Apache-2.0
+// std.random — Deterministic and Statistical Random Number Generators
+//
+// Donor Origin: CPython Lib/random.py (Python Software Foundation License 2.0)
+// Sebastiano Vigna SplitMix64 & Melissa O'Neill PCG-XSH-RR algorithms.
+//
+// Target OS Platforms:
+//   - Linux, Windows, macOS, Android, iOS, and WebAssembly
+
+from math import (
+    SplitMix64, PcgRng, seed, random, uniform, randint, randrange,
+    choice, choices, shuffle, sample, gauss, normalvariate, triangular
+);

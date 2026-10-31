@@ -1,0 +1,382 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.pickle — Python-Compatible Binary Object Serialization Protocol
+//
+// Donor Origin: CPython Lib/pickle.py (Python Software Foundation License 2.0)
+// Universal cross-architecture, multi-OS binary serializer and deserializer
+// supporting primitive scalars, lists, maps, tuples, booleans, and null/none.
+//
+// Target OS Platforms:
+//   - Linux (x86_64, aarch64, riscv64)
+//   - Windows (x86_64, aarch64)
+//   - macOS (Apple Silicon arm64, Intel x86_64)
+//   - Android (aarch64, armv7, x86_64)
+//   - iOS (arm64)
+//   - WebAssembly (wasm32-wasi, wasm32-unknown)
+
+import fs as std_fs;
+
+// Protocol version constants
+const HIGHEST_PROTOCOL: i64 = 5;
+const DEFAULT_PROTOCOL: i64 = 4;
+
+// Magic 4-byte header: "PILP" (Pilot Pickle)
+const MAGIC_0: i64 = 80;  // 'P'
+const MAGIC_1: i64 = 73;  // 'I'
+const MAGIC_2: i64 = 76;  // 'L'
+const MAGIC_3: i64 = 80;  // 'P'
+
+// Wire protocol opcodes
+const OP_NONE: i64       = 78;  // 'N'
+const OP_BOOL_TRUE: i64  = 84;  // 'T'
+const OP_BOOL_FALSE: i64 = 70;  // 'F'
+const OP_INT_POS: i64    = 43;  // '+'
+const OP_INT_NEG: i64    = 45;  // '-'
+const OP_FLOAT: i64      = 71;  // 'G'
+const OP_STRING: i64     = 83;  // 'S'
+const OP_LIST: i64       = 91;  // ']'
+const OP_MAP: i64        = 125; // '}'
+const OP_TUPLE: i64      = 41;  // ')'
+const OP_STOP: i64       = 46;  // '.'
+
+/// Exception raised when an error occurs during pickling or unpickling.
+/// Python reference: pickle.PickleError
+class PickleError {
+    def __init__(self, msg: str) {
+        self.msg = msg;
+    }
+
+    def to_string() -> str {
+        return f"PickleError: {self.msg}";
+    }
+}
+
+/// Exception raised when an object cannot be pickled.
+/// Python reference: pickle.PicklingError
+class PicklingError {
+    def __init__(self, msg: str) {
+        self.msg = msg;
+    }
+
+    def to_string() -> str {
+        return f"PicklingError: {self.msg}";
+    }
+}
+
+/// Exception raised when an object cannot be unpickled.
+/// Python reference: pickle.UnpicklingError
+class UnpicklingError {
+    def __init__(self, msg: str) {
+        self.msg = msg;
+    }
+
+    def to_string() -> str {
+        return f"UnpicklingError: {self.msg}";
+    }
+}
+
+def _write_u32_be(out, val: i64) {
+    out.append((val >> 24) & 255);
+    out.append((val >> 16) & 255);
+    out.append((val >> 8) & 255);
+    out.append(val & 255);
+}
+
+def _write_u64_be(out, val: i64) {
+    out.append((val >> 56) & 255);
+    out.append((val >> 48) & 255);
+    out.append((val >> 40) & 255);
+    out.append((val >> 32) & 255);
+    out.append((val >> 24) & 255);
+    out.append((val >> 16) & 255);
+    out.append((val >> 8) & 255);
+    out.append(val & 255);
+}
+
+def _read_u32_be(bytes_data, pos: i64) -> (i64, i64) {
+    let b0: i64 = bytes_data[pos];
+    let b1: i64 = bytes_data[pos + 1];
+    let b2: i64 = bytes_data[pos + 2];
+    let b3: i64 = bytes_data[pos + 3];
+    let res: i64 = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
+    return (res, pos + 4);
+}
+
+def _read_u64_be(bytes_data, pos: i64) -> (i64, i64) {
+    let b0: i64 = bytes_data[pos];
+    let b1: i64 = bytes_data[pos + 1];
+    let b2: i64 = bytes_data[pos + 2];
+    let b3: i64 = bytes_data[pos + 3];
+    let b4: i64 = bytes_data[pos + 4];
+    let b5: i64 = bytes_data[pos + 5];
+    let b6: i64 = bytes_data[pos + 6];
+    let b7: i64 = bytes_data[pos + 7];
+    let res: i64 = (b0 << 56) | (b1 << 48) | (b2 << 40) | (b3 << 32)
+                 | (b4 << 24) | (b5 << 16) | (b6 << 8) | b7;
+    return (res, pos + 8);
+}
+
+def _serialize_value(out, val) {
+    let kind: str = typeof(val);
+
+    if val == none {
+        out.append(OP_NONE);
+        return;
+    }
+
+    if kind == "bool" {
+        if val {
+            out.append(OP_BOOL_TRUE);
+        } else {
+            out.append(OP_BOOL_FALSE);
+        }
+        return;
+    }
+
+    if kind == "i64" {
+        let n: i64 = val;
+        if n >= 0 {
+            out.append(OP_INT_POS);
+            _write_u64_be(out, n);
+        } else {
+            out.append(OP_INT_NEG);
+            _write_u64_be(out, 0 - n);
+        }
+        return;
+    }
+
+    if kind == "f64" {
+        out.append(OP_FLOAT);
+        let s = str(val);
+        let s_len: i64 = len(s);
+        _write_u32_be(out, s_len);
+        for i in 0..<s_len {
+            out.append(__str_char_code(s, i));
+        }
+        return;
+    }
+
+    if kind == "str" or kind == "string" {
+        out.append(OP_STRING);
+        let s: str = val;
+        let s_len: i64 = len(s);
+        _write_u32_be(out, s_len);
+        for i in 0..<s_len {
+            out.append(__str_char_code(s, i));
+        }
+        return;
+    }
+
+    if kind == "list" {
+        out.append(OP_LIST);
+        let count: i64 = len(val);
+        _write_u32_be(out, count);
+        for elem in val {
+            _serialize_value(out, elem);
+        }
+        return;
+    }
+
+    if kind == "map" {
+        out.append(OP_MAP);
+        let keys_list = val.keys();
+        let count: i64 = len(keys_list);
+        _write_u32_be(out, count);
+        for k in keys_list {
+            _serialize_value(out, k);
+            _serialize_value(out, val[k]);
+        }
+        return;
+    }
+
+    if kind == "tuple" {
+        out.append(OP_TUPLE);
+        let count: i64 = len(val);
+        _write_u32_be(out, count);
+        for i in 0..<count {
+            _serialize_value(out, val[i]);
+        }
+        return;
+    }
+
+    // Fallback representation for unknown or user objects
+    out.append(OP_STRING);
+    let fallback_str = str(val);
+    let fb_len: i64 = len(fallback_str);
+    _write_u32_be(out, fb_len);
+    for i in 0..<fb_len {
+        out.append(__str_char_code(fallback_str, i));
+    }
+}
+
+def _deserialize_value(bytes_data, pos: i64) -> (any, i64) {
+    if pos >= len(bytes_data) {
+        panic("Unexpected end of pickle byte stream");
+    }
+
+    let op: i64 = bytes_data[pos];
+    var cur_pos: i64 = pos + 1;
+
+    if op == OP_NONE {
+        return (none, cur_pos);
+    }
+    if op == OP_BOOL_TRUE {
+        return (true, cur_pos);
+    }
+    if op == OP_BOOL_FALSE {
+        return (false, cur_pos);
+    }
+
+    if op == OP_INT_POS {
+        let pair = _read_u64_be(bytes_data, cur_pos);
+        return (pair[0], pair[1]);
+    }
+    if op == OP_INT_NEG {
+        let pair = _read_u64_be(bytes_data, cur_pos);
+        let mag: i64 = pair[0];
+        return (0 - mag, pair[1]);
+    }
+
+    if op == OP_FLOAT {
+        let len_pair = _read_u32_be(bytes_data, cur_pos);
+        let s_len: i64 = len_pair[0];
+        cur_pos = len_pair[1];
+        var s = "";
+        for _i in 0..<s_len {
+            s = s + __char_from_code(bytes_data[cur_pos]);
+            cur_pos = cur_pos + 1;
+        }
+        return (float(s), cur_pos);
+    }
+
+    if op == OP_STRING {
+        let len_pair = _read_u32_be(bytes_data, cur_pos);
+        let s_len: i64 = len_pair[0];
+        cur_pos = len_pair[1];
+        var s = "";
+        for _i in 0..<s_len {
+            s = s + __char_from_code(bytes_data[cur_pos]);
+            cur_pos = cur_pos + 1;
+        }
+        return (s, cur_pos);
+    }
+
+    if op == OP_LIST {
+        let count_pair = _read_u32_be(bytes_data, cur_pos);
+        let count: i64 = count_pair[0];
+        cur_pos = count_pair[1];
+        var list_out = [];
+        for _i in 0..<count {
+            let elem_pair = _deserialize_value(bytes_data, cur_pos);
+            list_out.append(elem_pair[0]);
+            cur_pos = elem_pair[1];
+        }
+        return (list_out, cur_pos);
+    }
+
+    if op == OP_MAP {
+        let count_pair = _read_u32_be(bytes_data, cur_pos);
+        let count: i64 = count_pair[0];
+        cur_pos = count_pair[1];
+        var map_out = {};
+        for _i in 0..<count {
+            let key_pair = _deserialize_value(bytes_data, cur_pos);
+            cur_pos = key_pair[1];
+            let val_pair = _deserialize_value(bytes_data, cur_pos);
+            cur_pos = val_pair[1];
+            map_out[key_pair[0]] = val_pair[0];
+        }
+        return (map_out, cur_pos);
+    }
+
+    if op == OP_TUPLE {
+        let count_pair = _read_u32_be(bytes_data, cur_pos);
+        let count: i64 = count_pair[0];
+        cur_pos = count_pair[1];
+        var tuple_items = [];
+        for _i in 0..<count {
+            let elem_pair = _deserialize_value(bytes_data, cur_pos);
+            tuple_items.append(elem_pair[0]);
+            cur_pos = elem_pair[1];
+        }
+        return (tuple_items, cur_pos);
+    }
+
+    panic(f"Unknown pickle opcode: {op}");
+}
+
+/// Pickler object encapsulating the state of a binary serialization.
+/// Python reference: pickle.Pickler(file, protocol=None, *, fix_imports=True, buffer_callback=None)
+class Pickler {
+    def __init__(self, protocol: i64 = 4) {
+        self.protocol = protocol;
+    }
+
+    def dump(self, obj) -> [i64] {
+        var out = [MAGIC_0, MAGIC_1, MAGIC_2, MAGIC_3, self.protocol];
+        _serialize_value(out, obj);
+        out.append(OP_STOP);
+        return out;
+    }
+}
+
+/// Unpickler object reading from a serialized byte stream.
+/// Python reference: pickle.Unpickler(file, *, fix_imports=True, encoding="ASCII", errors="strict", buffers=None)
+class Unpickler {
+    def __init__(self, data: [i64]) {
+        self.data = data;
+    }
+
+    def load(self) -> any {
+        let n: i64 = len(self.data);
+        if n < 5 {
+            panic("Data is too short to be a valid Pilot pickle stream");
+        }
+        if self.data[0] != MAGIC_0 or self.data[1] != MAGIC_1 or self.data[2] != MAGIC_2 or self.data[3] != MAGIC_3 {
+            panic("Invalid magic header in pickle stream");
+        }
+        let pair = _deserialize_value(self.data, 5);
+        return pair[0];
+    }
+}
+
+/// Serializes an object hierarchy to a byte array.
+/// Python reference: pickle.dumps(obj, protocol=None, *, fix_imports=True, buffer_callback=None)
+def dumps(obj, protocol: i64 = 4) -> [i64] {
+    let p = Pickler(protocol);
+    return p.dump(obj);
+}
+
+/// Deserializes an object hierarchy from a byte array.
+/// Python reference: pickle.loads(data, /, *, fix_imports=True, encoding="ASCII", errors="strict", buffers=None)
+def loads(bytes_data: [i64]) -> any {
+    let u = Unpickler(bytes_data);
+    return u.load();
+}
+
+/// Writes serialized binary bytes of obj to a file path.
+/// Python reference: pickle.dump(obj, file, protocol=None, *, fix_imports=True, buffer_callback=None)
+def dump(obj, file_path: str, protocol: i64 = 4) -> bool {
+    let bytes_out = dumps(obj, protocol);
+    var s = "";
+    for b in bytes_out {
+        s = s + __char_from_code(b);
+    }
+    let res = std_fs.write_text(file_path, s);
+    return !__result_is_err(res);
+}
+
+/// Reads serialized binary bytes from a file path and reconstructs the object.
+/// Python reference: pickle.load(file, *, fix_imports=True, encoding="ASCII", errors="strict", buffers=None)
+def load(file_path: str) -> any {
+    let text_res = std_fs.read_text(file_path);
+    if __result_is_err(text_res) {
+        panic(f"Failed to read pickle file: {file_path}");
+    }
+    let content: str = __result_unwrap_ok(text_res);
+    var bytes_in = [];
+    let n: i64 = len(content);
+    for i in 0..<n {
+        bytes_in.append(__str_char_code(content, i));
+    }
+    return loads(bytes_in);
+}

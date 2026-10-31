@@ -152,3 +152,106 @@ class PcgRng {
         return out;
     }
 }
+
+// =========================================================================
+// Python CPython Lib/random.py Module-Level Functions & Default Generator
+// =========================================================================
+
+var _DEFAULT_RNG = PcgRng(123456789, 54);
+
+/// Initialize the internal random number generator with seed.
+/// Python reference: random.seed(a=None, version=2)
+def seed(a: i64 = 42) {
+    _DEFAULT_RNG = PcgRng(a, 54);
+}
+
+/// Returns the next random floating point number in the range 0.0 <= X < 1.0.
+/// Python reference: random.random()
+def random() -> f64 {
+    return _DEFAULT_RNG.next_float();
+}
+
+/// Returns a random floating point number N such that a <= N <= b.
+/// Python reference: random.uniform(a, b)
+def uniform(a: f64, b: f64) -> f64 {
+    return _DEFAULT_RNG.next_range(a, b);
+}
+
+/// Returns a random integer N such that a <= N <= b.
+/// Python reference: random.randint(a, b)
+def randint(a: i64, b: i64) -> i64 {
+    return _DEFAULT_RNG.next_int(a, b);
+}
+
+/// Returns a randomly selected element from range(start, stop[, step]).
+/// Python reference: random.randrange(start, stop=None, step=1)
+def randrange(start: i64, stop: i64 = -1, step: i64 = 1) -> i64 {
+    var lo = start;
+    var hi = stop;
+    if hi < 0 {
+        hi = lo;
+        lo = 0;
+    }
+    if hi <= lo {
+        return lo;
+    }
+    let count: i64 = ((hi - lo) + step - 1) / step;
+    let idx: i64 = _DEFAULT_RNG.next_int(0, count - 1);
+    return lo + idx * step;
+}
+
+/// Choose a random element from a non-empty sequence.
+/// Python reference: random.choice(seq)
+def choice(seq) {
+    return _DEFAULT_RNG.choice(seq);
+}
+
+/// Return a k sized list of elements chosen from the population with replacement.
+/// Python reference: random.choices(population, weights=None, *, cum_weights=None, k=1)
+def choices(population, k: i64 = 1) {
+    let n: i64 = len(population);
+    if n == 0 or k <= 0 {
+        return [];
+    }
+    var out = [];
+    for _i in 0..<k {
+        let idx: i64 = _DEFAULT_RNG.next_int(0, n - 1);
+        out.append(population[idx]);
+    }
+    return out;
+}
+
+/// Shuffle the sequence x in place (returns a new shuffled list in Pilot).
+/// Python reference: random.shuffle(x)
+def shuffle(x) {
+    return _DEFAULT_RNG.shuffle(x);
+}
+
+/// Return a k length list of unique elements chosen from the population sequence.
+/// Python reference: random.sample(population, k, *, counts=None)
+def sample(population, k: i64) {
+    return _DEFAULT_RNG.sample(population, k);
+}
+
+/// Gaussian distribution with mean mu and standard deviation sigma.
+/// Python reference: random.gauss(mu=0.0, sigma=1.0)
+def gauss(mu: f64 = 0.0, sigma: f64 = 1.0) -> f64 {
+    return _DEFAULT_RNG.next_gaussian(mu, sigma);
+}
+
+/// Normal distribution matching random.gauss.
+/// Python reference: random.normalvariate(mu=0.0, sigma=1.0)
+def normalvariate(mu: f64 = 0.0, sigma: f64 = 1.0) -> f64 {
+    return _DEFAULT_RNG.next_gaussian(mu, sigma);
+}
+
+/// Triangular distribution where low <= result <= high with the specified mode.
+/// Python reference: random.triangular(low=0.0, high=1.0, mode=None)
+def triangular(low: f64 = 0.0, high: f64 = 1.0, mode: f64 = -1.0) -> f64 {
+    let c: f64 = if mode < 0.0 { 0.5 } else { (mode - low) / (high - low) };
+    let u: f64 = _DEFAULT_RNG.next_float();
+    if u > c {
+        return high - (high - low) * sqrt((1.0 - u) * (1.0 - c));
+    }
+    return low + (high - low) * sqrt(u * c);
+}

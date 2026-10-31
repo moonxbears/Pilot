@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.timeit — Multi-OS High-Precision Execution Time Measurement
+// Modeled after Python's `timeit` module (CPython Lib/timeit.py)
+// Compatible with Linux, Windows, macOS, Android, iOS, and WebAssembly targets.
+
+// ============================================================================
+// 1. Monotonic Timer (Python: timeit.default_timer)
+// ============================================================================
+
+/// Returns current monotonic clock timestamp in fractional seconds.
+def default_timer() -> f64 {
+    return __time_perf_counter();
+}
+
+/// Sleeps the execution thread for a duration specified in fractional seconds.
+def sleep(seconds: f64) {
+    let ms = int(seconds * 1000.0);
+    if ms > 0 {
+        __time_sleep_ms(ms);
+    }
+}
+
+// ============================================================================
+// 2. Timer Class (Python: timeit.Timer)
+// ============================================================================
+
+class Timer {
+    def __init__(stmt: any = none, setup: any = none, timer: any = none) {
+        self.stmt = stmt;
+        self.setup = setup;
+        self.timer = timer;
+    }
+
+    def _get_time() -> f64 {
+        return default_timer();
+    }
+
+    /// Executes setup once, then runs stmt `number` times, returning total elapsed seconds.
+    def timeit(number: i64 = 1000000) -> f64 {
+        if self.setup != none {
+            let s_type = type_of(self.setup);
+            if s_type == "function" or s_type == "lambda" {
+                self.setup();
+            }
+        }
+
+        let t0 = self._get_time();
+
+        if self.stmt != none {
+            let s_type = type_of(self.stmt);
+            if s_type == "function" or s_type == "lambda" {
+                for _ in 0..<number {
+                    self.stmt();
+                }
+            } else {
+                // If stmt is not callable, perform dummy iterations
+                for _ in 0..<number {
+                    let _ = self.stmt;
+                }
+            }
+        }
+
+        let t1 = self._get_time();
+        let elapsed = t1 - t0;
+        return if elapsed >= 0.0 { elapsed } else { 0.0 };
+    }
+
+    /// Calls `timeit()` repeated `repeat_count` times and returns list of results.
+    def repeat(repeat_count: i64 = 5, number: i64 = 1000000) -> [f64] {
+        var results: [f64] = [];
+        for _ in 0..<repeat_count {
+            results.append(self.timeit(number));
+        }
+        return results;
+    }
+
+    /// Automatically selects `number` such that total elapsed time is at least 0.2 seconds.
+    def autorange() -> [any] {
+        var number: i64 = 1;
+        while true {
+            for scale in [1, 2, 5] {
+                let count = number * scale;
+                let elapsed = self.timeit(count);
+                if elapsed >= 0.2 {
+                    return [count, elapsed];
+                }
+            }
+            number = number * 10;
+            if number > 1000000000 {
+                let final_elapsed = self.timeit(number);
+                return [number, final_elapsed];
+            }
+        }
+        return [number, 0.0];
+    }
+}
+
+// ============================================================================
+// 3. Convenience Top-Level Functions (Python: timeit.timeit, timeit.repeat)
+// ============================================================================
+
+/// Measures execution time of `stmt` run `number` times.
+def timeit(stmt: any, setup: any = none, number: i64 = 1000000) -> f64 {
+    let t = Timer(stmt, setup);
+    return t.timeit(number);
+}
+
+/// Measures execution time of `stmt` repeated `repeat_count` times of `number` loops.
+def repeat(stmt: any, setup: any = none, repeat_count: i64 = 5, number: i64 = 1000000) -> [f64] {
+    let t = Timer(stmt, setup);
+    return t.repeat(repeat_count, number);
+}
