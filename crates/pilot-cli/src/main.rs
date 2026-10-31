@@ -22,7 +22,7 @@ use std::time::Instant;
 use pilot_analysis::AnalysisPipeline;
 use pilot_codegen::{BuildDriver, BuildOptions, BuildTarget, OptLevel};
 use pilot_fmt::{format_source, FormatOptions};
-use pilot_parser::parse;
+use pilot_parser::parse_parallel;
 use pilot_rt::{BumpRegion, PilotVal};
 use pilot_span::LineIndex;
 use pilot_transpile::{ForeignAstIngester, IngestOptions, IrModule, TargetLanguage, Transpiler};
@@ -120,7 +120,7 @@ fn cmd_run(args: &[String]) {
     };
 
     let _start = Instant::now();
-    let arena = parse(&src);
+    let arena = parse_parallel(&src);
     if arena.root.is_none() {
         eprintln!("{}: error: failed to construct AST program", file_path);
         std::process::exit(1);
@@ -336,7 +336,7 @@ fn cmd_check(args: &[String]) {
         }
     };
 
-    let arena = parse(&src);
+    let arena = parse_parallel(&src);
     if arena.root.is_none() {
         eprintln!("{}: error: failed to construct AST program", file_path);
         std::process::exit(1);
@@ -450,7 +450,7 @@ fn cmd_test(args: &[String]) {
 
             total += 1;
             let src = fs::read_to_string(&path).unwrap_or_default();
-            let arena = parse(&src);
+            let arena = parse_parallel(&src);
             if arena.root.is_none() {
                 eprintln!("FAIL: {} (syntax parse error)", filename);
                 continue;
@@ -532,7 +532,7 @@ fn run_differential_tests(filter: &str) {
 
             total += 1;
             let src = fs::read_to_string(&path).unwrap_or_default();
-            let arena = parse(&src);
+            let arena = parse_parallel(&src);
             if arena.root.is_none() {
                 eprintln!("FAIL: {} (syntax parse error)", filename);
                 continue;
@@ -672,7 +672,7 @@ fn cmd_repl() {
             }
             continue;
         }
-        let arena = parse(trimmed);
+        let arena = parse_parallel(trimmed);
         let binary = pilot_vm::BytecodeCompiler::compile(&arena, arena.root);
         vm.load_binary(binary);
         let res = vm.run();
@@ -922,7 +922,7 @@ fn cmd_perf(args: &[String]) {
             }
         };
 
-        let arena = parse(&src);
+        let arena = parse_parallel(&src);
         let diags = pilot_perf::StaticWcetAnalyzer::analyze(&src, &arena);
         if diags.is_empty() {
             println!("No performance anti-patterns or WCET bottlenecks detected in '{}'.", file_path);
@@ -988,7 +988,7 @@ fn cmd_perf(args: &[String]) {
     let start = Instant::now();
     let mut total_nodes = 0;
     for _ in 0..iterations {
-        let arena = parse(&src);
+        let arena = parse_parallel(&src);
         total_nodes += arena.nodes.len();
     }
     let dur = start.elapsed();
@@ -1017,7 +1017,7 @@ fn cmd_bench(_args: &[String]) {
     let start = Instant::now();
     let mut total_nodes = 0;
     for _ in 0..iterations {
-        let arena = parse(&corpus);
+        let arena = parse_parallel(&corpus);
         total_nodes += arena.nodes.len();
     }
     let dur = start.elapsed();
@@ -1025,7 +1025,7 @@ fn cmd_bench(_args: &[String]) {
     let throughput_mb_s = (total_bytes as f64 / (1024.0 * 1024.0)) / dur.as_secs_f64();
 
     // 2. AST Memory Overhead
-    let arena = parse(&corpus);
+    let arena = parse_parallel(&corpus);
     let ast_bytes = arena.nodes.len() * std::mem::size_of::<pilot_ast::AstNode>();
     let overhead_ratio = ast_bytes as f64 / corpus_bytes as f64;
 
@@ -1088,7 +1088,7 @@ fn cmd_emit(args: &[String]) {
         std::process::exit(1);
     });
 
-    let arena = parse(&src);
+    let arena = parse_parallel(&src);
     let module_name = Path::new(file_path).file_stem().and_then(|s| s.to_str()).unwrap_or("module");
 
     // Check if emitting a GPU target
