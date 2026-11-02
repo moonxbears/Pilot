@@ -9,7 +9,7 @@ let control_ch: chan[str] = Channel(5)
 
 // --- 2. Asynchronous Functions and Tasks ---
 async def compute_telemetry(sensor_id: int) -> int {
-    println(f"Computing telemetry for sensor {sensor_id}...")
+    println($"Computing telemetry for sensor {sensor_id}...")
     return sensor_id * 100
 }
 

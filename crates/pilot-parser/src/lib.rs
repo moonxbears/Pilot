@@ -960,6 +960,10 @@ impl<'a> Parser<'a> {
             let s = self.text();
             self.advance();
             s
+        } else if self.at(TokenKind::StrLit) || self.at(TokenKind::TripleStrLit) {
+            let s = self.text();
+            self.advance();
+            s
         } else {
             "anon"
         };
@@ -2168,6 +2172,9 @@ impl<'a> Parser<'a> {
             if self.is_ident_like() {
                 self.advance();
             }
+        }
+        if has_paren && self.at(TokenKind::RParen) {
+            self.advance();
         }
         self.expect(TokenKind::KwIn);
         let iter_expr = self.parse_expr();

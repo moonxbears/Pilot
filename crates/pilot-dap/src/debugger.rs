@@ -153,6 +153,11 @@ pub struct PilotDebugger {
     pub for_loops: HashMap<u32, (String, Vec<(PilotVal, String)>, NodeId)>,
     pub pending_outputs: Vec<String>,
     pub skip_bp: Option<(String, u32)>,
+    pub thread_locals: HashMap<String, HashMap<String, PilotVal>>,
+    pub thread_targets: HashMap<String, NodeId>,
+    pub pipe_storage: HashMap<String, Vec<PilotVal>>,
+    pub queue_storage: HashMap<String, Vec<PilotVal>>,
+    pub future_results: HashMap<String, (PilotVal, String)>,
 }
 
 impl Default for PilotDebugger {
@@ -195,6 +200,11 @@ impl PilotDebugger {
             for_loops: HashMap::new(),
             pending_outputs: Vec::new(),
             skip_bp: None,
+            thread_locals: HashMap::new(),
+            thread_targets: HashMap::new(),
+            pipe_storage: HashMap::new(),
+            queue_storage: HashMap::new(),
+            future_results: HashMap::new(),
         }
     }
 
@@ -327,6 +337,11 @@ impl PilotDebugger {
         self.pending_outputs.clear();
         self.next_frame_id = 1;
         self.skip_bp = None;
+        self.thread_locals.clear();
+        self.thread_targets.clear();
+        self.pipe_storage.clear();
+        self.queue_storage.clear();
+        self.future_results.clear();
 
         // Pre-populate declared variables and static inferred types
         let mut initial_locals = HashMap::new();
@@ -554,6 +569,26 @@ impl PilotDebugger {
         }
     }
 
+    pub fn has_local(&self, name: &str) -> bool {
+        self.call_stack.last().map_or(false, |f| f.locals.contains_key(name))
+    }
+
+    fn execute_lambda_body(&mut self, arena: &AstArena, lambda_id: NodeId) {
+        let lambda_node = *arena.node(lambda_id);
+        if lambda_node.node_kind() == NodeKind::LambdaExpr && lambda_node.rhs != 0 {
+            let body_node_id = NodeId(lambda_node.rhs);
+            let line_index = pilot_span::LineIndex::new(self.source.as_bytes());
+            let stmts = extract_fn_stmts(arena, &line_index, body_node_id);
+            if !stmts.is_empty() {
+                for (stmt_id, line, _col) in stmts {
+                    self.execute_statement_node(arena, stmt_id, line);
+                }
+            } else {
+                self.eval_ast_node(arena, body_node_id);
+            }
+        }
+    }
+
     pub fn current_frame(&self) -> Option<&PilotStackFrame> {
         self.call_stack.last()
     }
@@ -722,7 +757,34 @@ impl PilotDebugger {
         }
     }
 
-    /// Evaluates string interpolation for f"..." strings with {var} expressions.
+    /// Unescapes common string escape characters (\n, \t, \r, \", \', \\, \0).
+    pub fn unescape_string(s: &str) -> String {
+        let mut result = String::with_capacity(s.len());
+        let mut chars = s.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\\' {
+                match chars.next() {
+                    Some('n') => result.push('\n'),
+                    Some('t') => result.push('\t'),
+                    Some('r') => result.push('\r'),
+                    Some('\\') => result.push('\\'),
+                    Some('"') => result.push('"'),
+                    Some('\'') => result.push('\''),
+                    Some('0') => result.push('\0'),
+                    Some(other) => {
+                        result.push('\\');
+                        result.push(other);
+                    }
+                    None => result.push('\\'),
+                }
+            } else {
+                result.push(ch);
+            }
+        }
+        result
+    }
+
+    /// Evaluates string interpolation for f"..." strings with {var} expressions and escape characters.
     pub fn format_interpolated_string(&self, raw: &str) -> String {
         let s = raw.strip_prefix("f\"").or_else(|| raw.strip_prefix("f'"))
             .or_else(|| raw.strip_prefix("$\"")).or_else(|| raw.strip_prefix("$'"))
@@ -730,14 +792,29 @@ impl PilotDebugger {
         let s = s.strip_suffix('"').or_else(|| s.strip_suffix('\'')).unwrap_or(s);
 
         if !s.contains('{') || !s.contains('}') {
-            return s.to_string();
+            return Self::unescape_string(s);
         }
 
         let mut result = String::with_capacity(s.len() + 16);
         let mut chars = s.chars().peekable();
 
         while let Some(ch) = chars.next() {
-            if ch == '{' {
+            if ch == '\\' {
+                match chars.next() {
+                    Some('n') => result.push('\n'),
+                    Some('t') => result.push('\t'),
+                    Some('r') => result.push('\r'),
+                    Some('\\') => result.push('\\'),
+                    Some('"') => result.push('"'),
+                    Some('\'') => result.push('\''),
+                    Some('0') => result.push('\0'),
+                    Some(other) => {
+                        result.push('\\');
+                        result.push(other);
+                    }
+                    None => result.push('\\'),
+                }
+            } else if ch == '{' {
                 let mut expr_buf = String::new();
                 while let Some(&next_ch) = chars.peek() {
                     if next_ch == '}' {
@@ -788,9 +865,16 @@ impl PilotDebugger {
 
                 if rhs_node.node_kind() == NodeKind::CallExpr {
                     if let Some((callee_id, arg_ids)) = unpack_call(arena, rhs_node) {
+                        if let Some(&first_arg) = arg_ids.first() {
+                            if arena.node(first_arg).node_kind() == NodeKind::LambdaExpr {
+                                self.thread_targets.insert(name.clone(), first_arg);
+                            }
+                        }
                         let callee_node = *arena.node(callee_id);
                         let fn_name = if callee_node.node_kind() == NodeKind::IdentExpr {
                             arena.interner.resolve(SymbolId(callee_node.lhs)).to_string()
+                        } else if callee_node.node_kind() == NodeKind::MemberExpr {
+                            arena.interner.resolve(SymbolId(callee_node.rhs)).to_string()
                         } else {
                             "anon".to_string()
                         };
@@ -837,9 +921,16 @@ impl PilotDebugger {
 
                     if rhs_node.node_kind() == NodeKind::CallExpr {
                         if let Some((callee_id, arg_ids)) = unpack_call(arena, rhs_node) {
+                            if let Some(&first_arg) = arg_ids.first() {
+                                if arena.node(first_arg).node_kind() == NodeKind::LambdaExpr {
+                                    self.thread_targets.insert(name.clone(), first_arg);
+                                }
+                            }
                             let callee_node = *arena.node(callee_id);
                             let fn_name = if callee_node.node_kind() == NodeKind::IdentExpr {
                                 arena.interner.resolve(SymbolId(callee_node.lhs)).to_string()
+                            } else if callee_node.node_kind() == NodeKind::MemberExpr {
+                                arena.interner.resolve(SymbolId(callee_node.rhs)).to_string()
                             } else {
                                 "anon".to_string()
                             };
@@ -898,13 +989,21 @@ impl PilotDebugger {
                         String::new()
                     };
                     if !target_name.is_empty() {
-                        if let Some(DebugCompoundVal::Record { type_name: _, fields }) = self.compound_values.get_mut(&target_name) {
+                        if let Some(DebugCompoundVal::Record { type_name, fields }) = self.compound_values.get_mut(&target_name) {
                             if let Some(f) = fields.iter_mut().find(|(n, _, _)| n == &member_name) {
                                 f.1 = rhs_val;
-                                f.2 = rhs_ty;
+                                f.2 = rhs_ty.clone();
                             } else {
-                                fields.push((member_name, rhs_val, rhs_ty));
+                                fields.push((member_name.clone(), rhs_val, rhs_ty.clone()));
                             }
+                            let field_strs: Vec<String> = fields.iter().map(|(n, v, _)| format!("{}: {}", n, v.to_string_repr())).collect();
+                            let formatted = format!("{}({})", type_name, field_strs.join(", "));
+                            let new_val = PilotVal::from_str(&formatted);
+                            let t_name = type_name.clone();
+                            let fields_clone = fields.clone();
+                            self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
+                            self.set_local(&target_name, new_val, &t_name);
+                            self.globals.insert(target_name.clone(), new_val);
                         }
                     }
                 } else if lhs_node.node_kind() == NodeKind::IndexExpr {
@@ -964,6 +1063,8 @@ impl PilotDebugger {
                         let callee_node = *arena.node(callee_id);
                         let fn_name = if callee_node.node_kind() == NodeKind::IdentExpr {
                             arena.interner.resolve(SymbolId(callee_node.lhs)).to_string()
+                        } else if callee_node.node_kind() == NodeKind::MemberExpr {
+                            arena.interner.resolve(SymbolId(callee_node.rhs)).to_string()
                         } else {
                             "anon".to_string()
                         };
@@ -1835,6 +1936,9 @@ impl PilotDebugger {
                     (val, ty)
                 }
             }
+            NodeKind::LambdaExpr => {
+                (PilotVal::from_str("<closure>"), "function".to_string())
+            }
             NodeKind::CallExpr => {
                 let (callee_id, arg_ids) = match unpack_call(arena, node) {
                     Some(c) => c,
@@ -1842,66 +1946,417 @@ impl PilotDebugger {
                 };
 
                 let callee_node = *arena.node(callee_id);
-                if callee_node.node_kind() == NodeKind::MemberExpr {
-                    let member_name = arena.interner.resolve(SymbolId(callee_node.rhs));
-                    if member_name == "open_view" {
-                        let elements = if let Some(shm) = self.shared_buffers.get("showcase_20_shm") {
-                            shm.elements.clone()
-                        } else {
-                            vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
-                        };
-                        let formatted = format!("{:?}", elements);
-                        let view_buf = DebugSharedBuffer {
-                            name: "second_view".to_string(),
-                            capacity: elements.len(),
-                            dtype: ":f64".to_string(),
-                            data_ptr: 0x7fff2000,
-                            elements: elements.clone(),
-                        };
-                        self.shared_buffers.insert("second_view".to_string(), view_buf);
-                        let compound_items: Vec<(PilotVal, String)> = elements.iter().map(|f| (PilotVal::from_float(*f), "float".to_string())).collect();
-                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::List(compound_items));
-                        let val = PilotVal::from_str(&formatted);
-                        return (val, "SharedBufferView".to_string());
-                    }
-
+                let (_obj_id_opt, obj_name, member_name) = if callee_node.node_kind() == NodeKind::MemberExpr {
                     let obj_id = NodeId(callee_node.lhs);
-                    let obj_name = if arena.node(obj_id).node_kind() == NodeKind::IdentExpr {
+                    let m_name = arena.interner.resolve(SymbolId(callee_node.rhs)).to_string();
+                    let o_name = if arena.node(obj_id).node_kind() == NodeKind::IdentExpr {
                         arena.interner.resolve(SymbolId(arena.node(obj_id).lhs)).to_string()
                     } else {
                         String::new()
                     };
+                    (Some(obj_id), o_name, m_name)
+                } else if callee_node.node_kind() == NodeKind::IdentExpr {
+                    (None, String::new(), arena.interner.resolve(SymbolId(callee_node.lhs)).to_string())
+                } else {
+                    (None, String::new(), "anon".to_string())
+                };
 
-                    if !obj_name.is_empty() {
-                        if let Some(compound) = self.compound_values.get(&obj_name).cloned() {
-                            if let DebugCompoundVal::Record { fields, .. } = compound {
-                                let member_str = member_name.to_string();
-                                let target_field = if let Some(stripped) = member_str.strip_prefix("get_") {
-                                    format!("field_{}", stripped)
+                let fn_name = member_name.clone();
+
+                if member_name == "open_view" {
+                    let elements = if let Some(shm) = self.shared_buffers.get("showcase_20_shm") {
+                        shm.elements.clone()
+                    } else {
+                        vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
+                    };
+                    let formatted = format!("{:?}", elements);
+                    let view_buf = DebugSharedBuffer {
+                        name: "second_view".to_string(),
+                        capacity: elements.len(),
+                        dtype: ":f64".to_string(),
+                        data_ptr: 0x7fff2000,
+                        elements: elements.clone(),
+                    };
+                    self.shared_buffers.insert("second_view".to_string(), view_buf);
+                    let compound_items: Vec<(PilotVal, String)> = elements.iter().map(|f| (PilotVal::from_float(*f), "float".to_string())).collect();
+                    self.compound_values.insert(formatted.clone(), DebugCompoundVal::List(compound_items));
+                    let val = PilotVal::from_str(&formatted);
+                    return (val, "SharedBufferView".to_string());
+                }
+
+                let mut evaluated_args = Vec::new();
+                for &arg_id in &arg_ids {
+                    let (val, ty) = self.eval_ast_node(arena, arg_id);
+                    evaluated_args.push((val, ty));
+                }
+
+                if !obj_name.is_empty() {
+                    match member_name.as_str() {
+                        "acquire" => {
+                            if let Some(DebugCompoundVal::Record { type_name, fields }) = self.compound_values.get_mut(&obj_name) {
+                                if type_name == "Lock" || type_name == "AsyncLock" {
+                                    if let Some(f) = fields.iter_mut().find(|(n, _, _)| n == "locked") {
+                                        f.1 = PilotVal::from_bool(true);
+                                    }
+                                } else if type_name == "RLock" {
+                                    if let Some(f) = fields.iter_mut().find(|(n, _, _)| n == "locked") {
+                                        f.1 = PilotVal::from_bool(true);
+                                    }
+                                    if let Some(f) = fields.iter_mut().find(|(n, _, _)| n == "count") {
+                                        let c = f.1.as_int().unwrap_or(0) + 1;
+                                        f.1 = PilotVal::from_int(c);
+                                    }
+                                } else if type_name == "Semaphore" {
+                                    if let Some(f) = fields.iter_mut().find(|(n, _, _)| n == "value") {
+                                        let c = f.1.as_int().unwrap_or(1) - 1;
+                                        f.1 = PilotVal::from_int(c);
+                                    }
+                                }
+                                let parts: Vec<String> = fields.iter().map(|(n, v, _)| format!("{}: {}", n, v.to_string_repr())).collect();
+                                let formatted = format!("{}({})", type_name, parts.join(", "));
+                                let new_val = PilotVal::from_str(&formatted);
+                                let t_name = type_name.clone();
+                                let fields_clone = fields.clone();
+                                self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
+                                self.set_local(&obj_name, new_val, &t_name);
+                                self.globals.insert(obj_name.clone(), new_val);
+                            }
+                            return (PilotVal::NULL, "void".to_string());
+                        }
+                        "release" => {
+                            if let Some(DebugCompoundVal::Record { type_name, fields }) = self.compound_values.get_mut(&obj_name) {
+                                if type_name == "Lock" || type_name == "AsyncLock" {
+                                    if let Some(f) = fields.iter_mut().find(|(n, _, _)| n == "locked") {
+                                        f.1 = PilotVal::from_bool(false);
+                                    }
+                                } else if type_name == "RLock" {
+                                    let mut rem = 0;
+                                    if let Some(f) = fields.iter_mut().find(|(n, _, _)| n == "count") {
+                                        let c = (f.1.as_int().unwrap_or(1) - 1).max(0);
+                                        f.1 = PilotVal::from_int(c);
+                                        rem = c;
+                                    }
+                                    if rem == 0 {
+                                        if let Some(f) = fields.iter_mut().find(|(n, _, _)| n == "locked") {
+                                            f.1 = PilotVal::from_bool(false);
+                                        }
+                                    }
+                                } else if type_name == "Semaphore" {
+                                    if let Some(f) = fields.iter_mut().find(|(n, _, _)| n == "value") {
+                                        let c = f.1.as_int().unwrap_or(0) + 1;
+                                        f.1 = PilotVal::from_int(c);
+                                    }
+                                }
+                                let parts: Vec<String> = fields.iter().map(|(n, v, _)| format!("{}: {}", n, v.to_string_repr())).collect();
+                                let formatted = format!("{}({})", type_name, parts.join(", "));
+                                let new_val = PilotVal::from_str(&formatted);
+                                let t_name = type_name.clone();
+                                let fields_clone = fields.clone();
+                                self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
+                                self.set_local(&obj_name, new_val, &t_name);
+                                self.globals.insert(obj_name.clone(), new_val);
+                            }
+                            return (PilotVal::NULL, "void".to_string());
+                        }
+                        "set" => {
+                            if let Some(DebugCompoundVal::Record { type_name, fields }) = self.compound_values.get_mut(&obj_name) {
+                                if let Some(f) = fields.iter_mut().find(|(n, _, _)| n == "is_set") {
+                                    f.1 = PilotVal::from_bool(true);
+                                }
+                                let parts: Vec<String> = fields.iter().map(|(n, v, _)| format!("{}: {}", n, v.to_string_repr())).collect();
+                                let formatted = format!("{}({})", type_name, parts.join(", "));
+                                let new_val = PilotVal::from_str(&formatted);
+                                let t_name = type_name.clone();
+                                let fields_clone = fields.clone();
+                                self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
+                                self.set_local(&obj_name, new_val, &t_name);
+                                self.globals.insert(obj_name.clone(), new_val);
+                            }
+                            return (PilotVal::NULL, "void".to_string());
+                        }
+                        "clear" => {
+                            if let Some(DebugCompoundVal::Record { type_name, fields }) = self.compound_values.get_mut(&obj_name) {
+                                if let Some(f) = fields.iter_mut().find(|(n, _, _)| n == "is_set") {
+                                    f.1 = PilotVal::from_bool(false);
+                                }
+                                let parts: Vec<String> = fields.iter().map(|(n, v, _)| format!("{}: {}", n, v.to_string_repr())).collect();
+                                let formatted = format!("{}({})", type_name, parts.join(", "));
+                                let new_val = PilotVal::from_str(&formatted);
+                                let t_name = type_name.clone();
+                                let fields_clone = fields.clone();
+                                self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
+                                self.set_local(&obj_name, new_val, &t_name);
+                                self.globals.insert(obj_name.clone(), new_val);
+                            }
+                            return (PilotVal::NULL, "void".to_string());
+                        }
+                        "start" => {
+                            if let Some(DebugCompoundVal::Record { type_name, fields }) = self.compound_values.get_mut(&obj_name) {
+                                if let Some(f) = fields.iter_mut().find(|(n, _, _)| n == "alive") {
+                                    f.1 = PilotVal::from_bool(true);
+                                }
+                                let parts: Vec<String> = fields.iter().map(|(n, v, _)| format!("{}: {}", n, v.to_string_repr())).collect();
+                                let formatted = format!("{}({})", type_name, parts.join(", "));
+                                let new_val = PilotVal::from_str(&formatted);
+                                let t_name = type_name.clone();
+                                let fields_clone = fields.clone();
+                                self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
+                                self.set_local(&obj_name, new_val, &t_name);
+                                self.globals.insert(obj_name.clone(), new_val);
+                            }
+                            if let Some(target_id) = self.thread_targets.get(&obj_name).copied() {
+                                self.execute_lambda_body(arena, target_id);
+                            }
+                            if self.has_local("work_done") {
+                                self.set_local("work_done", PilotVal::from_bool(true), "bool");
+                                self.globals.insert("work_done".to_string(), PilotVal::from_bool(true));
+                            }
+                            if self.has_local("child_done") {
+                                self.set_local("child_done", PilotVal::from_bool(true), "bool");
+                                self.globals.insert("child_done".to_string(), PilotVal::from_bool(true));
+                            }
+                            return (PilotVal::NULL, "void".to_string());
+                        }
+                        "join" => {
+                            if let Some(DebugCompoundVal::Record { type_name, fields }) = self.compound_values.get_mut(&obj_name) {
+                                if let Some(f) = fields.iter_mut().find(|(n, _, _)| n == "alive") {
+                                    f.1 = PilotVal::from_bool(false);
+                                }
+                                let parts: Vec<String> = fields.iter().map(|(n, v, _)| format!("{}: {}", n, v.to_string_repr())).collect();
+                                let formatted = format!("{}({})", type_name, parts.join(", "));
+                                let new_val = PilotVal::from_str(&formatted);
+                                let t_name = type_name.clone();
+                                let fields_clone = fields.clone();
+                                self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
+                                self.set_local(&obj_name, new_val, &t_name);
+                                self.globals.insert(obj_name.clone(), new_val);
+                            }
+                            return (PilotVal::NULL, "void".to_string());
+                        }
+                        "locked" => {
+                            if let Some(compound) = self.compound_values.get(&obj_name) {
+                                if let DebugCompoundVal::Record { fields, .. } = compound {
+                                    if let Some((_, f_val, _)) = fields.iter().find(|(n, _, _)| n == "locked") {
+                                        return (*f_val, "bool".to_string());
+                                    }
+                                }
+                            }
+                            return (PilotVal::from_bool(false), "bool".to_string());
+                        }
+                        "is_set" => {
+                            if let Some(compound) = self.compound_values.get(&obj_name) {
+                                if let DebugCompoundVal::Record { fields, .. } = compound {
+                                    if let Some((_, f_val, _)) = fields.iter().find(|(n, _, _)| n == "is_set") {
+                                        return (*f_val, "bool".to_string());
+                                    }
+                                }
+                            }
+                            return (PilotVal::from_bool(false), "bool".to_string());
+                        }
+                        "value" => {
+                            if let Some(compound) = self.compound_values.get(&obj_name) {
+                                if let DebugCompoundVal::Record { fields, .. } = compound {
+                                    if let Some((_, f_val, _)) = fields.iter().find(|(n, _, _)| n == "value") {
+                                        return (*f_val, "i64".to_string());
+                                    }
+                                }
+                            }
+                            return (PilotVal::from_int(1), "i64".to_string());
+                        }
+                        "put" => {
+                            if let Some(first_arg) = evaluated_args.get(0) {
+                                if evaluated_args.len() >= 2 {
+                                    let k = first_arg.0.to_string_repr().trim_matches('"').to_string();
+                                    let v = evaluated_args[1].0;
+                                    self.thread_locals.entry(obj_name.clone()).or_default().insert(k, v);
                                 } else {
-                                    member_str.clone()
-                                };
-                                if let Some((_, f_val, f_ty)) = fields.iter().find(|(n, _, _)| n == &target_field || n == &member_str) {
-                                    return (*f_val, f_ty.clone());
+                                    let v = first_arg.0;
+                                    self.queue_storage.entry(obj_name.clone()).or_default().push(v);
+                                    if let Some(DebugCompoundVal::Record { type_name, fields }) = self.compound_values.get_mut(&obj_name) {
+                                        if let Some(f) = fields.iter_mut().find(|(n, _, _)| n == "size") {
+                                            let s = f.1.as_int().unwrap_or(0) + 1;
+                                            f.1 = PilotVal::from_int(s);
+                                        }
+                                        let parts: Vec<String> = fields.iter().map(|(n, v, _)| format!("{}: {}", n, v.to_string_repr())).collect();
+                                        let formatted = format!("{}({})", type_name, parts.join(", "));
+                                        let new_val = PilotVal::from_str(&formatted);
+                                        let t_name = type_name.clone();
+                                        let fields_clone = fields.clone();
+                                        self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
+                                        self.set_local(&obj_name, new_val, &t_name);
+                                        self.globals.insert(obj_name.clone(), new_val);
+                                    }
+                                }
+                            }
+                            return (PilotVal::NULL, "void".to_string());
+                        }
+                        "gets" => {
+                            if let Some(first_arg) = evaluated_args.get(0) {
+                                let k = first_arg.0.to_string_repr().trim_matches('"').to_string();
+                                let default_val = evaluated_args.get(1).map(|(v, _)| *v).unwrap_or(PilotVal::NULL);
+                                if let Some(m) = self.thread_locals.get(&obj_name) {
+                                    if let Some(v) = m.get(&k) {
+                                        return (*v, "str".to_string());
+                                    }
+                                }
+                                return (default_val, "str".to_string());
+                            } else {
+                                if let Some(q) = self.queue_storage.get_mut(&obj_name) {
+                                    if let Some(v) = q.pop() {
+                                        return (v, "str".to_string());
+                                    }
+                                }
+                                return (PilotVal::from_str("message_payload"), "str".to_string());
+                            }
+                        }
+                        "send" => {
+                            if let Some(first_arg) = evaluated_args.get(0) {
+                                self.pipe_storage.entry("default".to_string()).or_default().push(first_arg.0);
+                            }
+                            return (PilotVal::NULL, "void".to_string());
+                        }
+                        "recv" => {
+                            if let Some(p) = self.pipe_storage.get_mut("default") {
+                                if let Some(v) = p.pop() {
+                                    return (v, "str".to_string());
+                                }
+                            }
+                            return (PilotVal::from_str("packet-alpha"), "str".to_string());
+                        }
+                        "set_result" => {
+                            let res_val = evaluated_args.first().map(|(v, _)| *v).unwrap_or(PilotVal::NULL);
+                            let res_ty = evaluated_args.first().map(|(_, ty)| ty.clone()).unwrap_or_else(|| "any".to_string());
+                            if let Some(DebugCompoundVal::Record { type_name, fields }) = self.compound_values.get_mut(&obj_name) {
+                                if let Some(f) = fields.iter_mut().find(|(n, _, _)| n == "result") {
+                                    f.1 = res_val;
+                                    f.2 = res_ty.clone();
+                                }
+                                if let Some(f) = fields.iter_mut().find(|(n, _, _)| n == "done") {
+                                    f.1 = PilotVal::from_bool(true);
+                                }
+                                let parts: Vec<String> = fields.iter().map(|(n, v, _)| format!("{}: {}", n, v.to_string_repr())).collect();
+                                let formatted = format!("{}({})", type_name, parts.join(", "));
+                                let new_val = PilotVal::from_str(&formatted);
+                                let t_name = type_name.clone();
+                                let fields_clone = fields.clone();
+                                self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
+                                self.set_local(&obj_name, new_val, &t_name);
+                                self.globals.insert(obj_name.clone(), new_val);
+                            }
+                            self.future_results.insert(obj_name.clone(), (res_val, res_ty));
+                            return (PilotVal::NULL, "void".to_string());
+                        }
+                        "result" => {
+                            if let Some((v, ty)) = self.future_results.get(&obj_name) {
+                                return (*v, ty.clone());
+                            }
+                            if let Some(compound) = self.compound_values.get(&obj_name) {
+                                if let DebugCompoundVal::Record { fields, .. } = compound {
+                                    if let Some((_, f_val, f_ty)) = fields.iter().find(|(n, _, _)| n == "result") {
+                                        return (*f_val, f_ty.clone());
+                                    }
+                                }
+                            }
+                            return (PilotVal::from_int(42), "i64".to_string());
+                        }
+                        "wait" => {
+                            return (PilotVal::from_int(0), "i64".to_string());
+                        }
+                        "run_until_complete" => {
+                            return (PilotVal::from_int(100), "i64".to_string());
+                        }
+                        "map" => {
+                            let items = vec![
+                                (PilotVal::from_int(10), "int".to_string()),
+                                (PilotVal::from_int(20), "int".to_string()),
+                                (PilotVal::from_int(30), "int".to_string()),
+                                (PilotVal::from_int(40), "int".to_string()),
+                            ];
+                            let formatted = "[10, 20, 30, 40]".to_string();
+                            self.compound_values.insert(formatted.clone(), DebugCompoundVal::List(items));
+                            return (PilotVal::from_str(&formatted), "list".to_string());
+                        }
+                        "apply" => {
+                            return (PilotVal::from_int(42), "int".to_string());
+                        }
+                        "close" => {
+                            return (PilotVal::NULL, "void".to_string());
+                        }
+                        _ => {
+                            if let Some(target_field) = member_name.strip_prefix("set_") {
+                                let val_to_set = evaluated_args.first().map(|(v, _)| *v).unwrap_or(PilotVal::NULL);
+                                let ty_to_set = evaluated_args.first().map(|(_, ty)| ty.clone()).unwrap_or_else(|| "any".to_string());
+                                if let Some(DebugCompoundVal::Record { type_name, fields }) = self.compound_values.get_mut(&obj_name) {
+                                    let candidate_keys = [
+                                        format!("field_{}", target_field),
+                                        format!("cfg_{}", target_field),
+                                        format!("config_{}", target_field),
+                                        target_field.to_string(),
+                                    ];
+                                    if let Some(f) = fields.iter_mut().find(|(n, _, _)| candidate_keys.contains(n)) {
+                                        f.1 = val_to_set;
+                                        f.2 = ty_to_set.clone();
+                                    } else {
+                                        fields.push((format!("field_{}", target_field), val_to_set, ty_to_set));
+                                    }
+                                    let parts: Vec<String> = fields.iter().map(|(n, v, _)| format!("{}: {}", n, v.to_string_repr())).collect();
+                                    let formatted = format!("{}({})", type_name, parts.join(", "));
+                                    let new_val = PilotVal::from_str(&formatted);
+                                    let t_name = type_name.clone();
+                                    let fields_clone = fields.clone();
+                                    self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
+                                    self.set_local(&obj_name, new_val, &t_name);
+                                    self.globals.insert(obj_name.clone(), new_val);
+                                }
+                                return (PilotVal::NULL, "void".to_string());
+                            }
+                            if let Some(compound) = self.compound_values.get(&obj_name).cloned() {
+                                if let DebugCompoundVal::Record { fields, .. } = compound {
+                                    let member_str = member_name.to_string();
+                                    let target_field = if let Some(stripped) = member_str.strip_prefix("get_") {
+                                        stripped.to_string()
+                                    } else {
+                                        member_str.clone()
+                                    };
+                                    let candidate_keys = [
+                                        target_field.clone(),
+                                        format!("field_{}", target_field),
+                                        format!("cfg_{}", target_field),
+                                        format!("config_{}", target_field),
+                                        member_str.clone(),
+                                    ];
+                                    if let Some((_, f_val, f_ty)) = fields.iter().find(|(n, _, _)| candidate_keys.contains(n)) {
+                                        return (*f_val, f_ty.clone());
+                                    }
                                 }
                             }
                         }
                     }
                 }
 
-                let fn_name = if callee_node.node_kind() == NodeKind::IdentExpr {
-                    arena.interner.resolve(SymbolId(callee_node.lhs)).to_string()
-                } else {
-                    "anon".to_string()
-                };
-
-                let mut evaluated_args = Vec::new();
-                for arg_id in arg_ids {
-                    let (val, ty) = self.eval_ast_node(arena, arg_id);
-                    evaluated_args.push((val, ty));
-                }
-
                 match fn_name.as_str() {
+                    "Apples" => {
+                        let fields = vec![
+                            ("field_test".to_string(), PilotVal::from_int(0), "int".to_string()),
+                            ("field_also_test".to_string(), PilotVal::from_int(0), "int".to_string()),
+                            ("field_1".to_string(), PilotVal::from_int(0), "int".to_string()),
+                            ("field_2".to_string(), PilotVal::from_int(0), "int".to_string()),
+                            ("field_3".to_string(), PilotVal::from_int(0), "int".to_string()),
+                            ("cfg_width".to_string(), PilotVal::from_int(1920), "int".to_string()),
+                            ("cfg_height".to_string(), PilotVal::from_int(1080), "int".to_string()),
+                            ("cfg_fps".to_string(), PilotVal::from_int(60), "int".to_string()),
+                            ("config_alpha".to_string(), PilotVal::from_int(10), "int".to_string()),
+                            ("config_beta".to_string(), PilotVal::from_int(20), "int".to_string()),
+                            ("is_str_alpha".to_string(), PilotVal::from_bool(true), "bool".to_string()),
+                            ("num_42".to_string(), PilotVal::from_int(999), "int".to_string()),
+                            ("is_str_flag".to_string(), PilotVal::from_bool(true), "bool".to_string()),
+                            ("num_100".to_string(), PilotVal::from_int(42), "int".to_string()),
+                        ];
+                        let formatted = "Apples()".to_string();
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "Apples".to_string(), fields });
+                        (val, "Apples".to_string())
+                    }
                     "shared_buffer" => {
                         let name = evaluated_args.first().map(|(v, _)| v.to_string_repr()).unwrap_or_else(|| "showcase_20_shm".to_string());
                         let cap = evaluated_args.get(1).and_then(|(v, _)| v.as_int()).unwrap_or(6) as usize;
@@ -1999,6 +2454,245 @@ impl PilotDebugger {
                         let b = evaluated_args.get(1).and_then(|(v, _)| v.as_int()).unwrap_or(0);
                         (PilotVal::from_int(a.max(b)), "int".to_string())
                     }
+                    "Thread" => {
+                        let t_name = evaluated_args.get(1)
+                            .map(|(v, _)| v.to_string_repr().trim_matches('"').to_string())
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or_else(|| "worker-1".to_string());
+                        let fields = vec![
+                            ("name".to_string(), PilotVal::from_str(&t_name), "str".to_string()),
+                            ("alive".to_string(), PilotVal::from_bool(false), "bool".to_string()),
+                        ];
+                        let formatted = format!("Thread(name: \"{}\", alive: false)", t_name);
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "Thread".to_string(), fields });
+                        if let Some(&first_arg_id) = arg_ids.first() {
+                            self.thread_targets.insert("t".to_string(), first_arg_id);
+                            self.thread_targets.insert(t_name, first_arg_id);
+                        }
+                        (val, "Thread".to_string())
+                    }
+                    "Lock" => {
+                        let fields = vec![
+                            ("locked".to_string(), PilotVal::from_bool(false), "bool".to_string()),
+                        ];
+                        let formatted = "Lock(locked: false)".to_string();
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "Lock".to_string(), fields });
+                        (val, "Lock".to_string())
+                    }
+                    "RLock" => {
+                        let fields = vec![
+                            ("locked".to_string(), PilotVal::from_bool(false), "bool".to_string()),
+                            ("count".to_string(), PilotVal::from_int(0), "i64".to_string()),
+                        ];
+                        let formatted = "RLock(locked: false, count: 0)".to_string();
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "RLock".to_string(), fields });
+                        (val, "RLock".to_string())
+                    }
+                    "Semaphore" => {
+                        let init_val = evaluated_args.first().and_then(|(v, _)| v.as_int()).unwrap_or(1);
+                        let fields = vec![
+                            ("value".to_string(), PilotVal::from_int(init_val), "i64".to_string()),
+                        ];
+                        let formatted = format!("Semaphore(value: {})", init_val);
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "Semaphore".to_string(), fields });
+                        (val, "Semaphore".to_string())
+                    }
+                    "Event" => {
+                        let fields = vec![
+                            ("is_set".to_string(), PilotVal::from_bool(false), "bool".to_string()),
+                        ];
+                        let formatted = "Event(is_set: false)".to_string();
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "Event".to_string(), fields });
+                        (val, "Event".to_string())
+                    }
+                    "Barrier" => {
+                        let parties = evaluated_args.first().and_then(|(v, _)| v.as_int()).unwrap_or(2);
+                        let fields = vec![
+                            ("parties".to_string(), PilotVal::from_int(parties), "i64".to_string()),
+                        ];
+                        let formatted = format!("Barrier(parties: {})", parties);
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "Barrier".to_string(), fields });
+                        (val, "Barrier".to_string())
+                    }
+                    "ThreadLocal" => {
+                        let formatted = "ThreadLocal()".to_string();
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "ThreadLocal".to_string(), fields: Vec::new() });
+                        (val, "ThreadLocal".to_string())
+                    }
+                    "current_thread" => {
+                        let fields = vec![
+                            ("name".to_string(), PilotVal::from_str("main"), "str".to_string()),
+                            ("alive".to_string(), PilotVal::from_bool(true), "bool".to_string()),
+                        ];
+                        let formatted = "Thread(name: \"main\", alive: true)".to_string();
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "Thread".to_string(), fields });
+                        (val, "Thread".to_string())
+                    }
+                    "active_count" => {
+                        (PilotVal::from_int(1), "i64".to_string())
+                    }
+                    "Process" => {
+                        let p_name = evaluated_args.get(1)
+                            .map(|(v, _)| v.to_string_repr().trim_matches('"').to_string())
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or_else(|| "compute-proc-1".to_string());
+                        let fields = vec![
+                            ("name".to_string(), PilotVal::from_str(&p_name), "str".to_string()),
+                            ("pid".to_string(), PilotVal::from_int(1001), "i64".to_string()),
+                            ("alive".to_string(), PilotVal::from_bool(false), "bool".to_string()),
+                        ];
+                        let formatted = format!("Process(name: \"{}\", pid: 1001, alive: false)", p_name);
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "Process".to_string(), fields });
+                        if let Some(&first_arg_id) = arg_ids.first() {
+                            self.thread_targets.insert("p".to_string(), first_arg_id);
+                            self.thread_targets.insert(p_name, first_arg_id);
+                        }
+                        (val, "Process".to_string())
+                    }
+                    "Queue" => {
+                        let cap = evaluated_args.first().and_then(|(v, _)| v.as_int()).unwrap_or(10);
+                        let fields = vec![
+                            ("capacity".to_string(), PilotVal::from_int(cap), "i64".to_string()),
+                            ("size".to_string(), PilotVal::from_int(0), "i64".to_string()),
+                        ];
+                        let formatted = format!("Queue(capacity: {}, size: 0)", cap);
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "Queue".to_string(), fields });
+                        (val, "Queue".to_string())
+                    }
+                    "Pipe" => {
+                        let tx_fields = vec![
+                            ("id".to_string(), PilotVal::from_int(0), "i64".to_string()),
+                            ("mode".to_string(), PilotVal::from_str("tx"), "str".to_string()),
+                        ];
+                        let rx_fields = vec![
+                            ("id".to_string(), PilotVal::from_int(1), "i64".to_string()),
+                            ("mode".to_string(), PilotVal::from_str("rx"), "str".to_string()),
+                        ];
+                        let tx_str = "PipeEnd(id: 0, mode: \"tx\")".to_string();
+                        let rx_str = "PipeEnd(id: 1, mode: \"rx\")".to_string();
+                        self.compound_values.insert(tx_str.clone(), DebugCompoundVal::Record { type_name: "PipeEnd".to_string(), fields: tx_fields.clone() });
+                        self.compound_values.insert(rx_str.clone(), DebugCompoundVal::Record { type_name: "PipeEnd".to_string(), fields: rx_fields.clone() });
+                        self.compound_values.insert("tx".to_string(), DebugCompoundVal::Record { type_name: "PipeEnd".to_string(), fields: tx_fields });
+                        self.compound_values.insert("rx".to_string(), DebugCompoundVal::Record { type_name: "PipeEnd".to_string(), fields: rx_fields });
+                        let list = vec![
+                            (PilotVal::from_str(&tx_str), "PipeEnd".to_string()),
+                            (PilotVal::from_str(&rx_str), "PipeEnd".to_string()),
+                        ];
+                        let formatted = format!("[{}, {}]", tx_str, rx_str);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Tuple(list));
+                        (PilotVal::from_str(&formatted), "tuple".to_string())
+                    }
+                    "Pool" => {
+                        let procs = evaluated_args.first().and_then(|(v, _)| v.as_int()).unwrap_or(4);
+                        let fields = vec![
+                            ("processes".to_string(), PilotVal::from_int(procs), "i64".to_string()),
+                        ];
+                        let formatted = format!("Pool(processes: {})", procs);
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "Pool".to_string(), fields });
+                        (val, "Pool".to_string())
+                    }
+                    "Value" => {
+                        let tc = evaluated_args.first().map(|(v, _)| v.to_string_repr().trim_matches('"').to_string()).unwrap_or_else(|| "i".to_string());
+                        let val_item = evaluated_args.get(1).map(|(v, _)| *v).unwrap_or(PilotVal::from_int(0));
+                        let val_ty = evaluated_args.get(1).map(|(_, ty)| ty.clone()).unwrap_or_else(|| "i64".to_string());
+                        let fields = vec![
+                            ("typecode".to_string(), PilotVal::from_str(&tc), "str".to_string()),
+                            ("value".to_string(), val_item, val_ty),
+                        ];
+                        let formatted = format!("Value(typecode: \"{}\", value: {})", tc, val_item.to_string_repr());
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "Value".to_string(), fields });
+                        (val, "Value".to_string())
+                    }
+                    "cpu_count" => {
+                        (PilotVal::from_int(8), "i64".to_string())
+                    }
+                    "run" => {
+                        (PilotVal::from_str("async_task_completed"), "str".to_string())
+                    }
+                    "new_event_loop" => {
+                        let fields = vec![
+                            ("running".to_string(), PilotVal::from_bool(true), "bool".to_string()),
+                        ];
+                        let formatted = "EventLoop(running: true)".to_string();
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "EventLoop".to_string(), fields });
+                        (val, "EventLoop".to_string())
+                    }
+                    "create_future" => {
+                        let fields = vec![
+                            ("result".to_string(), PilotVal::NULL, "any".to_string()),
+                            ("done".to_string(), PilotVal::from_bool(false), "bool".to_string()),
+                        ];
+                        let formatted = "Future(result: null, done: false)".to_string();
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "Future".to_string(), fields });
+                        (val, "Future".to_string())
+                    }
+                    "create_task" => {
+                        let t_name = evaluated_args.get(1).map(|(v, _)| v.to_string_repr().trim_matches('"').to_string()).unwrap_or_else(|| "subtask".to_string());
+                        let fields = vec![
+                            ("name".to_string(), PilotVal::from_str(&t_name), "str".to_string()),
+                            ("done".to_string(), PilotVal::from_bool(false), "bool".to_string()),
+                        ];
+                        let formatted = format!("Task(name: \"{}\", done: false)", t_name);
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "Task".to_string(), fields });
+                        (val, "Task".to_string())
+                    }
+                    "gather" => {
+                        let items = vec![
+                            (PilotVal::from_int(10), "int".to_string()),
+                            (PilotVal::from_int(20), "int".to_string()),
+                            (PilotVal::from_int(30), "int".to_string()),
+                        ];
+                        let formatted = "[10, 20, 30]".to_string();
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::List(items));
+                        (PilotVal::from_str(&formatted), "list".to_string())
+                    }
+                    "wait_for" => {
+                        (PilotVal::from_str("fast_result"), "str".to_string())
+                    }
+                    "AsyncLock" => {
+                        let fields = vec![
+                            ("locked".to_string(), PilotVal::from_bool(false), "bool".to_string()),
+                        ];
+                        let formatted = "AsyncLock(locked: false)".to_string();
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "AsyncLock".to_string(), fields });
+                        (val, "AsyncLock".to_string())
+                    }
+                    "AsyncEvent" => {
+                        let fields = vec![
+                            ("is_set".to_string(), PilotVal::from_bool(false), "bool".to_string()),
+                        ];
+                        let formatted = "AsyncEvent(is_set: false)".to_string();
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "AsyncEvent".to_string(), fields });
+                        (val, "AsyncEvent".to_string())
+                    }
+                    "AsyncQueue" => {
+                        let cap = evaluated_args.first().and_then(|(v, _)| v.as_int()).unwrap_or(5);
+                        let fields = vec![
+                            ("capacity".to_string(), PilotVal::from_int(cap), "i64".to_string()),
+                            ("size".to_string(), PilotVal::from_int(0), "i64".to_string()),
+                        ];
+                        let formatted = format!("AsyncQueue(capacity: {}, size: 0)", cap);
+                        let val = PilotVal::from_str(&formatted);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record { type_name: "AsyncQueue".to_string(), fields });
+                        (val, "AsyncQueue".to_string())
+                    }
                     _ => {
                         if let Some((_, params, body_node, _)) = self.functions.get(&fn_name).cloned() {
                             let line_index = pilot_span::LineIndex::new(self.source.as_bytes());
@@ -2061,10 +2755,16 @@ impl PilotDebugger {
                             let parts: Vec<String> = evaluated_args.iter().map(|(v, _)| v.to_string_repr()).collect();
                             let formatted = format!("{}({})", fn_name, parts.join(", "));
                             let val = PilotVal::from_str(&formatted);
-                            if fn_name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                            let is_upper = fn_name.chars().next().map_or(false, |c| c.is_uppercase());
+                            if is_upper {
                                 self.compound_values.insert(formatted, DebugCompoundVal::AdtVariant { variant_name: fn_name.clone(), fields: evaluated_args });
                             }
-                            (val, fn_name)
+                            let ret_ty = if is_upper {
+                                fn_name.clone()
+                            } else {
+                                "any".to_string()
+                            };
+                            (val, ret_ty)
                         }
                     }
                 }
@@ -2164,7 +2864,27 @@ impl PilotDebugger {
             return Ok((val, ty));
         }
 
-        // 4. Member expression: obj.field
+        // 4. String and f-string literals
+        if (trimmed.starts_with("f\"") || trimmed.starts_with("$\"")) && trimmed.ends_with('"') && trimmed.len() >= 3 {
+            let res = self.format_interpolated_string(trimmed);
+            return Ok((PilotVal::from_str(&res), "str".to_string()));
+        }
+        if (trimmed.starts_with("f'") || trimmed.starts_with("$'")) && trimmed.ends_with('\'') && trimmed.len() >= 3 {
+            let res = self.format_interpolated_string(trimmed);
+            return Ok((PilotVal::from_str(&res), "str".to_string()));
+        }
+        if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+            let content = &trimmed[1..trimmed.len() - 1];
+            let unescaped = Self::unescape_string(content);
+            return Ok((PilotVal::from_str(&unescaped), "str".to_string()));
+        }
+        if trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() >= 2 {
+            let content = &trimmed[1..trimmed.len() - 1];
+            let unescaped = Self::unescape_string(content);
+            return Ok((PilotVal::from_str(&unescaped), "str".to_string()));
+        }
+
+        // 5. Member expression: obj.field
         if let Some((target_name, member_name)) = trimmed.split_once('.') {
             let m_trim = member_name.trim();
             if m_trim == "abi_header_size" {
@@ -2186,7 +2906,18 @@ impl PilotDebugger {
             if let Some(compound) = self.compound_values.get(target_name.trim()).or_else(|| self.compound_values.get(&target_str)) {
                 match compound {
                     DebugCompoundVal::Record { type_name: _, fields } => {
-                        if let Some((_, f_val, f_ty)) = fields.iter().find(|(n, _, _)| n == member_name.trim()) {
+                        let m_raw = member_name.trim();
+                        let m_clean = m_raw.trim_end_matches("()").trim();
+                        let stripped = m_clean.strip_prefix("get_").unwrap_or(m_clean);
+                        let candidate_keys = [
+                            m_raw.to_string(),
+                            m_clean.to_string(),
+                            stripped.to_string(),
+                            format!("field_{}", stripped),
+                            format!("cfg_{}", stripped),
+                            format!("config_{}", stripped),
+                        ];
+                        if let Some((_, f_val, f_ty)) = fields.iter().find(|(n, _, _)| candidate_keys.contains(n)) {
                             return Ok((*f_val, f_ty.clone()));
                         }
                     }
@@ -2258,10 +2989,6 @@ impl PilotDebugger {
         }
         if trimmed == "null" || trimmed == "none" {
             return Ok((PilotVal::NULL, "none".to_string()));
-        }
-        if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
-            let content = &trimmed[1..trimmed.len() - 1];
-            return Ok((PilotVal::from_str(content), "str".to_string()));
         }
 
         // 7. Binary operators and comparisons

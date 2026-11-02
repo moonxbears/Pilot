@@ -633,4 +633,123 @@ mod tests {
 
         let _ = std::fs::remove_file(&test_file);
     }
+
+    #[test]
+    fn test_concurrency_stdlib_dap() {
+        let mut dap = DapServer::new();
+        dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
+        let current_dir = std::env::current_dir().unwrap();
+        // Locate examples/test_concurrency_stdlib.pilot
+        let pilot_file = if current_dir.join("examples/test_concurrency_stdlib.pilot").exists() {
+            current_dir.join("examples/test_concurrency_stdlib.pilot")
+        } else if current_dir.join("../../examples/test_concurrency_stdlib.pilot").exists() {
+            current_dir.join("../../examples/test_concurrency_stdlib.pilot")
+        } else {
+            std::path::PathBuf::from("examples/test_concurrency_stdlib.pilot")
+        };
+        let file_path = pilot_file.to_string_lossy().replace('\\', "/");
+
+        // Set breakpoint on line 35: `let is_set: bool = ev.is_set();`
+        dap.handle_message(&format!(
+            r#"{{"seq":2,"type":"request","command":"setBreakpoints","arguments":{{"source":{{"path":"{}"}},"breakpoints":[{{"line":35}}]}}}}"#,
+            file_path
+        )).unwrap();
+
+        dap.handle_message(&format!(
+            r#"{{"seq":3,"type":"request","command":"launch","arguments":{{"program":"{}","stopOnEntry":false}}}}"#,
+            file_path
+        )).unwrap();
+        dap.handle_message(r#"{"seq":4,"type":"request","command":"configurationDone"}"#).unwrap();
+
+        assert!(matches!(dap.debugger.state, DebuggerState::Paused(_)));
+
+        // Request variables for Locals (ref 1000)
+        let vars_resp = dap.handle_message(r#"{"seq":7,"type":"request","command":"variables","arguments":{"variablesReference":1000}}"#).unwrap();
+        println!("DAP concurrency vars response: {}", vars_resp);
+
+        assert!(!vars_resp.contains("anon"), "Variables should never contain 'anon': {}", vars_resp);
+        assert!(vars_resp.contains("\"name\":\"t\""), "Expected t variable");
+        assert!(vars_resp.contains("Thread"), "Expected Thread type");
+        assert!(vars_resp.contains("\"name\":\"lock\""), "Expected lock variable");
+        assert!(vars_resp.contains("Lock(locked: false)"), "Expected Lock(locked: false)");
+        assert!(vars_resp.contains("\"name\":\"is_locked\""), "Expected is_locked variable");
+        assert!(vars_resp.contains("\"value\":\"true\""), "Expected is_locked true");
+        assert!(vars_resp.contains("\"name\":\"rlock\""), "Expected rlock variable");
+        assert!(vars_resp.contains("RLock"), "Expected RLock type");
+        assert!(vars_resp.contains("\"name\":\"sem\""), "Expected sem variable");
+        assert!(vars_resp.contains("Semaphore(value: 2)"), "Expected Semaphore(value: 2)");
+        assert!(vars_resp.contains("\"name\":\"sem_val\""), "Expected sem_val variable");
+        assert!(vars_resp.contains("\"value\":\"1\""), "Expected sem_val 1");
+        assert!(vars_resp.contains("\"name\":\"ev\""), "Expected ev variable");
+        assert!(vars_resp.contains("Event(is_set: true)"), "Expected Event(is_set: true)");
+        assert!(vars_resp.contains("\"name\":\"work_done\""), "Expected work_done variable");
+        assert!(vars_resp.contains("\"value\":\"true\""), "Expected work_done true");
+    }
+
+    #[test]
+    fn test_showcase_33_dap_execution() {
+        let mut dap = DapServer::new();
+        let current_dir = std::env::current_dir().unwrap();
+        let pilot_file = if current_dir.join("examples/showcase/33_compile_time_generators.pilot").exists() {
+            current_dir.join("examples/showcase/33_compile_time_generators.pilot")
+        } else if current_dir.join("../../examples/showcase/33_compile_time_generators.pilot").exists() {
+            current_dir.join("../../examples/showcase/33_compile_time_generators.pilot")
+        } else {
+            std::path::PathBuf::from("examples/showcase/33_compile_time_generators.pilot")
+        };
+        let file_path = pilot_file.to_string_lossy().replace('\\', "/");
+        dap.debugger.load_program(&file_path).unwrap();
+
+        let mut outputs = Vec::new();
+        while dap.debugger.state != DebuggerState::Terminated {
+            dap.debugger.step_one();
+            outputs.extend(std::mem::take(&mut dap.debugger.pending_outputs));
+        }
+
+        let full_output = outputs.join("");
+        assert!(full_output.contains("Showcase 33: Compile-Time Generator Metaprogramming"), "Expected header");
+        assert!(full_output.contains("apple.get_test()      -> 42"), "Expected get_test");
+        assert!(full_output.contains("apple.get_also_test() -> 84"), "Expected get_also_test");
+        assert!(full_output.contains("apple.get_1()         -> 100"), "Expected get_1");
+        assert!(full_output.contains("apple.get_2()         -> 200"), "Expected get_2");
+        assert!(full_output.contains("apple.get_3()         -> 300"), "Expected get_3");
+        assert!(full_output.contains("Width:  1920"), "Expected width");
+        assert!(full_output.contains("Height: 1080"), "Expected height");
+        assert!(full_output.contains("FPS:    60"), "Expected fps");
+        assert!(full_output.contains("apple.is_str_alpha -> true"), "Expected is_str_alpha");
+        assert!(full_output.contains("apple.num_42       -> 999"), "Expected num_42");
+        assert!(full_output.contains("All compile-time generator demonstrations executed successfully!"), "Expected completion");
+    }
+
+    #[test]
+    fn test_fstring_and_escape_characters() {
+        let mut dap = DapServer::new();
+        let current_dir = std::env::current_dir().unwrap();
+        let pilot_file = if current_dir.join("examples/showcase/33_compile_time_generators.pilot").exists() {
+            current_dir.join("examples/showcase/33_compile_time_generators.pilot")
+        } else if current_dir.join("../../examples/showcase/33_compile_time_generators.pilot").exists() {
+            current_dir.join("../../examples/showcase/33_compile_time_generators.pilot")
+        } else {
+            std::path::PathBuf::from("examples/showcase/33_compile_time_generators.pilot")
+        };
+        let file_path = pilot_file.to_string_lossy().replace('\\', "/");
+        dap.debugger.load_program(&file_path).unwrap();
+
+        while dap.debugger.state != DebuggerState::Terminated {
+            dap.debugger.step_one();
+        }
+
+        // Test escape sequences in unescape_string
+        let unesc = crate::debugger::PilotDebugger::unescape_string("Hello\\n\\tWorld!\\\"\\\\");
+        assert_eq!(unesc, "Hello\n\tWorld!\"\\");
+
+        // Test f-string interpolation of method call and variable with escape
+        let interp = dap.debugger.format_interpolated_string("f\"Width: {apple.get_width()}\\nFPS: {apple.get_fps()}\"");
+        assert_eq!(interp, "Width: 1920\nFPS: 60");
+
+        // Test evaluate with f-string
+        let (val, ty) = dap.debugger.evaluate("f\"Test: {apple.get_test()}\"", None).unwrap();
+        assert_eq!(ty, "str");
+        assert_eq!(val.to_string_repr(), "Test: 42");
+    }
 }

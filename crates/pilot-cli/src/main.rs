@@ -105,7 +105,8 @@ fn main() {
 }
 
 fn cmd_run(args: &[String]) {
-    let use_vm = args.iter().any(|a| a == "--vm" || a == "--interp");
+    let use_vm = args.iter().any(|a| a == "--vm");
+    let use_interp = args.iter().any(|a| a == "--interp");
     let file_arg = args.iter().find(|a| !a.starts_with("--"));
     if file_arg.is_none() {
         eprintln!("error: missing file argument for 'pilot run'.");
@@ -139,6 +140,21 @@ fn cmd_run(args: &[String]) {
                 std::process::exit(1);
             }
         }
+    }
+
+    if use_interp {
+        let mut debugger = pilot_dap::PilotDebugger::new();
+        if let Err(e) = debugger.load_program(file_path) {
+            eprintln!("error: failed to load program '{}': {}", file_path, e);
+            std::process::exit(1);
+        }
+        while debugger.state != pilot_dap::DebuggerState::Terminated {
+            debugger.step_one();
+            for out in std::mem::take(&mut debugger.pending_outputs) {
+                print!("{}", out);
+            }
+        }
+        return;
     }
 
     let src = match fs::read_to_string(file_path) {
@@ -214,14 +230,25 @@ fn cmd_run(args: &[String]) {
             }
         }
         Err(_) => {
-            // Fallback to VM
-            let binary = pilot_vm::BytecodeCompiler::compile(&arena, arena.root);
-            let mut vm = pilot_vm::PilVirtualMachine::new();
-            vm.load_binary(binary);
-            let val = vm.run();
-            if let Some(i) = val.as_int() {
-                if i != 0 {
-                    println!("RESULT: {}", i);
+            // High-fidelity AST execution engine
+            let mut debugger = pilot_dap::PilotDebugger::new();
+            if debugger.load_program(file_path).is_ok() {
+                while debugger.state != pilot_dap::DebuggerState::Terminated {
+                    debugger.step_one();
+                    for out in std::mem::take(&mut debugger.pending_outputs) {
+                        print!("{}", out);
+                    }
+                }
+            } else {
+                // Fallback to VM
+                let binary = pilot_vm::BytecodeCompiler::compile(&arena, arena.root);
+                let mut vm = pilot_vm::PilVirtualMachine::new();
+                vm.load_binary(binary);
+                let val = vm.run();
+                if let Some(i) = val.as_int() {
+                    if i != 0 {
+                        println!("RESULT: {}", i);
+                    }
                 }
             }
         }
