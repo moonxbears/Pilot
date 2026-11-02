@@ -76,8 +76,13 @@
                 "icon": "$(debug-alt)"
             },
             {
+                "command": "pilot.debugCurrentFileDap",
+                "title": "Pilot: Debug with GUI (DAP)",
+                "icon": "$(debug)"
+            },
+            {
                 "command": "pilot.createLaunchConfig",
-                "title": "Pilot: Add Run \u0026 Debug Configurations to launch.json"
+                "title": "Pilot: Add Run & Debug Configurations to launch.json"
             },
             {
                 "command": "pilot.runAllTests",
@@ -141,10 +146,11 @@
                             },
                             "mode": {
                                 "type": "string",
-                                "description": "Execution mode: \u0027run\u0027 for standard execution, \u0027debug\u0027 for interactive terminal debugging.",
+                                "description": "Execution mode: 'run' for standard execution, 'debug' for interactive terminal debugging, 'dap' for VS Code GUI debugger.",
                                 "enum": [
                                     "run",
-                                    "debug"
+                                    "debug",
+                                    "dap"
                                 ],
                                 "default": "run"
                             },
@@ -158,7 +164,7 @@
                             },
                             "pilotPath": {
                                 "type": "string",
-                                "description": "Path to the pilot executable (default: \u0027pilot\u0027)",
+                                "description": "Path to the pilot executable (default: 'pilot')",
                                 "default": "pilot"
                             }
                         }

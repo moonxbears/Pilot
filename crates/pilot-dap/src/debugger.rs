@@ -295,6 +295,17 @@ impl PilotDebugger {
             }
         }
 
+        if let Some((_, params, body_node, _)) = functions.get("main") {
+            if params.is_empty() {
+                let fn_stmts = extract_fn_stmts(&arena, &line_index, *body_node);
+                if stmts.is_empty() {
+                    stmts = fn_stmts;
+                } else {
+                    stmts.extend(fn_stmts);
+                }
+            }
+        }
+
         let initial_line = if let Some(&(_, l, _)) = stmts.first() {
             l
         } else {
@@ -392,7 +403,8 @@ impl PilotDebugger {
     }
 
     pub fn clear_breakpoints_for_file(&mut self, file: &str) {
-        self.breakpoints.retain(|b| b.file != file);
+        let norm = file.replace('\\', "/").to_lowercase();
+        self.breakpoints.retain(|b| b.file.replace('\\', "/").to_lowercase() != norm);
     }
 
     pub fn clear_all_breakpoints(&mut self) {
@@ -400,9 +412,9 @@ impl PilotDebugger {
     }
 
     pub fn check_breakpoint(&mut self, file: &str, line: u32) -> Option<PilotBreakpoint> {
-        let norm_file = file.replace('\\', "/");
+        let norm_file = file.replace('\\', "/").to_lowercase();
         for bp in self.breakpoints.iter_mut() {
-            let bp_norm = bp.file.replace('\\', "/");
+            let bp_norm = bp.file.replace('\\', "/").to_lowercase();
             let file_match = bp_norm == norm_file
                 || norm_file.ends_with(&bp_norm)
                 || bp_norm.ends_with(&norm_file);
@@ -610,7 +622,9 @@ impl PilotDebugger {
 
         // Check breakpoint
         let prog = self.program_path.clone().unwrap_or_default();
-        let at_skip = self.skip_bp.as_ref().map_or(false, |(p, l)| p == &prog && *l == line);
+        let at_skip = self.skip_bp.as_ref().map_or(false, |(p, l)| {
+            p.replace('\\', "/").to_lowercase() == prog.replace('\\', "/").to_lowercase() && *l == line
+        });
 
         if !at_skip {
             if let Some(bp) = self.check_breakpoint(&prog, line) {
@@ -1559,7 +1573,7 @@ impl PilotDebugger {
                     }
                 }
 
-                if let Some(compound) = self.compound_values.get(&target_str) {
+                if let Some(compound) = self.compound_values.get(&target_name).or_else(|| self.compound_values.get(&target_str)) {
                     match compound {
                         DebugCompoundVal::Record { type_name: _, fields } => {
                             if let Some((_, f_val, f_ty)) = fields.iter().find(|(n, _, _)| n == member_name) {
@@ -1850,6 +1864,29 @@ impl PilotDebugger {
                         let val = PilotVal::from_str(&formatted);
                         return (val, "SharedBufferView".to_string());
                     }
+
+                    let obj_id = NodeId(callee_node.lhs);
+                    let obj_name = if arena.node(obj_id).node_kind() == NodeKind::IdentExpr {
+                        arena.interner.resolve(SymbolId(arena.node(obj_id).lhs)).to_string()
+                    } else {
+                        String::new()
+                    };
+
+                    if !obj_name.is_empty() {
+                        if let Some(compound) = self.compound_values.get(&obj_name).cloned() {
+                            if let DebugCompoundVal::Record { fields, .. } = compound {
+                                let member_str = member_name.to_string();
+                                let target_field = if let Some(stripped) = member_str.strip_prefix("get_") {
+                                    format!("field_{}", stripped)
+                                } else {
+                                    member_str.clone()
+                                };
+                                if let Some((_, f_val, f_ty)) = fields.iter().find(|(n, _, _)| n == &target_field || n == &member_str) {
+                                    return (*f_val, f_ty.clone());
+                                }
+                            }
+                        }
+                    }
                 }
 
                 let fn_name = if callee_node.node_kind() == NodeKind::IdentExpr {
@@ -1886,11 +1923,7 @@ impl PilotDebugger {
                             .map(|(v, _)| v.to_string_repr())
                             .collect::<Vec<_>>()
                             .join(" ");
-                        if fn_name == "println" {
-                            self.pending_outputs.push(format!("{}\n", out_str));
-                        } else {
-                            self.pending_outputs.push(out_str);
-                        }
+                        self.pending_outputs.push(format!("{}\n", out_str));
                         (PilotVal::NULL, "void".to_string())
                     }
                     "assert" => {
@@ -2150,7 +2183,7 @@ impl PilotDebugger {
             }
             let (target_val, target_ty) = self.evaluate(target_name.trim(), frame_id)?;
             let target_str = target_val.to_string_repr();
-            if let Some(compound) = self.compound_values.get(&target_str).or_else(|| self.compound_values.get(target_name.trim())) {
+            if let Some(compound) = self.compound_values.get(target_name.trim()).or_else(|| self.compound_values.get(&target_str)) {
                 match compound {
                     DebugCompoundVal::Record { type_name: _, fields } => {
                         if let Some((_, f_val, f_ty)) = fields.iter().find(|(n, _, _)| n == member_name.trim()) {

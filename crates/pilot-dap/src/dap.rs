@@ -14,6 +14,7 @@ pub struct DapServer {
     pub pending_events: Vec<String>,
     pub next_var_ref: u64,
     pub var_ref_cache: std::collections::HashMap<u64, Vec<(String, String, String, u64)>>,
+    pub seq: i64,
 }
 
 impl Default for DapServer {
@@ -33,6 +34,7 @@ impl DapServer {
             pending_events: Vec::new(),
             next_var_ref: 3000,
             var_ref_cache: std::collections::HashMap::new(),
+            seq: 1,
         }
     }
 
@@ -80,6 +82,12 @@ impl DapServer {
                     self.program_path = Some(prog.to_string());
                     let _ = self.debugger.load_program(prog);
                 }
+
+                let launch_banner = format!("[Pilot DAP] Debug session started: {}\n", prog);
+                self.pending_events.push(format_dap_event(
+                    "output",
+                    &format!(r#"{{"category":"console","output":{}}}"#, escape_json_str(&launch_banner)),
+                ));
 
                 let resp = format_dap_response(seq, "launch", true, "{}");
 
@@ -142,8 +150,8 @@ impl DapServer {
                 let mut frames_json = Vec::new();
                 for frame in self.debugger.call_stack.iter().rev() {
                     frames_json.push(format!(
-                        r#"{{"id":{},"name":"{}","source":{{"path":"{}"}},"line":{},"column":{}}}"#,
-                        frame.id, frame.name, frame.file, frame.line, frame.column
+                        r#"{{"id":{},"name":"{}","source":{{"path":{}}},"line":{},"column":{}}}"#,
+                        frame.id, frame.name, escape_json_str(&frame.file), frame.line, frame.column
                     ));
                 }
                 let body = format!(
@@ -174,11 +182,12 @@ impl DapServer {
 
                 if let Some(children) = self.var_ref_cache.get(&var_ref).cloned() {
                     for (c_name, c_val, c_ty, child_ref) in children {
+                        let display_val = self.format_var_display(&c_name, &c_val);
                         vars.push(format!(
-                            r#"{{"name":{},"value":{},"type":"{}","variablesReference":{}}}"#,
+                            r#"{{"name":{},"value":{},"type":{},"variablesReference":{}}}"#,
                             escape_json_str(&c_name),
-                            escape_json_str(&c_val),
-                            c_ty,
+                            escape_json_str(&display_val),
+                            escape_json_str(&c_ty),
                             child_ref
                         ));
                     }
@@ -194,11 +203,12 @@ impl DapServer {
                     };
                     for (k, val_str, ty) in raw_globals {
                         let child_ref = self.resolve_child_ref(&k, &val_str);
+                        let display_val = self.format_var_display(&k, &val_str);
                         vars.push(format!(
-                            r#"{{"name":{},"value":{},"type":"{}","variablesReference":{}}}"#,
+                            r#"{{"name":{},"value":{},"type":{},"variablesReference":{}}}"#,
                             escape_json_str(&k),
-                            escape_json_str(&val_str),
-                            ty,
+                            escape_json_str(&display_val),
+                            escape_json_str(&ty),
                             child_ref
                         ));
                     }
@@ -234,11 +244,12 @@ impl DapServer {
 
                     for (k, val_str, ty) in raw_locals {
                         let child_ref = self.resolve_child_ref(&k, &val_str);
+                        let display_val = self.format_var_display(&k, &val_str);
                         vars.push(format!(
-                            r#"{{"name":{},"value":{},"type":"{}","variablesReference":{}}}"#,
+                            r#"{{"name":{},"value":{},"type":{},"variablesReference":{}}}"#,
                             escape_json_str(&k),
-                            escape_json_str(&val_str),
-                            ty,
+                            escape_json_str(&display_val),
+                            escape_json_str(&ty),
                             child_ref
                         ));
                     }
@@ -322,6 +333,26 @@ impl DapServer {
         }
     }
 
+    fn format_var_display(&self, name: &str, val_str: &str) -> String {
+        if let Some(compound) = self.debugger.compound_values.get(name).or_else(|| self.debugger.compound_values.get(val_str)) {
+            match compound {
+                crate::debugger::DebugCompoundVal::Record { type_name, fields } => {
+                    if fields.is_empty() {
+                        format!("{}()", type_name)
+                    } else {
+                        let field_strs: Vec<String> = fields.iter().map(|(n, v, _)| {
+                            format!("{}: {}", n, v.to_string_repr())
+                        }).collect();
+                        format!("{}({})", type_name, field_strs.join(", "))
+                    }
+                }
+                _ => val_str.to_string(),
+            }
+        } else {
+            val_str.to_string()
+        }
+    }
+
     fn drain_outputs(&mut self) {
         for out in std::mem::take(&mut self.debugger.pending_outputs) {
             let ev = format!(
@@ -333,7 +364,7 @@ impl DapServer {
     }
 
     fn resolve_child_ref(&mut self, name: &str, val_str: &str) -> u64 {
-        if let Some(compound) = self.debugger.compound_values.get(val_str).or_else(|| self.debugger.compound_values.get(name)).cloned() {
+        if let Some(compound) = self.debugger.compound_values.get(name).or_else(|| self.debugger.compound_values.get(val_str)).cloned() {
             self.cache_compound_children(&compound, 0)
         } else {
             0
@@ -353,7 +384,7 @@ impl DapServer {
 
         let mut cached_children = Vec::new();
         for (c_name, c_val, c_ty) in children {
-            let child_ref = if let Some(child_compound) = self.debugger.compound_values.get(&c_val).or_else(|| self.debugger.compound_values.get(&c_name)).cloned() {
+            let child_ref = if let Some(child_compound) = self.debugger.compound_values.get(&c_name).or_else(|| self.debugger.compound_values.get(&c_val)).cloned() {
                 self.cache_compound_children(&child_compound, depth + 1)
             } else {
                 0
@@ -368,6 +399,12 @@ impl DapServer {
     fn check_execution_state(&mut self) {
         match &self.debugger.state {
             DebuggerState::Paused(reason) => {
+                let line = self.debugger.call_stack.last().map(|f| f.line).unwrap_or(0);
+                let hit_msg = format!("[Pilot DAP] Stopped at breakpoint (line {})\n", line);
+                self.pending_events.push(format_dap_event(
+                    "output",
+                    &format!(r#"{{"category":"console","output":{}}}"#, escape_json_str(&hit_msg)),
+                ));
                 let ev = format!(
                     r#"{{"reason":"{}","threadId":1,"allThreadsStopped":true}}"#,
                     reason
@@ -375,6 +412,11 @@ impl DapServer {
                 self.pending_events.push(format_dap_event("stopped", &ev));
             }
             DebuggerState::Terminated => {
+                let exit_msg = "\n[Pilot DAP] Execution finished with exit code 0.\n";
+                self.pending_events.push(format_dap_event(
+                    "output",
+                    &format!(r#"{{"category":"console","output":{}}}"#, escape_json_str(exit_msg)),
+                ));
                 self.pending_events.push(format_dap_event("exited", r#"{"exitCode":0}"#));
                 self.pending_events.push(format_dap_event("terminated", "{}"));
                 self.should_exit = true;
@@ -383,6 +425,8 @@ impl DapServer {
         }
     }
 }
+
+static EVENT_SEQ: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1000);
 
 fn format_dap_response(seq: i64, command: &str, success: bool, body_json: &str) -> String {
     format!(
@@ -396,8 +440,10 @@ fn format_dap_response(seq: i64, command: &str, success: bool, body_json: &str) 
 }
 
 fn format_dap_event(event_name: &str, body_json: &str) -> String {
+    let s = EVENT_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     format!(
-        r#"{{"seq":1,"type":"event","event":"{}","body":{}}}"#,
+        r#"{{"seq":{},"type":"event","event":"{}","body":{}}}"#,
+        s,
         event_name, body_json
     )
 }
