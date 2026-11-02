@@ -216,7 +216,7 @@ mod tests {
         let test_file = temp_dir.join("test_debug_script.pilot");
         let script = "let x = 10\nlet y = 20\nlet z = x + y\n";
         std::fs::write(&test_file, script).unwrap();
-        let file_path = test_file.to_str().unwrap().to_string();
+        let file_path = test_file.to_string_lossy().replace('\\', "/");
 
         let mut dap = DapServer::new();
         dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
@@ -286,7 +286,7 @@ mod tests {
         let test_file = temp_dir.join("test_calc_suite.pilot");
         let script = "fn calculate(a: int, b: int) -> int {\n    let temp = a * 2\n    let result = temp + b\n    return result\n}\n\nlet x = 5\nlet y = 12\nlet ans = calculate(x, y)\n";
         std::fs::write(&test_file, script).unwrap();
-        let file_path = test_file.to_str().unwrap().to_string();
+        let file_path = test_file.to_string_lossy().replace('\\', "/");
 
         let mut dap = DapServer::new();
         dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
@@ -350,7 +350,7 @@ mod tests {
         let test_src = "for x in 15..20:\n    println(x)\n\nfor j in [1, 2, 3, 4, 5]{\n    println(j)\n}\n\nvar myvar : int = 0\nwhile (true) {\n    if (myvar >= 20){\n        break;\n    }\n    println(f\"true - {myvar}\")\n    myvar += 1\n}\n";
         let path = format!("{}/../../examples/dap_myvar_test.pilot", manifest_dir);
         let _ = std::fs::write(&path, test_src);
-        let path = std::fs::canonicalize(&path).unwrap().to_str().unwrap().to_string();
+        let path = std::fs::canonicalize(&path).unwrap().to_string_lossy().replace('\\', "/").trim_start_matches("//?/").to_string();
 
         // Set breakpoint on line 13: println(f"true - {myvar}")
         let bp_req = format!(
@@ -408,7 +408,7 @@ mod tests {
         let test_file = temp_dir.join("test_compounds.pilot");
         let script = "record Point(x: float, y: float)\n\nlet pt = Point(1.5, 2.5)\nlet numbers = [10, 20, 30]\nlet mytup = (100, \"pilot\")\nlet myunit = 250ms\nlet mykw = :ready\nlet (px, py) = (11, 22)\nlet [head, ..tail] = [1, 2, 3, 4]\nlet myvar = 42\nprintln(f\"done - {myvar}\")\n";
         std::fs::write(&test_file, script).unwrap();
-        let file_path = test_file.to_str().unwrap().to_string();
+        let file_path = test_file.to_string_lossy().replace('\\', "/");
 
         let mut dap = DapServer::new();
         dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
@@ -540,7 +540,7 @@ mod tests {
         dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let path = format!("{}/../../examples/showcase/21_advanced_type_inference.pilot", manifest_dir);
-        let path = std::fs::canonicalize(&path).unwrap().to_str().unwrap().to_string();
+        let path = std::fs::canonicalize(&path).unwrap().to_string_lossy().replace('\\', "/").trim_start_matches("//?/").to_string();
 
         dap.handle_message(&format!(
             r#"{{"seq":2,"type":"request","command":"setBreakpoints","arguments":{{"source":{{"path":"{}"}},"breakpoints":[{{"line":15}}]}}}}"#,
@@ -577,17 +577,18 @@ mod tests {
     fn test_heterogeneous_collection_dap() {
         let mut dap = DapServer::new();
         dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
-        let test_file = "/tmp/test_heterogeneous_dap.pilot";
-        std::fs::write(test_file, "let mylist = [\"apples\", 5, 2];\nlet x = 1;\n").unwrap();
+        let test_file = std::env::temp_dir().join("test_heterogeneous_dap.pilot");
+        let test_file_str = test_file.to_string_lossy().replace('\\', "/");
+        std::fs::write(&test_file, "let mylist = [\"apples\", 5, 2];\nlet x = 1;\n").unwrap();
 
         dap.handle_message(&format!(
             r#"{{"seq":2,"type":"request","command":"setBreakpoints","arguments":{{"source":{{"path":"{}"}},"breakpoints":[{{"line":2}}]}}}}"#,
-            test_file
+            test_file_str
         )).unwrap();
 
         dap.handle_message(&format!(
             r#"{{"seq":3,"type":"request","command":"launch","arguments":{{"program":"{}","stopOnEntry":false}}}}"#,
-            test_file
+            test_file_str
         )).unwrap();
         dap.handle_message(r#"{"seq":4,"type":"request","command":"configurationDone"}"#).unwrap();
 
@@ -600,24 +601,25 @@ mod tests {
         assert!(vars_resp.contains("List[str | int]") || vars_resp.contains("List[i64 | str]"),
             "Expected constrained union type for mylist: {}", vars_resp);
 
-        let _ = std::fs::remove_file(test_file);
+        let _ = std::fs::remove_file(&test_file);
     }
 
     #[test]
     fn test_indexer_dap() {
         let mut dap = DapServer::new();
         dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
-        let test_file = "/tmp/test_indexer_dap.pilot";
-        std::fs::write(test_file, "let map = {\"alpha\": 10, \"beta\": 20};\nlet item = map[\"alpha\"];\nmap[\"alpha\"] = 99;\nlet updated = map[\"alpha\"];\n").unwrap();
+        let test_file = std::env::temp_dir().join("test_indexer_dap.pilot");
+        let test_file_str = test_file.to_string_lossy().replace('\\', "/");
+        std::fs::write(&test_file, "let map = {\"alpha\": 10, \"beta\": 20};\nlet item = map[\"alpha\"];\nmap[\"alpha\"] = 99;\nlet updated = map[\"alpha\"];\n").unwrap();
 
         dap.handle_message(&format!(
             r#"{{"seq":2,"type":"request","command":"setBreakpoints","arguments":{{"source":{{"path":"{}"}},"breakpoints":[{{"line":4}}]}}}}"#,
-            test_file
+            test_file_str
         )).unwrap();
 
         dap.handle_message(&format!(
             r#"{{"seq":3,"type":"request","command":"launch","arguments":{{"program":"{}","stopOnEntry":false}}}}"#,
-            test_file
+            test_file_str
         )).unwrap();
         dap.handle_message(r#"{"seq":4,"type":"request","command":"configurationDone"}"#).unwrap();
 
@@ -629,6 +631,6 @@ mod tests {
         assert!(vars_resp.contains("\"name\":\"item\""), "Expected item variable: {}", vars_resp);
         assert!(vars_resp.contains("\"value\":\"10\""), "Expected item value 10: {}", vars_resp);
 
-        let _ = std::fs::remove_file(test_file);
+        let _ = std::fs::remove_file(&test_file);
     }
 }

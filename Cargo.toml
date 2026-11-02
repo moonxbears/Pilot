@@ -32,7 +32,7 @@ members = [
 version = "1.1.51"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/pilot-lang/pilot"
+repository = "https://github.com/moonxbears/Pilot"
 
 [profile.release]
 opt-level = 3

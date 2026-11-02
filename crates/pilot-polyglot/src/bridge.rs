@@ -150,7 +150,7 @@ impl ExternalPolyglotBridge {
 
         // If -c fails or script is too large, write to a temporary file
         if child.is_err() {
-            let tmp_path = format!("/tmp/pilot_polyglot_{}.py", std::process::id());
+            let tmp_path = std::env::temp_dir().join(format!("pilot_polyglot_{}.py", std::process::id()));
             if let Ok(mut f) = File::create(&tmp_path) {
                 let _ = f.write_all(wrapped_script.as_bytes());
                 child = Command::new(&exe).arg(&tmp_path).output();
@@ -212,8 +212,9 @@ impl ExternalPolyglotBridge {
         let compiler = self.registered_runtimes.get("c").cloned().unwrap_or_else(|| "clang".to_string());
         let wrapped_src = PolyglotTypeBridge::wrap_script("c", snippet, vars);
         let id = format!("{}_{}", std::process::id(), rand_nonce());
-        let c_file = format!("/tmp/pilot_c_{}.c", id);
-        let bin_file = format!("/tmp/pilot_c_{}", id);
+        let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
+        let c_file = std::env::temp_dir().join(format!("pilot_c_{}.c", id));
+        let bin_file = std::env::temp_dir().join(format!("pilot_c_{}{}", id, ext));
 
         if let Ok(mut f) = File::create(&c_file) {
             let _ = f.write_all(wrapped_src.as_bytes());
@@ -245,8 +246,9 @@ impl ExternalPolyglotBridge {
         let compiler = self.registered_runtimes.get("cpp").cloned().unwrap_or_else(|| "clang++".to_string());
         let wrapped_src = PolyglotTypeBridge::wrap_script("cpp", snippet, vars);
         let id = format!("{}_{}", std::process::id(), rand_nonce());
-        let cpp_file = format!("/tmp/pilot_cpp_{}.cpp", id);
-        let bin_file = format!("/tmp/pilot_cpp_{}", id);
+        let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
+        let cpp_file = std::env::temp_dir().join(format!("pilot_cpp_{}.cpp", id));
+        let bin_file = std::env::temp_dir().join(format!("pilot_cpp_{}{}", id, ext));
 
         if let Ok(mut f) = File::create(&cpp_file) {
             let _ = f.write_all(wrapped_src.as_bytes());
@@ -279,8 +281,9 @@ impl ExternalPolyglotBridge {
         let compiler = self.registered_runtimes.get("rust").cloned().unwrap_or_else(|| "rustc".to_string());
         let wrapped_src = PolyglotTypeBridge::wrap_script("rust", snippet, vars);
         let id = format!("{}_{}", std::process::id(), rand_nonce());
-        let rs_file = format!("/tmp/pilot_rs_{}.rs", id);
-        let bin_file = format!("/tmp/pilot_rs_{}", id);
+        let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
+        let rs_file = std::env::temp_dir().join(format!("pilot_rs_{}.rs", id));
+        let bin_file = std::env::temp_dir().join(format!("pilot_rs_{}{}", id, ext));
 
         if let Ok(mut f) = File::create(&rs_file) {
             let _ = f.write_all(wrapped_src.as_bytes());

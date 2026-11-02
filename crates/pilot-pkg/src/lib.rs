@@ -64,10 +64,11 @@ mod tests {
 
     #[test]
     fn test_venv_initialization_and_scripts() {
-        let tmp_dir = format!("/tmp/test_pilot_venv_{}", std::process::id());
+        let tmp_dir = std::env::temp_dir().join(format!("test_pilot_venv_{}", std::process::id()));
+        let tmp_dir_str = tmp_dir.to_string_lossy().to_string();
         let _ = std::fs::remove_dir_all(&tmp_dir);
 
-        let venv_path = init_venv(&tmp_dir, Some("myenv"), false).expect("Init venv failed");
+        let venv_path = init_venv(&tmp_dir_str, Some("myenv"), false).expect("Init venv failed");
         assert!(venv_path.join("pilotvenv.cfg").exists());
         assert!(venv_path.join("bin").join("activate").exists());
         assert!(venv_path.join("bin").join("activate.ps1").exists());
@@ -82,21 +83,22 @@ mod tests {
 
     #[test]
     fn test_pilpkg_archive_pack_and_unpack() {
-        let src_dir = format!("/tmp/test_pilpkg_src_{}", std::process::id());
-        let dest_dir = format!("/tmp/test_pilpkg_dest_{}", std::process::id());
-        let pkg_file = format!("/tmp/test_{}.pilpkg", std::process::id());
+        let base_tmp = std::env::temp_dir();
+        let src_dir = base_tmp.join(format!("test_pilpkg_src_{}", std::process::id()));
+        let dest_dir = base_tmp.join(format!("test_pilpkg_dest_{}", std::process::id()));
+        let pkg_file = base_tmp.join(format!("test_{}.pilpkg", std::process::id()));
 
         let _ = std::fs::create_dir_all(&src_dir);
-        std::fs::write(format!("{}/main.pilot", src_dir), "println(\"hello\");").unwrap();
-        std::fs::write(format!("{}/pilot.json", src_dir), "{\"name\":\"test\"}").unwrap();
+        std::fs::write(src_dir.join("main.pilot"), "println(\"hello\");").unwrap();
+        std::fs::write(src_dir.join("pilot.json"), "{\"name\":\"test\"}").unwrap();
 
-        let count = pack_directory(&src_dir, &pkg_file).expect("Pack failed");
+        let count = pack_directory(&src_dir.to_string_lossy(), &pkg_file.to_string_lossy()).expect("Pack failed");
         assert_eq!(count, 2);
 
-        let unpack_count = unpack_archive(&pkg_file, &dest_dir).expect("Unpack failed");
+        let unpack_count = unpack_archive(&pkg_file.to_string_lossy(), &dest_dir.to_string_lossy()).expect("Unpack failed");
         assert_eq!(unpack_count, 2);
 
-        let read_main = std::fs::read_to_string(format!("{}/main.pilot", dest_dir)).unwrap();
+        let read_main = std::fs::read_to_string(dest_dir.join("main.pilot")).unwrap();
         assert_eq!(read_main, "println(\"hello\");");
 
         let _ = std::fs::remove_dir_all(&src_dir);

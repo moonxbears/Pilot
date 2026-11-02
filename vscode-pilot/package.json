@@ -215,17 +215,17 @@
             "properties": {
                 "pilot.languageServer.serverPath": {
                     "type": "string",
-                    "default": "",
+                    "default": "pilot-lsp",
                     "description": "Optional explicit path to pilot-lsp or pilot executable."
                 },
                 "pilot.compiler.executablePath": {
                     "type": "string",
-                    "default": "",
+                    "default": "pilot",
                     "description": "Optional explicit path to the pilot compiler executable."
                 },
                 "pilot.dap.serverPath": {
                     "type": "string",
-                    "default": "",
+                    "default": "pilot-dap",
                     "description": "Optional explicit path to pilot-dap or pilot executable."
                 }
             }

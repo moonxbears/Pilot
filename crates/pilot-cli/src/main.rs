@@ -170,11 +170,13 @@ fn cmd_run(args: &[String]) {
     }
 
     // Compile and execute directly
-    let tmp_bin = format!(
-        "/tmp/pilot_run_{}_{}",
+    let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
+    let tmp_bin = std::env::temp_dir().join(format!(
+        "pilot_run_{}_{}{}",
         Path::new(file_path).file_stem().and_then(|s| s.to_str()).unwrap_or("app"),
-        std::process::id()
-    );
+        std::process::id(),
+        ext
+    )).to_string_lossy().to_string();
     let use_burst = args.iter().any(|a| a == "--burst");
     let use_gpu = args.iter().any(|a| a == "--gpu");
     let opts = BuildOptions {
@@ -1570,48 +1572,50 @@ mod tests {
 
     #[test]
     fn test_cmd_emit_and_from_cli() {
-        let tmp_pilot = "/tmp/test_emit_input.pilot";
-        fs::write(tmp_pilot, "def add(a: int, b: int) -> int { return a + b }").unwrap();
+        let tmp_dir = std::env::temp_dir();
+        let tmp_pilot = tmp_dir.join("test_emit_input.pilot");
+        fs::write(&tmp_pilot, "def add(a: int, b: int) -> int { return a + b }").unwrap();
 
-        let tmp_out_py = "/tmp/test_emit_output.py";
-        cmd_emit(&["python".to_string(), tmp_pilot.to_string(), "-o".to_string(), tmp_out_py.to_string()]);
-        let py_content = fs::read_to_string(tmp_out_py).unwrap();
+        let tmp_out_py = tmp_dir.join("test_emit_output.py");
+        cmd_emit(&["python".to_string(), tmp_pilot.to_string_lossy().to_string(), "-o".to_string(), tmp_out_py.to_string_lossy().to_string()]);
+        let py_content = fs::read_to_string(&tmp_out_py).unwrap();
         assert!(py_content.contains("def add(a, b):"));
 
-        let tmp_rs = "/tmp/test_from_input.rs";
-        fs::write(tmp_rs, "pub fn mul(x: i64, y: i64) -> i64 { x * y }").unwrap();
+        let tmp_rs = tmp_dir.join("test_from_input.rs");
+        fs::write(&tmp_rs, "pub fn mul(x: i64, y: i64) -> i64 { x * y }").unwrap();
 
-        let tmp_out_pilot = "/tmp/test_from_output.pilot";
-        cmd_from(&["rust".to_string(), "--strict-pilot".to_string(), tmp_rs.to_string(), "-o".to_string(), tmp_out_pilot.to_string()]);
-        let pilot_content = fs::read_to_string(tmp_out_pilot).unwrap();
+        let tmp_out_pilot = tmp_dir.join("test_from_output.pilot");
+        cmd_from(&["rust".to_string(), "--strict-pilot".to_string(), tmp_rs.to_string_lossy().to_string(), "-o".to_string(), tmp_out_pilot.to_string_lossy().to_string()]);
+        let pilot_content = fs::read_to_string(&tmp_out_pilot).unwrap();
         assert!(pilot_content.contains("def mul"));
 
-        let _ = fs::remove_file(tmp_pilot);
-        let _ = fs::remove_file(tmp_out_py);
-        let _ = fs::remove_file(tmp_rs);
-        let _ = fs::remove_file(tmp_out_pilot);
+        let _ = fs::remove_file(&tmp_pilot);
+        let _ = fs::remove_file(&tmp_out_py);
+        let _ = fs::remove_file(&tmp_rs);
+        let _ = fs::remove_file(&tmp_out_pilot);
     }
 
     #[test]
     fn test_cmd_perf_subcommands() {
-        let tmp_file = "/tmp/test_perf.pilot";
-        fs::write(tmp_file, "def compute() -> i64 {\n    let mut x = 0;\n    for i in 0..10 {\n        let k = 1024 * 1024;\n        x = x + 1;\n    }\n    return x;\n}\n").unwrap();
+        let tmp_dir = std::env::temp_dir();
+        let tmp_file = tmp_dir.join("test_perf.pilot");
+        fs::write(&tmp_file, "def compute() -> i64 {\n    let mut x = 0;\n    for i in 0..10 {\n        let k = 1024 * 1024;\n        x = x + 1;\n    }\n    return x;\n}\n").unwrap();
 
-        cmd_perf(&["analyze".to_string(), tmp_file.to_string()]);
-        cmd_perf(&["profile".to_string(), tmp_file.to_string()]);
-        let flamegraph_path = "/tmp/test_flamegraph.svg";
-        cmd_perf(&["profile".to_string(), tmp_file.to_string(), "--flamegraph".to_string(), flamegraph_path.to_string()]);
-        assert!(fs::metadata(flamegraph_path).is_ok());
+        cmd_perf(&["analyze".to_string(), tmp_file.to_string_lossy().to_string()]);
+        cmd_perf(&["profile".to_string(), tmp_file.to_string_lossy().to_string()]);
+        let flamegraph_path = tmp_dir.join("test_flamegraph.svg");
+        cmd_perf(&["profile".to_string(), tmp_file.to_string_lossy().to_string(), "--flamegraph".to_string(), flamegraph_path.to_string_lossy().to_string()]);
+        assert!(fs::metadata(&flamegraph_path).is_ok());
 
-        cmd_perf(&["optimize".to_string(), tmp_file.to_string()]);
-        cmd_perf(&["optimize".to_string(), tmp_file.to_string(), "--apply".to_string()]);
-        let optimized = fs::read_to_string(tmp_file).unwrap();
+        cmd_perf(&["optimize".to_string(), tmp_file.to_string_lossy().to_string()]);
+        cmd_perf(&["optimize".to_string(), tmp_file.to_string_lossy().to_string(), "--apply".to_string()]);
+        let optimized = fs::read_to_string(&tmp_file).unwrap();
         assert!(optimized.contains("comptime"));
 
-        cmd_perf(&["benchmark".to_string(), tmp_file.to_string()]);
+        cmd_perf(&["benchmark".to_string(), tmp_file.to_string_lossy().to_string()]);
 
-        let _ = fs::remove_file(tmp_file);
-        let _ = fs::remove_file(flamegraph_path);
+        let _ = fs::remove_file(&tmp_file);
+        let _ = fs::remove_file(&flamegraph_path);
     }
 
     #[test]

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 
 const TOKEN_TYPES = [
     'namespace', 'type', 'class', 'enum', 'interface', 'struct',
@@ -15,6 +16,141 @@ const TOKEN_MODIFIERS = [
     'abstract', 'async', 'modification', 'documentation', 'defaultLibrary'
 ];
 
+function ensureExecutablePermission(filePath: string): void {
+    if (process.platform !== 'win32' && filePath) {
+        try {
+            if (fs.existsSync(filePath)) {
+                fs.accessSync(filePath, fs.constants.X_OK);
+            }
+        } catch {
+            try {
+                fs.chmodSync(filePath, 0o755);
+            } catch {
+                // Ignore inaccessible permissions
+            }
+        }
+    }
+}
+
+function resolveExistingPath(targetPath?: string): string | null {
+    if (!targetPath || typeof targetPath !== 'string') {
+        return null;
+    }
+    const trimmed = targetPath.trim();
+    if (!trimmed) {
+        return null;
+    }
+    try {
+        if (fs.existsSync(trimmed)) {
+            const stat = fs.statSync(trimmed);
+            if (stat.isFile()) {
+                ensureExecutablePermission(trimmed);
+                return trimmed;
+            }
+        }
+    } catch {
+        // Ignore inaccessible candidate paths
+    }
+    if (process.platform === 'win32' && !trimmed.toLowerCase().endsWith('.exe')) {
+        const exePath = `${trimmed}.exe`;
+        try {
+            if (fs.existsSync(exePath)) {
+                const stat = fs.statSync(exePath);
+                if (stat.isFile()) {
+                    return exePath;
+                }
+            }
+        } catch {
+            // Ignore inaccessible candidate paths
+        }
+    }
+    return null;
+}
+
+function findExecutableOnPath(name: string): string | null {
+    if (!name) {
+        return null;
+    }
+    if (name.includes('/') || name.includes('\\')) {
+        return resolveExistingPath(name);
+    }
+
+    const envPath = process.env.PATH || '';
+    const pathDirs = envPath.split(path.delimiter).filter(Boolean);
+
+    try {
+        const homeDir = os.homedir() || process.env.USERPROFILE || process.env.HOME || '';
+        if (homeDir) {
+            const cargoBin = path.join(homeDir, '.cargo', 'bin');
+            if (!pathDirs.some(d => path.resolve(d).toLowerCase() === path.resolve(cargoBin).toLowerCase())) {
+                pathDirs.push(cargoBin);
+            }
+        }
+    } catch {
+        // ignore
+    }
+
+    const extensions = process.platform === 'win32'
+        ? (process.env.PATHEXT ? process.env.PATHEXT.split(';') : ['.EXE', '.CMD', '.BAT', '.COM'])
+        : [''];
+
+    for (const dir of pathDirs) {
+        for (const ext of extensions) {
+            const hasExt = ext ? name.toLowerCase().endsWith(ext.toLowerCase()) : false;
+            const filename = hasExt ? name : `${name}${ext.toLowerCase()}`;
+            const fullPath = path.join(dir, filename);
+            const resolved = resolveExistingPath(fullPath);
+            if (resolved) {
+                return resolved;
+            }
+        }
+    }
+    return null;
+}
+
+function getSearchDirectories(extensionPath: string): string[] {
+    const dirs: string[] = [];
+
+    // 1. Extension's own bundled server directory
+    dirs.push(path.join(extensionPath, 'server'));
+
+    // 2. All workspace folders (target/release and target/debug)
+    const folders = vscode.workspace.workspaceFolders || [];
+    for (const folder of folders) {
+        const fsPath = folder.uri?.fsPath;
+        if (fsPath) {
+            dirs.push(path.join(fsPath, 'target', 'release'));
+            dirs.push(path.join(fsPath, 'target', 'debug'));
+        }
+    }
+
+    // 3. Parent of extension (if extension is inside a repo, e.g. <repo>/vscode-pilot)
+    const repoRoot = path.resolve(extensionPath, '..');
+    dirs.push(path.join(repoRoot, 'target', 'release'));
+    dirs.push(path.join(repoRoot, 'target', 'debug'));
+
+    return dirs;
+}
+
+function getExecutionEnv(extraEnv: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = { ...process.env, ...extraEnv };
+    try {
+        const homeDir = os.homedir() || process.env.USERPROFILE || process.env.HOME || '';
+        if (homeDir) {
+            const cargoBin = path.join(homeDir, '.cargo', 'bin');
+            const pathKey = Object.keys(env).find(k => k.toLowerCase() === 'path') || 'PATH';
+            const currentPath = env[pathKey] || '';
+            const pathDirs = currentPath.split(path.delimiter).filter(Boolean);
+            if (!pathDirs.some(d => path.resolve(d).toLowerCase() === path.resolve(cargoBin).toLowerCase())) {
+                env[pathKey] = `${cargoBin}${path.delimiter}${currentPath}`;
+            }
+        }
+    } catch {
+        // ignore
+    }
+    return env;
+}
+
 function pickNewestExistingFile(candidates: string[]): string {
     let bestPath = '';
     let bestMtime = -1;
@@ -22,47 +158,54 @@ function pickNewestExistingFile(candidates: string[]): string {
         if (!candidate) {
             continue;
         }
-        try {
-            if (fs.existsSync(candidate)) {
-                const stat = fs.statSync(candidate);
+        const resolved = resolveExistingPath(candidate);
+        if (resolved) {
+            try {
+                const stat = fs.statSync(resolved);
                 if (stat.isFile() && stat.mtimeMs > bestMtime) {
                     bestMtime = stat.mtimeMs;
-                    bestPath = candidate;
+                    bestPath = resolved;
                 }
+            } catch {
+                // Ignore inaccessible candidate paths
             }
-        } catch {
-            // Ignore inaccessible candidate paths
         }
     }
     return bestPath;
 }
 
-function resolvePilotExecutionPrefix(extensionPath: string, configuredPilotPath?: string): string {
-    if (configuredPilotPath && configuredPilotPath !== 'pilot') {
-        return `"${configuredPilotPath}"`;
-    }
+function resolvePilotBinary(extensionPath: string, configuredPilotPath?: string): string {
+    const configSetting = vscode.workspace.getConfiguration('pilot.compiler').get<string>('executablePath');
+    const userPath = (configuredPilotPath && configuredPilotPath !== 'pilot')
+        ? configuredPilotPath
+        : (configSetting && configSetting !== 'pilot' ? configSetting : '');
 
-    const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-    const repoRoot = path.resolve(extensionPath, '..');
-
-    const nativeCandidates: string[] = [
-        path.join(extensionPath, 'server', 'pilot'),
-        path.join(repoRoot, 'target', 'release', 'pilot'),
-        path.join(repoRoot, 'target', 'debug', 'pilot'),
-    ];
-    if (wsRoot) {
-        nativeCandidates.push(
-            path.join(wsRoot, 'target', 'release', 'pilot'),
-            path.join(wsRoot, 'target', 'debug', 'pilot')
-        );
-    }
-
-    for (const bin of nativeCandidates) {
-        if (fs.existsSync(bin)) {
-            return `"${bin}"`;
+    if (userPath) {
+        const resolved = resolveExistingPath(userPath) || findExecutableOnPath(userPath);
+        if (resolved) {
+            return resolved;
         }
     }
 
+    const nativeCandidates = getSearchDirectories(extensionPath).map(d => path.join(d, 'pilot'));
+    const newest = pickNewestExistingFile(nativeCandidates);
+    if (newest) {
+        return newest;
+    }
+
+    const onPath = findExecutableOnPath('pilot');
+    if (onPath) {
+        return onPath;
+    }
+
+    return 'pilot';
+}
+
+function resolvePilotExecutionPrefix(extensionPath: string, configuredPilotPath?: string): string {
+    const bin = resolvePilotBinary(extensionPath, configuredPilotPath);
+    if (bin && bin !== 'pilot') {
+        return `"${bin}"`;
+    }
     return 'pilot';
 }
 
@@ -96,42 +239,50 @@ class PilotLspClient implements vscode.Disposable {
         const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
         const repoRoot = path.resolve(this.extensionPath, '..');
 
-        const nativeCandidates: string[] = [
-            path.join(this.extensionPath, 'server', 'pilot-lsp'),
-            path.join(repoRoot, 'target', 'release', 'pilot-lsp'),
-            path.join(repoRoot, 'target', 'debug', 'pilot-lsp'),
-        ];
-        if (wsRoot) {
-            nativeCandidates.push(
-                path.join(wsRoot, 'target', 'release', 'pilot-lsp'),
-                path.join(wsRoot, 'target', 'debug', 'pilot-lsp')
-            );
-        }
+        const nativeCandidates = getSearchDirectories(this.extensionPath).map(d => path.join(d, 'pilot-lsp'));
 
         let nativeLsp = '';
         let nativeLspArgs: string[] = [];
-        if (customPath && fs.existsSync(customPath) && !customPath.endsWith('.dll') && !customPath.endsWith('.csproj')) {
-            nativeLsp = customPath;
-            if (path.basename(customPath) === 'pilot') {
-                nativeLspArgs = ['lsp'];
-            }
-        } else {
-            const newest = pickNewestExistingFile(nativeCandidates);
-            if (newest) {
-                nativeLsp = newest;
-                if (path.basename(newest) === 'pilot') {
+
+        if (customPath && customPath !== 'pilot-lsp') {
+            const resolved = resolveExistingPath(customPath) || findExecutableOnPath(customPath);
+            if (resolved && !resolved.endsWith('.dll') && !resolved.endsWith('.csproj')) {
+                nativeLsp = resolved;
+                if (path.basename(resolved, path.extname(resolved)).toLowerCase() === 'pilot') {
                     nativeLspArgs = ['lsp'];
                 }
             }
         }
 
+        if (!nativeLsp) {
+            const newest = pickNewestExistingFile(nativeCandidates);
+            if (newest) {
+                nativeLsp = newest;
+                if (path.basename(newest, path.extname(newest)).toLowerCase() === 'pilot') {
+                    nativeLspArgs = ['lsp'];
+                }
+            }
+        }
+
+        if (!nativeLsp) {
+            const lspOnPath = findExecutableOnPath('pilot-lsp');
+            if (lspOnPath) {
+                nativeLsp = lspOnPath;
+            }
+        }
+
         // Fallback to checking `pilot lsp` if standalone `pilot-lsp` binary isn't found
         if (!nativeLsp) {
-            const pilotBin = resolvePilotExecutionPrefix(this.extensionPath);
-            const unquotedPilot = pilotBin.replace(/^"(.*)"$/, '$1');
-            if (unquotedPilot !== 'pilot' && fs.existsSync(unquotedPilot)) {
-                nativeLsp = unquotedPilot;
+            const pilotBin = resolvePilotBinary(this.extensionPath);
+            if (pilotBin && pilotBin !== 'pilot') {
+                nativeLsp = pilotBin;
                 nativeLspArgs = ['lsp'];
+            } else {
+                const pilotOnPath = findExecutableOnPath('pilot');
+                if (pilotOnPath) {
+                    nativeLsp = pilotOnPath;
+                    nativeLspArgs = ['lsp'];
+                }
             }
         }
 
@@ -140,7 +291,8 @@ class PilotLspClient implements vscode.Disposable {
             const workingDir = wsRoot || path.dirname(nativeLsp);
             this.process = cp.spawn(nativeLsp, nativeLspArgs, {
                 cwd: workingDir,
-                stdio: ['pipe', 'pipe', 'pipe']
+                stdio: ['pipe', 'pipe', 'pipe'],
+                env: getExecutionEnv()
             });
         } else {
             this.statusBar.text = '$(error) Pilot LSP (Not Found)';
@@ -616,9 +768,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 vscode.window.showErrorMessage('No active Pilot file to run.');
                 return;
             }
-            const pilotCmd = resolvePilotExecutionPrefix(context.extensionPath);
+            const pilotBin = resolvePilotBinary(context.extensionPath);
             let terminal = vscode.window.terminals.find(t => t.name === 'Pilot Runner') || vscode.window.createTerminal('Pilot Runner');
             terminal.show();
+            const isPowerShell = process.platform === 'win32' && (!vscode.env.shell || /powershell|pwsh/i.test(vscode.env.shell));
+            const pilotCmd = pilotBin === 'pilot' ? 'pilot' : (isPowerShell ? `& "${pilotBin}"` : `"${pilotBin}"`);
             terminal.sendText(`${pilotCmd} run "${filePath}"`);
         }),
         vscode.commands.registerCommand('pilot.debugCurrentFile', async (uri?: vscode.Uri) => {
@@ -791,7 +945,7 @@ function setupPilotTesting(context: vscode.ExtensionContext): void {
 
     async function runTestExecution(request: vscode.TestRunRequest, token: vscode.CancellationToken): Promise<void> {
         const run = testController.createTestRun(request);
-        const pilotBin = resolvePilotExecutionPrefix(context.extensionPath).replace(/^"|"$/g, '');
+        const pilotBin = resolvePilotBinary(context.extensionPath);
 
         const filesToRun = new Map<string, { fileItem: vscode.TestItem; childItems: vscode.TestItem[] }>();
 
@@ -836,7 +990,7 @@ function setupPilotTesting(context: vscode.ExtensionContext): void {
             await new Promise<void>((resolve) => {
                 const proc = cp.spawn(pilotBin, ['test', '--json', filePath], {
                     cwd,
-                    env: { ...process.env, RUST_BACKTRACE: '1' }
+                    env: getExecutionEnv({ RUST_BACKTRACE: '1' })
                 });
 
                 let stdoutBuf = '';
@@ -1111,10 +1265,7 @@ class PilotDebugAdapter implements vscode.DebugAdapter {
 
         const mode = config.mode || 'run';
         const rawArgs = Array.isArray(config.args) ? config.args : (config.args ? [config.args] : []);
-        let pilotExe = resolvePilotExecutionPrefix(this.extensionPath, config.pilotPath);
-        if (pilotExe.startsWith('"') && pilotExe.endsWith('"')) {
-            pilotExe = pilotExe.slice(1, -1);
-        }
+        let pilotExe = resolvePilotBinary(this.extensionPath, config.pilotPath);
 
         const cmdArgs = [mode, program, ...rawArgs];
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || path.dirname(program);
@@ -1125,11 +1276,9 @@ class PilotDebugAdapter implements vscode.DebugAdapter {
         });
 
         try {
-            const home = process.env.HOME || '';
-            const cargoPath = home ? `${home}/.cargo/bin:` : '';
             this.childProcess = cp.spawn(pilotExe, cmdArgs, {
                 cwd,
-                env: { ...process.env, PATH: `${cargoPath}${process.env.PATH}` }
+                env: getExecutionEnv()
             });
 
             this.childProcess.stdout?.on('data', (data) => {
@@ -1197,35 +1346,34 @@ class PilotDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescripto
 
         // Check if custom DAP or Pilot path is configured
         const userDap = vscode.workspace.getConfiguration('pilot').get<string>('dap.serverPath');
-        if (userDap && fs.existsSync(userDap)) {
-            return new vscode.DebugAdapterExecutable(userDap, []);
+        if (userDap && userDap !== 'pilot-dap') {
+            const resolved = resolveExistingPath(userDap) || findExecutableOnPath(userDap);
+            if (resolved) {
+                return new vscode.DebugAdapterExecutable(resolved, []);
+            }
         }
 
         // 1. Look for standalone pilot-dap binary
-        const dapCandidates: string[] = [
-            path.join(this.extensionPath, 'server', 'pilot-dap'),
-            path.join(repoRoot, 'target', 'release', 'pilot-dap'),
-            path.join(repoRoot, 'target', 'debug', 'pilot-dap'),
-        ];
-        if (wsRoot) {
-            dapCandidates.push(
-                path.join(wsRoot, 'target', 'release', 'pilot-dap'),
-                path.join(wsRoot, 'target', 'debug', 'pilot-dap'),
-            );
-        }
+        const dapCandidates = getSearchDirectories(this.extensionPath).map(d => path.join(d, 'pilot-dap'));
 
         const newestDap = pickNewestExistingFile(dapCandidates);
         if (newestDap) {
             return new vscode.DebugAdapterExecutable(newestDap, []);
         }
 
-        // 2. Look for pilot binary with 'debug --dap'
-        let pilotExe = resolvePilotExecutionPrefix(this.extensionPath, config.pilotPath);
-        if (pilotExe.startsWith('"') && pilotExe.endsWith('"')) {
-            pilotExe = pilotExe.slice(1, -1);
+        const dapOnPath = findExecutableOnPath('pilot-dap');
+        if (dapOnPath) {
+            return new vscode.DebugAdapterExecutable(dapOnPath, []);
         }
-        if (pilotExe && (pilotExe === 'pilot' || fs.existsSync(pilotExe))) {
+
+        // 2. Look for pilot binary with 'debug --dap'
+        const pilotExe = resolvePilotBinary(this.extensionPath, config.pilotPath);
+        if (pilotExe && pilotExe !== 'pilot') {
             return new vscode.DebugAdapterExecutable(pilotExe, ['debug', '--dap']);
+        }
+        const pilotOnPath = findExecutableOnPath('pilot');
+        if (pilotOnPath) {
+            return new vscode.DebugAdapterExecutable(pilotOnPath, ['debug', '--dap']);
         }
 
         // Fallback to inline adapter if no native binary found
