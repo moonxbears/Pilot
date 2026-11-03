@@ -4425,7 +4425,7 @@ impl<'a> Parser<'a> {
                     }
                     _ => {
                         if type_args.is_empty() {
-                            self.arena.alloc_node(NodeKind::TypeSlice, 0, span, lhs.0, 0)
+                            self.arena.alloc_node(NodeKind::TypeList, 0, span, lhs.0, 0)
                         } else if type_args.len() == 1 {
                             self.arena.alloc_node(NodeKind::TypeList, 0, span, type_args[0].0, 0)
                         } else {

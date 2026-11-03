@@ -19,6 +19,9 @@ pub struct AnalysisResult {
     pub struct_fields: HashMap<String, Vec<(String, TypeId)>>,
     pub struct_member_visibility: HashMap<(String, String), pilot_ast::VisibilityTier>,
     pub struct_member_clearance: HashMap<(String, String), pilot_ast::ClearanceLevel>,
+    pub fn_visibility: HashMap<String, pilot_ast::VisibilityTier>,
+    pub fn_clearance: HashMap<String, pilot_ast::ClearanceLevel>,
+    pub current_scope_clearance: u32,
 }
 
 impl AnalysisResult {
@@ -131,6 +134,9 @@ impl AnalysisPipeline {
             struct_fields: infer_engine.struct_fields,
             struct_member_visibility: infer_engine.struct_member_visibility,
             struct_member_clearance: infer_engine.struct_member_clearance,
+            fn_visibility: infer_engine.fn_visibility,
+            fn_clearance: infer_engine.fn_clearance,
+            current_scope_clearance: infer_engine.current_scope_clearance,
         }
     }
 }

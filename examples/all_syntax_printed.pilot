@@ -148,7 +148,7 @@ actor EventBus {
 
 // Scoped Lexical Extension
 extension StringHelpers on str {
-    def shout(self) -> str {
+    pub def shout(self) -> str {
         return self + "!"
     }
 }
@@ -525,7 +525,7 @@ def run_omnibus_showcase() -> void {
 
     let maybe_node: NetworkNode? = node
     maybe_node?..set_status("Safe cascade verified")
-    println("  Safe cascaded maybe_node status: " + check_val(maybe_node.status, "idle"))
+    println("  Safe cascaded maybe_node status: " + check_val(maybe_node?.status, "idle"))
 
     // --- 6.10 Pattern Matching (match / case / when / or-patterns) ---
     println("\n[6.10] Pattern Matching:");

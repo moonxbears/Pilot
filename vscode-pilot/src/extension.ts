@@ -746,6 +746,79 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     });
                 }
             }
+        ),
+        vscode.languages.registerCodeActionsProvider(
+            selector,
+            {
+                async provideCodeActions(
+                    document: vscode.TextDocument,
+                    range: vscode.Range | vscode.Selection,
+                    context: vscode.CodeActionContext
+                ): Promise<(vscode.Command | vscode.CodeAction)[]> {
+                    client.notifyDidOpen(document);
+                    const res = await client.sendRequest('textDocument/codeAction', {
+                        textDocument: { uri: document.uri.toString() },
+                        range: {
+                            start: { line: range.start.line, character: range.start.character },
+                            end: { line: range.end.line, character: range.end.character }
+                        },
+                        context: {
+                            diagnostics: context.diagnostics.map(d => ({
+                                range: {
+                                    start: { line: d.range.start.line, character: d.range.start.character },
+                                    end: { line: d.range.end.line, character: d.range.end.character }
+                                },
+                                message: d.message,
+                                severity: d.severity === vscode.DiagnosticSeverity.Error ? 1 : 2,
+                                code: d.code
+                            }))
+                        }
+                    });
+                    if (!Array.isArray(res)) {
+                        return [];
+                    }
+                    return res.map((action: any) => {
+                        const ca = new vscode.CodeAction(
+                            action.title,
+                            action.kind ? vscode.CodeActionKind.Empty.append(action.kind) : vscode.CodeActionKind.QuickFix
+                        );
+                        ca.isPreferred = !!action.isPreferred;
+                        if (action.command) {
+                            ca.command = {
+                                title: action.command.title || action.title,
+                                command: action.command.command,
+                                arguments: action.command.arguments
+                            };
+                        }
+                        if (action.edit && action.edit.changes) {
+                            const we = new vscode.WorkspaceEdit();
+                            for (const [uriStr, textEdits] of Object.entries<any>(action.edit.changes)) {
+                                const targetUri = vscode.Uri.parse(uriStr);
+                                const edits = (textEdits || []).map((te: any) => new vscode.TextEdit(
+                                    new vscode.Range(
+                                        te.range.start.line,
+                                        te.range.start.character,
+                                        te.range.end.line,
+                                        te.range.end.character
+                                    ),
+                                    te.newText
+                                ));
+                                we.set(targetUri, edits);
+                            }
+                            ca.edit = we;
+                        }
+                        return ca;
+                    });
+                }
+            },
+            {
+                providedCodeActionKinds: [
+                    vscode.CodeActionKind.QuickFix,
+                    vscode.CodeActionKind.Refactor,
+                    vscode.CodeActionKind.RefactorExtract,
+                    vscode.CodeActionKind.SourceFixAll
+                ]
+            }
         )
     );
 
