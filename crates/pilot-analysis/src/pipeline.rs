@@ -17,6 +17,8 @@ pub struct AnalysisResult {
     pub types: TypeArena,
     pub inferred_types: HashMap<u32, TypeId>,
     pub struct_fields: HashMap<String, Vec<(String, TypeId)>>,
+    pub struct_member_visibility: HashMap<(String, String), pilot_ast::VisibilityTier>,
+    pub struct_member_clearance: HashMap<(String, String), pilot_ast::ClearanceLevel>,
 }
 
 impl AnalysisResult {
@@ -127,6 +129,8 @@ impl AnalysisPipeline {
             types: infer_engine.types,
             inferred_types: infer_engine.inferred_node_types,
             struct_fields: infer_engine.struct_fields,
+            struct_member_visibility: infer_engine.struct_member_visibility,
+            struct_member_clearance: infer_engine.struct_member_clearance,
         }
     }
 }

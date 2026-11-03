@@ -1406,8 +1406,35 @@ impl LspServer {
 
                                 // 4. If receiver_ty_name is found, populate declared members from struct_fields & AST
                                 if let Some(ref ty_str) = receiver_ty_name {
+                                    let is_inside_type = {
+                                        let mut inside = false;
+                                        for (c_idx, c_node) in arena.nodes.iter().enumerate() {
+                                            if matches!(c_node.node_kind(), pilot_ast::NodeKind::ClassDecl | pilot_ast::NodeKind::StructDecl | pilot_ast::NodeKind::RecordDecl | pilot_ast::NodeKind::InterfaceDecl) {
+                                                let c_name = arena.interner.resolve(pilot_intern::SymbolId(c_node.lhs));
+                                                if c_name == ty_str {
+                                                    let c_span = arena.spans[c_idx];
+                                                    if byte_offset >= c_span.start && byte_offset <= c_span.end {
+                                                        inside = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        inside
+                                    };
+
                                     if let Some(fields) = analysis.struct_fields.get(ty_str) {
                                         for (f_name, f_ty) in fields {
+                                            let m_vis = analysis.struct_member_visibility.get(&(ty_str.clone(), f_name.clone())).copied()
+                                                .unwrap_or(if matches!(analysis.types.get(analysis.types.prune(*f_ty)), pilot_analysis::TypeKind::Function { .. }) {
+                                                    pilot_ast::VisibilityTier::Private
+                                                } else {
+                                                    pilot_ast::VisibilityTier::Internal
+                                                });
+                                            if m_vis == pilot_ast::VisibilityTier::Private && !is_inside_type {
+                                                continue;
+                                            }
+
                                             let is_fn = matches!(analysis.types.get(analysis.types.prune(*f_ty)), pilot_analysis::TypeKind::Function { .. });
                                             let sig = format!("{}: {}", f_name, analysis.types.display(*f_ty));
                                             let kind_num = if is_fn { 2.0 } else { 5.0 };
@@ -1445,6 +1472,10 @@ impl LspServer {
                                                         for &child_id in children {
                                                             let child_node = *arena.node(pilot_ast::NodeId(child_id));
                                                             if child_node.node_kind() == pilot_ast::NodeKind::FnDecl {
+                                                                let m_vis = arena.node_visibility.get(&child_id).copied().unwrap_or(pilot_ast::VisibilityTier::Private);
+                                                                if m_vis == pilot_ast::VisibilityTier::Private && !is_inside_type {
+                                                                    continue;
+                                                                }
                                                                 let m_name = arena.interner.resolve(pilot_intern::SymbolId(child_node.lhs)).to_string();
                                                                 if !user_type_members.iter().any(|m| m.0 == m_name) {
                                                                     let fn_start = child_node.rhs;
@@ -3065,6 +3096,7 @@ impl LspServer {
                 diags_json.push(JsonValue::Object(vec![
                     ("range".to_string(), make_range(s_line, s_col, e_line, e_col)),
                     ("severity".to_string(), JsonValue::Number(sev_code as f64)),
+                    ("code".to_string(), JsonValue::String(_code)),
                     ("message".to_string(), JsonValue::String(message)),
                     ("source".to_string(), JsonValue::String("pilot".to_string())),
                 ]));
@@ -3718,7 +3750,22 @@ const KEYWORD_DOCS: &[(&str, (&str, &str))] = &[
     ("mut", ("Ownership & Mutability", "`mut` — Marks a reference, parameter, or binding as mutable.")),
     ("immut", ("Ownership & Mutability", "`immut` — Marks a binding or parameter as deeply immutable.")),
     ("ref", ("Ownership & References", "`ref <param>` — Passes a value by reference without copying.")),
+    ("pub", ("Visibility", "`pub` / `public` — Publicly callable; closed to external override/binding.")),
     ("public", ("Visibility", "`public` — Makes a declaration visible across all modules.")),
+    ("priv", ("Visibility", "`priv` / `private` — Enclosing type only. In Pilot, functions and methods default to private.")),
+    ("private", ("Visibility", "`private` — Enclosing type only. In Pilot, functions and methods default to private.")),
+    ("file", ("Visibility", "`file` / `fileprivate` — Restricts visibility to the current source file only.")),
+    ("fileprivate", ("Visibility", "`fileprivate` — Current source file only.")),
+    ("priv prot", ("Visibility", "`priv prot` — Enclosing type + structural subtypes within current binary.")),
+    ("prot", ("Visibility", "`prot` / `protected` — Enclosing type + structural subtypes/roles anywhere.")),
+    ("pkg", ("Visibility", "`pkg` / `package` — Current directory / module namespace.")),
+    ("package", ("Visibility", "`package` — Current directory / module namespace.")),
+    ("prot int", ("Visibility", "`prot int` — Current binary OR external structural subtypes.")),
+    ("int", ("Visibility", "`int` / `internal` — Current compiled binary / crate (Default for types).")),
+    ("open", ("Visibility", "`open` — Publicly callable AND open for external .pchor role/extension binding.")),
+    ("export", ("Visibility", "`export` — Public + emits unmangled C-ABI symbol.")),
+    ("lvl", ("Clearance Lattice", "`lvl(N)` / `lvl(Domain, N)` / `lvlN` — Compile-time clearance ring requirement (Axis 2).")),
+    ("iso", ("Ownership", "`iso` — Reference-capability for zero-copy isolated ownership transfer.")),
     ("private", ("Visibility", "`private` — Restricts visibility to the enclosing class, struct, or module.")),
     ("protected", ("Visibility", "`protected` — Restricts visibility to the declaring class and its subclasses.")),
     ("internal", ("Visibility", "`internal` — Restricts visibility to the current package/crate.")),

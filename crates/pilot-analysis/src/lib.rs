@@ -837,4 +837,175 @@ def check_ranges() {
         let result = AnalysisPipeline::analyze(&arena, arena.root);
         assert!(result.is_ok(), "Expected clean string range analysis, got: {:?}", result.diagnostics);
     }
+
+    #[test]
+    fn test_static_methods_contextual_enums_and_deep_flatten() {
+        // 1. Static def rejecting self / .field
+        let bad_static = r#"
+        class Service {
+            x: int
+            static def compute() -> int {
+                return .x;
+            }
+        }
+        "#;
+        let arena_bad = pilot_parser::parse(bad_static);
+        let result_bad = AnalysisPipeline::analyze(&arena_bad, arena_bad.root);
+        assert!(!result_bad.is_ok(), "Expected static method error");
+        assert!(result_bad.diagnostics.iter().any(|d| d.code == "STATIC001"), "Expected STATIC001, got: {:?}", result_bad.diagnostics);
+
+        // 2. Valid static def and instance def accessing fields
+        let good_code = r#"
+        class Vector2D {
+            x: int
+            y: int
+
+            def get_sum() -> int {
+                return .x + .y;
+            }
+
+            static def origin() -> int {
+                return 0;
+            }
+        }
+        "#;
+        let arena_good = pilot_parser::parse(good_code);
+        let result_good = AnalysisPipeline::analyze(&arena_good, arena_good.root);
+        assert!(result_good.is_ok(), "Expected clean analysis, got: {:?}", result_good.diagnostics);
+
+        // 3. Comptime deep flattening literal helper
+        let nested_code = r#"
+        let nested = [1, [2, [3, 4]], 5];
+        "#;
+        let arena_nested = pilot_parser::parse(nested_code);
+        let flat_leaves = crate::comptime::ComptimeEvaluator::flatten_literal_to_1d(&arena_nested, arena_nested.root);
+        assert!(flat_leaves.len() >= 5, "Expected flattened 1D leaves, got: {}", flat_leaves.len());
+    }
+
+    #[test]
+    fn test_accessibility_modifiers_and_clearance_lattice() {
+        // 1. Inaccessible private method accessed from outside triggers VIS001
+        let priv_code = r#"
+        class BankAccount {
+            balance: int
+
+            def internal_vault() -> int {
+                return .balance;
+            }
+
+            pub def get_balance() -> int {
+                return .internal_vault();
+            }
+        }
+
+        def test_access() {
+            let acct = BankAccount();
+            acct.internal_vault();
+        }
+        "#;
+        let arena_priv = pilot_parser::parse(priv_code);
+        let res_priv = AnalysisPipeline::analyze(&arena_priv, arena_priv.root);
+        assert!(!res_priv.is_ok(), "Expected VIS001 diagnostic for calling private method from outside");
+        assert!(res_priv.diagnostics.iter().any(|d| d.code == "VIS001"), "Expected VIS001, got: {:?}", res_priv.diagnostics);
+
+        // 2. Calling private method from inside class method via self or prefix dot succeeds
+        let valid_priv = r#"
+        class BankAccount {
+            balance: int
+
+            def internal_vault() -> int {
+                return .balance;
+            }
+
+            pub def get_balance() -> int {
+                return .internal_vault();
+            }
+        }
+
+        def test_access() {
+            let acct = BankAccount();
+            acct.get_balance();
+        }
+        "#;
+        let arena_valid = pilot_parser::parse(valid_priv);
+        let res_valid = AnalysisPipeline::analyze(&arena_valid, arena_valid.root);
+        assert!(res_valid.is_ok(), "Expected clean analysis, got: {:?}", res_valid.diagnostics);
+
+        // 3. Insufficient clearance calling lvl(30) function from lvl(0) triggers LVL001
+        let low_clearance = r#"
+        lvl30 def secure_wipe() {
+        }
+
+        def regular_user() {
+            secure_wipe();
+        }
+        "#;
+        let arena_low = pilot_parser::parse(low_clearance);
+        let res_low = AnalysisPipeline::analyze(&arena_low, arena_low.root);
+        assert!(!res_low.is_ok(), "Expected LVL001 diagnostic for insufficient clearance");
+        assert!(res_low.diagnostics.iter().any(|d| d.code == "LVL001"), "Expected LVL001, got: {:?}", res_low.diagnostics);
+
+        // 4. Elevated clearance via function declaration lvl30 allows call
+        let elevated_fn = r#"
+        lvl30 def secure_wipe() {
+        }
+
+        lvl30 def admin_panel() {
+            secure_wipe();
+        }
+        "#;
+        let arena_elevated = pilot_parser::parse(elevated_fn);
+        let res_elevated = AnalysisPipeline::analyze(&arena_elevated, arena_elevated.root);
+        assert!(res_elevated.is_ok(), "Expected clean analysis with matching clearance, got: {:?}", res_elevated.diagnostics);
+
+        // 5. Flow-typed elevation via `if lvl >= 30:`
+        let guard_code = r#"
+        lvl30 def secure_wipe() {
+        }
+
+        def dispatch(lvl: int) {
+            if lvl >= 30:
+                secure_wipe();
+        }
+        "#;
+        let arena_guard = pilot_parser::parse(guard_code);
+        let res_guard = AnalysisPipeline::analyze(&arena_guard, arena_guard.root);
+        assert!(res_guard.is_ok(), "Expected clean analysis with flow-typed elevation, got: {:?}", res_guard.diagnostics);
+    }
+
+    #[test]
+    fn test_flat_sibling_setters_variation_b() {
+        // Variation B flat sibling property and indexer setters
+        let code = r#"
+        class ConfigBuffer {
+            data: int
+
+            property timeout: int {
+                get:
+                    return .data;
+                pub set:
+                    .data = value;
+                pub set(multiplier: float):
+                    .data = 100;
+                priv set(raw: (int, int)):
+                    .data = 200;
+            }
+
+            self[key: str] -> int {
+                get:
+                    return .data;
+                default:
+                    return 0;
+                set:
+                    .data = value;
+                set(iso token: str):
+                    .data = 50;
+            }
+        }
+        "#;
+        let arena = pilot_parser::parse(code);
+        assert!(!arena.accessor_clauses.is_empty(), "Expected parsed accessor clauses");
+        let res = AnalysisPipeline::analyze(&arena, arena.root);
+        assert!(res.is_ok(), "Expected clean analysis for Variation B flat sibling accessors, got: {:?}", res.diagnostics);
+    }
 }

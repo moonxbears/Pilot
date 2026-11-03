@@ -152,4 +152,41 @@ impl ComptimeEvaluator {
             }
         }
     }
+
+    /// Recursively flattens nested list/tuple literals in `arena` into a 1D vector of leaf node IDs.
+    pub fn flatten_literal_to_1d(arena: &pilot_ast::AstArena, node_id: pilot_ast::NodeId) -> Vec<pilot_ast::NodeId> {
+        let mut leaves = Vec::new();
+        Self::collect_leaves_rec(arena, node_id, &mut leaves);
+        leaves
+    }
+
+    fn collect_leaves_rec(arena: &pilot_ast::AstArena, node_id: pilot_ast::NodeId, out: &mut Vec<pilot_ast::NodeId>) {
+        if node_id.is_none() {
+            return;
+        }
+        let node = *arena.node(node_id);
+        match node.node_kind() {
+            pilot_ast::NodeKind::Program => {
+                let children = arena.children_slice(node.lhs, node.rhs);
+                for &c in children {
+                    Self::collect_leaves_rec(arena, pilot_ast::NodeId(c), out);
+                }
+            }
+            pilot_ast::NodeKind::LetStmt | pilot_ast::NodeKind::VarStmt => {
+                Self::collect_leaves_rec(arena, pilot_ast::NodeId(node.rhs), out);
+            }
+            pilot_ast::NodeKind::ListExpr | pilot_ast::NodeKind::TupleExpr => {
+                let children = arena.children_slice(node.lhs, node.rhs);
+                for &c in children {
+                    Self::collect_leaves_rec(arena, pilot_ast::NodeId(c), out);
+                }
+            }
+            pilot_ast::NodeKind::UnaryExpr if node.flags == pilot_ast::UNARY_OP_DEEP_FLATTEN => {
+                Self::collect_leaves_rec(arena, pilot_ast::NodeId(node.lhs), out);
+            }
+            _ => {
+                out.push(node_id);
+            }
+        }
+    }
 }

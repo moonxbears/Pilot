@@ -452,6 +452,40 @@ impl<'a> Lexer<'a> {
         let b1 = if start + 1 < self.bytes.len() { self.bytes[start + 1] } else { 0 };
         let b2 = if start + 2 < self.bytes.len() { self.bytes[start + 2] } else { 0 };
 
+        // Check for *.. and *...tree adjacent dots
+        if b == b'*' && b1 == b'.' && b2 == b'.' {
+            if start + 3 < self.bytes.len() && self.bytes[start + 3] == b'.' {
+                self.tape.push_diagnostic("Syntax Error: ambiguous adjacent dots; add a space before '.<ident>' to access 'self.<ident>'".to_string());
+                self.cursor = start + 4;
+                self.push_token(TokenKind::StarDotDot, TokenFlags::NONE, ByteSpan::new(start as u32, (start + 3) as u32));
+                self.push_token(TokenKind::PrefixDot, TokenFlags::NONE, ByteSpan::new((start + 3) as u32, (start + 4) as u32));
+                return;
+            } else {
+                self.cursor = start + 3;
+                self.push_token(TokenKind::StarDotDot, TokenFlags::NONE, ByteSpan::new(start as u32, (start + 3) as u32));
+                return;
+            }
+        }
+
+        // Check for 0...count ambiguous adjacent dots
+        if b == b'.' && b1 == b'.' && b2 == b'.' {
+            let prev_is_token_char = start > 0 && match self.bytes[start - 1] {
+                b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' => true,
+                _ => false,
+            };
+            let next_is_ident_char = start + 3 < self.bytes.len() && match self.bytes[start + 3] {
+                b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' => true,
+                _ => false,
+            };
+            if prev_is_token_char || next_is_ident_char {
+                self.tape.push_diagnostic("Syntax Error: ambiguous adjacent dots; add a space before '.<ident>' to access 'self.<ident>'".to_string());
+                self.cursor = start + 3;
+                self.push_token(TokenKind::DotDot, TokenFlags::NONE, ByteSpan::new(start as u32, (start + 2) as u32));
+                self.push_token(TokenKind::PrefixDot, TokenFlags::NONE, ByteSpan::new((start + 2) as u32, (start + 3) as u32));
+                return;
+            }
+        }
+
         // 3-character operators
         let (kind, len) = match (b, b1, b2) {
             (b'-', b'>', b'>') => (TokenKind::JsonGetText, 3),
@@ -475,6 +509,7 @@ impl<'a> Lexer<'a> {
 
         // 2-character operators
         let (kind, len) = match (b, b1) {
+            (b':', b':') => (TokenKind::ColonColon, 2),
             (b'&', b'&') => (TokenKind::DoubleAmper, 2),
             (b'|', b'|') => (TokenKind::DoublePipe, 2),
             (b':', b'=') => (TokenKind::Walrus, 2),
@@ -548,7 +583,47 @@ impl<'a> Lexer<'a> {
             }
             b';' => (TokenKind::Semicolon, TokenFlags::NONE),
             b',' => (TokenKind::Comma, TokenFlags::NONE),
-            b'.' => (TokenKind::Dot, TokenFlags::NONE),
+            b'.' => {
+                let is_adjacent = if let Some(&last_kind) = self.tape.kinds.last() {
+                    if let Some(&last_span) = self.tape.spans.last() {
+                        (last_kind == TokenKind::DotDot || last_kind == TokenKind::DotDotEqual || last_kind == TokenKind::DotDotLess || last_kind == TokenKind::StarDotDot)
+                            && last_span.end == start as u32
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if is_adjacent {
+                    self.tape.push_diagnostic("Syntax Error: ambiguous adjacent dots; add a space before '.<ident>' to access 'self.<ident>'".to_string());
+                    self.cursor = start + 1;
+                    self.push_token(TokenKind::PrefixDot, TokenFlags::NONE, ByteSpan::new(start as u32, (start + 1) as u32));
+                    return;
+                }
+
+                if start + 1 < self.bytes.len() && self.bytes[start + 1].is_ascii_digit() {
+                    let is_infix = start > 0 && match self.bytes[start - 1] {
+                        b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b')' | b']' | b'}' => true,
+                        _ => false,
+                    };
+                    if !is_infix {
+                        self.tape.push_diagnostic("Syntax Error: invalid float literal; Help: prefix float literals with 0 ('0.5')".to_string());
+                        self.cursor = start + 1;
+                        self.push_token(TokenKind::PrefixDot, TokenFlags::NONE, ByteSpan::new(start as u32, (start + 1) as u32));
+                        return;
+                    }
+                }
+
+                let dot_kind = if start == 0 {
+                    TokenKind::PrefixDot
+                } else {
+                    match self.bytes[start - 1] {
+                        b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b')' | b']' | b'}' => TokenKind::InfixDot,
+                        _ => TokenKind::PrefixDot,
+                    }
+                };
+                (dot_kind, TokenFlags::NONE)
+            }
             b'@' => (TokenKind::At, TokenFlags::NONE),
             b'?' => (TokenKind::Question, TokenFlags::NONE),
             b'!' => (TokenKind::Exclamation, TokenFlags::NONE),

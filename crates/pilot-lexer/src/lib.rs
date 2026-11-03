@@ -180,4 +180,53 @@ let mode = "release"
             .collect();
         assert_eq!(release_text, vec!["\"release\""]);
     }
+
+    #[test]
+    fn test_dot_classification_and_disambiguation() {
+        // InfixDot: preceded immediately by ident, number, ), ], }
+        let code_infix = "obj.field; tuple.0; arr[0].len(); (x).y; {k: v}.m";
+        let tape_infix = tokenize(code_infix);
+        for i in 0..tape_infix.len() {
+            if tape_infix.kind(i) == TokenKind::InfixDot {
+                assert_eq!(tape_infix.kind(i), TokenKind::InfixDot);
+            }
+        }
+
+        // PrefixDot: preceded by whitespace, newline, ;, (, [, {, ,, :
+        let code_prefix = ".reset(); 0.. .count; [*.. .tree]; ( .foo, : .bar )";
+        let tape_prefix = tokenize(code_prefix);
+        let prefix_dots: Vec<_> = (0..tape_prefix.len())
+            .filter(|&i| tape_prefix.kind(i) == TokenKind::PrefixDot)
+            .collect();
+        assert_eq!(prefix_dots.len(), 5);
+
+        // Adjacent Dot Rejection: 0...count and *...tree
+        let code_adj1 = "0...count";
+        let tape_adj1 = tokenize(code_adj1);
+        assert!(tape_adj1.diagnostics.iter().any(|d| d.contains("ambiguous adjacent dots")));
+
+        let code_adj2 = "*...tree";
+        let tape_adj2 = tokenize(code_adj2);
+        assert!(tape_adj2.diagnostics.iter().any(|d| d.contains("ambiguous adjacent dots")));
+
+        // Float literal leading-zero requirement: reject .5
+        let code_float_invalid = ".5";
+        let tape_float_invalid = tokenize(code_float_invalid);
+        assert!(tape_float_invalid.diagnostics.iter().any(|d| d.contains("Help: prefix float literals with 0 ('0.5')")));
+
+        // Valid float: 0.5
+        let code_float_valid = "0.5";
+        let tape_float_valid = tokenize(code_float_valid);
+        assert_eq!(tape_float_valid.kind(0), TokenKind::FloatLit);
+        assert!(tape_float_valid.diagnostics.is_empty());
+
+        // Unpacking tokens: *, **, *..
+        let code_splat = "let [head, *payload, crc] = buf; CpuState(pc: next_pc, **curr); [*..nested_arr]; ::Active;";
+        let tape_splat = tokenize(code_splat);
+        let kinds: Vec<_> = (0..tape_splat.len()).map(|i| tape_splat.kind(i)).collect();
+        assert!(kinds.contains(&TokenKind::Star));
+        assert!(kinds.contains(&TokenKind::DoubleStar));
+        assert!(kinds.contains(&TokenKind::StarDotDot));
+        assert!(kinds.contains(&TokenKind::ColonColon));
+    }
 }

@@ -70,6 +70,7 @@ pub fn lookup_keyword(ident: &str) -> Option<(TokenKind, bool)> {
             b"self" => Some((TokenKind::KwSelf, true)),
             b"exit" => Some((TokenKind::KwExit, true)),
             b"pack" => Some((TokenKind::KwPack, true)),
+            b"flat" => Some((TokenKind::KwFlat, true)),
             b"some" => Some((TokenKind::KwSome, true)),
             b"null" => Some((TokenKind::KwNull, true)),
             b"true" | b"True" => Some((TokenKind::KwTrue, true)),

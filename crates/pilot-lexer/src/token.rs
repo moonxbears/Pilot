@@ -225,6 +225,7 @@ pub enum TokenKind {
     KwClone = 243,
     KwPack = 244,
     KwUnpack = 245,
+    KwFlat = 246,
 
     // --- Delimiters & Single Character Punctuation (250..269) ---
     LParen = 250,       // (
@@ -236,7 +237,8 @@ pub enum TokenKind {
     Colon = 256,        // :
     Semicolon = 257,    // ;
     Comma = 258,        // ,
-    Dot = 259,          // .
+    InfixDot = 259,     // . (infix)
+    PrefixDot = 269,    // . (prefix)
     At = 260,           // @
     Question = 261,     // ?
     Exclamation = 262,  // !
@@ -294,6 +296,8 @@ pub enum TokenKind {
     DotDotEqual = 313,  // ..=
     DotDotLess = 314,   // ..<
     Ellipsis = 315,     // ...
+    ColonColon = 316,   // ::
+    StarDotDot = 317,   // *..
 
     // --- Call-Quoting Projections (320..329, Invariant #1 & M17) ---
     CallQuoteShallow = 320, // fn!(...)
@@ -307,9 +311,12 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
+    #[allow(non_upper_case_globals)]
+    pub const Dot: Self = Self::InfixDot;
+
     #[inline]
     pub const fn is_keyword(self) -> bool {
-        (self as u16) >= (TokenKind::KwLet as u16) && (self as u16) <= (TokenKind::KwUnpack as u16)
+        (self as u16) >= (TokenKind::KwLet as u16) && (self as u16) <= (TokenKind::KwFlat as u16)
     }
 
     #[inline]
@@ -387,6 +394,7 @@ pub struct TokenTape {
     pub flags: Vec<TokenFlags>,
     pub spans: Vec<ByteSpan>,
     pub bracket_links: Vec<u32>,
+    pub diagnostics: Vec<String>,
 }
 
 impl TokenTape {
@@ -400,6 +408,7 @@ impl TokenTape {
             flags: Vec::with_capacity(cap),
             spans: Vec::with_capacity(cap),
             bracket_links: Vec::with_capacity(cap),
+            diagnostics: Vec::new(),
         }
     }
 
@@ -411,6 +420,11 @@ impl TokenTape {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.kinds.is_empty()
+    }
+
+    #[inline]
+    pub fn push_diagnostic(&mut self, diag: String) {
+        self.diagnostics.push(diag);
     }
 
     #[inline]

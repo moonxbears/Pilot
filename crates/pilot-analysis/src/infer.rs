@@ -30,6 +30,13 @@ pub struct TypeInferenceEngine {
     pub adt_variants: HashMap<String, (String, Vec<TypeId>)>, // variant -> (adt_name, field_types)
     pub fn_decls: HashMap<String, NodeId>,
     pub instantiating_fns: std::collections::HashSet<String>,
+    pub current_fn_is_static: bool,
+    pub current_scope_clearance: u32,
+    pub current_enclosing_type: Option<String>,
+    pub fn_visibility: HashMap<String, pilot_ast::VisibilityTier>,
+    pub fn_clearance: HashMap<String, pilot_ast::ClearanceLevel>,
+    pub struct_member_visibility: HashMap<(String, String), pilot_ast::VisibilityTier>,
+    pub struct_member_clearance: HashMap<(String, String), pilot_ast::ClearanceLevel>,
 }
 
 impl Default for TypeInferenceEngine {
@@ -50,6 +57,13 @@ impl TypeInferenceEngine {
             adt_variants: HashMap::new(),
             fn_decls: HashMap::new(),
             instantiating_fns: std::collections::HashSet::new(),
+            current_fn_is_static: false,
+            current_scope_clearance: 0,
+            current_enclosing_type: None,
+            fn_visibility: HashMap::new(),
+            fn_clearance: HashMap::new(),
+            struct_member_visibility: HashMap::new(),
+            struct_member_clearance: HashMap::new(),
         };
 
         engine.init_builtins();
@@ -758,8 +772,53 @@ impl TypeInferenceEngine {
         }
     }
 
+    fn extract_clearance_elevation(&self, arena: &AstArena, cond_id: NodeId) -> Option<u32> {
+        if cond_id.is_none() {
+            return None;
+        }
+        let c_node = *arena.node(cond_id);
+        if c_node.node_kind() == NodeKind::BinaryExpr {
+            let lhs_id = NodeId(c_node.lhs);
+            let rhs_id = NodeId(c_node.rhs);
+            if lhs_id.is_some() && rhs_id.is_some() {
+                let lhs = *arena.node(lhs_id);
+                let rhs = *arena.node(rhs_id);
+                if lhs.node_kind() == NodeKind::IdentExpr && rhs.node_kind() == NodeKind::IntLit {
+                    let name = arena.interner.resolve(SymbolId(lhs.lhs));
+                    if name == "lvl" || name == "clearance" {
+                        if let Some(&val) = arena.i64_pool.get(rhs.lhs as usize) {
+                            if val >= 0 {
+                                let uval = val as u32;
+                                if c_node.flags == pilot_ast::BinaryOp::Ge as u16 {
+                                    return Some(uval);
+                                } else if c_node.flags == pilot_ast::BinaryOp::Gt as u16 {
+                                    return Some(uval + 1);
+                                }
+                            }
+                        }
+                    }
+                } else if lhs.node_kind() == NodeKind::IntLit && rhs.node_kind() == NodeKind::IdentExpr {
+                    let name = arena.interner.resolve(SymbolId(rhs.lhs));
+                    if name == "lvl" || name == "clearance" {
+                        if let Some(&val) = arena.i64_pool.get(lhs.lhs as usize) {
+                            if val >= 0 {
+                                let uval = val as u32;
+                                if c_node.flags == pilot_ast::BinaryOp::Le as u16 {
+                                    return Some(uval);
+                                } else if c_node.flags == pilot_ast::BinaryOp::Lt as u16 {
+                                    return Some(uval + 1);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Extracts field & method signatures from a struct/class/record declaration.
-    fn collect_decl_fields(&mut self, arena: &AstArena, node_id: NodeId) -> Vec<(String, TypeId)> {
+    fn collect_decl_fields(&mut self, arena: &AstArena, node_id: NodeId, parent_name: &str) -> Vec<(String, TypeId)> {
         let mut fields = Vec::new();
         let node = *arena.node(node_id);
         if let Some(rec_fields) = arena.record_fields.get(&node_id.0) {
@@ -770,6 +829,7 @@ impl TypeInferenceEngine {
                 } else {
                     TypeId::ANY
                 };
+                self.struct_member_visibility.insert((parent_name.to_string(), f_name.clone()), pilot_ast::VisibilityTier::Internal);
                 fields.push((f_name, f_ty));
             }
         }
@@ -790,11 +850,21 @@ impl TypeInferenceEngine {
                             } else {
                                 TypeId::ANY
                             };
+                            let f_vis = arena.node_visibility.get(&stmt_id).copied().unwrap_or(pilot_ast::VisibilityTier::Internal);
+                            self.struct_member_visibility.insert((parent_name.to_string(), f_name.clone()), f_vis);
+                            if let Some(&clr) = arena.node_clearance.get(&stmt_id) {
+                                self.struct_member_clearance.insert((parent_name.to_string(), f_name.clone()), clr);
+                            }
                             self.inferred_node_types.insert(stmt_id, f_ty);
                             fields.push((f_name, f_ty));
                         }
                         NodeKind::FnDecl => {
                             let m_name = arena.interner.resolve(SymbolId(s_node.lhs)).to_string();
+                            let m_vis = arena.node_visibility.get(&stmt_id).copied().unwrap_or(pilot_ast::VisibilityTier::Private);
+                            self.struct_member_visibility.insert((parent_name.to_string(), m_name.clone()), m_vis);
+                            if let Some(&clr) = arena.node_clearance.get(&stmt_id) {
+                                self.struct_member_clearance.insert((parent_name.to_string(), m_name.clone()), clr);
+                            }
                             let fn_start = s_node.rhs;
                             let fn_len = s_node.flags as usize;
                             if fn_len == 0 {
@@ -983,10 +1053,46 @@ impl TypeInferenceEngine {
             NodeKind::IdentExpr => {
                 let sym = SymbolId(node.lhs);
                 let name = arena.interner.resolve(sym);
+                if name == "self" && self.current_fn_is_static {
+                    self.diagnostics.push(AnalysisDiagnostic::error(
+                        "STATIC001",
+                        "Cannot access 'self' or '.field' inside static method",
+                        arena.span(node_id),
+                    ));
+                    return TypeId::ANY;
+                }
                 if name == "_" {
                     TypeId::ANY
                 } else if let Some(t) = self.lookup_var(name) {
                     t
+                } else if !self.current_fn_is_static && self.lookup_var("self").is_some() {
+                    let self_ty = self.lookup_var("self").unwrap();
+                    let pruned_self = self.types.prune(self_ty);
+                    let self_type_name = match self.types.get(pruned_self) {
+                        TypeKind::Primitive(n) => Some(n.clone()),
+                        TypeKind::Adt { name, .. } => Some(name.clone()),
+                        _ => self.types.nominal_names.get(&pruned_self).cloned(),
+                    };
+                    if let Some(sname) = self_type_name {
+                        if let Some(fields) = self.struct_fields.get(&sname) {
+                            if let Some((_, fty)) = fields.iter().find(|(fname, _)| fname == name) {
+                                return *fty;
+                            }
+                        }
+                    }
+                    if let Some(&t) = self.type_defs.get(name) {
+                        t
+                    } else if self.adt_variants.contains_key(name) {
+                        let (adt_name, _) = self.adt_variants[name].clone();
+                        self.type_defs.get(&adt_name).copied().unwrap_or(TypeId::ANY)
+                    } else {
+                        self.diagnostics.push(AnalysisDiagnostic::error(
+                            "TYPE001",
+                            format!("Unresolved identifier '{}'", name),
+                            arena.span(node_id),
+                        ));
+                        TypeId::ANY
+                    }
                 } else if let Some(&t) = self.type_defs.get(name) {
                     t
                 } else if self.adt_variants.contains_key(name) {
@@ -1175,12 +1281,34 @@ impl TypeInferenceEngine {
             NodeKind::UnaryExpr => {
                 let op_flag = node.flags;
                 let operand_ty = self.synth(arena, NodeId(node.lhs));
-                if op_flag == 2 {
-                    // Spread operator (..collection) in C# collection expressions
+                if op_flag == 2 || op_flag == 6 {
+                    // Spread operator (..collection) or Splat (*)
                     match self.types.get(self.types.prune(operand_ty)).clone() {
                         TypeKind::Collection { element, .. } => element,
                         _ => operand_ty,
                     }
+                } else if op_flag == 7 {
+                    // Double splat (**)
+                    operand_ty
+                } else if op_flag == 8 {
+                    // Deep flatten (*..)
+                    let pruned = self.types.prune(operand_ty);
+                    let nominal_name = self.types.nominal_names.get(&pruned).cloned();
+                    if let Some(nom) = nominal_name {
+                        if let Some(fields) = self.struct_fields.get(&nom).cloned() {
+                            if let Some((_, flat_fn_ty)) = fields.iter().find(|(n, _)| n == "op flat" || n.starts_with("op flat")) {
+                                let pruned_flat = self.types.prune(*flat_fn_ty);
+                                if let TypeKind::Function { ret, .. } = self.types.get(pruned_flat) {
+                                    return self.types.prune(*ret);
+                                }
+                            }
+                        }
+                    }
+                    let mut curr = pruned;
+                    while let TypeKind::Collection { element, .. } = *self.types.get(curr) {
+                        curr = self.types.prune(element);
+                    }
+                    curr
                 } else {
                     operand_ty
                 }
@@ -1290,6 +1418,11 @@ impl TypeInferenceEngine {
                     match child_node.node_kind() {
                         NodeKind::FnDecl => {
                             let fn_name = arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
+                            let vis = arena.node_visibility.get(&c).copied().unwrap_or(pilot_ast::VisibilityTier::Private);
+                            self.fn_visibility.insert(fn_name.clone(), vis);
+                            if let Some(&clr) = arena.node_clearance.get(&c) {
+                                self.fn_clearance.insert(fn_name.clone(), clr);
+                            }
                             self.fn_decls.insert(fn_name.clone(), NodeId(c));
                             let fn_start = child_node.rhs;
                             let fn_len = child_node.flags as usize;
@@ -1315,7 +1448,7 @@ impl TypeInferenceEngine {
                         }
                         NodeKind::RecordDecl | NodeKind::StructDecl => {
                             let rec_name = arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
-                            let fields = self.collect_decl_fields(arena, NodeId(c));
+                            let fields = self.collect_decl_fields(arena, NodeId(c), &rec_name);
                             self.struct_fields.insert(rec_name.clone(), fields.clone());
                             let ty = self.types.row_record_with_name(fields.clone(), true, None, Some(rec_name.clone()));
                             self.type_defs.insert(rec_name.clone(), ty);
@@ -1384,7 +1517,7 @@ impl TypeInferenceEngine {
                             let ty = self.types.alloc(TypeKind::Primitive(cls_name.clone()));
                             self.types.register_nominal_name(ty, cls_name.clone());
                             self.type_defs.insert(cls_name.clone(), ty);
-                            let fields = self.collect_decl_fields(arena, NodeId(c));
+                            let fields = self.collect_decl_fields(arena, NodeId(c), &cls_name);
                             self.struct_fields.insert(cls_name.clone(), fields);
                             let ctor_ty = self.types.function_of(vec![TypeId::ANY], ty);
                             self.define_var(&cls_name, ctor_ty);
@@ -1558,6 +1691,13 @@ impl TypeInferenceEngine {
                 self.fn_decls.insert(fn_name.clone(), node_id);
                 let fn_start = node.rhs;
                 let fn_len = node.flags as usize;
+                let is_static = arena.static_methods.contains(&node_id.0);
+                let old_is_static = self.current_fn_is_static;
+                self.current_fn_is_static = is_static;
+                let old_clearance = self.current_scope_clearance;
+                if let Some(clr) = arena.node_clearance.get(&node_id.0) {
+                    self.current_scope_clearance = clr.level;
+                }
 
                 let explicit_ret_ty = arena
                     .type_annotations
@@ -1596,6 +1736,8 @@ impl TypeInferenceEngine {
                     self.synth(arena, body_node)
                 };
                 self.exit_scope();
+                self.current_fn_is_static = old_is_static;
+                self.current_scope_clearance = old_clearance;
 
                 let ret_ty = match explicit_ret_ty {
                     Some(exp) if exp != TypeId::ANY => {
@@ -1753,7 +1895,7 @@ impl TypeInferenceEngine {
             NodeKind::RecordDecl | NodeKind::StructDecl => {
                 let sym = SymbolId(node.lhs);
                 let name = arena.interner.resolve(sym).to_string();
-                let fields = self.collect_decl_fields(arena, node_id);
+                let fields = self.collect_decl_fields(arena, node_id, &name);
                 self.struct_fields.insert(name.clone(), fields.clone());
                 let ty = self.types.row_record_with_name(fields.clone(), true, None, Some(name.clone()));
                 self.type_defs.insert(name.clone(), ty);
@@ -1772,11 +1914,14 @@ impl TypeInferenceEngine {
                 self.define_var(&name, ctor);
                 let body = NodeId(node.rhs);
                 if body.is_some() {
+                    let old_enclosing = self.current_enclosing_type.take();
+                    self.current_enclosing_type = Some(name.clone());
                     self.enter_scope();
                     self.define_var("self", ty);
                     self.define_var("this", ty);
                     self.synth(arena, body);
                     self.exit_scope();
+                    self.current_enclosing_type = old_enclosing;
                 }
                 ty
             }
@@ -1800,17 +1945,20 @@ impl TypeInferenceEngine {
                 let ty = self.types.alloc(TypeKind::Primitive(name.clone()));
                 self.types.register_nominal_name(ty, name.clone());
                 self.type_defs.insert(name.clone(), ty);
-                let fields = self.collect_decl_fields(arena, node_id);
+                let fields = self.collect_decl_fields(arena, node_id, &name);
                 self.struct_fields.insert(name.clone(), fields);
                 let ctor = self.types.function_of(vec![TypeId::ANY], ty);
                 self.define_var(&name, ctor);
                 let body = NodeId(node.rhs);
                 if body.is_some() {
+                    let old_enclosing = self.current_enclosing_type.take();
+                    self.current_enclosing_type = Some(name.clone());
                     self.enter_scope();
                     self.define_var("self", ty);
                     self.define_var("this", ty);
                     self.synth(arena, body);
                     self.exit_scope();
+                    self.current_enclosing_type = old_enclosing;
                 }
                 ty
             }
@@ -1818,24 +1966,27 @@ impl TypeInferenceEngine {
             NodeKind::ExtendDecl => {
                 let target_name = arena.interner.resolve(SymbolId(node.lhs)).to_string();
                 let target_ty = self.type_defs.get(&target_name).copied().unwrap_or(TypeId::ANY);
-                let ext_fields = self.collect_decl_fields(arena, node_id);
+                let ext_fields = self.collect_decl_fields(arena, node_id, &target_name);
                 if !ext_fields.is_empty() {
                     for f in &ext_fields {
                         let ext_fn_name = format!("{}Ext_{}", target_name, f.0);
                         self.define_var(&ext_fn_name, f.1);
                     }
-                    let entry = self.struct_fields.entry(target_name).or_default();
+                    let entry = self.struct_fields.entry(target_name.clone()).or_default();
                     for f in ext_fields {
                         entry.push(f);
                     }
                 }
                 let body = NodeId(node.rhs);
                 if body.is_some() {
+                    let old_enclosing = self.current_enclosing_type.take();
+                    self.current_enclosing_type = Some(target_name.clone());
                     self.enter_scope();
                     self.define_var("self", target_ty);
                     self.define_var("this", target_ty);
                     self.synth(arena, body);
                     self.exit_scope();
+                    self.current_enclosing_type = old_enclosing;
                 }
                 TypeId::VOID
             }
@@ -1844,6 +1995,10 @@ impl TypeInferenceEngine {
             NodeKind::IfExpr => {
                 let cond_node = NodeId(node.lhs);
                 self.enter_scope();
+                let old_clearance = self.current_scope_clearance;
+                if let Some(elevated) = self.extract_clearance_elevation(arena, cond_node) {
+                    self.current_scope_clearance = self.current_scope_clearance.max(elevated);
+                }
                 if cond_node.is_some() {
                     let cond_kind = arena.node(cond_node).node_kind();
                     let cond_flags = arena.node(cond_node).flags;
@@ -1873,6 +2028,7 @@ impl TypeInferenceEngine {
                     (NodeId(node.rhs), NodeId::NONE)
                 };
                 let t_then = self.synth(arena, then_node);
+                self.current_scope_clearance = old_clearance;
                 self.exit_scope();
                 if else_node.is_some() {
                     let t_else = self.synth(arena, else_node);
@@ -1945,6 +2101,9 @@ impl TypeInferenceEngine {
 
             NodeKind::GuardStmt => {
                 let cond_node = NodeId(node.lhs);
+                if let Some(elevated) = self.extract_clearance_elevation(arena, cond_node) {
+                    self.current_scope_clearance = self.current_scope_clearance.max(elevated);
+                }
                 if cond_node.is_some() {
                     let cond_node_val = *arena.node(cond_node);
                     if cond_node_val.node_kind() == NodeKind::IdentExpr {
@@ -2006,6 +2165,15 @@ impl TypeInferenceEngine {
                 };
 
                 if let Some(ref fn_name) = fn_name_opt {
+                    if let Some(clr) = self.fn_clearance.get(fn_name) {
+                        if clr.level > self.current_scope_clearance {
+                            self.diagnostics.push(AnalysisDiagnostic::error(
+                                "LVL001",
+                                format!("Insufficient clearance: call to '{}' requires clearance lvl({}), but current scope has clearance lvl({})", fn_name, clr.level, self.current_scope_clearance),
+                                arena.span(node_id),
+                            ));
+                        }
+                    }
                     if let Some(&fn_decl_id) = self.fn_decls.get(fn_name) {
                         let fn_node = *arena.node(fn_decl_id);
                         let explicit_ret = arena.type_annotations.get(&fn_decl_id.0);
@@ -2059,6 +2227,21 @@ impl TypeInferenceEngine {
             // --- Member & Index Projections ---
             NodeKind::MemberExpr => {
                 let target_node = NodeId(node.lhs);
+                if node.flags == 2 || target_node.is_none() {
+                    let member_name = arena.interner.resolve(SymbolId(node.rhs));
+                    if let Some((adt_name, _)) = self.adt_variants.get(member_name) {
+                        let res = self.type_defs.get(adt_name).copied().unwrap_or(TypeId::ANY);
+                        self.inferred_node_types.insert(node_id.0, res);
+                        return res;
+                    } else {
+                        self.diagnostics.push(AnalysisDiagnostic::error(
+                            "ENUM001",
+                            format!("Unresolved contextual enum variant '::{}'", member_name),
+                            arena.span(node_id),
+                        ));
+                        return TypeId::ANY;
+                    }
+                }
                 let target_ty = self.synth(arena, target_node);
                 let member_name = arena.interner.resolve(SymbolId(node.rhs));
                 let mut pruned = self.types.prune(target_ty);
@@ -2125,6 +2308,29 @@ impl TypeInferenceEngine {
                     }
                 };
                 if let Some(type_name) = type_name_opt {
+                    if let Some(clr) = self.struct_member_clearance.get(&(type_name.clone(), member_name.to_string())) {
+                        if clr.level > self.current_scope_clearance {
+                            self.diagnostics.push(AnalysisDiagnostic::error(
+                                "LVL001",
+                                format!("Insufficient clearance: access to '{}' requires clearance lvl({}), but current scope has clearance lvl({})", member_name, clr.level, self.current_scope_clearance),
+                                arena.span(node_id),
+                            ));
+                        }
+                    }
+
+                    if let Some(vis) = self.struct_member_visibility.get(&(type_name.clone(), member_name.to_string())) {
+                        if *vis == pilot_ast::VisibilityTier::Private {
+                            let is_accessible = self.current_enclosing_type.as_deref() == Some(type_name.as_str());
+                            if !is_accessible {
+                                self.diagnostics.push(AnalysisDiagnostic::error(
+                                    "VIS001",
+                                    format!("Member '{}' is private to '{}' and cannot be accessed from the current context", member_name, type_name),
+                                    arena.span(node_id),
+                                ));
+                            }
+                        }
+                    }
+
                     if let Some(fields) = self.struct_fields.get(&type_name) {
                         if let Some((_, f_ty)) = fields.iter().find(|(k, _)| k == member_name) {
                             let base_res = *f_ty;

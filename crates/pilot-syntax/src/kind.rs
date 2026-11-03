@@ -237,6 +237,7 @@ pub enum SyntaxKind {
     KwClone = 262,
     KwPack = 263,
     KwUnpack = 264,
+    KwFlat = 265,
 
     // --- Delimiters & Single Character Punctuation (270..289) ---
     LParen = 270,
@@ -248,7 +249,8 @@ pub enum SyntaxKind {
     Colon = 276,
     Semicolon = 277,
     Comma = 278,
-    Dot = 279,
+    InfixDot = 279,
+    PrefixDot = 289,
     At = 280,
     Question = 281,
     Exclamation = 282,
@@ -306,6 +308,8 @@ pub enum SyntaxKind {
     DotDotEqual = 333,
     DotDotLess = 334,
     Ellipsis = 335,
+    ColonColon = 336,
+    StarDotDot = 337,
 
     // --- Call Quotes (350..359) ---
     CallQuoteShallow = 350,
@@ -392,6 +396,9 @@ pub enum SyntaxKind {
 }
 
 impl SyntaxKind {
+    #[allow(non_upper_case_globals)]
+    pub const Dot: Self = Self::InfixDot;
+
     #[inline]
     pub fn is_trivia(self) -> bool {
         matches!(
@@ -718,7 +725,11 @@ impl SyntaxKind {
             TokenKind::Colon => SyntaxKind::Colon,
             TokenKind::Semicolon => SyntaxKind::Semicolon,
             TokenKind::Comma => SyntaxKind::Comma,
-            TokenKind::Dot => SyntaxKind::Dot,
+            TokenKind::InfixDot => SyntaxKind::InfixDot,
+            TokenKind::PrefixDot => SyntaxKind::PrefixDot,
+            TokenKind::ColonColon => SyntaxKind::ColonColon,
+            TokenKind::StarDotDot => SyntaxKind::StarDotDot,
+            TokenKind::KwFlat => SyntaxKind::KwFlat,
             TokenKind::At => SyntaxKind::At,
             TokenKind::Question => SyntaxKind::Question,
             TokenKind::Exclamation => SyntaxKind::Exclamation,

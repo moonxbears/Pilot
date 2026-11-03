@@ -487,15 +487,78 @@ pub enum OperatorKind {
     SyncIterator = 17,
     AsyncFuture = 18,
     AsyncStream = 19,
+    DeepFlatten = 20,
 }
 
-/// Clauses for indexers (`self[...]`) and dynamic member dispatch (`self.(...)`).
+pub const UNARY_OP_SPLAT: u16 = 6;
+pub const UNARY_OP_DOUBLE_SPLAT: u16 = 7;
+pub const UNARY_OP_DEEP_FLATTEN: u16 = 8;
+
+/// 10-Tier Spatial Visibility Lattice (Axis 1).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum VisibilityTier {
+    Private = 0,           // priv / private (Default for functions/methods)
+    FilePrivate = 1,       // file / fileprivate
+    PrivateProtected = 2,  // priv prot / private protected
+    Protected = 3,         // prot / protected
+    Package = 4,           // pkg / package
+    ProtectedInternal = 5, // prot int / protected internal
+    Internal = 6,          // int / internal (Default for types/traits)
+    Public = 7,            // pub / public
+    Open = 8,              // open
+    Export = 9,            // export
+}
+
+impl VisibilityTier {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Private => "private",
+            Self::FilePrivate => "fileprivate",
+            Self::PrivateProtected => "private protected",
+            Self::Protected => "protected",
+            Self::Package => "package",
+            Self::ProtectedInternal => "protected internal",
+            Self::Internal => "internal",
+            Self::Public => "public",
+            Self::Open => "open",
+            Self::Export => "export",
+        }
+    }
+}
+
+/// Compile-Time Clearance Level (Axis 2 ? `lvl(N)` / `lvlN`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct ClearanceLevel {
+    pub level: u32,
+    pub domain: Option<SymbolId>,
+}
+
+/// Flat Sibling Setter Clause (Variation B).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetterClause {
+    pub param_name: SymbolId,
+    pub param_type: NodeId,
+    pub guard_expr: NodeId,
+    pub is_iso: bool,
+    pub generic_param: Option<SymbolId>,
+    pub generic_bound: NodeId,
+    pub body: NodeId,
+    pub span: ByteSpan,
+    pub visibility: Option<VisibilityTier>,
+    pub clearance: Option<ClearanceLevel>,
+}
+
+/// Clauses for properties, indexers (`self[...]`), and dynamic member dispatch (`self.(...)`).
 #[derive(Clone, Debug, Default)]
 pub struct AccessorClauses {
     pub get_body: NodeId,
+    pub get_visibility: Option<VisibilityTier>,
+    pub get_clearance: Option<ClearanceLevel>,
     pub set_param: Option<(SymbolId, NodeId)>,
     pub set_body: NodeId,
     pub default_body: NodeId,
+    pub setters: Vec<SetterClause>,
 }
 
 /// Hardware-packed **16-byte** C-ABI AST node (`4` nodes per 64-byte L1 cache line).
@@ -561,6 +624,10 @@ pub struct AstArena {
     pub accessor_clauses: std::collections::HashMap<u32, AccessorClauses>,
     /// Operator symbol or identifier for `OperatorDecl`.
     pub operator_symbols: std::collections::HashMap<u32, SymbolId>,
+    pub static_methods: std::collections::HashSet<u32>,
+    pub mut_methods: std::collections::HashSet<u32>,
+    pub node_visibility: std::collections::HashMap<u32, VisibilityTier>,
+    pub node_clearance: std::collections::HashMap<u32, ClearanceLevel>,
 }
 
 impl AstArena {
@@ -586,6 +653,10 @@ impl AstArena {
             scope_clauses: std::collections::HashMap::new(),
             accessor_clauses: std::collections::HashMap::new(),
             operator_symbols: std::collections::HashMap::new(),
+            static_methods: std::collections::HashSet::new(),
+            mut_methods: std::collections::HashSet::new(),
+            node_visibility: std::collections::HashMap::new(),
+            node_clearance: std::collections::HashMap::new(),
         }
     }
 
