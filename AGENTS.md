@@ -5,6 +5,7 @@
 - **No Hardcoded Answers:** Never return static, pre-computed, or dataset-specific values to make a test pass. Implement the complete underlying algorithm.
 - **No Elided Logic:** Do not use `# TODO`, `pass`, `...`, `unimplemented!()`, or placeholder comments. Every generated function, branch, and edge case must be fully realized.
 - **No Silent Fallbacks:** Do not swallow errors or return dummy default values on failure. Handle all states explicitly.
+- **Pilot Code Over Others:** When there are not performance disadvantages to implementing code in pilot over other languages (including the underlying Rust engine) then implement the code through pilot. If the code can be made into a useful library then package it as one in the stdlib.
 
 ## 2. Type System & Constrained Generics
 - **Ban Untyped Containers:** Never use `Object`, `Any`, `void*`, or untyped dictionaries to bypass the type checker.

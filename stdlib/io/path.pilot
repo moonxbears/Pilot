@@ -14,15 +14,15 @@ def separator() -> str {
 }
 
 def _to_slashes(raw: str) -> str {
-    return __str_replace(raw, "\\", "/");
+    return raw.replace("\\", "/");
 }
 
 def _has_windows_drive(clean: str) -> bool {
     if len(clean) < 2 {
         return false;
     }
-    let c0: i64 = __str_char_code(clean, 0);
-    let c1: i64 = __str_char_code(clean, 1);
+    let c0: i64 = clean.char_code_at(0);
+    let c1: i64 = clean.char_code_at(1);
     let is_alpha: bool = (c0 >= 65 and c0 <= 90) or (c0 >= 97 and c0 <= 122);
     return is_alpha and c1 == 58;
 }
@@ -32,14 +32,14 @@ def is_absolute(raw_path: str) -> bool {
     if len(s) == 0 {
         return false;
     }
-    if __str_slice(s, 0, 1) == "/" {
+    if s[0..1] == "/" {
         return true;
     }
     if _has_windows_drive(s) {
         if len(s) == 2 {
             return true;
         }
-        return __str_slice(s, 2, 3) == "/";
+        return s[2..3] == "/";
     }
     return false;
 }
@@ -54,20 +54,20 @@ def normalize(raw_path: str) -> str {
     var rest: str = slashed;
 
     if _has_windows_drive(slashed) {
-        prefix = __str_slice(slashed, 0, 2);
-        rest = __str_slice(slashed, 2, len(slashed));
-        if len(rest) > 0 and __str_slice(rest, 0, 1) == "/" {
+        prefix = slashed[0..2];
+        rest = slashed[2..len(slashed)];
+        if len(rest) > 0 and rest[0..1] == "/" {
             prefix = prefix + "/";
-            rest = __str_slice(rest, 1, len(rest));
+            rest = rest[1..len(rest)];
         }
-    } elif __str_slice(slashed, 0, 1) == "/" {
+    } elif slashed[0..1] == "/" {
         prefix = "/";
-        rest = __str_slice(slashed, 1, len(slashed));
+        rest = slashed[1..len(slashed)];
     }
 
-    let raw_parts = __str_split(rest, "/");
+    let raw_parts = rest.split("/");
     var stack = [];
-    let rooted: bool = len(prefix) > 0 and __str_slice(prefix, len(prefix) - 1, len(prefix)) == "/";
+    let rooted: bool = len(prefix) > 0 and prefix[len(prefix) - 1..len(prefix)] == "/";
 
     for seg in raw_parts {
         if len(seg) == 0 or seg == "." {
@@ -117,7 +117,7 @@ def join(base_path: str, child_path: str) -> str {
         return normalize(child_path);
     }
     let clean_base = _to_slashes(base_path);
-    if __str_slice(clean_base, len(clean_base) - 1, len(clean_base)) == "/" {
+    if clean_base[len(clean_base) - 1..len(clean_base)] == "/" {
         return normalize(clean_base + child_path);
     }
     return normalize(clean_base + "/" + child_path);
@@ -146,7 +146,7 @@ def parent(raw_path: str) {
     if _has_windows_drive(norm) and (len(norm) == 2 or len(norm) == 3) {
         return none;
     }
-    let slash_idx: i64 = __str_last_index_of(norm, "/");
+    let slash_idx: i64 = norm.last_index_of("/");
     if slash_idx < 0 {
         return some(".");
     }
@@ -154,9 +154,9 @@ def parent(raw_path: str) {
         return some("/");
     }
     if slash_idx == 2 and _has_windows_drive(norm) {
-        return some(__str_slice(norm, 0, 3));
+        return some(norm[0..3]);
     }
-    return some(__str_slice(norm, 0, slash_idx));
+    return some(norm[0..slash_idx]);
 }
 
 def file_name(raw_path: str) {
@@ -167,11 +167,11 @@ def file_name(raw_path: str) {
     if _has_windows_drive(norm) and len(norm) <= 3 {
         return none;
     }
-    let slash_idx: i64 = __str_last_index_of(norm, "/");
+    let slash_idx: i64 = norm.last_index_of("/");
     if slash_idx < 0 {
         return some(norm);
     }
-    let tail = __str_slice(norm, slash_idx + 1, len(norm));
+    let tail = norm[(slash_idx + 1)..len(norm)];
     if len(tail) == 0 {
         return none;
     }
@@ -184,11 +184,11 @@ def extension(raw_path: str) {
         return none;
     }
     let fname = __opt_unwrap(fname_opt);
-    let dot_idx: i64 = __str_last_index_of(fname, ".");
+    let dot_idx: i64 = fname.last_index_of(".");
     if dot_idx <= 0 or dot_idx == len(fname) - 1 {
         return none;
     }
-    return some(__str_slice(fname, dot_idx + 1, len(fname)));
+    return some(fname[(dot_idx + 1)..len(fname)]);
 }
 
 def stem(raw_path: str) {
@@ -197,19 +197,19 @@ def stem(raw_path: str) {
         return none;
     }
     let fname = __opt_unwrap(fname_opt);
-    let dot_idx: i64 = __str_last_index_of(fname, ".");
+    let dot_idx: i64 = fname.last_index_of(".");
     if dot_idx <= 0 {
         return some(fname);
     }
-    return some(__str_slice(fname, 0, dot_idx));
+    return some(fname[0..dot_idx]);
 }
 
 def with_extension(raw_path: str, new_ext: str) -> str {
     let par_opt = parent(raw_path);
     let st_opt = stem(raw_path);
     let base_stem = if __opt_is_some(st_opt) { __opt_unwrap(st_opt) } else { normalize(raw_path) };
-    let clean_ext = if len(new_ext) > 0 and __str_slice(new_ext, 0, 1) == "." {
-        __str_slice(new_ext, 1, len(new_ext))
+    let clean_ext = if len(new_ext) > 0 and new_ext[0..1] == "." {
+        new_ext[1..len(new_ext)]
     } else {
         new_ext
     };
@@ -229,19 +229,19 @@ def components(raw_path: str) {
     var out = [];
     var rest: str = norm;
     if _has_windows_drive(norm) {
-        if len(norm) >= 3 and __str_slice(norm, 2, 3) == "/" {
-            out.append(__str_slice(norm, 0, 3));
-            rest = __str_slice(norm, 3, len(norm));
+        if len(norm) >= 3 and norm[2..3] == "/" {
+            out.append(norm[0..3]);
+            rest = norm[3..len(norm)];
         } else {
-            out.append(__str_slice(norm, 0, 2));
-            rest = __str_slice(norm, 2, len(norm));
+            out.append(norm[0..2]);
+            rest = norm[2..len(norm)];
         }
-    } elif __str_slice(norm, 0, 1) == "/" {
+    } elif norm[0..1] == "/" {
         out.append("/");
-        rest = __str_slice(norm, 1, len(norm));
+        rest = norm[1..len(norm)];
     }
     if len(rest) > 0 and rest != "." {
-        for part in __str_split(rest, "/") {
+        for part in rest.split("/") {
             if len(part) > 0 {
                 out.append(part);
             }
@@ -259,8 +259,8 @@ def relative_to(target_path: str, base_path: str) {
         return some(".");
     }
     let prefix = if norm_b == "/" { "/" } else { norm_b + "/" };
-    if len(norm_t) > len(prefix) and __str_slice(norm_t, 0, len(prefix)) == prefix {
-        return some(__str_slice(norm_t, len(prefix), len(norm_t)));
+    if len(norm_t) > len(prefix) and norm_t[0..len(prefix)] == prefix {
+        return some(norm_t[len(prefix)..len(norm_t)]);
     }
     return none;
 }

@@ -388,31 +388,31 @@ class DataFrame {
 
 def read_csv(filepath: str) -> DataFrame {
     let content = __fs_read_text(filepath);
-    let lines: [str] = __str_split(content, "\n");
+    let lines: [str] = content.split("\n");
     if len(lines) == 0 or len(lines[0]) == 0 {
         return DataFrame({}, []);
     }
 
     // Header row
-    let header_line = __str_trim(lines[0]);
-    let cols: [str] = __str_split(header_line, ",");
+    let header_line = lines[0].trim();
+    let cols: [str] = header_line.split(",");
     var col_names = [];
     var data_map = {};
     for col in cols {
-        let clean_c = __str_trim(col);
+        let clean_c = col.trim();
         col_names.append(clean_c);
         data_map[clean_c] = [];
     }
 
     // Data rows
     for r_idx in 1..<len(lines) {
-        let row_line = __str_trim(lines[r_idx]);
+        let row_line = lines[r_idx].trim();
         if len(row_line) == 0 { continue; }
-        let cells: [str] = __str_split(row_line, ",");
+        let cells: [str] = row_line.split(",");
         for c_idx in 0..<len(col_names) {
             let c_name = col_names[c_idx];
             if c_idx < len(cells) {
-                let cell_val = __str_trim(cells[c_idx]);
+                let cell_val = cells[c_idx].trim();
                 data_map[c_name].append(cell_val);
             }
         }

@@ -181,13 +181,13 @@ class HTTPResponse {
         if amt < 0 or amt >= len(self.body) {
             return self.body;
         }
-        return __str_slice(self.body, 0, amt);
+        return self.body[0..amt];
     }
 
     def getheader(name: str, default_val: str = "") -> str {
-        let lower_name = __str_case(name, false);
+        let lower_name = name.to_lower();
         for k in self.headers.keys() {
-            if __str_case(k, false) == lower_name {
+            if k.to_lower() == lower_name {
                 return str(self.headers[k]);
             }
         }
@@ -248,7 +248,7 @@ class HTTPConnection {
     def endheaders(message_body: any = none) {
         let scheme = if self.is_https { "https" } else { "http" };
         var full_url = self._url;
-        if len(full_url) == 0 or __str_slice(full_url, 0, 1) != "/" {
+        if len(full_url) == 0 or full_url[0..1] != "/" {
             full_url = "/" + full_url;
         }
         full_url = f"{scheme}://{self.host}:{self.port}{full_url}";
@@ -334,7 +334,7 @@ class HTTPSConnection {
 
     def endheaders(message_body: any = none) {
         var full_url = self._url;
-        if len(full_url) == 0 or __str_slice(full_url, 0, 1) != "/" {
+        if len(full_url) == 0 or full_url[0..1] != "/" {
             full_url = "/" + full_url;
         }
         full_url = f"https://{self.host}:{self.port}{full_url}";
@@ -437,14 +437,14 @@ class SimpleCookie {
     }
 
     def load(rawdata: str) {
-        let parts: [str] = __str_split(rawdata, ";");
+        let parts: [str] = rawdata.split(";");
         for part in parts {
-            let clean = __str_trim(part);
+            let clean = part.trim();
             if len(clean) == 0 { continue; }
-            let eq = __str_index_of(clean, "=", 0);
+            let eq = clean.index_of("=");
             if eq >= 0 {
-                let k = __str_trim(__str_slice(clean, 0, eq));
-                let v = __str_trim(__str_slice(clean, eq + 1, len(clean)));
+                let k = clean[0..eq].trim();
+                let v = clean[(eq + 1)..len(clean)].trim();
                 self._morsels[k] = Morsel(k, v);
             }
         }
@@ -480,11 +480,11 @@ class BaseHTTPRequestHandler {
     }
 
     def _parse_request() {
-        let lines: [str] = __str_split(self.request_raw, "\r\n");
+        let lines: [str] = self.request_raw.split("\r\n");
         if len(lines) == 0 or len(lines[0]) == 0 {
             return;
         }
-        let req_line: [str] = __str_split(lines[0], " ");
+        let req_line: [str] = lines[0].split(" ");
         if len(req_line) >= 1 { self.command = req_line[0]; }
         if len(req_line) >= 2 { self.path = req_line[1]; }
         if len(req_line) >= 3 { self.request_version = req_line[2]; }
@@ -492,10 +492,10 @@ class BaseHTTPRequestHandler {
         for i in 1..<len(lines) {
             let line = lines[i];
             if len(line) == 0 { break; }
-            let c_idx = __str_index_of(line, ":", 0);
+            let c_idx = line.index_of(":");
             if c_idx >= 0 {
-                let k = __str_trim(__str_slice(line, 0, c_idx));
-                let v = __str_trim(__str_slice(line, c_idx + 1, len(line)));
+                let k = line[0..c_idx].trim();
+                let v = line[(c_idx + 1)..len(line)].trim();
                 self.headers[k] = v;
             }
         }

@@ -32,7 +32,7 @@ def getLevelName(level: i64) -> str {
 }
 
 def getLevelByName(name: str) -> i64 {
-    let upper = __str_case(name, true);
+    let upper = name.to_upper();
     if upper == "CRITICAL" or upper == "FATAL" { return 50; }
     if upper == "ERROR" { return 40; }
     if upper == "WARNING" or upper == "WARN" { return 30; }
@@ -81,11 +81,11 @@ class Formatter {
 
     def format(self, rec: any) -> str {
         var s = self._fmt;
-        s = __str_replace(s, "%(name)s", rec.name);
-        s = __str_replace(s, "%(levelname)s", rec.levelname);
-        s = __str_replace(s, "%(levelno)d", str(rec.levelno));
-        s = __str_replace(s, "%(message)s", rec.getMessage());
-        s = __str_replace(s, "%(asctime)s", self.formatTime(rec, self.datefmt));
+        s = s.replace("%(name)s", rec.name);
+        s = s.replace("%(levelname)s", rec.levelname);
+        s = s.replace("%(levelno)d", str(rec.levelno));
+        s = s.replace("%(message)s", rec.getMessage());
+        s = s.replace("%(asctime)s", self.formatTime(rec, self.datefmt));
         return s;
     }
 }
@@ -102,7 +102,7 @@ class Filter {
         if self.name == rec.name {
             return true;
         }
-        if __str_index_of(rec.name, self.name + ".", 0) == 0 {
+        if rec.name.starts_with(self.name + ".") {
             return true;
         }
         return false;

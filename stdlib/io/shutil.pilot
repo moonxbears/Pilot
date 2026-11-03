@@ -174,7 +174,7 @@ def which(cmd: str, path_env: str = "") -> Option[str] {
     }
 
     // If cmd already contains a path separator, check directly
-    if __str_index_of(cmd, "/", 0) >= 0 or __str_index_of(cmd, "\\", 0) >= 0 {
+    if cmd.contains("/") or cmd.contains("\\") {
         if std_fs.exists(cmd) and !std_fs.is_dir(cmd) {
             return some(std_path.normalize(cmd));
         }
@@ -195,7 +195,7 @@ def which(cmd: str, path_env: str = "") -> Option[str] {
         search_path = std_os.getenv("PATH", std_os.defpath());
     }
 
-    let dirs = __str_split(search_path, std_os.pathsep());
+    let dirs = search_path.split(std_os.pathsep());
     let is_win = std_os.is_windows();
     let win_exts = [".exe", ".cmd", ".bat"];
 

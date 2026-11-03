@@ -66,8 +66,8 @@ def read_text(path: str) -> str ! IoError {
 
 def read_lines(path: str) -> [str] ! IoError {
     let content = read_text(path)?;
-    let norm = __str_replace(content, "\r\n", "\n");
-    return ok(__str_split(norm, "\n"));
+    let norm = content.replace("\r\n", "\n");
+    return ok(norm.split("\n"));
 }
 
 def read_bytes(path: str) -> SliceBuffer ! IoError {
@@ -174,7 +174,7 @@ def fnmatch(name_str: str, pattern: str) -> bool {
     let n: i64 = len(pattern);
     var i: i64 = 0;
     while i < n {
-        let ch = __str_slice(pattern, i, i + 1);
+        let ch = pattern[i..(i + 1)];
         if ch == "*" {
             dfa_pat = dfa_pat + ".*";
         } elif ch == "?" {
@@ -183,21 +183,21 @@ def fnmatch(name_str: str, pattern: str) -> bool {
             dfa_pat = dfa_pat + "\\" + ch;
         } elif ch == "[" {
             var j: i64 = i + 1;
-            if j < n and __str_slice(pattern, j, j + 1) == "!" {
+            if j < n and pattern[j..(j + 1)] == "!" {
                 j = j + 1;
             }
-            if j < n and __str_slice(pattern, j, j + 1) == "]" {
+            if j < n and pattern[j..(j + 1)] == "]" {
                 j = j + 1;
             }
-            while j < n and __str_slice(pattern, j, j + 1) != "]" {
+            while j < n and pattern[j..(j + 1)] != "]" {
                 j = j + 1;
             }
             if j >= n {
                 dfa_pat = dfa_pat + "\\[";
             } else {
-                var inner = __str_slice(pattern, i + 1, j);
-                if len(inner) > 0 and __str_slice(inner, 0, 1) == "!" {
-                    inner = "^" + __str_slice(inner, 1, len(inner));
+                var inner = pattern[(i + 1)..j];
+                if len(inner) > 0 and inner[0..1] == "!" {
+                    inner = "^" + inner[1..len(inner)];
                 }
                 dfa_pat = dfa_pat + "[" + inner + "]";
                 i = j;
@@ -214,8 +214,8 @@ def fnmatch(name_str: str, pattern: str) -> bool {
 // Directory Globbing supporting both single-directory (`*.pilot`) and recursive (`**/*.pilot`) patterns
 def glob(root_dir: str, pattern: str) -> [str] ! IoError {
     let norm_root = std_path.normalize(root_dir);
-    let clean_pat = __str_replace(pattern, "\\", "/");
-    let is_recursive: bool = __str_index_of(clean_pat, "**", 0) >= 0;
+    let clean_pat = pattern.replace("\\", "/");
+    let is_recursive: bool = clean_pat.contains("**");
 
     let candidates = if is_recursive {
         walk_dir(norm_root)?
@@ -224,8 +224,8 @@ def glob(root_dir: str, pattern: str) -> [str] ! IoError {
     };
 
     var leaf_pat: str = clean_pat;
-    if __str_slice(clean_pat, 0, 3) == "**/" {
-        leaf_pat = __str_slice(clean_pat, 3, len(clean_pat));
+    if clean_pat[0..3] == "**/" {
+        leaf_pat = clean_pat[3..len(clean_pat)];
     }
 
     var matched = [];

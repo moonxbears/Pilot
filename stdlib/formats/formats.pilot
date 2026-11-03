@@ -81,7 +81,7 @@ class __FormatCursor {
         if self.pos >= self.total {
             return -1;
         }
-        return __str_char_code(self.src, self.pos);
+        return self.src.char_code_at(self.pos);
     }
 
     def peek_at(self, rel: i64) -> i64 {
@@ -89,14 +89,14 @@ class __FormatCursor {
         if idx < 0 or idx >= self.total {
             return -1;
         }
-        return __str_char_code(self.src, idx);
+        return self.src.char_code_at(idx);
     }
 
     def advance(self) -> i64 {
         if self.pos >= self.total {
             return -1;
         }
-        let code: i64 = __str_char_code(self.src, self.pos);
+        let code: i64 = self.src.char_code_at(self.pos);
         self.pos = self.pos + 1;
         if code == 10 {
             self.line = self.line + 1;
@@ -108,7 +108,7 @@ class __FormatCursor {
     }
 
     def slice_span(self, start_idx: i64, end_idx: i64) -> str {
-        return __str_slice(self.src, start_idx, end_idx);
+        return self.src[start_idx..end_idx];
     }
 }
 
@@ -478,7 +478,7 @@ def __json_escape_str(s: str) -> str {
     var out: str = "\"";
     let n: i64 = len(s);
     for i in 0..<n {
-        let c: i64 = __str_char_code(s, i);
+        let c: i64 = s.char_code_at(i);
         if c == 34 {
             out = out + "\\\"";
         } elif c == 92 {
@@ -496,9 +496,9 @@ def __json_escape_str(s: str) -> str {
         } elif c >= 0 and c < 32 {
             let hi: i64 = (c >> 4) & 15;
             let lo: i64 = c & 15;
-            out = out + "\\u00" + __str_slice(_HEX_UPPER_FMT, hi, hi + 1) + __str_slice(_HEX_UPPER_FMT, lo, lo + 1);
+            out = out + "\\u00" + _HEX_UPPER_FMT[hi..(hi + 1)] + _HEX_UPPER_FMT[lo..(lo + 1)];
         } else {
-            out = out + __str_slice(s, i, i + 1);
+            out = out + s[i..(i + 1)];
         }
     }
     return out + "\"";
@@ -596,7 +596,7 @@ def json_get_path(doc, dotted_path: str) {
     if len(dotted_path) == 0 {
         return some(doc);
     }
-    let segments: [str] = __str_split(dotted_path, ".");
+    let segments: [str] = dotted_path.split(".");
     var cur_val = doc;
     for seg in segments {
         if __opt_is_none(cur_val) {
@@ -810,18 +810,18 @@ def __toml_clean_underscores(raw: str, fmt_name: str, ln: i64, cl: i64) -> str !
     }
     var clean: str = "";
     for i in 0..<n {
-        let c: i64 = __str_char_code(raw, i);
+        let c: i64 = raw.char_code_at(i);
         if c == 95 {
             if i == 0 or (i + 1) >= n {
                 return fail(ParseError.BadNumber(fmt_name, raw, ln, cl));
             }
-            let prev_c: i64 = __str_char_code(raw, i - 1);
-            let next_c: i64 = __str_char_code(raw, i + 1);
+            let prev_c: i64 = raw.char_code_at(i - 1);
+            let next_c: i64 = raw.char_code_at(i + 1);
             if prev_c == 95 or prev_c == 46 or prev_c == 43 or prev_c == 45 or next_c == 95 or next_c == 46 {
                 return fail(ParseError.BadNumber(fmt_name, raw, ln, cl));
             }
         } else {
-            clean = clean + __str_slice(raw, i, i + 1);
+            clean = clean + raw[i..(i + 1)];
         }
     }
     return ok(clean);
@@ -856,10 +856,10 @@ def __toml_parse_scalar_or_number(cur: any) -> any ! ParseError {
     }
 
     // Radix prefixes `0x`, `0o`, `0b`
-    if len(raw) > 2 and __str_slice(raw, 0, 1) == "0" {
-        let pfx = __str_slice(raw, 0, 2);
+    if len(raw) > 2 and raw[0..1] == "0" {
+        let pfx = raw[0..2];
         if pfx == "0x" or pfx == "0X" or pfx == "0o" or pfx == "0O" or pfx == "0b" or pfx == "0B" {
-            let digits_raw = __str_slice(raw, 2, len(raw));
+            let digits_raw = raw[2..len(raw)];
             let digits_clean = __toml_clean_underscores(digits_raw, "toml", ln, cl)?;
             let radix: i64 = if pfx == "0x" or pfx == "0X" { 16 } elif pfx == "0o" or pfx == "0O" { 8 } else { 2 };
             let rx_opt = __parse_int_strict(digits_clean, radix);
@@ -871,8 +871,8 @@ def __toml_parse_scalar_or_number(cur: any) -> any ! ParseError {
     }
 
     let cleaned = __toml_clean_underscores(raw, "toml", ln, cl)?;
-    let has_dot: bool = __str_index_of(cleaned, ".", 0) >= 0;
-    let has_e: bool = __str_index_of(cleaned, "e", 0) >= 0 or __str_index_of(cleaned, "E", 0) >= 0;
+    let has_dot: bool = cleaned.contains(".");
+    let has_e: bool = cleaned.contains("e") or cleaned.contains("E");
     if has_dot or has_e {
         let flt_opt = __parse_float_strict(cleaned);
         if __opt_is_none(flt_opt) {
@@ -1125,7 +1125,7 @@ def __toml_format_key(k: str) -> str {
         return "\"\"";
     }
     for i in 0..<len(k) {
-        if !__is_toml_bare_key_char(__str_char_code(k, i)) {
+        if !__is_toml_bare_key_char(k.char_code_at(i)) {
             return __json_escape_str(k);
         }
     }
@@ -1231,7 +1231,7 @@ def csv_parse(src, delimiter: str = ",") -> [[str]] ! ParseError {
         return fail(ParseError.Syntax("csv", "invalid CSV delimiter character", 1, 1));
     }
 
-    let delim_code: i64 = __str_char_code(delimiter, 0);
+    let delim_code: i64 = delimiter.char_code_at(0);
     let n: i64 = len(text);
     if n == 0 {
         return ok([]);
@@ -1249,10 +1249,10 @@ def csv_parse(src, delimiter: str = ",") -> [[str]] ! ParseError {
     var i: i64 = 0;
 
     while i < n {
-        let c: i64 = __str_char_code(text, i);
+        let c: i64 = text.char_code_at(i);
         if in_quotes {
             if c == 34 {
-                if (i + 1) < n and __str_char_code(text, i + 1) == 34 {
+                if (i + 1) < n and text.char_code_at(i + 1) == 34 {
                     // Escaped `""` -> literal `"`
                     field = field + "\"";
                     i = i + 2;
@@ -1263,14 +1263,14 @@ def csv_parse(src, delimiter: str = ",") -> [[str]] ! ParseError {
                     cl = cl + 1;
                     // After closing quote, next char (if not EOF) must be delimiter or newline
                     if i < n {
-                        let after_q: i64 = __str_char_code(text, i);
+                        let after_q: i64 = text.char_code_at(i);
                         if after_q != delim_code and after_q != 10 and after_q != 13 {
                             return fail(ParseError.Syntax("csv", "unexpected character after closing quote", ln, cl));
                         }
                     }
                 }
             } else {
-                field = field + __str_slice(text, i, i + 1);
+                field = field + text[i..(i + 1)];
                 i = i + 1;
                 if c == 10 {
                     ln = ln + 1;
@@ -1302,7 +1302,7 @@ def csv_parse(src, delimiter: str = ",") -> [[str]] ! ParseError {
                 cur_row = [];
                 field = "";
                 at_field_start = true;
-                if c == 13 and (i + 1) < n and __str_char_code(text, i + 1) == 10 {
+                if c == 13 and (i + 1) < n and text.char_code_at(i + 1) == 10 {
                     i = i + 2;
                 } else {
                     i = i + 1;
@@ -1310,7 +1310,7 @@ def csv_parse(src, delimiter: str = ",") -> [[str]] ! ParseError {
                 ln = ln + 1;
                 cl = 1;
             } else {
-                field = field + __str_slice(text, i, i + 1);
+                field = field + text[i..(i + 1)];
                 at_field_start = false;
                 i = i + 1;
                 cl = cl + 1;
@@ -1354,14 +1354,14 @@ def csv_parse_records(src, delimiter: str = ",") -> [map] ! ParseError {
 
 def __csv_format_cell(val, delimiter: str) -> str {
     let s: str = if __opt_is_none(val) { "" } else { str(val) };
-    let needs_quote: bool = __str_index_of(s, delimiter, 0) >= 0 or
-                            __str_index_of(s, "\"", 0) >= 0 or
-                            __str_index_of(s, "\n", 0) >= 0 or
-                            __str_index_of(s, "\r", 0) >= 0;
+    let needs_quote: bool = s.contains(delimiter) or
+                            s.contains("\"") or
+                            s.contains("\n") or
+                            s.contains("\r");
     if !needs_quote {
         return s;
     }
-    return "\"" + __str_replace(s, "\"", "\"\"") + "\"";
+    return "\"" + s.replace("\"", "\"\"") + "\"";
 }
 
 def csv_stringify(rows, delimiter: str = ",") -> str {
@@ -1417,23 +1417,23 @@ def __env_expand_vars(raw_val: str, env_map) -> str {
     var out: str = "";
     var i: i64 = 0;
     while i < n {
-        let c: i64 = __str_char_code(raw_val, i);
-        if c == 92 and (i + 1) < n and __str_char_code(raw_val, i + 1) == 36 {
+        let c: i64 = raw_val.char_code_at(i);
+        if c == 92 and (i + 1) < n and raw_val.char_code_at(i + 1) == 36 {
             out = out + "$";
             i = i + 2;
         } elif c == 36 and (i + 1) < n {
-            let next_c: i64 = __str_char_code(raw_val, i + 1);
+            let next_c: i64 = raw_val.char_code_at(i + 1);
             if next_c == 123 {
                 // `${VAR}` or `${VAR:-fallback}`
-                let close_idx: i64 = __str_index_of(raw_val, "}", i + 2);
+                let close_idx: i64 = raw_val.index_of("}", i + 2);
                 if close_idx > (i + 2) {
-                    let expr = __str_slice(raw_val, i + 2, close_idx);
-                    let def_sep: i64 = __str_index_of(expr, ":-", 0);
+                    let expr = raw_val[(i + 2)..close_idx];
+                    let def_sep: i64 = expr.index_of(":-");
                     var var_name: str = expr;
                     var fallback: str = "";
                     if def_sep >= 0 {
-                        var_name = __str_slice(expr, 0, def_sep);
-                        fallback = __str_slice(expr, def_sep + 2, len(expr));
+                        var_name = expr[0..def_sep];
+                        fallback = expr[(def_sep + 2)..len(expr)];
                     }
                     if env_map.contains_key(var_name) and len(str(env_map[var_name])) > 0 {
                         out = out + str(env_map[var_name]);
@@ -1445,10 +1445,10 @@ def __env_expand_vars(raw_val: str, env_map) -> str {
                 }
             } elif __is_env_key_start(next_c) {
                 var j: i64 = i + 2;
-                while j < n and __is_env_key_char(__str_char_code(raw_val, j)) {
+                while j < n and __is_env_key_char(raw_val.char_code_at(j)) {
                     j = j + 1;
                 }
-                let var_name = __str_slice(raw_val, i + 1, j);
+                let var_name = raw_val[(i + 1)..j];
                 if env_map.contains_key(var_name) {
                     out = out + str(env_map[var_name]);
                 }
@@ -1458,7 +1458,7 @@ def __env_expand_vars(raw_val: str, env_map) -> str {
             out = out + "$";
             i = i + 1;
         } else {
-            out = out + __str_slice(raw_val, i, i + 1);
+            out = out + raw_val[i..(i + 1)];
             i = i + 1;
         }
     }
@@ -1558,7 +1558,7 @@ def env_parse(src, expand_vars: bool = true) -> map ! ParseError {
             if !closed {
                 return fail(ParseError.PrematureEof("env", q_ln, q_cl));
             }
-            val_str = if expand_vars { __env_expand_vars(raw_dq, env_map) } else { __str_replace(raw_dq, "\\$", "$") };
+            val_str = if expand_vars { __env_expand_vars(raw_dq, env_map) } else { raw_dq.replace("\\$", "$") };
             __toml_skip_inline_comment(cur);
         } else {
             // Unquoted value up to newline or ` #` inline comment
@@ -1571,14 +1571,14 @@ def env_parse(src, expand_vars: bool = true) -> map ! ParseError {
                 if uc == 35 {
                     // Treat `#` at start of value or preceded by whitespace as comment
                     let prev_idx: i64 = cur.pos - 1;
-                    let prev_c: i64 = if prev_idx >= u_start { __str_char_code(cur.src, prev_idx) } else { 32 };
+                    let prev_c: i64 = if prev_idx >= u_start { cur.src.char_code_at(prev_idx) } else { 32 };
                     if prev_c == 32 or prev_c == 9 {
                         break;
                     }
                 }
                 cur.advance();
             }
-            let raw_uq = __str_trim(cur.slice_span(u_start, cur.pos), 0);
+            let raw_uq = cur.slice_span(u_start, cur.pos).trim();
             val_str = if expand_vars { __env_expand_vars(raw_uq, env_map) } else { raw_uq };
             __toml_skip_inline_comment(cur);
         }
@@ -1610,19 +1610,19 @@ def env_stringify(vars_map) -> str {
         let pair = entries[i];
         let k: str = str(pair[0]);
         let v: str = if __opt_is_none(pair[1]) { "" } else { str(pair[1]) };
-        let needs_q: bool = __str_index_of(v, " ", 0) >= 0 or
-                            __str_index_of(v, "#", 0) >= 0 or
-                            __str_index_of(v, "\"", 0) >= 0 or
-                            __str_index_of(v, "'", 0) >= 0 or
-                            __str_index_of(v, "\n", 0) >= 0 or
-                            __str_index_of(v, "\r", 0) >= 0 or
-                            __str_index_of(v, "\t", 0) >= 0;
+        let needs_q: bool = v.contains(" ") or
+                            v.contains("#") or
+                            v.contains("\"") or
+                            v.contains("'") or
+                            v.contains("\n") or
+                            v.contains("\r") or
+                            v.contains("\t");
         if needs_q {
-            var esc: str = __str_replace(v, "\\", "\\\\");
-            esc = __str_replace(esc, "\"", "\\\"");
-            esc = __str_replace(esc, "\n", "\\n");
-            esc = __str_replace(esc, "\r", "\\r");
-            esc = __str_replace(esc, "\t", "\\t");
+            var esc: str = v.replace("\\", "\\\\");
+            esc = esc.replace("\"", "\\\"");
+            esc = esc.replace("\n", "\\n");
+            esc = esc.replace("\r", "\\r");
+            esc = esc.replace("\t", "\\t");
             out = out + k + "=\"" + esc + "\"";
         } else {
             out = out + k + "=" + v;

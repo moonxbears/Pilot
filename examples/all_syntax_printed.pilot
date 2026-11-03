@@ -411,7 +411,7 @@ def run_omnibus_showcase() -> void {
     println("  combined_map: " + check_val(combined_map, "{alpha: 1, beta: 2, gamma: 3, delta: 4}"))
     println("  combined_set: " + check_val(combined_set, "{10, 20, 30, 40, 50, 60}"))
     println("  first_elem: " + check_val(first_elem, 1))
-    println("  sliced_sublist (1..4): " + check_val(sliced_sublist, 1))
+    println("  sliced_sublist (1..4): " + check_val(sliced_sublist, "[2, 3, 4]"))
     println("  map_lookup [\"alpha\"]: " + check_val(map_lookup, 1))
     println("  squares comprehension: " + check_val(squares, "[1, 9, 25]"))
     println("  mapped_dict comprehension: " + check_val(mapped_dict, "{k_1: 10, k_2: 20, k_3: 30, k_4: 40, k_5: 50}"))

@@ -92,14 +92,14 @@ class Response {
 
     def _parse_cookies() {
         for k in self.headers.keys() {
-            if __str_case(k, false) == "set-cookie" {
+            if k.to_lower() == "set-cookie" {
                 let cookie_str = str(self.headers[k]);
-                let parts: [str] = __str_split(cookie_str, ";");
+                let parts: [str] = cookie_str.split(";");
                 if len(parts) > 0 {
-                    let eq = __str_index_of(parts[0], "=", 0);
+                    let eq = parts[0].index_of("=");
                     if eq >= 0 {
-                        let ck = __str_trim(__str_slice(parts[0], 0, eq));
-                        let cv = __str_trim(__str_slice(parts[0], eq + 1, len(parts[0])));
+                        let ck = parts[0][0..eq].trim();
+                        let cv = parts[0][(eq + 1)..len(parts[0])].trim();
                         self.cookies[ck] = cv;
                     }
                 }
@@ -108,9 +108,9 @@ class Response {
     }
 
     def get_header(name: str, default_val: str = "") -> str {
-        let lower = __str_case(name, false);
+        let lower = name.to_lower();
         for k in self.headers.keys() {
-            if __str_case(k, false) == lower {
+            if k.to_lower() == lower {
                 return str(self.headers[k]);
             }
         }
@@ -160,7 +160,7 @@ class Session {
         if params != none {
             let qs = urllib.urlencode(params);
             if len(qs) > 0 {
-                if __str_index_of(req_url, "?", 0) >= 0 {
+                if req_url.contains("?") {
                     req_url = req_url + "&" + qs;
                 } else {
                     req_url = req_url + "?" + qs;
@@ -204,7 +204,7 @@ class Session {
             }
         }
 
-        let m = __str_case(method, true);
+        let m = method.to_upper();
         var resp_map: any = 0;
 
         if m == "POST" or m == "PUT" or m == "PATCH" {

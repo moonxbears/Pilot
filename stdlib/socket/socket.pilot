@@ -321,7 +321,7 @@ def gethostbyname(hostname: str) -> str {
 /// Converts an IPv4 address from dotted-quad string format to 32-bit packed integer.
 /// Python reference: socket.inet_aton(ip_string)
 def inet_aton(ip_string: str) -> i64 {
-    let parts: [str] = __str_split(ip_string, ".");
+    let parts: [str] = ip_string.split(".");
     if len(parts) != 4 {
         panic(f"Invalid IP address format: {ip_string}");
     }

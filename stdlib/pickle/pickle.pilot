@@ -150,7 +150,7 @@ def _serialize_value(out, val) {
         let s_len: i64 = len(s);
         _write_u32_be(out, s_len);
         for i in 0..<s_len {
-            out.append(__str_char_code(s, i));
+            out.append(s.char_code_at(i));
         }
         return;
     }
@@ -161,7 +161,7 @@ def _serialize_value(out, val) {
         let s_len: i64 = len(s);
         _write_u32_be(out, s_len);
         for i in 0..<s_len {
-            out.append(__str_char_code(s, i));
+            out.append(s.char_code_at(i));
         }
         return;
     }
@@ -204,7 +204,7 @@ def _serialize_value(out, val) {
     let fb_len: i64 = len(fallback_str);
     _write_u32_be(out, fb_len);
     for i in 0..<fb_len {
-        out.append(__str_char_code(fallback_str, i));
+        out.append(fallback_str.char_code_at(i));
     }
 }
 
@@ -376,7 +376,7 @@ def load(file_path: str) -> any {
     var bytes_in = [];
     let n: i64 = len(content);
     for i in 0..<n {
-        bytes_in.append(__str_char_code(content, i));
+        bytes_in.append(content.char_code_at(i));
     }
     return loads(bytes_in);
 }

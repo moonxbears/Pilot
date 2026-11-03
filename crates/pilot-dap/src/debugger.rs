@@ -577,6 +577,14 @@ impl PilotDebugger {
         self.call_stack.last().map_or(false, |f| f.locals.contains_key(name))
     }
 
+    pub fn get_local(&self, name: &str) -> Option<PilotVal> {
+        self.call_stack.last().and_then(|f| f.locals.get(name).copied())
+    }
+
+    pub fn get_var_val(&self, name: &str) -> Option<PilotVal> {
+        self.get_local(name).or_else(|| self.globals.get(name).copied())
+    }
+
     #[inline]
     pub fn is_top_level_scope(&self) -> bool {
         self.call_stack.len() <= 1 && self.call_stack.first().map_or(false, |f| f.name != "main" || !self.functions.contains_key("main"))
@@ -2010,6 +2018,42 @@ impl PilotDebugger {
                 let (idx_val, _) = self.eval_ast_node(arena, NodeId(node.rhs));
                 let target_str = target_val.to_string_repr();
 
+                let idx_str = idx_val.to_string_repr();
+                let range_opt = if let Some(DebugCompoundVal::Range { start, end, inclusive }) = self.compound_values.get(&idx_str) {
+                    Some((*start, *end, *inclusive))
+                } else if idx_str.contains("..") {
+                    let inclusive = !idx_str.contains("..<");
+                    let clean = idx_str.replace("..<", "..").replace("..=", "..");
+                    if let Some((s_part, e_part)) = clean.split_once("..") {
+                        let st = s_part.trim().parse::<i64>().unwrap_or(0);
+                        let en = e_part.trim().parse::<i64>().unwrap_or(i64::MAX);
+                        Some((st, en, inclusive))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if let Some((start, end, _)) = range_opt {
+                    if let Some(compound) = self.compound_values.get(&target_str).or_else(|| self.compound_values.get(&target_name)) {
+                        if let DebugCompoundVal::List(items) | DebugCompoundVal::Tuple(items) = compound {
+                            let s = (start.max(0) as usize).min(items.len());
+                            let e = if end == i64::MAX { items.len() } else { (end.max(0) as usize).min(items.len()) };
+                            let sliced_items = if s <= e { items[s..e].to_vec() } else { Vec::new() };
+                            let formatted = format!("[{}]", sliced_items.iter().map(|(v, _)| v.to_string_repr()).collect::<Vec<_>>().join(", "));
+                            self.compound_values.insert(formatted.clone(), DebugCompoundVal::List(sliced_items));
+                            return (PilotVal::from_str(&formatted), "list".to_string());
+                        }
+                    }
+                    let clean_target = target_str.trim_matches('"');
+                    let chars: Vec<char> = clean_target.chars().collect();
+                    let s = (start.max(0) as usize).min(chars.len());
+                    let e = if end == i64::MAX { chars.len() } else { (end.max(0) as usize).min(chars.len()) };
+                    let sliced_str: String = if s <= e { chars[s..e].iter().collect() } else { String::new() };
+                    return (PilotVal::from_str(&sliced_str), "str".to_string());
+                }
+
                 if let Some(compound) = self.compound_values.get(&target_str).or_else(|| self.compound_values.get(&target_name)) {
                     match compound {
                         DebugCompoundVal::List(items) | DebugCompoundVal::Tuple(items) => {
@@ -2036,21 +2080,25 @@ impl PilotDebugger {
                     }
                 }
 
-                let idx = idx_val.as_int().unwrap_or(0) as usize;
+                let idx = idx_val.as_int().unwrap_or(0);
                 if target_str.starts_with('[') && target_str.ends_with(']') {
                     let parts: Vec<&str> = target_str[1..target_str.len() - 1].split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
-                    if idx < parts.len() {
-                        if let Ok(i) = parts[idx].parse::<i64>() {
+                    let u_idx = idx.max(0) as usize;
+                    if u_idx < parts.len() {
+                        if let Ok(i) = parts[u_idx].parse::<i64>() {
                             return (PilotVal::from_int(i), "int".to_string());
                         }
-                        if let Ok(f) = parts[idx].parse::<f64>() {
+                        if let Ok(f) = parts[u_idx].parse::<f64>() {
                             return (PilotVal::from_float(f), "float".to_string());
                         }
-                        return (PilotVal::from_str(parts[idx]), "str".to_string());
+                        return (PilotVal::from_str(parts[u_idx]), "str".to_string());
                     }
                 }
-                if let Some(ch) = target_str.chars().nth(idx) {
-                    return (PilotVal::from_str(&ch.to_string()), "str".to_string());
+                let clean_target = target_str.trim_matches('"');
+                let chars: Vec<char> = clean_target.chars().collect();
+                let actual_idx = if idx < 0 { (chars.len() as i64 + idx).max(0) as usize } else { idx as usize };
+                if actual_idx < chars.len() {
+                    return (PilotVal::from_str(&chars[actual_idx].to_string()), "str".to_string());
                 }
 
                 (PilotVal::NULL, "any".to_string())
@@ -2506,8 +2554,117 @@ impl PilotDebugger {
                     return (PilotVal::from_str(&repr), ty);
                 }
 
+                let target_obj_val = if let Some(oid) = _obj_id_opt {
+                    Some(self.eval_ast_node(arena, oid).0)
+                } else if !obj_name.is_empty() {
+                    self.get_var_val(&obj_name)
+                } else {
+                    None
+                };
+
+                if let Some(target_val) = target_obj_val {
+                    let s_raw = target_val.to_string_repr();
+                    if target_val.is_str() || (!s_raw.starts_with('[') && !s_raw.starts_with('{') && !s_raw.starts_with('(') && !self.compound_values.contains_key(&obj_name) && !self.compound_values.contains_key(&s_raw)) {
+                        let clean_s = s_raw.trim_matches('"');
+                        match member_name.as_str() {
+                            "trim" | "Trim" => {
+                                return (PilotVal::from_str(clean_s.trim()), "str".to_string());
+                            }
+                            "trim_start" | "trim_left" | "TrimStart" => {
+                                return (PilotVal::from_str(clean_s.trim_start()), "str".to_string());
+                            }
+                            "trim_end" | "trim_right" | "TrimEnd" => {
+                                return (PilotVal::from_str(clean_s.trim_end()), "str".to_string());
+                            }
+                            "replace" | "Replace" => {
+                                let old_sub = evaluated_args.get(0).map(|(v, _)| v.to_string_repr().trim_matches('"').to_string()).unwrap_or_default();
+                                let new_sub = evaluated_args.get(1).map(|(v, _)| v.to_string_repr().trim_matches('"').to_string()).unwrap_or_default();
+                                return (PilotVal::from_str(&clean_s.replace(&old_sub, &new_sub)), "str".to_string());
+                            }
+                            "split" | "Split" => {
+                                let sep = evaluated_args.get(0).map(|(v, _)| v.to_string_repr().trim_matches('"').to_string()).unwrap_or_else(|| " ".to_string());
+                                let parts: Vec<(PilotVal, String)> = if sep.is_empty() {
+                                    clean_s.chars().map(|c| (PilotVal::from_str(&c.to_string()), "str".to_string())).collect()
+                                } else {
+                                    clean_s.split(&sep).map(|p| (PilotVal::from_str(p), "str".to_string())).collect()
+                                };
+                                let formatted = format!("[{}]", parts.iter().map(|(v, _)| format!("\"{}\"", v.to_string_repr().trim_matches('"'))).collect::<Vec<_>>().join(", "));
+                                self.compound_values.insert(formatted.clone(), DebugCompoundVal::List(parts));
+                                return (PilotVal::from_str(&formatted), "list".to_string());
+                            }
+                            "index_of" | "IndexOf" => {
+                                let sub = evaluated_args.get(0).map(|(v, _)| v.to_string_repr().trim_matches('"').to_string()).unwrap_or_default();
+                                let start = evaluated_args.get(1).and_then(|(v, _)| v.as_int()).unwrap_or(0).max(0) as usize;
+                                let idx = if start < clean_s.len() {
+                                    clean_s[start..].find(&sub).map(|i| (i + start) as i64).unwrap_or(-1)
+                                } else {
+                                    -1
+                                };
+                                return (PilotVal::from_int(idx), "int".to_string());
+                            }
+                            "last_index_of" | "LastIndexOf" => {
+                                let sub = evaluated_args.get(0).map(|(v, _)| v.to_string_repr().trim_matches('"').to_string()).unwrap_or_default();
+                                let idx = clean_s.rfind(&sub).map(|i| i as i64).unwrap_or(-1);
+                                return (PilotVal::from_int(idx), "int".to_string());
+                            }
+                            "to_upper" | "ToUpper" => {
+                                return (PilotVal::from_str(&clean_s.to_uppercase()), "str".to_string());
+                            }
+                            "to_lower" | "ToLower" => {
+                                return (PilotVal::from_str(&clean_s.to_lowercase()), "str".to_string());
+                            }
+                            "contains" | "Contains" => {
+                                let sub = evaluated_args.get(0).map(|(v, _)| v.to_string_repr().trim_matches('"').to_string()).unwrap_or_default();
+                                return (PilotVal::from_bool(clean_s.contains(&sub)), "bool".to_string());
+                            }
+                            "starts_with" | "StartsWith" => {
+                                let pre = evaluated_args.get(0).map(|(v, _)| v.to_string_repr().trim_matches('"').to_string()).unwrap_or_default();
+                                return (PilotVal::from_bool(clean_s.starts_with(&pre)), "bool".to_string());
+                            }
+                            "ends_with" | "EndsWith" => {
+                                let suf = evaluated_args.get(0).map(|(v, _)| v.to_string_repr().trim_matches('"').to_string()).unwrap_or_default();
+                                return (PilotVal::from_bool(clean_s.ends_with(&suf)), "bool".to_string());
+                            }
+                            "char_code_at" | "charCodeAt" => {
+                                let idx = evaluated_args.get(0).and_then(|(v, _)| v.as_int()).unwrap_or(0).max(0) as usize;
+                                let code = clean_s.chars().nth(idx).map(|c| c as i64).unwrap_or(0);
+                                return (PilotVal::from_int(code), "int".to_string());
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
                 if !obj_name.is_empty() {
                     match member_name.as_str() {
+                        "append" | "push" => {
+                            if let Some(item) = evaluated_args.first() {
+                                if let Some(compound) = self.compound_values.get_mut(&obj_name) {
+                                    if let DebugCompoundVal::List(items) = compound {
+                                        items.push(item.clone());
+                                        let formatted = format!("[{}]", items.iter().map(|(v, _)| v.to_string_repr()).collect::<Vec<_>>().join(", "));
+                                        let new_val = PilotVal::from_str(&formatted);
+                                        self.set_local(&obj_name, new_val, "list");
+                                        self.update_global_if_applicable(&obj_name, new_val, Some("list"));
+                                    }
+                                }
+                            }
+                            return (PilotVal::NULL, "void".to_string());
+                        }
+                        "pop" => {
+                            if let Some(compound) = self.compound_values.get_mut(&obj_name) {
+                                if let DebugCompoundVal::List(items) = compound {
+                                    if let Some(popped) = items.pop() {
+                                        let formatted = format!("[{}]", items.iter().map(|(v, _)| v.to_string_repr()).collect::<Vec<_>>().join(", "));
+                                        let new_val = PilotVal::from_str(&formatted);
+                                        self.set_local(&obj_name, new_val, "list");
+                                        self.update_global_if_applicable(&obj_name, new_val, Some("list"));
+                                        return popped;
+                                    }
+                                }
+                            }
+                            return (PilotVal::NULL, "void".to_string());
+                        }
                         "acquire" => {
                             if let Some(DebugCompoundVal::Record { type_name, fields }) = self.compound_values.get_mut(&obj_name) {
                                 if type_name == "Lock" || type_name == "AsyncLock" {

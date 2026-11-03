@@ -184,7 +184,7 @@ class TestCase {
         var found = false;
         let c_type = type_of(container);
         if c_type == "string" {
-            found = (__str_index_of(str(container), str(member), 0) >= 0);
+            found = str(container).contains(str(member));
         } elif c_type == "list" {
             for item in container {
                 if item == member {
@@ -205,7 +205,7 @@ class TestCase {
         var found = false;
         let c_type = type_of(container);
         if c_type == "string" {
-            found = (__str_index_of(str(container), str(member), 0) >= 0);
+            found = str(container).contains(str(member));
         } elif c_type == "list" {
             for item in container {
                 if item == member {

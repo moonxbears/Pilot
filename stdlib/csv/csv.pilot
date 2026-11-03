@@ -91,7 +91,7 @@ def loads(src: str, delimiter: str = ",") -> [[str]] ! CSVError {
 def dumps(rows, delimiter: str = ",", lineterminator: str = "\r\n") -> str {
     var raw = csv_stringify(rows, delimiter);
     if lineterminator != "\n" {
-        raw = __str_replace(raw, "\n", lineterminator);
+        raw = raw.replace("\n", lineterminator);
     }
     return raw;
 }

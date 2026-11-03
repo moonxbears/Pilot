@@ -11,7 +11,6 @@ extern "c" lib "pilot_rt" {
     def __dfa_split(pattern: any, text: str) -> List[str];
     def __dfa_replace_all(pattern: any, text: str, replacement: str) -> str;
     def __slice_get(buf: any, idx: i64) -> any;
-    def __slice_len(buf: any) -> i64;
     def __slice_ptr(buf: any) -> i64;
     def __slice_subview(buf: any, start: i64, length: i64) -> any;
     def __utf8_encode_slice(text: str) -> any;
@@ -26,7 +25,7 @@ class StrSlice {
     }
 
     def byte_len(self) -> i64 {
-        return __slice_len(self._buf);
+        return len(self._buf);
     }
 
     def data_ptr(self) -> i64 {
@@ -34,7 +33,7 @@ class StrSlice {
     }
 
     def is_empty(self) -> bool {
-        return __slice_len(self._buf) == 0;
+        return len(self._buf) == 0;
     }
 
     def rune_count(self) -> i64 {
@@ -51,7 +50,7 @@ class StrSlice {
 
     // Zero-copy UTF-8 sub-slice (`DataPtr + start_byte`) returning `StrSlice?` (`none` if invalid UTF-8 boundary)
     def subslice(self, start_byte: i64, byte_length: i64) {
-        let total: i64 = __slice_len(self._buf);
+        let total: i64 = len(self._buf);
         if start_byte < 0 or byte_length < 0 or (start_byte + byte_length) > total {
             return none;
         }
@@ -156,32 +155,32 @@ def regex_split(re_or_pat, text: str) {
 
 // Pure String Manipulation Utilities
 def trim(s: str) -> str {
-    return __str_trim(s, 0);
+    return s.trim();
 }
 
 def trim_start(s: str) -> str {
-    return __str_trim(s, -1);
+    return s.trim_start();
 }
 
 def trim_end(s: str) -> str {
-    return __str_trim(s, 1);
+    return s.trim_end();
 }
 
 def to_upper(s: str) -> str {
-    return __str_case(s, true);
+    return s.to_upper();
 }
 
 def to_lower(s: str) -> str {
-    return __str_case(s, false);
+    return s.to_lower();
 }
 
 def split(s: str, sep: str = " ") {
-    return __str_split(s, sep);
+    return s.split(sep);
 }
 
 def lines(s: str) {
-    let normalized = __str_replace(s, "\r\n", "\n");
-    return __str_split(normalized, "\n");
+    let normalized = s.replace("\r\n", "\n");
+    return normalized.split("\n");
 }
 
 def join(parts, sep: str = "") -> str {
@@ -198,36 +197,27 @@ def join(parts, sep: str = "") -> str {
 }
 
 def replace(s: str, old_sub: str, new_sub: str) -> str {
-    return __str_replace(s, old_sub, new_sub);
+    return s.replace(old_sub, new_sub);
 }
 
 def index_of(s: str, sub: str, start: i64 = 0) -> i64 {
-    return __str_index_of(s, sub, start);
+    return s.index_of(sub, start);
 }
 
 def last_index_of(s: str, sub: str) -> i64 {
-    return __str_last_index_of(s, sub);
+    return s.last_index_of(sub);
 }
 
 def contains(s: str, sub: str) -> bool {
-    return __str_index_of(s, sub, 0) >= 0;
+    return s.contains(sub);
 }
 
 def starts_with(s: str, prefix: str) -> bool {
-    let plen: i64 = len(prefix);
-    if plen > len(s) {
-        return false;
-    }
-    return __str_slice(s, 0, plen) == prefix;
+    return s.starts_with(prefix);
 }
 
 def ends_with(s: str, suffix: str) -> bool {
-    let slen: i64 = len(s);
-    let suflen: i64 = len(suffix);
-    if suflen > slen {
-        return false;
-    }
-    return __str_slice(s, slen - suflen, slen) == suffix;
+    return s.ends_with(suffix);
 }
 
 def pad_left(s: str, width: i64, fill_char: str = " ") -> str {
@@ -235,7 +225,7 @@ def pad_left(s: str, width: i64, fill_char: str = " ") -> str {
     if cur >= width {
         return s;
     }
-    let ch = if len(fill_char) > 0 { __str_slice(fill_char, 0, 1) } else { " " };
+    let ch = if len(fill_char) > 0 { fill_char[0..1] } else { " " };
     return (ch * (width - cur)) + s;
 }
 
@@ -244,7 +234,7 @@ def pad_right(s: str, width: i64, fill_char: str = " ") -> str {
     if cur >= width {
         return s;
     }
-    let ch = if len(fill_char) > 0 { __str_slice(fill_char, 0, 1) } else { " " };
+    let ch = if len(fill_char) > 0 { fill_char[0..1] } else { " " };
     return s + (ch * (width - cur));
 }
 

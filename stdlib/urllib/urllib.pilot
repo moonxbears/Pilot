@@ -49,7 +49,7 @@ class HTTPError {
 const _HEX_CHARS: str = "0123456789ABCDEF";
 
 def _hex_to_int(ch: str) -> i64 {
-    let c = __str_char_code(ch, 0);
+    let c = ch.char_code_at(0);
     // 0-9
     if c >= 48 and c <= 57 {
         return c - 48;
@@ -68,7 +68,7 @@ def _hex_to_int(ch: str) -> i64 {
 def _int_to_hex(b: i64) -> str {
     let hi = (b >> 4) & 15;
     let lo = b & 15;
-    return __str_slice(_HEX_CHARS, hi, hi + 1) + __str_slice(_HEX_CHARS, lo, lo + 1);
+    return _HEX_CHARS[hi..(hi + 1)] + _HEX_CHARS[lo..(lo + 1)];
 }
 
 def _is_unreserved(b: i64) -> bool {
@@ -88,9 +88,9 @@ def quote(text: str, safe: str = "/") -> str {
     var out: str = "";
     let n = len(text);
     for i in 0..<n {
-        let ch = __str_slice(text, i, i + 1);
-        let b = __str_char_code(ch, 0);
-        if _is_unreserved(b) or __str_index_of(safe, ch, 0) >= 0 {
+        let ch = text[i..(i + 1)];
+        let b = ch.char_code_at(0);
+        if _is_unreserved(b) or safe.contains(ch) {
             out = out + ch;
         } else {
             out = out + "%" + _int_to_hex(b);
@@ -104,12 +104,12 @@ def quote_plus(text: str, safe: str = "") -> str {
     var out: str = "";
     let n = len(text);
     for i in 0..<n {
-        let ch = __str_slice(text, i, i + 1);
+        let ch = text[i..(i + 1)];
         if ch == " " {
             out = out + "+";
         } else {
-            let b = __str_char_code(ch, 0);
-            if _is_unreserved(b) or __str_index_of(safe, ch, 0) >= 0 {
+            let b = ch.char_code_at(0);
+            if _is_unreserved(b) or safe.contains(ch) {
                 out = out + ch;
             } else {
                 out = out + "%" + _int_to_hex(b);
@@ -125,10 +125,10 @@ def unquote(text: str) -> str {
     let n = len(text);
     var i: i64 = 0;
     while i < n {
-        let ch = __str_slice(text, i, i + 1);
+        let ch = text[i..(i + 1)];
         if ch == "%" and i + 2 < n {
-            let h1 = _hex_to_int(__str_slice(text, i + 1, i + 2));
-            let h2 = _hex_to_int(__str_slice(text, i + 2, i + 3));
+            let h1 = _hex_to_int(text[(i + 1)..(i + 2)]);
+            let h2 = _hex_to_int(text[(i + 2)..(i + 3)]);
             if h1 >= 0 and h2 >= 0 {
                 let code = (h1 << 4) | h2;
                 out = out + __char_from_code(code);
@@ -147,7 +147,7 @@ def unquote_plus(text: str) -> str {
     var unplussed: str = "";
     let n = len(text);
     for i in 0..<n {
-        let ch = __str_slice(text, i, i + 1);
+        let ch = text[i..(i + 1)];
         if ch == "+" {
             unplussed = unplussed + " ";
         } else {
@@ -201,16 +201,16 @@ def urlencode(query: any, doseq: bool = false) -> str {
 def parse_qs(qs: str, keep_blank_values: bool = false) -> map {
     var out = {};
     var clean: str = qs;
-    if len(clean) > 0 and __str_slice(clean, 0, 1) == "?" {
-        clean = __str_slice(clean, 1, len(clean));
+    if len(clean) > 0 and clean[0..1] == "?" {
+        clean = clean[1..len(clean)];
     }
     if len(clean) == 0 {
         return out;
     }
-    let pairs: [str] = __str_split(clean, "&");
+    let pairs: [str] = clean.split("&");
     for pair in pairs {
         if len(pair) == 0 { continue; }
-        let eq_idx: i64 = __str_index_of(pair, "=", 0);
+        let eq_idx: i64 = pair.index_of("=");
         var k: str = "";
         var v: str = "";
         if eq_idx < 0 {
@@ -221,8 +221,8 @@ def parse_qs(qs: str, keep_blank_values: bool = false) -> map {
                 continue;
             }
         } else {
-            k = unquote_plus(__str_slice(pair, 0, eq_idx));
-            v = unquote_plus(__str_slice(pair, eq_idx + 1, len(pair)));
+            k = unquote_plus(pair[0..eq_idx]);
+            v = unquote_plus(pair[(eq_idx + 1)..len(pair)]);
         }
         if out.contains_key(k) {
             out[k].append(v);
@@ -237,16 +237,16 @@ def parse_qs(qs: str, keep_blank_values: bool = false) -> map {
 def parse_qsl(qs: str, keep_blank_values: bool = false) -> [[str]] {
     var out = [];
     var clean: str = qs;
-    if len(clean) > 0 and __str_slice(clean, 0, 1) == "?" {
-        clean = __str_slice(clean, 1, len(clean));
+    if len(clean) > 0 and clean[0..1] == "?" {
+        clean = clean[1..len(clean)];
     }
     if len(clean) == 0 {
         return out;
     }
-    let pairs: [str] = __str_split(clean, "&");
+    let pairs: [str] = clean.split("&");
     for pair in pairs {
         if len(pair) == 0 { continue; }
-        let eq_idx: i64 = __str_index_of(pair, "=", 0);
+        let eq_idx: i64 = pair.index_of("=");
         var k: str = "";
         var v: str = "";
         if eq_idx < 0 {
@@ -256,8 +256,8 @@ def parse_qsl(qs: str, keep_blank_values: bool = false) -> [[str]] {
                 out.append([k, v]);
             }
         } else {
-            k = unquote_plus(__str_slice(pair, 0, eq_idx));
-            v = unquote_plus(__str_slice(pair, eq_idx + 1, len(pair)));
+            k = unquote_plus(pair[0..eq_idx]);
+            v = unquote_plus(pair[(eq_idx + 1)..len(pair)]);
             out.append([k, v]);
         }
     }
@@ -276,26 +276,26 @@ class ParseResult {
 
     def hostname() -> str {
         var h = self.netloc;
-        if __str_index_of(h, "@", 0) >= 0 {
-            let at_idx = __str_index_of(h, "@", 0);
-            h = __str_slice(h, at_idx + 1, len(h));
+        if h.contains("@") {
+            let at_idx = h.index_of("@");
+            h = h[(at_idx + 1)..len(h)];
         }
-        if __str_index_of(h, ":", 0) >= 0 {
-            let c_idx = __str_index_of(h, ":", 0);
-            h = __str_slice(h, 0, c_idx);
+        if h.contains(":") {
+            let c_idx = h.index_of(":");
+            h = h[0..c_idx];
         }
         return h;
     }
 
     def port() -> i64 {
         var h = self.netloc;
-        if __str_index_of(h, "@", 0) >= 0 {
-            let at_idx = __str_index_of(h, "@", 0);
-            h = __str_slice(h, at_idx + 1, len(h));
+        if h.contains("@") {
+            let at_idx = h.index_of("@");
+            h = h[(at_idx + 1)..len(h)];
         }
-        if __str_index_of(h, ":", 0) >= 0 {
-            let c_idx = __str_index_of(h, ":", 0);
-            let p_str = __str_slice(h, c_idx + 1, len(h));
+        if h.contains(":") {
+            let c_idx = h.index_of(":");
+            let p_str = h[(c_idx + 1)..len(h)];
             return int(p_str);
         }
         if self.scheme == "https" { return 443; }
@@ -304,12 +304,12 @@ class ParseResult {
     }
 
     def username() -> str {
-        if __str_index_of(self.netloc, "@", 0) >= 0 {
-            let at_idx = __str_index_of(self.netloc, "@", 0);
-            let userinfo = __str_slice(self.netloc, 0, at_idx);
-            if __str_index_of(userinfo, ":", 0) >= 0 {
-                let c_idx = __str_index_of(userinfo, ":", 0);
-                return __str_slice(userinfo, 0, c_idx);
+        if self.netloc.contains("@") {
+            let at_idx = self.netloc.index_of("@");
+            let userinfo = self.netloc[0..at_idx];
+            if userinfo.contains(":") {
+                let c_idx = userinfo.index_of(":");
+                return userinfo[0..c_idx];
             }
             return userinfo;
         }
@@ -317,12 +317,12 @@ class ParseResult {
     }
 
     def password() -> str {
-        if __str_index_of(self.netloc, "@", 0) >= 0 {
-            let at_idx = __str_index_of(self.netloc, "@", 0);
-            let userinfo = __str_slice(self.netloc, 0, at_idx);
-            if __str_index_of(userinfo, ":", 0) >= 0 {
-                let c_idx = __str_index_of(userinfo, ":", 0);
-                return __str_slice(userinfo, c_idx + 1, len(userinfo));
+        if self.netloc.contains("@") {
+            let at_idx = self.netloc.index_of("@");
+            let userinfo = self.netloc[0..at_idx];
+            if userinfo.contains(":") {
+                let c_idx = userinfo.index_of(":");
+                return userinfo[(c_idx + 1)..len(userinfo)];
             }
         }
         return "";
@@ -348,26 +348,26 @@ class SplitResult {
 
     def hostname() -> str {
         var h = self.netloc;
-        if __str_index_of(h, "@", 0) >= 0 {
-            let at_idx = __str_index_of(h, "@", 0);
-            h = __str_slice(h, at_idx + 1, len(h));
+        if h.contains("@") {
+            let at_idx = h.index_of("@");
+            h = h[(at_idx + 1)..len(h)];
         }
-        if __str_index_of(h, ":", 0) >= 0 {
-            let c_idx = __str_index_of(h, ":", 0);
-            h = __str_slice(h, 0, c_idx);
+        if h.contains(":") {
+            let c_idx = h.index_of(":");
+            h = h[0..c_idx];
         }
         return h;
     }
 
     def port() -> i64 {
         var h = self.netloc;
-        if __str_index_of(h, "@", 0) >= 0 {
-            let at_idx = __str_index_of(h, "@", 0);
-            h = __str_slice(h, at_idx + 1, len(h));
+        if h.contains("@") {
+            let at_idx = h.index_of("@");
+            h = h[(at_idx + 1)..len(h)];
         }
-        if __str_index_of(h, ":", 0) >= 0 {
-            let c_idx = __str_index_of(h, ":", 0);
-            let p_str = __str_slice(h, c_idx + 1, len(h));
+        if h.contains(":") {
+            let c_idx = h.index_of(":");
+            let p_str = h[(c_idx + 1)..len(h)];
             return int(p_str);
         }
         if self.scheme == "https" { return 443; }
@@ -396,26 +396,26 @@ def urlparse(urlstring: str, default_scheme: str = "", allow_fragments: bool = t
 
     // Fragment
     if allow_fragments {
-        let hash_idx: i64 = __str_index_of(rem, "#", 0);
+        let hash_idx: i64 = rem.index_of("#");
         if hash_idx >= 0 {
-            fragment = __str_slice(rem, hash_idx + 1, len(rem));
-            rem = __str_slice(rem, 0, hash_idx);
+            fragment = rem[(hash_idx + 1)..len(rem)];
+            rem = rem[0..hash_idx];
         }
     }
 
     // Scheme
-    let colon_idx: i64 = __str_index_of(rem, ":", 0);
-    let slash_idx: i64 = __str_index_of(rem, "/", 0);
+    let colon_idx: i64 = rem.index_of(":");
+    let slash_idx: i64 = rem.index_of("/");
     if colon_idx >= 0 and (slash_idx < 0 or colon_idx < slash_idx) {
-        scheme = __str_slice(rem, 0, colon_idx);
-        rem = __str_slice(rem, colon_idx + 1, len(rem));
+        scheme = rem[0..colon_idx];
+        rem = rem[(colon_idx + 1)..len(rem)];
     }
 
     // Netloc
-    if len(rem) >= 2 and __str_slice(rem, 0, 2) == "//" {
-        rem = __str_slice(rem, 2, len(rem));
-        let next_slash = __str_index_of(rem, "/", 0);
-        let next_q = __str_index_of(rem, "?", 0);
+    if len(rem) >= 2 and rem[0..2] == "//" {
+        rem = rem[2..len(rem)];
+        let next_slash = rem.index_of("/");
+        let next_q = rem.index_of("?");
         var end_netloc = len(rem);
         if next_slash >= 0 and next_slash < end_netloc {
             end_netloc = next_slash;
@@ -423,22 +423,22 @@ def urlparse(urlstring: str, default_scheme: str = "", allow_fragments: bool = t
         if next_q >= 0 and next_q < end_netloc {
             end_netloc = next_q;
         }
-        netloc = __str_slice(rem, 0, end_netloc);
-        rem = __str_slice(rem, end_netloc, len(rem));
+        netloc = rem[0..end_netloc];
+        rem = rem[end_netloc..len(rem)];
     }
 
     // Query
-    let q_idx = __str_index_of(rem, "?", 0);
+    let q_idx = rem.index_of("?");
     if q_idx >= 0 {
-        query = __str_slice(rem, q_idx + 1, len(rem));
-        rem = __str_slice(rem, 0, q_idx);
+        query = rem[(q_idx + 1)..len(rem)];
+        rem = rem[0..q_idx];
     }
 
     // Params (e.g. path;params)
-    let semi_idx = __str_index_of(rem, ";", 0);
+    let semi_idx = rem.index_of(";");
     if semi_idx >= 0 {
-        params = __str_slice(rem, semi_idx + 1, len(rem));
-        path = __str_slice(rem, 0, semi_idx);
+        params = rem[(semi_idx + 1)..len(rem)];
+        path = rem[0..semi_idx];
     } else {
         path = rem;
     }
@@ -520,10 +520,10 @@ def urljoin(base: str, url: str, allow_fragments: bool = true) -> str {
         return urlunparse(ParseResult(scheme, netloc, path, u.params, query, u.fragment));
     }
 
-    if __str_slice(path, 0, 1) != "/" {
-        let last_slash = __str_last_index_of(b.path, "/", 0);
+    if path[0..1] != "/" {
+        let last_slash = b.path.last_index_of("/");
         if last_slash >= 0 {
-            path = __str_slice(b.path, 0, last_slash + 1) + path;
+            path = b.path[0..(last_slash + 1)] + path;
         } else {
             path = "/" + path;
         }
@@ -677,9 +677,9 @@ def urlretrieve(url: str, filename: str = "") -> [any] {
     var dest: str = filename;
     if len(dest) == 0 {
         let p = urlparse(url);
-        let last_slash = __str_last_index_of(p.path, "/", 0);
+        let last_slash = p.path.last_index_of("/");
         if last_slash >= 0 {
-            dest = __str_slice(p.path, last_slash + 1, len(p.path));
+            dest = p.path[(last_slash + 1)..len(p.path)];
         }
         if len(dest) == 0 {
             dest = "downloaded_file";

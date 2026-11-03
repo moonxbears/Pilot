@@ -92,18 +92,18 @@ class BufferedReader {
         if self._char_pos >= total {
             return none;
         }
-        let nl_idx: i64 = __str_index_of(self._text, "\n", self._char_pos);
+        let nl_idx: i64 = self._text.index_of("\n", self._char_pos);
         if nl_idx < 0 {
-            let rem = __str_slice(self._text, self._char_pos, total);
+            let rem = self._text[self._char_pos..total];
             self._char_pos = total;
-            self._byte_pos = __slice_len(self._bytes);
+            self._byte_pos = len(self._bytes);
             return some(rem);
         }
         var line_end: i64 = nl_idx;
-        if line_end > self._char_pos and __str_slice(self._text, line_end - 1, line_end) == "\r" {
+        if line_end > self._char_pos and self._text[(line_end - 1)..line_end] == "\r" {
             line_end = line_end - 1;
         }
-        let line_str = __str_slice(self._text, self._char_pos, line_end);
+        let line_str = self._text[self._char_pos..line_end];
         self._char_pos = nl_idx + 1;
         return some(line_str);
     }
@@ -123,7 +123,7 @@ class BufferedReader {
 
     // Zero-copy subview over the reader's `SliceBuffer<u8>` (`none` at byte EOF)
     def read_bytes(self, max_bytes: i64) {
-        let total_b: i64 = __slice_len(self._bytes);
+        let total_b: i64 = len(self._bytes);
         if self._byte_pos >= total_b or max_bytes <= 0 {
             return none;
         }
@@ -138,7 +138,7 @@ class BufferedReader {
         if self._char_pos >= total {
             return "";
         }
-        let rem = __str_slice(self._text, self._char_pos, total);
+        let rem = self._text[self._char_pos..total];
         self._char_pos = total;
         return rem;
     }

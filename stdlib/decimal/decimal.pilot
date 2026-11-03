@@ -55,7 +55,7 @@ def _pow10(n: i64) -> i64 {
 }
 
 def _parse_decimal_str(raw: str) -> (i64, i64) {
-    let s: str = __str_trim(raw);
+    let s: str = raw.trim();
     let total_len: i64 = len(s);
     if total_len == 0 {
         return (0, 0);
@@ -63,7 +63,7 @@ def _parse_decimal_str(raw: str) -> (i64, i64) {
 
     var is_neg: bool = false;
     var start_idx: i64 = 0;
-    let first_code: i64 = __str_char_code(s, 0);
+    let first_code: i64 = s.char_code_at(0);
     if first_code == 45 { // '-'
         is_neg = true;
         start_idx = 1;
@@ -72,11 +72,11 @@ def _parse_decimal_str(raw: str) -> (i64, i64) {
     }
 
     // Check for dot
-    let dot_pos: i64 = __str_index_of(s, ".", 0);
+    let dot_pos: i64 = s.index_of(".");
     if dot_pos < 0 {
         var int_part: i64 = 0;
         for i in start_idx..<total_len {
-            let c: i64 = __str_char_code(s, i);
+            let c: i64 = s.char_code_at(i);
             if c >= 48 and c <= 57 {
                 int_part = int_part * 10 + (c - 48);
             }
@@ -90,7 +90,7 @@ def _parse_decimal_str(raw: str) -> (i64, i64) {
     // Has decimal point
     var int_acc: i64 = 0;
     for i in start_idx..<dot_pos {
-        let c: i64 = __str_char_code(s, i);
+        let c: i64 = s.char_code_at(i);
         if c >= 48 and c <= 57 {
             int_acc = int_acc * 10 + (c - 48);
         }
@@ -98,7 +98,7 @@ def _parse_decimal_str(raw: str) -> (i64, i64) {
 
     var frac_digits: i64 = 0;
     for j in (dot_pos + 1)..<total_len {
-        let c: i64 = __str_char_code(s, j);
+        let c: i64 = s.char_code_at(j);
         if c >= 48 and c <= 57 {
             int_acc = int_acc * 10 + (c - 48);
             frac_digits = frac_digits + 1;
@@ -302,7 +302,7 @@ class Decimal {
             let digits_len: i64 = len(s_mag);
             if digits_len > num_decimals {
                 let split_pt: i64 = digits_len - num_decimals;
-                result = __str_slice(s_mag, 0, split_pt) + "." + __str_slice(s_mag, split_pt, digits_len);
+                result = s_mag[0..split_pt] + "." + s_mag[split_pt..digits_len];
             } else {
                 result = "0.";
                 let leading_zeros: i64 = num_decimals - digits_len;

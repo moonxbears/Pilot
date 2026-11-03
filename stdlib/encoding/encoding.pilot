@@ -130,7 +130,7 @@ def __is_unreserved_rfc3986(b: i64) -> bool {
 
 def hex_encode(data, upper: bool = false) -> str {
     let buf = __to_utf8_bytes(data);
-    let n: i64 = __slice_len(buf);
+    let n: i64 = len(buf);
     if n == 0 {
         return "";
     }
@@ -140,8 +140,8 @@ def hex_encode(data, upper: bool = false) -> str {
         let b: i64 = __slice_byte_at(buf, i);
         let hi: i64 = (b >> 4) & 15;
         let lo: i64 = b & 15;
-        __slice_push(out_bytes, __str_char_code(alphabet, hi));
-        __slice_push(out_bytes, __str_char_code(alphabet, lo));
+        __slice_push(out_bytes, alphabet.char_code_at(hi));
+        __slice_push(out_bytes, alphabet.char_code_at(lo));
     }
     return __utf8_decode_slice(out_bytes);
 }
@@ -155,15 +155,15 @@ def hex_decode_bytes(encoded_in) -> SliceBuffer ! DecodeError {
     var out_buf = slice_buffer(n / 2, "u8");
     var i: i64 = 0;
     while i < n {
-        let c_hi: i64 = __str_char_code(encoded, i);
+        let c_hi: i64 = encoded.char_code_at(i);
         let v_hi: i64 = __hex_nibble(c_hi);
         if v_hi < 0 {
-            return fail(DecodeError.InvalidChar(__str_slice(encoded, i, i + 1), i));
+            return fail(DecodeError.InvalidChar(encoded[i..(i + 1)], i));
         }
-        let c_lo: i64 = __str_char_code(encoded, i + 1);
+        let c_lo: i64 = encoded.char_code_at(i + 1);
         let v_lo: i64 = __hex_nibble(c_lo);
         if v_lo < 0 {
-            return fail(DecodeError.InvalidChar(__str_slice(encoded, i + 1, i + 2), i + 1));
+            return fail(DecodeError.InvalidChar(encoded[(i + 1)..(i + 2)], i + 1));
         }
         __slice_push(out_buf, (v_hi << 4) | v_lo);
         i = i + 2;
@@ -183,7 +183,7 @@ def hex_decode(encoded) -> str ! DecodeError {
 
 def __b64_encode_core(data, alphabet: str, pad: bool) -> str {
     let buf = __to_utf8_bytes(data);
-    let n: i64 = __slice_len(buf);
+    let n: i64 = len(buf);
     if n == 0 {
         return "";
     }
@@ -195,18 +195,18 @@ def __b64_encode_core(data, alphabet: str, pad: bool) -> str {
         let b1: i64 = __slice_byte_at(buf, i + 1);
         let b2: i64 = __slice_byte_at(buf, i + 2);
         let triple: i64 = (b0 << 16) | (b1 << 8) | b2;
-        __slice_push(out_bytes, __str_char_code(alphabet, (triple >> 18) & 63));
-        __slice_push(out_bytes, __str_char_code(alphabet, (triple >> 12) & 63));
-        __slice_push(out_bytes, __str_char_code(alphabet, (triple >> 6) & 63));
-        __slice_push(out_bytes, __str_char_code(alphabet, triple & 63));
+        __slice_push(out_bytes, alphabet.char_code_at((triple >> 18) & 63));
+        __slice_push(out_bytes, alphabet.char_code_at((triple >> 12) & 63));
+        __slice_push(out_bytes, alphabet.char_code_at((triple >> 6) & 63));
+        __slice_push(out_bytes, alphabet.char_code_at(triple & 63));
         i = i + 3;
     }
 
     let rem: i64 = n - i;
     if rem == 1 {
         let b0: i64 = __slice_byte_at(buf, i);
-        __slice_push(out_bytes, __str_char_code(alphabet, (b0 >> 2) & 63));
-        __slice_push(out_bytes, __str_char_code(alphabet, (b0 & 3) << 4));
+        __slice_push(out_bytes, alphabet.char_code_at((b0 >> 2) & 63));
+        __slice_push(out_bytes, alphabet.char_code_at((b0 & 3) << 4));
         if pad {
             __slice_push(out_bytes, 61);
             __slice_push(out_bytes, 61);
@@ -215,9 +215,9 @@ def __b64_encode_core(data, alphabet: str, pad: bool) -> str {
         let b0: i64 = __slice_byte_at(buf, i);
         let b1: i64 = __slice_byte_at(buf, i + 1);
         let pair: i64 = (b0 << 8) | b1;
-        __slice_push(out_bytes, __str_char_code(alphabet, (pair >> 10) & 63));
-        __slice_push(out_bytes, __str_char_code(alphabet, (pair >> 4) & 63));
-        __slice_push(out_bytes, __str_char_code(alphabet, (pair & 15) << 2));
+        __slice_push(out_bytes, alphabet.char_code_at((pair >> 10) & 63));
+        __slice_push(out_bytes, alphabet.char_code_at((pair >> 4) & 63));
+        __slice_push(out_bytes, alphabet.char_code_at((pair & 15) << 2));
         if pad {
             __slice_push(out_bytes, 61);
         }
@@ -232,7 +232,7 @@ def __b64_decode_core(encoded: str, url_safe: bool) -> SliceBuffer ! DecodeError
     var offsets = [];
     let raw_len: i64 = len(encoded);
     for idx in 0..<raw_len {
-        let c: i64 = __str_char_code(encoded, idx);
+        let c: i64 = encoded.char_code_at(idx);
         if c == 10 or c == 13 {
             continue;
         }
@@ -291,12 +291,12 @@ def __b64_decode_core(encoded: str, url_safe: bool) -> SliceBuffer ! DecodeError
         let s0: i64 = __b64_sextet(c0, url_safe);
         if s0 < 0 {
             let off0: i64 = offsets[q];
-            return fail(DecodeError.InvalidChar(__str_slice(encoded, off0, off0 + 1), off0));
+            return fail(DecodeError.InvalidChar(encoded[off0..(off0 + 1)], off0));
         }
         let s1: i64 = __b64_sextet(c1, url_safe);
         if s1 < 0 {
             let off1: i64 = offsets[q + 1];
-            return fail(DecodeError.InvalidChar(__str_slice(encoded, off1, off1 + 1), off1));
+            return fail(DecodeError.InvalidChar(encoded[off1..(off1 + 1)], off1));
         }
 
         if c2 == 61 {
@@ -310,7 +310,7 @@ def __b64_decode_core(encoded: str, url_safe: bool) -> SliceBuffer ! DecodeError
             let s2: i64 = __b64_sextet(c2, url_safe);
             if s2 < 0 {
                 let off2: i64 = offsets[q + 2];
-                return fail(DecodeError.InvalidChar(__str_slice(encoded, off2, off2 + 1), off2));
+                return fail(DecodeError.InvalidChar(encoded[off2..(off2 + 1)], off2));
             }
             if (s2 & 3) != 0 {
                 return fail(DecodeError.InvalidPadding(offsets[q + 2], "non-zero trailing pad bits in 3-char base64 quantum"));
@@ -322,12 +322,12 @@ def __b64_decode_core(encoded: str, url_safe: bool) -> SliceBuffer ! DecodeError
             let s2: i64 = __b64_sextet(c2, url_safe);
             if s2 < 0 {
                 let off2: i64 = offsets[q + 2];
-                return fail(DecodeError.InvalidChar(__str_slice(encoded, off2, off2 + 1), off2));
+                return fail(DecodeError.InvalidChar(encoded[off2..(off2 + 1)], off2));
             }
             let s3: i64 = __b64_sextet(c3, url_safe);
             if s3 < 0 {
                 let off3: i64 = offsets[q + 3];
-                return fail(DecodeError.InvalidChar(__str_slice(encoded, off3, off3 + 1), off3));
+                return fail(DecodeError.InvalidChar(encoded[off3..(off3 + 1)], off3));
             }
             let triple: i64 = (s0 << 18) | (s1 << 12) | (s2 << 6) | s3;
             __slice_push(out_buf, (triple >> 16) & 255);
@@ -379,7 +379,7 @@ def base64url_decode(encoded) -> str ! DecodeError {
 
 def url_encode(text: str, space_as_plus: bool = false) -> str {
     let buf = __utf8_encode_slice(text);
-    let n: i64 = __slice_len(buf);
+    let n: i64 = len(buf);
     if n == 0 {
         return "";
     }
@@ -392,8 +392,8 @@ def url_encode(text: str, space_as_plus: bool = false) -> str {
             __slice_push(out_bytes, 43);
         } else {
             __slice_push(out_bytes, 37);
-            __slice_push(out_bytes, __str_char_code(_HEX_UPPER, (b >> 4) & 15));
-            __slice_push(out_bytes, __str_char_code(_HEX_UPPER, b & 15));
+            __slice_push(out_bytes, _HEX_UPPER.char_code_at((b >> 4) & 15));
+            __slice_push(out_bytes, _HEX_UPPER.char_code_at(b & 15));
         }
     }
     return __utf8_decode_slice(out_bytes);
@@ -401,7 +401,7 @@ def url_encode(text: str, space_as_plus: bool = false) -> str {
 
 def url_decode_bytes(encoded_in, plus_as_space: bool = false) -> SliceBuffer ! DecodeError {
     let src_bytes = __to_utf8_bytes(encoded_in);
-    let n: i64 = __slice_len(src_bytes);
+    let n: i64 = len(src_bytes);
     var out_buf = slice_buffer(n, "u8");
     var i: i64 = 0;
     while i < n {
@@ -458,25 +458,25 @@ def query_encode(params) -> str {
 
 def query_parse(query_str: str) -> map ! DecodeError {
     var clean: str = query_str;
-    if len(clean) > 0 and __str_slice(clean, 0, 1) == "?" {
-        clean = __str_slice(clean, 1, len(clean));
+    if len(clean) > 0 and clean[0..1] == "?" {
+        clean = clean[1..len(clean)];
     }
     var out = {};
     if len(clean) == 0 {
         return ok(out);
     }
-    let parts: [str] = __str_split(clean, "&");
+    let parts: [str] = clean.split("&");
     for part in parts {
         if len(part) == 0 {
             continue;
         }
-        let eq_idx: i64 = __str_index_of(part, "=", 0);
+        let eq_idx: i64 = part.index_of("=");
         if eq_idx < 0 {
             let k = url_decode(part, true)?;
             out[k] = "";
         } else {
-            let raw_k = __str_slice(part, 0, eq_idx);
-            let raw_v = __str_slice(part, eq_idx + 1, len(part));
+            let raw_k = part[0..eq_idx];
+            let raw_v = part[(eq_idx + 1)..len(part)];
             let k = url_decode(raw_k, true)?;
             let v = url_decode(raw_v, true)?;
             out[k] = v;
@@ -487,26 +487,26 @@ def query_parse(query_str: str) -> map ! DecodeError {
 
 def query_parse_multi(query_str: str) -> map ! DecodeError {
     var clean: str = query_str;
-    if len(clean) > 0 and __str_slice(clean, 0, 1) == "?" {
-        clean = __str_slice(clean, 1, len(clean));
+    if len(clean) > 0 and clean[0..1] == "?" {
+        clean = clean[1..len(clean)];
     }
     var out = {};
     if len(clean) == 0 {
         return ok(out);
     }
-    let parts: [str] = __str_split(clean, "&");
+    let parts: [str] = clean.split("&");
     for part in parts {
         if len(part) == 0 {
             continue;
         }
-        let eq_idx: i64 = __str_index_of(part, "=", 0);
+        let eq_idx: i64 = part.index_of("=");
         var k: str = "";
         var v: str = "";
         if eq_idx < 0 {
             k = url_decode(part, true)?;
         } else {
-            k = url_decode(__str_slice(part, 0, eq_idx), true)?;
-            v = url_decode(__str_slice(part, eq_idx + 1, len(part)), true)?;
+            k = url_decode(part[0..eq_idx], true)?;
+            v = url_decode(part[(eq_idx + 1)..len(part)], true)?;
         }
         if out.contains_key(k) {
             out[k].append(v);
@@ -611,54 +611,54 @@ def parse_url(raw_url: str) -> Url ! DecodeError {
     var path_part: str = "";
 
     // 1. Extract `#fragment`
-    let hash_idx: i64 = __str_index_of(rest, "#", 0);
+    let hash_idx: i64 = rest.index_of("#");
     if hash_idx >= 0 {
-        fragment = __str_slice(rest, hash_idx + 1, len(rest));
-        rest = __str_slice(rest, 0, hash_idx);
+        fragment = rest[(hash_idx + 1)..len(rest)];
+        rest = rest[0..hash_idx];
     }
 
     // 2. Extract `?query`
-    let q_idx: i64 = __str_index_of(rest, "?", 0);
+    let q_idx: i64 = rest.index_of("?");
     if q_idx >= 0 {
-        query = __str_slice(rest, q_idx + 1, len(rest));
-        rest = __str_slice(rest, 0, q_idx);
+        query = rest[(q_idx + 1)..len(rest)];
+        rest = rest[0..q_idx];
     }
 
     // 3. Extract `scheme://` (or `scheme:`)
-    let s_sep: i64 = __str_index_of(rest, "://", 0);
+    let s_sep: i64 = rest.index_of("://");
     if s_sep > 0 {
-        scheme = __str_case(__str_slice(rest, 0, s_sep), false);
-        let after_scheme = __str_slice(rest, s_sep + 3, len(rest));
-        let slash_idx: i64 = __str_index_of(after_scheme, "/", 0);
+        scheme = rest[0..s_sep].to_lower();
+        let after_scheme = rest[(s_sep + 3)..len(rest)];
+        let slash_idx: i64 = after_scheme.index_of("/");
         var authority: str = "";
         if slash_idx >= 0 {
-            authority = __str_slice(after_scheme, 0, slash_idx);
-            path_part = __str_slice(after_scheme, slash_idx, len(after_scheme));
+            authority = after_scheme[0..slash_idx];
+            path_part = after_scheme[slash_idx..len(after_scheme)];
         } else {
             authority = after_scheme;
             path_part = "";
         }
 
         // Extract optional `userinfo@`
-        let at_idx: i64 = __str_last_index_of(authority, "@");
+        let at_idx: i64 = authority.last_index_of("@");
         var host_port: str = authority;
         if at_idx >= 0 {
-            userinfo = __str_slice(authority, 0, at_idx);
-            host_port = __str_slice(authority, at_idx + 1, len(authority));
+            userinfo = authority[0..at_idx];
+            host_port = authority[(at_idx + 1)..len(authority)];
         }
 
         // IPv6 `[::1]:port` vs regular `host:port`
-        if len(host_port) > 0 and __str_slice(host_port, 0, 1) == "[" {
-            let close_br: i64 = __str_index_of(host_port, "]", 0);
+        if len(host_port) > 0 and host_port[0..1] == "[" {
+            let close_br: i64 = host_port.index_of("]");
             if close_br < 0 {
                 return fail(DecodeError.InvalidChar("[", s_sep + 3));
             }
-            host = __str_slice(host_port, 0, close_br + 1);
+            host = host_port[0..(close_br + 1)];
             if (close_br + 1) < len(host_port) {
-                if __str_slice(host_port, close_br + 1, close_br + 2) != ":" {
-                    return fail(DecodeError.InvalidChar(__str_slice(host_port, close_br + 1, close_br + 2), close_br + 1));
+                if host_port[(close_br + 1)..(close_br + 2)] != ":" {
+                    return fail(DecodeError.InvalidChar(host_port[(close_br + 1)..(close_br + 2)], close_br + 1));
                 }
-                let p_raw = __str_slice(host_port, close_br + 2, len(host_port));
+                let p_raw = host_port[(close_br + 2)..len(host_port)];
                 let p_parsed = __parse_int_strict(p_raw, 10);
                 if __opt_is_none(p_parsed) {
                     return fail(DecodeError.InvalidChar(p_raw, close_br + 2));
@@ -670,10 +670,10 @@ def parse_url(raw_url: str) -> Url ! DecodeError {
                 port_opt = some(p_val);
             }
         } else {
-            let colon_idx: i64 = __str_last_index_of(host_port, ":");
+            let colon_idx: i64 = host_port.last_index_of(":");
             if colon_idx >= 0 {
-                host = __str_slice(host_port, 0, colon_idx);
-                let p_raw = __str_slice(host_port, colon_idx + 1, len(host_port));
+                host = host_port[0..colon_idx];
+                let p_raw = host_port[(colon_idx + 1)..len(host_port)];
                 let p_parsed = __parse_int_strict(p_raw, 10);
                 if __opt_is_none(p_parsed) {
                     return fail(DecodeError.InvalidChar(p_raw, colon_idx + 1));

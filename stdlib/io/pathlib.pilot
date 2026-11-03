@@ -76,7 +76,7 @@ class Path {
 
     def suffixes(self) -> [str] {
         let n = self.name();
-        let split = __str_split(n, ".");
+        let split = n.split(".");
         var out = [];
         if len(split) > 1 {
             for i in 1..<len(split) {
@@ -99,7 +99,7 @@ class Path {
 
     def with_suffix(self, new_suffix: str) -> Path {
         let st = self.stem();
-        if len(new_suffix) > 0 and __str_slice(new_suffix, 0, 1) != "." {
+        if len(new_suffix) > 0 and new_suffix[0..1] != "." {
             return self.with_name(st + "." + new_suffix);
         }
         return self.with_name(st + new_suffix);
@@ -119,13 +119,13 @@ class Path {
         if !std_os.is_windows() {
             return false;
         }
-        let st = __str_case(self.stem(), false);
+        let st = self.stem().to_lower();
         if st == "con" or st == "prn" or st == "aux" or st == "nul" {
             return true;
         }
         if len(st) == 4 {
-            let pfx = __str_slice(st, 0, 3);
-            let sfx = __str_slice(st, 3, 4);
+            let pfx = st[0..3];
+            let sfx = st[3..4];
             if (pfx == "com" or pfx == "lpt") and (sfx >= "1" and sfx <= "9") {
                 return true;
             }
@@ -140,23 +140,23 @@ class Path {
 
     def drive(self) -> str {
         if len(self.raw) >= 2 {
-            let c0 = __str_char_code(self.raw, 0);
-            let c1 = __str_char_code(self.raw, 1);
+            let c0 = self.raw.char_code_at(0);
+            let c1 = self.raw.char_code_at(1);
             let is_alpha = (c0 >= 65 and c0 <= 90) or (c0 >= 97 and c0 <= 122);
             if is_alpha and c1 == 58 {
-                return __str_slice(self.raw, 0, 2);
+                return self.raw[0..2];
             }
         }
         return "";
     }
 
     def as_posix(self) -> str {
-        return __str_replace(self.raw, "\\", "/");
+        return self.raw.replace("\\", "/");
     }
 
     def as_uri(self) -> str {
         let posix_p = self.as_posix();
-        if __str_slice(posix_p, 0, 1) == "/" {
+        if posix_p[0..1] == "/" {
             return "file://" + posix_p;
         }
         return "file:///" + posix_p;
