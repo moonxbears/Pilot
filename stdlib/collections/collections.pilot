@@ -5,7 +5,7 @@
 //   - CPython Lib/collections/__init__.py: Counter, defaultdict, OrderedDict, ChainMap, deque, namedtuple
 //   - CPython Lib/bisect.py: bisect_left, bisect_right
 //   - CPython Lib/heapq.py: PriorityQueue (binary min-heap sift algorithms)
-//   - Rust alloc::collections::VecDeque: Deque / RingBuffer
+//   - RingBuffer / Deque (circular ring-buffer algorithm)
 //   - Displacement Perfect-Hash / SWAR 64-bit BitSet
 //
 // Target OS Platforms:
@@ -43,7 +43,7 @@ def bisect_right(arr, target) -> i64 {
     return lo;
 }
 
-// Amortized O(1) circular-buffer Double-Ended Queue (MIT/Apache-2.0 Rust VecDeque scaffold)
+// Amortized O(1) circular-buffer Double-Ended Queue
 class Deque {
     def __init__(self, initial_cap: i64 = 8) {
         var cap: i64 = 8;

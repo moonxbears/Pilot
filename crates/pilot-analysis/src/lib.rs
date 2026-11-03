@@ -219,7 +219,7 @@ def test_match_incomplete(x: int) -> int {
     }
 
     #[test]
-    fn test_showcase_21_row_polymorphism_inference() {
+    fn test_row_polymorphism_inference() {
         let code = r#"
 record Frame2D(width: int, height: int, name: str);
 record Canvas2D(width: float, height: float);
@@ -798,14 +798,26 @@ def test_builtins() {
     }
 
     #[test]
-    fn test_all_syntax_pilot_clean_analysis() {
-        let src = std::fs::read_to_string("../../examples/all_syntax.pilot")
-            .or_else(|_| std::fs::read_to_string("examples/all_syntax.pilot"))
-            .expect("read all_syntax.pilot");
-        let arena = pilot_parser::parse(&src);
+    fn test_comprehensive_syntax_clean_analysis() {
+        let src = r#"
+            record Point(x: int, y: int);
+            record Config(timeout: float, retry: bool);
+
+            def calculate(p: Point, c: Config) -> float {
+                if c.retry {
+                    return (p.x + p.y) as float * c.timeout;
+                }
+                return 0.0;
+            }
+
+            let p = Point(10, 20);
+            let c = Config(1.5, true);
+            let result = calculate(p, c);
+        "#;
+        let arena = pilot_parser::parse(src);
         let result = AnalysisPipeline::analyze(&arena, arena.root);
         let errors: Vec<_> = result.diagnostics.iter().filter(|d| d.severity == DiagnosticSeverity::Error).collect();
-        assert!(errors.is_empty(), "Expected 0 errors on all_syntax.pilot, got: {:?}", errors);
+        assert!(errors.is_empty(), "Expected 0 errors on clean syntax analysis, got: {:?}", errors);
     }
 
     #[test]

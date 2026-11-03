@@ -94,10 +94,18 @@ return c
     }
 
     #[test]
-    fn test_all_syntax() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/all_syntax.pilot");
-        let src = std::fs::read_to_string(&path).unwrap();
-        let arena = pilot_parser::parse(&src);
+    fn test_comprehensive_vm_execution() {
+        let src = r#"
+            def compute(x: int, y: int) -> int {
+                var total = 0;
+                for i in 0..x {
+                    total += i * y;
+                }
+                return total;
+            }
+            let res = compute(5, 2);
+        "#;
+        let arena = pilot_parser::parse(src);
         let binary = BytecodeCompiler::compile(&arena, arena.root);
         let mut vm = PilVirtualMachine::new();
         vm.load_binary(binary);

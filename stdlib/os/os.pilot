@@ -5,6 +5,33 @@
 import std.path as std_path;
 import std.fs as std_fs;
 
+// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
+extern "c" lib "pilot_rt" {
+    def __os_platform() -> str;
+    def __os_arch() -> str;
+    def __os_family() -> str;
+    def __os_is_windows() -> bool;
+    def __os_is_linux() -> bool;
+    def __os_is_macos() -> bool;
+    def __os_is_android() -> bool;
+    def __os_is_ios() -> bool;
+    def __os_getenv(name: str) -> str;
+    def __os_setenv(name: str, val: str) -> bool;
+    def __os_unsetenv(name: str) -> bool;
+    def __os_environ() -> List[str];
+    def __os_getpid() -> i64;
+    def __os_getppid() -> i64;
+    def __os_getuid() -> i64;
+    def __os_getgid() -> i64;
+    def __os_cpu_count() -> i64;
+    def __os_system(cmd: str) -> i64;
+    def __os_cwd() -> str;
+    def __os_homedir() -> str;
+    def __os_chdir(path: str) -> bool;
+    def __os_temp_dir() -> str;
+    def __os_abort();
+}
+
 // ============================================================================
 // 1. OS Constants & Path Separators (Python: os.sep, os.pathsep, etc.)
 // ============================================================================

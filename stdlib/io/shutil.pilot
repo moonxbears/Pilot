@@ -7,6 +7,11 @@ import std.path as std_path;
 import std.fs as std_fs;
 import std.os as std_os;
 
+// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
+extern "c" lib "pilot_rt" {
+    def __os_disk_usage(path: str) -> any;
+}
+
 // ============================================================================
 // 1. File Copy Operations (Python: shutil.copyfile, shutil.copy, shutil.copy2)
 // ============================================================================

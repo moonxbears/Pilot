@@ -86,6 +86,12 @@ impl PilotVal {
     }
 
     #[inline]
+    pub const fn is_str(self) -> bool {
+        let t = self.tag();
+        t == TAG_SSO_STR || t == TAG_HEAP_STR
+    }
+
+    #[inline]
     pub const fn from_bool(val: bool) -> Self {
         if val {
             Self::TRUE

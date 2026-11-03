@@ -5,6 +5,29 @@
 from std.io import IoError;
 import std.path as std_path;
 
+// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
+extern "c" lib "pilot_rt" {
+    def __fs_exists(path: str) -> bool;
+    def __fs_is_file(path: str) -> bool;
+    def __fs_is_dir(path: str) -> bool;
+    def __fs_file_size(path: str) -> i64;
+    def __fs_read_text(path: str) -> any;
+    def __fs_read_bytes(path: str) -> any;
+    def __fs_list_dir(path: str) -> List[str];
+    def __fs_walk_dir(path: str) -> List[str];
+    def __fs_mmap_read(path: str) -> any;
+    def __fs_mmap_rw(path: str) -> any;
+    def __fs_write_text(path: str, content: str) -> any;
+    def __fs_copy_file(src: str, dst: str) -> any;
+    def __fs_move_file(src: str, dst: str) -> any;
+    def __fs_remove_file(path: str) -> any;
+    def __fs_mkdir(path: str) -> any;
+    def __fs_rmdir(path: str) -> any;
+    def __os_cwd() -> str;
+    def __os_temp_dir() -> str;
+    def __dfa_is_match(pattern: any, text: str) -> bool;
+}
+
 def exists(path: str) -> bool {
     return __fs_exists(path);
 }

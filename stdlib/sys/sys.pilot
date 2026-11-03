@@ -6,6 +6,23 @@
 // 1. Command-Line Arguments (Python: sys.argv)
 // ============================================================================
 
+// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
+extern "c" lib "pilot_rt" {
+    def __sys_argv() -> List[str];
+    def __sys_exit(code: i64);
+    def __sys_executable() -> str;
+    def __sys_pointer_size() -> i64;
+    def __sys_byteorder() -> str;
+    def __os_platform() -> str;
+    def __os_arch() -> str;
+    def __os_is_windows() -> bool;
+    def __os_is_linux() -> bool;
+    def __os_is_macos() -> bool;
+    def __os_is_android() -> bool;
+    def __os_is_ios() -> bool;
+    def __os_abort();
+}
+
 def argv() -> [str] {
     return __sys_argv();
 }

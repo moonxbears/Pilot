@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: MIT AND PSF-2.0
 // std.formats — Zero-Copy-Friendly `json`, `toml`, `csv` & `env` State-Machine Parsers & Serializers (`T ! ParseError`)
-// Bootstrapped via M20 (`--from python|rust --strict-pilot --viable-license-only`) from CPython `json`/`tomllib`/`csv`
-// (PSF-2.0) and MIT TOML/dotenv state machines, curated for Pilot Invariant #7 (`T ! ParseError`) & `SliceBuffer<u8>`.
+// Zero-copy friendly JSON, TOML, CSV, and ENV state-machine parsers and serializers.
+
+// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
+extern "c" lib "pilot_rt" {
+    def __utf8_validate_slice(buf: any) -> i64;
+    def __utf8_decode_slice(buf: any) -> str;
+}
 
 type ParseError = Syntax(format_name: str, msg: str, line: i64, col: i64)
                 | PrematureEof(format_name: str, line: i64, col: i64)

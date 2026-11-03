@@ -2,6 +2,14 @@
 // std.io — Values-First `IoError` ADT, Null-Safe (`T?`) EOF Streams & Fallible (`! IoError`) Buffered I/O
 // Adheres to Pilot Invariant #7: zero `raise`/`try`/`except`; recoverable failures return `T ! IoError`.
 
+// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
+extern "c" lib "pilot_rt" {
+    def __fs_read_text(path: str) -> any;
+    def __fs_write_text(path: str, content: str) -> any;
+    def __slice_subview(buf: any, start: i64, length: i64) -> any;
+    def __utf8_encode_slice(text: str) -> any;
+}
+
 type IoError = NotFound(path: str)
              | PermissionDenied(path: str)
              | InvalidPath(msg: str)

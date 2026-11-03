@@ -405,6 +405,7 @@ pub enum BinaryOp {
     Union = 28,          // a union b / a union all b
     Intersect = 29,      // a intersect b
     Except = 30,         // a except b
+    PipeBackward = 31,   // a <| b
 }
 
 impl BinaryOp {
@@ -440,6 +441,7 @@ impl BinaryOp {
             Self::Union => "union",
             Self::Intersect => "intersect",
             Self::Except => "except",
+            Self::PipeBackward => "<|",
         }
     }
 }

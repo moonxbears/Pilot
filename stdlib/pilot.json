@@ -125,10 +125,10 @@
     },
     {
       "target_module": "std.collections",
-      "donor_ecosystem": "rust",
-      "donor_origin": "Rust alloc::collections::VecDeque / RingBuffer & SWAR 64-bit BitSet popcount",
+      "donor_ecosystem": "pilot_rt",
+      "donor_origin": "RingBuffer & SWAR 64-bit BitSet popcount",
       "spdx_license": "MIT OR Apache-2.0",
-      "bootstrap_flags": "--from rust --strict-pilot --viable-license-only"
+      "bootstrap_flags": "--from pilot_rt --strict-pilot --viable-license-only"
     },
     {
       "target_module": "std.secrets",

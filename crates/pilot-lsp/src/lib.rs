@@ -23,9 +23,16 @@ mod tests {
     #[test]
     fn test_sieve_did_open() {
         let mut server = LspServer::new();
-        let src = std::fs::read_to_string("../../crates/pilot-bench/suite/sieve.pilot")
-            .or_else(|_| std::fs::read_to_string("crates/pilot-bench/suite/sieve.pilot"))
-            .expect("read sieve.pilot");
+        let src = r#"
+            def sieve(limit: int) -> List[int] {
+                let primes = [];
+                for (i in 2..limit) {
+                    primes.append(i);
+                }
+                return primes;
+            }
+            let res = sieve(100);
+        "#.to_string();
         
         let json_src = src.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "");
         let did_open = format!(
@@ -140,12 +147,50 @@ mod tests {
     }
 
     #[test]
-    fn test_hover_12_polyglot() {
+    fn test_hover_polyglot() {
         let mut server = LspServer::new();
-        let uri = "file:///workspace/12_polyglot.pilot";
-        let code = std::fs::read_to_string("examples/showcase/12_polyglot_interoperability.pilot")
-            .or_else(|_| std::fs::read_to_string("../../examples/showcase/12_polyglot_interoperability.pilot"))
-            .unwrap();
+        let uri = "file:///workspace/polyglot.pilot";
+        let code = r#"# Concept: Deep Polyglot Interoperability
+# Line 1
+# Line 2
+
+println("==================================================");
+println(" PILOT: Polyglot Interoperability");
+println("==================================================");
+
+# 1. Python Block Execution & Variable Injection
+println("--- 1. Python Block & Bidirectional Variable Binding ---");
+
+let pilot_greeting : str = "Greetings from Pilot!";
+var python_echo = "";
+
+python {
+    # pilot_greeting is bound directly from the host scope!
+    python_echo = "Python received: " + pilot_greeting;
+}
+
+println("Pilot string sent into Python block: '" + pilot_greeting + "'");
+println("Value mutated and returned by Python: '" + python_echo + "'");
+
+
+# 2. Python Generator / Callable Block with Yield Bridge
+println("--- 2. Python Coroutine / Yield-Bridge Callable ---");
+
+let sequence_trace = [];
+def recorder(val) {
+    sequence_trace.append(val);
+    println("  [RECORDED STEP] -> " + val);
+    return val;
+}
+
+println("Constructing Python block with multiple yield statements:");
+let polyglot_routine = python {
+    recorder("Step 1: Python initialization")
+    yield recorder
+    recorder("Step 3: Intermediate resume point")
+    yield recorder("Step 4: Terminal finalization")
+}
+"#;
         let did_open = format!(
             r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
             uri,
@@ -159,6 +204,7 @@ mod tests {
             uri
         );
         let resp = server.handle_message(&hover_req).expect("Expected hover response");
+        println!("resp: {}", resp);
         assert!(resp.contains("def recorder(val: any) -> any"));
 
         // Hover over 'pilot_greeting' at line 12 (0-indexed line 11), char 6
@@ -304,12 +350,23 @@ for score in scores {
     }
 
     #[test]
-    fn test_showcase_21_hover() {
+    fn test_advanced_type_inference_hover() {
         let mut server = LspServer::new();
-        let uri = "file:///workspace/21_advanced_type_inference.pilot";
-        let code = std::fs::read_to_string("examples/showcase/21_advanced_type_inference.pilot")
-            .or_else(|_| std::fs::read_to_string("../../examples/showcase/21_advanced_type_inference.pilot"))
-            .unwrap();
+        let uri = "file:///workspace/advanced_type_inference.pilot";
+        let code = r#"// =============================================================================
+// Advanced Type Inference — Bidirectional, Flow-Sensitive & Row-Polymorphic
+// =============================================================================
+
+record Product(title: str, price: float, in_stock: bool);
+record Frame2D(width: int, height: int, name: str);
+record Canvas2D(width: float, height: float);
+
+// 1. Structural Row Polymorphism: infers `({ width: T, height: T, ..R } where T: Numeric) -> T`
+def compute_area(surface) => surface.width * surface.height;
+
+let frame_area = compute_area(Frame2D(1920, 1080, "HD"));
+let canvas_area = compute_area(Canvas2D(12.5, 8.0));
+"#;
         let did_open = format!(
             r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
             uri,
@@ -673,7 +730,7 @@ let out = compute(10);
     }
 
     #[test]
-    fn test_database_showcase_10_hover_types() {
+    fn test_database_query_hover_types() {
         let mut server = LspServer::new();
         let uri = "file:///workspace/10_database.pilot";
         let code = r#"let transactions = [

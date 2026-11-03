@@ -1,6 +1,18 @@
 // SPDX-License-Identifier: MIT
 // std.meta — Homoiconic Call-Quoting (`!`, `!!`, `!?`, `!@`) & Keyword Hierarchy Reflection
 
+// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
+extern "c" lib "pilot_rt" {
+    def __ast_fold(ast_node: any) -> any;
+    def __ast_subst(ast_node: any, sym_name: str, replacement: any) -> any;
+    def __ast_diff(ast_node: any, wrt_var: str) -> any;
+    def __ast_eval(ast_node: any, bindings: any) -> any;
+    def __kw_parents(kw: any) -> any;
+    def __kw_ancestors(kw: any) -> any;
+    def __kw_descendants(kw: any) -> any;
+    def __kw_distance(child_kw: any, ancestor_kw: any) -> i64;
+}
+
 def call_name(quoted_call) -> str {
     return quoted_call.fn_name;
 }

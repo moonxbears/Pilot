@@ -7,6 +7,11 @@
 // 1. Exceptions & Signals (Python: unittest.case.SkipTest, AssertionError)
 // ============================================================================
 
+// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
+extern "c" lib "pilot_rt" {
+    def __time_perf_counter() -> f64;
+}
+
 class AssertionError {
     def __init__(message: str = "") {
         self.message = message;

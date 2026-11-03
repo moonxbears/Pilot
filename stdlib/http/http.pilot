@@ -7,6 +7,13 @@
 // 1. HTTP Status Codes & Phrases (Python: http.HTTPStatus)
 // ============================================================================
 
+// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
+extern "c" lib "pilot_rt" {
+    def __net_http_get(url: str) -> any;
+    def __net_http_post(url: str, body: str, content_type: str) -> any;
+    def __net_tcp_listen(host: str, port: i64) -> any;
+}
+
 const HTTP_CONTINUE: i64 = 100;
 const HTTP_SWITCHING_PROTOCOLS: i64 = 101;
 const HTTP_PROCESSING: i64 = 102;

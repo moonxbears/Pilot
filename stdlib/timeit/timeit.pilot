@@ -8,6 +8,12 @@
 // ============================================================================
 
 /// Returns current monotonic clock timestamp in fractional seconds.
+// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
+extern "c" lib "pilot_rt" {
+    def __time_perf_counter() -> f64;
+    def __time_sleep_ms(ms: i64);
+}
+
 def default_timer() -> f64 {
     return __time_perf_counter();
 }

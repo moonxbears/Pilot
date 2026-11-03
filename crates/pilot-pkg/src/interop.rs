@@ -12,7 +12,7 @@ pub struct ParsedPackageSpec {
 }
 
 /// Parses a dependency string into ecosystem, package name, and version.
-/// Examples:
+/// Formats:
 ///   - `math-lib@1.0.0` -> `(pilot, math-lib, 1.0.0)`
 ///   - `pip:requests@2.31.0` -> `(pip, requests, 2.31.0)`
 ///   - `npm:lodash` -> `(npm, lodash, latest)`

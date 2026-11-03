@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: MIT AND PSF-2.0
 // std.encoding — Zero-Copy Byte/UTF-8 Codecs (`hex`, `base64`, `base64url`) & RFC-3986 `url` / Query Parsers
-// Bootstrapped via M20 (`--from python|rust --strict-pilot --viable-license-only`) from CPython `base64`/`urllib.parse`
-// (PSF-2.0) and Rust RFC-4648 codec tables (MIT/Apache-2.0), curated for Pilot `T ! DecodeError` & `SliceBuffer<u8>`.
+// Standard library zero-copy byte codecs and RFC-3986 URL parsing.
+
+// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
+extern "c" lib "pilot_rt" {
+    def __utf8_encode_slice(text: str) -> any;
+    def __utf8_validate_slice(buf: any) -> i64;
+    def __utf8_decode_slice(buf: any) -> str;
+    def __slice_push(buf: any, byte_val: i64);
+    def __slice_byte_at(buf: any, idx: i64) -> i64;
+}
 
 type DecodeError = InvalidChar(ch: str, offset: i64)
                  | InvalidLength(len_val: i64, msg: str)

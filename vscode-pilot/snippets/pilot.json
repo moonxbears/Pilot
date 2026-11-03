@@ -61,6 +61,15 @@
     ],
     "description": "Soft real-time deadline block with on_missed handler"
   },
+  "Within": {
+    "prefix": "within",
+    "body": [
+      "within ${1:10ms} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Scope-bound within execution block"
+  },
   "Actor Definition": {
     "prefix": "actor",
     "body": [

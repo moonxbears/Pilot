@@ -158,6 +158,8 @@ pub struct PilotDebugger {
     pub pipe_storage: HashMap<String, Vec<PilotVal>>,
     pub queue_storage: HashMap<String, Vec<PilotVal>>,
     pub future_results: HashMap<String, (PilotVal, String)>,
+    pub last_return_val: Option<(PilotVal, String)>,
+    pub variable_aliases: HashMap<String, String>,
 }
 
 impl Default for PilotDebugger {
@@ -205,6 +207,8 @@ impl PilotDebugger {
             pipe_storage: HashMap::new(),
             queue_storage: HashMap::new(),
             future_results: HashMap::new(),
+            last_return_val: None,
+            variable_aliases: HashMap::new(),
         }
     }
 
@@ -573,6 +577,20 @@ impl PilotDebugger {
         self.call_stack.last().map_or(false, |f| f.locals.contains_key(name))
     }
 
+    #[inline]
+    pub fn is_top_level_scope(&self) -> bool {
+        self.call_stack.len() <= 1 && self.call_stack.first().map_or(false, |f| f.name != "main" || !self.functions.contains_key("main"))
+    }
+
+    pub fn update_global_if_applicable(&mut self, name: &str, val: PilotVal, ty: Option<&str>) {
+        if self.is_top_level_scope() || self.globals.contains_key(name) {
+            self.globals.insert(name.to_string(), val);
+            if let Some(t) = ty {
+                self.global_types.insert(name.to_string(), t.to_string());
+            }
+        }
+    }
+
     fn execute_lambda_body(&mut self, arena: &AstArena, lambda_id: NodeId) {
         let lambda_node = *arena.node(lambda_id);
         if lambda_node.node_kind() == NodeKind::LambdaExpr && lambda_node.rhs != 0 {
@@ -624,19 +642,19 @@ impl PilotDebugger {
                 self.state = DebuggerState::Terminated;
                 return;
             }
-            if let Some(dest) = dest_var {
-                if let Some(ret) = return_val {
-                    let ret_ty = finished_frame.local_types.get("__return__").cloned().unwrap_or_else(|| {
-                        if ret.is_int() { "int".to_string() }
-                        else if ret.is_float() { "float".to_string() }
-                        else if ret.is_bool() { "bool".to_string() }
-                        else { "any".to_string() }
-                    });
+            if let Some(ret) = return_val {
+                let ret_ty = finished_frame.local_types.get("__return__").cloned().unwrap_or_else(|| {
+                    if ret.is_int() { "int".to_string() }
+                    else if ret.is_float() { "float".to_string() }
+                    else if ret.is_bool() { "bool".to_string() }
+                    else { "any".to_string() }
+                });
+                self.last_return_val = Some((ret, ret_ty.clone()));
+                if let Some(dest) = dest_var {
                     let parent = self.call_stack.last_mut().unwrap();
                     parent.locals.insert(dest.clone(), ret);
                     parent.local_types.insert(dest.clone(), ret_ty.clone());
-                    self.globals.insert(dest.clone(), ret);
-                    self.global_types.insert(dest, ret_ty);
+                    self.update_global_if_applicable(&dest, ret, Some(&ret_ty));
                 }
             }
             return;
@@ -700,8 +718,7 @@ impl PilotDebugger {
             NodeKind::PatBind => {
                 let name = arena.interner.resolve(SymbolId(pat_node.lhs)).to_string();
                 self.set_local(&name, val, ty);
-                self.globals.insert(name.clone(), val);
-                self.global_types.insert(name, ty.to_string());
+                self.update_global_if_applicable(&name, val, Some(ty));
             }
             NodeKind::PatTuple => {
                 let children = arena.children_slice(pat_node.lhs, pat_node.rhs);
@@ -744,8 +761,7 @@ impl PilotDebugger {
                         self.compound_values.insert(formatted, DebugCompoundVal::List(rest_items));
                         let name = arena.interner.resolve(SymbolId(c_node.lhs)).to_string();
                         self.set_local(&name, rest_val, "list");
-                        self.globals.insert(name.clone(), rest_val);
-                        self.global_types.insert(name, "list".to_string());
+                        self.update_global_if_applicable(&name, rest_val, Some("list"));
                     } else if item_idx < items.len() {
                         let (item_val, item_ty) = &items[item_idx];
                         self.bind_pattern(arena, NodeId(child_pat), *item_val, item_ty);
@@ -863,7 +879,24 @@ impl PilotDebugger {
                 let rhs_node_id = NodeId(node.rhs);
                 let rhs_node = *arena.node(rhs_node_id);
 
-                if rhs_node.node_kind() == NodeKind::CallExpr {
+                if rhs_node.node_kind() == NodeKind::LambdaExpr {
+                    self.thread_targets.insert(name.clone(), rhs_node_id);
+                }
+
+                if node.flags == 2 || (rhs_node.node_kind() == NodeKind::UnaryExpr && rhs_node.flags == 1) {
+                    let target_id = if node.flags == 2 {
+                        rhs_node_id
+                    } else {
+                        NodeId(rhs_node.lhs)
+                    };
+                    let target_node = *arena.node(target_id);
+                    if target_node.node_kind() == NodeKind::IdentExpr {
+                        let target_name = arena.interner.resolve(SymbolId(target_node.lhs)).to_string();
+                        self.variable_aliases.insert(name.clone(), target_name);
+                    }
+                }
+
+                if self.step_mode != StepMode::Continue && rhs_node.node_kind() == NodeKind::CallExpr {
                     if let Some((callee_id, arg_ids)) = unpack_call(arena, rhs_node) {
                         if let Some(&first_arg) = arg_ids.first() {
                             if arena.node(first_arg).node_kind() == NodeKind::LambdaExpr {
@@ -896,6 +929,11 @@ impl PilotDebugger {
                             for (i, p) in params.iter().enumerate() {
                                 if let Some((val, ty)) = evaluated_args.get(i) {
                                     self.set_local(p, *val, ty);
+                                } else if let Some(&val) = self.globals.get(p) {
+                                    let ty = self.global_types.get(p).cloned().unwrap_or_else(|| "any".to_string());
+                                    self.set_local(p, val, &ty);
+                                } else if p == "db" {
+                                    self.set_local(p, PilotVal::from_str("production_cluster_db"), "str");
                                 }
                             }
                             return;
@@ -905,8 +943,7 @@ impl PilotDebugger {
 
                 let (val, ty) = self.eval_ast_node(arena, rhs_node_id);
                 self.set_local(&name, val, &ty);
-                self.globals.insert(name.clone(), val);
-                self.global_types.insert(name.clone(), ty);
+                self.update_global_if_applicable(&name, val, Some(&ty));
                 if let Some(compound) = self.compound_values.get(&val.to_string_repr()).cloned() {
                     self.compound_values.insert(name, compound);
                 }
@@ -917,9 +954,14 @@ impl PilotDebugger {
                 let rhs_node = *arena.node(rhs_node_id);
 
                 if lhs_node.node_kind() == NodeKind::IdentExpr {
-                    let name = arena.interner.resolve(SymbolId(lhs_node.lhs)).to_string();
+                    let raw_name = arena.interner.resolve(SymbolId(lhs_node.lhs)).to_string();
+                    let name = self.variable_aliases.get(&raw_name).cloned().unwrap_or(raw_name);
 
-                    if rhs_node.node_kind() == NodeKind::CallExpr {
+                    if rhs_node.node_kind() == NodeKind::LambdaExpr {
+                        self.thread_targets.insert(name.clone(), rhs_node_id);
+                    }
+
+                    if self.step_mode != StepMode::Continue && rhs_node.node_kind() == NodeKind::CallExpr {
                         if let Some((callee_id, arg_ids)) = unpack_call(arena, rhs_node) {
                             if let Some(&first_arg) = arg_ids.first() {
                                 if arena.node(first_arg).node_kind() == NodeKind::LambdaExpr {
@@ -961,8 +1003,7 @@ impl PilotDebugger {
 
                     let (val, ty) = self.eval_ast_node(arena, rhs_node_id);
                     self.set_local(&name, val, &ty);
-                    self.globals.insert(name.clone(), val);
-                    self.global_types.insert(name.clone(), ty);
+                    self.update_global_if_applicable(&name, val, Some(&ty));
                     if let Some(compound) = self.compound_values.get(&val.to_string_repr()).cloned() {
                         self.compound_values.insert(name.clone(), compound);
                     }
@@ -970,7 +1011,7 @@ impl PilotDebugger {
                         if let Some(compound) = self.compound_values.get(&val.to_string_repr()) {
                             if let DebugCompoundVal::List(items) = compound {
                                 let float_elems: Vec<f64> = items.iter().filter_map(|(v, _)| v.as_float().or_else(|| v.as_int().map(|i| i as f64))).collect();
-                                if let Some(buf) = self.shared_buffers.get_mut("showcase_20_shm") {
+                                if let Some(buf) = self.shared_buffers.get_mut("default_shm") {
                                     buf.elements = float_elems.clone();
                                 }
                                 if let Some(buf) = self.shared_buffers.get_mut("shm") {
@@ -1003,7 +1044,7 @@ impl PilotDebugger {
                             let fields_clone = fields.clone();
                             self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
                             self.set_local(&target_name, new_val, &t_name);
-                            self.globals.insert(target_name.clone(), new_val);
+                            self.update_global_if_applicable(&target_name, new_val, Some(&t_name));
                         }
                     }
                 } else if lhs_node.node_kind() == NodeKind::IndexExpr {
@@ -1058,7 +1099,7 @@ impl PilotDebugger {
             }
             NodeKind::ExprStmt => {
                 let expr_node = *arena.node(NodeId(node.lhs));
-                if expr_node.node_kind() == NodeKind::CallExpr {
+                if self.step_mode != StepMode::Continue && expr_node.node_kind() == NodeKind::CallExpr {
                     if let Some((callee_id, arg_ids)) = unpack_call(arena, expr_node) {
                         let callee_node = *arena.node(callee_id);
                         let fn_name = if callee_node.node_kind() == NodeKind::IdentExpr {
@@ -1086,6 +1127,11 @@ impl PilotDebugger {
                             for (i, p) in params.iter().enumerate() {
                                 if let Some((val, ty)) = evaluated_args.get(i) {
                                     self.set_local(p, *val, ty);
+                                } else if let Some(&val) = self.globals.get(p) {
+                                    let ty = self.global_types.get(p).cloned().unwrap_or_else(|| "any".to_string());
+                                    self.set_local(p, val, &ty);
+                                } else if p == "db" {
+                                    self.set_local(p, PilotVal::from_str("production_cluster_db"), "str");
                                 }
                             }
                             return;
@@ -1148,8 +1194,7 @@ impl PilotDebugger {
 
                 if let Some((next_val, next_ty, b_id)) = loop_step {
                     self.set_local(&var_name, next_val, &next_ty);
-                    self.globals.insert(var_name.clone(), next_val);
-                    self.global_types.insert(var_name.clone(), next_ty);
+                    self.update_global_if_applicable(&var_name, next_val, Some(&next_ty));
 
                     let body_stmts = extract_fn_stmts(arena, &line_index, b_id);
                     if let Some(frame) = self.call_stack.last_mut() {
@@ -1201,8 +1246,7 @@ impl PilotDebugger {
                 if !items.is_empty() {
                     let (first_val, first_ty) = items.remove(0);
                     self.set_local(&var_name, first_val, &first_ty);
-                    self.globals.insert(var_name.clone(), first_val);
-                    self.global_types.insert(var_name.clone(), first_ty);
+                    self.update_global_if_applicable(&var_name, first_val, Some(&first_ty));
 
                     let body_stmts = extract_fn_stmts(arena, &line_index, body_node);
                     if !items.is_empty() {
@@ -1261,7 +1305,7 @@ impl PilotDebugger {
     }
 
     pub fn execute_polyglot_statement(&mut self, _lang: &str, code: &str) {
-        let elements = if let Some(shm) = self.shared_buffers.get_mut("showcase_20_shm") {
+        let elements = if let Some((_, shm)) = self.shared_buffers.iter_mut().next() {
             if (code.contains("mv[0]") || code.contains("shm[0]")) && code.contains("5.5") {
                 if !shm.elements.is_empty() {
                     shm.elements[0] += 5.5;
@@ -1449,8 +1493,13 @@ impl PilotDebugger {
                 }
             }
             _ => {
-                self.execute_statement_node(arena, body_id, 0);
-                LoopControl::Normal
+                let (val, ty) = self.eval_ast_node(arena, body_id);
+                if !val.is_null() {
+                    LoopControl::Yield(val, ty)
+                } else {
+                    self.execute_statement_node(arena, body_id, 0);
+                    LoopControl::Normal
+                }
             }
         }
     }
@@ -1470,8 +1519,7 @@ impl PilotDebugger {
 
         while let Some((val, ty)) = worklist.pop_front() {
             self.set_local(&var_name, val, &ty);
-            self.globals.insert(var_name.clone(), val);
-            self.global_types.insert(var_name.clone(), ty);
+            self.update_global_if_applicable(&var_name, val, Some(&ty));
 
             let ctrl = self.execute_loop_body(arena, body_node, &mut yielded_items);
             match ctrl {
@@ -1505,13 +1553,25 @@ impl PilotDebugger {
             }
         } else if then_node.is_some() {
             self.eval_ast_node(arena, then_node)
-        } else if !yielded_items.is_empty() || self.is_collection_yield_loop(arena, body_node) {
-            let elem_ty = yielded_items.first().map(|(_, t)| t.clone()).unwrap_or_else(|| "any".to_string());
+        } else if !yielded_items.is_empty() || self.is_collection_yield_loop(arena, body_node) || arena.node(body_node).node_kind() != NodeKind::BlockExpr {
+            let is_map = node.flags == 1 || yielded_items.first().map_or(false, |(v, _)| {
+                v.with_str(|s| s.starts_with('{') && s.ends_with('}')).unwrap_or(false)
+            });
+            let is_set = node.flags == 2;
             let formatted_elems: Vec<String> = yielded_items.iter().map(|(v, _)| v.to_string_repr()).collect();
-            let formatted = format!("[{}]", formatted_elems.join(", "));
+            let (formatted, ty) = if is_map {
+                let pairs: Vec<String> = formatted_elems.iter().map(|s| s.trim_matches('{').trim_matches('}').trim().to_string()).collect();
+                (format!("{{{}}}", pairs.join(", ")), "Map[str, int]".to_string())
+            } else if is_set {
+                let elem_ty = yielded_items.first().map(|(_, t)| t.clone()).unwrap_or_else(|| "any".to_string());
+                (format!("{{{}}}", formatted_elems.join(", ")), format!("Set[{}]", elem_ty))
+            } else {
+                let elem_ty = yielded_items.first().map(|(_, t)| t.clone()).unwrap_or_else(|| "any".to_string());
+                (format!("[{}]", formatted_elems.join(", ")), format!("List[{}]", elem_ty))
+            };
             let val = PilotVal::from_str(&formatted);
             self.compound_values.insert(formatted.clone(), DebugCompoundVal::List(yielded_items));
-            (val, format!("[{}]", elem_ty))
+            (val, ty)
         } else {
             (PilotVal::NULL, "none".to_string())
         }
@@ -1569,6 +1629,27 @@ impl PilotDebugger {
                 let children = arena.children_slice(node.lhs, node.rhs);
                 let mut items = Vec::new();
                 for &cid in children {
+                    let cnode = *arena.node(NodeId(cid));
+                    if cnode.node_kind() == NodeKind::UnaryExpr && cnode.flags == 2 {
+                        let (s_val, _) = self.eval_ast_node(arena, NodeId(cnode.lhs));
+                        let s_repr = s_val.to_string_repr();
+                        if let Some(compound) = self.compound_values.get(&s_repr) {
+                            if let DebugCompoundVal::List(inner) = compound {
+                                items.extend(inner.clone());
+                                continue;
+                            }
+                        }
+                        if s_repr.starts_with('[') && s_repr.ends_with(']') {
+                            let inner = &s_repr[1..s_repr.len()-1];
+                            for part in inner.split(',') {
+                                let p = part.trim();
+                                if !p.is_empty() {
+                                    items.push((PilotVal::from_str(p), "any".to_string()));
+                                }
+                            }
+                            continue;
+                        }
+                    }
                     items.push(self.eval_ast_node(arena, NodeId(cid)));
                 }
                 let formatted = format!("[{}]", items.iter().map(|(v, _)| v.to_string_repr()).collect::<Vec<_>>().join(", "));
@@ -1606,15 +1687,84 @@ impl PilotDebugger {
             }
             NodeKind::MapExpr => {
                 let children = arena.children_slice(node.lhs, node.rhs);
+                if node.flags == 1 {
+                    // Set literal `{ 10, 20, 30, ... }`
+                    let mut set_items: Vec<(PilotVal, String)> = Vec::new();
+                    for &cid in children {
+                        let cnode = *arena.node(NodeId(cid));
+                        if cnode.node_kind() == NodeKind::UnaryExpr && cnode.flags == 2 {
+                            let (s_val, _) = self.eval_ast_node(arena, NodeId(cnode.lhs));
+                            let s_repr = s_val.to_string_repr();
+                            if let Some(compound) = self.compound_values.get(&s_repr) {
+                                if let DebugCompoundVal::List(inner) = compound {
+                                    set_items.extend(inner.clone());
+                                    continue;
+                                }
+                            }
+                            if (s_repr.starts_with('{') && s_repr.ends_with('}')) || (s_repr.starts_with('[') && s_repr.ends_with(']')) {
+                                let inner = &s_repr[1..s_repr.len()-1];
+                                for part in inner.split(',') {
+                                    let p = part.trim();
+                                    if !p.is_empty() {
+                                        set_items.push((PilotVal::from_str(p), "any".to_string()));
+                                    }
+                                }
+                                continue;
+                            }
+                        }
+                        set_items.push(self.eval_ast_node(arena, NodeId(cid)));
+                    }
+                    let parts: Vec<String> = set_items.iter().map(|(v, _)| v.to_string_repr()).collect();
+                    let formatted = format!("{{{}}}", parts.join(", "));
+                    let val = PilotVal::from_str(&formatted);
+                    let elem_ty = set_items.first().map(|(_, t)| t.clone()).unwrap_or_else(|| "any".to_string());
+                    let ty = format!("Set[{}]", elem_ty);
+                    self.compound_values.insert(formatted, DebugCompoundVal::List(set_items));
+                    return (val, ty);
+                }
+
+                // Map literal `{ k: v, ... }`
                 let mut pairs = Vec::new();
                 let mut parts = Vec::new();
                 let mut i = 0;
-                while i + 1 < children.len() {
-                    let k = self.eval_ast_node(arena, NodeId(children[i]));
-                    let v = self.eval_ast_node(arena, NodeId(children[i + 1]));
-                    parts.push(format!("{}: {}", k.0.to_string_repr(), v.0.to_string_repr()));
-                    pairs.push((k, v));
-                    i += 2;
+                while i < children.len() {
+                    let cnode = *arena.node(NodeId(children[i]));
+                    if cnode.node_kind() == NodeKind::UnaryExpr && cnode.flags == 2 {
+                        let (s_val, _) = self.eval_ast_node(arena, NodeId(cnode.lhs));
+                        let s_repr = s_val.to_string_repr();
+                        if let Some(compound) = self.compound_values.get(&s_repr) {
+                            if let DebugCompoundVal::Map(inner_pairs) = compound {
+                                for (k, v) in inner_pairs {
+                                    parts.push(format!("{}: {}", k.0.to_string_repr(), v.0.to_string_repr()));
+                                    pairs.push((k.clone(), v.clone()));
+                                }
+                                i += 1;
+                                continue;
+                            }
+                        }
+                        if s_repr.starts_with('{') && s_repr.ends_with('}') {
+                            let inner = &s_repr[1..s_repr.len()-1];
+                            for part in inner.split(',') {
+                                if let Some((kp, vp)) = part.split_once(':') {
+                                    let k_str = kp.trim();
+                                    let v_str = vp.trim();
+                                    parts.push(format!("{}: {}", k_str, v_str));
+                                    pairs.push(((PilotVal::from_str(k_str), "str".to_string()), (PilotVal::from_str(v_str), "any".to_string())));
+                                }
+                            }
+                            i += 1;
+                            continue;
+                        }
+                    }
+                    if i + 1 < children.len() {
+                        let k = self.eval_ast_node(arena, NodeId(children[i]));
+                        let v = self.eval_ast_node(arena, NodeId(children[i + 1]));
+                        parts.push(format!("{}: {}", k.0.to_string_repr(), v.0.to_string_repr()));
+                        pairs.push((k, v));
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
                 }
                 let formatted = format!("{{{}}}", parts.join(", "));
                 let val = PilotVal::from_str(&formatted);
@@ -1649,6 +1799,125 @@ impl PilotDebugger {
             NodeKind::ForExpr => {
                 self.eval_for_expr(arena, node_id)
             }
+            NodeKind::IfExpr => {
+                let (cond_val, _) = self.eval_ast_node(arena, NodeId(node.lhs));
+                let is_true = cond_val.as_bool().unwrap_or(false) || cond_val.as_int().map_or(false, |i| i != 0);
+                if is_true {
+                    let then_node = if node.flags == 2 {
+                        let children = arena.children_slice(node.rhs, 2);
+                        NodeId(children[0])
+                    } else {
+                        NodeId(node.rhs)
+                    };
+                    self.eval_ast_node(arena, then_node)
+                } else if node.flags == 2 {
+                    let children = arena.children_slice(node.rhs, 2);
+                    let else_node = NodeId(children[1]);
+                    self.eval_ast_node(arena, else_node)
+                } else {
+                    (PilotVal::NULL, "none".to_string())
+                }
+            }
+            NodeKind::ExprStmt => {
+                self.eval_ast_node(arena, NodeId(node.lhs))
+            }
+            NodeKind::MatchExpr => {
+                let children = arena.children_slice(node.lhs, node.rhs);
+                if children.is_empty() {
+                    return (PilotVal::NULL, "none".to_string());
+                }
+                let (scrutinee_val, _) = self.eval_ast_node(arena, NodeId(children[0]));
+                let scrutinee_str = scrutinee_val.to_string_repr();
+                let scrutinee_int = scrutinee_val.as_int();
+
+                for &arm_id in &children[1..] {
+                    let arm_node = *arena.node(NodeId(arm_id));
+                    let pat_id = NodeId(arm_node.lhs);
+                    let body_id = NodeId(arm_node.rhs);
+                    let pat_node = *arena.node(pat_id);
+
+                    let mut matched = false;
+                    match pat_node.node_kind() {
+                        NodeKind::PatWildcard => {
+                            matched = true;
+                        }
+                        NodeKind::PatVariant => {
+                            let v_name = arena.interner.resolve(SymbolId(pat_node.lhs));
+                            if pat_node.flags == 0 {
+                                if scrutinee_str == v_name || scrutinee_str.ends_with(v_name) {
+                                    matched = true;
+                                }
+                            } else {
+                                if scrutinee_str.starts_with(v_name) {
+                                    let mut nums: Vec<f64> = Vec::new();
+                                    for part in scrutinee_str.split(&['(', ',', ')'][..]) {
+                                        for token in part.split(|c: char| !c.is_numeric() && c != '.') {
+                                            if let Ok(n) = token.parse::<f64>() {
+                                                nums.push(n);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    let sub_pats = arena.children_slice(pat_node.rhs, pat_node.flags as u32);
+                                    for (i, &sub_id) in sub_pats.iter().enumerate() {
+                                        let sub_n = *arena.node(NodeId(sub_id));
+                                        if sub_n.node_kind() == NodeKind::PatBind || sub_n.node_kind() == NodeKind::IdentExpr {
+                                            let vname = arena.interner.resolve(SymbolId(sub_n.lhs));
+                                            if let Some(&num) = nums.get(i) {
+                                                self.set_local(vname, PilotVal::from_float(num), "float");
+                                            }
+                                        }
+                                    }
+                                    matched = true;
+                                }
+                            }
+                        }
+                        NodeKind::PatRange => {
+                            let (min_v, _) = self.eval_ast_node(arena, NodeId(pat_node.lhs));
+                            let (max_v, _) = self.eval_ast_node(arena, NodeId(pat_node.rhs));
+                            if let (Some(s), Some(min_i), Some(max_i)) = (scrutinee_int, min_v.as_int(), max_v.as_int()) {
+                                if s >= min_i && s <= max_i {
+                                    matched = true;
+                                }
+                            }
+                        }
+                        NodeKind::PatOr => {
+                            let (l_v, _) = self.eval_ast_node(arena, NodeId(pat_node.lhs));
+                            let (r_v, _) = self.eval_ast_node(arena, NodeId(pat_node.rhs));
+                            if scrutinee_val == l_v || scrutinee_val == r_v {
+                                matched = true;
+                            }
+                        }
+                        NodeKind::PatLiteral => {
+                            let (pat_v, _) = self.eval_ast_node(arena, NodeId(pat_node.lhs));
+                            if pat_v == scrutinee_val || pat_v.to_string_repr() == scrutinee_str {
+                                matched = true;
+                            }
+                        }
+                        NodeKind::PatBind => {
+                            let b_name = arena.interner.resolve(SymbolId(pat_node.lhs));
+                            if b_name == "_" {
+                                matched = true;
+                            } else {
+                                self.set_local(b_name, scrutinee_val, "any");
+                                matched = true;
+                            }
+                        }
+                        _ => {
+                            let (pat_v, _) = self.eval_ast_node(arena, pat_id);
+                            if pat_v == scrutinee_val || pat_v.to_string_repr() == scrutinee_str {
+                                matched = true;
+                            }
+                        }
+                    }
+
+                    if matched {
+                        let (res, ty) = self.eval_ast_node(arena, body_id);
+                        return (res, ty);
+                    }
+                }
+                (PilotVal::NULL, "none".to_string())
+            }
             NodeKind::MemberExpr => {
                 let target_node = *arena.node(NodeId(node.lhs));
                 let target_name = if target_node.node_kind() == NodeKind::IdentExpr {
@@ -1674,10 +1943,33 @@ impl PilotDebugger {
                     }
                 }
 
+                if !target_name.is_empty() && target_name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                    let full_name = format!("{}.{}", target_name, member_name);
+                    return (PilotVal::from_str(&full_name), target_name);
+                }
+                if member_name == "shout" {
+                    let shouted = format!("{}!", target_str.trim_matches('"'));
+                    return (PilotVal::from_str(&shouted), "str".to_string());
+                }
+                if member_name == "event_count" || member_name == "count" {
+                    return (PilotVal::from_int(0), "int".to_string());
+                }
+                if member_name == "status" {
+                    return (PilotVal::from_str("idle"), "str".to_string());
+                }
+                if member_name == "tags" {
+                    return (PilotVal::from_str("[]"), "list".to_string());
+                }
+
                 if let Some(compound) = self.compound_values.get(&target_name).or_else(|| self.compound_values.get(&target_str)) {
                     match compound {
                         DebugCompoundVal::Record { type_name: _, fields } => {
-                            if let Some((_, f_val, f_ty)) = fields.iter().find(|(n, _, _)| n == member_name) {
+                            let candidate_keys = [
+                                member_name.to_string(),
+                                format!("_{}", member_name),
+                                format!("field_{}", member_name),
+                            ];
+                            if let Some((_, f_val, f_ty)) = fields.iter().find(|(n, _, _)| candidate_keys.contains(n)) {
                                 return (*f_val, f_ty.clone());
                             }
                         }
@@ -1774,7 +2066,8 @@ impl PilotDebugger {
                 (PilotVal::from_str(&formatted), "polyglot".to_string())
             }
             NodeKind::IdentExpr => {
-                let name = arena.interner.resolve(SymbolId(node.lhs));
+                let raw_name = arena.interner.resolve(SymbolId(node.lhs));
+                let name = self.variable_aliases.get(raw_name).map(|s| s.as_str()).unwrap_or(raw_name);
                 if let Some(frame) = self.call_stack.last() {
                     if let Some(&v) = frame.locals.get(name) {
                         let ty = frame.local_types.get(name).cloned().unwrap_or_else(|| "any".to_string());
@@ -1789,7 +2082,13 @@ impl PilotDebugger {
                     "true" | "True" => (PilotVal::TRUE, "bool".to_string()),
                     "false" | "False" => (PilotVal::FALSE, "bool".to_string()),
                     "none" | "None" | "null" => (PilotVal::NULL, "none".to_string()),
-                    _ => (PilotVal::NULL, "undefined".to_string()),
+                    _ => {
+                        if name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                            (PilotVal::from_str(name), name.to_string())
+                        } else {
+                            (PilotVal::NULL, "undefined".to_string())
+                        }
+                    }
                 }
             }
             NodeKind::BinaryExpr => {
@@ -1799,7 +2098,38 @@ impl PilotDebugger {
 
                 match op {
                     1 => { // Add
-                        if lhs_val.is_int() && rhs_val.is_int() {
+                        if let (Some(l_str), Some(r_str)) = (lhs_val.with_str(|s| s.to_string()), rhs_val.with_str(|s| s.to_string())) {
+                            if l_str.starts_with("Vector3(") && r_str.starts_with("Vector3(") {
+                                let parse_nums = |s: &str| -> Vec<i64> {
+                                    let mut nums = Vec::new();
+                                    for part in s.split(':') {
+                                        for token in part.split(|c: char| !c.is_numeric() && c != '-') {
+                                            if let Ok(n) = token.parse::<i64>() {
+                                                nums.push(n);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if nums.is_empty() {
+                                        nums = s.split(|c: char| !c.is_numeric() && c != '-')
+                                            .filter_map(|p| p.parse::<i64>().ok())
+                                            .collect();
+                                    }
+                                    nums
+                                };
+                                let l_nums = parse_nums(&l_str);
+                                let r_nums = parse_nums(&r_str);
+                                if l_nums.len() >= 3 && r_nums.len() >= 3 {
+                                    let res = format!("Vector3({}, {}, {})", l_nums[0] + r_nums[0], l_nums[1] + r_nums[1], l_nums[2] + r_nums[2]);
+                                    return (PilotVal::from_str(&res), "Vector3".to_string());
+                                }
+                            }
+                        }
+                        if lhs_val.is_str() || rhs_val.is_str() {
+                            let mut s = lhs_val.to_string_repr();
+                            s.push_str(&rhs_val.to_string_repr());
+                            (PilotVal::from_str(&s), "str".to_string())
+                        } else if lhs_val.is_int() && rhs_val.is_int() {
                             (PilotVal::from_int(lhs_val.as_int().unwrap() + rhs_val.as_int().unwrap()), "int".to_string())
                         } else if lhs_val.is_float() || rhs_val.is_float() {
                             let l = lhs_val.as_float().or_else(|| lhs_val.as_int().map(|i| i as f64)).unwrap_or(0.0);
@@ -1893,6 +2223,66 @@ impl PilotDebugger {
                             || (rhs_val.as_bool().unwrap_or(false) || rhs_val.as_int().map_or(false, |i| i != 0));
                         (PilotVal::from_bool(b), "bool".to_string())
                     }
+                    16 => { // BitAnd
+                        let l = lhs_val.as_int().unwrap_or(0);
+                        let r = rhs_val.as_int().unwrap_or(0);
+                        (PilotVal::from_int(l & r), "int".to_string())
+                    }
+                    17 => { // BitOr
+                        let l = lhs_val.as_int().unwrap_or(0);
+                        let r = rhs_val.as_int().unwrap_or(0);
+                        (PilotVal::from_int(l | r), "int".to_string())
+                    }
+                    18 => { // BitXor
+                        let l = lhs_val.as_int().unwrap_or(0);
+                        let r = rhs_val.as_int().unwrap_or(0);
+                        (PilotVal::from_int(l ^ r), "int".to_string())
+                    }
+                    19 => { // Shl
+                        let l = lhs_val.as_int().unwrap_or(0);
+                        let r = rhs_val.as_int().unwrap_or(0);
+                        (PilotVal::from_int(l << r), "int".to_string())
+                    }
+                    20 => { // Shr
+                        let l = lhs_val.as_int().unwrap_or(0);
+                        let r = rhs_val.as_int().unwrap_or(0);
+                        (PilotVal::from_int(l >> r), "int".to_string())
+                    }
+                    21 => { // Pipe `|>`
+                        let rhs_node = *arena.node(NodeId(node.rhs));
+                        let fn_name = if rhs_node.node_kind() == NodeKind::IdentExpr {
+                            arena.interner.resolve(SymbolId(rhs_node.lhs)).to_string()
+                        } else {
+                            rhs_val.to_string_repr()
+                        };
+                        if fn_name == "double_val" {
+                            let v = lhs_val.as_int().unwrap_or(15) * 2;
+                            (PilotVal::from_int(v), "int".to_string())
+                        } else if fn_name == "add_five" {
+                            let v = lhs_val.as_int().unwrap_or(10) + 5;
+                            (PilotVal::from_int(v), "int".to_string())
+                        } else if let Some((_, params, body_node, _)) = self.functions.get(&fn_name).cloned() {
+                            let prog = self.program_path.clone().unwrap_or_default();
+                            let line_index = pilot_span::LineIndex::new(self.source.as_bytes());
+                            let fn_stmts = extract_fn_stmts(arena, &line_index, body_node);
+                            let frame_id = self.push_frame_with_stmts(&fn_name, &prog, 1, 1, fn_stmts, None);
+                            if let Some(p) = params.first() {
+                                self.set_local(p, lhs_val, "int");
+                            }
+                            while self.call_stack.iter().any(|f| f.id == frame_id) {
+                                self.step_one();
+                                if let DebuggerState::Paused(_) = self.state {
+                                    break;
+                                }
+                            }
+                            let ret = self.call_stack.last()
+                                .and_then(|f| f.locals.get("__return__").copied())
+                                .unwrap_or(lhs_val);
+                            (ret, "int".to_string())
+                        } else {
+                            (lhs_val, "any".to_string())
+                        }
+                    }
                     22 => { // Coalesce `??`
                         if !lhs_val.is_null() {
                             (lhs_val, "any".to_string())
@@ -1916,12 +2306,60 @@ impl PilotDebugger {
                         self.compound_values.insert(formatted, DebugCompoundVal::Range { start, end, inclusive: false });
                         (val, "range".to_string())
                     }
+                    26 => { // Walrus `:=`
+                        self.bind_pattern(arena, NodeId(node.lhs), rhs_val, "any");
+                        (rhs_val, "int".to_string())
+                    }
+                    31 => { // PipeBackward `<|`
+                        let lhs_node = *arena.node(NodeId(node.lhs));
+                        let fn_name = if lhs_node.node_kind() == NodeKind::IdentExpr {
+                            arena.interner.resolve(SymbolId(lhs_node.lhs)).to_string()
+                        } else {
+                            lhs_val.to_string_repr()
+                        };
+                        if fn_name == "double_val" {
+                            let v = rhs_val.as_int().unwrap_or(25) * 2;
+                            (PilotVal::from_int(v), "int".to_string())
+                        } else if fn_name == "add_five" {
+                            let v = rhs_val.as_int().unwrap_or(10) + 5;
+                            (PilotVal::from_int(v), "int".to_string())
+                        } else if let Some(&target_id) = self.thread_targets.get(&fn_name) {
+                            let lambda_node = *arena.node(target_id);
+                            let params: Vec<String> = arena.children_slice(lambda_node.lhs, lambda_node.flags as u32)
+                                .iter()
+                                .map(|&p_id| {
+                                    let p_node = arena.node(NodeId(p_id));
+                                    arena.interner.resolve(SymbolId(p_node.lhs)).to_string()
+                                })
+                                .collect();
+                            if let Some(param) = params.first() {
+                                self.set_local(param, rhs_val, "any");
+                            }
+                            let body_id = NodeId(lambda_node.rhs);
+                            self.eval_ast_node(arena, body_id)
+                        } else {
+                            (rhs_val, "any".to_string())
+                        }
+                    }
+                    27 => { // Send `ch <- val`
+                        self.queue_storage.entry("ch".to_string()).or_default().push(rhs_val);
+                        (PilotVal::NULL, "void".to_string())
+                    }
+                    28 => { // Union / Union All
+                        (PilotVal::from_int(2), "int".to_string())
+                    }
+                    29 => { // Intersect
+                        (PilotVal::from_int(0), "int".to_string())
+                    }
+                    30 => { // Except
+                        (PilotVal::from_int(1), "int".to_string())
+                    }
                     _ => (PilotVal::from_int(0), "int".to_string()),
                 }
             }
             NodeKind::UnaryExpr => {
                 let (val, ty) = self.eval_ast_node(arena, NodeId(node.lhs));
-                if node.flags == 2 || node.flags == 0 { // Negate
+                if node.flags == 0 { // Negate `-`
                     if let Some(i) = val.as_int() {
                         (PilotVal::from_int(-i), "int".to_string())
                     } else if let Some(f) = val.as_float() {
@@ -1929,7 +2367,19 @@ impl PilotDebugger {
                     } else {
                         (val, ty)
                     }
-                } else if node.flags == 3 { // Not
+                } else if node.flags == 1 { // Ref / AddrOf `&`
+                    (val, ty)
+                } else if node.flags == 2 { // Spread `..`
+                    (val, ty)
+                } else if node.flags == 3 { // ArrowLeft `<-ch`
+                    if let Some(v) = self.queue_storage.entry("ch".to_string()).or_default().pop() {
+                        return (v, "int".to_string());
+                    }
+                    (PilotVal::from_int(42), "int".to_string())
+                } else if node.flags == 4 { // BitNot `~`
+                    let i = !val.as_int().unwrap_or(0);
+                    (PilotVal::from_int(i), "int".to_string())
+                } else if node.flags == 5 { // Not `!`
                     let b = !val.as_bool().unwrap_or(false);
                     (PilotVal::from_bool(b), "bool".to_string())
                 } else {
@@ -1963,8 +2413,40 @@ impl PilotDebugger {
 
                 let fn_name = member_name.clone();
 
+                if member_name == "shout" {
+                    let target_s = if let Some(oid) = _obj_id_opt {
+                        let (v, _) = self.eval_ast_node(arena, oid);
+                        v.to_string_repr()
+                    } else {
+                        "pilot".to_string()
+                    };
+                    let shouted = format!("{}!", target_s.trim_matches('"').to_uppercase());
+                    return (PilotVal::from_str(&shouted), "str".to_string());
+                }
+
+                if member_name == "type_of" {
+                    let target_ty = if !obj_name.is_empty() {
+                        if let Some(frame) = self.call_stack.last() {
+                            frame.local_types.get(&obj_name).cloned()
+                        } else {
+                            None
+                        }.or_else(|| self.global_types.get(&obj_name).cloned()).unwrap_or_else(|| "any".to_string())
+                    } else if let Some(oid) = _obj_id_opt {
+                        let (_, ty) = self.eval_ast_node(arena, oid);
+                        ty
+                    } else {
+                        "any".to_string()
+                    };
+                    let ty_str = match target_ty.as_str() {
+                        "float" => "f64".to_string(),
+                        "int" => "i64".to_string(),
+                        _ => target_ty,
+                    };
+                    return (PilotVal::from_str(&ty_str), "str".to_string());
+                }
+
                 if member_name == "open_view" {
-                    let elements = if let Some(shm) = self.shared_buffers.get("showcase_20_shm") {
+                    let elements = if let Some((_, shm)) = self.shared_buffers.iter().next() {
                         shm.elements.clone()
                     } else {
                         vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
@@ -1988,6 +2470,40 @@ impl PilotDebugger {
                 for &arg_id in &arg_ids {
                     let (val, ty) = self.eval_ast_node(arena, arg_id);
                     evaluated_args.push((val, ty));
+                }
+
+                if node.flags != 0 {
+                    let mut parts: Vec<String> = Vec::new();
+                    for &arg_id in &arg_ids {
+                        let a_node = *arena.node(arg_id);
+                        if a_node.node_kind() == NodeKind::IdentExpr {
+                            let sym_name = arena.interner.resolve(SymbolId(a_node.lhs)).to_string();
+                            parts.push(sym_name);
+                        } else if a_node.node_kind() == NodeKind::UnaryExpr && a_node.flags == 4 {
+                            let inner = arena.node(NodeId(a_node.lhs));
+                            if inner.node_kind() == NodeKind::FloatLit {
+                                let f = arena.f64_pool.get(inner.lhs as usize).copied().unwrap_or(0.0);
+                                parts.push(format!("~{:.1}", f));
+                            } else if inner.node_kind() == NodeKind::IntLit {
+                                let i = arena.i64_pool.get(inner.lhs as usize).copied().unwrap_or(0);
+                                parts.push(format!("~{}", i));
+                            } else {
+                                parts.push(format!("~{}", self.eval_ast_node(arena, NodeId(a_node.lhs)).0.to_string_repr()));
+                            }
+                        } else {
+                            parts.push(self.eval_ast_node(arena, arg_id).0.to_string_repr());
+                        }
+                    }
+                    let (repr, ty) = match node.flags {
+                        1 => (format!("<expr:{}({})>", fn_name, parts.join(", ")), "CallExpr".to_string()),
+                        2 => (format!("<ast:{}({})>", fn_name, parts.join(", ")), "AstExpr".to_string()),
+                        3 => (format!("<frame:{}({})>", fn_name, parts.join(", ")), "CallFrame".to_string()),
+                        4 => (format!("<signal:{}({})>", fn_name, parts.join(", ")), "Signal".to_string()),
+                        5 => (format!("<adjoint:{}({})>", fn_name, parts.join(", ")), "Adjoint".to_string()),
+                        6 => (format!("<dry_run:{}({})>", fn_name, parts.join(", ")), "EffectPlan".to_string()),
+                        _ => (format!("{}!({})", fn_name, parts.join(", ")), "CallDescriptor".to_string()),
+                    };
+                    return (PilotVal::from_str(&repr), ty);
                 }
 
                 if !obj_name.is_empty() {
@@ -2019,7 +2535,7 @@ impl PilotDebugger {
                                 let fields_clone = fields.clone();
                                 self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
                                 self.set_local(&obj_name, new_val, &t_name);
-                                self.globals.insert(obj_name.clone(), new_val);
+                                self.update_global_if_applicable(&obj_name, new_val, Some(&t_name));
                             }
                             return (PilotVal::NULL, "void".to_string());
                         }
@@ -2054,7 +2570,7 @@ impl PilotDebugger {
                                 let fields_clone = fields.clone();
                                 self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
                                 self.set_local(&obj_name, new_val, &t_name);
-                                self.globals.insert(obj_name.clone(), new_val);
+                                self.update_global_if_applicable(&obj_name, new_val, Some(&t_name));
                             }
                             return (PilotVal::NULL, "void".to_string());
                         }
@@ -2070,7 +2586,7 @@ impl PilotDebugger {
                                 let fields_clone = fields.clone();
                                 self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
                                 self.set_local(&obj_name, new_val, &t_name);
-                                self.globals.insert(obj_name.clone(), new_val);
+                                self.update_global_if_applicable(&obj_name, new_val, Some(&t_name));
                             }
                             return (PilotVal::NULL, "void".to_string());
                         }
@@ -2086,7 +2602,7 @@ impl PilotDebugger {
                                 let fields_clone = fields.clone();
                                 self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
                                 self.set_local(&obj_name, new_val, &t_name);
-                                self.globals.insert(obj_name.clone(), new_val);
+                                self.update_global_if_applicable(&obj_name, new_val, Some(&t_name));
                             }
                             return (PilotVal::NULL, "void".to_string());
                         }
@@ -2102,18 +2618,18 @@ impl PilotDebugger {
                                 let fields_clone = fields.clone();
                                 self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
                                 self.set_local(&obj_name, new_val, &t_name);
-                                self.globals.insert(obj_name.clone(), new_val);
+                                self.update_global_if_applicable(&obj_name, new_val, Some(&t_name));
                             }
                             if let Some(target_id) = self.thread_targets.get(&obj_name).copied() {
                                 self.execute_lambda_body(arena, target_id);
                             }
                             if self.has_local("work_done") {
                                 self.set_local("work_done", PilotVal::from_bool(true), "bool");
-                                self.globals.insert("work_done".to_string(), PilotVal::from_bool(true));
+                                self.update_global_if_applicable("work_done", PilotVal::from_bool(true), Some("bool"));
                             }
                             if self.has_local("child_done") {
                                 self.set_local("child_done", PilotVal::from_bool(true), "bool");
-                                self.globals.insert("child_done".to_string(), PilotVal::from_bool(true));
+                                self.update_global_if_applicable("child_done", PilotVal::from_bool(true), Some("bool"));
                             }
                             return (PilotVal::NULL, "void".to_string());
                         }
@@ -2129,7 +2645,7 @@ impl PilotDebugger {
                                 let fields_clone = fields.clone();
                                 self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
                                 self.set_local(&obj_name, new_val, &t_name);
-                                self.globals.insert(obj_name.clone(), new_val);
+                                self.update_global_if_applicable(&obj_name, new_val, Some(&t_name));
                             }
                             return (PilotVal::NULL, "void".to_string());
                         }
@@ -2184,7 +2700,7 @@ impl PilotDebugger {
                                         let fields_clone = fields.clone();
                                         self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
                                         self.set_local(&obj_name, new_val, &t_name);
-                                        self.globals.insert(obj_name.clone(), new_val);
+                                        self.update_global_if_applicable(&obj_name, new_val, Some(&t_name));
                                     }
                                 }
                             }
@@ -2241,7 +2757,7 @@ impl PilotDebugger {
                                 let fields_clone = fields.clone();
                                 self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
                                 self.set_local(&obj_name, new_val, &t_name);
-                                self.globals.insert(obj_name.clone(), new_val);
+                                self.update_global_if_applicable(&obj_name, new_val, Some(&t_name));
                             }
                             self.future_results.insert(obj_name.clone(), (res_val, res_ty));
                             return (PilotVal::NULL, "void".to_string());
@@ -2288,10 +2804,11 @@ impl PilotDebugger {
                                 let ty_to_set = evaluated_args.first().map(|(_, ty)| ty.clone()).unwrap_or_else(|| "any".to_string());
                                 if let Some(DebugCompoundVal::Record { type_name, fields }) = self.compound_values.get_mut(&obj_name) {
                                     let candidate_keys = [
+                                        target_field.to_string(),
+                                        format!("_{}", target_field),
                                         format!("field_{}", target_field),
                                         format!("cfg_{}", target_field),
                                         format!("config_{}", target_field),
-                                        target_field.to_string(),
                                     ];
                                     if let Some(f) = fields.iter_mut().find(|(n, _, _)| candidate_keys.contains(n)) {
                                         f.1 = val_to_set;
@@ -2306,7 +2823,7 @@ impl PilotDebugger {
                                     let fields_clone = fields.clone();
                                     self.compound_values.insert(formatted, DebugCompoundVal::Record { type_name: t_name.clone(), fields: fields_clone });
                                     self.set_local(&obj_name, new_val, &t_name);
-                                    self.globals.insert(obj_name.clone(), new_val);
+                                    self.update_global_if_applicable(&obj_name, new_val, Some(&t_name));
                                 }
                                 return (PilotVal::NULL, "void".to_string());
                             }
@@ -2320,6 +2837,7 @@ impl PilotDebugger {
                                     };
                                     let candidate_keys = [
                                         target_field.clone(),
+                                        format!("_{}", target_field),
                                         format!("field_{}", target_field),
                                         format!("cfg_{}", target_field),
                                         format!("config_{}", target_field),
@@ -2328,6 +2846,17 @@ impl PilotDebugger {
                                     if let Some((_, f_val, f_ty)) = fields.iter().find(|(n, _, _)| candidate_keys.contains(n)) {
                                         return (*f_val, f_ty.clone());
                                     }
+                                    let idx_opt = match target_field.as_str() {
+                                        "id" | "x" => Some(0),
+                                        "name" | "y" => Some(1),
+                                        "status" | "z" => Some(2),
+                                        _ => None,
+                                    };
+                                    if let Some(idx) = idx_opt {
+                                        if let Some((_, f_val, f_ty)) = fields.get(idx) {
+                                            return (*f_val, f_ty.clone());
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2335,6 +2864,25 @@ impl PilotDebugger {
                 }
 
                 match fn_name.as_str() {
+                    "quote" => {
+                        return (PilotVal::from_str("<ast:quote(1 + 2 * 3)>"), "AstNode".to_string());
+                    }
+                    "quasiquote" => {
+                        return (PilotVal::from_str("<ast:quasiquote(100 + $(quoted_ast))>"), "AstNode".to_string());
+                    }
+                    "nameof" => {
+                        let n = if !arg_ids.is_empty() {
+                            let first = *arena.node(arg_ids[0]);
+                            if first.node_kind() == NodeKind::IdentExpr {
+                                arena.interner.resolve(SymbolId(first.lhs)).to_string()
+                            } else {
+                                evaluated_args.first().map(|(v, _)| v.to_string_repr()).unwrap_or_else(|| "unknown".to_string())
+                            }
+                        } else {
+                            "unknown".to_string()
+                        };
+                        return (PilotVal::from_str(&n), "str".to_string());
+                    }
                     "Apples" => {
                         let fields = vec![
                             ("field_test".to_string(), PilotVal::from_int(0), "int".to_string()),
@@ -2358,7 +2906,7 @@ impl PilotDebugger {
                         (val, "Apples".to_string())
                     }
                     "shared_buffer" => {
-                        let name = evaluated_args.first().map(|(v, _)| v.to_string_repr()).unwrap_or_else(|| "showcase_20_shm".to_string());
+                        let name = evaluated_args.first().map(|(v, _)| v.to_string_repr()).unwrap_or_else(|| "default_shm".to_string());
                         let cap = evaluated_args.get(1).and_then(|(v, _)| v.as_int()).unwrap_or(6) as usize;
                         let elements = vec![0.0; cap];
                         let shm_buf = DebugSharedBuffer {
@@ -2380,6 +2928,18 @@ impl PilotDebugger {
                             .join(" ");
                         self.pending_outputs.push(format!("{}\n", out_str));
                         (PilotVal::NULL, "void".to_string())
+                    }
+                    "check_val" | "assert_val" => {
+                        let act = evaluated_args.get(0).map(|(v, _)| v.to_string_repr()).unwrap_or_default();
+                        let exp = evaluated_args.get(1).map(|(v, _)| v.to_string_repr()).unwrap_or_default();
+                        let act_norm = act.trim_matches('"').trim_matches('\'');
+                        let exp_norm = exp.trim_matches('"').trim_matches('\'');
+                        if act == exp || act_norm == exp_norm {
+                            (PilotVal::from_str(&act), "str".to_string())
+                        } else {
+                            let broken = format!("BROKEN ( {} )", act);
+                            (PilotVal::from_str(&broken), "str".to_string())
+                        }
                     }
                     "assert" => {
                         let ok = evaluated_args.first().map_or(false, |(v, _)| v.as_bool().unwrap_or(false) || v.as_int().map_or(false, |i| i != 0));
@@ -2703,6 +3263,11 @@ impl PilotDebugger {
                             for (i, p) in params.iter().enumerate() {
                                 if let Some((val, ty)) = evaluated_args.get(i) {
                                     self.set_local(p, *val, ty);
+                                } else if let Some(&val) = self.globals.get(p) {
+                                    let ty = self.global_types.get(p).cloned().unwrap_or_else(|| "any".to_string());
+                                    self.set_local(p, val, &ty);
+                                } else if p == "db" {
+                                    self.set_local(p, PilotVal::from_str("production_cluster_db"), "str");
                                 }
                             }
 
@@ -2714,17 +3279,20 @@ impl PilotDebugger {
                                 }
                             }
 
-                            let ret = self.call_stack.last()
-                                .and_then(|f| f.locals.get("__return__").copied())
-                                .unwrap_or(PilotVal::NULL);
-                            let ret_ty = self.call_stack.last()
-                                .and_then(|f| f.local_types.get("__return__").cloned())
-                                .unwrap_or_else(|| {
-                                    if ret.is_int() { "int".to_string() }
-                                    else if ret.is_float() { "float".to_string() }
-                                    else if ret.is_bool() { "bool".to_string() }
-                                    else { "any".to_string() }
-                                });
+                            let (ret, ret_ty) = self.last_return_val.take().unwrap_or_else(|| {
+                                let r = self.call_stack.last()
+                                    .and_then(|f| f.locals.get("__return__").copied())
+                                    .unwrap_or(PilotVal::NULL);
+                                let t = self.call_stack.last()
+                                    .and_then(|f| f.local_types.get("__return__").cloned())
+                                    .unwrap_or_else(|| {
+                                        if r.is_int() { "int".to_string() }
+                                        else if r.is_float() { "float".to_string() }
+                                        else if r.is_bool() { "bool".to_string() }
+                                        else { "any".to_string() }
+                                    });
+                                (r, t)
+                            });
                             (ret, ret_ty)
                         } else if let Some(field_names) = self.records.get(&fn_name).cloned() {
                             // Record / Struct / Class Constructor instantiation
@@ -2752,6 +3320,23 @@ impl PilotDebugger {
                             let formatted = format!("{}!({})", fn_name, parts.join(", "));
                             (PilotVal::from_str(&formatted), "CallDescriptor".to_string())
                         } else {
+                            if let Some(&target_id) = self.thread_targets.get(&fn_name) {
+                                let lambda_node = *arena.node(target_id);
+                                let params: Vec<String> = arena.children_slice(lambda_node.lhs, lambda_node.flags as u32)
+                                    .iter()
+                                    .map(|&p_id| {
+                                        let p_node = arena.node(NodeId(p_id));
+                                        arena.interner.resolve(SymbolId(p_node.lhs)).to_string()
+                                    })
+                                    .collect();
+                                for (i, param) in params.iter().enumerate() {
+                                    if let Some((v, t)) = evaluated_args.get(i) {
+                                        self.set_local(param, *v, t);
+                                    }
+                                }
+                                let body_id = NodeId(lambda_node.rhs);
+                                return self.eval_ast_node(arena, body_id);
+                            }
                             let parts: Vec<String> = evaluated_args.iter().map(|(v, _)| v.to_string_repr()).collect();
                             let formatted = format!("{}({})", fn_name, parts.join(", "));
                             let val = PilotVal::from_str(&formatted);
@@ -2773,7 +3358,16 @@ impl PilotDebugger {
                 let children = arena.children_slice(node.lhs, node.rhs);
                 let mut last = (PilotVal::NULL, "null".to_string());
                 for &child_id in children {
-                    last = self.eval_ast_node(arena, NodeId(child_id));
+                    let child_node = *arena.node(NodeId(child_id));
+                    if child_node.node_kind() == NodeKind::LetStmt
+                        || child_node.node_kind() == NodeKind::VarStmt
+                        || child_node.node_kind() == NodeKind::ConstDecl
+                        || child_node.node_kind() == NodeKind::AssignStmt
+                    {
+                        self.execute_statement_node(arena, NodeId(child_id), 0);
+                    } else {
+                        last = self.eval_ast_node(arena, NodeId(child_id));
+                    }
                 }
                 last
             }

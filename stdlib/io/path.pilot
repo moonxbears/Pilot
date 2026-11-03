@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT AND PSF-2.0
 // std.path — Cross-Platform Lexical Path Manipulation (PSF-2.0 CPython posixpath/pathlib scaffold)
 
+// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
+extern "c" lib "pilot_rt" {
+    def __os_is_windows() -> bool;
+}
+
 def separator() -> str {
     if __os_is_windows() {
         return "\\";

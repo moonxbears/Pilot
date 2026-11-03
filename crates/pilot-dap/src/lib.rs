@@ -342,15 +342,14 @@ mod tests {
     }
 
     #[test]
-    fn test_mytest_pilot_debugging() {
+    fn test_dap_loop_breakpoint() {
         let mut dap = DapServer::new();
         dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
 
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let test_src = "for x in 15..20:\n    println(x)\n\nfor j in [1, 2, 3, 4, 5]{\n    println(j)\n}\n\nvar myvar : int = 0\nwhile (true) {\n    if (myvar >= 20){\n        break;\n    }\n    println(f\"true - {myvar}\")\n    myvar += 1\n}\n";
-        let path = format!("{}/../../examples/dap_myvar_test.pilot", manifest_dir);
-        let _ = std::fs::write(&path, test_src);
-        let path = std::fs::canonicalize(&path).unwrap().to_string_lossy().replace('\\', "/").trim_start_matches("//?/").to_string();
+        let temp_file = std::env::temp_dir().join("dap_test_loop.pilot");
+        let _ = std::fs::write(&temp_file, test_src);
+        let path = std::fs::canonicalize(&temp_file).unwrap().to_string_lossy().replace('\\', "/").trim_start_matches("//?/").to_string();
 
         // Set breakpoint on line 13: println(f"true - {myvar}")
         let bp_req = format!(
@@ -504,13 +503,100 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Showcase 20 assertion failure repro from request 7"]
-    fn test_showcase_20_reproduce() {
+    #[ignore = "C-ABI and dynamic schedule test"]
+    fn test_dynamic_for_loop_and_c_abi() {
         let mut dap = DapServer::new();
         dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let path = format!("{}/../../examples/showcase/20_dynamic_for_expressions_and_c_abi.pilot", manifest_dir);
-        let path = std::fs::canonicalize(&path).unwrap().to_str().unwrap().to_string();
+        let code = r#"
+println("=== 1. Standard Fixed Yield (CollectionYield) ===");
+let cubes = for (i in 1..5) {
+    yield i * i * i;
+};
+println(f"Cubes (1..5): {cubes}");
+assert(cubes == [1, 8, 27, 64, 125]);
+
+println("=== 2. Destructive Range Pivot (MutableBounds) ===");
+let skipped_middle = for (i in 0..10) {
+    yield i;
+    if i == 2 {
+        continue 8..10;
+    }
+};
+println(f"Pivoted (0..2 -> 8..10): {skipped_middle}");
+assert(skipped_middle == [0, 1, 2, 8, 9, 10]);
+
+println("=== 3. Resumable Sub-Loop Prepend (WorklistStack LIFO) ===");
+let hierarchical_walk = for (i in 1..4) {
+    yield i;
+    if i == 2 {
+        continue 100..101, ...;
+    }
+};
+println(f"Resumable LIFO Worklist: {hierarchical_walk}");
+assert(hierarchical_walk == [1, 2, 100, 101, 3, 4]);
+
+println("=== 4. Scalar Break + `then` Completion Clause ===");
+let ports = [80, 443, 8080, 9000];
+let port_idx = for (idx in 0..<4) {
+    if ports[idx] == 8080 {
+        break idx;
+    }
+} then -1;
+let fallback_idx = for (idx in 0..<4) {
+    if ports[idx] == 3000 {
+        break idx;
+    }
+} then -1;
+println(f"Port 8080 index: {port_idx}, Port 3000 fallback: {fallback_idx}");
+assert(port_idx == 2);
+assert(fallback_idx == -1);
+
+println("=== 5. Zero-List Contiguous SliceBuffer[f64] Yield (15.3.3) ===");
+let contig_buf: SliceBuffer[f64] = for (i in 0..<6) {
+    yield (i + 1) * 10.0;
+};
+println(f"24-byte C-ABI SliceBuffer: {contig_buf}, managed_lists={contig_buf.managed_list_allocations}");
+assert(contig_buf.abi_header_size == 24);
+assert(contig_buf.managed_list_allocations == 0);
+assert(contig_buf == [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]);
+
+println("=== 6. Cross-Language Zero-Copy Shared Memory & Base-Address Independence (15.3.2) ===");
+var shm = shared_buffer("default_shm", 6, :f64);
+let base_ptr = shm.data_ptr;
+shm = for (i in 0..<6) {
+    yield (i + 1) * 10.0;
+};
+var second_view = shm.open_view();
+assert(shm.data_ptr == base_ptr);
+assert(shm.data_ptr != second_view.data_ptr);
+
+python {
+    mv = memoryview(shm)
+    mv[0] = mv[0] + 5.5
+}
+c """
+    double* p = (double*)shm.data_ptr;
+    p[1] *= 2.0;
+""";
+rust """
+    let s = &mut shm;
+    s[2] += 3.25;
+""";
+asm """
+    mov rax, shm
+    movsd xmm0, 100.0
+    addsd [rax + 0], xmm0
+    ret
+""";
+
+println(f"Shared view 1 (@0x{shm.data_ptr}): {shm}");
+println(f"Shared view 2 (@0x{second_view.data_ptr}): {second_view}");
+assert(shm.data_ptr == base_ptr);
+assert(second_view == [115.5, 40.0, 33.25, 40.0, 50.0, 60.0]);
+"#;
+        let temp_file = std::env::temp_dir().join("dap_test_abi.pilot");
+        let _ = std::fs::write(&temp_file, code);
+        let path = std::fs::canonicalize(&temp_file).unwrap().to_str().unwrap().to_string();
 
         dap.handle_message(&format!(
             r#"{{"seq":2,"type":"request","command":"launch","arguments":{{"program":"{}","stopOnEntry":false}}}}"#,
@@ -521,7 +607,7 @@ mod tests {
         let events = dap.drain_events();
         for ev in &events {
             println!("EV: {}", ev);
-            assert!(!ev.contains("Assertion Error"), "Unexpected assertion failure in showcase 20: {}", ev);
+            assert!(!ev.contains("Assertion Error"), "Unexpected assertion failure: {}", ev);
         }
 
         let combined_output = events.join("\n");
@@ -535,12 +621,31 @@ mod tests {
     }
 
     #[test]
-    fn test_showcase_21_dap_inferred_variable_types() {
+    fn test_dap_inferred_variable_types() {
         let mut dap = DapServer::new();
         dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let path = format!("{}/../../examples/showcase/21_advanced_type_inference.pilot", manifest_dir);
-        let path = std::fs::canonicalize(&path).unwrap().to_string_lossy().replace('\\', "/").trim_start_matches("//?/").to_string();
+        let code = r#"// Line 0
+// Line 1
+// Line 2
+// Line 3
+record Product(title: str, price: float, in_stock: bool);
+record Frame2D(width: int, height: int, name: str);
+record Canvas2D(width: float, height: float);
+
+def compute_area(surface) => surface.width * surface.height;
+
+let frame_area = compute_area(Frame2D(1920, 1080, "HD"));
+let canvas_area = compute_area(Canvas2D(12.5, 8.0));
+
+println(f"Frame area (int): {frame_area}");
+println(f"Canvas area (float): {canvas_area}");
+
+def is_even_step(n: int) => true if n == 0 else is_odd_step(n - 1);
+def is_odd_step(n: int) => false if n == 0 else is_even_step(n - 1);
+"#;
+        let temp_file = std::env::temp_dir().join("dap_test_type_infer.pilot");
+        let _ = std::fs::write(&temp_file, code);
+        let path = std::fs::canonicalize(&temp_file).unwrap().to_string_lossy().replace('\\', "/").trim_start_matches("//?/").to_string();
 
         dap.handle_message(&format!(
             r#"{{"seq":2,"type":"request","command":"setBreakpoints","arguments":{{"source":{{"path":"{}"}},"breakpoints":[{{"line":15}}]}}}}"#,
@@ -638,16 +743,51 @@ mod tests {
     fn test_concurrency_stdlib_dap() {
         let mut dap = DapServer::new();
         dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
-        let current_dir = std::env::current_dir().unwrap();
-        // Locate examples/test_concurrency_stdlib.pilot
-        let pilot_file = if current_dir.join("examples/test_concurrency_stdlib.pilot").exists() {
-            current_dir.join("examples/test_concurrency_stdlib.pilot")
-        } else if current_dir.join("../../examples/test_concurrency_stdlib.pilot").exists() {
-            current_dir.join("../../examples/test_concurrency_stdlib.pilot")
-        } else {
-            std::path::PathBuf::from("examples/test_concurrency_stdlib.pilot")
-        };
-        let file_path = pilot_file.to_string_lossy().replace('\\', "/");
+        let code = r#"import std.threading as threading;
+import std.multiprocessing as multiprocessing;
+import std.asyncio as asyncio;
+
+def test_threading() {
+    // 1. Thread lifecycle
+    var work_done: bool = false;
+    let t = threading.Thread(() => {
+        work_done = true;
+    }, "worker-1");
+
+    t.start();
+    t.join();
+
+    // 2. Locks & Semaphores
+    let lock = threading.Lock();
+    lock.acquire();
+    let is_locked: bool = lock.locked();
+    lock.release();
+
+    let rlock = threading.RLock();
+    rlock.acquire();
+    rlock.acquire(); // Re-entrant
+    rlock.release();
+    rlock.release();
+
+    let sem = threading.Semaphore(2);
+    sem.acquire();
+    let sem_val: i64 = sem.value();
+    sem.release();
+
+    // 3. Events & Barriers
+    let ev = threading.Event();
+    ev.set();
+    let is_set: bool = ev.is_set();
+    ev.clear();
+
+    let barrier = threading.Barrier(2);
+    let idx: i64 = barrier.wait();
+}
+test_threading();
+"#;
+        let temp_file = std::env::temp_dir().join("dap_test_concurrency.pilot");
+        let _ = std::fs::write(&temp_file, code);
+        let file_path = std::fs::canonicalize(&temp_file).unwrap().to_string_lossy().replace('\\', "/").trim_start_matches("//?/").to_string();
 
         // Set breakpoint on line 35: `let is_set: bool = ev.is_set();`
         dap.handle_message(&format!(
@@ -684,20 +824,57 @@ mod tests {
         assert!(vars_resp.contains("Event(is_set: true)"), "Expected Event(is_set: true)");
         assert!(vars_resp.contains("\"name\":\"work_done\""), "Expected work_done variable");
         assert!(vars_resp.contains("\"value\":\"true\""), "Expected work_done true");
+
+        // Request variables for Globals (ref 2000)
+        let globals_resp = dap.handle_message(r#"{"seq":8,"type":"request","command":"variables","arguments":{"variablesReference":2000}}"#).unwrap();
+        println!("DAP concurrency globals response: {}", globals_resp);
+        assert!(!globals_resp.contains("\"name\":\"is_locked\""), "Globals should not leak function locals: {}", globals_resp);
+        assert!(!globals_resp.contains("\"name\":\"sem_val\""), "Globals should not leak function locals: {}", globals_resp);
     }
 
     #[test]
-    fn test_showcase_33_dap_execution() {
+    fn test_compile_time_generators_execution() {
         let mut dap = DapServer::new();
-        let current_dir = std::env::current_dir().unwrap();
-        let pilot_file = if current_dir.join("examples/showcase/33_compile_time_generators.pilot").exists() {
-            current_dir.join("examples/showcase/33_compile_time_generators.pilot")
-        } else if current_dir.join("../../examples/showcase/33_compile_time_generators.pilot").exists() {
-            current_dir.join("../../examples/showcase/33_compile_time_generators.pilot")
-        } else {
-            std::path::PathBuf::from("examples/showcase/33_compile_time_generators.pilot")
-        };
-        let file_path = pilot_file.to_string_lossy().replace('\\', "/");
+        let code = r#"
+class Apples {
+    generator:
+        for i in ["test", "also_test", 1..=3] {
+            var f"field_{i}": int = 0;
+            def f"get_{i}"(self) -> int { return self.f"field_{i}"; }
+            def f"set_{i}"(self, v: int) { self.f"field_{i}" = v; }
+        }
+    generator:
+        for (prop, default_val) in [("width", 1920), ("height", 1080), ("fps", 60)] {
+            var f"cfg_{prop}": int = default_val;
+            def f"get_{prop}"(self) -> int { return self.f"cfg_{prop}"; }
+        }
+    generator:
+        for tag in ["alpha", 42] {
+            if tag is str { var f"is_str_{tag}": bool = true; }
+            else { var f"num_{tag}": int = 999; }
+        }
+}
+let apple = Apples();
+apple.set_test(42);
+apple.set_also_test(84);
+apple.set_1(100);
+apple.set_2(200);
+apple.set_3(300);
+println("apple.get_test()      -> " + apple.get_test());
+println("apple.get_also_test() -> " + apple.get_also_test());
+println("apple.get_1()         -> " + apple.get_1());
+println("apple.get_2()         -> " + apple.get_2());
+println("apple.get_3()         -> " + apple.get_3());
+println("Width:  " + apple.get_width());
+println("Height: " + apple.get_height());
+println("FPS:    " + apple.get_fps());
+println("apple.is_str_alpha -> " + apple.is_str_alpha);
+println("apple.num_42       -> " + apple.num_42);
+println("All generator demonstrations completed!");
+"#;
+        let temp_file = std::env::temp_dir().join("dap_test_generators.pilot");
+        let _ = std::fs::write(&temp_file, code);
+        let file_path = std::fs::canonicalize(&temp_file).unwrap().to_string_lossy().replace('\\', "/").trim_start_matches("//?/").to_string();
         dap.debugger.load_program(&file_path).unwrap();
 
         let mut outputs = Vec::new();
@@ -707,7 +884,6 @@ mod tests {
         }
 
         let full_output = outputs.join("");
-        assert!(full_output.contains("Showcase 33: Compile-Time Generator Metaprogramming"), "Expected header");
         assert!(full_output.contains("apple.get_test()      -> 42"), "Expected get_test");
         assert!(full_output.contains("apple.get_also_test() -> 84"), "Expected get_also_test");
         assert!(full_output.contains("apple.get_1()         -> 100"), "Expected get_1");
@@ -718,21 +894,30 @@ mod tests {
         assert!(full_output.contains("FPS:    60"), "Expected fps");
         assert!(full_output.contains("apple.is_str_alpha -> true"), "Expected is_str_alpha");
         assert!(full_output.contains("apple.num_42       -> 999"), "Expected num_42");
-        assert!(full_output.contains("All compile-time generator demonstrations executed successfully!"), "Expected completion");
+        assert!(full_output.contains("All generator demonstrations completed!"), "Expected completion");
     }
 
     #[test]
     fn test_fstring_and_escape_characters() {
         let mut dap = DapServer::new();
-        let current_dir = std::env::current_dir().unwrap();
-        let pilot_file = if current_dir.join("examples/showcase/33_compile_time_generators.pilot").exists() {
-            current_dir.join("examples/showcase/33_compile_time_generators.pilot")
-        } else if current_dir.join("../../examples/showcase/33_compile_time_generators.pilot").exists() {
-            current_dir.join("../../examples/showcase/33_compile_time_generators.pilot")
-        } else {
-            std::path::PathBuf::from("examples/showcase/33_compile_time_generators.pilot")
-        };
-        let file_path = pilot_file.to_string_lossy().replace('\\', "/");
+        let code = r#"
+class Apples {
+    generator:
+        for i in ["test"] {
+            var f"field_{i}": int = 42;
+            def f"get_{i}"(self) -> int { return self.f"field_{i}"; }
+        }
+        for (prop, default_val) in [("width", 1920), ("fps", 60)] {
+            var f"cfg_{prop}": int = default_val;
+            def f"get_{prop}"(self) -> int { return self.f"cfg_{prop}"; }
+        }
+}
+let apple = Apples();
+apple.set_test(42);
+"#;
+        let temp_file = std::env::temp_dir().join("dap_test_fstring.pilot");
+        let _ = std::fs::write(&temp_file, code);
+        let file_path = std::fs::canonicalize(&temp_file).unwrap().to_string_lossy().replace('\\', "/").trim_start_matches("//?/").to_string();
         dap.debugger.load_program(&file_path).unwrap();
 
         while dap.debugger.state != DebuggerState::Terminated {

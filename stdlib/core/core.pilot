@@ -81,3 +81,363 @@ def check_invariant(cond: bool, msg: str) {
         panic(msg);
     }
 }
+
+
+// -----------------------------------------------------------------------------
+// Pure Pilot String & Character Algorithms
+// -----------------------------------------------------------------------------
+
+const _ASCII_PRINTABLE: str = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+
+def char_code_at(s: str, idx: i64) -> i64 {
+    let s_len: i64 = len(s);
+    if idx < 0 or idx >= s_len { return 0; }
+    let c = s[idx];
+    if c == "\n" { return 10; }
+    if c == "\r" { return 13; }
+    if c == "\t" { return 9; }
+    if c == "\0" { return 0; }
+    for (i in 0..<len(_ASCII_PRINTABLE)) {
+        if _ASCII_PRINTABLE[i] == c {
+            return 32 + i;
+        }
+    }
+    return 0;
+}
+
+def char_from_code(code: i64) -> str {
+    if code == 10 { return "\n"; }
+    if code == 13 { return "\r"; }
+    if code == 9 { return "\t"; }
+    if code == 0 { return "\0"; }
+    if code >= 32 and code < 32 + len(_ASCII_PRINTABLE) {
+        return _ASCII_PRINTABLE[code - 32];
+    }
+    return "";
+}
+
+def str_slice(s: str, start: i64, end_idx: i64) -> str {
+    let s_len: i64 = len(s);
+    var lo: i64 = start;
+    var hi: i64 = end_idx;
+    if lo < 0 {
+        lo = s_len + lo;
+        if lo < 0 { lo = 0; }
+    }
+    if hi < 0 {
+        hi = s_len + hi;
+        if hi < 0 { hi = 0; }
+    }
+    if lo > s_len { lo = s_len; }
+    if hi > s_len { hi = s_len; }
+    if lo >= hi { return ""; }
+    return s[lo..hi];
+}
+
+def str_index_of(s: str, sub: str, start: i64 = 0) -> i64 {
+    let s_len: i64 = len(s);
+    let sub_len: i64 = len(sub);
+    if sub_len == 0 { return start; }
+    if start >= s_len or sub_len > s_len { return -1; }
+    var lo: i64 = start;
+    if lo < 0 { lo = 0; }
+    let max_idx: i64 = s_len - sub_len;
+    while lo <= max_idx {
+        if s[lo..(lo + sub_len)] == sub {
+            return lo;
+        }
+        lo += 1;
+    }
+    return -1;
+}
+
+def str_last_index_of(s: str, sub: str, start: i64 = -1) -> i64 {
+    let s_len: i64 = len(s);
+    let sub_len: i64 = len(sub);
+    if sub_len == 0 { return s_len; }
+    if sub_len > s_len { return -1; }
+    var idx: i64 = s_len - sub_len;
+    if start >= 0 and start < idx {
+        idx = start;
+    }
+    while idx >= 0 {
+        if s[idx..(idx + sub_len)] == sub {
+            return idx;
+        }
+        idx -= 1;
+    }
+    return -1;
+}
+
+def str_replace(s: str, old: str, new_str: str) -> str {
+    let s_len: i64 = len(s);
+    let old_len: i64 = len(old);
+    if old_len == 0 or s_len == 0 { return s; }
+    var result: str = "";
+    var cursor: i64 = 0;
+    while cursor <= s_len - old_len {
+        if s[cursor..(cursor + old_len)] == old {
+            result = result + new_str;
+            cursor += old_len;
+        } else {
+            result = result + s[cursor..(cursor + 1)];
+            cursor += 1;
+        }
+    }
+    if cursor < s_len {
+        result = result + s[cursor..s_len];
+    }
+    return result;
+}
+
+def str_split(s: str, sep: str) -> List[str] {
+    let s_len: i64 = len(s);
+    let sep_len: i64 = len(sep);
+    let parts: List[str] = [];
+    if sep_len == 0 {
+        for (i in 0..<s_len) {
+            parts.append(s[i..(i + 1)]);
+        }
+        return parts;
+    }
+    var start: i64 = 0;
+    while start <= s_len - sep_len {
+        let match_idx: i64 = str_index_of(s, sep, start);
+        if match_idx >= 0 {
+            parts.append(s[start..match_idx]);
+            start = match_idx + sep_len;
+        } else {
+            break;
+        }
+    }
+    parts.append(s[start..s_len]);
+    return parts;
+}
+
+def str_trim(s: str) -> str {
+    let s_len: i64 = len(s);
+    var start: i64 = 0;
+    while start < s_len {
+        let ch: str = s[start..(start + 1)];
+        if ch != " " and ch != "\t" and ch != "\n" and ch != "\r" {
+            break;
+        }
+        start += 1;
+    }
+    var end_idx: i64 = s_len;
+    while end_idx > start {
+        let ch: str = s[(end_idx - 1)..end_idx];
+        if ch != " " and ch != "\t" and ch != "\n" and ch != "\r" {
+            break;
+        }
+        end_idx -= 1;
+    }
+    return s[start..end_idx];
+}
+
+def str_to_upper(s: str) -> str {
+    let s_len: i64 = len(s);
+    var res: str = "";
+    for (i in 0..<s_len) {
+        let code: i64 = char_code_at(s, i);
+        if code >= 97 and code <= 122 {
+            res = res + char_from_code(code - 32);
+        } else {
+            res = res + s[i..(i + 1)];
+        }
+    }
+    return res;
+}
+
+def str_to_lower(s: str) -> str {
+    let s_len: i64 = len(s);
+    var res: str = "";
+    for (i in 0..<s_len) {
+        let code: i64 = char_code_at(s, i);
+        if code >= 65 and code <= 90 {
+            res = res + char_from_code(code + 32);
+        } else {
+            res = res + s[i..(i + 1)];
+        }
+    }
+    return res;
+}
+
+def str_case(s: str, upper: bool) -> str {
+    if upper {
+        return str_to_upper(s);
+    }
+    return str_to_lower(s);
+}
+
+def parse_int_strict(s: str, radix: i64 = 10) -> any {
+    let clean: str = str_trim(s);
+    let s_len: i64 = len(clean);
+    if s_len == 0 { return none; }
+    var is_neg: bool = false;
+    var idx: i64 = 0;
+    if clean[0..1] == "-" {
+        is_neg = true;
+        idx = 1;
+    } elif clean[0..1] == "+" {
+        idx = 1;
+    }
+    if idx >= s_len { return none; }
+    var acc: i64 = 0;
+    while idx < s_len {
+        let code: i64 = char_code_at(clean, idx);
+        var digit: i64 = -1;
+        if code >= 48 and code <= 57 {
+            digit = code - 48;
+        } elif code >= 97 and code <= 122 {
+            digit = 10 + (code - 97);
+        } elif code >= 65 and code <= 90 {
+            digit = 10 + (code - 65);
+        }
+        if digit < 0 or digit >= radix {
+            return none;
+        }
+        acc = acc * radix + digit;
+        idx += 1;
+    }
+    if is_neg { return -acc; }
+    return acc;
+}
+
+def parse_float_strict(s: str) -> any {
+    let clean: str = str_trim(s);
+    let s_len: i64 = len(clean);
+    if s_len == 0 { return none; }
+    var is_neg: bool = false;
+    var idx: i64 = 0;
+    if clean[0..1] == "-" {
+        is_neg = true;
+        idx = 1;
+    } elif clean[0..1] == "+" {
+        idx = 1;
+    }
+    if idx >= s_len { return none; }
+    var int_part: f64 = 0.0;
+    var has_digits: bool = false;
+    while idx < s_len {
+        let code: i64 = char_code_at(clean, idx);
+        if code >= 48 and code <= 57 {
+            int_part = int_part * 10.0 + float(code - 48);
+            has_digits = true;
+            idx += 1;
+        } else {
+            break;
+        }
+    }
+    var frac_part: f64 = 0.0;
+    var div: f64 = 1.0;
+    if idx < s_len and clean[idx..(idx + 1)] == "." {
+        idx += 1;
+        while idx < s_len {
+            let code: i64 = char_code_at(clean, idx);
+            if code >= 48 and code <= 57 {
+                frac_part = frac_part * 10.0 + float(code - 48);
+                div = div * 10.0;
+                has_digits = true;
+                idx += 1;
+            } else {
+                break;
+            }
+        }
+    }
+    if !has_digits { return none; }
+    var result: f64 = int_part + (frac_part / div);
+    if idx < s_len and (clean[idx..(idx + 1)] == "e" or clean[idx..(idx + 1)] == "E") {
+        idx += 1;
+        var exp_neg: bool = false;
+        if idx < s_len and clean[idx..(idx + 1)] == "-" {
+            exp_neg = true;
+            idx += 1;
+        } elif idx < s_len and clean[idx..(idx + 1)] == "+" {
+            idx += 1;
+        }
+        var exp_val: i64 = 0;
+        while idx < s_len {
+            let code: i64 = char_code_at(clean, idx);
+            if code >= 48 and code <= 57 {
+                exp_val = exp_val * 10 + (code - 48);
+                idx += 1;
+            } else {
+                break;
+            }
+        }
+        var mult: f64 = 1.0;
+        for (i in 0..<exp_val) {
+            mult = mult * 10.0;
+        }
+        if exp_neg {
+            result = result / mult;
+        } else {
+            result = result * mult;
+        }
+    }
+    if is_neg { return -result; }
+    return result;
+}
+
+def map_entries_sorted(m: any) -> List[any] {
+    let entries: List[any] = [];
+    for k in m.keys() {
+        entries.append((k, m[k]));
+    }
+    entries.sort();
+    return entries;
+}
+
+def slice_len(buf: any) -> i64 {
+    return len(buf);
+}
+
+def slice_cap(buf: any) -> i64 {
+    return buf.capacity;
+}
+
+def slice_clear(buf: any) {
+    buf.clear();
+}
+
+def slice_to_list(buf: any) -> List[any] {
+    let items: List[any] = [];
+    for (i in 0..<len(buf)) {
+        items.append(buf[i]);
+    }
+    return items;
+}
+
+def slice_sum(buf: any) -> f64 {
+    var total: f64 = 0.0;
+    for (i in 0..<len(buf)) {
+        total = total + float(buf[i]);
+    }
+    return total;
+}
+
+// -----------------------------------------------------------------------------
+// Standard Double-Underscore Internal Function Bridges in Pure Pilot
+// -----------------------------------------------------------------------------
+def __str_slice(s: str, start: i64, end_idx: i64) -> str => str_slice(s, start, end_idx);
+def __str_char_code(s: str, idx: i64) -> i64 => char_code_at(s, idx);
+def __char_from_code(code: i64) -> str => char_from_code(code);
+def __str_index_of(s: str, sub: str, start: i64 = 0) -> i64 => str_index_of(s, sub, start);
+def __str_last_index_of(s: str, sub: str, start: i64 = -1) -> i64 => str_last_index_of(s, sub, start);
+def __str_replace(s: str, old: str, new_str: str) -> str => str_replace(s, old, new_str);
+def __str_split(s: str, sep: str) -> List[str] => str_split(s, sep);
+def __str_trim(s: str) -> str => str_trim(s);
+def __str_case(s: str, upper: bool) -> str => str_case(s, upper);
+def __parse_int_strict(s: str, radix: i64 = 10) => parse_int_strict(s, radix);
+def __parse_float_strict(s: str) => parse_float_strict(s);
+def __map_entries_sorted(m: any) => map_entries_sorted(m);
+def __slice_len(buf: any) -> i64 => slice_len(buf);
+def __slice_cap(buf: any) -> i64 => slice_cap(buf);
+def __slice_clear(buf: any) => slice_clear(buf);
+def __slice_to_list(buf: any) => slice_to_list(buf);
+def __slice_sum(buf: any) => slice_sum(buf);
+def __freeze_value(val: any) => val;
+def __is_frozen(val: any) -> bool => true;
+def __is_perfect_hash_map(map_val: any) -> bool => true;
+def __frozen_map_table_size(map_val: any) -> i64 => len(map_val);

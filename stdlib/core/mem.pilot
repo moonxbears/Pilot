@@ -1,6 +1,25 @@
 // SPDX-License-Identifier: MIT
 // std.mem — Contiguous Zero-Copy SliceBuffer<T>, RangeWindow & .rodata Frozen Memory Primitives
 
+// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
+extern "c" lib "pilot_rt" {
+    def __slice_ptr(buf: any) -> i64;
+    def __slice_stride(buf: any) -> i64;
+    def __slice_is_readonly(buf: any) -> bool;
+    def __slice_get(buf: any, idx: i64) -> any;
+    def __slice_byte_at(buf: any, idx: i64) -> i64;
+    def __slice_set(buf: any, idx: i64, val: any);
+    def __slice_push(buf: any, val: any);
+    def __slice_subview(buf: any, start: i64, length: i64) -> any;
+    def __slice_dot(a: any, b: any) -> f64;
+    def __slice_saxpy(alpha: f64, x: any, y: any) -> any;
+    def __slice_scale(alpha: f64, buf: any) -> any;
+    def __slice_sort(buf: any) -> any;
+    def __slice_welford(buf: any) -> any;
+    def __cpp_backend_available() -> bool;
+    def __cpp_simd_bits() -> i64;
+}
+
 def alloc_slice(capacity: i64, elem_type: str = "f64", initial_length: i64 = 0) {
     return slice_buffer(capacity, elem_type, initial_length);
 }

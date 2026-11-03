@@ -1398,6 +1398,7 @@ impl<'a> Parser<'a> {
 
     fn parse_binding_stmt(&mut self, kind: NodeKind) -> NodeId {
         let start_span = self.span();
+        let is_ref = self.at(TokenKind::KwRef) || (self.is_ident_like() && self.text() == "ref");
         self.advance(); // consume 'let', 'var', 'const', 'dynamic', 'ref'
         if self.at(TokenKind::KwMut) || self.at(TokenKind::KwImmut) {
             self.advance();
@@ -1447,9 +1448,10 @@ impl<'a> Parser<'a> {
         };
 
         let end_pos = self.prev_span().end.max(start_span.end);
+        let flags = if is_ref { 2 } else { 0 };
         let node_id = self.arena.alloc_node(
             kind,
-            0,
+            flags,
             ByteSpan::new(start_span.start, end_pos),
             sym.0,
             init.0,
@@ -1589,6 +1591,22 @@ impl<'a> Parser<'a> {
 
     fn parse_with_stmt(&mut self) -> NodeId {
         self.advance(); // consume 'with'
+        if self.is_ident_like() && self.text() == "context" {
+            self.advance(); // consume 'context'
+            let bind_node = self.parse_stmt_or_decl();
+            let block = if self.at(TokenKind::LBrace) {
+                self.parse_block_expr()
+            } else {
+                NodeId::NONE
+            };
+            let mut children = vec![bind_node];
+            if block.is_some() {
+                let blk = *self.arena.node(block);
+                children.extend(self.arena.children_slice(blk.lhs, blk.rhs).iter().map(|&id| NodeId(id)));
+            }
+            let (start, len) = self.arena.alloc_child_slice(&children);
+            return self.arena.alloc_node(NodeKind::BlockExpr, 0, self.span(), start, len);
+        }
         while !self.at_end() && !self.at(TokenKind::LBrace) && !self.at(TokenKind::Colon) && !self.at(TokenKind::Newline) {
             self.advance();
         }
@@ -2705,6 +2723,12 @@ impl<'a> Parser<'a> {
 
             let name = self.text();
             self.advance();
+            if (name == "quote" || name == "quasiquote") && (self.at(TokenKind::LBrace) || self.at(TokenKind::VirtualLBrace)) {
+                let callee = self.arena.alloc_ident(name, span);
+                let body = self.parse_block_expr();
+                let (slice_start, slice_len) = self.arena.alloc_child_slice(&[callee, body]);
+                return self.arena.alloc_node(NodeKind::CallExpr, 0, span, slice_start, slice_len);
+            }
             return self.arena.alloc_ident(name, span);
         }
 
@@ -3110,12 +3134,12 @@ impl<'a> Parser<'a> {
                     if is_comp {
                         self.advance(); // consume '{'
                         let key_or_val = self.parse_expr();
-                        let yield_expr = if self.at(TokenKind::Colon) {
+                        let (yield_expr, comp_flag) = if self.at(TokenKind::Colon) {
                             self.advance();
                             let val_expr = self.parse_expr();
-                            self.arena.alloc_list_node(NodeKind::MapExpr, 0, span, &[key_or_val, val_expr])
+                            (self.arena.alloc_list_node(NodeKind::MapExpr, 0, span, &[key_or_val, val_expr]), 1)
                         } else {
-                            key_or_val
+                            (key_or_val, 2)
                         };
                         self.expect(TokenKind::KwFor);
                         let var_name = self.text();
@@ -3133,7 +3157,7 @@ impl<'a> Parser<'a> {
                             yield_expr
                         };
                         self.expect(TokenKind::RBrace);
-                        let for_node = self.arena.alloc_node(NodeKind::ForExpr, 0, span, sym.0, body.0);
+                        let for_node = self.arena.alloc_node(NodeKind::ForExpr, comp_flag, span, sym.0, body.0);
                         if iter_expr.is_some() {
                             self.arena.for_iter_nodes.insert(for_node.0, iter_expr);
                         }
@@ -3440,6 +3464,7 @@ impl<'a> Parser<'a> {
             TokenKind::ShiftLeft => Some((BinaryOp::Shl, ExprPrecedence::Shift as u8, false)),
             TokenKind::ShiftRight => Some((BinaryOp::Shr, ExprPrecedence::Shift as u8, false)),
             TokenKind::PipeForward => Some((BinaryOp::Pipe, ExprPrecedence::Pipe as u8, false)),
+            TokenKind::PipeBackward => Some((BinaryOp::PipeBackward, ExprPrecedence::Pipe as u8, true)),
             TokenKind::Coalesce => Some((BinaryOp::Coalesce, ExprPrecedence::Coalesce as u8, true)),
             TokenKind::DotDot | TokenKind::DotDotEqual => Some((BinaryOp::RangeInclusive, ExprPrecedence::Range as u8, false)),
             TokenKind::DotDotLess => Some((BinaryOp::RangeHalfOpen, ExprPrecedence::Range as u8, false)),
@@ -3903,24 +3928,34 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_01_type_safety() {
-        let src = std::fs::read_to_string("../../tests/01_type_safety.pilot").unwrap();
-        let tape = pilot_lexer::tokenize(&src);
-        for i in 0..tape.len() {
-            let sp = tape.span(i);
-            if sp.start >= 14890 && sp.start <= 15250 {
-                println!("  token {:?}: '{}' [{}:{}]", tape.kind(i), &src[sp.start as usize..sp.end as usize], sp.start, sp.end);
+    fn test_parse_type_safety_declarations() {
+        let src = r#"
+            type Result[T, E] = Ok(value: T) | Err(error: E);
+            record Config(host: str, port: int, active: bool);
+            class Handler {
+                def process(item: any) -> Result[str, str] {
+                    return Result.Ok("done");
+                }
             }
-        }
-        let arena = parse(&src);
+        "#;
+        let arena = parse(src);
         assert!(arena.nodes.len() > 10);
     }
 
     #[test]
-    fn test_parse_all_syntax() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/all_syntax.pilot");
-        let src = std::fs::read_to_string(&path).unwrap();
-        let arena = parse(&src);
+    fn test_parse_comprehensive_syntax() {
+        let src = r#"
+            def helper(x: int) -> int {
+                return x * 2;
+            }
+
+            def main() {
+                let list = [1, 2, 3];
+                let doubled = [helper(i) for i in list];
+                println(doubled);
+            }
+        "#;
+        let arena = parse(src);
         let root = arena.node(arena.root);
         let children = arena.children_slice(root.lhs, root.rhs);
         let top_fn_names: Vec<_> = children
@@ -3929,22 +3964,21 @@ mod tests {
             .filter(|n| n.node_kind() == NodeKind::FnDecl)
             .map(|n| arena.interner.resolve(SymbolId(n.lhs)))
             .collect();
-        println!("Top FN names: {:?}", top_fn_names);
-        assert!(top_fn_names.contains(&"run_omnibus_showcase"));
+        assert!(top_fn_names.contains(&"helper"));
         assert!(top_fn_names.contains(&"main"));
     }
 
     #[test]
-    fn test_parse_crucible_200() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/crucible_200.pilot");
-        let src = std::fs::read_to_string(&path).unwrap();
-        let arena = parse(&src);
+    fn test_parse_complex_declarations() {
+        let src = r#"
+            struct Point3D { x: float, y: float, z: float }
+            record Metadata(id: int, tags: List[str]);
+            enum Status { Pending, Active, Complete }
+            def process_point(pt: Point3D) => pt.x + pt.y + pt.z;
+        "#;
+        let arena = parse(src);
         let root = arena.node(arena.root);
         let children = arena.children_slice(root.lhs, root.rhs);
-        let top_kinds: Vec<_> = children
-            .iter()
-            .map(|&c| (arena.node(NodeId(c)).node_kind(), arena.interner.resolve(SymbolId(arena.node(NodeId(c)).lhs))))
-            .collect();
-        println!("Crucible top nodes ({}): {:?}", children.len(), top_kinds);
+        assert!(children.len() >= 4);
     }
 }

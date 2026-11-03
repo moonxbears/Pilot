@@ -59,19 +59,24 @@ mod tests {
     }
 
     #[test]
-    fn test_lex_all_syntax_brackets() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/all_syntax.pilot");
-        let src = std::fs::read_to_string(&path).unwrap();
-        let tape = tokenize(&src);
+    fn test_lex_nested_brackets_and_identifiers() {
+        let src = r#"
+            def run_suite() {
+                let items = [1, 2, (3 + 4), {5: 6}];
+                if (items.len() > 0) {
+                    println("Nested brackets test");
+                }
+            }
+        "#;
+        let tape = tokenize(src);
         for i in 0..tape.len() {
             if tape.kind(i) == TokenKind::Ident {
                 let span = tape.span(i);
                 let s = &src[span.start as usize..span.end as usize];
-                if s == "run_omnibus_showcase" {
-                    println!("run_omnibus_showcase found at tok {}", i);
+                if s == "run_suite" {
                     if let Some(next_lbrace) = (i..tape.len()).find(|&idx| tape.kind(idx) == TokenKind::LBrace) {
                         let matching = tape.bracket_links[next_lbrace];
-                        println!("next lbrace: {}, matching rbrace: {}", next_lbrace, matching);
+                        assert!(matching > next_lbrace as u32);
                     }
                 }
             }

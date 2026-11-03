@@ -7,6 +7,13 @@
 // 1. Errors & Exceptions (Python: urllib.error)
 // ============================================================================
 
+// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
+extern "c" lib "pilot_rt" {
+    def __net_http_get(url: str) -> any;
+    def __net_http_post(url: str, body: str, content_type: str) -> any;
+    def __fs_write_text(path: str, content: str) -> any;
+}
+
 class URLError {
     def __init__(reason: str) {
         self.reason = reason;

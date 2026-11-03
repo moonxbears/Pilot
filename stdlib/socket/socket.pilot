@@ -14,6 +14,14 @@
 
 import os as std_os;
 
+// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
+extern "c" lib "pilot_rt" {
+    def __net_tcp_connect(host: str, port: i64) -> any;
+    def __net_tcp_listen(host: str, port: i64) -> any;
+    def __net_gethostname() -> str;
+    def __net_gethostbyname(host: str) -> str;
+}
+
 // Address Families
 const AF_UNSPEC: i64 = 0;
 const AF_UNIX: i64   = 1;
