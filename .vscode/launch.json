@@ -1,0 +1,39 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "pilot",
+            "request": "launch",
+            "name": "Pilot: Run Current File",
+            "mode": "run",
+            "program": "${file}",
+            "args": []
+        },
+        {
+            "type": "pilot",
+            "request": "launch",
+            "name": "Pilot: Run Current File (VM)",
+            "mode": "run",
+            "program": "${file}",
+            "args": [
+                "--vm"
+            ]
+        },
+        {
+            "type": "pilot",
+            "request": "launch",
+            "name": "Pilot: Debug Current File",
+            "mode": "debug",
+            "program": "${file}",
+            "args": []
+        },
+        {
+            "type": "pilot",
+            "request": "launch",
+            "name": "Pilot: Debug with GUI (DAP)",
+            "mode": "dap",
+            "program": "${file}",
+            "args": []
+        }
+    ]
+}
