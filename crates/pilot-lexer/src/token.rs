@@ -217,27 +217,35 @@ pub enum TokenKind {
     KwNone = 235,
     KwNull = 236,
     KwUndefined = 237,
+    KwSelf = 238,
+    KwOp = 239,
+    KwScope = 240,
+    KwEnter = 241,
+    KwExit = 242,
+    KwClone = 243,
+    KwPack = 244,
+    KwUnpack = 245,
 
-    // --- Delimiters & Single Character Punctuation (240..269) ---
-    LParen = 240,       // (
-    RParen = 241,       // )
-    LBracket = 242,     // [
-    RBracket = 243,     // ]
-    LBrace = 244,       // {
-    RBrace = 245,       // }
-    Colon = 246,        // :
-    Semicolon = 247,    // ;
-    Comma = 248,        // ,
-    Dot = 249,          // .
-    At = 250,           // @
-    Question = 251,     // ?
-    Exclamation = 252,  // !
-    Tilde = 253,        // ~
-    Dollar = 254,       // $
-    Backquote = 255,    // `
-    Underscore = 256,   // _
-    Walrus = 257,       // :=
-    ArrowLeft = 258,    // <-
+    // --- Delimiters & Single Character Punctuation (250..269) ---
+    LParen = 250,       // (
+    RParen = 251,       // )
+    LBracket = 252,     // [
+    RBracket = 253,     // ]
+    LBrace = 254,       // {
+    RBrace = 255,       // }
+    Colon = 256,        // :
+    Semicolon = 257,    // ;
+    Comma = 258,        // ,
+    Dot = 259,          // .
+    At = 260,           // @
+    Question = 261,     // ?
+    Exclamation = 262,  // !
+    Tilde = 263,        // ~
+    Dollar = 264,       // $
+    Backquote = 265,    // `
+    Underscore = 266,   // _
+    Walrus = 267,       // :=
+    ArrowLeft = 268,    // <-
 
     // --- Operators & Arrows (270..319) ---
     Plus = 270,         // +
@@ -301,7 +309,7 @@ pub enum TokenKind {
 impl TokenKind {
     #[inline]
     pub const fn is_keyword(self) -> bool {
-        (self as u16) >= (TokenKind::KwLet as u16) && (self as u16) <= (TokenKind::KwUndefined as u16)
+        (self as u16) >= (TokenKind::KwLet as u16) && (self as u16) <= (TokenKind::KwUnpack as u16)
     }
 
     #[inline]

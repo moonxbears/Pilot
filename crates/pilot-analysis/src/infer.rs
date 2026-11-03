@@ -836,7 +836,93 @@ impl TypeInferenceEngine {
                                 .map(|&ann| self.resolve_type_spec(arena, ann))
                                 .unwrap_or(TypeId::ANY);
                             let m_ty = self.types.function_of(param_tys, ret_ty);
-                            fields.push((m_name, m_ty));
+                            fields.push((m_name.clone(), m_ty));
+
+                            if m_name.starts_with("__") && m_name.ends_with("__") && m_name.len() > 4 {
+                                let span = arena.span(NodeId(stmt_id));
+                                self.diagnostics.push(AnalysisDiagnostic::error(
+                                    "E0100",
+                                    format!("Python-style dunder method '{}' is prohibited in Pilot. Use first-class 'self' or 'op' declarations instead.", m_name),
+                                    span,
+                                ));
+                            }
+                        }
+                        NodeKind::ConstructorDecl => {
+                            let fn_start = s_node.lhs;
+                            let fn_len = s_node.rhs as usize;
+                            let mut param_tys = Vec::new();
+                            if fn_len > 1 {
+                                let fn_children = arena.children_slice(fn_start, fn_len as u32);
+                                for &p_id in &fn_children[1..] {
+                                    let p_node = *arena.node(NodeId(p_id));
+                                    let p_ty = if NodeId(p_node.rhs).is_some()
+                                        && (p_node.rhs as usize) < arena.nodes.len()
+                                        && arena.node(NodeId(p_node.rhs)).node_kind().is_type_spec()
+                                    {
+                                        self.resolve_type_spec(arena, NodeId(p_node.rhs))
+                                    } else {
+                                        TypeId::ANY
+                                    };
+                                    param_tys.push(p_ty);
+                                }
+                            }
+                            let ctor_ty = self.types.function_of(param_tys, TypeId::VOID);
+                            fields.push(("self".to_string(), ctor_ty));
+                        }
+                        NodeKind::DestructorDecl => {
+                            let dtor_ty = self.types.function_of(vec![], TypeId::VOID);
+                            fields.push(("~self".to_string(), dtor_ty));
+                        }
+                        NodeKind::ScopeDecl => {
+                            let scope_ty = self.types.function_of(vec![], TypeId::VOID);
+                            fields.push(("scope".to_string(), scope_ty));
+                        }
+                        NodeKind::IndexerDecl => {
+                            let ret_ty = arena.type_annotations.get(&stmt_id).map(|&ann| self.resolve_type_spec(arena, ann)).unwrap_or(TypeId::ANY);
+                            let params_slice = arena.children_slice(s_node.lhs, s_node.rhs);
+                            let mut param_tys = Vec::new();
+                            for &p_id in params_slice {
+                                let p_node = *arena.node(NodeId(p_id));
+                                let p_ty = if NodeId(p_node.rhs).is_some() && (p_node.rhs as usize) < arena.nodes.len() && arena.node(NodeId(p_node.rhs)).node_kind().is_type_spec() {
+                                    self.resolve_type_spec(arena, NodeId(p_node.rhs))
+                                } else {
+                                    TypeId::ANY
+                                };
+                                param_tys.push(p_ty);
+                            }
+                            let idx_ty = self.types.function_of(param_tys, ret_ty);
+                            fields.push(("this[]".to_string(), idx_ty));
+                            fields.push(("self[]".to_string(), idx_ty));
+                        }
+                        NodeKind::DynamicMemberDecl => {
+                            let ret_ty = arena.type_annotations.get(&stmt_id).map(|&ann| self.resolve_type_spec(arena, ann)).unwrap_or(TypeId::ANY);
+                            let dyn_ty = self.types.function_of(vec![TypeId::STR], ret_ty);
+                            fields.push(("self.()".to_string(), dyn_ty));
+                        }
+                        NodeKind::OperatorDecl => {
+                            let sym_name = if let Some(&sym) = arena.operator_symbols.get(&stmt_id) {
+                                arena.interner.resolve(sym).to_string()
+                            } else {
+                                "op".to_string()
+                            };
+                            let fn_start = s_node.lhs;
+                            let fn_len = s_node.rhs as usize;
+                            let mut param_tys = Vec::new();
+                            if fn_len > 1 {
+                                let fn_children = arena.children_slice(fn_start, fn_len as u32);
+                                for &p_id in &fn_children[1..] {
+                                    let p_node = *arena.node(NodeId(p_id));
+                                    let p_ty = if NodeId(p_node.rhs).is_some() && (p_node.rhs as usize) < arena.nodes.len() && arena.node(NodeId(p_node.rhs)).node_kind().is_type_spec() {
+                                        self.resolve_type_spec(arena, NodeId(p_node.rhs))
+                                    } else {
+                                        TypeId::ANY
+                                    };
+                                    param_tys.push(p_ty);
+                                }
+                            }
+                            let ret_ty = arena.type_annotations.get(&stmt_id).map(|&ann| self.resolve_type_spec(arena, ann)).unwrap_or(TypeId::ANY);
+                            let op_ty = self.types.function_of(param_tys, ret_ty);
+                            fields.push((format!("op {}", sym_name), op_ty));
                         }
                         _ => {}
                     }
@@ -1236,7 +1322,7 @@ impl TypeInferenceEngine {
                             self.types.register_nominal_name(ty, rec_name.clone());
                             let data_fields: Vec<TypeId> = fields
                                 .iter()
-                                .filter(|(n, t)| n != "this[]" && !matches!(self.types.get(self.types.prune(*t)), TypeKind::Function { .. }))
+                                .filter(|(n, t)| n != "this[]" && n != "self[]" && !matches!(self.types.get(self.types.prune(*t)), TypeKind::Function { .. }))
                                 .map(|(_, t)| *t)
                                 .collect();
                             let param_tys = if data_fields.is_empty() {
@@ -1530,6 +1616,140 @@ impl TypeInferenceEngine {
                 fn_ty
             }
 
+            NodeKind::ConstructorDecl => {
+                let fn_start = node.lhs;
+                let fn_len = node.rhs as usize;
+                if fn_len > 0 {
+                    let fn_children = arena.children_slice(fn_start, fn_len as u32);
+                    let body_node = NodeId(fn_children[0]);
+                    self.enter_scope();
+                    for &p_id in &fn_children[1..] {
+                        let p_node = *arena.node(NodeId(p_id));
+                        let p_name = arena.interner.resolve(SymbolId(p_node.lhs)).to_string();
+                        let p_ty = if NodeId(p_node.rhs).is_some() && (p_node.rhs as usize) < arena.nodes.len() && arena.node(NodeId(p_node.rhs)).node_kind().is_type_spec() {
+                            self.resolve_type_spec(arena, NodeId(p_node.rhs))
+                        } else {
+                            TypeId::ANY
+                        };
+                        self.define_var(&p_name, p_ty);
+                    }
+                    if body_node.is_some() {
+                        self.synth(arena, body_node);
+                    }
+                    self.exit_scope();
+                }
+                TypeId::VOID
+            }
+
+            NodeKind::DestructorDecl => {
+                let body_node = NodeId(node.lhs);
+                if body_node.is_some() {
+                    self.enter_scope();
+                    self.synth(arena, body_node);
+                    self.exit_scope();
+                }
+                TypeId::VOID
+            }
+
+            NodeKind::ScopeDecl => {
+                let enter_body = NodeId(node.lhs);
+                let exit_body = NodeId(node.rhs);
+                if enter_body.is_some() {
+                    self.enter_scope();
+                    self.synth(arena, enter_body);
+                    self.exit_scope();
+                }
+                if exit_body.is_some() {
+                    self.enter_scope();
+                    self.synth(arena, exit_body);
+                    self.exit_scope();
+                }
+                TypeId::VOID
+            }
+
+            NodeKind::IndexerDecl => {
+                let ret_ty = arena.type_annotations.get(&node_id.0).map(|&ann| self.resolve_type_spec(arena, ann)).unwrap_or(TypeId::ANY);
+                if let Some(clauses) = arena.accessor_clauses.get(&node_id.0) {
+                    if clauses.get_body.is_some() {
+                        self.enter_scope();
+                        self.synth(arena, clauses.get_body);
+                        self.exit_scope();
+                    }
+                    if clauses.set_body.is_some() {
+                        self.enter_scope();
+                        if let Some((sym, ty_node)) = clauses.set_param {
+                            let name = arena.interner.resolve(sym).to_string();
+                            let ty = if ty_node.is_some() && (ty_node.0 as usize) < arena.nodes.len() && arena.node(ty_node).node_kind().is_type_spec() {
+                                self.resolve_type_spec(arena, ty_node)
+                            } else {
+                                ret_ty
+                            };
+                            self.define_var(&name, ty);
+                        }
+                        self.synth(arena, clauses.set_body);
+                        self.exit_scope();
+                    }
+                    if clauses.default_body.is_some() {
+                        self.enter_scope();
+                        self.synth(arena, clauses.default_body);
+                        self.exit_scope();
+                    }
+                }
+                ret_ty
+            }
+
+            NodeKind::DynamicMemberDecl => {
+                let ret_ty = arena.type_annotations.get(&node_id.0).map(|&ann| self.resolve_type_spec(arena, ann)).unwrap_or(TypeId::ANY);
+                if let Some(clauses) = arena.accessor_clauses.get(&node_id.0) {
+                    if clauses.get_body.is_some() {
+                        self.enter_scope();
+                        self.synth(arena, clauses.get_body);
+                        self.exit_scope();
+                    }
+                    if clauses.set_body.is_some() {
+                        self.enter_scope();
+                        if let Some((sym, ty_node)) = clauses.set_param {
+                            let name = arena.interner.resolve(sym).to_string();
+                            let ty = if ty_node.is_some() && (ty_node.0 as usize) < arena.nodes.len() && arena.node(ty_node).node_kind().is_type_spec() {
+                                self.resolve_type_spec(arena, ty_node)
+                            } else {
+                                ret_ty
+                            };
+                            self.define_var(&name, ty);
+                        }
+                        self.synth(arena, clauses.set_body);
+                        self.exit_scope();
+                    }
+                }
+                ret_ty
+            }
+
+            NodeKind::OperatorDecl => {
+                let fn_start = node.lhs;
+                let fn_len = node.rhs as usize;
+                let ret_ty = arena.type_annotations.get(&node_id.0).map(|&ann| self.resolve_type_spec(arena, ann)).unwrap_or(TypeId::ANY);
+                if fn_len > 0 {
+                    let fn_children = arena.children_slice(fn_start, fn_len as u32);
+                    let body_node = NodeId(fn_children[0]);
+                    self.enter_scope();
+                    for &p_id in &fn_children[1..] {
+                        let p_node = *arena.node(NodeId(p_id));
+                        let p_name = arena.interner.resolve(SymbolId(p_node.lhs)).to_string();
+                        let p_ty = if NodeId(p_node.rhs).is_some() && (p_node.rhs as usize) < arena.nodes.len() && arena.node(NodeId(p_node.rhs)).node_kind().is_type_spec() {
+                            self.resolve_type_spec(arena, NodeId(p_node.rhs))
+                        } else {
+                            TypeId::ANY
+                        };
+                        self.define_var(&p_name, p_ty);
+                    }
+                    if body_node.is_some() {
+                        self.synth(arena, body_node);
+                    }
+                    self.exit_scope();
+                }
+                ret_ty
+            }
+
             NodeKind::RecordDecl | NodeKind::StructDecl => {
                 let sym = SymbolId(node.lhs);
                 let name = arena.interner.resolve(sym).to_string();
@@ -1540,7 +1760,7 @@ impl TypeInferenceEngine {
                 self.types.register_nominal_name(ty, name.clone());
                 let data_fields: Vec<TypeId> = fields
                     .iter()
-                    .filter(|(n, t)| n != "this[]" && !matches!(self.types.get(self.types.prune(*t)), TypeKind::Function { .. }))
+                    .filter(|(n, t)| n != "this[]" && n != "self[]" && !matches!(self.types.get(self.types.prune(*t)), TypeKind::Function { .. }))
                     .map(|(_, t)| *t)
                     .collect();
                 let param_tys = if data_fields.is_empty() {
@@ -1685,7 +1905,27 @@ impl TypeInferenceEngine {
                         TypeKind::Collection { element, .. } => self.types.prune(element),
                         TypeKind::Map { key, value } => self.types.tuple_of(vec![key, value]),
                         _ if pruned == TypeId::STR => TypeId::STR,
-                        _ => TypeId::I64,
+                        _ => {
+                            let nominal_name = self.types.nominal_names.get(&pruned).cloned();
+                            if let Some(nom) = nominal_name {
+                                if let Some(fields) = self.struct_fields.get(&nom).cloned() {
+                                    if let Some((_, for_fn_ty)) = fields.iter().find(|(n, _)| n == "op for" || n.starts_with("op for")) {
+                                        let pruned_for = self.types.prune(*for_fn_ty);
+                                        if let TypeKind::Function { ret, .. } = self.types.get(pruned_for) {
+                                            self.types.prune(*ret)
+                                        } else {
+                                            TypeId::I64
+                                        }
+                                    } else {
+                                        TypeId::I64
+                                    }
+                                } else {
+                                    TypeId::I64
+                                }
+                            } else {
+                                TypeId::I64
+                            }
+                        }
                     }
                 } else {
                     TypeId::I64
@@ -2289,7 +2529,7 @@ impl TypeInferenceEngine {
                         if let Some(ref f_name) = field_name_opt {
                             if let Some((_, f_ty)) = fields.iter().find(|(k, _)| k == f_name) {
                                 *f_ty
-                            } else if let Some((_, idx_fn)) = fields.iter().find(|(k, _)| k == "this[]") {
+                            } else if let Some((_, idx_fn)) = fields.iter().find(|(k, _)| k == "this[]" || k == "self[]") {
                                 self.invoke_indexer_fn(*idx_fn, idx_ty, node_id, arena)
                             } else if is_open {
                                 TypeId::ANY
@@ -2301,7 +2541,7 @@ impl TypeInferenceEngine {
                                 ));
                                 TypeId::ANY
                             }
-                        } else if let Some((_, idx_fn)) = fields.iter().find(|(k, _)| k == "this[]") {
+                        } else if let Some((_, idx_fn)) = fields.iter().find(|(k, _)| k == "this[]" || k == "self[]") {
                             self.invoke_indexer_fn(*idx_fn, idx_ty, node_id, arena)
                         } else {
                             let val_types: Vec<TypeId> = fields.iter().map(|(_, t)| *t).collect();
@@ -2364,14 +2604,14 @@ impl TypeInferenceEngine {
                         if let Some(f_ty) = struct_f_ty {
                             f_ty
                         } else {
-                            // Check for custom indexer: "this[]"
+                            // Check for custom indexer: "this[]" or "self[]"
                             let indexer_fn_ty = match self.types.get(pruned) {
                                 TypeKind::RowRecord { fields, .. } => {
-                                    fields.iter().find(|(n, _)| n == "this[]").map(|(_, ty)| *ty)
+                                    fields.iter().find(|(n, _)| n == "this[]" || n == "self[]").map(|(_, ty)| *ty)
                                 }
                                 TypeKind::Adt { name, .. } | TypeKind::Primitive(name) => {
                                     self.struct_fields.get(name).and_then(|fields| {
-                                        fields.iter().find(|(n, _)| n == "this[]").map(|(_, ty)| *ty)
+                                        fields.iter().find(|(n, _)| n == "this[]" || n == "self[]").map(|(_, ty)| *ty)
                                     })
                                 }
                                 _ => {
@@ -2379,7 +2619,7 @@ impl TypeInferenceEngine {
                                     if t_node.node_kind() == NodeKind::IdentExpr {
                                         let ident_name = arena.interner.resolve(SymbolId(t_node.lhs));
                                         self.struct_fields.get(ident_name).and_then(|fields| {
-                                            fields.iter().find(|(n, _)| n == "this[]").map(|(_, ty)| *ty)
+                                            fields.iter().find(|(n, _)| n == "this[]" || n == "self[]").map(|(_, ty)| *ty)
                                         })
                                     } else {
                                         None

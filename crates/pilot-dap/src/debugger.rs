@@ -298,7 +298,13 @@ impl PilotDebugger {
                         | NodeKind::InterfaceDecl
                         | NodeKind::ExtendDecl
                         | NodeKind::ImportDecl
-                        | NodeKind::FromImportDecl => {
+                        | NodeKind::FromImportDecl
+                        | NodeKind::ConstructorDecl
+                        | NodeKind::DestructorDecl
+                        | NodeKind::ScopeDecl
+                        | NodeKind::IndexerDecl
+                        | NodeKind::DynamicMemberDecl
+                        | NodeKind::OperatorDecl => {
                             // Type declarations are non-executable statements; don't execute as null-producing statements
                         }
                         _ => {

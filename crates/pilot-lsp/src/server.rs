@@ -475,6 +475,28 @@ impl LspServer {
         self.emit_diagnostics_for_file(file_id, uri);
     }
 
+    fn typespec_str(arena: &pilot_ast::AstArena, id: pilot_ast::NodeId, analysis: &pilot_analysis::AnalysisResult) -> String {
+        if id.is_some() && (id.0 as usize) < arena.nodes.len() {
+            let n = arena.node(id);
+            if n.node_kind() == pilot_ast::NodeKind::TypeNamed || n.node_kind() == pilot_ast::NodeKind::IdentExpr {
+                let name = arena.interner.resolve(pilot_intern::SymbolId(n.lhs));
+                return match name {
+                    "int" | "i64" => "i64".to_string(),
+                    "float" | "f64" => "f64".to_string(),
+                    "str" => "str".to_string(),
+                    "bool" => "bool".to_string(),
+                    _ => name.to_string(),
+                };
+            }
+        }
+        if let Some(&ty) = analysis.inferred_types.get(&id.0) {
+            if ty != pilot_analysis::TypeId::ANY {
+                return analysis.types.display(ty);
+            }
+        }
+        "i64".to_string()
+    }
+
     fn handle_hover(&mut self, params: &JsonValue) -> JsonValue {
         let (file_id, byte_offset) = match self.get_file_and_offset(params) {
             Some(res) => res,
@@ -559,7 +581,24 @@ impl LspServer {
                         if byte_offset >= span.start && byte_offset <= span.end {
                             let mut indexer_sig: Option<(Vec<String>, String)> = None;
                             for (fn_idx, fn_node) in arena.nodes.iter().enumerate() {
-                                if fn_node.node_kind() == pilot_ast::NodeKind::FnDecl {
+                                if fn_node.node_kind() == pilot_ast::NodeKind::IndexerDecl {
+                                    let params_slice = arena.children_slice(fn_node.lhs, fn_node.rhs);
+                                    let mut param_strs = Vec::new();
+                                    for &p_id in params_slice {
+                                        let p_node = *arena.node(pilot_ast::NodeId(p_id));
+                                        let p_name = arena.interner.resolve(pilot_intern::SymbolId(p_node.lhs));
+                                        let p_ty_node = pilot_ast::NodeId(p_node.rhs);
+                                        let ty_str = if p_ty_node.is_some() {
+                                            Self::typespec_str(arena, p_ty_node, analysis)
+                                        } else {
+                                            analysis.inferred_types.get(&p_id).map(|&t| analysis.types.display(t)).unwrap_or_else(|| "i64".to_string())
+                                        };
+                                        param_strs.push(format!("{}: {}", p_name, ty_str));
+                                    }
+                                    let ret_str = arena.type_annotations.get(&(fn_idx as u32)).map(|&ann| Self::typespec_str(arena, ann, analysis)).unwrap_or_else(|| "i64".to_string());
+                                    indexer_sig = Some((param_strs, ret_str));
+                                    break;
+                                } else if fn_node.node_kind() == pilot_ast::NodeKind::FnDecl {
                                     let name = arena.interner.resolve(pilot_intern::SymbolId(fn_node.lhs));
                                     if name == "this[]" {
                                         let fn_start = fn_node.rhs;
@@ -745,7 +784,28 @@ impl LspServer {
 
         // 2. Functions in file (definitions & call-sites)
         for (idx, node) in arena.nodes.iter().enumerate() {
-            if node.node_kind() == pilot_ast::NodeKind::FnDecl {
+            if node.node_kind() == pilot_ast::NodeKind::IndexerDecl {
+                let span = arena.spans[idx];
+                if (txt == "this" || txt == "self" || txt == "[") && byte_offset >= span.start && byte_offset <= span.end {
+                    let params_slice = arena.children_slice(node.lhs, node.rhs);
+                    let mut param_strs = Vec::new();
+                    for &p_id in params_slice {
+                        let p_node = *arena.node(pilot_ast::NodeId(p_id));
+                        let p_name = arena.interner.resolve(pilot_intern::SymbolId(p_node.lhs));
+                        let p_ty_node = pilot_ast::NodeId(p_node.rhs);
+                        let ty_str = if p_ty_node.is_some() {
+                            Self::typespec_str(arena, p_ty_node, analysis)
+                        } else {
+                            analysis.inferred_types.get(&p_id).map(|&t| analysis.types.display(t)).unwrap_or_else(|| "i64".to_string())
+                        };
+                        param_strs.push(format!("{}: {}", p_name, ty_str));
+                    }
+                    let ret_str = arena.type_annotations.get(&(idx as u32)).map(|&ann| Self::typespec_str(arena, ann, analysis)).unwrap_or_else(|| "i64".to_string());
+                    let sig = format!("property this[{}]: {}", param_strs.join(", "), ret_str);
+                    let md = format!("```pilot\n{}\n```\n\n*Pilot Indexer*", sig);
+                    return make_hover_card(&md);
+                }
+            } else if node.node_kind() == pilot_ast::NodeKind::FnDecl {
                 let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
                 let span = arena.spans[idx];
                 let is_indexer_match = name == "this[]" && txt == "this" && byte_offset >= span.start && byte_offset <= span.end;
@@ -3643,6 +3703,15 @@ const KEYWORD_DOCS: &[(&str, (&str, &str))] = &[
     ("get", ("Accessors", "`get { ... }` — Defines the getter accessor of a property.")),
     ("set", ("Accessors", "`set(val) { ... }` — Defines the setter accessor of a property or collection.")),
     ("operator", ("Overloading", "`operator <op>(lhs: T, rhs: U) -> R { ... }` — Overloads an operator for custom types.")),
+    ("op", ("Operators & Protocols", "`op self <binop> (rhs: R) -> Out` or `op clone self -> Self` — Declares a first-class overloaded operator or protocol implementation.")),
+    ("self", ("Member / Receiver", "`self(params...)`, `~self`, `self[...]`, `self.(...)` — First-class instance receiver, constructor, destructor, and indexer.")),
+    ("scope", ("Context Manager", "`scope self { enter: ... exit: ... }` — Defines deterministic RAII scope management.")),
+    ("enter", ("Context Manager", "`enter: ...` — Context manager acquisition block in `scope self`.")),
+    ("exit", ("Context Manager", "`exit: ...` — Context manager deterministic release block in `scope self`.")),
+    ("default", ("Accessors", "`default: ...` — Fallback accessor clause for indexers (`self[...]`).")),
+    ("clone", ("Protocols", "`op clone self -> Self` — Defines deep/arena duplication boundary.")),
+    ("pack", ("Serialization", "`op pack self` — Direct C-ABI binary buffer serialization.")),
+    ("unpack", ("Serialization", "`op unpack self` — Direct C-ABI binary buffer deserialization.")),
     // Modifiers & ownership
     ("pure", ("Effects & Modifiers", "`pure def ...` — Proves at compile time that the function has no side effects and is eligible for Static Demotion (`M19`).")),
     ("comptime", ("Metaprogramming", "`comptime { ... }` — Evaluates the expression or block at compile time with zero runtime cost.")),

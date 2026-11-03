@@ -61,6 +61,12 @@ pub enum NodeKind {
     InterfaceDecl = 10,
     ExtendDecl = 11,
     ConstDecl = 12,
+    ConstructorDecl = 13,
+    DestructorDecl = 14,
+    ScopeDecl = 15,
+    IndexerDecl = 16,
+    DynamicMemberDecl = 17,
+    OperatorDecl = 18,
 
     // --- Statements & Control Flow (100..199) ---
     LetStmt = 100,
@@ -156,6 +162,12 @@ impl NodeKind {
             10 => Self::InterfaceDecl,
             11 => Self::ExtendDecl,
             12 => Self::ConstDecl,
+            13 => Self::ConstructorDecl,
+            14 => Self::DestructorDecl,
+            15 => Self::ScopeDecl,
+            16 => Self::IndexerDecl,
+            17 => Self::DynamicMemberDecl,
+            18 => Self::OperatorDecl,
             100 => Self::LetStmt,
             101 => Self::VarStmt,
             102 => Self::AssignStmt,
@@ -238,6 +250,12 @@ impl NodeKind {
             Self::InterfaceDecl => "InterfaceDecl",
             Self::ExtendDecl => "ExtendDecl",
             Self::ConstDecl => "ConstDecl",
+            Self::ConstructorDecl => "ConstructorDecl",
+            Self::DestructorDecl => "DestructorDecl",
+            Self::ScopeDecl => "ScopeDecl",
+            Self::IndexerDecl => "IndexerDecl",
+            Self::DynamicMemberDecl => "DynamicMemberDecl",
+            Self::OperatorDecl => "OperatorDecl",
             Self::LetStmt => "LetStmt",
             Self::VarStmt => "VarStmt",
             Self::AssignStmt => "AssignStmt",
@@ -446,6 +464,40 @@ impl BinaryOp {
     }
 }
 
+/// Milestone 30 & 31: Canonical Operator and Protocol Kind for `OperatorDecl`.
+#[repr(u16)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum OperatorKind {
+    BinaryLeft = 1,
+    BinaryRight = 2,
+    CompoundMut = 3,
+    UnaryPrefix = 4,
+    Equality = 5,
+    FunctorCall = 6,
+    Membership = 7,
+    TypeGuard = 8,
+    ImplicitCast = 9,
+    ExplicitCast = 10,
+    FormattedStr = 11,
+    Deconstruct = 12,
+    Clone = 13,
+    Hash = 14,
+    Pack = 15,
+    Unpack = 16,
+    SyncIterator = 17,
+    AsyncFuture = 18,
+    AsyncStream = 19,
+}
+
+/// Clauses for indexers (`self[...]`) and dynamic member dispatch (`self.(...)`).
+#[derive(Clone, Debug, Default)]
+pub struct AccessorClauses {
+    pub get_body: NodeId,
+    pub set_param: Option<(SymbolId, NodeId)>,
+    pub set_body: NodeId,
+    pub default_body: NodeId,
+}
+
 /// Hardware-packed **16-byte** C-ABI AST node (`4` nodes per 64-byte L1 cache line).
 /// Zero raw pointers, zero individual heap allocations, `Copy + Send + Sync`.
 #[repr(C, align(8))]
@@ -501,6 +553,14 @@ pub struct AstArena {
     pub record_fields: std::collections::HashMap<u32, Vec<(SymbolId, NodeId)>>,
     /// Optional connection / scope argument `NodeId` for `PolyglotBlock` (e.g. `postgresql(conn) { ... }` or `sql(conn) { ... }`).
     pub polyglot_conns: std::collections::HashMap<u32, NodeId>,
+    /// Constructor chaining target `NodeId` for `ConstructorDecl` (`self(params...) -> self(other...)`).
+    pub constructor_chains: std::collections::HashMap<u32, NodeId>,
+    /// Scoped context manager `(enter_body, exit_body)` for `ScopeDecl` (`scope self { enter: ... exit: ... }`).
+    pub scope_clauses: std::collections::HashMap<u32, (NodeId, NodeId)>,
+    /// Accessor clauses for `IndexerDecl` (`self[...]`) and `DynamicMemberDecl` (`self.(...)`).
+    pub accessor_clauses: std::collections::HashMap<u32, AccessorClauses>,
+    /// Operator symbol or identifier for `OperatorDecl`.
+    pub operator_symbols: std::collections::HashMap<u32, SymbolId>,
 }
 
 impl AstArena {
@@ -522,6 +582,10 @@ impl AstArena {
             for_then_nodes: std::collections::HashMap::new(),
             record_fields: std::collections::HashMap::new(),
             polyglot_conns: std::collections::HashMap::new(),
+            constructor_chains: std::collections::HashMap::new(),
+            scope_clauses: std::collections::HashMap::new(),
+            accessor_clauses: std::collections::HashMap::new(),
+            operator_symbols: std::collections::HashMap::new(),
         }
     }
 

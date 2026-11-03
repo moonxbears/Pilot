@@ -229,27 +229,35 @@ pub enum SyntaxKind {
     KwNone = 254,
     KwNull = 255,
     KwUndefined = 256,
+    KwSelf = 257,
+    KwOp = 258,
+    KwScope = 259,
+    KwEnter = 260,
+    KwExit = 261,
+    KwClone = 262,
+    KwPack = 263,
+    KwUnpack = 264,
 
-    // --- Delimiters & Single Character Punctuation (260..289) ---
-    LParen = 260,
-    RParen = 261,
-    LBracket = 262,
-    RBracket = 263,
-    LBrace = 264,
-    RBrace = 265,
-    Colon = 266,
-    Semicolon = 267,
-    Comma = 268,
-    Dot = 269,
-    At = 270,
-    Question = 271,
-    Exclamation = 272,
-    Tilde = 273,
-    Dollar = 274,
-    Backquote = 275,
-    Underscore = 276,
-    Walrus = 277,
-    ArrowLeft = 278,
+    // --- Delimiters & Single Character Punctuation (270..289) ---
+    LParen = 270,
+    RParen = 271,
+    LBracket = 272,
+    RBracket = 273,
+    LBrace = 274,
+    RBrace = 275,
+    Colon = 276,
+    Semicolon = 277,
+    Comma = 278,
+    Dot = 279,
+    At = 280,
+    Question = 281,
+    Exclamation = 282,
+    Tilde = 283,
+    Dollar = 284,
+    Backquote = 285,
+    Underscore = 286,
+    Walrus = 287,
+    ArrowLeft = 288,
 
     // --- Operators & Arrows (290..349) ---
     Plus = 290,
@@ -323,6 +331,12 @@ pub enum SyntaxKind {
     ParamList = 412,
     TypeParam = 413,
     TypeParamList = 414,
+    ConstructorDecl = 415,
+    DestructorDecl = 416,
+    ScopeDecl = 417,
+    IndexerDecl = 418,
+    DynamicMemberDecl = 419,
+    OperatorDecl = 420,
 
     // --- Statements (430..459) ---
     LetStmt = 430,
@@ -411,13 +425,13 @@ impl SyntaxKind {
     #[inline]
     pub fn is_keyword(self) -> bool {
         (self as u16) >= (SyntaxKind::KwLet as u16)
-            && (self as u16) <= (SyntaxKind::KwUndefined as u16)
+            && (self as u16) <= (SyntaxKind::KwUnpack as u16)
     }
 
     #[inline]
     pub fn is_contextual_keyword(self) -> bool {
         (self as u16) >= (SyntaxKind::KwAsync as u16)
-            && (self as u16) <= (SyntaxKind::KwUndefined as u16)
+            && (self as u16) <= (SyntaxKind::KwUnpack as u16)
     }
 
     #[inline]
@@ -686,6 +700,14 @@ impl SyntaxKind {
             TokenKind::KwNone => SyntaxKind::KwNone,
             TokenKind::KwNull => SyntaxKind::KwNull,
             TokenKind::KwUndefined => SyntaxKind::KwUndefined,
+            TokenKind::KwSelf => SyntaxKind::KwSelf,
+            TokenKind::KwOp => SyntaxKind::KwOp,
+            TokenKind::KwScope => SyntaxKind::KwScope,
+            TokenKind::KwEnter => SyntaxKind::KwEnter,
+            TokenKind::KwExit => SyntaxKind::KwExit,
+            TokenKind::KwClone => SyntaxKind::KwClone,
+            TokenKind::KwPack => SyntaxKind::KwPack,
+            TokenKind::KwUnpack => SyntaxKind::KwUnpack,
 
             TokenKind::LParen => SyntaxKind::LParen,
             TokenKind::RParen => SyntaxKind::RParen,
@@ -778,6 +800,12 @@ impl SyntaxKind {
             NodeKind::ImportDecl => SyntaxKind::ImportDecl,
             NodeKind::FromImportDecl => SyntaxKind::FromImportDecl,
             NodeKind::ConstDecl => SyntaxKind::ConstDecl,
+            NodeKind::ConstructorDecl => SyntaxKind::ConstructorDecl,
+            NodeKind::DestructorDecl => SyntaxKind::DestructorDecl,
+            NodeKind::ScopeDecl => SyntaxKind::ScopeDecl,
+            NodeKind::IndexerDecl => SyntaxKind::IndexerDecl,
+            NodeKind::DynamicMemberDecl => SyntaxKind::DynamicMemberDecl,
+            NodeKind::OperatorDecl => SyntaxKind::OperatorDecl,
             NodeKind::LetStmt => SyntaxKind::LetStmt,
             NodeKind::VarStmt => SyntaxKind::VarStmt,
             NodeKind::ReturnStmt => SyntaxKind::ReturnStmt,
