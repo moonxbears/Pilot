@@ -183,8 +183,8 @@ let mode = "release"
 
     #[test]
     fn test_dot_classification_and_disambiguation() {
-        // InfixDot: preceded immediately by ident, number, ), ], }
-        let code_infix = "obj.field; tuple.0; arr[0].len(); (x).y; {k: v}.m";
+        // InfixDot: preceded immediately by ident, number, ), ], }, or string/char literal
+        let code_infix = "obj.field; tuple.0; arr[0].len(); (x).y; {k: v}.m; \"str\".len()";
         let tape_infix = tokenize(code_infix);
         for i in 0..tape_infix.len() {
             if tape_infix.kind(i) == TokenKind::InfixDot {

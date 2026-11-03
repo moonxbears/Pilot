@@ -69,39 +69,48 @@ fn print_version() {
 }
 
 fn main() {
-    let args: Vec<String> = env::args().skip(1).collect();
-    if args.is_empty() {
-        print_help();
-        return;
-    }
+    const STACK_SIZE: usize = 32 * 1024 * 1024;
+    let run = || {
+        let args: Vec<String> = env::args().skip(1).collect();
+        if args.is_empty() {
+            print_help();
+            return;
+        }
 
-    match args[0].as_str() {
-        "-v" | "--version" | "version" => print_version(),
-        "-h" | "--help" | "help" => print_help(),
-        "--emit" | "emit" => cmd_emit(&args[1..]),
-        "--from" | "from" => cmd_from(&args[1..]),
-        "run" => cmd_run(&args[1..]),
-        "build" => cmd_build(&args[1..]),
-        "check" => cmd_check(&args[1..]),
-        "fmt" => cmd_fmt(&args[1..]),
-        "test" => cmd_test(&args[1..]),
-        "repl" => cmd_repl(),
-        "pkg" => cmd_pkg(&args[1..]),
-        "venv" => cmd_venv(&args[1..]),
-        "debug" => cmd_debug(&args[1..]),
-        "lsp" => cmd_lsp(&args[1..]),
-        "perf" => cmd_perf(&args[1..]),
-        "bench" => cmd_bench(&args[1..]),
-        "compile" => cmd_compile(&args[1..]),
-        unknown => {
-            if unknown.ends_with(".pilot") || unknown.ends_with(".pilc") {
-                cmd_run(&args);
-            } else {
-                eprintln!("error: unknown command '{}'. Run 'pilot --help' for usage.", unknown);
-                std::process::exit(1);
+        match args[0].as_str() {
+            "-v" | "--version" | "version" => print_version(),
+            "-h" | "--help" | "help" => print_help(),
+            "--emit" | "emit" => cmd_emit(&args[1..]),
+            "--from" | "from" => cmd_from(&args[1..]),
+            "run" => cmd_run(&args[1..]),
+            "build" => cmd_build(&args[1..]),
+            "check" => cmd_check(&args[1..]),
+            "fmt" => cmd_fmt(&args[1..]),
+            "test" => cmd_test(&args[1..]),
+            "repl" => cmd_repl(),
+            "pkg" => cmd_pkg(&args[1..]),
+            "venv" => cmd_venv(&args[1..]),
+            "debug" => cmd_debug(&args[1..]),
+            "lsp" => cmd_lsp(&args[1..]),
+            "perf" => cmd_perf(&args[1..]),
+            "bench" => cmd_bench(&args[1..]),
+            "compile" => cmd_compile(&args[1..]),
+            unknown => {
+                if unknown.ends_with(".pilot") || unknown.ends_with(".pilc") {
+                    cmd_run(&args);
+                } else {
+                    eprintln!("error: unknown command '{}'. Run 'pilot --help' for usage.", unknown);
+                    std::process::exit(1);
+                }
             }
         }
-    }
+    };
+
+    let builder = std::thread::Builder::new().name("pilot_main".to_string()).stack_size(STACK_SIZE);
+    let handler = builder.spawn(run).expect("failed to spawn main thread with 32MB stack");
+    handler.join().unwrap_or_else(|e| {
+        std::panic::resume_unwind(e);
+    });
 }
 
 fn cmd_run(args: &[String]) {
@@ -230,25 +239,16 @@ fn cmd_run(args: &[String]) {
             }
         }
         Err(_) => {
-            // High-fidelity AST execution engine
+            // High-performance interpreter fallback: execute AST directly via PilotDebugger
             let mut debugger = pilot_dap::PilotDebugger::new();
-            if debugger.load_program(file_path).is_ok() {
-                while debugger.state != pilot_dap::DebuggerState::Terminated {
-                    debugger.step_one();
-                    for out in std::mem::take(&mut debugger.pending_outputs) {
-                        print!("{}", out);
-                    }
-                }
-            } else {
-                // Fallback to VM
-                let binary = pilot_vm::BytecodeCompiler::compile(&arena, arena.root);
-                let mut vm = pilot_vm::PilVirtualMachine::new();
-                vm.load_binary(binary);
-                let val = vm.run();
-                if let Some(i) = val.as_int() {
-                    if i != 0 {
-                        println!("RESULT: {}", i);
-                    }
+            if let Err(e) = debugger.load_program(file_path) {
+                eprintln!("error: failed to load program '{}': {}", file_path, e);
+                std::process::exit(1);
+            }
+            while debugger.state != pilot_dap::DebuggerState::Terminated {
+                debugger.step_one();
+                for out in std::mem::take(&mut debugger.pending_outputs) {
+                    print!("{}", out);
                 }
             }
         }

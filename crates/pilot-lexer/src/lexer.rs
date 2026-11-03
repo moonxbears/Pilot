@@ -603,7 +603,7 @@ impl<'a> Lexer<'a> {
 
                 if start + 1 < self.bytes.len() && self.bytes[start + 1].is_ascii_digit() {
                     let is_infix = start > 0 && match self.bytes[start - 1] {
-                        b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b')' | b']' | b'}' => true,
+                        b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b')' | b']' | b'}' | b'"' | b'\'' => true,
                         _ => false,
                     };
                     if !is_infix {
@@ -618,7 +618,7 @@ impl<'a> Lexer<'a> {
                     TokenKind::PrefixDot
                 } else {
                     match self.bytes[start - 1] {
-                        b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b')' | b']' | b'}' => TokenKind::InfixDot,
+                        b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b')' | b']' | b'}' | b'"' | b'\'' => TokenKind::InfixDot,
                         _ => TokenKind::PrefixDot,
                     }
                 };

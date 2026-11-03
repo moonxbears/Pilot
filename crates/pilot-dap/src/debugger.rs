@@ -1962,7 +1962,7 @@ impl PilotDebugger {
                     return (PilotVal::from_str(&full_name), target_name);
                 }
                 if member_name == "shout" {
-                    let shouted = format!("{}!", target_str.trim_matches('"'));
+                    let shouted = format!("{}!", target_str.trim_matches('"').to_uppercase());
                     return (PilotVal::from_str(&shouted), "str".to_string());
                 }
                 if member_name == "event_count" || member_name == "count" {
