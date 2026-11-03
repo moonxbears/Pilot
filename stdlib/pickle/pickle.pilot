@@ -41,7 +41,7 @@ const OP_STOP: i64       = 46;  // '.'
 /// Exception raised when an error occurs during pickling or unpickling.
 /// Python reference: pickle.PickleError
 class PickleError {
-    def __init__(self, msg: str) {
+    self(msg: str) {
         self.msg = msg;
     }
 
@@ -53,7 +53,7 @@ class PickleError {
 /// Exception raised when an object cannot be pickled.
 /// Python reference: pickle.PicklingError
 class PicklingError {
-    def __init__(self, msg: str) {
+    self(msg: str) {
         self.msg = msg;
     }
 
@@ -65,7 +65,7 @@ class PicklingError {
 /// Exception raised when an object cannot be unpickled.
 /// Python reference: pickle.UnpicklingError
 class UnpicklingError {
-    def __init__(self, msg: str) {
+    self(msg: str) {
         self.msg = msg;
     }
 
@@ -307,7 +307,7 @@ def _deserialize_value(bytes_data, pos: i64) -> (any, i64) {
 /// Pickler object encapsulating the state of a binary serialization.
 /// Python reference: pickle.Pickler(file, protocol=None, *, fix_imports=True, buffer_callback=None)
 class Pickler {
-    def __init__(self, protocol: i64 = 4) {
+    self(protocol: i64 = 4) {
         self.protocol = protocol;
     }
 
@@ -322,7 +322,7 @@ class Pickler {
 /// Unpickler object reading from a serialized byte stream.
 /// Python reference: pickle.Unpickler(file, *, fix_imports=True, encoding="ASCII", errors="strict", buffers=None)
 class Unpickler {
-    def __init__(self, data: [i64]) {
+    self(data: [i64]) {
         self.data = data;
     }
 

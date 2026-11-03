@@ -12,7 +12,7 @@ import std.os as std_os;
 // ============================================================================
 
 class Path {
-    def __init__(self, raw_path: str = "") {
+    self(raw_path: str = "") {
         if len(raw_path) == 0 {
             self.raw = ".";
         } else {

@@ -58,7 +58,7 @@ class DiagnosticSession {
     var error_count: int = 0;
     var is_active: bool = true;
 
-    def __init__(self, id: int, node: str) {
+    self(id: int, node: str) {
         this.session_id = id;
         this.target_node = node;
     }

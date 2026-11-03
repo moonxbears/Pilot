@@ -18,7 +18,7 @@ import fs as std_fs;
 /// Subclass of ParseError / Exception raised when JSON decoding fails.
 /// Python reference: json.JSONDecodeError(msg, doc, pos)
 class JSONDecodeError {
-    def __init__(self, msg: str, doc: str = "", pos: i64 = 0, lineno: i64 = 1, colno: i64 = 1) {
+    self(msg: str, doc: str = "", pos: i64 = 0, lineno: i64 = 1, colno: i64 = 1) {
         self.msg = msg;
         self.doc = doc;
         self.pos = pos;
@@ -78,7 +78,7 @@ def dump(obj, file_path: str, indent: i64 = -1, sort_keys: bool = false) -> bool
 /// Extensible JSON decoder class.
 /// Python reference: json.JSONDecoder(*, object_hook=None, parse_float=None, parse_int=None, parse_constant=None, strict=True, object_pairs_hook=None)
 class JSONDecoder {
-    def __init__(self, strict_unique_keys: bool = false) {
+    self(strict_unique_keys: bool = false) {
         self.strict_unique_keys = strict_unique_keys;
     }
 
@@ -90,7 +90,7 @@ class JSONDecoder {
 /// Extensible JSON encoder class.
 /// Python reference: json.JSONEncoder(*, skipkeys=False, ensure_ascii=True, check_circular=True, sort_keys=False, indent=None, separators=None, default=None)
 class JSONEncoder {
-    def __init__(self, indent: i64 = -1, sort_keys: bool = false) {
+    self(indent: i64 = -1, sort_keys: bool = false) {
         self.indent = indent;
         self.sort_keys = sort_keys;
     }

@@ -50,7 +50,7 @@ class SensorRig {
     var raw_voltage: float;
     var cal_factor: float;
 
-    def __init__(self, v: float, cal: float) {
+    self(v: float, cal: float) {
         this.raw_voltage = v;
         this.cal_factor = cal;
     }

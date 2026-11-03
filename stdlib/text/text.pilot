@@ -20,7 +20,7 @@ extern "c" lib "pilot_rt" {
 }
 
 class StrSlice {
-    def __init__(self, utf8_buf) {
+    self(utf8_buf) {
         self._buf = utf8_buf;
     }
 
@@ -84,7 +84,7 @@ def str_slice_from_bytes(utf8_buf) {
 
 // Comptime-compatible Thompson NFA -> Powerset DFA Regex Wrapper
 class Regex {
-    def __init__(self, pattern_or_dfa) {
+    self(pattern_or_dfa) {
         if type_of(pattern_or_dfa) == "string" {
             self.dfa = compile_regex(pattern_or_dfa);
         } else {

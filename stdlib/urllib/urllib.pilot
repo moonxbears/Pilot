@@ -15,7 +15,7 @@ extern "c" lib "pilot_rt" {
 }
 
 class URLError {
-    def __init__(reason: str) {
+    self(reason: str) {
         self.reason = reason;
         self.args = [reason];
     }
@@ -26,7 +26,7 @@ class URLError {
 }
 
 class HTTPError {
-    def __init__(url: str, code: i64, msg: str, hdrs: map, fp: any) {
+    self(url: str, code: i64, msg: str, hdrs: map, fp: any) {
         self.url = url;
         self.code = code;
         self.msg = msg;
@@ -265,7 +265,7 @@ def parse_qsl(qs: str, keep_blank_values: bool = false) -> [[str]] {
 }
 
 class ParseResult {
-    def __init__(scheme: str, netloc: str, path: str, params: str, query: str, fragment: str) {
+    self(scheme: str, netloc: str, path: str, params: str, query: str, fragment: str) {
         self.scheme = scheme;
         self.netloc = netloc;
         self.path = path;
@@ -338,7 +338,7 @@ class ParseResult {
 }
 
 class SplitResult {
-    def __init__(scheme: str, netloc: str, path: str, query: str, fragment: str) {
+    self(scheme: str, netloc: str, path: str, query: str, fragment: str) {
         self.scheme = scheme;
         self.netloc = netloc;
         self.path = path;
@@ -536,7 +536,7 @@ def urljoin(base: str, url: str, allow_fragments: bool = true) -> str {
 // ============================================================================
 
 class Request {
-    def __init__(
+    self(
         url: str,
         data: any = none,
         headers: map = {},
@@ -586,7 +586,7 @@ class Request {
 }
 
 class HTTPResponse {
-    def __init__(url: str, status: i64, reason: str, headers: map, body: str) {
+    self(url: str, status: i64, reason: str, headers: map, body: str) {
         self.url = url;
         self.status = status;
         self.code = status;

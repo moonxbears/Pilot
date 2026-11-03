@@ -13,7 +13,7 @@ extern "c" lib "pilot_rt" {
 }
 
 class AssertionError {
-    def __init__(message: str = "") {
+    self(message: str = "") {
         self.message = message;
         self.args = [message];
     }
@@ -24,7 +24,7 @@ class AssertionError {
 }
 
 class SkipTest {
-    def __init__(reason: str = "") {
+    self(reason: str = "") {
         self.reason = reason;
         self.args = [reason];
     }
@@ -39,7 +39,7 @@ class SkipTest {
 // ============================================================================
 
 class TestResult {
-    def __init__() {
+    self() {
         self.testsRun = 0;
         self.failures = [];
         self.errors = [];
@@ -89,7 +89,7 @@ class TestResult {
 // ============================================================================
 
 class TestCase {
-    def __init__(methodName: str = "runTest") {
+    self(methodName: str = "runTest") {
         self._testMethodName = methodName;
     }
 
@@ -291,7 +291,7 @@ class TestCase {
 // ============================================================================
 
 class TestSuite {
-    def __init__(tests: [any] = []) {
+    self(tests: [any] = []) {
         self._tests = [];
         for t in tests {
             self._tests.append(t);
@@ -329,7 +329,7 @@ class TestSuite {
 // ============================================================================
 
 class TextTestRunner {
-    def __init__(verbosity: i64 = 1) {
+    self(verbosity: i64 = 1) {
         self.verbosity = verbosity;
     }
 

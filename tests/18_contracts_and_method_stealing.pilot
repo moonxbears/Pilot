@@ -50,7 +50,7 @@ assert mlist.contains(100) == true;
 
 // 3. Contract Forwarding: IEquatable
 class Entity(IEquatable) {
-    def __init__(self, key, value) {
+    self(key, value) {
         self.key = key;
         self.value = value;
         IEquatable.Contracts = key;

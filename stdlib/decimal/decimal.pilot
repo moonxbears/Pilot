@@ -22,7 +22,7 @@ const ROUND_UP: str        = "ROUND_UP";
 /// Context controlling precision and rounding rules.
 /// Python reference: decimal.Context(prec=28, rounding=ROUND_HALF_EVEN)
 class Context {
-    def __init__(self, prec: i64 = 28, rounding: str = "ROUND_HALF_EVEN") {
+    self(prec: i64 = 28, rounding: str = "ROUND_HALF_EVEN") {
         self.prec = prec;
         self.rounding = rounding;
     }
@@ -114,7 +114,7 @@ def _parse_decimal_str(raw: str) -> (i64, i64) {
 /// Floating or fixed-point decimal number.
 /// Python reference: decimal.Decimal(value="0", context=None)
 class Decimal {
-    def __init__(self, value = "0") {
+    self(value = "0") {
         let kind: str = typeof(value);
         if kind == "i64" {
             self._int_val = value;

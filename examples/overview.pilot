@@ -32,7 +32,7 @@ enum TelemetryState {
 }
 
 class User {
-    fn __init__(self, id: int, name: str, email: str, age: int, is_active: bool) -> void {
+    self(id: int, name: str, email: str, age: int, is_active: bool) {
         self.id = id
         self.name = name
         self.email = email
@@ -42,7 +42,7 @@ class User {
 }
 
 class Order {
-    fn __init__(self, id: int, user_id: int, total: float, created_at: int) -> void {
+    self(id: int, user_id: int, total: float, created_at: int) {
         self.id = id
         self.user_id = user_id
         self.total = total

@@ -79,7 +79,7 @@ assert restored_payload["service"] == "api";
 assert restored_payload["port"] == 8080;
 
 class AgentConfig {
-    def __init__(self, id, active) {
+    self(id, active) {
         self.id = id;
         self.active = active;
     }

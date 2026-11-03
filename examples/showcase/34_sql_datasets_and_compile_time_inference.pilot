@@ -56,7 +56,7 @@ println("\n[3] In-Memory Relational Table Operations:");
 class Table {
     var rows: list = [];
 
-    def __init__(self, initial_records: list = []) {
+    self(initial_records: list = []) {
         self.rows = initial_records;
     }
 

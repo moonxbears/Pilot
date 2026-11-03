@@ -20,7 +20,7 @@ assert(primalVal == 125.0 and dMass == 12.5 and dVel == 50.0, "Tuple destructuri
 
 // ─── 2. Mode 7: Copy-on-Write Transactional Effect Dry-Run (`fn!?(a, b)`) ───
 class RecordBox:
-    def __init__(self, v: int):
+    self(v: int) :
         self.Val = v
 
 def MutateRecord(rec, newVal: int) -> int:
@@ -44,7 +44,7 @@ assert(rec.Val == 42, "After Commit(), live record field is updated to 42")
 
 // ─── 3. Mode 5: Glitch-Free Reactive Signal Graph (`fn!^(a, b)`) ───
 class Ship:
-    def __init__(self, m: float, v: float):
+    self(m: float, v: float) :
         self.Mass = m
         self.Vel = v
 

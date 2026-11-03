@@ -99,7 +99,7 @@ def status_phrase(code: i64) -> str {
 }
 
 class HTTPStatus {
-    def __init__(value: i64, phrase: str, description: str = "") {
+    self(value: i64, phrase: str, description: str = "") {
         self.value = value;
         self.phrase = phrase;
         self.description = description;
@@ -115,7 +115,7 @@ class HTTPStatus {
 // ============================================================================
 
 class HTTPException {
-    def __init__(message: str = "") {
+    self(message: str = "") {
         self.message = message;
         self.args = [message];
     }
@@ -126,37 +126,37 @@ class HTTPException {
 }
 
 class NotConnected {
-    def __init__(message: str = "Not connected") {
+    self(message: str = "Not connected") {
         self.message = message;
     }
 }
 
 class InvalidURL {
-    def __init__(message: str = "Invalid URL") {
+    self(message: str = "Invalid URL") {
         self.message = message;
     }
 }
 
 class CannotSendRequest {
-    def __init__(message: str = "Cannot send request") {
+    self(message: str = "Cannot send request") {
         self.message = message;
     }
 }
 
 class CannotSendHeader {
-    def __init__(message: str = "Cannot send header") {
+    self(message: str = "Cannot send header") {
         self.message = message;
     }
 }
 
 class ResponseNotReady {
-    def __init__(message: str = "Response not ready") {
+    self(message: str = "Response not ready") {
         self.message = message;
     }
 }
 
 class BadStatusLine {
-    def __init__(line: str) {
+    self(line: str) {
         self.line = line;
         self.message = f"Bad status line: {line}";
     }
@@ -167,7 +167,7 @@ class BadStatusLine {
 // ============================================================================
 
 class HTTPResponse {
-    def __init__(status: i64, reason: str, headers: map, body: str, version: i64 = 11) {
+    self(status: i64, reason: str, headers: map, body: str, version: i64 = 11) {
         self.status = status;
         self.code = status;
         self.reason = reason;
@@ -216,7 +216,7 @@ class HTTPResponse {
 // ============================================================================
 
 class HTTPConnection {
-    def __init__(host: str, port: i64 = 80, timeout: f64 = 30.0) {
+    self(host: str, port: i64 = 80, timeout: f64 = 30.0) {
         self.host = host;
         self.port = port;
         self.timeout = timeout;
@@ -303,7 +303,7 @@ class HTTPConnection {
 }
 
 class HTTPSConnection {
-    def __init__(host: str, port: i64 = 443, timeout: f64 = 30.0) {
+    self(host: str, port: i64 = 443, timeout: f64 = 30.0) {
         self.host = host;
         self.port = port;
         self.timeout = timeout;
@@ -393,7 +393,7 @@ class HTTPSConnection {
 // ============================================================================
 
 class Morsel {
-    def __init__(key: str, value: str) {
+    self(key: str, value: str) {
         self.key = key;
         self.value = value;
         self.coded_value = value;
@@ -418,7 +418,7 @@ class Morsel {
 }
 
 class SimpleCookie {
-    def __init__(rawdata: str = "") {
+    self(rawdata: str = "") {
         self._morsels = {};
         if len(rawdata) > 0 {
             self.load(rawdata);
@@ -465,7 +465,7 @@ class SimpleCookie {
 // ============================================================================
 
 class BaseHTTPRequestHandler {
-    def __init__(request_raw: str, client_address: [any] = ["127.0.0.1", 0]) {
+    self(request_raw: str, client_address: [any] = ["127.0.0.1", 0]) {
         self.request_raw = request_raw;
         self.client_address = client_address;
         self.command = "GET";
@@ -557,7 +557,7 @@ class BaseHTTPRequestHandler {
 }
 
 class HTTPServer {
-    def __init__(server_address: [any], RequestHandlerClass: any = none) {
+    self(server_address: [any], RequestHandlerClass: any = none) {
         self.server_address = server_address;
         self.server_name = str(server_address[0]);
         self.server_port = int(server_address[1]);

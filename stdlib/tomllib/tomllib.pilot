@@ -13,7 +13,7 @@ import fs as std_fs;
 /// Subclass of ParseError raised when a TOML document cannot be parsed.
 /// Python reference: tomllib.TOMLDecodeError
 class TOMLDecodeError {
-    def __init__(self, msg: str, line: i64 = 1, col: i64 = 1) {
+    self(msg: str, line: i64 = 1, col: i64 = 1) {
         self.msg = msg;
         self.line = line;
         self.col = col;

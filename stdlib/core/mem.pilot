@@ -126,7 +126,7 @@ def sizeof(type_name: str) -> i64 {
 
 // Half-open [start, end_idx) range window for work-stealing & zero-allocation index partitioning
 class RangeWindow {
-    def __init__(self, start: i64, end_idx: i64) {
+    self(start: i64, end_idx: i64) {
         self.start = start;
         if end_idx < start {
             self.end_idx = start;

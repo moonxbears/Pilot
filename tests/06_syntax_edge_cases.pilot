@@ -10,7 +10,7 @@ def add_numbers(a: int, b: int) -> int {
 
 # Braced class
 class Rectangle {
-    def __init__(self, w: float, h: float) -> void {
+    self(w: float, h: float) {
         self.w = w;
         self.h = h;
     }

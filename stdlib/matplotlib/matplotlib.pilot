@@ -13,7 +13,7 @@ extern "c" lib "pilot_rt" {
 }
 
 class PlotData {
-    def __init__(x: [f64], y: [f64], label: str = "", marker: str = "*", color: str = "blue", kind: str = "line") {
+    self(x: [f64], y: [f64], label: str = "", marker: str = "*", color: str = "blue", kind: str = "line") {
         self.x = x;
         self.y = y;
         self.label = label;
@@ -28,7 +28,7 @@ class PlotData {
 // ============================================================================
 
 class Figure {
-    def __init__(width: i64 = 60, height: i64 = 15) {
+    self(width: i64 = 60, height: i64 = 15) {
         self.width = width;
         self.height = height;
         self.title_str = "";

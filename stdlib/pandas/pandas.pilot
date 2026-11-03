@@ -16,7 +16,7 @@ extern "c" lib "pilot_rt" {
 // ============================================================================
 
 class Series {
-    def __init__(data: [any], index: [any] = [], name: str = "") {
+    self(data: [any], index: [any] = [], name: str = "") {
         self.data = [];
         for item in data {
             self.data.append(item);
@@ -163,7 +163,7 @@ class Series {
 // ============================================================================
 
 class DataFrame {
-    def __init__(data: map, columns: [str] = [], index: [any] = []) {
+    self(data: map, columns: [str] = [], index: [any] = []) {
         self.data = {};
         self.columns = [];
         self.index = [];

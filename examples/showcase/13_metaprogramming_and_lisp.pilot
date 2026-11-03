@@ -13,7 +13,7 @@ class SystemCoordinate {
     let x: float;
     let y: float;
 
-    def __init__(self, x: float, y: float) {
+    self(x: float, y: float) {
         self.x = x;
         self.y = y;
     }

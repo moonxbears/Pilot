@@ -58,7 +58,7 @@ class HttpResponse {
     var content_type: str;
     var body_length: int;
 
-    def __init__(self, code: int, text: str, ctype: str, len: int) {
+    self(code: int, text: str, ctype: str, len: int) {
         this.status_code = code;
         this.status_text = text;
         this.content_type = ctype;

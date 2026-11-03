@@ -31,7 +31,7 @@ def sleep(seconds: f64) {
 // ============================================================================
 
 class Timer {
-    def __init__(stmt: any = none, setup: any = none, timer: any = none) {
+    self(stmt: any = none, setup: any = none, timer: any = none) {
         self.stmt = stmt;
         self.setup = setup;
         self.timer = timer;

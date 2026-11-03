@@ -72,7 +72,7 @@ const has_ipv6: bool = true;
 /// Base exception for socket-related errors.
 /// Python reference: socket.error
 class SocketError {
-    def __init__(self, msg: str, errno: i64 = 0) {
+    self(msg: str, errno: i64 = 0) {
         self.msg = msg;
         self.errno = errno;
     }
@@ -85,7 +85,7 @@ class SocketError {
 /// Raised for address-related errors by getaddrinfo() and getnameinfo().
 /// Python reference: socket.gaierror
 class GaiError {
-    def __init__(self, msg: str, errno: i64 = 0) {
+    self(msg: str, errno: i64 = 0) {
         self.msg = msg;
         self.errno = errno;
     }
@@ -98,7 +98,7 @@ class GaiError {
 /// Raised when a socket timeout occurs.
 /// Python reference: socket.timeout
 class TimeoutError {
-    def __init__(self, msg: str = "timed out") {
+    self(msg: str = "timed out") {
         self.msg = msg;
     }
 
@@ -117,7 +117,7 @@ def _alloc_socket_fd() -> i64 {
 /// Represents a socket endpoint for network communication.
 /// Python reference: socket.socket(family=AF_INET, type=SOCK_STREAM, proto=0, fileno=None)
 class Socket {
-    def __init__(self, family: i64 = 2, type: i64 = 1, proto: i64 = 0, fileno: i64 = -1) {
+    self(family: i64 = 2, type: i64 = 1, proto: i64 = 0, fileno: i64 = -1) {
         self.family = family;
         self.type = type;
         self.proto = proto;

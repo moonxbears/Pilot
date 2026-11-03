@@ -88,7 +88,7 @@ def _sigmoid(z: f64) -> f64 {
 // ============================================================================
 
 class StandardScaler {
-    def __init__(with_mean: bool = true, with_std: bool = true) {
+    self(with_mean: bool = true, with_std: bool = true) {
         self.with_mean = with_mean;
         self.with_std = with_std;
         self.mean_ = [];
@@ -172,7 +172,7 @@ class StandardScaler {
 }
 
 class MinMaxScaler {
-    def __init__(feature_min: f64 = 0.0, feature_max: f64 = 1.0) {
+    self(feature_min: f64 = 0.0, feature_max: f64 = 1.0) {
         self.feature_min = feature_min;
         self.feature_max = feature_max;
         self.data_min_ = [];
@@ -229,7 +229,7 @@ class MinMaxScaler {
 }
 
 class LabelEncoder {
-    def __init__() {
+    self() {
         self.classes_ = [];
     }
 
@@ -399,7 +399,7 @@ def f1_score(y_true: any, y_pred: any) -> f64 {
 // ============================================================================
 
 class LinearRegression {
-    def __init__(fit_intercept: bool = true) {
+    self(fit_intercept: bool = true) {
         self.fit_intercept = fit_intercept;
         self.coef_ = [];
         self.intercept_ = 0.0;
@@ -469,7 +469,7 @@ class LinearRegression {
 }
 
 class LogisticRegression {
-    def __init__(learning_rate: f64 = 0.1, max_iter: i64 = 500) {
+    self(learning_rate: f64 = 0.1, max_iter: i64 = 500) {
         self.learning_rate = learning_rate;
         self.max_iter = max_iter;
         self.coef_ = [];
@@ -553,7 +553,7 @@ class LogisticRegression {
 // ============================================================================
 
 class KNeighborsClassifier {
-    def __init__(n_neighbors: i64 = 5) {
+    self(n_neighbors: i64 = 5) {
         self.n_neighbors = n_neighbors;
         self.X_train_ = [];
         self.y_train_ = [];
@@ -628,7 +628,7 @@ class KNeighborsClassifier {
 // ============================================================================
 
 class KMeans {
-    def __init__(n_clusters: i64 = 3, max_iter: i64 = 100, tol: f64 = 0.0001) {
+    self(n_clusters: i64 = 3, max_iter: i64 = 100, tol: f64 = 0.0001) {
         self.n_clusters = n_clusters;
         self.max_iter = max_iter;
         self.tol = tol;
@@ -790,7 +790,7 @@ def train_test_split(
 }
 
 class KFold {
-    def __init__(n_splits: i64 = 5, shuffle: bool = false) {
+    self(n_splits: i64 = 5, shuffle: bool = false) {
         self.n_splits = n_splits;
         self.shuffle = shuffle;
     }

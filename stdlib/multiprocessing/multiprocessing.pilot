@@ -24,7 +24,7 @@ def _next_pid() -> i64 {
 /// Process object representing an activity run in a separate OS process.
 /// Python reference: multiprocessing.Process(group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None)
 class Process {
-    def __init__(self, target = none, name: str = "", args = [], daemon: bool = false) {
+    self(target = none, name: str = "", args = [], daemon: bool = false) {
         self.target = target;
         self.pid: i64 = _next_pid();
         self.name: str = if len(name) > 0 { name } else { f"Process-{self.pid}" };
@@ -139,7 +139,7 @@ def cpu_count() -> i64 {
 /// Inter-process FIFO queue.
 /// Python reference: multiprocessing.Queue(maxsize=0)
 class Queue {
-    def __init__(self, maxsize: i64 = 0) {
+    self(maxsize: i64 = 0) {
         self._maxsize = maxsize;
         self._items = [];
     }
@@ -189,7 +189,7 @@ class Queue {
 /// Connection endpoint of a duplex Pipe.
 /// Python reference: multiprocessing.connection.Connection
 class PipeConnection {
-    def __init__(self) {
+    self() {
         self._buffer = [];
         self._closed = false;
     }
@@ -234,7 +234,7 @@ def Pipe(duplex: bool = true) -> (PipeConnection, PipeConnection) {
 /// Process worker pool executing tasks in parallel across CPU cores.
 /// Python reference: multiprocessing.Pool(processes=None, initializer=None, initargs=(), maxtasksperchild=None, context=None)
 class Pool {
-    def __init__(self, processes: i64 = -1) {
+    self(processes: i64 = -1) {
         let n: i64 = if processes > 0 { processes } else { std_os.cpu_count() };
         self.num_workers: i64 = if n > 0 { n } else { 1 };
         self._closed = false;
@@ -293,7 +293,7 @@ class Pool {
 /// Shared memory scalar value container.
 /// Python reference: multiprocessing.Value(typecode_or_type, *args, lock=True, ctx=None)
 class Value {
-    def __init__(self, typecode: str, value = 0) {
+    self(typecode: str, value = 0) {
         self.typecode = typecode;
         self.value = value;
     }
@@ -302,7 +302,7 @@ class Value {
 /// Shared memory array container.
 /// Python reference: multiprocessing.Array(typecode_or_type, size_or_initializer, *, lock=True, ctx=None)
 class Array {
-    def __init__(self, typecode: str, items = []) {
+    self(typecode: str, items = []) {
         self.typecode = typecode;
         self.items = [x for x in items];
     }

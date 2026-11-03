@@ -19,8 +19,7 @@ const QUOTE_NONE: i64 = 3;
 /// Dialect definition controlling formatting parameters.
 /// Python reference: csv.Dialect
 class Dialect {
-    def __init__(
-        self,
+    self(
         delimiter: str = ",",
         quotechar: str = "\"",
         escapechar: str = "",
@@ -60,7 +59,7 @@ def unix_dialect() -> Dialect {
 /// Error raised by CSV reader and writer operations.
 /// Python reference: csv.Error
 class CSVError {
-    def __init__(self, msg: str, line: i64 = 1, col: i64 = 1) {
+    self(msg: str, line: i64 = 1, col: i64 = 1) {
         self.msg = msg;
         self.line = line;
         self.col = col;
@@ -99,7 +98,7 @@ def dumps(rows, delimiter: str = ",", lineterminator: str = "\r\n") -> str {
 /// CSV Reader object iterating or collecting tabular rows.
 /// Python reference: csv.reader(csvfile, dialect='excel', **fmtparams)
 class Reader {
-    def __init__(self, data: str, delimiter: str = ",", quotechar: str = "\"", dialect = none) {
+    self(data: str, delimiter: str = ",", quotechar: str = "\"", dialect = none) {
         var delim = delimiter;
         if dialect != none {
             delim = dialect.delimiter;
@@ -129,7 +128,7 @@ def reader(data: str, delimiter: str = ",", quotechar: str = "\"", dialect = non
 /// CSV Writer object accumulating rows into formatted CSV text.
 /// Python reference: csv.writer(csvfile, dialect='excel', **fmtparams)
 class Writer {
-    def __init__(self, delimiter: str = ",", quotechar: str = "\"", lineterminator: str = "\r\n", dialect = none) {
+    self(delimiter: str = ",", quotechar: str = "\"", lineterminator: str = "\r\n", dialect = none) {
         var delim = delimiter;
         var term = lineterminator;
         if dialect != none {
@@ -166,7 +165,7 @@ def writer(delimiter: str = ",", quotechar: str = "\"", lineterminator: str = "\
 /// CSV reader mapping rows into dictionaries keyed by column headers.
 /// Python reference: csv.DictReader(f, fieldnames=None, restkey=None, restval=None, dialect='excel', *args, **kwds)
 class DictReader {
-    def __init__(self, data: str, fieldnames = none, delimiter: str = ",", quotechar: str = "\"", restkey: str = "extra", restval: str = "") {
+    self(data: str, fieldnames = none, delimiter: str = ",", quotechar: str = "\"", restkey: str = "extra", restval: str = "") {
         self.data = data;
         self.delimiter = delimiter;
         self.quotechar = quotechar;
@@ -220,7 +219,7 @@ class DictReader {
 /// CSV writer outputting records from dictionaries using predefined fieldnames.
 /// Python reference: csv.DictWriter(f, fieldnames, restval='', extrasaction='raise', dialect='excel', *args, **kwds)
 class DictWriter {
-    def __init__(self, fieldnames, delimiter: str = ",", quotechar: str = "\"", lineterminator: str = "\r\n", restval: str = "") {
+    self(fieldnames, delimiter: str = ",", quotechar: str = "\"", lineterminator: str = "\r\n", restval: str = "") {
         self.fieldnames = [str(f) for f in fieldnames];
         self.delimiter = delimiter;
         self.quotechar = quotechar;

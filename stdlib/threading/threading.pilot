@@ -26,7 +26,7 @@ def _next_thread_id() -> i64 {
 /// Primitive mutual exclusion lock.
 /// Python reference: threading.Lock()
 class Lock {
-    def __init__(self) {
+    self() {
         self._locked = false;
     }
 
@@ -64,7 +64,7 @@ class Lock {
 /// Re-entrant lock that can be acquired multiple times by the same owning thread.
 /// Python reference: threading.RLock()
 class RLock {
-    def __init__(self) {
+    self() {
         self._owner: i64 = -1;
         self._count: i64 = 0;
     }
@@ -107,7 +107,7 @@ class RLock {
 /// Counting semaphore managing an internal counter.
 /// Python reference: threading.Semaphore(value=1)
 class Semaphore {
-    def __init__(self, value: i64 = 1) {
+    self(value: i64 = 1) {
         if value < 0 {
             panic("Semaphore initial value must be >= 0");
         }
@@ -145,7 +145,7 @@ class Semaphore {
 /// Bounded semaphore that prevents releasing beyond its initial capacity.
 /// Python reference: threading.BoundedSemaphore(value=1)
 class BoundedSemaphore {
-    def __init__(self, value: i64 = 1) {
+    self(value: i64 = 1) {
         if value < 0 {
             panic("BoundedSemaphore initial value must be >= 0");
         }
@@ -180,7 +180,7 @@ class BoundedSemaphore {
 /// Simple synchronization primitive where one thread signals an event and others wait.
 /// Python reference: threading.Event()
 class Event {
-    def __init__(self) {
+    self() {
         self._flag = false;
     }
 
@@ -204,7 +204,7 @@ class Event {
 /// Barrier synchronization primitive for a fixed number of participating threads.
 /// Python reference: threading.Barrier(parties, action=None, timeout=None)
 class Barrier {
-    def __init__(self, parties: i64, action = none) {
+    self(parties: i64, action = none) {
         if parties < 1 {
             panic("parties must be > 0");
         }
@@ -243,7 +243,7 @@ class Barrier {
 /// Thread-local storage class providing isolated attributes per thread.
 /// Python reference: threading.local()
 class ThreadLocal {
-    def __init__(self) {
+    self() {
         self._storage = {};
     }
 
@@ -270,7 +270,7 @@ class ThreadLocal {
 /// Represents an activity that is run in a separate thread of control.
 /// Python reference: threading.Thread(group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None)
 class Thread {
-    def __init__(self, target = none, name: str = "", args = [], daemon: bool = false) {
+    self(target = none, name: str = "", args = [], daemon: bool = false) {
         self.target = target;
         self.ident: i64 = _next_thread_id();
         self.native_id: i64 = self.ident;

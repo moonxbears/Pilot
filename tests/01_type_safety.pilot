@@ -41,7 +41,7 @@ struct Color {
 
 # --- 3. Nominal Reference Classes ---
 class BankAccount {
-    def __init__(self, owner: str, initial_balance: float = 0.0) -> void {
+    self(owner: str, initial_balance: float = 0.0) {
         self.owner = owner
         self.balance = initial_balance
     }

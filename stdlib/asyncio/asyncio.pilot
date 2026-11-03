@@ -15,7 +15,7 @@
 /// A Future represents an eventual result of an asynchronous operation.
 /// Python reference: asyncio.Future(*, loop=None)
 class Future {
-    def __init__(self) {
+    self() {
         self._result = none;
         self._exception = none;
         self._state = "PENDING"; // PENDING, FINISHED, CANCELLED
@@ -105,7 +105,7 @@ var _TASK_ID_COUNTER: i64 = 0;
 /// A Task object executes a coroutine in an event loop.
 /// Python reference: asyncio.Task(coro, *, loop=None, name=None, context=None)
 class Task {
-    def __init__(self, coro, name: str = "") {
+    self(coro, name: str = "") {
         _TASK_ID_COUNTER = _TASK_ID_COUNTER + 1;
         self._id = _TASK_ID_COUNTER;
         self._name: str = if len(name) > 0 { name } else { f"Task-{self._id}" };
@@ -151,7 +151,7 @@ class Task {
 /// Cooperative asynchronous Event Loop managing task scheduling and I/O.
 /// Python reference: asyncio.AbstractEventLoop
 class EventLoop {
-    def __init__(self) {
+    self() {
         self._tasks = [];
         self._callbacks = [];
         self._is_running = false;
@@ -333,7 +333,7 @@ def wait_for(fut, timeout: f64) -> any {
 /// Asynchronous mutual exclusion lock.
 /// Python reference: asyncio.Lock()
 class AsyncLock {
-    def __init__(self) {
+    self() {
         self._locked = false;
     }
 
@@ -360,7 +360,7 @@ class AsyncLock {
 /// Asynchronous event object.
 /// Python reference: asyncio.Event()
 class AsyncEvent {
-    def __init__(self) {
+    self() {
         self._set = false;
     }
 
@@ -384,7 +384,7 @@ class AsyncEvent {
 /// Asynchronous FIFO queue.
 /// Python reference: asyncio.Queue(maxsize=0)
 class AsyncQueue {
-    def __init__(self, maxsize: i64 = 0) {
+    self(maxsize: i64 = 0) {
         self._maxsize = maxsize;
         self._items = [];
     }

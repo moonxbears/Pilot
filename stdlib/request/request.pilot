@@ -16,7 +16,7 @@ extern "c" lib "pilot_rt" {
 // ============================================================================
 
 class RequestException {
-    def __init__(message: str = "") {
+    self(message: str = "") {
         self.message = message;
         self.args = [message];
     }
@@ -27,7 +27,7 @@ class RequestException {
 }
 
 class HTTPError {
-    def __init__(message: str = "", response: any = none) {
+    self(message: str = "", response: any = none) {
         self.message = message;
         self.response = response;
         self.args = [message];
@@ -39,7 +39,7 @@ class HTTPError {
 }
 
 class ConnectionError {
-    def __init__(message: str = "") {
+    self(message: str = "") {
         self.message = message;
         self.args = [message];
     }
@@ -50,7 +50,7 @@ class ConnectionError {
 }
 
 class Timeout {
-    def __init__(message: str = "") {
+    self(message: str = "") {
         self.message = message;
         self.args = [message];
     }
@@ -61,13 +61,13 @@ class Timeout {
 }
 
 class TooManyRedirects {
-    def __init__(message: str = "") {
+    self(message: str = "") {
         self.message = message;
     }
 }
 
 class URLRequired {
-    def __init__(message: str = "A valid URL is required") {
+    self(message: str = "A valid URL is required") {
         self.message = message;
     }
 }
@@ -77,7 +77,7 @@ class URLRequired {
 // ============================================================================
 
 class Response {
-    def __init__(url: str, status_code: i64, reason: str, headers: map, content: str) {
+    self(url: str, status_code: i64, reason: str, headers: map, content: str) {
         self.url = url;
         self.status_code = status_code;
         self.reason = reason;
@@ -135,7 +135,7 @@ class Response {
 // ============================================================================
 
 class Session {
-    def __init__() {
+    self() {
         self.headers = {
             "User-Agent": "Pilot-Requests/1.1.0",
             "Accept-Encoding": "identity",

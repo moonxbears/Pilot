@@ -11,7 +11,7 @@ import std.timeit as timeit;
 // ============================================================================
 
 class MathTestCase : unittest.TestCase {
-    def __init__() {
+    self() {
         self._testMethodName = "MathTestCase";
     }
 

@@ -19,7 +19,7 @@ from core import some, none;
 /// Python reference: functools.partial(func, /, *args, **keywords)
 /// Object representing a function call with pre-bound arguments.
 class Partial {
-    def __init__(self, func, bound_args = []) {
+    self(func, bound_args = []) {
         self._func = func;
         self._bound_args = [x for x in bound_args];
     }
@@ -99,7 +99,7 @@ def reduce(items, initial, folder_fn) {
 /// Statistics describing an LruCache instance.
 /// Python reference: functools._CacheInfo(hits, misses, maxsize, currsize)
 class CacheInfo {
-    def __init__(self, hits: i64, misses: i64, maxsize: i64, currsize: i64) {
+    self(hits: i64, misses: i64, maxsize: i64, currsize: i64) {
         self.hits = hits;
         self.misses = misses;
         self.maxsize = maxsize;
@@ -115,7 +115,7 @@ class CacheInfo {
 /// Evicts least recently accessed entries when capacity exceeds maxsize.
 /// Python reference: functools.lru_cache(maxsize=128, typed=False)
 class LruCache {
-    def __init__(self, maxsize: i64 = 128) {
+    self(maxsize: i64 = 128) {
         self._maxsize = maxsize;
         self._cache = {};
         self._order = [];
@@ -216,7 +216,7 @@ def lru_cache(maxsize: i64 = 128) -> LruCache {
 /// Unbounded memoization cache. Simple wrapper around an in-memory dictionary.
 /// Python reference: functools.cache (Python 3.9+)
 class Cache {
-    def __init__(self) {
+    self() {
         self._data = {};
         self._hits = 0;
         self._misses = 0;
@@ -330,7 +330,7 @@ def const_fn(val) {
 /// Single-dispatch generic function registry based on runtime value types.
 /// Python reference: functools.singledispatch
 class SingleDispatch {
-    def __init__(self, default_fn) {
+    self(default_fn) {
         self._default = default_fn;
         self._registry = {};
     }
@@ -369,7 +369,7 @@ def singledispatch(default_fn) -> SingleDispatch {
 /// Key wrapper enabling Python-style custom comparison functions to be used in sorting.
 /// Python reference: functools.cmp_to_key(mycmp)
 class KeyWrapper {
-    def __init__(self, obj, cmp_fn) {
+    self(obj, cmp_fn) {
         self.obj = obj;
         self._cmp = cmp_fn;
     }

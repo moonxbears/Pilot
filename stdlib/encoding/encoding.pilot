@@ -518,8 +518,7 @@ def query_parse_multi(query_str: str) -> map ! DecodeError {
 }
 
 class Url {
-    def __init__(
-        self,
+    self(
         scheme: str,
         userinfo: str,
         host: str,

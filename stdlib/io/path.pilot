@@ -267,7 +267,7 @@ def relative_to(target_path: str, base_path: str) {
 
 // Object-oriented cross-platform `Path` value wrapper
 class Path {
-    def __init__(self, raw_path: str) {
+    self(raw_path: str) {
         self.raw = normalize(raw_path);
     }
 

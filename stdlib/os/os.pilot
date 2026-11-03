@@ -357,7 +357,7 @@ def truncate(path: str, length: i64) -> bool {
 // ============================================================================
 
 class StatResult {
-    def __init__(self, size: i64, is_dir: bool, is_file: bool, mode: i64) {
+    self(size: i64, is_dir: bool, is_file: bool, mode: i64) {
         self.size = size;
         self.is_dir = is_dir;
         self.is_file = is_file;

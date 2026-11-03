@@ -45,7 +45,7 @@ def bisect_right(arr, target) -> i64 {
 
 // Amortized O(1) circular-buffer Double-Ended Queue
 class Deque {
-    def __init__(self, initial_cap: i64 = 8) {
+    self(initial_cap: i64 = 8) {
         var cap: i64 = 8;
         while cap < initial_cap {
             cap = cap * 2;
@@ -209,7 +209,7 @@ class Deque {
 
 // Binary Min-Heap Priority Queue (PSF-2.0 CPython heapq sift scaffold)
 class PriorityQueue {
-    def __init__(self) {
+    self() {
         self._heap = [];
         self._seq = 0;
     }
@@ -302,7 +302,7 @@ class PriorityQueue {
 
 // Sorted Key-Value Map supporting O(log N) lookup, floor/ceiling keys, and inclusive range queries
 class OrderedMap {
-    def __init__(self) {
+    self() {
         self._keys = [];
         self._vals = [];
     }
@@ -385,7 +385,7 @@ class OrderedMap {
 
 // One-to-Many Associative MultiMap (key -> list of values)
 class MultiMap {
-    def __init__(self) {
+    self() {
         self._data = {};
         self._total = 0;
     }
@@ -432,7 +432,7 @@ class MultiMap {
 
 // Fixed-Capacity RingBuffer with non-allocating overwrite and bounded try_push
 class RingBuffer {
-    def __init__(self, capacity: i64) {
+    self(capacity: i64) {
         if capacity <= 0 {
             panic("RingBuffer capacity must be > 0");
         }
@@ -507,7 +507,7 @@ class RingBuffer {
 
 // 62-bit Word-Packed Dense BitSet with SWAR/Kernighan popcount & bitwise algebra
 class BitSet {
-    def __init__(self, bit_capacity: i64 = 62) {
+    self(bit_capacity: i64 = 62) {
         var word_count: i64 = (bit_capacity + 61) / 62;
         if word_count < 1 {
             word_count = 1;
@@ -614,7 +614,7 @@ def freeze_map(entries) {
 }
 
 class FrozenMap {
-    def __init__(self, entries) {
+    self(entries) {
         self._table = __freeze_value(entries);
     }
 
@@ -660,7 +660,7 @@ class FrozenMap {
 /// Dict subclass for counting hashable items.
 /// Python reference: collections.Counter
 class Counter {
-    def __init__(self, initial = none) {
+    self(initial = none) {
         self._counts = {};
         if initial != none {
             self.update(initial);
@@ -848,7 +848,7 @@ class Counter {
 /// Dictionary that calls a factory function to supply missing values.
 /// Python reference: collections.defaultdict
 class DefaultDict {
-    def __init__(self, default_factory) {
+    self(default_factory) {
         self._factory = default_factory;
         self._data = {};
     }
@@ -929,7 +929,7 @@ class DefaultDict {
 /// Dictionary that preserves the order entries were added.
 /// Python reference: collections.OrderedDict
 class OrderedDict {
-    def __init__(self) {
+    self() {
         self._keys = [];
         self._data = {};
     }
@@ -1053,7 +1053,7 @@ class OrderedDict {
 /// A ChainMap groups multiple dicts or mappings together to create a single, updateable view.
 /// Python reference: collections.ChainMap
 class ChainMap {
-    def __init__(self, maps_list = none) {
+    self(maps_list = none) {
         if maps_list == none {
             self._maps = [{}];
         } else {

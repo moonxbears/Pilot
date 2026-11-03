@@ -4,7 +4,7 @@
 
 # --- 1. Schemas & Indexed Relational Tables ---
 class Customer {
-    def __init__(self, id: int, name: str, email: str, tier: str, score: int) -> void {
+    self(id: int, name: str, email: str, tier: str, score: int) {
         self.id = id
         self.name = name
         self.email = email
@@ -14,7 +14,7 @@ class Customer {
 }
 
 class Transaction {
-    def __init__(self, id: int, customer_id: int, amount: float, region: str) -> void {
+    self(id: int, customer_id: int, amount: float, region: str) {
         self.id = id
         self.customer_id = customer_id
         self.amount = amount

@@ -11,7 +11,7 @@ println(f"Symbolic Adjoint ComputeImpulse!@(10.0, 5.0) => Value={ke}, dMass={dMa
 
 // 2. Mode 7 (!?): Copy-on-Write Transactional Effect Dry-Run
 class Account:
-    def __init__(self, balance: int):
+    self(balance: int) :
         self.Balance = balance
 
 def TransferBonus(acct, bonus: int) -> int:
@@ -27,7 +27,7 @@ println(f"Live balance after Commit():  {acct.Balance}")
 
 // 3. Mode 5 (!^): Glitch-Free Push-Pull Reactive Signal Graph
 class Spacecraft:
-    def __init__(self, m: float, v: float):
+    self(m: float, v: float) :
         self.Mass = m
         self.Vel = v
 

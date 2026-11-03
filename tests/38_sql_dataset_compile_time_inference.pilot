@@ -39,7 +39,7 @@ for r in filtered_report {
 class Table {
     var rows: list = [];
 
-    def __init__(self, initial_items: list = []) {
+    self(initial_items: list = []) {
         self.rows = initial_items;
     }
 

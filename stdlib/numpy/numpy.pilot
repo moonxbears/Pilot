@@ -11,7 +11,7 @@ const e: f64 = 2.71828182845904523536;
 // ============================================================================
 
 class ndarray {
-    def __init__(data: [f64], shape: [i64], dtype: str = "float64") {
+    self(data: [f64], shape: [i64], dtype: str = "float64") {
         self.data = data;
         self.shape = shape;
         self.ndim = len(shape);

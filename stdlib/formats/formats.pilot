@@ -64,7 +64,7 @@ def __is_ascii_digit(code: i64) -> bool {
 }
 
 class __FormatCursor {
-    def __init__(self, fmt_name: str, src: str) {
+    self(fmt_name: str, src: str) {
         self.fmt_name = fmt_name;
         self.src = src;
         self.total = len(src);
