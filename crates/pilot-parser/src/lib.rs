@@ -3398,6 +3398,24 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
+            if k == TokenKind::KwAs {
+                if (ExprPrecedence::UnaryPrefix as u8) < min_bp {
+                    break;
+                }
+                self.advance(); // consume 'as'
+                let is_view = if self.is_ident_like() && self.text() == "view" {
+                    self.advance(); // consume 'view'
+                    true
+                } else {
+                    false
+                };
+                let target_ty = self.parse_type();
+                let op = if is_view { BinaryOp::AsView } else { BinaryOp::As };
+                let span = self.arena.span(lhs);
+                lhs = self.arena.alloc_node(NodeKind::BinaryExpr, op as u16, span, lhs.0, target_ty.0);
+                continue;
+            }
+
             // Binary operators
             let (op, bp, r_assoc) = match self.get_binary_op(k) {
                 Some(triple) => triple,
@@ -4376,6 +4394,24 @@ impl<'a> Parser<'a> {
                 lhs = match base_name.as_str() {
                     "Map" | "map" | "Dict" | "dict" | "HashMap" | "NativeMap" if type_args.len() >= 2 => {
                         self.arena.alloc_node(NodeKind::TypeMap, 0, span, type_args[0].0, type_args[1].0)
+                    }
+                    "SliceMap" if type_args.len() >= 2 => {
+                        self.arena.alloc_node(NodeKind::TypeMap, 1, span, type_args[0].0, type_args[1].0)
+                    }
+                    "Slice" if type_args.len() == 1 => {
+                        self.arena.alloc_node(NodeKind::TypeSlice, 0, span, type_args[0].0, 0)
+                    }
+                    "SliceBuffer" if type_args.len() == 1 => {
+                        self.arena.alloc_node(NodeKind::TypeSlice, 1, span, type_args[0].0, 0)
+                    }
+                    "SliceView" if type_args.len() == 1 => {
+                        self.arena.alloc_node(NodeKind::TypeSlice, 2, span, type_args[0].0, 0)
+                    }
+                    "StridedSlice" if type_args.len() == 1 => {
+                        self.arena.alloc_node(NodeKind::TypeSlice, 3, span, type_args[0].0, 0)
+                    }
+                    "View" if type_args.len() == 1 => {
+                        self.arena.alloc_node(NodeKind::TypeSlice, 4, span, type_args[0].0, 0)
                     }
                     "Option" | "option" if !type_args.is_empty() => {
                         self.arena.alloc_node(NodeKind::TypeOptional, 0, span, type_args[0].0, 0)

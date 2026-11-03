@@ -424,6 +424,8 @@ pub enum BinaryOp {
     Intersect = 29,      // a intersect b
     Except = 30,         // a except b
     PipeBackward = 31,   // a <| b
+    As = 32,             // a as Target (Tier A bitcast / cast)
+    AsView = 33,         // a as view Target (Tier B compile-time offset swizzling)
 }
 
 impl BinaryOp {
@@ -460,6 +462,8 @@ impl BinaryOp {
             Self::Intersect => "intersect",
             Self::Except => "except",
             Self::PipeBackward => "<|",
+            Self::As => "as",
+            Self::AsView => "as view",
         }
     }
 }

@@ -39,6 +39,11 @@ pub enum CollectionKind {
     List,
     Set,
     Future,
+    Slice,
+    SliceBuffer,
+    SliceView,
+    StridedSlice,
+    View,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -49,6 +54,10 @@ pub enum TypeKind {
         element: TypeId,
     },
     Map {
+        key: TypeId,
+        value: TypeId,
+    },
+    SliceMap {
         key: TypeId,
         value: TypeId,
     },
@@ -172,6 +181,45 @@ impl TypeArena {
 
     pub fn map_of(&mut self, key: TypeId, value: TypeId) -> TypeId {
         self.alloc(TypeKind::Map { key, value })
+    }
+
+    pub fn slice_of(&mut self, elem: TypeId) -> TypeId {
+        self.alloc(TypeKind::Collection {
+            kind: CollectionKind::Slice,
+            element: elem,
+        })
+    }
+
+    pub fn slice_buffer_of(&mut self, elem: TypeId) -> TypeId {
+        self.alloc(TypeKind::Collection {
+            kind: CollectionKind::SliceBuffer,
+            element: elem,
+        })
+    }
+
+    pub fn slice_view_of(&mut self, elem: TypeId) -> TypeId {
+        self.alloc(TypeKind::Collection {
+            kind: CollectionKind::SliceView,
+            element: elem,
+        })
+    }
+
+    pub fn strided_slice_of(&mut self, elem: TypeId) -> TypeId {
+        self.alloc(TypeKind::Collection {
+            kind: CollectionKind::StridedSlice,
+            element: elem,
+        })
+    }
+
+    pub fn view_of(&mut self, elem: TypeId) -> TypeId {
+        self.alloc(TypeKind::Collection {
+            kind: CollectionKind::View,
+            element: elem,
+        })
+    }
+
+    pub fn slice_map_of(&mut self, key: TypeId, value: TypeId) -> TypeId {
+        self.alloc(TypeKind::SliceMap { key, value })
     }
 
     pub fn option_of(&mut self, elem: TypeId) -> TypeId {
@@ -319,6 +367,11 @@ impl TypeArena {
                 let v = self.deep_prune(value);
                 self.alloc(TypeKind::Map { key: k, value: v })
             }
+            TypeKind::SliceMap { key, value } => {
+                let k = self.deep_prune(key);
+                let v = self.deep_prune(value);
+                self.alloc(TypeKind::SliceMap { key: k, value: v })
+            }
             TypeKind::Tuple(elems) => {
                 let pr_elems: Vec<_> = elems.into_iter().map(|e| self.deep_prune(e)).collect();
                 self.alloc(TypeKind::Tuple(pr_elems))
@@ -395,6 +448,11 @@ impl TypeArena {
                 let key = self.unify(k1, k2)?;
                 let value = self.unify(v1, v2)?;
                 Ok(self.map_of(key, value))
+            }
+            (TypeKind::SliceMap { key: k1, value: v1 }, TypeKind::SliceMap { key: k2, value: v2 }) => {
+                let key = self.unify(k1, k2)?;
+                let value = self.unify(v1, v2)?;
+                Ok(self.slice_map_of(key, value))
             }
             (TypeKind::Tuple(t1), TypeKind::Tuple(t2)) if t1.len() == t2.len() => {
                 let mut unified = Vec::with_capacity(t1.len());
@@ -566,11 +624,19 @@ impl TypeArena {
                     CollectionKind::List => "List",
                     CollectionKind::Set => "Set",
                     CollectionKind::Future => "Future",
+                    CollectionKind::Slice => "Slice",
+                    CollectionKind::SliceBuffer => "SliceBuffer",
+                    CollectionKind::SliceView => "SliceView",
+                    CollectionKind::StridedSlice => "StridedSlice",
+                    CollectionKind::View => "View",
                 };
                 format!("{}[{}]", k_str, self.display(*element))
             }
             TypeKind::Map { key, value } => {
                 format!("Map[{}, {}]", self.display(*key), self.display(*value))
+            }
+            TypeKind::SliceMap { key, value } => {
+                format!("SliceMap[{}, {}]", self.display(*key), self.display(*value))
             }
             TypeKind::Tuple(elems) => {
                 let inner: Vec<String> = elems.iter().map(|e| self.display(*e)).collect();

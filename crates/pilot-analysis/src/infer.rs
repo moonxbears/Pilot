@@ -651,7 +651,7 @@ impl TypeInferenceEngine {
                 let err = self.resolve_type_spec(arena, NodeId(node.rhs));
                 self.types.result_of(ok, err)
             }
-            NodeKind::TypeList | NodeKind::TypeSlice => {
+            NodeKind::TypeList => {
                 let elem = if node.rhs > 0 {
                     let children = arena.children_slice(node.lhs, node.rhs);
                     children
@@ -663,10 +663,32 @@ impl TypeInferenceEngine {
                 };
                 self.types.list_of(elem)
             }
+            NodeKind::TypeSlice => {
+                let elem = if node.rhs > 0 {
+                    let children = arena.children_slice(node.lhs, node.rhs);
+                    children
+                        .first()
+                        .map(|&c| self.resolve_type_spec(arena, NodeId(c)))
+                        .unwrap_or(TypeId::ANY)
+                } else {
+                    self.resolve_type_spec(arena, NodeId(node.lhs))
+                };
+                match node.flags {
+                    1 => self.types.slice_buffer_of(elem),
+                    2 => self.types.slice_view_of(elem),
+                    3 => self.types.strided_slice_of(elem),
+                    4 => self.types.view_of(elem),
+                    _ => self.types.slice_of(elem),
+                }
+            }
             NodeKind::TypeMap => {
                 let key = self.resolve_type_spec(arena, NodeId(node.lhs));
                 let val = self.resolve_type_spec(arena, NodeId(node.rhs));
-                self.types.map_of(key, val)
+                if node.flags == 1 {
+                    self.types.slice_map_of(key, val)
+                } else {
+                    self.types.map_of(key, val)
+                }
             }
             NodeKind::TypeTuple => {
                 let children = arena.children_slice(node.lhs, node.rhs);
@@ -1111,6 +1133,21 @@ impl TypeInferenceEngine {
             // --- Arithmetic & Logical Binary Expressions ---
             NodeKind::BinaryExpr => {
                 let op = node.flags;
+                if op == 32 {
+                    // BinaryOp::As (Bit-cast or SliceView)
+                    let target_ty = self.resolve_type_spec(arena, NodeId(node.rhs));
+                    let _ = self.synth(arena, NodeId(node.lhs));
+                    self.inferred_node_types.insert(node_id.0, target_ty);
+                    return target_ty;
+                }
+                if op == 33 {
+                    // BinaryOp::AsView (Offset swizzled View[Target])
+                    let target_spec = self.resolve_type_spec(arena, NodeId(node.rhs));
+                    let view_ty = self.types.view_of(target_spec);
+                    let _ = self.synth(arena, NodeId(node.lhs));
+                    self.inferred_node_types.insert(node_id.0, view_ty);
+                    return view_ty;
+                }
                 if op == 26 {
                     // BinaryOp::Walrus (pat := val or let/some pat = val)
                     let raw_val_ty = self.synth(arena, NodeId(node.rhs));
@@ -2247,6 +2284,52 @@ impl TypeInferenceEngine {
                 let mut pruned = self.types.prune(target_ty);
                 let is_safe_nav = node.flags == 1;
 
+                if let TypeKind::SliceMap { key, value } = *self.types.get(pruned) {
+                    match member_name {
+                        "keys" => {
+                            let res = self.types.strided_slice_of(key);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "values" => {
+                            let res = self.types.strided_slice_of(value);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "invert" => {
+                            let inv_map = self.types.slice_map_of(value, key);
+                            let res = self.types.function_of(Vec::new(), inv_map);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "len" | "length" | "count" => {
+                            self.inferred_node_types.insert(node_id.0, TypeId::I64);
+                            return TypeId::I64;
+                        }
+                        _ => {}
+                    }
+                }
+
+                if matches!(self.types.get(pruned), TypeKind::Collection { kind: crate::types::CollectionKind::Slice | crate::types::CollectionKind::SliceBuffer, .. }) {
+                    if member_name == "map_view" {
+                        let ret_map = self.types.slice_map_of(TypeId::ANY, TypeId::ANY);
+                        let res = self.types.function_of(vec![TypeId::ANY, TypeId::ANY], ret_map);
+                        self.inferred_node_types.insert(node_id.0, res);
+                        return res;
+                    }
+                }
+
+                if let TypeKind::Collection { kind: crate::types::CollectionKind::SliceView, .. } = *self.types.get(pruned) {
+                    if member_name == "len" || member_name == "length" || member_name == "count" {
+                        self.inferred_node_types.insert(node_id.0, TypeId::I64);
+                        return TypeId::I64;
+                    }
+                }
+
+                if let TypeKind::Collection { kind: crate::types::CollectionKind::View, element } = *self.types.get(pruned) {
+                    pruned = self.types.prune(element);
+                }
+
                 // Member on Option: handle intrinsic Option methods/properties directly
                 if let TypeKind::Option(inner) = *self.types.get(pruned) {
                     if !is_safe_nav {
@@ -2699,6 +2782,7 @@ impl TypeInferenceEngine {
 
                 let pruned = self.types.prune(target_ty);
                 let res = match self.types.get(pruned).clone() {
+                    TypeKind::SliceMap { value, .. } => value,
                     TypeKind::Collection { element, .. } => element,
                     TypeKind::Map { value, .. } => {
                         if value == TypeId::ANY {

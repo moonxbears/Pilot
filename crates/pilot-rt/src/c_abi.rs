@@ -16,6 +16,41 @@ pub struct PilotArcBox {
     pub payload: [u8; 0],
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct PilotSlice {
+    pub ptr: *mut u8,
+    pub len: usize,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct PilotSliceView {
+    pub base_ptr: *mut u8,
+    pub len: usize,
+    pub byte_stride: usize,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct PilotStridedSlice {
+    pub base_ptr: *mut u8,
+    pub len: usize,
+    pub byte_stride: usize,
+    pub byte_offset: usize,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct PilotSliceMap {
+    pub keys_ptr: *mut u8,
+    pub vals_ptr: *mut u8,
+    pub len: usize,
+    pub key_stride: usize,
+    pub val_stride: usize,
+    pub is_soa: bool,
+}
+
 // --- Tier 1 Bump Region Memory ABI ---
 
 #[no_mangle]
@@ -374,6 +409,33 @@ static inline void* pilot_rt_region_alloc(void* region, size_t size, size_t alig
 static inline void pilot_rt_region_exit(void* region) { free(region); }
 
 /* Zero-Marshalling Contiguous Shared Memory SliceBuffer (Milestone 15, 20, 23, 28, 35) */
+typedef struct {
+    void* ptr;
+    size_t len;
+} PilotSlice;
+
+typedef struct {
+    void* base_ptr;
+    size_t len;
+    size_t byte_stride;
+} PilotSliceView;
+
+typedef struct {
+    void* base_ptr;
+    size_t len;
+    size_t byte_stride;
+    size_t byte_offset;
+} PilotStridedSlice;
+
+typedef struct {
+    void* keys_ptr;
+    void* vals_ptr;
+    size_t len;
+    size_t key_stride;
+    size_t val_stride;
+    bool is_soa;
+} PilotSliceMap;
+
 typedef struct {
     void* ptr;
     size_t len;

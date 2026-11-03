@@ -68,6 +68,37 @@ pub enum DebugCompoundVal {
         end: i64,
         inclusive: bool,
     },
+    SliceView {
+        target_type: String,
+        source_type: String,
+        source_items: Vec<(PilotVal, String)>,
+        byte_stride: usize,
+        field_offsets: std::collections::HashMap<String, usize>,
+    },
+    View {
+        target_type: String,
+        source_type: String,
+        source_item: (PilotVal, String),
+        field_offsets: std::collections::HashMap<String, usize>,
+    },
+    StridedSlice {
+        element_type: String,
+        items: Vec<(PilotVal, String)>,
+        stride: usize,
+        offset: usize,
+    },
+    SliceMap {
+        key_type: String,
+        val_type: String,
+        is_soa: bool,
+        entries: Vec<((PilotVal, String), (PilotVal, String))>,
+        source_items: Vec<(PilotVal, String)>,
+        key_field: String,
+        val_field: String,
+        key_offset: usize,
+        val_offset: usize,
+        stride: usize,
+    },
 }
 
 /// Cross-language shared buffer representation.
@@ -125,6 +156,24 @@ impl DebugCompoundVal {
                     ("end".to_string(), end.to_string(), "int".to_string()),
                     ("inclusive".to_string(), inclusive.to_string(), "bool".to_string()),
                 ]
+            }
+            DebugCompoundVal::SliceView { source_items, .. } => {
+                source_items.iter().enumerate().map(|(i, (v, ty))| {
+                    (format!("[{}]", i), v.to_string_repr(), ty.clone())
+                }).collect()
+            }
+            DebugCompoundVal::View { target_type, source_item, .. } => {
+                vec![("view".to_string(), source_item.0.to_string_repr(), target_type.clone())]
+            }
+            DebugCompoundVal::StridedSlice { items, .. } => {
+                items.iter().enumerate().map(|(i, (v, ty))| {
+                    (format!("[{}]", i), v.to_string_repr(), ty.clone())
+                }).collect()
+            }
+            DebugCompoundVal::SliceMap { entries, .. } => {
+                entries.iter().map(|((k, _), (v, ty))| {
+                    (k.to_string_repr(), v.to_string_repr(), ty.clone())
+                }).collect()
             }
         }
     }
@@ -240,11 +289,27 @@ impl PilotDebugger {
                 }
                 NodeKind::StructDecl | NodeKind::ClassDecl => {
                     let name = arena.interner.resolve(SymbolId(node.lhs)).to_string();
-                    let field_names = if let Some(fields) = arena.record_fields.get(&(i as u32)) {
+                    let mut field_names = if let Some(fields) = arena.record_fields.get(&(i as u32)) {
                         fields.iter().map(|(sym, _)| arena.interner.resolve(*sym).to_string()).collect()
                     } else {
                         Vec::new()
                     };
+                    if field_names.is_empty() && node.rhs > 0 {
+                        let body_node = arena.node(NodeId(node.rhs));
+                        if body_node.node_kind() == NodeKind::BlockExpr {
+                            let b_children = arena.children_slice(body_node.lhs, body_node.rhs);
+                            for &stmt_id in b_children {
+                                let s_node = arena.node(NodeId(stmt_id));
+                                match s_node.node_kind() {
+                                    NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
+                                        let f_name = arena.interner.resolve(SymbolId(s_node.lhs)).to_string();
+                                        field_names.push(f_name);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
                     records.insert(name, field_names);
                 }
                 NodeKind::TypeAdtDecl => {
@@ -481,6 +546,40 @@ impl PilotDebugger {
             return val.as_bool().unwrap_or(false) || val.as_int().map_or(false, |i| i != 0);
         }
         true
+    }
+
+    pub fn extract_type_from_node(&self, arena: &AstArena, id: NodeId) -> (String, Option<String>) {
+        if id.is_none() || (id.0 as usize) >= arena.nodes.len() {
+            return (String::new(), None);
+        }
+        let n = *arena.node(id);
+        match n.node_kind() {
+            NodeKind::TypeNamed => {
+                let name = arena.interner.resolve(SymbolId(n.lhs)).to_string();
+                (name, None)
+            }
+            NodeKind::TypeSlice => {
+                let elem_str = self.extract_type_from_node(arena, NodeId(n.lhs)).0;
+                let kind_str = match n.flags {
+                    1 => "SliceBuffer",
+                    2 => "SliceView",
+                    3 => "StridedSlice",
+                    4 => "View",
+                    _ => "Slice",
+                };
+                (kind_str.to_string(), Some(elem_str))
+            }
+            NodeKind::TypeList => {
+                let elem_str = self.extract_type_from_node(arena, NodeId(n.lhs)).0;
+                ("List".to_string(), Some(elem_str))
+            }
+            NodeKind::TypeTuple => {
+                let children = arena.children_slice(n.lhs, n.rhs);
+                let elem_strs: Vec<String> = children.iter().map(|&c| self.extract_type_from_node(arena, NodeId(c)).0).collect();
+                (format!("({})", elem_strs.join(", ")), None)
+            }
+            _ => (String::new(), None),
+        }
     }
 
     pub fn values_equal(&self, lhs: &PilotVal, rhs: &PilotVal) -> bool {
@@ -1239,6 +1338,15 @@ impl PilotDebugger {
                         DebugCompoundVal::List(it) | DebugCompoundVal::Tuple(it) => {
                             items = it.clone();
                         }
+                        DebugCompoundVal::SliceView { source_items, .. } => {
+                            items = source_items.clone();
+                        }
+                        DebugCompoundVal::StridedSlice { items: it, .. } => {
+                            items = it.clone();
+                        }
+                        DebugCompoundVal::SliceMap { entries, .. } => {
+                            items = entries.iter().map(|(k, _)| k.clone()).collect();
+                        }
                         _ => {}
                     }
                 }
@@ -1977,6 +2085,57 @@ impl PilotDebugger {
 
                 if let Some(compound) = self.compound_values.get(&target_name).or_else(|| self.compound_values.get(&target_str)) {
                     match compound {
+                        DebugCompoundVal::View { source_item, .. } => {
+                            if let Some(src_compound) = self.compound_values.get(&source_item.0.to_string_repr()) {
+                                if let DebugCompoundVal::Record { fields, .. } = src_compound {
+                                    let candidate_keys = [
+                                        member_name.to_string(),
+                                        format!("_{}", member_name),
+                                        format!("field_{}", member_name),
+                                    ];
+                                    if let Some((_, f_val, f_ty)) = fields.iter().find(|(n, _, _)| candidate_keys.contains(n)) {
+                                        return (*f_val, f_ty.clone());
+                                    }
+                                }
+                            }
+                        }
+                        DebugCompoundVal::SliceView { source_items, .. } => {
+                            if member_name == "len" || member_name == "length" || member_name == "count" {
+                                return (PilotVal::from_int(source_items.len() as i64), "int".to_string());
+                            }
+                        }
+                        DebugCompoundVal::SliceMap { entries, .. } => {
+                            if member_name == "len" || member_name == "length" || member_name == "count" {
+                                return (PilotVal::from_int(entries.len() as i64), "int".to_string());
+                            }
+                            if member_name == "keys" {
+                                let keys: Vec<(PilotVal, String)> = entries.iter().map(|(k, _)| k.clone()).collect();
+                                let formatted = format!("[{}]", keys.iter().map(|(v, _)| v.to_string_repr()).collect::<Vec<_>>().join(", "));
+                                self.compound_values.insert(formatted.clone(), DebugCompoundVal::StridedSlice {
+                                    element_type: "Any".to_string(),
+                                    items: keys,
+                                    stride: 0,
+                                    offset: 0,
+                                });
+                                return (PilotVal::from_str(&formatted), "StridedSlice".to_string());
+                            }
+                            if member_name == "values" {
+                                let vals: Vec<(PilotVal, String)> = entries.iter().map(|(_, v)| v.clone()).collect();
+                                let formatted = format!("[{}]", vals.iter().map(|(v, _)| v.to_string_repr()).collect::<Vec<_>>().join(", "));
+                                self.compound_values.insert(formatted.clone(), DebugCompoundVal::StridedSlice {
+                                    element_type: "Any".to_string(),
+                                    items: vals,
+                                    stride: 0,
+                                    offset: 0,
+                                });
+                                return (PilotVal::from_str(&formatted), "StridedSlice".to_string());
+                            }
+                        }
+                        DebugCompoundVal::StridedSlice { items, .. } => {
+                            if member_name == "len" || member_name == "length" || member_name == "count" {
+                                return (PilotVal::from_int(items.len() as i64), "int".to_string());
+                            }
+                        }
                         DebugCompoundVal::Record { type_name: _, fields } => {
                             let candidate_keys = [
                                 member_name.to_string(),
@@ -2042,7 +2201,7 @@ impl PilotDebugger {
                 };
 
                 if let Some((start, end, _)) = range_opt {
-                    if let Some(compound) = self.compound_values.get(&target_str).or_else(|| self.compound_values.get(&target_name)) {
+                    if let Some(compound) = self.compound_values.get(&target_str).or_else(|| self.compound_values.get(&target_name)).cloned() {
                         if let DebugCompoundVal::List(items) | DebugCompoundVal::Tuple(items) = compound {
                             let s = (start.max(0) as usize).min(items.len());
                             let e = if end == i64::MAX { items.len() } else { (end.max(0) as usize).min(items.len()) };
@@ -2060,7 +2219,7 @@ impl PilotDebugger {
                     return (PilotVal::from_str(&sliced_str), "str".to_string());
                 }
 
-                if let Some(compound) = self.compound_values.get(&target_str).or_else(|| self.compound_values.get(&target_name)) {
+                if let Some(compound) = self.compound_values.get(&target_str).or_else(|| self.compound_values.get(&target_name)).cloned() {
                     match compound {
                         DebugCompoundVal::List(items) | DebugCompoundVal::Tuple(items) => {
                             let idx = idx_val.as_int().unwrap_or(0) as usize;
@@ -2070,8 +2229,8 @@ impl PilotDebugger {
                         }
                         DebugCompoundVal::Map(pairs) => {
                             for ((k_val, _), (v_val, v_ty)) in pairs {
-                                if *k_val == idx_val || k_val.to_string_repr() == idx_val.to_string_repr() {
-                                    return (*v_val, v_ty.clone());
+                                if k_val == idx_val || k_val.to_string_repr() == idx_val.to_string_repr() {
+                                    return (v_val, v_ty.clone());
                                 }
                             }
                         }
@@ -2080,6 +2239,56 @@ impl PilotDebugger {
                             let clean_key = key_str.trim_matches('"');
                             if let Some((_, val, ty)) = fields.iter().find(|(n, _, _)| n == clean_key) {
                                 return (*val, ty.clone());
+                            }
+                        }
+                        DebugCompoundVal::SliceView { target_type, source_items, .. } => {
+                            let idx = idx_val.as_int().unwrap_or(0) as usize;
+                            if idx < source_items.len() {
+                                let (item_val, item_ty) = &source_items[idx];
+                                if let Some(src_compound) = self.compound_values.get(&item_val.to_string_repr()).cloned() {
+                                    if let DebugCompoundVal::Record { fields, .. } = src_compound {
+                                        let target_fields = self.records.get(&target_type).cloned().unwrap_or_else(|| {
+                                            fields.iter().map(|(n, _, _)| n.clone()).collect()
+                                        });
+                                        let mut proj_fields = Vec::new();
+                                        let mut parts = Vec::new();
+                                        for tf in &target_fields {
+                                            if let Some((_, val, ty)) = fields.iter().find(|(fn_name, _, _)| fn_name == tf || fn_name == &format!("_{}", tf)) {
+                                                proj_fields.push((tf.clone(), *val, ty.clone()));
+                                                parts.push(format!("{}: {}", tf, val.to_string_repr()));
+                                            }
+                                        }
+                                        let formatted = format!("{}({})", target_type, parts.join(", "));
+                                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::Record {
+                                            type_name: target_type.clone(),
+                                            fields: proj_fields.clone(),
+                                        });
+                                        self.compound_values.insert(format!("<View[{}]>", target_type), DebugCompoundVal::View {
+                                            target_type: target_type.clone(),
+                                            source_type: item_ty.clone(),
+                                            source_item: (*item_val, item_ty.clone()),
+                                            field_offsets: std::collections::HashMap::new(),
+                                        });
+                                        return (PilotVal::from_str(&formatted), target_type.clone());
+                                    }
+                                }
+                                return (*item_val, target_type.clone());
+                            }
+                        }
+                        DebugCompoundVal::SliceMap { entries, .. } => {
+                            for ((k_val, _), (v_val, v_ty)) in entries {
+                                if self.values_equal(&k_val, &idx_val)
+                                    || k_val.to_string_repr() == idx_val.to_string_repr()
+                                    || (k_val.is_int() && idx_val.is_int() && k_val.as_int() == idx_val.as_int())
+                                {
+                                    return (v_val, v_ty.clone());
+                                }
+                            }
+                        }
+                        DebugCompoundVal::StridedSlice { items, .. } => {
+                            let idx = idx_val.as_int().unwrap_or(0) as usize;
+                            if idx < items.len() {
+                                return items[idx].clone();
                             }
                         }
                         _ => {}
@@ -2100,11 +2309,13 @@ impl PilotDebugger {
                         return (PilotVal::from_str(parts[u_idx]), "str".to_string());
                     }
                 }
-                let clean_target = target_str.trim_matches('"');
-                let chars: Vec<char> = clean_target.chars().collect();
-                let actual_idx = if idx < 0 { (chars.len() as i64 + idx).max(0) as usize } else { idx as usize };
-                if actual_idx < chars.len() {
-                    return (PilotVal::from_str(&chars[actual_idx].to_string()), "str".to_string());
+                if !target_str.starts_with('<') && (target_str.starts_with('"') || target_str.starts_with('\'')) {
+                    let clean_target = target_str.trim_matches('"').trim_matches('\'');
+                    let chars: Vec<char> = clean_target.chars().collect();
+                    let actual_idx = if idx < 0 { (chars.len() as i64 + idx).max(0) as usize } else { idx as usize };
+                    if actual_idx < chars.len() {
+                        return (PilotVal::from_str(&chars[actual_idx].to_string()), "str".to_string());
+                    }
                 }
 
                 (PilotVal::NULL, "any".to_string())
@@ -2408,6 +2619,131 @@ impl PilotDebugger {
                     30 => { // Except
                         (PilotVal::from_int(1), "int".to_string())
                     }
+                    32 => { // BinaryOp::As
+                        let (kind, elem_opt) = self.extract_type_from_node(arena, NodeId(node.rhs));
+                        let target_str = if let Some(ref elem) = elem_opt {
+                            format!("{}[{}]", kind, elem)
+                        } else {
+                            kind.clone()
+                        };
+
+                        if kind == "SliceView" {
+                            let target_elem = elem_opt.unwrap_or_else(|| "Any".to_string());
+                            let items = if let Some(compound) = self.compound_values.get(&lhs_val.to_string_repr()) {
+                                match compound {
+                                    DebugCompoundVal::List(it) | DebugCompoundVal::Tuple(it) => it.clone(),
+                                    _ => Vec::new(),
+                                }
+                            } else {
+                                Vec::new()
+                            };
+                            let formatted = format!("<SliceView[{}] len={}>", target_elem, items.len());
+                            self.compound_values.insert(formatted.clone(), DebugCompoundVal::SliceView {
+                                target_type: target_elem.clone(),
+                                source_type: "Record".to_string(),
+                                source_items: items,
+                                byte_stride: 32,
+                                field_offsets: std::collections::HashMap::new(),
+                            });
+                            return (PilotVal::from_str(&formatted), format!("SliceView[{}]", target_elem));
+                        }
+
+                        if kind == "Slice" {
+                            let target_elem = elem_opt.unwrap_or_else(|| "f32".to_string());
+                            if let Some(compound) = self.compound_values.get(&lhs_val.to_string_repr()) {
+                                match compound {
+                                    DebugCompoundVal::List(it) => {
+                                        let mut flattened = Vec::new();
+                                        for (item_val, _) in it {
+                                            if let Some(c) = self.compound_values.get(&item_val.to_string_repr()) {
+                                                match c {
+                                                    DebugCompoundVal::Record { fields, .. } => {
+                                                        for (_, f_val, f_ty) in fields {
+                                                            flattened.push((*f_val, f_ty.clone()));
+                                                        }
+                                                    }
+                                                    DebugCompoundVal::Tuple(t_items) => {
+                                                        for t_it in t_items {
+                                                            flattened.push(t_it.clone());
+                                                        }
+                                                    }
+                                                    _ => flattened.push((*item_val, target_elem.clone())),
+                                                }
+                                            } else {
+                                                flattened.push((*item_val, target_elem.clone()));
+                                            }
+                                        }
+                                        let formatted = format!("[{}]", flattened.iter().map(|(v, _)| v.to_string_repr()).collect::<Vec<_>>().join(", "));
+                                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::List(flattened));
+                                        return (PilotVal::from_str(&formatted), format!("Slice[{}]", target_elem));
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+
+                        if kind == "u32" || kind == "u64" || kind == "i32" || kind == "i64" || kind == "int" {
+                            if let Some(compound) = self.compound_values.get(&lhs_val.to_string_repr()) {
+                                match compound {
+                                    DebugCompoundVal::Record { fields, .. } => {
+                                        let mut int_val: u64 = 0;
+                                        for (i, (_, f_val, _)) in fields.iter().enumerate() {
+                                            let b = (f_val.as_int().unwrap_or(0) & 0xFF) as u64;
+                                            int_val |= b << (i * 8);
+                                        }
+                                        return (PilotVal::from_int(int_val as i64), kind);
+                                    }
+                                    DebugCompoundVal::Tuple(t_items) => {
+                                        let mut int_val: u64 = 0;
+                                        for (i, (t_val, _)) in t_items.iter().enumerate() {
+                                            let b = (t_val.as_int().unwrap_or(0) & 0xFF) as u64;
+                                            int_val |= b << (i * 8);
+                                        }
+                                        return (PilotVal::from_int(int_val as i64), kind);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            if let Some(i) = lhs_val.as_int() {
+                                return (PilotVal::from_int(i), kind);
+                            }
+                            if let Some(f) = lhs_val.as_float() {
+                                return (PilotVal::from_int(f as i64), kind);
+                            }
+                        }
+
+                        if kind.starts_with('(') && kind.ends_with(')') {
+                            if let Some(val) = lhs_val.as_int() {
+                                let u = val as u64;
+                                let b0 = (u & 0xFF) as i64;
+                                let b1 = ((u >> 8) & 0xFF) as i64;
+                                let b2 = ((u >> 16) & 0xFF) as i64;
+                                let b3 = ((u >> 24) & 0xFF) as i64;
+                                let items = vec![
+                                    (PilotVal::from_int(b0), "u8".to_string()),
+                                    (PilotVal::from_int(b1), "u8".to_string()),
+                                    (PilotVal::from_int(b2), "u8".to_string()),
+                                    (PilotVal::from_int(b3), "u8".to_string()),
+                                ];
+                                let formatted = format!("({}, {}, {}, {})", b0, b1, b2, b3);
+                                self.compound_values.insert(formatted.clone(), DebugCompoundVal::Tuple(items));
+                                return (PilotVal::from_str(&formatted), kind);
+                            }
+                        }
+
+                        (lhs_val, target_str)
+                    }
+                    33 => { // BinaryOp::AsView
+                        let (target_elem, _) = self.extract_type_from_node(arena, NodeId(node.rhs));
+                        let formatted = format!("<View[{}]>", target_elem);
+                        self.compound_values.insert(formatted.clone(), DebugCompoundVal::View {
+                            target_type: target_elem.clone(),
+                            source_type: "Record".to_string(),
+                            source_item: (lhs_val, "Record".to_string()),
+                            field_offsets: std::collections::HashMap::new(),
+                        });
+                        return (PilotVal::from_str(&formatted), format!("View[{}]", target_elem));
+                    }
                     _ => (PilotVal::from_int(0), "int".to_string()),
                 }
             }
@@ -2497,6 +2833,189 @@ impl PilotDebugger {
                         _ => target_ty,
                     };
                     return (PilotVal::from_str(&ty_str), "str".to_string());
+                }
+
+                if member_name == "map_view" {
+                    let target_items = if let Some(oid) = _obj_id_opt {
+                        let (v, _) = self.eval_ast_node(arena, oid);
+                        if let Some(compound) = self.compound_values.get(&v.to_string_repr()) {
+                            match compound {
+                                DebugCompoundVal::List(it) | DebugCompoundVal::Tuple(it) => it.clone(),
+                                _ => Vec::new(),
+                            }
+                        } else {
+                            Vec::new()
+                        }
+                    } else if let Some(compound) = self.compound_values.get(&obj_name) {
+                        match compound {
+                            DebugCompoundVal::List(it) | DebugCompoundVal::Tuple(it) => it.clone(),
+                            _ => Vec::new(),
+                        }
+                    } else {
+                        Vec::new()
+                    };
+
+                    let key_field = if !arg_ids.is_empty() {
+                        let k_node = *arena.node(arg_ids[0]);
+                        if k_node.node_kind() == NodeKind::MemberExpr {
+                            arena.interner.resolve(SymbolId(k_node.rhs)).to_string()
+                        } else if k_node.node_kind() == NodeKind::IdentExpr {
+                            arena.interner.resolve(SymbolId(k_node.lhs)).to_string()
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
+
+                    let is_val_self = if arg_ids.len() > 1 {
+                        let v_node = *arena.node(arg_ids[1]);
+                        if v_node.node_kind() == NodeKind::IdentExpr {
+                            arena.interner.resolve(SymbolId(v_node.lhs)) == "self"
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    let val_field = if !is_val_self && arg_ids.len() > 1 {
+                        let v_node = *arena.node(arg_ids[1]);
+                        if v_node.node_kind() == NodeKind::MemberExpr {
+                            arena.interner.resolve(SymbolId(v_node.rhs)).to_string()
+                        } else if v_node.node_kind() == NodeKind::IdentExpr {
+                            arena.interner.resolve(SymbolId(v_node.lhs)).to_string()
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
+
+                    let mut entries = Vec::new();
+                    for (item_val, item_ty) in &target_items {
+                        if let Some(compound) = self.compound_values.get(&item_val.to_string_repr()) {
+                            if let DebugCompoundVal::Record { fields, .. } = compound {
+                                let k_entry = fields.iter().find(|(name, _, _)| name == &key_field || name == &format!("_{}", key_field))
+                                    .map(|(_, v, ty)| (*v, ty.clone()))
+                                    .unwrap_or((*item_val, item_ty.clone()));
+                                let v_entry = if is_val_self {
+                                    (*item_val, item_ty.clone())
+                                } else {
+                                    fields.iter().find(|(name, _, _)| name == &val_field || name == &format!("_{}", val_field))
+                                        .map(|(_, v, ty)| (*v, ty.clone()))
+                                        .unwrap_or((*item_val, item_ty.clone()))
+                                };
+                                entries.push((k_entry, v_entry));
+                            }
+                        }
+                    }
+
+                    let formatted = format!("<SliceMap key={} val={} len={}>", key_field, if is_val_self { "self" } else { &val_field }, entries.len());
+                    self.compound_values.insert(formatted.clone(), DebugCompoundVal::SliceMap {
+                        key_type: "Any".to_string(),
+                        val_type: "Any".to_string(),
+                        is_soa: false,
+                        entries: entries.clone(),
+                        source_items: target_items,
+                        key_field: key_field.clone(),
+                        val_field: if is_val_self { "self".to_string() } else { val_field },
+                        key_offset: 0,
+                        val_offset: 0,
+                        stride: 32,
+                    });
+                    return (PilotVal::from_str(&formatted), "SliceMap".to_string());
+                }
+
+                if member_name == "invert" {
+                    let map_entries = if let Some(oid) = _obj_id_opt {
+                        let (v, _) = self.eval_ast_node(arena, oid);
+                        if let Some(DebugCompoundVal::SliceMap { entries, .. }) = self.compound_values.get(&v.to_string_repr()) {
+                            entries.clone()
+                        } else {
+                            Vec::new()
+                        }
+                    } else if let Some(DebugCompoundVal::SliceMap { entries, .. }) = self.compound_values.get(&obj_name) {
+                        entries.clone()
+                    } else {
+                        Vec::new()
+                    };
+
+                    let inverted: Vec<_> = map_entries.into_iter().map(|(k, v)| (v, k)).collect();
+                    let (old_kf, old_vf) = if let Some(oid) = _obj_id_opt {
+                        let (v, _) = self.eval_ast_node(arena, oid);
+                        if let Some(DebugCompoundVal::SliceMap { key_field, val_field, .. }) = self.compound_values.get(&v.to_string_repr()) {
+                            (key_field.clone(), val_field.clone())
+                        } else {
+                            ("key".to_string(), "val".to_string())
+                        }
+                    } else {
+                        ("key".to_string(), "val".to_string())
+                    };
+                    let formatted = format!("<SliceMap key={} val={} len={}>", old_vf, old_kf, inverted.len());
+                    self.compound_values.insert(formatted.clone(), DebugCompoundVal::SliceMap {
+                        key_type: "Any".to_string(),
+                        val_type: "Any".to_string(),
+                        is_soa: false,
+                        entries: inverted,
+                        source_items: Vec::new(),
+                        key_field: old_vf,
+                        val_field: old_kf,
+                        key_offset: 0,
+                        val_offset: 0,
+                        stride: 32,
+                    });
+                    return (PilotVal::from_str(&formatted), "SliceMap".to_string());
+                }
+
+                if (obj_name == "SliceMap" || fn_name == "from_soa") && member_name == "from_soa" {
+                    let keys = if !arg_ids.is_empty() {
+                        let (k_val, _) = self.eval_ast_node(arena, arg_ids[0]);
+                        if let Some(compound) = self.compound_values.get(&k_val.to_string_repr()) {
+                            match compound {
+                                DebugCompoundVal::List(it) | DebugCompoundVal::Tuple(it) => it.clone(),
+                                _ => Vec::new(),
+                            }
+                        } else {
+                            Vec::new()
+                        }
+                    } else {
+                        Vec::new()
+                    };
+
+                    let vals = if arg_ids.len() > 1 {
+                        let (v_val, _) = self.eval_ast_node(arena, arg_ids[1]);
+                        if let Some(compound) = self.compound_values.get(&v_val.to_string_repr()) {
+                            match compound {
+                                DebugCompoundVal::List(it) | DebugCompoundVal::Tuple(it) => it.clone(),
+                                _ => Vec::new(),
+                            }
+                        } else {
+                            Vec::new()
+                        }
+                    } else {
+                        Vec::new()
+                    };
+
+                    let mut entries = Vec::new();
+                    for (k, v) in keys.into_iter().zip(vals.into_iter()) {
+                        entries.push((k, v));
+                    }
+
+                    let formatted = format!("<SliceMap soa len={}>", entries.len());
+                    self.compound_values.insert(formatted.clone(), DebugCompoundVal::SliceMap {
+                        key_type: "Any".to_string(),
+                        val_type: "Any".to_string(),
+                        is_soa: true,
+                        entries,
+                        source_items: Vec::new(),
+                        key_field: "key".to_string(),
+                        val_field: "val".to_string(),
+                        key_offset: 0,
+                        val_offset: 0,
+                        stride: 0,
+                    });
+                    return (PilotVal::from_str(&formatted), "SliceMap".to_string());
                 }
 
                 if member_name == "open_view" {
@@ -3118,6 +3637,9 @@ impl PilotDebugger {
                                 match compound {
                                     DebugCompoundVal::List(it) | DebugCompoundVal::Tuple(it) => it.len() as i64,
                                     DebugCompoundVal::Map(p) => p.len() as i64,
+                                    DebugCompoundVal::SliceView { source_items, .. } => source_items.len() as i64,
+                                    DebugCompoundVal::SliceMap { entries, .. } => entries.len() as i64,
+                                    DebugCompoundVal::StridedSlice { items, .. } => items.len() as i64,
                                     _ => 0,
                                 }
                             } else {
