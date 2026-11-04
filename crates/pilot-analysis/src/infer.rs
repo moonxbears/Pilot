@@ -3559,3 +3559,254 @@ fn parse_sql_column_target(target: &str) -> (String, TypeId) {
 
     (col_name, ty)
 }
+
+// =========================================================================================
+// PHASE 3: O(1) TRAIT BOUND VERIFICATION, STATIC DELEGATION & AST FIELD-RENAMING REWRITER
+// =========================================================================================
+
+impl TypeInferenceEngine {
+    /// Verifies in O(1) time via the `TypeDef::implemented_interfaces` bitset whether `type_id`
+    /// satisfies `required_iface`. Emits a `LatticeContractMismatch` or `TYPE002` diagnostic if not.
+    pub fn verify_trait_bound(
+        &mut self,
+        type_id: TypeId,
+        required_iface: crate::types::InterfaceId,
+        span: pilot_span::ByteSpan,
+    ) -> bool {
+        if self.types.implements_interface(type_id, required_iface) {
+            return true;
+        }
+        let type_name = self.types.display(type_id);
+        let iface_name = match required_iface {
+            crate::types::InterfaceId::IANY_VALUE => "IAnyValue".to_string(),
+            crate::types::InterfaceId::IVALUE => "IValue".to_string(),
+            crate::types::InterfaceId::IREFERENCE => "IReference".to_string(),
+            crate::types::InterfaceId::IOBJECT => "IObject".to_string(),
+            crate::types::InterfaceId::IGUARD => "IGuard".to_string(),
+            other => format!("Interface#{}", other.0),
+        };
+        self.diagnostics.push(AnalysisDiagnostic::error(
+            "TYPE002",
+            format!("Type `{}` does not satisfy required interface bound `{}`", type_name, iface_name),
+            span,
+        ));
+        false
+    }
+
+    /// Resolves static delegation `BundleName.method(var ref self, ...)` inside an enclosing struct's
+    /// Tier 1 override body using `TypeDef::static_delegates`.
+    pub fn resolve_static_delegate(
+        &self,
+        enclosing_type: TypeId,
+        bundle_or_iface: SymbolId,
+        method_sym: SymbolId,
+    ) -> Option<pilot_parser::FunctionId> {
+        let td = self.types.type_defs.get(&enclosing_type)?;
+        td.static_delegates.get(&(bundle_or_iface, method_sym)).copied()
+    }
+
+    /// Resolves a method call on `type_id` in O(1) time using the 4-tier `MethodTable`.
+    pub fn resolve_method_tier(
+        &self,
+        type_id: TypeId,
+        method_sym: SymbolId,
+    ) -> Option<&crate::types::MethodEntry> {
+        let td = self.types.type_defs.get(&type_id)?;
+        td.method_table.get(&method_sym)
+    }
+}
+
+/// Rewrites in-place all `.old_name` (`PrefixDot`) and `self.old_name` (`InfixDot`) field accesses
+/// inside the AST subtree rooted at `node_id` according to `renamed_symbols`.
+pub fn rewrite_self_field_accesses(
+    arena: &mut AstArena,
+    node_id: NodeId,
+    renamed_symbols: &crate::types::FxHashMap<SymbolId, SymbolId>,
+) {
+    if node_id.is_none() || (node_id.0 as usize) >= arena.nodes.len() || renamed_symbols.is_empty() {
+        return;
+    }
+    let node = arena.nodes[node_id.0 as usize];
+    match node.node_kind() {
+        NodeKind::MemberExpr => {
+            let lhs_id = NodeId(node.lhs);
+            let field_sym = SymbolId(node.rhs);
+            if lhs_id.is_some() && (lhs_id.0 as usize) < arena.nodes.len() {
+                let lhs_node = arena.nodes[lhs_id.0 as usize];
+                if lhs_node.node_kind() == NodeKind::IdentExpr {
+                    let recv_name = arena.interner.resolve(SymbolId(lhs_node.lhs));
+                    if recv_name == "self" || recv_name == "this" {
+                        if let Some(&new_sym) = renamed_symbols.get(&field_sym) {
+                            arena.nodes[node_id.0 as usize].rhs = new_sym.0;
+                        }
+                    }
+                }
+            }
+            rewrite_self_field_accesses(arena, lhs_id, renamed_symbols);
+        }
+        NodeKind::Program
+        | NodeKind::BlockExpr
+        | NodeKind::TupleExpr
+        | NodeKind::ListExpr
+        | NodeKind::MapExpr => {
+            let children: Vec<u32> = arena.children_slice(node.lhs, node.rhs).to_vec();
+            for c in children {
+                rewrite_self_field_accesses(arena, NodeId(c), renamed_symbols);
+            }
+        }
+        NodeKind::FnDecl | NodeKind::ConstructorDecl | NodeKind::DestructorDecl => {
+            let fn_start = node.rhs;
+            let fn_len = node.flags as usize;
+            if fn_len > 0 {
+                let children: Vec<u32> = arena.children_slice(fn_start, fn_len as u32).to_vec();
+                for c in children {
+                    rewrite_self_field_accesses(arena, NodeId(c), renamed_symbols);
+                }
+            } else if NodeId(node.rhs).is_some() {
+                rewrite_self_field_accesses(arena, NodeId(node.rhs), renamed_symbols);
+            }
+        }
+        NodeKind::IfExpr => {
+            rewrite_self_field_accesses(arena, NodeId(node.lhs), renamed_symbols);
+            if node.flags == 0 {
+                rewrite_self_field_accesses(arena, NodeId(node.rhs), renamed_symbols);
+            } else {
+                let extra: Vec<u32> = arena.children_slice(node.rhs, 2).to_vec();
+                for c in extra {
+                    rewrite_self_field_accesses(arena, NodeId(c), renamed_symbols);
+                }
+            }
+        }
+        NodeKind::CallExpr => {
+            rewrite_self_field_accesses(arena, NodeId(node.lhs), renamed_symbols);
+            let arg_count = (node.flags & 0x0FFF) as u32;
+            let args: Vec<u32> = arena.children_slice(node.rhs, arg_count).to_vec();
+            for a in args {
+                rewrite_self_field_accesses(arena, NodeId(a), renamed_symbols);
+            }
+        }
+        NodeKind::CallArg | NodeKind::UnaryExpr | NodeKind::ReturnStmt | NodeKind::YieldStmt | NodeKind::ExprStmt | NodeKind::DeferStmt => {
+            rewrite_self_field_accesses(arena, NodeId(node.lhs), renamed_symbols);
+        }
+        NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
+            rewrite_self_field_accesses(arena, NodeId(node.rhs), renamed_symbols);
+        }
+        NodeKind::BinaryExpr | NodeKind::AssignStmt | NodeKind::WhileStmt | NodeKind::IndexExpr | NodeKind::PipeExpr | NodeKind::CoalesceExpr | NodeKind::RangeExpr => {
+            rewrite_self_field_accesses(arena, NodeId(node.lhs), renamed_symbols);
+            rewrite_self_field_accesses(arena, NodeId(node.rhs), renamed_symbols);
+        }
+        _ => {}
+    }
+}
+
+/// Clones the AST subtree rooted at `node_id` in `arena` and rewrites all `.old_name` and
+/// `self.old_name` field accesses to `new_name` according to `renamed_symbols`.
+pub fn clone_and_rewrite_self_field_accesses(
+    arena: &mut AstArena,
+    node_id: NodeId,
+    renamed_symbols: &crate::types::FxHashMap<SymbolId, SymbolId>,
+) -> NodeId {
+    let cloned = clone_ast_subtree(arena, node_id);
+    rewrite_self_field_accesses(arena, cloned, renamed_symbols);
+    cloned
+}
+
+fn clone_ast_subtree(arena: &mut AstArena, node_id: NodeId) -> NodeId {
+    if node_id.is_none() || (node_id.0 as usize) >= arena.nodes.len() {
+        return node_id;
+    }
+    let node = arena.nodes[node_id.0 as usize];
+    let span = arena.span(node_id);
+    let kind = node.node_kind();
+
+    let new_id = match kind {
+        NodeKind::Program
+        | NodeKind::BlockExpr
+        | NodeKind::TupleExpr
+        | NodeKind::ListExpr
+        | NodeKind::MapExpr => {
+            let children: Vec<u32> = arena.children_slice(node.lhs, node.rhs).to_vec();
+            let mut cloned_children = Vec::with_capacity(children.len());
+            for c in children {
+                cloned_children.push(clone_ast_subtree(arena, NodeId(c)));
+            }
+            arena.alloc_list_node(kind, node.flags, span, &cloned_children)
+        }
+        NodeKind::FnDecl | NodeKind::ConstructorDecl | NodeKind::DestructorDecl => {
+            let fn_start = node.rhs;
+            let fn_len = node.flags as usize;
+            if fn_len > 0 {
+                let children: Vec<u32> = arena.children_slice(fn_start, fn_len as u32).to_vec();
+                let mut cloned_children = Vec::with_capacity(children.len());
+                for c in children {
+                    cloned_children.push(clone_ast_subtree(arena, NodeId(c)));
+                }
+                let (start, len) = arena.alloc_child_slice(&cloned_children);
+                arena.alloc_node(kind, len as u16, span, node.lhs, start)
+            } else {
+                let rhs_cloned = clone_ast_subtree(arena, NodeId(node.rhs));
+                arena.alloc_node(kind, node.flags, span, node.lhs, rhs_cloned.0)
+            }
+        }
+        NodeKind::IfExpr => {
+            let cond_cloned = clone_ast_subtree(arena, NodeId(node.lhs));
+            if node.flags == 0 {
+                let then_cloned = clone_ast_subtree(arena, NodeId(node.rhs));
+                arena.alloc_node(kind, 0, span, cond_cloned.0, then_cloned.0)
+            } else {
+                let extra: Vec<u32> = arena.children_slice(node.rhs, 2).to_vec();
+                let mut cloned_extra = Vec::with_capacity(extra.len());
+                for c in extra {
+                    cloned_extra.push(clone_ast_subtree(arena, NodeId(c)));
+                }
+                let (start, _) = arena.alloc_child_slice(&cloned_extra);
+                arena.alloc_node(kind, node.flags, span, cond_cloned.0, start)
+            }
+        }
+        NodeKind::CallExpr => {
+            let callee_cloned = clone_ast_subtree(arena, NodeId(node.lhs));
+            let arg_count = (node.flags & 0x0FFF) as u32;
+            let args: Vec<u32> = arena.children_slice(node.rhs, arg_count).to_vec();
+            let mut cloned_args = Vec::with_capacity(args.len());
+            for a in args {
+                cloned_args.push(clone_ast_subtree(arena, NodeId(a)));
+            }
+            let (start, _) = arena.alloc_child_slice(&cloned_args);
+            arena.alloc_node(kind, node.flags, span, callee_cloned.0, start)
+        }
+        NodeKind::MemberExpr => {
+            let lhs_cloned = clone_ast_subtree(arena, NodeId(node.lhs));
+            arena.alloc_node(kind, node.flags, span, lhs_cloned.0, node.rhs)
+        }
+        NodeKind::CallArg
+        | NodeKind::UnaryExpr
+        | NodeKind::ReturnStmt
+        | NodeKind::YieldStmt
+        | NodeKind::ExprStmt
+        | NodeKind::DeferStmt => {
+            let lhs_cloned = clone_ast_subtree(arena, NodeId(node.lhs));
+            arena.alloc_node(kind, node.flags, span, lhs_cloned.0, node.rhs)
+        }
+        NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
+            let rhs_cloned = clone_ast_subtree(arena, NodeId(node.rhs));
+            arena.alloc_node(kind, node.flags, span, node.lhs, rhs_cloned.0)
+        }
+        NodeKind::BinaryExpr
+        | NodeKind::AssignStmt
+        | NodeKind::WhileStmt
+        | NodeKind::IndexExpr
+        | NodeKind::PipeExpr
+        | NodeKind::CoalesceExpr
+        | NodeKind::RangeExpr => {
+            let lhs_cloned = clone_ast_subtree(arena, NodeId(node.lhs));
+            let rhs_cloned = clone_ast_subtree(arena, NodeId(node.rhs));
+            arena.alloc_node(kind, node.flags, span, lhs_cloned.0, rhs_cloned.0)
+        }
+        _ => arena.alloc_node(kind, node.flags, span, node.lhs, node.rhs),
+    };
+
+    if let Some(&ann) = arena.type_annotations.get(&node_id.0) {
+        arena.type_annotations.insert(new_id.0, ann);
+    }
+    new_id
+}

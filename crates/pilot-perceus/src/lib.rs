@@ -10,8 +10,32 @@ pub mod arc;
 pub mod realtime;
 
 pub use escape::{AllocationSite, EscapeAnalyzer, EscapeState};
-pub use arc::{ArcOp, PerceusArcEngine};
+pub use arc::{ArcOp, BindingLifecycleState, PerceusArcEngine};
 pub use realtime::RealtimeVerifier;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OwnershipAction {
+    /// `0b00` (`IValue`): Trivial bitwise register copy; no Perceus RC/drop tracking needed.
+    TrivialBitCopy,
+    /// `0b01` (`IReference`): Bitwise copy with lexical borrow-escape check in `escape.rs`.
+    LexicalBorrowCheckOnly,
+    /// `0b10` (`IObject`): Move-by-default; Perceus `arc.rs` inserts deterministic `~self()` or RC drop at scope exit;
+    /// may cross `.pchor` cues if `iso`-qualified.
+    MoveAndDropAtScopeExit,
+    /// `0b11` (`IGuard`): Move-by-default + lexical borrow-escape check + deterministic `~self()` at scope exit;
+    /// strictly forbidden from crossing `.pchor` cues.
+    ScopedGuardMoveAndDrop,
+}
+
+#[inline]
+pub const fn classify_perceus_action(lattice: u8) -> OwnershipAction {
+    match lattice & 0b11 {
+        0b00 => OwnershipAction::TrivialBitCopy,
+        0b01 => OwnershipAction::LexicalBorrowCheckOnly,
+        0b10 => OwnershipAction::MoveAndDropAtScopeExit,
+        _ => OwnershipAction::ScopedGuardMoveAndDrop,
+    }
+}
 
 pub struct PerceusReport {
     pub region_allocs: usize,
@@ -218,9 +242,9 @@ mod tests {
     #[test]
     fn test_perceus_optimizer_analyze_arena_catches_noalloc_heap_escape() {
         let code = r#"
-def dsp_process_signal(x: float) -> float {
-    let buf = [1.0, 2.0, 3.0]
-    return x
+fn dsp_process_signal(x: float) -> float {
+    let buf = [1.0, 2.0, 3.0];
+    return x;
 }
 "#;
         let arena = pilot_parser::parse(code);
@@ -229,5 +253,41 @@ def dsp_process_signal(x: float) -> float {
 
         assert!(!diags.is_empty(), "Expected PILOT104 for heap allocation inside dsp_process_signal");
         assert_eq!(diags[0].code, "PILOT104");
+    }
+
+    #[test]
+    fn test_phase3_perceus_2bit_lattice_lifecycle_routing() {
+        let span = ByteSpan::new(0, 10);
+        assert_eq!(classify_perceus_action(0b00), OwnershipAction::TrivialBitCopy);
+        assert_eq!(classify_perceus_action(0b01), OwnershipAction::LexicalBorrowCheckOnly);
+        assert_eq!(classify_perceus_action(0b10), OwnershipAction::MoveAndDropAtScopeExit);
+        assert_eq!(classify_perceus_action(0b11), OwnershipAction::ScopedGuardMoveAndDrop);
+
+        let mut perceus = PerceusOptimizer::new();
+        assert!(perceus.arc.track_binding_by_lattice("val_x", 0b00).is_none());
+        assert!(perceus.arc.track_binding_by_lattice("ref_y", 0b01).is_none());
+        let obj_state = perceus.arc.track_binding_by_lattice("obj_z", 0b10).unwrap();
+        assert!(obj_state.allow_early_last_use_drop);
+        let guard_state = perceus.arc.track_binding_by_lattice("guard_g", 0b11).unwrap();
+        assert!(!guard_state.allow_early_last_use_drop);
+        perceus.arc.emit_drop_for_binding("guard_g", false);
+        assert!(
+            perceus.arc.ops().is_empty(),
+            "IGuard must not drop early before scope exit"
+        );
+        perceus.arc.emit_drop_for_binding("guard_g", true);
+        assert_eq!(
+            perceus.arc.ops(),
+            &[ArcOp::ScopeExitDrop {
+                var_name: "guard_g".to_string()
+            }]
+        );
+        assert!(perceus
+            .escape
+            .verify_borrow_escape_by_lattice("guard_g", 0b11, true, None, true, span)
+            .is_err());
+        assert!(perceus.realtime.verify_cue_transfer("audio_cue", 0b00, false, span));
+        assert!(perceus.realtime.verify_cue_transfer("audio_cue", 0b10, true, span));
+        assert!(!perceus.realtime.verify_cue_transfer("audio_cue", 0b11, true, span));
     }
 }

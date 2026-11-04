@@ -88,4 +88,59 @@ impl EscapeAnalyzer {
             .filter(|a| a.escape_state == EscapeState::Stack)
             .count()
     }
+
+    /// 1-cycle `LatticeBits` borrow-escape check for `IReference` (`0b01`) and `IGuard` (`0b11`).
+    /// When `(lattice_bits & 0b01) != 0`:
+    /// 1. Forbids returning the value from a function unless its lifetime is tied to an input `ref` parameter.
+    /// 2. Forbids storing the value inside an `IObject` (`0b10`) heap container.
+    /// 3. Forbids sending the value across a `.pchor` `cue` boundary.
+    pub fn verify_borrow_escape_by_lattice(
+        &self,
+        var_name: &str,
+        lattice_bits: u8,
+        tied_to_input_ref_param: bool,
+        stored_in_container_lattice: Option<u8>,
+        crosses_cue_boundary: bool,
+        span: pilot_span::ByteSpan,
+    ) -> Result<(), pilot_analysis::diagnostics::AnalysisDiagnostic> {
+        if (lattice_bits & 0b01) == 0 {
+            return Ok(());
+        }
+        if crosses_cue_boundary {
+            return Err(pilot_analysis::diagnostics::AnalysisDiagnostic::error(
+                "ESCAPE001",
+                format!(
+                    "Borrow-tracked value `{}` (lattice `{:#04b}`) cannot cross a `.pchor` `cue` or thread boundary",
+                    var_name,
+                    lattice_bits & 0b11
+                ),
+                span,
+            ));
+        }
+        if let Some(container_lat) = stored_in_container_lattice {
+            if (container_lat & 0b10) != 0 && (container_lat & 0b01) == 0 {
+                return Err(pilot_analysis::diagnostics::AnalysisDiagnostic::error(
+                    "ESCAPE002",
+                    format!(
+                        "Borrow-tracked value `{}` (lattice `{:#04b}`) cannot be stored inside an `IObject` (`0b10`) heap container",
+                        var_name,
+                        lattice_bits & 0b11
+                    ),
+                    span,
+                ));
+            }
+        }
+        if !tied_to_input_ref_param {
+            return Err(pilot_analysis::diagnostics::AnalysisDiagnostic::error(
+                "ESCAPE003",
+                format!(
+                    "Borrow-tracked value `{}` (lattice `{:#04b}`) cannot escape function return unless tied to an input `ref` parameter",
+                    var_name,
+                    lattice_bits & 0b11
+                ),
+                span,
+            ));
+        }
+        Ok(())
+    }
 }

@@ -19,9 +19,17 @@ pub mod autodiff;
 pub mod quoting;
 pub mod macros;
 
-pub use diagnostics::{AnalysisDiagnostic, DiagnosticSeverity};
-pub use types::{TypeArena, TypeId, TypeKind};
-pub use infer::TypeInferenceEngine;
+pub use diagnostics::{
+    verify_core_naming_rules, AnalysisDiagnostic, Diagnostic, DiagnosticSeverity, PackageAst,
+};
+pub use types::{
+    classify_perceus_action, BitSet, BundleDef, BundleId, FieldDef, FxHashMap, FxHashSet,
+    InterfaceDef, InterfaceId, LatticeBits, MethodEntry, MethodSignature, MethodTier, OriginId,
+    OwnershipAction, SpliceDirectives, TypeArena, TypeDef, TypeId, TypeKind,
+};
+pub use infer::{
+    clone_and_rewrite_self_field_accesses, rewrite_self_field_accesses, TypeInferenceEngine,
+};
 pub use patterns::{MarangetChecker, PatternCase};
 pub use null_error::{ErrorFlowAnalyzer, NullSafetyAnalyzer};
 pub use loops::LoopAnalyzer;
