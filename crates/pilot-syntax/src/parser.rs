@@ -53,9 +53,8 @@ pub fn scan_raw_tokens<'a>(src: &'a str) -> Vec<RawToken<'a>> {
             continue;
         }
 
-        // 3. Comments & Preprocessor Directives (#region, #endregion, #, //, /* ... */)
+        // 3. Comments & Preprocessor Directives (#region, #endregion, //, /* ... */)
         if b == b'#' {
-            // Check for #region / #endregion
             let rest = &src[cur..];
             if rest.starts_with("#region") {
                 let end = scan_to_newline(bytes, cur);
@@ -75,15 +74,23 @@ pub fn scan_raw_tokens<'a>(src: &'a str) -> Vec<RawToken<'a>> {
                 });
                 cur = end;
                 continue;
+            } else if rest.starts_with("#if") || rest.starts_with("#else") || rest.starts_with("#elif") || rest.starts_with("#endif") || rest.starts_with("#define") || rest.starts_with("#undef") || rest.starts_with("#error") || rest.starts_with("#warning") || rest.starts_with("#pragma") {
+                let end = scan_to_newline(bytes, cur);
+                tokens.push(RawToken {
+                    kind: SyntaxKind::LineComment,
+                    text: &src[start..end],
+                    span: ByteSpan::new(start as u32, end as u32),
+                });
+                cur = end;
+                continue;
             }
 
-            let end = scan_to_newline(bytes, cur);
             tokens.push(RawToken {
-                kind: SyntaxKind::LineComment,
-                text: &src[start..end],
-                span: ByteSpan::new(start as u32, end as u32),
+                kind: SyntaxKind::ErrorToken,
+                text: &src[start..start + 1],
+                span: ByteSpan::new(start as u32, (start + 1) as u32),
             });
-            cur = end;
+            cur += 1;
             continue;
         }
 
@@ -145,8 +152,8 @@ pub fn scan_raw_tokens<'a>(src: &'a str) -> Vec<RawToken<'a>> {
             continue;
         }
 
-        // 5b. Interpolated F-Strings: f"...", f'...', $"...", $'...'
-        if (b == b'f' || b == b'F' || b == b'$')
+        // 5b. Interpolated F-Strings: f"...", f'...'
+        if (b == b'f' || b == b'F')
             && cur + 1 < bytes.len()
             && (bytes[cur + 1] == b'"' || bytes[cur + 1] == b'\'')
         {
@@ -657,11 +664,149 @@ impl<'a, 't> CstParser<'a, 't> {
     }
 
     fn parse_stmt_or_decl(&mut self) {
+        if self.at(SyntaxKind::LBracket) {
+            self.sink.start_node(SyntaxKind::AttrPipeline);
+            self.advance(); // '['
+            let mut last_was_comma = false;
+            while !self.at_end() && !self.at(SyntaxKind::RBracket) {
+                if self.at_ident_like() {
+                    self.advance();
+                    if self.at(SyntaxKind::LParen) {
+                        self.advance();
+                        while !self.at_end() && !self.at(SyntaxKind::RParen) {
+                            self.advance();
+                        }
+                        if self.at(SyntaxKind::RParen) {
+                            self.advance();
+                        }
+                    }
+                } else {
+                    self.advance();
+                }
+                last_was_comma = false;
+                if self.at(SyntaxKind::Comma) {
+                    self.advance();
+                    last_was_comma = true;
+                } else {
+                    break;
+                }
+            }
+            if last_was_comma {
+                self.sink.error(SyntaxDiagnostic::new("Trailing comma not allowed in attribute brackets", self.peek_span()));
+            }
+            if self.at(SyntaxKind::RBracket) {
+                self.advance();
+            }
+            self.sink.finish_node();
+        }
+
+        if self.at_ident_like() && matches!(self.peek_text(), "pub" | "priv" | "file" | "pkg" | "int" | "export") {
+            let next_idx = self.skip_trivia_idx(self.pos + 1);
+            if next_idx < self.tokens.len() && self.tokens[next_idx].kind == SyntaxKind::Colon {
+                self.sink.start_node(SyntaxKind::DistributiveHeader);
+                self.advance(); // modifier
+                self.advance(); // ':'
+                self.sink.finish_node();
+                return;
+            }
+            if next_idx < self.tokens.len() && (self.tokens[next_idx].kind == SyntaxKind::KwStruct || self.tokens[next_idx].kind == SyntaxKind::KwInterface) {
+                let after_kw = self.skip_trivia_idx(next_idx + 1);
+                if after_kw < self.tokens.len() && self.tokens[after_kw].kind == SyntaxKind::LBrace {
+                    self.sink.start_node(SyntaxKind::DistributiveBlock);
+                    self.advance();
+                    self.advance();
+                    self.parse_block_or_expr_body();
+                    self.sink.finish_node();
+                    return;
+                }
+            }
+        }
+
+        if self.at_ident_like() {
+            let txt = self.peek_text();
+            match txt {
+                "switch" => {
+                    self.parse_switch_stmt();
+                    return;
+                }
+                "import" => {
+                    self.parse_import_decl();
+                    return;
+                }
+                "from" => {
+                    self.parse_from_import_decl();
+                    return;
+                }
+                "var" => {
+                    self.parse_binding_stmt(SyntaxKind::VarStmt);
+                    return;
+                }
+                "const" => {
+                    self.parse_binding_stmt(SyntaxKind::ConstDecl);
+                    return;
+                }
+                "class" | "actor" => {
+                    self.parse_class_decl();
+                    return;
+                }
+                "record" => {
+                    self.parse_record_decl();
+                    return;
+                }
+                "type" | "enum" => {
+                    self.parse_type_adt_decl();
+                    return;
+                }
+                "extend" | "extension" => {
+                    self.parse_extend_decl();
+                    return;
+                }
+                "while" => {
+                    self.parse_while_stmt();
+                    return;
+                }
+                "for" => {
+                    self.parse_for_stmt();
+                    return;
+                }
+                "break" => {
+                    self.parse_break_stmt();
+                    return;
+                }
+                "continue" => {
+                    self.parse_continue_stmt();
+                    return;
+                }
+                "guard" => {
+                    self.parse_guard_stmt();
+                    return;
+                }
+                _ => {
+                    let next_idx = self.skip_trivia_idx(self.pos + 1);
+                    if next_idx < self.tokens.len() && self.tokens[next_idx].kind == SyntaxKind::Colon {
+                        if !matches!(txt, "pub" | "priv" | "file" | "pkg" | "int" | "export") {
+                            self.sink.start_node(SyntaxKind::VarStmt);
+                            self.advance(); // field name
+                            self.advance(); // ':'
+                            while !self.at_end() && !self.at(SyntaxKind::Semicolon) && !self.at(SyntaxKind::RBrace) && !self.at(SyntaxKind::Newline) {
+                                self.advance();
+                            }
+                            if self.at(SyntaxKind::Semicolon) {
+                                self.advance();
+                            }
+                            self.sink.finish_node();
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
         let k = self.peek();
         match k {
             SyntaxKind::KwImport => self.parse_import_decl(),
             SyntaxKind::KwFrom => self.parse_from_import_decl(),
-            SyntaxKind::KwDef | SyntaxKind::KwFn => self.parse_fn_decl(),
+            SyntaxKind::KwFn => self.parse_fn_decl(),
             SyntaxKind::KwClass => self.parse_class_decl(),
             SyntaxKind::KwStruct => self.parse_struct_decl(),
             SyntaxKind::KwRecord => self.parse_record_decl(),
@@ -682,7 +827,7 @@ impl<'a, 't> CstParser<'a, 't> {
             SyntaxKind::Ident => {
                 let txt = self.peek_text();
                 if let Some(candidate) = find_keyword_typo_candidate(txt) {
-                    if matches!(candidate, "guard" | "while" | "return" | "yield" | "break" | "continue" | "import" | "from") {
+                    if txt != candidate && matches!(candidate, "guard" | "while" | "return" | "yield" | "break" | "continue" | "import" | "from") {
                         let next_idx = self.skip_trivia_idx(self.skip_trivia_idx(self.pos) + 1);
                         if next_idx < self.tokens.len() {
                             let next_k = self.tokens[next_idx].kind;
@@ -704,6 +849,38 @@ impl<'a, 't> CstParser<'a, 't> {
             }
             _ => self.parse_expr_stmt(),
         }
+    }
+
+    fn parse_switch_stmt(&mut self) {
+        self.sink.start_node(SyntaxKind::SwitchStmt);
+        self.advance(); // 'switch'
+        if !self.at(SyntaxKind::LBrace) {
+            self.parse_expr();
+        }
+        if self.at(SyntaxKind::LBrace) {
+            self.advance(); // '{'
+            while !self.at_end() && !self.at(SyntaxKind::RBrace) {
+                if self.at_ident_like() && (self.peek_text() == "case" || self.peek_text() == "default") {
+                    self.sink.start_node(SyntaxKind::SwitchArm);
+                    let is_default = self.peek_text() == "default";
+                    self.advance(); // 'case' or 'default'
+                    if !is_default {
+                        self.parse_expr();
+                    }
+                    if self.at(SyntaxKind::FatArrow) || self.at(SyntaxKind::Colon) {
+                        self.advance();
+                    }
+                    self.parse_stmt_or_decl();
+                    self.sink.finish_node();
+                } else {
+                    self.advance();
+                }
+            }
+            if self.at(SyntaxKind::RBrace) {
+                self.advance();
+            }
+        }
+        self.sink.finish_node();
     }
 
     fn parse_import_decl(&mut self) {
@@ -732,7 +909,7 @@ impl<'a, 't> CstParser<'a, 't> {
 
     fn parse_fn_decl(&mut self) {
         self.sink.start_node(SyntaxKind::FnDecl);
-        self.advance(); // 'def' or 'fn'
+        self.advance(); // 'fn'
 
         if self.at_ident_like() {
             self.advance(); // function name
@@ -741,12 +918,58 @@ impl<'a, 't> CstParser<'a, 't> {
             self.sink.error(SyntaxDiagnostic::new("Expected function name", self.peek_span()));
         }
 
+        // Generic type parameters: <T, U>
+        if self.at(SyntaxKind::Less) {
+            self.sink.start_node(SyntaxKind::TypeParamList);
+            self.advance(); // '<'
+            let mut last_was_comma = false;
+            while !self.at_end() && !self.at(SyntaxKind::Greater) {
+                if self.at_ident_like() {
+                    self.advance();
+                    if self.at(SyntaxKind::Colon) {
+                        self.advance();
+                        while !self.at_end() && !self.at(SyntaxKind::Comma) && !self.at(SyntaxKind::Greater) {
+                            self.advance();
+                        }
+                    }
+                } else {
+                    self.advance();
+                }
+                last_was_comma = false;
+                if self.at(SyntaxKind::Comma) {
+                    self.advance();
+                    last_was_comma = true;
+                } else {
+                    break;
+                }
+            }
+            if last_was_comma {
+                self.sink.error(SyntaxDiagnostic::new("Trailing comma rejected in generic parameters", self.peek_span()));
+            }
+            if self.at(SyntaxKind::Greater) {
+                self.advance();
+            }
+            self.sink.finish_node();
+        }
+
         // Parameters: ( ... )
         if self.at(SyntaxKind::LParen) {
             self.sink.start_node(SyntaxKind::ParamList);
             self.advance(); // '('
+            let mut last_was_comma = false;
             while !self.at_end() && !self.at(SyntaxKind::RParen) && !self.at(SyntaxKind::LBrace) {
+                if self.at_ident_like() && self.peek_text() == "self" {
+                    self.sink.error(SyntaxDiagnostic::new("Explicit 1st-parameter 'self' is forbidden", self.peek_span()));
+                }
                 self.advance();
+                last_was_comma = false;
+                if self.at(SyntaxKind::Comma) {
+                    self.advance();
+                    last_was_comma = true;
+                }
+            }
+            if last_was_comma {
+                self.sink.error(SyntaxDiagnostic::new("Trailing comma rejected in function parameters", self.peek_span()));
             }
             if self.at(SyntaxKind::RParen) {
                 self.advance();
@@ -760,13 +983,13 @@ impl<'a, 't> CstParser<'a, 't> {
         // Optional return type: -> Type
         if self.at(SyntaxKind::Arrow) {
             self.advance();
-            while !self.at_end() && !self.at(SyntaxKind::LBrace) && !self.at(SyntaxKind::Colon) && !self.at(SyntaxKind::Semicolon) && !self.at(SyntaxKind::Newline) {
+            while !self.at_end() && !self.at(SyntaxKind::LBrace) && !self.at(SyntaxKind::FatArrow) && !self.at(SyntaxKind::Semicolon) && !self.at(SyntaxKind::Newline) {
                 self.advance();
             }
         }
 
-        // Body: block ({ ... } or : ...)
-        self.parse_block_or_colon_suite();
+        // Body: block ({ ... } or => expr;)
+        self.parse_block_or_expr_body();
         self.sink.finish_node(); // FnDecl
     }
 
@@ -776,7 +999,7 @@ impl<'a, 't> CstParser<'a, 't> {
         if self.at_ident_like() {
             self.advance();
         }
-        self.parse_block_or_colon_suite();
+        self.parse_block_or_expr_body();
         self.sink.finish_node();
     }
 
@@ -786,7 +1009,54 @@ impl<'a, 't> CstParser<'a, 't> {
         if self.at_ident_like() {
             self.advance();
         }
-        self.parse_block_or_colon_suite();
+        // Generic params: <T, U>
+        if self.at(SyntaxKind::Less) {
+            self.sink.start_node(SyntaxKind::TypeParamList);
+            self.advance(); // '<'
+            let mut last_was_comma = false;
+            while !self.at_end() && !self.at(SyntaxKind::Greater) {
+                if self.at_ident_like() {
+                    self.advance();
+                } else {
+                    self.advance();
+                }
+                last_was_comma = false;
+                if self.at(SyntaxKind::Comma) {
+                    self.advance();
+                    last_was_comma = true;
+                } else {
+                    break;
+                }
+            }
+            if last_was_comma {
+                self.sink.error(SyntaxDiagnostic::new("Trailing comma rejected in generic parameters", self.peek_span()));
+            }
+            if self.at(SyntaxKind::Greater) {
+                self.advance();
+            }
+            self.sink.finish_node();
+        }
+        // Inheritance list: : IBase1, IBase2
+        if self.at(SyntaxKind::Colon) {
+            self.advance(); // ':'
+            let mut last_was_comma = false;
+            while !self.at_end() && !self.at(SyntaxKind::LBrace) && !self.at(SyntaxKind::Semicolon) {
+                self.advance();
+                last_was_comma = false;
+                if self.at(SyntaxKind::Comma) {
+                    self.advance();
+                    last_was_comma = true;
+                }
+            }
+            if last_was_comma {
+                self.sink.error(SyntaxDiagnostic::new("Trailing comma rejected in inheritance list", self.peek_span()));
+            }
+        }
+        if self.at(SyntaxKind::LBrace) {
+            self.parse_block_or_expr_body();
+        } else if self.at(SyntaxKind::Semicolon) {
+            self.advance();
+        }
         self.sink.finish_node();
     }
 
@@ -796,7 +1066,7 @@ impl<'a, 't> CstParser<'a, 't> {
         if self.at_ident_like() {
             self.advance();
         }
-        self.parse_block_or_colon_suite();
+        self.parse_block_or_expr_body();
         self.sink.finish_node();
     }
 
@@ -806,7 +1076,54 @@ impl<'a, 't> CstParser<'a, 't> {
         if self.at_ident_like() {
             self.advance();
         }
-        self.parse_block_or_colon_suite();
+        // Generic params: <T, U>
+        if self.at(SyntaxKind::Less) {
+            self.sink.start_node(SyntaxKind::TypeParamList);
+            self.advance(); // '<'
+            let mut last_was_comma = false;
+            while !self.at_end() && !self.at(SyntaxKind::Greater) {
+                if self.at_ident_like() {
+                    self.advance();
+                } else {
+                    self.advance();
+                }
+                last_was_comma = false;
+                if self.at(SyntaxKind::Comma) {
+                    self.advance();
+                    last_was_comma = true;
+                } else {
+                    break;
+                }
+            }
+            if last_was_comma {
+                self.sink.error(SyntaxDiagnostic::new("Trailing comma rejected in generic parameters", self.peek_span()));
+            }
+            if self.at(SyntaxKind::Greater) {
+                self.advance();
+            }
+            self.sink.finish_node();
+        }
+        // Inheritance list: : IBase1, IBase2
+        if self.at(SyntaxKind::Colon) {
+            self.advance(); // ':'
+            let mut last_was_comma = false;
+            while !self.at_end() && !self.at(SyntaxKind::LBrace) && !self.at(SyntaxKind::Semicolon) {
+                self.advance();
+                last_was_comma = false;
+                if self.at(SyntaxKind::Comma) {
+                    self.advance();
+                    last_was_comma = true;
+                }
+            }
+            if last_was_comma {
+                self.sink.error(SyntaxDiagnostic::new("Trailing comma rejected in inheritance list", self.peek_span()));
+            }
+        }
+        if self.at(SyntaxKind::LBrace) {
+            self.parse_block_or_expr_body();
+        } else if self.at(SyntaxKind::Semicolon) {
+            self.advance();
+        }
         self.sink.finish_node();
     }
 
@@ -816,7 +1133,7 @@ impl<'a, 't> CstParser<'a, 't> {
         if self.at_ident_like() {
             self.advance();
         }
-        self.parse_block_or_colon_suite();
+        self.parse_block_or_expr_body();
         self.sink.finish_node();
     }
 
@@ -944,7 +1261,7 @@ impl<'a, 't> CstParser<'a, 't> {
         self.parse_expr();
         if self.at(SyntaxKind::KwElse) {
             self.advance();
-            self.parse_block_or_colon_suite();
+            self.parse_block_or_expr_body();
         }
         self.sink.finish_node();
     }
@@ -952,7 +1269,7 @@ impl<'a, 't> CstParser<'a, 't> {
     fn parse_defer_stmt(&mut self) {
         self.sink.start_node(SyntaxKind::DeferStmt);
         self.advance(); // 'defer'
-        self.parse_block_or_colon_suite();
+        self.parse_block_or_expr_body();
         self.sink.finish_node();
     }
 
@@ -960,7 +1277,7 @@ impl<'a, 't> CstParser<'a, 't> {
         self.sink.start_node(SyntaxKind::WhileStmt);
         self.advance(); // 'while'
         self.parse_expr();
-        self.parse_block_or_colon_suite();
+        self.parse_block_or_expr_body();
         self.sink.finish_node();
     }
 
@@ -990,7 +1307,7 @@ impl<'a, 't> CstParser<'a, 't> {
             self.advance();
         }
         self.parse_expr();
-        self.parse_block_or_colon_suite();
+        self.parse_block_or_expr_body();
         self.sink.finish_node();
     }
 
@@ -1003,8 +1320,16 @@ impl<'a, 't> CstParser<'a, 't> {
         self.sink.finish_node();
     }
 
-    fn parse_block_or_colon_suite(&mut self) {
-        if self.at(SyntaxKind::LBrace) {
+    fn parse_block_or_expr_body(&mut self) {
+        if self.at(SyntaxKind::FatArrow) {
+            self.advance(); // '=>'
+            self.parse_expr();
+            if self.at(SyntaxKind::Semicolon) {
+                self.advance();
+            } else {
+                self.sink.error(SyntaxDiagnostic::new("Missing semicolon after expression body", self.peek_span()));
+            }
+        } else if self.at(SyntaxKind::LBrace) {
             self.sink.start_node(SyntaxKind::BlockExpr);
             self.advance(); // '{'
             while !self.at_end() && !self.at(SyntaxKind::RBrace) {
@@ -1021,22 +1346,9 @@ impl<'a, 't> CstParser<'a, 't> {
                 self.sink.error(SyntaxDiagnostic::with_fix("Expected '}' closing block", self.peek_span(), "}"));
             }
             self.sink.finish_node();
-        } else if self.at(SyntaxKind::Colon) {
-            self.sink.start_node(SyntaxKind::BlockExpr);
-            self.advance(); // ':'
-            // In a colon suite, statements follow until dedent or next top-level item
-            while !self.at_end() && !self.at(SyntaxKind::RBrace) && !self.at(SyntaxKind::VirtualRBrace) {
-                let k = self.peek();
-                if matches!(k, SyntaxKind::KwDef | SyntaxKind::KwFn | SyntaxKind::KwClass | SyntaxKind::KwStruct | SyntaxKind::KwRecord | SyntaxKind::KwInterface | SyntaxKind::KwExtend) {
-                    break;
-                }
-                let start_pos = self.pos;
-                self.parse_stmt_or_decl();
-                if self.pos == start_pos {
-                    break;
-                }
-            }
-            self.sink.finish_node();
+        } else {
+            self.sink.token(SyntaxKind::MissingRBrace, "");
+            self.sink.error(SyntaxDiagnostic::new("Expected '{' block", self.peek_span()));
         }
     }
 
@@ -1186,7 +1498,7 @@ impl<'a, 't> CstParser<'a, 't> {
                 self.parse_postfix_chain();
             }
             SyntaxKind::LBrace => {
-                self.parse_block_or_colon_suite();
+                self.parse_block_or_expr_body();
             }
             _ => {
                 // If not at a recognized primary, synthesize MissingExpr if at semicolon or delimiter
@@ -1217,14 +1529,14 @@ impl<'a, 't> CstParser<'a, 't> {
             self.parse_expr();
         }
 
-        self.parse_block_or_colon_suite();
+        self.parse_block_or_expr_body();
 
         if self.at(SyntaxKind::KwElse) {
             self.advance();
             if self.at(SyntaxKind::KwIf) {
                 self.parse_if_expr();
             } else {
-                self.parse_block_or_colon_suite();
+                self.parse_block_or_expr_body();
             }
         }
         self.sink.finish_node();

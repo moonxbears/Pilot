@@ -629,6 +629,7 @@ pub struct AstArena {
     /// Operator symbol or identifier for `OperatorDecl`.
     pub operator_symbols: std::collections::HashMap<u32, SymbolId>,
     pub static_methods: std::collections::HashSet<u32>,
+    pub pure_methods: std::collections::HashSet<u32>,
     pub mut_methods: std::collections::HashSet<u32>,
     pub node_visibility: std::collections::HashMap<u32, VisibilityTier>,
     pub node_clearance: std::collections::HashMap<u32, ClearanceLevel>,
@@ -659,6 +660,7 @@ impl AstArena {
             operator_symbols: std::collections::HashMap::new(),
             static_methods: std::collections::HashSet::new(),
             mut_methods: std::collections::HashSet::new(),
+            pure_methods: std::collections::HashSet::new(),
             node_visibility: std::collections::HashMap::new(),
             node_clearance: std::collections::HashMap::new(),
         }

@@ -49,6 +49,9 @@ pub enum SyntaxKind {
     RawDslBlock = 45,
 
     // --- Strict Keywords (70..139) ---
+    KwEngine = 67,
+    KwAsm = 68,
+    KwLoop = 69,
     KwLet = 70,
     KwVar = 71,
     KwConst = 72,
@@ -372,6 +375,11 @@ pub enum SyntaxKind {
     TupleExpr = 473,
     ParenExpr = 474,
     LambdaExpr = 475,
+    SwitchStmt = 476,
+    SwitchArm = 477,
+    AttrPipeline = 478,
+    DistributiveBlock = 479,
+    DistributiveHeader = 480,
 
     // --- Patterns & Types (500..529) ---
     PatWildcard = 500,
@@ -528,6 +536,9 @@ impl SyntaxKind {
             TokenKind::MemoryLit => SyntaxKind::MemoryLit,
             TokenKind::RawDslBlock => SyntaxKind::RawDslBlock,
 
+            TokenKind::KwEngine => SyntaxKind::KwEngine,
+            TokenKind::KwAsm => SyntaxKind::KwAsm,
+            TokenKind::KwLoop => SyntaxKind::KwLoop,
             TokenKind::KwLet => SyntaxKind::KwLet,
             TokenKind::KwVar => SyntaxKind::KwVar,
             TokenKind::KwConst => SyntaxKind::KwConst,

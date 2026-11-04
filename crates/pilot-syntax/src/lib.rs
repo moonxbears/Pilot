@@ -32,7 +32,7 @@ mod tests {
 import std.math;
 
 /* Block comment */
-def calculate(a: i64, b: i64) -> i64 {
+fn calculate(a: i64, b: i64) -> i64 {
     // Inner computation
     let res = (a + b) * 10;
     return res;
@@ -42,15 +42,46 @@ def calculate(a: i64, b: i64) -> i64 {
         let cst = parse_cst(code);
         let reconstructed = cst.to_text();
         assert_eq!(reconstructed, code, "Round-trip must match byte-for-byte!");
-        assert!(cst.diagnostics.is_empty(), "Valid code should have no diagnostics");
+        assert!(cst.diagnostics.is_empty(), "Valid code should have no diagnostics: {:?}", cst.diagnostics);
     }
 
     #[test]
-    fn test_colon_suite_round_trip() {
-        let code = "def greet(name: str):\n    let msg = \"Hello \" + name;\n    return msg;\n";
+    fn test_fn_brace_block_and_arrow_expr_round_trip() {
+        let code = "fn greet(name: str) -> str {\n    let msg = \"Hello \" + name;\n    return msg;\n}\nfn add(a: i64, b: i64) => a + b;\n";
         let cst = parse_cst(code);
         assert_eq!(cst.to_text(), code);
         assert!(cst.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_generics_and_attributes_and_collection_trailing_commas() {
+        let code = r#"[Pure, Inline]
+struct Point<T> : ICloneable {
+    x: T;
+    y: T;
+}
+
+fn test_commas() {
+    let list = [1, 2, 3,];
+    let pair = (10, 20,);
+}
+"#;
+        let cst = parse_cst(code);
+        assert_eq!(cst.to_text(), code);
+        assert!(cst.diagnostics.is_empty(), "Valid code with collection trailing commas should have no diagnostics: {:?}", cst.diagnostics);
+
+        // Verify rejected trailing commas
+        let bad_attr = "[Attr1,] fn bad() {}";
+        let cst_bad_attr = parse_cst(bad_attr);
+        assert!(!cst_bad_attr.diagnostics.is_empty(), "Should reject trailing comma in attribute list");
+
+        let bad_params = "fn bad_param(a: i32,) {}";
+        let cst_bad_params = parse_cst(bad_params);
+        assert!(!cst_bad_params.diagnostics.is_empty(), "Should reject trailing comma in param list");
+
+        let bad_generics = "struct Bad<T,> {}";
+        let cst_bad_generics = parse_cst(bad_generics);
+        assert!(!cst_bad_generics.diagnostics.is_empty(), "Should reject trailing comma in generic params");
     }
 
     #[test]

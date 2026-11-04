@@ -35,6 +35,9 @@ pub enum TokenKind {
     RawDslBlock = 35,   // ```sql ... ```
 
     // --- Strict Keywords (60..119) ---
+    KwEngine = 56,
+    KwAsm = 57,
+    KwLoop = 58,
     KwLet = 60,
     KwVar = 61,
     KwConst = 62,
@@ -316,7 +319,23 @@ impl TokenKind {
 
     #[inline]
     pub const fn is_keyword(self) -> bool {
-        (self as u16) >= (TokenKind::KwLet as u16) && (self as u16) <= (TokenKind::KwFlat as u16)
+        matches!(
+            self,
+            TokenKind::KwEngine
+                | TokenKind::KwStruct
+                | TokenKind::KwInterface
+                | TokenKind::KwFn
+                | TokenKind::KwLet
+                | TokenKind::KwRef
+                | TokenKind::KwIf
+                | TokenKind::KwLoop
+                | TokenKind::KwReturn
+                | TokenKind::KwYield
+                | TokenKind::KwDefer
+                | TokenKind::KwComptime
+                | TokenKind::KwQuote
+                | TokenKind::KwAsm
+        )
     }
 
     #[inline]

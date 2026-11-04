@@ -19,11 +19,6 @@ pub struct Lexer<'a> {
     bracket_depth: u32,
     brace_depth: u32,
 
-    // Indentation stack for Pythonic `:` suite desugaring (Invariant #2)
-    indent_stack: Vec<u16>,
-    pending_virtual_rbraces: u32,
-    awaiting_indent_after_colon: bool,
-
     // Balanced delimiter stack for O(1) bracket_links
     bracket_stack: Vec<(TokenKind, u32)>,
 }
@@ -41,9 +36,6 @@ impl<'a> Lexer<'a> {
             paren_depth: 0,
             bracket_depth: 0,
             brace_depth: 0,
-            indent_stack: vec![0],
-            pending_virtual_rbraces: 0,
-            awaiting_indent_after_colon: false,
             bracket_stack: Vec::new(),
         }
     }
@@ -56,13 +48,6 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
-            // Emit any pending VirtualRBrace tokens before scanning next token
-            if self.pending_virtual_rbraces > 0 {
-                self.pending_virtual_rbraces -= 1;
-                let cur = self.cursor as u32;
-                self.push_token(TokenKind::VirtualRBrace, TokenFlags::IS_VIRTUAL | TokenFlags::IS_DELIMITER_CLOSE, ByteSpan::new(cur, cur));
-                continue;
-            }
 
             let start = self.cursor;
             let b = self.bytes[start];
@@ -82,14 +67,7 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
-            // 3. Comments (# or // or /* ... */)
-            if b == b'#' {
-                let end = scan_to_newline(self.bytes, self.cursor);
-                let span = ByteSpan::new(start as u32, end as u32);
-                self.cursor = end;
-                self.push_token(TokenKind::Comment, TokenFlags::NONE, span);
-                continue;
-            }
+            // 3. Comments (// line comments or /* ... */ block comments)
             if b == b'/' && start + 1 < self.bytes.len() {
                 if self.bytes[start + 1] == b'/' {
                     let end = scan_to_newline(self.bytes, self.cursor);
@@ -131,8 +109,8 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
-            // 6. F-Strings: f"..." or f'...' or $"..." or $'...'
-            if (b == b'f' || b == b'F' || b == b'$') && start + 1 < self.bytes.len() && (self.bytes[start + 1] == b'"' || self.bytes[start + 1] == b'\'') {
+            // 6. F-Strings: f"..." or f'...'
+            if (b == b'f' || b == b'F') && start + 1 < self.bytes.len() && (self.bytes[start + 1] == b'"' || self.bytes[start + 1] == b'\'') {
                 self.scan_fstring(start, self.bytes[start + 1]);
                 continue;
             }
@@ -202,12 +180,6 @@ impl<'a> Lexer<'a> {
             self.scan_operator_or_delimiter(start);
         }
 
-        // EOF: Close any remaining open Pythonic suites with VirtualRBrace
-        while self.indent_stack.len() > 1 {
-            self.indent_stack.pop();
-            let cur = self.cursor as u32;
-            self.push_token(TokenKind::VirtualRBrace, TokenFlags::IS_VIRTUAL | TokenFlags::IS_DELIMITER_CLOSE, ByteSpan::new(cur, cur));
-        }
 
         let eof_span = ByteSpan::new(self.cursor as u32, self.cursor as u32);
         self.push_token(TokenKind::Eof, TokenFlags::NONE, eof_span);
@@ -247,55 +219,12 @@ impl<'a> Lexer<'a> {
     }
 
     fn handle_newline_and_indentation(&mut self, nl_start: u32, nl_end: u32) {
-        // If inside (), [], {}, suppress virtual newline and indentation
+        // If inside (), [], {}, suppress virtual newline
         if self.paren_depth > 0 || self.bracket_depth > 0 || self.brace_depth > 0 {
             return;
         }
 
         self.push_token(TokenKind::Newline, TokenFlags::NONE, ByteSpan::new(nl_start, nl_end));
-
-        // Peek ahead to measure the indentation of the upcoming line
-        let mut peek = self.cursor;
-        let mut indent_col = 0u16;
-
-        while peek < self.bytes.len() {
-            let b = self.bytes[peek];
-            if b == b' ' {
-                indent_col += 1;
-                peek += 1;
-            } else if b == b'\t' {
-                indent_col += 4;
-                peek += 1;
-            } else {
-                break;
-            }
-        }
-
-        // Blank lines or comment-only lines do not trigger indentation changes
-        if peek < self.bytes.len() && (self.bytes[peek] == b'\n' || self.bytes[peek] == b'\r' || self.bytes[peek] == b'#') {
-            return;
-        }
-
-        let current_indent = *self.indent_stack.last().unwrap_or(&0);
-
-        if self.awaiting_indent_after_colon {
-            self.awaiting_indent_after_colon = false;
-            if indent_col > current_indent {
-                self.indent_stack.push(indent_col);
-                let cur = self.cursor as u32;
-                self.push_token(TokenKind::VirtualLBrace, TokenFlags::IS_VIRTUAL | TokenFlags::IS_DELIMITER_OPEN, ByteSpan::new(cur, cur));
-            }
-        } else if indent_col < current_indent {
-            // Dedent: pop indentation levels and queue VirtualRBrace tokens
-            while let Some(&top) = self.indent_stack.last() {
-                if top > indent_col {
-                    self.indent_stack.pop();
-                    self.pending_virtual_rbraces += 1;
-                } else {
-                    break;
-                }
-            }
-        }
     }
 
     fn try_scan_call_quote(&mut self, start: usize) -> Option<()> {
@@ -574,13 +503,7 @@ impl<'a> Lexer<'a> {
                 self.brace_depth = self.brace_depth.saturating_sub(1);
                 (TokenKind::RBrace, TokenFlags::IS_DELIMITER_CLOSE)
             }
-            b':' => {
-                // If colon ends logical line outside (), [], {}, record awaiting indent
-                if self.paren_depth == 0 && self.bracket_depth == 0 && self.brace_depth == 0 {
-                    self.awaiting_indent_after_colon = true;
-                }
-                (TokenKind::Colon, TokenFlags::NONE)
-            }
+            b':' => (TokenKind::Colon, TokenFlags::NONE),
             b';' => (TokenKind::Semicolon, TokenFlags::NONE),
             b',' => (TokenKind::Comma, TokenFlags::NONE),
             b'.' => {

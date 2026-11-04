@@ -1,235 +1,72 @@
-//! Milestone 29.4: Perfect-Hash Keyword and Contextual Identifier Table.
+//! Phase 1: Strict 14-Token Reserved Keyword Table.
 //!
-//! Provides ultra-fast $O(1)$ mapping from ASCII identifier slices to `(TokenKind, is_contextual)`.
+//! At startup, the lexer recognizes ONLY these 14 reserved keywords:
+//! `__engine`, `struct`, `interface`, `fn`, `let`, `ref`, `if`, `loop`, `return`, `yield`, `defer`, `comptime`, `quote`, `asm`.
+//! All other words lex as `TokenKind::Ident` until dynamically registered into `ParserTables` (Phase 2).
 
 use crate::token::TokenKind;
+use std::collections::HashMap;
+use std::sync::RwLock;
 
-/// Looks up an ASCII identifier slice, returning `Some((TokenKind, is_contextual))` if it matches
-/// a Pilot strict or contextual keyword.
+static DYNAMIC_KEYWORDS: RwLock<Option<HashMap<String, (TokenKind, bool)>>> = RwLock::new(None);
+
+/// Register a dynamic keyword or modifier from `stdlib/core/core.pilot` (Phase 2).
+pub fn register_dynamic_keyword(ident: &str, kind: TokenKind, is_contextual: bool) {
+    if let Ok(mut lock) = DYNAMIC_KEYWORDS.write() {
+        if lock.is_none() {
+            *lock = Some(HashMap::new());
+        }
+        if let Some(map) = lock.as_mut() {
+            map.insert(ident.to_string(), (kind, is_contextual));
+        }
+    }
+}
+
+/// Clears all dynamically registered keywords.
+pub fn clear_dynamic_keywords() {
+    if let Ok(mut lock) = DYNAMIC_KEYWORDS.write() {
+        *lock = None;
+    }
+}
+
+/// Checks if an identifier has been dynamically registered.
+pub fn is_registered_dynamic_keyword(ident: &str) -> bool {
+    if let Ok(lock) = DYNAMIC_KEYWORDS.read() {
+        if let Some(map) = lock.as_ref() {
+            return map.contains_key(ident);
+        }
+    }
+    false
+}
+
+/// Looks up an ASCII identifier slice, returning `Some((TokenKind, false))` if it matches
+/// one of the 14 strict reserved keywords or a dynamically registered keyword.
 #[inline]
 pub fn lookup_keyword(ident: &str) -> Option<(TokenKind, bool)> {
-    let bytes = ident.as_bytes();
-    match bytes.len() {
-        2 => match bytes {
-            b"if" => Some((TokenKind::KwIf, false)),
-            b"in" => Some((TokenKind::KwIn, false)),
-            b"as" => Some((TokenKind::KwAs, false)),
-            b"is" => Some((TokenKind::KwIs, false)),
-            b"or" => Some((TokenKind::KwOr, false)),
-            b"fn" => Some((TokenKind::KwFn, false)),
-            b"op" => Some((TokenKind::KwOp, true)),
-            b"to" => Some((TokenKind::KwTo, true)),
-            b"by" => Some((TokenKind::KwBy, true)),
-            b"do" => Some((TokenKind::KwDo, true)),
-            b"on" => Some((TokenKind::KwOn, true)),
-            _ => None,
-        },
-        3 => match bytes {
-            b"let" => Some((TokenKind::KwLet, false)),
-            b"var" => Some((TokenKind::KwVar, false)),
-            b"def" => Some((TokenKind::KwDef, false)),
-            b"ref" => Some((TokenKind::KwRef, false)),
-            b"mut" => Some((TokenKind::KwMut, false)),
-            b"for" => Some((TokenKind::KwFor, false)),
-            b"try" => Some((TokenKind::KwTry, false)),
-            b"and" => Some((TokenKind::KwAnd, false)),
-            b"not" => Some((TokenKind::KwNot, false)),
-            b"get" => Some((TokenKind::KwGet, false)),
-            b"all" => Some((TokenKind::KwAll, true)),
-            b"set" => Some((TokenKind::KwSet, true)),
-            b"asc" => Some((TokenKind::KwAsc, true)),
-            b"lib" => Some((TokenKind::KwLib, true)),
-            b"dsl" => Some((TokenKind::KwDsl, true)),
-            _ => None,
-        },
-        4 => match bytes {
-            b"type" => Some((TokenKind::KwType, false)),
-            b"pure" => Some((TokenKind::KwPure, false)),
-            b"elif" => Some((TokenKind::KwElif, false)),
-            b"else" => Some((TokenKind::KwElse, false)),
-            b"then" => Some((TokenKind::KwThen, false)),
-            b"case" => Some((TokenKind::KwCase, false)),
-            b"when" => Some((TokenKind::KwWhen, false)),
-            b"pass" => Some((TokenKind::KwPass, false)),
-            b"with" => Some((TokenKind::KwWith, false)),
-            b"from" => Some((TokenKind::KwFrom, false)),
-            b"enum" => Some((TokenKind::KwEnum, false)),
-            b"chan" => Some((TokenKind::KwChan, true)),
-            b"sync" => Some((TokenKind::KwSync, true)),
-            b"lock" => Some((TokenKind::KwLock, true)),
-            b"wcet" => Some((TokenKind::KwWcet, true)),
-            b"args" => Some((TokenKind::KwArgs, true)),
-            b"each" => Some((TokenKind::KwEach, true)),
-            b"join" => Some((TokenKind::KwJoin, true)),
-            b"left" => Some((TokenKind::KwLeft, true)),
-            b"full" => Some((TokenKind::KwFull, true)),
-            b"desc" => Some((TokenKind::KwDesc, true)),
-            b"into" => Some((TokenKind::KwInto, true)),
-            b"over" => Some((TokenKind::KwOver, true)),
-            b"unit" => Some((TokenKind::KwUnit, true)),
-            b"self" => Some((TokenKind::KwSelf, true)),
-            b"exit" => Some((TokenKind::KwExit, true)),
-            b"pack" => Some((TokenKind::KwPack, true)),
-            b"flat" => Some((TokenKind::KwFlat, true)),
-            b"some" => Some((TokenKind::KwSome, true)),
-            b"null" => Some((TokenKind::KwNull, true)),
-            b"true" | b"True" => Some((TokenKind::KwTrue, true)),
-            b"none" | b"None" => Some((TokenKind::KwNone, true)),
-            _ => None,
-        },
-        5 => match bytes {
-            b"const" => Some((TokenKind::KwConst, false)),
-            b"class" => Some((TokenKind::KwClass, false)),
-            b"actor" => Some((TokenKind::KwActor, false)),
-            b"immut" => Some((TokenKind::KwImmut, false)),
-            b"state" => Some((TokenKind::KwState, false)),
-            b"while" => Some((TokenKind::KwWhile, false)),
-            b"match" => Some((TokenKind::KwMatch, false)),
-            b"yield" => Some((TokenKind::KwYield, false)),
-            b"break" => Some((TokenKind::KwBreak, false)),
-            b"raise" => Some((TokenKind::KwRaise, false)),
-            b"catch" => Some((TokenKind::KwCatch, false)),
-            b"guard" => Some((TokenKind::KwGuard, false)),
-            b"defer" => Some((TokenKind::KwDefer, false)),
-            b"async" => Some((TokenKind::KwAsync, true)),
-            b"await" => Some((TokenKind::KwAwait, true)),
-            b"spawn" => Some((TokenKind::KwSpawn, true)),
-            b"steal" => Some((TokenKind::KwSteal, true)),
-            b"where" => Some((TokenKind::KwWhere, true)),
-            b"inner" => Some((TokenKind::KwInner, true)),
-            b"right" => Some((TokenKind::KwRight, true)),
-            b"cross" => Some((TokenKind::KwCross, true)),
-            b"outer" => Some((TokenKind::KwOuter, true)),
-            b"group" => Some((TokenKind::KwGroup, true)),
-            b"order" => Some((TokenKind::KwOrder, true)),
-            b"limit" => Some((TokenKind::KwLimit, true)),
-            b"union" => Some((TokenKind::KwUnion, true)),
-            b"index" => Some((TokenKind::KwIndex, true)),
-            b"table" => Some((TokenKind::KwTable, true)),
-            b"model" => Some((TokenKind::KwModel, true)),
-            b"macro" => Some((TokenKind::KwMacro, true)),
-            b"quote" => Some((TokenKind::KwQuote, true)),
-            b"scope" => Some((TokenKind::KwScope, true)),
-            b"enter" => Some((TokenKind::KwEnter, true)),
-            b"clone" => Some((TokenKind::KwClone, true)),
-            b"false" | b"False" => Some((TokenKind::KwFalse, true)),
-            _ => None,
-        },
-        6 => match bytes {
-            b"struct" => Some((TokenKind::KwStruct, false)),
-            b"record" => Some((TokenKind::KwRecord, false)),
-            b"symbol" => Some((TokenKind::KwSymbol, false)),
-            b"extend" => Some((TokenKind::KwExtend, false)),
-            b"return" => Some((TokenKind::KwReturn, false)),
-            b"assert" => Some((TokenKind::KwAssert, false)),
-            b"import" => Some((TokenKind::KwImport, false)),
-            b"global" => Some((TokenKind::KwGlobal, false)),
-            b"lambda" => Some((TokenKind::KwLambda, false)),
-            b"atomic" => Some((TokenKind::KwAtomic, true)),
-            b"region" => Some((TokenKind::KwRegion, true)),
-            b"period" => Some((TokenKind::KwPeriod, true)),
-            b"jitter" => Some((TokenKind::KwJitter, true)),
-            b"public" => Some((TokenKind::KwPublic, true)),
-            b"static" => Some((TokenKind::KwStatic, true)),
-            b"params" => Some((TokenKind::KwParams, true)),
-            b"kwargs" => Some((TokenKind::KwKwargs, true)),
-            b"nameof" => Some((TokenKind::KwNameof, true)),
-            b"repeat" => Some((TokenKind::KwRepeat, true)),
-            b"select" => Some((TokenKind::KwSelect, true)),
-            b"having" => Some((TokenKind::KwHaving, true)),
-            b"offset" => Some((TokenKind::KwOffset, true)),
-            b"except" => Some((TokenKind::KwExcept, true)),
-            b"lookup" => Some((TokenKind::KwLookup, true)),
-            b"schema" => Some((TokenKind::KwSchema, true)),
-            b"insert" => Some((TokenKind::KwInsert, true)),
-            b"update" => Some((TokenKind::KwUpdate, true)),
-            b"delete" => Some((TokenKind::KwDelete, true)),
-            b"values" => Some((TokenKind::KwValues, true)),
-            b"window" => Some((TokenKind::KwWindow, true)),
-            b"commit" => Some((TokenKind::KwCommit, true)),
-            b"domain" => Some((TokenKind::KwDomain, true)),
-            b"splice" => Some((TokenKind::KwSplice, true)),
-            b"extern" => Some((TokenKind::KwExtern, true)),
-            b"module" => Some((TokenKind::KwModule, true)),
-            b"within" => Some((TokenKind::KwWithin, true)),
-            b"unpack" => Some((TokenKind::KwUnpack, true)),
-            _ => None,
-        },
-        7 => match bytes {
-            b"dynamic" => Some((TokenKind::KwDynamic, false)),
-            b"finally" => Some((TokenKind::KwFinally, false)),
-            b"context" => Some((TokenKind::KwContext, false)),
-            b"ensures" => Some((TokenKind::KwEnsures, true)),
-            b"channel" => Some((TokenKind::KwChannel, true)),
-            b"isolate" => Some((TokenKind::KwIsolate, true)),
-            b"bounded" => Some((TokenKind::KwBounded, true)),
-            b"noalloc" => Some((TokenKind::KwNoalloc, true)),
-            b"hard_rt" => Some((TokenKind::KwHardRt, true)),
-            b"soft_rt" => Some((TokenKind::KwSoftRt, true)),
-            b"private" => Some((TokenKind::KwPrivate, true)),
-            b"partial" => Some((TokenKind::KwPartial, true)),
-            b"adapter" => Some((TokenKind::KwAdapter, true)),
-            b"default" => Some((TokenKind::KwDefault, true)),
-            b"timeout" => Some((TokenKind::KwTimeout, true)),
-            b"indexed" => Some((TokenKind::KwIndexed, true)),
-            b"nothing" => Some((TokenKind::KwNothing, true)),
-            b"unquote" => Some((TokenKind::KwUnquote, true)),
-            b"connect" => Some((TokenKind::KwConnect, true)),
-            _ => None,
-        },
-        8 => match bytes {
-            b"conflict" => Some((TokenKind::KwConflict, true)),
-            b"comptime" => Some((TokenKind::KwComptime, false)),
-            b"property" => Some((TokenKind::KwProperty, false)),
-            b"operator" => Some((TokenKind::KwOperator, false)),
-            b"continue" => Some((TokenKind::KwContinue, false)),
-            b"protocol" => Some((TokenKind::KwProtocol, false)),
-            b"requires" => Some((TokenKind::KwRequires, false)),
-            b"parallel" => Some((TokenKind::KwParallel, true)),
-            b"realtime" => Some((TokenKind::KwRealtime, true)),
-            b"deadline" => Some((TokenKind::KwDeadline, true)),
-            b"fallback" => Some((TokenKind::KwFallback, true)),
-            b"periodic" => Some((TokenKind::KwPeriodic, true)),
-            b"priority" => Some((TokenKind::KwPriority, true)),
-            b"internal" => Some((TokenKind::KwInternal, true)),
-            b"delegate" => Some((TokenKind::KwDelegate, true)),
-            b"distinct" => Some((TokenKind::KwDistinct, true)),
-            b"rollback" => Some((TokenKind::KwRollback, true)),
-            b"database" => Some((TokenKind::KwDatabase, true)),
-            b"defmacro" => Some((TokenKind::KwDefmacro, true)),
-            _ => None,
-        },
-        9 => match bytes {
-            b"interface" => Some((TokenKind::KwInterface, false)),
-            b"extension" => Some((TokenKind::KwExtension, true)),
-            b"on_missed" => Some((TokenKind::KwOnMissed, true)),
-            b"protected" => Some((TokenKind::KwProtected, true)),
-            b"contracts" => Some((TokenKind::KwContracts, true)),
-            b"converter" => Some((TokenKind::KwConverter, true)),
-            b"ascending" => Some((TokenKind::KwAscending, true)),
-            b"intersect" => Some((TokenKind::KwIntersect, true)),
-            b"returning" => Some((TokenKind::KwReturning, true)),
-            b"partition" => Some((TokenKind::KwPartition, true)),
-            b"savepoint" => Some((TokenKind::KwSavepoint, true)),
-            b"undefined" => Some((TokenKind::KwUndefined, true)),
-            _ => None,
-        },
-        10 => match bytes {
-            b"stackalloc" => Some((TokenKind::KwStackalloc, true)),
-            b"descending" => Some((TokenKind::KwDescending, true)),
-            b"difference" => Some((TokenKind::KwDifference, true)),
-            b"quasiquote" => Some((TokenKind::KwQuasiquote, true)),
-            b"defkeyword" => Some((TokenKind::KwDefkeyword, true)),
-            _ => None,
-        },
-        11 => match bytes {
-            b"transaction" => Some((TokenKind::KwTransaction, true)),
-            _ => None,
-        },
-        16 => match bytes {
-            b"unquote_splicing" => Some((TokenKind::KwUnquoteSplicing, true)),
-            _ => None,
-        },
-        _ => None,
+    match ident {
+        "__engine" => Some((TokenKind::KwEngine, false)),
+        "struct" => Some((TokenKind::KwStruct, false)),
+        "interface" => Some((TokenKind::KwInterface, false)),
+        "fn" => Some((TokenKind::KwFn, false)),
+        "let" => Some((TokenKind::KwLet, false)),
+        "ref" => Some((TokenKind::KwRef, false)),
+        "if" => Some((TokenKind::KwIf, false)),
+        "loop" => Some((TokenKind::KwLoop, false)),
+        "return" => Some((TokenKind::KwReturn, false)),
+        "yield" => Some((TokenKind::KwYield, false)),
+        "defer" => Some((TokenKind::KwDefer, false)),
+        "comptime" => Some((TokenKind::KwComptime, false)),
+        "quote" => Some((TokenKind::KwQuote, false)),
+        "asm" => Some((TokenKind::KwAsm, false)),
+        _ => {
+            if let Ok(lock) = DYNAMIC_KEYWORDS.read() {
+                if let Some(map) = lock.as_ref() {
+                    if let Some(res) = map.get(ident) {
+                        return Some(*res);
+                    }
+                }
+            }
+            None
+        }
     }
 }

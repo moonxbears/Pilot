@@ -27,11 +27,11 @@ mod tests {
 
     #[test]
     fn test_token_tape_basic_and_balanced_bracket_links() {
-        let code = "def add(x: i64, y: i64) -> i64 { return x + y; }";
+        let code = "fn add(x: i64, y: i64) -> i64 { return x + y; }";
         let tape = tokenize(code);
 
         assert!(!tape.is_empty());
-        assert_eq!(tape.kind(0), TokenKind::KwDef);
+        assert_eq!(tape.kind(0), TokenKind::KwFn);
 
         // Find '(' and '{'
         let mut lparen_idx = None;
@@ -61,7 +61,7 @@ mod tests {
     #[test]
     fn test_lex_nested_brackets_and_identifiers() {
         let src = r#"
-            def run_suite() {
+            fn run_suite() {
                 let items = [1, 2, (3 + 4), {5: 6}];
                 if (items.len() > 0) {
                     println("Nested brackets test");
@@ -84,24 +84,54 @@ mod tests {
     }
 
     #[test]
-    fn test_pythonic_indentation_virtual_braces() {
-        let code = "if true:\n    let x = 10\n    return x\nlet y = 20";
-        let tape = tokenize(code);
+    fn test_strict_14_token_seed_lexer_and_dynamic_promotion() {
+        let seed_keywords = [
+            ("__engine", TokenKind::KwEngine),
+            ("struct", TokenKind::KwStruct),
+            ("interface", TokenKind::KwInterface),
+            ("fn", TokenKind::KwFn),
+            ("let", TokenKind::KwLet),
+            ("ref", TokenKind::KwRef),
+            ("if", TokenKind::KwIf),
+            ("loop", TokenKind::KwLoop),
+            ("return", TokenKind::KwReturn),
+            ("yield", TokenKind::KwYield),
+            ("defer", TokenKind::KwDefer),
+            ("comptime", TokenKind::KwComptime),
+            ("quote", TokenKind::KwQuote),
+            ("asm", TokenKind::KwAsm),
+        ];
 
-        let mut has_virtual_lbrace = false;
-        let mut has_virtual_rbrace = false;
-
-        for i in 0..tape.len() {
-            if tape.kind(i) == TokenKind::VirtualLBrace {
-                has_virtual_lbrace = true;
-            }
-            if tape.kind(i) == TokenKind::VirtualRBrace {
-                has_virtual_rbrace = true;
-            }
+        for (word, expected_kind) in seed_keywords {
+            let tape = tokenize(word);
+            assert_eq!(tape.kind(0), expected_kind, "Word '{word}' must lex as {expected_kind:?}");
+            assert!(tape.flag(0).contains(TokenFlags::IS_KEYWORD));
         }
 
-        assert!(has_virtual_lbrace, "Expected VirtualLBrace from indented block after colon.");
-        assert!(has_virtual_rbrace, "Expected VirtualRBrace from dedented block.");
+        // Verify non-seed words lex as Ident
+        let legacy_words = ["def", "class", "mut", "match", "while", "for", "in", "switch", "case", "default", "type", "pub", "static"];
+        for word in legacy_words {
+            let tape = tokenize(word);
+            assert_eq!(tape.kind(0), TokenKind::Ident, "Word '{word}' must lex as Ident in 14-token lexer");
+            assert!(!tape.flag(0).contains(TokenFlags::IS_KEYWORD));
+        }
+
+        // Test dynamic registration hook
+        keywords::register_dynamic_keyword("async", TokenKind::KwAsync, false);
+        let tape_dynamic = tokenize("async");
+        assert_eq!(tape_dynamic.kind(0), TokenKind::KwAsync);
+        assert!(tape_dynamic.flag(0).contains(TokenFlags::IS_KEYWORD));
+        keywords::clear_dynamic_keywords();
+        let tape_cleared = tokenize("async");
+        assert_eq!(tape_cleared.kind(0), TokenKind::Ident);
+
+        // Verify $ lexes as Dollar and f-strings lex as FStrStart/StrLit
+        let dollar_tape = tokenize("$foo");
+        assert_eq!(dollar_tape.kind(0), TokenKind::Dollar);
+        assert_eq!(dollar_tape.kind(1), TokenKind::Ident);
+
+        let fstr_tape = tokenize(r#"f"hello {name}""#);
+        assert_eq!(fstr_tape.kind(0), TokenKind::StrLit);
     }
 
     #[test]

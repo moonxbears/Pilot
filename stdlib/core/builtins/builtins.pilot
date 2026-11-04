@@ -119,7 +119,6 @@ pub def breakpoint():
 pub type bytes     = Slice[u8];
 pub type bytearray = SliceBuffer[u8];
 
-
 # =========================================================================
 # C: callable, chr, classmethod, compile, complex
 # =========================================================================
@@ -135,6 +134,7 @@ pub struct Utf8Char:
 
     pub def as_slice() -> Slice[u8]:
         return .bytes[0 .. (.len as usize)];
+
 
 pub def chr(cp: u32) -> Utf8Char:
     if cp <= 0x7F:
