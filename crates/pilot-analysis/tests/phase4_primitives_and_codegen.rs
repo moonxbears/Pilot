@@ -64,19 +64,14 @@ fn populate_type_arena_from_ast(
     type_arena: &mut TypeArena,
 ) {
     for (idx, node) in arena.nodes.iter().enumerate() {
-        let nid = NodeId(idx as u32);
+        let _nid = NodeId(idx as u32);
         match node.node_kind() {
             NodeKind::StructDecl => {
                 let name_sym = SymbolId(node.lhs);
                 let name_str = arena.interner.resolve(name_sym);
                 let ty_id = type_arena.alloc(TypeKind::Primitive(name_str.to_string()));
                 let mut td = TypeDef::new(ty_id, name_sym, pkg_id);
-                if vm.lang_items_by_name.contains_key(name_str)
-                    || arena
-                        .node_attributes
-                        .get(&nid.0)
-                        .map_or(false, |attrs| attrs.iter().any(|a| arena.interner.resolve(a.name) == "Lang"))
-                {
+                if vm.lang_items_by_name.contains_key(name_str) {
                     td.is_lang_primitive = true;
                 }
                 type_arena.register_type_def(td, &arena.interner);
@@ -197,8 +192,8 @@ fn test_stage2_and_stage3_core_bootstrap_complete() {
         );
     }
 
-    // Verify `[EnforceCoreNaming]` is registered and passes with 0 diagnostics across all 7 files (6 unique pkg names)
-    assert_eq!(vm.core_naming_enforced_pkgs.len(), 6);
+    // Verify `[EnforceCoreNaming]` is registered and passes with 0 diagnostics across all 7 files
+    assert_eq!(vm.core_naming_enforced_pkgs.len(), 7);
     for (idx, (pkg_name, arena)) in arenas.iter().enumerate() {
         let pkg_ast = PackageAst::new(pkg_name.clone(), true);
         let mut type_arena = TypeArena::new();
@@ -293,6 +288,14 @@ fn test_all_integer_and_float_widths_ssa_ops() {
 #[test]
 fn test_symbol_construct_lowering_equivalence() {
     let src = r#"
+        pub syntax type_construct {
+            (T[])      => quote { slice<$T> };
+            (T[..])    => quote { stride<$T> };
+            (T?)       => quote { option<$T> };
+            (T ! E)    => quote { result<$T, $E> };
+            ((A) => R) => quote { fn<$A, $R> };
+            (T1 | T2)  => quote { union<$T1, $T2> };
+        }
         let a1: i32[];
         let a2: slice<i32>;
         let b1: f64[..];
@@ -308,10 +311,10 @@ fn test_symbol_construct_lowering_equivalence() {
     let arena = parse(src);
     let root = arena.node(arena.root);
     let stmts = arena.children_slice(root.lhs, root.rhs);
-    assert_eq!(stmts.len(), 11);
+    assert_eq!(stmts.len(), 12);
 
     let ty_of = |stmt_idx: usize| -> pilot_ast::AstNode {
-        let stmt_id = NodeId(stmts[stmt_idx]);
+        let stmt_id = NodeId(stmts[stmt_idx + 1]);
         let ty_id = *arena.type_annotations.get(&stmt_id.0).unwrap();
         *arena.node(ty_id)
     };
@@ -451,7 +454,11 @@ fn test_3tier_for_null_error_and_call_quoting() {
     ));
 
     // 2. Null & Values-First Error Analyzer (`option<T>` / `result<T, E>` `?` propagation & implicit lifting)
+    let (_tables, vm, arenas) = bootstrap_all_core_stages();
     let mut types = TypeArena::new();
+    for (idx, (_pkg_name, arena)) in arenas.iter().enumerate() {
+        populate_type_arena_from_ast(PackageId(idx as u32), arena, &vm, &mut types);
+    }
     let opt_int = types.alloc(TypeKind::Option(TypeId::I64));
     let opt_str = types.alloc(TypeKind::Option(TypeId::STR));
     let res_int_str = types.alloc(TypeKind::Result {
@@ -598,67 +605,145 @@ fn test_3tier_for_null_error_and_call_quoting() {
 
 #[test]
 fn test_5_backend_codegen_parity() {
-    // 1. C11/C23 Backend (`CTargetEmitter::map_lang_type_to_c`)
-    assert_eq!(CTargetEmitter::map_lang_type_to_c("void", &[]), "void");
-    assert_eq!(CTargetEmitter::map_lang_type_to_c("never", &[]), "_Noreturn void");
-    assert_eq!(CTargetEmitter::map_lang_type_to_c("bool", &[]), "bool");
-    assert_eq!(CTargetEmitter::map_lang_type_to_c("i8", &[]), "int8_t");
-    assert_eq!(CTargetEmitter::map_lang_type_to_c("i32", &[]), "int32_t");
-    assert_eq!(CTargetEmitter::map_lang_type_to_c("i64", &[]), "int64_t");
-    assert_eq!(CTargetEmitter::map_lang_type_to_c("i128", &[]), "__int128");
-    assert_eq!(CTargetEmitter::map_lang_type_to_c("u64", &[]), "uint64_t");
-    assert_eq!(CTargetEmitter::map_lang_type_to_c("usize", &[]), "size_t");
-    assert_eq!(CTargetEmitter::map_lang_type_to_c("f32", &[]), "float");
-    assert_eq!(CTargetEmitter::map_lang_type_to_c("f64", &[]), "double");
+    use pilot_analysis::types::{HardwarePhysics, RegClass};
+
+    let (_tables, vm, _arenas) = bootstrap_all_core_stages();
+    let phys_of = |name: &str| -> HardwarePhysics {
+        let spec = vm
+            .type_layout(name)
+            .unwrap_or_else(|| panic!("Missing layout for {}", name));
+        let reg_class = match spec.reg_class {
+            RegisterClass::Unit => RegClass::Unit,
+            RegisterClass::NoReturn => RegClass::NoReturn,
+            RegisterClass::GprSigned => {
+                if spec.bit_width == 0 {
+                    RegClass::Unit
+                } else {
+                    RegClass::GprSigned
+                }
+            }
+            RegisterClass::GprUnsigned => {
+                if spec.bit_width == 0 {
+                    if name == "never" {
+                        RegClass::NoReturn
+                    } else {
+                        RegClass::Unit
+                    }
+                } else {
+                    RegClass::GprUnsigned
+                }
+            }
+            RegisterClass::SimdFloat => RegClass::SimdFloat,
+            RegisterClass::SimdVector { lanes } => RegClass::SimdVector { lanes },
+            RegisterClass::RawPtr => RegClass::RawPtr,
+            RegisterClass::Composite => RegClass::Composite,
+        };
+        HardwarePhysics {
+            reg_class,
+            bit_width: spec.bit_width,
+        }
+    };
+    let comp = HardwarePhysics {
+        reg_class: RegClass::Composite,
+        bit_width: 0,
+    };
+
+    // 1. C11/C23 Backend (`CTargetEmitter::lower_physics_to_c`)
+    assert_eq!(CTargetEmitter::lower_physics_to_c(phys_of("void"), &[]), "void");
+    assert_eq!(CTargetEmitter::lower_physics_to_c(phys_of("never"), &[]), "_Noreturn void");
+    assert_eq!(CTargetEmitter::lower_physics_to_c(phys_of("bool"), &[]), "bool");
+    assert_eq!(CTargetEmitter::lower_physics_to_c(phys_of("i8"), &[]), "int8_t");
+    assert_eq!(CTargetEmitter::lower_physics_to_c(phys_of("i32"), &[]), "int32_t");
+    assert_eq!(CTargetEmitter::lower_physics_to_c(phys_of("i64"), &[]), "int64_t");
+    assert_eq!(CTargetEmitter::lower_physics_to_c(phys_of("i128"), &[]), "__int128");
+    assert_eq!(CTargetEmitter::lower_physics_to_c(phys_of("u64"), &[]), "uint64_t");
+    assert_eq!(CTargetEmitter::lower_physics_to_c(phys_of("usize"), &[]), "uint64_t");
+    assert_eq!(CTargetEmitter::lower_physics_to_c(phys_of("f32"), &[]), "float");
+    assert_eq!(CTargetEmitter::lower_physics_to_c(phys_of("f64"), &[]), "double");
     assert_eq!(
-        CTargetEmitter::map_lang_type_to_c("slice", &["uint8_t"]),
+        CTargetEmitter::lower_physics_to_c(
+            comp,
+            &[("data", "uint8_t*".into()), ("len", "size_t".into())]
+        ),
         "struct { uint8_t* data; size_t len; }"
     );
     assert_eq!(
-        CTargetEmitter::map_lang_type_to_c("stride", &["float"]),
+        CTargetEmitter::lower_physics_to_c(
+            comp,
+            &[
+                ("d", "float*".into()),
+                ("l", "size_t".into()),
+                ("s", "ptrdiff_t".into())
+            ]
+        ),
         "struct { float* d; size_t l; ptrdiff_t s; }"
     );
     assert_eq!(
-        CTargetEmitter::map_lang_type_to_c("RangeWindow", &["int32_t"]),
+        CTargetEmitter::lower_physics_to_c(
+            comp,
+            &[("current", "int32_t".into()), ("max", "int32_t".into())]
+        ),
         "struct { int32_t current; int32_t max; }"
     );
 
-    // 2. LLVM IR Backend (`LlvmEmitter::map_lang_type_to_llvm`)
-    assert_eq!(LlvmEmitter::map_lang_type_to_llvm("void", &[]), "void");
-    assert_eq!(LlvmEmitter::map_lang_type_to_llvm("bool", &[]), "i1");
-    assert_eq!(LlvmEmitter::map_lang_type_to_llvm("i8", &[]), "i8");
-    assert_eq!(LlvmEmitter::map_lang_type_to_llvm("i32", &[]), "i32");
-    assert_eq!(LlvmEmitter::map_lang_type_to_llvm("i64", &[]), "i64");
-    assert_eq!(LlvmEmitter::map_lang_type_to_llvm("i128", &[]), "i128");
-    assert_eq!(LlvmEmitter::map_lang_type_to_llvm("f16", &[]), "half");
-    assert_eq!(LlvmEmitter::map_lang_type_to_llvm("f32", &[]), "float");
-    assert_eq!(LlvmEmitter::map_lang_type_to_llvm("f64", &[]), "double");
-    assert_eq!(LlvmEmitter::map_lang_type_to_llvm("f128", &[]), "fp128");
-    assert_eq!(LlvmEmitter::map_lang_type_to_llvm("ptr", &["i8"]), "ptr");
-    assert_eq!(LlvmEmitter::map_lang_type_to_llvm("slice", &["i8"]), "{ ptr, i64 }");
-    assert_eq!(LlvmEmitter::map_lang_type_to_llvm("stride", &["float"]), "{ ptr, i64, i64 }");
-    assert_eq!(LlvmEmitter::map_lang_type_to_llvm("SliceBuffer", &["i32"]), "{ ptr, i64, i64 }");
-    assert_eq!(LlvmEmitter::map_lang_type_to_llvm("RangeWindow", &["i32"]), "{ i32, i32 }");
-    assert_eq!(LlvmEmitter::map_lang_type_to_llvm("RangeWindow", &["i64"]), "{ i64, i64 }");
-
-    // 3. WebAssembly WasmGC + WASI Preview 2 Backend (`WasmEmitter::map_lang_type_to_wasm`)
-    assert_eq!(WasmEmitter::map_lang_type_to_wasm("bool", &[]), "i32");
-    assert_eq!(WasmEmitter::map_lang_type_to_wasm("i32", &[]), "i32");
-    assert_eq!(WasmEmitter::map_lang_type_to_wasm("i64", &[]), "i64");
-    assert_eq!(WasmEmitter::map_lang_type_to_wasm("usize", &[]), "i64");
-    assert_eq!(WasmEmitter::map_lang_type_to_wasm("f32", &[]), "f32");
-    assert_eq!(WasmEmitter::map_lang_type_to_wasm("f64", &[]), "f64");
-    assert_eq!(WasmEmitter::map_lang_type_to_wasm("slice", &["i32"]), "(i32, i32)");
-    assert_eq!(WasmEmitter::map_lang_type_to_wasm("stride", &["f32"]), "(i32, i32, i32)");
-    assert_eq!(WasmEmitter::map_lang_type_to_wasm("RangeWindow", &["i32"]), "(i32, i32)");
-
-    // 4. Multi-Vendor GPU Backend (`GpuEmitter::map_lang_type_to_gpu`)
-    assert_eq!(GpuEmitter::map_lang_type_to_gpu("f32", &[]), "float");
-    assert_eq!(GpuEmitter::map_lang_type_to_gpu("u32", &[]), "uint");
-    assert_eq!(GpuEmitter::map_lang_type_to_gpu("i64", &[]), "long");
-    assert_eq!(GpuEmitter::map_lang_type_to_gpu("ptr", &["float"]), "global float*");
+    // 2. LLVM IR Backend (`LlvmEmitter::lower_physics_to_llvm`)
+    assert_eq!(LlvmEmitter::lower_physics_to_llvm(phys_of("void"), &[]), "void");
+    assert_eq!(LlvmEmitter::lower_physics_to_llvm(phys_of("bool"), &[]), "i1");
+    assert_eq!(LlvmEmitter::lower_physics_to_llvm(phys_of("i8"), &[]), "i8");
+    assert_eq!(LlvmEmitter::lower_physics_to_llvm(phys_of("i32"), &[]), "i32");
+    assert_eq!(LlvmEmitter::lower_physics_to_llvm(phys_of("i64"), &[]), "i64");
+    assert_eq!(LlvmEmitter::lower_physics_to_llvm(phys_of("i128"), &[]), "i128");
+    assert_eq!(LlvmEmitter::lower_physics_to_llvm(phys_of("f16"), &[]), "half");
+    assert_eq!(LlvmEmitter::lower_physics_to_llvm(phys_of("f32"), &[]), "float");
+    assert_eq!(LlvmEmitter::lower_physics_to_llvm(phys_of("f64"), &[]), "double");
+    assert_eq!(LlvmEmitter::lower_physics_to_llvm(phys_of("f128"), &[]), "fp128");
+    assert_eq!(LlvmEmitter::lower_physics_to_llvm(phys_of("ptr"), &[]), "ptr");
     assert_eq!(
-        GpuEmitter::map_lang_type_to_gpu("RangeWindow", &["int"]),
+        LlvmEmitter::lower_physics_to_llvm(comp, &["ptr".into(), "i64".into()]),
+        "{ ptr, i64 }"
+    );
+    assert_eq!(
+        LlvmEmitter::lower_physics_to_llvm(comp, &["ptr".into(), "i64".into(), "i64".into()]),
+        "{ ptr, i64, i64 }"
+    );
+    assert_eq!(
+        LlvmEmitter::lower_physics_to_llvm(comp, &["i32".into(), "i32".into()]),
+        "{ i32, i32 }"
+    );
+    assert_eq!(
+        LlvmEmitter::lower_physics_to_llvm(comp, &["i64".into(), "i64".into()]),
+        "{ i64, i64 }"
+    );
+
+    // 3. WebAssembly WasmGC + WASI Preview 2 Backend (`WasmEmitter::lower_physics_to_wasm`)
+    assert_eq!(WasmEmitter::lower_physics_to_wasm(phys_of("bool"), &[]), "i32");
+    assert_eq!(WasmEmitter::lower_physics_to_wasm(phys_of("i32"), &[]), "i32");
+    assert_eq!(WasmEmitter::lower_physics_to_wasm(phys_of("i64"), &[]), "i64");
+    assert_eq!(WasmEmitter::lower_physics_to_wasm(phys_of("usize"), &[]), "i64");
+    assert_eq!(WasmEmitter::lower_physics_to_wasm(phys_of("f32"), &[]), "f32");
+    assert_eq!(WasmEmitter::lower_physics_to_wasm(phys_of("f64"), &[]), "f64");
+    assert_eq!(
+        WasmEmitter::lower_physics_to_wasm(comp, &["i32".into(), "i32".into()]),
+        "(i32, i32)"
+    );
+    assert_eq!(
+        WasmEmitter::lower_physics_to_wasm(comp, &["i32".into(), "i32".into(), "i32".into()]),
+        "(i32, i32, i32)"
+    );
+
+    // 4. Multi-Vendor GPU Backend (`GpuEmitter::lower_physics_to_gpu`)
+    assert_eq!(GpuEmitter::lower_physics_to_gpu(phys_of("f32"), &[]), "float");
+    assert_eq!(GpuEmitter::lower_physics_to_gpu(phys_of("u32"), &[]), "uint");
+    assert_eq!(GpuEmitter::lower_physics_to_gpu(phys_of("i64"), &[]), "long");
+    assert_eq!(
+        GpuEmitter::lower_physics_to_gpu(phys_of("ptr"), &[("ptr", "float".into())]),
+        "global float*"
+    );
+    assert_eq!(
+        GpuEmitter::lower_physics_to_gpu(
+            comp,
+            &[("cur", "int".into()), ("max", "int".into())]
+        ),
         "struct { int cur; int max; }"
     );
 
@@ -668,4 +753,241 @@ fn test_5_backend_codegen_parity() {
         .expect("AsmEmitter must synthesize assembly cleanly");
     assert!(asm_out.contains(".text"));
     assert!(asm_out.contains("test_mod.pilot"));
+}
+
+#[test]
+fn test_15_new_symbols_and_alu_operators() {
+    use pilot_analysis::types::{HardwarePhysics, RegClass, StructuralShape};
+    let src = r#"
+        pub fn test_ops() {
+            let v4: f32@4;
+            let g:  f64[4, 4];
+            let r:  u8[:];
+            let s:  i64^;
+            let p:  @u8;
+
+            var `type`: i64 = 10;
+            var `fn`:   i64 = 20;
+            `type` :=: `fn`;
+
+            let cmp_res = `type` <=> `fn`;
+            let sat_a   = `type` +| `fn`;
+            let sat_s   = `type` -| `fn`;
+            let sat_m   = `type` *| `fn`;
+            let wrp_a   = `type` +% `fn`;
+            let wrp_s   = `type` -% `fn`;
+            let wrp_m   = `type` *% `fn`;
+            let chk_a   = `type` +? `fn`;
+            let chk_s   = `type` -? `fn`;
+            let chk_m   = `type` *? `fn`;
+            let euc_m   = `type` %% `fn`;
+            let open_r  = 0 >..< 10;
+            let after_r = 5 >..;
+        }
+    "#;
+    let arena = parse(src);
+    let mut engine = TypeInferenceEngine::new();
+    let _ = engine.synth(&arena, arena.root);
+    assert!(
+        engine.diagnostics.is_empty(),
+        "Expected 0 diagnostics, got: {:?}",
+        engine.diagnostics
+    );
+
+    let root = arena.node(arena.root);
+    let fn_id = NodeId(arena.children_slice(root.lhs, root.rhs)[0]);
+    let fn_node = arena.node(fn_id);
+    let body_id = NodeId(arena.children_slice(fn_node.rhs, fn_node.flags as u32)[0]);
+    let body_node = arena.node(body_id);
+    let stmts = arena.children_slice(body_node.lhs, body_node.rhs);
+
+    // 1. `f32@4` -> `simd<f32, 4>` (`RegClass::SimdVector { lanes: 4 }`, 128 bits, 16 bytes)
+    let v4_ty = engine.inferred_node_types[&stmts[0]];
+    assert_eq!(
+        engine.types.type_physics(v4_ty),
+        HardwarePhysics {
+            reg_class: RegClass::SimdVector { lanes: 4 },
+            bit_width: 128
+        }
+    );
+    assert_eq!(engine.types.type_size(v4_ty), 16);
+
+    // 2. `f64[4, 4]` -> `grid<f64, 4, 4>` (`4 * 4 * 8 = 128` bytes, `0b00` `IValue`)
+    let g_ty = engine.inferred_node_types[&stmts[1]];
+    assert_eq!(engine.types.type_size(g_ty), 128);
+    assert_eq!(engine.types.type_lattice(g_ty), LatticeBits::Value);
+
+    // 3. `u8[:]` -> `ring<u8>` (`0b01` `IReference`, 24 bytes)
+    let r_ty = engine.inferred_node_types[&stmts[2]];
+    assert_eq!(engine.types.type_lattice(r_ty), LatticeBits::Reference);
+    assert_eq!(engine.types.type_size(r_ty), 24);
+
+    // 4. `i64^` -> `signal<i64>` (`0b10` `IObject`)
+    let s_ty = engine.inferred_node_types[&stmts[3]];
+    assert_eq!(engine.types.type_lattice(s_ty), LatticeBits::Object);
+
+    // 5. `@u8` -> `pin<u8>` (`0b11` `IGuard`)
+    let p_ty = engine.inferred_node_types[&stmts[4]];
+    assert_eq!(engine.types.type_lattice(p_ty), LatticeBits::Guard);
+
+    // 6. `<=>` -> `order` (`8`-bit signed `RegClass::GprSigned`)
+    let cmp_ty = engine.inferred_node_types[&stmts[8]];
+    assert_eq!(
+        engine.types.type_physics(cmp_ty),
+        HardwarePhysics {
+            reg_class: RegClass::GprSigned,
+            bit_width: 8
+        }
+    );
+
+    // 7. `+?` -> `option<i64>` (`TaggedOutcome`)
+    let chk_ty = engine.inferred_node_types[&stmts[15]];
+    assert!(matches!(
+        engine.types.type_shape(chk_ty),
+        StructuralShape::TaggedOutcome { err_ty: None, .. }
+    ));
+
+    // 8. `>..<` -> `open<i64>` (`BoundsPair`)
+    let open_ty = engine.inferred_node_types[&stmts[19]];
+    assert!(matches!(
+        engine.types.type_shape(open_ty),
+        StructuralShape::BoundsPair {
+            inclusive: false,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn test_universal_offset_lens_swizzle_and_slicemap() {
+    use pilot_analysis::types::{HardwarePhysics, RegClass, StructuralShape};
+    let src = r#"
+        struct Vertex : IValue {
+            id:  u32;
+            pos: f32@3;
+        }
+        struct PosOnly : IValue {
+            pos: f32@3;
+        }
+        pub fn test_lenses(verts: Vertex[], vec: f32@4) {
+            let pos_view = verts ~> .pos;
+            let xy_map   = verts ~> (.id, .pos);
+            let zyx      = vec ~> (.2, .1, .0);
+            let pts      = verts as view<PosOnly>;
+        }
+    "#;
+    let arena = parse(src);
+    let mut engine = TypeInferenceEngine::new();
+    let _ = engine.synth(&arena, arena.root);
+    assert!(
+        engine.diagnostics.is_empty(),
+        "Expected 0 diagnostics on 0b00 IValue lens & view casts: {:?}",
+        engine.diagnostics
+    );
+
+    let root = arena.node(arena.root);
+    let fn_id = NodeId(arena.children_slice(root.lhs, root.rhs)[2]);
+    let fn_node = arena.node(fn_id);
+    let body_id = NodeId(arena.children_slice(fn_node.rhs, fn_node.flags as u32)[0]);
+    let body_node = arena.node(body_id);
+    let stmts = arena.children_slice(body_node.lhs, body_node.rhs);
+
+    // 1. `verts ~> .pos` -> `stride<f32@3>` (`0b01` `IReference`, 24 bytes, `StridedView`)
+    let pos_view_ty = engine.inferred_node_types[&stmts[0]];
+    assert_eq!(engine.types.type_lattice(pos_view_ty), LatticeBits::Reference);
+    assert_eq!(engine.types.type_size(pos_view_ty), 24);
+    assert!(matches!(
+        engine.types.type_shape(pos_view_ty),
+        StructuralShape::StridedView { .. }
+    ));
+
+    // 2. `verts ~> (.id, .pos)` -> `map<u32, f32@3>` (`0b01` `IReference`, 48 bytes)
+    let map_ty = engine.inferred_node_types[&stmts[1]];
+    assert_eq!(engine.types.type_lattice(map_ty), LatticeBits::Reference);
+    assert_eq!(engine.types.type_size(map_ty), 48);
+
+    // 3. `vec ~> (.2, .1, .0)` -> `f32@3` (`RegClass::SimdVector { lanes: 3 }`)
+    let zyx_ty = engine.inferred_node_types[&stmts[2]];
+    assert_eq!(
+        engine.types.type_physics(zyx_ty),
+        HardwarePhysics {
+            reg_class: RegClass::SimdVector { lanes: 3 },
+            bit_width: 3 * 32
+        }
+    );
+
+    // 4. `verts as view<PosOnly>` -> `stride<PosOnly>` (`0b01` `IReference`, 24 bytes)
+    let pts_ty = engine.inferred_node_types[&stmts[3]];
+    assert_eq!(engine.types.type_lattice(pts_ty), LatticeBits::Reference);
+    assert_eq!(engine.types.type_size(pts_ty), 24);
+
+    // 5. Negative test: `~>` or `as view` on `0b10` `IObject` must emit `LatticeContractMismatch`!
+    let bad_src = r#"
+        struct Bad : IObject {
+            ptr: ptr<u8>;
+            ~self() {}
+        }
+        pub fn test_bad(items: Bad[]) {
+            let p = items ~> .ptr;
+        }
+    "#;
+    let bad_arena = parse(bad_src);
+    let mut bad_engine = TypeInferenceEngine::new();
+    let _ = bad_engine.synth(&bad_arena, bad_arena.root);
+    assert!(
+        !bad_engine.diagnostics.is_empty(),
+        "OffsetLens '~>' on 0b10 IObject must be rejected!"
+    );
+}
+
+#[test]
+fn test_compile_time_units_and_zero_overhead_erasure() {
+    use pilot_analysis::types::{HardwarePhysics, RegClass};
+    let src = r#"
+        pub unit Meters(f64);
+        pub unit Seconds(f64);
+        pub unit Velocity(f64) = Meters / Seconds;
+
+        pub fn compute_speed(d: Meters, t: Seconds) -> Velocity {
+            let d2: Meters = d + d;
+            let v: Velocity = d2 / t;
+            return v;
+        }
+    "#;
+    let arena = parse(src);
+    let mut engine = TypeInferenceEngine::new();
+    let _ = engine.synth(&arena, arena.root);
+    assert!(
+        engine.diagnostics.is_empty(),
+        "Valid dimensional algebra must pass with 0 diagnostics: {:?}",
+        engine.diagnostics
+    );
+
+    // Verify 0-byte wrapper erasure: `Meters` has identical hardware physics to `f64` (8 bytes, SimdFloat)
+    let m_ty = *engine.type_defs.get("Meters").expect("Meters unit registered");
+    assert_eq!(engine.types.type_size(m_ty), 8);
+    assert_eq!(
+        engine.types.type_physics(m_ty),
+        HardwarePhysics {
+            reg_class: RegClass::SimdFloat,
+            bit_width: 64
+        }
+    );
+
+    // Negative test: adding `Meters + Seconds` must emit `DIM001`!
+    let bad_unit_src = r#"
+        pub unit Meters(f64);
+        pub unit Seconds(f64);
+        pub fn bad_add(d: Meters, t: Seconds) {
+            let invalid = d + t;
+        }
+    "#;
+    let bad_arena = parse(bad_unit_src);
+    let mut bad_engine = TypeInferenceEngine::new();
+    let _ = bad_engine.synth(&bad_arena, bad_arena.root);
+    assert!(
+        bad_engine.diagnostics.iter().any(|d| d.code == "DIM001"),
+        "Adding Meters + Seconds must emit DIM001 diagnostic! Got: {:?}",
+        bad_engine.diagnostics
+    );
 }

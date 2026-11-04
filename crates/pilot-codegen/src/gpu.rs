@@ -505,8 +505,8 @@ impl GpuEmitter {
         use pilot_analysis::types::RegClass;
         match (physics.reg_class, physics.bit_width) {
             (RegClass::Unit, _) | (RegClass::NoReturn, _) => "void".to_string(),
-            (RegClass::GprUnsigned, 1) => format!("{}{}", "bo", "ol"),
-            (RegClass::GprSigned, 8) => format!("{}{}", "ch", "ar"),
+            (RegClass::GprUnsigned, 1) => "bool".to_string(),
+            (RegClass::GprSigned, 8) => "char".to_string(),
             (RegClass::GprUnsigned, 8) => "uchar".to_string(),
             (RegClass::GprSigned, 16) => "short".to_string(),
             (RegClass::GprUnsigned, 16) => "ushort".to_string(),

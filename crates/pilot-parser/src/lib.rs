@@ -377,6 +377,12 @@ impl<'a> Parser<'a> {
     }
 
     #[inline]
+    fn is_backtick_escaped(&self) -> bool {
+        let sp = self.span();
+        self.src.as_bytes().get(sp.start as usize) == Some(&b'`')
+    }
+
+    #[inline]
     fn is_ident_like(&self) -> bool {
         if self.pos >= self.tape.len() {
             return false;
@@ -841,7 +847,7 @@ impl<'a> Parser<'a> {
                     self.advance();
                     vis = Some(VisibilityTier::Public);
                 }
-                "open" => {
+                "open" if !matches!(self.peek_ahead(1), TokenKind::Less | TokenKind::LBrace) => {
                     self.advance();
                     vis = Some(VisibilityTier::Open);
                 }
@@ -1987,7 +1993,7 @@ impl<'a> Parser<'a> {
             TokenKind::KwRaise => self.parse_raise_stmt(),
             TokenKind::KwAssert => self.parse_assert_stmt(),
             _ => {
-                if self.is_ident_like() {
+                if self.is_ident_like() && !self.is_backtick_escaped() {
                     let txt = self.text();
                     match txt {
                         "var" => {

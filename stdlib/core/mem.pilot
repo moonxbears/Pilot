@@ -143,7 +143,7 @@ pub partial struct {
     }
 
     // 4. Inline Fixed-Size C-ABI Array (`array<T, N>` / `T[N]`) — `N * sizeof(T)` Bytes, `0b00` `IValue`
-    [Lang(Cfg.Lang.array_t), Layout(c_abi)]
+    [Lang(Cfg.Lang.array_t), Layout("inline_array")]
     array<T: IAnyValue, N: const usize> : IList<T>, IValue {
         pub count:    usize { get => N; }
         pub is_empty: bool  { get => N == 0; }
@@ -178,7 +178,7 @@ pub partial struct {
     }
 
     // 5. Hardware SIMD Vector (`simd<T, N>` / `T@N`) — `N * sizeof(T)` Bytes, `0b00` `IValue`
-    [Lang(Cfg.Lang.simd_t), Layout(c_abi)]
+    [Lang(Cfg.Lang.simd_t), Bits(Cfg.Reg.b0, Cfg.Reg.simd_v), Layout("inline_array")]
     simd<T: IValue, N: const usize> : IValue {
         pub lanes: usize { get => N; }
         pub pure:
@@ -189,7 +189,7 @@ pub partial struct {
     }
 
     // 6. 2D Inline Matrix / Grid (`grid<T, N, M>` / `T[N, M]`) — `N * M * sizeof(T)` Bytes, `0b00` `IValue`
-    [Lang(Cfg.Lang.grid_t), Layout(c_abi)]
+    [Lang(Cfg.Lang.grid_t), Layout("inline_array")]
     grid<T: IAnyValue, N: const usize, M: const usize> : IValue {
         pub rows: usize { get => N; }
         pub cols: usize { get => M; }

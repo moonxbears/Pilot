@@ -9,7 +9,7 @@ use Pilot.Core.Genesis.*;
 
 pub interface {
     // 1. Universal 0-Byte Root Contract & 2-Bit Hardware Type Lattice Origins
-    [Lang(Cfg.Lang.any_val)]
+    [Lang(Cfg.Lang.any_t)]
     IAnyValue {}
 
     [Lang(Cfg.Lang.val_t), Lattice(Cfg.Lattice.value)]
@@ -162,8 +162,26 @@ pub interface {
         pub pure op >.. () -> TOut;
     }
 
-    ITryOperator<TUnwrapped: IAnyValue> : IAnyValue {
-        pub pure op ? () -> TUnwrapped;
+    IRangeOperator<TRhs: IValue, TOut: IValue> : IValue {
+        pub pure:
+            op ..< (rhs: TRhs) -> TOut;
+            op ..  (rhs: TRhs) -> TOut;
+    }
+
+    ISpanOperator<TRhs: IValue, TOut: IValue> : IValue {
+        pub pure op ..= (rhs: TRhs) -> TOut;
+    }
+
+    IStepOperator<TStep: IValue, TOut: IValue> : IValue {
+        pub pure op : (step_by: TStep) -> TOut;
+    }
+
+    ITryOperator<TOk: IAnyValue, TErr: IAnyValue> : IAnyValue {
+        pub pure op ? () -> TOk;
+    }
+
+    ICoalesceOperator<TOut: IAnyValue> : IAnyValue {
+        pub pure op ?? (fallback: TOut) -> TOut;
     }
 
     ISplatOperator<TSeq: IAnyValue> : IAnyValue {

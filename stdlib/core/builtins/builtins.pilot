@@ -84,11 +84,11 @@ let SignedIntSsaFacet<TSelf: IValue> = {
         op +%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.add_wrap, self, rhs);
         op -%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.sub_wrap, self, rhs);
         op *%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.mul_wrap, self, rhs);
-        op -   ()           -> TSelf => __ssa_unop(Cfg.Ssa.neg, self);
+        op -   ()           -> TSelf => __ssa_unary(Cfg.Ssa.neg, self);
         op &   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.and_b,    self, rhs);
         op |   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.or_b,     self, rhs);
         op ^   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.xor_b,    self, rhs);
-        op ~   ()           -> TSelf => __ssa_unop(Cfg.Ssa.bitnot, self);
+        op ~   ()           -> TSelf => __ssa_unary(Cfg.Ssa.bitnot, self);
         op <<  (bits: u32)  -> TSelf => __ssa(Cfg.Ssa.shl,      self, bits);
         op >>  (bits: u32)  -> TSelf => __ssa(Cfg.Ssa.ashr,     self, bits);
         op ==  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.eq,       self, rhs);
@@ -98,6 +98,9 @@ let SignedIntSsaFacet<TSelf: IValue> = {
         op >   (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.sgt,      self, rhs);
         op >=  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.sge,      self, rhs);
         op <=> (rhs: TSelf) -> order => __ssa(Cfg.Ssa.cmp3_s,   self, rhs);
+        op ..< (rhs: TSelf) -> range<TSelf> => range<TSelf> { start: self, end: rhs };
+        op ..  (rhs: TSelf) -> range<TSelf> => range<TSelf> { start: self, end: rhs };
+        op ..= (rhs: TSelf) -> span<TSelf>  => span<TSelf>  { start: self, end: rhs };
         fn abs() -> TSelf {
             if self < (0 as TSelf) { return -self; }
             return self;
@@ -121,7 +124,7 @@ let UnsignedIntSsaFacet<TSelf: IValue> = {
         op &   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.and_b,    self, rhs);
         op |   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.or_b,     self, rhs);
         op ^   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.xor_b,    self, rhs);
-        op ~   ()           -> TSelf => __ssa_unop(Cfg.Ssa.bitnot, self);
+        op ~   ()           -> TSelf => __ssa_unary(Cfg.Ssa.bitnot, self);
         op <<  (bits: u32)  -> TSelf => __ssa(Cfg.Ssa.shl,      self, bits);
         op >>  (bits: u32)  -> TSelf => __ssa(Cfg.Ssa.lshr,     self, bits);
         op ==  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.eq,       self, rhs);
@@ -131,6 +134,9 @@ let UnsignedIntSsaFacet<TSelf: IValue> = {
         op >   (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.ugt,      self, rhs);
         op >=  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.uge,      self, rhs);
         op <=> (rhs: TSelf) -> order => __ssa(Cfg.Ssa.cmp3_u,   self, rhs);
+        op ..< (rhs: TSelf) -> range<TSelf> => range<TSelf> { start: self, end: rhs };
+        op ..  (rhs: TSelf) -> range<TSelf> => range<TSelf> { start: self, end: rhs };
+        op ..= (rhs: TSelf) -> span<TSelf>  => span<TSelf>  { start: self, end: rhs };
 };
 
 let FloatSsaFacet<TSelf: IValue> = {
@@ -139,7 +145,7 @@ let FloatSsaFacet<TSelf: IValue> = {
         op -  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.fsub, self, rhs);
         op *  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.fmul, self, rhs);
         op /  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.fdiv, self, rhs);
-        op -  ()           -> TSelf => __ssa_unop(Cfg.Ssa.fneg, self);
+        op -  ()           -> TSelf => __ssa_unary(Cfg.Ssa.fneg, self);
         op == (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.feq,  self, rhs);
         op != (rhs: TSelf) -> bool  => !(__ssa(Cfg.Ssa.feq, self, rhs));
         op <  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.flt,  self, rhs);

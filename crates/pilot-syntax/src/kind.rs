@@ -313,8 +313,23 @@ pub enum SyntaxKind {
     Ellipsis = 335,
     ColonColon = 336,
     StarDotDot = 337,
+    Spaceship = 338,
+    PlusPipe = 339,
+    MinusPipe = 340,
+    StarPipe = 341,
+    PlusPercent = 342,
+    MinusPercent = 343,
+    StarPercent = 344,
+    PlusQuestion = 345,
+    MinusQuestion = 346,
+    StarQuestion = 347,
+    DoublePercent = 348,
+    TildeGreater = 349,
+    GreaterDotDotLess = 356,
+    GreaterDotDot = 357,
+    SwapEqual = 358,
 
-    // --- Call Quotes (350..359) ---
+    // --- Call Quotes (350..355) ---
     CallQuoteShallow = 350,
     CallQuoteDeep = 351,
     CallQuoteAbi = 352,
@@ -495,9 +510,7 @@ impl SyntaxKind {
 
     #[inline]
     pub fn is_operator(self) -> bool {
-        ((self as u16) >= (SyntaxKind::Plus as u16) && (self as u16) <= (SyntaxKind::Ellipsis as u16))
-            || ((self as u16) >= (SyntaxKind::CallQuoteShallow as u16)
-                && (self as u16) <= (SyntaxKind::CallQuoteEffect as u16))
+        ((self as u16) >= (SyntaxKind::Plus as u16) && (self as u16) <= (SyntaxKind::SwapEqual as u16))
             || matches!(
                 self,
                 SyntaxKind::Walrus
@@ -806,6 +819,21 @@ impl SyntaxKind {
             TokenKind::CallQuoteEffect => SyntaxKind::CallQuoteEffect,
             TokenKind::DoubleAmper => SyntaxKind::KwAnd,
             TokenKind::DoublePipe => SyntaxKind::KwOr,
+            TokenKind::Spaceship => SyntaxKind::Spaceship,
+            TokenKind::PlusPipe => SyntaxKind::PlusPipe,
+            TokenKind::MinusPipe => SyntaxKind::MinusPipe,
+            TokenKind::StarPipe => SyntaxKind::StarPipe,
+            TokenKind::PlusPercent => SyntaxKind::PlusPercent,
+            TokenKind::MinusPercent => SyntaxKind::MinusPercent,
+            TokenKind::StarPercent => SyntaxKind::StarPercent,
+            TokenKind::PlusQuestion => SyntaxKind::PlusQuestion,
+            TokenKind::MinusQuestion => SyntaxKind::MinusQuestion,
+            TokenKind::StarQuestion => SyntaxKind::StarQuestion,
+            TokenKind::DoublePercent => SyntaxKind::DoublePercent,
+            TokenKind::TildeGreater => SyntaxKind::TildeGreater,
+            TokenKind::GreaterDotDotLess => SyntaxKind::GreaterDotDotLess,
+            TokenKind::GreaterDotDot => SyntaxKind::GreaterDotDot,
+            TokenKind::SwapEqual => SyntaxKind::SwapEqual,
         }
     }
 

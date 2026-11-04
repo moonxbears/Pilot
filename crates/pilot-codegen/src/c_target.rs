@@ -59,7 +59,7 @@ impl CTargetEmitter {
         match (physics.reg_class, physics.bit_width) {
             (RegClass::Unit, _) => "void".to_string(),
             (RegClass::NoReturn, _) => "_Noreturn void".to_string(),
-            (RegClass::GprUnsigned, 1) => format!("{}{}", "bo", "ol"),
+            (RegClass::GprUnsigned, 1) => "bool".to_string(),
             (RegClass::GprSigned, 8) => "int8_t".to_string(),
             (RegClass::GprUnsigned, 8) => "uint8_t".to_string(),
             (RegClass::GprSigned, 16) => "int16_t".to_string(),
@@ -187,13 +187,13 @@ impl<'a> CGenContext<'a> {
 
     fn sanitize_c_ident(name: &str) -> String {
         const C_KEYWORDS: &[&str] = &[
-            "auto", "break", "case", "const", "continue", "default", "do",
+            "auto", "break", "case", "char", "const", "continue", "default", "do",
             "double", "else", "enum", "extern", "float", "for", "goto", "if",
             "inline", "int", "long", "register", "restrict", "return", "short",
             "signed", "sizeof", "static", "struct", "switch", "typedef", "union",
             "unsigned", "void", "volatile", "while",
         ];
-        if C_KEYWORDS.contains(&name) || (name.len() == 4 && name.starts_with("ch") && name.ends_with("ar")) {
+        if C_KEYWORDS.contains(&name) {
             format!("_{}", name)
         } else {
             name.to_string()
@@ -268,16 +268,35 @@ impl<'a> CGenContext<'a> {
         if type_spec_id.is_none() {
             return "int64_t".to_string();
         }
+        if let Some(&ty_id) = self.analysis.inferred_types.get(&type_spec_id.0) {
+            let pruned = self.analysis.types.prune(ty_id);
+            if pruned == TypeId::STR {
+                return "const char*".to_string();
+            }
+            if let Some(td) = self.analysis.types.type_defs.get(&pruned) {
+                if matches!(td.shape, pilot_analysis::types::StructuralShape::ContiguousView { .. }) {
+                    return "const char*".to_string();
+                }
+                if td.physics.reg_class != pilot_analysis::types::RegClass::Composite || td.physics.bit_width > 0 {
+                    return CTargetEmitter::lower_physics_to_c(td.physics, &[]);
+                }
+            }
+            let physics = self.analysis.types.type_physics(pruned);
+            if physics.reg_class != pilot_analysis::types::RegClass::Composite {
+                return CTargetEmitter::lower_physics_to_c(physics, &[]);
+            }
+        }
         let t_node = *self.arena.node(type_spec_id);
         match t_node.node_kind() {
             NodeKind::TypeNamed => {
                 let t_name = self.arena.interner.resolve(SymbolId(t_node.lhs));
                 if let Some(&def_id) = self.analysis.types.type_defs_by_name.get(t_name) {
-                    let td = &self.analysis.types.type_defs[def_id.0 as usize];
-                    if matches!(td.shape(), pilot_analysis::types::StructuralShape::ContiguousView { .. }) {
-                        return "const char*".to_string();
+                    if let Some(td) = self.analysis.types.type_defs.get(&def_id) {
+                        if matches!(td.shape, pilot_analysis::types::StructuralShape::ContiguousView { .. }) {
+                            return "const char*".to_string();
+                        }
+                        return CTargetEmitter::lower_physics_to_c(td.physics, &[]);
                     }
-                    return CCodeGenerator::lower_physics_to_c(td.physics(), &[]);
                 }
                 match t_name {
                     "string" => "const char*".to_string(),
@@ -290,41 +309,6 @@ impl<'a> CGenContext<'a> {
                     "float" => "double".to_string(),
                     "FILE" => "FILE*".to_string(),
                     "FlowState" => "FlowState*".to_string(),
-                    other if other.starts_with('i') && other[1..].parse::<u32>().is_ok() => {
-                        let bits = other[1..].parse::<u32>().unwrap_or(64);
-                        CCodeGenerator::lower_physics_to_c(
-                            pilot_analysis::types::HardwarePhysics {
-                                reg_class: pilot_analysis::types::RegClass::GprSigned,
-                                bit_width: bits,
-                            },
-                            &[],
-                        )
-                    }
-                    other if other.starts_with('u') && other[1..].parse::<u32>().is_ok() => {
-                        let bits = other[1..].parse::<u32>().unwrap_or(64);
-                        CCodeGenerator::lower_physics_to_c(
-                            pilot_analysis::types::HardwarePhysics {
-                                reg_class: pilot_analysis::types::RegClass::GprUnsigned,
-                                bit_width: bits,
-                            },
-                            &[],
-                        )
-                    }
-                    other if other.starts_with('f') && other[1..].parse::<u32>().is_ok() => {
-                        let bits = other[1..].parse::<u32>().unwrap_or(64);
-                        CCodeGenerator::lower_physics_to_c(
-                            pilot_analysis::types::HardwarePhysics {
-                                reg_class: pilot_analysis::types::RegClass::SimdFloat,
-                                bit_width: bits,
-                            },
-                            &[],
-                        )
-                    }
-                    other if other.len() == 3 && other.starts_with("st") => "const char*".to_string(),
-                    other if other.len() == 4 && other.starts_with("bo") => format!("{}{}", "bo", "ol"),
-                    other if other.len() == 4 && other.starts_with("ch") => "char*".to_string(),
-                    other if other.ends_with("size") && other.starts_with('i') => "ptrdiff_t".to_string(),
-                    other if other.ends_with("size") && other.starts_with('u') => "size_t".to_string(),
                     other => {
                         if self.class_names.contains(other) {
                             format!("{}*", other)
@@ -497,7 +481,7 @@ impl<'a> CGenContext<'a> {
                 TypeId::I32 => "int32_t",
                 TypeId::F64 => "double",
                 TypeId::F32 => "float",
-                TypeId::BOOL => "_Bool",
+                TypeId::BOOL => "bool",
                 TypeId::STR => "const char*",
                 TypeId::VOID => "void",
                 _ => {
@@ -505,13 +489,15 @@ impl<'a> CGenContext<'a> {
                     match (physics.reg_class, physics.bit_width) {
                         (pilot_analysis::types::RegClass::SimdFloat, 32) => "float",
                         (pilot_analysis::types::RegClass::SimdFloat, _) => "double",
-                        (pilot_analysis::types::RegClass::GprUnsigned, 1) => "_Bool",
+                        (pilot_analysis::types::RegClass::GprUnsigned, 1) => "bool",
                         _ => {
+                            if matches!(self.analysis.types.type_shape(ty_id), pilot_analysis::types::StructuralShape::ContiguousView { .. }) {
+                                return "const char*";
+                            }
                             let type_info = self.analysis.types.get(ty_id);
                             match type_info {
                                 TypeKind::Primitive(p) if p == "int" => "int64_t",
                                 TypeKind::Primitive(p) if p == "float" => "double",
-                                TypeKind::Primitive(p) if p.starts_with("st") => "const char*",
                                 TypeKind::Collection { .. } => "PilotList*",
                                 _ => "int64_t",
                             }
@@ -607,7 +593,7 @@ impl<'a> CGenContext<'a> {
                 writeln!(&mut self.out, "{}return NULL;", ind).unwrap();
             } else if ret_ty == "double" || ret_ty == "float" {
                 writeln!(&mut self.out, "{}return 0.0;", ind).unwrap();
-            } else if ret_ty == "int64_t" || ret_ty == "int32_t" || ret_ty == "uint64_t" || ret_ty == "uint32_t" || ret_ty == "int16_t" || ret_ty == "uint16_t" || ret_ty == "int8_t" || ret_ty == "uint8_t" || ret_ty == "int" || ret_ty == "_Bool" || (ret_ty.len() == 4 && ret_ty.starts_with("bo")) {
+            } else if ret_ty == "int64_t" || ret_ty == "int32_t" || ret_ty == "uint64_t" || ret_ty == "uint32_t" || ret_ty == "int16_t" || ret_ty == "uint16_t" || ret_ty == "int8_t" || ret_ty == "uint8_t" || ret_ty == "int" || ret_ty == "bool" {
                 writeln!(&mut self.out, "{}return 0;", ind).unwrap();
             } else {
                 writeln!(&mut self.out, "{}return ({}){{0}};", ind, ret_ty).unwrap();
@@ -730,7 +716,7 @@ impl<'a> CGenContext<'a> {
                 if let TypeKind::Collection { element, .. } = self.analysis.types.get(pruned).clone() {
                     let elem_pruned = self.analysis.types.prune(element);
                     let physics = self.analysis.types.type_physics(elem_pruned);
-                    if elem_pruned == TypeId::STR || matches!(self.analysis.types.get(elem_pruned), TypeKind::Primitive(p) if p.starts_with("st")) {
+                    if elem_pruned == TypeId::STR || matches!(self.analysis.types.type_shape(elem_pruned), pilot_analysis::types::StructuralShape::ContiguousView { .. }) {
                         return "const char*";
                     }
                     if elem_pruned == TypeId::F64 || elem_pruned == TypeId::F32 || physics.reg_class == pilot_analysis::types::RegClass::SimdFloat || matches!(self.analysis.types.get(elem_pruned), TypeKind::Primitive(p) if p == "float") {
@@ -774,7 +760,7 @@ impl<'a> CGenContext<'a> {
                 if pruned == TypeId::STR {
                     return true;
                 }
-                if matches!(self.analysis.types.get(pruned), TypeKind::Primitive(p) if p.starts_with("st")) {
+                if matches!(self.analysis.types.type_shape(pruned), pilot_analysis::types::StructuralShape::ContiguousView { .. }) {
                     return true;
                 }
             }
@@ -910,12 +896,7 @@ impl<'a> CGenContext<'a> {
                 let item = args.get(0).map(|s| s.as_str()).unwrap_or("\"\"");
                 Some(format!("pilot_rt_str_last_index_of({}, {})", target_code, item))
             }
-            "substring" | "Substring" => {
-                let start = args.get(0).map(|s| s.as_str()).unwrap_or("0LL");
-                let count = args.get(1).map(|s| s.as_str()).unwrap_or("0LL");
-                Some(format!("pilot_rt_str_substring({}, {}, {})", target_code, start, count))
-            }
-            m if m == "Slice" || (m.len() == 5 && m.starts_with("sl") && m.ends_with("ce")) => {
+            "substring" | "Substring" | "subslice" | "Slice" => {
                 let start = args.get(0).map(|s| s.as_str()).unwrap_or("0LL");
                 let count = args.get(1).map(|s| s.as_str()).unwrap_or("0LL");
                 if self.is_list_expr(target_id, target_code) {
@@ -1642,7 +1623,7 @@ impl<'a> CGenContext<'a> {
                     "max" if args.len() == 2 => {
                         format!("pilot_rt_int_max({}, {})", args[0], args[1])
                     }
-                    callee if callee.len() == 3 && callee.starts_with("st") && callee.ends_with('r') && args.len() == 1 => {
+                    "to_string" if args.len() == 1 => {
                         self.to_string_c_code(NodeId(self.arena.extra_children[arg_start + 1]), &args[0])
                     }
                     "int" if args.len() == 1 => {
@@ -1713,7 +1694,7 @@ impl<'a> CGenContext<'a> {
                         let pruned = self.analysis.types.prune(ty);
                         if let TypeKind::Collection { element, .. } = self.analysis.types.get(pruned).clone() {
                             let elem_pruned = self.analysis.types.prune(element);
-                            if elem_pruned == TypeId::STR || matches!(self.analysis.types.get(elem_pruned), TypeKind::Primitive(p) if p == "str" || p == "string") {
+                            if elem_pruned == TypeId::STR || matches!(self.analysis.types.type_shape(elem_pruned), pilot_analysis::types::StructuralShape::ContiguousView { .. }) {
                                 return format!("((const char*)pilot_rt_list_get({}, {}))", target, idx);
                             }
                         }

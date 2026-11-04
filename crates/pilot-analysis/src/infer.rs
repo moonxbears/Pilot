@@ -37,6 +37,7 @@ pub struct TypeInferenceEngine {
     pub fn_clearance: HashMap<String, pilot_ast::ClearanceLevel>,
     pub struct_member_visibility: HashMap<(String, String), pilot_ast::VisibilityTier>,
     pub struct_member_clearance: HashMap<(String, String), pilot_ast::ClearanceLevel>,
+    pub dimensions: crate::dimensions::DimensionChecker,
 }
 
 impl Default for TypeInferenceEngine {
@@ -64,6 +65,7 @@ impl TypeInferenceEngine {
             fn_clearance: HashMap::new(),
             struct_member_visibility: HashMap::new(),
             struct_member_clearance: HashMap::new(),
+            dimensions: crate::dimensions::DimensionChecker::new(),
         };
 
         engine.init_builtins();
@@ -87,9 +89,9 @@ impl TypeInferenceEngine {
         self.type_defs.insert("byte".to_string(), TypeId::I64);
         self.type_defs.insert("float".to_string(), TypeId::F64);
         self.type_defs.insert("f64".to_string(), TypeId::F64);
-        self.type_defs.insert("f32".to_string(), TypeId::F64);
-        self.type_defs.insert("f16".to_string(), TypeId::F64);
-        self.type_defs.insert("f8".to_string(), TypeId::F64);
+        self.type_defs.insert("f32".to_string(), TypeId::F32);
+        self.type_defs.insert("f16".to_string(), TypeId::F32);
+        self.type_defs.insert("f8".to_string(), TypeId::F32);
         self.type_defs.insert("double".to_string(), TypeId::F64);
         self.type_defs.insert("decimal".to_string(), TypeId::F64);
         self.type_defs.insert("bool".to_string(), TypeId::BOOL);
@@ -100,6 +102,21 @@ impl TypeInferenceEngine {
         self.type_defs.insert("char".to_string(), TypeId::I64);
         self.type_defs.insert("int64_t".to_string(), TypeId::I64);
         self.type_defs.insert("uint64_t".to_string(), TypeId::I64);
+        let order_ty = self.types.alloc(TypeKind::Primitive("order".to_string()));
+        self.type_defs.insert("order".to_string(), order_ty);
+        let mut order_td = crate::types::TypeDef::new(order_ty, SymbolId(0), crate::types::PackageId(0));
+        order_td.physics = crate::types::HardwarePhysics {
+            reg_class: crate::types::RegClass::GprSigned,
+            bit_width: 8,
+        };
+        order_td.size = 1;
+        order_td.align = 1;
+        order_td.lattice = crate::types::LatticeBits::Value;
+        order_td.shape = crate::types::StructuralShape::Scalar;
+        order_td.is_lang_primitive = true;
+        order_td.layout_sealed = true;
+        self.types.type_defs.insert(order_ty, order_td);
+        self.types.type_defs_by_name.insert("order".to_string(), order_ty);
         self.type_defs.insert("timespec".to_string(), TypeId::ANY);
         self.type_defs.insert("struct".to_string(), TypeId::ANY);
         self.type_defs.insert("void".to_string(), TypeId::VOID);
@@ -625,6 +642,394 @@ impl TypeInferenceEngine {
         }
     }
 
+    fn eval_const_usize(&self, arena: &AstArena, node_id: NodeId) -> Option<usize> {
+        if node_id.is_none() || (node_id.0 as usize) >= arena.nodes.len() {
+            return None;
+        }
+        let n = *arena.node(node_id);
+        match n.node_kind() {
+            NodeKind::IntLit => arena
+                .i64_pool
+                .get(n.lhs as usize)
+                .map(|&v| v.max(0) as usize),
+            NodeKind::TypeNamed | NodeKind::IdentExpr => {
+                let s = arena.interner.resolve(SymbolId(n.lhs));
+                s.parse::<usize>().ok()
+            }
+            _ => None,
+        }
+    }
+
+    pub fn alloc_simd_type(&mut self, elem_ty: TypeId, lanes: usize) -> TypeId {
+        let (elem_sz, _) = self.types.type_size_align(elem_ty);
+        let elem_bits = (elem_sz * 8).max(8) as u32;
+        let ty = self.types.alloc(TypeKind::Primitive(format!(
+            "simd<{},{}>",
+            self.types.display(elem_ty),
+            lanes
+        )));
+        let mut td = crate::types::TypeDef::new(
+            ty,
+            SymbolId(0),
+            crate::types::PackageId(0),
+        );
+        td.physics = crate::types::HardwarePhysics {
+            reg_class: crate::types::RegClass::SimdVector {
+                lanes: lanes as u16,
+            },
+            bit_width: (lanes as u32) * elem_bits,
+        };
+        td.size = lanes * elem_sz.max(1);
+        td.align = td.size.min(64).max(1);
+        td.lattice = crate::types::LatticeBits::Value;
+        td.shape = crate::types::StructuralShape::InlineRepeat {
+            elem_ty,
+            count: lanes,
+        };
+        td.is_lang_primitive = true;
+        td.layout_sealed = true;
+        self.types.type_defs.insert(ty, td);
+        ty
+    }
+
+    pub fn alloc_grid_type(&mut self, elem_ty: TypeId, rows: usize, cols: usize) -> TypeId {
+        let (elem_sz, elem_al) = self.types.type_size_align(elem_ty);
+        let count = rows.max(1) * cols.max(1);
+        let ty = self.types.alloc(TypeKind::Matrix {
+            rows: rows as u32,
+            cols: cols as u32,
+        });
+        let mut td = crate::types::TypeDef::new(
+            ty,
+            SymbolId(0),
+            crate::types::PackageId(0),
+        );
+        td.size = count * elem_sz.max(1);
+        td.align = elem_al.max(1);
+        td.lattice = crate::types::LatticeBits::Value;
+        td.shape = crate::types::StructuralShape::InlineRepeat { elem_ty, count };
+        td.is_lang_primitive = true;
+        td.layout_sealed = true;
+        self.types.type_defs.insert(ty, td);
+        ty
+    }
+
+    pub fn alloc_array_type(&mut self, elem_ty: TypeId, count: usize) -> TypeId {
+        let (elem_sz, elem_al) = self.types.type_size_align(elem_ty);
+        let ty = self.types.alloc(TypeKind::Primitive(format!(
+            "array<{},{}>",
+            self.types.display(elem_ty),
+            count
+        )));
+        let mut td = crate::types::TypeDef::new(
+            ty,
+            SymbolId(0),
+            crate::types::PackageId(0),
+        );
+        td.size = count.max(1) * elem_sz.max(1);
+        td.align = elem_al.max(1);
+        td.lattice = crate::types::LatticeBits::Value;
+        td.shape = crate::types::StructuralShape::InlineRepeat { elem_ty, count };
+        td.is_lang_primitive = true;
+        td.layout_sealed = true;
+        self.types.type_defs.insert(ty, td);
+        ty
+    }
+
+    pub fn alloc_ring_type(&mut self, elem_ty: TypeId) -> TypeId {
+        let ty = self.types.alloc(TypeKind::Primitive(format!(
+            "ring<{}>",
+            self.types.display(elem_ty)
+        )));
+        let mut td = crate::types::TypeDef::new(
+            ty,
+            SymbolId(0),
+            crate::types::PackageId(0),
+        );
+        td.size = 24;
+        td.align = 8;
+        td.lattice = crate::types::LatticeBits::Reference;
+        td.shape = crate::types::StructuralShape::StridedView { elem_ty };
+        td.is_lang_primitive = true;
+        td.layout_sealed = true;
+        self.types.type_defs.insert(ty, td);
+        ty
+    }
+
+    pub fn alloc_signal_type(&mut self, elem_ty: TypeId) -> TypeId {
+        let ty = self.types.alloc(TypeKind::Primitive(format!(
+            "signal<{}>",
+            self.types.display(elem_ty)
+        )));
+        let mut td = crate::types::TypeDef::new(
+            ty,
+            SymbolId(0),
+            crate::types::PackageId(0),
+        );
+        td.size = 16;
+        td.align = 8;
+        td.lattice = crate::types::LatticeBits::Object;
+        td.is_lang_primitive = true;
+        td.layout_sealed = true;
+        self.types.type_defs.insert(ty, td);
+        ty
+    }
+
+    pub fn alloc_pin_type(&mut self, elem_ty: TypeId) -> TypeId {
+        let ty = self.types.alloc(TypeKind::Primitive(format!(
+            "pin<{}>",
+            self.types.display(elem_ty)
+        )));
+        let mut td = crate::types::TypeDef::new(
+            ty,
+            SymbolId(0),
+            crate::types::PackageId(0),
+        );
+        td.size = 8;
+        td.align = 8;
+        td.lattice = crate::types::LatticeBits::Guard;
+        td.is_lang_primitive = true;
+        td.layout_sealed = true;
+        self.types.type_defs.insert(ty, td);
+        ty
+    }
+
+    pub fn alloc_bounds_pair_type(&mut self, bound_ty: TypeId, inclusive: bool) -> TypeId {
+        let (b_sz, b_al) = self.types.type_size_align(bound_ty);
+        let ty = self.types.alloc(TypeKind::Primitive(format!(
+            "bounds<{},{}>",
+            self.types.display(bound_ty),
+            inclusive
+        )));
+        let mut td = crate::types::TypeDef::new(
+            ty,
+            SymbolId(0),
+            crate::types::PackageId(0),
+        );
+        td.size = 2 * b_sz.max(1);
+        td.align = b_al.max(1);
+        td.lattice = crate::types::LatticeBits::Value;
+        td.shape = crate::types::StructuralShape::BoundsPair {
+            bound_ty,
+            inclusive,
+        };
+        td.is_lang_primitive = true;
+        td.layout_sealed = true;
+        self.types.type_defs.insert(ty, td);
+        ty
+    }
+
+    pub fn extract_element_type(&self, ty: TypeId) -> TypeId {
+        let pruned = self.types.prune(ty);
+        if let Some(td) = self.types.type_defs.get(&pruned) {
+            match td.shape {
+                crate::types::StructuralShape::ContiguousView { elem_ty }
+                | crate::types::StructuralShape::StridedView { elem_ty }
+                | crate::types::StructuralShape::OwnedBuffer { elem_ty }
+                | crate::types::StructuralShape::InlineRepeat { elem_ty, .. } => return elem_ty,
+                _ => {}
+            }
+        }
+        match self.types.get(pruned) {
+            TypeKind::Collection { element, .. } => self.types.prune(*element),
+            _ => pruned,
+        }
+    }
+
+    pub fn extract_simd_or_tuple_lane_type(&self, ty: TypeId) -> TypeId {
+        let pruned = self.types.prune(ty);
+        if let Some(td) = self.types.type_defs.get(&pruned) {
+            if let crate::types::StructuralShape::InlineRepeat { elem_ty, .. } = td.shape {
+                return elem_ty;
+            }
+        }
+        match self.types.get(pruned) {
+            TypeKind::Tuple(elems) => elems.first().copied().unwrap_or(TypeId::F32),
+            TypeKind::Collection { element, .. } => self.types.prune(*element),
+            _ => TypeId::F32,
+        }
+    }
+
+    pub fn resolve_field_on_type(&self, ty: TypeId, field_name: &str) -> TypeId {
+        let pruned = self.types.prune(ty);
+        if let Some(name) = self.types.nominal_names.get(&pruned) {
+            if let Some(fields) = self.struct_fields.get(name) {
+                if let Some((_, fty)) = fields.iter().find(|(n, _)| n == field_name) {
+                    return self.types.prune(*fty);
+                }
+            }
+        }
+        match self.types.get(pruned) {
+            TypeKind::RowRecord { fields, name, .. } => {
+                if let Some((_, fty)) = fields.iter().find(|(n, _)| n == field_name) {
+                    return self.types.prune(*fty);
+                }
+                if let Some(n) = name {
+                    if let Some(sfields) = self.struct_fields.get(n) {
+                        if let Some((_, fty)) = sfields.iter().find(|(fnm, _)| fnm == field_name) {
+                            return self.types.prune(*fty);
+                        }
+                    }
+                }
+                TypeId::ANY
+            }
+            TypeKind::Primitive(name) => {
+                if let Some(fields) = self.struct_fields.get(name) {
+                    if let Some((_, fty)) = fields.iter().find(|(n, _)| n == field_name) {
+                        return self.types.prune(*fty);
+                    }
+                }
+                TypeId::ANY
+            }
+            _ => TypeId::ANY,
+        }
+    }
+
+    fn eval_unit_formula_exponents(
+        &self,
+        arena: &AstArena,
+        expr_id: NodeId,
+    ) -> std::collections::BTreeMap<String, i32> {
+        if expr_id.is_none() || (expr_id.0 as usize) >= arena.nodes.len() {
+            return std::collections::BTreeMap::new();
+        }
+        let n = *arena.node(expr_id);
+        match n.node_kind() {
+            NodeKind::IdentExpr | NodeKind::TypeNamed => {
+                let u_name = arena.interner.resolve(SymbolId(n.lhs)).to_string();
+                self.dimensions
+                    .unit_exponents
+                    .get(&u_name)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        let mut m = std::collections::BTreeMap::new();
+                        m.insert(u_name, 1);
+                        m
+                    })
+            }
+            NodeKind::BinaryExpr => {
+                let lhs_map = self.eval_unit_formula_exponents(arena, NodeId(n.lhs));
+                let rhs_map = self.eval_unit_formula_exponents(arena, NodeId(n.rhs));
+                let mut res = lhs_map;
+                let sign = if n.flags == 3 { 1 } else { -1 };
+                for (k, v) in rhs_map {
+                    let entry = res.entry(k.clone()).or_insert(0);
+                    *entry += sign * v;
+                    if *entry == 0 {
+                        res.remove(&k);
+                    }
+                }
+                res
+            }
+            _ => std::collections::BTreeMap::new(),
+        }
+    }
+
+    fn register_unit_decl(&mut self, arena: &AstArena, node_id: NodeId, node: &AstNode) -> TypeId {
+        let sym = SymbolId(node.lhs);
+        let unit_name = arena.interner.resolve(sym).to_string();
+        let base_ty = arena
+            .type_annotations
+            .get(&node_id.0)
+            .map(|&ann| self.resolve_type_spec(arena, ann))
+            .unwrap_or(TypeId::F64);
+        if node.rhs == u32::MAX || NodeId(node.rhs).is_none() {
+            self.dimensions.register_base_unit(&unit_name);
+        } else {
+            let exps = self.eval_unit_formula_exponents(arena, NodeId(node.rhs));
+            self.dimensions.register_derived_unit(&unit_name, exps);
+        }
+        let unit_ty = self.types.unit_of(base_ty, unit_name.clone());
+        let (sz, al) = self.types.type_size_align(base_ty);
+        let physics = self.types.type_physics(base_ty);
+        let mut td = crate::types::TypeDef::new(
+            unit_ty,
+            sym,
+            crate::types::PackageId(0),
+        );
+        td.physics = physics;
+        td.size = sz;
+        td.align = al;
+        td.lattice = crate::types::LatticeBits::Value;
+        td.shape = crate::types::StructuralShape::Scalar;
+        td.layout_sealed = true;
+        self.types.register_type_def(td, &arena.interner);
+        self.type_defs.insert(unit_name.clone(), unit_ty);
+        let ctor_ty = self.types.function_of(vec![base_ty], unit_ty);
+        self.define_var(&unit_name, ctor_ty);
+        self.inferred_node_types.insert(node_id.0, unit_ty);
+        unit_ty
+    }
+
+    fn register_struct_typedef_if_needed(
+        &mut self,
+        arena: &AstArena,
+        node_id: NodeId,
+        ty: TypeId,
+        name: &str,
+        fields: &[(String, TypeId)],
+    ) {
+        if self.types.type_defs.contains_key(&ty) {
+            return;
+        }
+        let sym = arena.node(node_id).lhs;
+        let mut td = crate::types::TypeDef::new(
+            ty,
+            SymbolId(sym),
+            crate::types::PackageId(0),
+        );
+        if let Some(base_nodes) = arena.struct_base_types.get(&node_id.0) {
+            for &bnode in base_nodes {
+                let isym = arena
+                    .type_base_symbols
+                    .get(&bnode.0)
+                    .copied()
+                    .unwrap_or_else(|| SymbolId(arena.node(bnode).lhs));
+                let iname = arena.interner.resolve(isym);
+                if let Some(&iid) = self.types.interfaces_by_name.get(iname) {
+                    td.declared_interfaces.push(iid);
+                }
+            }
+        }
+        let body = NodeId(arena.node(node_id).rhs);
+        if body.is_some() && (body.0 as usize) < arena.nodes.len() {
+            let b_node = *arena.node(body);
+            if b_node.node_kind() == NodeKind::BlockExpr {
+                for &cid in arena.children_slice(b_node.lhs, b_node.rhs) {
+                    if arena.node(NodeId(cid)).node_kind() == NodeKind::DestructorDecl {
+                        td.destructor_fn = Some(crate::types::FunctionId(cid));
+                    }
+                }
+            }
+        }
+        self.types.register_type_def(td, &arena.interner);
+        let rec_fields = arena.record_fields.get(&node_id.0);
+        for (idx, (fname, fty)) in fields.iter().enumerate() {
+            if fname == "this[]"
+                || fname == "self[]"
+                || fname == "self"
+                || fname == "~self"
+                || fname == "scope"
+                || matches!(self.types.get(self.types.prune(*fty)), TypeKind::Function { .. })
+            {
+                continue;
+            }
+            let fsym = rec_fields
+                .and_then(|rf| {
+                    rf.iter()
+                        .find(|(s, _)| arena.interner.resolve(*s) == fname)
+                        .map(|(s, _)| *s)
+                })
+                .unwrap_or(SymbolId(idx as u32));
+            self.types
+                .add_struct_field(ty, fsym, *fty, 0, arena.span(node_id));
+        }
+        let mut seal_diags = Vec::new();
+        self.types
+            .seal_primary_struct_layout(ty, &arena.interner, &mut seal_diags);
+        self.type_defs.insert(name.to_string(), ty);
+    }
+
     pub fn resolve_type_spec(&mut self, arena: &AstArena, node_id: NodeId) -> TypeId {
         if node_id.is_none() {
             return TypeId::ANY;
@@ -634,7 +1039,9 @@ impl TypeInferenceEngine {
         let ty = match node.node_kind() {
             NodeKind::TypeNamed => {
                 let name = arena.interner.resolve(SymbolId(node.lhs));
-                if let Some(&ty) = self.type_defs.get(name) {
+                if let Some(&ty) = self.types.type_defs_by_name.get(name) {
+                    ty
+                } else if let Some(&ty) = self.type_defs.get(name) {
                     ty
                 } else {
                     let ty = self.types.alloc(TypeKind::Primitive(name.to_string()));
@@ -652,33 +1059,178 @@ impl TypeInferenceEngine {
                 self.types.result_of(ok, err)
             }
             NodeKind::TypeList => {
-                let elem = if node.rhs > 0 {
-                    let children = arena.children_slice(node.lhs, node.rhs);
-                    children
-                        .first()
-                        .map(|&c| self.resolve_type_spec(arena, NodeId(c)))
-                        .unwrap_or(TypeId::ANY)
+                let children: Vec<u32> = if node.rhs > 0 {
+                    arena.children_slice(node.lhs, node.rhs).to_vec()
+                } else if node.lhs != 0 {
+                    vec![node.lhs]
                 } else {
-                    self.resolve_type_spec(arena, NodeId(node.lhs))
+                    Vec::new()
                 };
+                let elem = children
+                    .first()
+                    .map(|&c| self.resolve_type_spec(arena, NodeId(c)))
+                    .unwrap_or(TypeId::ANY);
+                if let Some(&base_sym) = arena.type_base_symbols.get(&node_id.0) {
+                    let base_name = arena.interner.resolve(base_sym);
+                    match base_name {
+                        "simd" => {
+                            let lanes = children
+                                .get(1)
+                                .and_then(|&c| self.eval_const_usize(arena, NodeId(c)))
+                                .unwrap_or(4);
+                            return {
+                                let res = self.alloc_simd_type(elem, lanes);
+                                self.inferred_node_types.insert(node_id.0, res);
+                                res
+                            };
+                        }
+                        "grid" => {
+                            let rows = children
+                                .get(1)
+                                .and_then(|&c| self.eval_const_usize(arena, NodeId(c)))
+                                .unwrap_or(1);
+                            let cols = children
+                                .get(2)
+                                .and_then(|&c| self.eval_const_usize(arena, NodeId(c)))
+                                .unwrap_or(1);
+                            return {
+                                let res = self.alloc_grid_type(elem, rows, cols);
+                                self.inferred_node_types.insert(node_id.0, res);
+                                res
+                            };
+                        }
+                        "array" => {
+                            let count = children
+                                .get(1)
+                                .and_then(|&c| self.eval_const_usize(arena, NodeId(c)))
+                                .unwrap_or(1);
+                            return {
+                                let res = self.alloc_array_type(elem, count);
+                                self.inferred_node_types.insert(node_id.0, res);
+                                res
+                            };
+                        }
+                        "ring" => {
+                            let res = self.alloc_ring_type(elem);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "signal" => {
+                            let res = self.alloc_signal_type(elem);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "pin" => {
+                            let res = self.alloc_pin_type(elem);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "stride" => {
+                            let res = self.types.strided_slice_of(elem);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "slice" => {
+                            let res = self.types.slice_of(elem);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "option" => {
+                            let res = self.types.option_of(elem);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "result" => {
+                            let err = children
+                                .get(1)
+                                .map(|&c| self.resolve_type_spec(arena, NodeId(c)))
+                                .unwrap_or(TypeId::ANY);
+                            let res = self.types.result_of(elem, err);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        "map" => {
+                            let val = children
+                                .get(1)
+                                .map(|&c| self.resolve_type_spec(arena, NodeId(c)))
+                                .unwrap_or(TypeId::ANY);
+                            let res = self.types.slice_map_of(elem, val);
+                            self.inferred_node_types.insert(node_id.0, res);
+                            return res;
+                        }
+                        _ => {}
+                    }
+                }
                 self.types.list_of(elem)
             }
             NodeKind::TypeSlice => {
-                let elem = if node.rhs > 0 {
-                    let children = arena.children_slice(node.lhs, node.rhs);
-                    children
-                        .first()
-                        .map(|&c| self.resolve_type_spec(arena, NodeId(c)))
-                        .unwrap_or(TypeId::ANY)
-                } else {
-                    self.resolve_type_spec(arena, NodeId(node.lhs))
-                };
                 match node.flags {
-                    1 => self.types.slice_buffer_of(elem),
-                    2 => self.types.slice_view_of(elem),
-                    3 => self.types.strided_slice_of(elem),
-                    4 => self.types.view_of(elem),
-                    _ => self.types.slice_of(elem),
+                    5 => {
+                        // T@N -> simd<T, N>
+                        let elem = self.resolve_type_spec(arena, NodeId(node.lhs));
+                        let lanes = self.eval_const_usize(arena, NodeId(node.rhs)).unwrap_or(4);
+                        self.alloc_simd_type(elem, lanes)
+                    }
+                    6 => {
+                        // T[:] -> ring<T>
+                        let elem = self.resolve_type_spec(arena, NodeId(node.lhs));
+                        self.alloc_ring_type(elem)
+                    }
+                    7 => {
+                        // T^ -> signal<T>
+                        let elem = self.resolve_type_spec(arena, NodeId(node.lhs));
+                        self.alloc_signal_type(elem)
+                    }
+                    8 => {
+                        // @T -> pin<T>
+                        let elem = self.resolve_type_spec(arena, NodeId(node.lhs));
+                        self.alloc_pin_type(elem)
+                    }
+                    9 => {
+                        // T[N, M] -> grid<T, N, M>
+                        let children: Vec<u32> = arena.children_slice(node.lhs, node.rhs).to_vec();
+                        let elem = children
+                            .first()
+                            .map(|&c| self.resolve_type_spec(arena, NodeId(c)))
+                            .unwrap_or(TypeId::ANY);
+                        let rows = children
+                            .get(1)
+                            .and_then(|&c| self.eval_const_usize(arena, NodeId(c)))
+                            .unwrap_or(1);
+                        let cols = children
+                            .get(2)
+                            .and_then(|&c| self.eval_const_usize(arena, NodeId(c)))
+                            .unwrap_or(1);
+                        self.alloc_grid_type(elem, rows, cols)
+                    }
+                    _ => {
+                        let children: Vec<u32> = if node.rhs > 0 {
+                            arena.children_slice(node.lhs, node.rhs).to_vec()
+                        } else {
+                            Vec::new()
+                        };
+                        let elem = if !children.is_empty() {
+                            self.resolve_type_spec(arena, NodeId(children[0]))
+                        } else {
+                            self.resolve_type_spec(arena, NodeId(node.lhs))
+                        };
+                        match node.flags {
+                            1 => {
+                                if let Some(count) = children
+                                    .get(1)
+                                    .and_then(|&c| self.eval_const_usize(arena, NodeId(c)))
+                                {
+                                    self.alloc_array_type(elem, count)
+                                } else {
+                                    self.types.slice_buffer_of(elem)
+                                }
+                            }
+                            2 => self.types.slice_view_of(elem),
+                            3 => self.types.strided_slice_of(elem),
+                            4 => self.types.view_of(elem),
+                            _ => self.types.slice_of(elem),
+                        }
+                    }
                 }
             }
             NodeKind::TypeMap => {
@@ -1141,12 +1693,123 @@ impl TypeInferenceEngine {
                     return target_ty;
                 }
                 if op == 33 {
-                    // BinaryOp::AsView (Offset swizzled View[Target])
+                    // BinaryOp::AsView (xs as view<Target>)
                     let target_spec = self.resolve_type_spec(arena, NodeId(node.rhs));
-                    let view_ty = self.types.view_of(target_spec);
-                    let _ = self.synth(arena, NodeId(node.lhs));
+                    let lhs_ty = self.synth(arena, NodeId(node.lhs));
+                    let src_elem = self.extract_element_type(lhs_ty);
+                    let src_lat = self.types.type_lattice(src_elem);
+                    let dst_lat = self.types.type_lattice(target_spec);
+                    if src_lat != crate::types::LatticeBits::Value {
+                        self.diagnostics.push(AnalysisDiagnostic::lattice_contract_mismatch(
+                            arena.span(node_id),
+                            &self.types.display(src_elem),
+                            "IValue",
+                            0b00,
+                            src_lat.raw(),
+                            "source element type of 'as view<T>' must be a 0b00 IValue type",
+                        ));
+                    } else if dst_lat != crate::types::LatticeBits::Value {
+                        self.diagnostics.push(AnalysisDiagnostic::lattice_contract_mismatch(
+                            arena.span(node_id),
+                            &self.types.display(target_spec),
+                            "IValue",
+                            0b00,
+                            dst_lat.raw(),
+                            "target type of 'as view<T>' must be a 0b00 IValue type",
+                        ));
+                    }
+                    let view_ty = self.types.strided_slice_of(target_spec);
                     self.inferred_node_types.insert(node_id.0, view_ty);
                     return view_ty;
+                }
+                if op == 45 {
+                    // BinaryOp::Lens (`xs ~> .field`, `xs ~> (.k, .v)`, `vec ~> (.2, .1, .0)`)
+                    let lhs_ty = self.synth(arena, NodeId(node.lhs));
+                    let rhs_id = NodeId(node.rhs);
+                    if rhs_id.is_some() && (rhs_id.0 as usize) < arena.nodes.len() {
+                        let rhs_node = *arena.node(rhs_id);
+                        match rhs_node.node_kind() {
+                            NodeKind::MemberExpr => {
+                                let src_elem = self.extract_element_type(lhs_ty);
+                                let src_lat = self.types.type_lattice(src_elem);
+                                if src_lat != crate::types::LatticeBits::Value {
+                                    self.diagnostics.push(
+                                        AnalysisDiagnostic::lattice_contract_mismatch(
+                                            arena.span(node_id),
+                                            &self.types.display(src_elem),
+                                            "IValue",
+                                            0b00,
+                                            src_lat.raw(),
+                                            "OffsetLens ('~>') requires 0b00 IValue element type",
+                                        ),
+                                    );
+                                }
+                                let f_name = arena.interner.resolve(SymbolId(rhs_node.rhs));
+                                let f_ty = self.resolve_field_on_type(src_elem, f_name);
+                                let res = self.types.strided_slice_of(f_ty);
+                                self.inferred_node_types.insert(node_id.0, res);
+                                return res;
+                            }
+                            NodeKind::TupleExpr => {
+                                let t_children: Vec<u32> =
+                                    arena.children_slice(rhs_node.lhs, rhs_node.rhs).to_vec();
+                                let mut all_lane_indices = !t_children.is_empty();
+                                let mut field_names = Vec::new();
+                                for &cid in &t_children {
+                                    let cn = *arena.node(NodeId(cid));
+                                    if cn.node_kind() == NodeKind::IntLit {
+                                        continue;
+                                    } else if cn.node_kind() == NodeKind::MemberExpr {
+                                        let m_name =
+                                            arena.interner.resolve(SymbolId(cn.rhs)).to_string();
+                                        if m_name.parse::<usize>().is_err() {
+                                            all_lane_indices = false;
+                                        }
+                                        field_names.push(m_name);
+                                    } else {
+                                        all_lane_indices = false;
+                                    }
+                                }
+                                if all_lane_indices {
+                                    let lane_ty = self.extract_simd_or_tuple_lane_type(lhs_ty);
+                                    let res = self.alloc_simd_type(lane_ty, t_children.len());
+                                    self.inferred_node_types.insert(node_id.0, res);
+                                    return res;
+                                } else if field_names.len() == 2 {
+                                    let src_elem = self.extract_element_type(lhs_ty);
+                                    let src_lat = self.types.type_lattice(src_elem);
+                                    if src_lat != crate::types::LatticeBits::Value {
+                                        self.diagnostics.push(
+                                            AnalysisDiagnostic::lattice_contract_mismatch(
+                                                arena.span(node_id),
+                                                &self.types.display(src_elem),
+                                                "IValue",
+                                                0b00,
+                                                src_lat.raw(),
+                                                "SliceMap projection ('~>') requires 0b00 IValue element type",
+                                            ),
+                                        );
+                                    }
+                                    let k_ty = self.resolve_field_on_type(src_elem, &field_names[0]);
+                                    let v_ty = self.resolve_field_on_type(src_elem, &field_names[1]);
+                                    let res = self.types.slice_map_of(k_ty, v_ty);
+                                    self.inferred_node_types.insert(node_id.0, res);
+                                    return res;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    self.inferred_node_types.insert(node_id.0, TypeId::ANY);
+                    return TypeId::ANY;
+                }
+                if op == 47 && (node.rhs == u32::MAX || NodeId(node.rhs).is_none()) {
+                    // Postfix `a >..` (BinaryOp::AfterRange)
+                    let lhs_ty = self.synth(arena, NodeId(node.lhs));
+                    let p_lhs = self.types.prune(lhs_ty);
+                    let res = self.alloc_bounds_pair_type(p_lhs, false);
+                    self.inferred_node_types.insert(node_id.0, res);
+                    return res;
                 }
                 if op == 26 {
                     // BinaryOp::Walrus (pat := val or let/some pat = val)
@@ -1251,6 +1914,76 @@ impl TypeInferenceEngine {
                 let rhs_ty = self.synth(arena, NodeId(node.rhs));
                 let p_lhs = self.types.prune(lhs_ty);
                 let p_rhs = self.types.prune(rhs_ty);
+                // Check compile-time Unit dimensional algebra (`+`, `-`, `*`, `/`)
+                if let (
+                    TypeKind::Unit { base: b1, unit_name: u1 },
+                    TypeKind::Unit { base: _b2, unit_name: u2 },
+                ) = (self.types.get(p_lhs).clone(), self.types.get(p_rhs).clone())
+                {
+                    if op == 1 || op == 2 {
+                        if !self.dimensions.units_match(&u1, &u2) {
+                            self.diagnostics.push(AnalysisDiagnostic::error(
+                                "DIM001",
+                                format!(
+                                    "Incompatible dimensional units in addition/subtraction: '{}' vs '{}'",
+                                    u1, u2
+                                ),
+                                arena.span(node_id),
+                            ));
+                        }
+                        self.inferred_node_types.insert(node_id.0, p_lhs);
+                        return p_lhs;
+                    } else if op == 3 || op == 4 || op == 5 {
+                        let exps = self.dimensions.combine_unit_exponents(&u1, op, &u2);
+                        let res_ty = if let Some(derived_name) =
+                            self.dimensions.find_unit_by_exponents(&exps)
+                        {
+                            self.types.unit_of(b1, derived_name)
+                        } else {
+                            self.types.unit_of(b1, format!("{}#{}", u1, u2))
+                        };
+                        self.inferred_node_types.insert(node_id.0, res_ty);
+                        return res_ty;
+                    }
+                }
+                if op == 34 {
+                    // BinaryOp::Spaceship (`<=>`)
+                    let _ = self.types.unify(lhs_ty, rhs_ty);
+                    let order_ty = self
+                        .types
+                        .type_defs_by_name
+                        .get("order")
+                        .copied()
+                        .or_else(|| self.type_defs.get("order").copied())
+                        .unwrap_or(TypeId::I64);
+                    self.inferred_node_types.insert(node_id.0, order_ty);
+                    return order_ty;
+                }
+                if (35..=40).contains(&op) || op == 44 {
+                    // Saturating (`+|`, `-|`, `*|`), Wrapping (`+%`, `-%`, `*%`), Euclidean (`%%`)
+                    let unified = self.types.unify(lhs_ty, rhs_ty).unwrap_or(p_lhs);
+                    self.inferred_node_types.insert(node_id.0, unified);
+                    return unified;
+                }
+                if (41..=43).contains(&op) {
+                    // Checked (`+?`, `-?`, `*?`) -> option<T>
+                    let unified = self.types.unify(lhs_ty, rhs_ty).unwrap_or(p_lhs);
+                    let opt_ty = self.types.option_of(unified);
+                    self.inferred_node_types.insert(node_id.0, opt_ty);
+                    return opt_ty;
+                }
+                if op == 46 || op == 47 {
+                    // OpenRange (`>..<`) and AfterRange (`>..`) -> BoundsPair
+                    let res = self.alloc_bounds_pair_type(p_lhs, false);
+                    self.inferred_node_types.insert(node_id.0, res);
+                    return res;
+                }
+                if op == 48 {
+                    // Swap (`:=:`) -> void
+                    let _ = self.types.unify(lhs_ty, rhs_ty);
+                    self.inferred_node_types.insert(node_id.0, TypeId::VOID);
+                    return TypeId::VOID;
+                }
                 // Comparison operators (Eq=8..Ge=13) and logical operators (And=14, Or=15)
                 if (8..=15).contains(&op) {
                     let _ = self.types.unify(lhs_ty, rhs_ty);
@@ -1484,12 +2217,17 @@ impl TypeInferenceEngine {
                             self.inferred_node_types.insert(c, fn_ty);
                         }
                         NodeKind::RecordDecl | NodeKind::StructDecl => {
+                            if child_node.flags == 2 {
+                                self.register_unit_decl(arena, NodeId(c), &child_node);
+                                continue;
+                            }
                             let rec_name = arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
                             let fields = self.collect_decl_fields(arena, NodeId(c), &rec_name);
                             self.struct_fields.insert(rec_name.clone(), fields.clone());
                             let ty = self.types.row_record_with_name(fields.clone(), true, None, Some(rec_name.clone()));
                             self.type_defs.insert(rec_name.clone(), ty);
                             self.types.register_nominal_name(ty, rec_name.clone());
+                            self.register_struct_typedef_if_needed(arena, NodeId(c), ty, &rec_name, &fields);
                             let data_fields: Vec<TypeId> = fields
                                 .iter()
                                 .filter(|(n, t)| n != "this[]" && n != "self[]" && !matches!(self.types.get(self.types.prune(*t)), TypeKind::Function { .. }))
@@ -1667,6 +2405,21 @@ impl TypeInferenceEngine {
                 };
                 let val_ty = if let Some(explicit_ty) = ann_ty {
                     if init_node.is_some() && init_ty != TypeId::ANY {
+                        let p_exp = self.types.prune(explicit_ty);
+                        let p_init = self.types.prune(init_ty);
+                        if let (
+                            TypeKind::Unit { unit_name: u1, .. },
+                            TypeKind::Unit { unit_name: u2, .. },
+                        ) = (self.types.get(p_exp).clone(), self.types.get(p_init).clone())
+                        {
+                            if !self.dimensions.units_match(&u1, &u2) {
+                                self.diagnostics.push(AnalysisDiagnostic::error(
+                                    "DIM001",
+                                    format!("Unit dimension mismatch: expected '{}', found '{}'", u1, u2),
+                                    arena.span(node_id),
+                                ));
+                            }
+                        }
                         let _ = self.types.unify(explicit_ty, init_ty);
                     }
                     if explicit_ty != TypeId::ANY {
@@ -1930,6 +2683,9 @@ impl TypeInferenceEngine {
             }
 
             NodeKind::RecordDecl | NodeKind::StructDecl => {
+                if node.flags == 2 {
+                    return self.register_unit_decl(arena, node_id, &node);
+                }
                 let sym = SymbolId(node.lhs);
                 let name = arena.interner.resolve(sym).to_string();
                 let fields = self.collect_decl_fields(arena, node_id, &name);
@@ -1937,6 +2693,7 @@ impl TypeInferenceEngine {
                 let ty = self.types.row_record_with_name(fields.clone(), true, None, Some(name.clone()));
                 self.type_defs.insert(name.clone(), ty);
                 self.types.register_nominal_name(ty, name.clone());
+                self.register_struct_typedef_if_needed(arena, node_id, ty, &name, &fields);
                 let data_fields: Vec<TypeId> = fields
                     .iter()
                     .filter(|(n, t)| n != "this[]" && n != "self[]" && !matches!(self.types.get(self.types.prune(*t)), TypeKind::Function { .. }))

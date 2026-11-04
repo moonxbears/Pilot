@@ -189,10 +189,11 @@ fn test_seed_bool_and_usize_ssa_lowering() {
     let _arena = bootstrap_core_file(CORE_PILOT_SRC, &mut tables, &mut vm)
         .expect("stdlib/core/core.pilot should bootstrap cleanly");
 
-    // 1. Assert bool is bound to LangItem::Bool (8-bit gpr_unsigned)
+    // 1. Assert bool is bound to LangItem::Bool (1-bit gpr_unsigned, 1 byte in memory)
     assert!(vm.lang_item_node(LangItem::Bool).is_some());
     let bool_layout = vm.type_layout("bool").expect("bool layout registered");
-    assert_eq!(bool_layout.bit_width, 8);
+    assert_eq!(bool_layout.bit_width, 1);
+    assert_eq!(bool_layout.byte_size(), 1);
     assert_eq!(bool_layout.reg_class, RegisterClass::GprUnsigned);
 
     // 2. Assert usize is bound to LangItem::Usize (64-bit gpr_unsigned)

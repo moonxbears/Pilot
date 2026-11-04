@@ -332,7 +332,7 @@ pub struct HardwarePhysics {
     pub bit_width: u32,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub enum StructuralShape {
     Scalar,                                           // Single hardware register (`RegClass != Composite`)
     InlineRepeat { elem_ty: TypeId, count: usize },   // Fixed-length inline repeat (`[Layout("inline_array")]`)
@@ -923,6 +923,9 @@ impl TypeArena {
                 let elem = self.unify(elem_a, elem_b)?;
                 Ok(self.option_of(elem))
             }
+            _ if (a.is_integer() && b.is_integer()) || (a.is_float() && b.is_float()) => {
+                Ok(a)
+            }
             (TypeKind::Collection { kind: k1, element: e1 }, TypeKind::Collection { kind: k2, element: e2 }) if k1 == k2 => {
                 let elem = self.unify(e1, e2)?;
                 Ok(self.alloc(TypeKind::Collection { kind: k1, element: elem }))
@@ -1206,6 +1209,11 @@ impl TypeArena {
         let sym = type_def.name;
         if sym.0 != 0 {
             let name_str = interner.resolve(sym).to_string();
+            if let Some(slot) = crate::comptime::ReceptorSlot::from_slot_or_lang_name(&name_str) {
+                self.receptor_type_names
+                    .entry(slot)
+                    .or_insert_with(|| name_str.clone());
+            }
             self.type_defs_by_sym.insert(sym, id);
             self.type_defs_by_name.insert(name_str.clone(), id);
             self.nominal_names.insert(id, name_str);
@@ -1265,7 +1273,8 @@ impl TypeArena {
                 | CollectionKind::Future
                 | CollectionKind::SliceBuffer => LatticeBits::Object,
             },
-            TypeKind::Map { .. } | TypeKind::SliceMap { .. } => LatticeBits::Object,
+            TypeKind::SliceMap { .. } => LatticeBits::Reference,
+            TypeKind::Map { .. } => LatticeBits::Object,
             TypeKind::Primitive(name) => {
                 if let Some(&mapped_id) = self.type_defs_by_name.get(name) {
                     if let Some(td) = self.type_defs.get(&mapped_id) {
@@ -1310,6 +1319,43 @@ impl TypeArena {
         }
     }
 
+    /// Returns the size in bytes for a type.
+    pub fn type_size(&self, ty: TypeId) -> usize {
+        self.type_size_align(ty).0
+    }
+
+    /// Returns the `StructuralShape` of a type.
+    pub fn type_shape(&self, ty: TypeId) -> StructuralShape {
+        let pruned = self.prune(ty);
+        if let Some(td) = self.type_defs.get(&pruned) {
+            return td.shape;
+        }
+        match self.get(pruned) {
+            TypeKind::Collection { kind, element } => match kind {
+                CollectionKind::Slice | CollectionKind::SliceView | CollectionKind::View => {
+                    StructuralShape::ContiguousView { elem_ty: *element }
+                }
+                CollectionKind::StridedSlice => StructuralShape::StridedView { elem_ty: *element },
+                CollectionKind::SliceBuffer | CollectionKind::List => {
+                    StructuralShape::OwnedBuffer { elem_ty: *element }
+                }
+                _ => StructuralShape::GeneralAggregate,
+            },
+            TypeKind::Option(inner) => StructuralShape::TaggedOutcome {
+                ok_ty: *inner,
+                err_ty: None,
+                niche_optimized: true,
+            },
+            TypeKind::Result { ok, err } => StructuralShape::TaggedOutcome {
+                ok_ty: *ok,
+                err_ty: Some(*err),
+                niche_optimized: false,
+            },
+            TypeKind::Unit { base, .. } => self.type_shape(*base),
+            _ => StructuralShape::Scalar,
+        }
+    }
+
     /// Returns `(size_bytes, align_bytes)` for a type.
     pub fn type_size_align(&self, ty: TypeId) -> (usize, usize) {
         let pruned = self.prune(ty);
@@ -1320,6 +1366,8 @@ impl TypeArena {
         }
         match self.get(pruned) {
             TypeKind::Void | TypeKind::Never | TypeKind::Null => (0, 1),
+            TypeKind::Unit { base, .. } => self.type_size_align(*base),
+            TypeKind::SliceMap { .. } => (48, 8),
             TypeKind::Primitive(name) => {
                 if let Some(&mapped_id) = self.type_defs_by_name.get(name) {
                     if let Some(td) = self.type_defs.get(&mapped_id) {
@@ -1349,6 +1397,31 @@ impl TypeArena {
                 let mut max_align = 1usize;
                 for &e in elems {
                     let (sz, al) = self.type_size_align(e);
+                    let al = al.max(1);
+                    offset = (offset + al - 1) & !(al - 1);
+                    offset += sz;
+                    max_align = max_align.max(al);
+                }
+                let total = (offset + max_align - 1) & !(max_align - 1);
+                (total, max_align)
+            }
+            TypeKind::RowRecord { fields, name, .. } => {
+                if let Some(n) = name {
+                    if let Some(&mapped_id) = self.type_defs_by_name.get(n) {
+                        if let Some(td) = self.type_defs.get(&mapped_id) {
+                            if td.size > 0 {
+                                return (td.size, td.align.max(1));
+                            }
+                        }
+                    }
+                }
+                let mut offset = 0usize;
+                let mut max_align = 1usize;
+                for (_, fty) in fields {
+                    if matches!(self.get(self.prune(*fty)), TypeKind::Function { .. }) {
+                        continue;
+                    }
+                    let (sz, al) = self.type_size_align(*fty);
                     let al = al.max(1);
                     offset = (offset + al - 1) & !(al - 1);
                     offset += sz;
@@ -1656,6 +1729,7 @@ impl TypeArena {
                 reg_class: RegClass::NoReturn,
                 bit_width: 0,
             },
+            TypeKind::Unit { base, .. } => self.type_physics(*base),
             TypeKind::Primitive(name) => {
                 if let Some(&mapped_id) = self.type_defs_by_name.get(name) {
                     if let Some(td) = self.type_defs.get(&mapped_id) {
