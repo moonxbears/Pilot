@@ -1,912 +1,179 @@
 # Pilot Programming Language
 
-> **Type-Safe, Flexible, Configurable, Decoupled, Beautiful, Efficient, and Extendible.**
+> **Self-Hosted, Zero-GC, Type-Safe, Configurable, Decoupled, and Multi-Target.**
 
-**Pilot** is a modern general-purpose programming language blending Pythonic elegance with C#-style robustness, native relational database operations, real-time determinism, polyglot interoperability, and universal package adoption.
-
----
-
-## Table of Contents
-
-- [Documentation & Reference Manuals](#documentation--reference-manuals)
-- [Core Highlights](#core-highlights)
-- [Design Philosophy](#design-philosophy)
-- [Architecture & Repository Structure](#architecture--repository-structure)
-- [Getting Started & Installation](#getting-started--installation)
-  - [Prerequisites](#prerequisites)
-  - [Build & Verification](#build--verification)
-  - [CLI Command Summary](#cli-command-summary)
-- [Universal Package Manager (`pilot pkg`)](#universal-package-manager-pilot-pkg)
-  - [Native Pilot Packages](#native-pilot-packages)
-  - [Adopting Interop Packages (NuGet, npm, pip, Cargo, Maven, LuaRocks)](#adopting-interop-packages)
-  - [Packaging CLI Reference](#packaging-cli-reference)
-- [Virtual Environment System (`pilot venv`)](#virtual-environment-system-pilot-venv)
-  - [Creating and Activating Environments](#creating-and-activating-environments)
-  - [Virtual Environment CLI Reference](#virtual-environment-cli-reference)
-  - [Automatic Dependency Sandboxing](#automatic-dependency-sandboxing)
-  - [Programmatic Runtime API](#programmatic-runtime-api)
-- [Language Features & Syntax Reference](#language-features--syntax-reference)
-  - [1. Type Safety, Variables & Control Flow](#1-type-safety-variables--control-flow)
-  - [2. Preconditions & Cleanup (`guard` and `defer`)](#2-preconditions--cleanup-guard-and-defer)
-  - [3. Type Adapters, Argument Adaptation & Repeated Calls](#3-type-adapters-argument-adaptation--repeated-calls)
-  - [4. Advanced Method Groups & Dispatch](#4-advanced-method-groups--dispatch)
-  - [5. Algebraic Class Composition & Typestates](#5-algebraic-class-composition--typestates)
-  - [6. Structural Projection & Scoped Lexical Extensions](#6-structural-projection--scoped-lexical-extensions)
-  - [7. Contextual Parameters (Native Dependency Injection)](#7-contextual-parameters-native-dependency-injection)
-  - [8. Design-by-Contract (`requires` and `ensures`)](#8-design-by-contract-requires-and-ensures)
-  - [9. Exhaustive Pattern Matching Assignments](#9-exhaustive-pattern-matching-assignments)
-  - [10. Relational & In-Memory Database Set Operations](#10-relational--in-memory-database-set-operations)
-  - [11. Concurrency, Channels & Actors](#11-concurrency-channels--actors)
-  - [12. Real-Time Determinism & Units of Measure](#12-real-time-determinism--units-of-measure)
-  - [13. Metaprogramming, Macros & AST Generative Classes](#13-metaprogramming-macros--ast-generative-classes)
-- [Polyglot Interoperability & Multi-Language Transpilation](#polyglot-interoperability--multi-language-transpilation)
-  - [1. Inline Polyglot Blocks](#1-inline-polyglot-blocks)
-  - [2. Multi-Language Transpilation (`pilot --emit` & `--from`)](#2-multi-language-transpilation-pilot---emit----from)
-- [Standard Library & Precompiled Modules (`stdlib/`)](#standard-library--precompiled-modules-stdlib)
-- [Compilation & Scripting Runtime](#compilation--scripting-runtime)
-  - [Scripting Mode (Direct Execution)](#1-scripting-mode-direct-execution)
-  - [Ahead-Of-Time Precompilation (`.pilc` v3 Bytecode)](#2-ahead-of-time-precompilation-pilc-v3-bytecode)
-  - [Standard Library Precompilation (`pilot compile --stdlib`)](#3-standard-library-precompilation-pilot-compile---stdlib)
-  - [Direct Execution of Precompiled Bytecode](#4-direct-execution-of-precompiled-bytecode)
-  - [Linkable Native C-ABI Runtime Libraries (`libpilot_rt.a`, `libpilot_rt.so`)](#5-linkable-native-c-abi-runtime-libraries)
-- [Interactive Debugger & REPL](#interactive-debugger--repl)
-- [Language Server Protocol (LSP) & Tooling](#language-server-protocol-lsp--tooling)
-- [Running the Test Suites](#running-the-test-suites)
-- [Step-by-Step Architecture Guide](#step-by-step-architecture-guide)
+**Pilot** is a modern systems and application programming language built on an **Engine-Positive 14-Token Rust Core** that self-bootstraps its type system, operators, control flow, and standard library in pure Pilot (`stdlib/core/`). Pilot unifies C#-grade ergonomics (interfaces, implicit properties, operator hierarchies, `[...]` attribute pipelines, LINQ/SQL) with deterministic 3-tier Perceus memory management, zero-marshalling `SliceBuffer<T>` / `stride<T>` C-ABI layouts, homoiconic call-quoting (`!`, `!!`, `!&`, `!^`, `!@`, `!?`), polyglot interoperability, and native compilation to **PilVM v3 Bytecode, C11/C23 (Clang), LLVM IR, WebAssembly (WASI), x86_64/ARM64 ASM, and NVIDIA/AMD/WebGPU compute kernels**.
 
 ---
 
-## Documentation & Reference Manuals
+## Core Architectural Highlights
 
-Explore the complete, navigable Pilot documentation suite in [`docs/index.md`](docs/index.md):
-
-### Core Language Reference Manuals
-- **[Master Milestones & Roadmap Tracker (`MILESTONES.md`)](MILESTONES.md)** — Dependency-verified roadmap and concurrency matrix tracking completed milestones (M1–M10), cross-milestone grammar/semantic conflict invariants, and upcoming strategic phases (M11–M27: exhaustive ADTs, concise `T?` null-safety, localized `T ! E` value errors, expression ergonomics & class-like literals, dynamic-schedule `for` loops & zero-marshalling C-ABI guarantees, bidirectional type inference, first-class keywords & homoiconic call-quoting, reactive/autodiff/dry-run projections, runtime-to-`comptime` demotion, accurate bidirectional `--emit`/`--from` transpilers & `pilot fmt` with `--viable-license-only`, bootstrapped & curated `stdlib`, DAP GUI breakpoints, deep LLVM/WASM linking, `pilot perf` auto-optimizer, self-hosted compiler, and package registry evaluation).
-- **[Master Documentation Hub (`docs/index.md`)](docs/index.md)** — Central navigation portal, architecture pipeline, and cross-reference index.
-- **[Exhaustive Lexical Reference (`docs/lexical-reference.md`)](docs/lexical-reference.md)** — Every lexer token, preprocessor directive (`#define`, `#if`, `#region`, `#pragma`), diagnostic code (`PREPROC001`–`PREPROC011`), keyword category, contextual identifier rule, numeric/dimensional literal (`50ms`, `100Hz`, `64KB`), string/f-string/symbol literal, and operator/delimiter.
-- **[Exhaustive Syntax & Grammar Reference (`docs/syntax-reference.md`)](docs/syntax-reference.md)** — Every formal grammar production and AST lowering rule, program structure, `{}` vs `:` suites, type annotations, classes, algebraic class math, typestates, pattern matching, LINQ/SQL queries, concurrency, real-time blocks, macros, and the 19-level operator precedence table.
-- **[Exhaustive Functions, Methods & Runtime API Reference (`docs/functions-and-apis.md`)](docs/functions-and-apis.md)** — Every global built-in function, built-in module (`json`, `venv`, `TypeAdapter`), scripting host API, Universal Root Object method, collection/matrix/generator/future/lazy method, Design-by-Contract intrinsic, standard contract (`IList`, `IEquatable`, etc.), and runtime exception type.
-
-### 15 Deep-Dive Concept Guides (`docs/concepts/`)
-1. **[Types, Variables, Collections & Control Flow](docs/concepts/01-types-variables-control-flow.md)**
-2. **[Guard, Defer & Structured Exception Handling](docs/concepts/02-guard-defer-exceptions.md)**
-3. **[First-Class Method Groups & Multi-Dispatch](docs/concepts/03-method-groups-and-dispatch.md)**
-4. **[First-Class Type Adapters & Scalar-to-Collection Repetition](docs/concepts/04-type-adapters-and-repetition.md)**
-5. **[Algebraic Class Composition & Typestate Classes](docs/concepts/05-algebraic-classes-and-typestates.md)**
-6. **[Structural Projections, Scoped Lexical Extensions & Generative Classes](docs/concepts/06-projections-extensions-generative.md)**
-7. **[Contextual Parameters & Lexical Dependency Injection](docs/concepts/07-contextual-parameters-di.md)**
-8. **[Exhaustive Pattern Matching & Deep Destructuring](docs/concepts/08-exhaustive-pattern-matching.md)**
-9. **[Design-by-Contract, Contract Delegation & Method Stealing](docs/concepts/09-design-by-contract.md)**
-10. **[Native Database Engine, LINQ Queries & SQL-First DML](docs/concepts/10-database-and-sql.md)**
-11. **[Concurrency, Stateful Generators & Lazy Evaluation](docs/concepts/11-concurrency-generators-lazy.md)**
-12. **[Polyglot Interoperability & Resumable Yield-Bridge Coroutines](docs/concepts/12-polyglot-interoperability.md)**
-13. **[Metaprogramming, Homoiconic Lisp & Universal Root Object](docs/concepts/13-metaprogramming-and-lisp.md)**
-14. **[Hard Real-Time Systems, Dimensional Units & Native Matrix Types](docs/concepts/14-realtime-and-matrix-types.md)**
-15. **[Universal Package Manager, Virtual Environments, Preprocessor & Tooling](docs/concepts/15-packaging-venv-and-tooling.md)**
+- **14-Token Seed Engine + 4-Stage Self-Genesis (`stdlib/core/`):** The Rust lexer hardcodes strictly **14 seed tokens** (`__engine`, `struct`, `interface`, `fn`, `let`, `ref`, `if`, `loop`, `return`, `yield`, `defer`, `comptime`, `quote`, `asm`). At Line 1 of `stdlib/core/core.pilot`, a compile-time `Cfg` table registers all modifiers, Pratt operator precedences, `[...]` attributes, and SSA intrinsics, then permanently seals the bootstrap bridge (`seal_bootstrap_bridge`).
+- **Single Origin (`IAnyValue`) & 2-Bit Hardware Type Lattice:** Every type originates from `IAnyValue` with **0 runtime header bytes** and is classified in 1 CPU cycle via bitwise-OR of its fields and `~self()` destructor:
+  - **`0b00` `IValue`:** Bit-copyable inline data (`i64`, `f64`, `Vec3`, `array<T, N>`, `RangeWindow<T>`).
+  - **`0b01` `IReference`:** Borrowed zero-copy memory views (`slice<T>`, `stride<T>`, `str`, `map<K, V>`, `ref<T>`).
+  - **`0b10` `IObject`:** Owned handles with deterministic `~self()` teardown (`SliceBuffer<T>`, `List<T>`, `Signal<T>`, `iso<T>`).
+  - **`0b11` `IGuard`:** Scoped RAII tokens combining borrowed views with `~self()` cleanup (`MutexGuard<T>`, `ArenaScope`).
+- **4-Tier `MethodTable`, `*Bundle` & `*Facet` Composition:** Replaces vtable-heavy OOP base classes with `interface` contracts, auto-implemented default methods, field-bearing `*Bundle` splices, and method-only `*Facet` splices with explicit compile-time collision resolution (`coalesce`, `with`, `without`).
+- **7-Pillar `[...]` Attribute Engine:** Supports weighted execution pipelines (`IAttribute`), SSA entry/exit interceptors (`IInterceptor`), computed property formulas (`IFormulaAttribute`), reactive setter hooks (`IReactiveAttribute`), hierarchical inheritance (`IInheritedAttribute`), and ECS rule scheduling (`IEcsRule`).
+- **Homoiconic Call-Quoting & Semantic Projections:** Zero-whitespace call-quoting operators project any function call into an AST descriptor (`fn!(a, b)`), constant-folded deep splice (`fn!!(~a, b)`), zero-marshalling `#[repr(C)]` C-ABI call frame (`fn!&(a, b)`), reactive signal (`fn!^(a, b)`), compile-time symbolic derivative (`fn!@(a, b)`), or Copy-on-Write dry-run plan (`fn!?(a, b)`).
+- **Worry-Free 3-Tier Deterministic Zero-GC Memory:** Combines 16-byte `PilotVal` registers (with 14-byte inline SSO strings and niche-unboxed `T?` / `T ! E`), 64KB thread-local lexical bump arenas, and Perceus linear ARC with `drop_reuse` in-place recycling (`0.0 ms` GC pauses).
+- **Deep Polyglot Interop, 7-Target Transpilation & Universal Packaging:** Execute inline `python`, `js`, `lua`, `c`, `cpp`, `rust`, `java`, `asm`, and `postgresql`/`sqlite` blocks, transpile bidirectionally (`pilot --emit` / `pilot --from`), and manage native or foreign packages (`NuGet`, `npm`, `pip`, `Cargo`, `Maven`, `LuaRocks`) via `pilot pkg` and `pilot venv`.
 
 ---
 
-## Core Highlights
+## Canonical Syntax & Type Reference
 
-- **Pythonic Syntax + C# Robustness**: Familiar syntax with properties (`get`/`set`), operator overloads, generic `where` constraints, interfaces, contract delegation, and method stealing.
-- **Universal Package Manager**: First-class native packaging with full capability to adopt dependencies from **NuGet** (.NET), **npm** (Node), **pip** (Python), **Cargo** (Rust), **Maven** (Java), and **LuaRocks** (Lua).
-- **Argument Type Adapters & Auto-Vectorization**: Adapt arguments to matching signatures (e.g. `str` -> `int`, `dict` -> `Model`), or repeat singular calls over collections via `each`, `..` spread, `*` broadcast, or `with auto_repeat`.
-- **Method Groups**: Auto-routing switchboards over heterogeneous collections, currying signature sieves, fallback unions (`|`), and multi-cast broadcasts (`*`).
-- **Algebraic Types & Typestates**: Compose classes using set algebra (`Admin = BaseUser | AdminPrivileges`, `FreeUser = BaseUser - BillingModule`), and morph object types based on state (`Connection[Disconnected]` -> `Connection[Connected]`).
-- **Contextual Parameters**: Implicit downstream parameter propagation (`context db: Database`) bound via lexical `with context db = ...` blocks.
-- **Design-by-Contract**: Declarative pre-conditions (`requires`) and post-conditions (`ensures`) with snapshot introspection (`old(expr)`).
-- **Deep Polyglot Engine**: Direct inline block execution for JavaScript, Java, Lua, C, C++, Assembly, PostgreSQL, MySQL, Python, C#, and Rust.
+### 1. Single-Word `lowercase` Primitives & Symbolic Shorthands
 
----
+| Symbolic Form | Canonical `lowercase` Type | Lattice | Backing Interface / C-ABI Layout |
+| :--- | :--- | :--- | :--- |
+| `T[]` | `slice<T>` | `0b01` | `IReadOnlyList<T>` (`{ ptr<T>, usize }`, 16B) |
+| `T[N]` | `array<T, const N: usize>` | `0b00` | `IList<T>` (Inline `N * sizeof(T)` bytes) |
+| `T[..]` | `stride<T>` | `0b01` | `IReadOnlyList<T>` (`{ ptr<T>, usize, isize }`, 24B) |
+| `T*` | `ptr<T>` | `0b01` | `IIndexGet<usize, T>`, `IIndexSet<usize, T>` (8B) |
+| `&T` / `&var T` | `ref<T>` / `var ref<T>` | `0b01` | Lexical immutable / mutable borrow |
+| `~T` | `iso<T>` | `0b10` | Unique Perceus heap/arena ownership handle |
+| `T?` | `option<T>` | `0b00*` | `ITryOperator`, `ICoalesceOperator` (Niche-unboxed) |
+| `T ! E` | `result<T, E>` | `0b00*` | `ITryOperator` (Must-use register return) |
+| `(A, B) => R` | `fn<(A, B), R>` | `0b01` | Callable closure view (`{ ptr<void>, ptr<void> }`) |
+| `a ..< b` | `range<T>` | `0b00` | `IRangeOperator<T>` (Half-open `[a, b)`) |
+| `a .. b` / `a ..= b` | `span<T>` | `0b00` | `ISpanOperator<T>` (Inclusive `[a, b]`) |
+| `a .. b : s` | `step<T>` | `0b00` | `IStepOperator<T>` (Stepped sequence) |
+| `!&call(a, b)` | `frame<TSig>` | `0b00` | Zero-marshalling C-ABI call frame (`#[repr(C)]`) |
 
-## Design Philosophy
+### 2. Distributive Headers, Implicit Properties & 7-Pillar `[...]` Attributes
 
-1. **Flexible**: Adaptable syntax, dynamic-to-static typing continuum, and seamless interop across 10+ programming ecosystems.
-2. **Configurable**: Configurable execution contexts, extensible polyglot registries, and pluggable type adapters.
-3. **Decoupled**: Distinct boundaries across 25 zero-GC Rust crates: zero-allocation SIMD lexing (`pilot-lexer`), Rowan lossless CST (`pilot-syntax`), cache-packed 16-byte AST (`pilot-ast`), HM type inference (`pilot-analysis`), Perceus reference counting (`pilot-perceus`), 32-bit register bytecode VM (`pilot-vm`), AOT compilation (`pilot-codegen`), native C-ABI runtime (`pilot-rt`), and LSP/DAP tooling.
-4. **Beautiful**: Clean, expressive syntax free of excessive boilerplate, inspired by Python, Rust, and modern C#.
-5. **Efficient**: Low-overhead execution, ahead-of-time `.pilc` v3 bytecode format with zero-deserialization startup (<0.2 ms), fat LTO, and hardware SIMD acceleration.
-6. **Extendible**: Extensible via macros (`quote`/`quasiquote`), lexical extensions (`extension ... on ...`), and custom user type adapters (`adapter`).
+```pilot
+[EnforceCoreNaming]
+pub pkg Pilot.Core.Showcase;
 
----
+pub fn distributive_demo() {
+    let List<i32> {
+        myarr1 = [1, 2, 3],
+        myarr2 = [4, 5, 6,],
+    };
 
-## Architecture & Repository Structure
+    var Vec3<f64> {
+        a = (1.0, 2.0, 3.0),
+        b = (9.0, 8.0, 7.0,),
+    };
+}
 
+pub struct CombatUnit : IValue {
+    pub:
+        base_atk:  f32 = 50.0;
+        crit_mult: f32 = 1.5;
+
+        // Self-backed implicit property (`field` & `value`) with reactive attributes:
+        [Clamp(min: 0.0, max: 1000.0, weight: 100), OnChange((old, cur) => Log.info(f"HP: {old} -> {cur}"))]
+        hp: f32 = 100.0 {
+            get => field;
+            set => { field = value; }
+        }
+
+        // Formula Evaluator synthesizes computed getter at compile time:
+        [Formula((u) => u.base_atk * u.crit_mult)]
+        effective_atk: f32 { get; }
+
+        [TraceSpan(name: "apply_damage", weight: 50)]
+        var fn apply_damage(dmg: f32)
+            requires dmg >= 0.0
+            ensures .hp <= old(.hp)
+        {
+            .hp = .hp - dmg;
+        }
+}
 ```
+
+# 3. Values-First Errors (T ! E), switch & 3-Tier Dynamic for Loops
+## Code snippet
+
+```pilot
+pub fn process_window(inputs: str[]) -> i64[] ! ParseError {
+    // 3-tier expression-oriented `for` loop yielding into a zero-marshalling `SliceBuffer<i64>`:
+    let scaled: i64[] = for (i in 0 ..< inputs.count) {
+        let val: i64 = inputs[i].trim().parse_i64()?;
+        if val < 0 {
+            continue 0 .. 2, ...; // Pushes remaining window onto `RangeWindow<usize>` worklist!
+        }
+        yield switch val {
+            case 0       => 1;
+            case 1 .. 10 => val * 10;
+            default      => val;
+        };
+    };
+    return scaled;
+}
+```
+
+# Repository Structure
+``` Plaintext
 Pilot/
+├── .agents/                 # AI codebase index (`AI_CODEBASE_INDEX.md`), hooks & sync scripts
 ├── crates/
-│   ├── pilot-arena/         # High-performance 64KB slab bump allocator & generational typed arenas
-│   ├── pilot-span/          # Zero-copy SIMD SWAR source spans & fast LineIndex
-│   ├── pilot-intern/        # Thread-safe lock-free symbol & keyword interner
-│   ├── pilot-ast/           # Strictly 16-byte cache-line aligned AST nodes and flat AstArena
-│   ├── pilot-lexer/         # Zero-allocation SIMD-accelerated lexer (140+ tokens)
-│   ├── pilot-parser/        # Predictive recursive-descent & Pratt expression parser
-│   ├── pilot-syntax/        # Rowan-style lossless concrete syntax tree (CST) & green trees
-│   ├── pilot-fmt/           # Zero-allocation CST code formatter & style engine
-│   ├── pilot-incremental/   # Salsa-style query memoization with early-cutoff recomputation
-│   ├── pilot-db/            # In-memory relational database, table indexing, & query engine
-│   ├── pilot-analysis/      # Hindley-Milner type inference, pattern exhaustiveness, & contracts
-│   ├── pilot-perceus/       # Perceus reference counting with static reuse & drop specialization
-│   ├── pilot-vm/            # 32-bit register bytecode PilVM v3 and JIT/interpreter
-│   ├── pilot-codegen/       # LLVM IR, C11/C23, WASM, and multi-approach GPU emitters (CUDA/HIP/Vulkan/WGSL)
-│   ├── pilot-transpile/     # High-fidelity bidirectional transpilation to 7 languages
-│   ├── pilot-polyglot/      # Zero-copy FFI bridge for Python, JS, Lua, C, C++, Java, ASM, SQL
-│   ├── pilot-dap/           # Debug Adapter Protocol (DAP) server & interactive terminal debugger
-│   ├── pilot-lsp/           # JSON-RPC Language Server Protocol service & semantic analyzer
-│   ├── pilot-lsp-macros/    # Procedural macro support for LSP dispatch and protocol routing
-│   ├── pilot-pkg/           # Package manager & permissive SPDX license compliance verifier
-│   ├── pilot-bench/         # Nanosecond benchmark harness & cross-language comparative runner
-│   ├── pilot-perf/          # Profiler, worst-case execution time (WCET) analyzer, & CST auto-optimizer
-│   ├── pilot-ffi/           # Stable C-ABI foreign function interface & C header exports
-│   ├── pilot-rt/            # Zero-overhead runtime, networking, linkable C-ABI static/shared libraries
-│   └── pilot-cli/           # Unified toolchain CLI entrypoint (`pilot`)
-├── stdlib/                  # 40 native standard library modules with .pilc-cache/ precompilation
-├── examples/                # 32+ comprehensive showcase scripts demonstrating all language features
-├── tests/                   # 36 end-to-end integration and differential semantic test suites
-└── vscode-pilot/            # Production Visual Studio Code extension with native LSP & DAP
+│   ├── pilot-arena/         # 64KB slab bump allocator & typed generational arenas
+│   ├── pilot-span/          # Zero-copy SIMD SWAR byte spans & LineIndex
+│   ├── pilot-intern/        # Lock-free symbol & `:ns/kw` keyword interner
+│   ├── pilot-lexer/         # 14-token seed SIMD lexer, `#if` preprocessor & `bracket_links`
+│   ├── pilot-syntax/        # Rowan-style lossless Red/Green CST & panic-free recovery
+│   ├── pilot-ast/           # 16-byte cache-packed `AstNode` & flat `AstArena`
+│   ├── pilot-parser/        # Interleaved recursive-descent + Pratt parser & `ParserTables`
+│   ├── pilot-analysis/      # 2-bit lattice, 4-tier `MethodTable`, HM/row inference, `comptime` `Cfg`,
+│   │                        # autodiff (`!@`), call-quoting (`!&`), loops, dimensions & contracts
+│   ├── pilot-perceus/       # 2-bit lattice-driven Perceus ARC, escape analysis & realtime verifier
+│   ├── pilot-vm/            # 32-bit register `PilVM` v3 & zero-deserialization `.pilc` v3 cache
+│   ├── pilot-codegen/       # LLVM IR, C11/C23 (Clang), x86_64/ARM64 ASM, WASM & GPU (CUDA/ROCm/Vulkan/WGSL)
+│   ├── pilot-transpile/     # Bidirectional transpiler (`--emit` / `--from`) across 7 languages
+│   ├── pilot-polyglot/      # Zero-copy `SliceBuffer` FFI & SQL bridges (Python, JS, Lua, C/C++, Rust, Postgres)
+│   ├── pilot-db/            # In-memory relational database, B-Tree indexing & LINQ/SQL engine
+│   ├── pilot-fmt/           # Lossless Red/Green CST formatter & syntax migration engine
+│   ├── pilot-incremental/   # Salsa-style early-cutoff query memoization
+│   ├── pilot-perf/          # Multi-target profiler, WCET analyzer & CST auto-optimizer
+│   ├── pilot-pkg/           # Universal package manager, foreign interop & `pilot venv`
+│   ├── pilot-lsp/           # Native JSON-RPC 2.0 Language Server (+ `pilot-lsp-macros`)
+│   ├── pilot-dap/           # Native Debug Adapter Protocol server & interactive CLI debugger
+│   ├── pilot-ffi/           # C-ABI compiler bridge
+│   ├── pilot-rt/            # Linkable zero-GC C-ABI runtime (`libpilot_rt.a` / `pilot_runtime.h`)
+│   ├── pilot-bench/         # Cross-language nanosecond benchmark suite
+│   └── pilot-cli/           # Unified `pilot` toolchain binary
+├── stdlib/
+│   ├── core/                # 4-Stage Self-Genesis (`core.pilot`, `operator.pilot`, `builtins.pilot`, `mem.pilot`, `meta.pilot`)
+│   └── ...                  # 40 standard library modules (`collections`, `math`, `io`, `net`, `http`, `crypto`, `json`, etc.)
+├── selfhost/                # Self-hosted Pilot compiler (`lexer`, `parser`, `analyzer`, `emitter`, `pilotc.pilot`)
+├── tools/pilot-kernel/      # Jupyter Notebook kernel (`pilot_kernel`)
+├── tests/                   # 38 end-to-end integration suites & 6 multi-backend differential suites
+├── examples/showcase/       # 34 interactive concept showcases
+└── vscode-pilot/            # Visual Studio Code extension with native LSP & DAP integration
 ```
 
----
+# Build, Verification & CLI Summary
 
-## Getting Started & Installation
-
-### Prerequisites
-- [Rust 1.80+](https://rustup.rs/) (Cargo toolchain)
-- Optional: C/C++ compiler (`clang` or `gcc`) for Native AOT and LLVM IR compilation
-
-### Build & Verification
-```bash
-# Clone the repository
-git clone https://github.com/pilot-lang/pilot.git
-cd Pilot
-
-# Build release binaries (pilot and pilot-lsp)
+```Bash
+# Build release binaries (`pilot`, `pilot-lsp`, `pilot-dap`)
 cargo build --release
 
-# Run all crate unit and integration test suites
-cargo test --all
+# Run all workspace unit tests & phase verification gates
+cargo test --workspace
 
-# Precompile all 40 standard library modules to optimized .pilc v3 bytecode
-cargo run --bin pilot -- compile --stdlib
+# Precompile `stdlib/` into content-addressed `.pilc` v3 bytecode cache
+pilot compile --stdlib
 
-# Run all 36 end-to-end language test suites
-cargo run --bin pilot -- test
+# Run all 38 integration suites & multi-backend differential verification
+pilot test
+pilot test --differential
 
-# Run multi-backend differential semantic verification
-cargo run --bin pilot -- test --differential
-```
+# Native AOT, LLVM IR, C11/C23, WASM & Multi-Vendor GPU compilation
+pilot build app.pilot --target=native|llvm|c|wasm|gpu [-O3] [--burst]
+pilot build kernel.pilot --gpu --gpu-backend=cuda|rocm|vulkan|wgpu
 
-### CLI Command Summary
-```bash
-pilot run <file> [args...]                    # Execute a Pilot program or .pilc binary directly via PilVM v3
-pilot <file> [args...]                        # Shorthand direct execution of .pilot source or .pilc binary
-pilot compile <file> [options]                # Compile Pilot source to optimized .pilc v3 binary
-  -o, --output <file>                         # Set output .pilc binary path (default: <stem>.pilc)
-pilot compile --stdlib                        # Precompile 40 standard library modules into stdlib/.pilc-cache/
-pilot build <file> [options]                  # Compile to native AOT binary, LLVM IR, C, WASM, or GPU
-  --target=native|llvm|c|wasm|gpu             # Select compilation backend (default: native)
-  --burst                                     # Enable Burst SIMD vectorization pass
-  --gpu --gpu-backend=cuda|rocm|vulkan|wgpu   # Multi-approach GPU kernel generation (NVIDIA & AMD)
-  -o, --output <file>                         # Set output binary path
-  -O0 | -O2 | -O3                             # Optimization level
-pilot check <file>                            # Zero-allocation syntax and semantic analysis
-pilot fmt <file>                              # Format source files according to style invariants
-pilot test [filter] [--diff]                  # Discover and run unit, integration, or differential suites
-pilot repl                                    # Start interactive Pilot Read-Eval-Print Loop
-pilot pkg <subcommand>                        # Universal Package Manager & SPDX license verifier
-pilot venv <subcommand>                       # Manage isolated Pilot virtual environments
-pilot debug [--dap]                           # Launch debug adapter or interactive debugger
-pilot lsp                                     # Native Language Server Protocol (LSP) service
-pilot perf <subcommand>                       # Performance profiling, WCET, & CST auto-optimizer
-pilot bench                                   # Hardware throughput & cross-language comparative benchmark
-pilot --emit <lang> <file> [-o <out>]         # Transpile Pilot to C, C++, C#, Rust, Python, JS, or Lua
-pilot --from <lang> <file> [-o <out.pilot>]   # Ingest foreign source code into canonical Pilot syntax
-```
-
----
-
-## Universal Package Manager (`pilot pkg`)
-
-Pilot includes a complete, production-grade package manager capable of managing native Pilot packages and **adopting packages from foreign ecosystems**.
-
-### Native Pilot Packages
-Initialize a new project:
-```bash
-pilot pkg init my-awesome-app
-```
-This generates a `pilot.json` manifest:
-```json
-{
-  "name": "my-awesome-app",
-  "version": "0.1.0",
-  "description": "Package my-awesome-app created with Pilot package manager.",
-  "main": "main.pilot",
-  "dependencies": {},
-  "interopDependencies": {
-    "nuget": {},
-    "npm": {},
-    "pip": {},
-    "cargo": {},
-    "maven": {},
-    "luarocks": {}
-  }
-}
-```
-
-Add a native Pilot dependency:
-```bash
-pilot pkg add pilot-http@1.2.0
-```
-
-### Adopting Interop Packages
-Pilot allows you to adopt packages from foreign package managers directly into your Pilot project:
-
-```bash
-# Adopt a .NET NuGet package
-pilot pkg add nuget:Newtonsoft.Json@13.0.3
-
-# Adopt a JavaScript npm package
-pilot pkg add npm:lodash@4.17.21
-
-# Adopt a Python PyPI package
-pilot pkg add pip:requests@2.31.0
-
-# Adopt a Rust Cargo crate
-pilot pkg add cargo:serde@1.0
-
-# Adopt a Java Maven artifact
-pilot pkg add maven:org.json:json@20231013
-
-# Adopt a Lua LuaRocks module
-pilot pkg add luarocks:luasocket@3.0
-```
-
-### Packaging CLI Reference
-
-| Command | Description |
-| :--- | :--- |
-| `pilot pkg init [name]` | Creates a new `pilot.json` manifest in the current directory |
-| `pilot pkg add <pkgSpec>` | Adds a native or interop dependency (`[ecosystem:]package[@version]`) |
-| `pilot pkg install` / `restore` | Restores all declared dependencies and writes `pilot.lock.json` |
-| `pilot pkg remove <pkgSpec>` | Removes a dependency from `pilot.json` and lockfile |
-| `pilot pkg list` | Lists all installed native and adopted interop dependencies |
-| `pilot pkg pack [out.pilpkg]` | Bundles the project into a distributable `.pilpkg` archive |
-
----
-
-## Virtual Environment System (`pilot venv`)
-
-Pilot includes a complete, production-ready virtual environment system that isolates runtime environments, installed native modules, and foreign dependencies across projects.
-
-### Environment Layout
-
-When created, a Pilot virtual environment initializes a deterministic, self-contained filesystem layout:
-
-```
-myenv/
-├── pilotvenv.cfg              # Key-value environment configuration
-├── Scripts/                   # (bin/ on Unix/Linux/macOS)
-│   ├── activate.ps1           # PowerShell activation script
-│   ├── activate.bat           # Windows Command Prompt activation script
-│   ├── deactivate.bat         # Windows Command Prompt deactivation script
-│   ├── activate               # POSIX Bash/Zsh activation script
-│   └── pilot.cmd / pilot      # Isolated binary launcher
-├── lib/
-│   └── .pilot_modules/        # Sandboxed module directory
-│       ├── pilot/             # Native Pilot packages
-│       ├── nuget/             # Adopted NuGet packages
-│       ├── npm/               # Adopted npm packages
-│       ├── pip/               # Adopted Python wheels
-│       ├── cargo/             # Adopted Cargo crates
-│       ├── maven/             # Adopted Java JARs
-│       └── luarocks/          # Adopted Lua modules
-└── include/                   # C/C++ header stubs for native extensions
-```
-
-### Creating and Activating Environments
-
-**Create a virtual environment:**
-```bash
-# Basic creation in .venv
+# Lossless CST formatting, profiling, packaging & virtual environments
+pilot fmt <path>
+pilot perf profile|analyze|optimize <file.pilot>
+pilot pkg init|add|install|pack
 pilot venv create .venv
 
-# Custom prompt name and include system-wide packages
-pilot venv create /path/to/myenv --prompt dev-sandbox --system-site-packages
-```
-
-**Activate your environment:**
-```powershell
-# PowerShell
-& .venv\Scripts\activate.ps1
-
-# Windows CMD
-.venv\Scripts\activate.bat
-
-# Linux / macOS (POSIX)
-source .venv/bin/activate
-```
-
-Once activated, your terminal prompt is prefixed with `(myenv)` and any `pilot pkg install` or `pilot pkg add` automatically targets the isolated `.venv/lib/.pilot_modules/` location.
-
-**Deactivate:**
-```bash
-deactivate
-```
-
-### Virtual Environment CLI Reference
-
-| Command | Description |
-| :--- | :--- |
-| `pilot venv create <path> [--prompt <name>] [--system-site-packages]` | Creates a new virtual environment at the specified directory |
-| `pilot venv info [path]` | Inspects the currently active or detected virtual environment configuration |
-
-### Automatic Dependency Sandboxing
-
-When a virtual environment is active (detected via `PILOT_VENV` or `VIRTUAL_ENV`), the Pilot Universal Package Manager (`pilot pkg`) automatically switches its module resolution root to:
-```
-<venv_path>/lib/.pilot_modules
-```
-This guarantees that projects running different versions of native packages, NuGet assemblies, npm packages, or Python libraries do not conflict or contaminate system directories.
-
-### Programmatic Runtime API
-
-Pilot provides first-class language bindings to manage and query virtual environments directly within Pilot code:
-
-```pilot
-import venv # or virtual_environment
-
-# Query activation status
-let active = venv.is_active();
-print("Is active: " + active);
-
-# Query current environment root path
-let env_path = venv.active_path();
-print("Active venv path: " + env_path);
-
-# Create a virtual environment programmatically
-venv.create("./.custom_venv", "my-script-env");
-
-# Programmatically activate or deactivate in-process
-venv.activate("./.custom_venv");
-print("Now running inside: " + venv.active_path());
-
-venv.deactivate();
-```
-
----
-
-## Language Features & Syntax Reference
-
-### 1. Type Safety, Variables & Control Flow
-
-```pilot
-let greeting : str = "Hello, Pilot!";
-var counter : int = 0;
-const MAX_LIMIT = 1000;
-
-for i in 0..5:
-    counter += i;
-
-if counter > 5:
-    println("Counter exceeded 5: " + str(counter));
-```
-
-### 2. Preconditions & Cleanup (`guard` and `defer`)
-
-`guard` enforces early-exit preconditions, while `defer` guarantees LIFO cleanup execution:
-
-```pilot
-def process_file(path: str):
-    guard path.length > 0 else:
-        return "invalid_path";
-
-    println("Opening file: " + path);
-    defer println("Closing file resource.");
-    defer println("Flushing pending buffers.");
-
-    return "processed";
-```
-
-### 3. Type Adapters, Argument Adaptation & Repeated Calls
-
-Pilot allows passing a different type into a signature when possible, adapting arguments or unrolling collections into repeated individual calls:
-
-```pilot
-let myarr = [];
-let myitems : list = [1, 2, 3, 4, 5];
-
-# Option 1: 'each' argument modifier
-myarr.append(each myitems);
-
-# Option 2: Collection spread '..' inline
-myarr.append(..myitems);
-
-# Option 3: Broadcast operator '*'
-myarr.append*(myitems);
-
-# Option 4: Scoped 'with auto_repeat' block
-with auto_repeat:
-    myarr.append(myitems);
-
-# Repeated calls on functions returning values collects results into a list:
-def square(x: int): return x * x;
-let squares = square(each [1, 2, 3]); # -> [1, 4, 9]
-
-# Language-level Type Adapters
-adapter str -> int:
-    return int(self);
-
-def calc(x: int): return x * 10;
-let val = calc("42"); # Automatically adapts "42" -> 42 -> 420
-```
-
-### 4. Advanced Method Groups & Dispatch
-
-Method groups provide unified dispatch over function overloads:
-
-```pilot
-# Overloaded method group
-def process(data: int): return data * 2;
-def process(data: str): return data.to_upper();
-def process(data: list): return data.length;
-
-# 1. Switchboard Auto-Routing over heterogeneous collections:
-let mixed = [42, "hello", [1, 2, 3], 99];
-let routed = mixed.map(process); # [84, "HELLO", 3, 198]
-
-# 2. Currying (The Signature Sieve):
-def draw(shape: Circle, color: Color): ...
-def draw(shape: Square, color: Color): ...
-def draw(shape: Triangle, angle: float): ...
-
-const draw_red = draw(color=Color.RED); # Narrowed group of (Circle) and (Square)
-
-# 3. Group Fallback & Union (|):
-const serialize_any = Json.serialize | Xml.serialize;
-serialize_any(my_object);
-
-# 4. Multi-Cast Execution (*):
-on_event*(PlayerJoined("Isaac")); # Invokes all matching event overloads
-```
-
-### 5. Algebraic Class Composition & Typestates
-
-```pilot
-class BaseUser:
-    let id = 1;
-
-class AdminPrivileges:
-    def ban(self, uid) { return "banned"; }
-
-class BillingModule:
-    def pay(self, amount) { return "paid"; }
-
-# Set Algebra on classes:
-class Admin = BaseUser | AdminPrivileges;      # Union
-class FreeUser = BaseUser - BillingModule;      # Subtraction
-class Common = AdminPrivileges & BillingModule; # Intersection
-
-# Typestate Classes (Morphing Types):
-class Connection:
-    state Disconnected:
-        def connect(self) -> Self[Connected]: ...
-    state Connected:
-        def send(self, data): ...
-        def close(self) -> Self[Disconnected]: ...
-
-let conn = Connection();
-let active = conn.connect();
-active.send("payload");
-```
-
-### 6. Structural Projection & Scoped Lexical Extensions
-
-```pilot
-# Structural Projection (->)
-class Employee:
-    let name = "Isaac";
-    let department = "Engineering";
-    let salary = 120000;
-
-let dto = employee -> { name, department };
-# dto is: { "name": "Isaac", "department": "Engineering" }
-
-# Scoped Lexical Extensions (Monkey Patching with Scope Safety)
-extension StringHelpers on str:
-    def double(self): return self + self;
-
-with extension StringHelpers:
-    println("hi".double()); # "hihi"
-# Outside the block, 'double' is not present on str
-```
-
-### 7. Contextual Parameters (Native Dependency Injection)
-
-Contextual parameters are implicitly propagated downstream without boilerplate passing:
-
-```pilot
-def save_user(user, context db: Database):
-    db.execute("INSERT", user);
-
-def register_user(payload, context db: Database):
-    save_user(payload["username"]); # db implicitly forwarded
-
-with context db = Database("postgresql://localhost:5432"):
-    register_user({ "username": "Isaac" });
-```
-
-### 8. Design-by-Contract (`requires` and `ensures`)
-
-```pilot
-def transfer(amount: float, source: Account, dest: Account)
-    requires amount > 0
-    requires source.balance >= amount
-    ensures source.balance == old(source.balance) - amount:
-
-    source.deduct(amount);
-    dest.add(amount);
-```
-
-### 9. Exhaustive Pattern Matching Assignments
-
-```pilot
-# Record pattern matching destructuring
-{ "id": userId, "metadata": { "role": role } } = fetch_user_record();
-
-# List pattern matching with slice rest spread
-[head, ..tail] = [10, 20, 30, 40];
-```
-
-### 10. Relational & In-Memory Database Set Operations
-
-```pilot
-database InMemoryStore:
-    table users (id int primary key, name str, active bool);
-
-# LINQ-style query with grouping and ordering
-let activeAdmins = from u in users
-                   where u.active == true
-                   order by u.name ascending
-                   select u.name;
-
-# Postgres SQL operations
-transaction:
-    insert into users values (1, "Isaac", true)
-    on conflict do nothing;
-    savepoint sp1;
-    commit;
-```
-
-### 11. Concurrency, Channels & Actors
-
-```pilot
-actor Worker:
-    def handle(self, task):
-        return "completed:" + task;
-
-let ch = channel(10);
-spawn:
-    ch <- "message";
-
-select:
-    case msg = <-ch:
-        println("Received: " + msg);
-    timeout 500ms:
-        println("Timed out waiting for channel.");
-```
-
-### 12. Real-Time Determinism & Units of Measure
-
-```pilot
-# Dimensional units of measure
-let dist = 100 [m];
-let duration = 9.58 [s];
-let speed = dist / duration; # speed has dimensional unit [m/s]
-
-# Real-time execution budgets
-@hard_realtime
-@wcet(50us)
-def telemetry_tick():
-    noalloc:
-        # Guarantee zero GC allocation within bounded cycle
-        pass;
-```
-
-### 13. Metaprogramming, Macros & AST Generative Classes
-
-```pilot
-# Compile-time AST macro
-macro log_expr(expr):
-    quote:
-        println("Result of expression is: " + str(expr));
-
-# Generative Class Blocks
-class DatabaseModel:
-    generate:
-        for field in ["id", "username", "created_at"]:
-            inject_field(field);
-```
-
----
-
-## Polyglot Interoperability & Multi-Language Transpilation
-
-Pilot provides both direct inline polyglot blocks and high-fidelity bidirectional source transpilation across 7 major programming languages.
-
-### 1. Inline Polyglot Blocks
-
-Execute code from foreign language engines within the same Pilot process with zero-copy shared memory:
-
-```pilot
-# 1. SQL with Structured Row Objects
-let users = postgresql {
-    select id, name, count(*) from accounts where id in (1, 2, 3);
-}
-for u in users:
-    println(u.name);
-
-# 2. Python Interop with Variable Sharing & Yielding
-let myVariable = "Hello from Pilot!";
-python {
-    print(myVariable)
-}
-
-# 3. Inline JavaScript, C, C++, Lua, and Assembly
-let jsVal = js {
-    let x = 10;
-    return x * 4;
-}
-
-let luaVal = lua {
-    return 100
-}
-
-let asmVal = asm {
-    mov eax, 42
-}
-```
-
-### 2. Multi-Language Transpilation (`pilot --emit` & `--from`)
-
-Pilot features a production bidirectional transpiler engine (`pilot-transpile`) supporting **6 verified native compilation targets** plus Lua:
-
-| Target Language | Transpiler Flag | Native Compiler / Runtime Verified | Output Characteristics |
-| :--- | :--- | :--- | :--- |
-| **Python** | `--emit python` | Python 3.10+ (CPython, PyPy) | Idiomatic classes, dataclasses, duck typing, clean syntax |
-| **JavaScript** | `--emit js` | Node.js 18+, Bun, Deno, Modern Browsers | Modern ES2022+, classes, arrow functions, strict mode |
-| **C#** | `--emit csharp` | .NET 8.0+ / C# 12 (`dotnet build`, Roslyn) | Strongly typed records, properties, LINQ methods, namespaces |
-| **C++** | `--emit cpp` | GCC 13+, Clang 17+ (`-std=c++20`) | Fast structs, STL containers (`std::vector`, `std::string`), RAII |
-| **C** | `--emit c` | GCC, Clang, MSVC (`-std=c11` / `-std=c23`) | C-ABI compatible structs, explicit function pointer dispatch |
-| **Rust** | `--emit rust` | `rustc` 1.80+ / Cargo 2021 edition | Ownership-safe structs, match expressions, zero-cost abstractions |
-| **Lua** | `--emit lua` | Lua 5.4, LuaJIT 2.1 | Fast metatables, closures, single-file scripts |
-
-#### Transpilation CLI Usage
-```bash
-# Transpile Pilot source to idiomatic Python
-pilot --emit python app.pilot -o app.py
-
-# Transpile Pilot source to modern ES2022 JavaScript
-pilot --emit js app.pilot -o app.js
-
-# Transpile Pilot source to strongly typed C# (.NET 8)
-pilot --emit csharp app.pilot -o App.cs
-
-# Transpile Pilot source to ISO C++20
-pilot --emit cpp app.pilot -o app.cpp
-
-# Transpile Pilot source to ISO C11/C23
-pilot --emit c app.pilot -o app.c
-
-# Transpile Pilot source to safe idiomatic Rust
+# Bidirectional transpilation (`c`, `cpp`, `csharp`, `rust`, `python`, `js`, `lua`)
 pilot --emit rust app.pilot -o app.rs
-
-# Ingest foreign code into clean, canonical Pilot syntax
-pilot --from rust --strict-pilot input.rs -o output.pilot
-pilot --from python --strict-pilot math_ops.py -o math_ops.pilot
+pilot --from python --strict-pilot --viable-license-only lib.py -o lib.pilot
 ```
-
----
-
-## Standard Library & Precompiled Modules (`stdlib/`)
-
-Pilot ships with **40 foundational standard library modules** located in `stdlib/`, providing zero-dependency, type-safe primitives across system programming, networking, data science, and concurrency:
-
-| Domain | Modules | Key Functionality |
-| :--- | :--- | :--- |
-| **Core & Memory** | `std.core`, `std.option`, `std.result`, `std.mem`, `std.meta` | `Option[T]`, `Result[T, E]`, manual bump regions, type metadata reflection |
-| **Collections & Iteration** | `std.collections`, `std.itertools`, `std.text` | `Counter`, `defaultdict`, `OrderedDict`, `deque`, `chain`, `groupby`, `product`, `combinations` |
-| **Mathematics & Random** | `std.math`, `std.random`, `std.decimal` | High-precision transcendental math (`sqrt`, `sin`, `exp`, `ln`), PRNG, fixed-point decimal |
-| **I/O & File System** | `std.io`, `std.fs`, `std.path`, `std.pathlib`, `std.shutil` | Stream I/O, POSIX/Windows filesystem operations, OO path manipulation, directory trees |
-| **Operating System & Sys** | `std.os`, `std.sys` | Process environment, architecture flags, argv parsing, exit codes, platform detection |
-| **Functional Programming** | `std.functools` | `partial`, `reduce`, `lru_cache`, `singledispatch`, `cmp_to_key` |
-| **Serialization & Formats** | `std.json`, `std.csv`, `std.pickle`, `std.tomllib`, `std.encoding`, `std.formats` | JSON RFC 8259 parser, CSV tabular readers, TOML parsing, UTF-8/Hex/Base64 encodings |
-| **Concurrency & Async** | `std.threading`, `std.multiprocessing`, `std.asyncio` | Thread pools, OS process spawning, async/await event loops, tasks, and futures |
-| **Networking & HTTP** | `std.socket`, `std.urllib`, `std.http`, `std.request` | TCP/UDP sockets, URL parsing, HTTP/1.1 client with connection reuse, REST requests |
-| **Data Science & Numerical** | `std.numpy`, `std.pandas`, `std.matplotlib`, `std.scikit` | N-dimensional arrays, Series, DataFrames, plotting pipelines, regression/classification |
-| **Testing & Diagnostics** | `std.unittest`, `std.logging`, `std.timeit` | Test suites, structured loggers, nanosecond benchmark harnesses |
-| **Security & Crypto** | `std.secrets`, `std.crypto`, `std.time` | Cryptographic random tokens, SHA-256, BLAKE3, Ed25519, high-resolution monotonic clocks |
-
-All standard library modules can be imported directly:
-```pilot
-import std.collections
-import std.math
-import std.json
-
-let counts = std.collections.Counter(["apple", "banana", "apple", "orange"])
-println(counts.most_common(1))
-```
-
----
-
-## Compilation & Scripting Runtime
-
-Pilot functions as both a zero-overhead scripting engine and an ahead-of-time precompiler with native linkable runtime artifacts:
-
-### 1. Scripting Mode (Direct Execution)
-Run `.pilot` source files directly via the 32-bit register bytecode virtual machine (`pilot-vm`):
-```bash
-pilot my_script.pilot
-# or explicitly:
-pilot run my_script.pilot
-```
-
-### 2. Ahead-Of-Time Precompilation (`.pilc` v3 Bytecode)
-Compile `.pilot` source files into optimized, zero-deserialization `.pilc` v3 binary bytecode:
-```bash
-pilot compile my_script.pilot -o my_script.pilc
-```
-The `.pilc` v3 specification guarantees instantaneous startup and cross-process safety:
-- **Magic Header**: 6-byte identifier `PILC\x03\x00` enforcing format version compatibility.
-- **Tagged Constant Pool**: Directly encodes 64-bit integers, IEEE-754 floats, booleans, and small-string-optimized (SSO) values.
-- **Heap String Table**: Rehydrates heap-allocated UTF-8 string constants into process memory without raw-pointer dereference issues.
-- **32-Bit Register Instructions**: Aligned 12-byte instruction stream with register allocation and jump-target validation.
-
-### 3. Standard Library Precompilation (`pilot compile --stdlib`)
-Precompile all 40 standard library modules into the content-addressable cache:
-```bash
-pilot compile --stdlib
-```
-This generates precompiled binaries in `stdlib/.pilc-cache/` with dual naming:
-- Canonical filenames: `stdlib/.pilc-cache/std.<module>.pilc`
-- SHA-256 content-addressable hashes: `stdlib/.pilc-cache/std.<module>_<sha256>.pilc`
-
-### 4. Direct Execution of Precompiled Bytecode
-Execute precompiled `.pilc` binaries with sub-millisecond cold start times ($< 0.2\text{ ms}$):
-```bash
-pilot my_script.pilc
-# or explicitly:
-pilot run my_script.pilc
-```
-
-### 5. Linkable Native C-ABI Runtime Libraries
-`pilot-rt` compiles into standalone static and shared C-ABI libraries that can be embedded into C, C++, or Rust applications:
-- **`libpilot_rt.a`**: High-performance static library (compiled with Fat LTO, `opt-level=3`, and SIMD acceleration).
-- **`libpilot_rt.so`**: Lightweight dynamic shared library (383 KB).
-- **`libpilot_ffi.so`**: Stable FFI bridge for polyglot language integration.
-- **`pilot_runtime.h`**: Clean C99/C11 header declaring memory regions (`pilot_rt_region_*`), Perceus linear ARC (`pilot_rt_alloc_arc`, `pilot_rt_dup`, `pilot_rt_drop`, `pilot_rt_drop_reuse`), high-precision timers, and cryptographic hashing.
-
-```c
-#include "pilot_runtime.h"
-
-int main() {
-    // Enter a high-speed Tier 1 bump allocation region
-    void* region = pilot_rt_region_enter();
-    void* memory = pilot_rt_region_alloc(region, 1024, 16);
-    
-    // Tier 2 Perceus linear ARC
-    void* boxed = pilot_rt_alloc_arc(256);
-    void* ref = pilot_rt_dup(boxed);
-    pilot_rt_drop(ref);
-    pilot_rt_drop(boxed);
-
-    pilot_rt_region_exit(region);
-    return 0;
-}
-```
-
----
-
-## Interactive Debugger & REPL
-
-Pilot features a complete interactive command-line debugger with source tracking and breakpoint control:
-
-```bash
-pilot debug my_script.pilot
-```
-
-Debugger Commands:
-- `b <line>`: Set breakpoint at line
-- `c` / `continue`: Continue execution
-- `n` / `step`: Step over to next statement
-- `s` / `stepin`: Step into function
-- `o` / `stepout`: Step out of function
-- `l` / `locals`: Inspect local variables in current stack frame
-- `bt` / `stack`: Print full call stack trace
-- `q` / `quit`: Terminate debugger
-
-Interactive REPL:
-```bash
-pilot repl
-```
-
----
-
-## Language Server Protocol (LSP) & Tooling
-
-Pilot includes a standalone, zero-GC native JSON-RPC 2.0 Language Server communicating over standard I/O:
-
-```bash
-pilot lsp
-# or directly via binary:
-pilot-lsp
-```
-
-Features:
-- **23-Type Semantic Tokens Provider**: High-fidelity semantic highlighting with modifier bitmasks (`declaration`, `definition`, `readonly`, `static`, `defaultLibrary`).
-- **Interactive Hover & Signature Help**: Type hints, docstrings, and active parameter indexing for built-in, polyglot, and user-defined functions.
-- **Incremental CST & Early Cutoff Synchronization**: Sub-millisecond Salsa-style query recomputation (`pilot-incremental` and `pilot-db`).
-- **VS Code Extension**: Located in `vscode-pilot/` with full Language Server Protocol (LSP) and Debug Adapter Protocol (DAP) integration.
-
----
-
-## Running the Test Suites
-
-Pilot is validated through unit test suites across all 24 crates, 36 end-to-end language integration test suites, and multi-backend differential verification:
-
-```bash
-# Run all crate unit & integration tests
-cargo test --all
-
-# Run all 36 language integration test suites
-pilot test
-
-# Run multi-backend differential semantic verification (PilVM vs Native AOT vs LLVM vs WASM)
-pilot test --differential
-```
-
----
-
-## Step-by-Step Architecture Guide
-
-```mermaid
-flowchart TD
-    Source[".pilot Source File / Code String"] --> Lexer["pilot-lexer\n(Zero-Alloc SIMD Lexer)"]
-    Lexer --> Parser["pilot-parser\n(Pratt & Recursive Descent)"]
-    Parser --> CST["pilot-syntax\n(Rowan Lossless CST)"]
-    Parser --> AST["pilot-ast\n(16-Byte Flat AstArena)"]
-    
-    AST --> Analysis["pilot-analysis\n(HM Type Inference, Contracts & Exhaustiveness)"]
-    AST --> Perceus["pilot-perceus\n(Zero-GC Reference Counting & Reuse)"]
-    
-    Analysis --> ModeCheck{"Execution Backend"}
-    
-    ModeCheck -->|PilVM v3 Bytecode| VM["pilot-vm\n(32-Bit Register Bytecode VM)"]
-    ModeCheck -->|Native AOT| CCodeGen["pilot-codegen (C11/C23 Native Driver)"]
-    ModeCheck -->|LLVM IR| LLVM["pilot-codegen (LLVM IR Direct Emitter)"]
-    ModeCheck -->|WebAssembly| WASM["pilot-codegen (WASM + WASI)"]
-    ModeCheck -->|GPU Kernels| GPU["pilot-codegen (CUDA, ROCm, Vulkan, WGSL)"]
-    ModeCheck -->|Transpilation| Transpile["pilot-transpile (C, C++, C#, Rust, Python, JS, Lua)"]
-    
-    Source --> Incremental["pilot-incremental & pilot-db\n(Salsa Early-Cutoff Engine)"]
-    Incremental --> LSP["pilot-lsp\n(23-Type Semantic Tokens & Hover)"]
-    AST --> DAP["pilot-dap\n(Debug Adapter Protocol Server)"]
-```
-
-1. **Zero-Allocation Lexing (`pilot-lexer`)**:
-   Transforms UTF-8 source characters into SIMD-accelerated token streams with string-interning and zero heap allocations.
-2. **Predictive Parsing & Lossless CST (`pilot-parser` & `pilot-syntax`)**:
-   Constructs a Rowan-style lossless Concrete Syntax Tree (`GreenNode`) and simultaneously lowers into cache-packed 16-byte `AstNode` entries in `AstArena`.
-3. **Static Analysis & Type Inference (`pilot-analysis`)**:
-   Performs bidirectional Hindley-Milner type inference, pattern exhaustiveness checking, Design-by-Contract verification, and static `@comptime` demotion.
-4. **Perceus Linear Reference Counting (`pilot-perceus`)**:
-   Inserts compile-time drop specializations and in-place buffer reuses, guaranteeing zero-GC pauses and real-time determinism.
-5. **Multi-Backend Code Generation (`pilot-codegen` & `pilot-vm`)**:
-   Executes directly in the 32-bit register `PilVirtualMachine`, or compiles to Native AOT binaries (Clang/GCC), LLVM IR, WebAssembly (WASI), or GPU compute shaders (CUDA/HIP/Vulkan/WGSL).
-6. **Polyglot Execution (`pilot-polyglot`)**:
-   Bridges foreign execution blocks (`python`, `js`, `lua`, `c`, `cpp`, `java`, `asm`, `sql`) with zero-marshalling shared-memory `SliceBuffer<T>`.
-7. **IDE Services (`pilot-lsp` & `pilot-dap`)**:
-   Provides incremental LSP diagnostics, semantic highlighting, hover cards, code formatting, and DAP interactive debugging.
-8. **Package Resolution (`pilot-pkg`)**:
-   Loads native Pilot modules and adopted interop dependencies from `.pilot_modules/` or system feeds based on `pilot.json` and `pilot.lock.json`.
-9. **Linkable C-ABI Runtime & Standard Library (`pilot-rt`)**:
-   Provides high-performance native runtime intrinsics, memory management (`libpilot_rt.a`, `libpilot_rt.so`, `pilot_runtime.h`), and 40 precompiled standard library modules with content-addressable caching (`stdlib/.pilc-cache/`).

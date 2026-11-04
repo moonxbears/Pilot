@@ -1,227 +1,96 @@
-# AGENTS.md — Pilot Language AI Coding Guidelines
+# AGENTS.md — Pilot Language AI Coding & Architecture Guidelines
 
-## 1. Implementation Integrity (Zero Shortcuts)
-- **No Hardcoded Answers:** Never return static, pre-computed, or dataset-specific values to make a test pass. Implement the complete underlying algorithm.
-- **No Elided Logic:** Do not use `# TODO`, `pass`, `...`, `unimplemented!()`, or placeholder comments. Every generated function, branch, and edge case must be fully realized.
-- **No Silent Fallbacks:** Do not swallow errors or return dummy default values on failure. Handle all states explicitly.
-- **Pilot Code Over Others:** When there are no performance disadvantages to implementing code in Pilot over other languages (including the underlying Rust engine), implement the code in Pilot. If the code can be made into a useful library, package it in the stdlib.
+## 1. Implementation Integrity & Self-Hosting Ideology
+- **Zero Shortcuts:** Never return static, pre-computed, or dataset-specific values to make a test pass. Implement the complete underlying algorithm. No assumptions should be made of elements between pilot and Rust that is not strictly rust engine seeded keywords.
+- **No Elided Logic or Silent Fallbacks:** Never leave `// TODO`, `unimplemented!()`, or stubbed branches. Handle all states explicitly via `result<T, E>` (`T ! E`) or `option<T>` (`T?`).
+- **Pilot First (Self-Hosted Core):** The Rust workspace (`crates/pilot-*`) is a minimal zero-GC hardware/CFG/SSA/Perceus engine with **strictly 14 seed keywords** (`__engine`, `struct`, `interface`, `fn`, `let`, `ref`, `if`, `loop`, `return`, `yield`, `defer`, `comptime`, `quote`, `asm`). Whenever logic can be written in Pilot without performance loss, implement it in `stdlib/core/*.pilot`, `stdlib/*`, or `selfhost/*.pilot`.
+- **Hardware Arena & Register Invariants:**
+  - `AstNode` is strictly `16 bytes` (`Copy`, 4 nodes per 64-byte L1 cache line) indexed by 32-bit `NodeId` handles inside `AstArena` (zero heap pointer graphs).
+  - `PilotVal` is strictly `16 bytes` (`Copy`) with 14-byte inline Small-String Optimization (SSO), niche-unboxed `option<T>` (`T?`), and register-returned `result<T, E>` (`T ! E`).
 
-## 2. Type System & Constrained Generics
-- **Ban Untyped Containers:** Never use `Object`, `Any`, `void*`, or untyped dictionaries to bypass the type checker.
-- **Prefer Constrained Generics:** Use parametric polymorphism bounded by explicit structural or trait constraints so monomorphization and static dispatch remain intact. Preserve `sizeof(T)` byte-width invariants and zero-cost monomorphization across all operator and interface bounds.
+---
 
-```pilot
-// BAD: Type erasure and runtime casting
-def process_nodes(items: [Object]) -> Object {
-    return items[0]
-}
+## 2. Canonical Syntax Rules ("One Keyword Per Responsibility")
+1. **Functions & Closures:** Use `fn` (never `def`) and C#-style `(x) => expr` or `(x, y) => { return x + y; }` (never `lambda`).
+2. **Blocks & Terminators:** Use `{ ... }` for blocks and `=> expr;` for inline bodies (never Pythonic `:` indentation blocks). End all statements with `;`.
+3. **Colon (`:`) Responsibility:** Restricted strictly to type annotations (`x: i64`), inheritance (`: IComparable<i64>, IValue`), `switch` arms (`case 1:`), stepped ranges (`0 .. 10 : 2`), `:ns/kw` keywords, and C++-style distributive header labels (`pub:`, `priv:`, `pub static pure:`).
+4. **String Interpolation vs. AST Splicing:** Use `f"hello {x}"` for string interpolation (never `$"..."`). Reserve `$` strictly for homoiconic `quote { $node }` AST splicing.
+5. **Generics (`<T>`) vs. Square Brackets (`[]`):**
+   - Use `<T>` for all generic type parameters (`slice<T>`, `List<i32>`, `map<str, i64>`). Never use `Type[T]` for generics.
+   - `[...]` has 4 unambiguous roles by position:
+     1. **Declaration Prefix (`[Attr1, Attr2]`):** Compile-time/reactive attribute pipeline (replaces `@` decorators).
+     2. **Type Suffix (`T[]`, `T[N]`, `T[..]`):** Lowers to `slice<T>`, `array<T, N>`, and `stride<T>`.
+     3. **Expression Primary (`[1, 2, 3,]`):** Target-typed collection or `[k: v,]` map literal.
+     4. **Expression Postfix (`arr[i]`):** Index or sub-slice operation (`IIndexGet` / `IIndexSet`) or dimensional unit literal (`100[m]`).
+6. **Collection-Only Optional Trailing Commas:**
+   - **Allowed (Optional):** Collection literals (`[1, 2, 3,]`), tuple/struct initializers (`(1, 2,)`, `Vec3 { x: 1, y: 2, }`), `enum` variants, and distributive binding blocks (`let List<i32> { a = [1, 2,], b = [3, 4,], };`).
+   - **Disallowed:** Attribute lists `[Attr1, Attr2]`, function parameters/arguments `fn(a: i32, b: i32)`, generic parameters `<T, U>`, and `: IInterface` inheritance lists.
+7. **Mutability (`var` Only) & Pattern Branching (`switch` Only):**
+   - Use `let` for immutable bindings and `var` for mutable bindings (`var x = 0;`, `var ref<T>`, `var fn` — never `mut`).
+   - Use `switch` (never `match`).
+8. **Comments:** Use `//` and `/* ... */` (never `#` comments; `#` at line start is reserved strictly for preprocessor directives `#if`, `#define`, `#region`, `#pragma`).
+9. **Distributive Header Grouping (`Header:` & `Header { ... }`):**
+   - Section labels (`pub:`, `priv:`, `pub static pure:`) apply to subsequent declarations in the current `{ ... }` block.
+   - Block prefixes (`let List<i32> { myarr1 = [1, 2, 3], myarr2 = [4, 5, 6,], };`, `var Vec3<f64> { ... };`, `pub partial struct { ... }`, `pub interface { ... }`) distribute modifiers and types across every inner item.
 
-// GOOD: Constrained generic preserving static dispatch
-def process_nodes[T: AstNode + Serializable](items: Slice[T]) -> Result[T, ParseError] {
-    if len(items) == 0 {
-        return Err(ParseError.EmptyInput)
-    }
-    return Ok(items[0])
-}
-```
+---
 
-## 3. Disambiguation, Lexing & Method Call Rules
+## 3. Naming Taxonomy & The 2-Bit Hardware Type Lattice
+Every type originates from `IAnyValue` (0 runtime header bytes) and is classified in 1 CPU cycle via bitwise-OR of its fields and `~self()` destructor (`Bit 0` = borrows memory, `Bit 1` = owns `~self()` destructor). Enforce this taxonomy in `Pilot.Core.*` via `[EnforceCoreNaming]`:
 
-### 3.1 Two-Way Dot Classification (`PrefixDot` vs. `InfixDot`)
-Inside type methods, `.field` is shorthand for `self.field`. Dot tokens are classified strictly at the lexer level:
-- **`InfixDot` (`.`):** Preceded immediately (no intervening whitespace) by an identifier, numeric literal, `)`, `]`, or `}`. Valid ONLY in infix member access (`obj.field`, `tuple.0`).
-- **`PrefixDot` (`.`):** Preceded by whitespace, newline/indentation, `;`, `(`, `[`, `{`, `,`, or `:` (e.g. `.reset()`, `0.. .count`, `[*.. .tree]`). Valid ONLY in prefix position; desugars directly to `self.<ident>`.
-- **Adjacent Dot Rejection:** Never place dots directly adjacent without whitespace (e.g. `0...count` or `*...tree`). Always insert a space before prefix dot (`0.. .count`, `*.. .tree`). The lexer emits a clear diagnostic if adjacent dots are encountered.
-
-### 3.2 Numeric Literals & Statement Termination
-- **Leading-Zero Floats Only:** Floating-point literals MUST begin with an ASCII digit (`0-9`), followed by `.` and a digit (`0.5`). Bare `.5` is rejected at compile time with `Help: prefix float literals with 0 ('0.5')` to guarantee `.0` in `.tuple.0` never lexes as a float.
-- **Semicolon `;` & Multiline Chaining:** A semicolon explicitly terminates a statement. A leading `.method()` on the subsequent line parses as `self.method()`. Without a terminating semicolon, an indented `.method()` on the next line continues the preceding expression as an infix call chain (`sender.wake()\n .with_timeout(50);`).
-- **Contextual Enum Variant Resolution:** Enum variants must be referenced either explicitly (`Status.Active` or `Status::Active`) or via target-typed leading double-colon (`::Active`). Bare `.Active` is strictly prohibited for enums because leading dot `.ident` is reserved exclusively for `self.ident`.
-
-### 3.3 Splat & Recursive Flattening Tokens (`*`, `**`, `*..`)
-Tokenized via maximal munch:
-- **`*` (Positional Splat):** 1-level slice rest pattern or positional expansion (`let [head, *payload, crc] = buf;`, `fn(*args)`).
-- **`**` (Structural Splat):** 1-level compile-time named/structural field splat and deconstruction (`CpuState(pc: next_pc, **curr)`). Monomorphized statically by field offsets—zero runtime heap dictionaries.
-- **`*..` (Deep Flatten):** Complete recursive deep-flatten to 1D leaf elements (`[*..nested_arr]`, `for leaf in *..tree:`). Constant-folded at compile time for literal structures; invokes `op flat self -> LeafT` for dynamic containers.
-
-## 4. C#-Style Methods & First-Class `self` / `op` Grammar (Dunder-Free)
-All Python-style dunder (`__...__`) magic methods are strictly prohibited. The compiler emits explicit diagnostics pointing to first-class `self` or `op` replacements. Regular method parameter lists have an implicit receiver; Python-style `(self, ...)` parameters are forbidden.
-
-### 4.1 Method Signatures (`def`, `mut def`, `static def`)
-- **`def foo(a: i32) -> R`:** Read-only instance method. Passes `*const Self` as hidden parameter 0. Fields can be accessed via `.field`, `self.field`, or bare `field` (unless shadowed by local variables/parameters).
-- **`mut def foo(a: i32)`:** Mutating instance method. Passes `*mut Self` as hidden parameter 0.
-- **`static def foo(a: i32) -> R`:** Associated function with no receiver. Referencing `self` or `.field` inside `static def` triggers compile-time error `STATIC001`.
-
-### 4.2 Lifecycle & Accessor Forms
-- **Constructor:** `self(params...)` (replaces `__init__` / `__new__`). Definite-assignment initialization block returning the initialized stack/arena value. Supports constructor chaining (`self(x: i32) -> self(x, 0)`).
-- **Destructor:** `~self` (replaces `__del__`). Deterministic RAII cleanup emitted at scope exit.
-- **Scoped Context:** `scope self { enter: ... exit: ... }` (replaces `__enter__` / `__exit__`). Deterministic resource acquisition and teardown.
-- **Indexer:** `self[params...] -> T` or `self[params...] -> ref T` (replaces `__getitem__`, `__setitem__`, `__missing__`). Accessor clauses: `get:`, `set(val: T):`, and optional `default:`.
-- **Dynamic Member Dispatch:** `self.(name: str) -> T` (replaces `__getattr__` / `__setattr__`). Accessor clauses: `get:` and `set(val: T):`.
-
-### 4.3 Canonical `op` Operator and Protocol Reference Table
-
-| Capability | Pilot Syntax | Replaces | Notes |
+| Category / Lattice | Naming Pattern | Canonical Examples | Lifecycle & Perceus Action |
 | :--- | :--- | :--- | :--- |
-| **Binary Left** | `op self <binop> (rhs: R) -> Out` | `__add__`, `__mul__`, etc. | Standard left-hand instance operator |
-| **Binary Right** | `op (lhs: L) <binop> self -> Out` | `__radd__`, `__rmul__`, etc. | Commutative / asymmetric LHS |
-| **Compound Mut** | `op mut self <binop>= (rhs: R)` | `__iadd__`, `__imul__`, etc. | Mutates `self` in-place; zero allocation |
-| **Unary Prefix** | `op <unop> self -> Out` | `__neg__`, `__invert__` | Prefix `-self`, `~self`, `!self` |
-| **Equality** | `op self == (rhs: R) -> bool` | `__eq__`, `__ne__` | Auto-synthesizes `!=` unless overridden |
-| **Functor Call** | `op self(params...) -> Out` | `__call__` | Distinct from constructor `self(...)` via `op` |
-| **Membership** | `op (item: T) in self -> bool` | `__contains__` | Maps `x in container` directly |
-| **Type Guard** | `op (val: T) is Self -> bool` | `__instancecheck__` | Compile-time / structural type check |
-| **Implicit Cast** | `op self -> Target` | `__bool__`, safe coercions | Used in conditionals and widening |
-| **Explicit Cast** | `op self as Target` | `__int__`, `__float__`, `__str__` | Invoked via `expr as Target` |
-| **Formatted Str** | `op self as str(fmt: Slice[u8])` | `__format__` | Receives compile-time format slice |
-| **Deconstruct** | `op match self -> (T1, T2, ...)` | `__match_args__` | Zero-alloc register unpacking in `match` |
-| **Deep Flatten** | `op flat self -> LeafT` | Flatten recursion | Invoked by `*..self`; yields 1D elements |
-| **Explicit Clone**| `op clone self -> Self` | `__copy__`, `__deepcopy__` | Explicit deep/arena clone boundary |
-| **Hash** | `op hash self -> u64` | `__hash__` | Deterministic 64-bit structural hash |
-| **Binary Wire** | `op pack self` / `op unpack self` | `__getstate__`, `__setstate__` | Direct C-ABI buffer serialization |
-| **Sync Iterator** | `op for self -> T` (or `-> ref T`) | `__iter__`, `__next__` | Lowers to stack coroutine / loop fusion |
-| **Async Future** | `op await self -> T` | `__await__` | Uses `yield_async`; stack state machine |
-| **Async Stream** | `op async for self -> T` | `__aiter__`, `__anext__` | Async generator state machine |
+| **`[Lang]` Primitives** | Single-word `lowercase` | `void`, `never`, `bool`, `char`, `i8`..`i128`, `isize`, `u8`..`u128`, `usize`, `f16`..`f128`, `str`, `ptr<T>`, `slice<T>`, `stride<T>`, `array<T, N>`, `ref<T>`, `iso<T>`, `tuple<...>`, `option<T>`, `result<T, E>`, `union<T1, T2>`, `fn<A, R>`, `range<T>`, `span<T>`, `step<T>`, `from<T>`, `until<T>`, `full`, `splat<T>`, `pairs<K, V>`, `expand<T>`, `map<K, V>`, `frame<TSig>`, `type`, `ast` | Hardware register / flat C-ABI primitives bound in `stdlib/core/`. |
+| **Interfaces** | `I` + `PascalCase` | `IAnyValue`, `IValue`, `IReference`, `IObject`, `IGuard`, `IEnumerable<T>`, `IAddOperator<T>` | 0-byte compile-time contract, default method provider, and lattice carrier. |
+| **Field Bundles** | `PascalCase` + `Bundle` | `RawStorageBundle`, `SpatialHeaderBundle` | Contains stored fields + methods. Spliced via `*Bundle` in primary `struct` only. |
+| **Method Facets** | `PascalCase` + `Facet` | `SignedMathFacet`, `ContiguousViewFacet` | 0 stored fields (methods/ops only). Safe to splice in `partial struct`. |
+| **`0b00` Value Types** | Unadorned `PascalCase` | `Vec3`, `RangeWindow<T>`, `Dual<T, G>`, `CallExpr<T>` | `: IValue`. Trivial `memcpy`, eligible for `as view` casts and `.pchor` cues. |
+| **`0b01` Reference Views** | `...View` / `...Lens` / `...Cursor` | `SliceView<T>`, `OffsetLens<T>` | `: IReference`. Borrowed window; lexical escape checked in `pilot-perceus`. |
+| **`0b10` Owned Objects** | `...Buffer` / `...List` / `...Handle` | `SliceBuffer<T>`, `List<T>`, `Signal<T>`, `EffectPlan<T>` | `: IObject`. Has `~self()`; Perceus move-by-default + `drop_reuse`. |
+| **`0b11` Scoped Guards** | `...Guard` / `...Scope` / `...Lease` | `MutexGuard<T>`, `ArenaScope`, `TxLease` | `: IGuard`. Borrows memory AND runs `~self()` at scope exit; cannot escape scope. |
+| **`[...]` Attributes** | `...Attr` (Def) / `[Name]` (Use) | `struct ClampAttr : IAttribute` $\rightarrow$ `[Clamp(0, 1)]` | Sorted by `weight: i32` at compile time and woven into SSA/getters/setters. |
 
-```pilot
-// Real Pilot example demonstrating the unified grammar
-class TreeNode {
-    var value: i64
-    var children: [TreeNode]
+---
 
-    self(value: i64) {
-        .value = value;
-        .children = [];
-    }
+## 4. 4-Tier `MethodTable`, `*Bundle` Splicing & Extension Scoping
+- **4-Tier Vertical Precedence (Replaces OOP Base Classes):**
+  1. **Tier 1:** Explicit `struct` / `partial struct` member (wins unconditionally).
+  2. **Tier 2:** Spliced `*Bundle` / `*Facet` member (fulfills `interface` contracts and overrides Tiers 3–4).
+  3. **Tier 3:** Sub-`interface` default method (overrides Tier 4).
+  4. **Tier 4:** Base `interface` default method.
+- **Horizontal Collision Modifiers:** Resolve overlapping `*Bundle` fields or methods explicitly using `coalesce { id }`, `with { flags as net_flags }`, `without { clear_state }`, and static delegation `BundleName.method(var ref self, args...)`.
+- **Extensions (`ext` & `use ext`):** Support individual (`pub pure ext fn i64.is_even() -> bool => (self & 1) == 0;`) and block extensions (`pub ext str { ... }`), imported either file-wide (`use Pkg.StrExt;`) or lexically scoped (`use ext StrExt { ... }`).
 
-    self() -> self(0) {}
+---
 
-    ~self {
-        .children.clear();
-    }
+## 5. Lexing, Receivers, Properties, Operators & Call-Quoting Invariants
 
-    mut def add_child(node: TreeNode) {
-        .children.append(node);
-    }
+### 5.1 Two-Way Dot (`PrefixDot` vs. `InfixDot`), Floats, Enums & Cascades
+- **`InfixDot` (`.`):** Preceded immediately (no whitespace) by an identifier, literal, `)`, `]`, or `}` (`obj.field`, `tuple.0`).
+- **`PrefixDot` (`.`):** Preceded by whitespace or `;`, `(`, `[`, `{`, `,`, `:` (`.reset()`, `0 .. .count`). Desugars to `self.<ident>`. Never place dots adjacent without whitespace (`0.. .count`, not `0...count`).
+- **Leading-Zero Floats & `::Variant` Enums:** Floats must start with a digit (`0.5`, never `.5`). Target-typed enum variants use `::Active` (bare `.Active` is reserved for `self.Active`).
+- **Fluid Cascades (`..` / `?..`):** Bound at `Precedence::Cascade = 1` (`node..set_title("Master")..set_status("OK");`), mutating/calling on the root receiver and returning it.
 
-    static def leaf(v: i64) -> TreeNode {
-        return TreeNode(v);
-    }
+### 5.2 Splat & Recursive Flatten Tokens (`*`, `**`, `*..`)
+- **`*expr` (`splat<T>` / `ISplatOperator`):** 1-level positional sequence unpack or `*Bundle` splice.
+- **`**expr` (`pairs<K, V>` / `IPairsOperator`):** 1-level compile-time structural field/key-value unpack.
+- **`*..expr` (`expand<T>` / `IFlattenOperator`):** Recursive deep-flatten to 1D leaf elements via `op flat () -> TLeaf`.
 
-    op flat self -> i64 {
-        yield .value;
-        for c in .children {
-            for leaf in *..c {
-                yield leaf;
-            }
-        }
-    }
+### 5.3 Dunder-Free Lifecycle & Variation B Property/Indexer Setters
+- **Lifecycle:** `self(params...)` constructor, `~self()` destructor, and `scope self { enter: ... exit: ... }`.
+- **Implicit Properties & Indexers (`self[params...] -> T`):** Omit `property` keyword. Inside `get` and `set` clauses, `field` accesses synthesized backing storage and `value` accesses the incoming setter parameter (`pub balance: f64 { get => field; set => { field = value; } }`). Support type-overloaded setters (`set(scale: f64)`), guarded setters (`set(v: T) if cond`), and ownership setters (`set(iso v: OwnedT)`).
 
-    op for self -> i64 {
-        yield .value;
-        for c in .children {
-            yield c.value;
-        }
-    }
-}
-```
+### 5.4 Values-First Errors (`T ! E`), Null-Safety (`T?`), 3-Tier `for` & Call-Quoting (`!`, `!!`, `!&`, `!^`, `!@`, `!?`)
+- **Universal Postfix `?` (`ITryOperator`):** Unwraps `result<T, E>` (`T ! E`) or `option<T>` (`T?`) and propagates failure/`none` early. Pair with `guard some x else { ... }`, `expr ?? fallback`, and `expr catch err => ...`. Unchecked postfix `x!` is prohibited (`NULL001`–`NULL005`, `ERR001`–`ERR005`).
+- **3-Tier Dynamic `for` Expressions (`loops.rs`):** Preserve `FixedScalar`, `MutableBounds` (`continue a..b;`), and `WorklistStack` (`continue a..b, ...;` backed by `#[repr(C)] RangeWindow<TIter>`) alongside `CollectionYield` (`SliceBuffer<T>`) and `ScalarBreak` (`break val;` + `then fallback`).
+- **6 Homoiconic Call-Quoting Modes (Zero-Whitespace `(` Lookahead):**
+  - `fn!(a, b)` $\rightarrow$ `CallExpr<TReturn>` (`ShallowQuote`)
+  - `fn!!(~a, b)` $\rightarrow$ `ast<TReturn>` (`DeepSplice` with `~` compile-time unquoting)
+  - `fn!&(a, b)` $\rightarrow$ `frame<FnSig>` (`AbiFrame` zero-marshalling `#[repr(C)]` struct)
+  - `fn!^(a, b)` $\rightarrow$ `Signal<TReturn>` (`ReactiveSignal` glitch-free push-pull node)
+  - `fn!@(a, b)` $\rightarrow$ `Dual<TReturn, TGrad>` (`SymbolicAdjoint` compile-time CSE derivative)
+  - `fn!?(a, b)` $\rightarrow$ `EffectPlan<TReturn>` (`EffectDryRun` CoW transactional sandbox)
 
-### 4.4 Flat Sibling Property & Indexer Setters (Variation B)
-Inside properties, `self[params...] -> T`, and `self.(name: str) -> T`, flat sibling accessor clauses reside at the same indentation level (never use unconstrained `_:` catch-alls):
-- **`get:`** Returns canonical type `T`.
-- **`default:`** Optional missing-key fallback inside `self[...]`.
-- **`set:` (C#-Style Default):** Implicitly binds `value: T` matching the getter return type (`set: .data = value;`). Note: `.value` (`PrefixDot`) accesses `self.value`, while bare `value` references the incoming setter parameter.
-- **`set(pattern: OtherType):` (Scoped Type/Deconstruct Overload):** Transforms or unpacks alternate incoming types locally on assignment (`set((a: u8, b: u8, c: u8, d: u8)):`, `set(Vec2(x, y)):`) without creating global implicit casts.
-- **`set(CONST_LIT):` / `set(v: T) if cond:`:** Value-matched or guard-predicated setter branch.
-- **`set[U: TraitBound](v: U):`:** Constrained generic setter monomorphized per call-site type `U`.
-- **`set(iso v: OwnedT):`:** Reference-capability setter for zero-copy isolated ownership transfer.
-
-```pilot
-class ConfigMap {
-    data: int
-
-    property timeout: int {
-        get:
-            return .data;
-        pub set:
-            .data = value;
-        pub set(scale: float):
-            .data = (scale * 1000.0) as int;
-        priv set(raw: (int, int)):
-            .data = raw.0 + raw.1;
-    }
-
-    self[key: str] -> int {
-        get:
-            return .data;
-        default:
-            return 0;
-        set:
-            .data = value;
-        set(iso token: str):
-            .data = len(token);
-    }
-}
-```
-
-## 5. Two-Axis Visibility & Compile-Time Clearance Lattice (`lvl`)
-Functions and methods are implicitly `private` by default. Prefix declarations and accessor clauses with modifiers from two orthogonal axes:
-- **Axis 1 (10-Tier Spatial Visibility):**
-  - `priv` (`private`): Enclosing type only (Functions/methods default to private).
-  - `file` (`fileprivate`): Current source file only.
-  - `priv prot` (`private protected`): Enclosing type + structural subtypes within current binary.
-  - `prot` (`protected`): Enclosing type + structural subtypes/roles anywhere.
-  - `pkg` (`package`): Current directory / module namespace.
-  - `prot int` (`protected internal`): Current binary OR external structural subtypes.
-  - `int` (`internal`): Current compiled binary / crate (Default for non-functions).
-  - `pub` (`public`): Publicly callable; closed to external override/binding.
-  - `open`: Publicly callable AND open for external `.pchor` role/extension binding.
-  - `export`: Public + emits unmangled C-ABI symbol.
-- **Axis 2 (Compile-Time Clearance Rings ? `lvl(N)` / `lvlN`):**
-  - Support both `lvl(30)` / `lvl(Domain, 30)` and shorthand identifier `lvl30` (`^lvl([0-9]+)$` in modifier position).
-  - Track active clearance `C` per lexical scope (default `C = 0`). Calling a target rated `lvl(N)` requires `C >= N` at compile time.
-  - Elevate `C` either via transitive function/role declaration (`lvl30 def admin_op()`) or flow-typed guard blocks (`if lvl >= 30:`, `guard lvl >= 30 else: return`) with zero runtime overhead.
-  - Emit diagnostic code `LVL001` when clearance is insufficient, and `VIS001` when an inaccessible private member is accessed from outside.
-
-```pilot
-lvl30 def secure_vault_access() {
-    // Requires level 30 clearance
-}
-
-def dispatch_job(lvl: int) {
-    if lvl >= 30:
-        secure_vault_access(); // Permitted via flow-typed clearance elevation
-}
-```
-
-## 6. Custom Language Deterrents (Anti-Hallucination)
-- **Zero Syntax Hallucination:** Do not invent keywords, operators, decorators, or macro syntax borrowed from Python, Rust, or C# unless defined in the current workspace grammar.
-- **Zero Stdlib Hallucination:** Do not assume standard library modules (e.g., `fs`, `net`, `json`, `math`) or built-in methods exist unless they are explicitly imported in context or declared in the project prelude. If a helper is missing, write it from primitives.
-- **Verify Grammar Before Emitting:** Match the exact AST and token conventions found in neighboring `.pilot` and `.pchor` files.
-
-## 7. Memory Layout, Slices & C-ABI FFI (`!&`)
-- **Explicit FFI Layout:** When crossing the C-ABI boundary or using call quoting (`!&`), never assume compiler field reordering is safe. Use explicit alignment and fixed-width primitive types (`u8`, `i32`, `u64`, `usize`).
-- **Slice Aliasing & Lifetimes:** Do not return pointers or slices referencing stack-allocated buffers that do not outlive the call frame. Keep ownership and buffer lifetimes explicit.
-- **No Hidden Allocations:** Avoid implicit heap allocations inside hot loops or FFI trampolines; pass pre-allocated buffers or arena references where applicable.
-
-## 8. Exhaustive Control Flow & State Handling
-- **Exhaustive Matching:** Every tagged union, enum, or `Result` type must have all variants explicitly handled. Do not use catch-all wildcard branches (`_`) that mask unhandled future states.
-- **Explicit Control Flow:** Avoid deep, implicit exception-style jumps. Propagate errors through return values and explicit state transitions.
-
-## 9. Choreography (`.pchor`) vs. Core Implementation
-- **Strict Separation of Concerns:** Keep execution contracts, node graph wiring, cues, and event routing inside `.pchor` choreography definitions.
-- **Pure Implementation Nodes:** Keep concrete data transformations, bitwise math, and systems logic inside core Pilot modules. Never leak orchestration state machines into low-level compute functions.
-
-```pilot
-// .pchor Choreography Node
-node DataIngestWorkflow {
-    cue on_data_received(payload: RawPacket)
-    contract requires len(payload.bytes) > 0
-
-    route payload -> ValidateCrc -> DecryptFrame -> StoreRecord
-}
-```
-
-## 10. Verification & Tooling Discipline
-- **Compiler & Crucible First:** Always validate generated code against the `pilot` CLI compiler and existing crucible test suites before declaring a task complete.
-- **Fix Root Causes in AST/Codegen:** If a compiler test fails, fix the AST lowering, type-checker constraint, or codegen rule—never patch or weaken the test oracle to hide a regression.
+### 5.5 Preserved Domain Paradigms & Two-Axis Visibility (`lvl`)
+- **Two-Axis Visibility:** Axis 1 short modifiers (`priv`, `file`, `prot`, `pkg`, `int`, `pub`, `open`, `export`) + Axis 2 compile-time clearance rings (`lvl(N)` / `lvlN` with flow-typed `if lvl >= N` elevation, `LVL001`, `VIS001`).
+- **Contracts, DI, Adapters, Real-Time & Polyglot:** Preserve `requires`/`ensures`/`old()`, `context` / `with context` DI, `adapter A -> B` & `each` call vectorization, method group switchboards (`|`, `*`), algebraic type composition (`|`, `&`, `-`) & `state` typestates, `[HardRealtime]` / `[Wcet(50us)]` / `noalloc`, dimensional units (`250ms`, `64KB`), native `database` / `Table<T>` LINQ & SQL, and inline polyglot blocks.
