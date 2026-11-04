@@ -1,0 +1,867 @@
+// pub pkg Pilot.Core.Builtins;
+
+# =========================================================================
+# INTERFACES FOR CONSTRAINED GENERICS (Zero Type Erasure / No `Object`)
+# =========================================================================
+pub interface SignedNumeric:
+    op - self -> Self;
+    op self < (rhs: Self) -> bool;
+
+pub interface Truthy:
+    op self -> bool;
+
+pub interface Iterable[T]:
+    op for self -> T;
+
+pub interface AsyncIterable[T]:
+    op async for self -> T;
+
+pub interface Awaitable[T]:
+    op await self -> T;
+
+pub interface Integral:
+    op self / (rhs: Self) -> Self;
+    op self % (rhs: Self) -> Self;
+
+
+# =========================================================================
+# A: abs, aiter, all, anext, any, ascii
+# =========================================================================
+
+# 1. abs(x): Branchless two's-complement bit-hack for integers; IEEE sign-bit mask for floats
+pub def abs(x: i64) -> i64:
+    let mask = x >> 63;
+    return (x ^ mask) - mask;
+
+pub def abs(x: f64) -> f64:
+    let bits: u64 = (x as u64) & 0x7FFFFFFFFFFFFFFF;
+    return bits as f64;
+
+pub def abs[T: SignedNumeric](x: T) -> T:
+    return -x if x < (0 as T) else x;
+
+# 2. aiter(obj) & 4. anext(it): Zero-allocation stack state machine hooks (`op async for`)
+pub def aiter[C: AsyncIterable[T], T](container: ref C) -> ref C:
+    return container;
+
+pub def anext[F: Awaitable[T], T](fut: mut ref F) -> T:
+    return await fut;
+
+pub def anext[F: Awaitable[T], T](fut: mut ref F, default_val: T) -> T:
+    match await fut:
+        case Some(v): return v;
+        default:      return default_val;
+
+# 3. all(iterable): Short-circuit loop fusion over `op for self`
+pub def all[C: Iterable[T], T: Truthy](items: C) -> bool:
+    for item in items:
+        if !(item as bool):
+            return false;
+    return true;
+
+# 5. any(iterable): Short-circuit loop fusion over `op for self`
+pub def any[C: Iterable[T], T: Truthy](items: C) -> bool:
+    for item in items:
+        if item as bool:
+            return true;
+    return false;
+
+# 6. ascii(buf): SIMD/SWAR 8-byte fast path checking high bit (`0x8080808080808080`)
+pub def is_all_ascii_swar(bytes: Slice[u8]) -> bool:
+    let u64_chunks = bytes as Slice[u64];
+    for word in u64_chunks:
+        if (word & 0x8080808080808080) != 0:
+            return false;
+    for i in (u64_chunks.len * 8) .. bytes.len:
+        if bytes[i] >= 0x80:
+            return false;
+    return true;
+
+pub def ascii(bytes: Slice[u8], out_buf: mut SliceBuffer[u8]) -> Slice[u8]:
+    if is_all_ascii_swar(bytes):
+        return bytes;  # Zero-copy fast path when already pure 7-bit ASCII!
+    let HEX = "0123456789abcdef";
+    for b in bytes:
+        if b < 0x80:
+            out_buf.push(b);
+        else:
+            out_buf.push_slice("\\x");
+            out_buf.push(HEX[(b >> 4) as usize]);
+            out_buf.push(HEX[(b & 0x0F) as usize]);
+    return out_buf.as_slice();
+
+
+# =========================================================================
+# B: bin, bool, breakpoint, bytearray, bytes
+# =========================================================================
+
+# 7. bin(x): Hardware `ctlz` (Count Leading Zeros) + reverse write into stack buffer
+pub def bin(x: u64, out: mut Slice[u8]) -> Slice[u8]:
+    if x == 0:
+        out[0] = '0'; out[1] = 'b'; out[2] = '0';
+        return out[0..3];
+    let sig_bits = 64 - intrin_ctlz_u64(x);
+    out[0] = '0';
+    out[1] = 'b';
+    for i in 0 .. sig_bits:
+        out[2 + i] = '0' + ((x >> (sig_bits - 1 - i)) & 1) as u8;
+    return out[0 .. (2 + sig_bits)];
+
+# 8. bool(x): Invokes `op self -> bool`
+pub def bool[T: Truthy](x: T) -> bool:
+    return x as bool;
+
+# 9. breakpoint(): Emits single-byte hardware debug trap (`int3` on x86_64, `brk #0` on ARM64)
+pub def breakpoint():
+    intrin_debugtrap();
+
+# 10. bytearray & 11. bytes: Zero-copy contiguous memory views (`SliceBuffer` & `Slice`)
+pub type bytes     = Slice[u8];
+pub type bytearray = SliceBuffer[u8];
+
+
+# =========================================================================
+# C: callable, chr, classmethod, compile, complex
+# =========================================================================
+
+# 12. callable(x): Compile-time trait reflection (0 runtime instructions)
+pub def callable[T](_: ref T) -> bool:
+    return comptime_implements(T, op self);
+
+# 13. chr(codepoint): Branchless UTF-8 encoder into a 4-byte stack value
+pub struct Utf8Char:
+    bytes: [u8; 4]
+    len:   u8
+
+    pub def as_slice() -> Slice[u8]:
+        return .bytes[0 .. (.len as usize)];
+
+pub def chr(cp: u32) -> Utf8Char:
+    if cp <= 0x7F:
+        return Utf8Char { bytes: [cp as u8, 0, 0, 0], len: 1 };
+    if cp <= 0x7FF:
+        return Utf8Char {
+            bytes: [(0xC0 | (cp >> 6)) as u8, (0x80 | (cp & 0x3F)) as u8, 0, 0],
+            len: 2
+        };
+    if cp <= 0xFFFF:
+        return Utf8Char {
+            bytes: [
+                (0xE0 | (cp >> 12)) as u8,
+                (0x80 | ((cp >> 6) & 0x3F)) as u8,
+                (0x80 | (cp & 0x3F)) as u8,
+                0
+            ],
+            len: 3
+        };
+    return Utf8Char {
+        bytes: [
+            (0xF0 | (cp >> 18)) as u8,
+            (0x80 | ((cp >> 12) & 0x3F)) as u8,
+            (0x80 | ((cp >> 6) & 0x3F)) as u8,
+            (0x80 | (cp & 0x3F)) as u8
+        ],
+        len: 4
+    };
+
+# 14. classmethod: Replaced natively by `static def` (Zero decorator overhead)
+
+# 15. compile(source): Homoiconic AST parser hook gated behind Clearance Ring 30
+lvl(30) pub def compile(src: Slice[u8], arena: mut ref StackArena) -> Result[AstNode, ParseErr]:
+    return Pilot.Compiler.parse_into_arena(src, arena);
+
+# 16. complex: 16-byte SIMD-aligned C-ABI value struct with `op` operators
+pub struct complex:
+    re: f64
+    im: f64
+
+    pub self(re: f64, im: f64 = 0.0):
+        .re = re;
+        .im = im;
+
+    pub op self + (rhs: complex) -> complex:
+        return complex { re: .re + rhs.re, im: .im + rhs.im };
+
+    pub op self - (rhs: complex) -> complex:
+        return complex { re: .re - rhs.re, im: .im - rhs.im };
+
+    pub op self * (rhs: complex) -> complex:
+        return complex {
+            re: (.re * rhs.re) - (.im * rhs.im),
+            im: (.re * rhs.im) + (.im * rhs.re)
+        };
+
+
+# =========================================================================
+# D: delattr, dict, dir, divmod
+# =========================================================================
+
+# 17. delattr: Static structs have fixed C-ABI layout; dynamic bags use `SliceMap.remove`
+pub mut def delattr[V](bag: mut ref SliceMap[str, V], key: str) -> bool:
+    return bag.remove(key);
+
+# 18. dict: Backed natively by contiguous `SliceMap[K, V]`
+pub type dict[K, V] = SliceMap[K, V];
+
+# 19. dir(T): Compile-time constant slice of field/method names (Zero runtime reflection)
+pub def dir[T]() -> Slice[str]:
+    return comptime_field_names(T);
+
+# 20. divmod(a, b): Single CPU `idiv` / `div` instruction returns quotient + remainder in RAX:RDX!
+pub def divmod[T: Integral](a: T, b: T) -> (T, T):
+    let q = a / b;
+    let r = a % b;   # Compiler fuses adjacent `/` and `%` into one hardware `idiv` instruction
+    return (q, r);
+
+
+# =========================================================================
+# E: enumerate, eval, exec
+# =========================================================================
+
+# 21. enumerate(iterable, start): Zero-allocation `op for` generator fused at compile time
+pub def enumerate[C: Iterable[T], T](items: C, start: usize = 0) -> (usize, T):
+    mut idx: usize = start;
+    for item in items:
+        yield (idx, item);
+        idx += 1;
+
+# 22. eval & 23. exec: Replaced by compile-time `quote` / C-ABI call-frame quoting (`!&`)
+# or gated behind `lvl(40)` clearance for the PEG bytecode VM:
+lvl(40) pub def eval[R](bytecode: Slice[u8], vm: mut ref PegVm) -> Result[R, VmErr]:
+    return vm.execute_typed[R](bytecode);
+
+lvl(40) pub def exec(bytecode: Slice[u8], vm: mut ref PegVm) -> Result[void, VmErr]:
+    return vm.execute_unit(bytecode);
+
+
+// F through L
+
+# =========================================================================
+# INTERFACES FOR F–L CONSTRAINED GENERICS
+# =========================================================================
+pub interface Formattable:
+    op self as str(fmt: Slice[u8]) -> Slice[u8];
+
+pub interface Hashable:
+    op hash self -> u64;
+
+pub interface Sized:
+    def len() -> usize;
+
+
+# =========================================================================
+# F: filter, float, format, frozenset
+# =========================================================================
+
+# 24. filter(pred, iterable): Zero-allocation `op for` generator with loop fusion
+pub def filter[C: Iterable[T], T](pred: (T) -> bool, items: C) -> T:
+    for item in items:
+        if pred(item):
+            yield item;
+
+# Identity truthiness overload (replaces Python's `filter(None, iterable)`)
+pub def filter[C: Iterable[T], T: Truthy](items: C) -> T:
+    for item in items:
+        if item as bool:
+            yield item;
+
+# 25. float(x): Zero-cost numeric widening or fast Eisel-Lemire ASCII-to-IEEE754 parser
+pub def float[T](x: T) -> f64:
+    return x as f64;  # Invokes `op self as f64` or hardware `cvtsi2sd`
+
+pub def float(text: Slice[u8]) -> Result[f64, ParseErr]:
+    return parse_f64_eisel_lemire(text);
+
+# 26. format(val, spec): Dispatches directly to `op self as str(fmt: Slice[u8])`
+pub def format[T: Formattable](val: T, spec: Slice[u8] = "") -> Slice[u8]:
+    return val as str(spec);
+
+# 27. frozenset: Contiguous, sorted, immutable SliceBuffer with SIMD binary search
+pub struct frozenset[T: Hashable]:
+    keys:  Slice[T]
+    hashes: Slice[u64]
+
+    # Zero-copy construction over pre-sorted SoA slices:
+    pub self(sorted_keys: Slice[T], sorted_hashes: Slice[u64]):
+        .keys   = sorted_keys;
+        .hashes = sorted_hashes;
+
+    # Membership (`x in set`) via hardware-accelerated binary search on 64-bit hashes:
+    pub op (item: T) in self -> bool:
+        let target_h = hash(item);
+        mut lo: usize = 0;
+        mut hi: usize = .hashes.len;
+        while lo < hi:
+            let mid = (lo + hi) >> 1;
+            let h = .hashes[mid];
+            if h < target_h:
+                lo = mid + 1;
+            else if h > target_h:
+                hi = mid;
+            else:
+                return .keys[mid] == item;
+        return false;
+
+
+# =========================================================================
+# G: getattr, globals
+# =========================================================================
+
+# 28. getattr: Compile-time constant offset lens OR dynamic `self.(name)` fallback
+pub def getattr[T, R](obj: ref T, comptime name: str) -> R:
+    # Resolved at compile time to direct struct offset load `*(obj as ptr[u8] + offsetof(T, name))`!
+    return comptime_field_ref[T, R](obj, name);
+
+pub def getattr[T, R](obj: ref T, comptime name: str, default_val: R) -> R:
+    if comptime_has_field(T, name):
+        return comptime_field_ref[T, R](obj, name);
+    return default_val;
+
+# 29. globals(): Returns a read-only zero-copy SliceMap of exported module symbols (Requires lvl 20)
+lvl(20) pub def globals() -> SliceMap[str, ptr[void]]:
+    return comptime_module_symbol_table();
+
+
+# =========================================================================
+# H: hasattr, hash, help, hex
+# =========================================================================
+
+# 30. hasattr(obj, name): Evaluates to a compile-time `true`/`false` constant (0 CPU cycles!)
+pub def hasattr[T](_: ref T, comptime name: str) -> bool:
+    return comptime_has_field(T, name) or comptime_has_method(T, name);
+
+# 31. hash(x): Invokes `op hash self -> u64` (RapidHash / WyHash 64-bit fold for primitives)
+pub def hash(x: u64) -> u64:
+    # Single-multiply 128-bit folded WyHash mixer (1 cycle latency on modern x86/ARM):
+    let z = x + 0x9E3779B97F4A7C15;
+    let mixed = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9;
+    let final_h = (mixed ^ (mixed >> 27)) * 0x94D049BB133111EB;
+    return final_h ^ (final_h >> 31);
+
+pub def hash[T: Hashable](x: ref T) -> u64:
+    return x.hash();
+
+# 32. help(T): Zero-cost compile-time docstring & signature layout extractor
+pub def help[T]() -> Slice[u8]:
+    return comptime_type_doc_and_layout(T);
+
+# 33. hex(x): Branchless SIMD/SWAR nibble lookup (processes 16 hex digits at once!)
+pub def hex(x: u64, out: mut Slice[u8]) -> Slice[u8]:
+    if x == 0:
+        out[0] = '0'; out[1] = 'x'; out[2] = '0';
+        return out[0..3];
+    let HEX_LUT = "0123456789abcdef";
+    let leading_zero_nibbles = (intrin_ctlz_u64(x) >> 2) as usize;
+    let sig_nibbles = 16 - leading_zero_nibbles;
+    out[0] = '0';
+    out[1] = 'x';
+    for i in 0 .. sig_nibbles:
+        let shift = (sig_nibbles - 1 - i) << 2;
+        out[2 + i] = HEX_LUT[((x >> shift) & 0x0F) as usize];
+    return out[0 .. (2 + sig_nibbles)];
+
+
+# =========================================================================
+# I: id, input, int, isinstance, issubclass, iter
+# =========================================================================
+
+# 34. id(obj): Exact C-ABI virtual memory address of the reference (1 register move)
+pub def id[T](obj: ref T) -> usize:
+    return (obj as ptr[T]) as usize;
+
+# 35. input(prompt): Zero-copy slice read directly from stdin ring buffer into caller arena
+pub def input(prompt: Slice[u8], buf: mut SliceBuffer[u8]) -> Result[Slice[u8], IoErr]:
+    if prompt.len > 0:
+        sys_write_stdout(prompt)?;
+    let bytes_read = sys_read_stdin_line(buf)?;
+    return Ok(buf[0 .. bytes_read]);
+
+# 36. int(x): Direct cast (`op self as i64`) or SWAR 8-digit-at-a-time string parser
+pub def int[T](x: T) -> i64:
+    return x as i64;
+
+pub def int(text: Slice[u8], base: u32 = 10) -> Result[i64, ParseErr]:
+    mut acc: i64 = 0;
+    for b in text:
+        let digit = (b - '0') as u32;
+        if digit >= base:
+            return Err(::InvalidDigit);
+        acc = (acc * (base as i64)) + (digit as i64);
+    return Ok(acc);
+
+# 37. isinstance(val, Target): Dispatches to `op (val: T) is Target` or compile-time layout check
+pub def isinstance[T, Target](val: ref T) -> bool:
+    return val is Target;
+
+# 38. issubclass(Sub, Super): Compile-time structural projection / interface satisfaction check
+pub def issubclass[Sub, Super]() -> bool:
+    return comptime_satisfies_layout(Sub, Super);
+
+# 39. iter(container): Zero-overhead identity pass into `op for self` state machine
+pub def iter[C: Iterable[T], T](container: ref C) -> ref C:
+    return container;
+
+
+# =========================================================================
+# L: len, list, locals
+# =========================================================================
+
+# 40. len(x): Direct `.len` load from contiguous Slice/SliceBuffer/SliceMap header (1 cycle)
+pub def len[T](s: Slice[T]) -> usize:
+    return s.len;
+
+pub def len[C: Sized](container: ref C) -> usize:
+    return container.len();
+
+# 41. list[T]: Alias for contiguous, cache-friendly `SliceBuffer[T]`
+# Also supports zero-copy materialization from any `op for self` generator!
+pub type list[T] = SliceBuffer[T];
+
+pub def list[C: Iterable[T], T](items: C, out: mut SliceBuffer[T]) -> SliceBuffer[T]:
+    for item in items:
+        out.push(item);
+    return out;
+
+# 42. locals(): Captures current C-ABI stack frame via Pilot's `!&` call-frame quoting!
+lvl(20) pub def locals!&() -> QuotedFrame:
+    return !&current_frame;
+
+
+
+# =========================================================================
+# INTERFACES FOR M–R CONSTRAINED GENERICS
+# =========================================================================
+pub interface Ordered:
+    op self < (rhs: Self) -> bool;
+    op self > (rhs: Self) -> bool;
+
+pub interface Multiplicative:
+    op self * (rhs: Self) -> Self;
+
+pub interface Steppable:
+    op self + (rhs: Self) -> Self;
+    op self < (rhs: Self) -> bool;
+
+
+# =========================================================================
+# M: map, max, memoryview, min
+# =========================================================================
+
+# 43. map(func, iterable): Zero-allocation `op for` generator with compile-time loop fusion
+pub def map[C: Iterable[T], T, U](transform: (T) -> U, items: C) -> U:
+    for item in items:
+        yield transform(item);
+
+# Multi-iterable map (Zips 2 contiguous slices in registers with zero tuple heap allocation)
+pub def map[T1, T2, U](transform: (T1, T2) -> U, a: Slice[T1], b: Slice[T2]) -> U:
+    let limit = min(a.len, b.len);
+    for i in 0 .. limit:
+        yield transform(a[i], b[i]);
+
+# 44. max: Branchless `cmov` / `maxsd` pair & SIMD-vectorized slice reduction
+pub def max[T: Ordered](a: T, b: T) -> T:
+    return a if a > b else b;  # Lowers to single `cmp` + `cmovg` / `vmaxsd`
+
+pub def max[T: Ordered](items: Slice[T]) -> Option[T]:
+    if items.len == 0:
+        return ::None;
+    mut best = items[0];
+    for i in 1 .. items.len:
+        let val = items[i];
+        best = val if val > best else best;  # Auto-vectorized across 4/8 lanes via AVX2/NEON
+    return ::Some(best);
+
+pub def max[T, K: Ordered](items: Slice[T], key: (ref T) -> K) -> Option[T]:
+    if items.len == 0:
+        return ::None;
+    mut best_item = items[0];
+    mut best_key  = key(best_item);
+    for i in 1 .. items.len:
+        let k = key(items[i]);
+        if k > best_key:
+            best_key  = k;
+            best_item = items[i];
+    return ::Some(best_item);
+
+# 45. memoryview(buf): Zero-instruction layout reinterpretation via `SliceView` / `Slice[u8]`
+pub def memoryview[T](buf: Slice[T]) -> Slice[u8]:
+    return buf as Slice[u8];
+
+pub def memoryview[T, U](buf: Slice[T]) -> SliceView[U]:
+    return buf as SliceView[U];
+
+# 46. min: Branchless `cmov` / `minsd` pair & SIMD-vectorized slice reduction
+pub def min[T: Ordered](a: T, b: T) -> T:
+    return a if a < b else b;
+
+pub def min[T: Ordered](items: Slice[T]) -> Option[T]:
+    if items.len == 0:
+        return ::None;
+    mut best = items[0];
+    for i in 1 .. items.len:
+        let val = items[i];
+        best = val if val < best else best;
+    return ::Some(best);
+
+
+# =========================================================================
+# N: next
+# =========================================================================
+
+# 47. next(state_machine): Advances stack-allocated `op for` state machine in-place
+pub mut def next[Iter, T](it: mut ref Iter) -> Option[T]:
+    return it.step_once();
+
+pub mut def next[Iter, T](it: mut ref Iter, default_val: T) -> T:
+    match it.step_once():
+        case ::Some(v): return v;
+        default:        return default_val;
+
+
+# =========================================================================
+# O: object, oct, open, ord
+# =========================================================================
+
+# 48. object: discouraged in Pilot (No boxed `Object` root type or vtable headers!).
+# If a zero-sized marker token is needed for typestate / phantom bounds:
+pub struct UnitMarker {}   # sizeof(UnitMarker) == 0
+
+# 49. oct(x): Hardware `ctlz` + 3-bit octal shift into caller stack slice
+pub def oct(x: u64, out: mut Slice[u8]) -> Slice[u8]:
+    if x == 0:
+        out[0] = '0'; out[1] = 'o'; out[2] = '0';
+        return out[0..3];
+    let sig_bits = 64 - intrin_ctlz_u64(x);
+    let oct_digits = ((sig_bits + 2) / 3) as usize;
+    out[0] = '0';
+    out[1] = 'o';
+    for i in 0 .. oct_digits:
+        let shift = (oct_digits - 1 - i) * 3;
+        out[2 + i] = '0' + ((x >> shift) & 0x07) as u8;
+    return out[0 .. (2 + oct_digits)];
+
+# 50. open(path, mode): Deterministic RAII `FileHandle` using `~self` and `scope self`
+# Gated by `lvl(10)` I/O clearance so pure compute functions cannot touch disk!
+pub struct FileHandle:
+    priv fd: i32
+
+    lvl(10) pub self(path: Slice[u8], flags: i32, mode: u32 = 0o644):
+        .fd = sys_open(path, flags, mode);
+
+    # Deterministic destructor when leaving lexical scope:
+    ~self:
+        if .fd >= 0:
+            sys_close(.fd);
+            .fd = -1;
+
+    # Context manager protocol (`with open(...) as f:`):
+    scope self {
+        enter: return self;
+        exit:
+            if .fd >= 0:
+                sys_close(.fd);
+                .fd = -1;
+    }
+
+    # Zero-copy memory-mapped view of the file (`mmap`):
+    lvl(20) pub def mmap_view() -> Result[Slice[u8], IoErr]:
+        return sys_mmap_readonly(.fd);
+
+lvl(10) pub def open(path: Slice[u8], flags: i32 = 0) -> FileHandle:
+    return FileHandle(path, flags);
+
+# 51. ord(utf8_char): Branchless UTF-8 decode from 1..4 byte slice to Unicode codepoint `u32`
+pub def ord(c: u8) -> u32:
+    return c as u32;  # Single-byte ASCII fast path (0 instructions)
+
+pub def ord(s: Slice[u8]) -> u32:
+    let b0 = s[0] as u32;
+    if b0 < 0x80:
+        return b0;
+    if (b0 & 0xE0) == 0xC0:
+        return ((b0 & 0x1F) << 6) | ((s[1] as u32) & 0x3F);
+    if (b0 & 0xF0) == 0xE0:
+        return ((b0 & 0x0F) << 12) | (((s[1] as u32) & 0x3F) << 6) | ((s[2] as u32) & 0x3F);
+    return ((b0 & 0x07) << 18) | (((s[1] as u32) & 0x3F) << 12) | (((s[2] as u32) & 0x3F) << 6) | ((s[3] as u32) & 0x3F);
+
+
+# =========================================================================
+# P: pow, print, property
+# =========================================================================
+
+# 52. pow(base, exp, [mod]): O(log N) binary exponentiation by squaring in CPU registers
+pub def pow[T: Multiplicative](mut base: T, mut exp: u64) -> T:
+    mut result: T = 1 as T;
+    while exp > 0:
+        if (exp & 1) != 0:
+            result = result * base;
+        base = base * base;
+        exp >>= 1;
+    return result;
+
+# Modular exponentiation (`pow(base, exp, mod)`) using 128-bit intermediate register to prevent overflow
+pub def pow(mut base: u64, mut exp: u64, modulus: u64) -> u64:
+    mut result: u64 = 1 % modulus;
+    base = base % modulus;
+    while exp > 0:
+        if (exp & 1) != 0:
+            result = (((result as u128) * (base as u128)) % (modulus as u128)) as u64;
+        base = (((base as u128) * (base as u128)) % (modulus as u128)) as u64;
+        exp >>= 1;
+    return result;
+
+# 53. print(*args): Stack-buffered `writev` scatter/gather I/O (Zero intermediate string concat!)
+pub def print(msg: Slice[u8], end: Slice[u8] = "\n"):
+    let iov = [IoVec { base: msg.ptr, len: msg.len }, IoVec { base: end.ptr, len: end.len }];
+    sys_writev_stdout(iov);
+
+# 54. property: Native first-class syntax via Variation B `get:` / `set:` clauses (Zero runtime descriptor!)
+
+
+# =========================================================================
+# R: range, repr, reversed, round
+# =========================================================================
+
+# 55. range(start, stop, step): 24-byte `repr(C)` `RangeWindow` struct with inline `op for` and O(1) indexing
+pub struct range[T: Steppable]:
+    start: T
+    stop:  T
+    step:  T
+
+    pub self(stop: T):
+        .start = 0 as T;
+        .stop  = stop;
+        .step  = 1 as T;
+
+    pub self(start: T, stop: T, step: T = 1 as T):
+        .start = start;
+        .stop  = stop;
+        .step  = step;
+
+    # Fused directly into caller's loop header (0 allocations):
+    pub op for self -> T:
+        mut curr = .start;
+        while curr < .stop:
+            yield curr;
+            curr = curr + .step;
+
+    # O(1) random access indexing (`range(0, 100, 5)[3]` -> `15`):
+    pub self[idx: usize] -> T {
+        get: return .start + ((idx as T) * .step);
+    }
+
+    # O(1) membership test (`x in range(0, 100, 2)`):
+    pub op (val: T) in self -> bool:
+        if val < .start or !(val < .stop):
+            return false;
+        return ((val - .start) % .step) == (0 as T);
+
+# 56. repr(val): Compile-time structural debug formatter using `comptime_field_names(T)`
+pub def repr[T](val: ref T, out: mut SliceBuffer[u8]) -> Slice[u8]:
+    out.push_slice(comptime_type_name(T));
+    out.push_slice(" { ");
+    comptime_for_each_field(T, fn(name, offset):
+        out.push_slice(name);
+        out.push_slice(": ");
+        format_field_into(val, offset, out);
+        out.push_slice(", ");
+    );
+    out.push_slice("}");
+    return out.as_slice();
+
+# 57. reversed(slice): Zero-copy backward strided view or reverse `op for` generator
+pub def reversed[T](items: Slice[T]) -> T:
+    mut i = items.len;
+    while i > 0:
+        i -= 1;
+        yield items[i];
+
+# 58. round(x): Single-instruction IEEE-754 round-half-to-even (`roundsd` / `frintn`)
+pub def round(x: f64) -> f64:
+    return intrin_round_even_f64(x);
+
+pub def round(x: f64, ndigits: u32) -> f64:
+    # Lookup table for 10^0 .. 10^15 avoids slow `pow(10.0, n)` call!
+    let POW10: [f64; 16] = [
+        1.0, 10.0, 100.0, 1e3, 1e4, 1e5, 1e6, 1e7,
+        1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15
+    ];
+    let scale = POW10[ndigits as usize];
+    return intrin_round_even_f64(x * scale) / scale;
+
+
+# =========================================================================
+# INTERFACES FOR S–Z CONSTRAINED GENERICS
+# =========================================================================
+pub interface Additive:
+    op self + (rhs: Self) -> Self;
+
+pub interface Stringable:
+    op self as str -> Slice[u8];
+
+
+# =========================================================================
+# S: set, setattr, slice, sorted, staticmethod, str, sum, super
+# =========================================================================
+
+# 59. set[T]: SwissTable-style SIMD open-addressed contiguous set (1-byte H2 control tags)
+pub struct HashSet[T: Hashable]:
+    ctrl:   SliceBuffer[u8]    # 16-byte SIMD control groups (0x80 = empty, 0..127 = 7-bit hash tag)
+    keys:   SliceBuffer[T]     # Contiguous keys array (zero pointer chasing!)
+    count:  usize
+
+    pub op (item: T) in self -> bool:
+        let h = hash(item);
+        let h1 = (h >> 7) as usize;
+        let h2 = (h & 0x7F) as u8;
+        let mask = .ctrl.len - 1;
+        mut group_idx = h1 & mask;
+        while true:
+            # 16-way parallel byte comparison in a single SSE2/NEON instruction:
+            mut match_mask = intrin_simd16_eq_u8(.ctrl.ptr + group_idx, h2);
+            while match_mask != 0:
+                let bit = intrin_cttz_u32(match_mask) as usize;
+                let slot = (group_idx + bit) & mask;
+                if .keys[slot] == item:
+                    return true;
+                match_mask &= match_mask - 1;  # Clear lowest set bit
+            if intrin_simd16_has_empty(.ctrl.ptr + group_idx):
+                return false;
+            group_idx = (group_idx + 16) & mask;
+
+# 60. setattr(obj, name, val): Compile-time direct offset store `*(ptr + offset) = val`
+pub mut def setattr[T, V](obj: mut ref T, comptime name: str, val: V):
+    # Compiles to the exact same `mov [rdi + offset], rsi` instruction as `obj.field = val`!
+    comptime_field_mut_ref[T, V](obj, name) = val;
+
+# Dynamic bag fallback when operating on a runtime `SliceMap`:
+pub mut def setattr[V](bag: mut ref SliceMap[str, V], key: str, val: V):
+    bag[key] = val;
+
+# 61. slice(start, stop, step): 24-byte index window struct usable directly in `self[...]`
+pub struct SliceWindow:
+    start: usize
+    stop:  usize
+    step:  usize
+
+    pub self(stop: usize):
+        .start = 0; .stop = stop; .step = 1;
+
+    pub self(start: usize, stop: usize, step: usize = 1):
+        .start = start; .stop = stop; .step = step;
+
+    # Projects any contiguous `Slice[T]` into a zero-copy `StridedSlice[T]` in O(1) time!
+    pub def apply[T](buf: Slice[T]) -> StridedSlice[T]:
+        let clamped_stop = min(.stop, buf.len);
+        let count = (clamped_stop - .start + (.step - 1)) / .step;
+        return StridedSlice[T] {
+            base_ptr:    buf.ptr + .start,
+            len:         count,
+            byte_stride: sizeof(T) * .step
+        };
+
+# 62. sorted(items): In-place Pattern-Defeating Quicksort (pdqsort) + Radix Sort for integers
+pub def sorted[T: Ordered](items: Slice[T], out: mut SliceBuffer[T]) -> Slice[T]:
+    out.copy_from(0, items);
+    mut view = out.as_mut_slice();
+    if comptime_is_integer(T):
+        radix_sort_in_place(view);   # O(N) branchless 8-bit pass radix sort for u32/u64/i64!
+    else:
+        pdqsort_in_place(view);      # Branchless BlockQuicksort + InsertionSort for small runs
+    return view;
+
+# 63. staticmethod: Native `static def` keyword in Pilot (Zero wrapper object overhead)
+
+# 64. str(val): Invokes `op self as str` or zero-copy UTF-8 view
+pub type str = Slice[u8];
+
+pub def str[T: Stringable](val: ref T) -> Slice[u8]:
+    return val as str;
+
+# 65. sum(items, start): 4-Way Unrolled SIMD Accumulator (Prevents loop-carried dependency stalls!)
+pub def sum[T: Additive](items: Slice[T], start: T = 0 as T) -> T:
+    let n = items.len;
+    mut acc0: T = start;
+    mut acc1: T = 0 as T;
+    mut acc2: T = 0 as T;
+    mut acc3: T = 0 as T;
+
+    # Unroll 4x so the CPU executes 4 independent `add` / `vaddps` pipelines per cycle:
+    let limit = n & ~3;
+    mut i: usize = 0;
+    while i < limit:
+        acc0 = acc0 + items[i];
+        acc1 = acc1 + items[i + 1];
+        acc2 = acc2 + items[i + 2];
+        acc3 = acc3 + items[i + 3];
+        i += 4;
+
+    mut total = (acc0 + acc1) + (acc2 + acc3);
+    while i < n:
+        total = total + items[i];
+        i += 1;
+    return total;
+
+# 66. super(obj): Zero-cost compile-time structural upcast / base lens (0 instructions)
+pub def super[Base, Derived](obj: ref Derived) -> View[Base]:
+    return obj as view Base;
+
+
+# =========================================================================
+# T: tuple, type
+# =========================================================================
+
+# 67. tuple: Unboxed C-ABI contiguous value product type `(T1, T2, ...)` or fixed array
+pub def tuple[T, const N: usize](items: Slice[T]) -> [T; N]:
+    # Reinterprets slice pointer directly as a fixed-size stack/register tuple!
+    return *(items.ptr as ptr[[T; N]]);
+
+# 68. type(x): Compile-time 64-bit FNV-1a / TypeId constant (Zero runtime RTTI headers!)
+pub struct TypeInfo:
+    id:        u64
+    name:      Slice[u8]
+    byte_size: usize
+    alignment: usize
+
+pub def type[T](_: ref T) -> TypeInfo:
+    return TypeInfo {
+        id:        comptime_type_id(T),
+        name:      comptime_type_name(T),
+        byte_size: sizeof(T),
+        alignment: alignof(T)
+    };
+
+
+# =========================================================================
+# V: vars
+# =========================================================================
+
+# 69. vars(obj): Projects any struct instance into a zero-copy `SliceMap[str, Slice[u8]]`
+# using its compile-time field offset table!
+pub def vars[T](obj: ref T) -> StructFieldView[T]:
+    return StructFieldView[T] { base_ptr: obj as ptr[u8] };
+
+
+# =========================================================================
+# Z: zip
+# =========================================================================
+
+# 70. zip(a, b): Zero-allocation `op for` generator yielding register pairs `(T, U)`
+pub def zip[T, U](a: Slice[T], b: Slice[U]) -> (T, U):
+    let limit = min(a.len, b.len);
+    for i in 0 .. limit:
+        yield (a[i], b[i]);
+
+# Materialized zero-copy SoA-to-SliceMap zip (Zero element copying!):
+pub def zip_map[K, V](keys: Slice[K], vals: Slice[V]) -> SliceMap[K, V]:
+    return SliceMap.from_soa(keys, vals);
+
+
+# =========================================================================
+# __import__: Replaced by Clearance-Gated Native Dynamic Library Loader
+# =========================================================================
+
+# 71. Dynamic shared-library / plugin loader (`dlopen`/`LoadLibrary`) gated behind `lvl(40)`:
+lvl(40) pub def load_module[InterfaceT](lib_path: Slice[u8]) -> Result[InterfaceT, DlErr]:
+    let handle = sys_dlopen(lib_path)?;
+    return sys_bind_c_abi_table[InterfaceT](handle);

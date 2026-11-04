@@ -1,0 +1,105 @@
+pub interface OpAdd[T] {
+    op self +(other: T) -> T;
+}
+
+pub interface OpSubtract[T] {
+    op self -(other: T) -> T;
+}
+
+pub interface OpMultiply[T] {
+    op self *(other: T) -> T;
+}
+
+pub interface OpDivide[T] {
+    op self /(other: T) -> T;
+}
+
+pub interface OpModulo[T] {
+    op self %(other: T) -> T;
+}
+
+pub interface OpBitwiseAnd[T] {
+    op self &(other: T) -> T;
+}
+
+pub interface OpBitwiseOr[T] {
+    op self |(other: T) -> T;
+}
+
+pub interface OpBitwiseXor[T] {
+    op self ^(other: T) -> T;
+}
+
+pub interface OpBitwiseLeftShift[T] {
+    op self <<(shift: u32) -> T;
+}
+
+pub interface OpBitwiseRightShift[T] {
+    op self >>(shift: u32) -> T;
+}
+
+// assignment operators
+pub interface OpNotEqual[T] {
+    op self !=(other: T) -> bool;
+}
+
+pub interface OpEqual[T] {
+    op self ==(other: T) -> bool;
+}
+
+pub interface OpAddAssign[T] {
+    op self +=(other: T) -> T;
+}
+
+pub interface OpSubtractAssign[T] {
+    op self -=(other: T) -> T;
+}
+
+pub interface OpMultiplyAssign[T] {
+    op self *=(other: T) -> T;
+}
+
+pub interface OpDivideAssign[T] {
+    op self /=(other: T) -> T;
+}
+
+pub interface OpModuloAssign[T] {
+    op self %=(other: T) -> T;
+}
+
+// comparison operators
+pub interface OpLessThan[T] {
+    op self <(other: T) -> bool;
+}
+
+pub interface OpLessThanOrEqual[T] {
+    op self <=(other: T) -> bool;
+}
+
+pub interface OpGreaterThan[T] {
+    op self >(other: T) -> bool;
+}
+
+pub interface OpGreaterThanOrEqual[T] {
+    op self >=(other: T) -> bool;
+}
+
+pub interface OpNegate[T] {
+    op self !( ) -> bool;
+}
+
+pub interface OpLogicalAnd[T] {
+    op self &&(other: T) -> bool;
+}
+
+pub interface OpLogicalOr[T] {
+    op self ||(other: T) -> bool;
+}
+
+pub interface OpUnaryPlus[T] {
+    op + self ( ) -> T;
+}
+
+pub interface OpNegative[T] {
+    op - self ( ) -> T;
+}

@@ -1,0 +1,46 @@
+pub interface Numeric[T] {
+    op self +(other: T) -> T;
+    op self -(other: T) -> T;
+    op self *(other: T) -> T;
+    op self /(other: T) -> T;
+    op self %(other: T) -> T;
+    op self &(other: T) -> T;
+    op self >>(shift: u32) -> T;
+    op self ==(other: T) -> bool;
+}
+
+pub interface Integer[T] : Numeric[T] {
+    op self <<(shift: u32) -> T;
+    op self |(other: T) -> T;
+    op self ^(other: T) -> T;
+    op self <(other: T) -> bool;
+    op self <=(other: T) -> bool;
+    op self >=(other: T) -> bool;
+    op self >(other: T) -> bool;
+}
+
+pub interface FloatingPoint[T] : Numeric[T] {
+    op self <(other: T) -> bool;
+    op self <=(other: T) -> bool;
+    op self >=(other: T) -> bool;
+    op self >(other: T) -> bool;
+}
+
+pub interface Complex[T] : Numeric[T] {
+    op self <(other: T) -> bool;
+    op self <=(other: T) -> bool;
+    op self >=(other: T) -> bool;
+    op self >(other: T) -> bool;
+}
+
+pub interface Truthy[T] {
+    op self -> bool;
+}
+
+
+
+pub interface Integral {
+    op self / (rhs: Self) -> Self;
+    op self % (rhs: Self) -> Self;
+}
+

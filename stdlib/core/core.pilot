@@ -3,11 +3,33 @@
 
 type Ordering = Less | Equal | Greater;
 
-def identity(x) {
+pub interface Iterable[T] {
+    op for self -> T;
+}
+
+pub interface AsyncIterable[T] {
+    op async for self -> T;
+}
+
+pub interface Awaitable[T] {
+    op await self -> T;
+}
+
+pub pure def abs(x: i64) -> i64 {
+    let mask = x >> 63;
+    return (x ^ mask) - mask;
+}
+
+pub pure def abs(x: f64) -> f64 {
+    let bits: u64 = (x as u64) & 0x7FFFFFFFFFFFFFFF;
+    return bits as f64;
+}
+
+pub pure def identity(x) {
     return x;
 }
 
-def compare(a, b) -> Ordering {
+pub pure def compare(a, b) -> Ordering {
     if a < b {
         return Ordering.Less;
     } elif a > b {
@@ -16,7 +38,7 @@ def compare(a, b) -> Ordering {
     return Ordering.Equal;
 }
 
-def is_less(ord: Ordering) -> bool {
+pub pure def is_less(ord: Ordering) -> bool {
     return match ord {
         case Ordering.Less => true,
         case Ordering.Equal => false,
@@ -24,7 +46,7 @@ def is_less(ord: Ordering) -> bool {
     };
 }
 
-def is_equal(ord: Ordering) -> bool {
+pub pure def is_equal(ord: Ordering) -> bool {
     return match ord {
         case Ordering.Less => false,
         case Ordering.Equal => true,
@@ -32,7 +54,7 @@ def is_equal(ord: Ordering) -> bool {
     };
 }
 
-def is_greater(ord: Ordering) -> bool {
+pub pure def is_greater(ord: Ordering) -> bool {
     return match ord {
         case Ordering.Less => false,
         case Ordering.Equal => false,
@@ -40,7 +62,7 @@ def is_greater(ord: Ordering) -> bool {
     };
 }
 
-def reverse_ordering(ord: Ordering) -> Ordering {
+pub pure def reverse_ordering(ord: Ordering) -> Ordering {
     return match ord {
         case Ordering.Less => Ordering.Greater,
         case Ordering.Equal => Ordering.Equal,
@@ -48,7 +70,7 @@ def reverse_ordering(ord: Ordering) -> Ordering {
     };
 }
 
-def clamp(val, lo, hi) {
+pub pure def clamp(val, lo, hi) {
     if val < lo {
         return lo;
     }
@@ -58,25 +80,25 @@ def clamp(val, lo, hi) {
     return val;
 }
 
-def min(a, b) {
+pub pure def min(a, b) {
     if a <= b {
         return a;
     }
     return b;
 }
 
-def max(a, b) {
+pub pure def max(a, b) {
     if a >= b {
         return a;
     }
     return b;
 }
 
-def swap_pair(pair) {
+pub pure def swap_pair(pair) {
     return (pair[1], pair[0]);
 }
 
-def check_invariant(cond: bool, msg: str) {
+pub pure def check_invariant(cond: bool, msg: str) {
     if !cond {
         panic(msg);
     }
@@ -89,7 +111,7 @@ def check_invariant(cond: bool, msg: str) {
 
 const _ASCII_PRINTABLE: str = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
 
-def char_code_at(s: str, idx: i64) -> i64 {
+pub pure def char_code_at(s: str, idx: i64) -> i64 {
     let s_len: i64 = len(s);
     if idx < 0 or idx >= s_len { return 0; }
     let c = s[idx];
@@ -105,7 +127,7 @@ def char_code_at(s: str, idx: i64) -> i64 {
     return 0;
 }
 
-def char_from_code(code: i64) -> str {
+pub pure def char_from_code(code: i64) -> str {
     if code == 10 { return "\n"; }
     if code == 13 { return "\r"; }
     if code == 9 { return "\t"; }
@@ -116,7 +138,7 @@ def char_from_code(code: i64) -> str {
     return "";
 }
 
-def str_slice(s: str, start: i64, end_idx: i64) -> str {
+pub pure def str_slice(s: str, start: i64, end_idx: i64) -> str {
     let s_len: i64 = len(s);
     var lo: i64 = start;
     var hi: i64 = end_idx;
@@ -134,7 +156,7 @@ def str_slice(s: str, start: i64, end_idx: i64) -> str {
     return s[lo..hi];
 }
 
-def str_index_of(s: str, sub: str, start: i64 = 0) -> i64 {
+pub pure def str_index_of(s: str, sub: str, start: i64 = 0) -> i64 {
     let s_len: i64 = len(s);
     let sub_len: i64 = len(sub);
     if sub_len == 0 { return start; }
@@ -151,7 +173,7 @@ def str_index_of(s: str, sub: str, start: i64 = 0) -> i64 {
     return -1;
 }
 
-def str_last_index_of(s: str, sub: str, start: i64 = -1) -> i64 {
+pub pure def str_last_index_of(s: str, sub: str, start: i64 = -1) -> i64 {
     let s_len: i64 = len(s);
     let sub_len: i64 = len(sub);
     if sub_len == 0 { return s_len; }
@@ -169,7 +191,7 @@ def str_last_index_of(s: str, sub: str, start: i64 = -1) -> i64 {
     return -1;
 }
 
-def str_replace(s: str, old: str, new_str: str) -> str {
+pub pure def str_replace(s: str, old: str, new_str: str) -> str {
     let s_len: i64 = len(s);
     let old_len: i64 = len(old);
     if old_len == 0 or s_len == 0 { return s; }
@@ -190,7 +212,7 @@ def str_replace(s: str, old: str, new_str: str) -> str {
     return result;
 }
 
-def str_split(s: str, sep: str) -> List[str] {
+pub pure def str_split(s: str, sep: str) -> List[str] {
     let s_len: i64 = len(s);
     let sep_len: i64 = len(sep);
     let parts: List[str] = [];
@@ -214,7 +236,7 @@ def str_split(s: str, sep: str) -> List[str] {
     return parts;
 }
 
-def str_trim(s: str) -> str {
+pub pure def str_trim(s: str) -> str {
     let s_len: i64 = len(s);
     var start: i64 = 0;
     while start < s_len {
@@ -235,7 +257,7 @@ def str_trim(s: str) -> str {
     return s[start..end_idx];
 }
 
-def str_to_upper(s: str) -> str {
+pub pure def str_to_upper(s: str) -> str {
     let s_len: i64 = len(s);
     var res: str = "";
     for (i in 0..<s_len) {
@@ -249,7 +271,7 @@ def str_to_upper(s: str) -> str {
     return res;
 }
 
-def str_to_lower(s: str) -> str {
+pub pure def str_to_lower(s: str) -> str {
     let s_len: i64 = len(s);
     var res: str = "";
     for (i in 0..<s_len) {
@@ -263,14 +285,14 @@ def str_to_lower(s: str) -> str {
     return res;
 }
 
-def str_case(s: str, upper: bool) -> str {
+pub pure def str_case(s: str, upper: bool) -> str {
     if upper {
         return str_to_upper(s);
     }
     return str_to_lower(s);
 }
 
-def parse_int_strict(s: str, radix: i64 = 10) -> any {
+pub pure def parse_int_strict(s: str, radix: i64 = 10) -> any {
     let clean: str = str_trim(s);
     let s_len: i64 = len(clean);
     if s_len == 0 { return none; }
@@ -304,7 +326,7 @@ def parse_int_strict(s: str, radix: i64 = 10) -> any {
     return acc;
 }
 
-def parse_float_strict(s: str) -> any {
+pub pure def parse_float_strict(s: str) -> any {
     let clean: str = str_trim(s);
     let s_len: i64 = len(clean);
     if s_len == 0 { return none; }
@@ -380,7 +402,7 @@ def parse_float_strict(s: str) -> any {
     return result;
 }
 
-def map_entries_sorted(m: any) -> List[any] {
+pub pure def map_entries_sorted(m: any) -> List[any] {
     let entries: List[any] = [];
     for k in m.keys() {
         entries.append((k, m[k]));
@@ -389,19 +411,19 @@ def map_entries_sorted(m: any) -> List[any] {
     return entries;
 }
 
-def slice_len(buf: any) -> i64 {
+pub pure def slice_len(buf: any) -> i64 {
     return len(buf);
 }
 
-def slice_cap(buf: any) -> i64 {
+pub pure def slice_cap(buf: any) -> i64 {
     return buf.capacity;
 }
 
-def slice_clear(buf: any) {
+pub pure def slice_clear(buf: any) {
     buf.clear();
 }
 
-def slice_to_list(buf: any) -> List[any] {
+pub pure def slice_to_list(buf: any) -> List[any] {
     let items: List[any] = [];
     for (i in 0..<len(buf)) {
         items.append(buf[i]);
@@ -409,7 +431,7 @@ def slice_to_list(buf: any) -> List[any] {
     return items;
 }
 
-def slice_sum(buf: any) -> f64 {
+pub pure def slice_sum(buf: any) -> f64 {
     var total: f64 = 0.0;
     for (i in 0..<len(buf)) {
         total = total + float(buf[i]);
@@ -417,27 +439,29 @@ def slice_sum(buf: any) -> f64 {
     return total;
 }
 
+
+
 // -----------------------------------------------------------------------------
 // Standard Double-Underscore Internal Function Bridges in Pure Pilot
 // -----------------------------------------------------------------------------
-def __str_slice(s: str, start: i64, end_idx: i64) -> str => str_slice(s, start, end_idx);
-def __str_char_code(s: str, idx: i64) -> i64 => char_code_at(s, idx);
-def __char_from_code(code: i64) -> str => char_from_code(code);
-def __str_index_of(s: str, sub: str, start: i64 = 0) -> i64 => str_index_of(s, sub, start);
-def __str_last_index_of(s: str, sub: str, start: i64 = -1) -> i64 => str_last_index_of(s, sub, start);
-def __str_replace(s: str, old: str, new_str: str) -> str => str_replace(s, old, new_str);
-def __str_split(s: str, sep: str) -> List[str] => str_split(s, sep);
-def __str_trim(s: str) -> str => str_trim(s);
-def __str_case(s: str, upper: bool) -> str => str_case(s, upper);
-def __parse_int_strict(s: str, radix: i64 = 10) => parse_int_strict(s, radix);
-def __parse_float_strict(s: str) => parse_float_strict(s);
-def __map_entries_sorted(m: any) => map_entries_sorted(m);
-def __slice_len(buf: any) -> i64 => slice_len(buf);
-def __slice_cap(buf: any) -> i64 => slice_cap(buf);
-def __slice_clear(buf: any) => slice_clear(buf);
-def __slice_to_list(buf: any) => slice_to_list(buf);
-def __slice_sum(buf: any) => slice_sum(buf);
-def __freeze_value(val: any) => val;
-def __is_frozen(val: any) -> bool => true;
-def __is_perfect_hash_map(map_val: any) -> bool => true;
-def __frozen_map_table_size(map_val: any) -> i64 => len(map_val);
+pub pure def __str_slice(s: str, start: i64, end_idx: i64) -> str => str_slice(s, start, end_idx);
+pub pure def __str_char_code(s: str, idx: i64) -> i64 => char_code_at(s, idx);
+pub pure def __char_from_code(code: i64) -> str => char_from_code(code);
+pub pure def __str_index_of(s: str, sub: str, start: i64 = 0) -> i64 => str_index_of(s, sub, start);
+pub pure def __str_last_index_of(s: str, sub: str, start: i64 = -1) -> i64 => str_last_index_of(s, sub, start);
+pub pure def __str_replace(s: str, old: str, new_str: str) -> str => str_replace(s, old, new_str);
+pub pure def __str_split(s: str, sep: str) -> List[str] => str_split(s, sep);
+pub pure def __str_trim(s: str) -> str => str_trim(s);
+pub pure def __str_case(s: str, upper: bool) -> str => str_case(s, upper);
+pub pure def __parse_int_strict(s: str, radix: i64 = 10) => parse_int_strict(s, radix);
+pub pure def __parse_float_strict(s: str) => parse_float_strict(s);
+pub pure def __map_entries_sorted(m: any) => map_entries_sorted(m);
+pub pure def __slice_len(buf: any) -> i64 => slice_len(buf);
+pub pure def __slice_cap(buf: any) -> i64 => slice_cap(buf);
+pub pure def __slice_clear(buf: any) => slice_clear(buf);
+pub pure def __slice_to_list(buf: any) => slice_to_list(buf);
+pub pure def __slice_sum(buf: any) => slice_sum(buf);
+pub pure def __freeze_value(val: any) => val;
+pub pure def __is_frozen(val: any) -> bool => true;
+pub pure def __is_perfect_hash_map(map_val: any) -> bool => true;
+pub pure def __frozen_map_table_size(map_val: any) -> i64 => len(map_val);
