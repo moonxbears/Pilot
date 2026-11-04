@@ -1,116 +1,58 @@
-// SPDX-License-Identifier: MIT
-// std.option — Zero-Overhead Niche-Optimized Nullable (T?) Combinators
-// Adheres to Pilot Invariant #2: presence checks use native `match`, `if some`, or `is_some`.
+// =========================================================================
+// FILE: stdlib/core/option.pilot
+// STAGE 3B CONCISE NULL-SAFETY (`option<T>` / `T?`)
+// Preserves Milestone 12 implicit lifting, niche optimization & `some`/`none`.
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Option;
 
-def is_some(opt) -> bool {
-    return match opt {
-        case some(_) => true,
-        case none => false,
-        case _ => opt != none
-    };
-}
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
 
-def is_none(opt) -> bool {
-    return match opt {
-        case none => true,
-        case _ => opt == none
-    };
-}
+[Lang(Cfg.Lang.opt_t), Layout(c_abi)]
+pub partial struct option<T: IAnyValue> : IEquatable<option<T>>, ITryOperator<T, option<never>>, ICoalesceOperator<T> {
+    pub val:       T;
+    pub has_value: bool;
 
-def unwrap(opt) {
-    return match opt {
-        case some(v) => v,
-        case none => panic("called unwrap on none"),
-        case v => {
-            if v == none {
-                panic("called unwrap on none");
-            }
-            v
-        }
-    };
-}
+    pub is_some: bool { get => .has_value; }
+    pub is_none: bool { get => !.has_value; }
 
-// Runtime intrinsic aliases for interop
-def __opt_is_some(opt) -> bool { return is_some(opt); }
-def __opt_is_none(opt) -> bool { return is_none(opt); }
-def __opt_unwrap(opt) { return unwrap(opt); }
+    pub static pure:
+        fn some(v: T) -> option<T> => option<T> {
+            val:       v,
+            has_value: true,
+        };
 
-def expect(opt, msg: str) {
-    if is_none(opt) {
-        panic(msg);
-    }
-    return unwrap(opt);
-}
+        fn none() -> option<T> => option<T> {
+            val:       __ssa_cast(Cfg.Ssa.zext, 0, T),
+            has_value: false,
+        };
 
-def unwrap_or(opt, fallback) {
-    if is_some(opt) {
-        return unwrap(opt);
-    }
-    return fallback;
-}
+    pub pure:
+        // Universal postfix `expr?` unwraps `T` or propagates `none` early from enclosing `U?` fn
+        op ?  ()            -> T => .val;
+        op ?? (fallback: T) -> T => if .has_value { .val } else { fallback };
 
-def unwrap_or_else(opt, fallback_fn) {
-    if is_some(opt) {
-        return unwrap(opt);
-    }
-    return fallback_fn();
-}
+        op == (rhs: option<T>) -> bool =>
+            if .has_value != rhs.has_value {
+                false
+            } else {
+                if !.has_value { true } else { .val == rhs.val }
+            };
 
-def map(opt, transform_fn) {
-    if is_some(opt) {
-        return some(transform_fn(unwrap(opt)));
-    }
-    return none;
-}
+        fn unwrap_or(default_val: T) -> T => if .has_value { .val } else { default_val };
 
-def and_then(opt, flat_fn) {
-    if is_some(opt) {
-        return flat_fn(unwrap(opt));
-    }
-    return none;
-}
+        fn map<U: IAnyValue>(f: (T) => U) -> option<U> =>
+            if .has_value {
+                option<U>.some(f(.val))
+            } else {
+                option<U>.none()
+            };
 
-def or_else(opt, alt_fn) {
-    if is_some(opt) {
-        return opt;
-    }
-    return alt_fn();
-}
-
-def filter(opt, pred_fn) {
-    if is_some(opt) {
-        let v = unwrap(opt);
-        if pred_fn(v) {
-            return opt;
-        }
-    }
-    return none;
-}
-
-def zip(opt_a, opt_b) {
-    if is_some(opt_a) and is_some(opt_b) {
-        return some((unwrap(opt_a), unwrap(opt_b)));
-    }
-    return none;
-}
-
-def flatten(nested_opt) {
-    if is_some(nested_opt) {
-        return unwrap(nested_opt);
-    }
-    return none;
-}
-
-def ok_or(opt, err_val) -> any ! any {
-    if is_some(opt) {
-        return ok(unwrap(opt));
-    }
-    return fail(err_val);
-}
-
-def to_list(opt) {
-    if is_some(opt) {
-        return [unwrap(opt)];
-    }
-    return [];
+        fn and_then<U: IAnyValue>(f: (T) => option<U>) -> option<U> =>
+            if .has_value {
+                f(.val)
+            } else {
+                option<U>.none()
+            };
 }

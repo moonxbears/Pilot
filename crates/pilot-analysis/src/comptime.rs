@@ -299,11 +299,19 @@ impl TypeLayoutSpec {
     }
 
     pub fn byte_align(&self) -> usize {
-        let sz = self.byte_size();
-        if sz == 0 {
-            1
+        if self.bit_width == 0 {
+            self.fields
+                .iter()
+                .map(|(_, _, fsz)| (*fsz).next_power_of_two().min(8))
+                .max()
+                .unwrap_or(1)
         } else {
-            sz.next_power_of_two().min(16)
+            let sz = self.byte_size();
+            if sz == 0 {
+                1
+            } else {
+                sz.next_power_of_two().min(16)
+            }
         }
     }
 }
@@ -362,6 +370,7 @@ pub struct ComptimeEngine {
     pub lang_items: FxHashMap<LangItem, NodeId>,
     pub lang_items_by_name: FxHashMap<String, NodeId>,
     pub type_layouts: FxHashMap<String, TypeLayoutSpec>,
+    pub bundle_layouts: FxHashMap<String, TypeLayoutSpec>,
     pub node_to_type_name: FxHashMap<u32, String>,
     pub inline_hints: FxHashMap<u32, InlineHint>,
     pub lattice_interfaces: FxHashMap<String, u8>,
@@ -517,19 +526,96 @@ impl ComptimeEngine {
                 desugar_bracket_attributes(arena, item_id, parser_tables, self)?;
                 Ok(ComptimeValue::Void)
             }
+            NodeKind::LetStmt | NodeKind::VarStmt => {
+                let var_name = arena.interner.resolve(SymbolId(node.lhs)).to_string();
+                desugar_bracket_attributes(arena, item_id, parser_tables, self)?;
+                let rhs_id = NodeId(node.rhs);
+                if rhs_id.is_some() && (rhs_id.0 as usize) < arena.nodes.len() {
+                    let rhs_node = *arena.node(rhs_id);
+                    if rhs_node.node_kind() == NodeKind::BlockExpr {
+                        let mut bspec = TypeLayoutSpec::new(var_name.clone(), item_id);
+                        let children: Vec<u32> = arena.children_slice(rhs_node.lhs, rhs_node.rhs).to_vec();
+                        let mut field_offset = 0usize;
+                        for c_raw in children {
+                            let c_id = NodeId(c_raw);
+                            let c_node = *arena.node(c_id);
+                            if c_node.node_kind() == NodeKind::LetStmt {
+                                let f_name = arena.interner.resolve(SymbolId(c_node.lhs)).to_string();
+                                let f_ty_id = arena.type_annotations.get(&c_id.0).copied().unwrap_or(NodeId::NONE);
+                                let f_size = self.estimate_type_node_size(arena, f_ty_id);
+                                let aligned = if f_size > 0 {
+                                    (field_offset + (f_size - 1)) & !(f_size - 1)
+                                } else {
+                                    field_offset
+                                };
+                                bspec.fields.push((f_name, aligned, f_size));
+                                field_offset = aligned + f_size;
+                            } else if c_node.node_kind() == NodeKind::OperatorDecl {
+                                let op_sym_id = arena.operator_symbols.get(&c_id.0).copied().unwrap_or(SymbolId(0));
+                                let op_str = arena.interner.resolve(op_sym_id).to_string();
+                                let raw_body = arena.operator_bodies.get(&c_id.0).copied().unwrap_or(NodeId::NONE);
+                                if raw_body.is_some() {
+                                    let mut local_env = FxHashMap::default();
+                                    let self_sym = parser_tables.interner.intern("self");
+                                    local_env.insert("self".to_string(), ComptimeValue::Ident(self_sym));
+                                    if let Some(params) = arena.operator_params.get(&c_id.0).cloned() {
+                                        for p_id in params {
+                                            let p_node = *arena.node(p_id);
+                                            if p_node.node_kind() == NodeKind::ParamDecl {
+                                                let p_name = arena.interner.resolve(SymbolId(p_node.lhs)).to_string();
+                                                let p_sym = parser_tables.interner.intern(&p_name);
+                                                local_env.insert(p_name, ComptimeValue::Ident(p_sym));
+                                            }
+                                        }
+                                    }
+                                    let prev_depth = self.in_genesis_wrapper_depth;
+                                    self.in_genesis_wrapper_depth += 1;
+                                    let body_val = self.eval_expr_with_env(arena, raw_body, &mut local_env, parser_tables)?;
+                                    self.in_genesis_wrapper_depth = prev_depth;
+                                    if let ComptimeValue::SsaIntrinsic { opcode, .. } = body_val {
+                                        let is_unary = arena
+                                            .operator_params
+                                            .get(&c_id.0)
+                                            .map_or(true, |p| p.is_empty());
+                                        if is_unary && bspec.operators.contains_key(&op_str) {
+                                            bspec.operators.insert(format!("unary_{}", op_str), opcode);
+                                        } else {
+                                            bspec.operators.insert(op_str, opcode);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        self.bundle_layouts.insert(var_name, bspec);
+                    }
+                }
+                Ok(ComptimeValue::Void)
+            }
             NodeKind::StructDecl => {
                 let name_str = arena.interner.resolve(SymbolId(node.lhs)).to_string();
                 self.node_to_type_name.insert(item_id.0, name_str.clone());
-                self.type_layouts
+                let init_lattice = match name_str.as_str() {
+                    "slice" | "stride" | "str" | "SliceView" | "ref" => 0b01,
+                    "SliceBuffer" | "iso" => 0b10,
+                    "ArenaScope" => 0b11,
+                    _ => 0b00,
+                };
+                let entry = self
+                    .type_layouts
                     .entry(name_str.clone())
                     .or_insert_with(|| TypeLayoutSpec::new(name_str.clone(), item_id));
+                entry.lattice_bits |= init_lattice;
 
                 // Execute `[Lang(...), Bits(...), Layout(...)]` attributes left-to-right
                 desugar_bracket_attributes(arena, item_id, parser_tables, self)?;
 
                 // Record declared struct fields from `arena.record_fields`
                 if let Some(fields) = arena.record_fields.get(&item_id.0).cloned() {
-                    let mut field_offset = 0usize;
+                    let mut field_offset = self
+                        .type_layouts
+                        .get(&name_str)
+                        .map(|l| l.byte_size())
+                        .unwrap_or(0);
                     for (f_sym, f_ty_id) in fields {
                         let f_name = arena.interner.resolve(f_sym).to_string();
                         let f_size = self.estimate_type_node_size(arena, f_ty_id);
@@ -545,7 +631,7 @@ impl ComptimeEngine {
                     }
                 }
 
-                // Evaluate `op` declarations inside the struct body (`node.rhs` is the `BlockExpr` body)
+                // Evaluate fields, `*Bundle`/`*Facet` splices, destructors, and `op` declarations inside the struct body
                 let body_id = NodeId(node.rhs);
                 let children: Vec<u32> = if body_id.is_some() && (body_id.0 as usize) < arena.nodes.len() {
                     let body_node = *arena.node(body_id);
@@ -560,7 +646,62 @@ impl ComptimeEngine {
                 for c_raw in children {
                     let c_id = NodeId(c_raw);
                     let c_node = *arena.node(c_id);
-                    if c_node.node_kind() == NodeKind::OperatorDecl {
+                    match c_node.node_kind() {
+                        NodeKind::LetStmt => {
+                            let f_name = arena.interner.resolve(SymbolId(c_node.lhs)).to_string();
+                            let f_ty_id = arena.type_annotations.get(&c_id.0).copied().unwrap_or(NodeId::NONE);
+                            let f_size = self.estimate_type_node_size(arena, f_ty_id);
+                            let f_lat = self.estimate_type_node_lattice(arena, f_ty_id);
+                            if let Some(layout) = self.type_layouts.get_mut(&name_str) {
+                                let cur_off = layout.byte_size();
+                                let aligned = if f_size > 0 {
+                                    (cur_off + (f_size - 1)) & !(f_size - 1)
+                                } else {
+                                    cur_off
+                                };
+                                layout.fields.push((f_name, aligned, f_size));
+                                layout.lattice_bits |= f_lat;
+                            }
+                        }
+                        NodeKind::DestructorDecl => {
+                            if let Some(layout) = self.type_layouts.get_mut(&name_str) {
+                                layout.lattice_bits |= 0b10;
+                            }
+                        }
+                        NodeKind::ExprStmt => {
+                            let expr_id = NodeId(c_node.lhs);
+                            if expr_id.is_some() && (expr_id.0 as usize) < arena.nodes.len() {
+                                let expr_node = *arena.node(expr_id);
+                                if expr_node.node_kind() == NodeKind::UnaryExpr
+                                    && expr_node.flags == pilot_ast::UNARY_OP_SPLAT
+                                {
+                                    let op_id = NodeId(expr_node.lhs);
+                                    if op_id.is_some() && (op_id.0 as usize) < arena.nodes.len() {
+                                        let op_node = *arena.node(op_id);
+                                        if op_node.node_kind() == NodeKind::IdentExpr {
+                                            let bname = arena.interner.resolve(SymbolId(op_node.lhs)).to_string();
+                                            if let Some(bspec) = self.bundle_layouts.get(&bname).cloned() {
+                                                if let Some(layout) = self.type_layouts.get_mut(&name_str) {
+                                                    for (fnm, _, fsz) in bspec.fields {
+                                                        let cur_off = layout.byte_size();
+                                                        let aligned = if fsz > 0 {
+                                                            (cur_off + (fsz - 1)) & !(fsz - 1)
+                                                        } else {
+                                                            cur_off
+                                                        };
+                                                        layout.fields.push((fnm, aligned, fsz));
+                                                    }
+                                                    for (op_k, op_v) in bspec.operators {
+                                                        layout.operators.insert(op_k, op_v);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        NodeKind::OperatorDecl => {
                             let op_sym_id = arena.operator_symbols.get(&c_id.0).copied().unwrap_or(SymbolId(0));
                             let op_str = arena.interner.resolve(op_sym_id).to_string();
                             let raw_body = arena.operator_bodies.get(&c_id.0).copied().unwrap_or(NodeId::NONE);
@@ -596,18 +737,26 @@ impl ComptimeEngine {
                                     }
                                 }
                                 let prev_depth = self.in_genesis_wrapper_depth;
-                                if !parser_tables.bootstrap_sealed {
-                                    self.in_genesis_wrapper_depth += 1;
-                                }
+                                self.in_genesis_wrapper_depth += 1;
                                 let body_val = self.eval_expr_with_env(arena, raw_body, &mut local_env, parser_tables)?;
                                 self.in_genesis_wrapper_depth = prev_depth;
                                 if let ComptimeValue::SsaIntrinsic { opcode, .. } = body_val {
+                                    let is_unary = arena
+                                        .operator_params
+                                        .get(&c_id.0)
+                                        .map_or(true, |p| p.is_empty());
                                     if let Some(layout) = self.type_layouts.get_mut(&name_str) {
-                                        layout.operators.insert(op_str, opcode);
+                                        if is_unary && layout.operators.contains_key(&op_str) {
+                                            layout.operators.insert(format!("unary_{}", op_str), opcode);
+                                        } else {
+                                            layout.operators.insert(op_str, opcode);
+                                        }
                                     }
                                 }
                             }
                         }
+                        _ => {}
+                    }
                 }
                 Ok(ComptimeValue::Void)
             }
@@ -681,25 +830,95 @@ impl ComptimeEngine {
     }
 
     fn estimate_type_node_size(&self, arena: &AstArena, ty_node: NodeId) -> usize {
-        if ty_node.is_none() {
+        if ty_node.is_none() || (ty_node.0 as usize) >= arena.nodes.len() {
             return 8;
         }
         let n = *arena.node(ty_node);
-        if n.node_kind() == NodeKind::IdentExpr {
-            let tname = arena.interner.resolve(SymbolId(n.lhs));
-            if let Some(spec) = self.type_layouts.get(tname) {
-                return spec.byte_size();
+        match n.node_kind() {
+            NodeKind::IdentExpr | NodeKind::TypeNamed => {
+                let tname = arena.interner.resolve(SymbolId(n.lhs));
+                if let Some(spec) = self.type_layouts.get(tname) {
+                    let sz = spec.byte_size();
+                    if sz > 0 {
+                        return sz;
+                    }
+                }
+                match tname {
+                    "bool" | "u8" | "i8" => 1,
+                    "u16" | "i16" | "f16" => 2,
+                    "u32" | "i32" | "f32" | "char" => 4,
+                    "u64" | "i64" | "f64" | "usize" | "isize" | "ptr" => 8,
+                    "u128" | "i128" | "f128" | "slice" | "str" | "SliceView" => 16,
+                    "stride" | "SliceBuffer" => 24,
+                    _ => 8,
+                }
             }
-            match tname {
-                "bool" | "u8" | "i8" => 1,
-                "u16" | "i16" | "f16" => 2,
-                "u32" | "i32" | "f32" | "char" => 4,
-                "u64" | "i64" | "f64" | "usize" | "isize" => 8,
-                "u128" | "i128" | "f128" => 16,
-                _ => 8,
+            NodeKind::TypeSlice => match n.flags {
+                0 | 2 => 16, // slice<T> or SliceView<T>
+                1 | 3 => 24, // SliceBuffer<T> or stride<T>
+                _ => 16,
+            },
+            _ => 8,
+        }
+    }
+
+    fn estimate_type_node_lattice(&self, arena: &AstArena, ty_node: NodeId) -> u8 {
+        if ty_node.is_none() || (ty_node.0 as usize) >= arena.nodes.len() {
+            return 0b00;
+        }
+        let n = *arena.node(ty_node);
+        match n.node_kind() {
+            NodeKind::IdentExpr | NodeKind::TypeNamed => {
+                let tname = arena.interner.resolve(SymbolId(n.lhs));
+                if let Some(spec) = self.type_layouts.get(tname) {
+                    return spec.lattice_bits;
+                }
+                match tname {
+                    "slice" | "stride" | "str" | "SliceView" | "ref" => 0b01,
+                    "SliceBuffer" | "iso" => 0b10,
+                    "ArenaScope" => 0b11,
+                    _ => 0b00,
+                }
             }
-        } else {
-            8
+            NodeKind::TypeSlice => match n.flags {
+                0 | 2 | 3 => 0b01, // slice<T>, SliceView<T>, stride<T>
+                1 => 0b10,         // SliceBuffer<T>
+                _ => 0b01,
+            },
+            _ => 0b00,
+        }
+    }
+
+    pub fn query_type_size_align_lattice(&self, tname: &str) -> (usize, usize, u8) {
+        if let Some(lt_idx) = tname.find('<') {
+            let base = tname[..lt_idx].trim();
+            let arg = tname[lt_idx + 1..tname.len().saturating_sub(1)].trim();
+            if base == "RangeWindow" {
+                let (arg_sz, arg_align, arg_lat) = self.query_type_size_align_lattice(arg);
+                let field_count = self
+                    .type_layouts
+                    .get("RangeWindow")
+                    .map(|s| s.fields.len().max(2))
+                    .unwrap_or(2);
+                return (field_count * arg_sz, arg_align, arg_lat);
+            }
+            return self.query_type_size_align_lattice(base);
+        }
+        if let Some(spec) = self.type_layouts.get(tname) {
+            return (spec.byte_size(), spec.byte_align(), spec.lattice_bits);
+        }
+        match tname {
+            "bool" | "u8" | "i8" => (1, 1, 0b00),
+            "u16" | "i16" | "f16" => (2, 2, 0b00),
+            "u32" | "i32" | "f32" | "char" => (4, 4, 0b00),
+            "u64" | "i64" | "f64" | "usize" | "isize" | "ptr" => (8, 8, 0b00),
+            "u128" | "i128" | "f128" => (16, 16, 0b00),
+            "slice" | "str" | "SliceView" => (16, 8, 0b01),
+            "stride" => (24, 8, 0b01),
+            "SliceBuffer" => (24, 8, 0b10),
+            "ArenaScope" => (16, 8, 0b11),
+            "void" | "never" => (0, 1, 0b00),
+            _ => (8, 8, 0b00),
         }
     }
 
@@ -1447,37 +1666,14 @@ impl ComptimeEngine {
             // 22. `type_sizeof`: `(target_t: AstNode | Ident | Str)`
             "type_sizeof" => {
                 let tname = self.resolve_type_arg(args.first(), arena, parser_tables);
-                let bytes = if let Some(spec) = self.type_layouts.get(&tname) {
-                    spec.byte_size()
-                } else {
-                    match tname.as_str() {
-                        "bool" | "u8" | "i8" => 1,
-                        "u16" | "i16" | "f16" => 2,
-                        "u32" | "i32" | "f32" | "char" => 4,
-                        "u64" | "i64" | "f64" | "usize" | "isize" => 8,
-                        "u128" | "i128" | "f128" => 16,
-                        "void" | "never" => 0,
-                        _ => 8,
-                    }
-                };
+                let (bytes, _, _) = self.query_type_size_align_lattice(&tname);
                 Ok(ComptimeValue::Uint(bytes as u128))
             }
 
             // 23. `type_alignof`: `(target_t: AstNode | Ident | Str)`
             "type_alignof" => {
                 let tname = self.resolve_type_arg(args.first(), arena, parser_tables);
-                let align = if let Some(spec) = self.type_layouts.get(&tname) {
-                    spec.byte_align()
-                } else {
-                    match tname.as_str() {
-                        "bool" | "u8" | "i8" | "void" | "never" => 1,
-                        "u16" | "i16" | "f16" => 2,
-                        "u32" | "i32" | "f32" | "char" => 4,
-                        "u64" | "i64" | "f64" | "usize" | "isize" => 8,
-                        "u128" | "i128" | "f128" => 16,
-                        _ => 8,
-                    }
-                };
+                let (_, align, _) = self.query_type_size_align_lattice(&tname);
                 Ok(ComptimeValue::Uint(align as u128))
             }
 
@@ -1546,19 +1742,22 @@ impl ComptimeEngine {
                     .lattice_interfaces
                     .get(&tname)
                     .copied()
-                    .or_else(|| self.type_layouts.get(&tname).map(|s| s.lattice_bits))
-                    .unwrap_or(0b00);
+                    .unwrap_or_else(|| self.query_type_size_align_lattice(&tname).2);
                 Ok(ComptimeValue::Uint(bits as u128))
             }
 
             // 29. `enforce_core_naming_lint`: `(target_pkg: AstNode)`
             "enforce_core_naming_lint" => {
-                let pkg_name = match args.first() {
-                    Some(ComptimeValue::AstNode(nid)) if arena.pkg_decls.contains(&nid.0) => {
-                        let pkg_node = *arena.node(*nid);
-                        arena.interner.resolve(SymbolId(pkg_node.lhs)).to_string()
+                let pkg_name = if let Some(ref active) = self.active_pkg {
+                    active.clone()
+                } else {
+                    match args.first() {
+                        Some(ComptimeValue::AstNode(nid)) if arena.pkg_decls.contains(&nid.0) => {
+                            let pkg_node = *arena.node(*nid);
+                            arena.interner.resolve(SymbolId(pkg_node.lhs)).to_string()
+                        }
+                        _ => "Pilot.Core".to_string(),
                     }
-                    _ => self.active_pkg.clone().unwrap_or_else(|| "Pilot.Core".to_string()),
                 };
                 if !self.core_naming_enforced_pkgs.contains(&pkg_name) {
                     self.core_naming_enforced_pkgs.push(pkg_name);

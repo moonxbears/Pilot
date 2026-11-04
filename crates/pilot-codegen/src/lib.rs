@@ -142,7 +142,7 @@ let fl_round = fl.round();
 
     #[test]
     fn test_asm_emitter_vector_synthesis() {
-        let arena = pilot_parser::parse("def calc(a: int, b: int) -> int { return a + b }");
+        let arena = pilot_parser::parse("fn calc(a: i64, b: i64) -> i64 { return a + b; }");
         let asm = AsmEmitter::emit_assembly(&arena, "calc_mod", 3, true).unwrap();
         assert!(asm.contains("calc"));
 
@@ -165,11 +165,11 @@ let fl_round = fl.round();
     #[test]
     fn test_gpu_emitters_all_three_approaches() {
         let arena = pilot_parser::parse("
-@kernel
-def vec_add(a: *float, b: *float, c: *float, n: int) {
-    let idx = gpu_global_id()
+[Kernel]
+fn vec_add(a: ptr<f32>, b: ptr<f32>, c: ptr<f32>, n: i64) {
+    let idx = gpu_global_id();
     if idx < n {
-        c[idx] = a[idx] + b[idx]
+        c[idx] = a[idx] + b[idx];
     }
 }
 ");

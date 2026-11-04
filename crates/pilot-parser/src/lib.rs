@@ -201,6 +201,7 @@ pub struct DeclModifiers {
     pub is_pure: bool,
     pub is_mut: bool,
     pub is_partial: bool,
+    pub is_comptime: bool,
 }
 
 pub struct Parser<'a> {
@@ -405,6 +406,93 @@ impl<'a> Parser<'a> {
             self.errors.push(format!("Expected {:?}, found {:?}", kind, self.peek()));
             false
         }
+    }
+
+    #[inline]
+    fn next_non_newline_pos(&self, mut idx: usize) -> usize {
+        while idx < self.tape.len() {
+            let k = self.tape.kind(idx);
+            if k == TokenKind::Newline || k == TokenKind::Comment || k == TokenKind::BlockComment {
+                idx += 1;
+            } else {
+                break;
+            }
+        }
+        idx
+    }
+
+    #[inline]
+    fn at_greater(&self) -> bool {
+        self.at(TokenKind::Greater) || self.at(TokenKind::ShiftRight)
+    }
+
+    #[inline]
+    fn expect_greater(&mut self) -> bool {
+        if self.at(TokenKind::Greater) {
+            self.advance();
+            true
+        } else if self.at(TokenKind::ShiftRight) {
+            self.tape.kinds[self.pos] = TokenKind::Greater;
+            true
+        } else {
+            let ctx_start = (self.span().start as usize).saturating_sub(60);
+            let ctx_end = (self.span().end as usize + 20).min(self.src.len());
+            self.errors.push(format!(
+                "Expected '>', found {:?} near {:?}",
+                self.peek(),
+                &self.src[ctx_start..ctx_end]
+            ));
+            false
+        }
+    }
+
+    fn parse_generic_params(&mut self) {
+        if !self.at(TokenKind::Less) {
+            return;
+        }
+        self.advance(); // consume '<'
+        let mut last_was_comma = false;
+        while !self.at_end() && !self.at_greater() {
+            let start_pos = self.pos;
+            if self.is_ident_like() || self.peek().is_keyword() {
+                self.advance();
+                if self.at(TokenKind::Colon) {
+                    self.advance();
+                    if self.at(TokenKind::KwConst) || (self.is_ident_like() && self.text() == "const") {
+                        self.advance();
+                    }
+                    let _ = self.parse_type();
+                }
+            }
+            while !self.at_end() && !self.at(TokenKind::Comma) && !self.at_greater() {
+                if self.at(TokenKind::Equal) {
+                    self.advance();
+                    if self.at(TokenKind::StrLit) {
+                        self.advance();
+                    } else {
+                        let _ = self.parse_type();
+                    }
+                } else if self.at(TokenKind::Less) {
+                    self.parse_generic_params();
+                } else {
+                    self.advance();
+                }
+            }
+            last_was_comma = false;
+            if self.at(TokenKind::Comma) {
+                self.advance();
+                last_was_comma = true;
+            } else {
+                break;
+            }
+            if self.pos == start_pos {
+                self.advance();
+            }
+        }
+        if last_was_comma {
+            self.errors.push("Trailing comma rejected in generic parameters".to_string());
+        }
+        self.expect_greater();
     }
 
     fn peek_is_polyglot_block(&self) -> bool {
@@ -634,6 +722,7 @@ impl<'a> Parser<'a> {
         let mut is_pure = false;
         let mut is_mut = false;
         let mut is_partial = false;
+        let mut is_comptime = false;
 
         loop {
             self.skip_whitespace_and_comments();
@@ -646,7 +735,8 @@ impl<'a> Parser<'a> {
                 || self.at(TokenKind::KwPrivate)
                 || self.at(TokenKind::KwProtected)
                 || self.at(TokenKind::KwInternal)
-                || self.at(TokenKind::KwStatic);
+                || self.at(TokenKind::KwStatic)
+                || self.at(TokenKind::KwComptime);
 
             if !is_mod_candidate {
                 break;
@@ -725,16 +815,28 @@ impl<'a> Parser<'a> {
                     let next_pos = self.pos + 1;
                     if next_pos < self.tape.len() {
                         let nk = self.tape.kind(next_pos);
-                        let is_fn_or_mod = nk == TokenKind::KwFn || nk == TokenKind::KwStatic
+                        let is_fn_or_mod = nk == TokenKind::KwFn
+                            || nk == TokenKind::KwStatic
+                            || nk == TokenKind::Colon
+                            || nk == TokenKind::KwOp
                             || (self.is_ident_like_pos(next_pos) && {
                                 let t = self.tape.text(next_pos, self.src);
-                                t == "fn" || t == "static" || t == "pure"
+                                t == "fn" || t == "static" || t == "pure" || t == "op"
                             });
                         if is_fn_or_mod {
                             self.advance();
                             is_mut = true;
                             continue;
                         }
+                    }
+                    break;
+                }
+                "comptime" => {
+                    let next_pos = self.pos + 1;
+                    if next_pos < self.tape.len() && self.tape.kind(next_pos) == TokenKind::Colon {
+                        self.advance();
+                        is_comptime = true;
+                        continue;
                     }
                     break;
                 }
@@ -802,6 +904,9 @@ impl<'a> Parser<'a> {
             if !is_partial {
                 is_partial = active.is_partial;
             }
+            if !is_comptime {
+                is_comptime = active.is_comptime;
+            }
         }
 
         DeclModifiers {
@@ -812,6 +917,7 @@ impl<'a> Parser<'a> {
             is_pure,
             is_mut,
             is_partial,
+            is_comptime,
         }
     }
 
@@ -865,10 +971,17 @@ impl<'a> Parser<'a> {
 
                 if self.at(TokenKind::KwGet) || (self.is_ident_like() && self.text() == "get") {
                     self.advance();
-                    if self.at(TokenKind::Colon) || self.at(TokenKind::FatArrow) {
+                    if self.at(TokenKind::Semicolon) {
                         self.advance();
+                        clauses.get_body = NodeId::NONE;
+                    } else if self.at(TokenKind::RBrace) || self.at(TokenKind::VirtualRBrace) {
+                        clauses.get_body = NodeId::NONE;
+                    } else {
+                        if self.at(TokenKind::Colon) || self.at(TokenKind::FatArrow) {
+                            self.advance();
+                        }
+                        clauses.get_body = self.parse_block_or_expr_body();
                     }
-                    clauses.get_body = self.parse_block_or_expr_body();
                     clauses.get_visibility = clause_vis;
                     clauses.get_clearance = clause_clr;
                 } else if self.at(TokenKind::KwDefault) || (self.is_ident_like() && self.text() == "default") {
@@ -933,7 +1046,14 @@ impl<'a> Parser<'a> {
                     if self.at(TokenKind::Colon) || self.at(TokenKind::FatArrow) {
                         self.advance();
                     }
-                    let body = self.parse_block_or_expr_body();
+                    let body = if self.at(TokenKind::Semicolon) {
+                        self.advance();
+                        NodeId::NONE
+                    } else if self.at(TokenKind::RBrace) || self.at(TokenKind::VirtualRBrace) {
+                        NodeId::NONE
+                    } else {
+                        self.parse_block_or_expr_body()
+                    };
 
                     let setter = SetterClause {
                         param_name,
@@ -989,7 +1109,7 @@ impl<'a> Parser<'a> {
                 let t = self.tape.text(p, self.src);
                 if matches!(
                     t,
-                    "pub" | "public" | "priv" | "private" | "prot" | "protected" | "pkg" | "package" | "int" | "internal" | "open" | "export" | "static" | "pure" | "partial"
+                    "pub" | "public" | "priv" | "private" | "prot" | "protected" | "pkg" | "package" | "int" | "internal" | "open" | "export" | "static" | "pure" | "partial" | "var" | "comptime"
                 ) || (t.starts_with("lvl") && t[3..].chars().all(|c| c.is_ascii_digit()))
                 {
                     count += 1;
@@ -1004,13 +1124,22 @@ impl<'a> Parser<'a> {
 
     fn try_parse_distributive_binding(&mut self, is_var: bool, mods: DeclModifiers) -> Option<NodeId> {
         let saved_pos = self.pos;
+        let saved_err_len = self.errors.len();
         self.advance(); // consume 'let' or 'var'
-        if self.is_ident_like() {
+        let is_generic_param_decl = self.peek_ahead(1) == TokenKind::Less && self.peek_ahead(3) == TokenKind::Colon;
+        if self.is_ident_like()
+            && self.peek_ahead(1) != TokenKind::Equal
+            && self.peek_ahead(1) != TokenKind::Colon
+            && !is_generic_param_decl
+        {
             let ty_node = self.parse_type();
             if ty_node.is_some() && self.at(TokenKind::LBrace) {
-                let next_k = self.peek_ahead(1);
-                let next_k2 = self.peek_ahead(2);
-                let is_binding = (next_k == TokenKind::Ident || self.tape.flag(self.pos + 1).contains(TokenFlags::IS_CONTEXTUAL_IDENT))
+                let first_p = self.next_non_newline_pos(self.pos + 1);
+                let second_p = self.next_non_newline_pos(first_p + 1);
+                let next_k = if first_p < self.tape.len() { self.tape.kind(first_p) } else { TokenKind::Eof };
+                let next_k2 = if second_p < self.tape.len() { self.tape.kind(second_p) } else { TokenKind::Eof };
+                let is_binding = (next_k == TokenKind::Ident
+                    || (first_p < self.tape.len() && self.tape.flag(first_p).contains(TokenFlags::IS_CONTEXTUAL_IDENT)))
                     && next_k2 == TokenKind::Equal;
                 if is_binding {
                     self.advance(); // consume '{'
@@ -1051,6 +1180,7 @@ impl<'a> Parser<'a> {
             }
         }
         self.pos = saved_pos;
+        self.errors.truncate(saved_err_len);
         None
     }
 
@@ -1208,12 +1338,47 @@ impl<'a> Parser<'a> {
             );
         }
         if (self.at(TokenKind::KwInterface) || (self.is_ident_like() && self.text() == "interface")) && self.peek_ahead(1) == TokenKind::LBrace {
+            let start_span = self.span();
             self.advance(); // consume 'interface'
+            self.advance(); // consume '{'
             self.header_stack.push(self.active_header);
             self.active_header = Some(mods);
-            let block = self.parse_block_expr();
+            let mut children = Vec::new();
+            while !self.at_end() && !self.at(TokenKind::RBrace) {
+                self.consume_semi_or_newlines();
+                if self.at(TokenKind::RBrace) || self.at_end() {
+                    break;
+                }
+                let start_pos = self.pos;
+                let item_attrs = self.parse_attributes();
+                let item_mods = self.parse_modifiers();
+                let i_node = if self.at(TokenKind::KwInterface) || (self.is_ident_like() && self.text() == "interface") {
+                    self.parse_interface_decl()
+                } else if self.is_ident_like() || self.peek().is_keyword() {
+                    self.parse_interface_decl_headless()
+                } else {
+                    self.parse_stmt_or_decl()
+                };
+                if i_node.is_some() {
+                    self.apply_decl_mods(i_node, item_mods, Some(VisibilityTier::Internal));
+                    if !item_attrs.is_empty() {
+                        self.arena.node_attributes.entry(i_node.0).or_default().extend(item_attrs);
+                    }
+                    children.push(i_node);
+                }
+                if self.pos == start_pos {
+                    self.advance();
+                }
+                self.consume_semi_or_newlines();
+            }
+            self.expect(TokenKind::RBrace);
             self.active_header = self.header_stack.pop().unwrap_or(None);
-            return block;
+            return self.arena.alloc_list_node(
+                NodeKind::BlockExpr,
+                0,
+                ByteSpan::new(start_span.start, self.prev_span().end),
+                &children,
+            );
         }
 
         // Package declaration: `pkg Pilot.Core.Genesis;`
@@ -1239,6 +1404,30 @@ impl<'a> Parser<'a> {
             self.arena.pkg_decls.insert(pkg_node.0);
             self.apply_decl_mods(pkg_node, mods, Some(VisibilityTier::Public));
             return pkg_node;
+        }
+
+        // Use import declaration: `use Pilot.Core.Genesis.*;`
+        if self.is_ident_like() && (self.text() == "use" || self.tables.module_keywords_by_name.get(self.text()) == Some(&ModuleKwKind::ImportPath)) {
+            let start_span = self.span();
+            self.advance(); // consume 'use'
+            let mut use_path = String::new();
+            while !self.at_end() && !self.at(TokenKind::Semicolon) && !self.at(TokenKind::Newline) {
+                use_path.push_str(self.text());
+                self.advance();
+            }
+            if self.at(TokenKind::Semicolon) {
+                self.advance();
+            }
+            let path_sym = self.arena.interner.intern(&use_path);
+            let use_node = self.arena.alloc_node(
+                NodeKind::ImportDecl,
+                0,
+                ByteSpan::new(start_span.start, self.prev_span().end),
+                path_sym.0,
+                u32::MAX,
+            );
+            self.apply_decl_mods(use_node, mods, Some(VisibilityTier::Private));
+            return use_node;
         }
 
         // Syntax macro block: `pub syntax { break() => ...; continue() => ...; op(sig, body) => ...; }`
@@ -1274,6 +1463,56 @@ impl<'a> Parser<'a> {
                 if self.pos == start_pos {
                     self.advance();
                 }
+                self.consume_semi_or_newlines();
+            }
+            self.expect(TokenKind::RBrace);
+            return self.arena.alloc_list_node(
+                NodeKind::BlockExpr,
+                0,
+                ByteSpan::new(start_span.start, self.prev_span().end),
+                &rules,
+            );
+        }
+
+        // Named syntax construct block: `pub syntax type_construct { ($t:type) [] => quote { slice<$t> }; ... }`
+        if self.is_ident_like()
+            && (self.text() == "syntax" || self.tables.syntax_macros_by_name.contains_key(self.text()))
+            && self.is_ident_like_pos(self.pos + 1)
+            && self.peek_ahead(2) == TokenKind::LBrace
+        {
+            let start_span = self.span();
+            self.advance(); // consume 'syntax'
+            let group_name = self.text().to_string();
+            self.advance(); // consume group name (e.g. 'type_construct')
+            self.advance(); // consume '{'
+            let mut rules = Vec::new();
+            while !self.at_end() && !self.at(TokenKind::RBrace) {
+                self.consume_semi_or_newlines();
+                if self.at(TokenKind::RBrace) || self.at_end() {
+                    break;
+                }
+                let rule_span = self.span();
+                let mut pat_str = String::new();
+                while !self.at_end() && !self.at(TokenKind::FatArrow) && !self.at(TokenKind::RBrace) {
+                    pat_str.push_str(self.text());
+                    self.advance();
+                }
+                let body_expr = if self.at(TokenKind::FatArrow) {
+                    self.advance();
+                    self.parse_expr()
+                } else {
+                    NodeId::NONE
+                };
+                if self.at(TokenKind::Semicolon) {
+                    self.advance();
+                }
+                let sym = self.arena.interner.intern(&group_name);
+                let pat_node = self.arena.alloc_str(&pat_str, rule_span);
+                let (fn_start, fn_len) = self.arena.alloc_child_slice(&[body_expr, pat_node]);
+                let rule_fn = self.arena.alloc_node(NodeKind::FnDecl, fn_len as u16, rule_span, sym.0, fn_start);
+                self.arena.comptime_fns.insert(rule_fn.0);
+                self.apply_decl_mods(rule_fn, mods, Some(VisibilityTier::Public));
+                rules.push(rule_fn);
                 self.consume_semi_or_newlines();
             }
             self.expect(TokenKind::RBrace);
@@ -1324,7 +1563,7 @@ impl<'a> Parser<'a> {
                     let ty_node = self.parse_type();
 
                     if self.at(TokenKind::LBrace) {
-                        let lookahead_p = self.pos + 1;
+                        let lookahead_p = self.next_non_newline_pos(self.pos + 1);
                         let is_prop = if lookahead_p < self.tape.len() {
                             let k = self.tape.kind(lookahead_p);
                             let t = self.tape.text(lookahead_p, self.src);
@@ -1699,6 +1938,8 @@ impl<'a> Parser<'a> {
                         "extend" | "extension" => return self.parse_extend_decl(),
                         "database" => return self.parse_database_stmt(),
                         "transaction" => return self.parse_transaction_stmt(),
+                        "savepoint" | "commit" | "rollback" => return self.parse_transaction_op_stmt(),
+                        "insert" | "update" | "delete" => return self.parse_sql_mutation_stmt(),
                         "switch" => return self.parse_switch_stmt(),
                         _ => {}
                     }
@@ -1917,6 +2158,9 @@ impl<'a> Parser<'a> {
                         break;
                     }
                 }
+                TokenKind::Ident if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 && matches!(self.text(), "union" | "intersect" | "except") => {
+                    break;
+                }
                 TokenKind::Newline => {
                     if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 {
                         // Lookahead to see if next line continues the query
@@ -2092,22 +2336,7 @@ impl<'a> Parser<'a> {
 
         // Generic type parameters: <T, U>
         if self.at(TokenKind::Less) {
-            self.advance();
-            let mut last_was_comma = false;
-            while !self.at_end() && !self.at(TokenKind::Greater) {
-                let _ = self.parse_type();
-                last_was_comma = false;
-                if self.at(TokenKind::Comma) {
-                    self.advance();
-                    last_was_comma = true;
-                } else {
-                    break;
-                }
-            }
-            if last_was_comma {
-                self.errors.push("Trailing comma not allowed in generic parameters".to_string());
-            }
-            self.expect(TokenKind::Greater);
+            self.parse_generic_params();
         }
 
         // Parameters: (a: i64, b: i64)
@@ -2206,16 +2435,20 @@ impl<'a> Parser<'a> {
             self.consume_semi_or_newlines();
         }
 
-        // Body: => expr;, or { ... }
+        // Body: => expr;, => { ... }, or { ... }
         let body = if self.at(TokenKind::FatArrow) {
             self.advance();
-            let ret_expr = self.parse_expr();
-            if self.at(TokenKind::Semicolon) {
-                self.advance();
+            if self.at(TokenKind::LBrace) {
+                self.parse_block_expr()
             } else {
-                self.errors.push("Missing semicolon after expression body".to_string());
+                let ret_expr = self.parse_expr();
+                if self.at(TokenKind::Semicolon) {
+                    self.advance();
+                } else {
+                    self.errors.push("Missing semicolon after expression body".to_string());
+                }
+                self.arena.alloc_node(NodeKind::ReturnStmt, 0, start_span, ret_expr.0, 0)
             }
-            self.arena.alloc_node(NodeKind::ReturnStmt, 0, start_span, ret_expr.0, 0)
         } else if self.at(TokenKind::LBrace) {
             self.parse_block_expr()
         } else {
@@ -2307,30 +2540,7 @@ impl<'a> Parser<'a> {
 
         // Generic type params: <T, U>
         if self.at(TokenKind::Less) {
-            self.advance(); // consume '<'
-            let mut last_was_comma = false;
-            while !self.at_end() && !self.at(TokenKind::Greater) {
-                if self.is_ident_like() {
-                    self.advance();
-                    if self.at(TokenKind::Colon) {
-                        self.advance();
-                        let _ = self.parse_type();
-                    }
-                } else {
-                    self.advance();
-                }
-                last_was_comma = false;
-                if self.at(TokenKind::Comma) {
-                    self.advance();
-                    last_was_comma = true;
-                } else {
-                    break;
-                }
-            }
-            if last_was_comma {
-                self.errors.push("Trailing comma rejected in generic parameters".to_string());
-            }
-            self.expect(TokenKind::Greater);
+            self.parse_generic_params();
         }
 
         // Inheritance list: : IBase1, IBase2
@@ -2416,38 +2626,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_interface_decl(&mut self) -> NodeId {
-        let start_span = self.span();
         self.advance(); // consume 'interface' or 'protocol'
+        self.parse_interface_decl_headless()
+    }
+
+    fn parse_interface_decl_headless(&mut self) -> NodeId {
+        let start_span = self.span();
         let name = self.text();
         self.advance();
         let sym = self.arena.interner.intern(name);
 
         // Generic type params: <T, U>
         if self.at(TokenKind::Less) {
-            self.advance(); // consume '<'
-            let mut last_was_comma = false;
-            while !self.at_end() && !self.at(TokenKind::Greater) {
-                if self.is_ident_like() {
-                    self.advance();
-                    if self.at(TokenKind::Colon) {
-                        self.advance();
-                        let _ = self.parse_type();
-                    }
-                } else {
-                    self.advance();
-                }
-                last_was_comma = false;
-                if self.at(TokenKind::Comma) {
-                    self.advance();
-                    last_was_comma = true;
-                } else {
-                    break;
-                }
-            }
-            if last_was_comma {
-                self.errors.push("Trailing comma rejected in generic parameters".to_string());
-            }
-            self.expect(TokenKind::Greater);
+            self.parse_generic_params();
         }
 
         // Inheritance list: : IBase1, IBase2
@@ -2667,6 +2858,10 @@ impl<'a> Parser<'a> {
         let name = self.text();
         self.advance();
         let sym = self.arena.interner.intern(name);
+
+        if self.at(TokenKind::Less) {
+            self.parse_generic_params();
+        }
 
         // Optional type annotation: : type_spec
         let mut ty_node = NodeId::NONE;
@@ -3093,6 +3288,12 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::KwSelf) || (self.is_ident_like() && self.text() == "self") {
             self.advance(); // consume 'self'
         }
+        if self.at(TokenKind::LParen) {
+            self.advance();
+            if self.at(TokenKind::RParen) {
+                self.advance();
+            }
+        }
         self.consume_semi_or_newlines();
         let body = if self.at(TokenKind::LBrace) || self.at(TokenKind::VirtualLBrace) || self.at(TokenKind::Colon) {
             self.parse_block_expr()
@@ -3464,6 +3665,25 @@ impl<'a> Parser<'a> {
                 self.advance();
                 ret_ty = self.parse_type();
             }
+        } else if self.at(TokenKind::LBracket) {
+            self.advance(); // consume '['
+            if self.at(TokenKind::RBracket) {
+                self.advance(); // consume ']'
+            }
+            let op_str = if self.at(TokenKind::Equal) {
+                self.advance(); // consume '='
+                "[]="
+            } else {
+                "[]"
+            };
+            op_sym = self.arena.interner.intern(op_str);
+            if self.at(TokenKind::LParen) {
+                params = self.parse_param_list();
+            }
+            if self.at(TokenKind::Arrow) {
+                self.advance();
+                ret_ty = self.parse_type();
+            }
         } else if self.is_self_token() {
             self.advance(); // consume 'self'
             if self.at(TokenKind::LParen) {
@@ -3556,13 +3776,19 @@ impl<'a> Parser<'a> {
             b
         } else if self.at(TokenKind::FatArrow) {
             self.advance();
-            let expr = self.parse_expr();
-            raw_body_expr = expr;
-            if self.at(TokenKind::Semicolon) {
-                self.advance();
+            if self.at(TokenKind::LBrace) {
+                let b = self.parse_block_expr();
+                raw_body_expr = b;
+                b
+            } else {
+                let expr = self.parse_expr();
+                raw_body_expr = expr;
+                if self.at(TokenKind::Semicolon) {
+                    self.advance();
+                }
+                let ret = self.arena.alloc_node(NodeKind::ReturnStmt, 0, self.arena.span(expr), expr.0, 0);
+                self.arena.alloc_list_node(NodeKind::BlockExpr, 0, self.arena.span(expr), &[ret])
             }
-            let ret = self.arena.alloc_node(NodeKind::ReturnStmt, 0, self.arena.span(expr), expr.0, 0);
-            self.arena.alloc_list_node(NodeKind::BlockExpr, 0, self.arena.span(expr), &[ret])
         } else {
             NodeId::NONE
         };
@@ -3766,7 +3992,7 @@ impl<'a> Parser<'a> {
         } else {
             self.parse_expr()
         };
-        let else_body = if self.at(TokenKind::KwElse) {
+        let else_body = if self.at(TokenKind::KwElse) || (self.is_ident_like() && self.text() == "else") {
             self.advance();
             self.parse_block_expr()
         } else {
@@ -3778,7 +4004,11 @@ impl<'a> Parser<'a> {
     fn parse_defer_stmt(&mut self) -> NodeId {
         let start_span = self.span();
         self.advance(); // consume 'defer'
-        let body = self.parse_block_expr();
+        let body = if self.at(TokenKind::LBrace) || self.at(TokenKind::VirtualLBrace) {
+            self.parse_block_expr()
+        } else {
+            self.parse_stmt_or_decl()
+        };
         self.arena.alloc_node(NodeKind::DeferStmt, 0, start_span, body.0, 0)
     }
 
@@ -3813,7 +4043,11 @@ impl<'a> Parser<'a> {
         if has_paren && self.at(TokenKind::RParen) {
             self.advance();
         }
-        self.expect(TokenKind::KwIn);
+        if self.at(TokenKind::KwIn) || (self.is_ident_like() && self.text() == "in") {
+            self.advance();
+        } else {
+            self.expect(TokenKind::KwIn);
+        }
         let iter_expr = self.parse_expr();
         if has_paren && self.at(TokenKind::RParen) {
             self.advance();
@@ -3823,7 +4057,7 @@ impl<'a> Parser<'a> {
             let _bound = self.parse_expr();
         }
         let body = self.parse_block_expr();
-        if self.at(TokenKind::KwThen) {
+        if self.at(TokenKind::KwThen) || (self.is_ident_like() && self.text() == "then") {
             self.advance();
             let _ = self.parse_expr();
         }
@@ -3880,7 +4114,13 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::LBrace) || self.at(TokenKind::VirtualLBrace) {
             self.advance();
         } else {
-            self.errors.push("Expected '{' starting block".to_string());
+            let ctx_start = (self.span().start as usize).saturating_sub(60);
+            let ctx_end = (self.span().end as usize + 20).min(self.src.len());
+            self.errors.push(format!(
+                "Expected '{{' starting block, found {:?} near {:?}",
+                self.peek(),
+                &self.src[ctx_start..ctx_end]
+            ));
         }
 
         self.header_stack.push(self.active_header);
@@ -3989,6 +4229,151 @@ impl<'a> Parser<'a> {
                 }
             }
 
+            // Handle generic type arguments `<T, U>` on an identifier/member expression and struct initializers `Type { field: val }`
+            let mut had_generic_args = false;
+            if k == TokenKind::Less
+                && matches!(self.arena.node(lhs).node_kind(), NodeKind::IdentExpr | NodeKind::MemberExpr)
+            {
+                let mut p = self.pos;
+                let mut angle_depth = 0i32;
+                let mut valid_type_args = true;
+                while p < self.tape.len() {
+                    let tk = self.tape.kind(p);
+                    match tk {
+                        TokenKind::Less => angle_depth += 1,
+                        TokenKind::Greater => {
+                            angle_depth -= 1;
+                            if angle_depth <= 0 {
+                                break;
+                            }
+                        }
+                        TokenKind::ShiftRight => {
+                            angle_depth -= 2;
+                            if angle_depth <= 0 {
+                                break;
+                            }
+                        }
+                        TokenKind::Ident
+                        | TokenKind::KwFn
+                        | TokenKind::KwConst
+                        | TokenKind::Comma
+                        | TokenKind::LBracket
+                        | TokenKind::RBracket
+                        | TokenKind::LParen
+                        | TokenKind::RParen
+                        | TokenKind::Star
+                        | TokenKind::Question
+                        | TokenKind::Exclamation
+                        | TokenKind::Vbar
+                        | TokenKind::Amper
+                        | TokenKind::Arrow
+                        | TokenKind::FatArrow
+                        | TokenKind::DotDot
+                        | TokenKind::IntLit
+                        | TokenKind::StrLit => {}
+                        _ if self.is_ident_like_pos(p) || tk.is_keyword() => {}
+                        _ => {
+                            valid_type_args = false;
+                            break;
+                        }
+                    }
+                    p += 1;
+                }
+                if valid_type_args && angle_depth == 0 && p < self.tape.len() {
+                    let after_p = p + 1;
+                    let after_k = if after_p < self.tape.len() {
+                        self.tape.kind(after_p)
+                    } else {
+                        TokenKind::Eof
+                    };
+                    let is_bundle_mod = self.is_ident_like_pos(after_p) && {
+                        let t = self.tape.text(after_p, self.src);
+                        matches!(t, "with" | "without" | "coalesce")
+                    };
+                    if matches!(
+                        after_k,
+                        TokenKind::LBrace
+                            | TokenKind::Dot
+                            | TokenKind::PrefixDot
+                            | TokenKind::LParen
+                            | TokenKind::Semicolon
+                            | TokenKind::RParen
+                            | TokenKind::Comma
+                    ) || is_bundle_mod
+                    {
+                        if after_k == TokenKind::PrefixDot {
+                            self.tape.kinds[after_p] = TokenKind::InfixDot;
+                        }
+                        self.pos = after_p;
+                        self.skip_whitespace_and_comments();
+                        had_generic_args = true;
+                    }
+                }
+            }
+
+            if self.peek() == TokenKind::LBrace
+                && matches!(self.arena.node(lhs).node_kind(), NodeKind::IdentExpr | NodeKind::MemberExpr)
+            {
+                let first_p = self.next_non_newline_pos(self.pos + 1);
+                let second_p = self.next_non_newline_pos(first_p + 1);
+                let third_p = self.next_non_newline_pos(second_p + 1);
+                let first_k = if first_p < self.tape.len() { self.tape.kind(first_p) } else { TokenKind::Eof };
+                let second_k = if second_p < self.tape.len() { self.tape.kind(second_p) } else { TokenKind::Eof };
+                let after_colon = if third_p < self.tape.len() { self.tape.kind(third_p) } else { TokenKind::Eof };
+
+                let is_struct_init = if had_generic_args && first_k == TokenKind::RBrace {
+                    true
+                } else if self.is_ident_like_pos(first_p) && second_k == TokenKind::Colon {
+                    let first_t = self.tape.text(first_p, self.src);
+                    if matches!(first_t, "case" | "default" | "pub" | "priv" | "prot" | "pkg" | "int" | "enter" | "exit")
+                        || matches!(after_colon, TokenKind::KwLoop | TokenKind::KwFor | TokenKind::KwWhile)
+                    {
+                        false
+                    } else {
+                        let mut p = first_p;
+                        let mut depth = 0;
+                        let mut has_semi = false;
+                        while p < self.tape.len() {
+                            let tk = self.tape.kind(p);
+                            match tk {
+                                TokenKind::LBrace | TokenKind::LBracket | TokenKind::LParen => depth += 1,
+                                TokenKind::RBrace => {
+                                    if depth == 0 {
+                                        break;
+                                    }
+                                    depth -= 1;
+                                }
+                                TokenKind::RBracket | TokenKind::RParen => {
+                                    if depth > 0 {
+                                        depth -= 1;
+                                    }
+                                }
+                                TokenKind::Semicolon if depth == 0 => {
+                                    has_semi = true;
+                                    break;
+                                }
+                                _ => {}
+                            }
+                            p += 1;
+                        }
+                        !has_semi
+                    }
+                } else {
+                    false
+                };
+                if is_struct_init {
+                    let map_expr = self.parse_expr_prefix(ExprPrecedence::Lowest as u8);
+                    let (arg_start, arg_len) = self.arena.alloc_child_slice(&[lhs, map_expr]);
+                    let span = ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end);
+                    lhs = self.arena.alloc_node(NodeKind::CallExpr, 0, span, arg_start, arg_len);
+                    continue;
+                }
+            }
+            if had_generic_args {
+                continue;
+            }
+
+            let k = self.peek();
             // Handle postfix operators
             if k == TokenKind::Dot || k == TokenKind::InfixDot || k == TokenKind::SafeNav {
                 let is_safe = k == TokenKind::SafeNav;
@@ -4256,7 +4641,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            if k == TokenKind::KwAs {
+            if k == TokenKind::KwAs || (self.is_ident_like() && self.text() == "as") {
                 if (ExprPrecedence::UnaryPrefix as u8) < min_bp {
                     break;
                 }
@@ -4353,6 +4738,20 @@ impl<'a> Parser<'a> {
         if self.is_ident_like() {
             if self.text() == "switch" {
                 return self.parse_switch_stmt();
+            }
+            if self.text() == "select" {
+                return if self.peek_ahead(1) == TokenKind::LBrace {
+                    self.parse_select_stmt()
+                } else {
+                    self.parse_query_expr()
+                };
+            }
+            if self.text() == "from"
+                && self.is_ident_like_pos(self.pos + 1)
+                && self.pos + 2 < self.tape.len()
+                && self.tape.text(self.pos + 2, self.src) == "in"
+            {
+                return self.parse_query_expr();
             }
             // Check for C# single-parameter lambda: x => expr
             if min_bp <= (ExprPrecedence::Assign as u8)
@@ -4727,6 +5126,7 @@ impl<'a> Parser<'a> {
             | TokenKind::Plus
             | TokenKind::Tilde
             | TokenKind::Exclamation
+            | TokenKind::CallQuoteShallow
             | TokenKind::KwNot
             | TokenKind::KwEach
             | TokenKind::Amper
@@ -4736,7 +5136,7 @@ impl<'a> Parser<'a> {
                     TokenKind::Amper | TokenKind::KwRef => (1, "&"),
                     TokenKind::ArrowLeft => (3, "<-"),
                     TokenKind::Tilde => (4, "~"),
-                    TokenKind::Exclamation | TokenKind::KwNot => (5, "!"),
+                    TokenKind::Exclamation | TokenKind::CallQuoteShallow | TokenKind::KwNot => (5, "!"),
                     TokenKind::Minus => (0, "-"),
                     _ => (0, "+"),
                 };
@@ -4849,14 +5249,27 @@ impl<'a> Parser<'a> {
                     // Check for Map literal `{ k1: v1, ... }` or `{ Hooks = { ... }, ... }` or Set literal `{ 10, 20, ... }` or `{}`
                     let mut is_map_lit = false;
                     let mut is_set_lit = false;
-                    let first_inside = if self.pos + 1 < self.tape.len() {
-                        self.tape.kind(self.pos + 1)
+                    let first_p = self.next_non_newline_pos(self.pos + 1);
+                    let first_inside = if first_p < self.tape.len() {
+                        self.tape.kind(first_p)
                     } else {
                         TokenKind::Eof
                     };
                     if first_inside == TokenKind::RBrace {
                         is_map_lit = true;
-                    } else if first_inside != TokenKind::KwLet && first_inside != TokenKind::KwVar {
+                    } else if first_inside != TokenKind::KwLet
+                        && first_inside != TokenKind::KwVar
+                        && first_inside != TokenKind::KwFn
+                        && first_inside != TokenKind::KwReturn
+                        && first_inside != TokenKind::KwIf
+                        && first_inside != TokenKind::KwLoop
+                        && first_inside != TokenKind::KwDefer
+                        && !(self.is_ident_like_pos(first_p)
+                            && matches!(
+                                self.tape.text(first_p, self.src),
+                                "pub" | "priv" | "prot" | "pkg" | "int" | "op" | "fn" | "struct" | "interface" | "for" | "while" | "switch"
+                            ))
+                    {
                         let mut p = self.pos + 1;
                         let mut brace_depth = 0;
                         while p < self.tape.len() {
@@ -4877,7 +5290,6 @@ impl<'a> Parser<'a> {
                                 TokenKind::Colon | TokenKind::Equal => {
                                     if brace_depth == 0 {
                                         is_map_lit = true;
-                                        break;
                                     }
                                 }
                                 TokenKind::Comma => {
@@ -5058,11 +5470,14 @@ impl<'a> Parser<'a> {
             self.parse_expr()
         };
         let then_branch = self.parse_block_expr();
-        let else_branch = if self.at(TokenKind::KwElif) {
+        let else_branch = if self.at(TokenKind::KwElif) || (self.is_ident_like() && self.text() == "elif") {
             self.parse_if_expr()
-        } else if self.at(TokenKind::KwElse) {
+        } else if self.at(TokenKind::KwElse) || (self.is_ident_like() && self.text() == "else") {
             self.advance();
-            if self.at(TokenKind::KwIf) || self.at(TokenKind::KwElif) {
+            if self.at(TokenKind::KwIf)
+                || self.at(TokenKind::KwElif)
+                || (self.is_ident_like() && (self.text() == "if" || self.text() == "elif"))
+            {
                 self.parse_if_expr()
             } else {
                 self.parse_block_expr()
@@ -5237,6 +5652,15 @@ impl<'a> Parser<'a> {
             TokenKind::KwUnion => (BinaryOp::Union, "union", ExprPrecedence::BitOr as u8, false),
             TokenKind::KwIntersect => (BinaryOp::Intersect, "intersect", ExprPrecedence::BitOr as u8, false),
             TokenKind::KwExcept => (BinaryOp::Except, "except", ExprPrecedence::BitOr as u8, false),
+            TokenKind::Ident => match self.text() {
+                "union" => (BinaryOp::Union, "union", ExprPrecedence::BitOr as u8, false),
+                "intersect" => (BinaryOp::Intersect, "intersect", ExprPrecedence::BitOr as u8, false),
+                "except" => (BinaryOp::Except, "except", ExprPrecedence::BitOr as u8, false),
+                "and" => (BinaryOp::And, "&&", ExprPrecedence::LogicalAnd as u8, false),
+                "or" => (BinaryOp::Or, "||", ExprPrecedence::LogicalOr as u8, false),
+                "is" => (BinaryOp::Is, "is", ExprPrecedence::Comparison as u8, false),
+                _ => return None,
+            },
             _ => return None,
         };
         if let Some(spec) = self.tables.pratt_infix_by_name.get(op_str) {
@@ -5305,8 +5729,10 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            if k == TokenKind::Arrow {
-                // FnArrow: (A) -> B (bp = 10)
+            if k == TokenKind::Arrow
+                || (k == TokenKind::FatArrow && self.arena.node(lhs).node_kind() == NodeKind::TypeTuple)
+            {
+                // FnArrow: (A) -> B or (A) => B (bp = 10)
                 if (TypePrecedence::FnArrow as u8) < min_bp {
                     break;
                 }
@@ -5354,7 +5780,7 @@ impl<'a> Parser<'a> {
                 self.advance(); // consume '<'
                 let mut type_args = Vec::new();
                 let mut last_was_comma = false;
-                while !self.at_end() && !self.at(TokenKind::Greater) {
+                while !self.at_end() && !self.at_greater() {
                     let t = self.parse_type();
                     type_args.push(t);
                     last_was_comma = false;
@@ -5368,7 +5794,7 @@ impl<'a> Parser<'a> {
                 if last_was_comma {
                     self.errors.push("Trailing comma rejected in generic arguments".to_string());
                 }
-                self.expect(TokenKind::Greater);
+                self.expect_greater();
                 let span = ByteSpan::new(start_span.start, self.prev_span().end);
                 let base_name = if lhs.is_some() && self.arena.node(lhs).node_kind() == NodeKind::TypeNamed {
                     self.arena
@@ -5469,7 +5895,10 @@ impl<'a> Parser<'a> {
             };
             let inner_sym = self.arena.interner.intern(&ptr_str);
             self.arena.alloc_node(NodeKind::TypeNamed, 0, span, inner_sym.0, 0)
-        } else if self.is_ident_like() || self.at(TokenKind::KeywordLit) {
+        } else if self.at(TokenKind::KwConst) || (self.is_ident_like() && self.text() == "const") {
+            self.advance();
+            self.parse_type_prefix()
+        } else if self.is_ident_like() || self.at(TokenKind::KeywordLit) || self.at(TokenKind::KwFn) {
             let name = self.text();
             self.advance();
             let sym = self.arena.interner.intern(name);
@@ -5552,6 +5981,37 @@ impl<'a> Parser<'a> {
             } else {
                 let lit = self.arena.alloc_keyword(&name, span);
                 self.arena.alloc_node(NodeKind::PatLiteral, 0, span, lit.0, 0)
+            }
+        } else if self.at(TokenKind::ColonColon) {
+            self.advance(); // consume '::'
+            let name = if self.is_ident_like() || self.peek().is_keyword() {
+                let s = self.text().to_string();
+                self.advance();
+                s
+            } else {
+                String::new()
+            };
+            if self.at(TokenKind::LParen) {
+                self.advance();
+                let mut sub_pats = Vec::new();
+                while !self.at_end() && !self.at(TokenKind::RParen) {
+                    if self.is_ident_like() && self.peek_ahead(1) == TokenKind::Colon {
+                        self.advance();
+                        self.advance();
+                    }
+                    let sub = self.parse_pattern();
+                    sub_pats.push(sub);
+                    if self.at(TokenKind::Comma) {
+                        self.advance();
+                    }
+                }
+                self.expect(TokenKind::RParen);
+                let sym = self.arena.interner.intern(&name);
+                let (start, len) = self.arena.alloc_child_slice(&sub_pats);
+                self.arena.alloc_node(NodeKind::PatVariant, len as u16, span, sym.0, start)
+            } else {
+                let sym = self.arena.interner.intern(&name);
+                self.arena.alloc_node(NodeKind::PatVariant, 0, span, sym.0, 0)
             }
         } else if self.is_ident_like() || self.at(TokenKind::KwSome) {
             let mut name = self.text().to_string();

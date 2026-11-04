@@ -48,6 +48,48 @@ impl CTargetEmitter {
         self.out
     }
 
+    /// Section 4.4: 5-Backend Hardware & `[Lang]` Mapping Table (C11/C23 Backend).
+    pub fn map_lang_type_to_c(lang_item: &str, elem_types: &[&str]) -> String {
+        let t0 = elem_types.first().copied().unwrap_or("int64_t");
+        let t1 = elem_types.get(1).copied().unwrap_or("int32_t");
+        match lang_item {
+            "void" => "void".to_string(),
+            "never" => "_Noreturn void".to_string(),
+            "bool" => "bool".to_string(),
+            "char" => "uint32_t".to_string(),
+            "i8" => "int8_t".to_string(),
+            "u8" => "uint8_t".to_string(),
+            "i16" => "int16_t".to_string(),
+            "u16" => "uint16_t".to_string(),
+            "i32" => "int32_t".to_string(),
+            "u32" => "uint32_t".to_string(),
+            "i64" => "int64_t".to_string(),
+            "u64" => "uint64_t".to_string(),
+            "i128" => "__int128".to_string(),
+            "u128" => "unsigned __int128".to_string(),
+            "isize" => "ptrdiff_t".to_string(),
+            "usize" => "size_t".to_string(),
+            "f16" => "_Float16".to_string(),
+            "f32" => "float".to_string(),
+            "f64" => "double".to_string(),
+            "f128" => "__float128".to_string(),
+            "ptr" => format!("{}*", t0),
+            "slice" => format!("struct {{ {}* data; size_t len; }}", t0),
+            "str" => "struct { uint8_t* data; size_t len; }".to_string(),
+            "stride" => format!("struct {{ {}* d; size_t l; ptrdiff_t s; }}", t0),
+            "SliceBuffer" => format!("pilot_slice_buffer_{}", t0),
+            "RangeWindow" => format!("struct {{ {} current; {} max; }}", t0, t0),
+            "option" => format!("struct {{ {} val; bool has; }}", t0),
+            "result" => format!("struct {{ {} ok; {} err; bool is_ok; }}", t0, t1),
+            other => other.to_string(),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn finish_legacy(self) -> String {
+        self.out
+    }
+
     /// Emits a complete C11/C23 compilation unit from the AST arena.
     pub fn emit_ast_module(arena: &AstArena, analysis: &AnalysisResult, source: &str) -> String {
         let mut gen = CGenContext::new(arena, analysis, source);
@@ -216,6 +258,13 @@ impl<'a> CGenContext<'a> {
                     "str" | "string" => "const char*".to_string(),
                     "list" | "List" => "PilotList*".to_string(),
                     "void" => "void".to_string(),
+                    "never" => "_Noreturn void".to_string(),
+                    "isize" => "ptrdiff_t".to_string(),
+                    "usize" => "size_t".to_string(),
+                    "i128" => "__int128".to_string(),
+                    "u128" => "unsigned __int128".to_string(),
+                    "f16" => "_Float16".to_string(),
+                    "f128" => "__float128".to_string(),
                     "int" | "i64" => "int64_t".to_string(),
                     "i32" => "int32_t".to_string(),
                     "i16" => "int16_t".to_string(),

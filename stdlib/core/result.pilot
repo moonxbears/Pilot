@@ -1,113 +1,69 @@
-// SPDX-License-Identifier: MIT
-// std.result — Values-First Fallible Return (T ! E) Combinators
-// Adheres to Pilot Invariant #7: zero stack unwinding, register-represented `ok(v)` / `fail(e)`.
+// =========================================================================
+// FILE: stdlib/core/result.pilot
+// STAGE 3C VALUES-FIRST MUST-USE ERROR SYSTEM (`result<TOk, TErr>` / `T ! E`)
+// Preserves Milestone 13 register-returned `{ ok_val, err_val, is_ok }`,
+// universal postfix `?`, and localized `catch` recovery.
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Result;
 
-def is_ok(res) -> bool {
-    return match res {
-        case ok(_) => true,
-        case fail(_) => false,
-        case _ => true
-    };
-}
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Option.*;
 
-def is_err(res) -> bool {
-    return match res {
-        case fail(_) => true,
-        case _ => false
-    };
-}
+[Lang(Cfg.Lang.res_t), Layout(c_abi)]
+pub partial struct result<TOk: IAnyValue, TErr: IAnyValue> : IEquatable<result<TOk, TErr>>, ITryOperator<TOk, TErr> {
+    pub ok_val:  TOk;
+    pub err_val: TErr;
+    pub is_ok:   bool;
 
-def unwrap(res) {
-    return match res {
-        case ok(v) => v,
-        case fail(e) => panic(f"called unwrap on error: {e}"),
-        case v => v
-    };
-}
+    pub is_err: bool { get => !.is_ok; }
 
-def unwrap_err(res) {
-    return match res {
-        case fail(e) => e,
-        case _ => panic("called unwrap_err on ok value")
-    };
-}
+    pub static pure:
+        fn ok(v: TOk) -> result<TOk, TErr> => result<TOk, TErr> {
+            ok_val:  v,
+            err_val: __ssa_cast(Cfg.Ssa.zext, 0, TErr),
+            is_ok:   true,
+        };
 
-// Runtime intrinsic aliases for interop
-def __result_is_ok(res) -> bool { return is_ok(res); }
-def __result_is_err(res) -> bool { return is_err(res); }
-def __result_unwrap_ok(res) { return unwrap(res); }
-def __result_unwrap_err(res) { return unwrap_err(res); }
+        fn err(e: TErr) -> result<TOk, TErr> => result<TOk, TErr> {
+            ok_val:  __ssa_cast(Cfg.Ssa.zext, 0, TOk),
+            err_val: e,
+            is_ok:   false,
+        };
 
-def expect(res, msg: str) {
-    if is_err(res) {
-        panic(f"{msg}: {unwrap_err(res)}");
-    }
-    return unwrap(res);
-}
+        fn fail(e: TErr) -> result<TOk, TErr> => result<TOk, TErr>.err(e);
 
-def unwrap_or(res, fallback) {
-    if is_ok(res) {
-        return unwrap(res);
-    }
-    return fallback;
-}
+    pub pure:
+        // Universal postfix `expr?` unwraps `TOk` or early-returns `fail(err_val)`
+        op ? () -> TOk => .ok_val;
 
-def unwrap_or_else(res, recovery_fn) {
-    if is_ok(res) {
-        return unwrap(res);
-    }
-    return recovery_fn(unwrap_err(res));
-}
+        op == (rhs: result<TOk, TErr>) -> bool =>
+            if .is_ok != rhs.is_ok {
+                false
+            } else {
+                if .is_ok { .ok_val == rhs.ok_val } else { .err_val == rhs.err_val }
+            };
 
-def map_ok(res, transform_fn) -> any ! any {
-    if is_ok(res) {
-        return ok(transform_fn(unwrap(res)));
-    }
-    return res;
-}
+        fn unwrap_or(fallback: TOk) -> TOk => if .is_ok { .ok_val } else { fallback };
 
-def map_err(res, err_fn) -> any ! any {
-    if is_err(res) {
-        return fail(err_fn(unwrap_err(res)));
-    }
-    return res;
-}
+        fn ok_option() -> option<TOk> =>
+            if .is_ok { option<TOk>.some(.ok_val) } else { option<TOk>.none() };
 
-def and_then(res, next_fn) -> any ! any {
-    if is_ok(res) {
-        return next_fn(unwrap(res));
-    }
-    return res;
-}
+        fn err_option() -> option<TErr> =>
+            if !.is_ok { option<TErr>.some(.err_val) } else { option<TErr>.none() };
 
-def or_else(res, recover_fn) -> any ! any {
-    if is_err(res) {
-        return recover_fn(unwrap_err(res));
-    }
-    return res;
-}
+        fn map<U: IAnyValue>(f: (TOk) => U) -> result<U, TErr> =>
+            if .is_ok {
+                result<U, TErr>.ok(f(.ok_val))
+            } else {
+                result<U, TErr>.err(.err_val)
+            };
 
-def ok_option(res) {
-    if is_ok(res) {
-        return some(unwrap(res));
-    }
-    return none;
-}
-
-def err_option(res) {
-    if is_err(res) {
-        return some(unwrap_err(res));
-    }
-    return none;
-}
-
-def collect_ok(results) -> any ! any {
-    var acc = [];
-    for item in results {
-        if is_err(item) {
-            return item;
-        }
-        acc.append(unwrap(item));
-    }
-    return ok(acc);
+        fn map_err<F: IAnyValue>(f: (TErr) => F) -> result<TOk, F> =>
+            if .is_ok {
+                result<TOk, F>.ok(.ok_val)
+            } else {
+                result<TOk, F>.err(f(.err_val))
+            };
 }

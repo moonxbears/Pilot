@@ -495,6 +495,39 @@ impl GpuEmitter {
         parts.join(", ")
     }
 
+    /// Section 4.4: 5-Backend Hardware & `[Lang]` Mapping Table (GPU OpenCL/CUDA/SPIR-V Backend).
+    pub fn map_lang_type_to_gpu(lang_item: &str, elem_types: &[&str]) -> String {
+        let t0 = elem_types.first().copied().unwrap_or("long");
+        let t1 = elem_types.get(1).copied().unwrap_or("int");
+        match lang_item {
+            "void" | "never" => "void".to_string(),
+            "bool" => "bool".to_string(),
+            "char" => "uint".to_string(),
+            "i8" => "char".to_string(),
+            "u8" => "uchar".to_string(),
+            "i16" => "short".to_string(),
+            "u16" => "ushort".to_string(),
+            "i32" => "int".to_string(),
+            "u32" => "uint".to_string(),
+            "i64" | "isize" => "long".to_string(),
+            "u64" | "usize" => "ulong".to_string(),
+            "i128" | "u128" => "ulong2".to_string(),
+            "f16" => "half".to_string(),
+            "f32" => "float".to_string(),
+            "f64" => "double".to_string(),
+            "f128" => "double2".to_string(),
+            "ptr" => format!("global {}*", t0),
+            "slice" => format!("struct {{ {}* d; ulong l; }}", t0),
+            "str" => "struct { uchar* d; ulong l; }".to_string(),
+            "stride" => format!("struct {{ {}* d; ulong l; long s; }}", t0),
+            "SliceBuffer" => format!("pilot_slice_buffer_{}", t0),
+            "RangeWindow" => format!("struct {{ {} cur; {} max; }}", t0, t0),
+            "option" => format!("struct {{ {} val; bool has; }}", t0),
+            "result" => format!("struct {{ {} ok; {} err; bool ok_f; }}", t0, t1),
+            other => other.to_string(),
+        }
+    }
+
     fn map_type_c(ty: &str) -> &'static str {
         match ty {
             "float*" | "*float" => "float*",

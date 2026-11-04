@@ -384,4 +384,36 @@ impl LlvmEmitter {
     pub fn finish(self) -> String {
         self.out
     }
+
+    /// Section 4.4: 5-Backend Hardware & `[Lang]` Mapping Table (LLVM IR / ASM Backend).
+    pub fn map_lang_type_to_llvm(lang_item: &str, elem_types: &[&str]) -> String {
+        let t0 = elem_types.first().copied().unwrap_or("i64");
+        let t1 = elem_types.get(1).copied().unwrap_or("i32");
+        match lang_item {
+            "void" | "never" => "void".to_string(),
+            "bool" => "i1".to_string(),
+            "char" => "i32".to_string(),
+            "i8" | "u8" => "i8".to_string(),
+            "i16" | "u16" => "i16".to_string(),
+            "i32" | "u32" => "i32".to_string(),
+            "i64" | "u64" | "isize" | "usize" => "i64".to_string(),
+            "i128" | "u128" => "i128".to_string(),
+            "f16" => "half".to_string(),
+            "f32" => "float".to_string(),
+            "f64" => "double".to_string(),
+            "f128" => "fp128".to_string(),
+            "ptr" => "ptr".to_string(),
+            "slice" | "str" => "{ ptr, i64 }".to_string(),
+            "stride" | "SliceBuffer" => "{ ptr, i64, i64 }".to_string(),
+            "RangeWindow" => format!("{{ {}, {} }}", t0, t0),
+            "option" => format!("{{ {}, i1 }}", t0),
+            "result" => format!("{{ {}, {}, i1 }}", t0, t1),
+            other => other.to_string(),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn finish_legacy(self) -> String {
+        self.out
+    }
 }

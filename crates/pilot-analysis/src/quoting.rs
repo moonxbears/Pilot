@@ -241,4 +241,140 @@ impl CallQuotingEngine {
             free_vars,
         }
     }
+
+    /// Section 4.3: Binds the 6 `CallQuoteKind` modes to the canonical structs loaded from
+    /// `stdlib/core/task.pilot` (`CallExpr<TRet>`, `ast`, `frame<TSig>`, `Signal<TRet>`,
+    /// `Dual<TRet, TGrad>`, `EffectPlan<TRet>`), verifying `LatticeBits::Value` (`0b00`) on
+    /// `CallQuoteKind::AbiFrame` (`!&`) arguments.
+    pub fn resolve_call_quote_projection_type(
+        &mut self,
+        quote_kind: CallQuoteKind,
+        return_ty: crate::types::TypeId,
+        arg_types: &[crate::types::TypeId],
+        types: &mut crate::types::TypeArena,
+        span: ByteSpan,
+    ) -> CallQuoteProjectionInfo {
+        use crate::types::{LatticeBits, TypeKind};
+
+        match quote_kind {
+            CallQuoteKind::None => CallQuoteProjectionInfo {
+                quote_kind,
+                canonical_type_name: types.display(return_ty),
+                type_id: return_ty,
+                lattice: types.type_lattice(return_ty),
+            },
+            CallQuoteKind::ShallowQuote => {
+                let name = format!("CallExpr<{}>", types.display(return_ty));
+                let ty = types
+                    .type_defs_by_name
+                    .get("CallExpr")
+                    .copied()
+                    .unwrap_or_else(|| types.alloc(TypeKind::Primitive(name.clone())));
+                CallQuoteProjectionInfo {
+                    quote_kind,
+                    canonical_type_name: name,
+                    type_id: ty,
+                    lattice: LatticeBits::Value,
+                }
+            }
+            CallQuoteKind::DeepSplice => {
+                let name = "ast".to_string();
+                let ty = types
+                    .type_defs_by_name
+                    .get("ast")
+                    .copied()
+                    .unwrap_or_else(|| types.alloc(TypeKind::Primitive(name.clone())));
+                CallQuoteProjectionInfo {
+                    quote_kind,
+                    canonical_type_name: name,
+                    type_id: ty,
+                    lattice: LatticeBits::Value,
+                }
+            }
+            CallQuoteKind::AbiFrame => {
+                // Verify all argument types have `lattice == LatticeBits::Value` (`0b00`)
+                for &arg_ty in arg_types {
+                    let arg_lat = types.type_lattice(arg_ty);
+                    if arg_lat != LatticeBits::Value {
+                        self.diagnostics.push(AnalysisDiagnostic::lattice_contract_mismatch(
+                            span,
+                            &types.display(arg_ty),
+                            "IValue",
+                            0b00,
+                            arg_lat.raw(),
+                            "C-ABI call-frame projection 'fn!&(...)' requires all argument types to be 0b00 IValue",
+                        ));
+                    }
+                }
+                let sig_tuple = types.tuple_of(arg_types.to_vec());
+                let name = format!("frame<{}>", types.display(sig_tuple));
+                let ty = types
+                    .type_defs_by_name
+                    .get("frame")
+                    .copied()
+                    .unwrap_or_else(|| types.alloc(TypeKind::Primitive(name.clone())));
+                CallQuoteProjectionInfo {
+                    quote_kind,
+                    canonical_type_name: name,
+                    type_id: ty,
+                    lattice: LatticeBits::Value,
+                }
+            }
+            CallQuoteKind::ReactiveSignal => {
+                let name = format!("Signal<{}>", types.display(return_ty));
+                let ty = types
+                    .type_defs_by_name
+                    .get("Signal")
+                    .copied()
+                    .unwrap_or_else(|| types.alloc(TypeKind::Primitive(name.clone())));
+                CallQuoteProjectionInfo {
+                    quote_kind,
+                    canonical_type_name: name,
+                    type_id: ty,
+                    lattice: LatticeBits::Object,
+                }
+            }
+            CallQuoteKind::SymbolicAdjoint => {
+                let grad_ty = if arg_types.len() <= 1 {
+                    arg_types.first().copied().unwrap_or(return_ty)
+                } else {
+                    types.tuple_of(arg_types.to_vec())
+                };
+                let name = format!("Dual<{}, {}>", types.display(return_ty), types.display(grad_ty));
+                let ty = types
+                    .type_defs_by_name
+                    .get("Dual")
+                    .copied()
+                    .unwrap_or_else(|| types.alloc(TypeKind::Primitive(name.clone())));
+                CallQuoteProjectionInfo {
+                    quote_kind,
+                    canonical_type_name: name,
+                    type_id: ty,
+                    lattice: LatticeBits::Value,
+                }
+            }
+            CallQuoteKind::EffectDryRun => {
+                let name = format!("EffectPlan<{}>", types.display(return_ty));
+                let ty = types
+                    .type_defs_by_name
+                    .get("EffectPlan")
+                    .copied()
+                    .unwrap_or_else(|| types.alloc(TypeKind::Primitive(name.clone())));
+                CallQuoteProjectionInfo {
+                    quote_kind,
+                    canonical_type_name: name,
+                    type_id: ty,
+                    lattice: LatticeBits::Object,
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CallQuoteProjectionInfo {
+    pub quote_kind: CallQuoteKind,
+    pub canonical_type_name: String,
+    pub type_id: crate::types::TypeId,
+    pub lattice: crate::types::LatticeBits,
 }

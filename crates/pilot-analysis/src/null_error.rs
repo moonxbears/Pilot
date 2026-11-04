@@ -175,4 +175,140 @@ impl ErrorFlowAnalyzer {
             }
         }
     }
+
+    /// Section 4.2: Universal Postfix `expr?` (`ITryOperator`) Verification & Propagation Plan.
+    /// - If `expr` has type `result<TOk, TErr>`: verifies enclosing function returns `result<U, F>`,
+    ///   unwraps `TOk` on `.is_ok`, and plans early `return result<U, F>.err(expr.err_val)` on failure.
+    /// - If `expr` has type `option<T>`: verifies enclosing function returns `option<U>`,
+    ///   unwraps `T` on `.has_value`, and plans early `return option<U>.none()` on empty.
+    pub fn analyze_try_operator(
+        &mut self,
+        expr_ty: crate::types::TypeId,
+        enclosing_return_ty: Option<crate::types::TypeId>,
+        types: &crate::types::TypeArena,
+        fn_name: &str,
+        span: ByteSpan,
+    ) -> TryPropagationPlan {
+        let pruned = types.prune(expr_ty);
+        match types.get(pruned).clone() {
+            crate::types::TypeKind::Option(inner_ty) => {
+                if let Some(ret_ty) = enclosing_return_ty {
+                    let ret_pruned = types.prune(ret_ty);
+                    if !matches!(types.get(ret_pruned), crate::types::TypeKind::Option(_))
+                        && ret_pruned != crate::types::TypeId::ANY
+                    {
+                        self.report_undeclared_error_return("option<none>", fn_name, span);
+                    }
+                }
+                TryPropagationPlan::OptionUnwrap {
+                    unwrapped_ty: inner_ty,
+                    lang_item: crate::comptime::LangItem::Option,
+                }
+            }
+            crate::types::TypeKind::Result { ok, err } => {
+                if let Some(ret_ty) = enclosing_return_ty {
+                    let ret_pruned = types.prune(ret_ty);
+                    match types.get(ret_pruned) {
+                        crate::types::TypeKind::Result { err: expected_err, .. } => {
+                            let exp_e = types.prune(*expected_err);
+                            let act_e = types.prune(err);
+                            if exp_e != act_e
+                                && exp_e != crate::types::TypeId::ANY
+                                && act_e != crate::types::TypeId::ANY
+                            {
+                                self.report_incompatible_error_sets(
+                                    &types.display(exp_e),
+                                    &types.display(act_e),
+                                    span,
+                                );
+                            }
+                        }
+                        _ if ret_pruned != crate::types::TypeId::ANY => {
+                            self.report_undeclared_error_return(&types.display(err), fn_name, span);
+                        }
+                        _ => {}
+                    }
+                }
+                TryPropagationPlan::ResultUnwrap {
+                    unwrapped_ok_ty: ok,
+                    propagated_err_ty: err,
+                    lang_item: crate::comptime::LangItem::Result,
+                }
+            }
+            _ => TryPropagationPlan::Passthrough(pruned),
+        }
+    }
+
+    /// Section 4.2: Implicit Value Lifting for `option<T>` (`T?`) and `result<TOk, TErr>` (`T ! E`).
+    pub fn synthesize_implicit_lift(
+        expected_ty: crate::types::TypeId,
+        actual_ty: crate::types::TypeId,
+        is_fail_call: bool,
+        types: &crate::types::TypeArena,
+    ) -> Option<ImplicitLiftKind> {
+        let exp = types.prune(expected_ty);
+        let act = types.prune(actual_ty);
+        match types.get(exp).clone() {
+            crate::types::TypeKind::Option(inner) => {
+                let inner_p = types.prune(inner);
+                if act == crate::types::TypeId::NULL {
+                    Some(ImplicitLiftKind::OptionNone { elem_ty: inner_p })
+                } else if act == inner_p || inner_p == crate::types::TypeId::ANY {
+                    Some(ImplicitLiftKind::OptionSome { elem_ty: inner_p })
+                } else {
+                    None
+                }
+            }
+            crate::types::TypeKind::Result { ok, err } => {
+                let ok_p = types.prune(ok);
+                let err_p = types.prune(err);
+                if is_fail_call {
+                    Some(ImplicitLiftKind::ResultErr {
+                        ok_ty: ok_p,
+                        err_ty: err_p,
+                    })
+                } else if act == ok_p || ok_p == crate::types::TypeId::ANY {
+                    Some(ImplicitLiftKind::ResultOk {
+                        ok_ty: ok_p,
+                        err_ty: err_p,
+                    })
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum TryPropagationPlan {
+    OptionUnwrap {
+        unwrapped_ty: crate::types::TypeId,
+        lang_item: crate::comptime::LangItem,
+    },
+    ResultUnwrap {
+        unwrapped_ok_ty: crate::types::TypeId,
+        propagated_err_ty: crate::types::TypeId,
+        lang_item: crate::comptime::LangItem,
+    },
+    Passthrough(crate::types::TypeId),
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ImplicitLiftKind {
+    /// Synthesizes `option<T>.some(expr)`
+    OptionSome { elem_ty: crate::types::TypeId },
+    /// Synthesizes `option<T>.none()`
+    OptionNone { elem_ty: crate::types::TypeId },
+    /// Synthesizes `result<TOk, TErr>.ok(expr)`
+    ResultOk {
+        ok_ty: crate::types::TypeId,
+        err_ty: crate::types::TypeId,
+    },
+    /// Synthesizes `result<TOk, TErr>.err(err_expr)` (from `fail(err_expr)`)
+    ResultErr {
+        ok_ty: crate::types::TypeId,
+        err_ty: crate::types::TypeId,
+    },
 }

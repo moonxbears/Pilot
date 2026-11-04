@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "pilot-arena",
  "pilot-ast",
+ "pilot-codegen",
  "pilot-intern",
  "pilot-lexer",
  "pilot-lsp-macros",

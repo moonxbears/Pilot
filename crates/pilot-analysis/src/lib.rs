@@ -31,8 +31,12 @@ pub use infer::{
     clone_and_rewrite_self_field_accesses, rewrite_self_field_accesses, TypeInferenceEngine,
 };
 pub use patterns::{MarangetChecker, PatternCase};
-pub use null_error::{ErrorFlowAnalyzer, NullSafetyAnalyzer};
-pub use loops::LoopAnalyzer;
+pub use null_error::{
+    ErrorFlowAnalyzer, ImplicitLiftKind, NullSafetyAnalyzer, TryPropagationPlan,
+};
+pub use loops::{
+    ForLoopAnalyzer, ForLoweringStrategy, LoopAnalyzer, LoopReturnMode, LoopScheduleMode,
+};
 pub use contracts::{ContractVerifier, Interval};
 pub use dimensions::{DimensionChecker, DimensionVector};
 pub use comptime::{
@@ -43,8 +47,8 @@ pub use comptime::{
 pub use pipeline::{AnalysisPipeline, AnalysisResult};
 pub use autodiff::{DualValue, SymbolicDifferentiator, SymbolicExpr};
 pub use quoting::{
-    AstSpliceResult, CallFrameLayout, CallQuotingEngine, EffectDiff, EffectPlan,
-    ReactiveSignalNode, ShallowCallDescriptor,
+    AstSpliceResult, CallFrameLayout, CallQuoteProjectionInfo, CallQuotingEngine, EffectDiff,
+    EffectPlan, ReactiveSignalNode, ShallowCallDescriptor,
 };
 pub use macros::{
     desugar_bracket_attributes, expand_syntax_macro, splice_quote_template, DecoratorKind,
@@ -151,13 +155,13 @@ mod tests {
     #[test]
     fn test_infer_full_ast_pipeline_clean() {
         let code = r#"
-def fib(n: int) -> int {
+fn fib(n: i64) -> i64 {
     if n <= 1 {
-        return n
+        return n;
     }
-    return fib(n - 1) + fib(n - 2)
+    return fib(n - 1) + fib(n - 2);
 }
-let res = fib(10)
+let res = fib(10);
 "#;
         let arena = pilot_parser::parse(code);
         let result = AnalysisPipeline::analyze(&arena, arena.root);
@@ -168,9 +172,9 @@ let res = fib(10)
     #[test]
     fn test_infer_type_mismatch_diagnostics() {
         let code = r#"
-let a: int = 10
-let b: str = "hello"
-let c = a + b
+let a: i64 = 10;
+let b: str = "hello";
+let c = a + b;
 "#;
         let arena = pilot_parser::parse(code);
         let result = AnalysisPipeline::analyze(&arena, arena.root);
@@ -182,7 +186,7 @@ let c = a + b
     #[test]
     fn test_infer_unresolved_identifier_diagnostics() {
         let code = r#"
-let y = undeclared_variable + 5
+let y = undeclared_variable + 5;
 "#;
         let arena = pilot_parser::parse(code);
         let result = AnalysisPipeline::analyze(&arena, arena.root);
@@ -194,8 +198,8 @@ let y = undeclared_variable + 5
     #[test]
     fn test_contract_verifier_division_by_zero() {
         let code = r#"
-def div_test(x: int) -> int {
-    return x / 0
+fn div_test(x: i64) -> i64 {
+    return x / 0;
 }
 "#;
         let arena = pilot_parser::parse(code);
@@ -208,10 +212,10 @@ def div_test(x: int) -> int {
     #[test]
     fn test_pattern_exhaustiveness_ast_walk() {
         let code_exhaustive = r#"
-def test_match(x: int) -> int {
-    match x {
-        case 0 { return 10 }
-        case _ { return 20 }
+fn test_match(x: i64) -> i64 {
+    switch x {
+        case 0: { return 10; }
+        case _: { return 20; }
     }
 }
 "#;
@@ -221,9 +225,9 @@ def test_match(x: int) -> int {
         assert!(match_diags.is_empty(), "Expected exhaustive match, got: {:?}", match_diags);
 
         let code_non_exhaustive = r#"
-def test_match_incomplete(x: int) -> int {
-    match x {
-        case 0 { return 10 }
+fn test_match_incomplete(x: i64) -> i64 {
+    switch x {
+        case 0: { return 10; }
     }
 }
 "#;
@@ -239,7 +243,7 @@ def test_match_incomplete(x: int) -> int {
 record Frame2D(width: int, height: int, name: str);
 record Canvas2D(width: float, height: float);
 
-def compute_area(surface) => surface.width * surface.height;
+fn compute_area(surface) => surface.width * surface.height;
 
 let frame_area = compute_area(Frame2D(1920, 1080, "HD"));
 let canvas_area = compute_area(Canvas2D(12.5, 8.0));
@@ -280,7 +284,7 @@ let canvas_area = compute_area(Canvas2D(12.5, 8.0));
 let mylist = ["apples", 5, 2];
 let first_elem = mylist[0];
 let mymap = {"name": "Pilot", "count": 42};
-let branch_val = "ok" if true else 404;
+let branch_val = if true { "ok" } else { 404 };
 "#;
         let arena = pilot_parser::parse(code);
         let result = AnalysisPipeline::analyze(&arena, arena.root);
@@ -460,10 +464,10 @@ let branch_val = "ok" if true else 404;
     #[test]
     fn test_static_demotion_pass_and_comptime_side_effects() {
         let code = r#"
-def calculate(a: int, b: int) -> int {
-    let x = a + b
-    var y = x * 2
-    return y
+fn calculate(a: i64, b: i64) -> i64 {
+    let x = a + b;
+    var y = x * 2;
+    return y;
 }
 "#;
         let arena = pilot_parser::parse(code);
@@ -479,29 +483,29 @@ def calculate(a: int, b: int) -> int {
     fn test_custom_indexer_inference() {
         let code = r#"
 class MemoryCache {
-    property this[key: str]: int {
+    self[key: str] -> int {
         get => 42;
         set(v) => {};
     }
 }
 
 class Matrix {
-    property this[row: int, col: int]: float => 3.14;
+    self[row: int, col: int] -> float => 3.14;
 }
 
 class SimpleBuffer {
-    this[idx: int]: str => "item";
+    self[idx: int] -> str => "item";
 }
 
-let cache = MemoryCache()
-let item = cache["hello"]
-cache["test"] = 100
+let cache = MemoryCache();
+let item = cache["hello"];
+cache["test"] = 100;
 
-let mat = Matrix()
-let val = mat[1, 2]
+let mat = Matrix();
+let val = mat[1, 2];
 
-let buf = SimpleBuffer()
-let entry = buf[0]
+let buf = SimpleBuffer();
+let entry = buf[0];
 "#;
         let arena = pilot_parser::parse(code);
         let result = AnalysisPipeline::analyze(&arena, arena.root);
@@ -535,10 +539,10 @@ let entry = buf[0]
         // Test type mismatch in indexer argument
         let code_mismatch = r#"
 class Cache {
-    property this[key: str]: int => 0;
+    self[key: str] -> int => 0;
 }
-let c = Cache()
-let bad = c[123]
+let c = Cache();
+let bad = c[123];
 "#;
         let arena_m = pilot_parser::parse(code_mismatch);
         let res_m = AnalysisPipeline::analyze(&arena_m, arena_m.root);
@@ -548,10 +552,10 @@ let bad = c[123]
         // Test argument count mismatch in multi-dimensional indexer
         let code_count = r#"
 class Grid {
-    property this[r: int, c: int]: float => 1.0;
+    self[r: int, c: int] -> float => 1.0;
 }
-let g = Grid()
-let bad = g[5]
+let g = Grid();
+let bad = g[5];
 "#;
         let arena_c = pilot_parser::parse(code_count);
         let res_c = AnalysisPipeline::analyze(&arena_c, arena_c.root);
@@ -696,9 +700,9 @@ struct TransformFrame {
     var pad: u8
 }
 
-def step_frame(var f: TransformFrame, h: OddHeader, delta: i32) -> TransformFrame {
-    f.x = f.x + delta
-    return f
+fn step_frame(var f: TransformFrame, h: OddHeader, delta: i32) -> TransformFrame {
+    f.x = f.x + delta;
+    return f;
 }
 
 let f0 = TransformFrame(10, 20, 0x55, 7, 3, 1, 0);
@@ -742,7 +746,7 @@ var arena: TransformFrame[] = [f0, f1];
         assert_eq!(result.types.display(f0_ty.unwrap()), "TransformFrame");
         assert_eq!(result.types.display(h0_ty.unwrap()), "OddHeader");
         assert_eq!(result.types.display(f1_ty.unwrap()), "TransformFrame");
-        assert_eq!(result.types.display(arena_ty.unwrap()), "List[TransformFrame]");
+        assert_eq!(result.types.display(arena_ty.unwrap()), "Slice[TransformFrame]");
 
         let sf_str = result.types.display(step_frame_ty.unwrap());
         assert_eq!(sf_str, "(TransformFrame, OddHeader, i64) -> TransformFrame");
@@ -758,24 +762,24 @@ var arena: TransformFrame[] = [f0, f1];
     #[test]
     fn test_relational_queries_and_acid_transactions() {
         let code = r#"
-def test_queries() {
-    let users_table = [{"name": "Alice", "role": "admin", "active": true}]
+fn test_queries() {
+    let users_table = [{"name": "Alice", "role": "admin", "active": true}];
     let active_admins = from u in users_table
         where u["active"] == true and u["role"] == "admin"
         order by u["name"] ascending
-        select u["name"]
+        select u["name"];
 
-    let engineer_names = select u["name"] from users_table as u where u["role"] == "engineer"
+    let engineer_names = select u["name"] from users_table as u where u["role"] == "engineer";
 
-    let combined_users = active_admins union all engineer_names
-    let intersect_users = active_admins intersect engineer_names
-    let except_users = active_admins except engineer_names
+    let combined_users = active_admins union all engineer_names;
+    let intersect_users = active_admins intersect engineer_names;
+    let except_users = active_admins except engineer_names;
 
-    database app_db = connect("memory://")
+    database app_db = connect("memory://");
     transaction {
-        savepoint sp1
-        commit
-        rollback to savepoint sp1
+        savepoint sp1;
+        commit;
+        rollback to savepoint sp1;
     }
 }
 "#;
@@ -787,24 +791,24 @@ def test_queries() {
     #[test]
     fn test_builtin_type_methods_inference() {
         let code = r#"
-def test_builtins() {
-    let s = "hello,world"
-    let parts = s.split(",")
-    let joined = parts.join("-")
-    let rep = s.replace("world", "pilot")
-    let trimmed = s.trim()
-    let is_emp = s.is_empty()
-    let has_lo = s.contains("lo")
-    let idx = s.index_of("world")
+fn test_builtins() {
+    let s = "hello,world";
+    let parts = s.split(",");
+    let joined = parts.join("-");
+    let rep = s.replace("world", "pilot");
+    let trimmed = s.trim();
+    let is_emp = s.is_empty();
+    let has_lo = s.contains("lo");
+    let idx = s.index_of("world");
 
-    let num = -42
-    let abs_val = num.abs()
-    let clamped = num.clamp(0, 100)
-    let s_num = num.to_string()
+    let num = -42;
+    let abs_val = num.abs();
+    let clamped = num.clamp(0, 100);
+    let s_num = num.to_string();
 
-    let f = 3.14
-    let r = f.round()
-    let fl = f.floor()
+    let f = 3.14;
+    let r = f.round();
+    let fl = f.floor();
 }
 "#;
         let arena = pilot_parser::parse(code);
@@ -818,7 +822,7 @@ def test_builtins() {
             record Point(x: int, y: int);
             record Config(timeout: float, retry: bool);
 
-            def calculate(p: Point, c: Config) -> float {
+            fn calculate(p: Point, c: Config) -> float {
                 if c.retry {
                     return (p.x + p.y) as float * c.timeout;
                 }
@@ -838,13 +842,13 @@ def test_builtins() {
     #[test]
     fn test_string_range_type_inference() {
         let code = r#"
-def check_ranges() {
-    let forward = "a".."z"
-    let reverse = "z".."a"
-    let mixed = "a".."Z"
-    let big = "a".."zzza"
+fn check_ranges() {
+    let forward = "a".."z";
+    let reverse = "z".."a";
+    let mixed = "a".."Z";
+    let big = "a".."zzza";
     for ch in "a".."z" {
-        let upper = ch.to_upper()
+        let upper = ch.to_upper();
     }
 }
 "#;
@@ -855,11 +859,11 @@ def check_ranges() {
 
     #[test]
     fn test_static_methods_contextual_enums_and_deep_flatten() {
-        // 1. Static def rejecting self / .field
+        // 1. Static fn rejecting self / .field
         let bad_static = r#"
         class Service {
-            x: int
-            static def compute() -> int {
+            x: int;
+            static fn compute() -> int {
                 return .x;
             }
         }
@@ -869,17 +873,17 @@ def check_ranges() {
         assert!(!result_bad.is_ok(), "Expected static method error");
         assert!(result_bad.diagnostics.iter().any(|d| d.code == "STATIC001"), "Expected STATIC001, got: {:?}", result_bad.diagnostics);
 
-        // 2. Valid static def and instance def accessing fields
+        // 2. Valid static fn and instance fn accessing fields
         let good_code = r#"
         class Vector2D {
-            x: int
-            y: int
+            x: int;
+            y: int;
 
-            def get_sum() -> int {
+            fn get_sum() -> int {
                 return .x + .y;
             }
 
-            static def origin() -> int {
+            static fn origin() -> int {
                 return 0;
             }
         }
@@ -902,18 +906,18 @@ def check_ranges() {
         // 1. Inaccessible private method accessed from outside triggers VIS001
         let priv_code = r#"
         class BankAccount {
-            balance: int
+            balance: int;
 
-            def internal_vault() -> int {
+            fn internal_vault() -> int {
                 return .balance;
             }
 
-            pub def get_balance() -> int {
+            pub fn get_balance() -> int {
                 return .internal_vault();
             }
         }
 
-        def test_access() {
+        fn test_access() {
             let acct = BankAccount();
             acct.internal_vault();
         }
@@ -926,18 +930,18 @@ def check_ranges() {
         // 2. Calling private method from inside class method via self or prefix dot succeeds
         let valid_priv = r#"
         class BankAccount {
-            balance: int
+            balance: int;
 
-            def internal_vault() -> int {
+            fn internal_vault() -> int {
                 return .balance;
             }
 
-            pub def get_balance() -> int {
+            pub fn get_balance() -> int {
                 return .internal_vault();
             }
         }
 
-        def test_access() {
+        fn test_access() {
             let acct = BankAccount();
             acct.get_balance();
         }
@@ -948,10 +952,10 @@ def check_ranges() {
 
         // 3. Insufficient clearance calling lvl(30) function from lvl(0) triggers LVL001
         let low_clearance = r#"
-        lvl30 def secure_wipe() {
+        lvl30 fn secure_wipe() {
         }
 
-        def regular_user() {
+        fn regular_user() {
             secure_wipe();
         }
         "#;
@@ -962,10 +966,10 @@ def check_ranges() {
 
         // 4. Elevated clearance via function declaration lvl30 allows call
         let elevated_fn = r#"
-        lvl30 def secure_wipe() {
+        lvl30 fn secure_wipe() {
         }
 
-        lvl30 def admin_panel() {
+        lvl30 fn admin_panel() {
             secure_wipe();
         }
         "#;
@@ -973,14 +977,15 @@ def check_ranges() {
         let res_elevated = AnalysisPipeline::analyze(&arena_elevated, arena_elevated.root);
         assert!(res_elevated.is_ok(), "Expected clean analysis with matching clearance, got: {:?}", res_elevated.diagnostics);
 
-        // 5. Flow-typed elevation via `if lvl >= 30:`
+        // 5. Flow-typed elevation via `if lvl >= 30 { ... }`
         let guard_code = r#"
-        lvl30 def secure_wipe() {
+        lvl30 fn secure_wipe() {
         }
 
-        def dispatch(lvl: int) {
-            if lvl >= 30:
+        fn dispatch(lvl: int) {
+            if lvl >= 30 {
                 secure_wipe();
+            }
         }
         "#;
         let arena_guard = pilot_parser::parse(guard_code);
@@ -993,28 +998,20 @@ def check_ranges() {
         // Variation B flat sibling property and indexer setters
         let code = r#"
         class ConfigBuffer {
-            data: int
+            data: int;
 
-            property timeout: int {
-                get:
-                    return .data;
-                pub set:
-                    .data = value;
-                pub set(multiplier: float):
-                    .data = 100;
-                priv set(raw: (int, int)):
-                    .data = 200;
+            timeout: int {
+                get => .data;
+                pub set => { .data = value; }
+                pub set(multiplier: float) => { .data = 100; }
+                priv set(raw: (int, int)) => { .data = 200; }
             }
 
             self[key: str] -> int {
-                get:
-                    return .data;
-                default:
-                    return 0;
-                set:
-                    .data = value;
-                set(iso token: str):
-                    .data = 50;
+                get => .data;
+                default => 0;
+                set => { .data = value; }
+                set(iso token: str) => { .data = 50; }
             }
         }
         "#;

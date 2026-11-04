@@ -161,11 +161,12 @@ impl MarangetChecker {
                     | pilot_ast::NodeKind::PatBind => PatternCase::Wildcard,
                     pilot_ast::NodeKind::PatSlice => PatternCase::Tuple(Vec::new()),
                     pilot_ast::NodeKind::PatVariant => {
-                        let name = arena
+                        let raw_name = arena
                             .interner
-                            .resolve(pilot_intern::SymbolId(pat_node.lhs))
-                            .to_string();
-                        PatternCase::Variant(name)
+                            .resolve(pilot_intern::SymbolId(pat_node.lhs));
+                        let name = raw_name.strip_prefix("::").unwrap_or(raw_name).to_string();
+                        let normalized = if name == "fail" { "err".to_string() } else { name };
+                        PatternCase::Variant(normalized)
                     }
                     pilot_ast::NodeKind::PatLiteral => {
                         let lit_id = pilot_ast::NodeId(pat_node.lhs);
@@ -191,5 +192,25 @@ impl MarangetChecker {
         }
 
         checker.check(arena.span(match_id))
+    }
+
+    /// Returns the canonical variant list for Stage 3B `option<T>` (`["some", "none"]`),
+    /// Stage 3C `result<T, E>` (`["ok", "err"]`), `bool` (`["true", "false"]`), or user ADTs.
+    pub fn canonical_variants_for_type(
+        ty: crate::types::TypeId,
+        types: &crate::types::TypeArena,
+    ) -> Vec<String> {
+        let pruned = types.prune(ty);
+        match types.get(pruned) {
+            crate::types::TypeKind::Option(_) => vec!["some".to_string(), "none".to_string()],
+            crate::types::TypeKind::Result { .. } => vec!["ok".to_string(), "err".to_string()],
+            crate::types::TypeKind::Primitive(p) if p == "bool" => {
+                vec!["true".to_string(), "false".to_string()]
+            }
+            crate::types::TypeKind::Adt { variants, .. } => {
+                variants.iter().map(|(v, _)| v.clone()).collect()
+            }
+            _ => Vec::new(),
+        }
     }
 }

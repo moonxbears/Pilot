@@ -378,4 +378,31 @@ export function loadPilotModule(
     pub fn finish(self) -> String {
         self.out
     }
+
+    /// Section 4.4: 5-Backend Hardware & `[Lang]` Mapping Table (WebAssembly `.wat`/`.wasm` Backend).
+    pub fn map_lang_type_to_wasm(lang_item: &str, elem_types: &[&str]) -> String {
+        let t0 = elem_types.first().copied().unwrap_or("i64");
+        let t1 = elem_types.get(1).copied().unwrap_or("i32");
+        match lang_item {
+            "void" | "never" => "".to_string(),
+            "bool" | "char" | "i8" | "u8" | "i16" | "u16" | "i32" | "u32" => "i32".to_string(),
+            "i64" | "u64" | "isize" | "usize" => "i64".to_string(),
+            "i128" | "u128" => "(i64, i64)".to_string(),
+            "f16" | "f32" => "f32".to_string(),
+            "f64" => "f64".to_string(),
+            "f128" => "(f64, f64)".to_string(),
+            "ptr" => "i32".to_string(),
+            "slice" | "str" => "(i32, i32)".to_string(),
+            "stride" | "SliceBuffer" => "(i32, i32, i32)".to_string(),
+            "RangeWindow" => format!("({}, {})", t0, t0),
+            "option" => format!("({}, i32)", t0),
+            "result" => format!("({}, {}, i32)", t0, t1),
+            other => other.to_string(),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn finish_legacy(self) -> String {
+        self.out
+    }
 }

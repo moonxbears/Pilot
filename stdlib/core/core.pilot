@@ -241,6 +241,7 @@ comptime {
             sym_xor:     "^",
             sym_bitand:  "&",
             sym_range:   "..",
+            sym_range_lt:"..<",
             sym_span:    "..=",
             sym_eq:      "==",
             sym_ne:      "!=",
@@ -256,6 +257,7 @@ comptime {
             sym_div:     "/",
             sym_rem:     "%",
             sym_not:     "!",
+            sym_try:     "?",
             sym_bitnot:  "~",
             sym_pairs:   "**",
             sym_expand:  "*..",
@@ -342,8 +344,9 @@ comptime {
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_bitor,  Cfg.Ops.fix_infix,   Cfg.Ops.prec_bitor,  Cfg.Ops.assoc_left);
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_xor,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_xor,    Cfg.Ops.assoc_left);
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_bitand, Cfg.Ops.fix_infix,   Cfg.Ops.prec_bitand, Cfg.Ops.assoc_left);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_range,  Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
-    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_span,   Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_range,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_range_lt, Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_span,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_eq,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_eq,     Cfg.Ops.assoc_none);
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_ne,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_eq,     Cfg.Ops.assoc_none);
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_lt,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
@@ -366,6 +369,7 @@ comptime {
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_expand, Cfg.Ops.fix_prefix,  Cfg.Ops.prec_splat,  Cfg.Ops.assoc_right);
 
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_not,    Cfg.Ops.fix_postfix, Cfg.Ops.prec_post,   Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_try,    Cfg.Ops.fix_postfix, Cfg.Ops.prec_post,   Cfg.Ops.assoc_left);
 }
 
 [EnforceCoreNaming]

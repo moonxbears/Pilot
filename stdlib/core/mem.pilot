@@ -1,189 +1,258 @@
-// SPDX-License-Identifier: MIT
-// std.mem — Contiguous Zero-Copy SliceBuffer<T>, RangeWindow & .rodata Frozen Memory Primitives
+// =========================================================================
+// FILE: stdlib/core/mem.pilot
+// STAGE 3A MEMORY, VIEWS, ENUMERATORS & ZERO-MARSHALLING C-ABI PRIMITIVES
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Memory;
 
-// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
-extern "c" lib "pilot_rt" {
-    def __slice_ptr(buf: any) -> i64;
-    def __slice_stride(buf: any) -> i64;
-    def __slice_is_readonly(buf: any) -> bool;
-    def __slice_get(buf: any, idx: i64) -> any;
-    def __slice_byte_at(buf: any, idx: i64) -> i64;
-    def __slice_set(buf: any, idx: i64, val: any);
-    def __slice_push(buf: any, val: any);
-    def __slice_subview(buf: any, start: i64, length: i64) -> any;
-    def __slice_dot(a: any, b: any) -> f64;
-    def __slice_saxpy(alpha: f64, x: any, y: any) -> any;
-    def __slice_scale(alpha: f64, buf: any) -> any;
-    def __slice_sort(buf: any) -> any;
-    def __slice_welford(buf: any) -> any;
-    def __cpp_backend_available() -> bool;
-    def __cpp_simd_bits() -> i64;
-}
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
 
-def alloc_slice(capacity: i64, elem_type: str = "f64", initial_length: i64 = 0) {
-    return slice_buffer(capacity, elem_type, initial_length);
-}
+// Field-bearing bundle for contiguous pointer+length types (`slice<T>`, `str`, `SliceBuffer<T>`)
+let RawStorageBundle<TItem: IAnyValue> = {
+    pub data: ptr<TItem>;
+    pub len:  usize;
+};
 
-def shared_slice(name_or_path: str, capacity: i64, elem_type: str = "f64", initial_length: i64 = 0) {
-    return shared_buffer(name_or_path, capacity, elem_type, initial_length);
-}
+// Method-only facet for contiguous views (`0` stored fields -> safe in `partial struct`)
+let ContiguousViewFacet<TItem: IAnyValue> = {
+    pub count:    usize { get => .len; }
+    pub is_empty: bool  { get => .len == 0; }
+    pub byte_len: usize { get => .len * sizeof(TItem); }
+};
 
-def slice_len(buf) -> i64 {
-    return __slice_len(buf);
-}
+// Zero-allocation value enumerators for `slice<T>` and `stride<T>`
+pub struct {
+    [Layout(c_abi)]
+    SliceEnumerator<TItem: IAnyValue> : IEnumerator<TItem>, IReference {
+        pub data:  ptr<TItem>;
+        pub len:   usize;
+        pub index: usize;
+        pub has_started: bool;
 
-def slice_cap(buf) -> i64 {
-    return __slice_cap(buf);
-}
-
-def slice_stride(buf) -> i64 {
-    return __slice_stride(buf);
-}
-
-def slice_ptr(buf) -> i64 {
-    return __slice_ptr(buf);
-}
-
-def slice_is_readonly(buf) -> bool {
-    return __slice_is_readonly(buf);
-}
-
-def slice_get(buf, idx: i64) {
-    return __slice_get(buf, idx);
-}
-
-def slice_set(buf, idx: i64, val) {
-    return __slice_set(buf, idx, val);
-}
-
-def slice_push(buf, val) {
-    return __slice_push(buf, val);
-}
-
-def slice_clear(buf) {
-    return __slice_clear(buf);
-}
-
-def slice_subview(buf, start: i64, length: i64) {
-    return __slice_subview(buf, start, length);
-}
-
-def slice_to_list(buf) {
-    return __slice_to_list(buf);
-}
-
-def cpp_backend_available() -> bool {
-    return __cpp_backend_available();
-}
-
-def cpp_simd_bits() -> i64 {
-    return __cpp_simd_bits();
-}
-
-def slice_sum(buf) {
-    return __slice_sum(buf);
-}
-
-def slice_dot(a, b) -> f64 {
-    return __slice_dot(a, b);
-}
-
-def slice_saxpy(alpha: f64, x, y) {
-    return __slice_saxpy(alpha, x, y);
-}
-
-def slice_scale(alpha: f64, buf) {
-    return __slice_scale(alpha, buf);
-}
-
-def slice_sort(buf) {
-    return __slice_sort(buf);
-}
-
-def slice_welford(buf) {
-    return __slice_welford(buf);
-}
-
-def freeze(val) {
-    return __freeze_value(val);
-}
-
-def is_frozen(val) -> bool {
-    return __is_frozen(val);
-}
-
-def is_perfect_hash(map_val) -> bool {
-    return __is_perfect_hash_map(map_val);
-}
-
-def frozen_table_size(map_val) -> i64 {
-    return __frozen_map_table_size(map_val);
-}
-
-def sizeof(type_name: str) -> i64 {
-    return sizeof_type(type_name);
-}
-
-// Half-open [start, end_idx) range window for work-stealing & zero-allocation index partitioning
-class RangeWindow {
-    self(start: i64, end_idx: i64) {
-        self.start = start;
-        if end_idx < start {
-            self.end_idx = start;
-        } else {
-            self.end_idx = end_idx;
-        }
-    }
-
-    def len(self) -> i64 {
-        return self.end_idx - self.start;
-    }
-
-    def is_empty(self) -> bool {
-        return self.end_idx <= self.start;
-    }
-
-    def contains(self, idx: i64) -> bool {
-        return idx >= self.start and idx < self.end_idx;
-    }
-
-    def at(self, offset: i64) {
-        let actual: i64 = self.start + offset;
-        if offset < 0 or actual >= self.end_idx {
-            return none;
-        }
-        return some(actual);
-    }
-
-    def split_mid(self) {
-        let mid: i64 = self.start + ((self.end_idx - self.start) >> 1);
-        return (RangeWindow(self.start, mid), RangeWindow(mid, self.end_idx));
-    }
-
-    def split_chunks(self, chunk_size: i64) {
-        if chunk_size <= 0 {
-            panic("RangeWindow.split_chunks requires chunk_size > 0");
-        }
-        var out = [];
-        var cur: i64 = self.start;
-        while cur < self.end_idx {
-            var next_end: i64 = cur + chunk_size;
-            if next_end > self.end_idx {
-                next_end = self.end_idx;
+        pub var fn move_next() -> bool {
+            if !.has_started {
+                .has_started = true;
+                return .len > 0;
             }
-            out.append(RangeWindow(cur, next_end));
-            cur = next_end;
+            let next_idx = .index + 1;
+            if next_idx < .len {
+                .index = next_idx;
+                return true;
+            }
+            return false;
         }
-        return out;
+
+        pub current: TItem {
+            get => .data[.index];
+        }
     }
 
-    def to_list(self) {
-        var items = [];
-        var i: i64 = self.start;
-        while i < self.end_idx {
-            items.append(i);
-            i += 1;
+    [Layout(c_abi)]
+    StrideEnumerator<TItem: IAnyValue> : IEnumerator<TItem>, IReference {
+        pub source: stride<TItem>;
+        pub index:  usize;
+        pub has_started: bool;
+
+        pub var fn move_next() -> bool {
+            if !.has_started {
+                .has_started = true;
+                return .source.len > 0;
+            }
+            let next_idx = .index + 1;
+            if next_idx < .source.len {
+                .index = next_idx;
+                return true;
+            }
+            return false;
         }
-        return items;
+
+        pub current: TItem {
+            get => .source[.index];
+        }
+    }
+}
+
+pub partial struct {
+    // 1. Raw 64-Bit Address Register (`ptr<T>` / `T*`) — `0b01` `IReference`
+    [Lang(Cfg.Lang.ptr_t), Bits(Cfg.Reg.b64, Cfg.Reg.raw_ptr)]
+    ptr<T: IAnyValue> : IIndexGet<usize, T>, IIndexSet<usize, T>, IEquatable<ptr<T>>, IReference {
+        pub pure:
+            op []  (idx: usize)    -> T      => __ssa_load(__ssa_gep(self, idx));
+            op +   (offset: usize) -> ptr<T> => __ssa_gep(self, offset);
+            op -   (offset: usize) -> ptr<T> => __ssa_gep(self, 0 - offset);
+            op ==  (rhs: ptr<T>)   -> bool   => __ssa(Cfg.Ssa.eq, self, rhs);
+            fn is_null()           -> bool   => (__ssa_cast(Cfg.Ssa.bitcast, self, usize)) == 0;
+        pub var:
+            op []= (idx: usize, v: T)        => __ssa_store(__ssa_gep(self, idx), v);
+    }
+
+    // 2. Borrowed Contiguous Slice (`slice<T>` / `T[]`) — 16-Byte `{ ptr<T>, usize }`, `0b01` `IReference`
+    [Lang(Cfg.Lang.slice_t), Layout(c_abi)]
+    slice<T: IAnyValue> : IReadOnlyList<T>, IReference {
+        *RawStorageBundle<T>;
+        *ContiguousViewFacet<T>;
+
+        pub pure:
+            op [] (idx: usize) -> T => .data[idx];
+
+            op [] (r: range<usize>) -> slice<T> => slice<T> {
+                data: .data + r.start,
+                len:  r.end - r.start,
+            };
+
+            op [] (s: span<usize>) -> slice<T> => slice<T> {
+                data: .data + s.start,
+                len:  (s.end - s.start) + 1,
+            };
+
+            fn subslice(start: usize, sub_len: usize) -> slice<T> => slice<T> {
+                data: .data + start,
+                len:  sub_len,
+            };
+
+            fn get_enumerator() -> SliceEnumerator<T> => SliceEnumerator<T> {
+                data:        .data,
+                len:         .len,
+                index:       0,
+                has_started: false,
+            };
+    }
+
+    // 3. Strided OffsetLens View (`stride<T>` / `T[..]`) — 24-Byte `{ ptr<T>, usize, isize }`, `0b01` `IReference`
+    [Lang(Cfg.Lang.stride_t), Layout(c_abi)]
+    stride<T: IAnyValue> : IReadOnlyList<T>, IReference {
+        *RawStorageBundle<T>;
+        *ContiguousViewFacet<T>;
+        pub byte_step: isize;
+
+        pub pure:
+            op [] (idx: usize) -> T {
+                let base_addr = __ssa_cast(Cfg.Ssa.bitcast, .data, usize);
+                let step_off  = (idx as isize) * .byte_step;
+                let elem_addr = (base_addr as isize + step_off) as usize;
+                let elem_ptr  = __ssa_cast(Cfg.Ssa.bitcast, elem_addr, ptr<T>);
+                return __ssa_load(elem_ptr);
+            }
+
+            fn get_enumerator() -> StrideEnumerator<T> => StrideEnumerator<T> {
+                source:      self,
+                index:       0,
+                has_started: false,
+            };
+    }
+
+    // 4. Inline Fixed-Size C-ABI Array (`array<T, N>` / `T[N]`) — `N * sizeof(T)` Bytes, `0b00` `IValue`
+    [Lang(Cfg.Lang.array_t), Layout(c_abi)]
+    array<T: IAnyValue, N: const usize> : IList<T>, IValue {
+        pub count:    usize { get => N; }
+        pub is_empty: bool  { get => N == 0; }
+
+        pub pure:
+            fn as_ptr() -> ptr<T> => __ssa_cast(Cfg.Ssa.bitcast, ref self, ptr<T>);
+
+            fn as_slice() -> slice<T> => slice<T> {
+                data: .as_ptr(),
+                len:  N,
+            };
+
+            op [] (idx: usize) -> T => .as_ptr()[idx];
+
+            fn contains(item: T) -> bool {
+                var idx: usize = 0;
+                loop {
+                    if !(idx < N) { break; }
+                    if .as_ptr()[idx] == item { return true; }
+                    idx = idx + 1;
+                }
+                return false;
+            }
+
+            fn get_enumerator() -> SliceEnumerator<T> => .as_slice().get_enumerator();
+
+        pub var:
+            op []= (idx: usize, val: T) => { .as_ptr()[idx] = val; }
+            fn add(item: T) {}
+            fn clear() {}
+            fn remove_at(index: usize) {}
+    }
+
+    // 5. Zero-Copy Key-Value Strided Projection (`map<K, V>`) — `0b01` `IReference`
+    [Lang(Cfg.Lang.map_t), Layout(c_abi)]
+    map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IReference {
+        pub keys: stride<TKey>;
+        pub vals: stride<TVal>;
+        pub count: usize { get => .keys.len; }
+
+        pub pure fn contains_key(key: TKey) -> bool {
+            var idx: usize = 0;
+            loop {
+                if !(idx < .keys.len) { break; }
+                if .keys[idx] == key { return true; }
+                idx = idx + 1;
+            }
+            return false;
+        }
+    }
+
+    // 6. Splat & Flatten Carrier Primitives (`splat<T>`, `pairs<K, V>`, `expand<T>`)
+    [Lang(Cfg.Lang.splat_t),  Layout(c_abi)] splat<T: IAnyValue>                     : IReference { pub items: slice<T>; }
+    [Lang(Cfg.Lang.pairs_t),  Layout(c_abi)] pairs<K: IEquatable<K>, V: IAnyValue>   : IReference { pub entries: map<K, V>; }
+    [Lang(Cfg.Lang.expand_t), Layout(c_abi)] expand<T: IAnyValue>                    : IReference { pub items: slice<T>; }
+}
+
+pub struct {
+    // 7. Milestone 15.3.1 C-ABI Worklist Frame (`sizeof(RangeWindow<T>) == 2 * sizeof(T)`) — `0b00` `IValue`
+    [Layout(c_abi)]
+    RangeWindow<TIter: IValue> : IValue {
+        pub current: TIter;
+        pub max:     TIter;
+    }
+
+    // 8. Milestone 15.3.3 24-Byte Universal C-ABI Owned Buffer (`SliceBuffer<T>`) — `0b10` `IObject`
+    [Layout(c_abi)]
+    SliceBuffer<TItem: IAnyValue> : IList<TItem>, IObject {
+        *RawStorageBundle<TItem>;
+        *ContiguousViewFacet<TItem>;
+        pub cap: usize;
+
+        ~self() {
+            // Paired with `libpilot_rt` Perceus `pilot_rt_drop_reuse` / region deallocation
+        }
+
+        pub pure:
+            op []  (idx: usize) -> TItem  => .data[idx];
+            fn as_slice() -> slice<TItem> => slice<TItem> { data: .data, len: .len };
+            fn contains(item: TItem) -> bool => .as_slice().contains(item);
+            fn get_enumerator() -> SliceEnumerator<TItem> => .as_slice().get_enumerator();
+
+        pub var:
+            op []= (idx: usize, val: TItem) => { .data[idx] = val; }
+            fn add(item: TItem) {
+                if .len < .cap {
+                    .data[.len] = item;
+                    .len = .len + 1;
+                }
+            }
+            fn clear() => { .len = 0; }
+            fn remove_at(index: usize) {
+                if index < .len {
+                    var i = index;
+                    let last = .len - 1;
+                    loop {
+                        if !(i < last) { break; }
+                        .data[i] = .data[i + 1];
+                        i = i + 1;
+                    }
+                    .len = last;
+                }
+            }
+    }
+
+    // 9. Tier-1 64KB Lexical Bump Region Guard (`ArenaScope`) — `0b11` `IGuard`
+    [Layout(c_abi)]
+    ArenaScope : IGuard {
+        pub region_view: slice<u8>;
+        ~self() {}
     }
 }
