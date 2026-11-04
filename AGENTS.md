@@ -2,6 +2,7 @@
 
 ## 1. Implementation Integrity & Self-Hosting Ideology
 - **Zero Shortcuts:** Never return static, pre-computed, or dataset-specific values to make a test pass. Implement the complete underlying algorithm. No assumptions should be made of elements between pilot and Rust that is not strictly rust engine seeded keywords.
+- ** No Assuming:** Don't assume that Pilot and Rust know the same things. A good exercise to run is, if I change something in pilot, will the underlying rust engine account for that or will it break because of specific hard-coded values? (As a hypothetical, if I changed all instances of char to c32 in pilot, would rust break?). Only 14 seed keywords should be hardcoded because they come from the underlying rust engine.
 - **No Elided Logic or Silent Fallbacks:** Never leave `// TODO`, `unimplemented!()`, or stubbed branches. Handle all states explicitly via `result<T, E>` (`T ! E`) or `option<T>` (`T?`).
 - **Pilot First (Self-Hosted Core):** The Rust workspace (`crates/pilot-*`) is a minimal zero-GC hardware/CFG/SSA/Perceus engine with **strictly 14 seed keywords** (`__engine`, `struct`, `interface`, `fn`, `let`, `ref`, `if`, `loop`, `return`, `yield`, `defer`, `comptime`, `quote`, `asm`). Whenever logic can be written in Pilot without performance loss, implement it in `stdlib/core/*.pilot`, `stdlib/*`, or `selfhost/*.pilot`.
 - **Hardware Arena & Register Invariants:**
