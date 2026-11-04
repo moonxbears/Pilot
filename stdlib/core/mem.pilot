@@ -177,7 +177,46 @@ pub partial struct {
             fn remove_at(index: usize) {}
     }
 
-    // 5. Zero-Copy Key-Value Strided Projection (`map<K, V>`) — `0b01` `IReference`
+    // 5. Hardware SIMD Vector (`simd<T, N>` / `T@N`) — `N * sizeof(T)` Bytes, `0b00` `IValue`
+    [Lang(Cfg.Lang.simd_t), Layout(c_abi)]
+    simd<T: IValue, N: const usize> : IValue {
+        pub lanes: usize { get => N; }
+        pub pure:
+            op [] (idx: usize) -> T => (__ssa_cast(Cfg.Ssa.bitcast, ref self, ptr<T>))[idx];
+            op +  (rhs: simd<T, N>) -> simd<T, N> => __ssa(Cfg.Ssa.add, self, rhs);
+            op -  (rhs: simd<T, N>) -> simd<T, N> => __ssa(Cfg.Ssa.sub, self, rhs);
+            op *  (rhs: simd<T, N>) -> simd<T, N> => __ssa(Cfg.Ssa.mul, self, rhs);
+    }
+
+    // 6. 2D Inline Matrix / Grid (`grid<T, N, M>` / `T[N, M]`) — `N * M * sizeof(T)` Bytes, `0b00` `IValue`
+    [Lang(Cfg.Lang.grid_t), Layout(c_abi)]
+    grid<T: IAnyValue, N: const usize, M: const usize> : IValue {
+        pub rows: usize { get => N; }
+        pub cols: usize { get => M; }
+        pub pure:
+            fn as_ptr() -> ptr<T> => __ssa_cast(Cfg.Ssa.bitcast, ref self, ptr<T>);
+            op [] (row: usize) -> ptr<T> => .as_ptr() + (row * M);
+    }
+
+    // 7. Power-of-Two Circular Ring Buffer View (`ring<T>` / `T[:]`) — 24-Byte `{ ptr<T>, usize, usize }`, `0b01` `IReference`
+    [Lang(Cfg.Lang.ring_t), Layout(c_abi)]
+    ring<T: IAnyValue> : IIndexGet<usize, T>, IReference {
+        pub data: ptr<T>;
+        pub mask: usize;
+        pub head: usize;
+
+        pub pure:
+            op [] (idx: usize) -> T => .data[(.head + idx) & .mask];
+    }
+
+    // 8. Scoped Memory Pin Guard (`pin<T>` / `@T`) — `0b11` `IGuard`
+    [Lang(Cfg.Lang.pin_t), Layout(c_abi)]
+    pin<T: IAnyValue> : IGuard {
+        pub target: ptr<T>;
+        ~self() {}
+    }
+
+    // 9. Zero-Copy Key-Value Strided Projection (`map<K, V>`) — `0b01` `IReference`
     [Lang(Cfg.Lang.map_t), Layout(c_abi)]
     map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IReference {
         pub keys: stride<TKey>;
@@ -195,21 +234,21 @@ pub partial struct {
         }
     }
 
-    // 6. Splat & Flatten Carrier Primitives (`splat<T>`, `pairs<K, V>`, `expand<T>`)
+    // 10. Splat & Flatten Carrier Primitives (`splat<T>`, `pairs<K, V>`, `expand<T>`)
     [Lang(Cfg.Lang.splat_t),  Layout(c_abi)] splat<T: IAnyValue>                     : IReference { pub items: slice<T>; }
     [Lang(Cfg.Lang.pairs_t),  Layout(c_abi)] pairs<K: IEquatable<K>, V: IAnyValue>   : IReference { pub entries: map<K, V>; }
     [Lang(Cfg.Lang.expand_t), Layout(c_abi)] expand<T: IAnyValue>                    : IReference { pub items: slice<T>; }
 }
 
 pub struct {
-    // 7. Milestone 15.3.1 C-ABI Worklist Frame (`sizeof(RangeWindow<T>) == 2 * sizeof(T)`) — `0b00` `IValue`
+    // 11. Milestone 15.3.1 C-ABI Worklist Frame (`sizeof(RangeWindow<T>) == 2 * sizeof(T)`) — `0b00` `IValue`
     [Layout(c_abi)]
     RangeWindow<TIter: IValue> : IValue {
         pub current: TIter;
         pub max:     TIter;
     }
 
-    // 8. Milestone 15.3.3 24-Byte Universal C-ABI Owned Buffer (`SliceBuffer<T>`) — `0b10` `IObject`
+    // 12. Milestone 15.3.3 24-Byte Universal C-ABI Owned Buffer (`SliceBuffer<T>`) — `0b10` `IObject`
     [Layout(c_abi)]
     SliceBuffer<TItem: IAnyValue> : IList<TItem>, IObject {
         *RawStorageBundle<TItem>;
@@ -249,7 +288,7 @@ pub struct {
             }
     }
 
-    // 9. Tier-1 64KB Lexical Bump Region Guard (`ArenaScope`) — `0b11` `IGuard`
+    // 13. Tier-1 64KB Lexical Bump Region Guard (`ArenaScope`) — `0b11` `IGuard`
     [Layout(c_abi)]
     ArenaScope : IGuard {
         pub region_view: slice<u8>;

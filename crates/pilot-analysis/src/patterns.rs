@@ -176,7 +176,7 @@ impl MarangetChecker {
                             PatternCase::Literal("lit".to_string())
                         }
                     }
-                    pilot_ast::NodeKind::PatRange => PatternCase::Literal("range".to_string()),
+                    pilot_ast::NodeKind::PatRange => PatternCase::Literal("pat_bounds".to_string()),
                     pilot_ast::NodeKind::PatOr => PatternCase::Literal("or".to_string()),
                     pilot_ast::NodeKind::PatTuple => PatternCase::Tuple(Vec::new()),
                     _ => PatternCase::Wildcard,
@@ -194,19 +194,33 @@ impl MarangetChecker {
         checker.check(arena.span(match_id))
     }
 
-    /// Returns the canonical variant list for Stage 3B `option<T>` (`["some", "none"]`),
-    /// Stage 3C `result<T, E>` (`["ok", "err"]`), `bool` (`["true", "false"]`), or user ADTs.
+    /// Returns the canonical variant list for TaggedOutcome types (`["some", "none"]` / `["ok", "err"]`),
+    /// 1-bit boolean flags (`["true", "false"]`), or user ADTs.
     pub fn canonical_variants_for_type(
         ty: crate::types::TypeId,
         types: &crate::types::TypeArena,
     ) -> Vec<String> {
         let pruned = types.prune(ty);
+        if types.type_physics(pruned)
+            == (crate::types::HardwarePhysics {
+                reg_class: crate::types::RegClass::GprUnsigned,
+                bit_width: 1,
+            })
+        {
+            return vec!["true".to_string(), "false".to_string()];
+        }
+        if let Some(td) = types.type_defs.get(&pruned) {
+            if let crate::types::StructuralShape::TaggedOutcome { err_ty, .. } = td.shape {
+                return if err_ty.is_some() {
+                    vec!["ok".to_string(), "err".to_string()]
+                } else {
+                    vec!["some".to_string(), "none".to_string()]
+                };
+            }
+        }
         match types.get(pruned) {
             crate::types::TypeKind::Option(_) => vec!["some".to_string(), "none".to_string()],
             crate::types::TypeKind::Result { .. } => vec!["ok".to_string(), "err".to_string()],
-            crate::types::TypeKind::Primitive(p) if p == "bool" => {
-                vec!["true".to_string(), "false".to_string()]
-            }
             crate::types::TypeKind::Adt { variants, .. } => {
                 variants.iter().map(|(v, _)| v.clone()).collect()
             }

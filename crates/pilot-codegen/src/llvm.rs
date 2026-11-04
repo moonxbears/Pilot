@@ -69,7 +69,14 @@ impl LlvmEmitter {
         self.emit_module_header(name);
 
         if arena.root.is_none() {
-            self.emit_function("main", "i64", &[], &["ret i64 0"]);
+            let ret_ty = Self::lower_physics_to_llvm(
+                pilot_analysis::types::HardwarePhysics {
+                    reg_class: pilot_analysis::types::RegClass::GprSigned,
+                    bit_width: 64,
+                },
+                &[],
+            );
+            self.emit_function("main", &ret_ty, &[], &["ret i64 0"]);
             return self.out.clone();
         }
 
@@ -104,7 +111,14 @@ impl LlvmEmitter {
             body.push(format!("call void @pilot_rt_print_i64(i64 {})", ret_val));
             body.push("ret i64 0".to_string());
             let body_slices: Vec<&str> = body.iter().map(|s| s.as_str()).collect();
-            self.emit_function("main", "i64", &[], &body_slices);
+            let ret_ty = Self::lower_physics_to_llvm(
+                pilot_analysis::types::HardwarePhysics {
+                    reg_class: pilot_analysis::types::RegClass::GprSigned,
+                    bit_width: 64,
+                },
+                &[],
+            );
+            self.emit_function("main", &ret_ty, &[], &body_slices);
         }
 
         self.out.clone()
@@ -116,12 +130,19 @@ impl LlvmEmitter {
         let fn_start = fn_node.rhs as usize;
         let fn_len = fn_node.flags as usize;
 
+        let default_ty = Self::lower_physics_to_llvm(
+            pilot_analysis::types::HardwarePhysics {
+                reg_class: pilot_analysis::types::RegClass::GprSigned,
+                bit_width: 64,
+            },
+            &[],
+        );
         let mut params = Vec::new();
         if fn_len > 1 {
             for &p_id in &arena.extra_children[fn_start + 1..fn_start + fn_len] {
                 let p_node = arena.node(NodeId(p_id));
                 let p_name = arena.interner.resolve(SymbolId(p_node.lhs));
-                params.push(("i64", p_name));
+                params.push((default_ty.as_str(), p_name));
             }
         }
 
@@ -166,7 +187,7 @@ impl LlvmEmitter {
         }
 
         let body_slices: Vec<&str> = body_instructions.iter().map(|s| s.as_str()).collect();
-        self.emit_function(fn_name, "i64", &params, &body_slices);
+        self.emit_function(fn_name, &default_ty, &params, &body_slices);
     }
 
     fn lower_stmt_or_block(&mut self, arena: &AstArena, id: NodeId, body: &mut Vec<String>, ret_val: &mut String) {
@@ -413,33 +434,6 @@ impl LlvmEmitter {
                     format!("{{ {} }}", field_llvm_types.join(", "))
                 }
             }
-        }
-    }
-
-    /// Section 4.4: 5-Backend Hardware & `[Lang]` Mapping Table (LLVM IR / ASM Backend).
-    pub fn map_lang_type_to_llvm(lang_item: &str, elem_types: &[&str]) -> String {
-        let t0 = elem_types.first().copied().unwrap_or("i64");
-        let t1 = elem_types.get(1).copied().unwrap_or("i32");
-        match lang_item {
-            "void" | "never" => "void".to_string(),
-            "bool" => "i1".to_string(),
-            "char" => "i32".to_string(),
-            "i8" | "u8" => "i8".to_string(),
-            "i16" | "u16" => "i16".to_string(),
-            "i32" | "u32" => "i32".to_string(),
-            "i64" | "u64" | "isize" | "usize" => "i64".to_string(),
-            "i128" | "u128" => "i128".to_string(),
-            "f16" => "half".to_string(),
-            "f32" => "float".to_string(),
-            "f64" => "double".to_string(),
-            "f128" => "fp128".to_string(),
-            "ptr" => "ptr".to_string(),
-            "slice" | "str" => "{ ptr, i64 }".to_string(),
-            "stride" | "SliceBuffer" => "{ ptr, i64, i64 }".to_string(),
-            "RangeWindow" => format!("{{ {}, {} }}", t0, t0),
-            "option" => format!("{{ {}, i1 }}", t0),
-            "result" => format!("{{ {}, {}, i1 }}", t0, t1),
-            other => other.to_string(),
         }
     }
 

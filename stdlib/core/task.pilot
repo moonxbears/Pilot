@@ -1,67 +1,76 @@
 // =========================================================================
 // FILE: stdlib/core/task.pilot
-// STAGE 3D FUNCTION VIEWS & HOMOICONIC CALL-QUOTING PROJECTION TYPES
-// Backs `(A) => R` (`fn<A, R>`) and Call-Quoting Modes 1–6 (`!`, `!!`, `!&`, `!^`, `!@`, `!?`).
+// STAGE 3D CALLABLES, ABI FRAMES, REFLECTION & 6 CALL-QUOTING CARRIERS
 // =========================================================================
 [EnforceCoreNaming]
-pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Task;
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Callables;
 
 use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
 use Pilot.Core.Memory.*;
 
 pub partial struct {
-    // Canonical backing type for `(TArgs) => TOut` closures (`0b01` `IReference`)
+    // 1. First-Class Callable Closure / Function Pointer (`(A) => R` / `fn<TArgs, TRet>`)
     [Lang(Cfg.Lang.fn_t), Layout(c_abi)]
-    fn<TArgs: IAnyValue, TOut: IAnyValue> : IReference {
-        pub env_ptr: ptr<void>;
-        pub code_fn: ptr<void>;
+    fn<TArgs: IAnyValue, TRet: IAnyValue> : IValue {
+        pub code_ptr: ptr<u8>;
+        pub env_ptr:  ptr<u8>;
     }
 
-    // Mode 3 (`fn!&(a, b)`): Zero-Marshalling C-ABI Call-Frame Struct (`0b00` `IValue`)
+    // 2. Zero-Marshalling C-ABI Argument Frame (`fn!&(a, b)` -> `frame<FnSig>`) — `0b00` `IValue`
     [Lang(Cfg.Lang.frame_t), Layout(c_abi)]
-    frame<TSig: IValue> : IValue {
-        pub fn_id:     u32;
-        pub args_pack: TSig;
+    frame<TSig: IAnyValue> : IValue {
+        pub fn_ptr:     ptr<u8>;
+        pub frame_size: usize;
+    }
+
+    // 3. First-Class Compile-Time Type Descriptor (`type`) & Homoiconic AST Handle (`ast`, `fn!!(...)`)
+    [Lang(Cfg.Lang.type_t), Bits(Cfg.Reg.b64, Cfg.Reg.gpr_u)] type : IValue {}
+    [Lang(Cfg.Lang.ast_t),  Bits(Cfg.Reg.b64, Cfg.Reg.gpr_u)] ast  : IValue {}
+
+    // 4. Reactive Signal Cell Type Construct (`T^` -> `signal<T>`) — `0b10` `IObject`
+    [Lang(Cfg.Lang.signal_t), Layout(c_abi)]
+    signal<TVal: IAnyValue> : IObject {
+        pub current_val: TVal;
+        pub epoch:       u64;
+        ~self() {}
+        pub pure fn sample() -> TVal => .current_val;
     }
 }
 
 pub struct {
-    // Mode 1 (`fn!(a, b)`): Shallow-Quoted Call Descriptor (`0b00` `IValue`)
-    [Layout(c_abi)]
-    CallExpr<TRet: IAnyValue> : IValue {
-        pub fn_ptr:  ptr<void>;
-        pub meta_id: u32;
+    // 1. Shallow Call Quote (`fn!(args...)` -> `CallExpr<TReturn>`) — `0b00` `IValue`
+    [Lang(Cfg.Lang.call_expr_slot), Layout(c_abi)]
+    CallExpr<TReturn: IAnyValue> : IValue {
+        pub callee_sym: u64;
+        pub arg_count:  usize;
     }
 
-    // Mode 4 (`fn!^(a, b)`): Glitch-Free Push-Pull Reactive Signal (`0b10` `IObject`)
-    [Layout(c_abi)]
+    // 4. Reactive Signal Node (`fn!^(args...)` -> `Signal<TReturn>`) — `0b10` `IObject`
+    [Lang(Cfg.Lang.signal_slot), Layout(c_abi)]
     Signal<TVal: IAnyValue> : IObject {
         pub current_val: TVal;
-        pub node_handle: ptr<void>;
+        pub epoch:       u64;
+
         ~self() {}
-        pub value: TVal { get => .current_val; }
+
+        pub pure fn sample() -> TVal => .current_val;
     }
 
-    // Mode 5 (`fn!@(a, b)`): Unboxed Symbolic Adjoint & Gradient Tuple (`0b00` `IValue`)
-    [Layout(c_abi)]
-    Dual<TPrimal: IValue, TGrad: IValue> : IValue {
-        pub value:      TPrimal;
-        pub derivative: TGrad;
+    // 5. Symbolic Adjoint Dual Number (`fn!@(args...)` -> `Dual<TVal, TGrad>`) — `0b00` `IValue`
+    [Lang(Cfg.Lang.dual_slot), Layout(c_abi)]
+    Dual<TVal: IValue, TGrad: IValue> : IValue {
+        pub primal:  TVal;
+        pub tangent: TGrad;
     }
 
-    // Mode 6 (`fn!?(a, b)`): Copy-on-Write Shadow Dry-Run Diff Entry & Plan (`0b10` `IObject`)
-    [Layout(c_abi)]
-    EffectDiff : IValue {
-        pub target_addr: usize;
-        pub byte_len:    usize;
-    }
+    // 6. CoW Transactional Effect Sandbox (`fn!?(args...)` -> `EffectPlan<TReturn>`) — `0b10` `IObject`
+    [Lang(Cfg.Lang.effect_plan_slot), Layout(c_abi)]
+    EffectPlan<TReturn: IAnyValue> : IObject {
+        pub preview_val:  TReturn;
+        pub dirty_pages:  usize;
+        pub is_committed: bool;
 
-    [Layout(c_abi)]
-    EffectPlan<TRet: IAnyValue> : IObject {
-        pub result_val: TRet;
-        pub diffs:      SliceBuffer<EffectDiff>;
         ~self() {}
-        pub diff_count: usize { get => .diffs.len; }
     }
 }

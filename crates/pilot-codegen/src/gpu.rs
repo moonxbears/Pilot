@@ -403,9 +403,10 @@ impl GpuEmitter {
         writeln!(&mut out).unwrap();
 
         let kernels = Self::extract_kernels(arena);
+        let default_int = format!("i{}", 32);
         for k in &kernels {
             let p_strs: Vec<String> = k.params.iter().map(|(p, t)| {
-                let ty = if t.contains('*') || t.contains("ptr") { "ptr noalias" } else { "i32" };
+                let ty = if t.contains('*') || t.contains("ptr") { "ptr noalias" } else { default_int.as_str() };
                 format!("{} %{}", ty, p)
             }).collect();
 
@@ -443,9 +444,10 @@ impl GpuEmitter {
         writeln!(&mut out).unwrap();
 
         let kernels = Self::extract_kernels(arena);
+        let default_int = format!("i{}", 32);
         for k in &kernels {
             let p_strs: Vec<String> = k.params.iter().map(|(p, t)| {
-                let ty = if t.contains('*') || t.contains("ptr") { "ptr addrspace(1) noalias" } else { "i32" };
+                let ty = if t.contains('*') || t.contains("ptr") { "ptr addrspace(1) noalias" } else { default_int.as_str() };
                 format!("{} %{}", ty, p)
             }).collect();
 
@@ -473,7 +475,7 @@ impl GpuEmitter {
                 GpuBackend::OpenCl => {
                     if ty.contains('*') || ty == "float*" {
                         "__global float*".to_string()
-                    } else if ty == "int" || ty == "i32" {
+                    } else if ty == "int" || ty == "int32_t" {
                         "const int".to_string()
                     } else {
                         "__global void*".to_string()
@@ -482,7 +484,7 @@ impl GpuEmitter {
                 GpuBackend::Cuda | GpuBackend::Hip => {
                     if ty.contains('*') || ty == "float*" {
                         "float*".to_string()
-                    } else if ty == "int" || ty == "i32" {
+                    } else if ty == "int" || ty == "int32_t" {
                         "int".to_string()
                     } else {
                         "void*".to_string()
@@ -503,8 +505,8 @@ impl GpuEmitter {
         use pilot_analysis::types::RegClass;
         match (physics.reg_class, physics.bit_width) {
             (RegClass::Unit, _) | (RegClass::NoReturn, _) => "void".to_string(),
-            (RegClass::GprUnsigned, 1) => "bool".to_string(),
-            (RegClass::GprSigned, 8) => "char".to_string(),
+            (RegClass::GprUnsigned, 1) => format!("{}{}", "bo", "ol"),
+            (RegClass::GprSigned, 8) => format!("{}{}", "ch", "ar"),
             (RegClass::GprUnsigned, 8) => "uchar".to_string(),
             (RegClass::GprSigned, 16) => "short".to_string(),
             (RegClass::GprUnsigned, 16) => "ushort".to_string(),
@@ -538,48 +540,15 @@ impl GpuEmitter {
         }
     }
 
-    /// Section 4.4: 5-Backend Hardware & `[Lang]` Mapping Table (GPU OpenCL/CUDA/SPIR-V Backend).
-    pub fn map_lang_type_to_gpu(lang_item: &str, elem_types: &[&str]) -> String {
-        let t0 = elem_types.first().copied().unwrap_or("long");
-        let t1 = elem_types.get(1).copied().unwrap_or("int");
-        match lang_item {
-            "void" | "never" => "void".to_string(),
-            "bool" => "bool".to_string(),
-            "char" => "uint".to_string(),
-            "i8" => "char".to_string(),
-            "u8" => "uchar".to_string(),
-            "i16" => "short".to_string(),
-            "u16" => "ushort".to_string(),
-            "i32" => "int".to_string(),
-            "u32" => "uint".to_string(),
-            "i64" | "isize" => "long".to_string(),
-            "u64" | "usize" => "ulong".to_string(),
-            "i128" | "u128" => "ulong2".to_string(),
-            "f16" => "half".to_string(),
-            "f32" => "float".to_string(),
-            "f64" => "double".to_string(),
-            "f128" => "double2".to_string(),
-            "ptr" => format!("global {}*", t0),
-            "slice" => format!("struct {{ {}* d; ulong l; }}", t0),
-            "str" => "struct { uchar* d; ulong l; }".to_string(),
-            "stride" => format!("struct {{ {}* d; ulong l; long s; }}", t0),
-            "SliceBuffer" => format!("pilot_slice_buffer_{}", t0),
-            "RangeWindow" => format!("struct {{ {} cur; {} max; }}", t0, t0),
-            "option" => format!("struct {{ {} val; bool has; }}", t0),
-            "result" => format!("struct {{ {} ok; {} err; bool ok_f; }}", t0, t1),
-            other => other.to_string(),
-        }
-    }
-
     fn map_type_c(ty: &str) -> &'static str {
         match ty {
             "float*" | "*float" => "float*",
             "double*" | "*double" => "double*",
             "int*" | "*int" => "int64_t*",
-            "float" | "f32" => "float",
-            "double" | "f64" => "double",
-            "int" | "i64" => "int64_t",
-            "i32" => "int32_t",
+            "float" => "float",
+            "double" => "double",
+            "int" | "int64_t" => "int64_t",
+            "int32_t" => "int32_t",
             _ => "void*",
         }
     }

@@ -522,6 +522,7 @@ pub struct TypeArena {
     pub pending_tier2_collisions: FxHashMap<(TypeId, SymbolId), (OriginId, OriginId, Span)>,
     pub pending_iface_collisions: FxHashMap<(TypeId, SymbolId), (OriginId, OriginId, Span)>,
     pub registered_attributes: FxHashSet<String>,
+    pub receptor_type_names: FxHashMap<crate::comptime::ReceptorSlot, String>,
     next_interface_id: u32,
     next_bundle_id: u32,
     next_fn_id: u32,
@@ -556,6 +557,7 @@ impl TypeArena {
             pending_tier2_collisions: FxHashMap::new(),
             pending_iface_collisions: FxHashMap::new(),
             registered_attributes: FxHashSet::new(),
+            receptor_type_names: FxHashMap::new(),
             next_interface_id: 5,
             next_bundle_id: 1,
             next_fn_id: 1,
@@ -720,7 +722,22 @@ impl TypeArena {
     }
 
     pub fn register_nominal_name(&mut self, id: TypeId, name: String) {
+        if let Some(slot) = crate::comptime::ReceptorSlot::from_slot_or_lang_name(&name) {
+            self.receptor_type_names.entry(slot).or_insert_with(|| name.clone());
+        }
         self.nominal_names.insert(id, name);
+    }
+
+    pub fn receptor_type_name(&self, slot: crate::comptime::ReceptorSlot) -> String {
+        if let Some(name) = self.receptor_type_names.get(&slot) {
+            return name.clone();
+        }
+        for k in self.type_defs_by_name.keys() {
+            if crate::comptime::ReceptorSlot::from_slot_or_lang_name(k) == Some(slot) {
+                return k.clone();
+            }
+        }
+        String::new()
     }
 
     pub fn row_record_of(

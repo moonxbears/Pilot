@@ -311,6 +311,21 @@ pub enum TokenKind {
     CallQuoteEffect = 325,  // fn!?(...)
     DoubleAmper = 326,      // &&
     DoublePipe = 327,       // ||
+    Spaceship = 328,        // <=>
+    PlusPipe = 329,         // +|
+    MinusPipe = 330,        // -|
+    StarPipe = 331,         // *|
+    PlusPercent = 332,      // +%
+    MinusPercent = 333,     // -%
+    StarPercent = 334,      // *%
+    PlusQuestion = 335,     // +?
+    MinusQuestion = 336,    // -?
+    StarQuestion = 337,     // *?
+    DoublePercent = 338,    // %%
+    TildeGreater = 339,     // ~>
+    GreaterDotDotLess = 340,// >..<
+    GreaterDotDot = 341,    // >..
+    SwapEqual = 342,        // :=:
 }
 
 impl TokenKind {
@@ -487,7 +502,12 @@ impl TokenTape {
         let s = span.start as usize;
         let e = (span.end as usize).min(src.len());
         if s <= e && s <= src.len() {
-            &src[s..e]
+            let raw = &src[s..e];
+            if self.kind(idx) == TokenKind::Ident && raw.len() >= 2 && raw.starts_with('`') && raw.ends_with('`') {
+                &raw[1..raw.len() - 1]
+            } else {
+                raw
+            }
         } else {
             ""
         }

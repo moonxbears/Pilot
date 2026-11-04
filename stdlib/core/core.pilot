@@ -92,6 +92,18 @@ comptime {
             frame_t:  "frame",
             type_t:   "type",
             ast_t:    "ast",
+            simd_t:   "simd",
+            grid_t:   "grid",
+            ring_t:   "ring",
+            pin_t:    "pin",
+            open_t:   "open",
+            after_t:  "after",
+            order_t:  "order",
+            signal_t: "signal",
+            call_expr_slot:   "shallow_quote",
+            signal_slot:      "reactive_signal",
+            dual_slot:        "symbolic_adjoint",
+            effect_plan_slot: "effect_dry_run",
         },
 
         // 3. Backend SSA Instruction Opcodes
@@ -138,6 +150,19 @@ comptime {
             uitofp:  "uitofp",
             fptosi:  "fptosi",
             fptoui:  "fptoui",
+            sadd_sat:"sadd_sat",
+            uadd_sat:"uadd_sat",
+            ssub_sat:"ssub_sat",
+            usub_sat:"usub_sat",
+            smul_sat:"smul_sat",
+            umul_sat:"umul_sat",
+            add_wrap:"add_wrap",
+            sub_wrap:"sub_wrap",
+            mul_wrap:"mul_wrap",
+            srem_euc:"srem_euc",
+            urem_euc:"urem_euc",
+            cmp3_s:  "cmp3_s",
+            cmp3_u:  "cmp3_u",
         },
 
         // 4. Hardware Register Classes & Bit Widths
@@ -145,8 +170,10 @@ comptime {
             gpr_u:   gpr_unsigned,
             gpr_s:   gpr_signed,
             simd_f:  simd_float,
+            simd_v:  simd_vector,
             raw_ptr: raw_ptr,
             b0:      0,
+            b1:      1,
             b8:      8,
             b16:     16,
             b32:     32,
@@ -233,8 +260,10 @@ comptime {
             prec_add:    60,
             prec_mul:    70,
             prec_unary:  80,
+            prec_lens:   85,
             prec_splat:  90,
             prec_post:   95,
+            prec_swap:   5,
 
             sym_coal:    "??",
             sym_bitor:   "|",
@@ -243,19 +272,34 @@ comptime {
             sym_range:   "..",
             sym_range_lt:"..<",
             sym_span:    "..=",
+            sym_open_rng:">..<",
+            sym_after_rng:">..",
             sym_eq:      "==",
             sym_ne:      "!=",
             sym_lt:      "<",
             sym_gt:      ">",
             sym_le:      "<=",
             sym_ge:      ">=",
+            sym_cmp3:    "<=>",
             sym_shl:     "<<",
             sym_shr:     ">>",
             sym_add:     "+",
             sym_sub:     "-",
+            sym_sat_add: "+|",
+            sym_sat_sub: "-|",
+            sym_wrap_add:"+%",
+            sym_wrap_sub:"-%",
+            sym_chk_add: "+?",
+            sym_chk_sub: "-?",
             sym_mul:     "*",
             sym_div:     "/",
             sym_rem:     "%",
+            sym_sat_mul: "*|",
+            sym_wrap_mul:"*%",
+            sym_chk_mul: "*?",
+            sym_euc_mod: "%%",
+            sym_lens:    "~>",
+            sym_swap:    ":=:",
             sym_not:     "!",
             sym_try:     "?",
             sym_bitnot:  "~",
@@ -370,6 +414,21 @@ comptime {
 
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_not,    Cfg.Ops.fix_postfix, Cfg.Ops.prec_post,   Cfg.Ops.assoc_left);
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_try,    Cfg.Ops.fix_postfix, Cfg.Ops.prec_post,   Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_open_rng,Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_after_rng,Cfg.Ops.fix_prefix, Cfg.Ops.prec_range,  Cfg.Ops.assoc_right);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_cmp3,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_sat_add, Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_sat_sub, Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_wrap_add,Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_wrap_sub,Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_chk_add, Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_chk_sub, Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_sat_mul, Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_wrap_mul,Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_chk_mul, Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_euc_mod, Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_lens,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_lens,   Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_swap,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_swap,   Cfg.Ops.assoc_none);
 }
 
 [EnforceCoreNaming]
@@ -409,7 +468,7 @@ pub lvl(Cfg.Tokens.ring_public) comptime fn {
 // STEP 5: SEED PRIMITIVES (`bool` & `usize`) FOR STAGE 2/3 BOOTSTRAPPING
 // =========================================================================
 pub partial struct {
-    [Lang(Cfg.Lang.bool_t), Bits(Cfg.Reg.b8, Cfg.Reg.gpr_u)]
+    [Lang(Cfg.Lang.bool_t), Bits(Cfg.Reg.b1, Cfg.Reg.gpr_u)]
     bool {
         pub pure:
             op !  ()          -> bool => __ssa(Cfg.Ssa.xor_b, self, true);

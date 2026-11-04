@@ -196,20 +196,6 @@ impl LoopAnalyzer {
                     .unwrap_or(TypeId::ANY);
                 let pruned = infer.types.prune(iter_ty);
                 match infer.types.get(pruned).clone() {
-                    TypeKind::Primitive(ref name)
-                        if name.starts_with("range")
-                            || name.starts_with("span")
-                            || name.starts_with("step") =>
-                    {
-                        is_range_iterable = true;
-                        item_ty = TypeId::I64;
-                    }
-                    TypeKind::Adt { ref name, .. }
-                        if name == "range" || name == "span" || name == "step" =>
-                    {
-                        is_range_iterable = true;
-                        item_ty = TypeId::I64;
-                    }
                     TypeKind::Collection { element, .. } => {
                         item_ty = element;
                         enumerator_ty = infer
@@ -222,7 +208,21 @@ impl LoopAnalyzer {
                             });
                     }
                     _ => {
-                        if let Some(td) = infer.types.type_defs.get(&pruned) {
+                        let resolved_td = infer.types.type_defs.get(&pruned).or_else(|| {
+                            if let TypeKind::Primitive(ref name) | TypeKind::Adt { ref name, .. } =
+                                infer.types.get(pruned)
+                            {
+                                let base = name.split('<').next().unwrap_or(name).trim();
+                                infer
+                                    .types
+                                    .type_defs_by_name
+                                    .get(base)
+                                    .and_then(|id| infer.types.type_defs.get(id))
+                            } else {
+                                None
+                            }
+                        });
+                        if let Some(td) = resolved_td {
                             match td.shape {
                                 crate::types::StructuralShape::BoundsPair { bound_ty, .. } => {
                                     is_range_iterable = true;

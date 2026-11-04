@@ -242,9 +242,8 @@ impl CallQuotingEngine {
         }
     }
 
-    /// Section 4.3: Binds the 6 `CallQuoteKind` modes to the canonical structs loaded from
-    /// `stdlib/core/task.pilot` (`CallExpr<TRet>`, `ast`, `frame<TSig>`, `Signal<TRet>`,
-    /// `Dual<TRet, TGrad>`, `EffectPlan<TRet>`), verifying `LatticeBits::Value` (`0b00`) on
+    /// Section 4.3: Binds the 6 `CallQuoteKind` modes to the receptor slots registered in
+    /// `stdlib/core/task.pilot`, verifying `LatticeBits::Value` (`0b00`) on
     /// `CallQuoteKind::AbiFrame` (`!&`) arguments.
     pub fn resolve_call_quote_projection_type(
         &mut self,
@@ -254,6 +253,7 @@ impl CallQuotingEngine {
         types: &mut crate::types::TypeArena,
         span: ByteSpan,
     ) -> CallQuoteProjectionInfo {
+        use crate::comptime::ReceptorSlot;
         use crate::types::{LatticeBits, TypeKind};
 
         match quote_kind {
@@ -264,10 +264,11 @@ impl CallQuotingEngine {
                 lattice: types.type_lattice(return_ty),
             },
             CallQuoteKind::ShallowQuote => {
-                let name = format!("CallExpr<{}>", types.display(return_ty));
+                let base = types.receptor_type_name(ReceptorSlot::ShallowQuoteSlot);
+                let name = format!("{}<{}>", base, types.display(return_ty));
                 let ty = types
                     .type_defs_by_name
-                    .get("CallExpr")
+                    .get(&base)
                     .copied()
                     .unwrap_or_else(|| types.alloc(TypeKind::Primitive(name.clone())));
                 CallQuoteProjectionInfo {
@@ -278,10 +279,10 @@ impl CallQuotingEngine {
                 }
             }
             CallQuoteKind::DeepSplice => {
-                let name = "ast".to_string();
+                let name = types.receptor_type_name(ReceptorSlot::DeepSpliceSlot);
                 let ty = types
                     .type_defs_by_name
-                    .get("ast")
+                    .get(&name)
                     .copied()
                     .unwrap_or_else(|| types.alloc(TypeKind::Primitive(name.clone())));
                 CallQuoteProjectionInfo {
@@ -307,10 +308,11 @@ impl CallQuotingEngine {
                     }
                 }
                 let sig_tuple = types.tuple_of(arg_types.to_vec());
-                let name = format!("frame<{}>", types.display(sig_tuple));
+                let base = types.receptor_type_name(ReceptorSlot::AbiFrameSlot);
+                let name = format!("{}<{}>", base, types.display(sig_tuple));
                 let ty = types
                     .type_defs_by_name
-                    .get("frame")
+                    .get(&base)
                     .copied()
                     .unwrap_or_else(|| types.alloc(TypeKind::Primitive(name.clone())));
                 CallQuoteProjectionInfo {
@@ -321,10 +323,11 @@ impl CallQuotingEngine {
                 }
             }
             CallQuoteKind::ReactiveSignal => {
-                let name = format!("Signal<{}>", types.display(return_ty));
+                let base = types.receptor_type_name(ReceptorSlot::ReactiveSignalSlot);
+                let name = format!("{}<{}>", base, types.display(return_ty));
                 let ty = types
                     .type_defs_by_name
-                    .get("Signal")
+                    .get(&base)
                     .copied()
                     .unwrap_or_else(|| types.alloc(TypeKind::Primitive(name.clone())));
                 CallQuoteProjectionInfo {
@@ -340,10 +343,11 @@ impl CallQuotingEngine {
                 } else {
                     types.tuple_of(arg_types.to_vec())
                 };
-                let name = format!("Dual<{}, {}>", types.display(return_ty), types.display(grad_ty));
+                let base = types.receptor_type_name(ReceptorSlot::SymbolicAdjointSlot);
+                let name = format!("{}<{}, {}>", base, types.display(return_ty), types.display(grad_ty));
                 let ty = types
                     .type_defs_by_name
-                    .get("Dual")
+                    .get(&base)
                     .copied()
                     .unwrap_or_else(|| types.alloc(TypeKind::Primitive(name.clone())));
                 CallQuoteProjectionInfo {
@@ -354,10 +358,11 @@ impl CallQuotingEngine {
                 }
             }
             CallQuoteKind::EffectDryRun => {
-                let name = format!("EffectPlan<{}>", types.display(return_ty));
+                let base = types.receptor_type_name(ReceptorSlot::EffectDryRunSlot);
+                let name = format!("{}<{}>", base, types.display(return_ty));
                 let ty = types
                     .type_defs_by_name
-                    .get("EffectPlan")
+                    .get(&base)
                     .copied()
                     .unwrap_or_else(|| types.alloc(TypeKind::Primitive(name.clone())));
                 CallQuoteProjectionInfo {

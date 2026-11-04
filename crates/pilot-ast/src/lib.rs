@@ -426,6 +426,21 @@ pub enum BinaryOp {
     PipeBackward = 31,   // a <| b
     As = 32,             // a as Target (Tier A bitcast / cast)
     AsView = 33,         // a as view Target (Tier B compile-time offset swizzling)
+    Spaceship = 34,      // a <=> b (3-way comparison)
+    SatAdd = 35,         // a +| b (saturating add)
+    SatSub = 36,         // a -| b (saturating sub)
+    SatMul = 37,         // a *| b (saturating mul)
+    WrapAdd = 38,        // a +% b (wrapping add)
+    WrapSub = 39,        // a -% b (wrapping sub)
+    WrapMul = 40,        // a *% b (wrapping mul)
+    CheckedAdd = 41,     // a +? b (checked add -> T?)
+    CheckedSub = 42,     // a -? b (checked sub -> T?)
+    CheckedMul = 43,     // a *? b (checked mul -> T?)
+    EucMod = 44,         // a %% b (Euclidean modulo)
+    Lens = 45,           // a ~> .field / a ~> (.k, .v) / a ~> (.2, .1, .0)
+    OpenRange = 46,      // a >..< b (exclusive-both range)
+    AfterRange = 47,     // a >.. (exclusive-start range)
+    Swap = 48,           // a :=: b (in-place Perceus swap)
 }
 
 impl BinaryOp {
@@ -464,6 +479,21 @@ impl BinaryOp {
             Self::PipeBackward => "<|",
             Self::As => "as",
             Self::AsView => "as view",
+            Self::Spaceship => "<=>",
+            Self::SatAdd => "+|",
+            Self::SatSub => "-|",
+            Self::SatMul => "*|",
+            Self::WrapAdd => "+%",
+            Self::WrapSub => "-%",
+            Self::WrapMul => "*%",
+            Self::CheckedAdd => "+?",
+            Self::CheckedSub => "-?",
+            Self::CheckedMul => "*?",
+            Self::EucMod => "%%",
+            Self::Lens => "~>",
+            Self::OpenRange => ">..<",
+            Self::AfterRange => ">..",
+            Self::Swap => ":=:",
         }
     }
 }

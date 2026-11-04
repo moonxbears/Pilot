@@ -1,7 +1,6 @@
 // =========================================================================
 // FILE: stdlib/core/operator.pilot
-// STAGE 2 SELF-GENESIS: SINGLE ORIGIN (`IAnyValue`), 2-BIT LATTICE PILLARS,
-// CANONICAL `op` PROTOCOL INTERFACES & C#-STYLE COLLECTION HIERARCHY
+// STAGE 2 ROOT INTERFACES, 2-BIT LATTICE ORIGINS & OPERATOR PROTOCOLS
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Interfaces;
@@ -9,149 +8,205 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Interfaces;
 use Pilot.Core.Genesis.*;
 
 pub interface {
-    // ---------------------------------------------------------------------
-    // 1. SINGLE POINT OF ORIGIN (0 Runtime Object Header Bytes)
-    // ---------------------------------------------------------------------
-    [Lang(Cfg.Lang.any_t)]
-    IAnyValue {
-        pub comptime:
-            fn byte_size()  -> usize => sizeof(Self);
-            fn alignment()  -> usize => alignof(Self);
-            fn lattice_id() -> usize => lattice_bits_of(Self);
-    }
+    // 1. Universal 0-Byte Root Contract & 2-Bit Hardware Type Lattice Origins
+    [Lang(Cfg.Lang.any_val)]
+    IAnyValue {}
 
-    // ---------------------------------------------------------------------
-    // 2. THE 4 HARDWARE LATTICE ORIGIN INTERFACES (`0b00` .. `0b11`)
-    // ---------------------------------------------------------------------
-    // 0b00: Self-contained inline bits (No ~self, No borrow) -> `memcpy` & `as view` safe
     [Lang(Cfg.Lang.val_t), Lattice(Cfg.Lattice.value)]
     IValue : IAnyValue {}
 
-    // 0b01: Borrowed memory window (No ~self, Has borrow) -> Lexical escape checked
     [Lang(Cfg.Lang.ref_t), Lattice(Cfg.Lattice.reference)]
     IReference : IAnyValue {}
 
-    // 0b10: Owned lifecycle resource (Has ~self, No borrow) -> Perceus move + drop
     [Lang(Cfg.Lang.obj_t), Lattice(Cfg.Lattice.object)]
-    IObject : IAnyValue {
-        ~self();
-    }
+    IObject : IAnyValue {}
 
-    // 0b11: Scoped RAII guard (Has ~self + Has borrow) -> Perceus move + drop + borrow
     [Lang(Cfg.Lang.guard_t), Lattice(Cfg.Lattice.guard)]
     IGuard : IObject, IReference {}
 
-    // ---------------------------------------------------------------------
-    // 3. EQUALITY, ORDERING, HASHING, CLONING & WIRE SERIALIZATION
-    // ---------------------------------------------------------------------
-    IEquatable<TRhs Self> : IAnyValue {
-        pub pure:
-            op == (rhs: TRhs) -> bool;
-            op != (rhs: TRhs) -> bool => !(self == rhs);
+    // 2. Compile-Time Attribute Marker Contract
+    IAttribute : IValue {
+        pub weight: i32 { get => 0; }
     }
 
-    IComparable<TRhs Self> : IEquatable<TRhs> {
+    // 3. Equality, Ordering & Hashing Contracts
+    IEquatable<TSelf: IAnyValue> : IAnyValue {
         pub pure:
-            op <  (rhs: TRhs) -> bool;
-            op >  (rhs: TRhs) -> bool => rhs < self;
-            op <= (rhs: TRhs) -> bool => !(rhs < self);
-            op >= (rhs: TRhs) -> bool => !(self < rhs);
+            op == (rhs: TSelf) -> bool;
+            op != (rhs: TSelf) -> bool => !(self == rhs);
+    }
+
+    IComparable<TSelf: IAnyValue> : IEquatable<TSelf> {
+        pub pure:
+            op <  (rhs: TSelf) -> bool;
+            op <= (rhs: TSelf) -> bool => (self < rhs) || (self == rhs);
+            op >  (rhs: TSelf) -> bool => !(self <= rhs);
+            op >= (rhs: TSelf) -> bool => !(self < rhs);
+    }
+
+    ICompareOperator<TRhs: IAnyValue, TOrder: IAnyValue> : IAnyValue {
+        pub pure op <=> (rhs: TRhs) -> TOrder;
     }
 
     IHashable : IAnyValue {
-        pub pure op hash () -> u64;
+        pub pure fn hash_code() -> u64;
     }
 
-    ICloneable : IAnyValue {
-        pub pure op clone () -> Self;
+    // 4. Arithmetic, Bitwise & Checked/Saturating/Wrapping ALU Operator Contracts
+    IAddOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op + (rhs: TRhs) -> TOut;
     }
 
-    // ---------------------------------------------------------------------
-    // 4. ARITHMETIC & BITWISE OPERATOR INTERFACES
-    // ---------------------------------------------------------------------
-    IAddOperator<TRhs Self, TOut="Self">    : IAnyValue { pub pure op +  (rhs: TRhs) -> TOut; }
-    ISubOperator<TRhs Self, TOut="Self">    : IAnyValue { pub pure op -  (rhs: TRhs) -> TOut; }
-    IMulOperator<TRhs Self, TOut="Self">    : IAnyValue { pub pure op *  (rhs: TRhs) -> TOut; }
-    IDivOperator<TRhs Self, TOut="Self">    : IAnyValue { pub pure op /  (rhs: TRhs) -> TOut; }
-    IRemOperator<TRhs Self, TOut="Self">    : IAnyValue { pub pure op %  (rhs: TRhs) -> TOut; }
-    INegOperator<TOut Self>                 : IAnyValue { pub pure op -  ()          -> TOut; }
-
-    IBitAndOperator<TRhs Self, TOut="Self"> : IAnyValue { pub pure op &  (rhs: TRhs) -> TOut; }
-    IBitOrOperator<TRhs Self, TOut="Self">  : IAnyValue { pub pure op |  (rhs: TRhs) -> TOut; }
-    IBitXorOperator<TRhs Self, TOut="Self"> : IAnyValue { pub pure op ^  (rhs: TRhs) -> TOut; }
-    IBitNotOperator<TOut Self>              : IAnyValue { pub pure op ~  ()          -> TOut; }
-    IShlOperator<TRhs usize, TOut="Self">   : IAnyValue { pub pure op << (rhs: TRhs) -> TOut; }
-    IShrOperator<TRhs usize, TOut="Self">   : IAnyValue { pub pure op >> (rhs: TRhs) -> TOut; }
-
-    // ---------------------------------------------------------------------
-    // 5. RANGE, SPLAT, DEEP FLATTEN (`*..`), INDEX & PROPAGATION INTERFACES
-    // ---------------------------------------------------------------------
-    // Half-open range `a ..< b` -> `range<TBound>` (`[a, b)`)
-    IRangeOperator<TBound Self, TOut="range<TBound>"> : IAnyValue {
-        pub pure op ..< (end: TBound) -> TOut;
+    ISubOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op - (rhs: TRhs) -> TOut;
     }
 
-    // Inclusive closed span `a .. b` and `a ..= b` -> `span<TBound>` (`[a, b]`)
-    ISpanOperator<TBound Self, TOut="span<TBound>"> : IAnyValue {
+    IMulOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op * (rhs: TRhs) -> TOut;
+    }
+
+    IDivOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op / (rhs: TRhs) -> TOut;
+    }
+
+    IRemOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op % (rhs: TRhs) -> TOut;
+    }
+
+    IModOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op %% (rhs: TRhs) -> TOut;
+    }
+
+    ISatAddOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op +| (rhs: TRhs) -> TOut;
+    }
+
+    ISatSubOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op -| (rhs: TRhs) -> TOut;
+    }
+
+    ISatMulOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op *| (rhs: TRhs) -> TOut;
+    }
+
+    IWrapAddOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op +% (rhs: TRhs) -> TOut;
+    }
+
+    IWrapSubOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op -% (rhs: TRhs) -> TOut;
+    }
+
+    IWrapMulOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op *% (rhs: TRhs) -> TOut;
+    }
+
+    ICheckedAddOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op +? (rhs: TRhs) -> TOut;
+    }
+
+    ICheckedSubOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op -? (rhs: TRhs) -> TOut;
+    }
+
+    ICheckedMulOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op *? (rhs: TRhs) -> TOut;
+    }
+
+    INegOperator<TOut: IAnyValue> : IAnyValue {
+        pub pure op - () -> TOut;
+    }
+
+    IBitwiseOperator<TSelf: IAnyValue> : IAnyValue {
         pub pure:
-            op ..  (end: TBound) -> TOut;
-            op ..= (end: TBound) -> TOut => self .. end;
+            op &  (rhs: TSelf) -> TSelf;
+            op |  (rhs: TSelf) -> TSelf;
+            op ^  (rhs: TSelf) -> TSelf;
+            op ~  ()           -> TSelf;
+            op << (bits: u32)  -> TSelf;
+            op >> (bits: u32)  -> TSelf;
     }
 
-    // Stepped sequence `a .. b : s` -> `step<TBound>`
-    IStepOperator<TBound Self, TOut="step<TBound>"> : IAnyValue {
-        pub pure fn step_by(end: TBound, stride: TBound) -> TOut;
+    INumber<TSelf: IValue> :
+        IValue,
+        IComparable<TSelf>,
+        IAddOperator<TSelf, TSelf>,
+        ISubOperator<TSelf, TSelf>,
+        IMulOperator<TSelf, TSelf>,
+        IDivOperator<TSelf, TSelf>,
+        IRemOperator<TSelf, TSelf>
+    {}
+
+    // 5. Indexing, Slicing, Lens, Swap & Unpacking Operator Contracts
+    IIndexGet<TIdx: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op [] (idx: TIdx) -> TOut;
     }
 
-    // Positional splat `*xs`, structural key-value splat `**kv`, and recursive deep flatten `*..tree`
-    ISplatOperator<TOut>       : IAnyValue { pub pure op *    () -> TOut; }
-    IPairsOperator<TKey, TVal> : IAnyValue { pub pure op **   () -> pairs<TKey, TVal>; }
-    IFlattenOperator<TLeaf>    : IAnyValue { pub pure op flat () -> TLeaf; }
+    IIndexSet<TIdx: IAnyValue, TVal: IAnyValue> : IAnyValue {
+        pub var op []= (idx: TIdx, val: TVal);
+    }
 
-    // Element & sub-slice indexing (`a[i]`, `a[0 ..< 4]`, `a[i] = v`)
-    IIndexGet<TIdx, TOut>      : IAnyValue { pub pure op []   (index: TIdx) -> TOut; }
-    IIndexSet<TIdx, TVal>      : IAnyValue { pub var  op []=  (index: TIdx, val: TVal); }
+    ISwapOperator<TRhs: IAnyValue> : IAnyValue {
+        pub var op :=: (rhs: var ref<TRhs>);
+    }
 
-    // Universal postfix `expr?` unwrap/early-propagation & `??` null-coalescing
-    ITryOperator<TOk, TErr>    : IAnyValue { pub pure op ?    () -> TOk; }
-    ICoalesceOperator<TOut>    : IAnyValue { pub pure op ??   (fallback: TOut) -> TOut; }
+    ILensOperator<TLens: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op ~> (lens: TLens) -> TOut;
+    }
 
-    // ---------------------------------------------------------------------
-    // 6. C#-STYLE COLLECTION & COROUTINE STREAM HIERARCHY
-    // ---------------------------------------------------------------------
-    IEnumerator<TItem> : IAnyValue {
+    IOpenRangeOperator<TRhs: IValue, TOut: IValue> : IValue {
+        pub pure op >..< (rhs: TRhs) -> TOut;
+    }
+
+    IAfterRangeOperator<TOut: IValue> : IValue {
+        pub pure op >.. () -> TOut;
+    }
+
+    ITryOperator<TUnwrapped: IAnyValue> : IAnyValue {
+        pub pure op ? () -> TUnwrapped;
+    }
+
+    ISplatOperator<TSeq: IAnyValue> : IAnyValue {
+        pub pure fn unpack() -> TSeq;
+    }
+
+    IPairsOperator<TPairs: IAnyValue> : IAnyValue {
+        pub pure fn unpack_pairs() -> TPairs;
+    }
+
+    IFlattenOperator<TLeaf: IAnyValue> : IAnyValue {
+        pub pure fn flat() -> slice<TLeaf>;
+    }
+
+    // 6. Zero-Allocation Value-Type Iteration Hierarchy (`for x in coll`)
+    IEnumerator<TItem: IAnyValue> : IAnyValue {
         pub var fn move_next() -> bool;
         pub current: TItem { get; }
     }
 
-    IEnumerable<TItem> : IAnyValue {
-        pub pure fn get_enumerator() -> IEnumerator<TItem>;
+    IEnumerable<TItem: IAnyValue, TEnum: IEnumerator<TItem>> : IAnyValue {
+        pub pure fn get_enumerator() -> TEnum;
     }
 
-    IAsyncEnumerator<TItem> : IObject {
-        pub var fn move_next_async() -> bool;
-        pub current: TItem { get; }
+    ICollection<TItem: IAnyValue> : IAnyValue {
+        pub count:    usize { get; }
+        pub is_empty: bool  { get => .count == 0; }
+        pub pure fn contains(item: TItem) -> bool;
+        pub var:
+            fn add(item: TItem);
+            fn clear();
     }
 
-    IAsyncEnumerable<TItem> : IAnyValue {
-        pub pure fn get_async_enumerator() -> IAsyncEnumerator<TItem>;
-    }
-
-    IReadOnlyCollection<TItem> : IEnumerable<TItem> {
+    IReadOnlyList<TItem: IAnyValue> : IIndexGet<usize, TItem> {
         pub count:    usize { get; }
         pub is_empty: bool  { get => .count == 0; }
     }
 
-    IReadOnlyList<TItem> : IReadOnlyCollection<TItem>, IIndexGet<usize, TItem> {}
-
-    ICollection<TItem> : IReadOnlyCollection<TItem> {
-        pub var:
-            fn add(item: TItem);
-            fn clear();
-        pub pure fn contains(item: TItem) -> bool;
-    }
-
-    IList<TItem> : ICollection<TItem>, IReadOnlyList<TItem>, IIndexSet<usize, TItem> {
+    IList<TItem: IAnyValue> :
+        ICollection<TItem>,
+        IReadOnlyList<TItem>,
+        IIndexSet<usize, TItem>
+    {
         pub var fn remove_at(index: usize);
     }
 }

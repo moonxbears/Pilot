@@ -1,115 +1,162 @@
 // =========================================================================
 // FILE: stdlib/core/builtins/builtins.pilot
-// STAGE 3E SYMBOLIC TYPE CONSTRUCTS, COMPLETE LOWERCASE SCALAR PRIMITIVES,
-// RANGES (`range`, `span`, `step`) & PURE PILOT CONTROL FLOW
+// STAGE 3E SYMBOL CONSTRUCTS (`[]`, `?`, `!`, `=>`), ALL INTEGER/FLOAT WIDTHS,
+// `char`, `str`, RANGES (`..`, `..=`), TUPLES, UNIONS & `for`/`match` SYNTAX
 // =========================================================================
 [EnforceCoreNaming]
-pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Genesis;
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Builtins;
 
+use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
 use Pilot.Core.Memory.*;
 use Pilot.Core.Option.*;
 use Pilot.Core.Result.*;
-use Pilot.Core.Task.*;
+use Pilot.Core.Callables.*;
 
-// -------------------------------------------------------------------------
-// 1. SYMBOLIC TYPE-POSITION SHORTHAND LOWERING
-// -------------------------------------------------------------------------
+// =========================================================================
+// 1. TYPE-POSITION SYMBOL CONSTRUCTS (`syntax type_construct`)
+// Maps concise suffix/infix symbols to canonical lowercase `[Lang]` structs
+// =========================================================================
 pub syntax type_construct {
-    (T: type) []                    => quote { slice<$T> };
-    (T: type) [ (N: usize) ]        => quote { array<$T, $N> };
-    (T: type) [ .. ]                => quote { stride<$T> };
-    (T: type) *                     => quote { ptr<$T> };
-    & (T: type)                     => quote { ref<$T> };
-    & var (T: type)                 => quote { var ref<$T> };
-    ~ (T: type)                     => quote { iso<$T> };
-    (T: type) ?                     => quote { option<$T> };
-    (T: type) ! (E: type)           => quote { result<$T, $E> };
-    (T1: type) | (T2: type)         => quote { union<$T1, $T2> };
-    (TArgs: type) => (TOut: type)   => quote { fn<$TArgs, $TOut> };
+    (T[])          => quote { slice<$T> };
+    (T[N])         => quote { array<$T, $N> };
+    (T[N, M])      => quote { grid<$T, $N, $M> };
+    (T[..])        => quote { stride<$T> };
+    (T[:])         => quote { ring<$T> };
+    (T @ N)        => quote { simd<$T, $N> };
+    (T^)           => quote { signal<$T> };
+    (@T)           => quote { pin<$T> };
+    (T?)           => quote { option<$T> };
+    (T ! E)        => quote { result<$T, $E> };
+    ((A) => R)     => quote { fn<$A, $R> };
+    (T1 | T2)      => quote { union<$T1, $T2> };
 }
 
-// -------------------------------------------------------------------------
-// 2. REUSABLE TIER-2 SSA OPERATOR FACETS (0 Stored Fields -> `partial` Safe)
-// -------------------------------------------------------------------------
-// Shared by all signed integers: `i8`, `i16`, `i32`, `i64`, `i128`, `isize`
-let SignedIntSsaFacet = {
+// =========================================================================
+// 2. STATEMENT & EXPRESSION SYNTAX MACROS (`for`, `while`, `until`, `unit`)
+// =========================================================================
+pub syntax {
+    while(cond, body) => quote {
+        loop {
+            if !($cond) { break; }
+            $body
+        }
+    };
+
+    until(cond, body) => quote {
+        loop {
+            if $cond { break; }
+            $body
+        }
+    };
+
+    for(binding, iterable, body) => quote {
+        {
+            var __enum = ($iterable).get_enumerator();
+            loop {
+                if !__enum.move_next() { break; }
+                let $binding = __enum.current;
+                $body
+            }
+        }
+    };
+
+    unit(decl) => quote {
+        $decl
+    };
+}
+
+// =========================================================================
+// 3. ZERO-FIELD SSA OPERATOR FACETS FOR SIGNED, UNSIGNED & FLOAT REGISTERS
+// Spliced into every hardware register width (`i8`..`i128`, `u8`..`u128`, `f16`..`f128`)
+// =========================================================================
+let SignedIntSsaFacet<TSelf: IValue> = {
     pub pure:
-        op +   (rhs: Self) -> Self => __ssa(Cfg.Ssa.add,    self, rhs);
-        op -   (rhs: Self) -> Self => __ssa(Cfg.Ssa.sub,    self, rhs);
-        op *   (rhs: Self) -> Self => __ssa(Cfg.Ssa.mul,    self, rhs);
-        op /   (rhs: Self) -> Self => __ssa(Cfg.Ssa.sdiv,   self, rhs);
-        op %   (rhs: Self) -> Self => __ssa(Cfg.Ssa.srem,   self, rhs);
-        op -   ()          -> Self => __ssa_unary(Cfg.Ssa.neg, self);
-        op &   (rhs: Self) -> Self => __ssa(Cfg.Ssa.and_b,  self, rhs);
-        op |   (rhs: Self) -> Self => __ssa(Cfg.Ssa.or_b,   self, rhs);
-        op ^   (rhs: Self) -> Self => __ssa(Cfg.Ssa.xor_b,  self, rhs);
-        op ~   ()          -> Self => __ssa_unary(Cfg.Ssa.bitnot, self);
-        op <<  (rhs: usize)-> Self => __ssa(Cfg.Ssa.shl,    self, __ssa_cast(Cfg.Ssa.trunc, rhs, Self));
-        op >>  (rhs: usize)-> Self => __ssa(Cfg.Ssa.ashr,   self, __ssa_cast(Cfg.Ssa.trunc, rhs, Self));
-        op ==  (rhs: Self) -> bool => __ssa(Cfg.Ssa.eq,     self, rhs);
-        op !=  (rhs: Self) -> bool => __ssa(Cfg.Ssa.ne,     self, rhs);
-        op <   (rhs: Self) -> bool => __ssa(Cfg.Ssa.slt,    self, rhs);
-        op <=  (rhs: Self) -> bool => __ssa(Cfg.Ssa.sle,    self, rhs);
-        op >   (rhs: Self) -> bool => __ssa(Cfg.Ssa.sgt,    self, rhs);
-        op >=  (rhs: Self) -> bool => __ssa(Cfg.Ssa.sge,    self, rhs);
-        op ..< (end: Self) -> range<Self> => range<Self> { start: self, end: end };
-        op ..  (end: Self) -> span<Self>  => span<Self>  { start: self, end: end };
-        op ..= (end: Self) -> span<Self>  => span<Self>  { start: self, end: end };
-        fn step_by(end: Self, stride: Self) -> step<Self> => step<Self> { start: self, end: end, stride: stride };
+        op +   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.add,      self, rhs);
+        op -   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.sub,      self, rhs);
+        op *   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.mul,      self, rhs);
+        op /   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.sdiv,     self, rhs);
+        op %   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.srem,     self, rhs);
+        op %%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.srem_euc, self, rhs);
+        op +|  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.sadd_sat, self, rhs);
+        op -|  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.ssub_sat, self, rhs);
+        op *|  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.smul_sat, self, rhs);
+        op +%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.add_wrap, self, rhs);
+        op -%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.sub_wrap, self, rhs);
+        op *%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.mul_wrap, self, rhs);
+        op -   ()           -> TSelf => __ssa_unop(Cfg.Ssa.neg, self);
+        op &   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.and_b,    self, rhs);
+        op |   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.or_b,     self, rhs);
+        op ^   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.xor_b,    self, rhs);
+        op ~   ()           -> TSelf => __ssa_unop(Cfg.Ssa.bitnot, self);
+        op <<  (bits: u32)  -> TSelf => __ssa(Cfg.Ssa.shl,      self, bits);
+        op >>  (bits: u32)  -> TSelf => __ssa(Cfg.Ssa.ashr,     self, bits);
+        op ==  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.eq,       self, rhs);
+        op !=  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.ne,       self, rhs);
+        op <   (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.slt,      self, rhs);
+        op <=  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.sle,      self, rhs);
+        op >   (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.sgt,      self, rhs);
+        op >=  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.sge,      self, rhs);
+        op <=> (rhs: TSelf) -> order => __ssa(Cfg.Ssa.cmp3_s,   self, rhs);
+        fn abs() -> TSelf {
+            if self < (0 as TSelf) { return -self; }
+            return self;
+        }
 };
 
-// Shared by all unsigned integers: `u8`, `u16`, `u32`, `u64`, `u128`, `usize`
-let UnsignedIntSsaFacet = {
+let UnsignedIntSsaFacet<TSelf: IValue> = {
     pub pure:
-        op +   (rhs: Self) -> Self => __ssa(Cfg.Ssa.add,    self, rhs);
-        op -   (rhs: Self) -> Self => __ssa(Cfg.Ssa.sub,    self, rhs);
-        op *   (rhs: Self) -> Self => __ssa(Cfg.Ssa.mul,    self, rhs);
-        op /   (rhs: Self) -> Self => __ssa(Cfg.Ssa.udiv,   self, rhs);
-        op %   (rhs: Self) -> Self => __ssa(Cfg.Ssa.urem,   self, rhs);
-        op &   (rhs: Self) -> Self => __ssa(Cfg.Ssa.and_b,  self, rhs);
-        op |   (rhs: Self) -> Self => __ssa(Cfg.Ssa.or_b,   self, rhs);
-        op ^   (rhs: Self) -> Self => __ssa(Cfg.Ssa.xor_b,  self, rhs);
-        op ~   ()          -> Self => __ssa_unary(Cfg.Ssa.bitnot, self);
-        op <<  (rhs: usize)-> Self => __ssa(Cfg.Ssa.shl,    self, __ssa_cast(Cfg.Ssa.trunc, rhs, Self));
-        op >>  (rhs: usize)-> Self => __ssa(Cfg.Ssa.lshr,   self, __ssa_cast(Cfg.Ssa.trunc, rhs, Self));
-        op ==  (rhs: Self) -> bool => __ssa(Cfg.Ssa.eq,     self, rhs);
-        op !=  (rhs: Self) -> bool => __ssa(Cfg.Ssa.ne,     self, rhs);
-        op <   (rhs: Self) -> bool => __ssa(Cfg.Ssa.ult,    self, rhs);
-        op <=  (rhs: Self) -> bool => __ssa(Cfg.Ssa.ule,    self, rhs);
-        op >   (rhs: Self) -> bool => __ssa(Cfg.Ssa.ugt,    self, rhs);
-        op >=  (rhs: Self) -> bool => __ssa(Cfg.Ssa.uge,    self, rhs);
-        op ..< (end: Self) -> range<Self> => range<Self> { start: self, end: end };
-        op ..  (end: Self) -> span<Self>  => span<Self>  { start: self, end: end };
-        op ..= (end: Self) -> span<Self>  => span<Self>  { start: self, end: end };
-        fn step_by(end: Self, stride: Self) -> step<Self> => step<Self> { start: self, end: end, stride: stride };
+        op +   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.add,      self, rhs);
+        op -   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.sub,      self, rhs);
+        op *   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.mul,      self, rhs);
+        op /   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.udiv,     self, rhs);
+        op %   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.urem,     self, rhs);
+        op %%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.urem_euc, self, rhs);
+        op +|  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.uadd_sat, self, rhs);
+        op -|  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.usub_sat, self, rhs);
+        op *|  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.umul_sat, self, rhs);
+        op +%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.add_wrap, self, rhs);
+        op -%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.sub_wrap, self, rhs);
+        op *%  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.mul_wrap, self, rhs);
+        op &   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.and_b,    self, rhs);
+        op |   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.or_b,     self, rhs);
+        op ^   (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.xor_b,    self, rhs);
+        op ~   ()           -> TSelf => __ssa_unop(Cfg.Ssa.bitnot, self);
+        op <<  (bits: u32)  -> TSelf => __ssa(Cfg.Ssa.shl,      self, bits);
+        op >>  (bits: u32)  -> TSelf => __ssa(Cfg.Ssa.lshr,     self, bits);
+        op ==  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.eq,       self, rhs);
+        op !=  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.ne,       self, rhs);
+        op <   (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.ult,      self, rhs);
+        op <=  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.ule,      self, rhs);
+        op >   (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.ugt,      self, rhs);
+        op >=  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.uge,      self, rhs);
+        op <=> (rhs: TSelf) -> order => __ssa(Cfg.Ssa.cmp3_u,   self, rhs);
 };
 
-// Shared by all IEEE-754 floats: `f16`, `f32`, `f64`, `f128`
-let FloatSsaFacet = {
+let FloatSsaFacet<TSelf: IValue> = {
     pub pure:
-        op +   (rhs: Self) -> Self => __ssa(Cfg.Ssa.fadd,   self, rhs);
-        op -   (rhs: Self) -> Self => __ssa(Cfg.Ssa.fsub,   self, rhs);
-        op *   (rhs: Self) -> Self => __ssa(Cfg.Ssa.fmul,   self, rhs);
-        op /   (rhs: Self) -> Self => __ssa(Cfg.Ssa.fdiv,   self, rhs);
-        op -   ()          -> Self => __ssa_unary(Cfg.Ssa.fneg, self);
-        op ==  (rhs: Self) -> bool => __ssa(Cfg.Ssa.feq,    self, rhs);
-        op !=  (rhs: Self) -> bool => !(__ssa(Cfg.Ssa.feq,  self, rhs));
-        op <   (rhs: Self) -> bool => __ssa(Cfg.Ssa.flt,    self, rhs);
-        op <=  (rhs: Self) -> bool => __ssa(Cfg.Ssa.fle,    self, rhs);
-        op >   (rhs: Self) -> bool => __ssa(Cfg.Ssa.flt,    rhs,  self);
-        op >=  (rhs: Self) -> bool => __ssa(Cfg.Ssa.fle,    rhs,  self);
+        op +  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.fadd, self, rhs);
+        op -  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.fsub, self, rhs);
+        op *  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.fmul, self, rhs);
+        op /  (rhs: TSelf) -> TSelf => __ssa(Cfg.Ssa.fdiv, self, rhs);
+        op -  ()           -> TSelf => __ssa_unop(Cfg.Ssa.fneg, self);
+        op == (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.feq,  self, rhs);
+        op != (rhs: TSelf) -> bool  => !(__ssa(Cfg.Ssa.feq, self, rhs));
+        op <  (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.flt,  self, rhs);
+        op <= (rhs: TSelf) -> bool  => __ssa(Cfg.Ssa.fle,  self, rhs);
+        op >  (rhs: TSelf) -> bool  => !(__ssa(Cfg.Ssa.fle, self, rhs));
+        op >= (rhs: TSelf) -> bool  => !(__ssa(Cfg.Ssa.flt, self, rhs));
 };
 
-// -------------------------------------------------------------------------
-// 3. RANGE, SPAN & STEP VALUE ENUMERATORS
-// -------------------------------------------------------------------------
+// =========================================================================
+// 4. VALUE-TYPE RANGE ENUMERATORS (`range<T>` & `span<T>`)
+// =========================================================================
 pub struct {
     [Layout(c_abi)]
-    RangeEnumerator<TBound: IComparable<TBound>, IAddOperator<TBound>> : IEnumerator<TBound>, IValue {
-        pub current_val: TBound;
-        pub end_val:     TBound;
-        pub step_one:    TBound;
+    RangeEnumerator<T: INumber<T>> : IEnumerator<T>, IValue {
+        pub current_val: T;
+        pub end_val:     T;
+        pub step_val:    T;
         pub has_started: bool;
 
         pub var fn move_next() -> bool {
@@ -117,22 +164,22 @@ pub struct {
                 .has_started = true;
                 return .current_val < .end_val;
             }
-            let next_val = .current_val + .step_one;
-            if next_val < .end_val {
-                .current_val = next_val;
+            let next_v = .current_val + .step_val;
+            if next_v < .end_val {
+                .current_val = next_v;
                 return true;
             }
             return false;
         }
 
-        pub current: TBound { get => .current_val; }
+        pub current: T { get => .current_val; }
     }
 
     [Layout(c_abi)]
-    SpanEnumerator<TBound: IComparable<TBound>, IAddOperator<TBound>> : IEnumerator<TBound>, IValue {
-        pub current_val: TBound;
-        pub end_val:     TBound;
-        pub step_one:    TBound;
+    SpanEnumerator<T: INumber<T>> : IEnumerator<T>, IValue {
+        pub current_val: T;
+        pub end_val:     T;
+        pub step_val:    T;
         pub has_started: bool;
 
         pub var fn move_next() -> bool {
@@ -140,155 +187,92 @@ pub struct {
                 .has_started = true;
                 return .current_val <= .end_val;
             }
-            if .current_val == .end_val {
-                return false;
-            }
-            let next_val = .current_val + .step_one;
-            if next_val <= .end_val {
-                .current_val = next_val;
+            let next_v = .current_val + .step_val;
+            if next_v <= .end_val {
+                .current_val = next_v;
                 return true;
             }
             return false;
         }
 
-        pub current: TBound { get => .current_val; }
-    }
-
-    [Layout(c_abi)]
-    StepEnumerator<TBound: IComparable<TBound>, IAddOperator<TBound>> : IEnumerator<TBound>, IValue {
-        pub current_val: TBound;
-        pub end_val:     TBound;
-        pub stride_val:  TBound;
-        pub has_started: bool;
-
-        pub var fn move_next() -> bool {
-            if !.has_started {
-                .has_started = true;
-                return .current_val <= .end_val;
-            }
-            let next_val = .current_val + .stride_val;
-            if next_val <= .end_val {
-                .current_val = next_val;
-                return true;
-            }
-            return false;
-        }
-
-        pub current: TBound { get => .current_val; }
+        pub current: T { get => .current_val; }
     }
 }
 
-// -------------------------------------------------------------------------
-// 4. COMPLETE LOWERCASE PRIMITIVE DECLARATIONS
-// -------------------------------------------------------------------------
+// =========================================================================
+// 5. ALL LOWERCASE HARDWARE SCALARS, `char`, `str`, `order`, RANGES, TUPLES & UNIONS
+// =========================================================================
 pub partial struct {
-    [Lang(Cfg.Lang.void_t),  Bits(Cfg.Reg.b0,  Cfg.Reg.gpr_u)] void  : IValue {}
-    [Lang(Cfg.Lang.never_t), Bits(Cfg.Reg.b0,  Cfg.Reg.gpr_u)] never : IValue {}
+    // 5.1 Unit (`void`) and Bottom (`never`) Types
+    [Lang(Cfg.Lang.void_t),  Bits(Cfg.Reg.b0, Cfg.Reg.gpr_u)] void  : IValue {}
+    [Lang(Cfg.Lang.never_t), Bits(Cfg.Reg.b0, Cfg.Reg.gpr_u)] never : IValue {}
 
-    // Upgrade seed `bool` and `usize` with their full Stage 2 Interface conformances:
-    bool  : IEquatable<bool>, IBitAndOperator<bool>, IBitOrOperator<bool>, IBitXorOperator<bool>, IValue {}
-    usize : IComparable<usize>, IAddOperator<usize>, ISubOperator<usize>, IMulOperator<usize>, IDivOperator<usize>, IRemOperator<usize>, IBitAndOperator<usize>, IBitOrOperator<usize>, IBitXorOperator<usize>, IBitNotOperator<usize>, IShlOperator<usize>, IShrOperator<usize>, IRangeOperator<usize>, ISpanOperator<usize>, IStepOperator<usize>, IValue {
-        *UnsignedIntSsaFacet;
+    // 5.2 Three-Way Comparison Ordering Result (`order`: -1 Less, 0 Equal, +1 Greater)
+    [Lang(Cfg.Lang.order_t), Bits(Cfg.Reg.b8, Cfg.Reg.gpr_s)]
+    order : IEquatable<order>, IComparable<order>, IValue {
+        *SignedIntSsaFacet<order>;
+        pub pure:
+            fn is_lt() -> bool => (self as i8) < 0;
+            fn is_eq() -> bool => (self as i8) == 0;
+            fn is_gt() -> bool => (self as i8) > 0;
     }
 
+    // 5.3 Complete Signed Integer Widths (`i8`, `i16`, `i32`, `i64`, `i128`, `isize`)
+    [Lang(Cfg.Lang.i8_t),    Bits(Cfg.Reg.b8,   Cfg.Reg.gpr_s)] i8    : INumber<i8>,    IBitwiseOperator<i8>,    INegOperator<i8>    { *SignedIntSsaFacet<i8>; }
+    [Lang(Cfg.Lang.i16_t),   Bits(Cfg.Reg.b16,  Cfg.Reg.gpr_s)] i16   : INumber<i16>,   IBitwiseOperator<i16>,   INegOperator<i16>   { *SignedIntSsaFacet<i16>; }
+    [Lang(Cfg.Lang.i32_t),   Bits(Cfg.Reg.b32,  Cfg.Reg.gpr_s)] i32   : INumber<i32>,   IBitwiseOperator<i32>,   INegOperator<i32>   { *SignedIntSsaFacet<i32>; }
+    [Lang(Cfg.Lang.i64_t),   Bits(Cfg.Reg.b64,  Cfg.Reg.gpr_s)] i64   : INumber<i64>,   IBitwiseOperator<i64>,   INegOperator<i64>   { *SignedIntSsaFacet<i64>; }
+    [Lang(Cfg.Lang.i128_t),  Bits(Cfg.Reg.b128, Cfg.Reg.gpr_s)] i128  : INumber<i128>,  IBitwiseOperator<i128>,  INegOperator<i128>  { *SignedIntSsaFacet<i128>; }
+    [Lang(Cfg.Lang.isize_t), Bits(Cfg.Reg.b64,  Cfg.Reg.gpr_s)] isize : INumber<isize>, IBitwiseOperator<isize>, INegOperator<isize> { *SignedIntSsaFacet<isize>; }
+
+    // 5.4 Complete Unsigned Integer Widths (`u8`, `u16`, `u32`, `u64`, `u128`, plus `usize` extension)
+    [Lang(Cfg.Lang.u8_t),    Bits(Cfg.Reg.b8,   Cfg.Reg.gpr_u)] u8    : INumber<u8>,    IBitwiseOperator<u8>    { *UnsignedIntSsaFacet<u8>; }
+    [Lang(Cfg.Lang.u16_t),   Bits(Cfg.Reg.b16,  Cfg.Reg.gpr_u)] u16   : INumber<u16>,   IBitwiseOperator<u16>   { *UnsignedIntSsaFacet<u16>; }
+    [Lang(Cfg.Lang.u32_t),   Bits(Cfg.Reg.b32,  Cfg.Reg.gpr_u)] u32   : INumber<u32>,   IBitwiseOperator<u32>   { *UnsignedIntSsaFacet<u32>; }
+    [Lang(Cfg.Lang.u64_t),   Bits(Cfg.Reg.b64,  Cfg.Reg.gpr_u)] u64   : INumber<u64>,   IBitwiseOperator<u64>   { *UnsignedIntSsaFacet<u64>; }
+    [Lang(Cfg.Lang.u128_t),  Bits(Cfg.Reg.b128, Cfg.Reg.gpr_u)] u128  : INumber<u128>,  IBitwiseOperator<u128>  { *UnsignedIntSsaFacet<u128>; }
+    usize : INumber<usize>, IBitwiseOperator<usize> { *UnsignedIntSsaFacet<usize>; }
+    bool  : IEquatable<bool>, IValue {}
+
+    // 5.5 Complete IEEE-754 Floating-Point Widths (`f16`, `f32`, `f64`, `f128`)
+    [Lang(Cfg.Lang.f16_t),   Bits(Cfg.Reg.b16,  Cfg.Reg.simd_f)] f16  : INumber<f16>,  INegOperator<f16>  { *FloatSsaFacet<f16>; }
+    [Lang(Cfg.Lang.f32_t),   Bits(Cfg.Reg.b32,  Cfg.Reg.simd_f)] f32  : INumber<f32>,  INegOperator<f32>  { *FloatSsaFacet<f32>; }
+    [Lang(Cfg.Lang.f64_t),   Bits(Cfg.Reg.b64,  Cfg.Reg.simd_f)] f64  : INumber<f64>,  INegOperator<f64>  { *FloatSsaFacet<f64>; }
+    [Lang(Cfg.Lang.f128_t),  Bits(Cfg.Reg.b128, Cfg.Reg.simd_f)] f128 : INumber<f128>, INegOperator<f128> { *FloatSsaFacet<f128>; }
+
+    // 5.6 32-Bit Unicode Scalar Value (`char`) — `0b00` `IValue`
     [Lang(Cfg.Lang.char_t), Bits(Cfg.Reg.b32, Cfg.Reg.gpr_u)]
     char : IComparable<char>, IValue {
         pub pure:
-            op == (rhs: char) -> bool => __ssa(Cfg.Ssa.eq,  self, rhs);
-            op != (rhs: char) -> bool => __ssa(Cfg.Ssa.ne,  self, rhs);
-            op <  (rhs: char) -> bool => __ssa(Cfg.Ssa.ult, self, rhs);
-            op <= (rhs: char) -> bool => __ssa(Cfg.Ssa.ule, self, rhs);
-            op >  (rhs: char) -> bool => __ssa(Cfg.Ssa.ugt, self, rhs);
-            op >= (rhs: char) -> bool => __ssa(Cfg.Ssa.uge, self, rhs);
-            fn code_point()   -> u32  => __ssa_cast(Cfg.Ssa.bitcast, self, u32);
+            fn to_u32()         -> u32  => __ssa_cast(Cfg.Ssa.bitcast, self, u32);
+            op == (rhs: char)   -> bool => .to_u32() == rhs.to_u32();
+            op != (rhs: char)   -> bool => .to_u32() != rhs.to_u32();
+            op <  (rhs: char)   -> bool => .to_u32() <  rhs.to_u32();
+            op <= (rhs: char)   -> bool => .to_u32() <= rhs.to_u32();
+            op >  (rhs: char)   -> bool => .to_u32() >  rhs.to_u32();
+            op >= (rhs: char)   -> bool => .to_u32() >= rhs.to_u32();
+            fn is_ascii()       -> bool => .to_u32() <= 0x7F;
+            fn is_ascii_digit() -> bool => (.to_u32() >= 0x30) && (.to_u32() <= 0x39);
+            fn is_ascii_alpha() -> bool =>
+                ((.to_u32() >= 0x41) && (.to_u32() <= 0x5A)) ||
+                ((.to_u32() >= 0x61) && (.to_u32() <= 0x7A));
     }
 
-    // Signed Integer Primitives (`i8`, `i16`, `i32`, `i64`, `i128`, `isize`)
-    [Lang(Cfg.Lang.i8_t), Bits(Cfg.Reg.b8, Cfg.Reg.gpr_s)]
-    i8 : IComparable<i8>, IAddOperator<i8>, ISubOperator<i8>, IMulOperator<i8>, IDivOperator<i8>, IRemOperator<i8>, INegOperator<i8>, IBitAndOperator<i8>, IBitOrOperator<i8>, IBitXorOperator<i8>, IBitNotOperator<i8>, IShlOperator<usize, i8>, IShrOperator<usize, i8>, IRangeOperator<i8>, ISpanOperator<i8>, IStepOperator<i8>, IValue {
-        *SignedIntSsaFacet;
-    }
-
-    [Lang(Cfg.Lang.i16_t), Bits(Cfg.Reg.b16, Cfg.Reg.gpr_s)]
-    i16 : IComparable<i16>, IAddOperator<i16>, ISubOperator<i16>, IMulOperator<i16>, IDivOperator<i16>, IRemOperator<i16>, INegOperator<i16>, IBitAndOperator<i16>, IBitOrOperator<i16>, IBitXorOperator<i16>, IBitNotOperator<i16>, IShlOperator<usize, i16>, IShrOperator<usize, i16>, IRangeOperator<i16>, ISpanOperator<i16>, IStepOperator<i16>, IValue {
-        *SignedIntSsaFacet;
-    }
-
-    [Lang(Cfg.Lang.i32_t), Bits(Cfg.Reg.b32, Cfg.Reg.gpr_s)]
-    i32 : IComparable<i32>, IAddOperator<i32>, ISubOperator<i32>, IMulOperator<i32>, IDivOperator<i32>, IRemOperator<i32>, INegOperator<i32>, IBitAndOperator<i32>, IBitOrOperator<i32>, IBitXorOperator<i32>, IBitNotOperator<i32>, IShlOperator<usize, i32>, IShrOperator<usize, i32>, IRangeOperator<i32>, ISpanOperator<i32>, IStepOperator<i32>, IValue {
-        *SignedIntSsaFacet;
-    }
-
-    [Lang(Cfg.Lang.i64_t), Bits(Cfg.Reg.b64, Cfg.Reg.gpr_s)]
-    i64 : IComparable<i64>, IAddOperator<i64>, ISubOperator<i64>, IMulOperator<i64>, IDivOperator<i64>, IRemOperator<i64>, INegOperator<i64>, IBitAndOperator<i64>, IBitOrOperator<i64>, IBitXorOperator<i64>, IBitNotOperator<i64>, IShlOperator<usize, i64>, IShrOperator<usize, i64>, IRangeOperator<i64>, ISpanOperator<i64>, IStepOperator<i64>, IValue {
-        *SignedIntSsaFacet;
-    }
-
-    [Lang(Cfg.Lang.i128_t), Bits(Cfg.Reg.b128, Cfg.Reg.gpr_s)]
-    i128 : IComparable<i128>, IAddOperator<i128>, ISubOperator<i128>, IMulOperator<i128>, IDivOperator<i128>, IRemOperator<i128>, INegOperator<i128>, IBitAndOperator<i128>, IBitOrOperator<i128>, IBitXorOperator<i128>, IBitNotOperator<i128>, IShlOperator<usize, i128>, IShrOperator<usize, i128>, IRangeOperator<i128>, ISpanOperator<i128>, IStepOperator<i128>, IValue {
-        *SignedIntSsaFacet;
-    }
-
-    [Lang(Cfg.Lang.isize_t), Bits(Cfg.Reg.b64, Cfg.Reg.gpr_s)]
-    isize : IComparable<isize>, IAddOperator<isize>, ISubOperator<isize>, IMulOperator<isize>, IDivOperator<isize>, IRemOperator<isize>, INegOperator<isize>, IBitAndOperator<isize>, IBitOrOperator<isize>, IBitXorOperator<isize>, IBitNotOperator<isize>, IShlOperator<usize, isize>, IShrOperator<usize, isize>, IRangeOperator<isize>, ISpanOperator<isize>, IStepOperator<isize>, IValue {
-        *SignedIntSsaFacet;
-    }
-
-    // Unsigned Integer Primitives (`u8`, `u16`, `u32`, `u64`, `u128`)
-    [Lang(Cfg.Lang.u8_t), Bits(Cfg.Reg.b8, Cfg.Reg.gpr_u)]
-    u8 : IComparable<u8>, IAddOperator<u8>, ISubOperator<u8>, IMulOperator<u8>, IDivOperator<u8>, IRemOperator<u8>, IBitAndOperator<u8>, IBitOrOperator<u8>, IBitXorOperator<u8>, IBitNotOperator<u8>, IShlOperator<usize, u8>, IShrOperator<usize, u8>, IRangeOperator<u8>, ISpanOperator<u8>, IStepOperator<u8>, IValue {
-        *UnsignedIntSsaFacet;
-    }
-
-    [Lang(Cfg.Lang.u16_t), Bits(Cfg.Reg.b16, Cfg.Reg.gpr_u)]
-    u16 : IComparable<u16>, IAddOperator<u16>, ISubOperator<u16>, IMulOperator<u16>, IDivOperator<u16>, IRemOperator<u16>, IBitAndOperator<u16>, IBitOrOperator<u16>, IBitXorOperator<u16>, IBitNotOperator<u16>, IShlOperator<usize, u16>, IShrOperator<usize, u16>, IRangeOperator<u16>, ISpanOperator<u16>, IStepOperator<u16>, IValue {
-        *UnsignedIntSsaFacet;
-    }
-
-    [Lang(Cfg.Lang.u32_t), Bits(Cfg.Reg.b32, Cfg.Reg.gpr_u)]
-    u32 : IComparable<u32>, IAddOperator<u32>, ISubOperator<u32>, IMulOperator<u32>, IDivOperator<u32>, IRemOperator<u32>, IBitAndOperator<u32>, IBitOrOperator<u32>, IBitXorOperator<u32>, IBitNotOperator<u32>, IShlOperator<usize, u32>, IShrOperator<usize, u32>, IRangeOperator<u32>, ISpanOperator<u32>, IStepOperator<u32>, IValue {
-        *UnsignedIntSsaFacet;
-    }
-
-    [Lang(Cfg.Lang.u64_t), Bits(Cfg.Reg.b64, Cfg.Reg.gpr_u)]
-    u64 : IComparable<u64>, IAddOperator<u64>, ISubOperator<u64>, IMulOperator<u64>, IDivOperator<u64>, IRemOperator<u64>, IBitAndOperator<u64>, IBitOrOperator<u64>, IBitXorOperator<u64>, IBitNotOperator<u64>, IShlOperator<usize, u64>, IShrOperator<usize, u64>, IRangeOperator<u64>, ISpanOperator<u64>, IStepOperator<u64>, IValue {
-        *UnsignedIntSsaFacet;
-    }
-
-    [Lang(Cfg.Lang.u128_t), Bits(Cfg.Reg.b128, Cfg.Reg.gpr_u)]
-    u128 : IComparable<u128>, IAddOperator<u128>, ISubOperator<u128>, IMulOperator<u128>, IDivOperator<u128>, IRemOperator<u128>, IBitAndOperator<u128>, IBitOrOperator<u128>, IBitXorOperator<u128>, IBitNotOperator<u128>, IShlOperator<usize, u128>, IShrOperator<usize, u128>, IRangeOperator<u128>, ISpanOperator<u128>, IStepOperator<u128>, IValue {
-        *UnsignedIntSsaFacet;
-    }
-
-    // IEEE-754 Floating-Point Primitives (`f16`, `f32`, `f64`, `f128`)
-    [Lang(Cfg.Lang.f16_t), Bits(Cfg.Reg.b16, Cfg.Reg.simd_f)]
-    f16 : IComparable<f16>, IAddOperator<f16>, ISubOperator<f16>, IMulOperator<f16>, IDivOperator<f16>, INegOperator<f16>, IValue {
-        *FloatSsaFacet;
-    }
-
-    [Lang(Cfg.Lang.f32_t), Bits(Cfg.Reg.b32, Cfg.Reg.simd_f)]
-    f32 : IComparable<f32>, IAddOperator<f32>, ISubOperator<f32>, IMulOperator<f32>, IDivOperator<f32>, INegOperator<f32>, IValue {
-        *FloatSsaFacet;
-    }
-
-    [Lang(Cfg.Lang.f64_t), Bits(Cfg.Reg.b64, Cfg.Reg.simd_f)]
-    f64 : IComparable<f64>, IAddOperator<f64>, ISubOperator<f64>, IMulOperator<f64>, IDivOperator<f64>, INegOperator<f64>, IValue {
-        *FloatSsaFacet;
-    }
-
-    [Lang(Cfg.Lang.f128_t), Bits(Cfg.Reg.b128, Cfg.Reg.simd_f)]
-    f128 : IComparable<f128>, IAddOperator<f128>, ISubOperator<f128>, IMulOperator<f128>, IDivOperator<f128>, INegOperator<f128>, IValue {
-        *FloatSsaFacet;
-    }
-
-    // UTF-8 String View (`str` — 14-byte inline SSO in `PilotVal` or `{ ptr<u8>, usize }`, `0b01` `IReference`)
+    // 5.7 Borrowed UTF-8 String View (`str`) — 16-Byte `{ ptr<u8>, usize }`, `0b01` `IReference`
     [Lang(Cfg.Lang.str_t), Layout(c_abi)]
-    str : IReadOnlyList<u8>, IEquatable<str>, IReference {
+    str : IEquatable<str>, IIndexGet<usize, u8>, IReference {
         *RawStorageBundle<u8>;
         *ContiguousViewFacet<u8>;
 
         pub pure:
+            fn as_bytes() -> slice<u8> => slice<u8> { data: .data, len: .len };
+
             op [] (idx: usize) -> u8 => .data[idx];
+
+            op [] (r: range<usize>) -> str => str {
+                data: .data + r.start,
+                len:  r.end - r.start,
+            };
 
             op == (rhs: str) -> bool {
                 if .len != rhs.len { return false; }
@@ -301,80 +285,70 @@ pub partial struct {
                 return true;
             }
 
-            fn as_bytes() -> slice<u8> => slice<u8> { data: .data, len: .len };
             fn get_enumerator() -> SliceEnumerator<u8> => .as_bytes().get_enumerator();
     }
 
-    // Algebraic Product & Sum Canonical Backing Primitives (`tuple`, `union`)
-    [Lang(Cfg.Lang.tuple_t), Layout(c_abi)] tuple<T0: IAnyValue, T1: IAnyValue> : IValue { pub item0: T0; pub item1: T1; }
-    [Lang(Cfg.Lang.union_t), Layout(c_abi)] union<T0: IAnyValue, T1: IAnyValue> : IValue { pub tag: u8; }
-
-    // Single-Word Lowercase Range & Slice Bound Primitives (`range`, `span`, `step`, `from`, `until`, `full`)
+    // 5.8 Range, Span, Step, Open & Unbounded Slicing Descriptors (`range<T>`, `span<T>`, `step<T>`, `open<T>`, `after<T>`, `from<T>`, `until<T>`, `full`)
     [Lang(Cfg.Lang.range_t), Layout(c_abi)]
-    range<T: IComparable<T>, IAddOperator<T>> : IEnumerable<T>, IValue {
+    range<T: INumber<T>> : IValue {
         pub start: T;
         pub end:   T;
 
         pub pure:
-            fn contains(val: T) -> bool => (val >= .start) & (val < .end);
+            fn contains(v: T) -> bool => (v >= .start) && (v < .end);
             fn get_enumerator() -> RangeEnumerator<T> => RangeEnumerator<T> {
                 current_val: .start,
                 end_val:     .end,
-                step_one:    __ssa_cast(Cfg.Ssa.zext, 1, T),
+                step_val:    1 as T,
                 has_started: false,
             };
     }
 
     [Lang(Cfg.Lang.span_t), Layout(c_abi)]
-    span<T: IComparable<T>, IAddOperator<T>> : IEnumerable<T>, IValue {
+    span<T: INumber<T>> : IValue {
         pub start: T;
         pub end:   T;
 
         pub pure:
-            fn contains(val: T) -> bool => (val >= .start) & (val <= .end);
+            fn contains(v: T) -> bool => (v >= .start) && (v <= .end);
             fn get_enumerator() -> SpanEnumerator<T> => SpanEnumerator<T> {
                 current_val: .start,
                 end_val:     .end,
-                step_one:    __ssa_cast(Cfg.Ssa.zext, 1, T),
+                step_val:    1 as T,
                 has_started: false,
             };
     }
 
     [Lang(Cfg.Lang.step_t), Layout(c_abi)]
-    step<T: IComparable<T>, IAddOperator<T>> : IEnumerable<T>, IValue {
-        pub start:  T;
-        pub end:    T;
-        pub stride: T;
+    step<T: INumber<T>> : IValue {
+        pub bounds:  range<T>;
+        pub step_by: T;
 
-        pub pure fn get_enumerator() -> StepEnumerator<T> => StepEnumerator<T> {
-            current_val: .start,
-            end_val:     .end,
-            stride_val:  .stride,
+        pub pure fn get_enumerator() -> RangeEnumerator<T> => RangeEnumerator<T> {
+            current_val: .bounds.start,
+            end_val:     .bounds.end,
+            step_val:    .step_by,
             has_started: false,
         };
     }
 
-    [Lang(Cfg.Lang.from_t),  Layout(c_abi)] from<T: IComparable<T>>  : IValue { pub start: T; }
-    [Lang(Cfg.Lang.until_t), Layout(c_abi)] until<T: IComparable<T>> : IValue { pub end:   T; }
-    [Lang(Cfg.Lang.full_t),  Layout(c_abi)] full                     : IValue {}
-}
+    [Lang(Cfg.Lang.open_t),  Layout(c_abi)] open<T: IValue>  : IValue { pub start: T; pub end: T; }
+    [Lang(Cfg.Lang.after_t), Layout(c_abi)] after<T: IValue> : IValue { pub start: T; }
+    [Lang(Cfg.Lang.from_t),  Layout(c_abi)] from<T: IValue>  : IValue { pub start: T; }
+    [Lang(Cfg.Lang.until_t), Layout(c_abi)] until<T: IValue> : IValue { pub end: T; }
+    [Lang(Cfg.Lang.full_t),  Layout(c_abi)] full             : IValue {}
 
-// -------------------------------------------------------------------------
-// 5. PURE PILOT CONTROL-FLOW MACROS (`while`, `with`, & `IEnumerable` `for`)
-// -------------------------------------------------------------------------
-pub syntax {
-    while(cond, body) => quote {
-        loop {
-            if !($cond) { break; }
-            $body
-        }
-    };
+    // 5.9 Structural Heterogeneous Tuple (`tuple<T0, T1>`) & Tagged Union (`union<T1, T2>` / `T1 | T2`)
+    [Lang(Cfg.Lang.tuple_t), Layout(c_abi)]
+    tuple<T0: IAnyValue, T1: IAnyValue> : IValue {
+        pub item0: T0;
+        pub item1: T1;
+    }
 
-    with(res_binding, body) => quote {
-        {
-            var __res = $res_binding;
-            defer ~__res;
-            $body
-        }
-    };
+    [Lang(Cfg.Lang.union_t), Layout(c_abi)]
+    union<T1: IAnyValue, T2: IAnyValue> : IValue {
+        pub tag: u8;
+        pub v1:  T1;
+        pub v2:  T2;
+    }
 }

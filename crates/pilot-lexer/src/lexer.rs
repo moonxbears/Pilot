@@ -100,6 +100,20 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
+            // 4b. Backtick Raw Identifiers: `type`, `fn`, `struct`
+            if b == b'`' && start + 1 < self.bytes.len() && self.bytes[start + 1] != b'`' {
+                let mut end = start + 1;
+                while end < self.bytes.len() && self.bytes[end] != b'`' && self.bytes[end] != b'\n' && self.bytes[end] != b'\r' {
+                    end += 1;
+                }
+                if end < self.bytes.len() && self.bytes[end] == b'`' && end > start + 1 {
+                    let span = ByteSpan::new(start as u32, (end + 1) as u32);
+                    self.cursor = end + 1;
+                    self.push_token(TokenKind::Ident, TokenFlags::NONE, span);
+                    continue;
+                }
+            }
+
             // 5. Triple Strings (""" or ''')
             if (b == b'"' || b == b'\'') && start + 2 < self.bytes.len() && self.bytes[start + 1] == b && self.bytes[start + 2] == b {
                 let end = scan_triple_string_end(self.bytes, start + 3, b);
@@ -415,8 +429,27 @@ impl<'a> Lexer<'a> {
             }
         }
 
+        // 4-character operators
+        if start + 3 < self.bytes.len()
+            && b == b'>'
+            && b1 == b'.'
+            && b2 == b'.'
+            && self.bytes[start + 3] == b'<'
+        {
+            self.cursor = start + 4;
+            self.push_token(
+                TokenKind::GreaterDotDotLess,
+                TokenFlags::NONE,
+                ByteSpan::new(start as u32, (start + 4) as u32),
+            );
+            return;
+        }
+
         // 3-character operators
         let (kind, len) = match (b, b1, b2) {
+            (b'<', b'=', b'>') => (TokenKind::Spaceship, 3),
+            (b':', b'=', b':') => (TokenKind::SwapEqual, 3),
+            (b'>', b'.', b'.') => (TokenKind::GreaterDotDot, 3),
             (b'-', b'>', b'>') => (TokenKind::JsonGetText, 3),
             (b'?', b'.', b'.') => (TokenKind::SafeCascade, 3),
             (b'?', b'?', b'=') => (TokenKind::CoalesceEqual, 3),
@@ -465,6 +498,17 @@ impl<'a> Lexer<'a> {
             (b'*', b'=') => (TokenKind::StarEqual, 2),
             (b'/', b'=') => (TokenKind::SlashEqual, 2),
             (b'%', b'=') => (TokenKind::PercentEqual, 2),
+            (b'+', b'|') => (TokenKind::PlusPipe, 2),
+            (b'-', b'|') => (TokenKind::MinusPipe, 2),
+            (b'*', b'|') => (TokenKind::StarPipe, 2),
+            (b'+', b'%') => (TokenKind::PlusPercent, 2),
+            (b'-', b'%') => (TokenKind::MinusPercent, 2),
+            (b'*', b'%') => (TokenKind::StarPercent, 2),
+            (b'+', b'?') => (TokenKind::PlusQuestion, 2),
+            (b'-', b'?') => (TokenKind::MinusQuestion, 2),
+            (b'*', b'?') => (TokenKind::StarQuestion, 2),
+            (b'%', b'%') => (TokenKind::DoublePercent, 2),
+            (b'~', b'>') => (TokenKind::TildeGreater, 2),
             (b'&', b'=') => (TokenKind::AmperEqual, 2),
             (b'|', b'=') => (TokenKind::VbarEqual, 2),
             (b'^', b'=') => (TokenKind::CaretEqual, 2),

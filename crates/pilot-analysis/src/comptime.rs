@@ -191,6 +191,14 @@ pub enum LangItem {
     Frame,
     Type,
     Ast,
+    Simd,
+    Grid,
+    Ring,
+    Pin,
+    Open,
+    After,
+    Order,
+    Signal,
 }
 
 impl LangItem {
@@ -244,6 +252,14 @@ impl LangItem {
             "frame" => Some(Self::Frame),
             "type" => Some(Self::Type),
             "ast" => Some(Self::Ast),
+            "simd" => Some(Self::Simd),
+            "grid" => Some(Self::Grid),
+            "ring" => Some(Self::Ring),
+            "pin" => Some(Self::Pin),
+            "open" => Some(Self::Open),
+            "after" => Some(Self::After),
+            "order" => Some(Self::Order),
+            "signal" => Some(Self::Signal),
             _ => None,
         }
     }
@@ -269,6 +285,7 @@ impl RegisterClass {
             "gpr_unsigned" => Some(Self::GprUnsigned),
             "gpr_signed" => Some(Self::GprSigned),
             "simd_float" => Some(Self::SimdFloat),
+            "simd_vector" => Some(Self::SimdVector { lanes: 4 }),
             "raw_ptr" => Some(Self::RawPtr),
             "composite" => Some(Self::Composite),
             _ => None,
@@ -1023,6 +1040,14 @@ impl ComptimeEngine {
             .get(&ty_node.0)
             .map(|&s| arena.interner.resolve(s).to_string());
         match n.node_kind() {
+            NodeKind::IntLit => {
+                arena
+                    .i64_pool
+                    .get(n.lhs as usize)
+                    .copied()
+                    .unwrap_or(0)
+                    .to_string()
+            }
             NodeKind::IdentExpr | NodeKind::TypeNamed => {
                 arena.interner.resolve(SymbolId(n.lhs)).to_string()
             }
@@ -1046,6 +1071,25 @@ impl ComptimeEngine {
                 }
             }
             NodeKind::TypeSlice => {
+                if n.flags == 9 {
+                    let children = arena.children_slice(n.lhs, n.rhs);
+                    let elem = children
+                        .first()
+                        .map(|&c| self.format_type_node(arena, NodeId(c)))
+                        .unwrap_or_default();
+                    let n_str = children
+                        .get(1)
+                        .map(|&c| self.format_type_node(arena, NodeId(c)))
+                        .unwrap_or_else(|| "1".to_string());
+                    let m_str = children
+                        .get(2)
+                        .map(|&c| self.format_type_node(arena, NodeId(c)))
+                        .unwrap_or_else(|| "1".to_string());
+                    let base = override_base
+                        .or_else(|| self.type_construct_targets.get("[N,M]").cloned())
+                        .unwrap_or_else(|| "grid".to_string());
+                    return format!("{}<{}, {}, {}>", base, elem, n_str, m_str);
+                }
                 let elem = self.format_type_node(arena, NodeId(n.lhs));
                 let base = override_base.unwrap_or_else(|| match n.flags {
                     0 => self
@@ -1070,8 +1114,29 @@ impl ComptimeEngine {
                         .get("@")
                         .cloned()
                         .unwrap_or_else(|| "simd".to_string()),
+                    6 => self
+                        .type_construct_targets
+                        .get("[:]")
+                        .cloned()
+                        .unwrap_or_else(|| "ring".to_string()),
+                    7 => self
+                        .type_construct_targets
+                        .get("^")
+                        .cloned()
+                        .unwrap_or_else(|| "signal".to_string()),
+                    8 => self
+                        .type_construct_targets
+                        .get("@prefix")
+                        .cloned()
+                        .unwrap_or_else(|| "pin".to_string()),
                     _ => "slice".to_string(),
                 });
+                if (n.flags == 1 || n.flags == 5) && n.rhs != 0 {
+                    let count_str = self.format_type_node(arena, NodeId(n.rhs));
+                    if !count_str.is_empty() {
+                        return format!("{}<{}, {}>", base, elem, count_str);
+                    }
+                }
                 format!("{}<{}>", base, elem)
             }
             NodeKind::TypeList => {
@@ -1138,6 +1203,21 @@ impl ComptimeEngine {
             let args_part = trimmed[lt_idx + 1..trimmed.len().saturating_sub(1)].trim();
             let args: Vec<&str> = args_part.split(',').map(|s| s.trim()).collect();
             if let Some(spec) = self.type_layouts.get(base) {
+                if spec.memory_layout == Some(MemoryLayoutMode::InlineArray) && !args.is_empty() {
+                    let (elem_sz, elem_align, elem_lat) = self.query_type_size_align_lattice(args[0]);
+                    let count: usize = args[1..]
+                        .iter()
+                        .filter_map(|s| s.parse::<usize>().ok())
+                        .product::<usize>()
+                        .max(1);
+                    let total_sz = elem_sz * count;
+                    let align = if matches!(spec.reg_class, RegisterClass::SimdVector { .. }) {
+                        total_sz.next_power_of_two().min(64).max(elem_align)
+                    } else {
+                        elem_align.max(1)
+                    };
+                    return (total_sz, align, spec.lattice_bits | elem_lat);
+                }
                 if spec.has_explicit_register_layout {
                     return (spec.byte_size(), spec.byte_align(), spec.lattice_bits);
                 }

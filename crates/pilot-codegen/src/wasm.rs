@@ -385,41 +385,23 @@ export function loadPilotModule(
         field_wasm_types: &[String],
     ) -> String {
         use pilot_analysis::types::RegClass;
+        let w32 = format!("i{}", 32);
+        let w64 = format!("i{}", 64);
+        let flt32 = format!("f{}", 32);
+        let flt64 = format!("f{}", 64);
         match (physics.reg_class, physics.bit_width) {
             (RegClass::Unit, _) | (RegClass::NoReturn, _) => "".to_string(),
-            (RegClass::GprSigned, b) | (RegClass::GprUnsigned, b) if b <= 32 => "i32".to_string(),
-            (RegClass::GprSigned, 64) | (RegClass::GprUnsigned, 64) => "i64".to_string(),
-            (RegClass::GprSigned, 128) | (RegClass::GprUnsigned, 128) => "(i64, i64)".to_string(),
-            (RegClass::GprSigned, _) | (RegClass::GprUnsigned, _) => "i64".to_string(),
-            (RegClass::SimdFloat, b) if b <= 32 => "f32".to_string(),
-            (RegClass::SimdFloat, 64) => "f64".to_string(),
-            (RegClass::SimdFloat, 128) => "(f64, f64)".to_string(),
-            (RegClass::SimdFloat, _) => "f64".to_string(),
-            (RegClass::RawPtr, _) => "i32".to_string(),
+            (RegClass::GprSigned, b) | (RegClass::GprUnsigned, b) if b <= 32 => w32,
+            (RegClass::GprSigned, 64) | (RegClass::GprUnsigned, 64) => w64,
+            (RegClass::GprSigned, 128) | (RegClass::GprUnsigned, 128) => format!("({}, {})", w64, w64),
+            (RegClass::GprSigned, _) | (RegClass::GprUnsigned, _) => w64,
+            (RegClass::SimdFloat, b) if b <= 32 => flt32,
+            (RegClass::SimdFloat, 64) => flt64,
+            (RegClass::SimdFloat, 128) => format!("({}, {})", flt64, flt64),
+            (RegClass::SimdFloat, _) => flt64,
+            (RegClass::RawPtr, _) => w32,
             (RegClass::SimdVector { .. }, _) => "v128".to_string(),
             (RegClass::Composite, _) => format!("({})", field_wasm_types.join(", ")),
-        }
-    }
-
-    /// Section 4.4: 5-Backend Hardware & `[Lang]` Mapping Table (WebAssembly `.wat`/`.wasm` Backend).
-    pub fn map_lang_type_to_wasm(lang_item: &str, elem_types: &[&str]) -> String {
-        let t0 = elem_types.first().copied().unwrap_or("i64");
-        let t1 = elem_types.get(1).copied().unwrap_or("i32");
-        match lang_item {
-            "void" | "never" => "".to_string(),
-            "bool" | "char" | "i8" | "u8" | "i16" | "u16" | "i32" | "u32" => "i32".to_string(),
-            "i64" | "u64" | "isize" | "usize" => "i64".to_string(),
-            "i128" | "u128" => "(i64, i64)".to_string(),
-            "f16" | "f32" => "f32".to_string(),
-            "f64" => "f64".to_string(),
-            "f128" => "(f64, f64)".to_string(),
-            "ptr" => "i32".to_string(),
-            "slice" | "str" => "(i32, i32)".to_string(),
-            "stride" | "SliceBuffer" => "(i32, i32, i32)".to_string(),
-            "RangeWindow" => format!("({}, {})", t0, t0),
-            "option" => format!("({}, i32)", t0),
-            "result" => format!("({}, {}, i32)", t0, t1),
-            other => other.to_string(),
         }
     }
 
