@@ -9,6 +9,8 @@ use crate::types::{TypeArena, TypeId, TypeKind};
 pub struct Scope {
     pub bindings: HashMap<String, TypeId>,
     pub narrowed_types: HashMap<String, TypeId>,
+    pub fn_owner: NodeId,
+    pub is_var: HashMap<String, bool>,
 }
 
 impl Scope {
@@ -16,6 +18,8 @@ impl Scope {
         Self {
             bindings: HashMap::new(),
             narrowed_types: HashMap::new(),
+            fn_owner: NodeId::NONE,
+            is_var: HashMap::new(),
         }
     }
 }
@@ -23,6 +27,9 @@ impl Scope {
 pub struct TypeInferenceEngine {
     pub types: TypeArena,
     scopes: Vec<Scope>,
+    pub fn_stack: Vec<NodeId>,
+    pub local_fn_captures: HashMap<u32, pilot_ast::LocalFnCaptureSpec>,
+    pub patch_handles: HashMap<SymbolId, (bool, u32, u32)>,
     pub diagnostics: Vec<AnalysisDiagnostic>,
     pub inferred_node_types: HashMap<u32, TypeId>,
     pub type_defs: HashMap<String, TypeId>,
@@ -51,6 +58,9 @@ impl TypeInferenceEngine {
         let mut engine = Self {
             types: TypeArena::new(),
             scopes: vec![Scope::new()],
+            fn_stack: Vec::new(),
+            local_fn_captures: HashMap::new(),
+            patch_handles: HashMap::new(),
             diagnostics: Vec::new(),
             inferred_node_types: HashMap::new(),
             type_defs: HashMap::new(),
@@ -587,7 +597,10 @@ impl TypeInferenceEngine {
     }
 
     pub fn enter_scope(&mut self) {
-        self.scopes.push(Scope::new());
+        let cur_fn = self.fn_stack.last().copied().unwrap_or(NodeId::NONE);
+        let mut sc = Scope::new();
+        sc.fn_owner = cur_fn;
+        self.scopes.push(sc);
     }
 
     pub fn exit_scope(&mut self) {
@@ -599,6 +612,63 @@ impl TypeInferenceEngine {
     pub fn define_var(&mut self, name: &str, ty: TypeId) {
         if let Some(scope) = self.scopes.last_mut() {
             scope.bindings.insert(name.to_string(), ty);
+        }
+    }
+
+    pub fn define_var_mut(&mut self, name: &str, ty: TypeId, is_var: bool) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.bindings.insert(name.to_string(), ty);
+            scope.is_var.insert(name.to_string(), is_var);
+        }
+    }
+
+    pub fn lookup_var_owner(&self, name: &str) -> Option<(NodeId, bool)> {
+        for scope in self.scopes.iter().rev() {
+            if scope.bindings.contains_key(name) {
+                let is_v = scope.is_var.get(name).copied().unwrap_or(false);
+                return Some((scope.fn_owner, is_v));
+            }
+        }
+        None
+    }
+
+    pub fn record_capture(
+        &mut self,
+        _arena: &AstArena,
+        local_fn: NodeId,
+        _owner_fn: NodeId,
+        sym: SymbolId,
+        ty: TypeId,
+        is_var: bool,
+        span: pilot_span::ByteSpan,
+    ) {
+        if let Some(spec) = self.local_fn_captures.get_mut(&local_fn.0) {
+            if !spec.captures.iter().any(|c| c.sym == sym) {
+                let mode = if is_var {
+                    pilot_ast::CaptureMode::ByVarRef
+                } else {
+                    pilot_ast::CaptureMode::ByImmRef
+                };
+                spec.captures.push(pilot_ast::CapturedVar {
+                    sym,
+                    ty: ty.0,
+                    mode,
+                    outer_slot_coord: (0, 0),
+                    span,
+                });
+                spec.lattice_bits = 0b01; // IReference
+            }
+        }
+    }
+
+    pub fn mark_capture_mutating(&mut self, local_fn: NodeId, sym: SymbolId) {
+        if let Some(spec) = self.local_fn_captures.get_mut(&local_fn.0) {
+            for cap in &mut spec.captures {
+                if cap.sym == sym {
+                    cap.mode = pilot_ast::CaptureMode::ByVarRef;
+                }
+            }
+            spec.lattice_bits = 0b01;
         }
     }
 
@@ -1582,6 +1652,47 @@ impl TypeInferenceEngine {
             return TypeId::VOID;
         }
 
+        if self.patch_handles.is_empty() && !arena.node_attributes.is_empty() {
+            for (&_nid, attrs) in &arena.node_attributes {
+                for attr in attrs {
+                    if let Some(sym) = attr.binding_sym {
+                        let mut lo = 0u32;
+                        let mut hi = 1000u32;
+                        if !attr.args.is_empty() {
+                            let arg0 = *arena.node(attr.args[0]);
+                            if arg0.node_kind() == NodeKind::BinaryExpr || arg0.node_kind() == NodeKind::RangeExpr {
+                                if arg0.lhs != 0 {
+                                    let l_node = *arena.node(NodeId(arg0.lhs));
+                                    if l_node.node_kind() == NodeKind::IntLit {
+                                        lo = arena.i64_pool.get(l_node.lhs as usize).copied().unwrap_or(0) as u32;
+                                    }
+                                }
+                                if arg0.rhs != 0 {
+                                    let r_node = *arena.node(NodeId(arg0.rhs));
+                                    if r_node.node_kind() == NodeKind::IntLit {
+                                        hi = arena.i64_pool.get(r_node.lhs as usize).copied().unwrap_or(1000) as u32;
+                                    }
+                                }
+                            } else if arg0.node_kind() == NodeKind::IntLit {
+                                if attr.args.len() >= 2 {
+                                    lo = arena.i64_pool.get(arg0.lhs as usize).copied().unwrap_or(0) as u32;
+                                    let arg1 = *arena.node(attr.args[1]);
+                                    if arg1.node_kind() == NodeKind::IntLit {
+                                        hi = arena.i64_pool.get(arg1.lhs as usize).copied().unwrap_or(1000) as u32;
+                                    }
+                                } else {
+                                    hi = arena.i64_pool.get(arg0.lhs as usize).copied().unwrap_or(1000) as u32;
+                                }
+                            }
+                        }
+                        self.patch_handles.insert(sym, (attr.is_mutable_binding, lo, hi));
+                        let name = arena.interner.resolve(sym);
+                        self.define_var(name, TypeId::ANY);
+                    }
+                }
+            }
+        }
+
         let node = *arena.node(node_id);
         let ty = match node.node_kind() {
             // --- Literals ---
@@ -1638,6 +1749,22 @@ impl TypeInferenceEngine {
                 if name == "_" {
                     TypeId::ANY
                 } else if let Some(t) = self.lookup_var(name) {
+                    if self.fn_stack.len() > 1 {
+                        let cur_fn = *self.fn_stack.last().unwrap();
+                        if let Some((owner_fn, is_var)) = self.lookup_var_owner(name) {
+                            if owner_fn.is_some() && owner_fn != cur_fn {
+                                if arena.static_methods.contains(&cur_fn.0) {
+                                    self.diagnostics.push(AnalysisDiagnostic::error(
+                                        "STATIC002",
+                                        format!("Static local function cannot capture enclosing state '{}'", name),
+                                        arena.span(node_id),
+                                    ));
+                                } else {
+                                    self.record_capture(arena, cur_fn, owner_fn, sym, t, is_var, arena.span(node_id));
+                                }
+                            }
+                        }
+                    }
                     t
                 } else if !self.current_fn_is_static && self.lookup_var("self").is_some() {
                     let self_ty = self.lookup_var("self").unwrap();
@@ -2344,6 +2471,43 @@ impl TypeInferenceEngine {
             NodeKind::BlockExpr => {
                 self.enter_scope();
                 let children = arena.children_slice(node.lhs, node.rhs);
+
+                // Pass 1: Pre-register sibling local function headers in lexical scope
+                // This enables forward references, mutual recursion, and self-recursion!
+                for &c in children {
+                    let child_node = *arena.node(NodeId(c));
+                    if child_node.node_kind() == NodeKind::FnDecl {
+                        let sym = SymbolId(child_node.lhs);
+                        if sym.0 != 0 {
+                            let fn_name = arena.interner.resolve(sym).to_string();
+                            self.fn_decls.insert(fn_name.clone(), NodeId(c));
+                            let explicit_ret = arena
+                                .type_annotations
+                                .get(&c)
+                                .map(|&ann| self.resolve_type_spec(arena, ann));
+                            let fn_start = child_node.rhs;
+                            let fn_len = child_node.flags as usize;
+                            let mut param_tys = Vec::new();
+                            if fn_len > 1 {
+                                let fn_children = arena.children_slice(fn_start, fn_len as u32);
+                                for &p_id in &fn_children[1..] {
+                                    let p_ty = if let Some(&ann) = arena.type_annotations.get(&p_id) {
+                                        self.resolve_type_spec(arena, ann)
+                                    } else {
+                                        TypeId::ANY
+                                    };
+                                    param_tys.push(p_ty);
+                                }
+                            }
+                            let placeholder = self
+                                .types
+                                .function_of(param_tys, explicit_ret.unwrap_or(TypeId::ANY));
+                            self.define_var(&fn_name, placeholder);
+                        }
+                    }
+                }
+
+                // Pass 2: Typecheck statements & local function bodies
                 let mut last_ty = TypeId::VOID;
                 for &c in children {
                     let child_node = *arena.node(NodeId(c));
@@ -2430,12 +2594,13 @@ impl TypeInferenceEngine {
                 } else {
                     init_ty
                 };
+                let is_var = node.node_kind() == NodeKind::VarStmt;
                 if node.flags == 1 {
                     self.bind_pattern_vars_typed(arena, NodeId(node.lhs), val_ty);
                 } else {
                     let sym = SymbolId(node.lhs);
                     let name = arena.interner.resolve(sym).to_string();
-                    self.define_var(&name, val_ty);
+                    self.define_var_mut(&name, val_ty, is_var);
                 }
                 val_ty
             }
@@ -2445,6 +2610,27 @@ impl TypeInferenceEngine {
                 let val = NodeId(node.rhs);
                 let val_ty = self.synth(arena, val);
                 if target.is_some() {
+                    let target_node = *arena.node(target);
+                    if target_node.node_kind() == NodeKind::IdentExpr {
+                        let sym = SymbolId(target_node.lhs);
+                        let name = arena.interner.resolve(sym);
+                        if self.fn_stack.len() > 1 {
+                            let cur_fn = *self.fn_stack.last().unwrap();
+                            if let Some((owner_fn, _is_var)) = self.lookup_var_owner(name) {
+                                if owner_fn.is_some() && owner_fn != cur_fn {
+                                    if arena.pure_methods.contains(&cur_fn.0) {
+                                        self.diagnostics.push(AnalysisDiagnostic::error(
+                                            "PURITY001",
+                                            format!("Pure local function cannot mutate captured outer variable '{}'", name),
+                                            arena.span(target),
+                                        ));
+                                    } else {
+                                        self.mark_capture_mutating(cur_fn, sym);
+                                    }
+                                }
+                            }
+                        }
+                    }
                     let t_kind = arena.node(target).node_kind();
                     if matches!(t_kind, NodeKind::MapExpr | NodeKind::ListExpr | NodeKind::TupleExpr) {
                         self.bind_destructuring_expr(arena, target, val_ty);
@@ -2459,7 +2645,25 @@ impl TypeInferenceEngine {
             NodeKind::ReturnStmt => {
                 let expr_node = NodeId(node.lhs);
                 if expr_node.is_some() {
-                    self.synth(arena, expr_node)
+                    let ret_ty = self.synth(arena, expr_node);
+                    let ret_n = *arena.node(expr_node);
+                    if ret_n.node_kind() == NodeKind::IdentExpr {
+                        let sym = SymbolId(ret_n.lhs);
+                        let name = arena.interner.resolve(sym);
+                        if let Some(&fn_id) = self.fn_decls.get(name) {
+                            if let Some(spec) = self.local_fn_captures.get_mut(&fn_id.0) {
+                                if spec.lattice_bits == 0b01 {
+                                    spec.escapes_as_first_class_value = true;
+                                    self.diagnostics.push(AnalysisDiagnostic::error(
+                                        "PERCEUS001",
+                                        format!("Local function '{}' capturing enclosing scope has lattice 0b01 (IReference) and cannot escape enclosing stack frame", name),
+                                        arena.span(expr_node),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    ret_ty
                 } else {
                     TypeId::VOID
                 }
@@ -2487,6 +2691,21 @@ impl TypeInferenceEngine {
                 let old_clearance = self.current_scope_clearance;
                 if let Some(clr) = arena.node_clearance.get(&node_id.0) {
                     self.current_scope_clearance = clr.level;
+                }
+
+                let is_embedded = !self.fn_stack.is_empty();
+                let enclosing_fn = self.fn_stack.last().copied().unwrap_or(NodeId::NONE);
+                self.fn_stack.push(node_id);
+
+                if is_embedded {
+                    self.local_fn_captures.insert(node_id.0, pilot_ast::LocalFnCaptureSpec {
+                        fn_node: node_id,
+                        enclosing_fn_node: enclosing_fn,
+                        lifted_symbol: sym,
+                        captures: Vec::new(),
+                        lattice_bits: 0b00,
+                        escapes_as_first_class_value: false,
+                    });
                 }
 
                 let explicit_ret_ty = arena
@@ -2526,6 +2745,7 @@ impl TypeInferenceEngine {
                     self.synth(arena, body_node)
                 };
                 self.exit_scope();
+                self.fn_stack.pop();
                 self.current_fn_is_static = old_is_static;
                 self.current_scope_clearance = old_clearance;
 
@@ -2938,6 +3158,53 @@ impl TypeInferenceEngine {
                 }
                 let callee_node = NodeId(children[0]);
                 let callee_ty = self.synth(arena, callee_node);
+
+                if arena.node(callee_node).node_kind() == NodeKind::MemberExpr {
+                    let member_n = *arena.node(callee_node);
+                    let target_n = *arena.node(NodeId(member_n.lhs));
+                    if target_n.node_kind() == NodeKind::IdentExpr {
+                        let patch_sym = SymbolId(target_n.lhs);
+                        if let Some(&(is_mut, lo, hi)) = self.patch_handles.get(&patch_sym) {
+                            let method = arena.interner.resolve(SymbolId(member_n.rhs));
+                            if method == "set_line" {
+                                if !is_mut {
+                                    self.diagnostics.push(AnalysisDiagnostic::error(
+                                        "PATCH002",
+                                        "Cannot mutate line through immutable patch binding; declare with 'var'".to_string(),
+                                        arena.span(callee_node),
+                                    ));
+                                }
+                                if children.len() > 1 {
+                                    let arg0 = *arena.node(NodeId(children[1]));
+                                    if arg0.node_kind() == NodeKind::IntLit {
+                                        let line_val = arena.i64_pool.get(arg0.lhs as usize).copied().unwrap_or(0);
+                                        if line_val < lo as i64 || line_val > hi as i64 {
+                                            self.diagnostics.push(AnalysisDiagnostic::error(
+                                                "PATCH001",
+                                                format!("Line {} is outside permitted patch window {}..{}", line_val, lo, hi),
+                                                arena.span(callee_node),
+                                            ));
+                                        }
+                                    }
+                                }
+                            } else if method == "get_line" {
+                                if children.len() > 1 {
+                                    let arg0 = *arena.node(NodeId(children[1]));
+                                    if arg0.node_kind() == NodeKind::IntLit {
+                                        let line_val = arena.i64_pool.get(arg0.lhs as usize).copied().unwrap_or(0);
+                                        if line_val < lo as i64 || line_val > hi as i64 {
+                                            self.diagnostics.push(AnalysisDiagnostic::error(
+                                                "PATCH001",
+                                                format!("Line {} is outside permitted patch window {}..{}", line_val, lo, hi),
+                                                arena.span(callee_node),
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // If this is a homoiconic call-quote (`fn!(...)`, `fn!!(...)`, `fn!&(...)`),
                 // symbolic arguments inside `children[1..]` may be unbound quoted AST symbols.
@@ -4468,9 +4735,22 @@ pub fn clone_and_rewrite_self_field_accesses(
     cloned
 }
 
-fn clone_ast_subtree(arena: &mut AstArena, node_id: NodeId) -> NodeId {
+pub fn clone_ast_subtree(arena: &mut AstArena, node_id: NodeId) -> NodeId {
+    clone_ast_subtree_with_replacements(arena, node_id, &[])
+}
+
+pub fn clone_ast_subtree_with_replacements(
+    arena: &mut AstArena,
+    node_id: NodeId,
+    replacements: &[(NodeId, NodeId)],
+) -> NodeId {
     if node_id.is_none() || (node_id.0 as usize) >= arena.nodes.len() {
         return node_id;
+    }
+    for &(target, replacement) in replacements {
+        if node_id == target {
+            return clone_ast_subtree(arena, replacement);
+        }
     }
     let node = arena.nodes[node_id.0 as usize];
     let span = arena.span(node_id);
@@ -4485,7 +4765,7 @@ fn clone_ast_subtree(arena: &mut AstArena, node_id: NodeId) -> NodeId {
             let children: Vec<u32> = arena.children_slice(node.lhs, node.rhs).to_vec();
             let mut cloned_children = Vec::with_capacity(children.len());
             for c in children {
-                cloned_children.push(clone_ast_subtree(arena, NodeId(c)));
+                cloned_children.push(clone_ast_subtree_with_replacements(arena, NodeId(c), replacements));
             }
             arena.alloc_list_node(kind, node.flags, span, &cloned_children)
         }
@@ -4496,43 +4776,43 @@ fn clone_ast_subtree(arena: &mut AstArena, node_id: NodeId) -> NodeId {
                 let children: Vec<u32> = arena.children_slice(fn_start, fn_len as u32).to_vec();
                 let mut cloned_children = Vec::with_capacity(children.len());
                 for c in children {
-                    cloned_children.push(clone_ast_subtree(arena, NodeId(c)));
+                    cloned_children.push(clone_ast_subtree_with_replacements(arena, NodeId(c), replacements));
                 }
                 let (start, len) = arena.alloc_child_slice(&cloned_children);
                 arena.alloc_node(kind, len as u16, span, node.lhs, start)
             } else {
-                let rhs_cloned = clone_ast_subtree(arena, NodeId(node.rhs));
+                let rhs_cloned = clone_ast_subtree_with_replacements(arena, NodeId(node.rhs), replacements);
                 arena.alloc_node(kind, node.flags, span, node.lhs, rhs_cloned.0)
             }
         }
         NodeKind::IfExpr => {
-            let cond_cloned = clone_ast_subtree(arena, NodeId(node.lhs));
+            let cond_cloned = clone_ast_subtree_with_replacements(arena, NodeId(node.lhs), replacements);
             if node.flags == 0 {
-                let then_cloned = clone_ast_subtree(arena, NodeId(node.rhs));
+                let then_cloned = clone_ast_subtree_with_replacements(arena, NodeId(node.rhs), replacements);
                 arena.alloc_node(kind, 0, span, cond_cloned.0, then_cloned.0)
             } else {
                 let extra: Vec<u32> = arena.children_slice(node.rhs, 2).to_vec();
                 let mut cloned_extra = Vec::with_capacity(extra.len());
                 for c in extra {
-                    cloned_extra.push(clone_ast_subtree(arena, NodeId(c)));
+                    cloned_extra.push(clone_ast_subtree_with_replacements(arena, NodeId(c), replacements));
                 }
                 let (start, _) = arena.alloc_child_slice(&cloned_extra);
                 arena.alloc_node(kind, node.flags, span, cond_cloned.0, start)
             }
         }
         NodeKind::CallExpr => {
-            let callee_cloned = clone_ast_subtree(arena, NodeId(node.lhs));
+            let callee_cloned = clone_ast_subtree_with_replacements(arena, NodeId(node.lhs), replacements);
             let arg_count = (node.flags & 0x0FFF) as u32;
             let args: Vec<u32> = arena.children_slice(node.rhs, arg_count).to_vec();
             let mut cloned_args = Vec::with_capacity(args.len());
             for a in args {
-                cloned_args.push(clone_ast_subtree(arena, NodeId(a)));
+                cloned_args.push(clone_ast_subtree_with_replacements(arena, NodeId(a), replacements));
             }
             let (start, _) = arena.alloc_child_slice(&cloned_args);
             arena.alloc_node(kind, node.flags, span, callee_cloned.0, start)
         }
         NodeKind::MemberExpr => {
-            let lhs_cloned = clone_ast_subtree(arena, NodeId(node.lhs));
+            let lhs_cloned = clone_ast_subtree_with_replacements(arena, NodeId(node.lhs), replacements);
             arena.alloc_node(kind, node.flags, span, lhs_cloned.0, node.rhs)
         }
         NodeKind::CallArg
@@ -4541,11 +4821,11 @@ fn clone_ast_subtree(arena: &mut AstArena, node_id: NodeId) -> NodeId {
         | NodeKind::YieldStmt
         | NodeKind::ExprStmt
         | NodeKind::DeferStmt => {
-            let lhs_cloned = clone_ast_subtree(arena, NodeId(node.lhs));
+            let lhs_cloned = clone_ast_subtree_with_replacements(arena, NodeId(node.lhs), replacements);
             arena.alloc_node(kind, node.flags, span, lhs_cloned.0, node.rhs)
         }
         NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
-            let rhs_cloned = clone_ast_subtree(arena, NodeId(node.rhs));
+            let rhs_cloned = clone_ast_subtree_with_replacements(arena, NodeId(node.rhs), replacements);
             arena.alloc_node(kind, node.flags, span, node.lhs, rhs_cloned.0)
         }
         NodeKind::BinaryExpr
@@ -4555,8 +4835,8 @@ fn clone_ast_subtree(arena: &mut AstArena, node_id: NodeId) -> NodeId {
         | NodeKind::PipeExpr
         | NodeKind::CoalesceExpr
         | NodeKind::RangeExpr => {
-            let lhs_cloned = clone_ast_subtree(arena, NodeId(node.lhs));
-            let rhs_cloned = clone_ast_subtree(arena, NodeId(node.rhs));
+            let lhs_cloned = clone_ast_subtree_with_replacements(arena, NodeId(node.lhs), replacements);
+            let rhs_cloned = clone_ast_subtree_with_replacements(arena, NodeId(node.rhs), replacements);
             arena.alloc_node(kind, node.flags, span, lhs_cloned.0, rhs_cloned.0)
         }
         _ => arena.alloc_node(kind, node.flags, span, node.lhs, node.rhs),

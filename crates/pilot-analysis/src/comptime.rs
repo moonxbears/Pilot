@@ -125,6 +125,7 @@ pub enum ReceptorSlot {
     ReactiveSlot,          // Receptor for `IReactiveAttribute`
     InheritedSlot,         // Receptor for `IInheritedAttribute`
     EcsRuleSlot,           // Receptor for `IEcsRule`
+    PatchAttributeSlot,    // Receptor for `IPatchAttribute`
 }
 
 impl ReceptorSlot {
@@ -150,6 +151,7 @@ impl ReceptorSlot {
             "reactive" | "IReactiveAttribute" => Some(Self::ReactiveSlot),
             "inherited" | "IInheritedAttribute" => Some(Self::InheritedSlot),
             "ecs_rule" | "IEcsRule" => Some(Self::EcsRuleSlot),
+            "patch_attribute" | "IPatchAttribute" => Some(Self::PatchAttributeSlot),
             _ => None,
         }
     }
@@ -219,6 +221,7 @@ pub enum LangItem {
     IReactiveAttribute,
     IInheritedAttribute,
     IEcsRule,
+    IPatchAttribute,
 }
 
 impl LangItem {
@@ -235,6 +238,7 @@ impl LangItem {
             "IReactiveAttribute" => Some(Self::IReactiveAttribute),
             "IInheritedAttribute" => Some(Self::IInheritedAttribute),
             "IEcsRule" => Some(Self::IEcsRule),
+            "IPatchAttribute" => Some(Self::IPatchAttribute),
             "void" => Some(Self::Void),
             "never" => Some(Self::Never),
             "bool" => Some(Self::Bool),
@@ -503,6 +507,26 @@ pub enum BootstrapDiagnostic {
     },
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum PatchPartKind {
+    All = 0,
+    Signature = 1,
+    Params = 2,
+    Body = 3,
+}
+
+#[derive(Clone, Debug)]
+pub struct PatchHandleState {
+    pub target_fn_id: NodeId,
+    pub binding_sym: SymbolId,
+    pub is_mutable: bool,
+    pub window_lo: u32,
+    pub window_hi: u32,
+    pub line_overrides: FxHashMap<u32, String>,
+    pub ast_replacements: Vec<(NodeId, NodeId)>,
+    pub synthesized_clone_fn: Option<NodeId>,
+}
+
 #[derive(Clone, Debug)]
 pub struct ComptimeFnDef {
     pub id: FunctionId,
@@ -535,6 +559,8 @@ pub struct ComptimeEngine {
     pub active_pkg: Option<String>,
     pub active_clearance: u32,
     pub diagnostics: Vec<BootstrapDiagnostic>,
+    pub patch_handles: FxHashMap<SymbolId, PatchHandleState>,
+    pub patch_handles_by_name: FxHashMap<String, SymbolId>,
     in_genesis_wrapper_depth: u32,
 }
 
@@ -592,6 +618,117 @@ impl ComptimeEngine {
 
     pub fn receptor_type_name(&self, slot: ReceptorSlot) -> Option<&str> {
         self.receptor_type_names.get(&slot).map(|s| s.as_str())
+    }
+
+    pub fn create_patch_handle(
+        &mut self,
+        target_fn_id: NodeId,
+        binding_sym: SymbolId,
+        binding_name: &str,
+        is_mutable: bool,
+        window_lo: u32,
+        window_hi: u32,
+    ) {
+        let handle = PatchHandleState {
+            target_fn_id,
+            binding_sym,
+            is_mutable,
+            window_lo,
+            window_hi,
+            line_overrides: FxHashMap::default(),
+            ast_replacements: Vec::new(),
+            synthesized_clone_fn: None,
+        };
+        self.patch_handles.insert(binding_sym, handle);
+        self.patch_handles_by_name.insert(binding_name.to_string(), binding_sym);
+    }
+
+    pub fn get_patch_line(&self, handle_sym: SymbolId, line_idx: u32, arena: &AstArena) -> Result<String, AnalysisDiagnostic> {
+        let handle = match self.patch_handles.get(&handle_sym) {
+            Some(h) => h,
+            None => return Ok(String::new()),
+        };
+        if line_idx < handle.window_lo || line_idx > handle.window_hi {
+            return Err(AnalysisDiagnostic::error(
+                "PATCH001",
+                format!("Line {} is outside permitted patch window {}..{}", line_idx, handle.window_lo, handle.window_hi),
+                arena.span(handle.target_fn_id),
+            ));
+        }
+        if let Some(text) = handle.line_overrides.get(&line_idx) {
+            return Ok(text.clone());
+        }
+        Ok(String::new())
+    }
+
+    pub fn set_patch_line(&mut self, handle_sym: SymbolId, line_idx: u32, new_text: String, span: ByteSpan) -> Result<(), AnalysisDiagnostic> {
+        let handle = match self.patch_handles.get_mut(&handle_sym) {
+            Some(h) => h,
+            None => return Ok(()),
+        };
+        if !handle.is_mutable {
+            return Err(AnalysisDiagnostic::error(
+                "PATCH002",
+                "Cannot mutate line through immutable patch binding; declare with 'var'".to_string(),
+                span,
+            ));
+        }
+        if line_idx < handle.window_lo || line_idx > handle.window_hi {
+            return Err(AnalysisDiagnostic::error(
+                "PATCH001",
+                format!("Line {} is outside permitted patch window {}..{}", line_idx, handle.window_lo, handle.window_hi),
+                span,
+            ));
+        }
+        handle.line_overrides.insert(line_idx, new_text);
+        Ok(())
+    }
+
+    pub fn replace_ast_pattern(&mut self, handle_sym: SymbolId, target: NodeId, replacement: NodeId) {
+        if let Some(handle) = self.patch_handles.get_mut(&handle_sym) {
+            handle.ast_replacements.push((target, replacement));
+        }
+    }
+
+    pub fn synthesize_patched_fn(&mut self, handle_sym: SymbolId, arena: &mut AstArena) -> Option<NodeId> {
+        let handle = self.patch_handles.get_mut(&handle_sym)?;
+        if let Some(clone_id) = handle.synthesized_clone_fn {
+            return Some(clone_id);
+        }
+        let target_id = handle.target_fn_id;
+        let target_node = *arena.node(target_id);
+        if target_node.node_kind() != NodeKind::FnDecl {
+            return None;
+        }
+        let orig_name = arena.interner.resolve(SymbolId(target_node.lhs)).to_string();
+        let clone_name = format!("__patched_{}_{}", orig_name, arena.nodes.len());
+        let clone_sym = arena.interner.intern(&clone_name);
+        let span = arena.span(target_id);
+
+        let fn_start = target_node.rhs;
+        let fn_len = target_node.flags as usize;
+        let children: Vec<u32> = if fn_len > 0 {
+            arena.children_slice(fn_start, fn_len as u32).to_vec()
+        } else {
+            vec![target_node.rhs]
+        };
+
+        let replacements = handle.ast_replacements.clone();
+        let mut cloned_children = Vec::with_capacity(children.len());
+        for &cid in &children {
+            let cloned = crate::infer::clone_ast_subtree_with_replacements(arena, NodeId(cid), &replacements);
+            cloned_children.push(cloned);
+        }
+
+        let (new_start, _) = arena.alloc_child_slice(&cloned_children);
+        let clone_node_id = arena.alloc_node(NodeKind::FnDecl, fn_len as u16, span, clone_sym.0, new_start);
+
+        if let Some(&ann) = arena.type_annotations.get(&target_id.0) {
+            arena.type_annotations.insert(clone_node_id.0, ann);
+        }
+
+        handle.synthesized_clone_fn = Some(clone_node_id);
+        Some(clone_node_id)
     }
 
     pub fn register_comptime_fn(

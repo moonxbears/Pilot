@@ -119,6 +119,7 @@ impl InterfaceId {
     pub const IREACTIVE_ATTRIBUTE: Self = Self(8);
     pub const IINHERITED_ATTRIBUTE: Self = Self(9);
     pub const IECS_RULE: Self = Self(10);
+    pub const IPATCH_ATTRIBUTE: Self = Self(11);
 }
 
 #[repr(transparent)]
@@ -186,6 +187,7 @@ impl BitSet {
             LangItem::IReactiveAttribute => InterfaceId::IREACTIVE_ATTRIBUTE.0,
             LangItem::IInheritedAttribute => InterfaceId::IINHERITED_ATTRIBUTE.0,
             LangItem::IEcsRule => InterfaceId::IECS_RULE.0,
+            LangItem::IPatchAttribute => InterfaceId::IPATCH_ATTRIBUTE.0,
             other => 1000 + (other as u32),
         };
         self.insert(bit);
@@ -205,6 +207,7 @@ impl BitSet {
             LangItem::IReactiveAttribute => InterfaceId::IREACTIVE_ATTRIBUTE.0,
             LangItem::IInheritedAttribute => InterfaceId::IINHERITED_ATTRIBUTE.0,
             LangItem::IEcsRule => InterfaceId::IECS_RULE.0,
+            LangItem::IPatchAttribute => InterfaceId::IPATCH_ATTRIBUTE.0,
             other => 1000 + (other as u32),
         };
         self.contains(bit)
@@ -592,7 +595,7 @@ impl TypeArena {
             receptor_type_names: FxHashMap::new(),
             statement_bundles: StatementBundleTable::default(),
             extensions: ExtensionTable::default(),
-            next_interface_id: 11,
+            next_interface_id: 12,
             next_bundle_id: 1,
             next_fn_id: 1,
         };
@@ -633,6 +636,7 @@ impl TypeArena {
             (InterfaceId::IREACTIVE_ATTRIBUTE, "IReactiveAttribute", None, vec![InterfaceId::IATTRIBUTE]),
             (InterfaceId::IINHERITED_ATTRIBUTE, "IInheritedAttribute", None, vec![InterfaceId::IATTRIBUTE]),
             (InterfaceId::IECS_RULE, "IEcsRule", None, vec![InterfaceId::IATTRIBUTE]),
+            (InterfaceId::IPATCH_ATTRIBUTE, "IPatchAttribute", None, vec![InterfaceId::IATTRIBUTE]),
         ];
         for (id, name, explicit_lattice, super_interfaces) in origins {
             self.interfaces_by_name.insert(name.to_string(), id);
@@ -1271,7 +1275,7 @@ impl TypeArena {
         };
         // If this matches one of the canonical origin interfaces, reuse its canonical ID
         if let Some(&existing_id) = self.interfaces_by_name.get(&name_str) {
-            if existing_id.0 <= 10 {
+            if existing_id.0 <= 11 {
                 iface_def.id = existing_id;
             }
         }

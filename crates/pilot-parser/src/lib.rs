@@ -1253,6 +1253,20 @@ impl<'a> Parser<'a> {
             let mut last_was_comma = false;
             while !self.at_end() && !self.at(TokenKind::RBracket) {
                 let attr_span = self.span();
+                let mut binding_sym = None;
+                let mut is_mutable_binding = false;
+                if (self.at(TokenKind::KwVar) || self.at(TokenKind::KwLet) || (self.is_ident_like() && (self.text() == "var" || self.text() == "let")))
+                    && self.pos + 2 < self.tape.len()
+                    && self.is_ident_like_pos(self.pos + 1)
+                    && self.tape.kind(self.pos + 2) == TokenKind::Equal
+                {
+                    is_mutable_binding = self.at(TokenKind::KwVar) || (self.is_ident_like() && self.text() == "var");
+                    self.advance(); // consume 'var' or 'let'
+                    let b_name = self.text();
+                    binding_sym = Some(self.arena.interner.intern(b_name));
+                    self.advance(); // consume binding name
+                    self.advance(); // consume '='
+                }
                 if self.is_ident_like() || self.peek().is_keyword() {
                     let attr_name = self.arena.interner.intern(self.text());
                     self.advance();
@@ -1286,6 +1300,8 @@ impl<'a> Parser<'a> {
                     attrs.push(AstAttribute {
                         name: attr_name,
                         args,
+                        binding_sym,
+                        is_mutable_binding,
                         span: ByteSpan::new(attr_span.start, end_span.end),
                     });
                 } else {
@@ -1547,6 +1563,8 @@ impl<'a> Parser<'a> {
                     self.arena.node_attributes.entry(rule_fn.0).or_default().push(AstAttribute {
                         name: syn_macro_sym,
                         args: vec![kw_str_node],
+                        binding_sym: None,
+                        is_mutable_binding: false,
                         span: rule_span,
                     });
                     rules.push(rule_fn);
@@ -1751,6 +1769,12 @@ impl<'a> Parser<'a> {
             if is_pure {
                 self.arena.pure_methods.insert(fn_node.0);
             }
+            if is_mut {
+                self.arena.mut_methods.insert(fn_node.0);
+            }
+            if is_static {
+                self.arena.static_methods.insert(fn_node.0);
+            }
             return fn_node;
         }
 
@@ -1934,6 +1958,8 @@ impl<'a> Parser<'a> {
                 self.arena.node_visibility.insert(n.0, vis);
                 if let Some(c) = clr_opt { self.arena.node_clearance.insert(n.0, c); }
                 if is_pure { self.arena.pure_methods.insert(n.0); }
+                if is_mut { self.arena.mut_methods.insert(n.0); }
+                if is_static { self.arena.static_methods.insert(n.0); }
                 n
             }
             TokenKind::KwLoop => {
@@ -1942,7 +1968,7 @@ impl<'a> Parser<'a> {
                 let body = self.parse_block_expr();
                 self.arena.alloc_node(NodeKind::WhileStmt, 0, start_span, NodeId::NONE.0, body.0)
             }
-            TokenKind::KwClass | TokenKind::KwActor | TokenKind::KwState => {
+            TokenKind::KwClass | TokenKind::KwActor | TokenKind::KwState if k != TokenKind::KwState || self.is_ident_like_pos(self.pos + 1) => {
                 let n = self.parse_class_decl();
                 let vis = vis_opt.unwrap_or(VisibilityTier::Internal);
                 self.arena.node_visibility.insert(n.0, vis);
@@ -2100,7 +2126,7 @@ impl<'a> Parser<'a> {
                             if let Some(c) = clr_opt { self.arena.node_clearance.insert(n.0, c); }
                             return n;
                         }
-                        "state" => {
+                        "state" if self.is_ident_like_pos(self.pos + 1) && (self.peek_ahead(2) == TokenKind::LBrace || self.peek_ahead(2) == TokenKind::Colon) => {
                             let start_span = self.span();
                             self.advance(); // consume 'state'
                             let s_name = self.text().to_string();

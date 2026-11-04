@@ -22,6 +22,7 @@ pub struct AnalysisResult {
     pub fn_visibility: HashMap<String, pilot_ast::VisibilityTier>,
     pub fn_clearance: HashMap<String, pilot_ast::ClearanceLevel>,
     pub current_scope_clearance: u32,
+    pub local_fn_captures: HashMap<u32, pilot_ast::LocalFnCaptureSpec>,
 }
 
 impl AnalysisResult {
@@ -132,6 +133,8 @@ impl AnalysisPipeline {
         diagnostics.extend(weaver.diagnostics);
         diagnostics.extend(infer_engine.diagnostics);
 
+        let local_fn_captures = infer_engine.local_fn_captures.clone();
+
         AnalysisResult {
             diagnostics,
             types: infer_engine.types,
@@ -142,6 +145,7 @@ impl AnalysisPipeline {
             fn_visibility: infer_engine.fn_visibility,
             fn_clearance: infer_engine.fn_clearance,
             current_scope_clearance: infer_engine.current_scope_clearance,
+            local_fn_captures,
         }
     }
 }

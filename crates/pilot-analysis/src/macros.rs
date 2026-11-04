@@ -180,6 +180,8 @@ pub fn splice_quote_template(
                     new_attrs.push(AstAttribute {
                         name: new_attr_name,
                         args: new_args,
+                        binding_sym: attr.binding_sym,
+                        is_mutable_binding: attr.is_mutable_binding,
                         span: attr.span,
                     });
                 }

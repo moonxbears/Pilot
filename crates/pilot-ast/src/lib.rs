@@ -726,6 +726,8 @@ pub struct AstArena {
     pub refinement_predicates: std::collections::HashMap<u32, (NodeId, NodeId)>,
     /// `.pchor` cue declarations.
     pub cue_declarations: std::collections::HashSet<u32>,
+    /// Capture specifications for embedded local functions.
+    pub local_fn_captures: std::collections::HashMap<u32, LocalFnCaptureSpec>,
 }
 
 impl AstArena {
@@ -773,6 +775,7 @@ impl AstArena {
             state_typestates: std::collections::HashMap::new(),
             refinement_predicates: std::collections::HashMap::new(),
             cue_declarations: std::collections::HashSet::new(),
+            local_fn_captures: std::collections::HashMap::new(),
         }
     }
 
