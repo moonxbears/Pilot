@@ -531,6 +531,14 @@ impl VisibilityTier {
     }
 }
 
+/// Parsed prefix bracket attribute `[Name(arg1, arg2)]`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AstAttribute {
+    pub name: SymbolId,
+    pub args: Vec<NodeId>,
+    pub span: ByteSpan,
+}
+
 /// Compile-Time Clearance Level (Axis 2 ? `lvl(N)` / `lvlN`).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct ClearanceLevel {
@@ -633,6 +641,13 @@ pub struct AstArena {
     pub mut_methods: std::collections::HashSet<u32>,
     pub node_visibility: std::collections::HashMap<u32, VisibilityTier>,
     pub node_clearance: std::collections::HashMap<u32, ClearanceLevel>,
+    pub node_attributes: std::collections::HashMap<u32, Vec<AstAttribute>>,
+    pub comptime_fns: std::collections::HashSet<u32>,
+    pub partial_types: std::collections::HashSet<u32>,
+    pub pkg_decls: std::collections::HashSet<u32>,
+    pub clearance_exprs: std::collections::HashMap<u32, NodeId>,
+    pub operator_bodies: std::collections::HashMap<u32, NodeId>,
+    pub operator_params: std::collections::HashMap<u32, Vec<NodeId>>,
 }
 
 impl AstArena {
@@ -663,6 +678,13 @@ impl AstArena {
             pure_methods: std::collections::HashSet::new(),
             node_visibility: std::collections::HashMap::new(),
             node_clearance: std::collections::HashMap::new(),
+            node_attributes: std::collections::HashMap::new(),
+            comptime_fns: std::collections::HashSet::new(),
+            partial_types: std::collections::HashSet::new(),
+            pkg_decls: std::collections::HashSet::new(),
+            clearance_exprs: std::collections::HashMap::new(),
+            operator_bodies: std::collections::HashMap::new(),
+            operator_params: std::collections::HashMap::new(),
         }
     }
 

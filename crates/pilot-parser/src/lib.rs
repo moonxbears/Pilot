@@ -100,23 +100,119 @@ pub fn is_polyglot_lang(name: &str) -> bool {
     )
 }
 
+pub type FxHashMap<K, V> = std::collections::HashMap<K, V>;
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FunctionId(pub u32);
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PackageId(pub u32);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ModifierSpec {
+    VisibilityRing(u8),
+    SemanticFlag(String),
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ModuleKwKind {
+    DeclarePkg,
+    ImportPath,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Fixity {
+    Prefix,
+    Infix,
+    Postfix,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Assoc {
+    Left,
+    Right,
+    None,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct PrattOpSpec {
+    pub op_sym: SymbolId,
+    pub fixity: Fixity,
+    pub precedence: u8,
+    pub assoc: Assoc,
+    pub home_pkg: Option<PackageId>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ParserTables {
+    pub bracket_attributes: FxHashMap<SymbolId, FunctionId>,
+    pub modifiers: FxHashMap<SymbolId, ModifierSpec>,
+    pub param_modifiers: FxHashMap<SymbolId, SymbolId>,
+    pub module_keywords: FxHashMap<SymbolId, ModuleKwKind>,
+    pub syntax_macros: FxHashMap<SymbolId, FunctionId>,
+    pub pratt_infix: FxHashMap<SymbolId, PrattOpSpec>,
+    pub pratt_prefix: FxHashMap<SymbolId, PrattOpSpec>,
+    pub pratt_postfix: FxHashMap<SymbolId, PrattOpSpec>,
+    pub receiver_ident: Option<SymbolId>,
+    pub bootstrap_sealed: bool,
+    pub interner: pilot_intern::Interner,
+    pub bracket_attributes_by_name: FxHashMap<String, FunctionId>,
+    pub modifiers_by_name: FxHashMap<String, ModifierSpec>,
+    pub param_modifiers_by_name: FxHashMap<String, String>,
+    pub module_keywords_by_name: FxHashMap<String, ModuleKwKind>,
+    pub syntax_macros_by_name: FxHashMap<String, FunctionId>,
+    pub pratt_infix_by_name: FxHashMap<String, PrattOpSpec>,
+    pub pratt_prefix_by_name: FxHashMap<String, PrattOpSpec>,
+    pub pratt_postfix_by_name: FxHashMap<String, PrattOpSpec>,
+    pub receiver_ident_name: Option<String>,
+}
+
+impl ParserTables {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn infix_precedence(&self, op: &str) -> Option<u8> {
+        self.pratt_infix_by_name.get(op).map(|s| s.precedence)
+    }
+
+    pub fn prefix_precedence(&self, op: &str) -> Option<u8> {
+        self.pratt_prefix_by_name.get(op).map(|s| s.precedence)
+    }
+
+    pub fn postfix_precedence(&self, op: &str) -> Option<u8> {
+        self.pratt_postfix_by_name.get(op).map(|s| s.precedence)
+    }
+}
+
+/// Parses a Pilot source string into an `AstArena` using an existing `ParserTables` configuration.
+pub fn parse_with_tables(src: &str, tables: &ParserTables) -> AstArena {
+    let tape = tokenize(src);
+    let mut parser = Parser::with_tables(src, tape, tables.clone());
+    parser.parse_program()
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DeclModifiers {
     pub vis: Option<VisibilityTier>,
     pub clearance: Option<ClearanceLevel>,
+    pub clearance_expr: Option<NodeId>,
     pub is_static: bool,
     pub is_pure: bool,
     pub is_mut: bool,
+    pub is_partial: bool,
 }
 
 pub struct Parser<'a> {
     src: &'a str,
     tape: TokenTape,
     pos: usize,
-    arena: AstArena,
+    pub arena: AstArena,
     pub errors: Vec<String>,
     pub active_header: Option<DeclModifiers>,
     pub header_stack: Vec<Option<DeclModifiers>>,
+    pub tables: ParserTables,
+    pub top_children: Vec<NodeId>,
 }
 
 impl<'a> Parser<'a> {
@@ -129,7 +225,63 @@ impl<'a> Parser<'a> {
             errors: Vec::new(),
             active_header: None,
             header_stack: Vec::new(),
+            tables: ParserTables::new(),
+            top_children: Vec::new(),
         }
+    }
+
+    pub fn with_tables(src: &'a str, tape: TokenTape, tables: ParserTables) -> Self {
+        let mut arena = AstArena::with_capacity(32);
+        arena.interner = tables.interner.clone();
+        Self {
+            src,
+            tape,
+            pos: 0,
+            arena,
+            errors: Vec::new(),
+            active_header: None,
+            header_stack: Vec::new(),
+            tables,
+            top_children: Vec::new(),
+        }
+    }
+
+    /// Parses one top-level item using the live `tables` state and returns `Some(NodeId)` or `None` at EOF.
+    pub fn parse_next_top_level_item(&mut self, tables: &mut ParserTables) -> Option<NodeId> {
+        self.tables = tables.clone();
+        self.skip_whitespace_and_comments();
+        self.consume_semi_or_newlines();
+        if self.at_end() {
+            return None;
+        }
+        let start_pos = self.pos;
+        let node = self.parse_stmt_or_decl();
+        if node.is_some() {
+            if self.arena.node(node).node_kind() == NodeKind::Program {
+                let s = self.arena.node(node).lhs;
+                let l = self.arena.node(node).rhs;
+                let sub_children = self.arena.children_slice(s, l).to_vec();
+                for c in sub_children {
+                    self.top_children.push(NodeId(c));
+                }
+            } else {
+                self.top_children.push(node);
+            }
+        }
+        if self.pos == start_pos {
+            self.advance();
+        }
+        self.consume_semi_or_newlines();
+        tables.interner = self.arena.interner.clone();
+        Some(node)
+    }
+
+    /// Finalizes `self.arena` after interleaved top-level parsing and returns the `AstArena`.
+    pub fn finish_program(&mut self) -> AstArena {
+        let root_span = ByteSpan::new(0, self.src.len() as u32);
+        let root = self.arena.alloc_list_node(NodeKind::Program, 0, root_span, &self.top_children);
+        self.arena.root = root;
+        std::mem::take(&mut self.arena)
     }
 
     #[inline]
@@ -477,9 +629,11 @@ impl<'a> Parser<'a> {
     fn parse_modifiers(&mut self) -> DeclModifiers {
         let mut vis = None;
         let mut clearance = None;
+        let mut clearance_expr = None;
         let mut is_static = false;
         let mut is_pure = false;
         let mut is_mut = false;
+        let mut is_partial = false;
 
         loop {
             self.skip_whitespace_and_comments();
@@ -529,6 +683,17 @@ impl<'a> Parser<'a> {
                     vis = Some(VisibilityTier::Protected);
                 }
                 "pkg" | "package" => {
+                    // Disambiguate `pkg Pilot.Core.Genesis;` package declaration from `pkg` visibility modifier
+                    let is_pkg_decl = vis.is_some()
+                        || (self.pos + 2 < self.tape.len()
+                            && self.is_ident_like_pos(self.pos + 1)
+                            && matches!(
+                                self.tape.kind(self.pos + 2),
+                                TokenKind::InfixDot | TokenKind::Semicolon
+                            ));
+                    if is_pkg_decl {
+                        break;
+                    }
                     self.advance();
                     vis = Some(VisibilityTier::Package);
                 }
@@ -580,6 +745,7 @@ impl<'a> Parser<'a> {
                 }
                 "partial" => {
                     self.advance();
+                    is_partial = true;
                 }
                 t if t == "lvl" => {
                     self.advance();
@@ -591,15 +757,18 @@ impl<'a> Parser<'a> {
                             self.advance();
                             self.advance(); // consume ','
                         }
-                        let lvl_num = if self.at(TokenKind::IntLit) || (self.is_ident_like() && self.text().chars().all(|c| c.is_ascii_digit())) {
+                        if self.at(TokenKind::IntLit) || (self.is_ident_like() && self.text().chars().all(|c| c.is_ascii_digit())) {
                             let n: u32 = self.text().parse().unwrap_or(0);
                             self.advance();
-                            n
+                            clearance = Some(ClearanceLevel { level: n, domain });
+                        } else if !self.at(TokenKind::RParen) {
+                            let expr_id = self.parse_expr();
+                            clearance_expr = Some(expr_id);
+                            clearance = Some(ClearanceLevel { level: 0, domain });
                         } else {
-                            0
-                        };
+                            clearance = Some(ClearanceLevel { level: 0, domain });
+                        }
                         self.expect(TokenKind::RParen);
-                        clearance = Some(ClearanceLevel { level: lvl_num, domain });
                     }
                 }
                 t if t.starts_with("lvl") && t.len() > 3 && t[3..].chars().all(|c| c.is_ascii_digit()) => {
@@ -618,6 +787,9 @@ impl<'a> Parser<'a> {
             if clearance.is_none() {
                 clearance = active.clearance;
             }
+            if clearance_expr.is_none() {
+                clearance_expr = active.clearance_expr;
+            }
             if !is_static {
                 is_static = active.is_static;
             }
@@ -627,14 +799,19 @@ impl<'a> Parser<'a> {
             if !is_mut {
                 is_mut = active.is_mut;
             }
+            if !is_partial {
+                is_partial = active.is_partial;
+            }
         }
 
         DeclModifiers {
             vis,
             clearance,
+            clearance_expr,
             is_static,
             is_pure,
             is_mut,
+            is_partial,
         }
     }
 
@@ -877,20 +1054,48 @@ impl<'a> Parser<'a> {
         None
     }
 
-    fn parse_stmt_or_decl(&mut self) -> NodeId {
+    fn parse_attributes(&mut self) -> Vec<AstAttribute> {
+        let mut attrs = Vec::new();
         while self.at(TokenKind::LBracket) {
             self.advance(); // consume '['
             let mut last_was_comma = false;
             while !self.at_end() && !self.at(TokenKind::RBracket) {
-                if self.is_ident_like() {
+                let attr_span = self.span();
+                if self.is_ident_like() || self.peek().is_keyword() {
+                    let attr_name = self.arena.interner.intern(self.text());
                     self.advance();
+                    let mut args = Vec::new();
                     if self.at(TokenKind::LParen) {
-                        self.advance();
+                        self.advance(); // consume '('
+                        let mut arg_trailing_comma = false;
                         while !self.at_end() && !self.at(TokenKind::RParen) {
-                            self.advance();
+                            let start_pos = self.pos;
+                            let arg_expr = self.parse_expr();
+                            if arg_expr.is_some() {
+                                args.push(arg_expr);
+                            }
+                            arg_trailing_comma = false;
+                            if self.at(TokenKind::Comma) {
+                                self.advance();
+                                arg_trailing_comma = true;
+                            } else {
+                                break;
+                            }
+                            if self.pos == start_pos {
+                                self.advance();
+                            }
+                        }
+                        if arg_trailing_comma {
+                            self.errors.push("Trailing comma not allowed in attribute arguments".to_string());
                         }
                         self.expect(TokenKind::RParen);
                     }
+                    let end_span = self.prev_span();
+                    attrs.push(AstAttribute {
+                        name: attr_name,
+                        args,
+                        span: ByteSpan::new(attr_span.start, end_span.end),
+                    });
                 } else {
                     self.advance();
                 }
@@ -908,7 +1113,46 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::RBracket);
             self.consume_semi_or_newlines();
         }
+        attrs
+    }
 
+    fn apply_decl_mods(&mut self, node: NodeId, mods: DeclModifiers, default_vis: Option<VisibilityTier>) {
+        if node.is_none() {
+            return;
+        }
+        if let Some(v) = mods.vis.or(default_vis) {
+            self.arena.node_visibility.insert(node.0, v);
+        }
+        if let Some(c) = mods.clearance {
+            self.arena.node_clearance.insert(node.0, c);
+        }
+        if let Some(ce) = mods.clearance_expr {
+            self.arena.clearance_exprs.insert(node.0, ce);
+        }
+        if mods.is_pure {
+            self.arena.pure_methods.insert(node.0);
+        }
+        if mods.is_static {
+            self.arena.static_methods.insert(node.0);
+        }
+        if mods.is_mut {
+            self.arena.mut_methods.insert(node.0);
+        }
+        if mods.is_partial {
+            self.arena.partial_types.insert(node.0);
+        }
+    }
+
+    fn parse_stmt_or_decl(&mut self) -> NodeId {
+        let attrs = self.parse_attributes();
+        let node = self.parse_stmt_or_decl_inner();
+        if node.is_some() && !attrs.is_empty() {
+            self.arena.node_attributes.entry(node.0).or_default().extend(attrs);
+        }
+        node
+    }
+
+    fn parse_stmt_or_decl_inner(&mut self) -> NodeId {
         if self.try_parse_decl_header() {
             return NodeId::NONE;
         }
@@ -921,12 +1165,47 @@ impl<'a> Parser<'a> {
         let is_pure = mods.is_pure;
 
         if (self.at(TokenKind::KwStruct) || (self.is_ident_like() && self.text() == "struct")) && self.peek_ahead(1) == TokenKind::LBrace {
+            let start_span = self.span();
             self.advance(); // consume 'struct'
+            self.advance(); // consume '{'
             self.header_stack.push(self.active_header);
             self.active_header = Some(mods);
-            let block = self.parse_block_expr();
+            let mut children = Vec::new();
+            while !self.at_end() && !self.at(TokenKind::RBrace) {
+                self.consume_semi_or_newlines();
+                if self.at(TokenKind::RBrace) || self.at_end() {
+                    break;
+                }
+                let start_pos = self.pos;
+                let item_attrs = self.parse_attributes();
+                let item_mods = self.parse_modifiers();
+                let s_node = if self.at(TokenKind::KwStruct) || (self.is_ident_like() && self.text() == "struct") {
+                    self.parse_struct_decl()
+                } else if self.is_ident_like() || self.peek().is_keyword() {
+                    self.parse_struct_decl_headless()
+                } else {
+                    self.parse_stmt_or_decl()
+                };
+                if s_node.is_some() {
+                    self.apply_decl_mods(s_node, item_mods, Some(VisibilityTier::Internal));
+                    if !item_attrs.is_empty() {
+                        self.arena.node_attributes.entry(s_node.0).or_default().extend(item_attrs);
+                    }
+                    children.push(s_node);
+                }
+                if self.pos == start_pos {
+                    self.advance();
+                }
+                self.consume_semi_or_newlines();
+            }
+            self.expect(TokenKind::RBrace);
             self.active_header = self.header_stack.pop().unwrap_or(None);
-            return block;
+            return self.arena.alloc_list_node(
+                NodeKind::BlockExpr,
+                0,
+                ByteSpan::new(start_span.start, self.prev_span().end),
+                &children,
+            );
         }
         if (self.at(TokenKind::KwInterface) || (self.is_ident_like() && self.text() == "interface")) && self.peek_ahead(1) == TokenKind::LBrace {
             self.advance(); // consume 'interface'
@@ -935,6 +1214,75 @@ impl<'a> Parser<'a> {
             let block = self.parse_block_expr();
             self.active_header = self.header_stack.pop().unwrap_or(None);
             return block;
+        }
+
+        // Package declaration: `pkg Pilot.Core.Genesis;`
+        if self.is_ident_like() && (self.text() == "pkg" || self.tables.module_keywords_by_name.get(self.text()) == Some(&ModuleKwKind::DeclarePkg)) {
+            let start_span = self.span();
+            self.advance(); // consume 'pkg'
+            let mut pkg_path = String::new();
+            while !self.at_end() && !self.at(TokenKind::Semicolon) && !self.at(TokenKind::Newline) {
+                pkg_path.push_str(self.text());
+                self.advance();
+            }
+            if self.at(TokenKind::Semicolon) {
+                self.advance();
+            }
+            let path_sym = self.arena.interner.intern(&pkg_path);
+            let pkg_node = self.arena.alloc_node(
+                NodeKind::ImportDecl,
+                1,
+                ByteSpan::new(start_span.start, self.prev_span().end),
+                path_sym.0,
+                u32::MAX,
+            );
+            self.arena.pkg_decls.insert(pkg_node.0);
+            self.apply_decl_mods(pkg_node, mods, Some(VisibilityTier::Public));
+            return pkg_node;
+        }
+
+        // Syntax macro block: `pub syntax { break() => ...; continue() => ...; op(sig, body) => ...; }`
+        if self.is_ident_like()
+            && (self.text() == "syntax" || self.tables.syntax_macros_by_name.contains_key(self.text()))
+            && self.peek_ahead(1) == TokenKind::LBrace
+        {
+            let start_span = self.span();
+            self.advance(); // consume 'syntax'
+            self.advance(); // consume '{'
+            let mut rules = Vec::new();
+            while !self.at_end() && !self.at(TokenKind::RBrace) {
+                self.consume_semi_or_newlines();
+                if self.at(TokenKind::RBrace) || self.at_end() {
+                    break;
+                }
+                let start_pos = self.pos;
+                let rule_span = self.span();
+                let rule_name = self.text().to_string();
+                let rule_fn = self.parse_fn_decl_headless(false, false);
+                if rule_fn.is_some() {
+                    self.arena.comptime_fns.insert(rule_fn.0);
+                    self.apply_decl_mods(rule_fn, mods, Some(VisibilityTier::Public));
+                    let syn_macro_sym = self.arena.interner.intern("SyntaxMacro");
+                    let kw_str_node = self.arena.alloc_str(&rule_name, rule_span);
+                    self.arena.node_attributes.entry(rule_fn.0).or_default().push(AstAttribute {
+                        name: syn_macro_sym,
+                        args: vec![kw_str_node],
+                        span: rule_span,
+                    });
+                    rules.push(rule_fn);
+                }
+                if self.pos == start_pos {
+                    self.advance();
+                }
+                self.consume_semi_or_newlines();
+            }
+            self.expect(TokenKind::RBrace);
+            return self.arena.alloc_list_node(
+                NodeKind::BlockExpr,
+                0,
+                ByteSpan::new(start_span.start, self.prev_span().end),
+                &rules,
+            );
         }
 
         if self.at(TokenKind::KwLet) || (self.is_ident_like() && self.text() == "let") {
@@ -1052,12 +1400,60 @@ impl<'a> Parser<'a> {
         }
 
         if self.at(TokenKind::KwComptime) || (self.is_ident_like() && self.text() == "comptime") {
+            let start_span = self.span();
             let next_pos = self.pos + 1;
             if next_pos < self.tape.len() {
                 let nk = self.tape.kind(next_pos);
-                if nk == TokenKind::KwDef || nk == TokenKind::KwFn {
-                    self.advance();
-                    return self.parse_fn_decl();
+                if nk == TokenKind::LBrace {
+                    self.advance(); // consume 'comptime'
+                    let block = self.parse_block_expr();
+                    let end_span = self.prev_span();
+                    let node = self.arena.alloc_node(
+                        NodeKind::ComptimeExpr,
+                        0,
+                        ByteSpan::new(start_span.start, end_span.end),
+                        block.0,
+                        0,
+                    );
+                    self.apply_decl_mods(node, mods, None);
+                    return node;
+                } else if nk == TokenKind::KwDef || nk == TokenKind::KwFn || (self.is_ident_like_pos(next_pos) && self.tape.text(next_pos, self.src) == "fn") {
+                    self.advance(); // consume 'comptime'
+                    if self.peek_ahead(1) == TokenKind::LBrace {
+                        // Distributive `comptime fn { name(params) => expr; ... }`
+                        self.advance(); // consume 'fn'
+                        self.advance(); // consume '{'
+                        let mut fns = Vec::new();
+                        while !self.at_end() && !self.at(TokenKind::RBrace) {
+                            self.consume_semi_or_newlines();
+                            if self.at(TokenKind::RBrace) || self.at_end() {
+                                break;
+                            }
+                            let start_pos = self.pos;
+                            let fn_node = self.parse_fn_decl_headless(is_mut, is_static);
+                            if fn_node.is_some() {
+                                self.arena.comptime_fns.insert(fn_node.0);
+                                self.apply_decl_mods(fn_node, mods, Some(VisibilityTier::Private));
+                                fns.push(fn_node);
+                            }
+                            if self.pos == start_pos {
+                                self.advance();
+                            }
+                            self.consume_semi_or_newlines();
+                        }
+                        self.expect(TokenKind::RBrace);
+                        return self.arena.alloc_list_node(
+                            NodeKind::BlockExpr,
+                            0,
+                            ByteSpan::new(start_span.start, self.prev_span().end),
+                            &fns,
+                        );
+                    } else {
+                        let fn_node = self.parse_fn_decl_modifiers(is_mut, is_static);
+                        self.arena.comptime_fns.insert(fn_node.0);
+                        self.apply_decl_mods(fn_node, mods, Some(VisibilityTier::Private));
+                        return fn_node;
+                    }
                 } else if nk == TokenKind::KwAssert {
                     self.advance();
                     return self.parse_assert_stmt();
@@ -1631,9 +2027,13 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_fn_decl_modifiers(&mut self, is_mut: bool, is_static: bool) -> NodeId {
-        let start_span = self.span();
         self.advance(); // consume 'def' or 'fn'
-        let name = if self.is_ident_like() {
+        self.parse_fn_decl_headless(is_mut, is_static)
+    }
+
+    fn parse_fn_decl_headless(&mut self, is_mut: bool, is_static: bool) -> NodeId {
+        let start_span = self.span();
+        let name = if self.is_ident_like() || self.peek().is_keyword() {
             let s = self.text();
             self.advance();
             s
@@ -1742,7 +2142,13 @@ impl<'a> Parser<'a> {
                     }
                     self.advance();
                 }
-                if self.is_ident_like() {
+                let is_unquote_param = if self.at(TokenKind::Dollar) {
+                    self.advance(); // consume '$'
+                    true
+                } else {
+                    false
+                };
+                if self.is_ident_like() || self.peek().is_keyword() {
                     let p_span = self.span();
                     let p_name = self.text();
                     self.advance();
@@ -1759,7 +2165,7 @@ impl<'a> Parser<'a> {
                     let p_end = self.prev_span().end.max(p_span.end);
                     let p_node = self.arena.alloc_node(
                         NodeKind::ParamDecl,
-                        0,
+                        if is_unquote_param { 1 } else { 0 },
                         ByteSpan::new(p_span.start, p_end),
                         p_sym.0,
                         type_node.0,
@@ -1889,8 +2295,12 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_struct_decl(&mut self) -> NodeId {
-        let start_span = self.span();
         self.advance(); // consume 'struct'
+        self.parse_struct_decl_headless()
+    }
+
+    fn parse_struct_decl_headless(&mut self) -> NodeId {
+        let start_span = self.span();
         let name = self.text();
         self.advance();
         let sym = self.arena.interner.intern(name);
@@ -3035,14 +3445,21 @@ impl<'a> Parser<'a> {
                 ret_ty = self.parse_type();
             }
         } else if self.at(TokenKind::Minus) || self.at(TokenKind::Tilde) || self.at(TokenKind::Exclamation) {
-            // Unary Prefix: `op <unop> self -> Out`
-            op_kind = OperatorKind::UnaryPrefix;
+            // Unary Prefix: `op <unop> self -> Out` or `op ! () -> bool` or Binary Left: `op - (rhs: R) -> Out`
             let op_txt = self.text();
             op_sym = self.arena.interner.intern(op_txt);
             self.advance();
             if self.at(TokenKind::KwSelf) || (self.is_ident_like() && self.text() == "self") {
                 self.advance();
             }
+            if self.at(TokenKind::LParen) {
+                params = self.parse_param_list();
+            }
+            op_kind = if params.is_empty() {
+                OperatorKind::UnaryPrefix
+            } else {
+                OperatorKind::BinaryLeft
+            };
             if self.at(TokenKind::Arrow) {
                 self.advance();
                 ret_ty = self.parse_type();
@@ -3115,6 +3532,9 @@ impl<'a> Parser<'a> {
                     self.advance();
                 }
             } else {
+                if op_txt == "==" || op_txt == "!=" {
+                    op_kind = OperatorKind::Equality;
+                }
                 op_sym = self.arena.interner.intern(op_txt);
                 self.advance();
                 if self.at(TokenKind::LParen) {
@@ -3129,11 +3549,18 @@ impl<'a> Parser<'a> {
 
         self.consume_semi_or_newlines();
 
+        let mut raw_body_expr = NodeId::NONE;
         let body = if self.at(TokenKind::LBrace) || self.at(TokenKind::VirtualLBrace) || self.at(TokenKind::Colon) {
-            self.parse_block_expr()
+            let b = self.parse_block_expr();
+            raw_body_expr = b;
+            b
         } else if self.at(TokenKind::FatArrow) {
             self.advance();
             let expr = self.parse_expr();
+            raw_body_expr = expr;
+            if self.at(TokenKind::Semicolon) {
+                self.advance();
+            }
             let ret = self.arena.alloc_node(NodeKind::ReturnStmt, 0, self.arena.span(expr), expr.0, 0);
             self.arena.alloc_list_node(NodeKind::BlockExpr, 0, self.arena.span(expr), &[ret])
         } else {
@@ -3142,7 +3569,7 @@ impl<'a> Parser<'a> {
 
         let mut all_fn = Vec::with_capacity(1 + params.len());
         all_fn.push(body);
-        all_fn.extend(params);
+        all_fn.extend(params.iter().copied());
         let (fn_start, fn_len) = self.arena.alloc_child_slice(&all_fn);
         let span = ByteSpan::new(start_span.start, self.prev_span().end);
         let op_node = self.arena.alloc_node(NodeKind::OperatorDecl, op_kind as u16, span, fn_start, fn_len);
@@ -3150,6 +3577,8 @@ impl<'a> Parser<'a> {
             self.arena.type_annotations.insert(op_node.0, ret_ty);
         }
         self.arena.operator_symbols.insert(op_node.0, op_sym);
+        self.arena.operator_bodies.insert(op_node.0, raw_body_expr);
+        self.arena.operator_params.insert(op_node.0, params);
         op_node
     }
 
@@ -3897,6 +4326,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr_prefix(&mut self, min_bp: u8) -> NodeId {
+        while self.at(TokenKind::Newline) {
+            self.advance();
+        }
         let k = self.peek();
         let span = self.span();
 
@@ -3949,10 +4381,38 @@ impl<'a> Parser<'a> {
                 let (slice_start, slice_len) = self.arena.alloc_child_slice(&[callee, body]);
                 return self.arena.alloc_node(NodeKind::CallExpr, 0, span, slice_start, slice_len);
             }
+            if name == "true" {
+                return self.arena.alloc_node(NodeKind::BoolLit, 0, span, 1, 0);
+            }
+            if name == "false" {
+                return self.arena.alloc_node(NodeKind::BoolLit, 0, span, 0, 0);
+            }
             return self.arena.alloc_ident(name, span);
         }
 
         match k {
+            TokenKind::KwEngine => {
+                self.advance();
+                self.arena.alloc_ident("__engine", span)
+            }
+            TokenKind::KwQuote => {
+                self.advance();
+                let callee = self.arena.alloc_ident("quote", span);
+                let body = self.parse_block_expr();
+                let (slice_start, slice_len) = self.arena.alloc_child_slice(&[callee, body]);
+                self.arena.alloc_node(NodeKind::CallExpr, 0, ByteSpan::new(span.start, self.prev_span().end), slice_start, slice_len)
+            }
+            TokenKind::Star | TokenKind::DoubleStar | TokenKind::StarDotDot => {
+                let (flags, op_str) = match k {
+                    TokenKind::Star => (UNARY_OP_SPLAT, "*"),
+                    TokenKind::DoubleStar => (UNARY_OP_DOUBLE_SPLAT, "**"),
+                    _ => (UNARY_OP_DEEP_FLATTEN, "*.."),
+                };
+                self.advance();
+                let bp = self.tables.prefix_precedence(op_str).unwrap_or(ExprPrecedence::UnaryPrefix as u8);
+                let operand = self.parse_expr_bp(bp);
+                self.arena.alloc_node(NodeKind::UnaryExpr, flags, span, operand.0, 0)
+            }
             TokenKind::IntLit => {
                 let txt = self.text();
                 self.advance();
@@ -4272,15 +4732,17 @@ impl<'a> Parser<'a> {
             | TokenKind::Amper
             | TokenKind::KwRef
             | TokenKind::ArrowLeft => {
-                let flags = match k {
-                    TokenKind::Amper | TokenKind::KwRef => 1,
-                    TokenKind::ArrowLeft => 3,
-                    TokenKind::Tilde => 4,
-                    TokenKind::Exclamation | TokenKind::KwNot => 5,
-                    _ => 0,
+                let (flags, op_str) = match k {
+                    TokenKind::Amper | TokenKind::KwRef => (1, "&"),
+                    TokenKind::ArrowLeft => (3, "<-"),
+                    TokenKind::Tilde => (4, "~"),
+                    TokenKind::Exclamation | TokenKind::KwNot => (5, "!"),
+                    TokenKind::Minus => (0, "-"),
+                    _ => (0, "+"),
                 };
                 self.advance();
-                let operand = self.parse_expr_bp(ExprPrecedence::UnaryPrefix as u8);
+                let bp = self.tables.prefix_precedence(op_str).unwrap_or(ExprPrecedence::UnaryPrefix as u8);
+                let operand = self.parse_expr_bp(bp);
                 self.arena.alloc_node(NodeKind::UnaryExpr, flags, span, operand.0, 0)
             }
             TokenKind::KwComptime => {
@@ -4384,12 +4846,17 @@ impl<'a> Parser<'a> {
                         return for_node;
                     }
 
-                    // Check for Map literal `{ k1: v1, ... }` or Set literal `{ 10, 20, ... }` or `{}`
+                    // Check for Map literal `{ k1: v1, ... }` or `{ Hooks = { ... }, ... }` or Set literal `{ 10, 20, ... }` or `{}`
                     let mut is_map_lit = false;
                     let mut is_set_lit = false;
-                    if self.pos + 1 < self.tape.len() && self.tape.kind(self.pos + 1) == TokenKind::RBrace {
-                        is_map_lit = true;
+                    let first_inside = if self.pos + 1 < self.tape.len() {
+                        self.tape.kind(self.pos + 1)
                     } else {
+                        TokenKind::Eof
+                    };
+                    if first_inside == TokenKind::RBrace {
+                        is_map_lit = true;
+                    } else if first_inside != TokenKind::KwLet && first_inside != TokenKind::KwVar {
                         let mut p = self.pos + 1;
                         let mut brace_depth = 0;
                         while p < self.tape.len() {
@@ -4407,7 +4874,7 @@ impl<'a> Parser<'a> {
                                         brace_depth -= 1;
                                     }
                                 }
-                                TokenKind::Colon => {
+                                TokenKind::Colon | TokenKind::Equal => {
                                     if brace_depth == 0 {
                                         is_map_lit = true;
                                         break;
@@ -4435,9 +4902,23 @@ impl<'a> Parser<'a> {
                         self.advance(); // consume '{'
                         let mut pairs = Vec::new();
                         while !self.at_end() && !self.at(TokenKind::RBrace) {
+                            self.consume_semi_or_newlines();
+                            if self.at_end() || self.at(TokenKind::RBrace) {
+                                break;
+                            }
                             let start_pos = self.pos;
-                            let key = self.parse_expr();
-                            if is_map_lit && self.at(TokenKind::Colon) {
+                            let key = if self.is_ident_like()
+                                && self.pos + 1 < self.tape.len()
+                                && (self.tape.kind(self.pos + 1) == TokenKind::Colon || self.tape.kind(self.pos + 1) == TokenKind::Equal)
+                            {
+                                let k_span = self.span();
+                                let k_name = self.text();
+                                self.advance();
+                                self.arena.alloc_ident(k_name, k_span)
+                            } else {
+                                self.parse_expr()
+                            };
+                            if is_map_lit && (self.at(TokenKind::Colon) || self.at(TokenKind::Equal)) {
                                 self.advance();
                                 let val = self.parse_expr();
                                 if key.is_some() {
@@ -4475,8 +4956,11 @@ impl<'a> Parser<'a> {
                     let inner = self.parse_expr();
                     self.expect(TokenKind::RParen);
                     inner
-                } else if self.is_ident_like() {
-                    self.parse_expr_prefix(min_bp)
+                } else if self.is_ident_like() || self.peek().is_keyword() {
+                    let name = self.text();
+                    self.advance();
+                    let sym = self.arena.interner.intern(name);
+                    self.arena.alloc_node(NodeKind::IdentExpr, 1, span, sym.0, 0)
                 } else {
                     NodeId::NONE
                 }
@@ -4719,40 +5203,46 @@ impl<'a> Parser<'a> {
     }
 
     fn get_binary_op(&self, k: TokenKind) -> Option<(BinaryOp, u8, bool)> {
-        match k {
-            TokenKind::Plus => Some((BinaryOp::Add, ExprPrecedence::AddSub as u8, false)),
-            TokenKind::Minus => Some((BinaryOp::Sub, ExprPrecedence::AddSub as u8, false)),
-            TokenKind::Star => Some((BinaryOp::Mul, ExprPrecedence::MulDivRem as u8, false)),
-            TokenKind::Slash => Some((BinaryOp::Div, ExprPrecedence::MulDivRem as u8, false)),
-            TokenKind::DoubleSlash => Some((BinaryOp::FloorDiv, ExprPrecedence::MulDivRem as u8, false)),
-            TokenKind::Percent => Some((BinaryOp::Rem, ExprPrecedence::MulDivRem as u8, false)),
-            TokenKind::DoubleStar => Some((BinaryOp::Pow, ExprPrecedence::Power as u8, true)),
-            TokenKind::EqEqual => Some((BinaryOp::Eq, ExprPrecedence::Comparison as u8, false)),
-            TokenKind::NotEqual => Some((BinaryOp::Ne, ExprPrecedence::Comparison as u8, false)),
-            TokenKind::Less => Some((BinaryOp::Lt, ExprPrecedence::Comparison as u8, false)),
-            TokenKind::LessEqual => Some((BinaryOp::Le, ExprPrecedence::Comparison as u8, false)),
-            TokenKind::Greater => Some((BinaryOp::Gt, ExprPrecedence::Comparison as u8, false)),
-            TokenKind::GreaterEqual => Some((BinaryOp::Ge, ExprPrecedence::Comparison as u8, false)),
-            TokenKind::KwAnd | TokenKind::DoubleAmper => Some((BinaryOp::And, ExprPrecedence::LogicalAnd as u8, false)),
-            TokenKind::KwOr | TokenKind::DoublePipe => Some((BinaryOp::Or, ExprPrecedence::LogicalOr as u8, false)),
-            TokenKind::Amper => Some((BinaryOp::BitAnd, ExprPrecedence::BitAnd as u8, false)),
-            TokenKind::Vbar => Some((BinaryOp::BitOr, ExprPrecedence::BitOr as u8, false)),
-            TokenKind::Caret => Some((BinaryOp::BitXor, ExprPrecedence::BitXor as u8, false)),
-            TokenKind::ShiftLeft => Some((BinaryOp::Shl, ExprPrecedence::Shift as u8, false)),
-            TokenKind::ShiftRight => Some((BinaryOp::Shr, ExprPrecedence::Shift as u8, false)),
-            TokenKind::PipeForward => Some((BinaryOp::Pipe, ExprPrecedence::Pipe as u8, false)),
-            TokenKind::PipeBackward => Some((BinaryOp::PipeBackward, ExprPrecedence::Pipe as u8, true)),
-            TokenKind::Coalesce => Some((BinaryOp::Coalesce, ExprPrecedence::Coalesce as u8, true)),
-            TokenKind::DotDot | TokenKind::DotDotEqual => Some((BinaryOp::RangeInclusive, ExprPrecedence::Range as u8, false)),
-            TokenKind::DotDotLess => Some((BinaryOp::RangeHalfOpen, ExprPrecedence::Range as u8, false)),
-            TokenKind::KwIs => Some((BinaryOp::Is, ExprPrecedence::Comparison as u8, false)),
-            TokenKind::KwIn => Some((BinaryOp::Eq, ExprPrecedence::Comparison as u8, false)),
-            TokenKind::Walrus => Some((BinaryOp::Walrus, ExprPrecedence::Assign as u8, true)),
-            TokenKind::ArrowLeft => Some((BinaryOp::Send, ExprPrecedence::Pipe as u8, false)),
-            TokenKind::KwUnion => Some((BinaryOp::Union, ExprPrecedence::BitOr as u8, false)),
-            TokenKind::KwIntersect => Some((BinaryOp::Intersect, ExprPrecedence::BitOr as u8, false)),
-            TokenKind::KwExcept => Some((BinaryOp::Except, ExprPrecedence::BitOr as u8, false)),
-            _ => None,
+        let (bin_op, op_str, default_bp, default_rassoc) = match k {
+            TokenKind::Plus => (BinaryOp::Add, "+", ExprPrecedence::AddSub as u8, false),
+            TokenKind::Minus => (BinaryOp::Sub, "-", ExprPrecedence::AddSub as u8, false),
+            TokenKind::Star => (BinaryOp::Mul, "*", ExprPrecedence::MulDivRem as u8, false),
+            TokenKind::Slash => (BinaryOp::Div, "/", ExprPrecedence::MulDivRem as u8, false),
+            TokenKind::DoubleSlash => (BinaryOp::FloorDiv, "//", ExprPrecedence::MulDivRem as u8, false),
+            TokenKind::Percent => (BinaryOp::Rem, "%", ExprPrecedence::MulDivRem as u8, false),
+            TokenKind::DoubleStar => (BinaryOp::Pow, "**", ExprPrecedence::Power as u8, true),
+            TokenKind::EqEqual => (BinaryOp::Eq, "==", ExprPrecedence::Comparison as u8, false),
+            TokenKind::NotEqual => (BinaryOp::Ne, "!=", ExprPrecedence::Comparison as u8, false),
+            TokenKind::Less => (BinaryOp::Lt, "<", ExprPrecedence::Comparison as u8, false),
+            TokenKind::LessEqual => (BinaryOp::Le, "<=", ExprPrecedence::Comparison as u8, false),
+            TokenKind::Greater => (BinaryOp::Gt, ">", ExprPrecedence::Comparison as u8, false),
+            TokenKind::GreaterEqual => (BinaryOp::Ge, ">=", ExprPrecedence::Comparison as u8, false),
+            TokenKind::KwAnd | TokenKind::DoubleAmper => (BinaryOp::And, "&&", ExprPrecedence::LogicalAnd as u8, false),
+            TokenKind::KwOr | TokenKind::DoublePipe => (BinaryOp::Or, "||", ExprPrecedence::LogicalOr as u8, false),
+            TokenKind::Amper => (BinaryOp::BitAnd, "&", ExprPrecedence::BitAnd as u8, false),
+            TokenKind::Vbar => (BinaryOp::BitOr, "|", ExprPrecedence::BitOr as u8, false),
+            TokenKind::Caret => (BinaryOp::BitXor, "^", ExprPrecedence::BitXor as u8, false),
+            TokenKind::ShiftLeft => (BinaryOp::Shl, "<<", ExprPrecedence::Shift as u8, false),
+            TokenKind::ShiftRight => (BinaryOp::Shr, ">>", ExprPrecedence::Shift as u8, false),
+            TokenKind::PipeForward => (BinaryOp::Pipe, "|>", ExprPrecedence::Pipe as u8, false),
+            TokenKind::PipeBackward => (BinaryOp::PipeBackward, "<|", ExprPrecedence::Pipe as u8, true),
+            TokenKind::Coalesce => (BinaryOp::Coalesce, "??", ExprPrecedence::Coalesce as u8, true),
+            TokenKind::DotDot => (BinaryOp::RangeInclusive, "..", ExprPrecedence::Range as u8, false),
+            TokenKind::DotDotEqual => (BinaryOp::RangeInclusive, "..=", ExprPrecedence::Range as u8, false),
+            TokenKind::DotDotLess => (BinaryOp::RangeHalfOpen, "..<", ExprPrecedence::Range as u8, false),
+            TokenKind::KwIs => (BinaryOp::Is, "is", ExprPrecedence::Comparison as u8, false),
+            TokenKind::KwIn => (BinaryOp::Eq, "in", ExprPrecedence::Comparison as u8, false),
+            TokenKind::Walrus => (BinaryOp::Walrus, ":=", ExprPrecedence::Assign as u8, true),
+            TokenKind::ArrowLeft => (BinaryOp::Send, "<-", ExprPrecedence::Pipe as u8, false),
+            TokenKind::KwUnion => (BinaryOp::Union, "union", ExprPrecedence::BitOr as u8, false),
+            TokenKind::KwIntersect => (BinaryOp::Intersect, "intersect", ExprPrecedence::BitOr as u8, false),
+            TokenKind::KwExcept => (BinaryOp::Except, "except", ExprPrecedence::BitOr as u8, false),
+            _ => return None,
+        };
+        if let Some(spec) = self.tables.pratt_infix_by_name.get(op_str) {
+            Some((bin_op, spec.precedence, spec.assoc == Assoc::Right))
+        } else {
+            Some((bin_op, default_bp, default_rassoc))
         }
     }
 

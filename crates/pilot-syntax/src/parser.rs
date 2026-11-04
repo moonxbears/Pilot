@@ -700,25 +700,60 @@ impl<'a, 't> CstParser<'a, 't> {
             self.sink.finish_node();
         }
 
-        if self.at_ident_like() && matches!(self.peek_text(), "pub" | "priv" | "file" | "pkg" | "int" | "export") {
-            let next_idx = self.skip_trivia_idx(self.pos + 1);
-            if next_idx < self.tokens.len() && self.tokens[next_idx].kind == SyntaxKind::Colon {
+        if self.at_ident_like() && matches!(self.peek_text(), "pub" | "priv" | "file" | "pkg" | "int" | "export" | "pure" | "static" | "partial" | "ext" | "lvl") {
+            let mut scan = self.skip_trivia_idx(self.pos);
+            while scan < self.tokens.len() {
+                let tk = self.tokens[scan].kind;
+                let tt = self.tokens[scan].text;
+                if tk.is_ident_like() && matches!(tt, "pub" | "priv" | "file" | "pkg" | "int" | "export" | "pure" | "static" | "partial" | "ext" | "lvl" | "syntax" | "comptime") {
+                    scan = self.skip_trivia_idx(scan + 1);
+                    if scan < self.tokens.len() && self.tokens[scan].kind == SyntaxKind::LParen {
+                        let mut depth = 0;
+                        while scan < self.tokens.len() {
+                            if self.tokens[scan].kind == SyntaxKind::LParen {
+                                depth += 1;
+                            } else if self.tokens[scan].kind == SyntaxKind::RParen {
+                                depth -= 1;
+                                if depth == 0 {
+                                    scan = self.skip_trivia_idx(scan + 1);
+                                    break;
+                                }
+                            }
+                            scan += 1;
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+            if scan < self.tokens.len() && self.tokens[scan].kind == SyntaxKind::Colon {
                 self.sink.start_node(SyntaxKind::DistributiveHeader);
-                self.advance(); // modifier
-                self.advance(); // ':'
+                while self.skip_trivia_idx(self.pos) <= scan {
+                    self.advance();
+                }
                 self.sink.finish_node();
                 return;
             }
-            if next_idx < self.tokens.len() && (self.tokens[next_idx].kind == SyntaxKind::KwStruct || self.tokens[next_idx].kind == SyntaxKind::KwInterface) {
-                let after_kw = self.skip_trivia_idx(next_idx + 1);
+            if scan < self.tokens.len() && matches!(self.tokens[scan].kind, SyntaxKind::KwStruct | SyntaxKind::KwInterface | SyntaxKind::KwFn) {
+                let after_kw = self.skip_trivia_idx(scan + 1);
                 if after_kw < self.tokens.len() && self.tokens[after_kw].kind == SyntaxKind::LBrace {
                     self.sink.start_node(SyntaxKind::DistributiveBlock);
-                    self.advance();
-                    self.advance();
+                    while self.skip_trivia_idx(self.pos) <= scan {
+                        self.advance();
+                    }
                     self.parse_block_or_expr_body();
                     self.sink.finish_node();
                     return;
                 }
+            }
+            if scan < self.tokens.len() && self.tokens[scan].kind == SyntaxKind::LBrace {
+                self.sink.start_node(SyntaxKind::DistributiveBlock);
+                while self.skip_trivia_idx(self.pos) < scan {
+                    self.advance();
+                }
+                self.parse_block_or_expr_body();
+                self.sink.finish_node();
+                return;
             }
         }
 

@@ -1,749 +1,447 @@
-// SPDX-License-Identifier: MIT
-// std.core — Fundamental Comparison ADTs, Scalar Combinators & Contract Helpers
+// =========================================================================
+// FILE: stdlib/core/core.pilot
+// STAGE 1 SELF-GENESIS BOOTSTRAP
+// At Line 1, strictly the 14 Rust seed tokens exist:
+//   __engine, struct, interface, fn, let, ref, if, loop,
+//   return, yield, defer, comptime, quote, asm
+// Everything else in Pilot is birthed from `Cfg` below.
+// =========================================================================
+comptime {
+    let Cfg = {
+        // 1. Private Rust `__engine(...)` Callback Hook Names (30 Hooks)
+        Hooks = {
+            bind_attr:    "register_bracket_attribute",
+            bind_lang:    "bind_lang_item",
+            reg_layout:   "set_register_layout",
+            mem_layout:   "set_memory_layout",
+            pratt_op:     "register_pratt_op",
+            inline_hint:  "set_inline_hint",
+            syntax_kw:    "register_syntax_keyword",
+            modifier:     "register_modifier",
+            param_mod:    "register_parametric_modifier",
+            module_kw:    "register_module_kw",
+            receiver_id:  "bind_receiver_ident",
+            jmp_exit:     "cfg_jump_loop_exit",
+            jmp_head:     "cfg_jump_loop_head",
+            decl_op:      "decl_operator_fn",
+            ssa_binop:    "emit_ssa_binop",
+            ssa_unop:     "emit_ssa_unop",
+            ssa_cast:     "emit_ssa_cast",
+            ssa_load:     "emit_ssa_load",
+            ssa_store:    "emit_ssa_store",
+            ssa_gep:      "emit_ssa_gep",
+            is_comptime:  "query_is_comptime_vm",
+            t_sizeof:     "type_sizeof",
+            t_alignof:    "type_alignof",
+            t_offsetof:   "type_offsetof",
+            t_fields:     "type_fields_of",
+            diag_err:     "emit_diagnostic_error",
+            lattice_bind: "bind_lattice_kind",
+            lattice_get:  "get_lattice_bits",
+            core_naming:  "enforce_core_naming_lint",
+            seal_bridge:  "seal_bootstrap_bridge",
+        },
 
-type Ordering = Less | Equal | Greater;
+        // 2. Canonical `[Lang("...")]` Identifiers (Exported to `stdlib/core/*`)
+        Lang = {
+            any_t:    "IAnyValue",
+            val_t:    "IValue",
+            ref_t:    "IReference",
+            obj_t:    "IObject",
+            guard_t:  "IGuard",
+            void_t:   "void",
+            never_t:  "never",
+            bool_t:   "bool",
+            char_t:   "char",
+            i8_t:     "i8",
+            i16_t:    "i16",
+            i32_t:    "i32",
+            i64_t:    "i64",
+            i128_t:   "i128",
+            isize_t:  "isize",
+            u8_t:     "u8",
+            u16_t:    "u16",
+            u32_t:    "u32",
+            u64_t:    "u64",
+            u128_t:   "u128",
+            usize_t:  "usize",
+            f16_t:    "f16",
+            f32_t:    "f32",
+            f64_t:    "f64",
+            f128_t:   "f128",
+            str_t:    "str",
+            ptr_t:    "ptr",
+            slice_t:  "slice",
+            stride_t: "stride",
+            array_t:  "array",
+            tuple_t:  "tuple",
+            opt_t:    "option",
+            res_t:    "result",
+            union_t:  "union",
+            fn_t:     "fn",
+            range_t:  "range",
+            span_t:   "span",
+            step_t:   "step",
+            from_t:   "from",
+            until_t:  "until",
+            full_t:   "full",
+            splat_t:  "splat",
+            pairs_t:  "pairs",
+            expand_t: "expand",
+            map_t:    "map",
+            frame_t:  "frame",
+            type_t:   "type",
+            ast_t:    "ast",
+        },
 
-pub interface Iterable[T] {
-    op for self -> T;
+        // 3. Backend SSA Instruction Opcodes
+        Ssa = {
+            add:     "add",
+            sub:     "sub",
+            mul:     "mul",
+            sdiv:    "sdiv",
+            udiv:    "udiv",
+            srem:    "srem",
+            urem:    "urem",
+            fadd:    "fadd",
+            fsub:    "fsub",
+            fmul:    "fmul",
+            fdiv:    "fdiv",
+            and_b:   "and",
+            or_b:    "or",
+            xor_b:   "xor",
+            shl:     "shl",
+            lshr:    "lshr",
+            ashr:    "ashr",
+            eq:      "eq",
+            ne:      "ne",
+            ult:     "ult",
+            ule:     "ule",
+            ugt:     "ugt",
+            uge:     "uge",
+            slt:     "slt",
+            sle:     "sle",
+            sgt:     "sgt",
+            sge:     "sge",
+            flt:     "flt",
+            fle:     "fle",
+            feq:     "feq",
+            neg:     "neg",
+            fneg:    "fneg",
+            not_b:   "not",
+            bitnot:  "bitnot",
+            zext:    "zext",
+            sext:    "sext",
+            trunc:   "trunc",
+            bitcast: "bitcast",
+            sitofp:  "sitofp",
+            uitofp:  "uitofp",
+            fptosi:  "fptosi",
+            fptoui:  "fptoui",
+        },
+
+        // 4. Hardware Register Classes & Bit Widths
+        Reg = {
+            gpr_u:   gpr_unsigned,
+            gpr_s:   gpr_signed,
+            simd_f:  simd_float,
+            raw_ptr: raw_ptr,
+            b0:      0,
+            b8:      8,
+            b16:     16,
+            b32:     32,
+            b64:     64,
+            b128:    128,
+        },
+
+        // 5. 2-Bit Hardware Type Lattice Masks
+        Lattice = {
+            value:     0b00,
+            reference: 0b01,
+            object:    0b10,
+            guard:     0b11,
+        },
+
+        // 6. Core Modifier, Keyword & Clearance Ring Constants
+        Tokens = {
+            attr_lang:    "Lang",
+            attr_bits:    "Bits",
+            attr_layout:  "Layout",
+            attr_op:      "Operator",
+            attr_inline:  "Inline",
+            attr_lattice: "Lattice",
+            attr_naming:  "EnforceCoreNaming",
+            attr_syntax:  "SyntaxMacro",
+
+            vis_priv:     "priv",
+            vis_file:     "file",
+            vis_pkg:      "pkg",
+            vis_int:      "int",
+            vis_pub:      "pub",
+            vis_export:   "export",
+
+            mod_pure:     "pure",
+            mod_static:   "static",
+            mod_const:    "const",
+            mod_var:      "var",
+            mod_iso:      "iso",
+            mod_partial:  "partial",
+            mod_ext:      "ext",
+
+            act_pure:     "effect_pure",
+            act_static:   "storage_static",
+            act_const:    "binding_const",
+            act_var:      "binding_mutable",
+            act_iso:      "perceus_isolated",
+            act_partial:  "merge_type_members",
+            act_ext:      "extension_member",
+            act_ring:     "set_clearance_ring",
+            act_pkg:      "declare_package_scope",
+            act_use:      "import_symbol_path",
+
+            kw_syntax:    "syntax",
+            kw_lvl:       "lvl",
+            kw_pkg:       "pkg",
+            kw_use:       "use",
+            kw_self:      "self",
+
+            ring_public:  0,
+            ring_simd:    80,
+            ring_kernel:  90,
+            ring_genesis: 100,
+        },
+
+        // 7. Once-in-Genesis Pratt Operator Table Constants
+        Ops = {
+            fix_prefix:  prefix,
+            fix_infix:   infix,
+            fix_postfix: postfix,
+            assoc_left:  left,
+            assoc_right: right,
+            assoc_none:  none,
+
+            prec_coal:   10,
+            prec_or:     15,
+            prec_and:    20,
+            prec_bitor:  30,
+            prec_xor:    32,
+            prec_bitand: 35,
+            prec_range:  40,
+            prec_eq:     45,
+            prec_cmp:    50,
+            prec_shift:  55,
+            prec_add:    60,
+            prec_mul:    70,
+            prec_unary:  80,
+            prec_splat:  90,
+            prec_post:   95,
+
+            sym_coal:    "??",
+            sym_bitor:   "|",
+            sym_xor:     "^",
+            sym_bitand:  "&",
+            sym_range:   "..",
+            sym_span:    "..=",
+            sym_eq:      "==",
+            sym_ne:      "!=",
+            sym_lt:      "<",
+            sym_gt:      ">",
+            sym_le:      "<=",
+            sym_ge:      ">=",
+            sym_shl:     "<<",
+            sym_shr:     ">>",
+            sym_add:     "+",
+            sym_sub:     "-",
+            sym_mul:     "*",
+            sym_div:     "/",
+            sym_rem:     "%",
+            sym_not:     "!",
+            sym_bitnot:  "~",
+            sym_pairs:   "**",
+            sym_expand:  "*..",
+        },
+    };
 }
 
-pub interface AsyncIterable[T] {
-    op async for self -> T;
+// =========================================================================
+// STEP 1: DEFINE & BIND CORE `[...]` BRACKET ATTRIBUTES
+// =========================================================================
+comptime fn Lang(target_decl, item_name) =>
+    __engine(Cfg.Hooks.bind_lang, target_decl, item_name);
+
+comptime fn Bits(target_type, width, reg_class) =>
+    __engine(Cfg.Hooks.reg_layout, target_type, width, reg_class);
+
+comptime fn Layout(target_type, mode) =>
+    __engine(Cfg.Hooks.mem_layout, target_type, mode);
+
+comptime fn Operator(target_fn, fixity, prec, assoc) =>
+    __engine(Cfg.Hooks.pratt_op, target_fn, fixity, prec, assoc);
+
+comptime fn Inline(target_fn, mode) =>
+    __engine(Cfg.Hooks.inline_hint, target_fn, mode);
+
+comptime fn Lattice(target_iface, mask) =>
+    __engine(Cfg.Hooks.lattice_bind, target_iface, mask);
+
+comptime fn EnforceCoreNaming(target_pkg) =>
+    __engine(Cfg.Hooks.core_naming, target_pkg);
+
+comptime fn SyntaxMacro(transformer_fn, kw_token) =>
+    __engine(Cfg.Hooks.syntax_kw, kw_token, transformer_fn);
+
+comptime {
+    __engine(Cfg.Hooks.bind_attr, Cfg.Tokens.attr_lang,    Lang);
+    __engine(Cfg.Hooks.bind_attr, Cfg.Tokens.attr_bits,    Bits);
+    __engine(Cfg.Hooks.bind_attr, Cfg.Tokens.attr_layout,  Layout);
+    __engine(Cfg.Hooks.bind_attr, Cfg.Tokens.attr_op,      Operator);
+    __engine(Cfg.Hooks.bind_attr, Cfg.Tokens.attr_inline,  Inline);
+    __engine(Cfg.Hooks.bind_attr, Cfg.Tokens.attr_lattice, Lattice);
+    __engine(Cfg.Hooks.bind_attr, Cfg.Tokens.attr_naming,  EnforceCoreNaming);
+    __engine(Cfg.Hooks.bind_attr, Cfg.Tokens.attr_syntax,  SyntaxMacro);
 }
 
-pub interface Awaitable[T] {
-    op await self -> T;
+// =========================================================================
+// STEP 2: SELF-BOOTSTRAP THE `syntax` KEYWORD
+// =========================================================================
+[SyntaxMacro(Cfg.Tokens.kw_syntax)]
+comptime fn __bootstrap_syntax(kw_name, params, body) => quote {
+    [SyntaxMacro($kw_name)]
+    comptime fn __syntax_rule($params) { $body }
+};
+
+// =========================================================================
+// STEP 3: REGISTER MODIFIERS, MODULE KEYWORDS, RECEIVER & PRATT PRECEDENCES
+// =========================================================================
+comptime {
+    // 1. Short Access Visibility Rings (0..5)
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_priv,    0);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_file,    1);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_pkg,     2);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_int,     3);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_pub,     4);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_export,  5);
+
+    // 2. Semantic Declaration & Mutability Modifiers (`var` replaces `mut`)
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_pure,    Cfg.Tokens.act_pure);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_static,  Cfg.Tokens.act_static);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_const,   Cfg.Tokens.act_const);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_var,     Cfg.Tokens.act_var);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_iso,     Cfg.Tokens.act_iso);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_partial, Cfg.Tokens.act_partial);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_ext,     Cfg.Tokens.act_ext);
+
+    // 3. Clearance Ring (`lvl`), Package (`pkg`), Import (`use`) & Implicit `self`
+    __engine(Cfg.Hooks.param_mod,   Cfg.Tokens.kw_lvl,  Cfg.Tokens.act_ring);
+    __engine(Cfg.Hooks.module_kw,   Cfg.Tokens.kw_pkg,  Cfg.Tokens.act_pkg);
+    __engine(Cfg.Hooks.module_kw,   Cfg.Tokens.kw_use,  Cfg.Tokens.act_use);
+    __engine(Cfg.Hooks.receiver_id, Cfg.Tokens.kw_self);
+
+    // 4. Register Global Pratt Operator Precedences ONCE for the Entire Language
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_coal,   Cfg.Ops.fix_infix,   Cfg.Ops.prec_coal,   Cfg.Ops.assoc_right);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_bitor,  Cfg.Ops.fix_infix,   Cfg.Ops.prec_bitor,  Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_xor,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_xor,    Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_bitand, Cfg.Ops.fix_infix,   Cfg.Ops.prec_bitand, Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_range,  Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_span,   Cfg.Ops.fix_infix,   Cfg.Ops.prec_range,  Cfg.Ops.assoc_none);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_eq,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_eq,     Cfg.Ops.assoc_none);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_ne,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_eq,     Cfg.Ops.assoc_none);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_lt,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_gt,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_le,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_ge,     Cfg.Ops.fix_infix,   Cfg.Ops.prec_cmp,    Cfg.Ops.assoc_none);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_shl,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_shift,  Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_shr,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_shift,  Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_add,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_sub,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_add,    Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_mul,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_div,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_rem,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_mul,    Cfg.Ops.assoc_left);
+
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_not,    Cfg.Ops.fix_prefix,  Cfg.Ops.prec_unary,  Cfg.Ops.assoc_right);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_sub,    Cfg.Ops.fix_prefix,  Cfg.Ops.prec_unary,  Cfg.Ops.assoc_right);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_bitnot, Cfg.Ops.fix_prefix,  Cfg.Ops.prec_unary,  Cfg.Ops.assoc_right);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_mul,    Cfg.Ops.fix_prefix,  Cfg.Ops.prec_splat,  Cfg.Ops.assoc_right);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_pairs,  Cfg.Ops.fix_prefix,  Cfg.Ops.prec_splat,  Cfg.Ops.assoc_right);
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_expand, Cfg.Ops.fix_prefix,  Cfg.Ops.prec_splat,  Cfg.Ops.assoc_right);
+
+    __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_not,    Cfg.Ops.fix_postfix, Cfg.Ops.prec_post,   Cfg.Ops.assoc_left);
 }
 
-pub pure def abs(x: i64) -> i64 {
-    let mask = x >> 63;
-    return (x ^ mask) - mask;
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Genesis;
+
+// =========================================================================
+// STEP 4: PAIRED CFG KEYWORDS (`break`, `continue`, `op`) & SSA/REFLECTION HOOKS
+// =========================================================================
+pub syntax {
+    break()       => __engine(Cfg.Hooks.jmp_exit);
+    continue()    => __engine(Cfg.Hooks.jmp_head);
+    op(sig, body) => __engine(Cfg.Hooks.decl_op, sig, body);
 }
 
-pub pure def abs(x: f64) -> f64 {
-    let bits: u64 = (x as u64) & 0x7FFFFFFFFFFFFFFF;
-    return bits as f64;
+// Ring 80 (`lvl(80)`): Restricted to `Pilot.Core` SIMD/Primitive Implementations
+pub lvl(Cfg.Tokens.ring_simd) comptime fn {
+    __ssa(opcode, lhs, rhs)       => __engine(Cfg.Hooks.ssa_binop, opcode, lhs, rhs);
+    __ssa_unary(opcode, val)      => __engine(Cfg.Hooks.ssa_unop, opcode, val);
+    __ssa_cast(opcode, val, T)    => __engine(Cfg.Hooks.ssa_cast, opcode, val, T);
+    __ssa_load(ptr_val)           => __engine(Cfg.Hooks.ssa_load, ptr_val);
+    __ssa_store(ptr_val, val)     => __engine(Cfg.Hooks.ssa_store, ptr_val, val);
+    __ssa_gep(base_ptr, elem_idx) => __engine(Cfg.Hooks.ssa_gep, base_ptr, elem_idx);
 }
 
+// Ring 0 (`lvl(0)`): Public Compile-Time Reflection & Introspection Intrinsics
+pub lvl(Cfg.Tokens.ring_public) comptime fn {
+    __is_comptime()               => __engine(Cfg.Hooks.is_comptime);
+    sizeof(T)                     => __engine(Cfg.Hooks.t_sizeof, T);
+    alignof(T)                    => __engine(Cfg.Hooks.t_alignof, T);
+    offsetof(T, field_sym)        => __engine(Cfg.Hooks.t_offsetof, T, field_sym);
+    fields_of(T)                  => __engine(Cfg.Hooks.t_fields, T);
+    compile_error(msg)            => __engine(Cfg.Hooks.diag_err, msg);
+    lattice_bits_of(T)            => __engine(Cfg.Hooks.lattice_get, T);
+}
 
-# =========================================================================
-# 1. SIGNED 1-BYTE `Ordering` ENUM (-1, 0, +1)
-# Enables 1-instruction negation and branchless sign-bit checks!
-# =========================================================================
-pub enum Ordering(i8):
-    Less    = -1
-    Equal   =  0
-    Greater =  1
-
-    # Unary `-ord` reverses Ordering in 1 CPU cycle (`neg al`):
-    pub pure op - self -> Ordering {
-        return (-(self as i8)) as Ordering;
+// =========================================================================
+// STEP 5: SEED PRIMITIVES (`bool` & `usize`) FOR STAGE 2/3 BOOTSTRAPPING
+// =========================================================================
+pub partial struct {
+    [Lang(Cfg.Lang.bool_t), Bits(Cfg.Reg.b8, Cfg.Reg.gpr_u)]
+    bool {
+        pub pure:
+            op !  ()          -> bool => __ssa(Cfg.Ssa.xor_b, self, true);
+            op &  (rhs: bool) -> bool => __ssa(Cfg.Ssa.and_b, self, rhs);
+            op |  (rhs: bool) -> bool => __ssa(Cfg.Ssa.or_b,  self, rhs);
+            op ^  (rhs: bool) -> bool => __ssa(Cfg.Ssa.xor_b, self, rhs);
+            op == (rhs: bool) -> bool => __ssa(Cfg.Ssa.eq,    self, rhs);
+            op != (rhs: bool) -> bool => __ssa(Cfg.Ssa.ne,    self, rhs);
     }
 
-pub interface Ordered:
-    op self < (rhs: Self) -> bool;
-    op self > (rhs: Self) -> bool;
-    op self <= (rhs: Self) -> bool;
-    op self >= (rhs: Self) -> bool;
-
-
-# =========================================================================
-# 2. ZERO-INSTRUCTION GENERIC `identity` (Eliminates Untyped Boxing)
-# =========================================================================
-pub pure def identity[T](x: T) -> T {
-    return x;  # Erases to a 0-cycle register alias at compile time
-}
-
-
-# =========================================================================
-# 3. BRANCHLESS `compare` & 1-CYCLE `Ordering` PREDICATES
-# =========================================================================
-pub pure def compare[T: Ordered](a: T, b: T) -> Ordering {
-    # Branchless `(a > b) - (a < b)`:
-    # Compiles to `cmp` + `setg al` + `setl cl` + `sub al, cl` (Zero branches!)
-    let gt = (a > b) as i8;
-    let lt = (a < b) as i8;
-    return (gt - lt) as Ordering;
-}
-
-pub pure def is_less(ord: Ordering) -> bool {
-    return (ord as i8) < 0;   # Single sign-bit test (`test al, al` + `sets al`)
-}
-
-pub pure def is_equal(ord: Ordering) -> bool {
-    return (ord as i8) == 0;  # Single zero-flag test (`test al, al` + `sete al`)
-}
-
-pub pure def is_greater(ord: Ordering) -> bool {
-    return (ord as i8) > 0;   # Single positive test (`test al, al` + `setg al`)
-}
-
-pub pure def reverse_ordering(ord: Ordering) -> Ordering {
-    # Because Less = -1, Equal = 0, Greater = 1:
-    # -(-1) == +1, -(0) == 0, -(+1) == -1. Just a single `neg al` instruction!
-    return (-(ord as i8)) as Ordering;
-}
-
-
-# =========================================================================
-# 4. BRANCHLESS `min`, `max`, AND `clamp` (`cmov` / `vminsd` / `vmaxsd`)
-# =========================================================================
-pub pure def min[T: Ordered](a: T, b: T) -> T {
-    return a if a <= b else b;  # Emits single `cmp` + `cmovle` (or `vminsd`)
-}
-
-pub pure def max[T: Ordered](a: T, b: T) -> T {
-    return a if a >= b else b;  # Emits single `cmp` + `cmovge` (or `vmaxsd`)
-}
-
-pub pure def clamp[T: Ordered](val: T, lo: T, hi: T) -> T {
-    # Chains two branchless conditional moves back-to-back in 2 cycles:
-    let lower_bounded = lo if val < lo else val;
-    return hi if lower_bounded > hi else lower_bounded;
-}
-
-
-# =========================================================================
-# 5. REGISTER-RENAMED `swap_pair` & COLD-BRANCH `check_invariant`
-# =========================================================================
-pub pure def swap_pair[A, B](pair: (A, B)) -> (B, A) {
-    # Unboxed C-ABI 2-tuple swap: swaps registers RDI <-> RSI with 0 memory reads
-    return (pair.1, pair.0);
-}
-
-pub def check_invariant(cond: bool, msg: str) {
-    # Hint to branch predictor that `!cond` is statistically never taken (0% I-cache pollution):
-    if intrin_unlikely(!cond) {
-        panic(msg);
+    [Lang(Cfg.Lang.usize_t), Bits(Cfg.Reg.b64, Cfg.Reg.gpr_u)]
+    usize {
+        pub pure:
+            op +  (rhs: usize) -> usize => __ssa(Cfg.Ssa.add,  self, rhs);
+            op -  (rhs: usize) -> usize => __ssa(Cfg.Ssa.sub,  self, rhs);
+            op *  (rhs: usize) -> usize => __ssa(Cfg.Ssa.mul,  self, rhs);
+            op /  (rhs: usize) -> usize => __ssa(Cfg.Ssa.udiv, self, rhs);
+            op %  (rhs: usize) -> usize => __ssa(Cfg.Ssa.urem, self, rhs);
+            op &  (rhs: usize) -> usize => __ssa(Cfg.Ssa.and_b,self, rhs);
+            op |  (rhs: usize) -> usize => __ssa(Cfg.Ssa.or_b, self, rhs);
+            op ^  (rhs: usize) -> usize => __ssa(Cfg.Ssa.xor_b,self, rhs);
+            op << (rhs: usize) -> usize => __ssa(Cfg.Ssa.shl,  self, rhs);
+            op >> (rhs: usize) -> usize => __ssa(Cfg.Ssa.lshr, self, rhs);
+            op == (rhs: usize) -> bool  => __ssa(Cfg.Ssa.eq,   self, rhs);
+            op != (rhs: usize) -> bool  => __ssa(Cfg.Ssa.ne,   self, rhs);
+            op <  (rhs: usize) -> bool  => __ssa(Cfg.Ssa.ult,  self, rhs);
+            op <= (rhs: usize) -> bool  => __ssa(Cfg.Ssa.ule,  self, rhs);
+            op >  (rhs: usize) -> bool  => __ssa(Cfg.Ssa.ugt,  self, rhs);
+            op >= (rhs: usize) -> bool  => __ssa(Cfg.Ssa.uge,  self, rhs);
     }
 }
 
-# =========================================================================
-# STATIC 256-BYTE ASCII TABLE (For Zero-Allocation 1-Byte Slice Views)
-# =========================================================================
-const _ASCII_TABLE: [u8; 128] = [
-      0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,
-     16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,
-     32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,
-     48,  49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  59,  60,  61,  62,  63,
-     64,  65,  66,  67,  68,  69,  70,  71,  72,  73,  74,  75,  76,  77,  78,  79,
-     80,  81,  82,  83,  84,  85,  86,  87,  88,  89,  90,  91,  92,  93,  94,  95,
-     96,  97,  98,  99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111,
-    112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127
-];
-
-# =========================================================================
-# 1. O(1) REGISTER LOAD & ZERO-COPY TABLE SLICE (Replaces O(95) Loop)
-# =========================================================================
-pub pure def char_code_at(s: str, idx: i64) -> i64 {
-    # Single unsigned cast catches BOTH `idx < 0` and `idx >= s.len` in 1 CPU comparison!
-    if (idx as usize) >= s.len { return 0; }
-    let bytes = s as Slice[u8];
-    return bytes[idx as usize] as i64;
+// =========================================================================
+// STEP 6: PERMANENTLY SEAL THE RAW `__engine` BRIDGE
+// No file loaded after `stdlib/core/core.pilot` may invoke `__engine(...)`!
+// =========================================================================
+comptime {
+    __engine(Cfg.Hooks.seal_bridge);
 }
-
-pub pure def char_from_code(code: i64) -> str {
-    if (code as u64) >= 128 { return ""; }
-    let table_view = _ASCII_TABLE as str;
-    # Zero-copy 1-byte slice directly into static `.rodata`!
-    return table_view[code as usize .. (code as usize + 1)];
-}
-
-
-# =========================================================================
-# 2. BRANCHLESS CLAMPED ZERO-COPY SLICE
-# =========================================================================
-pub pure def str_slice(s: str, start: i64, end_idx: i64) -> str {
-    let s_len = s.len as i64;
-    let lo_raw = (s_len + start) if start < 0 else start;
-    let hi_raw = (s_len + end_idx) if end_idx < 0 else end_idx;
-
-    # Branchless `cmov` clamp to `[0, s_len]`
-    let lo = max(0, min(lo_raw, s_len)) as usize;
-    let hi = max(0, min(hi_raw, s_len)) as usize;
-    if lo >= hi { return ""; }
-    return s[lo..hi];
-}
-
-
-# =========================================================================
-# 3. SWAR 8-BYTE ANCHOR SEARCH (`str_index_of` & `str_last_index_of`)
-# =========================================================================
-# Broadcasts first & last needle bytes across 64-bit registers to scan 8 bytes/cycle:
-file pure def swar_has_zero_byte(v: u64) -> u64 {
-    return (v - 0x0101010101010101) & (~v) & 0x8080808080808080;
-}
-
-pub pure def str_index_of(s: str, sub: str, start: i64 = 0) -> i64 {
-    let s_len = s.len as i64;
-    let sub_len = sub.len as i64;
-    if sub_len == 0 { return max(0, min(start, s_len)); }
-    let lo_start = max(0, start);
-    if lo_start + sub_len > s_len { return -1; }
-
-    let hay = s as Slice[u8];
-    let ndl = sub as Slice[u8];
-    let first_b = ndl[0];
-    let last_b  = ndl[(sub_len - 1) as usize];
-    let mask_first: u64 = (first_b as u64) * 0x0101010101010101;
-    let mask_last:  u64 = (last_b  as u64) * 0x0101010101010101;
-
-    mut var i = lo_start as usize;
-    let max_idx = (s_len - sub_len) as usize;
-
-    # SWAR 8-byte parallel scan for `(first_byte, last_byte)` pair:
-    while i + 8 <= max_idx {
-        let w_first = *(hay.ptr + i as ptr[u64]);
-        let w_last  = *(hay.ptr + i + (sub_len as usize - 1) as ptr[u64]);
-        let eq_mask = swar_has_zero_byte((w_first ^ mask_first) | (w_last ^ mask_last));
-        mut var bits = eq_mask;
-        while bits != 0 {
-            let offset = (intrin_cttz_u64(bits) >> 3) as usize;
-            let cand = i + offset;
-            if s[cand .. (cand + sub_len as usize)] == sub {
-                return cand as i64;
-            }
-            bits &= bits - 1;
-        }
-        i += 8;
-    }
-
-    # Scalar tail for remaining < 8 bytes:
-    while i <= max_idx {
-        if hay[i] == first_b and hay[i + (sub_len as usize - 1)] == last_b {
-            if s[i .. (i + sub_len as usize)] == sub {
-                return i as i64;
-            }
-        }
-        i += 1;
-    }
-    return -1;
-}
-
-pub pure def str_last_index_of(s: str, sub: str, start: i64 = -1) -> i64 {
-    let s_len = s.len as i64;
-    let sub_len = sub.len as i64;
-    if sub_len == 0 { return s_len; }
-    if sub_len > s_len { return -1; }
-
-    mut var idx = s_len - sub_len;
-    if start >= 0 and start < idx { idx = start; }
-
-    let hay = s as Slice[u8];
-    let ndl = sub as Slice[u8];
-    let first_b = ndl[0];
-    let last_b  = ndl[(sub_len - 1) as usize];
-
-    while idx >= 0 {
-        let u_idx = idx as usize;
-        if hay[u_idx] == first_b and hay[u_idx + (sub_len as usize - 1)] == last_b {
-            if s[u_idx .. (u_idx + sub_len as usize)] == sub {
-                return idx;
-            }
-        }
-        idx -= 1;
-    }
-    return -1;
-}
-
-
-# =========================================================================
-# 4. BULK SPAN COPY `str_replace` (Fixes O(N^2) Char-by-Char Allocation)
-# =========================================================================
-pub pure def str_replace(s: str, old: str, new_str: str, out: mut SliceBuffer[u8]) -> str {
-    let s_len = s.len as i64;
-    let old_len = old.len as i64;
-    if old_len == 0 or s_len == 0 { return s; }
-
-    let first_hit = str_index_of(s, old, 0);
-    if first_hit < 0 { return s; }  # Zero-allocation fast path when `old` is absent!
-
-    mut var cursor: i64 = 0;
-    mut var match_idx: i64 = first_hit;
-    while match_idx >= 0 {
-        # Copy the entire unmatched span in a single `memcpy` instead of 1 char at a time!
-        if match_idx > cursor {
-            out.push_slice(s[cursor as usize .. match_idx as usize]);
-        }
-        out.push_slice(new_str);
-        cursor = match_idx + old_len;
-        match_idx = str_index_of(s, old, cursor);
-    }
-
-    if cursor < s_len {
-        out.push_slice(s[cursor as usize .. s_len as usize]);
-    }
-    return out.as_slice() as str;
-}
-
-
-# =========================================================================
-# 5. ZERO-ALLOCATION GENERATOR & BULK `str_split`
-# =========================================================================
-# Generator version: yields zero-copy `str` sub-slices with 0 heap allocations!
-pub pure def str_split_iter(s: str, sep: str) -> str {
-    let s_len = s.len as i64;
-    let sep_len = sep.len as i64;
-    if sep_len == 0 {
-        for i in 0 .. s.len {
-            yield s[i .. (i + 1)];
-        }
-        return;
-    }
-    mut start: i64 = 0;
-    while start <= s_len - sep_len {
-        let match_idx = str_index_of(s, sep, start);
-        if match_idx >= 0 {
-            yield s[start as usize .. match_idx as usize];
-            start = match_idx + sep_len;
-        } else {
-            break;
-        }
-    }
-    yield s[start as usize .. s.len];
-}
-
-pub pure def str_split(s: str, sep: str, out: mut SliceBuffer[str]) -> SliceBuffer[str] {
-    for part in str_split_iter(s, sep) {
-        out.push(part);
-    }
-    return out;
-}
-
-
-# =========================================================================
-# 6. BITMASK WHITESPACE `str_trim` (1 Bit-Shift Replaces 4 String Comparisons)
-# =========================================================================
-# Bitmask for ' ' (32), '\r' (13), '\n' (10), '\t' (9):
-# (1 << 32) | (1 << 13) | (1 << 10) | (1 << 9) == 0x100002600
-const _WS_MASK: u64 = 0x100002600;
-
-file pure def is_ascii_ws(b: u8) -> bool {
-    return b <= 32 and ((_WS_MASK >> (b as u64)) & 1) != 0;
-}
-
-pub pure def str_trim(s: str) -> str {
-    let bytes = s as Slice[u8];
-    mut var start: usize = 0;
-    mut var end_idx: usize = bytes.len;
-
-    while start < end_idx and is_ascii_ws(bytes[start]) {
-        start += 1;
-    }
-    while end_idx > start and is_ascii_ws(bytes[end_idx - 1]) {
-        end_idx -= 1;
-    }
-    return s[start..end_idx];
-}
-
-
-# =========================================================================
-# 7. SWAR 8-BYTES-PER-CYCLE CASE CONVERSION (`str_to_upper` / `str_to_lower`)
-# =========================================================================
-# Converts 8 ASCII bytes simultaneously using parallel bit-masks (Zero branches!):
-file pure def swar_toggle_case_u64(w: u64, lo_bound: u64, hi_bound: u64) -> u64 {
-    # Sets bit 7 (0x80) on each byte where `lo_bound <= byte <= hi_bound`
-    let gt_lo = w + (0x7F7F7F7F7F7F7F7F - lo_bound);
-    let lt_hi = (0x7F7F7F7F7F7F7F7F - (w & 0x7F7F7F7F7F7F7F7F)) + hi_bound;
-    let in_range_mask = (gt_lo & lt_hi & ~w) & 0x8080808080808080;
-    # Shift bit 7 right by 2 to bit 5 (0x20 == 32, the exact ASCII case toggle bit!)
-    return w ^ (in_range_mask >> 2);
-}
-
-pub pure def str_case(s: str, upper: bool, out: mut SliceBuffer[u8]) -> str {
-    let src = s as Slice[u8];
-    let n = src.len;
-    out.ensure_capacity(n);
-    mut var dst = out.as_mut_slice();
-
-    # 'a'..'z' (97..122) for upper; 'A'..'Z' (65..90) for lower
-    let lo_b: u8  = 97 if upper else 65;
-    let lo_w: u64 = (96 * 0x0101010101010101) if upper else (64 * 0x0101010101010101);
-    let hi_w: u64 = (122 * 0x0101010101010101) if upper else (90 * 0x0101010101010101);
-
-    mut var i: usize = 0;
-    while i + 8 <= n {
-        let word = *(src.ptr + i as ptr[u64]);
-        *(dst.ptr + i as mut ptr[u64]) = swar_toggle_case_u64(word, lo_w, hi_w);
-        i += 8;
-    }
-
-    # Branchless scalar tail: `b ^ 0x20` toggles bit 5 if `(b - lo_b) < 26`
-    while i < n {
-        let b = src[i];
-        let is_alpha = ((b - lo_b) < 26) as u8;
-        dst[i] = b ^ (is_alpha << 5);
-        i += 1;
-    }
-    return dst[0..n] as str;
-}
-
-pub pure def str_to_upper(s: str, out: mut SliceBuffer[u8]) -> str {
-    return str_case(s, true, out);
-}
-
-pub pure def str_to_lower(s: str, out: mut SliceBuffer[u8]) -> str {
-    return str_case(s, false, out);
-}
-
-# =========================================================================
-# STATIC 256-BYTE RADIX LOOKUP TABLE (Replaces 6-Branch ASCII Cascade)
-# Maps '0'..'9' -> 0..9, 'A'..'Z' -> 10..35, 'a'..'z' -> 10..35, all else -> 255
-# =========================================================================
-const _RADIX_LUT: [u8; 256] = [
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-      0,  1,  2,  3,  4,  5,  6,  7,  8,  9,255,255,255,255,255,255,
-    255, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-     25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,255,255,255,255,255,
-    255, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-     25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
-    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255
-];
-
-# Exact IEEE-754 powers of 10 (10^0 .. 10^22 are 100% bit-exact in f64)
-const _POW10_EXACT: [f64; 23] = [
-    1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,
-    1e8,  1e9,  1e10, 1e11, 1e12, 1e13, 1e14, 1e15,
-    1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22
-];
-
-# Binary exponentiation table for large exponents (10^16, 10^32, 10^64, 10^128, 10^256)
-const _POW10_BIG: [f64; 5] = [1e16, 1e32, 1e64, 1e128, 1e256];
-
-
-# =========================================================================
-# 1. SWAR + LUT `parse_int_strict` (Zero Type Erasure: `Option[i64]`)
-# =========================================================================
-# SWAR helper: parses 8 ASCII base-10 digits in 3 CPU instructions!
-file pure def swar_parse_8_digits(chunk: u64) -> Option[u64] {
-    let val = chunk - 0x3030303030303030;
-    let check = (chunk + 0x4646464646464646) | val;
-    if (check & 0x8080808080808080) != 0 {
-        return ::None;  # At least one byte was outside '0'..'9'
-    }
-    # Parallel endian-aware base-10 tree reduction in registers:
-    let bswap = intrin_bswap_u64(val);
-    let pair  = ((bswap & 0x0F000F000F000F00) >> 8) * 10 + (bswap & 0x000F000F000F000F);
-    let quad  = ((pair  & 0x00FF000000FF0000) >> 16) * 100 + (pair & 0x000000FF000000FF);
-    return ::Some(((quad >> 32) * 10000) + (quad & 0xFFFFFFFF));
-}
-
-pub pure def parse_int_strict(s: str, radix: i64 = 10) -> Option[i64] {
-    let bytes = str_trim(s) as Slice[u8];
-    let n = bytes.len;
-    if n == 0 or (radix as u64) - 2 > 34 { return ::None; }
-
-    # Branchless sign extraction:
-    let b0 = bytes[0];
-    let is_neg = (b0 == '-');
-    mut idx: usize = ((b0 == '-') or (b0 == '+')) as usize;
-    if idx >= n { return ::None; }
-
-    mut acc: i64 = 0;
-
-    # FAST PATH A: Base-10 (SWAR 8-digits-at-a-time + single unsigned compare)
-    if radix == 10 {
-        while idx + 8 <= n {
-            let chunk = *(bytes.ptr + idx as ptr[u64]);
-            match swar_parse_8_digits(chunk) {
-                case ::Some(v):
-                    acc = (acc * 100000000) + (v as i64);
-                    idx += 8;
-                default:
-                    return ::None;
-            }
-        }
-        while idx < n {
-            let d = (bytes[idx] - '0') as u64;
-            if d >= 10 { return ::None; }
-            acc = (acc * 10) + (d as i64);
-            idx += 1;
-        }
-    } else {
-        # FAST PATH B: Arbitrary Radix 2..36 via O(1) L1 Lookup Table
-        let u_radix = radix as u8;
-        while idx < n {
-            let d = _RADIX_LUT[bytes[idx] as usize];
-            if d >= u_radix { return ::None; }
-            acc = (acc * radix) + (d as i64);
-            idx += 1;
-        }
-    }
-
-    # Branchless two's-complement conditional negation:
-    let neg_mask = -(is_neg as i64);
-    return ::Some((acc ^ neg_mask) - neg_mask);
-}
-
-
-# =========================================================================
-# 2. INTEGER-MANTISSA + O(1) POW10 `parse_float_strict` (`Option[f64]`)
-# =========================================================================
-file pure def scale_pow10(val: f64, exp10: i64) -> f64 {
-    if exp10 == 0 or val == 0.0 { return val; }
-    let neg_exp = exp10 < 0;
-    let abs_exp = (-exp10 if neg_exp else exp10) as usize;
-
-    # Fast exact path for |exp10| <= 22 (1 hardware `mulsd` or `divsd`!)
-    if abs_exp <= 22 {
-        let p = _POW10_EXACT[abs_exp];
-        return (val / p) if neg_exp else (val * p);
-    }
-    if abs_exp > 308 {
-        return 0.0 if neg_exp else (1.0 / 0.0);
-    }
-
-    # O(1) 5-step binary decomposition for large exponents (replaces O(exp) loop!)
-    mut scale: f64 = _POW10_EXACT[abs_exp & 15];
-    mut var rem = abs_exp >> 4;
-    mut bit: usize = 0;
-    while rem != 0 {
-        if (rem & 1) != 0 {
-            scale = scale * _POW10_BIG[bit];
-        }
-        rem >>= 1;
-        bit += 1;
-    }
-    return (val / scale) if neg_exp else (val * scale);
-}
-
-pub pure def parse_float_strict(s: str) -> Option[f64] {
-    let bytes = str_trim(s) as Slice[u8];
-    let n = bytes.len;
-    if n == 0 { return ::None; }
-
-    let b0 = bytes[0];
-    let is_neg = (b0 == '-');
-    mut idx: usize = ((b0 == '-') or (b0 == '+')) as usize;
-    if idx >= n { return ::None; }
-
-    # Accumulate BOTH integer and fractional digits into a single u64 register!
-    # (1-cycle integer `imul` instead of 4-cycle `cvtsi2sd` + `mulsd` + `addsd` per char)
-    mut mantissa: u64 = 0;
-    mut exp10: i64 = 0;
-    mut digit_count: usize = 0;
-
-    # 1. Integer digits
-    while idx < n {
-        let d = (bytes[idx] - '0') as u64;
-        if d >= 10 { break; }
-        if digit_count < 19 {
-            mantissa = (mantissa * 10) + d;
-        } else {
-            exp10 += 1;  # Prevent u64 overflow beyond 19 significant digits
-        }
-        digit_count += 1;
-        idx += 1;
-    }
-
-    # 2. Fractional digits (just shifts `exp10` down—zero floating-point division inside loop!)
-    if idx < n and bytes[idx] == '.' {
-        idx += 1;
-        while idx < n {
-            let d = (bytes[idx] - '0') as u64;
-            if d >= 10 { break; }
-            if digit_count < 19 {
-                mantissa = (mantissa * 10) + d;
-                exp10 -= 1;
-            }
-            digit_count += 1;
-            idx += 1;
-        }
-    }
-
-    if digit_count == 0 { return ::None; }
-
-    # 3. Scientific notation (`e` or `E` folded via `(b | 0x20) == 'e'`)
-    if idx < n and (bytes[idx] | 0x20) == 'e' {
-        idx += 1;
-        if idx >= n { return ::None; }  # Reject trailing "1.5e"
-
-        let eb = bytes[idx];
-        let exp_neg = (eb == '-');
-        idx += ((eb == '-') or (eb == '+')) as usize;
-        if idx >= n { return ::None; }  # Reject trailing "1.5e+"
-
-        mut exp_val: i64 = 0;
-        while idx < n {
-            let d = (bytes[idx] - '0') as u64;
-            if d >= 10 { return ::None; }
-            exp_val = (exp_val * 10) + (d as i64);
-            idx += 1;
-        }
-        exp10 += (-exp_val) if exp_neg else exp_val;
-    }
-
-    # Strictness check: reject any unconsumed trailing characters (e.g., "12.34abc")
-    if idx != n { return ::None; }
-
-    # Single `u64 -> f64` conversion + O(1) power-of-10 scaling:
-    let result = scale_pow10(mantissa as f64, exp10);
-    return ::Some(-result if is_neg else result);
-}
-
-# =========================================================================
-# 1. `map_entries_sorted`: Single Cache-Line Lens Load + Zero-Copy View Option
-# =========================================================================
-pub pure def map_entries_sorted[K: Ordered, V](
-    m:   ref SliceMap[K, V],
-    out: mut SliceBuffer[(K, V)]
-) -> Slice[(K, V)] {
-    let n = m.len;
-    if n == 0 { return out[0..0]; }
-
-    out.ensure_capacity(n);
-
-    # Compile-time / branch-hoisted dispatch on SliceMap backing mode:
-    if m.is_aos_lens() {
-        # AoS Lens Mode: Key and Value live in the SAME struct cache line!
-        # Compute `row_ptr = base_ptr + i * stride` once per iteration instead of twice:
-        mut var row_ptr = m.base_ptr;
-        let stride  = m.byte_stride;
-        let k_off   = m.key_offset;
-        let v_off   = m.val_offset;
-        for _ in 0 .. n {
-            let k = *(row_ptr + k_off as ptr[K]);
-            let v = *(row_ptr + v_off as ptr[V]);
-            out.push_unchecked((k, v));
-            row_ptr += stride;
-        }
-    } else {
-        # SoA Parallel Array Mode: Dense contiguous `keys_ptr` and `vals_ptr` streams
-        let k_ptr = m.keys_ptr;
-        let v_ptr = m.vals_ptr;
-        for i in 0 .. n {
-            out.push_unchecked((k_ptr[i], v_ptr[i]));
-        }
-    }
-
-    mut var view = out.as_mut_slice();
-    if comptime_is_integer(K) {
-        radix_sort_by_key_in_place(view, (pair) => return pair.0);
-    } else {
-        pdqsort_by_key_in_place(view, (a, b) => return a.0 < b.0);
-    }
-    return view;
-}
-
-
-# =========================================================================
-# 2. `slice_len`, `slice_cap`, `slice_clear`: Works on Both Dense & Strided Views
-# =========================================================================
-pub pure def slice_len[T](buf: StridedSlice[T]) -> i64 {
-    return buf.len as i64;  # Accepts Slice[T], StridedSlice[T], m.keys, or m.values!
-}
-
-pub pure def slice_cap[T](buf: ref SliceBuffer[T]) -> i64 {
-    return buf.cap as i64;
-}
-
-pub mut def slice_clear[T](buf: mut ref SliceBuffer[T]) {
-    if comptime_has_destructor(T) {
-        for i in 0 .. buf.len {
-            ~buf[i];
-        }
-    }
-    buf.len = 0;
-}
-
-
-# =========================================================================
-# 3. `slice_to_list`: Stride-Aware Fast Path (Contiguous `memcpy` vs Strided Gather)
-# =========================================================================
-pub pure def slice_to_list[T](buf: StridedSlice[T], out: mut SliceBuffer[T]) -> SliceBuffer[T] {
-    let n = buf.len;
-    if n == 0 {
-        out.len = 0;
-        return out;
-    }
-    out.ensure_capacity(n);
-
-    # CRITICAL CHECK: Only use bulk `memcpy` if elements are densely packed (`stride == sizeof(T)`).
-    # If `buf` is a strided SliceMap projection (`m.keys` over a struct buffer), gather by stride!
-    if buf.byte_stride == sizeof(T) {
-        intrin_memcpy(out.ptr as mut ptr[u8], buf.base_ptr as ptr[u8], n * sizeof(T));
-        out.len = n;
-    } else {
-        mut src_byte_ptr = buf.base_ptr as ptr[u8];
-        let stride = buf.byte_stride;
-        for i in 0 .. n {
-            out.ptr[i] = *(src_byte_ptr as ptr[T]);
-            src_byte_ptr += stride;
-        }
-        out.len = n;
-    }
-    return out;
-}
-
-
-# =========================================================================
-# 4. `slice_sum`: Pointer-Stepping 4-Way Unrolled Sum (Supports Strided Views!)
-# =========================================================================
-pub pure def slice_sum[T: FloatConvertible](buf: StridedSlice[T]) -> f64 {
-    let n = buf.len;
-    if n == 0 { return 0.0; }
-
-    let s1 = buf.byte_stride;
-    let s2 = s1 + s1;
-    let s3 = s2 + s1;
-    let s4 = s1 << 2;  # 4 * byte_stride
-
-    mut p = buf.base_ptr as ptr[u8];
-    mut acc0: f64 = 0.0;
-    mut acc1: f64 = 0.0;
-    mut acc2: f64 = 0.0;
-    mut acc3: f64 = 0.0;
-
-    let limit = n & ~3;
-    mut i: usize = 0;
-    while i < limit {
-        acc0 += (*(p as ptr[T])) as f64;
-        acc1 += (*((p + s1) as ptr[T])) as f64;
-        acc2 += (*((p + s2) as ptr[T])) as f64;
-        acc3 += (*((p + s3) as ptr[T])) as f64;
-        p += s4;
-        i += 4;
-    }
-
-    mut total = (acc0 + acc1) + (acc2 + acc3);
-    while i < n {
-        total += (*(p as ptr[T])) as f64;
-        p += s1;
-        i += 1;
-    }
-    return total;
-}
-
-// -----------------------------------------------------------------------------
-// Standard Double-Underscore Internal Function Bridges in Pure Pilot
-// -----------------------------------------------------------------------------
-pub pure def __str_slice(s: str, start: i64, end_idx: i64) -> str => str_slice(s, start, end_idx);
-pub pure def __str_char_code(s: str, idx: i64) -> i64 => char_code_at(s, idx);
-pub pure def __char_from_code(code: i64) -> str => char_from_code(code);
-pub pure def __str_index_of(s: str, sub: str, start: i64 = 0) -> i64 => str_index_of(s, sub, start);
-pub pure def __str_last_index_of(s: str, sub: str, start: i64 = -1) -> i64 => str_last_index_of(s, sub, start);
-pub pure def __str_replace(s: str, old: str, new_str: str) -> str => str_replace(s, old, new_str);
-pub pure def __str_split(s: str, sep: str) -> List[str] => str_split(s, sep);
-pub pure def __str_trim(s: str) -> str => str_trim(s);
-pub pure def __str_case(s: str, upper: bool) -> str => str_case(s, upper);
-pub pure def __parse_int_strict(s: str, radix: i64 = 10) => parse_int_strict(s, radix);
-pub pure def __parse_float_strict(s: str) => parse_float_strict(s);
-pub pure def __map_entries_sorted(m: any) => map_entries_sorted(m);
-pub pure def __slice_len(buf: any) -> i64 => slice_len(buf);
-pub pure def __slice_cap(buf: any) -> i64 => slice_cap(buf);
-pub pure def __slice_clear(buf: any) => slice_clear(buf);
-pub pure def __slice_to_list(buf: any) => slice_to_list(buf);
-pub pure def __slice_sum(buf: any) => slice_sum(buf);
-pub pure def __freeze_value(val: any) => val;
-pub pure def __is_frozen(val: any) -> bool => true;
-pub pure def __is_perfect_hash_map(map_val: any) -> bool => true;
-pub pure def __frozen_map_table_size(map_val: any) -> i64 => len(map_val);

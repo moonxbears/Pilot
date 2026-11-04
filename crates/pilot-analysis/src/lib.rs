@@ -27,14 +27,21 @@ pub use null_error::{ErrorFlowAnalyzer, NullSafetyAnalyzer};
 pub use loops::LoopAnalyzer;
 pub use contracts::{ContractVerifier, Interval};
 pub use dimensions::{DimensionChecker, DimensionVector};
-pub use comptime::{CallFrameLayoutInfo, ComptimeEvaluator, QuoteKind, StaticDemotedSlot};
+pub use comptime::{
+    bootstrap_core_file, eval_file_with_tables, BootstrapDiagnostic, CallFrameLayoutInfo,
+    ComptimeEngine, ComptimeEvaluator, ComptimeFnDef, ComptimeValue, InlineHint, LangItem,
+    MemoryLayoutMode, QuoteKind, RegisterClass, StaticDemotedSlot, TypeLayoutSpec,
+};
 pub use pipeline::{AnalysisPipeline, AnalysisResult};
 pub use autodiff::{DualValue, SymbolicDifferentiator, SymbolicExpr};
 pub use quoting::{
     AstSpliceResult, CallFrameLayout, CallQuotingEngine, EffectDiff, EffectPlan,
     ReactiveSignalNode, ShallowCallDescriptor,
 };
-pub use macros::{DecoratorKind, MacroExpander, SynthesizedMember};
+pub use macros::{
+    desugar_bracket_attributes, expand_syntax_macro, splice_quote_template, DecoratorKind,
+    MacroExpander, SynthesizedMember,
+};
 
 #[cfg(test)]
 mod tests {
