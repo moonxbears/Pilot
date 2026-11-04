@@ -307,12 +307,57 @@ pub struct InterfaceDef {
     pub span: Span,
 }
 
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum RegClass {
+    Unit,                         // 0-bit unit
+    NoReturn,                     // 0-bit diverging bottom type
+    GprSigned,                    // 2's-complement signed integer register (`8`, `16`, `32`, `64`, `128` bits)
+    GprUnsigned,                  // Unsigned integer / boolean / scalar register (`1`, `8`, `16`, `32`, `64`, `128` bits)
+    SimdFloat,                    // IEEE-754 floating-point register (`16`, `32`, `64`, `128` bits)
+    SimdVector { lanes: u16 },    // Packed SIMD vector register (`lanes` x element `HardwarePhysics`)
+    RawPtr,                       // 64-bit native memory address register
+    Composite,                    // Multi-field aggregate struct lowered from `TypeDef::fields`
+}
+
+impl Default for RegClass {
+    fn default() -> Self {
+        Self::Composite
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct HardwarePhysics {
+    pub reg_class: RegClass,
+    pub bit_width: u32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub enum StructuralShape {
+    Scalar,                                           // Single hardware register (`RegClass != Composite`)
+    InlineRepeat { elem_ty: TypeId, count: usize },   // Fixed-length inline repeat (`[Layout("inline_array")]`)
+    ContiguousView { elem_ty: TypeId },               // 2-field `{ ptr, len }` + `0b01` `IReference`
+    StridedView { elem_ty: TypeId },                  // 3-field `{ ptr, len, stride }` + `0b01` `IReference`
+    OwnedBuffer { elem_ty: TypeId },                  // 3-field `{ ptr, len, cap }` + `0b10` `IObject` (`~self()`)
+    BoundsPair { bound_ty: TypeId, inclusive: bool }, // 2-field `{ start: T, end: T }` + `0b00` `IValue`
+    TaggedOutcome {                                   // Discriminated optional/fallible carrier (`[Layout("niche" | "register_pair")]`)
+        ok_ty: TypeId,
+        err_ty: Option<TypeId>,
+        niche_optimized: bool,
+    },
+    #[default]
+    GeneralAggregate,                                 // Arbitrary user/stdlib struct lowered field-by-field
+}
+
 #[derive(Clone, Debug)]
 pub struct TypeDef {
     pub id: TypeId,
     pub name: SymbolId,
     pub home_pkg: PackageId,
     pub is_lang_primitive: bool,                      // True if annotated with `[Lang("...")]`
+    pub physics: HardwarePhysics,                     // Hardware register class & bit width
+    pub shape: StructuralShape,                       // Structural layout shape derived from fields & lattice
+    pub layout_mode: Option<String>,                  // Optional `[Layout("niche" | "register_pair" | "inline_array" | "c_abi")]`
     pub size: usize,
     pub align: usize,
     pub layout_sealed: bool,                          // True as soon as primary `struct` block closes
@@ -333,6 +378,9 @@ impl TypeDef {
             name,
             home_pkg,
             is_lang_primitive: false,
+            physics: HardwarePhysics::default(),
+            shape: StructuralShape::GeneralAggregate,
+            layout_mode: None,
             size: 0,
             align: 1,
             layout_sealed: false,
@@ -1419,7 +1467,7 @@ impl TypeArena {
             (offset + max_align - 1) & !(max_align - 1)
         };
 
-        let lattice = LatticeBits::from_raw(computed_bits);
+        let _lattice = LatticeBits::from_raw(computed_bits);
         let type_name = if type_name_sym.0 != 0 {
             interner.resolve(type_name_sym).to_string()
         } else {
@@ -1526,12 +1574,30 @@ impl TypeArena {
             }
         }
 
+            for (_, exp_bits, _, _) in &explicit_origins {
+                computed_bits |= exp_bits.raw();
+            }
+
+            let _lattice = LatticeBits::from_raw(computed_bits);
+            let deduced_shape = self.deduce_structural_shape(
+                type_id,
+                &updated_fields,
+                _lattice,
+                self.type_defs
+                    .get(&type_id)
+                    .and_then(|td| td.layout_mode.as_deref()),
+            );
+            let lattice = _lattice;
+
         // 3, 5, 6. Store lattice, auto-attach lattice origin interfaces, and seal layout
         if let Some(td) = self.type_defs.get_mut(&type_id) {
             td.fields = updated_fields;
             td.size = final_size;
             td.align = max_align;
             td.lattice = lattice;
+            if td.shape == StructuralShape::GeneralAggregate {
+                td.shape = deduced_shape;
+            }
 
             // Unconditionally set LangItem::IAnyValue
             td.implemented_interfaces.insert_lang_item(LangItem::IAnyValue);
@@ -1553,6 +1619,178 @@ impl TypeArena {
             }
 
             td.layout_sealed = true;
+        }
+    }
+
+    /// Returns the `HardwarePhysics` of `ty`, derived from its `TypeDef` or canonical `TypeId`.
+    pub fn type_physics(&self, ty: TypeId) -> HardwarePhysics {
+        let pruned = self.prune(ty);
+        if let Some(td) = self.type_defs.get(&pruned) {
+            if td.physics.reg_class != RegClass::Composite || td.physics.bit_width > 0 {
+                return td.physics;
+            }
+        }
+        match self.get(pruned) {
+            TypeKind::Void => HardwarePhysics {
+                reg_class: RegClass::Unit,
+                bit_width: 0,
+            },
+            TypeKind::Never => HardwarePhysics {
+                reg_class: RegClass::NoReturn,
+                bit_width: 0,
+            },
+            TypeKind::Primitive(name) => {
+                if let Some(&mapped_id) = self.type_defs_by_name.get(name) {
+                    if let Some(td) = self.type_defs.get(&mapped_id) {
+                        if td.physics.reg_class != RegClass::Composite || td.physics.bit_width > 0 {
+                            return td.physics;
+                        }
+                    }
+                }
+                if name.starts_with('*') || name.ends_with('*') || name.starts_with("ptr") {
+                    HardwarePhysics {
+                        reg_class: RegClass::RawPtr,
+                        bit_width: 64,
+                    }
+                } else {
+                    match pruned {
+                        TypeId::BOOL => HardwarePhysics {
+                            reg_class: RegClass::GprUnsigned,
+                            bit_width: 1,
+                        },
+                        TypeId::I64 => HardwarePhysics {
+                            reg_class: RegClass::GprSigned,
+                            bit_width: 64,
+                        },
+                        TypeId::I32 => HardwarePhysics {
+                            reg_class: RegClass::GprSigned,
+                            bit_width: 32,
+                        },
+                        TypeId::F64 => HardwarePhysics {
+                            reg_class: RegClass::SimdFloat,
+                            bit_width: 64,
+                        },
+                        TypeId::F32 => HardwarePhysics {
+                            reg_class: RegClass::SimdFloat,
+                            bit_width: 32,
+                        },
+                        _ => HardwarePhysics {
+                            reg_class: RegClass::Composite,
+                            bit_width: 0,
+                        },
+                    }
+                }
+            }
+            _ => HardwarePhysics {
+                reg_class: RegClass::Composite,
+                bit_width: 0,
+            },
+        }
+    }
+
+    /// Deduces the `StructuralShape` of a struct purely from its field physics, `LatticeBits`, and `[Layout]` mode.
+    pub fn deduce_structural_shape(
+        &self,
+        type_id: TypeId,
+        fields: &[FieldDef],
+        lattice: LatticeBits,
+        layout_mode: Option<&str>,
+    ) -> StructuralShape {
+        if let Some(td) = self.type_defs.get(&type_id) {
+            if td.physics.reg_class != RegClass::Composite {
+                return StructuralShape::Scalar;
+            }
+        }
+        if let Some(mode) = layout_mode {
+            match mode {
+                "inline_array" => {
+                    let elem_ty = fields.first().map(|f| f.ty).unwrap_or(TypeId::ANY);
+                    return StructuralShape::InlineRepeat { elem_ty, count: 0 };
+                }
+                "niche" => {
+                    let ok_ty = fields.first().map(|f| f.ty).unwrap_or(TypeId::ANY);
+                    return StructuralShape::TaggedOutcome {
+                        ok_ty,
+                        err_ty: None,
+                        niche_optimized: true,
+                    };
+                }
+                "register_pair" => {
+                    let ok_ty = fields.first().map(|f| f.ty).unwrap_or(TypeId::ANY);
+                    let err_ty = fields.get(1).map(|f| f.ty);
+                    return StructuralShape::TaggedOutcome {
+                        ok_ty,
+                        err_ty,
+                        niche_optimized: false,
+                    };
+                }
+                _ => {}
+            }
+        }
+        match fields.len() {
+            2 => {
+                let p0 = self.type_physics(fields[0].ty);
+                let p1 = self.type_physics(fields[1].ty);
+                if p0.reg_class == RegClass::RawPtr
+                    && p1.reg_class == RegClass::GprUnsigned
+                    && p1.bit_width == 64
+                    && lattice == LatticeBits::Reference
+                {
+                    StructuralShape::ContiguousView {
+                        elem_ty: fields[0].ty,
+                    }
+                } else if p1.reg_class == RegClass::GprUnsigned && p1.bit_width == 1 {
+                    StructuralShape::TaggedOutcome {
+                        ok_ty: fields[0].ty,
+                        err_ty: None,
+                        niche_optimized: true,
+                    }
+                } else if self.prune(fields[0].ty) == self.prune(fields[1].ty)
+                    && lattice == LatticeBits::Value
+                {
+                    StructuralShape::BoundsPair {
+                        bound_ty: fields[0].ty,
+                        inclusive: false,
+                    }
+                } else {
+                    StructuralShape::GeneralAggregate
+                }
+            }
+            3 => {
+                let p0 = self.type_physics(fields[0].ty);
+                let p1 = self.type_physics(fields[1].ty);
+                let p2 = self.type_physics(fields[2].ty);
+                if p0.reg_class == RegClass::RawPtr
+                    && p1.reg_class == RegClass::GprUnsigned
+                    && p1.bit_width == 64
+                    && p2.reg_class == RegClass::GprSigned
+                    && p2.bit_width == 64
+                    && lattice == LatticeBits::Reference
+                {
+                    StructuralShape::StridedView {
+                        elem_ty: fields[0].ty,
+                    }
+                } else if p0.reg_class == RegClass::RawPtr
+                    && p1.reg_class == RegClass::GprUnsigned
+                    && p1.bit_width == 64
+                    && p2.reg_class == RegClass::GprUnsigned
+                    && p2.bit_width == 64
+                    && lattice == LatticeBits::Object
+                {
+                    StructuralShape::OwnedBuffer {
+                        elem_ty: fields[0].ty,
+                    }
+                } else if p2.reg_class == RegClass::GprUnsigned && p2.bit_width == 1 {
+                    StructuralShape::TaggedOutcome {
+                        ok_ty: fields[0].ty,
+                        err_ty: Some(fields[1].ty),
+                        niche_optimized: false,
+                    }
+                } else {
+                    StructuralShape::GeneralAggregate
+                }
+            }
+            _ => StructuralShape::GeneralAggregate,
         }
     }
 

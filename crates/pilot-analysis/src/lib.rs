@@ -24,8 +24,9 @@ pub use diagnostics::{
 };
 pub use types::{
     classify_perceus_action, BitSet, BundleDef, BundleId, FieldDef, FxHashMap, FxHashSet,
-    InterfaceDef, InterfaceId, LatticeBits, MethodEntry, MethodSignature, MethodTier, OriginId,
-    OwnershipAction, SpliceDirectives, TypeArena, TypeDef, TypeId, TypeKind,
+    HardwarePhysics, InterfaceDef, InterfaceId, LatticeBits, MethodEntry, MethodSignature,
+    MethodTier, OriginId, OwnershipAction, RegClass, SpliceDirectives, StructuralShape, TypeArena,
+    TypeDef, TypeId, TypeKind,
 };
 pub use infer::{
     clone_and_rewrite_self_field_accesses, rewrite_self_field_accesses, TypeInferenceEngine,

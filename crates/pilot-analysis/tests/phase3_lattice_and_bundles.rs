@@ -708,3 +708,374 @@ fn test_enforce_core_naming_lint() {
         "Expected `struct InlineAttr : IAttribute` to register full attribute `[InlineAttr]`"
     );
 }
+
+#[test]
+fn test_universal_rename_litmus_gate() {
+    use pilot_analysis::{
+        bootstrap_core_file, eval_file_with_tables, ComptimeEngine, ErrorFlowAnalyzer,
+        ForLoopAnalyzer, ForLoweringStrategy, HardwarePhysics, ImplicitLiftKind, LoopReturnMode,
+        LoopScheduleMode, RegClass, StructuralShape, TryPropagationPlan, TypeInferenceEngine,
+    };
+    use pilot_codegen::{
+        c_target::CTargetEmitter, gpu::GpuEmitter, llvm::LlvmEmitter, wasm::WasmEmitter,
+    };
+    use pilot_parser::{parse, ParserTables};
+
+    // 1. Bootstrap core.pilot first so the 14-keyword syntax/Pratt/attribute tables are active,
+    // then evaluate a self-contained module where EVERY primitive and composite type is renamed:
+    // `bitflag` (`bool`), `word64` (`usize`), `sint64` (`i64`), `c32` (`char`), `addr<T>` (`ptr<T>`),
+    // `window<T>` (`slice<T>`), `utf8view` (`str`), `maybe<T>` (`option<T>`),
+    // `outcome<T, E>` (`result<T, E>`), and `interval<T>` (`range<T>`).
+    let mut tables = ParserTables::new();
+    let mut vm = ComptimeEngine::new();
+    let core_src = include_str!("../../../stdlib/core/core.pilot");
+    bootstrap_core_file(core_src, &mut tables, &mut vm)
+        .expect("core.pilot must bootstrap with 0 errors");
+
+    let renamed_src = r#"
+        pub syntax type_construct {
+            (T: type) []            => quote { window<$T> };
+            (T: type) ?             => quote { maybe<$T> };
+            (T: type) ! (E: type)   => quote { outcome<$T, $E> };
+        }
+
+        pub partial struct {
+            [Bits(1,  3)] bitflag : IValue {
+                pub pure op == (rhs: bitflag) -> bitflag => __ssa(12, self, rhs);
+            }
+            [Bits(64, 3)] word64  : IValue {
+                pub pure op +  (rhs: word64)  -> word64  => __ssa(1, self, rhs);
+            }
+            [Bits(64, 2)] sint64  : IValue {
+                pub pure op +  (rhs: sint64)  -> sint64  => __ssa(1, self, rhs);
+                pub pure op -  (rhs: sint64)  -> sint64  => __ssa(2, self, rhs);
+                pub pure op *  (rhs: sint64)  -> sint64  => __ssa(3, self, rhs);
+            }
+            [Bits(32, 3)] c32     : IValue {
+                pub pure op == (rhs: c32)     -> bitflag => __ssa(12, self, rhs);
+            }
+            [Bits(64, 6)] addr<T: IAnyValue> : IReference {}
+
+            [Layout(c_abi)]
+            window<T: IAnyValue> : IReference {
+                pub data: addr<T>;
+                pub len:  word64;
+            }
+
+            [Layout(c_abi)]
+            utf8view : IReference {
+                pub data: addr<word64>;
+                pub len:  word64;
+            }
+
+            [Layout("niche")]
+            maybe<T: IAnyValue> : IValue {
+                pub val:       T;
+                pub has_value: bitflag;
+            }
+
+            [Layout("register_pair")]
+            outcome<T: IAnyValue, E: IAnyValue> : IValue {
+                pub ok_val:  T;
+                pub err_val: E;
+                pub is_ok:   bitflag;
+            }
+
+            [Layout(c_abi)]
+            interval<T: IValue> : IValue {
+                pub start: T;
+                pub end:   T;
+            }
+        }
+
+        pub struct SymbolHolder {
+            pub w: sint64[];
+            pub m: sint64?;
+            pub o: sint64 ! word64;
+        }
+    "#;
+
+    let renamed_arena = eval_file_with_tables(renamed_src, &mut tables, &mut vm)
+        .expect("Renamed primitive/composite module must parse and evaluate with 0 errors");
+
+    // Verify `syntax type_construct` re-bound `T[] -> window<T>`, `T? -> maybe<T>`, `T ! E -> outcome<T, E>`
+    let holder_layout = vm
+        .type_layouts
+        .get("SymbolHolder")
+        .expect("SymbolHolder must be registered");
+    assert_eq!(
+        holder_layout.field_types,
+        vec![
+            "window<sint64>".to_string(),
+            "maybe<sint64>".to_string(),
+            "outcome<sint64, word64>".to_string(),
+        ]
+    );
+
+    // 2. Verify size, alignment, and 2-bit hardware lattice of renamed types via ComptimeEngine & TypeArena
+    let (win_sz, win_align, win_lat) = vm.query_type_size_align_lattice("window<sint64>");
+    assert_eq!(win_sz, 16);
+    assert_eq!(win_align, 8);
+    assert_eq!(win_lat, 0b01);
+
+    let (u8v_sz, u8v_align, u8v_lat) = vm.query_type_size_align_lattice("utf8view");
+    assert_eq!(u8v_sz, 16);
+    assert_eq!(u8v_align, 8);
+    assert_eq!(u8v_lat, 0b01);
+
+    let (iv_sz, iv_align, iv_lat) = vm.query_type_size_align_lattice("interval<sint64>");
+    assert_eq!(iv_sz, 16);
+    assert_eq!(iv_align, 8);
+    assert_eq!(iv_lat, 0b00);
+
+    // Populate TypeArena with the renamed types and seal their layouts to deduce `StructuralShape`
+    let mut interner = renamed_arena.interner.clone();
+    let mut type_arena = TypeArena::new();
+    let pkg_id = PackageId(0);
+    let span = ByteSpan::new(0, 10);
+
+    let ty_bitflag = type_arena.alloc(TypeKind::Primitive("bitflag".to_string()));
+    let mut td_bitflag = TypeDef::new(ty_bitflag, interner.intern("bitflag"), pkg_id);
+    td_bitflag.is_lang_primitive = true;
+    td_bitflag.physics = HardwarePhysics {
+        reg_class: RegClass::GprUnsigned,
+        bit_width: 1,
+    };
+    td_bitflag.size = 1;
+    td_bitflag.align = 1;
+    type_arena.register_type_def(td_bitflag, &interner);
+
+    let ty_word64 = type_arena.alloc(TypeKind::Primitive("word64".to_string()));
+    let mut td_word64 = TypeDef::new(ty_word64, interner.intern("word64"), pkg_id);
+    td_word64.is_lang_primitive = true;
+    td_word64.physics = HardwarePhysics {
+        reg_class: RegClass::GprUnsigned,
+        bit_width: 64,
+    };
+    td_word64.size = 8;
+    td_word64.align = 8;
+    type_arena.register_type_def(td_word64, &interner);
+
+    let ty_sint64 = type_arena.alloc(TypeKind::Primitive("sint64".to_string()));
+    let mut td_sint64 = TypeDef::new(ty_sint64, interner.intern("sint64"), pkg_id);
+    td_sint64.is_lang_primitive = true;
+    td_sint64.physics = HardwarePhysics {
+        reg_class: RegClass::GprSigned,
+        bit_width: 64,
+    };
+    td_sint64.size = 8;
+    td_sint64.align = 8;
+    type_arena.register_type_def(td_sint64, &interner);
+
+    let ty_c32 = type_arena.alloc(TypeKind::Primitive("c32".to_string()));
+    let mut td_c32 = TypeDef::new(ty_c32, interner.intern("c32"), pkg_id);
+    td_c32.is_lang_primitive = true;
+    td_c32.physics = HardwarePhysics {
+        reg_class: RegClass::GprUnsigned,
+        bit_width: 32,
+    };
+    td_c32.size = 4;
+    td_c32.align = 4;
+    type_arena.register_type_def(td_c32, &interner);
+
+    let ty_addr_sint64 = type_arena.alloc(TypeKind::Adt {
+        name: "addr<sint64>".to_string(),
+        variants: vec![],
+    });
+    let mut td_addr = TypeDef::new(ty_addr_sint64, interner.intern("addr"), pkg_id);
+    td_addr.is_lang_primitive = true;
+    td_addr.physics = HardwarePhysics {
+        reg_class: RegClass::RawPtr,
+        bit_width: 64,
+    };
+    td_addr.size = 8;
+    td_addr.align = 8;
+    td_addr.lattice = LatticeBits::Reference;
+    td_addr.declared_interfaces.push(InterfaceId::IREFERENCE);
+    type_arena.register_type_def(td_addr, &interner);
+
+    // Seal `window<sint64>` and verify `StructuralShape::ContiguousView`
+    let ty_window = type_arena.alloc(TypeKind::Adt {
+        name: "window<sint64>".to_string(),
+        variants: vec![],
+    });
+    let mut td_window = TypeDef::new(ty_window, interner.intern("window"), pkg_id);
+    td_window.declared_interfaces.push(InterfaceId::IREFERENCE);
+    type_arena.register_type_def(td_window, &interner);
+    type_arena.add_struct_field(ty_window, interner.intern("data"), ty_addr_sint64, 8, span);
+    type_arena.add_struct_field(ty_window, interner.intern("len"), ty_word64, 8, span);
+    let mut diags = Vec::new();
+    type_arena.seal_primary_struct_layout(ty_window, &interner, &mut diags);
+    assert!(diags.is_empty());
+    let win_def = type_arena.type_defs.get(&ty_window).unwrap();
+    assert_eq!(win_def.size, 16);
+    assert_eq!(win_def.align, 8);
+    assert_eq!(win_def.lattice, LatticeBits::Reference);
+    assert_eq!(
+        win_def.shape,
+        StructuralShape::ContiguousView {
+            elem_ty: ty_addr_sint64
+        }
+    );
+
+    // 3. Seal `maybe<sint64>` and `outcome<sint64, word64>` and verify `StructuralShape::TaggedOutcome` + `?` operator
+    let ty_maybe = type_arena.alloc(TypeKind::Adt {
+        name: "maybe<sint64>".to_string(),
+        variants: vec![],
+    });
+    let mut td_maybe = TypeDef::new(ty_maybe, interner.intern("maybe"), pkg_id);
+    td_maybe.layout_mode = Some("niche".to_string());
+    td_maybe.declared_interfaces.push(InterfaceId::IVALUE);
+    type_arena.register_type_def(td_maybe, &interner);
+    type_arena.add_struct_field(ty_maybe, interner.intern("val"), ty_sint64, 8, span);
+    type_arena.add_struct_field(ty_maybe, interner.intern("has_value"), ty_bitflag, 8, span);
+    type_arena.seal_primary_struct_layout(ty_maybe, &interner, &mut diags);
+    assert!(diags.is_empty());
+    assert_eq!(
+        type_arena.type_defs.get(&ty_maybe).unwrap().shape,
+        StructuralShape::TaggedOutcome {
+            ok_ty: ty_sint64,
+            err_ty: None,
+            niche_optimized: true,
+        }
+    );
+
+    let ty_outcome = type_arena.alloc(TypeKind::Adt {
+        name: "outcome<sint64, word64>".to_string(),
+        variants: vec![],
+    });
+    let mut td_outcome = TypeDef::new(ty_outcome, interner.intern("outcome"), pkg_id);
+    td_outcome.layout_mode = Some("register_pair".to_string());
+    td_outcome.declared_interfaces.push(InterfaceId::IVALUE);
+    type_arena.register_type_def(td_outcome, &interner);
+    type_arena.add_struct_field(ty_outcome, interner.intern("ok_val"), ty_sint64, 8, span);
+    type_arena.add_struct_field(ty_outcome, interner.intern("err_val"), ty_word64, 8, span);
+    type_arena.add_struct_field(ty_outcome, interner.intern("is_ok"), ty_bitflag, 8, span);
+    type_arena.seal_primary_struct_layout(ty_outcome, &interner, &mut diags);
+    assert!(diags.is_empty());
+    assert_eq!(
+        type_arena.type_defs.get(&ty_outcome).unwrap().shape,
+        StructuralShape::TaggedOutcome {
+            ok_ty: ty_sint64,
+            err_ty: Some(ty_word64),
+            niche_optimized: false,
+        }
+    );
+
+    let mut err_flow = ErrorFlowAnalyzer::new();
+    let plan_maybe = err_flow.analyze_try_operator(ty_maybe, Some(ty_maybe), &type_arena, "test_fn", span);
+    assert!(matches!(
+        plan_maybe,
+        TryPropagationPlan::OptionUnwrap { unwrapped_ty, .. } if unwrapped_ty == ty_sint64
+    ));
+    let plan_outcome =
+        err_flow.analyze_try_operator(ty_outcome, Some(ty_outcome), &type_arena, "test_fn", span);
+    assert!(matches!(
+        plan_outcome,
+        TryPropagationPlan::ResultUnwrap {
+            unwrapped_ok_ty,
+            propagated_err_ty,
+            ..
+        } if unwrapped_ok_ty == ty_sint64 && propagated_err_ty == ty_word64
+    ));
+    assert!(err_flow.diagnostics.is_empty());
+    assert_eq!(
+        ErrorFlowAnalyzer::synthesize_implicit_lift(ty_maybe, ty_sint64, false, &type_arena),
+        Some(ImplicitLiftKind::OptionSome { elem_ty: ty_sint64 })
+    );
+    assert_eq!(
+        ErrorFlowAnalyzer::synthesize_implicit_lift(ty_outcome, ty_sint64, false, &type_arena),
+        Some(ImplicitLiftKind::ResultOk {
+            ok_ty: ty_sint64,
+            err_ty: ty_word64
+        })
+    );
+
+    // 4. Seal `interval<sint64>` and verify `StructuralShape::BoundsPair` + 3-tier `for` loop schedule
+    let ty_interval = type_arena.alloc(TypeKind::Adt {
+        name: "interval<sint64>".to_string(),
+        variants: vec![],
+    });
+    let mut td_interval = TypeDef::new(ty_interval, interner.intern("interval"), pkg_id);
+    td_interval.declared_interfaces.push(InterfaceId::IVALUE);
+    type_arena.register_type_def(td_interval, &interner);
+    type_arena.add_struct_field(ty_interval, interner.intern("start"), ty_sint64, 8, span);
+    type_arena.add_struct_field(ty_interval, interner.intern("end"), ty_sint64, 8, span);
+    type_arena.seal_primary_struct_layout(ty_interval, &interner, &mut diags);
+    assert!(diags.is_empty());
+    assert_eq!(
+        type_arena.type_defs.get(&ty_interval).unwrap().shape,
+        StructuralShape::BoundsPair {
+            bound_ty: ty_sint64,
+            inclusive: false,
+        }
+    );
+    assert_eq!(
+        ForLoopAnalyzer::worklist_frame_size_align(ty_sint64, &type_arena),
+        (16, 8)
+    );
+
+    let p_bitflag = type_arena.type_physics(ty_bitflag);
+    let p_word64 = type_arena.type_physics(ty_word64);
+    let p_sint64 = type_arena.type_physics(ty_sint64);
+    let p_c32 = type_arena.type_physics(ty_c32);
+    let p_addr = type_arena.type_physics(ty_addr_sint64);
+    let p_win = type_arena.type_physics(ty_window);
+
+    let for_arena = parse("for x in iv { let y = x; }");
+    let for_root = for_arena.node(for_arena.root);
+    let for_id = NodeId(for_arena.children_slice(for_root.lhs, for_root.rhs)[0]);
+    let iter_id = *for_arena.for_iter_nodes.get(&for_id.0).unwrap();
+    let mut infer = TypeInferenceEngine::new();
+    infer.types = type_arena;
+    infer.inferred_node_types.insert(iter_id.0, ty_interval);
+    let mut loop_analyzer = ForLoopAnalyzer::new();
+    let strategy = loop_analyzer.analyze_for_expr(&for_arena, for_id, false, false, &mut infer);
+    assert_eq!(
+        strategy,
+        ForLoweringStrategy::ThreeTierDynamicSchedule {
+            schedule: LoopScheduleMode::FixedScalar,
+            ret_mode: LoopReturnMode::StatementVoid,
+            can_preallocate_yield_buffer: true,
+        }
+    );
+
+    assert_eq!(LlvmEmitter::lower_physics_to_llvm(p_bitflag, &[]), "i1");
+    assert_eq!(LlvmEmitter::lower_physics_to_llvm(p_word64, &[]), "i64");
+    assert_eq!(LlvmEmitter::lower_physics_to_llvm(p_sint64, &[]), "i64");
+    assert_eq!(LlvmEmitter::lower_physics_to_llvm(p_c32, &[]), "i32");
+    assert_eq!(LlvmEmitter::lower_physics_to_llvm(p_addr, &["i64".to_string()]), "ptr");
+    assert_eq!(
+        LlvmEmitter::lower_physics_to_llvm(p_win, &["ptr".to_string(), "i64".to_string()]),
+        "{ ptr, i64 }"
+    );
+
+    assert_eq!(CTargetEmitter::lower_physics_to_c(p_bitflag, &[]), "bool");
+    assert_eq!(CTargetEmitter::lower_physics_to_c(p_word64, &[]), "uint64_t");
+    assert_eq!(CTargetEmitter::lower_physics_to_c(p_sint64, &[]), "int64_t");
+    assert_eq!(CTargetEmitter::lower_physics_to_c(p_c32, &[]), "uint32_t");
+    assert_eq!(
+        CTargetEmitter::lower_physics_to_c(
+            p_win,
+            &[("data", "int64_t*".to_string()), ("len", "uint64_t".to_string())]
+        ),
+        "struct { int64_t* data; uint64_t len; }"
+    );
+
+    assert_eq!(WasmEmitter::lower_physics_to_wasm(p_bitflag, &[]), "i32");
+    assert_eq!(WasmEmitter::lower_physics_to_wasm(p_sint64, &[]), "i64");
+    assert_eq!(
+        WasmEmitter::lower_physics_to_wasm(p_win, &["i32".to_string(), "i32".to_string()]),
+        "(i32, i32)"
+    );
+
+    assert_eq!(GpuEmitter::lower_physics_to_gpu(p_sint64, &[]), "long");
+    assert_eq!(GpuEmitter::lower_physics_to_gpu(p_word64, &[]), "ulong");
+    assert_eq!(
+        GpuEmitter::lower_physics_to_gpu(
+            p_win,
+            &[("d", "long*".to_string()), ("l", "ulong".to_string())]
+        ),
+        "struct { long* d; ulong l; }"
+    );
+}

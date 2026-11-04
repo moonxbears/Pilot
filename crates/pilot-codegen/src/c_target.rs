@@ -48,6 +48,61 @@ impl CTargetEmitter {
         self.out
     }
 
+    /// Section 2.8 (Phase 3.5): Physics & StructuralShape-Driven C11/C23 Type Lowering.
+    /// Zero hardcoded Pilot type names — derives C11 representation strictly from
+    /// `HardwarePhysics` (`RegClass`, `bit_width`) and recursive `(field_name, field_c_type)` pairs.
+    pub fn lower_physics_to_c(
+        physics: pilot_analysis::types::HardwarePhysics,
+        field_c_decls: &[(&str, String)],
+    ) -> String {
+        use pilot_analysis::types::RegClass;
+        match (physics.reg_class, physics.bit_width) {
+            (RegClass::Unit, _) => "void".to_string(),
+            (RegClass::NoReturn, _) => "_Noreturn void".to_string(),
+            (RegClass::GprUnsigned, 1) => "bool".to_string(),
+            (RegClass::GprSigned, 8) => "int8_t".to_string(),
+            (RegClass::GprUnsigned, 8) => "uint8_t".to_string(),
+            (RegClass::GprSigned, 16) => "int16_t".to_string(),
+            (RegClass::GprUnsigned, 16) => "uint16_t".to_string(),
+            (RegClass::GprSigned, 32) => "int32_t".to_string(),
+            (RegClass::GprUnsigned, 32) => "uint32_t".to_string(),
+            (RegClass::GprSigned, 64) => "int64_t".to_string(),
+            (RegClass::GprUnsigned, 64) => "uint64_t".to_string(),
+            (RegClass::GprSigned, 128) => "__int128".to_string(),
+            (RegClass::GprUnsigned, 128) => "unsigned __int128".to_string(),
+            (RegClass::GprSigned, _) => "int64_t".to_string(),
+            (RegClass::GprUnsigned, _) => "uint64_t".to_string(),
+            (RegClass::SimdFloat, 16) => "_Float16".to_string(),
+            (RegClass::SimdFloat, 32) => "float".to_string(),
+            (RegClass::SimdFloat, 64) => "double".to_string(),
+            (RegClass::SimdFloat, 128) => "__float128".to_string(),
+            (RegClass::SimdFloat, _) => "double".to_string(),
+            (RegClass::RawPtr, _) => {
+                if let Some((_, pointee)) = field_c_decls.first() {
+                    format!("{}*", pointee)
+                } else {
+                    "void*".to_string()
+                }
+            }
+            (RegClass::SimdVector { lanes }, b) => {
+                let bytes = (b / 8).max(16);
+                let lane_bits = (b / (lanes.max(1) as u32)).max(8);
+                format!("int{}_t __attribute__((vector_size({})))", lane_bits, bytes)
+            }
+            (RegClass::Composite, _) => {
+                if field_c_decls.is_empty() {
+                    "struct {}".to_string()
+                } else {
+                    let members: Vec<String> = field_c_decls
+                        .iter()
+                        .map(|(name, ty)| format!("{} {};", ty, name))
+                        .collect();
+                    format!("struct {{ {} }}", members.join(" "))
+                }
+            }
+        }
+    }
+
     /// Section 4.4: 5-Backend Hardware & `[Lang]` Mapping Table (C11/C23 Backend).
     pub fn map_lang_type_to_c(lang_item: &str, elem_types: &[&str]) -> String {
         let t0 = elem_types.first().copied().unwrap_or("int64_t");

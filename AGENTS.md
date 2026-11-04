@@ -1,14 +1,19 @@
 # AGENTS.md — Pilot Language AI Coding & Architecture Guidelines
 
-## 1. Implementation Integrity & Self-Hosting Ideology
-- **Zero Shortcuts:** Never return static, pre-computed, or dataset-specific values to make a test pass. Implement the complete underlying algorithm. No assumptions should be made of elements between pilot and Rust that is not strictly rust engine seeded keywords.
-- ** No Assuming:** Don't assume that Pilot and Rust know the same things. A good exercise to run is, if I change something in pilot, will the underlying rust engine account for that or will it break because of specific hard-coded values? (As a hypothetical, if I changed all instances of char to c32 in pilot, would rust break?). Only 14 seed keywords should be hardcoded because they come from the underlying rust engine.
-- **No Elided Logic or Silent Fallbacks:** Never leave `// TODO`, `unimplemented!()`, or stubbed branches. Handle all states explicitly via `result<T, E>` (`T ! E`) or `option<T>` (`T?`).
-- **Pilot First (Self-Hosted Core):** The Rust workspace (`crates/pilot-*`) is a minimal zero-GC hardware/CFG/SSA/Perceus engine with **strictly 14 seed keywords** (`__engine`, `struct`, `interface`, `fn`, `let`, `ref`, `if`, `loop`, `return`, `yield`, `defer`, `comptime`, `quote`, `asm`). Whenever logic can be written in Pilot without performance loss, implement it in `stdlib/core/*.pilot`, `stdlib/*`, or `selfhost/*.pilot`.
-- **Hardware Arena & Register Invariants:**
-  - `AstNode` is strictly `16 bytes` (`Copy`, 4 nodes per 64-byte L1 cache line) indexed by 32-bit `NodeId` handles inside `AstArena` (zero heap pointer graphs).
-  - `PilotVal` is strictly `16 bytes` (`Copy`) with 14-byte inline Small-String Optimization (SSO), niche-unboxed `option<T>` (`T?`), and register-returned `result<T, E>` (`T ! E`).
-
+## 1. Implementation Integrity & The Universal Name-Blind Contract
+- **The Strict 14-Token Boundary:** The Rust workspace (`crates/pilot-*`) is a **Name-Blind Hardware & Structural Physics Engine**. The ONLY words the Rust compiler may ever hardcode are the **14 seed tokens**:
+  `__engine`, `struct`, `interface`, `fn`, `let`, `ref`, `if`, `loop`, `return`, `yield`, `defer`, `comptime`, `quote`, `asm`.
+- **Zero Hardcoded Type or Symbol Names (Primitives AND Composites):**
+  - Never hardcode ANY Pilot type name—whether scalar (`"i64"`, `"u8"`, `"f64"`, `"char"`, `"bool"`, `"usize"`) or composite/algebraic (`"str"`, `"slice"`, `"stride"`, `"array"`, `"simd"`, `"option"`, `"result"`, `"range"`, `"span"`, `"map"`, `"SliceBuffer"`, `"RangeWindow"`, `"Dual"`, `"Signal"`, `"frame"`)—inside Rust `match` arms, string comparisons, or codegen tables.
+  - **The Universal Rename Litmus Test:** *If a developer renames `char` to `c32`, `slice<T>` to `window<T>`, `option<T>` to `maybe<T>`, `result<T, E>` to `outcome<T, E>`, and `range<T>` to `interval<T>` inside `stdlib/core/*.pilot`, the entire Rust compiler (`pilot-lexer`, `pilot-parser`, `pilot-analysis`, `pilot-perceus`, `pilot-codegen`, `pilot-vm`, `pilot-lsp`) MUST compile, type-check, and emit valid LLVM/C/WASM/GPU/ASM code with zero Rust source changes.*
+- **How Rust Must Derive All Types (5 Name-Blind Mechanisms):**
+  1. **Register & Layout Physics (`[Bits]` & `[Layout]`):** Deduce CPU register classes (`gpr_signed`, `gpr_unsigned`, `simd_float`, `simd_vector`, `raw_ptr`, `unit`, `noreturn`), bit widths, inline array repetition (`repeat`), and niche packing (`niche`) strictly from layout descriptors.
+  2. **Structural Field Anatomy (`TypeDef.fields` & `LatticeBits`):** Deduce contiguous views (`{ ptr<T>, usize }` + `0b01`), strided lenses (`{ ptr<T>, usize, isize }` + `0b01`), owned buffers (`{ ptr<T>, usize, usize }` + `0b10`), and bounds pairs (`{ T, T }` + `0b00`) from field types, byte offsets, and the 2-bit lattice (`0b00..0b11`).
+  3. **Pure Pilot Syntax Rewrites (`syntax type_construct`):** Symbolic types (`T[]`, `T[N]`, `T[..]`, `T@N`, `T?`, `T!E`, `(A) => R`) are rewritten into canonical AST types by `syntax type_construct` rules in `stdlib/core/`—never by hardcoded name mappings in the Rust parser.
+  4. **Operator & Protocol Contracts (`MethodTable`):** Deduce behavior for postfix `expr?` (any type implementing `op ?`), `for` loops (any type implementing `get_enumerator()` or structural bounds), and implicit value lifting (any type with an `implicit` constructor) from the type's resolved `MethodTable`.
+  5. **`TypeId` Receptor Slots (`__engine("bind_receptor", ...)`):** Bind lexed literals (`42`, `3.14`, `'a'`, `"hi"`, `true`) and homoiconic call-quote projections (`!`, `!!`, `!&`, `!^`, `!@`, `!?`) to the registered `TypeId` handle, populating composite fields by structural index (`0`, `1`, ...) rather than field or type names.
+- **Zero Shortcuts or Elided Logic:** Never return static, pre-computed, or dataset-specific values to make a test pass. Never leave `// TODO`, `unimplemented!()`, or stubbed branches.
+- **Pilot First (Self-Hosted Core):** Whenever logic can be expressed in Pilot without performance loss, implement it in `stdlib/core/*.pilot`, `stdlib/*`, or `selfhost/*.pilot` rather than in Rust.
 ---
 
 ## 2. Canonical Syntax Rules ("One Keyword Per Responsibility")

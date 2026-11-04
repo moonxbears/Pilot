@@ -379,6 +379,28 @@ export function loadPilotModule(
         self.out
     }
 
+    /// Section 2.8 (Phase 3.5): Physics-Driven WebAssembly Type Lowering.
+    pub fn lower_physics_to_wasm(
+        physics: pilot_analysis::types::HardwarePhysics,
+        field_wasm_types: &[String],
+    ) -> String {
+        use pilot_analysis::types::RegClass;
+        match (physics.reg_class, physics.bit_width) {
+            (RegClass::Unit, _) | (RegClass::NoReturn, _) => "".to_string(),
+            (RegClass::GprSigned, b) | (RegClass::GprUnsigned, b) if b <= 32 => "i32".to_string(),
+            (RegClass::GprSigned, 64) | (RegClass::GprUnsigned, 64) => "i64".to_string(),
+            (RegClass::GprSigned, 128) | (RegClass::GprUnsigned, 128) => "(i64, i64)".to_string(),
+            (RegClass::GprSigned, _) | (RegClass::GprUnsigned, _) => "i64".to_string(),
+            (RegClass::SimdFloat, b) if b <= 32 => "f32".to_string(),
+            (RegClass::SimdFloat, 64) => "f64".to_string(),
+            (RegClass::SimdFloat, 128) => "(f64, f64)".to_string(),
+            (RegClass::SimdFloat, _) => "f64".to_string(),
+            (RegClass::RawPtr, _) => "i32".to_string(),
+            (RegClass::SimdVector { .. }, _) => "v128".to_string(),
+            (RegClass::Composite, _) => format!("({})", field_wasm_types.join(", ")),
+        }
+    }
+
     /// Section 4.4: 5-Backend Hardware & `[Lang]` Mapping Table (WebAssembly `.wat`/`.wasm` Backend).
     pub fn map_lang_type_to_wasm(lang_item: &str, elem_types: &[&str]) -> String {
         let t0 = elem_types.first().copied().unwrap_or("i64");

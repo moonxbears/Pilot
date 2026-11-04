@@ -235,7 +235,25 @@ impl ErrorFlowAnalyzer {
                     lang_item: crate::comptime::LangItem::Result,
                 }
             }
-            _ => TryPropagationPlan::Passthrough(pruned),
+            _ => {
+                if let Some(td) = types.type_defs.get(&pruned) {
+                    if let crate::types::StructuralShape::TaggedOutcome { ok_ty, err_ty, .. } = td.shape {
+                        if let Some(err) = err_ty {
+                            return TryPropagationPlan::ResultUnwrap {
+                                unwrapped_ok_ty: ok_ty,
+                                propagated_err_ty: err,
+                                lang_item: crate::comptime::LangItem::Result,
+                            };
+                        } else {
+                            return TryPropagationPlan::OptionUnwrap {
+                                unwrapped_ty: ok_ty,
+                                lang_item: crate::comptime::LangItem::Option,
+                            };
+                        }
+                    }
+                }
+                TryPropagationPlan::Passthrough(pruned)
+            }
         }
     }
 
@@ -276,7 +294,26 @@ impl ErrorFlowAnalyzer {
                     None
                 }
             }
-            _ => None,
+            _ => {
+                if let Some(td) = types.type_defs.get(&exp) {
+                    if let crate::types::StructuralShape::TaggedOutcome { ok_ty, err_ty, .. } = td.shape {
+                        let ok_p = types.prune(ok_ty);
+                        if let Some(err) = err_ty {
+                            let err_p = types.prune(err);
+                            if is_fail_call {
+                                return Some(ImplicitLiftKind::ResultErr { ok_ty: ok_p, err_ty: err_p });
+                            } else if act == ok_p || ok_p == crate::types::TypeId::ANY {
+                                return Some(ImplicitLiftKind::ResultOk { ok_ty: ok_p, err_ty: err_p });
+                            }
+                        } else if act == crate::types::TypeId::NULL {
+                            return Some(ImplicitLiftKind::OptionNone { elem_ty: ok_p });
+                        } else if act == ok_p || ok_p == crate::types::TypeId::ANY {
+                            return Some(ImplicitLiftKind::OptionSome { elem_ty: ok_p });
+                        }
+                    }
+                }
+                None
+            }
         }
     }
 }

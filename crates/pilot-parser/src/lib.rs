@@ -165,6 +165,9 @@ pub struct ParserTables {
     pub pratt_prefix_by_name: FxHashMap<String, PrattOpSpec>,
     pub pratt_postfix_by_name: FxHashMap<String, PrattOpSpec>,
     pub receiver_ident_name: Option<String>,
+    /// Symbolic type construct targets registered via `syntax type_construct { ... }`
+    /// (e.g. `"[]"` -> `"window"`, `"?"` -> `"maybe"`, `"!"` -> `"outcome"`, `"[N]"` -> `"array"`, `"[..]"` -> `"stride"`).
+    pub type_construct_targets: FxHashMap<String, String>,
 }
 
 impl ParserTables {
@@ -274,7 +277,40 @@ impl<'a> Parser<'a> {
         }
         self.consume_semi_or_newlines();
         tables.interner = self.arena.interner.clone();
+        tables.type_construct_targets = self.tables.type_construct_targets.clone();
         Some(node)
+    }
+
+    fn extract_quote_target_type_name(&self, expr_id: NodeId) -> Option<String> {
+        if expr_id.is_none() || (expr_id.0 as usize) >= self.arena.nodes.len() {
+            return None;
+        }
+        let n = self.arena.node(expr_id);
+        match n.node_kind() {
+            NodeKind::IdentExpr | NodeKind::TypeNamed => {
+                let s = self.arena.interner.resolve(SymbolId(n.lhs));
+                if s != "quote" && !s.starts_with('$') && !s.is_empty() {
+                    return Some(s.to_string());
+                }
+            }
+            NodeKind::CallExpr | NodeKind::BlockExpr | NodeKind::Program => {
+                for &c in self.arena.children_slice(n.lhs, n.rhs) {
+                    if let Some(found) = self.extract_quote_target_type_name(NodeId(c)) {
+                        return Some(found);
+                    }
+                }
+            }
+            NodeKind::ExprStmt | NodeKind::ReturnStmt | NodeKind::BinaryExpr => {
+                return self.extract_quote_target_type_name(NodeId(n.lhs));
+            }
+            NodeKind::TypeList | NodeKind::TypeSlice => {
+                if let Some(&sym) = self.arena.type_base_symbols.get(&expr_id.0) {
+                    return Some(self.arena.interner.resolve(sym).to_string());
+                }
+            }
+            _ => {}
+        }
+        None
     }
 
     /// Finalizes `self.arena` after interleaved top-level parsing and returns the `AstArena`.
@@ -446,16 +482,25 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_generic_params(&mut self) {
+    fn parse_generic_params(&mut self) -> Vec<SymbolId> {
+        let mut params = Vec::new();
         if !self.at(TokenKind::Less) {
-            return;
+            return params;
         }
         self.advance(); // consume '<'
         let mut last_was_comma = false;
         while !self.at_end() && !self.at_greater() {
             let start_pos = self.pos;
             if self.is_ident_like() || self.peek().is_keyword() {
+                let p_name = self.text();
                 self.advance();
+                if p_name == "const" && (self.is_ident_like() || self.peek().is_keyword()) {
+                    let const_param_name = self.text();
+                    self.advance();
+                    params.push(self.arena.interner.intern(const_param_name));
+                } else {
+                    params.push(self.arena.interner.intern(p_name));
+                }
                 if self.at(TokenKind::Colon) {
                     self.advance();
                     if self.at(TokenKind::KwConst) || (self.is_ident_like() && self.text() == "const") {
@@ -473,7 +518,7 @@ impl<'a> Parser<'a> {
                         let _ = self.parse_type();
                     }
                 } else if self.at(TokenKind::Less) {
-                    self.parse_generic_params();
+                    let _ = self.parse_generic_params();
                 } else {
                     self.advance();
                 }
@@ -493,6 +538,7 @@ impl<'a> Parser<'a> {
             self.errors.push("Trailing comma rejected in generic parameters".to_string());
         }
         self.expect_greater();
+        params
     }
 
     fn peek_is_polyglot_block(&self) -> bool {
@@ -1505,6 +1551,30 @@ impl<'a> Parser<'a> {
                 };
                 if self.at(TokenKind::Semicolon) {
                     self.advance();
+                }
+                if group_name == "type_construct" && body_expr.is_some() {
+                    if let Some(target_base) = self.extract_quote_target_type_name(body_expr) {
+                        let construct_key = if pat_str.contains("[..]") {
+                            Some("[..]")
+                        } else if pat_str.contains("[]") {
+                            Some("[]")
+                        } else if pat_str.contains('[') && pat_str.contains(']') {
+                            Some("[N]")
+                        } else if pat_str.contains('@') {
+                            Some("@")
+                        } else if pat_str.contains('?') {
+                            Some("?")
+                        } else if pat_str.contains('!') {
+                            Some("!")
+                        } else if pat_str.contains("=>") {
+                            Some("=>")
+                        } else {
+                            None
+                        };
+                        if let Some(key) = construct_key {
+                            self.tables.type_construct_targets.insert(key.to_string(), target_base);
+                        }
+                    }
                 }
                 let sym = self.arena.interner.intern(&group_name);
                 let pat_node = self.arena.alloc_str(&pat_str, rule_span);
@@ -2539,16 +2609,22 @@ impl<'a> Parser<'a> {
         let sym = self.arena.interner.intern(name);
 
         // Generic type params: <T, U>
-        if self.at(TokenKind::Less) {
-            self.parse_generic_params();
-        }
+        let type_params = if self.at(TokenKind::Less) {
+            self.parse_generic_params()
+        } else {
+            Vec::new()
+        };
 
         // Inheritance list: : IBase1, IBase2
+        let mut base_types = Vec::new();
         if self.at(TokenKind::Colon) {
             self.advance(); // consume ':'
             let mut last_was_comma = false;
             while !self.at_end() && !self.at(TokenKind::LBrace) && !self.at(TokenKind::Semicolon) {
-                let _ = self.parse_type();
+                let base_ty = self.parse_type();
+                if base_ty.is_some() {
+                    base_types.push(base_ty);
+                }
                 last_was_comma = false;
                 if self.at(TokenKind::Comma) {
                     self.advance();
@@ -2567,11 +2643,25 @@ impl<'a> Parser<'a> {
                 self.advance();
             }
             let span = ByteSpan::new(start_span.start, self.prev_span().end);
-            return self.arena.alloc_node(NodeKind::StructDecl, 0, span, sym.0, 0);
+            let node = self.arena.alloc_node(NodeKind::StructDecl, 0, span, sym.0, 0);
+            if !type_params.is_empty() {
+                self.arena.struct_type_params.insert(node.0, type_params);
+            }
+            if !base_types.is_empty() {
+                self.arena.struct_base_types.insert(node.0, base_types);
+            }
+            return node;
         }
         let body = self.parse_block_expr();
         let span = ByteSpan::new(start_span.start, self.arena.span(body).end);
-        self.arena.alloc_node(NodeKind::StructDecl, 0, span, sym.0, body.0)
+        let node = self.arena.alloc_node(NodeKind::StructDecl, 0, span, sym.0, body.0);
+        if !type_params.is_empty() {
+            self.arena.struct_type_params.insert(node.0, type_params);
+        }
+        if !base_types.is_empty() {
+            self.arena.struct_base_types.insert(node.0, base_types);
+        }
+        node
     }
 
     fn parse_record_decl(&mut self) -> NodeId {
@@ -2637,16 +2727,22 @@ impl<'a> Parser<'a> {
         let sym = self.arena.interner.intern(name);
 
         // Generic type params: <T, U>
-        if self.at(TokenKind::Less) {
-            self.parse_generic_params();
-        }
+        let type_params = if self.at(TokenKind::Less) {
+            self.parse_generic_params()
+        } else {
+            Vec::new()
+        };
 
         // Inheritance list: : IBase1, IBase2
+        let mut base_types = Vec::new();
         if self.at(TokenKind::Colon) {
             self.advance(); // consume ':'
             let mut last_was_comma = false;
             while !self.at_end() && !self.at(TokenKind::LBrace) && !self.at(TokenKind::Semicolon) {
-                let _ = self.parse_type();
+                let base_ty = self.parse_type();
+                if base_ty.is_some() {
+                    base_types.push(base_ty);
+                }
                 last_was_comma = false;
                 if self.at(TokenKind::Comma) {
                     self.advance();
@@ -2665,11 +2761,25 @@ impl<'a> Parser<'a> {
                 self.advance();
             }
             let span = ByteSpan::new(start_span.start, self.prev_span().end);
-            return self.arena.alloc_node(NodeKind::InterfaceDecl, 0, span, sym.0, 0);
+            let node = self.arena.alloc_node(NodeKind::InterfaceDecl, 0, span, sym.0, 0);
+            if !type_params.is_empty() {
+                self.arena.struct_type_params.insert(node.0, type_params);
+            }
+            if !base_types.is_empty() {
+                self.arena.struct_base_types.insert(node.0, base_types);
+            }
+            return node;
         }
         let body = self.parse_block_expr();
         let span = ByteSpan::new(start_span.start, self.arena.span(body).end);
-        self.arena.alloc_node(NodeKind::InterfaceDecl, 0, span, sym.0, body.0)
+        let node = self.arena.alloc_node(NodeKind::InterfaceDecl, 0, span, sym.0, body.0);
+        if !type_params.is_empty() {
+            self.arena.struct_type_params.insert(node.0, type_params);
+        }
+        if !base_types.is_empty() {
+            self.arena.struct_base_types.insert(node.0, base_types);
+        }
+        node
     }
 
     fn parse_extend_decl(&mut self) -> NodeId {
@@ -5701,7 +5811,12 @@ impl<'a> Parser<'a> {
                 }
                 let span = self.span();
                 self.advance();
-                lhs = self.arena.alloc_node(NodeKind::TypeOptional, 0, span, lhs.0, 0);
+                let new_lhs = self.arena.alloc_node(NodeKind::TypeOptional, 0, span, lhs.0, 0);
+                if let Some(target) = self.tables.type_construct_targets.get("?").cloned() {
+                    let sym = self.arena.interner.intern(&target);
+                    self.arena.type_base_symbols.insert(new_lhs.0, sym);
+                }
+                lhs = new_lhs;
                 continue;
             }
 
@@ -5739,7 +5854,12 @@ impl<'a> Parser<'a> {
                 let span = self.span();
                 self.advance();
                 let ret = self.parse_type_bp(TypePrecedence::FnArrow as u8);
-                lhs = self.arena.alloc_node(NodeKind::TypeFn, 0, span, lhs.0, ret.0);
+                let new_lhs = self.arena.alloc_node(NodeKind::TypeFn, 0, span, lhs.0, ret.0);
+                if let Some(target) = self.tables.type_construct_targets.get("=>").cloned() {
+                    let sym = self.arena.interner.intern(&target);
+                    self.arena.type_base_symbols.insert(new_lhs.0, sym);
+                }
+                lhs = new_lhs;
                 continue;
             }
 
@@ -5771,7 +5891,12 @@ impl<'a> Parser<'a> {
                 } else {
                     self.parse_type_bp(TypePrecedence::Fallible as u8 + 1)
                 };
-                lhs = self.arena.alloc_node(NodeKind::TypeFallible, 0, span, lhs.0, err.0);
+                let new_lhs = self.arena.alloc_node(NodeKind::TypeFallible, 0, span, lhs.0, err.0);
+                if let Some(target) = self.tables.type_construct_targets.get("!").cloned() {
+                    let sym = self.arena.interner.intern(&target);
+                    self.arena.type_base_symbols.insert(new_lhs.0, sym);
+                }
+                lhs = new_lhs;
                 continue;
             }
 
@@ -5796,15 +5921,15 @@ impl<'a> Parser<'a> {
                 }
                 self.expect_greater();
                 let span = ByteSpan::new(start_span.start, self.prev_span().end);
-                let base_name = if lhs.is_some() && self.arena.node(lhs).node_kind() == NodeKind::TypeNamed {
-                    self.arena
-                        .interner
-                        .resolve(SymbolId(self.arena.node(lhs).lhs))
-                        .to_string()
+                let base_sym = if lhs.is_some() && self.arena.node(lhs).node_kind() == NodeKind::TypeNamed {
+                    Some(SymbolId(self.arena.node(lhs).lhs))
                 } else {
-                    String::new()
+                    None
                 };
-                lhs = match base_name.as_str() {
+                let base_name = base_sym
+                    .map(|s| self.arena.interner.resolve(s).to_string())
+                    .unwrap_or_default();
+                let new_lhs = match base_name.as_str() {
                     "Map" | "map" | "Dict" | "dict" | "HashMap" | "NativeMap" if type_args.len() >= 2 => {
                         self.arena.alloc_node(NodeKind::TypeMap, 0, span, type_args[0].0, type_args[1].0)
                     }
@@ -5846,6 +5971,25 @@ impl<'a> Parser<'a> {
                         }
                     }
                 };
+                if let Some(bs) = base_sym {
+                    self.arena.type_base_symbols.insert(new_lhs.0, bs);
+                }
+                lhs = new_lhs;
+                continue;
+            }
+
+            if k == TokenKind::At {
+                // T@N -> simd<T, N> (or registered '@' construct)
+                let start_span = self.span();
+                self.advance(); // consume '@'
+                let n_expr = self.parse_expr_prefix(ExprPrecedence::Lowest as u8);
+                let span = ByteSpan::new(start_span.start, self.prev_span().end);
+                let new_lhs = self.arena.alloc_node(NodeKind::TypeSlice, 5, span, lhs.0, n_expr.0);
+                if let Some(target) = self.tables.type_construct_targets.get("@").cloned() {
+                    let sym = self.arena.interner.intern(&target);
+                    self.arena.type_base_symbols.insert(new_lhs.0, sym);
+                }
+                lhs = new_lhs;
                 continue;
             }
 
@@ -5853,24 +5997,39 @@ impl<'a> Parser<'a> {
                 let start_span = self.span();
                 self.advance(); // consume '['
                 if self.at(TokenKind::RBracket) {
-                    // T[] -> slice<T>
+                    // T[] -> slice<T> (or registered '[]' construct)
                     self.advance();
                     let span = ByteSpan::new(start_span.start, self.prev_span().end);
-                    lhs = self.arena.alloc_node(NodeKind::TypeSlice, 0, span, lhs.0, 0);
+                    let new_lhs = self.arena.alloc_node(NodeKind::TypeSlice, 0, span, lhs.0, 0);
+                    if let Some(target) = self.tables.type_construct_targets.get("[]").cloned() {
+                        let sym = self.arena.interner.intern(&target);
+                        self.arena.type_base_symbols.insert(new_lhs.0, sym);
+                    }
+                    lhs = new_lhs;
                     continue;
                 } else if self.at(TokenKind::DotDot) {
-                    // T[..] -> stride<T>
+                    // T[..] -> stride<T> (or registered '[..]' construct)
                     self.advance();
                     self.expect(TokenKind::RBracket);
                     let span = ByteSpan::new(start_span.start, self.prev_span().end);
-                    lhs = self.arena.alloc_node(NodeKind::TypeSlice, 3, span, lhs.0, 0);
+                    let new_lhs = self.arena.alloc_node(NodeKind::TypeSlice, 3, span, lhs.0, 0);
+                    if let Some(target) = self.tables.type_construct_targets.get("[..]").cloned() {
+                        let sym = self.arena.interner.intern(&target);
+                        self.arena.type_base_symbols.insert(new_lhs.0, sym);
+                    }
+                    lhs = new_lhs;
                     continue;
                 } else {
-                    // T[N] -> array<T, N>
+                    // T[N] -> array<T, N> (or registered '[N]' construct)
                     let n_expr = self.parse_expr();
                     self.expect(TokenKind::RBracket);
                     let span = ByteSpan::new(start_span.start, self.prev_span().end);
-                    lhs = self.arena.alloc_node(NodeKind::TypeSlice, 1, span, lhs.0, n_expr.0);
+                    let new_lhs = self.arena.alloc_node(NodeKind::TypeSlice, 1, span, lhs.0, n_expr.0);
+                    if let Some(target) = self.tables.type_construct_targets.get("[N]").cloned() {
+                        let sym = self.arena.interner.intern(&target);
+                        self.arena.type_base_symbols.insert(new_lhs.0, sym);
+                    }
+                    lhs = new_lhs;
                     continue;
                 }
             }

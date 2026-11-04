@@ -648,6 +648,12 @@ pub struct AstArena {
     pub clearance_exprs: std::collections::HashMap<u32, NodeId>,
     pub operator_bodies: std::collections::HashMap<u32, NodeId>,
     pub operator_params: std::collections::HashMap<u32, Vec<NodeId>>,
+    /// Generic type parameter names `<T, U>` declared on `StructDecl` or `InterfaceDecl`.
+    pub struct_type_params: std::collections::HashMap<u32, Vec<SymbolId>>,
+    /// Inherited base type nodes `: IBase1, IBase2` declared on `StructDecl` or `InterfaceDecl`.
+    pub struct_base_types: std::collections::HashMap<u32, Vec<NodeId>>,
+    /// Generic base symbol for parameterized type nodes (`Name<T, U>`).
+    pub type_base_symbols: std::collections::HashMap<u32, SymbolId>,
 }
 
 impl AstArena {
@@ -685,6 +691,9 @@ impl AstArena {
             clearance_exprs: std::collections::HashMap::new(),
             operator_bodies: std::collections::HashMap::new(),
             operator_params: std::collections::HashMap::new(),
+            struct_type_params: std::collections::HashMap::new(),
+            struct_base_types: std::collections::HashMap::new(),
+            type_base_symbols: std::collections::HashMap::new(),
         }
     }
 

@@ -97,6 +97,50 @@ impl ComptimeValue {
     }
 }
 
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ReceptorSlot {
+    // Literal & Condition Receptors
+    BoolCondition,         // Type produced by `true`, `false`, and consumed by `if` conditions
+    IntLiteral,            // Default integer literal receptor (`42`)
+    UintLiteral,           // Default unsigned/size literal receptor
+    FloatLiteral,          // Default float literal receptor (`3.14`)
+    CharLiteral,           // Default character literal receptor (`'a'`)
+    Utf8StrLiteral,        // Default string literal receptor (`"hello"`)
+    VoidUnit,              // 0-bit unit receptor (`()`)
+    NeverBottom,           // 0-bit diverging bottom receptor
+
+    // 6 Homoiconic Call-Quoting Receptors (`!`, `!!`, `!&`, `!^`, `!@`, `!?`)
+    ShallowQuoteSlot,      // Receptor for `fn!(a, b)`
+    DeepSpliceSlot,        // Receptor for `fn!!(~a, b)`
+    AbiFrameSlot,          // Receptor for `fn!&(a, b)`
+    ReactiveSignalSlot,    // Receptor for `fn!^(a, b)`
+    SymbolicAdjointSlot,   // Receptor for `fn!@(a, b)`
+    EffectDryRunSlot,      // Receptor for `fn!?(a, b)`
+}
+
+impl ReceptorSlot {
+    pub fn from_slot_or_lang_name(name: &str) -> Option<Self> {
+        match name {
+            "bool_condition" | "bool" => Some(Self::BoolCondition),
+            "int_literal" | "i64" => Some(Self::IntLiteral),
+            "uint_literal" | "usize" => Some(Self::UintLiteral),
+            "float_literal" | "f64" => Some(Self::FloatLiteral),
+            "char_literal" | "char" => Some(Self::CharLiteral),
+            "utf8_str_literal" | "str" => Some(Self::Utf8StrLiteral),
+            "void_unit" | "void" => Some(Self::VoidUnit),
+            "never_bottom" | "never" => Some(Self::NeverBottom),
+            "shallow_quote" | "CallExpr" => Some(Self::ShallowQuoteSlot),
+            "deep_splice" | "ast" => Some(Self::DeepSpliceSlot),
+            "abi_frame" | "frame" => Some(Self::AbiFrameSlot),
+            "reactive_signal" | "Signal" => Some(Self::ReactiveSignalSlot),
+            "symbolic_adjoint" | "Dual" => Some(Self::SymbolicAdjointSlot),
+            "effect_dry_run" | "EffectPlan" => Some(Self::EffectDryRunSlot),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LangItem {
     IAnyValue,
@@ -207,20 +251,40 @@ impl LangItem {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum RegisterClass {
+    Unit,
+    NoReturn,
     GprUnsigned,
     GprSigned,
     SimdFloat,
+    SimdVector { lanes: u16 },
     RawPtr,
+    Composite,
 }
 
 impl RegisterClass {
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
+            "unit" | "void" => Some(Self::Unit),
+            "no_return" | "never" => Some(Self::NoReturn),
             "gpr_unsigned" => Some(Self::GprUnsigned),
             "gpr_signed" => Some(Self::GprSigned),
             "simd_float" => Some(Self::SimdFloat),
             "raw_ptr" => Some(Self::RawPtr),
+            "composite" => Some(Self::Composite),
             _ => None,
+        }
+    }
+
+    pub fn to_reg_class(self) -> crate::types::RegClass {
+        match self {
+            Self::Unit => crate::types::RegClass::Unit,
+            Self::NoReturn => crate::types::RegClass::NoReturn,
+            Self::GprSigned => crate::types::RegClass::GprSigned,
+            Self::GprUnsigned => crate::types::RegClass::GprUnsigned,
+            Self::SimdFloat => crate::types::RegClass::SimdFloat,
+            Self::SimdVector { lanes } => crate::types::RegClass::SimdVector { lanes },
+            Self::RawPtr => crate::types::RegClass::RawPtr,
+            Self::Composite => crate::types::RegClass::Composite,
         }
     }
 }
@@ -231,6 +295,9 @@ pub enum MemoryLayoutMode {
     Soa,
     Transparent,
     Packed,
+    Niche,
+    RegisterPair,
+    InlineArray,
 }
 
 impl MemoryLayoutMode {
@@ -240,6 +307,9 @@ impl MemoryLayoutMode {
             "soa" => Some(Self::Soa),
             "transparent" => Some(Self::Transparent),
             "packed" => Some(Self::Packed),
+            "niche" => Some(Self::Niche),
+            "register_pair" => Some(Self::RegisterPair),
+            "inline_array" => Some(Self::InlineArray),
             _ => None,
         }
     }
@@ -269,9 +339,12 @@ pub struct TypeLayoutSpec {
     pub decl_node: NodeId,
     pub bit_width: u32,
     pub reg_class: RegisterClass,
+    pub has_explicit_register_layout: bool,
     pub memory_layout: Option<MemoryLayoutMode>,
     pub lattice_bits: u8,
+    pub type_params: Vec<String>,
     pub fields: Vec<(String, usize, usize)>, // (name, offset_bytes, size_bytes)
+    pub field_types: Vec<String>,            // Declared field type expressions for structural/generic deduction
     /// Operator symbol -> lowered SSA opcode (e.g. "+" -> "add", "<" -> "ult", "!" -> "xor")
     pub operators: FxHashMap<String, String>,
 }
@@ -282,17 +355,54 @@ impl TypeLayoutSpec {
             type_name,
             decl_node,
             bit_width: 0,
-            reg_class: RegisterClass::GprUnsigned,
+            reg_class: RegisterClass::Composite,
+            has_explicit_register_layout: false,
             memory_layout: None,
             lattice_bits: 0b00,
+            type_params: Vec::new(),
             fields: Vec::new(),
+            field_types: Vec::new(),
             operators: FxHashMap::default(),
+        }
+    }
+
+    pub fn hardware_physics(&self) -> crate::types::HardwarePhysics {
+        if self.has_explicit_register_layout {
+            let rc = if self.bit_width == 0 && self.fields.is_empty() {
+                if self.reg_class == RegisterClass::NoReturn {
+                    crate::types::RegClass::NoReturn
+                } else {
+                    crate::types::RegClass::Unit
+                }
+            } else {
+                self.reg_class.to_reg_class()
+            };
+            crate::types::HardwarePhysics {
+                reg_class: rc,
+                bit_width: self.bit_width,
+            }
+        } else {
+            crate::types::HardwarePhysics {
+                reg_class: crate::types::RegClass::Composite,
+                bit_width: (self.byte_size() * 8) as u32,
+            }
         }
     }
 
     pub fn byte_size(&self) -> usize {
         if self.bit_width == 0 {
-            self.fields.iter().map(|(_, _, sz)| *sz).sum()
+            if self.fields.is_empty() {
+                0
+            } else {
+                let last_end = self
+                    .fields
+                    .iter()
+                    .map(|(_, off, sz)| *off + *sz)
+                    .max()
+                    .unwrap_or(0);
+                let align = self.byte_align().max(1);
+                (last_end + align - 1) & !(align - 1)
+            }
         } else {
             ((self.bit_width as usize) + 7) / 8
         }
@@ -302,6 +412,7 @@ impl TypeLayoutSpec {
         if self.bit_width == 0 {
             self.fields
                 .iter()
+                .filter(|(_, _, fsz)| *fsz > 0)
                 .map(|(_, _, fsz)| (*fsz).next_power_of_two().min(8))
                 .max()
                 .unwrap_or(1)
@@ -369,11 +480,14 @@ pub struct ComptimeEngine {
     pub functions: Vec<ComptimeFnDef>,
     pub lang_items: FxHashMap<LangItem, NodeId>,
     pub lang_items_by_name: FxHashMap<String, NodeId>,
+    pub receptor_slots: FxHashMap<ReceptorSlot, NodeId>,
+    pub receptor_type_names: FxHashMap<ReceptorSlot, String>,
     pub type_layouts: FxHashMap<String, TypeLayoutSpec>,
     pub bundle_layouts: FxHashMap<String, TypeLayoutSpec>,
     pub node_to_type_name: FxHashMap<u32, String>,
     pub inline_hints: FxHashMap<u32, InlineHint>,
     pub lattice_interfaces: FxHashMap<String, u8>,
+    pub type_construct_targets: FxHashMap<String, String>,
     pub core_naming_enforced_pkgs: Vec<String>,
     pub active_pkg: Option<String>,
     pub active_clearance: u32,
@@ -417,6 +531,24 @@ impl ComptimeEngine {
         self.type_layouts
             .get(type_name)
             .and_then(|spec| spec.operators.get(op_sym).map(|s| s.as_str()))
+    }
+
+    pub fn ssa_opcode_for_physics(&self, reg_class: RegisterClass, bit_width: u32, op_sym: &str) -> Option<&str> {
+        for spec in self.type_layouts.values() {
+            if spec.has_explicit_register_layout
+                && spec.reg_class == reg_class
+                && spec.bit_width == bit_width
+            {
+                if let Some(op) = spec.operators.get(op_sym) {
+                    return Some(op.as_str());
+                }
+            }
+        }
+        None
+    }
+
+    pub fn receptor_type_name(&self, slot: ReceptorSlot) -> Option<&str> {
+        self.receptor_type_names.get(&slot).map(|s| s.as_str())
     }
 
     pub fn register_comptime_fn(
@@ -491,10 +623,13 @@ impl ComptimeEngine {
             return Ok(ComptimeValue::Void);
         }
 
-        // Sync interner symbols from arena into parser_tables
+        // Sync interner symbols and type construct targets from arena/parser_tables
         for i in 0..arena.interner.symbol_count() {
             let s = arena.interner.resolve(SymbolId(i as u32));
             parser_tables.interner.intern(s);
+        }
+        for (k, v) in &parser_tables.type_construct_targets {
+            self.type_construct_targets.insert(k.clone(), v.clone());
         }
 
         // Check for package declaration `pkg Pilot.Core.Genesis;`
@@ -542,13 +677,17 @@ impl ComptimeEngine {
                             if c_node.node_kind() == NodeKind::LetStmt {
                                 let f_name = arena.interner.resolve(SymbolId(c_node.lhs)).to_string();
                                 let f_ty_id = arena.type_annotations.get(&c_id.0).copied().unwrap_or(NodeId::NONE);
+                                let f_ty_str = self.format_type_node(arena, f_ty_id);
                                 let f_size = self.estimate_type_node_size(arena, f_ty_id);
+                                let f_lat = self.estimate_type_node_lattice(arena, f_ty_id);
                                 let aligned = if f_size > 0 {
                                     (field_offset + (f_size - 1)) & !(f_size - 1)
                                 } else {
                                     field_offset
                                 };
                                 bspec.fields.push((f_name, aligned, f_size));
+                                bspec.field_types.push(f_ty_str);
+                                bspec.lattice_bits |= f_lat;
                                 field_offset = aligned + f_size;
                             } else if c_node.node_kind() == NodeKind::OperatorDecl {
                                 let op_sym_id = arena.operator_symbols.get(&c_id.0).copied().unwrap_or(SymbolId(0));
@@ -594,17 +733,30 @@ impl ComptimeEngine {
             NodeKind::StructDecl => {
                 let name_str = arena.interner.resolve(SymbolId(node.lhs)).to_string();
                 self.node_to_type_name.insert(item_id.0, name_str.clone());
-                let init_lattice = match name_str.as_str() {
-                    "slice" | "stride" | "str" | "SliceView" | "ref" => 0b01,
-                    "SliceBuffer" | "iso" => 0b10,
-                    "ArenaScope" => 0b11,
-                    _ => 0b00,
-                };
+                let mut init_lattice = 0b00;
+                if let Some(bases) = arena.struct_base_types.get(&item_id.0) {
+                    for &base_ty_node in bases {
+                        let base_name = self.format_type_node(arena, base_ty_node);
+                        let base_head = base_name.split('<').next().unwrap_or(&base_name).trim();
+                        if let Some(&lat) = self.lattice_interfaces.get(base_head) {
+                            init_lattice |= lat;
+                        }
+                    }
+                }
+                let type_params: Vec<String> = arena
+                    .struct_type_params
+                    .get(&item_id.0)
+                    .map(|syms| syms.iter().map(|&s| arena.interner.resolve(s).to_string()).collect())
+                    .unwrap_or_default();
+
                 let entry = self
                     .type_layouts
                     .entry(name_str.clone())
                     .or_insert_with(|| TypeLayoutSpec::new(name_str.clone(), item_id));
                 entry.lattice_bits |= init_lattice;
+                if !type_params.is_empty() && entry.type_params.is_empty() {
+                    entry.type_params = type_params;
+                }
 
                 // Execute `[Lang(...), Bits(...), Layout(...)]` attributes left-to-right
                 desugar_bracket_attributes(arena, item_id, parser_tables, self)?;
@@ -618,7 +770,9 @@ impl ComptimeEngine {
                         .unwrap_or(0);
                     for (f_sym, f_ty_id) in fields {
                         let f_name = arena.interner.resolve(f_sym).to_string();
+                        let f_ty_str = self.format_type_node(arena, f_ty_id);
                         let f_size = self.estimate_type_node_size(arena, f_ty_id);
+                        let f_lat = self.estimate_type_node_lattice(arena, f_ty_id);
                         let aligned = if f_size > 0 {
                             (field_offset + (f_size - 1)) & !(f_size - 1)
                         } else {
@@ -626,6 +780,8 @@ impl ComptimeEngine {
                         };
                         if let Some(layout) = self.type_layouts.get_mut(&name_str) {
                             layout.fields.push((f_name, aligned, f_size));
+                            layout.field_types.push(f_ty_str);
+                            layout.lattice_bits |= f_lat;
                         }
                         field_offset = aligned + f_size;
                     }
@@ -650,6 +806,7 @@ impl ComptimeEngine {
                         NodeKind::LetStmt => {
                             let f_name = arena.interner.resolve(SymbolId(c_node.lhs)).to_string();
                             let f_ty_id = arena.type_annotations.get(&c_id.0).copied().unwrap_or(NodeId::NONE);
+                            let f_ty_str = self.format_type_node(arena, f_ty_id);
                             let f_size = self.estimate_type_node_size(arena, f_ty_id);
                             let f_lat = self.estimate_type_node_lattice(arena, f_ty_id);
                             if let Some(layout) = self.type_layouts.get_mut(&name_str) {
@@ -660,6 +817,7 @@ impl ComptimeEngine {
                                     cur_off
                                 };
                                 layout.fields.push((f_name, aligned, f_size));
+                                layout.field_types.push(f_ty_str);
                                 layout.lattice_bits |= f_lat;
                             }
                         }
@@ -682,7 +840,7 @@ impl ComptimeEngine {
                                             let bname = arena.interner.resolve(SymbolId(op_node.lhs)).to_string();
                                             if let Some(bspec) = self.bundle_layouts.get(&bname).cloned() {
                                                 if let Some(layout) = self.type_layouts.get_mut(&name_str) {
-                                                    for (fnm, _, fsz) in bspec.fields {
+                                                    for ((fnm, _, fsz), fty) in bspec.fields.into_iter().zip(bspec.field_types.into_iter().chain(std::iter::repeat(String::new()))) {
                                                         let cur_off = layout.byte_size();
                                                         let aligned = if fsz > 0 {
                                                             (cur_off + (fsz - 1)) & !(fsz - 1)
@@ -690,10 +848,36 @@ impl ComptimeEngine {
                                                             cur_off
                                                         };
                                                         layout.fields.push((fnm, aligned, fsz));
+                                                        layout.field_types.push(fty);
                                                     }
+                                                    layout.lattice_bits |= bspec.lattice_bits;
                                                     for (op_k, op_v) in bspec.operators {
                                                         layout.operators.insert(op_k, op_v);
                                                     }
+                                                }
+                                                let spliced_ftys: Vec<String> = self
+                                                    .type_layouts
+                                                    .get(&name_str)
+                                                    .map(|l| l.field_types.clone())
+                                                    .unwrap_or_default();
+                                                let host_lat = self
+                                                    .type_layouts
+                                                    .get(&name_str)
+                                                    .map(|l| l.lattice_bits)
+                                                    .unwrap_or(0);
+                                                let mut extra_lat = 0u8;
+                                                for fty in &spliced_ftys {
+                                                    let f_base = fty.split('<').next().unwrap_or(fty).trim();
+                                                    let is_raw_ptr = self
+                                                        .type_layouts
+                                                        .get(f_base)
+                                                        .map_or(false, |s| s.has_explicit_register_layout && s.reg_class == RegisterClass::RawPtr);
+                                                    if !((host_lat & 0b10) != 0 && is_raw_ptr) {
+                                                        extra_lat |= self.query_type_size_align_lattice(fty).2;
+                                                    }
+                                                }
+                                                if let Some(layout) = self.type_layouts.get_mut(&name_str) {
+                                                    layout.lattice_bits |= extra_lat;
                                                 }
                                             }
                                         }
@@ -829,97 +1013,192 @@ impl ComptimeEngine {
         }
     }
 
+    pub fn format_type_node(&self, arena: &AstArena, ty_node: NodeId) -> String {
+        if ty_node.is_none() || (ty_node.0 as usize) >= arena.nodes.len() {
+            return String::new();
+        }
+        let n = *arena.node(ty_node);
+        let override_base = arena
+            .type_base_symbols
+            .get(&ty_node.0)
+            .map(|&s| arena.interner.resolve(s).to_string());
+        match n.node_kind() {
+            NodeKind::IdentExpr | NodeKind::TypeNamed => {
+                arena.interner.resolve(SymbolId(n.lhs)).to_string()
+            }
+            NodeKind::TypeOptional => {
+                let inner = self.format_type_node(arena, NodeId(n.lhs));
+                let base = override_base
+                    .or_else(|| self.type_construct_targets.get("?").cloned())
+                    .unwrap_or_else(|| "option".to_string());
+                format!("{}<{}>", base, inner)
+            }
+            NodeKind::TypeFallible => {
+                let ok = self.format_type_node(arena, NodeId(n.lhs));
+                let err = self.format_type_node(arena, NodeId(n.rhs));
+                let base = override_base
+                    .or_else(|| self.type_construct_targets.get("!").cloned())
+                    .unwrap_or_else(|| "result".to_string());
+                if err.is_empty() {
+                    format!("{}<{}>", base, ok)
+                } else {
+                    format!("{}<{}, {}>", base, ok, err)
+                }
+            }
+            NodeKind::TypeSlice => {
+                let elem = self.format_type_node(arena, NodeId(n.lhs));
+                let base = override_base.unwrap_or_else(|| match n.flags {
+                    0 => self
+                        .type_construct_targets
+                        .get("[]")
+                        .cloned()
+                        .unwrap_or_else(|| "slice".to_string()),
+                    1 => self
+                        .type_construct_targets
+                        .get("[N]")
+                        .cloned()
+                        .unwrap_or_else(|| "SliceBuffer".to_string()),
+                    2 => "SliceView".to_string(),
+                    3 => self
+                        .type_construct_targets
+                        .get("[..]")
+                        .cloned()
+                        .unwrap_or_else(|| "stride".to_string()),
+                    4 => "View".to_string(),
+                    5 => self
+                        .type_construct_targets
+                        .get("@")
+                        .cloned()
+                        .unwrap_or_else(|| "simd".to_string()),
+                    _ => "slice".to_string(),
+                });
+                format!("{}<{}>", base, elem)
+            }
+            NodeKind::TypeList => {
+                let base = override_base.unwrap_or_else(|| "List".to_string());
+                if n.rhs == 0 {
+                    let elem = self.format_type_node(arena, NodeId(n.lhs));
+                    format!("{}<{}>", base, elem)
+                } else {
+                    let args: Vec<String> = arena
+                        .children_slice(n.lhs, n.rhs)
+                        .iter()
+                        .map(|&c| self.format_type_node(arena, NodeId(c)))
+                        .collect();
+                    format!("{}<{}>", base, args.join(", "))
+                }
+            }
+            NodeKind::TypeMap => {
+                let k = self.format_type_node(arena, NodeId(n.lhs));
+                let v = self.format_type_node(arena, NodeId(n.rhs));
+                let base = override_base.unwrap_or_else(|| "map".to_string());
+                format!("{}<{}, {}>", base, k, v)
+            }
+            NodeKind::TypeTuple => {
+                let args: Vec<String> = arena
+                    .children_slice(n.lhs, n.rhs)
+                    .iter()
+                    .map(|&c| self.format_type_node(arena, NodeId(c)))
+                    .collect();
+                format!("tuple<{}>", args.join(", "))
+            }
+            _ => String::new(),
+        }
+    }
+
     fn estimate_type_node_size(&self, arena: &AstArena, ty_node: NodeId) -> usize {
         if ty_node.is_none() || (ty_node.0 as usize) >= arena.nodes.len() {
             return 8;
         }
-        let n = *arena.node(ty_node);
-        match n.node_kind() {
-            NodeKind::IdentExpr | NodeKind::TypeNamed => {
-                let tname = arena.interner.resolve(SymbolId(n.lhs));
-                if let Some(spec) = self.type_layouts.get(tname) {
-                    let sz = spec.byte_size();
-                    if sz > 0 {
-                        return sz;
-                    }
-                }
-                match tname {
-                    "bool" | "u8" | "i8" => 1,
-                    "u16" | "i16" | "f16" => 2,
-                    "u32" | "i32" | "f32" | "char" => 4,
-                    "u64" | "i64" | "f64" | "usize" | "isize" | "ptr" => 8,
-                    "u128" | "i128" | "f128" | "slice" | "str" | "SliceView" => 16,
-                    "stride" | "SliceBuffer" => 24,
-                    _ => 8,
-                }
+        let formatted = self.format_type_node(arena, ty_node);
+        if !formatted.is_empty() {
+            let (sz, _, _) = self.query_type_size_align_lattice(&formatted);
+            if sz > 0 {
+                return sz;
             }
-            NodeKind::TypeSlice => match n.flags {
-                0 | 2 => 16, // slice<T> or SliceView<T>
-                1 | 3 => 24, // SliceBuffer<T> or stride<T>
-                _ => 16,
-            },
-            _ => 8,
         }
+        8
     }
 
     fn estimate_type_node_lattice(&self, arena: &AstArena, ty_node: NodeId) -> u8 {
         if ty_node.is_none() || (ty_node.0 as usize) >= arena.nodes.len() {
             return 0b00;
         }
-        let n = *arena.node(ty_node);
-        match n.node_kind() {
-            NodeKind::IdentExpr | NodeKind::TypeNamed => {
-                let tname = arena.interner.resolve(SymbolId(n.lhs));
-                if let Some(spec) = self.type_layouts.get(tname) {
-                    return spec.lattice_bits;
-                }
-                match tname {
-                    "slice" | "stride" | "str" | "SliceView" | "ref" => 0b01,
-                    "SliceBuffer" | "iso" => 0b10,
-                    "ArenaScope" => 0b11,
-                    _ => 0b00,
-                }
-            }
-            NodeKind::TypeSlice => match n.flags {
-                0 | 2 | 3 => 0b01, // slice<T>, SliceView<T>, stride<T>
-                1 => 0b10,         // SliceBuffer<T>
-                _ => 0b01,
-            },
-            _ => 0b00,
+        let formatted = self.format_type_node(arena, ty_node);
+        if !formatted.is_empty() {
+            return self.query_type_size_align_lattice(&formatted).2;
         }
+        0b00
     }
 
     pub fn query_type_size_align_lattice(&self, tname: &str) -> (usize, usize, u8) {
-        if let Some(lt_idx) = tname.find('<') {
-            let base = tname[..lt_idx].trim();
-            let arg = tname[lt_idx + 1..tname.len().saturating_sub(1)].trim();
-            if base == "RangeWindow" {
-                let (arg_sz, arg_align, arg_lat) = self.query_type_size_align_lattice(arg);
-                let field_count = self
-                    .type_layouts
-                    .get("RangeWindow")
-                    .map(|s| s.fields.len().max(2))
-                    .unwrap_or(2);
-                return (field_count * arg_sz, arg_align, arg_lat);
+        let trimmed = tname.trim();
+        if let Some(lt_idx) = trimmed.find('<') {
+            let base = trimmed[..lt_idx].trim();
+            let args_part = trimmed[lt_idx + 1..trimmed.len().saturating_sub(1)].trim();
+            let args: Vec<&str> = args_part.split(',').map(|s| s.trim()).collect();
+            if let Some(spec) = self.type_layouts.get(base) {
+                if spec.has_explicit_register_layout {
+                    return (spec.byte_size(), spec.byte_align(), spec.lattice_bits);
+                }
+                if !spec.field_types.is_empty() {
+                    let mut subst_map: FxHashMap<&str, &str> = FxHashMap::default();
+                    for (idx, param_name) in spec.type_params.iter().enumerate() {
+                        if let Some(&arg_val) = args.get(idx) {
+                            subst_map.insert(param_name.as_str(), arg_val);
+                        }
+                    }
+                    let mut offset = 0usize;
+                    let mut max_align = 1usize;
+                    let mut lat = spec.lattice_bits;
+                    for f_ty_expr in &spec.field_types {
+                        let f_trimmed = f_ty_expr.trim();
+                        let resolved_fty = if let Some(&mapped) = subst_map.get(f_trimmed) {
+                            mapped.to_string()
+                        } else if let Some(flt) = f_trimmed.find('<') {
+                            let fbase = f_trimmed[..flt].trim();
+                            let fargs: Vec<String> = f_trimmed[flt + 1..f_trimmed.len().saturating_sub(1)]
+                                .split(',')
+                                .map(|fa| {
+                                    let fat = fa.trim();
+                                    subst_map.get(fat).copied().unwrap_or(fat).to_string()
+                                })
+                                .collect();
+                            format!("{}<{}>", fbase, fargs.join(", "))
+                        } else {
+                            f_trimmed.to_string()
+                        };
+                        let (fsz, fal, flat) = self.query_type_size_align_lattice(&resolved_fty);
+                        let fal = fal.max(1);
+                        offset = (offset + fal - 1) & !(fal - 1);
+                        offset += fsz;
+                        max_align = max_align.max(fal);
+                        let f_base = resolved_fty.split('<').next().unwrap_or(&resolved_fty).trim();
+                        let is_raw_ptr = self
+                            .type_layouts
+                            .get(f_base)
+                            .map_or(false, |s| s.has_explicit_register_layout && s.reg_class == RegisterClass::RawPtr);
+                        if !((spec.lattice_bits & 0b10) != 0 && is_raw_ptr) {
+                            lat |= flat;
+                        }
+                    }
+                    let total_sz = (offset + max_align - 1) & !(max_align - 1);
+                    return (total_sz, max_align, lat);
+                }
+                return (spec.byte_size(), spec.byte_align(), spec.lattice_bits);
             }
             return self.query_type_size_align_lattice(base);
         }
-        if let Some(spec) = self.type_layouts.get(tname) {
+        if let Some(spec) = self.type_layouts.get(trimmed) {
             return (spec.byte_size(), spec.byte_align(), spec.lattice_bits);
         }
-        match tname {
-            "bool" | "u8" | "i8" => (1, 1, 0b00),
-            "u16" | "i16" | "f16" => (2, 2, 0b00),
-            "u32" | "i32" | "f32" | "char" => (4, 4, 0b00),
-            "u64" | "i64" | "f64" | "usize" | "isize" | "ptr" => (8, 8, 0b00),
-            "u128" | "i128" | "f128" => (16, 16, 0b00),
-            "slice" | "str" | "SliceView" => (16, 8, 0b01),
-            "stride" => (24, 8, 0b01),
-            "SliceBuffer" => (24, 8, 0b10),
-            "ArenaScope" => (16, 8, 0b11),
-            "void" | "never" => (0, 1, 0b00),
-            _ => (8, 8, 0b00),
+        if let Some(&lat) = self.lattice_interfaces.get(trimmed) {
+            return (0, 1, lat);
         }
+        if trimmed.starts_with('*') || trimmed.ends_with('*') {
+            return (8, 8, 0b00);
+        }
+        (8, 8, 0b00)
     }
 
     fn eval_comptime_stmt_or_block(
@@ -1144,7 +1423,9 @@ impl ComptimeEngine {
                 let operand = self.eval_expr_with_env(arena, NodeId(node.lhs), local_env, parser_tables)?;
                 match (node.flags, operand) {
                     (5, ComptimeValue::Bool(b)) => {
-                        let ssa = self.ssa_opcode_for_operator("bool", "!").unwrap_or("xor");
+                        let ssa = self
+                            .ssa_opcode_for_physics(RegisterClass::GprUnsigned, 1, "!")
+                            .unwrap_or("xor");
                         if ssa == "xor" || ssa == "not" {
                             Ok(ComptimeValue::Bool(!b))
                         } else {
@@ -1181,7 +1462,9 @@ impl ComptimeEngine {
                 };
                 match (&lhs, &rhs) {
                     (ComptimeValue::Uint(a), ComptimeValue::Uint(b)) => {
-                        let ssa = self.ssa_opcode_for_operator("usize", op_sym).unwrap_or("");
+                        let ssa = self
+                            .ssa_opcode_for_physics(RegisterClass::GprUnsigned, 64, op_sym)
+                            .unwrap_or("");
                         match ssa {
                             "add" => Ok(ComptimeValue::Uint(a.wrapping_add(*b))),
                             "sub" => Ok(ComptimeValue::Uint(a.wrapping_sub(*b))),
@@ -1203,7 +1486,9 @@ impl ComptimeEngine {
                         }
                     }
                     (ComptimeValue::Bool(a), ComptimeValue::Bool(b)) => {
-                        let ssa = self.ssa_opcode_for_operator("bool", op_sym).unwrap_or("");
+                        let ssa = self
+                            .ssa_opcode_for_physics(RegisterClass::GprUnsigned, 1, op_sym)
+                            .unwrap_or("");
                         match ssa {
                             "and" => Ok(ComptimeValue::Bool(*a & *b)),
                             "or" => Ok(ComptimeValue::Bool(*a | *b)),
@@ -1328,8 +1613,8 @@ impl ComptimeEngine {
                 Ok(ComptimeValue::Void)
             }
 
-            // 2. `bind_lang_item`: `(target_decl: AstNode, item_name: Str)`
-            "bind_lang_item" => {
+            // 2. `bind_lang_item` / `bind_receptor_slot`: `(target_decl: AstNode, item_or_slot_name: Str)`
+            "bind_lang_item" | "bind_receptor_slot" => {
                 let target_node = match args.first() {
                     Some(ComptimeValue::AstNode(nid)) => *nid,
                     _ => NodeId::NONE,
@@ -1341,6 +1626,13 @@ impl ComptimeEngine {
                     .to_string();
                 if let Some(lang_item) = LangItem::from_name(&item_name) {
                     self.lang_items.insert(lang_item, target_node);
+                }
+                if let Some(slot) = ReceptorSlot::from_slot_or_lang_name(&item_name) {
+                    self.receptor_slots.insert(slot, target_node);
+                    let actual_type_name = self.resolve_type_name_from_node(arena, target_node);
+                    if !actual_type_name.is_empty() {
+                        self.receptor_type_names.insert(slot, actual_type_name);
+                    }
                 }
                 self.lang_items_by_name.insert(item_name.clone(), target_node);
                 if target_node.is_some() {
@@ -1356,11 +1648,24 @@ impl ComptimeEngine {
                     _ => NodeId::NONE,
                 };
                 let bit_width = args.get(1).and_then(|v| v.as_uint()).unwrap_or(0) as u32;
-                let reg_name = args
+                let reg_class = if let Some(reg_name) = args
                     .get(2)
                     .and_then(|v| v.as_str(&parser_tables.interner).or_else(|| v.as_str(&arena.interner)))
-                    .unwrap_or("gpr_unsigned");
-                let reg_class = RegisterClass::from_name(reg_name).unwrap_or(RegisterClass::GprUnsigned);
+                {
+                    RegisterClass::from_name(reg_name).unwrap_or(RegisterClass::GprUnsigned)
+                } else if let Some(code) = args.get(2).and_then(|v| v.as_uint()) {
+                    match code {
+                        0 => RegisterClass::Unit,
+                        1 => RegisterClass::NoReturn,
+                        2 => RegisterClass::GprSigned,
+                        3 => RegisterClass::GprUnsigned,
+                        4 => RegisterClass::SimdFloat,
+                        6 => RegisterClass::RawPtr,
+                        _ => RegisterClass::GprUnsigned,
+                    }
+                } else {
+                    RegisterClass::GprUnsigned
+                };
 
                 let type_name = self.resolve_type_name_from_node(arena, target_node);
                 let spec = self
@@ -1369,6 +1674,10 @@ impl ComptimeEngine {
                     .or_insert_with(|| TypeLayoutSpec::new(type_name, target_node));
                 spec.bit_width = bit_width;
                 spec.reg_class = reg_class;
+                spec.has_explicit_register_layout = true;
+                if reg_class == RegisterClass::RawPtr {
+                    spec.lattice_bits |= 0b01;
+                }
                 Ok(ComptimeValue::Void)
             }
 

@@ -385,6 +385,37 @@ impl LlvmEmitter {
         self.out
     }
 
+    /// Section 2.8 (Phase 3.5): Physics & StructuralShape-Driven LLVM IR Type Lowering.
+    /// Zero hardcoded Pilot type names — derives LLVM IR representation strictly from
+    /// `HardwarePhysics` (`RegClass`, `bit_width`) and recursive field types.
+    pub fn lower_physics_to_llvm(
+        physics: pilot_analysis::types::HardwarePhysics,
+        field_llvm_types: &[String],
+    ) -> String {
+        use pilot_analysis::types::RegClass;
+        match (physics.reg_class, physics.bit_width) {
+            (RegClass::Unit, _) | (RegClass::NoReturn, _) => "void".to_string(),
+            (RegClass::GprSigned, b) | (RegClass::GprUnsigned, b) => format!("i{}", b.max(1)),
+            (RegClass::SimdFloat, 16) => "half".to_string(),
+            (RegClass::SimdFloat, 32) => "float".to_string(),
+            (RegClass::SimdFloat, 64) => "double".to_string(),
+            (RegClass::SimdFloat, 128) => "fp128".to_string(),
+            (RegClass::SimdFloat, _) => "double".to_string(),
+            (RegClass::RawPtr, _) => "ptr".to_string(),
+            (RegClass::SimdVector { lanes }, b) => {
+                let lane_bits = (b / (lanes.max(1) as u32)).max(8);
+                format!("<{} x i{}>", lanes, lane_bits)
+            }
+            (RegClass::Composite, _) => {
+                if field_llvm_types.is_empty() {
+                    "{}".to_string()
+                } else {
+                    format!("{{ {} }}", field_llvm_types.join(", "))
+                }
+            }
+        }
+    }
+
     /// Section 4.4: 5-Backend Hardware & `[Lang]` Mapping Table (LLVM IR / ASM Backend).
     pub fn map_lang_type_to_llvm(lang_item: &str, elem_types: &[&str]) -> String {
         let t0 = elem_types.first().copied().unwrap_or("i64");

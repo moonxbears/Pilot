@@ -49,6 +49,17 @@ pub enum ForLoweringStrategy {
 
 pub type ForLoopAnalyzer = LoopAnalyzer;
 
+impl LoopAnalyzer {
+    /// Computes `(size, align)` of the anonymous `#[repr(C)] { TIter, TIter }` Tier-3 worklist stack frame
+    /// directly from the bound type's `HardwarePhysics` (zero hardcoded type names).
+    pub fn worklist_frame_size_align(bound_ty: TypeId, types: &crate::types::TypeArena) -> (usize, usize) {
+        let p = types.type_physics(bound_ty);
+        let elem_bytes = ((p.bit_width.max(8) as usize) + 7) / 8;
+        let align = elem_bytes.next_power_of_two().clamp(1, 16);
+        (elem_bytes * 2, align)
+    }
+}
+
 pub struct LoopAnalyzer {
     pub diagnostics: Vec<AnalysisDiagnostic>,
 }
@@ -210,7 +221,23 @@ impl LoopAnalyzer {
                                 infer.types.alloc(TypeKind::Primitive("SliceEnumerator".to_string()))
                             });
                     }
-                    _ => {}
+                    _ => {
+                        if let Some(td) = infer.types.type_defs.get(&pruned) {
+                            match td.shape {
+                                crate::types::StructuralShape::BoundsPair { bound_ty, .. } => {
+                                    is_range_iterable = true;
+                                    item_ty = bound_ty;
+                                }
+                                crate::types::StructuralShape::ContiguousView { elem_ty }
+                                | crate::types::StructuralShape::StridedView { elem_ty }
+                                | crate::types::StructuralShape::OwnedBuffer { elem_ty } => {
+                                    item_ty = elem_ty;
+                                    enumerator_ty = pruned;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -495,6 +495,49 @@ impl GpuEmitter {
         parts.join(", ")
     }
 
+    /// Section 2.8 (Phase 3.5): Physics-Driven GPU (OpenCL/CUDA/SPIR-V) Type Lowering.
+    pub fn lower_physics_to_gpu(
+        physics: pilot_analysis::types::HardwarePhysics,
+        field_gpu_decls: &[(&str, String)],
+    ) -> String {
+        use pilot_analysis::types::RegClass;
+        match (physics.reg_class, physics.bit_width) {
+            (RegClass::Unit, _) | (RegClass::NoReturn, _) => "void".to_string(),
+            (RegClass::GprUnsigned, 1) => "bool".to_string(),
+            (RegClass::GprSigned, 8) => "char".to_string(),
+            (RegClass::GprUnsigned, 8) => "uchar".to_string(),
+            (RegClass::GprSigned, 16) => "short".to_string(),
+            (RegClass::GprUnsigned, 16) => "ushort".to_string(),
+            (RegClass::GprSigned, 32) => "int".to_string(),
+            (RegClass::GprUnsigned, 32) => "uint".to_string(),
+            (RegClass::GprSigned, 64) => "long".to_string(),
+            (RegClass::GprUnsigned, 64) => "ulong".to_string(),
+            (RegClass::GprSigned, 128) | (RegClass::GprUnsigned, 128) => "ulong2".to_string(),
+            (RegClass::GprSigned, _) => "long".to_string(),
+            (RegClass::GprUnsigned, _) => "ulong".to_string(),
+            (RegClass::SimdFloat, 16) => "half".to_string(),
+            (RegClass::SimdFloat, 32) => "float".to_string(),
+            (RegClass::SimdFloat, 64) => "double".to_string(),
+            (RegClass::SimdFloat, 128) => "double2".to_string(),
+            (RegClass::SimdFloat, _) => "double".to_string(),
+            (RegClass::RawPtr, _) => {
+                if let Some((_, pointee)) = field_gpu_decls.first() {
+                    format!("global {}*", pointee)
+                } else {
+                    "global void*".to_string()
+                }
+            }
+            (RegClass::SimdVector { lanes }, _) => format!("float{}", lanes),
+            (RegClass::Composite, _) => {
+                let members: Vec<String> = field_gpu_decls
+                    .iter()
+                    .map(|(name, ty)| format!("{} {};", ty, name))
+                    .collect();
+                format!("struct {{ {} }}", members.join(" "))
+            }
+        }
+    }
+
     /// Section 4.4: 5-Backend Hardware & `[Lang]` Mapping Table (GPU OpenCL/CUDA/SPIR-V Backend).
     pub fn map_lang_type_to_gpu(lang_item: &str, elem_types: &[&str]) -> String {
         let t0 = elem_types.first().copied().unwrap_or("long");
