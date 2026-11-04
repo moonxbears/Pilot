@@ -205,6 +205,7 @@ pub struct DeclModifiers {
     pub is_mut: bool,
     pub is_partial: bool,
     pub is_comptime: bool,
+    pub is_ext: bool,
 }
 
 pub struct Parser<'a> {
@@ -775,6 +776,7 @@ impl<'a> Parser<'a> {
         let mut is_mut = false;
         let mut is_partial = false;
         let mut is_comptime = false;
+        let mut is_ext = false;
 
         loop {
             self.skip_whitespace_and_comments();
@@ -901,6 +903,10 @@ impl<'a> Parser<'a> {
                     self.advance();
                     is_partial = true;
                 }
+                "ext" | "extension" => {
+                    self.advance();
+                    is_ext = true;
+                }
                 t if t == "lvl" => {
                     self.advance();
                     if self.at(TokenKind::LParen) {
@@ -959,6 +965,9 @@ impl<'a> Parser<'a> {
             if !is_comptime {
                 is_comptime = active.is_comptime;
             }
+            if !is_ext {
+                is_ext = active.is_ext;
+            }
         }
 
         DeclModifiers {
@@ -970,6 +979,7 @@ impl<'a> Parser<'a> {
             is_mut,
             is_partial,
             is_comptime,
+            is_ext,
         }
     }
 
@@ -1346,6 +1356,12 @@ impl<'a> Parser<'a> {
         let is_mut = mods.is_mut;
         let is_pure = mods.is_pure;
 
+        if mods.is_ext && !self.at(TokenKind::KwFn) && !(self.is_ident_like() && self.text() == "fn") {
+            let n = self.parse_extend_decl();
+            self.apply_decl_mods(n, mods, Some(VisibilityTier::Public));
+            return n;
+        }
+
         if (self.at(TokenKind::KwStruct) || (self.is_ident_like() && self.text() == "struct")) && self.peek_ahead(1) == TokenKind::LBrace {
             let start_span = self.span();
             self.advance(); // consume 'struct'
@@ -1456,6 +1472,29 @@ impl<'a> Parser<'a> {
             self.arena.pkg_decls.insert(pkg_node.0);
             self.apply_decl_mods(pkg_node, mods, Some(VisibilityTier::Public));
             return pkg_node;
+        }
+
+        // Use ext declaration: `use ext StrExt { ... }` or `use ext StrExt;`
+        if self.is_ident_like() && self.text() == "use" && self.pos + 1 < self.tape.len() && self.is_ident_like_pos(self.pos + 1) && (self.tape.text(self.pos + 1, self.src) == "ext" || self.tape.text(self.pos + 1, self.src) == "extension") {
+            let start_span = self.span();
+            self.advance(); // consume 'use'
+            self.advance(); // consume 'ext'
+            let group_name = self.text().to_string();
+            self.advance();
+            let group_sym = self.arena.interner.intern(&group_name);
+            if self.at(TokenKind::LBrace) {
+                let block = self.parse_block_expr();
+                self.arena.lexical_use_ext_scopes.insert(block.0, group_sym);
+                return block;
+            } else {
+                if self.at(TokenKind::Semicolon) {
+                    self.advance();
+                }
+                let span = ByteSpan::new(start_span.start, self.prev_span().end);
+                let use_node = self.arena.alloc_node(NodeKind::ImportDecl, 0, span, group_sym.0, u32::MAX);
+                self.arena.lexical_use_ext_scopes.insert(use_node.0, group_sym);
+                return use_node;
+            }
         }
 
         // Use import declaration: `use Pilot.Core.Genesis.*;`
@@ -1992,6 +2031,48 @@ impl<'a> Parser<'a> {
             TokenKind::KwAdapter | TokenKind::KwConverter => self.parse_adapter_decl(),
             TokenKind::KwRaise => self.parse_raise_stmt(),
             TokenKind::KwAssert => self.parse_assert_stmt(),
+            TokenKind::Star if self.pos + 1 < self.tape.len() && self.is_ident_like_pos(self.pos + 1) => {
+                let start_span = self.span();
+                let expr = self.parse_expr();
+                let mut renames = Vec::new();
+                if self.is_ident_like() && self.text() == "with" {
+                    self.advance(); // consume 'with'
+                    if self.at(TokenKind::LBrace) {
+                        self.advance();
+                        while !self.at_end() && !self.at(TokenKind::RBrace) {
+                            self.consume_semi_or_newlines();
+                            if self.at(TokenKind::RBrace) { break; }
+                            if self.is_ident_like() {
+                                let old_name = self.text().to_string();
+                                self.advance();
+                                let old_sym = self.arena.interner.intern(&old_name);
+                                if self.at(TokenKind::KwAs) || (self.is_ident_like() && self.text() == "as") {
+                                    self.advance();
+                                }
+                                if self.is_ident_like() {
+                                    let new_name = self.text().to_string();
+                                    self.advance();
+                                    let new_sym = self.arena.interner.intern(&new_name);
+                                    renames.push((old_sym, new_sym));
+                                }
+                            } else {
+                                self.advance();
+                            }
+                            if self.at(TokenKind::Comma) { self.advance(); }
+                        }
+                        self.expect(TokenKind::RBrace);
+                    }
+                }
+                if self.at(TokenKind::Semicolon) {
+                    self.advance();
+                }
+                let span = ByteSpan::new(start_span.start, self.prev_span().end);
+                let node = self.arena.alloc_node(NodeKind::ExprStmt, 0, span, expr.0, 0);
+                if !renames.is_empty() {
+                    self.arena.statement_splice_renames.insert(node.0, renames);
+                }
+                return node;
+            }
             _ => {
                 if self.is_ident_like() && !self.is_backtick_escaped() {
                     let txt = self.text();
@@ -2012,12 +2093,66 @@ impl<'a> Parser<'a> {
                         "for" => return self.parse_for_stmt(),
                         "break" => return self.parse_break_stmt(),
                         "continue" => return self.parse_continue_stmt(),
-                        "class" | "actor" | "state" => {
+                        "class" | "actor" => {
                             let n = self.parse_class_decl();
                             let vis = vis_opt.unwrap_or(VisibilityTier::Internal);
                             self.arena.node_visibility.insert(n.0, vis);
                             if let Some(c) = clr_opt { self.arena.node_clearance.insert(n.0, c); }
                             return n;
+                        }
+                        "state" => {
+                            let start_span = self.span();
+                            self.advance(); // consume 'state'
+                            let s_name = self.text().to_string();
+                            self.advance();
+                            let s_sym = self.arena.interner.intern(&s_name);
+                            let mut variants = Vec::new();
+                            if self.at(TokenKind::LBrace) {
+                                self.advance();
+                                while !self.at_end() && !self.at(TokenKind::RBrace) {
+                                    self.consume_semi_or_newlines();
+                                    if self.at(TokenKind::RBrace) { break; }
+                                    if self.is_ident_like() {
+                                        let v_sym = self.arena.interner.intern(self.text());
+                                        self.advance();
+                                        variants.push(v_sym);
+                                    } else {
+                                        self.advance();
+                                    }
+                                    if self.at(TokenKind::Comma) { self.advance(); }
+                                }
+                                self.expect(TokenKind::RBrace);
+                            }
+                            let span = ByteSpan::new(start_span.start, self.prev_span().end);
+                            let n = self.arena.alloc_node(NodeKind::TypeAdtDecl, 0, span, s_sym.0, 0);
+                            self.arena.state_typestates.insert(n.0, variants);
+                            let vis = vis_opt.unwrap_or(VisibilityTier::Public);
+                            self.arena.node_visibility.insert(n.0, vis);
+                            return n;
+                        }
+                        "blueprint" | "role" => {
+                            let start_span = self.span();
+                            self.advance(); // consume 'blueprint' or 'role'
+                            let b_name = self.text().to_string();
+                            self.advance();
+                            let b_sym = self.arena.interner.intern(&b_name);
+                            let body = if self.at(TokenKind::LBrace) { self.parse_block_expr() } else { NodeId::NONE };
+                            let span = ByteSpan::new(start_span.start, self.arena.span(body).end);
+                            return self.arena.alloc_node(NodeKind::StructDecl, 0, span, b_sym.0, body.0);
+                        }
+                        "cue" => {
+                            self.advance(); // consume 'cue'
+                            let fn_node = self.parse_fn_decl_headless(false, false);
+                            self.arena.cue_declarations.insert(fn_node.0);
+                            return fn_node;
+                        }
+                        "route" => {
+                            let start_span = self.span();
+                            self.advance(); // consume 'route'
+                            let expr = self.parse_expr();
+                            self.consume_semi_or_newlines();
+                            let span = ByteSpan::new(start_span.start, self.arena.span(expr).end);
+                            return self.arena.alloc_node(NodeKind::ExprStmt, 0, span, expr.0, 0);
                         }
                         "record" => {
                             let n = self.parse_record_decl();
@@ -2053,7 +2188,7 @@ impl<'a> Parser<'a> {
                             if let Some(c) = clr_opt { self.arena.node_clearance.insert(n.0, c); }
                             return n;
                         }
-                        "extend" | "extension" => return self.parse_extend_decl(),
+                        "ext" | "extend" | "extension" => return self.parse_extend_decl(),
                         "database" => return self.parse_database_stmt(),
                         "transaction" => return self.parse_transaction_stmt(),
                         "savepoint" | "commit" | "rollback" => return self.parse_transaction_op_stmt(),
@@ -2406,7 +2541,17 @@ impl<'a> Parser<'a> {
         } else {
             "anon"
         };
-        let sym = self.arena.interner.intern(name);
+        let mut ext_target = None;
+        let mut final_name = name;
+        if (self.at(TokenKind::InfixDot) || (self.at(TokenKind::Dot) && self.is_ident_like_pos(self.pos + 1))) && !self.is_backtick_escaped() {
+            self.advance();
+            if self.is_ident_like() || self.peek().is_keyword() {
+                ext_target = Some(name);
+                final_name = self.text();
+                self.advance();
+            }
+        }
+        let sym = self.arena.interner.intern(final_name);
 
         if name.starts_with("__") && name.ends_with("__") && name.len() > 4 {
             let suggestion = match name {
@@ -2579,6 +2724,10 @@ impl<'a> Parser<'a> {
         let (fn_start, fn_len) = self.arena.alloc_child_slice(&all_fn);
 
         let fn_node = self.arena.alloc_node(NodeKind::FnDecl, fn_len as u16, start_span, sym.0, fn_start);
+        if let Some(target_str) = ext_target {
+            let target_sym = self.arena.interner.intern(target_str);
+            self.arena.extension_methods.insert(fn_node.0, (target_sym, sym));
+        }
         if ret_type_node.is_some() {
             self.arena.type_annotations.insert(fn_node.0, ret_type_node);
         }
@@ -2832,7 +2981,7 @@ impl<'a> Parser<'a> {
 
     fn parse_extend_decl(&mut self) -> NodeId {
         let start_span = self.span();
-        self.advance(); // consume 'extend' or 'extension'
+        self.advance(); // consume 'extend' or 'extension' or 'ext'
         if self.at(TokenKind::LBracket) {
             self.advance();
             while !self.at_end() && !self.at(TokenKind::RBracket) {
@@ -2842,15 +2991,21 @@ impl<'a> Parser<'a> {
                 self.advance();
             }
         }
-        let mut target = self.text().to_string();
+        let first_name = self.text().to_string();
         self.advance();
-        if self.at(TokenKind::KwOn) || (self.is_ident_like() && self.text() == "on") {
+        let (group_name, mut target) = if self.at(TokenKind::KwOn) || (self.is_ident_like() && self.text() == "on") {
             self.advance();
-            if !self.at_end() {
-                target = self.text().to_string();
+            let on_target = if !self.at_end() {
+                let s = self.text().to_string();
                 self.advance();
-            }
-        }
+                s
+            } else {
+                first_name.clone()
+            };
+            (Some(first_name), on_target)
+        } else {
+            (None, first_name.clone())
+        };
         if self.at(TokenKind::LBracket) && self.peek_ahead(1) == TokenKind::RBracket {
             self.advance();
             self.advance();
@@ -2862,7 +3017,14 @@ impl<'a> Parser<'a> {
         }
         let body = self.parse_block_expr();
         let span = ByteSpan::new(start_span.start, self.arena.span(body).end);
-        self.arena.alloc_node(NodeKind::ExtendDecl, 0, span, sym.0, body.0)
+        let node = self.arena.alloc_node(NodeKind::ExtendDecl, 0, span, sym.0, body.0);
+        let g_sym = if let Some(ref g) = group_name {
+            self.arena.interner.intern(g)
+        } else {
+            sym
+        };
+        self.arena.named_extension_groups.insert(node.0, g_sym);
+        node
     }
 
     fn parse_type_adt_decl(&mut self) -> NodeId {
@@ -2898,10 +3060,19 @@ impl<'a> Parser<'a> {
 
             if !is_adt {
                 let ty_node = self.parse_type();
+                let mut where_expr = NodeId::NONE;
+                if self.at(TokenKind::KwWhere) || (self.is_ident_like() && self.text() == "where") {
+                    self.advance();
+                    where_expr = self.parse_expr();
+                }
                 if self.at(TokenKind::Semicolon) {
                     self.advance();
                 }
-                return self.arena.alloc_node(NodeKind::TypeAdtDecl, 0, start_span, sym.0, ty_node.0);
+                let node = self.arena.alloc_node(NodeKind::TypeAdtDecl, 0, start_span, sym.0, ty_node.0);
+                if where_expr.is_some() {
+                    self.arena.refinement_predicates.insert(node.0, (ty_node, where_expr));
+                }
+                return node;
             }
 
             while !self.at_end() && !self.at(TokenKind::Semicolon) && (!is_brace || !self.at(TokenKind::RBrace)) {
@@ -6174,7 +6345,10 @@ impl<'a> Parser<'a> {
         } else if self.at(TokenKind::KwConst) || (self.is_ident_like() && self.text() == "const") {
             self.advance();
             self.parse_type_prefix()
-        } else if self.is_ident_like() || self.at(TokenKind::KeywordLit) || self.at(TokenKind::KwFn) || self.at(TokenKind::IntLit) {
+        } else if self.at(TokenKind::KwVar) || (self.is_ident_like() && self.text() == "var") {
+            self.advance();
+            self.parse_type_prefix()
+        } else if self.is_ident_like() || self.at(TokenKind::KeywordLit) || self.at(TokenKind::KwFn) || self.at(TokenKind::KwRef) || self.at(TokenKind::IntLit) {
             let name = self.text();
             self.advance();
             let sym = self.arena.interner.intern(name);

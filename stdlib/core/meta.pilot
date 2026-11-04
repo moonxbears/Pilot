@@ -1,125 +1,287 @@
-// SPDX-License-Identifier: MIT
-// std.meta — Homoiconic Call-Quoting (`!`, `!!`, `!?`, `!@`) & Keyword Hierarchy Reflection
+// =========================================================================
+// FILE: stdlib/core/meta.pilot
+// STAGE 4 SELF-GENESIS: 7-PILLAR `[...]` ATTRIBUTE ENGINE, `.pchor`
+// CHOREOGRAPHY, `state` TYPESTATES & DEFERRED `partial struct` MATH FACETS
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Meta;
 
-// Native runtime optimizations provided by pilot_rt (C-ABI FFI)
-extern "c" lib "pilot_rt" {
-    def __ast_fold(ast_node: any) -> any;
-    def __ast_subst(ast_node: any, sym_name: str, replacement: any) -> any;
-    def __ast_diff(ast_node: any, wrt_var: str) -> any;
-    def __ast_eval(ast_node: any, bindings: any) -> any;
-    def __kw_parents(kw: any) -> any;
-    def __kw_ancestors(kw: any) -> any;
-    def __kw_descendants(kw: any) -> any;
-    def __kw_distance(child_kw: any, ancestor_kw: any) -> i64;
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Callables.*;
+use Pilot.Core.Builtins.*;
+
+// =========================================================================
+// 1. THE 7-PILLAR `[...]` ATTRIBUTE ENGINE INTERFACES
+// =========================================================================
+pub struct InheritPolicy : IValue {
+    pub code: u8;
+    pub static pure:
+        fn override_policy() -> InheritPolicy => InheritPolicy { code: 0 };
+        fn append_policy()   -> InheritPolicy => InheritPolicy { code: 1 };
+        fn coalesce_policy() -> InheritPolicy => InheritPolicy { code: 2 };
 }
 
-def call_name(quoted_call) -> str {
-    return quoted_call.fn_name;
-}
-
-def call_id(quoted_call) -> i64 {
-    return quoted_call.fn_id;
-}
-
-def call_args(quoted_call) {
-    return quoted_call.args;
-}
-
-def call_return_type(quoted_call) -> str {
-    return quoted_call.return_type;
-}
-
-def invoke_call(quoted_call) {
-    return quoted_call.invoke();
-}
-
-def ast_sexpr(ast_node) -> str {
-    return ast_node.s_expr;
-}
-
-def ast_infix(ast_node) -> str {
-    return ast_node.infix;
-}
-
-def ast_symbols(ast_node) {
-    return ast_node.symbols;
-}
-
-def fold_ast(ast_node) {
-    return __ast_fold(ast_node);
-}
-
-def subst_ast(ast_node, sym_name, replacement) {
-    return __ast_subst(ast_node, sym_name, replacement);
-}
-
-def diff_ast(ast_node, wrt_var) {
-    return __ast_diff(ast_node, wrt_var);
-}
-
-def eval_ast(ast_node, bindings = {}) {
-    return __ast_eval(ast_node, bindings);
-}
-
-def plan_value(effect_plan) {
-    return effect_plan.value;
-}
-
-def plan_diffs(effect_plan) {
-    return effect_plan.diffs;
-}
-
-def plan_diff_count(effect_plan) -> i64 {
-    return effect_plan.diff_count;
-}
-
-def plan_is_pure(effect_plan) -> bool {
-    return effect_plan.is_pure;
-}
-
-def inspect_plan(effect_plan) -> str {
-    return effect_plan.inspect();
-}
-
-def commit_plan(effect_plan) {
-    return effect_plan.commit();
-}
-
-def rollback_plan(effect_plan) -> bool {
-    return effect_plan.rollback();
-}
-
-def kw_intern(name_str: str, ns_str = none) {
-    if __opt_is_some(ns_str) {
-        return keyword(__opt_unwrap(ns_str), name_str);
+pub interface {
+    // Pillar 2: Compile-Time AOP Function Entry/Exit Interceptor
+    IInterceptor<TContext: IAnyValue> : IAttribute {
+        pub fn on_enter(fn_name: str) -> TContext;
+        pub fn on_exit(ctx: TContext);
     }
-    return keyword(name_str);
+
+    // Pillar 4: Zero-Storage Computed Property Formula Evaluator
+    IFormulaAttribute<TOwner: IAnyValue, TOut: IAnyValue> : IAttribute {
+        pub pure fn evaluate(owner: ref<TOwner>) -> TOut;
+    }
+
+    // Pillar 5: Reactive Property Setter Validator & Change Notifier
+    IReactiveAttribute<TVal: IAnyValue> : IAttribute {
+        pub pure fn on_validating(old_val: TVal, new_val: TVal) -> TVal => new_val;
+        pub fn on_changed(old_val: TVal, new_val: TVal) {}
+    }
+
+    // Pillar 6: Hierarchical Interface-to-Struct Attribute Propagation
+    IInheritedAttribute : IAttribute {
+        pub policy: InheritPolicy { get => InheritPolicy.override_policy(); }
+    }
+
+    // Pillar 7: Declarative ECS & `.pchor` Archetype Rule Scheduler
+    IEcsRule<TEntity: IAnyValue> : IAttribute {
+        pub pure fn matches(entity: ref<TEntity>) -> bool;
+        pub var  fn apply(entity: var ref<TEntity>);
+    }
 }
 
-def kw_derive(child_kw, parent_kw) {
-    return derive(child_kw, parent_kw);
+// =========================================================================
+// 2. STANDARD BUILT-IN `[...]` ATTRIBUTES (`...Attr` -> `[ ShortName ]`)
+// =========================================================================
+pub struct {
+    // Pillar 5 Reactive Clamping Attribute: `[Clamp(min: 0.0, max: 100.0, weight: 100)]`
+    [Layout(c_abi)]
+    ClampAttr<TVal: IComparable<TVal>> : IReactiveAttribute<TVal>, IValue {
+        pub min:    TVal;
+        pub max:    TVal;
+        pub weight: i32;
+
+        pub pure fn on_validating(old_val: TVal, new_val: TVal) -> TVal {
+            if new_val < .min { return .min; }
+            if new_val > .max { return .max; }
+            return new_val;
+        }
+    }
+
+    // Pillar 5 Reactive Change Listener: `[OnChange(callback)]`
+    [Layout(c_abi)]
+    OnChangeAttr<TVal: IAnyValue> : IReactiveAttribute<TVal>, IValue {
+        pub callback: fn<(TVal, TVal), void>;
+        pub weight:   i32;
+
+        pub pure fn on_validating(old_val: TVal, new_val: TVal) -> TVal => new_val;
+        pub fn on_changed(old_val: TVal, new_val: TVal) {}
+    }
+
+    // Pillar 4 Computed Property Formula Attribute: `[Formula((u) => u.base_atk * u.crit_mult)]`
+    [Layout(c_abi)]
+    FormulaAttr<TOwner: IAnyValue, TOut: IAnyValue> : IFormulaAttribute<TOwner, TOut>, IValue {
+        pub expr_fn: fn<ref<TOwner>, TOut>;
+        pub weight:  i32;
+
+        pub pure fn evaluate(owner: ref<TOwner>) -> TOut => owner as TOut;
+    }
+
+    // Pillar 2 AOP Trace Span Interceptor: `[TraceSpan(name: "step_physics", weight: 50)]`
+    [Layout(c_abi)]
+    TraceSpanAttr : IInterceptor<u64>, IInheritedAttribute, IValue {
+        pub name:   str;
+        pub weight: i32;
+
+        pub fn on_enter(fn_name: str) -> u64 => 0;
+        pub fn on_exit(start_tick: u64) {}
+    }
+
+    // Pillar 7 Declarative ECS Archetype Rule: `[Rule(when: ..., then: ...)]`
+    [Layout(c_abi)]
+    RuleAttr<TEntity: IAnyValue> : IEcsRule<TEntity>, IValue {
+        pub when_fn: fn<ref<TEntity>, bool>;
+        pub then_fn: fn<var ref<TEntity>, void>;
+        pub weight:  i32;
+
+        pub pure fn matches(entity: ref<TEntity>) -> bool => true;
+        pub var  fn apply(entity: var ref<TEntity>) {}
+    }
+
+    // Real-Time & Zero-Allocation Verification Attributes (`[HardRealtime]`, `[Wcet]`, `[ZeroRuntime]`, `[Kernel]`)
+    [Layout(c_abi)] HardRealtimeAttr : IInheritedAttribute, IValue { pub weight: i32; }
+    [Layout(c_abi)] WcetAttr         : IInheritedAttribute, IValue { pub budget_ns: u64; pub weight: i32; }
+    [Layout(c_abi)] ZeroRuntimeAttr  : IInheritedAttribute, IValue { pub weight: i32; }
+    [Layout(c_abi)] KernelAttr       : IAttribute,          IValue { pub workgroup_size: u32; pub weight: i32; }
 }
 
-def kw_underive(child_kw, parent_kw) {
-    return underive(child_kw, parent_kw);
+// =========================================================================
+// 3. SELF-HOSTED `.pchor` CHOREOGRAPHY & `state` TYPESTATE SYNTAX MACROS
+// =========================================================================
+pub syntax {
+    state(state_decl)         => quote { $state_decl };
+    blueprint(blueprint_decl) => quote { $blueprint_decl };
+    role(role_decl)           => quote { $role_decl };
+    cue(cue_decl)             => quote { $cue_decl };
+    route(route_expr)         => quote { $route_expr };
 }
 
-def kw_isa(child_kw, ancestor_kw) -> bool {
-    return isa(child_kw, ancestor_kw);
+// =========================================================================
+// 4. DEFERRED STAGE 4 MATH & BITWISE FACETS (`0` Fields -> `partial` Safe!)
+// Uses `while`, distributive bindings, and dual-path `comptime if __is_comptime()`
+// =========================================================================
+let SignedMathFacet<TSelf: INumber<TSelf>> = {
+    pub pure:
+        fn min(other: TSelf) -> TSelf => if self < other { self } else { other };
+        fn max(other: TSelf) -> TSelf => if self > other { self } else { other };
+
+        fn clamp(lo: TSelf, hi: TSelf) -> TSelf {
+            if self < lo { return lo; }
+            if self > hi { return hi; }
+            return self;
+        }
+
+        fn signum() -> TSelf {
+            let zero = 0 as TSelf;
+            if self < zero { return -(1 as TSelf); }
+            if self > zero { return 1 as TSelf; }
+            return zero;
+        }
+
+        fn pow(exp: u32) -> TSelf {
+            var base: TSelf = self;
+            var res:  TSelf = 1 as TSelf;
+            var e:    u32   = exp;
+            while e > 0 {
+                if (e & 1) == 1 {
+                    res = res * base;
+                }
+                base = base * base;
+                e = e >> 1;
+            }
+            return res;
+        }
+};
+
+let UnsignedBitFacet<TSelf: INumber<TSelf>> = {
+    pub pure:
+        fn min(other: TSelf) -> TSelf => if self < other { self } else { other };
+        fn max(other: TSelf) -> TSelf => if self > other { self } else { other };
+
+        fn clamp(lo: TSelf, hi: TSelf) -> TSelf {
+            if self < lo { return lo; }
+            if self > hi { return hi; }
+            return self;
+        }
+
+        fn is_power_of_two() -> bool {
+            let zero = 0 as TSelf;
+            if self == zero { return false; }
+            return (self & (self - (1 as TSelf))) == zero;
+        }
+
+        fn count_ones() -> u32 {
+            var v: TSelf = self;
+            var c: u32   = 0;
+            let zero     = 0 as TSelf;
+            while v != zero {
+                v = v & (v - (1 as TSelf));
+                c = c + 1;
+            }
+            return c;
+        }
+};
+
+let FloatIeeeFacet<TSelf: INumber<TSelf>> = {
+    pub pure:
+        fn abs() -> TSelf => if self < (0.0 as TSelf) { -self } else { self };
+        fn min(other: TSelf) -> TSelf => if self < other { self } else { other };
+        fn max(other: TSelf) -> TSelf => if self > other { self } else { other };
+
+        fn clamp(lo: TSelf, hi: TSelf) -> TSelf {
+            if self < lo { return lo; }
+            if self > hi { return hi; }
+            return self;
+        }
+
+        fn lerp(target: TSelf, t: TSelf) -> TSelf => self + ((target - self) * t);
+        fn is_nan() -> bool => self != self;
+};
+
+// Reopen sealed scalar primitives via `partial struct` to splice Stage 4 math facets
+// without altering `sizeof(T)`, `alignof(T)`, or `LatticeBits::Value` (`0b00`)!
+pub partial struct {
+    i8    { *SignedMathFacet<i8>; }
+    i16   { *SignedMathFacet<i16>; }
+    i32   { *SignedMathFacet<i32>; }
+    i64   { *SignedMathFacet<i64>; }
+    i128  { *SignedMathFacet<i128>; }
+    isize { *SignedMathFacet<isize>; }
+
+    u8    { *UnsignedBitFacet<u8>; }
+    u16   { *UnsignedBitFacet<u16>; }
+    u32   { *UnsignedBitFacet<u32>; }
+    u64   { *UnsignedBitFacet<u64>; }
+    u128  { *UnsignedBitFacet<u128>; }
+    usize { *UnsignedBitFacet<usize>; }
+
+    f16   { *FloatIeeeFacet<f16>; }
+    f32   { *FloatIeeeFacet<f32>; }
+    f64   { *FloatIeeeFacet<f64>; }
+    f128  { *FloatIeeeFacet<f128>; }
 }
 
-def kw_parents(kw) {
-    return __kw_parents(kw);
+// =========================================================================
+// 5. PILLAR 8: NON-DESTRUCTIVE FUNCTION CST/AST CLONING & PATCHING
+// =========================================================================
+pub struct PatchPart : IValue {
+    pub kind: u8;
+    pub static pure:
+        fn all()       -> PatchPart => PatchPart { kind: 0 };
+        fn signature() -> PatchPart => PatchPart { kind: 1 };
+        fn params()    -> PatchPart => PatchPart { kind: 2 };
+        fn body()      -> PatchPart => PatchPart { kind: 3 };
 }
 
-def kw_ancestors(kw) {
-    return __kw_ancestors(kw);
+[Lang(Cfg.Lang.patch_attr_slot)]
+pub interface IPatchAttribute : IAttribute {
+    pub pure fn clone_ast() -> ast;
+    pub var  fn patch()     -> ast;
 }
 
-def kw_descendants(kw) {
-    return __kw_descendants(kw);
-}
+pub struct {
+    // Interactive CST/AST Clone & Patch Builder:
+    // `[var contents = Patch(myorigfunc, PatchPart.body(), 4 .. 5)]`
+    [Layout(c_abi)]
+    PatchAttr<TTargetFn: IAnyValue> : IPatchAttribute, IValue {
+        pub target_fn: TTargetFn;
+        pub part:      PatchPart;
+        pub lines:     span<usize>;
+        pub weight:    i32;
 
-def kw_distance(child_kw, ancestor_kw) -> i64 {
-    return __kw_distance(child_kw, ancestor_kw);
+        pub pure:
+            fn clone_ast() -> ast => __ssa_cast(Cfg.Ssa.bitcast, 0, ast);
+        pub var:
+            fn replace_ast(pattern: ast, replacement: ast) {}
+            fn patch() -> ast => .clone_ast();
+    }
+
+    // Declarative 1-Line Whole-Function Patch & Clone:
+    // `[PatchReplace(myorigfunc, PatchPart.body(), 4 .. 4, (l) => l.replace("Hi", "Hello"))]`
+    [Layout(c_abi)]
+    PatchReplaceAttr<TTargetFn: IAnyValue> : IPatchAttribute, IValue {
+        pub target_fn: TTargetFn;
+        pub part:      PatchPart;
+        pub lines:     span<usize>;
+        pub rewrite:   fn<str, str>;
+        pub weight:    i32;
+
+        pub pure fn clone_ast() -> ast => __ssa_cast(Cfg.Ssa.bitcast, 0, ast);
+        pub var  fn patch()     -> ast => .clone_ast();
+    }
 }

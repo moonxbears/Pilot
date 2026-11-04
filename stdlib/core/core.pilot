@@ -104,6 +104,13 @@ comptime {
             signal_slot:      "reactive_signal",
             dual_slot:        "symbolic_adjoint",
             effect_plan_slot: "effect_dry_run",
+            attr_slot:        "attribute",
+            interceptor_slot: "interceptor",
+            formula_slot:     "formula",
+            reactive_slot:    "reactive",
+            inherited_slot:   "inherited",
+            ecs_rule_slot:    "ecs_rule",
+            patch_attr_slot:  "patch_attribute",
         },
 
         // 3. Backend SSA Instruction Opcodes

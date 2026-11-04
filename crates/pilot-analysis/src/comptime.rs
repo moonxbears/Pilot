@@ -117,6 +117,14 @@ pub enum ReceptorSlot {
     ReactiveSignalSlot,    // Receptor for `fn!^(a, b)`
     SymbolicAdjointSlot,   // Receptor for `fn!@(a, b)`
     EffectDryRunSlot,      // Receptor for `fn!?(a, b)`
+
+    // 7 Attribute Pillar Receptors
+    AttributeSlot,         // Receptor for `IAttribute`
+    InterceptorSlot,       // Receptor for `IInterceptor`
+    FormulaSlot,           // Receptor for `IFormulaAttribute`
+    ReactiveSlot,          // Receptor for `IReactiveAttribute`
+    InheritedSlot,         // Receptor for `IInheritedAttribute`
+    EcsRuleSlot,           // Receptor for `IEcsRule`
 }
 
 impl ReceptorSlot {
@@ -136,6 +144,12 @@ impl ReceptorSlot {
             "reactive_signal" | "Signal" => Some(Self::ReactiveSignalSlot),
             "symbolic_adjoint" | "Dual" => Some(Self::SymbolicAdjointSlot),
             "effect_dry_run" | "EffectPlan" => Some(Self::EffectDryRunSlot),
+            "attribute" | "IAttribute" => Some(Self::AttributeSlot),
+            "interceptor" | "IInterceptor" => Some(Self::InterceptorSlot),
+            "formula" | "IFormulaAttribute" => Some(Self::FormulaSlot),
+            "reactive" | "IReactiveAttribute" => Some(Self::ReactiveSlot),
+            "inherited" | "IInheritedAttribute" => Some(Self::InheritedSlot),
+            "ecs_rule" | "IEcsRule" => Some(Self::EcsRuleSlot),
             _ => None,
         }
     }
@@ -199,6 +213,12 @@ pub enum LangItem {
     After,
     Order,
     Signal,
+    IAttribute,
+    IInterceptor,
+    IFormulaAttribute,
+    IReactiveAttribute,
+    IInheritedAttribute,
+    IEcsRule,
 }
 
 impl LangItem {
@@ -209,6 +229,12 @@ impl LangItem {
             "IReference" => Some(Self::IReference),
             "IObject" => Some(Self::IObject),
             "IGuard" => Some(Self::IGuard),
+            "IAttribute" => Some(Self::IAttribute),
+            "IInterceptor" => Some(Self::IInterceptor),
+            "IFormulaAttribute" => Some(Self::IFormulaAttribute),
+            "IReactiveAttribute" => Some(Self::IReactiveAttribute),
+            "IInheritedAttribute" => Some(Self::IInheritedAttribute),
+            "IEcsRule" => Some(Self::IEcsRule),
             "void" => Some(Self::Void),
             "never" => Some(Self::Never),
             "bool" => Some(Self::Bool),

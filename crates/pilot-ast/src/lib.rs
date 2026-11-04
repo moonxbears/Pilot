@@ -561,12 +561,40 @@ impl VisibilityTier {
     }
 }
 
-/// Parsed prefix bracket attribute `[Name(arg1, arg2)]`.
+/// Parsed prefix bracket attribute `[Name(arg1, arg2)]` or `[var contents = Name(arg1, arg2)]`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AstAttribute {
     pub name: SymbolId,
     pub args: Vec<NodeId>,
+    pub binding_sym: Option<SymbolId>, // Some("contents") for `[var contents = Patch(...)]`
+    pub is_mutable_binding: bool,      // true for `var`, false for `let`
     pub span: ByteSpan,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum CaptureMode {
+    ByImmRef,  // Read-only capture of outer local/parameter (`ref<T>`)
+    ByVarRef,  // Mutating capture of outer `var` local/parameter (`var ref<T>`)
+    ByIsoMove, // Explicit move of an `iso` `0b10` `IObject`
+}
+
+#[derive(Clone, Debug)]
+pub struct CapturedVar {
+    pub sym: SymbolId,
+    pub ty: u32,                       // TypeId inner
+    pub mode: CaptureMode,
+    pub outer_slot_coord: (u16, u16),  // `(frame_depth, slot_index)`
+    pub span: ByteSpan,
+}
+
+#[derive(Clone, Debug)]
+pub struct LocalFnCaptureSpec {
+    pub fn_node: NodeId,
+    pub enclosing_fn_node: NodeId,
+    pub lifted_symbol: SymbolId,       // `__local_<outer>_<inner>_<id>`
+    pub captures: Vec<CapturedVar>,
+    pub lattice_bits: u8,              // `0b00` if `captures.is_empty()`, else `0b01` (`IReference`)
+    pub escapes_as_first_class_value: bool,
 }
 
 /// Compile-Time Clearance Level (Axis 2 ? `lvl(N)` / `lvlN`).
@@ -684,6 +712,20 @@ pub struct AstArena {
     pub struct_base_types: std::collections::HashMap<u32, Vec<NodeId>>,
     /// Generic base symbol for parameterized type nodes (`Name<T, U>`).
     pub type_base_symbols: std::collections::HashMap<u32, SymbolId>,
+    /// Statement block splice renames (`*AuditBlock with { old as new }`).
+    pub statement_splice_renames: std::collections::HashMap<u32, Vec<(SymbolId, SymbolId)>>,
+    /// Extension method declarations (`ext fn Type.method()`).
+    pub extension_methods: std::collections::HashMap<u32, (SymbolId, SymbolId)>,
+    /// Named extension group declarations (`ext ExtName on Type { ... }`).
+    pub named_extension_groups: std::collections::HashMap<u32, SymbolId>,
+    /// Lexical `use ext ExtName { ... }` block scopes.
+    pub lexical_use_ext_scopes: std::collections::HashMap<u32, SymbolId>,
+    /// Typestate variant declarations (`state ConnState { Disconnected, Connected }`).
+    pub state_typestates: std::collections::HashMap<u32, Vec<SymbolId>>,
+    /// Refinement type declarations (`type Sub = Base where <pred>`).
+    pub refinement_predicates: std::collections::HashMap<u32, (NodeId, NodeId)>,
+    /// `.pchor` cue declarations.
+    pub cue_declarations: std::collections::HashSet<u32>,
 }
 
 impl AstArena {
@@ -724,6 +766,13 @@ impl AstArena {
             struct_type_params: std::collections::HashMap::new(),
             struct_base_types: std::collections::HashMap::new(),
             type_base_symbols: std::collections::HashMap::new(),
+            statement_splice_renames: std::collections::HashMap::new(),
+            extension_methods: std::collections::HashMap::new(),
+            named_extension_groups: std::collections::HashMap::new(),
+            lexical_use_ext_scopes: std::collections::HashMap::new(),
+            state_typestates: std::collections::HashMap::new(),
+            refinement_predicates: std::collections::HashMap::new(),
+            cue_declarations: std::collections::HashSet::new(),
         }
     }
 

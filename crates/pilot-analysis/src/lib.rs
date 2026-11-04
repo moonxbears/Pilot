@@ -45,7 +45,7 @@ pub use comptime::{
     ComptimeEngine, ComptimeEvaluator, ComptimeFnDef, ComptimeValue, InlineHint, LangItem,
     MemoryLayoutMode, QuoteKind, RegisterClass, StaticDemotedSlot, TypeLayoutSpec,
 };
-pub use pipeline::{AnalysisPipeline, AnalysisResult};
+pub use pipeline::{AnalysisPipeline, AnalysisResult, AttributeWeaver};
 pub use autodiff::{DualValue, SymbolicDifferentiator, SymbolicExpr};
 pub use quoting::{
     AstSpliceResult, CallFrameLayout, CallQuoteProjectionInfo, CallQuotingEngine, EffectDiff,

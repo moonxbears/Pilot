@@ -125,6 +125,11 @@ impl AnalysisPipeline {
         let mut comptime = ComptimeEvaluator::new();
         comptime.demote_arena(arena, root);
         diagnostics.extend(comptime.diagnostics);
+
+        // 8. 7-Pillar Attribute Weaver & .pchor Cue Boundary Verification
+        let mut weaver = AttributeWeaver::new();
+        weaver.weave(arena, &mut infer_engine.types);
+        diagnostics.extend(weaver.diagnostics);
         diagnostics.extend(infer_engine.diagnostics);
 
         AnalysisResult {
@@ -137,6 +142,84 @@ impl AnalysisPipeline {
             fn_visibility: infer_engine.fn_visibility,
             fn_clearance: infer_engine.fn_clearance,
             current_scope_clearance: infer_engine.current_scope_clearance,
+        }
+    }
+}
+
+pub struct AttributeWeaver {
+    pub diagnostics: Vec<AnalysisDiagnostic>,
+    pub ecs_rules: Vec<NodeId>,
+}
+
+impl AttributeWeaver {
+    pub fn new() -> Self {
+        Self {
+            diagnostics: Vec::new(),
+            ecs_rules: Vec::new(),
+        }
+    }
+
+    pub fn weave(&mut self, arena: &AstArena, types: &mut TypeArena) {
+        // Pillar 1: Weight sorting & general attribute dispatch
+        for (&node_id, attrs) in &arena.node_attributes {
+            let mut sorted_attrs = attrs.clone();
+            sorted_attrs.sort_by_key(|a| {
+                let mut weight: i32 = 0;
+                for &arg in &a.args {
+                    let arg_node = arena.node(arg);
+                    if arg_node.node_kind() == pilot_ast::NodeKind::IntLit {
+                        weight = arena.i64_pool.get(arg_node.lhs as usize).copied().unwrap_or(0) as i32;
+                    }
+                }
+                std::cmp::Reverse(weight)
+            });
+
+            for attr in &sorted_attrs {
+                let attr_name = arena.interner.resolve(attr.name);
+                if let Some(iface_id) = types.interfaces_by_name.get(attr_name) {
+                    if *iface_id == crate::types::InterfaceId::IECS_RULE {
+                        self.ecs_rules.push(NodeId(node_id));
+                    }
+                }
+            }
+        }
+
+        // Gate 7: .pchor cue boundary safety verification
+        for &cue_id in &arena.cue_declarations {
+            let cue_node = arena.node(NodeId(cue_id));
+            if cue_node.node_kind() == pilot_ast::NodeKind::FnDecl {
+                let fn_start = cue_node.rhs;
+                let fn_len = cue_node.flags as usize;
+                if fn_len > 1 {
+                    let children = arena.children_slice(fn_start, fn_len as u32);
+                    for &param_id in &children[1..] {
+                        let param_node = arena.node(NodeId(param_id));
+                        if param_node.node_kind() == pilot_ast::NodeKind::ParamDecl {
+                            let type_node_id = NodeId(param_node.rhs);
+                            if type_node_id.is_some() {
+                                let ty_node = arena.node(type_node_id);
+                                if ty_node.node_kind() == pilot_ast::NodeKind::TypeNamed {
+                                    let ty_name = arena.interner.resolve(pilot_intern::SymbolId(ty_node.lhs));
+                                    if let Some(&tid) = types.type_defs_by_name.get(ty_name) {
+                                        let lattice = types.type_lattice(tid);
+                                        let is_iso = param_node.flags & 1 != 0;
+                                        if !lattice.can_cross_cue_boundary(is_iso) {
+                                            self.diagnostics.push(AnalysisDiagnostic::error(
+                                                "PCHOR001",
+                                                format!(
+                                                    "Cue boundary violation: parameter of type '{}' has lattice 0b{:02b} (borrow/guard) and cannot cross .pchor cue boundary without iso qualification",
+                                                    ty_name, lattice.raw()
+                                                ),
+                                                arena.span(NodeId(param_id)),
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

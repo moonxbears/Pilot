@@ -113,6 +113,12 @@ impl InterfaceId {
     pub const IREFERENCE: Self = Self(2);
     pub const IOBJECT: Self = Self(3);
     pub const IGUARD: Self = Self(4);
+    pub const IATTRIBUTE: Self = Self(5);
+    pub const IINTERCEPTOR: Self = Self(6);
+    pub const IFORMULA_ATTRIBUTE: Self = Self(7);
+    pub const IREACTIVE_ATTRIBUTE: Self = Self(8);
+    pub const IINHERITED_ATTRIBUTE: Self = Self(9);
+    pub const IECS_RULE: Self = Self(10);
 }
 
 #[repr(transparent)]
@@ -174,6 +180,12 @@ impl BitSet {
             LangItem::IReference => InterfaceId::IREFERENCE.0,
             LangItem::IObject => InterfaceId::IOBJECT.0,
             LangItem::IGuard => InterfaceId::IGUARD.0,
+            LangItem::IAttribute => InterfaceId::IATTRIBUTE.0,
+            LangItem::IInterceptor => InterfaceId::IINTERCEPTOR.0,
+            LangItem::IFormulaAttribute => InterfaceId::IFORMULA_ATTRIBUTE.0,
+            LangItem::IReactiveAttribute => InterfaceId::IREACTIVE_ATTRIBUTE.0,
+            LangItem::IInheritedAttribute => InterfaceId::IINHERITED_ATTRIBUTE.0,
+            LangItem::IEcsRule => InterfaceId::IECS_RULE.0,
             other => 1000 + (other as u32),
         };
         self.insert(bit);
@@ -187,6 +199,12 @@ impl BitSet {
             LangItem::IReference => InterfaceId::IREFERENCE.0,
             LangItem::IObject => InterfaceId::IOBJECT.0,
             LangItem::IGuard => InterfaceId::IGUARD.0,
+            LangItem::IAttribute => InterfaceId::IATTRIBUTE.0,
+            LangItem::IInterceptor => InterfaceId::IINTERCEPTOR.0,
+            LangItem::IFormulaAttribute => InterfaceId::IFORMULA_ATTRIBUTE.0,
+            LangItem::IReactiveAttribute => InterfaceId::IREACTIVE_ATTRIBUTE.0,
+            LangItem::IInheritedAttribute => InterfaceId::IINHERITED_ATTRIBUTE.0,
+            LangItem::IEcsRule => InterfaceId::IECS_RULE.0,
             other => 1000 + (other as u32),
         };
         self.contains(bit)
@@ -499,6 +517,18 @@ pub enum TypeKind {
     Null,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct StatementBundleTable {
+    pub blocks_by_sym: FxHashMap<SymbolId, pilot_ast::NodeId>,
+    pub blocks_by_name: FxHashMap<String, pilot_ast::NodeId>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ExtensionTable {
+    pub type_extensions: FxHashMap<String, FxHashMap<SymbolId, MethodEntry>>,
+    pub named_extension_groups: FxHashMap<String, FxHashMap<String, FxHashMap<SymbolId, MethodEntry>>>,
+}
+
 #[derive(Debug)]
 pub struct TypeArena {
     types: Vec<TypeKind>,
@@ -523,6 +553,8 @@ pub struct TypeArena {
     pub pending_iface_collisions: FxHashMap<(TypeId, SymbolId), (OriginId, OriginId, Span)>,
     pub registered_attributes: FxHashSet<String>,
     pub receptor_type_names: FxHashMap<crate::comptime::ReceptorSlot, String>,
+    pub statement_bundles: StatementBundleTable,
+    pub extensions: ExtensionTable,
     next_interface_id: u32,
     next_bundle_id: u32,
     next_fn_id: u32,
@@ -558,7 +590,9 @@ impl TypeArena {
             pending_iface_collisions: FxHashMap::new(),
             registered_attributes: FxHashSet::new(),
             receptor_type_names: FxHashMap::new(),
-            next_interface_id: 5,
+            statement_bundles: StatementBundleTable::default(),
+            extensions: ExtensionTable::default(),
+            next_interface_id: 11,
             next_bundle_id: 1,
             next_fn_id: 1,
         };
@@ -575,7 +609,7 @@ impl TypeArena {
         arena.register_builtin(TypeId::F32, TypeKind::Primitive("f32".to_string()));
         arena.register_builtin(TypeId::STR, TypeKind::Primitive("str".to_string()));
 
-        // Initialize the 5 canonical lattice origin interfaces at InterfaceId(0..=4)
+        // Initialize the canonical lattice origin interfaces at InterfaceId(0..=10)
         arena.init_origin_interfaces();
 
         arena
@@ -593,6 +627,12 @@ impl TypeArena {
                 Some(LatticeBits::Guard),
                 vec![InterfaceId::IOBJECT, InterfaceId::IREFERENCE],
             ),
+            (InterfaceId::IATTRIBUTE, "IAttribute", None, vec![InterfaceId::IANY_VALUE]),
+            (InterfaceId::IINTERCEPTOR, "IInterceptor", None, vec![InterfaceId::IATTRIBUTE]),
+            (InterfaceId::IFORMULA_ATTRIBUTE, "IFormulaAttribute", None, vec![InterfaceId::IATTRIBUTE]),
+            (InterfaceId::IREACTIVE_ATTRIBUTE, "IReactiveAttribute", None, vec![InterfaceId::IATTRIBUTE]),
+            (InterfaceId::IINHERITED_ATTRIBUTE, "IInheritedAttribute", None, vec![InterfaceId::IATTRIBUTE]),
+            (InterfaceId::IECS_RULE, "IEcsRule", None, vec![InterfaceId::IATTRIBUTE]),
         ];
         for (id, name, explicit_lattice, super_interfaces) in origins {
             self.interfaces_by_name.insert(name.to_string(), id);
@@ -1229,9 +1269,9 @@ impl TypeArena {
         } else {
             String::new()
         };
-        // If this matches one of the 5 pre-allocated lattice origin interfaces, reuse its canonical ID
+        // If this matches one of the canonical origin interfaces, reuse its canonical ID
         if let Some(&existing_id) = self.interfaces_by_name.get(&name_str) {
-            if existing_id.0 <= 4 {
+            if existing_id.0 <= 10 {
                 iface_def.id = existing_id;
             }
         }
