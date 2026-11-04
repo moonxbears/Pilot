@@ -1,7 +1,7 @@
 # Pilot — AI-Only Codebase Navigation & Symbol Index
 
 > **STRICTLY FOR AI AGENTS**: Do not link this file in user-facing documentation. Use exact paths and `:L<line>` anchors below with `read_file` (`StartLine`/`EndLine`) to jump directly to code without exploratory directory/grep bouncing.
-> **Auto-Sync Stamp**: `6029F25D73696034DF581AA9B48EA65A8EE98E0F2FA93F6809E1998B5ABB8421` | **Total Indexed Files**: 9546 | **Regenerate**: `pwsh -NoProfile -File .agents/scripts/update_ai_index.ps1`
+> **Auto-Sync Stamp**: `FBA883A8E914EF5F85EA65417D3628AC0FDB96C12C72C3F6FF237817FF38CABF` | **Total Indexed Files**: 9546 | **Regenerate**: `pwsh -NoProfile -File .agents/scripts/update_ai_index.ps1`
 
 <!-- BEGIN MANUAL NOTES -->
 ## 1. Instant Task-to-File Routing Table (Consult First — Zero Blind Searching)
@@ -67,14 +67,14 @@ Use these `:L<line>` method anchors to pass exact `StartLine`/`EndLine` into `re
 
 ### (Repository Root)
 - `.gitignore` (88 L)
-- `AGENTS.md` (227 L)
+- `AGENTS.md` (96 L)
 - `Cargo.lock` (287 L)
 - `Cargo.toml` (42 L)
 - `fix_type.sh` (4 L)
 - `input.txt` (187 L)
-- `MILESTONES.md` (1447 L)
+- `LEGACY_MILESTONES.md` (1447 L)
 - `pilot_runtime.h` (925 L)
-- `README.md` (912 L)
+- `README.md` (179 L)
 
 ### crates
 - `crates/pilot-analysis/Cargo.toml` (14 L)
