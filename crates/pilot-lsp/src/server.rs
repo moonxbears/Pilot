@@ -684,16 +684,26 @@ impl LspServer {
 
         // If `txt` is a strict keyword (and not after `.` or inside an f-string), show keyword doc immediately
         if word_in_str.is_none() && !is_after_dot && tok_kind.is_keyword() && !tok_kind.is_contextual_keyword() {
+            if let Some((domain, summary)) = get_keyword_doc(txt) {
+                let md = format!("**Pilot Keyword**: `{}` ({})\n\n{}", txt, domain, summary);
+                return make_hover_card(&md);
+            }
+            let snap = pilot_analysis::comptime::BootstrapSnapshot::global();
+            if let Some(layout) = snap.vm.type_layouts.get(txt) {
+                let badge = pilot_ast::IdePresentationPolicy::format_type_hover(
+                    txt,
+                    layout.byte_size(),
+                    layout.byte_align(),
+                    layout.lattice_bits,
+                );
+                return make_hover_card(&badge);
+            }
             if let Some((sig, summary)) = get_builtin_doc(txt) {
                 let md = format!("```pilot\n{}\n```\n\n{}", sig, summary);
                 return make_hover_card(&md);
             }
             if let Some(doc) = get_type_doc(txt) {
                 let md = format!("**Pilot Type**: `{}`\n\n{}", txt, doc);
-                return make_hover_card(&md);
-            }
-            if let Some((domain, summary)) = get_keyword_doc(txt) {
-                let md = format!("**Pilot Keyword**: `{}` ({})\n\n{}", txt, domain, summary);
                 return make_hover_card(&md);
             }
         }
@@ -861,7 +871,11 @@ impl LspServer {
                             .copied()
                             .unwrap_or(pilot_analysis::TypeId::ANY);
                         let fields_str = analysis.types.display_structural(ty_id);
-                        let md = format!("```pilot\n{} {} {}\n```\n\n*Pilot Value Type*", kw, name, fields_str);
+                        let snap = pilot_analysis::comptime::BootstrapSnapshot::global();
+                        let layout = snap.vm.type_layouts.get(name);
+                        let (size, align, bits) = layout.map(|l| (l.byte_size(), l.byte_align(), l.lattice_bits)).unwrap_or((0, 0, 0));
+                        let badge = pilot_ast::IdePresentationPolicy::format_type_hover(name, size, align, bits);
+                        let md = format!("```pilot\n{} {} {}\n```\n\n{}", kw, name, fields_str, badge);
                         return make_hover_card(&md);
                     }
                 }
@@ -869,7 +883,11 @@ impl LspServer {
                     let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
                     if name == txt {
                         let kw = if node.node_kind() == pilot_ast::NodeKind::InterfaceDecl { "interface" } else { "class" };
-                        let md = format!("```pilot\n{} {}\n```\n\n*Pilot Object Type*", kw, name);
+                        let snap = pilot_analysis::comptime::BootstrapSnapshot::global();
+                        let layout = snap.vm.type_layouts.get(name);
+                        let (size, align, bits) = layout.map(|l| (l.byte_size(), l.byte_align(), l.lattice_bits)).unwrap_or((0, 0, 0b10));
+                        let badge = pilot_ast::IdePresentationPolicy::format_type_hover(name, size, align, bits);
+                        let md = format!("```pilot\n{} {}\n```\n\n{}", kw, name, badge);
                         return make_hover_card(&md);
                     }
                 }
@@ -2541,11 +2559,13 @@ impl LspServer {
             return JsonValue::Null;
         }
 
+        let snap = pilot_analysis::comptime::BootstrapSnapshot::global();
         if (tok.kind().is_keyword() && !tok.kind().is_contextual_keyword())
-            || txt == "self"
-            || txt == "this"
-            || txt == "field"
-            || txt == "value"
+            || snap.tables.receiver_ident_name.as_deref() == Some(txt)
+            || snap.tables.prop_field_name.as_deref() == Some(txt)
+            || snap.tables.prop_value_name.as_deref() == Some(txt)
+            || snap.tables.modifiers_by_name.contains_key(txt)
+            || snap.tables.syntax_macros_by_name.contains_key(txt)
         {
             return JsonValue::Null;
         }
@@ -2710,62 +2730,6 @@ impl LspServer {
         Some(path)
     }
 
-    fn is_pilot_primitive_type(s: &str) -> bool {
-        matches!(
-            s,
-            "int"
-                | "i64"
-                | "i32"
-                | "i16"
-                | "i8"
-                | "uint"
-                | "u64"
-                | "u32"
-                | "u16"
-                | "u8"
-                | "float"
-                | "f64"
-                | "f32"
-                | "f16"
-                | "f8"
-                | "str"
-                | "string"
-                | "char"
-                | "bool"
-                | "void"
-                | "any"
-                | "symbol"
-                | "list"
-                | "map"
-                | "dict"
-                | "set"
-                | "tuple"
-                | "range"
-                | "bytes"
-                | "bytearray"
-                | "dynamic"
-                | "decimal"
-                | "double"
-                | "complex"
-                | "frozenset"
-                | "Table"
-                | "Dataset"
-                | "Relation"
-                | "Channel"
-                | "Chan"
-                | "Result"
-                | "Option"
-                | "Span"
-                | "Memory"
-                | "SliceBuffer"
-                | "SharedBuffer"
-                | "RangeWindow"
-                | "NativeArray"
-                | "NativeMap"
-                | "AstNode"
-        )
-    }
-
     fn handle_semantic_tokens_full(&mut self, params: &JsonValue) -> JsonValue {
         let uri = match params.get("textDocument").and_then(|d| d.get("uri")).and_then(|u| u.as_str()) {
             Some(u) => u,
@@ -2791,6 +2755,10 @@ impl LspServer {
             None => return JsonValue::Object(vec![("data".to_string(), JsonValue::Array(Vec::new()))]),
         };
 
+        let snap = pilot_analysis::comptime::BootstrapSnapshot::global();
+        let tables = &snap.tables;
+        let mod_analysis = self.db.module_analysis(file_id);
+
         let root = SyntaxNode::new_root(green);
         let mut data = Vec::new();
         let mut prev_line = 0u32;
@@ -2804,111 +2772,197 @@ impl LspServer {
                     continue;
                 }
 
-                let token_desc: Option<(u32, u32)> = match k {
-                    // Keywords (15) and Modifiers (16), with context awareness for member/variable positions
-                    k if k.is_keyword() => {
-                        let text = token.text();
-                        let end_offset = (token.offset() + token.text_len()) as usize;
-                        let remainder = src.get(end_offset..).unwrap_or("").trim_start();
+                let text = token.text();
+                let end_offset = (token.offset() + token.text_len()) as usize;
+                let remainder = src.get(end_offset..).unwrap_or("").trim_start();
 
-                        if prev_non_trivia_kind == SyntaxKind::Dot
-                            || prev_non_trivia_kind == SyntaxKind::SafeNav
-                            || prev_non_trivia_kind == SyntaxKind::Cascade
-                            || prev_non_trivia_kind == SyntaxKind::DotDot
-                        {
-                            if remainder.starts_with('(') {
-                                Some((13, 0)) // method
-                            } else {
-                                Some((9, 0)) // property
+                let mut ctx = 0u32;
+                if prev_non_trivia_kind == SyntaxKind::KwLet
+                    || prev_non_trivia_kind == SyntaxKind::KwVar
+                    || prev_non_trivia_kind == SyntaxKind::KwConst
+                    || prev_non_trivia_kind == SyntaxKind::KwFn
+                    || prev_non_trivia_kind == SyntaxKind::KwDef
+                    || prev_non_trivia_kind == SyntaxKind::KwStruct
+                    || prev_non_trivia_kind == SyntaxKind::KwRecord
+                    || prev_non_trivia_kind == SyntaxKind::KwInterface
+                    || prev_non_trivia_kind == SyntaxKind::KwClass
+                    || prev_non_trivia_kind == SyntaxKind::KwEnum
+                    || prev_non_trivia_kind == SyntaxKind::KwType
+                    || prev_non_trivia_kind == SyntaxKind::KwMacro
+                {
+                    ctx |= pilot_ast::AstContext::IS_DECLARATION;
+                }
+
+                if remainder.starts_with('(') || (remainder.starts_with('{') && !k.is_keyword()) {
+                    ctx |= pilot_ast::AstContext::IS_CALL_CALLEE;
+                }
+
+                if prev_non_trivia_kind == SyntaxKind::Colon
+                    || prev_non_trivia_kind == SyntaxKind::Arrow
+                    || prev_non_trivia_kind == SyntaxKind::KwAs
+                {
+                    ctx |= pilot_ast::AstContext::IS_TYPE_ANNOTATION;
+                }
+
+                if prev_non_trivia_kind == SyntaxKind::Dot
+                    || prev_non_trivia_kind == SyntaxKind::SafeNav
+                    || prev_non_trivia_kind == SyntaxKind::Cascade
+                    || prev_non_trivia_kind == SyntaxKind::DotDot
+                {
+                    ctx |= pilot_ast::AstContext::IS_MEMBER_ACCESS;
+                }
+
+                if prev_non_trivia_kind == SyntaxKind::ColonColon {
+                    ctx |= pilot_ast::AstContext::IS_VARIANT_CTOR;
+                }
+
+                if prev_non_trivia_kind == SyntaxKind::Star {
+                    ctx |= pilot_ast::AstContext::IS_BUNDLE_SPLICE;
+                }
+
+                if prev_non_trivia_kind == SyntaxKind::At {
+                    ctx |= pilot_ast::AstContext::IS_ATTR_PREFIX;
+                }
+
+                if tables.prop_field_name.as_deref() == Some(text) {
+                    ctx |= pilot_ast::AstContext::IS_CONTEXTUAL_FIELD;
+                    ctx |= pilot_ast::AstContext::IS_PROP_ACCESSOR;
+                }
+                if tables.prop_value_name.as_deref() == Some(text) {
+                    ctx |= pilot_ast::AstContext::IS_CONTEXTUAL_VALUE;
+                    ctx |= pilot_ast::AstContext::IS_PROP_ACCESSOR;
+                }
+
+                if k.is_modifier_keyword()
+                    || tables.modifiers_by_name.contains_key(text)
+                    || tables.param_modifiers_by_name.contains_key(text)
+                    || (text.starts_with("lvl") && text.len() >= 4 && text[3..].chars().all(|c| c.is_ascii_digit()))
+                {
+                    ctx |= pilot_ast::AstContext::IS_MODIFIER_POS;
+                }
+
+                if tables.syntax_macros_by_name.contains_key(text) {
+                    ctx |= pilot_ast::AstContext::IS_SYNTAX_MACRO;
+                }
+
+                if snap.vm.type_layouts.contains_key(text) || snap.vm.lattice_interfaces.contains_key(text) {
+                    ctx |= pilot_ast::AstContext::IS_TYPE_SYMBOL;
+                }
+
+                if let Some(layout) = snap.vm.type_layouts.get(text) {
+                    if layout.has_explicit_register_layout || layout.reg_class != pilot_analysis::RegisterClass::Composite || text.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) {
+                        ctx |= pilot_ast::AstContext::IS_LANG_PRIMITIVE;
+                    }
+                }
+
+                if text.starts_with('$') {
+                    ctx |= pilot_ast::AstContext::IS_QUOTE_SPLICE;
+                    if text.chars().nth(1).map_or(false, |c| c.is_ascii_uppercase()) {
+                        ctx |= pilot_ast::AstContext::IS_QUOTE_TYPE_PARAM;
+                    }
+                }
+
+                if text.starts_with('~') {
+                    ctx |= pilot_ast::AstContext::IS_UNQUOTE_ESCAPE;
+                }
+
+                if text.starts_with('`') && text.ends_with('`') {
+                    ctx |= pilot_ast::AstContext::IS_RAW_BACKTICK;
+                }
+
+                if let Some(ref ma) = mod_analysis {
+                    for (n_idx, &node_span) in ma.arena.spans.iter().enumerate() {
+                        if node_span.start == token.offset() && node_span.end == token.offset() + token.text_len() {
+                            if let Some(ast_ctx) = ma.arena.node_contexts.get(&(n_idx as u32)) {
+                                ctx |= ast_ctx.0;
                             }
-                        } else if (prev_non_trivia_kind == SyntaxKind::KwLet
-                            || prev_non_trivia_kind == SyntaxKind::KwVar
-                            || prev_non_trivia_kind == SyntaxKind::KwConst)
-                            && !k.is_modifier_keyword()
-                        {
-                            Some((8, 1)) // variable declaration
-                        } else if k.is_modifier_keyword() {
-                            Some((16, 0)) // modifier
-                        } else if Self::is_pilot_primitive_type(text) {
-                            Some((1, 512)) // type (defaultLibrary)
-                        } else {
-                            Some((15, 0)) // keyword
+                            break;
                         }
                     }
+                    for (_fn_id, spec) in &ma.analysis.local_fn_captures {
+                        if spec.captures.iter().any(|c| ma.arena.interner.resolve(c.sym) == text) {
+                            ctx |= pilot_ast::AstContext::IS_LOCAL_CAPTURE;
+                            break;
+                        }
+                    }
+                }
 
-                    // Identifiers (function / method / type / class / struct / property / decorator / variable)
-                    SyntaxKind::Ident => {
-                        let text = token.text();
-                        let end_offset = (token.offset() + token.text_len()) as usize;
-                        let remainder = src.get(end_offset..).unwrap_or("").trim_start();
-
-                        if pilot_parser::is_polyglot_lang(text) && (remainder.starts_with('{') || remainder.starts_with("```") || remainder.starts_with("\"\"\"")) {
-                            Some((15, 0)) // keyword
-                        } else if matches!(text, "priv" | "pub" | "file" | "fileprivate" | "prot" | "pkg" | "package" | "int" | "open" | "export" | "iso" | "steal" | "public" | "private" | "protected" | "internal" | "static" | "partial" | "readonly" | "override" | "virtual" | "abstract" | "sealed") || (text.starts_with("lvl") && (text.len() == 3 || text[3..].chars().all(|c| c.is_ascii_digit()))) {
-                            Some((16, 0)) // modifier
-                        } else if text == "view" && prev_non_trivia_kind == SyntaxKind::KwAs {
-                            Some((15, 0)) // keyword
-                        } else if prev_non_trivia_kind == SyntaxKind::At {
-                            Some((22, 0)) // decorator
-                        } else if prev_non_trivia_kind == SyntaxKind::KwClass || prev_non_trivia_kind == SyntaxKind::KwActor || prev_non_trivia_kind == SyntaxKind::KwState {
-                            Some((2, 3)) // class (declaration + definition)
-                        } else if prev_non_trivia_kind == SyntaxKind::KwStruct || prev_non_trivia_kind == SyntaxKind::KwRecord {
-                            Some((5, 3)) // struct (declaration + definition)
-                        } else if prev_non_trivia_kind == SyntaxKind::KwInterface || prev_non_trivia_kind == SyntaxKind::KwProtocol {
-                            Some((4, 3)) // interface (declaration + definition)
-                        } else if prev_non_trivia_kind == SyntaxKind::KwEnum {
-                            Some((3, 3)) // enum (declaration + definition)
-                        } else if prev_non_trivia_kind == SyntaxKind::KwType || prev_non_trivia_kind == SyntaxKind::KwExtend || prev_non_trivia_kind == SyntaxKind::KwExtension {
-                            Some((1, 3)) // type (declaration + definition)
-                        } else if prev_non_trivia_kind == SyntaxKind::KwProperty {
-                            Some((9, 3)) // property (declaration + definition)
-                        } else if prev_non_trivia_kind == SyntaxKind::KwMacro || prev_non_trivia_kind == SyntaxKind::KwDefmacro {
-                            Some((14, 3)) // macro (declaration + definition)
-                        } else if prev_non_trivia_kind == SyntaxKind::KwDef || prev_non_trivia_kind == SyntaxKind::KwFn {
-                            Some((12, 3)) // function definition
-                        } else if prev_non_trivia_kind == SyntaxKind::Dot || prev_non_trivia_kind == SyntaxKind::SafeNav || prev_non_trivia_kind == SyntaxKind::Cascade || prev_non_trivia_kind == SyntaxKind::DotDot {
-                            if remainder.starts_with('(') {
-                                Some((13, 0)) // method
+                let token_desc: Option<(u32, u32)> = match k {
+                    k if k.is_keyword() => {
+                        let (inh_k, inh_m) = if (ctx & pilot_ast::AstContext::IS_MEMBER_ACCESS) != 0 {
+                            if (ctx & pilot_ast::AstContext::IS_CALL_CALLEE) != 0 {
+                                (pilot_ast::LspKind::METHOD_K, pilot_ast::LspMod::NONE)
                             } else {
-                                Some((9, 0)) // property
+                                (pilot_ast::LspKind::PROPERTY_K, pilot_ast::LspMod::NONE)
                             }
-                        } else if remainder.starts_with('(') {
-                            if text.starts_with(char::is_uppercase) {
-                                Some((2, 0)) // class constructor call
-                            } else if get_builtin_doc(text).is_some() {
-                                Some((12, 512)) // builtin function call + defaultLibrary
+                        } else if (ctx & pilot_ast::AstContext::IS_MODIFIER_POS) != 0 {
+                            (pilot_ast::LspKind::MODIFIER_K, pilot_ast::LspMod::NONE)
+                        } else if (ctx & pilot_ast::AstContext::IS_TYPE_SYMBOL) != 0 {
+                            (pilot_ast::LspKind::TYPE_K, pilot_ast::LspMod::DEFAULT_LIB)
+                        } else {
+                            (pilot_ast::LspKind::KEYWORD_K, pilot_ast::LspMod::NONE)
+                        };
+                        let lattice_bits = snap.vm.type_layouts.get(text).map(|l| l.lattice_bits).unwrap_or(0);
+                        Some(pilot_ast::IdeContextPolicy::classify(inh_k, inh_m, ctx, lattice_bits))
+                    }
+                    SyntaxKind::Ident => {
+                        let (inh_k, inh_m) = if pilot_parser::is_polyglot_lang(text) && (remainder.starts_with('{') || remainder.starts_with("```") || remainder.starts_with("\"\"\"")) {
+                            (pilot_ast::LspKind::KEYWORD_K, pilot_ast::LspMod::NONE)
+                        } else if text == "view" && prev_non_trivia_kind == SyntaxKind::KwAs {
+                            (pilot_ast::LspKind::KEYWORD_K, pilot_ast::LspMod::NONE)
+                        } else if prev_non_trivia_kind == SyntaxKind::KwClass || prev_non_trivia_kind == SyntaxKind::KwActor || prev_non_trivia_kind == SyntaxKind::KwState {
+                            (pilot_ast::LspKind::CLASS_K, pilot_ast::LspMod::DECLARATION | pilot_ast::LspMod::DEFINITION)
+                        } else if prev_non_trivia_kind == SyntaxKind::KwStruct || prev_non_trivia_kind == SyntaxKind::KwRecord {
+                            (pilot_ast::LspKind::STRUCT_K, pilot_ast::LspMod::DECLARATION | pilot_ast::LspMod::DEFINITION)
+                        } else if prev_non_trivia_kind == SyntaxKind::KwInterface || prev_non_trivia_kind == SyntaxKind::KwProtocol {
+                            (pilot_ast::LspKind::INTERFACE_K, pilot_ast::LspMod::DECLARATION | pilot_ast::LspMod::DEFINITION)
+                        } else if prev_non_trivia_kind == SyntaxKind::KwEnum {
+                            (pilot_ast::LspKind::ENUM_K, pilot_ast::LspMod::DECLARATION | pilot_ast::LspMod::DEFINITION)
+                        } else if prev_non_trivia_kind == SyntaxKind::KwType || prev_non_trivia_kind == SyntaxKind::KwExtend || prev_non_trivia_kind == SyntaxKind::KwExtension {
+                            (pilot_ast::LspKind::TYPE_K, pilot_ast::LspMod::DECLARATION | pilot_ast::LspMod::DEFINITION)
+                        } else if prev_non_trivia_kind == SyntaxKind::KwProperty {
+                            (pilot_ast::LspKind::PROPERTY_K, pilot_ast::LspMod::DECLARATION | pilot_ast::LspMod::DEFINITION)
+                        } else if prev_non_trivia_kind == SyntaxKind::KwMacro || prev_non_trivia_kind == SyntaxKind::KwDefmacro {
+                            (pilot_ast::LspKind::MACRO_K, pilot_ast::LspMod::DECLARATION | pilot_ast::LspMod::DEFINITION)
+                        } else if prev_non_trivia_kind == SyntaxKind::KwDef || prev_non_trivia_kind == SyntaxKind::KwFn {
+                            (pilot_ast::LspKind::FUNCTION_K, pilot_ast::LspMod::DECLARATION | pilot_ast::LspMod::DEFINITION)
+                        } else if (ctx & pilot_ast::AstContext::IS_MEMBER_ACCESS) != 0 {
+                            if (ctx & pilot_ast::AstContext::IS_CALL_CALLEE) != 0 {
+                                (pilot_ast::LspKind::METHOD_K, pilot_ast::LspMod::NONE)
                             } else {
-                                Some((12, 0)) // function call
+                                (pilot_ast::LspKind::PROPERTY_K, pilot_ast::LspMod::NONE)
+                            }
+                        } else if (ctx & pilot_ast::AstContext::IS_CALL_CALLEE) != 0 {
+                            if text.starts_with(char::is_uppercase) {
+                                (pilot_ast::LspKind::CLASS_K, pilot_ast::LspMod::CONSTRUCTOR)
+                            } else if get_builtin_doc(text).is_some() {
+                                (pilot_ast::LspKind::FUNCTION_K, pilot_ast::LspMod::DEFAULT_LIB)
+                            } else {
+                                (pilot_ast::LspKind::FUNCTION_K, pilot_ast::LspMod::NONE)
                             }
                         } else if get_builtin_doc(text).is_some() {
-                            Some((12, 512)) // builtin function identifier + defaultLibrary
-                        } else if Self::is_pilot_primitive_type(text) {
-                            Some((1, 512)) // type (defaultLibrary)
+                            (pilot_ast::LspKind::FUNCTION_K, pilot_ast::LspMod::DEFAULT_LIB)
                         } else if text.starts_with(char::is_uppercase) {
                             if text.chars().all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit()) && text.len() > 1 {
-                                Some((8, 4)) // constant (variable + readonly)
+                                (pilot_ast::LspKind::VARIABLE_K, pilot_ast::LspMod::READONLY)
                             } else {
-                                Some((1, 0)) // type
+                                (pilot_ast::LspKind::TYPE_K, pilot_ast::LspMod::NONE)
                             }
-                        } else if text == "self" || text == "this" {
-                            Some((8, 4)) // variable + readonly
+                        } else if tables.receiver_ident_name.as_deref() == Some(text) || text == "self" || text == "this" {
+                            (pilot_ast::LspKind::VARIABLE_K, pilot_ast::LspMod::READONLY)
                         } else if prev_non_trivia_kind == SyntaxKind::KwLet || prev_non_trivia_kind == SyntaxKind::KwVar {
-                            Some((8, 1)) // variable declaration
+                            (pilot_ast::LspKind::VARIABLE_K, pilot_ast::LspMod::DECLARATION)
                         } else if prev_non_trivia_kind == SyntaxKind::KwConst {
-                            Some((8, 5)) // variable declaration + readonly
+                            (pilot_ast::LspKind::VARIABLE_K, pilot_ast::LspMod::DECLARATION | pilot_ast::LspMod::READONLY)
                         } else {
-                            Some((8, 0)) // variable
-                        }
+                            (pilot_ast::LspKind::VARIABLE_K, pilot_ast::LspMod::NONE)
+                        };
+
+                        let lattice_bits = snap.vm.type_layouts.get(text).map(|l| l.lattice_bits).unwrap_or(0);
+                        Some(pilot_ast::IdeContextPolicy::classify(inh_k, inh_m, ctx, lattice_bits))
                     }
-
-                    // Single-line Strings (18). Leave FStrStart, TripleStrLit, and RawDslBlock to TextMate so
-                    // interpolated `{...}` expressions and embedded polyglot blocks keep their syntax coloring!
-                    SyntaxKind::StrLit if !token.text().contains('\n') => Some((18, 0)),
-
-                    // Keyword literal / symbols (10: enumMember)
-                    SyntaxKind::KeywordLit => Some((10, 0)),
-
-                    // Numbers & Dimensional Literals (19)
+                    SyntaxKind::StrLit if !token.text().contains('\n') => Some((pilot_ast::LspKind::STRING_K, pilot_ast::LspMod::NONE)),
+                    SyntaxKind::KeywordLit => Some((pilot_ast::LspKind::ENUM_MEM_K, pilot_ast::LspMod::NONE)),
                     SyntaxKind::IntLit
                     | SyntaxKind::HexIntLit
                     | SyntaxKind::BinIntLit
@@ -2916,18 +2970,11 @@ impl LspServer {
                     | SyntaxKind::FloatLit
                     | SyntaxKind::DurationLit
                     | SyntaxKind::FrequencyLit
-                    | SyntaxKind::MemoryLit => Some((19, 0)), // number
-
-                    // Single-line Comments (17)
-                    SyntaxKind::LineComment | SyntaxKind::Shebang => Some((17, 0)), // comment
-                    SyntaxKind::BlockComment if !token.text().contains('\n') => Some((17, 0)),
-
-                    // Operators (21)
-                    k if k.is_operator() => Some((21, 0)), // operator
-
-                    // Decorators (22)
-                    SyntaxKind::At => Some((22, 0)), // decorator
-
+                    | SyntaxKind::MemoryLit => Some((pilot_ast::LspKind::NUMBER_K, pilot_ast::LspMod::NONE)),
+                    SyntaxKind::LineComment | SyntaxKind::Shebang => Some((pilot_ast::LspKind::COMMENT_K, pilot_ast::LspMod::NONE)),
+                    SyntaxKind::BlockComment if !token.text().contains('\n') => Some((pilot_ast::LspKind::COMMENT_K, pilot_ast::LspMod::NONE)),
+                    k if k.is_operator() => Some((pilot_ast::LspKind::OPERATOR_K, pilot_ast::LspMod::NONE)),
+                    SyntaxKind::At => Some((pilot_ast::LspKind::DECORATOR_K, pilot_ast::LspMod::NONE)),
                     _ => None,
                 };
 
@@ -3053,6 +3100,24 @@ impl LspServer {
                         ("paddingLeft".to_string(), JsonValue::Bool(false)),
                     ]));
                 }
+            }
+        }
+
+        for (&fn_id, spec) in &analysis.local_fn_captures {
+            if !spec.captures.is_empty() {
+                let capture_names: Vec<&str> = spec.captures.iter().map(|c| arena.interner.resolve(c.sym)).collect();
+                let captures_csv = capture_names.join(", ");
+                let span = arena.spans[fn_id as usize];
+                let (line, col) = li.offset_to_line_col(span.start);
+                hints.push(JsonValue::Object(vec![
+                    ("position".to_string(), JsonValue::Object(vec![
+                        ("line".to_string(), JsonValue::Number(line.saturating_sub(1) as f64)),
+                        ("character".to_string(), JsonValue::Number(col.saturating_sub(1) as f64)),
+                    ])),
+                    ("label".to_string(), JsonValue::String(pilot_ast::IdePresentationPolicy::format_capture_inlay_hint(&captures_csv))),
+                    ("kind".to_string(), JsonValue::Number(2.0)),
+                    ("paddingRight".to_string(), JsonValue::Bool(true)),
+                ]));
             }
         }
 
@@ -3254,46 +3319,24 @@ fn is_valid_identifier(name: &str) -> bool {
             return false;
         }
     }
-    !matches!(
-        name,
-        "fn"
-            | "def"
-            | "class"
-            | "struct"
-            | "interface"
-            | "record"
-            | "extend"
-            | "type"
-            | "enum"
-            | "let"
-            | "var"
-            | "const"
-            | "return"
-            | "if"
-            | "else"
-            | "while"
-            | "for"
-            | "in"
-            | "break"
-            | "continue"
-            | "yield"
-            | "switch"
-            | "match"
-            | "try"
-            | "catch"
-            | "finally"
-            | "except"
-            | "import"
-            | "from"
-            | "as"
-            | "true"
-            | "false"
-            | "null"
-            | "self"
-            | "this"
-            | "field"
-            | "value"
-    )
+    const SEED_TOKENS: &[&str] = &[
+        "__engine", "struct", "interface", "fn", "let", "ref", "if", "loop", "return", "yield",
+        "defer", "comptime", "quote", "asm",
+    ];
+    if SEED_TOKENS.contains(&name) {
+        return false;
+    }
+    let snap = pilot_analysis::comptime::BootstrapSnapshot::global();
+    if snap.tables.modifiers_by_name.contains_key(name)
+        || snap.tables.syntax_macros_by_name.contains_key(name)
+        || snap.tables.module_keywords_by_name.contains_key(name)
+        || snap.tables.receiver_ident_name.as_deref() == Some(name)
+        || snap.tables.prop_field_name.as_deref() == Some(name)
+        || snap.tables.prop_value_name.as_deref() == Some(name)
+    {
+        return false;
+    }
+    true
 }
 
 fn make_range(start_line: u32, start_col: u32, end_line: u32, end_col: u32) -> JsonValue {

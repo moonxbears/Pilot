@@ -14,9 +14,93 @@ pub use doc::Doc;
 pub use options::{FormatOptions, FormatResult};
 pub use printer::format_source;
 
+/// Legacy-to-canonical syntax migration pairs matching `selfhost/ide_sync.pilot`.
+pub fn syntax_migration_pairs() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("def", "fn"),
+        ("mut", "var"),
+        ("match", "switch"),
+        ("protocol", "interface"),
+        ("extension", "ext"),
+    ]
+}
+
+/// Applies lossless CST-driven syntax migration from legacy keywords to canonical Pilot keywords.
+pub fn migrate_syntax(source: &str) -> String {
+    let tape = pilot_lexer::tokenize(source);
+    let pairs = syntax_migration_pairs();
+    let mut result = String::with_capacity(source.len());
+    let mut last_offset = 0;
+
+    for i in 0..tape.len() {
+        let span = tape.span(i);
+        let kind = tape.kind(i);
+        let start = span.start as usize;
+        let end = span.end as usize;
+
+        if start > last_offset && start <= source.len() {
+            result.push_str(&source[last_offset..start]);
+        }
+
+        if end <= source.len() {
+            let tok_text = &source[start..end];
+            if kind.is_keyword() || kind == pilot_lexer::TokenKind::Ident {
+                let mut replaced = false;
+                for (old_kw, new_kw) in &pairs {
+                    if tok_text == *old_kw {
+                        result.push_str(new_kw);
+                        replaced = true;
+                        break;
+                    }
+                }
+                if !replaced {
+                    result.push_str(tok_text);
+                }
+            } else {
+                result.push_str(tok_text);
+            }
+            last_offset = end;
+        }
+    }
+    if last_offset < source.len() {
+        result.push_str(&source[last_offset..]);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_syntax_migration_pairs_and_lossless_migration() {
+        let legacy = r#"// Legacy Pilot code
+def add(a: i64, b: i64) -> i64 {
+    mut x = a;
+    match b {
+        case 0: return x;
+        default: return x + b;
+    }
+}
+
+protocol IGreeter {
+    def greet();
+}
+
+extension String {
+    def say_hi() {}
+}
+"#;
+        let migrated = migrate_syntax(legacy);
+        assert!(migrated.contains("fn add("));
+        assert!(migrated.contains("var x = a;"));
+        assert!(migrated.contains("switch b {"));
+        assert!(migrated.contains("interface IGreeter {"));
+        assert!(migrated.contains("fn greet();"));
+        assert!(migrated.contains("ext String {"));
+        assert!(migrated.contains("fn say_hi() {}"));
+        assert!(migrated.contains("// Legacy Pilot code"));
+    }
 
     #[test]
     fn test_format_source_preserves_comments_and_expressions() {

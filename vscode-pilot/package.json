@@ -29,6 +29,45 @@
     ],
     "main": "./out/extension.js",
     "contributes": {
+    "semanticTokenTypes": [
+      { "id": "namespace", "description": "Style for namespaces" },
+      { "id": "type", "description": "Style for types" },
+      { "id": "class", "description": "Style for classes" },
+      { "id": "enum", "description": "Style for enums" },
+      { "id": "interface", "description": "Style for interfaces" },
+      { "id": "struct", "description": "Style for structs" },
+      { "id": "typeParameter", "description": "Style for generic type parameters" },
+      { "id": "parameter", "description": "Style for function parameters" },
+      { "id": "variable", "description": "Style for variables" },
+      { "id": "property", "description": "Style for properties and fields" },
+      { "id": "enumMember", "description": "Style for enum variants" },
+      { "id": "event", "description": "Style for events" },
+      { "id": "function", "description": "Style for functions" },
+      { "id": "method", "description": "Style for methods" },
+      { "id": "macro", "description": "Style for macros" },
+      { "id": "keyword", "description": "Style for keywords" },
+      { "id": "modifier", "description": "Style for modifiers" },
+      { "id": "comment", "description": "Style for comments" },
+      { "id": "string", "description": "Style for strings" },
+      { "id": "number", "description": "Style for numbers" },
+      { "id": "regexp", "description": "Style for regexes" },
+      { "id": "operator", "description": "Style for operators" },
+      { "id": "decorator", "description": "Style for attributes and decorators" }
+    ],
+    "semanticTokenModifiers": [
+      { "id": "declaration", "description": "Annotates symbol declarations" },
+      { "id": "definition", "description": "Annotates symbol definitions" },
+      { "id": "readonly", "description": "Annotates readonly or immutable symbols" },
+      { "id": "static", "description": "Annotates static members" },
+      { "id": "deprecated", "description": "Annotates deprecated members" },
+      { "id": "abstract", "description": "Annotates abstract members" },
+      { "id": "async", "description": "Annotates async members" },
+      { "id": "modification", "description": "Annotates mutating targets" },
+      { "id": "documentation", "description": "Annotates doc comments" },
+      { "id": "defaultLibrary", "description": "Annotates stdlib / built-in members" },
+      { "id": "constructor", "description": "Annotates constructors" },
+      { "id": "callable", "description": "Annotates callable variables" }
+    ],
         "languages": [
             {
                 "id": "pilot",
@@ -140,6 +179,11 @@
                             "program"
                         ],
                         "properties": {
+        "editor.semanticHighlighting.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enables semantic highlighting for Pilot files"
+        },
                             "program": {
                                 "type": "string",
                                 "description": "Path to the .pilot script to run or debug.",

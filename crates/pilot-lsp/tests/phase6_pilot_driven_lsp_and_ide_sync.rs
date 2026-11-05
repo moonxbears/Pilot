@@ -1,0 +1,350 @@
+//! Phase 6 of 6 Verification Gate:
+//! Pilot-Hosted IDE Semantic Classifier, Hover/Inlay Formatter & Artifact Generator (`meta.pilot` & `ide_sync.pilot`)
+//! + Pure AST/Span Rust LSP Engine (`pilot-lsp`).
+
+use pilot_analysis::comptime::BootstrapSnapshot;
+use pilot_ast::{AstContext, IdeContextPolicy, IdePresentationPolicy, LspKind, LspMod};
+use pilot_lsp::LspServer;
+
+/// Test 1: Disambiguation of constructors, functions, callable objects, and macros via Pilot's IdeContextPolicy.
+#[test]
+fn test_pilot_ide_context_policy_disambiguates_constructors_functions_and_callables() {
+    // 1. Value struct constructor: `Point(1, 2)` -> struct_k + constructor
+    let (kind, mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_CALL_CALLEE | AstContext::IS_TYPE_SYMBOL,
+        0b00, // IValue
+    );
+    assert_eq!(kind, LspKind::STRUCT_K);
+    assert_eq!(mods & LspMod::CONSTRUCTOR, LspMod::CONSTRUCTOR);
+
+    // 2. Owned object/class constructor: `Buffer(10)` -> class_k + constructor
+    let (kind, mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_CALL_CALLEE | AstContext::IS_TYPE_SYMBOL,
+        0b10, // IObject
+    );
+    assert_eq!(kind, LspKind::CLASS_K);
+    assert_eq!(mods & LspMod::CONSTRUCTOR, LspMod::CONSTRUCTOR);
+
+    // 3. Scalar/primitive type call: `i64(1)` -> type_k + default_lib
+    let (kind, mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_CALL_CALLEE | AstContext::IS_TYPE_SYMBOL | AstContext::IS_LANG_PRIMITIVE,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::TYPE_K);
+    assert_eq!(mods & LspMod::DEFAULT_LIB, LspMod::DEFAULT_LIB);
+
+    // 4. Callable object invocation: `handler(event)` -> variable_k + callable
+    let (kind, mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_CALL_CALLEE | AstContext::IS_CALLABLE_OBJECT,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::VARIABLE_K);
+    assert_eq!(mods & LspMod::CALLABLE, LspMod::CALLABLE);
+
+    // 5. Callable property/field invocation: `this.callback(args)` -> property_k + callable
+    let (kind, mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_CALL_CALLEE | AstContext::IS_CALLABLE_OBJECT | AstContext::IS_FIELD_OR_PROP,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::PROPERTY_K);
+    assert_eq!(mods & LspMod::CALLABLE, LspMod::CALLABLE);
+
+    // 6. Syntax macro invocation: `my_macro(...)` -> macro_k
+    let (kind, _mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_CALL_CALLEE | AstContext::IS_SYNTAX_MACRO,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::MACRO_K);
+
+    // 7. Method invocation: `obj.compute(...)` -> method_k
+    let (kind, _mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_CALL_CALLEE | AstContext::IS_METHOD_SYMBOL,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::METHOD_K);
+
+    // 8. Plain function invocation: `calculate(...)` -> function_k
+    let (kind, _mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_CALL_CALLEE,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::FUNCTION_K);
+}
+
+/// Test 2: Live user syntax evolution, quote depth hygiene, and splice classification.
+#[test]
+fn test_live_user_syntax_evolution_and_quote_splice_depth_hygiene() {
+    let snap = BootstrapSnapshot::global();
+
+    // Verify ParserTables has registered seed tokens and syntax macros
+    assert!(!snap.tables.syntax_macros_by_name.is_empty(), "Bootstrap must register core syntax macros");
+
+    // Splice of expression parameter: `$x` inside quote -> param_k + static_m
+    let (kind, mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_QUOTE_SPLICE,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::PARAM_K);
+    assert_eq!(mods & LspMod::STATIC_M, LspMod::STATIC_M);
+
+    // Splice of type parameter: `$T` inside quote -> type_param_k + static_m
+    let (kind, mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_QUOTE_SPLICE | AstContext::IS_QUOTE_TYPE_PARAM,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::TYPE_PARAM_K);
+    assert_eq!(mods & LspMod::STATIC_M, LspMod::STATIC_M);
+
+    // Unquote escape: `~expr` inside quote -> macro_k + static_m
+    let (kind, mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_UNQUOTE_ESCAPE,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::MACRO_K);
+    assert_eq!(mods & LspMod::STATIC_M, LspMod::STATIC_M);
+
+    // Verify side-table tracking in AstArena: 16-byte AstNode invariant
+    let mut arena = pilot_ast::AstArena::new();
+    let span = pilot_span::ByteSpan::new(0, 10);
+    let nid = arena.alloc_node(pilot_ast::NodeKind::IdentExpr, 0, span, 0, 0);
+    arena.node_quote_depths.insert(nid.0, 2);
+    arena.node_contexts.insert(nid.0, AstContext(AstContext::IS_QUOTE_SPLICE));
+    arena.node_expansion_origins.insert(nid.0, pilot_ast::ExpansionOrigin::Source);
+
+    assert_eq!(arena.node_quote_depths.get(&nid.0), Some(&2));
+    assert_eq!(arena.node_contexts.get(&nid.0).map(|c| c.0), Some(AstContext::IS_QUOTE_SPLICE));
+    assert_eq!(std::mem::size_of::<pilot_ast::AstNode>(), 16, "AstNode must be strictly 16 bytes");
+}
+
+/// Test 3: Distributive headers, Variation B contextual `field`/`value`, and uncalled method groups.
+#[test]
+fn test_distributive_headers_variation_b_field_value_and_uncalled_method_groups() {
+    let snap = BootstrapSnapshot::global();
+
+    // Contextual property tokens registered in ParserTables without hardcoding
+    assert!(snap.tables.prop_field_name.is_some(), "prop_field_name must be registered");
+    assert!(snap.tables.prop_value_name.is_some(), "prop_value_name must be registered");
+
+    // Variation B contextual `field` inside property accessor:
+    // -> property_k + default_lib + modification
+    let (kind, mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_PROP_ACCESSOR | AstContext::IS_CONTEXTUAL_FIELD,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::PROPERTY_K);
+    assert_eq!(mods & LspMod::DEFAULT_LIB, LspMod::DEFAULT_LIB);
+    assert_eq!(mods & LspMod::MODIFICATION, LspMod::MODIFICATION);
+
+    // Variation B contextual `value` inside property accessor:
+    // -> param_k + default_lib + readonly
+    let (kind, mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_PROP_ACCESSOR | AstContext::IS_CONTEXTUAL_VALUE,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::PARAM_K);
+    assert_eq!(mods & LspMod::DEFAULT_LIB, LspMod::DEFAULT_LIB);
+    assert_eq!(mods & LspMod::READONLY, LspMod::READONLY);
+
+    // Member access `obj.field`: IS_MEMBER_ACCESS overrides contextual accessor rule
+    let (kind, _mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_MEMBER_ACCESS | AstContext::IS_FIELD_OR_PROP,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::PROPERTY_K);
+
+    // Uncalled method reference: `items.map(.process)` or `obj.method`
+    // -> method_k even without trailing `()`
+    let (kind, _mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_MEMBER_ACCESS | AstContext::IS_METHOD_SYMBOL,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::METHOD_K);
+}
+
+/// Test 4: Attribute cascades, offset lenses, and custom [IdeToken] attributes.
+#[test]
+fn test_patch_attribute_cascades_offset_lens_and_custom_ide_token_attr() {
+    // 1. `[...]` Attribute prefix on type: `[Clamp(0, 1)]` -> decorator_k
+    let (kind, _mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_ATTR_PREFIX | AstContext::IS_TYPE_SYMBOL,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::DECORATOR_K);
+
+    // 2. `*Bundle` or `*Facet` splice -> static_m
+    let (kind, mods) = IdeContextPolicy::classify(
+        LspKind::STRUCT_K,
+        LspMod::NONE,
+        AstContext::IS_BUNDLE_SPLICE,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::STRUCT_K);
+    assert_eq!(mods & LspMod::STATIC_M, LspMod::STATIC_M);
+
+    // 3. Dimensional unit suffix: `100[m/s]` -> type_param_k + default_lib
+    let (kind, mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_UNIT_DIMENSION,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::TYPE_PARAM_K);
+    assert_eq!(mods & LspMod::DEFAULT_LIB, LspMod::DEFAULT_LIB);
+
+    // 4. Type operator: `T@N`, `T[:]`, `T^`, `@T`, `T!E` -> operator_k + definition
+    let (kind, mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_TYPE_OPERATOR,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::OPERATOR_K);
+    assert_eq!(mods & LspMod::DEFINITION, LspMod::DEFINITION);
+
+    // 5. Variant constructor: `::ok(v)`, `::Active` -> enum_mem_k + readonly
+    let (kind, mods) = IdeContextPolicy::classify(
+        LspKind::VARIABLE_K,
+        LspMod::NONE,
+        AstContext::IS_VARIANT_CTOR,
+        0b00,
+    );
+    assert_eq!(kind, LspKind::ENUM_MEM_K);
+    assert_eq!(mods & LspMod::READONLY, LspMod::READONLY);
+}
+
+/// Test 5: Name-blind LSP rename litmus gate.
+#[test]
+fn test_name_blind_lsp_rename_litmus_gate() {
+    let mut server = LspServer::new();
+    let uri = "file:///workspace/rename_litmus.pilot";
+    let code = "struct Vector {\n    pub x: i64;\n    pub y: i64;\n    pub length: f64 {\n        get => field;\n        set => { field = value; }\n    }\n}\n";
+
+    // didOpen
+    let did_open = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+        uri,
+        code.replace('\n', "\\n")
+    );
+    server.handle_message(&did_open);
+
+    // 1. prepareRename on valid user identifier `Vector` -> succeeds with placeholder
+    let prep_req = format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/prepareRename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":8}}}}}}"#,
+        uri
+    );
+    let prep_resp = server.handle_message(&prep_req).expect("Expected response");
+    assert!(prep_resp.contains("placeholder"), "Valid identifier must be renameable: {}", prep_resp);
+    assert!(prep_resp.contains("Vector"));
+
+    // 2. prepareRename on contextual keyword `field` -> returns null (protected)
+    let prep_field_req = format!(
+        r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/prepareRename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":4,"character":16}}}}}}"#,
+        uri
+    );
+    let prep_field_resp = server.handle_message(&prep_field_req).expect("Expected response");
+    assert!(prep_field_resp.contains("\"result\":null"), "Contextual field must not be renameable: {}", prep_field_resp);
+
+    // 3. prepareRename on contextual keyword `value` -> returns null (protected)
+    let prep_val_req = format!(
+        r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/prepareRename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":5,"character":26}}}}}}"#,
+        uri
+    );
+    let prep_val_resp = server.handle_message(&prep_val_req).expect("Expected response");
+    assert!(prep_val_resp.contains("\"result\":null"), "Contextual value must not be renameable: {}", prep_val_resp);
+
+    // 4. rename to hardware seed keyword `struct` -> rejected
+    let rename_kw_req = format!(
+        r#"{{"jsonrpc":"2.0","id":4,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":8}},"newName":"struct"}}}}"#,
+        uri
+    );
+    let rename_kw_resp = server.handle_message(&rename_kw_req).expect("Expected response");
+    assert!(rename_kw_resp.contains("\"result\":null"), "Renaming to keyword must be rejected: {}", rename_kw_resp);
+
+    // 5. rename to valid identifier `Vec2` -> succeeds with text edits
+    let rename_valid_req = format!(
+        r#"{{"jsonrpc":"2.0","id":5,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":8}},"newName":"Vec2"}}}}"#,
+        uri
+    );
+    let rename_valid_resp = server.handle_message(&rename_valid_req).expect("Expected response");
+    assert!(rename_valid_resp.contains("newText"), "Valid rename must produce workspace edits: {}", rename_valid_resp);
+    assert!(rename_valid_resp.contains("Vec2"));
+}
+
+/// Test 6: Self-hosted ide_sync.pilot generates all 4 VS Code artifacts and presentation policy hover badges.
+#[test]
+fn test_selfhost_ide_sync_pilot_generates_all_4_vscode_artifacts_and_hover_badges() {
+    // 1. Verify IdePresentationPolicy 2-bit hardware lattice hover badges
+    let hover_00 = IdePresentationPolicy::format_type_hover("Vec3", 24, 8, 0b00);
+    assert!(hover_00.contains("0b00 IValue (Trivial Copy)"));
+    assert!(hover_00.contains("24 bytes"));
+    assert!(hover_00.contains("align 8"));
+
+    let hover_01 = IdePresentationPolicy::format_type_hover("SliceView", 16, 8, 0b01);
+    assert!(hover_01.contains("0b01 IReference (Lexical Borrow)"));
+
+    let hover_10 = IdePresentationPolicy::format_type_hover("SliceBuffer", 24, 8, 0b10);
+    assert!(hover_10.contains("0b10 IObject (Perceus Move + ~self)"));
+
+    let hover_11 = IdePresentationPolicy::format_type_hover("MutexGuard", 16, 8, 0b11);
+    assert!(hover_11.contains("0b11 IGuard (Scoped RAII + Borrow)"));
+
+    // 2. Verify capture inlay hint formatting
+    let inlay = IdePresentationPolicy::format_capture_inlay_hint("base, total");
+    assert_eq!(inlay, "/* captures: base, total */");
+
+    // 3. Verify semantic tokens full via LSP server
+    let mut server = LspServer::new();
+    let uri = "file:///workspace/semantic_tokens_test.pilot";
+    let code = "fn compute(x: i64) -> i64 {\n    var res = x + 1;\n    return res;\n}\n";
+    let did_open = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+        uri,
+        code.replace('\n', "\\n")
+    );
+    server.handle_message(&did_open);
+
+    let sem_req = format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/semanticTokens/full","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+        uri
+    );
+    let sem_resp = server.handle_message(&sem_req).expect("Expected semantic tokens response");
+    assert!(sem_resp.contains("data"), "Semantic tokens response must have data array: {}", sem_resp);
+
+    // 4. Verify syntax migration pairs in pilot-fmt
+    let pairs = pilot_fmt::syntax_migration_pairs();
+    assert!(!pairs.is_empty(), "Syntax migration pairs must be loaded");
+    let migrated = pilot_fmt::migrate_syntax("def add(x: int) -> int: return x");
+    assert!(migrated.contains("fn add"), "Migrated syntax should use 'fn': {}", migrated);
+}

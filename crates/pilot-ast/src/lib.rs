@@ -742,6 +742,230 @@ pub enum ExpansionOrigin {
     PatchExpansion { patch_id: NodeId, original_site: ByteSpan },
 }
 
+/// Mirrors `stdlib/core/meta.pilot`'s `LspKind`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LspKind;
+
+impl LspKind {
+    pub const NAMESPACE_K: u32 = 0;
+    pub const TYPE_K: u32 = 1;
+    pub const CLASS_K: u32 = 2;
+    pub const ENUM_K: u32 = 3;
+    pub const INTERFACE_K: u32 = 4;
+    pub const STRUCT_K: u32 = 5;
+    pub const TYPE_PARAM_K: u32 = 6;
+    pub const PARAM_K: u32 = 7;
+    pub const VARIABLE_K: u32 = 8;
+    pub const PROPERTY_K: u32 = 9;
+    pub const ENUM_MEM_K: u32 = 10;
+    pub const EVENT_K: u32 = 11;
+    pub const FUNCTION_K: u32 = 12;
+    pub const METHOD_K: u32 = 13;
+    pub const MACRO_K: u32 = 14;
+    pub const KEYWORD_K: u32 = 15;
+    pub const MODIFIER_K: u32 = 16;
+    pub const COMMENT_K: u32 = 17;
+    pub const STRING_K: u32 = 18;
+    pub const NUMBER_K: u32 = 19;
+    pub const REGEXP_K: u32 = 20;
+    pub const OPERATOR_K: u32 = 21;
+    pub const DECORATOR_K: u32 = 22;
+}
+
+/// Mirrors `stdlib/core/meta.pilot`'s `LspMod`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LspMod;
+
+impl LspMod {
+    pub const NONE: u32 = 0;
+    pub const DECLARATION: u32 = 1 << 0;
+    pub const DEFINITION: u32 = 1 << 1;
+    pub const READONLY: u32 = 1 << 2;
+    pub const STATIC_M: u32 = 1 << 3;
+    pub const DEPRECATED: u32 = 1 << 4;
+    pub const ABSTRACT_M: u32 = 1 << 5;
+    pub const ASYNC_M: u32 = 1 << 6;
+    pub const MODIFICATION: u32 = 1 << 7;
+    pub const DOC_M: u32 = 1 << 8;
+    pub const DEFAULT_LIB: u32 = 1 << 9;
+    pub const CONSTRUCTOR: u32 = 1 << 10;
+    pub const CALLABLE: u32 = 1 << 11;
+}
+
+/// Mirrors `stdlib/core/meta.pilot`'s `IdeContextPolicy`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct IdeContextPolicy;
+
+impl IdeContextPolicy {
+    pub fn classify(
+        inherited_kind: u32,
+        inherited_mods: u32,
+        ctx: u32,
+        lattice_bits: u8,
+    ) -> (u32, u32) {
+        let mut mods = inherited_mods;
+        if (ctx & AstContext::IS_DECLARATION) != 0 {
+            mods |= LspMod::DECLARATION;
+        }
+        if (ctx & AstContext::IS_MUTATING_TARGET) != 0 {
+            mods = (mods & !LspMod::READONLY) | LspMod::MODIFICATION;
+        }
+        if (ctx & AstContext::IS_LOCAL_CAPTURE) != 0 {
+            mods |= LspMod::STATIC_M;
+        }
+
+        // Rule 1: Type-Position Symbolic Operators (`T@N`, `T[:]`, `T^`, `@T`, `T?`, `T!E`, `(A)=>R`)
+        if (ctx & AstContext::IS_TYPE_OPERATOR) != 0 {
+            return (LspKind::OPERATOR_K, mods | LspMod::DEFINITION);
+        }
+
+        // Rule 2: Homoiconic `quote { ... }` Splices (`$T` vs `$x`) & `~unquote` Escapes
+        if (ctx & AstContext::IS_QUOTE_SPLICE) != 0 {
+            if (ctx & AstContext::IS_QUOTE_TYPE_PARAM) != 0 {
+                return (LspKind::TYPE_PARAM_K, mods | LspMod::STATIC_M);
+            }
+            return (LspKind::PARAM_K, mods | LspMod::STATIC_M);
+        }
+        if (ctx & AstContext::IS_UNQUOTE_ESCAPE) != 0 {
+            return (LspKind::MACRO_K, mods | LspMod::STATIC_M);
+        }
+
+        // Rule 3: Variation B Contextual `field` and `value` Inside Property Accessors
+        if ((ctx & AstContext::IS_PROP_ACCESSOR) != 0) && ((ctx & AstContext::IS_MEMBER_ACCESS) == 0) {
+            if (ctx & AstContext::IS_CONTEXTUAL_FIELD) != 0 {
+                return (LspKind::PROPERTY_K, mods | LspMod::DEFAULT_LIB | LspMod::MODIFICATION);
+            }
+            if (ctx & AstContext::IS_CONTEXTUAL_VALUE) != 0 {
+                return (LspKind::PARAM_K, mods | LspMod::DEFAULT_LIB | LspMod::READONLY);
+            }
+        }
+
+        // Rule 4: `[...]` Attribute Prefix (`[Clamp]`, `[var c = Patch(orig, ...)]`)
+        if (ctx & AstContext::IS_ATTR_PREFIX) != 0 {
+            if (ctx & AstContext::IS_TYPE_SYMBOL) != 0 {
+                return (LspKind::DECORATOR_K, mods);
+            }
+        }
+
+        // Rule 5: `*Bundle`, `*Facet`, & `*myBlock` Splices
+        if (ctx & AstContext::IS_BUNDLE_SPLICE) != 0 {
+            return (inherited_kind, mods | LspMod::STATIC_M);
+        }
+
+        // Rule 6: Dimensional Unit Suffixes (`100[m/s]`)
+        if (ctx & AstContext::IS_UNIT_DIMENSION) != 0 {
+            return (LspKind::TYPE_PARAM_K, mods | LspMod::DEFAULT_LIB);
+        }
+
+        // Rule 7: Variant Constructors (`::ok(v)`, `::some(x)`, `Shape.Circle(r)`)
+        if (ctx & AstContext::IS_VARIANT_CTOR) != 0 {
+            return (LspKind::ENUM_MEM_K, mods | LspMod::READONLY);
+        }
+
+        // Rule 8: Call Target Disambiguation (`Point(1, 2)` vs `closure_var(1)` vs `syntax_macro(1)` vs `fn(1)`)
+        if (ctx & AstContext::IS_CALL_CALLEE) != 0 {
+            if ((ctx & AstContext::IS_SYNTAX_MACRO) != 0) && ((ctx & AstContext::IS_RAW_BACKTICK) == 0) {
+                return (LspKind::MACRO_K, mods);
+            }
+            if (ctx & AstContext::IS_TYPE_SYMBOL) != 0 {
+                if (ctx & AstContext::IS_LANG_PRIMITIVE) != 0 {
+                    return (LspKind::TYPE_K, mods | LspMod::DEFAULT_LIB);
+                }
+                let ctor_kind = if (lattice_bits & 0b10) != 0 {
+                    LspKind::CLASS_K
+                } else {
+                    LspKind::STRUCT_K
+                };
+                return (ctor_kind, mods | LspMod::CONSTRUCTOR);
+            }
+            if (ctx & AstContext::IS_CALLABLE_OBJECT) != 0 {
+                let var_kind = if (ctx & AstContext::IS_FIELD_OR_PROP) != 0 {
+                    LspKind::PROPERTY_K
+                } else {
+                    inherited_kind
+                };
+                return (var_kind, mods | LspMod::CALLABLE);
+            }
+            if (ctx & AstContext::IS_METHOD_SYMBOL) != 0 {
+                return (LspKind::METHOD_K, mods);
+            }
+            return (LspKind::FUNCTION_K, mods);
+        }
+
+        // Rule 9: Member Access (`obj.m`, `.m` PrefixDot, `node..m` Cascade, `xs ~> .m` Lens)
+        if (ctx & AstContext::IS_MEMBER_ACCESS) != 0 {
+            if (ctx & AstContext::IS_METHOD_SYMBOL) != 0 {
+                return (LspKind::METHOD_K, mods);
+            }
+            if (ctx & AstContext::IS_FIELD_OR_PROP) != 0 {
+                return (LspKind::PROPERTY_K, mods);
+            }
+        }
+
+        // Rule 10: Type Annotations & Distributive `let Type<T> { ... }` Headers
+        if ((ctx & AstContext::IS_TYPE_ANNOTATION) != 0) || ((ctx & AstContext::IS_TYPE_SYMBOL) != 0) {
+            if (ctx & AstContext::IS_LANG_PRIMITIVE) != 0 {
+                return (LspKind::TYPE_K, mods | LspMod::DEFAULT_LIB);
+            }
+            if inherited_kind != 0 {
+                return (inherited_kind, mods);
+            }
+            let ty_kind = if (lattice_bits & 0b10) != 0 {
+                LspKind::CLASS_K
+            } else {
+                LspKind::STRUCT_K
+            };
+            return (ty_kind, mods);
+        }
+
+        // Rule 11: Declaration Modifiers (`pub`..`export`, `var`, `pure`, `lvl30`) vs Expression `lvl`
+        if (ctx & AstContext::IS_MODIFIER_POS) != 0 {
+            if (ctx & AstContext::IS_RAW_BACKTICK) == 0 {
+                return (LspKind::MODIFIER_K, mods | LspMod::STATIC_M);
+            }
+        }
+
+        // Rule 12: User or Core `syntax` Macro Invocations Without `()` (`break;`, `continue;`)
+        if ((ctx & AstContext::IS_SYNTAX_MACRO) != 0) && ((ctx & AstContext::IS_RAW_BACKTICK) == 0) {
+            return (LspKind::MACRO_K, mods);
+        }
+
+        (inherited_kind, mods)
+    }
+}
+
+/// Mirrors `stdlib/core/meta.pilot`'s `IdePresentationPolicy`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct IdePresentationPolicy;
+
+impl IdePresentationPolicy {
+    #[inline]
+    pub fn lattice_badge(bits: u8) -> &'static str {
+        match bits {
+            0b00 => "0b00 IValue (Trivial Copy)",
+            0b01 => "0b01 IReference (Lexical Borrow)",
+            0b10 => "0b10 IObject (Perceus Move + ~self)",
+            _ => "0b11 IGuard (Scoped RAII + Borrow)",
+        }
+    }
+
+    #[inline]
+    pub fn format_type_hover(name: &str, byte_size: usize, byte_align: usize, bits: u8) -> String {
+        format!(
+            "**{}** — `{} bytes` (`align {}`) | `{}`",
+            name,
+            byte_size,
+            byte_align,
+            Self::lattice_badge(bits)
+        )
+    }
+
+    #[inline]
+    pub fn format_capture_inlay_hint(captures_csv: &str) -> String {
+        format!("/* captures: {} */", captures_csv)
+    }
+}
+
 /// Flat, pointer-free AST arena storing 16-byte `AstNode`s, side-table literal pools,
 /// and variable-arity child index slices (`extra_children`).
 #[derive(Clone, Debug, Default)]

@@ -365,8 +365,8 @@ impl<'a> Lexer<'a> {
     }
 
     fn scan_fstring(&mut self, start: usize, quote: u8) {
-        // e.g. f"hello {x} world"
-        let mut cur = start + 2; // skip f"
+        let is_triple = start + 3 < self.bytes.len() && self.bytes[start + 2] == quote && self.bytes[start + 3] == quote;
+        let mut cur = if is_triple { start + 4 } else { start + 2 };
         let seg_start = start;
 
         while cur < self.bytes.len() {
@@ -375,7 +375,15 @@ impl<'a> Lexer<'a> {
                 cur += 2;
                 continue;
             }
-            if b == quote {
+            if is_triple {
+                if b == quote && cur + 2 < self.bytes.len() && self.bytes[cur + 1] == quote && self.bytes[cur + 2] == quote {
+                    cur += 3;
+                    let span = ByteSpan::new(seg_start as u32, cur as u32);
+                    self.cursor = cur;
+                    self.push_token(TokenKind::StrLit, TokenFlags::NONE, span);
+                    return;
+                }
+            } else if b == quote {
                 cur += 1;
                 let span = ByteSpan::new(seg_start as u32, cur as u32);
                 self.cursor = cur;

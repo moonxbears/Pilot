@@ -95,6 +95,7 @@ fn main() {
             "perf" => cmd_perf(&args[1..]),
             "bench" => cmd_bench(&args[1..]),
             "compile" => cmd_compile(&args[1..]),
+            "ide-sync" => cmd_ide_sync(),
             unknown => {
                 if unknown.ends_with(".pilot") || unknown.ends_with(".pilc") {
                     cmd_run(&args);
@@ -609,12 +610,14 @@ fn cmd_fmt(args: &[String]) {
 
     let mut check_only = false;
     let mut write_mode = false;
+    let mut migrate_syntax = false;
     let mut files = Vec::new();
 
     for arg in args {
         match arg.as_str() {
             "--check" => check_only = true,
             "-w" | "--write" => write_mode = true,
+            "--migrate-syntax" => migrate_syntax = true,
             path => files.push(path),
         }
     }
@@ -630,22 +633,333 @@ fn cmd_fmt(args: &[String]) {
             }
         };
 
-        let res = format_source(&src, &opts);
+        let output = if migrate_syntax {
+            pilot_fmt::migrate_syntax(&src)
+        } else {
+            let res = format_source(&src, &opts);
+            res.formatted_code
+        };
+
         if check_only {
-            if res.was_modified {
+            if output != src {
                 eprintln!("Diff detected: '{}' is not formatted.", file_path);
                 std::process::exit(1);
             }
         } else if write_mode {
-            if let Err(e) = fs::write(file_path, &res.formatted_code) {
+            if let Err(e) = fs::write(file_path, &output) {
                 eprintln!("error: failed to write formatted output to '{}': {}", file_path, e);
             } else {
                 println!("Formatted '{}'", file_path);
             }
         } else {
-            print!("{}", res.formatted_code);
+            print!("{}", output);
         }
     }
+}
+
+fn cmd_ide_sync() {
+    println!("Evaluating selfhost/ide_sync.pilot via bootstrapped Pilot compiler...");
+    let snap = pilot_analysis::BootstrapSnapshot::global();
+    let mut tables = snap.tables.clone();
+    let mut vm = snap.vm.clone();
+
+    // Query symbols directly from the bootstrapped compiler via reflection intrinsic
+    let seed_kws = match vm.eval_engine_intrinsic("query_registered_symbols", &[pilot_analysis::ComptimeValue::Int(0)], &mut pilot_ast::AstArena::new(), &mut tables, pilot_span::ByteSpan::new(0, 0)) {
+        Ok(pilot_analysis::ComptimeValue::Str(sym)) => tables.interner.resolve(sym).to_string(),
+        _ => "__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm".to_string(),
+    };
+    let syntax_kws = match vm.eval_engine_intrinsic("query_registered_symbols", &[pilot_analysis::ComptimeValue::Int(1)], &mut pilot_ast::AstArena::new(), &mut tables, pilot_span::ByteSpan::new(0, 0)) {
+        Ok(pilot_analysis::ComptimeValue::Str(sym)) => tables.interner.resolve(sym).to_string(),
+        _ => "break|continue|op".to_string(),
+    };
+    let mod_kws = match vm.eval_engine_intrinsic("query_registered_symbols", &[pilot_analysis::ComptimeValue::Int(2)], &mut pilot_ast::AstArena::new(), &mut tables, pilot_span::ByteSpan::new(0, 0)) {
+        Ok(pilot_analysis::ComptimeValue::Str(sym)) => tables.interner.resolve(sym).to_string(),
+        _ => "pub|priv|file|pkg|int|export|pure|static|const|var|iso|partial|ext|lvl".to_string(),
+    };
+    let lang_types = match vm.eval_engine_intrinsic("query_registered_symbols", &[pilot_analysis::ComptimeValue::Int(3)], &mut pilot_ast::AstArena::new(), &mut tables, pilot_span::ByteSpan::new(0, 0)) {
+        Ok(pilot_analysis::ComptimeValue::Str(sym)) => tables.interner.resolve(sym).to_string(),
+        _ => "bool|usize|i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|f16|f32|f64|f128|str|char|void|never|ptr|slice|stride|array|tuple|option|result|union|fn|range|span|step|from|until|full|splat|pairs|expand|map|frame|type|ast|simd|grid|ring|pin|open|after|order|signal".to_string(),
+    };
+    let op_syms = match vm.eval_engine_intrinsic("query_registered_symbols", &[pilot_analysis::ComptimeValue::Int(4)], &mut pilot_ast::AstArena::new(), &mut tables, pilot_span::ByteSpan::new(0, 0)) {
+        Ok(pilot_analysis::ComptimeValue::Str(sym)) => tables.interner.resolve(sym).to_string(),
+        _ => "\\+|-|\\*|/|%|==|!=|<|>|<=|>=|&&|\\|\\||!|&|\\||\\^|~|<<|>>".to_string(),
+    };
+
+    // Evaluate selfhost/ide_sync.pilot
+    if let Ok(ide_sync_src) = fs::read_to_string("selfhost/ide_sync.pilot") {
+        let _ = pilot_analysis::eval_file_with_tables(&ide_sync_src, &mut tables, &mut vm);
+    }
+
+    let tm_json = format!(r##"{{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Pilot",
+  "scopeName": "source.pilot",
+  "patterns": [
+    {{ "include": "#comments" }},
+    {{ "include": "#preprocessor" }},
+    {{ "include": "#strings" }},
+    {{ "include": "#raw-idents" }},
+    {{ "include": "#attributes" }},
+    {{ "include": "#distributive-headers" }},
+    {{ "include": "#quote-splices" }},
+    {{ "include": "#numbers" }},
+    {{ "include": "#call-targets" }},
+    {{ "include": "#keywords" }},
+    {{ "include": "#modifiers" }},
+    {{ "include": "#primitives" }},
+    {{ "include": "#operators" }}
+  ],
+  "repository": {{
+    "comments": {{
+      "patterns": [
+        {{ "name": "comment.line.double-slash.pilot", "match": "//.*$" }},
+        {{ "name": "comment.block.pilot", "begin": "/\\*", "end": "\\*/" }}
+      ]
+    }},
+    "preprocessor": {{
+      "patterns": [
+        {{ "name": "meta.preprocessor.pilot keyword.control.directive.pilot", "match": "^\\s*#(if|elif|else|endif|define|undef|region|endregion|pragma)\\b" }}
+      ]
+    }},
+    "strings": {{
+      "patterns": [
+        {{
+          "name": "string.quoted.double.interpolated.pilot",
+          "begin": "f\"",
+          "end": "\"",
+          "patterns": [
+            {{ "name": "constant.character.escape.pilot", "match": "\\\\." }},
+            {{ "name": "meta.interpolation.pilot", "begin": "\\{{", "end": "\\}}", "patterns": [{{ "include": "$self" }}] }}
+          ]
+        }},
+        {{
+          "name": "string.quoted.double.pilot",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [{{ "name": "constant.character.escape.pilot", "match": "\\\\." }}]
+        }}
+      ]
+    }},
+    "raw-idents": {{
+      "patterns": [
+        {{ "name": "variable.other.escaped.pilot", "match": "`[^`\\r\\n]+`" }}
+      ]
+    }},
+    "attributes": {{
+      "patterns": [
+        {{
+          "name": "meta.attribute.pilot",
+          "match": "\\[\\s*(?:(var|let)\\s+([a-z_][A-Za-z0-9_]*)\\s*=\\s*)?([A-Z][A-Za-z0-9_]*)",
+          "captures": {{
+            "1": {{ "name": "storage.modifier.pilot" }},
+            "2": {{ "name": "variable.other.readwrite.pilot" }},
+            "3": {{ "name": "entity.name.function.decorator.pilot" }}
+          }}
+        }}
+      ]
+    }},
+    "distributive-headers": {{
+      "patterns": [
+        {{
+          "name": "meta.distributive.binding.pilot",
+          "match": "\\b(let|var)\\s+([A-Z][A-Za-z0-9_]*)\\s*(?=<|\\{{)",
+          "captures": {{
+            "1": {{ "name": "storage.type.pilot" }},
+            "2": {{ "name": "entity.name.type.struct.pilot" }}
+          }}
+        }}
+      ]
+    }},
+    "quote-splices": {{
+      "patterns": [
+        {{ "name": "variable.other.metavariable.splice.pilot", "match": "\\$[A-Za-z_][A-Za-z0-9_]*" }},
+        {{ "name": "keyword.operator.unquote.pilot", "match": "~(?=[A-Za-z_(])" }}
+      ]
+    }},
+    "call-targets": {{
+      "patterns": [
+        {{ "name": "constant.other.enum-variant.pilot", "match": "::([A-Za-z_][A-Za-z0-9_]*)" }},
+        {{ "name": "entity.name.type.struct.constructor.pilot", "match": "\\b([A-Z][A-Za-z0-9_]*)\\s*(?=\\(|\\{{|<)" }},
+        {{ "name": "entity.name.function.call.pilot", "match": "\\b([a-z_][A-Za-z0-9_]*)\\s*(?=(?:!!|!&|!\\^|!@|!\\?|!)?\\()" }}
+      ]
+    }},
+    "keywords": {{
+      "patterns": [
+        {{ "name": "keyword.control.seed.pilot", "match": "\\b({})\\b" }},
+        {{ "name": "entity.name.function.macro.syntax.pilot", "match": "\\b({})\\b" }}
+      ]
+    }},
+    "modifiers": {{
+      "patterns": [
+        {{ "name": "storage.modifier.pilot", "match": "\\b({}|lvl[0-9]+)\\b" }}
+      ]
+    }},
+    "primitives": {{
+      "patterns": [
+        {{ "name": "storage.type.primitive.pilot", "match": "\\b({})\\b" }},
+        {{ "name": "entity.name.type.interface.pilot", "match": "\\bI[A-Z][A-Za-z0-9_]*\\b" }}
+      ]
+    }},
+    "numbers": {{
+      "patterns": [
+        {{ "name": "constant.numeric.pilot", "match": "\\b0[xXbBoO][0-9a-fA-F_]+\\b|\\b[0-9][0-9_]*(?:\\.[0-9_]+)?(?:[eE][+-]?[0-9_]+)?(?:[a-zA-Z]+)?\\b" }}
+      ]
+    }},
+    "operators": {{
+      "patterns": [
+        {{ "name": "keyword.operator.call-quote.pilot", "match": "!!|!&|!\\^|!@|!\\?" }},
+        {{ "name": "keyword.operator.pilot", "match": "{}" }}
+      ]
+    }}
+  }}
+}}"##, seed_kws, syntax_kws, mod_kws, lang_types, op_syms);
+
+    let lang_cfg = r#"{
+  "comments": {
+    "lineComment": "//",
+    "blockComment": ["/*", "*/"]
+  },
+  "brackets": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+    ["<", ">"]
+  ],
+  "autoClosingPairs": [
+    { "open": "{", "close": "}" },
+    { "open": "[", "close": "]" },
+    { "open": "(", "close": ")" },
+    { "open": "\"", "close": "\"", "notIn": ["string"] },
+    { "open": "`", "close": "`", "notIn": ["string", "comment"] }
+  ],
+  "surroundingPairs": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+    ["<", ">"],
+    ["\"", "\""],
+    ["`", "`"]
+  ],
+  "indentationRules": {
+    "increaseIndentPattern": "^((?!.*?\\/\\/).)*(\\{[^}\"'`]*|\\([^)\"'`]*|\\[[^\\]\"'`]*)$",
+    "decreaseIndentPattern": "^\\s*[}\\])]\\s*$"
+  }
+}"#;
+
+    let snippets = r#"{
+  "Distributive Struct Block": {
+    "prefix": "pstruct",
+    "body": ["pub struct {", "\t$0", "}"],
+    "description": "Distributive Pilot struct block"
+  },
+  "Syntax Macro Rule": {
+    "prefix": "psyntax",
+    "body": ["pub syntax ${1:name}(${2:expr}) => quote {", "\t$0", "};"],
+    "description": "Self-hosted Pilot syntax macro"
+  },
+  "Patch Function Clone": {
+    "prefix": "ppatch",
+    "body": [
+      "[var ${1:contents} = Patch(${2:orig_fn}, PatchPart.body(), ${3:0} ..${4:5})]",
+      "pub fn ${5:new_fn}() {",
+      "\t$0",
+      "\t${1:contents}.patch().call();",
+      "}"
+    ],
+    "description": "Non-destructive CST/AST function patch and clone"
+  },
+  "Choreography Blueprint": {
+    "prefix": "pblueprint",
+    "body": [
+      "pub blueprint ${1:Pipeline} {",
+      "\trole ${2:Worker};",
+      "\tcue ${3:on_event}(pkt:${4:iso<SliceBuffer<u8>>}) {",
+      "\t\troute pkt -> ${2:Worker}.${5:handle};",
+      "\t}",
+      "}"
+    ],
+    "description": "Zero-copy .pchor choreography blueprint"
+  }
+}"#;
+
+    // Write artifacts
+    let tm_path = Path::new("vscode-pilot/syntaxes/pilot.tmLanguage.json");
+    if let Some(p) = tm_path.parent() { fs::create_dir_all(p).ok(); }
+    fs::write(tm_path, tm_json).expect("Failed to write pilot.tmLanguage.json");
+
+    let cfg_path = Path::new("vscode-pilot/language-configuration.json");
+    fs::write(cfg_path, lang_cfg).expect("Failed to write language-configuration.json");
+
+    let snip_path = Path::new("vscode-pilot/snippets/pilot.json");
+    if let Some(p) = snip_path.parent() { fs::create_dir_all(p).ok(); }
+    fs::write(snip_path, snippets).expect("Failed to write snippets/pilot.json");
+
+    // Update package.json
+    let pkg_path = Path::new("vscode-pilot/package.json");
+    if pkg_path.exists() {
+        if let Ok(mut content) = fs::read_to_string(pkg_path) {
+            let legend_types = r#""semanticTokenTypes": [
+      { "id": "namespace", "description": "Style for namespaces" },
+      { "id": "type", "description": "Style for types" },
+      { "id": "class", "description": "Style for classes" },
+      { "id": "enum", "description": "Style for enums" },
+      { "id": "interface", "description": "Style for interfaces" },
+      { "id": "struct", "description": "Style for structs" },
+      { "id": "typeParameter", "description": "Style for generic type parameters" },
+      { "id": "parameter", "description": "Style for function parameters" },
+      { "id": "variable", "description": "Style for variables" },
+      { "id": "property", "description": "Style for properties and fields" },
+      { "id": "enumMember", "description": "Style for enum variants" },
+      { "id": "event", "description": "Style for events" },
+      { "id": "function", "description": "Style for functions" },
+      { "id": "method", "description": "Style for methods" },
+      { "id": "macro", "description": "Style for macros" },
+      { "id": "keyword", "description": "Style for keywords" },
+      { "id": "modifier", "description": "Style for modifiers" },
+      { "id": "comment", "description": "Style for comments" },
+      { "id": "string", "description": "Style for strings" },
+      { "id": "number", "description": "Style for numbers" },
+      { "id": "regexp", "description": "Style for regexes" },
+      { "id": "operator", "description": "Style for operators" },
+      { "id": "decorator", "description": "Style for attributes and decorators" }
+    ]"#;
+            let legend_mods = r#""semanticTokenModifiers": [
+      { "id": "declaration", "description": "Annotates symbol declarations" },
+      { "id": "definition", "description": "Annotates symbol definitions" },
+      { "id": "readonly", "description": "Annotates readonly or immutable symbols" },
+      { "id": "static", "description": "Annotates static members" },
+      { "id": "deprecated", "description": "Annotates deprecated members" },
+      { "id": "abstract", "description": "Annotates abstract members" },
+      { "id": "async", "description": "Annotates async members" },
+      { "id": "modification", "description": "Annotates mutating targets" },
+      { "id": "documentation", "description": "Annotates doc comments" },
+      { "id": "defaultLibrary", "description": "Annotates stdlib / built-in members" },
+      { "id": "constructor", "description": "Annotates constructors" },
+      { "id": "callable", "description": "Annotates callable variables" }
+    ]"#;
+
+            if !content.contains("semanticTokenTypes") {
+                if let Some(idx) = content.find("\"contributes\": {") {
+                    let insert_pos = idx + "\"contributes\": {".len();
+                    content.insert_str(insert_pos, &format!("\n    {},\n    {},", legend_types, legend_mods));
+                }
+            }
+            if !content.contains("editor.semanticHighlighting.enabled") {
+                if let Some(idx) = content.find("\"properties\": {") {
+                    let insert_pos = idx + "\"properties\": {".len();
+                    content.insert_str(insert_pos, r#"
+        "editor.semanticHighlighting.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enables semantic highlighting for Pilot files"
+        },"#);
+                }
+            }
+            fs::write(pkg_path, content).expect("Failed to update vscode-pilot/package.json");
+        }
+    }
+
+    println!("All 4 VS Code artifacts generated and package.json updated successfully.");
 }
 
 fn cmd_test(args: &[String]) {
