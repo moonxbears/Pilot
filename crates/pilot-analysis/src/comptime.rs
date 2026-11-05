@@ -97,204 +97,6 @@ impl ComptimeValue {
     }
 }
 
-#[repr(u8)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum ReceptorSlot {
-    // Literal & Condition Receptors
-    BoolCondition,         // Type produced by `true`, `false`, and consumed by `if` conditions
-    IntLiteral,            // Default integer literal receptor (`42`)
-    UintLiteral,           // Default unsigned/size literal receptor
-    FloatLiteral,          // Default float literal receptor (`3.14`)
-    CharLiteral,           // Default character literal receptor (`'a'`)
-    Utf8StrLiteral,        // Default string literal receptor (`"hello"`)
-    VoidUnit,              // 0-bit unit receptor (`()`)
-    NeverBottom,           // 0-bit diverging bottom receptor
-
-    // 6 Homoiconic Call-Quoting Receptors (`!`, `!!`, `!&`, `!^`, `!@`, `!?`)
-    ShallowQuoteSlot,      // Receptor for `fn!(a, b)`
-    DeepSpliceSlot,        // Receptor for `fn!!(~a, b)`
-    AbiFrameSlot,          // Receptor for `fn!&(a, b)`
-    ReactiveSignalSlot,    // Receptor for `fn!^(a, b)`
-    SymbolicAdjointSlot,   // Receptor for `fn!@(a, b)`
-    EffectDryRunSlot,      // Receptor for `fn!?(a, b)`
-
-    // 7 Attribute Pillar Receptors
-    AttributeSlot,         // Receptor for `IAttribute`
-    InterceptorSlot,       // Receptor for `IInterceptor`
-    FormulaSlot,           // Receptor for `IFormulaAttribute`
-    ReactiveSlot,          // Receptor for `IReactiveAttribute`
-    InheritedSlot,         // Receptor for `IInheritedAttribute`
-    EcsRuleSlot,           // Receptor for `IEcsRule`
-    PatchAttributeSlot,    // Receptor for `IPatchAttribute`
-}
-
-impl ReceptorSlot {
-    pub fn from_slot_or_lang_name(name: &str) -> Option<Self> {
-        match name {
-            "bool_condition" | "bool_t" => Some(Self::BoolCondition),
-            "int_literal" | "i64" => Some(Self::IntLiteral),
-            "uint_literal" | "usize" => Some(Self::UintLiteral),
-            "float_literal" | "f64" => Some(Self::FloatLiteral),
-            "char_literal" | "char_t" => Some(Self::CharLiteral),
-            "utf8_str_literal" | "str" => Some(Self::Utf8StrLiteral),
-            "void_unit" | "void" => Some(Self::VoidUnit),
-            "never_bottom" | "never" => Some(Self::NeverBottom),
-            "shallow_quote" | "CallExpr" => Some(Self::ShallowQuoteSlot),
-            "deep_splice" | "ast" => Some(Self::DeepSpliceSlot),
-            "abi_frame" | "frame" => Some(Self::AbiFrameSlot),
-            "reactive_signal" | "Signal" => Some(Self::ReactiveSignalSlot),
-            "symbolic_adjoint" | "Dual" => Some(Self::SymbolicAdjointSlot),
-            "effect_dry_run" | "EffectPlan" => Some(Self::EffectDryRunSlot),
-            "attribute" | "IAttribute" => Some(Self::AttributeSlot),
-            "interceptor" | "IInterceptor" => Some(Self::InterceptorSlot),
-            "formula" | "IFormulaAttribute" => Some(Self::FormulaSlot),
-            "reactive" | "IReactiveAttribute" => Some(Self::ReactiveSlot),
-            "inherited" | "IInheritedAttribute" => Some(Self::InheritedSlot),
-            "ecs_rule" | "IEcsRule" => Some(Self::EcsRuleSlot),
-            "patch_attribute" | "IPatchAttribute" => Some(Self::PatchAttributeSlot),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum LangItem {
-    IAnyValue,
-    IValue,
-    IReference,
-    IObject,
-    IGuard,
-    Void,
-    Never,
-    Bool,
-    Char,
-    I8,
-    I16,
-    I32,
-    I64,
-    I128,
-    Isize,
-    U8,
-    U16,
-    U32,
-    U64,
-    U128,
-    Usize,
-    F16,
-    F32,
-    F64,
-    F128,
-    Str,
-    Ptr,
-    Slice,
-    Stride,
-    Array,
-    Tuple,
-    Option,
-    Result,
-    Union,
-    Fn,
-    Range,
-    Span,
-    Step,
-    From,
-    Until,
-    Full,
-    Splat,
-    Pairs,
-    Expand,
-    Map,
-    Frame,
-    Type,
-    Ast,
-    Simd,
-    Grid,
-    Ring,
-    Pin,
-    Open,
-    After,
-    Order,
-    Signal,
-    IAttribute,
-    IInterceptor,
-    IFormulaAttribute,
-    IReactiveAttribute,
-    IInheritedAttribute,
-    IEcsRule,
-    IPatchAttribute,
-}
-
-impl LangItem {
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "IAnyValue" => Some(Self::IAnyValue),
-            "IValue" => Some(Self::IValue),
-            "IReference" => Some(Self::IReference),
-            "IObject" => Some(Self::IObject),
-            "IGuard" => Some(Self::IGuard),
-            "IAttribute" => Some(Self::IAttribute),
-            "IInterceptor" => Some(Self::IInterceptor),
-            "IFormulaAttribute" => Some(Self::IFormulaAttribute),
-            "IReactiveAttribute" => Some(Self::IReactiveAttribute),
-            "IInheritedAttribute" => Some(Self::IInheritedAttribute),
-            "IEcsRule" => Some(Self::IEcsRule),
-            "IPatchAttribute" => Some(Self::IPatchAttribute),
-            "void" => Some(Self::Void),
-            "never" => Some(Self::Never),
-            "bool_t" => Some(Self::Bool),
-            "char_t" => Some(Self::Char),
-            "i8" => Some(Self::I8),
-            "i16" => Some(Self::I16),
-            "i32" => Some(Self::I32),
-            "i64" => Some(Self::I64),
-            "i128" => Some(Self::I128),
-            "isize" => Some(Self::Isize),
-            "u8" => Some(Self::U8),
-            "u16" => Some(Self::U16),
-            "u32" => Some(Self::U32),
-            "u64" => Some(Self::U64),
-            "u128" => Some(Self::U128),
-            "usize" => Some(Self::Usize),
-            "f16" => Some(Self::F16),
-            "f32" => Some(Self::F32),
-            "f64" => Some(Self::F64),
-            "f128" => Some(Self::F128),
-            "str" => Some(Self::Str),
-            "ptr" => Some(Self::Ptr),
-            "slice" => Some(Self::Slice),
-            "stride" => Some(Self::Stride),
-            "array" => Some(Self::Array),
-            "tuple" => Some(Self::Tuple),
-            "opt_t" => Some(Self::Option),
-            "res_t" => Some(Self::Result),
-            "union" => Some(Self::Union),
-            "fn" => Some(Self::Fn),
-            "range" => Some(Self::Range),
-            "span" => Some(Self::Span),
-            "step" => Some(Self::Step),
-            "from" => Some(Self::From),
-            "until" => Some(Self::Until),
-            "full" => Some(Self::Full),
-            "splat" => Some(Self::Splat),
-            "pairs" => Some(Self::Pairs),
-            "expand" => Some(Self::Expand),
-            "map_t" => Some(Self::Map),
-            "frame" => Some(Self::Frame),
-            "type" => Some(Self::Type),
-            "ast" => Some(Self::Ast),
-            "simd" => Some(Self::Simd),
-            "grid" => Some(Self::Grid),
-            "ring" => Some(Self::Ring),
-            "pin" => Some(Self::Pin),
-            "open" => Some(Self::Open),
-            "after" => Some(Self::After),
-            "order" => Some(Self::Order),
-            "signal" => Some(Self::Signal),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum RegisterClass {
     Unit,
@@ -319,19 +121,6 @@ impl RegisterClass {
             "raw_ptr" => Some(Self::RawPtr),
             "composite" => Some(Self::Composite),
             _ => None,
-        }
-    }
-
-    pub fn to_reg_class(self) -> crate::types::RegClass {
-        match self {
-            Self::Unit => crate::types::RegClass::Unit,
-            Self::NoReturn => crate::types::RegClass::NoReturn,
-            Self::GprSigned => crate::types::RegClass::GprSigned,
-            Self::GprUnsigned => crate::types::RegClass::GprUnsigned,
-            Self::SimdFloat => crate::types::RegClass::SimdFloat,
-            Self::SimdVector { lanes } => crate::types::RegClass::SimdVector { lanes },
-            Self::RawPtr => crate::types::RegClass::RawPtr,
-            Self::Composite => crate::types::RegClass::Composite,
         }
     }
 }
@@ -410,29 +199,6 @@ impl TypeLayoutSpec {
             fields: Vec::new(),
             field_types: Vec::new(),
             operators: FxHashMap::default(),
-        }
-    }
-
-    pub fn hardware_physics(&self) -> crate::types::HardwarePhysics {
-        if self.has_explicit_register_layout {
-            let rc = if self.bit_width == 0 && self.fields.is_empty() {
-                if self.reg_class == RegisterClass::NoReturn {
-                    crate::types::RegClass::NoReturn
-                } else {
-                    crate::types::RegClass::Unit
-                }
-            } else {
-                self.reg_class.to_reg_class()
-            };
-            crate::types::HardwarePhysics {
-                reg_class: rc,
-                bit_width: self.bit_width,
-            }
-        } else {
-            crate::types::HardwarePhysics {
-                reg_class: crate::types::RegClass::Composite,
-                bit_width: (self.byte_size() * 8) as u32,
-            }
         }
     }
 
@@ -545,10 +311,8 @@ pub struct ComptimeEngine {
     pub globals: FxHashMap<SymbolId, ComptimeValue>,
     pub globals_by_name: FxHashMap<String, ComptimeValue>,
     pub functions: Vec<ComptimeFnDef>,
-    pub lang_items: FxHashMap<LangItem, NodeId>,
     pub lang_items_by_name: FxHashMap<String, NodeId>,
-    pub receptor_slots: FxHashMap<ReceptorSlot, NodeId>,
-    pub receptor_type_names: FxHashMap<ReceptorSlot, String>,
+    pub receptor_type_names: FxHashMap<String, String>,
     pub type_layouts: FxHashMap<String, TypeLayoutSpec>,
     pub bundle_layouts: FxHashMap<String, TypeLayoutSpec>,
     pub node_to_type_name: FxHashMap<u32, String>,
@@ -591,8 +355,8 @@ impl ComptimeEngine {
         val.as_uint()
     }
 
-    pub fn lang_item_node(&self, item: LangItem) -> Option<NodeId> {
-        self.lang_items.get(&item).copied()
+    pub fn lang_item_node(&self, item_name: &str) -> Option<NodeId> {
+        self.lang_items_by_name.get(item_name).copied()
     }
 
     pub fn type_layout(&self, type_name: &str) -> Option<&TypeLayoutSpec> {
@@ -619,8 +383,8 @@ impl ComptimeEngine {
         None
     }
 
-    pub fn receptor_type_name(&self, slot: ReceptorSlot) -> Option<&str> {
-        self.receptor_type_names.get(&slot).map(|s| s.as_str())
+    pub fn receptor_type_name(&self, slot: &str) -> Option<&str> {
+        self.receptor_type_names.get(slot).map(|s| s.as_str())
     }
 
     pub fn create_patch_handle(
@@ -717,10 +481,16 @@ impl ComptimeEngine {
         };
 
         let replacements = handle.ast_replacements.clone();
-        let mut cloned_children = Vec::with_capacity(children.len());
+        let mut cloned_children: Vec<NodeId> = Vec::with_capacity(children.len());
         for &cid in &children {
-            let cloned = crate::infer::clone_ast_subtree_with_replacements(arena, NodeId(cid), &replacements);
-            cloned_children.push(cloned);
+            let mut cloned = cid;
+            for &(from, to) in &replacements {
+                if cid == from.0 {
+                    cloned = to.0;
+                    break;
+                }
+            }
+            cloned_children.push(NodeId(cloned));
         }
 
         let (new_start, _) = arena.alloc_child_slice(&cloned_children);
@@ -860,7 +630,7 @@ impl ComptimeEngine {
                             if c_node.node_kind() == NodeKind::LetStmt {
                                 let f_name = arena.interner.resolve(SymbolId(c_node.lhs)).to_string();
                                 let f_ty_id = arena.type_annotations.get(&c_id.0).copied().unwrap_or(NodeId::NONE);
-                                let f_ty_str = self.format_type_node(arena, f_ty_id);
+                                let f_ty_str = Self::resolve_type_ident_name(arena, f_ty_id);
                                 let f_size = self.estimate_type_node_size(arena, f_ty_id);
                                 let f_lat = self.estimate_type_node_lattice(arena, f_ty_id);
                                 let aligned = if f_size > 0 {
@@ -919,7 +689,7 @@ impl ComptimeEngine {
                 let mut init_lattice = 0b00;
                 if let Some(bases) = arena.struct_base_types.get(&item_id.0) {
                     for &base_ty_node in bases {
-                        let base_name = self.format_type_node(arena, base_ty_node);
+                        let base_name = Self::resolve_type_ident_name(arena, base_ty_node);
                         let base_head = base_name.split('<').next().unwrap_or(&base_name).trim();
                         if let Some(&lat) = self.lattice_interfaces.get(base_head) {
                             init_lattice |= lat;
@@ -953,7 +723,7 @@ impl ComptimeEngine {
                         .unwrap_or(0);
                     for (f_sym, f_ty_id) in fields {
                         let f_name = arena.interner.resolve(f_sym).to_string();
-                        let f_ty_str = self.format_type_node(arena, f_ty_id);
+                        let f_ty_str = Self::resolve_type_ident_name(arena, f_ty_id);
                         let f_size = self.estimate_type_node_size(arena, f_ty_id);
                         let f_lat = self.estimate_type_node_lattice(arena, f_ty_id);
                         let aligned = if f_size > 0 {
@@ -989,7 +759,7 @@ impl ComptimeEngine {
                         NodeKind::LetStmt => {
                             let f_name = arena.interner.resolve(SymbolId(c_node.lhs)).to_string();
                             let f_ty_id = arena.type_annotations.get(&c_id.0).copied().unwrap_or(NodeId::NONE);
-                            let f_ty_str = self.format_type_node(arena, f_ty_id);
+                            let f_ty_str = Self::resolve_type_ident_name(arena, f_ty_id);
                             let f_size = self.estimate_type_node_size(arena, f_ty_id);
                             let f_lat = self.estimate_type_node_lattice(arena, f_ty_id);
                             if let Some(layout) = self.type_layouts.get_mut(&name_str) {
@@ -1196,154 +966,22 @@ impl ComptimeEngine {
         }
     }
 
-    pub fn format_type_node(&self, arena: &AstArena, ty_node: NodeId) -> String {
+    fn resolve_type_ident_name(arena: &AstArena, ty_node: NodeId) -> String {
         if ty_node.is_none() || (ty_node.0 as usize) >= arena.nodes.len() {
             return String::new();
         }
         let n = *arena.node(ty_node);
-        let override_base = arena
-            .type_base_symbols
-            .get(&ty_node.0)
-            .map(|&s| arena.interner.resolve(s).to_string());
-        match n.node_kind() {
-            NodeKind::IntLit => {
-                arena
-                    .i64_pool
-                    .get(n.lhs as usize)
-                    .copied()
-                    .unwrap_or(0)
-                    .to_string()
-            }
-            NodeKind::IdentExpr | NodeKind::TypeNamed => {
-                arena.interner.resolve(SymbolId(n.lhs)).to_string()
-            }
-            NodeKind::TypeOptional => {
-                let inner = self.format_type_node(arena, NodeId(n.lhs));
-                let base = override_base
-                    .or_else(|| self.type_construct_targets.get("?").cloned())
-                    .unwrap_or_default();
-                format!("{}<{}>", base, inner)
-            }
-            NodeKind::TypeFallible => {
-                let ok = self.format_type_node(arena, NodeId(n.lhs));
-                let err = self.format_type_node(arena, NodeId(n.rhs));
-                let base = override_base
-                    .or_else(|| self.type_construct_targets.get("!").cloned())
-                    .unwrap_or_default();
-                if err.is_empty() {
-                    format!("{}<{}>", base, ok)
-                } else {
-                    format!("{}<{}, {}>", base, ok, err)
-                }
-            }
-            NodeKind::TypeSlice => {
-                if n.flags == 9 {
-                    let children = arena.children_slice(n.lhs, n.rhs);
-                    let elem = children
-                        .first()
-                        .map(|&c| self.format_type_node(arena, NodeId(c)))
-                        .unwrap_or_default();
-                    let n_str = children
-                        .get(1)
-                        .map(|&c| self.format_type_node(arena, NodeId(c)))
-                        .unwrap_or_else(|| "1".to_string());
-                    let m_str = children
-                        .get(2)
-                        .map(|&c| self.format_type_node(arena, NodeId(c)))
-                        .unwrap_or_else(|| "1".to_string());
-                    let base = override_base
-                        .or_else(|| self.type_construct_targets.get("[N,M]").cloned())
-                        .unwrap_or_else(|| "grid".to_string());
-                    return format!("{}<{}, {}, {}>", base, elem, n_str, m_str);
-                }
-                let elem = self.format_type_node(arena, NodeId(n.lhs));
-                let base = override_base.unwrap_or_else(|| match n.flags {
-                    0 => self
-                        .type_construct_targets
-                        .get("[]")
-                        .cloned()
-                        .unwrap_or_else(|| "slice".to_string()),
-                    1 => self
-                        .type_construct_targets
-                        .get("[N]")
-                        .cloned()
-                        .unwrap_or_else(|| "array".to_string()),
-                    2 => "SliceView".to_string(),
-                    3 => self
-                        .type_construct_targets
-                        .get("[..]")
-                        .cloned()
-                        .unwrap_or_else(|| "stride".to_string()),
-                    4 => "View".to_string(),
-                    5 => self
-                        .type_construct_targets
-                        .get("@")
-                        .cloned()
-                        .unwrap_or_else(|| "simd".to_string()),
-                    6 => self
-                        .type_construct_targets
-                        .get("[:]")
-                        .cloned()
-                        .unwrap_or_else(|| "ring".to_string()),
-                    7 => self
-                        .type_construct_targets
-                        .get("^")
-                        .cloned()
-                        .unwrap_or_else(|| "signal".to_string()),
-                    8 => self
-                        .type_construct_targets
-                        .get("@prefix")
-                        .cloned()
-                        .unwrap_or_else(|| "pin".to_string()),
-                    _ => "slice".to_string(),
-                });
-                if (n.flags == 1 || n.flags == 5) && n.rhs != 0 {
-                    let count_str = self.format_type_node(arena, NodeId(n.rhs));
-                    if !count_str.is_empty() {
-                        return format!("{}<{}, {}>", base, elem, count_str);
-                    }
-                }
-                format!("{}<{}>", base, elem)
-            }
-            NodeKind::TypeList => {
-                let base = override_base.unwrap_or_else(|| "slice".to_string());
-                if n.rhs == 0 {
-                    let elem = self.format_type_node(arena, NodeId(n.lhs));
-                    format!("{}<{}>", base, elem)
-                } else {
-                    let args: Vec<String> = arena
-                        .children_slice(n.lhs, n.rhs)
-                        .iter()
-                        .map(|&c| self.format_type_node(arena, NodeId(c)))
-                        .collect();
-                    format!("{}<{}>", base, args.join(", "))
-                }
-            }
-            NodeKind::TypeMap => {
-                let k = self.format_type_node(arena, NodeId(n.lhs));
-                let v = self.format_type_node(arena, NodeId(n.rhs));
-                let base = override_base.unwrap_or_else(|| "pairs".to_string());
-                format!("{}<{}, {}>", base, k, v)
-            }
-            NodeKind::TypeTuple => {
-                let args: Vec<String> = arena
-                    .children_slice(n.lhs, n.rhs)
-                    .iter()
-                    .map(|&c| self.format_type_node(arena, NodeId(c)))
-                    .collect();
-                format!("tuple<{}>", args.join(", "))
-            }
-            _ => String::new(),
+        if matches!(n.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed) {
+            arena.interner.resolve(SymbolId(n.lhs)).to_string()
+        } else {
+            String::new()
         }
     }
 
     fn estimate_type_node_size(&self, arena: &AstArena, ty_node: NodeId) -> usize {
-        if ty_node.is_none() || (ty_node.0 as usize) >= arena.nodes.len() {
-            return 8;
-        }
-        let formatted = self.format_type_node(arena, ty_node);
-        if !formatted.is_empty() {
-            let (sz, _, _) = self.query_type_size_align_lattice(&formatted);
+        let name = Self::resolve_type_ident_name(arena, ty_node);
+        if !name.is_empty() {
+            let (sz, _, _) = self.query_type_size_align_lattice(&name);
             if sz > 0 {
                 return sz;
             }
@@ -1352,12 +990,9 @@ impl ComptimeEngine {
     }
 
     fn estimate_type_node_lattice(&self, arena: &AstArena, ty_node: NodeId) -> u8 {
-        if ty_node.is_none() || (ty_node.0 as usize) >= arena.nodes.len() {
-            return 0b00;
-        }
-        let formatted = self.format_type_node(arena, ty_node);
-        if !formatted.is_empty() {
-            return self.query_type_size_align_lattice(&formatted).2;
+        let name = Self::resolve_type_ident_name(arena, ty_node);
+        if !name.is_empty() {
+            return self.query_type_size_align_lattice(&name).2;
         }
         0b00
     }
@@ -1870,17 +1505,9 @@ impl ComptimeEngine {
                     .and_then(|v| v.as_str(&parser_tables.interner).or_else(|| v.as_str(&arena.interner)))
                     .unwrap_or("")
                     .to_string();
-                if let Some(lang_item) = LangItem::from_name(&item_name) {
-                    self.lang_items.insert(lang_item, target_node);
-                }
                 let actual_type_name = self.resolve_type_name_from_node(arena, target_node);
-                if let Some(slot) = ReceptorSlot::from_slot_or_lang_name(&item_name) {
-                    self.receptor_slots.insert(slot, target_node);
-                    if !actual_type_name.is_empty() {
-                        self.receptor_type_names.insert(slot, actual_type_name.clone());
-                    }
-                }
-                if !actual_type_name.is_empty() && LangItem::from_name(&item_name).is_some() {
+                if !actual_type_name.is_empty() {
+                    self.receptor_type_names.insert(item_name.clone(), actual_type_name.clone());
                     self.lang_items_by_name.insert(actual_type_name.clone(), target_node);
                 }
                 self.lang_items_by_name.insert(item_name.clone(), target_node);

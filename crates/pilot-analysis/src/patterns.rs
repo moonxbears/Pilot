@@ -193,38 +193,4 @@ impl MarangetChecker {
 
         checker.check(arena.span(match_id))
     }
-
-    /// Returns the canonical variant list for TaggedOutcome types (`["some", "none"]` / `["ok", "err"]`),
-    /// 1-bit boolean flags (`["true", "false"]`), or user ADTs.
-    pub fn canonical_variants_for_type(
-        ty: crate::types::TypeId,
-        types: &crate::types::TypeArena,
-    ) -> Vec<String> {
-        let pruned = types.prune(ty);
-        if types.type_physics(pruned)
-            == (crate::types::HardwarePhysics {
-                reg_class: crate::types::RegClass::GprUnsigned,
-                bit_width: 1,
-            })
-        {
-            return vec!["true".to_string(), "false".to_string()];
-        }
-        if let Some(td) = types.type_defs.get(&pruned) {
-            if let crate::types::StructuralShape::TaggedOutcome { err_ty, .. } = td.shape {
-                return if err_ty.is_some() {
-                    vec!["ok".to_string(), "err".to_string()]
-                } else {
-                    vec!["some".to_string(), "none".to_string()]
-                };
-            }
-        }
-        match types.get(pruned) {
-            crate::types::TypeKind::Option(_) => vec!["some".to_string(), "none".to_string()],
-            crate::types::TypeKind::Result { .. } => vec!["ok".to_string(), "err".to_string()],
-            crate::types::TypeKind::Adt { variants, .. } => {
-                variants.iter().map(|(v, _)| v.clone()).collect()
-            }
-            _ => Vec::new(),
-        }
-    }
 }

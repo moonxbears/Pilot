@@ -15,5 +15,3 @@ pilot-lsp-macros = { path = "../pilot-lsp-macros" }
 pilot-rt = { path = "../pilot-rt" }
 pilot-vm = { path = "../pilot-vm" }
 
-[dev-dependencies]
-pilot-codegen = { path = "../pilot-codegen" }
