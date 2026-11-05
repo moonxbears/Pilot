@@ -374,7 +374,7 @@ mod tests {
     fn test_early_cutoff_preserves_signature_hash_when_editing_body() {
         let mut db = Database::new();
         let file_id = FileId(1);
-        let code = r#"def calculate(x: i64) -> i64 {
+        let code = r#"fn calculate(x: i64) -> i64 {
     let a = x + 10;
     return a;
 }
@@ -400,12 +400,12 @@ mod tests {
     fn test_signature_edit_invalidates_signature_hash() {
         let mut db = Database::new();
         let file_id = FileId(1);
-        let code = "def calculate(x: i64) -> i64 { return x; }\n";
+        let code = "fn calculate(x: i64) -> i64 { return x; }\n";
         db.set_source(file_id, code);
         let orig_hash = db.module_item_tree(file_id).unwrap().signature_hash;
 
         // Edit function name: calculate -> compute
-        let edit = TextEdit::new(4, 13, "compute");
+        let edit = TextEdit::new(3, 12, "compute");
         db.apply_edit(file_id, &edit);
 
         // Early cutoff should NOT fire because the signature changed
@@ -418,7 +418,7 @@ mod tests {
     fn test_memoized_module_analysis_and_lsp_queries() {
         let mut db = Database::new();
         let file_id = FileId(10);
-        let code = "def add(a: i64, b: i64) -> i64 {\n    return a + b\n}\nlet result = add(1, 2)\n";
+        let code = "fn add(a: i64, b: i64) -> i64 {\n    return a + b;\n}\nlet result = add(1, 2);\n";
         db.set_source(file_id, code);
 
         // Verify proc-macro generated constants

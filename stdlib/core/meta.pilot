@@ -1,7 +1,10 @@
 // =========================================================================
 // FILE: stdlib/core/meta.pilot
-// STAGE 4 SELF-GENESIS: 7-PILLAR `[...]` ATTRIBUTE ENGINE, `.pchor`
-// CHOREOGRAPHY, `state` TYPESTATES & DEFERRED `partial struct` MATH FACETS
+// STAGE 4 SELF-GENESIS (100% PILOT-HOSTED):
+//   • 7-Pillar `[...]` Attribute Interfaces & `quote` Weavers
+//   • `.pchor` Choreography Macros & 2-Bit Lattice Cue Verifier
+//   • `state` Typestate & `where` Refinement Macros
+//   • Deferred `partial struct` Math & Bitwise Facets
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Meta;
@@ -15,7 +18,7 @@ use Pilot.Core.Callables.*;
 use Pilot.Core.Builtins.*;
 
 // =========================================================================
-// 1. THE 7-PILLAR `[...]` ATTRIBUTE ENGINE INTERFACES
+// 1. THE 7-PILLAR `[...]` ATTRIBUTE INTERFACES & PILOT-HOSTED `quote` WEAVERS
 // =========================================================================
 pub struct InheritPolicy : IValue {
     pub code: u8;
@@ -30,17 +33,41 @@ pub interface {
     IInterceptor<TContext: IAnyValue> : IAttribute {
         pub fn on_enter(fn_name: str) -> TContext;
         pub fn on_exit(ctx: TContext);
+
+        // Pilot-Hosted AST Weaver for Pillar 2:
+        pub comptime fn weave_fn(fn_name: str, orig_body: ast) -> ast => quote {
+            {
+                let __attr_ctx = self.on_enter($fn_name);
+                defer self.on_exit(__attr_ctx);
+                $orig_body
+            }
+        };
     }
 
     // Pillar 4: Zero-Storage Computed Property Formula Evaluator
     IFormulaAttribute<TOwner: IAnyValue, TOut: IAnyValue> : IAttribute {
         pub pure fn evaluate(owner: ref<TOwner>) -> TOut;
+
+        // Pilot-Hosted AST Weaver for Pillar 4 (`0` backing storage bytes!):
+        pub comptime fn weave_getter(owner_expr: ast) -> ast => quote {
+            self.evaluate($owner_expr)
+        };
     }
 
     // Pillar 5: Reactive Property Setter Validator & Change Notifier
     IReactiveAttribute<TVal: IAnyValue> : IAttribute {
         pub pure fn on_validating(old_val: TVal, new_val: TVal) -> TVal => new_val;
         pub fn on_changed(old_val: TVal, new_val: TVal) {}
+
+        // Pilot-Hosted AST Weaver for Pillar 5 + Variation B `field` / `value`:
+        pub comptime fn weave_setter(backing_field: ast, incoming_val: ast) -> ast => quote {
+            {
+                let __old_val = $backing_field;
+                let __valid_val = self.on_validating(__old_val, $incoming_val);
+                $backing_field = __valid_val;
+                self.on_changed(__old_val, $backing_field);
+            }
+        };
     }
 
     // Pillar 6: Hierarchical Interface-to-Struct Attribute Propagation
@@ -52,11 +79,17 @@ pub interface {
     IEcsRule<TEntity: IAnyValue> : IAttribute {
         pub pure fn matches(entity: ref<TEntity>) -> bool;
         pub var  fn apply(entity: var ref<TEntity>);
+
+        pub comptime fn weave_ecs_step(entity_ref: ast) -> ast => quote {
+            if self.matches($entity_ref) {
+                self.apply(var ref $entity_ref);
+            }
+        };
     }
 }
 
 // =========================================================================
-// 2. STANDARD BUILT-IN `[...]` ATTRIBUTES (`...Attr` -> `[ ShortName ]`)
+// 2. STANDARD BUILT-IN `[...]` ATTRIBUTES (`...Attr` -> `[ShortName]`)
 // =========================================================================
 pub struct {
     // Pillar 5 Reactive Clamping Attribute: `[Clamp(min: 0.0, max: 100.0, weight: 100)]`
@@ -73,7 +106,7 @@ pub struct {
         }
     }
 
-    // Pillar 5 Reactive Change Listener: `[OnChange(callback)]`
+    // Pillar 5 Reactive Change Listener: `[OnChange(callback, weight: 50)]`
     [Layout(c_abi)]
     OnChangeAttr<TVal: IAnyValue> : IReactiveAttribute<TVal>, IValue {
         pub callback: fn<(TVal, TVal), void>;
@@ -83,7 +116,7 @@ pub struct {
         pub fn on_changed(old_val: TVal, new_val: TVal) {}
     }
 
-    // Pillar 4 Computed Property Formula Attribute: `[Formula((u) => u.base_atk * u.crit_mult)]`
+    // Pillar 4 Computed Property Formula: `[Formula((u) => u.base_atk * u.crit_mult)]`
     [Layout(c_abi)]
     FormulaAttr<TOwner: IAnyValue, TOut: IAnyValue> : IFormulaAttribute<TOwner, TOut>, IValue {
         pub expr_fn: fn<ref<TOwner>, TOut>;
@@ -102,7 +135,7 @@ pub struct {
         pub fn on_exit(start_tick: u64) {}
     }
 
-    // Pillar 7 Declarative ECS Archetype Rule: `[Rule(when: ..., then: ...)]`
+    // Pillar 7 Declarative ECS Archetype Rule: `[Rule(when_fn, then_fn, weight: 10)]`
     [Layout(c_abi)]
     RuleAttr<TEntity: IAnyValue> : IEcsRule<TEntity>, IValue {
         pub when_fn: fn<ref<TEntity>, bool>;
@@ -121,8 +154,20 @@ pub struct {
 }
 
 // =========================================================================
-// 3. SELF-HOSTED `.pchor` CHOREOGRAPHY & `state` TYPESTATE SYNTAX MACROS
+// 3. PILOT-HOSTED `.pchor` CUE VERIFIER & `state` TYPESTATE MACROS
 // =========================================================================
+// Enforces the 2-Bit Lattice Cue Boundary Law 100% in Pilot:
+// Only `0b00` (`IValue`) or `iso`-qualified `0b10` (`IObject`) may cross a cue!
+pub comptime fn verify_cue_payload<TPayload: IAnyValue>(is_iso_qualified: bool) {
+    let bits = lattice_bits_of(TPayload);
+    if (bits & Cfg.Lattice.reference) != 0 {
+        compile_error("LatticeContractMismatch: Borrowed 0b01 IReference or 0b11 IGuard cannot cross a .pchor cue boundary");
+    }
+    if ((bits & Cfg.Lattice.object) != 0) && (!is_iso_qualified) {
+        compile_error("LatticeContractMismatch: Owned 0b10 IObject crossing a .pchor cue boundary must be 'iso' qualified");
+    }
+}
+
 pub syntax {
     state(state_decl)         => quote { $state_decl };
     blueprint(blueprint_decl) => quote { $blueprint_decl };
@@ -133,7 +178,6 @@ pub syntax {
 
 // =========================================================================
 // 4. DEFERRED STAGE 4 MATH & BITWISE FACETS (`0` Fields -> `partial` Safe!)
-// Uses `while`, distributive bindings, and dual-path `comptime if __is_comptime()`
 // =========================================================================
 let SignedMathFacet<TSelf: INumber<TSelf>> = {
     pub pure:
@@ -213,8 +257,6 @@ let FloatIeeeFacet<TSelf: INumber<TSelf>> = {
         fn is_nan() -> bool => self != self;
 };
 
-// Reopen sealed scalar primitives via `partial struct` to splice Stage 4 math facets
-// without altering `sizeof(T)`, `alignof(T)`, or `LatticeBits::Value` (`0b00`)!
 pub partial struct {
     i8    { *SignedMathFacet<i8>; }
     i16   { *SignedMathFacet<i16>; }
@@ -237,7 +279,8 @@ pub partial struct {
 }
 
 // =========================================================================
-// 5. PILLAR 8: NON-DESTRUCTIVE FUNCTION CST/AST CLONING & PATCHING
+// 5. PILLAR 8 (100% PILOT-HOSTED): NON-DESTRUCTIVE FUNCTION CLONING & PATCHING
+// Uses `__ast_lines`, `__replace_ast`, and `__parse_ast` from `core.pilot`!
 // =========================================================================
 pub struct PatchPart : IValue {
     pub kind: u8;
@@ -256,28 +299,45 @@ pub interface IPatchAttribute : IAttribute {
 
 pub struct {
     // Interactive CST/AST Clone & Patch Builder:
-    // `[var contents = Patch(myorigfunc, PatchPart.body(), 4 .. 5)]`
+    // `[var contents = Patch(myorigfunc, PatchPart.body(), 3 .. 5)]`
     [Layout(c_abi)]
     PatchAttr<TTargetFn: IAnyValue> : IPatchAttribute, IValue {
-        pub target_fn: TTargetFn;
-        pub part:      PatchPart;
-        pub lines:     span<usize>;
-        pub weight:    i32;
+        pub target_fn:   TTargetFn;
+        pub part:        PatchPart;
+        pub window:      span<usize>;
+        pub source_buf:  SliceBuffer<str>;
+        pub cloned_root: ast;
+        pub weight:      i32;
 
-        pub pure:
-            fn clone_ast() -> ast => __ssa_cast(Cfg.Ssa.bitcast, 0, ast);
+        // Line-Window Indexer (`contents.line[5]` / `contents.line[5] = ...` and `contents.line5`)
+        pub self[line_idx: usize] -> str {
+            get => .source_buf[line_idx];
+            set {
+                comptime {
+                    if !.window.contains(line_idx) {
+                        compile_error("PatchLineOutOfWindow: Attempted to mutate a line outside the declared Patch window");
+                    }
+                }
+                .source_buf[line_idx] = value;
+            }
+        }
+
+        pub pure fn clone_ast() -> ast => .cloned_root;
+
         pub var:
-            fn replace_ast(pattern: ast, replacement: ast) {}
-            fn patch() -> ast => .clone_ast();
+            fn replace_ast(pattern: ast, replacement: ast) {
+                .cloned_root = __replace_ast(.cloned_root, pattern, replacement);
+            }
+
+            fn patch() -> ast => __parse_ast(.source_buf, .cloned_root);
     }
 
     // Declarative 1-Line Whole-Function Patch & Clone:
-    // `[PatchReplace(myorigfunc, PatchPart.body(), 4 .. 4, (l) => l.replace("Hi", "Hello"))]`
     [Layout(c_abi)]
     PatchReplaceAttr<TTargetFn: IAnyValue> : IPatchAttribute, IValue {
         pub target_fn: TTargetFn;
         pub part:      PatchPart;
-        pub lines:     span<usize>;
+        pub window:    span<usize>;
         pub rewrite:   fn<str, str>;
         pub weight:    i32;
 

@@ -117,6 +117,44 @@ pub partial struct {
                 index:       0,
                 has_started: false,
             };
+
+            fn lens_column<TField: IAnyValue>(comptime field_sym: str) -> stride<TField> {
+                comptime {
+                    if lattice_bits_of(T) != Cfg.Lattice.value {
+                        compile_error("OffsetLens '~>' requires a 0b00 IValue element struct");
+                    }
+                }
+                let base_addr = (__ssa_cast(Cfg.Ssa.bitcast, .data, usize)) + offsetof(T, field_sym);
+                return stride<TField> {
+                    data:      __ssa_cast(Cfg.Ssa.bitcast, base_addr, ptr<TField>),
+                    len:       .len,
+                    byte_step: sizeof(T) as isize,
+                };
+            }
+
+            fn lens_map<TKey: IEquatable<TKey>, TVal: IAnyValue>(
+                comptime key_sym: str,
+                comptime val_sym: str
+            ) -> map<TKey, TVal> => map<TKey, TVal> {
+                keys: .lens_column<TKey>(key_sym),
+                vals: .lens_column<TVal>(val_sym),
+            };
+
+            fn as_structural_view<TDst: IValue>() -> stride<TDst> {
+                comptime {
+                    if (lattice_bits_of(T) != Cfg.Lattice.value) || (lattice_bits_of(TDst) != Cfg.Lattice.value) {
+                        compile_error("'as view' requires both source and target structs to be 0b00 IValue");
+                    }
+                    if sizeof(TDst) > sizeof(T) {
+                        compile_error("'as view' target struct cannot be larger than source struct");
+                    }
+                }
+                return stride<TDst> {
+                    data:      __ssa_cast(Cfg.Ssa.bitcast, .data, ptr<TDst>),
+                    len:       .len,
+                    byte_step: sizeof(T) as isize,
+                };
+            }
     }
 
     // 3. Strided OffsetLens View (`stride<T>` / `T[..]`) — 24-Byte `{ ptr<T>, usize, isize }`, `0b01` `IReference`
@@ -140,6 +178,44 @@ pub partial struct {
                 index:       0,
                 has_started: false,
             };
+
+            fn lens_column<TField: IAnyValue>(comptime field_sym: str) -> stride<TField> {
+                comptime {
+                    if lattice_bits_of(T) != Cfg.Lattice.value {
+                        compile_error("OffsetLens '~>' requires a 0b00 IValue element struct");
+                    }
+                }
+                let base_addr = (__ssa_cast(Cfg.Ssa.bitcast, .data, usize)) + offsetof(T, field_sym);
+                return stride<TField> {
+                    data:      __ssa_cast(Cfg.Ssa.bitcast, base_addr, ptr<TField>),
+                    len:       .len,
+                    byte_step: .byte_step,
+                };
+            }
+
+            fn lens_map<TKey: IEquatable<TKey>, TVal: IAnyValue>(
+                comptime key_sym: str,
+                comptime val_sym: str
+            ) -> map<TKey, TVal> => map<TKey, TVal> {
+                keys: .lens_column<TKey>(key_sym),
+                vals: .lens_column<TVal>(val_sym),
+            };
+
+            fn as_structural_view<TDst: IValue>() -> stride<TDst> {
+                comptime {
+                    if (lattice_bits_of(T) != Cfg.Lattice.value) || (lattice_bits_of(TDst) != Cfg.Lattice.value) {
+                        compile_error("'as view' requires both source and target structs to be 0b00 IValue");
+                    }
+                    if sizeof(TDst) > sizeof(T) {
+                        compile_error("'as view' target struct cannot be larger than source struct");
+                    }
+                }
+                return stride<TDst> {
+                    data:      __ssa_cast(Cfg.Ssa.bitcast, .data, ptr<TDst>),
+                    len:       .len,
+                    byte_step: .byte_step,
+                };
+            }
     }
 
     // 4. Inline Fixed-Size C-ABI Array (`array<T, N>` / `T[N]`) — `N * sizeof(T)` Bytes, `0b00` `IValue`
@@ -264,6 +340,18 @@ pub struct {
             fn as_slice() -> slice<TItem> => slice<TItem> { data: .data, len: .len };
             fn contains(item: TItem) -> bool => .as_slice().contains(item);
             fn get_enumerator() -> SliceEnumerator<TItem> => .as_slice().get_enumerator();
+
+            fn lens_column<TField: IAnyValue>(comptime field_sym: str) -> stride<TField> =>
+                .as_slice().lens_column<TField>(field_sym);
+
+            fn lens_map<TKey: IEquatable<TKey>, TVal: IAnyValue>(
+                comptime key_sym: str,
+                comptime val_sym: str
+            ) -> map<TKey, TVal> =>
+                .as_slice().lens_map<TKey, TVal>(key_sym, val_sym);
+
+            fn as_structural_view<TDst: IValue>() -> stride<TDst> =>
+                .as_slice().as_structural_view<TDst>();
 
         pub var:
             op []= (idx: usize, val: TItem) => { .data[idx] = val; }

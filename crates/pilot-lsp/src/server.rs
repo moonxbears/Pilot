@@ -841,7 +841,7 @@ impl LspServer {
                         let md = format!("```pilot\n{}\n```\n\n*Pilot Indexer*", sig);
                         return make_hover_card(&md);
                     }
-                    let sig = format!("def {}({}) -> {}", name, param_strs.join(", "), ret_str);
+                    let sig = format!("fn {}({}) -> {}", name, param_strs.join(", "), ret_str);
                     let md = format!("```pilot\n{}\n```\n\n*Pilot Function*", sig);
                     return make_hover_card(&md);
                 }
@@ -1511,7 +1511,7 @@ impl LspServer {
                                                                     } else {
                                                                         analysis.types.display(ret_ty)
                                                                     };
-                                                                    let sig = format!("def {}({}) -> {}", m_name, param_strs.join(", "), ret_str);
+                                                                    let sig = format!("fn {}({}) -> {}", m_name, param_strs.join(", "), ret_str);
                                                                     let doc = format!("Method declared on `{}`", c_name);
                                                                     user_type_members.push((m_name, sig, doc, 2.0));
                                                                 }
@@ -1541,7 +1541,7 @@ impl LspServer {
                                                             if child_node.node_kind() == pilot_ast::NodeKind::FnDecl {
                                                                 let m_name = arena.interner.resolve(pilot_intern::SymbolId(child_node.lhs)).to_string();
                                                                 if !user_type_members.iter().any(|m| m.0 == m_name) {
-                                                                    let sig = format!("def {}(...) -> any", m_name);
+                                                                    let sig = format!("fn {}(...) -> any", m_name);
                                                                     let doc = format!("Extension method on `{}`", ext_name);
                                                                     user_type_members.push((m_name, sig, doc, 2.0));
                                                                 }
@@ -3256,7 +3256,8 @@ fn is_valid_identifier(name: &str) -> bool {
     }
     !matches!(
         name,
-        "def"
+        "fn"
+            | "def"
             | "class"
             | "struct"
             | "interface"
@@ -3276,6 +3277,7 @@ fn is_valid_identifier(name: &str) -> bool {
             | "break"
             | "continue"
             | "yield"
+            | "switch"
             | "match"
             | "try"
             | "catch"

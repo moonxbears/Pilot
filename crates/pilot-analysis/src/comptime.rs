@@ -2323,6 +2323,43 @@ impl ComptimeEngine {
                 Ok(ComptimeValue::Void)
             }
 
+            // 31. `type_name_of`: `(target_t: AstNode | Ident | Str)`
+            "type_name_of" => {
+                let tname = self.resolve_type_arg(args.first(), arena, parser_tables);
+                let sym = parser_tables.interner.intern(&tname);
+                Ok(ComptimeValue::Str(sym))
+            }
+
+            // 32. `ast_source_lines`: `(target_fn: AstNode, part_kind: Uint)`
+            "ast_source_lines" => {
+                Ok(ComptimeValue::Tuple(Vec::new()))
+            }
+
+            // 33. `parse_ast_fragment`: `(source_str: Str)`
+            "parse_ast_fragment" => {
+                let src = args
+                    .first()
+                    .and_then(|v| v.as_str(&parser_tables.interner).or_else(|| v.as_str(&arena.interner)))
+                    .unwrap_or("")
+                    .to_string();
+                let frag_arena = pilot_parser::parse(&src);
+                Ok(ComptimeValue::AstNode(frag_arena.root))
+            }
+
+            // 34. `replace_ast_pattern`: `(root: AstNode, pat: AstNode, rep: AstNode)`
+            "replace_ast_pattern" => {
+                let root = match args.first() {
+                    Some(ComptimeValue::AstNode(nid)) => *nid,
+                    _ => NodeId::NONE,
+                };
+                Ok(ComptimeValue::AstNode(root))
+            }
+
+            // 35. `register_attr_weaver`: `(iface_decl: AstNode, fn_ref: FunctionId)`
+            "register_attr_weaver" => {
+                Ok(ComptimeValue::Void)
+            }
+
             other => {
                 let err = BootstrapDiagnostic::UnknownEngineHook {
                     hook: other.to_string(),

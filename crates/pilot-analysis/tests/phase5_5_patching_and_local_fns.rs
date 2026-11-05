@@ -1,10 +1,10 @@
 //! Phase 5.5 Verification Gate Tests:
-//! 1. Line-window function patch attributes (`[var patch = Patch(0..10)]` / `IPatchAttribute`)
-//! 2. Patch bounds enforcement (`PATCH001` out-of-window, `PATCH002` immutable mutation) & AST pattern replacement
-//! 3. Block-embedded named functions with 3-tier capture analysis (Tier 0 0b00, Tier 1 0b01 ByImmRef, Tier 2 0b01 ByVarRef, STATIC002, PURITY001)
-//! 4. Embedded function self-recursion and mutual recursion (Pass 1 & Pass 2 scoping)
-//! 5. Perceus lexical escape gate (`PERCEUS001` 0b01 reference cannot escape stack frame)
-//! 6. Patched embedded local functions and Universal Name-Blind Rename Litmus
+//! 1. `test_pilot_hosted_patch_attr_line_window_and_unmutated_original`
+//! 2. `test_pilot_hosted_patch_window_bounds_error_and_replace_ast`
+//! 3. `test_embedded_named_functions_tier0_tier1_tier2_captures`
+//! 4. `test_embedded_named_functions_recursion_and_mutual_recursion`
+//! 5. `test_embedded_function_escape_analysis_perceus_gate`
+//! 6. `test_patched_embedded_local_function_and_rename_litmus`
 
 use pilot_analysis::{
     bootstrap_core_file, eval_file_with_tables, AnalysisPipeline,
@@ -48,7 +48,7 @@ fn bootstrap_all_core_stages_including_meta() -> (ParserTables, ComptimeEngine, 
 }
 
 #[test]
-fn test_suite_1_line_window_function_patch_attribute() {
+fn test_pilot_hosted_patch_attr_line_window_and_unmutated_original() {
     let (_tables, mut vm, arenas) = bootstrap_all_core_stages_including_meta();
     assert_eq!(arenas.len(), 8, "Expected 8 core packages loaded (Stages 1–4)");
 
@@ -99,7 +99,7 @@ fn test_suite_1_line_window_function_patch_attribute() {
 }
 
 #[test]
-fn test_suite_2_patch_bounds_and_ast_pattern_replacement() {
+fn test_pilot_hosted_patch_window_bounds_error_and_replace_ast() {
     let (_tables, mut vm, _arenas) = bootstrap_all_core_stages_including_meta();
 
     let src = r#"
@@ -177,7 +177,7 @@ fn test_suite_2_patch_bounds_and_ast_pattern_replacement() {
 }
 
 #[test]
-fn test_suite_3_embedded_named_functions_tier0_tier1_tier2_captures() {
+fn test_embedded_named_functions_tier0_tier1_tier2_captures() {
     let src = r#"
         fn outer_calc(base: i64) -> i64 {
             // Tier 0: Non-capturing local function (0b00 Value)
@@ -261,7 +261,7 @@ fn test_suite_3_embedded_named_functions_tier0_tier1_tier2_captures() {
 }
 
 #[test]
-fn test_suite_4_embedded_named_functions_recursion_and_mutual_recursion() {
+fn test_embedded_named_functions_recursion_and_mutual_recursion() {
     let src = r#"
         fn compute_combinatorics(n: i64) -> i64 {
             // Self-recursion
@@ -297,7 +297,7 @@ fn test_suite_4_embedded_named_functions_recursion_and_mutual_recursion() {
 }
 
 #[test]
-fn test_suite_5_embedded_function_escape_analysis_perceus_gate() {
+fn test_embedded_function_escape_analysis_perceus_gate() {
     let src = r#"
         fn make_escaping_closure(outer_val: i64) -> fn<i64, i64> {
             fn capturing_local(x: i64) -> i64 => x + outer_val;
@@ -313,7 +313,7 @@ fn test_suite_5_embedded_function_escape_analysis_perceus_gate() {
 }
 
 #[test]
-fn test_suite_6_patched_embedded_local_function_and_rename_litmus() {
+fn test_patched_embedded_local_function_and_rename_litmus() {
     let src = r#"
         fn run_pipeline() -> i64 {
             [var step_patch = Patch(0..5)]

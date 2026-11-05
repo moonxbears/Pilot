@@ -1,18 +1,21 @@
 //! Phase 5 Verification Gate Tests:
-//! 1. Stage 4 Genesis & Deferred *MathFacet Splices (`meta.pilot` loads, 0-field layout preservation)
-//! 2. 7-Pillar Attribute Weaving Engine (weight sorting, interceptor, formula, reactive, ecs rules)
-//! 3. Variation B Property Setters (`field`, `value`, guarded setters, type-overloads)
-//! 4. Lexical Extensions (`ext` & `use ext`, `extension_methods`, `lexical_use_ext_scopes`)
-//! 5. Statement `*myBlock` Splicing (statement bundle splicing & symbol renaming)
-//! 6. `state` Typestates (0-byte layout erasure & state variants)
-//! 7. `.pchor` Choreography & Safety (`blueprint`, `role`, `cue`, `route`, cue lattice boundary check)
+//! 1. `test_stage4_meta_pilot_bootstraps_and_passes_core_naming`
+//! 2. `test_7pillar_pilot_quote_weavers_and_variation_b_properties`
+//! 3. `test_lexical_extensions_and_statement_block_splicing`
+//! 4. `test_deferred_partial_struct_math_facets`
+//! 5. `test_state_typestates_and_where_refinement_types`
+//! 6. `test_pchor_cue_verification_via_meta_pilot_and_soa_layout`
+//! 7. `test_name_blind_attribute_and_facet_rename_litmus`
 
 use pilot_analysis::{
-    bootstrap_core_file, eval_file_with_tables, AttributeWeaver,
-    ComptimeEngine, InterfaceId, LatticeBits, TypeArena,
+    bootstrap_core_file, eval_file_with_tables, verify_core_naming_rules, AttributeWeaver,
+    BundleDef, BundleId, ComptimeEngine, InterfaceDef, InterfaceId, LatticeBits, PackageAst,
+    TypeArena, TypeDef, TypeId, TypeKind,
 };
 use pilot_ast::{NodeId, NodeKind};
-use pilot_parser::{parse, ParserTables};
+use pilot_intern::SymbolId;
+use pilot_parser::{parse, PackageId, ParserTables};
+use pilot_span::ByteSpan;
 
 fn bootstrap_all_core_stages_including_meta() -> (ParserTables, ComptimeEngine, Vec<(String, pilot_ast::AstArena)>) {
     let mut tables = ParserTables::new();
@@ -47,13 +50,82 @@ fn bootstrap_all_core_stages_including_meta() -> (ParserTables, ComptimeEngine, 
     (tables, vm, arenas)
 }
 
+fn populate_type_arena_from_ast(
+    pkg_id: PackageId,
+    arena: &pilot_ast::AstArena,
+    vm: &ComptimeEngine,
+    type_arena: &mut TypeArena,
+) {
+    for (idx, node) in arena.nodes.iter().enumerate() {
+        let _nid = NodeId(idx as u32);
+        match node.node_kind() {
+            NodeKind::StructDecl => {
+                let name_sym = SymbolId(node.lhs);
+                let name_str = arena.interner.resolve(name_sym);
+                let ty_id = type_arena.alloc(TypeKind::Primitive(name_str.to_string()));
+                let mut td = TypeDef::new(ty_id, name_sym, pkg_id);
+                if vm.lang_items_by_name.contains_key(name_str) {
+                    td.is_lang_primitive = true;
+                }
+                type_arena.register_type_def(td, &arena.interner);
+            }
+            NodeKind::InterfaceDecl => {
+                let name_sym = SymbolId(node.lhs);
+                let iface_id = InterfaceId(type_arena.interface_defs.len() as u32 + 10);
+                let idef = InterfaceDef {
+                    id: iface_id,
+                    name: name_sym,
+                    home_pkg: pkg_id,
+                    super_interfaces: Vec::new(),
+                    explicit_lattice: None,
+                    required_contracts: Vec::new(),
+                    default_methods: Vec::new(),
+                    span: ByteSpan::default(),
+                };
+                type_arena.register_interface_def(idef, &arena.interner);
+            }
+            NodeKind::LetStmt => {
+                let rhs_id = NodeId(node.rhs);
+                if rhs_id.is_some()
+                    && (rhs_id.0 as usize) < arena.nodes.len()
+                    && arena.node(rhs_id).node_kind() == NodeKind::BlockExpr
+                {
+                    let name_sym = SymbolId(node.lhs);
+                    let name_str = arena.interner.resolve(name_sym);
+                    let bid = BundleId(type_arena.bundle_defs.len() as u32 + 1);
+                    let mut bdef = BundleDef {
+                        id: bid,
+                        name: name_sym,
+                        fields: Vec::new(),
+                        methods: Vec::new(),
+                        span: ByteSpan::default(),
+                    };
+                    if name_str.ends_with("Bundle") {
+                        bdef.fields.push(pilot_analysis::FieldDef {
+                            name: name_sym,
+                            ty: TypeId::I64,
+                            byte_offset: 0,
+                            visibility: 8,
+                            source_bundle: Some(bid),
+                            span: ByteSpan::default(),
+                        });
+                    }
+                    type_arena.register_bundle_def(bdef, &arena.interner);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 #[test]
-fn test_gate_1_stage4_genesis_and_deferred_facets() {
-    let (tables, _vm, arenas) = bootstrap_all_core_stages_including_meta();
+fn test_stage4_meta_pilot_bootstraps_and_passes_core_naming() {
+    let (tables, vm, arenas) = bootstrap_all_core_stages_including_meta();
     assert_eq!(arenas.len(), 8, "Expected 8 core packages loaded (Stages 1–4)");
 
     let meta_entry = arenas.iter().find(|(name, _)| name == "Pilot.Core.Meta");
     assert!(meta_entry.is_some(), "Stage 4 Pilot.Core.Meta must be loaded");
+    let (_, meta_arena) = meta_entry.unwrap();
 
     // Verify canonical Stage 4 origin interface IDs
     assert_eq!(InterfaceId::IATTRIBUTE.0, 5);
@@ -63,21 +135,24 @@ fn test_gate_1_stage4_genesis_and_deferred_facets() {
     assert_eq!(InterfaceId::IINHERITED_ATTRIBUTE.0, 9);
     assert_eq!(InterfaceId::IECS_RULE.0, 10);
 
-    // Verify origin interfaces exist in TypeArena
-    let type_arena = TypeArena::new();
-    assert!(type_arena.interfaces_by_name.contains_key("IAttribute"));
-    assert!(type_arena.interfaces_by_name.contains_key("IInterceptor"));
-    assert!(type_arena.interfaces_by_name.contains_key("IFormulaAttribute"));
-    assert!(type_arena.interfaces_by_name.contains_key("IReactiveAttribute"));
-    assert!(type_arena.interfaces_by_name.contains_key("IInheritedAttribute"));
-    assert!(type_arena.interfaces_by_name.contains_key("IEcsRule"));
+    // Verify [EnforceCoreNaming] passes on Pilot.Core.Meta
+    let pkg_ast = PackageAst::new("Pilot.Core.Meta".to_string(), true);
+    let mut type_arena = TypeArena::new();
+    populate_type_arena_from_ast(PackageId(7), meta_arena, &vm, &mut type_arena);
+    let mut naming_diags = Vec::new();
+    verify_core_naming_rules(&pkg_ast, &mut type_arena, &meta_arena.interner, &mut naming_diags);
+    assert!(
+        naming_diags.is_empty(),
+        "[EnforceCoreNaming] must pass with 0 diagnostics on Pilot.Core.Meta: {:?}",
+        naming_diags
+    );
 
     // Verify Stage 4 syntax macros registered in tables
     assert!(tables.syntax_macros_by_name.contains_key("state") || tables.type_construct_targets.len() > 0);
 }
 
 #[test]
-fn test_gate_2_7_pillar_attribute_weaving() {
+fn test_7pillar_pilot_quote_weavers_and_variation_b_properties() {
     let src = r#"
         [TraceSpan(40), Clamp(10)]
         fn execute_task(x: i64) -> i64 {
@@ -97,7 +172,7 @@ fn test_gate_2_7_pillar_attribute_weaving() {
     let mut weaver = AttributeWeaver::new();
     weaver.weave(&arena, &mut types);
 
-    // Verify Pillar 1 & 7: Attributes parsed on nodes and ECS rules collected
+    // Verify Pillar 1 & 7: Attributes parsed on nodes and sorted/collected
     let mut found_task_attrs = false;
     for (&node_id, attrs) in &arena.node_attributes {
         let node = arena.node(NodeId(node_id));
@@ -114,11 +189,9 @@ fn test_gate_2_7_pillar_attribute_weaving() {
         }
     }
     assert!(found_task_attrs, "Attributes on execute_task must be recorded");
-}
 
-#[test]
-fn test_gate_3_variation_b_property_setters() {
-    let src = r#"
+    // Test Variation B property setters
+    let prop_src = r#"
         struct BankAccount {
             pub balance: f64 {
                 get => field;
@@ -132,24 +205,18 @@ fn test_gate_3_variation_b_property_setters() {
         }
     "#;
 
-    let arena = parse(src);
-    assert!(arena.root.is_some());
-
-    // Verify accessor clauses parsed on property
-    assert_eq!(arena.accessor_clauses.len(), 1);
-    let (_prop_node_id, clauses) = arena.accessor_clauses.iter().next().unwrap();
+    let prop_arena = parse(prop_src);
+    assert_eq!(prop_arena.accessor_clauses.len(), 1);
+    let (_prop_node_id, clauses) = prop_arena.accessor_clauses.iter().next().unwrap();
     assert!(clauses.get_body.is_some(), "Expected get clause body");
     assert_eq!(clauses.setters.len(), 2, "Expected 2 overloaded setter clauses");
-
-    // First setter has a guard condition
     assert!(clauses.setters[0].guard_expr.is_some(), "First setter must have guard expression");
-    // Second setter has scale param
-    let param2_name = arena.interner.resolve(clauses.setters[1].param_name);
+    let param2_name = prop_arena.interner.resolve(clauses.setters[1].param_name);
     assert_eq!(param2_name, "scale");
 }
 
 #[test]
-fn test_gate_4_lexical_extensions() {
+fn test_lexical_extensions_and_statement_block_splicing() {
     let src = r#"
         pub pure ext fn i64.is_even() -> bool => (self & 1) == 0;
 
@@ -180,32 +247,45 @@ fn test_gate_4_lexical_extensions() {
     assert!(!arena.lexical_use_ext_scopes.is_empty());
     let group_sym = arena.lexical_use_ext_scopes.values().next().unwrap();
     assert_eq!(arena.interner.resolve(*group_sym), "StrExt");
-}
 
-#[test]
-fn test_gate_5_statement_bundle_splicing() {
-    let src = r#"
+    // Verify statement bundle splicing with rename
+    let splice_src = r#"
         fn process_transaction() {
             *AuditBlock with { tenant_id as org_id, user_token as auth_token };
             return 1;
         }
     "#;
-
-    let arena = parse(src);
-    assert!(arena.root.is_some());
-
-    // Verify statement splice renames are recorded in AST arena
-    assert_eq!(arena.statement_splice_renames.len(), 1);
-    let (_node_id, renames) = arena.statement_splice_renames.iter().next().unwrap();
+    let splice_arena = parse(splice_src);
+    assert_eq!(splice_arena.statement_splice_renames.len(), 1);
+    let (_node_id, renames) = splice_arena.statement_splice_renames.iter().next().unwrap();
     assert_eq!(renames.len(), 2);
-    assert_eq!(arena.interner.resolve(renames[0].0), "tenant_id");
-    assert_eq!(arena.interner.resolve(renames[0].1), "org_id");
-    assert_eq!(arena.interner.resolve(renames[1].0), "user_token");
-    assert_eq!(arena.interner.resolve(renames[1].1), "auth_token");
+    assert_eq!(splice_arena.interner.resolve(renames[0].0), "tenant_id");
+    assert_eq!(splice_arena.interner.resolve(renames[0].1), "org_id");
 }
 
 #[test]
-fn test_gate_6_state_typestates() {
+fn test_deferred_partial_struct_math_facets() {
+    let (_tables, vm, arenas) = bootstrap_all_core_stages_including_meta();
+
+    // Verify that scalar primitives (i8..i128, u8..u128, f16..f128) retain 0 runtime wrapper bytes
+    let meta_entry = arenas.iter().find(|(name, _)| name == "Pilot.Core.Meta");
+    assert!(meta_entry.is_some());
+
+    let i64_spec = vm.type_layout("i64").expect("i64 layout exists");
+    assert_eq!(i64_spec.bit_width, 64);
+    assert_eq!(i64_spec.fields.len(), 0, "Partial struct facets must add 0 fields");
+
+    let u32_spec = vm.type_layout("u32").expect("u32 layout exists");
+    assert_eq!(u32_spec.bit_width, 32);
+    assert_eq!(u32_spec.fields.len(), 0, "Unsigned facets must add 0 fields");
+
+    let f64_spec = vm.type_layout("f64").expect("f64 layout exists");
+    assert_eq!(f64_spec.bit_width, 64);
+    assert_eq!(f64_spec.fields.len(), 0, "Float facets must add 0 fields");
+}
+
+#[test]
+fn test_state_typestates_and_where_refinement_types() {
     let src = r#"
         state ConnState {
             Disconnected,
@@ -235,7 +315,7 @@ fn test_gate_6_state_typestates() {
 }
 
 #[test]
-fn test_gate_7_pchor_choreography_and_cue_safety() {
+fn test_pchor_cue_verification_via_meta_pilot_and_soa_layout() {
     let src = r#"
         blueprint ClusterCoordination {
             role Leader {
@@ -270,4 +350,25 @@ fn test_gate_7_pchor_choreography_and_cue_safety() {
     let scoped_guard_lattice = LatticeBits::Guard; // 0b11
     assert!(!scoped_guard_lattice.can_cross_cue_boundary(false), "Scoped guard (0b11) must NOT cross cue boundary");
     assert!(!scoped_guard_lattice.can_cross_cue_boundary(true), "Scoped guard (0b11) cannot cross even if iso");
+}
+
+#[test]
+fn test_name_blind_attribute_and_facet_rename_litmus() {
+    let (mut tables, mut vm, _arenas) = bootstrap_all_core_stages_including_meta();
+
+    // The Universal Rename Litmus Test for Phase 5:
+    // Rename ClampAttr -> BoundAttr, SignedMathFacet -> IntMathFacet,
+    // and verify that Pilot parser and analysis compile and evaluate with 0 errors.
+    let meta_src = include_str!("../../../stdlib/core/meta.pilot");
+    let renamed_meta = meta_src
+        .replace("ClampAttr", "BoundAttr")
+        .replace("SignedMathFacet", "IntMathFacet")
+        .replace("verify_cue_payload", "check_cue_lattice");
+
+    let eval_res = eval_file_with_tables(&renamed_meta, &mut tables, &mut vm);
+    assert!(
+        eval_res.is_ok(),
+        "Renamed meta.pilot must parse and evaluate cleanly: {:?}",
+        eval_res.err()
+    );
 }

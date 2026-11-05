@@ -1601,7 +1601,7 @@ mod tests {
     fn test_cmd_emit_and_from_cli() {
         let tmp_dir = std::env::temp_dir();
         let tmp_pilot = tmp_dir.join("test_emit_input.pilot");
-        fs::write(&tmp_pilot, "def add(a: int, b: int) -> int { return a + b }").unwrap();
+        fs::write(&tmp_pilot, "fn add(a: i64, b: i64) -> i64 { return a + b; }").unwrap();
 
         let tmp_out_py = tmp_dir.join("test_emit_output.py");
         cmd_emit(&["python".to_string(), tmp_pilot.to_string_lossy().to_string(), "-o".to_string(), tmp_out_py.to_string_lossy().to_string()]);

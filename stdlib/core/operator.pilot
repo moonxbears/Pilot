@@ -176,7 +176,7 @@ pub interface {
         pub pure op : (step_by: TStep) -> TOut;
     }
 
-    ITryOperator<TOk: IAnyValue, TErr: IAnyValue> : IAnyValue {
+    ITryOperator<TOk: IAnyValue, TErr: IAnyValue = void> : IAnyValue {
         pub pure op ? () -> TOk;
     }
 

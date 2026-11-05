@@ -44,7 +44,7 @@ def calc(a: i64, b: i64, c: i64) -> i64 {
 
     #[test]
     fn test_format_brace_and_colon_suite_transformations() {
-        let code = r#"def check_val(x: i64) -> i64 {
+        let code = r#"fn check_val(x: i64) -> i64 {
     if x > 0 {
         return x;
     } else {
@@ -60,7 +60,7 @@ def calc(a: i64, b: i64, c: i64) -> i64 {
         };
         let colon_res = format_source(code, &colon_opts);
         assert!(colon_res.success);
-        assert!(colon_res.formatted_code.contains("def check_val(x: i64) -> i64:"));
+        assert!(colon_res.formatted_code.contains("fn check_val(x: i64) -> i64:"));
         assert!(colon_res.formatted_code.contains("if x > 0:"));
         assert!(colon_res.formatted_code.contains("else:"));
 
@@ -72,7 +72,7 @@ def calc(a: i64, b: i64, c: i64) -> i64 {
         };
         let brace_res = format_source(&colon_res.formatted_code, &brace_opts);
         assert!(brace_res.success);
-        assert!(brace_res.formatted_code.contains("def check_val(x: i64) -> i64 {"));
+        assert!(brace_res.formatted_code.contains("fn check_val(x: i64) -> i64 {"));
         assert!(brace_res.formatted_code.contains("if x > 0 {"));
     }
 }

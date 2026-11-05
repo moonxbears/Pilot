@@ -2650,6 +2650,7 @@ impl<'a> Parser<'a> {
                 }
                 while self.at(TokenKind::KwVar)
                     || self.at(TokenKind::KwRef)
+                    || self.at(TokenKind::KwComptime)
                     || (self.is_ident_like() && (self.text() == "var" || self.text() == "ref" || self.text() == "val" || self.text() == "comptime"))
                 {
                     if self.pos + 1 < self.tape.len() {
@@ -3818,6 +3819,19 @@ impl<'a> Parser<'a> {
                 self.consume_semi_or_newlines();
                 if self.at(TokenKind::RParen) || self.at_end() {
                     break;
+                }
+                while self.at(TokenKind::KwVar)
+                    || self.at(TokenKind::KwRef)
+                    || self.at(TokenKind::KwComptime)
+                    || (self.is_ident_like() && (self.text() == "var" || self.text() == "ref" || self.text() == "val" || self.text() == "comptime"))
+                {
+                    if self.pos + 1 < self.tape.len() {
+                        let next_k = self.tape.kind(self.pos + 1);
+                        if next_k == TokenKind::Colon || next_k == TokenKind::Comma || next_k == TokenKind::RParen || next_k == TokenKind::Equal {
+                            break;
+                        }
+                    }
+                    self.advance();
                 }
                 if self.is_ident_like() {
                     let p_span = self.span();

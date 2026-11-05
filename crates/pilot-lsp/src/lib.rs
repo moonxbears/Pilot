@@ -24,7 +24,7 @@ mod tests {
     fn test_sieve_did_open() {
         let mut server = LspServer::new();
         let src = r#"
-            def sieve(limit: int) -> List[int] {
+            fn sieve(limit: int) -> List[int] {
                 let primes = [];
                 for (i in 2..limit) {
                     primes.append(i);
@@ -55,7 +55,7 @@ mod tests {
 
         // 2. didOpen
         let uri = "file:///workspace/test.pilot";
-        let code = "def compute(x: i64) -> i64 {\n    return x + 1;\n}\n";
+        let code = "fn compute(x: i64) -> i64 {\n    return x + 1;\n}\n";
         let did_open_notif = format!(
             r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
             uri,
@@ -64,14 +64,14 @@ mod tests {
         let resp = server.handle_message(&did_open_notif);
         assert!(resp.is_none(), "Notifications do not produce direct responses");
 
-        // 3. Hover over 'def' keyword at line 0, character 1
+        // 3. Hover over 'fn' keyword at line 0, character 1
         let hover_req = format!(
             r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":1}}}}}}"#,
             uri
         );
         let hover_resp = server.handle_message(&hover_req).expect("Expected hover response");
         assert!(hover_resp.contains("Pilot Keyword"));
-        assert!(hover_resp.contains("def"));
+        assert!(hover_resp.contains("fn"));
 
         // 4. Semantic tokens full
         let sem_req = format!(
@@ -81,7 +81,7 @@ mod tests {
         let sem_resp = server.handle_message(&sem_req).expect("Expected semantic tokens response");
         assert!(sem_resp.contains("data"));
         // Standard VSCode legend indices: keyword = 15, function = 12, variable = 8, type = 1
-        assert!(sem_resp.contains("15")); // keyword 'def'
+        assert!(sem_resp.contains("15")); // keyword 'fn'
         assert!(sem_resp.contains("12")); // function 'compute'
         assert!(sem_resp.contains("8"));  // variable 'x'
         assert!(sem_resp.contains("1"));  // type 'i64'
@@ -100,7 +100,7 @@ mod tests {
     fn test_lsp_incremental_did_change_and_definition() {
         let mut server = LspServer::new();
         let uri = "file:///workspace/test.pilot";
-        let code = "def calculate(x: i64) -> i64 {\n    return x * 2;\n}\n";
+        let code = "fn calculate(x: i64) -> i64 {\n    return x * 2;\n}\n";
 
         let did_open = format!(
             r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
@@ -116,9 +116,9 @@ mod tests {
         );
         server.handle_message(&did_change);
 
-        // Go to definition on calculate at line 0, char 5
+        // Go to definition on calculate at line 0, char 4
         let def_req = format!(
-            r#"{{"jsonrpc":"2.0","id":10,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":5}}}}}}"#,
+            r#"{{"jsonrpc":"2.0","id":10,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":4}}}}}}"#,
             uri
         );
         let def_resp = server.handle_message(&def_req).expect("Expected definition response");
@@ -177,7 +177,7 @@ println("Value mutated and returned by Python: '" + python_echo + "'");
 println("--- 2. Python Coroutine / Yield-Bridge Callable ---");
 
 let sequence_trace = [];
-def recorder(val) {
+fn recorder(val) {
     sequence_trace.append(val);
     println("  [RECORDED STEP] -> " + val);
     return val;
@@ -205,7 +205,7 @@ let polyglot_routine = python {
         );
         let resp = server.handle_message(&hover_req).expect("Expected hover response");
         println!("resp: {}", resp);
-        assert!(resp.contains("def recorder(val: any) -> any"));
+        assert!(resp.contains("fn recorder(val: any) -> any"));
 
         // Hover over 'pilot_greeting' at line 12 (0-indexed line 11), char 6
         let hover_req3 = format!(
@@ -243,13 +243,13 @@ type Shape =
     | Circle(radius: f64)
     | PointShape
 
-def add(a: int, b: int) -> int {
+fn add(a: int, b: int) -> int {
     return a + b
 }
 
 let c = add(10, 20)
 let explicit_val: f64 = 3.14
-let scores: List[int] = [10, 20, 30]
+let scores: List<int> = [10, 20, 30]
 let (px, py) = (100, 200)
 let [head, ..tail] = scores
 let pt = Point(1.5, 2.5)
@@ -287,10 +287,10 @@ for score in scores {
         let h_variant = hover_at(2, 8);
         assert!(h_variant.contains("(variant) Circle: (f64) -> Shape"), "got: {}", h_variant);
 
-        // 3. Function & Parameter inference: `def add(a: int, b: int) -> int`
-        let h_fn = hover_at(5, 5);
-        assert!(h_fn.contains("def add(a: i64, b: i64) -> i64"), "got: {}", h_fn);
-        let h_param = hover_at(5, 8);
+        // 3. Function & Parameter inference: `fn add(a: int, b: int) -> int`
+        let h_fn = hover_at(5, 4);
+        assert!(h_fn.contains("fn add(a: i64, b: i64) -> i64"), "got: {}", h_fn);
+        let h_param = hover_at(5, 7);
         assert!(h_param.contains("(parameter) a: i64"), "got: {}", h_param);
         let h_param_use = hover_at(6, 11);
         assert!(h_param_use.contains("(parameter) a: i64"), "got: {}", h_param_use);
@@ -362,7 +362,7 @@ record Frame2D(width: int, height: int, name: str);
 record Canvas2D(width: float, height: float);
 
 // 1. Structural Row Polymorphism: infers `({ width: T, height: T, ..R } where T: Numeric) -> T`
-def compute_area(surface) => surface.width * surface.height;
+fn compute_area(surface) => surface.width * surface.height;
 
 let frame_area = compute_area(Frame2D(1920, 1080, "HD"));
 let canvas_area = compute_area(Canvas2D(12.5, 8.0));
@@ -513,7 +513,7 @@ let canvas_area = compute_area(Canvas2D(12.5, 8.0));
     property holder: str
     property balance: float
 
-    def deposit(amount: float) -> float {
+    fn deposit(amount: float) -> float {
         self.balance = self.balance + amount;
         return self.balance;
     }
@@ -555,7 +555,7 @@ let b = acct.balance;
         );
         let resp_deposit = server.handle_message(&def_deposit).expect("Definition for deposit method");
         println!("def deposit: {}", resp_deposit);
-        assert!(resp_deposit.contains(r#""line":4"#), "Expected line 4 for def deposit, got: {}", resp_deposit);
+        assert!(resp_deposit.contains(r#""line":4"#), "Expected line 4 for fn deposit, got: {}", resp_deposit);
 
         // 4. Navigate to property `balance` from `acct.balance` at line 12, char 15
         let def_balance = format!(
@@ -580,7 +580,7 @@ let b = acct.balance;
     fn test_find_all_references() {
         let mut server = LspServer::new();
         let uri = "file:///workspace/calc.pilot";
-        let code = r#"def calculate(x: i64) -> i64 {
+        let code = r#"fn calculate(x: i64) -> i64 {
     let result = x * 2;
     return result + x;
 }
@@ -597,7 +597,7 @@ let total = calculate(10);
 
         // Find all references for `calculate` with includeDeclaration: true
         let ref_calc = format!(
-            r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/references","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":5}},"context":{{"includeDeclaration":true}}}}}}"#,
+            r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/references","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":4}},"context":{{"includeDeclaration":true}}}}}}"#,
             uri
         );
         let resp_calc = server.handle_message(&ref_calc).expect("References for calculate");
@@ -623,18 +623,18 @@ let total = calculate(10);
         let mut server = LspServer::new();
         let uri = "file:///workspace/shapes.pilot";
         let code = r#"interface IShape {
-    def area() -> float;
+    fn area() -> float;
 }
 
 class Circle : IShape {
     property radius: float
-    def area() -> float {
+    fn area() -> float {
         return 3.14159 * self.radius * self.radius;
     }
 }
 
 extend IShape {
-    def description() -> str {
+    fn description() -> str {
         return "Shape";
     }
 }
@@ -661,7 +661,7 @@ extend IShape {
     fn test_rename_refactoring_and_prepare_rename() {
         let mut server = LspServer::new();
         let uri = "file:///workspace/refactor.pilot";
-        let code = r#"def compute(val: i64) -> i64 {
+        let code = r#"fn compute(val: i64) -> i64 {
     let intermediate = val + 1;
     return intermediate * 2;
 }
@@ -696,7 +696,7 @@ let out = compute(10);
         assert!(rename_resp.contains("changes"), "Expected changes map in WorkspaceEdit");
         assert!(rename_resp.contains(uri), "Expected uri key in changes map");
 
-        // 3. Prepare rename on keyword 'def' must be rejected (null)
+        // 3. Prepare rename on keyword 'fn' must be rejected (null)
         let prep_kw = format!(
             r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/prepareRename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":1}}}}}}"#,
             uri
@@ -803,7 +803,7 @@ for t in transactions {
         );
         let resp_arena = server.handle_message(&hover_arena).expect("Hover on arena");
         println!("arena hover: {}", resp_arena);
-        assert!(resp_arena.contains("arena: List[TransformFrame]"), "Expected List[TransformFrame], got: {}", resp_arena);
+        assert!(resp_arena.contains("arena: Slice[TransformFrame]"), "Expected Slice[TransformFrame], got: {}", resp_arena);
 
         // 3. Hover on struct declaration definition itself (line 0, character 8)
         let hover_decl = format!(
@@ -884,7 +884,7 @@ for t in transactions {
     fn test_user_class_completion_context_isolation() {
         let mut server = LspServer::new();
         let uri = "file:///workspace/apples.pilot";
-        let code = "class Apples {\n    var variety: str = \"Honeycrisp\"\n    var count: int = 10\n    pub def pick(self, amount: int) -> int {\n        self.\n        return amount\n    }\n    def secret_audit() -> int {\n        return 1\n    }\n}\nlet a = Apples()\na.\n";
+        let code = "class Apples {\n    var variety: str = \"Honeycrisp\"\n    var count: int = 10\n    pub fn pick(self, amount: int) -> int {\n        self.\n        return amount\n    }\n    fn secret_audit() -> int {\n        return 1\n    }\n}\nlet a = Apples()\na.\n";
         // Line 0: class Apples {
         // Line 1:     var variety: str = "Honeycrisp"
         // Line 2:     var count: int = 10

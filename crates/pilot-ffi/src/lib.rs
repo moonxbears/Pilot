@@ -1004,7 +1004,7 @@ mod tests {
 
     #[test]
     fn ffi_c_abi_zero_copy_token_tape() {
-        let src = b"def compute(a: i64) -> i64 { return a * 2; }\n";
+        let src = b"fn compute(a: i64) -> i64 { return a * 2; }\n";
         unsafe {
             let handle = pilot_tokenize_utf8(src.as_ptr(), src.len());
             assert!(!handle.is_null());
@@ -1021,7 +1021,7 @@ mod tests {
             assert!(!links_ptr.is_null());
 
             let kinds = core::slice::from_raw_parts(kinds_ptr, len as usize);
-            assert_eq!(kinds[0], pilot_lexer::TokenKind::KwDef as u16);
+            assert_eq!(kinds[0], pilot_lexer::TokenKind::KwFn as u16);
 
             pilot_token_tape_free(handle);
         }
@@ -1029,7 +1029,7 @@ mod tests {
 
     #[test]
     fn ffi_c_abi_lossless_cst_and_format() {
-        let src = b"// Test comment\ndef run(x: i64) -> i64 {\n    return x + 1;\n}\n";
+        let src = b"// Test comment\nfn run(x: i64) -> i64 {\n    return x + 1;\n}\n";
         unsafe {
             // Test CST parsing and roundtrip text
             let cst_handle = pilot_cst_parse(src.as_ptr(), src.len());
@@ -1054,7 +1054,7 @@ mod tests {
             assert!(fmt_len > 0);
             let fmt_slice = core::slice::from_raw_parts(fmt_ptr, fmt_len);
             let fmt_str = core::str::from_utf8(fmt_slice).unwrap();
-            assert!(fmt_str.contains("def run(x: i64) -> i64:"));
+            assert!(fmt_str.contains("fn run(x: i64) -> i64"));
             pilot_free_string(fmt_ptr, fmt_len);
         }
     }

@@ -58,10 +58,47 @@ pub struct {
     }
 
     // 5. Symbolic Adjoint Dual Number (`fn!@(args...)` -> `Dual<TVal, TGrad>`) — `0b00` `IValue`
+    // Implements exact forward-mode chain rule (`+`, `-`, `*`, `/`, unary `-`) 100% in Pilot!
     [Lang(Cfg.Lang.dual_slot), Layout(c_abi)]
-    Dual<TVal: IValue, TGrad: IValue> : IValue {
-        pub primal:  TVal;
-        pub tangent: TGrad;
+    Dual<TVal: INumber<TVal>, TGrad: INumber<TGrad>> : IEquatable<Dual<TVal, TGrad>>, IValue {
+        pub primal:     TVal;
+        pub tangent:    TGrad;
+        pub value:      TVal  { get => .primal; }
+        pub derivative: TGrad { get => .tangent; }
+
+        pub pure:
+            op == (rhs: Dual<TVal, TGrad>) -> bool =>
+                (.primal == rhs.primal) && (.tangent == rhs.tangent);
+
+            op + (rhs: Dual<TVal, TGrad>) -> Dual<TVal, TGrad> => Dual<TVal, TGrad> {
+                primal:  .primal  + rhs.primal,
+                tangent: .tangent + rhs.tangent,
+            };
+
+            op - (rhs: Dual<TVal, TGrad>) -> Dual<TVal, TGrad> => Dual<TVal, TGrad> {
+                primal:  .primal  - rhs.primal,
+                tangent: .tangent - rhs.tangent,
+            };
+
+            op - () -> Dual<TVal, TGrad> => Dual<TVal, TGrad> {
+                primal:  (0 as TVal)  - .primal,
+                tangent: (0 as TGrad) - .tangent,
+            };
+
+            // Product Rule: d(u * v) = u * dv + v * du
+            op * (rhs: Dual<TVal, TGrad>) -> Dual<TVal, TGrad> => Dual<TVal, TGrad> {
+                primal:  .primal * rhs.primal,
+                tangent: ((.primal as TGrad) * rhs.tangent) + (.tangent * (rhs.primal as TGrad)),
+            };
+
+            // Quotient Rule: d(u / v) = (du * v - u * dv) / (v * v)
+            op / (rhs: Dual<TVal, TGrad>) -> Dual<TVal, TGrad> {
+                let denom = (rhs.primal * rhs.primal) as TGrad;
+                return Dual<TVal, TGrad> {
+                    primal:  .primal / rhs.primal,
+                    tangent: ((.tangent * (rhs.primal as TGrad)) - ((.primal as TGrad) * rhs.tangent)) / denom,
+                };
+            }
     }
 
     // 6. CoW Transactional Effect Sandbox (`fn!?(args...)` -> `EffectPlan<TReturn>`) — `0b10` `IObject`

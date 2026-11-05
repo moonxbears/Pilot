@@ -101,6 +101,7 @@ let SignedIntSsaFacet<TSelf: IValue> = {
         op ..< (rhs: TSelf) -> range<TSelf> => range<TSelf> { start: self, end: rhs };
         op ..  (rhs: TSelf) -> range<TSelf> => range<TSelf> { start: self, end: rhs };
         op ..= (rhs: TSelf) -> span<TSelf>  => span<TSelf>  { start: self, end: rhs };
+        fn step_by(step: TSelf) -> step<TSelf> => step<TSelf> { bounds: range<TSelf> { start: self, end: self }, step_by: step };
         fn abs() -> TSelf {
             if self < (0 as TSelf) { return -self; }
             return self;
@@ -137,6 +138,7 @@ let UnsignedIntSsaFacet<TSelf: IValue> = {
         op ..< (rhs: TSelf) -> range<TSelf> => range<TSelf> { start: self, end: rhs };
         op ..  (rhs: TSelf) -> range<TSelf> => range<TSelf> { start: self, end: rhs };
         op ..= (rhs: TSelf) -> span<TSelf>  => span<TSelf>  { start: self, end: rhs };
+        fn step_by(step: TSelf) -> step<TSelf> => step<TSelf> { bounds: range<TSelf> { start: self, end: self }, step_by: step };
 };
 
 let FloatSsaFacet<TSelf: IValue> = {
@@ -302,6 +304,7 @@ pub partial struct {
 
         pub pure:
             fn contains(v: T) -> bool => (v >= .start) && (v < .end);
+            fn step_by(step: T) -> step<T> => step<T> { bounds: self, step_by: step };
             fn get_enumerator() -> RangeEnumerator<T> => RangeEnumerator<T> {
                 current_val: .start,
                 end_val:     .end,
@@ -356,5 +359,28 @@ pub partial struct {
         pub tag: u8;
         pub v1:  T1;
         pub v2:  T2;
+    }
+
+    // 5.10 Compile-Time Dimensional Quantity (`Quantity<TVal, M, S, K>`) — `0b00` `IValue`
+    [Layout(transparent)]
+    Quantity<TVal: INumber<TVal>, const M: i8, const S: i8, const K: i8 = 0> : IValue {
+        pub value: TVal;
+
+        pub pure:
+            op + (rhs: Quantity<TVal, M, S, K>) -> Quantity<TVal, M, S, K> =>
+                Quantity<TVal, M, S, K> { value: .value + rhs.value };
+
+            op - (rhs: Quantity<TVal, M, S, K>) -> Quantity<TVal, M, S, K> =>
+                Quantity<TVal, M, S, K> { value: .value - rhs.value };
+
+            op - () -> Quantity<TVal, M, S, K> =>
+                Quantity<TVal, M, S, K> { value: -.value };
+
+            op == (rhs: Quantity<TVal, M, S, K>) -> bool => .value == rhs.value;
+            op != (rhs: Quantity<TVal, M, S, K>) -> bool => .value != rhs.value;
+            op <  (rhs: Quantity<TVal, M, S, K>) -> bool => .value <  rhs.value;
+            op <= (rhs: Quantity<TVal, M, S, K>) -> bool => .value <= rhs.value;
+            op >  (rhs: Quantity<TVal, M, S, K>) -> bool => .value >  rhs.value;
+            op >= (rhs: Quantity<TVal, M, S, K>) -> bool => .value >= rhs.value;
     }
 }

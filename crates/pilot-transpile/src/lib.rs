@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn test_ast_to_transpile_ir_lowerer() {
-        let code = "def add_nums(x: int, y: int) -> int { return x + y; }";
+        let code = "fn add_nums(x: int, y: int) -> int { return x + y; }";
         let arena = pilot_parser::parse(code);
         let root = arena.root;
         let analysis = pilot_analysis::pipeline::AnalysisPipeline::analyze(&arena, root);
@@ -149,7 +149,7 @@ struct Point {
 class Counter {
     val: int
 
-    def inc() -> int {
+    fn inc() -> int {
         return self.val + 1;
     }
 }
@@ -213,7 +213,7 @@ class Counter {
     #[test]
     fn test_transpile_modern_pilot_expressions() {
         let code = r#"
-def process_data(limit: int) -> int {
+fn process_data(limit: int) -> int {
     let items = [10, 20, 30];
     var sum = 0;
     for i in 0..<limit {

@@ -632,7 +632,7 @@ record Product(title: str, price: float, in_stock: bool);
 record Frame2D(width: int, height: int, name: str);
 record Canvas2D(width: float, height: float);
 
-def compute_area(surface) => surface.width * surface.height;
+fn compute_area(surface) => surface.width * surface.height;
 
 let frame_area = compute_area(Frame2D(1920, 1080, "HD"));
 let canvas_area = compute_area(Canvas2D(12.5, 8.0));
@@ -640,8 +640,8 @@ let canvas_area = compute_area(Canvas2D(12.5, 8.0));
 println(f"Frame area (int): {frame_area}");
 println(f"Canvas area (float): {canvas_area}");
 
-def is_even_step(n: int) => true if n == 0 else is_odd_step(n - 1);
-def is_odd_step(n: int) => false if n == 0 else is_even_step(n - 1);
+fn is_even_step(n: int) => true if n == 0 else is_odd_step(n - 1);
+fn is_odd_step(n: int) => false if n == 0 else is_even_step(n - 1);
 "#;
         let temp_file = std::env::temp_dir().join("dap_test_type_infer.pilot");
         let _ = std::fs::write(&temp_file, code);
@@ -747,7 +747,7 @@ def is_odd_step(n: int) => false if n == 0 else is_even_step(n - 1);
 import std.multiprocessing as multiprocessing;
 import std.asyncio as asyncio;
 
-def test_threading() {
+fn test_threading() {
     // 1. Thread lifecycle
     var work_done: bool = false;
     let t = threading.Thread(() => {

@@ -385,7 +385,32 @@ pub fn scan_raw_tokens<'a>(src: &'a str) -> Vec<RawToken<'a>> {
             } else if let Some((kw, _)) = lookup_keyword(ident) {
                 SyntaxKind::from_token_kind(kw)
             } else {
-                SyntaxKind::Ident
+                match ident {
+                    "else" => SyntaxKind::KwElse,
+                    "in" => SyntaxKind::KwIn,
+                    "is" => SyntaxKind::KwIs,
+                    "as" => SyntaxKind::KwAs,
+                    "and" => SyntaxKind::KwAnd,
+                    "or" => SyntaxKind::KwOr,
+                    "not" => SyntaxKind::KwNot,
+                    "await" => SyntaxKind::KwAwait,
+                    "spawn" => SyntaxKind::KwSpawn,
+                    "mut" => SyntaxKind::KwMut,
+                    "true" => SyntaxKind::KwTrue,
+                    "false" => SyntaxKind::KwFalse,
+                    "none" => SyntaxKind::KwNone,
+                    "null" => SyntaxKind::KwNull,
+                    "some" => SyntaxKind::KwSome,
+                    "undefined" => SyntaxKind::KwUndefined,
+                    "import" => SyntaxKind::KwImport,
+                    "from" => SyntaxKind::KwFrom,
+                    "while" => SyntaxKind::KwWhile,
+                    "for" => SyntaxKind::KwFor,
+                    "guard" => SyntaxKind::KwGuard,
+                    "break" => SyntaxKind::KwBreak,
+                    "continue" => SyntaxKind::KwContinue,
+                    _ => SyntaxKind::Ident,
+                }
             };
             tokens.push(RawToken {
                 kind,
@@ -1018,7 +1043,7 @@ impl<'a, 't> CstParser<'a, 't> {
         // Optional return type: -> Type
         if self.at(SyntaxKind::Arrow) {
             self.advance();
-            while !self.at_end() && !self.at(SyntaxKind::LBrace) && !self.at(SyntaxKind::FatArrow) && !self.at(SyntaxKind::Semicolon) && !self.at(SyntaxKind::Newline) {
+            while !self.at_end() && !self.at(SyntaxKind::LBrace) && !self.at(SyntaxKind::Colon) && !self.at(SyntaxKind::FatArrow) && !self.at(SyntaxKind::Semicolon) && !self.at(SyntaxKind::Newline) {
                 self.advance();
             }
         }
@@ -1379,6 +1404,17 @@ impl<'a, 't> CstParser<'a, 't> {
             } else {
                 self.sink.token(SyntaxKind::MissingRBrace, "");
                 self.sink.error(SyntaxDiagnostic::with_fix("Expected '}' closing block", self.peek_span(), "}"));
+            }
+            self.sink.finish_node();
+        } else if self.at(SyntaxKind::Colon) {
+            self.sink.start_node(SyntaxKind::BlockExpr);
+            self.advance(); // ':'
+            while !self.at_end() && !self.at(SyntaxKind::RBrace) {
+                let start_pos = self.pos;
+                self.parse_stmt_or_decl();
+                if self.pos == start_pos {
+                    self.recover_unexpected();
+                }
             }
             self.sink.finish_node();
         } else {

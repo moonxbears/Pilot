@@ -40,6 +40,11 @@ comptime {
             lattice_get:  "get_lattice_bits",
             core_naming:  "enforce_core_naming_lint",
             seal_bridge:  "seal_bootstrap_bridge",
+            t_name:       "type_name_of",
+            ast_lines:    "ast_source_lines",
+            ast_parse:    "parse_ast_fragment",
+            ast_replace:  "replace_ast_pattern",
+            attr_weave:   "register_attr_weaver",
         },
 
         // 2. Canonical `[Lang("...")]` Identifiers (Exported to `stdlib/core/*`)
@@ -469,6 +474,11 @@ pub lvl(Cfg.Tokens.ring_public) comptime fn {
     fields_of(T)                  => __engine(Cfg.Hooks.t_fields, T);
     compile_error(msg)            => __engine(Cfg.Hooks.diag_err, msg);
     lattice_bits_of(T)            => __engine(Cfg.Hooks.lattice_get, T);
+    type_name_of(T)                   => __engine(Cfg.Hooks.t_name, T);
+    __ast_lines(target_fn, part_kind) => __engine(Cfg.Hooks.ast_lines, target_fn, part_kind);
+    __parse_ast(source_str)           => __engine(Cfg.Hooks.ast_parse, source_str);
+    __replace_ast(root, pat, rep)     => __engine(Cfg.Hooks.ast_replace, root, pat, rep);
+    __bind_weaver(iface_decl, fn_ref) => __engine(Cfg.Hooks.attr_weave, iface_decl, fn_ref);
 }
 
 // =========================================================================
