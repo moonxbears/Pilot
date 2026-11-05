@@ -17,7 +17,7 @@ pub use diagnostics::{
     verify_core_naming_rules, AnalysisDiagnostic, Diagnostic, DiagnosticSeverity, PackageAst,
 };
 pub use types::{
-    CapabilityBits, CapabilityPhysics, FieldOffset, LayoutId, LayoutTable, PhysicalLayout,
+    CapabilityBits, CapabilityPhysics, FieldOffset, HwScalarHeader, LayoutId, LayoutTable, PhysicalLayout,
     PhysicsGeometry,
 };
 pub use infer::{

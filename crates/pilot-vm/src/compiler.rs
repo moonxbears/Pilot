@@ -321,7 +321,9 @@ impl BytecodeCompiler {
                     (NodeId(node.rhs), NodeId::NONE)
                 };
 
+                let dst = self.alloc_reg();
                 let then_reg = self.compile_node(arena, then_node);
+                self.emit(Opcode::Move, dst, then_reg, 0);
                 let jump_end_idx = self.emit(Opcode::Jump, 0, 0, 0);
 
                 let else_pos = self.instructions.len() as u16;
@@ -334,7 +336,8 @@ impl BytecodeCompiler {
                 );
 
                 if else_node.is_some() {
-                    self.compile_node(arena, else_node);
+                    let else_reg = self.compile_node(arena, else_node);
+                    self.emit(Opcode::Move, dst, else_reg, 0);
                 }
 
                 // Patch JumpEnd target
@@ -346,7 +349,7 @@ impl BytecodeCompiler {
                     (end_pos & 0xFF) as u8,
                 );
 
-                then_reg
+                dst
             }
 
             NodeKind::WhileStmt => {

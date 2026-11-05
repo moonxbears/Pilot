@@ -2,26 +2,25 @@ use std::collections::{HashMap, HashSet};
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_intern::SymbolId;
 use pilot_rt::PilotVal;
-use crate::types::{CapabilityBits, FieldOffset, LayoutId, LayoutTable, PhysicalLayout, PhysicsGeometry};
+use crate::types::{CapabilityBits, FieldOffset, HwScalarHeader, LayoutId, LayoutTable, PhysicalLayout, PhysicsGeometry};
 
 #[derive(Clone, Debug)]
 pub struct RawAstNode {
     pub node_id: u32, pub parent_id: u32, pub kind_tag: u8, pub sym_id: u32,
-    pub first_child: u32, pub child_count: u16, pub raw_bits: u64,
-    pub literal_kind: u8, pub span_start: u32, pub span_end: u32,
+    pub first_child: u32, pub child_count: u16, pub first_attr_arg: u32, pub attr_arg_count: u16,
+    pub raw_bits: u64, pub literal_kind: u8, pub span_start: u32, pub span_end: u32,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct RawAstArena {
     pub nodes: Vec<RawAstNode>,
     pub child_links: Vec<u32>,
+    pub attr_args: Vec<i64>,
 }
 
 #[derive(Clone, Debug)]
 pub struct PhysicsDiagnostic {
-    pub node_id: u32,
-    pub severity: u8,
-    pub message: String,
+    pub node_id: u32, pub severity: u8, pub message: String,
 }
 
 #[derive(Clone, Debug)]
@@ -41,9 +40,11 @@ impl PhysicsRegistry {
     }
 }
 
+// Restriction: Pure 1-to-1 structural copy; Forbidden: bit-packing attr.args or setting lit_kind on StructDecl
 pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32, String>) {
     let mut raw_nodes = Vec::with_capacity(arena.nodes.len());
     let mut child_links = Vec::new();
+    let mut attr_args = Vec::new();
     let mut symbol_strings = HashMap::new();
     let mut struct_field_nodes = HashSet::new();
     let mut struct_fields_map: HashMap<u32, Vec<u32>> = HashMap::new();
@@ -71,6 +72,20 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
         let span = arena.span(NodeId(idx_u32));
         let kind = node.node_kind();
 
+        let first_attr_arg = attr_args.len() as u32;
+        let mut attr_arg_count = 0u16;
+        if let Some(attrs) = arena.node_attributes.get(&idx_u32) {
+            for attr in attrs {
+                for &a in &attr.args {
+                    let an = arena.node(a);
+                    if an.node_kind() == NodeKind::IntLit {
+                        attr_args.push(arena.i64_pool.get(an.lhs as usize).copied().unwrap_or(0));
+                        attr_arg_count += 1;
+                    }
+                }
+            }
+        }
+
         let (kind_tag, sym_id, raw_bits, lit_kind) = if struct_field_nodes.contains(&idx_u32) {
             let ty_id = if kind == NodeKind::ParamDecl { NodeId(node.rhs) } else { arena.type_annotations.get(&idx_u32).copied().unwrap_or(NodeId::NONE) };
             let ty_sym = extract_sym(ty_id);
@@ -78,26 +93,7 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
             (21u8, node.lhs, ty_sym as u64, 0u8)
         } else {
             match kind {
-                NodeKind::StructDecl => {
-                    let mut bits = 0u64;
-                    let mut lit = 0u8;
-                    if let Some(attrs) = arena.node_attributes.get(&idx_u32) {
-                        for attr in attrs {
-                            let args: Vec<i64> = attr.args.iter().filter_map(|&a| {
-                                let an = arena.node(a);
-                                if an.node_kind() == NodeKind::IntLit { arena.i64_pool.get(an.lhs as usize).copied() } else { None }
-                            }).collect();
-                            if args.len() == 3 {
-                                bits = ((args[0].max(0) as u64 & 0xFFFF) << 16) | ((args[1].max(1) as u64 & 0xFF) << 8) | (args[2].max(0) as u64 & 0xFF);
-                            } else if args.len() == 2 {
-                                bits = ((args[0].max(0) as u64 & 0xFFFF) << 16) | (1u64 << 8) | (args[1].max(0) as u64 & 0xFF);
-                            } else if args.len() == 1 && attr.args.len() == 1 && (1..=4).contains(&args[0]) {
-                                lit = args[0] as u8;
-                            }
-                        }
-                    }
-                    (1u8, node.lhs, bits, lit)
-                }
+                NodeKind::StructDecl => (1u8, node.lhs, 0u64, 0u8),
                 NodeKind::InterfaceDecl => (2u8, node.lhs, 0u64, 0u8),
                 NodeKind::FnDecl => (3u8, node.lhs, 0u64, 0u8),
                 NodeKind::ParamDecl => {
@@ -177,13 +173,14 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
 
         raw_nodes.push(RawAstNode {
             node_id: idx_u32, parent_id: 0, kind_tag, sym_id, first_child, child_count,
-            raw_bits, literal_kind: lit_kind, span_start: span.start, span_end: span.end,
+            first_attr_arg, attr_arg_count, raw_bits, literal_kind: lit_kind, span_start: span.start, span_end: span.end,
         });
     }
 
-    (RawAstArena { nodes: raw_nodes, child_links }, symbol_strings)
+    (RawAstArena { nodes: raw_nodes, child_links, attr_args }, symbol_strings)
 }
 
+// Restriction: Dispatches __engine calls to PhysicsRegistry & LayoutTable; Forbidden: type inference logic, symbol lookups, or AST traversal
 pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, args: &[PilotVal]) -> Result<PilotVal, String> {
     match op_code {
         "ast_node_count" => Ok(PilotVal::from_int(registry.arena.nodes.len() as i64)),
@@ -214,6 +211,25 @@ pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, ar
                 if idx < n.child_count as usize { registry.arena.child_links.get(n.first_child as usize + idx).copied() } else { None }
             }).unwrap_or(0);
             Ok(PilotVal::from_int(cid as i64))
+        }
+        "ast_attr_count" => Ok(PilotVal::from_int(args.first().and_then(|v| v.as_int()).and_then(|n| registry.arena.nodes.get(n as usize)).map_or(0, |n| n.attr_arg_count) as i64)),
+        "ast_attr_arg" => {
+            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
+            let aidx = args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as usize;
+            let val = registry.arena.nodes.get(nid).and_then(|n| {
+                if aidx < n.attr_arg_count as usize { registry.arena.attr_args.get(n.first_attr_arg as usize + aidx).copied() } else { None }
+            }).unwrap_or(0);
+            Ok(PilotVal::from_int(val))
+        }
+        "layout_hw_header" => {
+            let code = args.first().and_then(|v| v.as_int()).unwrap_or(0) as u8;
+            let hdr = match code {
+                0 => HwScalarHeader::Unit0, 1 => HwScalarHeader::Bool8, 2 => HwScalarHeader::U8, 3 => HwScalarHeader::U16,
+                4 => HwScalarHeader::U32, 5 => HwScalarHeader::U64, 6 => HwScalarHeader::U128, 7 => HwScalarHeader::I8,
+                8 => HwScalarHeader::I16, 9 => HwScalarHeader::I32, 10 => HwScalarHeader::I64, 11 => HwScalarHeader::I128,
+                12 => HwScalarHeader::F32, 13 => HwScalarHeader::F64, 14 => HwScalarHeader::RawPtr64, _ => HwScalarHeader::Never0,
+            };
+            Ok(PilotVal::from_int(registry.layouts.register_hw_header(hdr).0 as i64))
         }
         "layout_scalar" => {
             let w = args.first().and_then(|v| v.as_int()).unwrap_or(64) as u16;
@@ -294,6 +310,7 @@ pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, ar
     }
 }
 
+// Restriction: Compiles & executes selfhost/analyzer.pilot; Forbidden: modifying registry before or after vm.run
 pub fn run_pilot_analyzer(registry: &mut PhysicsRegistry, analyzer_src: Option<&str>) -> Result<(), String> {
     let src = match analyzer_src {
         Some(s) => s.to_string(),
@@ -319,6 +336,7 @@ pub fn run_pilot_analyzer(registry: &mut PhysicsRegistry, analyzer_src: Option<&
     Ok(())
 }
 
+// Restriction: Canonical analysis entry point; Forbidden: calling any other Rust pass
 pub fn analyze_physics(arena: &AstArena, root: NodeId, analyzer_override: Option<&str>) -> PhysicsRegistry {
     let (flat_arena, symbol_strings) = flatten_ast(arena, root);
     let mut registry = PhysicsRegistry::new(flat_arena, symbol_strings);
@@ -327,9 +345,7 @@ pub fn analyze_physics(arena: &AstArena, root: NodeId, analyzer_override: Option
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct NodeLayoutMap {
-    pub node_layouts: Vec<Option<LayoutId>>,
-}
+pub struct NodeLayoutMap { pub node_layouts: Vec<Option<LayoutId>> }
 
 impl NodeLayoutMap {
     pub fn new() -> Self { Self::default() }
@@ -342,36 +358,21 @@ impl NodeLayoutMap {
 
 pub fn verify_capability_transition(source: CapabilityBits, target: CapabilityBits) -> bool {
     match (source, target) {
-        (CapabilityBits::VALUE, _) => true,
-        (CapabilityBits::OWNED_OBJ, CapabilityBits::BORROW_REF) => true,
-        (CapabilityBits::OWNED_OBJ, CapabilityBits::SCOPED_GUARD) => true,
-        (s, t) if s == t => true,
-        _ => false,
+        (CapabilityBits::VALUE, _) | (CapabilityBits::OWNED_OBJ, CapabilityBits::BORROW_REF) | (CapabilityBits::OWNED_OBJ, CapabilityBits::SCOPED_GUARD) => true,
+        (s, t) => s == t,
     }
 }
 
 pub fn compute_field_projection(aggregate: &PhysicalLayout, field_idx: usize) -> Option<FieldOffset> {
-    match &aggregate.geometry {
-        PhysicsGeometry::Aggregate { fields, .. } => fields.get(field_idx).copied(),
-        _ => None,
-    }
+    match &aggregate.geometry { PhysicsGeometry::Aggregate { fields, .. } => fields.get(field_idx).copied(), _ => None }
 }
 
 pub fn compute_soa_projection(slice_layout: &PhysicalLayout, field_idx: usize) -> Option<PhysicalLayout> {
     match &slice_layout.geometry {
-        PhysicsGeometry::Aggregate { fields, .. } => {
-            let field = fields.get(field_idx)?;
-            Some(PhysicalLayout {
-                id: field.layout,
-                byte_size: 16,
-                byte_align: 8,
-                geometry: PhysicsGeometry::Pointer {
-                    target: field.layout,
-                    capability: CapabilityBits::MUTABLE,
-                    addr_space: 0,
-                },
-            })
-        }
+        PhysicsGeometry::Aggregate { fields, .. } => fields.get(field_idx).map(|f| PhysicalLayout {
+            id: f.layout, byte_size: 16, byte_align: 8,
+            geometry: PhysicsGeometry::Pointer { target: f.layout, capability: CapabilityBits::MUTABLE, addr_space: 0 },
+        }),
         _ => None,
     }
 }

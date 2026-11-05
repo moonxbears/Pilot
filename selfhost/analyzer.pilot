@@ -46,16 +46,21 @@ pub fn infer_struct(s_id: i64, node_count: i64) -> i64 {
         return existing;
     }
 
-    let bits = __engine("ast_node_raw_bits", s_id);
-    if bits > 0 {
-        let bit_width = (bits >> 16) & 65535;
-        let lanes = (bits >> 8) & 255;
-        let bank = bits & 255;
+    let attr_cnt = __engine("ast_attr_count", s_id);
+    if attr_cnt >= 2 {
+        let arg0 = __engine("ast_attr_arg", s_id, 0);
+        let arg1 = __engine("ast_attr_arg", s_id, 1);
+        var bank = arg1;
+        var lanes = 1;
+        if attr_cnt >= 3 {
+            lanes = arg1;
+            bank = __engine("ast_attr_arg", s_id, 2);
+        }
         var s_lid = 0;
         if bank == 6 {
             s_lid = __engine("layout_ptr", 0, 1, 0);
         } else {
-            s_lid = __engine("layout_scalar", bit_width, lanes, bank);
+            s_lid = __engine("layout_scalar", arg0, lanes, bank);
         }
         __engine("ast_bind_layout", s_id, s_lid);
         return s_lid;
@@ -66,6 +71,20 @@ pub fn infer_struct(s_id: i64, node_count: i64) -> i64 {
         let empty_lid = __engine("layout_scalar", 8, 1, 0);
         __engine("ast_bind_layout", s_id, empty_lid);
         return empty_lid;
+    }
+
+    // Self-Referential / Recursive Struct Guard
+    let my_sym = __engine("ast_node_sym", s_id);
+    var fi_chk = 0;
+    while fi_chk < c_count {
+        let f_chk_node = __engine("ast_child_at", s_id, fi_chk);
+        let f_chk_sym = __engine("ast_node_raw_bits", f_chk_node);
+        if f_chk_sym == my_sym {
+            let rec_lid = __engine("layout_scalar", 64, 1, 0);
+            __engine("ast_bind_layout", s_id, rec_lid);
+            return rec_lid;
+        }
+        fi_chk = fi_chk + 1;
     }
 
     var f0 = 0;
@@ -109,16 +128,19 @@ pub fn infer_struct(s_id: i64, node_count: i64) -> i64 {
 }
 
 pub fn resolve_lit_layout(lit_kind: i64, node_count: i64) -> i64 {
-    // 1. Check for StructDecl with matching default_literal receptor
+    // 1. Check for StructDecl with matching 1-arg attribute (e.g. [DefaultLit(1)])
     var j = 0;
     while j < node_count {
         let k = __engine("ast_node_kind", j);
         if k == 1 {
-            let lk = __engine("ast_node_lit_kind", j);
-            if lk == lit_kind {
-                let s_lid = __engine("ast_get_bound_layout", j);
-                if s_lid != 4294967295 {
-                    return s_lid;
+            let attr_cnt = __engine("ast_attr_count", j);
+            if attr_cnt == 1 {
+                let a0 = __engine("ast_attr_arg", j, 0);
+                if a0 == lit_kind {
+                    let s_lid = __engine("ast_get_bound_layout", j);
+                    if s_lid != 4294967295 {
+                        return s_lid;
+                    }
                 }
             }
         }
@@ -130,12 +152,12 @@ pub fn resolve_lit_layout(lit_kind: i64, node_count: i64) -> i64 {
     while j < node_count {
         let k = __engine("ast_node_kind", j);
         if k == 1 {
-            let bits = __engine("ast_node_raw_bits", j);
-            if bits > 0 {
+            let attr_cnt = __engine("ast_attr_count", j);
+            if attr_cnt >= 2 {
                 let s_lid = __engine("ast_get_bound_layout", j);
                 if s_lid != 4294967295 {
                     let sz = __engine("layout_metrics", s_lid);
-                    let bank = bits & 255;
+                    let bank = if attr_cnt >= 3 { __engine("ast_attr_arg", j, 2) } else { __engine("ast_attr_arg", j, 1) };
                     if lit_kind == 4 {
                         if sz == 1 {
                             return s_lid;
@@ -179,14 +201,14 @@ pub fn resolve_lit_layout(lit_kind: i64, node_count: i64) -> i64 {
 
     // 4. Register on demand when a literal of this kind is actually encountered
     if lit_kind == 4 {
-        let b_lid = __engine("layout_scalar", 8, 1, 0);
+        let b_lid = __engine("layout_hw_header", 1);
         return b_lid;
     }
     if lit_kind == 2 {
-        let f_lid = __engine("layout_scalar", 64, 1, 1);
+        let f_lid = __engine("layout_hw_header", 13);
         return f_lid;
     }
-    let i_lid = __engine("layout_scalar", 64, 1, 0);
+    let i_lid = __engine("layout_hw_header", 10);
     return i_lid;
 }
 

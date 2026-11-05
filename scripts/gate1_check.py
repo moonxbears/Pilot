@@ -5,7 +5,8 @@ import glob
 ALLOWED_INFER_STRINGS = {
     "ast_node_count", "ast_node_kind", "ast_node_sym", "ast_node_lit_kind",
     "ast_node_raw_bits", "ast_child_count", "ast_child_at",
-    "layout_scalar", "layout_ptr", "layout_aggregate", "layout_union",
+    "ast_attr_count", "ast_attr_arg",
+    "layout_hw_header", "layout_scalar", "layout_ptr", "layout_aggregate", "layout_union",
     "layout_fn_abi", "layout_metrics", "layout_field_offset",
     "layout_physically_equal", "ast_bind_layout", "ast_get_bound_layout",
     "ast_bind_target", "ast_emit_diag",
