@@ -173,3 +173,36 @@ fn test_arbitrary_prelude_type_names() {
     let res_let_layout = find_let_layout("res");
     assert_eq!(res_let_layout.byte_size, 8, "`let res = v.x + offset;` must be inferred as 8-byte layout");
 }
+
+#[test]
+fn test_pilot_hosted_div_by_zero_and_comptime_persistence() {
+    // 1. Static Division-by-Zero Verification via AnalysisPipeline::analyze
+    let div_zero_src = r#"
+        fn bad_div(x: i64) -> i64 {
+            return x / 0;
+        }
+    "#;
+    let arena = parse(div_zero_src);
+    let result = pilot_analysis::AnalysisPipeline::analyze(&arena, arena.root);
+    assert!(!result.diagnostics.is_empty(), "Division by zero must emit a diagnostic");
+    assert!(
+        result.diagnostics.iter().any(|d| d.message.contains("DIV001")),
+        "Expected DIV001 diagnostic, got: {:?}",
+        result.diagnostics
+    );
+
+    // 2. ComptimeEngine state persistence
+    let comptime_snippet = r#"
+        __engine("layout_hw_header", 10);
+    "#;
+    let comptime_arena = parse(comptime_snippet);
+    let mut comptime_engine = pilot_analysis::ComptimeEngine::new();
+    assert_eq!(comptime_engine.layout_table.len(), 0);
+    let eval_res = comptime_engine.eval_ast_node(&comptime_arena, comptime_arena.root);
+    assert!(eval_res.is_ok(), "eval_ast_node must succeed: {:?}", eval_res);
+    assert_eq!(
+        comptime_engine.layout_table.len(),
+        1,
+        "eval_ast_node must persist registered layout back into self.layout_table"
+    );
+}

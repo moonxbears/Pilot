@@ -249,6 +249,27 @@ pub fn infer_member_expr(i: i64, node_count: i64) -> i64 {
     return 0;
 }
 
+pub fn check_div_by_zero(i: i64, op: i64, c_count: i64) -> i64 {
+    if op >= 4 {
+        if op <= 6 {
+            if c_count >= 2 {
+                let rhs_id = __engine("ast_child_at", i, 1);
+                let rhs_kind = __engine("ast_node_kind", rhs_id);
+                let rhs_lit = __engine("ast_node_lit_kind", rhs_id);
+                let rhs_bits = __engine("ast_node_raw_bits", rhs_id);
+                if rhs_kind == 15 {
+                    if rhs_lit == 1 {
+                        if rhs_bits == 0 {
+                            __engine("ast_emit_diag", i, 1, "DIV001: Compile-time division by zero detected");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 pub fn infer_node(i: i64, node_count: i64) -> i64 {
     let kind = __engine("ast_node_kind", i);
 
@@ -320,6 +341,7 @@ pub fn infer_node(i: i64, node_count: i64) -> i64 {
         let c_count = __engine("ast_child_count", i);
         if c_count > 0 {
             let op = __engine("ast_node_raw_bits", i);
+            check_div_by_zero(i, op, c_count);
             if op >= 8 {
                 if op <= 17 {
                     let b_lid = resolve_lit_layout(4, node_count);
@@ -332,6 +354,32 @@ pub fn infer_node(i: i64, node_count: i64) -> i64 {
             if lhs_lid != 4294967295 {
                 __engine("ast_bind_layout", i, lhs_lid);
                 return lhs_lid;
+            }
+        }
+        return 0;
+    }
+
+    if kind == 9 {
+        let c_count = __engine("ast_child_count", i);
+        if c_count > 0 {
+            let val_id = __engine("ast_child_at", i, 0);
+            let val_lid = __engine("ast_get_bound_layout", val_id);
+            if val_lid != 4294967295 {
+                __engine("ast_bind_layout", i, val_lid);
+                return val_lid;
+            }
+        }
+        return 0;
+    }
+
+    if kind == 7 {
+        let c_count = __engine("ast_child_count", i);
+        if c_count > 0 {
+            let body_id = __engine("ast_child_at", i, c_count - 1);
+            let body_lid = __engine("ast_get_bound_layout", body_id);
+            if body_lid != 4294967295 {
+                __engine("ast_bind_layout", i, body_lid);
+                return body_lid;
             }
         }
         return 0;

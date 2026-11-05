@@ -71,7 +71,7 @@ impl BytecodeCompiler {
         let r = self.next_reg;
         self.next_reg = self.next_reg.wrapping_add(1);
         if self.next_reg == 0 {
-            self.next_reg = 1;
+            self.next_reg = 17;
         }
         r
     }

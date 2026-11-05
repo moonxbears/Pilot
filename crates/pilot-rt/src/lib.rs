@@ -132,7 +132,7 @@ mod tests {
         assert!(PilotStdlibResolver::is_stdlib_module("std.math"));
         assert!(PilotStdlibResolver::is_stdlib_module("std.core"));
         assert!(!PilotStdlibResolver::is_stdlib_module("unknown.module"));
-        assert_eq!(PilotStdlibResolver::get_module_relative_path("std.core"), Some("core/core.pilot"));
+        assert_eq!(PilotStdlibResolver::resolve_relative_path("std.core"), Some("core/core.pilot".to_string()));
         assert!(PilotOsSyscall::monotonic_nanos() > 0);
     }
 

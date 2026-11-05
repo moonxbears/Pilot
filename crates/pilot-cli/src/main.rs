@@ -361,8 +361,26 @@ fn compile_stdlib() {
     let mut total_bytes = 0usize;
     let start_time = Instant::now();
 
-    for &(mod_name, rel_path) in pilot_rt::PilotStdlibResolver::MODULE_MAP {
-        let full_path = stdlib_dir.join(rel_path);
+    let mut stdlib_files = Vec::new();
+    fn visit_dirs(dir: &Path, files: &mut Vec<PathBuf>) {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if path.file_name().map_or(false, |n| n == ".pilc-cache") { continue; }
+                    visit_dirs(&path, files);
+                } else if path.extension().map_or(false, |ext| ext == "pilot") {
+                    files.push(path);
+                }
+            }
+        }
+    }
+    visit_dirs(&stdlib_dir, &mut stdlib_files);
+    stdlib_files.sort();
+
+    for full_path in stdlib_files {
+        let rel_path = full_path.strip_prefix(&stdlib_dir).unwrap_or(&full_path);
+        let mod_name = rel_path.to_string_lossy().replace('\\', "/");
         if !full_path.exists() {
             eprintln!("warning: standard library source missing: {}", full_path.display());
             continue;
@@ -663,27 +681,11 @@ fn cmd_ide_sync() {
     let mut tables = snap.tables.clone();
     let mut vm = snap.vm.clone();
 
-    // Query symbols directly from the bootstrapped compiler via reflection intrinsic
-    let seed_kws = match vm.eval_engine_intrinsic("query_registered_symbols", &[pilot_analysis::ComptimeValue::Int(0)], &mut pilot_ast::AstArena::new(), &mut tables, pilot_span::ByteSpan::new(0, 0)) {
-        Ok(pilot_analysis::ComptimeValue::Str(sym)) => tables.interner.resolve(sym).to_string(),
-        _ => "__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm".to_string(),
-    };
-    let syntax_kws = match vm.eval_engine_intrinsic("query_registered_symbols", &[pilot_analysis::ComptimeValue::Int(1)], &mut pilot_ast::AstArena::new(), &mut tables, pilot_span::ByteSpan::new(0, 0)) {
-        Ok(pilot_analysis::ComptimeValue::Str(sym)) => tables.interner.resolve(sym).to_string(),
-        _ => String::new(),
-    };
-    let mod_kws = match vm.eval_engine_intrinsic("query_registered_symbols", &[pilot_analysis::ComptimeValue::Int(2)], &mut pilot_ast::AstArena::new(), &mut tables, pilot_span::ByteSpan::new(0, 0)) {
-        Ok(pilot_analysis::ComptimeValue::Str(sym)) => tables.interner.resolve(sym).to_string(),
-        _ => String::new(),
-    };
-    let lang_types = match vm.eval_engine_intrinsic("query_registered_symbols", &[pilot_analysis::ComptimeValue::Int(3)], &mut pilot_ast::AstArena::new(), &mut tables, pilot_span::ByteSpan::new(0, 0)) {
-        Ok(pilot_analysis::ComptimeValue::Str(sym)) => tables.interner.resolve(sym).to_string(),
-        _ => "bool|usize|i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|f16|f32|f64|f128|str|char|void|never|ptr|slice|stride|array|tuple|option|result|union|fn|range|span|step|from|until|full|splat|pairs|expand|map|frame|type|ast|simd|grid|ring|pin|open|after|order|signal".to_string(),
-    };
-    let op_syms = match vm.eval_engine_intrinsic("query_registered_symbols", &[pilot_analysis::ComptimeValue::Int(4)], &mut pilot_ast::AstArena::new(), &mut tables, pilot_span::ByteSpan::new(0, 0)) {
-        Ok(pilot_analysis::ComptimeValue::Str(sym)) => tables.interner.resolve(sym).to_string(),
-        _ => "\\+|-|\\*|/|%|==|!=|<|>|<=|>=|&&|\\|\\||!|&|\\||\\^|~|<<|>>".to_string(),
-    };
+    let seed_kws = "__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm".to_string();
+    let syntax_kws = String::new();
+    let mod_kws = String::new();
+    let lang_types = "bool|usize|i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|f16|f32|f64|f128|str|char|void|never|ptr|slice|stride|array|tuple|option|result|union|fn|range|span|step|from|until|full|splat|pairs|expand|map|frame|type|ast|simd|grid|ring|pin|open|after|order|signal".to_string();
+    let op_syms = "\\+|-|\\*|/|%|==|!=|<|>|<=|>=|&&|\\|\\||!|&|\\||\\^|~|<<|>>".to_string();
 
     // Evaluate selfhost/ide_sync.pilot
     if let Ok(ide_sync_src) = fs::read_to_string("selfhost/ide_sync.pilot") {

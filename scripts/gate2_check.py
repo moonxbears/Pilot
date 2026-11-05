@@ -15,11 +15,13 @@ DELETED_FILES = [
 LINE_CAPS = {
     "crates/pilot-analysis/src/types.rs": 250,
     "crates/pilot-analysis/src/infer.rs": 380,
-    "crates/pilot-analysis/src/comptime.rs": 300,
+    "crates/pilot-analysis/src/comptime.rs": 220,
     "crates/pilot-analysis/src/pipeline.rs": 80,
     "crates/pilot-analysis/src/lib.rs": 60,
-    "crates/pilot-rt/src/stdlib.rs": 200,
+    "crates/pilot-rt/src/stdlib.rs": 90,
 }
+
+BANNED_STDLIB_TOKENS = ["pandas", "matplotlib", "scikit", "MODULE_MAP"]
 
 def main():
     passed = True
@@ -44,10 +46,21 @@ def main():
         else:
             print(f"PASS: {path} line count = {lines} (<= {cap})")
 
+    stdlib_path = "crates/pilot-rt/src/stdlib.rs"
+    if os.path.exists(stdlib_path):
+        with open(stdlib_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        for token in BANNED_STDLIB_TOKENS:
+            if token in content:
+                print(f"FAIL: {stdlib_path} contains banned token '{token}'")
+                passed = False
+            else:
+                print(f"PASS: {stdlib_path} free of '{token}'")
+
     if not passed:
         sys.exit(1)
 
-    print("ALL PHASE 2A SCORCHED-EARTH GATES PASSED!")
+    print("ALL PHASE 2B GATES PASSED!")
     sys.exit(0)
 
 if __name__ == "__main__":

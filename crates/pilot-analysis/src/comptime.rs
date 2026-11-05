@@ -5,7 +5,7 @@ use pilot_intern::SymbolId;
 use pilot_parser::ParserTables;
 use pilot_span::ByteSpan;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
-use crate::types::LayoutTable;
+use crate::types::{LayoutId, LayoutTable};
 
 // Restriction: Minimal value bridge for compile-time AST and constants
 #[derive(Clone, Debug, PartialEq)]
@@ -22,38 +22,13 @@ pub enum ComptimeValue {
 
 impl ComptimeValue {
     // Restriction: Pure scalar integer extraction
-    pub fn as_int(&self) -> Option<i64> {
-        match self {
-            ComptimeValue::Int(v) => Some(*v),
-            ComptimeValue::Uint(v) => Some(*v as i64),
-            _ => None,
-        }
-    }
-
+    pub fn as_int(&self) -> Option<i64> { match self { ComptimeValue::Int(v) => Some(*v), ComptimeValue::Uint(v) => Some(*v as i64), _ => None } }
     // Restriction: Pure unsigned integer extraction
-    pub fn as_uint(&self) -> Option<u128> {
-        match self {
-            ComptimeValue::Uint(v) => Some(*v),
-            ComptimeValue::Int(v) if *v >= 0 => Some(*v as u128),
-            _ => None,
-        }
-    }
-
+    pub fn as_uint(&self) -> Option<u128> { match self { ComptimeValue::Uint(v) => Some(*v), ComptimeValue::Int(v) if *v >= 0 => Some(*v as u128), _ => None } }
     // Restriction: Pure boolean extraction
-    pub fn as_bool(&self) -> Option<bool> {
-        match self {
-            ComptimeValue::Bool(b) => Some(*b),
-            _ => None,
-        }
-    }
-
+    pub fn as_bool(&self) -> Option<bool> { match self { ComptimeValue::Bool(b) => Some(*b), _ => None } }
     // Restriction: Pure string resolution via interner
-    pub fn as_str<'a>(&'a self, interner: &'a pilot_intern::Interner) -> Option<&'a str> {
-        match self {
-            ComptimeValue::Str(sym) | ComptimeValue::Ident(sym) => Some(interner.resolve(*sym)),
-            _ => None,
-        }
-    }
+    pub fn as_str<'a>(&'a self, interner: &'a pilot_intern::Interner) -> Option<&'a str> { match self { ComptimeValue::Str(sym) | ComptimeValue::Ident(sym) => Some(interner.resolve(*sym)), _ => None } }
 }
 
 // Restriction: Bootstrap diagnostics container; Forbidden: hardcoded error suppression
@@ -83,19 +58,17 @@ impl BootstrapDiagnostic {
 #[derive(Clone, Debug, Default)]
 pub struct ComptimeEngine {
     pub layout_table: LayoutTable,
+    pub node_layouts: Vec<Option<LayoutId>>,
     pub diagnostics: Vec<BootstrapDiagnostic>,
 }
 
 impl ComptimeEngine {
     // Restriction: Construct empty ComptimeEngine with zero registered layouts
     pub fn new() -> Self {
-        Self {
-            layout_table: LayoutTable::new(),
-            diagnostics: Vec::new(),
-        }
+        Self::default()
     }
 
-    // Restriction: Delegates AST execution to pilot-vm; bridges intrinsics via handle_engine_intrinsic
+    // Restriction: Delegates AST execution to pilot-vm; persists layouts & diagnostics back to self
     pub fn eval_ast_node(&mut self, arena: &AstArena, node_id: NodeId) -> Result<ComptimeValue, BootstrapDiagnostic> {
         if node_id.is_none() {
             return Ok(ComptimeValue::Void);
@@ -108,11 +81,21 @@ impl ComptimeEngine {
         let mut registry = crate::infer::PhysicsRegistry::new(flat_arena, symbol_strings);
         registry.layouts = self.layout_table.clone();
 
+        let reg_ptr = &mut registry as *mut crate::infer::PhysicsRegistry;
         vm.engine_handler = Some(Box::new(move |op_code: &str, args: &[pilot_rt::PilotVal]| {
-            crate::infer::handle_engine_intrinsic(&mut registry, op_code, args)
+            crate::infer::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op_code, args)
         }));
 
         let ret = vm.run();
+        self.layout_table = registry.layouts;
+        self.node_layouts = registry.node_layouts;
+        for d in registry.diagnostics {
+            self.diagnostics.push(BootstrapDiagnostic::UserCompileError {
+                message: d.message,
+                span: ByteSpan::new(0, 0),
+            });
+        }
+
         if ret.is_int() {
             Ok(ComptimeValue::Int(ret.as_int().unwrap()))
         } else if ret.is_float() {
@@ -122,18 +105,6 @@ impl ComptimeEngine {
         } else {
             Ok(ComptimeValue::Void)
         }
-    }
-
-    // Restriction: Minimal engine intrinsic dispatcher delegating to handle_engine_intrinsic
-    pub fn eval_engine_intrinsic(
-        &mut self,
-        _name: &str,
-        _args: &[ComptimeValue],
-        _arena: &mut AstArena,
-        _tables: &mut ParserTables,
-        _span: ByteSpan,
-    ) -> Result<ComptimeValue, BootstrapDiagnostic> {
-        Ok(ComptimeValue::Void)
     }
 }
 

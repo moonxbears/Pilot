@@ -145,7 +145,7 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
                         for &ch in &arena.extra_children[s..s + c] { child_links.push(ch); child_count += 1; }
                     }
                 }
-                NodeKind::BinaryExpr | NodeKind::AssignStmt | NodeKind::WhileStmt => {
+                NodeKind::BinaryExpr | NodeKind::AssignStmt | NodeKind::WhileStmt | NodeKind::ForExpr => {
                     for &ch in &[node.lhs, node.rhs] { if ch != 0 { child_links.push(ch); child_count += 1; } }
                 }
                 NodeKind::IfExpr => {
