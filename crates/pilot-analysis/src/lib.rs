@@ -41,9 +41,10 @@ pub use loops::{
 pub use contracts::{ContractVerifier, Interval};
 pub use dimensions::{DimensionChecker, DimensionVector};
 pub use comptime::{
-    bootstrap_core_file, eval_file_with_tables, BootstrapDiagnostic, CallFrameLayoutInfo,
-    ComptimeEngine, ComptimeEvaluator, ComptimeFnDef, ComptimeValue, InlineHint, LangItem,
-    MemoryLayoutMode, QuoteKind, RegisterClass, StaticDemotedSlot, TypeLayoutSpec,
+    bootstrap_core_file, eval_file_with_tables, BootstrapDiagnostic, BootstrapSnapshot,
+    CallFrameLayoutInfo, ComptimeEngine, ComptimeEvaluator, ComptimeFnDef, ComptimeValue,
+    InlineHint, LangItem, MemoryLayoutMode, QuoteKind, RegisterClass, StaticDemotedSlot,
+    TypeLayoutSpec,
 };
 pub use pipeline::{AnalysisPipeline, AnalysisResult, AttributeWeaver};
 pub use autodiff::{DualValue, SymbolicDifferentiator, SymbolicExpr};

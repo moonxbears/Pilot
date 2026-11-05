@@ -859,6 +859,9 @@ impl AstArena {
             refinement_predicates: std::collections::HashMap::new(),
             cue_declarations: std::collections::HashSet::new(),
             local_fn_captures: std::collections::HashMap::new(),
+            node_contexts: std::collections::HashMap::new(),
+            node_quote_depths: std::collections::HashMap::new(),
+            node_expansion_origins: std::collections::HashMap::new(),
         }
     }
 

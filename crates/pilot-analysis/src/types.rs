@@ -887,43 +887,100 @@ impl TypeArena {
         match self.get(pruned).clone() {
             TypeKind::Collection { kind, element } => {
                 let e = self.deep_prune(element);
-                self.alloc(TypeKind::Collection { kind, element: e })
+                if e == element {
+                    pruned
+                } else {
+                    self.alloc(TypeKind::Collection { kind, element: e })
+                }
             }
             TypeKind::Map { key, value } => {
                 let k = self.deep_prune(key);
                 let v = self.deep_prune(value);
-                self.alloc(TypeKind::Map { key: k, value: v })
+                if k == key && v == value {
+                    pruned
+                } else {
+                    self.alloc(TypeKind::Map { key: k, value: v })
+                }
             }
             TypeKind::SliceMap { key, value } => {
                 let k = self.deep_prune(key);
                 let v = self.deep_prune(value);
-                self.alloc(TypeKind::SliceMap { key: k, value: v })
+                if k == key && v == value {
+                    pruned
+                } else {
+                    self.alloc(TypeKind::SliceMap { key: k, value: v })
+                }
             }
             TypeKind::Tuple(elems) => {
-                let pr_elems: Vec<_> = elems.into_iter().map(|e| self.deep_prune(e)).collect();
-                self.alloc(TypeKind::Tuple(pr_elems))
+                let mut changed = false;
+                let pr_elems: Vec<_> = elems.iter().map(|&e| {
+                    let pr = self.deep_prune(e);
+                    if pr != e { changed = true; }
+                    pr
+                }).collect();
+                if changed {
+                    self.alloc(TypeKind::Tuple(pr_elems))
+                } else {
+                    pruned
+                }
             }
             TypeKind::Option(inner) => {
                 let inn = self.deep_prune(inner);
-                self.alloc(TypeKind::Option(inn))
+                if inn == inner {
+                    pruned
+                } else {
+                    self.alloc(TypeKind::Option(inn))
+                }
             }
             TypeKind::Result { ok, err } => {
                 let o = self.deep_prune(ok);
                 let e = self.deep_prune(err);
-                self.alloc(TypeKind::Result { ok: o, err: e })
+                if o == ok && e == err {
+                    pruned
+                } else {
+                    self.alloc(TypeKind::Result { ok: o, err: e })
+                }
             }
             TypeKind::Function { params, ret } => {
-                let pr_params: Vec<_> = params.into_iter().map(|p| self.deep_prune(p)).collect();
+                let mut changed = false;
+                let pr_params: Vec<_> = params.iter().map(|&p| {
+                    let pr = self.deep_prune(p);
+                    if pr != p { changed = true; }
+                    pr
+                }).collect();
                 let pr_ret = self.deep_prune(ret);
-                self.alloc(TypeKind::Function { params: pr_params, ret: pr_ret })
+                if pr_ret != ret { changed = true; }
+                if changed {
+                    self.alloc(TypeKind::Function { params: pr_params, ret: pr_ret })
+                } else {
+                    pruned
+                }
             }
             TypeKind::Union(types) => {
-                let pr_types: Vec<_> = types.into_iter().map(|t| self.deep_prune(t)).collect();
-                self.union_of(pr_types)
+                let mut changed = false;
+                let pr_types: Vec<_> = types.iter().map(|&t| {
+                    let pr = self.deep_prune(t);
+                    if pr != t { changed = true; }
+                    pr
+                }).collect();
+                if changed {
+                    self.union_of(pr_types)
+                } else {
+                    pruned
+                }
             }
             TypeKind::RowRecord { fields, is_open, tail_var, name } => {
-                let pr_fields: Vec<_> = fields.into_iter().map(|(n, t)| (n, self.deep_prune(t))).collect();
-                self.row_record_with_name(pr_fields, is_open, tail_var, name)
+                let mut changed = false;
+                let pr_fields: Vec<_> = fields.iter().map(|(n, t)| {
+                    let pr = self.deep_prune(*t);
+                    if pr != *t { changed = true; }
+                    (n.clone(), pr)
+                }).collect();
+                if changed {
+                    self.row_record_with_name(pr_fields, is_open, tail_var, name)
+                } else {
+                    pruned
+                }
             }
             _ => pruned,
         }
@@ -2142,18 +2199,22 @@ impl TypeArena {
         // Tier 1 resolves any pending Tier 2 bundle collision or Tier 3/4 interface default collision
         self.pending_tier2_collisions.remove(&(type_id, sym));
         self.pending_iface_collisions.remove(&(type_id, sym));
+        if diags.is_empty() {
+            return;
+        }
         let m_name = interner.resolve(sym);
-        let t_name = if type_name_sym.0 != 0 {
-            interner.resolve(type_name_sym)
+        let m_needle = format!("'{}'", m_name);
+        let t_needle = if type_name_sym.0 != 0 {
+            format!("'{}'", interner.resolve(type_name_sym))
         } else {
-            ""
+            String::new()
         };
         diags.retain(|d| {
-            !(d.code == "AmbiguousBundleMethodCollision" && d.message.contains(&format!("'{}'", m_name)))
-                && !(d.code == "AmbiguousInterfaceDefault" && d.message.contains(&format!("'{}'", m_name)))
+            !(d.code == "AmbiguousBundleMethodCollision" && d.message.contains(&m_needle))
+                && !(d.code == "AmbiguousInterfaceDefault" && d.message.contains(&m_needle))
                 && !(d.code == "MissingInterfaceContract"
-                    && d.message.contains(&format!("'{}'", m_name))
-                    && (t_name.is_empty() || d.message.contains(&format!("'{}'", t_name))))
+                    && d.message.contains(&m_needle)
+                    && (t_needle.is_empty() || d.message.contains(&t_needle)))
         });
     }
 

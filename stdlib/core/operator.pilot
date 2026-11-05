@@ -39,8 +39,8 @@ pub interface {
     IComparable<TSelf: IAnyValue> : IEquatable<TSelf> {
         pub pure:
             op <  (rhs: TSelf) -> bool;
-            op <= (rhs: TSelf) -> bool => (self < rhs) || (self == rhs);
-            op >  (rhs: TSelf) -> bool => !(self <= rhs);
+            op <= (rhs: TSelf) -> bool => !(rhs < self);
+            op >  (rhs: TSelf) -> bool => (rhs < self);
             op >= (rhs: TSelf) -> bool => !(self < rhs);
     }
 

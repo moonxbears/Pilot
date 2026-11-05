@@ -293,6 +293,74 @@ impl LangItem {
             _ => None,
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::IAnyValue => "IAnyValue",
+            Self::IValue => "IValue",
+            Self::IReference => "IReference",
+            Self::IObject => "IObject",
+            Self::IGuard => "IGuard",
+            Self::IAttribute => "IAttribute",
+            Self::IInterceptor => "IInterceptor",
+            Self::IFormulaAttribute => "IFormulaAttribute",
+            Self::IReactiveAttribute => "IReactiveAttribute",
+            Self::IInheritedAttribute => "IInheritedAttribute",
+            Self::IEcsRule => "IEcsRule",
+            Self::IPatchAttribute => "IPatchAttribute",
+            Self::Void => "void",
+            Self::Never => "never",
+            Self::Bool => "bool",
+            Self::Char => "char",
+            Self::I8 => "i8",
+            Self::I16 => "i16",
+            Self::I32 => "i32",
+            Self::I64 => "i64",
+            Self::I128 => "i128",
+            Self::Isize => "isize",
+            Self::U8 => "u8",
+            Self::U16 => "u16",
+            Self::U32 => "u32",
+            Self::U64 => "u64",
+            Self::U128 => "u128",
+            Self::Usize => "usize",
+            Self::F16 => "f16",
+            Self::F32 => "f32",
+            Self::F64 => "f64",
+            Self::F128 => "f128",
+            Self::Str => "str",
+            Self::Ptr => "ptr",
+            Self::Slice => "slice",
+            Self::Stride => "stride",
+            Self::Array => "array",
+            Self::Tuple => "tuple",
+            Self::Option => "option",
+            Self::Result => "result",
+            Self::Union => "union",
+            Self::Fn => "fn",
+            Self::Range => "range",
+            Self::Span => "span",
+            Self::Step => "step",
+            Self::From => "from",
+            Self::Until => "until",
+            Self::Full => "full",
+            Self::Splat => "splat",
+            Self::Pairs => "pairs",
+            Self::Expand => "expand",
+            Self::Map => "map",
+            Self::Frame => "frame",
+            Self::Type => "type",
+            Self::Ast => "ast",
+            Self::Simd => "simd",
+            Self::Grid => "grid",
+            Self::Ring => "ring",
+            Self::Pin => "pin",
+            Self::Open => "open",
+            Self::After => "after",
+            Self::Order => "order",
+            Self::Signal => "signal",
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -540,7 +608,7 @@ pub struct ComptimeFnDef {
     pub is_genesis_wrapper: bool,
 }
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ComptimeEngine {
     pub globals: FxHashMap<SymbolId, ComptimeValue>,
     pub globals_by_name: FxHashMap<String, ComptimeValue>,
@@ -1827,7 +1895,7 @@ impl ComptimeEngine {
         // SECURITY GATE (First Line): Once `seal_bootstrap_bridge` has been called at the end of
         // `stdlib/core/core.pilot`, any direct `__engine(...)` call in user or downstream files
         // is rejected with `BootstrapBridgeSealedError`!
-        if parser_tables.bootstrap_sealed && self.in_genesis_wrapper_depth == 0 {
+        if parser_tables.bootstrap_sealed && self.in_genesis_wrapper_depth == 0 && hook_name != "query_registered_symbols" {
             let err = BootstrapDiagnostic::BootstrapBridgeSealedError {
                 hook: hook_name.to_string(),
                 span,
@@ -2102,7 +2170,7 @@ impl ComptimeEngine {
                 Ok(ComptimeValue::Void)
             }
 
-            // 11. `bind_receiver_ident`: `(ident_str: Str)`
+            // 11. `bind_receiver_ident`: `(ident_str: Str, ...)`
             "bind_receiver_ident" => {
                 let recv_str = args
                     .first()
@@ -2112,6 +2180,23 @@ impl ComptimeEngine {
                 let sym = parser_tables.interner.intern(&recv_str);
                 parser_tables.receiver_ident = Some(sym);
                 parser_tables.receiver_ident_name = Some(recv_str);
+
+                if let Some(f_arg) = args.get(1) {
+                    let f_str = f_arg.as_str(&parser_tables.interner).or_else(|| f_arg.as_str(&arena.interner)).map(|s| s.to_string());
+                    if let Some(f_str) = f_str {
+                        let fsym = parser_tables.interner.intern(&f_str);
+                        parser_tables.prop_field_sym = Some(fsym);
+                        parser_tables.prop_field_name = Some(f_str);
+                    }
+                }
+                if let Some(v_arg) = args.get(2) {
+                    let v_str = v_arg.as_str(&parser_tables.interner).or_else(|| v_arg.as_str(&arena.interner)).map(|s| s.to_string());
+                    if let Some(v_str) = v_str {
+                        let vsym = parser_tables.interner.intern(&v_str);
+                        parser_tables.prop_value_sym = Some(vsym);
+                        parser_tables.prop_value_name = Some(v_str);
+                    }
+                }
                 Ok(ComptimeValue::Void)
             }
 
@@ -2360,6 +2445,100 @@ impl ComptimeEngine {
                 Ok(ComptimeValue::Void)
             }
 
+            // 36. `query_registered_symbols`: `(category_id: u32)`
+            "query_registered_symbols" => {
+                let cat = match args.first() {
+                    Some(ComptimeValue::Int(n)) => *n as u32,
+                    Some(ComptimeValue::Uint(n)) => *n as u32,
+                    _ => 0,
+                };
+                let result_str = match cat {
+                    // 0: seed_keywords
+                    0 => "__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm".to_string(),
+                    // 1: syntax_macros
+                    1 => {
+                        let mut names: Vec<String> = parser_tables.syntax_macros_by_name.keys().cloned().collect();
+                        names.sort();
+                        if names.is_empty() {
+                            "break|continue|op".to_string()
+                        } else {
+                            names.join("|")
+                        }
+                    }
+                    // 2: modifiers
+                    2 => {
+                        let mut mods: Vec<String> = parser_tables.modifiers_by_name.keys().cloned().collect();
+                        for pm in parser_tables.param_modifiers_by_name.keys() {
+                            if !mods.contains(pm) {
+                                mods.push(pm.clone());
+                            }
+                        }
+                        mods.sort();
+                        if mods.is_empty() {
+                            "pub|priv|file|pkg|int|export|pure|static|const|var|iso|partial|ext|lvl".to_string()
+                        } else {
+                            mods.join("|")
+                        }
+                    }
+                    // 3: lang_primitives
+                    3 => {
+                        let mut types: Vec<String> = self.type_layouts.keys().cloned().collect();
+                        for (item, _) in &self.lang_items {
+                            let s = item.as_str();
+                            if !types.iter().any(|t| t == s) {
+                                types.push(s.to_string());
+                            }
+                        }
+                        types.sort();
+                        if types.is_empty() {
+                            "bool|usize|i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|f16|f32|f64|f128|str|char|void|never|ptr|slice|stride|array|tuple|option|result|union|fn|range|span|step|from|until|full|splat|pairs|expand|map|frame|type|ast|simd|grid|ring|pin|open|after|order|signal".to_string()
+                        } else {
+                            types.join("|")
+                        }
+                    }
+                    // 4: operators
+                    4 => {
+                        let mut ops: Vec<String> = Vec::new();
+                        for op in parser_tables.pratt_infix_by_name.keys() {
+                            if !ops.contains(op) { ops.push(op.clone()); }
+                        }
+                        for op in parser_tables.pratt_prefix_by_name.keys() {
+                            if !ops.contains(op) { ops.push(op.clone()); }
+                        }
+                        for op in parser_tables.pratt_postfix_by_name.keys() {
+                            if !ops.contains(op) { ops.push(op.clone()); }
+                        }
+                        ops.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+                        let escaped: Vec<String> = ops.into_iter().map(|op| {
+                            let mut esc = String::new();
+                            for c in op.chars() {
+                                if "^$*+?.()|{}[]\\".contains(c) {
+                                    esc.push('\\');
+                                }
+                                esc.push(c);
+                            }
+                            esc
+                        }).collect();
+                        escaped.join("|")
+                    }
+                    // 5: interfaces
+                    5 => {
+                        let mut ifaces: Vec<String> = self.lattice_interfaces.keys().cloned().collect();
+                        ifaces.sort();
+                        ifaces.join("|")
+                    }
+                    // 6: attributes
+                    6 => {
+                        let mut attrs: Vec<String> = parser_tables.bracket_attributes_by_name.keys().cloned().collect();
+                        attrs.sort();
+                        attrs.join("|")
+                    }
+                    _ => String::new(),
+                };
+                let sym = parser_tables.interner.intern(&result_str);
+                Ok(ComptimeValue::Str(sym))
+            }
+
             other => {
                 let err = BootstrapDiagnostic::UnknownEngineHook {
                     hook: other.to_string(),
@@ -2441,6 +2620,52 @@ pub fn eval_file_with_tables(
     comptime_vm: &mut ComptimeEngine,
 ) -> Result<AstArena, BootstrapDiagnostic> {
     bootstrap_core_file(source, parser_tables, comptime_vm)
+}
+
+#[derive(Clone, Debug)]
+pub struct BootstrapSnapshot {
+    pub tables: ParserTables,
+    pub vm: ComptimeEngine,
+    pub arenas: Vec<(String, AstArena)>,
+}
+
+static GLOBAL_BOOTSTRAP_SNAPSHOT: std::sync::OnceLock<BootstrapSnapshot> = std::sync::OnceLock::new();
+
+impl BootstrapSnapshot {
+    pub fn global() -> &'static Self {
+        GLOBAL_BOOTSTRAP_SNAPSHOT.get_or_init(|| {
+            let mut tables = ParserTables::new();
+            let mut vm = ComptimeEngine::new();
+            let mut arenas = Vec::new();
+
+            let core_src = include_str!("../../../stdlib/core/core.pilot");
+            let core_arena = bootstrap_core_file(core_src, &mut tables, &mut vm)
+                .expect("Stage 1 core.pilot must bootstrap with 0 errors");
+            arenas.push(("Pilot.Core.Genesis".to_string(), core_arena));
+
+            let stages_files = [
+                ("Pilot.Core.Operator", include_str!("../../../stdlib/core/operator.pilot")),
+                ("Pilot.Core.Mem", include_str!("../../../stdlib/core/mem.pilot")),
+                ("Pilot.Core.Option", include_str!("../../../stdlib/core/option.pilot")),
+                ("Pilot.Core.Result", include_str!("../../../stdlib/core/result.pilot")),
+                ("Pilot.Core.Task", include_str!("../../../stdlib/core/task.pilot")),
+                ("Pilot.Core.Builtins", include_str!("../../../stdlib/core/builtins/builtins.pilot")),
+                ("Pilot.Core.Meta", include_str!("../../../stdlib/core/meta.pilot")),
+            ];
+
+            for (pkg_name, src) in stages_files {
+                let arena = eval_file_with_tables(src, &mut tables, &mut vm)
+                    .unwrap_or_else(|e| panic!("{} must parse and evaluate with 0 errors: {:?}", pkg_name, e));
+                arenas.push((pkg_name.to_string(), arena));
+            }
+
+            BootstrapSnapshot {
+                tables,
+                vm,
+                arenas,
+            }
+        })
+    }
 }
 
 // =========================================================================
@@ -2634,3 +2859,38 @@ impl ComptimeEvaluator {
         }
     }
 }
+
+#[cfg(test)]
+mod comptime_tests {
+    use super::*;
+
+    #[test]
+    fn test_bootstrap_snapshot_cache_and_symbol_reflection() {
+        let t0 = std::time::Instant::now();
+        let snap1 = BootstrapSnapshot::global();
+        let first_duration = t0.elapsed();
+        println!("First snapshot took: {:?}", first_duration);
+
+        let t1 = std::time::Instant::now();
+        let snap2 = BootstrapSnapshot::global();
+        let second_duration = t1.elapsed();
+        println!("Subsequent snapshot took: {:?}", second_duration);
+        assert!(second_duration.as_micros() < 50, "Subsequent snapshot must be < 0.05 ms (50 µs)");
+        assert_eq!(snap1.arenas.len(), snap2.arenas.len());
+
+        // Verify registered symbols reflection intrinsic
+        let mut tables = snap1.tables.clone();
+        let mut vm = snap1.vm.clone();
+        let mut arena = AstArena::new();
+        let span = ByteSpan::new(0, 0);
+
+        let seeds = vm.eval_engine_intrinsic("query_registered_symbols", &[ComptimeValue::Int(0)], &mut arena, &mut tables, span).unwrap();
+        if let ComptimeValue::Str(sym) = seeds {
+            let s = tables.interner.resolve(sym);
+            assert!(s.contains("struct") && s.contains("fn") && s.contains("let"));
+        } else {
+            panic!("Expected Str for category 0");
+        }
+    }
+}
+

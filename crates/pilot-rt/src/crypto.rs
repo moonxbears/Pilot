@@ -1,8 +1,5 @@
 //! Milestone 24 & Milestone 43.4: Pure-Rust Cryptographic Primitives (SHA-256, SHA-512, Blake3, HMAC, Ed25519, CSPRNG).
 
-use std::fs::File;
-use std::io::Read;
-
 /// Computes the SHA-256 hash of `data` (FIPS 180-4).
 pub fn sha256(data: &[u8]) -> [u8; 32] {
     let mut h: [u32; 8] = [

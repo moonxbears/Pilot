@@ -28,9 +28,15 @@ pub fn desugar_bracket_attributes(
     for attr in attrs {
         let attr_name = arena.interner.resolve(attr.name).to_string();
         let fn_id = if let Some(&id) = parser_tables.bracket_attributes_by_name.get(&attr_name) {
-            id
+            Some(id)
         } else if let Some(&id) = parser_tables.bracket_attributes.get(&attr.name) {
-            id
+            Some(id)
+        } else if let Some(&id) = parser_tables.bracket_attributes_by_name.get(&format!("{}Attr", attr_name)) {
+            Some(id)
+        } else if comptime_vm.type_layouts.contains_key(&format!("{}Attr", attr_name))
+            || comptime_vm.type_layouts.contains_key(&attr_name)
+        {
+            None
         } else {
             return Err(BootstrapDiagnostic::UnknownBracketAttribute {
                 name: attr_name,
@@ -38,14 +44,20 @@ pub fn desugar_bracket_attributes(
             });
         };
 
-        let mut call_args = Vec::with_capacity(1 + attr.args.len());
-        call_args.push(ComptimeValue::AstNode(target_node));
-        for &arg_node in &attr.args {
-            let val = comptime_vm.eval_expr(arena, arg_node, parser_tables)?;
-            call_args.push(val);
-        }
+        if let Some(fid) = fn_id {
+            let mut call_args = Vec::with_capacity(1 + attr.args.len());
+            call_args.push(ComptimeValue::AstNode(target_node));
+            for &arg_node in &attr.args {
+                let val = comptime_vm.eval_expr(arena, arg_node, parser_tables)?;
+                call_args.push(val);
+            }
 
-        comptime_vm.invoke_function(fn_id, &call_args, arena, parser_tables, attr.span)?;
+            comptime_vm.invoke_function(fid, &call_args, arena, parser_tables, attr.span)?;
+        } else {
+            for &arg_node in &attr.args {
+                let _ = comptime_vm.eval_expr(arena, arg_node, parser_tables)?;
+            }
+        }
     }
 
     Ok(())

@@ -1280,6 +1280,14 @@ impl<'a> Parser<'a> {
                         let mut arg_trailing_comma = false;
                         while !self.at_end() && !self.at(TokenKind::RParen) {
                             let start_pos = self.pos;
+                            // Support named arguments `param_name = value` or `param_name: value`
+                            if self.is_ident_like()
+                                && self.pos + 1 < self.tape.len()
+                                && (self.tape.kind(self.pos + 1) == TokenKind::Equal || self.tape.kind(self.pos + 1) == TokenKind::Colon)
+                            {
+                                self.advance(); // consume param_name
+                                self.advance(); // consume '=' or ':'
+                            }
                             let arg_expr = self.parse_expr();
                             if arg_expr.is_some() {
                                 args.push(arg_expr);

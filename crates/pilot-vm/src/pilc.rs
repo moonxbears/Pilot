@@ -6,6 +6,7 @@ use crate::instruction::Instruction;
 pub const PILC_V3_MAGIC: &[u8; 4] = b"PIL3";
 pub const PILC_V3_VERSION: u32 = 3;
 
+#[derive(Clone, Debug)]
 pub struct PilcBinary {
     pub constants: Vec<PilotVal>,
     pub instructions: Vec<Instruction>,
@@ -157,3 +158,22 @@ impl PilcBinary {
         })
     }
 }
+
+/// Milestone 34.3 / Phase 6: Fast snapshot container for bootstrapped VM state.
+#[derive(Clone, Debug)]
+pub struct BootstrapSnapshot {
+    pub binary: PilcBinary,
+}
+
+static GLOBAL_PILC_SNAPSHOT: std::sync::OnceLock<BootstrapSnapshot> = std::sync::OnceLock::new();
+
+impl BootstrapSnapshot {
+    pub fn global() -> &'static Self {
+        GLOBAL_PILC_SNAPSHOT.get_or_init(|| {
+            Self {
+                binary: PilcBinary::new(Vec::new(), Vec::new()),
+            }
+        })
+    }
+}
+
