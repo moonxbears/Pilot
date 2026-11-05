@@ -165,6 +165,10 @@ pub struct ParserTables {
     pub pratt_prefix_by_name: FxHashMap<String, PrattOpSpec>,
     pub pratt_postfix_by_name: FxHashMap<String, PrattOpSpec>,
     pub receiver_ident_name: Option<String>,
+    pub prop_field_sym: Option<SymbolId>,
+    pub prop_value_sym: Option<SymbolId>,
+    pub prop_field_name: Option<String>,
+    pub prop_value_name: Option<String>,
     /// Symbolic type construct targets registered via `syntax type_construct { ... }`
     /// (e.g. `"[]"` -> `"window"`, `"?"` -> `"maybe"`, `"!"` -> `"outcome"`, `"[N]"` -> `"array"`, `"[..]"` -> `"stride"`).
     pub type_construct_targets: FxHashMap<String, String>,

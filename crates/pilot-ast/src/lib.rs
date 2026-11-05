@@ -665,6 +665,83 @@ impl AstNode {
     }
 }
 
+/// Structural AST context bitflags computed per token / node.
+/// Mirrors `stdlib/core/meta.pilot`'s `AstContext`.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct AstContext(pub u32);
+
+impl AstContext {
+    pub const NONE: u32 = 0;
+    pub const IS_DECLARATION: u32      = 1 << 0;  // Token is at its declaration site
+    pub const IS_CALL_CALLEE: u32      = 1 << 1;  // Followed by `(...)` or `{ field: val }`
+    pub const IS_TYPE_ANNOTATION: u32  = 1 << 2;  // Inside `: Type`, `<Type>`, or `let Type { ... }` header
+    pub const IS_MEMBER_ACCESS: u32    = 1 << 3;  // RHS of `.`, `?.`, `..`, or `~>`
+    pub const IS_PROP_ACCESSOR: u32    = 1 << 4;  // Inside `get` or `set` body of a property/indexer
+    pub const IS_ATTR_PREFIX: u32      = 1 << 5;  // Inside `[Attr(...)]` or `[var x = Attr(...)]`
+    pub const IS_BUNDLE_SPLICE: u32    = 1 << 6;  // Target of `*Bundle`, `*Facet`, or `*myBlock`
+    pub const IS_VARIANT_CTOR: u32     = 1 << 7;  // Preceded by `::` or resolving to ADT/Outcome variant
+    pub const IS_QUOTE_SPLICE: u32     = 1 << 8;  // `$ident` inside `quote { ... }` or `fn!!(...)`
+    pub const IS_QUOTE_TYPE_PARAM: u32 = 1 << 9;  // `$T` where enclosing `syntax` param is `: type`
+    pub const IS_UNQUOTE_ESCAPE: u32   = 1 << 10; // `~expr` escape inside `quote { ... }`
+    pub const IS_MODIFIER_POS: u32     = 1 << 11; // Declaration modifier position (`pub`, `var`, `lvl30`)
+    pub const IS_MUTATING_TARGET: u32  = 1 << 12; // `var` binding, `var ref`, `var fn`, or LHS of `=`
+    pub const IS_CALLABLE_OBJECT: u32  = 1 << 13; // Variable/param/field whose type is `fn<A, R>` or has `op ()`
+    pub const IS_METHOD_SYMBOL: u32    = 1 << 14; // Resolves in receiver's 4-tier `MethodTable` or `ext`
+    pub const IS_FIELD_OR_PROP: u32    = 1 << 15; // Resolves in receiver's `fields` or `property_clauses`
+    pub const IS_TYPE_SYMBOL: u32      = 1 << 16; // Resolves in `TypeArena` (`struct`, `interface`, `[Lang]`)
+    pub const IS_LANG_PRIMITIVE: u32   = 1 << 17; // Annotated with `[Lang(...)]` / scalar register physics
+    pub const IS_SYNTAX_MACRO: u32     = 1 << 18; // Registered in `ParserTables.syntax_macros_by_name`
+    pub const IS_UNIT_DIMENSION: u32   = 1 << 19; // Resolves in `DimensionChecker` (`100[m/s]`)
+    pub const IS_CONTEXTUAL_FIELD: u32 = 1 << 20; // Matches `Cfg.Tokens.kw_field` symbol
+    pub const IS_CONTEXTUAL_VALUE: u32 = 1 << 21; // Matches `Cfg.Tokens.kw_value` symbol
+    pub const IS_RAW_BACKTICK: u32     = 1 << 22; // Escaped `` `ident` `` (never classify as keyword!)
+    pub const IS_TYPE_OPERATOR: u32    = 1 << 23; // Symbolic operator inside `TypeSpec` (`T@N`, `T[:]`, `T^`, `@T`, `T!E`)
+    pub const IS_LOCAL_CAPTURE: u32    = 1 << 24; // Outer variable captured inside an embedded local `fn`
+
+    #[inline]
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    #[inline]
+    pub const fn from_bits(bits: u32) -> Self {
+        Self(bits)
+    }
+
+    #[inline]
+    pub const fn bits(self) -> u32 {
+        self.0
+    }
+
+    #[inline]
+    pub const fn contains(self, flag: u32) -> bool {
+        (self.0 & flag) != 0
+    }
+
+    #[inline]
+    pub const fn with(self, flag: u32) -> Self {
+        Self(self.0 | flag)
+    }
+
+    #[inline]
+    pub fn insert(&mut self, flag: u32) {
+        self.0 |= flag;
+    }
+
+    #[inline]
+    pub fn remove(&mut self, flag: u32) {
+        self.0 &= !flag;
+    }
+}
+
+/// Provenance tracking across macro expansions and `[Patch]` AST transforms.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ExpansionOrigin {
+    Source,
+    MacroExpansion { macro_id: NodeId, call_site: ByteSpan },
+    PatchExpansion { patch_id: NodeId, original_site: ByteSpan },
+}
+
 /// Flat, pointer-free AST arena storing 16-byte `AstNode`s, side-table literal pools,
 /// and variable-arity child index slices (`extra_children`).
 #[derive(Clone, Debug, Default)]
@@ -728,6 +805,12 @@ pub struct AstArena {
     pub cue_declarations: std::collections::HashSet<u32>,
     /// Capture specifications for embedded local functions.
     pub local_fn_captures: std::collections::HashMap<u32, LocalFnCaptureSpec>,
+    /// Structural AST context bitflags computed per node.
+    pub node_contexts: std::collections::HashMap<u32, AstContext>,
+    /// Homoiconic quote depth per node.
+    pub node_quote_depths: std::collections::HashMap<u32, u32>,
+    /// Provenance origin across macro and patch expansions.
+    pub node_expansion_origins: std::collections::HashMap<u32, ExpansionOrigin>,
 }
 
 impl AstArena {

@@ -345,3 +345,277 @@ pub struct {
         pub var  fn patch()     -> ast => .clone_ast();
     }
 }
+
+// =========================================================================
+// 6. PILOT-HOSTED IDE SEMANTIC CLASSIFIER & PRESENTATION ENGINE
+// Rust passes only structural `AstContext` bitflags, `LatticeBits`, and sizes;
+// Pilot computes every semantic token, modifier mask, hover header & inlay hint!
+// =========================================================================
+pub struct LspKind : IValue {
+    pub id: u32;
+    pub static pure:
+        fn namespace_k()  -> u32 => 0;
+        fn type_k()       -> u32 => 1;
+        fn class_k()      -> u32 => 2;
+        fn enum_k()       -> u32 => 3;
+        fn interface_k()  -> u32 => 4;
+        fn struct_k()     -> u32 => 5;
+        fn type_param_k() -> u32 => 6;
+        fn param_k()      -> u32 => 7;
+        fn variable_k()   -> u32 => 8;
+        fn property_k()   -> u32 => 9;
+        fn enum_mem_k()   -> u32 => 10;
+        fn event_k()      -> u32 => 11;
+        fn function_k()   -> u32 => 12;
+        fn method_k()     -> u32 => 13;
+        fn macro_k()      -> u32 => 14;
+        fn keyword_k()    -> u32 => 15;
+        fn modifier_k()   -> u32 => 16;
+        fn comment_k()    -> u32 => 17;
+        fn string_k()     -> u32 => 18;
+        fn number_k()     -> u32 => 19;
+        fn regexp_k()     -> u32 => 20;
+        fn operator_k()   -> u32 => 21;
+        fn decorator_k()  -> u32 => 22;
+}
+
+pub struct LspMod : IValue {
+    pub mask: u32;
+    pub static pure:
+        fn none()         -> u32 => 0;
+        fn declaration()  -> u32 => 1 << 0;
+        fn definition()   -> u32 => 1 << 1;
+        fn readonly()     -> u32 => 1 << 2;
+        fn static_m()     -> u32 => 1 << 3;
+        fn deprecated()   -> u32 => 1 << 4;
+        fn abstract_m()   -> u32 => 1 << 5;
+        fn async_m()      -> u32 => 64;
+        fn modification() -> u32 => 1 << 7;
+        fn doc_m()        -> u32 => 1 << 8;
+        fn default_lib()  -> u32 => 1 << 9;
+        fn constructor()  -> u32 => 1 << 10;
+        fn callable()     -> u32 => 1 << 11;
+}
+
+pub struct AstContext : IValue {
+    pub bits: u32;
+    pub static pure:
+        fn is_declaration()      -> u32 => 1 << 0;  // Token is at its declaration site
+        fn is_call_callee()      -> u32 => 1 << 1;  // Followed by `(...)` or `{ field: val }`
+        fn is_type_annotation()  -> u32 => 1 << 2;  // Inside `: Type`, `<Type>`, or `let Type { ... }` header
+        fn is_member_access()    -> u32 => 1 << 3;  // RHS of `.`, `?.`, `..`, or `~>`
+        fn is_prop_accessor()    -> u32 => 1 << 4;  // Inside `get` or `set` body of a property/indexer
+        fn is_attr_prefix()      -> u32 => 1 << 5;  // Inside `[Attr(...)]` or `[var x = Attr(...)]`
+        fn is_bundle_splice()    -> u32 => 1 << 6;  // Target of `*Bundle`, `*Facet`, or `*myBlock`
+        fn is_variant_ctor()     -> u32 => 1 << 7;  // Preceded by `::` or resolving to ADT/Outcome variant
+        fn is_quote_splice()     -> u32 => 1 << 8;  // `$ident` inside `quote { ... }` or `fn!!(...)`
+        fn is_quote_type_param() -> u32 => 1 << 9;  // `$T` where enclosing `syntax` param is `: type`
+        fn is_unquote_escape()   -> u32 => 1 << 10; // `~expr` escape inside `quote { ... }`
+        fn is_modifier_pos()     -> u32 => 1 << 11; // Declaration modifier position (`pub`, `var`, `lvl30`)
+        fn is_mutating_target()  -> u32 => 1 << 12; // `var` binding, `var ref`, `var fn`, or LHS of `=`
+        fn is_callable_object()  -> u32 => 1 << 13; // Variable/param/field whose type is `fn<A, R>` or has `op ()`
+        fn is_method_symbol()    -> u32 => 1 << 14; // Resolves in receiver's 4-tier `MethodTable` or `ext`
+        fn is_field_or_prop()    -> u32 => 1 << 15; // Resolves in receiver's `fields` or `property_clauses`
+        fn is_type_symbol()      -> u32 => 1 << 16; // Resolves in `TypeArena` (`struct`, `interface`, `[Lang]`)
+        fn is_lang_primitive()   -> u32 => 1 << 17; // Annotated with `[Lang(...)]` / scalar register physics
+        fn is_syntax_macro()     -> u32 => 1 << 18; // Registered in `ParserTables.syntax_macros_by_name`
+        fn is_unit_dimension()   -> u32 => 1 << 19; // Resolves in `DimensionChecker` (`100[m/s]`)
+        fn is_contextual_field() -> u32 => 1 << 20; // Matches `Cfg.Tokens.kw_field` symbol
+        fn is_contextual_value() -> u32 => 1 << 21; // Matches `Cfg.Tokens.kw_value` symbol
+        fn is_raw_backtick()     -> u32 => 1 << 22; // Escaped `` `ident` `` (never classify as keyword!)
+        fn is_type_operator()    -> u32 => 1 << 23; // Symbolic operator inside `TypeSpec` (`T@N`, `T[:]`, `T^`, `@T`, `T!E`)
+        fn is_local_capture()    -> u32 => 1 << 24; // Outer variable captured inside an embedded local `fn`
+}
+
+[Lang(Cfg.Lang.ide_token_slot)]
+pub interface IIdeTokenAttribute : IInheritedAttribute {
+    pub token_kind: u32 { get; }
+    pub token_mods: u32 { get; }
+}
+
+[Layout(c_abi)]
+pub struct IdeTokenAttr : IIdeTokenAttribute, IValue {
+    pub kind:   u32;
+    pub mods:   u32;
+    pub weight: i32;
+
+    pub token_kind: u32 { get => .kind; }
+    pub token_mods: u32 { get => .mods; }
+}
+
+// Attach `[IdeToken]` to the 4 Lattice Origin Interfaces & `IAttribute` using symbolic constants:
+[IdeToken(kind: LspKind.interface_k(), mods: LspMod.default_lib(), weight: 10)]
+pub partial interface IAnyValue {}
+
+[IdeToken(kind: LspKind.struct_k(),    mods: LspMod.readonly(),    weight: 20)]
+pub partial interface IValue {}
+
+[IdeToken(kind: LspKind.struct_k(),    mods: LspMod.none(),        weight: 20)]
+pub partial interface IReference {}
+
+[IdeToken(kind: LspKind.class_k(),     mods: LspMod.none(),        weight: 20)]
+pub partial interface IObject {}
+
+[IdeToken(kind: LspKind.class_k(),     mods: LspMod.modification(),weight: 30)]
+pub partial interface IGuard {}
+
+[IdeToken(kind: LspKind.decorator_k(), mods: LspMod.static_m(),    weight: 40)]
+pub partial interface IAttribute {}
+
+// Pure-Pilot Context-Sensitive Semantic Token Solver
+[Lang(Cfg.Lang.ide_policy_slot), Layout(c_abi)]
+pub struct IdeContextPolicy : IValue {
+    pub static pure fn classify(
+        inherited_kind: u32,
+        inherited_mods: u32,
+        ctx:            u32,
+        lattice_bits:   u8
+    ) -> tuple<u32, u32> {
+        var mods: u32 = inherited_mods;
+        if (ctx & AstContext.is_declaration()) != 0 {
+            mods = mods | LspMod.declaration();
+        }
+        if (ctx & AstContext.is_mutating_target()) != 0 {
+            mods = (mods & (~LspMod.readonly())) | LspMod.modification();
+        }
+        if (ctx & AstContext.is_local_capture()) != 0 {
+            mods = mods | LspMod.static_m();
+        }
+
+        // Rule 1: Type-Position Symbolic Operators (`T@N`, `T[:]`, `T^`, `@T`, `T?`, `T!E`, `(A)=>R`)
+        if (ctx & AstContext.is_type_operator()) != 0 {
+            return (LspKind.operator_k(), mods | LspMod.definition());
+        }
+
+        // Rule 2: Homoiconic `quote { ... }` Splices (`$T` vs `$x`) & `~unquote` Escapes
+        if (ctx & AstContext.is_quote_splice()) != 0 {
+            if (ctx & AstContext.is_quote_type_param()) != 0 {
+                return (LspKind.type_param_k(), mods | LspMod.static_m());
+            }
+            return (LspKind.param_k(), mods | LspMod.static_m());
+        }
+        if (ctx & AstContext.is_unquote_escape()) != 0 {
+            return (LspKind.macro_k(), mods | LspMod.static_m());
+        }
+
+        // Rule 3: Variation B Contextual `field` and `value` Inside Property Accessors
+        if ((ctx & AstContext.is_prop_accessor()) != 0) & ((ctx & AstContext.is_member_access()) == 0) {
+            if (ctx & AstContext.is_contextual_field()) != 0 {
+                return (LspKind.property_k(), mods | LspMod.default_lib() | LspMod.modification());
+            }
+            if (ctx & AstContext.is_contextual_value()) != 0 {
+                return (LspKind.param_k(), mods | LspMod.default_lib() | LspMod.readonly());
+            }
+        }
+
+        // Rule 4: `[...]` Attribute Prefix (`[Clamp]`, `[var c = Patch(orig, ...)]`)
+        if (ctx & AstContext.is_attr_prefix()) != 0 {
+            if (ctx & AstContext.is_type_symbol()) != 0 {
+                return (LspKind.decorator_k(), mods);
+            }
+        }
+
+        // Rule 5: `*Bundle`, `*Facet`, & `*myBlock` Splices
+        if (ctx & AstContext.is_bundle_splice()) != 0 {
+            return (inherited_kind, mods | LspMod.static_m());
+        }
+
+        // Rule 6: Dimensional Unit Suffixes (`100[m/s]`)
+        if (ctx & AstContext.is_unit_dimension()) != 0 {
+            return (LspKind.type_param_k(), mods | LspMod.default_lib());
+        }
+
+        // Rule 7: Variant Constructors (`::ok(v)`, `::some(x)`, `Shape.Circle(r)`)
+        if (ctx & AstContext.is_variant_ctor()) != 0 {
+            return (LspKind.enum_mem_k(), mods | LspMod.readonly());
+        }
+
+        // Rule 8: Call Target Disambiguation (`Point(1, 2)` vs `closure_var(1)` vs `syntax_macro(1)` vs `fn(1)`)
+        if (ctx & AstContext.is_call_callee()) != 0 {
+            if ((ctx & AstContext.is_syntax_macro()) != 0) & ((ctx & AstContext.is_raw_backtick()) == 0) {
+                return (LspKind.macro_k(), mods);
+            }
+            if (ctx & AstContext.is_type_symbol()) != 0 {
+                if (ctx & AstContext.is_lang_primitive()) != 0 {
+                    return (LspKind.type_k(), mods | LspMod.default_lib());
+                }
+                let ctor_kind = if (lattice_bits & 0b10) != 0 {
+                    LspKind.class_k()
+                } else {
+                    LspKind.struct_k()
+                };
+                return (ctor_kind, mods | LspMod.constructor());
+            }
+            if (ctx & AstContext.is_callable_object()) != 0 {
+                let var_kind = if (ctx & AstContext.is_field_or_prop()) != 0 {
+                    LspKind.property_k()
+                } else {
+                    inherited_kind
+                };
+                return (var_kind, mods | LspMod.callable());
+            }
+            if (ctx & AstContext.is_method_symbol()) != 0 {
+                return (LspKind.method_k(), mods);
+            }
+            return (LspKind.function_k(), mods);
+        }
+
+        // Rule 9: Member Access (`obj.m`, `.m` PrefixDot, `node..m` Cascade, `xs ~> .m` Lens)
+        // Colors method references like `items.map(.process)` as `Method` even without `()`!
+        if (ctx & AstContext.is_member_access()) != 0 {
+            if (ctx & AstContext.is_method_symbol()) != 0 {
+                return (LspKind.method_k(), mods);
+            }
+            if (ctx & AstContext.is_field_or_prop()) != 0 {
+                return (LspKind.property_k(), mods);
+            }
+        }
+
+        // Rule 10: Type Annotations & Distributive `let Type<T> { ... }` Headers
+        if ((ctx & AstContext.is_type_annotation()) != 0) | ((ctx & AstContext.is_type_symbol()) != 0) {
+            if (ctx & AstContext.is_lang_primitive()) != 0 {
+                return (LspKind.type_k(), mods | LspMod.default_lib());
+            }
+            if inherited_kind != 0 {
+                return (inherited_kind, mods);
+            }
+            let ty_kind = if (lattice_bits & 0b10) != 0 {
+                LspKind.class_k()
+            } else {
+                LspKind.struct_k()
+            };
+            return (ty_kind, mods);
+        }
+
+        // Rule 11: Declaration Modifiers (`pub`..`export`, `var`, `pure`, `lvl30`) vs Expression `lvl`
+        if (ctx & AstContext.is_modifier_pos()) != 0 {
+            if (ctx & AstContext.is_raw_backtick()) == 0 {
+                return (LspKind.modifier_k(), mods | LspMod.static_m());
+            }
+        }
+
+        // Rule 12: User or Core `syntax` Macro Invocations Without `()` (`break;`, `continue;`)
+        if ((ctx & AstContext.is_syntax_macro()) != 0) & ((ctx & AstContext.is_raw_backtick()) == 0) {
+            return (LspKind.macro_k(), mods);
+        }
+
+        return (inherited_kind, mods);
+    }
+}
+
+// Pure-Pilot Hover & Inlay Hint Formatter (Replaces hardcoded strings in `pilot-lsp`)
+pub struct IdePresentationPolicy : IValue {
+    pub static pure:
+        fn lattice_badge(bits: u8) -> str =>
+            if bits == 0b00 { "0b00 IValue (Trivial Copy)" }
+            else if bits == 0b01 { "0b01 IReference (Lexical Borrow)" }
+            else if bits == 0b10 { "0b10 IObject (Perceus Move + ~self)" }
+            else { "0b11 IGuard (Scoped RAII + Borrow)" };
+
+        fn format_type_hover(name: str, byte_size: usize, byte_align: usize, bits: u8) -> str =>
+            f"**{name}** — `{byte_size} bytes` (`align {byte_align}`) | `{IdePresentationPolicy.lattice_badge(bits)}`";
+
+        fn format_capture_inlay_hint(captures_csv: str) -> str =>
+            f"/* captures: {captures_csv} */";
+}
+

@@ -45,6 +45,7 @@ comptime {
             ast_parse:    "parse_ast_fragment",
             ast_replace:  "replace_ast_pattern",
             attr_weave:   "register_attr_weaver",
+            sym_registry: "query_registered_symbols",
         },
 
         // 2. Canonical `[Lang("...")]` Identifiers (Exported to `stdlib/core/*`)
@@ -116,6 +117,8 @@ comptime {
             inherited_slot:   "inherited",
             ecs_rule_slot:    "ecs_rule",
             patch_attr_slot:  "patch_attribute",
+            ide_token_slot:   "ide_token_attribute",
+            ide_policy_slot:  "ide_context_policy",
         },
 
         // 3. Backend SSA Instruction Opcodes
@@ -243,6 +246,8 @@ comptime {
             kw_pkg:       "pkg",
             kw_use:       "use",
             kw_self:      "self",
+            kw_field:     "field",
+            kw_value:     "value",
 
             ring_public:  0,
             ring_simd:    80,
@@ -393,7 +398,7 @@ comptime {
     __engine(Cfg.Hooks.param_mod,   Cfg.Tokens.kw_lvl,  Cfg.Tokens.act_ring);
     __engine(Cfg.Hooks.module_kw,   Cfg.Tokens.kw_pkg,  Cfg.Tokens.act_pkg);
     __engine(Cfg.Hooks.module_kw,   Cfg.Tokens.kw_use,  Cfg.Tokens.act_use);
-    __engine(Cfg.Hooks.receiver_id, Cfg.Tokens.kw_self);
+    __engine(Cfg.Hooks.receiver_id, Cfg.Tokens.kw_self, Cfg.Tokens.kw_field, Cfg.Tokens.kw_value);
 
     // 4. Register Global Pratt Operator Precedences ONCE for the Entire Language
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_coal,   Cfg.Ops.fix_infix,   Cfg.Ops.prec_coal,   Cfg.Ops.assoc_right);
@@ -479,6 +484,8 @@ pub lvl(Cfg.Tokens.ring_public) comptime fn {
     __parse_ast(source_str)           => __engine(Cfg.Hooks.ast_parse, source_str);
     __replace_ast(root, pat, rep)     => __engine(Cfg.Hooks.ast_replace, root, pat, rep);
     __bind_weaver(iface_decl, fn_ref) => __engine(Cfg.Hooks.attr_weave, iface_decl, fn_ref);
+    // Categories: 0 = seed_keywords, 1 = syntax_macros, 2 = modifiers, 3 = lang_primitives, 4 = operators, 5 = interfaces, 6 = attributes
+    __registered_symbols(category_id) => __engine(Cfg.Hooks.sym_registry, category_id);
 }
 
 // =========================================================================

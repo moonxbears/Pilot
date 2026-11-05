@@ -1,0 +1,254 @@
+// =========================================================================
+// FILE: selfhost/ide_sync.pilot
+// 100% PILOT-HOSTED VS CODE ARTIFACT GENERATOR & SYNTAX MIGRATION TABLE
+// Queries `__registered_symbols` directly from the bootstrapped compiler!
+// =========================================================================
+pub pkg Pilot.SelfHost.IdeSync;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Meta.*;
+
+pub struct IdeArtifactsBundle : IValue {
+    pub tm_language_json:       str;
+    pub language_config_json:   str;
+    pub snippets_json:          str;
+    pub semantic_legend_json:   str;
+}
+
+pub pure fn build_all_ide_artifacts() -> IdeArtifactsBundle {
+    let seed_kws   = __registered_symbols(0);
+    let syntax_kws = __registered_symbols(1);
+    let mod_kws    = __registered_symbols(2);
+    let lang_types = __registered_symbols(3);
+    let op_syms    = __registered_symbols(4);
+
+    return IdeArtifactsBundle {
+        tm_language_json:     build_tm_language_json(seed_kws, syntax_kws, mod_kws, lang_types, op_syms),
+        language_config_json: build_language_configuration_json(),
+        snippets_json:        build_snippets_json(),
+        semantic_legend_json: build_semantic_legend_json(),
+    };
+}
+
+pub pure fn build_semantic_legend_json() -> str => """{
+  "tokenTypes": [
+    "namespace", "type", "class", "enum", "interface", "struct",
+    "typeParameter", "parameter", "variable", "property", "enumMember",
+    "event", "function", "method", "macro", "keyword", "modifier",
+    "comment", "string", "number", "regexp", "operator", "decorator"
+  ],
+  "tokenModifiers": [
+    "declaration", "definition", "readonly", "static", "deprecated",
+    "abstract", "async", "modification", "documentation", "defaultLibrary",
+    "constructor", "callable"
+  ]
+}""";
+
+pub pure fn build_language_configuration_json() -> str => """{
+  "comments": {
+    "lineComment": "//",
+    "blockComment": ["/*", "*/"]
+  },
+  "brackets": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+    ["<", ">"]
+  ],
+  "autoClosingPairs": [
+    { "open": "{", "close": "}" },
+    { "open": "[", "close": "]" },
+    { "open": "(", "close": ")" },
+    { "open": "\"", "close": "\"", "notIn": ["string"] },
+    { "open": "`", "close": "`", "notIn": ["string", "comment"] }
+  ],
+  "surroundingPairs": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+    ["<", ">"],
+    ["\"", "\""],
+    ["`", "`"]
+  ],
+  "indentationRules": {
+    "increaseIndentPattern": "^((?!.*?\\/\\/).)*(\\{[^}\"'`]*|\\([^)\"'`]*|\\[[^\\]\"'`]*)$",
+    "decreaseIndentPattern": "^\\s*[}\\])]\\s*$"
+  }
+}""";
+
+pub pure fn build_snippets_json() -> str => """{
+  "Distributive Struct Block": {
+    "prefix": "pstruct",
+    "body": ["pub struct {", "\t$0", "}"],
+    "description": "Distributive Pilot struct block"
+  },
+  "Syntax Macro Rule": {
+    "prefix": "psyntax",
+    "body": ["pub syntax ${1:name}(${2:expr}) => quote {", "\t$0", "};"],
+    "description": "Self-hosted Pilot syntax macro"
+  },
+  "Patch Function Clone": {
+    "prefix": "ppatch",
+    "body": [
+      "[var ${1:contents} = Patch(${2:orig_fn}, PatchPart.body(), ${3:0} ..${4:5})]",
+      "pub fn ${5:new_fn}() {",
+      "\t$0",
+      "\t${1:contents}.patch().call();",
+      "}"
+    ],
+    "description": "Non-destructive CST/AST function patch and clone"
+  },
+  "Choreography Blueprint": {
+    "prefix": "pblueprint",
+    "body": [
+      "pub blueprint ${1:Pipeline} {",
+      "\trole ${2:Worker};",
+      "\tcue ${3:on_event}(pkt:${4:iso<SliceBuffer<u8>>}) {",
+      "\t\troute pkt -> ${2:Worker}.${5:handle};",
+      "\t}",
+      "}"
+    ],
+    "description": "Zero-copy .pchor choreography blueprint"
+  }
+}""";
+
+pub pure fn build_tm_language_json(
+    seed_keywords_regex:   str,
+    syntax_macros_regex:   str,
+    modifiers_regex:       str,
+    lang_primitives_regex: str,
+    operators_regex:       str
+) -> str => f"""{{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Pilot",
+  "scopeName": "source.pilot",
+  "patterns": [
+    {{ "include": "#comments" }},
+    {{ "include": "#preprocessor" }},
+    {{ "include": "#strings" }},
+    {{ "include": "#raw-idents" }},
+    {{ "include": "#attributes" }},
+    {{ "include": "#distributive-headers" }},
+    {{ "include": "#quote-splices" }},
+    {{ "include": "#numbers" }},
+    {{ "include": "#call-targets" }},
+    {{ "include": "#keywords" }},
+    {{ "include": "#modifiers" }},
+    {{ "include": "#primitives" }},
+    {{ "include": "#operators" }}
+  ],
+  "repository": {{
+    "comments": {{
+      "patterns": [
+        {{ "name": "comment.line.double-slash.pilot", "match": "//.*$" }},
+        {{ "name": "comment.block.pilot", "begin": "/\\\\*", "end": "\\\\*/" }}
+      ]
+    }},
+    "preprocessor": {{
+      "patterns": [
+        {{ "name": "meta.preprocessor.pilot keyword.control.directive.pilot", "match": "^\\\\s*#(if|elif|else|endif|define|undef|region|endregion|pragma)\\\\b" }}
+      ]
+    }},
+    "strings": {{
+      "patterns": [
+        {{
+          "name": "string.quoted.double.interpolated.pilot",
+          "begin": "f\\"",
+          "end": "\\"",
+          "patterns": [
+            {{ "name": "constant.character.escape.pilot", "match": "\\\\\\\\." }},
+            {{ "name": "meta.interpolation.pilot", "begin": "\\\\{{", "end": "\\\\}}", "patterns": [{{ "include": "$self" }}] }}
+          ]
+        }},
+        {{
+          "name": "string.quoted.double.pilot",
+          "begin": "\\"",
+          "end": "\\"",
+          "patterns": [{{ "name": "constant.character.escape.pilot", "match": "\\\\\\\\." }}]
+        }}
+      ]
+    }},
+    "raw-idents": {{
+      "patterns": [
+        {{ "name": "variable.other.escaped.pilot", "match": "`[^`\\r\\n]+`" }}
+      ]
+    }},
+    "attributes": {{
+      "patterns": [
+        {{
+          "name": "meta.attribute.pilot",
+          "match": "\\\\[\\\\s*(?:(var|let)\\\\s+([a-z_][A-Za-z0-9_]*)\\\\s*=\\\\s*)?([A-Z][A-Za-z0-9_]*)",
+          "captures": {{
+            "1": {{ "name": "storage.modifier.pilot" }},
+            "2": {{ "name": "variable.other.readwrite.pilot" }},
+            "3": {{ "name": "entity.name.function.decorator.pilot" }}
+          }}
+        }}
+      ]
+    }},
+    "distributive-headers": {{
+      "patterns": [
+        {{
+          "name": "meta.distributive.binding.pilot",
+          "match": "\\\\b(let|var)\\\\s+([A-Z][A-Za-z0-9_]*)\\\\s*(?=<|\\\\{{)",
+          "captures": {{
+            "1": {{ "name": "storage.type.pilot" }},
+            "2": {{ "name": "entity.name.type.struct.pilot" }}
+          }}
+        }}
+      ]
+    }},
+    "quote-splices": {{
+      "patterns": [
+        {{ "name": "variable.other.metavariable.splice.pilot", "match": "\\\\$[A-Za-z_][A-Za-z0-9_]*" }},
+        {{ "name": "keyword.operator.unquote.pilot", "match": "~(?=[A-Za-z_(])" }}
+      ]
+    }},
+    "call-targets": {{
+      "patterns": [
+        {{ "name": "constant.other.enum-variant.pilot", "match": "::([A-Za-z_][A-Za-z0-9_]*)" }},
+        {{ "name": "entity.name.type.struct.constructor.pilot", "match": "\\\\b([A-Z][A-Za-z0-9_]*)\\\\s*(?=\\\\(|\\\\{{|<)" }},
+        {{ "name": "entity.name.function.call.pilot", "match": "\\\\b([a-z_][A-Za-z0-9_]*)\\\\s*(?=(?:!!|!&|!\\\\^|!@|!\\\\?|!)?\\\\()" }}
+      ]
+    }},
+    "keywords": {{
+      "patterns": [
+        {{ "name": "keyword.control.seed.pilot", "match": "\\\\b({seed_keywords_regex})\\\\b" }},
+        {{ "name": "entity.name.function.macro.syntax.pilot", "match": "\\\\b({syntax_macros_regex})\\\\b" }}
+      ]
+    }},
+    "modifiers": {{
+      "patterns": [
+        {{ "name": "storage.modifier.pilot", "match": "\\\\b({modifiers_regex}|lvl[0-9]+)\\\\b" }}
+      ]
+    }},
+    "primitives": {{
+      "patterns": [
+        {{ "name": "storage.type.primitive.pilot", "match": "\\\\b({lang_primitives_regex})\\\\b" }},
+        {{ "name": "entity.name.type.interface.pilot", "match": "\\\\bI[A-Z][A-Za-z0-9_]*\\\\b" }}
+      ]
+    }},
+    "numbers": {{
+      "patterns": [
+        {{ "name": "constant.numeric.pilot", "match": "\\\\b0[xXbBoO][0-9a-fA-F_]+\\\\b|\\\\b[0-9][0-9_]*(?:\\\\.[0-9_]+)?(?:[eE][+-]?[0-9_]+)?(?:[a-zA-Z]+)?\\\\b" }}
+      ]
+    }},
+    "operators": {{
+      "patterns": [
+        {{ "name": "keyword.operator.call-quote.pilot", "match": "!!|!&|!\\\\^|!@|!\\\\?" }},
+        {{ "name": "keyword.operator.pilot", "match": "{operators_regex}" }}
+      ]
+    }}
+  }}
+}}""";
+
+// Pilot-Hosted Legacy-to-Canonical Syntax Migration Table (Used by `pilot fmt --migrate-syntax`)
+pub pure fn syntax_migration_pairs() -> tuple<str, str>[] => [
+    ("def",       "fn"),
+    ("mut",       "var"),
+    ("match",     "switch"),
+    ("protocol",  "interface"),
+    ("extension", "ext"),
+];
