@@ -79,6 +79,62 @@ pub struct PrepareRenameQuery;
 #[lsp_capability("renameProvider")]
 pub struct RenameQuery;
 
+#[derive(Clone, Debug)]
+pub struct FnParamInfo {
+    pub name: String,
+    pub ty_str: String,
+    pub default_val: Option<String>,
+    pub modifier: Option<String>,
+    pub doc: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct FnHoverInfo {
+    pub name: String,
+    pub receiver: Option<String>,
+    pub modifiers: Vec<String>,
+    pub params: Vec<FnParamInfo>,
+    pub return_ty: String,
+    pub error_ty: Option<String>,
+    pub doc: Option<String>,
+    pub span: Option<pilot_span::ByteSpan>,
+    pub node_id: Option<u32>,
+}
+
+fn extract_doc_comment_before_span(src: &str, span_start: usize) -> Option<String> {
+    if span_start == 0 || span_start > src.len() {
+        return None;
+    }
+    let before = &src[..span_start];
+    let line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let before_line = &src[..line_start];
+    let mut doc_lines = Vec::new();
+    for line in before_line.lines().rev() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if !doc_lines.is_empty() {
+                break;
+            }
+            continue;
+        }
+        if trimmed.starts_with("///") {
+            let content = trimmed.trim_start_matches("///").trim();
+            doc_lines.push(content.to_string());
+        } else if trimmed.starts_with("//") && !trimmed.starts_with("//-") {
+            let content = trimmed.trim_start_matches("//").trim();
+            doc_lines.push(content.to_string());
+        } else {
+            break;
+        }
+    }
+    if doc_lines.is_empty() {
+        None
+    } else {
+        doc_lines.reverse();
+        Some(doc_lines.join("\n"))
+    }
+}
+
 pub struct LspServer {
     db: Database,
     uri_to_file_id: HashMap<String, FileId>,
@@ -348,6 +404,28 @@ impl LspServer {
                     }
                 }
             }
+            for folder in &self.workspace_folders {
+                let p_str = if folder.starts_with("file:///") {
+                    let stripped = folder.trim_start_matches("file:///");
+                    // On Windows, handle e:/Pilot -> E:\Pilot
+                    if stripped.len() >= 2 && stripped.as_bytes()[1] == b':' {
+                        stripped.replace('/', "\\")
+                    } else {
+                        format!("/{}", stripped)
+                    }
+                } else if folder.starts_with("file://") {
+                    folder.trim_start_matches("file://").replace('/', "\\")
+                } else {
+                    folder.clone()
+                };
+                let pb = std::path::PathBuf::from(&p_str);
+                if pb.join("stdlib").is_dir() {
+                    std::env::set_var("PILOT_ROOT", &pb);
+                    std::env::set_var("PILOT_STDLIB", pb.join("stdlib"));
+                    std::env::set_current_dir(&pb).ok();
+                    break;
+                }
+            }
             self.discover_workspace_files();
         }
 
@@ -476,25 +554,501 @@ impl LspServer {
     }
 
     fn typespec_str(arena: &pilot_ast::AstArena, id: pilot_ast::NodeId, analysis: &pilot_analysis::AnalysisResult) -> String {
-        if id.is_some() && (id.0 as usize) < arena.nodes.len() {
-            let n = arena.node(id);
-            if n.node_kind() == pilot_ast::NodeKind::TypeNamed || n.node_kind() == pilot_ast::NodeKind::IdentExpr {
-                let name = arena.interner.resolve(pilot_intern::SymbolId(n.lhs));
-                return match name {
-                    "int" | "i64" => "i64".to_string(),
-                    "float" | "f64" => "f64".to_string(),
-                    "str" => "str".to_string(),
-                    "bool" => "bool".to_string(),
-                    _ => name.to_string(),
-                };
-            }
-        }
         if let Some(&ty) = analysis.inferred_types.get(&id.0) {
             if ty != pilot_analysis::TypeId::ANY {
                 return analysis.types.display(ty);
             }
         }
-        "i64".to_string()
+        if id.is_some() && (id.0 as usize) < arena.nodes.len() {
+            let n = arena.node(id);
+            match n.node_kind() {
+                pilot_ast::NodeKind::TypeNamed | pilot_ast::NodeKind::IdentExpr => {
+                    let name = arena.interner.resolve(pilot_intern::SymbolId(n.lhs));
+                    return name.to_string();
+                }
+                pilot_ast::NodeKind::TypeFallible => {
+                    let ok_str = Self::typespec_str(arena, pilot_ast::NodeId(n.lhs), analysis);
+                    let err_str = Self::typespec_str(arena, pilot_ast::NodeId(n.rhs), analysis);
+                    return format!("{} ! {}", ok_str, err_str);
+                }
+                pilot_ast::NodeKind::TypeOptional => {
+                    let inner = Self::typespec_str(arena, pilot_ast::NodeId(n.lhs), analysis);
+                    return format!("{}?", inner);
+                }
+                pilot_ast::NodeKind::TypeUnion => {
+                    let lhs = Self::typespec_str(arena, pilot_ast::NodeId(n.lhs), analysis);
+                    let rhs = Self::typespec_str(arena, pilot_ast::NodeId(n.rhs), analysis);
+                    return format!("{} | {}", lhs, rhs);
+                }
+                pilot_ast::NodeKind::TypeIntersection => {
+                    let lhs = Self::typespec_str(arena, pilot_ast::NodeId(n.lhs), analysis);
+                    let rhs = Self::typespec_str(arena, pilot_ast::NodeId(n.rhs), analysis);
+                    return format!("{} & {}", lhs, rhs);
+                }
+                pilot_ast::NodeKind::TypeTuple => {
+                    let children = arena.children_slice(n.lhs, n.rhs);
+                    let elems: Vec<String> = children.iter().map(|&c| Self::typespec_str(arena, pilot_ast::NodeId(c), analysis)).collect();
+                    return format!("({})", elems.join(", "));
+                }
+                pilot_ast::NodeKind::TypeList => {
+                    let elem = if n.lhs != 0 {
+                        Self::typespec_str(arena, pilot_ast::NodeId(n.lhs), analysis)
+                    } else {
+                        "any".to_string()
+                    };
+                    if let Some(&base_sym) = arena.type_base_symbols.get(&id.0) {
+                        let base_name = arena.interner.resolve(base_sym);
+                        return format!("{}<{}>", base_name, elem);
+                    }
+                    return format!("{}[]", elem);
+                }
+                _ => {}
+            }
+        }
+        "any".to_string()
+    }
+
+    fn extract_fn_hover_info(
+        arena: &pilot_ast::AstArena,
+        analysis: &pilot_analysis::AnalysisResult,
+        src: &str,
+        fn_idx: usize,
+    ) -> FnHoverInfo {
+        let node = arena.nodes[fn_idx];
+        let span = arena.spans[fn_idx];
+        let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs)).to_string();
+
+        let mut modifiers = Vec::new();
+        if arena.pure_methods.contains(&(fn_idx as u32)) {
+            modifiers.push("pure".to_string());
+        }
+        if arena.static_methods.contains(&(fn_idx as u32)) {
+            modifiers.push("static".to_string());
+        }
+        if arena.comptime_fns.contains(&(fn_idx as u32)) {
+            modifiers.push("comptime".to_string());
+        }
+        if let Some(&vis) = arena.node_visibility.get(&(fn_idx as u32)).or_else(|| analysis.fn_visibility.get(&name)) {
+            let vis_str = match vis {
+                pilot_ast::VisibilityTier::Public => "pub",
+                pilot_ast::VisibilityTier::Private => "priv",
+                pilot_ast::VisibilityTier::Protected => "prot",
+                pilot_ast::VisibilityTier::Internal => "int",
+                pilot_ast::VisibilityTier::Package => "pkg",
+                pilot_ast::VisibilityTier::FilePrivate => "file",
+                pilot_ast::VisibilityTier::Open => "open",
+                pilot_ast::VisibilityTier::Export => "export",
+                _ => "",
+            };
+            if !vis_str.is_empty() {
+                modifiers.push(vis_str.to_string());
+            }
+        }
+        if let Some(&clr) = arena.node_clearance.get(&(fn_idx as u32)).or_else(|| analysis.fn_clearance.get(&name)) {
+            let lvl = clr.level;
+            if lvl > 0 {
+                modifiers.push(format!("lvl({})", lvl));
+            }
+        }
+
+        let receiver = if let Some(&(target_sym, _)) = arena.extension_methods.get(&(fn_idx as u32)) {
+            Some(arena.interner.resolve(target_sym).to_string())
+        } else {
+            None
+        };
+
+        let fn_start = node.rhs;
+        let fn_len = node.flags as usize;
+        let mut params = Vec::new();
+        if fn_len > 0 {
+            let fn_children = arena.children_slice(fn_start, fn_len as u32);
+            for &p_id in &fn_children[1..] {
+                let p_node = *arena.node(pilot_ast::NodeId(p_id));
+                let p_name = arena.interner.resolve(pilot_intern::SymbolId(p_node.lhs)).to_string();
+                let p_span = arena.spans[p_id as usize];
+
+                let ty_str = if let Some(&t) = analysis.inferred_types.get(&p_id) {
+                    if t != pilot_analysis::TypeId::ANY {
+                        analysis.types.display(t)
+                    } else {
+                        let p_ty_node = pilot_ast::NodeId(p_node.rhs);
+                        if p_ty_node.is_some() {
+                            Self::typespec_str(arena, p_ty_node, analysis)
+                        } else {
+                            analysis.types.display(t)
+                        }
+                    }
+                } else {
+                    let p_ty_node = pilot_ast::NodeId(p_node.rhs);
+                    if p_ty_node.is_some() {
+                        Self::typespec_str(arena, p_ty_node, analysis)
+                    } else {
+                        "any".to_string()
+                    }
+                };
+
+                let (modifier, default_val) = if (p_span.start as usize) < (p_span.end as usize) && (p_span.end as usize) <= src.len() {
+                    let p_raw = &src[p_span.start as usize..p_span.end as usize];
+                    let mod_str = if p_raw.contains("ref ") || p_raw.starts_with("ref\t") {
+                        Some("ref".to_string())
+                    } else if p_raw.contains("var ") || p_raw.starts_with("var\t") {
+                        Some("var".to_string())
+                    } else if p_raw.contains("iso ") {
+                        Some("iso".to_string())
+                    } else if p_raw.contains("..") {
+                        Some("..rest".to_string())
+                    } else {
+                        None
+                    };
+                    let def_val = if let Some(eq_pos) = p_raw.find('=') {
+                        Some(p_raw[eq_pos + 1..].trim().to_string())
+                    } else {
+                        None
+                    };
+                    (mod_str, def_val)
+                } else {
+                    (None, None)
+                };
+
+                params.push(FnParamInfo {
+                    name: p_name,
+                    ty_str,
+                    default_val,
+                    modifier,
+                    doc: None,
+                });
+            }
+        }
+
+        let ret_ty = analysis
+            .inferred_types
+            .get(&(fn_idx as u32))
+            .copied()
+            .unwrap_or(pilot_analysis::TypeId::ANY);
+        let pruned = analysis.types.prune(ret_ty);
+        let (return_ty, error_ty) = if let pilot_analysis::TypeKind::Function { ret, .. } = analysis.types.get(pruned) {
+            let pruned_ret = analysis.types.prune(*ret);
+            if let pilot_analysis::TypeKind::Result { ok, err } = analysis.types.get(pruned_ret) {
+                (analysis.types.display(*ok), Some(analysis.types.display(*err)))
+            } else {
+                (analysis.types.display(*ret), None)
+            }
+        } else if let Some(&ann) = arena.type_annotations.get(&(fn_idx as u32)) {
+            if ann.is_some() && (ann.0 as usize) < arena.nodes.len() {
+                let ann_node = arena.node(ann);
+                if ann_node.node_kind() == pilot_ast::NodeKind::TypeFallible {
+                    let ok_str = Self::typespec_str(arena, pilot_ast::NodeId(ann_node.lhs), analysis);
+                    let err_str = Self::typespec_str(arena, pilot_ast::NodeId(ann_node.rhs), analysis);
+                    (ok_str, Some(err_str))
+                } else {
+                    (Self::typespec_str(arena, ann, analysis), None)
+                }
+            } else {
+                ("void".to_string(), None)
+            }
+        } else {
+            (analysis.types.display(ret_ty), None)
+        };
+
+        let doc = extract_doc_comment_before_span(src, span.start as usize);
+
+        FnHoverInfo {
+            name,
+            receiver,
+            modifiers,
+            params,
+            return_ty,
+            error_ty,
+            doc,
+            span: Some(span),
+            node_id: Some(fn_idx as u32),
+        }
+    }
+
+    fn format_advanced_fn_hover(
+        active: &FnHoverInfo,
+        overloads: &[FnHoverInfo],
+        active_idx: usize,
+    ) -> String {
+        let mut out = String::new();
+
+        // 1. Signature code block
+        out.push_str("```pilot\n");
+        let sig_modifiers: Vec<String> = active
+            .modifiers
+            .iter()
+            .filter(|&m| m != "priv" && m != "builtin")
+            .cloned()
+            .collect();
+        let mod_prefix = if !sig_modifiers.is_empty() {
+            format!("{} ", sig_modifiers.join(" "))
+        } else {
+            String::new()
+        };
+
+        let mut param_sig_strs = Vec::new();
+        for p in &active.params {
+            let mut p_s = String::new();
+            if let Some(ref m) = p.modifier {
+                p_s.push_str(m);
+                p_s.push(' ');
+            }
+            p_s.push_str(&p.name);
+            p_s.push_str(": ");
+            p_s.push_str(&p.ty_str);
+            if let Some(ref d) = p.default_val {
+                p_s.push_str(" = ");
+                p_s.push_str(d);
+            }
+            param_sig_strs.push(p_s);
+        }
+
+        let err_suffix = if let Some(ref err) = active.error_ty {
+            format!(" ! {}", err)
+        } else {
+            String::new()
+        };
+
+        let receiver_prefix = if let Some(ref recv) = active.receiver {
+            format!("{}.", recv)
+        } else {
+            String::new()
+        };
+
+        let inline_params = param_sig_strs.join(", ");
+        let inline_sig = format!(
+            "{}fn {}{}({}) -> {}{}",
+            mod_prefix, receiver_prefix, active.name, inline_params, active.return_ty, err_suffix
+        );
+
+        if inline_sig.len() > 50 || param_sig_strs.len() > 2 {
+            out.push_str(&format!("{}fn {}{}(\n", mod_prefix, receiver_prefix, active.name));
+            for p_s in &param_sig_strs {
+                out.push_str(&format!("    {},\n", p_s));
+            }
+            out.push_str(&format!(") -> {}{}\n", active.return_ty, err_suffix));
+        } else {
+            out.push_str(&inline_sig);
+            out.push('\n');
+        }
+        out.push_str("```\n\n");
+
+        // 2. Kind label and linked modifier badges
+        let kind_label = if let Some(ref recv) = active.receiver {
+            format!("*Pilot Method* on `{}`", recv)
+        } else {
+            "*Pilot Function*".to_string()
+        };
+
+        out.push_str(&kind_label);
+        for m in &active.modifiers {
+            out.push_str(" • ");
+            let link_tooltip = match m.as_str() {
+                "pub" => "[pub](# \"Publicly accessible across modules\")",
+                "priv" => "[priv](# \"Restricted to declaring file or type\")",
+                "pure" => "[pure](# \"Compile-time verified side-effect-free, eligible for static demotion\")",
+                "static" => "[static](# \"Associated with type, no instance receiver\")",
+                "comptime" => "[comptime](# \"Evaluated at compile-time\")",
+                m if m.starts_with("lvl(") => &format!("[{}](# \"Compile-time clearance level requirement\")", m),
+                _ => m.as_str(),
+            };
+            out.push_str(link_tooltip);
+        }
+        out.push('\n');
+
+        // 3. Documentation (if any)
+        if let Some(ref doc) = active.doc {
+            out.push('\n');
+            out.push_str(doc);
+            out.push('\n');
+        }
+
+        // 4. Parameters Section
+        if !active.params.is_empty() {
+            out.push_str("\n### Parameters\n");
+            for p in &active.params {
+                out.push_str(&format!("- `{}`: `{}`", p.name, p.ty_str));
+                if let Some(ref m) = p.modifier {
+                    out.push_str(&format!(" *({})*", m));
+                }
+                if let Some(ref d) = p.default_val {
+                    out.push_str(&format!(" *(default: `{}`)*", d));
+                }
+                if let Some(ref desc) = p.doc {
+                    out.push_str(&format!(" — {}", desc));
+                }
+                out.push('\n');
+            }
+        }
+
+        // 5. Returns Section
+        if active.return_ty != "void" && active.return_ty != "()" {
+            out.push_str("\n### Returns\n");
+            out.push_str(&format!("- `{}`\n", active.return_ty));
+        }
+
+        // 6. Exceptions / Throws / Errors Section
+        if let Some(ref err) = active.error_ty {
+            out.push_str("\n### Throws / Errors\n");
+            out.push_str(&format!("- `{}` — *Propagated on failure via [`?`](# \"Try Propagate Operator\") operator or [`catch`](# \"Error Handling Catch\") block*\n", err));
+        }
+
+        // 7. Overloads Section
+        if overloads.len() > 1 {
+            out.push_str(&format!("\n### Overloads ({})\n", overloads.len()));
+            for (i, ov) in overloads.iter().enumerate() {
+                let ov_params: Vec<String> = ov.params.iter().map(|p| format!("{}: {}", p.name, p.ty_str)).collect();
+                let ov_err = if let Some(ref e) = ov.error_ty {
+                    format!(" ! {}", e)
+                } else {
+                    String::new()
+                };
+                let ov_recv = if let Some(ref r) = ov.receiver {
+                    format!("{}.", r)
+                } else {
+                    String::new()
+                };
+                let active_marker = if i == active_idx { " *(active)*" } else { "" };
+                out.push_str(&format!(
+                    "{}. `fn {}{}({}) -> {}{}`{}\n",
+                    i + 1,
+                    ov_recv,
+                    ov.name,
+                    ov_params.join(", "),
+                    ov.return_ty,
+                    ov_err,
+                    active_marker
+                ));
+            }
+        }
+
+        out
+    }
+
+    fn parse_builtin_sig(name: &str, receiver: Option<String>, sig_str: &str, doc_str: &str) -> FnHoverInfo {
+        let paren_open = sig_str.find('(');
+        let paren_close = sig_str.rfind(')');
+        let mut params = Vec::new();
+        let mut return_ty = "void".to_string();
+        let mut error_ty = None;
+
+        if let (Some(open), Some(close)) = (paren_open, paren_close) {
+            if close > open + 1 {
+                let inside = &sig_str[open + 1..close];
+                let mut param_chunks = Vec::new();
+                let mut depth = 0i32;
+                let mut chunk_start = 0;
+                for (idx, ch) in inside.char_indices() {
+                    match ch {
+                        '(' | '[' | '<' => depth += 1,
+                        ')' | ']' | '>' => depth -= 1,
+                        ',' if depth == 0 => {
+                            param_chunks.push(inside[chunk_start..idx].trim());
+                            chunk_start = idx + 1;
+                        }
+                        _ => {}
+                    }
+                }
+                if chunk_start < inside.len() {
+                    param_chunks.push(inside[chunk_start..].trim());
+                }
+
+                for p_chunk in param_chunks {
+                    if p_chunk.is_empty() {
+                        continue;
+                    }
+                    let (p_base, p_def) = if let Some(eq) = p_chunk.find('=') {
+                        (p_chunk[..eq].trim(), Some(p_chunk[eq + 1..].trim().to_string()))
+                    } else {
+                        (p_chunk, None)
+                    };
+
+                    let (p_name, p_ty) = if let Some(col) = p_base.find(':') {
+                        (p_base[..col].trim(), p_base[col + 1..].trim())
+                    } else {
+                        (p_base, "any")
+                    };
+
+                    params.push(FnParamInfo {
+                        name: p_name.to_string(),
+                        ty_str: p_ty.to_string(),
+                        default_val: p_def,
+                        modifier: None,
+                        doc: None,
+                    });
+                }
+            }
+
+            let after_paren = &sig_str[close + 1..];
+            if let Some(arr_idx) = after_paren.find("->") {
+                let ret_part = after_paren[arr_idx + 2..].trim();
+                if let Some(bang_idx) = ret_part.find('!') {
+                    return_ty = ret_part[..bang_idx].trim().to_string();
+                    error_ty = Some(ret_part[bang_idx + 1..].trim().to_string());
+                } else {
+                    return_ty = ret_part.to_string();
+                }
+            }
+        }
+
+        FnHoverInfo {
+            name: name.to_string(),
+            receiver,
+            modifiers: vec!["builtin".to_string()],
+            params,
+            return_ty,
+            error_ty,
+            doc: if doc_str.is_empty() { None } else { Some(doc_str.to_string()) },
+            span: None,
+            node_id: None,
+        }
+    }
+
+    fn collect_builtin_overloads(txt: &str) -> Vec<FnHoverInfo> {
+        let mut results = Vec::new();
+        for (name, sig, summary) in BUILTIN_DOCS.iter() {
+            if *name == txt {
+                results.push(Self::parse_builtin_sig(name, None, sig, summary));
+            }
+        }
+        for (name, sig, summary) in STR_METHOD_DOCS.iter() {
+            if *name == txt {
+                results.push(Self::parse_builtin_sig(name, Some("str".to_string()), sig, summary));
+            }
+        }
+        for (name, sig, summary) in LIST_METHOD_DOCS.iter() {
+            if *name == txt {
+                results.push(Self::parse_builtin_sig(name, Some("List".to_string()), sig, summary));
+            }
+        }
+        results
+    }
+
+    fn find_call_args_count_at(arena: &pilot_ast::AstArena, byte_offset: u32, callee_name: &str) -> Option<usize> {
+        for (idx, node) in arena.nodes.iter().enumerate() {
+            if node.node_kind() == pilot_ast::NodeKind::CallExpr {
+                let span = arena.spans[idx];
+                if byte_offset >= span.start && byte_offset <= span.end {
+                    let call_children = arena.children_slice(node.lhs, node.rhs);
+                    if !call_children.is_empty() {
+                        let callee_node = *arena.node(pilot_ast::NodeId(call_children[0]));
+                        let callee_match = match callee_node.node_kind() {
+                            pilot_ast::NodeKind::IdentExpr => {
+                                arena.interner.resolve(pilot_intern::SymbolId(callee_node.lhs)) == callee_name
+                            }
+                            pilot_ast::NodeKind::MemberExpr => {
+                                arena.interner.resolve(pilot_intern::SymbolId(callee_node.rhs)) == callee_name
+                            }
+                            _ => true,
+                        };
+                        if callee_match {
+                            return Some(call_children.len() - 1);
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn handle_hover(&mut self, params: &JsonValue) -> JsonValue {
@@ -685,7 +1239,7 @@ impl LspServer {
         // If `txt` is a strict keyword (and not after `.` or inside an f-string), show keyword doc immediately
         if word_in_str.is_none() && !is_after_dot && tok_kind.is_keyword() && !tok_kind.is_contextual_keyword() {
             if let Some((domain, summary)) = get_keyword_doc(txt) {
-                let md = format!("**Pilot Keyword**: `{}` ({})\n\n{}", txt, domain, summary);
+                let md = format_keyword_hover(txt, domain, summary);
                 return make_hover_card(&md);
             }
             let snap = pilot_analysis::comptime::BootstrapSnapshot::global();
@@ -749,113 +1303,154 @@ impl LspServer {
                     .unwrap_or(pilot_analysis::TypeId::ANY);
                 let target_str = analysis.types.display(target_ty);
                 let member_str = analysis.types.display(member_ty);
-                let kind_label = if matches!(analysis.types.get(analysis.types.prune(member_ty)), pilot_analysis::TypeKind::Function { .. }) {
-                    "method"
-                } else {
-                    "property"
-                };
-                let is_primitive_target = target_str.contains("str")
-                    || target_str.contains("list")
-                    || target_str == "int"
-                    || target_str == "i64"
-                    || target_str == "i32"
-                    || target_str == "float"
-                    || target_str == "f64"
-                    || target_str == "bool";
-                let builtin_method_doc = if is_primitive_target {
-                    get_builtin_method_doc(txt)
-                } else {
-                    None
-                };
-                let extra_doc = if let Some((_, doc)) = builtin_method_doc {
-                    format!("\n\n{}", doc)
-                } else if !is_primitive_target && target_str != "any" && !target_str.is_empty() {
-                    format!("\n\nDeclared on `{}`", target_str)
-                } else {
-                    match txt {
-                        "len" | "length" | "count" => "\n\nReturns the number of elements or bytes in the receiver.".to_string(),
-                        "size_of" => "\n\nCompile-time size in bytes of the value or type layout.".to_string(),
-                        "tag_bytes" => "\n\nNumber of discriminant tag bytes used by an algebraic data type.".to_string(),
-                        "is_unboxed" => "\n\n`true` if the ADT or struct is unboxed inline without heap allocation.".to_string(),
-                        "is_recursive" => "\n\n`true` if the type contains recursive indirection.".to_string(),
-                        "is_empty" => "\n\n`true` if the collection or string contains zero elements.".to_string(),
-                        "is_some" | "is_none" => "\n\nChecks whether an `Option[T]` contains a value.".to_string(),
-                        "is_ok" | "is_err" => "\n\nChecks whether a `Result[T, E]` is `Ok` or `Err`.".to_string(),
-                        _ => String::new(),
+                let is_fn_member = matches!(analysis.types.get(analysis.types.prune(member_ty)), pilot_analysis::TypeKind::Function { .. });
+
+                let mut method_overloads = Vec::new();
+                for (fn_idx, fn_node) in arena.nodes.iter().enumerate() {
+                    if fn_node.node_kind() == pilot_ast::NodeKind::FnDecl {
+                        let f_name = arena.interner.resolve(pilot_intern::SymbolId(fn_node.lhs));
+                        if f_name == txt {
+                            let mut info = Self::extract_fn_hover_info(arena, analysis, &src, fn_idx);
+                            if info.receiver.is_none() && target_str != "any" && !target_str.is_empty() {
+                                info.receiver = Some(target_str.clone());
+                            }
+                            method_overloads.push(info);
+                        }
                     }
+                }
+
+                let builtin_ovs = Self::collect_builtin_overloads(txt);
+                for mut bov in builtin_ovs {
+                    if bov.receiver.is_none() && target_str != "any" && !target_str.is_empty() {
+                        bov.receiver = Some(target_str.clone());
+                    }
+                    method_overloads.push(bov);
+                }
+
+                if !method_overloads.is_empty() && (is_fn_member || !method_overloads.is_empty()) {
+                    let mut active_idx = 0;
+                    if let Some(arg_count) = Self::find_call_args_count_at(arena, byte_offset, txt) {
+                        if let Some(pos) = method_overloads.iter().position(|ov| ov.params.len() == arg_count) {
+                            active_idx = pos;
+                        }
+                    }
+                    let active = &method_overloads[active_idx];
+                    let md = Self::format_advanced_fn_hover(active, &method_overloads, active_idx);
+                    return make_hover_card(&md);
+                }
+
+                let extra_doc = match txt {
+                    "len" | "length" | "count" => "\n\nReturns the number of elements or bytes in the receiver.".to_string(),
+                    "size_of" => "\n\nCompile-time size in bytes of the value or type layout.".to_string(),
+                    "tag_bytes" => "\n\nNumber of discriminant tag bytes used by an algebraic data type.".to_string(),
+                    "is_unboxed" => "\n\n`true` if the ADT or struct is unboxed inline without heap allocation.".to_string(),
+                    "is_recursive" => "\n\n`true` if the type contains recursive indirection.".to_string(),
+                    "is_empty" => "\n\n`true` if the collection or string contains zero elements.".to_string(),
+                    "is_some" | "is_none" => "\n\nChecks whether an `Option[T]` contains a value.".to_string(),
+                    "is_ok" | "is_err" => "\n\nChecks whether a `Result[T, E]` is `Ok` or `Err`.".to_string(),
+                    _ => String::new(),
                 };
                 let md = format!(
-                    "```pilot\n({}) {}.{}: {}\n```\n\n*Pilot Member Access*{}",
-                    kind_label, target_str, txt, member_str, extra_doc
+                    "```pilot\n(property) {}.{}: {}\n```\n\n*Pilot Property* on `{}`{}",
+                    target_str, txt, member_str, target_str, extra_doc
                 );
                 return make_hover_card(&md);
             }
         }
 
         // 2. Functions in file (definitions & call-sites)
+        let mut fn_overloads = Vec::new();
+        let mut active_fn_idx = 0;
+        let mut matched_indexer = None;
+
         for (idx, node) in arena.nodes.iter().enumerate() {
             if node.node_kind() == pilot_ast::NodeKind::IndexerDecl {
                 let span = arena.spans[idx];
                 if (txt == "this" || txt == "self" || txt == "[") && byte_offset >= span.start && byte_offset <= span.end {
-                    let params_slice = arena.children_slice(node.lhs, node.rhs);
-                    let mut param_strs = Vec::new();
-                    for &p_id in params_slice {
-                        let p_node = *arena.node(pilot_ast::NodeId(p_id));
-                        let p_name = arena.interner.resolve(pilot_intern::SymbolId(p_node.lhs));
-                        let p_ty_node = pilot_ast::NodeId(p_node.rhs);
-                        let ty_str = if p_ty_node.is_some() {
-                            Self::typespec_str(arena, p_ty_node, analysis)
-                        } else {
-                            analysis.inferred_types.get(&p_id).map(|&t| analysis.types.display(t)).unwrap_or_else(|| "i64".to_string())
-                        };
-                        param_strs.push(format!("{}: {}", p_name, ty_str));
-                    }
-                    let ret_str = arena.type_annotations.get(&(idx as u32)).map(|&ann| Self::typespec_str(arena, ann, analysis)).unwrap_or_else(|| "i64".to_string());
-                    let sig = format!("property this[{}]: {}", param_strs.join(", "), ret_str);
-                    let md = format!("```pilot\n{}\n```\n\n*Pilot Indexer*", sig);
-                    return make_hover_card(&md);
+                    matched_indexer = Some(idx);
+                    break;
                 }
             } else if node.node_kind() == pilot_ast::NodeKind::FnDecl {
                 let name = arena.interner.resolve(pilot_intern::SymbolId(node.lhs));
                 let span = arena.spans[idx];
                 let is_indexer_match = name == "this[]" && txt == "this" && byte_offset >= span.start && byte_offset <= span.end;
-                if name == txt || is_indexer_match {
-                    let fn_start = node.rhs;
-                    let fn_len = node.flags as usize;
-                    let mut param_strs = Vec::new();
-                    if fn_len > 0 {
-                        let fn_children = arena.children_slice(fn_start, fn_len as u32);
-                        for &p_id in &fn_children[1..] {
-                            let p_node = *arena.node(pilot_ast::NodeId(p_id));
-                            let p_name = arena.interner.resolve(pilot_intern::SymbolId(p_node.lhs));
-                            let p_ty = analysis
-                                .inferred_types
-                                .get(&p_id)
-                                .copied()
-                                .unwrap_or(pilot_analysis::TypeId::ANY);
-                            param_strs.push(format!("{}: {}", p_name, analysis.types.display(p_ty)));
-                        }
+                if is_indexer_match {
+                    matched_indexer = Some(idx);
+                    break;
+                }
+                if name == txt {
+                    let info = Self::extract_fn_hover_info(arena, analysis, &src, idx);
+                    if byte_offset >= span.start && byte_offset <= span.end {
+                        active_fn_idx = fn_overloads.len();
                     }
-                    let ret_ty = analysis
-                        .inferred_types
-                        .get(&(idx as u32))
-                        .copied()
-                        .unwrap_or(pilot_analysis::TypeId::ANY);
-                    let ret_str = if let pilot_analysis::TypeKind::Function { ret, .. } = analysis.types.get(analysis.types.prune(ret_ty)) {
-                        analysis.types.display(*ret)
-                    } else {
-                        analysis.types.display(ret_ty)
-                    };
-                    if name == "this[]" {
-                        let sig = format!("property this[{}]: {}", param_strs.join(", "), ret_str);
-                        let md = format!("```pilot\n{}\n```\n\n*Pilot Indexer*", sig);
-                        return make_hover_card(&md);
-                    }
-                    let sig = format!("fn {}({}) -> {}", name, param_strs.join(", "), ret_str);
-                    let md = format!("```pilot\n{}\n```\n\n*Pilot Function*", sig);
-                    return make_hover_card(&md);
+                    fn_overloads.push(info);
                 }
             }
+        }
+
+        if let Some(idx) = matched_indexer {
+            let node = arena.nodes[idx];
+            let (params_slice, ret_str) = if node.node_kind() == pilot_ast::NodeKind::IndexerDecl {
+                let p_slice = arena.children_slice(node.lhs, node.rhs);
+                let ret = arena.type_annotations.get(&(idx as u32)).map(|&ann| Self::typespec_str(arena, ann, analysis)).unwrap_or_else(|| "any".to_string());
+                (p_slice, ret)
+            } else {
+                let fn_start = node.rhs;
+                let fn_len = node.flags as usize;
+                let p_slice = if fn_len > 1 {
+                    &arena.children_slice(fn_start, fn_len as u32)[1..]
+                } else {
+                    &[]
+                };
+                let ret_ty = analysis.inferred_types.get(&(idx as u32)).copied().unwrap_or(pilot_analysis::TypeId::ANY);
+                let ret = if let pilot_analysis::TypeKind::Function { ret, .. } = analysis.types.get(analysis.types.prune(ret_ty)) {
+                    analysis.types.display(*ret)
+                } else {
+                    analysis.types.display(ret_ty)
+                };
+                (p_slice, ret)
+            };
+            let mut param_strs = Vec::new();
+            let mut param_list = Vec::new();
+            for &p_id in params_slice {
+                let p_node = *arena.node(pilot_ast::NodeId(p_id));
+                let p_name = arena.interner.resolve(pilot_intern::SymbolId(p_node.lhs));
+                let p_ty_node = pilot_ast::NodeId(p_node.rhs);
+                let ty_str = if p_ty_node.is_some() {
+                    Self::typespec_str(arena, p_ty_node, analysis)
+                } else {
+                    analysis.inferred_types.get(&p_id).map(|&t| analysis.types.display(t)).unwrap_or_else(|| "any".to_string())
+                };
+                param_strs.push(format!("{}: {}", p_name, ty_str));
+                param_list.push(format!("- `{}`: `{}`", p_name, ty_str));
+            }
+            let mut md = format!("```pilot\nproperty this[{}]: {}\n```\n\n*Pilot Indexer*\n", param_strs.join(", "), ret_str);
+            if !param_list.is_empty() {
+                md.push_str("\n### Index Parameters\n");
+                md.push_str(&param_list.join("\n"));
+                md.push('\n');
+            }
+            md.push_str("\n### Returns\n- `");
+            md.push_str(&ret_str);
+            md.push_str("`\n");
+            return make_hover_card(&md);
+        }
+
+        if !fn_overloads.is_empty() {
+            let builtin_ovs = Self::collect_builtin_overloads(txt);
+            for bov in builtin_ovs {
+                fn_overloads.push(bov);
+            }
+
+            if let Some(arg_count) = Self::find_call_args_count_at(arena, byte_offset, txt) {
+                if let Some(matching_pos) = fn_overloads.iter().position(|ov| ov.params.len() == arg_count) {
+                    active_fn_idx = matching_pos;
+                }
+            }
+
+            let active = &fn_overloads[active_fn_idx];
+            let md = Self::format_advanced_fn_hover(active, &fn_overloads, active_fn_idx);
+            return make_hover_card(&md);
         }
 
         // 3. Classes, Interfaces, Structs, Records, Type Aliases, ADTs, and ADT Variants
@@ -875,7 +1470,19 @@ impl LspServer {
                         let layout = snap.vm.type_layouts.get(name);
                         let (size, align, bits) = layout.map(|l| (l.byte_size(), l.byte_align(), l.lattice_bits)).unwrap_or((0, 0, 0));
                         let badge = pilot_ast::IdePresentationPolicy::format_type_hover(name, size, align, bits);
-                        let md = format!("```pilot\n{} {} {}\n```\n\n{}", kw, name, fields_str, badge);
+                        let mut md = format!("```pilot\n{} {} {}\n```\n\n{}", kw, name, fields_str, badge);
+                        if let Some(doc) = extract_doc_comment_before_span(&src, arena.spans[idx].start as usize) {
+                            md.push_str("\n\n");
+                            md.push_str(&doc);
+                        }
+                        if let Some(fields) = analysis.struct_fields.get(name) {
+                            if !fields.is_empty() {
+                                md.push_str("\n\n### Fields\n");
+                                for (f_name, f_ty) in fields {
+                                    md.push_str(&format!("- `{}`: `{}`\n", f_name, analysis.types.display(*f_ty)));
+                                }
+                            }
+                        }
                         return make_hover_card(&md);
                     }
                 }
@@ -1118,7 +1725,18 @@ impl LspServer {
                 return make_hover_card(&md);
             }
             (None, None) => {
-                if let Some((sig, summary)) = get_builtin_doc(txt) {
+                let builtin_ovs = Self::collect_builtin_overloads(txt);
+                if !builtin_ovs.is_empty() {
+                    let mut active_idx = 0;
+                    if let Some(arg_count) = Self::find_call_args_count_at(arena, byte_offset, txt) {
+                        if let Some(pos) = builtin_ovs.iter().position(|ov| ov.params.len() == arg_count) {
+                            active_idx = pos;
+                        }
+                    }
+                    let active = &builtin_ovs[active_idx];
+                    let md = Self::format_advanced_fn_hover(active, &builtin_ovs, active_idx);
+                    return make_hover_card(&md);
+                } else if let Some((sig, summary)) = get_builtin_doc(txt) {
                     let md = format!("```pilot\n{}\n```\n\n{}", sig, summary);
                     return make_hover_card(&md);
                 }
@@ -1130,7 +1748,18 @@ impl LspServer {
         }
 
         // 6. Built-in standard library functions
-        if let Some((sig, summary)) = get_builtin_doc(txt) {
+        let builtin_ovs = Self::collect_builtin_overloads(txt);
+        if !builtin_ovs.is_empty() {
+            let mut active_idx = 0;
+            if let Some(arg_count) = Self::find_call_args_count_at(arena, byte_offset, txt) {
+                if let Some(pos) = builtin_ovs.iter().position(|ov| ov.params.len() == arg_count) {
+                    active_idx = pos;
+                }
+            }
+            let active = &builtin_ovs[active_idx];
+            let md = Self::format_advanced_fn_hover(active, &builtin_ovs, active_idx);
+            return make_hover_card(&md);
+        } else if let Some((sig, summary)) = get_builtin_doc(txt) {
             let md = format!("```pilot\n{}\n```\n\n{}", sig, summary);
             return make_hover_card(&md);
         }
@@ -1143,7 +1772,7 @@ impl LspServer {
 
         // 8. Pilot Keywords (including contextual keywords)
         if let Some((domain, summary)) = get_keyword_doc(txt) {
-            let md = format!("**Pilot Keyword**: `{}` ({})\n\n{}", txt, domain, summary);
+            let md = format_keyword_hover(txt, domain, summary);
             return make_hover_card(&md);
         }
 
@@ -3453,6 +4082,76 @@ fn get_operator_doc(op: &str) -> Option<(&'static str, &'static str)> {
 
 fn get_keyword_doc(ident: &str) -> Option<(&'static str, &'static str)> {
     KEYWORD_DOCS.iter().find(|(k, _)| *k == ident).map(|(_, v)| *v)
+}
+
+fn get_related_keywords(kw: &str) -> Option<&'static [&'static str]> {
+    match kw {
+        "guard" => Some(&["else", "return", "break", "throw"]),
+        "switch" => Some(&["case", "default", "when", "break"]),
+        "case" => Some(&["switch", "when", "default", "break"]),
+        "default" => Some(&["switch", "case"]),
+        "if" => Some(&["elif", "else", "then"]),
+        "elif" => Some(&["if", "else", "then"]),
+        "else" => Some(&["if", "guard", "then"]),
+        "then" => Some(&["if", "else"]),
+        "for" => Some(&["in", "continue", "break", "yield", "then"]),
+        "in" => Some(&["for", "each"]),
+        "each" => Some(&["for", "in"]),
+        "while" => Some(&["break", "continue", "loop"]),
+        "loop" => Some(&["break", "continue", "return"]),
+        "break" => Some(&["loop", "for", "while", "switch"]),
+        "continue" => Some(&["loop", "for", "while"]),
+        "try" => Some(&["catch", "finally", "throw", "raise", "?"]),
+        "catch" => Some(&["try", "finally", "throw"]),
+        "finally" => Some(&["try", "catch", "defer"]),
+        "defer" => Some(&["scope", "enter", "exit", "~self"]),
+        "throw" | "raise" => Some(&["try", "catch", "!"]),
+        "fn" | "def" => Some(&["pure", "comptime", "return", "yield", "async"]),
+        "return" => Some(&["fn", "guard", "yield"]),
+        "yield" => Some(&["fn", "for"]),
+        "let" => Some(&["var", "const", "ref", "immut"]),
+        "var" => Some(&["let", "ref", "mut"]),
+        "ref" => Some(&["var", "let", "iso", "steal", "view"]),
+        "iso" => Some(&["ref", "steal", "pure"]),
+        "pure" => Some(&["fn", "comptime", "iso"]),
+        "comptime" => Some(&["fn", "quote", "ast", "pure"]),
+        "quote" => Some(&["comptime", "ast"]),
+        "struct" => Some(&["interface", "view", "as", "Bundle", "Facet"]),
+        "interface" => Some(&["struct", "IValue", "IReference", "IObject", "IGuard"]),
+        "record" => Some(&["struct", "class"]),
+        "class" => Some(&["struct", "interface"]),
+        "type" => Some(&["struct", "enum", "alias"]),
+        "enum" => Some(&["type", "switch", "case"]),
+        "pub" | "public" => Some(&["priv", "prot", "int", "open", "export", "lvl"]),
+        "priv" | "private" => Some(&["pub", "prot", "file", "lvl"]),
+        "prot" | "protected" => Some(&["pub", "priv", "int", "lvl"]),
+        "int" | "internal" => Some(&["pub", "priv", "prot", "pkg", "lvl"]),
+        "pkg" | "package" => Some(&["pub", "priv", "int"]),
+        "file" | "fileprivate" => Some(&["priv", "pub"]),
+        "open" => Some(&["pub", "export", "lvl"]),
+        "export" => Some(&["pub", "open", "extern", "lvl"]),
+        "lvl" => Some(&["pub", "priv", "prot", "int"]),
+        "as" => Some(&["view", "is"]),
+        "view" => Some(&["as", "ref", "SliceView"]),
+        "is" => Some(&["as", "switch", "case"]),
+        "scope" => Some(&["enter", "exit", "defer", "~self"]),
+        "self" => Some(&["~self", "scope", "property"]),
+        "op" | "operator" => Some(&["clone", "pack", "unpack"]),
+        "state" => Some(&["actor", "typestate"]),
+        "actor" => Some(&["state", "Channel"]),
+        "requires" | "ensures" | "contracts" => Some(&["assert", "old"]),
+        _ => None,
+    }
+}
+
+fn format_keyword_hover(ident: &str, domain: &str, summary: &str) -> String {
+    let mut md = format!("**Pilot Keyword**: `{}` ({})\n\n{}", ident, domain, summary);
+    if let Some(related) = get_related_keywords(ident) {
+        md.push_str("\n\n---\n**Related Keywords**: ");
+        let links: Vec<String> = related.iter().map(|&r| format!("[`{}`](#)", r)).collect();
+        md.push_str(&links.join(" • "));
+    }
+    md
 }
 
 fn get_builtin_doc(ident: &str) -> Option<(&'static str, &'static str)> {

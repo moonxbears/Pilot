@@ -94,7 +94,7 @@
     "keywords": {
       "patterns": [
         { "name": "keyword.control.seed.pilot", "match": "\\b(__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm)\\b" },
-        { "name": "entity.name.function.macro.syntax.pilot", "match": "\\b(blueprint|break|continue|cue|for|op|role|route|state|syntax|unit|until|while)\\b" }
+        { "name": "entity.name.function.macro.syntax.pilot", "match": "\\b(blueprint|break|case|catch|continue|cue|default|for|guard|op|pkg|role|route|state|switch|syntax|try|unit|until|use|while)\\b" }
       ]
     },
     "modifiers": {
@@ -104,7 +104,7 @@
     },
     "primitives": {
       "patterns": [
-        { "name": "storage.type.primitive.pilot", "match": "\\b(ArenaScope|AstContext|CallExpr|ClampAttr|Dual|EffectPlan|FormulaAttr|HardRealtimeAttr|IAnyValue|IGuard|IObject|IReference|IValue|IdeContextPolicy|IdePresentationPolicy|IdeTokenAttr|InheritPolicy|KernelAttr|LspKind|LspMod|OnChangeAttr|PatchAttr|PatchPart|PatchReplaceAttr|Quantity|RangeEnumerator|RangeWindow|RuleAttr|Signal|SliceBuffer|SliceEnumerator|SpanEnumerator|StrideEnumerator|TraceSpanAttr|WcetAttr|ZeroRuntimeAttr|after|array|ast|bool|char|expand|f128|f16|f32|f64|fn|frame|from|full|grid|i128|i16|i32|i64|i8|isize|map|never|open|option|order|pairs|pin|ptr|range|result|ring|signal|simd|slice|span|splat|step|str|stride|tuple|type|u128|u16|u32|u64|u8|union|until|usize|void)\\b" },
+        { "name": "storage.type.primitive.pilot", "match": "\\b(ArenaScope|AstContext|CallExpr|ClampAttr|Dual|EffectPlan|FormulaAttr|HardRealtimeAttr|IdeContextPolicy|IdePresentationPolicy|IdeTokenAttr|InheritPolicy|KernelAttr|LspKind|LspMod|OnChangeAttr|PatchAttr|PatchPart|PatchReplaceAttr|Quantity|RangeEnumerator|RangeWindow|RuleAttr|Signal|SliceBuffer|SliceEnumerator|SpanEnumerator|StrideEnumerator|TraceSpanAttr|WcetAttr|ZeroRuntimeAttr|after|array|ast|bool|char|expand|f128|f16|f32|f64|fn|frame|from|full|grid|i128|i16|i32|i64|i8|isize|map|never|open|option|order|pairs|pin|ptr|range|result|ring|signal|simd|slice|span|splat|step|str|stride|tuple|type|u128|u16|u32|u64|u8|union|until|usize|void)\\b" },
         { "name": "entity.name.type.interface.pilot", "match": "\\bI[A-Z][A-Za-z0-9_]*\\b" }
       ]
     },

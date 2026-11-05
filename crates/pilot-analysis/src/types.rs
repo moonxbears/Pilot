@@ -419,8 +419,214 @@ impl TypeDef {
 
 
 #[repr(transparent)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct LayoutId(pub u32);
+
+#[repr(transparent)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct TypeId(pub u32);
+
+#[repr(transparent)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub struct CapabilityBits(pub u8);
+// Bit 0: mutable (1) vs immutable (0)
+// Bit 1: isolated/unique (1) vs aliased/shared (0)
+// Bit 2: linear/move-only (1) vs copyable (0)
+// Bit 3: stack/arena-pinned (1) vs heap-escaped (0)
+
+pub type CapabilityPhysics = CapabilityBits;
+
+impl CapabilityBits {
+    pub const IMMUTABLE: Self = Self(0);
+    pub const MUTABLE: Self = Self(1);
+    pub const UNIQUE: Self = Self(2);
+    pub const LINEAR: Self = Self(4);
+    pub const PINNED: Self = Self(8);
+
+    pub const VALUE: Self = Self(0);
+    pub const BORROW_REF: Self = Self(1);
+    pub const OWNED_OBJ: Self = Self(4);
+    pub const SCOPED_GUARD: Self = Self(5);
+
+    #[inline(always)]
+    pub const fn from_raw(b: u8) -> Self { Self(b) }
+    #[inline(always)]
+    pub const fn raw(self) -> u8 { self.0 }
+    #[inline(always)]
+    pub const fn is_mutable(self) -> bool { (self.0 & 1) != 0 }
+    #[inline(always)]
+    pub const fn is_unique(self) -> bool { (self.0 & 2) != 0 }
+    #[inline(always)]
+    pub const fn is_linear(self) -> bool { (self.0 & 4) != 0 }
+    #[inline(always)]
+    pub const fn is_pinned(self) -> bool { (self.0 & 8) != 0 }
+    #[inline(always)]
+    pub const fn union(self, other: Self) -> Self { Self(self.0 | other.0) }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum PhysicsGeometry {
+    Scalar {
+        bit_width: u16,
+        lanes: u16,
+        bank: u8, // 0 = integer/bitwise ALU, 1 = IEEE-754 FPU, 2 = signed integer ALU
+    },
+    Pointer {
+        target: LayoutId,
+        capability: CapabilityBits,
+        addr_space: u8,
+    },
+    Aggregate {
+        fields: Vec<FieldOffset>,
+        is_soa: bool,
+        is_packed: bool,
+    },
+    TaggedUnion {
+        tag_bits: u8,
+        payloads: Vec<LayoutId>,
+    },
+    CallFrame {
+        params: Vec<LayoutId>,
+        ret: LayoutId,
+    },
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FieldOffset {
+    pub positional_index: u16,
+    pub layout: LayoutId,
+    pub byte_offset: u32,
+    pub element_stride: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PhysicalLayout {
+    pub id: LayoutId,
+    pub byte_size: u32,
+    pub byte_align: u32,
+    pub geometry: PhysicsGeometry,
+}
+
+#[derive(Default, Clone, Debug)]
+pub struct LayoutTable {
+    layouts: Vec<PhysicalLayout>, // MUST start empty (len == 0)!
+}
+
+impl LayoutTable {
+    pub fn new() -> Self {
+        Self { layouts: Vec::new() }
+    }
+
+    pub fn register_scalar(&mut self, bit_width: u16, lanes: u16, bank: u8) -> LayoutId {
+        let id = LayoutId(self.layouts.len() as u32);
+        let bit_total = bit_width as u32 * lanes as u32;
+        let byte_size = if bit_total == 0 { 0 } else { (bit_total + 7) / 8 };
+        let byte_align = byte_size.next_power_of_two().max(1).min(16);
+        self.layouts.push(PhysicalLayout {
+            id,
+            byte_size,
+            byte_align,
+            geometry: PhysicsGeometry::Scalar { bit_width, lanes, bank },
+        });
+        id
+    }
+
+    pub fn register_pointer(&mut self, target: LayoutId, cap: CapabilityBits, space: u8) -> LayoutId {
+        let id = LayoutId(self.layouts.len() as u32);
+        self.layouts.push(PhysicalLayout {
+            id,
+            byte_size: 8,
+            byte_align: 8,
+            geometry: PhysicsGeometry::Pointer { target, capability: cap, addr_space: space },
+        });
+        id
+    }
+
+    pub fn register_aggregate(&mut self, field_layouts: &[LayoutId], is_soa: bool, is_packed: bool) -> LayoutId {
+        let mut fields = Vec::with_capacity(field_layouts.len());
+        let mut current_offset: u32 = 0;
+        let mut max_align: u32 = 1;
+
+        for (idx, &fl_id) in field_layouts.iter().enumerate() {
+            let (f_size, f_align) = match self.get(fl_id) {
+                Some(l) => (l.byte_size, l.byte_align),
+                None => (8, 8),
+            };
+            if !is_packed {
+                max_align = max_align.max(f_align);
+                let padding = (f_align.wrapping_sub(current_offset % f_align)) % f_align;
+                current_offset += padding;
+            }
+            fields.push(FieldOffset {
+                positional_index: idx as u16,
+                layout: fl_id,
+                byte_offset: current_offset,
+                element_stride: f_size,
+            });
+            current_offset += f_size;
+        }
+
+        let total_size = if !is_packed && max_align > 0 {
+            let final_padding = (max_align.wrapping_sub(current_offset % max_align)) % max_align;
+            current_offset + final_padding
+        } else {
+            current_offset
+        };
+
+        let id = LayoutId(self.layouts.len() as u32);
+        self.layouts.push(PhysicalLayout {
+            id,
+            byte_size: total_size,
+            byte_align: max_align,
+            geometry: PhysicsGeometry::Aggregate { fields, is_soa, is_packed },
+        });
+        id
+    }
+
+    pub fn register_union(&mut self, tag_bits: u8, payloads: &[LayoutId]) -> LayoutId {
+        let tag_bytes = ((tag_bits as u32) + 7) / 8;
+        let max_payload = payloads.iter().map(|&p| self.get(p).map_or(0, |l| l.byte_size)).max().unwrap_or(0);
+        let max_align = payloads.iter().map(|&p| self.get(p).map_or(1, |l| l.byte_align)).max().unwrap_or(1).max(tag_bytes.next_power_of_two());
+        let total_size = ((tag_bytes + max_payload + max_align - 1) / max_align) * max_align;
+
+        let id = LayoutId(self.layouts.len() as u32);
+        self.layouts.push(PhysicalLayout {
+            id,
+            byte_size: total_size,
+            byte_align: max_align,
+            geometry: PhysicsGeometry::TaggedUnion { tag_bits, payloads: payloads.to_vec() },
+        });
+        id
+    }
+
+    pub fn register_call_frame(&mut self, params: &[LayoutId], ret: LayoutId) -> LayoutId {
+        let mut total_size = 0;
+        for &p in params {
+            let sz = self.get(p).map_or(8, |l| l.byte_size);
+            total_size += (sz + 7) / 8 * 8;
+        }
+        let id = LayoutId(self.layouts.len() as u32);
+        self.layouts.push(PhysicalLayout {
+            id,
+            byte_size: total_size,
+            byte_align: 8,
+            geometry: PhysicsGeometry::CallFrame { params: params.to_vec(), ret },
+        });
+        id
+    }
+
+    pub fn get(&self, id: LayoutId) -> Option<&PhysicalLayout> {
+        self.layouts.get(id.0 as usize)
+    }
+
+    pub fn len(&self) -> usize {
+        self.layouts.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.layouts.is_empty()
+    }
+}
 
 impl TypeId {
     pub const VOID: Self = Self(0);
@@ -600,17 +806,60 @@ impl TypeArena {
             next_fn_id: 1,
         };
 
+        // Derive primitive type names name-blindly from the compilation bootstrap snapshot
+        let snap = crate::BootstrapSnapshot::global();
+        let bool_name = snap
+            .vm
+            .receptor_type_names
+            .get(&crate::comptime::ReceptorSlot::BoolCondition)
+            .cloned()
+            .unwrap_or_default();
+        let i64_name = snap
+            .vm
+            .receptor_type_names
+            .get(&crate::comptime::ReceptorSlot::IntLiteral)
+            .cloned()
+            .unwrap_or_default();
+        let f64_name = snap
+            .vm
+            .receptor_type_names
+            .get(&crate::comptime::ReceptorSlot::FloatLiteral)
+            .cloned()
+            .unwrap_or_default();
+        let str_name = snap
+            .vm
+            .receptor_type_names
+            .get(&crate::comptime::ReceptorSlot::Utf8StrLiteral)
+            .cloned()
+            .unwrap_or_default();
+
+        let mut i32_name = String::new();
+        let mut f32_name = String::new();
+        for (name, layout) in &snap.vm.type_layouts {
+            if layout.has_explicit_register_layout {
+                match layout.reg_class {
+                    crate::comptime::RegisterClass::GprSigned if layout.bit_width == 32 => {
+                        i32_name = name.clone();
+                    }
+                    crate::comptime::RegisterClass::SimdFloat if layout.bit_width == 32 => {
+                        f32_name = name.clone();
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         // Initialize predefined primitive types at 0..9
         arena.register_builtin(TypeId::VOID, TypeKind::Void);
         arena.register_builtin(TypeId::NEVER, TypeKind::Never);
         arena.register_builtin(TypeId::ANY, TypeKind::Any);
         arena.register_builtin(TypeId::NULL, TypeKind::Null);
-        arena.register_builtin(TypeId::BOOL, TypeKind::Primitive("bool".to_string()));
-        arena.register_builtin(TypeId::I64, TypeKind::Primitive("i64".to_string()));
-        arena.register_builtin(TypeId::I32, TypeKind::Primitive("i32".to_string()));
-        arena.register_builtin(TypeId::F64, TypeKind::Primitive("f64".to_string()));
-        arena.register_builtin(TypeId::F32, TypeKind::Primitive("f32".to_string()));
-        arena.register_builtin(TypeId::STR, TypeKind::Primitive("str".to_string()));
+        arena.register_builtin(TypeId::BOOL, TypeKind::Primitive(bool_name));
+        arena.register_builtin(TypeId::I64, TypeKind::Primitive(i64_name));
+        arena.register_builtin(TypeId::I32, TypeKind::Primitive(i32_name));
+        arena.register_builtin(TypeId::F64, TypeKind::Primitive(f64_name));
+        arena.register_builtin(TypeId::F32, TypeKind::Primitive(f32_name));
+        arena.register_builtin(TypeId::STR, TypeKind::Primitive(str_name));
 
         // Initialize the canonical lattice origin interfaces at InterfaceId(0..=10)
         arena.init_origin_interfaces();
@@ -1208,14 +1457,14 @@ impl TypeArena {
             TypeKind::Primitive(name) => name.clone(),
             TypeKind::Collection { kind, element } => {
                 let k_str = match kind {
-                    CollectionKind::List => "List",
-                    CollectionKind::Set => "Set",
-                    CollectionKind::Future => "Future",
-                    CollectionKind::Slice => "Slice",
-                    CollectionKind::SliceBuffer => "SliceBuffer",
-                    CollectionKind::SliceView => "SliceView",
-                    CollectionKind::StridedSlice => "StridedSlice",
-                    CollectionKind::View => "View",
+                    CollectionKind::List => "list",
+                    CollectionKind::Set => "set",
+                    CollectionKind::Future => "future",
+                    CollectionKind::Slice => "slice",
+                    CollectionKind::SliceBuffer => "slice_buffer",
+                    CollectionKind::SliceView => "slice_view",
+                    CollectionKind::StridedSlice => "strided_slice",
+                    CollectionKind::View => "view",
                 };
                 format!("{}[{}]", k_str, self.display(*element))
             }
@@ -1382,9 +1631,8 @@ impl TypeArena {
                         return td.lattice;
                     }
                 }
-                if name == "slice"
-                    || name == "stride"
-                    || name == "view"
+                let shape = self.type_shape(ty);
+                if matches!(shape, StructuralShape::ContiguousView { .. } | StructuralShape::StridedView { .. })
                     || name.starts_with("ref ")
                     || name.starts_with('&')
                 {
@@ -1477,15 +1725,20 @@ impl TypeArena {
                         }
                     }
                 }
-                match name.as_str() {
-                    "void" | "never" => (0, 1),
-                    "bool" | "u8" | "i8" | "byte" => (1, 1),
-                    "u16" | "i16" | "f16" => (2, 2),
-                    "u32" | "i32" | "f32" | "char" => (4, 4),
-                    "u128" | "i128" | "f128" => (16, 16),
-                    "slice" | "str" | "string" => (16, 8),
-                    "stride" => (24, 8),
-                    _ => (8, 8), // usize, isize, i64, u64, f64, ptr, ref
+                let phys = self.type_physics(ty);
+                if phys.bit_width > 0 {
+                    let sz = (phys.bit_width as usize + 7) / 8;
+                    let al = sz.min(8).max(1);
+                    (sz, al)
+                } else if phys.reg_class == RegClass::Unit || phys.reg_class == RegClass::NoReturn {
+                    (0, 1)
+                } else {
+                    let shape = self.type_shape(ty);
+                    match shape {
+                        StructuralShape::ContiguousView { .. } => (16, 8),
+                        StructuralShape::StridedView { .. } => (24, 8),
+                        _ => (8, 8),
+                    }
                 }
             }
             TypeKind::Collection { kind, .. } => match kind {

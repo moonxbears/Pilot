@@ -5,6 +5,7 @@ use crate::instruction::{Instruction, Opcode};
 use crate::pilc::PilcBinary;
 
 pub type VmHook = Box<dyn FnMut(usize, Instruction, &[PilotVal; 256])>;
+pub type EngineIntrinsicHandler = Box<dyn FnMut(&str, &[PilotVal]) -> Result<PilotVal, String>>;
 
 pub struct PilVirtualMachine {
     pub registers: [PilotVal; 256],
@@ -13,6 +14,7 @@ pub struct PilVirtualMachine {
     pub pc: usize,
     pub call_stack: Vec<(usize, [PilotVal; 256], u8)>,
     pub hook: Option<VmHook>,
+    pub engine_handler: Option<EngineIntrinsicHandler>,
 }
 
 impl Default for PilVirtualMachine {
@@ -30,6 +32,7 @@ impl PilVirtualMachine {
             pc: 0,
             call_stack: Vec::with_capacity(64),
             hook: None,
+            engine_handler: None,
         }
     }
 
@@ -261,6 +264,19 @@ impl PilVirtualMachine {
                         self.pc = ret_pc;
                     } else {
                         return ret_val;
+                    }
+                }
+                Opcode::EngineIntrinsic => {
+                    let hook_val = unsafe { *self.registers.get_unchecked(src1) };
+                    let hook_name = hook_val.to_string_repr();
+                    let num_args = src2;
+                    let mut args = Vec::with_capacity(num_args);
+                    for i in 1..=num_args {
+                        args.push(unsafe { *self.registers.get_unchecked(i) });
+                    }
+                    if let Some(ref mut handler) = self.engine_handler {
+                        let res = handler(&hook_name, &args).unwrap_or(PilotVal::NULL);
+                        unsafe { *self.registers.get_unchecked_mut(dst) = res };
                     }
                 }
                 Opcode::Halt => {

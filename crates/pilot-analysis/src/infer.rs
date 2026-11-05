@@ -3,8 +3,425 @@
 use std::collections::HashMap;
 use pilot_ast::{AstArena, AstNode, NodeId, NodeKind};
 use pilot_intern::SymbolId;
+use pilot_rt::PilotVal;
 use crate::diagnostics::AnalysisDiagnostic;
-use crate::types::{TypeArena, TypeId, TypeKind};
+use crate::types::{CapabilityBits, LayoutId, LayoutTable, PhysicsGeometry, TypeArena, TypeId, TypeKind};
+
+#[derive(Clone, Debug)]
+pub struct RawAstNode {
+    pub node_id: u32,
+    pub parent_id: u32,
+    pub kind_tag: u8,
+    pub sym_id: u32,
+    pub first_child: u32,
+    pub child_count: u16,
+    pub raw_bits: u64,
+    pub literal_kind: u8, // 0 = none, 1 = int_bits, 2 = float_bits, 3 = byte_slice_sym, 4 = bit_flag
+    pub span_start: u32,
+    pub span_end: u32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct RawAstArena {
+    pub nodes: Vec<RawAstNode>,
+    pub child_links: Vec<u32>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PhysicsDiagnostic {
+    pub node_id: u32,
+    pub severity: u8, // 0 = warning, 1 = error
+    pub message: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct PhysicsRegistry {
+    pub arena: RawAstArena,
+    pub layouts: LayoutTable, // MUST start empty (len == 0)!
+    pub node_layouts: Vec<Option<LayoutId>>,
+    pub node_targets: Vec<Option<u32>>,
+    pub symbol_strings: HashMap<u32, String>,
+    pub diagnostics: Vec<PhysicsDiagnostic>,
+}
+
+impl PhysicsRegistry {
+    pub fn new(arena: RawAstArena, symbol_strings: HashMap<u32, String>) -> Self {
+        let node_count = arena.nodes.len();
+        Self {
+            arena,
+            layouts: LayoutTable::new(), // Starts with 0 entries!
+            node_layouts: vec![None; node_count],
+            node_targets: vec![None; node_count],
+            symbol_strings,
+            diagnostics: Vec::new(),
+        }
+    }
+}
+
+pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32, String>) {
+    let mut raw_nodes = Vec::with_capacity(arena.nodes.len());
+    let mut child_links = Vec::new();
+    let mut symbol_strings = HashMap::new();
+
+    for (idx, node) in arena.nodes.iter().enumerate() {
+        let span = arena.span(NodeId(idx as u32));
+        let kind = node.node_kind();
+
+        let (kind_tag, sym_id, raw_bits, lit_kind) = match kind {
+            NodeKind::StructDecl => (1u8, node.lhs, 0u64, 0u8),
+            NodeKind::InterfaceDecl => (2u8, node.lhs, 0u64, 0u8),
+            NodeKind::FnDecl => (3u8, node.lhs, 0u64, 0u8),
+            NodeKind::LetStmt | NodeKind::VarStmt => (4u8, node.lhs, 0u64, 0u8),
+            NodeKind::IfExpr => (6u8, 0, 0u64, 0u8),
+            NodeKind::ForExpr | NodeKind::WhileStmt => (7u8, 0, 0u64, 0u8),
+            NodeKind::ReturnStmt => (8u8, 0, 0u64, 0u8),
+            NodeKind::YieldStmt => (9u8, 0, 0u64, 0u8),
+            NodeKind::DeferStmt => (10u8, 0, 0u64, 0u8),
+            NodeKind::ComptimeExpr => (11u8, 0, 0u64, 0u8),
+            NodeKind::PolyglotBlock => (13u8, 0, 0u64, 0u8),
+            NodeKind::IdentExpr | NodeKind::TypeNamed => (14u8, node.lhs, 0u64, 0u8),
+            NodeKind::IntLit => {
+                let val = arena.i64_pool.get(node.lhs as usize).copied().unwrap_or(0);
+                (15u8, 0, val as u64, 1u8)
+            }
+            NodeKind::FloatLit => {
+                let val = arena.f64_pool.get(node.lhs as usize).copied().unwrap_or(0.0);
+                (15u8, 0, val.to_bits(), 2u8)
+            }
+            NodeKind::StrLit => (15u8, node.lhs, 0u64, 3u8),
+            NodeKind::BoolLit => (15u8, 0, node.lhs as u64, 4u8),
+            NodeKind::CallExpr => (16u8, 0, 0u64, 0u8),
+            NodeKind::MemberExpr => (17u8, node.rhs, 0u64, 0u8),
+            NodeKind::BlockExpr => (18u8, 0, 0u64, 0u8),
+            NodeKind::BinaryExpr => (19u8, 0, node.flags as u64, 0u8),
+            NodeKind::AssignStmt => (20u8, 0, 0u64, 0u8),
+            _ => (255u8, 0, 0u64, 0u8),
+        };
+
+        if sym_id != 0 {
+            let str_val = arena.interner.resolve(SymbolId(sym_id)).to_string();
+            symbol_strings.insert(sym_id, str_val);
+        }
+
+        let first_child = child_links.len() as u32;
+        let mut child_count = 0u16;
+
+        match kind {
+            NodeKind::BinaryExpr | NodeKind::AssignStmt => {
+                if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
+                if node.rhs != 0 { child_links.push(node.rhs); child_count += 1; }
+            }
+            NodeKind::IfExpr => {
+                if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
+                if node.rhs != 0 { child_links.push(node.rhs); child_count += 1; }
+            }
+            NodeKind::WhileStmt => {
+                if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
+                if node.rhs != 0 { child_links.push(node.rhs); child_count += 1; }
+            }
+            NodeKind::LetStmt | NodeKind::VarStmt => {
+                if node.rhs != 0 { child_links.push(node.rhs); child_count += 1; }
+            }
+            NodeKind::ReturnStmt | NodeKind::YieldStmt => {
+                if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
+            }
+            NodeKind::MemberExpr => {
+                if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
+            }
+            NodeKind::CallExpr => {
+                let start = node.lhs as usize;
+                let count = node.rhs as usize;
+                if count > 0 && start + count <= arena.extra_children.len() {
+                    for &c in &arena.extra_children[start..start + count] {
+                        child_links.push(c);
+                        child_count += 1;
+                    }
+                }
+            }
+            NodeKind::BlockExpr | NodeKind::Program => {
+                let start = node.lhs as usize;
+                let count = node.rhs as usize;
+                if count > 0 && start + count <= arena.extra_children.len() {
+                    for &c in &arena.extra_children[start..start + count] {
+                        child_links.push(c);
+                        child_count += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        raw_nodes.push(RawAstNode {
+            node_id: idx as u32,
+            parent_id: 0,
+            kind_tag,
+            sym_id,
+            first_child,
+            child_count,
+            raw_bits,
+            literal_kind: lit_kind,
+            span_start: span.start,
+            span_end: span.end,
+        });
+    }
+
+    (RawAstArena { nodes: raw_nodes, child_links }, symbol_strings)
+}
+
+pub fn handle_engine_intrinsic(
+    registry: &mut PhysicsRegistry,
+    op_code: &str,
+    args: &[PilotVal],
+) -> Result<PilotVal, String> {
+    match op_code {
+        "ast_node_count" => {
+            Ok(PilotVal::from_int(registry.arena.nodes.len() as i64))
+        }
+        "ast_node_kind" => {
+            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
+            let kind = registry.arena.nodes.get(nid).map_or(255, |n| n.kind_tag);
+            Ok(PilotVal::from_int(kind as i64))
+        }
+        "ast_node_sym" => {
+            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
+            let sym = registry.arena.nodes.get(nid).map_or(0, |n| n.sym_id);
+            Ok(PilotVal::from_int(sym as i64))
+        }
+        "ast_node_lit_kind" => {
+            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
+            let lit = registry.arena.nodes.get(nid).map_or(0, |n| n.literal_kind);
+            Ok(PilotVal::from_int(lit as i64))
+        }
+        "ast_node_raw_bits" => {
+            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
+            let bits = registry.arena.nodes.get(nid).map_or(0, |n| n.raw_bits);
+            Ok(PilotVal::from_int(bits as i64))
+        }
+        "ast_child_count" => {
+            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
+            let count = registry.arena.nodes.get(nid).map_or(0, |n| n.child_count);
+            Ok(PilotVal::from_int(count as i64))
+        }
+        "ast_child_at" => {
+            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
+            let idx = args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as usize;
+            let child_id = if let Some(node) = registry.arena.nodes.get(nid) {
+                if idx < node.child_count as usize {
+                    let link_idx = node.first_child as usize + idx;
+                    registry.arena.child_links.get(link_idx).copied().unwrap_or(0)
+                } else {
+                    0
+                }
+            } else {
+                0
+            };
+            Ok(PilotVal::from_int(child_id as i64))
+        }
+        "layout_scalar" => {
+            let bit_width = args.first().and_then(|v| v.as_int()).unwrap_or(64) as u16;
+            let lanes = args.get(1).and_then(|v| v.as_int()).unwrap_or(1) as u16;
+            let bank = args.get(2).and_then(|v| v.as_int()).unwrap_or(0) as u8;
+            let id = registry.layouts.register_scalar(bit_width, lanes, bank);
+            Ok(PilotVal::from_int(id.0 as i64))
+        }
+        "layout_ptr" => {
+            let target = args.first().and_then(|v| v.as_int()).unwrap_or(0) as u32;
+            let cap_bits = args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as u8;
+            let space = args.get(2).and_then(|v| v.as_int()).unwrap_or(0) as u8;
+            let id = registry.layouts.register_pointer(
+                LayoutId(target),
+                CapabilityBits(cap_bits),
+                space,
+            );
+            Ok(PilotVal::from_int(id.0 as i64))
+        }
+        "layout_aggregate" => {
+            let mut field_ids = Vec::new();
+            for arg in args {
+                if let Some(val) = arg.as_int() {
+                    field_ids.push(LayoutId(val as u32));
+                }
+            }
+            let id = registry.layouts.register_aggregate(&field_ids, false, false);
+            Ok(PilotVal::from_int(id.0 as i64))
+        }
+        "layout_union" => {
+            let tag_bits = args.first().and_then(|v| v.as_int()).unwrap_or(8) as u8;
+            let mut payloads = Vec::new();
+            for arg in &args[1..] {
+                if let Some(val) = arg.as_int() {
+                    payloads.push(LayoutId(val as u32));
+                }
+            }
+            let id = registry.layouts.register_union(tag_bits, &payloads);
+            Ok(PilotVal::from_int(id.0 as i64))
+        }
+        "layout_metrics" => {
+            let lid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as u32;
+            let sz = registry.layouts.get(LayoutId(lid)).map_or(0, |l| l.byte_size);
+            Ok(PilotVal::from_int(sz as i64))
+        }
+        "layout_field_offset" => {
+            let lid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as u32;
+            let f_idx = args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as usize;
+            let offset = if let Some(l) = registry.layouts.get(LayoutId(lid)) {
+                match &l.geometry {
+                    PhysicsGeometry::Aggregate { fields, .. } => {
+                        fields.get(f_idx).map_or(0, |f| f.byte_offset)
+                    }
+                    _ => 0,
+                }
+            } else {
+                0
+            };
+            Ok(PilotVal::from_int(offset as i64))
+        }
+        "layout_physically_equal" => {
+            let a = args.first().and_then(|v| v.as_int()).unwrap_or(0) as u32;
+            let b = args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as u32;
+            let eq = match (registry.layouts.get(LayoutId(a)), registry.layouts.get(LayoutId(b))) {
+                (Some(la), Some(lb)) => la.byte_size == lb.byte_size && la.byte_align == lb.byte_align && la.geometry == lb.geometry,
+                _ => false,
+            };
+            Ok(PilotVal::from_bool(eq))
+        }
+        "ast_bind_layout" => {
+            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
+            let lid = args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as u32;
+            if nid < registry.node_layouts.len() {
+                registry.node_layouts[nid] = Some(LayoutId(lid));
+            }
+            Ok(PilotVal::NULL)
+        }
+        "ast_get_bound_layout" => {
+            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
+            let lid = registry.node_layouts.get(nid).and_then(|x| *x).map_or(u32::MAX as i64, |l| l.0 as i64);
+            Ok(PilotVal::from_int(lid))
+        }
+        "ast_bind_target" => {
+            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
+            let tid = args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as u32;
+            if nid < registry.node_targets.len() {
+                registry.node_targets[nid] = Some(tid);
+            }
+            Ok(PilotVal::NULL)
+        }
+        "ast_emit_diag" => {
+            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as u32;
+            let sev = args.get(1).and_then(|v| v.as_int()).unwrap_or(1) as u8;
+            let msg = args.get(2).and_then(|v| v.with_str(|s| s.to_string())).unwrap_or_default();
+            registry.diagnostics.push(PhysicsDiagnostic {
+                node_id: nid,
+                severity: sev,
+                message: msg,
+            });
+            Ok(PilotVal::NULL)
+        }
+        _ => Ok(PilotVal::NULL),
+    }
+}
+
+pub fn run_pilot_analyzer(registry: &mut PhysicsRegistry, analyzer_src: Option<&str>) -> Result<(), String> {
+    let src = match analyzer_src {
+        Some(s) => s.to_string(),
+        None => {
+            std::fs::read_to_string("selfhost/analyzer.pilot")
+                .or_else(|_| std::fs::read_to_string("e:/Pilot/selfhost/analyzer.pilot"))
+                .unwrap_or_else(|_| include_str!("../../../selfhost/analyzer.pilot").to_string())
+        }
+    };
+
+    let parsed_arena = pilot_parser::parse(&src);
+    let binary = pilot_vm::compiler::BytecodeCompiler::compile(&parsed_arena, parsed_arena.root);
+
+    let mut vm = pilot_vm::vm::PilVirtualMachine::new();
+    vm.load_binary(binary);
+
+    let reg_ptr = registry as *mut PhysicsRegistry;
+    vm.engine_handler = Some(Box::new(move |op_code, args| {
+        let reg = unsafe { &mut *reg_ptr };
+        handle_engine_intrinsic(reg, op_code, args)
+    }));
+
+    vm.run();
+    Ok(())
+}
+
+pub fn analyze_physics(
+    arena: &AstArena,
+    root: NodeId,
+    analyzer_override: Option<&str>,
+) -> PhysicsRegistry {
+    // Step 1: Flatten AST
+    let (flat_arena, symbol_strings) = flatten_ast(arena, root);
+
+    // Step 2: Empty Physics State
+    let mut registry = PhysicsRegistry::new(flat_arena, symbol_strings);
+
+    // Step 3: Execute analyzer in pilot-vm
+    let _ = run_pilot_analyzer(&mut registry, analyzer_override);
+
+    // Step 4: Return PhysicsRegistry
+    registry
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct NodeLayoutMap {
+    pub node_layouts: Vec<Option<crate::types::LayoutId>>,
+}
+
+impl NodeLayoutMap {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn get(&self, node_id: u32) -> Option<crate::types::LayoutId> {
+        self.node_layouts.get(node_id as usize).copied().flatten()
+    }
+
+    pub fn set(&mut self, node_id: u32, layout_id: crate::types::LayoutId) {
+        if node_id as usize >= self.node_layouts.len() {
+            self.node_layouts.resize(node_id as usize + 1, None);
+        }
+        self.node_layouts[node_id as usize] = Some(layout_id);
+    }
+}
+
+pub fn verify_capability_transition(source: crate::types::CapabilityBits, target: crate::types::CapabilityBits) -> bool {
+    match (source, target) {
+        (crate::types::CapabilityBits::VALUE, _) => true,
+        (crate::types::CapabilityBits::OWNED_OBJ, crate::types::CapabilityBits::BORROW_REF) => true,
+        (crate::types::CapabilityBits::OWNED_OBJ, crate::types::CapabilityBits::SCOPED_GUARD) => true,
+        (s, t) if s == t => true,
+        _ => false,
+    }
+}
+
+pub fn compute_field_projection(aggregate: &crate::types::PhysicalLayout, field_idx: usize) -> Option<crate::types::FieldOffset> {
+    match &aggregate.geometry {
+        crate::types::PhysicsGeometry::Aggregate { fields, .. } => fields.get(field_idx).copied(),
+        _ => None,
+    }
+}
+
+pub fn compute_soa_projection(slice_layout: &crate::types::PhysicalLayout, field_idx: usize) -> Option<crate::types::PhysicalLayout> {
+    match &slice_layout.geometry {
+        crate::types::PhysicsGeometry::Aggregate { fields, .. } => {
+            let field = fields.get(field_idx)?;
+            Some(crate::types::PhysicalLayout {
+                id: field.layout,
+                byte_size: 16,
+                byte_align: 8,
+                geometry: crate::types::PhysicsGeometry::Pointer {
+                    target: field.layout,
+                    capability: crate::types::CapabilityBits::MUTABLE,
+                    addr_space: 0,
+                },
+            })
+        }
+        _ => None,
+    }
+}
 
 pub struct Scope {
     pub bindings: HashMap<String, TypeId>,
@@ -46,6 +463,8 @@ pub struct TypeInferenceEngine {
     pub struct_member_clearance: HashMap<(String, String), pilot_ast::ClearanceLevel>,
     pub dimensions: crate::dimensions::DimensionChecker,
     pub imported_files: std::collections::HashSet<std::path::PathBuf>,
+    pub node_layouts: NodeLayoutMap,
+    pub layout_table: LayoutTable,
 }
 
 impl Default for TypeInferenceEngine {
@@ -78,6 +497,8 @@ impl TypeInferenceEngine {
             struct_member_clearance: HashMap::new(),
             dimensions: crate::dimensions::DimensionChecker::new(),
             imported_files: std::collections::HashSet::new(),
+            node_layouts: NodeLayoutMap::new(),
+            layout_table: LayoutTable::new(),
         };
 
         engine.init_builtins();
@@ -85,35 +506,116 @@ impl TypeInferenceEngine {
     }
 
     fn init_builtins(&mut self) {
-        // Standard primitives in type_defs
-        self.type_defs.insert("int".to_string(), TypeId::I64);
-        self.type_defs.insert("i64".to_string(), TypeId::I64);
-        self.type_defs.insert("i32".to_string(), TypeId::I64);
-        self.type_defs.insert("i16".to_string(), TypeId::I64);
-        self.type_defs.insert("i8".to_string(), TypeId::I64);
-        self.type_defs.insert("uint".to_string(), TypeId::I64);
-        self.type_defs.insert("u64".to_string(), TypeId::I64);
-        self.type_defs.insert("u32".to_string(), TypeId::I64);
-        self.type_defs.insert("u16".to_string(), TypeId::I64);
-        self.type_defs.insert("u8".to_string(), TypeId::I64);
-        self.type_defs.insert("usize".to_string(), TypeId::I64);
-        self.type_defs.insert("isize".to_string(), TypeId::I64);
-        self.type_defs.insert("byte".to_string(), TypeId::I64);
-        self.type_defs.insert("float".to_string(), TypeId::F64);
-        self.type_defs.insert("f64".to_string(), TypeId::F64);
-        self.type_defs.insert("f32".to_string(), TypeId::F32);
-        self.type_defs.insert("f16".to_string(), TypeId::F32);
-        self.type_defs.insert("f8".to_string(), TypeId::F32);
-        self.type_defs.insert("double".to_string(), TypeId::F64);
-        self.type_defs.insert("decimal".to_string(), TypeId::F64);
-        self.type_defs.insert("bool".to_string(), TypeId::BOOL);
-        self.type_defs.insert("str".to_string(), TypeId::STR);
-        self.type_defs.insert("string".to_string(), TypeId::STR);
-        self.type_defs.insert("bytes".to_string(), TypeId::STR);
-        self.type_defs.insert("bytearray".to_string(), TypeId::STR);
-        self.type_defs.insert("char".to_string(), TypeId::I64);
-        self.type_defs.insert("int64_t".to_string(), TypeId::I64);
-        self.type_defs.insert("uint64_t".to_string(), TypeId::I64);
+        // Capture types dynamically from compilation bootstrap snapshots & layout physics
+        let snap = crate::BootstrapSnapshot::global();
+                let pkg_id = crate::types::PackageId(0);
+
+        for (name, layout) in &snap.vm.type_layouts {
+            if layout.has_explicit_register_layout {
+                let ty = match layout.reg_class {
+                    crate::comptime::RegisterClass::GprUnsigned if layout.bit_width == 1 => TypeId::BOOL,
+                    crate::comptime::RegisterClass::GprSigned if layout.bit_width == 64 => TypeId::I64,
+                    crate::comptime::RegisterClass::GprSigned if layout.bit_width == 32 => TypeId::I32,
+                    crate::comptime::RegisterClass::SimdFloat if layout.bit_width == 64 => TypeId::F64,
+                    crate::comptime::RegisterClass::SimdFloat if layout.bit_width == 32 => TypeId::F32,
+                    crate::comptime::RegisterClass::Unit => TypeId::VOID,
+                    crate::comptime::RegisterClass::NoReturn => TypeId::NEVER,
+                    _ => {
+                        let allocated = self.types.alloc(TypeKind::Primitive(name.clone()));
+                        let mut td = crate::types::TypeDef::new(allocated, SymbolId(0), pkg_id);
+                        td.is_lang_primitive = true;
+                        td.physics = crate::types::HardwarePhysics {
+                            reg_class: match layout.reg_class {
+                                crate::comptime::RegisterClass::GprSigned => crate::types::RegClass::GprSigned,
+                                crate::comptime::RegisterClass::GprUnsigned => crate::types::RegClass::GprUnsigned,
+                                crate::comptime::RegisterClass::SimdFloat => crate::types::RegClass::SimdFloat,
+                                crate::comptime::RegisterClass::RawPtr => crate::types::RegClass::RawPtr,
+                                crate::comptime::RegisterClass::Unit => crate::types::RegClass::Unit,
+                                crate::comptime::RegisterClass::NoReturn => crate::types::RegClass::NoReturn,
+                                _ => crate::types::RegClass::Composite,
+                            },
+                            bit_width: layout.bit_width,
+                        };
+                        td.size = (layout.bit_width as usize + 7) / 8;
+                        td.align = td.size.min(8).max(1);
+                        td.lattice = crate::types::LatticeBits::from_raw(layout.lattice_bits);
+                        td.shape = crate::types::StructuralShape::Scalar;
+                        td.layout_sealed = true;
+                        self.types.type_defs.insert(allocated, td);
+                        self.types.type_defs_by_name.insert(name.clone(), allocated);
+                        allocated
+                    }
+                };
+                self.type_defs.insert(name.clone(), ty);
+            } else {
+                let is_str_receptor = snap
+                    .vm
+                    .receptor_type_names
+                    .get(&crate::comptime::ReceptorSlot::Utf8StrLiteral)
+                    .map(|s| s == name)
+                    .unwrap_or(false);
+                let ty = if is_str_receptor {
+                    TypeId::STR
+                } else {
+                    let allocated = self.types.alloc(TypeKind::Adt { name: name.clone(), variants: vec![] });
+                    let mut td = crate::types::TypeDef::new(allocated, SymbolId(0), pkg_id);
+                    let (sz, al, lat) = snap.vm.query_type_size_align_lattice(name);
+                    td.size = sz;
+                    td.align = al.max(1);
+                    td.lattice = crate::types::LatticeBits::from_raw(lat);
+                    td.layout_mode = layout.memory_layout.as_ref().map(|m| format!("{:?}", m).to_lowercase());
+                    td.shape = self.types.deduce_structural_shape(allocated, &[], td.lattice, td.layout_mode.as_deref());
+                    td.layout_sealed = true;
+                    self.types.type_defs.insert(allocated, td);
+                    self.types.type_defs_by_name.insert(name.clone(), allocated);
+                    allocated
+                };
+                self.type_defs.insert(name.clone(), ty);
+            }
+        }
+
+        // Receptors: bind registered receptor slots to their canonical TypeIds
+        for (slot, name) in &snap.vm.receptor_type_names {
+            match slot {
+                crate::comptime::ReceptorSlot::BoolCondition => {
+                    self.type_defs.insert(name.clone(), TypeId::BOOL);
+                }
+                crate::comptime::ReceptorSlot::IntLiteral => {
+                    self.type_defs.insert(name.clone(), TypeId::I64);
+                }
+                crate::comptime::ReceptorSlot::UintLiteral => {
+                    self.type_defs.insert(name.clone(), TypeId::I64);
+                }
+                crate::comptime::ReceptorSlot::FloatLiteral => {
+                    self.type_defs.insert(name.clone(), TypeId::F64);
+                }
+                crate::comptime::ReceptorSlot::CharLiteral => {
+                    self.type_defs.insert(name.clone(), TypeId::I64);
+                }
+                crate::comptime::ReceptorSlot::Utf8StrLiteral => {
+                    self.type_defs.insert(name.clone(), TypeId::STR);
+                }
+                crate::comptime::ReceptorSlot::VoidUnit => {
+                    self.type_defs.insert(name.clone(), TypeId::VOID);
+                }
+                crate::comptime::ReceptorSlot::NeverBottom => {
+                    self.type_defs.insert(name.clone(), TypeId::NEVER);
+                }
+                _ => {}
+            }
+        }
+
+        // Map universal numeric aliases 'int' and 'float' to the captured literal receptor slots
+        if let Some(int_name) = snap.vm.receptor_type_names.get(&crate::comptime::ReceptorSlot::IntLiteral) {
+            if let Some(&ty) = self.type_defs.get(int_name) {
+                self.type_defs.entry("int".to_string()).or_insert(ty);
+            }
+        }
+        if let Some(float_name) = snap.vm.receptor_type_names.get(&crate::comptime::ReceptorSlot::FloatLiteral) {
+            if let Some(&ty) = self.type_defs.get(float_name) {
+                self.type_defs.entry("float".to_string()).or_insert(ty);
+            }
+        }
         let order_ty = self.types.alloc(TypeKind::Primitive("order".to_string()));
         self.type_defs.insert("order".to_string(), order_ty);
         let mut order_td = crate::types::TypeDef::new(order_ty, SymbolId(0), crate::types::PackageId(0));
@@ -747,11 +1249,31 @@ impl TypeInferenceEngine {
     }
 
     fn locate_stdlib_root() -> Option<std::path::PathBuf> {
+        if let Ok(env_path) = std::env::var("PILOT_STDLIB") {
+            let p = std::path::PathBuf::from(env_path);
+            if p.is_dir() {
+                return p.canonicalize().ok().or(Some(p));
+            }
+        }
+        if let Ok(env_root) = std::env::var("PILOT_ROOT") {
+            let p = std::path::PathBuf::from(env_root).join("stdlib");
+            if p.is_dir() {
+                return p.canonicalize().ok().or(Some(p));
+            }
+        }
         if let Ok(cwd) = std::env::current_dir() {
             for anc in cwd.ancestors() {
                 let cand = anc.join("stdlib");
                 if cand.is_dir() {
-                    return Some(cand);
+                    return cand.canonicalize().ok().or(Some(cand));
+                }
+            }
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            for anc in exe.ancestors() {
+                let cand = anc.join("stdlib");
+                if cand.is_dir() {
+                    return cand.canonicalize().ok().or(Some(cand));
                 }
             }
         }
@@ -759,7 +1281,7 @@ impl TypeInferenceEngine {
         for anc in manifest_dir.ancestors() {
             let cand = anc.join("stdlib");
             if cand.is_dir() {
-                return Some(cand);
+                return cand.canonicalize().ok().or(Some(cand));
             }
         }
         None
@@ -1457,6 +1979,36 @@ impl TypeInferenceEngine {
                     .unwrap_or(TypeId::ANY);
                 if let Some(&base_sym) = arena.type_base_symbols.get(&node_id.0) {
                     let base_name = arena.interner.resolve(base_sym);
+                    if let Some(&base_ty) = self.type_defs.get(base_name) {
+                        match self.types.type_shape(base_ty) {
+                            crate::types::StructuralShape::ContiguousView { .. } => {
+                                let res = self.types.slice_of(elem);
+                                self.inferred_node_types.insert(node_id.0, res);
+                                return res;
+                            }
+                            crate::types::StructuralShape::StridedView { .. } => {
+                                let res = self.types.strided_slice_of(elem);
+                                self.inferred_node_types.insert(node_id.0, res);
+                                return res;
+                            }
+                            crate::types::StructuralShape::TaggedOutcome { err_ty, .. } => {
+                                if err_ty.is_some() || children.len() > 1 {
+                                    let err = children
+                                        .get(1)
+                                        .map(|&c| self.resolve_type_spec(arena, NodeId(c)))
+                                        .unwrap_or(TypeId::ANY);
+                                    let res = self.types.result_of(elem, err);
+                                    self.inferred_node_types.insert(node_id.0, res);
+                                    return res;
+                                } else {
+                                    let res = self.types.option_of(elem);
+                                    self.inferred_node_types.insert(node_id.0, res);
+                                    return res;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                     match base_name {
                         "simd" => {
                             let lanes = children
@@ -3992,7 +4544,7 @@ impl TypeInferenceEngine {
                 }
 
                 // String built-in methods
-                if pruned == TypeId::STR || matches!(self.types.get(pruned), TypeKind::Primitive(p) if p == "str" || p == "string") {
+                if pruned == TypeId::STR || matches!(self.types.type_shape(pruned), crate::types::StructuralShape::ContiguousView { .. }) {
                     let str_ret = if is_safe_nav {
                         self.types.option_of(TypeId::STR)
                     } else {
@@ -4086,7 +4638,7 @@ impl TypeInferenceEngine {
                 }
 
                 // Integer built-in methods
-                if pruned == TypeId::I64 || pruned == TypeId::I32 || matches!(self.types.get(pruned), TypeKind::Primitive(p) if p == "int" || p == "i64" || p == "i32") {
+                if pruned.is_integer() || self.types.type_physics(pruned).reg_class == crate::types::RegClass::GprSigned || self.types.type_physics(pruned).reg_class == crate::types::RegClass::GprUnsigned {
                     match member_name {
                         "abs" | "Abs" => {
                             let res = self.types.function_of(vec![], TypeId::I64);
@@ -4123,7 +4675,7 @@ impl TypeInferenceEngine {
                 }
 
                 // Float built-in methods
-                if pruned == TypeId::F64 || pruned == TypeId::F32 || matches!(self.types.get(pruned), TypeKind::Primitive(p) if p == "float" || p == "f64" || p == "f32") {
+                if pruned.is_float() || self.types.type_physics(pruned).reg_class == crate::types::RegClass::SimdFloat {
                     match member_name {
                         "abs" | "Abs" | "round" | "Round" | "floor" | "Floor" | "ceil" | "Ceil" | "trunc" | "Trunc" | "sqrt" | "Sqrt" => {
                             let res = self.types.function_of(vec![], TypeId::F64);
@@ -4155,7 +4707,7 @@ impl TypeInferenceEngine {
                 }
 
                 // Bool built-in methods
-                if pruned == TypeId::BOOL || matches!(self.types.get(pruned), TypeKind::Primitive(p) if p == "bool") {
+                if pruned == TypeId::BOOL || (self.types.type_physics(pruned).reg_class == crate::types::RegClass::GprUnsigned && self.types.type_physics(pruned).bit_width == 1) {
                     match member_name {
                         "to_string" | "to_str" | "ToString" => {
                             let res = self.types.function_of(vec![], TypeId::STR);

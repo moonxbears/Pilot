@@ -169,7 +169,7 @@ impl ErrorFlowAnalyzer {
             if inner.is_some() {
                 if let Some(&ty) = infer.inferred_node_types.get(&inner.0) {
                     if let crate::types::TypeKind::Result { .. } = infer.types.get(infer.types.prune(ty)) {
-                        self.report_must_use_result("Result", arena.span(node_id));
+                        self.report_must_use_result("result", arena.span(node_id));
                     }
                 }
             }

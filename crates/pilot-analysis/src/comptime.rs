@@ -629,6 +629,9 @@ pub struct ComptimeEngine {
     pub diagnostics: Vec<BootstrapDiagnostic>,
     pub patch_handles: FxHashMap<SymbolId, PatchHandleState>,
     pub patch_handles_by_name: FxHashMap<String, SymbolId>,
+    pub layout_table: crate::types::LayoutTable,
+    pub ast_bound_layouts: FxHashMap<u32, u32>,
+    pub ast_bound_targets: FxHashMap<u32, u32>,
     in_genesis_wrapper_depth: u32,
 }
 
@@ -1332,7 +1335,7 @@ impl ComptimeEngine {
                         .type_construct_targets
                         .get("[N]")
                         .cloned()
-                        .unwrap_or_else(|| "SliceBuffer".to_string()),
+                        .unwrap_or_else(|| "slice_buffer".to_string()),
                     2 => "SliceView".to_string(),
                     3 => self
                         .type_construct_targets
@@ -1371,7 +1374,7 @@ impl ComptimeEngine {
                 format!("{}<{}>", base, elem)
             }
             NodeKind::TypeList => {
-                let base = override_base.unwrap_or_else(|| "List".to_string());
+                let base = override_base.unwrap_or_else(|| "list".to_string());
                 if n.rhs == 0 {
                     let elem = self.format_type_node(arena, NodeId(n.lhs));
                     format!("{}<{}>", base, elem)
@@ -2458,12 +2461,13 @@ impl ComptimeEngine {
                     // 1: syntax_macros
                     1 => {
                         let mut names: Vec<String> = parser_tables.syntax_macros_by_name.keys().cloned().collect();
-                        names.sort();
-                        if names.is_empty() {
-                            "break|continue|op".to_string()
-                        } else {
-                            names.join("|")
+                        for kw in parser_tables.module_keywords_by_name.keys() {
+                            if !names.contains(kw) {
+                                names.push(kw.clone());
+                            }
                         }
+                        names.sort();
+                        names.join("|")
                     }
                     // 2: modifiers
                     2 => {
@@ -2474,27 +2478,13 @@ impl ComptimeEngine {
                             }
                         }
                         mods.sort();
-                        if mods.is_empty() {
-                            "pub|priv|file|pkg|int|export|pure|static|const|var|iso|partial|ext|lvl".to_string()
-                        } else {
-                            mods.join("|")
-                        }
+                        mods.join("|")
                     }
                     // 3: lang_primitives
                     3 => {
                         let mut types: Vec<String> = self.type_layouts.keys().cloned().collect();
-                        for (item, _) in &self.lang_items {
-                            let s = item.as_str();
-                            if !types.iter().any(|t| t == s) {
-                                types.push(s.to_string());
-                            }
-                        }
                         types.sort();
-                        if types.is_empty() {
-                            "bool|usize|i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|f16|f32|f64|f128|str|char|void|never|ptr|slice|stride|array|tuple|option|result|union|fn|range|span|step|from|until|full|splat|pairs|expand|map|frame|type|ast|simd|grid|ring|pin|open|after|order|signal".to_string()
-                        } else {
-                            types.join("|")
-                        }
+                        types.join("|")
                     }
                     // 4: operators
                     4 => {
@@ -2537,6 +2527,220 @@ impl ComptimeEngine {
                 };
                 let sym = parser_tables.interner.intern(&result_str);
                 Ok(ComptimeValue::Str(sym))
+            }
+
+            // =========================================================================
+            // PHASE 1: DYNAMIC NAME-BLIND LAYOUT & AST INTRINSICS
+            // =========================================================================
+
+            // 37. `layout_scalar`: `(bit_width: u16, lanes: u16, bank: u8) -> LayoutId`
+            "layout_scalar" => {
+                let bit_width = args.first().and_then(|v| v.as_uint()).unwrap_or(64) as u16;
+                let lanes = args.get(1).and_then(|v| v.as_uint()).unwrap_or(1) as u16;
+                let bank = args.get(2).and_then(|v| v.as_uint()).unwrap_or(0) as u8;
+                let id = self.layout_table.register_scalar(bit_width, lanes, bank);
+                Ok(ComptimeValue::Uint(id.0 as u128))
+            }
+
+            // 38. `layout_ptr`: `(target: LayoutId, cap_bits: u8, space: u8) -> LayoutId`
+            "layout_ptr" => {
+                let target = args.first().and_then(|v| v.as_uint()).unwrap_or(u32::MAX as u128) as u32;
+                let cap_bits = args.get(1).and_then(|v| v.as_uint()).unwrap_or(0) as u8;
+                let space = args.get(2).and_then(|v| v.as_uint()).unwrap_or(0) as u8;
+                let id = self.layout_table.register_pointer(
+                    crate::types::LayoutId(target),
+                    crate::types::CapabilityBits(cap_bits),
+                    space,
+                );
+                Ok(ComptimeValue::Uint(id.0 as u128))
+            }
+
+            // 39. `layout_aggregate`: `(field_ids: Tuple, is_soa: bool, is_packed: bool) -> LayoutId`
+            "layout_aggregate" => {
+                let field_ids: Vec<crate::types::LayoutId> = match args.first() {
+                    Some(ComptimeValue::Tuple(items)) => items
+                        .iter()
+                        .filter_map(|v| v.as_uint())
+                        .map(|n| crate::types::LayoutId(n as u32))
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                let is_soa = args.get(1).and_then(|v| v.as_bool()).unwrap_or(false);
+                let is_packed = args.get(2).and_then(|v| v.as_bool()).unwrap_or(false);
+                let id = self.layout_table.register_aggregate(&field_ids, is_soa, is_packed);
+                Ok(ComptimeValue::Uint(id.0 as u128))
+            }
+
+            // 40. `layout_union`: `(tag_bits: u8, variant_ids: Tuple) -> LayoutId`
+            "layout_union" => {
+                let tag_bits = args.first().and_then(|v| v.as_uint()).unwrap_or(8) as u8;
+                let variant_ids: Vec<crate::types::LayoutId> = match args.get(1) {
+                    Some(ComptimeValue::Tuple(items)) => items
+                        .iter()
+                        .filter_map(|v| v.as_uint())
+                        .map(|n| crate::types::LayoutId(n as u32))
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                let id = self.layout_table.register_union(tag_bits, &variant_ids);
+                Ok(ComptimeValue::Uint(id.0 as u128))
+            }
+
+            // 41. `layout_fn_abi`: `(param_ids: Tuple, ret_id: LayoutId) -> LayoutId`
+            "layout_fn_abi" => {
+                let param_ids: Vec<crate::types::LayoutId> = match args.first() {
+                    Some(ComptimeValue::Tuple(items)) => items
+                        .iter()
+                        .filter_map(|v| v.as_uint())
+                        .map(|n| crate::types::LayoutId(n as u32))
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                let ret_id = args.get(1).and_then(|v| v.as_uint()).map(|n| crate::types::LayoutId(n as u32)).unwrap_or_default();
+                let id = self.layout_table.register_call_frame(&param_ids, ret_id);
+                Ok(ComptimeValue::Uint(id.0 as u128))
+            }
+
+            // 42. `layout_metrics`: `(layout_id: LayoutId) -> (byte_size, byte_align, field_count)`
+            "layout_metrics" => {
+                let id = args.first().and_then(|v| v.as_uint()).unwrap_or(u32::MAX as u128) as u32;
+                let (sz, al, fc) = if let Some(l) = self.layout_table.get(crate::types::LayoutId(id)) {
+                    let fields_len = match &l.geometry {
+                        crate::types::PhysicsGeometry::Aggregate { fields, .. } => fields.len(),
+                        _ => 0,
+                    };
+                    (l.byte_size, l.byte_align, fields_len)
+                } else {
+                    (0, 1, 0)
+                };
+                Ok(ComptimeValue::Tuple(vec![
+                    ComptimeValue::Uint(sz as u128),
+                    ComptimeValue::Uint(al as u128),
+                    ComptimeValue::Uint(fc as u128),
+                ]))
+            }
+
+            // 43. `layout_field_offset`: `(layout_id: LayoutId, field_idx: u32) -> (layout, byte_offset, stride)`
+            "layout_field_offset" => {
+                let id = args.first().and_then(|v| v.as_uint()).unwrap_or(u32::MAX as u128) as u32;
+                let f_idx = args.get(1).and_then(|v| v.as_uint()).unwrap_or(0) as usize;
+                let (fl_id, offset, stride) = if let Some(l) = self.layout_table.get(crate::types::LayoutId(id)) {
+                    match &l.geometry {
+                        crate::types::PhysicsGeometry::Aggregate { fields, .. } => {
+                            fields.get(f_idx).map_or((u32::MAX, 0, 0), |f| (f.layout.0, f.byte_offset, f.element_stride))
+                        }
+                        _ => (u32::MAX, 0, 0),
+                    }
+                } else {
+                    (u32::MAX, 0, 0)
+                };
+                Ok(ComptimeValue::Tuple(vec![
+                    ComptimeValue::Uint(fl_id as u128),
+                    ComptimeValue::Uint(offset as u128),
+                    ComptimeValue::Uint(stride as u128),
+                ]))
+            }
+
+            // 44. `ast_node_count`: `() -> u32`
+            "ast_node_count" => {
+                Ok(ComptimeValue::Uint(arena.nodes.len() as u128))
+            }
+
+            // 45. `ast_read_node`: `(node_id: u32) -> (seed_kind, sym_id, first_child, child_count, lit_physics, span_start, span_len)`
+            "ast_read_node" => {
+                let nid = args.first().and_then(|v| v.as_uint()).unwrap_or(0) as usize;
+                if nid < arena.nodes.len() {
+                    let n = *arena.node(NodeId(nid as u32));
+                    let span = arena.span(NodeId(nid as u32));
+                    let seed_kind: u8 = match n.node_kind() {
+                        NodeKind::StructDecl => 1,
+                        NodeKind::InterfaceDecl => 2,
+                        NodeKind::FnDecl => 3,
+                        NodeKind::LetStmt | NodeKind::VarStmt => 4,
+                        NodeKind::IfExpr => 6,
+                        NodeKind::ForExpr | NodeKind::WhileStmt => 7,
+                        NodeKind::ReturnStmt => 8,
+                        NodeKind::YieldStmt => 9,
+                        NodeKind::DeferStmt => 10,
+                        NodeKind::ComptimeExpr => 11,
+                        NodeKind::PolyglotBlock => 13,
+                        NodeKind::IdentExpr | NodeKind::TypeNamed => 14,
+                        NodeKind::IntLit | NodeKind::FloatLit | NodeKind::StrLit | NodeKind::BoolLit | NodeKind::UnitLit => 15,
+                        NodeKind::CallExpr => 16,
+                        NodeKind::MemberExpr => 17,
+                        NodeKind::BlockExpr => 18,
+                        _ => 255,
+                    };
+                    let sym_id = match n.node_kind() {
+                        NodeKind::StructDecl | NodeKind::InterfaceDecl | NodeKind::FnDecl | NodeKind::IdentExpr | NodeKind::TypeNamed => n.lhs,
+                        NodeKind::MemberExpr => n.rhs,
+                        _ => 0,
+                    };
+                    Ok(ComptimeValue::Tuple(vec![
+                        ComptimeValue::Uint(seed_kind as u128),
+                        ComptimeValue::Uint(sym_id as u128),
+                        ComptimeValue::Uint(n.lhs as u128),
+                        ComptimeValue::Uint(n.flags as u128),
+                        ComptimeValue::Uint(n.rhs as u128),
+                        ComptimeValue::Uint(span.start as u128),
+                        ComptimeValue::Uint(span.len() as u128),
+                    ]))
+                } else {
+                    Ok(ComptimeValue::Tuple(vec![
+                        ComptimeValue::Uint(255),
+                        ComptimeValue::Uint(0),
+                        ComptimeValue::Uint(0),
+                        ComptimeValue::Uint(0),
+                        ComptimeValue::Uint(0),
+                        ComptimeValue::Uint(0),
+                        ComptimeValue::Uint(0),
+                    ]))
+                }
+            }
+
+            // 46. `ast_child_id`: `(node_id: u32, child_idx: u32) -> u32`
+            "ast_child_id" => {
+                let nid = args.first().and_then(|v| v.as_uint()).unwrap_or(0) as usize;
+                let c_idx = args.get(1).and_then(|v| v.as_uint()).unwrap_or(0) as usize;
+                let child_id = if nid < arena.nodes.len() {
+                    let n = *arena.node(NodeId(nid as u32));
+                    let children = arena.children_slice(n.lhs, n.rhs);
+                    children.get(c_idx).copied().unwrap_or(0)
+                } else {
+                    0
+                };
+                Ok(ComptimeValue::Uint(child_id as u128))
+            }
+
+            // 47. `ast_bind_layout`: `(node_id: u32, layout_id: u32) -> Void`
+            "ast_bind_layout" => {
+                let nid = args.first().and_then(|v| v.as_uint()).unwrap_or(0) as u32;
+                let lid = args.get(1).and_then(|v| v.as_uint()).unwrap_or(0) as u32;
+                self.ast_bound_layouts.insert(nid, lid);
+                Ok(ComptimeValue::Void)
+            }
+
+            // 48. `ast_bind_target`: `(node_id: u32, target_sym_id: u32) -> Void`
+            "ast_bind_target" => {
+                let nid = args.first().and_then(|v| v.as_uint()).unwrap_or(0) as u32;
+                let tid = args.get(1).and_then(|v| v.as_uint()).unwrap_or(0) as u32;
+                self.ast_bound_targets.insert(nid, tid);
+                Ok(ComptimeValue::Void)
+            }
+
+            // 49. `ast_emit_diag`: `(code: str, msg: str, span_start: u32, span_len: u32, is_error: bool) -> Void`
+            "ast_emit_diag" => {
+                let msg = args.get(1)
+                    .and_then(|v| v.as_str(&parser_tables.interner).or_else(|| v.as_str(&arena.interner)))
+                    .unwrap_or("")
+                    .to_string();
+                let start = args.get(2).and_then(|v| v.as_uint()).unwrap_or(0) as u32;
+                let len = args.get(3).and_then(|v| v.as_uint()).unwrap_or(0) as u32;
+                self.diagnostics.push(BootstrapDiagnostic::UserCompileError {
+                    message: msg,
+                    span: ByteSpan::new(start, len),
+                });
+                Ok(ComptimeValue::Void)
             }
 
             other => {

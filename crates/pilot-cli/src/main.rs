@@ -670,11 +670,11 @@ fn cmd_ide_sync() {
     };
     let syntax_kws = match vm.eval_engine_intrinsic("query_registered_symbols", &[pilot_analysis::ComptimeValue::Int(1)], &mut pilot_ast::AstArena::new(), &mut tables, pilot_span::ByteSpan::new(0, 0)) {
         Ok(pilot_analysis::ComptimeValue::Str(sym)) => tables.interner.resolve(sym).to_string(),
-        _ => "break|continue|op".to_string(),
+        _ => String::new(),
     };
     let mod_kws = match vm.eval_engine_intrinsic("query_registered_symbols", &[pilot_analysis::ComptimeValue::Int(2)], &mut pilot_ast::AstArena::new(), &mut tables, pilot_span::ByteSpan::new(0, 0)) {
         Ok(pilot_analysis::ComptimeValue::Str(sym)) => tables.interner.resolve(sym).to_string(),
-        _ => "pub|priv|file|pkg|int|export|pure|static|const|var|iso|partial|ext|lvl".to_string(),
+        _ => String::new(),
     };
     let lang_types = match vm.eval_engine_intrinsic("query_registered_symbols", &[pilot_analysis::ComptimeValue::Int(3)], &mut pilot_ast::AstArena::new(), &mut tables, pilot_span::ByteSpan::new(0, 0)) {
         Ok(pilot_analysis::ComptimeValue::Str(sym)) => tables.interner.resolve(sym).to_string(),
@@ -956,6 +956,45 @@ fn cmd_ide_sync() {
                 }
             }
             fs::write(pkg_path, content).expect("Failed to update vscode-pilot/package.json");
+        }
+    }
+
+    // Deploy updated binaries into vscode-pilot/server and installed extension if present
+    let server_dir = Path::new("vscode-pilot/server");
+    let _ = fs::create_dir_all(server_dir);
+    let bin_names = if cfg!(target_os = "windows") {
+        vec!["pilot.exe", "pilot-lsp.exe", "pilot-dap.exe"]
+    } else {
+        vec!["pilot", "pilot-lsp", "pilot-dap"]
+    };
+
+    let user_ext_server = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .ok()
+        .map(|h| PathBuf::from(h).join(".vscode").join("extensions").join("pilot-lang").join("server"));
+
+    for bin_name in bin_names {
+        let mut source_bin: Option<PathBuf> = None;
+        for cand in &[
+            Path::new("target").join("release").join(bin_name),
+            Path::new("target").join("debug").join(bin_name),
+            Path::new("target").join("test-lsp-build").join("debug").join(bin_name),
+            std::env::current_exe().unwrap_or_default(),
+        ] {
+            if cand.is_file() && cand.file_name().and_then(|s| s.to_str()) == Some(bin_name) {
+                source_bin = Some(cand.clone());
+                break;
+            }
+        }
+
+        if let Some(src) = source_bin {
+            let dest = server_dir.join(bin_name);
+            let _ = fs::copy(&src, &dest);
+            if let Some(ref ext_dest) = user_ext_server {
+                if ext_dest.is_dir() {
+                    let _ = fs::copy(&src, ext_dest.join(bin_name));
+                }
+            }
         }
     }
 

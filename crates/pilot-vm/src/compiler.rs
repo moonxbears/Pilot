@@ -446,6 +446,18 @@ impl BytecodeCompiler {
                             let r_arg = self.compile_node(arena, NodeId(arena.extra_children[arg_start + 1]));
                             self.emit(Opcode::Print, 0, r_arg, 0);
                             return 0;
+                        } else if name == "__engine" && arg_len > 1 {
+                            let hook_arg = NodeId(arena.extra_children[arg_start + 1]);
+                            let r_hook = self.compile_node(arena, hook_arg);
+                            let num_args = (arg_len - 2) as u8;
+                            for i in 0..num_args {
+                                let arg_id = NodeId(arena.extra_children[arg_start + 2 + (i as usize)]);
+                                let r = self.compile_node(arena, arg_id);
+                                self.emit(Opcode::Move, (i + 1) as u8, r, 0);
+                            }
+                            let dst = self.alloc_reg();
+                            self.emit(Opcode::EngineIntrinsic, dst, r_hook, num_args);
+                            return dst;
                         } else {
                             let mut arg_regs = Vec::new();
                             for i in 1..arg_len {

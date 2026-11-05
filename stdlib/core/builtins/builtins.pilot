@@ -61,6 +61,35 @@ pub syntax {
         }
     };
 
+    guard(cond, else_body) => quote {
+        if !() {
+            
+        }
+    };
+
+    switch(target, arms) => quote {
+        {
+            let __sw_target = ;
+            
+        }
+    };
+
+    case(pat, body) => quote {
+        
+    };
+
+    default(body) => quote {
+        
+    };
+
+    try(body, handler) => quote {
+        
+    };
+
+    catch(err_pat, body) => quote {
+        
+    };
+
     unit(decl) => quote {
         $decl
     };

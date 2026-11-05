@@ -12,6 +12,8 @@ pilot-lexer = { path = "../pilot-lexer" }
 pilot-parser = { path = "../pilot-parser" }
 pilot-syntax = { path = "../pilot-syntax" }
 pilot-lsp-macros = { path = "../pilot-lsp-macros" }
+pilot-rt = { path = "../pilot-rt" }
+pilot-vm = { path = "../pilot-vm" }
 
 [dev-dependencies]
 pilot-codegen = { path = "../pilot-codegen" }

@@ -37,6 +37,7 @@ pub enum Opcode {
     Xor = 31,
     Shl = 32,
     Shr = 33,
+    EngineIntrinsic = 34,
 }
 
 impl Opcode {
@@ -75,6 +76,7 @@ impl Opcode {
             31 => Self::Xor,
             32 => Self::Shl,
             33 => Self::Shr,
+            34 => Self::EngineIntrinsic,
             _ => Self::Nop,
         }
     }

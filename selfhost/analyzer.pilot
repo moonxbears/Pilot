@@ -1,41 +1,114 @@
 // ==============================================================================
-// selfhost/analyzer.pilot: Semantic Analyzer & Type Checker Written in Pilot
+// selfhost/analyzer.pilot: Name-Blind Type Inference & Semantic Analyzer
+// 100% Pilot-Hosted Multi-Pass Analyzer Executed in PilVirtualMachine
+// Driven by __engine(...) host bridge into PhysicsRegistry
 // ==============================================================================
 
 pub pkg Pilot.SelfHost.Analyzer;
 
-use Pilot.Core.Genesis.*;
-use Pilot.Core.Interfaces.*;
-use Pilot.Core.Memory.*;
-use Pilot.Core.Option.*;
-use Pilot.Core.Result.*;
-use Pilot.Core.Builtins.*;
+// Top-level entrypoint executed by pilot-vm
+pub fn analyze_unit(unit_id: i64) -> i64 {
+    let total_nodes = __engine("ast_node_count");
+    if total_nodes == 0 {
+        return 0;
+    }
 
-extern "c" {
-    fn strcmp(s1: str, s2: str) -> i32;
+    // Default scalar layouts registered dynamically
+    let int_scalar = __engine("layout_scalar", 64, 1, 2);
+    let float_scalar = __engine("layout_scalar", 64, 1, 1);
+    let bool_scalar = __engine("layout_scalar", 8, 1, 0);
+
+    // Pass 1: Declaration Registration
+    var i = 0;
+    while i < total_nodes {
+        let kind = __engine("ast_node_kind", i);
+        if kind == 1 {
+            // Struct declaration
+            let sym = __engine("ast_node_sym", i);
+            let child_cnt = __engine("ast_child_count", i);
+            var struct_lid = int_scalar;
+            if child_cnt > 0 {
+                struct_lid = __engine("layout_aggregate", int_scalar, int_scalar);
+            }
+            __engine("ast_bind_layout", i, struct_lid);
+        } else if kind == 3 {
+            // Fn declaration
+            let fn_lid = __engine("layout_scalar", 64, 1, 0);
+            __engine("ast_bind_layout", i, fn_lid);
+        }
+        i = i + 1;
+    }
+
+    // Pass 2: Statements & Expressions Inference
+    i = 0;
+    while i < total_nodes {
+        let kind = __engine("ast_node_kind", i);
+        if kind == 15 {
+            // Literal Leaf
+            let lit_kind = __engine("ast_node_lit_kind", i);
+            var lit_lid = int_scalar;
+            if lit_kind == 2 {
+                lit_lid = float_scalar;
+            } else if lit_kind == 4 {
+                lit_lid = bool_scalar;
+            }
+            __engine("ast_bind_layout", i, lit_lid);
+        } else if kind == 14 {
+            // Identifier Leaf
+            let sym = __engine("ast_node_sym", i);
+            __engine("ast_bind_layout", i, int_scalar);
+        } else if kind == 4 {
+            // Let statement
+            let child_cnt = __engine("ast_child_count", i);
+            if child_cnt > 0 {
+                let rhs_id = __engine("ast_child_at", i, 0);
+                var rhs_lid = __engine("ast_get_bound_layout", rhs_id);
+                if rhs_lid == 4294967295 {
+                    rhs_lid = int_scalar;
+                }
+                __engine("ast_bind_layout", i, rhs_lid);
+            } else {
+                __engine("ast_bind_layout", i, int_scalar);
+            }
+        } else if kind == 19 {
+            // Binary expression
+            let child_cnt = __engine("ast_child_count", i);
+            var res_lid = int_scalar;
+            if child_cnt > 0 {
+                let lhs_id = __engine("ast_child_at", i, 0);
+                let lhs_lid = __engine("ast_get_bound_layout", lhs_id);
+                if lhs_lid != 4294967295 {
+                    res_lid = lhs_lid;
+                }
+            }
+            __engine("ast_bind_layout", i, res_lid);
+        } else if kind == 17 {
+            // Field access (MemberExpr)
+            let child_cnt = __engine("ast_child_count", i);
+            if child_cnt > 0 {
+                let recv_id = __engine("ast_child_at", i, 0);
+                var recv_lid = __engine("ast_get_bound_layout", recv_id);
+                if recv_lid == 4294967295 {
+                    recv_lid = int_scalar;
+                }
+                let offset = __engine("layout_field_offset", recv_lid, 0);
+                __engine("ast_bind_layout", i, int_scalar);
+            } else {
+                __engine("ast_bind_layout", i, int_scalar);
+            }
+        } else if kind == 6 {
+            // If expression
+            __engine("ast_bind_layout", i, int_scalar);
+        } else if kind == 16 {
+            // Call expression
+            let sym = __engine("ast_node_sym", i);
+            __engine("ast_bind_target", i, sym);
+            __engine("ast_bind_layout", i, int_scalar);
+        }
+        i = i + 1;
+    }
+
+    return 1;
 }
 
-pub const TYPE_UNKNOWN: i64 = 0;
-pub const TYPE_INT: i64 = 1;
-pub const TYPE_FLOAT: i64 = 2;
-pub const TYPE_BOOL: i64 = 3;
-pub const TYPE_STR: i64 = 4;
-pub const TYPE_VOID: i64 = 5;
-
-pub fn resolve_primitive_type(type_name: str) -> i64 {
-    if strcmp(type_name, "i64") == 0 || strcmp(type_name, "int") == 0 { return TYPE_INT; }
-    if strcmp(type_name, "f64") == 0 || strcmp(type_name, "float") == 0 { return TYPE_FLOAT; }
-    if strcmp(type_name, "bool") == 0 { return TYPE_BOOL; }
-    if strcmp(type_name, "str") == 0 { return TYPE_STR; }
-    if strcmp(type_name, "void") == 0 { return TYPE_VOID; }
-    return TYPE_UNKNOWN;
-}
-
-pub fn get_type_c_name(type_id: i64) -> str {
-    if type_id == 1 { return "int64_t"; }
-    if type_id == 2 { return "double"; }
-    if type_id == 3 { return "bool"; }
-    if type_id == 4 { return "const char*"; }
-    if type_id == 5 { return "void"; }
-    return "int64_t";
-}
+analyze_unit(0);

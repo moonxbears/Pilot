@@ -947,4 +947,72 @@ for t in transactions {
         assert!(!comp_self_resp.contains("\"split\""), "self inside Apples must not show string method 'split': {}", comp_self_resp);
         assert!(!comp_self_resp.contains("\"clamp\""), "self inside Apples must not show int method 'clamp'");
     }
+
+    #[test]
+    fn test_advanced_hover_overloads_wrapping_and_sections() {
+        let mut server = LspServer::new();
+        let uri = "file:///workspace/advanced_hover.pilot";
+        let code = "/// Computes summary statistics over the buffer.\npub pure fn process(data: str, threshold: f64, max_depth: i64) -> i64 ! str {\n    return 42;\n}\n\npub fn process(data: str) -> i64 {\n    return 1;\n}\n\nlet res = process(\"metrics\", 0.5, 10);\nlet short_res = process(\"raw\");\nguard true else { return; };\n";
+        let did_open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+            uri,
+            code.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+        );
+        server.handle_message(&did_open);
+
+        // 1. Hover on definition of first `process` (line 1, char 15)
+        let hover_def1 = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":1,"character":15}}}}}}"#,
+            uri
+        );
+        let resp1 = server.handle_message(&hover_def1).expect("hover def1");
+        println!("resp1: {}", resp1);
+        // Should have parameter wrapping for 3 parameters:
+        assert!(resp1.contains("fn process(\\n") || resp1.contains("fn process(\n"), "Expected parameter wrapping, got: {}", resp1);
+        assert!(resp1.contains("data: str,"), "Expected wrapped parameter 'data'");
+        assert!(resp1.contains("threshold: f64,"), "Expected wrapped parameter 'threshold'");
+        assert!(resp1.contains("max_depth: i64,"), "Expected wrapped parameter 'max_depth'");
+        assert!(resp1.contains(") -> i64 ! str"), "Expected return type and error type");
+        // Should have structured sections:
+        assert!(resp1.contains("### Parameters"), "Expected ### Parameters section");
+        assert!(resp1.contains("- `data`: `str`"), "Expected parameter data");
+        assert!(resp1.contains("### Returns"), "Expected ### Returns section");
+        assert!(resp1.contains("- `i64`"), "Expected return type i64");
+        assert!(resp1.contains("### Throws / Errors"), "Expected ### Throws / Errors section");
+        assert!(resp1.contains("- `str`"), "Expected error type str");
+        assert!(resp1.contains("### Overloads (2)"), "Expected Overloads (2)");
+        assert!(resp1.contains("*(active)*"), "Expected active indicator");
+        // Should include linked modifier badges:
+        assert!(resp1.contains("[pub](#"), "Expected linked pub modifier");
+        assert!(resp1.contains("[pure](#"), "Expected linked pure modifier");
+        // Should include doc comment:
+        assert!(resp1.contains("Computes summary statistics over the buffer."), "Expected doc comment");
+
+        // 2. Hover on call site `process("metrics", ...)` (line 9, char 12)
+        let hover_call1 = format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":9,"character":12}}}}}}"#,
+            uri
+        );
+        let resp_call1 = server.handle_message(&hover_call1).expect("hover call1");
+        assert!(resp_call1.contains("1. `fn process(data: str, threshold: f64, max_depth: i64) -> i64 ! str` *(active)*"), "Expected 3-param overload to be active, got: {}", resp_call1);
+
+        // 3. Hover on call site `process("raw")` (line 10, char 18)
+        let hover_call2 = format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":10,"character":18}}}}}}"#,
+            uri
+        );
+        let resp_call2 = server.handle_message(&hover_call2).expect("hover call2");
+        assert!(resp_call2.contains("2. `fn process(data: str) -> i64` *(active)*"), "Expected 1-param overload to be active, got: {}", resp_call2);
+
+        // 4. Hover on keyword `guard` (line 11, char 2)
+        let hover_kw = format!(
+            r#"{{"jsonrpc":"2.0","id":4,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":11,"character":2}}}}}}"#,
+            uri
+        );
+        let resp_kw = server.handle_message(&hover_kw).expect("hover guard kw");
+        assert!(resp_kw.contains("Pilot Keyword"), "Expected Pilot Keyword");
+        assert!(resp_kw.contains("guard"), "Expected guard");
+        assert!(resp_kw.contains("Related Keywords"), "Expected Related Keywords section");
+        assert!(resp_kw.contains("[`else`](#)"), "Expected linked keyword else");
+    }
 }
