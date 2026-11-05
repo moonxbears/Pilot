@@ -7,7 +7,6 @@ use std::collections::HashSet;
 use std::fmt::Write;
 use pilot_ast::{AstArena, CallQuoteKind, NodeId, NodeKind};
 use pilot_analysis::AnalysisResult;
-use pilot_analysis::types::{TypeId, TypeKind};
 use pilot_intern::SymbolId;
 
 pub struct CTargetEmitter {
@@ -52,10 +51,10 @@ impl CTargetEmitter {
     /// Zero hardcoded Pilot type names — derives C11 representation strictly from
     /// `HardwarePhysics` (`RegClass`, `bit_width`) and recursive `(field_name, field_c_type)` pairs.
     pub fn lower_physics_to_c(
-        physics: pilot_analysis::types::HardwarePhysics,
+        physics: crate::physics::HardwarePhysics,
         field_c_decls: &[(&str, String)],
     ) -> String {
-        use pilot_analysis::types::RegClass;
+        use crate::physics::RegClass;
         match (physics.reg_class, physics.bit_width) {
             (RegClass::Unit, _) => "void".to_string(),
             (RegClass::NoReturn, _) => "_Noreturn void".to_string(),
@@ -268,36 +267,10 @@ impl<'a> CGenContext<'a> {
         if type_spec_id.is_none() {
             return "int64_t".to_string();
         }
-        if let Some(&ty_id) = self.analysis.inferred_types.get(&type_spec_id.0) {
-            let pruned = self.analysis.types.prune(ty_id);
-            if pruned == TypeId::STR {
-                return "const char*".to_string();
-            }
-            if let Some(td) = self.analysis.types.type_defs.get(&pruned) {
-                if matches!(td.shape, pilot_analysis::types::StructuralShape::ContiguousView { .. }) {
-                    return "const char*".to_string();
-                }
-                if td.physics.reg_class != pilot_analysis::types::RegClass::Composite || td.physics.bit_width > 0 {
-                    return CTargetEmitter::lower_physics_to_c(td.physics, &[]);
-                }
-            }
-            let physics = self.analysis.types.type_physics(pruned);
-            if physics.reg_class != pilot_analysis::types::RegClass::Composite {
-                return CTargetEmitter::lower_physics_to_c(physics, &[]);
-            }
-        }
         let t_node = *self.arena.node(type_spec_id);
         match t_node.node_kind() {
             NodeKind::TypeNamed => {
                 let t_name = self.arena.interner.resolve(SymbolId(t_node.lhs));
-                if let Some(&def_id) = self.analysis.types.type_defs_by_name.get(t_name) {
-                    if let Some(td) = self.analysis.types.type_defs.get(&def_id) {
-                        if matches!(td.shape, pilot_analysis::types::StructuralShape::ContiguousView { .. }) {
-                            return "const char*".to_string();
-                        }
-                        return CTargetEmitter::lower_physics_to_c(td.physics, &[]);
-                    }
-                }
                 match t_name {
                     "string" => "const char*".to_string(),
                     "list" | "List" => "PilotList*".to_string(),
@@ -474,40 +447,8 @@ impl<'a> CGenContext<'a> {
         out
     }
 
-    fn infer_c_type(&self, id: NodeId) -> &'static str {
-        if let Some(&ty_id) = self.analysis.inferred_types.get(&id.0) {
-            match ty_id {
-                TypeId::I64 => "int64_t",
-                TypeId::I32 => "int32_t",
-                TypeId::F64 => "double",
-                TypeId::F32 => "float",
-                TypeId::BOOL => "bool",
-                TypeId::STR => "const char*",
-                TypeId::VOID => "void",
-                _ => {
-                    let physics = self.analysis.types.type_physics(ty_id);
-                    match (physics.reg_class, physics.bit_width) {
-                        (pilot_analysis::types::RegClass::SimdFloat, 32) => "float",
-                        (pilot_analysis::types::RegClass::SimdFloat, _) => "double",
-                        (pilot_analysis::types::RegClass::GprUnsigned, 1) => "bool",
-                        _ => {
-                            if matches!(self.analysis.types.type_shape(ty_id), pilot_analysis::types::StructuralShape::ContiguousView { .. }) {
-                                return "const char*";
-                            }
-                            let type_info = self.analysis.types.get(ty_id);
-                            match type_info {
-                                TypeKind::Primitive(p) if p == "int" => "int64_t",
-                                TypeKind::Primitive(p) if p == "float" => "double",
-                                TypeKind::Collection { .. } => "PilotList*",
-                                _ => "int64_t",
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            "int64_t"
-        }
+    fn infer_c_type(&self, _id: NodeId) -> &'static str {
+        "int64_t"
     }
 
     fn emit_body(&mut self) {
@@ -709,27 +650,12 @@ impl<'a> CGenContext<'a> {
         None
     }
 
-    fn infer_list_elem_type(&self, id: NodeId) -> &'static str {
-        if id.is_some() {
-            if let Some(&ty) = self.analysis.inferred_types.get(&id.0) {
-                let pruned = self.analysis.types.prune(ty);
-                if let TypeKind::Collection { element, .. } = self.analysis.types.get(pruned).clone() {
-                    let elem_pruned = self.analysis.types.prune(element);
-                    let physics = self.analysis.types.type_physics(elem_pruned);
-                    if elem_pruned == TypeId::STR || matches!(self.analysis.types.type_shape(elem_pruned), pilot_analysis::types::StructuralShape::ContiguousView { .. }) {
-                        return "const char*";
-                    }
-                    if elem_pruned == TypeId::F64 || elem_pruned == TypeId::F32 || physics.reg_class == pilot_analysis::types::RegClass::SimdFloat || matches!(self.analysis.types.get(elem_pruned), TypeKind::Primitive(p) if p == "float") {
-                        return "double";
-                    }
-                }
-            }
-        }
+    fn infer_list_elem_type(&self, _id: NodeId) -> &'static str {
         "int64_t"
     }
 
-    fn is_string_expr(&self, id: NodeId, code: &str) -> bool {
-        if code.starts_with('"')
+    fn is_string_expr(&self, _id: NodeId, code: &str) -> bool {
+        code.starts_with('"')
             || code.contains("((const char*)")
             || code.contains("(char*)")
             || code.contains("pilot_rt_str_concat")
@@ -748,85 +674,33 @@ impl<'a> CGenContext<'a> {
             || code.contains("pilot_rt_list_to_str")
             || code.contains("pilot_rt_int_to_hex")
             || code.contains("pilot_rt_int_to_bin")
-        {
-            return true;
-        }
-        if id.is_some() {
-            if let Some(&ty) = self.analysis.inferred_types.get(&id.0) {
-                let mut pruned = self.analysis.types.prune(ty);
-                if let TypeKind::Option(inner) = *self.analysis.types.get(pruned) {
-                    pruned = self.analysis.types.prune(inner);
-                }
-                if pruned == TypeId::STR {
-                    return true;
-                }
-                if matches!(self.analysis.types.type_shape(pruned), pilot_analysis::types::StructuralShape::ContiguousView { .. }) {
-                    return true;
-                }
-            }
-        }
-        false
     }
 
-    fn is_float_expr(&self, id: NodeId, code: &str) -> bool {
-        if code.contains("pilot_rt_str_to_float") || code.contains("pilot_rt_float_") || code.starts_with("round(") || code.starts_with("floor(") || code.starts_with("ceil(") || code.starts_with("sqrt(") {
-            return true;
-        }
-        if id.is_some() {
-            if let Some(&ty) = self.analysis.inferred_types.get(&id.0) {
-                if ty == TypeId::F64 || ty == TypeId::F32 {
-                    return true;
-                }
-                let pruned = self.analysis.types.prune(ty);
-                if self.analysis.types.type_physics(pruned).reg_class == pilot_analysis::types::RegClass::SimdFloat
-                    || matches!(self.analysis.types.get(pruned), TypeKind::Primitive(p) if p == "float")
-                {
-                    return true;
-                }
-            }
-        }
-        code.contains('.') && !code.starts_with('"') && !code.contains("pilot_rt_")
+    fn is_float_expr(&self, _id: NodeId, code: &str) -> bool {
+        code.contains("pilot_rt_str_to_float")
+            || code.contains("pilot_rt_float_")
+            || code.starts_with("round(")
+            || code.starts_with("floor(")
+            || code.starts_with("ceil(")
+            || code.starts_with("sqrt(")
+            || (code.contains('.') && !code.starts_with('"') && !code.contains("pilot_rt_"))
     }
 
-    fn is_bool_expr(&self, id: NodeId, code: &str) -> bool {
-        if code == "true"
+    fn is_bool_expr(&self, _id: NodeId, code: &str) -> bool {
+        code == "true"
             || code == "false"
             || code.contains("pilot_rt_str_starts_with")
             || code.contains("pilot_rt_str_ends_with")
             || code.contains("pilot_rt_str_contains")
             || code.contains("pilot_rt_str_is_")
             || code.contains("pilot_rt_list_contains")
-        {
-            return true;
-        }
-        if id.is_some() {
-            if let Some(&ty) = self.analysis.inferred_types.get(&id.0) {
-                if ty == TypeId::BOOL {
-                    return true;
-                }
-                let pruned = self.analysis.types.prune(ty);
-                let physics = self.analysis.types.type_physics(pruned);
-                if physics.reg_class == pilot_analysis::types::RegClass::GprUnsigned && physics.bit_width == 1 {
-                    return true;
-                }
-            }
-        }
-        false
     }
 
-    fn is_list_expr(&self, id: NodeId, code: &str) -> bool {
-        if code.starts_with("PILOT_LIST_OF") || code.starts_with("pilot_rt_list_") || code.contains("pilot_rt_str_split") || code.contains("pilot_rt_str_chars") {
-            return true;
-        }
-        if id.is_some() {
-            if let Some(&ty) = self.analysis.inferred_types.get(&id.0) {
-                let pruned = self.analysis.types.prune(ty);
-                if matches!(self.analysis.types.get(pruned), TypeKind::Collection { .. }) {
-                    return true;
-                }
-            }
-        }
-        false
+    fn is_list_expr(&self, _id: NodeId, code: &str) -> bool {
+        code.starts_with("PILOT_LIST_OF")
+            || code.starts_with("pilot_rt_list_")
+            || code.contains("pilot_rt_str_split")
+            || code.contains("pilot_rt_str_chars")
     }
 
     fn to_string_c_code(&self, id: NodeId, code: &str) -> String {
@@ -1690,15 +1564,6 @@ impl<'a> CGenContext<'a> {
                 let idx_id = NodeId(node.rhs);
                 let idx = self.emit_expr(idx_id);
                 if self.is_list_expr(target_id, &target) {
-                    if let Some(&ty) = self.analysis.inferred_types.get(&target_id.0) {
-                        let pruned = self.analysis.types.prune(ty);
-                        if let TypeKind::Collection { element, .. } = self.analysis.types.get(pruned).clone() {
-                            let elem_pruned = self.analysis.types.prune(element);
-                            if elem_pruned == TypeId::STR || matches!(self.analysis.types.type_shape(elem_pruned), pilot_analysis::types::StructuralShape::ContiguousView { .. }) {
-                                return format!("((const char*)pilot_rt_list_get({}, {}))", target, idx);
-                            }
-                        }
-                    }
                     format!("((int64_t)(intptr_t)pilot_rt_list_get({}, {}))", target, idx)
                 } else if self.is_string_expr(target_id, &target) {
                     format!("pilot_rt_str_char_at({}, {})", target, idx)

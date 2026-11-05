@@ -70,8 +70,8 @@ impl LlvmEmitter {
 
         if arena.root.is_none() {
             let ret_ty = Self::lower_physics_to_llvm(
-                pilot_analysis::types::HardwarePhysics {
-                    reg_class: pilot_analysis::types::RegClass::GprSigned,
+                crate::physics::HardwarePhysics {
+                    reg_class: crate::physics::RegClass::GprSigned,
                     bit_width: 64,
                 },
                 &[],
@@ -112,8 +112,8 @@ impl LlvmEmitter {
             body.push("ret i64 0".to_string());
             let body_slices: Vec<&str> = body.iter().map(|s| s.as_str()).collect();
             let ret_ty = Self::lower_physics_to_llvm(
-                pilot_analysis::types::HardwarePhysics {
-                    reg_class: pilot_analysis::types::RegClass::GprSigned,
+                crate::physics::HardwarePhysics {
+                    reg_class: crate::physics::RegClass::GprSigned,
                     bit_width: 64,
                 },
                 &[],
@@ -131,8 +131,8 @@ impl LlvmEmitter {
         let fn_len = fn_node.flags as usize;
 
         let default_ty = Self::lower_physics_to_llvm(
-            pilot_analysis::types::HardwarePhysics {
-                reg_class: pilot_analysis::types::RegClass::GprSigned,
+            crate::physics::HardwarePhysics {
+                reg_class: crate::physics::RegClass::GprSigned,
                 bit_width: 64,
             },
             &[],
@@ -410,10 +410,10 @@ impl LlvmEmitter {
     /// Zero hardcoded Pilot type names — derives LLVM IR representation strictly from
     /// `HardwarePhysics` (`RegClass`, `bit_width`) and recursive field types.
     pub fn lower_physics_to_llvm(
-        physics: pilot_analysis::types::HardwarePhysics,
+        physics: crate::physics::HardwarePhysics,
         field_llvm_types: &[String],
     ) -> String {
-        use pilot_analysis::types::RegClass;
+        use crate::physics::RegClass;
         match (physics.reg_class, physics.bit_width) {
             (RegClass::Unit, _) | (RegClass::NoReturn, _) => "void".to_string(),
             (RegClass::GprSigned, b) | (RegClass::GprUnsigned, b) => format!("i{}", b.max(1)),

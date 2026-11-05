@@ -427,8 +427,8 @@ impl PilotDebugger {
             for &child_id in arena.children_slice(root_node.lhs, root_node.rhs) {
                 let node = *arena.node(NodeId(child_id));
                 if matches!(node.node_kind(), NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl) {
-                    let ty_str = if let Some(ty_id) = analysis.inferred_types.get(&(child_id as u32)) {
-                        analysis.types.display(*ty_id)
+                    let ty_str = if let Some(Some(lid)) = analysis.physics.node_layouts.get(child_id as usize) {
+                        format!("layout#{}", lid.0)
                     } else if let Some(annot_id) = arena.type_annotations.get(&(child_id as u32)) {
                         let annot_node = arena.node(*annot_id);
                         if annot_node.node_kind() == NodeKind::TypeNamed {

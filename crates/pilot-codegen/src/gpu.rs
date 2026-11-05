@@ -499,10 +499,10 @@ impl GpuEmitter {
 
     /// Section 2.8 (Phase 3.5): Physics-Driven GPU (OpenCL/CUDA/SPIR-V) Type Lowering.
     pub fn lower_physics_to_gpu(
-        physics: pilot_analysis::types::HardwarePhysics,
+        physics: crate::physics::HardwarePhysics,
         field_gpu_decls: &[(&str, String)],
     ) -> String {
-        use pilot_analysis::types::RegClass;
+        use crate::physics::RegClass;
         match (physics.reg_class, physics.bit_width) {
             (RegClass::Unit, _) | (RegClass::NoReturn, _) => "void".to_string(),
             (RegClass::GprUnsigned, 1) => "bool".to_string(),

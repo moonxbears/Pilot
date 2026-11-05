@@ -381,10 +381,10 @@ export function loadPilotModule(
 
     /// Section 2.8 (Phase 3.5): Physics-Driven WebAssembly Type Lowering.
     pub fn lower_physics_to_wasm(
-        physics: pilot_analysis::types::HardwarePhysics,
+        physics: crate::physics::HardwarePhysics,
         field_wasm_types: &[String],
     ) -> String {
-        use pilot_analysis::types::RegClass;
+        use crate::physics::RegClass;
         let w32 = format!("i{}", 32);
         let w64 = format!("i{}", 64);
         let flt32 = format!("f{}", 32);

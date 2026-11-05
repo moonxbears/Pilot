@@ -8,6 +8,7 @@ pub mod wasm;
 pub mod asm;
 pub mod driver;
 pub mod gpu;
+pub mod physics;
 
 pub use llvm::LlvmEmitter;
 pub use c_target::CTargetEmitter;
@@ -15,6 +16,7 @@ pub use wasm::WasmEmitter;
 pub use asm::AsmEmitter;
 pub use driver::{BuildDriver, BuildOptions, BuildTarget, OptLevel};
 pub use gpu::{GpuBackend, GpuEmitter, GpuVendor};
+pub use physics::{HardwarePhysics, RegClass};
 
 #[cfg(test)]
 mod tests {

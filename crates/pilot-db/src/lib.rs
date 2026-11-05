@@ -268,7 +268,7 @@ pub fn type_at_offset_query(db: &mut Database, file_id: FileId, byte_offset: u32
     for (idx, span) in mod_analysis.arena.spans.iter().enumerate() {
         if byte_offset >= span.start && byte_offset <= span.end {
             let len = span.end.saturating_sub(span.start);
-            if mod_analysis.analysis.inferred_types.contains_key(&(idx as u32)) {
+            if mod_analysis.analysis.physics.node_layouts.get(idx).and_then(|x| *x).is_some() {
                 if best_match.map_or(true, |(_, best_len)| len <= best_len) {
                     best_match = Some((idx as u32, len));
                 }
@@ -277,9 +277,9 @@ pub fn type_at_offset_query(db: &mut Database, file_id: FileId, byte_offset: u32
     }
 
     let (node_idx, _) = best_match?;
-    let ty_id = *mod_analysis.analysis.inferred_types.get(&node_idx)?;
-    let pruned = mod_analysis.analysis.types.prune(ty_id);
-    Some(mod_analysis.analysis.types.display(pruned))
+    let lid = *mod_analysis.analysis.physics.node_layouts.get(node_idx as usize)?.as_ref()?;
+    let layout = mod_analysis.analysis.physics.layouts.get(lid)?;
+    Some(format!("{:?}", layout.geometry))
 }
 
 /// Auto-registered compiler query for `textDocument/documentSymbol`.

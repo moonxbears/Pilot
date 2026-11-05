@@ -5,7 +5,6 @@
 
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_analysis::AnalysisResult;
-use pilot_analysis::types::{TypeId, TypeKind};
 use pilot_intern::SymbolId;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -56,47 +55,8 @@ pub enum IrType {
 }
 
 impl IrType {
-    pub fn from_analysis(types: &pilot_analysis::types::TypeArena, id: TypeId) -> Self {
-        match id {
-            TypeId::VOID => Self::Void,
-            TypeId::BOOL => Self::Bool,
-            TypeId::I64 | TypeId::I32 => Self::Int,
-            TypeId::F64 | TypeId::F32 => Self::Float,
-            TypeId::STR => Self::String,
-            _ => {
-                let kind = types.get(id);
-                match kind {
-                    TypeKind::RowRecord { name: Some(ref n), .. } => Self::Custom(n.clone()),
-                    TypeKind::RowRecord { .. } => Self::Custom("Record".to_string()),
-                    TypeKind::Adt { ref name, .. } => Self::Custom(name.clone()),
-                    TypeKind::Unit { base, .. } => Self::from_analysis(types, *base),
-                    TypeKind::Option(inner) => {
-                        Self::Option(Box::new(Self::from_analysis(types, *inner)))
-                    }
-                    TypeKind::Result { ok, err } => Self::Result {
-                        ok: Box::new(Self::from_analysis(types, *ok)),
-                        err: Box::new(Self::from_analysis(types, *err)),
-                    },
-                    TypeKind::Collection { element, .. } => {
-                        Self::List(Box::new(Self::from_analysis(types, *element)))
-                    }
-                    TypeKind::Map { key, value } => Self::Map {
-                        key: Box::new(Self::from_analysis(types, *key)),
-                        value: Box::new(Self::from_analysis(types, *value)),
-                    },
-                    TypeKind::Tuple(fields) => {
-                        Self::Tuple(fields.iter().map(|&f| Self::from_analysis(types, f)).collect())
-                    }
-                    TypeKind::Primitive(p) if p == "int" || p == "i64" || p == "i32" || p == "usize" => Self::Int,
-                    TypeKind::Primitive(p) if p == "float" || p == "f64" || p == "f32" => Self::Float,
-                    TypeKind::Primitive(p) if p == "bool" => Self::Bool,
-                    TypeKind::Primitive(p) if p == "str" || p == "string" => Self::String,
-                    TypeKind::Primitive(p) if p == "unit" || p == "void" => Self::Void,
-                    TypeKind::Primitive(p) => Self::Custom(p.clone()),
-                    _ => Self::Int,
-                }
-            }
-        }
+    pub fn from_analysis() -> Self {
+        Self::Custom("any".to_string())
     }
 
     pub fn from_type_spec(arena: &AstArena, id: NodeId) -> Self {
@@ -337,8 +297,6 @@ impl IrModule {
                                             let f_name = arena.interner.resolve(SymbolId(c_node.lhs)).to_string();
                                             let f_ty = if let Some(&ann) = arena.type_annotations.get(&c_id) {
                                                 IrType::from_type_spec(arena, ann)
-                                            } else if let Some(&ty_id) = analysis.inferred_types.get(&c_id) {
-                                                IrType::from_analysis(&analysis.types, ty_id)
                                             } else {
                                                 IrType::Int
                                             };
@@ -486,8 +444,6 @@ impl IrModule {
             IrType::from_type_spec(arena, ann)
         } else if fn_name == "main" {
             IrType::Int
-        } else if let Some(&ty_id) = analysis.inferred_types.get(&fn_id.0) {
-            IrType::from_analysis(&analysis.types, ty_id)
         } else {
             IrType::Void
         };
@@ -578,10 +534,6 @@ impl IrModule {
                 let init = Self::lower_expr(arena, analysis, init_id);
                 let ty = if let Some(&ann) = arena.type_annotations.get(&id.0) {
                     IrType::from_type_spec(arena, ann)
-                } else if let Some(&ty_id) = analysis.inferred_types.get(&id.0) {
-                    IrType::from_analysis(&analysis.types, ty_id)
-                } else if let Some(&ty_id) = analysis.inferred_types.get(&init_id.0) {
-                    IrType::from_analysis(&analysis.types, ty_id)
                 } else {
                     IrType::Int
                 };
@@ -597,10 +549,6 @@ impl IrModule {
                 let init = Self::lower_expr(arena, analysis, init_id);
                 let ty = if let Some(&ann) = arena.type_annotations.get(&id.0) {
                     IrType::from_type_spec(arena, ann)
-                } else if let Some(&ty_id) = analysis.inferred_types.get(&id.0) {
-                    IrType::from_analysis(&analysis.types, ty_id)
-                } else if let Some(&ty_id) = analysis.inferred_types.get(&init_id.0) {
-                    IrType::from_analysis(&analysis.types, ty_id)
                 } else {
                     IrType::Int
                 };
