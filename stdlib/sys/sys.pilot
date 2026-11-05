@@ -2,36 +2,45 @@
 // std.sys — System-specific parameters and functions across Linux, Windows, macOS, Android, iOS
 // Modeled after Python's `sys` module (CPython Lib/sys scaffold)
 
+pub pkg Pilot.Sys;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+
 // ============================================================================
 // 1. Command-Line Arguments (Python: sys.argv)
 // ============================================================================
 
 // Native runtime optimizations provided by pilot_rt (C-ABI FFI)
 extern "c" lib "pilot_rt" {
-    def __sys_argv() -> List[str];
-    def __sys_exit(code: i64);
-    def __sys_executable() -> str;
-    def __sys_pointer_size() -> i64;
-    def __sys_byteorder() -> str;
-    def __os_platform() -> str;
-    def __os_arch() -> str;
-    def __os_is_windows() -> bool;
-    def __os_is_linux() -> bool;
-    def __os_is_macos() -> bool;
-    def __os_is_android() -> bool;
-    def __os_is_ios() -> bool;
-    def __os_abort();
+    fn __sys_argv() -> str[];
+    fn __sys_exit(code: i64);
+    fn __sys_executable() -> str;
+    fn __sys_pointer_size() -> i64;
+    fn __sys_byteorder() -> str;
+    fn __os_platform() -> str;
+    fn __os_arch() -> str;
+    fn __os_is_windows() -> bool;
+    fn __os_is_linux() -> bool;
+    fn __os_is_macos() -> bool;
+    fn __os_is_android() -> bool;
+    fn __os_is_ios() -> bool;
+    fn __os_abort();
 }
 
-def argv() -> [str] {
+pub fn argv() -> str[] {
     return __sys_argv();
 }
 
-def get_args() -> [str] {
+pub fn get_args() -> str[] {
     return argv();
 }
 
-def argc() -> i64 {
+pub fn argc() -> i64 {
     return len(argv());
 }
 
@@ -39,22 +48,22 @@ def argc() -> i64 {
 // 2. Platform & Target Architecture (Python: sys.platform, sys.byteorder)
 // ============================================================================
 
-def platform() -> str {
+pub fn platform() -> str {
     if __os_is_windows() {
         return "win32";
-    } elif __os_is_macos() {
+    } else if __os_is_macos() {
         return "darwin";
-    } elif __os_is_android() {
+    } else if __os_is_android() {
         return "android";
-    } elif __os_is_ios() {
+    } else if __os_is_ios() {
         return "ios";
-    } elif __os_is_linux() {
+    } else if __os_is_linux() {
         return "linux";
     }
     return __os_platform();
 }
 
-def arch() -> str {
+pub fn arch() -> str {
     let a = __os_arch();
     if len(a) > 0 {
         return a;
@@ -62,7 +71,7 @@ def arch() -> str {
     return "x86_64";
 }
 
-def byteorder() -> str {
+pub fn byteorder() -> str {
     let bo = __sys_byteorder();
     if len(bo) > 0 {
         return bo;
@@ -70,7 +79,7 @@ def byteorder() -> str {
     return "little";
 }
 
-def pointer_size() -> i64 {
+pub fn pointer_size() -> i64 {
     let ps = __sys_pointer_size();
     if ps > 0 {
         return ps;
@@ -78,19 +87,19 @@ def pointer_size() -> i64 {
     return 8;
 }
 
-def is_64bit() -> bool {
+pub fn is_64bit() -> bool {
     return pointer_size() == 8;
 }
 
-def is_32bit() -> bool {
+pub fn is_32bit() -> bool {
     return pointer_size() == 4;
 }
 
-def is_little_endian() -> bool {
+pub fn is_little_endian() -> bool {
     return byteorder() == "little";
 }
 
-def is_big_endian() -> bool {
+pub fn is_big_endian() -> bool {
     return byteorder() == "big";
 }
 
@@ -98,11 +107,11 @@ def is_big_endian() -> bool {
 // 3. Process Execution & Control (Python: sys.exit)
 // ============================================================================
 
-def exit(code: i64 = 0) -> void {
+pub fn exit(code: i64 = 0) -> void {
     __sys_exit(code);
 }
 
-def abort() -> void {
+pub fn abort() -> void {
     __os_abort();
 }
 
@@ -110,19 +119,19 @@ def abort() -> void {
 // 4. Pilot Version & Implementation (Python: sys.version, sys.version_info)
 // ============================================================================
 
-def version() -> str {
+pub fn version() -> str {
     return "1.1.51";
 }
 
-def version_info() -> [i64] {
+pub fn version_info() -> i64[] {
     return [1, 1, 51];
 }
 
-def compiler() -> str {
+pub fn compiler() -> str {
     return "Pilot Native AOT (C11/LLVM/PilVM v3)";
 }
 
-def executable() -> str {
+pub fn executable() -> str {
     let exe = __sys_executable();
     if len(exe) > 0 {
         return exe;
@@ -134,23 +143,23 @@ def executable() -> str {
 // 5. Standard Streams & File Descriptors (Python: sys.stdin, sys.stdout, sys.stderr)
 // ============================================================================
 
-def stdin_fileno() -> i64 {
+pub fn stdin_fileno() -> i64 {
     return 0;
 }
 
-def stdout_fileno() -> i64 {
+pub fn stdout_fileno() -> i64 {
     return 1;
 }
 
-def stderr_fileno() -> i64 {
+pub fn stderr_fileno() -> i64 {
     return 2;
 }
 
-def write_stdout(text: str) -> void {
+pub fn write_stdout(text: str) -> void {
     print(text);
 }
 
-def write_stderr(text: str) -> void {
+pub fn write_stderr(text: str) -> void {
     print(text);
 }
 
@@ -158,22 +167,22 @@ def write_stderr(text: str) -> void {
 // 6. Integer & Float Numerical Limits (Python: sys.maxsize)
 // ============================================================================
 
-def maxsize() -> i64 {
+pub fn maxsize() -> i64 {
     return 9223372036854775807; // i64::MAX
 }
 
-def minsize() -> i64 {
+pub fn minsize() -> i64 {
     return -9223372036854775807 - 1; // i64::MIN
 }
 
-def float_max() -> float {
+pub fn float_max() -> f64 {
     return 1.7976931348623157e+308;
 }
 
-def float_min() -> float {
+pub fn float_min() -> f64 {
     return 2.2250738585072014e-308;
 }
 
-def float_eps() -> float {
+pub fn float_eps() -> f64 {
     return 2.220446049250313e-16;
 }

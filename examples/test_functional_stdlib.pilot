@@ -1,22 +1,22 @@
-import std.collections as collections;
-import std.itertools as itertools;
-import std.functools as functools;
+use Pilot.Collections as collections;
+use Pilot.Collections.Itertools as itertools;
+use Pilot.Functools as functools;
 
-def test_collections() {
+fn test_collections() {
     // 1. Counter (CPython collections.Counter)
-    let c = collections.Counter(["apple", "banana", "apple", "cherry", "apple", "banana"]);
+    var c = collections.Counter(["apple", "banana", "apple", "cherry", "apple", "banana"]);
     c.increment("orange", 2);
     let top = c.most_common(2);
     let tot: i64 = c.total();
 
     // 2. DefaultDict (CPython collections.defaultdict)
-    let dd = collections.DefaultDict(() => 0);
+    var dd = collections.DefaultDict(() => 0);
     dd.put("score", 100);
     let score = dd.gets("score");
     let missing = dd.gets("lives"); // defaults to 0
 
     // 3. OrderedDict (CPython collections.OrderedDict)
-    let od = collections.OrderedDict();
+    var od = collections.OrderedDict();
     od.put("first", 1);
     od.put("second", 2);
     od.put("third", 3);
@@ -31,14 +31,14 @@ def test_collections() {
     let theme = cm.get_or("theme", "light");
 
     // 5. Deque extensions (CPython collections.deque)
-    let dq = collections.Deque();
+    var dq = collections.Deque();
     dq.push_back(10);
     dq.extend_all([20, 30, 40]);
     dq.extend_left([5, 1]);
     dq.rotate(2);
 }
 
-def test_itertools() {
+fn test_itertools() {
     // 1. accumulate (CPython itertools.accumulate)
     let running_sums = itertools.accumulate([1, 2, 3, 4, 5]);
 
@@ -55,7 +55,7 @@ def test_itertools() {
     let sliced = itertools.islice([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 2, 8, 2);
 
     // 6. starmap (CPython itertools.starmap)
-    let sums = itertools.starmap((a, b) => a + b, [(1, 2), (3, 4), (5, 6)]);
+    let sums = itertools.starmap((a: i64, b: i64) => a + b, [(1, 2), (3, 4), (5, 6)]);
 
     // 7. Combinatorics: product, permutations, combinations
     let prod = itertools.product([1, 2], ["x", "y"]);
@@ -64,39 +64,39 @@ def test_itertools() {
     let combs_rep = itertools.combinations_with_replacement([1, 2, 3], 2);
 }
 
-def test_functools() {
+fn test_functools() {
     // 1. partial (CPython functools.partial)
-    let add_three = (a, b, c) => a + b + c;
+    let add_three = (a: i64, b: i64, c: i64) => a + b + c;
     let p = functools.partial(add_three, [10, 20]);
     let res = p.call1(30);
 
     // 2. reduce (CPython functools.reduce)
-    let sum = functools.reduce([1, 2, 3, 4, 5], 0, (acc, x) => acc + x);
+    let sum = functools.reduce([1, 2, 3, 4, 5], 0, (acc: i64, x: i64) => acc + x);
 
     // 3. lru_cache (CPython functools.lru_cache)
-    let cache = functools.lru_cache(100);
-    let fib_val = cache.get_or_compute(10, (n) => n * 2);
+    var cache = functools.lru_cache(100);
+    let fib_val = cache.get_or_compute(10, (n: i64) => n * 2);
     let info = cache.cache_info();
 
     // 4. compose & pipe (Functional Algebra)
-    let double_it = (x) => x * 2;
-    let add_five = (x) => x + 5;
+    let double_it = (x: i64) => x * 2;
+    let add_five = (x: i64) => x + 5;
     let comp = functools.compose(double_it, add_five); // (x + 5) * 2
     let piped = functools.pipe(10, [add_five, double_it]); // (10 + 5) * 2 = 30
 
     // 5. curry2 & flip
-    let sub = (a, b) => a - b;
+    let sub = (a: i64, b: i64) => a - b;
     let curried_sub = functools.curry2(sub);
     let flipped_sub = functools.flip(sub);
 
     // 6. singledispatch (CPython functools.singledispatch)
-    let dispatcher = functools.singledispatch((x) => f"default: {x}");
-    dispatcher.register("i64", (x) => f"integer: {x}");
-    dispatcher.register("str", (x) => f"string: {x}");
+    var dispatcher = functools.singledispatch((x: any) => f"default: {x}");
+    dispatcher.register("i64", (x: any) => f"integer: {x}");
+    dispatcher.register("str", (x: any) => f"string: {x}");
     let d_res = dispatcher.invoke(42);
 }
 
-def main() {
+fn main() {
     test_collections();
     test_itertools();
     test_functools();

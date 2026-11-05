@@ -2,27 +2,27 @@
 // Showcase 21: Advanced Type Inference — Bidirectional, Flow-Sensitive & Row-Polymorphic
 // =============================================================================
 
-record Product(title: str, price: float, in_stock: bool);
-record Frame2D(width: int, height: int, name: str);
-record Canvas2D(width: float, height: float);
+record Product(title: str, price: f64, in_stock: bool);
+record Frame2D(width: i64, height: i64, name: str);
+record Canvas2D(width: f64, height: f64);
 
-// 1. Structural Row Polymorphism: infers `({ width: T, height: T, ..R } where T: Numeric) -> T`
-def compute_area(surface) => surface.width * surface.height;
+// 1. Structural Row Polymorphism: infers `({ width: T, height: T, ..R } where T: INumber<T>) -> T`
+fn compute_area(surface) => surface.width * surface.height;
 
 let frame_area = compute_area(Frame2D(1920, 1080, "HD"));
 let canvas_area = compute_area(Canvas2D(12.5, 8.0));
 
-println(f"Frame area (int): {frame_area}");
-println(f"Canvas area (float): {canvas_area}");
+println(f"Frame area (i64): {frame_area}");
+println(f"Canvas area (f64): {canvas_area}");
 
 // 2. Tarjan SCC Fixed-Point Mutual Recursion
-def is_even_step(n: int) => true if n == 0 else is_odd_step(n - 1);
-def is_odd_step(n: int) => false if n == 0 else is_even_step(n - 1);
+fn is_even_step(n: i64) -> bool => if n == 0 { true } else { is_odd_step(n - 1) };
+fn is_odd_step(n: i64) -> bool => if n == 0 { false } else { is_even_step(n - 1) };
 
 println(f"is_even_step(10) = {is_even_step(10)}");
 
 // 3. Dominator Control-Flow Narrowing
-def format_discount(code: str?, base_price: float) -> str {
+fn format_discount(code: str?, base_price: f64) -> str {
     guard some code else {
         return f"${base_price} (no promo)";
     }

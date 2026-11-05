@@ -2,95 +2,103 @@
 // std.os — Operating System Interfaces across Linux, Windows, macOS, Android, iOS
 // Modeled after Python's `os` module (CPython Lib/os.py scaffold)
 
-import std.path as std_path;
-import std.fs as std_fs;
+pub pkg Pilot.Os;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+use Pilot.Io.Path as std_path;
+use Pilot.Io.Fs as std_fs;
 
 // Native runtime optimizations provided by pilot_rt (C-ABI FFI)
 extern "c" lib "pilot_rt" {
-    def __os_platform() -> str;
-    def __os_arch() -> str;
-    def __os_family() -> str;
-    def __os_is_windows() -> bool;
-    def __os_is_linux() -> bool;
-    def __os_is_macos() -> bool;
-    def __os_is_android() -> bool;
-    def __os_is_ios() -> bool;
-    def __os_getenv(name: str) -> str;
-    def __os_setenv(name: str, val: str) -> bool;
-    def __os_unsetenv(name: str) -> bool;
-    def __os_environ() -> List[str];
-    def __os_getpid() -> i64;
-    def __os_getppid() -> i64;
-    def __os_getuid() -> i64;
-    def __os_getgid() -> i64;
-    def __os_cpu_count() -> i64;
-    def __os_system(cmd: str) -> i64;
-    def __os_cwd() -> str;
-    def __os_homedir() -> str;
-    def __os_chdir(path: str) -> bool;
-    def __os_temp_dir() -> str;
-    def __os_abort();
+    fn __os_platform() -> str;
+    fn __os_arch() -> str;
+    fn __os_family() -> str;
+    fn __os_is_windows() -> bool;
+    fn __os_is_linux() -> bool;
+    fn __os_is_macos() -> bool;
+    fn __os_is_android() -> bool;
+    fn __os_is_ios() -> bool;
+    fn __os_getenv(name: str) -> str;
+    fn __os_setenv(name: str, val: str) -> bool;
+    fn __os_unsetenv(name: str) -> bool;
+    fn __os_environ() -> str[];
+    fn __os_getpid() -> i64;
+    fn __os_getppid() -> i64;
+    fn __os_getuid() -> i64;
+    fn __os_getgid() -> i64;
+    fn __os_cpu_count() -> i64;
+    fn __os_system(cmd: str) -> i64;
+    fn __os_cwd() -> str;
+    fn __os_homedir() -> str;
+    fn __os_chdir(path: str) -> bool;
+    fn __os_temp_dir() -> str;
+    fn __os_abort();
 }
 
 // ============================================================================
 // 1. OS Constants & Path Separators (Python: os.sep, os.pathsep, etc.)
 // ============================================================================
 
-def name() -> str {
+pub fn name() -> str {
     if is_windows() {
         return "nt";
     }
     return "posix";
 }
 
-def sep() -> str {
+pub fn sep() -> str {
     if is_windows() {
         return "\\";
     }
     return "/";
 }
 
-def altsep() -> str {
+pub fn altsep() -> str {
     if is_windows() {
         return "/";
     }
     return "";
 }
 
-def pathsep() -> str {
+pub fn pathsep() -> str {
     if is_windows() {
         return ";";
     }
     return ":";
 }
 
-def linesep() -> str {
+pub fn linesep() -> str {
     if is_windows() {
         return "\r\n";
     }
     return "\n";
 }
 
-def devnull() -> str {
+pub fn devnull() -> str {
     if is_windows() {
         return "nul";
     }
     return "/dev/null";
 }
 
-def curdir() -> str {
+pub fn curdir() -> str {
     return ".";
 }
 
-def pardir() -> str {
+pub fn pardir() -> str {
     return "..";
 }
 
-def extsep() -> str {
+pub fn extsep() -> str {
     return ".";
 }
 
-def defpath() -> str {
+pub fn defpath() -> str {
     if is_windows() {
         return ".;C:\\bin";
     }
@@ -101,46 +109,46 @@ def defpath() -> str {
 // 2. Multi-OS Target Detection (Linux, Windows, macOS, Android, iOS)
 // ============================================================================
 
-def is_windows() -> bool {
+pub fn is_windows() -> bool {
     return __os_is_windows();
 }
 
-def is_linux() -> bool {
+pub fn is_linux() -> bool {
     return __os_is_linux();
 }
 
-def is_macos() -> bool {
+pub fn is_macos() -> bool {
     return __os_is_macos();
 }
 
-def is_android() -> bool {
+pub fn is_android() -> bool {
     return __os_is_android();
 }
 
-def is_ios() -> bool {
+pub fn is_ios() -> bool {
     return __os_is_ios();
 }
 
-def is_posix() -> bool {
+pub fn is_posix() -> bool {
     return !is_windows();
 }
 
-def platform() -> str {
+pub fn platform() -> str {
     if is_windows() {
         return "windows";
-    } elif is_android() {
+    } else if is_android() {
         return "android";
-    } elif is_ios() {
+    } else if is_ios() {
         return "ios";
-    } elif is_macos() {
+    } else if is_macos() {
         return "macos";
-    } elif is_linux() {
+    } else if is_linux() {
         return "linux";
     }
     return __os_platform();
 }
 
-def family() -> str {
+pub fn family() -> str {
     if is_windows() {
         return "windows";
     }
@@ -151,7 +159,7 @@ def family() -> str {
 // 3. Environment Variables (Python: os.getenv, os.environ, os.putenv, os.unsetenv)
 // ============================================================================
 
-def getenv(key: str, default_val: str = "") -> str {
+pub fn getenv(key: str, default_val: str = "") -> str {
     let val = __os_getenv(key);
     if len(val) == 0 {
         return default_val;
@@ -159,24 +167,24 @@ def getenv(key: str, default_val: str = "") -> str {
     return val;
 }
 
-def hasenv(key: str) -> bool {
+pub fn hasenv(key: str) -> bool {
     let val = __os_getenv(key);
     return len(val) > 0;
 }
 
-def setenv(key: str, val: str) -> bool {
+pub fn setenv(key: str, val: str) -> bool {
     return __os_setenv(key, val);
 }
 
-def putenv(key: str, val: str) -> bool {
+pub fn putenv(key: str, val: str) -> bool {
     return __os_setenv(key, val);
 }
 
-def unsetenv(key: str) -> bool {
+pub fn unsetenv(key: str) -> bool {
     return __os_unsetenv(key);
 }
 
-def environ() -> [str] {
+pub fn environ() -> str[] {
     return __os_environ();
 }
 
@@ -184,15 +192,15 @@ def environ() -> [str] {
 // 4. Working Directory & Navigation (Python: os.getcwd, os.chdir)
 // ============================================================================
 
-def getcwd() -> str {
+pub fn getcwd() -> str {
     return std_path.normalize(__os_cwd());
 }
 
-def chdir(path: str) -> bool {
+pub fn chdir(path: str) -> bool {
     return __os_chdir(path);
 }
 
-def homedir() -> str {
+pub fn homedir() -> str {
     let home_int = __os_homedir();
     if len(home_int) > 0 {
         return std_path.normalize(home_int);
@@ -204,7 +212,7 @@ def homedir() -> str {
         }
         let drive = getenv("HOMEDRIVE");
         let path = getenv("HOMEPATH");
-        if len(drive) > 0 and len(path) > 0 {
+        if len(drive) > 0 && len(path) > 0 {
             return std_path.normalize(drive + path);
         }
         return "C:\\";
@@ -216,7 +224,7 @@ def homedir() -> str {
     return "/";
 }
 
-def tempdir() -> str {
+pub fn tempdir() -> str {
     let tmp_int = __os_temp_dir();
     if len(tmp_int) > 0 {
         return std_path.normalize(tmp_int);
@@ -243,29 +251,29 @@ def tempdir() -> str {
 // 5. Process & User Information (Python: os.getpid, os.getuid, os.cpu_count)
 // ============================================================================
 
-def getpid() -> i64 {
+pub fn getpid() -> i64 {
     return __os_getpid();
 }
 
-def getppid() -> i64 {
+pub fn getppid() -> i64 {
     return __os_getppid();
 }
 
-def getuid() -> i64 {
+pub fn getuid() -> i64 {
     if is_windows() {
         return 0;
     }
     return __os_getuid();
 }
 
-def getgid() -> i64 {
+pub fn getgid() -> i64 {
     if is_windows() {
         return 0;
     }
     return __os_getgid();
 }
 
-def cpu_count() -> i64 {
+pub fn cpu_count() -> i64 {
     let count = __os_cpu_count();
     if count <= 0 {
         return 1;
@@ -277,75 +285,95 @@ def cpu_count() -> i64 {
 // 6. Filesystem Operations (Python: os.listdir, os.mkdir, os.remove, os.rename)
 // ============================================================================
 
-def listdir(path: str = ".") -> [str] {
-    return std_fs.list_dir(path);
-}
-
-def mkdir(path: str) -> bool {
-    let res = std_fs.create_dir(path, false);
-    match res {
-        ok(val) => val,
-        fail(err) => false,
+pub fn listdir(path: str = ".") -> str[] {
+    let res = std_fs.list_dir(path);
+    switch res {
+        case ok(entries):
+            return entries;
+        case fail(_):
+            return [];
     }
 }
 
-def makedirs(path: str, exist_ok: bool = false) -> bool {
-    if exist_ok and std_fs.exists(path) {
+pub fn mkdir(path: str) -> bool {
+    let res = std_fs.create_dir(path, false);
+    switch res {
+        case ok(val):
+            return val;
+        case fail(_):
+            return false;
+    }
+}
+
+pub fn makedirs(path: str, exist_ok: bool = false) -> bool {
+    if exist_ok && std_fs.exists(path) {
         return true;
     }
     let res = std_fs.create_dir(path, true);
-    match res {
-        ok(val) => val,
-        fail(err) => false,
+    switch res {
+        case ok(val):
+            return val;
+        case fail(_):
+            return false;
     }
 }
 
-def remove(path: str) -> bool {
+pub fn remove(path: str) -> bool {
     let res = std_fs.remove_file(path);
-    match res {
-        ok(val) => val,
-        fail(err) => false,
+    switch res {
+        case ok(val):
+            return val;
+        case fail(_):
+            return false;
     }
 }
 
-def unlink(path: str) -> bool {
+pub fn unlink(path: str) -> bool {
     return remove(path);
 }
 
-def rmdir(path: str) -> bool {
+pub fn rmdir(path: str) -> bool {
     let res = std_fs.remove_dir(path, false);
-    match res {
-        ok(val) => val,
-        fail(err) => false,
+    switch res {
+        case ok(val):
+            return val;
+        case fail(_):
+            return false;
     }
 }
 
-def removedirs(path: str) -> bool {
+pub fn removedirs(path: str) -> bool {
     let res = std_fs.remove_dir(path, true);
-    match res {
-        ok(val) => val,
-        fail(err) => false,
+    switch res {
+        case ok(val):
+            return val;
+        case fail(_):
+            return false;
     }
 }
 
-def rename(src: str, dst: str) -> bool {
+pub fn rename(src: str, dst: str) -> bool {
     let res = std_fs.move_file(src, dst, true);
-    match res {
-        ok(val) => val,
-        fail(err) => false,
+    switch res {
+        case ok(val):
+            return val;
+        case fail(_):
+            return false;
     }
 }
 
-def replace(src: str, dst: str) -> bool {
+pub fn replace(src: str, dst: str) -> bool {
     return rename(src, dst);
 }
 
-def truncate(path: str, length: i64) -> bool {
+pub fn truncate(path: str, length: i64) -> bool {
     if length == 0 {
         let res = std_fs.write_text(path, "");
-        match res {
-            ok(_) => true,
-            fail(_) => false,
+        switch res {
+            case ok(_):
+                return true;
+            case fail(_):
+                return false;
         }
     } else {
         return std_fs.exists(path);
@@ -356,32 +384,42 @@ def truncate(path: str, length: i64) -> bool {
 // 7. Stat & Metadata (Python: os.stat, os.stat_result)
 // ============================================================================
 
-class StatResult {
-    self(size: i64, is_dir: bool, is_file: bool, mode: i64) {
-        self.size = size;
-        self.is_dir = is_dir;
-        self.is_file = is_file;
-        self.mode = mode;
-    }
+pub struct StatResult : IValue {
+    pub:
+        size:    i64;
+        is_dir:  bool;
+        is_file: bool;
+        mode:    i64;
+
+        self(size: i64, is_dir: bool, is_file: bool, mode: i64) {
+            .size = size;
+            .is_dir = is_dir;
+            .is_file = is_file;
+            .mode = mode;
+        }
 }
 
-def stat(path: str) -> StatResult {
-    let sz = match std_fs.file_size(path) {
-        ok(s) => s,
-        fail(_) => 0,
-    };
+pub fn stat(path: str) -> StatResult {
+    var sz: i64 = 0;
+    let sz_res = std_fs.file_size(path);
+    switch sz_res {
+        case ok(s):
+            sz = s;
+        case fail(_):
+            sz = 0;
+    }
     let is_d = std_fs.is_dir(path);
     let is_f = std_fs.is_file(path);
     var m: i64 = 0;
     if is_d {
         m = 16877; // 0o040755
-    } elif is_f {
+    } else if is_f {
         m = 33188; // 0o100644
     }
     return StatResult(sz, is_d, is_f, m);
 }
 
-def lstat(path: str) -> StatResult {
+pub fn lstat(path: str) -> StatResult {
     return stat(path);
 }
 
@@ -389,25 +427,35 @@ def lstat(path: str) -> StatResult {
 // 8. Process Execution & System Commands (Python: os.system, os.abort)
 // ============================================================================
 
-def system(command: str) -> i64 {
+pub fn system(command: str) -> i64 {
     return __os_system(command);
 }
 
-def abort() -> void {
+pub fn abort() -> void {
     __os_abort();
 }
 
-def strerror(code: i64) -> str {
-    match code {
-        0 => "Success",
-        1 => "Operation not permitted (EPERM)",
-        2 => "No such file or directory (ENOENT)",
-        13 => "Permission denied (EACCES)",
-        17 => "File exists (EEXIST)",
-        20 => "Not a directory (ENOTDIR)",
-        21 => "Is a directory (EISDIR)",
-        22 => "Invalid argument (EINVAL)",
-        28 => "No space left on device (ENOSPC)",
-        _ => "Unknown operating system error",
+pub fn strerror(code: i64) -> str {
+    switch code {
+        case 0:
+            return "Success";
+        case 1:
+            return "Operation not permitted (EPERM)";
+        case 2:
+            return "No such file or directory (ENOENT)";
+        case 13:
+            return "Permission denied (EACCES)";
+        case 17:
+            return "File exists (EEXIST)";
+        case 20:
+            return "Not a directory (ENOTDIR)";
+        case 21:
+            return "Is a directory (EISDIR)";
+        case 22:
+            return "Invalid argument (EINVAL)";
+        case 28:
+            return "No space left on device (ENOSPC)";
+        default:
+            return "Unknown operating system error";
     }
 }

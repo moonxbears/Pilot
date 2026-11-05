@@ -3,6 +3,15 @@
 // Modeled after Python's `timeit` module (CPython Lib/timeit.py)
 // Compatible with Linux, Windows, macOS, Android, iOS, and WebAssembly targets.
 
+pub pkg Pilot.Timeit;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+
 // ============================================================================
 // 1. Monotonic Timer (Python: timeit.default_timer)
 // ============================================================================
@@ -10,17 +19,17 @@
 /// Returns current monotonic clock timestamp in fractional seconds.
 // Native runtime optimizations provided by pilot_rt (C-ABI FFI)
 extern "c" lib "pilot_rt" {
-    def __time_perf_counter() -> f64;
-    def __time_sleep_ms(ms: i64);
+    fn __time_perf_counter() -> f64;
+    fn __time_sleep_ms(ms: i64);
 }
 
-def default_timer() -> f64 {
+pub fn default_timer() -> f64 {
     return __time_perf_counter();
 }
 
 /// Sleeps the execution thread for a duration specified in fractional seconds.
-def sleep(seconds: f64) {
-    let ms = int(seconds * 1000.0);
+pub fn sleep(seconds: f64) {
+    let ms: i64 = (seconds * 1000.0) as i64;
     if ms > 0 {
         __time_sleep_ms(ms);
     }
@@ -30,75 +39,82 @@ def sleep(seconds: f64) {
 // 2. Timer Class (Python: timeit.Timer)
 // ============================================================================
 
-class Timer {
-    self(stmt: any = none, setup: any = none, timer: any = none) {
-        self.stmt = stmt;
-        self.setup = setup;
-        self.timer = timer;
-    }
+pub struct Timer : IValue {
+    pub:
+        stmt:  any;
+        setup: any;
+        timer: any;
 
-    def _get_time() -> f64 {
-        return default_timer();
-    }
-
-    /// Executes setup once, then runs stmt `number` times, returning total elapsed seconds.
-    def timeit(number: i64 = 1000000) -> f64 {
-        if self.setup != none {
-            let s_type = type_of(self.setup);
-            if s_type == "function" or s_type == "lambda" {
-                self.setup();
-            }
+        self(stmt: any = none, setup: any = none, timer: any = none) {
+            .stmt = stmt;
+            .setup = setup;
+            .timer = timer;
         }
 
-        let t0 = self._get_time();
+        fn _get_time() -> f64 {
+            return default_timer();
+        }
 
-        if self.stmt != none {
-            let s_type = type_of(self.stmt);
-            if s_type == "function" or s_type == "lambda" {
-                for _ in 0..<number {
-                    self.stmt();
-                }
-            } else {
-                // If stmt is not callable, perform dummy iterations
-                for _ in 0..<number {
-                    let _ = self.stmt;
+        /// Executes setup once, then runs stmt `number` times, returning total elapsed seconds.
+        fn timeit(number: i64 = 1000000) -> f64 {
+            if self.setup != none {
+                let s_type = type_of(self.setup);
+                if s_type == "function" || s_type == "closure" || s_type == "lambda" {
+                    let setup_fn = self.setup;
+                    setup_fn();
                 }
             }
-        }
 
-        let t1 = self._get_time();
-        let elapsed = t1 - t0;
-        return if elapsed >= 0.0 { elapsed } else { 0.0 };
-    }
+            let t0 = self._get_time();
 
-    /// Calls `timeit()` repeated `repeat_count` times and returns list of results.
-    def repeat(repeat_count: i64 = 5, number: i64 = 1000000) -> [f64] {
-        var results: [f64] = [];
-        for _ in 0..<repeat_count {
-            results.append(self.timeit(number));
-        }
-        return results;
-    }
-
-    /// Automatically selects `number` such that total elapsed time is at least 0.2 seconds.
-    def autorange() -> [any] {
-        var number: i64 = 1;
-        while true {
-            for scale in [1, 2, 5] {
-                let count = number * scale;
-                let elapsed = self.timeit(count);
-                if elapsed >= 0.2 {
-                    return [count, elapsed];
+            if self.stmt != none {
+                let s_type = type_of(self.stmt);
+                if s_type == "function" || s_type == "closure" || s_type == "lambda" {
+                    let stmt_fn = self.stmt;
+                    for _ in 0..<number {
+                        stmt_fn();
+                    }
+                } else {
+                    // If stmt is not callable, perform dummy iterations
+                    for _ in 0..<number {
+                        let _ = self.stmt;
+                    }
                 }
             }
-            number = number * 10;
-            if number > 1000000000 {
-                let final_elapsed = self.timeit(number);
-                return [number, final_elapsed];
-            }
+
+            let t1 = self._get_time();
+            let elapsed = t1 - t0;
+            return if elapsed >= 0.0 { elapsed } else { 0.0 };
         }
-        return [number, 0.0];
-    }
+
+        /// Calls `timeit()` repeated `repeat_count` times and returns list of results.
+        fn repeat(repeat_count: i64 = 5, number: i64 = 1000000) -> f64[] {
+            var results: f64[] = [];
+            for _ in 0..<repeat_count {
+                results.append(self.timeit(number));
+            }
+            return results;
+        }
+
+        /// Automatically selects `number` such that total elapsed time is at least 0.2 seconds.
+        fn autorange() -> any[] {
+            var number: i64 = 1;
+            while true {
+                for scale in [1, 2, 5] {
+                    let count = number * scale;
+                    let elapsed = self.timeit(count);
+                    if elapsed >= 0.2 {
+                        return [count, elapsed];
+                    }
+                }
+                number = number * 10;
+                if number > 1000000000 {
+                    let final_elapsed = self.timeit(number);
+                    return [number, final_elapsed];
+                }
+            }
+            return [number, 0.0];
+        }
 }
 
 // ============================================================================
@@ -106,13 +122,13 @@ class Timer {
 // ============================================================================
 
 /// Measures execution time of `stmt` run `number` times.
-def timeit(stmt: any, setup: any = none, number: i64 = 1000000) -> f64 {
+pub fn timeit(stmt: any, setup: any = none, number: i64 = 1000000) -> f64 {
     let t = Timer(stmt, setup);
     return t.timeit(number);
 }
 
 /// Measures execution time of `stmt` repeated `repeat_count` times of `number` loops.
-def repeat(stmt: any, setup: any = none, repeat_count: i64 = 5, number: i64 = 1000000) -> [f64] {
+pub fn repeat(stmt: any, setup: any = none, repeat_count: i64 = 5, number: i64 = 1000000) -> f64[] {
     let t = Timer(stmt, setup);
     return t.repeat(repeat_count, number);
 }

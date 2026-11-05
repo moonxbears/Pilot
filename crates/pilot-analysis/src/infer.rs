@@ -45,6 +45,7 @@ pub struct TypeInferenceEngine {
     pub struct_member_visibility: HashMap<(String, String), pilot_ast::VisibilityTier>,
     pub struct_member_clearance: HashMap<(String, String), pilot_ast::ClearanceLevel>,
     pub dimensions: crate::dimensions::DimensionChecker,
+    pub imported_files: std::collections::HashSet<std::path::PathBuf>,
 }
 
 impl Default for TypeInferenceEngine {
@@ -76,6 +77,7 @@ impl TypeInferenceEngine {
             struct_member_visibility: HashMap::new(),
             struct_member_clearance: HashMap::new(),
             dimensions: crate::dimensions::DimensionChecker::new(),
+            imported_files: std::collections::HashSet::new(),
         };
 
         engine.init_builtins();
@@ -708,6 +710,319 @@ impl TypeInferenceEngine {
             }
             for (_, ty) in scope.narrowed_types.iter_mut() {
                 *ty = self.types.deep_prune(*ty);
+            }
+        }
+    }
+
+    fn expand_program_top_items(arena: &AstArena, raw_children: &[u32]) -> Vec<u32> {
+        let mut out = Vec::with_capacity(raw_children.len());
+        for &c in raw_children {
+            let child_node = *arena.node(NodeId(c));
+            if child_node.node_kind() == NodeKind::BlockExpr && !arena.lexical_use_ext_scopes.contains_key(&c) {
+                let block_children = arena.children_slice(child_node.lhs, child_node.rhs);
+                let is_decl_block = !block_children.is_empty()
+                    && block_children.iter().all(|&bc| {
+                        matches!(
+                            arena.node(NodeId(bc)).node_kind(),
+                            NodeKind::FnDecl
+                                | NodeKind::StructDecl
+                                | NodeKind::RecordDecl
+                                | NodeKind::ClassDecl
+                                | NodeKind::InterfaceDecl
+                                | NodeKind::TypeAdtDecl
+                                | NodeKind::ImportDecl
+                                | NodeKind::FromImportDecl
+                                | NodeKind::ConstDecl
+                                | NodeKind::BlockExpr
+                        )
+                    });
+                if is_decl_block {
+                    out.extend(Self::expand_program_top_items(arena, block_children));
+                    continue;
+                }
+            }
+            out.push(c);
+        }
+        out
+    }
+
+    fn locate_stdlib_root() -> Option<std::path::PathBuf> {
+        if let Ok(cwd) = std::env::current_dir() {
+            for anc in cwd.ancestors() {
+                let cand = anc.join("stdlib");
+                if cand.is_dir() {
+                    return Some(cand);
+                }
+            }
+        }
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        for anc in manifest_dir.ancestors() {
+            let cand = anc.join("stdlib");
+            if cand.is_dir() {
+                return Some(cand);
+            }
+        }
+        None
+    }
+
+    fn resolve_module_file_name_blind(mod_path: &str) -> Option<std::path::PathBuf> {
+        let stdlib_root = Self::locate_stdlib_root()?;
+        let segs: Vec<String> = mod_path
+            .split(['.', ':'])
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty() && s != "*")
+            .collect();
+        if segs.is_empty() {
+            return None;
+        }
+
+        for start in 0..segs.len() {
+            let suffix = &segs[start..];
+            let mut rel = std::path::PathBuf::new();
+            for part in suffix {
+                rel.push(part);
+            }
+            let direct = stdlib_root.join(&rel).with_extension("pilot");
+            if direct.is_file() {
+                return direct.canonicalize().ok().or(Some(direct));
+            }
+            if let Some(last) = suffix.last() {
+                let nested = stdlib_root.join(&rel).join(format!("{}.pilot", last));
+                if nested.is_file() {
+                    return nested.canonicalize().ok().or(Some(nested));
+                }
+            }
+            if let Some(parent_rel) = rel.parent() {
+                let parent_dir = stdlib_root.join(parent_rel);
+                if parent_dir != stdlib_root && parent_dir.is_dir() {
+                    let clean_target = mod_path.trim().trim_end_matches(".*").trim_end_matches('.');
+                    if let Ok(entries) = std::fs::read_dir(&parent_dir) {
+                        for entry in entries.flatten() {
+                            let cand = entry.path();
+                            if cand.extension().and_then(|e| e.to_str()) == Some("pilot") && cand.is_file() {
+                                if let Some(cand_arena) = Self::cached_module_arena(&cand) {
+                                    for &pkg_nid in &cand_arena.pkg_decls {
+                                        let pkg_node = *cand_arena.node(NodeId(pkg_nid));
+                                        let pkg_name = cand_arena.interner.resolve(SymbolId(pkg_node.lhs));
+                                        if pkg_name.eq_ignore_ascii_case(clean_target) {
+                                            return cand.canonicalize().ok().or(Some(cand));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(last) = segs.last() {
+            if let Ok(entries) = std::fs::read_dir(&stdlib_root) {
+                for entry in entries.flatten() {
+                    let subdir = entry.path();
+                    if subdir.is_dir() {
+                        let cand = subdir.join(format!("{}.pilot", last));
+                        if cand.is_file() {
+                            return cand.canonicalize().ok().or(Some(cand));
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn cached_module_arena(path: &std::path::Path) -> Option<std::sync::Arc<AstArena>> {
+        static MODULE_AST_CACHE: std::sync::OnceLock<
+            std::sync::Mutex<
+                HashMap<std::path::PathBuf, (Option<std::time::SystemTime>, std::sync::Arc<AstArena>)>,
+            >,
+        > = std::sync::OnceLock::new();
+
+        let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+        let cache = MODULE_AST_CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+        if let Ok(guard) = cache.lock() {
+            if let Some((cached_mtime, arena_arc)) = guard.get(path) {
+                if *cached_mtime == mtime {
+                    return Some(arena_arc.clone());
+                }
+            }
+        }
+
+        let src = std::fs::read_to_string(path).ok()?;
+        let parsed = std::sync::Arc::new(pilot_parser::parse(&src));
+        if let Ok(mut guard) = cache.lock() {
+            guard.insert(path.to_path_buf(), (mtime, parsed.clone()));
+        }
+        Some(parsed)
+    }
+
+    fn import_module_exports(
+        &mut self,
+        mod_path: &str,
+        filter: Option<&std::collections::HashSet<String>>,
+    ) {
+        let Some(file_path) = Self::resolve_module_file_name_blind(mod_path) else {
+            return;
+        };
+        if filter.is_none() && !self.imported_files.insert(file_path.clone()) {
+            return;
+        }
+        let Some(imp_arena) = Self::cached_module_arena(&file_path) else {
+            return;
+        };
+        if imp_arena.root.is_none() {
+            return;
+        }
+        let root_node = *imp_arena.node(imp_arena.root);
+        if root_node.node_kind() != NodeKind::Program {
+            return;
+        }
+        let raw_children = imp_arena.children_slice(root_node.lhs, root_node.rhs);
+        let top_items = Self::expand_program_top_items(&imp_arena, raw_children);
+
+        let allow = |sym_name: &str| -> bool {
+            match filter {
+                Some(set) => set.contains(sym_name),
+                None => true,
+            }
+        };
+
+        for &c in &top_items {
+            let child_node = *imp_arena.node(NodeId(c));
+            match child_node.node_kind() {
+                NodeKind::FnDecl => {
+                    let fn_name = imp_arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
+                    if !allow(&fn_name) {
+                        continue;
+                    }
+                    let fn_start = child_node.rhs;
+                    let fn_len = child_node.flags as usize;
+                    let mut param_tys = Vec::new();
+                    if fn_len > 1 {
+                        let fn_children = imp_arena.children_slice(fn_start, fn_len as u32);
+                        for &p_id in &fn_children[1..] {
+                            let p_ty = imp_arena
+                                .type_annotations
+                                .get(&p_id)
+                                .map(|&ann| self.resolve_type_spec(&imp_arena, ann))
+                                .unwrap_or(TypeId::ANY);
+                            param_tys.push(p_ty);
+                        }
+                    }
+                    let ret_ty = imp_arena
+                        .type_annotations
+                        .get(&c)
+                        .map(|&ann| self.resolve_type_spec(&imp_arena, ann))
+                        .unwrap_or(TypeId::ANY);
+                    let fn_ty = self.types.function_of(param_tys, ret_ty);
+                    if self.lookup_var(&fn_name).is_none() {
+                        self.define_var(&fn_name, fn_ty);
+                    }
+                }
+                NodeKind::RecordDecl | NodeKind::StructDecl => {
+                    if child_node.flags == 2 {
+                        continue;
+                    }
+                    let rec_name = imp_arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
+                    if !allow(&rec_name) || self.type_defs.contains_key(&rec_name) {
+                        continue;
+                    }
+                    let fields = self.collect_decl_fields(&imp_arena, NodeId(c), &rec_name);
+                    self.struct_fields.insert(rec_name.clone(), fields.clone());
+                    let ty = self.types.row_record_with_name(fields.clone(), true, None, Some(rec_name.clone()));
+                    self.type_defs.insert(rec_name.clone(), ty);
+                    self.types.register_nominal_name(ty, rec_name.clone());
+                    let data_fields: Vec<TypeId> = fields
+                        .iter()
+                        .filter(|(n, t)| n != "this[]" && n != "self[]" && !matches!(self.types.get(self.types.prune(*t)), TypeKind::Function { .. }))
+                        .map(|(_, t)| *t)
+                        .collect();
+                    let param_tys = if data_fields.is_empty() { vec![TypeId::ANY] } else { data_fields };
+                    let ctor_ty = self.types.function_of(param_tys, ty);
+                    self.define_var(&rec_name, ctor_ty);
+                }
+                NodeKind::TypeAdtDecl => {
+                    let adt_name = imp_arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
+                    if !allow(&adt_name) || self.type_defs.contains_key(&adt_name) {
+                        continue;
+                    }
+                    let var_start = child_node.rhs as usize;
+                    let var_len = child_node.flags as usize;
+                    let mut adt_variants_list = Vec::new();
+                    let adt_placeholder = self.types.adt_of(adt_name.clone(), Vec::new());
+                    self.type_defs.insert(adt_name.clone(), adt_placeholder);
+                    if var_len > 0 && var_start + var_len <= imp_arena.extra_children.len() {
+                        for &v_id in &imp_arena.extra_children[var_start..var_start + var_len] {
+                            let v_node = *imp_arena.node(NodeId(v_id));
+                            if v_node.node_kind() == NodeKind::AdtVariant {
+                                let v_name = imp_arena.interner.resolve(SymbolId(v_node.lhs)).to_string();
+                                let param_start = v_node.rhs;
+                                let param_len = v_node.flags as usize;
+                                let mut p_tys = Vec::new();
+                                if param_len > 0 {
+                                    let p_slice = imp_arena.children_slice(param_start, param_len as u32);
+                                    for &p_id in p_slice {
+                                        let p_node = *imp_arena.node(NodeId(p_id));
+                                        let p_ty = if p_node.rhs != 0 {
+                                            self.resolve_type_spec(&imp_arena, NodeId(p_node.rhs))
+                                        } else {
+                                            TypeId::ANY
+                                        };
+                                        p_tys.push(p_ty);
+                                    }
+                                }
+                                adt_variants_list.push((v_name.clone(), p_tys.clone()));
+                                self.adt_variants.insert(v_name.clone(), (adt_name.clone(), p_tys.clone()));
+                                if param_len == 0 {
+                                    self.define_var(&v_name, adt_placeholder);
+                                } else {
+                                    let ctor_ty = self.types.function_of(p_tys, adt_placeholder);
+                                    self.define_var(&v_name, ctor_ty);
+                                }
+                            }
+                        }
+                    }
+                    let adt_ty = self.types.adt_of(adt_name.clone(), adt_variants_list);
+                    self.types.register_nominal_name(adt_ty, adt_name.clone());
+                    self.type_defs.insert(adt_name, adt_ty);
+                }
+                NodeKind::ClassDecl | NodeKind::InterfaceDecl => {
+                    let cls_name = imp_arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
+                    if !allow(&cls_name) || self.type_defs.contains_key(&cls_name) {
+                        continue;
+                    }
+                    let ty = self.types.alloc(TypeKind::Primitive(cls_name.clone()));
+                    self.types.register_nominal_name(ty, cls_name.clone());
+                    self.type_defs.insert(cls_name.clone(), ty);
+                    let fields = self.collect_decl_fields(&imp_arena, NodeId(c), &cls_name);
+                    self.struct_fields.insert(cls_name.clone(), fields);
+                    let ctor_ty = self.types.function_of(vec![TypeId::ANY], ty);
+                    self.define_var(&cls_name, ctor_ty);
+                }
+                NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
+                    if child_node.flags == 1 {
+                        continue;
+                    }
+                    let name = imp_arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
+                    if !allow(&name) || self.lookup_var(&name).is_some() {
+                        continue;
+                    }
+                    let ann_ty = imp_arena
+                        .type_annotations
+                        .get(&c)
+                        .map(|&ann| self.resolve_type_spec(&imp_arena, ann))
+                        .unwrap_or(TypeId::ANY);
+                    self.define_var(&name, ann_ty);
+                }
+                NodeKind::ImportDecl if filter.is_none() && !imp_arena.pkg_decls.contains(&c) && child_node.rhs == u32::MAX => {
+                    let nested_raw = imp_arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
+                    if nested_raw.ends_with(".*") || nested_raw.ends_with(":*") {
+                        let base = nested_raw.trim_end_matches('*').trim_end_matches(['.', ':']);
+                        self.import_module_exports(base, None);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -2138,6 +2453,19 @@ impl TypeInferenceEngine {
                     } else {
                         TypeId::ANY
                     }
+                } else if op == 27 {
+                    // BinaryOp::Send (ch <- val)
+                    TypeId::VOID
+                } else if op == 28 || op == 29 || op == 30 {
+                    // BinaryOp::Union | Intersect | Except
+                    lhs_ty
+                } else if op == 31 {
+                    // BinaryOp::PipeBackward (fn <| arg)
+                    if let TypeKind::Function { ret, .. } = self.types.get(lhs_ty).clone() {
+                        ret
+                    } else {
+                        TypeId::ANY
+                    }
                 } else if op == 22 {
                     // BinaryOp::Coalesce (??)
                     if lhs_ty == TypeId::NULL {
@@ -2265,7 +2593,11 @@ impl TypeInferenceEngine {
                         let k_id = NodeId(chunk[0]);
                         let v_id = NodeId(chunk[1]);
                         let k_node = *arena.node(k_id);
-                        let k_ty = self.synth(arena, k_id);
+                        let k_ty = if k_node.node_kind() == NodeKind::IdentExpr {
+                            TypeId::STR
+                        } else {
+                            self.synth(arena, k_id)
+                        };
                         let v_ty = self.synth(arena, v_id);
                         k_types.push(k_ty);
                         v_types.push(v_ty);
@@ -2308,9 +2640,10 @@ impl TypeInferenceEngine {
 
             // --- Blocks & Program Root ---
             NodeKind::Program => {
-                let children = arena.children_slice(node.lhs, node.rhs);
+                let raw_children = arena.children_slice(node.lhs, node.rhs);
+                let top_items = Self::expand_program_top_items(arena, raw_children);
                 // Pass 1: Register top-level function, class, struct, record, and ADT signatures
-                for &c in children {
+                for &c in &top_items {
                     let child_node = *arena.node(NodeId(c));
                     match child_node.node_kind() {
                         NodeKind::FnDecl => {
@@ -2425,21 +2758,61 @@ impl TypeInferenceEngine {
                             self.define_var(&cls_name, ctor_ty);
                         }
                         NodeKind::ImportDecl => {
+                            if arena.pkg_decls.contains(&c) {
+                                continue;
+                            }
                             if child_node.rhs != u32::MAX {
                                 let alias = arena.interner.resolve(SymbolId(child_node.rhs)).to_string();
                                 self.define_var(&alias, TypeId::ANY);
                                 self.type_defs.insert(alias, TypeId::ANY);
+                            } else {
+                                let raw_path = arena.interner.resolve(SymbolId(child_node.lhs)).to_string();
+                                if raw_path.ends_with(".*") || raw_path.ends_with(":*") {
+                                    let base = raw_path.trim_end_matches('*').trim_end_matches(['.', ':']);
+                                    self.import_module_exports(base, None);
+                                } else {
+                                    if let Some(dot_idx) = raw_path.rfind(['.', ':']) {
+                                        let prefix = &raw_path[..dot_idx];
+                                        let last_seg = raw_path[dot_idx + 1..].trim();
+                                        if !last_seg.is_empty() {
+                                            let mut single = std::collections::HashSet::new();
+                                            single.insert(last_seg.to_string());
+                                            self.import_module_exports(prefix, Some(&single));
+                                        }
+                                    }
+                                    let last_seg = raw_path.rsplit(['.', ':']).next().unwrap_or(&raw_path).trim();
+                                    if !last_seg.is_empty() && last_seg != "*" {
+                                        if self.lookup_var(last_seg).is_none() {
+                                            self.define_var(last_seg, TypeId::ANY);
+                                        }
+                                        self.type_defs.entry(last_seg.to_string()).or_insert(TypeId::ANY);
+                                    }
+                                }
                             }
                         }
                         NodeKind::FromImportDecl => {
                             let sub_children = arena.children_slice(child_node.lhs, child_node.rhs);
+                            let mut names = Vec::new();
+                            let mut filter_set = std::collections::HashSet::new();
                             for &sym_id in sub_children {
                                 let sym_node = arena.node(NodeId(sym_id));
                                 if sym_node.node_kind() == NodeKind::IdentExpr {
                                     let name = arena.interner.resolve(SymbolId(sym_node.lhs)).to_string();
-                                    self.define_var(&name, TypeId::ANY);
-                                    self.type_defs.insert(name, TypeId::ANY);
+                                    filter_set.insert(name.clone());
+                                    names.push(name);
                                 }
+                            }
+                            if let Some(&mod_sym) = arena.from_import_paths.get(&c) {
+                                let mod_path = arena.interner.resolve(mod_sym).to_string();
+                                if !mod_path.is_empty() && !filter_set.is_empty() {
+                                    self.import_module_exports(&mod_path, Some(&filter_set));
+                                }
+                            }
+                            for name in names {
+                                if self.lookup_var(&name).is_none() {
+                                    self.define_var(&name, TypeId::ANY);
+                                }
+                                self.type_defs.entry(name).or_insert(TypeId::ANY);
                             }
                         }
                         NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
@@ -2461,7 +2834,7 @@ impl TypeInferenceEngine {
 
                 // Pass 2: Synthesize all statements and expressions
                 let mut last_ty = TypeId::VOID;
-                for &c in children {
+                for &c in &top_items {
                     last_ty = self.synth(arena, NodeId(c));
                 }
                 self.finalize_inferred_types();
@@ -2821,14 +3194,34 @@ impl TypeInferenceEngine {
 
             NodeKind::IndexerDecl => {
                 let ret_ty = arena.type_annotations.get(&node_id.0).map(|&ann| self.resolve_type_spec(arena, ann)).unwrap_or(TypeId::ANY);
+                let idx_param_ids: Vec<u32> = arena.children_slice(node.lhs, node.rhs).to_vec();
+                let mut idx_params: Vec<(String, TypeId)> = Vec::new();
+                for pid in idx_param_ids {
+                    let p_node = *arena.node(NodeId(pid));
+                    if p_node.node_kind() == NodeKind::ParamDecl {
+                        let p_name = arena.interner.resolve(SymbolId(p_node.lhs)).to_string();
+                        let p_ty = if p_node.rhs != 0 && (p_node.rhs as usize) < arena.nodes.len() {
+                            self.resolve_type_spec(arena, NodeId(p_node.rhs))
+                        } else {
+                            TypeId::ANY
+                        };
+                        idx_params.push((p_name, p_ty));
+                    }
+                }
                 if let Some(clauses) = arena.accessor_clauses.get(&node_id.0) {
                     if clauses.get_body.is_some() {
                         self.enter_scope();
+                        for (pn, pt) in &idx_params {
+                            self.define_var(pn, *pt);
+                        }
                         self.synth(arena, clauses.get_body);
                         self.exit_scope();
                     }
                     if clauses.set_body.is_some() {
                         self.enter_scope();
+                        for (pn, pt) in &idx_params {
+                            self.define_var(pn, *pt);
+                        }
                         if let Some((sym, ty_node)) = clauses.set_param {
                             let name = arena.interner.resolve(sym).to_string();
                             let ty = if ty_node.is_some() && (ty_node.0 as usize) < arena.nodes.len() && arena.node(ty_node).node_kind().is_type_spec() {
@@ -2837,12 +3230,17 @@ impl TypeInferenceEngine {
                                 ret_ty
                             };
                             self.define_var(&name, ty);
+                        } else {
+                            self.define_var("value", ret_ty);
                         }
                         self.synth(arena, clauses.set_body);
                         self.exit_scope();
                     }
                     if clauses.default_body.is_some() {
                         self.enter_scope();
+                        for (pn, pt) in &idx_params {
+                            self.define_var(pn, *pt);
+                        }
                         self.synth(arena, clauses.default_body);
                         self.exit_scope();
                     }

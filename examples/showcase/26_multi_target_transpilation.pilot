@@ -1,7 +1,7 @@
 // =============================================================================
 // Showcase 26: Bidirectional Multi-Language Transpilation & AST Ingestion
 // =============================================================================
-// Demonstrates Milestones 20 & 41:
+// Demonstrates:
 //   1. High-Fidelity Transpilation (`pilot --emit <target>`):
 //      - Generates clean, compiler-verified code in 7 native languages:
 //        C11/C23, Rust, Python 3.10+, Go, TypeScript, C#/.NET 8, and Java
@@ -10,7 +10,7 @@
 //      - Design-by-Contract constraints (`requires`, `ensures`)
 //      - Values-first error types (`T ! E` maps to `Result<T, E>` in Rust/Go)
 //   3. Foreign AST Ingestion (`pilot --from <target>`):
-//      - Automatic semantic upgrade to `--strict-pilot` idioms
+//      - Automatic semantic upgrade to canonical Pilot idioms
 // =============================================================================
 
 println("==================================================================");
@@ -18,30 +18,37 @@ println(" Showcase 26: Bidirectional Multi-Language Transpilation          ");
 println("==================================================================");
 
 // -----------------------------------------------------------------------------
-// 1. Universal Data Record with Contracts & Numeric Precision
+// 1. Universal Data Struct with Contracts & Numeric Precision
 // -----------------------------------------------------------------------------
-struct NetworkPacket {
-    var packet_id: int;
-    var payload_len: int;
-    var checksum: int;
-    var latency_ms: float;
+struct NetworkPacket : IValue {
+    pub var packet_id: i64;
+    pub var payload_len: i64;
+    pub var checksum: i64;
+    pub var latency_ms: f64;
 
-    def is_valid() -> bool {
-        return this.payload_len > 0 && this.checksum != 0;
+    pub self(packet_id: i64, payload_len: i64, checksum: i64, latency_ms: f64) {
+        .packet_id = packet_id;
+        .payload_len = payload_len;
+        .checksum = checksum;
+        .latency_ms = latency_ms;
+    }
+
+    pub pure fn is_valid() -> bool {
+        return (.payload_len > 0) && (.checksum != 0);
     }
 }
 
 // -----------------------------------------------------------------------------
 // 2. High-Throughput Pipeline Function (Emits cleanly to Rust / C11 / Go)
 // -----------------------------------------------------------------------------
-def process_packet(pkt: NetworkPacket, scale_factor: float) -> float
+fn process_packet(pkt: NetworkPacket, scale_factor: f64) -> f64
     requires pkt.payload_len >= 0
     ensures result >= 0.0
 {
     if !pkt.is_valid() {
         return 0.0;
     }
-    let throughput_mb = (float(pkt.payload_len) * 8.0) / (pkt.latency_ms * 1000.0);
+    let throughput_mb = (f64(pkt.payload_len) * 8.0) / (pkt.latency_ms * 1000.0);
     return throughput_mb * scale_factor;
 }
 
@@ -51,30 +58,30 @@ def process_packet(pkt: NetworkPacket, scale_factor: float) -> float
 let sample_packet = NetworkPacket(1042, 1460, 0xABCD, 1.25);
 
 println("\n[1] NetworkPacket Verification:");
-println("  Packet ID:     " + sample_packet.packet_id);
-println("  Payload Bytes: " + sample_packet.payload_len);
-println("  Valid Status:  " + sample_packet.is_valid());
+println(f"  Packet ID:     {sample_packet.packet_id}");
+println(f"  Payload Bytes: {sample_packet.payload_len}");
+println(f"  Valid Status:  {sample_packet.is_valid()}");
 
 let throughput = process_packet(sample_packet, 1.15);
 println("\n[2] Processed Network Throughput:");
-println("  Effective Throughput: " + throughput + " MB/s");
+println(f"  Effective Throughput: {throughput} MB/s");
 
 // -----------------------------------------------------------------------------
 // 4. Target Language Emission Matrix
 // -----------------------------------------------------------------------------
 let targets = [
-    { "target": "c",      "backend": "C11/C23 ISO Standard",      "flag": "--emit c" },
-    { "target": "rust",   "backend": "Safe Rust 2021 Edition",    "flag": "--emit rust" },
+    { "target": "c",      "backend": "C11/C23 ISO Standard",       "flag": "--emit c" },
+    { "target": "rust",   "backend": "Safe Rust 2021 Edition",     "flag": "--emit rust" },
     { "target": "python", "backend": "Python 3.10+ Type Annotated","flag": "--emit python" },
-    { "target": "go",     "backend": "Go 1.21+ Standard Packages","flag": "--emit go" },
-    { "target": "ts",     "backend": "TypeScript ESM Strict",     "flag": "--emit ts" },
-    { "target": "csharp", "backend": "C# 12 / .NET 8 AOT Ready",  "flag": "--emit csharp" },
-    { "target": "java",   "backend": "Java 21 Virtual Threads",   "flag": "--emit java" }
+    { "target": "go",     "backend": "Go 1.21+ Standard Packages", "flag": "--emit go" },
+    { "target": "ts",     "backend": "TypeScript ESM Strict",      "flag": "--emit ts" },
+    { "target": "csharp", "backend": "C# 12 / .NET 8 AOT Ready",   "flag": "--emit csharp" },
+    { "target": "java",   "backend": "Java 21 Virtual Threads",    "flag": "--emit java" },
 ];
 
 println("\n[3] Supported Multi-Target CodeGen Backends:");
 for t in targets {
-    println("  -> " + t["target"] + " (" + t["backend"] + ") via " + t["flag"]);
+    println(f"  -> {t[\"target\"]} ({t[\"backend\"]}) via {t[\"flag\"]}");
 }
 
 println("\n>>> Showcase 26 Complete! <<<\n");

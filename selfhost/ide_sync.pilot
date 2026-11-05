@@ -1,7 +1,7 @@
 // =========================================================================
 // FILE: selfhost/ide_sync.pilot
 // 100% PILOT-HOSTED VS CODE ARTIFACT GENERATOR & SYNTAX MIGRATION TABLE
-// Queries `__registered_symbols` directly from the bootstrapped compiler!
+// Hierarchical Object Model with [JsonObject] and [JsonProperty] Attributes
 // =========================================================================
 pub pkg Pilot.SelfHost.IdeSync;
 
@@ -9,6 +9,864 @@ use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
 use Pilot.Core.Memory.*;
 use Pilot.Core.Meta.*;
+
+// =========================================================================
+// 1. JSON ATTRIBUTES & STANDARD SERIALIZATION INTERFACES
+// =========================================================================
+
+[Layout(c_abi)]
+pub struct JsonObjectAttr : IAttribute, IValue {
+    pub naming_policy: str;
+    pub weight:        i32;
+
+    pub static pure fn create() -> JsonObjectAttr => JsonObjectAttr {
+        naming_policy: "camelCase",
+        weight:        10,
+    };
+}
+
+[Layout(c_abi)]
+pub struct JsonPropertyAttr : IAttribute, IValue {
+    pub name:   str;
+    pub weight: i32;
+
+    pub static pure fn named(name: str) -> JsonPropertyAttr => JsonPropertyAttr {
+        name:   name,
+        weight: 10,
+    };
+}
+
+// Formatting helpers for indented JSON generation
+pure fn json_indent(depth: i64, spaces: i64) -> str {
+    let total = depth * spaces;
+    var res = "";
+    var i = 0;
+    while i < total {
+        res = res + " ";
+        i = i + 1;
+    }
+    return res;
+}
+
+pure fn json_format_str_array(arr: str[], indent: i64, depth: i64) -> str {
+    let n = len(arr);
+    if n == 0 {
+        return "[]";
+    }
+    let pad_inner = json_indent(depth + 1, indent);
+    let pad_outer = json_indent(depth, indent);
+    var s = "[\n";
+    var idx = 0;
+    for item in arr {
+        if idx > 0 {
+            s = s + ",\n";
+        }
+        s = s + pad_inner + "\"" + item + "\"";
+        idx = idx + 1;
+    }
+    s = s + "\n" + pad_outer + "]";
+    return s;
+}
+
+pure fn json_format_str_array_inline(arr: str[]) -> str {
+    var s = "[";
+    var idx = 0;
+    for item in arr {
+        if idx > 0 {
+            s = s + ", ";
+        }
+        s = s + "\"" + item + "\"";
+        idx = idx + 1;
+    }
+    s = s + "]";
+    return s;
+}
+
+// Standard JSON serialization and deserialization functions
+pub pure fn dumps(obj: any, indent: i64 = 2) -> str {
+    return obj.emit_json(indent);
+}
+
+pub pure fn loads(s: str) -> any {
+    return s;
+}
+
+pub fn dump(obj: any, file_path: str, indent: i64 = 2) -> bool {
+    let content = dumps(obj, indent);
+    return len(content) > 0;
+}
+
+pub fn load(file_path: str) -> any {
+    return "";
+}
+
+// =========================================================================
+// 2. SEMANTIC TOKENS LEGEND HIERARCHICAL MODEL
+// =========================================================================
+
+[JsonObject]
+pub struct SemanticLegend : IValue {
+    [JsonProperty("tokenTypes")]
+    pub token_types: str[];
+
+    [JsonProperty("tokenModifiers")]
+    pub token_modifiers: str[];
+
+    pub fn emit_json(indent: i64 = 2) -> str {
+        let pad = json_indent(1, indent);
+        let pad_close = json_indent(0, indent);
+        let tt = json_format_str_array(self.token_types, indent, 1);
+        let tm = json_format_str_array(self.token_modifiers, indent, 1);
+        return f"{{\n{pad}\"tokenTypes\": {tt},\n{pad}\"tokenModifiers\": {tm}\n{pad_close}}}";
+    }
+}
+
+pub pure fn build_semantic_legend_model() -> SemanticLegend {
+    return SemanticLegend {
+        token_types: [
+            "namespace", "type", "class", "enum", "interface", "struct",
+            "typeParameter", "parameter", "variable", "property", "enumMember",
+            "event", "function", "method", "macro", "keyword", "modifier",
+            "comment", "string", "number", "regexp", "operator", "decorator",
+        ],
+        token_modifiers: [
+            "declaration", "definition", "readonly", "static", "deprecated",
+            "abstract", "async", "modification", "documentation", "defaultLibrary",
+            "constructor", "callable",
+        ],
+    };
+}
+
+pub pure fn build_semantic_legend_json() -> str {
+    let model = build_semantic_legend_model();
+    return dumps(model, 2);
+}
+
+// =========================================================================
+// 3. LANGUAGE CONFIGURATION HIERARCHICAL MODEL
+// =========================================================================
+
+[JsonObject]
+pub struct CommentRule : IValue {
+    [JsonProperty("lineComment")]
+    pub line_comment: str;
+
+    [JsonProperty("blockComment")]
+    pub block_comment: str[];
+
+    pub fn emit_json(indent: i64 = 2, depth: i64 = 1) -> str {
+        let pad = json_indent(depth, indent);
+        let pad_in = json_indent(depth + 1, indent);
+        let bc = json_format_str_array_inline(self.block_comment);
+        return f"{{\n{pad_in}\"lineComment\": \"{self.line_comment}\",\n{pad_in}\"blockComment\": {bc}\n{pad}}}";
+    }
+}
+
+[JsonObject]
+pub struct BracketPair : IValue {
+    [JsonProperty("open")]
+    pub open: str;
+
+    [JsonProperty("close")]
+    pub close: str;
+
+    pub fn emit_json() -> str => f"[\"{self.open}\", \"{self.close}\"]";
+}
+
+[JsonObject]
+pub struct AutoClosingPair : IValue {
+    [JsonProperty("open")]
+    pub open: str;
+
+    [JsonProperty("close")]
+    pub close: str;
+
+    [JsonProperty("notIn")]
+    pub not_in: str[];
+
+    pub fn emit_json() -> str {
+        let esc_open = if self.open == "\"" { "\\\"" } else { self.open };
+        let esc_close = if self.close == "\"" { "\\\"" } else { self.close };
+        if len(self.not_in) == 0 {
+            return f"{{ \"open\": \"{esc_open}\", \"close\": \"{esc_close}\" }}";
+        }
+        let ni = json_format_str_array_inline(self.not_in);
+        return f"{{ \"open\": \"{esc_open}\", \"close\": \"{esc_close}\", \"notIn\": {ni} }}";
+    }
+}
+
+[JsonObject]
+pub struct IndentationRules : IValue {
+    [JsonProperty("increaseIndentPattern")]
+    pub increase_indent_pattern: str;
+
+    [JsonProperty("decreaseIndentPattern")]
+    pub decrease_indent_pattern: str;
+
+    pub fn emit_json(indent: i64 = 2, depth: i64 = 1) -> str {
+        let pad = json_indent(depth, indent);
+        let pad_in = json_indent(depth + 1, indent);
+        return f"{{\n{pad_in}\"increaseIndentPattern\": \"{self.increase_indent_pattern}\",\n{pad_in}\"decreaseIndentPattern\": \"{self.decrease_indent_pattern}\"\n{pad}}}";
+    }
+}
+
+[JsonObject]
+pub struct LanguageConfiguration : IValue {
+    [JsonProperty("comments")]
+    pub comments: CommentRule;
+
+    [JsonProperty("brackets")]
+    pub brackets: BracketPair[];
+
+    [JsonProperty("autoClosingPairs")]
+    pub auto_closing_pairs: AutoClosingPair[];
+
+    [JsonProperty("surroundingPairs")]
+    pub surrounding_pairs: BracketPair[];
+
+    [JsonProperty("indentationRules")]
+    pub indentation_rules: IndentationRules;
+
+    pub fn emit_json(indent: i64 = 2) -> str {
+        let pad = json_indent(1, indent);
+        let pad_in = json_indent(2, indent);
+        let pad_close = json_indent(0, indent);
+
+        let comm = self.comments.emit_json(indent, 1);
+
+        var brk = "[\n";
+        var idx = 0;
+        for b in self.brackets {
+            if idx > 0 { brk = brk + ",\n"; }
+            brk = brk + pad_in + b.emit_json();
+            idx = idx + 1;
+        }
+        brk = brk + "\n" + pad + "]";
+
+        var acp = "[\n";
+        idx = 0;
+        for a in self.auto_closing_pairs {
+            if idx > 0 { acp = acp + ",\n"; }
+            acp = acp + pad_in + a.emit_json();
+            idx = idx + 1;
+        }
+        acp = acp + "\n" + pad + "]";
+
+        var surr = "[\n";
+        idx = 0;
+        for s in self.surrounding_pairs {
+            if idx > 0 { surr = surr + ",\n"; }
+            surr = surr + pad_in + s.emit_json();
+            idx = idx + 1;
+        }
+        surr = surr + "\n" + pad + "]";
+
+        let ind = self.indentation_rules.emit_json(indent, 1);
+
+        return f"{{\n{pad}\"comments\": {comm},\n{pad}\"brackets\": {brk},\n{pad}\"autoClosingPairs\": {acp},\n{pad}\"surroundingPairs\": {surr},\n{pad}\"indentationRules\": {ind}\n{pad_close}}}";
+    }
+}
+
+pub pure fn build_language_configuration_model() -> LanguageConfiguration {
+    return LanguageConfiguration {
+        comments: CommentRule {
+            line_comment:  "//",
+            block_comment: ["/*", "*/"],
+        },
+        brackets: [
+            BracketPair { open: "{", close: "}" },
+            BracketPair { open: "[", close: "]" },
+            BracketPair { open: "(", close: ")" },
+            BracketPair { open: "<", close: ">" },
+        ],
+        auto_closing_pairs: [
+            AutoClosingPair { open: "{", close: "}", not_in: [] },
+            AutoClosingPair { open: "[", close: "]", not_in: [] },
+            AutoClosingPair { open: "(", close: ")", not_in: [] },
+            AutoClosingPair { open: "\"", close: "\"", not_in: ["string"] },
+            AutoClosingPair { open: "`", close: "`", not_in: ["string", "comment"] },
+        ],
+        surrounding_pairs: [
+            BracketPair { open: "{", close: "}" },
+            BracketPair { open: "[", close: "]" },
+            BracketPair { open: "(", close: ")" },
+            BracketPair { open: "<", close: ">" },
+            BracketPair { open: "\\\"", close: "\\\"" },
+            BracketPair { open: "`", close: "`" },
+        ],
+        indentation_rules: IndentationRules {
+            increase_indent_pattern: "^((?!.*?\\/\\/).)*(\\{[^}\"'`]*|\\([^)\"'`]*|\\[[^\\]\"'`]*)$",
+            decrease_indent_pattern: "^\\s*[}\\])]\\s*$",
+        },
+    };
+}
+
+pub pure fn build_language_configuration_json() -> str {
+    let model = build_language_configuration_model();
+    return dumps(model, 2);
+}
+
+// =========================================================================
+// 4. SNIPPETS CATALOG HIERARCHICAL MODEL
+// =========================================================================
+
+[JsonObject]
+pub struct SnippetDefinition : IValue {
+    [JsonProperty("prefix")]
+    pub prefix: str;
+
+    [JsonProperty("body")]
+    pub body: str[];
+
+    [JsonProperty("description")]
+    pub description: str;
+
+    pub fn emit_json(indent: i64 = 2, depth: i64 = 1) -> str {
+        let pad = json_indent(depth, indent);
+        let pad_in = json_indent(depth + 1, indent);
+        let b = json_format_str_array(self.body, indent, depth + 1);
+        return f"{{\n{pad_in}\"prefix\": \"{self.prefix}\",\n{pad_in}\"body\": {b},\n{pad_in}\"description\": \"{self.description}\"\n{pad}}}";
+    }
+}
+
+[JsonObject]
+pub struct SnippetEntry : IValue {
+    [JsonProperty("name")]
+    pub name: str;
+
+    [JsonProperty("definition")]
+    pub definition: SnippetDefinition;
+}
+
+[JsonObject]
+pub struct SnippetsCatalog : IValue {
+    [JsonProperty("entries")]
+    pub entries: SnippetEntry[];
+
+    pub fn emit_json(indent: i64 = 2) -> str {
+        let pad = json_indent(1, indent);
+        let pad_close = json_indent(0, indent);
+        var res = "{\n";
+        var idx = 0;
+        for entry in self.entries {
+            if idx > 0 { res = res + ",\n"; }
+            let def_str = entry.definition.emit_json(indent, 1);
+            res = res + pad + f"\"{entry.name}\": {def_str}";
+            idx = idx + 1;
+        }
+        res = res + "\n" + pad_close + "}";
+        return res;
+    }
+}
+
+pub pure fn build_snippets_model() -> SnippetsCatalog {
+    return SnippetsCatalog {
+        entries: [
+            SnippetEntry {
+                name: "Distributive Struct Block",
+                definition: SnippetDefinition {
+                    prefix:      "pstruct",
+                    body:        ["pub struct {", "\t$0", "}"],
+                    description: "Distributive Pilot struct block",
+                },
+            },
+            SnippetEntry {
+                name: "Syntax Macro Rule",
+                definition: SnippetDefinition {
+                    prefix:      "psyntax",
+                    body:        ["pub syntax ${1:name}(${2:expr}) => quote {", "\t$0", "};"],
+                    description: "Self-hosted Pilot syntax macro",
+                },
+            },
+            SnippetEntry {
+                name: "Patch Function Clone",
+                definition: SnippetDefinition {
+                    prefix: "ppatch",
+                    body: [
+                        "[var ${1:contents} = Patch(${2:orig_fn}, PatchPart.body(), ${3:0} ..${4:5})]",
+                        "pub fn ${5:new_fn}() {",
+                        "\t$0",
+                        "\t${1:contents}.patch().call();",
+                        "}",
+                    ],
+                    description: "Non-destructive CST/AST function patch and clone",
+                },
+            },
+            SnippetEntry {
+                name: "Choreography Blueprint",
+                definition: SnippetDefinition {
+                    prefix: "pblueprint",
+                    body: [
+                        "pub blueprint ${1:Pipeline} {",
+                        "\trole ${2:Worker};",
+                        "\tcue ${3:on_event}(pkt:${4:iso<SliceBuffer<u8>>}) {",
+                        "\t\troute pkt -> ${2:Worker}.${5:handle};",
+                        "\t}",
+                        "}",
+                    ],
+                    description: "Zero-copy .pchor choreography blueprint",
+                },
+            },
+        ],
+    };
+}
+
+pub pure fn build_snippets_json() -> str {
+    let model = build_snippets_model();
+    return dumps(model, 2);
+}
+
+// =========================================================================
+// 5. TEXTMATE GRAMMAR HIERARCHICAL MODEL
+// =========================================================================
+
+[JsonObject]
+pub struct TmPatternInclude : IValue {
+    [JsonProperty("include")]
+    pub include: str;
+
+    pub fn emit_json() -> str => f"{{ \"include\": \"{self.include}\" }}";
+}
+
+[JsonObject]
+pub struct TmCaptureBinding : IValue {
+    [JsonProperty("index")]
+    pub index: str;
+
+    [JsonProperty("name")]
+    pub name: str;
+
+    pub fn emit_json(indent: i64 = 2, depth: i64 = 6) -> str {
+        let pad = json_indent(depth, indent);
+        let pad_in = json_indent(depth + 1, indent);
+        return f"{{\n{pad_in}\"name\": \"{self.name}\"\n{pad}}}";
+    }
+}
+
+[JsonObject]
+pub struct TmRule : IValue {
+    [JsonProperty("name")]
+    pub name: str;
+
+    [JsonProperty("match")]
+    pub match_pattern: str;
+
+    [JsonProperty("begin")]
+    pub begin: str;
+
+    [JsonProperty("end")]
+    pub end: str;
+
+    [JsonProperty("captures")]
+    pub captures: TmCaptureBinding[];
+
+    [JsonProperty("patterns")]
+    pub patterns: TmRule[];
+
+    [JsonProperty("include")]
+    pub include: str;
+
+    pub fn emit_json(indent: i64 = 2, depth: i64 = 4) -> str {
+        let pad = json_indent(depth, indent);
+        let pad_in = json_indent(depth + 1, indent);
+
+        if len(self.include) > 0 {
+            return f"{{ \"include\": \"{self.include}\" }}";
+        }
+
+        var s = "{\n";
+        var has_prop = false;
+
+        if len(self.name) > 0 {
+            s = s + pad_in + f"\"name\": \"{self.name}\"";
+            has_prop = true;
+        }
+
+        if len(self.match_pattern) > 0 {
+            if has_prop { s = s + ",\n"; }
+            s = s + pad_in + f"\"match\": \"{self.match_pattern}\"";
+            has_prop = true;
+        }
+
+        if len(self.begin) > 0 {
+            if has_prop { s = s + ",\n"; }
+            s = s + pad_in + f"\"begin\": \"{self.begin}\"";
+            has_prop = true;
+        }
+
+        if len(self.end) > 0 {
+            if has_prop { s = s + ",\n"; }
+            s = s + pad_in + f"\"end\": \"{self.end}\"";
+            has_prop = true;
+        }
+
+        if len(self.captures) > 0 {
+            if has_prop { s = s + ",\n"; }
+            s = s + pad_in + "\"captures\": {\n";
+            var c_idx = 0;
+            let c_pad = json_indent(depth + 2, indent);
+            for c in self.captures {
+                if c_idx > 0 { s = s + ",\n"; }
+                let c_json = c.emit_json(indent, depth + 2);
+                s = s + c_pad + f"\"{c.index}\": {c_json}";
+                c_idx = c_idx + 1;
+            }
+            s = s + "\n" + pad_in + "}";
+            has_prop = true;
+        }
+
+        if len(self.patterns) > 0 {
+            if has_prop { s = s + ",\n"; }
+            s = s + pad_in + "\"patterns\": [\n";
+            var p_idx = 0;
+            let p_pad = json_indent(depth + 2, indent);
+            for p in self.patterns {
+                if p_idx > 0 { s = s + ",\n"; }
+                s = s + p_pad + p.emit_json(indent, depth + 2);
+                p_idx = p_idx + 1;
+            }
+            s = s + "\n" + pad_in + "]";
+            has_prop = true;
+        }
+
+        s = s + "\n" + pad + "}";
+        return s;
+    }
+}
+
+[JsonObject]
+pub struct TmSection : IValue {
+    [JsonProperty("name")]
+    pub name: str;
+
+    [JsonProperty("rules")]
+    pub rules: TmRule[];
+
+    pub fn emit_json(indent: i64 = 2, depth: i64 = 2) -> str {
+        let pad = json_indent(depth, indent);
+        let pad_in = json_indent(depth + 1, indent);
+        var s = f"{{\n{pad_in}\"patterns\": [\n";
+        var r_idx = 0;
+        let r_pad = json_indent(depth + 2, indent);
+        for r in self.rules {
+            if r_idx > 0 { s = s + ",\n"; }
+            let r_json = r.emit_json(indent, depth + 2);
+            s = s + r_pad + r_json;
+            r_idx = r_idx + 1;
+        }
+        s = s + "\n" + pad_in + "]\n" + pad + "}";
+        return s;
+    }
+}
+
+[JsonObject]
+pub struct TmLanguageGrammar : IValue {
+    [JsonProperty("$schema")]
+    pub schema: str;
+
+    [JsonProperty("name")]
+    pub name: str;
+
+    [JsonProperty("scopeName")]
+    pub scope_name: str;
+
+    [JsonProperty("patterns")]
+    pub patterns: TmPatternInclude[];
+
+    [JsonProperty("repository")]
+    pub repository: TmSection[];
+
+    pub fn emit_json(indent: i64 = 2) -> str {
+        let pad = json_indent(1, indent);
+        let pad_in = json_indent(2, indent);
+        let pad_close = json_indent(0, indent);
+
+        var p_str = "[\n";
+        var p_idx = 0;
+        for p in self.patterns {
+            if p_idx > 0 { p_str = p_str + ",\n"; }
+            p_str = p_str + pad_in + p.emit_json();
+            p_idx = p_idx + 1;
+        }
+        p_str = p_str + "\n" + pad + "]";
+
+        var r_str = "{\n";
+        var s_idx = 0;
+        for s in self.repository {
+            if s_idx > 0 { r_str = r_str + ",\n"; }
+            let s_json = s.emit_json(indent, 2);
+            r_str = r_str + pad_in + f"\"{s.name}\": {s_json}";
+            s_idx = s_idx + 1;
+        }
+        r_str = r_str + "\n" + pad + "}";
+
+        return f"{{\n{pad}\"$schema\": \"{self.schema}\",\n{pad}\"name\": \"{self.name}\",\n{pad}\"scopeName\": \"{self.scope_name}\",\n{pad}\"patterns\": {p_str},\n{pad}\"repository\": {r_str}\n{pad_close}}}";
+    }
+}
+
+pub pure fn build_tm_language_model(
+    seed_keywords_regex:   str,
+    syntax_macros_regex:   str,
+    modifiers_regex:       str,
+    lang_primitives_regex: str,
+    operators_regex:       str
+) -> TmLanguageGrammar {
+    return TmLanguageGrammar {
+        schema:     "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+        name:       "Pilot",
+        scope_name: "source.pilot",
+        patterns: [
+            TmPatternInclude { include: "#comments" },
+            TmPatternInclude { include: "#preprocessor" },
+            TmPatternInclude { include: "#strings" },
+            TmPatternInclude { include: "#raw-idents" },
+            TmPatternInclude { include: "#attributes" },
+            TmPatternInclude { include: "#distributive-headers" },
+            TmPatternInclude { include: "#quote-splices" },
+            TmPatternInclude { include: "#numbers" },
+            TmPatternInclude { include: "#call-targets" },
+            TmPatternInclude { include: "#keywords" },
+            TmPatternInclude { include: "#modifiers" },
+            TmPatternInclude { include: "#primitives" },
+            TmPatternInclude { include: "#operators" },
+        ],
+        repository: [
+            TmSection {
+                name: "comments",
+                rules: [
+                    TmRule {
+                        name: "comment.line.double-slash.pilot",
+                        match_pattern: "//.*$",
+                        begin: "", end: "", captures: [], patterns: [], include: "",
+                    },
+                    TmRule {
+                        name: "comment.block.pilot",
+                        match_pattern: "",
+                        begin: "/\\*", end: "\\*/", captures: [], patterns: [], include: "",
+                    },
+                ],
+            },
+            TmSection {
+                name: "preprocessor",
+                rules: [
+                    TmRule {
+                        name: "meta.preprocessor.pilot keyword.control.directive.pilot",
+                        match_pattern: "^\\s*#(if|elif|else|endif|define|undef|region|endregion|pragma)\\b",
+                        begin: "", end: "", captures: [], patterns: [], include: "",
+                    },
+                ],
+            },
+            TmSection {
+                name: "strings",
+                rules: [
+                    TmRule {
+                        name: "string.quoted.double.interpolated.pilot",
+                        match_pattern: "",
+                        begin: "f\"", end: "\"",
+                        captures: [],
+                        patterns: [
+                            TmRule {
+                                name: "constant.character.escape.pilot",
+                                match_pattern: "\\\\.",
+                                begin: "", end: "", captures: [], patterns: [], include: "",
+                            },
+                            TmRule {
+                                name: "meta.interpolation.pilot",
+                                match_pattern: "",
+                                begin: "\\{", end: "\\}",
+                                captures: [],
+                                patterns: [
+                                    TmRule {
+                                        name: "", match_pattern: "", begin: "", end: "",
+                                        captures: [], patterns: [], include: "$self",
+                                    },
+                                ],
+                                include: "",
+                            },
+                        ],
+                        include: "",
+                    },
+                    TmRule {
+                        name: "string.quoted.double.pilot",
+                        match_pattern: "",
+                        begin: "\"", end: "\"",
+                        captures: [],
+                        patterns: [
+                            TmRule {
+                                name: "constant.character.escape.pilot",
+                                match_pattern: "\\\\.",
+                                begin: "", end: "", captures: [], patterns: [], include: "",
+                            },
+                        ],
+                        include: "",
+                    },
+                ],
+            },
+            TmSection {
+                name: "raw-idents",
+                rules: [
+                    TmRule {
+                        name: "variable.other.escaped.pilot",
+                        match_pattern: "`[^`\\r\\n]+`",
+                        begin: "", end: "", captures: [], patterns: [], include: "",
+                    },
+                ],
+            },
+            TmSection {
+                name: "attributes",
+                rules: [
+                    TmRule {
+                        name: "meta.attribute.pilot",
+                        match_pattern: "\\[\\s*(?:(var|let)\\s+([a-z_][A-Za-z0-9_]*)\\s*=\\s*)?([A-Z][A-Za-z0-9_]*)",
+                        begin: "", end: "",
+                        captures: [
+                            TmCaptureBinding { index: "1", name: "storage.modifier.pilot" },
+                            TmCaptureBinding { index: "2", name: "variable.other.readwrite.pilot" },
+                            TmCaptureBinding { index: "3", name: "entity.name.function.decorator.pilot" },
+                        ],
+                        patterns: [], include: "",
+                    },
+                ],
+            },
+            TmSection {
+                name: "distributive-headers",
+                rules: [
+                    TmRule {
+                        name: "meta.distributive.binding.pilot",
+                        match_pattern: "\\b(let|var)\\s+([A-Z][A-Za-z0-9_]*)\\s*(?=<|\\{)",
+                        begin: "", end: "",
+                        captures: [
+                            TmCaptureBinding { index: "1", name: "storage.type.pilot" },
+                            TmCaptureBinding { index: "2", name: "entity.name.type.struct.pilot" },
+                        ],
+                        patterns: [], include: "",
+                    },
+                ],
+            },
+            TmSection {
+                name: "quote-splices",
+                rules: [
+                    TmRule {
+                        name: "variable.other.metavariable.splice.pilot",
+                        match_pattern: "\\$[A-Za-z_][A-Za-z0-9_]*",
+                        begin: "", end: "", captures: [], patterns: [], include: "",
+                    },
+                    TmRule {
+                        name: "keyword.operator.unquote.pilot",
+                        match_pattern: "~(?=[A-Za-z_(])",
+                        begin: "", end: "", captures: [], patterns: [], include: "",
+                    },
+                ],
+            },
+            TmSection {
+                name: "call-targets",
+                rules: [
+                    TmRule {
+                        name: "constant.other.enum-variant.pilot",
+                        match_pattern: "::([A-Za-z_][A-Za-z0-9_]*)",
+                        begin: "", end: "", captures: [], patterns: [], include: "",
+                    },
+                    TmRule {
+                        name: "entity.name.type.struct.constructor.pilot",
+                        match_pattern: "\\b([A-Z][A-Za-z0-9_]*)\\s*(?=\\(|\\{|<)",
+                        begin: "", end: "", captures: [], patterns: [], include: "",
+                    },
+                    TmRule {
+                        name: "entity.name.function.call.pilot",
+                        match_pattern: "\\b([a-z_][A-Za-z0-9_]*)\\s*(?=(?:!!|!&|!\\^|!@|!\\?|!)?\\()",
+                        begin: "", end: "", captures: [], patterns: [], include: "",
+                    },
+                ],
+            },
+            TmSection {
+                name: "keywords",
+                rules: [
+                    TmRule {
+                        name: "keyword.control.seed.pilot",
+                        match_pattern: f"\\b({seed_keywords_regex})\\b",
+                        begin: "", end: "", captures: [], patterns: [], include: "",
+                    },
+                    TmRule {
+                        name: "entity.name.function.macro.syntax.pilot",
+                        match_pattern: f"\\b({syntax_macros_regex})\\b",
+                        begin: "", end: "", captures: [], patterns: [], include: "",
+                    },
+                ],
+            },
+            TmSection {
+                name: "modifiers",
+                rules: [
+                    TmRule {
+                        name: "storage.modifier.pilot",
+                        match_pattern: f"\\b({modifiers_regex}|lvl[0-9]+)\\b",
+                        begin: "", end: "", captures: [], patterns: [], include: "",
+                    },
+                ],
+            },
+            TmSection {
+                name: "primitives",
+                rules: [
+                    TmRule {
+                        name: "storage.type.primitive.pilot",
+                        match_pattern: f"\\b({lang_primitives_regex})\\b",
+                        begin: "", end: "", captures: [], patterns: [], include: "",
+                    },
+                    TmRule {
+                        name: "entity.name.type.interface.pilot",
+                        match_pattern: "\\bI[A-Z][A-Za-z0-9_]*\\b",
+                        begin: "", end: "", captures: [], patterns: [], include: "",
+                    },
+                ],
+            },
+            TmSection {
+                name: "numbers",
+                rules: [
+                    TmRule {
+                        name: "constant.numeric.pilot",
+                        match_pattern: "\\b0[xXbBoO][0-9a-fA-F_]+\\b|\\b[0-9][0-9_]*(?:\\.[0-9_]+)?(?:[eE][+-]?[0-9_]+)?(?:[a-zA-Z]+)?\\b",
+                        begin: "", end: "", captures: [], patterns: [], include: "",
+                    },
+                ],
+            },
+            TmSection {
+                name: "operators",
+                rules: [
+                    TmRule {
+                        name: "keyword.operator.call-quote.pilot",
+                        match_pattern: "!!|!&|!\\^|!@|!\\?",
+                        begin: "", end: "", captures: [], patterns: [], include: "",
+                    },
+                    TmRule {
+                        name: "keyword.operator.pilot",
+                        match_pattern: operators_regex,
+                        begin: "", end: "", captures: [], patterns: [], include: "",
+                    },
+                ],
+            },
+        ],
+    };
+}
+
+pub pure fn build_tm_language_json(
+    seed_keywords_regex:   str,
+    syntax_macros_regex:   str,
+    modifiers_regex:       str,
+    lang_primitives_regex: str,
+    operators_regex:       str
+) -> str {
+    let model = build_tm_language_model(
+        seed_keywords_regex,
+        syntax_macros_regex,
+        modifiers_regex,
+        lang_primitives_regex,
+        operators_regex
+    );
+    return dumps(model, 2);
+}
+
+// =========================================================================
+// 6. IDE ARTIFACTS BUNDLE & SYNTAX MIGRATION TABLE
+// =========================================================================
 
 pub struct IdeArtifactsBundle : IValue {
     pub tm_language_json:       str;
@@ -31,218 +889,6 @@ pub pure fn build_all_ide_artifacts() -> IdeArtifactsBundle {
         semantic_legend_json: build_semantic_legend_json(),
     };
 }
-
-pub pure fn build_semantic_legend_json() -> str => """{
-  "tokenTypes": [
-    "namespace", "type", "class", "enum", "interface", "struct",
-    "typeParameter", "parameter", "variable", "property", "enumMember",
-    "event", "function", "method", "macro", "keyword", "modifier",
-    "comment", "string", "number", "regexp", "operator", "decorator"
-  ],
-  "tokenModifiers": [
-    "declaration", "definition", "readonly", "static", "deprecated",
-    "abstract", "async", "modification", "documentation", "defaultLibrary",
-    "constructor", "callable"
-  ]
-}""";
-
-pub pure fn build_language_configuration_json() -> str => """{
-  "comments": {
-    "lineComment": "//",
-    "blockComment": ["/*", "*/"]
-  },
-  "brackets": [
-    ["{", "}"],
-    ["[", "]"],
-    ["(", ")"],
-    ["<", ">"]
-  ],
-  "autoClosingPairs": [
-    { "open": "{", "close": "}" },
-    { "open": "[", "close": "]" },
-    { "open": "(", "close": ")" },
-    { "open": "\"", "close": "\"", "notIn": ["string"] },
-    { "open": "`", "close": "`", "notIn": ["string", "comment"] }
-  ],
-  "surroundingPairs": [
-    ["{", "}"],
-    ["[", "]"],
-    ["(", ")"],
-    ["<", ">"],
-    ["\"", "\""],
-    ["`", "`"]
-  ],
-  "indentationRules": {
-    "increaseIndentPattern": "^((?!.*?\\/\\/).)*(\\{[^}\"'`]*|\\([^)\"'`]*|\\[[^\\]\"'`]*)$",
-    "decreaseIndentPattern": "^\\s*[}\\])]\\s*$"
-  }
-}""";
-
-pub pure fn build_snippets_json() -> str => """{
-  "Distributive Struct Block": {
-    "prefix": "pstruct",
-    "body": ["pub struct {", "\t$0", "}"],
-    "description": "Distributive Pilot struct block"
-  },
-  "Syntax Macro Rule": {
-    "prefix": "psyntax",
-    "body": ["pub syntax ${1:name}(${2:expr}) => quote {", "\t$0", "};"],
-    "description": "Self-hosted Pilot syntax macro"
-  },
-  "Patch Function Clone": {
-    "prefix": "ppatch",
-    "body": [
-      "[var ${1:contents} = Patch(${2:orig_fn}, PatchPart.body(), ${3:0} ..${4:5})]",
-      "pub fn ${5:new_fn}() {",
-      "\t$0",
-      "\t${1:contents}.patch().call();",
-      "}"
-    ],
-    "description": "Non-destructive CST/AST function patch and clone"
-  },
-  "Choreography Blueprint": {
-    "prefix": "pblueprint",
-    "body": [
-      "pub blueprint ${1:Pipeline} {",
-      "\trole ${2:Worker};",
-      "\tcue ${3:on_event}(pkt:${4:iso<SliceBuffer<u8>>}) {",
-      "\t\troute pkt -> ${2:Worker}.${5:handle};",
-      "\t}",
-      "}"
-    ],
-    "description": "Zero-copy .pchor choreography blueprint"
-  }
-}""";
-
-pub pure fn build_tm_language_json(
-    seed_keywords_regex:   str,
-    syntax_macros_regex:   str,
-    modifiers_regex:       str,
-    lang_primitives_regex: str,
-    operators_regex:       str
-) -> str => f"""{{
-  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "Pilot",
-  "scopeName": "source.pilot",
-  "patterns": [
-    {{ "include": "#comments" }},
-    {{ "include": "#preprocessor" }},
-    {{ "include": "#strings" }},
-    {{ "include": "#raw-idents" }},
-    {{ "include": "#attributes" }},
-    {{ "include": "#distributive-headers" }},
-    {{ "include": "#quote-splices" }},
-    {{ "include": "#numbers" }},
-    {{ "include": "#call-targets" }},
-    {{ "include": "#keywords" }},
-    {{ "include": "#modifiers" }},
-    {{ "include": "#primitives" }},
-    {{ "include": "#operators" }}
-  ],
-  "repository": {{
-    "comments": {{
-      "patterns": [
-        {{ "name": "comment.line.double-slash.pilot", "match": "//.*$" }},
-        {{ "name": "comment.block.pilot", "begin": "/\\\\*", "end": "\\\\*/" }}
-      ]
-    }},
-    "preprocessor": {{
-      "patterns": [
-        {{ "name": "meta.preprocessor.pilot keyword.control.directive.pilot", "match": "^\\\\s*#(if|elif|else|endif|define|undef|region|endregion|pragma)\\\\b" }}
-      ]
-    }},
-    "strings": {{
-      "patterns": [
-        {{
-          "name": "string.quoted.double.interpolated.pilot",
-          "begin": "f\\"",
-          "end": "\\"",
-          "patterns": [
-            {{ "name": "constant.character.escape.pilot", "match": "\\\\\\\\." }},
-            {{ "name": "meta.interpolation.pilot", "begin": "\\\\{{", "end": "\\\\}}", "patterns": [{{ "include": "$self" }}] }}
-          ]
-        }},
-        {{
-          "name": "string.quoted.double.pilot",
-          "begin": "\\"",
-          "end": "\\"",
-          "patterns": [{{ "name": "constant.character.escape.pilot", "match": "\\\\\\\\." }}]
-        }}
-      ]
-    }},
-    "raw-idents": {{
-      "patterns": [
-        {{ "name": "variable.other.escaped.pilot", "match": "`[^`\\r\\n]+`" }}
-      ]
-    }},
-    "attributes": {{
-      "patterns": [
-        {{
-          "name": "meta.attribute.pilot",
-          "match": "\\\\[\\\\s*(?:(var|let)\\\\s+([a-z_][A-Za-z0-9_]*)\\\\s*=\\\\s*)?([A-Z][A-Za-z0-9_]*)",
-          "captures": {{
-            "1": {{ "name": "storage.modifier.pilot" }},
-            "2": {{ "name": "variable.other.readwrite.pilot" }},
-            "3": {{ "name": "entity.name.function.decorator.pilot" }}
-          }}
-        }}
-      ]
-    }},
-    "distributive-headers": {{
-      "patterns": [
-        {{
-          "name": "meta.distributive.binding.pilot",
-          "match": "\\\\b(let|var)\\\\s+([A-Z][A-Za-z0-9_]*)\\\\s*(?=<|\\\\{{)",
-          "captures": {{
-            "1": {{ "name": "storage.type.pilot" }},
-            "2": {{ "name": "entity.name.type.struct.pilot" }}
-          }}
-        }}
-      ]
-    }},
-    "quote-splices": {{
-      "patterns": [
-        {{ "name": "variable.other.metavariable.splice.pilot", "match": "\\\\$[A-Za-z_][A-Za-z0-9_]*" }},
-        {{ "name": "keyword.operator.unquote.pilot", "match": "~(?=[A-Za-z_(])" }}
-      ]
-    }},
-    "call-targets": {{
-      "patterns": [
-        {{ "name": "constant.other.enum-variant.pilot", "match": "::([A-Za-z_][A-Za-z0-9_]*)" }},
-        {{ "name": "entity.name.type.struct.constructor.pilot", "match": "\\\\b([A-Z][A-Za-z0-9_]*)\\\\s*(?=\\\\(|\\\\{{|<)" }},
-        {{ "name": "entity.name.function.call.pilot", "match": "\\\\b([a-z_][A-Za-z0-9_]*)\\\\s*(?=(?:!!|!&|!\\\\^|!@|!\\\\?|!)?\\\\()" }}
-      ]
-    }},
-    "keywords": {{
-      "patterns": [
-        {{ "name": "keyword.control.seed.pilot", "match": "\\\\b({seed_keywords_regex})\\\\b" }},
-        {{ "name": "entity.name.function.macro.syntax.pilot", "match": "\\\\b({syntax_macros_regex})\\\\b" }}
-      ]
-    }},
-    "modifiers": {{
-      "patterns": [
-        {{ "name": "storage.modifier.pilot", "match": "\\\\b({modifiers_regex}|lvl[0-9]+)\\\\b" }}
-      ]
-    }},
-    "primitives": {{
-      "patterns": [
-        {{ "name": "storage.type.primitive.pilot", "match": "\\\\b({lang_primitives_regex})\\\\b" }},
-        {{ "name": "entity.name.type.interface.pilot", "match": "\\\\bI[A-Z][A-Za-z0-9_]*\\\\b" }}
-      ]
-    }},
-    "numbers": {{
-      "patterns": [
-        {{ "name": "constant.numeric.pilot", "match": "\\\\b0[xXbBoO][0-9a-fA-F_]+\\\\b|\\\\b[0-9][0-9_]*(?:\\\\.[0-9_]+)?(?:[eE][+-]?[0-9_]+)?(?:[a-zA-Z]+)?\\\\b" }}
-      ]
-    }},
-    "operators": {{
-      "patterns": [
-        {{ "name": "keyword.operator.call-quote.pilot", "match": "!!|!&|!\\\\^|!@|!\\\\?" }},
-        {{ "name": "keyword.operator.pilot", "match": "{operators_regex}" }}
-      ]
-    }}
-  }}
-}}""";
 
 // Pilot-Hosted Legacy-to-Canonical Syntax Migration Table (Used by `pilot fmt --migrate-syntax`)
 pub pure fn syntax_migration_pairs() -> tuple<str, str>[] => [

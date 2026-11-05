@@ -1,64 +1,66 @@
 // =============================================================================
-// Tutorial 02: Control Flow, Loops, Ranges, Comprehensions & Walrus Operator
+// Tutorial 02: Control Flow, Loops, Ranges, Unpacking & Functional Pipelines
 // =============================================================================
 
-// --- 1. If / Elif / Else Expressions ---
+// --- 1. If / Else If / Else Expressions ---
 // In Pilot, if-statements are expressions that evaluate to a value.
-let score = 88
+let score = 88;
 let grade = if score >= 90 {
-    "A"
-} elif score >= 80 {
-    "B"
-} elif score >= 70 {
-    "C"
+    "A";
+} else if score >= 80 {
+    "B";
+} else if score >= 70 {
+    "C";
 } else {
-    "F"
-}
-println(f"Score {score} yields grade {grade}")
+    "F";
+};
+println(f"Score {score} yields grade {grade}");
 
 // --- 2. Inline Assignment Expression (The Walrus Operator `:=`) ---
-let threshold = 50
+let threshold = 50;
 if (let sample_reading := score * 2) > 100 {
-    println(f"Sample reading {sample_reading} exceeds threshold {threshold}")
+    println(f"Sample reading {sample_reading} exceeds threshold {threshold}");
 }
 
 // --- 3. While Loops ---
-var countdown = 3
+var countdown = 3;
 while countdown > 0 {
-    println(f"T-minus {countdown}...")
-    countdown -= 1
+    println(f"T-minus {countdown}...");
+    countdown -= 1;
 }
 
 // --- 4. For-in Loops and Range Expressions ---
 // Range operators:
-//   `0..5`   -> Inclusive range [0, 5] (0, 1, 2, 3, 4, 5)
+//   `0..=5`  -> Inclusive span [0, 5] (0, 1, 2, 3, 4, 5)
 //   `0..<5`  -> Half-open range [0, 5) (0, 1, 2, 3, 4)
 for i in 0..<3 {
-    println(f"Iteration: {i}")
+    println(f"Iteration: {i}");
 }
 
-// --- 5. C# Collection Expressions with Spread Elements (..) ---
-// Pilot supports modern C# 12+ collection expressions with spread syntax (..):
-let row_a = [1, 2, 3]
-let row_b = [4, 5, 6]
-let combined_list = [..row_a, ..row_b]
-let surrounded = [0, ..row_a, 99, ..row_b, 100]
+// --- 5. Collection Expressions with Splat (`*`) and Key-Value Pairs (`**`) ---
+let row_a = [1, 2, 3];
+let row_b = [4, 5, 6];
+let combined_list = [*row_a, *row_b];
+let surrounded = [0, *row_a, 99, *row_b, 100];
 
-// Dictionary and Set spreading:
-let base_dict = {"host": "localhost", "port": "8080"}
-let extended_dict = {..base_dict, "ssl": "true", "timeout": "30s"}
-let base_set = {10, 20}
-let extended_set = {..base_set, 30, 40}
+// Map and target-typed collection unpacking:
+let base_dict: map<str, str> = ["host": "localhost", "port": "8080"];
+let extended_dict: map<str, str> = [**base_dict, "ssl": "true", "timeout": "30s"];
+let base_set: i64[] = [10, 20];
+let extended_set: i64[] = [*base_set, 30, 40];
 
-// --- 6. Collection Comprehensions ---
-// List comprehension: [expr for var in iterable (if condition)?]
-let raw_numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-let odd_squares = [x * x for x in raw_numbers if x % 2 != 0]
+// --- 6. Collection Transformations ---
+let raw_numbers: i64[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+var odd_squares: i64[] = [];
+for x in raw_numbers {
+    if x % 2 != 0 {
+        odd_squares.append(x * x);
+    }
+}
 
-// Set comprehension: {expr for var in iterable}
-let unique_tags = {tag for tag in ["io", "net", "io", "crypto"]}
+var indexed_map: map<str, i64> = [];
+for n in [1, 2, 3] {
+    indexed_map[f"item_{n}"] = n * 10;
+}
 
-// Dict/Map comprehension: {key: value for var in iterable}
-let indexed_map = {f"item_{n}": n * 10 for n in [1, 2, 3]}
-
-println("Tutorial 02 completed successfully.")
+println(f"Odd squares count: {len(odd_squares)}, Tutorial 02 completed successfully.");

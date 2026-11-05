@@ -1,50 +1,65 @@
-# ==============================================================================
-# selfhost/preprocessor.pilot: Preprocessor Engine Written in Pilot
-# ==============================================================================
+// ==============================================================================
+// selfhost/preprocessor.pilot: Preprocessor Engine Written in Pilot
+// ==============================================================================
 
-def is_directive_line(line: str) -> bool {
-    if line[0] == 35 { # '#' character
-        return true
-    }
-    return false
+pub pkg Pilot.SelfHost.Preprocessor;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+
+extern "c" {
+    fn strlen(s: str) -> i64;
 }
 
-def is_comment_line(line: str) -> bool {
-    let mut i = 0
-    while line[i] == 32 || line[i] == 9 { # space or tab
-        i = i + 1
+pub fn is_directive_line(line: str) -> bool {
+    if line.char_code_at(0) == 35 { // '#' character
+        return true;
     }
-    if line[i] == 35 { # '#' comment
-        if line[i + 1] != 100 && line[i + 1] != 105 && line[i + 1] != 117 && line[i + 1] != 101 {
-            # Not #define, #if, #undef, #else, #endif
-            return true
-        }
-    }
-    if line[i] == 47 && line[i + 1] == 47 { # '//' comment
-        return true
-    }
-    return false
+    return false;
 }
 
-def preprocess_strip_comments(src: str, out_buf: str) -> int {
-    let len = strlen(src)
-    let mut out_len = 0
-    let mut in_comment = false
-
-    let mut i = 0
-    while i < len {
-        if src[i] == 47 && i + 1 < len && src[i + 1] == 47 {
-            in_comment = true
+pub fn is_comment_line(line: str) -> bool {
+    var i: i64 = 0;
+    while line.char_code_at(i) == 32 || line.char_code_at(i) == 9 { // space or tab
+        i = i + 1;
+    }
+    if line.char_code_at(i) == 35 { // '#' comment
+        let next_c: i64 = line.char_code_at(i + 1);
+        if next_c != 100 && next_c != 105 && next_c != 117 && next_c != 101 {
+            // Not #define, #if, #undef, #else, #endif
+            return true;
         }
-        if src[i] == 10 { # newline
-            in_comment = false
+    }
+    if line.char_code_at(i) == 47 && line.char_code_at(i + 1) == 47 { // '//' comment
+        return true;
+    }
+    return false;
+}
+
+pub fn preprocess_strip_comments(src: str, out_buf: any) -> i64 {
+    let total_len: i64 = strlen(src);
+    var out_len: i64 = 0;
+    var in_comment: bool = false;
+
+    var i: i64 = 0;
+    while i < total_len {
+        let ch: i64 = src.char_code_at(i);
+        if ch == 47 && i + 1 < total_len && src.char_code_at(i + 1) == 47 {
+            in_comment = true;
+        }
+        if ch == 10 { // newline
+            in_comment = false;
         }
         if !in_comment {
-            out_buf[out_len] = src[i]
-            out_len = out_len + 1
+            out_buf[out_len] = ch;
+            out_len = out_len + 1;
         }
-        i = i + 1
+        i = i + 1;
     }
-    out_buf[out_len] = 0
-    return out_len
+    out_buf[out_len] = 0;
+    return out_len;
 }

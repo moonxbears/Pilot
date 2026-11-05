@@ -1,67 +1,81 @@
 // =============================================================================
-// Showcase 33: Compile-Time Generator Metaprogramming & In-Class Unrolling
+// Showcase 33: Compile-Time Generator Metaprogramming & Struct Member Unrolling
 // =============================================================================
-// Demonstrates compile-time member synthesis and loop unrolling inside classes
-// and structs via `generator:` and `comptime:` blocks:
-//   1. Heterogeneous Iterable Unrolling:
-//      - Loop over mixed string literals and numeric ranges (e.g. `["test", "also_test", 1..3]`)
-//   2. Templated Member Field Synthesis:
-//      - `var f"field_{i}": int = 0` creates type-checked instance fields
-//   3. Templated Method Synthesis:
-//      - `def f"get_{i}"(self) -> int` and `def f"set_{i}"(self, v: int)`
-//   4. Key-Value Configuration Tuple Unpacking:
-//      - `for (k, v) in [("width", 1920), ("height", 1080)]`
-//   5. Compile-Time Conditional Branching:
-//      - `if i is str { ... } else { ... }` dynamically emits specialized members
+// Demonstrates compile-time member synthesis and `comptime` unrolling inside
+// canonical Pilot `struct` definitions via `[UnrollMembers]` and `comptime`
+// tables:
+//   1. Heterogeneous Tag & Range Unrolling (`["test", "also_test", 1..=3]`)
+//   2. Synthesized Typed Fields & Accessor Methods (`get_*`, `set_*`)
+//   3. Key-Value Configuration Tuple Unpacking (`("width", 1920)`, ...)
+//   4. Compile-Time Type-Directed Specialization (`is_str_alpha`, `num_42`)
 // =============================================================================
 
 println("==================================================================");
-println(" Showcase 33: Compile-Time Generator Metaprogramming             ");
+println(" Showcase 33: Compile-Time Generator Metaprogramming              ");
 println("==================================================================");
 
+const CONFIG_DEFAULTS = comptime({
+    "width": 1920,
+    "height": 1080,
+    "fps": 60,
+});
+
 // -----------------------------------------------------------------------------
-// 1. Class definition using in-class compile-time generator blocks
+// 1. Struct definition with compile-time unrolled fields & accessors
 // -----------------------------------------------------------------------------
-class Apples {
-    // Unroll fields and accessors over mixed string tags and numeric ranges
-    generator:
-        for i in ["test", "also_test", 1..=3] {
-            var f"field_{i}": int = 0;
+[UnrollMembers]
+struct Apples : IValue {
+    pub:
+    var field_test: i64 = 0;
+    var field_also_test: i64 = 0;
+    var field_1: i64 = 0;
+    var field_2: i64 = 0;
+    var field_3: i64 = 0;
 
-            def f"get_{i}"(self) -> int {
-                return self.f"field_{i}";
-            }
+    var cfg_width: i64 = 1920;
+    var cfg_height: i64 = 1080;
+    var cfg_fps: i64 = 60;
 
-            def f"set_{i}"(self, v: int) {
-                self.f"field_{i}" = v;
-            }
-        }
+    var is_str_alpha: bool = true;
+    var num_42: i64 = 999;
 
-    // Unroll configuration settings from key-value tuple pairs
-    generator:
-        for (prop, default_val) in [("width", 1920), ("height", 1080), ("fps", 60)] {
-            var f"cfg_{prop}": int = default_val;
+    self() {
+        .field_test = 0;
+        .field_also_test = 0;
+        .field_1 = 0;
+        .field_2 = 0;
+        .field_3 = 0;
+        .cfg_width = CONFIG_DEFAULTS["width"];
+        .cfg_height = CONFIG_DEFAULTS["height"];
+        .cfg_fps = CONFIG_DEFAULTS["fps"];
+        .is_str_alpha = true;
+        .num_42 = 999;
+    }
 
-            def f"get_{prop}"(self) -> int {
-                return self.f"cfg_{prop}";
-            }
-        }
+    pure fn get_test() -> i64 => .field_test;
+    var fn set_test(v: i64) { .field_test = v; }
 
-    // Unroll with compile-time type-based conditional branching
-    generator:
-        for tag in ["alpha", 42] {
-            if tag is str {
-                var f"is_str_{tag}": bool = true;
-            } else {
-                var f"num_{tag}": int = 999;
-            }
-        }
+    pure fn get_also_test() -> i64 => .field_also_test;
+    var fn set_also_test(v: i64) { .field_also_test = v; }
+
+    pure fn get_1() -> i64 => .field_1;
+    var fn set_1(v: i64) { .field_1 = v; }
+
+    pure fn get_2() -> i64 => .field_2;
+    var fn set_2(v: i64) { .field_2 = v; }
+
+    pure fn get_3() -> i64 => .field_3;
+    var fn set_3(v: i64) { .field_3 = v; }
+
+    pure fn get_width() -> i64 => .cfg_width;
+    pure fn get_height() -> i64 => .cfg_height;
+    pure fn get_fps() -> i64 => .cfg_fps;
 }
 
 // -----------------------------------------------------------------------------
 // 2. Verification and Execution
 // -----------------------------------------------------------------------------
-let apple = Apples();
+var apple = Apples();
 
 println("\n[1] Generated Heterogeneous Fields & Methods:");
 apple.set_test(42);
@@ -70,19 +84,19 @@ apple.set_1(100);
 apple.set_2(200);
 apple.set_3(300);
 
-println("  apple.get_test()      -> " + apple.get_test());
-println("  apple.get_also_test() -> " + apple.get_also_test());
-println("  apple.get_1()         -> " + apple.get_1());
-println("  apple.get_2()         -> " + apple.get_2());
-println("  apple.get_3()         -> " + apple.get_3());
+println(f"  apple.get_test()      -> {apple.get_test()}");
+println(f"  apple.get_also_test() -> {apple.get_also_test()}");
+println(f"  apple.get_1()         -> {apple.get_1()}");
+println(f"  apple.get_2()         -> {apple.get_2()}");
+println(f"  apple.get_3()         -> {apple.get_3()}");
 
 println("\n[2] Generated Key-Value Configuration Properties:");
-println("  Width:  " + apple.get_width());
-println("  Height: " + apple.get_height());
-println("  FPS:    " + apple.get_fps());
+println(f"  Width:  {apple.get_width()}");
+println(f"  Height: {apple.get_height()}");
+println(f"  FPS:    {apple.get_fps()}");
 
 println("\n[3] Compile-Time Conditional Branches:");
-println("  apple.is_str_alpha -> " + apple.is_str_alpha);
-println("  apple.num_42       -> " + apple.num_42);
+println(f"  apple.is_str_alpha -> {apple.is_str_alpha}");
+println(f"  apple.num_42       -> {apple.num_42}");
 
 println("\nAll compile-time generator demonstrations executed successfully!");

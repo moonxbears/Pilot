@@ -1,8 +1,8 @@
 // =============================================================================
 // Showcase 27: First-Class Fluid Cascades, Pipeline Operators & Fallback Expressions
 // =============================================================================
-// Demonstrates Milestones 14 & 48:
-//   1. Fluid Method Cascades (`..`):
+// Demonstrates:
+//   1. Fluid Method Cascades (`..` / `?..`):
 //      - Smalltalk / Dart-style receiver retention across multi-mutation calls
 //   2. Cascade Result Binding (`..method() -> let binding`):
 //      - Extracts intermediate returns without losing fluent chaining
@@ -10,7 +10,7 @@
 //      - Left-to-right function application: `x |> f |> g`
 //   4. Null-Coalescing (`??`) and Safe Navigation (`?.`, `?[...]`):
 //      - Defensive access with localized default fallback
-//   5. Exception Recovery Expression (`catch`):
+//   5. Values-First Error Recovery Expression (`catch`):
 //      - Localized inline error fallback without heavy try-catch blocks
 // =============================================================================
 
@@ -21,33 +21,41 @@ println("==================================================================");
 // -----------------------------------------------------------------------------
 // 1. Fluid Method Cascades (`..`) on Configurable Client
 // -----------------------------------------------------------------------------
-class HttpClientConfig {
-    var host: str = "localhost";
-    var port: int = 80;
-    var use_tls: bool = false;
-    var timeout_ms: int = 5000;
-    var auth_token: str = "";
+struct HttpClientConfig : IValue {
+    pub var host: str = "localhost";
+    pub var port: i64 = 80;
+    pub var use_tls: bool = false;
+    pub var timeout_ms: i64 = 5000;
+    pub var auth_token: str = "";
 
-    def set_host(h: str) {
-        this.host = h;
+    pub self() {
+        .host = "localhost";
+        .port = 80;
+        .use_tls = false;
+        .timeout_ms = 5000;
+        .auth_token = "";
     }
 
-    def set_port(p: int) {
-        this.port = p;
+    pub var fn set_host(h: str) {
+        .host = h;
     }
 
-    def enable_tls() {
-        this.use_tls = true;
+    pub var fn set_port(p: i64) {
+        .port = p;
     }
 
-    def generate_session_token() -> str {
-        this.auth_token = "tok_live_98a72b";
-        return this.auth_token;
+    pub var fn enable_tls() {
+        .use_tls = true;
     }
 
-    def describe() -> str {
-        let scheme = "https" if this.use_tls else "http";
-        return scheme + "://" + this.host + ":" + this.port + " (timeout=" + this.timeout_ms + "ms)";
+    pub var fn generate_session_token() -> str {
+        .auth_token = "tok_live_98a72b";
+        return .auth_token;
+    }
+
+    pub pure fn describe() -> str {
+        let scheme = if .use_tls { "https" } else { "http" };
+        return f"{scheme}://{.host}:{.port} (timeout={.timeout_ms}ms)";
     }
 }
 
@@ -58,22 +66,22 @@ let client = HttpClientConfig()
     ..generate_session_token() -> let session_key;
 
 println("\n[1] Fluid Cascaded Client Configuration:");
-println("  Endpoint:    " + client.describe());
-println("  Bound Token: " + session_key);
+println(f"  Endpoint:    {client.describe()}");
+println(f"  Bound Token: {session_key}");
 
 // -----------------------------------------------------------------------------
 // 2. Functional Pipeline Operator (`|>`)
 // -----------------------------------------------------------------------------
-def sanitize_metric(value: float) -> float {
-    return value if value >= 0.0 else 0.0;
+fn sanitize_metric(value: f64) -> f64 {
+    return if value >= 0.0 { value } else { 0.0 };
 }
 
-def amplify_gain(signal: float) -> float {
+fn amplify_gain(signal: f64) -> f64 {
     return signal * 2.5;
 }
 
-def quantize_sample(reading: float) -> int {
-    return int(reading + 0.5);
+fn quantize_sample(reading: f64) -> i64 {
+    return i64(reading + 0.5);
 }
 
 let raw_input = 14.8;
@@ -83,15 +91,20 @@ let final_signal = raw_input
     |> quantize_sample;
 
 println("\n[2] Pipeline Operator (|>) Transformation:");
-println("  Raw Input:    " + raw_input);
-println("  Final Signal: " + final_signal);
+println(f"  Raw Input:    {raw_input}");
+println(f"  Final Signal: {final_signal}");
 
 // -----------------------------------------------------------------------------
 // 3. Null-Coalescing (`??`) and Safe Navigation (`?.`)
 // -----------------------------------------------------------------------------
-class ServerProfile {
-    var region: str? = none;
-    var fallback_region: str = "us-east-1";
+struct ServerProfile : IValue {
+    pub var region: str? = none;
+    pub var fallback_region: str = "us-east-1";
+
+    pub self() {
+        .region = none;
+        .fallback_region = "us-east-1";
+    }
 }
 
 let profile = ServerProfile();
@@ -99,15 +112,15 @@ let resolved_region = profile.region ?? profile.fallback_region;
 let safe_len = profile.region?.len ?? 0;
 
 println("\n[3] Null-Safety Coalescing & Safe Navigation:");
-println("  Resolved Region: " + resolved_region);
-println("  Region Length:   " + safe_len);
+println(f"  Resolved Region: {resolved_region}");
+println(f"  Region Length:   {safe_len}");
 
 // -----------------------------------------------------------------------------
-// 4. Inline Exception Recovery Expression (`catch`)
+// 4. Inline Error Recovery Expression (`catch`)
 // -----------------------------------------------------------------------------
-def load_port_from_env(env_var: str) -> int {
+fn load_port_from_env(env_var: str) -> i64 ! str {
     if env_var == "INVALID" {
-        raise "Invalid port string format";
+        return fail("Invalid port string format");
     }
     return 8080;
 }
@@ -115,8 +128,8 @@ def load_port_from_env(env_var: str) -> int {
 let configured_port = load_port_from_env("INVALID") catch 3000;
 let standard_port = load_port_from_env("VALID") catch 3000;
 
-println("\n[4] Localized Exception Recovery (catch):");
-println("  Configured Port (recovered from error): " + configured_port);
-println("  Standard Port (normal path):            " + standard_port);
+println("\n[4] Localized Error Recovery (catch):");
+println(f"  Configured Port (recovered from error): {configured_port}");
+println(f"  Standard Port (normal path):            {standard_port}");
 
 println("\n>>> Showcase 27 Complete! <<<\n");

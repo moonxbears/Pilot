@@ -1,116 +1,146 @@
-# ==============================================================================
-# Concept 03: Method Groups, Switchboards, Currying, Unions & Broadcasts
-# ==============================================================================
+// ==============================================================================
+// Concept 03: Method Groups, Switchboards, Currying, Unions & Broadcasts
+// ==============================================================================
 
 println("==================================================");
 println(" PILOT SHOWCASE: Advanced Method Groups & Dispatch");
 println("==================================================");
 
-# 1. Switchboard (Auto-Routing Maps over Heterogeneous Collections)
+// 1. Switchboard (Auto-Routing Maps over Heterogeneous Collections)
 println("\n--- 1. Auto-Routing Switchboard ---");
 
-def process_item(item: int) {
-    return "Integer Doubled: " + (item * 2);
+fn process_item(item: i64) -> str {
+    return f"Integer Doubled: {item * 2}";
 }
 
-def process_item(item: str) {
-    return "String Uppercase: " + item.to_upper();
+fn process_item(item: str) -> str {
+    return f"String Uppercase: {item}";
 }
 
-def process_item(item: list) {
-    return "List Count: " + item.length + " elements";
+fn process_item(item: i64[]) -> str {
+    return f"Slice Count: {len(item)} elements";
 }
 
-let mixed_collection = [ 42, "pilot language", [1, 2, 3, 4], 100 ];
-println("Original heterogeneous collection: " + mixed_collection);
+let mixed_collection = [42, "pilot language", [1, 2, 3, 4], 100];
+println(f"Original heterogeneous collection: {mixed_collection}");
 
 println("\nMapping method group 'process_item' directly across collection:");
 let routed_results = mixed_collection.map(process_item);
 for res in routed_results {
-    println("  -> " + res);
+    println(f"  -> {res}");
 }
 
-
-# 2. Method Group Currying (The Signature Sieve)
+// 2. Method Group Currying (The Signature Sieve)
 println("\n--- 2. Method Group Currying (Signature Sieve) ---");
 
-class Circle { let radius = 12.0; }
-class Square { let side = 8.0; }
-class Triangle { let angle = 60.0; }
-
-def draw(shape: Circle, color: str) {
-    return "Drawing Circle with radius " + shape.radius + " in " + color;
+struct Circle : IValue {
+    pub radius: f64 = 12.0;
+    pub self() { .radius = 12.0; }
 }
 
-def draw(shape: Square, color: str) {
-    return "Drawing Square with side " + shape.side + " in " + color;
+struct Square : IValue {
+    pub side: f64 = 8.0;
+    pub self() { .side = 8.0; }
 }
 
-def draw(shape: Triangle, angle: float) {
-    return "Drawing Triangle rotated at " + angle + " deg";
+struct Triangle : IValue {
+    pub angle: f64 = 60.0;
+    pub self() { .angle = 60.0; }
 }
 
-println("Initial 'draw' method group has 3 overloads: (Circle, str), (Square, str), (Triangle, float).");
+fn draw(shape: Circle, color: str) -> str {
+    return f"Drawing Circle with radius {shape.radius} in {color}";
+}
 
-# Supplying only color="Crimson" sieves out Triangle!
-let draw_crimson = draw(color="Crimson");
-println("Currying draw(color='Crimson') narrowed the group to Circle and Square overloads.");
+fn draw(shape: Square, color: str) -> str {
+    return f"Drawing Square with side {shape.side} in {color}";
+}
+
+fn draw(shape: Triangle, angle: f64) -> str {
+    return f"Drawing Triangle rotated at {angle} deg";
+}
+
+println("Initial 'draw' method group has 3 overloads: (Circle, str), (Square, str), (Triangle, f64).");
+
+// Supplying only color="Crimson" sieves out Triangle!
+let draw_crimson = draw(color = "Crimson");
+println("Currying draw(color = 'Crimson') narrowed the group to Circle and Square overloads.");
 
 let my_circle = Circle();
 let my_square = Square();
 
-println("  Result: " + draw_crimson(my_circle));
-println("  Result: " + draw_crimson(my_square));
+println(f"  Result: {draw_crimson(my_circle)}");
+println(f"  Result: {draw_crimson(my_square)}");
 
-
-# 3. Method Group Fallback and Union (|)
+// 3. Method Group Fallback and Union (|)
 println("\n--- 3. Group Fallback and Union (|) ---");
 
-class UserProfile { let name = "Alice"; }
-class SystemConfig { let version = "2.4.0"; }
+struct UserProfile : IValue {
+    pub name: str = "Alice";
+    pub self() { .name = "Alice"; }
+}
 
-class JsonHandler {
-    def serialize(target: UserProfile) {
-        return "{\"type\": \"user\", \"name\": \"" + target.name + "\"}";
+struct SystemConfig : IValue {
+    pub version: str = "2.4.0";
+    pub self() { .version = "2.4.0"; }
+}
+
+struct JsonHandler : IValue {
+    pub static pure fn serialize(target: UserProfile) -> str {
+        return f"{{\"type\": \"user\", \"name\": \"{target.name}\"}}";
     }
 }
 
-class XmlHandler {
-    def serialize(target: SystemConfig) {
-        return "<config version=\"" + target.version + "\" />";
+struct XmlHandler : IValue {
+    pub static pure fn serialize(target: SystemConfig) -> str {
+        return f"<config version=\"{target.version}\" />";
     }
 }
 
-# Merge JsonHandler.serialize and XmlHandler.serialize into one logical pipeline!
+// Merge JsonHandler.serialize and XmlHandler.serialize into one logical pipeline!
 let universal_serializer = JsonHandler.serialize | XmlHandler.serialize;
 println("Constructed union: JsonHandler.serialize | XmlHandler.serialize");
 
 let user_obj = UserProfile();
 let config_obj = SystemConfig();
 
-println("Serializing UserProfile:  " + universal_serializer(user_obj));
-println("Serializing SystemConfig: " + universal_serializer(config_obj));
+println(f"Serializing UserProfile:  {universal_serializer(user_obj)}");
+println(f"Serializing SystemConfig: {universal_serializer(config_obj)}");
 
-
-# 4. Multi-Cast Execution (The Broadcast *)
+// 4. Multi-Cast Execution (The Broadcast *)
 println("\n--- 4. Multi-Cast Execution (Broadcast *) ---");
 
-class SystemEvent { let event_id = 9001; }
-class NetworkAlert(SystemEvent) { let message = "High Latency Warning"; }
+interface ISystemEvent {
+    pub event_id: i64 { get; }
+}
 
-def on_alert(ev: NetworkAlert) {
-    println("  [Subscriber 1: Network Alert Handler] Received: " + ev.message);
+struct SystemEventBundle : IValue {
+    pub event_id: i64 = 9001;
+}
+
+struct NetworkAlert : ISystemEvent, IValue {
+    *SystemEventBundle;
+    pub message: str = "High Latency Warning";
+
+    pub self() {
+        .event_id = 9001;
+        .message = "High Latency Warning";
+    }
+}
+
+fn on_alert(ev: NetworkAlert) -> str {
+    println(f"  [Subscriber 1: Network Alert Handler] Received: {ev.message}");
     return "Handled by AlertHandler";
 }
 
-def on_alert(ev: SystemEvent) {
-    println("  [Subscriber 2: Global Event Telemetry] Logged event ID: " + ev.event_id);
+fn on_alert(ev: ISystemEvent) -> str {
+    println(f"  [Subscriber 2: Global Event Telemetry] Logged event ID: {ev.event_id}");
     return "Handled by Telemetry";
 }
 
 let alert = NetworkAlert();
 println("Broadcasting alert to on_alert*(alert)...");
 let broadcast_responses = on_alert*(alert);
-println("All matching hierarchy subscribers triggered simultaneously: " + broadcast_responses);
+println(f"All matching subscribers triggered simultaneously: {broadcast_responses}");
 
 println("\n>>> Concept 03 Demonstration Complete! <<<\n");

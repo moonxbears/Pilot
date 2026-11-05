@@ -13,8 +13,24 @@
 //   - Combinatoric Generators: product, permutations, combinations, combinations_with_replacement
 //   - Extended Sequence Utilities: chunk, window, frequencies, partition, scan, reduce, unique
 
-from core import min, max;
-def enumerate(items, start: i64 = 0) {
+pub pkg Pilot.Collections.Itertools;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+
+fn _collect_list(items: any) -> any[] {
+    var out = [];
+    for x in items {
+        out.append(x);
+    }
+    return out;
+}
+
+pub fn enumerate(items: any, start: i64 = 0) -> any[] {
     var out = [];
     var idx: i64 = start;
     for item in items {
@@ -24,9 +40,9 @@ def enumerate(items, start: i64 = 0) {
     return out;
 }
 
-def zip(seq_a, seq_b) {
-    var list_a = [x for x in seq_a];
-    var list_b = [y for y in seq_b];
+pub fn zip(seq_a: any, seq_b: any) -> any[] {
+    let list_a = _collect_list(seq_a);
+    let list_b = _collect_list(seq_b);
     let n: i64 = min(len(list_a), len(list_b));
     var out = [];
     for i in 0..<n {
@@ -35,9 +51,9 @@ def zip(seq_a, seq_b) {
     return out;
 }
 
-def zip_longest(seq_a, seq_b, fill_val = none) {
-    var list_a = [x for x in seq_a];
-    var list_b = [y for y in seq_b];
+pub fn zip_longest(seq_a: any, seq_b: any, fill_val: any = none) -> any[] {
+    let list_a = _collect_list(seq_a);
+    let list_b = _collect_list(seq_b);
     let n: i64 = max(len(list_a), len(list_b));
     var out = [];
     for i in 0..<n {
@@ -48,7 +64,7 @@ def zip_longest(seq_a, seq_b, fill_val = none) {
     return out;
 }
 
-def chain(seq_a, seq_b) {
+pub fn chain(seq_a: any, seq_b: any) -> any[] {
     var out = [];
     for x in seq_a {
         out.append(x);
@@ -59,7 +75,7 @@ def chain(seq_a, seq_b) {
     return out;
 }
 
-def flatten(nested_seqs) {
+pub fn flatten(nested_seqs: any) -> any[] {
     var out = [];
     for sub in nested_seqs {
         for item in sub {
@@ -69,11 +85,11 @@ def flatten(nested_seqs) {
     return out;
 }
 
-def chunk(items, size: i64) {
+pub fn chunk(items: any, size: i64) -> any[] {
     if size <= 0 {
         panic("itertools.chunk requires size > 0");
     }
-    var src = [x for x in items];
+    let src = _collect_list(items);
     let n: i64 = len(src);
     var batches = [];
     var i: i64 = 0;
@@ -89,11 +105,11 @@ def chunk(items, size: i64) {
     return batches;
 }
 
-def window(items, width: i64, step: i64 = 1) {
-    if width <= 0 or step <= 0 {
+pub fn window(items: any, width: i64, step: i64 = 1) -> any[] {
+    if width <= 0 || step <= 0 {
         panic("itertools.window requires width > 0 and step > 0");
     }
-    var src = [x for x in items];
+    let src = _collect_list(items);
     let n: i64 = len(src);
     var wins = [];
     var i: i64 = 0;
@@ -108,7 +124,7 @@ def window(items, width: i64, step: i64 = 1) {
     return wins;
 }
 
-def group_by(items, key_fn) {
+pub fn group_by(items: any, key_fn: any) -> map {
     var groups = {};
     for item in items {
         let k = key_fn(item);
@@ -121,7 +137,7 @@ def group_by(items, key_fn) {
     return groups;
 }
 
-def frequencies(items) {
+pub fn frequencies(items: any) -> map {
     var counts = {};
     for item in items {
         if counts.contains_key(item) {
@@ -133,7 +149,7 @@ def frequencies(items) {
     return counts;
 }
 
-def take(items, count: i64) {
+pub fn take(items: any, count: i64) -> any[] {
     if count <= 0 {
         return [];
     }
@@ -149,7 +165,7 @@ def take(items, count: i64) {
     return out;
 }
 
-def drop(items, count: i64) {
+pub fn drop(items: any, count: i64) -> any[] {
     var out = [];
     var idx: i64 = 0;
     for item in items {
@@ -161,7 +177,7 @@ def drop(items, count: i64) {
     return out;
 }
 
-def take_while(items, pred_fn) {
+pub fn take_while(items: any, pred_fn: any) -> any[] {
     var out = [];
     for item in items {
         if !pred_fn(item) {
@@ -172,11 +188,11 @@ def take_while(items, pred_fn) {
     return out;
 }
 
-def drop_while(items, pred_fn) {
+pub fn drop_while(items: any, pred_fn: any) -> any[] {
     var out = [];
     var dropping: bool = true;
     for item in items {
-        if dropping and pred_fn(item) {
+        if dropping && pred_fn(item) {
             continue;
         }
         dropping = false;
@@ -185,7 +201,7 @@ def drop_while(items, pred_fn) {
     return out;
 }
 
-def unique(items) {
+pub fn unique(items: any) -> any[] {
     var seen = {};
     var out = [];
     for item in items {
@@ -197,7 +213,7 @@ def unique(items) {
     return out;
 }
 
-def partition(items, pred_fn) {
+pub fn partition(items: any, pred_fn: any) -> any {
     var yes = [];
     var no = [];
     for item in items {
@@ -210,7 +226,7 @@ def partition(items, pred_fn) {
     return (yes, no);
 }
 
-def scan(items, initial, folder_fn) {
+pub fn scan(items: any, initial: any, folder_fn: any) -> any[] {
     var acc = initial;
     var out = [];
     for item in items {
@@ -220,7 +236,7 @@ def scan(items, initial, folder_fn) {
     return out;
 }
 
-def reduce(items, initial, folder_fn) {
+pub fn reduce(items: any, initial: any, folder_fn: any) -> any {
     var acc = initial;
     for item in items {
         acc = folder_fn(acc, item);
@@ -229,13 +245,13 @@ def reduce(items, initial, folder_fn) {
 }
 
 // Lazy coroutine generator combinators (`yield`)
-def lazy_map(items, fn_map) {
+pub fn lazy_map(items: any, fn_map: any) -> any {
     for item in items {
         yield fn_map(item);
     }
 }
 
-def lazy_filter(items, pred_fn) {
+pub fn lazy_filter(items: any, pred_fn: any) -> any {
     for item in items {
         if pred_fn(item) {
             yield item;
@@ -243,7 +259,7 @@ def lazy_filter(items, pred_fn) {
     }
 }
 
-def lazy_take(items, limit: i64) {
+pub fn lazy_take(items: any, limit: i64) -> any {
     var count: i64 = 0;
     for item in items {
         if count >= limit {
@@ -254,7 +270,7 @@ def lazy_take(items, limit: i64) {
     }
 }
 
-def lazy_chain(seq_a, seq_b) {
+pub fn lazy_chain(seq_a: any, seq_b: any) -> any {
     for x in seq_a {
         yield x;
     }
@@ -269,9 +285,9 @@ def lazy_chain(seq_a, seq_b) {
 
 /// Returns accumulated sums (or cumulative results of func).
 /// Python reference: itertools.accumulate(iterable[, func, *, initial])
-def accumulate(items, func = none, initial = none) {
+pub fn accumulate(items: any, func: any = none, initial: any = none) -> any[] {
     var out = [];
-    let pool = [x for x in items];
+    let pool = _collect_list(items);
     let n: i64 = len(pool);
     if n == 0 {
         if initial != none {
@@ -298,16 +314,16 @@ def accumulate(items, func = none, initial = none) {
 
 /// Batches items into non-overlapping batches of length n.
 /// Python reference: itertools.batched(iterable, n) (Python 3.12+)
-def batched(items, n: i64) {
+pub fn batched(items: any, n: i64) -> any[] {
     return chunk(items, n);
 }
 
 /// Filters elements from data returning only those that have a corresponding
 /// element in selectors evaluating to true.
 /// Python reference: itertools.compress(data, selectors)
-def compress(data, selectors) {
+pub fn compress(data: any, selectors: any) -> any[] {
     var out = [];
-    let sel_list = [s for s in selectors];
+    let sel_list = _collect_list(selectors);
     let sel_len: i64 = len(sel_list);
     var idx: i64 = 0;
     for item in data {
@@ -315,7 +331,7 @@ def compress(data, selectors) {
             break;
         }
         let s = sel_list[idx];
-        if s == true or s == 1 {
+        if s == true || s == 1 {
             out.append(item);
         }
         idx = idx + 1;
@@ -325,19 +341,19 @@ def compress(data, selectors) {
 
 /// Drops elements while pred_fn returns true; returns remaining elements.
 /// Python reference: itertools.dropwhile(predicate, iterable)
-def dropwhile(pred_fn, items) {
+pub fn dropwhile(pred_fn: any, items: any) -> any[] {
     return drop_while(items, pred_fn);
 }
 
 /// Yields elements while pred_fn returns true; stops on first false.
 /// Python reference: itertools.takewhile(predicate, iterable)
-def takewhile(pred_fn, items) {
+pub fn takewhile(pred_fn: any, items: any) -> any[] {
     return take_while(items, pred_fn);
 }
 
 /// Yields elements from items where pred_fn evaluates to false.
 /// Python reference: itertools.filterfalse(predicate, iterable)
-def filter_false(pred_fn, items) {
+pub fn filter_false(pred_fn: any, items: any) -> any[] {
     var out = [];
     for item in items {
         if !pred_fn(item) {
@@ -349,13 +365,13 @@ def filter_false(pred_fn, items) {
 
 /// Alias for filter_false matching Python CPython naming convention.
 /// Python reference: itertools.filterfalse(predicate, iterable)
-def filterfalse(pred_fn, items) {
+pub fn filterfalse(pred_fn: any, items: any) -> any[] {
     return filter_false(pred_fn, items);
 }
 
 /// Groups consecutive keys or items matching Python itertools.groupby behavior.
 /// Python reference: itertools.groupby(iterable, key=None)
-def groupby(items, key_fn = none) {
+pub fn groupby(items: any, key_fn: any = none) -> map {
     if key_fn == none {
         return group_by(items, (x) => x);
     }
@@ -364,14 +380,14 @@ def groupby(items, key_fn = none) {
 
 /// Slices an iterable with start, stop, and step without loading all elements.
 /// Python reference: itertools.islice(iterable, [start,] stop [, step])
-def islice(items, start: i64, stop: i64 = -1, step: i64 = 1) {
+pub fn islice(items: any, start: i64, stop: i64 = -1, step: i64 = 1) -> any[] {
     if step <= 0 {
         panic("itertools.islice step must be > 0");
     }
     var out = [];
-    let pool = [x for x in items];
+    let pool = _collect_list(items);
     let n: i64 = len(pool);
-    let end_idx: i64 = if stop < 0 or stop > n { n } else { stop };
+    let end_idx: i64 = if stop < 0 || stop > n { n } else { stop };
     var i: i64 = start;
     while i < end_idx {
         out.append(pool[i]);
@@ -382,8 +398,8 @@ def islice(items, start: i64, stop: i64 = -1, step: i64 = 1) {
 
 /// Returns successive overlapping pairs: (s0, s1), (s1, s2), (s2, s3)...
 /// Python reference: itertools.pairwise(iterable) (Python 3.10+)
-def pairwise(items) {
-    let pool = [x for x in items];
+pub fn pairwise(items: any) -> any[] {
+    let pool = _collect_list(items);
     let n: i64 = len(pool);
     var out = [];
     if n < 2 {
@@ -397,7 +413,7 @@ def pairwise(items) {
 
 /// Computes func on tuple pairs: func(pair[0], pair[1]).
 /// Python reference: itertools.starmap(func, iterable)
-def starmap(func, pairs) {
+pub fn starmap(func: any, pairs: any) -> any[] {
     var out = [];
     for p in pairs {
         out.append(func(p[0], p[1]));
@@ -407,20 +423,20 @@ def starmap(func, pairs) {
 
 /// Returns n independent shallow copies of items.
 /// Python reference: itertools.tee(iterable, n=2)
-def tee(items, n: i64 = 2) {
-    let pool = [x for x in items];
+pub fn tee(items: any, n: i64 = 2) -> any[] {
+    let pool = _collect_list(items);
     var copies = [];
     for _i in 0..<n {
-        copies.append([x for x in pool]);
+        copies.append(_collect_list(pool));
     }
     return copies;
 }
 
 /// Cycles through items count times.
 /// Python reference: itertools.cycle(iterable)
-def cycle(items, count: i64 = 1) {
+pub fn cycle(items: any, count: i64 = 1) -> any[] {
     var out = [];
-    let pool = [x for x in items];
+    let pool = _collect_list(items);
     for _c in 0..<count {
         for x in pool {
             out.append(x);
@@ -431,7 +447,7 @@ def cycle(items, count: i64 = 1) {
 
 /// Repeats item times times.
 /// Python reference: itertools.repeat(object[, times])
-def repeat(item, times: i64 = 1) {
+pub fn repeat(item: any, times: i64 = 1) -> any[] {
     var out = [];
     for _i in 0..<times {
         out.append(item);
@@ -441,7 +457,7 @@ def repeat(item, times: i64 = 1) {
 
 /// Infinite integer counter coroutine.
 /// Python reference: itertools.count(start=0, step=1)
-def count(start: i64 = 0, step: i64 = 1) {
+pub fn count(start: i64 = 0, step: i64 = 1) -> any {
     var current: i64 = start;
     while true {
         yield current;
@@ -451,7 +467,7 @@ def count(start: i64 = 0, step: i64 = 1) {
 
 /// Cartesian product of input sequences: (a, b) for all a in seq_a and b in seq_b.
 /// Python reference: itertools.product(*iterables)
-def product(seq_a, seq_b) {
+pub fn product(seq_a: any, seq_b: any) -> any[] {
     var out = [];
     for a in seq_a {
         for b in seq_b {
@@ -461,9 +477,9 @@ def product(seq_a, seq_b) {
     return out;
 }
 
-def _perm_rec(pool, r: i64, used, current, out) {
+fn _perm_rec(pool: any, r: i64, used: any, current: any, out: any) {
     if len(current) == r {
-        out.append([x for x in current]);
+        out.append(_collect_list(current));
         return;
     }
     let n: i64 = len(pool);
@@ -480,11 +496,11 @@ def _perm_rec(pool, r: i64, used, current, out) {
 
 /// Generates all successive r-length permutations of elements in items.
 /// Python reference: itertools.permutations(iterable, r=None)
-def permutations(items, r: i64 = -1) {
-    let pool = [x for x in items];
+pub fn permutations(items: any, r: i64 = -1) -> any[] {
+    let pool = _collect_list(items);
     let n: i64 = len(pool);
     let target_r: i64 = if r < 0 { n } else { r };
-    if target_r < 0 or target_r > n {
+    if target_r < 0 || target_r > n {
         return [];
     }
     if target_r == 0 {
@@ -500,9 +516,9 @@ def permutations(items, r: i64 = -1) {
     return out;
 }
 
-def _comb_rec(pool, r: i64, start_idx: i64, current, out) {
+fn _comb_rec(pool: any, r: i64, start_idx: i64, current: any, out: any) {
     if len(current) == r {
-        out.append([x for x in current]);
+        out.append(_collect_list(current));
         return;
     }
     let n: i64 = len(pool);
@@ -515,10 +531,10 @@ def _comb_rec(pool, r: i64, start_idx: i64, current, out) {
 
 /// Generates all successive r-length combinations of elements from items.
 /// Python reference: itertools.combinations(iterable, r)
-def combinations(items, r: i64) {
-    let pool = [x for x in items];
+pub fn combinations(items: any, r: i64) -> any[] {
+    let pool = _collect_list(items);
     let n: i64 = len(pool);
-    if r < 0 or r > n {
+    if r < 0 || r > n {
         return [];
     }
     if r == 0 {
@@ -530,9 +546,9 @@ def combinations(items, r: i64) {
     return out;
 }
 
-def _comb_rep_rec(pool, r: i64, start_idx: i64, current, out) {
+fn _comb_rep_rec(pool: any, r: i64, start_idx: i64, current: any, out: any) {
     if len(current) == r {
-        out.append([x for x in current]);
+        out.append(_collect_list(current));
         return;
     }
     let n: i64 = len(pool);
@@ -545,10 +561,10 @@ def _comb_rep_rec(pool, r: i64, start_idx: i64, current, out) {
 
 /// Generates all successive r-length combinations allowing individual elements to be repeated.
 /// Python reference: itertools.combinations_with_replacement(iterable, r)
-def combinations_with_replacement(items, r: i64) {
-    let pool = [x for x in items];
+pub fn combinations_with_replacement(items: any, r: i64) -> any[] {
+    let pool = _collect_list(items);
     let n: i64 = len(pool);
-    if r < 0 or (n == 0 and r > 0) {
+    if r < 0 || (n == 0 && r > 0) {
         return [];
     }
     if r == 0 {

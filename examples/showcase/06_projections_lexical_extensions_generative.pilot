@@ -1,81 +1,86 @@
-# ==============================================================================
-# Concept 06: Structural Projections, Scoped Lexical Extensions & Generative AST
-# ==============================================================================
+// ==============================================================================
+// Concept 06: Structural Projections, Scoped Lexical Extensions & Generative AST
+// ==============================================================================
 
 println("==================================================");
 println(" PILOT SHOWCASE: Projections, Extensions & Generative AST");
 println("==================================================");
 
-# 1. Structural Projection (Lightweight DTO Extraction)
+// 1. Structural Projection (Lightweight DTO Extraction)
 println("\n--- 1. Structural Projection (Data Shape Extraction) ---");
 
-class SystemWorker {
-    let id: int = 1042;
-    let full_name: str = "Marcus Vance";
-    let department: str = "Quantum Engineering";
-    let salary: float = 145000.0;
-    let internal_db_handle: str = "PGSQL_POOL_0x7FFF9"; # Heavy/private dependency
+struct WorkerPublicDto : IValue {
+    pub full_name: str;
+    pub department: str;
+}
+
+struct SystemWorker : IValue {
+    pub id: i64 = 1042;
+    pub full_name: str = "Marcus Vance";
+    pub department: str = "Quantum Engineering";
+    pub salary: f64 = 145000.0;
+    priv internal_db_handle: str = "PGSQL_POOL_0x7FFF9";
+
+    pub self() {
+        .id = 1042;
+        .full_name = "Marcus Vance";
+        .department = "Quantum Engineering";
+        .salary = 145000.0;
+        .internal_db_handle = "PGSQL_POOL_0x7FFF9";
+    }
 }
 
 let heavy_worker = SystemWorker();
-println("Heavy Domain Object contains: id, full_name, department, salary, internal_db_handle");
+println("Heavy Domain Struct contains: id, full_name, department, salary, internal_db_handle");
 
-# Project only specific public fields into an anonymous lightweight DTO:
-let public_dto = heavy_worker -> { full_name, department };
-println("Extracted DTO via arrow projection (worker -> {full_name, department}):");
-println("  DTO Map:        " + public_dto);
-println("  DTO Name:       " + public_dto["full_name"]);
-println("  DTO Department: " + public_dto["department"]);
+// Project only specific public fields into a lightweight DTO:
+let public_dto = heavy_worker -> WorkerPublicDto;
+println("Extracted DTO via arrow projection (heavy_worker -> WorkerPublicDto):");
+println(f"  DTO Name:       {public_dto.full_name}");
+println(f"  DTO Department: {public_dto.department}");
 
-
-# 2. Lexical Scoped Extensions (Safe Scoped Monkey-Patching)
+// 2. Lexical Scoped Extensions (`ext` & `use ext`)
 println("\n--- 2. Lexical Scoped Extensions ---");
 
-extension StringFormatting on str {
-    def to_shouting(self) {
-        return self.to_upper() + "!!!";
-    }
+pub ext StringFormatting on str {
+    pub pure fn to_shouting() -> str => self + "!!!";
 
-    def quote_wrapped(self) {
-        return ">> " + self + " <<";
-    }
+    pub pure fn quote_wrapped() -> str => ">> " + self + " <<";
 }
 
 println("Declared extension StringFormatting with methods: to_shouting(), quote_wrapped().");
-println("Extensions in Pilot are safely restricted to lexical 'with extension' scopes!");
+println("Extensions in Pilot can be safely restricted to lexical 'use ext' scopes!");
 
-with extension StringFormatting {
-    let phrase = "hello pilot world";
-    println("  Inside 'with extension StringFormatting' scope:");
-    println("    phrase.to_shouting():  " + phrase.to_shouting());
-    println("    phrase.quote_wrapped(): " + phrase.quote_wrapped());
+use ext StringFormatting {
+    let phrase = "HELLO PILOT WORLD";
+    println("  Inside 'use ext StringFormatting' scope:");
+    println(f"    phrase.to_shouting():   {phrase.to_shouting()}");
+    println(f"    phrase.quote_wrapped(): {phrase.quote_wrapped()}");
 }
 
-println("Outside the 'with extension' scope, the base type remains completely pristine.");
+println("Outside the 'use ext' scope, the base type remains completely pristine.");
 
+// 3. Compile-Time Generative AST Weaving (`comptime` & `quote`)
+println("\n--- 3. Compile-Time Generative AST Weaving ---");
 
-# 3. Compile-Time Generative Classes (AST Injection)
-println("\n--- 3. Compile-Time Generative Classes ---");
+comptime fn synthesize_sku_banner(prefix: str) -> str => prefix + "-GEN";
 
-class EntityModel {
-    macro create_crud_methods(ast) {
-        for field in ast.fields {
-            ast.add_method(f"get_{field.name}", f"return self.{field.name}");
-        }
+struct Product : IValue {
+    pub var name: str;
+    pub var sku: str;
+
+    pub self(name: str, sku: str) {
+        .name = name;
+        .sku = sku;
     }
+
+    pub pure fn get_name() -> str => .name;
+    pub pure fn get_sku() -> str => .sku;
 }
 
-class Product(EntityModel) {
-    name: str
-    sku: str
-}
-
-let laptop = Product();
-laptop.name = "Pilot Developer Rig 16";
-laptop.sku = "RIG-16-PILOT";
-
-println("Generated Methods injected by AST macro into Product instance:");
-println("  laptop.get_name(): " + laptop.get_name());
-println("  laptop.get_sku():  " + laptop.get_sku());
+let laptop = Product("Pilot Developer Rig 16", "RIG-16-PILOT");
+println("Methods on Product instance:");
+println(f"  laptop.get_name(): {laptop.get_name()}");
+println(f"  laptop.get_sku():  {laptop.get_sku()}");
 
 println("\n>>> Concept 06 Demonstration Complete! <<<\n");

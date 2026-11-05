@@ -1,9 +1,9 @@
-import std.os as os;
-import std.sys as sys;
-import std.pathlib as pathlib;
-import std.shutil as shutil;
+use Pilot.Os as os;
+use Pilot.Sys as sys;
+use Pilot.Io.Pathlib as pathlib;
+use Pilot.Io.Shutil as shutil;
 
-def main() -> int {
+fn main() -> i64 {
     // 1. std.os verification
     let os_name = os.name();
     let os_sep = os.sep();

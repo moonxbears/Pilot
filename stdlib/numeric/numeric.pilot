@@ -1,46 +1,60 @@
-pub interface Numeric[T] {
-    op self +(other: T) -> T;
-    op self -(other: T) -> T;
-    op self *(other: T) -> T;
-    op self /(other: T) -> T;
-    op self %(other: T) -> T;
-    op self &(other: T) -> T;
-    op self >>(shift: u32) -> T;
-    op self ==(other: T) -> bool;
+// SPDX-License-Identifier: MIT AND Apache-2.0
+// std.numeric — Canonical Numeric, Integer, Floating-Point, Complex, Truthiness & Integral Contracts
+
+pub pkg Pilot.Numeric;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+
+pub interface Numeric<T: IAnyValue> : IAnyValue {
+    pub pure:
+        op + (other: T) -> T;
+        op - (other: T) -> T;
+        op * (other: T) -> T;
+        op / (other: T) -> T;
+        op % (other: T) -> T;
+        op & (other: T) -> T;
+        op >> (shift: u32) -> T;
+        op == (other: T) -> bool;
 }
 
-pub interface Integer[T] : Numeric[T] {
-    op self <<(shift: u32) -> T;
-    op self |(other: T) -> T;
-    op self ^(other: T) -> T;
-    op self <(other: T) -> bool;
-    op self <=(other: T) -> bool;
-    op self >=(other: T) -> bool;
-    op self >(other: T) -> bool;
+pub interface Integer<T: IAnyValue> : Numeric<T> {
+    pub pure:
+        op << (shift: u32) -> T;
+        op | (other: T) -> T;
+        op ^ (other: T) -> T;
+        op < (other: T) -> bool;
+        op <= (other: T) -> bool;
+        op >= (other: T) -> bool;
+        op > (other: T) -> bool;
 }
 
-pub interface FloatingPoint[T] : Numeric[T] {
-    op self <(other: T) -> bool;
-    op self <=(other: T) -> bool;
-    op self >=(other: T) -> bool;
-    op self >(other: T) -> bool;
+pub interface FloatingPoint<T: IAnyValue> : Numeric<T> {
+    pub pure:
+        op < (other: T) -> bool;
+        op <= (other: T) -> bool;
+        op >= (other: T) -> bool;
+        op > (other: T) -> bool;
 }
 
-pub interface Complex[T] : Numeric[T] {
-    op self <(other: T) -> bool;
-    op self <=(other: T) -> bool;
-    op self >=(other: T) -> bool;
-    op self >(other: T) -> bool;
+pub interface Complex<T: IAnyValue> : Numeric<T> {
+    pub pure:
+        op < (other: T) -> bool;
+        op <= (other: T) -> bool;
+        op >= (other: T) -> bool;
+        op > (other: T) -> bool;
 }
 
-pub interface Truthy[T] {
-    op self -> bool;
+pub interface Truthy<T: IAnyValue> : IAnyValue {
+    pub pure fn to_bool() -> bool;
 }
 
-
-
-pub interface Integral {
-    op self / (rhs: Self) -> Self;
-    op self % (rhs: Self) -> Self;
+pub interface Integral<TSelf: IAnyValue = any> : IAnyValue {
+    pub pure:
+        op / (rhs: TSelf) -> TSelf;
+        op % (rhs: TSelf) -> TSelf;
 }
-

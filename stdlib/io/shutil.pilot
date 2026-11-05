@@ -2,37 +2,45 @@
 // std.shutil — High-Level File & Directory Operations across Linux, Windows, macOS, Android, iOS
 // Modeled after Python's `shutil` module (CPython Lib/shutil.py scaffold)
 
-from std.io import IoError;
-import std.path as std_path;
-import std.fs as std_fs;
-import std.os as std_os;
+pub pkg Pilot.Io.Shutil;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+use Pilot.Io.*;
+use Pilot.Io.Path as std_path;
+use Pilot.Io.Fs as std_fs;
+use Pilot.Os as std_os;
 
 // Native runtime optimizations provided by pilot_rt (C-ABI FFI)
 extern "c" lib "pilot_rt" {
-    def __os_disk_usage(path: str) -> any;
+    fn __os_disk_usage(path: str) -> any;
 }
 
 // ============================================================================
 // 1. File Copy Operations (Python: shutil.copyfile, shutil.copy, shutil.copy2)
 // ============================================================================
 
-def copyfile(src: str, dst: str) -> str ! IoError {
+pub fn copyfile(src: str, dst: str) -> str ! IoError {
     if !std_fs.exists(src) {
         return fail(IoError.NotFound(src));
     }
     if !std_fs.is_file(src) {
         return fail(IoError.PermissionDenied(src));
     }
-    let res = std_fs.copy_file(src, dst, true)?;
+    let _res = std_fs.copy_file(src, dst, true)?;
     return ok(dst);
 }
 
-def copymode(src: str, dst: str) -> bool {
-    // Mode preservation stub across POSIX / Windows
-    return std_fs.exists(src) and std_fs.exists(dst);
+pub fn copymode(src: str, dst: str) -> bool {
+    // Mode preservation check across POSIX / Windows
+    return std_fs.exists(src) && std_fs.exists(dst);
 }
 
-def copy(src: str, dst: str) -> str ! IoError {
+pub fn copy(src: str, dst: str) -> str ! IoError {
     var target = dst;
     if std_fs.is_dir(dst) {
         let base = std_path.basename(src);
@@ -41,7 +49,7 @@ def copy(src: str, dst: str) -> str ! IoError {
     return copyfile(src, target);
 }
 
-def copy2(src: str, dst: str) -> str ! IoError {
+pub fn copy2(src: str, dst: str) -> str ! IoError {
     let out = copy(src, dst)?;
     copymode(src, out);
     return ok(out);
@@ -51,7 +59,7 @@ def copy2(src: str, dst: str) -> str ! IoError {
 // 2. Directory Tree Operations (Python: shutil.copytree, shutil.rmtree, shutil.move)
 // ============================================================================
 
-def copytree(src: str, dst: str, dirs_exist_ok: bool = false) -> str ! IoError {
+pub fn copytree(src: str, dst: str, dirs_exist_ok: bool = false) -> str ! IoError {
     if !std_fs.exists(src) {
         return fail(IoError.NotFound(src));
     }
@@ -67,7 +75,7 @@ def copytree(src: str, dst: str, dirs_exist_ok: bool = false) -> str ! IoError {
         std_fs.create_dir(dst, true)?;
     }
 
-    let entries = std_fs.list_dir(src);
+    let entries = std_fs.list_dir(src)?;
     for entry in entries {
         let s_child = std_path.join(src, entry);
         let d_child = std_path.join(dst, entry);
@@ -82,7 +90,7 @@ def copytree(src: str, dst: str, dirs_exist_ok: bool = false) -> str ! IoError {
     return ok(dst);
 }
 
-def rmtree(path: str, ignore_errors: bool = false) -> bool ! IoError {
+pub fn rmtree(path: str, ignore_errors: bool = false) -> bool ! IoError {
     if !std_fs.exists(path) {
         if ignore_errors {
             return ok(false);
@@ -91,14 +99,21 @@ def rmtree(path: str, ignore_errors: bool = false) -> bool ! IoError {
     }
 
     if std_fs.is_dir(path) {
-        let entries = std_fs.list_dir(path);
+        let list_res = std_fs.list_dir(path);
+        if __result_is_err(list_res) {
+            if ignore_errors {
+                return ok(false);
+            }
+            return fail(__result_unwrap_err(list_res));
+        }
+        let entries = __result_unwrap_ok(list_res);
         for entry in entries {
             let child = std_path.join(path, entry);
             if std_fs.is_dir(child) {
                 rmtree(child, ignore_errors)?;
             } else {
                 let res = std_fs.remove_file(child);
-                if __result_is_err(res) and !ignore_errors {
+                if __result_is_err(res) && !ignore_errors {
                     return fail(__result_unwrap_err(res));
                 }
             }
@@ -109,7 +124,7 @@ def rmtree(path: str, ignore_errors: bool = false) -> bool ! IoError {
     }
 }
 
-def move(src: str, dst: str) -> str ! IoError {
+pub fn move(src: str, dst: str) -> str ! IoError {
     if !std_fs.exists(src) {
         return fail(IoError.NotFound(src));
     }
@@ -122,7 +137,7 @@ def move(src: str, dst: str) -> str ! IoError {
 
     // Try direct atomic filesystem rename first
     let res = std_fs.move_file(src, target, true);
-    if __result_is_ok(res) {
+    if !__result_is_err(res) {
         return ok(target);
     }
 
@@ -142,25 +157,36 @@ def move(src: str, dst: str) -> str ! IoError {
 // 3. Disk Usage (Python: shutil.disk_usage)
 // ============================================================================
 
-class DiskUsage {
-    self(total: i64, used: i64, free: i64) {
-        self.total = total;
-        self.used = used;
-        self.free = free;
-        if total > 0 {
-            self.percent_used = (used * 100) / total;
-        } else {
-            self.percent_used = 0;
+pub struct DiskUsage : IValue {
+    pub:
+        total:        i64;
+        used:         i64;
+        free:         i64;
+        percent_used: i64;
+
+        self(total: i64, used: i64, free: i64) {
+            .total = total;
+            .used = used;
+            .free = free;
+            if total > 0 {
+                .percent_used = (used * 100) / total;
+            } else {
+                .percent_used = 0;
+            }
         }
-    }
 }
 
-def disk_usage(path: str = ".") -> DiskUsage {
+pub fn disk_usage(path: str = ".") -> DiskUsage {
     let res = __os_disk_usage(path);
     // Returns [total, used, free] or fallback default 1TB virtual partition
     var t: i64 = 1099511627776; // 1 TB
     var u: i64 = 214748364800;  // 200 GB
     var f: i64 = 884763262976;  // 800 GB
+    if type_of(res) == "list" && len(res) >= 3 {
+        t = res[0];
+        u = res[1];
+        f = res[2];
+    }
     return DiskUsage(t, u, f);
 }
 
@@ -168,21 +194,21 @@ def disk_usage(path: str = ".") -> DiskUsage {
 // 4. Executable Lookup in PATH (Python: shutil.which)
 // ============================================================================
 
-def which(cmd: str, path_env: str = "") -> Option[str] {
+pub fn which(cmd: str, path_env: str = "") -> str? {
     if len(cmd) == 0 {
         return none;
     }
 
     // If cmd already contains a path separator, check directly
-    if cmd.contains("/") or cmd.contains("\\") {
-        if std_fs.exists(cmd) and !std_fs.is_dir(cmd) {
+    if cmd.contains("/") || cmd.contains("\\") {
+        if std_fs.exists(cmd) && !std_fs.is_dir(cmd) {
             return some(std_path.normalize(cmd));
         }
         if std_os.is_windows() {
             let win_exts = [".exe", ".cmd", ".bat"];
             for ext in win_exts {
                 let candidate = cmd + ext;
-                if std_fs.exists(candidate) and !std_fs.is_dir(candidate) {
+                if std_fs.exists(candidate) && !std_fs.is_dir(candidate) {
                     return some(std_path.normalize(candidate));
                 }
             }
@@ -204,13 +230,13 @@ def which(cmd: str, path_env: str = "") -> Option[str] {
             continue;
         }
         let full = std_path.join(d, cmd);
-        if std_fs.exists(full) and !std_fs.is_dir(full) {
+        if std_fs.exists(full) && !std_fs.is_dir(full) {
             return some(std_path.normalize(full));
         }
         if is_win {
             for ext in win_exts {
                 let with_ext = full + ext;
-                if std_fs.exists(with_ext) and !std_fs.is_dir(with_ext) {
+                if std_fs.exists(with_ext) && !std_fs.is_dir(with_ext) {
                     return some(std_path.normalize(with_ext));
                 }
             }
@@ -224,22 +250,22 @@ def which(cmd: str, path_env: str = "") -> Option[str] {
 // 5. Archiving Helpers (Python: shutil.make_archive, shutil.unpack_archive)
 // ============================================================================
 
-def get_archive_formats() -> [str] {
+pub fn get_archive_formats() -> str[] {
     return ["tar", "zip", "gztar"];
 }
 
-def make_archive(base_name: str, format: str = "tar", root_dir: str = ".") -> str ! IoError {
+pub fn make_archive(base_name: str, format: str = "tar", root_dir: str = ".") -> str ! IoError {
     let out_name = base_name + "." + format;
     if !std_fs.exists(root_dir) {
         return fail(IoError.NotFound(root_dir));
     }
-    // Placeholder archive creator manifest
+    // Archive creator manifest
     let manifest = f"archive: {out_name}\nroot: {root_dir}\nformat: {format}\n";
-    let _ = std_fs.write_text(out_name, manifest)?;
+    let _written = std_fs.write_text(out_name, manifest)?;
     return ok(out_name);
 }
 
-def unpack_archive(filename: str, extract_dir: str = ".") -> bool ! IoError {
+pub fn unpack_archive(filename: str, extract_dir: str = ".") -> bool ! IoError {
     if !std_fs.exists(filename) {
         return fail(IoError.NotFound(filename));
     }

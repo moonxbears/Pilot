@@ -8,45 +8,56 @@
 // Target OS Platforms:
 //   - Linux, Windows, macOS, Android, iOS, and WebAssembly
 
-from core import abs, min, max;
+pub pkg Pilot.Decimal;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
 
 // Rounding modes matching Python decimal module
-const ROUND_CEILING: str   = "ROUND_CEILING";
-const ROUND_DOWN: str      = "ROUND_DOWN";
-const ROUND_FLOOR: str     = "ROUND_FLOOR";
-const ROUND_HALF_DOWN: str = "ROUND_HALF_DOWN";
-const ROUND_HALF_EVEN: str = "ROUND_HALF_EVEN";
-const ROUND_HALF_UP: str   = "ROUND_HALF_UP";
-const ROUND_UP: str        = "ROUND_UP";
+pub const ROUND_CEILING: str   = "ROUND_CEILING";
+pub const ROUND_DOWN: str      = "ROUND_DOWN";
+pub const ROUND_FLOOR: str     = "ROUND_FLOOR";
+pub const ROUND_HALF_DOWN: str = "ROUND_HALF_DOWN";
+pub const ROUND_HALF_EVEN: str = "ROUND_HALF_EVEN";
+pub const ROUND_HALF_UP: str   = "ROUND_HALF_UP";
+pub const ROUND_UP: str        = "ROUND_UP";
 
 /// Context controlling precision and rounding rules.
 /// Python reference: decimal.Context(prec=28, rounding=ROUND_HALF_EVEN)
-class Context {
-    self(prec: i64 = 28, rounding: str = "ROUND_HALF_EVEN") {
-        self.prec = prec;
-        self.rounding = rounding;
-    }
+pub struct Context : IValue {
+    pub:
+        prec:     i64;
+        rounding: str;
 
-    def to_string(self) -> str {
-        return f"Context(prec={self.prec}, rounding='{self.rounding}')";
-    }
+        self(prec: i64 = 28, rounding: str = "ROUND_HALF_EVEN") {
+            self.prec = prec;
+            self.rounding = rounding;
+        }
+
+        fn to_string() -> str {
+            return f"Context(prec={self.prec}, rounding='{self.rounding}')";
+        }
 }
 
-var _CURRENT_CONTEXT = Context(28, ROUND_HALF_EVEN);
+var _CURRENT_CONTEXT: Context = Context(28, ROUND_HALF_EVEN);
 
 /// Returns the current active default decimal context.
 /// Python reference: decimal.getcontext()
-def getcontext() -> Context {
+pub fn getcontext() -> Context {
     return _CURRENT_CONTEXT;
 }
 
 /// Sets the current active default decimal context.
 /// Python reference: decimal.setcontext(c)
-def setcontext(ctx: Context) {
+pub fn setcontext(ctx: Context) {
     _CURRENT_CONTEXT = ctx;
 }
 
-def _pow10(n: i64) -> i64 {
+fn _pow10(n: i64) -> i64 {
     var res: i64 = 1;
     for _i in 0..<n {
         res = res * 10;
@@ -54,7 +65,7 @@ def _pow10(n: i64) -> i64 {
     return res;
 }
 
-def _parse_decimal_str(raw: str) -> (i64, i64) {
+fn _parse_decimal_str(raw: str) -> (i64, i64) {
     let s: str = raw.trim();
     let total_len: i64 = len(s);
     if total_len == 0 {
@@ -77,7 +88,7 @@ def _parse_decimal_str(raw: str) -> (i64, i64) {
         var int_part: i64 = 0;
         for i in start_idx..<total_len {
             let c: i64 = s.char_code_at(i);
-            if c >= 48 and c <= 57 {
+            if c >= 48 && c <= 57 {
                 int_part = int_part * 10 + (c - 48);
             }
         }
@@ -91,7 +102,7 @@ def _parse_decimal_str(raw: str) -> (i64, i64) {
     var int_acc: i64 = 0;
     for i in start_idx..<dot_pos {
         let c: i64 = s.char_code_at(i);
-        if c >= 48 and c <= 57 {
+        if c >= 48 && c <= 57 {
             int_acc = int_acc * 10 + (c - 48);
         }
     }
@@ -99,7 +110,7 @@ def _parse_decimal_str(raw: str) -> (i64, i64) {
     var frac_digits: i64 = 0;
     for j in (dot_pos + 1)..<total_len {
         let c: i64 = s.char_code_at(j);
-        if c >= 48 and c <= 57 {
+        if c >= 48 && c <= 57 {
             int_acc = int_acc * 10 + (c - 48);
             frac_digits = frac_digits + 1;
         }
@@ -113,263 +124,290 @@ def _parse_decimal_str(raw: str) -> (i64, i64) {
 
 /// Floating or fixed-point decimal number.
 /// Python reference: decimal.Decimal(value="0", context=None)
-class Decimal {
-    self(value = "0") {
-        let kind: str = typeof(value);
-        if kind == "i64" {
-            self._int_val = value;
-            self._exp = 0;
-        } else if kind == "f64" {
-            let pair = _parse_decimal_str(str(value));
-            self._int_val = pair[0];
-            self._exp = pair[1];
-        } else if kind == "str" or kind == "string" {
-            let pair = _parse_decimal_str(value);
-            self._int_val = pair[0];
-            self._exp = pair[1];
-        } else {
-            let pair = _parse_decimal_str(str(value));
-            self._int_val = pair[0];
-            self._exp = pair[1];
-        }
-    }
+pub struct Decimal : IValue {
+    pub:
+        _int_val: i64;
+        _exp:     i64;
 
-    def _normalize(self) {
-        if self._int_val == 0 {
-            self._exp = 0;
-            return;
-        }
-        while self._exp < 0 and (self._int_val % 10) == 0 {
-            self._int_val = self._int_val / 10;
-            self._exp = self._exp + 1;
-        }
-    }
-
-    /// Adds another Decimal to self.
-    def add(self, other: Decimal) -> Decimal {
-        let e1: i64 = self._exp;
-        let e2: i64 = other._exp;
-        var v1: i64 = self._int_val;
-        var v2: i64 = other._int_val;
-        var target_exp: i64 = e1;
-
-        if e1 > e2 {
-            let diff: i64 = e1 - e2;
-            v1 = v1 * _pow10(diff);
-            target_exp = e2;
-        } else if e2 > e1 {
-            let diff: i64 = e2 - e1;
-            v2 = v2 * _pow10(diff);
-            target_exp = e1;
-        }
-
-        let res = Decimal(0);
-        res._int_val = v1 + v2;
-        res._exp = target_exp;
-        res._normalize();
-        return res;
-    }
-
-    /// Subtracts another Decimal from self.
-    def sub(self, other: Decimal) -> Decimal {
-        let e1: i64 = self._exp;
-        let e2: i64 = other._exp;
-        var v1: i64 = self._int_val;
-        var v2: i64 = other._int_val;
-        var target_exp: i64 = e1;
-
-        if e1 > e2 {
-            let diff: i64 = e1 - e2;
-            v1 = v1 * _pow10(diff);
-            target_exp = e2;
-        } else if e2 > e1 {
-            let diff: i64 = e2 - e1;
-            v2 = v2 * _pow10(diff);
-            target_exp = e1;
-        }
-
-        let res = Decimal(0);
-        res._int_val = v1 - v2;
-        res._exp = target_exp;
-        res._normalize();
-        return res;
-    }
-
-    /// Multiplies self by another Decimal.
-    def mul(self, other: Decimal) -> Decimal {
-        let res = Decimal(0);
-        res._int_val = self._int_val * other._int_val;
-        res._exp = self._exp + other._exp;
-        res._normalize();
-        return res;
-    }
-
-    /// Divides self by another Decimal with the current context precision.
-    def div(self, other: Decimal) -> Decimal {
-        if other._int_val == 0 {
-            panic("decimal.DivisionByZero");
-        }
-        let scale: i64 = 8;
-        let scaled_num: i64 = self._int_val * _pow10(scale);
-        let quotient: i64 = scaled_num / other._int_val;
-
-        let res = Decimal(0);
-        res._int_val = quotient;
-        res._exp = (self._exp - other._exp) - scale;
-        res._normalize();
-        return res;
-    }
-
-    /// Returns the negation of self.
-    def neg(self) -> Decimal {
-        let res = Decimal(0);
-        res._int_val = 0 - self._int_val;
-        res._exp = self._exp;
-        return res;
-    }
-
-    /// Returns the absolute value of self.
-    def abs(self) -> Decimal {
-        let res = Decimal(0);
-        res._int_val = if self._int_val < 0 { 0 - self._int_val } else { self._int_val };
-        res._exp = self._exp;
-        return res;
-    }
-
-    /// Compares self to other, returning -1 for less, 0 for equal, 1 for greater.
-    def compare(self, other: Decimal) -> i64 {
-        let diff = self.sub(other);
-        if diff._int_val > 0 {
-            return 1;
-        }
-        if diff._int_val < 0 {
-            return -1;
-        }
-        return 0;
-    }
-
-    def eq(self, other: Decimal) -> bool {
-        return self.compare(other) == 0;
-    }
-
-    def ne(self, other: Decimal) -> bool {
-        return self.compare(other) != 0;
-    }
-
-    def lt(self, other: Decimal) -> bool {
-        return self.compare(other) < 0;
-    }
-
-    def le(self, other: Decimal) -> bool {
-        return self.compare(other) <= 0;
-    }
-
-    def gt(self, other: Decimal) -> bool {
-        return self.compare(other) > 0;
-    }
-
-    def ge(self, other: Decimal) -> bool {
-        return self.compare(other) >= 0;
-    }
-
-    def is_zero(self) -> bool {
-        return self._int_val == 0;
-    }
-
-    def is_negative(self) -> bool {
-        return self._int_val < 0;
-    }
-
-    /// Formats the decimal as a canonical decimal string.
-    def to_string(self) -> str {
-        if self._int_val == 0 {
-            return "0";
-        }
-        let is_neg: bool = self._int_val < 0;
-        let mag: i64 = if is_neg { 0 - self._int_val } else { self._int_val };
-        let s_mag: str = str(mag);
-
-        var result = "";
-        if self._exp == 0 {
-            result = s_mag;
-        } else if self._exp > 0 {
-            result = s_mag;
-            for _i in 0..<self._exp {
-                result = result + "0";
-            }
-        } else {
-            let num_decimals: i64 = 0 - self._exp;
-            let digits_len: i64 = len(s_mag);
-            if digits_len > num_decimals {
-                let split_pt: i64 = digits_len - num_decimals;
-                result = s_mag[0..split_pt] + "." + s_mag[split_pt..digits_len];
+        self(value: any = "0") {
+            let kind: str = type_of(value);
+            if kind == "i64" || kind == "int" {
+                self._int_val = value;
+                self._exp = 0;
+            } else if kind == "f64" || kind == "float" {
+                let pair = _parse_decimal_str(str(value));
+                self._int_val = pair[0];
+                self._exp = pair[1];
+            } else if kind == "str" || kind == "string" {
+                let pair = _parse_decimal_str(value);
+                self._int_val = pair[0];
+                self._exp = pair[1];
             } else {
-                result = "0.";
-                let leading_zeros: i64 = num_decimals - digits_len;
-                for _z in 0..<leading_zeros {
+                let pair = _parse_decimal_str(str(value));
+                self._int_val = pair[0];
+                self._exp = pair[1];
+            }
+        }
+
+        var fn _normalize() {
+            if self._int_val == 0 {
+                self._exp = 0;
+                return;
+            }
+            while self._exp < 0 && (self._int_val % 10) == 0 {
+                self._int_val = self._int_val / 10;
+                self._exp = self._exp + 1;
+            }
+        }
+
+        /// Adds another Decimal to self.
+        fn add(other: Decimal) -> Decimal {
+            let e1: i64 = self._exp;
+            let e2: i64 = other._exp;
+            var v1: i64 = self._int_val;
+            var v2: i64 = other._int_val;
+            var target_exp: i64 = e1;
+
+            if e1 > e2 {
+                let diff: i64 = e1 - e2;
+                v1 = v1 * _pow10(diff);
+                target_exp = e2;
+            } else if e2 > e1 {
+                let diff: i64 = e2 - e1;
+                v2 = v2 * _pow10(diff);
+                target_exp = e1;
+            }
+
+            var res = Decimal(0);
+            res._int_val = v1 + v2;
+            res._exp = target_exp;
+            res._normalize();
+            return res;
+        }
+
+        /// Subtracts another Decimal from self.
+        fn sub(other: Decimal) -> Decimal {
+            let e1: i64 = self._exp;
+            let e2: i64 = other._exp;
+            var v1: i64 = self._int_val;
+            var v2: i64 = other._int_val;
+            var target_exp: i64 = e1;
+
+            if e1 > e2 {
+                let diff: i64 = e1 - e2;
+                v1 = v1 * _pow10(diff);
+                target_exp = e2;
+            } else if e2 > e1 {
+                let diff: i64 = e2 - e1;
+                v2 = v2 * _pow10(diff);
+                target_exp = e1;
+            }
+
+            var res = Decimal(0);
+            res._int_val = v1 - v2;
+            res._exp = target_exp;
+            res._normalize();
+            return res;
+        }
+
+        /// Multiplies self by another Decimal.
+        fn mul(other: Decimal) -> Decimal {
+            var res = Decimal(0);
+            res._int_val = self._int_val * other._int_val;
+            res._exp = self._exp + other._exp;
+            res._normalize();
+            return res;
+        }
+
+        /// Divides self by another Decimal with the current context precision.
+        fn div(other: Decimal) -> Decimal {
+            if other._int_val == 0 {
+                panic("decimal.DivisionByZero");
+            }
+            let scale: i64 = 8;
+            let scaled_num: i64 = self._int_val * _pow10(scale);
+            let quotient: i64 = scaled_num / other._int_val;
+
+            var res = Decimal(0);
+            res._int_val = quotient;
+            res._exp = (self._exp - other._exp) - scale;
+            res._normalize();
+            return res;
+        }
+
+        /// Returns the negation of self.
+        fn neg() -> Decimal {
+            var res = Decimal(0);
+            res._int_val = 0 - self._int_val;
+            res._exp = self._exp;
+            return res;
+        }
+
+        /// Returns the absolute value of self.
+        fn abs() -> Decimal {
+            var res = Decimal(0);
+            res._int_val = if self._int_val < 0 { 0 - self._int_val } else { self._int_val };
+            res._exp = self._exp;
+            return res;
+        }
+
+        /// Compares self to other, returning -1 for less, 0 for equal, 1 for greater.
+        fn compare(other: Decimal) -> i64 {
+            let diff = self.sub(other);
+            if diff._int_val > 0 {
+                return 1;
+            }
+            if diff._int_val < 0 {
+                return -1;
+            }
+            return 0;
+        }
+
+        fn eq(other: Decimal) -> bool {
+            return self.compare(other) == 0;
+        }
+
+        fn ne(other: Decimal) -> bool {
+            return self.compare(other) != 0;
+        }
+
+        fn lt(other: Decimal) -> bool {
+            return self.compare(other) < 0;
+        }
+
+        fn le(other: Decimal) -> bool {
+            return self.compare(other) <= 0;
+        }
+
+        fn gt(other: Decimal) -> bool {
+            return self.compare(other) > 0;
+        }
+
+        fn ge(other: Decimal) -> bool {
+            return self.compare(other) >= 0;
+        }
+
+        pure op +  (rhs: Decimal) -> Decimal => self.add(rhs);
+        pure op -  (rhs: Decimal) -> Decimal => self.sub(rhs);
+        pure op *  (rhs: Decimal) -> Decimal => self.mul(rhs);
+        pure op /  (rhs: Decimal) -> Decimal => self.div(rhs);
+        pure op -  ()             -> Decimal => self.neg();
+        pure op == (rhs: Decimal) -> bool    => self.eq(rhs);
+        pure op != (rhs: Decimal) -> bool    => self.ne(rhs);
+        pure op <  (rhs: Decimal) -> bool    => self.lt(rhs);
+        pure op <= (rhs: Decimal) -> bool    => self.le(rhs);
+        pure op >  (rhs: Decimal) -> bool    => self.gt(rhs);
+        pure op >= (rhs: Decimal) -> bool    => self.ge(rhs);
+
+        fn is_zero() -> bool {
+            return self._int_val == 0;
+        }
+
+        fn is_negative() -> bool {
+            return self._int_val < 0;
+        }
+
+        /// Formats the decimal as a canonical decimal string.
+        fn to_string() -> str {
+            if self._int_val == 0 {
+                return "0";
+            }
+            let is_neg: bool = self._int_val < 0;
+            let mag: i64 = if is_neg { 0 - self._int_val } else { self._int_val };
+            let s_mag: str = str(mag);
+
+            var result: str = "";
+            if self._exp == 0 {
+                result = s_mag;
+            } else if self._exp > 0 {
+                result = s_mag;
+                for _i in 0..<self._exp {
                     result = result + "0";
                 }
-                result = result + s_mag;
-            }
-        }
-
-        if is_neg {
-            return "-" + result;
-        }
-        return result;
-    }
-
-    /// Converts Decimal to standard 64-bit IEEE floating-point number.
-    def to_f64(self) -> f64 {
-        return float(self.to_string());
-    }
-
-    /// Converts Decimal to 64-bit integer, discarding fraction.
-    def to_int(self) -> i64 {
-        if self._exp >= 0 {
-            return self._int_val * _pow10(self._exp);
-        }
-        return self._int_val / _pow10(0 - self._exp);
-    }
-
-    /// Quantizes self to the exponent of the pattern Decimal.
-    /// Python reference: decimal.Decimal.quantize(exp, rounding=None)
-    def quantize(self, exp_pattern: Decimal) -> Decimal {
-        let target_exp: i64 = exp_pattern._exp;
-        let cur_exp: i64 = self._exp;
-        if cur_exp == target_exp {
-            return self;
-        }
-        if cur_exp < target_exp {
-            let drop_digits: i64 = target_exp - cur_exp;
-            let divisor: i64 = _pow10(drop_digits);
-            let raw_int: i64 = self._int_val;
-            let mag: i64 = if raw_int < 0 { 0 - raw_int } else { raw_int };
-            let remainder: i64 = mag % divisor;
-            var rounded_val: i64 = self._int_val / divisor;
-            if remainder >= (divisor / 2) {
-                if self._int_val >= 0 {
-                    rounded_val = rounded_val + 1;
+            } else {
+                let num_decimals: i64 = 0 - self._exp;
+                let digits_len: i64 = len(s_mag);
+                if digits_len > num_decimals {
+                    let split_pt: i64 = digits_len - num_decimals;
+                    result = s_mag[0..split_pt] + "." + s_mag[split_pt..digits_len];
                 } else {
-                    rounded_val = rounded_val - 1;
+                    result = "0.";
+                    let leading_zeros: i64 = num_decimals - digits_len;
+                    for _z in 0..<leading_zeros {
+                        result = result + "0";
+                    }
+                    result = result + s_mag;
                 }
             }
-            let res = Decimal(0);
-            res._int_val = rounded_val;
-            res._exp = target_exp;
-            return res;
-        } else {
-            let add_digits: i64 = cur_exp - target_exp;
-            let res = Decimal(0);
-            res._int_val = self._int_val * _pow10(add_digits);
-            res._exp = target_exp;
-            return res;
+
+            if is_neg {
+                return "-" + result;
+            }
+            return result;
         }
-    }
+
+        /// Converts Decimal to standard 64-bit IEEE floating-point number.
+        fn to_f64() -> f64 {
+            var val: f64 = self._int_val as f64;
+            if self._exp > 0 {
+                for _i in 0..<self._exp {
+                    val = val * 10.0;
+                }
+            } else if self._exp < 0 {
+                let neg_exp: i64 = 0 - self._exp;
+                for _i in 0..<neg_exp {
+                    val = val / 10.0;
+                }
+            }
+            return val;
+        }
+
+        /// Converts Decimal to 64-bit integer, discarding fraction.
+        fn to_int() -> i64 {
+            if self._exp >= 0 {
+                return self._int_val * _pow10(self._exp);
+            }
+            return self._int_val / _pow10(0 - self._exp);
+        }
+
+        /// Quantizes self to the exponent of the pattern Decimal.
+        /// Python reference: decimal.Decimal.quantize(exp, rounding=None)
+        fn quantize(exp_pattern: Decimal) -> Decimal {
+            let target_exp: i64 = exp_pattern._exp;
+            let cur_exp: i64 = self._exp;
+            if cur_exp == target_exp {
+                return self;
+            }
+            if cur_exp < target_exp {
+                let drop_digits: i64 = target_exp - cur_exp;
+                let divisor: i64 = _pow10(drop_digits);
+                let raw_int: i64 = self._int_val;
+                let mag: i64 = if raw_int < 0 { 0 - raw_int } else { raw_int };
+                let remainder: i64 = mag % divisor;
+                var rounded_val: i64 = self._int_val / divisor;
+                if remainder >= (divisor / 2) {
+                    if self._int_val >= 0 {
+                        rounded_val = rounded_val + 1;
+                    } else {
+                        rounded_val = rounded_val - 1;
+                    }
+                }
+                var res = Decimal(0);
+                res._int_val = rounded_val;
+                res._exp = target_exp;
+                return res;
+            } else {
+                let add_digits: i64 = cur_exp - target_exp;
+                var res = Decimal(0);
+                res._int_val = self._int_val * _pow10(add_digits);
+                res._exp = target_exp;
+                return res;
+            }
+        }
 }
 
 /// Convenience constructor for Decimal instances.
 /// Python reference: decimal.Decimal
-def decimal(value = "0") -> Decimal {
+pub fn decimal(value: any = "0") -> Decimal {
     return Decimal(value);
 }

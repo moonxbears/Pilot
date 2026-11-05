@@ -1,8 +1,12 @@
-from collections import Dequeue;
+use Pilot.Collections.*;
 
-let myqueue = Dequeue();
-myqueue.push(each 1..10)
-while true {
-    var myitem = myqueue.pop_front();
-    print(myitem);
+pub fn main() {
+    var myqueue = Deque();
+    for i in 1..=10 {
+        myqueue.push_back(i);
+    }
+    while myqueue.len() > 0 {
+        let myitem = myqueue.pop_front();
+        print(myitem);
+    }
 }

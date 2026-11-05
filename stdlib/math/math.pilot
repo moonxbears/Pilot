@@ -1,49 +1,58 @@
 // SPDX-License-Identifier: MIT AND PSF-2.0
 // std.math — Differentiable Elementary Math (`!@`), Constants, Number Theory & Welford Statistics
 
-const PI: f64 = 3.14159265358979323846;
-const TAU: f64 = 6.28318530717958647692;
-const E: f64 = 2.71828182845904523536;
-const SQRT2: f64 = 1.41421356237309504880;
-const SQRT3: f64 = 1.73205080756887729352;
-const LN2: f64 = 0.69314718055994530942;
-const LN10: f64 = 2.30258509299404568402;
-const PHI: f64 = 1.61803398874989484820;
-const DEG_TO_RAD: f64 = 0.01745329251994329577;
-const RAD_TO_DEG: f64 = 57.2957795130823208768;
+pub pkg Pilot.Math;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+
+pub const PI: f64 = 3.14159265358979323846;
+pub const TAU: f64 = 6.28318530717958647692;
+pub const E: f64 = 2.71828182845904523536;
+pub const SQRT2: f64 = 1.41421356237309504880;
+pub const SQRT3: f64 = 1.73205080756887729352;
+pub const LN2: f64 = 0.69314718055994530942;
+pub const LN10: f64 = 2.30258509299404568402;
+pub const PHI: f64 = 1.61803398874989484820;
+pub const DEG_TO_RAD: f64 = 0.01745329251994329577;
+pub const RAD_TO_DEG: f64 = 57.2957795130823208768;
 
 // Differentiable Elementary Functions (supported natively by `fn!@(...)` Symbolic Adjoint Engine)
-def deg_to_rad(deg: f64) -> f64 {
+pub fn deg_to_rad(deg: f64) -> f64 {
     return deg * DEG_TO_RAD;
 }
 
-def rad_to_deg(rad: f64) -> f64 {
+pub fn rad_to_deg(rad: f64) -> f64 {
     return rad * RAD_TO_DEG;
 }
 
-def sigmoid(x: f64) -> f64 {
+pub fn sigmoid(x: f64) -> f64 {
     return 1.0 / (1.0 + exp(-x));
 }
 
-def softplus(x: f64) -> f64 {
+pub fn softplus(x: f64) -> f64 {
     if x > 20.0 {
         return x;
     }
     return ln(1.0 + exp(x));
 }
 
-def relu(x: f64) -> f64 {
+pub fn relu(x: f64) -> f64 {
     if x > 0.0 {
         return x;
     }
     return 0.0;
 }
 
-def lerp(a: f64, b: f64, t: f64) -> f64 {
+pub fn lerp(a: f64, b: f64, t: f64) -> f64 {
     return a + (b - a) * t;
 }
 
-def clamp(x: f64, lo: f64, hi: f64) -> f64 {
+pub fn clamp(x: f64, lo: f64, hi: f64) -> f64 {
     if x < lo {
         return lo;
     }
@@ -53,16 +62,16 @@ def clamp(x: f64, lo: f64, hi: f64) -> f64 {
     return x;
 }
 
-def smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
+pub fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
     let t: f64 = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
     return t * t * (3.0 - 2.0 * t);
 }
 
-def approx_eq(a: f64, b: f64, eps: f64 = 0.000000001) -> bool {
+pub fn approx_eq(a: f64, b: f64, eps: f64 = 0.000000001) -> bool {
     return abs(a - b) <= eps;
 }
 
-def sign(x: f64) -> i64 {
+pub fn sign(x: f64) -> i64 {
     if x > 0.0 {
         return 1;
     }
@@ -73,7 +82,7 @@ def sign(x: f64) -> i64 {
 }
 
 // Number Theory & Discrete Combinatorics
-def gcd(a: i64, b: i64) -> i64 {
+pub fn gcd(a: i64, b: i64) -> i64 {
     var x: i64 = abs(a);
     var y: i64 = abs(b);
     while y != 0 {
@@ -84,14 +93,14 @@ def gcd(a: i64, b: i64) -> i64 {
     return x;
 }
 
-def lcm(a: i64, b: i64) -> i64 {
-    if a == 0 or b == 0 {
+pub fn lcm(a: i64, b: i64) -> i64 {
+    if a == 0 || b == 0 {
         return 0;
     }
     return abs((a / gcd(a, b)) * b);
 }
 
-def ipow(base_val: i64, exp_val: i64) -> i64 {
+pub fn ipow(base_val: i64, exp_val: i64) -> i64 {
     if exp_val < 0 {
         panic("math.ipow requires non-negative exponent");
     }
@@ -108,19 +117,19 @@ def ipow(base_val: i64, exp_val: i64) -> i64 {
     return result;
 }
 
-def factorial(n: i64) -> i64 {
+pub fn factorial(n: i64) -> i64 {
     if n < 0 {
         panic("math.factorial requires n >= 0");
     }
     var acc: i64 = 1;
-    for i in 2..n {
+    for i in 2..=n {
         acc = acc * i;
     }
     return acc;
 }
 
-def binomial(n: i64, k: i64) -> i64 {
-    if k < 0 or k > n {
+pub fn binomial(n: i64, k: i64) -> i64 {
+    if k < 0 || k > n {
         return 0;
     }
     var r: i64 = k;
@@ -128,25 +137,25 @@ def binomial(n: i64, k: i64) -> i64 {
         r = n - r;
     }
     var res: i64 = 1;
-    for i in 1..r {
+    for i in 1..=r {
         res = (res * (n - r + i)) / i;
     }
     return res;
 }
 
-def is_prime(n: i64) -> bool {
+pub fn is_prime(n: i64) -> bool {
     if n < 2 {
         return false;
     }
-    if n == 2 or n == 3 {
+    if n == 2 || n == 3 {
         return true;
     }
-    if (n % 2) == 0 or (n % 3) == 0 {
+    if (n % 2) == 0 || (n % 3) == 0 {
         return false;
     }
     var d: i64 = 5;
     while d * d <= n {
-        if (n % d) == 0 or (n % (d + 2)) == 0 {
+        if (n % d) == 0 || (n % (d + 2)) == 0 {
             return false;
         }
         d = d + 6;
@@ -155,23 +164,23 @@ def is_prime(n: i64) -> bool {
 }
 
 // Numerically Stable Welford Statistics (PSF-2.0 CPython statistics scaffold)
-def sum(values) -> f64 {
+pub fn sum(values: any) -> f64 {
     var total: f64 = 0.0;
     for v in values {
-        total = total + float(v);
+        total = total + f64(v);
     }
     return total;
 }
 
-def mean(values) {
+pub fn mean(values: any) -> f64? {
     let n: i64 = len(values);
     if n == 0 {
         return none;
     }
-    return some(sum(values) / float(n));
+    return some(sum(values) / f64(n));
 }
 
-def variance(values) {
+pub fn variance(values: any) -> f64? {
     let n: i64 = len(values);
     if n == 0 {
         return none;
@@ -180,38 +189,45 @@ def variance(values) {
     var mu: f64 = 0.0;
     var m2: f64 = 0.0;
     for raw in values {
-        let x: f64 = float(raw);
+        let x: f64 = f64(raw);
         count = count + 1;
         let delta: f64 = x - mu;
-        mu = mu + (delta / float(count));
+        mu = mu + (delta / f64(count));
         let delta2: f64 = x - mu;
         m2 = m2 + delta * delta2;
     }
-    return some(m2 / float(count));
+    return some(m2 / f64(count));
 }
 
-def sample_variance(values) {
+pub fn sample_variance(values: any) -> f64? {
     let n: i64 = len(values);
     if n < 2 {
         return none;
     }
     let pop = variance(values);
-    if some pv = pop {
-        return some((pv * float(n)) / float(n - 1));
+    switch pop {
+        case some(pv):
+            return some((pv * f64(n)) / f64(n - 1));
+        default:
+            return none;
     }
-    return none;
 }
 
-def stdev(values) {
+pub fn stdev(values: any) -> f64? {
     let v = variance(values);
-    if some pv = v {
-        return some(sqrt(pv));
+    switch v {
+        case some(pv):
+            return some(sqrt(pv));
+        default:
+            return none;
     }
-    return none;
 }
 
-def _sorted_floats(values) {
-    var arr = [float(v) for v in values];
+fn _sorted_floats(values: any) -> f64[] {
+    var arr: f64[] = [];
+    for v in values {
+        arr.append(f64(v));
+    }
     let n: i64 = len(arr);
     // Insertion sort / Shell-gap sort for clean zero-dependency median/quantile
     var gap: i64 = n >> 1;
@@ -219,7 +235,7 @@ def _sorted_floats(values) {
         for i in gap..<n {
             let temp: f64 = arr[i];
             var j: i64 = i;
-            while j >= gap and arr[j - gap] > temp {
+            while j >= gap && arr[j - gap] > temp {
                 arr[j] = arr[j - gap];
                 j = j - gap;
             }
@@ -230,7 +246,7 @@ def _sorted_floats(values) {
     return arr;
 }
 
-def median(values) {
+pub fn median(values: any) -> f64? {
     let n: i64 = len(values);
     if n == 0 {
         return none;
@@ -243,28 +259,28 @@ def median(values) {
     return some((sorted[mid - 1] + sorted[mid]) * 0.5);
 }
 
-def quantile(values, q: f64) {
+pub fn quantile(values: any, q: f64) -> f64? {
     let n: i64 = len(values);
-    if n == 0 or q < 0.0 or q > 1.0 {
+    if n == 0 || q < 0.0 || q > 1.0 {
         return none;
     }
     let sorted = _sorted_floats(values);
     if n == 1 {
         return some(sorted[0]);
     }
-    let pos: f64 = q * float(n - 1);
+    let pos: f64 = q * f64(n - 1);
     let lo: i64 = floor(pos);
     let hi: i64 = ceil(pos);
     if lo == hi {
         return some(sorted[lo]);
     }
-    let frac: f64 = pos - float(lo);
+    let frac: f64 = pos - f64(lo);
     return some(sorted[lo] + (sorted[hi] - sorted[lo]) * frac);
 }
 
-def correlation(xs, ys) {
+pub fn correlation(xs: any, ys: any) -> f64? {
     let n: i64 = len(xs);
-    if n < 2 or len(ys) != n {
+    if n < 2 || len(ys) != n {
         return none;
     }
     let mx = __opt_unwrap(mean(xs));
@@ -273,8 +289,8 @@ def correlation(xs, ys) {
     var vx: f64 = 0.0;
     var vy: f64 = 0.0;
     for i in 0..<n {
-        let dx: f64 = float(xs[i]) - mx;
-        let dy: f64 = float(ys[i]) - my;
+        let dx: f64 = f64(xs[i]) - mx;
+        let dy: f64 = f64(ys[i]) - my;
         cov = cov + dx * dy;
         vx = vx + dx * dx;
         vy = vy + dy * dy;
@@ -292,61 +308,61 @@ def correlation(xs, ys) {
 
 /// Returns the absolute value of x as a float.
 /// Python reference: math.fabs(x)
-def fabs(x: f64) -> f64 {
+pub fn fabs(x: f64) -> f64 {
     return abs(x);
 }
 
 /// Returns a float with the magnitude of x but the sign of y.
 /// Python reference: math.copysign(x, y)
-def copysign(x: f64, y: f64) -> f64 {
+pub fn copysign(x: f64, y: f64) -> f64 {
     let mag: f64 = abs(x);
     return if y < 0.0 { 0.0 - mag } else { mag };
 }
 
 /// Truncates x to an integer towards zero.
 /// Python reference: math.trunc(x)
-def trunc(x: f64) -> i64 {
+pub fn trunc(x: f64) -> i64 {
     return if x < 0.0 { ceil(x) } else { floor(x) };
 }
 
 /// Returns the remainder of x / y matching Python fmod.
 /// Python reference: math.fmod(x, y)
-def fmod(x: f64, y: f64) -> f64 {
+pub fn fmod(x: f64, y: f64) -> f64 {
     return x - floor(x / y) * y;
 }
 
 /// Returns the Euclidean norm, sqrt(x*x + y*y).
 /// Python reference: math.hypot(*coordinates)
-def hypot(x: f64, y: f64) -> f64 {
+pub fn hypot(x: f64, y: f64) -> f64 {
     return sqrt(x * x + y * y);
 }
 
 /// Returns the Euclidean distance between two 2D points (x1, y1) and (x2, y2).
 /// Python reference: math.dist(p, q)
-def dist(p, q) -> f64 {
-    let dx: f64 = float(p[0]) - float(q[0]);
-    let dy: f64 = float(p[1]) - float(q[1]);
+pub fn dist(p: any, q: any) -> f64 {
+    let dx: f64 = f64(p[0]) - f64(q[0]);
+    let dy: f64 = f64(p[1]) - f64(q[1]);
     return sqrt(dx * dx + dy * dy);
 }
 
 /// Number of ways to choose k items from n without repetition and without order.
 /// Python reference: math.comb(n, k)
-def comb(n: i64, k: i64) -> i64 {
+pub fn comb(n: i64, k: i64) -> i64 {
     return binomial(n, k);
 }
 
 /// Number of ways to choose k items from n without repetition and with order.
 /// Python reference: math.perm(n, k=None)
-def perm(n: i64, k: i64 = -1) -> i64 {
+pub fn perm(n: i64, k: i64 = -1) -> i64 {
     if n < 0 {
         panic("math.perm requires n >= 0");
     }
     let target_k: i64 = if k < 0 { n } else { k };
-    if target_k < 0 or target_k > n {
+    if target_k < 0 || target_k > n {
         return 0;
     }
     var res: i64 = 1;
-    for i in (n - target_k + 1)..n {
+    for i in (n - target_k + 1)..=n {
         res = res * i;
     }
     return res;
@@ -354,7 +370,7 @@ def perm(n: i64, k: i64 = -1) -> i64 {
 
 /// Returns true if values a and b are close to each other.
 /// Python reference: math.isclose(a, b, *, rel_tol=1e-09, abs_tol=0.0)
-def isclose(a: f64, b: f64, rel_tol: f64 = 0.000000001, abs_tol: f64 = 0.0) -> bool {
+pub fn isclose(a: f64, b: f64, rel_tol: f64 = 0.000000001, abs_tol: f64 = 0.0) -> bool {
     let diff: f64 = abs(a - b);
     let max_val: f64 = max(abs(a), abs(b));
     let tol: f64 = max(rel_tol * max_val, abs_tol);
@@ -363,28 +379,28 @@ def isclose(a: f64, b: f64, rel_tol: f64 = 0.000000001, abs_tol: f64 = 0.0) -> b
 
 /// Calculates the product of all elements in the iterable.
 /// Python reference: math.prod(iterable, *, start=1)
-def prod(iterable, start: f64 = 1.0) -> f64 {
+pub fn prod(iterable: any, start: f64 = 1.0) -> f64 {
     var acc: f64 = start;
     for x in iterable {
-        acc = acc * float(x);
+        acc = acc * f64(x);
     }
     return acc;
 }
 
 /// Converts angle x from radians to degrees.
 /// Python reference: math.degrees(x)
-def degrees(rad: f64) -> f64 {
+pub fn degrees(rad: f64) -> f64 {
     return rad_to_deg(rad);
 }
 
 /// Converts angle x from degrees to radians.
 /// Python reference: math.radians(x)
-def radians(deg: f64) -> f64 {
+pub fn radians(deg: f64) -> f64 {
     return deg_to_rad(deg);
 }
 
 /// Returns true if x is neither an infinity nor a NaN.
 /// Python reference: math.isfinite(x)
-def isfinite(x: f64) -> bool {
-    return !isnan(x) and !isinf(x);
+pub fn isfinite(x: f64) -> bool {
+    return !isnan(x) && !isinf(x);
 }

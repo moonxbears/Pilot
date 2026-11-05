@@ -2,16 +2,11 @@
 // Showcase 25: C#-Style Configurable Indexers & Self-Backed Properties
 // =============================================================================
 // Demonstrates:
-//   1. Advanced Multi-Dimensional Indexers:
-//      - `property this[row: int, col: int]: float { get => ...; set(v) => ...; }`
-//   2. Dictionary / Associative Indexers:
-//      - `property this[key: str]: int { get => ...; set(v) => ...; }`
-//   3. Concise Expression-Bodied Indexers:
-//      - `this[idx: int]: str => ...;`
-//   4. Self-Backed Fields with Contextual `field` and `value` Keywords:
-//      - `property balance: float { get => field; set => field = value; }`
-//   5. Computed Expression-Bodied Properties:
-//      - `property area: float => this.width * this.height;`
+//   1. Advanced Multi-Dimensional Indexers (`pub self[row: i64, col: i64] -> f64`)
+//   2. Associative Indexers (`pub self[key: str] -> i64`)
+//   3. Concise Read-Only Indexers (`pub self[idx: i64] -> i64`)
+//   4. Variation B Implicit Properties with `field` and `value`
+//   5. Computed Properties (`pub account_summary: str { get => ...; }`)
 //   6. Structural Row Record Indexing with Exact Static Type Retention
 // =============================================================================
 
@@ -22,82 +17,100 @@ println("==================================================================");
 // -----------------------------------------------------------------------------
 // 1. Multi-Dimensional Grid Indexer
 // -----------------------------------------------------------------------------
-class Matrix2D {
-    var data: List[float] = [
+struct Matrix2D : IValue {
+    pub var data: f64[] = [
         1.0, 0.0,
-        0.0, 1.0
+        0.0, 1.0,
     ];
 
-    property this[row: int, col: int]: float {
-        get => this.data[row * 2 + col];
-        set(v) => {
-            this.data[row * 2 + col] = v;
-        };
+    pub self() {
+        .data = [1.0, 0.0, 0.0, 1.0];
+    }
+
+    pub self[row: i64, col: i64] -> f64 {
+        get => .data[row * 2 + col];
+        set(v: f64) => {
+            .data[row * 2 + col] = v;
+        }
     }
 }
 
-let mat = Matrix2D();
+var mat = Matrix2D();
 println("\n[1] 2D Matrix Identity Cell at (0, 0):");
-println("  mat[0, 0] = " + mat[0, 0]);
-println("  mat[0, 1] = " + mat[0, 1]);
+println(f"  mat[0, 0] = {mat[0, 0]}");
+println(f"  mat[0, 1] = {mat[0, 1]}");
 
 mat[0, 1] = 4.5;
-println("  After mat[0, 1] = 4.5 -> " + mat[0, 1]);
+println(f"  After mat[0, 1] = 4.5 -> {mat[0, 1]}");
 
 // -----------------------------------------------------------------------------
 // 2. Associative Cache Indexer
 // -----------------------------------------------------------------------------
-class MetricCache {
-    property this[metric_name: str]: int {
+struct MetricCache : IValue {
+    pub self() {}
+
+    pub self[metric_name: str] -> i64 {
         get => 100;
-        set(v) => {};
+        set(v: i64) => {}
     }
 }
 
-let metrics = MetricCache();
+var metrics = MetricCache();
 println("\n[2] MetricCache Associative Indexer:");
-println("  metrics['cpu_usage'] = " + metrics["cpu_usage"]);
-println("  metrics['mem_usage'] = " + metrics["mem_usage"]);
+println(f"  metrics['cpu_usage'] = {metrics[\"cpu_usage\"]}");
+println(f"  metrics['mem_usage'] = {metrics[\"mem_usage\"]}");
 
 // -----------------------------------------------------------------------------
-// 3. Concise Expression-Bodied Indexer
+// 3. Concise Read-Only Indexer
 // -----------------------------------------------------------------------------
-class FibonacciSeries {
-    this[index: int]: int => index * 10;
+struct FibonacciSeries : IValue {
+    pub self() {}
+
+    pub self[index: i64] -> i64 {
+        get => index * 10;
+    }
 }
 
 let fib = FibonacciSeries();
 println("\n[3] Concise Series Indexer:");
-println("  fib[3] = " + fib[3]);
-println("  fib[7] = " + fib[7]);
+println(f"  fib[3] = {fib[3]}");
+println(f"  fib[7] = {fib[7]}");
 
 // -----------------------------------------------------------------------------
-// 4. Self-Backed Property Fields with `field` & `value`
+// 4. Variation B Implicit Properties with `field` & `value`
 // -----------------------------------------------------------------------------
-class BankAccount {
-    property holder: str {
+struct BankAccount : IValue {
+    pub self() {}
+
+    pub holder: str {
         get => field;
-        set => field = value;
+        set => {
+            field = value;
+        }
     }
 
-    property balance: float {
+    pub balance: f64 {
         get => field;
-        set => field = value if value >= 0.0 else 0.0;
+        set => {
+            field = if value >= 0.0 { value } else { 0.0 };
+        }
     }
 
-    property account_summary: str => this.holder + " has balance $" + this.balance;
+    pub account_summary: str {
+        get => f"{.holder} has balance ${.balance}";
+    }
 }
 
-let acct = BankAccount();
+var acct = BankAccount();
 acct.holder = "Alice Vance";
 acct.balance = 2500.75;
 
-println("\n[4] Self-Backed Properties with Contextual 'field' and 'value':");
-println("  " + acct.account_summary);
+println("\n[4] Implicit Properties with Contextual 'field' and 'value':");
+println(f"  {acct.account_summary}");
 
 // Attempt negative deposit (validation sets to 0.0)
 acct.balance = -50.0;
-println("  After invalid assignment balance = -50.0 -> " + acct.balance);
+println(f"  After invalid assignment balance = -50.0 -> {acct.balance}");
 
 // -----------------------------------------------------------------------------
 // 5. Structural Row Record Indexing with Static Type Retention
@@ -106,7 +119,7 @@ let transaction = {
     "txn_id": 9801,
     "merchant": "Apex Hardware Corp",
     "total": 349.50,
-    "verified": true
+    "verified": true,
 };
 
 let total_amt = transaction["total"];
@@ -114,6 +127,6 @@ let merchant_name = transaction["merchant"];
 let is_verified = transaction["verified"];
 
 println("\n[5] Structural Row Record Static Field Indexing:");
-println("  Transaction #" + transaction["txn_id"] + " at " + merchant_name + " for $" + total_amt + " (verified: " + is_verified + ")");
+println(f"  Transaction #{transaction[\"txn_id\"]} at {merchant_name} for ${total_amt} (verified: {is_verified})");
 
 println("\n>>> Showcase 25 Complete! <<<\n");

@@ -3,76 +3,93 @@
 // Modeled after Python's `http` package (CPython Lib/http/client.py, server.py, cookies.py)
 // Compatible with Linux, Windows, macOS, Android, iOS, and WebAssembly targets.
 
+pub pkg Pilot.Http;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+
 // ============================================================================
 // 1. HTTP Status Codes & Phrases (Python: http.HTTPStatus)
 // ============================================================================
 
 // Native runtime optimizations provided by pilot_rt (C-ABI FFI)
 extern "c" lib "pilot_rt" {
-    def __net_http_get(url: str) -> any;
-    def __net_http_post(url: str, body: str, content_type: str) -> any;
-    def __net_tcp_listen(host: str, port: i64) -> any;
+    fn __net_http_get(url: str) -> any;
+    fn __net_http_post(url: str, body: str, content_type: str) -> any;
+    fn __net_tcp_listen(host: str, port: i64) -> any;
 }
 
-const HTTP_CONTINUE: i64 = 100;
-const HTTP_SWITCHING_PROTOCOLS: i64 = 101;
-const HTTP_PROCESSING: i64 = 102;
+fn _parse_i64_or(val: any, fallback: i64) -> i64 {
+    let opt = __parse_int_strict(str(val), 10);
+    if __opt_is_some(opt) {
+        return __opt_unwrap(opt);
+    }
+    return fallback;
+}
 
-const HTTP_OK: i64 = 200;
-const HTTP_CREATED: i64 = 201;
-const HTTP_ACCEPTED: i64 = 202;
-const HTTP_NON_AUTHORITATIVE_INFORMATION: i64 = 203;
-const HTTP_NO_CONTENT: i64 = 204;
-const HTTP_RESET_CONTENT: i64 = 205;
-const HTTP_PARTIAL_CONTENT: i64 = 206;
+pub const HTTP_CONTINUE: i64 = 100;
+pub const HTTP_SWITCHING_PROTOCOLS: i64 = 101;
+pub const HTTP_PROCESSING: i64 = 102;
 
-const HTTP_MULTIPLE_CHOICES: i64 = 300;
-const HTTP_MOVED_PERMANENTLY: i64 = 301;
-const HTTP_FOUND: i64 = 302;
-const HTTP_SEE_OTHER: i64 = 303;
-const HTTP_NOT_MODIFIED: i64 = 304;
-const HTTP_USE_PROXY: i64 = 305;
-const HTTP_TEMPORARY_REDIRECT: i64 = 307;
-const HTTP_PERMANENT_REDIRECT: i64 = 308;
+pub const HTTP_OK: i64 = 200;
+pub const HTTP_CREATED: i64 = 201;
+pub const HTTP_ACCEPTED: i64 = 202;
+pub const HTTP_NON_AUTHORITATIVE_INFORMATION: i64 = 203;
+pub const HTTP_NO_CONTENT: i64 = 204;
+pub const HTTP_RESET_CONTENT: i64 = 205;
+pub const HTTP_PARTIAL_CONTENT: i64 = 206;
 
-const HTTP_BAD_REQUEST: i64 = 400;
-const HTTP_UNAUTHORIZED: i64 = 401;
-const HTTP_PAYMENT_REQUIRED: i64 = 402;
-const HTTP_FORBIDDEN: i64 = 403;
-const HTTP_NOT_FOUND: i64 = 404;
-const HTTP_METHOD_NOT_ALLOWED: i64 = 405;
-const HTTP_NOT_ACCEPTABLE: i64 = 406;
-const HTTP_PROXY_AUTHENTICATION_REQUIRED: i64 = 407;
-const HTTP_REQUEST_TIMEOUT: i64 = 408;
-const HTTP_CONFLICT: i64 = 409;
-const HTTP_GONE: i64 = 410;
-const HTTP_LENGTH_REQUIRED: i64 = 411;
-const HTTP_PRECONDITION_FAILED: i64 = 412;
-const HTTP_PAYLOAD_TOO_LARGE: i64 = 413;
-const HTTP_URI_TOO_LONG: i64 = 414;
-const HTTP_UNSUPPORTED_MEDIA_TYPE: i64 = 415;
-const HTTP_RANGE_NOT_SATISFIABLE: i64 = 416;
-const HTTP_EXPECTATION_FAILED: i64 = 417;
-const HTTP_IM_A_TEAPOT: i64 = 418;
-const HTTP_MISDIRECTED_REQUEST: i64 = 421;
-const HTTP_UNPROCESSABLE_ENTITY: i64 = 422;
-const HTTP_LOCKED: i64 = 423;
-const HTTP_FAILED_DEPENDENCY: i64 = 424;
-const HTTP_TOO_EARLY: i64 = 425;
-const HTTP_UPGRADE_REQUIRED: i64 = 426;
-const HTTP_PRECONDITION_REQUIRED: i64 = 428;
-const HTTP_TOO_MANY_REQUESTS: i64 = 429;
-const HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE: i64 = 431;
-const HTTP_UNAVAILABLE_FOR_LEGAL_REASONS: i64 = 451;
+pub const HTTP_MULTIPLE_CHOICES: i64 = 300;
+pub const HTTP_MOVED_PERMANENTLY: i64 = 301;
+pub const HTTP_FOUND: i64 = 302;
+pub const HTTP_SEE_OTHER: i64 = 303;
+pub const HTTP_NOT_MODIFIED: i64 = 304;
+pub const HTTP_USE_PROXY: i64 = 305;
+pub const HTTP_TEMPORARY_REDIRECT: i64 = 307;
+pub const HTTP_PERMANENT_REDIRECT: i64 = 308;
 
-const HTTP_INTERNAL_SERVER_ERROR: i64 = 500;
-const HTTP_NOT_IMPLEMENTED: i64 = 501;
-const HTTP_BAD_GATEWAY: i64 = 502;
-const HTTP_SERVICE_UNAVAILABLE: i64 = 503;
-const HTTP_GATEWAY_TIMEOUT: i64 = 504;
-const HTTP_HTTP_VERSION_NOT_SUPPORTED: i64 = 505;
+pub const HTTP_BAD_REQUEST: i64 = 400;
+pub const HTTP_UNAUTHORIZED: i64 = 401;
+pub const HTTP_PAYMENT_REQUIRED: i64 = 402;
+pub const HTTP_FORBIDDEN: i64 = 403;
+pub const HTTP_NOT_FOUND: i64 = 404;
+pub const HTTP_METHOD_NOT_ALLOWED: i64 = 405;
+pub const HTTP_NOT_ACCEPTABLE: i64 = 406;
+pub const HTTP_PROXY_AUTHENTICATION_REQUIRED: i64 = 407;
+pub const HTTP_REQUEST_TIMEOUT: i64 = 408;
+pub const HTTP_CONFLICT: i64 = 409;
+pub const HTTP_GONE: i64 = 410;
+pub const HTTP_LENGTH_REQUIRED: i64 = 411;
+pub const HTTP_PRECONDITION_FAILED: i64 = 412;
+pub const HTTP_PAYLOAD_TOO_LARGE: i64 = 413;
+pub const HTTP_URI_TOO_LONG: i64 = 414;
+pub const HTTP_UNSUPPORTED_MEDIA_TYPE: i64 = 415;
+pub const HTTP_RANGE_NOT_SATISFIABLE: i64 = 416;
+pub const HTTP_EXPECTATION_FAILED: i64 = 417;
+pub const HTTP_IM_A_TEAPOT: i64 = 418;
+pub const HTTP_MISDIRECTED_REQUEST: i64 = 421;
+pub const HTTP_UNPROCESSABLE_ENTITY: i64 = 422;
+pub const HTTP_LOCKED: i64 = 423;
+pub const HTTP_FAILED_DEPENDENCY: i64 = 424;
+pub const HTTP_TOO_EARLY: i64 = 425;
+pub const HTTP_UPGRADE_REQUIRED: i64 = 426;
+pub const HTTP_PRECONDITION_REQUIRED: i64 = 428;
+pub const HTTP_TOO_MANY_REQUESTS: i64 = 429;
+pub const HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE: i64 = 431;
+pub const HTTP_UNAVAILABLE_FOR_LEGAL_REASONS: i64 = 451;
 
-def status_phrase(code: i64) -> str {
+pub const HTTP_INTERNAL_SERVER_ERROR: i64 = 500;
+pub const HTTP_NOT_IMPLEMENTED: i64 = 501;
+pub const HTTP_BAD_GATEWAY: i64 = 502;
+pub const HTTP_SERVICE_UNAVAILABLE: i64 = 503;
+pub const HTTP_GATEWAY_TIMEOUT: i64 = 504;
+pub const HTTP_HTTP_VERSION_NOT_SUPPORTED: i64 = 505;
+
+pub fn status_phrase(code: i64) -> str {
     if code == 200 { return "OK"; }
     if code == 201 { return "Created"; }
     if code == 202 { return "Accepted"; }
@@ -98,489 +115,598 @@ def status_phrase(code: i64) -> str {
     return "Unknown";
 }
 
-class HTTPStatus {
-    self(value: i64, phrase: str, description: str = "") {
-        self.value = value;
-        self.phrase = phrase;
-        self.description = description;
-    }
+pub struct HTTPStatus : IValue {
+    pub:
+        value:       i64;
+        phrase:      str;
+        description: str;
 
-    def to_str() -> str {
-        return f"<HTTPStatus.{self.phrase}: {self.value}>";
-    }
+        self(value: i64, phrase: str, description: str = "") {
+            .value = value;
+            .phrase = phrase;
+            .description = description;
+        }
+
+        fn to_str() -> str {
+            return f"<HTTPStatus.{self.phrase}: {self.value}>";
+        }
 }
 
 // ============================================================================
 // 2. HTTP Exceptions (Python: http.client.HTTPException)
 // ============================================================================
 
-class HTTPException {
-    self(message: str = "") {
-        self.message = message;
-        self.args = [message];
-    }
+pub struct HTTPException : IValue {
+    pub:
+        message: str;
+        args:    str[];
 
-    def to_str() -> str {
-        return f"<HTTPException: {self.message}>";
-    }
+        self(message: str = "") {
+            .message = message;
+            .args = [message];
+        }
+
+        fn to_str() -> str {
+            return f"<HTTPException: {self.message}>";
+        }
 }
 
-class NotConnected {
-    self(message: str = "Not connected") {
-        self.message = message;
-    }
+pub struct NotConnected : IValue {
+    pub:
+        message: str;
+
+        self(message: str = "Not connected") {
+            .message = message;
+        }
 }
 
-class InvalidURL {
-    self(message: str = "Invalid URL") {
-        self.message = message;
-    }
+pub struct InvalidURL : IValue {
+    pub:
+        message: str;
+
+        self(message: str = "Invalid URL") {
+            .message = message;
+        }
 }
 
-class CannotSendRequest {
-    self(message: str = "Cannot send request") {
-        self.message = message;
-    }
+pub struct CannotSendRequest : IValue {
+    pub:
+        message: str;
+
+        self(message: str = "Cannot send request") {
+            .message = message;
+        }
 }
 
-class CannotSendHeader {
-    self(message: str = "Cannot send header") {
-        self.message = message;
-    }
+pub struct CannotSendHeader : IValue {
+    pub:
+        message: str;
+
+        self(message: str = "Cannot send header") {
+            .message = message;
+        }
 }
 
-class ResponseNotReady {
-    self(message: str = "Response not ready") {
-        self.message = message;
-    }
+pub struct ResponseNotReady : IValue {
+    pub:
+        message: str;
+
+        self(message: str = "Response not ready") {
+            .message = message;
+        }
 }
 
-class BadStatusLine {
-    self(line: str) {
-        self.line = line;
-        self.message = f"Bad status line: {line}";
-    }
+pub struct BadStatusLine : IValue {
+    pub:
+        line:    str;
+        message: str;
+
+        self(line: str) {
+            .line = line;
+            .message = f"Bad status line: {line}";
+        }
 }
 
 // ============================================================================
 // 3. HTTP Client Response (Python: http.client.HTTPResponse)
 // ============================================================================
 
-class HTTPResponse {
-    self(status: i64, reason: str, headers: map, body: str, version: i64 = 11) {
-        self.status = status;
-        self.code = status;
-        self.reason = reason;
-        self.headers = headers;
-        self.body = body;
-        self.version = version;
-        self.closed = false;
-    }
+pub struct HTTPResponse : IValue {
+    pub:
+        status:  i64;
+        code:    i64;
+        reason:  str;
+        headers: map;
+        body:    str;
+        version: i64;
+        closed:  bool;
 
-    def read(amt: i64 = -1) -> str {
-        if amt < 0 or amt >= len(self.body) {
-            return self.body;
+        self(status: i64, reason: str, headers: map, body: str, version: i64 = 11) {
+            .status = status;
+            .code = status;
+            .reason = reason;
+            .headers = headers;
+            .body = body;
+            .version = version;
+            .closed = false;
         }
-        return self.body[0..amt];
-    }
 
-    def getheader(name: str, default_val: str = "") -> str {
-        let lower_name = name.to_lower();
-        for k in self.headers.keys() {
-            if k.to_lower() == lower_name {
-                return str(self.headers[k]);
+        fn read(amt: i64 = -1) -> str {
+            if amt < 0 || amt >= len(self.body) {
+                return self.body;
             }
+            return self.body[0..amt];
         }
-        return default_val;
-    }
 
-    def getheaders() -> [[str]] {
-        var out = [];
-        for k in self.headers.keys() {
-            out.append([k, str(self.headers[k])]);
+        fn getheader(name: str, default_val: str = "") -> str {
+            let lower_name = name.to_lower();
+            for k in self.headers.keys() {
+                if k.to_lower() == lower_name {
+                    return str(self.headers[k]);
+                }
+            }
+            return default_val;
         }
-        return out;
-    }
 
-    def close() {
-        self.closed = true;
-    }
+        fn getheaders() -> str[][] {
+            var out = [];
+            for k in self.headers.keys() {
+                out.append([k, str(self.headers[k])]);
+            }
+            return out;
+        }
 
-    def isclosed() -> bool {
-        return self.closed;
-    }
+        var fn close() {
+            self.closed = true;
+        }
+
+        fn isclosed() -> bool {
+            return self.closed;
+        }
 }
 
 // ============================================================================
 // 4. HTTP Connection (Python: http.client.HTTPConnection)
 // ============================================================================
 
-class HTTPConnection {
-    self(host: str, port: i64 = 80, timeout: f64 = 30.0) {
-        self.host = host;
-        self.port = port;
-        self.timeout = timeout;
-        self.is_https = false;
-        self._connected = false;
-        self._pending_response = none;
-        self._req_headers = {};
-    }
+pub struct HTTPConnection : IObject {
+    pub:
+        host:              str;
+        port:              i64;
+        timeout:           f64;
+        is_https:          bool;
+        _connected:        bool;
+        _pending_response: any;
+        _req_headers:      map;
+        _method:           str;
+        _url:              str;
 
-    def connect() {
-        self._connected = true;
-    }
-
-    def close() {
-        self._connected = false;
-        self._pending_response = none;
-    }
-
-    def putrequest(method: str, url: str) {
-        self._req_headers = {};
-        self._method = method;
-        self._url = url;
-    }
-
-    def putheader(header: str, argument: str) {
-        self._req_headers[header] = argument;
-    }
-
-    def endheaders(message_body: any = none) {
-        let scheme = if self.is_https { "https" } else { "http" };
-        var full_url = self._url;
-        if len(full_url) == 0 or full_url[0..1] != "/" {
-            full_url = "/" + full_url;
-        }
-        full_url = f"{scheme}://{self.host}:{self.port}{full_url}";
-
-        var body_str = "";
-        if message_body != none {
-            body_str = str(message_body);
+        self(host: str, port: i64 = 80, timeout: f64 = 30.0) {
+            .host = host;
+            .port = port;
+            .timeout = timeout;
+            .is_https = false;
+            ._connected = false;
+            ._pending_response = none;
+            ._req_headers = {};
+            ._method = "GET";
+            ._url = "/";
         }
 
-        var resp_map: any = 0;
-        if self._method == "POST" or self._method == "PUT" or self._method == "PATCH" {
-            var ctype = "application/octet-stream";
-            if self._req_headers.contains_key("Content-Type") {
-                ctype = self._req_headers["Content-Type"];
+        ~self() {
+            .close();
+        }
+
+        var fn connect() {
+            self._connected = true;
+        }
+
+        var fn close() {
+            self._connected = false;
+            self._pending_response = none;
+        }
+
+        var fn putrequest(method: str, url: str) {
+            self._req_headers = {};
+            self._method = method;
+            self._url = url;
+        }
+
+        var fn putheader(header: str, argument: str) {
+            self._req_headers[header] = argument;
+        }
+
+        var fn endheaders(message_body: any = none) {
+            let scheme = if self.is_https { "https" } else { "http" };
+            var full_url = self._url;
+            if len(full_url) == 0 || full_url[0..1] != "/" {
+                full_url = "/" + full_url;
             }
-            resp_map = __net_http_post(full_url, body_str, ctype);
-        } else {
-            resp_map = __net_http_get(full_url);
+            full_url = f"{scheme}://{self.host}:{self.port}{full_url}";
+
+            var body_str = "";
+            if message_body != none {
+                body_str = str(message_body);
+            }
+
+            var resp_map: any = 0;
+            if self._method == "POST" || self._method == "PUT" || self._method == "PATCH" {
+                var ctype = "application/octet-stream";
+                if self._req_headers.contains_key("Content-Type") {
+                    ctype = self._req_headers["Content-Type"];
+                }
+                resp_map = __net_http_post(full_url, body_str, ctype);
+            } else {
+                resp_map = __net_http_get(full_url);
+            }
+
+            var status: i64 = 200;
+            var reason: str = "OK";
+            var r_headers: map = {};
+            var body: str = "";
+
+            if type_of(resp_map) == "map" {
+                if resp_map.contains_key("status") { status = _parse_i64_or(resp_map["status"], 200); }
+                if resp_map.contains_key("reason") { reason = str(resp_map["reason"]); }
+                if resp_map.contains_key("headers") { r_headers = resp_map["headers"]; }
+                if resp_map.contains_key("body") { body = str(resp_map["body"]); }
+            }
+
+            self._pending_response = HTTPResponse(status, reason, r_headers, body);
         }
 
-        var status: i64 = 200;
-        var reason: str = "OK";
-        var r_headers: map = {};
-        var body: str = "";
-
-        if type_of(resp_map) == "map" {
-            if resp_map.contains_key("status") { status = int(resp_map["status"]); }
-            if resp_map.contains_key("reason") { reason = str(resp_map["reason"]); }
-            if resp_map.contains_key("headers") { r_headers = resp_map["headers"]; }
-            if resp_map.contains_key("body") { body = str(resp_map["body"]); }
+        var fn request(method: str, url: str, body: any = none, headers: map = {}) {
+            self.putrequest(method, url);
+            for k in headers.keys() {
+                self.putheader(k, str(headers[k]));
+            }
+            self.endheaders(body);
         }
 
-        self._pending_response = HTTPResponse(status, reason, r_headers, body);
-    }
-
-    def request(method: str, url: str, body: any = none, headers: map = {}) {
-        self.putrequest(method, url);
-        for k in headers.keys() {
-            self.putheader(k, str(headers[k]));
+        var fn getresponse() -> HTTPResponse {
+            if self._pending_response == none {
+                return HTTPResponse(200, "OK", {}, "");
+            }
+            let resp = self._pending_response;
+            self._pending_response = none;
+            return resp;
         }
-        self.endheaders(body);
-    }
-
-    def getresponse() -> HTTPResponse {
-        if self._pending_response == none {
-            return HTTPResponse(200, "OK", {}, "");
-        }
-        let resp = self._pending_response;
-        self._pending_response = none;
-        return resp;
-    }
 }
 
-class HTTPSConnection {
-    self(host: str, port: i64 = 443, timeout: f64 = 30.0) {
-        self.host = host;
-        self.port = port;
-        self.timeout = timeout;
-        self.is_https = true;
-        self._connected = false;
-        self._pending_response = none;
-        self._req_headers = {};
-    }
+pub struct HTTPSConnection : IObject {
+    pub:
+        host:              str;
+        port:              i64;
+        timeout:           f64;
+        is_https:          bool;
+        _connected:        bool;
+        _pending_response: any;
+        _req_headers:      map;
+        _method:           str;
+        _url:              str;
 
-    def connect() {
-        self._connected = true;
-    }
-
-    def close() {
-        self._connected = false;
-        self._pending_response = none;
-    }
-
-    def putrequest(method: str, url: str) {
-        self._req_headers = {};
-        self._method = method;
-        self._url = url;
-    }
-
-    def putheader(header: str, argument: str) {
-        self._req_headers[header] = argument;
-    }
-
-    def endheaders(message_body: any = none) {
-        var full_url = self._url;
-        if len(full_url) == 0 or full_url[0..1] != "/" {
-            full_url = "/" + full_url;
-        }
-        full_url = f"https://{self.host}:{self.port}{full_url}";
-
-        var body_str = "";
-        if message_body != none {
-            body_str = str(message_body);
+        self(host: str, port: i64 = 443, timeout: f64 = 30.0) {
+            .host = host;
+            .port = port;
+            .timeout = timeout;
+            .is_https = true;
+            ._connected = false;
+            ._pending_response = none;
+            ._req_headers = {};
+            ._method = "GET";
+            ._url = "/";
         }
 
-        var resp_map: any = 0;
-        if self._method == "POST" or self._method == "PUT" or self._method == "PATCH" {
-            var ctype = "application/octet-stream";
-            if self._req_headers.contains_key("Content-Type") {
-                ctype = self._req_headers["Content-Type"];
+        ~self() {
+            .close();
+        }
+
+        var fn connect() {
+            self._connected = true;
+        }
+
+        var fn close() {
+            self._connected = false;
+            self._pending_response = none;
+        }
+
+        var fn putrequest(method: str, url: str) {
+            self._req_headers = {};
+            self._method = method;
+            self._url = url;
+        }
+
+        var fn putheader(header: str, argument: str) {
+            self._req_headers[header] = argument;
+        }
+
+        var fn endheaders(message_body: any = none) {
+            var full_url = self._url;
+            if len(full_url) == 0 || full_url[0..1] != "/" {
+                full_url = "/" + full_url;
             }
-            resp_map = __net_http_post(full_url, body_str, ctype);
-        } else {
-            resp_map = __net_http_get(full_url);
+            full_url = f"https://{self.host}:{self.port}{full_url}";
+
+            var body_str = "";
+            if message_body != none {
+                body_str = str(message_body);
+            }
+
+            var resp_map: any = 0;
+            if self._method == "POST" || self._method == "PUT" || self._method == "PATCH" {
+                var ctype = "application/octet-stream";
+                if self._req_headers.contains_key("Content-Type") {
+                    ctype = self._req_headers["Content-Type"];
+                }
+                resp_map = __net_http_post(full_url, body_str, ctype);
+            } else {
+                resp_map = __net_http_get(full_url);
+            }
+
+            var status: i64 = 200;
+            var reason: str = "OK";
+            var r_headers: map = {};
+            var body: str = "";
+
+            if type_of(resp_map) == "map" {
+                if resp_map.contains_key("status") { status = _parse_i64_or(resp_map["status"], 200); }
+                if resp_map.contains_key("reason") { reason = str(resp_map["reason"]); }
+                if resp_map.contains_key("headers") { r_headers = resp_map["headers"]; }
+                if resp_map.contains_key("body") { body = str(resp_map["body"]); }
+            }
+
+            self._pending_response = HTTPResponse(status, reason, r_headers, body);
         }
 
-        var status: i64 = 200;
-        var reason: str = "OK";
-        var r_headers: map = {};
-        var body: str = "";
-
-        if type_of(resp_map) == "map" {
-            if resp_map.contains_key("status") { status = int(resp_map["status"]); }
-            if resp_map.contains_key("reason") { reason = str(resp_map["reason"]); }
-            if resp_map.contains_key("headers") { r_headers = resp_map["headers"]; }
-            if resp_map.contains_key("body") { body = str(resp_map["body"]); }
+        var fn request(method: str, url: str, body: any = none, headers: map = {}) {
+            self.putrequest(method, url);
+            for k in headers.keys() {
+                self.putheader(k, str(headers[k]));
+            }
+            self.endheaders(body);
         }
 
-        self._pending_response = HTTPResponse(status, reason, r_headers, body);
-    }
-
-    def request(method: str, url: str, body: any = none, headers: map = {}) {
-        self.putrequest(method, url);
-        for k in headers.keys() {
-            self.putheader(k, str(headers[k]));
+        var fn getresponse() -> HTTPResponse {
+            if self._pending_response == none {
+                return HTTPResponse(200, "OK", {}, "");
+            }
+            let resp = self._pending_response;
+            self._pending_response = none;
+            return resp;
         }
-        self.endheaders(body);
-    }
-
-    def getresponse() -> HTTPResponse {
-        if self._pending_response == none {
-            return HTTPResponse(200, "OK", {}, "");
-        }
-        let resp = self._pending_response;
-        self._pending_response = none;
-        return resp;
-    }
 }
 
 // ============================================================================
 // 5. HTTP Cookies (Python: http.cookies.SimpleCookie)
 // ============================================================================
 
-class Morsel {
-    self(key: str, value: str) {
-        self.key = key;
-        self.value = value;
-        self.coded_value = value;
-        self.path = "/";
-        self.domain = "";
-        self.secure = false;
-        self.httponly = false;
-        self.samesite = "";
-        self.max_age = -1;
-    }
+pub struct Morsel : IValue {
+    pub:
+        key:         str;
+        value:       str;
+        coded_value: str;
+        path:        str;
+        domain:      str;
+        secure:      bool;
+        httponly:    bool;
+        samesite:    str;
+        max_age:     i64;
 
-    def output() -> str {
-        var s = f"Set-Cookie: {self.key}={self.value}";
-        if len(self.path) > 0 { s = s + f"; Path={self.path}"; }
-        if len(self.domain) > 0 { s = s + f"; Domain={self.domain}"; }
-        if self.max_age >= 0 { s = s + f"; Max-Age={self.max_age}"; }
-        if self.secure { s = s + "; Secure"; }
-        if self.httponly { s = s + "; HttpOnly"; }
-        if len(self.samesite) > 0 { s = s + f"; SameSite={self.samesite}"; }
-        return s;
-    }
+        self(key: str, value: str) {
+            .key = key;
+            .value = value;
+            .coded_value = value;
+            .path = "/";
+            .domain = "";
+            .secure = false;
+            .httponly = false;
+            .samesite = "";
+            .max_age = -1;
+        }
+
+        fn output() -> str {
+            var s = f"Set-Cookie: {self.key}={self.value}";
+            if len(self.path) > 0 { s = s + f"; Path={self.path}"; }
+            if len(self.domain) > 0 { s = s + f"; Domain={self.domain}"; }
+            if self.max_age >= 0 { s = s + f"; Max-Age={self.max_age}"; }
+            if self.secure { s = s + "; Secure"; }
+            if self.httponly { s = s + "; HttpOnly"; }
+            if len(self.samesite) > 0 { s = s + f"; SameSite={self.samesite}"; }
+            return s;
+        }
 }
 
-class SimpleCookie {
-    self(rawdata: str = "") {
-        self._morsels = {};
-        if len(rawdata) > 0 {
-            self.load(rawdata);
-        }
-    }
+pub struct SimpleCookie : IValue {
+    pub:
+        _morsels: map;
 
-    def set(key: str, value: str) {
-        self._morsels[key] = Morsel(key, value);
-    }
-
-    def get_cookie(key: str) -> Morsel {
-        if self._morsels.contains_key(key) {
-            return self._morsels[key];
-        }
-        return Morsel(key, "");
-    }
-
-    def load(rawdata: str) {
-        let parts: [str] = rawdata.split(";");
-        for part in parts {
-            let clean = part.trim();
-            if len(clean) == 0 { continue; }
-            let eq = clean.index_of("=");
-            if eq >= 0 {
-                let k = clean[0..eq].trim();
-                let v = clean[(eq + 1)..len(clean)].trim();
-                self._morsels[k] = Morsel(k, v);
+        self(rawdata: str = "") {
+            ._morsels = {};
+            if len(rawdata) > 0 {
+                .load(rawdata);
             }
         }
-    }
 
-    def output() -> str {
-        var out = "";
-        for k in self._morsels.keys() {
-            let m: Morsel = self._morsels[k];
-            out = out + m.output() + "\r\n";
+        var fn set(key: str, value: str) {
+            self._morsels[key] = Morsel(key, value);
         }
-        return out;
-    }
+
+        fn get_cookie(key: str) -> Morsel {
+            if self._morsels.contains_key(key) {
+                return self._morsels[key];
+            }
+            return Morsel(key, "");
+        }
+
+        var fn load(rawdata: str) {
+            let parts: str[] = rawdata.split(";");
+            for part in parts {
+                let clean = part.trim();
+                if len(clean) == 0 { continue; }
+                let eq = clean.index_of("=");
+                if eq >= 0 {
+                    let k = clean[0..eq].trim();
+                    let v = clean[(eq + 1)..len(clean)].trim();
+                    self._morsels[k] = Morsel(k, v);
+                }
+            }
+        }
+
+        fn output() -> str {
+            var out = "";
+            for k in self._morsels.keys() {
+                let m: Morsel = self._morsels[k];
+                out = out + m.output() + "\r\n";
+            }
+            return out;
+        }
 }
 
 // ============================================================================
 // 6. HTTP Server Interfaces (Python: http.server)
 // ============================================================================
 
-class BaseHTTPRequestHandler {
-    self(request_raw: str, client_address: [any] = ["127.0.0.1", 0]) {
-        self.request_raw = request_raw;
-        self.client_address = client_address;
-        self.command = "GET";
-        self.path = "/";
-        self.request_version = "HTTP/1.1";
-        self.headers = {};
-        self.response_code = 200;
-        self.response_message = "OK";
-        self.response_headers = {};
-        self.response_body = "";
-        self._parse_request();
-    }
+pub struct BaseHTTPRequestHandler : IValue {
+    pub:
+        request_raw:      str;
+        client_address:   any[];
+        command:          str;
+        path:             str;
+        request_version:  str;
+        headers:          map;
+        response_code:    i64;
+        response_message: str;
+        response_headers: map;
+        response_body:    str;
 
-    def _parse_request() {
-        let lines: [str] = self.request_raw.split("\r\n");
-        if len(lines) == 0 or len(lines[0]) == 0 {
-            return;
+        self(request_raw: str, client_address: any[] = ["127.0.0.1", 0]) {
+            .request_raw = request_raw;
+            .client_address = client_address;
+            .command = "GET";
+            .path = "/";
+            .request_version = "HTTP/1.1";
+            .headers = {};
+            .response_code = 200;
+            .response_message = "OK";
+            .response_headers = {};
+            .response_body = "";
+            ._parse_request();
         }
-        let req_line: [str] = lines[0].split(" ");
-        if len(req_line) >= 1 { self.command = req_line[0]; }
-        if len(req_line) >= 2 { self.path = req_line[1]; }
-        if len(req_line) >= 3 { self.request_version = req_line[2]; }
 
-        for i in 1..<len(lines) {
-            let line = lines[i];
-            if len(line) == 0 { break; }
-            let c_idx = line.index_of(":");
-            if c_idx >= 0 {
-                let k = line[0..c_idx].trim();
-                let v = line[(c_idx + 1)..len(line)].trim();
-                self.headers[k] = v;
+        var fn _parse_request() {
+            let lines: str[] = self.request_raw.split("\r\n");
+            if len(lines) == 0 || len(lines[0]) == 0 {
+                return;
+            }
+            let req_line: str[] = lines[0].split(" ");
+            if len(req_line) >= 1 { self.command = req_line[0]; }
+            if len(req_line) >= 2 { self.path = req_line[1]; }
+            if len(req_line) >= 3 { self.request_version = req_line[2]; }
+
+            for i in 1..<len(lines) {
+                let line = lines[i];
+                if len(line) == 0 { break; }
+                let c_idx = line.index_of(":");
+                if c_idx >= 0 {
+                    let k = line[0..c_idx].trim();
+                    let v = line[(c_idx + 1)..len(line)].trim();
+                    self.headers[k] = v;
+                }
             }
         }
-    }
 
-    def send_response(code: i64, message: str = "") {
-        self.response_code = code;
-        if len(message) > 0 {
-            self.response_message = message;
-        } else {
-            self.response_message = status_phrase(code);
+        var fn send_response(code: i64, message: str = "") {
+            self.response_code = code;
+            if len(message) > 0 {
+                self.response_message = message;
+            } else {
+                self.response_message = status_phrase(code);
+            }
         }
-    }
 
-    def send_header(keyword: str, value: str) {
-        self.response_headers[keyword] = value;
-    }
-
-    def end_headers() {
-        // Headers sealed
-    }
-
-    def send_error(code: i64, message: str = "") {
-        self.send_response(code, message);
-        self.send_header("Content-Type", "text/plain");
-        let body = f"Error code: {code}\nMessage: {self.response_message}.\n";
-        self.response_body = body;
-    }
-
-    def write_body(body: str) {
-        self.response_body = body;
-    }
-
-    def render_response() -> str {
-        var out = f"{self.request_version} {self.response_code} {self.response_message}\r\n";
-        for k in self.response_headers.keys() {
-            out = out + f"{k}: {self.response_headers[k]}\r\n";
+        var fn send_header(keyword: str, value: str) {
+            self.response_headers[keyword] = value;
         }
-        out = out + "\r\n" + self.response_body;
-        return out;
-    }
 
-    def do_GET() {
-        self.send_response(200, "OK");
-        self.send_header("Content-Type", "text/html");
-        self.end_headers();
-        self.write_body("<html><body><h1>Pilot HTTP Server</h1></body></html>");
-    }
+        fn end_headers() {
+            // Headers sealed
+        }
 
-    def do_POST() {
-        self.send_response(200, "OK");
-        self.end_headers();
-    }
+        var fn send_error(code: i64, message: str = "") {
+            self.send_response(code, message);
+            self.send_header("Content-Type", "text/plain");
+            let body = f"Error code: {code}\nMessage: {self.response_message}.\n";
+            self.response_body = body;
+        }
 
-    def do_HEAD() {
-        self.send_response(200, "OK");
-        self.end_headers();
-    }
+        var fn write_body(body: str) {
+            self.response_body = body;
+        }
+
+        fn render_response() -> str {
+            var out = f"{self.request_version} {self.response_code} {self.response_message}\r\n";
+            for k in self.response_headers.keys() {
+                out = out + f"{k}: {self.response_headers[k]}\r\n";
+            }
+            out = out + "\r\n" + self.response_body;
+            return out;
+        }
+
+        var fn do_GET() {
+            self.send_response(200, "OK");
+            self.send_header("Content-Type", "text/html");
+            self.end_headers();
+            self.write_body("<html><body><h1>Pilot HTTP Server</h1></body></html>");
+        }
+
+        var fn do_POST() {
+            self.send_response(200, "OK");
+            self.end_headers();
+        }
+
+        var fn do_HEAD() {
+            self.send_response(200, "OK");
+            self.end_headers();
+        }
 }
 
-class HTTPServer {
-    self(server_address: [any], RequestHandlerClass: any = none) {
-        self.server_address = server_address;
-        self.server_name = str(server_address[0]);
-        self.server_port = int(server_address[1]);
-        self.RequestHandlerClass = RequestHandlerClass;
-        self.running = false;
-        self.listener = none;
-    }
+pub struct HTTPServer : IObject {
+    pub:
+        server_address:      any[];
+        server_name:         str;
+        server_port:         i64;
+        RequestHandlerClass: any;
+        running:             bool;
+        listener:            any;
 
-    def server_bind() {
-        self.listener = __net_tcp_listen(self.server_name, self.server_port);
-    }
+        self(server_address: any[], RequestHandlerClass: any = none) {
+            .server_address = server_address;
+            .server_name = str(server_address[0]);
+            .server_port = _parse_i64_or(server_address[1], 80);
+            .RequestHandlerClass = RequestHandlerClass;
+            .running = false;
+            .listener = none;
+        }
 
-    def server_activate() {
-        self.running = true;
-    }
+        ~self() {
+            .server_close();
+        }
 
-    def serve_forever() {
-        self.server_bind();
-        self.server_activate();
-    }
+        var fn server_bind() {
+            self.listener = __net_tcp_listen(self.server_name, self.server_port);
+        }
 
-    def server_close() {
-        self.running = false;
-        self.listener = none;
-    }
+        var fn server_activate() {
+            self.running = true;
+        }
+
+        var fn serve_forever() {
+            self.server_bind();
+            self.server_activate();
+        }
+
+        var fn server_close() {
+            self.running = false;
+            self.listener = none;
+        }
 }

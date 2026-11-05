@@ -3,43 +3,74 @@
 // Modeled after Python's `urllib` package (CPython Lib/urllib/parse.py, request.py, error.py, response.py)
 // Compatible with Linux, Windows, macOS, Android, iOS, and WebAssembly targets.
 
+pub pkg Pilot.Urllib;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+
 // ============================================================================
 // 1. Errors & Exceptions (Python: urllib.error)
 // ============================================================================
 
 // Native runtime optimizations provided by pilot_rt (C-ABI FFI)
 extern "c" lib "pilot_rt" {
-    def __net_http_get(url: str) -> any;
-    def __net_http_post(url: str, body: str, content_type: str) -> any;
-    def __fs_write_text(path: str, content: str) -> any;
+    fn __net_http_get(url: str) -> any;
+    fn __net_http_post(url: str, body: str, content_type: str) -> any;
+    fn __fs_write_text(path: str, content: str) -> any;
 }
 
-class URLError {
-    self(reason: str) {
-        self.reason = reason;
-        self.args = [reason];
+fn _parse_i64_or(val: any, fallback: i64) -> i64 {
+    let opt = __parse_int_strict(str(val), 10);
+    if __opt_is_some(opt) {
+        return __opt_unwrap(opt);
     }
-
-    def to_str() -> str {
-        return f"<URLError: {self.reason}>";
-    }
+    return fallback;
 }
 
-class HTTPError {
-    self(url: str, code: i64, msg: str, hdrs: map, fp: any) {
-        self.url = url;
-        self.code = code;
-        self.msg = msg;
-        self.reason = msg;
-        self.hdrs = hdrs;
-        self.headers = hdrs;
-        self.fp = fp;
-        self.args = [code, msg];
-    }
+pub struct URLError : IValue {
+    pub:
+        reason: str;
+        args:   str[];
 
-    def to_str() -> str {
-        return f"<HTTPError {self.code}: {self.msg}>";
-    }
+        self(reason: str) {
+            .reason = reason;
+            .args = [reason];
+        }
+
+        fn to_str() -> str {
+            return f"<URLError: {self.reason}>";
+        }
+}
+
+pub struct HTTPError : IValue {
+    pub:
+        url:     str;
+        code:    i64;
+        msg:     str;
+        reason:  str;
+        hdrs:    map;
+        headers: map;
+        fp:      any;
+        args:    any[];
+
+        self(url: str, code: i64, msg: str, hdrs: map, fp: any) {
+            .url = url;
+            .code = code;
+            .msg = msg;
+            .reason = msg;
+            .hdrs = hdrs;
+            .headers = hdrs;
+            .fp = fp;
+            .args = [code, msg];
+        }
+
+        fn to_str() -> str {
+            return f"<HTTPError {self.code}: {self.msg}>";
+        }
 }
 
 // ============================================================================
@@ -48,49 +79,54 @@ class HTTPError {
 
 const _HEX_CHARS: str = "0123456789ABCDEF";
 
-def _hex_to_int(ch: str) -> i64 {
+fn _hex_to_int(ch: str) -> i64 {
     let c = ch.char_code_at(0);
     // 0-9
-    if c >= 48 and c <= 57 {
+    if c >= 48 && c <= 57 {
         return c - 48;
     }
     // a-f
-    if c >= 97 and c <= 102 {
+    if c >= 97 && c <= 102 {
         return c - 97 + 10;
     }
     // A-F
-    if c >= 65 and c <= 70 {
+    if c >= 65 && c <= 70 {
         return c - 65 + 10;
     }
     return -1;
 }
 
-def _int_to_hex(b: i64) -> str {
+fn _int_to_hex(b: i64) -> str {
     let hi = (b >> 4) & 15;
     let lo = b & 15;
     return _HEX_CHARS[hi..(hi + 1)] + _HEX_CHARS[lo..(lo + 1)];
 }
 
-def _is_unreserved(b: i64) -> bool {
+fn _is_unreserved(b: i64) -> bool {
     // A-Z
-    if b >= 65 and b <= 90 { return true; }
+    if b >= 65 && b <= 90 { return true; }
     // a-z
-    if b >= 97 and b <= 122 { return true; }
+    if b >= 97 && b <= 122 { return true; }
     // 0-9
-    if b >= 48 and b <= 57 { return true; }
+    if b >= 48 && b <= 57 { return true; }
     // - _ . ~
-    if b == 45 or b == 95 or b == 46 or b == 126 { return true; }
+    if b == 45 || b == 95 || b == 46 || b == 126 { return true; }
     return false;
 }
 
 /// Quotes characters in a string according to RFC 3986 percent-encoding.
-def quote(text: str, safe: str = "/") -> str {
+pub fn quote(text: str, safe: str = "/") -> str {
+    return url_quote(text, safe);
+}
+
+/// Quotes characters in a string according to RFC 3986 percent-encoding (alias avoiding `quote` keyword ambiguity).
+pub fn url_quote(text: str, safe: str = "/") -> str {
     var out: str = "";
     let n = len(text);
     for i in 0..<n {
         let ch = text[i..(i + 1)];
         let b = ch.char_code_at(0);
-        if _is_unreserved(b) or safe.contains(ch) {
+        if _is_unreserved(b) || safe.contains(ch) {
             out = out + ch;
         } else {
             out = out + "%" + _int_to_hex(b);
@@ -100,7 +136,7 @@ def quote(text: str, safe: str = "/") -> str {
 }
 
 /// Quotes characters in a string, turning spaces into '+' (Python: quote_plus).
-def quote_plus(text: str, safe: str = "") -> str {
+pub fn quote_plus(text: str, safe: str = "") -> str {
     var out: str = "";
     let n = len(text);
     for i in 0..<n {
@@ -109,7 +145,7 @@ def quote_plus(text: str, safe: str = "") -> str {
             out = out + "+";
         } else {
             let b = ch.char_code_at(0);
-            if _is_unreserved(b) or safe.contains(ch) {
+            if _is_unreserved(b) || safe.contains(ch) {
                 out = out + ch;
             } else {
                 out = out + "%" + _int_to_hex(b);
@@ -120,16 +156,16 @@ def quote_plus(text: str, safe: str = "") -> str {
 }
 
 /// Unquotes percent-encoded characters in a string (Python: unquote).
-def unquote(text: str) -> str {
+pub fn unquote(text: str) -> str {
     var out: str = "";
     let n = len(text);
     var i: i64 = 0;
     while i < n {
         let ch = text[i..(i + 1)];
-        if ch == "%" and i + 2 < n {
+        if ch == "%" && i + 2 < n {
             let h1 = _hex_to_int(text[(i + 1)..(i + 2)]);
             let h2 = _hex_to_int(text[(i + 2)..(i + 3)]);
-            if h1 >= 0 and h2 >= 0 {
+            if h1 >= 0 && h2 >= 0 {
                 let code = (h1 << 4) | h2;
                 out = out + __char_from_code(code);
                 i = i + 3;
@@ -143,7 +179,7 @@ def unquote(text: str) -> str {
 }
 
 /// Unquotes percent-encoded characters in a string, replacing '+' with space (Python: unquote_plus).
-def unquote_plus(text: str) -> str {
+pub fn unquote_plus(text: str) -> str {
     var unplussed: str = "";
     let n = len(text);
     for i in 0..<n {
@@ -158,14 +194,14 @@ def unquote_plus(text: str) -> str {
 }
 
 /// URL encodes a map or list of pairs into a query string (Python: urllib.parse.urlencode).
-def urlencode(query: any, doseq: bool = false) -> str {
+pub fn urlencode(query: any, doseq: bool = false) -> str {
     var out: str = "";
     var first: bool = true;
 
     if type_of(query) == "map" {
         for k in query.keys() {
             let v = query[k];
-            if doseq and type_of(v) == "list" {
+            if doseq && type_of(v) == "list" {
                 for item in v {
                     if !first { out = out + "&"; }
                     out = out + quote_plus(str(k)) + "=" + quote_plus(str(item));
@@ -177,11 +213,11 @@ def urlencode(query: any, doseq: bool = false) -> str {
                 first = false;
             }
         }
-    } elif type_of(query) == "list" {
+    } else if type_of(query) == "list" {
         for pair in query {
             let k = pair[0];
             let v = pair[1];
-            if doseq and type_of(v) == "list" {
+            if doseq && type_of(v) == "list" {
                 for item in v {
                     if !first { out = out + "&"; }
                     out = out + quote_plus(str(k)) + "=" + quote_plus(str(item));
@@ -198,16 +234,16 @@ def urlencode(query: any, doseq: bool = false) -> str {
 }
 
 /// Parses a query string into a map where values are lists of strings (Python: parse_qs).
-def parse_qs(qs: str, keep_blank_values: bool = false) -> map {
+pub fn parse_qs(qs: str, keep_blank_values: bool = false) -> map {
     var out = {};
     var clean: str = qs;
-    if len(clean) > 0 and clean[0..1] == "?" {
+    if len(clean) > 0 && clean[0..1] == "?" {
         clean = clean[1..len(clean)];
     }
     if len(clean) == 0 {
         return out;
     }
-    let pairs: [str] = clean.split("&");
+    let pairs: str[] = clean.split("&");
     for pair in pairs {
         if len(pair) == 0 { continue; }
         let eq_idx: i64 = pair.index_of("=");
@@ -234,16 +270,16 @@ def parse_qs(qs: str, keep_blank_values: bool = false) -> map {
 }
 
 /// Parses a query string into a list of [key, value] pairs (Python: parse_qsl).
-def parse_qsl(qs: str, keep_blank_values: bool = false) -> [[str]] {
+pub fn parse_qsl(qs: str, keep_blank_values: bool = false) -> str[][] {
     var out = [];
     var clean: str = qs;
-    if len(clean) > 0 and clean[0..1] == "?" {
+    if len(clean) > 0 && clean[0..1] == "?" {
         clean = clean[1..len(clean)];
     }
     if len(clean) == 0 {
         return out;
     }
-    let pairs: [str] = clean.split("&");
+    let pairs: str[] = clean.split("&");
     for pair in pairs {
         if len(pair) == 0 { continue; }
         let eq_idx: i64 = pair.index_of("=");
@@ -264,128 +300,143 @@ def parse_qsl(qs: str, keep_blank_values: bool = false) -> [[str]] {
     return out;
 }
 
-class ParseResult {
-    self(scheme: str, netloc: str, path: str, params: str, query: str, fragment: str) {
-        self.scheme = scheme;
-        self.netloc = netloc;
-        self.path = path;
-        self.params = params;
-        self.query = query;
-        self.fragment = fragment;
-    }
+pub struct ParseResult : IValue {
+    pub:
+        scheme:   str;
+        netloc:   str;
+        path:     str;
+        params:   str;
+        query:    str;
+        fragment: str;
 
-    def hostname() -> str {
-        var h = self.netloc;
-        if h.contains("@") {
-            let at_idx = h.index_of("@");
-            h = h[(at_idx + 1)..len(h)];
+        self(scheme: str, netloc: str, path: str, params: str, query: str, fragment: str) {
+            .scheme = scheme;
+            .netloc = netloc;
+            .path = path;
+            .params = params;
+            .query = query;
+            .fragment = fragment;
         }
-        if h.contains(":") {
-            let c_idx = h.index_of(":");
-            h = h[0..c_idx];
-        }
-        return h;
-    }
 
-    def port() -> i64 {
-        var h = self.netloc;
-        if h.contains("@") {
-            let at_idx = h.index_of("@");
-            h = h[(at_idx + 1)..len(h)];
-        }
-        if h.contains(":") {
-            let c_idx = h.index_of(":");
-            let p_str = h[(c_idx + 1)..len(h)];
-            return int(p_str);
-        }
-        if self.scheme == "https" { return 443; }
-        if self.scheme == "http" { return 80; }
-        return 0;
-    }
-
-    def username() -> str {
-        if self.netloc.contains("@") {
-            let at_idx = self.netloc.index_of("@");
-            let userinfo = self.netloc[0..at_idx];
-            if userinfo.contains(":") {
-                let c_idx = userinfo.index_of(":");
-                return userinfo[0..c_idx];
+        fn hostname() -> str {
+            var h = self.netloc;
+            if h.contains("@") {
+                let at_idx = h.index_of("@");
+                h = h[(at_idx + 1)..len(h)];
             }
-            return userinfo;
-        }
-        return "";
-    }
-
-    def password() -> str {
-        if self.netloc.contains("@") {
-            let at_idx = self.netloc.index_of("@");
-            let userinfo = self.netloc[0..at_idx];
-            if userinfo.contains(":") {
-                let c_idx = userinfo.index_of(":");
-                return userinfo[(c_idx + 1)..len(userinfo)];
+            if h.contains(":") {
+                let c_idx = h.index_of(":");
+                h = h[0..c_idx];
             }
+            return h;
         }
-        return "";
-    }
 
-    def geturl() -> str {
-        return urlunparse(self);
-    }
+        fn port() -> i64 {
+            var h = self.netloc;
+            if h.contains("@") {
+                let at_idx = h.index_of("@");
+                h = h[(at_idx + 1)..len(h)];
+            }
+            if h.contains(":") {
+                let c_idx = h.index_of(":");
+                let p_str = h[(c_idx + 1)..len(h)];
+                return _parse_i64_or(p_str, 0);
+            }
+            if self.scheme == "https" { return 443; }
+            if self.scheme == "http" { return 80; }
+            return 0;
+        }
 
-    def to_str() -> str {
-        return f"ParseResult(scheme='{self.scheme}', netloc='{self.netloc}', path='{self.path}', params='{self.params}', query='{self.query}', fragment='{self.fragment}')";
-    }
+        fn username() -> str {
+            if self.netloc.contains("@") {
+                let at_idx = self.netloc.index_of("@");
+                let userinfo = self.netloc[0..at_idx];
+                if userinfo.contains(":") {
+                    let c_idx = userinfo.index_of(":");
+                    return userinfo[0..c_idx];
+                }
+                return userinfo;
+            }
+            return "";
+        }
+
+        fn password() -> str {
+            if self.netloc.contains("@") {
+                let at_idx = self.netloc.index_of("@");
+                let userinfo = self.netloc[0..at_idx];
+                if userinfo.contains(":") {
+                    let c_idx = userinfo.index_of(":");
+                    return userinfo[(c_idx + 1)..len(userinfo)];
+                }
+            }
+            return "";
+        }
+
+        fn geturl() -> str {
+            return urlunparse(self);
+        }
+
+        fn to_str() -> str {
+            return f"ParseResult(scheme='{self.scheme}', netloc='{self.netloc}', path='{self.path}', params='{self.params}', query='{self.query}', fragment='{self.fragment}')";
+        }
 }
 
-class SplitResult {
-    self(scheme: str, netloc: str, path: str, query: str, fragment: str) {
-        self.scheme = scheme;
-        self.netloc = netloc;
-        self.path = path;
-        self.query = query;
-        self.fragment = fragment;
-    }
+pub struct SplitResult : IValue {
+    pub:
+        scheme:   str;
+        netloc:   str;
+        path:     str;
+        query:    str;
+        fragment: str;
 
-    def hostname() -> str {
-        var h = self.netloc;
-        if h.contains("@") {
-            let at_idx = h.index_of("@");
-            h = h[(at_idx + 1)..len(h)];
+        self(scheme: str, netloc: str, path: str, query: str, fragment: str) {
+            .scheme = scheme;
+            .netloc = netloc;
+            .path = path;
+            .query = query;
+            .fragment = fragment;
         }
-        if h.contains(":") {
-            let c_idx = h.index_of(":");
-            h = h[0..c_idx];
-        }
-        return h;
-    }
 
-    def port() -> i64 {
-        var h = self.netloc;
-        if h.contains("@") {
-            let at_idx = h.index_of("@");
-            h = h[(at_idx + 1)..len(h)];
+        fn hostname() -> str {
+            var h = self.netloc;
+            if h.contains("@") {
+                let at_idx = h.index_of("@");
+                h = h[(at_idx + 1)..len(h)];
+            }
+            if h.contains(":") {
+                let c_idx = h.index_of(":");
+                h = h[0..c_idx];
+            }
+            return h;
         }
-        if h.contains(":") {
-            let c_idx = h.index_of(":");
-            let p_str = h[(c_idx + 1)..len(h)];
-            return int(p_str);
+
+        fn port() -> i64 {
+            var h = self.netloc;
+            if h.contains("@") {
+                let at_idx = h.index_of("@");
+                h = h[(at_idx + 1)..len(h)];
+            }
+            if h.contains(":") {
+                let c_idx = h.index_of(":");
+                let p_str = h[(c_idx + 1)..len(h)];
+                return _parse_i64_or(p_str, 0);
+            }
+            if self.scheme == "https" { return 443; }
+            if self.scheme == "http" { return 80; }
+            return 0;
         }
-        if self.scheme == "https" { return 443; }
-        if self.scheme == "http" { return 80; }
-        return 0;
-    }
 
-    def geturl() -> str {
-        return urlunsplit(self);
-    }
+        fn geturl() -> str {
+            return urlunsplit(self);
+        }
 
-    def to_str() -> str {
-        return f"SplitResult(scheme='{self.scheme}', netloc='{self.netloc}', path='{self.path}', query='{self.query}', fragment='{self.fragment}')";
-    }
+        fn to_str() -> str {
+            return f"SplitResult(scheme='{self.scheme}', netloc='{self.netloc}', path='{self.path}', query='{self.query}', fragment='{self.fragment}')";
+        }
 }
 
 /// Parses a URL into 6 components: (scheme, netloc, path, params, query, fragment).
-def urlparse(urlstring: str, default_scheme: str = "", allow_fragments: bool = true) -> ParseResult {
+pub fn urlparse(urlstring: str, default_scheme: str = "", allow_fragments: bool = true) -> ParseResult {
     var rem: str = urlstring;
     var scheme: str = default_scheme;
     var netloc: str = "";
@@ -406,21 +457,21 @@ def urlparse(urlstring: str, default_scheme: str = "", allow_fragments: bool = t
     // Scheme
     let colon_idx: i64 = rem.index_of(":");
     let slash_idx: i64 = rem.index_of("/");
-    if colon_idx >= 0 and (slash_idx < 0 or colon_idx < slash_idx) {
+    if colon_idx >= 0 && (slash_idx < 0 || colon_idx < slash_idx) {
         scheme = rem[0..colon_idx];
         rem = rem[(colon_idx + 1)..len(rem)];
     }
 
     // Netloc
-    if len(rem) >= 2 and rem[0..2] == "//" {
+    if len(rem) >= 2 && rem[0..2] == "//" {
         rem = rem[2..len(rem)];
         let next_slash = rem.index_of("/");
         let next_q = rem.index_of("?");
         var end_netloc = len(rem);
-        if next_slash >= 0 and next_slash < end_netloc {
+        if next_slash >= 0 && next_slash < end_netloc {
             end_netloc = next_slash;
         }
-        if next_q >= 0 and next_q < end_netloc {
+        if next_q >= 0 && next_q < end_netloc {
             end_netloc = next_q;
         }
         netloc = rem[0..end_netloc];
@@ -447,12 +498,12 @@ def urlparse(urlstring: str, default_scheme: str = "", allow_fragments: bool = t
 }
 
 /// Assembles a 6-tuple/ParseResult back into a complete URL string.
-def urlunparse(parts: ParseResult) -> str {
+pub fn urlunparse(parts: ParseResult) -> str {
     var out: str = "";
     if len(parts.scheme) > 0 {
         out = out + parts.scheme + ":";
     }
-    if len(parts.netloc) > 0 or (len(parts.scheme) > 0 and (parts.scheme == "http" or parts.scheme == "https")) {
+    if len(parts.netloc) > 0 || (len(parts.scheme) > 0 && (parts.scheme == "http" || parts.scheme == "https")) {
         out = out + "//" + parts.netloc;
     }
     out = out + parts.path;
@@ -469,19 +520,19 @@ def urlunparse(parts: ParseResult) -> str {
 }
 
 /// Parses a URL into 5 components: (scheme, netloc, path, query, fragment).
-def urlsplit(urlstring: str, default_scheme: str = "", allow_fragments: bool = true) -> SplitResult {
+pub fn urlsplit(urlstring: str, default_scheme: str = "", allow_fragments: bool = true) -> SplitResult {
     let p = urlparse(urlstring, default_scheme, allow_fragments);
     let full_path = if len(p.params) > 0 { p.path + ";" + p.params } else { p.path };
     return SplitResult(p.scheme, p.netloc, full_path, p.query, p.fragment);
 }
 
 /// Assembles a SplitResult back into a complete URL string.
-def urlunsplit(parts: SplitResult) -> str {
+pub fn urlunsplit(parts: SplitResult) -> str {
     var out: str = "";
     if len(parts.scheme) > 0 {
         out = out + parts.scheme + ":";
     }
-    if len(parts.netloc) > 0 or (len(parts.scheme) > 0 and (parts.scheme == "http" or parts.scheme == "https")) {
+    if len(parts.netloc) > 0 || (len(parts.scheme) > 0 && (parts.scheme == "http" || parts.scheme == "https")) {
         out = out + "//" + parts.netloc;
     }
     out = out + parts.path;
@@ -495,7 +546,7 @@ def urlunsplit(parts: SplitResult) -> str {
 }
 
 /// Joins a base URL and a possibly relative URL according to RFC 3986.
-def urljoin(base: str, url: str, allow_fragments: bool = true) -> str {
+pub fn urljoin(base: str, url: str, allow_fragments: bool = true) -> str {
     if len(base) == 0 {
         return url;
     }
@@ -505,7 +556,7 @@ def urljoin(base: str, url: str, allow_fragments: bool = true) -> str {
     let b = urlparse(base, "", allow_fragments);
     let u = urlparse(url, "", allow_fragments);
 
-    if len(u.scheme) > 0 and u.scheme != b.scheme {
+    if len(u.scheme) > 0 && u.scheme != b.scheme {
         return url;
     }
     let scheme = if len(u.scheme) > 0 { u.scheme } else { b.scheme };
@@ -535,96 +586,113 @@ def urljoin(base: str, url: str, allow_fragments: bool = true) -> str {
 // 3. HTTP Request & Response (Python: urllib.request)
 // ============================================================================
 
-class Request {
-    self(
-        url: str,
-        data: any = none,
-        headers: map = {},
-        origin_req_host: str = "",
-        unverifiable: bool = false,
-        method: str = ""
-    ) {
-        self.url = url;
-        self.data = data;
-        self.headers = {};
-        for k in headers.keys() {
-            self.headers[k] = headers[k];
+pub struct Request : IValue {
+    pub:
+        url:             str;
+        data:            any;
+        headers:         map;
+        origin_req_host: str;
+        unverifiable:    bool;
+        _method:         str;
+
+        self(
+            url: str,
+            data: any = none,
+            headers: map = {},
+            origin_req_host: str = "",
+            unverifiable: bool = false,
+            method: str = ""
+        ) {
+            var copied_headers: map = {};
+            for k in headers.keys() {
+                copied_headers[k] = headers[k];
+            }
+            .url = url;
+            .data = data;
+            .headers = copied_headers;
+            .origin_req_host = origin_req_host;
+            .unverifiable = unverifiable;
+            ._method = method;
         }
-        self.origin_req_host = origin_req_host;
-        self.unverifiable = unverifiable;
-        self._method = method;
-    }
 
-    def add_header(key: str, val: str) {
-        self.headers[key] = val;
-    }
-
-    def get_header(key: str, default_val: str = "") -> str {
-        if self.headers.contains_key(key) {
-            return str(self.headers[key]);
+        var fn add_header(key: str, val: str) {
+            self.headers[key] = val;
         }
-        return default_val;
-    }
 
-    def has_header(key: str) -> bool {
-        return self.headers.contains_key(key);
-    }
-
-    def get_full_url() -> str {
-        return self.url;
-    }
-
-    def get_method() -> str {
-        if len(self._method) > 0 {
-            return self._method;
+        fn get_header(key: str, default_val: str = "") -> str {
+            if self.headers.contains_key(key) {
+                return str(self.headers[key]);
+            }
+            return default_val;
         }
-        if self.data != none {
-            return "POST";
+
+        fn has_header(key: str) -> bool {
+            return self.headers.contains_key(key);
         }
-        return "GET";
-    }
+
+        fn get_full_url() -> str {
+            return self.url;
+        }
+
+        fn get_method() -> str {
+            if len(self._method) > 0 {
+                return self._method;
+            }
+            if self.data != none {
+                return "POST";
+            }
+            return "GET";
+        }
 }
 
-class HTTPResponse {
-    self(url: str, status: i64, reason: str, headers: map, body: str) {
-        self.url = url;
-        self.status = status;
-        self.code = status;
-        self.reason = reason;
-        self.headers = headers;
-        self.body = body;
-    }
+pub struct HTTPResponse : IValue {
+    pub:
+        url:     str;
+        status:  i64;
+        code:    i64;
+        reason:  str;
+        headers: map;
+        body:    str;
 
-    def read() -> str {
-        return self.body;
-    }
-
-    def getcode() -> i64 {
-        return self.status;
-    }
-
-    def geturl() -> str {
-        return self.url;
-    }
-
-    def info() -> map {
-        return self.headers;
-    }
-
-    def get_header(name: str, default_val: str = "") -> str {
-        if self.headers.contains_key(name) {
-            return str(self.headers[name]);
+        self(url: str, status: i64, reason: str, headers: map, body: str) {
+            .url = url;
+            .status = status;
+            .code = status;
+            .reason = reason;
+            .headers = headers;
+            .body = body;
         }
-        return default_val;
-    }
 
-    def close() {
-        // No-op for synchronous read response
-    }
+        fn read() -> str {
+            return self.body;
+        }
+
+        fn getcode() -> i64 {
+            return self.status;
+        }
+
+        fn geturl() -> str {
+            return self.url;
+        }
+
+        fn info() -> map {
+            return self.headers;
+        }
+
+        fn get_header(name: str, default_val: str = "") -> str {
+            if self.headers.contains_key(name) {
+                return str(self.headers[name]);
+            }
+            return default_val;
+        }
+
+        fn close() {
+            // No-op for synchronous read response
+        }
 }
 
 /// Synchronously opens a URL or Request object (Python: urllib.request.urlopen).
-def urlopen(url: any, data: any = none, timeout: f64 = 30.0) -> HTTPResponse {
+pub fn urlopen(url: any, data: any = none, timeout: f64 = 30.0) -> HTTPResponse {
     var target_url: str = "";
     var method: str = "GET";
     var content_type: str = "application/x-www-form-urlencoded";
@@ -636,7 +704,7 @@ def urlopen(url: any, data: any = none, timeout: f64 = 30.0) -> HTTPResponse {
             method = "POST";
             body_str = str(data);
         }
-    } elif type_of(url) == "object" {
+    } else if type_of(url) == "object" {
         target_url = url.get_full_url();
         method = url.get_method();
         if url.has_header("Content-Type") {
@@ -662,7 +730,7 @@ def urlopen(url: any, data: any = none, timeout: f64 = 30.0) -> HTTPResponse {
     var body: str = "";
 
     if type_of(resp_map) == "map" {
-        if resp_map.contains_key("status") { status = int(resp_map["status"]); }
+        if resp_map.contains_key("status") { status = _parse_i64_or(resp_map["status"], 200); }
         if resp_map.contains_key("reason") { reason = str(resp_map["reason"]); }
         if resp_map.contains_key("headers") { r_headers = resp_map["headers"]; }
         if resp_map.contains_key("body") { body = str(resp_map["body"]); }
@@ -672,7 +740,7 @@ def urlopen(url: any, data: any = none, timeout: f64 = 30.0) -> HTTPResponse {
 }
 
 /// Retrieves a resource at `url` and saves it to a local file (Python: urllib.request.urlretrieve).
-def urlretrieve(url: str, filename: str = "") -> [any] {
+pub fn urlretrieve(url: str, filename: str = "") -> any[] {
     let resp = urlopen(url);
     var dest: str = filename;
     if len(dest) == 0 {

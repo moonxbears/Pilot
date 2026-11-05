@@ -2,29 +2,44 @@
 // std.encoding — Zero-Copy Byte/UTF-8 Codecs (`hex`, `base64`, `base64url`) & RFC-3986 `url` / Query Parsers
 // Standard library zero-copy byte codecs and RFC-3986 URL parsing.
 
+pub pkg Pilot.Encoding;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+
 // Native runtime optimizations provided by pilot_rt (C-ABI FFI)
 extern "c" lib "pilot_rt" {
-    def __utf8_encode_slice(text: str) -> any;
-    def __utf8_validate_slice(buf: any) -> i64;
-    def __utf8_decode_slice(buf: any) -> str;
-    def __slice_push(buf: any, byte_val: i64);
-    def __slice_byte_at(buf: any, idx: i64) -> i64;
+    fn __utf8_encode_slice(text: str) -> any;
+    fn __utf8_validate_slice(buf: any) -> i64;
+    fn __utf8_decode_slice(buf: any) -> str;
+    fn __slice_subview(buf: any, start: i64, length: i64) -> any;
+    fn __slice_push(buf: any, byte_val: i64);
+    fn __slice_byte_at(buf: any, idx: i64) -> i64;
 }
 
-type DecodeError = InvalidChar(ch: str, offset: i64)
-                 | InvalidLength(len_val: i64, msg: str)
-                 | InvalidPadding(offset: i64, msg: str)
-                 | InvalidUtf8(offset: i64, msg: str)
-                 | BadPercentEscape(seq: str, offset: i64);
+pub type DecodeError = InvalidChar(ch: str, offset: i64)
+                     | InvalidLength(len_val: i64, msg: str)
+                     | InvalidPadding(offset: i64, msg: str)
+                     | InvalidUtf8(offset: i64, msg: str)
+                     | BadPercentEscape(seq: str, offset: i64);
 
-def format_decode_error(err: DecodeError) -> str {
-    return match err {
-        case DecodeError.InvalidChar(ch, off) => f"InvalidChar('{ch}' at byte {off})",
-        case DecodeError.InvalidLength(n, msg) => f"InvalidLength({n}): {msg}",
-        case DecodeError.InvalidPadding(off, msg) => f"InvalidPadding(at {off}): {msg}",
-        case DecodeError.InvalidUtf8(off, msg) => f"InvalidUtf8(at {off}): {msg}",
-        case DecodeError.BadPercentEscape(seq, off) => f"BadPercentEscape('{seq}' at {off})"
-    };
+pub fn format_decode_error(err: DecodeError) -> str {
+    switch err {
+        case DecodeError.InvalidChar(ch, off):
+            return f"InvalidChar('{ch}' at byte {off})";
+        case DecodeError.InvalidLength(n, msg):
+            return f"InvalidLength({n}): {msg}";
+        case DecodeError.InvalidPadding(off, msg):
+            return f"InvalidPadding(at {off}): {msg}";
+        case DecodeError.InvalidUtf8(off, msg):
+            return f"InvalidUtf8(at {off}): {msg}";
+        case DecodeError.BadPercentEscape(seq, off):
+            return f"BadPercentEscape('{seq}' at {off})";
+    }
 }
 
 const _HEX_LOWER: str = "0123456789abcdef";
@@ -32,16 +47,16 @@ const _HEX_UPPER: str = "0123456789ABCDEF";
 const _B64_STD: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const _B64_URL: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
-def __to_utf8_bytes(data: any) -> any {
+fn __to_utf8_bytes(data: any) -> any {
     let kind: str = type_of(data);
     if kind == "slicebuffer" {
         return data;
     }
-    if kind == "list" or kind == "tuple" {
+    if kind == "list" || kind == "tuple" {
         let count: i64 = len(data);
         var buf = slice_buffer(count, "u8");
         for i in 0..<count {
-            __slice_push(buf, int(data[i]) & 255);
+            __slice_push(buf, (data[i] as i64) & 255);
         }
         return buf;
     }
@@ -51,7 +66,7 @@ def __to_utf8_bytes(data: any) -> any {
     return __utf8_encode_slice(str(data));
 }
 
-def __decode_utf8_strict(buf) -> str ! DecodeError {
+fn __decode_utf8_strict(buf: any) -> str ! DecodeError {
     let bad_idx: i64 = __utf8_validate_slice(buf);
     if bad_idx >= 0 {
         return fail(DecodeError.InvalidUtf8(bad_idx, "invalid UTF-8 byte sequence"));
@@ -59,9 +74,9 @@ def __decode_utf8_strict(buf) -> str ! DecodeError {
     return ok(__utf8_decode_slice(buf));
 }
 
-def __coerce_encoded_str(encoded) -> str ! DecodeError {
+fn __coerce_encoded_str(encoded: any) -> str ! DecodeError {
     let kind: str = type_of(encoded);
-    if kind == "string" {
+    if kind == "string" || kind == "str" {
         return ok(encoded);
     }
     if kind == "slicebuffer" {
@@ -75,27 +90,27 @@ def __coerce_encoded_str(encoded) -> str ! DecodeError {
     return ok(str(encoded));
 }
 
-def __hex_nibble(code: i64) -> i64 {
-    if code >= 48 and code <= 57 {
+fn __hex_nibble(code: i64) -> i64 {
+    if code >= 48 && code <= 57 {
         return code - 48;
     }
-    if code >= 97 and code <= 102 {
+    if code >= 97 && code <= 102 {
         return 10 + (code - 97);
     }
-    if code >= 65 and code <= 70 {
+    if code >= 65 && code <= 70 {
         return 10 + (code - 65);
     }
     return -1;
 }
 
-def __b64_sextet(code: i64, url_safe: bool) -> i64 {
-    if code >= 65 and code <= 90 {
+fn __b64_sextet(code: i64, url_safe: bool) -> i64 {
+    if code >= 65 && code <= 90 {
         return code - 65;
     }
-    if code >= 97 and code <= 122 {
+    if code >= 97 && code <= 122 {
         return 26 + (code - 97);
     }
-    if code >= 48 and code <= 57 {
+    if code >= 48 && code <= 57 {
         return 52 + (code - 48);
     }
     if url_safe {
@@ -116,19 +131,19 @@ def __b64_sextet(code: i64, url_safe: bool) -> i64 {
     return -1;
 }
 
-def __is_unreserved_rfc3986(b: i64) -> bool {
-    if (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or (b >= 48 and b <= 57) {
+fn __is_unreserved_rfc3986(b: i64) -> bool {
+    if (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) {
         return true;
     }
     // '-' (45), '.' (46), '_' (95), '~' (126)
-    return b == 45 or b == 46 or b == 95 or b == 126;
+    return b == 45 || b == 46 || b == 95 || b == 126;
 }
 
 // ============================================================================
 // 1. Hexadecimal Codec (RFC 4648 §8)
 // ============================================================================
 
-def hex_encode(data, upper: bool = false) -> str {
+pub fn hex_encode(data: any, upper: bool = false) -> str {
     let buf = __to_utf8_bytes(data);
     let n: i64 = len(buf);
     if n == 0 {
@@ -146,7 +161,7 @@ def hex_encode(data, upper: bool = false) -> str {
     return __utf8_decode_slice(out_bytes);
 }
 
-def hex_decode_bytes(encoded_in) -> SliceBuffer ! DecodeError {
+pub fn hex_decode_bytes(encoded_in: any) -> SliceBuffer<u8> ! DecodeError {
     let encoded: str = __coerce_encoded_str(encoded_in)?;
     let n: i64 = len(encoded);
     if (n % 2) != 0 {
@@ -171,7 +186,7 @@ def hex_decode_bytes(encoded_in) -> SliceBuffer ! DecodeError {
     return ok(out_buf);
 }
 
-def hex_decode(encoded) -> str ! DecodeError {
+pub fn hex_decode(encoded: any) -> str ! DecodeError {
     let buf = hex_decode_bytes(encoded)?;
     let decoded = __decode_utf8_strict(buf)?;
     return ok(decoded);
@@ -181,7 +196,7 @@ def hex_decode(encoded) -> str ! DecodeError {
 // 2. Base64 & Base64URL Codecs (RFC 4648 §4 & §5)
 // ============================================================================
 
-def __b64_encode_core(data, alphabet: str, pad: bool) -> str {
+fn __b64_encode_core(data: any, alphabet: str, pad: bool) -> str {
     let buf = __to_utf8_bytes(data);
     let n: i64 = len(buf);
     if n == 0 {
@@ -211,7 +226,7 @@ def __b64_encode_core(data, alphabet: str, pad: bool) -> str {
             __slice_push(out_bytes, 61);
             __slice_push(out_bytes, 61);
         }
-    } elif rem == 2 {
+    } else if rem == 2 {
         let b0: i64 = __slice_byte_at(buf, i);
         let b1: i64 = __slice_byte_at(buf, i + 1);
         let pair: i64 = (b0 << 8) | b1;
@@ -226,14 +241,14 @@ def __b64_encode_core(data, alphabet: str, pad: bool) -> str {
     return __utf8_decode_slice(out_bytes);
 }
 
-def __b64_decode_core(encoded: str, url_safe: bool) -> SliceBuffer ! DecodeError {
+fn __b64_decode_core(encoded: str, url_safe: bool) -> SliceBuffer<u8> ! DecodeError {
     // Collect non-CR/LF characters alongside original string offsets
     var codes = [];
     var offsets = [];
     let raw_len: i64 = len(encoded);
     for idx in 0..<raw_len {
         let c: i64 = encoded.char_code_at(idx);
-        if c == 10 or c == 13 {
+        if c == 10 || c == 13 {
             continue;
         }
         codes.append(c);
@@ -245,7 +260,7 @@ def __b64_decode_core(encoded: str, url_safe: bool) -> SliceBuffer ! DecodeError
         return ok(slice_buffer(0, "u8"));
     }
 
-    if !url_safe and (n % 4) != 0 {
+    if !url_safe && (n % 4) != 0 {
         return fail(DecodeError.InvalidLength(n, "standard base64 input length must be a multiple of 4"));
     }
     if (n % 4) == 1 {
@@ -259,7 +274,7 @@ def __b64_decode_core(encoded: str, url_safe: bool) -> SliceBuffer ! DecodeError
         offsets.append(raw_len);
         codes.append(61);
         offsets.append(raw_len);
-    } elif rem4 == 3 {
+    } else if rem4 == 3 {
         codes.append(61);
         offsets.append(raw_len);
     }
@@ -280,11 +295,11 @@ def __b64_decode_core(encoded: str, url_safe: bool) -> SliceBuffer ! DecodeError
         if c1 == 61 {
             return fail(DecodeError.InvalidPadding(offsets[q + 1], "unexpected '=' at second position of base64 quantum"));
         }
-        if !is_last and (c2 == 61 or c3 == 61) {
+        if !is_last && (c2 == 61 || c3 == 61) {
             let bad_off: i64 = if c2 == 61 { offsets[q + 2] } else { offsets[q + 3] };
             return fail(DecodeError.InvalidPadding(bad_off, "padding '=' only allowed in final base64 quantum"));
         }
-        if c2 == 61 and c3 != 61 {
+        if c2 == 61 && c3 != 61 {
             return fail(DecodeError.InvalidPadding(offsets[q + 2], "'=' must be followed by '=' in final base64 quantum"));
         }
 
@@ -305,7 +320,7 @@ def __b64_decode_core(encoded: str, url_safe: bool) -> SliceBuffer ! DecodeError
                 return fail(DecodeError.InvalidPadding(offsets[q + 1], "non-zero trailing pad bits in 2-char base64 quantum"));
             }
             __slice_push(out_buf, ((s0 << 2) | (s1 >> 4)) & 255);
-        } elif c3 == 61 {
+        } else if c3 == 61 {
             // 3 chars + "=" -> 2 bytes (RFC 4648 §3.5: low 2 bits of s2 must be 0)
             let s2: i64 = __b64_sextet(c2, url_safe);
             if s2 < 0 {
@@ -341,33 +356,33 @@ def __b64_decode_core(encoded: str, url_safe: bool) -> SliceBuffer ! DecodeError
     return ok(out_buf);
 }
 
-def base64_encode(data) -> str {
+pub fn base64_encode(data: any) -> str {
     return __b64_encode_core(data, _B64_STD, true);
 }
 
-def base64_decode_bytes(encoded_in) -> SliceBuffer ! DecodeError {
+pub fn base64_decode_bytes(encoded_in: any) -> SliceBuffer<u8> ! DecodeError {
     let encoded: str = __coerce_encoded_str(encoded_in)?;
     let out_buf = __b64_decode_core(encoded, false)?;
     return ok(out_buf);
 }
 
-def base64_decode(encoded) -> str ! DecodeError {
+pub fn base64_decode(encoded: any) -> str ! DecodeError {
     let buf = base64_decode_bytes(encoded)?;
     let decoded = __decode_utf8_strict(buf)?;
     return ok(decoded);
 }
 
-def base64url_encode(data, pad: bool = false) -> str {
+pub fn base64url_encode(data: any, pad: bool = false) -> str {
     return __b64_encode_core(data, _B64_URL, pad);
 }
 
-def base64url_decode_bytes(encoded_in) -> SliceBuffer ! DecodeError {
+pub fn base64url_decode_bytes(encoded_in: any) -> SliceBuffer<u8> ! DecodeError {
     let encoded: str = __coerce_encoded_str(encoded_in)?;
     let out_buf = __b64_decode_core(encoded, true)?;
     return ok(out_buf);
 }
 
-def base64url_decode(encoded) -> str ! DecodeError {
+pub fn base64url_decode(encoded: any) -> str ! DecodeError {
     let buf = base64url_decode_bytes(encoded)?;
     let decoded = __decode_utf8_strict(buf)?;
     return ok(decoded);
@@ -377,7 +392,7 @@ def base64url_decode(encoded) -> str ! DecodeError {
 // 3. RFC 3986 Percent-Encoding, Query Strings & Structured `Url`
 // ============================================================================
 
-def url_encode(text: str, space_as_plus: bool = false) -> str {
+pub fn url_encode(text: str, space_as_plus: bool = false) -> str {
     let buf = __utf8_encode_slice(text);
     let n: i64 = len(buf);
     if n == 0 {
@@ -388,7 +403,7 @@ def url_encode(text: str, space_as_plus: bool = false) -> str {
         let b: i64 = __slice_byte_at(buf, i);
         if __is_unreserved_rfc3986(b) {
             __slice_push(out_bytes, b);
-        } elif b == 32 and space_as_plus {
+        } else if b == 32 && space_as_plus {
             __slice_push(out_bytes, 43);
         } else {
             __slice_push(out_bytes, 37);
@@ -399,25 +414,27 @@ def url_encode(text: str, space_as_plus: bool = false) -> str {
     return __utf8_decode_slice(out_bytes);
 }
 
-def url_decode_bytes(encoded_in, plus_as_space: bool = false) -> SliceBuffer ! DecodeError {
+pub fn url_decode_bytes(encoded_in: any, plus_as_space: bool = false) -> SliceBuffer<u8> ! DecodeError {
     let src_bytes = __to_utf8_bytes(encoded_in);
     let n: i64 = len(src_bytes);
     var out_buf = slice_buffer(n, "u8");
     var i: i64 = 0;
     while i < n {
         let b: i64 = __slice_byte_at(src_bytes, i);
-        if b == 43 and plus_as_space {
+        if b == 43 && plus_as_space {
             __slice_push(out_buf, 32);
             i = i + 1;
-        } elif b == 37 {
+        } else if b == 37 {
             if (i + 2) >= n {
-                let rem_seq = __utf8_decode_slice(src_bytes, i, n - i);
+                let rem_view = __slice_subview(src_bytes, i, n - i);
+                let rem_seq = __utf8_decode_slice(rem_view);
                 return fail(DecodeError.BadPercentEscape(rem_seq, i));
             }
             let hi: i64 = __hex_nibble(__slice_byte_at(src_bytes, i + 1));
             let lo: i64 = __hex_nibble(__slice_byte_at(src_bytes, i + 2));
-            if hi < 0 or lo < 0 {
-                let bad_seq = __utf8_decode_slice(src_bytes, i, 3);
+            if hi < 0 || lo < 0 {
+                let bad_view = __slice_subview(src_bytes, i, 3);
+                let bad_seq = __utf8_decode_slice(bad_view);
                 return fail(DecodeError.BadPercentEscape(bad_seq, i));
             }
             __slice_push(out_buf, (hi << 4) | lo);
@@ -430,14 +447,14 @@ def url_decode_bytes(encoded_in, plus_as_space: bool = false) -> SliceBuffer ! D
     return ok(out_buf);
 }
 
-def url_decode(encoded, plus_as_space: bool = false) -> str ! DecodeError {
+pub fn url_decode(encoded: any, plus_as_space: bool = false) -> str ! DecodeError {
     let buf = url_decode_bytes(encoded, plus_as_space)?;
     let decoded = __decode_utf8_strict(buf)?;
     return ok(decoded);
 }
 
-def query_encode(params) -> str {
-    let entries = if type_of(params) == "map" or type_of(params) == "object" {
+pub fn query_encode(params: any) -> str {
+    let entries = if type_of(params) == "map" || type_of(params) == "object" {
         __map_entries_sorted(params)
     } else {
         params
@@ -456,16 +473,16 @@ def query_encode(params) -> str {
     return out;
 }
 
-def query_parse(query_str: str) -> map ! DecodeError {
+pub fn query_parse(query_str: str) -> map ! DecodeError {
     var clean: str = query_str;
-    if len(clean) > 0 and clean[0..1] == "?" {
+    if len(clean) > 0 && clean[0..1] == "?" {
         clean = clean[1..len(clean)];
     }
     var out = {};
     if len(clean) == 0 {
         return ok(out);
     }
-    let parts: [str] = clean.split("&");
+    let parts: str[] = clean.split("&");
     for part in parts {
         if len(part) == 0 {
             continue;
@@ -485,16 +502,16 @@ def query_parse(query_str: str) -> map ! DecodeError {
     return ok(out);
 }
 
-def query_parse_multi(query_str: str) -> map ! DecodeError {
+pub fn query_parse_multi(query_str: str) -> map ! DecodeError {
     var clean: str = query_str;
-    if len(clean) > 0 and clean[0..1] == "?" {
+    if len(clean) > 0 && clean[0..1] == "?" {
         clean = clean[1..len(clean)];
     }
     var out = {};
     if len(clean) == 0 {
         return ok(out);
     }
-    let parts: [str] = clean.split("&");
+    let parts: str[] = clean.split("&");
     for part in parts {
         if len(part) == 0 {
             continue;
@@ -517,85 +534,94 @@ def query_parse_multi(query_str: str) -> map ! DecodeError {
     return ok(out);
 }
 
-class Url {
-    self(
-        scheme: str,
-        userinfo: str,
-        host: str,
-        port_opt,
-        path: str,
-        query: str,
-        fragment: str
-    ) {
-        self.scheme = scheme;
-        self.userinfo = userinfo;
-        self.host = host;
-        self.port = port_opt;
-        self.path = path;
-        self.query = query;
-        self.fragment = fragment;
-    }
+pub struct Url : IValue {
+    pub:
+        scheme:   str;
+        userinfo: str;
+        host:     str;
+        port:     any;
+        path:     str;
+        query:    str;
+        fragment: str;
 
-    def has_port(self) -> bool {
-        return __opt_is_some(self.port);
-    }
-
-    def port_or(self, default_port: i64) -> i64 {
-        if __opt_is_some(self.port) {
-            return __opt_unwrap(self.port);
+        self(
+            scheme: str,
+            userinfo: str,
+            host: str,
+            port_opt: any,
+            path: str,
+            query: str,
+            fragment: str
+        ) {
+            self.scheme = scheme;
+            self.userinfo = userinfo;
+            self.host = host;
+            self.port = port_opt;
+            self.path = path;
+            self.query = query;
+            self.fragment = fragment;
         }
-        return default_port;
-    }
 
-    def origin(self) -> str {
-        if len(self.scheme) == 0 or len(self.host) == 0 {
-            return "";
+        fn has_port() -> bool {
+            return __opt_is_some(self.port);
         }
-        var res: str = self.scheme + "://" + self.host;
-        if __opt_is_some(self.port) {
-            res = res + ":" + str(__opt_unwrap(self.port));
+
+        fn port_or(default_port: i64) -> i64 {
+            if __opt_is_some(self.port) {
+                return __opt_unwrap(self.port);
+            }
+            return default_port;
         }
-        return res;
-    }
 
-    def query_params(self) -> map ! DecodeError {
-        return query_parse(self.query);
-    }
-
-    def with_query(self, params) {
-        let q_str = if type_of(params) == "string" { params } else { query_encode(params) };
-        return Url(self.scheme, self.userinfo, self.host, self.port, self.path, q_str, self.fragment);
-    }
-
-    def to_str(self) -> str {
-        var out: str = "";
-        if len(self.scheme) > 0 {
-            out = out + self.scheme + ":";
+        fn origin() -> str {
+            if len(self.scheme) == 0 || len(self.host) == 0 {
+                return "";
+            }
+            var res: str = self.scheme + "://" + self.host;
+            if __opt_is_some(self.port) {
+                res = res + ":" + str(__opt_unwrap(self.port));
+            }
+            return res;
         }
-        if len(self.host) > 0 or len(self.scheme) > 0 {
-            if len(self.host) > 0 {
-                out = out + "//";
-                if len(self.userinfo) > 0 {
-                    out = out + self.userinfo + "@";
-                }
-                out = out + self.host;
-                if __opt_is_some(self.port) {
-                    out = out + ":" + str(__opt_unwrap(self.port));
+
+        fn query_params() -> map ! DecodeError {
+            return query_parse(self.query);
+        }
+
+        fn with_query(params: any) -> Url {
+            let q_str = if type_of(params) == "string" || type_of(params) == "str" { params } else { query_encode(params) };
+            return Url(self.scheme, self.userinfo, self.host, self.port, self.path, q_str, self.fragment);
+        }
+
+        fn to_str() -> str {
+            var out: str = "";
+            if len(self.scheme) > 0 {
+                out = out + self.scheme + ":";
+            }
+            if len(self.host) > 0 || len(self.scheme) > 0 {
+                if len(self.host) > 0 {
+                    out = out + "//";
+                    if len(self.userinfo) > 0 {
+                        out = out + self.userinfo + "@";
+                    }
+                    out = out + self.host;
+                    if __opt_is_some(self.port) {
+                        out = out + ":" + str(__opt_unwrap(self.port));
+                    }
                 }
             }
+            out = out + self.path;
+            if len(self.query) > 0 {
+                out = out + "?" + self.query;
+            }
+            if len(self.fragment) > 0 {
+                out = out + "#" + self.fragment;
+            }
+            return out;
         }
-        out = out + self.path;
-        if len(self.query) > 0 {
-            out = out + "?" + self.query;
-        }
-        if len(self.fragment) > 0 {
-            out = out + "#" + self.fragment;
-        }
-        return out;
-    }
 }
 
-def parse_url(raw_url: str) -> Url ! DecodeError {
+pub fn parse_url(raw_url: str) -> Url ! DecodeError {
     if len(raw_url) == 0 {
         return fail(DecodeError.InvalidLength(0, "empty URL"));
     }
@@ -606,7 +632,7 @@ def parse_url(raw_url: str) -> Url ! DecodeError {
     var scheme: str = "";
     var userinfo: str = "";
     var host: str = "";
-    var port_opt = none;
+    var port_opt: any = none;
     var path_part: str = "";
 
     // 1. Extract `#fragment`
@@ -647,7 +673,7 @@ def parse_url(raw_url: str) -> Url ! DecodeError {
         }
 
         // IPv6 `[::1]:port` vs regular `host:port`
-        if len(host_port) > 0 and host_port[0..1] == "[" {
+        if len(host_port) > 0 && host_port[0..1] == "[" {
             let close_br: i64 = host_port.index_of("]");
             if close_br < 0 {
                 return fail(DecodeError.InvalidChar("[", s_sep + 3));
@@ -663,7 +689,7 @@ def parse_url(raw_url: str) -> Url ! DecodeError {
                     return fail(DecodeError.InvalidChar(p_raw, close_br + 2));
                 }
                 let p_val: i64 = __opt_unwrap(p_parsed);
-                if p_val < 0 or p_val > 65535 {
+                if p_val < 0 || p_val > 65535 {
                     return fail(DecodeError.InvalidLength(p_val, "URL port must be in 0..65535"));
                 }
                 port_opt = some(p_val);
@@ -678,7 +704,7 @@ def parse_url(raw_url: str) -> Url ! DecodeError {
                     return fail(DecodeError.InvalidChar(p_raw, colon_idx + 1));
                 }
                 let p_val: i64 = __opt_unwrap(p_parsed);
-                if p_val < 0 or p_val > 65535 {
+                if p_val < 0 || p_val > 65535 {
                     return fail(DecodeError.InvalidLength(p_val, "URL port must be in 0..65535"));
                 }
                 port_opt = some(p_val);

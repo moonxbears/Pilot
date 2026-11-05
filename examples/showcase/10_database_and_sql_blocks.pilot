@@ -1,12 +1,12 @@
-# ==============================================================================
-# Concept 10: Relational & In-Memory Database Set Operations & Polyglot SQL
-# ==============================================================================
+// ==============================================================================
+// Concept 10: Relational & In-Memory Database Set Operations & Polyglot SQL
+// ==============================================================================
 
 println("==================================================");
 println(" PILOT SHOWCASE: Database Operations & SQL Blocks");
 println("==================================================");
 
-# 1. Inline PostgreSQL Query Block Execution
+// 1. Inline PostgreSQL Query Block Execution
 println("\n--- 1. Native PostgreSQL Inline Block ---");
 
 println("Executing inline postgresql { ... } block directly in Pilot:");
@@ -14,48 +14,46 @@ let psql_records = postgresql {
     select id, name, count(*)
     from system_metrics tb
     where tb.id in (1, 2, 3, 4, 5);
-}
+};
 
-println("Returned " + psql_records.length + " record rows from PostgreSQL engine.");
+println(f"Returned {len(psql_records)} record rows from PostgreSQL engine.");
 println("Iterating over returned row objects and accessing fields:");
 
 for row in psql_records {
-    println("  Row #" + row.id + ": name='" + row.name + "'");
+    println(f"  Row #{row.id}: name='{row.name}'");
 }
 
-
-# 2. Inline MySQL Query Block Execution
+// 2. Inline MySQL Query Block Execution
 println("\n--- 2. Native MySQL Inline Block ---");
 
 let mysql_results = mysql {
     select user_id, email, status
     from accounts
     where active = 1;
-}
+};
 
-println("Returned " + mysql_results.length + " rows from MySQL engine.");
+println(f"Returned {len(mysql_results)} rows from MySQL engine.");
 for account in mysql_results {
-    println("  Account: id=" + account.id + ", name=" + account.name);
+    println(f"  Account: id={account.id}, name={account.name}");
 }
 
-
-# 3. In-Memory Set Transformations & Aggregations
+// 3. In-Memory Set Transformations & Aggregations
 println("\n--- 3. In-Memory Relational Operations ---");
 
 let transactions = [
     { "id": 1, "customer": "Alice", "amount": 250.0, "category": "Hardware" },
     { "id": 2, "customer": "Bob",   "amount": 420.0, "category": "Software" },
     { "id": 3, "customer": "Alice", "amount": 180.0, "category": "Cloud" },
-    { "id": 4, "customer": "Carol", "amount": 950.0, "category": "Hardware" }
+    { "id": 4, "customer": "Carol", "amount": 950.0, "category": "Hardware" },
 ];
 
 println("Raw Transactions Dataset:");
 for txn in transactions {
-    println("  Txn #" + txn["id"] + " | " + txn["customer"] + " | $" + txn["amount"] + " | " + txn["category"]);
+    println(f"  Txn #{txn[\"id\"]} | {txn[\"customer\"]} | ${txn[\"amount\"]} | {txn[\"category\"]}");
 }
 
-# Filter Hardware transactions and calculate sum
-let hardware_txns = [];
+// Filter Hardware transactions and calculate sum
+var hardware_txns = [];
 var total_hardware_spend = 0.0;
 
 for t in transactions {
@@ -67,8 +65,8 @@ for t in transactions {
 
 println("\nFiltered 'Hardware' Category Transactions:");
 for ht in hardware_txns {
-    println("  -> Customer: " + ht["customer"] + " spent $" + ht["amount"]);
+    println(f"  -> Customer: {ht[\"customer\"]} spent ${ht[\"amount\"]}");
 }
-println("Aggregated Hardware Total: $" + total_hardware_spend);
+println(f"Aggregated Hardware Total: ${total_hardware_spend}");
 
 println("\n>>> Concept 10 Demonstration Complete! <<<\n");

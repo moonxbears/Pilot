@@ -1,45 +1,45 @@
 // =============================================================================
-// Tutorial 03: Functions, Return Types, Lambdas & Design-by-Contract
+// Tutorial 03: Functions, Return Types, Closures & Design-by-Contract
 // =============================================================================
 
 // --- 1. Basic Functions ---
-// Defined with 'def' or 'fn'. Return type indicated by '-> Type'.
-def add_integers(a: int, b: int) -> int {
-    return a + b
+// Defined with 'fn'. Return type indicated by '-> Type'.
+fn add_integers(a: i64, b: i64) -> i64 {
+    return a + b;
 }
 
 // --- 2. Default Parameters ---
-def format_log(msg: str, level: str = "INFO") -> str {
-    return f"[{level}] {msg}"
+fn format_log(msg: str, level: str = "INFO") -> str {
+    return f"[{level}] {msg}";
 }
 
 // --- 3. Short Expression-Bodied Functions (=>) ---
-def square(x: int) -> int => x * x;
-def is_even(n: int) -> bool => n % 2 == 0;
+fn square(x: i64) -> i64 => x * x;
+fn is_even(n: i64) -> bool => n % 2 == 0;
 
-// --- 4. First-Class C#-Style Lambdas (=>) ---
-// Pilot supports modern C#-style fat-arrow lambdas:
-let multiplier = x => x * 3;
+// --- 4. First-Class C#-Style Closures (=>) ---
+// Pilot supports modern C#-style fat-arrow closures:
+let multiplier = (x) => x * 3;
 let add_two = (a, b) => a + b;
 let get_magic = () => 42;
-let typed_lambda = (a: int, b: int) => a + b;
-let block_lambda = (x) => { return x * 2; };
+let typed_closure = (a: i64, b: i64) => a + b;
+let block_closure = (x) => { return x * 2; };
 
-let transformed = multiplier(10)
-let combined_nums = add_two(15, 25)
+let transformed = multiplier(10);
+let combined_nums = add_two(15, 25);
 
 // --- 5. Design-by-Contract: requires & ensures ---
 // Preconditions (requires) and Postconditions (ensures) are verified at boundaries.
-def safe_divide(numerator: int, denominator: int) -> int
+fn safe_divide(numerator: i64, denominator: i64) -> i64
     requires denominator != 0
     ensures result * denominator <= numerator
 {
-    return numerator / denominator
+    return numerator / denominator;
 }
 
 // Testing function calls
-let sum_res = add_integers(20, 22)
-let log_entry = format_log("System operational", "SUCCESS")
-let quotient = safe_divide(100, 4)
+let sum_res = add_integers(20, 22);
+let log_entry = format_log("System operational", "SUCCESS");
+let quotient = safe_divide(100, 4);
 
-println(f"Sum: {sum_res}, Log: {log_entry}, Div: {quotient}")
+println(f"Sum: {sum_res}, Log: {log_entry}, Div: {quotient}");

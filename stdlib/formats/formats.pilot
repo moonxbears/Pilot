@@ -2,31 +2,45 @@
 // std.formats — Zero-Copy-Friendly `json`, `toml`, `csv` & `env` State-Machine Parsers & Serializers (`T ! ParseError`)
 // Zero-copy friendly JSON, TOML, CSV, and ENV state-machine parsers and serializers.
 
+pub pkg Pilot.Formats;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+
 // Native runtime optimizations provided by pilot_rt (C-ABI FFI)
 extern "c" lib "pilot_rt" {
-    def __utf8_validate_slice(buf: any) -> i64;
-    def __utf8_decode_slice(buf: any) -> str;
+    fn __utf8_validate_slice(buf: any) -> i64;
+    fn __utf8_decode_slice(buf: any) -> str;
 }
 
-type ParseError = Syntax(format_name: str, msg: str, line: i64, col: i64)
-                | PrematureEof(format_name: str, line: i64, col: i64)
-                | BadEscape(format_name: str, seq: str, line: i64, col: i64)
-                | BadNumber(format_name: str, raw: str, line: i64, col: i64)
-                | DuplicateKey(format_name: str, key: str, line: i64, col: i64);
+pub type ParseError = Syntax(format_name: str, msg: str, line: i64, col: i64)
+                    | PrematureEof(format_name: str, line: i64, col: i64)
+                    | BadEscape(format_name: str, seq: str, line: i64, col: i64)
+                    | BadNumber(format_name: str, raw: str, line: i64, col: i64)
+                    | DuplicateKey(format_name: str, key: str, line: i64, col: i64);
 
-def format_parse_error(err: ParseError) -> str {
-    return match err {
-        case ParseError.Syntax(fmt, msg, ln, cl) => f"[{fmt} {ln}:{cl}] SyntaxError: {msg}",
-        case ParseError.PrematureEof(fmt, ln, cl) => f"[{fmt} {ln}:{cl}] PrematureEof",
-        case ParseError.BadEscape(fmt, seq, ln, cl) => f"[{fmt} {ln}:{cl}] BadEscape: '{seq}'",
-        case ParseError.BadNumber(fmt, raw, ln, cl) => f"[{fmt} {ln}:{cl}] BadNumber: '{raw}'",
-        case ParseError.DuplicateKey(fmt, key, ln, cl) => f"[{fmt} {ln}:{cl}] DuplicateKey: '{key}'"
-    };
+pub fn format_parse_error(err: ParseError) -> str {
+    switch err {
+        case ParseError.Syntax(fmt, msg, ln, cl):
+            return f"[{fmt} {ln}:{cl}] SyntaxError: {msg}";
+        case ParseError.PrematureEof(fmt, ln, cl):
+            return f"[{fmt} {ln}:{cl}] PrematureEof";
+        case ParseError.BadEscape(fmt, seq, ln, cl):
+            return f"[{fmt} {ln}:{cl}] BadEscape: '{seq}'";
+        case ParseError.BadNumber(fmt, raw, ln, cl):
+            return f"[{fmt} {ln}:{cl}] BadNumber: '{raw}'";
+        case ParseError.DuplicateKey(fmt, key, ln, cl):
+            return f"[{fmt} {ln}:{cl}] DuplicateKey: '{key}'";
+    }
 }
 
 const _HEX_UPPER_FMT: str = "0123456789ABCDEF";
 
-def __coerce_format_text(src, fmt_name: str) -> str ! ParseError {
+fn __coerce_format_text(src: any, fmt_name: str) -> str ! ParseError {
     let kind: str = type_of(src);
     if kind == "slicebuffer" {
         let bad_idx: i64 = __utf8_validate_slice(src);
@@ -46,80 +60,88 @@ def __coerce_format_text(src, fmt_name: str) -> str ! ParseError {
     return ok(str(src));
 }
 
-def __fmt_hex_digit(code: i64) -> i64 {
-    if code >= 48 and code <= 57 {
+fn __fmt_hex_digit(code: i64) -> i64 {
+    if code >= 48 && code <= 57 {
         return code - 48;
     }
-    if code >= 97 and code <= 102 {
+    if code >= 97 && code <= 102 {
         return 10 + (code - 97);
     }
-    if code >= 65 and code <= 70 {
+    if code >= 65 && code <= 70 {
         return 10 + (code - 65);
     }
     return -1;
 }
 
-def __is_ascii_digit(code: i64) -> bool {
-    return code >= 48 and code <= 57;
+fn __is_ascii_digit(code: i64) -> bool {
+    return code >= 48 && code <= 57;
 }
 
-class __FormatCursor {
-    self(fmt_name: str, src: str) {
-        self.fmt_name = fmt_name;
-        self.src = src;
-        self.total = len(src);
-        self.pos = 0;
-        self.line = 1;
-        self.col = 1;
-    }
+struct __FormatCursor : IValue {
+    pub:
+        fmt_name: str;
+        src:      str;
+        total:    i64;
+        pos:      i64;
+        line:     i64;
+        col:      i64;
 
-    def is_eof(self) -> bool {
-        return self.pos >= self.total;
-    }
-
-    def peek_code(self) -> i64 {
-        if self.pos >= self.total {
-            return -1;
+        self(fmt_name: str, src: str) {
+            .fmt_name = fmt_name;
+            .src = src;
+            .total = len(src);
+            .pos = 0;
+            .line = 1;
+            .col = 1;
         }
-        return self.src.char_code_at(self.pos);
-    }
 
-    def peek_at(self, rel: i64) -> i64 {
-        let idx: i64 = self.pos + rel;
-        if idx < 0 or idx >= self.total {
-            return -1;
+        fn is_eof() -> bool {
+            return self.pos >= self.total;
         }
-        return self.src.char_code_at(idx);
-    }
 
-    def advance(self) -> i64 {
-        if self.pos >= self.total {
-            return -1;
+        fn peek_code() -> i64 {
+            if self.pos >= self.total {
+                return -1;
+            }
+            return self.src.char_code_at(self.pos);
         }
-        let code: i64 = self.src.char_code_at(self.pos);
-        self.pos = self.pos + 1;
-        if code == 10 {
-            self.line = self.line + 1;
-            self.col = 1;
-        } else {
-            self.col = self.col + 1;
-        }
-        return code;
-    }
 
-    def slice_span(self, start_idx: i64, end_idx: i64) -> str {
-        return self.src[start_idx..end_idx];
-    }
+        fn peek_at(rel: i64) -> i64 {
+            let idx: i64 = self.pos + rel;
+            if idx < 0 || idx >= self.total {
+                return -1;
+            }
+            return self.src.char_code_at(idx);
+        }
+
+        var fn advance() -> i64 {
+            if self.pos >= self.total {
+                return -1;
+            }
+            let code: i64 = self.src.char_code_at(self.pos);
+            self.pos = self.pos + 1;
+            if code == 10 {
+                self.line = self.line + 1;
+                self.col = 1;
+            } else {
+                self.col = self.col + 1;
+            }
+            return code;
+        }
+
+        fn slice_span(start_idx: i64, end_idx: i64) -> str {
+            return self.src[start_idx..end_idx];
+        }
 }
 
 // ============================================================================
 // 1. JSON (RFC 8259) Recursive-Descent Parser, Path Accessor & Serializer
 // ============================================================================
 
-def __json_skip_ws(cur: any) {
+fn __json_skip_ws(cur: any) {
     while !cur.is_eof() {
         let c: i64 = cur.peek_code();
-        if c == 32 or c == 9 or c == 10 or c == 13 {
+        if c == 32 || c == 9 || c == 10 || c == 13 {
             cur.advance();
         } else {
             break;
@@ -127,7 +149,7 @@ def __json_skip_ws(cur: any) {
     }
 }
 
-def __json_read_hex4(cur: any, esc_line: i64, esc_col: i64) -> i64 ! ParseError {
+fn __json_read_hex4(cur: any, esc_line: i64, esc_col: i64) -> i64 ! ParseError {
     var acc: i64 = 0;
     for _k in 0..<4 {
         if cur.is_eof() {
@@ -143,7 +165,7 @@ def __json_read_hex4(cur: any, esc_line: i64, esc_col: i64) -> i64 ! ParseError 
     return ok(acc);
 }
 
-def __json_parse_string(cur: any) -> str ! ParseError {
+fn __json_parse_string(cur: any) -> str ! ParseError {
     let open_ln: i64 = cur.line;
     let open_cl: i64 = cur.col;
     let _open = cur.advance(); // '"'
@@ -163,7 +185,7 @@ def __json_parse_string(cur: any) -> str ! ParseError {
             }
             return ok(out);
         }
-        if c >= 0 and c < 32 {
+        if c >= 0 && c < 32 {
             return fail(ParseError.Syntax(cur.fmt_name, "unescaped control character in string", cur.line, cur.col));
         }
         if c == 92 {
@@ -179,29 +201,29 @@ def __json_parse_string(cur: any) -> str ! ParseError {
             let esc: i64 = cur.advance();
             if esc == 34 {
                 chunks.append("\"");
-            } elif esc == 92 {
+            } else if esc == 92 {
                 chunks.append("\\");
-            } elif esc == 47 {
+            } else if esc == 47 {
                 chunks.append("/");
-            } elif esc == 98 {
+            } else if esc == 98 {
                 chunks.append(__char_from_code(8));
-            } elif esc == 102 {
+            } else if esc == 102 {
                 chunks.append(__char_from_code(12));
-            } elif esc == 110 {
+            } else if esc == 110 {
                 chunks.append("\n");
-            } elif esc == 114 {
+            } else if esc == 114 {
                 chunks.append("\r");
-            } elif esc == 116 {
+            } else if esc == 116 {
                 chunks.append("\t");
-            } elif esc == 117 {
+            } else if esc == 117 {
                 let u1: i64 = __json_read_hex4(cur, esc_ln, esc_cl)?;
-                if u1 >= 55296 and u1 <= 56319 {
+                if u1 >= 55296 && u1 <= 56319 {
                     // High UTF-16 surrogate (0xD800..0xDBFF): check for \uDC00..0xDFFF low surrogate
-                    if cur.peek_code() == 92 and cur.peek_at(1) == 117 {
+                    if cur.peek_code() == 92 && cur.peek_at(1) == 117 {
                         let _bs2 = cur.advance();
                         let _u2_ch = cur.advance();
                         let u2: i64 = __json_read_hex4(cur, esc_ln, esc_cl)?;
-                        if u2 < 56320 or u2 > 57343 {
+                        if u2 < 56320 || u2 > 57343 {
                             return fail(ParseError.BadEscape(cur.fmt_name, "unpaired UTF-16 surrogate", esc_ln, esc_cl));
                         }
                         let codepoint: i64 = 65536 + ((u1 - 55296) << 10) + (u2 - 56320);
@@ -209,7 +231,7 @@ def __json_parse_string(cur: any) -> str ! ParseError {
                     } else {
                         return fail(ParseError.BadEscape(cur.fmt_name, "unpaired high UTF-16 surrogate", esc_ln, esc_cl));
                     }
-                } elif u1 >= 56320 and u1 <= 57343 {
+                } else if u1 >= 56320 && u1 <= 57343 {
                     return fail(ParseError.BadEscape(cur.fmt_name, "unpaired low UTF-16 surrogate", esc_ln, esc_cl));
                 } else {
                     chunks.append(__char_from_code(u1));
@@ -226,7 +248,7 @@ def __json_parse_string(cur: any) -> str ! ParseError {
     return fail(ParseError.PrematureEof(cur.fmt_name, open_ln, open_cl));
 }
 
-def __json_parse_number(cur: any) -> any ! ParseError {
+fn __json_parse_number(cur: any) -> any ! ParseError {
     let start_pos: i64 = cur.pos;
     let start_ln: i64 = cur.line;
     let start_cl: i64 = cur.col;
@@ -236,7 +258,7 @@ def __json_parse_number(cur: any) -> any ! ParseError {
         cur.advance();
     }
 
-    if cur.is_eof() or !__is_ascii_digit(cur.peek_code()) {
+    if cur.is_eof() || !__is_ascii_digit(cur.peek_code()) {
         let raw_bad = cur.slice_span(start_pos, min(cur.pos + 1, cur.total));
         return fail(ParseError.BadNumber("json", raw_bad, start_ln, start_cl));
     }
@@ -270,11 +292,11 @@ def __json_parse_number(cur: any) -> any ! ParseError {
 
     // Exponent part `e`/`E` [+/-] digits
     let ec: i64 = cur.peek_code();
-    if ec == 101 or ec == 69 {
+    if ec == 101 || ec == 69 {
         is_float = true;
         cur.advance();
         let sc: i64 = cur.peek_code();
-        if sc == 43 or sc == 45 {
+        if sc == 43 || sc == 45 {
             cur.advance();
         }
         if !__is_ascii_digit(cur.peek_code()) {
@@ -300,7 +322,7 @@ def __json_parse_number(cur: any) -> any ! ParseError {
     return fail(ParseError.BadNumber("json", raw_num, start_ln, start_cl));
 }
 
-def __json_parse_value(cur: any, strict_unique_keys: bool) -> any ! ParseError {
+fn __json_parse_value(cur: any, strict_unique_keys: bool) -> any ! ParseError {
     __json_skip_ws(cur);
     if cur.is_eof() {
         return fail(ParseError.PrematureEof("json", cur.line, cur.col));
@@ -319,7 +341,7 @@ def __json_parse_value(cur: any, strict_unique_keys: bool) -> any ! ParseError {
         let av = __json_parse_array(cur, strict_unique_keys)?;
         return ok(av);
     }
-    if c == 45 or __is_ascii_digit(c) {
+    if c == 45 || __is_ascii_digit(c) {
         let nv = __json_parse_number(cur)?;
         return ok(nv);
     }
@@ -327,7 +349,7 @@ def __json_parse_value(cur: any, strict_unique_keys: bool) -> any ! ParseError {
         // "true"
         let ln: i64 = cur.line;
         let cl: i64 = cur.col;
-        if (cur.pos + 4) <= cur.total and cur.slice_span(cur.pos, cur.pos + 4) == "true" {
+        if (cur.pos + 4) <= cur.total && cur.slice_span(cur.pos, cur.pos + 4) == "true" {
             for _i in 0..<4 { cur.advance(); }
             return ok(true);
         }
@@ -337,7 +359,7 @@ def __json_parse_value(cur: any, strict_unique_keys: bool) -> any ! ParseError {
         // "false"
         let ln: i64 = cur.line;
         let cl: i64 = cur.col;
-        if (cur.pos + 5) <= cur.total and cur.slice_span(cur.pos, cur.pos + 5) == "false" {
+        if (cur.pos + 5) <= cur.total && cur.slice_span(cur.pos, cur.pos + 5) == "false" {
             for _i in 0..<5 { cur.advance(); }
             return ok(false);
         }
@@ -347,9 +369,9 @@ def __json_parse_value(cur: any, strict_unique_keys: bool) -> any ! ParseError {
         // "null"
         let ln: i64 = cur.line;
         let cl: i64 = cur.col;
-        if (cur.pos + 4) <= cur.total and cur.slice_span(cur.pos, cur.pos + 4) == "null" {
+        if (cur.pos + 4) <= cur.total && cur.slice_span(cur.pos, cur.pos + 4) == "null" {
             for _i in 0..<4 { cur.advance(); }
-            return ok(null);
+            return ok(none);
         }
         return fail(ParseError.Syntax("json", "invalid literal (expected 'null')", ln, cl));
     }
@@ -357,7 +379,7 @@ def __json_parse_value(cur: any, strict_unique_keys: bool) -> any ! ParseError {
     return fail(ParseError.Syntax("json", "unexpected token '" + __char_from_code(c) + "'", cur.line, cur.col));
 }
 
-def __json_parse_array(cur: any, strict_unique_keys: bool) -> list ! ParseError {
+fn __json_parse_array(cur: any, strict_unique_keys: bool) -> any[] ! ParseError {
     let open_ln: i64 = cur.line;
     let open_cl: i64 = cur.col;
     cur.advance(); // '['
@@ -390,7 +412,7 @@ def __json_parse_array(cur: any, strict_unique_keys: bool) -> list ! ParseError 
             if cur.peek_code() == 93 {
                 return fail(ParseError.Syntax("json", "trailing comma in array", comma_ln, comma_cl));
             }
-        } elif next_c == 93 {
+        } else if next_c == 93 {
             cur.advance();
             return ok(items);
         } else {
@@ -400,7 +422,7 @@ def __json_parse_array(cur: any, strict_unique_keys: bool) -> list ! ParseError 
     return ok(items);
 }
 
-def __json_parse_object(cur: any, strict_unique_keys: bool) -> map ! ParseError {
+fn __json_parse_object(cur: any, strict_unique_keys: bool) -> map ! ParseError {
     let open_ln: i64 = cur.line;
     let open_cl: i64 = cur.col;
     cur.advance(); // '{'
@@ -422,7 +444,7 @@ def __json_parse_object(cur: any, strict_unique_keys: bool) -> map ! ParseError 
         let key_ln: i64 = cur.line;
         let key_cl: i64 = cur.col;
         let key: str = __json_parse_string(cur)?;
-        if strict_unique_keys and obj.contains_key(key) {
+        if strict_unique_keys && obj.contains_key(key) {
             return fail(ParseError.DuplicateKey("json", key, key_ln, key_cl));
         }
 
@@ -450,7 +472,7 @@ def __json_parse_object(cur: any, strict_unique_keys: bool) -> map ! ParseError 
             if cur.peek_code() == 125 {
                 return fail(ParseError.Syntax("json", "trailing comma in object", comma_ln, comma_cl));
             }
-        } elif sep == 125 {
+        } else if sep == 125 {
             cur.advance();
             return ok(obj);
         } else {
@@ -460,7 +482,7 @@ def __json_parse_object(cur: any, strict_unique_keys: bool) -> map ! ParseError 
     return ok(obj);
 }
 
-def json_parse(src, strict_unique_keys: bool = false) -> any ! ParseError {
+pub fn json_parse(src: any, strict_unique_keys: bool = false) -> any ! ParseError {
     let text = __coerce_format_text(src, "json")?;
     var cur = __FormatCursor("json", text);
     let root_res = __json_parse_value(cur, strict_unique_keys);
@@ -474,26 +496,26 @@ def json_parse(src, strict_unique_keys: bool = false) -> any ! ParseError {
     return ok(__result_unwrap_ok(root_res));
 }
 
-def __json_escape_str(s: str) -> str {
+fn __json_escape_str(s: str) -> str {
     var out: str = "\"";
     let n: i64 = len(s);
     for i in 0..<n {
         let c: i64 = s.char_code_at(i);
         if c == 34 {
             out = out + "\\\"";
-        } elif c == 92 {
+        } else if c == 92 {
             out = out + "\\\\";
-        } elif c == 8 {
+        } else if c == 8 {
             out = out + "\\b";
-        } elif c == 12 {
+        } else if c == 12 {
             out = out + "\\f";
-        } elif c == 10 {
+        } else if c == 10 {
             out = out + "\\n";
-        } elif c == 13 {
+        } else if c == 13 {
             out = out + "\\r";
-        } elif c == 9 {
+        } else if c == 9 {
             out = out + "\\t";
-        } elif c >= 0 and c < 32 {
+        } else if c >= 0 && c < 32 {
             let hi: i64 = (c >> 4) & 15;
             let lo: i64 = c & 15;
             out = out + "\\u00" + _HEX_UPPER_FMT[hi..(hi + 1)] + _HEX_UPPER_FMT[lo..(lo + 1)];
@@ -504,7 +526,7 @@ def __json_escape_str(s: str) -> str {
     return out + "\"";
 }
 
-def __spaces(count: i64) -> str {
+fn __spaces(count: i64) -> str {
     if count <= 0 {
         return "";
     }
@@ -515,7 +537,7 @@ def __spaces(count: i64) -> str {
     return out;
 }
 
-def __json_emit(val, pretty: bool, indent_spaces: i64, depth: i64) -> str {
+fn __json_emit(val: any, pretty: bool, indent_spaces: i64, depth: i64) -> str {
     if __opt_is_none(val) {
         return "null";
     }
@@ -523,22 +545,22 @@ def __json_emit(val, pretty: bool, indent_spaces: i64, depth: i64) -> str {
     if kind == "bool" {
         return if val { "true" } else { "false" };
     }
-    if kind == "int" or kind == "uint" {
+    if kind == "int" || kind == "uint" {
         return str(val);
     }
-    if kind == "float" or kind == "decimal" {
-        if isnan(val) or isinf(val) {
+    if kind == "float" || kind == "decimal" {
+        if isnan(val) || isinf(val) {
             return "null";
         }
         return str(val);
     }
-    if kind == "string" or kind == "char" {
+    if kind == "string" || kind == "char" {
         return __json_escape_str(str(val));
     }
     if kind == "keyword" {
         return __json_escape_str(name(val));
     }
-    if kind == "list" or kind == "tuple" or kind == "set" {
+    if kind == "list" || kind == "tuple" || kind == "set" {
         let count: i64 = len(val);
         if count == 0 {
             return "[]";
@@ -561,7 +583,7 @@ def __json_emit(val, pretty: bool, indent_spaces: i64, depth: i64) -> str {
         }
         return out;
     }
-    if kind == "map" or kind == "object" {
+    if kind == "map" || kind == "object" {
         let entries = __map_entries_sorted(val);
         let count: i64 = len(entries);
         if count == 0 {
@@ -588,15 +610,15 @@ def __json_emit(val, pretty: bool, indent_spaces: i64, depth: i64) -> str {
     return __json_escape_str(str(val));
 }
 
-def json_stringify(val, pretty: bool = false, indent_spaces: i64 = 2) -> str {
+pub fn json_stringify(val: any, pretty: bool = false, indent_spaces: i64 = 2) -> str {
     return __json_emit(val, pretty, max(0, indent_spaces), 0);
 }
 
-def json_get_path(doc, dotted_path: str) {
+pub fn json_get_path(doc: any, dotted_path: str) -> any {
     if len(dotted_path) == 0 {
         return some(doc);
     }
-    let segments: [str] = dotted_path.split(".");
+    let segments: str[] = dotted_path.split(".");
     var cur_val = doc;
     for seg in segments {
         if __opt_is_none(cur_val) {
@@ -609,13 +631,13 @@ def json_get_path(doc, dotted_path: str) {
             } else {
                 return none;
             }
-        } elif k_type == "list" or k_type == "tuple" {
+        } else if k_type == "list" || k_type == "tuple" {
             let idx_opt = __parse_int_strict(seg, 10);
             if __opt_is_none(idx_opt) {
                 return none;
             }
             let idx: i64 = __opt_unwrap(idx_opt);
-            if idx < 0 or idx >= len(cur_val) {
+            if idx < 0 || idx >= len(cur_val) {
                 return none;
             }
             cur_val = cur_val[idx];
@@ -630,17 +652,17 @@ def json_get_path(doc, dotted_path: str) {
 // 2. TOML v1.0 Parser & Serializer
 // ============================================================================
 
-def __is_toml_bare_key_char(c: i64) -> bool {
-    if (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) {
+fn __is_toml_bare_key_char(c: i64) -> bool {
+    if (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) {
         return true;
     }
-    return c == 95 or c == 45;
+    return c == 95 || c == 45;
 }
 
-def __toml_skip_inline_ws(cur: any) {
+fn __toml_skip_inline_ws(cur: any) {
     while !cur.is_eof() {
         let c: i64 = cur.peek_code();
-        if c == 32 or c == 9 {
+        if c == 32 || c == 9 {
             cur.advance();
         } else {
             break;
@@ -648,13 +670,13 @@ def __toml_skip_inline_ws(cur: any) {
     }
 }
 
-def __toml_skip_ws_and_comments(cur: any) {
+fn __toml_skip_ws_and_comments(cur: any) {
     while !cur.is_eof() {
         let c: i64 = cur.peek_code();
-        if c == 32 or c == 9 or c == 10 or c == 13 {
+        if c == 32 || c == 9 || c == 10 || c == 13 {
             cur.advance();
-        } elif c == 35 {
-            while !cur.is_eof() and cur.peek_code() != 10 {
+        } else if c == 35 {
+            while !cur.is_eof() && cur.peek_code() != 10 {
                 cur.advance();
             }
         } else {
@@ -663,30 +685,30 @@ def __toml_skip_ws_and_comments(cur: any) {
     }
 }
 
-def __toml_skip_inline_comment(cur: any) {
+fn __toml_skip_inline_comment(cur: any) {
     __toml_skip_inline_ws(cur);
     if cur.peek_code() == 35 {
-        while !cur.is_eof() and cur.peek_code() != 10 {
+        while !cur.is_eof() && cur.peek_code() != 10 {
             cur.advance();
         }
     }
 }
 
-def __toml_parse_literal_string(cur: any) -> str ! ParseError {
+fn __toml_parse_literal_string(cur: any) -> str ! ParseError {
     let start_ln: i64 = cur.line;
     let start_cl: i64 = cur.col;
-    if cur.peek_code() == 39 and cur.peek_at(1) == 39 and cur.peek_at(2) == 39 {
+    if cur.peek_code() == 39 && cur.peek_at(1) == 39 && cur.peek_at(2) == 39 {
         // Multi-line literal string '''...'''
         for _i in 0..<3 { cur.advance(); }
-        if cur.peek_code() == 13 and cur.peek_at(1) == 10 {
+        if cur.peek_code() == 13 && cur.peek_at(1) == 10 {
             cur.advance();
             cur.advance();
-        } elif cur.peek_code() == 10 {
+        } else if cur.peek_code() == 10 {
             cur.advance();
         }
         let body_start: i64 = cur.pos;
         while !cur.is_eof() {
-            if cur.peek_code() == 39 and cur.peek_at(1) == 39 and cur.peek_at(2) == 39 {
+            if cur.peek_code() == 39 && cur.peek_at(1) == 39 && cur.peek_at(2) == 39 {
                 let s = cur.slice_span(body_start, cur.pos);
                 for _k in 0..<3 { cur.advance(); }
                 return ok(s);
@@ -706,7 +728,7 @@ def __toml_parse_literal_string(cur: any) -> str ! ParseError {
             cur.advance();
             return ok(s);
         }
-        if c == 10 or c == 13 {
+        if c == 10 || c == 13 {
             return fail(ParseError.Syntax("toml", "newline in single-line literal string", cur.line, cur.col));
         }
         cur.advance();
@@ -714,21 +736,21 @@ def __toml_parse_literal_string(cur: any) -> str ! ParseError {
     return fail(ParseError.PrematureEof("toml", start_ln, start_cl));
 }
 
-def __toml_parse_basic_string(cur: any) -> str ! ParseError {
+fn __toml_parse_basic_string(cur: any) -> str ! ParseError {
     let start_ln: i64 = cur.line;
     let start_cl: i64 = cur.col;
-    if cur.peek_code() == 34 and cur.peek_at(1) == 34 and cur.peek_at(2) == 34 {
+    if cur.peek_code() == 34 && cur.peek_at(1) == 34 && cur.peek_at(2) == 34 {
         // Multi-line basic string """..."""
         for _i in 0..<3 { cur.advance(); }
-        if cur.peek_code() == 13 and cur.peek_at(1) == 10 {
+        if cur.peek_code() == 13 && cur.peek_at(1) == 10 {
             cur.advance();
             cur.advance();
-        } elif cur.peek_code() == 10 {
+        } else if cur.peek_code() == 10 {
             cur.advance();
         }
         var out: str = "";
         while !cur.is_eof() {
-            if cur.peek_code() == 34 and cur.peek_at(1) == 34 and cur.peek_at(2) == 34 {
+            if cur.peek_code() == 34 && cur.peek_at(1) == 34 && cur.peek_at(2) == 34 {
                 for _k in 0..<3 { cur.advance(); }
                 return ok(out);
             }
@@ -739,13 +761,13 @@ def __toml_parse_basic_string(cur: any) -> str ! ParseError {
                 }
                 let esc: i64 = cur.advance();
                 if esc == 110 { out = out + "\n"; }
-                elif esc == 114 { out = out + "\r"; }
-                elif esc == 116 { out = out + "\t"; }
-                elif esc == 34 { out = out + "\""; }
-                elif esc == 92 { out = out + "\\"; }
-                elif esc == 10 or esc == 13 {
+                else if esc == 114 { out = out + "\r"; }
+                else if esc == 116 { out = out + "\t"; }
+                else if esc == 34 { out = out + "\""; }
+                else if esc == 92 { out = out + "\\"; }
+                else if esc == 10 || esc == 13 {
                     // Line-ending backslash trims following whitespace/newlines
-                    while !cur.is_eof() and (cur.peek_code() == 32 or cur.peek_code() == 9 or cur.peek_code() == 10 or cur.peek_code() == 13) {
+                    while !cur.is_eof() && (cur.peek_code() == 32 || cur.peek_code() == 9 || cur.peek_code() == 10 || cur.peek_code() == 13) {
                         cur.advance();
                     }
                 } else {
@@ -762,7 +784,7 @@ def __toml_parse_basic_string(cur: any) -> str ! ParseError {
     return ok(sv);
 }
 
-def __toml_parse_key_segment(cur: any) -> str ! ParseError {
+fn __toml_parse_key_segment(cur: any) -> str ! ParseError {
     __toml_skip_inline_ws(cur);
     if cur.is_eof() {
         return fail(ParseError.PrematureEof("toml", cur.line, cur.col));
@@ -786,7 +808,7 @@ def __toml_parse_key_segment(cur: any) -> str ! ParseError {
     return ok(cur.slice_span(start_pos, cur.pos));
 }
 
-def __toml_parse_dotted_key(cur: any) -> [str] ! ParseError {
+fn __toml_parse_dotted_key(cur: any) -> str[] ! ParseError {
     var parts = [];
     let first = __toml_parse_key_segment(cur)?;
     parts.append(first);
@@ -803,7 +825,7 @@ def __toml_parse_dotted_key(cur: any) -> [str] ! ParseError {
     return ok(parts);
 }
 
-def __toml_clean_underscores(raw: str, fmt_name: str, ln: i64, cl: i64) -> str ! ParseError {
+fn __toml_clean_underscores(raw: str, fmt_name: str, ln: i64, cl: i64) -> str ! ParseError {
     let n: i64 = len(raw);
     if n == 0 {
         return fail(ParseError.BadNumber(fmt_name, raw, ln, cl));
@@ -812,12 +834,12 @@ def __toml_clean_underscores(raw: str, fmt_name: str, ln: i64, cl: i64) -> str !
     for i in 0..<n {
         let c: i64 = raw.char_code_at(i);
         if c == 95 {
-            if i == 0 or (i + 1) >= n {
+            if i == 0 || (i + 1) >= n {
                 return fail(ParseError.BadNumber(fmt_name, raw, ln, cl));
             }
             let prev_c: i64 = raw.char_code_at(i - 1);
             let next_c: i64 = raw.char_code_at(i + 1);
-            if prev_c == 95 or prev_c == 46 or prev_c == 43 or prev_c == 45 or next_c == 95 or next_c == 46 {
+            if prev_c == 95 || prev_c == 46 || prev_c == 43 || prev_c == 45 || next_c == 95 || next_c == 46 {
                 return fail(ParseError.BadNumber(fmt_name, raw, ln, cl));
             }
         } else {
@@ -827,14 +849,14 @@ def __toml_clean_underscores(raw: str, fmt_name: str, ln: i64, cl: i64) -> str !
     return ok(clean);
 }
 
-def __toml_parse_scalar_or_number(cur: any) -> any ! ParseError {
+fn __toml_parse_scalar_or_number(cur: any) -> any ! ParseError {
     let start_pos: i64 = cur.pos;
     let ln: i64 = cur.line;
     let cl: i64 = cur.col;
 
     while !cur.is_eof() {
         let c: i64 = cur.peek_code();
-        if c == 32 or c == 9 or c == 10 or c == 13 or c == 44 or c == 93 or c == 125 or c == 35 {
+        if c == 32 || c == 9 || c == 10 || c == 13 || c == 44 || c == 93 || c == 125 || c == 35 {
             break;
         }
         cur.advance();
@@ -850,18 +872,18 @@ def __toml_parse_scalar_or_number(cur: any) -> any ! ParseError {
     if raw == "false" {
         return ok(false);
     }
-    if raw == "inf" or raw == "+inf" or raw == "-inf" or raw == "nan" or raw == "+nan" or raw == "-nan" {
+    if raw == "inf" || raw == "+inf" || raw == "-inf" || raw == "nan" || raw == "+nan" || raw == "-nan" {
         let sp_opt = __parse_float_strict(raw);
         return ok(__opt_unwrap(sp_opt));
     }
 
     // Radix prefixes `0x`, `0o`, `0b`
-    if len(raw) > 2 and raw[0..1] == "0" {
+    if len(raw) > 2 && raw[0..1] == "0" {
         let pfx = raw[0..2];
-        if pfx == "0x" or pfx == "0X" or pfx == "0o" or pfx == "0O" or pfx == "0b" or pfx == "0B" {
+        if pfx == "0x" || pfx == "0X" || pfx == "0o" || pfx == "0O" || pfx == "0b" || pfx == "0B" {
             let digits_raw = raw[2..len(raw)];
             let digits_clean = __toml_clean_underscores(digits_raw, "toml", ln, cl)?;
-            let radix: i64 = if pfx == "0x" or pfx == "0X" { 16 } elif pfx == "0o" or pfx == "0O" { 8 } else { 2 };
+            let radix: i64 = if pfx == "0x" || pfx == "0X" { 16 } else if pfx == "0o" || pfx == "0O" { 8 } else { 2 };
             let rx_opt = __parse_int_strict(digits_clean, radix);
             if __opt_is_none(rx_opt) {
                 return fail(ParseError.BadNumber("toml", raw, ln, cl));
@@ -872,8 +894,8 @@ def __toml_parse_scalar_or_number(cur: any) -> any ! ParseError {
 
     let cleaned = __toml_clean_underscores(raw, "toml", ln, cl)?;
     let has_dot: bool = cleaned.contains(".");
-    let has_e: bool = cleaned.contains("e") or cleaned.contains("E");
-    if has_dot or has_e {
+    let has_e: bool = cleaned.contains("e") || cleaned.contains("E");
+    if has_dot || has_e {
         let flt_opt = __parse_float_strict(cleaned);
         if __opt_is_none(flt_opt) {
             return fail(ParseError.BadNumber("toml", raw, ln, cl));
@@ -888,7 +910,7 @@ def __toml_parse_scalar_or_number(cur: any) -> any ! ParseError {
     return ok(__opt_unwrap(int_opt));
 }
 
-def __toml_set_dotted(target_tbl: any, key_parts: [str], val: any, ln: i64, cl: i64) -> bool ! ParseError {
+fn __toml_set_dotted(target_tbl: any, key_parts: str[], val: any, ln: i64, cl: i64) -> bool ! ParseError {
     var cur_tbl = target_tbl;
     let n: i64 = len(key_parts);
     for i in 0..<(n - 1) {
@@ -913,7 +935,7 @@ def __toml_set_dotted(target_tbl: any, key_parts: [str], val: any, ln: i64, cl: 
     return ok(true);
 }
 
-def __toml_parse_value(cur: any) -> any ! ParseError {
+fn __toml_parse_value(cur: any) -> any ! ParseError {
     __toml_skip_inline_ws(cur);
     if cur.is_eof() {
         return fail(ParseError.PrematureEof("toml", cur.line, cur.col));
@@ -956,7 +978,7 @@ def __toml_parse_value(cur: any) -> any ! ParseError {
             }
             if cur.peek_code() == 44 {
                 cur.advance();
-            } elif cur.peek_code() == 93 {
+            } else if cur.peek_code() == 93 {
                 cur.advance();
                 return ok(arr);
             } else {
@@ -993,7 +1015,7 @@ def __toml_parse_value(cur: any) -> any ! ParseError {
             __toml_skip_inline_ws(cur);
             if cur.peek_code() == 44 {
                 cur.advance();
-            } elif cur.peek_code() == 125 {
+            } else if cur.peek_code() == 125 {
                 cur.advance();
                 return ok(inl);
             } else {
@@ -1006,7 +1028,7 @@ def __toml_parse_value(cur: any) -> any ! ParseError {
     return ok(sv);
 }
 
-def __toml_resolve_table_header(root_doc: any, key_parts: [str], is_array_table: bool, ln: i64, cl: i64) -> map ! ParseError {
+fn __toml_resolve_table_header(root_doc: any, key_parts: str[], is_array_table: bool, ln: i64, cl: i64) -> map ! ParseError {
     var cur_tbl = root_doc;
     let n: i64 = len(key_parts);
     for i in 0..<(n - 1) {
@@ -1015,7 +1037,7 @@ def __toml_resolve_table_header(root_doc: any, key_parts: [str], is_array_table:
             let existing = cur_tbl[seg];
             if type_of(existing) == "map" {
                 cur_tbl = existing;
-            } elif type_of(existing) == "list" and len(existing) > 0 {
+            } else if type_of(existing) == "list" && len(existing) > 0 {
                 cur_tbl = existing[len(existing) - 1];
             } else {
                 return fail(ParseError.DuplicateKey("toml", seg, ln, cl));
@@ -1054,7 +1076,7 @@ def __toml_resolve_table_header(root_doc: any, key_parts: [str], is_array_table:
     return ok(created);
 }
 
-def toml_parse(src) -> map ! ParseError {
+pub fn toml_parse(src: any) -> map ! ParseError {
     let text = __coerce_format_text(src, "toml")?;
     var cur = __FormatCursor("toml", text);
     var root = {};
@@ -1078,7 +1100,7 @@ def toml_parse(src) -> map ! ParseError {
             let hdr_parts = __toml_parse_dotted_key(cur)?;
             __toml_skip_inline_ws(cur);
             if is_aot {
-                if cur.peek_code() != 93 or cur.peek_at(1) != 93 {
+                if cur.peek_code() != 93 || cur.peek_at(1) != 93 {
                     return fail(ParseError.Syntax("toml", "expected ']]' closing array-of-tables header", cur.line, cur.col));
                 }
                 cur.advance();
@@ -1106,10 +1128,10 @@ def toml_parse(src) -> map ! ParseError {
         __toml_skip_inline_comment(cur);
         if !cur.is_eof() {
             let eol: i64 = cur.peek_code();
-            if eol == 13 and cur.peek_at(1) == 10 {
+            if eol == 13 && cur.peek_at(1) == 10 {
                 cur.advance();
                 cur.advance();
-            } elif eol == 10 {
+            } else if eol == 10 {
                 cur.advance();
             } else {
                 return fail(ParseError.Syntax("toml", "expected newline after statement", cur.line, cur.col));
@@ -1120,7 +1142,7 @@ def toml_parse(src) -> map ! ParseError {
     return ok(root);
 }
 
-def __toml_format_key(k: str) -> str {
+fn __toml_format_key(k: str) -> str {
     if len(k) == 0 {
         return "\"\"";
     }
@@ -1132,15 +1154,15 @@ def __toml_format_key(k: str) -> str {
     return k;
 }
 
-def __toml_format_value(val) -> str {
+fn __toml_format_value(val: any) -> str {
     let kind: str = type_of(val);
     if kind == "bool" {
         return if val { "true" } else { "false" };
     }
-    if kind == "int" or kind == "uint" {
+    if kind == "int" || kind == "uint" {
         return str(val);
     }
-    if kind == "float" or kind == "decimal" {
+    if kind == "float" || kind == "decimal" {
         if isnan(val) {
             return "nan";
         }
@@ -1149,10 +1171,10 @@ def __toml_format_value(val) -> str {
         }
         return str(val);
     }
-    if kind == "string" or kind == "char" {
+    if kind == "string" || kind == "char" {
         return __json_escape_str(str(val));
     }
-    if kind == "list" or kind == "tuple" {
+    if kind == "list" || kind == "tuple" {
         var parts = [];
         for item in val {
             parts.append(__toml_format_value(item));
@@ -1164,7 +1186,7 @@ def __toml_format_value(val) -> str {
         }
         return out + "]";
     }
-    if kind == "map" or kind == "object" {
+    if kind == "map" || kind == "object" {
         let entries = __map_entries_sorted(val);
         var out: str = "{ ";
         for i in 0..<len(entries) {
@@ -1177,7 +1199,7 @@ def __toml_format_value(val) -> str {
     return __json_escape_str(str(val));
 }
 
-def __toml_emit_table(tbl, section_prefix: str) -> str {
+fn __toml_emit_table(tbl: any, section_prefix: str) -> str {
     let entries = __map_entries_sorted(tbl);
     var scalars_out: str = "";
     var subtables = [];
@@ -1188,7 +1210,7 @@ def __toml_emit_table(tbl, section_prefix: str) -> str {
         if __opt_is_none(v) {
             continue;
         }
-        if type_of(v) == "map" or type_of(v) == "object" {
+        if type_of(v) == "map" || type_of(v) == "object" {
             subtables.append((k, v));
         } else {
             scalars_out = scalars_out + __toml_format_key(k) + " = " + __toml_format_value(v) + "\n";
@@ -1196,7 +1218,7 @@ def __toml_emit_table(tbl, section_prefix: str) -> str {
     }
 
     var full_out: str = "";
-    if len(section_prefix) > 0 and (len(scalars_out) > 0 or len(subtables) == 0) {
+    if len(section_prefix) > 0 && (len(scalars_out) > 0 || len(subtables) == 0) {
         full_out = "[" + section_prefix + "]\n" + scalars_out;
     } else {
         full_out = scalars_out;
@@ -1206,7 +1228,7 @@ def __toml_emit_table(tbl, section_prefix: str) -> str {
         let sub_k = __toml_format_key(sub[0]);
         let next_prefix = if len(section_prefix) > 0 { section_prefix + "." + sub_k } else { sub_k };
         let rendered_sub = __toml_emit_table(sub[1], next_prefix);
-        if len(full_out) > 0 and len(rendered_sub) > 0 {
+        if len(full_out) > 0 && len(rendered_sub) > 0 {
             full_out = full_out + "\n";
         }
         full_out = full_out + rendered_sub;
@@ -1214,7 +1236,7 @@ def __toml_emit_table(tbl, section_prefix: str) -> str {
     return full_out;
 }
 
-def toml_stringify(doc) -> str {
+pub fn toml_stringify(doc: any) -> str {
     return __toml_emit_table(doc, "");
 }
 
@@ -1222,12 +1244,12 @@ def toml_stringify(doc) -> str {
 // 3. CSV / TSV (RFC 4180) State-Machine Parser & Serializer
 // ============================================================================
 
-def csv_parse(src, delimiter: str = ",") -> [[str]] ! ParseError {
+pub fn csv_parse(src: any, delimiter: str = ",") -> str[][] ! ParseError {
     let text = __coerce_format_text(src, "csv")?;
     if len(delimiter) != 1 {
         return fail(ParseError.Syntax("csv", "delimiter must be a single character", 1, 1));
     }
-    if delimiter == "\"" or delimiter == "\n" or delimiter == "\r" {
+    if delimiter == "\"" || delimiter == "\n" || delimiter == "\r" {
         return fail(ParseError.Syntax("csv", "invalid CSV delimiter character", 1, 1));
     }
 
@@ -1252,7 +1274,7 @@ def csv_parse(src, delimiter: str = ",") -> [[str]] ! ParseError {
         let c: i64 = text.char_code_at(i);
         if in_quotes {
             if c == 34 {
-                if (i + 1) < n and text.char_code_at(i + 1) == 34 {
+                if (i + 1) < n && text.char_code_at(i + 1) == 34 {
                     // Escaped `""` -> literal `"`
                     field = field + "\"";
                     i = i + 2;
@@ -1264,7 +1286,7 @@ def csv_parse(src, delimiter: str = ",") -> [[str]] ! ParseError {
                     // After closing quote, next char (if not EOF) must be delimiter or newline
                     if i < n {
                         let after_q: i64 = text.char_code_at(i);
-                        if after_q != delim_code and after_q != 10 and after_q != 13 {
+                        if after_q != delim_code && after_q != 10 && after_q != 13 {
                             return fail(ParseError.Syntax("csv", "unexpected character after closing quote", ln, cl));
                         }
                     }
@@ -1290,19 +1312,19 @@ def csv_parse(src, delimiter: str = ",") -> [[str]] ! ParseError {
                 quote_open_cl = cl;
                 i = i + 1;
                 cl = cl + 1;
-            } elif c == delim_code {
+            } else if c == delim_code {
                 cur_row.append(field);
                 field = "";
                 at_field_start = true;
                 i = i + 1;
                 cl = cl + 1;
-            } elif c == 13 or c == 10 {
+            } else if c == 13 || c == 10 {
                 cur_row.append(field);
                 rows.append(cur_row);
                 cur_row = [];
                 field = "";
                 at_field_start = true;
-                if c == 13 and (i + 1) < n and text.char_code_at(i + 1) == 10 {
+                if c == 13 && (i + 1) < n && text.char_code_at(i + 1) == 10 {
                     i = i + 2;
                 } else {
                     i = i + 1;
@@ -1322,7 +1344,7 @@ def csv_parse(src, delimiter: str = ",") -> [[str]] ! ParseError {
         return fail(ParseError.PrematureEof("csv", quote_open_ln, quote_open_cl));
     }
 
-    if len(cur_row) > 0 or len(field) > 0 or !at_field_start {
+    if len(cur_row) > 0 || len(field) > 0 || !at_field_start {
         cur_row.append(field);
         rows.append(cur_row);
     }
@@ -1330,7 +1352,7 @@ def csv_parse(src, delimiter: str = ",") -> [[str]] ! ParseError {
     return ok(rows);
 }
 
-def csv_parse_records(src, delimiter: str = ",") -> [map] ! ParseError {
+pub fn csv_parse_records(src: any, delimiter: str = ",") -> map[] ! ParseError {
     let rows = csv_parse(src, delimiter)?;
     if len(rows) == 0 {
         return ok([]);
@@ -1352,11 +1374,11 @@ def csv_parse_records(src, delimiter: str = ",") -> [map] ! ParseError {
     return ok(records);
 }
 
-def __csv_format_cell(val, delimiter: str) -> str {
+fn __csv_format_cell(val: any, delimiter: str) -> str {
     let s: str = if __opt_is_none(val) { "" } else { str(val) };
-    let needs_quote: bool = s.contains(delimiter) or
-                            s.contains("\"") or
-                            s.contains("\n") or
+    let needs_quote: bool = s.contains(delimiter) ||
+                            s.contains("\"") ||
+                            s.contains("\n") ||
                             s.contains("\r");
     if !needs_quote {
         return s;
@@ -1364,7 +1386,7 @@ def __csv_format_cell(val, delimiter: str) -> str {
     return "\"" + s.replace("\"", "\"\"") + "\"";
 }
 
-def csv_stringify(rows, delimiter: str = ",") -> str {
+pub fn csv_stringify(rows: any, delimiter: str = ",") -> str {
     var out: str = "";
     for r_idx in 0..<len(rows) {
         if r_idx > 0 {
@@ -1383,7 +1405,7 @@ def csv_stringify(rows, delimiter: str = ",") -> str {
     return out;
 }
 
-def csv_stringify_records(records, headers, delimiter: str = ",") -> str {
+pub fn csv_stringify_records(records: any, headers: any, delimiter: str = ",") -> str {
     var all_rows = [];
     all_rows.append(headers);
     for rec in records {
@@ -1404,24 +1426,24 @@ def csv_stringify_records(records, headers, delimiter: str = ",") -> str {
 // 4. `.env` / Dotenv Parser (with `${VAR:-default}` Expansion) & Serializer
 // ============================================================================
 
-def __is_env_key_start(c: i64) -> bool {
-    return (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95;
+fn __is_env_key_start(c: i64) -> bool {
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95;
 }
 
-def __is_env_key_char(c: i64) -> bool {
-    return __is_env_key_start(c) or (c >= 48 and c <= 57) or c == 46;
+fn __is_env_key_char(c: i64) -> bool {
+    return __is_env_key_start(c) || (c >= 48 && c <= 57) || c == 46;
 }
 
-def __env_expand_vars(raw_val: str, env_map) -> str {
+fn __env_expand_vars(raw_val: str, env_map: any) -> str {
     let n: i64 = len(raw_val);
     var out: str = "";
     var i: i64 = 0;
     while i < n {
         let c: i64 = raw_val.char_code_at(i);
-        if c == 92 and (i + 1) < n and raw_val.char_code_at(i + 1) == 36 {
+        if c == 92 && (i + 1) < n && raw_val.char_code_at(i + 1) == 36 {
             out = out + "$";
             i = i + 2;
-        } elif c == 36 and (i + 1) < n {
+        } else if c == 36 && (i + 1) < n {
             let next_c: i64 = raw_val.char_code_at(i + 1);
             if next_c == 123 {
                 // `${VAR}` or `${VAR:-fallback}`
@@ -1435,7 +1457,7 @@ def __env_expand_vars(raw_val: str, env_map) -> str {
                         var_name = expr[0..def_sep];
                         fallback = expr[(def_sep + 2)..len(expr)];
                     }
-                    if env_map.contains_key(var_name) and len(str(env_map[var_name])) > 0 {
+                    if env_map.contains_key(var_name) && len(str(env_map[var_name])) > 0 {
                         out = out + str(env_map[var_name]);
                     } else {
                         out = out + fallback;
@@ -1443,9 +1465,9 @@ def __env_expand_vars(raw_val: str, env_map) -> str {
                     i = close_idx + 1;
                     continue;
                 }
-            } elif __is_env_key_start(next_c) {
+            } else if __is_env_key_start(next_c) {
                 var j: i64 = i + 2;
-                while j < n and __is_env_key_char(raw_val.char_code_at(j)) {
+                while j < n && __is_env_key_char(raw_val.char_code_at(j)) {
                     j = j + 1;
                 }
                 let var_name = raw_val[(i + 1)..j];
@@ -1465,7 +1487,7 @@ def __env_expand_vars(raw_val: str, env_map) -> str {
     return out;
 }
 
-def env_parse(src, expand_vars: bool = true) -> map ! ParseError {
+pub fn env_parse(src: any, expand_vars: bool = true) -> map ! ParseError {
     let text = __coerce_format_text(src, "env")?;
     var cur = __FormatCursor("env", text);
     var env_map = {};
@@ -1480,9 +1502,9 @@ def env_parse(src, expand_vars: bool = true) -> map ! ParseError {
         let stmt_cl: i64 = cur.col;
 
         // Optional `export ` prefix
-        if (cur.pos + 7) <= cur.total and cur.slice_span(cur.pos, cur.pos + 6) == "export" {
+        if (cur.pos + 7) <= cur.total && cur.slice_span(cur.pos, cur.pos + 6) == "export" {
             let after_exp: i64 = cur.peek_at(6);
-            if after_exp == 32 or after_exp == 9 {
+            if after_exp == 32 || after_exp == 9 {
                 for _i in 0..<6 { cur.advance(); }
                 __toml_skip_inline_ws(cur);
             }
@@ -1526,7 +1548,7 @@ def env_parse(src, expand_vars: bool = true) -> map ! ParseError {
                 return fail(ParseError.PrematureEof("env", q_ln, q_cl));
             }
             __toml_skip_inline_comment(cur);
-        } elif vc == 34 {
+        } else if vc == 34 {
             // Double-quoted value (supports multi-line + escapes + optional var expansion)
             let q_ln: i64 = cur.line;
             let q_cl: i64 = cur.col;
@@ -1545,11 +1567,11 @@ def env_parse(src, expand_vars: bool = true) -> map ! ParseError {
                     }
                     let esc: i64 = cur.advance();
                     if esc == 110 { raw_dq = raw_dq + "\n"; }
-                    elif esc == 114 { raw_dq = raw_dq + "\r"; }
-                    elif esc == 116 { raw_dq = raw_dq + "\t"; }
-                    elif esc == 34 { raw_dq = raw_dq + "\""; }
-                    elif esc == 92 { raw_dq = raw_dq + "\\"; }
-                    elif esc == 36 { raw_dq = raw_dq + "\\$"; }
+                    else if esc == 114 { raw_dq = raw_dq + "\r"; }
+                    else if esc == 116 { raw_dq = raw_dq + "\t"; }
+                    else if esc == 34 { raw_dq = raw_dq + "\""; }
+                    else if esc == 92 { raw_dq = raw_dq + "\\"; }
+                    else if esc == 36 { raw_dq = raw_dq + "\\$"; }
                     else { raw_dq = raw_dq + __char_from_code(esc); }
                 } else {
                     raw_dq = raw_dq + __char_from_code(ch_c);
@@ -1565,14 +1587,14 @@ def env_parse(src, expand_vars: bool = true) -> map ! ParseError {
             let u_start: i64 = cur.pos;
             while !cur.is_eof() {
                 let uc: i64 = cur.peek_code();
-                if uc == 10 or uc == 13 {
+                if uc == 10 || uc == 13 {
                     break;
                 }
                 if uc == 35 {
                     // Treat `#` at start of value or preceded by whitespace as comment
                     let prev_idx: i64 = cur.pos - 1;
                     let prev_c: i64 = if prev_idx >= u_start { cur.src.char_code_at(prev_idx) } else { 32 };
-                    if prev_c == 32 or prev_c == 9 {
+                    if prev_c == 32 || prev_c == 9 {
                         break;
                     }
                 }
@@ -1586,10 +1608,10 @@ def env_parse(src, expand_vars: bool = true) -> map ! ParseError {
         env_map[key] = val_str;
 
         if !cur.is_eof() {
-            if cur.peek_code() == 13 and cur.peek_at(1) == 10 {
+            if cur.peek_code() == 13 && cur.peek_at(1) == 10 {
                 cur.advance();
                 cur.advance();
-            } elif cur.peek_code() == 10 {
+            } else if cur.peek_code() == 10 {
                 cur.advance();
             } else {
                 return fail(ParseError.Syntax("env", "unexpected trailing characters on line", cur.line, cur.col));
@@ -1600,7 +1622,7 @@ def env_parse(src, expand_vars: bool = true) -> map ! ParseError {
     return ok(env_map);
 }
 
-def env_stringify(vars_map) -> str {
+pub fn env_stringify(vars_map: any) -> str {
     let entries = __map_entries_sorted(vars_map);
     var out: str = "";
     for i in 0..<len(entries) {
@@ -1610,12 +1632,12 @@ def env_stringify(vars_map) -> str {
         let pair = entries[i];
         let k: str = str(pair[0]);
         let v: str = if __opt_is_none(pair[1]) { "" } else { str(pair[1]) };
-        let needs_q: bool = v.contains(" ") or
-                            v.contains("#") or
-                            v.contains("\"") or
-                            v.contains("'") or
-                            v.contains("\n") or
-                            v.contains("\r") or
+        let needs_q: bool = v.contains(" ") ||
+                            v.contains("#") ||
+                            v.contains("\"") ||
+                            v.contains("'") ||
+                            v.contains("\n") ||
+                            v.contains("\r") ||
                             v.contains("\t");
         if needs_q {
             var esc: str = v.replace("\\", "\\\\");

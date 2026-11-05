@@ -7,79 +7,106 @@
 // Target OS Platforms:
 //   - Linux, Windows, macOS, Android, iOS, and WebAssembly
 
-from formats import csv_parse, csv_parse_records, csv_stringify, csv_stringify_records, ParseError;
-import fs as std_fs;
+pub pkg Pilot.Csv;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+use Pilot.Formats.*;
+use Pilot.Io.Fs as std_fs;
 
 // Quoting styles matching Python csv module constants
-const QUOTE_MINIMAL: i64 = 0;
-const QUOTE_ALL: i64 = 1;
-const QUOTE_NONNUMERIC: i64 = 2;
-const QUOTE_NONE: i64 = 3;
+pub const QUOTE_MINIMAL: i64 = 0;
+pub const QUOTE_ALL: i64 = 1;
+pub const QUOTE_NONNUMERIC: i64 = 2;
+pub const QUOTE_NONE: i64 = 3;
 
 /// Dialect definition controlling formatting parameters.
 /// Python reference: csv.Dialect
-class Dialect {
-    self(
-        delimiter: str = ",",
-        quotechar: str = "\"",
-        escapechar: str = "",
-        doublequote: bool = true,
-        skipinitialspace: bool = false,
-        lineterminator: str = "\r\n",
-        quoting: i64 = 0
-    ) {
-        self.delimiter = delimiter;
-        self.quotechar = quotechar;
-        self.escapechar = escapechar;
-        self.doublequote = doublequote;
-        self.skipinitialspace = skipinitialspace;
-        self.lineterminator = lineterminator;
-        self.quoting = quoting;
-    }
+pub struct Dialect : IValue {
+    pub:
+        delimiter:        str;
+        quotechar:        str;
+        escapechar:       str;
+        doublequote:      bool;
+        skipinitialspace: bool;
+        lineterminator:   str;
+        quoting:          i64;
+
+        self(
+            delimiter: str = ",",
+            quotechar: str = "\"",
+            escapechar: str = "",
+            doublequote: bool = true,
+            skipinitialspace: bool = false,
+            lineterminator: str = "\r\n",
+            quoting: i64 = 0
+        ) {
+            .delimiter = delimiter;
+            .quotechar = quotechar;
+            .escapechar = escapechar;
+            .doublequote = doublequote;
+            .skipinitialspace = skipinitialspace;
+            .lineterminator = lineterminator;
+            .quoting = quoting;
+        }
 }
 
 /// Standard Excel CSV dialect (comma delimited, CRLF line endings).
 /// Python reference: csv.excel
-def excel_dialect() -> Dialect {
+pub fn excel_dialect() -> Dialect {
     return Dialect(",", "\"", "", true, false, "\r\n", QUOTE_MINIMAL);
 }
 
 /// Excel TAB-delimited dialect.
 /// Python reference: csv.excel_tab
-def excel_tab_dialect() -> Dialect {
+pub fn excel_tab_dialect() -> Dialect {
     return Dialect("\t", "\"", "", true, false, "\r\n", QUOTE_MINIMAL);
 }
 
 /// Unix CSV dialect (comma delimited, LF line endings).
 /// Python reference: csv.unix_dialect
-def unix_dialect() -> Dialect {
+pub fn unix_dialect() -> Dialect {
     return Dialect(",", "\"", "", true, false, "\n", QUOTE_ALL);
 }
 
-/// Error raised by CSV reader and writer operations.
+/// Error returned by CSV reader and writer operations.
 /// Python reference: csv.Error
-class CSVError {
-    self(msg: str, line: i64 = 1, col: i64 = 1) {
-        self.msg = msg;
-        self.line = line;
-        self.col = col;
-    }
+pub struct CSVError : IValue {
+    pub:
+        msg:  str;
+        line: i64;
+        col:  i64;
 
-    def to_string(self) -> str {
-        return f"CSVError: {self.msg} at line {self.line}:{self.col}";
-    }
+        self(msg: str, line: i64 = 1, col: i64 = 1) {
+            .msg = msg;
+            .line = line;
+            .col = col;
+        }
+
+        fn to_string() -> str {
+            return f"CSVError: {self.msg} at line {self.line}:{self.col}";
+        }
 }
 
 /// Parses an entire CSV string into a 2D list of row strings.
 /// Python reference: csv.reader
-def loads(src: str, delimiter: str = ",") -> [[str]] ! CSVError {
-    match csv_parse(src, delimiter) {
-        ok(rows) => ok(rows),
-        fail(err) => {
-            match err {
-                case ParseError.Syntax(_, msg, ln, cl) => fail(CSVError(msg, ln, cl)),
-                case ParseError.PrematureEof(_, ln, cl) => fail(CSVError("Unexpected EOF in quoted field", ln, cl)),
-                case _ => fail(CSVError("Failed to parse CSV document", 1, 1))
+pub fn loads(src: str, delimiter: str = ",") -> str[][] ! CSVError {
+    let parse_res = csv_parse(src, delimiter);
+    switch parse_res {
+        case ok(rows):
+            return ok(rows);
+        case fail(err): {
+            switch err {
+                case ParseError.Syntax(_, msg, ln, cl):
+                    return fail(CSVError(msg, ln, cl));
+                case ParseError.PrematureEof(_, ln, cl):
+                    return fail(CSVError("Unexpected EOF in quoted field", ln, cl));
+                default:
+                    return fail(CSVError("Failed to parse CSV document", 1, 1));
             }
         }
     }
@@ -87,7 +114,7 @@ def loads(src: str, delimiter: str = ",") -> [[str]] ! CSVError {
 
 /// Serializes a 2D list of rows into a CSV string.
 /// Python reference: csv.writer
-def dumps(rows, delimiter: str = ",", lineterminator: str = "\r\n") -> str {
+pub fn dumps(rows: any, delimiter: str = ",", lineterminator: str = "\r\n") -> str {
     var raw = csv_stringify(rows, delimiter);
     if lineterminator != "\n" {
         raw = raw.replace("\n", lineterminator);
@@ -97,169 +124,213 @@ def dumps(rows, delimiter: str = ",", lineterminator: str = "\r\n") -> str {
 
 /// CSV Reader object iterating or collecting tabular rows.
 /// Python reference: csv.reader(csvfile, dialect='excel', **fmtparams)
-class Reader {
-    self(data: str, delimiter: str = ",", quotechar: str = "\"", dialect = none) {
-        var delim = delimiter;
-        if dialect != none {
-            delim = dialect.delimiter;
+pub struct Reader : IValue {
+    pub:
+        data:      str;
+        delimiter: str;
+        quotechar: str;
+
+        self(data: str, delimiter: str = ",", quotechar: str = "\"", dialect: any = none) {
+            var delim = delimiter;
+            if !__opt_is_none(dialect) {
+                delim = dialect.delimiter;
+            }
+            .data = data;
+            .delimiter = delim;
+            .quotechar = quotechar;
         }
-        self.data = data;
-        self.delimiter = delim;
-        self.quotechar = quotechar;
-    }
 
-    /// Reads all remaining rows into memory.
-    def read_all(self) -> [[str]] ! CSVError {
-        return loads(self.data, self.delimiter);
-    }
+        /// Reads all remaining rows into memory.
+        fn read_all() -> str[][] ! CSVError {
+            return loads(self.data, self.delimiter);
+        }
 
-    /// Alias for read_all.
-    def rows(self) -> [[str]] ! CSVError {
-        return self.read_all();
-    }
+        /// Alias for read_all.
+        fn rows() -> str[][] ! CSVError {
+            return self.read_all();
+        }
 }
 
 /// Constructs a new CSV Reader instance.
 /// Python reference: csv.reader
-def reader(data: str, delimiter: str = ",", quotechar: str = "\"", dialect = none) -> Reader {
+pub fn reader(data: str, delimiter: str = ",", quotechar: str = "\"", dialect: any = none) -> Reader {
     return Reader(data, delimiter, quotechar, dialect);
 }
 
 /// CSV Writer object accumulating rows into formatted CSV text.
 /// Python reference: csv.writer(csvfile, dialect='excel', **fmtparams)
-class Writer {
-    self(delimiter: str = ",", quotechar: str = "\"", lineterminator: str = "\r\n", dialect = none) {
-        var delim = delimiter;
-        var term = lineterminator;
-        if dialect != none {
-            delim = dialect.delimiter;
-            term = dialect.lineterminator;
+pub struct Writer : IValue {
+    pub:
+        delimiter:      str;
+        quotechar:      str;
+        lineterminator: str;
+        _rows:          str[][];
+
+        self(delimiter: str = ",", quotechar: str = "\"", lineterminator: str = "\r\n", dialect: any = none) {
+            var delim = delimiter;
+            var term = lineterminator;
+            if !__opt_is_none(dialect) {
+                delim = dialect.delimiter;
+                term = dialect.lineterminator;
+            }
+            .delimiter = delim;
+            .quotechar = quotechar;
+            .lineterminator = term;
+            ._rows = [];
         }
-        self.delimiter = delim;
-        self.quotechar = quotechar;
-        self.lineterminator = term;
-        self._rows = [];
-    }
 
-    def writerow(self, row) {
-        self._rows.append([str(x) for x in row]);
-    }
-
-    def writerows(self, rows) {
-        for r in rows {
-            self.writerow(r);
+        var fn writerow(row: any) {
+            var row_strs = [];
+            for x in row {
+                row_strs.append(str(x));
+            }
+            self._rows.append(row_strs);
         }
-    }
 
-    def get_value(self) -> str {
-        return dumps(self._rows, self.delimiter, self.lineterminator);
-    }
+        var fn writerows(rows: any) {
+            for r in rows {
+                self.writerow(r);
+            }
+        }
+
+        fn get_value() -> str {
+            return dumps(self._rows, self.delimiter, self.lineterminator);
+        }
 }
 
 /// Constructs a new CSV Writer instance.
 /// Python reference: csv.writer
-def writer(delimiter: str = ",", quotechar: str = "\"", lineterminator: str = "\r\n", dialect = none) -> Writer {
+pub fn writer(delimiter: str = ",", quotechar: str = "\"", lineterminator: str = "\r\n", dialect: any = none) -> Writer {
     return Writer(delimiter, quotechar, lineterminator, dialect);
 }
 
 /// CSV reader mapping rows into dictionaries keyed by column headers.
 /// Python reference: csv.DictReader(f, fieldnames=None, restkey=None, restval=None, dialect='excel', *args, **kwds)
-class DictReader {
-    self(data: str, fieldnames = none, delimiter: str = ",", quotechar: str = "\"", restkey: str = "extra", restval: str = "") {
-        self.data = data;
-        self.delimiter = delimiter;
-        self.quotechar = quotechar;
-        self.restkey = restkey;
-        self.restval = restval;
-        self._fieldnames = if fieldnames != none { [f for f in fieldnames] } else { [] };
-    }
+pub struct DictReader : IValue {
+    pub:
+        data:        str;
+        delimiter:   str;
+        quotechar:   str;
+        restkey:     str;
+        restval:     str;
+        _fieldnames: str[];
 
-    def fieldnames(self) -> [str] {
-        return self._fieldnames;
-    }
-
-    /// Reads all records as a list of maps.
-    def read_all(self) -> [map] ! CSVError {
-        if len(self._fieldnames) == 0 {
-            match csv_parse_records(self.data, self.delimiter) {
-                ok(records) => return ok(records),
-                fail(err) => return fail(CSVError("Failed to parse CSV records", 1, 1))
-            }
-        }
-
-        let all_rows = loads(self.data, self.delimiter)?;
-        var records = [];
-        let headers = self._fieldnames;
-        let num_headers: i64 = len(headers);
-
-        for row in all_rows {
-            var rec = {};
-            let row_len: i64 = len(row);
-            for i in 0..<num_headers {
-                let key = headers[i];
-                if i < row_len {
-                    rec[key] = row[i];
-                } else {
-                    rec[key] = self.restval;
+        self(data: str, fieldnames: any = none, delimiter: str = ",", quotechar: str = "\"", restkey: str = "extra", restval: str = "") {
+            .data = data;
+            .delimiter = delimiter;
+            .quotechar = quotechar;
+            .restkey = restkey;
+            .restval = restval;
+            var names = [];
+            if !__opt_is_none(fieldnames) {
+                for f in fieldnames {
+                    names.append(str(f));
                 }
             }
-            if row_len > num_headers {
-                var extra = [];
-                for j in num_headers..<row_len {
-                    extra.append(row[j]);
-                }
-                rec[self.restkey] = extra;
-            }
-            records.append(rec);
+            ._fieldnames = names;
         }
-        return ok(records);
-    }
+
+        fn fieldnames() -> str[] {
+            return self._fieldnames;
+        }
+
+        /// Reads all records as a list of maps.
+        fn read_all() -> map[] ! CSVError {
+            if len(self._fieldnames) == 0 {
+                let rec_res = csv_parse_records(self.data, self.delimiter);
+                switch rec_res {
+                    case ok(records):
+                        return ok(records);
+                    case fail(_):
+                        return fail(CSVError("Failed to parse CSV records", 1, 1));
+                }
+            }
+
+            let all_rows = loads(self.data, self.delimiter)?;
+            var records = [];
+            let headers = self._fieldnames;
+            let num_headers: i64 = len(headers);
+
+            for row in all_rows {
+                var rec = {};
+                let row_len: i64 = len(row);
+                for i in 0..<num_headers {
+                    let key = headers[i];
+                    if i < row_len {
+                        rec[key] = row[i];
+                    } else {
+                        rec[key] = self.restval;
+                    }
+                }
+                if row_len > num_headers {
+                    var extra = [];
+                    for j in num_headers..<row_len {
+                        extra.append(row[j]);
+                    }
+                    rec[self.restkey] = extra;
+                }
+                records.append(rec);
+            }
+            return ok(records);
+        }
 }
 
 /// CSV writer outputting records from dictionaries using predefined fieldnames.
 /// Python reference: csv.DictWriter(f, fieldnames, restval='', extrasaction='raise', dialect='excel', *args, **kwds)
-class DictWriter {
-    self(fieldnames, delimiter: str = ",", quotechar: str = "\"", lineterminator: str = "\r\n", restval: str = "") {
-        self.fieldnames = [str(f) for f in fieldnames];
-        self.delimiter = delimiter;
-        self.quotechar = quotechar;
-        self.lineterminator = lineterminator;
-        self.restval = restval;
-        self._rows = [];
-    }
+pub struct DictWriter : IValue {
+    pub:
+        fieldnames:     str[];
+        delimiter:      str;
+        quotechar:      str;
+        lineterminator: str;
+        restval:        str;
+        _rows:          str[][];
 
-    /// Writes the header row containing field names.
-    def writeheader(self) {
-        self._rows.append(self.fieldnames);
-    }
+        self(fieldnames: any, delimiter: str = ",", quotechar: str = "\"", lineterminator: str = "\r\n", restval: str = "") {
+            var names = [];
+            for f in fieldnames {
+                names.append(str(f));
+            }
+            .fieldnames = names;
+            .delimiter = delimiter;
+            .quotechar = quotechar;
+            .lineterminator = lineterminator;
+            .restval = restval;
+            ._rows = [];
+        }
 
-    /// Writes a single dictionary row.
-    def writerow(self, rowdict) {
-        var row = [];
-        for f in self.fieldnames {
-            if rowdict.contains_key(f) {
-                row.append(str(rowdict[f]));
-            } else {
-                row.append(self.restval);
+        /// Writes the header row containing field names.
+        var fn writeheader() {
+            self._rows.append(self.fieldnames);
+        }
+
+        /// Writes a single dictionary row.
+        var fn writerow(rowdict: any) {
+            var row = [];
+            for f in self.fieldnames {
+                if rowdict.contains_key(f) {
+                    row.append(str(rowdict[f]));
+                } else {
+                    row.append(self.restval);
+                }
+            }
+            self._rows.append(row);
+        }
+
+        /// Writes multiple dictionary rows.
+        var fn writerows(rowdicts: any) {
+            for r in rowdicts {
+                self.writerow(r);
             }
         }
-        self._rows.append(row);
-    }
 
-    /// Writes multiple dictionary rows.
-    def writerows(self, rowdicts) {
-        for r in rowdicts {
-            self.writerow(r);
+        fn get_value() -> str {
+            return dumps(self._rows, self.delimiter, self.lineterminator);
         }
-    }
-
-    def get_value(self) -> str {
-        return dumps(self._rows, self.delimiter, self.lineterminator);
-    }
 }
 
 /// Loads a CSV file from the filesystem.
-def load(file_path: str, delimiter: str = ",") -> [[str]] ! CSVError {
+pub fn load(file_path: str, delimiter: str = ",") -> str[][] ! CSVError {
     let text_res = std_fs.read_text(file_path);
     if __result_is_err(text_res) {
         return fail(CSVError(f"Could not open CSV file: {file_path}", 1, 1));
@@ -269,14 +340,14 @@ def load(file_path: str, delimiter: str = ",") -> [[str]] ! CSVError {
 }
 
 /// Dumps a 2D list of rows into a file.
-def dump(rows, file_path: str, delimiter: str = ",", lineterminator: str = "\r\n") -> bool {
+pub fn dump(rows: any, file_path: str, delimiter: str = ",", lineterminator: str = "\r\n") -> bool {
     let content = dumps(rows, delimiter, lineterminator);
     let write_res = std_fs.write_text(file_path, content);
     return !__result_is_err(write_res);
 }
 
 /// Reads records as dictionaries with keys from the first line header.
-def load_records(file_path: str, delimiter: str = ",") -> [map] ! CSVError {
+pub fn load_records(file_path: str, delimiter: str = ",") -> map[] ! CSVError {
     let text_res = std_fs.read_text(file_path);
     if __result_is_err(text_res) {
         return fail(CSVError(f"Could not open CSV file: {file_path}", 1, 1));
@@ -287,15 +358,18 @@ def load_records(file_path: str, delimiter: str = ",") -> [map] ! CSVError {
 }
 
 /// Dumps a list of records as CSV with the provided fieldnames into a file.
-def dump_records(records, file_path: str, fieldnames = none, delimiter: str = ",") -> bool {
+pub fn dump_records(records: any, file_path: str, fieldnames: any = none, delimiter: str = ",") -> bool {
     var headers = [];
-    if fieldnames != none {
-        headers = [str(f) for f in fieldnames];
+    if !__opt_is_none(fieldnames) {
+        for f in fieldnames {
+            headers.append(str(f));
+        }
     } else if len(records) > 0 {
         headers = records[0].keys();
     }
-    let w = DictWriter(headers, delimiter);
+    var w = DictWriter(headers, delimiter);
     w.writeheader();
     w.writerows(records);
-    return std_fs.write_text(file_path, w.get_value()) >= 0;
+    let write_res = std_fs.write_text(file_path, w.get_value());
+    return !__result_is_err(write_res);
 }

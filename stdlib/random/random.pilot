@@ -7,7 +7,12 @@
 // Target OS Platforms:
 //   - Linux, Windows, macOS, Android, iOS, and WebAssembly
 
-from math import (
-    SplitMix64, PcgRng, seed, random, uniform, randint, randrange,
-    choice, choices, shuffle, sample, gauss, normalvariate, triangular
-);
+pub pkg Pilot.Random;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+pub use Pilot.Math.Random.*;

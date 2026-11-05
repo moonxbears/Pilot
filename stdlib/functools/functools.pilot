@@ -14,81 +14,100 @@
 //   - iOS (arm64)
 //   - WebAssembly (wasm32-wasi, wasm32-unknown)
 
-from core import some, none;
+pub pkg Pilot.Functools;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
 
 /// Python reference: functools.partial(func, /, *args, **keywords)
 /// Object representing a function call with pre-bound arguments.
-class Partial {
-    self(func, bound_args = []) {
-        self._func = func;
-        self._bound_args = [x for x in bound_args];
-    }
+pub struct Partial : IValue {
+    pub:
+        _func:       any;
+        _bound_args: any;
 
-    def func(self) {
-        return self._func;
-    }
-
-    def args(self) {
-        return [x for x in self._bound_args];
-    }
-
-    /// Invokes the wrapped function with bound arguments combined with extra arguments.
-    def invoke(self, extra_args = []) {
-        var all_args = [];
-        for a in self._bound_args {
-            all_args.append(a);
+        self(func: any, bound_args: any = []) {
+            self._func = func;
+            var copied = [];
+            for x in bound_args {
+                copied.append(x);
+            }
+            self._bound_args = copied;
         }
-        for b in extra_args {
-            all_args.append(b);
+
+        fn func() -> any {
+            return self._func;
         }
-        let f = self._func;
-        let count: i64 = len(all_args);
-        if count == 0 {
-            return f();
-        } else if count == 1 {
-            return f(all_args[0]);
-        } else if count == 2 {
-            return f(all_args[0], all_args[1]);
-        } else if count == 3 {
-            return f(all_args[0], all_args[1], all_args[2]);
-        } else if count == 4 {
-            return f(all_args[0], all_args[1], all_args[2], all_args[3]);
-        } else {
-            return f(all_args);
+
+        fn args() -> any {
+            var copied = [];
+            for x in self._bound_args {
+                copied.append(x);
+            }
+            return copied;
         }
-    }
 
-    /// Convenience invocation with 0 extra arguments.
-    def call0(self) {
-        return self.invoke([]);
-    }
+        /// Invokes the wrapped function with bound arguments combined with extra arguments.
+        fn invoke(extra_args: any = []) -> any {
+            var all_args = [];
+            for a in self._bound_args {
+                all_args.append(a);
+            }
+            for b in extra_args {
+                all_args.append(b);
+            }
+            let f = self._func;
+            let count: i64 = len(all_args);
+            if count == 0 {
+                return f();
+            } else if count == 1 {
+                return f(all_args[0]);
+            } else if count == 2 {
+                return f(all_args[0], all_args[1]);
+            } else if count == 3 {
+                return f(all_args[0], all_args[1], all_args[2]);
+            } else if count == 4 {
+                return f(all_args[0], all_args[1], all_args[2], all_args[3]);
+            } else {
+                return f(all_args);
+            }
+        }
 
-    /// Convenience invocation with 1 extra argument.
-    def call1(self, arg1) {
-        return self.invoke([arg1]);
-    }
+        /// Convenience invocation with 0 extra arguments.
+        fn call0() -> any {
+            return self.invoke([]);
+        }
 
-    /// Convenience invocation with 2 extra arguments.
-    def call2(self, arg1, arg2) {
-        return self.invoke([arg1, arg2]);
-    }
+        /// Convenience invocation with 1 extra argument.
+        fn call1(arg1: any) -> any {
+            return self.invoke([arg1]);
+        }
 
-    /// Convenience invocation with 3 extra arguments.
-    def call3(self, arg1, arg2, arg3) {
-        return self.invoke([arg1, arg2, arg3]);
-    }
+        /// Convenience invocation with 2 extra arguments.
+        fn call2(arg1: any, arg2: any) -> any {
+            return self.invoke([arg1, arg2]);
+        }
+
+        /// Convenience invocation with 3 extra arguments.
+        fn call3(arg1: any, arg2: any, arg3: any) -> any {
+            return self.invoke([arg1, arg2, arg3]);
+        }
 }
 
 /// Creates a new Partial application wrapper.
 /// Python reference: functools.partial
-def partial(func, bound_args = []) -> Partial {
+pub fn partial(func: any, bound_args: any = []) -> Partial {
     return Partial(func, bound_args);
 }
 
 /// Cumulatively applies folder_fn of two arguments to the items of an iterable,
 /// reducing the sequence to a single final value.
 /// Python reference: functools.reduce(function, iterable[, initializer])
-def reduce(items, initial, folder_fn) {
+pub fn reduce(items: any, initial: any, folder_fn: any) -> any {
     var acc = initial;
     for item in items {
         acc = folder_fn(acc, item);
@@ -98,187 +117,205 @@ def reduce(items, initial, folder_fn) {
 
 /// Statistics describing an LruCache instance.
 /// Python reference: functools._CacheInfo(hits, misses, maxsize, currsize)
-class CacheInfo {
-    self(hits: i64, misses: i64, maxsize: i64, currsize: i64) {
-        self.hits = hits;
-        self.misses = misses;
-        self.maxsize = maxsize;
-        self.currsize = currsize;
-    }
+pub struct CacheInfo : IValue {
+    pub:
+        hits:     i64;
+        misses:   i64;
+        maxsize:  i64;
+        currsize: i64;
 
-    def to_string(self) -> string {
-        return f"CacheInfo(hits={self.hits}, misses={self.misses}, maxsize={self.maxsize}, currsize={self.currsize})";
-    }
+        self(hits: i64, misses: i64, maxsize: i64, currsize: i64) {
+            self.hits = hits;
+            self.misses = misses;
+            self.maxsize = maxsize;
+            self.currsize = currsize;
+        }
+
+        fn to_string() -> str {
+            return f"CacheInfo(hits={self.hits}, misses={self.misses}, maxsize={self.maxsize}, currsize={self.currsize})";
+        }
 }
 
 /// Thread-safe / portable Least-Recently-Used (LRU) memoization cache.
 /// Evicts least recently accessed entries when capacity exceeds maxsize.
 /// Python reference: functools.lru_cache(maxsize=128, typed=False)
-class LruCache {
-    self(maxsize: i64 = 128) {
-        self._maxsize = maxsize;
-        self._cache = {};
-        self._order = [];
-        self._hits = 0;
-        self._misses = 0;
-    }
+pub struct LruCache : IValue {
+    pub:
+        _maxsize: i64;
+        _cache:   any;
+        _order:   any;
+        _hits:    i64;
+        _misses:  i64;
 
-    def len(self) -> i64 {
-        return len(self._order);
-    }
+        self(maxsize: i64 = 128) {
+            self._maxsize = maxsize;
+            self._cache = {};
+            self._order = [];
+            self._hits = 0;
+            self._misses = 0;
+        }
 
-    def is_empty(self) -> bool {
-        return len(self._order) == 0;
-    }
+        fn len() -> i64 {
+            return len(self._order);
+        }
 
-    def contains_key(self, key) -> bool {
-        return self._cache.contains_key(key);
-    }
+        fn is_empty() -> bool {
+            return len(self._order) == 0;
+        }
 
-    def _touch(self, key) {
-        var idx: i64 = -1;
-        let n: i64 = len(self._order);
-        for i in 0..<n {
-            if self._order[i] == key {
-                idx = i;
-                break;
+        fn contains_key(key: any) -> bool {
+            return self._cache.contains_key(key);
+        }
+
+        var fn _touch(key: any) {
+            var idx: i64 = -1;
+            let n: i64 = len(self._order);
+            for i in 0..<n {
+                if self._order[i] == key {
+                    idx = i;
+                    break;
+                }
+            }
+            if idx >= 0 {
+                self._order.remove_at(idx);
+                self._order.append(key);
             }
         }
-        if idx >= 0 {
-            self._order.remove_at(idx);
+
+        /// Looks up key in the LRU cache. Moves key to most-recently used position on hit.
+        var fn gets(key: any) -> any {
+            if self._cache.contains_key(key) {
+                self._hits = self._hits + 1;
+                self._touch(key);
+                return some(self._cache[key]);
+            }
+            self._misses = self._misses + 1;
+            return none;
+        }
+
+        /// Inserts or updates an entry in the LRU cache. Evicts oldest entry if capacity exceeded.
+        var fn put(key: any, val: any) {
+            if self._cache.contains_key(key) {
+                self._cache[key] = val;
+                self._touch(key);
+                return;
+            }
+
+            if self._maxsize > 0 && len(self._order) >= self._maxsize {
+                let oldest_key = self._order[0];
+                self._order.remove_at(0);
+                self._cache.remove(oldest_key);
+            }
+
             self._order.append(key);
-        }
-    }
-
-    /// Looks up key in the LRU cache. Moves key to most-recently used position on hit.
-    def gets(self, key) {
-        if self._cache.contains_key(key) {
-            self._hits = self._hits + 1;
-            self._touch(key);
-            return some(self._cache[key]);
-        }
-        self._misses = self._misses + 1;
-        return none;
-    }
-
-    /// Inserts or updates an entry in the LRU cache. Evicts oldest entry if capacity exceeded.
-    def put(self, key, val) {
-        if self._cache.contains_key(key) {
             self._cache[key] = val;
-            self._touch(key);
-            return;
         }
 
-        if self._maxsize > 0 and len(self._order) >= self._maxsize {
-            let oldest_key = self._order[0];
-            self._order.remove_at(0);
-            self._cache.remove(oldest_key);
+        /// Retrieves an entry or computes it using computer_fn on cache miss.
+        var fn get_or_compute(key: any, computer_fn: any) -> any {
+            if self._cache.contains_key(key) {
+                self._hits = self._hits + 1;
+                self._touch(key);
+                return self._cache[key];
+            }
+
+            self._misses = self._misses + 1;
+            let computed = computer_fn(key);
+            self.put(key, computed);
+            return computed;
         }
 
-        self._order.append(key);
-        self._cache[key] = val;
-    }
-
-    /// Retrieves an entry or computes it using computer_fn on cache miss.
-    def get_or_compute(self, key, computer_fn) {
-        if self._cache.contains_key(key) {
-            self._hits = self._hits + 1;
-            self._touch(key);
-            return self._cache[key];
+        /// Returns hit/miss statistics for this cache.
+        fn cache_info() -> CacheInfo {
+            return CacheInfo(self._hits, self._misses, self._maxsize, len(self._order));
         }
 
-        self._misses = self._misses + 1;
-        let computed = computer_fn(key);
-        self.put(key, computed);
-        return computed;
-    }
-
-    /// Returns hit/miss statistics for this cache.
-    def cache_info(self) -> CacheInfo {
-        return CacheInfo(self._hits, self._misses, self._maxsize, len(self._order));
-    }
-
-    /// Clears the cache and resets performance counters.
-    def cache_clear(self) {
-        self._cache = {};
-        self._order = [];
-        self._hits = 0;
-        self._misses = 0;
-    }
+        /// Clears the cache and resets performance counters.
+        var fn cache_clear() {
+            self._cache = {};
+            self._order = [];
+            self._hits = 0;
+            self._misses = 0;
+        }
 }
 
 /// Constructs an LRU cache with the specified maximum capacity.
 /// Python reference: functools.lru_cache
-def lru_cache(maxsize: i64 = 128) -> LruCache {
+pub fn lru_cache(maxsize: i64 = 128) -> LruCache {
     return LruCache(maxsize);
 }
 
 /// Unbounded memoization cache. Simple wrapper around an in-memory dictionary.
 /// Python reference: functools.cache (Python 3.9+)
-class Cache {
-    self() {
-        self._data = {};
-        self._hits = 0;
-        self._misses = 0;
-    }
+pub struct Cache : IValue {
+    pub:
+        _data:   any;
+        _hits:   i64;
+        _misses: i64;
 
-    def len(self) -> i64 {
-        return len(self._data.keys());
-    }
-
-    def contains_key(self, key) -> bool {
-        return self._data.contains_key(key);
-    }
-
-    def gets(self, key) {
-        if self._data.contains_key(key) {
-            self._hits = self._hits + 1;
-            return some(self._data[key]);
+        self() {
+            self._data = {};
+            self._hits = 0;
+            self._misses = 0;
         }
-        self._misses = self._misses + 1;
-        return none;
-    }
 
-    def put(self, key, val) {
-        self._data[key] = val;
-    }
-
-    def get_or_compute(self, key, computer_fn) {
-        if self._data.contains_key(key) {
-            self._hits = self._hits + 1;
-            return self._data[key];
+        fn len() -> i64 {
+            return len(self._data.keys());
         }
-        self._misses = self._misses + 1;
-        let res = computer_fn(key);
-        self._data[key] = res;
-        return res;
-    }
 
-    def clear(self) {
-        self._data = {};
-        self._hits = 0;
-        self._misses = 0;
-    }
+        fn contains_key(key: any) -> bool {
+            return self._data.contains_key(key);
+        }
 
-    def cache_info(self) -> CacheInfo {
-        return CacheInfo(self._hits, self._misses, 0, len(self._data.keys()));
-    }
+        var fn gets(key: any) -> any {
+            if self._data.contains_key(key) {
+                self._hits = self._hits + 1;
+                return some(self._data[key]);
+            }
+            self._misses = self._misses + 1;
+            return none;
+        }
+
+        var fn put(key: any, val: any) {
+            self._data[key] = val;
+        }
+
+        var fn get_or_compute(key: any, computer_fn: any) -> any {
+            if self._data.contains_key(key) {
+                self._hits = self._hits + 1;
+                return self._data[key];
+            }
+            self._misses = self._misses + 1;
+            let res = computer_fn(key);
+            self._data[key] = res;
+            return res;
+        }
+
+        var fn clear() {
+            self._data = {};
+            self._hits = 0;
+            self._misses = 0;
+        }
+
+        fn cache_info() -> CacheInfo {
+            return CacheInfo(self._hits, self._misses, 0, len(self._data.keys()));
+        }
 }
 
 /// Constructs an unbounded memoization cache.
 /// Python reference: functools.cache
-def cache() -> Cache {
+pub fn cache() -> Cache {
     return Cache();
 }
 
 /// Binary mathematical function composition: (f ∘ g)(x) = f(g(x)).
-def compose(f, g) {
+pub fn compose(f: any, g: any) -> any {
     return (x) => f(g(x));
 }
 
 /// Composes a sequence of unary functions from right to left:
 /// compose_all([f, g, h])(x) = f(g(h(x)))
-def compose_all(fn_list) {
+pub fn compose_all(fn_list: any) -> any {
     return (initial_val) => {
         var acc = initial_val;
         let n: i64 = len(fn_list);
@@ -294,7 +331,7 @@ def compose_all(fn_list) {
 
 /// Functional pipeline / threading: pipes a value through a sequence of unary functions from left to right:
 /// pipe(x, [f, g, h]) = h(g(f(x)))
-def pipe(initial_val, fn_list) {
+pub fn pipe(initial_val: any, fn_list: any) -> any {
     var acc = initial_val;
     for func in fn_list {
         acc = func(acc);
@@ -303,85 +340,93 @@ def pipe(initial_val, fn_list) {
 }
 
 /// Currying transformation for binary function: (a, b) -> c into a -> (b -> c).
-def curry2(fn) {
-    return (a) => (b) => fn(a, b);
+pub fn curry2(func: any) -> any {
+    return (a) => (b) => func(a, b);
 }
 
 /// Currying transformation for ternary function: (a, b, c) -> d into a -> (b -> (c -> d)).
-def curry3(fn) {
-    return (a) => (b) => (c) => fn(a, b, c);
+pub fn curry3(func: any) -> any {
+    return (a) => (b) => (c) => func(a, b, c);
 }
 
-/// Reverses the two arguments to a binary function: flip(fn)(a, b) = fn(b, a).
-def flip(fn) {
-    return (a, b) => fn(b, a);
+/// Reverses the two arguments to a binary function: flip(func)(a, b) = func(b, a).
+pub fn flip(func: any) -> any {
+    return (a, b) => func(b, a);
 }
 
 /// Identity function: returns its argument unchanged.
-def identity(x) {
+pub fn identity(x: any) -> any {
     return x;
 }
 
 /// Constant function: returns a function that ignores its argument and always returns val.
-def const_fn(val) {
+pub fn const_fn(val: any) -> any {
     return (_) => val;
 }
 
 /// Single-dispatch generic function registry based on runtime value types.
 /// Python reference: functools.singledispatch
-class SingleDispatch {
-    self(default_fn) {
-        self._default = default_fn;
-        self._registry = {};
-    }
+pub struct SingleDispatch : IValue {
+    pub:
+        _default:  any;
+        _registry: any;
 
-    /// Registers a specialized handler for a given runtime type name ("i64", "f64", "str", "bool", "list", "map", etc.).
-    def register(self, type_name: string, handler_fn) {
-        self._registry[type_name] = handler_fn;
-    }
-
-    /// Dispatches execution based on the runtime type of the first argument.
-    def invoke(self, arg) {
-        let ty: string = typeof(arg);
-        if self._registry.contains_key(ty) {
-            let handler = self._registry[ty];
-            return handler(arg);
+        self(default_fn: any) {
+            self._default = default_fn;
+            self._registry = {};
         }
-        let def_fn = self._default;
-        return def_fn(arg);
-    }
 
-    /// Returns the registered handler for the type name, or the default handler.
-    def dispatch(self, type_name: string) {
-        if self._registry.contains_key(type_name) {
-            return self._registry[type_name];
+        /// Registers a specialized handler for a given runtime type name ("i64", "f64", "str", "bool", "list", "map", etc.).
+        var fn register(type_name: str, handler_fn: any) {
+            self._registry[type_name] = handler_fn;
         }
-        return self._default;
-    }
+
+        /// Dispatches execution based on the runtime type of the first argument.
+        fn invoke(arg: any) -> any {
+            let ty: str = type_of(arg);
+            if self._registry.contains_key(ty) {
+                let handler = self._registry[ty];
+                return handler(arg);
+            }
+            let def_fn = self._default;
+            return def_fn(arg);
+        }
+
+        /// Returns the registered handler for the type name, or the default handler.
+        fn dispatch(type_name: str) -> any {
+            if self._registry.contains_key(type_name) {
+                return self._registry[type_name];
+            }
+            return self._default;
+        }
 }
 
 /// Constructs a single-dispatch generic function registry with the given default function.
 /// Python reference: functools.singledispatch
-def singledispatch(default_fn) -> SingleDispatch {
+pub fn singledispatch(default_fn: any) -> SingleDispatch {
     return SingleDispatch(default_fn);
 }
 
 /// Key wrapper enabling Python-style custom comparison functions to be used in sorting.
 /// Python reference: functools.cmp_to_key(mycmp)
-class KeyWrapper {
-    self(obj, cmp_fn) {
-        self.obj = obj;
-        self._cmp = cmp_fn;
-    }
+pub struct KeyWrapper : IValue {
+    pub:
+        obj:  any;
+        _cmp: any;
 
-    def compare(self, other) -> i64 {
-        let f = self._cmp;
-        return f(self.obj, other.obj);
-    }
+        self(obj: any, cmp_fn: any) {
+            self.obj = obj;
+            self._cmp = cmp_fn;
+        }
+
+        fn compare(other: any) -> i64 {
+            let f = self._cmp;
+            return f(self.obj, other.obj);
+        }
 }
 
 /// Transforms an old-style comparison function into a key-generating function.
 /// Python reference: functools.cmp_to_key
-def cmp_to_key(cmp_fn) {
+pub fn cmp_to_key(cmp_fn: any) -> any {
     return (item) => KeyWrapper(item, cmp_fn);
 }

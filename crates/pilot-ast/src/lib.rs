@@ -1035,6 +1035,8 @@ pub struct AstArena {
     pub node_quote_depths: std::collections::HashMap<u32, u32>,
     /// Provenance origin across macro and patch expansions.
     pub node_expansion_origins: std::collections::HashMap<u32, ExpansionOrigin>,
+    /// Module path symbol associated with `FromImportDecl` nodes (`use Pkg.{A, B};` / `from Pkg import A, B;`).
+    pub from_import_paths: std::collections::HashMap<u32, SymbolId>,
 }
 
 impl AstArena {
@@ -1086,6 +1088,7 @@ impl AstArena {
             node_contexts: std::collections::HashMap::new(),
             node_quote_depths: std::collections::HashMap::new(),
             node_expansion_origins: std::collections::HashMap::new(),
+            from_import_paths: std::collections::HashMap::new(),
         }
     }
 

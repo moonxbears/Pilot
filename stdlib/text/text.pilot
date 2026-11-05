@@ -1,189 +1,204 @@
 // SPDX-License-Identifier: MIT
 // std.text — Zero-Copy UTF-8 StrSlice Views (`SliceBuffer<u8>`), Comptime DFA Regex & String Algorithms
 
+pub pkg Pilot.Text;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+
 // Zero-copy UTF-8 string view backed directly by unmanaged/mmap `SliceBuffer<u8>`
 // Native runtime optimizations provided by pilot_rt (C-ABI FFI)
 extern "c" lib "pilot_rt" {
-    def __dfa_is_match(pattern: any, text: str) -> bool;
-    def __dfa_find(pattern: any, text: str, start: i64) -> any;
-    def __dfa_find_all(pattern: any, text: str) -> List[str];
-    def __dfa_find_spans(pattern: any, text: str) -> any;
-    def __dfa_split(pattern: any, text: str) -> List[str];
-    def __dfa_replace_all(pattern: any, text: str, replacement: str) -> str;
-    def __slice_get(buf: any, idx: i64) -> any;
-    def __slice_ptr(buf: any) -> i64;
-    def __slice_subview(buf: any, start: i64, length: i64) -> any;
-    def __utf8_encode_slice(text: str) -> any;
-    def __utf8_decode_slice(buf: any) -> str;
-    def __utf8_is_valid_boundary(buf: any, idx: i64) -> bool;
-    def __utf8_rune_count(buf: any) -> i64;
+    fn __dfa_is_match(pattern: any, text: str) -> bool;
+    fn __dfa_find(pattern: any, text: str, start: i64) -> any;
+    fn __dfa_find_all(pattern: any, text: str) -> str[];
+    fn __dfa_find_spans(pattern: any, text: str) -> any;
+    fn __dfa_split(pattern: any, text: str) -> str[];
+    fn __dfa_replace_all(pattern: any, text: str, replacement: str) -> str;
+    fn __slice_get(buf: any, idx: i64) -> any;
+    fn __slice_ptr(buf: any) -> i64;
+    fn __slice_subview(buf: any, start: i64, length: i64) -> any;
+    fn __utf8_encode_slice(text: str) -> any;
+    fn __utf8_decode_slice(buf: any) -> str;
+    fn __utf8_is_valid_boundary(buf: any, idx: i64) -> bool;
+    fn __utf8_rune_count(buf: any) -> i64;
 }
 
-class StrSlice {
-    self(utf8_buf) {
-        self._buf = utf8_buf;
-    }
+pub struct StrSlice : IValue {
+    pub:
+        _buf: any;
 
-    def byte_len(self) -> i64 {
-        return len(self._buf);
-    }
-
-    def data_ptr(self) -> i64 {
-        return __slice_ptr(self._buf);
-    }
-
-    def is_empty(self) -> bool {
-        return len(self._buf) == 0;
-    }
-
-    def rune_count(self) -> i64 {
-        return __utf8_rune_count(self._buf);
-    }
-
-    def is_char_boundary(self, byte_offset: i64) -> bool {
-        return __utf8_is_valid_boundary(self._buf, byte_offset);
-    }
-
-    def byte_at(self, idx: i64) {
-        return __slice_get(self._buf, idx);
-    }
-
-    // Zero-copy UTF-8 sub-slice (`DataPtr + start_byte`) returning `StrSlice?` (`none` if invalid UTF-8 boundary)
-    def subslice(self, start_byte: i64, byte_length: i64) {
-        let total: i64 = len(self._buf);
-        if start_byte < 0 or byte_length < 0 or (start_byte + byte_length) > total {
-            return none;
+        self(utf8_buf: any) {
+            self._buf = utf8_buf;
         }
-        if !__utf8_is_valid_boundary(self._buf, start_byte) or !__utf8_is_valid_boundary(self._buf, start_byte + byte_length) {
-            return none;
+
+        fn byte_len() -> i64 {
+            return len(self._buf);
         }
-        let view = __slice_subview(self._buf, start_byte, byte_length);
-        return some(StrSlice(view));
-    }
 
-    def to_str(self) -> str {
-        return __utf8_decode_slice(self._buf);
-    }
+        fn data_ptr() -> i64 {
+            return __slice_ptr(self._buf);
+        }
 
-    def raw_buffer(self) {
-        return self._buf;
-    }
+        fn is_empty() -> bool {
+            return len(self._buf) == 0;
+        }
+
+        fn rune_count() -> i64 {
+            return __utf8_rune_count(self._buf);
+        }
+
+        fn is_char_boundary(byte_offset: i64) -> bool {
+            return __utf8_is_valid_boundary(self._buf, byte_offset);
+        }
+
+        fn byte_at(idx: i64) -> any {
+            return __slice_get(self._buf, idx);
+        }
+
+        // Zero-copy UTF-8 sub-slice (`DataPtr + start_byte`) returning `StrSlice?` (`none` if invalid UTF-8 boundary)
+        fn subslice(start_byte: i64, byte_length: i64) -> StrSlice? {
+            let total: i64 = len(self._buf);
+            if start_byte < 0 || byte_length < 0 || (start_byte + byte_length) > total {
+                return none;
+            }
+            if !__utf8_is_valid_boundary(self._buf, start_byte) || !__utf8_is_valid_boundary(self._buf, start_byte + byte_length) {
+                return none;
+            }
+            let view = __slice_subview(self._buf, start_byte, byte_length);
+            return some(StrSlice(view));
+        }
+
+        fn to_str() -> str {
+            return __utf8_decode_slice(self._buf);
+        }
+
+        fn raw_buffer() -> any {
+            return self._buf;
+        }
 }
 
-def str_slice(text: str) {
+pub fn str_slice(text: str) -> StrSlice {
     return StrSlice(__utf8_encode_slice(text));
 }
 
-def as_utf8_slice(text: str) {
+pub fn as_utf8_slice(text: str) -> any {
     return __utf8_encode_slice(text);
 }
 
-def str_slice_from_bytes(utf8_buf) {
+pub fn str_slice_from_bytes(utf8_buf: any) -> StrSlice {
     return StrSlice(utf8_buf);
 }
 
 // Comptime-compatible Thompson NFA -> Powerset DFA Regex Wrapper
-class Regex {
-    self(pattern_or_dfa) {
-        if type_of(pattern_or_dfa) == "string" {
-            self.dfa = compile_regex(pattern_or_dfa);
-        } else {
-            self.dfa = pattern_or_dfa;
+pub struct Regex : IValue {
+    pub:
+        dfa: any;
+
+        self(pattern_or_dfa: any) {
+            if type_of(pattern_or_dfa) == "string" {
+                self.dfa = compile_regex(pattern_or_dfa);
+            } else {
+                self.dfa = pattern_or_dfa;
+            }
         }
-    }
 
-    def pattern(self) -> str {
-        return self.dfa.pattern;
-    }
+        fn pattern() -> str {
+            return self.dfa.pattern;
+        }
 
-    def state_count(self) -> i64 {
-        return self.dfa.state_count;
-    }
+        fn state_count() -> i64 {
+            return self.dfa.state_count;
+        }
 
-    def is_match(self, text: str) -> bool {
-        return __dfa_is_match(self.dfa, text);
-    }
+        fn is_match(text: str) -> bool {
+            return __dfa_is_match(self.dfa, text);
+        }
 
-    def find(self, text: str, start_idx: i64 = 0) {
-        return __dfa_find(self.dfa, text, start_idx);
-    }
+        fn find(text: str, start_idx: i64 = 0) -> any {
+            return __dfa_find(self.dfa, text, start_idx);
+        }
 
-    def find_all(self, text: str) {
-        return __dfa_find_all(self.dfa, text);
-    }
+        fn find_all(text: str) -> str[] {
+            return __dfa_find_all(self.dfa, text);
+        }
 
-    def find_spans(self, text: str) {
-        return __dfa_find_spans(self.dfa, text);
-    }
+        fn find_spans(text: str) -> any {
+            return __dfa_find_spans(self.dfa, text);
+        }
 
-    def replace_all(self, text: str, replacement: str) -> str {
-        return __dfa_replace_all(self.dfa, text, replacement);
-    }
+        fn replace_all(text: str, replacement: str) -> str {
+            return __dfa_replace_all(self.dfa, text, replacement);
+        }
 
-    def split(self, text: str) {
-        return __dfa_split(self.dfa, text);
-    }
+        fn split(text: str) -> str[] {
+            return __dfa_split(self.dfa, text);
+        }
 }
 
-def regex(pattern: str) {
+pub fn regex(pattern: str) -> any {
     return compile_regex(pattern);
 }
 
-def regex_is_match(re_or_pat, text: str) -> bool {
+pub fn regex_is_match(re_or_pat: any, text: str) -> bool {
     return __dfa_is_match(re_or_pat, text);
 }
 
-def regex_find(re_or_pat, text: str, start_idx: i64 = 0) {
+pub fn regex_find(re_or_pat: any, text: str, start_idx: i64 = 0) -> any {
     return __dfa_find(re_or_pat, text, start_idx);
 }
 
-def regex_find_all(re_or_pat, text: str) {
+pub fn regex_find_all(re_or_pat: any, text: str) -> str[] {
     return __dfa_find_all(re_or_pat, text);
 }
 
-def regex_find_spans(re_or_pat, text: str) {
+pub fn regex_find_spans(re_or_pat: any, text: str) -> any {
     return __dfa_find_spans(re_or_pat, text);
 }
 
-def regex_replace_all(re_or_pat, text: str, replacement: str) -> str {
+pub fn regex_replace_all(re_or_pat: any, text: str, replacement: str) -> str {
     return __dfa_replace_all(re_or_pat, text, replacement);
 }
 
-def regex_split(re_or_pat, text: str) {
+pub fn regex_split(re_or_pat: any, text: str) -> str[] {
     return __dfa_split(re_or_pat, text);
 }
 
 // Pure String Manipulation Utilities
-def trim(s: str) -> str {
+pub fn trim(s: str) -> str {
     return s.trim();
 }
 
-def trim_start(s: str) -> str {
+pub fn trim_start(s: str) -> str {
     return s.trim_start();
 }
 
-def trim_end(s: str) -> str {
+pub fn trim_end(s: str) -> str {
     return s.trim_end();
 }
 
-def to_upper(s: str) -> str {
+pub fn to_upper(s: str) -> str {
     return s.to_upper();
 }
 
-def to_lower(s: str) -> str {
+pub fn to_lower(s: str) -> str {
     return s.to_lower();
 }
 
-def split(s: str, sep: str = " ") {
+pub fn split(s: str, sep: str = " ") -> any {
     return s.split(sep);
 }
 
-def lines(s: str) {
+pub fn lines(s: str) -> any {
     let normalized = s.replace("\r\n", "\n");
     return normalized.split("\n");
 }
 
-def join(parts, sep: str = "") -> str {
+pub fn join(parts: any, sep: str = "") -> str {
     var out: str = "";
     var first: bool = true;
     for p in parts {
@@ -196,31 +211,31 @@ def join(parts, sep: str = "") -> str {
     return out;
 }
 
-def replace(s: str, old_sub: str, new_sub: str) -> str {
+pub fn replace(s: str, old_sub: str, new_sub: str) -> str {
     return s.replace(old_sub, new_sub);
 }
 
-def index_of(s: str, sub: str, start: i64 = 0) -> i64 {
+pub fn index_of(s: str, sub: str, start: i64 = 0) -> i64 {
     return s.index_of(sub, start);
 }
 
-def last_index_of(s: str, sub: str) -> i64 {
+pub fn last_index_of(s: str, sub: str) -> i64 {
     return s.last_index_of(sub);
 }
 
-def contains(s: str, sub: str) -> bool {
+pub fn contains(s: str, sub: str) -> bool {
     return s.contains(sub);
 }
 
-def starts_with(s: str, prefix: str) -> bool {
+pub fn starts_with(s: str, prefix: str) -> bool {
     return s.starts_with(prefix);
 }
 
-def ends_with(s: str, suffix: str) -> bool {
+pub fn ends_with(s: str, suffix: str) -> bool {
     return s.ends_with(suffix);
 }
 
-def pad_left(s: str, width: i64, fill_char: str = " ") -> str {
+pub fn pad_left(s: str, width: i64, fill_char: str = " ") -> str {
     let cur: i64 = len(s);
     if cur >= width {
         return s;
@@ -229,7 +244,7 @@ def pad_left(s: str, width: i64, fill_char: str = " ") -> str {
     return (ch * (width - cur)) + s;
 }
 
-def pad_right(s: str, width: i64, fill_char: str = " ") -> str {
+pub fn pad_right(s: str, width: i64, fill_char: str = " ") -> str {
     let cur: i64 = len(s);
     if cur >= width {
         return s;
@@ -240,7 +255,7 @@ def pad_right(s: str, width: i64, fill_char: str = " ") -> str {
 
 // Generates a sequence of strings from `start` to `end` using bijective alphabetical enumeration.
 // Supports: "a".."z", "z".."a", "a".."zzza", "a".."Z" (52 combos), "A".."z", "Z".."a", "z".."A".
-def str_range(start: str, end: str, inclusive: bool = true) {
+pub fn str_range(start: str, end: str, inclusive: bool = true) -> any {
     if inclusive {
         return start..end;
     } else {

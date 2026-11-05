@@ -2,53 +2,61 @@
 // std.fs — Fallible (`! IoError`) Filesystem Operations, Zero-Copy `mmap` Views, Directory Walk & Globbing
 // Participates seamlessly in `fn!?(...)` transactional Copy-on-Write dry-runs (`EffectPlan`).
 
-from std.io import IoError;
-import std.path as std_path;
+pub pkg Pilot.Io.Fs;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+use Pilot.Io.*;
+use Pilot.Io.Path as std_path;
 
 // Native runtime optimizations provided by pilot_rt (C-ABI FFI)
 extern "c" lib "pilot_rt" {
-    def __fs_exists(path: str) -> bool;
-    def __fs_is_file(path: str) -> bool;
-    def __fs_is_dir(path: str) -> bool;
-    def __fs_file_size(path: str) -> i64;
-    def __fs_read_text(path: str) -> any;
-    def __fs_read_bytes(path: str) -> any;
-    def __fs_list_dir(path: str) -> List[str];
-    def __fs_walk_dir(path: str) -> List[str];
-    def __fs_mmap_read(path: str) -> any;
-    def __fs_mmap_rw(path: str) -> any;
-    def __fs_write_text(path: str, content: str) -> any;
-    def __fs_copy_file(src: str, dst: str) -> any;
-    def __fs_move_file(src: str, dst: str) -> any;
-    def __fs_remove_file(path: str) -> any;
-    def __fs_mkdir(path: str) -> any;
-    def __fs_rmdir(path: str) -> any;
-    def __os_cwd() -> str;
-    def __os_temp_dir() -> str;
-    def __dfa_is_match(pattern: any, text: str) -> bool;
+    fn __fs_exists(path: str) -> bool;
+    fn __fs_is_file(path: str) -> bool;
+    fn __fs_is_dir(path: str) -> bool;
+    fn __fs_file_size(path: str) -> any;
+    fn __fs_read_text(path: str) -> any;
+    fn __fs_read_bytes(path: str) -> any;
+    fn __fs_list_dir(path: str) -> any;
+    fn __fs_walk_dir(path: str) -> any;
+    fn __fs_mmap_read(path: str, elem_type: str = "u8") -> any;
+    fn __fs_mmap_rw(path: str, capacity: i64 = 0, elem_type: str = "u8") -> any;
+    fn __fs_write_text(path: str, content: str, append: bool = false) -> any;
+    fn __fs_copy_file(src: str, dst: str, overwrite: bool = false) -> any;
+    fn __fs_move_file(src: str, dst: str, overwrite: bool = false) -> any;
+    fn __fs_remove_file(path: str) -> any;
+    fn __fs_mkdir(path: str, recursive: bool = true) -> any;
+    fn __fs_rmdir(path: str, recursive: bool = false) -> any;
+    fn __os_cwd() -> str;
+    fn __os_temp_dir() -> str;
+    fn __dfa_is_match(pattern: any, text: str) -> bool;
 }
 
-def exists(path: str) -> bool {
+pub fn exists(path: str) -> bool {
     return __fs_exists(path);
 }
 
-def is_file(path: str) -> bool {
+pub fn is_file(path: str) -> bool {
     return __fs_is_file(path);
 }
 
-def is_dir(path: str) -> bool {
+pub fn is_dir(path: str) -> bool {
     return __fs_is_dir(path);
 }
 
-def cwd() -> str {
+pub fn cwd() -> str {
     return std_path.normalize(__os_cwd());
 }
 
-def temp_dir() -> str {
+pub fn temp_dir() -> str {
     return std_path.normalize(__os_temp_dir());
 }
 
-def file_size(path: str) -> i64 ! IoError {
+pub fn file_size(path: str) -> i64 ! IoError {
     let res = __fs_file_size(path);
     if __result_is_err(res) {
         return fail(__result_unwrap_err(res));
@@ -56,7 +64,7 @@ def file_size(path: str) -> i64 ! IoError {
     return ok(__result_unwrap_ok(res));
 }
 
-def read_text(path: str) -> str ! IoError {
+pub fn read_text(path: str) -> str ! IoError {
     let res = __fs_read_text(path);
     if __result_is_err(res) {
         return fail(__result_unwrap_err(res));
@@ -64,13 +72,13 @@ def read_text(path: str) -> str ! IoError {
     return ok(__result_unwrap_ok(res));
 }
 
-def read_lines(path: str) -> [str] ! IoError {
+pub fn read_lines(path: str) -> str[] ! IoError {
     let content = read_text(path)?;
     let norm = content.replace("\r\n", "\n");
     return ok(norm.split("\n"));
 }
 
-def read_bytes(path: str) -> SliceBuffer ! IoError {
+pub fn read_bytes(path: str) -> SliceBuffer<u8> ! IoError {
     let res = __fs_read_bytes(path);
     if __result_is_err(res) {
         return fail(__result_unwrap_err(res));
@@ -78,7 +86,7 @@ def read_bytes(path: str) -> SliceBuffer ! IoError {
     return ok(__result_unwrap_ok(res));
 }
 
-def write_text(path: str, content: str) -> i64 ! IoError {
+pub fn write_text(path: str, content: str) -> i64 ! IoError {
     let res = __fs_write_text(path, content, false);
     if __result_is_err(res) {
         return fail(__result_unwrap_err(res));
@@ -86,7 +94,7 @@ def write_text(path: str, content: str) -> i64 ! IoError {
     return ok(__result_unwrap_ok(res));
 }
 
-def append_text(path: str, content: str) -> i64 ! IoError {
+pub fn append_text(path: str, content: str) -> i64 ! IoError {
     let res = __fs_write_text(path, content, true);
     if __result_is_err(res) {
         return fail(__result_unwrap_err(res));
@@ -94,7 +102,7 @@ def append_text(path: str, content: str) -> i64 ! IoError {
     return ok(__result_unwrap_ok(res));
 }
 
-def remove_file(path: str) -> bool ! IoError {
+pub fn remove_file(path: str) -> bool ! IoError {
     let res = __fs_remove_file(path);
     if __result_is_err(res) {
         return fail(__result_unwrap_err(res));
@@ -102,7 +110,7 @@ def remove_file(path: str) -> bool ! IoError {
     return ok(__result_unwrap_ok(res));
 }
 
-def copy_file(src: str, dst: str, overwrite: bool = false) -> bool ! IoError {
+pub fn copy_file(src: str, dst: str, overwrite: bool = false) -> bool ! IoError {
     let res = __fs_copy_file(src, dst, overwrite);
     if __result_is_err(res) {
         return fail(__result_unwrap_err(res));
@@ -110,7 +118,7 @@ def copy_file(src: str, dst: str, overwrite: bool = false) -> bool ! IoError {
     return ok(__result_unwrap_ok(res));
 }
 
-def move_file(src: str, dst: str, overwrite: bool = false) -> bool ! IoError {
+pub fn move_file(src: str, dst: str, overwrite: bool = false) -> bool ! IoError {
     let res = __fs_move_file(src, dst, overwrite);
     if __result_is_err(res) {
         return fail(__result_unwrap_err(res));
@@ -118,7 +126,7 @@ def move_file(src: str, dst: str, overwrite: bool = false) -> bool ! IoError {
     return ok(__result_unwrap_ok(res));
 }
 
-def create_dir(path: str, recursive: bool = true) -> bool ! IoError {
+pub fn create_dir(path: str, recursive: bool = true) -> bool ! IoError {
     let res = __fs_mkdir(path, recursive);
     if __result_is_err(res) {
         return fail(__result_unwrap_err(res));
@@ -126,7 +134,7 @@ def create_dir(path: str, recursive: bool = true) -> bool ! IoError {
     return ok(__result_unwrap_ok(res));
 }
 
-def remove_dir(path: str, recursive: bool = false) -> bool ! IoError {
+pub fn remove_dir(path: str, recursive: bool = false) -> bool ! IoError {
     let res = __fs_rmdir(path, recursive);
     if __result_is_err(res) {
         return fail(__result_unwrap_err(res));
@@ -134,7 +142,7 @@ def remove_dir(path: str, recursive: bool = false) -> bool ! IoError {
     return ok(__result_unwrap_ok(res));
 }
 
-def list_dir(path: str) -> [str] ! IoError {
+pub fn list_dir(path: str) -> str[] ! IoError {
     let res = __fs_list_dir(path);
     if __result_is_err(res) {
         return fail(__result_unwrap_err(res));
@@ -142,7 +150,7 @@ def list_dir(path: str) -> [str] ! IoError {
     return ok(__result_unwrap_ok(res));
 }
 
-def walk_dir(path: str) -> [str] ! IoError {
+pub fn walk_dir(path: str) -> str[] ! IoError {
     let res = __fs_walk_dir(path);
     if __result_is_err(res) {
         return fail(__result_unwrap_err(res));
@@ -151,7 +159,7 @@ def walk_dir(path: str) -> [str] ! IoError {
 }
 
 // Zero-Copy Read-Only OS `mmap` File View (`SliceBuffer<u8>` or typed scalar view)
-def mmap_read(path: str, elem_type: str = "u8") -> SliceBuffer ! IoError {
+pub fn mmap_read(path: str, elem_type: str = "u8") -> SliceBuffer<u8> ! IoError {
     let res = __fs_mmap_read(path, elem_type);
     if __result_is_err(res) {
         return fail(__result_unwrap_err(res));
@@ -160,7 +168,7 @@ def mmap_read(path: str, elem_type: str = "u8") -> SliceBuffer ! IoError {
 }
 
 // Zero-Copy Read-Write OS `mmap` Shared File View
-def mmap_rw(path: str, capacity: i64, elem_type: str = "u8") -> SliceBuffer ! IoError {
+pub fn mmap_rw(path: str, capacity: i64, elem_type: str = "u8") -> SliceBuffer<u8> ! IoError {
     let res = __fs_mmap_rw(path, capacity, elem_type);
     if __result_is_err(res) {
         return fail(__result_unwrap_err(res));
@@ -169,7 +177,7 @@ def mmap_rw(path: str, capacity: i64, elem_type: str = "u8") -> SliceBuffer ! Io
 }
 
 // Pure Wildcard / Glob Matcher (PSF-2.0 CPython fnmatch scaffold converted to DFA regex)
-def fnmatch(name_str: str, pattern: str) -> bool {
+pub fn fnmatch(name_str: str, pattern: str) -> bool {
     var dfa_pat: str = "^";
     let n: i64 = len(pattern);
     var i: i64 = 0;
@@ -177,26 +185,26 @@ def fnmatch(name_str: str, pattern: str) -> bool {
         let ch = pattern[i..(i + 1)];
         if ch == "*" {
             dfa_pat = dfa_pat + ".*";
-        } elif ch == "?" {
+        } else if ch == "?" {
             dfa_pat = dfa_pat + ".";
-        } elif ch == "." or ch == "+" or ch == "(" or ch == ")" or ch == "^" or ch == "$" or ch == "|" or ch == "\\" {
+        } else if ch == "." || ch == "+" || ch == "(" || ch == ")" || ch == "^" || ch == "$" || ch == "|" || ch == "\\" {
             dfa_pat = dfa_pat + "\\" + ch;
-        } elif ch == "[" {
+        } else if ch == "[" {
             var j: i64 = i + 1;
-            if j < n and pattern[j..(j + 1)] == "!" {
+            if j < n && pattern[j..(j + 1)] == "!" {
                 j = j + 1;
             }
-            if j < n and pattern[j..(j + 1)] == "]" {
+            if j < n && pattern[j..(j + 1)] == "]" {
                 j = j + 1;
             }
-            while j < n and pattern[j..(j + 1)] != "]" {
+            while j < n && pattern[j..(j + 1)] != "]" {
                 j = j + 1;
             }
             if j >= n {
                 dfa_pat = dfa_pat + "\\[";
             } else {
                 var inner = pattern[(i + 1)..j];
-                if len(inner) > 0 and inner[0..1] == "!" {
+                if len(inner) > 0 && inner[0..1] == "!" {
                     inner = "^" + inner[1..len(inner)];
                 }
                 dfa_pat = dfa_pat + "[" + inner + "]";
@@ -212,7 +220,7 @@ def fnmatch(name_str: str, pattern: str) -> bool {
 }
 
 // Directory Globbing supporting both single-directory (`*.pilot`) and recursive (`**/*.pilot`) patterns
-def glob(root_dir: str, pattern: str) -> [str] ! IoError {
+pub fn glob(root_dir: str, pattern: str) -> str[] ! IoError {
     let norm_root = std_path.normalize(root_dir);
     let clean_pat = pattern.replace("\\", "/");
     let is_recursive: bool = clean_pat.contains("**");
@@ -224,7 +232,7 @@ def glob(root_dir: str, pattern: str) -> [str] ! IoError {
     };
 
     var leaf_pat: str = clean_pat;
-    if clean_pat[0..3] == "**/" {
+    if len(clean_pat) >= 3 && clean_pat[0..3] == "**/" {
         leaf_pat = clean_pat[3..len(clean_pat)];
     }
 
@@ -236,11 +244,11 @@ def glob(root_dir: str, pattern: str) -> [str] ! IoError {
         let fname_opt = std_path.file_name(norm_entry);
         let fname_str = if __opt_is_some(fname_opt) { __opt_unwrap(fname_opt) } else { rel_str };
 
-        if is_recursive and clean_pat != leaf_pat {
-            if fnmatch(fname_str, leaf_pat) or fnmatch(rel_str, leaf_pat) {
+        if is_recursive && clean_pat != leaf_pat {
+            if fnmatch(fname_str, leaf_pat) || fnmatch(rel_str, leaf_pat) {
                 matched.append(norm_entry);
             }
-        } elif fnmatch(rel_str, clean_pat) or fnmatch(fname_str, clean_pat) {
+        } else if fnmatch(rel_str, clean_pat) || fnmatch(fname_str, clean_pat) {
             matched.append(norm_entry);
         }
     }

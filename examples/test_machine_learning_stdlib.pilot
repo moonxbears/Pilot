@@ -1,30 +1,30 @@
 // SPDX-License-Identifier: MIT
-// Integration Test: std.scikit (Machine Learning)
+// Integration Test: Pilot.Scikit (Machine Learning)
 // Multi-OS validation for ML estimators, transformers, and evaluation metrics across Linux, Windows, macOS, Android, iOS, and WebAssembly.
 
-import std.scikit as skl;
-import std.numpy as np;
+use Pilot.Scikit as skl;
+use Pilot.Numpy as np;
 
-def test_preprocessing() {
-    print("=== Testing std.scikit Preprocessing ===");
+fn test_preprocessing() -> void {
+    print("=== Testing Pilot.Scikit Preprocessing ===");
 
     // 1. StandardScaler
     let X = [
         [10.0, 100.0],
         [20.0, 200.0],
-        [30.0, 300.0]
+        [30.0, 300.0],
     ];
-    let scaler = skl.StandardScaler();
+    var scaler = skl.StandardScaler();
     let scaled = scaler.fit_transform(X);
     assert(len(scaled) == 3, "scaled rows 3");
     assert(scaler.mean_[0] == 20.0, "mean col 0 is 20.0");
     assert(scaler.mean_[1] == 200.0, "mean col 1 is 200.0");
 
     let reconstructed = scaler.inverse_transform(scaled);
-    assert(reconstructed[1][0] >= 19.9 and reconstructed[1][0] <= 20.1, "reconstructed row 1 col 0");
+    assert(reconstructed[1][0] >= 19.9 && reconstructed[1][0] <= 20.1, "reconstructed row 1 col 0");
 
     // 2. MinMaxScaler
-    let min_max = skl.MinMaxScaler(0.0, 1.0);
+    var min_max = skl.MinMaxScaler(0.0, 1.0);
     let mm_scaled = min_max.fit_transform(X);
     assert(mm_scaled[0][0] == 0.0, "min normalized to 0.0");
     assert(mm_scaled[2][0] == 1.0, "max normalized to 1.0");
@@ -32,7 +32,7 @@ def test_preprocessing() {
 
     // 3. LabelEncoder
     let labels = ["cat", "dog", "cat", "bird", "dog"];
-    let le = skl.LabelEncoder();
+    var le = skl.LabelEncoder();
     let encoded = le.fit_transform(labels);
     assert(len(encoded) == 5, "encoded length 5");
     assert(encoded[0] == encoded[2], "identical classes have identical codes");
@@ -45,21 +45,21 @@ def test_preprocessing() {
     print("Preprocessing tests passed!");
 }
 
-def test_supervised_learning() {
-    print("=== Testing std.scikit Supervised Learning ===");
+fn test_supervised_learning() -> void {
+    print("=== Testing Pilot.Scikit Supervised Learning ===");
 
     // 1. LinearRegression: y = 2.0 * x0 + 3.0 * x1 + 5.0
-    var X_reg: [[f64]] = [];
-    var y_reg: [f64] = [];
-    for i in 0..<20 {
-        let x0 = float(i);
-        let x1 = float(i % 5);
+    var X_reg: f64[][] = [];
+    var y_reg: f64[] = [];
+    for i in 0..20 {
+        let x0 = f64(i);
+        let x1 = f64(i % 5);
         let y = 2.0 * x0 + 3.0 * x1 + 5.0;
         X_reg.append([x0, x1]);
         y_reg.append(y);
     }
 
-    let reg = skl.LinearRegression(true);
+    var reg = skl.LinearRegression(true);
     reg.fit(X_reg, y_reg);
     let preds = reg.predict(X_reg);
 
@@ -69,25 +69,31 @@ def test_supervised_learning() {
     assert(r2 > 0.95, "linear regression R2 is high");
 
     // 2. LogisticRegression: Binary Classification
-    var X_clf: [[f64]] = [];
-    var y_clf: [f64] = [];
+    var X_clf: f64[][] = [];
+    var y_clf: f64[] = [];
     // Class 0: centered around (1, 1)
-    X_clf.append([0.5, 0.5]); y_clf.append(0.0);
-    X_clf.append([1.0, 1.2]); y_clf.append(0.0);
-    X_clf.append([1.5, 0.8]); y_clf.append(0.0);
+    X_clf.append([0.5, 0.5]);
+    y_clf.append(0.0);
+    X_clf.append([1.0, 1.2]);
+    y_clf.append(0.0);
+    X_clf.append([1.5, 0.8]);
+    y_clf.append(0.0);
     // Class 1: centered around (5, 5)
-    X_clf.append([4.5, 5.0]); y_clf.append(1.0);
-    X_clf.append([5.2, 4.8]); y_clf.append(1.0);
-    X_clf.append([5.5, 5.5]); y_clf.append(1.0);
+    X_clf.append([4.5, 5.0]);
+    y_clf.append(1.0);
+    X_clf.append([5.2, 4.8]);
+    y_clf.append(1.0);
+    X_clf.append([5.5, 5.5]);
+    y_clf.append(1.0);
 
-    let clf = skl.LogisticRegression(0.2, 500);
+    var clf = skl.LogisticRegression(0.2, 500);
     clf.fit(X_clf, y_clf);
     let clf_preds = clf.predict(X_clf);
     let acc = skl.accuracy_score(y_clf, clf_preds);
     assert(acc == 1.0, "logistic regression separates trivial clusters");
 
     // 3. KNeighborsClassifier
-    let knn = skl.KNeighborsClassifier(3);
+    var knn = skl.KNeighborsClassifier(3);
     knn.fit(X_clf, y_clf);
     let knn_preds = knn.predict(X_clf);
     let knn_acc = skl.accuracy_score(y_clf, knn_preds);
@@ -96,11 +102,11 @@ def test_supervised_learning() {
     print("Supervised learning tests passed!");
 }
 
-def test_unsupervised_and_metrics() {
-    print("=== Testing std.scikit Clustering & Evaluation Metrics ===");
+fn test_unsupervised_and_metrics() -> void {
+    print("=== Testing Pilot.Scikit Clustering & Evaluation Metrics ===");
 
     // 1. KMeans Clustering
-    var X_clusters: [[f64]] = [];
+    var X_clusters: f64[][] = [];
     // Cluster 0: points near 0
     X_clusters.append([0.1, 0.2]);
     X_clusters.append([0.2, 0.1]);
@@ -110,7 +116,7 @@ def test_unsupervised_and_metrics() {
     X_clusters.append([9.9, 10.2]);
     X_clusters.append([10.2, 9.8]);
 
-    let km = skl.KMeans(2, 50);
+    var km = skl.KMeans(2, 50);
     km.fit(X_clusters);
     assert(len(km.cluster_centers_) == 2, "2 cluster centers identified");
     assert(km.inertia_ < 2.0, "tight cluster inertia");
@@ -141,10 +147,10 @@ def test_unsupervised_and_metrics() {
     print("Unsupervised learning & metrics tests passed!");
 }
 
-def main() {
-    print("Starting integration tests for std.scikit (Machine Learning)...");
+fn main() -> void {
+    print("Starting integration tests for Pilot.Scikit (Machine Learning)...");
     test_preprocessing();
     test_supervised_learning();
     test_unsupervised_and_metrics();
-    print("ALL TESTS IN std.scikit PASSED SUCCESSFULLY!");
+    print("ALL TESTS IN Pilot.Scikit PASSED SUCCESSFULLY!");
 }

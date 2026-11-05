@@ -1,92 +1,134 @@
-# ==============================================================================
-# Concept 05: Algebraic Class Composition (Class Math) & Typestate Classes
-# ==============================================================================
+// ==============================================================================
+// Concept 05: Algebraic Struct/Interface Composition & Typestate Machines
+// ==============================================================================
 
 println("==================================================");
-println(" PILOT SHOWCASE: Class Math & Typestates");
+println(" PILOT SHOWCASE: Algebraic Composition & Typestates");
 println("==================================================");
 
-# 1. Algebraic Class Composition (Class Math: |, -, &)
-println("\n--- 1. Algebraic Class Composition (Class Math) ---");
+// 1. Algebraic Bundle/Interface Composition (`*Bundle`, `|`, `&`, `-`)
+println("\n--- 1. Algebraic Struct & Interface Composition ---");
 
-class IdentityModule {
-    let username: str = "captain_eva";
-    def verify_token(self) {
-        return "TOKEN_VALID_992";
+interface IIdentifiable {
+    pub pure fn verify_token() -> str;
+}
+
+interface ISecurable {
+    pub pure fn check_clearance() -> str;
+}
+
+struct IdentityBundle : IValue {
+    pub var username: str = "captain_eva";
+
+    pub pure fn verify_token() -> str => "TOKEN_VALID_992";
+}
+
+struct SecurityBundle : IValue {
+    pub var clearance_ring: i64 = 5;
+
+    pub pure fn check_clearance() -> str => "LEVEL_5_CLEAR";
+}
+
+struct BillingBundle : IValue {
+    pub var credit_balance: f64 = 7500.0;
+
+    pub var fn deduct_credits(amount: f64) -> f64 {
+        .credit_balance = .credit_balance - amount;
+        return .credit_balance;
     }
 }
 
-class SecurityModule {
-    let permissions = [ "read_telemetry", "launch_thrusters" ];
-    def check_clearance(self) {
-        return "LEVEL_5_CLEAR";
+// Splice `*Bundle` carriers to satisfy composite interface contracts (`IIdentifiable`, `ISecurable`)
+struct Commander : IIdentifiable, ISecurable, IValue {
+    *IdentityBundle;
+    *SecurityBundle;
+
+    pub self() {
+        .username = "captain_eva";
+        .clearance_ring = 5;
     }
 }
 
-class BillingModule {
-    let credit_balance: float = 7500.0;
-    def deduct_credits(self, amount: float) {
-        self.credit_balance = self.credit_balance - amount;
-        return self.credit_balance;
-    }
-}
-
-# Union (|): Combines properties and methods from both classes
-class Commander = IdentityModule | SecurityModule;
-println("Defined Union: class Commander = IdentityModule | SecurityModule;");
+// Algebraic Type Composition (`|`, `&`, `-`)
+type RolePrincipal = Commander | IdentityBundle;
+type PrivilegedPrincipal = IIdentifiable & ISecurable;
+type RestrictedPrincipal = IdentityBundle - SecurityBundle;
 
 let cmd = Commander();
 println("Commander Instance Created:");
-println("  Username:        " + cmd.username);
-println("  Verify Token:    " + cmd.verify_token());
-println("  Permissions:     " + cmd.permissions);
-println("  Check Clearance: " + cmd.check_clearance());
+println(f"  Username:        {cmd.username}");
+println(f"  Verify Token:    {cmd.verify_token()}");
+println(f"  Clearance Ring:  {cmd.clearance_ring}");
+println(f"  Check Clearance: {cmd.check_clearance()}");
 
-# Subtraction (-): Removes specific traits or methods
-class GuestUser = IdentityModule - SecurityModule;
-println("\nDefined Subtraction: class GuestUser = IdentityModule - SecurityModule;");
-let guest = GuestUser();
-println("Guest Instance Created: Username=" + guest.username);
+struct GuestUser : IIdentifiable, IValue {
+    *IdentityBundle;
 
-
-# 2. Typestate Classes (Morphing Types & Compile-Time State Machines)
-println("\n--- 2. Typestate Classes (Morphing State Machines) ---");
-
-class NetworkSocket {
-    state Disconnected {
-        def connect(self, host: str, port: int) {
-            println("  [TRANSITION] Connecting to " + host + ":" + port + "...");
-            self.transition_to("Connected");
-            return self;
-        }
-    }
-
-    state Connected {
-        def transmit(self, message: str) {
-            println("  [TRANSMIT] Sending encrypted packet: '" + message + "'");
-            return "ACK: 200 OK";
-        }
-
-        def disconnect(self) {
-            println("  [TRANSITION] Closing socket and releasing buffer...");
-            self.transition_to("Disconnected");
-            return self;
-        }
+    pub self() {
+        .username = "guest_observer";
     }
 }
 
-let socket = NetworkSocket();
-println("Initial socket created. Current State: " + socket.current_state());
+let guest = GuestUser();
+println(f"\nGuest Instance Created: Username={guest.username}");
 
-# Morph state from Disconnected -> Connected
+// 2. Compile-Time Typestates (`state` State Machines)
+println("\n--- 2. Compile-Time Typestate Machines ---");
+
+state SocketPhase {
+    Disconnected,
+    Connected,
+}
+
+struct ConnectedSocket : IValue {
+    pub host: str;
+    pub port: i64;
+
+    pub self(host: str, port: i64) {
+        .host = host;
+        .port = port;
+    }
+
+    pub pure fn current_state() -> str => "Connected";
+
+    pub fn transmit(message: str) -> str {
+        println(f"  [TRANSMIT] Sending encrypted packet: '{message}'");
+        return "ACK: 200 OK";
+    }
+
+    pub fn disconnect() -> DisconnectedSocket {
+        println("  [TRANSITION] Closing socket and releasing buffer...");
+        return DisconnectedSocket("closed");
+    }
+}
+
+struct DisconnectedSocket : IValue {
+    pub endpoint: str;
+
+    pub self(endpoint: str) {
+        .endpoint = endpoint;
+    }
+
+    pub pure fn current_state() -> str => "Disconnected";
+
+    pub fn connect(host: str, port: i64) -> ConnectedSocket {
+        println(f"  [TRANSITION] Connecting to {host}:{port}...");
+        return ConnectedSocket(host, port);
+    }
+}
+
+let socket = DisconnectedSocket("unbound");
+println(f"Initial socket created. Current State: {socket.current_state()}");
+
+// Transition DisconnectedSocket -> ConnectedSocket
 let active_socket = socket.connect("api.pilot-lang.org", 443);
-println("Current State: " + active_socket.current_state());
+println(f"Current State: {active_socket.current_state()}");
 
 let reply = active_socket.transmit("GET /telemetry/stream HTTP/1.1");
-println("Server Response: " + reply);
+println(f"Server Response: {reply}");
 
-# Morph state from Connected -> Disconnected
+// Transition ConnectedSocket -> DisconnectedSocket
 let idle_socket = active_socket.disconnect();
-println("Current State: " + idle_socket.current_state());
+println(f"Current State: {idle_socket.current_state()}");
 
 println("\n>>> Concept 05 Demonstration Complete! <<<\n");

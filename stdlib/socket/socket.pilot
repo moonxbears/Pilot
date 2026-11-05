@@ -12,293 +12,335 @@
 //   - Android (bionic libc sockets)
 //   - WebAssembly (wasi_snapshot_preview1 / wasi-sockets)
 
-import os as std_os;
+pub pkg Pilot.Socket;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+use Pilot.Os as std_os;
 
 // Native runtime optimizations provided by pilot_rt (C-ABI FFI)
 extern "c" lib "pilot_rt" {
-    def __net_tcp_connect(host: str, port: i64) -> any;
-    def __net_tcp_listen(host: str, port: i64) -> any;
-    def __net_gethostname() -> str;
-    def __net_gethostbyname(host: str) -> str;
+    fn __net_tcp_connect(host: str, port: i64) -> any;
+    fn __net_tcp_listen(host: str, port: i64) -> any;
+    fn __net_gethostname() -> str;
+    fn __net_gethostbyname(host: str) -> str;
 }
 
 // Address Families
-const AF_UNSPEC: i64 = 0;
-const AF_UNIX: i64   = 1;
-const AF_INET: i64   = 2;
-const AF_INET6: i64  = 10;
+pub const AF_UNSPEC: i64 = 0;
+pub const AF_UNIX: i64   = 1;
+pub const AF_INET: i64   = 2;
+pub const AF_INET6: i64  = 10;
 
 // Socket Types
-const SOCK_STREAM: i64    = 1;
-const SOCK_DGRAM: i64     = 2;
-const SOCK_RAW: i64       = 3;
-const SOCK_RDM: i64       = 4;
-const SOCK_SEQPACKET: i64 = 5;
+pub const SOCK_STREAM: i64    = 1;
+pub const SOCK_DGRAM: i64     = 2;
+pub const SOCK_RAW: i64       = 3;
+pub const SOCK_RDM: i64       = 4;
+pub const SOCK_SEQPACKET: i64 = 5;
 
 // Protocols
-const IPPROTO_IP: i64   = 0;
-const IPPROTO_ICMP: i64 = 1;
-const IPPROTO_TCP: i64  = 6;
-const IPPROTO_UDP: i64  = 17;
-const IPPROTO_RAW: i64  = 255;
+pub const IPPROTO_IP: i64   = 0;
+pub const IPPROTO_ICMP: i64 = 1;
+pub const IPPROTO_TCP: i64  = 6;
+pub const IPPROTO_UDP: i64  = 17;
+pub const IPPROTO_RAW: i64  = 255;
 
 // Socket Options
-const SOL_SOCKET: i64   = 1;
-const SO_DEBUG: i64     = 1;
-const SO_REUSEADDR: i64 = 2;
-const SO_TYPE: i64      = 3;
-const SO_ERROR: i64     = 4;
-const SO_DONTROUTE: i64 = 5;
-const SO_BROADCAST: i64 = 6;
-const SO_SNDBUF: i64    = 7;
-const SO_RCVBUF: i64    = 8;
-const SO_KEEPALIVE: i64 = 9;
-const SO_OOBINLINE: i64 = 10;
-const TCP_NODELAY: i64  = 1;
+pub const SOL_SOCKET: i64   = 1;
+pub const SO_DEBUG: i64     = 1;
+pub const SO_REUSEADDR: i64 = 2;
+pub const SO_TYPE: i64      = 3;
+pub const SO_ERROR: i64     = 4;
+pub const SO_DONTROUTE: i64 = 5;
+pub const SO_BROADCAST: i64 = 6;
+pub const SO_SNDBUF: i64    = 7;
+pub const SO_RCVBUF: i64    = 8;
+pub const SO_KEEPALIVE: i64 = 9;
+pub const SO_OOBINLINE: i64 = 10;
+pub const TCP_NODELAY: i64  = 1;
 
 // Shutdown modes
-const SHUT_RD: i64   = 0;
-const SHUT_WR: i64   = 1;
-const SHUT_RDWR: i64 = 2;
+pub const SHUT_RD: i64   = 0;
+pub const SHUT_WR: i64   = 1;
+pub const SHUT_RDWR: i64 = 2;
 
 // Special IP Addresses
-const INADDR_ANY: str       = "0.0.0.0";
-const INADDR_BROADCAST: str = "255.255.255.255";
-const INADDR_LOOPBACK: str  = "127.0.0.1";
-const INADDR_NONE: str      = "255.255.255.255";
+pub const INADDR_ANY: str       = "0.0.0.0";
+pub const INADDR_BROADCAST: str = "255.255.255.255";
+pub const INADDR_LOOPBACK: str  = "127.0.0.1";
+pub const INADDR_NONE: str      = "255.255.255.255";
 
-const has_ipv6: bool = true;
+pub const has_ipv6: bool = true;
 
 /// Base exception for socket-related errors.
 /// Python reference: socket.error
-class SocketError {
-    self(msg: str, errno: i64 = 0) {
-        self.msg = msg;
-        self.errno = errno;
-    }
+pub struct SocketError : IValue {
+    pub:
+        msg:   str;
+        errno: i64;
 
-    def to_string() -> str {
-        return f"SocketError({self.errno}): {self.msg}";
-    }
+        self(msg: str, errno: i64 = 0) {
+            .msg = msg;
+            .errno = errno;
+        }
+
+        fn to_string() -> str {
+            return f"SocketError({self.errno}): {self.msg}";
+        }
 }
 
 /// Raised for address-related errors by getaddrinfo() and getnameinfo().
 /// Python reference: socket.gaierror
-class GaiError {
-    self(msg: str, errno: i64 = 0) {
-        self.msg = msg;
-        self.errno = errno;
-    }
+pub struct GaiError : IValue {
+    pub:
+        msg:   str;
+        errno: i64;
 
-    def to_string() -> str {
-        return f"GaiError({self.errno}): {self.msg}";
-    }
+        self(msg: str, errno: i64 = 0) {
+            .msg = msg;
+            .errno = errno;
+        }
+
+        fn to_string() -> str {
+            return f"GaiError({self.errno}): {self.msg}";
+        }
 }
 
 /// Raised when a socket timeout occurs.
 /// Python reference: socket.timeout
-class TimeoutError {
-    self(msg: str = "timed out") {
-        self.msg = msg;
-    }
+pub struct TimeoutError : IValue {
+    pub:
+        msg: str;
 
-    def to_string() -> str {
-        return f"TimeoutError: {self.msg}";
-    }
+        self(msg: str = "timed out") {
+            .msg = msg;
+        }
+
+        fn to_string() -> str {
+            return f"TimeoutError: {self.msg}";
+        }
 }
 
 var _SOCKET_FD_COUNTER: i64 = 100;
 
-def _alloc_socket_fd() -> i64 {
+fn _alloc_socket_fd() -> i64 {
     _SOCKET_FD_COUNTER = _SOCKET_FD_COUNTER + 1;
     return _SOCKET_FD_COUNTER;
 }
 
 /// Represents a socket endpoint for network communication.
 /// Python reference: socket.socket(family=AF_INET, type=SOCK_STREAM, proto=0, fileno=None)
-class Socket {
-    self(family: i64 = 2, type: i64 = 1, proto: i64 = 0, fileno: i64 = -1) {
-        self.family = family;
-        self.type = type;
-        self.proto = proto;
-        self._fd: i64 = if fileno >= 0 { fileno } else { _alloc_socket_fd() };
-        self._connected = false;
-        self._bound = false;
-        self._listening = false;
-        self._blocking = true;
-        self._timeout: f64 = -1.0;
-        self._peer_host = "";
-        self._peer_port: i64 = 0;
-        self._local_host = INADDR_ANY;
-        self._local_port: i64 = 0;
-        self._inbound_buffer = [];
-        self._outbound_buffer = [];
-    }
+pub struct Socket : IObject {
+    pub:
+        family:           i64;
+        type:             i64;
+        sock_type:        i64;
+        proto:            i64;
+        _fd:              i64;
+        _connected:       bool;
+        _bound:           bool;
+        _listening:       bool;
+        _blocking:        bool;
+        _timeout:         f64;
+        _peer_host:       str;
+        _peer_port:       i64;
+        _local_host:      str;
+        _local_port:      i64;
+        _inbound_buffer:  str[];
+        _outbound_buffer: str[];
 
-    /// Connect to a remote socket at address (host, port).
-    /// Python reference: socket.socket.connect(address)
-    def connect(self, address: (str, i64)) {
-        self._peer_host = address[0];
-        self._peer_port = address[1];
-        let _ = __net_tcp_connect(self._peer_host, self._peer_port);
-        self._connected = true;
-    }
-
-    /// Connect to a remote socket at address (host, port) returning an error code.
-    /// Python reference: socket.socket.connect_ex(address)
-    def connect_ex(self, address: (str, i64)) -> i64 {
-        self.connect(address);
-        return 0;
-    }
-
-    /// Bind the socket to address (host, port).
-    /// Python reference: socket.socket.bind(address)
-    def bind(self, address: (str, i64)) {
-        self._local_host = address[0];
-        self._local_port = address[1];
-        let _ = __net_tcp_listen(self._local_host, self._local_port);
-        self._bound = true;
-    }
-
-    /// Enable a server to accept connections.
-    /// Python reference: socket.socket.listen([backlog])
-    def listen(self, backlog: i64 = 128) {
-        if !self._bound {
-            panic("cannot listen on unbound socket");
+        self(family: i64 = 2, sock_type: i64 = 1, proto: i64 = 0, fileno: i64 = -1) {
+            .family = family;
+            .type = sock_type;
+            .sock_type = sock_type;
+            .proto = proto;
+            ._fd = if fileno >= 0 { fileno } else { _alloc_socket_fd() };
+            ._connected = false;
+            ._bound = false;
+            ._listening = false;
+            ._blocking = true;
+            ._timeout = -1.0;
+            ._peer_host = "";
+            ._peer_port = 0;
+            ._local_host = INADDR_ANY;
+            ._local_port = 0;
+            ._inbound_buffer = [];
+            ._outbound_buffer = [];
         }
-        self._listening = true;
-    }
 
-    /// Accept an incoming connection, returning (client_socket, (host, port)).
-    /// Python reference: socket.socket.accept()
-    def accept() -> (Socket, (str, i64)) {
-        let client_sock = Socket(self.family, self.type, self.proto);
-        client_sock._connected = true;
-        client_sock._peer_host = "127.0.0.1";
-        client_sock._peer_port = 8080;
-        return (client_sock, (client_sock._peer_host, client_sock._peer_port));
-    }
-
-    /// Send data to the socket. Returns the number of bytes sent.
-    /// Python reference: socket.socket.send(bytes[, flags])
-    def send(self, data: str) -> i64 {
-        self._outbound_buffer.append(data);
-        return len(data);
-    }
-
-    /// Send all data to the socket.
-    /// Python reference: socket.socket.sendall(bytes[, flags])
-    def sendall(self, data: str) {
-        let _ = self.send(data);
-    }
-
-    /// Receive data from the socket.
-    /// Python reference: socket.socket.recv(bufsize[, flags])
-    def recv(self, bufsize: i64 = 4096) -> str {
-        if len(self._inbound_buffer) > 0 {
-            let chunk = self._inbound_buffer[0];
-            self._inbound_buffer.remove_at(0);
-            return chunk;
+        ~self() {
+            .close();
         }
-        return "";
-    }
 
-    /// Send data to the socket bound to remote address (host, port).
-    /// Python reference: socket.socket.sendto(bytes, address)
-    def sendto(self, data: str, address: (str, i64)) -> i64 {
-        self._peer_host = address[0];
-        self._peer_port = address[1];
-        return self.send(data);
-    }
+        /// Connect to a remote socket at address (host, port).
+        /// Python reference: socket.socket.connect(address)
+        var fn connect(address: tuple<str, i64>) {
+            self._peer_host = address[0];
+            self._peer_port = address[1];
+            let _ = __net_tcp_connect(self._peer_host, self._peer_port);
+            self._connected = true;
+        }
 
-    /// Receive data from the socket, returning (data, (host, port)).
-    /// Python reference: socket.socket.recvfrom(bufsize[, flags])
-    def recvfrom(self, bufsize: i64 = 4096) -> (str, (str, i64)) {
-        let data = self.recv(bufsize);
-        return (data, (self._peer_host, self._peer_port));
-    }
+        /// Connect to a remote socket at address (host, port) returning an error code.
+        /// Python reference: socket.socket.connect_ex(address)
+        var fn connect_ex(address: tuple<str, i64>) -> i64 {
+            self.connect(address);
+            return 0;
+        }
 
-    /// Close the socket.
-    /// Python reference: socket.socket.close()
-    def close() {
-        self._connected = false;
-        self._listening = false;
-        self._inbound_buffer = [];
-        self._outbound_buffer = [];
-    }
+        /// Bind the socket to address (host, port).
+        /// Python reference: socket.socket.bind(address)
+        var fn bind(address: tuple<str, i64>) {
+            self._local_host = address[0];
+            self._local_port = address[1];
+            let _ = __net_tcp_listen(self._local_host, self._local_port);
+            self._bound = true;
+        }
 
-    /// Shut down one or both halves of the connection.
-    /// Python reference: socket.socket.shutdown(how)
-    def shutdown(how: i64 = 2) {
-        if how == SHUT_RD or how == SHUT_RDWR {
+        /// Enable a server to accept connections.
+        /// Python reference: socket.socket.listen([backlog])
+        var fn listen(backlog: i64 = 128) {
+            if !self._bound {
+                panic("cannot listen on unbound socket");
+            }
+            self._listening = true;
+        }
+
+        /// Accept an incoming connection, returning (client_socket, (host, port)).
+        /// Python reference: socket.socket.accept()
+        fn accept() -> tuple<Socket, tuple<str, i64>> {
+            var client_sock = Socket(self.family, self.sock_type, self.proto);
+            client_sock._connected = true;
+            client_sock._peer_host = "127.0.0.1";
+            client_sock._peer_port = 8080;
+            return (client_sock, (client_sock._peer_host, client_sock._peer_port));
+        }
+
+        /// Send data to the socket. Returns the number of bytes sent.
+        /// Python reference: socket.socket.send(bytes[, flags])
+        var fn send(data: str) -> i64 {
+            self._outbound_buffer.append(data);
+            return len(data);
+        }
+
+        /// Send all data to the socket.
+        /// Python reference: socket.socket.sendall(bytes[, flags])
+        var fn sendall(data: str) {
+            let _ = self.send(data);
+        }
+
+        /// Receive data from the socket.
+        /// Python reference: socket.socket.recv(bufsize[, flags])
+        var fn recv(bufsize: i64 = 4096) -> str {
+            if len(self._inbound_buffer) > 0 {
+                let chunk = self._inbound_buffer[0];
+                self._inbound_buffer.remove_at(0);
+                return chunk;
+            }
+            return "";
+        }
+
+        /// Send data to the socket bound to remote address (host, port).
+        /// Python reference: socket.socket.sendto(bytes, address)
+        var fn sendto(data: str, address: tuple<str, i64>) -> i64 {
+            self._peer_host = address[0];
+            self._peer_port = address[1];
+            return self.send(data);
+        }
+
+        /// Receive data from the socket, returning (data, (host, port)).
+        /// Python reference: socket.socket.recvfrom(bufsize[, flags])
+        var fn recvfrom(bufsize: i64 = 4096) -> tuple<str, tuple<str, i64>> {
+            let data = self.recv(bufsize);
+            return (data, (self._peer_host, self._peer_port));
+        }
+
+        /// Close the socket.
+        /// Python reference: socket.socket.close()
+        var fn close() {
+            self._connected = false;
+            self._listening = false;
             self._inbound_buffer = [];
-        }
-        if how == SHUT_WR or how == SHUT_RDWR {
             self._outbound_buffer = [];
         }
-    }
 
-    /// Set a timeout on blocking socket operations.
-    /// Python reference: socket.socket.settimeout(value)
-    def settimeout(value: f64) {
-        self._timeout = value;
-        self._blocking = value != 0.0;
-    }
+        /// Shut down one or both halves of the connection.
+        /// Python reference: socket.socket.shutdown(how)
+        var fn shutdown(how: i64 = 2) {
+            if how == SHUT_RD || how == SHUT_RDWR {
+                self._inbound_buffer = [];
+            }
+            if how == SHUT_WR || how == SHUT_RDWR {
+                self._outbound_buffer = [];
+            }
+        }
 
-    /// Return the timeout associated with socket operations.
-    /// Python reference: socket.socket.gettimeout()
-    def gettimeout() -> f64 {
-        return self._timeout;
-    }
+        /// Set a timeout on blocking socket operations.
+        /// Python reference: socket.socket.settimeout(value)
+        var fn settimeout(value: f64) {
+            self._timeout = value;
+            self._blocking = value != 0.0;
+        }
 
-    /// Set blocking or non-blocking mode of the socket.
-    /// Python reference: socket.socket.setblocking(flag)
-    def setblocking(flag: bool) {
-        self._blocking = flag;
-        self._timeout = if flag { -1.0 } else { 0.0 };
-    }
+        /// Return the timeout associated with socket operations.
+        /// Python reference: socket.socket.gettimeout()
+        fn gettimeout() -> f64 {
+            return self._timeout;
+        }
 
-    /// Return the socket's own address (host, port).
-    /// Python reference: socket.socket.getsockname()
-    def getsockname() -> (str, i64) {
-        return (self._local_host, self._local_port);
-    }
+        /// Set blocking or non-blocking mode of the socket.
+        /// Python reference: socket.socket.setblocking(flag)
+        var fn setblocking(flag: bool) {
+            self._blocking = flag;
+            self._timeout = if flag { -1.0 } else { 0.0 };
+        }
 
-    /// Return the remote address to which the socket is connected.
-    /// Python reference: socket.socket.getpeername()
-    def getpeername() -> (str, i64) {
-        return (self._peer_host, self._peer_port);
-    }
+        /// Return the socket's own address (host, port).
+        /// Python reference: socket.socket.getsockname()
+        fn getsockname() -> tuple<str, i64> {
+            return (self._local_host, self._local_port);
+        }
 
-    /// Set the value of the given socket option.
-    /// Python reference: socket.socket.setsockopt(level, optname, value)
-    def setsockopt(level: i64, optname: i64, value: i64) {
-        // Option configured
-    }
+        /// Return the remote address to which the socket is connected.
+        /// Python reference: socket.socket.getpeername()
+        fn getpeername() -> tuple<str, i64> {
+            return (self._peer_host, self._peer_port);
+        }
 
-    /// Return the value of the given socket option.
-    /// Python reference: socket.socket.getsockopt(level, optname[, buflen])
-    def getsockopt(level: i64, optname: i64) -> i64 {
-        return 0;
-    }
+        /// Set the value of the given socket option.
+        /// Python reference: socket.socket.setsockopt(level, optname, value)
+        var fn setsockopt(level: i64, optname: i64, value: i64) {
+            // Option configured
+        }
 
-    /// Return the socket's file descriptor integer.
-    /// Python reference: socket.socket.fileno()
-    def fileno() -> i64 {
-        return self._fd;
-    }
+        /// Return the value of the given socket option.
+        /// Python reference: socket.socket.getsockopt(level, optname[, buflen])
+        fn getsockopt(level: i64, optname: i64) -> i64 {
+            return 0;
+        }
+
+        /// Return the socket's file descriptor integer.
+        /// Python reference: socket.socket.fileno()
+        fn fileno() -> i64 {
+            return self._fd;
+        }
 }
 
 /// Convenience factory creating a Socket object.
 /// Python reference: socket.socket
-def socket(family: i64 = 2, type: i64 = 1, proto: i64 = 0) -> Socket {
-    return Socket(family, type, proto);
+pub fn socket(family: i64 = 2, sock_type: i64 = 1, proto: i64 = 0) -> Socket {
+    return Socket(family, sock_type, proto);
 }
 
 /// Connect to address (host, port) and return the socket object.
 /// Python reference: socket.create_connection(address, timeout=None, source_address=None)
-def create_connection(address: (str, i64), timeout: f64 = -1.0) -> Socket {
-    let sock = Socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+pub fn create_connection(address: tuple<str, i64>, timeout: f64 = -1.0) -> Socket {
+    var sock = Socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if timeout >= 0.0 {
         sock.settimeout(timeout);
     }
@@ -308,33 +350,42 @@ def create_connection(address: (str, i64), timeout: f64 = -1.0) -> Socket {
 
 /// Return a string containing the hostname of the machine where Pilot is currently executing.
 /// Python reference: socket.gethostname()
-def gethostname() -> str {
+pub fn gethostname() -> str {
     return __net_gethostname();
 }
 
 /// Translate a host name to IPv4 address format.
 /// Python reference: socket.gethostbyname(hostname)
-def gethostbyname(hostname: str) -> str {
+pub fn gethostbyname(hostname: str) -> str {
     return __net_gethostbyname(hostname);
+}
+
+fn _parse_ipv4_octet(seg: str) -> i64 {
+    let opt = __parse_int_strict(seg, 10);
+    if __opt_is_some(opt) {
+        return __opt_unwrap(opt);
+    }
+    panic(f"Invalid IPv4 octet: {seg}");
+    return 0;
 }
 
 /// Converts an IPv4 address from dotted-quad string format to 32-bit packed integer.
 /// Python reference: socket.inet_aton(ip_string)
-def inet_aton(ip_string: str) -> i64 {
-    let parts: [str] = ip_string.split(".");
+pub fn inet_aton(ip_string: str) -> i64 {
+    let parts: str[] = ip_string.split(".");
     if len(parts) != 4 {
         panic(f"Invalid IP address format: {ip_string}");
     }
-    let p0: i64 = int(parts[0]);
-    let p1: i64 = int(parts[1]);
-    let p2: i64 = int(parts[2]);
-    let p3: i64 = int(parts[3]);
+    let p0: i64 = _parse_ipv4_octet(parts[0]);
+    let p1: i64 = _parse_ipv4_octet(parts[1]);
+    let p2: i64 = _parse_ipv4_octet(parts[2]);
+    let p3: i64 = _parse_ipv4_octet(parts[3]);
     return (p0 << 24) | (p1 << 16) | (p2 << 8) | p3;
 }
 
 /// Convert a 32-bit packed integer IPv4 address to standard dotted-quad string format.
 /// Python reference: socket.inet_ntoa(packed_ip)
-def inet_ntoa(packed_ip: i64) -> str {
+pub fn inet_ntoa(packed_ip: i64) -> str {
     let p0: i64 = (packed_ip >> 24) & 255;
     let p1: i64 = (packed_ip >> 16) & 255;
     let p2: i64 = (packed_ip >> 8) & 255;

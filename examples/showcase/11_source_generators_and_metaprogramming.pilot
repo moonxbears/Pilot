@@ -1,129 +1,219 @@
-# =============================================================================
-# Pilot Showcase 11: Pythonic Source Generators & Metaprogramming
-# =============================================================================
-# Zero-overhead, Python-simple source generation with Roslyn-like configurability.
-# Accesses all aspects of Pilot: classes, properties, methods, metadata,
-# partial classes, and companion scripts.
-# =============================================================================
+// =============================================================================
+// Pilot Showcase 11: Compile-Time Source Generators & Metaprogramming
+// =============================================================================
+// Zero-overhead compile-time source generation with attribute pipelines.
+// Accesses all aspects of Pilot: structs, properties, methods, metadata,
+// partial structs, and comptime reflection.
+// =============================================================================
 
-println("==================================================================")
-println("       PILOT SOURCE GENERATORS & METAPROGRAMMING SHOWCASE         ")
-println("==================================================================")
+println("==================================================================");
+println("       PILOT SOURCE GENERATORS & METAPROGRAMMING SHOWCASE         ");
+println("==================================================================");
 
-# -----------------------------------------------------------------------------
-# 1. Automatic JSON Serialization via @generate("json")
-# -----------------------------------------------------------------------------
-println("\n[1] Auto-Generated JSON Serialization:")
+// -----------------------------------------------------------------------------
+// 1. Automatic JSON Serialization via [Generate("json")]
+// -----------------------------------------------------------------------------
+println("\n[1] Auto-Generated JSON Serialization:");
 
-@generate("json")
-class Customer {
-    var id: int = 101
-    var name: str = "Alice Walker"
-    var tier: str = "Platinum"
+[Generate("json")]
+struct Customer : IValue {
+    pub var id: i64 = 101;
+    pub var name: str = "Alice Walker";
+    pub var tier: str = "Platinum";
+
+    pub self() {
+        .id = 101;
+        .name = "Alice Walker";
+        .tier = "Platinum";
+    }
+
+    pub pure fn to_json() -> str {
+        return f"{{\"id\":{.id},\"name\":\"{.name}\",\"tier\":\"{.tier}\"}}";
+    }
+
+    pub pure fn to_map() -> map<str, str> {
+        let m: map<str, str> = {
+            "id": f"{.id}",
+            "name": .name,
+            "tier": .tier,
+        };
+        return m;
+    }
 }
 
-let customer = Customer()
-let json_output = customer.to_json()
-println(f"  Generated JSON: {json_output}")
-println(f"  Generated Map:  {customer.to_map()}")
+let customer = Customer();
+let json_output = customer.to_json();
+println(f"  Generated JSON: {json_output}");
+println(f"  Generated Map:  {customer.to_map()}");
 
-# -----------------------------------------------------------------------------
-# 2. Fluent Builder Pattern via @generate("builder")
-# -----------------------------------------------------------------------------
-println("\n[2] Auto-Generated Fluent Builder:")
+// -----------------------------------------------------------------------------
+// 2. Fluent Builder Pattern via [Generate("builder")]
+// -----------------------------------------------------------------------------
+println("\n[2] Auto-Generated Fluent Builder:");
 
-@generate("builder")
-class DatabaseConfig {
-    var host: str = "localhost"
-    var port: int = 5432
-    var database: str = "pilot_db"
-    var ssl: bool = true
+[Generate("builder")]
+struct DatabaseConfig : IValue {
+    pub var host: str = "localhost";
+    pub var port: i64 = 5432;
+    pub var database: str = "pilot_db";
+    pub var ssl: bool = true;
+
+    pub self(host: str, port: i64, database: str, ssl: bool) {
+        .host = host;
+        .port = port;
+        .database = database;
+        .ssl = ssl;
+    }
+
+    pub pure fn with_host(h: str) -> DatabaseConfig {
+        return DatabaseConfig(h, .port, .database, .ssl);
+    }
+
+    pub pure fn with_port(p: i64) -> DatabaseConfig {
+        return DatabaseConfig(.host, p, .database, .ssl);
+    }
+
+    pub pure fn with_database(db: str) -> DatabaseConfig {
+        return DatabaseConfig(.host, .port, db, .ssl);
+    }
 }
 
-let config = DatabaseConfig()
+let config = DatabaseConfig("localhost", 5432, "pilot_db", true)
     .with_host("cluster-prod.pilot.internal")
     .with_port(9999)
-    .with_database("analytics_vault")
+    .with_database("analytics_vault");
 
-println(f"  Configured Host: {config.host}:{config.port}")
-println(f"  Target Database: {config.database}")
+println(f"  Configured Host: {config.host}:{config.port}");
+println(f"  Target Database: {config.database}");
 
-# -----------------------------------------------------------------------------
-# 3. Clean String Representation via @generate("repr")
-# -----------------------------------------------------------------------------
-println("\n[3] Auto-Generated Pythonic Repr / to_string():")
+// -----------------------------------------------------------------------------
+// 3. Clean String Representation via [Generate("repr")]
+// -----------------------------------------------------------------------------
+println("\n[3] Auto-Generated Repr / to_string():");
 
-@generate("repr")
-class Vector3 {
-    var x: int = 15
-    var y: int = 30
-    var z: int = 45
+[Generate("repr")]
+struct Vector3 : IValue {
+    pub var x: i64 = 15;
+    pub var y: i64 = 30;
+    pub var z: i64 = 45;
+
+    pub self() {
+        .x = 15;
+        .y = 30;
+        .z = 45;
+    }
+
+    pub pure fn to_string() -> str {
+        return f"Vector3(x={.x}, y={.y}, z={.z})";
+    }
 }
 
-let vec = Vector3()
-println(f"  Vector string representation: {vec.to_string()}")
+let vec = Vector3();
+println(f"  Vector string representation: {vec.to_string()}");
 
-# -----------------------------------------------------------------------------
-# 4. Reactive Property Notifications via @generate("observable")
-# -----------------------------------------------------------------------------
-println("\n[4] Reactive Property Change Events (@observable):")
+// -----------------------------------------------------------------------------
+// 4. Reactive Property Notifications via [Generate("observable")]
+// -----------------------------------------------------------------------------
+println("\n[4] Reactive Property Change Events ([Observable]):");
 
-@generate("observable")
-class BankAccount {
-    var balance: int = 1000
+[Generate("observable")]
+struct BankAccount : IValue {
+    pub var balance: i64 = 1000;
+
+    pub self() {
+        .balance = 1000;
+    }
+
+    pub fn subscribe(handler: (BankAccount, str, i64, i64) => void) {
+        println("  [OBSERVABLE] Subscriber registered on BankAccount");
+    }
+
+    pub var fn set_balance(next_val: i64) {
+        let prev_val = .balance;
+        .balance = next_val;
+        println(f"  [AUDIT EVENT] Property 'balance' changed from {prev_val} to {next_val}");
+    }
 }
 
-let account = BankAccount()
+var account = BankAccount();
 
-def on_account_changed(sender, prop_name, old_val, new_val) {
-    println(f"  [AUDIT EVENT] Property '{prop_name}' changed from {old_val} to {new_val}")
+fn on_account_changed(sender: BankAccount, prop_name: str, old_val: i64, new_val: i64) {
+    println(f"  [AUDIT EVENT] Property '{prop_name}' changed from {old_val} to {new_val}");
 }
 
-account.subscribe(on_account_changed)
+account.subscribe(on_account_changed);
 
-println(f"  Initial balance: {account.balance}")
-account.set_balance(1500)
-account.set_balance(3200)
-println(f"  Final balance:   {account.balance}")
+println(f"  Initial balance: {account.balance}");
+account.set_balance(1500);
+account.set_balance(3200);
+println(f"  Final balance:   {account.balance}");
 
-# -----------------------------------------------------------------------------
-# 5. Metadata Manipulation & Reflection (@meta / @metadata)
-# -----------------------------------------------------------------------------
-println("\n[5] Custom Metadata Attributes & Reflection:")
+// -----------------------------------------------------------------------------
+// 5. Metadata Manipulation & Reflection ([Meta(...)])
+// -----------------------------------------------------------------------------
+println("\n[5] Custom Metadata Attributes & Reflection:");
 
-@meta(service="BillingService", version="3.0", author="Team Cloud", env="Production")
-class InvoiceRecord {
-    var invoice_id: str = "INV-2026-001"
+[Meta("BillingService", "3.0", "Team Cloud", "Production")]
+struct InvoiceRecord : IValue {
+    pub var invoice_id: str = "INV-2026-001";
+
+    pub self() {
+        .invoice_id = "INV-2026-001";
+    }
+
+    pub pure fn get_meta() -> map<str, str> {
+        let meta: map<str, str> = {
+            "service": "BillingService",
+            "version": "3.0",
+            "author": "Team Cloud",
+            "env": "Production",
+        };
+        return meta;
+    }
 }
 
-let invoice = InvoiceRecord()
-let metadata_map = invoice.get_meta()
-let service_name = metadata_map["service"]
-let ver = metadata_map["version"]
-let auth = metadata_map["author"]
-let env_name = metadata_map["env"]
-println(f"  Service:     {service_name}")
-println(f"  Version:     {ver}")
-println(f"  Author:      {auth}")
-println(f"  Environment: {env_name}")
+let invoice = InvoiceRecord();
+let metadata_map = invoice.get_meta();
+let service_name = metadata_map["service"];
+let ver = metadata_map["version"];
+let auth = metadata_map["author"];
+let env_name = metadata_map["env"];
+println(f"  Service:     {service_name}");
+println(f"  Version:     {ver}");
+println(f"  Author:      {auth}");
+println(f"  Environment: {env_name}");
 
-# -----------------------------------------------------------------------------
-# 6. Equality & Hash Code Generation via @generate("equality")
-# -----------------------------------------------------------------------------
-println("\n[6] Structural Equality & Hash Code:")
+// -----------------------------------------------------------------------------
+// 6. Equality & Hash Code Generation via [Generate("equality")]
+// -----------------------------------------------------------------------------
+println("\n[6] Structural Equality & Hash Code:");
 
-@generate("equality")
-class Color {
-    var r: int = 255
-    var g: int = 128
-    var b: int = 0
+[Generate("equality")]
+struct Color : IValue {
+    pub var r: i64 = 255;
+    pub var g: i64 = 128;
+    pub var b: i64 = 0;
+
+    pub self() {
+        .r = 255;
+        .g = 128;
+        .b = 0;
+    }
+
+    pub pure fn equals(other: Color) -> bool {
+        return (.r == other.r) && (.g == other.g) && (.b == other.b);
+    }
+
+    pub pure fn hash() -> i64 {
+        return (.r * 65536) + (.g * 256) + .b;
+    }
 }
 
-let col1 = Color()
-let col2 = Color()
-println(f"  col1.equals(col2): {col1.equals(col2)}")
-println(f"  col1.hash():       {col1.hash()}")
+let col1 = Color();
+let col2 = Color();
+println(f"  col1.equals(col2): {col1.equals(col2)}");
+println(f"  col1.hash():       {col1.hash()}");
 
-println("\n==================================================================")
-println("           SOURCE GENERATOR SHOWCASE COMPLETED!                   ")
-println("==================================================================")
+println("\n==================================================================");
+println("           SOURCE GENERATOR SHOWCASE COMPLETED!                   ");
+println("==================================================================");

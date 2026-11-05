@@ -1,19 +1,18 @@
 // =============================================================================
 // Showcase 28: Zero-GC Perceus Memory Management & Real-Time Arenas
 // =============================================================================
-// Demonstrates Milestones 34 & 38:
-//   1. Perceus Zero-GC Reference Counting & In-Place Mutation:
+// Demonstrates:
+//   1. Perceus Zero-GC Ownership (`iso<T>`, `ref<T>`, `var ref<T>`, `~self()`):
 //      - Deterministic drop-reuse without stop-the-world garbage collection pauses
 //   2. Hard Real-Time Deterministic Guarantees:
 //      - Dimensional units (`250us`, `10ms`, `50kHz`, `64KB`)
-//      - `@hard_realtime` and `@wcet(250us)` verification
+//      - `[HardRealtime]` and `[Wcet(250us)]` verification
 //      - `noalloc { ... }` blocks enforcing zero heap allocations
 //   3. Memory Arenas & Bounded Loops:
 //      - Scoped `region` memory allocators
 //      - Static loop termination bounds (`bounded N`)
-//   4. Soft Real-Time Scheduling Blocks:
-//      - `deadline` with jitter limits and `on_missed` recovery
-//      - `within` budgets with deterministic `fallback`
+//   4. Soft Real-Time Scheduling Budgets:
+//      - `within` execution budgets
 // =============================================================================
 
 println("==================================================================");
@@ -21,7 +20,7 @@ println(" Showcase 28: Zero-GC Perceus Memory & Hard Real-Time Arenas      ");
 println("==================================================================");
 
 // -----------------------------------------------------------------------------
-// 1. Dimensional Time, Frequency & Memory Literals
+// 1. Dimensional Time, Frequency & Memory Literals + Perceus `IObject`
 // -----------------------------------------------------------------------------
 let loop_cycle = 10ms;
 let sample_rate = 50kHz;
@@ -29,23 +28,50 @@ let scratch_cap = 64KB;
 let control_deadline = 250us;
 
 println("\n[1] Physical Dimensional Constants:");
-println("  Control Deadline: " + control_deadline);
-println("  Cycle Interval:   " + loop_cycle);
-println("  Sampling Rate:    " + sample_rate);
-println("  Memory Limit:     " + scratch_cap);
+println(f"  Control Deadline: {control_deadline}");
+println(f"  Cycle Interval:   {loop_cycle}");
+println(f"  Sampling Rate:    {sample_rate}");
+println(f"  Memory Limit:     {scratch_cap}");
+
+// 0b10 Owned Object with deterministic Perceus `~self()` drop-reuse
+struct SampleRingBuffer : IObject {
+    pub var capacity: i64;
+    pub var peak_val: f64;
+
+    pub self(capacity: i64) {
+        .capacity = capacity;
+        .peak_val = 0.0;
+    }
+
+    ~self() {
+        // Deterministic Perceus drop-reuse at lexical exit
+    }
+}
+
+fn read_ring_peak(buf: ref<SampleRingBuffer>) -> f64 => buf.peak_val;
+
+fn update_ring_peak(var ref buf: SampleRingBuffer, sample: f64) {
+    if sample > buf.peak_val {
+        buf.peak_val = sample;
+    }
+}
+
+var ring = SampleRingBuffer(64);
+update_ring_peak(ring, 42.5);
+println(f"  Perceus Owned Ring Peak: {read_ring_peak(ring)}");
 
 // -----------------------------------------------------------------------------
 // 2. Hard Real-Time Zero-Allocation Processing Block
 // -----------------------------------------------------------------------------
-def compute_pid_output(target: float, current: float) -> float {
+fn compute_pid_output(target: f64, current: f64) -> f64 {
     let kp = 1.25;
     let err = target - current;
     return kp * err;
 }
 
-@hard_realtime
-@wcet(250us)
-def run_motor_actuator(target_pos: float) -> float {
+[HardRealtime]
+[Wcet(250us)]
+fn run_motor_actuator(target_pos: f64) -> f64 {
     var output_drive = 0.0;
     noalloc {
         var pos = 0.0;
@@ -58,16 +84,16 @@ def run_motor_actuator(target_pos: float) -> float {
 }
 
 let motor_signal = run_motor_actuator(45.0);
-println("\n[2] Hard Real-Time @noalloc Actuator Drive:");
-println("  Calculated Signal: " + motor_signal);
+println("\n[2] Hard Real-Time noalloc Actuator Drive:");
+println(f"  Calculated Signal: {motor_signal}");
 
 // -----------------------------------------------------------------------------
 // 3. Scoped Region Memory Arenas
 // -----------------------------------------------------------------------------
-def run_signal_dsp() -> float {
+fn run_signal_dsp() -> f64 {
     var total_energy = 0.0;
     region dsp_scratchpad {
-        var readings = [1.2, 2.4, 3.6, 4.8, 5.0];
+        var readings: f64[] = [1.2, 2.4, 3.6, 4.8, 5.0];
         for r in readings {
             total_energy = total_energy + (r * r);
         }
@@ -77,21 +103,21 @@ def run_signal_dsp() -> float {
 
 let energy = run_signal_dsp();
 println("\n[3] Scoped 'region' Memory Arena Evaluation:");
-println("  Total Waveform Energy: " + energy);
+println(f"  Total Waveform Energy: {energy}");
 
 // -----------------------------------------------------------------------------
-// 4. Soft Real-Time Scheduling: Deadlines & Fallbacks
+// 4. Soft Real-Time Scheduling: Deadlines & Budgets
 // -----------------------------------------------------------------------------
-def sensor_fusion_pipeline() -> str {
+fn sensor_fusion_pipeline() -> str {
+    var status = "Low-Latency Dead-Reckoning Fallback";
     within 5ms {
-        return "High-Accuracy Kalman Filter Converged";
-    } fallback {
-        return "Low-Latency Dead-Reckoning Fallback";
+        status = "High-Accuracy Kalman Filter Converged";
     }
+    return status;
 }
 
 let telemetry = sensor_fusion_pipeline();
-println("\n[4] Real-Time Budget Execution (within/fallback):");
-println("  Status: " + telemetry);
+println("\n[4] Real-Time Budget Execution (within 5ms):");
+println(f"  Status: {telemetry}");
 
 println("\n>>> Showcase 28 Complete! <<<\n");

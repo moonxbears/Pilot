@@ -1,23 +1,23 @@
-import std.json as json;
-import std.csv as csv;
-import std.pickle as pickle;
-import std.tomllib as tomllib;
+use Pilot.Json as json;
+use Pilot.Csv as csv;
+use Pilot.Pickle as pickle;
+use Pilot.Tomllib as tomllib;
 
-def test_json() {
+fn test_json() {
     // 1. dumps & loads (CPython json.dumps, json.loads)
     let payload = {
         "name": "Pilot",
         "version": "1.1.51",
         "features": ["native-aot", "perceus-rc", "multi-os"],
         "active": true,
-        "count": 42
+        "count": 42,
     };
 
     let encoded = json.dumps(payload, 2);
     let decoded = json.loads(encoded).unwrap();
     print(f"Decoded name: {decoded[\"name\"]}");
 
-    // 2. Encoder & Decoder classes
+    // 2. Encoder & Decoder structs
     let encoder = json.JSONEncoder(4, true);
     let pretty_str = encoder.encode(payload);
 
@@ -28,13 +28,13 @@ def test_json() {
     let feature = json.get_path(parsed_doc, "features.0");
 }
 
-def test_csv() {
+fn test_csv() {
     // 1. dumps & loads (CPython csv.writer, csv.reader)
     let rows = [
         ["id", "title", "platform"],
         ["1", "Kernel", "Linux"],
         ["2", "Driver", "Windows"],
-        ["3", "GUI", "macOS"]
+        ["3", "GUI", "macOS"],
     ];
 
     let csv_text = csv.dumps(rows);
@@ -43,10 +43,10 @@ def test_csv() {
     // 2. DictReader & DictWriter (CPython csv.DictReader, csv.DictWriter)
     let records = [
         { "name": "Alice", "role": "Engineer" },
-        { "name": "Bob", "role": "Designer" }
+        { "name": "Bob", "role": "Designer" },
     ];
 
-    let writer = csv.DictWriter(["name", "role"]);
+    var writer = csv.DictWriter(["name", "role"]);
     writer.writeheader();
     writer.writerows(records);
     let dict_csv = writer.get_value();
@@ -55,26 +55,26 @@ def test_csv() {
     let parsed_records = reader.read_all().unwrap();
 }
 
-def test_pickle() {
+fn test_pickle() {
     // 1. dumps & loads (CPython pickle.dumps, pickle.loads)
     let state = {
         "user_id": 1001,
         "authenticated": true,
         "tags": ["admin", "developer"],
-        "metadata": (192, 168, 1, 1)
+        "metadata": (192, 168, 1, 1),
     };
 
     let binary_bytes = pickle.dumps(state, pickle.DEFAULT_PROTOCOL);
     let restored = pickle.loads(binary_bytes);
 
-    // 2. Pickler & Unpickler classes
+    // 2. Pickler & Unpickler structs
     let p = pickle.Pickler();
     let stream = p.dump([10, 20, 30, "hello"]);
     let u = pickle.Unpickler(stream);
     let restored_list = u.load();
 }
 
-def test_tomllib() {
+fn test_tomllib() {
     // 1. loads & dumps (CPython tomllib.loads, PEP 680)
     let toml_doc = "[package]\nname = \"pilot-app\"\nversion = \"1.0.0\"\nedition = \"2026\"\n\n[dependencies]\npilot_rt = \"1.1.51\"\n";
 
@@ -82,7 +82,7 @@ def test_tomllib() {
     let emitted = tomllib.dumps(config);
 }
 
-def main() {
+fn main() {
     test_json();
     test_csv();
     test_pickle();

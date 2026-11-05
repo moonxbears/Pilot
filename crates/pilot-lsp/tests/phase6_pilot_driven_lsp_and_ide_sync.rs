@@ -347,4 +347,27 @@ fn test_selfhost_ide_sync_pilot_generates_all_4_vscode_artifacts_and_hover_badge
     assert!(!pairs.is_empty(), "Syntax migration pairs must be loaded");
     let migrated = pilot_fmt::migrate_syntax("def add(x: int) -> int: return x");
     assert!(migrated.contains("fn add"), "Migrated syntax should use 'fn': {}", migrated);
+
+    // 5. Verify selfhost/ide_sync.pilot hierarchical class structure and evaluation
+    let ide_sync_src = include_str!("../../../selfhost/ide_sync.pilot");
+    let snap = BootstrapSnapshot::global();
+    let mut snap_tables = snap.tables.clone();
+    let mut snap_vm = snap.vm.clone();
+    let eval_res = pilot_analysis::eval_file_with_tables(&ide_sync_src, &mut snap_tables, &mut snap_vm);
+    assert!(eval_res.is_ok(), "selfhost/ide_sync.pilot must evaluate cleanly: {:?}", eval_res.err());
+    let arena = eval_res.unwrap();
+    assert!(arena.root.is_some(), "AST arena must have root");
+
+    // 6. Verify stdlib/json/json.pilot canonical syntax and evaluation
+    let json_src = include_str!("../../../stdlib/json/json.pilot");
+    let mut json_tables = snap.tables.clone();
+    let mut json_vm = snap.vm.clone();
+    let json_eval_res = pilot_analysis::eval_file_with_tables(json_src, &mut json_tables, &mut json_vm);
+    assert!(json_eval_res.is_ok(), "stdlib/json/json.pilot must evaluate cleanly: {:?}", json_eval_res.err());
+    let json_arena = pilot_parser::parse(json_src);
+    let json_analysis = pilot_analysis::AnalysisPipeline::analyze(&json_arena, json_arena.root);
+    for d in &json_analysis.diagnostics {
+        eprintln!("JSON DIAG: {:?}", d);
+    }
+    assert!(json_analysis.is_ok(), "json.pilot must have clean type inference: {:?}", json_analysis.diagnostics);
 }

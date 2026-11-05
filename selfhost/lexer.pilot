@@ -1,83 +1,99 @@
-# ==============================================================================
-# selfhost/lexer.pilot: Tokenizer & Scanner Written in Pilot
-# ==============================================================================
+// ==============================================================================
+// selfhost/lexer.pilot: Tokenizer & Scanner Written in Pilot
+// ==============================================================================
 
-let TOK_EOF: int = 0
-let TOK_INT: int = 1
-let TOK_FLOAT: int = 2
-let TOK_STR: int = 3
-let TOK_IDENT: int = 4
-let TOK_KEYWORD: int = 5
+pub pkg Pilot.SelfHost.Lexer;
 
-let TOK_PLUS: int = 10
-let TOK_MINUS: int = 11
-let TOK_STAR: int = 12
-let TOK_SLASH: int = 13
-let TOK_PERCENT: int = 14
-let TOK_EQUAL: int = 15
-let TOK_EQEQ: int = 16
-let TOK_NE: int = 17
-let TOK_LT: int = 18
-let TOK_LE: int = 19
-let TOK_GT: int = 20
-let TOK_GE: int = 21
-let TOK_ARROW: int = 22
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
 
-let TOK_LPAREN: int = 30
-let TOK_RPAREN: int = 31
-let TOK_LBRACE: int = 32
-let TOK_RBRACE: int = 33
-let TOK_LBRACKET: int = 34
-let TOK_RBRACKET: int = 35
-let TOK_COMMA: int = 36
-let TOK_COLON: int = 37
-let TOK_SEMICOLON: int = 38
-
-def is_digit(c: int) -> bool {
-    return c >= 48 && c <= 57
+extern "c" {
+    fn strcmp(s1: str, s2: str) -> i32;
 }
 
-def is_alpha(c: int) -> bool {
-    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95
+pub const TOK_EOF: i64 = 0;
+pub const TOK_INT: i64 = 1;
+pub const TOK_FLOAT: i64 = 2;
+pub const TOK_STR: i64 = 3;
+pub const TOK_IDENT: i64 = 4;
+pub const TOK_KEYWORD: i64 = 5;
+
+pub const TOK_PLUS: i64 = 10;
+pub const TOK_MINUS: i64 = 11;
+pub const TOK_STAR: i64 = 12;
+pub const TOK_SLASH: i64 = 13;
+pub const TOK_PERCENT: i64 = 14;
+pub const TOK_EQUAL: i64 = 15;
+pub const TOK_EQEQ: i64 = 16;
+pub const TOK_NE: i64 = 17;
+pub const TOK_LT: i64 = 18;
+pub const TOK_LE: i64 = 19;
+pub const TOK_GT: i64 = 20;
+pub const TOK_GE: i64 = 21;
+pub const TOK_ARROW: i64 = 22;
+
+pub const TOK_LPAREN: i64 = 30;
+pub const TOK_RPAREN: i64 = 31;
+pub const TOK_LBRACE: i64 = 32;
+pub const TOK_RBRACE: i64 = 33;
+pub const TOK_LBRACKET: i64 = 34;
+pub const TOK_RBRACKET: i64 = 35;
+pub const TOK_COMMA: i64 = 36;
+pub const TOK_COLON: i64 = 37;
+pub const TOK_SEMICOLON: i64 = 38;
+
+pub fn is_digit(c: i64) -> bool {
+    return c >= 48 && c <= 57;
 }
 
-def is_alphanumeric(c: int) -> bool {
-    return is_alpha(c) || is_digit(c)
+pub fn is_alpha(c: i64) -> bool {
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95;
 }
 
-def is_keyword(s: str) -> bool {
-    if strcmp(s, "def") == 0 { return true }
-    if strcmp(s, "let") == 0 { return true }
-    if strcmp(s, "var") == 0 { return true }
-    if strcmp(s, "return") == 0 { return true }
-    if strcmp(s, "if") == 0 { return true }
-    if strcmp(s, "else") == 0 { return true }
-    if strcmp(s, "while") == 0 { return true }
-    if strcmp(s, "for") == 0 { return true }
-    if strcmp(s, "in") == 0 { return true }
-    if strcmp(s, "import") == 0 { return true }
-    if strcmp(s, "from") == 0 { return true }
-    if strcmp(s, "comptime") == 0 { return true }
-    return false
+pub fn is_alphanumeric(c: i64) -> bool {
+    return is_alpha(c) || is_digit(c);
 }
 
-def get_token_kind_name(kind: int) -> str {
-    if kind == 0 { return "EOF" }
-    if kind == 1 { return "INT" }
-    if kind == 2 { return "FLOAT" }
-    if kind == 3 { return "STR" }
-    if kind == 4 { return "IDENT" }
-    if kind == 5 { return "KEYWORD" }
-    if kind == 10 { return "PLUS" }
-    if kind == 11 { return "MINUS" }
-    if kind == 12 { return "STAR" }
-    if kind == 13 { return "SLASH" }
-    if kind == 15 { return "EQUAL" }
-    if kind == 16 { return "EQEQ" }
-    if kind == 22 { return "ARROW" }
-    if kind == 30 { return "LPAREN" }
-    if kind == 31 { return "RPAREN" }
-    if kind == 32 { return "LBRACE" }
-    if kind == 33 { return "RBRACE" }
-    return "UNKNOWN"
+// Recognizes strictly the 14 canonical Pilot seed tokens
+pub fn is_keyword(s: str) -> bool {
+    if strcmp(s, "__engine") == 0 { return true; }
+    if strcmp(s, "struct") == 0 { return true; }
+    if strcmp(s, "interface") == 0 { return true; }
+    if strcmp(s, "fn") == 0 { return true; }
+    if strcmp(s, "let") == 0 { return true; }
+    if strcmp(s, "ref") == 0 { return true; }
+    if strcmp(s, "if") == 0 { return true; }
+    if strcmp(s, "loop") == 0 { return true; }
+    if strcmp(s, "return") == 0 { return true; }
+    if strcmp(s, "yield") == 0 { return true; }
+    if strcmp(s, "defer") == 0 { return true; }
+    if strcmp(s, "comptime") == 0 { return true; }
+    if strcmp(s, "quote") == 0 { return true; }
+    if strcmp(s, "asm") == 0 { return true; }
+    return false;
+}
+
+pub fn get_token_kind_name(kind: i64) -> str {
+    if kind == 0 { return "EOF"; }
+    if kind == 1 { return "INT"; }
+    if kind == 2 { return "FLOAT"; }
+    if kind == 3 { return "STR"; }
+    if kind == 4 { return "IDENT"; }
+    if kind == 5 { return "KEYWORD"; }
+    if kind == 10 { return "PLUS"; }
+    if kind == 11 { return "MINUS"; }
+    if kind == 12 { return "STAR"; }
+    if kind == 13 { return "SLASH"; }
+    if kind == 15 { return "EQUAL"; }
+    if kind == 16 { return "EQEQ"; }
+    if kind == 22 { return "ARROW"; }
+    if kind == 30 { return "LPAREN"; }
+    if kind == 31 { return "RPAREN"; }
+    if kind == 32 { return "LBRACE"; }
+    if kind == 33 { return "RBRACE"; }
+    return "UNKNOWN";
 }
