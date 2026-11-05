@@ -17,7 +17,7 @@ pub mod net;
 pub use value::{PilotVal, TAG_INT, TAG_FLOAT, TAG_BOOL, TAG_SSO_STR, TAG_HEAP_STR, TAG_NULL};
 pub use memory::{ArcHeader, BumpRegion, FLAG_ATOMIC};
 pub use concurrency::{Channel, ShadowEffectContext, Signal};
-pub use stdlib::{PilotDfaRegex, PilotStdlibIntrinsics, PilotStdlibResolver};
+pub use stdlib::{PilotOsSyscall, PilotStdlibResolver};
 pub use crypto::{blake3, ed25519_sign, ed25519_verify, hmac_sha256, random_bytes, sha256, sha512};
 pub use time::{monotonic_micros, now_millis, now_nanos, sleep_ms, timespec_now};
 pub use net::{http_get, http_post, tcp_connect, tcp_listen, udp_bind, HttpResponse};
@@ -128,49 +128,12 @@ mod tests {
     }
 
     #[test]
-    fn test_stdlib_intrinsics_and_dfa_regex() {
-        // Intrinsics
-        assert_eq!(PilotStdlibIntrinsics::type_name(PilotVal::from_int(42)), "int");
-        assert_eq!(PilotStdlibIntrinsics::type_name(PilotVal::from_float(3.14)), "float");
-        assert_eq!(PilotStdlibIntrinsics::math_sqrt(16.0), 4.0);
-
-        // DFA Regex
-        let regex = PilotDfaRegex::compile("^hello.*world$");
-        assert!(regex.is_match("hello world"));
-        assert!(regex.is_match("hello beautiful world"));
-        assert!(!regex.is_match("bye world"));
-
-        // Module resolution
+    fn test_stdlib_resolver_and_syscalls() {
         assert!(PilotStdlibResolver::is_stdlib_module("std.math"));
         assert!(PilotStdlibResolver::is_stdlib_module("std.core"));
         assert!(!PilotStdlibResolver::is_stdlib_module("unknown.module"));
-
-        // Extended string and numeric intrinsics
-        assert_eq!(PilotStdlibIntrinsics::str_split("hello,world", ","), vec!["hello", "world"]);
-        assert_eq!(PilotStdlibIntrinsics::str_join(&["a", "b", "c"], "-"), "a-b-c");
-        assert_eq!(PilotStdlibIntrinsics::str_replace("hello world", "world", "pilot"), "hello pilot");
-        assert_eq!(PilotStdlibIntrinsics::str_trim("   pilot   "), "pilot");
-        assert_eq!(PilotStdlibIntrinsics::str_to_upper("pilot"), "PILOT");
-        assert_eq!(PilotStdlibIntrinsics::str_to_lower("PILOT"), "pilot");
-        assert!(PilotStdlibIntrinsics::str_starts_with("hello world", "hello"));
-        assert!(PilotStdlibIntrinsics::str_ends_with("hello world", "world"));
-        assert!(PilotStdlibIntrinsics::str_contains("hello world", "lo wo"));
-        assert_eq!(PilotStdlibIntrinsics::str_index_of("hello world", "world"), Some(6));
-        assert_eq!(PilotStdlibIntrinsics::str_repeat("ab", 3), "ababab");
-        assert_eq!(PilotStdlibIntrinsics::str_substring("pilot", 1, 3), "ilo");
-        assert!(PilotStdlibIntrinsics::str_is_digit("12345"));
-        assert!(!PilotStdlibIntrinsics::str_is_digit("123a45"));
-        assert!(PilotStdlibIntrinsics::str_is_alpha("hello"));
-        assert!(!PilotStdlibIntrinsics::str_is_alpha("hello12"));
-        assert_eq!(PilotStdlibIntrinsics::str_to_int("42"), Some(42));
-        assert_eq!(PilotStdlibIntrinsics::str_to_float("3.14"), Some(3.14));
-        assert_eq!(PilotStdlibIntrinsics::int_abs(-50), 50);
-        assert_eq!(PilotStdlibIntrinsics::int_clamp(150, 0, 100), 100);
-        assert_eq!(PilotStdlibIntrinsics::float_abs(-2.5), 2.5);
-        assert_eq!(PilotStdlibIntrinsics::float_clamp(12.5, 0.0, 10.0), 10.0);
-        assert_eq!(PilotStdlibIntrinsics::float_round(3.7), 4.0);
-        assert_eq!(PilotStdlibIntrinsics::float_floor(3.7), 3.0);
-        assert_eq!(PilotStdlibIntrinsics::float_ceil(3.2), 4.0);
+        assert_eq!(PilotStdlibResolver::get_module_relative_path("std.core"), Some("core/core.pilot"));
+        assert!(PilotOsSyscall::monotonic_nanos() > 0);
     }
 
     #[test]
@@ -237,70 +200,5 @@ mod tests {
         let resp = HttpResponse::ok(b"{\"status\":\"ok\"}", "application/json");
         assert_eq!(resp.status, 200);
         assert_eq!(resp.text(), "{\"status\":\"ok\"}");
-    }
-
-    #[test]
-    fn test_str_range_combinations() {
-        // 1. Single letter lowercase a..z (26 elements)
-        let a_to_z = PilotStdlibIntrinsics::str_range("a", "z", true);
-        assert_eq!(a_to_z.len(), 26);
-        assert_eq!(a_to_z.first().unwrap(), "a");
-        assert_eq!(a_to_z.last().unwrap(), "z");
-
-        // 2. Reverse z..a (26 elements)
-        let z_to_a = PilotStdlibIntrinsics::str_range("z", "a", true);
-        assert_eq!(z_to_a.len(), 26);
-        assert_eq!(z_to_a.first().unwrap(), "z");
-        assert_eq!(z_to_a.last().unwrap(), "a");
-        assert_eq!(z_to_a[1], "y");
-
-        // 3. Multi-character bijective combinations: a..aa (27 elements)
-        let a_to_aa = PilotStdlibIntrinsics::str_range("a", "aa", true);
-        assert_eq!(a_to_aa.len(), 27);
-        assert_eq!(a_to_aa[25], "z");
-        assert_eq!(a_to_aa[26], "aa");
-
-        // 4. a..zzza transitions from a..z (length 1), aa..zz (length 2), aaa..zzz (length 3), up to zzza (length 4)
-        let a_to_ab = PilotStdlibIntrinsics::str_range("a", "ab", true);
-        assert_eq!(a_to_ab.len(), 28);
-        assert_eq!(a_to_ab[25], "z");
-        assert_eq!(a_to_ab[26], "aa");
-        assert_eq!(a_to_ab[27], "ab");
-
-        // 5. a..Z -> 52 combinations: a..z then A..Z
-        let a_to_big_z = PilotStdlibIntrinsics::str_range("a", "Z", true);
-        assert_eq!(a_to_big_z.len(), 52);
-        assert_eq!(a_to_big_z[0], "a");
-        assert_eq!(a_to_big_z[25], "z");
-        assert_eq!(a_to_big_z[26], "A");
-        assert_eq!(a_to_big_z[51], "Z");
-
-        // 6. A..z -> 52 combinations: A..Z then a..z
-        let big_a_to_z = PilotStdlibIntrinsics::str_range("A", "z", true);
-        assert_eq!(big_a_to_z.len(), 52);
-        assert_eq!(big_a_to_z[0], "A");
-        assert_eq!(big_a_to_z[25], "Z");
-        assert_eq!(big_a_to_z[26], "a");
-        assert_eq!(big_a_to_z[51], "z");
-
-        // 7. Z..a -> reverse of a..Z: Z..A then z..a
-        let rev_z_to_a = PilotStdlibIntrinsics::str_range("Z", "a", true);
-        assert_eq!(rev_z_to_a.len(), 52);
-        assert_eq!(rev_z_to_a[0], "Z");
-        assert_eq!(rev_z_to_a[25], "A");
-        assert_eq!(rev_z_to_a[26], "z");
-        assert_eq!(rev_z_to_a[51], "a");
-
-        // 8. z..A -> reverse of A..z: z..a then Z..A
-        let rev_small_z_to_big_a = PilotStdlibIntrinsics::str_range("z", "A", true);
-        assert_eq!(rev_small_z_to_big_a.len(), 52);
-        assert_eq!(rev_small_z_to_big_a[0], "z");
-        assert_eq!(rev_small_z_to_big_a[25], "a");
-        assert_eq!(rev_small_z_to_big_a[26], "Z");
-        assert_eq!(rev_small_z_to_big_a[51], "A");
-
-        // 9. Half-open a..<c (a, b)
-        let half_open = PilotStdlibIntrinsics::str_range("a", "c", false);
-        assert_eq!(half_open, vec!["a", "b"]);
     }
 }
