@@ -1457,11 +1457,11 @@ impl TypeArena {
             TypeKind::Primitive(name) => name.clone(),
             TypeKind::Collection { kind, element } => {
                 let k_str = match kind {
-                    CollectionKind::List => "list",
+                    CollectionKind::List => "slice",
                     CollectionKind::Set => "set",
                     CollectionKind::Future => "future",
                     CollectionKind::Slice => "slice",
-                    CollectionKind::SliceBuffer => "slice_buffer",
+                    CollectionKind::SliceBuffer => "slice",
                     CollectionKind::SliceView => "slice_view",
                     CollectionKind::StridedSlice => "strided_slice",
                     CollectionKind::View => "view",

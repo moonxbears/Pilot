@@ -2,8 +2,8 @@ import os
 import re
 import glob
 
-PATTERNS = ["Int", "Float", "String", "Bool", "Char", "List", "Dict", "Map", "Option", "Result", "SliceBuffer", "SliceMap", "Tensor", "Matrix"]
-REGEX = re.compile(r'\"(' + '|'.join(PATTERNS) + r')\"')
+PATTERNS = ["int", "float", "string", "bool", "char", "list", "dict", "map", "option", "result", "slicebuffer", "slicemap", "slice_buffer", "slice_map", "tensor", "matrix"]
+REGEX = re.compile(r'\"(' + '|'.join(PATTERNS) + r')\"', re.IGNORECASE)
 REGEX_LAYOUT_ID = re.compile(r'LayoutId\([0-9]+\)')
 
 def main():

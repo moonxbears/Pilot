@@ -8,7 +8,6 @@ use crate::diagnostics::AnalysisDiagnostic;
 use crate::dimensions::DimensionChecker;
 use crate::infer::TypeInferenceEngine;
 use crate::loops::LoopAnalyzer;
-use crate::null_error::{ErrorFlowAnalyzer, NullSafetyAnalyzer};
 use crate::patterns::MarangetChecker;
 use crate::types::{TypeArena, TypeId};
 
@@ -49,8 +48,6 @@ impl AnalysisPipeline {
         infer_engine.finalize_inferred_types();
 
         // 2. Pattern Exhaustiveness & Redundancy Checking
-        let mut null_safety = NullSafetyAnalyzer::new();
-        let mut error_flow = ErrorFlowAnalyzer::new();
         let loop_analyzer = LoopAnalyzer::new();
         let mut dim_checker = DimensionChecker::new();
         let mut contract_verifier = ContractVerifier::new();
@@ -99,14 +96,10 @@ impl AnalysisPipeline {
                 diagnostics.extend(match_diags);
             }
 
-            null_safety.check_node(arena, node_id, &infer_engine);
-            error_flow.check_node(arena, node_id, &infer_engine);
             dim_checker.check_node(arena, node_id, &infer_engine);
             contract_verifier.check_node(arena, node_id);
         }
 
-        diagnostics.extend(null_safety.diagnostics);
-        diagnostics.extend(error_flow.diagnostics);
         diagnostics.extend(loop_analyzer.diagnostics);
         diagnostics.extend(dim_checker.diagnostics);
         diagnostics.extend(contract_verifier.diagnostics);

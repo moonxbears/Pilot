@@ -62,32 +62,37 @@ pub syntax {
     };
 
     guard(cond, else_body) => quote {
-        if !() {
-            
+        if !($cond) {
+            $else_body
         }
     };
 
     switch(target, arms) => quote {
         {
-            let __sw_target = ;
-            
+            let __sw_target = $target;
+            $arms
         }
     };
 
     case(pat, body) => quote {
-        
+        if __sw_target == $pat {
+            $body
+        }
     };
 
     default(body) => quote {
-        
+        $body
     };
 
     try(body, handler) => quote {
-        
+        {
+            $body
+            $handler
+        }
     };
 
     catch(err_pat, body) => quote {
-        
+        $body
     };
 
     unit(decl) => quote {

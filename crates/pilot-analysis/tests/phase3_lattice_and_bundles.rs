@@ -712,9 +712,9 @@ fn test_enforce_core_naming_lint() {
 #[test]
 fn test_universal_rename_litmus_gate() {
     use pilot_analysis::{
-        bootstrap_core_file, eval_file_with_tables, ComptimeEngine, ErrorFlowAnalyzer,
-        ForLoopAnalyzer, ForLoweringStrategy, HardwarePhysics, ImplicitLiftKind, LoopReturnMode,
-        LoopScheduleMode, RegClass, StructuralShape, TryPropagationPlan, TypeInferenceEngine,
+        bootstrap_core_file, eval_file_with_tables, ComptimeEngine,
+        ForLoopAnalyzer, ForLoweringStrategy, HardwarePhysics, LoopReturnMode,
+        LoopScheduleMode, RegClass, StructuralShape, TypeInferenceEngine,
     };
     use pilot_codegen::{
         c_target::CTargetEmitter, gpu::GpuEmitter, llvm::LlvmEmitter, wasm::WasmEmitter,
@@ -960,35 +960,6 @@ fn test_universal_rename_litmus_gate() {
             err_ty: Some(ty_word64),
             niche_optimized: false,
         }
-    );
-
-    let mut err_flow = ErrorFlowAnalyzer::new();
-    let plan_maybe = err_flow.analyze_try_operator(ty_maybe, Some(ty_maybe), &type_arena, "test_fn", span);
-    assert!(matches!(
-        plan_maybe,
-        TryPropagationPlan::OptionUnwrap { unwrapped_ty, .. } if unwrapped_ty == ty_sint64
-    ));
-    let plan_outcome =
-        err_flow.analyze_try_operator(ty_outcome, Some(ty_outcome), &type_arena, "test_fn", span);
-    assert!(matches!(
-        plan_outcome,
-        TryPropagationPlan::ResultUnwrap {
-            unwrapped_ok_ty,
-            propagated_err_ty,
-            ..
-        } if unwrapped_ok_ty == ty_sint64 && propagated_err_ty == ty_word64
-    ));
-    assert!(err_flow.diagnostics.is_empty());
-    assert_eq!(
-        ErrorFlowAnalyzer::synthesize_implicit_lift(ty_maybe, ty_sint64, false, &type_arena),
-        Some(ImplicitLiftKind::OptionSome { elem_ty: ty_sint64 })
-    );
-    assert_eq!(
-        ErrorFlowAnalyzer::synthesize_implicit_lift(ty_outcome, ty_sint64, false, &type_arena),
-        Some(ImplicitLiftKind::ResultOk {
-            ok_ty: ty_sint64,
-            err_ty: ty_word64
-        })
     );
 
     // 4. Seal `interval<sint64>` and verify `StructuralShape::BoundsPair` + 3-tier `for` loop schedule

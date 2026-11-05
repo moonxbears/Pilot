@@ -898,3 +898,159 @@ pub pure fn syntax_migration_pairs() -> tuple<str, str>[] => [
     ("protocol",  "interface"),
     ("extension", "ext"),
 ];
+
+// =========================================================================
+// 7. PILOT-HOSTED ADVANCED HOVER CARD MARKDOWN FORMATTER & KEYWORD LINKS
+// =========================================================================
+
+pub struct HoverParamModel : IValue {
+    pub name:        str;
+    pub ty_str:      str;
+    pub modifier:    str;
+    pub default_val: str;
+    pub doc:         str;
+}
+
+pub struct HoverOverloadModel : IValue {
+    pub name:      str;
+    pub receiver:  str;
+    pub modifiers: str[];
+    pub params:    HoverParamModel[];
+    pub return_ty: str;
+    pub error_ty:  str;
+    pub doc:       str;
+}
+
+pub pure fn get_related_keywords(kw: str) -> str[] {
+    switch kw {
+        case "guard":     return ["else", "return", "break", "throw"];
+        case "switch":    return ["case", "default", "when", "break"];
+        case "case":      return ["switch", "when", "default", "break"];
+        case "default":   return ["switch", "case"];
+        case "if":        return ["else", "then"];
+        case "else":      return ["if", "guard", "then"];
+        case "then":      return ["if", "else"];
+        case "for":       return ["in", "continue", "break", "yield", "then"];
+        case "in":        return ["for", "each"];
+        case "loop":      return ["break", "continue", "return"];
+        case "break":     return ["loop", "for", "switch"];
+        case "continue":  return ["loop", "for"];
+        case "defer":     return ["scope", "enter", "exit", "~self"];
+        case "fn":        return ["pure", "comptime", "return", "yield"];
+        case "return":    return ["fn", "guard", "yield"];
+        case "yield":     return ["fn", "for"];
+        case "let":       return ["var", "ref"];
+        case "var":       return ["let", "ref"];
+        case "ref":       return ["var", "let", "iso", "view"];
+        case "iso":       return ["ref", "pure"];
+        case "pure":      return ["fn", "comptime", "iso"];
+        case "comptime":  return ["fn", "quote", "ast", "pure"];
+        case "quote":     return ["comptime", "ast"];
+        case "struct":    return ["interface", "view", "as"];
+        case "interface": return ["struct", "IValue", "IReference", "IObject", "IGuard"];
+        case "pub":       return ["priv", "prot", "int", "open", "export", "lvl"];
+        case "priv":      return ["pub", "prot", "file", "lvl"];
+        default:          return [];
+    }
+}
+
+pub pure fn format_keyword_hover_markdown(ident: str, domain: str, summary: str) -> str {
+    var md = f"**Pilot Keyword**: `{ident}` ({domain})\n\n{summary}";
+    let related = get_related_keywords(ident);
+    if len(related) > 0 {
+        md = md + "\n\n---\n**Related Keywords**: ";
+        var idx = 0;
+        for r in related {
+            if idx > 0 {
+                md = md + " • ";
+            }
+            md = md + f"[`{r}`](#)";
+            idx = idx + 1;
+        }
+    }
+    return md;
+}
+
+pub pure fn format_fn_hover_markdown(
+    active:     HoverOverloadModel,
+    overloads:  HoverOverloadModel[],
+    active_idx: i64
+) -> str {
+    var out = "```pilot\n";
+    var mod_prefix = "";
+    for m in active.modifiers {
+        if m != "priv" && m != "builtin" {
+            mod_prefix = mod_prefix + m + " ";
+        }
+    }
+
+    let recv_prefix = if len(active.receiver) > 0 { active.receiver + "." } else { "" };
+    let err_suffix  = if len(active.error_ty) > 0 { " ! " + active.error_ty } else { "" };
+
+    if len(active.params) > 2 {
+        out = out + f"{mod_prefix}fn {recv_prefix}{active.name}(\n";
+        for p in active.params {
+            let p_mod = if len(p.modifier) > 0 { p.modifier + " " } else { "" };
+            let p_def = if len(p.default_val) > 0 { " = " + p.default_val } else { "" };
+            out = out + f"    {p_mod}{p.name}: {p.ty_str}{p_def},\n";
+        }
+        out = out + f") -> {active.return_ty}{err_suffix}\n";
+    } else {
+        var inline_params = "";
+        var pidx = 0;
+        for p in active.params {
+            if pidx > 0 { inline_params = inline_params + ", "; }
+            let p_mod = if len(p.modifier) > 0 { p.modifier + " " } else { "" };
+            let p_def = if len(p.default_val) > 0 { " = " + p.default_val } else { "" };
+            inline_params = inline_params + f"{p_mod}{p.name}: {p.ty_str}{p_def}";
+            pidx = pidx + 1;
+        }
+        out = out + f"{mod_prefix}fn {recv_prefix}{active.name}({inline_params}) -> {active.return_ty}{err_suffix}\n";
+    }
+    out = out + "```\n\n";
+
+    let kind_label = if len(active.receiver) > 0 {
+        f"*Pilot Method* on `{active.receiver}`"
+    } else {
+        "*Pilot Function*"
+    };
+    out = out + kind_label;
+
+    for m in active.modifiers {
+        out = out + f" • [{m}](#)";
+    }
+    out = out + "\n";
+
+    if len(active.doc) > 0 {
+        out = out + "\n" + active.doc + "\n";
+    }
+
+    if len(active.params) > 0 {
+        out = out + "\n### Parameters\n";
+        for p in active.params {
+            out = out + f"- `{p.name}`: `{p.ty_str}`\n";
+        }
+    }
+
+    if active.return_ty != "void" && active.return_ty != "()" {
+        out = out + f"\n### Returns\n- `{active.return_ty}`\n";
+    }
+
+    if len(active.error_ty) > 0 {
+        out = out + f"\n### Throws / Errors\n- `{active.error_ty}`\n";
+    }
+
+    let ov_count = len(overloads);
+    if ov_count > 1 {
+        out = out + f"\n### Overloads ({ov_count})\n";
+        var oidx = 0;
+        for ov in overloads {
+            let marker = if oidx == active_idx { " *(active)*" } else { "" };
+            let num = oidx + 1;
+            out = out + f"{num}. `fn {ov.name}(...) -> {ov.return_ty}`{marker}\n";
+            oidx = oidx + 1;
+        }
+    }
+
+    return out;
+}

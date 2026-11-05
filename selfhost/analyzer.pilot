@@ -6,105 +6,420 @@
 
 pub pkg Pilot.SelfHost.Analyzer;
 
-// Top-level entrypoint executed by pilot-vm
-pub fn analyze_unit(unit_id: i64) -> i64 {
-    let total_nodes = __engine("ast_node_count");
-    if total_nodes == 0 {
+pub fn resolve_type_sym(type_sym: i64, node_count: i64) -> i64 {
+    var j = 0;
+    while j < node_count {
+        let k = __engine("ast_node_kind", j);
+        if k == 1 {
+            let s = __engine("ast_node_sym", j);
+            if s == type_sym {
+                let lid = infer_struct(j, node_count);
+                return lid;
+            }
+        }
+        j = j + 1;
+    }
+
+    // Fallback for external/undeclared type symbols: reuse if already bound, else register on demand
+    j = 0;
+    while j < node_count {
+        let k = __engine("ast_node_kind", j);
+        if k == 21 {
+            let b = __engine("ast_node_raw_bits", j);
+            if b == type_sym {
+                let ex = __engine("ast_get_bound_layout", j);
+                if ex != 4294967295 {
+                    return ex;
+                }
+            }
+        }
+        j = j + 1;
+    }
+
+    let ext_lid = __engine("layout_scalar", 64, 1, 0);
+    return ext_lid;
+}
+
+pub fn infer_struct(s_id: i64, node_count: i64) -> i64 {
+    let existing = __engine("ast_get_bound_layout", s_id);
+    if existing != 4294967295 {
+        return existing;
+    }
+
+    let bits = __engine("ast_node_raw_bits", s_id);
+    if bits > 0 {
+        let bit_width = (bits >> 16) & 65535;
+        let lanes = (bits >> 8) & 255;
+        let bank = bits & 255;
+        var s_lid = 0;
+        if bank == 6 {
+            s_lid = __engine("layout_ptr", 0, 1, 0);
+        } else {
+            s_lid = __engine("layout_scalar", bit_width, lanes, bank);
+        }
+        __engine("ast_bind_layout", s_id, s_lid);
+        return s_lid;
+    }
+
+    let c_count = __engine("ast_child_count", s_id);
+    if c_count == 0 {
+        let empty_lid = __engine("layout_scalar", 8, 1, 0);
+        __engine("ast_bind_layout", s_id, empty_lid);
+        return empty_lid;
+    }
+
+    var f0 = 0;
+    var f1 = 0;
+    var f2 = 0;
+    var f3 = 0;
+    var f4 = 0;
+    var f5 = 0;
+
+    var fi = 0;
+    while fi < c_count {
+        let f_node = __engine("ast_child_at", s_id, fi);
+        let f_ty_sym = __engine("ast_node_raw_bits", f_node);
+        let f_lid = resolve_type_sym(f_ty_sym, node_count);
+        __engine("ast_bind_layout", f_node, f_lid);
+        if fi == 0 { f0 = f_lid; }
+        if fi == 1 { f1 = f_lid; }
+        if fi == 2 { f2 = f_lid; }
+        if fi == 3 { f3 = f_lid; }
+        if fi == 4 { f4 = f_lid; }
+        if fi == 5 { f5 = f_lid; }
+        fi = fi + 1;
+    }
+
+    var agg_lid = 0;
+    if c_count == 1 {
+        agg_lid = __engine("layout_aggregate", f0);
+    } else if c_count == 2 {
+        agg_lid = __engine("layout_aggregate", f0, f1);
+    } else if c_count == 3 {
+        agg_lid = __engine("layout_aggregate", f0, f1, f2);
+    } else if c_count == 4 {
+        agg_lid = __engine("layout_aggregate", f0, f1, f2, f3);
+    } else if c_count == 5 {
+        agg_lid = __engine("layout_aggregate", f0, f1, f2, f3, f4);
+    } else {
+        agg_lid = __engine("layout_aggregate", f0, f1, f2, f3, f4, f5);
+    }
+    __engine("ast_bind_layout", s_id, agg_lid);
+    return agg_lid;
+}
+
+pub fn resolve_lit_layout(lit_kind: i64, node_count: i64) -> i64 {
+    // 1. Check for StructDecl with matching default_literal receptor
+    var j = 0;
+    while j < node_count {
+        let k = __engine("ast_node_kind", j);
+        if k == 1 {
+            let lk = __engine("ast_node_lit_kind", j);
+            if lk == lit_kind {
+                let s_lid = __engine("ast_get_bound_layout", j);
+                if s_lid != 4294967295 {
+                    return s_lid;
+                }
+            }
+        }
+        j = j + 1;
+    }
+
+    // 2. Check for StructDecl with matching physical geometry (1-byte scalar for bool, 8-byte scalar for int/float)
+    j = 0;
+    while j < node_count {
+        let k = __engine("ast_node_kind", j);
+        if k == 1 {
+            let bits = __engine("ast_node_raw_bits", j);
+            if bits > 0 {
+                let s_lid = __engine("ast_get_bound_layout", j);
+                if s_lid != 4294967295 {
+                    let sz = __engine("layout_metrics", s_lid);
+                    let bank = bits & 255;
+                    if lit_kind == 4 {
+                        if sz == 1 {
+                            return s_lid;
+                        }
+                    } else if lit_kind == 1 {
+                        if sz == 8 {
+                            if bank != 1 {
+                                if bank != 6 {
+                                    return s_lid;
+                                }
+                            }
+                        }
+                    } else if lit_kind == 2 {
+                        if sz == 8 {
+                            if bank == 1 {
+                                return s_lid;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        j = j + 1;
+    }
+
+    // 3. Reuse previously bound literal of same lit_kind in this AST
+    j = 0;
+    while j < node_count {
+        let k = __engine("ast_node_kind", j);
+        if k == 15 {
+            let lk = __engine("ast_node_lit_kind", j);
+            if lk == lit_kind {
+                let ex = __engine("ast_get_bound_layout", j);
+                if ex != 4294967295 {
+                    return ex;
+                }
+            }
+        }
+        j = j + 1;
+    }
+
+    // 4. Register on demand when a literal of this kind is actually encountered
+    if lit_kind == 4 {
+        let b_lid = __engine("layout_scalar", 8, 1, 0);
+        return b_lid;
+    }
+    if lit_kind == 2 {
+        let f_lid = __engine("layout_scalar", 64, 1, 1);
+        return f_lid;
+    }
+    let i_lid = __engine("layout_scalar", 64, 1, 0);
+    return i_lid;
+}
+
+pub fn infer_member_expr(i: i64, node_count: i64) -> i64 {
+    let c_count = __engine("ast_child_count", i);
+    if c_count == 0 {
+        return 0;
+    }
+    let recv_id = __engine("ast_child_at", i, 0);
+    let recv_lid = __engine("ast_get_bound_layout", recv_id);
+    if recv_lid == 4294967295 {
+        return 0;
+    }
+    let field_sym = __engine("ast_node_sym", i);
+    var s_id = 0;
+    while s_id < node_count {
+        let sk = __engine("ast_node_kind", s_id);
+        if sk == 1 {
+            let s_lid = __engine("ast_get_bound_layout", s_id);
+            if s_lid == recv_lid {
+                let f_cnt = __engine("ast_child_count", s_id);
+                var f_idx = 0;
+                while f_idx < f_cnt {
+                    let f_node = __engine("ast_child_at", s_id, f_idx);
+                    let f_sym = __engine("ast_node_sym", f_node);
+                    if f_sym == field_sym {
+                        let offset = __engine("layout_field_offset", recv_lid, f_idx);
+                        let f_lid = __engine("ast_get_bound_layout", f_node);
+                        __engine("ast_bind_layout", i, f_lid);
+                        return f_lid;
+                    }
+                    f_idx = f_idx + 1;
+                }
+            }
+        }
+        s_id = s_id + 1;
+    }
+    return 0;
+}
+
+pub fn infer_node(i: i64, node_count: i64) -> i64 {
+    let kind = __engine("ast_node_kind", i);
+
+    if kind == 15 {
+        let lit_kind = __engine("ast_node_lit_kind", i);
+        let lit_lid = resolve_lit_layout(lit_kind, node_count);
+        __engine("ast_bind_layout", i, lit_lid);
+        return lit_lid;
+    }
+
+    if kind == 14 {
+        let sym = __engine("ast_node_sym", i);
+        var j = i - 1;
+        var found = 0;
+        while j >= 0 {
+            if found == 0 {
+                let jk = __engine("ast_node_kind", j);
+                if jk == 4 {
+                    let js = __engine("ast_node_sym", j);
+                    if js == sym {
+                        let target_lid = __engine("ast_get_bound_layout", j);
+                        if target_lid != 4294967295 {
+                            __engine("ast_bind_target", i, j);
+                            __engine("ast_bind_layout", i, target_lid);
+                            found = 1;
+                        }
+                    }
+                } else if jk == 21 {
+                    let js = __engine("ast_node_sym", j);
+                    if js == sym {
+                        let target_lid = __engine("ast_get_bound_layout", j);
+                        if target_lid != 4294967295 {
+                            __engine("ast_bind_target", i, j);
+                            __engine("ast_bind_layout", i, target_lid);
+                            found = 1;
+                        }
+                    }
+                }
+            }
+            j = j - 1;
+        }
+        return found;
+    }
+
+    if kind == 4 {
+        let ann_sym = __engine("ast_node_raw_bits", i);
+        if ann_sym > 0 {
+            let ann_lid = resolve_type_sym(ann_sym, node_count);
+            __engine("ast_bind_layout", i, ann_lid);
+            return ann_lid;
+        }
+        let c_count = __engine("ast_child_count", i);
+        if c_count > 0 {
+            let rhs_id = __engine("ast_child_at", i, 0);
+            let rhs_lid = __engine("ast_get_bound_layout", rhs_id);
+            if rhs_lid != 4294967295 {
+                __engine("ast_bind_layout", i, rhs_lid);
+                return rhs_lid;
+            }
+        }
         return 0;
     }
 
-    // Default scalar layouts registered dynamically
-    let int_scalar = __engine("layout_scalar", 64, 1, 2);
-    let float_scalar = __engine("layout_scalar", 64, 1, 1);
-    let bool_scalar = __engine("layout_scalar", 8, 1, 0);
+    if kind == 17 {
+        return infer_member_expr(i, node_count);
+    }
 
-    // Pass 1: Declaration Registration
+    if kind == 19 {
+        let c_count = __engine("ast_child_count", i);
+        if c_count > 0 {
+            let op = __engine("ast_node_raw_bits", i);
+            if op >= 8 {
+                if op <= 17 {
+                    let b_lid = resolve_lit_layout(4, node_count);
+                    __engine("ast_bind_layout", i, b_lid);
+                    return b_lid;
+                }
+            }
+            let lhs_id = __engine("ast_child_at", i, 0);
+            let lhs_lid = __engine("ast_get_bound_layout", lhs_id);
+            if lhs_lid != 4294967295 {
+                __engine("ast_bind_layout", i, lhs_lid);
+                return lhs_lid;
+            }
+        }
+        return 0;
+    }
+
+    if kind == 8 {
+        let c_count = __engine("ast_child_count", i);
+        if c_count > 0 {
+            let val_id = __engine("ast_child_at", i, 0);
+            let val_lid = __engine("ast_get_bound_layout", val_id);
+            if val_lid != 4294967295 {
+                __engine("ast_bind_layout", i, val_lid);
+                return val_lid;
+            }
+        }
+        return 0;
+    }
+
+    if kind == 18 {
+        let c_count = __engine("ast_child_count", i);
+        if c_count > 0 {
+            let last_id = __engine("ast_child_at", i, c_count - 1);
+            let last_lid = __engine("ast_get_bound_layout", last_id);
+            if last_lid != 4294967295 {
+                __engine("ast_bind_layout", i, last_lid);
+                return last_lid;
+            }
+        }
+        return 0;
+    }
+
+    if kind == 6 {
+        let c_count = __engine("ast_child_count", i);
+        if c_count >= 2 {
+            let then_id = __engine("ast_child_at", i, 1);
+            let then_lid = __engine("ast_get_bound_layout", then_id);
+            if c_count >= 3 {
+                let else_id = __engine("ast_child_at", i, 2);
+                let else_lid = __engine("ast_get_bound_layout", else_id);
+                if then_lid != 4294967295 {
+                    if else_lid != 4294967295 {
+                        if then_lid != else_lid {
+                            let u_lid = __engine("layout_union", 8, then_lid, else_lid);
+                            __engine("ast_bind_layout", i, u_lid);
+                            return u_lid;
+                        }
+                    }
+                }
+            }
+            if then_lid != 4294967295 {
+                __engine("ast_bind_layout", i, then_lid);
+                return then_lid;
+            }
+        }
+        return 0;
+    }
+
+    if kind == 3 {
+        let c_count = __engine("ast_child_count", i);
+        if c_count > 0 {
+            let body_id = __engine("ast_child_at", i, 0);
+            let body_lid = __engine("ast_get_bound_layout", body_id);
+            if body_lid != 4294967295 {
+                __engine("ast_bind_layout", i, body_lid);
+                return body_lid;
+            }
+        }
+        return 0;
+    }
+
+    return 0;
+}
+
+pub fn analyze_unit(unit_id: i64) -> i64 {
+    let node_count = __engine("ast_node_count");
+    if node_count == 0 {
+        return 0;
+    }
+
+    // Pass 1: Resolve all StructDecl layouts (scalars, pointers, and nested aggregates)
     var i = 0;
-    while i < total_nodes {
+    while i < node_count {
         let kind = __engine("ast_node_kind", i);
         if kind == 1 {
-            // Struct declaration
-            let sym = __engine("ast_node_sym", i);
-            let child_cnt = __engine("ast_child_count", i);
-            var struct_lid = int_scalar;
-            if child_cnt > 0 {
-                struct_lid = __engine("layout_aggregate", int_scalar, int_scalar);
-            }
-            __engine("ast_bind_layout", i, struct_lid);
-        } else if kind == 3 {
-            // Fn declaration
-            let fn_lid = __engine("layout_scalar", 64, 1, 0);
-            __engine("ast_bind_layout", i, fn_lid);
+            infer_struct(i, node_count);
         }
         i = i + 1;
     }
 
-    // Pass 2: Statements & Expressions Inference
+    // Pass 2: Resolve all function parameter layouts (kind == 21 not already bound as struct fields)
     i = 0;
-    while i < total_nodes {
+    while i < node_count {
         let kind = __engine("ast_node_kind", i);
-        if kind == 15 {
-            // Literal Leaf
-            let lit_kind = __engine("ast_node_lit_kind", i);
-            var lit_lid = int_scalar;
-            if lit_kind == 2 {
-                lit_lid = float_scalar;
-            } else if lit_kind == 4 {
-                lit_lid = bool_scalar;
-            }
-            __engine("ast_bind_layout", i, lit_lid);
-        } else if kind == 14 {
-            // Identifier Leaf
-            let sym = __engine("ast_node_sym", i);
-            __engine("ast_bind_layout", i, int_scalar);
-        } else if kind == 4 {
-            // Let statement
-            let child_cnt = __engine("ast_child_count", i);
-            if child_cnt > 0 {
-                let rhs_id = __engine("ast_child_at", i, 0);
-                var rhs_lid = __engine("ast_get_bound_layout", rhs_id);
-                if rhs_lid == 4294967295 {
-                    rhs_lid = int_scalar;
-                }
-                __engine("ast_bind_layout", i, rhs_lid);
-            } else {
-                __engine("ast_bind_layout", i, int_scalar);
-            }
-        } else if kind == 19 {
-            // Binary expression
-            let child_cnt = __engine("ast_child_count", i);
-            var res_lid = int_scalar;
-            if child_cnt > 0 {
-                let lhs_id = __engine("ast_child_at", i, 0);
-                let lhs_lid = __engine("ast_get_bound_layout", lhs_id);
-                if lhs_lid != 4294967295 {
-                    res_lid = lhs_lid;
+        if kind == 21 {
+            let existing = __engine("ast_get_bound_layout", i);
+            if existing == 4294967295 {
+                let param_ty_sym = __engine("ast_node_raw_bits", i);
+                if param_ty_sym > 0 {
+                    let param_lid = resolve_type_sym(param_ty_sym, node_count);
+                    __engine("ast_bind_layout", i, param_lid);
                 }
             }
-            __engine("ast_bind_layout", i, res_lid);
-        } else if kind == 17 {
-            // Field access (MemberExpr)
-            let child_cnt = __engine("ast_child_count", i);
-            if child_cnt > 0 {
-                let recv_id = __engine("ast_child_at", i, 0);
-                var recv_lid = __engine("ast_get_bound_layout", recv_id);
-                if recv_lid == 4294967295 {
-                    recv_lid = int_scalar;
-                }
-                let offset = __engine("layout_field_offset", recv_lid, 0);
-                __engine("ast_bind_layout", i, int_scalar);
-            } else {
-                __engine("ast_bind_layout", i, int_scalar);
-            }
-        } else if kind == 6 {
-            // If expression
-            __engine("ast_bind_layout", i, int_scalar);
-        } else if kind == 16 {
-            // Call expression
-            let sym = __engine("ast_node_sym", i);
-            __engine("ast_bind_target", i, sym);
-            __engine("ast_bind_layout", i, int_scalar);
         }
+        i = i + 1;
+    }
+
+    // Pass 3: Bottom-up expression and statement inference
+    i = 0;
+    while i < node_count {
+        infer_node(i, node_count);
         i = i + 1;
     }
 

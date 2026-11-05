@@ -2,10 +2,12 @@
 // tests/phase1_ironclad_killswitch.rs
 // Ironclad Phase 1 Verification:
 // Gate 1: The Kill-Switch Proof Test (Proves Rust Has Zero Hidden Inference)
-// Gate 2: The Randomized Type-Name Torture Test (Proves True Name-Blindness)
+// Gate 2: The Anti-Hardcoding Structural Proof Test (1B, 8B, 24B, 32B)
 // ==============================================================================
 
 use pilot_analysis::{analyze_physics, PhysicsRegistry};
+use pilot_ast::NodeKind;
+use pilot_intern::SymbolId;
 use pilot_parser::parse;
 
 #[test]
@@ -80,43 +82,94 @@ fn test_killswitch_proof_part_a_and_part_b() {
 #[test]
 fn test_arbitrary_prelude_type_names() {
     let custom_prelude_snippet = r#"
+        [Bits(64, 2)]
         struct Zorglub64 {
             raw: Zorglub64;
         }
 
-        struct FluxCapacitor {
-            raw: FluxCapacitor;
-        }
-
+        [Bits(8, 3)]
         struct QuantumTruth {
             raw: QuantumTruth;
         }
 
-        struct Point {
+        struct Vec3 {
             x: Zorglub64;
             y: Zorglub64;
+            z: Zorglub64;
         }
 
-        fn run_physics(p: Point, cond: QuantumTruth) -> Zorglub64 {
+        struct Composite {
+            flag: QuantumTruth;
+            vec: Vec3;
+        }
+
+        fn run_physics(v: Vec3, cond: QuantumTruth) -> Zorglub64 {
+            let flag = true;
             let offset = 100;
-            let res = p.x + offset;
-            if cond {
+            let res = v.x + offset;
+            if flag {
                 return res;
             }
-            return p.y;
+            return v.z;
         }
     "#;
 
     let arena = parse(custom_prelude_snippet);
     let result: PhysicsRegistry = analyze_physics(&arena, arena.root, None);
 
-    assert!(
-        result.layouts.len() >= 3,
-        "Expected at least 3 layouts for arbitrary types, got: {}",
-        result.layouts.len()
-    );
+    let find_struct_layout = |target_name: &str| {
+        for (idx, node) in arena.nodes.iter().enumerate() {
+            if node.node_kind() == NodeKind::StructDecl {
+                let name = arena.interner.resolve(SymbolId(node.lhs));
+                if name == target_name {
+                    let lid = result.node_layouts[idx]
+                        .unwrap_or_else(|| panic!("StructDecl '{}' must have a bound LayoutId", target_name));
+                    return result.layouts.get(lid).expect("Layout must exist in LayoutTable").clone();
+                }
+            }
+        }
+        panic!("StructDecl '{}' not found in AST", target_name);
+    };
 
-    let scalar_layout = result.layouts.get(pilot_analysis::LayoutId(0)).expect("Scalar layout must exist");
-    assert_eq!(scalar_layout.byte_size, 8, "Zorglub64 scalar size must be 8 bytes");
-    assert_eq!(scalar_layout.byte_align, 8, "Zorglub64 scalar align must be 8 bytes");
+    let find_let_layout = |target_name: &str| {
+        for (idx, node) in arena.nodes.iter().enumerate() {
+            if node.node_kind() == NodeKind::LetStmt {
+                let name = arena.interner.resolve(SymbolId(node.lhs));
+                if name == target_name {
+                    let lid = result.node_layouts[idx]
+                        .unwrap_or_else(|| panic!("LetStmt '{}' must have a bound LayoutId", target_name));
+                    return result.layouts.get(lid).expect("Layout must exist in LayoutTable").clone();
+                }
+            }
+        }
+        panic!("LetStmt '{}' not found in AST", target_name);
+    };
+
+    // 1. Zorglub64 must be 8 bytes, 8-byte aligned
+    let zorglub_layout = find_struct_layout("Zorglub64");
+    assert_eq!(zorglub_layout.byte_size, 8, "Zorglub64 scalar size must be 8 bytes");
+    assert_eq!(zorglub_layout.byte_align, 8, "Zorglub64 scalar align must be 8 bytes");
+
+    // 2. QuantumTruth must be 1 byte, 1-byte aligned
+    let quantum_layout = find_struct_layout("QuantumTruth");
+    assert_eq!(quantum_layout.byte_size, 1, "QuantumTruth scalar size must be 1 byte");
+    assert_eq!(quantum_layout.byte_align, 1, "QuantumTruth scalar align must be 1 byte");
+
+    // 3. Vec3 (3 x Zorglub64) must be 24 bytes (NOT 8 or 16)
+    let vec3_layout = find_struct_layout("Vec3");
+    assert_eq!(vec3_layout.byte_size, 24, "Vec3 struct size must be 24 bytes (3 x 8B)");
+    assert_eq!(vec3_layout.byte_align, 8, "Vec3 struct align must be 8 bytes");
+
+    // 4. Composite { flag: QuantumTruth (1B + 7B pad), vec: Vec3 (24B) } must be 32 bytes
+    let composite_layout = find_struct_layout("Composite");
+    assert_eq!(composite_layout.byte_size, 32, "Composite struct size with padding must be 32 bytes (1B + 7B pad + 24B)");
+    assert_eq!(composite_layout.byte_align, 8, "Composite struct align must be 8 bytes");
+
+    // 5. `let flag = true;` must be bound to a 1-byte layout (NOT 8)
+    let flag_let_layout = find_let_layout("flag");
+    assert_eq!(flag_let_layout.byte_size, 1, "`let flag = true;` must be inferred as 1-byte layout, not 8-byte");
+
+    // 6. `let res = v.x + offset;` must be bound to an 8-byte layout via MemberExpr + BinaryExpr inference
+    let res_let_layout = find_let_layout("res");
+    assert_eq!(res_let_layout.byte_size, 8, "`let res = v.x + offset;` must be inferred as 8-byte layout");
 }

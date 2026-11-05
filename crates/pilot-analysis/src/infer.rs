@@ -63,39 +63,163 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
     let mut child_links = Vec::new();
     let mut symbol_strings = HashMap::new();
 
+    // Pre-scan StructDecl bodies to identify struct field nodes and their parent struct
+    let mut struct_field_nodes = std::collections::HashSet::new();
+    let mut struct_fields_map: HashMap<u32, Vec<u32>> = HashMap::new();
     for (idx, node) in arena.nodes.iter().enumerate() {
-        let span = arena.span(NodeId(idx as u32));
+        if node.node_kind() == NodeKind::StructDecl && node.rhs != 0 {
+            let b_node = *arena.node(NodeId(node.rhs));
+            if b_node.node_kind() == NodeKind::BlockExpr {
+                let mut f_ids = Vec::new();
+                for &c_id in arena.children_slice(b_node.lhs, b_node.rhs) {
+                    let c_node = *arena.node(NodeId(c_id));
+                    let is_field = c_node.node_kind() == NodeKind::ParamDecl
+                        || (matches!(c_node.node_kind(), NodeKind::LetStmt | NodeKind::VarStmt)
+                            && arena.type_annotations.contains_key(&c_id));
+                    if is_field {
+                        struct_field_nodes.insert(c_id);
+                        f_ids.push(c_id);
+                    }
+                }
+                struct_fields_map.insert(idx as u32, f_ids);
+            }
+        }
+    }
+
+    let extract_type_sym = |ty_node_id: NodeId| -> u32 {
+        if ty_node_id.is_none() {
+            return 0;
+        }
+        let tn = *arena.node(ty_node_id);
+        tn.lhs
+    };
+
+    for (idx, node) in arena.nodes.iter().enumerate() {
+        let idx_u32 = idx as u32;
+        let span = arena.span(NodeId(idx_u32));
         let kind = node.node_kind();
 
-        let (kind_tag, sym_id, raw_bits, lit_kind) = match kind {
-            NodeKind::StructDecl => (1u8, node.lhs, 0u64, 0u8),
-            NodeKind::InterfaceDecl => (2u8, node.lhs, 0u64, 0u8),
-            NodeKind::FnDecl => (3u8, node.lhs, 0u64, 0u8),
-            NodeKind::LetStmt | NodeKind::VarStmt => (4u8, node.lhs, 0u64, 0u8),
-            NodeKind::IfExpr => (6u8, 0, 0u64, 0u8),
-            NodeKind::ForExpr | NodeKind::WhileStmt => (7u8, 0, 0u64, 0u8),
-            NodeKind::ReturnStmt => (8u8, 0, 0u64, 0u8),
-            NodeKind::YieldStmt => (9u8, 0, 0u64, 0u8),
-            NodeKind::DeferStmt => (10u8, 0, 0u64, 0u8),
-            NodeKind::ComptimeExpr => (11u8, 0, 0u64, 0u8),
-            NodeKind::PolyglotBlock => (13u8, 0, 0u64, 0u8),
-            NodeKind::IdentExpr | NodeKind::TypeNamed => (14u8, node.lhs, 0u64, 0u8),
-            NodeKind::IntLit => {
-                let val = arena.i64_pool.get(node.lhs as usize).copied().unwrap_or(0);
-                (15u8, 0, val as u64, 1u8)
+        let (kind_tag, sym_id, raw_bits, lit_kind) = if struct_field_nodes.contains(&idx_u32) {
+            let ty_node_id = if kind == NodeKind::ParamDecl {
+                NodeId(node.rhs)
+            } else {
+                arena.type_annotations.get(&idx_u32).copied().unwrap_or(NodeId::NONE)
+            };
+            let ty_sym = extract_type_sym(ty_node_id);
+            if ty_sym != 0 {
+                let s = arena.interner.resolve(SymbolId(ty_sym)).to_string();
+                symbol_strings.insert(ty_sym, s);
             }
-            NodeKind::FloatLit => {
-                let val = arena.f64_pool.get(node.lhs as usize).copied().unwrap_or(0.0);
-                (15u8, 0, val.to_bits(), 2u8)
+            (21u8, node.lhs, ty_sym as u64, 0u8)
+        } else {
+            match kind {
+                NodeKind::StructDecl => {
+                    let mut encoded_bits = 0u64;
+                    let mut def_lit = 0u8;
+                    if let Some(attrs) = arena.node_attributes.get(&idx_u32) {
+                        for attr in attrs {
+                            let int_args: Vec<i64> = attr
+                                .args
+                                .iter()
+                                .filter_map(|&arg_id| {
+                                    let an = arena.node(arg_id);
+                                    if an.node_kind() == NodeKind::IntLit {
+                                        arena.i64_pool.get(an.lhs as usize).copied()
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                            if int_args.len() == 3 {
+                                let w = (int_args[0].max(0) as u64) & 0xFFFF;
+                                let l = (int_args[1].max(1) as u64) & 0xFF;
+                                let b = (int_args[2].max(0) as u64) & 0xFF;
+                                encoded_bits = (w << 16) | (l << 8) | b;
+                            } else if int_args.len() == 2 {
+                                let w = (int_args[0].max(0) as u64) & 0xFFFF;
+                                let b = (int_args[1].max(0) as u64) & 0xFF;
+                                encoded_bits = (w << 16) | (1u64 << 8) | b;
+                                if def_lit == 0 {
+                                    if b == 3 && w <= 8 {
+                                        def_lit = 4;
+                                    } else if b == 2 && w == 64 {
+                                        def_lit = 1;
+                                    }
+                                }
+                            } else if int_args.len() == 1 && attr.args.len() == 1 {
+                                let k = int_args[0];
+                                if (1..=4).contains(&k) {
+                                    def_lit = k as u8;
+                                }
+                            }
+                        }
+                    }
+                    if encoded_bits == 0 {
+                        if let Some(f_ids) = struct_fields_map.get(&idx_u32) {
+                            if f_ids.len() == 1 {
+                                let f_id = f_ids[0];
+                                let f_node = *arena.node(NodeId(f_id));
+                                let ty_node_id = if f_node.node_kind() == NodeKind::ParamDecl {
+                                    NodeId(f_node.rhs)
+                                } else {
+                                    arena.type_annotations.get(&f_id).copied().unwrap_or(NodeId::NONE)
+                                };
+                                if extract_type_sym(ty_node_id) == node.lhs && node.lhs != 0 {
+                                    encoded_bits = (64u64 << 16) | (1u64 << 8);
+                                }
+                            }
+                        }
+                    }
+                    (1u8, node.lhs, encoded_bits, def_lit)
+                }
+                NodeKind::InterfaceDecl => (2u8, node.lhs, 0u64, 0u8),
+                NodeKind::FnDecl => (3u8, node.lhs, 0u64, 0u8),
+                NodeKind::ParamDecl => {
+                    let ty_sym = extract_type_sym(NodeId(node.rhs));
+                    if ty_sym != 0 {
+                        let s = arena.interner.resolve(SymbolId(ty_sym)).to_string();
+                        symbol_strings.insert(ty_sym, s);
+                    }
+                    (21u8, node.lhs, ty_sym as u64, 0u8)
+                }
+                NodeKind::LetStmt | NodeKind::VarStmt => {
+                    let ty_sym = arena
+                        .type_annotations
+                        .get(&idx_u32)
+                        .copied()
+                        .map(&extract_type_sym)
+                        .unwrap_or(0);
+                    if ty_sym != 0 {
+                        let s = arena.interner.resolve(SymbolId(ty_sym)).to_string();
+                        symbol_strings.insert(ty_sym, s);
+                    }
+                    (4u8, node.lhs, ty_sym as u64, 0u8)
+                }
+                NodeKind::IfExpr => (6u8, 0, 0u64, 0u8),
+                NodeKind::ForExpr | NodeKind::WhileStmt => (7u8, 0, 0u64, 0u8),
+                NodeKind::ReturnStmt => (8u8, 0, 0u64, 0u8),
+                NodeKind::YieldStmt => (9u8, 0, 0u64, 0u8),
+                NodeKind::DeferStmt => (10u8, 0, 0u64, 0u8),
+                NodeKind::ComptimeExpr => (11u8, 0, 0u64, 0u8),
+                NodeKind::PolyglotBlock => (13u8, 0, 0u64, 0u8),
+                NodeKind::IdentExpr | NodeKind::TypeNamed => (14u8, node.lhs, 0u64, 0u8),
+                NodeKind::IntLit => {
+                    let val = arena.i64_pool.get(node.lhs as usize).copied().unwrap_or(0);
+                    (15u8, 0, val as u64, 1u8)
+                }
+                NodeKind::FloatLit => {
+                    let val = arena.f64_pool.get(node.lhs as usize).copied().unwrap_or(0.0);
+                    (15u8, 0, val.to_bits(), 2u8)
+                }
+                NodeKind::StrLit => (15u8, node.lhs, 0u64, 3u8),
+                NodeKind::BoolLit => (15u8, 0, node.lhs as u64, 4u8),
+                NodeKind::CallExpr => (16u8, 0, 0u64, 0u8),
+                NodeKind::MemberExpr => (17u8, node.rhs, 0u64, 0u8),
+                NodeKind::BlockExpr => (18u8, 0, 0u64, 0u8),
+                NodeKind::BinaryExpr => (19u8, 0, node.flags as u64, 0u8),
+                NodeKind::AssignStmt => (20u8, 0, 0u64, 0u8),
+                _ => (255u8, 0, 0u64, 0u8),
             }
-            NodeKind::StrLit => (15u8, node.lhs, 0u64, 3u8),
-            NodeKind::BoolLit => (15u8, 0, node.lhs as u64, 4u8),
-            NodeKind::CallExpr => (16u8, 0, 0u64, 0u8),
-            NodeKind::MemberExpr => (17u8, node.rhs, 0u64, 0u8),
-            NodeKind::BlockExpr => (18u8, 0, 0u64, 0u8),
-            NodeKind::BinaryExpr => (19u8, 0, node.flags as u64, 0u8),
-            NodeKind::AssignStmt => (20u8, 0, 0u64, 0u8),
-            _ => (255u8, 0, 0u64, 0u8),
         };
 
         if sym_id != 0 {
@@ -106,53 +230,83 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
         let first_child = child_links.len() as u32;
         let mut child_count = 0u16;
 
-        match kind {
-            NodeKind::BinaryExpr | NodeKind::AssignStmt => {
-                if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
-                if node.rhs != 0 { child_links.push(node.rhs); child_count += 1; }
-            }
-            NodeKind::IfExpr => {
-                if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
-                if node.rhs != 0 { child_links.push(node.rhs); child_count += 1; }
-            }
-            NodeKind::WhileStmt => {
-                if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
-                if node.rhs != 0 { child_links.push(node.rhs); child_count += 1; }
-            }
-            NodeKind::LetStmt | NodeKind::VarStmt => {
-                if node.rhs != 0 { child_links.push(node.rhs); child_count += 1; }
-            }
-            NodeKind::ReturnStmt | NodeKind::YieldStmt => {
-                if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
-            }
-            NodeKind::MemberExpr => {
-                if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
-            }
-            NodeKind::CallExpr => {
-                let start = node.lhs as usize;
-                let count = node.rhs as usize;
-                if count > 0 && start + count <= arena.extra_children.len() {
-                    for &c in &arena.extra_children[start..start + count] {
-                        child_links.push(c);
+        if !struct_field_nodes.contains(&idx_u32) {
+            match kind {
+                NodeKind::StructDecl => {
+                    if let Some(f_ids) = struct_fields_map.get(&idx_u32) {
+                        for &f_id in f_ids {
+                            child_links.push(f_id);
+                            child_count += 1;
+                        }
+                    }
+                }
+                NodeKind::FnDecl => {
+                    let start = node.rhs as usize;
+                    let count = node.flags as usize;
+                    if count > 0 && start + count <= arena.extra_children.len() {
+                        for &c in &arena.extra_children[start..start + count] {
+                            child_links.push(c);
+                            child_count += 1;
+                        }
+                    }
+                }
+                NodeKind::BinaryExpr | NodeKind::AssignStmt => {
+                    if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
+                    if node.rhs != 0 { child_links.push(node.rhs); child_count += 1; }
+                }
+                NodeKind::IfExpr => {
+                    if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
+                    if node.flags == 2 {
+                        for &c in arena.children_slice(node.rhs, 2) {
+                            if c != 0 {
+                                child_links.push(c);
+                                child_count += 1;
+                            }
+                        }
+                    } else if node.rhs != 0 {
+                        child_links.push(node.rhs);
                         child_count += 1;
                     }
                 }
-            }
-            NodeKind::BlockExpr | NodeKind::Program => {
-                let start = node.lhs as usize;
-                let count = node.rhs as usize;
-                if count > 0 && start + count <= arena.extra_children.len() {
-                    for &c in &arena.extra_children[start..start + count] {
-                        child_links.push(c);
-                        child_count += 1;
+                NodeKind::WhileStmt => {
+                    if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
+                    if node.rhs != 0 { child_links.push(node.rhs); child_count += 1; }
+                }
+                NodeKind::LetStmt | NodeKind::VarStmt => {
+                    if node.rhs != 0 { child_links.push(node.rhs); child_count += 1; }
+                }
+                NodeKind::ReturnStmt | NodeKind::YieldStmt => {
+                    if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
+                }
+                NodeKind::MemberExpr => {
+                    if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
+                }
+                NodeKind::CallExpr => {
+                    let start = node.lhs as usize;
+                    let count = node.rhs as usize;
+                    if count > 0 && start + count <= arena.extra_children.len() {
+                        for &c in &arena.extra_children[start..start + count] {
+                            child_links.push(c);
+                            child_count += 1;
+                        }
                     }
                 }
+                NodeKind::BlockExpr | NodeKind::Program => {
+                    let start = node.lhs as usize;
+                    let count = node.rhs as usize;
+                    if count > 0 && start + count <= arena.extra_children.len() {
+                        for &c in &arena.extra_children[start..start + count] {
+                            child_links.push(c);
+                            child_count += 1;
+                        }
+                    }
+                }
+                _ => {}
             }
-            _ => {}
         }
 
         raw_nodes.push(RawAstNode {
-            node_id: idx as u32,
+            node_id: idx_u32,
             parent_id: 0,
             kind_tag,
             sym_id,
@@ -605,17 +759,6 @@ impl TypeInferenceEngine {
             }
         }
 
-        // Map universal numeric aliases 'int' and 'float' to the captured literal receptor slots
-        if let Some(int_name) = snap.vm.receptor_type_names.get(&crate::comptime::ReceptorSlot::IntLiteral) {
-            if let Some(&ty) = self.type_defs.get(int_name) {
-                self.type_defs.entry("int".to_string()).or_insert(ty);
-            }
-        }
-        if let Some(float_name) = snap.vm.receptor_type_names.get(&crate::comptime::ReceptorSlot::FloatLiteral) {
-            if let Some(&ty) = self.type_defs.get(float_name) {
-                self.type_defs.entry("float".to_string()).or_insert(ty);
-            }
-        }
         let order_ty = self.types.alloc(TypeKind::Primitive("order".to_string()));
         self.type_defs.insert("order".to_string(), order_ty);
         let mut order_td = crate::types::TypeDef::new(order_ty, SymbolId(0), crate::types::PackageId(0));
@@ -820,7 +963,6 @@ impl TypeInferenceEngine {
         self.define_var("Channel", fn_async);
         self.define_var("Chan", fn_async);
         self.define_var("old", fn_async);
-        self.define_var("result", TypeId::ANY);
         self.define_var("Exception", TypeId::ANY);
         self.define_var("Error", TypeId::ANY);
         self.define_var("DivideByZeroError", TypeId::ANY);
@@ -840,8 +982,6 @@ impl TypeInferenceEngine {
         self.type_defs.insert("NullReferenceError".to_string(), TypeId::ANY);
         self.type_defs.insert("TypeError".to_string(), TypeId::ANY);
         self.type_defs.insert("AssertionError".to_string(), TypeId::ANY);
-        self.type_defs.insert("list".to_string(), self.types.list_of(TypeId::ANY));
-        self.type_defs.insert("map".to_string(), TypeId::ANY);
         self.type_defs.insert("tuple".to_string(), TypeId::ANY);
         let list_any = self.types.list_of(TypeId::ANY);
         let fn_table = self.types.function_of(vec![TypeId::ANY], list_any);
@@ -879,9 +1019,6 @@ impl TypeInferenceEngine {
         self.define_var("type_of", fn_typeof);
         self.define_var("str", fn_typeof);
         self.define_var("name", fn_typeof);
-
-        let fn_slice_buf = self.types.function_of(vec![TypeId::I64, TypeId::STR, TypeId::I64], TypeId::ANY);
-        self.define_var("slice_buffer", fn_slice_buf);
 
         let fn_compile_regex = self.types.function_of(vec![TypeId::STR], TypeId::ANY);
         self.define_var("compile_regex", fn_compile_regex);
@@ -2069,29 +2206,6 @@ impl TypeInferenceEngine {
                         }
                         "slice" => {
                             let res = self.types.slice_of(elem);
-                            self.inferred_node_types.insert(node_id.0, res);
-                            return res;
-                        }
-                        "option" => {
-                            let res = self.types.option_of(elem);
-                            self.inferred_node_types.insert(node_id.0, res);
-                            return res;
-                        }
-                        "result" => {
-                            let err = children
-                                .get(1)
-                                .map(|&c| self.resolve_type_spec(arena, NodeId(c)))
-                                .unwrap_or(TypeId::ANY);
-                            let res = self.types.result_of(elem, err);
-                            self.inferred_node_types.insert(node_id.0, res);
-                            return res;
-                        }
-                        "map" => {
-                            let val = children
-                                .get(1)
-                                .map(|&c| self.resolve_type_spec(arena, NodeId(c)))
-                                .unwrap_or(TypeId::ANY);
-                            let res = self.types.slice_map_of(elem, val);
                             self.inferred_node_types.insert(node_id.0, res);
                             return res;
                         }
@@ -4473,7 +4587,7 @@ impl TypeInferenceEngine {
                             self.inferred_node_types.insert(node_id.0, res);
                             return res;
                         }
-                        "select" | "map" => {
+                        "select" => {
                             let ret_list = self.types.list_of(TypeId::ANY);
                             let res = self.types.function_of(vec![TypeId::ANY], ret_list);
                             self.inferred_node_types.insert(node_id.0, res);

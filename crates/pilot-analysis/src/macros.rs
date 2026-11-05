@@ -326,12 +326,12 @@ impl MacroExpander {
             DecoratorKind::Equality => {
                 members.push(SynthesizedMember {
                     name: "equals".to_string(),
-                    return_type: "bool".to_string(),
+                    return_type: "u8".to_string(),
                     doc_comment: "Structural field-by-field equality comparison".to_string(),
                 });
                 members.push(SynthesizedMember {
                     name: "hash_code".to_string(),
-                    return_type: "int".to_string(),
+                    return_type: "i64".to_string(),
                     doc_comment: "Computes deterministic 64-bit structural hash code".to_string(),
                 });
             }

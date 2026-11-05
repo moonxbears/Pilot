@@ -450,9 +450,23 @@ impl BytecodeCompiler {
                             let hook_arg = NodeId(arena.extra_children[arg_start + 1]);
                             let r_hook = self.compile_node(arena, hook_arg);
                             let num_args = (arg_len - 2) as u8;
+                            let mut arg_regs = Vec::with_capacity(num_args as usize);
                             for i in 0..num_args {
                                 let arg_id = NodeId(arena.extra_children[arg_start + 2 + (i as usize)]);
                                 let r = self.compile_node(arena, arg_id);
+                                arg_regs.push(r);
+                            }
+                            let mut final_args = Vec::with_capacity(num_args as usize);
+                            for &r in &arg_regs {
+                                if r >= 1 && r <= num_args {
+                                    let tmp = self.alloc_reg();
+                                    self.emit(Opcode::Move, tmp, r, 0);
+                                    final_args.push(tmp);
+                                } else {
+                                    final_args.push(r);
+                                }
+                            }
+                            for (i, &r) in final_args.iter().enumerate() {
                                 self.emit(Opcode::Move, (i + 1) as u8, r, 0);
                             }
                             let dst = self.alloc_reg();

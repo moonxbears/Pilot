@@ -8,9 +8,9 @@
 
 use pilot_analysis::{
     bootstrap_core_file, eval_file_with_tables, verify_core_naming_rules, BundleDef, BundleId,
-    CallQuotingEngine, ComptimeEngine, ErrorFlowAnalyzer, ForLoopAnalyzer, ForLoweringStrategy,
-    ImplicitLiftKind, InterfaceDef, InterfaceId, LangItem, LatticeBits, LoopReturnMode,
-    LoopScheduleMode, MarangetChecker, PackageAst, RegisterClass, TryPropagationPlan, TypeArena,
+    CallQuotingEngine, ComptimeEngine, ForLoopAnalyzer, ForLoweringStrategy,
+    InterfaceDef, InterfaceId, LangItem, LatticeBits, LoopReturnMode,
+    LoopScheduleMode, MarangetChecker, PackageAst, RegisterClass, TypeArena,
     TypeDef, TypeId, TypeInferenceEngine, TypeKind,
 };
 use pilot_ast::{CallQuoteKind, NodeId, NodeKind};
@@ -460,54 +460,11 @@ fn test_3tier_for_null_error_and_call_quoting() {
         populate_type_arena_from_ast(PackageId(idx as u32), arena, &vm, &mut types);
     }
     let opt_int = types.alloc(TypeKind::Option(TypeId::I64));
-    let opt_str = types.alloc(TypeKind::Option(TypeId::STR));
+    let _opt_str = types.alloc(TypeKind::Option(TypeId::STR));
     let res_int_str = types.alloc(TypeKind::Result {
         ok: TypeId::I64,
         err: TypeId::STR,
     });
-
-    let mut err_analyzer = ErrorFlowAnalyzer::new();
-    let span = ByteSpan::new(0, 10);
-    let opt_plan = err_analyzer.analyze_try_operator(opt_int, Some(opt_str), &types, "find_user", span);
-    assert_eq!(
-        opt_plan,
-        TryPropagationPlan::OptionUnwrap {
-            unwrapped_ty: TypeId::I64,
-            lang_item: LangItem::Option,
-        }
-    );
-
-    let res_plan = err_analyzer.analyze_try_operator(res_int_str, Some(res_int_str), &types, "parse_id", span);
-    assert_eq!(
-        res_plan,
-        TryPropagationPlan::ResultUnwrap {
-            unwrapped_ok_ty: TypeId::I64,
-            propagated_err_ty: TypeId::STR,
-            lang_item: LangItem::Result,
-        }
-    );
-    assert!(err_analyzer.diagnostics.is_empty());
-
-    assert_eq!(
-        ErrorFlowAnalyzer::synthesize_implicit_lift(opt_int, TypeId::I64, false, &types),
-        Some(ImplicitLiftKind::OptionSome {
-            elem_ty: TypeId::I64
-        })
-    );
-    assert_eq!(
-        ErrorFlowAnalyzer::synthesize_implicit_lift(res_int_str, TypeId::I64, false, &types),
-        Some(ImplicitLiftKind::ResultOk {
-            ok_ty: TypeId::I64,
-            err_ty: TypeId::STR
-        })
-    );
-    assert_eq!(
-        ErrorFlowAnalyzer::synthesize_implicit_lift(res_int_str, TypeId::STR, true, &types),
-        Some(ImplicitLiftKind::ResultErr {
-            ok_ty: TypeId::I64,
-            err_ty: TypeId::STR
-        })
-    );
 
     // 3. Maranget Exhaustiveness Checker (`some`/`none` for `option<T>`, `ok`/`err` for `result<T, E>`)
     assert_eq!(
@@ -540,6 +497,7 @@ fn test_3tier_for_null_error_and_call_quoting() {
     );
 
     // 4. All 6 Call-Quoting Modes (`!`, `!!`, `!&`, `!^`, `!@`, `!?`)
+    let span = ByteSpan::new(0, 10);
     let mut quote_engine = CallQuotingEngine::new();
     let p_shallow = quote_engine.resolve_call_quote_projection_type(
         CallQuoteKind::ShallowQuote,

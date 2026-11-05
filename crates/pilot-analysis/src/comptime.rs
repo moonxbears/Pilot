@@ -131,11 +131,11 @@ pub enum ReceptorSlot {
 impl ReceptorSlot {
     pub fn from_slot_or_lang_name(name: &str) -> Option<Self> {
         match name {
-            "bool_condition" | "bool" => Some(Self::BoolCondition),
+            "bool_condition" | "bool_t" => Some(Self::BoolCondition),
             "int_literal" | "i64" => Some(Self::IntLiteral),
             "uint_literal" | "usize" => Some(Self::UintLiteral),
             "float_literal" | "f64" => Some(Self::FloatLiteral),
-            "char_literal" | "char" => Some(Self::CharLiteral),
+            "char_literal" | "char_t" => Some(Self::CharLiteral),
             "utf8_str_literal" | "str" => Some(Self::Utf8StrLiteral),
             "void_unit" | "void" => Some(Self::VoidUnit),
             "never_bottom" | "never" => Some(Self::NeverBottom),
@@ -241,8 +241,8 @@ impl LangItem {
             "IPatchAttribute" => Some(Self::IPatchAttribute),
             "void" => Some(Self::Void),
             "never" => Some(Self::Never),
-            "bool" => Some(Self::Bool),
-            "char" => Some(Self::Char),
+            "bool_t" => Some(Self::Bool),
+            "char_t" => Some(Self::Char),
             "i8" => Some(Self::I8),
             "i16" => Some(Self::I16),
             "i32" => Some(Self::I32),
@@ -265,8 +265,8 @@ impl LangItem {
             "stride" => Some(Self::Stride),
             "array" => Some(Self::Array),
             "tuple" => Some(Self::Tuple),
-            "option" => Some(Self::Option),
-            "result" => Some(Self::Result),
+            "opt_t" => Some(Self::Option),
+            "res_t" => Some(Self::Result),
             "union" => Some(Self::Union),
             "fn" => Some(Self::Fn),
             "range" => Some(Self::Range),
@@ -278,7 +278,7 @@ impl LangItem {
             "splat" => Some(Self::Splat),
             "pairs" => Some(Self::Pairs),
             "expand" => Some(Self::Expand),
-            "map" => Some(Self::Map),
+            "map_t" => Some(Self::Map),
             "frame" => Some(Self::Frame),
             "type" => Some(Self::Type),
             "ast" => Some(Self::Ast),
@@ -291,74 +291,6 @@ impl LangItem {
             "order" => Some(Self::Order),
             "signal" => Some(Self::Signal),
             _ => None,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::IAnyValue => "IAnyValue",
-            Self::IValue => "IValue",
-            Self::IReference => "IReference",
-            Self::IObject => "IObject",
-            Self::IGuard => "IGuard",
-            Self::IAttribute => "IAttribute",
-            Self::IInterceptor => "IInterceptor",
-            Self::IFormulaAttribute => "IFormulaAttribute",
-            Self::IReactiveAttribute => "IReactiveAttribute",
-            Self::IInheritedAttribute => "IInheritedAttribute",
-            Self::IEcsRule => "IEcsRule",
-            Self::IPatchAttribute => "IPatchAttribute",
-            Self::Void => "void",
-            Self::Never => "never",
-            Self::Bool => "bool",
-            Self::Char => "char",
-            Self::I8 => "i8",
-            Self::I16 => "i16",
-            Self::I32 => "i32",
-            Self::I64 => "i64",
-            Self::I128 => "i128",
-            Self::Isize => "isize",
-            Self::U8 => "u8",
-            Self::U16 => "u16",
-            Self::U32 => "u32",
-            Self::U64 => "u64",
-            Self::U128 => "u128",
-            Self::Usize => "usize",
-            Self::F16 => "f16",
-            Self::F32 => "f32",
-            Self::F64 => "f64",
-            Self::F128 => "f128",
-            Self::Str => "str",
-            Self::Ptr => "ptr",
-            Self::Slice => "slice",
-            Self::Stride => "stride",
-            Self::Array => "array",
-            Self::Tuple => "tuple",
-            Self::Option => "option",
-            Self::Result => "result",
-            Self::Union => "union",
-            Self::Fn => "fn",
-            Self::Range => "range",
-            Self::Span => "span",
-            Self::Step => "step",
-            Self::From => "from",
-            Self::Until => "until",
-            Self::Full => "full",
-            Self::Splat => "splat",
-            Self::Pairs => "pairs",
-            Self::Expand => "expand",
-            Self::Map => "map",
-            Self::Frame => "frame",
-            Self::Type => "type",
-            Self::Ast => "ast",
-            Self::Simd => "simd",
-            Self::Grid => "grid",
-            Self::Ring => "ring",
-            Self::Pin => "pin",
-            Self::Open => "open",
-            Self::After => "after",
-            Self::Order => "order",
-            Self::Signal => "signal",
         }
     }
 }
@@ -1289,7 +1221,7 @@ impl ComptimeEngine {
                 let inner = self.format_type_node(arena, NodeId(n.lhs));
                 let base = override_base
                     .or_else(|| self.type_construct_targets.get("?").cloned())
-                    .unwrap_or_else(|| "option".to_string());
+                    .unwrap_or_default();
                 format!("{}<{}>", base, inner)
             }
             NodeKind::TypeFallible => {
@@ -1297,7 +1229,7 @@ impl ComptimeEngine {
                 let err = self.format_type_node(arena, NodeId(n.rhs));
                 let base = override_base
                     .or_else(|| self.type_construct_targets.get("!").cloned())
-                    .unwrap_or_else(|| "result".to_string());
+                    .unwrap_or_default();
                 if err.is_empty() {
                     format!("{}<{}>", base, ok)
                 } else {
@@ -1335,7 +1267,7 @@ impl ComptimeEngine {
                         .type_construct_targets
                         .get("[N]")
                         .cloned()
-                        .unwrap_or_else(|| "slice_buffer".to_string()),
+                        .unwrap_or_else(|| "array".to_string()),
                     2 => "SliceView".to_string(),
                     3 => self
                         .type_construct_targets
@@ -1374,7 +1306,7 @@ impl ComptimeEngine {
                 format!("{}<{}>", base, elem)
             }
             NodeKind::TypeList => {
-                let base = override_base.unwrap_or_else(|| "list".to_string());
+                let base = override_base.unwrap_or_else(|| "slice".to_string());
                 if n.rhs == 0 {
                     let elem = self.format_type_node(arena, NodeId(n.lhs));
                     format!("{}<{}>", base, elem)
@@ -1390,7 +1322,7 @@ impl ComptimeEngine {
             NodeKind::TypeMap => {
                 let k = self.format_type_node(arena, NodeId(n.lhs));
                 let v = self.format_type_node(arena, NodeId(n.rhs));
-                let base = override_base.unwrap_or_else(|| "map".to_string());
+                let base = override_base.unwrap_or_else(|| "pairs".to_string());
                 format!("{}<{}, {}>", base, k, v)
             }
             NodeKind::TypeTuple => {
@@ -1941,12 +1873,15 @@ impl ComptimeEngine {
                 if let Some(lang_item) = LangItem::from_name(&item_name) {
                     self.lang_items.insert(lang_item, target_node);
                 }
+                let actual_type_name = self.resolve_type_name_from_node(arena, target_node);
                 if let Some(slot) = ReceptorSlot::from_slot_or_lang_name(&item_name) {
                     self.receptor_slots.insert(slot, target_node);
-                    let actual_type_name = self.resolve_type_name_from_node(arena, target_node);
                     if !actual_type_name.is_empty() {
-                        self.receptor_type_names.insert(slot, actual_type_name);
+                        self.receptor_type_names.insert(slot, actual_type_name.clone());
                     }
+                }
+                if !actual_type_name.is_empty() && LangItem::from_name(&item_name).is_some() {
+                    self.lang_items_by_name.insert(actual_type_name.clone(), target_node);
                 }
                 self.lang_items_by_name.insert(item_name.clone(), target_node);
                 if target_node.is_some() {

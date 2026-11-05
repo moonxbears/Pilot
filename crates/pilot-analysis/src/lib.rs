@@ -9,7 +9,6 @@ pub mod diagnostics;
 pub mod types;
 pub mod infer;
 pub mod patterns;
-pub mod null_error;
 pub mod loops;
 pub mod contracts;
 pub mod dimensions;
@@ -34,9 +33,6 @@ pub use infer::{
     RawAstArena, RawAstNode, TypeInferenceEngine,
 };
 pub use patterns::{MarangetChecker, PatternCase};
-pub use null_error::{
-    ErrorFlowAnalyzer, ImplicitLiftKind, NullSafetyAnalyzer, TryPropagationPlan,
-};
 pub use loops::{
     ForLoopAnalyzer, ForLoweringStrategy, LoopAnalyzer, LoopReturnMode, LoopScheduleMode,
 };
@@ -244,8 +240,8 @@ fn test_match_incomplete(x: i64) -> i64 {
     #[test]
     fn test_row_polymorphism_inference() {
         let code = r#"
-record Frame2D(width: int, height: int, name: str);
-record Canvas2D(width: float, height: float);
+record Frame2D(width: i64, height: i64, name: str);
+record Canvas2D(width: f64, height: f64);
 
 fn compute_area(surface) => surface.width * surface.height;
 
@@ -315,8 +311,8 @@ let branch_val = if true { "ok" } else { 404 };
         assert!(mylist_ty.is_some(), "mylist should be inferred");
         let mylist_disp = result.types.display(mylist_ty.unwrap());
         println!("mylist inferred type: {}", mylist_disp);
-        assert!(mylist_disp.to_lowercase().contains("list[") && mylist_disp.contains("str") && mylist_disp.contains("i64"),
-            "Expected List[str | i64] (or int), got: {}", mylist_disp);
+        assert!(mylist_disp.contains("slice[") && mylist_disp.contains("str") && mylist_disp.contains("i64"),
+            "Expected slice[str | i64], got: {}", mylist_disp);
 
         assert!(first_elem_ty.is_some(), "first_elem should be inferred");
         let first_disp = result.types.display(first_elem_ty.unwrap());
@@ -428,7 +424,7 @@ let branch_val = if true { "ok" } else { 404 };
         let builder_members = expander.derive_decorator(
             &DecoratorKind::Builder,
             "User",
-            &[("name", "str"), ("age", "int")],
+            &[("name", "str"), ("age", "i64")],
             span,
         );
         assert!(builder_members.iter().any(|m| m.name == "with_name"));
@@ -449,7 +445,7 @@ let branch_val = if true { "ok" } else { 404 };
         let obs_members = expander.derive_decorator(
             &DecoratorKind::Observable,
             "Ship",
-            &[("Mass", "float"), ("Vel", "float")],
+            &[("Mass", "f64"), ("Vel", "f64")],
             span,
         );
         assert!(obs_members.iter().any(|m| m.name == "notify_Mass_changed"));
@@ -458,7 +454,7 @@ let branch_val = if true { "ok" } else { 404 };
         let eq_members = expander.derive_decorator(
             &DecoratorKind::Equality,
             "Point",
-            &[("x", "float"), ("y", "float")],
+            &[("x", "f64"), ("y", "f64")],
             span,
         );
         assert!(eq_members.iter().any(|m| m.name == "equals"));
@@ -487,18 +483,18 @@ fn calculate(a: i64, b: i64) -> i64 {
     fn test_custom_indexer_inference() {
         let code = r#"
 class MemoryCache {
-    self[key: str] -> int {
+    self[key: str] -> i64 {
         get => 42;
         set(v) => {};
     }
 }
 
 class Matrix {
-    self[row: int, col: int] -> float => 3.14;
+    self[row: i64, col: i64] -> f64 => 3.14;
 }
 
 class SimpleBuffer {
-    self[idx: int] -> str => "item";
+    self[idx: i64] -> str => "item";
 }
 
 let cache = MemoryCache();
@@ -543,7 +539,7 @@ let entry = buf[0];
         // Test type mismatch in indexer argument
         let code_mismatch = r#"
 class Cache {
-    self[key: str] -> int => 0;
+    self[key: str] -> i64 => 0;
 }
 let c = Cache();
 let bad = c[123];
@@ -556,7 +552,7 @@ let bad = c[123];
         // Test argument count mismatch in multi-dimensional indexer
         let code_count = r#"
 class Grid {
-    self[r: int, c: int] -> float => 1.0;
+    self[r: i64, c: i64] -> f64 => 1.0;
 }
 let g = Grid();
 let bad = g[5];
@@ -610,7 +606,7 @@ for t in transactions {
         let hw_ty = hw_txns_ty.unwrap();
         let hw_display = result.types.display(hw_ty);
         assert!(!hw_display.contains("'T"), "Expected concrete inferred type without unconstrained type variables, got: {}", hw_display);
-        assert!(hw_display.to_lowercase().contains("list["), "Expected List type, got: {}", hw_display);
+        assert!(hw_display.contains("slice["), "Expected slice type, got: {}", hw_display);
         assert!(hw_display.contains("amount: f64"), "Expected amount: f64, got: {}", hw_display);
         assert!(hw_display.contains("category: str"), "Expected category: str, got: {}", hw_display);
     }
@@ -824,12 +820,12 @@ fn test_builtins() {
     #[test]
     fn test_comprehensive_syntax_clean_analysis() {
         let src = r#"
-            record Point(x: int, y: int);
-            record Config(timeout: float, retry: bool);
+            record Point(x: i64, y: i64);
+            record Config(timeout: f64, retry: bool);
 
-            fn calculate(p: Point, c: Config) -> float {
+            fn calculate(p: Point, c: Config) -> f64 {
                 if c.retry {
-                    return (p.x + p.y) as float * c.timeout;
+                    return (p.x + p.y) as f64 * c.timeout;
                 }
                 return 0.0;
             }
@@ -867,8 +863,8 @@ fn check_ranges() {
         // 1. Static fn rejecting self / .field
         let bad_static = r#"
         class Service {
-            x: int;
-            static fn compute() -> int {
+            x: i64;
+            static fn compute() -> i64 {
                 return .x;
             }
         }
@@ -881,14 +877,14 @@ fn check_ranges() {
         // 2. Valid static fn and instance fn accessing fields
         let good_code = r#"
         class Vector2D {
-            x: int;
-            y: int;
+            x: i64;
+            y: i64;
 
-            fn get_sum() -> int {
+            fn get_sum() -> i64 {
                 return .x + .y;
             }
 
-            static fn origin() -> int {
+            static fn origin() -> i64 {
                 return 0;
             }
         }
@@ -911,13 +907,13 @@ fn check_ranges() {
         // 1. Inaccessible private method accessed from outside triggers VIS001
         let priv_code = r#"
         class BankAccount {
-            balance: int;
+            balance: i64;
 
-            fn internal_vault() -> int {
+            fn internal_vault() -> i64 {
                 return .balance;
             }
 
-            pub fn get_balance() -> int {
+            pub fn get_balance() -> i64 {
                 return .internal_vault();
             }
         }
@@ -935,13 +931,13 @@ fn check_ranges() {
         // 2. Calling private method from inside class method via self or prefix dot succeeds
         let valid_priv = r#"
         class BankAccount {
-            balance: int;
+            balance: i64;
 
-            fn internal_vault() -> int {
+            fn internal_vault() -> i64 {
                 return .balance;
             }
 
-            pub fn get_balance() -> int {
+            pub fn get_balance() -> i64 {
                 return .internal_vault();
             }
         }
@@ -987,7 +983,7 @@ fn check_ranges() {
         lvl30 fn secure_wipe() {
         }
 
-        fn dispatch(lvl: int) {
+        fn dispatch(lvl: i64) {
             if lvl >= 30 {
                 secure_wipe();
             }
@@ -1003,16 +999,16 @@ fn check_ranges() {
         // Variation B flat sibling property and indexer setters
         let code = r#"
         class ConfigBuffer {
-            data: int;
+            data: i64;
 
-            timeout: int {
+            timeout: i64 {
                 get => .data;
                 pub set => { .data = value; }
-                pub set(multiplier: float) => { .data = 100; }
-                priv set(raw: (int, int)) => { .data = 200; }
+                pub set(multiplier: f64) => { .data = 100; }
+                priv set(raw: (i64, i64)) => { .data = 200; }
             }
 
-            self[key: str] -> int {
+            self[key: str] -> i64 {
                 get => .data;
                 default => 0;
                 set => { .data = value; }

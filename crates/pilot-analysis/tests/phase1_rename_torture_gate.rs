@@ -1,15 +1,18 @@
 // ==============================================================================
 // tests/phase1_rename_torture_gate.rs
 // Phase 1 Verification Gate: Universal Type-Rename Torture Test
-// Verifies that WholeNum, TruthBit, and Utf8Run compile, infer, and derive
-// correct physical layouts and C-ABI layouts via LayoutTable methods.
+// Verifies that WholeNum, TruthBit, Utf8Run, and RecordContainer are analyzed
+// directly by `selfhost/analyzer.pilot` via `analyze_physics` with ZERO manual
+// layout registration in Rust test code.
 // ==============================================================================
 
 use pilot_analysis::{
-    bootstrap_core_file, eval_file_with_tables, ComptimeEngine,
-    CapabilityBits, LayoutId, LayoutTable,
-    infer::{verify_capability_transition, compute_field_projection, NodeLayoutMap},
+    analyze_physics, bootstrap_core_file, eval_file_with_tables, ComptimeEngine,
+    CapabilityBits,
+    infer::{verify_capability_transition, compute_field_projection},
 };
+use pilot_ast::NodeKind;
+use pilot_intern::SymbolId;
 use pilot_parser::ParserTables;
 
 const CORE_PILOT_SRC: &str = include_str!("../../../stdlib/core/core.pilot");
@@ -50,43 +53,39 @@ fn test_type_rename_torture_gate_wholenum_truthbit_utf8run() {
         }
     "#;
 
-    let _arena = eval_file_with_tables(renamed_src, &mut tables, &mut vm)
+    let arena = eval_file_with_tables(renamed_src, &mut tables, &mut vm)
         .expect("Renamed WholeNum/TruthBit/Utf8Run module must parse & evaluate cleanly");
 
-    // Name-Blind Physical Layout Verification using LayoutTable methods
-    let mut layout_table = LayoutTable::new();
-    assert_eq!(layout_table.len(), 0, "LayoutTable must start empty");
+    // Drive physical layout inference strictly through `selfhost/analyzer.pilot`
+    let registry = analyze_physics(&arena, arena.root, None);
 
-    // Register WholeNum: 64-bit signed scalar (8 bytes, 8 align)
-    let whole_num_id = layout_table.register_scalar(64, 1, 2);
+    let find_struct_lid = |target_name: &str| {
+        for (idx, node) in arena.nodes.iter().enumerate() {
+            if node.node_kind() == NodeKind::StructDecl {
+                let name = arena.interner.resolve(SymbolId(node.lhs));
+                if name == target_name {
+                    return registry.node_layouts[idx]
+                        .unwrap_or_else(|| panic!("StructDecl '{}' must have a bound LayoutId from analyzer.pilot", target_name));
+                }
+            }
+        }
+        panic!("StructDecl '{}' not found in AST", target_name);
+    };
 
-    // Register TruthBit: 1-bit scalar (1 byte, 1 align)
-    let truth_bit_id = layout_table.register_scalar(1, 1, 0);
+    let whole_num_id = find_struct_lid("WholeNum");
+    let truth_bit_id = find_struct_lid("TruthBit");
+    let utf8_run_id = find_struct_lid("Utf8Run");
+    let record_id = find_struct_lid("RecordContainer");
 
-    // Register AddrVal: pointer targeting WholeNum
-    let addr_val_id = layout_table.register_pointer(whole_num_id, CapabilityBits::MUTABLE, 0);
-
-    // Register Utf8Run: Aggregate { data: AddrVal, len: WholeNum }
-    let utf8_run_id = layout_table.register_aggregate(&[addr_val_id, whole_num_id], false, false);
-
-    let utf8_layout = layout_table.get(utf8_run_id).expect("Utf8Run layout must exist");
+    let utf8_layout = registry.layouts.get(utf8_run_id).expect("Utf8Run layout must exist in registry.layouts");
     assert_eq!(utf8_layout.byte_size, 16, "Utf8Run size must be 16 bytes (ptr + len)");
     assert_eq!(utf8_layout.byte_align, 8, "Utf8Run alignment must be 8 bytes");
 
-    // Register RecordContainer: Aggregate { count: WholeNum, flag: TruthBit, label: Utf8Run }
-    // Offset calculation:
-    // count:  offset 0,  size 8, align 8
-    // flag:   offset 8,  size 1, align 1
-    // [pad 7 bytes to align Utf8Run to 8 bytes]
-    // label:  offset 16, size 16, align 8
-    // Total size: 32 bytes, Align: 8
-    let record_id = layout_table.register_aggregate(&[whole_num_id, truth_bit_id, utf8_run_id], false, false);
-
-    let record_layout = layout_table.get(record_id).expect("RecordContainer layout must exist");
+    let record_layout = registry.layouts.get(record_id).expect("RecordContainer layout must exist in registry.layouts");
     assert_eq!(record_layout.byte_size, 32, "RecordContainer size with padding must be 32 bytes");
     assert_eq!(record_layout.byte_align, 8, "RecordContainer alignment must be 8 bytes");
 
-    // Verify Field Projection with Alignment Padding
+    // Verify Field Projection with Alignment Padding produced by `selfhost/analyzer.pilot`
     let field_0 = compute_field_projection(record_layout, 0).expect("field 0 exists");
     assert_eq!(field_0.byte_offset, 0, "count byte_offset is 0");
     assert_eq!(field_0.layout, whole_num_id);
@@ -103,15 +102,4 @@ fn test_type_rename_torture_gate_wholenum_truthbit_utf8run() {
     assert!(verify_capability_transition(CapabilityBits::VALUE, CapabilityBits::BORROW_REF));
     assert!(verify_capability_transition(CapabilityBits::OWNED_OBJ, CapabilityBits::BORROW_REF));
     assert!(verify_capability_transition(CapabilityBits::OWNED_OBJ, CapabilityBits::SCOPED_GUARD));
-
-    // Verify NodeLayoutMap Binding
-    let mut node_map = NodeLayoutMap::new();
-    node_map.set(10, whole_num_id);
-    node_map.set(11, truth_bit_id);
-    node_map.set(12, utf8_run_id);
-
-    assert_eq!(node_map.get(10), Some(whole_num_id));
-    assert_eq!(node_map.get(11), Some(truth_bit_id));
-    assert_eq!(node_map.get(12), Some(utf8_run_id));
-    assert_eq!(node_map.get(999), None);
 }
