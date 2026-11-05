@@ -13,7 +13,8 @@ const TOKEN_TYPES = [
 
 const TOKEN_MODIFIERS = [
     'declaration', 'definition', 'readonly', 'static', 'deprecated',
-    'abstract', 'async', 'modification', 'documentation', 'defaultLibrary'
+    'abstract', 'async', 'modification', 'documentation', 'defaultLibrary',
+    'constructor', 'callable'
 ];
 
 function ensureExecutablePermission(filePath: string): void {
