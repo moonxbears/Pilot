@@ -14,7 +14,7 @@ pub use types::{
     PhysicsGeometry,
 };
 pub use infer::{
-    analyze_physics, flatten_ast, handle_engine_intrinsic, run_pilot_analyzer,
+    analyze_physics, analyze_physics_with_source, flatten_ast, handle_engine_intrinsic, run_pilot_analyzer,
     compute_field_projection, compute_soa_projection, verify_capability_transition,
     NodeLayoutMap, PhysicsDiagnostic, PhysicsRegistry, RawAstArena, RawAstNode,
 };

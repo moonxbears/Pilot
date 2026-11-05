@@ -124,31 +124,63 @@ impl PilVirtualMachine {
                     unsafe { *self.registers.get_unchecked_mut(dst) = *self.registers.get_unchecked(src1) };
                 }
                 Opcode::CmpEq => {
-                    let eq = unsafe { *self.registers.get_unchecked(src1) == *self.registers.get_unchecked(src2) };
+                    let r1 = unsafe { *self.registers.get_unchecked(src1) };
+                    let r2 = unsafe { *self.registers.get_unchecked(src2) };
+                    let eq = if r1.is_sso_str() || r2.is_sso_str() || r1.tag() == 9 || r2.tag() == 9 {
+                        r1.to_string_repr() == r2.to_string_repr()
+                    } else {
+                        r1 == r2
+                    };
                     unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(eq) };
                 }
                 Opcode::CmpLt => {
-                    let a = unsafe { self.registers.get_unchecked(src1).as_int().unwrap_or(0) };
-                    let b = unsafe { self.registers.get_unchecked(src2).as_int().unwrap_or(0) };
-                    unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(a < b) };
+                    let r1 = unsafe { *self.registers.get_unchecked(src1) };
+                    let r2 = unsafe { *self.registers.get_unchecked(src2) };
+                    let lt = if r1.is_sso_str() || r2.is_sso_str() || r1.tag() == 9 || r2.tag() == 9 {
+                        r1.to_string_repr() < r2.to_string_repr()
+                    } else {
+                        r1.as_int().unwrap_or(0) < r2.as_int().unwrap_or(0)
+                    };
+                    unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(lt) };
                 }
                 Opcode::CmpGt => {
-                    let a = unsafe { self.registers.get_unchecked(src1).as_int().unwrap_or(0) };
-                    let b = unsafe { self.registers.get_unchecked(src2).as_int().unwrap_or(0) };
-                    unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(a > b) };
+                    let r1 = unsafe { *self.registers.get_unchecked(src1) };
+                    let r2 = unsafe { *self.registers.get_unchecked(src2) };
+                    let gt = if r1.is_sso_str() || r2.is_sso_str() || r1.tag() == 9 || r2.tag() == 9 {
+                        r1.to_string_repr() > r2.to_string_repr()
+                    } else {
+                        r1.as_int().unwrap_or(0) > r2.as_int().unwrap_or(0)
+                    };
+                    unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(gt) };
                 }
                 Opcode::CmpLe => {
-                    let a = unsafe { self.registers.get_unchecked(src1).as_int().unwrap_or(0) };
-                    let b = unsafe { self.registers.get_unchecked(src2).as_int().unwrap_or(0) };
-                    unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(a <= b) };
+                    let r1 = unsafe { *self.registers.get_unchecked(src1) };
+                    let r2 = unsafe { *self.registers.get_unchecked(src2) };
+                    let le = if r1.is_sso_str() || r2.is_sso_str() || r1.tag() == 9 || r2.tag() == 9 {
+                        r1.to_string_repr() <= r2.to_string_repr()
+                    } else {
+                        r1.as_int().unwrap_or(0) <= r2.as_int().unwrap_or(0)
+                    };
+                    unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(le) };
                 }
                 Opcode::CmpGe => {
-                    let a = unsafe { self.registers.get_unchecked(src1).as_int().unwrap_or(0) };
-                    let b = unsafe { self.registers.get_unchecked(src2).as_int().unwrap_or(0) };
-                    unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(a >= b) };
+                    let r1 = unsafe { *self.registers.get_unchecked(src1) };
+                    let r2 = unsafe { *self.registers.get_unchecked(src2) };
+                    let ge = if r1.is_sso_str() || r2.is_sso_str() || r1.tag() == 9 || r2.tag() == 9 {
+                        r1.to_string_repr() >= r2.to_string_repr()
+                    } else {
+                        r1.as_int().unwrap_or(0) >= r2.as_int().unwrap_or(0)
+                    };
+                    unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(ge) };
                 }
                 Opcode::CmpNe => {
-                    let ne = unsafe { *self.registers.get_unchecked(src1) != *self.registers.get_unchecked(src2) };
+                    let r1 = unsafe { *self.registers.get_unchecked(src1) };
+                    let r2 = unsafe { *self.registers.get_unchecked(src2) };
+                    let ne = if r1.is_sso_str() || r2.is_sso_str() || r1.tag() == 9 || r2.tag() == 9 {
+                        r1.to_string_repr() != r2.to_string_repr()
+                    } else {
+                        r1 != r2
+                    };
                     unsafe { *self.registers.get_unchecked_mut(dst) = PilotVal::from_bool(ne) };
                 }
                 Opcode::RemI64 => {

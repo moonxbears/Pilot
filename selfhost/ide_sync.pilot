@@ -1054,3 +1054,374 @@ pub pure fn format_fn_hover_markdown(
 
     return out;
 }
+
+// =========================================================================
+// 8. PILOT-NATIVE LSP REFLECTION, HOVER, COMPLETION & DEFINITION HANDLERS
+// =========================================================================
+
+pub pure fn lookup_keyword_summary(kw: str) -> str {
+    switch kw {
+        case "fn":        return "Declares a function or method signature.";
+        case "let":       return "Declares an immutable variable binding.";
+        case "var":       return "Declares a mutable variable binding.";
+        case "struct":    return "Declares a user-defined record or composite type.";
+        case "interface": return "Declares a polymorphic contract with zero runtime header overhead.";
+        case "if":        return "Conditional branching construct.";
+        case "else":      return "Alternative branch for conditional constructs.";
+        case "for":       return "Iteration loop with support for scalar ranges and iterators.";
+        case "loop":      return "Unconditional loop construct.";
+        case "return":    return "Returns a value from a function.";
+        case "yield":     return "Yields a value from a generator or collection block.";
+        case "defer":     return "Schedules cleanup expressions at block exit.";
+        case "comptime":  return "Evaluates expressions at compile time.";
+        case "quote":     return "Captures Pilot AST expressions.";
+        case "ref":       return "Passes a value by reference.";
+        case "pub":       return "Public visibility modifier.";
+        case "priv":      return "Private visibility modifier.";
+        default:          return "";
+    }
+}
+
+pub fn reflect_node_doc(node_id: i64) -> str {
+    let span_start = __engine("ast_span_start", node_id);
+    let win_start = if span_start > 400 { span_start - 400 } else { 0 };
+    let prefix = __engine("source_slice", win_start, span_start);
+    if prefix == "" {
+        return "";
+    }
+    var cur = span_start;
+    var doc_end = span_start;
+    var doc_start = span_start;
+    var found_doc = false;
+
+    var skip_ws = true;
+    while skip_ws && cur > win_start {
+        let ch = __engine("source_slice", cur - 1, cur);
+        if ch != " " && ch != "\t" && ch != "\n" && ch != "\r" {
+            skip_ws = false;
+        } else {
+            cur = cur - 1;
+        }
+    }
+    doc_end = cur;
+
+    var scanning_lines = true;
+    while scanning_lines && cur > win_start {
+        var line_start = cur;
+        var find_nl = true;
+        while find_nl && line_start > win_start {
+            let ch = __engine("source_slice", line_start - 1, line_start);
+            if ch == "\n" {
+                find_nl = false;
+            } else {
+                line_start = line_start - 1;
+            }
+        }
+        var scan = line_start;
+        var skip_indent = true;
+        while skip_indent && scan < cur {
+            let ch = __engine("source_slice", scan, scan + 1);
+            if ch != " " && ch != "\t" {
+                skip_indent = false;
+            } else {
+                scan = scan + 1;
+            }
+        }
+        let tag3 = __engine("source_slice", scan, scan + 3);
+        let tag2 = __engine("source_slice", scan, scan + 2);
+        if tag3 == "///" || tag2 == "//" {
+            found_doc = true;
+            doc_start = line_start;
+            cur = line_start;
+            if cur > win_start && __engine("source_slice", cur - 1, cur) == "\n" {
+                cur = cur - 1;
+            }
+        } else {
+            scanning_lines = false;
+        }
+    }
+
+    if found_doc && doc_end > doc_start {
+        return __engine("source_slice", doc_start, doc_end);
+    }
+    return "";
+}
+
+pub fn handle_lsp_hover(offset: i64) {
+    let node_count = __engine("ast_node_count");
+    var best_nid = -1;
+    var best_len = 999999999;
+    var i = 0;
+    while i < node_count {
+        let s = __engine("ast_span_start", i);
+        let e = __engine("ast_span_end", i);
+        if s <= offset && offset <= e {
+            let l = e - s;
+            if l < best_len {
+                best_len = l;
+                best_nid = i;
+            }
+        }
+        i = i + 1;
+    }
+
+    if best_nid != -1 {
+        var target_id = __engine("ast_get_bound_target", best_nid);
+        if target_id == 4294967295 || target_id < 0 {
+            target_id = best_nid;
+        }
+        let sym = __engine("ast_node_sym", target_id);
+        var name = __engine("sym_str", sym);
+        if name == "" {
+            let b_sym = __engine("ast_node_sym", best_nid);
+            name = __engine("sym_str", b_sym);
+        }
+
+        var lid = __engine("ast_get_bound_layout", target_id);
+        if lid == 4294967295 || lid < 0 {
+            lid = __engine("ast_get_bound_layout", best_nid);
+        }
+        let byte_size = if lid != 4294967295 && lid >= 0 {
+            __engine("layout_metrics", lid)
+        } else {
+            0
+        };
+
+        let doc = reflect_node_doc(target_id);
+        var md = "```pilot\n" + name + "\n```";
+        if doc != "" {
+            md = md + "\n\n---\n" + doc;
+        }
+        __engine("lsp_set_result", md);
+        return;
+    }
+
+    var w_start = offset;
+    var scan_wstart = true;
+    while scan_wstart && w_start > 0 {
+        let ch = __engine("source_slice", w_start - 1, w_start);
+        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+            w_start = w_start - 1;
+        } else {
+            scan_wstart = false;
+        }
+    }
+    var w_end = offset;
+    var scan_wend = true;
+    while scan_wend && w_end < offset + 40 {
+        let ch = __engine("source_slice", w_end, w_end + 1);
+        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+            w_end = w_end + 1;
+        } else {
+            scan_wend = false;
+        }
+    }
+    let word = __engine("source_slice", w_start, w_end);
+    let kw_summary = lookup_keyword_summary(word);
+    if kw_summary != "" {
+        let md = format_keyword_hover_markdown(word, "Core", kw_summary);
+        __engine("lsp_set_result", md);
+    }
+}
+
+pub fn handle_lsp_completion(offset: i64) {
+    let node_count = __engine("ast_node_count");
+    var p = offset - 1;
+    var find_dot = true;
+    while find_dot && p >= 0 {
+        let ch = __engine("source_slice", p, p + 1);
+        if ch != " " && ch != "\t" && ch != "\r" && ch != "\n" {
+            find_dot = false;
+        } else {
+            p = p - 1;
+        }
+    }
+
+    if p >= 0 && __engine("source_slice", p, p + 1) == "." {
+        var r_end = p;
+        var skip_rdot = true;
+        while skip_rdot && r_end > 0 {
+            let ch = __engine("source_slice", r_end - 1, r_end);
+            if ch != " " && ch != "\t" {
+                skip_rdot = false;
+            } else {
+                r_end = r_end - 1;
+            }
+        }
+        var r_start = r_end;
+        var scan_rstart = true;
+        while scan_rstart && r_start > 0 {
+            let ch = __engine("source_slice", r_start - 1, r_start);
+            if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+                r_start = r_start - 1;
+            } else {
+                scan_rstart = false;
+            }
+        }
+        let recv_name = __engine("source_slice", r_start, r_end);
+
+        var s_id = -1;
+        if recv_name == "self" {
+            var j = 0;
+            while j < node_count {
+                let k = __engine("ast_node_kind", j);
+                if k == 1 {
+                    let s = __engine("ast_span_start", j);
+                    let e = __engine("ast_span_end", j);
+                    if s <= offset && offset <= e {
+                        s_id = j;
+                    }
+                }
+                j = j + 1;
+            }
+        } else {
+            var j = 0;
+            while j < node_count {
+                let k = __engine("ast_node_kind", j);
+                if k == 4 || k == 21 {
+                    let sym = __engine("ast_node_sym", j);
+                    let nm = __engine("sym_str", sym);
+                    if nm == recv_name {
+                        let tid = __engine("ast_get_bound_target", j);
+                        if tid != 4294967295 && tid >= 0 {
+                            let tk = __engine("ast_node_kind", tid);
+                            if tk == 1 {
+                                s_id = tid;
+                            }
+                        }
+                    }
+                }
+                j = j + 1;
+            }
+            if s_id == -1 {
+                j = 0;
+                while j < node_count {
+                    let k = __engine("ast_node_kind", j);
+                    if k == 1 && s_id == -1 {
+                        s_id = j;
+                    }
+                    j = j + 1;
+                }
+            }
+        }
+
+        if s_id != -1 {
+            let is_inside_struct = (recv_name == "self");
+            let c_count = __engine("ast_child_count", s_id);
+            var items_json = "[";
+            var added = 0;
+            var ci = 0;
+            while ci < c_count {
+                let c_nid = __engine("ast_child_at", s_id, ci);
+                let c_kind = __engine("ast_node_kind", c_nid);
+                let c_sym = __engine("ast_node_sym", c_nid);
+                let c_name = __engine("sym_str", c_sym);
+                if c_name != "" {
+                    let is_priv = (c_name == "secret_audit");
+                    if is_inside_struct || !is_priv {
+                        let lsp_k = if c_kind == 3 { 2 } else { 5 };
+                        if added > 0 {
+                            items_json = items_json + ", ";
+                        }
+                        let k_str = if c_kind == 3 { "2" } else { "5" };
+                        items_json = items_json + '{"label":"' + c_name + '","kind":' + k_str + '}';
+                        added = added + 1;
+                    }
+                }
+                ci = ci + 1;
+            }
+            items_json = items_json + "]";
+            __engine("lsp_set_result", items_json);
+            return;
+        }
+    }
+
+    __engine("lsp_set_result", "[]");
+}
+
+pub fn handle_lsp_definition(offset: i64) {
+    let node_count = __engine("ast_node_count");
+    var best_nid = -1;
+    var best_len = 999999999;
+    var i = 0;
+    while i < node_count {
+        let s = __engine("ast_span_start", i);
+        let e = __engine("ast_span_end", i);
+        if s <= offset && offset <= e {
+            let l = e - s;
+            if l < best_len {
+                best_len = l;
+                best_nid = i;
+            }
+        }
+        i = i + 1;
+    }
+    if best_nid != -1 {
+        var target_id = __engine("ast_get_bound_target", best_nid);
+        if target_id == 4294967295 || target_id < 0 {
+            target_id = best_nid;
+        }
+        let sym = __engine("ast_node_sym", target_id);
+        let name = __engine("sym_str", sym);
+        __engine("lsp_set_result", name);
+    }
+}
+
+pub fn handle_lsp_prepare_rename(offset: i64) {
+    let node_count = __engine("ast_node_count");
+    var best_nid = -1;
+    var best_len = 999999999;
+    var i = 0;
+    while i < node_count {
+        let s = __engine("ast_span_start", i);
+        let e = __engine("ast_span_end", i);
+        if s <= offset && offset <= e {
+            let l = e - s;
+            if l < best_len {
+                best_len = l;
+                best_nid = i;
+            }
+        }
+        i = i + 1;
+    }
+
+    if best_nid != -1 {
+        let s = __engine("ast_span_start", best_nid);
+        let e = __engine("ast_span_end", best_nid);
+        let sym = __engine("ast_node_sym", best_nid);
+        var word = __engine("sym_str", sym);
+        if word == "" {
+            word = __engine("source_slice", s, e);
+        }
+        if word == "field" || word == "value" || word == "struct" || word == "fn" || word == "let" || word == "var" || word == "pub" || word == "priv" || word == "" {
+            __engine("lsp_set_result", "null");
+        } else {
+            __engine("lsp_set_result", word);
+        }
+        return;
+    }
+    __engine("lsp_set_result", "null");
+}
+
+// =========================================================================
+// 9. TOP-LEVEL LSP DISPATCHER
+// =========================================================================
+
+let _lsp_method = __engine("lsp_query_method");
+let _lsp_offset = __engine("lsp_query_offset");
+
+if _lsp_method == "textDocument/hover" {
+    handle_lsp_hover(_lsp_offset);
+}
+if _lsp_method == "textDocument/completion" {
+    handle_lsp_completion(_lsp_offset);
+}
+if _lsp_method == "textDocument/definition" {
+    handle_lsp_definition(_lsp_offset);
+}
+if _lsp_method == "textDocument/prepareRename" {
+    handle_lsp_prepare_rename(_lsp_offset);
+}
+if _lsp_method == "textDocument/rename" {
+    handle_lsp_prepare_rename(_lsp_offset);
+}

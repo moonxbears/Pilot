@@ -181,8 +181,10 @@ dependencies = [
  "pilot-lexer",
  "pilot-lsp-macros",
  "pilot-parser",
+ "pilot-rt",
  "pilot-span",
  "pilot-syntax",
+ "pilot-vm",
 ]
 
 [[package]]

@@ -447,7 +447,19 @@ impl<'a> CGenContext<'a> {
         out
     }
 
-    fn infer_c_type(&self, _id: NodeId) -> &'static str {
+    fn infer_c_type(&self, id: NodeId) -> &'static str {
+        if let Some(Some(lid)) = self.analysis.physics.node_layouts.get(id.0 as usize) {
+            if let Some(layout) = self.analysis.physics.layouts.get(*lid) {
+                match &layout.geometry {
+                    pilot_analysis::types::PhysicsGeometry::Scalar { bit_width: 32, bank: 1, .. } => return "float",
+                    pilot_analysis::types::PhysicsGeometry::Scalar { bank: 1, .. } => return "double",
+                    pilot_analysis::types::PhysicsGeometry::Scalar { bit_width: 1 | 8, bank: 0, .. } => return "bool",
+                    pilot_analysis::types::PhysicsGeometry::Scalar { bit_width: 32, bank: 2, .. } => return "int32_t",
+                    pilot_analysis::types::PhysicsGeometry::Pointer { .. } => return "const char*",
+                    _ => {}
+                }
+            }
+        }
         "int64_t"
     }
 
@@ -650,8 +662,8 @@ impl<'a> CGenContext<'a> {
         None
     }
 
-    fn infer_list_elem_type(&self, _id: NodeId) -> &'static str {
-        "int64_t"
+    fn infer_list_elem_type(&self, id: NodeId) -> &'static str {
+        self.infer_c_type(id)
     }
 
     fn is_string_expr(&self, _id: NodeId, code: &str) -> bool {

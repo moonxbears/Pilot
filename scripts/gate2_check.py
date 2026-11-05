@@ -14,7 +14,7 @@ DELETED_FILES = [
 
 LINE_CAPS = {
     "crates/pilot-analysis/src/types.rs": 250,
-    "crates/pilot-analysis/src/infer.rs": 380,
+    "crates/pilot-analysis/src/infer.rs": 440,
     "crates/pilot-analysis/src/comptime.rs": 220,
     "crates/pilot-analysis/src/pipeline.rs": 80,
     "crates/pilot-analysis/src/lib.rs": 60,

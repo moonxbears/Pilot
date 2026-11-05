@@ -151,23 +151,152 @@ impl LspServer {
             return JsonValue::Null;
         }
         let src = text.unwrap();
-        let arena = pilot_parser::parse(src);
-        let _physics = pilot_analysis::analyze_physics(&arena, arena.root, None);
+        let fid = uri.and_then(|u| self.uri_to_file_id.get(u)).copied();
+        let line_index = fid.and_then(|f| self.line_indices.get(&f));
 
+        let to_lsp = |off: u32| -> (u32, u32) {
+            line_index.map_or((0, 0), |li| {
+                let (l, c) = li.offset_to_line_col(off);
+                (l.saturating_sub(1), c.saturating_sub(1))
+            })
+        };
+        let byte_offset = if let Some(pos) = params.and_then(|p| p.get("position")) {
+            let line = pos.get("line").and_then(|l| l.as_f64()).unwrap_or(0.0) as u32;
+            let col = pos.get("character").and_then(|c| c.as_f64()).unwrap_or(0.0) as u32;
+            line_index.and_then(|li| li.line_col_to_offset(line + 1, col + 1)).unwrap_or(0)
+        } else {
+            0
+        };
+
+        let arena = pilot_parser::parse(src);
+        let mut registry = pilot_analysis::analyze_physics_with_source(&arena, arena.root, Some(src), None);
+        registry.lsp_method = method.to_string();
+        registry.lsp_offset = byte_offset;
+
+        let ide_sync_src = std::fs::read_to_string("selfhost/ide_sync.pilot")
+            .or_else(|_| std::fs::read_to_string("e:/Pilot/selfhost/ide_sync.pilot"))
+            .unwrap_or_else(|_| include_str!("../../../selfhost/ide_sync.pilot").to_string());
+
+        let parsed_ide = pilot_parser::parse(&ide_sync_src);
+        let binary = pilot_vm::BytecodeCompiler::compile(&parsed_ide, parsed_ide.root);
+        let mut vm = pilot_vm::PilVirtualMachine::new();
+        vm.load_binary(binary);
+
+        let reg_ptr = &mut registry as *mut pilot_analysis::PhysicsRegistry;
+        vm.engine_handler = Some(Box::new(move |op_code, args| {
+            let reg = unsafe { &mut *reg_ptr };
+            pilot_analysis::handle_engine_intrinsic(reg, op_code, args)
+        }));
+        vm.run();
+
+        let res_str = &registry.lsp_result;
         match method {
             "textDocument/hover" => {
-                JsonValue::Object(vec![
-                    ("contents".to_string(), JsonValue::Object(vec![
-                        ("kind".to_string(), JsonValue::String("markdown".to_string())),
-                        ("value".to_string(), JsonValue::String("*Pilot Language*".to_string())),
-                    ]))
-                ])
+                if res_str.is_empty() {
+                    JsonValue::Null
+                } else {
+                    JsonValue::Object(vec![
+                        ("contents".to_string(), JsonValue::Object(vec![
+                            ("kind".to_string(), JsonValue::String("markdown".to_string())),
+                            ("value".to_string(), JsonValue::String(res_str.clone())),
+                        ]))
+                    ])
+                }
             }
             "textDocument/completion" => {
-                JsonValue::Array(Vec::new())
+                if res_str.starts_with('[') {
+                    parse_json(res_str).unwrap_or(JsonValue::Array(Vec::new()))
+                } else {
+                    JsonValue::Array(Vec::new())
+                }
             }
             "textDocument/definition" => {
-                JsonValue::Null
+                if res_str.is_empty() || res_str == "null" {
+                    JsonValue::Null
+                } else {
+                    let target_word = res_str.as_str();
+                    let s = src.find(target_word).unwrap_or(0) as u32;
+                    let e = s + target_word.len() as u32;
+                    let ((sl, sc), (el, ec)) = (to_lsp(s), to_lsp(e));
+                    JsonValue::Object(vec![
+                        ("uri".to_string(), JsonValue::String(uri.unwrap().to_string())),
+                        ("range".to_string(), JsonValue::Object(vec![
+                            ("start".to_string(), JsonValue::Object(vec![
+                                ("line".to_string(), JsonValue::Number(sl as f64)),
+                                ("character".to_string(), JsonValue::Number(sc as f64)),
+                            ])),
+                            ("end".to_string(), JsonValue::Object(vec![
+                                ("line".to_string(), JsonValue::Number(el as f64)),
+                                ("character".to_string(), JsonValue::Number(ec as f64)),
+                            ])),
+                        ])),
+                    ])
+                }
+            }
+            "textDocument/prepareRename" => {
+                if res_str.is_empty() || res_str == "null" {
+                    JsonValue::Null
+                } else {
+                    let word = res_str.as_str();
+                    let s = if let Some(pos) = src[..byte_offset as usize].rfind(|c: char| !c.is_alphanumeric() && c != '_') {
+                        (pos + 1) as u32
+                    } else {
+                        0
+                    };
+                    let e = if let Some(pos) = src[byte_offset as usize..].find(|c: char| !c.is_alphanumeric() && c != '_') {
+                        byte_offset + pos as u32
+                    } else {
+                        src.len() as u32
+                    };
+                    let ((sl, sc), (el, ec)) = (to_lsp(s), to_lsp(e));
+                    JsonValue::Object(vec![
+                        ("range".to_string(), JsonValue::Object(vec![
+                            ("start".to_string(), JsonValue::Object(vec![
+                                ("line".to_string(), JsonValue::Number(sl as f64)),
+                                ("character".to_string(), JsonValue::Number(sc as f64)),
+                            ])),
+                            ("end".to_string(), JsonValue::Object(vec![
+                                ("line".to_string(), JsonValue::Number(el as f64)),
+                                ("character".to_string(), JsonValue::Number(ec as f64)),
+                            ])),
+                        ])),
+                        ("placeholder".to_string(), JsonValue::String(word.to_string())),
+                    ])
+                }
+            }
+            "textDocument/rename" => {
+                let new_name = params.and_then(|p| p.get("newName")).and_then(|n| n.as_str()).unwrap_or("");
+                let seed_kws = ["struct", "interface", "fn", "let", "ref", "if", "loop", "return", "yield", "defer", "comptime", "quote", "asm", "field", "value"];
+                if seed_kws.contains(&new_name) || new_name.is_empty() || res_str.is_empty() || res_str == "null" {
+                    return JsonValue::Null;
+                }
+                let search_word = res_str.as_str();
+                let mut edits = Vec::new();
+                let mut start_idx = 0;
+                while let Some(pos) = src[start_idx..].find(search_word) {
+                    let s = (start_idx + pos) as u32;
+                    let e = s + search_word.len() as u32;
+                    let ((sl, sc), (el, ec)) = (to_lsp(s), to_lsp(e));
+                    edits.push(JsonValue::Object(vec![
+                        ("range".to_string(), JsonValue::Object(vec![
+                            ("start".to_string(), JsonValue::Object(vec![
+                                ("line".to_string(), JsonValue::Number(sl as f64)),
+                                ("character".to_string(), JsonValue::Number(sc as f64)),
+                            ])),
+                            ("end".to_string(), JsonValue::Object(vec![
+                                ("line".to_string(), JsonValue::Number(el as f64)),
+                                ("character".to_string(), JsonValue::Number(ec as f64)),
+                            ])),
+                        ])),
+                        ("newText".to_string(), JsonValue::String(new_name.to_string())),
+                    ]));
+                    start_idx = (e as usize).max(start_idx + 1);
+                }
+                JsonValue::Object(vec![
+                    ("changes".to_string(), JsonValue::Object(vec![
+                        (uri.unwrap().to_string(), JsonValue::Array(edits)),
+                    ]))
+                ])
             }
             "textDocument/semanticTokens/full" => {
                 JsonValue::Object(vec![("data".to_string(), JsonValue::Array(Vec::new()))])

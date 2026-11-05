@@ -31,12 +31,20 @@ pub struct PhysicsRegistry {
     pub node_targets: Vec<Option<u32>>,
     pub symbol_strings: HashMap<u32, String>,
     pub diagnostics: Vec<PhysicsDiagnostic>,
+    pub source_text: String,
+    pub lsp_method: String,
+    pub lsp_offset: u32,
+    pub lsp_result: String,
 }
 
 impl PhysicsRegistry {
     pub fn new(arena: RawAstArena, symbol_strings: HashMap<u32, String>) -> Self {
         let count = arena.nodes.len();
-        Self { arena, layouts: LayoutTable::new(), node_layouts: vec![None; count], node_targets: vec![None; count], symbol_strings, diagnostics: Vec::new() }
+        Self {
+            arena, layouts: LayoutTable::new(), node_layouts: vec![None; count],
+            node_targets: vec![None; count], symbol_strings, diagnostics: Vec::new(),
+            source_text: String::new(), lsp_method: String::new(), lsp_offset: 0, lsp_result: String::new(),
+        }
     }
 }
 
@@ -59,6 +67,7 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
                     let is_f = c_node.node_kind() == NodeKind::ParamDecl
                         || (matches!(c_node.node_kind(), NodeKind::LetStmt | NodeKind::VarStmt) && arena.type_annotations.contains_key(&c_id));
                     if is_f { struct_field_nodes.insert(c_id); f_ids.push(c_id); }
+                    else if c_node.node_kind() == NodeKind::FnDecl { f_ids.push(c_id); }
                 }
                 struct_fields_map.insert(idx as u32, f_ids);
             }
@@ -306,6 +315,48 @@ pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, ar
             registry.diagnostics.push(PhysicsDiagnostic { node_id: nid, severity: sev, message: msg });
             Ok(PilotVal::NULL)
         }
+        "sym_str" => {
+            let sid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as u32;
+            Ok(PilotVal::from_str(registry.symbol_strings.get(&sid).map(|s| s.as_str()).unwrap_or_default()))
+        }
+        "ast_span_start" => Ok(PilotVal::from_int(args.first().and_then(|v| v.as_int()).and_then(|n| registry.arena.nodes.get(n as usize)).map_or(0, |n| n.span_start as i64))),
+        "ast_span_end" => Ok(PilotVal::from_int(args.first().and_then(|v| v.as_int()).and_then(|n| registry.arena.nodes.get(n as usize)).map_or(0, |n| n.span_end as i64))),
+        "source_slice" => {
+            let s_raw = args.first().and_then(|v| v.as_int()).unwrap_or(0).max(0) as usize;
+            let e_raw = args.get(1).and_then(|v| v.as_int()).unwrap_or(0).max(0) as usize;
+            let (txt, len) = (&registry.source_text, registry.source_text.len());
+            let (mut s, mut e) = (s_raw.min(len), e_raw.min(len));
+            while s > 0 && !txt.is_char_boundary(s) { s -= 1; }
+            while e < len && !txt.is_char_boundary(e) { e += 1; }
+            if s > e { s = e; }
+            Ok(PilotVal::from_str(&txt[s..e]))
+        }
+        "ast_get_bound_target" => Ok(PilotVal::from_int(args.first().and_then(|v| v.as_int()).and_then(|n| registry.node_targets.get(n as usize)).and_then(|x| *x).map_or(u32::MAX as i64, |t| t as i64))),
+        "mount_unit" => {
+            let path = args.first().and_then(|v| v.with_str(|s| s.to_string())).unwrap_or_default();
+            if let Ok(src) = std::fs::read_to_string(&path) {
+                let parsed = pilot_parser::parse(&src);
+                let (flat, syms) = flatten_ast(&parsed, parsed.root);
+                let (offset, links_base) = (registry.arena.nodes.len() as u32, registry.arena.child_links.len() as u32);
+                for c in flat.child_links { registry.arena.child_links.push(c + offset); }
+                for mut n in flat.nodes {
+                    n.node_id += offset;
+                    if n.child_count > 0 { n.first_child += links_base; }
+                    registry.arena.nodes.push(n);
+                }
+                registry.symbol_strings.extend(syms);
+                let total = registry.arena.nodes.len();
+                registry.node_layouts.resize(total, None);
+                registry.node_targets.resize(total, None);
+            }
+            Ok(PilotVal::from_int(registry.arena.nodes.len() as i64))
+        }
+        "lsp_query_method" => Ok(PilotVal::from_str(&registry.lsp_method)),
+        "lsp_query_offset" => Ok(PilotVal::from_int(registry.lsp_offset as i64)),
+        "lsp_set_result" => {
+            if let Some(v) = args.first() { v.with_str(|s| registry.lsp_result = s.to_string()); }
+            Ok(PilotVal::NULL)
+        }
         _ => Ok(PilotVal::NULL),
     }
 }
@@ -337,11 +388,16 @@ pub fn run_pilot_analyzer(registry: &mut PhysicsRegistry, analyzer_src: Option<&
 }
 
 // Restriction: Canonical analysis entry point; Forbidden: calling any other Rust pass
-pub fn analyze_physics(arena: &AstArena, root: NodeId, analyzer_override: Option<&str>) -> PhysicsRegistry {
+pub fn analyze_physics_with_source(arena: &AstArena, root: NodeId, source: Option<&str>, analyzer_override: Option<&str>) -> PhysicsRegistry {
     let (flat_arena, symbol_strings) = flatten_ast(arena, root);
     let mut registry = PhysicsRegistry::new(flat_arena, symbol_strings);
+    if let Some(src) = source { registry.source_text = src.to_string(); }
     let _ = run_pilot_analyzer(&mut registry, analyzer_override);
     registry
+}
+
+pub fn analyze_physics(arena: &AstArena, root: NodeId, analyzer_override: Option<&str>) -> PhysicsRegistry {
+    analyze_physics_with_source(arena, root, None, analyzer_override)
 }
 
 #[derive(Clone, Debug, Default)]

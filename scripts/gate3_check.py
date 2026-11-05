@@ -18,6 +18,9 @@ BANNED_TOKENS = [
     "TypeInferenceEngine",
     "TypeArena",
     "TypeId",
+    "#[ignore]",
+    "*Pilot Language*",
+    'Custom("any"',
 ]
 
 def check_caps():
@@ -34,7 +37,11 @@ def check_caps():
 
 def check_banned():
     ok = True
-    targets = ["crates/pilot-cli/src/main.rs"] + glob.glob("crates/pilot-lsp/src/**/*.rs", recursive=True)
+    targets = (
+        glob.glob("crates/pilot-cli/src/**/*.rs", recursive=True)
+        + glob.glob("crates/pilot-lsp/src/**/*.rs", recursive=True)
+        + glob.glob("crates/pilot-lsp/tests/**/*.rs", recursive=True)
+    )
     for path in targets:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -54,7 +61,7 @@ def main():
         passed = False
     if not passed:
         sys.exit(1)
-    print("ALL PHASE 3A SCORCHED-EARTH GATES PASSED!")
+    print("ALL PHASE 3B GATES PASSED!")
     sys.exit(0)
 
 if __name__ == "__main__":

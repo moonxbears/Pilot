@@ -24,5 +24,7 @@ pilot-db = { path = "../pilot-db" }
 pilot-parser = { path = "../pilot-parser" }
 pilot-ast = { path = "../pilot-ast" }
 pilot-intern = { path = "../pilot-intern" }
+pilot-rt = { path = "../pilot-rt" }
+pilot-vm = { path = "../pilot-vm" }
 pilot-analysis = { path = "../pilot-analysis" }
 pilot-lsp-macros = { path = "../pilot-lsp-macros" }

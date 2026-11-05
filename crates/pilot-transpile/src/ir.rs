@@ -55,8 +55,23 @@ pub enum IrType {
 }
 
 impl IrType {
-    pub fn from_analysis() -> Self {
-        Self::Custom("any".to_string())
+    pub fn from_analysis(physics: &pilot_analysis::PhysicsRegistry, node_id: u32) -> Self {
+        if let Some(Some(lid)) = physics.node_layouts.get(node_id as usize) {
+            if let Some(layout) = physics.layouts.get(*lid) {
+                match &layout.geometry {
+                    pilot_analysis::types::PhysicsGeometry::Scalar { bit_width: 0, .. } => return Self::Void,
+                    pilot_analysis::types::PhysicsGeometry::Scalar { bit_width: 32, bank: 1, .. } => return Self::Float,
+                    pilot_analysis::types::PhysicsGeometry::Scalar { bank: 1, .. } => return Self::Float,
+                    pilot_analysis::types::PhysicsGeometry::Scalar { bit_width: 1 | 8, bank: 0, .. } => return Self::Bool,
+                    pilot_analysis::types::PhysicsGeometry::Scalar { .. } => return Self::Int,
+                    pilot_analysis::types::PhysicsGeometry::Pointer { .. } => return Self::String,
+                    pilot_analysis::types::PhysicsGeometry::Aggregate { .. } => return Self::Custom("Aggregate".to_string()),
+                    pilot_analysis::types::PhysicsGeometry::TaggedUnion { .. } => return Self::Custom("TaggedUnion".to_string()),
+                    _ => return Self::Int,
+                }
+            }
+        }
+        Self::Int
     }
 
     pub fn from_type_spec(arena: &AstArena, id: NodeId) -> Self {
@@ -444,6 +459,8 @@ impl IrModule {
             IrType::from_type_spec(arena, ann)
         } else if fn_name == "main" {
             IrType::Int
+        } else if let Some(Some(_)) = analysis.physics.node_layouts.get(fn_id.0 as usize) {
+            IrType::from_analysis(&analysis.physics, fn_id.0)
         } else {
             IrType::Void
         };
@@ -534,6 +551,10 @@ impl IrModule {
                 let init = Self::lower_expr(arena, analysis, init_id);
                 let ty = if let Some(&ann) = arena.type_annotations.get(&id.0) {
                     IrType::from_type_spec(arena, ann)
+                } else if let Some(Some(_)) = analysis.physics.node_layouts.get(id.0 as usize) {
+                    IrType::from_analysis(&analysis.physics, id.0)
+                } else if let Some(Some(_)) = analysis.physics.node_layouts.get(init_id.0 as usize) {
+                    IrType::from_analysis(&analysis.physics, init_id.0)
                 } else {
                     IrType::Int
                 };
@@ -549,6 +570,10 @@ impl IrModule {
                 let init = Self::lower_expr(arena, analysis, init_id);
                 let ty = if let Some(&ann) = arena.type_annotations.get(&id.0) {
                     IrType::from_type_spec(arena, ann)
+                } else if let Some(Some(_)) = analysis.physics.node_layouts.get(id.0 as usize) {
+                    IrType::from_analysis(&analysis.physics, id.0)
+                } else if let Some(Some(_)) = analysis.physics.node_layouts.get(init_id.0 as usize) {
+                    IrType::from_analysis(&analysis.physics, init_id.0)
                 } else {
                     IrType::Int
                 };

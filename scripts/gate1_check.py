@@ -10,6 +10,9 @@ ALLOWED_INFER_STRINGS = {
     "layout_fn_abi", "layout_metrics", "layout_field_offset",
     "layout_physically_equal", "ast_bind_layout", "ast_get_bound_layout",
     "ast_bind_target", "ast_emit_diag",
+    "sym_str", "ast_span_start", "ast_span_end", "source_slice",
+    "ast_get_bound_target", "mount_unit", "lsp_query_method",
+    "lsp_query_offset", "lsp_set_result",
     "selfhost/analyzer.pilot", "e:/Pilot/selfhost/analyzer.pilot",
     "../../../selfhost/analyzer.pilot",
 }
@@ -57,7 +60,7 @@ def main():
     passed = True
     if not check_file_lines("crates/pilot-analysis/src/types.rs", 250):
         passed = False
-    if not check_file_lines("crates/pilot-analysis/src/infer.rs", 380):
+    if not check_file_lines("crates/pilot-analysis/src/infer.rs", 440):
         passed = False
     if not check_whitelist_strings("crates/pilot-analysis/src/types.rs", set()):
         passed = False

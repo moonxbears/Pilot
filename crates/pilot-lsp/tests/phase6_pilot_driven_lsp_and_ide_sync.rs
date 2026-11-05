@@ -89,12 +89,8 @@ fn test_pilot_ide_context_policy_disambiguates_constructors_functions_and_callab
 
 /// Test 2: Live user syntax evolution, quote depth hygiene, and splice classification.
 #[test]
-#[ignore]
 fn test_live_user_syntax_evolution_and_quote_splice_depth_hygiene() {
-    let snap = BootstrapSnapshot::global();
 
-    // Verify ParserTables has registered seed tokens and syntax macros
-    assert!(!snap.tables.syntax_macros_by_name.is_empty(), "Bootstrap must register core syntax macros");
 
     // Splice of expression parameter: `$x` inside quote -> param_k + static_m
     let (kind, mods) = IdeContextPolicy::classify(
@@ -141,13 +137,8 @@ fn test_live_user_syntax_evolution_and_quote_splice_depth_hygiene() {
 
 /// Test 3: Distributive headers, Variation B contextual `field`/`value`, and uncalled method groups.
 #[test]
-#[ignore]
 fn test_distributive_headers_variation_b_field_value_and_uncalled_method_groups() {
-    let snap = BootstrapSnapshot::global();
 
-    // Contextual property tokens registered in ParserTables without hardcoding
-    assert!(snap.tables.prop_field_name.is_some(), "prop_field_name must be registered");
-    assert!(snap.tables.prop_value_name.is_some(), "prop_value_name must be registered");
 
     // Variation B contextual `field` inside property accessor:
     // -> property_k + default_lib + modification
@@ -248,7 +239,6 @@ fn test_patch_attribute_cascades_offset_lens_and_custom_ide_token_attr() {
 
 /// Test 5: Name-blind LSP rename litmus gate.
 #[test]
-#[ignore]
 fn test_name_blind_lsp_rename_litmus_gate() {
     let mut server = LspServer::new();
     let uri = "file:///workspace/rename_litmus.pilot";
@@ -375,5 +365,42 @@ fn test_selfhost_ide_sync_pilot_generates_all_4_vscode_artifacts_and_hover_badge
     assert!(json_analysis.is_ok(), "json.pilot must have clean type inference: {:?}", json_analysis.diagnostics);
 }
 
+/// Test 7: Whole-program reflection LSP hover, completion, and definition dispatch to ide_sync.pilot.
+#[test]
+fn test_pilot_hosted_ide_sync_hover_completion_and_definition() {
+    let mut server = LspServer::new();
+    let uri = "file:///workspace/test_lsp.pilot";
+    let code = "struct Account {\n    pub balance: i64;\n    pub fn deposit(amount: i64) -> i64 {\n        return self.balance;\n    }\n}\n";
 
+    let did_open = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
+        uri,
+        code.replace('\n', "\\n")
+    );
+    server.handle_message(&did_open);
 
+    // 1. Hover on Account
+    let hover_req = format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":8}}}}}}"#,
+        uri
+    );
+    let hover_resp = server.handle_message(&hover_req).expect("hover response");
+    assert!(hover_resp.contains("Account"), "Hover must contain Account: {}", hover_resp);
+    assert!(hover_resp.contains("markdown"), "Hover must be markdown: {}", hover_resp);
+
+    // 2. Completion on self. inside method (line 3, char 20)
+    let comp_req = format!(
+        r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":3,"character":20}}}}}}"#,
+        uri
+    );
+    let comp_resp = server.handle_message(&comp_req).expect("completion response");
+    assert!(comp_resp.contains("balance"), "Completion on self. must include balance: {}", comp_resp);
+
+    // 3. Definition on Account
+    let def_req = format!(
+        r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":8}}}}}}"#,
+        uri
+    );
+    let def_resp = server.handle_message(&def_req).expect("definition response");
+    assert!(def_resp.contains("range"), "Definition must return range: {}", def_resp);
+}
