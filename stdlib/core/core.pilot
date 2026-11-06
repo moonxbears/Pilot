@@ -456,10 +456,34 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Genesis;
 // =========================================================================
 // STEP 4: PAIRED CFG KEYWORDS (`break`, `continue`, `op`) & SSA/REFLECTION HOOKS
 // =========================================================================
+pub syntax type_construct {
+    ($t: type) []           => quote { slice<$t> };
+    ($t: type) [..]         => quote { stride<$t> };
+    ($t: type) [:]          => quote { stride<$t> };
+    ($t: type) [N]          => quote { array<$t, N> };
+    ($t: type) [N, M]       => quote { grid<$t, N, M> };
+    ($t: type) ?            => quote { option<$t> };
+    ($t: type) ! ($e: type) => quote { result<$t, $e> };
+    ($t: type) @ N          => quote { simd<$t, N> };
+    @ ($t: type)            => quote { pin<$t> };
+    ($t: type) ^            => quote { signal<$t> };
+    ($a: type) => ($r: type)=> quote { fn<$a, $r> };
+}
+
 pub syntax {
-    break()       => __engine(Cfg.Hooks.jmp_exit);
-    continue()    => __engine(Cfg.Hooks.jmp_head);
-    op(sig, body) => __engine(Cfg.Hooks.decl_op, sig, body);
+    break()                     => __engine(Cfg.Hooks.jmp_exit);
+    continue()                  => __engine(Cfg.Hooks.jmp_head);
+    op(sig, body)               => __engine(Cfg.Hooks.decl_op, sig, body);
+    while(cond, body)           => quote { loop { if (!($cond)) { break; } $body } };
+    until(cond, body)           => quote { loop { if ($cond) { break; } $body } };
+    for(iter, body)             => quote { loop { if (!($iter)) { break; } $body } };
+    guard(cond, else_body)      => quote { if (!($cond)) { $else_body } };
+    switch(val, arms)           => quote { switch ($val) { $arms } };
+    case(pat, body)             => quote { case $pat: { $body } };
+    default(body)               => quote { default: { $body } };
+    try(body, catch_arms)       => quote { try { $body } $catch_arms };
+    catch(err, body)            => quote { catch ($err) { $body } };
+    unit(decl)                  => quote { $decl };
 }
 
 // Ring 80 (`lvl(80)`): Restricted to `Pilot.Core` SIMD/Primitive Implementations
