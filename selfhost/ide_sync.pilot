@@ -742,6 +742,23 @@ pub fn reflect_category_keywords(target_cat_id: i64) -> str {
     return pat;
 }
 
+pub fn reflect_primitives_pattern() -> str {
+    var pat = "";
+    var cid = 20;
+    while cid <= 29 {
+        let cpat = reflect_category_keywords(cid);
+        if cpat != "" {
+            if pat == "" {
+                pat = cpat;
+            } else {
+                pat = pat + "|" + cpat;
+            }
+        }
+        cid = cid + 1;
+    }
+    return pat;
+}
+
 pub fn reflect_keyword_doc(target_word: str) -> str {
     if target_word == "" {
         return "";
@@ -876,7 +893,7 @@ pub fn build_tm_language_model(
 ) -> TmLanguageGrammar {
     let seed_pat = if seed_keywords_regex != "" { seed_keywords_regex } else { reflect_category_keywords(0) };
     let mod_pat  = if modifiers_regex != "" { modifiers_regex } else { reflect_category_keywords(4) };
-    let prim_pat = if lang_primitives_regex != "" { lang_primitives_regex } else { "void|never|bool|char|i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|f16|f32|f64|f128|str|ptr|slice|stride|array|tuple|option|result|union|range|span|step|from|until|full|splat|pairs|expand|map|frame|type|ast" };
+    let prim_pat = if lang_primitives_regex != "" { lang_primitives_regex } else { reflect_primitives_pattern() };
     let op_pat   = if operators_regex != "" { operators_regex } else { "%%|\\*%|\\*\\?|\\*\\||\\+%|\\+\\?|\\+\\||-%|-\\?|-\\||<<|>>|~>|%|&|\\+|-|/|\\^|\\||~" };
     let syn_pat  = if syntax_macros_regex != "" { syntax_macros_regex } else { "syntax|quote|macro" };
 
@@ -1687,7 +1704,7 @@ pub fn build_tm_language_json(
 ) -> str {
     let seed_pat = if seed_keywords_regex != "" { seed_keywords_regex } else { reflect_category_keywords(0) };
     let mod_pat  = if modifiers_regex != "" { modifiers_regex } else { reflect_category_keywords(4) };
-    let prim_pat = if lang_primitives_regex != "" { lang_primitives_regex } else { "void|never|bool|char|i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|f16|f32|f64|f128|str|ptr|slice|stride|array|tuple|option|result|union|range|span|step|from|until|full|splat|pairs|expand|map|frame|type|ast" };
+    let prim_pat = if lang_primitives_regex != "" { lang_primitives_regex } else { reflect_primitives_pattern() };
     let op_pat   = if operators_regex != "" { operators_regex } else { "%%|\\*%|\\*\\?|\\*\\||\\+%|\\+\\?|\\+\\||-%|-\\?|-\\||<<|>>|~>|%|&|\\+|-|/|\\^|\\||~" };
     let syn_pat  = if syntax_macros_regex != "" { syntax_macros_regex } else { "syntax|quote|macro" };
 

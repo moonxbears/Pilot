@@ -1,0 +1,16 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/after.pilot
+// HALF-BOUNDED SLICE DESCRIPTOR (`after<T>`, 0b00 IValue)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.After;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(28, "Half-bounded slice descriptor starting strictly after the given index.")]
+[Lang(Cfg.Lang.after_t), Layout(c_abi)]
+pub partial struct after<T: IValue> : IValue {
+    pub start: T;
+}

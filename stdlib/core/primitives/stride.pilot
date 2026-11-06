@@ -1,0 +1,72 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/stride.pilot
+// STRIDED OFFSET MEMORY LENS VIEW (`stride<T>`, 24-BYTE `{ ptr<T>, usize, isize }`, 0b01 IReference)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Stride;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Memory::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(26, "Strided offset memory lens view backed by pointer, length, and byte stride (24 bytes).")]
+[Lang(Cfg.Lang.stride_t), Layout(c_abi)]
+pub partial struct stride<T: IAnyValue> : IReadOnlyList<T>, IReference {
+    *RawStorageBundle<T>;
+    *ContiguousViewFacet<T>;
+    pub byte_step: isize;
+
+    pub pure:
+        op [] (idx: usize) -> T {
+            let base_addr = __ssa_cast(Cfg.Ssa.bitcast, .data, usize);
+            let step_off  = (idx as isize) * .byte_step;
+            let elem_addr = (base_addr as isize + step_off) as usize;
+            let elem_ptr  = __ssa_cast(Cfg.Ssa.bitcast, elem_addr, ptr<T>);
+            return __ssa_load(elem_ptr);
+        }
+
+        fn get_enumerator() -> StrideEnumerator<T> => StrideEnumerator<T> {
+            source:      self,
+            index:       0,
+            has_started: false,
+        };
+
+        fn lens_column<TField: IAnyValue>(comptime field_sym: str) -> stride<TField> {
+            comptime {
+                if lattice_bits_of(T) != Cfg.Lattice.value {
+                    compile_error("OffsetLens '~>' requires a 0b00 IValue element struct");
+                }
+            }
+            let base_addr = (__ssa_cast(Cfg.Ssa.bitcast, .data, usize)) + offsetof(T, field_sym);
+            return stride<TField> {
+                data:      __ssa_cast(Cfg.Ssa.bitcast, base_addr, ptr<TField>),
+                len:       .len,
+                byte_step: .byte_step,
+            };
+        }
+
+        fn lens_map<TKey: IEquatable<TKey>, TVal: IAnyValue>(
+            comptime key_sym: str,
+            comptime val_sym: str
+        ) -> map<TKey, TVal> => map<TKey, TVal> {
+            keys: .lens_column<TKey>(key_sym),
+            vals: .lens_column<TVal>(val_sym),
+        };
+
+        fn as_structural_view<TDst: IValue>() -> stride<TDst> {
+            comptime {
+                if (lattice_bits_of(T) != Cfg.Lattice.value) || (lattice_bits_of(TDst) != Cfg.Lattice.value) {
+                    compile_error("'as view' requires both source and target structs to be 0b00 IValue");
+                }
+                if sizeof(TDst) > sizeof(T) {
+                    compile_error("'as view' target struct cannot be larger than source struct");
+                }
+            }
+            return stride<TDst> {
+                data:      __ssa_cast(Cfg.Ssa.bitcast, .data, ptr<TDst>),
+                len:       .len,
+                byte_step: .byte_step,
+            };
+        }
+}

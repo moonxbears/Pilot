@@ -1,0 +1,22 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/bool.pilot
+// SINGLE-BIT BOOLEAN TRUTH HARDWARE SCALAR
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Bool;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(23, "Single-bit Boolean truth value (`true` or `false`).")]
+[Lang(Cfg.Lang.bool_t), Bits(Cfg.Reg.b1, Cfg.Reg.gpr_u)]
+pub partial struct bool : IEquatable<bool>, IValue {
+    pub pure:
+        op == (rhs: bool) -> bool => __ssa(Cfg.Ssa.eq, self, rhs);
+        op != (rhs: bool) -> bool => __ssa(Cfg.Ssa.ne, self, rhs);
+        op !  ()          -> bool => if self { false } else { true };
+        op &  (rhs: bool) -> bool => if self { rhs } else { false };
+        op |  (rhs: bool) -> bool => if self { true } else { rhs };
+        op ^  (rhs: bool) -> bool => if self { !rhs } else { rhs };
+}

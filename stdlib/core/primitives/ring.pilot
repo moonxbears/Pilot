@@ -1,0 +1,21 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/ring.pilot
+// POWER-OF-TWO CIRCULAR RING BUFFER VIEW (`ring<T>`, 0b01 IReference)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Ring;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(27, "Power-of-two circular ring buffer view.")]
+[Lang(Cfg.Lang.ring_t), Layout(c_abi)]
+pub partial struct ring<T: IAnyValue> : IIndexGet<usize, T>, IReference {
+    pub data: ptr<T>;
+    pub mask: usize;
+    pub head: usize;
+
+    pub pure:
+        op [] (idx: usize) -> T => .data[(.head + idx) & .mask];
+}

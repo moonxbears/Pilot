@@ -1,0 +1,29 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/map.pilot
+// ZERO-COPY KEY-VALUE STRIDED PROJECTION (`map<K, V>`, 0b01 IReference)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Map;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Memory::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(29, "Zero-copy key-value strided column projection map.")]
+[Lang(Cfg.Lang.map_t), Layout(c_abi)]
+pub partial struct map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IReference {
+    pub keys: stride<TKey>;
+    pub vals: stride<TVal>;
+    pub count: usize { get => .keys.len; }
+
+    pub pure fn contains_key(key: TKey) -> bool {
+        var idx: usize = 0;
+        loop {
+            if !(idx < .keys.len) { break; }
+            if .keys[idx] == key { return true; }
+            idx = idx + 1;
+        }
+        return false;
+    }
+}

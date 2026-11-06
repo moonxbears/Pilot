@@ -1,0 +1,14 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/frame.pilot
+// RAW ZERO-MARSHALLING C-ABI CALL FRAME STRUCT (`frame<TSig>`, 0b00 IValue)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Frame;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(29, "Raw ABI zero-marshalling call frame struct.")]
+[Lang(Cfg.Lang.frame_t), Layout(c_abi)]
+pub partial struct frame<TSig: IValue> : IValue {}

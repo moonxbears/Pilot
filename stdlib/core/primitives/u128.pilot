@@ -1,0 +1,45 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/u128.pilot
+// 128-BIT UNSIGNED INTEGER HARDWARE SCALAR
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.U128;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(21, "128-bit unsigned integer.")]
+[Lang(Cfg.Lang.u128_t), Bits(Cfg.Reg.b128, Cfg.Reg.gpr_u)]
+pub partial struct u128 : INumber<u128>, IBitwiseOperator<u128> {
+    pub pure:
+        op +   (rhs: u128) -> u128  => __ssa(Cfg.Ssa.add,      self, rhs);
+        op -   (rhs: u128) -> u128  => __ssa(Cfg.Ssa.sub,      self, rhs);
+        op *   (rhs: u128) -> u128  => __ssa(Cfg.Ssa.mul,      self, rhs);
+        op /   (rhs: u128) -> u128  => __ssa(Cfg.Ssa.udiv,     self, rhs);
+        op %   (rhs: u128) -> u128  => __ssa(Cfg.Ssa.urem,     self, rhs);
+        op %%  (rhs: u128) -> u128  => __ssa(Cfg.Ssa.urem_euc, self, rhs);
+        op +|  (rhs: u128) -> u128  => __ssa(Cfg.Ssa.uadd_sat, self, rhs);
+        op -|  (rhs: u128) -> u128  => __ssa(Cfg.Ssa.usub_sat, self, rhs);
+        op *|  (rhs: u128) -> u128  => __ssa(Cfg.Ssa.umul_sat, self, rhs);
+        op +%  (rhs: u128) -> u128  => __ssa(Cfg.Ssa.add_wrap, self, rhs);
+        op -%  (rhs: u128) -> u128  => __ssa(Cfg.Ssa.sub_wrap, self, rhs);
+        op *%  (rhs: u128) -> u128  => __ssa(Cfg.Ssa.mul_wrap, self, rhs);
+        op &   (rhs: u128) -> u128  => __ssa(Cfg.Ssa.and_b,    self, rhs);
+        op |   (rhs: u128) -> u128  => __ssa(Cfg.Ssa.or_b,     self, rhs);
+        op ^   (rhs: u128) -> u128  => __ssa(Cfg.Ssa.xor_b,    self, rhs);
+        op ~   ()          -> u128  => __ssa_unary(Cfg.Ssa.bitnot, self);
+        op <<  (bits: u32) -> u128  => __ssa(Cfg.Ssa.shl,      self, bits);
+        op >>  (bits: u32) -> u128  => __ssa(Cfg.Ssa.lshr,     self, bits);
+        op ==  (rhs: u128) -> bool  => __ssa(Cfg.Ssa.eq,       self, rhs);
+        op !=  (rhs: u128) -> bool  => __ssa(Cfg.Ssa.ne,       self, rhs);
+        op <   (rhs: u128) -> bool  => __ssa(Cfg.Ssa.ult,      self, rhs);
+        op <=  (rhs: u128) -> bool  => __ssa(Cfg.Ssa.ule,      self, rhs);
+        op >   (rhs: u128) -> bool  => __ssa(Cfg.Ssa.ugt,      self, rhs);
+        op >=  (rhs: u128) -> bool  => __ssa(Cfg.Ssa.uge,      self, rhs);
+        op <=> (rhs: u128) -> order => __ssa(Cfg.Ssa.cmp3_u,   self, rhs);
+        op ..< (rhs: u128) -> range<u128> => range<u128> { start: self, end: rhs };
+        op ..  (rhs: u128) -> range<u128> => range<u128> { start: self, end: rhs };
+        op ..= (rhs: u128) -> span<u128>  => span<u128>  { start: self, end: rhs };
+        fn step_by(step: u128) -> step<u128> => step<u128> { bounds: range<u128> { start: self, end: self }, step_by: step };
+}

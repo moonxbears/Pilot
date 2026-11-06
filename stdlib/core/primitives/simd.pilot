@@ -1,0 +1,22 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/simd.pilot
+// HARDWARE SIMD VECTOR (`simd<T, N>`, 0b00 IValue)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Simd;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(27, "Hardware SIMD vector packed in dedicated vector registers.")]
+[Lang(Cfg.Lang.simd_t), Bits(Cfg.Reg.b0, Cfg.Reg.simd_v), Layout("inline_array")]
+pub partial struct simd<T: IValue, N: const usize> : IValue {
+    pub lanes: usize { get => N; }
+
+    pub pure:
+        op [] (idx: usize) -> T => (__ssa_cast(Cfg.Ssa.bitcast, ref self, ptr<T>))[idx];
+        op +  (rhs: simd<T, N>) -> simd<T, N> => __ssa(Cfg.Ssa.add, self, rhs);
+        op -  (rhs: simd<T, N>) -> simd<T, N> => __ssa(Cfg.Ssa.sub, self, rhs);
+        op *  (rhs: simd<T, N>) -> simd<T, N> => __ssa(Cfg.Ssa.mul, self, rhs);
+}

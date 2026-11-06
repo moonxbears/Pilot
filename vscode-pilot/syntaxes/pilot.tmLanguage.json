@@ -285,7 +285,17 @@
         { "name": "keyword.control.concurrency.pilot", "match": "\\b(async|await|spawn|atomic|sync|isolate|select|timeout|bounded|noalloc|region|deadline|within|periodic|priority|jitter)\\b" },
         { "name": "keyword.control.database.pilot", "match": "\\b(database|transaction|commit|rollback|savepoint|connect|from|where|order|ascending|descending|insert|into|values|update|delete)\\b" },
         { "name": "keyword.control.foreign.pilot", "match": "\\b(extern|assembly|module|lib)\\b" },
-        { "name": "keyword.other.query.pilot", "match": "\\b(sizeof|alignof|offsetof|fields_of|nameof|assert|blueprint|cue|role|route|unit|syntax|use|op)\\b" }
+        { "name": "keyword.other.query.pilot", "match": "\\b(sizeof|alignof|offsetof|fields_of|nameof|assert|blueprint|cue|role|route|unit|syntax|use|op)\\b" },
+        { "name": "support.type.primitive.pilot entity.name.type.primitive.pilot", "match": "\\b(i8|i16|i32|i64|i128|isize)\\b" },
+        { "name": "support.type.primitive.pilot entity.name.type.primitive.pilot", "match": "\\b(u8|u16|u32|u64|u128|usize)\\b" },
+        { "name": "support.type.primitive.pilot entity.name.type.primitive.pilot", "match": "\\b(f16|f32|f64|f128)\\b" },
+        { "name": "support.type.primitive.pilot entity.name.type.primitive.pilot", "match": "\\b(bool|char)\\b" },
+        { "name": "support.type.primitive.pilot entity.name.type.primitive.pilot", "match": "\\b(void|never)\\b" },
+        { "name": "support.type.primitive.pilot entity.name.type.primitive.pilot", "match": "\\b(str)\\b" },
+        { "name": "support.type.primitive.pilot entity.name.type.primitive.pilot", "match": "\\b(ptr|slice|stride)\\b" },
+        { "name": "support.type.primitive.pilot entity.name.type.primitive.pilot", "match": "\\b(array|simd|grid|ring)\\b" },
+        { "name": "support.type.primitive.pilot entity.name.type.primitive.pilot", "match": "\\b(order|range|span|step|open|after|from|until|full)\\b" },
+        { "name": "support.type.primitive.pilot entity.name.type.primitive.pilot", "match": "\\b(tuple|union|Quantity|map|splat|pairs|expand|frame|type|ast)\\b" }
       ]
     },
     "modifiers": {
@@ -296,7 +306,7 @@
     },
     "primitives": {
       "patterns": [
-        { "name": "support.type.primitive.pilot entity.name.type.primitive.pilot", "match": "\\b(void|never|bool|char|i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|f16|f32|f64|f128|str|ptr|slice|stride|array|tuple|option|result|union|range|span|step|from|until|full|splat|pairs|expand|map|frame|type|ast)\\b" },
+        { "name": "support.type.primitive.pilot entity.name.type.primitive.pilot", "match": "\\b(i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|f16|f32|f64|f128|bool|char|void|never|str|ptr|slice|stride|array|simd|grid|ring|order|range|span|step|open|after|from|until|full|tuple|union|Quantity|map|splat|pairs|expand|frame|type|ast)\\b" },
         { "name": "support.type.system.pilot entity.name.type.pilot", "match": "\\b(ArenaScope|AstContext|CallExpr|ClampAttr|Dual|EffectPlan|FormulaAttr|HardRealtimeAttr|IdeContextPolicy|IdePresentationPolicy|IdeTokenAttr|InheritPolicy|KernelAttr|LspKind|LspMod|OnChangeAttr|PatchAttr|PatchPart|PatchReplaceAttr|Quantity|RangeEnumerator|RangeWindow|RuleAttr|Signal|SliceBuffer|SliceEnumerator|SpanEnumerator|StrideEnumerator|TraceSpanAttr|WcetAttr|ZeroRuntimeAttr)\\b" },
         { "name": "entity.name.type.interface.pilot", "match": "\\bI[A-Z][A-Za-z0-9_]*\\b" },
         { "name": "entity.name.type.pilot", "match": "\\b[A-Z][A-Za-z0-9_]*\\b" }

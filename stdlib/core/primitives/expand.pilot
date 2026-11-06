@@ -1,0 +1,17 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/expand.pilot
+// RECURSIVE DEEP-FLATTEN UNPACK CARRIER (`expand<T>`, 0b01 IReference)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Expand;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Memory::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(29, "Recursive deep-flatten unpack operator carrier.")]
+[Lang(Cfg.Lang.expand_t), Layout(c_abi)]
+pub partial struct expand<T: IAnyValue> : IReference {
+    pub items: slice<T>;
+}

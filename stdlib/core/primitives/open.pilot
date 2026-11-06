@@ -1,0 +1,17 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/open.pilot
+// OPEN SLICE BOUND DESCRIPTOR (`open<T>`, 0b00 IValue)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Open;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(28, "Open slice bound descriptor with both start and end specified.")]
+[Lang(Cfg.Lang.open_t), Layout(c_abi)]
+pub partial struct open<T: IValue> : IValue {
+    pub start: T;
+    pub end:   T;
+}

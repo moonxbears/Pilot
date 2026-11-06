@@ -1,0 +1,16 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/from.pilot
+// HALF-BOUNDED SLICE DESCRIPTOR (`from<T>`, 0b00 IValue)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.From;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(28, "Half-bounded slice descriptor starting from the given index to the end.")]
+[Lang(Cfg.Lang.from_t), Layout(c_abi)]
+pub partial struct from<T: IValue> : IValue {
+    pub start: T;
+}

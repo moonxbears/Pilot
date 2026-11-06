@@ -1,0 +1,21 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/grid.pilot
+// 2D INLINE MATRIX / GRID (`grid<T, N, M>`, 0b00 IValue)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Grid;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(27, "2D inline fixed-capacity matrix grid stored contiguously.")]
+[Lang(Cfg.Lang.grid_t), Layout("inline_array")]
+pub partial struct grid<T: IAnyValue, N: const usize, M: const usize> : IValue {
+    pub rows: usize { get => N; }
+    pub cols: usize { get => M; }
+
+    pub pure:
+        fn as_ptr() -> ptr<T> => __ssa_cast(Cfg.Ssa.bitcast, ref self, ptr<T>);
+        op [] (row: usize) -> ptr<T> => .as_ptr() + (row * M);
+}

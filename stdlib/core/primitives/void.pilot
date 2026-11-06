@@ -1,0 +1,14 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/void.pilot
+// ZERO-SIZE UNIT TYPE (0 RUNTIME HEADER BYTES)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Void;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(24, "Zero-size unit type representing the absence of a meaningful value (0 runtime bytes).")]
+[Lang(Cfg.Lang.void_t), Bits(Cfg.Reg.b0, Cfg.Reg.gpr_u)]
+pub partial struct void : IValue {}

@@ -1,0 +1,33 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/quantity.pilot
+// COMPILE-TIME DIMENSIONAL QUANTITY (`Quantity<TVal, M, S, K>`, 0b00 IValue)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Quantity;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(29, "Compile-time dimensional physical quantity with unit verification.")]
+[Layout(transparent)]
+pub partial struct Quantity<TVal: INumber<TVal>, const M: i8, const S: i8, const K: i8 = 0> : IValue {
+    pub value: TVal;
+
+    pub pure:
+        op + (rhs: Quantity<TVal, M, S, K>) -> Quantity<TVal, M, S, K> =>
+            Quantity<TVal, M, S, K> { value: .value + rhs.value };
+
+        op - (rhs: Quantity<TVal, M, S, K>) -> Quantity<TVal, M, S, K> =>
+            Quantity<TVal, M, S, K> { value: .value - rhs.value };
+
+        op - () -> Quantity<TVal, M, S, K> =>
+            Quantity<TVal, M, S, K> { value: -.value };
+
+        op == (rhs: Quantity<TVal, M, S, K>) -> bool => .value == rhs.value;
+        op != (rhs: Quantity<TVal, M, S, K>) -> bool => .value != rhs.value;
+        op <  (rhs: Quantity<TVal, M, S, K>) -> bool => .value <  rhs.value;
+        op <= (rhs: Quantity<TVal, M, S, K>) -> bool => .value <= rhs.value;
+        op >  (rhs: Quantity<TVal, M, S, K>) -> bool => .value >  rhs.value;
+        op >= (rhs: Quantity<TVal, M, S, K>) -> bool => .value >= rhs.value;
+}

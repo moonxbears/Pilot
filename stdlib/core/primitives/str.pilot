@@ -1,0 +1,41 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/str.pilot
+// BORROWED UTF-8 STRING VIEW (16-BYTE `{ ptr<u8>, usize }`, 0b01 IReference)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Str;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Memory::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(25, "Borrowed UTF-8 string view backed by contiguous byte pointer and length (16 bytes).")]
+[Lang(Cfg.Lang.str_t), Layout(c_abi)]
+pub partial struct str : IEquatable<str>, IIndexGet<usize, u8>, IReference {
+    *RawStorageBundle<u8>;
+    *ContiguousViewFacet<u8>;
+
+    pub pure:
+        fn as_bytes() -> slice<u8> => slice<u8> { data: .data, len: .len };
+
+        op [] (idx: usize) -> u8 => .data[idx];
+
+        op [] (r: range<usize>) -> str => str {
+            data: .data + r.start,
+            len:  r.end - r.start,
+        };
+
+        op == (rhs: str) -> bool {
+            if .len != rhs.len { return false; }
+            var idx: usize = 0;
+            loop {
+                if !(idx < .len) { break; }
+                if .data[idx] != rhs.data[idx] { return false; }
+                idx = idx + 1;
+            }
+            return true;
+        }
+
+        fn get_enumerator() -> SliceEnumerator<u8> => .as_bytes().get_enumerator();
+}

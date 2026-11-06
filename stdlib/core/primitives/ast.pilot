@@ -1,0 +1,16 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/ast.pilot
+// HOMOICONIC ABSTRACT SYNTAX TREE NODE REPRESENTATION (`ast<TReturn>`, 0b00 IValue)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Ast;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(29, "Homoiconic abstract syntax tree node representation.")]
+[Lang(Cfg.Lang.ast_t), Layout(c_abi)]
+pub partial struct ast<TReturn: IAnyValue> : IValue {
+    pub node_id: usize;
+}

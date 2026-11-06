@@ -1,0 +1,46 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/array.pilot
+// INLINE FIXED-CAPACITY C-ABI ARRAY (`array<T, N>`, 0b00 IValue)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Array;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Memory::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(27, "Inline fixed-capacity C-ABI array stored contiguously without pointer indirection.")]
+[Lang(Cfg.Lang.array_t), Layout("inline_array")]
+pub partial struct array<T: IAnyValue, N: const usize> : IList<T>, IValue {
+    pub count:    usize { get => N; }
+    pub is_empty: bool  { get => N == 0; }
+
+    pub pure:
+        fn as_ptr() -> ptr<T> => __ssa_cast(Cfg.Ssa.bitcast, ref self, ptr<T>);
+
+        fn as_slice() -> slice<T> => slice<T> {
+            data: .as_ptr(),
+            len:  N,
+        };
+
+        op [] (idx: usize) -> T => .as_ptr()[idx];
+
+        fn contains(item: T) -> bool {
+            var idx: usize = 0;
+            loop {
+                if !(idx < N) { break; }
+                if .as_ptr()[idx] == item { return true; }
+                idx = idx + 1;
+            }
+            return false;
+        }
+
+        fn get_enumerator() -> SliceEnumerator<T> => .as_slice().get_enumerator();
+
+    pub var:
+        op []= (idx: usize, val: T) => { .as_ptr()[idx] = val; }
+        fn add(item: T) {}
+        fn clear() {}
+        fn remove_at(index: usize) {}
+}

@@ -1,0 +1,14 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/never.pilot
+// EMPTY BOTTOM TYPE FOR NON-RETURNING FUNCTIONS & UNREACHABLE BRANCHES
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Never;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(24, "Empty bottom type for non-returning functions and unreachable code branches.")]
+[Lang(Cfg.Lang.never_t), Bits(Cfg.Reg.b0, Cfg.Reg.gpr_u)]
+pub partial struct never : IValue {}

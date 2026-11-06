@@ -1,0 +1,27 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/range.pilot
+// HALF-OPEN INTERVAL DESCRIPTOR (`range<T>` / `start .. end`, 0b00 IValue)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Range;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(28, "Half-open interval `start .. end` iterating from start up to (excluding) end.")]
+[Lang(Cfg.Lang.range_t), Layout(c_abi)]
+pub partial struct range<T: INumber<T>> : IValue {
+    pub start: T;
+    pub end:   T;
+
+    pub pure:
+        fn contains(v: T) -> bool => (v >= .start) && (v < .end);
+        fn step_by(step: T) -> step<T> => step<T> { bounds: self, step_by: step };
+        fn get_enumerator() -> RangeEnumerator<T> => RangeEnumerator<T> {
+            current_val: .start,
+            end_val:     .end,
+            step_val:    1 as T,
+            has_started: false,
+        };
+}

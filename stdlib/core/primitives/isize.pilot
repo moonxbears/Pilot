@@ -1,0 +1,50 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/isize.pilot
+// POINTER-WIDTH SIGNED TWO'S-COMPLEMENT INTEGER HARDWARE SCALAR
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.ISize;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(20, "Pointer-width signed two's-complement integer.")]
+[Lang(Cfg.Lang.isize_t), Bits(Cfg.Reg.b64, Cfg.Reg.gpr_s)]
+pub partial struct isize : INumber<isize>, IBitwiseOperator<isize>, INegOperator<isize> {
+    pub pure:
+        op +   (rhs: isize) -> isize => __ssa(Cfg.Ssa.add,      self, rhs);
+        op -   (rhs: isize) -> isize => __ssa(Cfg.Ssa.sub,      self, rhs);
+        op *   (rhs: isize) -> isize => __ssa(Cfg.Ssa.mul,      self, rhs);
+        op /   (rhs: isize) -> isize => __ssa(Cfg.Ssa.sdiv,     self, rhs);
+        op %   (rhs: isize) -> isize => __ssa(Cfg.Ssa.srem,     self, rhs);
+        op %%  (rhs: isize) -> isize => __ssa(Cfg.Ssa.srem_euc, self, rhs);
+        op +|  (rhs: isize) -> isize => __ssa(Cfg.Ssa.sadd_sat, self, rhs);
+        op -|  (rhs: isize) -> isize => __ssa(Cfg.Ssa.ssub_sat, self, rhs);
+        op *|  (rhs: isize) -> isize => __ssa(Cfg.Ssa.smul_sat, self, rhs);
+        op +%  (rhs: isize) -> isize => __ssa(Cfg.Ssa.add_wrap, self, rhs);
+        op -%  (rhs: isize) -> isize => __ssa(Cfg.Ssa.sub_wrap, self, rhs);
+        op *%  (rhs: isize) -> isize => __ssa(Cfg.Ssa.mul_wrap, self, rhs);
+        op -   ()           -> isize => __ssa_unary(Cfg.Ssa.neg, self);
+        op &   (rhs: isize) -> isize => __ssa(Cfg.Ssa.and_b,    self, rhs);
+        op |   (rhs: isize) -> isize => __ssa(Cfg.Ssa.or_b,     self, rhs);
+        op ^   (rhs: isize) -> isize => __ssa(Cfg.Ssa.xor_b,    self, rhs);
+        op ~   ()           -> isize => __ssa_unary(Cfg.Ssa.bitnot, self);
+        op <<  (bits: u32)  -> isize => __ssa(Cfg.Ssa.shl,      self, bits);
+        op >>  (bits: u32)  -> isize => __ssa(Cfg.Ssa.ashr,     self, bits);
+        op ==  (rhs: isize) -> bool  => __ssa(Cfg.Ssa.eq,       self, rhs);
+        op !=  (rhs: isize) -> bool  => __ssa(Cfg.Ssa.ne,       self, rhs);
+        op <   (rhs: isize) -> bool  => __ssa(Cfg.Ssa.slt,      self, rhs);
+        op <=  (rhs: isize) -> bool  => __ssa(Cfg.Ssa.sle,      self, rhs);
+        op >   (rhs: isize) -> bool  => __ssa(Cfg.Ssa.sgt,      self, rhs);
+        op >=  (rhs: isize) -> bool  => __ssa(Cfg.Ssa.sge,      self, rhs);
+        op <=> (rhs: isize) -> order => __ssa(Cfg.Ssa.cmp3_s,   self, rhs);
+        op ..< (rhs: isize) -> range<isize> => range<isize> { start: self, end: rhs };
+        op ..  (rhs: isize) -> range<isize> => range<isize> { start: self, end: rhs };
+        op ..= (rhs: isize) -> span<isize>  => span<isize>  { start: self, end: rhs };
+        fn step_by(step: isize) -> step<isize> => step<isize> { bounds: range<isize> { start: self, end: self }, step_by: step };
+        fn abs() -> isize {
+            if self < 0 { return -self; }
+            return self;
+        }
+}

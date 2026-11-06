@@ -1,0 +1,27 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/f64.pilot
+// 64-BIT IEEE 754 DOUBLE-PRECISION FLOATING-POINT HARDWARE SCALAR
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.F64;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(22, "64-bit IEEE 754 double-precision floating-point number.")]
+[Lang(Cfg.Lang.f64_t), Bits(Cfg.Reg.b64, Cfg.Reg.simd_f)]
+pub partial struct f64 : INumber<f64>, INegOperator<f64> {
+    pub pure:
+        op +  (rhs: f64) -> f64  => __ssa(Cfg.Ssa.fadd, self, rhs);
+        op -  (rhs: f64) -> f64  => __ssa(Cfg.Ssa.fsub, self, rhs);
+        op *  (rhs: f64) -> f64  => __ssa(Cfg.Ssa.fmul, self, rhs);
+        op /  (rhs: f64) -> f64  => __ssa(Cfg.Ssa.fdiv, self, rhs);
+        op -  ()         -> f64  => __ssa_unary(Cfg.Ssa.fneg, self);
+        op == (rhs: f64) -> bool => __ssa(Cfg.Ssa.feq,  self, rhs);
+        op != (rhs: f64) -> bool => !(__ssa(Cfg.Ssa.feq, self, rhs));
+        op <  (rhs: f64) -> bool => __ssa(Cfg.Ssa.flt,  self, rhs);
+        op <= (rhs: f64) -> bool => __ssa(Cfg.Ssa.fle,  self, rhs);
+        op >  (rhs: f64) -> bool => !(__ssa(Cfg.Ssa.fle, self, rhs));
+        op >= (rhs: f64) -> bool => !(__ssa(Cfg.Ssa.flt, self, rhs));
+}

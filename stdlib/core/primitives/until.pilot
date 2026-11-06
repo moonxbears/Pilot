@@ -1,0 +1,16 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/until.pilot
+// HALF-BOUNDED SLICE DESCRIPTOR (`until<T>`, 0b00 IValue)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Until;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(28, "Half-bounded slice descriptor spanning from the beginning until the given index.")]
+[Lang(Cfg.Lang.until_t), Layout(c_abi)]
+pub partial struct until<T: IValue> : IValue {
+    pub end: T;
+}

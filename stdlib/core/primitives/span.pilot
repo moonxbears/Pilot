@@ -1,0 +1,26 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/span.pilot
+// CLOSED INTERVAL DESCRIPTOR (`span<T>` / `start ..= end`, 0b00 IValue)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Span;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(28, "Closed interval `start ..= end` iterating from start up to and including end.")]
+[Lang(Cfg.Lang.span_t), Layout(c_abi)]
+pub partial struct span<T: INumber<T>> : IValue {
+    pub start: T;
+    pub end:   T;
+
+    pub pure:
+        fn contains(v: T) -> bool => (v >= .start) && (v <= .end);
+        fn get_enumerator() -> SpanEnumerator<T> => SpanEnumerator<T> {
+            current_val: .start,
+            end_val:     .end,
+            step_val:    1 as T,
+            has_started: false,
+        };
+}

@@ -1,0 +1,14 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/full.pilot
+// FULL UNBOUNDED SLICE DESCRIPTOR (`full`, 0b00 IValue)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Full;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(28, "Full unbounded slice descriptor spanning the entire underlying buffer.")]
+[Lang(Cfg.Lang.full_t), Layout(c_abi)]
+pub partial struct full : IValue {}

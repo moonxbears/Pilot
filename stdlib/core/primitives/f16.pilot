@@ -1,0 +1,27 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/f16.pilot
+// 16-BIT IEEE 754 HALF-PRECISION FLOATING-POINT HARDWARE SCALAR
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.F16;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(22, "16-bit IEEE 754 half-precision floating-point number.")]
+[Lang(Cfg.Lang.f16_t), Bits(Cfg.Reg.b16, Cfg.Reg.simd_f)]
+pub partial struct f16 : INumber<f16>, INegOperator<f16> {
+    pub pure:
+        op +  (rhs: f16) -> f16  => __ssa(Cfg.Ssa.fadd, self, rhs);
+        op -  (rhs: f16) -> f16  => __ssa(Cfg.Ssa.fsub, self, rhs);
+        op *  (rhs: f16) -> f16  => __ssa(Cfg.Ssa.fmul, self, rhs);
+        op /  (rhs: f16) -> f16  => __ssa(Cfg.Ssa.fdiv, self, rhs);
+        op -  ()         -> f16  => __ssa_unary(Cfg.Ssa.fneg, self);
+        op == (rhs: f16) -> bool => __ssa(Cfg.Ssa.feq,  self, rhs);
+        op != (rhs: f16) -> bool => !(__ssa(Cfg.Ssa.feq, self, rhs));
+        op <  (rhs: f16) -> bool => __ssa(Cfg.Ssa.flt,  self, rhs);
+        op <= (rhs: f16) -> bool => __ssa(Cfg.Ssa.fle,  self, rhs);
+        op >  (rhs: f16) -> bool => !(__ssa(Cfg.Ssa.fle, self, rhs));
+        op >= (rhs: f16) -> bool => !(__ssa(Cfg.Ssa.flt, self, rhs));
+}

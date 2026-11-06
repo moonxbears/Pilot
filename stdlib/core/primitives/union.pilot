@@ -1,0 +1,18 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/union.pilot
+// TAGGED UNION VARIANT COMPOSITE (`union<T1, T2>` / `T1 | T2`, 0b00 IValue)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Union;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(29, "Tagged union variant storing a discriminant byte alongside payload storage.")]
+[Lang(Cfg.Lang.union_t), Layout(c_abi)]
+pub partial struct union<T1: IAnyValue, T2: IAnyValue> : IValue {
+    pub tag: u8;
+    pub v1:  T1;
+    pub v2:  T2;
+}

@@ -1,0 +1,17 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/pairs.pilot
+// STRUCTURAL KEY-VALUE UNPACK CARRIER (`pairs<K, V>`, 0b01 IReference)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Pairs;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Memory::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(29, "Compile-time structural key-value unpack operator carrier.")]
+[Lang(Cfg.Lang.pairs_t), Layout(c_abi)]
+pub partial struct pairs<K: IEquatable<K>, V: IAnyValue> : IReference {
+    pub entries: map<K, V>;
+}

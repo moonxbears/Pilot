@@ -1,0 +1,24 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/ptr.pilot
+// RAW 64-BIT ADDRESS REGISTER POINTER (`ptr<T>`, 0b01 IReference)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Ptr;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(26, "Raw 64-bit untracked address register pointer.")]
+[Lang(Cfg.Lang.ptr_t), Bits(Cfg.Reg.b64, Cfg.Reg.raw_ptr)]
+pub partial struct ptr<T: IAnyValue> : IIndexGet<usize, T>, IIndexSet<usize, T>, IEquatable<ptr<T>>, IReference {
+    pub pure:
+        op []  (idx: usize)    -> T      => __ssa_load(__ssa_gep(self, idx));
+        op +   (offset: usize) -> ptr<T> => __ssa_gep(self, offset);
+        op -   (offset: usize) -> ptr<T> => __ssa_gep(self, 0 - offset);
+        op ==  (rhs: ptr<T>)   -> bool   => __ssa(Cfg.Ssa.eq, self, rhs);
+        fn is_null()           -> bool   => (__ssa_cast(Cfg.Ssa.bitcast, self, usize)) == 0;
+
+    pub var:
+        op []= (idx: usize, v: T)        => __ssa_store(__ssa_gep(self, idx), v);
+}

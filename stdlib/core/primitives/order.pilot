@@ -1,0 +1,25 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/order.pilot
+// THREE-WAY COMPARISON ORDERING RESULT (`order`: -1 Less, 0 Equal, +1 Greater)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Order;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(28, "Three-way comparison ordering result (-1 Less, 0 Equal, +1 Greater).")]
+[Lang(Cfg.Lang.order_t), Bits(Cfg.Reg.b8, Cfg.Reg.gpr_s)]
+pub partial struct order : IEquatable<order>, IComparable<order>, IValue {
+    pub pure:
+        fn is_lt() -> bool => (self as i8) < 0;
+        fn is_eq() -> bool => (self as i8) == 0;
+        fn is_gt() -> bool => (self as i8) > 0;
+        op == (rhs: order) -> bool => (self as i8) == (rhs as i8);
+        op != (rhs: order) -> bool => (self as i8) != (rhs as i8);
+        op <  (rhs: order) -> bool => (self as i8) <  (rhs as i8);
+        op <= (rhs: order) -> bool => (self as i8) <= (rhs as i8);
+        op >  (rhs: order) -> bool => (self as i8) >  (rhs as i8);
+        op >= (rhs: order) -> bool => (self as i8) >= (rhs as i8);
+}

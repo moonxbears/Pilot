@@ -1,0 +1,16 @@
+// =========================================================================
+// FILE: stdlib/core/primitives/type.pilot
+// TYPE REFLECTION METADATA DESCRIPTOR (`type`, 0b00 IValue)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Type;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+[KeywordDefAttr(29, "Compile-time or runtime type reflection descriptor.")]
+[Lang(Cfg.Lang.type_t), Layout(c_abi)]
+pub partial struct type : IValue {
+    pub id: usize;
+}
