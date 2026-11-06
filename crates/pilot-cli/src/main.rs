@@ -371,11 +371,13 @@ fn cmd_ide_sync() {
     println!("Evaluating selfhost/ide_sync.pilot via bootstrapped Pilot compiler...");
     if let Ok(src) = fs::read_to_string("selfhost/ide_sync.pilot") {
         let arena = parse(&src);
+        let (flat, syms) = pilot_analysis::flatten_ast(&arena, arena.root);
+        let mut registry = pilot_analysis::PhysicsRegistry::new(flat, syms);
+        registry.lsp_method = "ide-sync".to_string();
+        let reg_ptr = &mut registry as *mut pilot_analysis::PhysicsRegistry;
         let mut vm = pilot_vm::PilVirtualMachine::new();
-        vm.engine_handler = Some(Box::new(|name, args| {
-            if name == "lsp_query_method" {
-                Ok(pilot_rt::PilotVal::from_str("ide-sync"))
-            } else if name == "fs_write_text" && args.len() >= 2 {
+        vm.engine_handler = Some(Box::new(move |name, args| {
+            if name == "fs_write_text" && args.len() >= 2 {
                 let path = args[0].to_string_repr();
                 let content = args[1].to_string_repr();
                 if let Some(parent) = Path::new(&path).parent() {
@@ -388,7 +390,8 @@ fn cmd_ide_sync() {
                 let content = fs::read_to_string(&path).unwrap_or_default();
                 Ok(pilot_rt::PilotVal::from_str(&content))
             } else {
-                Ok(pilot_rt::PilotVal::NULL)
+                let reg = unsafe { &mut *reg_ptr };
+                pilot_analysis::handle_engine_intrinsic(reg, name, args)
             }
         }));
         let chunk = pilot_vm::BytecodeCompiler::compile(&arena, arena.root);

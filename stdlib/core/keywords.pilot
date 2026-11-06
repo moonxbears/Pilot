@@ -1,0 +1,469 @@
+// =========================================================================
+// FILE: stdlib/core/keywords.pilot
+// 100% PILOT-HOSTED DECLARATIVE KEYWORD CATALOG & OPEN CATEGORY TAXONOMY
+// The Rust compiler has zero prior knowledge of non-seed keyword names
+// or descriptions; it reflects them solely through these attributes.
+// =========================================================================
+pub pkg Pilot.Core.Keywords;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+
+// =========================================================================
+// 1. ATTRIBUTES FOR CATEGORY DEFINITIONS & KEYWORD DECLARATIONS
+// =========================================================================
+
+[Layout(c_abi)]
+pub struct KeywordCategoryDefAttr : IAttribute, IValue {
+    pub id:          i32;
+    pub scope:       str;
+    pub hover_badge: str;
+    pub lsp_kind:    i32;
+    pub weight:      i32;
+
+    pub static pure fn create(id: i32, scope: str, hover_badge: str, lsp_kind: i32) -> KeywordCategoryDefAttr => KeywordCategoryDefAttr {
+        id:          id,
+        scope:       scope,
+        hover_badge: hover_badge,
+        lsp_kind:    lsp_kind,
+        weight:      10,
+    };
+}
+
+[Layout(c_abi)]
+pub struct KeywordDefAttr : IAttribute, IValue {
+    pub category: i32;
+    pub doc:      str;
+    pub suffix:   str;
+    pub weight:   i32;
+
+    pub static pure fn create(category: i32, doc: str) -> KeywordDefAttr => KeywordDefAttr {
+        category: category,
+        doc:      doc,
+        suffix:   "",
+        weight:   10,
+    };
+
+    pub static pure fn with_suffix(category: i32, doc: str, suffix: str) -> KeywordDefAttr => KeywordDefAttr {
+        category: category,
+        doc:      doc,
+        suffix:   suffix,
+        weight:   10,
+    };
+}
+
+// =========================================================================
+// 2. OPEN CATEGORY REGISTRY DECLARATIONS (1..14 Standard, >=100 User-Defined)
+// =========================================================================
+
+[KeywordCategoryDefAttr(0, "keyword.control.seed.pilot", "Hardware Seed", 14)]
+pub struct CatSeed {}
+
+[KeywordCategoryDefAttr(1, "keyword.control.flow.pilot", "Control Flow", 14)]
+pub struct CatControlFlow {}
+
+[KeywordCategoryDefAttr(2, "keyword.declaration.pilot", "Declaration", 14)]
+pub struct CatDeclaration {}
+
+[KeywordCategoryDefAttr(3, "storage.modifier.visibility.pilot", "Visibility", 14)]
+pub struct CatVisibility {}
+
+[KeywordCategoryDefAttr(4, "storage.modifier.pilot", "Modifier", 14)]
+pub struct CatModifier {}
+
+[KeywordCategoryDefAttr(5, "keyword.other.property.pilot", "Property Accessor", 14)]
+pub struct CatPropertyAccessor {}
+
+[KeywordCategoryDefAttr(6, "variable.language.property.pilot", "Language Var", 14)]
+pub struct CatLanguageVar {}
+
+[KeywordCategoryDefAttr(7, "keyword.other.lifecycle.pilot", "Lifecycle", 14)]
+pub struct CatLifecycle {}
+
+[KeywordCategoryDefAttr(8, "keyword.other.contract.pilot", "Contract", 14)]
+pub struct CatContract {}
+
+[KeywordCategoryDefAttr(9, "keyword.other.adapter.pilot", "Adapter / DI", 14)]
+pub struct CatAdapter {}
+
+[KeywordCategoryDefAttr(10, "keyword.other.collision.pilot", "Composition", 14)]
+pub struct CatCollision {}
+
+[KeywordCategoryDefAttr(11, "keyword.control.concurrency.pilot", "Concurrency", 14)]
+pub struct CatConcurrency {}
+
+[KeywordCategoryDefAttr(12, "keyword.control.database.pilot", "Database / LINQ", 14)]
+pub struct CatDatabase {}
+
+[KeywordCategoryDefAttr(13, "keyword.control.foreign.pilot", "Foreign ABI", 14)]
+pub struct CatForeign {}
+
+[KeywordCategoryDefAttr(14, "keyword.other.query.pilot", "Metaprogramming", 14)]
+pub struct CatMetaprogramming {}
+
+// =========================================================================
+// 3. KEYWORD DECLARATIONS WITH ATTACHED METADATA
+// =========================================================================
+
+// Category 0: Hardware Seed Keywords (The strict 14 hardware seed tokens)
+[KeywordDefAttr(0, "Calls directly into the low-level hardware or host runtime engine.")]
+pub struct __engine {}
+
+[KeywordDefAttr(0, "Declares a user-defined record or composite type.")]
+pub struct struct {}
+
+[KeywordDefAttr(0, "Declares a polymorphic contract with zero runtime header overhead.")]
+pub struct interface {}
+
+[KeywordDefAttr(0, "Declares a function or method signature.")]
+pub struct fn {}
+
+[KeywordDefAttr(0, "Declares an immutable variable binding.")]
+pub struct let {}
+
+[KeywordDefAttr(0, "Passes a value by reference.")]
+pub struct ref {}
+
+[KeywordDefAttr(0, "Conditional branching construct.")]
+pub struct if {}
+
+[KeywordDefAttr(0, "Unconditional loop construct.")]
+pub struct loop {}
+
+[KeywordDefAttr(0, "Returns a value from a function.")]
+pub struct return {}
+
+[KeywordDefAttr(0, "Yields a value from a generator or collection block.")]
+pub struct yield {}
+
+[KeywordDefAttr(0, "Schedules cleanup expressions at block exit.")]
+pub struct defer {}
+
+[KeywordDefAttr(0, "Evaluates expressions at compile time.")]
+pub struct comptime {}
+
+[KeywordDefAttr(0, "Captures Pilot AST expressions.")]
+pub struct quote {}
+
+[KeywordDefAttr(0, "Inline hardware assembly instruction block.")]
+pub struct asm {}
+
+// Category 1: Control Flow
+[KeywordDefAttr(1, "Alternative branch for conditional constructs.")]
+pub struct else {}
+
+[KeywordDefAttr(1, "Executes a block while a condition evaluates to true.")]
+pub struct while {}
+
+[KeywordDefAttr(1, "Executes a block until a condition evaluates to true.")]
+pub struct until {}
+
+[KeywordDefAttr(1, "Iterates over a sequence, collection, or range.")]
+pub struct for {}
+
+[KeywordDefAttr(1, "Pattern match or iteration sequence membership test.")]
+pub struct in {}
+
+[KeywordDefAttr(1, "Alternative branch evaluated when a loop terminates without break.")]
+pub struct then {}
+
+[KeywordDefAttr(1, "Terminates execution of the innermost loop or switch.")]
+pub struct break {}
+
+[KeywordDefAttr(1, "Advances execution to the next iteration of the loop.")]
+pub struct continue {}
+
+[KeywordDefAttr(1, "Validates early exit preconditions without nested indentation.")]
+pub struct guard {}
+
+[KeywordDefAttr(1, "Pattern matches against values and variants.")]
+pub struct switch {}
+
+[KeywordDefAttr(1, "Pattern arm inside a switch construct.")]
+pub struct case {}
+
+[KeywordDefAttr(1, "Fallback arm inside a switch construct.")]
+pub struct default {}
+
+[KeywordDefAttr(1, "Begins an exception-handling protected block.")]
+pub struct try {}
+
+[KeywordDefAttr(1, "Catches and handles an exception.")]
+pub struct catch {}
+
+// Category 2: Type Declarations
+[KeywordDefAttr(2, "Declares a mutable variable binding.")]
+pub struct var {}
+
+[KeywordDefAttr(2, "Declares a compile-time constant.")]
+pub struct const {}
+
+[KeywordDefAttr(2, "Declares an enumeration or algebraic data type.")]
+pub struct enum {}
+
+[KeywordDefAttr(2, "Declares an asynchronous concurrent actor.")]
+pub struct actor {}
+
+[KeywordDefAttr(2, "Declares an algebraic typestate.")]
+pub struct state {}
+
+[KeywordDefAttr(2, "Declares a type alias or type construct.")]
+pub struct type {}
+
+// Category 3: Access & Visibility Modifiers
+[KeywordDefAttr(3, "Public visibility modifier accessible from any scope.")]
+pub struct pub {}
+
+[KeywordDefAttr(3, "Private visibility modifier restricted to enclosing type.")]
+pub struct priv {}
+
+[KeywordDefAttr(3, "Protected visibility modifier accessible by derived types.")]
+pub struct prot {}
+
+[KeywordDefAttr(3, "Package visibility modifier restricted to enclosing package.")]
+pub struct pkg {}
+
+[KeywordDefAttr(3, "Internal package visibility modifier.")]
+pub struct int {}
+
+[KeywordDefAttr(3, "File-scoped visibility modifier restricted to enclosing file.")]
+pub struct file {}
+
+[KeywordDefAttr(3, "Extensible visibility modifier allowing external inheritance.")]
+pub struct open {}
+
+[KeywordDefAttr(3, "Exports declarations across module boundaries.")]
+pub struct export {}
+
+[KeywordDefAttr(3, "Compile-time security clearance ring modifier.", "[0-9]*")]
+pub struct lvl {}
+
+// Category 4: Storage & Semantic Modifiers
+[KeywordDefAttr(4, "Designates a function as side-effect free and deterministic.")]
+pub struct pure {}
+
+[KeywordDefAttr(4, "Designates a static type-level member.")]
+pub struct static {}
+
+[KeywordDefAttr(4, "Isolated heap pointer with strictly unique ownership.")]
+pub struct iso {}
+
+[KeywordDefAttr(4, "Allows splitting a type declaration across multiple blocks.")]
+pub struct partial {}
+
+[KeywordDefAttr(4, "Declares an extension method or extension block.")]
+pub struct ext {}
+
+// Category 5: Property Accessors
+[KeywordDefAttr(5, "Property getter accessor.")]
+pub struct get {}
+
+[KeywordDefAttr(5, "Property setter accessor.")]
+pub struct set {}
+
+// Category 6: Language Contextual Variables
+[KeywordDefAttr(6, "Reference to the current instance receiver.")]
+pub struct self {}
+
+[KeywordDefAttr(6, "Synthesized backing storage access inside property getters and setters.")]
+pub struct field {}
+
+[KeywordDefAttr(6, "Incoming setter parameter value inside property setters.")]
+pub struct value {}
+
+// Category 7: Lifecycle & RAII
+[KeywordDefAttr(7, "Defines a lexical lifetime scope block.")]
+pub struct scope {}
+
+[KeywordDefAttr(7, "Scope entry hook for RAII guards.")]
+pub struct enter {}
+
+[KeywordDefAttr(7, "Scope exit hook for RAII guards.")]
+pub struct exit {}
+
+// Category 8: Design by Contract
+[KeywordDefAttr(8, "Function precondition contract requirement.")]
+pub struct requires {}
+
+[KeywordDefAttr(8, "Function postcondition contract guarantee.")]
+pub struct ensures {}
+
+[KeywordDefAttr(8, "Captures expression state prior to function execution.")]
+pub struct old {}
+
+// Category 9: Adapters & Contextual Dependency Injection
+[KeywordDefAttr(9, "Contextual parameter or ambient dependency injection.")]
+pub struct context {}
+
+[KeywordDefAttr(9, "Type adapter declaring implicit or structural conversion.")]
+pub struct adapter {}
+
+[KeywordDefAttr(9, "Performs vectorized call dispatch across collection elements.")]
+pub struct each {}
+
+// Category 10: Bundle Collision Resolution
+[KeywordDefAttr(10, "Coalesces identical fields from multiple spliced bundles.")]
+pub struct coalesce {}
+
+[KeywordDefAttr(10, "Renames spliced bundle members to resolve collisions.")]
+pub struct with {}
+
+[KeywordDefAttr(10, "Excludes specific members from a spliced bundle.")]
+pub struct without {}
+
+[KeywordDefAttr(10, "Casts an expression to a view or target type.")]
+pub struct as {}
+
+// Category 11: Concurrency & Real-Time
+[KeywordDefAttr(11, "Declares an asynchronous coroutine function.")]
+pub struct async {}
+
+[KeywordDefAttr(11, "Suspends coroutine execution until an asynchronous task completes.")]
+pub struct await {}
+
+[KeywordDefAttr(11, "Spawns an asynchronous task or worker thread.")]
+pub struct spawn {}
+
+[KeywordDefAttr(11, "Performs an atomic memory operation.")]
+pub struct atomic {}
+
+[KeywordDefAttr(11, "Synchronizes execution across concurrent threads.")]
+pub struct sync {}
+
+[KeywordDefAttr(11, "Isolates a memory region for concurrent mutation.")]
+pub struct isolate {}
+
+[KeywordDefAttr(11, "Selects over multiple asynchronous channels.")]
+pub struct select {}
+
+[KeywordDefAttr(11, "Sets a timeout limit on an asynchronous operation.")]
+pub struct timeout {}
+
+[KeywordDefAttr(11, "Bounds concurrency or buffer size.")]
+pub struct bounded {}
+
+[KeywordDefAttr(11, "Enforces zero heap allocations within a real-time block.")]
+pub struct noalloc {}
+
+[KeywordDefAttr(11, "Defines a regional memory arena.")]
+pub struct region {}
+
+[KeywordDefAttr(11, "Enforces a hard real-time execution deadline.")]
+pub struct deadline {}
+
+[KeywordDefAttr(11, "Restricts execution duration to a bounded window.")]
+pub struct within {}
+
+[KeywordDefAttr(11, "Schedules a task to execute periodically.")]
+pub struct periodic {}
+
+[KeywordDefAttr(11, "Specifies execution priority for real-time scheduling.")]
+pub struct priority {}
+
+[KeywordDefAttr(11, "Constrains maximum timing jitter in real-time execution.")]
+pub struct jitter {}
+
+// Category 12: Database & Query Comprehensions
+[KeywordDefAttr(12, "Declares a database connection or schema mapping.")]
+pub struct database {}
+
+[KeywordDefAttr(12, "Starts a transactional database execution block.")]
+pub struct transaction {}
+
+[KeywordDefAttr(12, "Commits the active database transaction.")]
+pub struct commit {}
+
+[KeywordDefAttr(12, "Rolls back changes in the active database transaction.")]
+pub struct rollback {}
+
+[KeywordDefAttr(12, "Establishes a savepoint within an active transaction.")]
+pub struct savepoint {}
+
+[KeywordDefAttr(12, "Connects to a database source.")]
+pub struct connect {}
+
+[KeywordDefAttr(12, "Specifies the source table or collection in a query.")]
+pub struct from {}
+
+[KeywordDefAttr(12, "Filters records matching a query predicate.")]
+pub struct where {}
+
+[KeywordDefAttr(12, "Orders query results by specified keys.")]
+pub struct order {}
+
+[KeywordDefAttr(12, "Ascending sort order in query results.")]
+pub struct ascending {}
+
+[KeywordDefAttr(12, "Descending sort order in query results.")]
+pub struct descending {}
+
+[KeywordDefAttr(12, "Inserts new records into a database table.")]
+pub struct insert {}
+
+[KeywordDefAttr(12, "Specifies target table for insert operations.")]
+pub struct into {}
+
+[KeywordDefAttr(12, "Specifies record values for insert operations.")]
+pub struct values {}
+
+[KeywordDefAttr(12, "Updates existing records in a database table.")]
+pub struct update {}
+
+[KeywordDefAttr(12, "Deletes records from a database table.")]
+pub struct delete {}
+
+// Category 13: Foreign ABI & Assembly
+[KeywordDefAttr(13, "Declares a foreign function interface binding.")]
+pub struct extern {}
+
+[KeywordDefAttr(13, "Defines an external assembly module.")]
+pub struct assembly {}
+
+[KeywordDefAttr(13, "Declares or imports a foreign module.")]
+pub struct module {}
+
+[KeywordDefAttr(13, "Links an external dynamic or static library.")]
+pub struct lib {}
+
+// Category 14: Compile-Time Metaprogramming & Queries
+[KeywordDefAttr(14, "Returns byte size of a type at compile time.")]
+pub struct sizeof {}
+
+[KeywordDefAttr(14, "Returns byte alignment of a type at compile time.")]
+pub struct alignof {}
+
+[KeywordDefAttr(14, "Returns byte offset of a field within a type.")]
+pub struct offsetof {}
+
+[KeywordDefAttr(14, "Returns field descriptor metadata of a type.")]
+pub struct fields_of {}
+
+[KeywordDefAttr(14, "Returns the string identifier of a symbol at compile time.")]
+pub struct nameof {}
+
+[KeywordDefAttr(14, "Asserts a condition at runtime or compile time.")]
+pub struct assert {}
+
+[KeywordDefAttr(14, "Declares a structural blueprint pattern.")]
+pub struct blueprint {}
+
+[KeywordDefAttr(14, "Declares a synchronization cue.")]
+pub struct cue {}
+
+[KeywordDefAttr(14, "Declares an actor or component role.")]
+pub struct role {}
+
+[KeywordDefAttr(14, "Declares a message routing rule.")]
+pub struct route {}
+
+[KeywordDefAttr(14, "Declares a standalone compilation unit.")]
+pub struct unit {}
+
+[KeywordDefAttr(14, "Declares a syntax macro transformation rule.")]
+pub struct syntax {}
+
+[KeywordDefAttr(14, "Imports symbols or namespaces from another package.")]
+pub struct use {}
+
+[KeywordDefAttr(14, "Declares an overloaded operator function.")]
+pub struct op {}

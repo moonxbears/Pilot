@@ -705,18 +705,180 @@ pub struct TmLanguageGrammar : IValue {
     }
 }
 
-pub pure fn build_tm_language_model(
+// =========================================================================
+// 4B. DYNAMIC KEYWORD REFLECTION & OPEN CATEGORY TAXONOMY ENGINE
+// =========================================================================
+
+pub struct KeywordInfo : IValue {
+    pub badge: str;
+    pub doc:   str;
+}
+
+pub fn reflect_category_keywords(target_cat_id: i64) -> str {
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var pat = "";
+    var idx = 0;
+    while idx < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, idx);
+        if k == 1 {
+            let ac = __engine("ast_attr_count", idx);
+            if ac == 2 || ac == 3 {
+                let cat = __engine("ast_attr_arg", idx, 0);
+                if cat == target_cat_id {
+                    let sym = __engine(Cfg.ast.ast_node_sym, idx);
+                    let nm = __engine(Cfg.ast.sym_str, sym);
+                    let suffix = if ac == 3 { __engine(Cfg.ast.sym_str, __engine("ast_attr_arg", idx, 2)) } else { "" };
+                    let term = if suffix != "" { nm + suffix + "|" + nm } else { nm };
+                    if pat == "" {
+                        pat = term;
+                    } else {
+                        pat = pat + "|" + term;
+                    }
+                }
+            }
+        }
+        idx = idx + 1;
+    }
+    return pat;
+}
+
+pub fn reflect_keyword_doc(target_word: str) -> str {
+    if target_word == "" {
+        return "";
+    }
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var i = 0;
+    while i < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, i);
+        if k == 1 {
+            let ac = __engine("ast_attr_count", i);
+            if ac == 2 || ac == 3 {
+                let sym = __engine(Cfg.ast.ast_node_sym, i);
+                let nm = __engine(Cfg.ast.sym_str, sym);
+                if nm == target_word {
+                    let doc_sym = __engine("ast_attr_arg", i, 1);
+                    return __engine(Cfg.ast.sym_str, doc_sym);
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return "";
+}
+
+pub fn reflect_keyword_badge(target_word: str) -> str {
+    if target_word == "" {
+        return "Core";
+    }
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var i = 0;
+    var target_cat_id = -1;
+    while i < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, i);
+        if k == 1 {
+            let ac = __engine("ast_attr_count", i);
+            if ac == 2 || ac == 3 {
+                let sym = __engine(Cfg.ast.ast_node_sym, i);
+                let nm = __engine(Cfg.ast.sym_str, sym);
+                if nm == target_word {
+                    target_cat_id = __engine("ast_attr_arg", i, 0);
+                    i = node_count;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    if target_cat_id == -1 {
+        return "Core";
+    }
+    var j = 0;
+    while j < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, j);
+        if k == 1 {
+            let ac = __engine("ast_attr_count", j);
+            if ac == 4 {
+                let cid = __engine("ast_attr_arg", j, 0);
+                if cid == target_cat_id {
+                    let badge_sym = __engine("ast_attr_arg", j, 2);
+                    return __engine(Cfg.ast.sym_str, badge_sym);
+                }
+            }
+        }
+        j = j + 1;
+    }
+    return "Core";
+}
+
+pub fn reflect_keyword_info(target_word: str) -> KeywordInfo {
+    return KeywordInfo {
+        badge: reflect_keyword_badge(target_word),
+        doc:   reflect_keyword_doc(target_word),
+    };
+}
+
+pub fn reflect_related_keywords(kw: str) -> str[] {
+    if kw == "" {
+        return [];
+    }
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var i = 0;
+    var target_cat = -1;
+    while i < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, i);
+        if k == 1 {
+            let ac = __engine("ast_attr_count", i);
+            if ac == 2 || ac == 3 {
+                let sym = __engine(Cfg.ast.ast_node_sym, i);
+                let nm = __engine(Cfg.ast.sym_str, sym);
+                if nm == kw {
+                    target_cat = __engine("ast_attr_arg", i, 0);
+                    i = node_count;
+                }
+            }
+        }
+        i = i + 1;
+    }
+
+    if target_cat == -1 {
+        return [];
+    }
+
+    var related: str[] = [];
+    var rel_count = 0;
+    var j = 0;
+    while j < node_count && rel_count < 5 {
+        let k = __engine(Cfg.ast.ast_node_kind, j);
+        if k == 1 {
+            let ac = __engine("ast_attr_count", j);
+            if ac == 2 || ac == 3 {
+                let cid = __engine("ast_attr_arg", j, 0);
+                if cid == target_cat {
+                    let sym = __engine(Cfg.ast.ast_node_sym, j);
+                    let nm = __engine(Cfg.ast.sym_str, sym);
+                    if nm != kw {
+                        related = related + [nm];
+                        rel_count = rel_count + 1;
+                    }
+                }
+            }
+        }
+        j = j + 1;
+    }
+    return related;
+}
+
+pub fn build_tm_language_model(
     seed_keywords_regex:   str,
     syntax_macros_regex:   str,
     modifiers_regex:       str,
     lang_primitives_regex: str,
     operators_regex:       str
 ) -> TmLanguageGrammar {
-    let seed_pat = if len(seed_keywords_regex) > 0 { seed_keywords_regex } else { "__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm" };
-    let mod_pat  = if len(modifiers_regex) > 0 { modifiers_regex } else { "const|export|ext|file|int|iso|lvl|partial|pkg|priv|pub|pure|static|var|lvl[0-9]+" };
-    let prim_pat = if len(lang_primitives_regex) > 0 { lang_primitives_regex } else { "void|never|bool|char|i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|f16|f32|f64|f128|str|ptr|slice|stride|array|tuple|option|result|union|range|span|step|from|until|full|splat|pairs|expand|map|frame|type|ast" };
-    let op_pat   = if len(operators_regex) > 0 { operators_regex } else { "%%|\\*%|\\*\\?|\\*\\||\\+%|\\+\\?|\\+\\||-%|-\\?|-\\||<<|>>|~>|%|&|\\+|-|/|\\^|\\||~" };
-    let syn_pat  = if len(syntax_macros_regex) > 0 { syntax_macros_regex } else { "syntax|quote|macro" };
+    let seed_pat = if seed_keywords_regex != "" { seed_keywords_regex } else { reflect_category_keywords(0) };
+    let mod_pat  = if modifiers_regex != "" { modifiers_regex } else { reflect_category_keywords(4) };
+    let prim_pat = if lang_primitives_regex != "" { lang_primitives_regex } else { "void|never|bool|char|i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|f16|f32|f64|f128|str|ptr|slice|stride|array|tuple|option|result|union|range|span|step|from|until|full|splat|pairs|expand|map|frame|type|ast" };
+    let op_pat   = if operators_regex != "" { operators_regex } else { "%%|\\*%|\\*\\?|\\*\\||\\+%|\\+\\?|\\+\\||-%|-\\?|-\\||<<|>>|~>|%|&|\\+|-|/|\\^|\\||~" };
+    let syn_pat  = if syntax_macros_regex != "" { syntax_macros_regex } else { "syntax|quote|macro" };
 
     return TmLanguageGrammar {
         schema:     "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
@@ -963,24 +1125,11 @@ pub pure fn build_tm_language_model(
                     ),
                     tm_match("keyword.control.syntax.pilot", f"\\b({syn_pat})\\b"),
                     tm_match("keyword.control.seed.pilot", f"\\b({seed_pat})\\b"),
-                    tm_match("keyword.control.flow.pilot", "\\b(if|else|while|until|for|in|then|loop|break|continue|return|yield|defer|switch|case|default|guard|try|catch)\\b"),
-                    tm_match("keyword.declaration.pilot", "\\b(struct|interface|enum|actor|state|type|fn|let|var|ref|const)\\b"),
-                    tm_match("keyword.other.property.pilot", "\\b(get|set)\\b"),
-                    tm_match("variable.language.property.pilot", "\\b(field|value)\\b"),
-                    tm_match("keyword.other.lifecycle.pilot", "\\b(scope|enter|exit)\\b"),
-                    tm_match("keyword.other.contract.pilot", "\\b(requires|ensures|old)\\b"),
-                    tm_match("keyword.other.adapter.pilot", "\\b(context|adapter|each)\\b"),
-                    tm_match("keyword.other.collision.pilot", "\\b(coalesce|with|without|as)\\b"),
-                    tm_match("keyword.control.concurrency.pilot", "\\b(async|await|spawn|atomic|sync|isolate|select|timeout|bounded|noalloc|region|deadline|within|periodic|priority|jitter)\\b"),
-                    tm_match("keyword.control.database.pilot", "\\b(database|transaction|commit|rollback|savepoint|connect|from|where|order|ascending|descending|insert|into|values|update|delete)\\b"),
-                    tm_match("keyword.control.foreign.pilot", "\\b(extern|assembly|module|lib)\\b"),
-                    tm_match("keyword.other.query.pilot", "\\b(sizeof|alignof|offsetof|fields_of|nameof|assert|blueprint|cue|role|route|unit|pkg|use|ext|op)\\b"),
                 ],
             },
             TmSection {
                 name: "modifiers",
                 rules: [
-                    tm_match("storage.modifier.visibility.pilot", "\\b(pub|priv|prot|pkg|int|file|open|export|lvl[0-9]*|lvl)\\b"),
                     tm_match("storage.modifier.pilot", f"\\b({mod_pat})\\b"),
                 ],
             },
@@ -1374,39 +1523,51 @@ pure fn tm_declarations_section() -> str => "    \"declarations\": {\n" +
     "      ]\n" +
     "    }";
 
-pure fn tm_keywords_section(seed_pat: str, syn_pat: str) -> str => "    \"keywords\": {\n" +
-    "      \"patterns\": [\n" +
-    "        {\n" +
-    "          \"name\": \"meta.syntax.declaration.type-construct.pilot\",\n" +
-    "          \"match\": \"\\\\b(syntax)\\\\s+(type_construct)\\\\b\",\n" +
-    "          \"captures\": {\n" +
-    "            \"1\": { \"name\": \"keyword.control.syntax.pilot\" },\n" +
-    "            \"2\": { \"name\": \"keyword.control.type-construct.pilot\" }\n" +
-    "          }\n" +
-    "        },\n" +
-    "        { \"name\": \"keyword.control.syntax.pilot\", \"match\": \"\\\\b(" + syn_pat + ")\\\\b\" },\n" +
-    "        { \"name\": \"keyword.control.seed.pilot\", \"match\": \"\\\\b(" + seed_pat + ")\\\\b\" },\n" +
-    "        { \"name\": \"keyword.control.flow.pilot\", \"match\": \"\\\\b(if|else|while|until|for|in|then|loop|break|continue|return|yield|defer|switch|case|default|guard|try|catch)\\\\b\" },\n" +
-    "        { \"name\": \"keyword.declaration.pilot\", \"match\": \"\\\\b(struct|interface|enum|actor|state|type|fn|let|var|ref|const)\\\\b\" },\n" +
-    "        { \"name\": \"keyword.other.property.pilot\", \"match\": \"\\\\b(get|set)\\\\b\" },\n" +
-    "        { \"name\": \"variable.language.property.pilot\", \"match\": \"\\\\b(field|value)\\\\b\" },\n" +
-    "        { \"name\": \"keyword.other.lifecycle.pilot\", \"match\": \"\\\\b(scope|enter|exit)\\\\b\" },\n" +
-    "        { \"name\": \"keyword.other.contract.pilot\", \"match\": \"\\\\b(requires|ensures|old)\\\\b\" },\n" +
-    "        { \"name\": \"keyword.other.adapter.pilot\", \"match\": \"\\\\b(context|adapter|each)\\\\b\" },\n" +
-    "        { \"name\": \"keyword.other.collision.pilot\", \"match\": \"\\\\b(coalesce|with|without|as)\\\\b\" },\n" +
-    "        { \"name\": \"keyword.control.concurrency.pilot\", \"match\": \"\\\\b(async|await|spawn|atomic|sync|isolate|select|timeout|bounded|noalloc|region|deadline|within|periodic|priority|jitter)\\\\b\" },\n" +
-    "        { \"name\": \"keyword.control.database.pilot\", \"match\": \"\\\\b(database|transaction|commit|rollback|savepoint|connect|from|where|order|ascending|descending|insert|into|values|update|delete)\\\\b\" },\n" +
-    "        { \"name\": \"keyword.control.foreign.pilot\", \"match\": \"\\\\b(extern|assembly|module|lib)\\\\b\" },\n" +
-    "        { \"name\": \"keyword.other.query.pilot\", \"match\": \"\\\\b(sizeof|alignof|offsetof|fields_of|nameof|assert|blueprint|cue|role|route|unit|pkg|use|ext|op)\\\\b\" }\n" +
-    "      ]\n" +
-    "    }";
+fn tm_keywords_section(seed_pat: str, syn_pat: str) -> str {
+    var s = "    \"keywords\": {\n      \"patterns\": [\n" +
+        "        {\n" +
+        "          \"name\": \"meta.syntax.declaration.type-construct.pilot\",\n" +
+        "          \"match\": \"\\\\b(syntax)\\\\s+(type_construct)\\\\b\",\n" +
+        "          \"captures\": {\n" +
+        "            \"1\": { \"name\": \"keyword.control.syntax.pilot\" },\n" +
+        "            \"2\": { \"name\": \"keyword.control.type-construct.pilot\" }\n" +
+        "          }\n" +
+        "        },\n" +
+        "        { \"name\": \"keyword.control.syntax.pilot\", \"match\": \"\\\\b(" + syn_pat + ")\\\\b\" },\n" +
+        "        { \"name\": \"keyword.control.seed.pilot\", \"match\": \"\\\\b(" + seed_pat + ")\\\\b\" }";
 
-pure fn tm_modifiers_section(mod_pat: str) -> str => "    \"modifiers\": {\n" +
-    "      \"patterns\": [\n" +
-    "        { \"name\": \"storage.modifier.visibility.pilot\", \"match\": \"\\\\b(pub|priv|prot|pkg|int|file|open|export|lvl[0-9]*|lvl)\\\\b\" },\n" +
-    "        { \"name\": \"storage.modifier.pilot\", \"match\": \"\\\\b(" + mod_pat + ")\\\\b\" }\n" +
-    "      ]\n" +
-    "    }";
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var i = 0;
+    while i < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, i);
+        if k == 1 {
+            let ac = __engine("ast_attr_count", i);
+            if ac == 4 {
+                let cid = __engine("ast_attr_arg", i, 0);
+                if cid != 0 && cid != 3 && cid != 4 {
+                    let scope = __engine(Cfg.ast.sym_str, __engine("ast_attr_arg", i, 1));
+                    let pat = reflect_category_keywords(cid);
+                    if pat != "" {
+                        s = s + ',\n        { "name": "' + scope + '", "match": "\\\\b(' + pat + ')\\\\b" }';
+                    }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    s = s + "\n      ]\n    }";
+    return s;
+}
+
+fn tm_modifiers_section(mod_pat: str) -> str {
+    let vis_pat = reflect_category_keywords(3);
+    var s = "    \"modifiers\": {\n      \"patterns\": [\n";
+    if vis_pat != "" {
+        s = s + "        { \"name\": \"storage.modifier.visibility.pilot\", \"match\": \"\\\\b(" + vis_pat + ")\\\\b\" },\n";
+    }
+    s = s + "        { \"name\": \"storage.modifier.pilot\", \"match\": \"\\\\b(" + mod_pat + ")\\\\b\" }\n      ]\n    }";
+    return s;
+}
 
 pure fn tm_primitives_section(prim_pat: str) -> str => "    \"primitives\": {\n" +
     "      \"patterns\": [\n" +
@@ -1517,18 +1678,18 @@ pure fn tm_variables_section() -> str => "    \"variables\": {\n" +
     "      ]\n" +
     "    }";
 
-pub pure fn build_tm_language_json(
+pub fn build_tm_language_json(
     seed_keywords_regex:   str,
     syntax_macros_regex:   str,
     modifiers_regex:       str,
     lang_primitives_regex: str,
     operators_regex:       str
 ) -> str {
-    let seed_pat = if len(seed_keywords_regex) > 0 { seed_keywords_regex } else { "__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm" };
-    let mod_pat  = if len(modifiers_regex) > 0 { modifiers_regex } else { "const|export|ext|file|int|iso|lvl|partial|pkg|priv|pub|pure|static|var|lvl[0-9]+" };
-    let prim_pat = if len(lang_primitives_regex) > 0 { lang_primitives_regex } else { "void|never|bool|char|i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|f16|f32|f64|f128|str|ptr|slice|stride|array|tuple|option|result|union|range|span|step|from|until|full|splat|pairs|expand|map|frame|type|ast" };
-    let op_pat   = if len(operators_regex) > 0 { operators_regex } else { "%%|\\*%|\\*\\?|\\*\\||\\+%|\\+\\?|\\+\\||-%|-\\?|-\\||<<|>>|~>|%|&|\\+|-|/|\\^|\\||~" };
-    let syn_pat  = if len(syntax_macros_regex) > 0 { syntax_macros_regex } else { "syntax|quote|macro" };
+    let seed_pat = if seed_keywords_regex != "" { seed_keywords_regex } else { reflect_category_keywords(0) };
+    let mod_pat  = if modifiers_regex != "" { modifiers_regex } else { reflect_category_keywords(4) };
+    let prim_pat = if lang_primitives_regex != "" { lang_primitives_regex } else { "void|never|bool|char|i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|f16|f32|f64|f128|str|ptr|slice|stride|array|tuple|option|result|union|range|span|step|from|until|full|splat|pairs|expand|map|frame|type|ast" };
+    let op_pat   = if operators_regex != "" { operators_regex } else { "%%|\\*%|\\*\\?|\\*\\||\\+%|\\+\\?|\\+\\||-%|-\\?|-\\||<<|>>|~>|%|&|\\+|-|/|\\^|\\||~" };
+    let syn_pat  = if syntax_macros_regex != "" { syntax_macros_regex } else { "syntax|quote|macro" };
 
     var s = "{\n  \"$schema\": \"https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json\",\n  \"name\": \"Pilot\",\n  \"scopeName\": \"source.pilot\",\n  \"patterns\": " + tm_patterns_list() + ",\n  \"repository\": {\n";
     s = s + tm_comments_section() + ",\n";
@@ -1583,10 +1744,7 @@ pub pure fn nameof(sym: str) -> str => sym;
 // Pilot-Hosted Legacy-to-Canonical Syntax Migration Table (Used by `pilot fmt --migrate-syntax`)
 pub pure fn syntax_migration_pairs() -> tuple<str, str>[] => [
     ("def",       nameof(fn)),
-    ("mut",       nameof(var)),
-    ("match",     nameof(switch)),
     ("protocol",  nameof(interface)),
-    ("extension", "ext"),
 ];
 
 // =========================================================================
@@ -1611,52 +1769,24 @@ pub struct HoverOverloadModel : IValue {
     pub doc:       str;
 }
 
-pub pure fn get_related_keywords(kw: str) -> str[] {
-    switch kw {
-        case nameof(guard):     return [nameof(else), nameof(return), nameof(break), "throw"];
-        case nameof(switch):    return [nameof(case), nameof(default), "when", nameof(break)];
-        case nameof(case):      return [nameof(switch), "when", nameof(default), nameof(break)];
-        case nameof(default):   return [nameof(switch), nameof(case)];
-        case nameof(if):        return [nameof(else), "then"];
-        case nameof(else):      return [nameof(if), nameof(guard), "then"];
-        case "then":            return [nameof(if), nameof(else)];
-        case nameof(for):       return ["in", nameof(continue), nameof(break), nameof(yield), "then"];
-        case "in":              return [nameof(for), "each"];
-        case nameof(loop):      return [nameof(break), nameof(continue), nameof(return)];
-        case nameof(break):     return [nameof(loop), nameof(for), nameof(switch)];
-        case nameof(continue):  return [nameof(loop), nameof(for)];
-        case nameof(defer):     return ["scope", "enter", "exit", "~self"];
-        case nameof(fn):        return [nameof(pure), nameof(comptime), nameof(return), nameof(yield)];
-        case nameof(return):    return [nameof(fn), nameof(guard), nameof(yield)];
-        case nameof(yield):     return [nameof(fn), nameof(for)];
-        case nameof(let):       return [nameof(var), nameof(ref)];
-        case nameof(var):       return [nameof(let), nameof(ref)];
-        case nameof(ref):       return [nameof(var), nameof(let), nameof(iso), "view"];
-        case nameof(iso):       return [nameof(ref), nameof(pure)];
-        case nameof(pure):      return [nameof(fn), nameof(comptime), nameof(iso)];
-        case nameof(comptime):  return [nameof(fn), nameof(quote), "ast", nameof(pure)];
-        case nameof(quote):     return [nameof(comptime), "ast"];
-        case nameof(struct):    return [nameof(interface), "view", "as"];
-        case nameof(interface): return [nameof(struct), "IValue", "IReference", "IObject", "IGuard"];
-        case nameof(pub):       return [nameof(priv), nameof(prot), nameof(int), nameof(open), nameof(export), nameof(lvl)];
-        case nameof(priv):      return [nameof(pub), nameof(prot), nameof(file), nameof(lvl)];
-        default:                return [];
-    }
+pub fn get_related_keywords(kw: str) -> str[] {
+    return reflect_related_keywords(kw);
 }
 
 pub pure fn format_keyword_hover_markdown(ident: str, domain: str, summary: str) -> str {
     var md = "**Pilot Keyword**: `" + ident + "` (" + domain + ")\n\n" + summary;
     let related = get_related_keywords(ident);
-    if len(related) > 0 {
-        md = md + "\n\n---\n**Related Keywords**: ";
-        var idx = 0;
-        for r in related {
-            if idx > 0 {
-                md = md + " • ";
-            }
-            md = md + "[`" + r + "`](#)";
-            idx = idx + 1;
+    var rel_str = "";
+    var idx = 0;
+    for r in related {
+        if idx > 0 {
+            rel_str = rel_str + " • ";
         }
+        rel_str = rel_str + "[`" + r + "`](#)";
+        idx = idx + 1;
+    }
+    if rel_str != "" {
+        md = md + "\n\n---\n**Related Keywords**: " + rel_str;
     }
     return md;
 }
@@ -1749,45 +1879,9 @@ pub pure fn format_fn_hover_markdown(
 // 8. PILOT-NATIVE LSP REFLECTION, HOVER, COMPLETION & DEFINITION HANDLERS
 // =========================================================================
 
-pub pure fn lookup_keyword_summary(kw: str) -> str {
-    switch kw {
-        case nameof(fn):        return "Declares a function or method signature.";
-        case nameof(let):       return "Declares an immutable variable binding.";
-        case nameof(var):       return "Declares a mutable variable binding.";
-        case nameof(struct):    return "Declares a user-defined record or composite type.";
-        case nameof(interface): return "Declares a polymorphic contract with zero runtime header overhead.";
-        case nameof(if):        return "Conditional branching construct.";
-        case nameof(else):      return "Alternative branch for conditional constructs.";
-        case nameof(for):       return "Iteration loop with support for scalar ranges and iterators.";
-        case nameof(loop):      return "Unconditional loop construct.";
-        case nameof(return):    return "Returns a value from a function.";
-        case nameof(yield):     return "Yields a value from a generator or collection block.";
-        case nameof(defer):     return "Schedules cleanup expressions at block exit.";
-        case nameof(comptime):  return "Evaluates expressions at compile time.";
-        case nameof(quote):     return "Captures Pilot AST expressions.";
-        case nameof(ref):       return "Passes a value by reference.";
-        case nameof(pub):       return "Public visibility modifier.";
-        case nameof(priv):      return "Private visibility modifier.";
-        case nameof(guard):     return "Validates early exit preconditions without nested indentation.";
-        case nameof(switch):    return "Pattern matches against values and variants.";
-        case nameof(case):      return "Pattern arm inside a switch construct.";
-        case nameof(default):   return "Fallback arm inside a switch construct.";
-        case nameof(break):     return "Terminates execution of the innermost loop or switch.";
-        case nameof(continue):  return "Advances execution to the next iteration of the loop.";
-        case nameof(pure):      return "Designates a function as side-effect free and deterministic.";
-        case nameof(asm):       return "Inline hardware assembly instruction block.";
-        case nameof(iso):       return "Isolated heap pointer with strictly unique ownership.";
-        case nameof(open):      return "Extensible visibility modifier allowing external inheritance.";
-        case nameof(export):    return "Exports declarations across module boundaries.";
-        case nameof(file):      return "File-scoped visibility modifier.";
-        case nameof(prot):      return "Protected visibility modifier.";
-        case nameof(int):       return "Internal package visibility modifier.";
-        case nameof(lvl):       return "Compile-time security clearance ring modifier.";
-        case nameof(self):      return "Reference to the current instance receiver.";
-        case nameof(field):     return "Synthesized backing storage access inside property getters and setters.";
-        case nameof(value):     return "Incoming setter parameter value inside property setters.";
-        default:                return "";
-    }
+pub fn lookup_keyword_summary(kw: str) -> str {
+    let info = reflect_keyword_info(kw);
+    return info.doc;
 }
 
 pub fn reflect_node_doc(node_id: i64) -> str {
@@ -1876,13 +1970,6 @@ pub fn handle_lsp_hover(offset: i64) {
         }
     }
     let word = __engine(Cfg.ast.source_slice, w_start, w_end);
-    let kw_summary = lookup_keyword_summary(word);
-    if kw_summary != "" {
-        let md = format_keyword_hover_markdown(word, "Core", kw_summary);
-        __engine(Cfg.ast.lsp_set_result, md);
-        return;
-    }
-
     if word == "" {
         __engine(Cfg.ast.lsp_set_result, "");
         return;
@@ -1904,14 +1991,21 @@ pub fn handle_lsp_hover(offset: i64) {
                     best_len = l;
                     best_nid = i;
                 }
-            } else if best_len > 100000000 && l < best_len {
-                best_nid = i;
             }
         }
         i = i + 1;
     }
 
     if best_nid == -1 {
+        __engine(Cfg.ast.mount_unit, "stdlib/core/keywords.pilot");
+        __engine(Cfg.ast.mount_unit, "../../stdlib/core/keywords.pilot");
+        let doc = reflect_keyword_doc(word);
+        if doc != "" {
+            let badge = reflect_keyword_badge(word);
+            let md = format_keyword_hover_markdown(word, badge, doc);
+            __engine(Cfg.ast.lsp_set_result, md);
+            return;
+        }
         __engine(Cfg.ast.lsp_set_result, "");
         return;
     }
@@ -2271,12 +2365,34 @@ pub fn handle_lsp_definition(offset: i64) {
     __engine(Cfg.ast.lsp_set_result, "null");
 }
 
-pub pure fn is_keyword_or_seed(w: str) -> bool {
-    if w == nameof(struct) || w == nameof(interface) || w == nameof(fn) || w == nameof(let) || w == nameof(var) ||
-       w == nameof(ref) || w == nameof(if) || w == nameof(loop) || w == nameof(return) || w == nameof(yield) ||
-       w == nameof(defer) || w == nameof(comptime) || w == nameof(quote) || w == nameof(asm) ||
-       w == nameof(field) || w == nameof(value) || w == nameof(pub) || w == nameof(priv) || w == "" {
+pub fn is_keyword_or_seed(w: str) -> bool {
+    if w == "" {
         return true;
+    }
+    // 14 Hardware seed tokens
+    if w == nameof(__engine) || w == nameof(struct) || w == nameof(interface) || w == nameof(fn) ||
+       w == nameof(let) || w == nameof(ref) || w == nameof(if) || w == nameof(loop) ||
+       w == nameof(return) || w == nameof(yield) || w == nameof(defer) || w == nameof(comptime) ||
+       w == nameof(quote) || w == nameof(asm) {
+        return true;
+    }
+    __engine(Cfg.ast.mount_unit, "stdlib/core/keywords.pilot");
+    __engine(Cfg.ast.mount_unit, "../../stdlib/core/keywords.pilot");
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var i = 0;
+    while i < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, i);
+        if k == 1 {
+            let ac = __engine("ast_attr_count", i);
+            if ac == 2 || ac == 3 {
+                let sym = __engine(Cfg.ast.ast_node_sym, i);
+                let nm = __engine(Cfg.ast.sym_str, sym);
+                if nm == w {
+                    return true;
+                }
+            }
+        }
+        i = i + 1;
     }
     return false;
 }
@@ -2318,17 +2434,46 @@ pub fn handle_lsp_prepare_rename(offset: i64) {
 }
 
 pub fn handle_lsp_rename(offset: i64, method_str: str) {
-    if method_str == "textDocument/rename:struct" || method_str == "textDocument/rename:interface" ||
-       method_str == "textDocument/rename:fn" || method_str == "textDocument/rename:let" ||
-       method_str == "textDocument/rename:var" || method_str == "textDocument/rename:ref" ||
-       method_str == "textDocument/rename:if" || method_str == "textDocument/rename:loop" ||
-       method_str == "textDocument/rename:return" || method_str == "textDocument/rename:yield" ||
-       method_str == "textDocument/rename:defer" || method_str == "textDocument/rename:comptime" ||
-       method_str == "textDocument/rename:quote" || method_str == "textDocument/rename:asm" ||
-       method_str == "textDocument/rename:field" || method_str == "textDocument/rename:value" {
+    // 1. Rejection for 14 hardware seed keywords
+    if method_str == "textDocument/rename:" + nameof(__engine) ||
+       method_str == "textDocument/rename:" + nameof(struct) ||
+       method_str == "textDocument/rename:" + nameof(interface) ||
+       method_str == "textDocument/rename:" + nameof(fn) ||
+       method_str == "textDocument/rename:" + nameof(let) ||
+       method_str == "textDocument/rename:" + nameof(ref) ||
+       method_str == "textDocument/rename:" + nameof(if) ||
+       method_str == "textDocument/rename:" + nameof(loop) ||
+       method_str == "textDocument/rename:" + nameof(return) ||
+       method_str == "textDocument/rename:" + nameof(yield) ||
+       method_str == "textDocument/rename:" + nameof(defer) ||
+       method_str == "textDocument/rename:" + nameof(comptime) ||
+       method_str == "textDocument/rename:" + nameof(quote) ||
+       method_str == "textDocument/rename:" + nameof(asm) {
         __engine(Cfg.ast.lsp_set_result, "null");
         return;
     }
+
+    // 2. Dynamic rejection for all non-seed keywords reflected from keywords.pilot
+    __engine(Cfg.ast.mount_unit, "stdlib/core/keywords.pilot");
+    __engine(Cfg.ast.mount_unit, "../../stdlib/core/keywords.pilot");
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var i = 0;
+    while i < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, i);
+        if k == 1 {
+            let ac = __engine("ast_attr_count", i);
+            if ac == 2 || ac == 3 {
+                let sym = __engine(Cfg.ast.ast_node_sym, i);
+                let nm = __engine(Cfg.ast.sym_str, sym);
+                if method_str == "textDocument/rename:" + nm {
+                    __engine(Cfg.ast.lsp_set_result, "null");
+                    return;
+                }
+            }
+        }
+        i = i + 1;
+    }
+
     handle_lsp_prepare_rename(offset);
 }
 
@@ -2351,27 +2496,17 @@ if _lsp_method == "textDocument/definition" {
 if _lsp_method == "textDocument/prepareRename" {
     handle_lsp_prepare_rename(_lsp_offset);
 }
-if _lsp_method == "textDocument/rename" ||
-   _lsp_method == "textDocument/rename:struct" || _lsp_method == "textDocument/rename:interface" ||
-   _lsp_method == "textDocument/rename:fn" || _lsp_method == "textDocument/rename:let" ||
-   _lsp_method == "textDocument/rename:var" || _lsp_method == "textDocument/rename:ref" ||
-   _lsp_method == "textDocument/rename:if" || _lsp_method == "textDocument/rename:loop" ||
-   _lsp_method == "textDocument/rename:return" || _lsp_method == "textDocument/rename:yield" ||
-   _lsp_method == "textDocument/rename:defer" || _lsp_method == "textDocument/rename:comptime" ||
-   _lsp_method == "textDocument/rename:quote" || _lsp_method == "textDocument/rename:asm" ||
-   _lsp_method == "textDocument/rename:field" || _lsp_method == "textDocument/rename:value" {
-    handle_lsp_rename(_lsp_offset, _lsp_method);
+if _lsp_method == "ide-sync" || _lsp_method == "" {
+    __engine(Cfg.ast.mount_unit, "stdlib/core/keywords.pilot");
+    __engine(Cfg.ast.mount_unit, "../../stdlib/core/keywords.pilot");
+    let tm_json = build_tm_language_json("", "", "", "", "");
+    let lc_json = build_language_configuration_json();
+    let sn_json = build_snippets_json();
+    __engine("fs_write_text", "vscode-pilot/syntaxes/pilot.tmLanguage.json", tm_json);
+    __engine("fs_write_text", "vscode-pilot/language-configuration.json", lc_json);
+    __engine("fs_write_text", "vscode-pilot/snippets/pilot.json", sn_json);
 } else {
-    if _lsp_method == "ide-sync" || _lsp_method == "" {
-        let tm_json = build_tm_language_json("", "", "", "", "");
-        let lc_json = build_language_configuration_json();
-        let sn_json = build_snippets_json();
-        __engine("fs_write_text", "vscode-pilot/syntaxes/pilot.tmLanguage.json", tm_json);
-        __engine("fs_write_text", "vscode-pilot/language-configuration.json", lc_json);
-        __engine("fs_write_text", "vscode-pilot/snippets/pilot.json", sn_json);
-    } else {
-        if _lsp_method != "textDocument/hover" && _lsp_method != "textDocument/completion" && _lsp_method != "textDocument/definition" && _lsp_method != "textDocument/prepareRename" {
-            handle_lsp_rename(_lsp_offset, _lsp_method);
-        }
+    if _lsp_method != "textDocument/hover" && _lsp_method != "textDocument/completion" && _lsp_method != "textDocument/definition" && _lsp_method != "textDocument/prepareRename" {
+        handle_lsp_rename(_lsp_offset, _lsp_method);
     }
 }

@@ -90,6 +90,10 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
                     if an.node_kind() == NodeKind::IntLit {
                         attr_args.push(arena.i64_pool.get(an.lhs as usize).copied().unwrap_or(0));
                         attr_arg_count += 1;
+                    } else if an.node_kind() == NodeKind::StrLit || an.node_kind() == NodeKind::IdentExpr {
+                        if an.lhs != 0 { symbol_strings.insert(an.lhs, arena.interner.resolve(SymbolId(an.lhs)).to_string()); }
+                        attr_args.push(an.lhs as i64);
+                        attr_arg_count += 1;
                     }
                 }
             }
@@ -241,15 +245,11 @@ pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, ar
             Ok(PilotVal::from_int(registry.layouts.register_hw_header(hdr).0 as i64))
         }
         "layout_scalar" => {
-            let w = args.first().and_then(|v| v.as_int()).unwrap_or(64) as u16;
-            let l = args.get(1).and_then(|v| v.as_int()).unwrap_or(1) as u16;
-            let b = args.get(2).and_then(|v| v.as_int()).unwrap_or(0) as u8;
+            let (w, l, b) = (args.first().and_then(|v| v.as_int()).unwrap_or(64) as u16, args.get(1).and_then(|v| v.as_int()).unwrap_or(1) as u16, args.get(2).and_then(|v| v.as_int()).unwrap_or(0) as u8);
             Ok(PilotVal::from_int(registry.layouts.register_scalar(w, l, b).0 as i64))
         }
         "layout_ptr" => {
-            let target = args.first().and_then(|v| v.as_int()).unwrap_or(0) as u32;
-            let cap = args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as u8;
-            let space = args.get(2).and_then(|v| v.as_int()).unwrap_or(0) as u8;
+            let (target, cap, space) = (args.first().and_then(|v| v.as_int()).unwrap_or(0) as u32, args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as u8, args.get(2).and_then(|v| v.as_int()).unwrap_or(0) as u8);
             Ok(PilotVal::from_int(registry.layouts.register_pointer(LayoutId(target), CapabilityBits(cap), space).0 as i64))
         }
         "layout_aggregate" => {
@@ -337,11 +337,13 @@ pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, ar
             if let Ok(src) = std::fs::read_to_string(&path) {
                 let parsed = pilot_parser::parse(&src);
                 let (flat, syms) = flatten_ast(&parsed, parsed.root);
-                let (offset, links_base) = (registry.arena.nodes.len() as u32, registry.arena.child_links.len() as u32);
+                let (offset, links_base, attrs_base) = (registry.arena.nodes.len() as u32, registry.arena.child_links.len() as u32, registry.arena.attr_args.len() as u32);
                 for c in flat.child_links { registry.arena.child_links.push(c + offset); }
+                registry.arena.attr_args.extend(flat.attr_args);
                 for mut n in flat.nodes {
                     n.node_id += offset;
                     if n.child_count > 0 { n.first_child += links_base; }
+                    if n.attr_arg_count > 0 { n.first_attr_arg += attrs_base; }
                     registry.arena.nodes.push(n);
                 }
                 registry.symbol_strings.extend(syms);

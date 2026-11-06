@@ -443,6 +443,41 @@ pub struct IdeTokenAttr : IIdeTokenAttribute, IValue {
     pub token_mods: u32 { get => .mods; }
 }
 
+[Layout(c_abi)]
+pub struct KeywordCategoryAttr : IAttribute, IValue {
+    pub category: i32;
+    pub weight:   i32;
+
+    pub static pure fn create(category: i32) -> KeywordCategoryAttr => KeywordCategoryAttr {
+        category: category,
+        weight:   10,
+    };
+}
+
+[Layout(c_abi)]
+pub struct KeywordDocAttr : IAttribute, IValue {
+    pub doc:    str;
+    pub weight: i32;
+
+    pub static pure fn create(doc: str) -> KeywordDocAttr => KeywordDocAttr {
+        doc:    doc,
+        weight: 10,
+    };
+}
+
+[Layout(c_abi)]
+pub struct KeywordInfoAttr : IAttribute, IValue {
+    pub category: i32;
+    pub doc:      str;
+    pub weight:   i32;
+
+    pub static pure fn create(category: i32, doc: str) -> KeywordInfoAttr => KeywordInfoAttr {
+        category: category,
+        doc:      doc,
+        weight:   10,
+    };
+}
+
 // Attach `[IdeToken]` to the 4 Lattice Origin Interfaces & `IAttribute` using symbolic constants:
 [IdeToken(kind: LspKind.interface_k(), mods: LspMod.default_lib(), weight: 10)]
 pub partial interface IAnyValue {}

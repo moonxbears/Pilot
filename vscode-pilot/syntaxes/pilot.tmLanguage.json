@@ -274,10 +274,10 @@
         },
         { "name": "keyword.control.syntax.pilot", "match": "\\b(syntax|quote|macro)\\b" },
         { "name": "keyword.control.seed.pilot", "match": "\\b(__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm)\\b" },
-        { "name": "keyword.control.flow.pilot", "match": "\\b(if|else|while|until|for|in|then|loop|break|continue|return|yield|defer|switch|case|default|guard|try|catch)\\b" },
-        { "name": "keyword.declaration.pilot", "match": "\\b(struct|interface|enum|actor|state|type|fn|let|var|ref|const)\\b" },
+        { "name": "keyword.control.flow.pilot", "match": "\\b(else|while|until|for|in|then|break|continue|guard|switch|case|default|try|catch)\\b" },
+        { "name": "keyword.declaration.pilot", "match": "\\b(var|const|enum|actor|state|type)\\b" },
         { "name": "keyword.other.property.pilot", "match": "\\b(get|set)\\b" },
-        { "name": "variable.language.property.pilot", "match": "\\b(field|value)\\b" },
+        { "name": "variable.language.property.pilot", "match": "\\b(self|field|value)\\b" },
         { "name": "keyword.other.lifecycle.pilot", "match": "\\b(scope|enter|exit)\\b" },
         { "name": "keyword.other.contract.pilot", "match": "\\b(requires|ensures|old)\\b" },
         { "name": "keyword.other.adapter.pilot", "match": "\\b(context|adapter|each)\\b" },
@@ -285,13 +285,13 @@
         { "name": "keyword.control.concurrency.pilot", "match": "\\b(async|await|spawn|atomic|sync|isolate|select|timeout|bounded|noalloc|region|deadline|within|periodic|priority|jitter)\\b" },
         { "name": "keyword.control.database.pilot", "match": "\\b(database|transaction|commit|rollback|savepoint|connect|from|where|order|ascending|descending|insert|into|values|update|delete)\\b" },
         { "name": "keyword.control.foreign.pilot", "match": "\\b(extern|assembly|module|lib)\\b" },
-        { "name": "keyword.other.query.pilot", "match": "\\b(sizeof|alignof|offsetof|fields_of|nameof|assert|blueprint|cue|role|route|unit|pkg|use|ext|op)\\b" }
+        { "name": "keyword.other.query.pilot", "match": "\\b(sizeof|alignof|offsetof|fields_of|nameof|assert|blueprint|cue|role|route|unit|syntax|use|op)\\b" }
       ]
     },
     "modifiers": {
       "patterns": [
         { "name": "storage.modifier.visibility.pilot", "match": "\\b(pub|priv|prot|pkg|int|file|open|export|lvl[0-9]*|lvl)\\b" },
-        { "name": "storage.modifier.pilot", "match": "\\b()\\b" }
+        { "name": "storage.modifier.pilot", "match": "\\b(pure|static|iso|partial|ext)\\b" }
       ]
     },
     "primitives": {
