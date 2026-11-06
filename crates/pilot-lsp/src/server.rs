@@ -170,7 +170,12 @@ impl LspServer {
 
         let arena = pilot_parser::parse(src);
         let mut registry = pilot_analysis::analyze_physics_with_source(&arena, arena.root, Some(src), None);
-        registry.lsp_method = method.to_string();
+        registry.lsp_method = if method == "textDocument/rename" {
+            let nn = params.and_then(|p| p.get("newName")).and_then(|n| n.as_str()).unwrap_or("");
+            format!("{}:{}", method, nn)
+        } else {
+            method.to_string()
+        };
         registry.lsp_offset = byte_offset;
 
         let ide_sync_src = std::fs::read_to_string("selfhost/ide_sync.pilot")
@@ -188,11 +193,10 @@ impl LspServer {
             pilot_analysis::handle_engine_intrinsic(reg, op_code, args)
         }));
         vm.run();
-
         let res_str = &registry.lsp_result;
         match method {
             "textDocument/hover" => {
-                if res_str.is_empty() {
+                if res_str.is_empty() || res_str == "null" {
                     JsonValue::Null
                 } else {
                     JsonValue::Object(vec![
@@ -214,9 +218,11 @@ impl LspServer {
                 if res_str.is_empty() || res_str == "null" {
                     JsonValue::Null
                 } else {
-                    let target_word = res_str.as_str();
-                    let s = src.find(target_word).unwrap_or(0) as u32;
-                    let e = s + target_word.len() as u32;
+                    let (s, e) = if let Some((s_str, e_str)) = res_str.split_once(':') {
+                        (s_str.parse().unwrap_or(0), e_str.parse().unwrap_or(0))
+                    } else {
+                        (0, 0)
+                    };
                     let ((sl, sc), (el, ec)) = (to_lsp(s), to_lsp(e));
                     JsonValue::Object(vec![
                         ("uri".to_string(), JsonValue::String(uri.unwrap().to_string())),
@@ -266,8 +272,7 @@ impl LspServer {
             }
             "textDocument/rename" => {
                 let new_name = params.and_then(|p| p.get("newName")).and_then(|n| n.as_str()).unwrap_or("");
-                let seed_kws = ["struct", "interface", "fn", "let", "ref", "if", "loop", "return", "yield", "defer", "comptime", "quote", "asm", "field", "value"];
-                if seed_kws.contains(&new_name) || new_name.is_empty() || res_str.is_empty() || res_str == "null" {
+                if new_name.is_empty() || res_str.is_empty() || res_str == "null" {
                     return JsonValue::Null;
                 }
                 let search_word = res_str.as_str();

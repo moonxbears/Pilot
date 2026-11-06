@@ -325,7 +325,9 @@ comptime {
         },
     };
 }
-
+extern "rust" lib "libphysics" {
+    pub fn __engine(hook_name: str, ...) -> any;
+}
 // =========================================================================
 // STEP 1: DEFINE & BIND CORE `[...]` BRACKET ATTRIBUTES
 // =========================================================================
@@ -472,6 +474,7 @@ pub lvl(Cfg.Tokens.ring_simd) comptime fn {
 
 // Ring 0 (`lvl(0)`): Public Compile-Time Reflection & Introspection Intrinsics
 pub lvl(Cfg.Tokens.ring_public) comptime fn {
+    nameof(sym)                   => sym;
     __is_comptime()               => __engine(Cfg.Hooks.is_comptime);
     sizeof(T)                     => __engine(Cfg.Hooks.t_sizeof, T);
     alignof(T)                    => __engine(Cfg.Hooks.t_alignof, T);

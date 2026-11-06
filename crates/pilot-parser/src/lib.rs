@@ -5481,7 +5481,30 @@ impl<'a> Parser<'a> {
                 } else {
                     raw_content.trim_matches('"').trim_matches('\'')
                 };
-                let sym = self.arena.interner.intern(clean);
+                let unescaped = if clean.contains('\\') {
+                    let mut s = String::with_capacity(clean.len());
+                    let mut chars = clean.chars().peekable();
+                    while let Some(c) = chars.next() {
+                        if c == '\\' {
+                            match chars.next() {
+                                Some('n') => s.push('\n'),
+                                Some('t') => s.push('\t'),
+                                Some('r') => s.push('\r'),
+                                Some('\\') => s.push('\\'),
+                                Some('"') => s.push('"'),
+                                Some('\'') => s.push('\''),
+                                Some(other) => { s.push('\\'); s.push(other); }
+                                None => s.push('\\'),
+                            }
+                        } else {
+                            s.push(c);
+                        }
+                    }
+                    s
+                } else {
+                    clean.to_string()
+                };
+                let sym = self.arena.interner.intern(&unescaped);
                 let flags = if is_fstring { 1 } else { 0 };
                 self.arena.alloc_node(NodeKind::StrLit, flags, span, sym.0, 0)
             }
@@ -6029,21 +6052,36 @@ impl<'a> Parser<'a> {
             self.advance();
         }
 
+        let is_nameof = self.arena.node(callee).node_kind() == NodeKind::IdentExpr
+            && self.arena.interner.resolve(SymbolId(self.arena.node(callee).lhs)) == "nameof";
+
         self.expect(TokenKind::LParen);
         let mut args = Vec::new();
         while !self.at_end() && !self.at(TokenKind::RParen) {
             let start_pos = self.pos;
-            // Support named arguments `param_name = value` or `param_name: value`
-            if self.is_ident_like()
-                && self.pos + 1 < self.tape.len()
-                && (self.tape.kind(self.pos + 1) == TokenKind::Equal || self.tape.kind(self.pos + 1) == TokenKind::Colon)
-            {
-                self.advance(); // consume param_name
-                self.advance(); // consume '=' or ':'
-            }
-            let arg = self.parse_expr();
-            if arg.is_some() {
-                args.push(arg);
+            if is_nameof {
+                let token_span = self.span();
+                let mut txt = String::new();
+                while !self.at_end() && !self.at(TokenKind::RParen) && !self.at(TokenKind::Comma) {
+                    txt.push_str(self.text());
+                    self.advance();
+                }
+                let sym = self.arena.interner.intern(&txt);
+                let str_node = self.arena.alloc_node(NodeKind::StrLit, 0, token_span, sym.0, 0);
+                args.push(str_node);
+            } else {
+                // Support named arguments `param_name = value` or `param_name: value`
+                if self.is_ident_like()
+                    && self.pos + 1 < self.tape.len()
+                    && (self.tape.kind(self.pos + 1) == TokenKind::Equal || self.tape.kind(self.pos + 1) == TokenKind::Colon)
+                {
+                    self.advance(); // consume param_name
+                    self.advance(); // consume '=' or ':'
+                }
+                let arg = self.parse_expr();
+                if arg.is_some() {
+                    args.push(arg);
+                }
             }
             let mut last_was_comma = false;
             if self.at(TokenKind::Comma) {
@@ -6735,6 +6773,18 @@ impl<'a> Parser<'a> {
         } else if self.is_ident_like() || self.at(TokenKind::KwSome) {
             let mut name = self.text().to_string();
             self.advance();
+            if name == "nameof" && self.at(TokenKind::LParen) {
+                self.advance();
+                let mut txt = String::new();
+                while !self.at_end() && !self.at(TokenKind::RParen) && !self.at(TokenKind::Comma) {
+                    txt.push_str(self.text());
+                    self.advance();
+                }
+                self.expect(TokenKind::RParen);
+                let sym = self.arena.interner.intern(&txt);
+                let str_node = self.arena.alloc_node(NodeKind::StrLit, 0, span, sym.0, 0);
+                return self.arena.alloc_node(NodeKind::PatLiteral, 0, span, str_node.0, 0);
+            }
             // Handle pattern alias `sq @ Rectangle(w, h)`
             if self.at(TokenKind::At) {
                 self.advance(); // consume '@'

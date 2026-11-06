@@ -10,6 +10,40 @@ use Pilot.Core.Interfaces.*;
 use Pilot.Core.Memory.*;
 use Pilot.Core.Meta.*;
 
+let Cfg = {
+    ast = {
+        ast_attr_arg: "ast_attr_arg",
+        ast_attr_count: "ast_attr_count",
+        ast_bind_layout: "ast_bind_layout",
+        ast_bind_target: "ast_bind_target",
+        ast_child_at: "ast_child_at",
+        ast_child_count: "ast_child_count",
+        ast_emit_diag: "ast_emit_diag",
+        ast_get_bound_layout: "ast_get_bound_layout",
+        ast_get_bound_target: "ast_get_bound_target",
+        ast_node_count: "ast_node_count",
+        ast_node_kind: "ast_node_kind",
+        ast_node_lit_kind: "ast_node_lit_kind",
+        ast_node_raw_bits: "ast_node_raw_bits",
+        ast_node_sym: "ast_node_sym",
+        ast_span_end: "ast_span_end",
+        ast_span_start: "ast_span_start",
+        layout_aggregate: "layout_aggregate",
+        layout_field_offset: "layout_field_offset",
+        layout_hw_header: "layout_hw_header",
+        layout_metrics: "layout_metrics",
+        layout_ptr: "layout_ptr",
+        layout_scalar: "layout_scalar",
+        layout_union: "layout_union",
+        lsp_query_method: "lsp_query_method",
+        lsp_query_offset: "lsp_query_offset",
+        lsp_set_result: "lsp_set_result",
+        mount_unit: "mount_unit",
+        source_slice: "source_slice",
+        sym_str: "sym_str",
+    }
+};
+
 // =========================================================================
 // 1. JSON ATTRIBUTES & STANDARD SERIALIZATION INTERFACES
 // =========================================================================
@@ -876,26 +910,26 @@ pub struct IdeArtifactsBundle : IValue {
 }
 
 pub pure fn build_all_ide_artifacts() -> IdeArtifactsBundle {
-    let seed_kws   = __registered_symbols(0);
+    let seed_tokens = __registered_symbols(0);
     let syntax_kws = __registered_symbols(1);
     let mod_kws    = __registered_symbols(2);
     let lang_types = __registered_symbols(3);
     let op_syms    = __registered_symbols(4);
 
     return IdeArtifactsBundle {
-        tm_language_json:     build_tm_language_json(seed_kws, syntax_kws, mod_kws, lang_types, op_syms),
+        tm_language_json:     build_tm_language_json(seed_tokens, syntax_kws, mod_kws, lang_types, op_syms),
         language_config_json: build_language_configuration_json(),
         snippets_json:        build_snippets_json(),
         semantic_legend_json: build_semantic_legend_json(),
     };
 }
-
+pub pure fn nameof(sym: str) -> str => sym;
 // Pilot-Hosted Legacy-to-Canonical Syntax Migration Table (Used by `pilot fmt --migrate-syntax`)
 pub pure fn syntax_migration_pairs() -> tuple<str, str>[] => [
-    ("def",       "fn"),
-    ("mut",       "var"),
-    ("match",     "switch"),
-    ("protocol",  "interface"),
+    ("def",       nameof(fn)),
+    ("mut",       nameof(var)),
+    ("match",     nameof(switch)),
+    ("protocol",  nameof(interface)),
     ("extension", "ext"),
 ];
 
@@ -923,39 +957,39 @@ pub struct HoverOverloadModel : IValue {
 
 pub pure fn get_related_keywords(kw: str) -> str[] {
     switch kw {
-        case "guard":     return ["else", "return", "break", "throw"];
-        case "switch":    return ["case", "default", "when", "break"];
-        case "case":      return ["switch", "when", "default", "break"];
-        case "default":   return ["switch", "case"];
-        case "if":        return ["else", "then"];
-        case "else":      return ["if", "guard", "then"];
-        case "then":      return ["if", "else"];
-        case "for":       return ["in", "continue", "break", "yield", "then"];
-        case "in":        return ["for", "each"];
-        case "loop":      return ["break", "continue", "return"];
-        case "break":     return ["loop", "for", "switch"];
-        case "continue":  return ["loop", "for"];
-        case "defer":     return ["scope", "enter", "exit", "~self"];
-        case "fn":        return ["pure", "comptime", "return", "yield"];
-        case "return":    return ["fn", "guard", "yield"];
-        case "yield":     return ["fn", "for"];
-        case "let":       return ["var", "ref"];
-        case "var":       return ["let", "ref"];
-        case "ref":       return ["var", "let", "iso", "view"];
-        case "iso":       return ["ref", "pure"];
-        case "pure":      return ["fn", "comptime", "iso"];
-        case "comptime":  return ["fn", "quote", "ast", "pure"];
-        case "quote":     return ["comptime", "ast"];
-        case "struct":    return ["interface", "view", "as"];
-        case "interface": return ["struct", "IValue", "IReference", "IObject", "IGuard"];
-        case "pub":       return ["priv", "prot", "int", "open", "export", "lvl"];
-        case "priv":      return ["pub", "prot", "file", "lvl"];
-        default:          return [];
+        case nameof(guard):     return [nameof(else), nameof(return), nameof(break), "throw"];
+        case nameof(switch):    return [nameof(case), nameof(default), "when", nameof(break)];
+        case nameof(case):      return [nameof(switch), "when", nameof(default), nameof(break)];
+        case nameof(default):   return [nameof(switch), nameof(case)];
+        case nameof(if):        return [nameof(else), "then"];
+        case nameof(else):      return [nameof(if), nameof(guard), "then"];
+        case "then":            return [nameof(if), nameof(else)];
+        case nameof(for):       return ["in", nameof(continue), nameof(break), nameof(yield), "then"];
+        case "in":              return [nameof(for), "each"];
+        case nameof(loop):      return [nameof(break), nameof(continue), nameof(return)];
+        case nameof(break):     return [nameof(loop), nameof(for), nameof(switch)];
+        case nameof(continue):  return [nameof(loop), nameof(for)];
+        case nameof(defer):     return ["scope", "enter", "exit", "~self"];
+        case nameof(fn):        return [nameof(pure), nameof(comptime), nameof(return), nameof(yield)];
+        case nameof(return):    return [nameof(fn), nameof(guard), nameof(yield)];
+        case nameof(yield):     return [nameof(fn), nameof(for)];
+        case nameof(let):       return [nameof(var), nameof(ref)];
+        case nameof(var):       return [nameof(let), nameof(ref)];
+        case nameof(ref):       return [nameof(var), nameof(let), nameof(iso), "view"];
+        case nameof(iso):       return [nameof(ref), nameof(pure)];
+        case nameof(pure):      return [nameof(fn), nameof(comptime), nameof(iso)];
+        case nameof(comptime):  return [nameof(fn), nameof(quote), "ast", nameof(pure)];
+        case nameof(quote):     return [nameof(comptime), "ast"];
+        case nameof(struct):    return [nameof(interface), "view", "as"];
+        case nameof(interface): return [nameof(struct), "IValue", "IReference", "IObject", "IGuard"];
+        case nameof(pub):       return [nameof(priv), nameof(prot), nameof(int), nameof(open), nameof(export), nameof(lvl)];
+        case nameof(priv):      return [nameof(pub), nameof(prot), nameof(file), nameof(lvl)];
+        default:                return [];
     }
 }
 
 pub pure fn format_keyword_hover_markdown(ident: str, domain: str, summary: str) -> str {
-    var md = f"**Pilot Keyword**: `{ident}` ({domain})\n\n{summary}";
+    var md = "**Pilot Keyword**: `" + ident + "` (" + domain + ")\n\n" + summary;
     let related = get_related_keywords(ident);
     if len(related) > 0 {
         md = md + "\n\n---\n**Related Keywords**: ";
@@ -964,7 +998,7 @@ pub pure fn format_keyword_hover_markdown(ident: str, domain: str, summary: str)
             if idx > 0 {
                 md = md + " • ";
             }
-            md = md + f"[`{r}`](#)";
+            md = md + "[`" + r + "`](#)";
             idx = idx + 1;
         }
     }
@@ -1061,145 +1095,114 @@ pub pure fn format_fn_hover_markdown(
 
 pub pure fn lookup_keyword_summary(kw: str) -> str {
     switch kw {
-        case "fn":        return "Declares a function or method signature.";
-        case "let":       return "Declares an immutable variable binding.";
-        case "var":       return "Declares a mutable variable binding.";
-        case "struct":    return "Declares a user-defined record or composite type.";
-        case "interface": return "Declares a polymorphic contract with zero runtime header overhead.";
-        case "if":        return "Conditional branching construct.";
-        case "else":      return "Alternative branch for conditional constructs.";
-        case "for":       return "Iteration loop with support for scalar ranges and iterators.";
-        case "loop":      return "Unconditional loop construct.";
-        case "return":    return "Returns a value from a function.";
-        case "yield":     return "Yields a value from a generator or collection block.";
-        case "defer":     return "Schedules cleanup expressions at block exit.";
-        case "comptime":  return "Evaluates expressions at compile time.";
-        case "quote":     return "Captures Pilot AST expressions.";
-        case "ref":       return "Passes a value by reference.";
-        case "pub":       return "Public visibility modifier.";
-        case "priv":      return "Private visibility modifier.";
-        default:          return "";
+        case nameof(fn):        return "Declares a function or method signature.";
+        case nameof(let):       return "Declares an immutable variable binding.";
+        case nameof(var):       return "Declares a mutable variable binding.";
+        case nameof(struct):    return "Declares a user-defined record or composite type.";
+        case nameof(interface): return "Declares a polymorphic contract with zero runtime header overhead.";
+        case nameof(if):        return "Conditional branching construct.";
+        case nameof(else):      return "Alternative branch for conditional constructs.";
+        case nameof(for):       return "Iteration loop with support for scalar ranges and iterators.";
+        case nameof(loop):      return "Unconditional loop construct.";
+        case nameof(return):    return "Returns a value from a function.";
+        case nameof(yield):     return "Yields a value from a generator or collection block.";
+        case nameof(defer):     return "Schedules cleanup expressions at block exit.";
+        case nameof(comptime):  return "Evaluates expressions at compile time.";
+        case nameof(quote):     return "Captures Pilot AST expressions.";
+        case nameof(ref):       return "Passes a value by reference.";
+        case nameof(pub):       return "Public visibility modifier.";
+        case nameof(priv):      return "Private visibility modifier.";
+        case nameof(guard):     return "Validates early exit preconditions without nested indentation.";
+        case nameof(switch):    return "Pattern matches against values and variants.";
+        case nameof(case):      return "Pattern arm inside a switch construct.";
+        case nameof(default):   return "Fallback arm inside a switch construct.";
+        case nameof(break):     return "Terminates execution of the innermost loop or switch.";
+        case nameof(continue):  return "Advances execution to the next iteration of the loop.";
+        case nameof(pure):      return "Designates a function as side-effect free and deterministic.";
+        case nameof(asm):       return "Inline hardware assembly instruction block.";
+        case nameof(iso):       return "Isolated heap pointer with strictly unique ownership.";
+        case nameof(open):      return "Extensible visibility modifier allowing external inheritance.";
+        case nameof(export):    return "Exports declarations across module boundaries.";
+        case nameof(file):      return "File-scoped visibility modifier.";
+        case nameof(prot):      return "Protected visibility modifier.";
+        case nameof(int):       return "Internal package visibility modifier.";
+        case nameof(lvl):       return "Compile-time security clearance ring modifier.";
+        case nameof(self):      return "Reference to the current instance receiver.";
+        case nameof(field):     return "Synthesized backing storage access inside property getters and setters.";
+        case nameof(value):     return "Incoming setter parameter value inside property setters.";
+        default:                return "";
     }
 }
 
 pub fn reflect_node_doc(node_id: i64) -> str {
-    let span_start = __engine("ast_span_start", node_id);
+    let span_start = __engine(Cfg.ast.ast_span_start, node_id);
     let win_start = if span_start > 400 { span_start - 400 } else { 0 };
-    let prefix = __engine("source_slice", win_start, span_start);
-    if prefix == "" {
+    if span_start <= win_start {
         return "";
     }
-    var cur = span_start;
-    var doc_end = span_start;
-    var doc_start = span_start;
-    var found_doc = false;
 
-    var skip_ws = true;
-    while skip_ws && cur > win_start {
-        let ch = __engine("source_slice", cur - 1, cur);
-        if ch != " " && ch != "\t" && ch != "\n" && ch != "\r" {
-            skip_ws = false;
+    var lead = span_start;
+    var scan_lead = true;
+    while scan_lead && lead > win_start {
+        let ch = __engine(Cfg.ast.source_slice, lead - 1, lead);
+        if ch == "\n" {
+            scan_lead = false;
+        } else if ch == ";" || ch == "}" || ch == "{" {
+            return "";
         } else {
-            cur = cur - 1;
-        }
-    }
-    doc_end = cur;
-
-    var scanning_lines = true;
-    while scanning_lines && cur > win_start {
-        var line_start = cur;
-        var find_nl = true;
-        while find_nl && line_start > win_start {
-            let ch = __engine("source_slice", line_start - 1, line_start);
-            if ch == "\n" {
-                find_nl = false;
-            } else {
-                line_start = line_start - 1;
-            }
-        }
-        var scan = line_start;
-        var skip_indent = true;
-        while skip_indent && scan < cur {
-            let ch = __engine("source_slice", scan, scan + 1);
-            if ch != " " && ch != "\t" {
-                skip_indent = false;
-            } else {
-                scan = scan + 1;
-            }
-        }
-        let tag3 = __engine("source_slice", scan, scan + 3);
-        let tag2 = __engine("source_slice", scan, scan + 2);
-        if tag3 == "///" || tag2 == "//" {
-            found_doc = true;
-            doc_start = line_start;
-            cur = line_start;
-            if cur > win_start && __engine("source_slice", cur - 1, cur) == "\n" {
-                cur = cur - 1;
-            }
-        } else {
-            scanning_lines = false;
+            lead = lead - 1;
         }
     }
 
-    if found_doc && doc_end > doc_start {
-        return __engine("source_slice", doc_start, doc_end);
+    var p = lead - 1;
+    var scan_doc = true;
+    while scan_doc && p > win_start {
+        let ch = __engine(Cfg.ast.source_slice, p - 1, p);
+        if ch == "\n" || ch == " " || ch == "\t" || ch == "\r" {
+            p = p - 1;
+        } else {
+            scan_doc = false;
+        }
+    }
+
+    if p > win_start + 3 {
+        var line_start = p;
+        while line_start > win_start && __engine(Cfg.ast.source_slice, line_start - 1, line_start) != "\n" {
+            line_start = line_start - 1;
+        }
+        var ls = line_start;
+        var scan_ws = true;
+        while scan_ws && ls < p {
+            let ch = __engine(Cfg.ast.source_slice, ls, ls + 1);
+            if ch == " " || ch == "\t" {
+                ls = ls + 1;
+            } else {
+                scan_ws = false;
+            }
+        }
+        if __engine(Cfg.ast.source_slice, ls, ls + 3) == "///" {
+            var ds = ls + 3;
+            if __engine(Cfg.ast.source_slice, ds, ds + 1) == " " {
+                ds = ds + 1;
+            }
+            return __engine(Cfg.ast.source_slice, ds, p);
+        }
     }
     return "";
 }
 
 pub fn handle_lsp_hover(offset: i64) {
-    let node_count = __engine("ast_node_count");
-    var best_nid = -1;
-    var best_len = 999999999;
-    var i = 0;
-    while i < node_count {
-        let s = __engine("ast_span_start", i);
-        let e = __engine("ast_span_end", i);
-        if s <= offset && offset <= e {
-            let l = e - s;
-            if l < best_len {
-                best_len = l;
-                best_nid = i;
-            }
-        }
-        i = i + 1;
-    }
-
-    if best_nid != -1 {
-        var target_id = __engine("ast_get_bound_target", best_nid);
-        if target_id == 4294967295 || target_id < 0 {
-            target_id = best_nid;
-        }
-        let sym = __engine("ast_node_sym", target_id);
-        var name = __engine("sym_str", sym);
-        if name == "" {
-            let b_sym = __engine("ast_node_sym", best_nid);
-            name = __engine("sym_str", b_sym);
-        }
-
-        var lid = __engine("ast_get_bound_layout", target_id);
-        if lid == 4294967295 || lid < 0 {
-            lid = __engine("ast_get_bound_layout", best_nid);
-        }
-        let byte_size = if lid != 4294967295 && lid >= 0 {
-            __engine("layout_metrics", lid)
-        } else {
-            0
-        };
-
-        let doc = reflect_node_doc(target_id);
-        var md = "```pilot\n" + name + "\n```";
-        if doc != "" {
-            md = md + "\n\n---\n" + doc;
-        }
-        __engine("lsp_set_result", md);
+    let cur_ch = __engine(Cfg.ast.source_slice, offset, offset + 1);
+    let is_ident = (cur_ch >= "a" && cur_ch <= "z") || (cur_ch >= "A" && cur_ch <= "Z") || (cur_ch >= "0" && cur_ch <= "9") || cur_ch == "_";
+    if !is_ident {
+        __engine(Cfg.ast.lsp_set_result, "");
         return;
     }
 
     var w_start = offset;
     var scan_wstart = true;
     while scan_wstart && w_start > 0 {
-        let ch = __engine("source_slice", w_start - 1, w_start);
+        let ch = __engine(Cfg.ast.source_slice, w_start - 1, w_start);
         if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
             w_start = w_start - 1;
         } else {
@@ -1209,27 +1212,243 @@ pub fn handle_lsp_hover(offset: i64) {
     var w_end = offset;
     var scan_wend = true;
     while scan_wend && w_end < offset + 40 {
-        let ch = __engine("source_slice", w_end, w_end + 1);
+        let ch = __engine(Cfg.ast.source_slice, w_end, w_end + 1);
         if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
             w_end = w_end + 1;
         } else {
             scan_wend = false;
         }
     }
-    let word = __engine("source_slice", w_start, w_end);
+    let word = __engine(Cfg.ast.source_slice, w_start, w_end);
     let kw_summary = lookup_keyword_summary(word);
     if kw_summary != "" {
         let md = format_keyword_hover_markdown(word, "Core", kw_summary);
-        __engine("lsp_set_result", md);
+        __engine(Cfg.ast.lsp_set_result, md);
+        return;
     }
+
+    if word == "" {
+        __engine(Cfg.ast.lsp_set_result, "");
+        return;
+    }
+
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var best_nid = -1;
+    var best_len = 999999999;
+    var i = 0;
+    while i < node_count {
+        let s = __engine(Cfg.ast.ast_span_start, i);
+        let e = __engine(Cfg.ast.ast_span_end, i);
+        if s <= offset && offset <= e {
+            let sym = __engine(Cfg.ast.ast_node_sym, i);
+            let sname = __engine(Cfg.ast.sym_str, sym);
+            let l = e - s;
+            if sname == word {
+                if l < best_len {
+                    best_len = l;
+                    best_nid = i;
+                }
+            } else if best_len > 100000000 && l < best_len {
+                best_nid = i;
+            }
+        }
+        i = i + 1;
+    }
+
+    if best_nid == -1 {
+        __engine(Cfg.ast.lsp_set_result, "");
+        return;
+    }
+
+    var target_id = __engine(Cfg.ast.ast_get_bound_target, best_nid);
+    if target_id == 4294967295 || target_id < 0 {
+        target_id = best_nid;
+    }
+    let t_kind = __engine(Cfg.ast.ast_node_kind, target_id);
+    let b_kind = __engine(Cfg.ast.ast_node_kind, best_nid);
+
+    if t_kind == 3 || b_kind == 3 {
+        let fn_id = if t_kind == 3 { target_id } else { best_nid };
+        let fn_start = __engine(Cfg.ast.ast_span_start, fn_id);
+        var sig_start = fn_start;
+        var scan_back = true;
+        while scan_back && sig_start > 0 {
+            let ch = __engine(Cfg.ast.source_slice, sig_start - 1, sig_start);
+            if ch == "\n" || ch == ";" || ch == "{" || ch == "}" {
+                scan_back = false;
+            } else {
+                sig_start = sig_start - 1;
+            }
+        }
+        var trim_lead = true;
+        while trim_lead && sig_start < fn_start {
+            let ch = __engine(Cfg.ast.source_slice, sig_start, sig_start + 1);
+            if ch == " " || ch == "\t" || ch == "\r" {
+                sig_start = sig_start + 1;
+            } else {
+                trim_lead = false;
+            }
+        }
+        var sig_end = fn_start;
+        var scan_sig = true;
+        while scan_sig && sig_end < fn_start + 200 {
+            let ch = __engine(Cfg.ast.source_slice, sig_end, sig_end + 1);
+            if ch == "{" || ch == "=" || ch == ";" || ch == "\n" {
+                scan_sig = false;
+            } else {
+                sig_end = sig_end + 1;
+            }
+        }
+        var trim_end = true;
+        while trim_end && sig_end > fn_start {
+            let ch = __engine(Cfg.ast.source_slice, sig_end - 1, sig_end);
+            if ch == " " || ch == "\t" || ch == "\r" {
+                sig_end = sig_end - 1;
+            } else {
+                trim_end = false;
+            }
+        }
+        var sig_str = __engine(Cfg.ast.source_slice, sig_start, sig_end);
+        var md = "```pilot\n" + sig_str + "\n```";
+        let doc = reflect_node_doc(fn_id);
+        if doc != "" {
+            md = md + "\n\n---\n" + doc;
+        }
+        __engine(Cfg.ast.lsp_set_result, md);
+        return;
+    }
+
+    if t_kind == 1 || b_kind == 1 {
+        let s_id = if t_kind == 1 { target_id } else { best_nid };
+        let sym = __engine(Cfg.ast.ast_node_sym, s_id);
+        var name = __engine(Cfg.ast.sym_str, sym);
+        if name == "" {
+            name = word;
+        }
+        var lid = __engine(Cfg.ast.ast_get_bound_layout, s_id);
+        let byte_size = if lid != 4294967295 && lid >= 0 {
+            __engine(Cfg.ast.layout_metrics, lid)
+        } else {
+            0
+        };
+        let doc = reflect_node_doc(s_id);
+        var md = "```pilot\nstruct " + name + "\n```\n*Layout Size*: `" + byte_size + " bytes`";
+        let c_count = __engine(Cfg.ast.ast_child_count, s_id);
+        if c_count > 0 {
+            var ci = 0;
+            var has_f = false;
+            while ci < c_count {
+                let c_nid = __engine(Cfg.ast.ast_child_at, s_id, ci);
+                let c_kind = __engine(Cfg.ast.ast_node_kind, c_nid);
+                if c_kind == 21 {
+                    if !has_f {
+                        md = md + "\n\n**Fields:**";
+                        has_f = true;
+                    }
+                    let c_sym = __engine(Cfg.ast.ast_node_sym, c_nid);
+                    let c_name = __engine(Cfg.ast.sym_str, c_sym);
+                    if c_name != "" {
+                        md = md + "\n- `" + c_name + "`";
+                    }
+                }
+                ci = ci + 1;
+            }
+        }
+        if doc != "" {
+            md = md + "\n\n---\n" + doc;
+        }
+        __engine(Cfg.ast.lsp_set_result, md);
+        return;
+    }
+
+    if b_kind == 21 || t_kind == 21 {
+        let f_id = if b_kind == 21 { best_nid } else { target_id };
+        let f_start = __engine(Cfg.ast.ast_span_start, f_id);
+        var f_end = __engine(Cfg.ast.ast_span_end, f_id);
+        var trim_f = true;
+        while trim_f && f_end > f_start {
+            let ch = __engine(Cfg.ast.source_slice, f_end - 1, f_end);
+            if ch == ";" || ch == " " || ch == "\t" || ch == "\r" || ch == "\n" {
+                f_end = f_end - 1;
+            } else {
+                trim_f = false;
+            }
+        }
+        var f_slice = __engine(Cfg.ast.source_slice, f_start, f_end);
+        var lid = __engine(Cfg.ast.ast_get_bound_layout, f_id);
+        let byte_size = if lid != 4294967295 && lid >= 0 {
+            __engine(Cfg.ast.layout_metrics, lid)
+        } else {
+            0
+        };
+        var md = "```pilot\n" + f_slice + "\n```";
+        if byte_size > 0 {
+            md = md + "\n*Layout Size*: `" + byte_size + " bytes`";
+        }
+        let doc = reflect_node_doc(f_id);
+        if doc != "" {
+            md = md + "\n\n---\n" + doc;
+        }
+        __engine(Cfg.ast.lsp_set_result, md);
+        return;
+    }
+
+    if b_kind == 4 || t_kind == 4 {
+        let v_id = if b_kind == 4 { best_nid } else { target_id };
+        let sym = __engine(Cfg.ast.ast_node_sym, v_id);
+        var vname = __engine(Cfg.ast.sym_str, sym);
+        if vname == "" {
+            vname = word;
+        }
+        var lid = __engine(Cfg.ast.ast_get_bound_layout, v_id);
+        let byte_size = if lid != 4294967295 && lid >= 0 {
+            __engine(Cfg.ast.layout_metrics, lid)
+        } else {
+            0
+        };
+        var md = "```pilot\nlet " + vname;
+        if target_id != v_id {
+            let tsym = __engine(Cfg.ast.ast_node_sym, target_id);
+            let tname = __engine(Cfg.ast.sym_str, tsym);
+            if tname != "" {
+                md = md + ": " + tname;
+            }
+        }
+        md = md + "\n```";
+        if byte_size > 0 {
+            md = md + "\n*Layout Size*: `" + byte_size + " bytes`";
+        }
+        __engine(Cfg.ast.lsp_set_result, md);
+        return;
+    }
+
+    var name = word;
+    var lid = __engine(Cfg.ast.ast_get_bound_layout, best_nid);
+    if lid == 4294967295 || lid < 0 {
+        lid = __engine(Cfg.ast.ast_get_bound_layout, target_id);
+    }
+    let byte_size = if lid != 4294967295 && lid >= 0 {
+        __engine(Cfg.ast.layout_metrics, lid)
+    } else {
+        0
+    };
+    var md = "```pilot\n" + name + "\n```";
+    if byte_size > 0 {
+        md = md + "\n*Layout Size*: `" + byte_size + " bytes`";
+    }
+    let doc = reflect_node_doc(target_id);
+    if doc != "" {
+        md = md + "\n\n---\n" + doc;
+    }
+    __engine(Cfg.ast.lsp_set_result, md);
 }
 
 pub fn handle_lsp_completion(offset: i64) {
-    let node_count = __engine("ast_node_count");
+    let node_count = __engine(Cfg.ast.ast_node_count);
     var p = offset - 1;
     var find_dot = true;
     while find_dot && p >= 0 {
-        let ch = __engine("source_slice", p, p + 1);
+        let ch = __engine(Cfg.ast.source_slice, p, p + 1);
         if ch != " " && ch != "\t" && ch != "\r" && ch != "\n" {
             find_dot = false;
         } else {
@@ -1237,11 +1456,11 @@ pub fn handle_lsp_completion(offset: i64) {
         }
     }
 
-    if p >= 0 && __engine("source_slice", p, p + 1) == "." {
+    if p >= 0 && __engine(Cfg.ast.source_slice, p, p + 1) == "." {
         var r_end = p;
         var skip_rdot = true;
         while skip_rdot && r_end > 0 {
-            let ch = __engine("source_slice", r_end - 1, r_end);
+            let ch = __engine(Cfg.ast.source_slice, r_end - 1, r_end);
             if ch != " " && ch != "\t" {
                 skip_rdot = false;
             } else {
@@ -1251,23 +1470,24 @@ pub fn handle_lsp_completion(offset: i64) {
         var r_start = r_end;
         var scan_rstart = true;
         while scan_rstart && r_start > 0 {
-            let ch = __engine("source_slice", r_start - 1, r_start);
+            let ch = __engine(Cfg.ast.source_slice, r_start - 1, r_start);
             if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
                 r_start = r_start - 1;
             } else {
                 scan_rstart = false;
             }
         }
-        let recv_name = __engine("source_slice", r_start, r_end);
+        let recv_name = __engine(Cfg.ast.source_slice, r_start, r_end);
+        __engine(Cfg.ast.ast_emit_diag, 0, 1, "recv=" + recv_name);
 
         var s_id = -1;
         if recv_name == "self" {
             var j = 0;
             while j < node_count {
-                let k = __engine("ast_node_kind", j);
+                let k = __engine(Cfg.ast.ast_node_kind, j);
                 if k == 1 {
-                    let s = __engine("ast_span_start", j);
-                    let e = __engine("ast_span_end", j);
+                    let s = __engine(Cfg.ast.ast_span_start, j);
+                    let e = __engine(Cfg.ast.ast_span_end, j);
                     if s <= offset && offset <= e {
                         s_id = j;
                     }
@@ -1277,48 +1497,73 @@ pub fn handle_lsp_completion(offset: i64) {
         } else {
             var j = 0;
             while j < node_count {
-                let k = __engine("ast_node_kind", j);
+                let k = __engine(Cfg.ast.ast_node_kind, j);
                 if k == 4 || k == 21 {
-                    let sym = __engine("ast_node_sym", j);
-                    let nm = __engine("sym_str", sym);
+                    let sym = __engine(Cfg.ast.ast_node_sym, j);
+                    let nm = __engine(Cfg.ast.sym_str, sym);
                     if nm == recv_name {
-                        let tid = __engine("ast_get_bound_target", j);
+                        let tid = __engine(Cfg.ast.ast_get_bound_target, j);
                         if tid != 4294967295 && tid >= 0 {
-                            let tk = __engine("ast_node_kind", tid);
+                            let tk = __engine(Cfg.ast.ast_node_kind, tid);
                             if tk == 1 {
                                 s_id = tid;
+                            }
+                        }
+                        if s_id == -1 {
+                            let var_lid = __engine(Cfg.ast.ast_get_bound_layout, j);
+                            if var_lid != 4294967295 {
+                                var sj = 0;
+                                while sj < node_count {
+                                    if __engine(Cfg.ast.ast_node_kind, sj) == 1 {
+                                        let s_lid = __engine(Cfg.ast.ast_get_bound_layout, sj);
+                                        if s_lid == var_lid {
+                                            s_id = sj;
+                                        }
+                                    }
+                                    sj = sj + 1;
+                                }
                             }
                         }
                     }
                 }
                 j = j + 1;
             }
-            if s_id == -1 {
-                j = 0;
-                while j < node_count {
-                    let k = __engine("ast_node_kind", j);
-                    if k == 1 && s_id == -1 {
-                        s_id = j;
-                    }
-                    j = j + 1;
-                }
-            }
         }
 
         if s_id != -1 {
             let is_inside_struct = (recv_name == "self");
-            let c_count = __engine("ast_child_count", s_id);
+            let c_count = __engine(Cfg.ast.ast_child_count, s_id);
             var items_json = "[";
             var added = 0;
             var ci = 0;
             while ci < c_count {
-                let c_nid = __engine("ast_child_at", s_id, ci);
-                let c_kind = __engine("ast_node_kind", c_nid);
-                let c_sym = __engine("ast_node_sym", c_nid);
-                let c_name = __engine("sym_str", c_sym);
+                let c_nid = __engine(Cfg.ast.ast_child_at, s_id, ci);
+                let c_kind = __engine(Cfg.ast.ast_node_kind, c_nid);
+                let c_sym = __engine(Cfg.ast.ast_node_sym, c_nid);
+                let c_name = __engine(Cfg.ast.sym_str, c_sym);
                 if c_name != "" {
-                    let is_priv = (c_name == "secret_audit");
-                    if is_inside_struct || !is_priv {
+                    let c_start = __engine(Cfg.ast.ast_span_start, c_nid);
+                    let lead_start = if c_start >= 16 { c_start - 16 } else { 0 };
+                    var p_scan = lead_start;
+                    var is_pub = false;
+                    var is_priv = false;
+                    while p_scan < c_start {
+                        let s4 = __engine(Cfg.ast.source_slice, p_scan, p_scan + 4);
+                        if s4 == "pub " || s4 == "open" {
+                            is_pub = true;
+                        }
+                        let s5 = __engine(Cfg.ast.source_slice, p_scan, p_scan + 5);
+                        if s5 == "priv " {
+                            is_priv = true;
+                        }
+                        let s7 = __engine(Cfg.ast.source_slice, p_scan, p_scan + 7);
+                        if s7 == "export " {
+                            is_pub = true;
+                        }
+                        p_scan = p_scan + 1;
+                    }
+                    let is_hidden = if c_kind == 3 { !is_pub } else { is_priv };
+                    if is_inside_struct || !is_hidden {
                         let lsp_k = if c_kind == 3 { 2 } else { 5 };
                         if added > 0 {
                             items_json = items_json + ", ";
@@ -1331,22 +1576,22 @@ pub fn handle_lsp_completion(offset: i64) {
                 ci = ci + 1;
             }
             items_json = items_json + "]";
-            __engine("lsp_set_result", items_json);
+            __engine(Cfg.ast.lsp_set_result, items_json);
             return;
         }
     }
 
-    __engine("lsp_set_result", "[]");
+    __engine(Cfg.ast.lsp_set_result, "[]");
 }
 
 pub fn handle_lsp_definition(offset: i64) {
-    let node_count = __engine("ast_node_count");
+    let node_count = __engine(Cfg.ast.ast_node_count);
     var best_nid = -1;
     var best_len = 999999999;
     var i = 0;
     while i < node_count {
-        let s = __engine("ast_span_start", i);
-        let e = __engine("ast_span_end", i);
+        let s = __engine(Cfg.ast.ast_span_start, i);
+        let e = __engine(Cfg.ast.ast_span_end, i);
         if s <= offset && offset <= e {
             let l = e - s;
             if l < best_len {
@@ -1357,24 +1602,37 @@ pub fn handle_lsp_definition(offset: i64) {
         i = i + 1;
     }
     if best_nid != -1 {
-        var target_id = __engine("ast_get_bound_target", best_nid);
+        var target_id = __engine(Cfg.ast.ast_get_bound_target, best_nid);
         if target_id == 4294967295 || target_id < 0 {
             target_id = best_nid;
         }
-        let sym = __engine("ast_node_sym", target_id);
-        let name = __engine("sym_str", sym);
-        __engine("lsp_set_result", name);
+        let s = __engine(Cfg.ast.ast_span_start, target_id);
+        let e = __engine(Cfg.ast.ast_span_end, target_id);
+        let res = "" + s + ":" + e;
+        __engine(Cfg.ast.lsp_set_result, res);
+        return;
     }
+    __engine(Cfg.ast.lsp_set_result, "null");
+}
+
+pub pure fn is_keyword_or_seed(w: str) -> bool {
+    if w == nameof(struct) || w == nameof(interface) || w == nameof(fn) || w == nameof(let) || w == nameof(var) ||
+       w == nameof(ref) || w == nameof(if) || w == nameof(loop) || w == nameof(return) || w == nameof(yield) ||
+       w == nameof(defer) || w == nameof(comptime) || w == nameof(quote) || w == nameof(asm) ||
+       w == nameof(field) || w == nameof(value) || w == nameof(pub) || w == nameof(priv) || w == "" {
+        return true;
+    }
+    return false;
 }
 
 pub fn handle_lsp_prepare_rename(offset: i64) {
-    let node_count = __engine("ast_node_count");
+    let node_count = __engine(Cfg.ast.ast_node_count);
     var best_nid = -1;
     var best_len = 999999999;
     var i = 0;
     while i < node_count {
-        let s = __engine("ast_span_start", i);
-        let e = __engine("ast_span_end", i);
+        let s = __engine(Cfg.ast.ast_span_start, i);
+        let e = __engine(Cfg.ast.ast_span_end, i);
         if s <= offset && offset <= e {
             let l = e - s;
             if l < best_len {
@@ -1386,29 +1644,44 @@ pub fn handle_lsp_prepare_rename(offset: i64) {
     }
 
     if best_nid != -1 {
-        let s = __engine("ast_span_start", best_nid);
-        let e = __engine("ast_span_end", best_nid);
-        let sym = __engine("ast_node_sym", best_nid);
-        var word = __engine("sym_str", sym);
+        let s = __engine(Cfg.ast.ast_span_start, best_nid);
+        let e = __engine(Cfg.ast.ast_span_end, best_nid);
+        let sym = __engine(Cfg.ast.ast_node_sym, best_nid);
+        var word = __engine(Cfg.ast.sym_str, sym);
         if word == "" {
-            word = __engine("source_slice", s, e);
+            word = __engine(Cfg.ast.source_slice, s, e);
         }
-        if word == "field" || word == "value" || word == "struct" || word == "fn" || word == "let" || word == "var" || word == "pub" || word == "priv" || word == "" {
-            __engine("lsp_set_result", "null");
+        if is_keyword_or_seed(word) {
+            __engine(Cfg.ast.lsp_set_result, "null");
         } else {
-            __engine("lsp_set_result", word);
+            __engine(Cfg.ast.lsp_set_result, word);
         }
         return;
     }
-    __engine("lsp_set_result", "null");
+    __engine(Cfg.ast.lsp_set_result, "null");
+}
+
+pub fn handle_lsp_rename(offset: i64, method_str: str) {
+    if method_str == "textDocument/rename:struct" || method_str == "textDocument/rename:interface" ||
+       method_str == "textDocument/rename:fn" || method_str == "textDocument/rename:let" ||
+       method_str == "textDocument/rename:var" || method_str == "textDocument/rename:ref" ||
+       method_str == "textDocument/rename:if" || method_str == "textDocument/rename:loop" ||
+       method_str == "textDocument/rename:return" || method_str == "textDocument/rename:yield" ||
+       method_str == "textDocument/rename:defer" || method_str == "textDocument/rename:comptime" ||
+       method_str == "textDocument/rename:quote" || method_str == "textDocument/rename:asm" ||
+       method_str == "textDocument/rename:field" || method_str == "textDocument/rename:value" {
+        __engine(Cfg.ast.lsp_set_result, "null");
+        return;
+    }
+    handle_lsp_prepare_rename(offset);
 }
 
 // =========================================================================
 // 9. TOP-LEVEL LSP DISPATCHER
 // =========================================================================
 
-let _lsp_method = __engine("lsp_query_method");
-let _lsp_offset = __engine("lsp_query_offset");
+let _lsp_method = __engine(Cfg.ast.lsp_query_method);
+let _lsp_offset = __engine(Cfg.ast.lsp_query_offset);
 
 if _lsp_method == "textDocument/hover" {
     handle_lsp_hover(_lsp_offset);
@@ -1422,6 +1695,18 @@ if _lsp_method == "textDocument/definition" {
 if _lsp_method == "textDocument/prepareRename" {
     handle_lsp_prepare_rename(_lsp_offset);
 }
-if _lsp_method == "textDocument/rename" {
-    handle_lsp_prepare_rename(_lsp_offset);
+if _lsp_method == "textDocument/rename" ||
+   _lsp_method == "textDocument/rename:struct" || _lsp_method == "textDocument/rename:interface" ||
+   _lsp_method == "textDocument/rename:fn" || _lsp_method == "textDocument/rename:let" ||
+   _lsp_method == "textDocument/rename:var" || _lsp_method == "textDocument/rename:ref" ||
+   _lsp_method == "textDocument/rename:if" || _lsp_method == "textDocument/rename:loop" ||
+   _lsp_method == "textDocument/rename:return" || _lsp_method == "textDocument/rename:yield" ||
+   _lsp_method == "textDocument/rename:defer" || _lsp_method == "textDocument/rename:comptime" ||
+   _lsp_method == "textDocument/rename:quote" || _lsp_method == "textDocument/rename:asm" ||
+   _lsp_method == "textDocument/rename:field" || _lsp_method == "textDocument/rename:value" {
+    handle_lsp_rename(_lsp_offset, _lsp_method);
+} else {
+    if _lsp_method != "textDocument/hover" && _lsp_method != "textDocument/completion" && _lsp_method != "textDocument/definition" && _lsp_method != "textDocument/prepareRename" {
+        handle_lsp_rename(_lsp_offset, _lsp_method);
+    }
 }

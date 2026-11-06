@@ -370,7 +370,7 @@ fn test_selfhost_ide_sync_pilot_generates_all_4_vscode_artifacts_and_hover_badge
 fn test_pilot_hosted_ide_sync_hover_completion_and_definition() {
     let mut server = LspServer::new();
     let uri = "file:///workspace/test_lsp.pilot";
-    let code = "struct Account {\n    pub balance: i64;\n    pub fn deposit(amount: i64) -> i64 {\n        return self.balance;\n    }\n}\n";
+    let code = "struct DecoyFirstStruct {\n    pub wrong_field: i64;\n}\n/// Documented Account struct\nstruct Account {\n    pub balance: i64;\n    pub fn deposit(amount: i64) -> i64 {\n        return self.balance;\n    }\n    fn internal_helper() -> i64 {\n        return 0;\n    }\n}\nlet acct = Account();\nacct.\n";
 
     let did_open = format!(
         r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"pilot","version":1,"text":"{}"}}}}}}"#,
@@ -381,24 +381,54 @@ fn test_pilot_hosted_ide_sync_hover_completion_and_definition() {
 
     // 1. Hover on Account
     let hover_req = format!(
-        r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":8}}}}}}"#,
+        r#"{{"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":4,"character":8}}}}}}"#,
         uri
     );
     let hover_resp = server.handle_message(&hover_req).expect("hover response");
     assert!(hover_resp.contains("Account"), "Hover must contain Account: {}", hover_resp);
-    assert!(hover_resp.contains("markdown"), "Hover must be markdown: {}", hover_resp);
+    assert!(hover_resp.contains("Documented Account struct"), "Hover must contain doc: {}", hover_resp);
+    assert!(hover_resp.contains("8 bytes"), "Hover must contain byte size: {}", hover_resp);
 
-    // 2. Completion on self. inside method (line 3, char 20)
+    // 1b. Hover on keyword `struct` (line 4, character 2)
+    let hover_kw_req = format!(
+        r#"{{"jsonrpc":"2.0","id":11,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":4,"character":2}}}}}}"#,
+        uri
+    );
+    let hover_kw_resp = server.handle_message(&hover_kw_req).expect("hover kw response");
+    assert!(hover_kw_resp.contains("Pilot Keyword"), "Keyword hover must indicate keyword: {}", hover_kw_resp);
+    assert!(hover_kw_resp.contains("composite type"), "Keyword hover must have summary: {}", hover_kw_resp);
+
+    // 1c. Hover on method `deposit` (line 6, character 15)
+    let hover_fn_req = format!(
+        r#"{{"jsonrpc":"2.0","id":12,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":6,"character":15}}}}}}"#,
+        uri
+    );
+    let hover_fn_resp = server.handle_message(&hover_fn_req).expect("hover fn response");
+    assert!(hover_fn_resp.contains("deposit"), "Function hover must contain deposit: {}", hover_fn_resp);
+    assert!(hover_fn_resp.contains("amount: i64"), "Function hover must contain param: {}", hover_fn_resp);
+
+    // 1d. Hover on whitespace (line 4, character 6) -> returns null (no broken empty card)
+    let hover_ws_req = format!(
+        r#"{{"jsonrpc":"2.0","id":13,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":4,"character":6}}}}}}"#,
+        uri
+    );
+    let hover_ws_resp = server.handle_message(&hover_ws_req).expect("hover ws response");
+    assert!(hover_ws_resp.contains("\"result\":null"), "Whitespace hover must be null: {}", hover_ws_resp);
+
+    // 2. Completion on acct. outside Account (line 14, character 5)
     let comp_req = format!(
-        r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":3,"character":20}}}}}}"#,
+        r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":14,"character":5}}}}}}"#,
         uri
     );
     let comp_resp = server.handle_message(&comp_req).expect("completion response");
-    assert!(comp_resp.contains("balance"), "Completion on self. must include balance: {}", comp_resp);
+    assert!(comp_resp.contains("balance"), "Completion on acct. must include balance: {}", comp_resp);
+    assert!(comp_resp.contains("deposit"), "Completion on acct. must include deposit: {}", comp_resp);
+    assert!(!comp_resp.contains("wrong_field"), "Completion on acct. must NOT include wrong_field from DecoyFirstStruct: {}", comp_resp);
+    assert!(!comp_resp.contains("internal_helper"), "Completion on acct. must NOT include private internal_helper: {}", comp_resp);
 
     // 3. Definition on Account
     let def_req = format!(
-        r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":8}}}}}}"#,
+        r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":4,"character":8}}}}}}"#,
         uri
     );
     let def_resp = server.handle_message(&def_req).expect("definition response");

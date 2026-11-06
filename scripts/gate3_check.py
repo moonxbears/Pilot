@@ -6,6 +6,7 @@ CAPS = {
     "crates/pilot-cli/src/main.rs": 520,
     "crates/pilot-lsp/src/server.rs": 350,
     "crates/pilot-lsp/src/lib.rs": 120,
+    "crates/pilot-analysis/src/infer.rs": 440,
 }
 
 BANNED_TOKENS = [
@@ -21,6 +22,8 @@ BANNED_TOKENS = [
     "#[ignore]",
     "*Pilot Language*",
     'Custom("any"',
+    "secret_audit",
+    "seed_kws",
 ]
 
 def check_caps():
@@ -41,6 +44,7 @@ def check_banned():
         glob.glob("crates/pilot-cli/src/**/*.rs", recursive=True)
         + glob.glob("crates/pilot-lsp/src/**/*.rs", recursive=True)
         + glob.glob("crates/pilot-lsp/tests/**/*.rs", recursive=True)
+        + ["selfhost/ide_sync.pilot"]
     )
     for path in targets:
         with open(path, "r", encoding="utf-8") as f:
