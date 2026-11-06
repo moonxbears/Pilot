@@ -1,0 +1,23 @@
+// =========================================================================
+// FILE: stdlib/core/operators/checked_math.pilot
+// CHECKED OVERFLOW-DETECTING ARITHMETIC PROTOCOLS (`op +?`, `op -?`, `op *?`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.CheckedMath;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub interface {
+    ICheckedAddOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op +? (rhs: TRhs) -> TOut;
+    }
+
+    ICheckedSubOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op -? (rhs: TRhs) -> TOut;
+    }
+
+    ICheckedMulOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op *? (rhs: TRhs) -> TOut;
+    }
+}

@@ -742,6 +742,18 @@ pub fn reflect_category_keywords(target_cat_id: i64) -> str {
     return pat;
 }
 
+pub fn reflect_syntax_pattern() -> str {
+    let syn = reflect_category_keywords(36);
+    if syn != "" {
+        return "syntax|quote|" + syn;
+    }
+    return "syntax|quote|macro";
+}
+
+pub fn reflect_operators_pattern() -> str {
+    return "%%|\\\\*%|\\\\*\\\\?|\\\\*\\\\||\\\\+%|\\\\+\\\\?|\\\\+\\\\||-%|-\\\\?|-\\\\||<<|>>|~>|%|&|\\\\+|-|/|\\\\^|\\\\||~";
+}
+
 pub fn reflect_primitives_pattern() -> str {
     var pat = "";
     var cid = 20;
@@ -894,8 +906,8 @@ pub fn build_tm_language_model(
     let seed_pat = if seed_keywords_regex != "" { seed_keywords_regex } else { reflect_category_keywords(0) };
     let mod_pat  = if modifiers_regex != "" { modifiers_regex } else { reflect_category_keywords(4) };
     let prim_pat = if lang_primitives_regex != "" { lang_primitives_regex } else { reflect_primitives_pattern() };
-    let op_pat   = if operators_regex != "" { operators_regex } else { "%%|\\*%|\\*\\?|\\*\\||\\+%|\\+\\?|\\+\\||-%|-\\?|-\\||<<|>>|~>|%|&|\\+|-|/|\\^|\\||~" };
-    let syn_pat  = if syntax_macros_regex != "" { syntax_macros_regex } else { "syntax|quote|macro" };
+    let op_pat   = if operators_regex != "" { operators_regex } else { reflect_operators_pattern() };
+    let syn_pat  = if syntax_macros_regex != "" { syntax_macros_regex } else { reflect_syntax_pattern() };
 
     return TmLanguageGrammar {
         schema:     "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
@@ -1673,7 +1685,7 @@ pure fn tm_operators_section(op_pat: str) -> str => "    \"operators\": {\n" +
     "        { \"name\": \"punctuation.operator.assignment.pilot\", \"match\": \":=:|:=|\\\\+=|-=|\\\\*=|/=|%=|&=|\\\\|=|\\\\^=|<<=|>>=|=\" },\n" +
     "        { \"name\": \"punctuation.operator.logical.pilot\", \"match\": \"&&|\\\\|\\\\||!\" },\n" +
     "        { \"name\": \"punctuation.operator.spread.pilot\", \"match\": \"\\\\*\\\\.\\\\.|\\\\*\\\\*|\\\\*\" },\n" +
-    "        { \"name\": \"punctuation.operator.arithmetic.pilot\", \"match\": \"%%|\\\\*%|\\\\*\\\\?|\\\\*\\\\||\\\\+%|\\\\+\\\\?|\\\\+\\\\||-%|-\\\\?|-\\\\||<<|>>|~>|%|&|\\\\+|-|/|\\\\^|\\\\||~\" }\n" +
+    '        { "name": "punctuation.operator.arithmetic.pilot", "match": "' + op_pat + '" }\n' +
     "      ]\n" +
     "    }";
 
@@ -1705,8 +1717,8 @@ pub fn build_tm_language_json(
     let seed_pat = if seed_keywords_regex != "" { seed_keywords_regex } else { reflect_category_keywords(0) };
     let mod_pat  = if modifiers_regex != "" { modifiers_regex } else { reflect_category_keywords(4) };
     let prim_pat = if lang_primitives_regex != "" { lang_primitives_regex } else { reflect_primitives_pattern() };
-    let op_pat   = if operators_regex != "" { operators_regex } else { "%%|\\*%|\\*\\?|\\*\\||\\+%|\\+\\?|\\+\\||-%|-\\?|-\\||<<|>>|~>|%|&|\\+|-|/|\\^|\\||~" };
-    let syn_pat  = if syntax_macros_regex != "" { syntax_macros_regex } else { "syntax|quote|macro" };
+    let op_pat   = if operators_regex != "" { operators_regex } else { reflect_operators_pattern() };
+    let syn_pat  = if syntax_macros_regex != "" { syntax_macros_regex } else { reflect_syntax_pattern() };
 
     var s = "{\n  \"$schema\": \"https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json\",\n  \"name\": \"Pilot\",\n  \"scopeName\": \"source.pilot\",\n  \"patterns\": " + tm_patterns_list() + ",\n  \"repository\": {\n";
     s = s + tm_comments_section() + ",\n";

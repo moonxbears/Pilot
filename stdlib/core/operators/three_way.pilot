@@ -1,0 +1,15 @@
+// =========================================================================
+// FILE: stdlib/core/operators/three_way.pilot
+// THREE-WAY SPACESHIP COMPARISON PROTOCOL (`op <=>`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.ThreeWay;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub interface {
+    ICompareOperator<TRhs: IAnyValue, TOrder: IAnyValue> : IAnyValue {
+        pub pure op <=> (rhs: TRhs) -> TOrder;
+    }
+}

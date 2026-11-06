@@ -1,0 +1,23 @@
+// =========================================================================
+// FILE: stdlib/core/operators/wrap_math.pilot
+// TWO'S-COMPLEMENT WRAPPING ARITHMETIC PROTOCOLS (`op +%`, `op -%`, `op *%`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.WrapMath;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub interface {
+    IWrapAddOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op +% (rhs: TRhs) -> TOut;
+    }
+
+    IWrapSubOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op -% (rhs: TRhs) -> TOut;
+    }
+
+    IWrapMulOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op *% (rhs: TRhs) -> TOut;
+    }
+}

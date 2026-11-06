@@ -1,0 +1,21 @@
+// =========================================================================
+// FILE: stdlib/core/operators/bitwise.pilot
+// BITWISE & SHIFT LOGICAL OPERATOR PROTOCOLS (`op &`, `op |`, `op ^`, `op ~`, `op <<`, `op >>`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.Bitwise;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub interface {
+    IBitwiseOperator<TSelf: IAnyValue> : IAnyValue {
+        pub pure:
+            op &  (rhs: TSelf) -> TSelf;
+            op |  (rhs: TSelf) -> TSelf;
+            op ^  (rhs: TSelf) -> TSelf;
+            op ~  ()           -> TSelf;
+            op << (bits: u32)  -> TSelf;
+            op >> (bits: u32)  -> TSelf;
+    }
+}

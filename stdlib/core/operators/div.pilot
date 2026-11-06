@@ -1,0 +1,15 @@
+// =========================================================================
+// FILE: stdlib/core/operators/div.pilot
+// DIVISION OPERATOR PROTOCOL (`op /`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.Div;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub interface {
+    IDivOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op / (rhs: TRhs) -> TOut;
+    }
+}

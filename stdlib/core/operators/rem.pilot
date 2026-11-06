@@ -1,0 +1,15 @@
+// =========================================================================
+// FILE: stdlib/core/operators/rem.pilot
+// TRUNCATING REMAINDER OPERATOR PROTOCOL (`op %`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.Rem;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub interface {
+    IRemOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op % (rhs: TRhs) -> TOut;
+    }
+}

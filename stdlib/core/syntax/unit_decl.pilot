@@ -1,0 +1,14 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/unit_decl.pilot
+// COMPILATION UNIT WRAPPER MACRO (`unit(decl)`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.UnitDecl;
+
+use Pilot.Core.Genesis::*;
+
+pub syntax {
+    unit(decl) => quote {
+        $decl
+    };
+}

@@ -1,0 +1,21 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/try_catch.pilot
+// TRY-CATCH ERROR HANDLING STATEMENT MACRO (`try(body, handler)`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.TryCatch;
+
+use Pilot.Core.Genesis::*;
+
+pub syntax {
+    try(body, handler) => quote {
+        {
+            $body
+            $handler
+        }
+    };
+
+    catch(err_pat, body) => quote {
+        $body
+    };
+}

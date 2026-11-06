@@ -1,0 +1,17 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/while.pilot
+// WHILE LOOP STATEMENT SYNTAX MACRO (`while(cond, body)`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.While;
+
+use Pilot.Core.Genesis::*;
+
+pub syntax {
+    while(cond, body) => quote {
+        loop {
+            if !($cond) { break; }
+            $body
+        }
+    };
+}

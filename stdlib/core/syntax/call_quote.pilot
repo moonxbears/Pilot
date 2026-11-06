@@ -1,0 +1,42 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/call_quote.pilot
+// 6 HOMOICONIC CALL-QUOTING PROJECTION CONSTRUCTS
+// (`!`, `!!`, `!&`, `!^`, `!@`, `!?`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.CallQuote;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub partial struct {
+    // 1. Shallow AST Quote Carrier (`fn!(a, b) -> CallExpr<TReturn>`)
+    [Layout(c_abi)]
+    CallExpr<TReturn: IAnyValue> : IValue {
+        pub callee:   str;
+        pub arg_repr: str;
+    }
+
+    // 2. Glitch-Free Push-Pull Reactive Signal Node (`fn!^(a, b) -> Signal<TReturn>`)
+    [Layout(c_abi)]
+    Signal<TReturn: IAnyValue> : IObject {
+        pub value:   TReturn;
+        pub version: usize;
+        ~self() {}
+    }
+
+    // 3. Symbolic Adjoint Dual Number Carrier (`fn!@(a, b) -> Dual<TReturn, TGrad>`)
+    [Layout(c_abi)]
+    Dual<TReturn: IValue, TGrad: IValue> : IValue {
+        pub primal:      TReturn;
+        pub sensitivity: TGrad;
+    }
+
+    // 4. CoW Effect Dry-Run Transaction Plan (`fn!?(a, b) -> EffectPlan<TReturn>`)
+    [Layout(c_abi)]
+    EffectPlan<TReturn: IAnyValue> : IObject {
+        pub estimated_ops: usize;
+        pub is_committable: bool;
+        ~self() {}
+    }
+}

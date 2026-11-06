@@ -1,0 +1,15 @@
+// =========================================================================
+// FILE: stdlib/core/operators/mul.pilot
+// MULTIPLICATION OPERATOR PROTOCOL (`op *`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.Mul;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub interface {
+    IMulOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op * (rhs: TRhs) -> TOut;
+    }
+}

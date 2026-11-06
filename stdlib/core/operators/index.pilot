@@ -1,0 +1,19 @@
+// =========================================================================
+// FILE: stdlib/core/operators/index.pilot
+// ELEMENT INDEX GETTER & SETTER PROTOCOLS (`op []`, `op []=`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.Index;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub interface {
+    IIndexGet<TIdx: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op [] (idx: TIdx) -> TOut;
+    }
+
+    IIndexSet<TIdx: IAnyValue, TVal: IAnyValue> : IAnyValue {
+        pub var op []= (idx: TIdx, val: TVal);
+    }
+}

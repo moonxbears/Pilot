@@ -1,0 +1,15 @@
+// =========================================================================
+// FILE: stdlib/core/operators/mod.pilot
+// EUCLIDEAN MODULO OPERATOR PROTOCOL (`op %%`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.Mod;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub interface {
+    IModOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op %% (rhs: TRhs) -> TOut;
+    }
+}

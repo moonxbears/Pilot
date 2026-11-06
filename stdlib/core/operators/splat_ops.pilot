@@ -1,0 +1,23 @@
+// =========================================================================
+// FILE: stdlib/core/operators/splat_ops.pilot
+// SEQUENCE & STRUCTURAL UNPACK OPERATOR PROTOCOLS (`op *`, `op **`, `op *..`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.SplatOps;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub interface {
+    ISplatOperator<TSeq: IAnyValue> : IAnyValue {
+        pub pure fn unpack() -> TSeq;
+    }
+
+    IPairsOperator<TPairs: IAnyValue> : IAnyValue {
+        pub pure fn unpack_pairs() -> TPairs;
+    }
+
+    IFlattenOperator<TLeaf: IAnyValue> : IAnyValue {
+        pub pure fn flat() -> slice<TLeaf>;
+    }
+}

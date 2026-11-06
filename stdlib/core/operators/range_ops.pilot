@@ -1,0 +1,33 @@
+// =========================================================================
+// FILE: stdlib/core/operators/range_ops.pilot
+// RANGE, SPAN, STEP & BOUNDS OPERATOR PROTOCOLS (`..`, `..<`, `..=`, `:`, `>..`, `>..<`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.RangeOps;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub interface {
+    IRangeOperator<TRhs: IValue, TOut: IValue> : IValue {
+        pub pure:
+            op ..< (rhs: TRhs) -> TOut;
+            op ..  (rhs: TRhs) -> TOut;
+    }
+
+    ISpanOperator<TRhs: IValue, TOut: IValue> : IValue {
+        pub pure op ..= (rhs: TRhs) -> TOut;
+    }
+
+    IStepOperator<TStep: IValue, TOut: IValue> : IValue {
+        pub pure op : (step_by: TStep) -> TOut;
+    }
+
+    IOpenRangeOperator<TRhs: IValue, TOut: IValue> : IValue {
+        pub pure op >..< (rhs: TRhs) -> TOut;
+    }
+
+    IAfterRangeOperator<TOut: IValue> : IValue {
+        pub pure op >.. () -> TOut;
+    }
+}

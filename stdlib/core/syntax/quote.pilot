@@ -1,0 +1,18 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/quote.pilot
+// HOMOICONIC AST QUOTING & COMPILE-TIME UNQUOTING CONSTRUCTS
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Quote;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub partial struct {
+    // AST Quoting marker contract
+    [Layout(c_abi)]
+    AstQuoteContext : IValue {
+        pub depth: usize;
+        pub is_spliced: bool;
+    }
+}

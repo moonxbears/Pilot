@@ -1,0 +1,15 @@
+// =========================================================================
+// FILE: stdlib/core/operators/coalesce.pilot
+// NULL-COALESCING FALLBACK OPERATOR PROTOCOL (`op ??`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.Coalesce;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub interface {
+    ICoalesceOperator<TOut: IAnyValue> : IAnyValue {
+        pub pure op ?? (fallback: TOut) -> TOut;
+    }
+}

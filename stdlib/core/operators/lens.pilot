@@ -1,0 +1,15 @@
+// =========================================================================
+// FILE: stdlib/core/operators/lens.pilot
+// STRIDED COLUMN PROJECTION LENS OPERATOR PROTOCOL (`op ~>`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.Lens;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub interface {
+    ILensOperator<TLens: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op ~> (lens: TLens) -> TOut;
+    }
+}

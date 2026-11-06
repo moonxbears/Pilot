@@ -1,0 +1,23 @@
+// =========================================================================
+// FILE: stdlib/core/operators/sat_math.pilot
+// SATURATING ARITHMETIC OPERATOR PROTOCOLS (`op +|`, `op -|`, `op *|`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.SatMath;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub interface {
+    ISatAddOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op +| (rhs: TRhs) -> TOut;
+    }
+
+    ISatSubOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op -| (rhs: TRhs) -> TOut;
+    }
+
+    ISatMulOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op *| (rhs: TRhs) -> TOut;
+    }
+}

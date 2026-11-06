@@ -1,0 +1,16 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/guard.pilot
+// GUARD EARLY EXIT SYNTAX MACRO (`guard(cond, else_body)`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Guard;
+
+use Pilot.Core.Genesis::*;
+
+pub syntax {
+    guard(cond, else_body) => quote {
+        if !($cond) {
+            $else_body
+        }
+    };
+}

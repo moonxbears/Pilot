@@ -1,0 +1,27 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/switch.pilot
+// PATTERN-MATCHING SWITCH SYNTAX MACRO (`switch(target, arms)`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Switch;
+
+use Pilot.Core.Genesis::*;
+
+pub syntax {
+    switch(target, arms) => quote {
+        {
+            let __sw_target = $target;
+            $arms
+        }
+    };
+
+    case(pat, body) => quote {
+        if __sw_target == $pat {
+            $body
+        }
+    };
+
+    default(body) => quote {
+        $body
+    };
+}

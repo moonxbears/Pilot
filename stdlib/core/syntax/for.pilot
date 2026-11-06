@@ -1,0 +1,22 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/for.pilot
+// FOR ITERATION STATEMENT SYNTAX MACRO (`for(binding, iterable, body)`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.For;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub syntax {
+    for(binding, iterable, body) => quote {
+        {
+            var __enum = ($iterable).get_enumerator();
+            loop {
+                if !__enum.move_next() { break; }
+                let $binding = __enum.current;
+                $body
+            }
+        }
+    };
+}

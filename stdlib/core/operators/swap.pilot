@@ -1,0 +1,15 @@
+// =========================================================================
+// FILE: stdlib/core/operators/swap.pilot
+// IN-PLACE ZERO-ALLOCATION SWAP OPERATOR PROTOCOL (`op :=:`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.Swap;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub interface {
+    ISwapOperator<TRhs: IAnyValue> : IAnyValue {
+        pub var op :=: (rhs: var ref<TRhs>);
+    }
+}

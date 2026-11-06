@@ -1,0 +1,19 @@
+// =========================================================================
+// FILE: stdlib/core/operators/sub.pilot
+// SUBTRACTION & UNARY NEGATION OPERATOR PROTOCOLS (`op -`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Operators.Sub;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub interface {
+    ISubOperator<TRhs: IAnyValue, TOut: IAnyValue> : IAnyValue {
+        pub pure op - (rhs: TRhs) -> TOut;
+    }
+
+    INegOperator<TOut: IAnyValue> : IAnyValue {
+        pub pure op - () -> TOut;
+    }
+}

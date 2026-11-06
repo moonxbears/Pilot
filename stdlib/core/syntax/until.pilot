@@ -1,0 +1,17 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/until.pilot
+// UNTIL LOOP STATEMENT SYNTAX MACRO (`until(cond, body)`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Until;
+
+use Pilot.Core.Genesis::*;
+
+pub syntax {
+    until(cond, body) => quote {
+        loop {
+            if $cond { break; }
+            $body
+        }
+    };
+}
