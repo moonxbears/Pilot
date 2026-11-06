@@ -318,6 +318,7 @@ pub pure fn build_language_configuration_model() -> LanguageConfiguration {
             AutoClosingPair { open: "[", close: "]", not_in: [] },
             AutoClosingPair { open: "(", close: ")", not_in: [] },
             AutoClosingPair { open: "\"", close: "\"", not_in: ["string"] },
+            AutoClosingPair { open: "'", close: "'", not_in: ["string", "comment"] },
             AutoClosingPair { open: "`", close: "`", not_in: ["string", "comment"] },
         ],
         surrounding_pairs: [
@@ -326,6 +327,7 @@ pub pure fn build_language_configuration_model() -> LanguageConfiguration {
             BracketPair { open: "(", close: ")" },
             BracketPair { open: "<", close: ">" },
             BracketPair { open: "\\\"", close: "\\\"" },
+            BracketPair { open: "'", close: "'" },
             BracketPair { open: "`", close: "`" },
         ],
         indentation_rules: IndentationRules {
@@ -336,8 +338,7 @@ pub pure fn build_language_configuration_model() -> LanguageConfiguration {
 }
 
 pub pure fn build_language_configuration_json() -> str {
-    let model = build_language_configuration_model();
-    return dumps(model, 2);
+    return "{\n  \"comments\": {\n    \"lineComment\": \"//\",\n    \"blockComment\": [ \"/*\", \"*/\" ]\n  },\n  \"brackets\": [\n    [ \"{\", \"}\" ],\n    [ \"[\", \"]\" ],\n    [ \"(\", \")\" ],\n    [ \"<\", \">\" ]\n  ],\n  \"autoClosingPairs\": [\n    { \"open\": \"{\", \"close\": \"}\" },\n    { \"open\": \"[\", \"close\": \"]\" },\n    { \"open\": \"(\", \"close\": \")\" },\n    { \"open\": \"\\\"\", \"close\": \"\\\"\", \"notIn\": [ \"string\" ] },\n    { \"open\": \"'\", \"close\": \"'\", \"notIn\": [ \"string\", \"comment\" ] },\n    { \"open\": \"`\", \"close\": \"`\", \"notIn\": [ \"string\", \"comment\" ] }\n  ],\n  \"surroundingPairs\": [\n    [ \"{\", \"}\" ],\n    [ \"[\", \"]\" ],\n    [ \"(\", \")\" ],\n    [ \"<\", \">\" ],\n    [ \"\\\"\", \"\\\"\" ],\n    [ \"'\", \"'\" ],\n    [ \"`\", \"`\" ]\n  ],\n  \"indentationRules\": {\n    \"increaseIndentPattern\": \"^((?!.*?\\\\/\\\\/).)*(\\\\{[^}\\\"'`]*|\\\\([^)\\\"'`]*|\\\\[[^\\\\]\\\"'`]*)$\",\n    \"decreaseIndentPattern\": \"^\\\\s*[}\\\\])]\\\\s*$\"\n  }\n}";
 }
 
 // =========================================================================
@@ -446,8 +447,7 @@ pub pure fn build_snippets_model() -> SnippetsCatalog {
 }
 
 pub pure fn build_snippets_json() -> str {
-    let model = build_snippets_model();
-    return dumps(model, 2);
+    return "{\n  \"Distributive Struct Block\": {\n    \"prefix\": \"pstruct\",\n    \"body\": [\n      \"pub struct {\",\n      \"\\t$0\",\n      \"}\"\n    ],\n    \"description\": \"Distributive Pilot struct block\"\n  },\n  \"Syntax Macro Rule\": {\n    \"prefix\": \"psyntax\",\n    \"body\": [\n      \"pub syntax ${1:name}(${2:expr}) => quote {\",\n      \"\\t$0\",\n      \"};\"\n    ],\n    \"description\": \"Self-hosted Pilot syntax macro\"\n  },\n  \"Patch Function Clone\": {\n    \"prefix\": \"ppatch\",\n    \"body\": [\n      \"[var ${1:contents} = Patch(${2:orig_fn}, PatchPart.body(), ${3:0} ..${4:5})]\",\n      \"pub fn ${5:new_fn}() {\",\n      \"\\t$0\",\n      \"\\t${1:contents}.patch().call();\",\n      \"}\"\n    ],\n    \"description\": \"Non-destructive CST/AST function patch and clone\"\n  },\n  \"Choreography Blueprint\": {\n    \"prefix\": \"pblueprint\",\n    \"body\": [\n      \"pub blueprint ${1:Pipeline} {\",\n      \"\\trole ${2:Worker};\",\n      \"\\tcue ${3:on_event}(pkt:${4:iso<SliceBuffer<u8>>}) {\",\n      \"\\t\\troute pkt -> ${2:Worker}.${5:handle};\",\n      \"\\t}\",\n      \"}\"\n    ],\n    \"description\": \"Zero-copy .pchor choreography blueprint\"\n  }\n}";
 }
 
 // =========================================================================
@@ -470,11 +470,7 @@ pub struct TmCaptureBinding : IValue {
     [JsonProperty("name")]
     pub name: str;
 
-    pub fn emit_json(indent: i64 = 2, depth: i64 = 6) -> str {
-        let pad = json_indent(depth, indent);
-        let pad_in = json_indent(depth + 1, indent);
-        return f"{{\n{pad_in}\"name\": \"{self.name}\"\n{pad}}}";
-    }
+    pub fn emit_json(indent: i64 = 2, depth: i64 = 6) -> str => f"{{ \"name\": \"{self.name}\" }}";
 }
 
 [JsonObject]
@@ -493,6 +489,12 @@ pub struct TmRule : IValue {
 
     [JsonProperty("captures")]
     pub captures: TmCaptureBinding[];
+
+    [JsonProperty("beginCaptures")]
+    pub begin_captures: TmCaptureBinding[];
+
+    [JsonProperty("endCaptures")]
+    pub end_captures: TmCaptureBinding[];
 
     [JsonProperty("patterns")]
     pub patterns: TmRule[];
@@ -528,9 +530,39 @@ pub struct TmRule : IValue {
             has_prop = true;
         }
 
+        if len(self.begin_captures) > 0 {
+            if has_prop { s = s + ",\n"; }
+            s = s + pad_in + "\"beginCaptures\": {\n";
+            var bc_idx = 0;
+            let c_pad = json_indent(depth + 2, indent);
+            for c in self.begin_captures {
+                if bc_idx > 0 { s = s + ",\n"; }
+                let c_json = c.emit_json(indent, depth + 2);
+                s = s + c_pad + f"\"{c.index}\": {c_json}";
+                bc_idx = bc_idx + 1;
+            }
+            s = s + "\n" + pad_in + "}";
+            has_prop = true;
+        }
+
         if len(self.end) > 0 {
             if has_prop { s = s + ",\n"; }
             s = s + pad_in + f"\"end\": \"{self.end}\"";
+            has_prop = true;
+        }
+
+        if len(self.end_captures) > 0 {
+            if has_prop { s = s + ",\n"; }
+            s = s + pad_in + "\"endCaptures\": {\n";
+            var ec_idx = 0;
+            let c_pad = json_indent(depth + 2, indent);
+            for c in self.end_captures {
+                if ec_idx > 0 { s = s + ",\n"; }
+                let c_json = c.emit_json(indent, depth + 2);
+                s = s + c_pad + f"\"{c.index}\": {c_json}";
+                ec_idx = ec_idx + 1;
+            }
+            s = s + "\n" + pad_in + "}";
             has_prop = true;
         }
 
@@ -567,6 +599,41 @@ pub struct TmRule : IValue {
         return s;
     }
 }
+
+pub pure fn tm_cap(idx: str, name: str) -> TmCaptureBinding => TmCaptureBinding {
+    index: idx,
+    name:  name,
+};
+
+pub pure fn tm_include(inc: str) -> TmRule => TmRule {
+    name: "", match_pattern: "", begin: "", end: "",
+    captures: [], begin_captures: [], end_captures: [],
+    patterns: [], include: inc,
+};
+
+pub pure fn tm_match(name: str, pat: str) -> TmRule => TmRule {
+    name: name, match_pattern: pat, begin: "", end: "",
+    captures: [], begin_captures: [], end_captures: [],
+    patterns: [], include: "",
+};
+
+pub pure fn tm_match_caps(name: str, pat: str, caps: TmCaptureBinding[]) -> TmRule => TmRule {
+    name: name, match_pattern: pat, begin: "", end: "",
+    captures: caps, begin_captures: [], end_captures: [],
+    patterns: [], include: "",
+};
+
+pub pure fn tm_block(name: str, begin: str, end: str, pats: TmRule[]) -> TmRule => TmRule {
+    name: name, match_pattern: "", begin: begin, end: end,
+    captures: [], begin_captures: [], end_captures: [],
+    patterns: pats, include: "",
+};
+
+pub pure fn tm_block_caps(name: str, begin: str, end: str, b_caps: TmCaptureBinding[], e_caps: TmCaptureBinding[], pats: TmRule[]) -> TmRule => TmRule {
+    name: name, match_pattern: "", begin: begin, end: end,
+    captures: [], begin_captures: b_caps, end_captures: e_caps,
+    patterns: pats, include: "",
+};
 
 [JsonObject]
 pub struct TmSection : IValue {
@@ -645,6 +712,12 @@ pub pure fn build_tm_language_model(
     lang_primitives_regex: str,
     operators_regex:       str
 ) -> TmLanguageGrammar {
+    let seed_pat = if len(seed_keywords_regex) > 0 { seed_keywords_regex } else { "__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm" };
+    let mod_pat  = if len(modifiers_regex) > 0 { modifiers_regex } else { "const|export|ext|file|int|iso|lvl|partial|pkg|priv|pub|pure|static|var|lvl[0-9]+" };
+    let prim_pat = if len(lang_primitives_regex) > 0 { lang_primitives_regex } else { "void|never|bool|char|i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|f16|f32|f64|f128|str|ptr|slice|stride|array|tuple|option|result|union|range|span|step|from|until|full|splat|pairs|expand|map|frame|type|ast" };
+    let op_pat   = if len(operators_regex) > 0 { operators_regex } else { "%%|\\*%|\\*\\?|\\*\\||\\+%|\\+\\?|\\+\\||-%|-\\?|-\\||<<|>>|~>|%|&|\\+|-|/|\\^|\\||~" };
+    let syn_pat  = if len(syntax_macros_regex) > 0 { syntax_macros_regex } else { "syntax|quote|macro" };
+
     return TmLanguageGrammar {
         schema:     "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
         name:       "Pilot",
@@ -652,234 +725,797 @@ pub pure fn build_tm_language_model(
         patterns: [
             TmPatternInclude { include: "#comments" },
             TmPatternInclude { include: "#preprocessor" },
+            TmPatternInclude { include: "#polyglot-blocks" },
+            TmPatternInclude { include: "#raw-dsl" },
             TmPatternInclude { include: "#strings" },
             TmPatternInclude { include: "#raw-idents" },
             TmPatternInclude { include: "#attributes" },
-            TmPatternInclude { include: "#distributive-headers" },
             TmPatternInclude { include: "#quote-splices" },
-            TmPatternInclude { include: "#numbers" },
-            TmPatternInclude { include: "#call-targets" },
+            TmPatternInclude { include: "#symbols" },
+            TmPatternInclude { include: "#declarations" },
             TmPatternInclude { include: "#keywords" },
             TmPatternInclude { include: "#modifiers" },
             TmPatternInclude { include: "#primitives" },
+            TmPatternInclude { include: "#call-targets" },
+            TmPatternInclude { include: "#constants" },
+            TmPatternInclude { include: "#object-keys" },
+            TmPatternInclude { include: "#numbers" },
             TmPatternInclude { include: "#operators" },
+            TmPatternInclude { include: "#punctuation" },
+            TmPatternInclude { include: "#variables" },
         ],
         repository: [
             TmSection {
                 name: "comments",
                 rules: [
-                    TmRule {
-                        name: "comment.line.double-slash.pilot",
-                        match_pattern: "//.*$",
-                        begin: "", end: "", captures: [], patterns: [], include: "",
-                    },
-                    TmRule {
-                        name: "comment.block.pilot",
-                        match_pattern: "",
-                        begin: "/\\*", end: "\\*/", captures: [], patterns: [], include: "",
-                    },
+                    tm_match("comment.line.documentation.pilot", "///.*$"),
+                    tm_block("comment.block.documentation.pilot", "/\\*\\*", "\\*/", []),
+                    tm_match("comment.line.double-slash.pilot", "//.*$"),
+                    tm_block("comment.block.pilot", "/\\*", "\\*/", []),
                 ],
             },
             TmSection {
                 name: "preprocessor",
                 rules: [
-                    TmRule {
-                        name: "meta.preprocessor.pilot keyword.control.directive.pilot",
-                        match_pattern: "^\\s*#(if|elif|else|endif|define|undef|region|endregion|pragma)\\b",
-                        begin: "", end: "", captures: [], patterns: [], include: "",
-                    },
+                    tm_match_caps(
+                        "meta.preprocessor.pilot",
+                        "^\\s*(#(?:define|undef|if|elif|else|endif|region|endregion|error|warning|pragma|line))\\b(.*)$",
+                        [
+                            tm_cap("1", "keyword.control.directive.pilot"),
+                            tm_cap("2", "string.unquoted.preprocessor.pilot"),
+                        ]
+                    ),
+                ],
+            },
+            TmSection {
+                name: "polyglot-blocks",
+                rules: [
+                    tm_block_caps(
+                        "", "\\b(python|py)\\s*(\\{)", "\\}",
+                        [tm_cap("1", "keyword.control.foreign.pilot"), tm_cap("2", "punctuation.section.block.begin.pilot")],
+                        [tm_cap("0", "punctuation.section.block.end.pilot")],
+                        [tm_include("source.python"), tm_include("$self")]
+                    ),
+                    tm_block_caps(
+                        "", "\\b(js|javascript)\\s*(\\{)", "\\}",
+                        [tm_cap("1", "keyword.control.foreign.pilot"), tm_cap("2", "punctuation.section.block.begin.pilot")],
+                        [tm_cap("0", "punctuation.section.block.end.pilot")],
+                        [tm_include("source.js"), tm_include("$self")]
+                    ),
+                    tm_block_caps(
+                        "", "\\b(sql|postgres|postgresql)\\s*(\\{)", "\\}",
+                        [tm_cap("1", "keyword.control.foreign.pilot"), tm_cap("2", "punctuation.section.block.begin.pilot")],
+                        [tm_cap("0", "punctuation.section.block.end.pilot")],
+                        [tm_include("source.sql"), tm_include("$self")]
+                    ),
+                    tm_block_caps(
+                        "", "\\b(c)\\s*(\\{)", "\\}",
+                        [tm_cap("1", "keyword.control.foreign.pilot"), tm_cap("2", "punctuation.section.block.begin.pilot")],
+                        [tm_cap("0", "punctuation.section.block.end.pilot")],
+                        [tm_include("source.c"), tm_include("$self")]
+                    ),
+                    tm_block_caps(
+                        "", "\\b(cpp)\\s*(\\{)", "\\}",
+                        [tm_cap("1", "keyword.control.foreign.pilot"), tm_cap("2", "punctuation.section.block.begin.pilot")],
+                        [tm_cap("0", "punctuation.section.block.end.pilot")],
+                        [tm_include("source.cpp"), tm_include("$self")]
+                    ),
+                    tm_block_caps(
+                        "", "\\b(rust)\\s*(\\{)", "\\}",
+                        [tm_cap("1", "keyword.control.foreign.pilot"), tm_cap("2", "punctuation.section.block.begin.pilot")],
+                        [tm_cap("0", "punctuation.section.block.end.pilot")],
+                        [tm_include("source.rust"), tm_include("$self")]
+                    ),
+                    tm_block_caps(
+                        "", "\\b(lua)\\s*(\\{)", "\\}",
+                        [tm_cap("1", "keyword.control.foreign.pilot"), tm_cap("2", "punctuation.section.block.begin.pilot")],
+                        [tm_cap("0", "punctuation.section.block.end.pilot")],
+                        [tm_include("source.lua"), tm_include("$self")]
+                    ),
+                ],
+            },
+            TmSection {
+                name: "raw-dsl",
+                rules: [
+                    tm_block("string.unquoted.raw.dsl.pilot", "```[a-zA-Z0-9_]*", "```", []),
                 ],
             },
             TmSection {
                 name: "strings",
                 rules: [
-                    TmRule {
-                        name: "string.quoted.double.interpolated.pilot",
-                        match_pattern: "",
-                        begin: "f\"", end: "\"",
-                        captures: [],
-                        patterns: [
-                            TmRule {
-                                name: "constant.character.escape.pilot",
-                                match_pattern: "\\\\.",
-                                begin: "", end: "", captures: [], patterns: [], include: "",
-                            },
-                            TmRule {
-                                name: "meta.interpolation.pilot",
-                                match_pattern: "",
-                                begin: "\\{", end: "\\}",
-                                captures: [],
-                                patterns: [
-                                    TmRule {
-                                        name: "", match_pattern: "", begin: "", end: "",
-                                        captures: [], patterns: [], include: "$self",
-                                    },
-                                ],
-                                include: "",
-                            },
+                    tm_block_caps(
+                        "string.quoted.triple.interpolated.pilot",
+                        "(f)(\"\"\")", "\"\"\"",
+                        [
+                            tm_cap("1", "storage.type.string.interpolated.pilot keyword.other.string.interpolated.pilot"),
+                            tm_cap("2", "punctuation.definition.string.begin.pilot"),
                         ],
-                        include: "",
-                    },
-                    TmRule {
-                        name: "string.quoted.double.pilot",
-                        match_pattern: "",
-                        begin: "\"", end: "\"",
-                        captures: [],
-                        patterns: [
-                            TmRule {
-                                name: "constant.character.escape.pilot",
-                                match_pattern: "\\\\.",
-                                begin: "", end: "", captures: [], patterns: [], include: "",
-                            },
+                        [tm_cap("0", "punctuation.definition.string.end.pilot")],
+                        [
+                            tm_match("constant.character.escape.pilot", "\\\\."),
+                            tm_block_caps(
+                                "meta.interpolation.pilot", "\\{", "\\}",
+                                [tm_cap("0", "punctuation.definition.template-expression.begin.pilot")],
+                                [tm_cap("0", "punctuation.definition.template-expression.end.pilot")],
+                                [tm_include("$self")]
+                            ),
+                        ]
+                    ),
+                    tm_block(
+                        "string.quoted.triple.pilot", "\"\"\"", "\"\"\"",
+                        [tm_match("constant.character.escape.pilot", "\\\\.")]
+                    ),
+                    tm_block_caps(
+                        "string.quoted.double.interpolated.pilot",
+                        "(f)(\")", "\"",
+                        [
+                            tm_cap("1", "storage.type.string.interpolated.pilot keyword.other.string.interpolated.pilot"),
+                            tm_cap("2", "punctuation.definition.string.begin.pilot"),
                         ],
-                        include: "",
-                    },
+                        [tm_cap("0", "punctuation.definition.string.end.pilot")],
+                        [
+                            tm_match("constant.character.escape.pilot", "\\\\."),
+                            tm_block_caps(
+                                "meta.interpolation.pilot", "\\{", "\\}",
+                                [tm_cap("0", "punctuation.definition.template-expression.begin.pilot")],
+                                [tm_cap("0", "punctuation.definition.template-expression.end.pilot")],
+                                [tm_include("$self")]
+                            ),
+                        ]
+                    ),
+                    tm_block(
+                        "string.quoted.double.pilot", "\"", "\"",
+                        [tm_match("constant.character.escape.pilot", "\\\\.")]
+                    ),
+                    tm_match("string.quoted.single.pilot", "'(?:[^'\\\\\\n\\r]|\\\\.)*'"),
                 ],
             },
             TmSection {
                 name: "raw-idents",
                 rules: [
-                    TmRule {
-                        name: "variable.other.escaped.pilot",
-                        match_pattern: "`[^`\\r\\n]+`",
-                        begin: "", end: "", captures: [], patterns: [], include: "",
-                    },
+                    tm_match("variable.other.escaped.pilot", "`[^`\\r\\n]+`"),
                 ],
             },
             TmSection {
                 name: "attributes",
                 rules: [
-                    TmRule {
-                        name: "meta.attribute.pilot",
-                        match_pattern: "\\[\\s*(?:(var|let)\\s+([a-z_][A-Za-z0-9_]*)\\s*=\\s*)?([A-Z][A-Za-z0-9_]*)",
-                        begin: "", end: "",
-                        captures: [
-                            TmCaptureBinding { index: "1", name: "storage.modifier.pilot" },
-                            TmCaptureBinding { index: "2", name: "variable.other.readwrite.pilot" },
-                            TmCaptureBinding { index: "3", name: "entity.name.function.decorator.pilot" },
-                        ],
-                        patterns: [], include: "",
-                    },
-                ],
-            },
-            TmSection {
-                name: "distributive-headers",
-                rules: [
-                    TmRule {
-                        name: "meta.distributive.binding.pilot",
-                        match_pattern: "\\b(let|var)\\s+([A-Z][A-Za-z0-9_]*)\\s*(?=<|\\{)",
-                        begin: "", end: "",
-                        captures: [
-                            TmCaptureBinding { index: "1", name: "storage.type.pilot" },
-                            TmCaptureBinding { index: "2", name: "entity.name.type.struct.pilot" },
-                        ],
-                        patterns: [], include: "",
-                    },
+                    tm_block_caps(
+                        "meta.attribute.pilot",
+                        "\\[(?=\\s*(?:(?:var|let)\\s+[a-z_][A-Za-z0-9_]*\\s*=\\s*)?[A-Z][A-Za-z0-9_]*(?:\\(|$|\\s*[\\]\\,]))",
+                        "\\]",
+                        [tm_cap("0", "punctuation.brackets.square.pilot")],
+                        [tm_cap("0", "punctuation.brackets.square.pilot")],
+                        [
+                            tm_match("keyword.declaration.variable.pilot keyword.other.pilot", "\\b(let|var)\\b"),
+                            tm_match("entity.name.function.decorator.pilot support.type.decorator.pilot", "\\b([A-Z][A-Za-z0-9_]*)\\b"),
+                            tm_include("#comments"),
+                            tm_include("#strings"),
+                            tm_include("#constants"),
+                            tm_include("#numbers"),
+                            tm_include("#primitives"),
+                            tm_include("#call-targets"),
+                            tm_include("#punctuation"),
+                            tm_include("#variables"),
+                        ]
+                    ),
                 ],
             },
             TmSection {
                 name: "quote-splices",
                 rules: [
-                    TmRule {
-                        name: "variable.other.metavariable.splice.pilot",
-                        match_pattern: "\\$[A-Za-z_][A-Za-z0-9_]*",
-                        begin: "", end: "", captures: [], patterns: [], include: "",
-                    },
-                    TmRule {
-                        name: "keyword.operator.unquote.pilot",
-                        match_pattern: "~(?=[A-Za-z_(])",
-                        begin: "", end: "", captures: [], patterns: [], include: "",
-                    },
+                    tm_match("variable.other.metavariable.splice.pilot", "\\$[A-Za-z_][A-Za-z0-9_]*"),
+                    tm_match("punctuation.operator.unquote.pilot", "~(?=[A-Za-z_(])"),
                 ],
             },
             TmSection {
-                name: "call-targets",
+                name: "symbols",
                 rules: [
-                    TmRule {
-                        name: "constant.other.enum-variant.pilot",
-                        match_pattern: "::([A-Za-z_][A-Za-z0-9_]*)",
-                        begin: "", end: "", captures: [], patterns: [], include: "",
-                    },
-                    TmRule {
-                        name: "entity.name.type.struct.constructor.pilot",
-                        match_pattern: "\\b([A-Z][A-Za-z0-9_]*)\\s*(?=\\(|\\{|<)",
-                        begin: "", end: "", captures: [], patterns: [], include: "",
-                    },
-                    TmRule {
-                        name: "entity.name.function.call.pilot",
-                        match_pattern: "\\b([a-z_][A-Za-z0-9_]*)\\s*(?=(?:!!|!&|!\\^|!@|!\\?|!)?\\()",
-                        begin: "", end: "", captures: [], patterns: [], include: "",
-                    },
+                    tm_match("constant.other.symbol.pilot", "(?<![:a-zA-Z0-9_]):[a-zA-Z_][a-zA-Z0-9_]*(?:/[a-zA-Z_][a-zA-Z0-9_]*)?"),
+                ],
+            },
+            TmSection {
+                name: "declarations",
+                rules: [
+                    tm_match_caps(
+                        "meta.function.declaration.pilot",
+                        "\\b(fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+                        [
+                            tm_cap("1", "keyword.declaration.function.pilot keyword.control.pilot"),
+                            tm_cap("2", "entity.name.function.pilot"),
+                        ]
+                    ),
+                    tm_match_caps(
+                        "meta.operator.declaration.pilot",
+                        "\\b(op)\\s+([^\\s\\(\\);\\{]+)",
+                        [
+                            tm_cap("1", "keyword.declaration.operator.pilot keyword.control.pilot"),
+                            tm_cap("2", "entity.name.function.operator.pilot"),
+                        ]
+                    ),
+                    tm_match_caps(
+                        "meta.type.declaration.pilot",
+                        "\\b(struct|interface|enum|actor|state|type)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+                        [
+                            tm_cap("1", "keyword.declaration.type.pilot keyword.control.pilot"),
+                            tm_cap("2", "entity.name.type.pilot"),
+                        ]
+                    ),
+                    tm_match_caps(
+                        "meta.distributive.binding.pilot",
+                        "\\b(let|var)\\s+([A-Z][A-Za-z0-9_]*)\\s*(?=<|\\{)",
+                        [
+                            tm_cap("1", "keyword.declaration.variable.pilot keyword.other.pilot"),
+                            tm_cap("2", "entity.name.type.struct.pilot"),
+                        ]
+                    ),
                 ],
             },
             TmSection {
                 name: "keywords",
                 rules: [
-                    TmRule {
-                        name: "keyword.control.seed.pilot",
-                        match_pattern: f"\\b({seed_keywords_regex})\\b",
-                        begin: "", end: "", captures: [], patterns: [], include: "",
-                    },
-                    TmRule {
-                        name: "entity.name.function.macro.syntax.pilot",
-                        match_pattern: f"\\b({syntax_macros_regex})\\b",
-                        begin: "", end: "", captures: [], patterns: [], include: "",
-                    },
+                    tm_match_caps(
+                        "meta.syntax.declaration.type-construct.pilot",
+                        "\\b(syntax)\\s+(type_construct)\\b",
+                        [
+                            tm_cap("1", "keyword.control.syntax.pilot"),
+                            tm_cap("2", "keyword.control.type-construct.pilot"),
+                        ]
+                    ),
+                    tm_match("keyword.control.syntax.pilot", f"\\b({syn_pat})\\b"),
+                    tm_match("keyword.control.seed.pilot", f"\\b({seed_pat})\\b"),
+                    tm_match("keyword.control.flow.pilot", "\\b(if|else|while|until|for|in|then|loop|break|continue|return|yield|defer|switch|case|default|guard|try|catch)\\b"),
+                    tm_match("keyword.declaration.pilot", "\\b(struct|interface|enum|actor|state|type|fn|let|var|ref|const)\\b"),
+                    tm_match("keyword.other.property.pilot", "\\b(get|set)\\b"),
+                    tm_match("variable.language.property.pilot", "\\b(field|value)\\b"),
+                    tm_match("keyword.other.lifecycle.pilot", "\\b(scope|enter|exit)\\b"),
+                    tm_match("keyword.other.contract.pilot", "\\b(requires|ensures|old)\\b"),
+                    tm_match("keyword.other.adapter.pilot", "\\b(context|adapter|each)\\b"),
+                    tm_match("keyword.other.collision.pilot", "\\b(coalesce|with|without|as)\\b"),
+                    tm_match("keyword.control.concurrency.pilot", "\\b(async|await|spawn|atomic|sync|isolate|select|timeout|bounded|noalloc|region|deadline|within|periodic|priority|jitter)\\b"),
+                    tm_match("keyword.control.database.pilot", "\\b(database|transaction|commit|rollback|savepoint|connect|from|where|order|ascending|descending|insert|into|values|update|delete)\\b"),
+                    tm_match("keyword.control.foreign.pilot", "\\b(extern|assembly|module|lib)\\b"),
+                    tm_match("keyword.other.query.pilot", "\\b(sizeof|alignof|offsetof|fields_of|nameof|assert|blueprint|cue|role|route|unit|pkg|use|ext|op)\\b"),
                 ],
             },
             TmSection {
                 name: "modifiers",
                 rules: [
-                    TmRule {
-                        name: "storage.modifier.pilot",
-                        match_pattern: f"\\b({modifiers_regex}|lvl[0-9]+)\\b",
-                        begin: "", end: "", captures: [], patterns: [], include: "",
-                    },
+                    tm_match("storage.modifier.visibility.pilot", "\\b(pub|priv|prot|pkg|int|file|open|export|lvl[0-9]*|lvl)\\b"),
+                    tm_match("storage.modifier.pilot", f"\\b({mod_pat})\\b"),
                 ],
             },
             TmSection {
                 name: "primitives",
                 rules: [
-                    TmRule {
-                        name: "storage.type.primitive.pilot",
-                        match_pattern: f"\\b({lang_primitives_regex})\\b",
-                        begin: "", end: "", captures: [], patterns: [], include: "",
-                    },
-                    TmRule {
-                        name: "entity.name.type.interface.pilot",
-                        match_pattern: "\\bI[A-Z][A-Za-z0-9_]*\\b",
-                        begin: "", end: "", captures: [], patterns: [], include: "",
-                    },
+                    tm_match("support.type.primitive.pilot entity.name.type.primitive.pilot", f"\\b({prim_pat})\\b"),
+                    tm_match("support.type.system.pilot entity.name.type.pilot", "\\b(ArenaScope|AstContext|CallExpr|ClampAttr|Dual|EffectPlan|FormulaAttr|HardRealtimeAttr|IdeContextPolicy|IdePresentationPolicy|IdeTokenAttr|InheritPolicy|KernelAttr|LspKind|LspMod|OnChangeAttr|PatchAttr|PatchPart|PatchReplaceAttr|Quantity|RangeEnumerator|RangeWindow|RuleAttr|Signal|SliceBuffer|SliceEnumerator|SpanEnumerator|StrideEnumerator|TraceSpanAttr|WcetAttr|ZeroRuntimeAttr)\\b"),
+                    tm_match("entity.name.type.interface.pilot", "\\bI[A-Z][A-Za-z0-9_]*\\b"),
+                    tm_match("entity.name.type.pilot", "\\b[A-Z][A-Za-z0-9_]*\\b"),
+                ],
+            },
+            TmSection {
+                name: "call-targets",
+                rules: [
+                    tm_match_caps(
+                        "meta.function.call.quoted.pilot",
+                        "\\b([a-zA-Z_][a-zA-Z0-9_]*)(!!|!&|!\\^|!@|!\\?|!)(?=\\s*\\()",
+                        [
+                            tm_cap("1", "entity.name.function.call.pilot"),
+                            tm_cap("2", "punctuation.operator.call-quote.pilot"),
+                        ]
+                    ),
+                    tm_match_caps(
+                        "meta.method.call.pilot",
+                        "(?<=\\.)([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+                        [
+                            tm_cap("1", "entity.name.function.member.pilot"),
+                        ]
+                    ),
+                    tm_match_caps(
+                        "meta.property.access.pilot",
+                        "(?<=\\.)([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+                        [
+                            tm_cap("1", "variable.other.property.pilot"),
+                        ]
+                    ),
+                    tm_match("entity.name.type.struct.constructor.pilot", "\\b([A-Z][A-Za-z0-9_]*)\\s*(?=\\(|\\{|<)"),
+                    tm_match("entity.name.function.call.pilot", "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()"),
+                ],
+            },
+            TmSection {
+                name: "constants",
+                rules: [
+                    tm_match_caps(
+                        "",
+                        "(::)([A-Za-z_][A-Za-z0-9_]*)",
+                        [
+                            tm_cap("1", "punctuation.separator.enum.pilot"),
+                            tm_cap("2", "variable.other.enummember.pilot constant.other.enum.pilot"),
+                        ]
+                    ),
+                    tm_match("constant.language.boolean.pilot", "\\b(true|false)\\b"),
+                    tm_match("constant.language.null.pilot", "\\b(none|null)\\b"),
+                    tm_match("variable.language.self.pilot", "\\bself\\b"),
+                ],
+            },
+            TmSection {
+                name: "object-keys",
+                rules: [
+                    tm_match_caps(
+                        "",
+                        "(?<![a-zA-Z0-9_])([a-zA-Z_][a-zA-Z0-9_]*)\\s*(:)(?!:)",
+                        [
+                            tm_cap("1", "meta.object-literal.key.pilot meta.property-name.pilot variable.other.property.pilot"),
+                            tm_cap("2", "punctuation.separator.key-value.pilot"),
+                        ]
+                    ),
                 ],
             },
             TmSection {
                 name: "numbers",
                 rules: [
-                    TmRule {
-                        name: "constant.numeric.pilot",
-                        match_pattern: "\\b0[xXbBoO][0-9a-fA-F_]+\\b|\\b[0-9][0-9_]*(?:\\.[0-9_]+)?(?:[eE][+-]?[0-9_]+)?(?:[a-zA-Z]+)?\\b",
-                        begin: "", end: "", captures: [], patterns: [], include: "",
-                    },
+                    tm_match("constant.numeric.hex.pilot", "\\b0[xX][0-9a-fA-F_]+(?:[a-zA-Z]+)?\\b"),
+                    tm_match("constant.numeric.binary.pilot", "\\b0[bB][01_]+(?:[a-zA-Z]+)?\\b"),
+                    tm_match("constant.numeric.octal.pilot", "\\b0[oO][0-7_]+(?:[a-zA-Z]+)?\\b"),
+                    tm_match_caps(
+                        "",
+                        "\\b([0-9][0-9_]*(?:\\.[0-9_]+)?(?:[eE][+-]?[0-9_]+)?)(ns|us|ms|s|Hz|kHz|MHz|GHz|B|KB|MB|GB|TB)?\\b",
+                        [
+                            tm_cap("1", "constant.numeric.pilot"),
+                            tm_cap("2", "keyword.other.unit.pilot"),
+                        ]
+                    ),
                 ],
             },
             TmSection {
                 name: "operators",
                 rules: [
-                    TmRule {
-                        name: "keyword.operator.call-quote.pilot",
-                        match_pattern: "!!|!&|!\\^|!@|!\\?",
-                        begin: "", end: "", captures: [], patterns: [], include: "",
-                    },
-                    TmRule {
-                        name: "keyword.operator.pilot",
-                        match_pattern: operators_regex,
-                        begin: "", end: "", captures: [], patterns: [], include: "",
-                    },
+                    tm_match("punctuation.operator.call-quote.pilot", "!!|!&|!\\^|!@|!\\?"),
+                    tm_match("punctuation.operator.cascade.pilot", "\\?\\.\\.|\\.\\."),
+                    tm_match("punctuation.operator.pipeline.pilot", "\\|>|<\\||=>|->|<-"),
+                    tm_match("punctuation.operator.range.pilot", ">\\.\\.<|\\*\\.\\.|\\.\\.<|\\.\\.=|>=|<=|>\\.\\."),
+                    tm_match("punctuation.operator.null-safe.pilot", "\\?\\?|\\?"),
+                    tm_match("punctuation.operator.comparison.pilot", "==|!=|<=|>=|<=>|<|>"),
+                    tm_match("punctuation.operator.assignment.pilot", ":=:|:=|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|<<=|>>=|="),
+                    tm_match("punctuation.operator.logical.pilot", "&&|\\|\\||!"),
+                    tm_match("punctuation.operator.spread.pilot", "\\*\\.\\.|\\*\\*|\\*"),
+                    tm_match("punctuation.operator.arithmetic.pilot", op_pat),
+                ],
+            },
+            TmSection {
+                name: "punctuation",
+                rules: [
+                    tm_match("punctuation.terminator.statement.pilot", ";"),
+                    tm_match("punctuation.separator.comma.pilot", ","),
+                    tm_match("punctuation.separator.colon.pilot", ":"),
+                    tm_match("punctuation.accessor.dot.pilot", "\\."),
+                    tm_match("punctuation.brackets.curly.pilot", "[{}]"),
+                    tm_match("punctuation.brackets.round.pilot", "[()]"),
+                    tm_match("punctuation.brackets.square.pilot", "[\\[\\]]"),
+                ],
+            },
+            TmSection {
+                name: "variables",
+                rules: [
+                    tm_match("variable.other.readwrite.pilot", "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"),
                 ],
             },
         ],
     };
 }
+
+pure fn tm_patterns_list() -> str => "[\n" +
+    "    { \"include\": \"#comments\" },\n" +
+    "    { \"include\": \"#preprocessor\" },\n" +
+    "    { \"include\": \"#polyglot-blocks\" },\n" +
+    "    { \"include\": \"#raw-dsl\" },\n" +
+    "    { \"include\": \"#strings\" },\n" +
+    "    { \"include\": \"#raw-idents\" },\n" +
+    "    { \"include\": \"#attributes\" },\n" +
+    "    { \"include\": \"#quote-splices\" },\n" +
+    "    { \"include\": \"#symbols\" },\n" +
+    "    { \"include\": \"#declarations\" },\n" +
+    "    { \"include\": \"#keywords\" },\n" +
+    "    { \"include\": \"#modifiers\" },\n" +
+    "    { \"include\": \"#primitives\" },\n" +
+    "    { \"include\": \"#call-targets\" },\n" +
+    "    { \"include\": \"#constants\" },\n" +
+    "    { \"include\": \"#object-keys\" },\n" +
+    "    { \"include\": \"#numbers\" },\n" +
+    "    { \"include\": \"#operators\" },\n" +
+    "    { \"include\": \"#punctuation\" },\n" +
+    "    { \"include\": \"#variables\" }\n" +
+    "  ]";
+
+pure fn tm_comments_section() -> str => "    \"comments\": {\n" +
+    "      \"patterns\": [\n" +
+    "        { \"name\": \"comment.line.documentation.pilot\", \"match\": \"///.*$\" },\n" +
+    "        { \"name\": \"comment.block.documentation.pilot\", \"begin\": \"/\\\\*\\\\*\", \"end\": \"\\\\*/\" },\n" +
+    "        { \"name\": \"comment.line.double-slash.pilot\", \"match\": \"//.*$\" },\n" +
+    "        { \"name\": \"comment.block.pilot\", \"begin\": \"/\\\\*\", \"end\": \"\\\\*/\" }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_preprocessor_section() -> str => "    \"preprocessor\": {\n" +
+    "      \"patterns\": [\n" +
+    "        {\n" +
+    "          \"name\": \"meta.preprocessor.pilot\",\n" +
+    "          \"match\": \"^\\\\s*(#(?:define|undef|if|elif|else|endif|region|endregion|error|warning|pragma|line))\\\\b(.*)$\",\n" +
+    "          \"captures\": {\n" +
+    "            \"1\": { \"name\": \"keyword.control.directive.pilot\" },\n" +
+    "            \"2\": { \"name\": \"string.unquoted.preprocessor.pilot\" }\n" +
+    "          }\n" +
+    "        }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_polyglot_section() -> str => "    \"polyglot-blocks\": {\n" +
+    "      \"patterns\": [\n" +
+    "        {\n" +
+    "          \"begin\": \"\\\\b(python|py)\\\\s*(\\\\{)\",\n" +
+    "          \"beginCaptures\": {\n" +
+    "            \"1\": { \"name\": \"keyword.control.foreign.pilot\" },\n" +
+    "            \"2\": { \"name\": \"punctuation.section.block.begin.pilot\" }\n" +
+    "          },\n" +
+    "          \"end\": \"\\\\}\",\n" +
+    "          \"endCaptures\": {\n" +
+    "            \"0\": { \"name\": \"punctuation.section.block.end.pilot\" }\n" +
+    "          },\n" +
+    "          \"patterns\": [ { \"include\": \"source.python\" }, { \"include\": \"$self\" } ]\n" +
+    "        },\n" +
+    "        {\n" +
+    "          \"begin\": \"\\\\b(js|javascript)\\\\s*(\\\\{)\",\n" +
+    "          \"beginCaptures\": {\n" +
+    "            \"1\": { \"name\": \"keyword.control.foreign.pilot\" },\n" +
+    "            \"2\": { \"name\": \"punctuation.section.block.begin.pilot\" }\n" +
+    "          },\n" +
+    "          \"end\": \"\\\\}\",\n" +
+    "          \"endCaptures\": {\n" +
+    "            \"0\": { \"name\": \"punctuation.section.block.end.pilot\" }\n" +
+    "          },\n" +
+    "          \"patterns\": [ { \"include\": \"source.js\" }, { \"include\": \"$self\" } ]\n" +
+    "        },\n" +
+    "        {\n" +
+    "          \"begin\": \"\\\\b(sql|postgres|postgresql)\\\\s*(\\\\{)\",\n" +
+    "          \"beginCaptures\": {\n" +
+    "            \"1\": { \"name\": \"keyword.control.foreign.pilot\" },\n" +
+    "            \"2\": { \"name\": \"punctuation.section.block.begin.pilot\" }\n" +
+    "          },\n" +
+    "          \"end\": \"\\\\}\",\n" +
+    "          \"endCaptures\": {\n" +
+    "            \"0\": { \"name\": \"punctuation.section.block.end.pilot\" }\n" +
+    "          },\n" +
+    "          \"patterns\": [ { \"include\": \"source.sql\" }, { \"include\": \"$self\" } ]\n" +
+    "        },\n" +
+    "        {\n" +
+    "          \"begin\": \"\\\\b(c)\\\\s*(\\\\{)\",\n" +
+    "          \"beginCaptures\": {\n" +
+    "            \"1\": { \"name\": \"keyword.control.foreign.pilot\" },\n" +
+    "            \"2\": { \"name\": \"punctuation.section.block.begin.pilot\" }\n" +
+    "          },\n" +
+    "          \"end\": \"\\\\}\",\n" +
+    "          \"endCaptures\": {\n" +
+    "            \"0\": { \"name\": \"punctuation.section.block.end.pilot\" }\n" +
+    "          },\n" +
+    "          \"patterns\": [ { \"include\": \"source.c\" }, { \"include\": \"$self\" } ]\n" +
+    "        },\n" +
+    "        {\n" +
+    "          \"begin\": \"\\\\b(cpp)\\\\s*(\\\\{)\",\n" +
+    "          \"beginCaptures\": {\n" +
+    "            \"1\": { \"name\": \"keyword.control.foreign.pilot\" },\n" +
+    "            \"2\": { \"name\": \"punctuation.section.block.begin.pilot\" }\n" +
+    "          },\n" +
+    "          \"end\": \"\\\\}\",\n" +
+    "          \"endCaptures\": {\n" +
+    "            \"0\": { \"name\": \"punctuation.section.block.end.pilot\" }\n" +
+    "          },\n" +
+    "          \"patterns\": [ { \"include\": \"source.cpp\" }, { \"include\": \"$self\" } ]\n" +
+    "        },\n" +
+    "        {\n" +
+    "          \"begin\": \"\\\\b(rust)\\\\s*(\\\\{)\",\n" +
+    "          \"beginCaptures\": {\n" +
+    "            \"1\": { \"name\": \"keyword.control.foreign.pilot\" },\n" +
+    "            \"2\": { \"name\": \"punctuation.section.block.begin.pilot\" }\n" +
+    "          },\n" +
+    "          \"end\": \"\\\\}\",\n" +
+    "          \"endCaptures\": {\n" +
+    "            \"0\": { \"name\": \"punctuation.section.block.end.pilot\" }\n" +
+    "          },\n" +
+    "          \"patterns\": [ { \"include\": \"source.rust\" }, { \"include\": \"$self\" } ]\n" +
+    "        },\n" +
+    "        {\n" +
+    "          \"begin\": \"\\\\b(lua)\\\\s*(\\\\{)\",\n" +
+    "          \"beginCaptures\": {\n" +
+    "            \"1\": { \"name\": \"keyword.control.foreign.pilot\" },\n" +
+    "            \"2\": { \"name\": \"punctuation.section.block.begin.pilot\" }\n" +
+    "          },\n" +
+    "          \"end\": \"\\\\}\",\n" +
+    "          \"endCaptures\": {\n" +
+    "            \"0\": { \"name\": \"punctuation.section.block.end.pilot\" }\n" +
+    "          },\n" +
+    "          \"patterns\": [ { \"include\": \"source.lua\" }, { \"include\": \"$self\" } ]\n" +
+    "        }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_raw_dsl_section() -> str => "    \"raw-dsl\": {\n" +
+    "      \"patterns\": [\n" +
+    "        { \"name\": \"string.unquoted.raw.dsl.pilot\", \"begin\": \"```[a-zA-Z0-9_]*\", \"end\": \"```\" }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_strings_section() -> str => "    \"strings\": {\n" +
+    "      \"patterns\": [\n" +
+    "        {\n" +
+    "          \"name\": \"string.quoted.triple.interpolated.pilot\",\n" +
+    "          \"begin\": \"(f)(\\\"\\\"\\\")\",\n" +
+    "          \"beginCaptures\": {\n" +
+    "            \"1\": { \"name\": \"storage.type.string.interpolated.pilot keyword.other.string.interpolated.pilot\" },\n" +
+    "            \"2\": { \"name\": \"punctuation.definition.string.begin.pilot\" }\n" +
+    "          },\n" +
+    "          \"end\": \"\\\"\\\"\\\"\",\n" +
+    "          \"endCaptures\": { \"0\": { \"name\": \"punctuation.definition.string.end.pilot\" } },\n" +
+    "          \"patterns\": [\n" +
+    "            { \"name\": \"constant.character.escape.pilot\", \"match\": \"\\\\\\\\.\" },\n" +
+    "            {\n" +
+    "              \"name\": \"meta.interpolation.pilot\",\n" +
+    "              \"begin\": \"\\\\{\",\n" +
+    "              \"beginCaptures\": { \"0\": { \"name\": \"punctuation.definition.template-expression.begin.pilot\" } },\n" +
+    "              \"end\": \"\\\\}\",\n" +
+    "              \"endCaptures\": { \"0\": { \"name\": \"punctuation.definition.template-expression.end.pilot\" } },\n" +
+    "              \"patterns\": [ { \"include\": \"$self\" } ]\n" +
+    "            }\n" +
+    "          ]\n" +
+    "        },\n" +
+    "        { \"name\": \"string.quoted.triple.pilot\", \"begin\": \"\\\"\\\"\\\"\", \"end\": \"\\\"\\\"\\\"\", \"patterns\": [ { \"name\": \"constant.character.escape.pilot\", \"match\": \"\\\\\\\\.\" } ] },\n" +
+    "        {\n" +
+    "          \"name\": \"string.quoted.double.interpolated.pilot\",\n" +
+    "          \"begin\": \"(f)(\\\")\",\n" +
+    "          \"beginCaptures\": {\n" +
+    "            \"1\": { \"name\": \"storage.type.string.interpolated.pilot keyword.other.string.interpolated.pilot\" },\n" +
+    "            \"2\": { \"name\": \"punctuation.definition.string.begin.pilot\" }\n" +
+    "          },\n" +
+    "          \"end\": \"\\\"\",\n" +
+    "          \"endCaptures\": { \"0\": { \"name\": \"punctuation.definition.string.end.pilot\" } },\n" +
+    "          \"patterns\": [\n" +
+    "            { \"name\": \"constant.character.escape.pilot\", \"match\": \"\\\\\\\\.\" },\n" +
+    "            {\n" +
+    "              \"name\": \"meta.interpolation.pilot\",\n" +
+    "              \"begin\": \"\\\\{\",\n" +
+    "              \"beginCaptures\": { \"0\": { \"name\": \"punctuation.definition.template-expression.begin.pilot\" } },\n" +
+    "              \"end\": \"\\\\}\",\n" +
+    "              \"endCaptures\": { \"0\": { \"name\": \"punctuation.definition.template-expression.end.pilot\" } },\n" +
+    "              \"patterns\": [ { \"include\": \"$self\" } ]\n" +
+    "            }\n" +
+    "          ]\n" +
+    "        },\n" +
+    "        { \"name\": \"string.quoted.double.pilot\", \"begin\": \"\\\"\", \"end\": \"\\\"\", \"patterns\": [ { \"name\": \"constant.character.escape.pilot\", \"match\": \"\\\\\\\\.\" } ] },\n" +
+    "        { \"name\": \"string.quoted.single.pilot\", \"match\": \"'(?:[^'\\\\\\\\\\n\\r]|\\\\\\\\.)*'\" }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_raw_idents_section() -> str => "    \"raw-idents\": {\n" +
+    "      \"patterns\": [\n" +
+    "        { \"name\": \"variable.other.escaped.pilot\", \"match\": \"`[^`\\\\r\\\\n]+`\" }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_attributes_section() -> str => "    \"attributes\": {\n" +
+    "      \"patterns\": [\n" +
+    "        {\n" +
+    "          \"name\": \"meta.attribute.pilot\",\n" +
+    "          \"begin\": \"\\\\[(?=\\\\s*(?:(?:var|let)\\\\s+[a-z_][A-Za-z0-9_]*\\\\s*=\\\\s*)?[A-Z][A-Za-z0-9_]*(?:\\\\(|$|\\\\s*[\\\\]\\\\,]))\",\n" +
+    "          \"beginCaptures\": { \"0\": { \"name\": \"punctuation.brackets.square.pilot\" } },\n" +
+    "          \"end\": \"\\\\]\",\n" +
+    "          \"endCaptures\": { \"0\": { \"name\": \"punctuation.brackets.square.pilot\" } },\n" +
+    "          \"patterns\": [\n" +
+    "            { \"match\": \"\\\\b(let|var)\\\\b\", \"name\": \"keyword.declaration.variable.pilot keyword.other.pilot\" },\n" +
+    "            { \"match\": \"\\\\b([A-Z][A-Za-z0-9_]*)\\\\b\", \"name\": \"entity.name.function.decorator.pilot support.type.decorator.pilot\" },\n" +
+    "            { \"include\": \"#comments\" },\n" +
+    "            { \"include\": \"#strings\" },\n" +
+    "            { \"include\": \"#constants\" },\n" +
+    "            { \"include\": \"#numbers\" },\n" +
+    "            { \"include\": \"#primitives\" },\n" +
+    "            { \"include\": \"#call-targets\" },\n" +
+    "            { \"include\": \"#punctuation\" },\n" +
+    "            { \"include\": \"#variables\" }\n" +
+    "          ]\n" +
+    "        }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_quote_splices_section() -> str => "    \"quote-splices\": {\n" +
+    "      \"patterns\": [\n" +
+    "        { \"name\": \"variable.other.metavariable.splice.pilot\", \"match\": \"\\\\$[A-Za-z_][A-Za-z0-9_]*\" },\n" +
+    "        { \"name\": \"punctuation.operator.unquote.pilot\", \"match\": \"~(?=[A-Za-z_(])\" }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_symbols_section() -> str => "    \"symbols\": {\n" +
+    "      \"patterns\": [\n" +
+    "        { \"name\": \"constant.other.symbol.pilot\", \"match\": \"(?<![:a-zA-Z0-9_]):[a-zA-Z_][a-zA-Z0-9_]*(?:/[a-zA-Z_][a-zA-Z0-9_]*)?\" }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_declarations_section() -> str => "    \"declarations\": {\n" +
+    "      \"patterns\": [\n" +
+    "        {\n" +
+    "          \"name\": \"meta.function.declaration.pilot\",\n" +
+    "          \"match\": \"\\\\b(fn)\\\\s+([a-zA-Z_][a-zA-Z0-9_]*)\",\n" +
+    "          \"captures\": {\n" +
+    "            \"1\": { \"name\": \"keyword.declaration.function.pilot keyword.control.pilot\" },\n" +
+    "            \"2\": { \"name\": \"entity.name.function.pilot\" }\n" +
+    "          }\n" +
+    "        },\n" +
+    "        {\n" +
+    "          \"name\": \"meta.operator.declaration.pilot\",\n" +
+    "          \"match\": \"\\\\b(op)\\\\s+([^\\\\s\\\\(\\\\);\\\\{]+)\",\n" +
+    "          \"captures\": {\n" +
+    "            \"1\": { \"name\": \"keyword.declaration.operator.pilot keyword.control.pilot\" },\n" +
+    "            \"2\": { \"name\": \"entity.name.function.operator.pilot\" }\n" +
+    "          }\n" +
+    "        },\n" +
+    "        {\n" +
+    "          \"name\": \"meta.type.declaration.pilot\",\n" +
+    "          \"match\": \"\\\\b(struct|interface|enum|actor|state|type)\\\\s+([A-Za-z_][A-Za-z0-9_]*)\",\n" +
+    "          \"captures\": {\n" +
+    "            \"1\": { \"name\": \"keyword.declaration.type.pilot keyword.control.pilot\" },\n" +
+    "            \"2\": { \"name\": \"entity.name.type.pilot\" }\n" +
+    "          }\n" +
+    "        },\n" +
+    "        {\n" +
+    "          \"name\": \"meta.distributive.binding.pilot\",\n" +
+    "          \"match\": \"\\\\b(let|var)\\\\s+([A-Z][A-Za-z0-9_]*)\\\\s*(?=<|\\\\{)\",\n" +
+    "          \"captures\": {\n" +
+    "            \"1\": { \"name\": \"keyword.declaration.variable.pilot keyword.other.pilot\" },\n" +
+    "            \"2\": { \"name\": \"entity.name.type.struct.pilot\" }\n" +
+    "          }\n" +
+    "        }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_keywords_section(seed_pat: str, syn_pat: str) -> str => "    \"keywords\": {\n" +
+    "      \"patterns\": [\n" +
+    "        {\n" +
+    "          \"name\": \"meta.syntax.declaration.type-construct.pilot\",\n" +
+    "          \"match\": \"\\\\b(syntax)\\\\s+(type_construct)\\\\b\",\n" +
+    "          \"captures\": {\n" +
+    "            \"1\": { \"name\": \"keyword.control.syntax.pilot\" },\n" +
+    "            \"2\": { \"name\": \"keyword.control.type-construct.pilot\" }\n" +
+    "          }\n" +
+    "        },\n" +
+    "        { \"name\": \"keyword.control.syntax.pilot\", \"match\": \"\\\\b(" + syn_pat + ")\\\\b\" },\n" +
+    "        { \"name\": \"keyword.control.seed.pilot\", \"match\": \"\\\\b(" + seed_pat + ")\\\\b\" },\n" +
+    "        { \"name\": \"keyword.control.flow.pilot\", \"match\": \"\\\\b(if|else|while|until|for|in|then|loop|break|continue|return|yield|defer|switch|case|default|guard|try|catch)\\\\b\" },\n" +
+    "        { \"name\": \"keyword.declaration.pilot\", \"match\": \"\\\\b(struct|interface|enum|actor|state|type|fn|let|var|ref|const)\\\\b\" },\n" +
+    "        { \"name\": \"keyword.other.property.pilot\", \"match\": \"\\\\b(get|set)\\\\b\" },\n" +
+    "        { \"name\": \"variable.language.property.pilot\", \"match\": \"\\\\b(field|value)\\\\b\" },\n" +
+    "        { \"name\": \"keyword.other.lifecycle.pilot\", \"match\": \"\\\\b(scope|enter|exit)\\\\b\" },\n" +
+    "        { \"name\": \"keyword.other.contract.pilot\", \"match\": \"\\\\b(requires|ensures|old)\\\\b\" },\n" +
+    "        { \"name\": \"keyword.other.adapter.pilot\", \"match\": \"\\\\b(context|adapter|each)\\\\b\" },\n" +
+    "        { \"name\": \"keyword.other.collision.pilot\", \"match\": \"\\\\b(coalesce|with|without|as)\\\\b\" },\n" +
+    "        { \"name\": \"keyword.control.concurrency.pilot\", \"match\": \"\\\\b(async|await|spawn|atomic|sync|isolate|select|timeout|bounded|noalloc|region|deadline|within|periodic|priority|jitter)\\\\b\" },\n" +
+    "        { \"name\": \"keyword.control.database.pilot\", \"match\": \"\\\\b(database|transaction|commit|rollback|savepoint|connect|from|where|order|ascending|descending|insert|into|values|update|delete)\\\\b\" },\n" +
+    "        { \"name\": \"keyword.control.foreign.pilot\", \"match\": \"\\\\b(extern|assembly|module|lib)\\\\b\" },\n" +
+    "        { \"name\": \"keyword.other.query.pilot\", \"match\": \"\\\\b(sizeof|alignof|offsetof|fields_of|nameof|assert|blueprint|cue|role|route|unit|pkg|use|ext|op)\\\\b\" }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_modifiers_section(mod_pat: str) -> str => "    \"modifiers\": {\n" +
+    "      \"patterns\": [\n" +
+    "        { \"name\": \"storage.modifier.visibility.pilot\", \"match\": \"\\\\b(pub|priv|prot|pkg|int|file|open|export|lvl[0-9]*|lvl)\\\\b\" },\n" +
+    "        { \"name\": \"storage.modifier.pilot\", \"match\": \"\\\\b(" + mod_pat + ")\\\\b\" }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_primitives_section(prim_pat: str) -> str => "    \"primitives\": {\n" +
+    "      \"patterns\": [\n" +
+    "        { \"name\": \"support.type.primitive.pilot entity.name.type.primitive.pilot\", \"match\": \"\\\\b(" + prim_pat + ")\\\\b\" },\n" +
+    "        { \"name\": \"support.type.system.pilot entity.name.type.pilot\", \"match\": \"\\\\b(ArenaScope|AstContext|CallExpr|ClampAttr|Dual|EffectPlan|FormulaAttr|HardRealtimeAttr|IdeContextPolicy|IdePresentationPolicy|IdeTokenAttr|InheritPolicy|KernelAttr|LspKind|LspMod|OnChangeAttr|PatchAttr|PatchPart|PatchReplaceAttr|Quantity|RangeEnumerator|RangeWindow|RuleAttr|Signal|SliceBuffer|SliceEnumerator|SpanEnumerator|StrideEnumerator|TraceSpanAttr|WcetAttr|ZeroRuntimeAttr)\\\\b\" },\n" +
+    "        { \"name\": \"entity.name.type.interface.pilot\", \"match\": \"\\\\bI[A-Z][A-Za-z0-9_]*\\\\b\" },\n" +
+    "        { \"name\": \"entity.name.type.pilot\", \"match\": \"\\\\b[A-Z][A-Za-z0-9_]*\\\\b\" }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_call_targets_section() -> str => "    \"call-targets\": {\n" +
+    "      \"patterns\": [\n" +
+    "        {\n" +
+    "          \"name\": \"meta.function.call.quoted.pilot\",\n" +
+    "          \"match\": \"\\\\b([a-zA-Z_][a-zA-Z0-9_]*)(!!|!&|!\\\\^|!@|!\\\\?|!)(?=\\\\s*\\\\()\",\n" +
+    "          \"captures\": {\n" +
+    "            \"1\": { \"name\": \"entity.name.function.call.pilot\" },\n" +
+    "            \"2\": { \"name\": \"punctuation.operator.call-quote.pilot\" }\n" +
+    "          }\n" +
+    "        },\n" +
+    "        {\n" +
+    "          \"name\": \"meta.method.call.pilot\",\n" +
+    "          \"match\": \"(?<=\\\\.)([a-zA-Z_][a-zA-Z0-9_]*)\\\\s*(?=\\\\()\",\n" +
+    "          \"captures\": { \"1\": { \"name\": \"entity.name.function.member.pilot\" } }\n" +
+    "        },\n" +
+    "        {\n" +
+    "          \"name\": \"meta.property.access.pilot\",\n" +
+    "          \"match\": \"(?<=\\\\.)([a-zA-Z_][a-zA-Z0-9_]*)\\\\b\",\n" +
+    "          \"captures\": { \"1\": { \"name\": \"variable.other.property.pilot\" } }\n" +
+    "        },\n" +
+    "        { \"name\": \"entity.name.type.struct.constructor.pilot\", \"match\": \"\\\\b([A-Z][A-Za-z0-9_]*)\\\\s*(?=\\\\(|\\\\{|<)\" },\n" +
+    "        { \"name\": \"entity.name.function.call.pilot\", \"match\": \"\\\\b([a-zA-Z_][a-zA-Z0-9_]*)\\\\s*(?=\\\\()\" }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_constants_section() -> str => "    \"constants\": {\n" +
+    "      \"patterns\": [\n" +
+    "        {\n" +
+    "          \"match\": \"(::)([A-Za-z_][A-Za-z0-9_]*)\",\n" +
+    "          \"captures\": {\n" +
+    "            \"1\": { \"name\": \"punctuation.separator.enum.pilot\" },\n" +
+    "            \"2\": { \"name\": \"variable.other.enummember.pilot constant.other.enum.pilot\" }\n" +
+    "          }\n" +
+    "        },\n" +
+    "        { \"name\": \"constant.language.boolean.pilot\", \"match\": \"\\\\b(true|false)\\\\b\" },\n" +
+    "        { \"name\": \"constant.language.null.pilot\", \"match\": \"\\\\b(none|null)\\\\b\" },\n" +
+    "        { \"name\": \"variable.language.self.pilot\", \"match\": \"\\\\bself\\\\b\" }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_object_keys_section() -> str => "    \"object-keys\": {\n" +
+    "      \"patterns\": [\n" +
+    "        {\n" +
+    "          \"match\": \"(?<![a-zA-Z0-9_])([a-zA-Z_][a-zA-Z0-9_]*)\\\\s*(:)(?!:)\",\n" +
+    "          \"captures\": {\n" +
+    "            \"1\": { \"name\": \"meta.object-literal.key.pilot meta.property-name.pilot variable.other.property.pilot\" },\n" +
+    "            \"2\": { \"name\": \"punctuation.separator.key-value.pilot\" }\n" +
+    "          }\n" +
+    "        }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_numbers_section() -> str => "    \"numbers\": {\n" +
+    "      \"patterns\": [\n" +
+    "        { \"name\": \"constant.numeric.hex.pilot\", \"match\": \"\\\\b0[xX][0-9a-fA-F_]+(?:[a-zA-Z]+)?\\\\b\" },\n" +
+    "        { \"name\": \"constant.numeric.binary.pilot\", \"match\": \"\\\\b0[bB][01_]+(?:[a-zA-Z]+)?\\\\b\" },\n" +
+    "        { \"name\": \"constant.numeric.octal.pilot\", \"match\": \"\\\\b0[oO][0-7_]+(?:[a-zA-Z]+)?\\\\b\" },\n" +
+    "        {\n" +
+    "          \"match\": \"\\\\b([0-9][0-9_]*(?:\\\\.[0-9_]+)?(?:[eE][+-]?[0-9_]+)?)(ns|us|ms|s|Hz|kHz|MHz|GHz|B|KB|MB|GB|TB)?\\\\b\",\n" +
+    "          \"captures\": {\n" +
+    "            \"1\": { \"name\": \"constant.numeric.pilot\" },\n" +
+    "            \"2\": { \"name\": \"keyword.other.unit.pilot\" }\n" +
+    "          }\n" +
+    "        }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_operators_section(op_pat: str) -> str => "    \"operators\": {\n" +
+    "      \"patterns\": [\n" +
+    "        { \"name\": \"punctuation.operator.call-quote.pilot\", \"match\": \"!!|!&|!\\\\^|!@|!\\\\?\" },\n" +
+    "        { \"name\": \"punctuation.operator.cascade.pilot\", \"match\": \"\\\\?\\\\.\\\\.|\\\\.\\\\.\" },\n" +
+    "        { \"name\": \"punctuation.operator.pipeline.pilot\", \"match\": \"\\\\|>|<\\\\||=>|->|<-\" },\n" +
+    "        { \"name\": \"punctuation.operator.range.pilot\", \"match\": \">\\\\.\\\\.<|\\\\*\\\\.\\\\.|\\\\.\\\\.<|\\\\.\\\\.=|>=|<=|>\\\\.\\\\.\" },\n" +
+    "        { \"name\": \"punctuation.operator.null-safe.pilot\", \"match\": \"\\\\?\\\\?|\\\\?\" },\n" +
+    "        { \"name\": \"punctuation.operator.comparison.pilot\", \"match\": \"==|!=|<=|>=|<=>|<|>\" },\n" +
+    "        { \"name\": \"punctuation.operator.assignment.pilot\", \"match\": \":=:|:=|\\\\+=|-=|\\\\*=|/=|%=|&=|\\\\|=|\\\\^=|<<=|>>=|=\" },\n" +
+    "        { \"name\": \"punctuation.operator.logical.pilot\", \"match\": \"&&|\\\\|\\\\||!\" },\n" +
+    "        { \"name\": \"punctuation.operator.spread.pilot\", \"match\": \"\\\\*\\\\.\\\\.|\\\\*\\\\*|\\\\*\" },\n" +
+    "        { \"name\": \"punctuation.operator.arithmetic.pilot\", \"match\": \"%%|\\\\*%|\\\\*\\\\?|\\\\*\\\\||\\\\+%|\\\\+\\\\?|\\\\+\\\\||-%|-\\\\?|-\\\\||<<|>>|~>|%|&|\\\\+|-|/|\\\\^|\\\\||~\" }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_punctuation_section() -> str => "    \"punctuation\": {\n" +
+    "      \"patterns\": [\n" +
+    "        { \"name\": \"punctuation.terminator.statement.pilot\", \"match\": \";\" },\n" +
+    "        { \"name\": \"punctuation.separator.comma.pilot\", \"match\": \",\" },\n" +
+    "        { \"name\": \"punctuation.separator.colon.pilot\", \"match\": \":\" },\n" +
+    "        { \"name\": \"punctuation.accessor.dot.pilot\", \"match\": \"\\\\.\" },\n" +
+    "        { \"name\": \"punctuation.brackets.curly.pilot\", \"match\": \"[{}]\" },\n" +
+    "        { \"name\": \"punctuation.brackets.round.pilot\", \"match\": \"[()]\" },\n" +
+    "        { \"name\": \"punctuation.brackets.square.pilot\", \"match\": \"[\\\\[\\\\]]\" }\n" +
+    "      ]\n" +
+    "    }";
+
+pure fn tm_variables_section() -> str => "    \"variables\": {\n" +
+    "      \"patterns\": [\n" +
+    "        { \"name\": \"variable.other.readwrite.pilot\", \"match\": \"\\\\b[a-zA-Z_][a-zA-Z0-9_]*\\\\b\" }\n" +
+    "      ]\n" +
+    "    }";
 
 pub pure fn build_tm_language_json(
     seed_keywords_regex:   str,
@@ -888,14 +1524,34 @@ pub pure fn build_tm_language_json(
     lang_primitives_regex: str,
     operators_regex:       str
 ) -> str {
-    let model = build_tm_language_model(
-        seed_keywords_regex,
-        syntax_macros_regex,
-        modifiers_regex,
-        lang_primitives_regex,
-        operators_regex
-    );
-    return dumps(model, 2);
+    let seed_pat = if len(seed_keywords_regex) > 0 { seed_keywords_regex } else { "__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm" };
+    let mod_pat  = if len(modifiers_regex) > 0 { modifiers_regex } else { "const|export|ext|file|int|iso|lvl|partial|pkg|priv|pub|pure|static|var|lvl[0-9]+" };
+    let prim_pat = if len(lang_primitives_regex) > 0 { lang_primitives_regex } else { "void|never|bool|char|i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|f16|f32|f64|f128|str|ptr|slice|stride|array|tuple|option|result|union|range|span|step|from|until|full|splat|pairs|expand|map|frame|type|ast" };
+    let op_pat   = if len(operators_regex) > 0 { operators_regex } else { "%%|\\*%|\\*\\?|\\*\\||\\+%|\\+\\?|\\+\\||-%|-\\?|-\\||<<|>>|~>|%|&|\\+|-|/|\\^|\\||~" };
+    let syn_pat  = if len(syntax_macros_regex) > 0 { syntax_macros_regex } else { "syntax|quote|macro" };
+
+    var s = "{\n  \"$schema\": \"https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json\",\n  \"name\": \"Pilot\",\n  \"scopeName\": \"source.pilot\",\n  \"patterns\": " + tm_patterns_list() + ",\n  \"repository\": {\n";
+    s = s + tm_comments_section() + ",\n";
+    s = s + tm_preprocessor_section() + ",\n";
+    s = s + tm_polyglot_section() + ",\n";
+    s = s + tm_raw_dsl_section() + ",\n";
+    s = s + tm_strings_section() + ",\n";
+    s = s + tm_raw_idents_section() + ",\n";
+    s = s + tm_attributes_section() + ",\n";
+    s = s + tm_quote_splices_section() + ",\n";
+    s = s + tm_symbols_section() + ",\n";
+    s = s + tm_declarations_section() + ",\n";
+    s = s + tm_keywords_section(seed_pat, syn_pat) + ",\n";
+    s = s + tm_modifiers_section(mod_pat) + ",\n";
+    s = s + tm_primitives_section(prim_pat) + ",\n";
+    s = s + tm_call_targets_section() + ",\n";
+    s = s + tm_constants_section() + ",\n";
+    s = s + tm_object_keys_section() + ",\n";
+    s = s + tm_numbers_section() + ",\n";
+    s = s + tm_operators_section(op_pat) + ",\n";
+    s = s + tm_punctuation_section() + ",\n";
+    s = s + tm_variables_section() + "\n  }\n}";
+    return s;
 }
 
 // =========================================================================
@@ -1706,7 +2362,16 @@ if _lsp_method == "textDocument/rename" ||
    _lsp_method == "textDocument/rename:field" || _lsp_method == "textDocument/rename:value" {
     handle_lsp_rename(_lsp_offset, _lsp_method);
 } else {
-    if _lsp_method != "textDocument/hover" && _lsp_method != "textDocument/completion" && _lsp_method != "textDocument/definition" && _lsp_method != "textDocument/prepareRename" {
-        handle_lsp_rename(_lsp_offset, _lsp_method);
+    if _lsp_method == "ide-sync" || _lsp_method == "" {
+        let tm_json = build_tm_language_json("", "", "", "", "");
+        let lc_json = build_language_configuration_json();
+        let sn_json = build_snippets_json();
+        __engine("fs_write_text", "vscode-pilot/syntaxes/pilot.tmLanguage.json", tm_json);
+        __engine("fs_write_text", "vscode-pilot/language-configuration.json", lc_json);
+        __engine("fs_write_text", "vscode-pilot/snippets/pilot.json", sn_json);
+    } else {
+        if _lsp_method != "textDocument/hover" && _lsp_method != "textDocument/completion" && _lsp_method != "textDocument/definition" && _lsp_method != "textDocument/prepareRename" {
+            handle_lsp_rename(_lsp_offset, _lsp_method);
+        }
     }
 }

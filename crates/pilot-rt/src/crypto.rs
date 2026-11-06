@@ -253,7 +253,8 @@ pub fn random_bytes(len: usize) -> Vec<u8> {
     let mut buf = vec![0u8; len];
     #[cfg(unix)]
     {
-        if let Ok(mut f) = File::open("/dev/urandom") {
+        use std::io::Read;
+        if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
             let _ = f.read_exact(&mut buf);
             return buf;
         }

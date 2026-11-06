@@ -1,12 +1,20 @@
 {
   "Distributive Struct Block": {
     "prefix": "pstruct",
-    "body": ["pub struct {", "\t$0", "}"],
+    "body": [
+      "pub struct {",
+      "\t$0",
+      "}"
+    ],
     "description": "Distributive Pilot struct block"
   },
   "Syntax Macro Rule": {
     "prefix": "psyntax",
-    "body": ["pub syntax ${1:name}(${2:expr}) => quote {", "\t$0", "};"],
+    "body": [
+      "pub syntax ${1:name}(${2:expr}) => quote {",
+      "\t$0",
+      "};"
+    ],
     "description": "Self-hosted Pilot syntax macro"
   },
   "Patch Function Clone": {

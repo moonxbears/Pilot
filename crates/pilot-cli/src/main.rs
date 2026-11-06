@@ -373,7 +373,9 @@ fn cmd_ide_sync() {
         let arena = parse(&src);
         let mut vm = pilot_vm::PilVirtualMachine::new();
         vm.engine_handler = Some(Box::new(|name, args| {
-            if name == "fs_write_text" && args.len() >= 2 {
+            if name == "lsp_query_method" {
+                Ok(pilot_rt::PilotVal::from_str("ide-sync"))
+            } else if name == "fs_write_text" && args.len() >= 2 {
                 let path = args[0].to_string_repr();
                 let content = args[1].to_string_repr();
                 if let Some(parent) = Path::new(&path).parent() {
@@ -412,6 +414,20 @@ fn cmd_ide_sync() {
             if cand.is_file() && cand.file_name().and_then(|s| s.to_str()) == Some(bin_name) {
                 let _ = fs::copy(cand, server_dir.join(bin_name));
                 break;
+            }
+        }
+    }
+
+    if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+        let ext_base = Path::new(&home).join(".vscode").join("extensions");
+        if let Ok(entries) = fs::read_dir(ext_base) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() && p.file_name().and_then(|s| s.to_str()).map_or(false, |n| n.contains("pilot-lang")) {
+                    let _ = fs::copy("vscode-pilot/syntaxes/pilot.tmLanguage.json", p.join("syntaxes").join("pilot.tmLanguage.json"));
+                    let _ = fs::copy("vscode-pilot/language-configuration.json", p.join("language-configuration.json"));
+                    let _ = fs::copy("vscode-pilot/snippets/pilot.json", p.join("snippets").join("pilot.json"));
+                }
             }
         }
     }
