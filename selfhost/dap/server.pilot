@@ -12,6 +12,10 @@ pub fn encode_dap_frame(json_payload: str) -> str {
     return "Content-Length: " + byte_len + "\r\n\r\n" + json_payload;
 }
 
+pub fn build_dap_stack_trace_frame(seq: i64, fn_name: str, line: i64, col: i64) -> str {
+    return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"stackTrace\",\"body\":{\"stackFrames\":[{\"id\":1,\"name\":\"" + fn_name + "\",\"line\":" + line + ",\"column\":" + col + "}],\"totalFrames\":1}}";
+}
+
 pub fn route_dap_command(command: str, seq: i64) -> str {
     if command == "initialize" {
         return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"initialize\",\"body\":{\"supportsConfigurationDoneRequest\":true,\"supportsEvaluateForHovers\":true}}";
@@ -26,7 +30,7 @@ pub fn route_dap_command(command: str, seq: i64) -> str {
         return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"threads\",\"body\":{\"threads\":[{\"id\":1,\"name\":\"PilVM Main Thread\"}]}}";
     }
     if command == "stackTrace" {
-        return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"stackTrace\",\"body\":{\"stackFrames\":[{\"id\":1,\"name\":\"" + nameof(fn) + " main\",\"line\":1,\"column\":1}],\"totalFrames\":1}}";
+        return build_dap_stack_trace_frame(seq, nameof(fn) + " main", 1, 1);
     }
     if command == "continue" || command == "next" || command == "stepIn" || command == "stepOut" {
         return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"" + command + "\",\"body\":{\"allThreadsContinued\":true}}";

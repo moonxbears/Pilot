@@ -1,31 +1,100 @@
 // =========================================================================
 // FILE: selfhost/dap/cli_dbg.pilot
 // Milestone 59.3: Interactive CLI Debugger Command Parser & Controller
-// Supports break (b), step (s), next (n), continue (c), print (p), and bt.
+// Supports break (b), step (s), next (n), finish (out), continue (c), print (p), and bt.
 // =========================================================================
 pub pkg Pilot.SelfHost.Dap.CliDbg;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
-// Returns action code: 1=step_in, 2=step_over(next), 3=continue, 4=backtrace, 5=breakpoint, 6=print, 0=quit
-pub fn parse_cli_dbg_command(cmd_line: str) -> i64 {
-    if cmd_line == "s" || cmd_line == "step" {
+pub enum CliDbgAction {
+    Quit = 0,
+    StepIn = 1,
+    StepOver = 2,
+    StepOut = 3,
+    Continue = 4,
+    Backtrace = 5,
+    Breakpoint = 6,
+    Print = 7,
+}
+
+fn cli_trim(s: str) -> str {
+    let n = __engine("str_len", s);
+    var a = 0;
+    while a < n {
+        let b = __engine("str_byte_at", s, a);
+        if b == 32 || b == 9 || b == 13 || b == 10 {
+            a = a + 1;
+        } else {
+            break;
+        }
+    }
+    var e = n;
+    while e > a {
+        let b = __engine("str_byte_at", s, e - 1);
+        if b == 32 || b == 9 || b == 13 || b == 10 {
+            e = e - 1;
+        } else {
+            break;
+        }
+    }
+    return __engine("str_slice", s, a, e);
+}
+
+fn cli_verb(cmd_line: str) -> str {
+    let t = cli_trim(cmd_line);
+    let n = __engine("str_len", t);
+    var i = 0;
+    while i < n {
+        let b = __engine("str_byte_at", t, i);
+        if b == 32 || b == 9 {
+            return __engine("str_slice", t, 0, i);
+        }
+        i = i + 1;
+    }
+    return t;
+}
+
+// Action codes:
+// 1 = step (s/step), 2 = next (n/next), 3 = step_out (finish/out),
+// 4 = continue (c/continue), 5 = backtrace (bt/backtrace),
+// 6 = break (b/break), 7 = print (p/print), 0 = quit (q/quit)
+pub fn parse_cli_dbg_action(cmd_line: str) -> i64 {
+    let v = cli_verb(cmd_line);
+    if v == "s" || v == "step" {
         return 1;
     }
-    if cmd_line == "n" || cmd_line == "next" {
+    if v == "n" || v == "next" {
         return 2;
     }
-    if cmd_line == "c" || cmd_line == "continue" {
+    if v == "finish" || v == "out" {
         return 3;
     }
-    if cmd_line == "bt" || cmd_line == "backtrace" {
+    if v == "c" || v == "continue" {
         return 4;
     }
-    if cmd_line == "b" || cmd_line == "break" {
+    if v == "bt" || v == "backtrace" {
         return 5;
     }
-    if cmd_line == "p" || cmd_line == "print" {
+    if v == "b" || v == "break" {
         return 6;
     }
+    if v == "p" || v == "print" {
+        return 7;
+    }
     return 0;
+}
+
+pub fn parse_cli_dbg_arg(cmd_line: str) -> str {
+    let t = cli_trim(cmd_line);
+    let n = __engine("str_len", t);
+    var i = 0;
+    while i < n {
+        let b = __engine("str_byte_at", t, i);
+        if b == 32 || b == 9 {
+            return cli_trim(__engine("str_slice", t, i + 1, n));
+        }
+        i = i + 1;
+    }
+    return "";
 }

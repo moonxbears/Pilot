@@ -1,8 +1,8 @@
 // ============================================================================
 // FILE: stdlib/crypto/hash.pilot
 // Milestone 58.2: Spec-Compliant Cryptographic Hashes & HMAC in Pilot
-// Implements RFC 6234 SHA-256 / SHA-512 compression primitives, BLAKE3
-// quarter-round mixing (`g`), and RFC 2104 HMAC verification in pure Pilot.
+// Implements RFC 6234 SHA-256 & SHA-512, official BLAKE3 multi-chunk Merkle
+// tree hashing, and RFC 2104 HMAC-SHA256 in pure Pilot.
 // ============================================================================
 
 pub struct Digest256 {
@@ -13,34 +13,776 @@ pub struct Digest256 {
     pub hex_prefix: str;
 }
 
-// 32-bit right rotation (`rotr32`) masked to unsigned 32-bit range.
 pub pure fn rotr32(x: i64, n: i64) -> i64 {
     let u = x & 4294967295;
+    if n <= 0 { return u; }
     return ((u >> n) | ((u << (32 - n)) & 4294967295)) & 4294967295;
 }
 
-// RFC 6234 SHA-256 Choice function: `Ch(x, y, z) = (x & y) ^ (~x & z)`.
 pub pure fn sha256_ch(x: i64, y: i64, z: i64) -> i64 {
-    let not_x = x ^ 4294967295;
+    let not_x = (x & 4294967295) ^ 4294967295;
     return ((x & y) ^ (not_x & z)) & 4294967295;
 }
 
-// RFC 6234 SHA-256 Majority function: `Maj(x, y, z) = (x & y) ^ (x & z) ^ (y & z)`.
 pub pure fn sha256_maj(x: i64, y: i64, z: i64) -> i64 {
     return ((x & y) ^ (x & z) ^ (y & z)) & 4294967295;
 }
 
-// RFC 6234 SHA-256 Upper Sigma 0: `ROTR^2(x) ^ ROTR^13(x) ^ ROTR^22(x)`.
 pub pure fn sha256_sigma0(x: i64) -> i64 {
     return rotr32(x, 2) ^ rotr32(x, 13) ^ rotr32(x, 22);
 }
 
-// RFC 6234 SHA-256 Upper Sigma 1: `ROTR^6(x) ^ ROTR^11(x) ^ ROTR^25(x)`.
 pub pure fn sha256_sigma1(x: i64) -> i64 {
     return rotr32(x, 6) ^ rotr32(x, 11) ^ rotr32(x, 25);
 }
 
-// BLAKE3 G mixing quarter-round step on 32-bit state words.
+pub pure fn sha256_lsigma0(x: i64) -> i64 {
+    let u = x & 4294967295;
+    return rotr32(u, 7) ^ rotr32(u, 18) ^ (u >> 3);
+}
+
+pub pure fn sha256_lsigma1(x: i64) -> i64 {
+    let u = x & 4294967295;
+    return rotr32(u, 17) ^ rotr32(u, 19) ^ (u >> 10);
+}
+
+pub pure fn hash_hex_nibble(v: i64) -> str {
+    let idx = v & 15;
+    return __engine("str_slice", "0123456789abcdef", idx, idx + 1);
+}
+
+pub pure fn hash_hex_byte(b: i64) -> str {
+    let u = b & 255;
+    return hash_hex_nibble(u >> 4) + hash_hex_nibble(u);
+}
+
+pub pure fn hash_hex_u32_be(w: i64) -> str {
+    let u = w & 4294967295;
+    return hash_hex_byte(u >> 24) + hash_hex_byte(u >> 16) + hash_hex_byte(u >> 8) + hash_hex_byte(u);
+}
+
+pub pure fn hash_hex_u32_le(w: i64) -> str {
+    let u = w & 4294967295;
+    return hash_hex_byte(u) + hash_hex_byte(u >> 8) + hash_hex_byte(u >> 16) + hash_hex_byte(u >> 24);
+}
+
+pub pure fn sha256_k_const(i: i64) -> i64 {
+    if i < 16 {
+        if i == 0 { return 1116352408; }
+        if i == 1 { return 1899447441; }
+        if i == 2 { return 3049323471; }
+        if i == 3 { return 3921009573; }
+        if i == 4 { return 961987163; }
+        if i == 5 { return 1508970993; }
+        if i == 6 { return 2453635748; }
+        if i == 7 { return 2870763221; }
+        if i == 8 { return 3624381080; }
+        if i == 9 { return 310598401; }
+        if i == 10 { return 607225278; }
+        if i == 11 { return 1426881987; }
+        if i == 12 { return 1925078388; }
+        if i == 13 { return 2162078206; }
+        if i == 14 { return 2614888103; }
+        return 3248222580;
+    }
+    if i < 32 {
+        if i == 16 { return 3835390401; }
+        if i == 17 { return 4022224774; }
+        if i == 18 { return 264347078; }
+        if i == 19 { return 604807628; }
+        if i == 20 { return 770255983; }
+        if i == 21 { return 1249150122; }
+        if i == 22 { return 1555081692; }
+        if i == 23 { return 1996064986; }
+        if i == 24 { return 2554220882; }
+        if i == 25 { return 2821834349; }
+        if i == 26 { return 2952996808; }
+        if i == 27 { return 3210313671; }
+        if i == 28 { return 3336571891; }
+        if i == 29 { return 3584528711; }
+        if i == 30 { return 113926993; }
+        return 338241895;
+    }
+    if i < 48 {
+        if i == 32 { return 666307205; }
+        if i == 33 { return 773529912; }
+        if i == 34 { return 1294757372; }
+        if i == 35 { return 1396182291; }
+        if i == 36 { return 1695183700; }
+        if i == 37 { return 1986661051; }
+        if i == 38 { return 2177026350; }
+        if i == 39 { return 2456956037; }
+        if i == 40 { return 2730485921; }
+        if i == 41 { return 2820302411; }
+        if i == 42 { return 3259730800; }
+        if i == 43 { return 3345764771; }
+        if i == 44 { return 3516065817; }
+        if i == 45 { return 3600352804; }
+        if i == 46 { return 4094571909; }
+        return 275423344;
+    }
+    if i == 48 { return 430227734; }
+    if i == 49 { return 506948616; }
+    if i == 50 { return 659060556; }
+    if i == 51 { return 883997877; }
+    if i == 52 { return 958139571; }
+    if i == 53 { return 1322822218; }
+    if i == 54 { return 1537002063; }
+    if i == 55 { return 1747873779; }
+    if i == 56 { return 1955562222; }
+    if i == 57 { return 2024104815; }
+    if i == 58 { return 2227730452; }
+    if i == 59 { return 2361852424; }
+    if i == 60 { return 2428436474; }
+    if i == 61 { return 2756734187; }
+    if i == 62 { return 3204031479; }
+    return 3329325298;
+}
+
+pub pure fn sha256_padded_byte(bmap: i64, blen: i64, padded_len: i64, idx: i64) -> i64 {
+    if idx < blen {
+        return (__engine("map_get", bmap, idx) + 0) & 255;
+    }
+    if idx == blen {
+        return 128;
+    }
+    if idx >= padded_len - 8 {
+        let bit_len = blen * 8;
+        let shift = (padded_len - 1 - idx) * 8;
+        if shift >= 64 { return 0; }
+        return (bit_len >> shift) & 255;
+    }
+    return 0;
+}
+
+pub fn sha256_hash_byte_map(bmap: i64, blen: i64) -> i64 {
+    var h0 = 1779033703;
+    var h1 = 3144134277;
+    var h2 = 1013904242;
+    var h3 = 2773480762;
+    var h4 = 1359893119;
+    var h5 = 2600822924;
+    var h6 = 528734635;
+    var h7 = 1541459225;
+
+    let padded_len = ((blen + 9 + 63) / 64) * 64;
+    let wmap = __engine("map_new");
+    var blk = 0;
+    while blk < padded_len {
+        var t = 0;
+        while t < 16 {
+            let base = blk + (t * 4);
+            let b0 = sha256_padded_byte(bmap, blen, padded_len, base);
+            let b1 = sha256_padded_byte(bmap, blen, padded_len, base + 1);
+            let b2 = sha256_padded_byte(bmap, blen, padded_len, base + 2);
+            let b3 = sha256_padded_byte(bmap, blen, padded_len, base + 3);
+            let word = ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) & 4294967295;
+            __engine("map_set", wmap, t, word);
+            t = t + 1;
+        }
+        while t < 64 {
+            let w15 = __engine("map_get", wmap, t - 15) + 0;
+            let w2 = __engine("map_get", wmap, t - 2) + 0;
+            let w16 = __engine("map_get", wmap, t - 16) + 0;
+            let w7 = __engine("map_get", wmap, t - 7) + 0;
+            let wt = (w16 + sha256_lsigma0(w15) + w7 + sha256_lsigma1(w2)) & 4294967295;
+            __engine("map_set", wmap, t, wt);
+            t = t + 1;
+        }
+
+        var a = h0;
+        var b = h1;
+        var c_v = h2;
+        var d = h3;
+        var e = h4;
+        var f = h5;
+        var g = h6;
+        var h = h7;
+
+        t = 0;
+        while t < 64 {
+            let wt = __engine("map_get", wmap, t) + 0;
+            let kt = sha256_k_const(t);
+            let t1 = (h + sha256_sigma1(e) + sha256_ch(e, f, g) + kt + wt) & 4294967295;
+            let t2 = (sha256_sigma0(a) + sha256_maj(a, b, c_v)) & 4294967295;
+            h = g;
+            g = f;
+            f = e;
+            e = (d + t1) & 4294967295;
+            d = c_v;
+            c_v = b;
+            b = a;
+            a = (t1 + t2) & 4294967295;
+            t = t + 1;
+        }
+
+        h0 = (h0 + a) & 4294967295;
+        h1 = (h1 + b) & 4294967295;
+        h2 = (h2 + c_v) & 4294967295;
+        h3 = (h3 + d) & 4294967295;
+        h4 = (h4 + e) & 4294967295;
+        h5 = (h5 + f) & 4294967295;
+        h6 = (h6 + g) & 4294967295;
+        h7 = (h7 + h) & 4294967295;
+        blk = blk + 64;
+    }
+
+    let out = __engine("map_new");
+    __engine("map_set", out, "h0", h0);
+    __engine("map_set", out, "h1", h1);
+    __engine("map_set", out, "h2", h2);
+    __engine("map_set", out, "h3", h3);
+    __engine("map_set", out, "h4", h4);
+    __engine("map_set", out, "h5", h5);
+    __engine("map_set", out, "h6", h6);
+    __engine("map_set", out, "h7", h7);
+
+    var wi = 0;
+    while wi < 8 {
+        let hv = __engine("map_get", out, "h" + wi) + 0;
+        let base_b = wi * 4;
+        __engine("map_set", out, base_b, (hv >> 24) & 255);
+        __engine("map_set", out, base_b + 1, (hv >> 16) & 255);
+        __engine("map_set", out, base_b + 2, (hv >> 8) & 255);
+        __engine("map_set", out, base_b + 3, hv & 255);
+        wi = wi + 1;
+    }
+
+    let hex_str = hash_hex_u32_be(h0) + hash_hex_u32_be(h1) + hash_hex_u32_be(h2) + hash_hex_u32_be(h3)
+        + hash_hex_u32_be(h4) + hash_hex_u32_be(h5) + hash_hex_u32_be(h6) + hash_hex_u32_be(h7);
+    __engine("map_set", out, "hex", hex_str);
+    return out;
+}
+
+pub fn sha256_hex(msg: str) -> str {
+    let n = __engine("str_len", msg);
+    let bmap = __engine("map_new");
+    var i = 0;
+    while i < n {
+        __engine("map_set", bmap, i, __engine("str_byte_at", msg, i));
+        i = i + 1;
+    }
+    let res = sha256_hash_byte_map(bmap, n);
+    return __engine("map_get", res, "hex");
+}
+
+pub fn sha256_digest(msg: str) -> Digest256 {
+    let n = __engine("str_len", msg);
+    let bmap = __engine("map_new");
+    var i = 0;
+    while i < n {
+        __engine("map_set", bmap, i, __engine("str_byte_at", msg, i));
+        i = i + 1;
+    }
+    let res = sha256_hash_byte_map(bmap, n);
+    return Digest256 {
+        h0: __engine("map_get", res, "h0") + 0,
+        h1: __engine("map_get", res, "h1") + 0,
+        h2: __engine("map_get", res, "h2") + 0,
+        h3: __engine("map_get", res, "h3") + 0,
+        hex_prefix: __engine("map_get", res, "hex"),
+    };
+}
+
+// ============================================================================
+// RFC 2104 HMAC-SHA256
+// ============================================================================
+
+pub fn hmac_sha256_hex(key: str, msg: str) -> str {
+    let klen = __engine("str_len", key);
+    let kblock = __engine("map_new");
+    if klen > 64 {
+        let raw_k = __engine("map_new");
+        var ki = 0;
+        while ki < klen {
+            __engine("map_set", raw_k, ki, __engine("str_byte_at", key, ki));
+            ki = ki + 1;
+        }
+        let kh = sha256_hash_byte_map(raw_k, klen);
+        var j = 0;
+        while j < 32 {
+            __engine("map_set", kblock, j, __engine("map_get", kh, j) + 0);
+            j = j + 1;
+        }
+        while j < 64 {
+            __engine("map_set", kblock, j, 0);
+            j = j + 1;
+        }
+    } else {
+        var j = 0;
+        while j < klen {
+            __engine("map_set", kblock, j, __engine("str_byte_at", key, j));
+            j = j + 1;
+        }
+        while j < 64 {
+            __engine("map_set", kblock, j, 0);
+            j = j + 1;
+        }
+    }
+
+    let mlen = __engine("str_len", msg);
+    let inner_in = __engine("map_new");
+    var i = 0;
+    while i < 64 {
+        let kb = __engine("map_get", kblock, i) + 0;
+        __engine("map_set", inner_in, i, (kb ^ 54) & 255);
+        i = i + 1;
+    }
+    var mi = 0;
+    while mi < mlen {
+        __engine("map_set", inner_in, 64 + mi, __engine("str_byte_at", msg, mi));
+        mi = mi + 1;
+    }
+    let inner_hash = sha256_hash_byte_map(inner_in, 64 + mlen);
+
+    let outer_in = __engine("map_new");
+    i = 0;
+    while i < 64 {
+        let kb = __engine("map_get", kblock, i) + 0;
+        __engine("map_set", outer_in, i, (kb ^ 92) & 255);
+        i = i + 1;
+    }
+    var di = 0;
+    while di < 32 {
+        __engine("map_set", outer_in, 64 + di, __engine("map_get", inner_hash, di) + 0);
+        di = di + 1;
+    }
+    let outer_hash = sha256_hash_byte_map(outer_in, 96);
+    return __engine("map_get", outer_hash, "hex");
+}
+
+pub fn hmac_sha256_tag(key: str, msg: str) -> i64 {
+    let hex_s = hmac_sha256_hex(key, msg);
+    return __engine("str_byte_at", hex_s, 0);
+}
+
+// ============================================================================
+// RFC 6234 SHA-512 (64-bit word operations via exact (hi32, lo32) pairs)
+// ============================================================================
+
+pub pure fn rotr64_hi(h: i64, l: i64, n: i64) -> i64 {
+    let uh = h & 4294967295;
+    let ul = l & 4294967295;
+    if n == 0 { return uh; }
+    if n < 32 {
+        return ((uh >> n) | ((ul << (32 - n)) & 4294967295)) & 4294967295;
+    }
+    if n == 32 { return ul; }
+    let k = n - 32;
+    return ((ul >> k) | ((uh << (32 - k)) & 4294967295)) & 4294967295;
+}
+
+pub pure fn rotr64_lo(h: i64, l: i64, n: i64) -> i64 {
+    let uh = h & 4294967295;
+    let ul = l & 4294967295;
+    if n == 0 { return ul; }
+    if n < 32 {
+        return ((ul >> n) | ((uh << (32 - n)) & 4294967295)) & 4294967295;
+    }
+    if n == 32 { return uh; }
+    let k = n - 32;
+    return ((uh >> k) | ((ul << (32 - k)) & 4294967295)) & 4294967295;
+}
+
+pub pure fn shr64_hi(h: i64, n: i64) -> i64 {
+    return (h & 4294967295) >> n;
+}
+
+pub pure fn shr64_lo(h: i64, l: i64, n: i64) -> i64 {
+    let uh = h & 4294967295;
+    let ul = l & 4294967295;
+    return ((ul >> n) | ((uh << (32 - n)) & 4294967295)) & 4294967295;
+}
+
+pub pure fn sha512_sigma0_hi(h: i64, l: i64) -> i64 {
+    return rotr64_hi(h, l, 28) ^ rotr64_hi(h, l, 34) ^ rotr64_hi(h, l, 39);
+}
+
+pub pure fn sha512_sigma0_lo(h: i64, l: i64) -> i64 {
+    return rotr64_lo(h, l, 28) ^ rotr64_lo(h, l, 34) ^ rotr64_lo(h, l, 39);
+}
+
+pub pure fn sha512_sigma1_hi(h: i64, l: i64) -> i64 {
+    return rotr64_hi(h, l, 14) ^ rotr64_hi(h, l, 18) ^ rotr64_hi(h, l, 41);
+}
+
+pub pure fn sha512_sigma1_lo(h: i64, l: i64) -> i64 {
+    return rotr64_lo(h, l, 14) ^ rotr64_lo(h, l, 18) ^ rotr64_lo(h, l, 41);
+}
+
+pub pure fn sha512_lsigma0_hi(h: i64, l: i64) -> i64 {
+    return rotr64_hi(h, l, 1) ^ rotr64_hi(h, l, 8) ^ shr64_hi(h, 7);
+}
+
+pub pure fn sha512_lsigma0_lo(h: i64, l: i64) -> i64 {
+    return rotr64_lo(h, l, 1) ^ rotr64_lo(h, l, 8) ^ shr64_lo(h, l, 7);
+}
+
+pub pure fn sha512_lsigma1_hi(h: i64, l: i64) -> i64 {
+    return rotr64_hi(h, l, 19) ^ rotr64_hi(h, l, 61) ^ shr64_hi(h, 6);
+}
+
+pub pure fn sha512_lsigma1_lo(h: i64, l: i64) -> i64 {
+    return rotr64_lo(h, l, 19) ^ rotr64_lo(h, l, 61) ^ shr64_lo(h, l, 6);
+}
+
+pub pure fn sha512_k_hi(i: i64) -> i64 {
+    if i < 20 {
+        if i == 0 { return 1116352408; }
+        if i == 1 { return 1899447441; }
+        if i == 2 { return 3049323471; }
+        if i == 3 { return 3921009573; }
+        if i == 4 { return 961987163; }
+        if i == 5 { return 1508970993; }
+        if i == 6 { return 2453635748; }
+        if i == 7 { return 2870763221; }
+        if i == 8 { return 3624381080; }
+        if i == 9 { return 310598401; }
+        if i == 10 { return 607225278; }
+        if i == 11 { return 1426881987; }
+        if i == 12 { return 1925078388; }
+        if i == 13 { return 2162078206; }
+        if i == 14 { return 2614888103; }
+        if i == 15 { return 3248222580; }
+        if i == 16 { return 3835390401; }
+        if i == 17 { return 4022224774; }
+        if i == 18 { return 264347078; }
+        return 604807628;
+    }
+    if i < 40 {
+        if i == 20 { return 770255983; }
+        if i == 21 { return 1249150122; }
+        if i == 22 { return 1555081692; }
+        if i == 23 { return 1996064986; }
+        if i == 24 { return 2554220882; }
+        if i == 25 { return 2821834349; }
+        if i == 26 { return 2952996808; }
+        if i == 27 { return 3210313671; }
+        if i == 28 { return 3336571891; }
+        if i == 29 { return 3584528711; }
+        if i == 30 { return 113926993; }
+        if i == 31 { return 338241895; }
+        if i == 32 { return 666307205; }
+        if i == 33 { return 773529912; }
+        if i == 34 { return 1294757372; }
+        if i == 35 { return 1396182291; }
+        if i == 36 { return 1695183700; }
+        if i == 37 { return 1986661051; }
+        if i == 38 { return 2177026350; }
+        return 2456956037;
+    }
+    if i < 60 {
+        if i == 40 { return 2730485921; }
+        if i == 41 { return 2820302411; }
+        if i == 42 { return 3259730800; }
+        if i == 43 { return 3345764771; }
+        if i == 44 { return 3516065817; }
+        if i == 45 { return 3600352804; }
+        if i == 46 { return 4094571909; }
+        if i == 47 { return 275423344; }
+        if i == 48 { return 430227734; }
+        if i == 49 { return 506948616; }
+        if i == 50 { return 659060556; }
+        if i == 51 { return 883997877; }
+        if i == 52 { return 958139571; }
+        if i == 53 { return 1322822218; }
+        if i == 54 { return 1537002063; }
+        if i == 55 { return 1747873779; }
+        if i == 56 { return 1955562222; }
+        if i == 57 { return 2024104815; }
+        if i == 58 { return 2227730452; }
+        return 2361852424;
+    }
+    if i == 60 { return 2428436474; }
+    if i == 61 { return 2756734187; }
+    if i == 62 { return 3204031479; }
+    if i == 63 { return 3329325298; }
+    if i == 64 { return 3391569614; }
+    if i == 65 { return 3515267271; }
+    if i == 66 { return 3940187606; }
+    if i == 67 { return 4118630271; }
+    if i == 68 { return 116418474; }
+    if i == 69 { return 174292421; }
+    if i == 70 { return 289380356; }
+    if i == 71 { return 460393269; }
+    if i == 72 { return 685471733; }
+    if i == 73 { return 852142971; }
+    if i == 74 { return 1017036298; }
+    if i == 75 { return 1126000580; }
+    if i == 76 { return 1288033470; }
+    if i == 77 { return 1501505948; }
+    if i == 78 { return 1607167915; }
+    return 1816402316;
+}
+
+pub pure fn sha512_k_lo(i: i64) -> i64 {
+    if i < 20 {
+        if i == 0 { return 3609767458; }
+        if i == 1 { return 602891725; }
+        if i == 2 { return 3964484399; }
+        if i == 3 { return 2173295548; }
+        if i == 4 { return 4081628472; }
+        if i == 5 { return 3053834265; }
+        if i == 6 { return 2937671579; }
+        if i == 7 { return 3664609560; }
+        if i == 8 { return 2734883394; }
+        if i == 9 { return 1164996542; }
+        if i == 10 { return 1323610764; }
+        if i == 11 { return 3590304994; }
+        if i == 12 { return 4068182383; }
+        if i == 13 { return 991336113; }
+        if i == 14 { return 633803317; }
+        if i == 15 { return 3479774868; }
+        if i == 16 { return 2666613458; }
+        if i == 17 { return 944711139; }
+        if i == 18 { return 2341262773; }
+        return 2007800933;
+    }
+    if i < 40 {
+        if i == 20 { return 1495990901; }
+        if i == 21 { return 1856431235; }
+        if i == 22 { return 3175218132; }
+        if i == 23 { return 2198950837; }
+        if i == 24 { return 3999719339; }
+        if i == 25 { return 766784016; }
+        if i == 26 { return 2566594879; }
+        if i == 27 { return 3203337956; }
+        if i == 28 { return 1034457026; }
+        if i == 29 { return 2466948901; }
+        if i == 30 { return 3758326383; }
+        if i == 31 { return 168717936; }
+        if i == 32 { return 1188179964; }
+        if i == 33 { return 1546045734; }
+        if i == 34 { return 1522805485; }
+        if i == 35 { return 2643833823; }
+        if i == 36 { return 2343527390; }
+        if i == 37 { return 1014477480; }
+        if i == 38 { return 1206759142; }
+        return 344077627;
+    }
+    if i < 60 {
+        if i == 40 { return 1290863460; }
+        if i == 41 { return 3158454273; }
+        if i == 42 { return 3505952657; }
+        if i == 43 { return 106217008; }
+        if i == 44 { return 3606008344; }
+        if i == 45 { return 1432725776; }
+        if i == 46 { return 1467031594; }
+        if i == 47 { return 851169720; }
+        if i == 48 { return 3100823752; }
+        if i == 49 { return 1363258195; }
+        if i == 50 { return 3750685593; }
+        if i == 51 { return 3785050280; }
+        if i == 52 { return 3318307427; }
+        if i == 53 { return 3812723403; }
+        if i == 54 { return 2003034995; }
+        if i == 55 { return 3602036899; }
+        if i == 56 { return 1575990012; }
+        if i == 57 { return 1125592928; }
+        if i == 58 { return 2716904306; }
+        return 442776044;
+    }
+    if i == 60 { return 593698344; }
+    if i == 61 { return 3733110249; }
+    if i == 62 { return 2999351573; }
+    if i == 63 { return 3815920427; }
+    if i == 64 { return 3928383900; }
+    if i == 65 { return 566280711; }
+    if i == 66 { return 3454069534; }
+    if i == 67 { return 4000239992; }
+    if i == 68 { return 1914138554; }
+    if i == 69 { return 2731055270; }
+    if i == 70 { return 3203993006; }
+    if i == 71 { return 320620315; }
+    if i == 72 { return 587496836; }
+    if i == 73 { return 1086792851; }
+    if i == 74 { return 365543100; }
+    if i == 75 { return 2618297676; }
+    if i == 76 { return 3409855158; }
+    if i == 77 { return 4234509866; }
+    if i == 78 { return 987167468; }
+    return 1246189591;
+}
+
+pub fn sha512_init_k_table(kmap: i64) -> i64 {
+    var i = 0;
+    while i < 80 {
+        __engine("map_set", kmap, i, sha512_k_hi(i));
+        __engine("map_set", kmap, 100 + i, sha512_k_lo(i));
+        i = i + 1;
+    }
+    return kmap;
+}
+
+pub pure fn sha512_padded_byte(bmap: i64, blen: i64, padded_len: i64, idx: i64) -> i64 {
+    if idx < blen {
+        return (__engine("map_get", bmap, idx) + 0) & 255;
+    }
+    if idx == blen {
+        return 128;
+    }
+    if idx >= padded_len - 8 {
+        let bit_len = blen * 8;
+        let shift = (padded_len - 1 - idx) * 8;
+        if shift >= 64 { return 0; }
+        return (bit_len >> shift) & 255;
+    }
+    return 0;
+}
+
+pub fn sha512_store_u32_be(st: i64, base_b: i64, w: i64) -> i64 {
+    let u = w & 4294967295;
+    __engine("map_set", st, base_b, (u >> 24) & 255);
+    __engine("map_set", st, base_b + 1, (u >> 16) & 255);
+    __engine("map_set", st, base_b + 2, (u >> 8) & 255);
+    __engine("map_set", st, base_b + 3, u & 255);
+    return st;
+}
+
+pub fn sha512_hash_byte_map(bmap: i64, blen: i64) -> i64 {
+    let st = __engine("map_new");
+    sha512_init_k_table(st);
+
+    var h0_h = 1779033703; var h0_l = 4089235720;
+    var h1_h = 3144134277; var h1_l = 2227873595;
+    var h2_h = 1013904242; var h2_l = 4271175723;
+    var h3_h = 2773480762; var h3_l = 1595750129;
+    var h4_h = 1359893119; var h4_l = 2917565137;
+    var h5_h = 2600822924; var h5_l = 725511199;
+    var h6_h = 528734635;  var h6_l = 4215389547;
+    var h7_h = 1541459225; var h7_l = 327033209;
+
+    let padded_len = ((blen + 17 + 127) / 128) * 128;
+    var blk = 0;
+    while blk < padded_len {
+        var t = 0;
+        while t < 16 {
+            let base = blk + (t * 8);
+            let b0 = sha512_padded_byte(bmap, blen, padded_len, base);
+            let b1 = sha512_padded_byte(bmap, blen, padded_len, base + 1);
+            let b2 = sha512_padded_byte(bmap, blen, padded_len, base + 2);
+            let b3 = sha512_padded_byte(bmap, blen, padded_len, base + 3);
+            let b4 = sha512_padded_byte(bmap, blen, padded_len, base + 4);
+            let b5 = sha512_padded_byte(bmap, blen, padded_len, base + 5);
+            let b6 = sha512_padded_byte(bmap, blen, padded_len, base + 6);
+            let b7 = sha512_padded_byte(bmap, blen, padded_len, base + 7);
+            let wh = ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) & 4294967295;
+            let wl = ((b4 << 24) | (b5 << 16) | (b6 << 8) | b7) & 4294967295;
+            __engine("map_set", st, 200 + t, wh);
+            __engine("map_set", st, 300 + t, wl);
+            t = t + 1;
+        }
+        while t < 80 {
+            let w15_h = __engine("map_get", st, 200 + t - 15) + 0;
+            let w15_l = __engine("map_get", st, 300 + t - 15) + 0;
+            let w2_h = __engine("map_get", st, 200 + t - 2) + 0;
+            let w2_l = __engine("map_get", st, 300 + t - 2) + 0;
+            let w16_h = __engine("map_get", st, 200 + t - 16) + 0;
+            let w16_l = __engine("map_get", st, 300 + t - 16) + 0;
+            let w7_h = __engine("map_get", st, 200 + t - 7) + 0;
+            let w7_l = __engine("map_get", st, 300 + t - 7) + 0;
+
+            let s0_h = sha512_lsigma0_hi(w15_h, w15_l);
+            let s0_l = sha512_lsigma0_lo(w15_h, w15_l);
+            let s1_h = sha512_lsigma1_hi(w2_h, w2_l);
+            let s1_l = sha512_lsigma1_lo(w2_h, w2_l);
+
+            let sum_l = w16_l + s0_l + w7_l + s1_l;
+            let wt_l = sum_l & 4294967295;
+            let wt_h = (w16_h + s0_h + w7_h + s1_h + (sum_l >> 32)) & 4294967295;
+            __engine("map_set", st, 200 + t, wt_h);
+            __engine("map_set", st, 300 + t, wt_l);
+            t = t + 1;
+        }
+
+        var a_h = h0_h; var a_l = h0_l;
+        var b_h = h1_h; var b_l = h1_l;
+        var c_h = h2_h; var c_l = h2_l;
+        var d_h = h3_h; var d_l = h3_l;
+        var e_h = h4_h; var e_l = h4_l;
+        var f_h = h5_h; var f_l = h5_l;
+        var g_h = h6_h; var g_l = h6_l;
+        var h_h = h7_h; var h_l = h7_l;
+
+        t = 0;
+        while t < 80 {
+            let wt_h = __engine("map_get", st, 200 + t) + 0;
+            let wt_l = __engine("map_get", st, 300 + t) + 0;
+            let kt_h = __engine("map_get", st, t) + 0;
+            let kt_l = __engine("map_get", st, 100 + t) + 0;
+
+            let t1_l_sum = h_l + sha512_sigma1_lo(e_h, e_l) + sha256_ch(e_l, f_l, g_l) + kt_l + wt_l;
+            let t1_l = t1_l_sum & 4294967295;
+            let t1_h = (h_h + sha512_sigma1_hi(e_h, e_l) + sha256_ch(e_h, f_h, g_h) + kt_h + wt_h + (t1_l_sum >> 32)) & 4294967295;
+
+            let t2_l_sum = sha512_sigma0_lo(a_h, a_l) + sha256_maj(a_l, b_l, c_l);
+            let t2_l = t2_l_sum & 4294967295;
+            let t2_h = (sha512_sigma0_hi(a_h, a_l) + sha256_maj(a_h, b_h, c_h) + (t2_l_sum >> 32)) & 4294967295;
+
+            h_h = g_h; h_l = g_l;
+            g_h = f_h; g_l = f_l;
+            f_h = e_h; f_l = e_l;
+            let ne_l = d_l + t1_l;
+            e_l = ne_l & 4294967295;
+            e_h = (d_h + t1_h + (ne_l >> 32)) & 4294967295;
+            d_h = c_h; d_l = c_l;
+            c_h = b_h; c_l = b_l;
+            b_h = a_h; b_l = a_l;
+            let na_l = t1_l + t2_l;
+            a_l = na_l & 4294967295;
+            a_h = (t1_h + t2_h + (na_l >> 32)) & 4294967295;
+            t = t + 1;
+        }
+
+        let s0l = h0_l + a_l; h0_l = s0l & 4294967295; h0_h = (h0_h + a_h + (s0l >> 32)) & 4294967295;
+        let s1l = h1_l + b_l; h1_l = s1l & 4294967295; h1_h = (h1_h + b_h + (s1l >> 32)) & 4294967295;
+        let s2l = h2_l + c_l; h2_l = s2l & 4294967295; h2_h = (h2_h + c_h + (s2l >> 32)) & 4294967295;
+        let s3l = h3_l + d_l; h3_l = s3l & 4294967295; h3_h = (h3_h + d_h + (s3l >> 32)) & 4294967295;
+        let s4l = h4_l + e_l; h4_l = s4l & 4294967295; h4_h = (h4_h + e_h + (s4l >> 32)) & 4294967295;
+        let s5l = h5_l + f_l; h5_l = s5l & 4294967295; h5_h = (h5_h + f_h + (s5l >> 32)) & 4294967295;
+        let s6l = h6_l + g_l; h6_l = s6l & 4294967295; h6_h = (h6_h + g_h + (s6l >> 32)) & 4294967295;
+        let s7l = h7_l + h_l; h7_l = s7l & 4294967295; h7_h = (h7_h + h_h + (s7l >> 32)) & 4294967295;
+
+        blk = blk + 128;
+    }
+
+    sha512_store_u32_be(st, 0, h0_h);  sha512_store_u32_be(st, 4, h0_l);
+    sha512_store_u32_be(st, 8, h1_h);  sha512_store_u32_be(st, 12, h1_l);
+    sha512_store_u32_be(st, 16, h2_h); sha512_store_u32_be(st, 20, h2_l);
+    sha512_store_u32_be(st, 24, h3_h); sha512_store_u32_be(st, 28, h3_l);
+    sha512_store_u32_be(st, 32, h4_h); sha512_store_u32_be(st, 36, h4_l);
+    sha512_store_u32_be(st, 40, h5_h); sha512_store_u32_be(st, 44, h5_l);
+    sha512_store_u32_be(st, 48, h6_h); sha512_store_u32_be(st, 52, h6_l);
+    sha512_store_u32_be(st, 56, h7_h); sha512_store_u32_be(st, 60, h7_l);
+
+    let hex_str = hash_hex_u32_be(h0_h) + hash_hex_u32_be(h0_l)
+        + hash_hex_u32_be(h1_h) + hash_hex_u32_be(h1_l)
+        + hash_hex_u32_be(h2_h) + hash_hex_u32_be(h2_l)
+        + hash_hex_u32_be(h3_h) + hash_hex_u32_be(h3_l)
+        + hash_hex_u32_be(h4_h) + hash_hex_u32_be(h4_l)
+        + hash_hex_u32_be(h5_h) + hash_hex_u32_be(h5_l)
+        + hash_hex_u32_be(h6_h) + hash_hex_u32_be(h6_l)
+        + hash_hex_u32_be(h7_h) + hash_hex_u32_be(h7_l);
+    __engine("map_set", st, "hex", hex_str);
+    return st;
+}
+
+pub fn sha512_hex(msg: str) -> str {
+    let n = __engine("str_len", msg);
+    let bmap = __engine("map_new");
+    var i = 0;
+    while i < n {
+        __engine("map_set", bmap, i, __engine("str_byte_at", msg, i));
+        i = i + 1;
+    }
+    let res = sha512_hash_byte_map(bmap, n);
+    return __engine("map_get", res, "hex");
+}
+
+// ============================================================================
+// Official BLAKE3 Compression & Multi-Chunk Merkle Tree Hash
+// ============================================================================
+
 pub pure fn blake3_g_mix(a: i64, b: i64, c: i64, d: i64, mx: i64, my: i64) -> i64 {
     let a1 = (a + b + mx) & 4294967295;
     let d1 = rotr32(d ^ a1, 16);
@@ -53,62 +795,291 @@ pub pure fn blake3_g_mix(a: i64, b: i64, c: i64, d: i64, mx: i64, my: i64) -> i6
     return (a2 ^ b2 ^ c2 ^ d2) & 4294967295;
 }
 
-// Computes canonical SHA-256 digest words and RFC 6234 test-vector hex for known inputs.
-pub fn sha256_digest(msg: str) -> Digest256 {
-    if msg.len() == 0 {
-        // RFC 6234 SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-        return Digest256 {
-            h0: 3820029250,
-            h1: 2566659092,
-            h2: 2600195272,
-            h3: 2574235940,
-            hex_prefix: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        };
-    }
-    if msg == "abc" {
-        // RFC 6234 SHA-256("abc") = ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
-        return Digest256 {
-            h0: 3128432319,
-            h1: 2399260650,
-            h2: 1094795486,
-            h3: 1571693091,
-            hex_prefix: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-        };
-    }
-    let b0 = msg.byte_at(0);
-    let w0 = sha256_sigma0(1779033703 ^ b0);
-    let w1 = sha256_sigma1(3144134277 ^ msg.len());
-    let w2 = sha256_ch(w0, w1, 1013904242);
-    let w3 = sha256_maj(w0, w1, 2773480762);
-    return Digest256 {
-        h0: w0,
-        h1: w1,
-        h2: w2,
-        h3: w3,
-        hex_prefix: "sha256_computed",
-    };
+pub pure fn blake3_iv(i: i64) -> i64 {
+    if i == 0 { return 1779033703; }
+    if i == 1 { return 3144134277; }
+    if i == 2 { return 1013904242; }
+    if i == 3 { return 2773480762; }
+    if i == 4 { return 1359893119; }
+    if i == 5 { return 2600822924; }
+    if i == 6 { return 528734635; }
+    return 1541459225;
 }
 
-// Computes BLAKE3 digest using the BLAKE3 IV (`0x6A09E667..`) and `blake3_g_mix`.
+pub pure fn blake3_msg_perm(i: i64) -> i64 {
+    if i == 0 { return 2; }
+    if i == 1 { return 6; }
+    if i == 2 { return 3; }
+    if i == 3 { return 10; }
+    if i == 4 { return 7; }
+    if i == 5 { return 0; }
+    if i == 6 { return 4; }
+    if i == 7 { return 13; }
+    if i == 8 { return 1; }
+    if i == 9 { return 11; }
+    if i == 10 { return 12; }
+    if i == 11 { return 5; }
+    if i == 12 { return 9; }
+    if i == 13 { return 14; }
+    if i == 14 { return 15; }
+    return 8;
+}
+
+pub fn blake3_qround(st: i64, ai: i64, bi: i64, ci: i64, di: i64, mx: i64, my: i64) -> i64 {
+    let a0 = __engine("map_get", st, ai) + 0;
+    let b0 = __engine("map_get", st, bi) + 0;
+    let c0 = __engine("map_get", st, ci) + 0;
+    let d0 = __engine("map_get", st, di) + 0;
+
+    let a1 = (a0 + b0 + mx) & 4294967295;
+    let d1 = rotr32(d0 ^ a1, 16);
+    let c1 = (c0 + d1) & 4294967295;
+    let b1 = rotr32(b0 ^ c1, 12);
+    let a2 = (a1 + b1 + my) & 4294967295;
+    let d2 = rotr32(d1 ^ a2, 8);
+    let c2 = (c1 + d2) & 4294967295;
+    let b2 = rotr32(b1 ^ c2, 7);
+
+    __engine("map_set", st, ai, a2);
+    __engine("map_set", st, bi, b2);
+    __engine("map_set", st, ci, c2);
+    __engine("map_set", st, di, d2);
+    return st;
+}
+
+// `st`: indices 0..15 = state words, 16..31 = message words, 32..47 = temp permute, 48..55 = cv
+pub fn blake3_compress_in_place(st: i64, counter: i64, block_len: i64, flags: i64) -> i64 {
+    var i = 0;
+    while i < 8 {
+        __engine("map_set", st, i, __engine("map_get", st, 48 + i) + 0);
+        i = i + 1;
+    }
+    __engine("map_set", st, 8, blake3_iv(0));
+    __engine("map_set", st, 9, blake3_iv(1));
+    __engine("map_set", st, 10, blake3_iv(2));
+    __engine("map_set", st, 11, blake3_iv(3));
+    __engine("map_set", st, 12, counter & 4294967295);
+    __engine("map_set", st, 13, (counter >> 32) & 4294967295);
+    __engine("map_set", st, 14, block_len & 4294967295);
+    __engine("map_set", st, 15, flags & 4294967295);
+
+    var r = 0;
+    while r < 7 {
+        blake3_qround(st, 0, 4, 8, 12, __engine("map_get", st, 16) + 0, __engine("map_get", st, 17) + 0);
+        blake3_qround(st, 1, 5, 9, 13, __engine("map_get", st, 18) + 0, __engine("map_get", st, 19) + 0);
+        blake3_qround(st, 2, 6, 10, 14, __engine("map_get", st, 20) + 0, __engine("map_get", st, 21) + 0);
+        blake3_qround(st, 3, 7, 11, 15, __engine("map_get", st, 22) + 0, __engine("map_get", st, 23) + 0);
+        blake3_qround(st, 0, 5, 10, 15, __engine("map_get", st, 24) + 0, __engine("map_get", st, 25) + 0);
+        blake3_qround(st, 1, 6, 11, 12, __engine("map_get", st, 26) + 0, __engine("map_get", st, 27) + 0);
+        blake3_qround(st, 2, 7, 8, 13, __engine("map_get", st, 28) + 0, __engine("map_get", st, 29) + 0);
+        blake3_qround(st, 3, 4, 9, 14, __engine("map_get", st, 30) + 0, __engine("map_get", st, 31) + 0);
+        if r < 6 {
+            var pi = 0;
+            while pi < 16 {
+                let src_idx = blake3_msg_perm(pi);
+                __engine("map_set", st, 32 + pi, __engine("map_get", st, 16 + src_idx) + 0);
+                pi = pi + 1;
+            }
+            pi = 0;
+            while pi < 16 {
+                __engine("map_set", st, 16 + pi, __engine("map_get", st, 32 + pi) + 0);
+                pi = pi + 1;
+            }
+        }
+        r = r + 1;
+    }
+
+    i = 0;
+    while i < 8 {
+        let s_lo = __engine("map_get", st, i) + 0;
+        let s_hi = __engine("map_get", st, i + 8) + 0;
+        let cv_i = __engine("map_get", st, 48 + i) + 0;
+        __engine("map_set", st, i, (s_lo ^ s_hi) & 4294967295);
+        __engine("map_set", st, i + 8, (s_hi ^ cv_i) & 4294967295);
+        i = i + 1;
+    }
+    return st;
+}
+
+pub pure fn blake3_msg_byte(msg: str, mlen: i64, idx: i64) -> i64 {
+    if idx < mlen {
+        return __engine("str_byte_at", msg, idx) & 255;
+    }
+    return 0;
+}
+
+pub fn blake3_load_msg_block(st: i64, msg: str, mlen: i64, blk_offset: i64, blk_len: i64) -> i64 {
+    let end_off = blk_offset + blk_len;
+    var wi = 0;
+    while wi < 16 {
+        let p = blk_offset + (wi * 4);
+        let b0 = if p < end_off { blake3_msg_byte(msg, mlen, p) } else { 0 };
+        let b1 = if p + 1 < end_off { blake3_msg_byte(msg, mlen, p + 1) } else { 0 };
+        let b2 = if p + 2 < end_off { blake3_msg_byte(msg, mlen, p + 2) } else { 0 };
+        let b3 = if p + 3 < end_off { blake3_msg_byte(msg, mlen, p + 3) } else { 0 };
+        let w = (b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)) & 4294967295;
+        __engine("map_set", st, 16 + wi, w);
+        wi = wi + 1;
+    }
+    return st;
+}
+
+pub fn blake3_hex(msg: str) -> str {
+    let mlen = __engine("str_len", msg);
+    let st = __engine("map_new");
+
+    if mlen <= 1024 {
+        var i = 0;
+        while i < 8 {
+            __engine("map_set", st, 48 + i, blake3_iv(i));
+            i = i + 1;
+        }
+        let num_blocks = if mlen == 0 { 1 } else { (mlen + 63) / 64 };
+        var b_idx = 0;
+        while b_idx < num_blocks {
+            let b_start = b_idx * 64;
+            let rem = mlen - b_start;
+            let b_len = if mlen == 0 { 0 } else if rem > 64 { 64 } else { rem };
+            blake3_load_msg_block(st, msg, mlen, b_start, b_len);
+            var flags = 0;
+            if b_idx == 0 { flags = flags | 1; }
+            if b_idx + 1 == num_blocks { flags = flags | 2 | 8; }
+            blake3_compress_in_place(st, 0, b_len, flags);
+            if b_idx + 1 < num_blocks {
+                var ci = 0;
+                while ci < 8 {
+                    __engine("map_set", st, 48 + ci, __engine("map_get", st, ci) + 0);
+                    ci = ci + 1;
+                }
+            }
+            b_idx = b_idx + 1;
+        }
+        var hex_s = "";
+        var hi = 0;
+        while hi < 8 {
+            hex_s = hex_s + hash_hex_u32_le(__engine("map_get", st, hi) + 0);
+            hi = hi + 1;
+        }
+        return hex_s;
+    }
+
+    // Multi-chunk Merkle stack: stack depth `d` stored at `100 + d * 8 + i`
+    let total_chunks = (mlen + 1023) / 1024;
+    var stack_len = 0;
+    var chunk_idx = 0;
+    while chunk_idx < total_chunks {
+        let c_start = chunk_idx * 1024;
+        let c_rem = mlen - c_start;
+        let c_len = if c_rem > 1024 { 1024 } else { c_rem };
+        var i = 0;
+        while i < 8 {
+            __engine("map_set", st, 48 + i, blake3_iv(i));
+            i = i + 1;
+        }
+        let num_blocks = (c_len + 63) / 64;
+        var b_idx = 0;
+        while b_idx < num_blocks {
+            let b_start = c_start + (b_idx * 64);
+            let b_rem = (c_start + c_len) - b_start;
+            let b_len = if b_rem > 64 { 64 } else { b_rem };
+            blake3_load_msg_block(st, msg, mlen, b_start, b_len);
+            var flags = 0;
+            if b_idx == 0 { flags = flags | 1; }
+            if b_idx + 1 == num_blocks { flags = flags | 2; }
+            blake3_compress_in_place(st, chunk_idx, b_len, flags);
+            var ci = 0;
+            while ci < 8 {
+                __engine("map_set", st, 48 + ci, __engine("map_get", st, ci) + 0);
+                ci = ci + 1;
+            }
+            b_idx = b_idx + 1;
+        }
+
+        var cur_h = 0;
+        if (chunk_idx + 1) < total_chunks {
+            var fold = 1;
+            while fold == 1 {
+                if stack_len > 0 {
+                    let top_h = __engine("map_get", st, 300 + stack_len - 1) + 0;
+                    if top_h == cur_h {
+                        stack_len = stack_len - 1;
+                        let l_base = 100 + (stack_len * 8);
+                        var wi = 0;
+                        while wi < 8 {
+                            __engine("map_set", st, 16 + wi, __engine("map_get", st, l_base + wi) + 0);
+                            __engine("map_set", st, 24 + wi, __engine("map_get", st, 48 + wi) + 0);
+                            __engine("map_set", st, 48 + wi, blake3_iv(wi));
+                            wi = wi + 1;
+                        }
+                        blake3_compress_in_place(st, 0, 64, 4);
+                        wi = 0;
+                        while wi < 8 {
+                            __engine("map_set", st, 48 + wi, __engine("map_get", st, wi) + 0);
+                            wi = wi + 1;
+                        }
+                        cur_h = top_h + 1;
+                    } else {
+                        fold = 0;
+                    }
+                } else {
+                    fold = 0;
+                }
+            }
+            var si = 0;
+            while si < 8 {
+                __engine("map_set", st, 100 + (stack_len * 8) + si, __engine("map_get", st, 48 + si) + 0);
+                si = si + 1;
+            }
+            __engine("map_set", st, 300 + stack_len, cur_h);
+            stack_len = stack_len + 1;
+        } else {
+            while stack_len > 1 {
+                stack_len = stack_len - 1;
+                let l_base = 100 + (stack_len * 8);
+                var wi = 0;
+                while wi < 8 {
+                    __engine("map_set", st, 16 + wi, __engine("map_get", st, l_base + wi) + 0);
+                    __engine("map_set", st, 24 + wi, __engine("map_get", st, 48 + wi) + 0);
+                    __engine("map_set", st, 48 + wi, blake3_iv(wi));
+                    wi = wi + 1;
+                }
+                blake3_compress_in_place(st, 0, 64, 4);
+                wi = 0;
+                while wi < 8 {
+                    __engine("map_set", st, 48 + wi, __engine("map_get", st, wi) + 0);
+                    wi = wi + 1;
+                }
+            }
+            stack_len = stack_len - 1;
+            let root_l = 100 + (stack_len * 8);
+            var rwi = 0;
+            while rwi < 8 {
+                __engine("map_set", st, 16 + rwi, __engine("map_get", st, root_l + rwi) + 0);
+                __engine("map_set", st, 24 + rwi, __engine("map_get", st, 48 + rwi) + 0);
+                __engine("map_set", st, 48 + rwi, blake3_iv(rwi));
+                rwi = rwi + 1;
+            }
+            blake3_compress_in_place(st, 0, 64, 12);
+            var hex_s = "";
+            var hi = 0;
+            while hi < 8 {
+                hex_s = hex_s + hash_hex_u32_le(__engine("map_get", st, hi) + 0);
+                hi = hi + 1;
+            }
+            return hex_s;
+        }
+        chunk_idx = chunk_idx + 1;
+    }
+    return "";
+}
+
 pub fn blake3_digest(msg: str) -> Digest256 {
-    let m0 = if msg.len() > 0 { msg.byte_at(0) } else { 0 };
-    let m1 = msg.len();
-    let mix0 = blake3_g_mix(1779033703, 3144134277, 1013904242, 2773480762, m0, m1);
-    let mix1 = blake3_g_mix(1359893119, 2600822924, 528734635, 1541459225, m1, m0);
+    let hex_s = blake3_hex(msg);
     return Digest256 {
-        h0: mix0,
-        h1: mix1,
-        h2: (mix0 ^ mix1) & 4294967295,
-        h3: rotr32(mix0, 7),
-        hex_prefix: "blake3_computed",
+        h0: __engine("str_byte_at", hex_s, 0),
+        h1: __engine("str_byte_at", hex_s, 1),
+        h2: __engine("str_byte_at", hex_s, 2),
+        h3: __engine("str_byte_at", hex_s, 3),
+        hex_prefix: hex_s,
     };
-}
-
-// RFC 2104 HMAC-SHA256 tag computation (`H((K ^ opad) || H((K ^ ipad) || msg))`).
-pub fn hmac_sha256_tag(key: str, msg: str) -> i64 {
-    let k0 = if key.len() > 0 { key.byte_at(0) } else { 0 };
-    let ipad = (k0 ^ 54) & 255;
-    let opad = (k0 ^ 92) & 255;
-    let inner = sha256_digest(msg);
-    return blake3_g_mix(inner.h0, inner.h1, ipad, opad, key.len(), msg.len());
 }

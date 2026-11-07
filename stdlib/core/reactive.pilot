@@ -1,7 +1,8 @@
 // ============================================================================
 // FILE: stdlib/core/reactive.pilot
 // Milestone 58.3: Glitch-Free Push-Pull Reactive Signal Nodes (`!^`)
-// Migrates `Signal<T>` from `crates/pilot-rt/src/concurrency.rs` into Pilot.
+// Implements a glitch-free push-pull reactive dependency DAG with epoch
+// memoization and diamond-sink single-evaluation guarantees in pure Pilot.
 // ============================================================================
 
 pub struct ReactiveSignalNode {
@@ -30,4 +31,109 @@ pub fn update_reactive_signal(sig: ReactiveSignalNode, next_val: i64) -> Reactiv
         epoch: sig.epoch + 1,
         is_dirty: true,
     };
+}
+
+pub pure fn rx_eval_op(op_kind: i64, va: i64, vb: i64, const_arg: i64) -> i64 {
+    if op_kind == 1 { return va * const_arg; }
+    if op_kind == 2 { return va + const_arg; }
+    if op_kind == 3 { return va + vb; }
+    if op_kind == 4 { return va - vb; }
+    if op_kind == 5 { return va * vb; }
+    return va + const_arg;
+}
+
+pub fn rx_graph_new() -> i64 {
+    let g = __engine("map_new");
+    __engine("map_set", g, "cnt", 0);
+    __engine("map_set", g, "epoch", 1);
+    return g;
+}
+
+pub fn rx_source(g: i64, init_val: i64) -> i64 {
+    let id = (__engine("map_get", g, "cnt") + 0) + 1;
+    let ep = __engine("map_get", g, "epoch") + 0;
+    __engine("map_set", g, "cnt", id);
+    __engine("map_set", g, "kind_" + id, 0);
+    __engine("map_set", g, "val_" + id, init_val);
+    __engine("map_set", g, "ver_" + id, ep);
+    __engine("map_set", g, "seen_" + id, ep);
+    __engine("map_set", g, "recomp_" + id, 0);
+    return id;
+}
+
+pub fn rx_read(g: i64, node_id: i64) -> i64 {
+    let kind = __engine("map_get", g, "kind_" + node_id) + 0;
+    if kind == 0 {
+        return __engine("map_get", g, "val_" + node_id) + 0;
+    }
+    let ep = __engine("map_get", g, "epoch") + 0;
+    let seen = __engine("map_get", g, "seen_" + node_id) + 0;
+    if seen == ep {
+        return __engine("map_get", g, "val_" + node_id) + 0;
+    }
+    let da = __engine("map_get", g, "da_" + node_id) + 0;
+    let db = __engine("map_get", g, "db_" + node_id) + 0;
+    let ca = __engine("map_get", g, "ca_" + node_id) + 0;
+
+    let va = if da > 0 { rx_read(g, da) } else { 0 };
+    let vb = if db > 0 { rx_read(g, db) } else { 0 };
+
+    let vera = if da > 0 { __engine("map_get", g, "ver_" + da) + 0 } else { 0 };
+    let verb = if db > 0 { __engine("map_get", g, "ver_" + db) + 0 } else { 0 };
+    let dep_ver = (vera * 1000003) + verb;
+    let prev_dep_ver = __engine("map_get", g, "dver_" + node_id) + 0;
+
+    __engine("map_set", g, "seen_" + node_id, ep);
+    if dep_ver != prev_dep_ver {
+        let next_v = rx_eval_op(kind, va, vb, ca);
+        let rc = (__engine("map_get", g, "recomp_" + node_id) + 0) + 1;
+        __engine("map_set", g, "recomp_" + node_id, rc);
+        __engine("map_set", g, "dver_" + node_id, dep_ver);
+        let old_v = __engine("map_get", g, "val_" + node_id) + 0;
+        if next_v != old_v {
+            __engine("map_set", g, "val_" + node_id, next_v);
+            __engine("map_set", g, "ver_" + node_id, ep);
+        }
+    }
+    return __engine("map_get", g, "val_" + node_id) + 0;
+}
+
+pub fn rx_derived(g: i64, dep_a: i64, dep_b: i64, op_kind: i64, const_arg: i64) -> i64 {
+    let id = (__engine("map_get", g, "cnt") + 0) + 1;
+    let ep = __engine("map_get", g, "epoch") + 0;
+    __engine("map_set", g, "cnt", id);
+    __engine("map_set", g, "kind_" + id, op_kind);
+    __engine("map_set", g, "da_" + id, dep_a);
+    __engine("map_set", g, "db_" + id, dep_b);
+    __engine("map_set", g, "ca_" + id, const_arg);
+
+    let va = if dep_a > 0 { rx_read(g, dep_a) } else { 0 };
+    let vb = if dep_b > 0 { rx_read(g, dep_b) } else { 0 };
+    let vera = if dep_a > 0 { __engine("map_get", g, "ver_" + dep_a) + 0 } else { 0 };
+    let verb = if dep_b > 0 { __engine("map_get", g, "ver_" + dep_b) + 0 } else { 0 };
+    let init_v = rx_eval_op(op_kind, va, vb, const_arg);
+
+    __engine("map_set", g, "val_" + id, init_v);
+    __engine("map_set", g, "ver_" + id, ep);
+    __engine("map_set", g, "seen_" + id, ep);
+    __engine("map_set", g, "dver_" + id, (vera * 1000003) + verb);
+    __engine("map_set", g, "recomp_" + id, 0);
+    return id;
+}
+
+pub fn rx_set(g: i64, node_id: i64, new_val: i64) -> i64 {
+    let cur = __engine("map_get", g, "val_" + node_id) + 0;
+    if cur == new_val {
+        return cur;
+    }
+    let ep = (__engine("map_get", g, "epoch") + 0) + 1;
+    __engine("map_set", g, "epoch", ep);
+    __engine("map_set", g, "val_" + node_id, new_val);
+    __engine("map_set", g, "ver_" + node_id, ep);
+    __engine("map_set", g, "seen_" + node_id, ep);
+    return new_val;
+}
+
+pub fn rx_recompute_count(g: i64, node_id: i64) -> i64 {
+    return __engine("map_get", g, "recomp_" + node_id) + 0;
 }

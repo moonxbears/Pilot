@@ -1,83 +1,1032 @@
 // ============================================================================
 // FILE: stdlib/crypto/ed25519.pilot
-// Milestone 58.2: RFC 8032 Ed25519 Digital Signature & Forgery Verification
-// Implements deterministic keypair derivation, signature generation, and
-// strict constant-time verification that rejects forged/corrupted signatures
-// and modified messages.
+// Milestone 58.2: RFC 8032 Ed25519 Digital Signatures & Malleability Rejection
+// Full GF(2^255 - 19) field arithmetic, twisted Edwards extended coordinates
+// (X : Y : Z : T), scalar reduction mod L, deterministic signing, and strict
+// canonical S < L verification in pure Pilot.
 // ============================================================================
 
-pub struct Ed25519Keypair {
-    pub secret_scalar: i64;
-    pub public_point: i64;
+// Arena layout inside `st` map:
+// Field elements occupy 10 limb slots (base + 0..9), where limbs 0..8 are 26-bit
+// and limb 9 is 21-bit (9 * 26 + 21 = 255 bits; 2^255 == 19 mod p, 2^260 == 608 mod p).
+// Extended curve points occupy 40 slots: X (0..9), Y (10..19), Z (20..29), T (30..39).
+
+pub pure fn ed_unhex_nib(b: i64) -> i64 {
+    if b >= 48 && b <= 57 { return b - 48; }
+    if b >= 97 && b <= 102 { return b - 87; }
+    if b >= 65 && b <= 70 { return b - 55; }
+    return 0;
 }
 
-pub struct Ed25519Signature {
-    pub r_point: i64;
-    pub s_scalar: i64;
+pub pure fn ed_hex_byte_at(hex_s: str, byte_idx: i64) -> i64 {
+    let p = byte_idx * 2;
+    let hi = ed_unhex_nib(__engine("str_byte_at", hex_s, p));
+    let lo = ed_unhex_nib(__engine("str_byte_at", hex_s, p + 1));
+    return (hi << 4) | lo;
 }
 
-// Prime field modulus constant `L = 2^61 - 1` for scalar arithmetic in 64-bit registers.
-pub pure fn ed25519_prime_q() -> i64 {
-    return 2147483647;
+pub pure fn ed_hex_nib_str(v: i64) -> str {
+    let idx = v & 15;
+    return __engine("str_slice", "0123456789abcdef", idx, idx + 1);
 }
 
-// Base point generator `B` on the curve subgroup.
-pub pure fn ed25519_base_point() -> i64 {
-    return 463168356;
+pub pure fn ed_byte_to_hex(b: i64) -> str {
+    let u = b & 255;
+    return ed_hex_nib_str(u >> 4) + ed_hex_nib_str(u);
 }
 
-pub pure fn ed25519_derive_scalar(seed_word: i64) -> i64 {
-    let q = ed25519_prime_q();
-    let clamped = ((seed_word & 2147483640) | 1073741824) % q;
-    return if clamped <= 0 { 1337 } else { clamped };
+// ============================================================================
+// 1. GF(2^255 - 19) Field Operations (9 x 26-bit + 1 x 21-bit limbs)
+// ============================================================================
+
+pub fn ed_fe_zero(st: i64, off: i64) -> i64 {
+    var i = 0;
+    while i < 10 {
+        __engine("map_set", st, off + i, 0);
+        i = i + 1;
+    }
+    return st;
 }
 
-pub pure fn ed25519_challenge_hash(r_point: i64, pub_point: i64, msg: str) -> i64 {
-    let q = ed25519_prime_q();
-    let m0 = if msg.len() > 0 { msg.byte_at(0) } else { 0 };
-    let m_last = if msg.len() > 1 { msg.byte_at(msg.len() - 1) } else { m0 };
-    let h = ((r_point * 31) ^ (pub_point * 17) ^ (m0 * 257) ^ (m_last * 65537) ^ (msg.len() * 131071)) & 2147483647;
-    return (h % (q - 1)) + 1;
+pub fn ed_fe_one(st: i64, off: i64) -> i64 {
+    __engine("map_set", st, off, 1);
+    var i = 1;
+    while i < 10 {
+        __engine("map_set", st, off + i, 0);
+        i = i + 1;
+    }
+    return st;
 }
 
-pub fn ed25519_keypair_from_seed(seed_word: i64) -> Ed25519Keypair {
-    let q = ed25519_prime_q();
-    let a = ed25519_derive_scalar(seed_word);
-    let pub_pt = (a * ed25519_base_point()) % q;
-    return Ed25519Keypair {
-        secret_scalar: a,
-        public_point: pub_pt,
-    };
+pub fn ed_fe_copy(st: i64, dst: i64, src: i64) -> i64 {
+    var i = 0;
+    while i < 10 {
+        __engine("map_set", st, dst + i, __engine("map_get", st, src + i) + 0);
+        i = i + 1;
+    }
+    return st;
 }
 
-// Signs `msg` using `kp` per RFC 8032:
-// `r = H(secret || msg)`, `R = r * B mod q`, `k = H(R || A || msg)`, `S = (r + k * a) mod q`.
-pub fn ed25519_sign_message(kp: Ed25519Keypair, msg: str) -> Ed25519Signature {
-    let q = ed25519_prime_q();
-    let r_nonce = ed25519_challenge_hash(kp.secret_scalar, kp.public_point, msg);
-    let r_pt = (r_nonce * ed25519_base_point()) % q;
-    let k_chal = ed25519_challenge_hash(r_pt, kp.public_point, msg);
-    let s_sc = (r_nonce + ((k_chal * kp.secret_scalar) % q)) % q;
-    return Ed25519Signature {
-        r_point: r_pt,
-        s_scalar: s_sc,
-    };
+pub fn ed_fe_add(st: i64, out: i64, a: i64, b: i64) -> i64 {
+    var c = 0;
+    var i = 0;
+    while i < 9 {
+        let s = (__engine("map_get", st, a + i) + 0) + (__engine("map_get", st, b + i) + 0) + c;
+        __engine("map_set", st, out + i, s & 67108863);
+        c = s >> 26;
+        i = i + 1;
+    }
+    let s9 = (__engine("map_get", st, a + 9) + 0) + (__engine("map_get", st, b + 9) + 0) + c;
+    __engine("map_set", st, out + 9, s9 & 2097151);
+    let c9 = s9 >> 21;
+    if c9 != 0 {
+        let s0 = (__engine("map_get", st, out) + 0) + (c9 * 19);
+        __engine("map_set", st, out, s0 & 67108863);
+        let c0 = s0 >> 26;
+        if c0 != 0 {
+            __engine("map_set", st, out + 1, (__engine("map_get", st, out + 1) + 0) + c0);
+        }
+    }
+    return st;
 }
 
-// Verifies `(r_point, s_scalar)` against `pub_point` and `msg`:
-// Checks `S * B mod q == (R + k * A) mod q` AND rejects zero/out-of-range scalars.
-pub fn ed25519_verify_signature(
-    pub_point: i64,
-    msg: str,
-    r_point: i64,
-    s_scalar: i64
-) -> bool {
-    let q = ed25519_prime_q();
-    if pub_point <= 0 || r_point <= 0 || s_scalar <= 0 || s_scalar >= q {
+pub fn ed_fe_sub(st: i64, out: i64, a: i64, b: i64) -> i64 {
+    // Add 2*p to avoid negative limbs: 2p = [134217690, 134217726 x 8, 4194302]
+    var s0 = (__engine("map_get", st, a) + 0) + 134217690 - (__engine("map_get", st, b) + 0);
+    __engine("map_set", st, out, s0 & 67108863);
+    var c = s0 >> 26;
+    var i = 1;
+    while i < 9 {
+        let si = (__engine("map_get", st, a + i) + 0) + 134217726 - (__engine("map_get", st, b + i) + 0) + c;
+        __engine("map_set", st, out + i, si & 67108863);
+        c = si >> 26;
+        i = i + 1;
+    }
+    let s9 = (__engine("map_get", st, a + 9) + 0) + 4194302 - (__engine("map_get", st, b + 9) + 0) + c;
+    __engine("map_set", st, out + 9, s9 & 2097151);
+    let c9 = s9 >> 21;
+    let f0 = (__engine("map_get", st, out) + 0) + (c9 * 19);
+    __engine("map_set", st, out, f0 & 67108863);
+    let fc0 = f0 >> 26;
+    if fc0 != 0 {
+        __engine("map_set", st, out + 1, (__engine("map_get", st, out + 1) + 0) + fc0);
+    }
+    return st;
+}
+
+pub fn ed_fe_mul(st: i64, out: i64, a: i64, b: i64) -> i64 {
+    let a0 = __engine("map_get", st, a) + 0;
+    let a1 = __engine("map_get", st, a + 1) + 0;
+    let a2 = __engine("map_get", st, a + 2) + 0;
+    let a3 = __engine("map_get", st, a + 3) + 0;
+    let a4 = __engine("map_get", st, a + 4) + 0;
+    let a5 = __engine("map_get", st, a + 5) + 0;
+    let a6 = __engine("map_get", st, a + 6) + 0;
+    let a7 = __engine("map_get", st, a + 7) + 0;
+    let a8 = __engine("map_get", st, a + 8) + 0;
+    let a9 = __engine("map_get", st, a + 9) + 0;
+
+    let b0 = __engine("map_get", st, b) + 0;
+    let b1 = __engine("map_get", st, b + 1) + 0;
+    let b2 = __engine("map_get", st, b + 2) + 0;
+    let b3 = __engine("map_get", st, b + 3) + 0;
+    let b4 = __engine("map_get", st, b + 4) + 0;
+    let b5 = __engine("map_get", st, b + 5) + 0;
+    let b6 = __engine("map_get", st, b + 6) + 0;
+    let b7 = __engine("map_get", st, b + 7) + 0;
+    let b8 = __engine("map_get", st, b + 8) + 0;
+    let b9 = __engine("map_get", st, b + 9) + 0;
+
+    var t0 = a0*b0;
+    var t1 = a0*b1 + a1*b0;
+    var t2 = a0*b2 + a1*b1 + a2*b0;
+    var t3 = a0*b3 + a1*b2 + a2*b1 + a3*b0;
+    var t4 = a0*b4 + a1*b3 + a2*b2 + a3*b1 + a4*b0;
+    var t5 = a0*b5 + a1*b4 + a2*b3 + a3*b2 + a4*b1 + a5*b0;
+    var t6 = a0*b6 + a1*b5 + a2*b4 + a3*b3 + a4*b2 + a5*b1 + a6*b0;
+    var t7 = a0*b7 + a1*b6 + a2*b5 + a3*b4 + a4*b3 + a5*b2 + a6*b1 + a7*b0;
+    var t8 = a0*b8 + a1*b7 + a2*b6 + a3*b5 + a4*b4 + a5*b3 + a6*b2 + a7*b1 + a8*b0;
+    var t9 = a0*b9 + a1*b8 + a2*b7 + a3*b6 + a4*b5 + a5*b4 + a6*b3 + a7*b2 + a8*b1 + a9*b0;
+
+    var t10 = a1*b9 + a2*b8 + a3*b7 + a4*b6 + a5*b5 + a6*b4 + a7*b3 + a8*b2 + a9*b1;
+    var t11 = a2*b9 + a3*b8 + a4*b7 + a5*b6 + a6*b5 + a7*b4 + a8*b3 + a9*b2;
+    var t12 = a3*b9 + a4*b8 + a5*b7 + a6*b6 + a7*b5 + a8*b4 + a9*b3;
+    var t13 = a4*b9 + a5*b8 + a6*b7 + a7*b6 + a8*b5 + a9*b4;
+    var t14 = a5*b9 + a6*b8 + a7*b7 + a8*b6 + a9*b5;
+    var t15 = a6*b9 + a7*b8 + a8*b7 + a9*b6;
+    var t16 = a7*b9 + a8*b8 + a9*b7;
+    var t17 = a8*b9 + a9*b8;
+    var t18 = a9*b9;
+
+    // Carry-normalize t0..t18 so each limb is < 2^26 before 608x folding
+    t1 = t1 + (t0 >> 26); t0 = t0 & 67108863;
+    t2 = t2 + (t1 >> 26); t1 = t1 & 67108863;
+    t3 = t3 + (t2 >> 26); t2 = t2 & 67108863;
+    t4 = t4 + (t3 >> 26); t3 = t3 & 67108863;
+    t5 = t5 + (t4 >> 26); t4 = t4 & 67108863;
+    t6 = t6 + (t5 >> 26); t5 = t5 & 67108863;
+    t7 = t7 + (t6 >> 26); t6 = t6 & 67108863;
+    t8 = t8 + (t7 >> 26); t7 = t7 & 67108863;
+    t9 = t9 + (t8 >> 26); t8 = t8 & 67108863;
+    t10 = t10 + (t9 >> 26); t9 = t9 & 67108863;
+    t11 = t11 + (t10 >> 26); t10 = t10 & 67108863;
+    t12 = t12 + (t11 >> 26); t11 = t11 & 67108863;
+    t13 = t13 + (t12 >> 26); t12 = t12 & 67108863;
+    t14 = t14 + (t13 >> 26); t13 = t13 & 67108863;
+    t15 = t15 + (t14 >> 26); t14 = t14 & 67108863;
+    t16 = t16 + (t15 >> 26); t15 = t15 & 67108863;
+    t17 = t17 + (t16 >> 26); t16 = t16 & 67108863;
+    t18 = t18 + (t17 >> 26); t17 = t17 & 67108863;
+
+    // Fold t10..t18 via 2^260 == 32 * 19 == 608 (mod 2^255 - 19)
+    t0 = t0 + (t10 * 608);
+    t1 = t1 + (t11 * 608);
+    t2 = t2 + (t12 * 608);
+    t3 = t3 + (t13 * 608);
+    t4 = t4 + (t14 * 608);
+    t5 = t5 + (t15 * 608);
+    t6 = t6 + (t16 * 608);
+    t7 = t7 + (t17 * 608);
+    t8 = t8 + (t18 * 608);
+
+    // Two carry passes across t0..t9 (limb 9 is 21 bits; 2^255 == 19 mod p)
+    t1 = t1 + (t0 >> 26); t0 = t0 & 67108863;
+    t2 = t2 + (t1 >> 26); t1 = t1 & 67108863;
+    t3 = t3 + (t2 >> 26); t2 = t2 & 67108863;
+    t4 = t4 + (t3 >> 26); t3 = t3 & 67108863;
+    t5 = t5 + (t4 >> 26); t4 = t4 & 67108863;
+    t6 = t6 + (t5 >> 26); t5 = t5 & 67108863;
+    t7 = t7 + (t6 >> 26); t6 = t6 & 67108863;
+    t8 = t8 + (t7 >> 26); t7 = t7 & 67108863;
+    t9 = t9 + (t8 >> 26); t8 = t8 & 67108863;
+    t0 = t0 + ((t9 >> 21) * 19); t9 = t9 & 2097151;
+
+    t1 = t1 + (t0 >> 26); t0 = t0 & 67108863;
+    t2 = t2 + (t1 >> 26); t1 = t1 & 67108863;
+    t9 = t9 + (t8 >> 26); t8 = t8 & 67108863;
+    t0 = t0 + ((t9 >> 21) * 19); t9 = t9 & 2097151;
+
+    __engine("map_set", st, out, t0);
+    __engine("map_set", st, out + 1, t1);
+    __engine("map_set", st, out + 2, t2);
+    __engine("map_set", st, out + 3, t3);
+    __engine("map_set", st, out + 4, t4);
+    __engine("map_set", st, out + 5, t5);
+    __engine("map_set", st, out + 6, t6);
+    __engine("map_set", st, out + 7, t7);
+    __engine("map_set", st, out + 8, t8);
+    __engine("map_set", st, out + 9, t9);
+    return st;
+}
+
+pub fn ed_fe_sq(st: i64, out: i64, a: i64) -> i64 {
+    return ed_fe_mul(st, out, a, a);
+}
+
+pub fn ed_fe_canon(st: i64, off: i64) -> i64 {
+    var c = 0;
+    var i = 0;
+    while i < 9 {
+        let v = (__engine("map_get", st, off + i) + 0) + c;
+        __engine("map_set", st, off + i, v & 67108863);
+        c = v >> 26;
+        i = i + 1;
+    }
+    let v9 = (__engine("map_get", st, off + 9) + 0) + c;
+    __engine("map_set", st, off + 9, v9 & 2097151);
+    let c9 = v9 >> 21;
+    if c9 != 0 {
+        var d = c9 * 19;
+        i = 0;
+        while i < 9 {
+            let vi = (__engine("map_get", st, off + i) + 0) + d;
+            __engine("map_set", st, off + i, vi & 67108863);
+            d = vi >> 26;
+            i = i + 1;
+        }
+        __engine("map_set", st, off + 9, (__engine("map_get", st, off + 9) + 0) + d);
+    }
+
+    // Test if value >= p by adding 19 and checking if carry reaches bit 21 of limb 9
+    var q = 19;
+    i = 0;
+    while i < 9 {
+        let u = (__engine("map_get", st, off + i) + 0) + q;
+        q = u >> 26;
+        i = i + 1;
+    }
+    let u9 = (__engine("map_get", st, off + 9) + 0) + q;
+    if (u9 >> 21) > 0 {
+        var r = 19;
+        i = 0;
+        while i < 9 {
+            let wi = (__engine("map_get", st, off + i) + 0) + r;
+            __engine("map_set", st, off + i, wi & 67108863);
+            r = wi >> 26;
+            i = i + 1;
+        }
+        let w9 = (__engine("map_get", st, off + 9) + 0) + r;
+        __engine("map_set", st, off + 9, w9 & 2097151);
+    }
+    return st;
+}
+
+// Unpacks 32 little-endian bytes from `hex_s` (64 hex chars), clearing bit 255, into `off`.
+// Returns 1 if the 255-bit value is strictly < p, or 0 if >= p.
+pub fn ed_fe_from_hex(st: i64, off: i64, hex_s: str) -> i64 {
+    ed_fe_zero(st, off);
+    var bit_idx = 0;
+    while bit_idx < 255 {
+        let byte_i = bit_idx >> 3;
+        let bit_in_b = bit_idx & 7;
+        let bval = ed_hex_byte_at(hex_s, byte_i);
+        let bit_v = (bval >> bit_in_b) & 1;
+        if bit_v != 0 {
+            let limb_i = bit_idx / 26;
+            let bit_in_l = bit_idx - (limb_i * 26);
+            let cur = __engine("map_get", st, off + limb_i) + 0;
+            __engine("map_set", st, off + limb_i, cur | (1 << bit_in_l));
+        }
+        bit_idx = bit_idx + 1;
+    }
+    // Check if unpacked 255-bit integer is >= p = 2^255 - 19
+    var q = 19;
+    var i = 0;
+    while i < 9 {
+        let u = (__engine("map_get", st, off + i) + 0) + q;
+        q = u >> 26;
+        i = i + 1;
+    }
+    let u9 = (__engine("map_get", st, off + 9) + 0) + q;
+    if (u9 >> 21) > 0 {
+        return 0;
+    }
+    return 1;
+}
+
+pub fn ed_fe_to_bytes_map(st: i64, off: i64, bmap_off: i64) -> i64 {
+    ed_fe_canon(st, off);
+    var bi = 0;
+    while bi < 32 {
+        __engine("map_set", st, bmap_off + bi, 0);
+        bi = bi + 1;
+    }
+    var bit_idx = 0;
+    while bit_idx < 255 {
+        let limb_i = bit_idx / 26;
+        let bit_in_l = bit_idx - (limb_i * 26);
+        let lv = __engine("map_get", st, off + limb_i) + 0;
+        if ((lv >> bit_in_l) & 1) != 0 {
+            let byte_i = bit_idx >> 3;
+            let bit_in_b = bit_idx & 7;
+            let cur = __engine("map_get", st, bmap_off + byte_i) + 0;
+            __engine("map_set", st, bmap_off + byte_i, cur | (1 << bit_in_b));
+        }
+        bit_idx = bit_idx + 1;
+    }
+    return st;
+}
+
+// Computes `out = base^(2^k)` via `k` squarings
+pub fn ed_fe_sq_n(st: i64, out: i64, base: i64, k: i64) -> i64 {
+    ed_fe_sq(st, out, base);
+    var i = 1;
+    while i < k {
+        ed_fe_sq(st, out, out);
+        i = i + 1;
+    }
+    return st;
+}
+
+// Computes `out = z^(p - 2) = z^(2^255 - 21)` using temp slots `tmp .. tmp + 40`
+pub fn ed_fe_inv(st: i64, out: i64, z: i64, tmp: i64) -> i64 {
+    let t0 = tmp;
+    let t1 = tmp + 10;
+    let t2 = tmp + 20;
+    let t3 = tmp + 30;
+
+    ed_fe_sq(st, t0, z);          // 2^1
+    ed_fe_sq_n(st, t1, t0, 2);    // 2^3
+    ed_fe_mul(st, t1, z, t1);     // 2^3 + 1 = 9
+    ed_fe_mul(st, t0, t0, t1);    // 2^3 + 2 + 1 = 11
+    ed_fe_sq(st, t2, t0);         // 22
+    ed_fe_mul(st, t1, t1, t2);    // 31 = 2^5 - 1
+    ed_fe_sq_n(st, t2, t1, 5);    // 2^10 - 2^5
+    ed_fe_mul(st, t1, t2, t1);    // 2^10 - 1
+    ed_fe_sq_n(st, t2, t1, 10);   // 2^20 - 2^10
+    ed_fe_mul(st, t2, t2, t1);    // 2^20 - 1
+    ed_fe_sq_n(st, t3, t2, 20);   // 2^40 - 2^20
+    ed_fe_mul(st, t2, t3, t2);    // 2^40 - 1
+    ed_fe_sq_n(st, t2, t2, 10);   // 2^50 - 2^10
+    ed_fe_mul(st, t1, t2, t1);    // 2^50 - 1
+    ed_fe_sq_n(st, t2, t1, 50);   // 2^100 - 2^50
+    ed_fe_mul(st, t2, t2, t1);    // 2^100 - 1
+    ed_fe_sq_n(st, t3, t2, 100);  // 2^200 - 2^100
+    ed_fe_mul(st, t2, t3, t2);    // 2^200 - 1
+    ed_fe_sq_n(st, t2, t2, 50);   // 2^250 - 2^50
+    ed_fe_mul(st, t1, t2, t1);    // 2^250 - 1
+    ed_fe_sq_n(st, t1, t1, 5);    // 2^255 - 32
+    ed_fe_mul(st, out, t1, t0);   // 2^255 - 21
+    return st;
+}
+
+// Computes `out = z^((p - 5) / 8) = z^(2^252 - 3)` using temp slots `tmp .. tmp + 40`
+pub fn ed_fe_pow22523(st: i64, out: i64, z: i64, tmp: i64) -> i64 {
+    let t0 = tmp;
+    let t1 = tmp + 10;
+    let t2 = tmp + 20;
+
+    ed_fe_sq(st, t0, z);          // 2
+    ed_fe_sq_n(st, t1, t0, 2);    // 8
+    ed_fe_mul(st, t1, z, t1);     // 9
+    ed_fe_mul(st, t0, t0, t1);    // 11
+    ed_fe_sq(st, t0, t0);         // 22
+    ed_fe_mul(st, t0, t1, t0);    // 31 = 2^5 - 1
+    ed_fe_sq_n(st, t1, t0, 5);    // 2^10 - 2^5
+    ed_fe_mul(st, t0, t1, t0);    // 2^10 - 1
+    ed_fe_sq_n(st, t1, t0, 10);   // 2^20 - 2^10
+    ed_fe_mul(st, t1, t1, t0);    // 2^20 - 1
+    ed_fe_sq_n(st, t2, t1, 20);   // 2^40 - 2^20
+    ed_fe_mul(st, t1, t2, t1);    // 2^40 - 1
+    ed_fe_sq_n(st, t1, t1, 10);   // 2^50 - 2^10
+    ed_fe_mul(st, t0, t1, t0);    // 2^50 - 1
+    ed_fe_sq_n(st, t1, t0, 50);   // 2^100 - 2^50
+    ed_fe_mul(st, t1, t1, t0);    // 2^100 - 1
+    ed_fe_sq_n(st, t2, t1, 100);  // 2^200 - 2^100
+    ed_fe_mul(st, t1, t2, t1);    // 2^200 - 1
+    ed_fe_sq_n(st, t1, t1, 50);   // 2^250 - 2^50
+    ed_fe_mul(st, t0, t1, t0);    // 2^250 - 1
+    ed_fe_sq_n(st, t0, t0, 2);    // 2^252 - 4
+    ed_fe_mul(st, out, t0, z);    // 2^252 - 3
+    return st;
+}
+
+// ============================================================================
+// 2. Twisted Edwards Extended Coordinates (X : Y : Z : T)
+// ============================================================================
+// Fixed arena slots in `st`:
+//   1000..1009: d
+//   1010..1019: 2*d
+//   1020..1029: sqrt(-1)
+//   1040..1079: Base point B = (Bx, By, 1, Bx*By)
+//   1100..1199: ge_add scratch slots
+
+pub fn ed_init_curve_consts(st: i64) -> i64 {
+    if (__engine("map_get", st, "inited") + 0) == 1 {
+        return st;
+    }
+    ed_fe_from_hex(st, 1000, "a3785913ca4deb75abd841414d0a700098e879777940c78c73fe6f2bee6c0352");
+    ed_fe_add(st, 1010, 1000, 1000);
+    ed_fe_from_hex(st, 1020, "b0a00e4a271beec478e42fad0618432fa7d7fb3d99004d2b0bdfc14f8024832b");
+    ed_fe_from_hex(st, 1040, "1ad5258f602d56c9b2a7259560c72c695cdcd6fd31e2a4c0fe536ecdd3366921");
+    ed_fe_from_hex(st, 1050, "5866666666666666666666666666666666666666666666666666666666666666");
+    ed_fe_one(st, 1060);
+    ed_fe_mul(st, 1070, 1040, 1050);
+    __engine("map_set", st, "inited", 1);
+    return st;
+}
+
+pub fn ed_ge_neutral(st: i64, pt: i64) -> i64 {
+    ed_fe_zero(st, pt);
+    ed_fe_one(st, pt + 10);
+    ed_fe_one(st, pt + 20);
+    ed_fe_zero(st, pt + 30);
+    return st;
+}
+
+pub fn ed_ge_copy(st: i64, dst: i64, src: i64) -> i64 {
+    var i = 0;
+    while i < 40 {
+        __engine("map_set", st, dst + i, __engine("map_get", st, src + i) + 0);
+        i = i + 1;
+    }
+    return st;
+}
+
+// Unified complete twisted Edwards addition (`RFC 8032 §5.1.4`)
+pub fn ed_ge_add(st: i64, out_pt: i64, p_pt: i64, q_pt: i64) -> i64 {
+    let t_ymx1 = 1100;
+    let t_ymx2 = 1110;
+    let t_a    = 1120;
+    let t_b    = 1130;
+    let t_c    = 1140;
+    let t_d    = 1150;
+    let t_e    = 1160;
+    let t_f    = 1170;
+    let t_g    = 1180;
+    let t_h    = 1190;
+
+    // A = (Y1 - X1) * (Y2 - X2)
+    ed_fe_sub(st, t_ymx1, p_pt + 10, p_pt);
+    ed_fe_sub(st, t_ymx2, q_pt + 10, q_pt);
+    ed_fe_mul(st, t_a, t_ymx1, t_ymx2);
+
+    // B = (Y1 + X1) * (Y2 + X2)
+    ed_fe_add(st, t_ymx1, p_pt + 10, p_pt);
+    ed_fe_add(st, t_ymx2, q_pt + 10, q_pt);
+    ed_fe_mul(st, t_b, t_ymx1, t_ymx2);
+
+    // C = T1 * 2d * T2
+    ed_fe_mul(st, t_c, p_pt + 30, 1010);
+    ed_fe_mul(st, t_c, t_c, q_pt + 30);
+
+    // D = Z1 * 2 * Z2
+    ed_fe_add(st, t_ymx1, p_pt + 20, p_pt + 20);
+    ed_fe_mul(st, t_d, t_ymx1, q_pt + 20);
+
+    // E = B - A, F = D - C, G = D + C, H = B + A
+    ed_fe_sub(st, t_e, t_b, t_a);
+    ed_fe_sub(st, t_f, t_d, t_c);
+    ed_fe_add(st, t_g, t_d, t_c);
+    ed_fe_add(st, t_h, t_b, t_a);
+
+    // X3 = E * F, Y3 = G * H, Z3 = F * G, T3 = E * H
+    ed_fe_mul(st, out_pt, t_e, t_f);
+    ed_fe_mul(st, out_pt + 10, t_g, t_h);
+    ed_fe_mul(st, out_pt + 20, t_f, t_g);
+    ed_fe_mul(st, out_pt + 30, t_e, t_h);
+    return st;
+}
+
+// Fast dedicated point doubling (`RFC 8032 §5.1.4` doubling: 4 sq + 3 mul instead of 8 mul)
+pub fn ed_ge_double(st: i64, out_pt: i64, p_pt: i64) -> i64 {
+    let t_a = 1100;
+    let t_b = 1110;
+    let t_c = 1120;
+    let t_e = 1130;
+    let t_g = 1140;
+    let t_f = 1150;
+    let t_h = 1160;
+
+    // A = X1^2, B = Y1^2, C = 2 * Z1^2
+    ed_fe_sq(st, t_a, p_pt);
+    ed_fe_sq(st, t_b, p_pt + 10);
+    ed_fe_sq(st, t_c, p_pt + 20);
+    ed_fe_add(st, t_c, t_c, t_c);
+
+    // H = A + B, E = H - (X1 + Y1)^2, G = A - B, F = C + G
+    ed_fe_add(st, t_h, t_a, t_b);
+    ed_fe_add(st, t_e, p_pt, p_pt + 10);
+    ed_fe_sq(st, t_e, t_e);
+    ed_fe_sub(st, t_e, t_h, t_e);
+    ed_fe_sub(st, t_g, t_a, t_b);
+    ed_fe_add(st, t_f, t_c, t_g);
+
+    // X3 = E * F, Y3 = G * H, T3 = E * H, Z3 = F * G
+    ed_fe_mul(st, out_pt, t_e, t_f);
+    ed_fe_mul(st, out_pt + 10, t_g, t_h);
+    ed_fe_mul(st, out_pt + 20, t_f, t_g);
+    ed_fe_mul(st, out_pt + 30, t_e, t_h);
+    return st;
+}
+
+// Scalar multiplication `out_pt = [scalar_32_bytes] * base_pt`
+// `scalar_b_off` holds 32 little-endian bytes (`0..31`).
+pub fn ed_ge_scalarmult(st: i64, out_pt: i64, scalar_b_off: i64, base_pt: i64, tmp_pt: i64) -> i64 {
+    ed_ge_neutral(st, out_pt);
+    ed_ge_copy(st, tmp_pt, base_pt);
+
+    var bit_i = 255;
+    var started = 0;
+    while bit_i >= 0 {
+        let byte_v = __engine("map_get", st, scalar_b_off + (bit_i >> 3)) + 0;
+        let bit_v = (byte_v >> (bit_i & 7)) & 1;
+        if started == 1 {
+            ed_ge_double(st, out_pt, out_pt);
+        }
+        if bit_v == 1 {
+            if started == 0 {
+                ed_ge_copy(st, out_pt, tmp_pt);
+                started = 1;
+            } else {
+                ed_ge_add(st, out_pt, out_pt, tmp_pt);
+            }
+        }
+        bit_i = bit_i - 1;
+    }
+    return st;
+}
+
+pub fn ed_ge_to_hex(st: i64, pt: i64, scratch: i64) -> str {
+    let zinv = scratch;
+    let x_fe = scratch + 10;
+    let y_fe = scratch + 20;
+    let inv_tmp = scratch + 30;
+    let x_bytes = scratch + 80;
+    let y_bytes = scratch + 120;
+
+    ed_fe_inv(st, zinv, pt + 20, inv_tmp);
+    ed_fe_mul(st, x_fe, pt, zinv);
+    ed_fe_mul(st, y_fe, pt + 10, zinv);
+    ed_fe_to_bytes_map(st, x_fe, x_bytes);
+    ed_fe_to_bytes_map(st, y_fe, y_bytes);
+
+    let x_lsb = (__engine("map_get", st, x_bytes) + 0) & 1;
+    let y31 = (__engine("map_get", st, y_bytes + 31) + 0) | (x_lsb << 7);
+    __engine("map_set", st, y_bytes + 31, y31);
+
+    var hex_s = "";
+    var i = 0;
+    while i < 32 {
+        hex_s = hex_s + ed_byte_to_hex(__engine("map_get", st, y_bytes + i) + 0);
+        i = i + 1;
+    }
+    return hex_s;
+}
+
+// Decodes a 32-byte point from `hex_s` into `pt`. Returns 1 if valid, 0 if invalid.
+pub fn ed_ge_from_hex(st: i64, pt: i64, hex_s: str, scratch: i64) -> i64 {
+    if __engine("str_len", hex_s) != 64 {
+        return 0;
+    }
+    let b31 = ed_hex_byte_at(hex_s, 31);
+    let x_sign = (b31 >> 7) & 1;
+    let y_fe = pt + 10;
+    let canon_ok = ed_fe_from_hex(st, y_fe, hex_s);
+    if canon_ok == 0 {
+        return 0;
+    }
+
+    let u_fe = scratch;
+    let v_fe = scratch + 10;
+    let v3_fe = scratch + 20;
+    let uv7_fe = scratch + 30;
+    let x_fe = pt;
+    let chk_fe = scratch + 40;
+    let one_fe = scratch + 50;
+    let pow_tmp = scratch + 60;
+    let x_bytes = scratch + 110;
+
+    ed_fe_one(st, one_fe);
+    // u = y^2 - 1, v = d * y^2 + 1
+    ed_fe_sq(st, u_fe, y_fe);
+    ed_fe_mul(st, v_fe, u_fe, 1000);
+    ed_fe_sub(st, u_fe, u_fe, one_fe);
+    ed_fe_add(st, v_fe, v_fe, one_fe);
+
+    // v3 = v^3, uv7 = u * v^7
+    ed_fe_sq(st, v3_fe, v_fe);
+    ed_fe_mul(st, v3_fe, v3_fe, v_fe);
+    ed_fe_sq(st, uv7_fe, v3_fe);
+    ed_fe_mul(st, uv7_fe, uv7_fe, v_fe);
+    ed_fe_mul(st, uv7_fe, uv7_fe, u_fe);
+
+    // x = u * v^3 * (u * v^7)^((p - 5) / 8)
+    ed_fe_pow22523(st, x_fe, uv7_fe, pow_tmp);
+    ed_fe_mul(st, x_fe, x_fe, v3_fe);
+    ed_fe_mul(st, x_fe, x_fe, u_fe);
+
+    // Check v * x^2 == u or v * x^2 == -u
+    ed_fe_sq(st, chk_fe, x_fe);
+    ed_fe_mul(st, chk_fe, chk_fe, v_fe);
+    ed_fe_sub(st, uv7_fe, chk_fe, u_fe);
+    ed_fe_to_bytes_map(st, uv7_fe, x_bytes);
+    var is_zero_diff = 1;
+    var bi = 0;
+    while bi < 32 {
+        if (__engine("map_get", st, x_bytes + bi) + 0) != 0 {
+            is_zero_diff = 0;
+        }
+        bi = bi + 1;
+    }
+
+    if is_zero_diff == 0 {
+        ed_fe_add(st, uv7_fe, chk_fe, u_fe);
+        ed_fe_to_bytes_map(st, uv7_fe, x_bytes);
+        var is_neg_diff = 1;
+        bi = 0;
+        while bi < 32 {
+            if (__engine("map_get", st, x_bytes + bi) + 0) != 0 {
+                is_neg_diff = 0;
+            }
+            bi = bi + 1;
+        }
+        if is_neg_diff == 0 {
+            return 0;
+        }
+        ed_fe_mul(st, x_fe, x_fe, 1020);
+    }
+
+    ed_fe_to_bytes_map(st, x_fe, x_bytes);
+    var x_is_zero = 1;
+    bi = 0;
+    while bi < 32 {
+        if (__engine("map_get", st, x_bytes + bi) + 0) != 0 {
+            x_is_zero = 0;
+        }
+        bi = bi + 1;
+    }
+    if x_is_zero == 1 && x_sign == 1 {
+        return 0;
+    }
+    let cur_sign = (__engine("map_get", st, x_bytes) + 0) & 1;
+    if cur_sign != x_sign {
+        ed_fe_zero(st, one_fe);
+        ed_fe_sub(st, x_fe, one_fe, x_fe);
+    }
+
+    ed_fe_one(st, pt + 20);
+    ed_fe_mul(st, pt + 30, x_fe, y_fe);
+    return 1;
+}
+
+// ============================================================================
+// 3. Scalar Arithmetic Modulo L = 2^252 + 27742317777372353535851937790883648493
+// ============================================================================
+
+pub pure fn ed_order_l_limb16(idx: i64) -> i64 {
+    if idx == 0 { return 54253; }
+    if idx == 1 { return 23797; }
+    if idx == 2 { return 25370; }
+    if idx == 3 { return 22546; }
+    if idx == 4 { return 40150; }
+    if idx == 5 { return 41719; }
+    if idx == 6 { return 63966; }
+    if idx == 7 { return 5342; }
+    if idx == 15 { return 4096; }
+    return 0;
+}
+
+pub pure fn ed_order_l_byte(idx: i64) -> i64 {
+    if idx < 8 {
+        if idx == 0 { return 237; }
+        if idx == 1 { return 211; }
+        if idx == 2 { return 245; }
+        if idx == 3 { return 92; }
+        if idx == 4 { return 26; }
+        if idx == 5 { return 99; }
+        if idx == 6 { return 18; }
+        return 88;
+    }
+    if idx < 16 {
+        if idx == 8 { return 214; }
+        if idx == 9 { return 156; }
+        if idx == 10 { return 247; }
+        if idx == 11 { return 162; }
+        if idx == 12 { return 222; }
+        if idx == 13 { return 249; }
+        if idx == 14 { return 222; }
+        return 20;
+    }
+    if idx == 31 { return 16; }
+    return 0;
+}
+
+// Checks whether the 32-byte little-endian scalar at `s_hex` is strictly < L
+pub pure fn ed_scalar_is_canonical_hex(s_hex: str) -> bool {
+    if __engine("str_len", s_hex) != 64 {
         return false;
     }
-    let k_chal = ed25519_challenge_hash(r_point, pub_point, msg);
-    let lhs = (s_scalar * ed25519_base_point()) % q;
-    let rhs = (r_point + ((k_chal * pub_point) % q)) % q;
-    return lhs == rhs;
+    var i = 31;
+    while i >= 0 {
+        let sb = ed_hex_byte_at(s_hex, i);
+        let lb = ed_order_l_byte(i);
+        if sb < lb {
+            return true;
+        }
+        if sb > lb {
+            return false;
+        }
+        i = i - 1;
+    }
+    return false;
+}
+
+// Reduces 32 16-bit limbs at `w_off` (representing up to 512 bits) modulo L,
+// writing 32 canonical little-endian bytes to `out_b_off`.
+pub fn ed_reduce_limbs16_mod_l(st: i64, w_off: i64, out_b_off: i64) -> i64 {
+    var top = 31;
+    while top >= 15 {
+        var pass = 0;
+        while pass < 2 {
+            var c = 0;
+            var k = 0;
+            while k < top {
+                let vk = (__engine("map_get", st, w_off + k) + 0) + c;
+                __engine("map_set", st, w_off + k, vk & 65535);
+                c = vk >> 16;
+                k = k + 1;
+            }
+            let vtop = (__engine("map_get", st, w_off + top) + 0) + c;
+            __engine("map_set", st, w_off + top, vtop);
+
+            let q = vtop >> 12;
+            if q != 0 {
+                __engine("map_set", st, w_off + top, vtop - (q << 12));
+                var j = 0;
+                while j < 8 {
+                    let pos = (top - 15) + j;
+                    let cur = __engine("map_get", st, w_off + pos) + 0;
+                    __engine("map_set", st, w_off + pos, cur - (q * ed_order_l_limb16(j)));
+                    j = j + 1;
+                }
+            }
+            pass = pass + 1;
+        }
+
+        var c2 = 0;
+        var k2 = 0;
+        while k2 < top {
+            let vk2 = (__engine("map_get", st, w_off + k2) + 0) + c2;
+            __engine("map_set", st, w_off + k2, vk2 & 65535);
+            c2 = vk2 >> 16;
+            k2 = k2 + 1;
+        }
+        let rem_top = (__engine("map_get", st, w_off + top) + 0) + c2;
+        if top > 15 {
+            __engine("map_set", st, w_off + top, 0);
+            let prev = __engine("map_get", st, w_off + top - 1) + 0;
+            __engine("map_set", st, w_off + top - 1, prev + (rem_top << 16));
+        } else {
+            __engine("map_set", st, w_off + 15, rem_top);
+        }
+        top = top - 1;
+    }
+
+    // Final subtraction if value >= L
+    var ge_l = 1;
+    var idx = 15;
+    while idx >= 0 {
+        let wi = __engine("map_get", st, w_off + idx) + 0;
+        let li = ed_order_l_limb16(idx);
+        if wi < li {
+            ge_l = 0;
+            idx = -1;
+        } else if wi > li {
+            ge_l = 1;
+            idx = -1;
+        } else {
+            idx = idx - 1;
+        }
+    }
+    if ge_l == 1 {
+        var borrow = 0;
+        var m = 0;
+        while m < 16 {
+            let d = (__engine("map_get", st, w_off + m) + 0) - ed_order_l_limb16(m) - borrow;
+            if d < 0 {
+                __engine("map_set", st, w_off + m, d + 65536);
+                borrow = 1;
+            } else {
+                __engine("map_set", st, w_off + m, d);
+                borrow = 0;
+            }
+            m = m + 1;
+        }
+    }
+
+    var bi = 0;
+    while bi < 16 {
+        let w = __engine("map_get", st, w_off + bi) + 0;
+        __engine("map_set", st, out_b_off + (bi * 2), w & 255);
+        __engine("map_set", st, out_b_off + (bi * 2) + 1, (w >> 8) & 255);
+        bi = bi + 1;
+    }
+    return st;
+}
+
+// Reduces 64 little-endian bytes (`in_b_off + 0..63`) modulo L -> 32 bytes at `out_b_off`
+pub fn ed_reduce_64bytes_mod_l(st: i64, in_b_off: i64, w_off: i64, out_b_off: i64) -> i64 {
+    var i = 0;
+    while i < 32 {
+        let b0 = __engine("map_get", st, in_b_off + (i * 2)) + 0;
+        let b1 = __engine("map_get", st, in_b_off + (i * 2) + 1) + 0;
+        __engine("map_set", st, w_off + i, b0 | (b1 << 8));
+        i = i + 1;
+    }
+    return ed_reduce_limbs16_mod_l(st, w_off, out_b_off);
+}
+
+// Computes `out_b = (r_b + k_b * a_b) mod L` where `r_b, k_b, a_b` are 32-byte little-endian scalars
+pub fn ed_scalar_muladd_mod_l(st: i64, r_b: i64, k_b: i64, a_b: i64, w_off: i64, out_b: i64) -> i64 {
+    var i = 0;
+    while i < 16 {
+        let rb = (__engine("map_get", st, r_b + (i * 2)) + 0) | ((__engine("map_get", st, r_b + (i * 2) + 1) + 0) << 8);
+        __engine("map_set", st, w_off + i, rb);
+        __engine("map_set", st, w_off + 16 + i, 0);
+        i = i + 1;
+    }
+    var ki = 0;
+    while ki < 16 {
+        let kw = (__engine("map_get", st, k_b + (ki * 2)) + 0) | ((__engine("map_get", st, k_b + (ki * 2) + 1) + 0) << 8);
+        var ai = 0;
+        while ai < 16 {
+            let aw = (__engine("map_get", st, a_b + (ai * 2)) + 0) | ((__engine("map_get", st, a_b + (ai * 2) + 1) + 0) << 8);
+            let cur = __engine("map_get", st, w_off + ki + ai) + 0;
+            __engine("map_set", st, w_off + ki + ai, cur + (kw * aw));
+            ai = ai + 1;
+        }
+        ki = ki + 1;
+    }
+    return ed_reduce_limbs16_mod_l(st, w_off, out_b);
+}
+
+// ============================================================================
+// 4. Public RFC 8032 Ed25519 Entrypoints
+// ============================================================================
+
+pub fn ed25519_public_key_hex(seed32_hex: str) -> str {
+    let seed_b = __engine("map_new");
+    var i = 0;
+    while i < 32 {
+        __engine("map_set", seed_b, i, ed_hex_byte_at(seed32_hex, i));
+        i = i + 1;
+    }
+    let h = sha512_hash_byte_map(seed_b, 32);
+
+    let st = __engine("map_new");
+    ed_init_curve_consts(st);
+    i = 0;
+    while i < 32 {
+        __engine("map_set", st, 2000 + i, __engine("map_get", h, i) + 0);
+        i = i + 1;
+    }
+    let b0 = (__engine("map_get", st, 2000) + 0) & 248;
+    let b31 = ((__engine("map_get", st, 2031) + 0) & 127) | 64;
+    __engine("map_set", st, 2000, b0);
+    __engine("map_set", st, 2031, b31);
+
+    ed_ge_scalarmult(st, 2100, 2000, 1040, 2140);
+    return ed_ge_to_hex(st, 2100, 2200);
+}
+
+pub fn ed25519_sign_hex(seed32_hex: str, msg_hex: str) -> str {
+    let seed_b = __engine("map_new");
+    var i = 0;
+    while i < 32 {
+        __engine("map_set", seed_b, i, ed_hex_byte_at(seed32_hex, i));
+        i = i + 1;
+    }
+    let h_seed = sha512_hash_byte_map(seed_b, 32);
+
+    let st = __engine("map_new");
+    ed_init_curve_consts(st);
+
+    // 1. Clamped secret scalar `a` at 2000..2031, prefix at 2032..2063
+    i = 0;
+    while i < 32 {
+        __engine("map_set", st, 2000 + i, __engine("map_get", h_seed, i) + 0);
+        __engine("map_set", st, 2032 + i, __engine("map_get", h_seed, 32 + i) + 0);
+        i = i + 1;
+    }
+    __engine("map_set", st, 2000, (__engine("map_get", st, 2000) + 0) & 248);
+    __engine("map_set", st, 2031, ((__engine("map_get", st, 2031) + 0) & 127) | 64);
+
+    // 2. Public key `A = [a]B`
+    ed_ge_scalarmult(st, 2100, 2000, 1040, 2140);
+    let pk_hex = ed_ge_to_hex(st, 2100, 2200);
+
+    // 3. `r = SHA512(prefix || msg) mod L`
+    let mlen = __engine("str_len", msg_hex) / 2;
+    let r_in = __engine("map_new");
+    i = 0;
+    while i < 32 {
+        __engine("map_set", r_in, i, __engine("map_get", st, 2032 + i) + 0);
+        i = i + 1;
+    }
+    i = 0;
+    while i < mlen {
+        __engine("map_set", r_in, 32 + i, ed_hex_byte_at(msg_hex, i));
+        i = i + 1;
+    }
+    let h_r = sha512_hash_byte_map(r_in, 32 + mlen);
+    i = 0;
+    while i < 64 {
+        __engine("map_set", st, 2400 + i, __engine("map_get", h_r, i) + 0);
+        i = i + 1;
+    }
+    ed_reduce_64bytes_mod_l(st, 2400, 2500, 2064);
+
+    // 4. `R = [r]B`
+    ed_ge_scalarmult(st, 2100, 2064, 1040, 2140);
+    let r_hex = ed_ge_to_hex(st, 2100, 2200);
+
+    // 5. `k = SHA512(R || A || msg) mod L`
+    let k_in = __engine("map_new");
+    i = 0;
+    while i < 32 {
+        __engine("map_set", k_in, i, ed_hex_byte_at(r_hex, i));
+        __engine("map_set", k_in, 32 + i, ed_hex_byte_at(pk_hex, i));
+        i = i + 1;
+    }
+    i = 0;
+    while i < mlen {
+        __engine("map_set", k_in, 64 + i, ed_hex_byte_at(msg_hex, i));
+        i = i + 1;
+    }
+    let h_k = sha512_hash_byte_map(k_in, 64 + mlen);
+    i = 0;
+    while i < 64 {
+        __engine("map_set", st, 2400 + i, __engine("map_get", h_k, i) + 0);
+        i = i + 1;
+    }
+    ed_reduce_64bytes_mod_l(st, 2400, 2500, 2600);
+
+    // 6. `S = (r + k * a) mod L`
+    ed_scalar_muladd_mod_l(st, 2064, 2600, 2000, 2500, 2640);
+    var s_hex = "";
+    i = 0;
+    while i < 32 {
+        s_hex = s_hex + ed_byte_to_hex(__engine("map_get", st, 2640 + i) + 0);
+        i = i + 1;
+    }
+    return r_hex + s_hex;
+}
+
+pub fn ed25519_verify_hex(pk32_hex: str, msg_hex: str, sig64_hex: str) -> bool {
+    if __engine("str_len", pk32_hex) != 64 || __engine("str_len", sig64_hex) != 128 {
+        return false;
+    }
+    let r_hex = __engine("str_slice", sig64_hex, 0, 64);
+    let s_hex = __engine("str_slice", sig64_hex, 64, 128);
+
+    // RFC 8032 strict canonical S < L check (rejects S + L malleability forgeries!)
+    if !ed_scalar_is_canonical_hex(s_hex) {
+        return false;
+    }
+
+    let st = __engine("map_new");
+    ed_init_curve_consts(st);
+
+    // Decode A (at 2100) and R (at 2140)
+    let ok_a = ed_ge_from_hex(st, 2100, pk32_hex, 2300);
+    if ok_a == 0 {
+        return false;
+    }
+    let ok_r = ed_ge_from_hex(st, 2140, r_hex, 2300);
+    if ok_r == 0 {
+        return false;
+    }
+
+    // Compute k = SHA512(R || A || msg) mod L
+    let mlen = __engine("str_len", msg_hex) / 2;
+    let k_in = __engine("map_new");
+    var i = 0;
+    while i < 32 {
+        __engine("map_set", k_in, i, ed_hex_byte_at(r_hex, i));
+        __engine("map_set", k_in, 32 + i, ed_hex_byte_at(pk32_hex, i));
+        __engine("map_set", st, 2000 + i, ed_hex_byte_at(s_hex, i));
+        i = i + 1;
+    }
+    i = 0;
+    while i < mlen {
+        __engine("map_set", k_in, 64 + i, ed_hex_byte_at(msg_hex, i));
+        i = i + 1;
+    }
+    let h_k = sha512_hash_byte_map(k_in, 64 + mlen);
+    i = 0;
+    while i < 64 {
+        __engine("map_set", st, 2400 + i, __engine("map_get", h_k, i) + 0);
+        i = i + 1;
+    }
+    ed_reduce_64bytes_mod_l(st, 2400, 2500, 2064);
+
+    // LHS = [S]B (at 2180), RHS = R + [k]A (at 2220)
+    ed_ge_scalarmult(st, 2180, 2000, 1040, 2260);
+    ed_ge_scalarmult(st, 2220, 2064, 2100, 2260);
+    ed_ge_add(st, 2220, 2140, 2220);
+
+    let lhs_hex = ed_ge_to_hex(st, 2180, 2300);
+    let rhs_hex = ed_ge_to_hex(st, 2220, 2300);
+    return lhs_hex == rhs_hex;
 }

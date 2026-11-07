@@ -1,6 +1,6 @@
 // ============================================================================
 // FILE: stdlib/polyglot/marshal.pilot
-// Milestone 58.4: Polyglot JSON & Variable Marshaling Engine
+// Milestone 58.4: Recursive-Descent JSON Parser, Query & Serializer Engine
 // Replaces `crates/pilot-polyglot/src/marshal.pilot` in pure Pilot.
 // ============================================================================
 
@@ -26,4 +26,252 @@ pub fn marshal_str_binding(var_name: str, val_str: str) -> MarshaledBinding {
         json_payload: json,
         reg_class: 6,
     };
+}
+
+pub pure fn json_escape_str(s: str) -> str {
+    let n = __engine("str_len", s);
+    var out = "";
+    var i = 0;
+    while i < n {
+        let b = __engine("str_byte_at", s, i);
+        if b == 34 {
+            out = out + "\\\"";
+        } else if b == 92 {
+            out = out + "\\\\";
+        } else if b == 10 {
+            out = out + "\\n";
+        } else if b == 13 {
+            out = out + "\\r";
+        } else if b == 9 {
+            out = out + "\\t";
+        } else {
+            out = out + __engine("str_slice", s, i, i + 1);
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+pub fn json_skip_ws(src: str, st: i64) -> i64 {
+    let n = __engine("map_get", st, "len") + 0;
+    var p = __engine("map_get", st, "pos") + 0;
+    while p < n {
+        let b = __engine("str_byte_at", src, p);
+        if b == 32 || b == 9 || b == 10 || b == 13 {
+            p = p + 1;
+        } else {
+            break;
+        }
+    }
+    __engine("map_set", st, "pos", p);
+    return p;
+}
+
+pub fn json_parse_str_token(src: str, st: i64) -> str {
+    let n = __engine("map_get", st, "len") + 0;
+    var p = json_skip_ws(src, st);
+    if p < n && __engine("str_byte_at", src, p) == 34 {
+        p = p + 1;
+    }
+    var out = "";
+    while p < n {
+        let b = __engine("str_byte_at", src, p);
+        if b == 34 {
+            p = p + 1;
+            break;
+        }
+        if b == 92 && (p + 1) < n {
+            let nb = __engine("str_byte_at", src, p + 1);
+            if nb == 34 {
+                out = out + "\"";
+            } else if nb == 92 {
+                out = out + "\\";
+            } else if nb == 110 {
+                out = out + "\n";
+            } else if nb == 114 {
+                out = out + "\r";
+            } else if nb == 116 {
+                out = out + "\t";
+            } else {
+                out = out + __engine("str_slice", src, p + 1, p + 2);
+            }
+            p = p + 2;
+        } else {
+            out = out + __engine("str_slice", src, p, p + 1);
+            p = p + 1;
+        }
+    }
+    __engine("map_set", st, "pos", p);
+    return out;
+}
+
+pub fn json_parse_node(src: str, st: i64, doc: i64, path: str) -> str {
+    let n = __engine("map_get", st, "len") + 0;
+    var p = json_skip_ws(src, st);
+    if p >= n {
+        return "null";
+    }
+    let b = __engine("str_byte_at", src, p);
+
+    // Object `{ ... }`
+    if b == 123 {
+        __engine("map_set", st, "pos", p + 1);
+        var canon = "{";
+        var count = 0;
+        var loop_obj = 1;
+        while loop_obj == 1 {
+            p = json_skip_ws(src, st);
+            if p >= n {
+                loop_obj = 0;
+            } else if __engine("str_byte_at", src, p) == 125 {
+                __engine("map_set", st, "pos", p + 1);
+                loop_obj = 0;
+            } else {
+                if __engine("str_byte_at", src, p) == 44 {
+                    __engine("map_set", st, "pos", p + 1);
+                    p = json_skip_ws(src, st);
+                }
+                let k = json_parse_str_token(src, st);
+                p = json_skip_ws(src, st);
+                if p < n && __engine("str_byte_at", src, p) == 58 {
+                    __engine("map_set", st, "pos", p + 1);
+                }
+                let child_path = if __engine("str_len", path) > 0 { path + "." + k } else { k };
+                let child_json = json_parse_node(src, st, doc, child_path);
+                if count > 0 {
+                    canon = canon + ",";
+                }
+                canon = canon + "\"" + json_escape_str(k) + "\":" + child_json;
+                count = count + 1;
+            }
+        }
+        canon = canon + "}";
+        __engine("map_set", doc, "raw_" + path, canon);
+        return canon;
+    }
+
+    // Array `[ ... ]`
+    if b == 91 {
+        __engine("map_set", st, "pos", p + 1);
+        var canon = "[";
+        var count = 0;
+        var loop_arr = 1;
+        while loop_arr == 1 {
+            p = json_skip_ws(src, st);
+            if p >= n {
+                loop_arr = 0;
+            } else if __engine("str_byte_at", src, p) == 93 {
+                __engine("map_set", st, "pos", p + 1);
+                loop_arr = 0;
+            } else {
+                if __engine("str_byte_at", src, p) == 44 {
+                    __engine("map_set", st, "pos", p + 1);
+                    p = json_skip_ws(src, st);
+                }
+                let elem_path = if __engine("str_len", path) > 0 { path + "." + count } else { "" + count };
+                let elem_json = json_parse_node(src, st, doc, elem_path);
+                if count > 0 {
+                    canon = canon + ",";
+                }
+                canon = canon + elem_json;
+                count = count + 1;
+            }
+        }
+        canon = canon + "]";
+        __engine("map_set", doc, "alen_" + path, count);
+        __engine("map_set", doc, "raw_" + path, canon);
+        return canon;
+    }
+
+    // String `"..."`
+    if b == 34 {
+        let sval = json_parse_str_token(src, st);
+        __engine("map_set", doc, "str_" + path, sval);
+        let canon = "\"" + json_escape_str(sval) + "\"";
+        __engine("map_set", doc, "raw_" + path, canon);
+        return canon;
+    }
+
+    // `true`, `false`, `null`
+    if b == 116 || b == 102 || b == 110 {
+        let start = p;
+        while p < n {
+            let ch = __engine("str_byte_at", src, p);
+            if ch >= 97 && ch <= 122 {
+                p = p + 1;
+            } else {
+                break;
+            }
+        }
+        __engine("map_set", st, "pos", p);
+        let kw = __engine("str_slice", src, start, p);
+        if kw == "true" {
+            __engine("map_set", doc, "bool_" + path, 1);
+            __engine("map_set", doc, "str_" + path, "true");
+            __engine("map_set", doc, "raw_" + path, "true");
+            return "true";
+        }
+        if kw == "false" {
+            __engine("map_set", doc, "bool_" + path, 0);
+            __engine("map_set", doc, "str_" + path, "false");
+            __engine("map_set", doc, "raw_" + path, "false");
+            return "false";
+        }
+        __engine("map_set", doc, "raw_" + path, "null");
+        return "null";
+    }
+
+    // Signed integer / number
+    var sign = 1;
+    if b == 45 {
+        sign = -1;
+        p = p + 1;
+    }
+    var val = 0;
+    while p < n {
+        let d = __engine("str_byte_at", src, p);
+        if d >= 48 && d <= 57 {
+            val = (val * 10) + (d - 48);
+            p = p + 1;
+        } else {
+            break;
+        }
+    }
+    __engine("map_set", st, "pos", p);
+    let signed_val = val * sign;
+    let s_repr = "" + signed_val;
+    __engine("map_set", doc, "int_" + path, signed_val);
+    __engine("map_set", doc, "str_" + path, s_repr);
+    __engine("map_set", doc, "raw_" + path, s_repr);
+    return s_repr;
+}
+
+pub fn json_parse(src: str) -> i64 {
+    let doc = __engine("map_new");
+    let st = __engine("map_new");
+    __engine("map_set", st, "pos", 0);
+    __engine("map_set", st, "len", __engine("str_len", src));
+    let root_canon = json_parse_node(src, st, doc, "");
+    __engine("map_set", doc, "root_json", root_canon);
+    return doc;
+}
+
+pub fn json_get_str(doc: i64, path: str) -> str {
+    return "" + __engine("map_get", doc, "str_" + path);
+}
+
+pub fn json_get_int(doc: i64, path: str) -> i64 {
+    return __engine("map_get", doc, "int_" + path) + 0;
+}
+
+pub fn json_get_bool(doc: i64, path: str) -> bool {
+    return (__engine("map_get", doc, "bool_" + path) + 0) != 0;
+}
+
+pub fn json_array_len(doc: i64, path: str) -> i64 {
+    return __engine("map_get", doc, "alen_" + path) + 0;
+}
+
+pub fn json_stringify(doc: i64) -> str {
+    return "" + __engine("map_get", doc, "root_json");
 }

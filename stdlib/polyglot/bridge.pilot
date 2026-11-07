@@ -11,10 +11,11 @@ pub struct PolyglotExecutionPlan {
 }
 
 pub pure fn resolve_polyglot_host_binary(lang: str) -> str {
-    if lang == "python" || lang == "py" { return "python3"; }
-    if lang == "js" || lang == "node" || lang == "javascript" { return "node"; }
-    if lang == "lua" { return "lua"; }
-    if lang == "sh" || lang == "bash" { return "sh"; }
+    let l_str = lang;
+    if l_str == "python" || l_str == "py" || l_str == "python3" { return "python3"; }
+    if l_str == "js" || l_str == "node" || l_str == "javascript" { return "node"; }
+    if l_str == "lua" { return "lua"; }
+    if l_str == "sh" || l_str == "bash" { return "sh"; }
     return "sh";
 }
 
@@ -26,4 +27,41 @@ pub fn build_polyglot_execution_plan(lang: str, preamble_json: str, snippet: str
         host_binary: bin,
         wrapped_script: wrapped,
     };
+}
+
+pub pure fn bridge_quote_str(s: str) -> str {
+    let n = __engine("str_len", s);
+    var out = "\"";
+    var i = 0;
+    while i < n {
+        let b = __engine("str_byte_at", s, i);
+        if b == 34 {
+            out = out + "\\\"";
+        } else if b == 92 {
+            out = out + "\\\\";
+        } else if b == 10 {
+            out = out + "\\n";
+        } else if b == 13 {
+            out = out + "\\r";
+        } else {
+            out = out + __engine("str_slice", s, i, i + 1);
+        }
+        i = i + 1;
+    }
+    return out + "\"";
+}
+
+pub fn polyglot_eval_json(lang: str, json_bindings: str, user_expr: str) -> str {
+    let bin = resolve_polyglot_host_binary(lang);
+    let q_json = bridge_quote_str(json_bindings);
+    if bin == "python3" {
+        let py_script = "import json\nenv = json.loads(" + q_json + ")\nglobals().update(env)\nprint(" + user_expr + ", end='')\n";
+        return "" + __engine("host_spawn_eval", "python3", py_script);
+    }
+    if bin == "node" {
+        let js_script = "const env = JSON.parse(" + q_json + ");\nwith (env) { process.stdout.write(String(" + user_expr + ")); }\n";
+        return "" + __engine("host_spawn_eval", "node", js_script);
+    }
+    let sh_script = user_expr;
+    return "" + __engine("host_spawn_eval", bin, sh_script);
 }

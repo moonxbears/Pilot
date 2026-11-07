@@ -4,31 +4,57 @@
 // Replaces `crates/pilot-polyglot/src/slice.rs` (`SliceBuffer`) in pure Pilot.
 // ============================================================================
 
-pub struct ShmWindowDescriptor {
+pub struct ShmOwnedBuffer {
     pub base_addr: i64;
-    pub elem_count: i64;
-    pub elem_byte_stride: i64;
-    pub capacity: i64;
+    pub byte_capacity: i64;
+    pub alignment: i64;
     pub lattice_bits: i64;
 }
 
-pub fn create_shm_owned_buffer(base_addr: i64, capacity: i64, elem_byte_stride: i64) -> ShmWindowDescriptor {
-    return ShmWindowDescriptor {
+pub struct ShmBorrowedView {
+    pub base_addr: i64;
+    pub byte_len: i64;
+    pub lattice_bits: i64;
+    pub valid: bool;
+}
+
+pub fn create_shm_owned_buffer(base_addr: i64, byte_capacity: i64, alignment: i64) -> ShmOwnedBuffer {
+    return ShmOwnedBuffer {
         base_addr: base_addr,
-        elem_count: 0,
-        elem_byte_stride: elem_byte_stride,
-        capacity: capacity,
+        byte_capacity: byte_capacity,
+        alignment: alignment,
         lattice_bits: 2,
     };
 }
 
-pub fn project_shm_borrowed_view(buf: ShmWindowDescriptor, offset_elems: i64, view_len: i64) -> ShmWindowDescriptor {
-    let sub_addr = buf.base_addr + (offset_elems * buf.elem_byte_stride);
-    return ShmWindowDescriptor {
-        base_addr: sub_addr,
-        elem_count: view_len,
-        elem_byte_stride: buf.elem_byte_stride,
-        capacity: view_len,
+pub fn project_shm_borrowed_view(
+    buf: ShmOwnedBuffer,
+    elem_offset: i64,
+    elem_count: i64,
+    elem_size: i64
+) -> ShmBorrowedView {
+    if elem_offset < 0 || elem_count < 0 || elem_size <= 0 {
+        return ShmBorrowedView {
+            base_addr: buf.base_addr,
+            byte_len: 0,
+            lattice_bits: 1,
+            valid: false,
+        };
+    }
+    let byte_off = elem_offset * elem_size;
+    let blen = elem_count * elem_size;
+    if (byte_off + blen) > buf.byte_capacity {
+        return ShmBorrowedView {
+            base_addr: buf.base_addr,
+            byte_len: 0,
+            lattice_bits: 1,
+            valid: false,
+        };
+    }
+    return ShmBorrowedView {
+        base_addr: buf.base_addr + byte_off,
+        byte_len: blen,
         lattice_bits: 1,
+        valid: true,
     };
 }

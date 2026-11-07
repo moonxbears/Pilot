@@ -12,6 +12,25 @@ pub fn format_register_variable_json(var_name: str, reg_slot: i64, val_str: str,
     return "{\"name\":\"" + var_name + "\",\"value\":\"" + val_str + "\",\"register\":\"r" + reg_slot + "\",\"byteSize\":" + byte_size + "}";
 }
 
-pub fn inspect_struct_field_offset(layout_id: i64, field_idx: i64) -> i64 {
-    return __engine("layout_field_offset", layout_id, field_idx);
+pub fn inspect_struct_fields_json(layout_id: i64) -> str {
+    let total_bytes = __engine("layout_metrics", layout_id);
+    if total_bytes <= 0 {
+        return "[]";
+    }
+    let off0 = __engine("layout_field_offset", layout_id, 0);
+    var json = "[{\"index\":0,\"offset\":" + off0 + "}";
+    var prev_off = off0;
+    var idx = 1;
+    while idx < 64 {
+        let off = __engine("layout_field_offset", layout_id, idx);
+        if off > prev_off && off < total_bytes {
+            json = json + ",{\"index\":" + idx + ",\"offset\":" + off + "}";
+            prev_off = off;
+            idx = idx + 1;
+        } else {
+            break;
+        }
+    }
+    json = json + "]";
+    return json;
 }

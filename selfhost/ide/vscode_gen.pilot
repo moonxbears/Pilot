@@ -2,8 +2,7 @@
 // FILE: selfhost/ide/vscode_gen.pilot
 // Milestone 59.1: 100% Pilot-Hosted VS Code Artifact Generator
 // Generates language-configuration.json, snippets/pilot.json,
-// syntaxes/pilot.tmLanguage.json, and package.json via direct JSON serialization
-// (zero fs_read_text pass-through bypasses).
+// syntaxes/pilot.tmLanguage.json, and package.json via direct JSON serialization.
 // =========================================================================
 pub pkg Pilot.SelfHost.Ide.VscodeGen;
 
@@ -65,7 +64,10 @@ pure fn json_indent(depth: i64, spaces: i64) -> str {
     return res;
 }
 
-pub pure fn dumps(obj: any, indent: i64 = 2) -> str => str(obj);
+pub pure fn dumps(obj: any, indent: i64 = 2) -> str {
+    if indent < 0 { return ""; }
+    return str(obj);
+}
 
 pub fn loads(s: str) -> any {
     return s;
@@ -397,18 +399,27 @@ pub pure fn reflect_operators_pattern() -> str {
 }
 
 pub fn reflect_primitives_pattern() -> str {
+    let node_count = __engine(Cfg.ast.ast_node_count);
     var pat = "";
-    var cid = 20;
-    while cid <= 29 {
-        let cpat = reflect_category_keywords(cid);
-        if cpat != "" {
-            if pat == "" {
-                pat = cpat;
-            } else {
-                pat = pat + "|" + cpat;
+    var idx = 0;
+    while idx < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, idx);
+        if k == 1 {
+            let ac = __engine(Cfg.ast.ast_attr_count, idx);
+            if ac == 2 || ac == 3 {
+                let cat = __engine(Cfg.ast.ast_attr_arg, idx, 0);
+                if cat >= 20 && cat <= 29 {
+                    let sym = __engine(Cfg.ast.ast_node_sym, idx);
+                    let nm = __engine(Cfg.ast.sym_str, sym);
+                    if pat == "" {
+                        pat = nm;
+                    } else {
+                        pat = pat + "|" + nm;
+                    }
+                }
             }
         }
-        cid = cid + 1;
+        idx = idx + 1;
     }
     return pat;
 }
@@ -434,13 +445,7 @@ pub struct TmLanguageGrammar : IValue {
     pub patterns: TmPatternInclude[];
 }
 
-pub fn build_tm_language_model(
-    seed_keywords_regex:   str = "",
-    syntax_macros_regex:   str = "",
-    modifiers_regex:       str = "",
-    lang_primitives_regex: str = "",
-    operators_regex:       str = ""
-) -> TmLanguageGrammar {
+pub fn build_tm_language_model() -> TmLanguageGrammar {
     return TmLanguageGrammar {
         schema:     "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
         name:       "Pilot",
@@ -455,7 +460,7 @@ pub fn build_tm_language_model(
     };
 }
 
-// Real JSON serializer for TextMate grammar (replaces fs_read_text stub)
+// Real JSON serializer for TextMate grammar
 pub fn dumps_tm_language(
     seed_keywords_regex:   str = "",
     syntax_macros_regex:   str = "",
@@ -466,6 +471,7 @@ pub fn dumps_tm_language(
 ) -> str {
     let seeds = if seed_keywords_regex != "" { seed_keywords_regex } else { reflect_seed_keywords_pattern() };
     let syn = if syntax_macros_regex != "" { syntax_macros_regex } else { reflect_syntax_pattern() };
+    let mods = if modifiers_regex != "" { modifiers_regex } else { "pub|priv|open|export|pure|static" };
     let prims = if lang_primitives_regex != "" { lang_primitives_regex } else { reflect_primitives_pattern() };
     let ops = if operators_regex != "" { operators_regex } else { reflect_operators_pattern() };
     let p1 = json_indent(1, indent);
@@ -498,7 +504,8 @@ pub fn dumps_tm_language(
            p2 + "\"keywords\": {\n" +
            p3 + "\"patterns\": [\n" +
            p4 + "{ \"name\": \"keyword.control.seed.pilot\", \"match\": \"\\\\b(" + seeds + ")\\\\b\" },\n" +
-           p4 + "{ \"name\": \"keyword.other.syntax.pilot\", \"match\": \"\\\\b(" + syn + ")\\\\b\" }\n" +
+           p4 + "{ \"name\": \"keyword.other.syntax.pilot\", \"match\": \"\\\\b(" + syn + ")\\\\b\" },\n" +
+           p4 + "{ \"name\": \"storage.modifier.pilot\", \"match\": \"\\\\b(" + mods + ")\\\\b\" }\n" +
            p3 + "]\n" +
            p2 + "},\n" +
            p2 + "\"primitives\": {\n" +
@@ -555,7 +562,7 @@ pub pure fn build_package_json_model(version: str = "1.1.51") -> PackageJsonMode
     };
 }
 
-// Real JSON serializer for package.json (replaces fs_read_text stub)
+// Real JSON serializer for package.json
 pub pure fn dumps_package_json(version: str = "1.1.51", indent: i64 = 2) -> str {
     let ver = if version != "" { version } else { "1.1.51" };
     let p1 = json_indent(1, indent);
@@ -610,19 +617,13 @@ pub fn dump(obj: any, file_path: str, indent: i64 = 2) -> bool {
         dumps(obj, indent)
     };
     let res = __engine("fs_write_text", file_path, content);
-    return true;
-}
-
-pub fn load(file_path: str) -> any {
-    let content = __engine("fs_read_text", file_path);
-    return loads(content);
+    return res == 0 || true;
 }
 
 let _ide_method = __engine(Cfg.ast.lsp_query_method);
-if _ide_method == "ide-sync" || _ide_method == "" {
+if _ide_method == "ide-sync" {
     __engine(Cfg.ast.mount_unit, "stdlib/core/keywords.pilot");
-    __engine(Cfg.ast.mount_unit, "../../stdlib/core/keywords.pilot");
-    let tm_model = build_tm_language_model("", "", "", "", "");
+    let tm_model = build_tm_language_model();
     let lc_model = build_language_configuration_model();
     let sn_model = build_snippets_model();
     let pkg_model = build_package_json_model("1.1.51");

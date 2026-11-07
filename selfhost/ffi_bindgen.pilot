@@ -1,8 +1,8 @@
 // ============================================================================
 // FILE: selfhost/ffi_bindgen.pilot
 // Milestone 58.1: Self-Hosted C Header & Host FFI Binding Generator
-// Generates C-ABI extern prototypes and host `LibraryImport` / `dlopen`
-// bindings from `LayoutTable` physics descriptors in pure Pilot.
+// Generates C-ABI extern prototypes, C11 struct typedefs, and host
+// `LibraryImport` / `dlopen` bindings from `LayoutTable` physics descriptors.
 // ============================================================================
 
 pub struct FfiBindingBundle {
@@ -14,11 +14,15 @@ pub struct FfiBindingBundle {
 pub pure fn ffi_c_type_for_physics(reg_class: i64, bit_width: i64) -> str {
     if reg_class == 0 || reg_class == 1 { return "void"; }
     if reg_class == 2 {
+        if bit_width <= 8 { return "int8_t"; }
+        if bit_width <= 16 { return "int16_t"; }
         if bit_width <= 32 { return "int32_t"; }
         return "int64_t";
     }
     if reg_class == 3 {
         if bit_width == 1 { return "uint8_t"; }
+        if bit_width <= 8 { return "uint8_t"; }
+        if bit_width <= 16 { return "uint16_t"; }
         if bit_width <= 32 { return "uint32_t"; }
         return "uint64_t";
     }
@@ -70,4 +74,222 @@ pub fn generate_ffi_binding(
         c_prototype: c_proto,
         csharp_library_import: cs_imp,
     };
+}
+
+pub pure fn ffi_is_ident_byte(b: i64) -> bool {
+    return (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 95;
+}
+
+pub fn ffi_target_prog_nid() -> i64 {
+    let total = __engine("ast_node_count");
+    var i = 0;
+    while i < total {
+        if __engine("ast_orig_kind", i) == 0 && __engine("ast_span_start", i) < 4000000000 {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+pub fn ffi_find_struct_by_name(type_name: str) -> i64 {
+    if __engine("str_len", type_name) <= 0 {
+        return -1;
+    }
+    let total = __engine("ast_node_count");
+    var i = 0;
+    while i < total {
+        if __engine("ast_node_kind", i) == 1 && __engine("ast_span_start", i) < 4000000000 {
+            if __engine("sym_str", __engine("ast_node_sym", i)) == type_name {
+                return i;
+            }
+        }
+        i = i + 1;
+    }
+    i = 0;
+    while i < total {
+        if __engine("ast_node_kind", i) == 1 {
+            if __engine("sym_str", __engine("ast_node_sym", i)) == type_name {
+                return i;
+            }
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+pub fn ffi_struct_has_stored_fields(s_nid: i64) -> bool {
+    if s_nid < 0 { return false; }
+    let my_sym = __engine("ast_node_sym", s_nid);
+    let cc = __engine("ast_child_count", s_nid);
+    var i = 0;
+    while i < cc {
+        let ch = __engine("ast_child_at", s_nid, i);
+        let fk = __engine("ast_node_kind", ch);
+        if fk == 21 || fk == 4 {
+            if __engine("ast_node_raw_bits", ch) != my_sym {
+                return true;
+            }
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+pub fn ffi_resolve_c_type_name(type_name: str) -> str {
+    if __engine("str_len", type_name) == 0 {
+        return "void";
+    }
+    let s_nid = ffi_find_struct_by_name(type_name);
+    if s_nid >= 0 {
+        if ffi_struct_has_stored_fields(s_nid) {
+            return type_name;
+        }
+        let decl_cnt = __engine("ast_attr_decl_count", s_nid);
+        var matched = -1;
+        var di = 0;
+        while di < decl_cnt {
+            let argc = __engine("ast_attr_decl_arg_count", s_nid, di);
+            if argc == 2 || argc == 3 {
+                let aname = __engine("sym_str", __engine("ast_attr_name", s_nid, di));
+                if matched < 0 || aname == "Bits" {
+                    matched = di;
+                }
+            }
+            di = di + 1;
+        }
+        if matched >= 0 {
+            let argc = __engine("ast_attr_decl_arg_count", s_nid, matched);
+            let w = __engine("ast_attr_decl_arg", s_nid, matched, 0);
+            var bank = __engine("ast_attr_decl_arg", s_nid, matched, 1);
+            if argc == 3 {
+                bank = __engine("ast_attr_decl_arg", s_nid, matched, 2);
+            }
+            return ffi_c_type_for_physics(bank, w);
+        }
+        let flat_cnt = __engine("ast_attr_count", s_nid);
+        if flat_cnt >= 2 {
+            let w0 = __engine("ast_attr_arg", s_nid, 0);
+            var bk0 = __engine("ast_attr_arg", s_nid, 1);
+            if flat_cnt >= 3 {
+                bk0 = __engine("ast_attr_arg", s_nid, 2);
+            }
+            return ffi_c_type_for_physics(bk0, w0);
+        }
+        return "void";
+    }
+    return "int64_t";
+}
+
+pub fn ffi_fn_return_type_name(fn_nid: i64) -> str {
+    let s0 = __engine("ast_span_start", fn_nid);
+    var s1 = __engine("ast_span_end", fn_nid);
+    if __engine("ast_child_count", fn_nid) > 0 {
+        let body_s = __engine("ast_span_start", __engine("ast_child_at", fn_nid, 0));
+        if body_s > s0 && body_s < s1 {
+            s1 = body_s;
+        }
+    }
+    let hdr = __engine("source_slice", s0, s1);
+    let n = __engine("str_len", hdr);
+    var pdepth = 0;
+    var i = 0;
+    while i + 1 < n {
+        let b = __engine("str_byte_at", hdr, i);
+        if b == 40 {
+            pdepth = pdepth + 1;
+        } else if b == 41 {
+            if pdepth > 0 { pdepth = pdepth - 1; }
+        } else if pdepth == 0 && b == 45 && __engine("str_byte_at", hdr, i + 1) == 62 {
+            var j = i + 2;
+            while j < n && __engine("str_byte_at", hdr, j) <= 32 {
+                j = j + 1;
+            }
+            let t_start = j;
+            while j < n && ffi_is_ident_byte(__engine("str_byte_at", hdr, j)) {
+                j = j + 1;
+            }
+            if j > t_start {
+                return __engine("str_slice", hdr, t_start, j);
+            }
+            return "";
+        }
+        i = i + 1;
+    }
+    return "";
+}
+
+pub fn ffi_emit_struct_typedef(s_nid: i64) -> str {
+    let sname = __engine("sym_str", __engine("ast_node_sym", s_nid));
+    let cc = __engine("ast_child_count", s_nid);
+    var fields = "";
+    var fi = 0;
+    while fi < cc {
+        let f_nid = __engine("ast_child_at", s_nid, fi);
+        if __engine("ast_node_kind", f_nid) == 21 {
+            let fname = __engine("sym_str", __engine("ast_node_sym", f_nid));
+            let ftsym = __engine("ast_node_raw_bits", f_nid);
+            let fty = ffi_resolve_c_type_name(__engine("sym_str", ftsym));
+            fields = fields + "    " + fty + " " + fname + ";\n";
+        }
+        fi = fi + 1;
+    }
+    return "typedef struct {\n" + fields + "} " + sname + ";\n\n";
+}
+
+pub fn ffi_emit_fn_params(fn_nid: i64) -> str {
+    let cc = __engine("ast_child_count", fn_nid);
+    if cc <= 1 {
+        return "void";
+    }
+    var sig = "";
+    var pi = 1;
+    while pi < cc {
+        let p_nid = __engine("ast_child_at", fn_nid, pi);
+        if __engine("ast_node_kind", p_nid) == 21 {
+            let pname = __engine("sym_str", __engine("ast_node_sym", p_nid));
+            let ptsym = __engine("ast_node_raw_bits", p_nid);
+            let pty = ffi_resolve_c_type_name(__engine("sym_str", ptsym));
+            if __engine("str_len", sig) > 0 { sig = sig + ", "; }
+            sig = sig + pty + " " + pname;
+        }
+        pi = pi + 1;
+    }
+    if __engine("str_len", sig) == 0 {
+        return "void";
+    }
+    return sig;
+}
+
+pub fn generate_arena_c_ffi_header() -> str {
+    var out = "#ifndef PILOT_ARENA_FFI_H\n#define PILOT_ARENA_FFI_H\n#include <stdint.h>\n#include <stdbool.h>\n#include <stddef.h>\n\n";
+    let prog = ffi_target_prog_nid();
+    if prog >= 0 {
+        let cc = __engine("ast_child_count", prog);
+        var ci = 0;
+        while ci < cc {
+            let item = __engine("ast_child_at", prog, ci);
+            let ik = __engine("ast_node_kind", item);
+            if ik == 1 && ffi_struct_has_stored_fields(item) {
+                out = out + ffi_emit_struct_typedef(item);
+            }
+            ci = ci + 1;
+        }
+        ci = 0;
+        while ci < cc {
+            let item = __engine("ast_child_at", prog, ci);
+            let ik = __engine("ast_node_kind", item);
+            let dflags = __engine("ast_decl_flags", item);
+            if ik == 3 && (dflags & 256) == 0 {
+                let fname = __engine("sym_str", __engine("ast_node_sym", item));
+                let rty_name = ffi_fn_return_type_name(item);
+                let ret_c = ffi_resolve_c_type_name(rty_name);
+                let psig = ffi_emit_fn_params(item);
+                out = out + "extern " + ret_c + " " + fname + "(" + psig + ");\n";
+            }
+            ci = ci + 1;
+        }
+    }
+    out = out + "\n#endif\n";
+    return out;
 }

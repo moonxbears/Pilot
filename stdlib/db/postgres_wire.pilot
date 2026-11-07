@@ -1,6 +1,8 @@
 // ============================================================================
 // FILE: stdlib/db/postgres_wire.pilot
-// Milestone 58.4: PostgreSQL v3 Wire Protocol Frame Encoder (`Startup` & `Q`)
+// Milestone 58.4: PostgreSQL v3 Wire Protocol Frame Encoder & Decoder
+// Implements `StartupMessage`, Simple Query (`'Q'`), and `DataRow` (`'D'`)
+// multi-byte big-endian binary wire framing & decoding in pure Pilot.
 // ============================================================================
 
 pub struct PostgresWirePacket {
@@ -9,17 +11,191 @@ pub struct PostgresWirePacket {
     pub query_sql: str;
 }
 
-// PostgreSQL v3 protocol version `3.0` (`196608 = (3 << 16) | 0`).
 pub pure fn postgres_v3_protocol_version() -> i64 {
     return 196608;
 }
 
-// Encodes a PostgreSQL v3 Simple Query (`'Q'` = `81`) wire packet descriptor.
 pub fn encode_postgres_query_packet(sql: str) -> PostgresWirePacket {
-    let total_len = 4 + sql.len() + 1;
+    let q_str = sql;
+    let total_len = 4 + __engine("str_len", q_str) + 1;
     return PostgresWirePacket {
         msg_tag_byte: 81,
         payload_len: total_len,
-        query_sql: sql,
+        query_sql: q_str,
     };
+}
+
+pub pure fn pg_hex_nib(v: i64) -> str {
+    let idx = v & 15;
+    return __engine("str_slice", "0123456789abcdef", idx, idx + 1);
+}
+
+pub pure fn pg_hex_u8(b: i64) -> str {
+    let u = b & 255;
+    return pg_hex_nib(u >> 4) + pg_hex_nib(u);
+}
+
+pub pure fn pg_hex_u16_be(v: i64) -> str {
+    return pg_hex_u8(v >> 8) + pg_hex_u8(v);
+}
+
+pub pure fn pg_hex_u32_be(v: i64) -> str {
+    return pg_hex_u8(v >> 24) + pg_hex_u8(v >> 16) + pg_hex_u8(v >> 8) + pg_hex_u8(v);
+}
+
+pub pure fn pg_str_to_hex(s: str) -> str {
+    let n = __engine("str_len", s);
+    var out = "";
+    var i = 0;
+    while i < n {
+        out = out + pg_hex_u8(__engine("str_byte_at", s, i));
+        i = i + 1;
+    }
+    return out;
+}
+
+pub pure fn pg_unhex_nib(b: i64) -> i64 {
+    if b >= 48 && b <= 57 { return b - 48; }
+    if b >= 97 && b <= 102 { return b - 87; }
+    if b >= 65 && b <= 70 { return b - 55; }
+    return 0;
+}
+
+pub pure fn pg_read_u8(hex_s: str, byte_idx: i64) -> i64 {
+    let p = byte_idx * 2;
+    let hi = pg_unhex_nib(__engine("str_byte_at", hex_s, p));
+    let lo = pg_unhex_nib(__engine("str_byte_at", hex_s, p + 1));
+    return (hi << 4) | lo;
+}
+
+pub pure fn pg_read_u16_be(hex_s: str, byte_idx: i64) -> i64 {
+    let b0 = pg_read_u8(hex_s, byte_idx);
+    let b1 = pg_read_u8(hex_s, byte_idx + 1);
+    return (b0 << 8) | b1;
+}
+
+pub pure fn pg_read_u32_be(hex_s: str, byte_idx: i64) -> i64 {
+    let b0 = pg_read_u8(hex_s, byte_idx);
+    let b1 = pg_read_u8(hex_s, byte_idx + 1);
+    let b2 = pg_read_u8(hex_s, byte_idx + 2);
+    let b3 = pg_read_u8(hex_s, byte_idx + 3);
+    return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
+}
+
+pub pure fn pg_ascii_char(b: i64) -> str {
+    let table = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+    if b >= 32 && b <= 126 {
+        let idx = b - 32;
+        return __engine("str_slice", table, idx, idx + 1);
+    }
+    if b == 10 { return "\n"; }
+    if b == 13 { return "\r"; }
+    if b == 9 { return "\t"; }
+    return " ";
+}
+
+pub pure fn pg_decode_bytes_to_str(hex_s: str, start_byte: i64, byte_len: i64) -> str {
+    var out = "";
+    var i = 0;
+    while i < byte_len {
+        let b = pg_read_u8(hex_s, start_byte + i);
+        out = out + pg_ascii_char(b);
+        i = i + 1;
+    }
+    return out;
+}
+
+pub fn pg_encode_startup_hex(user: str, database: str) -> str {
+    let u_len = __engine("str_len", user);
+    let d_len = __engine("str_len", database);
+    let total_len = 4 + 4 + 5 + u_len + 1 + 9 + d_len + 1 + 1;
+    return pg_hex_u32_be(total_len)
+        + pg_hex_u32_be(196608)
+        + pg_str_to_hex("user") + "00"
+        + pg_str_to_hex(user) + "00"
+        + pg_str_to_hex("database") + "00"
+        + pg_str_to_hex(database) + "00"
+        + "00";
+}
+
+pub fn pg_decode_startup_info(frame_hex: str) -> str {
+    let total_len = pg_read_u32_be(frame_hex, 0);
+    var pos = 8;
+    var user_val = "";
+    var db_val = "";
+    while pos < total_len {
+        let b0 = pg_read_u8(frame_hex, pos);
+        if b0 == 0 {
+            break;
+        }
+        var k_end = pos;
+        while k_end < total_len && pg_read_u8(frame_hex, k_end) != 0 {
+            k_end = k_end + 1;
+        }
+        let k_str = pg_decode_bytes_to_str(frame_hex, pos, k_end - pos);
+        let v_start = k_end + 1;
+        var v_end = v_start;
+        while v_end < total_len && pg_read_u8(frame_hex, v_end) != 0 {
+            v_end = v_end + 1;
+        }
+        let v_str = pg_decode_bytes_to_str(frame_hex, v_start, v_end - v_start);
+        if k_str == "user" {
+            user_val = v_str;
+        } else if k_str == "database" {
+            db_val = v_str;
+        }
+        pos = v_end + 1;
+    }
+    return user_val + "|" + db_val;
+}
+
+pub fn pg_encode_query_hex(sql: str) -> str {
+    let q_str = sql;
+    let q_len = __engine("str_len", q_str);
+    let total_len = 4 + q_len + 1;
+    return "51" + pg_hex_u32_be(total_len) + pg_str_to_hex(q_str) + "00";
+}
+
+pub fn pg_decode_query_sql(frame_hex: str) -> str {
+    let tag = pg_read_u8(frame_hex, 0);
+    if tag != 81 {
+        return "";
+    }
+    let total_len = pg_read_u32_be(frame_hex, 1);
+    let str_bytes = total_len - 5;
+    return pg_decode_bytes_to_str(frame_hex, 5, str_bytes);
+}
+
+pub fn pg_encode_data_row_hex(col0: str, col1: str) -> str {
+    let n0 = __engine("str_len", col0);
+    let n1 = __engine("str_len", col1);
+    let total_len = 4 + 2 + 4 + n0 + 4 + n1;
+    return "44"
+        + pg_hex_u32_be(total_len)
+        + pg_hex_u16_be(2)
+        + pg_hex_u32_be(n0) + pg_str_to_hex(col0)
+        + pg_hex_u32_be(n1) + pg_str_to_hex(col1);
+}
+
+pub fn pg_decode_data_row_pipe(frame_hex: str) -> str {
+    let tag = pg_read_u8(frame_hex, 0);
+    if tag != 68 {
+        return "";
+    }
+    let ncols = pg_read_u16_be(frame_hex, 5);
+    var pos = 7;
+    var out = "";
+    var c_idx = 0;
+    while c_idx < ncols {
+        let clen = pg_read_u32_be(frame_hex, pos);
+        pos = pos + 4;
+        let cval = pg_decode_bytes_to_str(frame_hex, pos, clen);
+        pos = pos + clen;
+        if c_idx > 0 {
+            out = out + "|";
+        }
+        out = out + cval;
+        c_idx = c_idx + 1;
+    }
+    return out;
 }

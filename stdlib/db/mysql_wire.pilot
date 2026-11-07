@@ -1,6 +1,8 @@
 // ============================================================================
 // FILE: stdlib/db/mysql_wire.pilot
-// Milestone 58.4: MySQL Binary/Text Wire Protocol Frame Encoder (`COM_QUERY`)
+// Milestone 58.4: MySQL Binary/Text Wire Protocol Frame Encoder & Decoder
+// Implements 3-byte little-endian payload length + 1-byte sequence ID
+// `COM_QUERY` (`0x03`) packet encoding and decoding in pure Pilot.
 // ============================================================================
 
 pub struct MysqlWirePacket {
@@ -10,16 +12,97 @@ pub struct MysqlWirePacket {
     pub query_sql: str;
 }
 
-// MySQL `COM_QUERY` command byte (`0x03` = `3`).
 pub pure fn mysql_com_query_byte() -> i64 {
     return 3;
 }
 
 pub fn encode_mysql_query_packet(sequence_id: i64, sql: str) -> MysqlWirePacket {
+    let q_str = sql;
     return MysqlWirePacket {
         sequence_id: sequence_id,
         command_byte: mysql_com_query_byte(),
-        payload_len: 1 + sql.len(),
-        query_sql: sql,
+        payload_len: 1 + __engine("str_len", q_str),
+        query_sql: q_str,
     };
+}
+
+pub pure fn my_hex_nib(v: i64) -> str {
+    let idx = v & 15;
+    return __engine("str_slice", "0123456789abcdef", idx, idx + 1);
+}
+
+pub pure fn my_hex_u8(b: i64) -> str {
+    let u = b & 255;
+    return my_hex_nib(u >> 4) + my_hex_nib(u);
+}
+
+pub pure fn my_str_to_hex(s: str) -> str {
+    let n = __engine("str_len", s);
+    var out = "";
+    var i = 0;
+    while i < n {
+        out = out + my_hex_u8(__engine("str_byte_at", s, i));
+        i = i + 1;
+    }
+    return out;
+}
+
+pub pure fn my_unhex_nib(b: i64) -> i64 {
+    if b >= 48 && b <= 57 { return b - 48; }
+    if b >= 97 && b <= 102 { return b - 87; }
+    if b >= 65 && b <= 70 { return b - 55; }
+    return 0;
+}
+
+pub pure fn my_read_u8(hex_s: str, byte_idx: i64) -> i64 {
+    let p = byte_idx * 2;
+    let hi = my_unhex_nib(__engine("str_byte_at", hex_s, p));
+    let lo = my_unhex_nib(__engine("str_byte_at", hex_s, p + 1));
+    return (hi << 4) | lo;
+}
+
+pub pure fn my_ascii_char(b: i64) -> str {
+    let table = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+    if b >= 32 && b <= 126 {
+        let idx = b - 32;
+        return __engine("str_slice", table, idx, idx + 1);
+    }
+    if b == 10 { return "\n"; }
+    if b == 13 { return "\r"; }
+    if b == 9 { return "\t"; }
+    return " ";
+}
+
+pub fn mysql_encode_com_query_hex(seq_id: i64, sql: str) -> str {
+    let q_str = sql;
+    let payload_len = 1 + __engine("str_len", q_str);
+    let b0 = payload_len & 255;
+    let b1 = (payload_len >> 8) & 255;
+    let b2 = (payload_len >> 16) & 255;
+    let seq_b = seq_id & 255;
+    return my_hex_u8(b0) + my_hex_u8(b1) + my_hex_u8(b2)
+        + my_hex_u8(seq_b)
+        + "03"
+        + my_str_to_hex(q_str);
+}
+
+pub fn mysql_decode_com_query(frame_hex: str) -> str {
+    let b0 = my_read_u8(frame_hex, 0);
+    let b1 = my_read_u8(frame_hex, 1);
+    let b2 = my_read_u8(frame_hex, 2);
+    let payload_len = b0 | (b1 << 8) | (b2 << 16);
+    let seq_id = my_read_u8(frame_hex, 3);
+    let cmd = my_read_u8(frame_hex, 4);
+    if cmd != 3 {
+        return "";
+    }
+    let str_len = payload_len - 1;
+    var q_out = "";
+    var i = 0;
+    while i < str_len {
+        let ch_b = my_read_u8(frame_hex, 5 + i);
+        q_out = q_out + my_ascii_char(ch_b);
+        i = i + 1;
+    }
+    return "" + seq_id + "|" + q_out;
 }

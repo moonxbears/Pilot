@@ -7,6 +7,13 @@ pub pkg Pilot.SelfHost.Dap.VmController;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
+pub enum StepMode {
+    Continue = 0,
+    StepIn = 1,
+    StepOver = 2,
+    StepOut = 3,
+}
+
 // Step mode constants: 0 = Continue, 1 = StepIn, 2 = StepOver, 3 = StepOut
 pub fn should_pause_at_pc(
     step_mode: i64,
@@ -16,21 +23,35 @@ pub fn should_pause_at_pc(
     cur_call_depth: i64,
     target_call_depth: i64
 ) -> i64 {
+    if cur_line <= 1 {
+        return 0;
+    }
+
+    let raw_val = __engine("map_get", 0, "call_line");
+    let call_line = if raw_val != null { raw_val } else { -1 };
+
     if cur_line == breakpoint_line && cur_line != last_stopped_line {
+        let _new = __engine("map_new");
+        let _s = __engine("map_set", 0, "call_line", cur_line);
         return 1;
     }
     if step_mode == 1 {
-        if cur_line != last_stopped_line {
+        // StepIn: pause at the first statement inside callee (new line and not the call site)
+        if cur_line != last_stopped_line && cur_line != call_line {
             return 1;
         }
     }
     if step_mode == 2 {
-        if cur_call_depth <= target_call_depth && cur_line != last_stopped_line {
+        // StepOver: pause when back at target_call_depth or lower, on a new statement
+        if cur_call_depth <= target_call_depth && cur_line != last_stopped_line && cur_line != call_line {
+            let _s = __engine("map_set", 0, "call_line", cur_line);
             return 1;
         }
     }
     if step_mode == 3 {
-        if cur_call_depth < target_call_depth {
+        // StepOut: pause when popped to a shallower call depth, on the statement following the call
+        if cur_call_depth < target_call_depth && cur_line != last_stopped_line && cur_line != call_line {
+            let _s = __engine("map_set", 0, "call_line", cur_line);
             return 1;
         }
     }

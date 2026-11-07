@@ -7,10 +7,160 @@ pub pkg Pilot.SelfHost.Lsp.Server;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
-[Layout(c_abi)]
-pub struct LspQueryAttr {
-    pub method_name: str;
-    pub weight:      i32;
+fn lsp_find_substr(haystack: str, needle: str, start_pos: i64) -> i64 {
+    let h_len = __engine("str_len", haystack);
+    let n_len = __engine("str_len", needle);
+    if n_len == 0 || start_pos < 0 || start_pos + n_len > h_len {
+        return -1;
+    }
+    var i = start_pos;
+    while i + n_len <= h_len {
+        if __engine("str_slice", haystack, i, i + n_len) == needle {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn lsp_parse_int_at(s: str, start_pos: i64) -> i64 {
+    let n = __engine("str_len", s);
+    var i = start_pos;
+    while i < n {
+        let b = __engine("str_byte_at", s, i);
+        if b == 32 || b == 9 || b == 58 {
+            i = i + 1;
+        } else {
+            break;
+        }
+    }
+    var val = 0;
+    var found = false;
+    while i < n {
+        let b = __engine("str_byte_at", s, i);
+        if b >= 48 && b <= 57 {
+            val = val * 10 + (b - 48);
+            found = true;
+            i = i + 1;
+        } else {
+            break;
+        }
+    }
+    if !found {
+        return -1;
+    }
+    return val;
+}
+
+fn lsp_extract_json_str_field(json_str: str, key: str) -> str {
+    let pat = "\"" + key + "\":\"";
+    let idx = lsp_find_substr(json_str, pat, 0);
+    if idx < 0 {
+        return "";
+    }
+    let n = __engine("str_len", json_str);
+    var i = idx + __engine("str_len", pat);
+    var out = "";
+    while i < n {
+        let b = __engine("str_byte_at", json_str, i);
+        if b == 92 && i + 1 < n {
+            let nb = __engine("str_byte_at", json_str, i + 1);
+            if nb == 110 {
+                out = out + "\n";
+            } else if nb == 114 {
+                out = out + "\r";
+            } else if nb == 116 {
+                out = out + "\t";
+            } else if nb == 34 {
+                out = out + "\"";
+            } else if nb == 92 {
+                out = out + "\\";
+            } else {
+                out = out + __engine("str_slice", json_str, i + 1, i + 2);
+            }
+            i = i + 2;
+        } else if b == 34 {
+            return out;
+        } else {
+            out = out + __engine("str_slice", json_str, i, i + 1);
+            i = i + 1;
+        }
+    }
+    return out;
+}
+
+fn lsp_extract_json_int_field(json_str: str, key: str) -> i64 {
+    let pat = "\"" + key + "\":";
+    let idx = lsp_find_substr(json_str, pat, 0);
+    if idx < 0 {
+        return -1;
+    }
+    return lsp_parse_int_at(json_str, idx + __engine("str_len", pat));
+}
+
+fn lsp_escape_json_str(s: str) -> str {
+    let n = __engine("str_len", s);
+    var out = "";
+    var i = 0;
+    while i < n {
+        let b = __engine("str_byte_at", s, i);
+        if b == 34 {
+            out = out + "\\\"";
+        } else if b == 92 {
+            out = out + "\\\\";
+        } else if b == 10 {
+            out = out + "\\n";
+        } else if b == 13 {
+            out = out + "\\r";
+        } else if b == 9 {
+            out = out + "\\t";
+        } else {
+            out = out + __engine("str_slice", s, i, i + 1);
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+fn lsp_extract_hover_signature(doc: str, offset: i64) -> str {
+    let n = __engine("str_len", doc);
+    if n == 0 {
+        return "";
+    }
+    let cl_off = if offset < 0 { 0 } else { if offset >= n { n - 1 } else { offset } };
+    var line_start = cl_off;
+    while line_start > 0 {
+        let b = __engine("str_byte_at", doc, line_start - 1);
+        if b == 10 || b == 123 || b == 125 || b == 59 {
+            break;
+        }
+        line_start = line_start - 1;
+    }
+    while line_start < n {
+        let b = __engine("str_byte_at", doc, line_start);
+        if b == 32 || b == 9 || b == 13 || b == 10 {
+            line_start = line_start + 1;
+        } else {
+            break;
+        }
+    }
+    var sig_end = line_start;
+    while sig_end < n {
+        let b = __engine("str_byte_at", doc, sig_end);
+        if b == 123 || b == 59 || b == 10 {
+            break;
+        }
+        sig_end = sig_end + 1;
+    }
+    while sig_end > line_start {
+        let b = __engine("str_byte_at", doc, sig_end - 1);
+        if b == 32 || b == 9 || b == 13 {
+            sig_end = sig_end - 1;
+        } else {
+            break;
+        }
+    }
+    return __engine("str_slice", doc, line_start, sig_end);
 }
 
 pub fn encode_lsp_frame(json_payload: str) -> str {
@@ -18,18 +168,66 @@ pub fn encode_lsp_frame(json_payload: str) -> str {
     return "Content-Length: " + byte_len + "\r\n\r\n" + json_payload;
 }
 
-pub fn route_lsp_request(method: str, req_id: i64) -> str {
-    if method == "initialize" {
-        return "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":{\"capabilities\":{\"textDocumentSync\":1,\"hoverProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"definitionProvider\":true,\"referencesProvider\":true,\"renameProvider\":{\"prepareProvider\":true}}}}";
+pub fn lsp_session_new() -> i64 {
+    let sess = __engine("map_new");
+    let _init = __engine("map_set", sess, "last_doc", "");
+    return sess;
+}
+
+pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
+    let total_len = __engine("str_len", framed_stream);
+    var pos = 0;
+    var out_frames = "";
+    while pos < total_len {
+        let cl_idx = lsp_find_substr(framed_stream, "Content-Length:", pos);
+        if cl_idx < 0 {
+            break;
+        }
+        let hdr_end = lsp_find_substr(framed_stream, "\r\n\r\n", cl_idx);
+        if hdr_end < 0 {
+            break;
+        }
+        let body_len = lsp_parse_int_at(framed_stream, cl_idx + 15);
+        let body_start = hdr_end + 4;
+        if body_len < 0 || body_start + body_len > total_len {
+            break;
+        }
+        let msg = __engine("str_slice", framed_stream, body_start, body_start + body_len);
+        pos = body_start + body_len;
+
+        let method = lsp_extract_json_str_field(msg, "method");
+        let req_id = lsp_extract_json_int_field(msg, "id");
+        let uri = lsp_extract_json_str_field(msg, "uri");
+
+        if method == "initialize" {
+            let init_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":{\"capabilities\":{\"textDocumentSync\":1,\"hoverProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"definitionProvider\":true,\"referencesProvider\":true,\"renameProvider\":{\"prepareProvider\":true}}}}";
+            out_frames = out_frames + encode_lsp_frame(init_json);
+        } else if method == "textDocument/didOpen" || method == "textDocument/didChange" {
+            var new_text = lsp_extract_json_str_field(msg, "text");
+            if uri != "" {
+                let _s1 = __engine("map_set", sess, "doc:" + uri, new_text);
+            }
+            let _s2 = __engine("map_set", sess, "last_doc", new_text);
+        } else if method == "textDocument/hover" {
+            let offset = lsp_extract_json_int_field(msg, "offset");
+            var doc = "";
+            if uri != "" {
+                doc = __engine("map_get", sess, "doc:" + uri);
+            }
+            if doc == "" {
+                doc = __engine("map_get", sess, "last_doc");
+            }
+            let sig = lsp_extract_hover_signature(doc, offset);
+            let esc_sig = lsp_escape_json_str(sig);
+            let hover_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":{\"contents\":{\"kind\":\"markdown\",\"value\":\"```pilot\\n" + esc_sig + "\\n```\"}}}";
+            out_frames = out_frames + encode_lsp_frame(hover_json);
+        } else if method == "textDocument/completion" {
+            let comp_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":[{\"label\":\"" + nameof(fn) + "\",\"kind\":14},{\"label\":\"" + nameof(struct) + "\",\"kind\":14},{\"label\":\"" + nameof(interface) + "\",\"kind\":14}]}";
+            out_frames = out_frames + encode_lsp_frame(comp_json);
+        } else if method == "shutdown" {
+            let shut_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":null}";
+            out_frames = out_frames + encode_lsp_frame(shut_json);
+        }
     }
-    if method == "shutdown" {
-        return "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":null}";
-    }
-    if method == "textDocument/hover" {
-        return "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":{\"contents\":{\"kind\":\"markdown\",\"value\":\"```pilot\\n" + nameof(fn) + " resident_pilvm_lsp()\\n```\"}}}";
-    }
-    if method == "textDocument/completion" {
-        return "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":[{\"label\":\"" + nameof(fn) + "\",\"kind\":14},{\"label\":\"" + nameof(struct) + "\",\"kind\":14},{\"label\":\"" + nameof(interface) + "\",\"kind\":14}]}";
-    }
-    return "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":null}";
+    return out_frames;
 }
