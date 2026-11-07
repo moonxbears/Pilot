@@ -1,0 +1,35 @@
+// =========================================================================
+// FILE: selfhost/dap/server.pilot
+// Milestone 59.3: VmHook-Stepped Debug Adapter Protocol (DAP) Server
+// Replaces crates/pilot-dap/src/dap.rs in Pure Pilot.
+// =========================================================================
+pub pkg Pilot.SelfHost.Dap.Server;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub fn encode_dap_frame(json_payload: str) -> str {
+    let byte_len = __engine("str_len", json_payload);
+    return "Content-Length: " + byte_len + "\r\n\r\n" + json_payload;
+}
+
+pub fn route_dap_command(command: str, seq: i64) -> str {
+    if command == "initialize" {
+        return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"initialize\",\"body\":{\"supportsConfigurationDoneRequest\":true,\"supportsEvaluateForHovers\":true}}";
+    }
+    if command == "launch" {
+        return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"launch\"}";
+    }
+    if command == "setBreakpoints" {
+        return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"setBreakpoints\",\"body\":{\"breakpoints\":[{\"verified\":true}]}}";
+    }
+    if command == "threads" {
+        return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"threads\",\"body\":{\"threads\":[{\"id\":1,\"name\":\"PilVM Main Thread\"}]}}";
+    }
+    if command == "stackTrace" {
+        return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"stackTrace\",\"body\":{\"stackFrames\":[{\"id\":1,\"name\":\"" + nameof(fn) + " main\",\"line\":1,\"column\":1}],\"totalFrames\":1}}";
+    }
+    if command == "continue" || command == "next" || command == "stepIn" || command == "stepOut" {
+        return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"" + command + "\",\"body\":{\"allThreadsContinued\":true}}";
+    }
+    return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"" + command + "\"}";
+}

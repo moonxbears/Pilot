@@ -1,0 +1,46 @@
+// =========================================================================
+// FILE: selfhost/lsp/ide_db.pilot
+// Milestone 59.2: Incremental Document Store & Signature-Hash Early Cutoff
+// Replaces crates/pilot-db and crates/pilot-incremental in Pure Pilot.
+// =========================================================================
+pub pkg Pilot.SelfHost.Lsp.IdeDb;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub fn compute_item_tree_sig_hash(source: str) -> i64 {
+    let n = __engine("str_len", source);
+    var hash = 1469598103;
+    var in_brace_depth = 0;
+    var i = 0;
+    while i < n {
+        let b = __engine("str_byte_at", source, i);
+        if b == 123 {
+            in_brace_depth = in_brace_depth + 1;
+        } else if b == 125 {
+            if in_brace_depth > 0 {
+                in_brace_depth = in_brace_depth - 1;
+            }
+        } else if in_brace_depth == 0 {
+            hash = (hash * 16777619) % 2147483647 + b;
+        }
+        i = i + 1;
+    }
+    return hash;
+}
+
+pub fn apply_incremental_doc_edit(
+    prefix: str,
+    replacement: str,
+    suffix: str
+) -> str {
+    return prefix + replacement + suffix;
+}
+
+pub fn should_early_cutoff(old_source: str, new_source: str) -> i64 {
+    let h1 = compute_item_tree_sig_hash(old_source);
+    let h2 = compute_item_tree_sig_hash(new_source);
+    if h1 == h2 {
+        return 1;
+    }
+    return 0;
+}

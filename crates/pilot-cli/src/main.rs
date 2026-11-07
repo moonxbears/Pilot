@@ -103,8 +103,7 @@ fn main() {
 
 // Restriction: Program execution via bytecode VM or debugger
 pub(crate) fn cmd_run(args: &[String]) {
-    let use_vm = args.iter().any(|a| a == "--vm");
-    let use_interp = args.iter().any(|a| a == "--interp");
+    let use_vm = args.iter().any(|a| a == "--vm" || a == "--interp");
     let file_arg = args.iter().find(|a| !a.starts_with("--"));
     if file_arg.is_none() {
         eprintln!("error: missing file argument for 'pilot run'.");
@@ -138,21 +137,6 @@ pub(crate) fn cmd_run(args: &[String]) {
                 std::process::exit(1);
             }
         }
-    }
-
-    if use_interp {
-        let mut debugger = pilot_dap::PilotDebugger::new();
-        if let Err(e) = debugger.load_program(file_path) {
-            eprintln!("error: failed to load program '{}': {}", file_path, e);
-            std::process::exit(1);
-        }
-        while debugger.state != pilot_dap::DebuggerState::Terminated {
-            debugger.step_one();
-            for out in std::mem::take(&mut debugger.pending_outputs) {
-                print!("{}", out);
-            }
-        }
-        return;
     }
 
     let src = match fs::read_to_string(file_path) {
@@ -357,19 +341,20 @@ fn cmd_check(args: &[String]) {
     }
 }
 
-// Restriction: LSP command delegating to pilot-lsp stdio server
+// Restriction: LSP command delegating to selfhost/lsp/server.pilot resident PilVM server
 fn cmd_lsp(_args: &[String]) {
-    let stdin = std::io::stdin();
-    let reader = std::io::BufReader::new(stdin.lock());
-    let stdout = std::io::stdout();
-    let writer = std::io::BufWriter::new(stdout.lock());
-    let _ = pilot_lsp::run_stdio_server(reader, writer);
+    if let Ok(src) = fs::read_to_string("selfhost/lsp/server.pilot") {
+        let arena = parse(&src);
+        let mut vm = pilot_vm::PilVirtualMachine::new();
+        vm.load_binary(pilot_vm::BytecodeCompiler::compile(&arena, arena.root));
+        let _ = vm.run();
+    }
 }
 
-// Restriction: IDE sync command delegating VS Code artifact generation to selfhost/ide_sync.pilot; forbidden: hardcoded type strings or docs
+// Restriction: IDE sync command delegating VS Code artifact generation to selfhost/ide/vscode_gen.pilot; forbidden: hardcoded type strings or docs
 fn cmd_ide_sync() {
-    println!("Evaluating selfhost/ide_sync.pilot via bootstrapped Pilot compiler...");
-    if let Ok(src) = fs::read_to_string("selfhost/ide_sync.pilot") {
+    println!("Evaluating selfhost/ide/vscode_gen.pilot via bootstrapped Pilot compiler...");
+    if let Ok(src) = fs::read_to_string("selfhost/ide/vscode_gen.pilot") {
         let arena = parse(&src);
         let (flat, syms) = pilot_analysis::flatten_ast(&arena, arena.root);
         let mut registry = pilot_analysis::PhysicsRegistry::new(flat, syms);

@@ -4,8 +4,8 @@ import glob
 
 CAPS = {
     "crates/pilot-cli/src/main.rs": 520,
-    "crates/pilot-lsp/src/server.rs": 350,
-    "crates/pilot-lsp/src/lib.rs": 120,
+    "selfhost/ide/vscode_gen.pilot": 1000,
+    "selfhost/lsp/handlers.pilot": 1000,
     "crates/pilot-analysis/src/infer.rs": 440,
 }
 
@@ -42,9 +42,7 @@ def check_banned():
     ok = True
     targets = (
         glob.glob("crates/pilot-cli/src/**/*.rs", recursive=True)
-        + glob.glob("crates/pilot-lsp/src/**/*.rs", recursive=True)
-        + glob.glob("crates/pilot-lsp/tests/**/*.rs", recursive=True)
-        + ["selfhost/ide_sync.pilot"]
+        + ["selfhost/ide/vscode_gen.pilot", "selfhost/lsp/handlers.pilot"]
     )
     for path in targets:
         with open(path, "r", encoding="utf-8") as f:

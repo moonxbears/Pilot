@@ -1,0 +1,16 @@
+// =========================================================================
+// FILE: selfhost/dap/repl_eval.pilot
+// Milestone 59.3: On-the-Fly Debug Console REPL Expression Evaluator
+// Compiles & evaluates watch expressions against active PilVM registers.
+// =========================================================================
+pub pkg Pilot.SelfHost.Dap.ReplEval;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub fn wrap_repl_watch_expr(expr_src: str) -> str {
+    return nameof(fn) + " __dap_repl_eval() { " + nameof(return) + " " + expr_src + "; }";
+}
+
+pub fn format_dap_evaluate_response(seq: i64, result_repr: str) -> str {
+    return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"evaluate\",\"body\":{\"result\":\"" + result_repr + "\",\"variablesReference\":0}}";
+}

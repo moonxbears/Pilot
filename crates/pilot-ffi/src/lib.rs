@@ -90,32 +90,6 @@ pub unsafe extern "C" fn pilot_free_string(ptr: *mut u8, len: usize) {
     if !ptr.is_null() && len > 0 { drop(Box::from_raw(core::slice::from_raw_parts_mut(ptr, len) as *mut [u8])); }
 }
 
-#[no_mangle] pub unsafe extern "C" fn pilot_db_new() -> *mut pilot_db::Database { Box::into_raw(Box::new(pilot_db::Database::new())) }
-#[no_mangle] pub unsafe extern "C" fn pilot_db_free(db: *mut pilot_db::Database) { if !db.is_null() { drop(Box::from_raw(db)); } }
-#[no_mangle]
-pub unsafe extern "C" fn pilot_db_set_source(db: *mut pilot_db::Database, file_id: u32, src_ptr: *const u8, src_len: usize) {
-    if !db.is_null() { (*db).set_source(pilot_db::FileId(file_id), str_from_raw(src_ptr, src_len)); }
-}
-#[no_mangle]
-pub unsafe extern "C" fn pilot_db_apply_edit(db: *mut pilot_db::Database, file_id: u32, start: u32, end: u32, rep_ptr: *const u8, rep_len: usize) {
-    if !db.is_null() { (*db).apply_edit(pilot_db::FileId(file_id), &pilot_incremental::TextEdit::new(start, end, str_from_raw(rep_ptr, rep_len))); }
-}
-#[no_mangle] pub unsafe extern "C" fn pilot_db_early_cutoff_count(db: *const pilot_db::Database) -> usize { if db.is_null() { 0 } else { (*db).early_cutoff_count } }
-#[no_mangle] pub unsafe extern "C" fn pilot_db_signature_hash(db: *const pilot_db::Database, file_id: u32) -> u64 {
-    if db.is_null() { 0 } else { (*db).module_item_tree(pilot_db::FileId(file_id)).map(|t| t.signature_hash).unwrap_or(0) }
-}
-
-#[no_mangle] pub unsafe extern "C" fn pilot_lsp_new() -> *mut pilot_lsp::LspServer { Box::into_raw(Box::new(pilot_lsp::LspServer::new())) }
-#[no_mangle] pub unsafe extern "C" fn pilot_lsp_free(s: *mut pilot_lsp::LspServer) { if !s.is_null() { drop(Box::from_raw(s)); } }
-#[no_mangle]
-pub unsafe extern "C" fn pilot_lsp_handle_message(s: *mut pilot_lsp::LspServer, msg_ptr: *const u8, msg_len: usize, out_len: *mut usize) -> *mut u8 {
-    if s.is_null() { if !out_len.is_null() { *out_len = 0; } return core::ptr::null_mut(); }
-    match (*s).handle_message(str_from_raw(msg_ptr, msg_len)) {
-        Some(resp) => into_raw_str(resp, out_len),
-        None => { if !out_len.is_null() { *out_len = 0; } core::ptr::null_mut() }
-    }
-}
-
 #[no_mangle]
 pub unsafe extern "C" fn pilot_analysis_run(h: *const PilotFfiArenaHandle) -> *mut PilotFfiAnalysisHandle {
     if h.is_null() { return core::ptr::null_mut(); }

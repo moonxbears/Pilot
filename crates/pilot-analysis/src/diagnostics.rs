@@ -1,6 +1,5 @@
 //! Name-blind diagnostic container and LSP severity codes.
 
-use pilot_lsp_macros::IntoLspDiagnostic;
 use pilot_span::ByteSpan;
 
 pub type Diagnostic = AnalysisDiagnostic;
@@ -15,7 +14,7 @@ impl DiagnosticSeverity {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, IntoLspDiagnostic)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AnalysisDiagnostic {
     pub code: String, pub message: String, pub span: ByteSpan, pub severity: DiagnosticSeverity,
 }

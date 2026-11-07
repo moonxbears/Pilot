@@ -8,6 +8,4 @@ license.workspace = true
 pilot-lexer = { path = "../pilot-lexer" }
 pilot-parser = { path = "../pilot-parser" }
 pilot-ast = { path = "../pilot-ast" }
-pilot-incremental = { path = "../pilot-incremental" }
-pilot-db = { path = "../pilot-db" }
 pilot-rt = { path = "../pilot-rt" }

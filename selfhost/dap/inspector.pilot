@@ -1,0 +1,17 @@
+// =========================================================================
+// FILE: selfhost/dap/inspector.pilot
+// Milestone 59.3: Name-Blind Register & PhysicsRegistry Variable Inspector
+// Reads register slots and layout field offsets without hardcoded type names.
+// =========================================================================
+pub pkg Pilot.SelfHost.Dap.Inspector;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub fn format_register_variable_json(var_name: str, reg_slot: i64, val_str: str, layout_id: i64) -> str {
+    let byte_size = if layout_id >= 0 { __engine("layout_metrics", layout_id) } else { 8 };
+    return "{\"name\":\"" + var_name + "\",\"value\":\"" + val_str + "\",\"register\":\"r" + reg_slot + "\",\"byteSize\":" + byte_size + "}";
+}
+
+pub fn inspect_struct_field_offset(layout_id: i64, field_idx: i64) -> i64 {
+    return __engine("layout_field_offset", layout_id, field_idx);
+}

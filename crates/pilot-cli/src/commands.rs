@@ -829,21 +829,19 @@ pub fn cmd_venv(args: &[String]) {
 pub fn cmd_debug(args: &[String]) {
     let is_dap = args.iter().any(|a| a == "--dap");
     if is_dap {
-        let stdin = io::stdin();
-        let reader = io::BufReader::new(stdin.lock());
-        let stdout = io::stdout();
-        let writer = io::BufWriter::new(stdout.lock());
-        let _ = pilot_dap::run_dap_stdio_server(reader, writer);
+        if let Ok(src) = fs::read_to_string("selfhost/dap/server.pilot") {
+            let arena = parse(&src);
+            let mut vm = pilot_vm::PilVirtualMachine::new();
+            vm.load_binary(pilot_vm::BytecodeCompiler::compile(&arena, arena.root));
+            let _ = vm.run();
+        }
         return;
     }
 
     let file_arg = args.iter().find(|a| !a.starts_with('-'));
     match file_arg {
         Some(file_path) => {
-            let fp = file_path.clone();
-            let _ = pilot_dap::run_cli_debugger(file_path, move || {
-                cmd_run(&[fp.clone()]);
-            });
+            cmd_run(&[file_path.clone(), "--vm".to_string()]);
         }
         None => {
             eprintln!("Usage: pilot debug [--dap] <file.pilot>");

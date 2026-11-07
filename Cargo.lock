@@ -10,7 +10,6 @@ dependencies = [
  "pilot-ast",
  "pilot-intern",
  "pilot-lexer",
- "pilot-lsp-macros",
  "pilot-parser",
  "pilot-rt",
  "pilot-span",
@@ -35,8 +34,6 @@ name = "pilot-bench"
 version = "1.1.51"
 dependencies = [
  "pilot-ast",
- "pilot-db",
- "pilot-incremental",
  "pilot-lexer",
  "pilot-parser",
  "pilot-rt",
@@ -50,10 +47,8 @@ dependencies = [
  "pilot-ast",
  "pilot-bench",
  "pilot-codegen",
- "pilot-dap",
  "pilot-intern",
  "pilot-lexer",
- "pilot-lsp",
  "pilot-parser",
  "pilot-perf",
  "pilot-pkg",
@@ -75,33 +70,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pilot-dap"
-version = "1.1.51"
-dependencies = [
- "pilot-analysis",
- "pilot-ast",
- "pilot-intern",
- "pilot-parser",
- "pilot-rt",
- "pilot-span",
- "pilot-vm",
-]
-
-[[package]]
-name = "pilot-db"
-version = "1.1.51"
-dependencies = [
- "pilot-analysis",
- "pilot-ast",
- "pilot-incremental",
- "pilot-intern",
- "pilot-lexer",
- "pilot-lsp-macros",
- "pilot-parser",
- "pilot-span",
-]
-
-[[package]]
 name = "pilot-ffi"
 version = "1.1.51"
 dependencies = [
@@ -109,23 +77,12 @@ dependencies = [
  "pilot-arena",
  "pilot-ast",
  "pilot-codegen",
- "pilot-db",
- "pilot-incremental",
  "pilot-intern",
  "pilot-lexer",
- "pilot-lsp",
  "pilot-parser",
  "pilot-rt",
  "pilot-span",
  "pilot-vm",
-]
-
-[[package]]
-name = "pilot-incremental"
-version = "1.1.51"
-dependencies = [
- "pilot-lexer",
- "pilot-span",
 ]
 
 [[package]]
@@ -142,27 +99,6 @@ dependencies = [
  "pilot-intern",
  "pilot-span",
 ]
-
-[[package]]
-name = "pilot-lsp"
-version = "1.1.51"
-dependencies = [
- "pilot-analysis",
- "pilot-ast",
- "pilot-db",
- "pilot-incremental",
- "pilot-intern",
- "pilot-lexer",
- "pilot-lsp-macros",
- "pilot-parser",
- "pilot-rt",
- "pilot-span",
- "pilot-vm",
-]
-
-[[package]]
-name = "pilot-lsp-macros"
-version = "1.1.51"
 
 [[package]]
 name = "pilot-parser"

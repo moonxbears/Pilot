@@ -1,0 +1,994 @@
+// =========================================================================
+// FILE: selfhost/lsp/handlers.pilot
+// Milestone 59.1: Pilot-Native LSP Reflection, Hover, Completion,
+// Definition, References & Rename Handlers.
+// =========================================================================
+pub pkg Pilot.SelfHost.Lsp.Handlers;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Meta.*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+let Cfg = {
+    ast = {
+        ast_attr_arg: "ast_attr_arg", ast_attr_count: "ast_attr_count",
+        ast_child_at: "ast_child_at", ast_child_count: "ast_child_count",
+        ast_emit_diag: "ast_emit_diag", ast_get_bound_layout: "ast_get_bound_layout",
+        ast_get_bound_target: "ast_get_bound_target", ast_node_count: "ast_node_count",
+        ast_node_kind: "ast_node_kind", ast_node_sym: "ast_node_sym",
+        ast_span_end: "ast_span_end", ast_span_start: "ast_span_start",
+        layout_metrics: "layout_metrics", lsp_query_method: "lsp_query_method",
+        lsp_query_offset: "lsp_query_offset", lsp_set_result: "lsp_set_result",
+        mount_unit: "mount_unit", source_slice: "source_slice", sym_str: "sym_str",
+    }
+};
+
+pub fn reflect_keyword_doc(target_word: str) -> str {
+    if target_word == "" {
+        return "";
+    }
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var i = 0;
+    while i < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, i);
+        if k == 1 {
+            let ac = __engine(Cfg.ast.ast_attr_count, i);
+            if ac == 2 || ac == 3 {
+                let sym = __engine(Cfg.ast.ast_node_sym, i);
+                let nm = __engine(Cfg.ast.sym_str, sym);
+                if nm == target_word {
+                    let doc_sym = __engine(Cfg.ast.ast_attr_arg, i, 1);
+                    return __engine(Cfg.ast.sym_str, doc_sym);
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return "";
+}
+
+pub fn reflect_keyword_badge(target_word: str) -> str {
+    if target_word == "" {
+        return "Core";
+    }
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var i = 0;
+    var target_cat_id = -1;
+    while i < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, i);
+        if k == 1 {
+            let ac = __engine(Cfg.ast.ast_attr_count, i);
+            if ac == 2 || ac == 3 {
+                let sym = __engine(Cfg.ast.ast_node_sym, i);
+                let nm = __engine(Cfg.ast.sym_str, sym);
+                if nm == target_word {
+                    target_cat_id = __engine(Cfg.ast.ast_attr_arg, i, 0);
+                    i = node_count;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    if target_cat_id == -1 {
+        return "Core";
+    }
+    var j = 0;
+    while j < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, j);
+        if k == 1 {
+            let ac = __engine(Cfg.ast.ast_attr_count, j);
+            if ac == 4 {
+                let cid = __engine(Cfg.ast.ast_attr_arg, j, 0);
+                if cid == target_cat_id {
+                    let badge_sym = __engine(Cfg.ast.ast_attr_arg, j, 2);
+                    return __engine(Cfg.ast.sym_str, badge_sym);
+                }
+            }
+        }
+        j = j + 1;
+    }
+    return "Core";
+}
+
+pub fn reflect_related_keywords(kw: str) -> str[] {
+    if kw == "" {
+        return [];
+    }
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var i = 0;
+    var target_cat = -1;
+    while i < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, i);
+        if k == 1 {
+            let ac = __engine(Cfg.ast.ast_attr_count, i);
+            if ac == 2 || ac == 3 {
+                let sym = __engine(Cfg.ast.ast_node_sym, i);
+                let nm = __engine(Cfg.ast.sym_str, sym);
+                if nm == kw {
+                    target_cat = __engine(Cfg.ast.ast_attr_arg, i, 0);
+                    i = node_count;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    if target_cat == -1 {
+        return [];
+    }
+    var related: str[] = [];
+    var rel_count = 0;
+    var j = 0;
+    while j < node_count && rel_count < 5 {
+        let k = __engine(Cfg.ast.ast_node_kind, j);
+        if k == 1 {
+            let ac = __engine(Cfg.ast.ast_attr_count, j);
+            if ac == 2 || ac == 3 {
+                let cid = __engine(Cfg.ast.ast_attr_arg, j, 0);
+                if cid == target_cat {
+                    let sym = __engine(Cfg.ast.ast_node_sym, j);
+                    let nm = __engine(Cfg.ast.sym_str, sym);
+                    if nm != kw {
+                        related = related + [nm];
+                        rel_count = rel_count + 1;
+                    }
+                }
+            }
+        }
+        j = j + 1;
+    }
+    return related;
+}
+
+pub fn get_related_keywords(kw: str) -> str[] {
+    return reflect_related_keywords(kw);
+}
+
+pub pure fn format_keyword_hover_markdown(ident: str, domain: str, summary: str) -> str {
+    var md = "**Pilot Keyword**: `" + ident + "` (" + domain + ")\n\n" + summary;
+    let related = get_related_keywords(ident);
+    var rel_str = "";
+    var idx = 0;
+    for r in related {
+        if idx > 0 {
+            rel_str = rel_str + " • ";
+        }
+        rel_str = rel_str + "[`" + r + "`](#)";
+        idx = idx + 1;
+    }
+    if rel_str != "" {
+        md = md + "\n\n---\n**Related Keywords**: " + rel_str;
+    }
+    return md;
+}
+
+pub fn reflect_node_doc(node_id: i64) -> str {
+    let span_start = __engine(Cfg.ast.ast_span_start, node_id);
+    let win_start = if span_start > 400 { span_start - 400 } else { 0 };
+    if span_start <= win_start {
+        return "";
+    }
+
+    var lead = span_start;
+    var scan_lead = true;
+    while scan_lead && lead > win_start {
+        let ch = __engine(Cfg.ast.source_slice, lead - 1, lead);
+        if ch == "\n" {
+            scan_lead = false;
+        } else if ch == ";" || ch == "}" || ch == "{" {
+            return "";
+        } else {
+            lead = lead - 1;
+        }
+    }
+
+    var p = lead - 1;
+    var scan_doc = true;
+    while scan_doc && p > win_start {
+        let ch = __engine(Cfg.ast.source_slice, p - 1, p);
+        if ch == "\n" || ch == " " || ch == "\t" || ch == "\r" {
+            p = p - 1;
+        } else {
+            scan_doc = false;
+        }
+    }
+
+    if p > win_start + 3 {
+        var line_start = p;
+        while line_start > win_start && __engine(Cfg.ast.source_slice, line_start - 1, line_start) != "\n" {
+            line_start = line_start - 1;
+        }
+        var ls = line_start;
+        var scan_ws = true;
+        while scan_ws && ls < p {
+            let ch = __engine(Cfg.ast.source_slice, ls, ls + 1);
+            if ch == " " || ch == "\t" {
+                ls = ls + 1;
+            } else {
+                scan_ws = false;
+            }
+        }
+        if __engine(Cfg.ast.source_slice, ls, ls + 3) == "///" {
+            var ds = ls + 3;
+            if __engine(Cfg.ast.source_slice, ds, ds + 1) == " " {
+                ds = ds + 1;
+            }
+            return __engine(Cfg.ast.source_slice, ds, p);
+        }
+    }
+    return "";
+}
+
+pub fn handle_lsp_hover(offset: i64) {
+    let cur_ch = __engine(Cfg.ast.source_slice, offset, offset + 1);
+    let is_ident = (cur_ch >= "a" && cur_ch <= "z") || (cur_ch >= "A" && cur_ch <= "Z") || (cur_ch >= "0" && cur_ch <= "9") || cur_ch == "_";
+    if !is_ident {
+        __engine(Cfg.ast.lsp_set_result, "");
+        return;
+    }
+
+    var w_start = offset;
+    var scan_wstart = true;
+    while scan_wstart && w_start > 0 {
+        let ch = __engine(Cfg.ast.source_slice, w_start - 1, w_start);
+        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+            w_start = w_start - 1;
+        } else {
+            scan_wstart = false;
+        }
+    }
+    var w_end = offset;
+    var scan_wend = true;
+    while scan_wend && w_end < offset + 40 {
+        let ch = __engine(Cfg.ast.source_slice, w_end, w_end + 1);
+        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+            w_end = w_end + 1;
+        } else {
+            scan_wend = false;
+        }
+    }
+    let word = __engine(Cfg.ast.source_slice, w_start, w_end);
+    if word == "" {
+        __engine(Cfg.ast.lsp_set_result, "");
+        return;
+    }
+
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var best_nid = -1;
+    var best_len = 999999999;
+    var i = 0;
+    while i < node_count {
+        let s = __engine(Cfg.ast.ast_span_start, i);
+        let e = __engine(Cfg.ast.ast_span_end, i);
+        let k = __engine(Cfg.ast.ast_node_kind, i);
+        let sym = __engine(Cfg.ast.ast_node_sym, i);
+        let sname = __engine(Cfg.ast.sym_str, sym);
+        var eff_s = s;
+        var eff_e = e;
+        if k == 17 {
+            var p = e;
+            while p < e + 60 && __engine(Cfg.ast.source_slice, p, p + 1) != "." {
+                p = p + 1;
+            }
+            if __engine(Cfg.ast.source_slice, p, p + 1) == "." {
+                p = p + 1;
+                while p < e + 60 && (__engine(Cfg.ast.source_slice, p, p + 1) == " " || __engine(Cfg.ast.source_slice, p, p + 1) == "\t") {
+                    p = p + 1;
+                }
+                eff_s = p;
+                var m_end = p;
+                var scan_m = true;
+                while scan_m && m_end < p + 60 {
+                    let ch = __engine(Cfg.ast.source_slice, m_end, m_end + 1);
+                    if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+                        m_end = m_end + 1;
+                    } else {
+                        scan_m = false;
+                    }
+                }
+                eff_e = m_end;
+            }
+        }
+        if eff_s <= offset && offset <= eff_e {
+            let l = eff_e - eff_s;
+            if sname == word {
+                if l < best_len {
+                    best_len = l;
+                    best_nid = i;
+                }
+            }
+        }
+        i = i + 1;
+    }
+
+    if best_nid == -1 {
+        __engine(Cfg.ast.mount_unit, "stdlib/core/keywords.pilot");
+        __engine(Cfg.ast.mount_unit, "../../stdlib/core/keywords.pilot");
+        let doc = reflect_keyword_doc(word);
+        if doc != "" {
+            let badge = reflect_keyword_badge(word);
+            let md = format_keyword_hover_markdown(word, badge, doc);
+            __engine(Cfg.ast.lsp_set_result, md);
+            return;
+        }
+        __engine(Cfg.ast.lsp_set_result, "");
+        return;
+    }
+
+    var target_id = __engine(Cfg.ast.ast_get_bound_target, best_nid);
+    if target_id == 4294967295 || target_id < 0 {
+        target_id = best_nid;
+    }
+    let b_kind = __engine(Cfg.ast.ast_node_kind, best_nid);
+    var t_kind = __engine(Cfg.ast.ast_node_kind, target_id);
+
+    if b_kind == 17 || (target_id == best_nid && (b_kind == 14 || b_kind == 16)) {
+        var found_target = -1;
+        var j = 0;
+        while j < node_count && found_target == -1 {
+            let jk = __engine(Cfg.ast.ast_node_kind, j);
+            let js = __engine(Cfg.ast.ast_node_sym, j);
+            let jname = __engine(Cfg.ast.sym_str, js);
+            if jname == word {
+                if b_kind == 17 {
+                    if jk == 21 || jk == 3 {
+                        found_target = j;
+                    }
+                } else {
+                    if jk == 4 || jk == 21 || jk == 3 || jk == 1 || jk == 2 {
+                        found_target = j;
+                    }
+                }
+            }
+            j = j + 1;
+        }
+        if found_target != -1 {
+            target_id = found_target;
+            t_kind = __engine(Cfg.ast.ast_node_kind, target_id);
+        }
+    }
+
+    if t_kind == 3 || b_kind == 3 {
+        let fn_id = if t_kind == 3 { target_id } else { best_nid };
+        let fn_start = __engine(Cfg.ast.ast_span_start, fn_id);
+        var sig_start = fn_start;
+        var scan_back = true;
+        while scan_back && sig_start > 0 {
+            let ch = __engine(Cfg.ast.source_slice, sig_start - 1, sig_start);
+            if ch == "\n" || ch == ";" || ch == "{" || ch == "}" {
+                scan_back = false;
+            } else {
+                sig_start = sig_start - 1;
+            }
+        }
+        var trim_lead = true;
+        while trim_lead && sig_start < fn_start {
+            let ch = __engine(Cfg.ast.source_slice, sig_start, sig_start + 1);
+            if ch == " " || ch == "\t" || ch == "\r" {
+                sig_start = sig_start + 1;
+            } else {
+                trim_lead = false;
+            }
+        }
+        var sig_end = fn_start;
+        var scan_sig = true;
+        while scan_sig && sig_end < fn_start + 200 {
+            let ch = __engine(Cfg.ast.source_slice, sig_end, sig_end + 1);
+            if ch == "{" || ch == "=" || ch == ";" || ch == "\n" {
+                scan_sig = false;
+            } else {
+                sig_end = sig_end + 1;
+            }
+        }
+        var trim_end = true;
+        while trim_end && sig_end > fn_start {
+            let ch = __engine(Cfg.ast.source_slice, sig_end - 1, sig_end);
+            if ch == " " || ch == "\t" || ch == "\r" {
+                sig_end = sig_end - 1;
+            } else {
+                trim_end = false;
+            }
+        }
+        var sig_str = __engine(Cfg.ast.source_slice, sig_start, sig_end);
+        var md = "```pilot\n" + sig_str + "\n```";
+        let doc = reflect_node_doc(fn_id);
+        if doc != "" {
+            md = md + "\n\n---\n" + doc;
+        }
+        __engine(Cfg.ast.lsp_set_result, md);
+        return;
+    }
+
+    if t_kind == 1 || b_kind == 1 {
+        let s_id = if t_kind == 1 { target_id } else { best_nid };
+        let sym = __engine(Cfg.ast.ast_node_sym, s_id);
+        var name = __engine(Cfg.ast.sym_str, sym);
+        if name == "" {
+            name = word;
+        }
+        var lid = __engine(Cfg.ast.ast_get_bound_layout, s_id);
+        let byte_size = if lid != 4294967295 && lid >= 0 {
+            __engine(Cfg.ast.layout_metrics, lid)
+        } else {
+            0
+        };
+        let doc = reflect_node_doc(s_id);
+        var md = "```pilot\n" + nameof(struct) + " " + name + "\n```\n*Layout Size*: `" + byte_size + " bytes`";
+        let c_count = __engine(Cfg.ast.ast_child_count, s_id);
+        if c_count > 0 {
+            var ci = 0;
+            var has_f = false;
+            while ci < c_count {
+                let c_nid = __engine(Cfg.ast.ast_child_at, s_id, ci);
+                let c_kind = __engine(Cfg.ast.ast_node_kind, c_nid);
+                if c_kind == 21 {
+                    if !has_f {
+                        md = md + "\n\n**Fields:**";
+                        has_f = true;
+                    }
+                    let c_sym = __engine(Cfg.ast.ast_node_sym, c_nid);
+                    let c_name = __engine(Cfg.ast.sym_str, c_sym);
+                    if c_name != "" {
+                        md = md + "\n- `" + c_name + "`";
+                    }
+                }
+                ci = ci + 1;
+            }
+        }
+        if doc != "" {
+            md = md + "\n\n---\n" + doc;
+        }
+        __engine(Cfg.ast.lsp_set_result, md);
+        return;
+    }
+
+    if b_kind == 21 || t_kind == 21 {
+        let f_id = if b_kind == 21 { best_nid } else { target_id };
+        let f_start = __engine(Cfg.ast.ast_span_start, f_id);
+        var f_end = __engine(Cfg.ast.ast_span_end, f_id);
+        var trim_f = true;
+        while trim_f && f_end > f_start {
+            let ch = __engine(Cfg.ast.source_slice, f_end - 1, f_end);
+            if ch == ";" || ch == " " || ch == "\t" || ch == "\r" || ch == "\n" {
+                f_end = f_end - 1;
+            } else {
+                trim_f = false;
+            }
+        }
+        var f_slice = __engine(Cfg.ast.source_slice, f_start, f_end);
+        var lid = __engine(Cfg.ast.ast_get_bound_layout, f_id);
+        let byte_size = if lid != 4294967295 && lid >= 0 {
+            __engine(Cfg.ast.layout_metrics, lid)
+        } else {
+            0
+        };
+        var md = "```pilot\n" + f_slice + "\n```";
+        if byte_size > 0 {
+            md = md + "\n*Layout Size*: `" + byte_size + " bytes`";
+        }
+        let doc = reflect_node_doc(f_id);
+        if doc != "" {
+            md = md + "\n\n---\n" + doc;
+        }
+        __engine(Cfg.ast.lsp_set_result, md);
+        return;
+    }
+
+    if b_kind == 4 || t_kind == 4 {
+        let v_id = if b_kind == 4 { best_nid } else { target_id };
+        let sym = __engine(Cfg.ast.ast_node_sym, v_id);
+        var vname = __engine(Cfg.ast.sym_str, sym);
+        if vname == "" {
+            vname = word;
+        }
+        var lid = __engine(Cfg.ast.ast_get_bound_layout, v_id);
+        let byte_size = if lid != 4294967295 && lid >= 0 {
+            __engine(Cfg.ast.layout_metrics, lid)
+        } else {
+            0
+        };
+        var md = "```pilot\n" + nameof(let) + " " + vname;
+        if target_id != v_id {
+            let tsym = __engine(Cfg.ast.ast_node_sym, target_id);
+            let tname = __engine(Cfg.ast.sym_str, tsym);
+            if tname != "" {
+                md = md + ": " + tname;
+            }
+        }
+        md = md + "\n```";
+        if byte_size > 0 {
+            md = md + "\n*Layout Size*: `" + byte_size + " bytes`";
+        }
+        __engine(Cfg.ast.lsp_set_result, md);
+        return;
+    }
+
+    var name = word;
+    var lid = __engine(Cfg.ast.ast_get_bound_layout, best_nid);
+    if lid == 4294967295 || lid < 0 {
+        lid = __engine(Cfg.ast.ast_get_bound_layout, target_id);
+    }
+    let byte_size = if lid != 4294967295 && lid >= 0 {
+        __engine(Cfg.ast.layout_metrics, lid)
+    } else {
+        0
+    };
+    var md = "```pilot\n" + name + "\n```";
+    if byte_size > 0 {
+        md = md + "\n*Layout Size*: `" + byte_size + " bytes`";
+    }
+    let doc = reflect_node_doc(target_id);
+    if doc != "" {
+        md = md + "\n\n---\n" + doc;
+    }
+    __engine(Cfg.ast.lsp_set_result, md);
+}
+
+pub fn handle_lsp_completion(offset: i64) {
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var p = offset - 1;
+    var find_dot = true;
+    while find_dot && p >= 0 {
+        let ch = __engine(Cfg.ast.source_slice, p, p + 1);
+        if ch != " " && ch != "\t" && ch != "\r" && ch != "\n" {
+            find_dot = false;
+        } else {
+            p = p - 1;
+        }
+    }
+
+    if p >= 0 && __engine(Cfg.ast.source_slice, p, p + 1) == "." {
+        var r_end = p;
+        var skip_rdot = true;
+        while skip_rdot && r_end > 0 {
+            let ch = __engine(Cfg.ast.source_slice, r_end - 1, r_end);
+            if ch != " " && ch != "\t" {
+                skip_rdot = false;
+            } else {
+                r_end = r_end - 1;
+            }
+        }
+        var r_start = r_end;
+        var scan_rstart = true;
+        while scan_rstart && r_start > 0 {
+            let ch = __engine(Cfg.ast.source_slice, r_start - 1, r_start);
+            if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+                r_start = r_start - 1;
+            } else {
+                scan_rstart = false;
+            }
+        }
+        let recv_name = __engine(Cfg.ast.source_slice, r_start, r_end);
+        __engine(Cfg.ast.ast_emit_diag, 0, 1, "recv=" + recv_name);
+
+        var s_id = -1;
+        if recv_name == "self" {
+            var j = 0;
+            while j < node_count {
+                let k = __engine(Cfg.ast.ast_node_kind, j);
+                if k == 1 {
+                    let s = __engine(Cfg.ast.ast_span_start, j);
+                    let e = __engine(Cfg.ast.ast_span_end, j);
+                    if s <= offset && offset <= e {
+                        s_id = j;
+                    }
+                }
+                j = j + 1;
+            }
+        } else {
+            var j = 0;
+            while j < node_count {
+                let k = __engine(Cfg.ast.ast_node_kind, j);
+                if k == 4 || k == 21 {
+                    let sym = __engine(Cfg.ast.ast_node_sym, j);
+                    let nm = __engine(Cfg.ast.sym_str, sym);
+                    if nm == recv_name {
+                        let tid = __engine(Cfg.ast.ast_get_bound_target, j);
+                        if tid != 4294967295 && tid >= 0 {
+                            let tk = __engine(Cfg.ast.ast_node_kind, tid);
+                            if tk == 1 {
+                                s_id = tid;
+                            }
+                        }
+                        if s_id == -1 {
+                            let var_lid = __engine(Cfg.ast.ast_get_bound_layout, j);
+                            if var_lid != 4294967295 {
+                                var sj = 0;
+                                while sj < node_count {
+                                    if __engine(Cfg.ast.ast_node_kind, sj) == 1 {
+                                        let s_lid = __engine(Cfg.ast.ast_get_bound_layout, sj);
+                                        if s_lid == var_lid {
+                                            s_id = sj;
+                                        }
+                                    }
+                                    sj = sj + 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                j = j + 1;
+            }
+        }
+
+        if s_id != -1 {
+            let is_inside_struct = (recv_name == "self");
+            let c_count = __engine(Cfg.ast.ast_child_count, s_id);
+            var items_json = "[";
+            var added = 0;
+            var ci = 0;
+            while ci < c_count {
+                let c_nid = __engine(Cfg.ast.ast_child_at, s_id, ci);
+                let c_kind = __engine(Cfg.ast.ast_node_kind, c_nid);
+                let c_sym = __engine(Cfg.ast.ast_node_sym, c_nid);
+                let c_name = __engine(Cfg.ast.sym_str, c_sym);
+                if c_name != "" {
+                    let c_start = __engine(Cfg.ast.ast_span_start, c_nid);
+                    let lead_start = if c_start >= 16 { c_start - 16 } else { 0 };
+                    var p_scan = lead_start;
+                    var is_pub = false;
+                    var is_priv = false;
+                    while p_scan < c_start {
+                        let s4 = __engine(Cfg.ast.source_slice, p_scan, p_scan + 4);
+                        if s4 == "pub " || s4 == "open" {
+                            is_pub = true;
+                        }
+                        let s5 = __engine(Cfg.ast.source_slice, p_scan, p_scan + 5);
+                        if s5 == "priv " {
+                            is_priv = true;
+                        }
+                        let s7 = __engine(Cfg.ast.source_slice, p_scan, p_scan + 7);
+                        if s7 == "export " {
+                            is_pub = true;
+                        }
+                        p_scan = p_scan + 1;
+                    }
+                    let is_hidden = if c_kind == 3 { !is_pub } else { is_priv };
+                    if is_inside_struct || !is_hidden {
+                        if added > 0 {
+                            items_json = items_json + ", ";
+                        }
+                        let k_str = if c_kind == 3 { "2" } else { "5" };
+                        items_json = items_json + '{"label":"' + c_name + '","kind":' + k_str + '}';
+                        added = added + 1;
+                    }
+                }
+                ci = ci + 1;
+            }
+            items_json = items_json + "]";
+            __engine(Cfg.ast.lsp_set_result, items_json);
+            return;
+        }
+    }
+
+    __engine(Cfg.ast.lsp_set_result, "[]");
+}
+
+pub fn handle_lsp_definition(offset: i64) {
+    let cur_ch = __engine(Cfg.ast.source_slice, offset, offset + 1);
+    let is_ident = (cur_ch >= "a" && cur_ch <= "z") || (cur_ch >= "A" && cur_ch <= "Z") || (cur_ch >= "0" && cur_ch <= "9") || cur_ch == "_";
+    if !is_ident {
+        __engine(Cfg.ast.lsp_set_result, "null");
+        return;
+    }
+
+    var w_start = offset;
+    var scan_wstart = true;
+    while scan_wstart && w_start > 0 {
+        let ch = __engine(Cfg.ast.source_slice, w_start - 1, w_start);
+        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+            w_start = w_start - 1;
+        } else {
+            scan_wstart = false;
+        }
+    }
+    var w_end = offset;
+    var scan_wend = true;
+    while scan_wend && w_end < offset + 40 {
+        let ch = __engine(Cfg.ast.source_slice, w_end, w_end + 1);
+        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+            w_end = w_end + 1;
+        } else {
+            scan_wend = false;
+        }
+    }
+    let word = __engine(Cfg.ast.source_slice, w_start, w_end);
+    if word == "" {
+        __engine(Cfg.ast.lsp_set_result, "null");
+        return;
+    }
+
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var best_nid = -1;
+    var best_len = 999999999;
+    var i = 0;
+    while i < node_count {
+        let s = __engine(Cfg.ast.ast_span_start, i);
+        let e = __engine(Cfg.ast.ast_span_end, i);
+        let k = __engine(Cfg.ast.ast_node_kind, i);
+        let sym = __engine(Cfg.ast.ast_node_sym, i);
+        let sname = __engine(Cfg.ast.sym_str, sym);
+        var eff_s = s;
+        var eff_e = e;
+        if k == 17 {
+            var p = e;
+            while p < e + 60 && __engine(Cfg.ast.source_slice, p, p + 1) != "." {
+                p = p + 1;
+            }
+            if __engine(Cfg.ast.source_slice, p, p + 1) == "." {
+                p = p + 1;
+                while p < e + 60 && (__engine(Cfg.ast.source_slice, p, p + 1) == " " || __engine(Cfg.ast.source_slice, p, p + 1) == "\t") {
+                    p = p + 1;
+                }
+                eff_s = p;
+                var m_end = p;
+                var scan_m = true;
+                while scan_m && m_end < p + 60 {
+                    let ch = __engine(Cfg.ast.source_slice, m_end, m_end + 1);
+                    if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+                        m_end = m_end + 1;
+                    } else {
+                        scan_m = false;
+                    }
+                }
+                eff_e = m_end;
+            }
+        }
+        if eff_s <= offset && offset <= eff_e {
+            let l = eff_e - eff_s;
+            if sname == word {
+                if l < best_len {
+                    best_len = l;
+                    best_nid = i;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    if best_nid != -1 {
+        var target_id = __engine(Cfg.ast.ast_get_bound_target, best_nid);
+        if target_id == 4294967295 || target_id < 0 {
+            target_id = best_nid;
+        }
+        let b_kind = __engine(Cfg.ast.ast_node_kind, best_nid);
+        if b_kind == 17 || (target_id == best_nid && (b_kind == 14 || b_kind == 16)) {
+            var found_target = -1;
+            var j = 0;
+            while j < node_count && found_target == -1 {
+                let jk = __engine(Cfg.ast.ast_node_kind, j);
+                let js = __engine(Cfg.ast.ast_node_sym, j);
+                let jname = __engine(Cfg.ast.sym_str, js);
+                if jname == word {
+                    if b_kind == 17 {
+                        if jk == 21 || jk == 3 {
+                            found_target = j;
+                        }
+                    } else {
+                        if jk == 4 || jk == 21 || jk == 3 || jk == 1 || jk == 2 {
+                            found_target = j;
+                        }
+                    }
+                }
+                j = j + 1;
+            }
+            if found_target != -1 {
+                target_id = found_target;
+            }
+        }
+        let s = __engine(Cfg.ast.ast_span_start, target_id);
+        let e = __engine(Cfg.ast.ast_span_end, target_id);
+        let res = "" + s + ":" + e;
+        __engine(Cfg.ast.lsp_set_result, res);
+        return;
+    }
+    __engine(Cfg.ast.lsp_set_result, "null");
+}
+
+pub fn handle_lsp_references(offset: i64) {
+    let cur_ch = __engine(Cfg.ast.source_slice, offset, offset + 1);
+    let is_ident = (cur_ch >= "a" && cur_ch <= "z") || (cur_ch >= "A" && cur_ch <= "Z") || (cur_ch >= "0" && cur_ch <= "9") || cur_ch == "_";
+    if !is_ident {
+        __engine(Cfg.ast.lsp_set_result, "[]");
+        return;
+    }
+
+    var w_start = offset;
+    var scan_wstart = true;
+    while scan_wstart && w_start > 0 {
+        let ch = __engine(Cfg.ast.source_slice, w_start - 1, w_start);
+        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+            w_start = w_start - 1;
+        } else {
+            scan_wstart = false;
+        }
+    }
+    var w_end = offset;
+    var scan_wend = true;
+    while scan_wend && w_end < offset + 40 {
+        let ch = __engine(Cfg.ast.source_slice, w_end, w_end + 1);
+        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+            w_end = w_end + 1;
+        } else {
+            scan_wend = false;
+        }
+    }
+    let word = __engine(Cfg.ast.source_slice, w_start, w_end);
+    if word == "" {
+        __engine(Cfg.ast.lsp_set_result, "[]");
+        return;
+    }
+
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var refs_json = "[";
+    var added = 0;
+    var i = 0;
+    while i < node_count {
+        let sym = __engine(Cfg.ast.ast_node_sym, i);
+        let sname = __engine(Cfg.ast.sym_str, sym);
+        if sname == word {
+            let s = __engine(Cfg.ast.ast_span_start, i);
+            let e = __engine(Cfg.ast.ast_span_end, i);
+            let k = __engine(Cfg.ast.ast_node_kind, i);
+            var eff_s = s;
+            var eff_e = e;
+            if k == 17 {
+                var p = e;
+                while p < e + 60 && __engine(Cfg.ast.source_slice, p, p + 1) != "." {
+                    p = p + 1;
+                }
+                if __engine(Cfg.ast.source_slice, p, p + 1) == "." {
+                    p = p + 1;
+                    while p < e + 60 && (__engine(Cfg.ast.source_slice, p, p + 1) == " " || __engine(Cfg.ast.source_slice, p, p + 1) == "\t") {
+                        p = p + 1;
+                    }
+                    eff_s = p;
+                    var m_end = p;
+                    var scan_m = true;
+                    while scan_m && m_end < p + 60 {
+                        let ch = __engine(Cfg.ast.source_slice, m_end, m_end + 1);
+                        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+                            m_end = m_end + 1;
+                        } else {
+                            scan_m = false;
+                        }
+                    }
+                    eff_e = m_end;
+                }
+            }
+            if added > 0 {
+                refs_json = refs_json + ",";
+            }
+            refs_json = refs_json + '{"start":' + eff_s + ',"end":' + eff_e + '}';
+            added = added + 1;
+        }
+        i = i + 1;
+    }
+    refs_json = refs_json + "]";
+    __engine(Cfg.ast.lsp_set_result, refs_json);
+}
+
+pub fn is_keyword_or_seed(w: str) -> bool {
+    if w == "" {
+        return true;
+    }
+    if w == nameof(__engine) || w == nameof(struct) || w == nameof(interface) || w == nameof(fn) ||
+       w == nameof(let) || w == nameof(ref) || w == nameof(if) || w == nameof(loop) ||
+       w == nameof(return) || w == nameof(yield) || w == nameof(defer) || w == nameof(comptime) ||
+       w == nameof(quote) || w == nameof(asm) {
+        return true;
+    }
+    __engine(Cfg.ast.mount_unit, "stdlib/core/keywords.pilot");
+    __engine(Cfg.ast.mount_unit, "../../stdlib/core/keywords.pilot");
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var i = 0;
+    while i < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, i);
+        if k == 1 {
+            let ac = __engine(Cfg.ast.ast_attr_count, i);
+            if ac == 2 || ac == 3 {
+                let sym = __engine(Cfg.ast.ast_node_sym, i);
+                let nm = __engine(Cfg.ast.sym_str, sym);
+                if nm == w {
+                    return true;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+pub fn handle_lsp_prepare_rename(offset: i64) {
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var best_nid = -1;
+    var best_len = 999999999;
+    var i = 0;
+    while i < node_count {
+        let s = __engine(Cfg.ast.ast_span_start, i);
+        let e = __engine(Cfg.ast.ast_span_end, i);
+        if s <= offset && offset <= e {
+            let l = e - s;
+            if l < best_len {
+                best_len = l;
+                best_nid = i;
+            }
+        }
+        i = i + 1;
+    }
+
+    if best_nid != -1 {
+        let s = __engine(Cfg.ast.ast_span_start, best_nid);
+        let e = __engine(Cfg.ast.ast_span_end, best_nid);
+        let sym = __engine(Cfg.ast.ast_node_sym, best_nid);
+        var word = __engine(Cfg.ast.sym_str, sym);
+        if word == "" {
+            word = __engine(Cfg.ast.source_slice, s, e);
+        }
+        if is_keyword_or_seed(word) {
+            __engine(Cfg.ast.lsp_set_result, "null");
+        } else {
+            __engine(Cfg.ast.lsp_set_result, word);
+        }
+        return;
+    }
+    __engine(Cfg.ast.lsp_set_result, "null");
+}
+
+pub fn handle_lsp_rename(offset: i64, method_str: str) {
+    if method_str == "textDocument/rename:" + nameof(__engine) || method_str == "textDocument/rename:" + nameof(struct) ||
+       method_str == "textDocument/rename:" + nameof(interface) || method_str == "textDocument/rename:" + nameof(fn) ||
+       method_str == "textDocument/rename:" + nameof(let) || method_str == "textDocument/rename:" + nameof(ref) ||
+       method_str == "textDocument/rename:" + nameof(if) || method_str == "textDocument/rename:" + nameof(loop) ||
+       method_str == "textDocument/rename:" + nameof(return) || method_str == "textDocument/rename:" + nameof(yield) ||
+       method_str == "textDocument/rename:" + nameof(defer) || method_str == "textDocument/rename:" + nameof(comptime) ||
+       method_str == "textDocument/rename:" + nameof(quote) || method_str == "textDocument/rename:" + nameof(asm) {
+        __engine(Cfg.ast.lsp_set_result, "null");
+        return;
+    }
+
+    __engine(Cfg.ast.mount_unit, "stdlib/core/keywords.pilot");
+    __engine(Cfg.ast.mount_unit, "../../stdlib/core/keywords.pilot");
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var i = 0;
+    while i < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, i);
+        if k == 1 {
+            let ac = __engine(Cfg.ast.ast_attr_count, i);
+            if ac == 2 || ac == 3 {
+                let sym = __engine(Cfg.ast.ast_node_sym, i);
+                let nm = __engine(Cfg.ast.sym_str, sym);
+                if method_str == "textDocument/rename:" + nm {
+                    __engine(Cfg.ast.lsp_set_result, "null");
+                    return;
+                }
+            }
+        }
+        i = i + 1;
+    }
+
+    handle_lsp_prepare_rename(offset);
+}
+
+let _lsp_method = __engine(Cfg.ast.lsp_query_method);
+let _lsp_offset = __engine(Cfg.ast.lsp_query_offset);
+
+if _lsp_method == "textDocument/hover" {
+    handle_lsp_hover(_lsp_offset);
+}
+if _lsp_method == "textDocument/completion" {
+    handle_lsp_completion(_lsp_offset);
+}
+if _lsp_method == "textDocument/definition" {
+    handle_lsp_definition(_lsp_offset);
+}
+if _lsp_method == "textDocument/prepareRename" {
+    handle_lsp_prepare_rename(_lsp_offset);
+}
+if _lsp_method == "textDocument/references" {
+    handle_lsp_references(_lsp_offset);
+}
+if _lsp_method != "" && _lsp_method != "ide-sync" && _lsp_method != "textDocument/hover" && _lsp_method != "textDocument/completion" && _lsp_method != "textDocument/definition" && _lsp_method != "textDocument/prepareRename" && _lsp_method != "textDocument/references" {
+    handle_lsp_rename(_lsp_offset, _lsp_method);
+}

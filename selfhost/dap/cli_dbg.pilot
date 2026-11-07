@@ -1,0 +1,31 @@
+// =========================================================================
+// FILE: selfhost/dap/cli_dbg.pilot
+// Milestone 59.3: Interactive CLI Debugger Command Parser & Controller
+// Supports break (b), step (s), next (n), continue (c), print (p), and bt.
+// =========================================================================
+pub pkg Pilot.SelfHost.Dap.CliDbg;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// Returns action code: 1=step_in, 2=step_over(next), 3=continue, 4=backtrace, 5=breakpoint, 6=print, 0=quit
+pub fn parse_cli_dbg_command(cmd_line: str) -> i64 {
+    if cmd_line == "s" || cmd_line == "step" {
+        return 1;
+    }
+    if cmd_line == "n" || cmd_line == "next" {
+        return 2;
+    }
+    if cmd_line == "c" || cmd_line == "continue" {
+        return 3;
+    }
+    if cmd_line == "bt" || cmd_line == "backtrace" {
+        return 4;
+    }
+    if cmd_line == "b" || cmd_line == "break" {
+        return 5;
+    }
+    if cmd_line == "p" || cmd_line == "print" {
+        return 6;
+    }
+    return 0;
+}
