@@ -52,6 +52,7 @@ pub pure fn cst_kind_block_comment() -> i64 { return 3; }
 pub pure fn cst_kind_shebang() -> i64 { return 4; }
 pub pure fn cst_kind_whitespace() -> i64 { return 6; }
 pub pure fn cst_kind_ident() -> i64 { return 20; }
+pub pure fn cst_kind_token() -> i64 { return 21; }
 pub pure fn cst_kind_program() -> i64 { return 500; }
 pub pure fn cst_kind_fn_decl() -> i64 { return 501; }
 pub pure fn cst_kind_struct_decl() -> i64 { return 502; }
@@ -69,6 +70,86 @@ pub pure fn is_trivia_cst_kind(kind: i64) -> bool {
 
 pub pure fn is_synthetic_missing_kind(kind: i64) -> bool {
     return kind == 591 || kind == 592 || kind == 593;
+}
+
+// ============================================================================
+// Immutable Heap-Backed GreenNode Handle Arena (`map_new` / `map_set` / `map_get`)
+// ============================================================================
+
+pub fn cst_alloc_node(kind: i64, text: str) -> i64 {
+    let h = __engine("map_new");
+    __engine("map_set", h, "k", kind);
+    __engine("map_set", h, "n", 0);
+    __engine("map_set", h, "t", text);
+    return h;
+}
+
+pub fn cst_append_child(parent: i64, child: i64) -> i64 {
+    if parent < 0 {
+        return parent;
+    }
+    let idx = __engine("map_get", parent, "n");
+    __engine("map_set", parent, "c_" + idx, child);
+    __engine("map_set", parent, "n", idx + 1);
+    return parent;
+}
+
+pub fn cst_append_text_and_child(parent: i64, extra_text: str) -> i64 {
+    if parent < 0 || extra_text.len() == 0 {
+        return parent;
+    }
+    let old_txt = __engine("map_get", parent, "t");
+    __engine("map_set", parent, "t", old_txt + extra_text);
+    let tr_leaf = cst_alloc_node(cst_kind_whitespace(), extra_text);
+    cst_append_child(parent, tr_leaf);
+    return parent;
+}
+
+pub fn cst_node_kind(handle: i64) -> i64 {
+    if handle < 0 {
+        return -1;
+    }
+    return __engine("map_get", handle, "k");
+}
+
+pub fn cst_child_count(handle: i64) -> i64 {
+    if handle < 0 {
+        return 0;
+    }
+    return __engine("map_get", handle, "n");
+}
+
+pub fn cst_child_at(handle: i64, idx: i64) -> i64 {
+    if handle < 0 || idx < 0 {
+        return -1;
+    }
+    let cnt = __engine("map_get", handle, "n");
+    if idx >= cnt {
+        return -1;
+    }
+    return __engine("map_get", handle, "c_" + idx);
+}
+
+pub fn cst_node_text(handle: i64) -> str {
+    if handle < 0 {
+        return "";
+    }
+    let cc = __engine("map_get", handle, "n");
+    if cc <= 0 {
+        return __engine("map_get", handle, "t");
+    }
+    let cached = __engine("map_get", handle, "t");
+    if cached.len() > 0 {
+        return cached;
+    }
+    var acc = "";
+    var i = 0;
+    while i < cc {
+        let ch = __engine("map_get", handle, "c_" + i);
+        acc = acc + cst_node_text(ch);
+        i = i + 1;
+    }
+    return acc;
 }
 
 pub fn green_token_create(kind: i64, text: str) -> GreenToken {
@@ -165,13 +246,21 @@ pub fn count_cst_top_level_children(src: str) -> i64 {
     var i = 0;
     while i < n {
         let b = src.byte_at(i);
-        // Skip line comments `//`
         if b == 47 && i + 1 < n && src.byte_at(i + 1) == 47 {
             while i < n && src.byte_at(i) != 10 {
                 i = i + 1;
             }
+        } else if b == 47 && i + 1 < n && src.byte_at(i + 1) == 42 {
+            i = i + 2;
+            while i + 1 < n && !(src.byte_at(i) == 42 && src.byte_at(i + 1) == 47) {
+                i = i + 1;
+            }
+            if i + 1 < n {
+                i = i + 2;
+            } else {
+                i = n;
+            }
         } else if b == 34 {
-            // Skip string literals `"..."`
             in_token = true;
             i = i + 1;
             while i < n && src.byte_at(i) != 34 {

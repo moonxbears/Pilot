@@ -1,8 +1,8 @@
 // ============================================================================
 // FILE: selfhost/fmt/fmt.pilot
 // Milestone 53.3: Canonical Wadler-Lindig Pretty-Printer & Formatter (`pilot fmt`)
-// Strictly enforces canonical `{ ... }` blocks, `=> expr;` inline bodies, and
-// `;` statement terminators with zero legacy colon-suite or Pythonic options.
+// Strictly enforces canonical `{ ... }` blocks, `=> expr;` inline bodies,
+// `;` statement terminators, operator spacing, and width-aware `( ... )` groups.
 // ============================================================================
 
 pub struct FormatOptions {
@@ -30,6 +30,13 @@ pub pure fn doc_kind_softline() -> i64 { return 3; }
 pub pure fn doc_kind_nest() -> i64 { return 4; }
 pub pure fn doc_kind_group() -> i64 { return 5; }
 
+// Formatter lexical token kinds
+pub pure fn fmt_tok_comment() -> i64 { return 1; }
+pub pure fn fmt_tok_block_comment() -> i64 { return 2; }
+pub pure fn fmt_tok_lit() -> i64 { return 3; }
+pub pure fn fmt_tok_word() -> i64 { return 4; }
+pub pure fn fmt_tok_punct() -> i64 { return 5; }
+
 pub fn default_format_options() -> FormatOptions {
     return FormatOptions {
         indent_width: 4,
@@ -53,6 +60,18 @@ pub pure fn is_ws_char(b: u8) -> bool {
     return b == 32 || b == 9 || b == 13;
 }
 
+pub pure fn is_fmt_all_ws(b: u8) -> bool {
+    return b == 32 || b == 9 || b == 10 || b == 13;
+}
+
+pub pure fn is_fmt_word_start(b: u8) -> bool {
+    return (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
+}
+
+pub pure fn is_fmt_word_cont(b: u8) -> bool {
+    return is_fmt_word_start(b) || (b >= 48 && b <= 57);
+}
+
 pub fn trim_line(s: str) -> str {
     let n = s.len();
     var start = 0;
@@ -66,29 +85,99 @@ pub fn trim_line(s: str) -> str {
     return s.slice(start, end);
 }
 
-// Normalizes horizontal spacing within a single code line (preserving string literals & comments).
-pub fn normalize_line_spacing(line: str) -> str {
-    let trimmed = trim_line(line);
-    let n = trimmed.len();
-    if n == 0 {
-        return "";
-    }
-    if n >= 2 && trimmed.byte_at(0) == 47 && trimmed.byte_at(1) == 47 {
-        return trimmed;
-    }
+pub fn fmt_push_tok(stream: i64, kind: i64, text: str) -> i64 {
+    let idx = __engine("map_get", stream, "cnt");
+    __engine("map_set", stream, "k_" + idx, kind);
+    __engine("map_set", stream, "t_" + idx, text);
+    __engine("map_set", stream, "cnt", idx + 1);
+    return idx;
+}
 
-    var out = "";
+// Tokenizes `src` into a lossless lexical stream preserving string literals and comments verbatim.
+pub fn fmt_tokenize(src: str) -> i64 {
+    let stream = __engine("map_new");
+    __engine("map_set", stream, "cnt", 0);
+    let n = src.len();
     var i = 0;
-    var last_was_space = false;
 
     while i < n {
-        let b = trimmed.byte_at(i);
-        if b == 34 {
-            // Preserve string literal verbatim
-            let start = i;
+        let b = src.byte_at(i);
+        if is_fmt_all_ws(b) {
             i = i + 1;
-            while i < n && trimmed.byte_at(i) != 34 {
-                if trimmed.byte_at(i) == 92 {
+        } else if i == 0 && b == 35 && i + 1 < n && src.byte_at(i + 1) == 33 {
+            let s = i;
+            while i < n && src.byte_at(i) != 10 {
+                i = i + 1;
+            }
+            fmt_push_tok(stream, fmt_tok_comment(), trim_line(src.slice(s, i)));
+        } else if b == 47 && i + 1 < n && src.byte_at(i + 1) == 47 {
+            let s = i;
+            while i < n && src.byte_at(i) != 10 {
+                i = i + 1;
+            }
+            fmt_push_tok(stream, fmt_tok_comment(), trim_line(src.slice(s, i)));
+        } else if b == 47 && i + 1 < n && src.byte_at(i + 1) == 42 {
+            let s = i;
+            i = i + 2;
+            while i + 1 < n && !(src.byte_at(i) == 42 && src.byte_at(i + 1) == 47) {
+                i = i + 1;
+            }
+            if i + 1 < n {
+                i = i + 2;
+            } else {
+                i = n;
+            }
+            fmt_push_tok(stream, fmt_tok_block_comment(), src.slice(s, i));
+        } else if (b == 102 || b == 70) && i + 1 < n && src.byte_at(i + 1) == 34 {
+            let s = i;
+            i = i + 2;
+            var brace_d = 0;
+            while i < n {
+                let c = src.byte_at(i);
+                if c == 92 {
+                    i = i + 2;
+                } else if brace_d == 0 {
+                    if c == 34 {
+                        i = i + 1;
+                        brace_d = -1;
+                    } else if c == 123 {
+                        if i + 1 < n && src.byte_at(i + 1) == 123 {
+                            i = i + 2;
+                        } else {
+                            brace_d = 1;
+                            i = i + 1;
+                        }
+                    } else {
+                        i = i + 1;
+                    }
+                } else if c == 34 {
+                    i = i + 1;
+                    while i < n && src.byte_at(i) != 34 {
+                        if src.byte_at(i) == 92 {
+                            i = i + 2;
+                        } else {
+                            i = i + 1;
+                        }
+                    }
+                    if i < n {
+                        i = i + 1;
+                    }
+                } else {
+                    if c == 123 { brace_d = brace_d + 1; }
+                    else if c == 125 { brace_d = brace_d - 1; }
+                    i = i + 1;
+                }
+                if brace_d < 0 {
+                    break;
+                }
+            }
+            fmt_push_tok(stream, fmt_tok_lit(), src.slice(s, i));
+        } else if b == 34 || b == 39 {
+            let s = i;
+            let q = b;
+            i = i + 1;
+            while i < n && src.byte_at(i) != q {
+                if src.byte_at(i) == 92 {
                     i = i + 2;
                 } else {
                     i = i + 1;
@@ -97,108 +186,452 @@ pub fn normalize_line_spacing(line: str) -> str {
             if i < n {
                 i = i + 1;
             }
-            out = out + trimmed.slice(start, i);
-            last_was_space = false;
-        } else if b == 47 && i + 1 < n && trimmed.byte_at(i + 1) == 47 {
-            // Preserve trailing line comment verbatim
-            if !last_was_space && out.len() > 0 {
-                out = out + " ";
-            }
-            out = out + trimmed.slice(i, n);
-            return out;
-        } else if is_ws_char(b) {
-            if !last_was_space && out.len() > 0 {
-                out = out + " ";
-                last_was_space = true;
-            }
+            fmt_push_tok(stream, fmt_tok_lit(), src.slice(s, i));
+        } else if is_fmt_word_start(b) {
+            let s = i;
             i = i + 1;
-        } else if b == 44 {
-            // Comma `,`: no space before, single space after (unless at end of line or before `}`/`]`)
-            out = out + ",";
-            i = i + 1;
-            while i < n && is_ws_char(trimmed.byte_at(i)) {
+            while i < n && is_fmt_word_cont(src.byte_at(i)) {
                 i = i + 1;
             }
-            if i < n && trimmed.byte_at(i) != 125 && trimmed.byte_at(i) != 93 && trimmed.byte_at(i) != 41 {
-                out = out + " ";
-                last_was_space = true;
-            } else {
-                last_was_space = false;
-            }
-        } else {
-            out = out + trimmed.slice(i, i + 1);
-            last_was_space = false;
+            fmt_push_tok(stream, fmt_tok_word(), src.slice(s, i));
+        } else if b >= 48 && b <= 57 {
+            let s = i;
             i = i + 1;
+            while i < n && (is_fmt_word_cont(src.byte_at(i)) || src.byte_at(i) == 46) {
+                if src.byte_at(i) == 46 && i + 1 < n && src.byte_at(i + 1) == 46 {
+                    break;
+                }
+                i = i + 1;
+            }
+            fmt_push_tok(stream, fmt_tok_lit(), src.slice(s, i));
+        } else {
+            var matched_len = 1;
+            if i + 2 < n {
+                let s3 = src.slice(i, i + 3);
+                if s3 == "..=" || s3 == "..<" || s3 == "..." || s3 == "*.." || s3 == ":=:"
+                    || s3 == "<=>" || s3 == "?.." || s3 == "!!(" || s3 == "!&(" || s3 == "!^("
+                    || s3 == "!@(" || s3 == "!?("
+                {
+                    matched_len = 3;
+                }
+            }
+            if matched_len == 1 && i + 1 < n {
+                let s2 = src.slice(i, i + 2);
+                if s2 == "->" || s2 == "=>" || s2 == "::" || s2 == ".." || s2 == "?."
+                    || s2 == "==" || s2 == "!=" || s2 == "<=" || s2 == ">=" || s2 == "&&"
+                    || s2 == "||" || s2 == "<<" || s2 == ">>" || s2 == "??" || s2 == "~>"
+                    || s2 == "**" || s2 == "+|" || s2 == "-|" || s2 == "*|" || s2 == "+%"
+                    || s2 == "-%" || s2 == "*%" || s2 == "+?" || s2 == "-?" || s2 == "*?"
+                    || s2 == "%%" || s2 == "!(" || s2 == "+=" || s2 == "-=" || s2 == "*="
+                    || s2 == "/="
+                {
+                    matched_len = 2;
+                }
+            }
+            fmt_push_tok(stream, fmt_tok_punct(), src.slice(i, i + matched_len));
+            i = i + matched_len;
         }
     }
-    return trim_line(out);
+    return stream;
 }
 
-// Counts net brace delta (`{` minus `}`) on a normalized line (ignoring strings and comments).
-pub fn line_brace_delta(line: str) -> i64 {
-    let n = line.len();
-    var delta = 0;
-    var i = 0;
-    while i < n {
-        let b = line.byte_at(i);
-        if b == 34 {
-            i = i + 1;
-            while i < n && line.byte_at(i) != 34 {
-                if line.byte_at(i) == 92 { i = i + 2; } else { i = i + 1; }
-            }
-            if i < n { i = i + 1; }
-        } else if b == 47 && i + 1 < n && line.byte_at(i + 1) == 47 {
-            return delta;
-        } else {
-            if b == 123 { delta = delta + 1; }
-            else if b == 125 { delta = delta - 1; }
-            i = i + 1;
-        }
+pub pure fn is_kw_spaced_before_lparen(w: str) -> bool {
+    return w == nameof(if)
+        || w == nameof(while)
+        || w == nameof(until)
+        || w == nameof(for)
+        || w == nameof(switch)
+        || w == nameof(return)
+        || w == nameof(yield)
+        || w == nameof(catch)
+        || w == nameof(guard);
+}
+
+pub pure fn is_open_group_tok(t: str) -> bool {
+    return t == "(" || t == "!(" || t == "!!(" || t == "!&(" || t == "!^(" || t == "!@(" || t == "!?(";
+}
+
+pub pure fn is_binary_or_assign_op(t: str) -> bool {
+    return t == "->" || t == "=>" || t == "=" || t == "==" || t == "!="
+        || t == "<" || t == ">" || t == "<=" || t == ">=" || t == "&&"
+        || t == "||" || t == "+" || t == "*" || t == "/" || t == "%"
+        || t == "&" || t == "|" || t == "^" || t == "<<" || t == ">>"
+        || t == "??" || t == "+=" || t == "-=" || t == "*=" || t == "/="
+        || t == "<=>" || t == ":=:" || t == "~>";
+}
+
+pub pure fn can_precede_unary_minus(prev: str) -> bool {
+    if prev.len() == 0 {
+        return true;
     }
-    return delta;
+    return is_open_group_tok(prev) || prev == "[" || prev == "{" || prev == "," || prev == ";"
+        || prev == ":" || prev == "!" || is_binary_or_assign_op(prev) || prev == "-"
+        || prev == nameof(return) || prev == nameof(yield);
 }
 
-// Formats a Pilot source string with canonical 4-space `{ ... }` block indentation
-// and idempotent spacing (`format_pilot_source(format_pilot_source(s)) == format_pilot_source(s)`).
-pub fn format_pilot_source(src: str) -> str {
-    let n = src.len();
-    var cursor = 0;
-    var depth = 0;
+// Determines canonical horizontal spacing between `prev` (preceded by `prev2`) and `cur`.
+pub pure fn fmt_needs_space(prev2: str, prev: str, cur: str) -> bool {
+    if prev.len() == 0 || cur.len() == 0 {
+        return false;
+    }
+    if cur == "," || cur == ";" || cur == ")" || cur == "]" || cur == "." || cur == "?." || cur == "::" || cur == ":" {
+        return false;
+    }
+    if is_open_group_tok(prev) || prev == "[" || prev == "." || prev == "?." || prev == "::" || prev == "!" {
+        return false;
+    }
+    if prev == "-" && can_precede_unary_minus(prev2) {
+        return false;
+    }
+    if cur == "{" {
+        return true;
+    }
+    if is_open_group_tok(cur) || cur == "[" {
+        if is_kw_spaced_before_lparen(prev) || prev == ":" || prev == "," || prev == ";" || is_binary_or_assign_op(prev) || prev == "-" {
+            return true;
+        }
+        return false;
+    }
+    if prev == "," || prev == ":" || is_binary_or_assign_op(prev) || is_binary_or_assign_op(cur) {
+        return true;
+    }
+    if prev == "-" || cur == "-" {
+        return true;
+    }
+    return true;
+}
+
+// Renders token slice `[start_idx, end_idx)` inline on a single flat line.
+pub fn fmt_render_flat_range(stream: i64, start_idx: i64, end_idx: i64) -> str {
     var out = "";
-
-    while cursor < n {
-        var line_end = cursor;
-        while line_end < n && src.byte_at(line_end) != 10 {
-            line_end = line_end + 1;
+    var prev2 = "";
+    var prev = "";
+    var i = start_idx;
+    while i < end_idx {
+        let t = __engine("map_get", stream, "t_" + i);
+        if fmt_needs_space(prev2, prev, t) {
+            out = out + " ";
         }
-        let raw_line = src.slice(cursor, line_end);
-        let norm = normalize_line_spacing(raw_line);
-
-        if norm.len() == 0 {
-            out = out + "\n";
-        } else {
-            // If line starts with `}`, dedent before emitting this line
-            var effective_depth = depth;
-            if norm.byte_at(0) == 125 && effective_depth > 0 {
-                effective_depth = effective_depth - 1;
-            }
-            let indent = make_indent_spaces(effective_depth, 4);
-            out = out + indent + norm + "\n";
-
-            let delta = line_brace_delta(norm);
-            depth = depth + delta;
-            if depth < 0 {
-                depth = 0;
-            }
-        }
-
-        if line_end < n {
-            cursor = line_end + 1;
-        } else {
-            cursor = line_end;
-        }
+        out = out + t;
+        prev2 = prev;
+        prev = t;
+        i = i + 1;
     }
     return out;
+}
+
+// Finds matching `)` for an open `(` group at `open_idx`, returning `-1` if it spans `{`, `}`, `;`, or comments.
+pub fn fmt_find_clean_rparen(stream: i64, total: i64, open_idx: i64) -> i64 {
+    var depth = 1;
+    var i = open_idx + 1;
+    while i < total && depth > 0 {
+        let k = __engine("map_get", stream, "k_" + i);
+        let t = __engine("map_get", stream, "t_" + i);
+        if k == fmt_tok_comment() {
+            return -1;
+        }
+        if t == "{" || t == "}" || t == ";" {
+            return -1;
+        }
+        if is_open_group_tok(t) {
+            depth = depth + 1;
+        } else if t == ")" {
+            depth = depth - 1;
+            if depth == 0 {
+                return i;
+            }
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// Counts top-level commas inside `( ... )` between `open_idx + 1` and `close_idx`.
+pub fn fmt_count_top_commas(stream: i64, open_idx: i64, close_idx: i64) -> i64 {
+    var depth = 0;
+    var commas = 0;
+    var i = open_idx + 1;
+    while i < close_idx {
+        let t = __engine("map_get", stream, "t_" + i);
+        if is_open_group_tok(t) || t == "[" {
+            depth = depth + 1;
+        } else if t == ")" || t == "]" {
+            if depth > 0 {
+                depth = depth - 1;
+            }
+        } else if t == "," && depth == 0 {
+            commas = commas + 1;
+        }
+        i = i + 1;
+    }
+    return commas;
+}
+
+// Measures trailing same-statement header/terminator length after `close_idx` up to `{` or `;`.
+pub fn fmt_measure_line_tail_after_rparen(stream: i64, total: i64, close_idx: i64) -> i64 {
+    var end_i = close_idx + 1;
+    while end_i < total {
+        let k = __engine("map_get", stream, "k_" + end_i);
+        let t = __engine("map_get", stream, "t_" + end_i);
+        if k == fmt_tok_comment() {
+            break;
+        }
+        if t == "{" || t == ";" {
+            end_i = end_i + 1;
+            break;
+        }
+        if t == "}" || is_open_group_tok(t) {
+            break;
+        }
+        end_i = end_i + 1;
+    }
+    if end_i <= close_idx + 1 {
+        return 0;
+    }
+    let sample = fmt_render_flat_range(stream, close_idx, end_i);
+    if sample.len() > 1 {
+        return sample.len() - 1;
+    }
+    return 0;
+}
+
+// Renders a wrapped multi-line `( ... )` Wadler-Lindig group when flat layout exceeds `max_width`.
+pub fn fmt_render_broken_paren_group(
+    stream: i64,
+    open_idx: i64,
+    close_idx: i64,
+    block_depth: i64,
+    indent_width: i64
+) -> str {
+    let open_t = __engine("map_get", stream, "t_" + open_idx);
+    let inner_indent = make_indent_spaces(block_depth + 1, indent_width);
+    let close_indent = make_indent_spaces(block_depth, indent_width);
+    var out = open_t + "\n";
+    var item_start = open_idx + 1;
+    var depth = 0;
+    var i = open_idx + 1;
+
+    while i <= close_idx {
+        var at_split = false;
+        if i == close_idx {
+            at_split = true;
+        } else {
+            let t = __engine("map_get", stream, "t_" + i);
+            if is_open_group_tok(t) || t == "[" {
+                depth = depth + 1;
+            } else if t == ")" || t == "]" {
+                if depth > 0 {
+                    depth = depth - 1;
+                }
+            } else if t == "," && depth == 0 {
+                at_split = true;
+            }
+        }
+
+        if at_split {
+            let item_txt = fmt_render_flat_range(stream, item_start, i);
+            if item_txt.len() > 0 {
+                out = out + inner_indent + item_txt;
+                if i < close_idx {
+                    out = out + ",\n";
+                } else {
+                    out = out + "\n";
+                }
+            }
+            item_start = i + 1;
+        }
+        i = i + 1;
+    }
+    return out + close_indent + ")";
+}
+
+// Formats Pilot source according to Wadler-Lindig `max_width` group layout and 4-space `{ ... }` blocks.
+pub fn format_pilot_with_width(src: str, max_width: i64) -> str {
+    var effective_width = max_width;
+    if effective_width < 20 {
+        effective_width = 20;
+    }
+    let indent_width = 4;
+    let stream = fmt_tokenize(src);
+    let total = __engine("map_get", stream, "cnt");
+    if total == 0 {
+        return "";
+    }
+
+    var out = "";
+    var cur_line = "";
+    var block_depth = 0;
+    var paren_depth = 0;
+    var prev2 = "";
+    var prev = "";
+    var i = 0;
+
+    while i < total {
+        let k = __engine("map_get", stream, "k_" + i);
+        let t = __engine("map_get", stream, "t_" + i);
+
+        if k == fmt_tok_comment() {
+            if cur_line.len() > 0 {
+                out = out + cur_line + " " + t + "\n";
+                cur_line = "";
+            } else {
+                out = out + make_indent_spaces(block_depth, indent_width) + t + "\n";
+            }
+            prev2 = "";
+            prev = "";
+            i = i + 1;
+        } else if t == "{" && paren_depth == 0 {
+            if i + 1 < total && __engine("map_get", stream, "t_" + (i + 1)) == "}" {
+                if cur_line.len() == 0 {
+                    cur_line = make_indent_spaces(block_depth, indent_width) + "{}";
+                } else {
+                    cur_line = cur_line + " {}";
+                }
+                if i + 2 < total && __engine("map_get", stream, "t_" + (i + 2)) == ";" {
+                    cur_line = cur_line + ";";
+                    i = i + 3;
+                } else {
+                    i = i + 2;
+                }
+                out = out + cur_line + "\n";
+                cur_line = "";
+                prev2 = "";
+                prev = "";
+            } else {
+                if cur_line.len() == 0 {
+                    out = out + make_indent_spaces(block_depth, indent_width) + "{\n";
+                } else {
+                    out = out + cur_line + " {\n";
+                    cur_line = "";
+                }
+                block_depth = block_depth + 1;
+                prev2 = "";
+                prev = "";
+                i = i + 1;
+            }
+        } else if t == "}" && paren_depth == 0 {
+            if cur_line.len() > 0 {
+                out = out + cur_line + "\n";
+                cur_line = "";
+            }
+            if block_depth > 0 {
+                block_depth = block_depth - 1;
+            }
+            let close_line = make_indent_spaces(block_depth, indent_width) + "}";
+            var next_t = "";
+            if i + 1 < total {
+                next_t = __engine("map_get", stream, "t_" + (i + 1));
+            }
+            if next_t == nameof(else) || next_t == nameof(catch) {
+                cur_line = close_line;
+                prev2 = "";
+                prev = "}";
+                i = i + 1;
+            } else if next_t == ";" || next_t == "," {
+                out = out + close_line + next_t + "\n";
+                prev2 = "";
+                prev = "";
+                i = i + 2;
+            } else {
+                out = out + close_line + "\n";
+                prev2 = "";
+                prev = "";
+                i = i + 1;
+            }
+        } else if t == ";" && paren_depth == 0 {
+            if cur_line.len() == 0 {
+                out = out + make_indent_spaces(block_depth, indent_width) + ";\n";
+            } else {
+                out = out + cur_line + ";\n";
+                cur_line = "";
+            }
+            prev2 = "";
+            prev = "";
+            i = i + 1;
+        } else if is_open_group_tok(t) && paren_depth == 0 {
+            let close_idx = fmt_find_clean_rparen(stream, total, i);
+            var handled_group = false;
+            if close_idx > i {
+                let commas = fmt_count_top_commas(stream, i, close_idx);
+                if commas >= 1 {
+                    handled_group = true;
+                    if cur_line.len() == 0 {
+                        cur_line = make_indent_spaces(block_depth, indent_width);
+                    } else if fmt_needs_space(prev2, prev, t) {
+                        cur_line = cur_line + " ";
+                    }
+                    let flat_grp = fmt_render_flat_range(stream, i, close_idx + 1);
+                    let tail_len = fmt_measure_line_tail_after_rparen(stream, total, close_idx);
+                    if cur_line.len() + flat_grp.len() + tail_len <= effective_width {
+                        cur_line = cur_line + flat_grp;
+                    } else {
+                        let broken = fmt_render_broken_paren_group(stream, i, close_idx, block_depth, indent_width);
+                        out = out + cur_line;
+                        let b_len = broken.len();
+                        var last_nl = -1;
+                        var bi = 0;
+                        while bi < b_len {
+                            if broken.byte_at(bi) == 10 {
+                                last_nl = bi;
+                            }
+                            bi = bi + 1;
+                        }
+                        if last_nl >= 0 {
+                            out = out + broken.slice(0, last_nl + 1);
+                            cur_line = broken.slice(last_nl + 1, b_len);
+                        } else {
+                            cur_line = cur_line + broken;
+                        }
+                    }
+                    prev2 = "(";
+                    prev = ")";
+                    i = close_idx + 1;
+                }
+            }
+            if !handled_group {
+                if cur_line.len() == 0 {
+                    cur_line = make_indent_spaces(block_depth, indent_width) + t;
+                } else {
+                    if fmt_needs_space(prev2, prev, t) {
+                        cur_line = cur_line + " ";
+                    }
+                    cur_line = cur_line + t;
+                }
+                paren_depth = paren_depth + 1;
+                prev2 = prev;
+                prev = t;
+                i = i + 1;
+            }
+        } else {
+            if is_open_group_tok(t) {
+                paren_depth = paren_depth + 1;
+            } else if t == ")" && paren_depth > 0 {
+                paren_depth = paren_depth - 1;
+            }
+            if cur_line.len() == 0 {
+                cur_line = make_indent_spaces(block_depth, indent_width) + t;
+            } else {
+                if fmt_needs_space(prev2, prev, t) {
+                    cur_line = cur_line + " ";
+                }
+                cur_line = cur_line + t;
+            }
+            prev2 = prev;
+            prev = t;
+            i = i + 1;
+        }
+    }
+
+    if cur_line.len() > 0 {
+        out = out + cur_line + "\n";
+    }
+    return out;
+}
+
+// Formats a Pilot source string with default 100-column Wadler-Lindig width and 4-space `{ ... }` indentation.
+pub fn format_pilot_source(src: str) -> str {
+    let opts = default_format_options();
+    return format_pilot_with_width(src, opts.max_width);
 }
 
 // Verifies round-trip formatting idempotency (`format(format(s)) == format(s)`).
@@ -206,4 +639,15 @@ pub fn verify_format_idempotent(src: str) -> bool {
     let once = format_pilot_source(src);
     let twice = format_pilot_source(once);
     return once == twice;
+}
+
+// Normalizes horizontal spacing within a single code line (preserving string literals & comments).
+pub fn normalize_line_spacing(line: str) -> str {
+    let trimmed = trim_line(line);
+    if trimmed.len() == 0 {
+        return "";
+    }
+    let stream = fmt_tokenize(trimmed);
+    let cnt = __engine("map_get", stream, "cnt");
+    return fmt_render_flat_range(stream, 0, cnt);
 }

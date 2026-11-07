@@ -2,7 +2,8 @@
 // FILE: selfhost/cst/cst_recovery.pilot
 // Milestone 53.2: Live-Keyword Damerau-Levenshtein Typo Recovery & Sync Sets
 // Fixes the legacy Rust u128 TokenSet bitmask truncation bug and queries the
-// live Pilot.Core.Keywords registry dynamically via __engine.
+// live Pilot.Core.Keywords registry dynamically via __engine across core & user
+// categories without any 128-symbol ceiling.
 // ============================================================================
 
 pub pure fn min_i64(a: i64, b: i64) -> i64 {
@@ -15,7 +16,11 @@ pub pure fn abs_i64(x: i64) -> i64 {
     return x;
 }
 
-// Computes exact Damerau-Levenshtein distance <= 2 (returns 0, 1, 2, or 99 if > 2).
+pub pure fn is_kw_list_sep(b: u8) -> bool {
+    return b == 44 || b == 124;
+}
+
+// Computes exact Damerau-Levenshtein distance <= 1 (returns 0, 1, or 99 if > 1).
 // Handles single-character insertion, deletion, substitution, and adjacent transposition.
 pub fn damerau_levenshtein_le1(a: str, b: str) -> i64 {
     let alen = a.len();
@@ -85,13 +90,16 @@ pub fn damerau_levenshtein_le1(a: str, b: str) -> i64 {
     return 1;
 }
 
-// Searches comma-separated keyword list `csv` for an exact match.
+// Searches `'|'` or `','`-delimited keyword list `csv` for an exact match.
 pub fn csv_contains_word(csv: str, word: str) -> bool {
     let n = csv.len();
+    if n == 0 {
+        return false;
+    }
     var start = 0;
     var i = 0;
     while i <= n {
-        if i == n || csv.byte_at(i) == 44 {
+        if i == n || is_kw_list_sep(csv.byte_at(i)) {
             if csv.slice(start, i) == word {
                 return true;
             }
@@ -102,13 +110,16 @@ pub fn csv_contains_word(csv: str, word: str) -> bool {
     return false;
 }
 
-// Searches comma-separated keyword list `csv` for a Damerau-Levenshtein distance-1 match.
+// Searches `'|'` or `','`-delimited keyword list `csv` for a Damerau-Levenshtein distance-1 match.
 pub fn csv_find_dl1_match(csv: str, ident: str) -> str {
     let n = csv.len();
+    if n == 0 {
+        return "";
+    }
     var start = 0;
     var i = 0;
     while i <= n {
-        if i == n || csv.byte_at(i) == 44 {
+        if i == n || is_kw_list_sep(csv.byte_at(i)) {
             let candidate = csv.slice(start, i);
             if candidate.len() >= 3 && damerau_levenshtein_le1(ident, candidate) == 1 {
                 return candidate;
@@ -120,8 +131,8 @@ pub fn csv_find_dl1_match(csv: str, ident: str) -> str {
     return "";
 }
 
-// Queries the live Pilot.Core.Keywords registry across categories 0..14 (plus seed fallback)
-// to suggest a distance-1 keyword fix-it for `ident` (e.g. "retrun" -> "return").
+// Queries the live PhysicsRegistry across core categories (0..=37) and user categories (100..=255)
+// (plus canonical seed fallback) to suggest a distance-1 keyword fix-it for `ident`.
 pub fn suggest_keyword_typo(ident: str) -> str {
     if ident.len() < 3 {
         return "";
@@ -133,15 +144,41 @@ pub fn suggest_keyword_typo(ident: str) -> str {
         return "";
     }
 
-    // 1. Check live dynamic registry categories via __engine if mounted
+    // Pass 1: Verify `ident` is NOT an exact match in ANY core (0..=37) or user (100..=255) category
     var cat = 0;
-    while cat <= 14 {
-        let live_csv = __engine("query_registered_symbols", cat);
-        if live_csv.len() > 0 {
-            if csv_contains_word(live_csv, ident) {
-                return "";
+    while cat <= 37 {
+        let live_words = __engine("query_registered_symbols", cat);
+        if live_words.len() > 0 && csv_contains_word(live_words, ident) {
+            return "";
+        }
+        cat = cat + 1;
+    }
+    cat = 100;
+    while cat <= 255 {
+        let live_words = __engine("query_registered_symbols", cat);
+        if live_words.len() > 0 && csv_contains_word(live_words, ident) {
+            return "";
+        }
+        cat = cat + 1;
+    }
+
+    // Pass 2: Search live dynamic registry categories for Damerau-Levenshtein distance-1 match
+    cat = 0;
+    while cat <= 37 {
+        let live_words = __engine("query_registered_symbols", cat);
+        if live_words.len() > 0 {
+            let hit = csv_find_dl1_match(live_words, ident);
+            if hit.len() > 0 {
+                return hit;
             }
-            let hit = csv_find_dl1_match(live_csv, ident);
+        }
+        cat = cat + 1;
+    }
+    cat = 100;
+    while cat <= 255 {
+        let live_words = __engine("query_registered_symbols", cat);
+        if live_words.len() > 0 {
+            let hit = csv_find_dl1_match(live_words, ident);
             if hit.len() > 0 {
                 return hit;
             }
@@ -149,7 +186,7 @@ pub fn suggest_keyword_typo(ident: str) -> str {
         cat = cat + 1;
     }
 
-    // 2. Check canonical keyword table
+    // Pass 3: Fallback to canonical keyword table
     return csv_find_dl1_match(canonical_keywords, ident);
 }
 

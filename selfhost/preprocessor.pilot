@@ -1,7 +1,7 @@
 // ============================================================================
 // Pilot Self-Hosted Stage 0 Preprocessor (selfhost/preprocessor.pilot)
-// 100% Pilot Conditional Compilation (#define, #undef, #if/#elif/#else/#endif,
-// #region/#endregion, #error, #warning, #pragma warning) & PREPROC001-PREPROC008
+// 100% Pilot Conditional Compilation (define, undef, if/elif/else/endif,
+// region/endregion, error, warning, pragma warning) & PREPROC001-PREPROC008
 // ============================================================================
 
 pub struct PreprocDiagnostic {
@@ -89,7 +89,8 @@ pub fn parse_directive_name(content: str) -> str {
     let n = trimmed.len();
     var i = 0;
     while i < n {
-        if is_ws_byte(trimmed.byte_at(i)) {
+        let b = trimmed.byte_at(i);
+        if is_ws_byte(b) || b == 40 {
             return trimmed.slice(0, i);
         }
         i = i + 1;
@@ -102,7 +103,8 @@ pub fn parse_directive_args(content: str) -> str {
     let n = trimmed.len();
     var i = 0;
     while i < n {
-        if is_ws_byte(trimmed.byte_at(i)) {
+        let b = trimmed.byte_at(i);
+        if is_ws_byte(b) || b == 40 {
             return trim_ws(trimmed.slice(i, n));
         }
         i = i + 1;
@@ -112,16 +114,27 @@ pub fn parse_directive_args(content: str) -> str {
 
 pub fn csv_has_symbol(defined_csv: str, sym: str) -> bool {
     let target = trim_ws(sym);
-    if target.len() == 0 {
+    if target.len() == 0 || defined_csv.len() == 0 {
         return false;
     }
-    let wrapped = "," + defined_csv + ",";
-    let needle = "," + target + ",";
-    return find_substr(wrapped, needle) >= 0;
+    let n = defined_csv.len();
+    var start = 0;
+    var i = 0;
+    while i <= n {
+        if i == n || defined_csv.byte_at(i) == 44 {
+            let item = trim_ws(defined_csv.slice(start, i));
+            if item == target {
+                return true;
+            }
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    return false;
 }
 
 pub fn csv_add_symbol(defined_csv: str, sym: str) -> str {
-    let target = trim_ws(sym);
+    let target = parse_directive_name(sym);
     if target.len() == 0 {
         return defined_csv;
     }
@@ -135,7 +148,7 @@ pub fn csv_add_symbol(defined_csv: str, sym: str) -> str {
 }
 
 pub fn csv_remove_symbol(defined_csv: str, sym: str) -> str {
-    let target = trim_ws(sym);
+    let target = parse_directive_name(sym);
     if target.len() == 0 || defined_csv.len() == 0 {
         return defined_csv;
     }
@@ -160,26 +173,51 @@ pub fn csv_remove_symbol(defined_csv: str, sym: str) -> str {
     return out;
 }
 
-// Evaluates boolean preprocessor conditions (`DEBUG || (LINUX && !X86)`).
+pub fn has_enclosing_parens(s: str) -> bool {
+    let n = s.len();
+    if n < 2 || s.byte_at(0) != 40 || s.byte_at(n - 1) != 41 {
+        return false;
+    }
+    var depth = 0;
+    var i = 0;
+    while i < n - 1 {
+        let b = s.byte_at(i);
+        if b == 40 {
+            depth = depth + 1;
+        } else if b == 41 {
+            depth = depth - 1;
+            if depth <= 0 {
+                return false;
+            }
+        }
+        i = i + 1;
+    }
+    return depth == 1;
+}
+
+// Evaluates boolean preprocessor conditions (`defined(A) || (!B && (C || false))`).
 pub fn eval_preproc_condition(expr: str, defined_csv: str) -> bool {
-    let trimmed = trim_ws(expr);
-    let n = trimmed.len();
+    var s = trim_ws(expr);
+    while has_enclosing_parens(s) {
+        s = trim_ws(s.slice(1, s.len() - 1));
+    }
+    let n = s.len();
     if n == 0 {
         return false;
     }
 
-    // 1. Top-level binary OR (`||`) outside parentheses
+    // 1. Top-level binary OR (`||`) outside parentheses (lowest precedence)
     var depth = 0;
     var i = 0;
     while i + 1 < n {
-        let b = trimmed.byte_at(i);
+        let b = s.byte_at(i);
         if b == 40 {
             depth = depth + 1;
         } else if b == 41 && depth > 0 {
             depth = depth - 1;
-        } else if depth == 0 && b == 124 && trimmed.byte_at(i + 1) == 124 {
-            let lhs = trimmed.slice(0, i);
-            let rhs = trimmed.slice(i + 2, n);
+        } else if depth == 0 && b == 124 && s.byte_at(i + 1) == 124 {
+            let lhs = s.slice(0, i);
+            let rhs = s.slice(i + 2, n);
             if eval_preproc_condition(lhs, defined_csv) {
                 return true;
             }
@@ -188,18 +226,18 @@ pub fn eval_preproc_condition(expr: str, defined_csv: str) -> bool {
         i = i + 1;
     }
 
-    // 2. Top-level binary AND (`&&`) outside parentheses
+    // 2. Top-level binary AND (`&&`) outside parentheses (binds tighter than `||`)
     depth = 0;
     i = 0;
     while i + 1 < n {
-        let b = trimmed.byte_at(i);
+        let b = s.byte_at(i);
         if b == 40 {
             depth = depth + 1;
         } else if b == 41 && depth > 0 {
             depth = depth - 1;
-        } else if depth == 0 && b == 38 && trimmed.byte_at(i + 1) == 38 {
-            let lhs = trimmed.slice(0, i);
-            let rhs = trimmed.slice(i + 2, n);
+        } else if depth == 0 && b == 38 && s.byte_at(i + 1) == 38 {
+            let lhs = s.slice(0, i);
+            let rhs = s.slice(i + 2, n);
             if !eval_preproc_condition(lhs, defined_csv) {
                 return false;
             }
@@ -208,23 +246,51 @@ pub fn eval_preproc_condition(expr: str, defined_csv: str) -> bool {
         i = i + 1;
     }
 
-    // 3. Outer parentheses `(...)`
-    if trimmed.byte_at(0) == 40 && trimmed.byte_at(n - 1) == 41 {
-        return eval_preproc_condition(trimmed.slice(1, n - 1), defined_csv);
+    // 3. Top-level equality / inequality (`==` / `!=`) outside parentheses
+    depth = 0;
+    i = 0;
+    while i + 1 < n {
+        let b = s.byte_at(i);
+        if b == 40 {
+            depth = depth + 1;
+        } else if b == 41 && depth > 0 {
+            depth = depth - 1;
+        } else if depth == 0 && b == 61 && s.byte_at(i + 1) == 61 {
+            let lv = eval_preproc_condition(s.slice(0, i), defined_csv);
+            let rv = eval_preproc_condition(s.slice(i + 2, n), defined_csv);
+            return lv == rv;
+        } else if depth == 0 && i > 0 && b == 33 && s.byte_at(i + 1) == 61 {
+            let lv = eval_preproc_condition(s.slice(0, i), defined_csv);
+            let rv = eval_preproc_condition(s.slice(i + 2, n), defined_csv);
+            return lv != rv;
+        }
+        i = i + 1;
     }
 
     // 4. Unary NOT (`!`)
-    if trimmed.byte_at(0) == 33 {
-        return !eval_preproc_condition(trimmed.slice(1, n), defined_csv);
+    if s.byte_at(0) == 33 {
+        return !eval_preproc_condition(s.slice(1, n), defined_csv);
     }
 
-    if trimmed == "true" || trimmed == "TRUE" || trimmed == "1" {
+    // 5. `defined(SYM)` or `defined SYM`
+    if starts_with_str(s, "defined") && n > 7 {
+        let next_b = s.byte_at(7);
+        if next_b == 40 || is_ws_byte(next_b) {
+            var rest = trim_ws(s.slice(7, n));
+            while has_enclosing_parens(rest) {
+                rest = trim_ws(rest.slice(1, rest.len() - 1));
+            }
+            return csv_has_symbol(defined_csv, rest);
+        }
+    }
+
+    if s == "true" || s == "TRUE" || s == "1" {
         return true;
     }
-    if trimmed == "false" || trimmed == "FALSE" || trimmed == "0" {
+    if s == "false" || s == "FALSE" || s == "0" {
         return false;
     }
-    return csv_has_symbol(defined_csv, trimmed);
+    return csv_has_symbol(defined_csv, s);
 }
 
 // Classifies single-directive diagnostic codes (`PREPROC001`..`PREPROC008`).
@@ -236,12 +302,14 @@ pub fn classify_directive_code(
     has_open_region: bool
 ) -> str {
     if directive == "define" {
-        if args.len() == 0 {
+        if trim_ws(args).len() == 0 {
             return "PREPROC001";
         }
         return "";
     }
-    if directive == "undef" || directive == "if" || directive == "region" || directive == "pragma" || directive == "nullable" || directive == "line" {
+    if directive == "undef" || directive == "if" || directive == "ifdef" || directive == "ifndef"
+        || directive == "region" || directive == "pragma" || directive == "nullable" || directive == "line"
+    {
         return "";
     }
     if directive == "elif" {
@@ -283,17 +351,70 @@ pub fn classify_directive_code(
     return "PREPROC001";
 }
 
+pub fn if_stack_is_active(stk: i64, depth: i64) -> bool {
+    if depth <= 0 {
+        return true;
+    }
+    let pa = __engine("map_get", stk, "pa_" + depth);
+    let ba = __engine("map_get", stk, "ba_" + depth);
+    return pa == 1 && ba == 1;
+}
+
+pub fn if_stack_has_else(stk: i64, depth: i64) -> bool {
+    if depth <= 0 {
+        return false;
+    }
+    return __engine("map_get", stk, "el_" + depth) == 1;
+}
+
+pub fn scan_line_comment_state(line_str: str, in_block_comment: bool) -> bool {
+    let n = line_str.len();
+    var in_blk = in_block_comment;
+    var i = 0;
+    while i < n {
+        let b = line_str.byte_at(i);
+        if in_blk {
+            if b == 42 && i + 1 < n && line_str.byte_at(i + 1) == 47 {
+                in_blk = false;
+                i = i + 2;
+            } else {
+                i = i + 1;
+            }
+        } else if b == 47 && i + 1 < n && line_str.byte_at(i + 1) == 47 {
+            return false;
+        } else if b == 47 && i + 1 < n && line_str.byte_at(i + 1) == 42 {
+            in_blk = true;
+            i = i + 2;
+        } else if b == 34 {
+            i = i + 1;
+            while i < n && line_str.byte_at(i) != 34 {
+                if line_str.byte_at(i) == 92 {
+                    i = i + 2;
+                } else {
+                    i = i + 1;
+                }
+            }
+            if i < n {
+                i = i + 1;
+            }
+        } else {
+            i = i + 1;
+        }
+    }
+    return in_blk;
+}
+
 // Validates a source string and returns comma-separated PREPROC001..PREPROC008 diagnostic codes.
 pub fn validate_preprocessor_directives(src: str, initial_symbols_csv: str) -> str {
     let n = src.len();
+    let stk = __engine("map_new");
     var cursor = 0;
     var line_num = 1;
     var defined_csv = initial_symbols_csv;
     var if_depth = 0;
-    var top_has_else = false;
-    var top_active = true;
-    var top_met = false;
     var region_depth = 0;
+    var warn_disabled = false;
+    var in_blk_comment = false;
     var diags = "";
 
     while cursor < n {
@@ -303,50 +424,106 @@ pub fn validate_preprocessor_directives(src: str, initial_symbols_csv: str) -> s
         }
         let line_str = src.slice(cursor, line_end);
         let trimmed = trim_ws(line_str);
+        let cur_active = if_stack_is_active(stk, if_depth);
 
-        if !(line_num == 1 && starts_with_str(trimmed, "#!")) {
-            if trimmed.len() > 0 && trimmed.byte_at(0) == 35 {
-                let content = trim_ws(trimmed.slice(1, trimmed.len()));
-                let dir = parse_directive_name(content);
-                let args = parse_directive_args(content);
-                let code = classify_directive_code(dir, args, if_depth > 0, top_has_else, region_depth > 0);
-                if code.len() > 0 {
-                    if (dir != "error" && dir != "warning") || top_active {
+        if line_num == 1 && starts_with_str(trimmed, "!") == false && trimmed.len() >= 2 && trimmed.byte_at(0) == 35 && trimmed.byte_at(1) == 33 {
+            // Line-1 shebang is skipped cleanly
+            line_num = line_num;
+        } else if !in_blk_comment && trimmed.len() > 0 && trimmed.byte_at(0) == 35 {
+            let content = trim_ws(trimmed.slice(1, trimmed.len()));
+            let dir = parse_directive_name(content);
+            let args = parse_directive_args(content);
+            let cur_has_else = if_stack_has_else(stk, if_depth);
+            let code = classify_directive_code(dir, args, if_depth > 0, cur_has_else, region_depth > 0);
+
+            if code.len() > 0 {
+                if dir == "error" {
+                    if cur_active {
                         diags = csv_add_symbol(diags, code);
                     }
-                }
-                if dir == "define" && top_active && args.len() > 0 {
-                    defined_csv = csv_add_symbol(defined_csv, args);
-                } else if dir == "undef" && top_active && args.len() > 0 {
-                    defined_csv = csv_remove_symbol(defined_csv, args);
-                } else if dir == "if" {
-                    if_depth = if_depth + 1;
-                    top_has_else = false;
-                    let cond = eval_preproc_condition(args, defined_csv);
-                    top_met = cond;
-                    top_active = cond;
-                } else if dir == "elif" && if_depth > 0 && !top_has_else {
-                    if top_met {
-                        top_active = false;
-                    } else {
-                        let cond = eval_preproc_condition(args, defined_csv);
-                        top_met = cond;
-                        top_active = cond;
+                } else if dir == "warning" {
+                    if cur_active && !warn_disabled {
+                        diags = csv_add_symbol(diags, code);
                     }
-                } else if dir == "else" && if_depth > 0 && !top_has_else {
-                    top_has_else = true;
-                    top_active = !top_met;
-                } else if dir == "endif" && if_depth > 0 {
-                    if_depth = if_depth - 1;
-                    top_has_else = false;
-                    top_active = true;
-                    top_met = false;
-                } else if dir == "region" {
-                    region_depth = region_depth + 1;
-                } else if dir == "endregion" && region_depth > 0 {
-                    region_depth = region_depth - 1;
+                } else {
+                    diags = csv_add_symbol(diags, code);
                 }
             }
+
+            if dir == "define" && cur_active && args.len() > 0 {
+                defined_csv = csv_add_symbol(defined_csv, args);
+            } else if dir == "undef" && cur_active && args.len() > 0 {
+                defined_csv = csv_remove_symbol(defined_csv, args);
+            } else if dir == "pragma" && cur_active {
+                if starts_with_str(args, "warning") {
+                    let wrest = trim_ws(args.slice(7, args.len()));
+                    if starts_with_str(wrest, "disable") {
+                        warn_disabled = true;
+                    } else if starts_with_str(wrest, "restore") {
+                        warn_disabled = false;
+                    }
+                }
+            } else if dir == "if" || dir == "ifdef" || dir == "ifndef" {
+                if_depth = if_depth + 1;
+                var pa_flag = 0;
+                if cur_active {
+                    pa_flag = 1;
+                }
+                __engine("map_set", stk, "pa_" + if_depth, pa_flag);
+                __engine("map_set", stk, "el_" + if_depth, 0);
+                if cur_active {
+                    var cond = false;
+                    if dir == "ifdef" {
+                        cond = csv_has_symbol(defined_csv, args);
+                    } else if dir == "ifndef" {
+                        cond = !csv_has_symbol(defined_csv, args);
+                    } else {
+                        cond = eval_preproc_condition(args, defined_csv);
+                    }
+                    if cond {
+                        __engine("map_set", stk, "ba_" + if_depth, 1);
+                        __engine("map_set", stk, "met_" + if_depth, 1);
+                    } else {
+                        __engine("map_set", stk, "ba_" + if_depth, 0);
+                        __engine("map_set", stk, "met_" + if_depth, 0);
+                    }
+                } else {
+                    __engine("map_set", stk, "ba_" + if_depth, 0);
+                    __engine("map_set", stk, "met_" + if_depth, 1);
+                }
+            } else if dir == "elif" && if_depth > 0 && !cur_has_else {
+                let pa = __engine("map_get", stk, "pa_" + if_depth) == 1;
+                let met = __engine("map_get", stk, "met_" + if_depth) == 1;
+                if !pa || met {
+                    __engine("map_set", stk, "ba_" + if_depth, 0);
+                } else {
+                    let cond = eval_preproc_condition(args, defined_csv);
+                    if cond {
+                        __engine("map_set", stk, "ba_" + if_depth, 1);
+                        __engine("map_set", stk, "met_" + if_depth, 1);
+                    } else {
+                        __engine("map_set", stk, "ba_" + if_depth, 0);
+                    }
+                }
+            } else if dir == "else" && if_depth > 0 && !cur_has_else {
+                __engine("map_set", stk, "el_" + if_depth, 1);
+                let pa = __engine("map_get", stk, "pa_" + if_depth) == 1;
+                let met = __engine("map_get", stk, "met_" + if_depth) == 1;
+                if pa && !met {
+                    __engine("map_set", stk, "ba_" + if_depth, 1);
+                    __engine("map_set", stk, "met_" + if_depth, 1);
+                } else {
+                    __engine("map_set", stk, "ba_" + if_depth, 0);
+                }
+            } else if dir == "endif" && if_depth > 0 {
+                if_depth = if_depth - 1;
+            } else if dir == "region" {
+                region_depth = region_depth + 1;
+            } else if dir == "endregion" && region_depth > 0 {
+                region_depth = region_depth - 1;
+            }
+        } else if cur_active {
+            in_blk_comment = scan_line_comment_state(line_str, in_blk_comment);
         }
 
         if line_end < n {
@@ -366,16 +543,15 @@ pub fn validate_preprocessor_directives(src: str, initial_symbols_csv: str) -> s
     return diags;
 }
 
-// Preprocesses raw source and returns active Pilot source with inactive lines replaced by empty lines.
+// Preprocesses raw source and returns active Pilot source with inactive/directive lines replaced by empty lines.
 pub fn preprocess_source(src: str, initial_symbols_csv: str) -> str {
     let n = src.len();
+    let stk = __engine("map_new");
     var cursor = 0;
     var line_num = 1;
     var defined_csv = initial_symbols_csv;
     var if_depth = 0;
-    var top_has_else = false;
-    var top_active = true;
-    var top_met = false;
+    var in_blk_comment = false;
     var out = "";
 
     while cursor < n {
@@ -386,44 +562,82 @@ pub fn preprocess_source(src: str, initial_symbols_csv: str) -> str {
         let has_nl = line_end < n;
         let line_str = src.slice(cursor, line_end);
         let trimmed = trim_ws(line_str);
+        let cur_active = if_stack_is_active(stk, if_depth);
         var emit_line = false;
 
-        if line_num == 1 && starts_with_str(trimmed, "#!") {
+        if line_num == 1 && trimmed.len() >= 2 && trimmed.byte_at(0) == 35 && trimmed.byte_at(1) == 33 {
             emit_line = false;
-        } else if trimmed.len() > 0 && trimmed.byte_at(0) == 35 {
+        } else if !in_blk_comment && trimmed.len() > 0 && trimmed.byte_at(0) == 35 {
             let content = trim_ws(trimmed.slice(1, trimmed.len()));
             let dir = parse_directive_name(content);
             let args = parse_directive_args(content);
-            if dir == "define" && top_active && args.len() > 0 {
+            let cur_has_else = if_stack_has_else(stk, if_depth);
+
+            if dir == "define" && cur_active && args.len() > 0 {
                 defined_csv = csv_add_symbol(defined_csv, args);
-            } else if dir == "undef" && top_active && args.len() > 0 {
+            } else if dir == "undef" && cur_active && args.len() > 0 {
                 defined_csv = csv_remove_symbol(defined_csv, args);
-            } else if dir == "if" {
+            } else if dir == "if" || dir == "ifdef" || dir == "ifndef" {
                 if_depth = if_depth + 1;
-                top_has_else = false;
-                let cond = eval_preproc_condition(args, defined_csv);
-                top_met = cond;
-                top_active = cond;
-            } else if dir == "elif" && if_depth > 0 && !top_has_else {
-                if top_met {
-                    top_active = false;
+                var pa_flag = 0;
+                if cur_active {
+                    pa_flag = 1;
+                }
+                __engine("map_set", stk, "pa_" + if_depth, pa_flag);
+                __engine("map_set", stk, "el_" + if_depth, 0);
+                if cur_active {
+                    var cond = false;
+                    if dir == "ifdef" {
+                        cond = csv_has_symbol(defined_csv, args);
+                    } else if dir == "ifndef" {
+                        cond = !csv_has_symbol(defined_csv, args);
+                    } else {
+                        cond = eval_preproc_condition(args, defined_csv);
+                    }
+                    if cond {
+                        __engine("map_set", stk, "ba_" + if_depth, 1);
+                        __engine("map_set", stk, "met_" + if_depth, 1);
+                    } else {
+                        __engine("map_set", stk, "ba_" + if_depth, 0);
+                        __engine("map_set", stk, "met_" + if_depth, 0);
+                    }
+                } else {
+                    __engine("map_set", stk, "ba_" + if_depth, 0);
+                    __engine("map_set", stk, "met_" + if_depth, 1);
+                }
+            } else if dir == "elif" && if_depth > 0 && !cur_has_else {
+                let pa = __engine("map_get", stk, "pa_" + if_depth) == 1;
+                let met = __engine("map_get", stk, "met_" + if_depth) == 1;
+                if !pa || met {
+                    __engine("map_set", stk, "ba_" + if_depth, 0);
                 } else {
                     let cond = eval_preproc_condition(args, defined_csv);
-                    top_met = cond;
-                    top_active = cond;
+                    if cond {
+                        __engine("map_set", stk, "ba_" + if_depth, 1);
+                        __engine("map_set", stk, "met_" + if_depth, 1);
+                    } else {
+                        __engine("map_set", stk, "ba_" + if_depth, 0);
+                    }
                 }
-            } else if dir == "else" && if_depth > 0 && !top_has_else {
-                top_has_else = true;
-                top_active = !top_met;
+            } else if dir == "else" && if_depth > 0 && !cur_has_else {
+                __engine("map_set", stk, "el_" + if_depth, 1);
+                let pa = __engine("map_get", stk, "pa_" + if_depth) == 1;
+                let met = __engine("map_get", stk, "met_" + if_depth) == 1;
+                if pa && !met {
+                    __engine("map_set", stk, "ba_" + if_depth, 1);
+                    __engine("map_set", stk, "met_" + if_depth, 1);
+                } else {
+                    __engine("map_set", stk, "ba_" + if_depth, 0);
+                }
             } else if dir == "endif" && if_depth > 0 {
                 if_depth = if_depth - 1;
-                top_has_else = false;
-                top_active = true;
-                top_met = false;
             }
             emit_line = false;
         } else {
-            emit_line = top_active;
+            emit_line = cur_active;
+            if cur_active {
+                in_blk_comment = scan_line_comment_state(line_str, in_blk_comment);
+            }
         }
 
         if emit_line {

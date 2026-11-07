@@ -45,9 +45,10 @@ pub fn verify_delimiter_convergence(island_text: str) -> bool {
 
     while i < n {
         let b = island_text.byte_at(i);
-        if b == 34 {
+        if b == 34 || b == 39 {
+            let q = b;
             i = i + 1;
-            while i < n && island_text.byte_at(i) != 34 {
+            while i < n && island_text.byte_at(i) != q {
                 if island_text.byte_at(i) == 92 {
                     i = i + 2;
                 } else {
@@ -62,6 +63,15 @@ pub fn verify_delimiter_convergence(island_text: str) -> bool {
             while i < n && island_text.byte_at(i) != 10 {
                 i = i + 1;
             }
+        } else if b == 47 && i + 1 < n && island_text.byte_at(i + 1) == 42 {
+            i = i + 2;
+            while i + 1 < n && !(island_text.byte_at(i) == 42 && island_text.byte_at(i + 1) == 47) {
+                i = i + 1;
+            }
+            if i + 1 >= n {
+                return false;
+            }
+            i = i + 2;
         } else {
             if b == 40 { paren_depth = paren_depth + 1; }
             else if b == 41 { paren_depth = paren_depth - 1; if paren_depth < 0 { return false; } }
@@ -75,8 +85,89 @@ pub fn verify_delimiter_convergence(island_text: str) -> bool {
     return paren_depth == 0 && bracket_depth == 0 && brace_depth == 0;
 }
 
+// Incrementally reparses only the affected top-level syntactic island when delimiters converge,
+// reusing exact GreenNode handles for all unaffected sibling declarations.
+pub fn incremental_reparse_cst(
+    old_root: i64,
+    old_src: str,
+    edit_start: i64,
+    edit_end: i64,
+    replacement: str
+) -> i64 {
+    let new_src = apply_text_edit(old_src, edit_start, edit_end, replacement);
+    if old_root < 0 || edit_start < 0 || edit_end < edit_start || edit_end > old_src.len() {
+        return parse_lossless_cst(new_src);
+    }
+
+    let child_cnt = cst_child_count(old_root);
+    if child_cnt <= 0 {
+        return parse_lossless_cst(new_src);
+    }
+
+    var target_idx = -1;
+    var target_start = 0;
+    var target_txt = "";
+    var cur_off = 0;
+    var i = 0;
+    while i < child_cnt {
+        let ch = cst_child_at(old_root, i);
+        let txt = cst_node_text(ch);
+        let ch_start = cur_off;
+        let ch_end = cur_off + txt.len();
+        if target_idx < 0 && edit_start >= ch_start && edit_end <= ch_end {
+            if edit_start < ch_end || ch_end == old_src.len() {
+                target_idx = i;
+                target_start = ch_start;
+                target_txt = txt;
+            }
+        }
+        cur_off = ch_end;
+        i = i + 1;
+    }
+
+    if target_idx < 0 {
+        return parse_lossless_cst(new_src);
+    }
+
+    let rel_start = edit_start - target_start;
+    let rel_end = edit_end - target_start;
+    if !verify_delimiter_convergence(target_txt) {
+        return parse_lossless_cst(new_src);
+    }
+
+    let new_island_txt = apply_text_edit(target_txt, rel_start, rel_end, replacement);
+    if new_island_txt.len() == 0 || !verify_delimiter_convergence(new_island_txt) {
+        return parse_lossless_cst(new_src);
+    }
+    if cst_detect_missing_rbrace(new_island_txt) || cst_detect_missing_rparen(new_island_txt) {
+        return parse_lossless_cst(new_src);
+    }
+
+    let island_root = parse_lossless_cst(new_island_txt);
+    if cst_child_count(island_root) != 1 {
+        return parse_lossless_cst(new_src);
+    }
+
+    let reparsed_child = cst_child_at(island_root, 0);
+    if cst_node_text(reparsed_child) != new_island_txt {
+        return parse_lossless_cst(new_src);
+    }
+
+    let new_root = cst_alloc_node(cst_kind_program(), new_src);
+    var j = 0;
+    while j < child_cnt {
+        if j == target_idx {
+            cst_append_child(new_root, reparsed_child);
+        } else {
+            cst_append_child(new_root, cst_child_at(old_root, j));
+        }
+        j = j + 1;
+    }
+    return new_root;
+}
+
 // Locates the narrowest top-level declaration island `[island_start, island_end)`
-// enclosing `[edit_start, edit_end)`. Returns `"start:end:total_islands"` or `"-1:-1:total"`.
+// enclosing `[edit_start, edit_end)`.
 pub fn find_enclosing_island(src: str, edit_start: i64, edit_end: i64) -> str {
     let n = src.len();
     var brace_depth = 0;
@@ -140,7 +231,7 @@ pub fn find_enclosing_island(src: str, edit_start: i64, edit_end: i64) -> str {
         }
     }
 
-    if found_start >= 0 && found_end >= found_start {
+    if found_start >= 0 && found_end >= found_start && total_islands > 0 {
         let old_island = src.slice(found_start, found_end);
         let rel_start = edit_start - found_start;
         let rel_end = edit_end - found_start;

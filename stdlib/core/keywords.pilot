@@ -848,14 +848,15 @@ pub fn keyword_strip_colon(raw: str) -> str {
 
 pub fn keyword_slash_index(stripped: str) -> i64 {
     let n = stripped.len();
+    var last_idx = -1;
     var i = 0;
     while i < n {
         if stripped.byte_at(i) == 47 {
-            return i;
+            last_idx = i;
         }
         i = i + 1;
     }
-    return -1;
+    return last_idx;
 }
 
 pub fn keyword_namespace(raw: str) -> str {
@@ -881,5 +882,22 @@ pub fn keyword_split(raw: str) -> KeywordDescriptor {
         namespace: keyword_namespace(raw),
         name:      keyword_name(raw),
     };
+}
+
+pub fn register_keyword_category_entry(
+    category_id: i64,
+    tm_scope:    str,
+    badge:       str,
+    lsp_kind:    i64
+) -> i64 {
+    return __engine("register_keyword_category", category_id, tm_scope, badge, lsp_kind);
+}
+
+pub fn register_keyword_entry(
+    category_id: i64,
+    word:        str,
+    doc:         str
+) -> i64 {
+    return __engine("register_keyword", category_id, word, doc);
 }
 

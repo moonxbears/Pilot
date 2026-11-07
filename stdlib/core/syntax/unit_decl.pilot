@@ -115,3 +115,18 @@ pub fn split_numeric_and_unit_suffix(raw_lit: str) -> UnitDescriptor {
         base_multiplier: unit_scale_to_base(suffix),
     };
 }
+
+pub fn convert_unit_literal_to_base(raw_lit: str) -> i64 {
+    let desc = split_numeric_and_unit_suffix(raw_lit);
+    let num_len = raw_lit.len() - desc.suffix.len();
+    var acc = 0;
+    var i = 0;
+    while i < num_len {
+        let b = raw_lit.byte_at(i);
+        if b >= 48 && b <= 57 {
+            acc = acc * 10 + (b - 48);
+        }
+        i = i + 1;
+    }
+    return acc * desc.base_multiplier;
+}
