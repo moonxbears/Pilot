@@ -1,0 +1,65 @@
+// =========================================================================
+// FILE: stdlib/core/naming_attr.pilot
+// CANONICAL 2-BIT HARDWARE LATTICE & CORE TAXONOMY NAMING ATTRIBUTE
+// Enforces AGENTS.md §3 across [EnforceCoreNaming] packages in Pilot.Core.*:
+//   1. Interfaces:        'I' + PascalCase (IAnyValue, IValue, IEquatable)
+//   2. [Lang] Primitives: lowercase hardware/ABI primitives (i64, slice, str)
+//   3. Attributes:        PascalCase + 'Attr' (ClampAttr, HardRealtimeAttr)
+//   4. 0b01 Views:        PascalCase + View | Lens | Cursor | Enumerator
+//   5. 0b11 Guards:       PascalCase + Guard | Scope | Lease
+//   6. 0b00 / 0b10 Types: Unadorned PascalCase (RangeWindow, SliceBuffer)
+// =========================================================================
+[EnforceCoreNaming]
+pub pkg Pilot.Core.Naming;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+
+[Layout(c_abi)]
+pub struct EnforceCoreNamingAttr : IAttribute, IValue {
+    pub check_interfaces:      bool;
+    pub check_attributes:      bool;
+    pub check_lattice_suffix:  bool;
+    pub weight:                i32;
+
+    pub static pure fn strict() -> EnforceCoreNamingAttr => EnforceCoreNamingAttr {
+        check_interfaces:     true,
+        check_attributes:     true,
+        check_lattice_suffix: true,
+        weight:               100,
+    };
+}
+
+pub struct NamingRuleCode : IValue {
+    pub code: i64;
+
+    pub static pure:
+        fn interface_prefix() -> i64 => 1;
+        fn pascal_struct()    -> i64 => 2;
+        fn attribute_suffix() -> i64 => 3;
+        fn reference_suffix() -> i64 => 4;
+        fn guard_suffix()     -> i64 => 5;
+        fn struct_i_prefix()  -> i64 => 6;
+}
+
+pub pure fn naming_rule_label(rule_code: i64) -> str {
+    if rule_code == 1 {
+        return "InterfacePrefix";
+    }
+    if rule_code == 2 {
+        return "StructPascalCase";
+    }
+    if rule_code == 3 {
+        return "AttributeSuffix";
+    }
+    if rule_code == 4 {
+        return "ReferenceViewSuffix";
+    }
+    if rule_code == 5 {
+        return "ScopedGuardSuffix";
+    }
+    if rule_code == 6 {
+        return "ReservedInterfacePrefix";
+    }
+    return "CoreNamingRule";
+}

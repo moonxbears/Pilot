@@ -802,6 +802,7 @@ impl<'a> Parser<'a> {
                 || self.at(TokenKind::KwProtected)
                 || self.at(TokenKind::KwInternal)
                 || self.at(TokenKind::KwStatic)
+                || self.at(TokenKind::KwPartial)
                 || self.at(TokenKind::KwComptime);
 
             if !is_mod_candidate {
@@ -2286,38 +2287,28 @@ impl<'a> Parser<'a> {
             }
             TokenKind::KwClass | TokenKind::KwActor | TokenKind::KwState if k != TokenKind::KwState || self.is_ident_like_pos(self.pos + 1) => {
                 let n = self.parse_class_decl();
-                let vis = vis_opt.unwrap_or(VisibilityTier::Internal);
-                self.arena.node_visibility.insert(n.0, vis);
-                if let Some(c) = clr_opt { self.arena.node_clearance.insert(n.0, c); }
+                self.apply_decl_mods(n, mods, Some(VisibilityTier::Internal));
                 n
             }
             TokenKind::KwStruct => {
                 let n = self.parse_struct_decl();
-                let vis = vis_opt.unwrap_or(VisibilityTier::Internal);
-                self.arena.node_visibility.insert(n.0, vis);
-                if let Some(c) = clr_opt { self.arena.node_clearance.insert(n.0, c); }
+                self.apply_decl_mods(n, mods, Some(VisibilityTier::Internal));
                 n
             }
             TokenKind::KwRecord => {
                 let n = self.parse_record_decl();
-                let vis = vis_opt.unwrap_or(VisibilityTier::Internal);
-                self.arena.node_visibility.insert(n.0, vis);
-                if let Some(c) = clr_opt { self.arena.node_clearance.insert(n.0, c); }
+                self.apply_decl_mods(n, mods, Some(VisibilityTier::Internal));
                 n
             }
             TokenKind::KwInterface | TokenKind::KwProtocol => {
                 let n = self.parse_interface_decl();
-                let vis = vis_opt.unwrap_or(VisibilityTier::Internal);
-                self.arena.node_visibility.insert(n.0, vis);
-                if let Some(c) = clr_opt { self.arena.node_clearance.insert(n.0, c); }
+                self.apply_decl_mods(n, mods, Some(VisibilityTier::Internal));
                 n
             }
             TokenKind::KwExtend | TokenKind::KwExtension => self.parse_extend_decl(),
             TokenKind::KwType | TokenKind::KwEnum => {
                 let n = self.parse_type_adt_decl();
-                let vis = vis_opt.unwrap_or(VisibilityTier::Internal);
-                self.arena.node_visibility.insert(n.0, vis);
-                if let Some(c) = clr_opt { self.arena.node_clearance.insert(n.0, c); }
+                self.apply_decl_mods(n, mods, Some(VisibilityTier::Internal));
                 n
             }
             TokenKind::KwLet | TokenKind::KwDynamic => {
@@ -5701,8 +5692,12 @@ impl<'a> Parser<'a> {
                     &raw_content[3..raw_content.len() - 3]
                 } else if raw_content.starts_with("'''") && raw_content.ends_with("'''") && raw_content.len() >= 6 {
                     &raw_content[3..raw_content.len() - 3]
+                } else if raw_content.starts_with('"') && raw_content.ends_with('"') && raw_content.len() >= 2 {
+                    &raw_content[1..raw_content.len() - 1]
+                } else if raw_content.starts_with('\'') && raw_content.ends_with('\'') && raw_content.len() >= 2 {
+                    &raw_content[1..raw_content.len() - 1]
                 } else {
-                    raw_content.trim_matches('"').trim_matches('\'')
+                    raw_content
                 };
                 let unescaped = if clean.contains('\\') {
                     let mut s = String::with_capacity(clean.len());

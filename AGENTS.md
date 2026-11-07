@@ -5,6 +5,10 @@
   `__engine`, `struct`, `interface`, `fn`, `let`, `ref`, `if`, `loop`, `return`, `yield`, `defer`, `comptime`, `quote`, `asm`.
 - **Zero Hardcoded Type or Symbol Names (Primitives AND Composites):**
   - Never hardcode ANY Pilot type name—whether scalar (`"i64"`, `"u8"`, `"f64"`, `"char"`, `"bool"`, `"usize"`) or composite/algebraic (`"str"`, `"slice"`, `"stride"`, `"array"`, `"simd"`, `"option"`, `"result"`, `"range"`, `"span"`, `"map"`, `"SliceBuffer"`, `"RangeWindow"`, `"Dual"`, `"Signal"`, `"frame"`)—inside Rust `match` arms, string comparisons, or codegen tables.
+- **Scalable Designing:**
+  - Everything should be extendible and scalable to prevent duplicity and locking to specific ways of doing things. If implementing something like `BootstrapStage`, a function shouldn't return the number 8 hardcoded when the function is meant to return the number of stages. Instead, a map of key indices mapped to strings for the stages should exist so that you can call <map_variable>.len 
+- **Remove Legacy Code:**
+  - Anytime a replacement is provided, remove all the legacy code so as to not clutter the code base.
   - **The Universal Rename Litmus Test:** *If a developer renames `char` to `c32`, `slice<T>` to `window<T>`, `option<T>` to `maybe<T>`, `result<T, E>` to `outcome<T, E>`, and `range<T>` to `interval<T>` inside `stdlib/core/*.pilot`, the entire Rust compiler (`pilot-lexer`, `pilot-parser`, `pilot-analysis`, `pilot-perceus`, `pilot-codegen`, `pilot-vm`, `pilot-lsp`) MUST compile, type-check, and emit valid LLVM/C/WASM/GPU/ASM code with zero Rust source changes.*
 - **How Rust Must Derive All Types (5 Name-Blind Mechanisms):**
   1. **Register & Layout Physics (`[Bits]` & `[Layout]`):** Deduce CPU register classes (`gpr_signed`, `gpr_unsigned`, `simd_float`, `simd_vector`, `raw_ptr`, `unit`, `noreturn`), bit widths, inline array repetition (`repeat`), and niche packing (`niche`) strictly from layout descriptors.

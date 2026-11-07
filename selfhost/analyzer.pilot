@@ -12,18 +12,27 @@ let Cfg = {
     ast = {
         ast_attr_arg: "ast_attr_arg",
         ast_attr_count: "ast_attr_count",
+        ast_attr_decl_arg: "ast_attr_decl_arg",
+        ast_attr_decl_arg_count: "ast_attr_decl_arg_count",
+        ast_attr_decl_count: "ast_attr_decl_count",
+        ast_attr_name: "ast_attr_name",
+        ast_base_at: "ast_base_at",
+        ast_base_count: "ast_base_count",
         ast_bind_layout: "ast_bind_layout",
         ast_bind_target: "ast_bind_target",
         ast_child_at: "ast_child_at",
         ast_child_count: "ast_child_count",
+        ast_decl_flags: "ast_decl_flags",
         ast_emit_diag: "ast_emit_diag",
         ast_get_bound_layout: "ast_get_bound_layout",
         ast_get_bound_target: "ast_get_bound_target",
         ast_node_count: "ast_node_count",
+        ast_node_flags: "ast_node_flags",
         ast_node_kind: "ast_node_kind",
         ast_node_lit_kind: "ast_node_lit_kind",
         ast_node_raw_bits: "ast_node_raw_bits",
         ast_node_sym: "ast_node_sym",
+        ast_orig_kind: "ast_orig_kind",
         ast_span_end: "ast_span_end",
         ast_span_start: "ast_span_start",
         layout_aggregate: "layout_aggregate",
@@ -38,6 +47,8 @@ let Cfg = {
         lsp_set_result: "lsp_set_result",
         mount_unit: "mount_unit",
         source_slice: "source_slice",
+        str_byte_at: "str_byte_at",
+        str_len: "str_len",
         sym_str: "sym_str",
     }
 };
@@ -82,27 +93,74 @@ pub fn infer_struct(s_id: i64, node_count: i64) -> i64 {
         return existing;
     }
 
-    let attr_cnt = __engine(Cfg.ast.ast_attr_count, s_id);
-    if attr_cnt >= 2 {
-        let arg0 = __engine(Cfg.ast.ast_attr_arg, s_id, 0);
-        let arg1 = __engine(Cfg.ast.ast_attr_arg, s_id, 1);
-        var bank = arg1;
-        var lanes = 1;
-        if attr_cnt >= 3 {
-            lanes = arg1;
-            bank = __engine(Cfg.ast.ast_attr_arg, s_id, 2);
+    let c_count = __engine(Cfg.ast.ast_child_count, s_id);
+    let my_sym = __engine(Cfg.ast.ast_node_sym, s_id);
+    var has_non_self_field = 0;
+    var fscan = 0;
+    while fscan < c_count {
+        let fnid = __engine(Cfg.ast.ast_child_at, s_id, fscan);
+        let fk = __engine(Cfg.ast.ast_node_kind, fnid);
+        if fk == 21 || fk == 4 {
+            let fts = __engine(Cfg.ast.ast_node_raw_bits, fnid);
+            if fts != my_sym {
+                has_non_self_field = 1;
+            }
         }
-        var s_lid = 0;
-        if bank == 6 {
-            s_lid = __engine(Cfg.ast.layout_ptr, 0, 1, 0);
-        } else {
-            s_lid = __engine(Cfg.ast.layout_scalar, arg0, lanes, bank);
-        }
-        __engine(Cfg.ast.ast_bind_layout, s_id, s_lid);
-        return s_lid;
+        fscan = fscan + 1;
     }
 
-    let c_count = __engine(Cfg.ast.ast_child_count, s_id);
+    let decl_cnt = __engine(Cfg.ast.ast_attr_decl_count, s_id);
+    if has_non_self_field == 0 && decl_cnt > 0 {
+        var di = 0;
+        var matched_decl = -1;
+        while di < decl_cnt {
+            let dargc = __engine(Cfg.ast.ast_attr_decl_arg_count, s_id, di);
+            if dargc == 2 || dargc == 3 {
+                matched_decl = di;
+            }
+            di = di + 1;
+        }
+        if matched_decl >= 0 {
+            let dargc = __engine(Cfg.ast.ast_attr_decl_arg_count, s_id, matched_decl);
+            let d0 = __engine(Cfg.ast.ast_attr_decl_arg, s_id, matched_decl, 0);
+            let d1 = __engine(Cfg.ast.ast_attr_decl_arg, s_id, matched_decl, 1);
+            var dbank = d1;
+            var dlanes = 1;
+            if dargc == 3 {
+                dlanes = d1;
+                dbank = __engine(Cfg.ast.ast_attr_decl_arg, s_id, matched_decl, 2);
+            }
+            var ds_lid = 0;
+            if dbank == 6 {
+                ds_lid = __engine(Cfg.ast.layout_ptr, 0, 1, 0);
+            } else {
+                ds_lid = __engine(Cfg.ast.layout_scalar, d0, dlanes, dbank);
+            }
+            __engine(Cfg.ast.ast_bind_layout, s_id, ds_lid);
+            return ds_lid;
+        }
+    } else if has_non_self_field == 0 {
+        let attr_cnt = __engine(Cfg.ast.ast_attr_count, s_id);
+        if attr_cnt >= 2 {
+            let arg0 = __engine(Cfg.ast.ast_attr_arg, s_id, 0);
+            let arg1 = __engine(Cfg.ast.ast_attr_arg, s_id, 1);
+            var bank = arg1;
+            var lanes = 1;
+            if attr_cnt >= 3 {
+                lanes = arg1;
+                bank = __engine(Cfg.ast.ast_attr_arg, s_id, 2);
+            }
+            var s_lid = 0;
+            if bank == 6 {
+                s_lid = __engine(Cfg.ast.layout_ptr, 0, 1, 0);
+            } else {
+                s_lid = __engine(Cfg.ast.layout_scalar, arg0, lanes, bank);
+            }
+            __engine(Cfg.ast.ast_bind_layout, s_id, s_lid);
+            return s_lid;
+        }
+    }
+
     if c_count == 0 {
         let empty_lid = __engine(Cfg.ast.layout_scalar, 8, 1, 0);
         __engine(Cfg.ast.ast_bind_layout, s_id, empty_lid);
@@ -110,7 +168,6 @@ pub fn infer_struct(s_id: i64, node_count: i64) -> i64 {
     }
 
     // Self-Referential / Recursive Struct Guard
-    let my_sym = __engine(Cfg.ast.ast_node_sym, s_id);
     var fi_chk = 0;
     while fi_chk < c_count {
         let f_chk_node = __engine(Cfg.ast.ast_child_at, s_id, fi_chk);
@@ -552,10 +609,163 @@ pub fn infer_node(i: i64, node_count: i64) -> i64 {
     return 0;
 }
 
+pub fn verify_capability_transition(src_cap: i64, dst_cap: i64) -> bool {
+    // 0 = VALUE (`0b00`), 1 = BORROW_REF (`0b01`), 4 = OWNED_OBJ (`0b10`), 5 = SCOPED_GUARD (`0b11`)
+    if src_cap == 0 {
+        return true;
+    }
+    if src_cap == 4 {
+        if dst_cap == 1 { return true; }
+        if dst_cap == 5 { return true; }
+    }
+    return src_cap == dst_cap;
+}
+
+pub fn compute_field_projection_offset(agg_lid: i64, field_idx: i64) -> i64 {
+    return __engine(Cfg.ast.layout_field_offset, agg_lid, field_idx);
+}
+
+pub fn compute_soa_projection(elem_lid: i64, ptr_bits: i64) -> i64 {
+    // Target-pointer-width-aware SOA column slice (`{ ptr<TField>, usize }` -> 8B on 32-bit, 16B on 64-bit)
+    let w = if ptr_bits > 0 { ptr_bits } else { 64 };
+    let ptr_word_lid = __engine(Cfg.ast.layout_scalar, w, 1, 0);
+    let len_word_lid = __engine(Cfg.ast.layout_scalar, w, 1, 0);
+    let soa_slice_lid = __engine(Cfg.ast.layout_aggregate, ptr_word_lid, len_word_lid);
+    return soa_slice_lid;
+}
+
+pub fn str_ends_with_bytes(s: str, suffix: str) -> bool {
+    let slen = __engine(Cfg.ast.str_len, s);
+    let suflen = __engine(Cfg.ast.str_len, suffix);
+    if suflen > slen {
+        return false;
+    }
+    let base = slen - suflen;
+    var k = 0;
+    while k < suflen {
+        let a = __engine(Cfg.ast.str_byte_at, s, base + k);
+        let b = __engine(Cfg.ast.str_byte_at, suffix, k);
+        if a != b {
+            return false;
+        }
+        k = k + 1;
+    }
+    return true;
+}
+
+pub fn has_attr_named(nid: i64, target: str) -> bool {
+    let ac = __engine(Cfg.ast.ast_attr_decl_count, nid);
+    var idx = 0;
+    while idx < ac {
+        let asym = __engine(Cfg.ast.ast_attr_name, nid, idx);
+        let anm = __engine(Cfg.ast.sym_str, asym);
+        if anm == target {
+            return true;
+        }
+        idx = idx + 1;
+    }
+    return false;
+}
+
+pub fn verify_decl_contracts(nid: i64, enforce_naming: bool) -> i64 {
+    let kind = __engine(Cfg.ast.ast_node_kind, nid);
+    if kind != 1 {
+        if kind != 2 {
+            return 0;
+        }
+    }
+    let sym = __engine(Cfg.ast.ast_node_sym, nid);
+    let name = __engine(Cfg.ast.sym_str, sym);
+    let nlen = __engine(Cfg.ast.str_len, name);
+    if nlen == 0 {
+        return 0;
+    }
+    let c0 = __engine(Cfg.ast.str_byte_at, name, 0);
+    if c0 == 36 {
+        return 0;
+    }
+
+    let dflags = __engine(Cfg.ast.ast_decl_flags, nid);
+    let is_partial = (dflags & 16) != 0;
+    let has_dtor = (dflags & 1024) != 0;
+    let is_lang = has_attr_named(nid, "Lang");
+
+    if kind == 2 {
+        if enforce_naming {
+            let c1 = __engine(Cfg.ast.str_byte_at, name, 1);
+            if c0 != 73 || c1 < 65 || c1 > 90 {
+                __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [InterfacePrefix] Interface '" + name + "' must begin with 'I' + PascalCase");
+            }
+        }
+        return 0;
+    }
+
+    let bc = __engine(Cfg.ast.ast_base_count, nid);
+    var has_ivalue = false;
+    var has_iref = false;
+    var has_iobj = false;
+    var has_iguard = false;
+    var has_iattr = false;
+    var bi = 0;
+    while bi < bc {
+        let bsym = __engine(Cfg.ast.ast_base_at, nid, bi);
+        let bnm = __engine(Cfg.ast.sym_str, bsym);
+        if bnm == "IValue" { has_ivalue = true; }
+        if bnm == "IReference" { has_iref = true; }
+        if bnm == "IObject" { has_iobj = true; }
+        if bnm == "IGuard" { has_iguard = true; }
+        if bnm == "IAttribute" || bnm == "IInheritedAttribute" || bnm == "IInterceptor" || bnm == "IEcsRule" {
+            has_iattr = true;
+        }
+        if str_ends_with_bytes(bnm, "Attribute") {
+            has_iattr = true;
+        }
+        bi = bi + 1;
+    }
+
+    if has_ivalue {
+        if has_dtor {
+            __engine(Cfg.ast.ast_emit_diag, nid, 1, "LatticeContractMismatch: struct '" + name + "' declared ': IValue' (0b00), but declares ~self() destructor (0b10)");
+        }
+    }
+
+    if enforce_naming {
+        if !is_partial {
+            if !is_lang {
+                if c0 < 65 || c0 > 90 {
+                    __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [StructPascalCase] Core struct '" + name + "' must be PascalCase");
+                } else if has_iattr {
+                    if !str_ends_with_bytes(name, "Attr") {
+                        __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [AttributeSuffix] Attribute struct '" + name + "' must end with 'Attr'");
+                    }
+                } else if has_iguard || (has_iref && has_iobj) {
+                    if !str_ends_with_bytes(name, "Guard") && !str_ends_with_bytes(name, "Scope") && !str_ends_with_bytes(name, "Lease") {
+                        __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [ScopedGuardSuffix] IGuard struct '" + name + "' must end with 'Guard', 'Scope', or 'Lease'");
+                    }
+                } else if has_iref {
+                    if !str_ends_with_bytes(name, "View") && !str_ends_with_bytes(name, "Lens") && !str_ends_with_bytes(name, "Cursor") && !str_ends_with_bytes(name, "Enumerator") {
+                        __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [ReferenceViewSuffix] IReference struct '" + name + "' must end with 'View', 'Lens', 'Cursor', or 'Enumerator'");
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 pub fn analyze_unit(unit_id: i64) -> i64 {
     let node_count = __engine(Cfg.ast.ast_node_count);
     if node_count == 0 {
         return 0;
+    }
+
+    var enforce_naming = false;
+    var ni = 0;
+    while ni < node_count {
+        if has_attr_named(ni, "EnforceCoreNaming") || has_attr_named(ni, "EnforceCoreNamingAttr") {
+            enforce_naming = true;
+        }
+        ni = ni + 1;
     }
 
     // Pass 1: Resolve all StructDecl layouts (scalars, pointers, and nested aggregates)
@@ -589,6 +799,13 @@ pub fn analyze_unit(unit_id: i64) -> i64 {
     i = 0;
     while i < node_count {
         infer_node(i, node_count);
+        i = i + 1;
+    }
+
+    // Pass 4: Lattice origin & [EnforceCoreNaming] contract verification
+    i = 0;
+    while i < node_count {
+        verify_decl_contracts(i, enforce_naming);
         i = i + 1;
     }
 

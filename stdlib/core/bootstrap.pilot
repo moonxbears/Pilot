@@ -1,0 +1,72 @@
+// =========================================================================
+// FILE: stdlib/core/bootstrap.pilot
+// DECLARATIVE CORE BOOTSTRAP MANIFEST (STAGES 1..4)
+// Executed by ComptimeEngine::BootstrapSnapshot on PilVirtualMachine so Rust
+// never hardcodes "Pilot.Core.*" package names or stage ordering tables.
+// =========================================================================
+[EnforceCoreNaming]
+pub pkg Pilot.Core.Bootstrap;
+
+pub struct BootstrapStage : IValue {
+    pub stage_id:   i64;
+    pub ring_level: i64;
+    pub rel_path:   str;
+}
+
+pub pure fn bootstrap_stage_count() -> i64 {
+    return 8;
+}
+
+pub pure fn bootstrap_stage_path(idx: i64) -> str {
+    if idx == 0 {
+        return "stdlib/core/core.pilot";
+    }
+    if idx == 1 {
+        return "stdlib/core/operator.pilot";
+    }
+    if idx == 2 {
+        return "stdlib/core/mem.pilot";
+    }
+    if idx == 3 {
+        return "stdlib/core/option.pilot";
+    }
+    if idx == 4 {
+        return "stdlib/core/result.pilot";
+    }
+    if idx == 5 {
+        return "stdlib/core/task.pilot";
+    }
+    if idx == 6 {
+        return "stdlib/core/builtins/builtins.pilot";
+    }
+    if idx == 7 {
+        return "stdlib/core/meta.pilot";
+    }
+    return "";
+}
+
+pub pure fn bootstrap_stage_ring(idx: i64) -> i64 {
+    if idx == 0 {
+        return 100;
+    }
+    if idx >= 1 {
+        if idx <= 5 {
+            return 90;
+        }
+    }
+    if idx == 6 {
+        return 80;
+    }
+    if idx == 7 {
+        return 100;
+    }
+    return 0;
+}
+
+pub pure fn bootstrap_stage_at(idx: i64) -> BootstrapStage {
+    return BootstrapStage {
+        stage_id:   idx + 1,
+        ring_level: bootstrap_stage_ring(idx),
+        rel_path:   bootstrap_stage_path(idx),
+    };
+}

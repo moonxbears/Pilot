@@ -48,30 +48,20 @@ pub enum PhysicsGeometry {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FieldOffset {
-    pub positional_index: u16,
-    pub layout: LayoutId,
-    pub byte_offset: u32,
-    pub element_stride: u32,
+    pub positional_index: u16, pub layout: LayoutId, pub byte_offset: u32, pub element_stride: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PhysicalLayout {
-    pub id: LayoutId,
-    pub byte_size: u32,
-    pub byte_align: u32,
-    pub geometry: PhysicsGeometry,
+    pub id: LayoutId, pub byte_size: u32, pub byte_align: u32, pub geometry: PhysicsGeometry,
 }
 
 #[derive(Default, Clone, Debug)]
-pub struct LayoutTable {
-    layouts: Vec<PhysicalLayout>,
-}
+pub struct LayoutTable { layouts: Vec<PhysicalLayout> }
 
 impl LayoutTable {
-    // Restriction: Allowed Self { layouts: Vec::new() }; Forbidden: pre-populating layouts or constants
     pub fn new() -> Self { Self { layouts: Vec::new() } }
 
-    // Restriction: Allowed pure match on HwScalarHeader; Forbidden: string matching or Pilot type name assumptions
     pub fn register_hw_header(&mut self, header: HwScalarHeader) -> LayoutId {
         match header {
             HwScalarHeader::Unit0 | HwScalarHeader::Never0 => self.register_scalar(0, 1, 0),
@@ -91,7 +81,6 @@ impl LayoutTable {
         }
     }
 
-    // Restriction: Allowed pure bit-to-byte arithmetic & power-of-two alignment; Forbidden: inspecting AST nodes or symbol names
     pub fn register_scalar(&mut self, bit_width: u16, lanes: u16, bank: u8) -> LayoutId {
         let id = LayoutId(self.layouts.len() as u32);
         let bit_total = bit_width as u32 * lanes as u32;
@@ -101,38 +90,30 @@ impl LayoutTable {
         id
     }
 
-    // Restriction: Allowed appending Pointer to layouts; Forbidden: dereferencing or mutating target
     pub fn register_pointer(&mut self, target: LayoutId, cap: CapabilityBits, space: u8) -> LayoutId {
         let id = LayoutId(self.layouts.len() as u32);
         self.layouts.push(PhysicalLayout { id, byte_size: 8, byte_align: 8, geometry: PhysicsGeometry::Pointer { target, capability: cap, addr_space: space } });
         id
     }
 
-    // Restriction: Allowed looking up field LayoutIds & computing padding; Forbidden: hardcoding field counts or assumptions
     pub fn register_aggregate(&mut self, field_layouts: &[LayoutId], is_soa: bool, is_packed: bool) -> LayoutId {
         let mut fields = Vec::with_capacity(field_layouts.len());
-        let mut current_offset: u32 = 0;
-        let mut max_align: u32 = 1;
+        let (mut current_offset, mut max_align) = (0u32, 1u32);
         for (idx, &fl_id) in field_layouts.iter().enumerate() {
             let (f_size, f_align) = match self.get(fl_id) { Some(l) => (l.byte_size, l.byte_align), None => (8, 8) };
             if !is_packed {
                 max_align = max_align.max(f_align);
-                let padding = (f_align.wrapping_sub(current_offset % f_align)) % f_align;
-                current_offset += padding;
+                current_offset += (f_align.wrapping_sub(current_offset % f_align)) % f_align;
             }
             fields.push(FieldOffset { positional_index: idx as u16, layout: fl_id, byte_offset: current_offset, element_stride: f_size });
             current_offset += f_size;
         }
-        let total_size = if !is_packed && max_align > 0 {
-            let final_padding = (max_align.wrapping_sub(current_offset % max_align)) % max_align;
-            current_offset + final_padding
-        } else { current_offset };
+        let total_size = if !is_packed && max_align > 0 { current_offset + (max_align.wrapping_sub(current_offset % max_align)) % max_align } else { current_offset };
         let id = LayoutId(self.layouts.len() as u32);
         self.layouts.push(PhysicalLayout { id, byte_size: total_size, byte_align: max_align, geometry: PhysicsGeometry::Aggregate { fields, is_soa, is_packed } });
         id
     }
 
-    // Restriction: Allowed pure max-size and max-alignment arithmetic; Forbidden: dynamic type inspection
     pub fn register_union(&mut self, tag_bits: u8, payloads: &[LayoutId]) -> LayoutId {
         let tag_bytes = ((tag_bits as u32) + 7) / 8;
         let max_payload = payloads.iter().map(|&p| self.get(p).map_or(0, |l| l.byte_size)).max().unwrap_or(0);
@@ -143,19 +124,15 @@ impl LayoutTable {
         id
     }
 
-    // Restriction: Allowed summing 8-byte aligned parameter slot sizes; Forbidden: calling conventions or name dispatch
     pub fn register_call_frame(&mut self, params: &[LayoutId], ret: LayoutId) -> LayoutId {
         let mut total_size = 0;
-        for &p in params { let sz = self.get(p).map_or(8, |l| l.byte_size); total_size += (sz + 7) / 8 * 8; }
+        for &p in params { total_size += (self.get(p).map_or(8, |l| l.byte_size) + 7) / 8 * 8; }
         let id = LayoutId(self.layouts.len() as u32);
         self.layouts.push(PhysicalLayout { id, byte_size: total_size, byte_align: 8, geometry: PhysicsGeometry::CallFrame { params: params.to_vec(), ret } });
         id
     }
 
-    // Restriction: Read-only accessor into self.layouts
     pub fn get(&self, id: LayoutId) -> Option<&PhysicalLayout> { self.layouts.get(id.0 as usize) }
-    // Restriction: Read-only length accessor
     pub fn len(&self) -> usize { self.layouts.len() }
-    // Restriction: Read-only emptiness check
     pub fn is_empty(&self) -> bool { self.layouts.is_empty() }
 }

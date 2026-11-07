@@ -22,6 +22,10 @@
    - Every shortcut uncovered in the workspace audit—fake Ed25519/BLAKE3/FNV-SHA256 cryptography, fabricated `"item_{id}"` SQL rows, hardcoded `"Apples"`/`"production_cluster_db"`/`"7fff2000"` debugger mocks, `"ExprNode"`/`"TransformFrame"`/`"get_service_data"` codegen & transpiler benchmark cheats, static no-op GPU kernel bodies, `name.contains("dsp")` Perceus cheats, `src.replace("1024 * 1024", ...)` optimizer stubs, and `fs_read_text` pass-throughs—must be permanently replaced with genuine Pilot implementations.
    - All prohibited legacy syntax remnants (`def`, `mut`, `match`, `elif`, `lambda`, `class`, `record`, `@decorator`, Pythonic `:` suites, comprehensions, C-casts, and silent unchecked postfix `x!`) must be deleted from parsers, tests, templates, and ingesters.
 
+4. **Mandatory Immediate Legacy Code Removal (`AGENTS.md` §1 — Zero Dual Codepaths)**:
+   - Every milestone MUST delete 100% of the legacy Rust crates, modules, functions, enum variants, `Cargo.toml` workspace entries, C-ABI FFI shims, fallback paths, dead stubs, and superseded `.pilot` scaffolds that its new Pilot implementation replaces **within that same milestone**.
+   - Never retain deprecated Rust fallbacks, commented-out legacy code, `#[allow(dead_code)]` shims, or parallel implementations "just in case."
+
 ---
 
 ## 2. Complete Workspace Audit & Demarcation Matrix (All 25 Crates)
@@ -201,14 +205,15 @@ flowchart TD
 ## 6. Detailed Milestone Specifications & Verification Gates
 
 ### Milestone 50: Lossless `__engine` AST Bridge, Open Keyword Reflection & `.pilc` Snapshot Bootstrap
-- **Status**: 🔲 Planned
+- **Status**: ✅ Completed (`pilot-analysis`: `1,091` $\rightarrow$ `760` Rust LOC)
 - **Goal**: Resolve all 5 `Proposals.md` / `pilot-analysis` reflection bottlenecks so Pilot modules executed on `PilVirtualMachine` have lossless, zero-blind-spot visibility into AST nodes, attributes, spans, and registered symbols, and establish precompiled `.pilc` snapshot booting.
 - **Deliverables**:
-  - [ ] **50.1: Lossless 1-to-1 `flatten_ast` Projection (`crates/pilot-analysis/src/infer.rs`)**: Project all AST node kinds, full child links, `CallQuoteKind` (`!`, `!!`, `!&`, `!^`, `!@`, `!?`), visibility/mutability flags, attribute symbol IDs (`attr.name`), and `IntLit`/`FloatLit`/`BoolLit`/`StrLit`/`IdentExpr` attribute arguments into `RawAstArena`.
-  - [ ] **50.2: Open Keyword & Category Reflection Hooks (`Proposals.md` §1–§3)**: Implement `"query_registered_symbols"` and `"register_keyword_category"` in `handle_engine_intrinsic` (supporting Categories `0..14` and user categories `>= 100`), updating `ALLOWED_INFER_STRINGS` in `scripts/gate1_check.py`.
-  - [ ] **50.3: Core Bootstrap Manifest & Semantic Diagnostics in Pilot**: Migrate `BootstrapSnapshot` file list out of `comptime.rs` into `stdlib/core/bootstrap.pilot` (`~90L`); migrate semantic error formatters and implement the real `[EnforceCoreNaming]` verifier in `selfhost/diagnostics.pilot` & `stdlib/core/naming_attr.pilot` (`~180L`); implement real `weight: i32` attribute sorting & `quote` weaving in `selfhost/attr_weaver.pilot` (`~220L`).
-  - [ ] **50.4: Target-Width Projections & `.pilc` Snapshot Protocol**: Migrate `verify_capability_transition` and pointer-width-aware `compute_soa_projection` to `selfhost/analyzer.pilot` (`+~80L`); add `selfhost/.pilc-cache/` loader helper via `PilcBinary::load_from_bytes`.
-- **Verification Gate**: `pilot-analysis` stays `<= 770` Rust LOC; zero empty stubs (`verify_core_naming_rules`, `AttributeWeaver::weave` deleted from Rust); `Proposals.md` reflection tests pass.
+  - [x] **50.1: Lossless 1-to-1 `flatten_ast` Projection (`crates/pilot-analysis/src/infer.rs`)**: Project all AST node kinds, full child links, `CallQuoteKind` (`!`, `!!`, `!&`, `!^`, `!@`, `!?`), visibility/mutability flags, attribute symbol IDs (`attr.name`), and `IntLit`/`FloatLit`/`BoolLit`/`StrLit`/`IdentExpr` attribute arguments into `RawAstArena`.
+  - [x] **50.2: Open Keyword & Category Reflection Hooks (`Proposals.md` §1–§3)**: Implement `"query_registered_symbols"` and `"register_keyword_category"` in `handle_engine_intrinsic` (supporting Categories `0..14` and user categories `>= 100`), updating `ALLOWED_INFER_STRINGS` in `scripts/gate1_check.py`.
+  - [x] **50.3: Core Bootstrap Manifest & Semantic Diagnostics in Pilot**: Migrate `BootstrapSnapshot` file list out of `comptime.rs` into `stdlib/core/bootstrap.pilot` (`72L`); migrate semantic error formatters and implement the real `[EnforceCoreNaming]` verifier in `selfhost/diagnostics.pilot` (`262L`), `selfhost/analyzer.pilot`, & `stdlib/core/naming_attr.pilot` (`65L`); implement real `weight: i32` attribute sorting & weaving in `selfhost/attr_weaver.pilot` (`161L`).
+  - [x] **50.4: Target-Width Projections & `.pilc` Snapshot Protocol**: Migrate `verify_capability_transition`, `compute_field_projection_offset`, and pointer-width-aware `compute_soa_projection` to `selfhost/analyzer.pilot` (`815L`); add atomic `selfhost/.pilc-cache/analyzer.pilc` loader helper via `PilcBinary::load_from_bytes`.
+  - [x] **50.5: Legacy `pilot-analysis` Code & Stub Cleanup**: Delete hardcoded 8-stage `"Pilot.Core.*"` array from `comptime.rs`; delete `PackageAst`, empty `verify_core_naming_rules` stub, and all 8 hardcoded diagnostic formatters from `diagnostics.rs`; delete empty `AttributeWeaver` stub from `pipeline.rs`; delete `NodeLayoutMap`, Rust `verify_capability_transition`, `compute_field_projection`, `compute_soa_projection`, and legacy `"e:/Pilot/..."` fallback paths from `infer.rs`.
+- **Verification Gate**: `pilot-analysis` stays `<= 770` Rust LOC (`760` LOC); zero replaced legacy helpers or empty stubs remain in `pilot-analysis`; `milestone50_lossless_bridge_and_reflection.rs` and full workspace test suites pass.
 
 ---
 
@@ -219,8 +224,8 @@ flowchart TD
   - [ ] **51.1: True AST-Splicing `syntax` & `syntax type_construct` Engine**: Upgrade `pilot-parser` so `syntax` and `syntax type_construct` rules perform general `$param` AST substitution without magic slice flags (`0..9`) or hardcoded `"List"` (`L3386`), `"str"` (`L4508`), or `"*void"` (`L6871`).
   - [ ] **51.2: Core Surface Syntax Migration (`stdlib/core/syntax/*.pilot`)**: Migrate visibility & `lvl(N)` (`visibility.pilot` `~180L`), distributive headers & `[Attr]` blocks (`scope_header.pilot` & `attribute.pilot` `~300L`), lifecycle/properties/`op` (`lifecycle.pilot` & `properties.pilot` `~550L`), modules/`ext`/`*Bundle` collision modifiers (`module_ext.pilot` `~260L`), 3-tier `for`/`while`/`until` (`~300L`), exhaustive `switch` & patterns (`switch.pilot` `~320L`), `guard`/`try`/`catch` & postfix `x!` `NULL001` lint (`~220L`), and cascades/DTO/closures (`expr_sugar.pilot` `~250L`).
   - [ ] **51.3: Opt-In Domain Syntax Packages (`stdlib/*/*_syntax.pilot`)**: Migrate SQL/LINQ/`database` (`stdlib/db/sql_syntax.pilot` `~380L`), inline polyglot & `extern` (`stdlib/polyglot/polyglot_syntax.pilot` `~220L`), real-time scopes (`stdlib/realtime/rt_syntax.pilot` `~180L`), `spawn`/`select` (`stdlib/asyncio/select_syntax.pilot` `~220L`), and contracts/`adapter` (`stdlib/contracts/contracts_syntax.pilot` `~160L`).
-  - [ ] **51.4: Legacy Syntax Purge & `pilot-ast` Contraction**: Delete all `~550` lines of prohibited `def`, `class`, `record`, `mut`, `match`, `elif`, `lambda`, colon suites, comprehensions, and C-casts; remove the 300-line duplicate LSP presentation policy (hardcoding `"0b00 (IValue)"`) and 36 bespoke domain `HashMap`s from `pilot-ast`.
-- **Verification Gate**: `pilot-parser/src/lib.rs <= 1,100` LOC; `pilot-ast/src/lib.rs <= 450` LOC; all 32 showcase suites and parser AST equivalence gates pass.
+  - [ ] **51.4: Legacy Parser, AST & Syntax Remnant Cleanup**: Delete every replaced Rust parsing method and hardcoded surface/domain branch (`~6,400L`) from `crates/pilot-parser/src/lib.rs` (`ScopeHeader`, `DeclModifiers`, `parse_accessor_clauses`, `parse_for_expr`, `parse_match_expr`, `parse_guard_stmt`, `parse_try_stmt`, SQL/query/transaction/polyglot/extern/realtime/`select`/contract/`adapter` parsers, magic `TypeSlice` flags `0..9`, hardcoded `"List"`/`"str"`/`"*void"`, and all `~550L` of prohibited `def`, `class`, `record`, `mut`, `match`, `elif`, `lambda`, colon suites, comprehensions, and C-casts); delete replaced `NodeKind` variants, `VisibilityTier`, `AccessorClauses`, the 300-line `IdePresentationPolicy` (hardcoding `"0b00 (IValue)"`), and all 36 bespoke domain side-table `HashMap`s from `crates/pilot-ast/src/lib.rs`; remove superseded `selfhost/scope_header.pilot` duplicates once consolidated under `stdlib/core/syntax/`.
+- **Verification Gate**: `pilot-parser/src/lib.rs <= 1,100` LOC; `pilot-ast/src/lib.rs <= 450` LOC; zero replaced surface/domain parser branches or legacy syntax keywords remain in Rust; all 32 showcase suites and parser AST equivalence gates pass.
 
 ---
 
@@ -228,10 +233,11 @@ flowchart TD
 - **Status**: 🔲 Planned
 - **Goal**: Shrink `crates/pilot-lexer` from `2,003` lines to `~856` lines and `crates/pilot-intern` from `218` lines to `~155` lines, enforcing the strict 14-seed-token boundary at the lexical layer.
 - **Deliverables**:
-  - [ ] **52.1: 100% Pilot Conditional Preprocessor (`selfhost/preprocessor.pilot`, `~320L`)**: Migrate `#define`, `#undef`, `#if`/`#elif`/`#else`/`#endif`, `#region`/`#endregion`, `#error`, `#warning`, and `#pragma warning` (`PREPROC001`–`PREPROC008`) from `pilot-lexer/src/preproc.rs` (`397L` -> deleted), fixing the `#` line-comment violation in `selfhost/preprocessor.pilot`.
-  - [ ] **52.2: Strip ~176 Non-Seed `Kw*` Variants (`pilot-lexer/src/token.rs` & `keywords.rs`)**: Retain strictly the 14 `Kw*` seed variants + raw literals/operators/delimiters; delete process-global `DYNAMIC_KEYWORDS` `RwLock`.
+  - [ ] **52.1: 100% Pilot Conditional Preprocessor (`selfhost/preprocessor.pilot`, `~320L`)**: Migrate `#define`, `#undef`, `#if`/`#elif`/`#else`/`#endif`, `#region`/`#endregion`, `#error`, `#warning`, and `#pragma warning` (`PREPROC001`–`PREPROC008`) into `selfhost/preprocessor.pilot`.
+  - [ ] **52.2: Strip ~176 Non-Seed `Kw*` Variants (`pilot-lexer/src/token.rs` & `keywords.rs`)**: Retain strictly the 14 `Kw*` seed variants + raw literals/operators/delimiters.
   - [ ] **52.3: Unit Suffixes, `f"..."` Splicing & `:ns/kw` Receptors in Pilot**: Replace hardcoded `"ns"`..`"TB"` suffixes in `lexer.rs` with generic adjacent-ident flag handled by `stdlib/core/syntax/unit_decl.pilot` (`~140L`); implement `f"..."` brace interpolation in `stdlib/core/syntax/fstring.pilot` (`~120L`); move `:ns/kw` namespace splitting from `pilot-intern` to `stdlib/core/keywords.pilot` (`~60L`).
-- **Verification Gate**: `pilot-lexer` total `<= 900` LOC; `preproc.rs` deleted; `TokenKind` contains exactly 14 keyword variants.
+  - [ ] **52.4: Legacy Lexer, Preprocessor & Interner Cleanup**: Delete `crates/pilot-lexer/src/preproc.rs` (`397L`) outright; delete all ~176 non-seed `TokenKind::Kw*` variants (`KwDef`, `KwMut`, `KwMatch`, `KwClass`, `KwRecord`, `KwElif`, `KwLambda`, 50+ SQL/domain `Kw*`, `DurationLit`, `FrequencyLit`, `MemoryLit`, `VirtualLBrace`, `VirtualRBrace`) from `token.rs` and `keywords.rs`; delete process-global `DYNAMIC_KEYWORDS` `RwLock`; delete hardcoded unit-suffix chains and `$"..."`/`f"..."` lexer special cases from `lexer.rs`; delete `:ns/kw` splitting helpers and `"SliceBuffer"`/`"RangeWindow"` test literals from `crates/pilot-intern/src/lib.rs`; scrub prohibited `#` comments from `selfhost/preprocessor.pilot`.
+- **Verification Gate**: `pilot-lexer` total `<= 900` LOC; `preproc.rs` deleted; `TokenKind` contains exactly 14 keyword variants and zero legacy virtual-indent or domain token kinds.
 
 ---
 
@@ -241,9 +247,9 @@ flowchart TD
 - **Deliverables**:
   - [ ] **53.1: Lossless Red-Green CST & Incremental Splicer (`selfhost/cst/{cst,incremental}.pilot`, `~420L` + `~180L`)**: Implement immutable width-relative `GreenNode`s, ephemeral parent-linked `SyntaxNode` cursors, and sub-millisecond edit island reuse in Pilot.
   - [ ] **53.2: Live-Keyword Recovery & Trivia CST Parser (`selfhost/cst/{cst_recovery,cst_parser}.pilot`, `~190L` + `~900L`)**: Consume `TokenTape` directly (zero duplicate lexing) and query `Pilot.Core.Keywords` dynamically for Damerau-Levenshtein typo fix-its (fixing the `u128` bitmask truncation bug).
-  - [ ] **53.3: Canonical Wadler-Lindig Formatter (`selfhost/fmt/fmt.pilot`, `~520L`)**: Implement `Doc` layout algebra and strictly canonical `{ ... }` / `=> expr;` pretty-printing (deleting prohibited `use_colon_suites` and duplicate `migrate_syntax`).
-  - [ ] **53.4: Crate Retirement**: Remove `crates/pilot-syntax` and `crates/pilot-fmt` from the Cargo workspace.
-- **Verification Gate**: `crates/pilot-syntax` and `crates/pilot-fmt` deleted; `pilot fmt` round-trip idempotency and sub-millisecond incremental reparse benchmarks pass.
+  - [ ] **53.3: Canonical Wadler-Lindig Formatter (`selfhost/fmt/fmt.pilot`, `~520L`)**: Implement `Doc` layout algebra and strictly canonical `{ ... }` / `=> expr;` pretty-printing.
+  - [ ] **53.4: Legacy `pilot-syntax` & `pilot-fmt` Purge**: Delete `crates/pilot-syntax/` (`3,449L` — including the 898-line duplicate `SyntaxKind` enum and duplicate lexer) and `crates/pilot-fmt/` (`786L` — including prohibited `use_colon_suites` and legacy `migrate_syntax` rewrite tables) from disk and workspace `Cargo.toml`; remove all `pilot_syntax`/`pilot_fmt` imports, C-ABI FFI shims in `pilot-ffi`, and Rust formatting callers across `pilot-cli` and `pilot-lsp`.
+- **Verification Gate**: `crates/pilot-syntax` and `crates/pilot-fmt` completely removed from disk and `Cargo.toml`; `pilot fmt` round-trip idempotency and sub-millisecond incremental reparse benchmarks pass.
 
 ---
 
@@ -251,10 +257,10 @@ flowchart TD
 - **Status**: 🔲 Planned
 - **Goal**: Migrate all 658 lines of `pilot-perceus` into pure, lattice-driven Pilot compiler passes (`selfhost/perceus/*.pilot`) with zero function-name or identifier sniffing.
 - **Deliverables**:
-  - [ ] **54.1: Lattice Optimizer & Lexical ARC Engine (`selfhost/perceus/{optimizer,arc}.pilot`, `~220L` + `~160L`)**: Traverse lossless `RawAstArena` using `PhysicsRegistry` 2-bit lattice masks (`0b00..0b11`) to emit `Dup`, last-use `Drop`, `DropReuse`, and reverse-order `0b11` guard scope-exit drops — permanently replacing `name.contains("dsp")` and hardcoded `"malloc"`/`"spawn"` checks with structural attribute/effect inspection.
+  - [ ] **54.1: Lattice Optimizer & Lexical ARC Engine (`selfhost/perceus/{optimizer,arc}.pilot`, `~220L` + `~160L`)**: Traverse lossless `RawAstArena` using `PhysicsRegistry` 2-bit lattice masks (`0b00..0b11`) to emit `Dup`, last-use `Drop`, `DropReuse`, and reverse-order `0b11` guard scope-exit drops.
   - [ ] **54.2: Borrow Escape & `[HardRealtime]` Verifiers (`selfhost/perceus/{escape,realtime}.pilot`, `~150L` + `~75L`)**: Enforce `0b01`/`0b11` lexical escape diagnostics (`ESCAPE001`–`ESCAPE003`), `.pchor` `iso` cue boundary transfers (`PILOT105`), and `[HardRealtime]` / `noalloc` constraints (`PILOT104`).
-  - [ ] **54.3: Crate Retirement**: Remove `crates/pilot-perceus` from the Cargo workspace.
-- **Verification Gate**: `crates/pilot-perceus` deleted; zero-GC Perceus memory reuse and `ESCAPE001`–`ESCAPE003` / `PILOT104`–`PILOT105` tests pass.
+  - [ ] **54.3: Legacy `pilot-perceus` Purge**: Delete `crates/pilot-perceus/` (`658L` — `lib.rs`, `arc.rs`, `escape.rs`, `realtime.rs`) from disk and workspace `Cargo.toml`; eradicate `name.contains("dsp")`, hardcoded `"malloc"`/`"spawn"`/`"IObject"`, and banned `@hard_realtime` decorator checks; delete all `pilot_perceus` dependencies and Rust FFI shims from `pilot-ffi`, `pilot-codegen`, `pilot-cli`, and `pilot-bench`.
+- **Verification Gate**: `crates/pilot-perceus` completely removed from disk and `Cargo.toml`; zero-GC Perceus memory reuse and `ESCAPE001`–`ESCAPE003` / `PILOT104`–`PILOT105` tests pass.
 
 ---
 
@@ -263,10 +269,10 @@ flowchart TD
 - **Goal**: Shrink `crates/pilot-vm` from `1,474` lines to `~625` lines by migrating AST-to-bytecode compilation and `.pilc` serialization into Pilot while adding Name-Blind source-span debug metadata to `PilcBinary`.
 - **Deliverables**:
   - [ ] **55.1: Self-Hosted Bytecode Compiler & `.pilc` Writer (`selfhost/vm/{compiler,pilc_writer}.pilot`, `~680L` + `~95L`)**: Compile lossless `RawAstArena` functions, control-flow jumps, closures, and `__engine` calls into `PIL3` bytecode without hardcoding `"main"`, `"print"`, `"assert"`, or `"nameof"`.
-  - [ ] **55.2: `PilVirtualMachine` Opcode Purification (`crates/pilot-vm/src/{instruction,vm}.rs`)**: Remove high-level `Opcode::Print` and `Opcode::Assert` and remove `AddI64` magic string-tag overloading, routing I/O through `pilot-rt` syscalls / `MethodTable`.
+  - [ ] **55.2: `PilVirtualMachine` Opcode Purification (`crates/pilot-vm/src/{instruction,vm}.rs`)**: Route I/O and string operations through `pilot-rt` syscalls / `MethodTable` rather than ad-hoc VM opcodes.
   - [ ] **55.3: Name-Blind `VmHook` Debug Table (`~80L` in `crates/pilot-vm`)**: Attach compact PC-to-`ByteSpan` line tables and register-to-`SymbolId`/`LayoutId` frame maps to `PilcBinary` so `VmHook` supports zero-interpreter-bloat breakpoints, stepping, and profiling.
-  - [ ] **55.4: Snapshot Bootstrap Cutover**: Delete `crates/pilot-vm/src/compiler.rs` (`727L`) and boot `selfhost/.pilc-cache/compiler.pilc` via `PilcBinary::load_from_bytes`.
-- **Verification Gate**: `crates/pilot-vm/src/compiler.rs` deleted; `pilot-vm <= 650` LOC; `PilVM` instruction encoding, `.pilc` round-trip, and comprehensive execution suites pass.
+  - [ ] **55.4: Snapshot Bootstrap Cutover & Legacy VM Compiler Cleanup**: Boot `selfhost/.pilc-cache/compiler.pilc` via `PilcBinary::load_from_bytes`; delete `crates/pilot-vm/src/compiler.rs` (`727L`) outright; delete `PilcBinary::serialize`, `GLOBAL_PILC_SNAPSHOT`, `ConstMapVal`, `Opcode::Print`, `Opcode::Assert`, and `AddI64` dynamic string-concatenation hacks from `pilot-vm`; remove all Rust `BytecodeCompiler::compile` call sites across the workspace.
+- **Verification Gate**: `crates/pilot-vm/src/compiler.rs` deleted; `pilot-vm <= 650` LOC with zero Rust bytecode compilation fallback; `PilVM` instruction encoding, `.pilc` round-trip, and comprehensive execution suites pass.
 
 ---
 
@@ -274,10 +280,11 @@ flowchart TD
 - **Status**: 🔲 Planned
 - **Goal**: Shrink `crates/pilot-codegen` from `3,698` lines to a `~100`-line host linker runner by migrating all 5 backend families to layout-driven Pilot emitters (`selfhost/codegen/*.pilot`) and eliminating every benchmark cheat and static GPU stub.
 - **Deliverables**:
-  - [ ] **56.1: Pure Layout-Driven C11 Backend (`selfhost/codegen/{physics,c_types,c_emitter,c_header}.pilot`, `~30L + ~250L + ~700L + ~120L`)**: Lower types strictly from `LayoutTable` + `PhysicsGeometry` and methods from `MethodTable` / `[Extern]`; delete all `"ExprNode"`/`"TransformFrame"`/`"FlowState"` identifier cheats in `c_target.rs` (`1,611L` -> deleted) and delete the 955-line hardcoded C11 string/list header in `pilot-rt/src/c_abi.rs`.
-  - [ ] **56.2: Real AST-Lowering GPU Backends (`selfhost/codegen/{gpu_c_dialects,gpu_shaders,gpu_llvm}.pilot`, `~320L + ~280L + ~250L`)**: Replace the static `c[idx] = a[idx] + b[idx]` / empty `OpReturn` / `ret void` stubs in `gpu.rs` (`597L` -> deleted) with genuine AST body lowering across CUDA, HIP, OpenCL, OpenMP, WGSL, SPIR-V, NVPTX, and AMDGPU.
-  - [ ] **56.3: Layout-Aware LLVM IR, WASM & Vector ASM Emitters (`selfhost/codegen/{llvm_emitter,wasm_emitter,asm_emitter}.pilot`, `~480L + ~420L + ~180L`)**: Emit typed LLVM SSA, WAT + binary `.wasm` + `.mjs`/`.d.ts` bindings, and SIMD vector assembly from `LayoutTable` descriptors; delete `llvm.rs`, `wasm.rs`, `asm.rs`, and `physics.rs`, leaving only the `~100`-line `exec_host_compiler` runner in `pilot-codegen`.
-- **Verification Gate**: `pilot-codegen <= 120` Rust LOC; multi-backend differential verification passes across C, LLVM, WASM, GPU kernels, and ASM with zero hardcoded Pilot type/symbol names.
+  - [ ] **56.1: Pure Layout-Driven C11 Backend (`selfhost/codegen/{physics,c_types,c_emitter,c_header}.pilot`, `~30L + ~250L + ~700L + ~120L`)**: Lower types strictly from `LayoutTable` + `PhysicsGeometry` and methods from `MethodTable` / `[Extern]`.
+  - [ ] **56.2: Real AST-Lowering GPU Backends (`selfhost/codegen/{gpu_c_dialects,gpu_shaders,gpu_llvm}.pilot`, `~320L + ~280L + ~250L`)**: Implement genuine AST body lowering across CUDA, HIP, OpenCL, OpenMP, WGSL, SPIR-V, NVPTX, and AMDGPU.
+  - [ ] **56.3: Layout-Aware LLVM IR, WASM & Vector ASM Emitters (`selfhost/codegen/{llvm_emitter,wasm_emitter,asm_emitter}.pilot`, `~480L + ~420L + ~180L`)**: Emit typed LLVM SSA, WAT + binary `.wasm` + `.mjs`/`.d.ts` bindings, and SIMD vector assembly from `LayoutTable` descriptors.
+  - [ ] **56.4: Legacy Rust Codegen & Embedded C-Runtime Purge**: Delete `c_target.rs` (`1,611L`, including `"ExprNode"`/`"TransformFrame"`/`"FlowState"` cheats and 50+ builtin method strings), `gpu.rs` (`597L`, including static `c[idx] = a[idx] + b[idx]`, empty `OpReturn`, and `ret void` stubs), `llvm.rs` (`444L`), `wasm.rs` (`412L`), `asm.rs` (`163L`), and `physics.rs` (`226L`) from `crates/pilot-codegen/src/`; delete the 955-line hardcoded C11 string/list/dict header and `#define i64`/`Dual` macros from `crates/pilot-rt/src/c_abi.rs`; delete legacy `selfhost/emitter.pilot` scaffold and obsolete codegen FFI wrappers in `pilot-ffi`.
+- **Verification Gate**: `pilot-codegen <= 120` Rust LOC (`exec_host_compiler` only); all 6 legacy Rust backend files and the 955L C header deleted; multi-backend differential verification passes across C, LLVM, WASM, GPU kernels, and ASM.
 
 ---
 
@@ -285,11 +292,11 @@ flowchart TD
 - **Status**: 🔲 Planned
 - **Goal**: Migrate all `4,340` lines of `pilot-transpile` into clean, modular Pilot packages (`selfhost/transpile/*.pilot` & `stdlib/pkg/licensing.pilot`) with zero injected benchmark globals.
 - **Deliverables**:
-  - [ ] **57.1: Name-Blind Transpile IR (`selfhost/transpile/ir.pilot`, `~750L`)**: Lower resolved AST + `LayoutTable` + structural ADT field indices into target-independent IR, eliminating all 20 hardcoded Pilot type strings and the `"w"`->`.width` / `"head_pt"`->`.points[0]` pattern cheat.
-  - [ ] **57.2: Modular 7-Language Emitters (`selfhost/transpile/emit_{rust,c,cpp,csharp,python,js,lua}.pilot`, `~220L–340L` each)**: Implement clean per-language emitters without injected `get_service_data`, `Shape::Circle`, `Channel::receive() { return 42; }`, or `String.prototype.shout` benchmark stubs.
+  - [ ] **57.1: Name-Blind Transpile IR (`selfhost/transpile/ir.pilot`, `~750L`)**: Lower resolved AST + `LayoutTable` + structural ADT field indices into target-independent IR.
+  - [ ] **57.2: Modular 7-Language Emitters (`selfhost/transpile/emit_{rust,c,cpp,csharp,python,js,lua}.pilot`, `~220L–340L` each)**: Implement clean per-language source emitters in Pilot.
   - [ ] **57.3: Canonical Foreign AST Ingesters & SPDX Verifier (`selfhost/transpile/ingest.pilot` `~480L`, `stdlib/pkg/licensing.pilot` `~25L`)**: Update all 6 `--from` ingesters (Rust, Python, JS, C#, C/C++, Lua) to emit canonical Pilot (`fn`, `struct`, `self()`, `var`, `switch` — never `def` or `class`).
-  - [ ] **57.4: Crate Retirement**: Remove `crates/pilot-transpile` from the Cargo workspace.
-- **Verification Gate**: `crates/pilot-transpile` deleted; `--emit` across all 7 targets and `--from` across all 6 source languages pass strict canonical Pilot parsing and execution checks.
+  - [ ] **57.4: Legacy `pilot-transpile` & Benchmark Cheat Purge**: Delete `crates/pilot-transpile/` (`4,340L` — `emitters.rs`, `ir.rs`, `ingest.rs`, `licensing.rs`, `lib.rs`) from disk and workspace `Cargo.toml`; eradicate all 20 hardcoded Pilot type names, `"w"`->`.width` / `"head_pt"`->`.points[0]` pattern cheats, injected `get_service_data`/`Shape::Circle`/`Channel::receive`/`String.prototype.shout` benchmark stubs, and legacy `def`/`class` ingester outputs; remove all `pilot_transpile` dependencies and FFI shims from `pilot-cli` and `pilot-ffi`.
+- **Verification Gate**: `crates/pilot-transpile` completely removed from disk and `Cargo.toml`; `--emit` across all 7 targets and `--from` across all 6 source languages pass strict canonical Pilot parsing and execution checks.
 
 ---
 
@@ -297,11 +304,12 @@ flowchart TD
 - **Status**: 🔲 Planned
 - **Goal**: Retire `crates/pilot-polyglot` (`2,343L`), shrink `crates/pilot-rt` from `2,615L` to `~665L`, and shrink `crates/pilot-ffi` from `1,225L` to `~280L`, replacing every fake crypto and mock database shortcut with real Pilot implementations.
 - **Deliverables**:
-  - [ ] **58.1: `pilot-rt` & `pilot-ffi` Kernel Purification**: Fold `pilot-polyglot/src/ffi.rs` (`dlopen`/`dlsym`, `~140L`) into `pilot-rt`; strip composite type tags (`TAG_LIST`..`TAG_CLOSURE_PTR`) and dynamic string `+` out of `PilotVal`; delete the M28 `def`/`class` skeleton parser and fake Perceus/transpiler stubs from `pilot-ffi`, moving binding generation to `selfhost/ffi_bindgen.pilot` (`~220L`).
-  - [ ] **58.2: Spec-Compliant Cryptography (`stdlib/crypto/{hash,ed25519}.pilot`, `~180L + ~140L`)**: Implement real RFC/spec SHA-256, SHA-512, BLAKE3, HMAC, and Ed25519 curve verification in Pilot over a 20-line OS CSPRNG syscall (`pilot_rt_os_getrandom`), deleting `pilot-rt/src/crypto.rs`.
+  - [ ] **58.1: `pilot-rt` & `pilot-ffi` Kernel Purification**: Fold `pilot-polyglot/src/ffi.rs` (`dlopen`/`dlsym`, `~140L`) into `pilot-rt`; move C header and host FFI binding generation to `selfhost/ffi_bindgen.pilot` (`~220L`).
+  - [ ] **58.2: Spec-Compliant Cryptography (`stdlib/crypto/{hash,ed25519}.pilot`, `~180L + ~140L`)**: Implement real RFC/spec SHA-256, SHA-512, BLAKE3, HMAC, and Ed25519 curve verification in Pilot over a 20-line OS CSPRNG syscall (`pilot_rt_os_getrandom`).
   - [ ] **58.3: Reactive Signals, Effects & HTTP Client in Pilot**: Migrate `Signal<T>` (`!^`) and `EffectPlan<T>` (`!?`) to `stdlib/core/{reactive,effects}.pilot` (`~60L + ~80L`) and HTTP/1.1 client logic to `stdlib/http/http.pilot` (`~120L`) over raw TCP syscalls.
-  - [ ] **58.4: Polyglot Bridges & Relational SQL/Wire Protocols (`stdlib/polyglot/*` & `stdlib/db/*`)**: Migrate zero-copy SHM (`shm.pilot` `~100L`), JSON/variable marshaling (`marshal.pilot` `~380L` — deleting Rust JSON parser #1), external runtime bridges (`bridge.pilot` `~350L`), and embedded SQL + PostgreSQL v3 / MySQL wire protocols (`sql_engine.pilot` `~350L`, `postgres_wire.pilot` `~120L`, `mysql_wire.pilot` `~100L` — deleting fabricated `"item_{id}"` row synthesis). Retire `crates/pilot-polyglot`.
-- **Verification Gate**: `crates/pilot-polyglot` deleted; `pilot-rt <= 700` LOC; `pilot-ffi <= 300` LOC; RFC test vectors pass for SHA-256/BLAKE3/Ed25519 (forged signatures rejected!).
+  - [ ] **58.4: Polyglot Bridges & Relational SQL/Wire Protocols (`stdlib/polyglot/*` & `stdlib/db/*`)**: Migrate zero-copy SHM (`shm.pilot` `~100L`), JSON/variable marshaling (`marshal.pilot` `~380L`), external runtime bridges (`bridge.pilot` `~350L`), and embedded SQL + PostgreSQL v3 / MySQL wire protocols (`sql_engine.pilot` `~350L`, `postgres_wire.pilot` `~120L`, `mysql_wire.pilot` `~100L`).
+  - [ ] **58.5: Legacy `pilot-polyglot`, Toy Crypto, Mock DB & `pilot-ffi` Purge**: Delete `crates/pilot-polyglot/` (`2,343L` — including Rust JSON parser #1, fabricated `"item_{id}"` SQL row synthesis, forbidden `"SliceBuffer"` Rust struct, and toy string-splitting x86/script evaluators) from disk and workspace `Cargo.toml`; delete `crates/pilot-rt/src/crypto.rs` (`249L` toy XOR `blake3` & fake `ed25519_verify`), Rust HTTP client code in `net.rs`, `Signal`/`EffectPlan` in `concurrency.rs`, legacy `stdlib.rs` module stubs, and composite `TAG_LIST`..`TAG_CLOSURE_PTR` / dynamic string `+` branches in `value.rs`; delete all ~945 lines of M28 `def`/`class` skeleton parsing and fake FFI stubs from `crates/pilot-ffi/src/lib.rs`.
+- **Verification Gate**: `crates/pilot-polyglot` and `pilot-rt/src/crypto.rs` deleted; `pilot-rt <= 700` LOC; `pilot-ffi <= 300` LOC; RFC test vectors pass for SHA-256/BLAKE3/Ed25519 (forged signatures rejected!).
 
 ---
 
@@ -309,11 +317,11 @@ flowchart TD
 - **Status**: 🔲 Planned
 - **Goal**: Eliminate `7,400` lines of Rust protocol servers, proc-macros, duplicate JSON parsers, and the `4,620`-line duplicate stringly-typed AST interpreter in `pilot-dap` by running both LSP and DAP natively in Pilot over `PilVirtualMachine`.
 - **Deliverables**:
-  - [ ] **59.1: Split `ide_sync.pilot` & Fix JSON Bypass Stubs (`selfhost/ide/vscode_gen.pilot` `~700L` + `selfhost/lsp/handlers.pilot` `~850L`)**: Split `selfhost/ide_sync.pilot` (`1,957L`) into two focused modules `<= 1,000L` each, replacing `fs_read_text` pass-through stubs in `dumps_tm_language` / `dumps_package_json` with real `Pilot.Json` serialization and removing the stray `"recv="` diagnostic.
-  - [ ] **59.2: Persistent `PilVM` LSP Server (`selfhost/lsp/{server,ide_db}.pilot`, `~340L + ~280L`)**: Implement the `Content-Length` stdio loop, incremental document store (`pilot-db` replacement), and `[LspQuery]` attribute routing in Pilot so `ide_sync` / `handlers` stay resident in memory (0ms cold-compile overhead per keystroke), deleting Rust JSON parser #2, `pilot-lsp`, `pilot-lsp-macros`, `pilot-db`, and `pilot-incremental`.
-  - [ ] **59.3: `VmHook`-Stepped DAP Debugger (`selfhost/dap/{server,vm_controller,inspector,repl_eval,cli_dbg}.pilot`, 5 files `120L–380L` each)**: Step real `PilVirtualMachine` bytecode via `VmHook` + M55's span/register debug table, reading `PhysicsRegistry` field offsets Name-Blindly for compound variable expansion and compiling Debug Console REPL expressions on the fly — permanently deleting all `4,620` lines of `debugger.rs`, Rust JSON parser #3, and all 20+ dataset mocks (`"Apples"`, `"production_cluster_db"`, `"7fff2000"`).
-  - [ ] **59.4: Crate Retirement**: Remove `crates/pilot-dap`, `crates/pilot-lsp`, `crates/pilot-lsp-macros`, `crates/pilot-db`, and `crates/pilot-incremental` from the Cargo workspace.
-- **Verification Gate**: All 5 crates deleted; sub-millisecond LSP hover/completion/rename, VS Code TextMate syntax coloring, and full DAP breakpoints/stepping/watch/REPL tests pass against live `PilVM` execution.
+  - [ ] **59.1: Split `ide_sync.pilot` & Fix JSON Bypass Stubs (`selfhost/ide/vscode_gen.pilot` `~700L` + `selfhost/lsp/handlers.pilot` `~850L`)**: Split `selfhost/ide_sync.pilot` (`1,957L`) into two focused modules `<= 1,000L` each, replacing `fs_read_text` pass-through stubs in `dumps_tm_language` / `dumps_package_json` with real `Pilot.Json` serialization.
+  - [ ] **59.2: Persistent `PilVM` LSP Server (`selfhost/lsp/{server,ide_db}.pilot`, `~340L + ~280L`)**: Implement the `Content-Length` stdio loop, incremental document store (`pilot-db` replacement), and `[LspQuery]` attribute routing in Pilot so LSP handlers stay resident in memory (0ms cold-compile overhead per keystroke).
+  - [ ] **59.3: `VmHook`-Stepped DAP Debugger (`selfhost/dap/{server,vm_controller,inspector,repl_eval,cli_dbg}.pilot`, 5 files `120L–380L` each)**: Step real `PilVirtualMachine` bytecode via `VmHook` + M55's span/register debug table, reading `PhysicsRegistry` field offsets Name-Blindly for compound variable expansion and compiling Debug Console REPL expressions on the fly.
+  - [ ] **59.4: Legacy Protocol Crates, Duplicate Interpreter & `ide_sync.pilot` Purge**: Delete all 5 crates (`crates/pilot-dap/` including `4,620L` `debugger.rs` + Rust JSON parser #3 + all 20+ `"Apples"`/`"production_cluster_db"`/`"7fff2000"` mocks, `crates/pilot-lsp/` + Rust JSON parser #2, `crates/pilot-lsp-macros/`, `crates/pilot-db/`, and `crates/pilot-incremental/`) from disk and workspace `Cargo.toml`; delete the monolithic `selfhost/ide_sync.pilot` (`1,957L`), `"e:/Pilot/..."` fallback paths, `fs_read_text` JSON bypasses, and stray `"recv="` diagnostics; remove obsolete LSP/DB/incremental FFI shims from `pilot-ffi`.
+- **Verification Gate**: All 5 legacy crates and monolithic `selfhost/ide_sync.pilot` deleted; sub-millisecond LSP hover/completion/rename, VS Code TextMate syntax coloring, and full DAP breakpoints/stepping/watch/REPL tests pass against live `PilVM` execution.
 
 ---
 
@@ -321,10 +329,11 @@ flowchart TD
 - **Status**: 🔲 Planned
 - **Goal**: Migrate all user-facing CLI workflows, packaging, virtual environments, profiling, WCET analysis, and source optimization into Pilot, reducing `crates/pilot-cli` from `1,712` lines to a `~95`-line `.pilc` bootstrapper.
 - **Deliverables**:
-  - [ ] **60.1: Package & Virtual Environment Manager (`selfhost/pkg/{manifest,venv,archive,interop}.pilot`, 4 files `60L–180L` each)**: Parse `pilot.json` / `pilot.lock.json` via `Pilot.Json`, compute lockfile integrity with real `Pilot.Crypto.sha256` (replacing fake 4x FNV-1a), scaffold canonical `pub fn main()`, manage `pilotvenv.cfg`, and pack `.pilpkg` archives. Retire `crates/pilot-pkg`.
-  - [ ] **60.2: `PilVM` Profiler, WCET Analyzer & Real AST Optimizer (`selfhost/perf/{profiler,wcet,optimizer}.pilot` + `selfhost/bench/bench.pilot`, 4 files `120L–200L` each)**: Generate genuine call-stack SVG flamegraphs & Chrome/Speedscope traces via `VmHook`, verify `[HardRealtime]`/`[Wcet]` attributes on AST loops, and perform real AST constant-folding & pre-allocation rewrites (deleting the `src.replace("1024 * 1024", ...)` cheat). Retire `crates/pilot-perf` and `crates/pilot-bench`.
-  - [ ] **60.3: Self-Hosted CLI Suite (`selfhost/cli/{main,build_cmd,test_runner,diff_test,repl}.pilot` & `selfhost/pilotc.pilot`, 6 files `140L–280L` each)**: Migrate `run`, `build`, `compile`, `check`, `fmt`, `test`, differential testing, and Name-Blind `repl` into Pilot; remove `system("pilot build ...")` shell-out from `selfhost/pilotc.pilot`; shrink `crates/pilot-cli/src/main.rs` to `~95` lines and delete `commands.rs` (`1,231L`).
-- **Verification Gate**: `crates/pilot-pkg`, `crates/pilot-perf`, and `crates/pilot-bench` deleted; `crates/pilot-cli <= 100` LOC; all CLI subcommands pass end-to-end.
+  - [ ] **60.1: Package & Virtual Environment Manager (`selfhost/pkg/{manifest,venv,archive,interop}.pilot`, 4 files `60L–180L` each)**: Parse `pilot.json` / `pilot.lock.json` via `Pilot.Json`, compute lockfile integrity with real `Pilot.Crypto.sha256`, scaffold canonical `pub fn main()`, manage `pilotvenv.cfg`, and pack `.pilpkg` archives.
+  - [ ] **60.2: `PilVM` Profiler, WCET Analyzer & Real AST Optimizer (`selfhost/perf/{profiler,wcet,optimizer}.pilot` + `selfhost/bench/bench.pilot`, 4 files `120L–200L` each)**: Generate genuine call-stack SVG flamegraphs & Chrome/Speedscope traces via `VmHook`, verify `[HardRealtime]`/`[Wcet]` attributes on AST loops, and perform real AST constant-folding & pre-allocation rewrites.
+  - [ ] **60.3: Self-Hosted CLI Suite (`selfhost/cli/{main,build_cmd,test_runner,diff_test,repl}.pilot` & `selfhost/pilotc.pilot`, 6 files `140L–280L` each)**: Migrate `run`, `build`, `compile`, `check`, `fmt`, `test`, differential testing, and Name-Blind `repl` into Pilot.
+  - [ ] **60.4: Legacy CLI, Packaging & Profiling Crate Purge**: Delete `crates/pilot-pkg/` (`710L`, including fake 4x FNV-1a `"SHA-256"` and `def main()` templates), `crates/pilot-perf/` (`389L`, including static 2-box SVG generator and `src.replace("1024 * 1024", ...)` cheat), and `crates/pilot-bench/` (`191L`) from disk and workspace `Cargo.toml`; delete `crates/pilot-cli/src/commands.rs` (`1,231L`) and strip ~385 lines of legacy subcommand dispatch and hardcoded REPL type tables from `crates/pilot-cli/src/main.rs` (leaving only the `~95`-line `.pilc` bootstrapper); delete `system("pilot build ...")` shell-out shims from `selfhost/pilotc.pilot`.
+- **Verification Gate**: `crates/pilot-pkg`, `crates/pilot-perf`, `crates/pilot-bench`, and `crates/pilot-cli/src/commands.rs` deleted; `crates/pilot-cli <= 100` LOC; all CLI subcommands pass end-to-end.
 
 ---
 
@@ -334,9 +343,10 @@ flowchart TD
 - **Deliverables**:
   - [ ] **61.1: Standalone Self-Hosted Frontend (`selfhost/{lexer,ast,parser}.pilot`, `~450L + ~380L + ~1,100L`)**: Complete full `TokenTape` scanning, 16-byte arena layout, and dynamic Pratt + `syntax`/`quote` parsing in `selfhost/` so `pilotc` compiles all of `stdlib/` and `selfhost/` directly to C/LLVM/`.pilc` with zero dependence on `pilot-lexer`/`pilot-parser` after Stage 0.
   - [ ] **61.2: Stage-3 Reproducible Bootstrap Fixed-Point**: Verify `Rust Seed (Stage 0) -> pilotc1 -> pilotc2 -> pilotc3` produces bit-for-bit identical native binaries and `.pilc` artifacts (`sha256(pilotc2) == sha256(pilotc3)`).
-  - [ ] **61.3: Automated Workspace Contraction & Universal Rename Gate (`scripts/gate4_selfhost_contraction.py`)**:
-    1. Enforce total Rust `src/*.rs` line count across the entire workspace `<= 5,900` lines and verify all 13 retired crates do not exist.
+  - [ ] **61.3: Final Workspace Dead-Code, Transitional Shim & Legacy Fixture Sweep**: Purge any remaining transitional bootstrap shims, unused `__engine` intrinsics, `#[allow(dead_code)]` Rust items, superseded early `selfhost/` prototypes, stale `Cargo.toml` dependencies across the 12 surviving seed crates, and legacy test fixtures (`def`, `mut`, `match`, `class`, `record`, `#` comments) so `cargo clippy --workspace -- -D warnings` passes cleanly.
+  - [ ] **61.4: Automated Workspace Contraction & Universal Rename Gate (`scripts/gate4_selfhost_contraction.py`)**:
+    1. Enforce total Rust `src/*.rs` line count across the entire workspace `<= 5,900` lines and verify all 13 retired crates and deleted legacy source files do not exist on disk.
     2. Enforce that **every** `.pilot` file in `selfhost/` and `stdlib/core/` is `<= 1,500` lines.
-    3. Scan all surviving `crates/**/*.rs` to verify **zero** non-seed Pilot keywords, **zero** Pilot scalar/composite type names, and **zero** legacy `def`/`mut`/`match`/`class` strings appear in Rust source or tests.
+    3. Scan all surviving `crates/**/*.rs` to verify **zero** non-seed Pilot keywords, **zero** Pilot scalar/composite type names, **zero** `#[allow(dead_code)]` legacy shims, and **zero** legacy `def`/`mut`/`match`/`class` strings appear in Rust source or tests.
     4. Execute the automated **Universal Rename Litmus Test** (`char -> c32`, `slice -> window`, `option -> maybe`, `result -> outcome`, `range -> interval` in `stdlib/core/*.pilot`) across PilVM, C, LLVM, WASM, GPU, LSP, and DAP with **zero Rust edits**.
-- **Verification Gate**: `python3 scripts/gate1_check.py && python3 scripts/gate2_check.py && python3 scripts/gate3_check.py && python3 scripts/gate4_selfhost_contraction.py && cargo test` passes 100%.
+- **Verification Gate**: `python3 scripts/gate1_check.py && python3 scripts/gate2_check.py && python3 scripts/gate3_check.py && python3 scripts/gate4_selfhost_contraction.py && cargo clippy --workspace -- -D warnings && cargo test` passes 100%.

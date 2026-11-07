@@ -26,6 +26,7 @@ pub struct BytecodeCompiler {
     fn_entries: HashMap<String, (u16, Vec<String>)>,
     call_patches: Vec<(usize, String)>,
     const_maps: HashMap<String, ConstMapVal>,
+    next_local_reg: u8,
     next_reg: u8,
 }
 
@@ -44,7 +45,8 @@ impl BytecodeCompiler {
             fn_entries: HashMap::new(),
             call_patches: Vec::new(),
             const_maps: HashMap::new(),
-            next_reg: 1, // r0 is reserved for function return value
+            next_local_reg: 17, // r17..95 reserved for named local variables
+            next_reg: 96,       // r96..255 reserved for temporary expressions
         }
     }
 
@@ -78,11 +80,19 @@ impl BytecodeCompiler {
         PilcBinary::new(compiler.constants, compiler.instructions)
     }
 
+    fn alloc_local_reg(&mut self) -> u8 {
+        let r = self.next_local_reg;
+        if self.next_local_reg < 95 {
+            self.next_local_reg += 1;
+        }
+        r
+    }
+
     fn alloc_reg(&mut self) -> u8 {
         let r = self.next_reg;
         self.next_reg = self.next_reg.wrapping_add(1);
-        if self.next_reg == 0 {
-            self.next_reg = 17;
+        if self.next_reg < 96 {
+            self.next_reg = 96;
         }
         r
     }
@@ -221,11 +231,12 @@ impl BytecodeCompiler {
                         self.fn_entries.insert(fn_name.clone(), (entry_pc, params.clone()));
 
                         self.var_slots.clear();
-                        self.next_reg = 17; // Local variables start at r17; r1..=16 are reserved for call arguments
+                        self.next_local_reg = 17;
+                        self.next_reg = 96;
 
                         // Save incoming arguments from r1..=params.len() into dedicated local slots
                         for (i, p) in params.iter().enumerate() {
-                            let slot = self.alloc_reg();
+                            let slot = self.alloc_local_reg();
                             self.emit(Opcode::Move, slot, (i + 1) as u8, 0);
                             self.var_slots.insert(p.clone(), slot);
                         }
@@ -245,7 +256,8 @@ impl BytecodeCompiler {
                 );
 
                 self.var_slots.clear();
-                self.next_reg = 17; // Local variables start at r17; r1..=16 are reserved for call arguments
+                self.next_local_reg = 17;
+                self.next_reg = 96;
 
                 if let Some(&(main_entry, _)) = self.fn_entries.get("main") {
                     let dst = self.alloc_reg();
@@ -319,7 +331,7 @@ impl BytecodeCompiler {
                 if let Some(&reg) = self.var_slots.get(name) {
                     reg
                 } else {
-                    let r = self.alloc_reg();
+                    let r = self.alloc_local_reg();
                     self.var_slots.insert(name.to_string(), r);
                     r
                 }
@@ -375,7 +387,7 @@ impl BytecodeCompiler {
                     self.emit(Opcode::LoadConst, r, (const_idx >> 8) as u8, (const_idx & 0xFF) as u8);
                     r
                 };
-                let slot = self.alloc_reg();
+                let slot = self.var_slots.get(&name).copied().unwrap_or_else(|| self.alloc_local_reg());
                 self.emit(Opcode::Move, slot, r_val, 0);
                 self.var_slots.insert(name, slot);
                 slot
@@ -391,7 +403,7 @@ impl BytecodeCompiler {
                         self.emit(Opcode::Move, slot, rhs_reg, 0);
                         slot
                     } else {
-                        let slot = self.alloc_reg();
+                        let slot = self.alloc_local_reg();
                         self.emit(Opcode::Move, slot, rhs_reg, 0);
                         self.var_slots.insert(name.to_string(), slot);
                         slot

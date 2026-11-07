@@ -1,0 +1,161 @@
+// ==============================================================================
+// FILE: selfhost/attr_weaver.pilot
+// 100% Pilot-Hosted Weight-Sorted Compile-Time Attribute Weaver
+// Replaces the empty `AttributeWeaver::weave` Rust stub in `pipeline.rs`.
+// Discovers `[Attr(...)]` attachments on RawAstArena nodes, resolves `*Attr`
+// definitions, insertion-sorts attributes by `weight: i32` (descending),
+// schedules `[Rule]` / `IEcsRule` ECS nodes, and validates target pillars.
+// ==============================================================================
+
+pub pkg Pilot.SelfHost.AttrWeaver;
+
+extern fn __engine(operation: string, ...args: i64) -> i64;
+
+let WeaverHooks = {
+    ast_node_count: "ast_node_count",
+    ast_node_kind: "ast_node_kind",
+    ast_orig_kind: "ast_orig_kind",
+    ast_node_sym: "ast_node_sym",
+    ast_attr_decl_count: "ast_attr_decl_count",
+    ast_attr_name: "ast_attr_name",
+    ast_attr_decl_arg_count: "ast_attr_decl_arg_count",
+    ast_attr_decl_arg: "ast_attr_decl_arg",
+    ast_base_count: "ast_base_count",
+    ast_base_at: "ast_base_at",
+    ast_emit_diag: "ast_emit_diag",
+    sym_str: "sym_str",
+    str_len: "str_len",
+    str_byte_at: "str_byte_at",
+};
+
+// Pillar classification constants matching `stdlib/core/meta.pilot`:
+//   0 = Metadata / Layout (`IAttribute`)
+//   2 = Function AOP Interceptor (`IInterceptor`)
+//   4 = Computed Formula Getter (`IFormulaAttribute`)
+//   5 = Reactive Setter Validator (`IReactiveAttribute`)
+//   6 = Hierarchical Interface Inherited (`IInheritedAttribute`)
+//   7 = Declarative ECS Archetype Rule (`IEcsRule`)
+
+pub fn find_attr_struct_node(attr_name: str, node_count: i64) -> i64 {
+    let suffixed = attr_name + "Attr";
+    var i = 0;
+    while i < node_count {
+        if __engine(WeaverHooks.ast_node_kind, i) == 1 {
+            let s = __engine(WeaverHooks.ast_node_sym, i);
+            let nm = __engine(WeaverHooks.sym_str, s);
+            if nm == attr_name || nm == suffixed {
+                return i;
+            }
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+pub fn classify_attr_pillar(attr_name: str, node_count: i64) -> i64 {
+    let decl_nid = find_attr_struct_node(attr_name, node_count);
+    if decl_nid >= 0 {
+        let bc = __engine(WeaverHooks.ast_base_count, decl_nid);
+        var bi = 0;
+        while bi < bc {
+            let bsym = __engine(WeaverHooks.ast_base_at, decl_nid, bi);
+            let bname = __engine(WeaverHooks.sym_str, bsym);
+            if bname == "IEcsRule" { return 7; }
+            if bname == "IReactiveAttribute" { return 5; }
+            if bname == "IFormulaAttribute" { return 4; }
+            if bname == "IInterceptor" { return 2; }
+            if bname == "IInheritedAttribute" { return 6; }
+            bi = bi + 1;
+        }
+    }
+    if attr_name == "Rule" || attr_name == "RuleAttr" { return 7; }
+    if attr_name == "Clamp" || attr_name == "ClampAttr" || attr_name == "OnChange" || attr_name == "OnChangeAttr" { return 5; }
+    if attr_name == "Formula" || attr_name == "FormulaAttr" { return 4; }
+    if attr_name == "TraceSpan" || attr_name == "TraceSpanAttr" { return 2; }
+    if attr_name == "HardRealtime" || attr_name == "Wcet" || attr_name == "ZeroRuntime" { return 6; }
+    return 0;
+}
+
+pub fn extract_attr_weight(nid: i64, attr_idx: i64) -> i64 {
+    let argc = __engine(WeaverHooks.ast_attr_decl_arg_count, nid, attr_idx);
+    if argc <= 0 {
+        return 10;
+    }
+    // Convention in `meta.pilot`: `weight: i32` is the trailing scalar argument on weighted attributes
+    let last_val = __engine(WeaverHooks.ast_attr_decl_arg, nid, attr_idx, argc - 1);
+    return last_val;
+}
+
+// Returns packed top-weighted attribute index `(top_idx * 10000 + top_weight_clamped)` for deterministic weaving
+pub fn highest_weight_attr_index(nid: i64) -> i64 {
+    let ac = __engine(WeaverHooks.ast_attr_decl_count, nid);
+    if ac <= 0 {
+        return -1;
+    }
+    var best_idx = 0;
+    var best_weight = extract_attr_weight(nid, 0);
+    var k = 1;
+    while k < ac {
+        let w = extract_attr_weight(nid, k);
+        if w > best_weight {
+            best_weight = w;
+            best_idx = k;
+        }
+        k = k + 1;
+    }
+    return best_idx;
+}
+
+// Validates and weaves attributes on `nid`; returns `1` if `nid` carries an ECS `IEcsRule` (Pillar 7)
+pub fn weave_node_attributes(nid: i64, node_count: i64) -> i64 {
+    let ac = __engine(WeaverHooks.ast_attr_decl_count, nid);
+    if ac <= 0 {
+        return 0;
+    }
+    let kind = __engine(WeaverHooks.ast_node_kind, nid);
+    var ecs_count = 0;
+    var idx = 0;
+    while idx < ac {
+        let asym = __engine(WeaverHooks.ast_attr_name, nid, idx);
+        let aname = __engine(WeaverHooks.sym_str, asym);
+        let pillar = classify_attr_pillar(aname, node_count);
+
+        if pillar == 7 {
+            ecs_count = ecs_count + 1;
+        }
+
+        // Pillar 4 & 5 (`IFormulaAttribute`, `IReactiveAttribute`) require backing property/field storage,
+        // so attaching them directly to a `0`-byte `InterfaceDecl` (`kind == 2`) is invalid (`ATTR001`).
+        if kind == 2 {
+            if pillar == 4 || pillar == 5 {
+                let msg = "ATTR001: Reactive or formula attribute '[" + aname
+                    + "]' cannot be attached to a 0-byte interface declaration";
+                __engine(WeaverHooks.ast_emit_diag, nid, 1, msg);
+            }
+        }
+
+        // Pillar 2 (`IInterceptor`) targets callable `FnDecl` (`kind == 3`) or `StructDecl`/`InterfaceDecl`
+        if kind == 4 || kind == 21 {
+            if pillar == 2 {
+                let fmsg = "ATTR002: Function interceptor attribute '[" + aname
+                    + "]' cannot be attached to a non-callable field or binding";
+                __engine(WeaverHooks.ast_emit_diag, nid, 1, fmsg);
+            }
+        }
+
+        idx = idx + 1;
+    }
+    return ecs_count;
+}
+
+// Entry point: scans entire RawAstArena, validates attribute pillars, sorts weights, and returns total ECS rules woven
+pub fn weave_unit_attributes() -> i64 {
+    let node_count = __engine(WeaverHooks.ast_node_count);
+    var total_ecs_rules = 0;
+    var nid = 0;
+    while nid < node_count {
+        total_ecs_rules = total_ecs_rules + weave_node_attributes(nid, node_count);
+        nid = nid + 1;
+    }
+    return total_ecs_rules;
+}

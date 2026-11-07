@@ -1,0 +1,262 @@
+// ==============================================================================
+// FILE: selfhost/diagnostics.pilot
+// 100% Pilot-Hosted Semantic Diagnostics & [EnforceCoreNaming] Verifier
+// Migrates all semantic message formatting & package naming checks out of Rust
+// (`crates/pilot-analysis/src/diagnostics.rs`).
+// ==============================================================================
+
+pub pkg Pilot.SelfHost.Diagnostics;
+
+extern fn __engine(operation: string, ...args: i64) -> i64;
+
+let DiagHooks = {
+    ast_node_count: "ast_node_count",
+    ast_node_kind: "ast_node_kind",
+    ast_orig_kind: "ast_orig_kind",
+    ast_decl_flags: "ast_decl_flags",
+    ast_node_sym: "ast_node_sym",
+    ast_child_count: "ast_child_count",
+    ast_child_at: "ast_child_at",
+    ast_node_raw_bits: "ast_node_raw_bits",
+    ast_attr_decl_count: "ast_attr_decl_count",
+    ast_attr_name: "ast_attr_name",
+    ast_base_count: "ast_base_count",
+    ast_base_at: "ast_base_at",
+    ast_emit_diag: "ast_emit_diag",
+    sym_str: "sym_str",
+    str_len: "str_len",
+    str_byte_at: "str_byte_at",
+};
+
+pub fn lattice_bits_str(bits: i64) -> str {
+    if bits == 0 { return "0b00"; }
+    if bits == 1 { return "0b01"; }
+    if bits == 2 { return "0b10"; }
+    return "0b11";
+}
+
+pub fn format_lattice_contract_mismatch(
+    type_name: str,
+    declared_origin: str,
+    expected_bits: i64,
+    computed_bits: i64,
+    reason: str
+) -> str {
+    return "LatticeContractMismatch: on struct '" + type_name + "': declared ': "
+        + declared_origin + "' (" + lattice_bits_str(expected_bits)
+        + "), but computed lattice is " + lattice_bits_str(computed_bits)
+        + " (" + reason + ")";
+}
+
+pub fn format_partial_struct_cannot_splice_fields(bundle_name: str) -> str {
+    return "PartialStructCannotSpliceFields: Cannot splice field-bearing bundle '"
+        + bundle_name + "' into a layout-sealed 'partial struct'; only 0-field '*Facet' bundles may be spliced in partial extensions";
+}
+
+pub fn format_coalesce_field_type_mismatch(field_name: str) -> str {
+    return "CoalesceFieldTypeMismatch: Cannot coalesce field '" + field_name
+        + "': spliced bundle field type or alignment does not match existing struct field";
+}
+
+pub fn format_bundle_field_collision(field_name: str) -> str {
+    return "BundleFieldCollision: Bundle field collision on '" + field_name
+        + "'. Help: resolve using 'coalesce { " + field_name
+        + " }', 'with { " + field_name + " as new_name }', or 'without { " + field_name + " }'";
+}
+
+pub fn format_ambiguous_bundle_method_collision(method_name: str) -> str {
+    return "AmbiguousBundleMethodCollision: Ambiguous Tier 2 bundle method collision on '"
+        + method_name + "': multiple spliced bundles define '" + method_name
+        + "' without a Tier 1 struct override or 'without { " + method_name + " }'";
+}
+
+pub fn format_ambiguous_interface_default(method_name: str) -> str {
+    return "AmbiguousInterfaceDefault: Diamond interface default method collision on '"
+        + method_name + "': provide an explicit Tier 1 or Tier 2 implementation to disambiguate";
+}
+
+pub fn format_missing_interface_contract(type_name: str, iface_name: str, method_name: str) -> str {
+    return "MissingInterfaceContract: Struct '" + type_name
+        + "' is missing required contract method '" + method_name
+        + "' from interface '" + iface_name + "'";
+}
+
+pub fn format_core_naming_violation(rule: str, detail: str) -> str {
+    return "EnforceCoreNaming: [" + rule + "] " + detail;
+}
+
+pub fn str_ends_with(s: str, suffix: str) -> bool {
+    let slen = __engine(DiagHooks.str_len, s);
+    let suflen = __engine(DiagHooks.str_len, suffix);
+    if suflen > slen {
+        return false;
+    }
+    let start = slen - suflen;
+    var k = 0;
+    while k < suflen {
+        let b1 = __engine(DiagHooks.str_byte_at, s, start + k);
+        let b2 = __engine(DiagHooks.str_byte_at, suffix, k);
+        if b1 != b2 {
+            return false;
+        }
+        k = k + 1;
+    }
+    return true;
+}
+
+pub fn node_has_attr_named(nid: i64, target_attr: str) -> bool {
+    let ac = __engine(DiagHooks.ast_attr_decl_count, nid);
+    var idx = 0;
+    while idx < ac {
+        let asym = __engine(DiagHooks.ast_attr_name, nid, idx);
+        let aname = __engine(DiagHooks.sym_str, asym);
+        if aname == target_attr {
+            return true;
+        }
+        idx = idx + 1;
+    }
+    return false;
+}
+
+pub fn unit_enforces_core_naming(node_count: i64) -> bool {
+    var i = 0;
+    while i < node_count {
+        if node_has_attr_named(i, "EnforceCoreNaming") {
+            return true;
+        }
+        if node_has_attr_named(i, "EnforceCoreNamingAttr") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
+    let kind = __engine(DiagHooks.ast_node_kind, nid);
+    if kind != 1 {
+        if kind != 2 {
+            return 0;
+        }
+    }
+    let sym = __engine(DiagHooks.ast_node_sym, nid);
+    let name = __engine(DiagHooks.sym_str, sym);
+    let nlen = __engine(DiagHooks.str_len, name);
+    if nlen == 0 {
+        return 0;
+    }
+    let c0 = __engine(DiagHooks.str_byte_at, name, 0);
+    // Skip $name homoiconic quote placeholders inside syntax rules
+    if c0 == 36 {
+        return 0;
+    }
+
+    let dflags = __engine(DiagHooks.ast_decl_flags, nid);
+    let is_partial = (dflags & 16) != 0;
+    let has_dtor = (dflags & 1024) != 0;
+    let is_lang = node_has_attr_named(nid, "Lang");
+
+    if kind == 2 {
+        if enforce_naming {
+            let c1 = __engine(DiagHooks.str_byte_at, name, 1);
+            if c0 != 73 || c1 < 65 || c1 > 90 {
+                let msg = format_core_naming_violation(
+                    "InterfacePrefix",
+                    "Interface '" + name + "' must begin with 'I' followed by PascalCase"
+                );
+                __engine(DiagHooks.ast_emit_diag, nid, 1, msg);
+                return 1;
+            }
+        }
+        return 0;
+    }
+
+    // Gather base contracts on StructDecl
+    let bc = __engine(DiagHooks.ast_base_count, nid);
+    var has_ivalue = false;
+    var has_iref = false;
+    var has_iobj = false;
+    var has_iguard = false;
+    var has_iattr = false;
+    var bi = 0;
+    while bi < bc {
+        let bsym = __engine(DiagHooks.ast_base_at, nid, bi);
+        let bname = __engine(DiagHooks.sym_str, bsym);
+        if bname == "IValue" { has_ivalue = true; }
+        if bname == "IReference" { has_iref = true; }
+        if bname == "IObject" { has_iobj = true; }
+        if bname == "IGuard" { has_iguard = true; }
+        if bname == "IAttribute" || bname == "IInheritedAttribute" || bname == "IInterceptor" || bname == "IEcsRule" {
+            has_iattr = true;
+        }
+        if str_ends_with(bname, "Attribute") {
+            has_iattr = true;
+        }
+        bi = bi + 1;
+    }
+
+    // Universal Lattice Check: `: IValue` (`0b00`) must never declare `~self()` (`0b10`)
+    if has_ivalue {
+        if has_dtor {
+            let lmsg = format_lattice_contract_mismatch(name, "IValue", 0, 2, "declares ~self() destructor");
+            __engine(DiagHooks.ast_emit_diag, nid, 1, lmsg);
+            return 1;
+        }
+    }
+
+    if enforce_naming {
+        if !is_partial {
+            if !is_lang {
+                if c0 < 65 || c0 > 90 {
+                    let pmsg = format_core_naming_violation(
+                        "StructPascalCase",
+                        "Core struct '" + name + "' must use PascalCase unless [Lang] or partial"
+                    );
+                    __engine(DiagHooks.ast_emit_diag, nid, 1, pmsg);
+                    return 1;
+                }
+                if has_iattr {
+                    if !str_ends_with(name, "Attr") {
+                        let amsg = format_core_naming_violation(
+                            "AttributeSuffix",
+                            "Attribute struct '" + name + "' must end with 'Attr'"
+                        );
+                        __engine(DiagHooks.ast_emit_diag, nid, 1, amsg);
+                        return 1;
+                    }
+                } else if has_iguard || (has_iref && has_iobj) {
+                    if !str_ends_with(name, "Guard") && !str_ends_with(name, "Scope") && !str_ends_with(name, "Lease") {
+                        let gmsg = format_core_naming_violation(
+                            "ScopedGuardSuffix",
+                            "0b11 IGuard struct '" + name + "' must end with 'Guard', 'Scope', or 'Lease'"
+                        );
+                        __engine(DiagHooks.ast_emit_diag, nid, 1, gmsg);
+                        return 1;
+                    }
+                } else if has_iref {
+                    if !str_ends_with(name, "View") && !str_ends_with(name, "Lens") && !str_ends_with(name, "Cursor") && !str_ends_with(name, "Enumerator") {
+                        let rmsg = format_core_naming_violation(
+                            "ReferenceViewSuffix",
+                            "0b01 IReference struct '" + name + "' must end with 'View', 'Lens', 'Cursor', or 'Enumerator'"
+                        );
+                        __engine(DiagHooks.ast_emit_diag, nid, 1, rmsg);
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+pub fn verify_unit_diagnostics() -> i64 {
+    let node_count = __engine(DiagHooks.ast_node_count);
+    let enforce_naming = unit_enforces_core_naming(node_count);
+    var errs = 0;
+    var i = 0;
+    while i < node_count {
+        errs = errs + verify_decl_naming_and_lattice(i, enforce_naming);
+        i = i + 1;
+    }
+    return errs;
+}

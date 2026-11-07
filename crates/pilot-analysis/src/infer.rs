@@ -2,102 +2,150 @@ use std::collections::{HashMap, HashSet};
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_intern::SymbolId;
 use pilot_rt::PilotVal;
-use crate::types::{CapabilityBits, FieldOffset, HwScalarHeader, LayoutId, LayoutTable, PhysicalLayout, PhysicsGeometry};
+use pilot_vm::pilc::PilcBinary;
+use crate::types::{CapabilityBits, HwScalarHeader, LayoutId, LayoutTable, PhysicsGeometry};
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RawAttr { pub name_sym: u32, pub first_arg: u32, pub arg_count: u16 }
 
 #[derive(Clone, Debug)]
 pub struct RawAstNode {
-    pub node_id: u32, pub parent_id: u32, pub kind_tag: u8, pub sym_id: u32,
+    pub node_id: u32, pub parent_id: u32, pub kind_tag: u8, pub orig_kind: u16,
+    pub node_flags: u16, pub decl_flags: u16, pub sym_id: u32,
     pub first_child: u32, pub child_count: u16, pub first_attr_arg: u32, pub attr_arg_count: u16,
+    pub first_attr: u32, pub attr_count: u16, pub first_base: u32, pub base_count: u16,
     pub raw_bits: u64, pub literal_kind: u8, pub span_start: u32, pub span_end: u32,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct RawAstArena {
-    pub nodes: Vec<RawAstNode>,
-    pub child_links: Vec<u32>,
-    pub attr_args: Vec<i64>,
+    pub nodes: Vec<RawAstNode>, pub child_links: Vec<u32>, pub attr_args: Vec<i64>,
+    pub attr_arg_kind: Vec<u8>, pub attrs: Vec<RawAttr>, pub base_syms: Vec<u32>,
 }
 
 #[derive(Clone, Debug)]
-pub struct PhysicsDiagnostic {
-    pub node_id: u32, pub severity: u8, pub message: String,
-}
+pub struct CategoryRecord { pub id: i64, pub scope: String, pub badge: String, pub lsp_kind: i64 }
+
+#[derive(Clone, Debug)]
+pub struct PhysicsDiagnostic { pub node_id: u32, pub severity: u8, pub message: String }
 
 #[derive(Clone, Debug)]
 pub struct PhysicsRegistry {
-    pub arena: RawAstArena,
-    pub layouts: LayoutTable,
-    pub node_layouts: Vec<Option<LayoutId>>,
-    pub node_targets: Vec<Option<u32>>,
-    pub symbol_strings: HashMap<u32, String>,
-    pub diagnostics: Vec<PhysicsDiagnostic>,
-    pub source_text: String,
-    pub lsp_method: String,
-    pub lsp_offset: u32,
-    pub lsp_result: String,
+    pub arena: RawAstArena, pub layouts: LayoutTable, pub node_layouts: Vec<Option<LayoutId>>,
+    pub node_targets: Vec<Option<u32>>, pub symbol_strings: HashMap<u32, String>,
+    pub diagnostics: Vec<PhysicsDiagnostic>, pub source_text: String,
+    pub lsp_method: String, pub lsp_offset: u32, pub lsp_result: String,
+    pub categories: Vec<CategoryRecord>, pub registered_symbols: Vec<(i64, String, String)>,
 }
 
 impl PhysicsRegistry {
     pub fn new(arena: RawAstArena, symbol_strings: HashMap<u32, String>) -> Self {
         let count = arena.nodes.len();
-        Self {
-            arena, layouts: LayoutTable::new(), node_layouts: vec![None; count],
-            node_targets: vec![None; count], symbol_strings, diagnostics: Vec::new(),
-            source_text: String::new(), lsp_method: String::new(), lsp_offset: 0, lsp_result: String::new(),
+        let mut reg = Self {
+            arena, layouts: LayoutTable::new(), node_layouts: vec![None; count], node_targets: vec![None; count],
+            symbol_strings, diagnostics: Vec::new(), source_text: String::new(),
+            lsp_method: String::new(), lsp_offset: 0, lsp_result: String::new(),
+            categories: Vec::new(), registered_symbols: Vec::new(),
+        };
+        reg.index_arena_symbols(0);
+        reg
+    }
+
+    fn index_arena_symbols(&mut self, from_node: usize) {
+        for n in &self.arena.nodes[from_node..] {
+            let b = n.first_attr_arg as usize;
+            if n.kind_tag == 1 && n.attr_arg_count == 4 && self.arena.attr_arg_kind[b + 1] == 1 && self.arena.attr_arg_kind[b + 2] == 1 {
+                let (cid, lkind) = (self.arena.attr_args[b], self.arena.attr_args[b + 3]);
+                let scope = self.symbol_strings.get(&(self.arena.attr_args[b + 1] as u32)).cloned().unwrap_or_default();
+                let badge = self.symbol_strings.get(&(self.arena.attr_args[b + 2] as u32)).cloned().unwrap_or_default();
+                if !self.categories.iter().any(|c| c.id == cid) { self.categories.push(CategoryRecord { id: cid, scope, badge, lsp_kind: lkind }); }
+            } else if n.kind_tag == 1 && n.child_count == 0 && (n.attr_arg_count == 2 || n.attr_arg_count == 3)
+                && self.arena.attr_arg_kind[b] == 0 && self.arena.attr_arg_kind[b + 1] == 1
+            {
+                let cid = self.arena.attr_args[b];
+                let word = self.symbol_strings.get(&n.sym_id).cloned().unwrap_or_default();
+                let doc = self.symbol_strings.get(&(self.arena.attr_args[b + 1] as u32)).cloned().unwrap_or_default();
+                if !word.is_empty() { self.registered_symbols.push((cid, word, doc)); }
+            }
         }
     }
 }
 
-// Restriction: Pure 1-to-1 structural copy; Forbidden: bit-packing attr.args or setting lit_kind on StructDecl
 pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32, String>) {
     let mut raw_nodes = Vec::with_capacity(arena.nodes.len());
-    let mut child_links = Vec::new();
-    let mut attr_args = Vec::new();
-    let mut symbol_strings = HashMap::new();
-    let mut struct_field_nodes = HashSet::new();
-    let mut struct_fields_map: HashMap<u32, Vec<u32>> = HashMap::new();
+    let (mut child_links, mut attr_args, mut attr_arg_kind) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut raw_attrs, mut base_syms, mut symbol_strings) = (Vec::new(), Vec::new(), HashMap::new());
+    let (mut struct_field_nodes, mut struct_dtor_nodes, mut struct_fields_map) = (HashSet::new(), HashSet::new(), HashMap::new());
 
     for (idx, node) in arena.nodes.iter().enumerate() {
-        if node.node_kind() == NodeKind::StructDecl && node.rhs != 0 {
+        if node.node_kind() == NodeKind::StructDecl && node.rhs != 0 && node.rhs != u32::MAX {
             let b_node = *arena.node(NodeId(node.rhs));
             if b_node.node_kind() == NodeKind::BlockExpr {
                 let mut f_ids = Vec::new();
                 for &c_id in arena.children_slice(b_node.lhs, b_node.rhs) {
-                    let c_node = *arena.node(NodeId(c_id));
-                    let is_f = c_node.node_kind() == NodeKind::ParamDecl
-                        || (matches!(c_node.node_kind(), NodeKind::LetStmt | NodeKind::VarStmt) && arena.type_annotations.contains_key(&c_id));
-                    if is_f { struct_field_nodes.insert(c_id); f_ids.push(c_id); }
-                    else if c_node.node_kind() == NodeKind::FnDecl { f_ids.push(c_id); }
+                    let ck = arena.node(NodeId(c_id)).node_kind();
+                    if ck == NodeKind::ParamDecl || (matches!(ck, NodeKind::LetStmt | NodeKind::VarStmt) && arena.type_annotations.contains_key(&c_id)) {
+                        struct_field_nodes.insert(c_id); f_ids.push(c_id);
+                    } else {
+                        if ck == NodeKind::DestructorDecl { struct_dtor_nodes.insert(idx as u32); }
+                        f_ids.push(c_id);
+                    }
                 }
                 struct_fields_map.insert(idx as u32, f_ids);
             }
         }
     }
 
-    let extract_sym = |id: NodeId| -> u32 { if id.is_none() { 0 } else { arena.node(id).lhs } };
+    let extract_sym = |id: NodeId| -> u32 {
+        if id.is_none() || (id.0 as usize) >= arena.nodes.len() { 0 }
+        else { arena.type_base_symbols.get(&id.0).map_or_else(|| arena.node(id).lhs, |s| s.0) }
+    };
 
     for (idx, node) in arena.nodes.iter().enumerate() {
-        let idx_u32 = idx as u32;
-        let span = arena.span(NodeId(idx_u32));
-        let kind = node.node_kind();
-
-        let first_attr_arg = attr_args.len() as u32;
-        let mut attr_arg_count = 0u16;
+        let (idx_u32, span, kind) = (idx as u32, arena.span(NodeId(idx as u32)), node.node_kind());
+        let (first_attr_arg, first_attr) = (attr_args.len() as u32, raw_attrs.len() as u32);
+        let (mut attr_arg_count, mut attr_count) = (0u16, 0u16);
         if let Some(attrs) = arena.node_attributes.get(&idx_u32) {
             for attr in attrs {
+                if attr.name.0 != 0 { symbol_strings.insert(attr.name.0, arena.interner.resolve(attr.name).to_string()); }
+                let (this_first, mut this_cnt) = (attr_args.len() as u32, 0u16);
                 for &a in &attr.args {
                     let an = arena.node(a);
-                    if an.node_kind() == NodeKind::IntLit {
-                        attr_args.push(arena.i64_pool.get(an.lhs as usize).copied().unwrap_or(0));
-                        attr_arg_count += 1;
-                    } else if an.node_kind() == NodeKind::StrLit || an.node_kind() == NodeKind::IdentExpr {
-                        if an.lhs != 0 { symbol_strings.insert(an.lhs, arena.interner.resolve(SymbolId(an.lhs)).to_string()); }
-                        attr_args.push(an.lhs as i64);
-                        attr_arg_count += 1;
-                    }
+                    let (val, ak) = match an.node_kind() {
+                        NodeKind::IntLit => (arena.i64_pool.get(an.lhs as usize).copied().unwrap_or(0), 0u8),
+                        NodeKind::FloatLit => (arena.f64_pool.get(an.lhs as usize).copied().unwrap_or(0.0).to_bits() as i64, 0),
+                        NodeKind::BoolLit => ((an.lhs != 0) as i64, 0),
+                        NodeKind::StrLit | NodeKind::IdentExpr | NodeKind::TypeNamed => {
+                            if an.lhs != 0 { symbol_strings.insert(an.lhs, arena.interner.resolve(SymbolId(an.lhs)).to_string()); }
+                            (an.lhs as i64, if an.node_kind() == NodeKind::StrLit { 1 } else { 2 })
+                        }
+                        NodeKind::UnaryExpr if an.flags != 1 && (an.lhs as usize) < arena.nodes.len() && arena.node(NodeId(an.lhs)).node_kind() == NodeKind::IntLit => {
+                            (-arena.i64_pool.get(arena.node(NodeId(an.lhs)).lhs as usize).copied().unwrap_or(0), 0)
+                        }
+                        _ => (a.0 as i64, 0),
+                    };
+                    attr_args.push(val); attr_arg_kind.push(ak); this_cnt += 1; attr_arg_count += 1;
                 }
+                raw_attrs.push(RawAttr { name_sym: attr.name.0, first_arg: this_first, arg_count: this_cnt });
+                attr_count += 1;
             }
         }
+
+        let (first_base, mut base_count) = (base_syms.len() as u32, 0u16);
+        if let Some(bases) = arena.struct_base_types.get(&idx_u32) {
+            for &b in bases {
+                let bsym = extract_sym(b);
+                if bsym != 0 { symbol_strings.insert(bsym, arena.interner.resolve(SymbolId(bsym)).to_string()); base_syms.push(bsym); base_count += 1; }
+            }
+        }
+
+        let mut decl_flags = arena.node_visibility.get(&idx_u32).map_or(15u16, |v| *v as u16);
+        for (cond, bit) in [
+            (arena.partial_types.contains(&idx_u32), 16), (arena.static_methods.contains(&idx_u32), 32),
+            (arena.pure_methods.contains(&idx_u32), 64), (arena.mut_methods.contains(&idx_u32) || kind == NodeKind::VarStmt, 128),
+            (arena.comptime_fns.contains(&idx_u32), 256), (arena.pkg_decls.contains(&idx_u32), 512),
+            (struct_dtor_nodes.contains(&idx_u32), 1024),
+        ] { if cond { decl_flags |= bit; } }
 
         let (kind_tag, sym_id, raw_bits, lit_kind) = if struct_field_nodes.contains(&idx_u32) {
             let ty_id = if kind == NodeKind::ParamDecl { NodeId(node.rhs) } else { arena.type_annotations.get(&idx_u32).copied().unwrap_or(NodeId::NONE) };
@@ -106,137 +154,121 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
             (21u8, node.lhs, ty_sym as u64, 0u8)
         } else {
             match kind {
-                NodeKind::StructDecl => (1u8, node.lhs, 0u64, 0u8),
-                NodeKind::InterfaceDecl => (2u8, node.lhs, 0u64, 0u8),
-                NodeKind::FnDecl => (3u8, node.lhs, 0u64, 0u8),
+                NodeKind::StructDecl => (1, node.lhs, 0, 0),
+                NodeKind::InterfaceDecl => (2, node.lhs, 0, 0),
+                NodeKind::FnDecl => (3, node.lhs, 0, 0),
                 NodeKind::ParamDecl => {
                     let ty_sym = extract_sym(NodeId(node.rhs));
                     if ty_sym != 0 { symbol_strings.insert(ty_sym, arena.interner.resolve(SymbolId(ty_sym)).to_string()); }
-                    (21u8, node.lhs, ty_sym as u64, 0u8)
+                    (21, node.lhs, ty_sym as u64, 0)
                 }
-                NodeKind::LetStmt | NodeKind::VarStmt => {
+                NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
                     let ty_sym = arena.type_annotations.get(&idx_u32).copied().map(extract_sym).unwrap_or(0);
                     if ty_sym != 0 { symbol_strings.insert(ty_sym, arena.interner.resolve(SymbolId(ty_sym)).to_string()); }
-                    (4u8, node.lhs, ty_sym as u64, 0u8)
+                    (4, node.lhs, ty_sym as u64, 0)
                 }
-                NodeKind::IfExpr => (6u8, 0, 0u64, 0u8),
-                NodeKind::ForExpr | NodeKind::WhileStmt => (7u8, 0, 0u64, 0u8),
-                NodeKind::ReturnStmt => (8u8, 0, 0u64, 0u8),
-                NodeKind::YieldStmt => (9u8, 0, 0u64, 0u8),
-                NodeKind::DeferStmt => (10u8, 0, 0u64, 0u8),
-                NodeKind::ComptimeExpr => (11u8, 0, 0u64, 0u8),
-                NodeKind::PolyglotBlock => (13u8, 0, 0u64, 0u8),
-                NodeKind::IdentExpr | NodeKind::TypeNamed => (14u8, node.lhs, 0u64, 0u8),
-                NodeKind::IntLit => (15u8, 0, arena.i64_pool.get(node.lhs as usize).copied().unwrap_or(0) as u64, 1u8),
-                NodeKind::FloatLit => (15u8, 0, arena.f64_pool.get(node.lhs as usize).copied().unwrap_or(0.0).to_bits(), 2u8),
-                NodeKind::StrLit => (15u8, node.lhs, 0u64, 3u8),
-                NodeKind::BoolLit => (15u8, 0, node.lhs as u64, 4u8),
-                NodeKind::CallExpr => (16u8, 0, 0u64, 0u8),
-                NodeKind::MemberExpr => (17u8, node.rhs, 0u64, 0u8),
-                NodeKind::BlockExpr => (18u8, 0, 0u64, 0u8),
-                NodeKind::BinaryExpr => (19u8, 0, node.flags as u64, 0u8),
-                NodeKind::AssignStmt => (20u8, 0, 0u64, 0u8),
-                _ => (255u8, 0, 0u64, 0u8),
+                NodeKind::IfExpr => (6, 0, 0, 0),
+                NodeKind::ForExpr | NodeKind::WhileStmt => (7, 0, 0, 0),
+                NodeKind::ReturnStmt => (8, 0, 0, 0),
+                NodeKind::YieldStmt => (9, 0, 0, 0),
+                NodeKind::DeferStmt => (10, 0, 0, 0),
+                NodeKind::ComptimeExpr => (11, 0, 0, 0),
+                NodeKind::PolyglotBlock => (13, node.lhs, 0, 0),
+                NodeKind::IdentExpr | NodeKind::TypeNamed => (14, node.lhs, 0, 0),
+                NodeKind::IntLit => (15, 0, arena.i64_pool.get(node.lhs as usize).copied().unwrap_or(0) as u64, 1),
+                NodeKind::FloatLit => (15, 0, arena.f64_pool.get(node.lhs as usize).copied().unwrap_or(0.0).to_bits(), 2),
+                NodeKind::StrLit => (15, node.lhs, 0, 3),
+                NodeKind::BoolLit => (15, 0, node.lhs as u64, 4),
+                NodeKind::CallExpr => (16, 0, node.flags as u64, 0),
+                NodeKind::MemberExpr => (17, node.rhs, 0, 0),
+                NodeKind::BlockExpr => (18, 0, 0, 0),
+                NodeKind::BinaryExpr => (19, 0, node.flags as u64, 0),
+                NodeKind::AssignStmt => (20, 0, 0, 0),
+                NodeKind::ImportDecl | NodeKind::TypeAdtDecl | NodeKind::AdtVariant | NodeKind::RecordDecl
+                | NodeKind::ClassDecl | NodeKind::ExtendDecl | NodeKind::PatBind | NodeKind::PatVariant | NodeKind::UnitLit => (255, node.lhs, node.flags as u64, 0),
+                _ => (255, 0, node.flags as u64, 0),
             }
         };
-
         if sym_id != 0 { symbol_strings.insert(sym_id, arena.interner.resolve(SymbolId(sym_id)).to_string()); }
 
-        let first_child = child_links.len() as u32;
-        let mut child_count = 0u16;
-
+        let (first_child, mut child_count) = (child_links.len() as u32, 0u16);
+        let mut push_ch = |c: u32| { if c != 0 && c != u32::MAX && (c as usize) < arena.nodes.len() { child_links.push(c); child_count += 1; } };
         if !struct_field_nodes.contains(&idx_u32) {
             match kind {
-                NodeKind::StructDecl => {
-                    if let Some(f_ids) = struct_fields_map.get(&idx_u32) {
-                        for &f_id in f_ids { child_links.push(f_id); child_count += 1; }
+                NodeKind::StructDecl => if let Some(f_ids) = struct_fields_map.get(&idx_u32) { for &f in f_ids { child_links.push(f); child_count += 1; } },
+                NodeKind::InterfaceDecl | NodeKind::RecordDecl | NodeKind::ClassDecl | NodeKind::ExtendDecl => {
+                    if node.rhs != 0 && node.rhs != u32::MAX && (node.rhs as usize) < arena.nodes.len() {
+                        let bn = *arena.node(NodeId(node.rhs));
+                        if bn.node_kind() == NodeKind::BlockExpr { for &c in arena.children_slice(bn.lhs, bn.rhs) { push_ch(c); } } else { push_ch(node.rhs); }
                     }
                 }
-                NodeKind::FnDecl => {
-                    let (s, c) = (node.rhs as usize, node.flags as usize);
-                    if c > 0 && s + c <= arena.extra_children.len() {
-                        for &ch in &arena.extra_children[s..s + c] { child_links.push(ch); child_count += 1; }
-                    }
-                }
-                NodeKind::BinaryExpr | NodeKind::AssignStmt | NodeKind::WhileStmt | NodeKind::ForExpr => {
-                    for &ch in &[node.lhs, node.rhs] { if ch != 0 { child_links.push(ch); child_count += 1; } }
-                }
+                NodeKind::FnDecl | NodeKind::AdtVariant | NodeKind::PatVariant => for &c in arena.children_slice(node.rhs, node.flags as u32) { push_ch(c); },
+                NodeKind::TypeAdtDecl => if node.flags > 0 { for &c in arena.children_slice(node.rhs, node.flags as u32) { push_ch(c); } } else { push_ch(node.rhs); },
+                NodeKind::LambdaExpr => { for &c in arena.children_slice(node.lhs, node.flags as u32) { push_ch(c); } push_ch(node.rhs); }
+                NodeKind::ForExpr => { if let Some(&it) = arena.for_iter_nodes.get(&idx_u32) { push_ch(it.0); } push_ch(node.rhs); }
                 NodeKind::IfExpr => {
-                    if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
-                    if node.flags == 2 {
-                        for &ch in arena.children_slice(node.rhs, 2) { if ch != 0 { child_links.push(ch); child_count += 1; } }
-                    } else if node.rhs != 0 { child_links.push(node.rhs); child_count += 1; }
+                    push_ch(node.lhs);
+                    if node.flags >= 2 { for &c in arena.children_slice(node.rhs, node.flags as u32) { push_ch(c); } } else { push_ch(node.rhs); }
                 }
-                NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::MemberExpr => {
-                    let ch = if kind == NodeKind::MemberExpr { node.lhs } else { node.rhs };
-                    if ch != 0 { child_links.push(ch); child_count += 1; }
+                NodeKind::Program | NodeKind::BlockExpr | NodeKind::CallExpr | NodeKind::TupleExpr | NodeKind::ListExpr
+                | NodeKind::MapExpr | NodeKind::MatchExpr | NodeKind::TryStmt | NodeKind::ConstructorDecl
+                | NodeKind::IndexerDecl | NodeKind::OperatorDecl | NodeKind::TypeTuple | NodeKind::PatTuple | NodeKind::PatSlice => {
+                    for &c in arena.children_slice(node.lhs, node.rhs) { push_ch(c); }
                 }
-                NodeKind::ReturnStmt | NodeKind::YieldStmt => {
-                    if node.lhs != 0 { child_links.push(node.lhs); child_count += 1; }
+                NodeKind::BinaryExpr | NodeKind::AssignStmt | NodeKind::WhileStmt | NodeKind::IndexExpr | NodeKind::CascadeExpr
+                | NodeKind::PipeExpr | NodeKind::CatchRecoveryExpr | NodeKind::CoalesceExpr | NodeKind::RangeExpr
+                | NodeKind::GuardStmt | NodeKind::MatchArm | NodeKind::ScopeDecl | NodeKind::TypeIntersection
+                | NodeKind::TypeUnion | NodeKind::TypeFn | NodeKind::TypeFallible | NodeKind::TypeMap | NodeKind::PatOr | NodeKind::PatRange => {
+                    push_ch(node.lhs); push_ch(node.rhs);
                 }
-                NodeKind::CallExpr | NodeKind::BlockExpr | NodeKind::Program => {
-                    let (s, c) = (node.lhs as usize, node.rhs as usize);
-                    if c > 0 && s + c <= arena.extra_children.len() {
-                        for &ch in &arena.extra_children[s..s + c] { child_links.push(ch); child_count += 1; }
-                    }
-                }
+                NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl | NodeKind::CatchClause => push_ch(node.rhs),
+                NodeKind::MemberExpr | NodeKind::UnaryExpr | NodeKind::ReturnStmt | NodeKind::YieldStmt | NodeKind::DeferStmt
+                | NodeKind::ExprStmt | NodeKind::TryPropagateExpr | NodeKind::DestructorDecl | NodeKind::DynamicMemberDecl
+                | NodeKind::ComptimeExpr | NodeKind::TypeOptional | NodeKind::TypeList | NodeKind::PatLiteral => push_ch(node.lhs),
+                NodeKind::TypeSlice => if node.flags == 9 { for &c in arena.children_slice(node.lhs, node.rhs) { push_ch(c); } } else { push_ch(node.lhs); push_ch(node.rhs); },
                 _ => {}
             }
         }
-
         raw_nodes.push(RawAstNode {
-            node_id: idx_u32, parent_id: 0, kind_tag, sym_id, first_child, child_count,
-            first_attr_arg, attr_arg_count, raw_bits, literal_kind: lit_kind, span_start: span.start, span_end: span.end,
+            node_id: idx_u32, parent_id: u32::MAX, kind_tag, orig_kind: node.kind, node_flags: node.flags, decl_flags,
+            sym_id, first_child, child_count, first_attr_arg, attr_arg_count, first_attr, attr_count,
+            first_base, base_count, raw_bits, literal_kind: lit_kind, span_start: span.start, span_end: span.end,
         });
     }
 
-    (RawAstArena { nodes: raw_nodes, child_links, attr_args }, symbol_strings)
+    for p_idx in 0..raw_nodes.len() {
+        let (fc, cc) = (raw_nodes[p_idx].first_child as usize, raw_nodes[p_idx].child_count as usize);
+        for &cid in &child_links[fc..fc + cc] { if (cid as usize) < raw_nodes.len() { raw_nodes[cid as usize].parent_id = p_idx as u32; } }
+    }
+    (RawAstArena { nodes: raw_nodes, child_links, attr_args, attr_arg_kind, attrs: raw_attrs, base_syms }, symbol_strings)
 }
 
-// Restriction: Dispatches __engine calls to PhysicsRegistry & LayoutTable; Forbidden: type inference logic, symbol lookups, or AST traversal
 pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, args: &[PilotVal]) -> Result<PilotVal, String> {
+    let arg_i = |i: usize| args.get(i).and_then(|v| v.as_int()).unwrap_or(0);
+    let arg_s = |i: usize| args.get(i).and_then(|v| v.with_str(|s| s.to_string())).unwrap_or_default();
+    let nid = arg_i(0) as usize;
     match op_code {
         "ast_node_count" => Ok(PilotVal::from_int(registry.arena.nodes.len() as i64)),
-        "ast_node_kind" => {
-            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
-            Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(255, |n| n.kind_tag) as i64))
-        }
-        "ast_node_sym" => {
-            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
-            Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.sym_id) as i64))
-        }
-        "ast_node_lit_kind" => {
-            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
-            Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.literal_kind) as i64))
-        }
-        "ast_node_raw_bits" => {
-            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
-            Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.raw_bits) as i64))
-        }
-        "ast_child_count" => {
-            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
-            Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.child_count) as i64))
-        }
-        "ast_child_at" => {
-            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
-            let idx = args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as usize;
-            let cid = registry.arena.nodes.get(nid).and_then(|n| {
-                if idx < n.child_count as usize { registry.arena.child_links.get(n.first_child as usize + idx).copied() } else { None }
-            }).unwrap_or(0);
-            Ok(PilotVal::from_int(cid as i64))
-        }
-        "ast_attr_count" => Ok(PilotVal::from_int(args.first().and_then(|v| v.as_int()).and_then(|n| registry.arena.nodes.get(n as usize)).map_or(0, |n| n.attr_arg_count) as i64)),
-        "ast_attr_arg" => {
-            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
-            let aidx = args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as usize;
-            let val = registry.arena.nodes.get(nid).and_then(|n| {
-                if aidx < n.attr_arg_count as usize { registry.arena.attr_args.get(n.first_attr_arg as usize + aidx).copied() } else { None }
-            }).unwrap_or(0);
-            Ok(PilotVal::from_int(val))
-        }
+        "ast_node_kind" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(255, |n| n.kind_tag) as i64)),
+        "ast_orig_kind" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(65535, |n| n.orig_kind) as i64)),
+        "ast_node_flags" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.node_flags) as i64)),
+        "ast_decl_flags" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.decl_flags) as i64)),
+        "ast_parent" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(u32::MAX as i64, |n| n.parent_id as i64))),
+        "ast_node_sym" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.sym_id) as i64)),
+        "ast_node_lit_kind" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.literal_kind) as i64)),
+        "ast_node_raw_bits" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.raw_bits) as i64)),
+        "ast_child_count" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.child_count) as i64)),
+        "ast_child_at" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).and_then(|n| ((arg_i(1) as usize) < n.child_count as usize).then(|| registry.arena.child_links[n.first_child as usize + arg_i(1) as usize])).unwrap_or(0) as i64)),
+        "ast_attr_count" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.attr_arg_count) as i64)),
+        "ast_attr_arg" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).and_then(|n| ((arg_i(1) as usize) < n.attr_arg_count as usize).then(|| registry.arena.attr_args[n.first_attr_arg as usize + arg_i(1) as usize])).unwrap_or(0))),
+        "ast_attr_decl_count" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.attr_count) as i64)),
+        "ast_attr_name" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).and_then(|n| ((arg_i(1) as usize) < n.attr_count as usize).then(|| registry.arena.attrs[n.first_attr as usize + arg_i(1) as usize].name_sym)).unwrap_or(0) as i64)),
+        "ast_attr_decl_arg_count" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).and_then(|n| ((arg_i(1) as usize) < n.attr_count as usize).then(|| registry.arena.attrs[n.first_attr as usize + arg_i(1) as usize].arg_count)).unwrap_or(0) as i64)),
+        "ast_attr_decl_arg" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).and_then(|n| ((arg_i(1) as usize) < n.attr_count as usize).then(|| registry.arena.attrs[n.first_attr as usize + arg_i(1) as usize])).and_then(|a| ((arg_i(2) as usize) < a.arg_count as usize).then(|| registry.arena.attr_args[a.first_arg as usize + arg_i(2) as usize])).unwrap_or(0))),
+        "ast_base_count" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.base_count) as i64)),
+        "ast_base_at" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).and_then(|n| ((arg_i(1) as usize) < n.base_count as usize).then(|| registry.arena.base_syms[n.first_base as usize + arg_i(1) as usize])).unwrap_or(0) as i64)),
         "layout_hw_header" => {
-            let code = args.first().and_then(|v| v.as_int()).unwrap_or(0) as u8;
-            let hdr = match code {
+            let hdr = match arg_i(0) as u8 {
                 0 => HwScalarHeader::Unit0, 1 => HwScalarHeader::Bool8, 2 => HwScalarHeader::U8, 3 => HwScalarHeader::U16,
                 4 => HwScalarHeader::U32, 5 => HwScalarHeader::U64, 6 => HwScalarHeader::U128, 7 => HwScalarHeader::I8,
                 8 => HwScalarHeader::I16, 9 => HwScalarHeader::I32, 10 => HwScalarHeader::I64, 11 => HwScalarHeader::I128,
@@ -244,109 +276,98 @@ pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, ar
             };
             Ok(PilotVal::from_int(registry.layouts.register_hw_header(hdr).0 as i64))
         }
-        "layout_scalar" => {
-            let (w, l, b) = (args.first().and_then(|v| v.as_int()).unwrap_or(64) as u16, args.get(1).and_then(|v| v.as_int()).unwrap_or(1) as u16, args.get(2).and_then(|v| v.as_int()).unwrap_or(0) as u8);
-            Ok(PilotVal::from_int(registry.layouts.register_scalar(w, l, b).0 as i64))
-        }
-        "layout_ptr" => {
-            let (target, cap, space) = (args.first().and_then(|v| v.as_int()).unwrap_or(0) as u32, args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as u8, args.get(2).and_then(|v| v.as_int()).unwrap_or(0) as u8);
-            Ok(PilotVal::from_int(registry.layouts.register_pointer(LayoutId(target), CapabilityBits(cap), space).0 as i64))
-        }
+        "layout_scalar" => Ok(PilotVal::from_int(registry.layouts.register_scalar(arg_i(0) as u16, arg_i(1).max(1) as u16, arg_i(2) as u8).0 as i64)),
+        "layout_ptr" => Ok(PilotVal::from_int(registry.layouts.register_pointer(LayoutId(arg_i(0) as u32), CapabilityBits(arg_i(1) as u8), arg_i(2) as u8).0 as i64)),
         "layout_aggregate" => {
-            let mut fields = Vec::new();
-            for a in args { if let Some(v) = a.as_int() { fields.push(LayoutId(v as u32)); } }
+            let fields: Vec<LayoutId> = args.iter().filter_map(|a| a.as_int().map(|v| LayoutId(v as u32))).collect();
             Ok(PilotVal::from_int(registry.layouts.register_aggregate(&fields, false, false).0 as i64))
         }
         "layout_union" => {
-            let tag = args.first().and_then(|v| v.as_int()).unwrap_or(8) as u8;
-            let mut payloads = Vec::new();
-            for a in &args[1..] { if let Some(v) = a.as_int() { payloads.push(LayoutId(v as u32)); } }
-            Ok(PilotVal::from_int(registry.layouts.register_union(tag, &payloads).0 as i64))
+            let payloads: Vec<LayoutId> = args.iter().skip(1).filter_map(|a| a.as_int().map(|v| LayoutId(v as u32))).collect();
+            Ok(PilotVal::from_int(registry.layouts.register_union(arg_i(0) as u8, &payloads).0 as i64))
         }
         "layout_fn_abi" => {
-            let mut params = Vec::new();
-            for a in &args[..args.len().saturating_sub(1)] { if let Some(v) = a.as_int() { params.push(LayoutId(v as u32)); } }
+            let params: Vec<LayoutId> = args[..args.len().saturating_sub(1)].iter().filter_map(|a| a.as_int().map(|v| LayoutId(v as u32))).collect();
             let ret = args.last().and_then(|v| v.as_int()).map(|x| LayoutId(x as u32)).unwrap_or_default();
             Ok(PilotVal::from_int(registry.layouts.register_call_frame(&params, ret).0 as i64))
         }
-        "layout_metrics" => {
-            let lid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as u32;
-            Ok(PilotVal::from_int(registry.layouts.get(LayoutId(lid)).map_or(0, |l| l.byte_size) as i64))
-        }
-        "layout_field_offset" => {
-            let lid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as u32;
-            let idx = args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as usize;
-            let off = registry.layouts.get(LayoutId(lid)).and_then(|l| match &l.geometry {
-                PhysicsGeometry::Aggregate { fields, .. } => fields.get(idx).map(|f| f.byte_offset),
-                _ => None,
-            }).unwrap_or(0);
-            Ok(PilotVal::from_int(off as i64))
-        }
-        "layout_physically_equal" => {
-            let a = args.first().and_then(|v| v.as_int()).unwrap_or(0) as u32;
-            let b = args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as u32;
-            let eq = match (registry.layouts.get(LayoutId(a)), registry.layouts.get(LayoutId(b))) {
-                (Some(la), Some(lb)) => la.byte_size == lb.byte_size && la.byte_align == lb.byte_align && la.geometry == lb.geometry,
-                _ => false,
-            };
-            Ok(PilotVal::from_bool(eq))
-        }
-        "ast_bind_layout" => {
-            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
-            let lid = args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as u32;
-            if nid < registry.node_layouts.len() { registry.node_layouts[nid] = Some(LayoutId(lid)); }
-            Ok(PilotVal::NULL)
-        }
-        "ast_get_bound_layout" => {
-            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
-            let lid = registry.node_layouts.get(nid).and_then(|x| *x).map_or(u32::MAX as i64, |l| l.0 as i64);
-            Ok(PilotVal::from_int(lid))
-        }
-        "ast_bind_target" => {
-            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as usize;
-            let tid = args.get(1).and_then(|v| v.as_int()).unwrap_or(0) as u32;
-            if nid < registry.node_targets.len() { registry.node_targets[nid] = Some(tid); }
-            Ok(PilotVal::NULL)
-        }
-        "ast_emit_diag" => {
-            let nid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as u32;
-            let sev = args.get(1).and_then(|v| v.as_int()).unwrap_or(1) as u8;
-            let msg = args.get(2).and_then(|v| v.with_str(|s| s.to_string())).unwrap_or_default();
-            registry.diagnostics.push(PhysicsDiagnostic { node_id: nid, severity: sev, message: msg });
-            Ok(PilotVal::NULL)
-        }
-        "sym_str" => {
-            let sid = args.first().and_then(|v| v.as_int()).unwrap_or(0) as u32;
-            Ok(PilotVal::from_str(registry.symbol_strings.get(&sid).map(|s| s.as_str()).unwrap_or_default()))
-        }
-        "ast_span_start" => Ok(PilotVal::from_int(args.first().and_then(|v| v.as_int()).and_then(|n| registry.arena.nodes.get(n as usize)).map_or(0, |n| n.span_start as i64))),
-        "ast_span_end" => Ok(PilotVal::from_int(args.first().and_then(|v| v.as_int()).and_then(|n| registry.arena.nodes.get(n as usize)).map_or(0, |n| n.span_end as i64))),
+        "layout_metrics" => Ok(PilotVal::from_int(registry.layouts.get(LayoutId(arg_i(0) as u32)).map_or(0, |l| l.byte_size) as i64)),
+        "layout_field_offset" => Ok(PilotVal::from_int(registry.layouts.get(LayoutId(arg_i(0) as u32)).and_then(|l| match &l.geometry { PhysicsGeometry::Aggregate { fields, .. } => fields.get(arg_i(1) as usize).map(|f| f.byte_offset), _ => None }).unwrap_or(0) as i64)),
+        "layout_physically_equal" => Ok(PilotVal::from_bool(matches!((registry.layouts.get(LayoutId(arg_i(0) as u32)), registry.layouts.get(LayoutId(arg_i(1) as u32))), (Some(a), Some(b)) if a.byte_size == b.byte_size && a.byte_align == b.byte_align && a.geometry == b.geometry))),
+        "ast_bind_layout" => { if nid < registry.node_layouts.len() { registry.node_layouts[nid] = Some(LayoutId(arg_i(1) as u32)); } Ok(PilotVal::NULL) }
+        "ast_get_bound_layout" => Ok(PilotVal::from_int(registry.node_layouts.get(nid).and_then(|x| *x).map_or(u32::MAX as i64, |l| l.0 as i64))),
+        "ast_bind_target" => { if nid < registry.node_targets.len() { registry.node_targets[nid] = Some(arg_i(1) as u32); } Ok(PilotVal::NULL) }
+        "ast_get_bound_target" => Ok(PilotVal::from_int(registry.node_targets.get(nid).and_then(|x| *x).map_or(u32::MAX as i64, |t| t as i64))),
+        "ast_emit_diag" => { registry.diagnostics.push(PhysicsDiagnostic { node_id: nid as u32, severity: arg_i(1) as u8, message: arg_s(2) }); Ok(PilotVal::NULL) }
+        "sym_str" => Ok(PilotVal::from_str(registry.symbol_strings.get(&(arg_i(0) as u32)).map(|s| s.as_str()).unwrap_or_default())),
+        "str_len" => Ok(PilotVal::from_int(arg_s(0).len() as i64)),
+        "str_byte_at" => Ok(PilotVal::from_int(arg_s(0).as_bytes().get(arg_i(1).max(0) as usize).copied().unwrap_or(0) as i64)),
+        "ast_span_start" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.span_start as i64))),
+        "ast_span_end" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.span_end as i64))),
         "source_slice" => {
-            let s_raw = args.first().and_then(|v| v.as_int()).unwrap_or(0).max(0) as usize;
-            let e_raw = args.get(1).and_then(|v| v.as_int()).unwrap_or(0).max(0) as usize;
             let (txt, len) = (&registry.source_text, registry.source_text.len());
-            let (mut s, mut e) = (s_raw.min(len), e_raw.min(len));
+            let (mut s, mut e) = ((arg_i(0).max(0) as usize).min(len), (arg_i(1).max(0) as usize).min(len));
             while s > 0 && !txt.is_char_boundary(s) { s -= 1; }
             while e < len && !txt.is_char_boundary(e) { e += 1; }
-            if s > e { s = e; }
-            Ok(PilotVal::from_str(&txt[s..e]))
+            Ok(PilotVal::from_str(&txt[s.min(e)..e]))
         }
-        "ast_get_bound_target" => Ok(PilotVal::from_int(args.first().and_then(|v| v.as_int()).and_then(|n| registry.node_targets.get(n as usize)).and_then(|x| *x).map_or(u32::MAX as i64, |t| t as i64))),
+        "register_keyword_category" => {
+            let (cid, scope, badge, lkind) = (arg_i(0), arg_s(1), arg_s(2), arg_i(3));
+            if let Some(ex) = registry.categories.iter_mut().find(|c| c.id == cid) { ex.scope = scope; ex.badge = badge; ex.lsp_kind = lkind; }
+            else { registry.categories.push(CategoryRecord { id: cid, scope, badge, lsp_kind: lkind }); }
+            Ok(PilotVal::from_int(registry.categories.len() as i64))
+        }
+        "register_keyword" => {
+            let (cid, word, doc) = (arg_i(0), arg_s(1), arg_s(2));
+            if !word.is_empty() { registry.registered_symbols.push((cid, word, doc)); }
+            Ok(PilotVal::from_int(registry.registered_symbols.len() as i64))
+        }
+        "query_registered_symbols" => {
+            let (cid, mode, target) = (args.first().and_then(|v| v.as_int()).unwrap_or(-1), arg_i(1), arg_s(2));
+            if mode == 1 || mode == 2 {
+                let s = registry.categories.iter().find(|c| c.id == cid).map_or_else(String::new, |c| if mode == 1 { c.scope.clone() } else { c.badge.clone() });
+                return Ok(PilotVal::from_str(&s));
+            }
+            if mode == 3 {
+                let d = registry.registered_symbols.iter().find(|(c, w, _)| (cid < 0 || *c == cid) && w == &target).map_or_else(String::new, |(_, _, d)| d.clone());
+                return Ok(PilotVal::from_str(&d));
+            }
+            let (mut out, mut seen) = (String::new(), HashSet::new());
+            if cid < 0 {
+                for c in &registry.categories { if seen.insert(c.scope.clone()) { if !out.is_empty() { out.push('|'); } out.push_str(&c.scope); } }
+            } else {
+                for (c, w, _) in &registry.registered_symbols { if *c == cid && seen.insert(w.clone()) { if !out.is_empty() { out.push('|'); } out.push_str(w); } }
+            }
+            Ok(PilotVal::from_str(&out))
+        }
         "mount_unit" => {
-            let path = args.first().and_then(|v| v.with_str(|s| s.to_string())).unwrap_or_default();
-            if let Ok(src) = std::fs::read_to_string(&path) {
+            if let Ok(src) = std::fs::read_to_string(arg_s(0)) {
                 let parsed = pilot_parser::parse(&src);
                 let (flat, syms) = flatten_ast(&parsed, parsed.root);
-                let (offset, links_base, attrs_base) = (registry.arena.nodes.len() as u32, registry.arena.child_links.len() as u32, registry.arena.attr_args.len() as u32);
-                for c in flat.child_links { registry.arena.child_links.push(c + offset); }
-                registry.arena.attr_args.extend(flat.attr_args);
+                let sym_off = registry.symbol_strings.keys().copied().max().unwrap_or(0);
+                let (off, l_base, aa_base) = (registry.arena.nodes.len() as u32, registry.arena.child_links.len() as u32, registry.arena.attr_args.len() as u32);
+                let (at_base, bs_base) = (registry.arena.attrs.len() as u32, registry.arena.base_syms.len() as u32);
+                for c in flat.child_links { registry.arena.child_links.push(c + off); }
+                for (v, k) in flat.attr_args.into_iter().zip(flat.attr_arg_kind.into_iter()) {
+                    registry.arena.attr_args.push(if k != 0 && v != 0 { v + sym_off as i64 } else { v });
+                    registry.arena.attr_arg_kind.push(k);
+                }
+                for mut a in flat.attrs { if a.name_sym != 0 { a.name_sym += sym_off; } if a.arg_count > 0 { a.first_arg += aa_base; } registry.arena.attrs.push(a); }
+                for b in flat.base_syms { registry.arena.base_syms.push(if b != 0 { b + sym_off } else { 0 }); }
                 for mut n in flat.nodes {
-                    n.node_id += offset;
-                    if n.child_count > 0 { n.first_child += links_base; }
-                    if n.attr_arg_count > 0 { n.first_attr_arg += attrs_base; }
+                    n.node_id += off;
+                    (n.span_start, n.span_end) = (u32::MAX, u32::MAX);
+                    if n.sym_id != 0 { n.sym_id += sym_off; }
+                    if (n.kind_tag == 4 || n.kind_tag == 21) && n.raw_bits != 0 { n.raw_bits += sym_off as u64; }
+                    if n.parent_id != u32::MAX { n.parent_id += off; }
+                    if n.child_count > 0 { n.first_child += l_base; }
+                    if n.attr_arg_count > 0 { n.first_attr_arg += aa_base; }
+                    if n.attr_count > 0 { n.first_attr += at_base; }
+                    if n.base_count > 0 { n.first_base += bs_base; }
                     registry.arena.nodes.push(n);
                 }
-                registry.symbol_strings.extend(syms);
+                for (k, v) in syms { registry.symbol_strings.insert(k + sym_off, v); }
+                registry.index_arena_symbols(off as usize);
                 let total = registry.arena.nodes.len();
                 registry.node_layouts.resize(total, None);
                 registry.node_targets.resize(total, None);
@@ -355,41 +376,40 @@ pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, ar
         }
         "lsp_query_method" => Ok(PilotVal::from_str(&registry.lsp_method)),
         "lsp_query_offset" => Ok(PilotVal::from_int(registry.lsp_offset as i64)),
-        "lsp_set_result" => {
-            if let Some(v) = args.first() { v.with_str(|s| registry.lsp_result = s.to_string()); }
-            Ok(PilotVal::NULL)
-        }
+        "lsp_set_result" => { registry.lsp_result = arg_s(0); Ok(PilotVal::NULL) }
         _ => Ok(PilotVal::NULL),
     }
 }
 
-// Restriction: Compiles & executes selfhost/analyzer.pilot; Forbidden: modifying registry before or after vm.run
-pub fn run_pilot_analyzer(registry: &mut PhysicsRegistry, analyzer_src: Option<&str>) -> Result<(), String> {
-    let src = match analyzer_src {
-        Some(s) => s.to_string(),
-        None => {
-            std::fs::read_to_string("selfhost/analyzer.pilot")
-                .or_else(|_| std::fs::read_to_string("e:/Pilot/selfhost/analyzer.pilot"))
-                .unwrap_or_else(|_| include_str!("../../../selfhost/analyzer.pilot").to_string())
+pub fn load_or_compile_analyzer_pilc() -> PilcBinary {
+    let is_fresh = matches!((std::fs::metadata("selfhost/analyzer.pilot").and_then(|m| m.modified()), std::fs::metadata("selfhost/.pilc-cache/analyzer.pilc").and_then(|m| m.modified())), (Ok(st), Ok(ct)) if ct >= st);
+    if is_fresh {
+        if let Ok(bin) = std::fs::read("selfhost/.pilc-cache/analyzer.pilc").and_then(|b| PilcBinary::load_from_bytes(&b).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))) {
+            return bin;
         }
-    };
+    }
+    let (src, has_local) = std::fs::read_to_string("selfhost/analyzer.pilot").map(|s| (s, true)).unwrap_or_else(|_| (include_str!("../../../selfhost/analyzer.pilot").to_string(), false));
+    let parsed = pilot_parser::parse(&src);
+    let binary = pilot_vm::compiler::BytecodeCompiler::compile(&parsed, parsed.root);
+    if has_local {
+        let _ = std::fs::create_dir_all("selfhost/.pilc-cache");
+        if std::fs::write("selfhost/.pilc-cache/analyzer.pilc.tmp", binary.serialize()).is_ok() {
+            let _ = std::fs::rename("selfhost/.pilc-cache/analyzer.pilc.tmp", "selfhost/.pilc-cache/analyzer.pilc");
+        }
+    }
+    binary
+}
 
-    let parsed_arena = pilot_parser::parse(&src);
-    let binary = pilot_vm::compiler::BytecodeCompiler::compile(&parsed_arena, parsed_arena.root);
+pub fn run_pilot_analyzer(registry: &mut PhysicsRegistry, analyzer_src: Option<&str>) -> Result<(), String> {
+    let binary = analyzer_src.map_or_else(load_or_compile_analyzer_pilc, |s| { let p = pilot_parser::parse(s); pilot_vm::compiler::BytecodeCompiler::compile(&p, p.root) });
     let mut vm = pilot_vm::vm::PilVirtualMachine::new();
     vm.load_binary(binary);
-
     let reg_ptr = registry as *mut PhysicsRegistry;
-    vm.engine_handler = Some(Box::new(move |op_code, args| {
-        let reg = unsafe { &mut *reg_ptr };
-        handle_engine_intrinsic(reg, op_code, args)
-    }));
-
+    vm.engine_handler = Some(Box::new(move |op_code, args| handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op_code, args)));
     vm.run();
     Ok(())
 }
 
-// Restriction: Canonical analysis entry point; Forbidden: calling any other Rust pass
 pub fn analyze_physics_with_source(arena: &AstArena, root: NodeId, source: Option<&str>, analyzer_override: Option<&str>) -> PhysicsRegistry {
     let (flat_arena, symbol_strings) = flatten_ast(arena, root);
     let mut registry = PhysicsRegistry::new(flat_arena, symbol_strings);
@@ -400,37 +420,4 @@ pub fn analyze_physics_with_source(arena: &AstArena, root: NodeId, source: Optio
 
 pub fn analyze_physics(arena: &AstArena, root: NodeId, analyzer_override: Option<&str>) -> PhysicsRegistry {
     analyze_physics_with_source(arena, root, None, analyzer_override)
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct NodeLayoutMap { pub node_layouts: Vec<Option<LayoutId>> }
-
-impl NodeLayoutMap {
-    pub fn new() -> Self { Self::default() }
-    pub fn get(&self, node_id: u32) -> Option<LayoutId> { self.node_layouts.get(node_id as usize).copied().flatten() }
-    pub fn set(&mut self, node_id: u32, layout_id: LayoutId) {
-        if node_id as usize >= self.node_layouts.len() { self.node_layouts.resize(node_id as usize + 1, None); }
-        self.node_layouts[node_id as usize] = Some(layout_id);
-    }
-}
-
-pub fn verify_capability_transition(source: CapabilityBits, target: CapabilityBits) -> bool {
-    match (source, target) {
-        (CapabilityBits::VALUE, _) | (CapabilityBits::OWNED_OBJ, CapabilityBits::BORROW_REF) | (CapabilityBits::OWNED_OBJ, CapabilityBits::SCOPED_GUARD) => true,
-        (s, t) => s == t,
-    }
-}
-
-pub fn compute_field_projection(aggregate: &PhysicalLayout, field_idx: usize) -> Option<FieldOffset> {
-    match &aggregate.geometry { PhysicsGeometry::Aggregate { fields, .. } => fields.get(field_idx).copied(), _ => None }
-}
-
-pub fn compute_soa_projection(slice_layout: &PhysicalLayout, field_idx: usize) -> Option<PhysicalLayout> {
-    match &slice_layout.geometry {
-        PhysicsGeometry::Aggregate { fields, .. } => fields.get(field_idx).map(|f| PhysicalLayout {
-            id: f.layout, byte_size: 16, byte_align: 8,
-            geometry: PhysicsGeometry::Pointer { target: f.layout, capability: CapabilityBits::MUTABLE, addr_space: 0 },
-        }),
-        _ => None,
-    }
 }
