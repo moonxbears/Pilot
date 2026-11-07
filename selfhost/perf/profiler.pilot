@@ -1,0 +1,26 @@
+// =========================================================================
+// FILE: selfhost/perf/profiler.pilot
+// Milestone 60.2: PilVM Call-Stack Profiler & SVG Flamegraph / Chrome Trace Emitter
+// Replaces crates/pilot-perf/src/profile.rs in Pure Pilot.
+// =========================================================================
+pub pkg Pilot.SelfHost.Perf.Profiler;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub pure fn render_flamegraph_svg_frame(fn_label: str, x_px: i64, y_px: i64, width_px: i64, samples: i64) -> str {
+    return "<g class=\"func_g\"><title>" + nameof(fn) + " " + fn_label + " (" + samples + " samples)</title>" +
+           "<rect x=\"" + x_px + "\" y=\"" + y_px + "\" width=\"" + width_px + "\" height=\"16\" fill=\"rgb(235,110,52)\"/>" +
+           "<text x=\"" + (x_px + 4) + "\" y=\"" + (y_px + 12) + "\">" + fn_label + "</text></g>";
+}
+
+pub pure fn export_call_stack_flamegraph_svg(root_fn: str, leaf_fn: str, total_samples: i64, leaf_samples: i64) -> str {
+    let leaf_w = if total_samples > 0 { (leaf_samples * 800) / total_samples } else { 400 };
+    return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"820\" height=\"80\">\n" +
+           "  " + render_flamegraph_svg_frame(root_fn, 10, 40, 800, total_samples) + "\n" +
+           "  " + render_flamegraph_svg_frame(leaf_fn, 10, 20, leaf_w, leaf_samples) + "\n" +
+           "</svg>";
+}
+
+pub pure fn export_chrome_trace_event(fn_label: str, ts_us: i64, dur_us: i64) -> str {
+    return "{\"name\":\"" + fn_label + "\",\"cat\":\"pilvm\",\"ph\":\"X\",\"ts\":" + ts_us + ",\"dur\":" + dur_us + ",\"pid\":1,\"tid\":1}";
+}

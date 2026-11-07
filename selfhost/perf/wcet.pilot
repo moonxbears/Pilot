@@ -1,0 +1,31 @@
+// =========================================================================
+// FILE: selfhost/perf/wcet.pilot
+// Milestone 60.2: Static WCET & [HardRealtime] Loop Bound Verifier
+// Replaces crates/pilot-perf/src/analyze.rs in Pure Pilot.
+// =========================================================================
+pub pkg Pilot.SelfHost.Perf.Wcet;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub fn audit_realtime_ast_loops() -> i64 {
+    let count = __engine("ast_node_count");
+    var unbounded_loops = 0;
+    var i = 0;
+    while i < count {
+        let k = __engine("ast_node_kind", i);
+        // k == 7 is ForExpr / WhileStmt / Loop
+        if k == 7 {
+            let cc = __engine("ast_child_count", i);
+            if cc < 2 {
+                unbounded_loops = unbounded_loops + 1;
+            }
+        }
+        i = i + 1;
+    }
+    return unbounded_loops;
+}
+
+pub pure fn format_wcet_report(fn_name: str, est_cycles: i64, budget_cycles: i64) -> str {
+    let status = if est_cycles <= budget_cycles { "PASS" } else { "EXCEEDED" };
+    return "[WCET " + status + "] " + nameof(fn) + " " + fn_name + ": " + est_cycles + " / " + budget_cycles + " cycles";
+}

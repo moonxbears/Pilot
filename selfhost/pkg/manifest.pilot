@@ -1,0 +1,34 @@
+// =========================================================================
+// FILE: selfhost/pkg/manifest.pilot
+// Milestone 60.1: Pilot Package Manifest (pilot.json) & Lockfile Generator
+// Replaces crates/pilot-pkg/src/manifest.rs in Pure Pilot.
+// =========================================================================
+pub pkg Pilot.SelfHost.Pkg.Manifest;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub pure fn generate_default_manifest_json(pkg_name: str, version: str = "0.1.0") -> str {
+    let nm = if pkg_name != "" { pkg_name } else { "pilot_app" };
+    return "{\n" +
+           "  \"name\": \"" + nm + "\",\n" +
+           "  \"version\": \"" + version + "\",\n" +
+           "  \"license\": \"MIT\",\n" +
+           "  \"entry\": \"src/main.pilot\",\n" +
+           "  \"dependencies\": {}\n" +
+           "}";
+}
+
+pub pure fn scaffold_canonical_main_pilot(pkg_name: str) -> str {
+    return "pub " + nameof(fn) + " main() -> i64 {\n" +
+           "    " + nameof(let) + " msg = \"Hello from " + pkg_name + "!\";\n" +
+           "    " + nameof(return) + " 0;\n" +
+           "}\n";
+}
+
+pub pure fn generate_lockfile_json(pkg_name: str, version: str, sha256_hex: str) -> str {
+    return "{\n" +
+           "  \"lockfileVersion\": 3,\n" +
+           "  \"root\": \"" + pkg_name + "@" + version + "\",\n" +
+           "  \"integrity\": \"sha256-" + sha256_hex + "\"\n" +
+           "}";
+}

@@ -1,0 +1,29 @@
+// =========================================================================
+// FILE: selfhost/pkg/interop.pilot
+// Milestone 60.1: Cross-Ecosystem Package Spec Resolver (cargo:, pip:, npm:)
+// Replaces crates/pilot-pkg/src/interop.rs in Pure Pilot.
+// =========================================================================
+pub pkg Pilot.SelfHost.Pkg.Interop;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// Ecosystem codes: 0 = pilot, 1 = cargo, 2 = pip, 3 = npm
+pub fn detect_package_ecosystem(spec: str) -> i64 {
+    let b0 = __engine("str_byte_at", spec, 0);
+    let b1 = __engine("str_byte_at", spec, 1);
+    let b2 = __engine("str_byte_at", spec, 2);
+    let b3 = __engine("str_byte_at", spec, 3);
+    // "car" -> cargo:
+    if b0 == 99 && b1 == 97 && b2 == 114 {
+        return 1;
+    }
+    // "pip:" -> ':' is 58
+    if b0 == 112 && b1 == 105 && b2 == 112 && b3 == 58 {
+        return 2;
+    }
+    // "npm:"
+    if b0 == 110 && b1 == 112 && b2 == 109 && b3 == 58 {
+        return 3;
+    }
+    return 0;
+}

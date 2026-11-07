@@ -1,0 +1,46 @@
+// =========================================================================
+// FILE: selfhost/cli/main.pilot
+// Milestone 60.3: Self-Hosted Unified CLI Subcommand Router
+// Replaces crates/pilot-cli/src/main.rs & commands.rs in Pure Pilot.
+// =========================================================================
+pub pkg Pilot.SelfHost.Cli.Main;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub pure fn cli_help_banner() -> str {
+    return "Pilot Programming Language Compiler & Toolchain (v1.1.51)\n" +
+           "Usage: pilot <command> [options] [arguments]\n\n" +
+           "Commands:\n" +
+           "  run <file.pilot> [args...]      Execute Pilot program via PilVM v3 / Native AOT\n" +
+           "  build <file.pilot> [flags]      Compile Pilot program to Native/LLVM/C/WASM/GPU\n" +
+           "  check <file.pilot>              Verify syntax, type safety, and " + nameof(comptime) + "\n" +
+           "  fmt <file.pilot> [--write]      Format source code according to Pilot style\n" +
+           "  test [filter]                   Run integrated test suite or differential tests\n" +
+           "  repl                            Start interactive Name-Blind Pilot REPL\n" +
+           "  pkg <init|add|install|audit>    Manage packages and dependencies\n" +
+           "  venv <init|activate|list>       Manage isolated virtual environments\n" +
+           "  debug [--dap] <file.pilot>      Launch VmHook-stepped debugger or DAP server\n" +
+           "  lsp                             Start resident PilVM Language Server\n" +
+           "  perf <profile|analyze|opt>      Profile and optimize code performance\n" +
+           "  compile <file.pilot> [-o out]   Compile source into .pilc v3 bytecode binary\n" +
+           "  ide-sync                        Synchronize VS Code extension grammar and schemas";
+}
+
+// Subcommand dispatch codes:
+// 1=run, 2=build, 3=check, 4=fmt, 5=test, 6=repl, 7=pkg, 8=venv, 9=debug, 10=lsp, 11=perf, 12=compile, 13=ide-sync, 0=help
+pub pure fn resolve_cli_subcommand(cmd: str) -> i64 {
+    if cmd == "run" { return 1; }
+    if cmd == "build" { return 2; }
+    if cmd == "check" { return 3; }
+    if cmd == "fmt" { return 4; }
+    if cmd == "test" { return 5; }
+    if cmd == "repl" { return 6; }
+    if cmd == "pkg" { return 7; }
+    if cmd == "venv" { return 8; }
+    if cmd == "debug" { return 9; }
+    if cmd == "lsp" { return 10; }
+    if cmd == "perf" { return 11; }
+    if cmd == "compile" { return 12; }
+    if cmd == "ide-sync" { return 13; }
+    return 0;
+}

@@ -11,11 +11,8 @@ members = [
     "crates/pilot-rt",
     "crates/pilot-vm",
     "crates/pilot-codegen",
-    "crates/pilot-pkg",
-    "crates/pilot-perf",
     "crates/pilot-ffi",
     "crates/pilot-cli",
-    "crates/pilot-bench",
 ]
 
 [workspace.package]

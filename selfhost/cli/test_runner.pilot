@@ -1,0 +1,16 @@
+// =========================================================================
+// FILE: selfhost/cli/test_runner.pilot
+// Milestone 60.3: Self-Hosted Test Runner & JSON Telemetry Emitter
+// Replaces cmd_test in crates/pilot-cli/src/commands.rs.
+// =========================================================================
+pub pkg Pilot.SelfHost.Cli.TestRunner;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub pure fn format_test_pass_json(file_path: str, test_name: str, nodes: i64, instructions: i64) -> str {
+    return "{\"event\":\"pass\",\"file\":\"" + file_path + "\",\"name\":\"" + test_name + "\",\"nodes\":" + nodes + ",\"instructions\":" + instructions + "}";
+}
+
+pub pure fn format_test_summary_json(passed: i64, failed: i64, total: i64) -> str {
+    return "{\"event\":\"summary\",\"passed\":" + passed + ",\"failed\":" + failed + ",\"total\":" + total + "}";
+}

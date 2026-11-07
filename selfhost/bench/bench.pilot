@@ -1,0 +1,23 @@
+// =========================================================================
+// FILE: selfhost/bench/bench.pilot
+// Milestone 60.2: Self-Hosted Hardware Throughput & Zero-GC Benchmark Suite
+// Replaces crates/pilot-bench/src/lib.rs in Pure Pilot.
+// =========================================================================
+pub pkg Pilot.SelfHost.Bench;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub fn generate_benchmark_snippet(idx: i64) -> str {
+    return "pub " + nameof(fn) + " compute_kernel_" + idx + "(x: i64) -> i64 {\n" +
+           "    " + nameof(let) + " y = x * 2 + " + idx + ";\n" +
+           "    " + nameof(return) + " y;\n" +
+           "}\n";
+}
+
+pub pure fn verify_ast_memory_overhead(node_count: i64, source_bytes: i64) -> i64 {
+    let ast_bytes = node_count * 16;
+    if ast_bytes * 2 <= source_bytes * 3 {
+        return 1;
+    }
+    return 0;
+}

@@ -18,6 +18,3 @@ pilot-analysis = { path = "../pilot-analysis" }
 pilot-rt = { path = "../pilot-rt" }
 pilot-vm = { path = "../pilot-vm" }
 pilot-codegen = { path = "../pilot-codegen" }
-pilot-pkg = { path = "../pilot-pkg" }
-pilot-perf = { path = "../pilot-perf" }
-pilot-bench = { path = "../pilot-bench" }

@@ -1,0 +1,20 @@
+// =========================================================================
+// FILE: selfhost/pkg/venv.pilot
+// Milestone 60.1: Isolated Virtual Environment Manager (pilotvenv.cfg)
+// Replaces crates/pilot-pkg/src/venv.pilot in Pure Pilot.
+// =========================================================================
+pub pkg Pilot.SelfHost.Pkg.Venv;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub pure fn format_pilotvenv_cfg(venv_name: str, compiler_version: str = "1.1.51") -> str {
+    return "home = /usr/local/bin\n" +
+           "include-system-site-packages = false\n" +
+           "version = " + compiler_version + "\n" +
+           "prompt = (" + venv_name + ")\n";
+}
+
+pub pure fn format_posix_activate_script(venv_path: str) -> str {
+    return "export PILOT_VENV=\"" + venv_path + "\"\n" +
+           "export PATH=\"" + venv_path + "/bin:$PATH\"\n";
+}

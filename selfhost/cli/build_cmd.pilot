@@ -1,0 +1,22 @@
+// =========================================================================
+// FILE: selfhost/cli/build_cmd.pilot
+// Milestone 60.3: Self-Hosted Build, Check & Compile Command Driver
+// Coordinates selfhost/codegen/* and selfhost/vm/compiler.pilot.
+// =========================================================================
+pub pkg Pilot.SelfHost.Cli.BuildCmd;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// Target codes: 0=native, 1=c, 2=llvm, 3=wasm, 4=gpu, 5=asm
+pub pure fn resolve_build_target(target_flag: str) -> i64 {
+    if target_flag == "c" { return 1; }
+    if target_flag == "llvm" { return 2; }
+    if target_flag == "wasm" { return 3; }
+    if target_flag == "gpu" { return 4; }
+    if target_flag == "asm" { return 5; }
+    return 0;
+}
+
+pub pure fn format_build_summary(module_name: str, target_flag: str, out_path: str) -> str {
+    return "Built " + module_name + " [" + target_flag + "] -> " + out_path;
+}

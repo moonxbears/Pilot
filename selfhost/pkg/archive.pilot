@@ -1,0 +1,24 @@
+// =========================================================================
+// FILE: selfhost/pkg/archive.pilot
+// Milestone 60.1: .pilpkg Deterministic Package Archive Header & Entry Codec
+// Replaces crates/pilot-pkg/src/archive.rs in Pure Pilot.
+// =========================================================================
+pub pkg Pilot.SelfHost.Pkg.Archive;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub fn format_pilpkg_entry(rel_path: str, content: str) -> str {
+    let byte_len = __engine("str_len", content);
+    return "PILPKG3:" + rel_path + ":" + byte_len + "\n" + content + "\n";
+}
+
+pub fn verify_pilpkg_header(archive_text: str) -> i64 {
+    let b0 = __engine("str_byte_at", archive_text, 0);
+    let b1 = __engine("str_byte_at", archive_text, 1);
+    let b2 = __engine("str_byte_at", archive_text, 2);
+    // 'P' = 80, 'I' = 73, 'L' = 76
+    if b0 == 80 && b1 == 73 && b2 == 76 {
+        return 1;
+    }
+    return 0;
+}

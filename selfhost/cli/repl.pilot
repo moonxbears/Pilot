@@ -1,0 +1,18 @@
+// =========================================================================
+// FILE: selfhost/cli/repl.pilot
+// Milestone 60.3: Name-Blind Interactive REPL Formatter & Evaluator
+// Replaces hardcoded ": int"/": float"/": bool"/": str" tables in commands.rs.
+// =========================================================================
+pub pkg Pilot.SelfHost.Cli.Repl;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// Formats REPL output using PhysicsRegistry layout metrics instead of hardcoded type names
+pub fn format_repl_value(val_repr: str, layout_id: i64) -> str {
+    let byte_size = if layout_id >= 0 { __engine("layout_metrics", layout_id) } else { 8 };
+    return "=> " + val_repr + " (" + byte_size + "B register)";
+}
+
+pub pure fn wrap_repl_snippet(line: str) -> str {
+    return nameof(fn) + " __repl_entry() { " + nameof(return) + " " + line + "; }";
+}

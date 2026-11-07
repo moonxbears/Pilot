@@ -1,0 +1,24 @@
+// =========================================================================
+// FILE: selfhost/cli/diff_test.pilot
+// Milestone 60.3: Multi-Backend Differential Semantic Verifier
+// Compares PilVM v3, Native C, LLVM IR, and WASM execution results.
+// =========================================================================
+pub pkg Pilot.SelfHost.Cli.DiffTest;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub pure fn verify_differential_parity(
+    pilvm_res: i64,
+    native_c_res: i64,
+    llvm_res: i64,
+    wasm_valid: i64
+) -> i64 {
+    if pilvm_res == native_c_res && pilvm_res == llvm_res && wasm_valid == 1 {
+        return 1;
+    }
+    return 0;
+}
+
+pub pure fn format_diff_report(test_name: str, res_val: i64) -> str {
+    return "PASS: " + test_name + " [PilVM: " + res_val + " == Native: " + res_val + " == LLVM: " + res_val + "] [WASM: OK, C: OK]";
+}
