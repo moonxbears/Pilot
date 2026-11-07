@@ -6,6 +6,10 @@ pub pkg Pilot.Realtime.Syntax;
 
 use Pilot.Core.Genesis.*;
 
+comptime {
+    __engine("register_modifier", nameof(noalloc), nameof(effect_async));
+}
+
 pub syntax {
     noalloc(body)        => quote { { $body } };
     region(pool, body)   => quote { { $body } };

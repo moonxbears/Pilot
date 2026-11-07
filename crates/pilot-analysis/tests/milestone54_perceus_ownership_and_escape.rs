@@ -399,9 +399,14 @@ pub fn test_54_1_real_ast_perceus_arc_dup_last_use_drop_reuse_and_lifo_guards() 
             g3, g2, g1
         );
         assert!(
-            !s_guards.contains(&format!("Drop:{}", g1)),
-            "Trial {}: 0b11 guard `{}` must never drop early before scope exit: `{}`",
-            trial, g1, s_guards
+            !s_guards.split(';').any(|op| {
+                let t = op.trim();
+                t == format!("Drop:{}", g1)
+                    || t == format!("Drop:{}", g2)
+                    || t == format!("Drop:{}", g3)
+            }),
+            "Trial {}: 0b11 guards (`{}`, `{}`, `{}`) must never drop early before scope exit: `{}`",
+            trial, g1, g2, g3, s_guards
         );
         assert!(
             s_guards.contains(&expected_lifo),

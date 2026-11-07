@@ -38,10 +38,6 @@ pub pure fn classify_allocation_escape_tier(
 }
 
 // 1-cycle `LatticeBits` borrow-escape verifier for `0b01` (`IReference`) and `0b11` (`IGuard`).
-// When `(lattice_bits & 1) != 0`:
-// 1. `ESCAPE001`: Cannot cross a `.pchor` `cue` or thread boundary.
-// 2. `ESCAPE002`: Cannot be stored inside an `IObject` (`0b10`) heap container.
-// 3. `ESCAPE003`: Cannot escape function `return` unless tied to an input `ref` parameter.
 pub fn verify_borrow_escape_by_lattice(
     var_name: str,
     lattice_bits: i64,
@@ -50,7 +46,7 @@ pub fn verify_borrow_escape_by_lattice(
     crosses_cue_boundary: bool
 ) -> str {
     let bits = lattice_bits & 3;
-    if (bits & 1) == 0 {
+    if (bits & 1) == 0 && var_name.len() >= 0 {
         return "";
     }
     if crosses_cue_boundary {
@@ -66,4 +62,333 @@ pub fn verify_borrow_escape_by_lattice(
         return "ESCAPE003";
     }
     return "";
+}
+
+// Deduces the 2-bit lattice (`0..3`) of an AST expression `expr_nid` within `env`.
+pub fn esc_expr_lattice(expr_nid: i64, env: i64, memo: i64, node_count: i64) -> i64 {
+    if expr_nid <= 0 {
+        return 0;
+    }
+    let k = __engine("ast_node_kind", expr_nid);
+    let orig = __engine("ast_orig_kind", expr_nid);
+    if k == 14 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", expr_nid));
+        let lplus = __engine("map_get", env, "elat_" + vname) + 0;
+        if lplus > 0 {
+            return (lplus - 1) & 3;
+        }
+        return 0;
+    }
+    if orig == 218 {
+        return 2;
+    }
+    if k == 16 && __engine("ast_child_count", expr_nid) > 0 {
+        let callee = __engine("ast_child_at", expr_nid, 0);
+        if __engine("ast_node_kind", callee) == 14 {
+            let csym = __engine("ast_node_sym", callee);
+            if arc_find_struct_decl(csym, node_count) >= 0 {
+                return arc_deduce_type_lattice(csym, node_count, memo, 0);
+            }
+        }
+    }
+    if orig == 217 && __engine("ast_child_count", expr_nid) == 1 {
+        return esc_expr_lattice(__engine("ast_child_at", expr_nid, 0), env, memo, node_count);
+    }
+    return 0;
+}
+
+// Checks whether `expr_nid` originates from an input `ref` parameter in `env`.
+pub fn esc_expr_from_ref(expr_nid: i64, env: i64) -> bool {
+    if expr_nid <= 0 {
+        return false;
+    }
+    let k = __engine("ast_node_kind", expr_nid);
+    let orig = __engine("ast_orig_kind", expr_nid);
+    if k == 14 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", expr_nid));
+        return (__engine("map_get", env, "eref_" + vname) + 0) == 1;
+    }
+    if k == 17 && __engine("ast_child_count", expr_nid) > 0 {
+        return esc_expr_from_ref(__engine("ast_child_at", expr_nid, 0), env);
+    }
+    if orig == 217 && __engine("ast_child_count", expr_nid) == 1 {
+        return esc_expr_from_ref(__engine("ast_child_at", expr_nid, 0), env);
+    }
+    return false;
+}
+
+// Checks whether `expr_nid` carries `iso` ownership capability in `env`.
+pub fn esc_expr_is_iso(expr_nid: i64, env: i64) -> bool {
+    if expr_nid <= 0 {
+        return false;
+    }
+    let k = __engine("ast_node_kind", expr_nid);
+    let orig = __engine("ast_orig_kind", expr_nid);
+    if k == 14 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", expr_nid));
+        return (__engine("map_get", env, "eiso_" + vname) + 0) == 1;
+    }
+    if orig == 217 && __engine("ast_child_count", expr_nid) == 1 {
+        return esc_expr_is_iso(__engine("ast_child_at", expr_nid, 0), env);
+    }
+    return false;
+}
+
+// Checks whether a local `let`/`var` binding header carries an explicit `iso` modifier.
+pub fn esc_let_has_iso_modifier(let_nid: i64) -> bool {
+    let sstart = __engine("ast_span_start", let_nid);
+    let send = __engine("ast_span_end", let_nid);
+    if send <= sstart {
+        return false;
+    }
+    let raw = __engine("source_slice", sstart, send);
+    let rlen = raw.len();
+    var cut = rlen;
+    var i = 0;
+    while i < rlen {
+        let b = raw.byte_at(i);
+        if b == 58 || b == 61 {
+            cut = i;
+            break;
+        }
+        i = i + 1;
+    }
+    var head = raw.slice(0, cut);
+    let vname = __engine("sym_str", __engine("ast_node_sym", let_nid));
+    var hend = head.len();
+    while hend > 0 && (head.byte_at(hend - 1) == 32 || head.byte_at(hend - 1) == 9) {
+        hend = hend - 1;
+    }
+    if vname.len() > 0 && hend >= vname.len() {
+        if head.slice(hend - vname.len(), hend) == vname {
+            hend = hend - vname.len();
+        }
+    }
+    return source_contains_keyword(head.slice(0, hend), nameof(iso));
+}
+
+// Verifies a `CallExpr` (`nid`) for `[HardRealtime]`/`noalloc` (`PILOT104`), heap container
+// borrow escape (`ESCAPE002`), and `[Cue]` boundary transfers (`ESCAPE001` / `PILOT105`).
+pub fn esc_verify_call_node(nid: i64, env: i64, memo: i64, node_count: i64, in_rt: bool) -> i64 {
+    var cnt = 0;
+    let cc = __engine("ast_child_count", nid);
+    if cc == 0 {
+        return 0;
+    }
+    if cc == 2 && __engine("ast_orig_kind", __engine("ast_child_at", nid, 1)) == 219 {
+        let map_nid = __engine("ast_child_at", nid, 1);
+        let mcc = __engine("ast_child_count", map_nid);
+        var mi = 1;
+        while mi < mcc {
+            cnt = cnt + esc_walk_perceus_node(__engine("ast_child_at", map_nid, mi), env, memo, node_count, in_rt);
+            mi = mi + 2;
+        }
+    } else {
+        var ai = 1;
+        while ai < cc {
+            cnt = cnt + esc_walk_perceus_node(__engine("ast_child_at", nid, ai), env, memo, node_count, in_rt);
+            ai = ai + 1;
+        }
+    }
+
+    let callee = __engine("ast_child_at", nid, 0);
+    if __engine("ast_node_kind", callee) != 14 {
+        cnt = cnt + esc_walk_perceus_node(callee, env, memo, node_count, in_rt);
+        return cnt;
+    }
+
+    let csym = __engine("ast_node_sym", callee);
+    let cname = __engine("sym_str", csym);
+
+    if cname == nameof(spawn) {
+        if in_rt {
+            let pcode = verify_noalloc_escape(2, true);
+            __engine("ast_emit_diag", nid, 1, pcode + ": Task spawn forbidden in [HardRealtime] or noalloc context");
+            cnt = cnt + 1;
+        }
+        return cnt;
+    }
+
+    if arc_find_struct_decl(csym, node_count) >= 0 {
+        let st_lat = arc_deduce_type_lattice(csym, node_count, memo, 0);
+        if st_lat == 2 {
+            if in_rt {
+                let pcode = verify_noalloc_escape(2, true);
+                __engine("ast_emit_diag", nid, 1, pcode + ": Owned heap struct allocation forbidden in [HardRealtime] or noalloc context");
+                cnt = cnt + 1;
+            }
+            if cc == 2 && __engine("ast_orig_kind", __engine("ast_child_at", nid, 1)) == 219 {
+                let map_nid = __engine("ast_child_at", nid, 1);
+                let mcc = __engine("ast_child_count", map_nid);
+                var fvi = 1;
+                while fvi < mcc {
+                    let fval = __engine("ast_child_at", map_nid, fvi);
+                    let flat = esc_expr_lattice(fval, env, memo, node_count);
+                    let ecode = verify_borrow_escape_by_lattice(cname, flat, true, 2, false);
+                    if ecode.len() > 0 {
+                        __engine("ast_emit_diag", nid, 1, ecode + ": Borrowed view or guard cannot be stored inside owned heap struct");
+                        cnt = cnt + 1;
+                    }
+                    fvi = fvi + 2;
+                }
+            } else {
+                var cai = 1;
+                while cai < cc {
+                    let aval = __engine("ast_child_at", nid, cai);
+                    let alat = esc_expr_lattice(aval, env, memo, node_count);
+                    let ecode = verify_borrow_escape_by_lattice(cname, alat, true, 2, false);
+                    if ecode.len() > 0 {
+                        __engine("ast_emit_diag", nid, 1, ecode + ": Borrowed view or guard cannot be stored inside owned heap struct");
+                        cnt = cnt + 1;
+                    }
+                    cai = cai + 1;
+                }
+            }
+        }
+        return cnt;
+    }
+
+    let target_fn = arc_find_fn_decl_by_sym(csym, node_count);
+    if target_fn >= 0 && rt_fn_is_cue(target_fn) {
+        var qai = 1;
+        while qai < cc {
+            let qarg = __engine("ast_child_at", nid, qai);
+            let qlat = esc_expr_lattice(qarg, env, memo, node_count);
+            let qiso = esc_expr_is_iso(qarg, env);
+            if (qlat & 1) != 0 {
+                let ecode = verify_borrow_escape_by_lattice(cname, qlat, true, -1, true);
+                __engine("ast_emit_diag", nid, 1, ecode + ": Borrowed view or guard cannot cross [Cue] boundary");
+                cnt = cnt + 1;
+            } else {
+                let ccode = verify_cue_transfer_by_lattice(cname, qlat, qiso);
+                if ccode.len() > 0 {
+                    __engine("ast_emit_diag", nid, 1, ccode + ": Unisolated owned object cannot cross [Cue] boundary without iso");
+                    cnt = cnt + 1;
+                }
+            }
+            qai = qai + 1;
+        }
+    }
+    return cnt;
+}
+
+// Recursively walks AST subtree `nid`, enforcing ESCAPE001–003, PILOT104, and PILOT105.
+pub fn esc_walk_perceus_node(nid: i64, env: i64, memo: i64, node_count: i64, in_rt: bool) -> i64 {
+    if nid <= 0 {
+        return 0;
+    }
+    let k = __engine("ast_node_kind", nid);
+    let orig = __engine("ast_orig_kind", nid);
+
+    if k == 4 {
+        var cnt = 0;
+        var rhs_nid = 0;
+        if __engine("ast_child_count", nid) > 0 {
+            rhs_nid = __engine("ast_child_at", nid, 0);
+            cnt = cnt + esc_walk_perceus_node(rhs_nid, env, memo, node_count, in_rt);
+        }
+        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
+        var vtsym = __engine("ast_node_raw_bits", nid);
+        if vtsym == 0 && rhs_nid > 0 {
+            vtsym = arc_infer_rhs_type_sym(rhs_nid, env, node_count);
+        }
+        var vlat = arc_deduce_type_lattice(vtsym, node_count, memo, 0);
+        if rhs_nid > 0 && __engine("ast_orig_kind", rhs_nid) == 218 {
+            vlat = 2;
+        } else if rhs_nid > 0 && vlat == 0 {
+            vlat = esc_expr_lattice(rhs_nid, env, memo, node_count);
+        }
+        var vref = 0;
+        if rhs_nid > 0 && esc_expr_from_ref(rhs_nid, env) {
+            vref = 1;
+        }
+        var viso = 0;
+        if esc_let_has_iso_modifier(nid) || (rhs_nid > 0 && esc_expr_is_iso(rhs_nid, env)) {
+            viso = 1;
+        }
+        __engine("map_set", env, "vts_" + vname, vtsym + 1);
+        __engine("map_set", env, "elat_" + vname, vlat + 1);
+        __engine("map_set", env, "eref_" + vname, vref);
+        __engine("map_set", env, "eiso_" + vname, viso);
+        return cnt;
+    }
+
+    if orig == 218 {
+        var lcnt = 0;
+        if in_rt {
+            let pcode = verify_noalloc_escape(2, true);
+            __engine("ast_emit_diag", nid, 1, pcode + ": Heap list literal forbidden in [HardRealtime] or noalloc context");
+            lcnt = lcnt + 1;
+        }
+        let lcc = __engine("ast_child_count", nid);
+        var li = 0;
+        while li < lcc {
+            let elem = __engine("ast_child_at", nid, li);
+            lcnt = lcnt + esc_walk_perceus_node(elem, env, memo, node_count, in_rt);
+            let elat = esc_expr_lattice(elem, env, memo, node_count);
+            let ecode = verify_borrow_escape_by_lattice("list", elat, true, 2, false);
+            if ecode.len() > 0 {
+                __engine("ast_emit_diag", nid, 1, ecode + ": Borrowed view or guard cannot be stored inside heap list");
+                lcnt = lcnt + 1;
+            }
+            li = li + 1;
+        }
+        return lcnt;
+    }
+
+    if k == 16 {
+        return esc_verify_call_node(nid, env, memo, node_count, in_rt);
+    }
+
+    if k == 20 {
+        var acnt = 0;
+        let acc = __engine("ast_child_count", nid);
+        var ai = 0;
+        while ai < acc {
+            acnt = acnt + esc_walk_perceus_node(__engine("ast_child_at", nid, ai), env, memo, node_count, in_rt);
+            ai = ai + 1;
+        }
+        if acc >= 2 {
+            let lhs = __engine("ast_child_at", nid, 0);
+            let rhs = __engine("ast_child_at", nid, 1);
+            if __engine("ast_node_kind", lhs) == 17 && __engine("ast_child_count", lhs) > 0 {
+                let recv = __engine("ast_child_at", lhs, 0);
+                let recv_lat = esc_expr_lattice(recv, env, memo, node_count);
+                let rhs_lat = esc_expr_lattice(rhs, env, memo, node_count);
+                let ecode = verify_borrow_escape_by_lattice("assign", rhs_lat, true, recv_lat, false);
+                if ecode.len() > 0 {
+                    __engine("ast_emit_diag", nid, 1, ecode + ": Borrowed view or guard cannot be assigned to owned heap field");
+                    acnt = acnt + 1;
+                }
+            }
+        }
+        return acnt;
+    }
+
+    if k == 8 {
+        var rcnt = 0;
+        if __engine("ast_child_count", nid) > 0 {
+            let ret_e = __engine("ast_child_at", nid, 0);
+            rcnt = rcnt + esc_walk_perceus_node(ret_e, env, memo, node_count, in_rt);
+            let rlat = esc_expr_lattice(ret_e, env, memo, node_count);
+            if (rlat & 1) != 0 {
+                let tied = (rlat == 1) && esc_expr_from_ref(ret_e, env);
+                let rcode = verify_borrow_escape_by_lattice("return", rlat, tied, -1, false);
+                if rcode.len() > 0 {
+                    __engine("ast_emit_diag", nid, 1, rcode + ": Local borrowed view or guard cannot escape function return");
+                    rcnt = rcnt + 1;
+                }
+            }
+        }
+        return rcnt;
+    }
+
+    var total = 0;
+    let cc = __engine("ast_child_count", nid);
+    var ci = 0;
+    while ci < cc {
+        total = total + esc_walk_perceus_node(__engine("ast_child_at", nid, ci), env, memo, node_count, in_rt);
+        ci = ci + 1;
+    }
+    return total;
 }

@@ -2,8 +2,8 @@
 // FILE: selfhost/vm/compiler.pilot
 // Milestone 55.1: Self-Hosted PilVM v3 3-Address Register Bytecode Compiler
 // Encodes 32-bit instructions `[opcode:8 | dst:8 | src1:8 | src2:8]`, resolves
-// control-flow jump patches, and attaches PC-to-ByteSpan debug tables with
-// zero hardcoded "main", "print", "assert", or "nameof" special cases.
+// control-flow jump patches, and attaches PC-to-ByteSpan debug tables over
+// `PhysicsRegistry` (`RawAstArena`) in pure Pilot.
 // ============================================================================
 
 pub struct EncodedInstruction {
@@ -18,7 +18,7 @@ pub struct DebugRegBinding {
     pub layout_id: i64;
 }
 
-// PilVM v3 canonical 8-bit opcodes (purified: zero Print or Assert opcodes)
+// PilVM v3 canonical 8-bit opcodes (purified: zero legacy I/O opcodes)
 pub pure fn op_nop() -> i64 { return 0; }
 pub pure fn op_add_i64() -> i64 { return 1; }
 pub pure fn op_sub_i64() -> i64 { return 2; }
@@ -98,7 +98,7 @@ pub pure fn binary_flag_to_opcode(bin_flag: i64) -> i64 {
     if bin_flag == 1 { return op_add_i64(); }
     if bin_flag == 2 { return op_sub_i64(); }
     if bin_flag == 3 { return op_mul_i64(); }
-    if bin_flag == 4 { return op_div_i64(); }
+    if bin_flag == 4 || bin_flag == 5 { return op_div_i64(); }
     if bin_flag == 6 { return op_rem_i64(); }
     if bin_flag == 8 { return op_cmp_eq(); }
     if bin_flag == 9 { return op_cmp_ne(); }
@@ -142,4 +142,702 @@ pub fn create_debug_reg_binding(reg_slot: i64, symbol_id: i64, layout_id: i64) -
         symbol_id: symbol_id,
         layout_id: layout_id,
     };
+}
+
+// Allocates a new compiler state map.
+pub fn vmc_new_state() -> i64 {
+    let st = __engine("map_new");
+    __engine("map_set", st, "ccount", 0);
+    __engine("map_set", st, "icount", 0);
+    __engine("map_set", st, "dbg_rcount", 0);
+    __engine("map_set", st, "patch_cnt", 0);
+    __engine("map_set", st, "loop_depth", 0);
+    __engine("map_set", st, "call_seq", 0);
+    __engine("map_set", st, "next_local", 17);
+    __engine("map_set", st, "next_temp", 96);
+    __engine("map_set", st, "cur_s0", 0);
+    __engine("map_set", st, "cur_s1", 0);
+    __engine("map_set", st, "vslots", __engine("map_new"));
+    __engine("map_set", st, "fns", __engine("map_new"));
+    return st;
+}
+
+pub fn vmc_reset_frame_regs(st: i64) -> i64 {
+    __engine("map_set", st, "vslots", __engine("map_new"));
+    __engine("map_set", st, "next_local", 17);
+    __engine("map_set", st, "next_temp", 96);
+    return 0;
+}
+
+pub fn vmc_alloc_local(st: i64) -> i64 {
+    let r = __engine("map_get", st, "next_local") + 0;
+    if r < 95 {
+        __engine("map_set", st, "next_local", r + 1);
+    }
+    return r;
+}
+
+pub fn vmc_alloc_temp(st: i64) -> i64 {
+    let r = __engine("map_get", st, "next_temp") + 0;
+    var nx = r + 1;
+    if nx > 255 {
+        nx = 96;
+    }
+    __engine("map_set", st, "next_temp", nx);
+    return r;
+}
+
+pub fn vmc_record_debug_reg(st: i64, slot: i64, sym_id: i64, name: str) -> i64 {
+    let seen_key = "dbg_seen_" + slot + "_" + sym_id;
+    if (__engine("map_get", st, seen_key) + 0) > 0 {
+        return 0;
+    }
+    __engine("map_set", st, seen_key, 1);
+    let idx = __engine("map_get", st, "dbg_rcount") + 0;
+    __engine("map_set", st, "dbg_rslot_" + idx, slot);
+    __engine("map_set", st, "dbg_rsym_" + idx, sym_id);
+    __engine("map_set", st, "dbg_rname_" + idx, name);
+    __engine("map_set", st, "dbg_rcount", idx + 1);
+    return idx;
+}
+
+pub fn vmc_emit(st: i64, op: i64, dst: i64, src1: i64, src2: i64) -> i64 {
+    let pc = __engine("map_get", st, "icount") + 0;
+    let word = encode_pilvm_instruction(op, dst, src1, src2);
+    let s0 = __engine("map_get", st, "cur_s0") + 0;
+    let s1 = __engine("map_get", st, "cur_s1") + 0;
+    __engine("map_set", st, "ins_" + pc, word);
+    __engine("map_set", st, "isp0_" + pc, s0);
+    __engine("map_set", st, "isp1_" + pc, s1);
+    __engine("map_set", st, "icount", pc + 1);
+    return pc;
+}
+
+pub fn vmc_add_scalar_const(st: i64, tag: i64, payload: i64) -> i64 {
+    let key = "ck_t" + tag + "_" + payload;
+    let ex = __engine("map_get", st, key) + 0;
+    if ex > 0 {
+        return ex - 1;
+    }
+    let idx = __engine("map_get", st, "ccount") + 0;
+    __engine("map_set", st, "ctag_" + idx, tag);
+    __engine("map_set", st, "cpay_" + idx, payload);
+    __engine("map_set", st, "ccount", idx + 1);
+    __engine("map_set", st, key, idx + 1);
+    return idx;
+}
+
+pub fn vmc_add_str_const(st: i64, sval: str) -> i64 {
+    let key = "ck_str_" + sval.len() + ":" + sval;
+    let ex = __engine("map_get", st, key) + 0;
+    if ex > 0 {
+        return ex - 1;
+    }
+    let idx = __engine("map_get", st, "ccount") + 0;
+    __engine("map_set", st, "ctag_" + idx, 8);
+    __engine("map_set", st, "cstr_" + idx, sval);
+    __engine("map_set", st, "ccount", idx + 1);
+    __engine("map_set", st, key, idx + 1);
+    return idx;
+}
+
+pub fn vmc_emit_load_const(st: i64, cidx: i64) -> i64 {
+    let dst = vmc_alloc_temp(st);
+    let hi = (cidx >> 8) & 255;
+    let lo = cidx & 255;
+    vmc_emit(st, op_load_const(), dst, hi, lo);
+    return dst;
+}
+
+// Stages `argc` evaluated argument registers stored under `"carg_<seq>_<i>"` into `r1..r<argc>`.
+pub fn vmc_stage_call_args(st: i64, seq: i64, argc: i64) -> i64 {
+    var i = 0;
+    while i < argc {
+        let r = __engine("map_get", st, "carg_" + seq + "_" + i) + 0;
+        if r >= 1 && r <= argc {
+            let tmp = vmc_alloc_temp(st);
+            vmc_emit(st, op_move(), tmp, r, 0);
+            __engine("map_set", st, "carg_" + seq + "_" + i, tmp);
+        }
+        i = i + 1;
+    }
+    i = 0;
+    while i < argc {
+        let r = __engine("map_get", st, "carg_" + seq + "_" + i) + 0;
+        vmc_emit(st, op_move(), i + 1, r, 0);
+        i = i + 1;
+    }
+    return 0;
+}
+
+// Compiles a `CallExpr` (`nid`, `kind_tag == 16`) into `st`.
+pub fn vmc_compile_call(st: i64, nid: i64) -> i64 {
+    let cc = __engine("ast_child_count", nid);
+    if cc == 0 {
+        return 0;
+    }
+    let callee = __engine("ast_child_at", nid, 0);
+    let ck = __engine("ast_node_kind", callee);
+    let seq = (__engine("map_get", st, "call_seq") + 0) + 1;
+    __engine("map_set", st, "call_seq", seq);
+
+    // String / object member method call (`b.len()`, `b.byte_at(i)`, `b.slice(a, b)`)
+    if ck == 17 {
+        let mname = __engine("sym_str", __engine("ast_node_sym", callee));
+        var hook = "";
+        if mname == nameof(len) {
+            hook = nameof(str_len);
+        } else if mname == nameof(byte_at) {
+            hook = nameof(str_byte_at);
+        } else if mname == nameof(slice) || mname == nameof(substring) {
+            hook = nameof(str_slice);
+        }
+        if hook.len() > 0 {
+            let recv_id = __engine("ast_child_at", callee, 0);
+            let r_recv = vmc_compile_node(st, recv_id);
+            __engine("map_set", st, "carg_" + seq + "_0", r_recv);
+            var mi = 1;
+            while mi < cc {
+                let ra = vmc_compile_node(st, __engine("ast_child_at", nid, mi));
+                __engine("map_set", st, "carg_" + seq + "_" + mi, ra);
+                mi = mi + 1;
+            }
+            let r_hook = vmc_emit_load_const(st, vmc_add_str_const(st, hook));
+            vmc_stage_call_args(st, seq, cc);
+            let dst = vmc_alloc_temp(st);
+            vmc_emit(st, op_engine_intrinsic(), dst, r_hook, cc);
+            return dst;
+        }
+        return 0;
+    }
+
+    if ck == 14 {
+        let cname = __engine("sym_str", __engine("ast_node_sym", callee));
+        if cname == nameof(__engine) && cc >= 2 {
+            let r_hook = vmc_compile_node(st, __engine("ast_child_at", nid, 1));
+            let iargc = cc - 2;
+            var ei = 0;
+            while ei < iargc {
+                let ra = vmc_compile_node(st, __engine("ast_child_at", nid, ei + 2));
+                __engine("map_set", st, "carg_" + seq + "_" + ei, ra);
+                ei = ei + 1;
+            }
+            vmc_stage_call_args(st, seq, iargc);
+            let dst = vmc_alloc_temp(st);
+            vmc_emit(st, op_engine_intrinsic(), dst, r_hook, iargc);
+            return dst;
+        }
+
+        if cname == nameof(nameof) && cc >= 2 {
+            let a1 = __engine("ast_child_at", nid, 1);
+            if __engine("ast_node_kind", a1) == 14 {
+                let sym_txt = __engine("sym_str", __engine("ast_node_sym", a1));
+                return vmc_emit_load_const(st, vmc_add_str_const(st, sym_txt));
+            }
+            return vmc_compile_node(st, a1);
+        }
+
+        let fns_map = __engine("map_get", st, "fns") + 0;
+        let known_ep = __engine("map_get", fns_map, cname) + 0;
+
+        // Struct literal `TypeName { k: v, ... }` backed by VM heap map
+        if cc == 2 && known_ep == 0 && __engine("ast_orig_kind", __engine("ast_child_at", nid, 1)) == 219 {
+            let map_nid = __engine("ast_child_at", nid, 1);
+            let r_new = vmc_emit_load_const(st, vmc_add_str_const(st, nameof(map_new)));
+            let r_map = vmc_alloc_local(st);
+            vmc_emit(st, op_engine_intrinsic(), r_map, r_new, 0);
+            let r_set = vmc_emit_load_const(st, vmc_add_str_const(st, nameof(map_set)));
+            let mcc = __engine("ast_child_count", map_nid);
+            var fi = 0;
+            while fi + 1 < mcc {
+                let knid = __engine("ast_child_at", map_nid, fi);
+                let ktxt = __engine("sym_str", __engine("ast_node_sym", knid));
+                let r_val = vmc_compile_node(st, __engine("ast_child_at", map_nid, fi + 1));
+                let r_key = vmc_emit_load_const(st, vmc_add_str_const(st, ktxt));
+                vmc_emit(st, op_move(), 1, r_map, 0);
+                vmc_emit(st, op_move(), 2, r_key, 0);
+                vmc_emit(st, op_move(), 3, r_val, 0);
+                vmc_emit(st, op_engine_intrinsic(), r_map, r_set, 3);
+                fi = fi + 2;
+            }
+            return r_map;
+        }
+
+        // Standard / recursive user function call
+        let argc = cc - 1;
+        var ai = 0;
+        while ai < argc {
+            let ra = vmc_compile_node(st, __engine("ast_child_at", nid, ai + 1));
+            __engine("map_set", st, "carg_" + seq + "_" + ai, ra);
+            ai = ai + 1;
+        }
+        vmc_stage_call_args(st, seq, argc);
+        let dst = vmc_alloc_temp(st);
+        if known_ep > 0 {
+            let ep = known_ep - 1;
+            vmc_emit(st, op_call(), dst, (ep >> 8) & 255, ep & 255);
+        } else {
+            let call_pc = vmc_emit(st, op_call(), dst, 0, 0);
+            let pcnt = __engine("map_get", st, "patch_cnt") + 0;
+            __engine("map_set", st, "patch_pc_" + pcnt, call_pc);
+            __engine("map_set", st, "patch_fn_" + pcnt, cname);
+            __engine("map_set", st, "patch_cnt", pcnt + 1);
+        }
+        return dst;
+    }
+
+    return 0;
+}
+
+// Compiles a `WhileStmt` (`orig == 106`) or range `ForExpr` (`orig == 204`) into `st`.
+pub fn vmc_compile_loop(st: i64, nid: i64, orig: i64) -> i64 {
+    if orig == 106 {
+        let start_pc = __engine("map_get", st, "icount") + 0;
+        let r_cond = vmc_compile_node(st, __engine("ast_child_at", nid, 0));
+        let jf_pc = vmc_emit(st, op_jump_if_false(), 0, r_cond, 0);
+        let depth = (__engine("map_get", st, "loop_depth") + 0) + 1;
+        __engine("map_set", st, "loop_depth", depth);
+        __engine("map_set", st, "lstart_" + depth, start_pc);
+        __engine("map_set", st, "lbrk_cnt_" + depth, 0);
+
+        vmc_compile_node(st, __engine("ast_child_at", nid, 1));
+
+        let bcnt = __engine("map_get", st, "lbrk_cnt_" + depth) + 0;
+        __engine("map_set", st, "loop_depth", depth - 1);
+        vmc_emit(st, op_jump(), 0, (start_pc >> 8) & 255, start_pc & 255);
+
+        let end_pc = __engine("map_get", st, "icount") + 0;
+        let orig_jf = __engine("map_get", st, "ins_" + jf_pc) + 0;
+        __engine("map_set", st, "ins_" + jf_pc, patch_jump_if_false(orig_jf, end_pc));
+
+        var bi = 0;
+        while bi < bcnt {
+            let bpc = __engine("map_get", st, "lbrk_" + depth + "_" + bi) + 0;
+            __engine("map_set", st, "ins_" + bpc, encode_jump_to_pc(end_pc));
+            bi = bi + 1;
+        }
+        return 0;
+    }
+
+    if orig == 204 && __engine("ast_child_count", nid) >= 2 {
+        let iter_id = __engine("ast_child_at", nid, 0);
+        let body_id = __engine("ast_child_at", nid, 1);
+        let ibf = __engine("ast_node_flags", iter_id);
+        if __engine("ast_node_kind", iter_id) == 19 && (ibf == 23 || ibf == 24) {
+            let r_s = vmc_compile_node(st, __engine("ast_child_at", iter_id, 0));
+            let r_e = vmc_compile_node(st, __engine("ast_child_at", iter_id, 1));
+            let r_end = vmc_alloc_local(st);
+            vmc_emit(st, op_move(), r_end, r_e, 0);
+            let vsym = __engine("ast_node_sym", nid);
+            let vname = __engine("sym_str", vsym);
+            let vslots = __engine("map_get", st, "vslots") + 0;
+            var slot = __engine("map_get", vslots, vname) + 0;
+            if slot == 0 {
+                slot = vmc_alloc_local(st);
+                __engine("map_set", vslots, vname, slot);
+                vmc_record_debug_reg(st, slot, vsym, vname);
+            }
+            vmc_emit(st, op_move(), slot, r_s, 0);
+            let start_pc = __engine("map_get", st, "icount") + 0;
+            let r_cond = vmc_alloc_temp(st);
+            var cmp_op = op_cmp_lt();
+            if ibf == 23 {
+                cmp_op = op_cmp_le();
+            }
+            vmc_emit(st, cmp_op, r_cond, slot, r_end);
+            let jf_pc = vmc_emit(st, op_jump_if_false(), 0, r_cond, 0);
+            let depth = (__engine("map_get", st, "loop_depth") + 0) + 1;
+            __engine("map_set", st, "loop_depth", depth);
+            __engine("map_set", st, "lstart_" + depth, start_pc);
+            __engine("map_set", st, "lbrk_cnt_" + depth, 0);
+
+            vmc_compile_node(st, body_id);
+
+            let bcnt = __engine("map_get", st, "lbrk_cnt_" + depth) + 0;
+            __engine("map_set", st, "loop_depth", depth - 1);
+            let r_one = vmc_emit_load_const(st, vmc_add_scalar_const(st, 3, 1));
+            vmc_emit(st, op_add_i64(), slot, slot, r_one);
+            vmc_emit(st, op_jump(), 0, (start_pc >> 8) & 255, start_pc & 255);
+
+            let end_pc = __engine("map_get", st, "icount") + 0;
+            let orig_jf = __engine("map_get", st, "ins_" + jf_pc) + 0;
+            __engine("map_set", st, "ins_" + jf_pc, patch_jump_if_false(orig_jf, end_pc));
+            var bi = 0;
+            while bi < bcnt {
+                let bpc = __engine("map_get", st, "lbrk_" + depth + "_" + bi) + 0;
+                __engine("map_set", st, "ins_" + bpc, encode_jump_to_pc(end_pc));
+                bi = bi + 1;
+            }
+        }
+    }
+    return 0;
+}
+
+// Compiles AST node `nid` in `PhysicsRegistry` into `st`, returning its destination register.
+pub fn vmc_compile_node(st: i64, nid: i64) -> i64 {
+    if nid < 0 {
+        return 0;
+    }
+    __engine("map_set", st, "cur_s0", __engine("ast_span_start", nid));
+    __engine("map_set", st, "cur_s1", __engine("ast_span_end", nid));
+
+    let k = __engine("ast_node_kind", nid);
+    let orig = __engine("ast_orig_kind", nid);
+
+    // BlockExpr (`kind_tag == 18`) or TupleExpr (`orig == 217`)
+    if k == 18 || orig == 217 {
+        let cc = __engine("ast_child_count", nid);
+        var last_r = 0;
+        var ci = 0;
+        while ci < cc {
+            if k == 18 {
+                __engine("map_set", st, "next_temp", 96);
+            }
+            last_r = vmc_compile_node(st, __engine("ast_child_at", nid, ci));
+            ci = ci + 1;
+        }
+        return last_r;
+    }
+
+    // ExprStmt (`orig == 110`)
+    if orig == 110 {
+        if __engine("ast_child_count", nid) > 0 {
+            return vmc_compile_node(st, __engine("ast_child_at", nid, 0));
+        }
+        return 0;
+    }
+
+    // Literals (`kind_tag == 15`) and NoneLit (`orig == 305`)
+    if k == 15 {
+        let lk = __engine("ast_node_lit_kind", nid);
+        if lk == 1 {
+            return vmc_emit_load_const(st, vmc_add_scalar_const(st, 3, __engine("ast_node_raw_bits", nid)));
+        }
+        if lk == 2 {
+            return vmc_emit_load_const(st, vmc_add_scalar_const(st, 5, __engine("ast_node_raw_bits", nid)));
+        }
+        if lk == 3 {
+            let stxt = __engine("sym_str", __engine("ast_node_sym", nid));
+            return vmc_emit_load_const(st, vmc_add_str_const(st, stxt));
+        }
+        if lk == 4 {
+            var bpay = 0;
+            if __engine("ast_node_raw_bits", nid) != 0 {
+                bpay = 1;
+            }
+            return vmc_emit_load_const(st, vmc_add_scalar_const(st, 2, bpay));
+        }
+        return vmc_emit_load_const(st, vmc_add_scalar_const(st, 0, 0));
+    }
+    if orig == 305 {
+        return vmc_emit_load_const(st, vmc_add_scalar_const(st, 0, 0));
+    }
+
+    // IdentExpr (`kind_tag == 14`)
+    if k == 14 {
+        let isym = __engine("ast_node_sym", nid);
+        let iname = __engine("sym_str", isym);
+        let vslots = __engine("map_get", st, "vslots") + 0;
+        let ex = __engine("map_get", vslots, iname) + 0;
+        if ex > 0 {
+            return ex;
+        }
+        let r = vmc_alloc_local(st);
+        __engine("map_set", vslots, iname, r);
+        vmc_record_debug_reg(st, r, isym, iname);
+        return r;
+    }
+
+    // LetStmt / VarStmt / ConstDecl (`kind_tag == 4`)
+    if k == 4 {
+        let lsym = __engine("ast_node_sym", nid);
+        let lname = __engine("sym_str", lsym);
+        var r_val = 0;
+        if __engine("ast_child_count", nid) > 0 {
+            r_val = vmc_compile_node(st, __engine("ast_child_at", nid, 0));
+        } else {
+            r_val = vmc_emit_load_const(st, vmc_add_scalar_const(st, 0, 0));
+        }
+        let vslots = __engine("map_get", st, "vslots") + 0;
+        var slot = __engine("map_get", vslots, lname) + 0;
+        if slot == 0 {
+            slot = vmc_alloc_local(st);
+            __engine("map_set", vslots, lname, slot);
+            vmc_record_debug_reg(st, slot, lsym, lname);
+        }
+        vmc_emit(st, op_move(), slot, r_val, 0);
+        return slot;
+    }
+
+    // AssignStmt (`kind_tag == 20`)
+    if k == 20 && __engine("ast_child_count", nid) >= 2 {
+        let lhs = __engine("ast_child_at", nid, 0);
+        let r_rhs = vmc_compile_node(st, __engine("ast_child_at", nid, 1));
+        if __engine("ast_node_kind", lhs) == 14 {
+            let asym = __engine("ast_node_sym", lhs);
+            let aname = __engine("sym_str", asym);
+            let vslots = __engine("map_get", st, "vslots") + 0;
+            var slot = __engine("map_get", vslots, aname) + 0;
+            if slot == 0 {
+                slot = vmc_alloc_local(st);
+                __engine("map_set", vslots, aname, slot);
+                vmc_record_debug_reg(st, slot, asym, aname);
+            }
+            vmc_emit(st, op_move(), slot, r_rhs, 0);
+            return slot;
+        }
+        return r_rhs;
+    }
+
+    // UnaryExpr (`orig == 206`)
+    if orig == 206 && __engine("ast_child_count", nid) > 0 {
+        let r_op = vmc_compile_node(st, __engine("ast_child_at", nid, 0));
+        let dst = vmc_alloc_temp(st);
+        let ufl = __engine("ast_node_flags", nid);
+        if ufl == 1 {
+            vmc_emit(st, op_move(), dst, r_op, 0);
+        } else if ufl == 5 {
+            vmc_emit(st, op_not(), dst, r_op, 0);
+        } else {
+            vmc_emit(st, op_neg_i64(), dst, r_op, 0);
+        }
+        return dst;
+    }
+
+    // BinaryExpr (`kind_tag == 19`)
+    if k == 19 && __engine("ast_child_count", nid) >= 2 {
+        let r_l = vmc_compile_node(st, __engine("ast_child_at", nid, 0));
+        let r_r = vmc_compile_node(st, __engine("ast_child_at", nid, 1));
+        if r_l == 0 || r_r == 0 {
+            return 0;
+        }
+        let dst = vmc_alloc_temp(st);
+        let bop = binary_flag_to_opcode(__engine("ast_node_flags", nid));
+        vmc_emit(st, bop, dst, r_l, r_r);
+        return dst;
+    }
+
+    // IfExpr (`kind_tag == 6`)
+    if k == 6 && __engine("ast_child_count", nid) >= 2 {
+        let icc = __engine("ast_child_count", nid);
+        let r_cond = vmc_compile_node(st, __engine("ast_child_at", nid, 0));
+        let jf_pc = vmc_emit(st, op_jump_if_false(), 0, r_cond, 0);
+        let dst = vmc_alloc_temp(st);
+        let r_then = vmc_compile_node(st, __engine("ast_child_at", nid, 1));
+        vmc_emit(st, op_move(), dst, r_then, 0);
+        let jend_pc = vmc_emit(st, op_jump(), 0, 0, 0);
+        let else_pc = __engine("map_get", st, "icount") + 0;
+        let orig_jf = __engine("map_get", st, "ins_" + jf_pc) + 0;
+        __engine("map_set", st, "ins_" + jf_pc, patch_jump_if_false(orig_jf, else_pc));
+        if icc >= 3 {
+            let r_else = vmc_compile_node(st, __engine("ast_child_at", nid, 2));
+            vmc_emit(st, op_move(), dst, r_else, 0);
+        }
+        let end_pc = __engine("map_get", st, "icount") + 0;
+        __engine("map_set", st, "ins_" + jend_pc, encode_jump_to_pc(end_pc));
+        return dst;
+    }
+
+    // Loops (`kind_tag == 7`: `WhileStmt` 106 / `ForExpr` 204)
+    if k == 7 {
+        return vmc_compile_loop(st, nid, orig);
+    }
+
+    // BreakStmt (`orig == 107`) & ContinueStmt (`orig == 108`)
+    if orig == 107 {
+        let depth = __engine("map_get", st, "loop_depth") + 0;
+        if depth > 0 {
+            let bpc = vmc_emit(st, op_jump(), 0, 0, 0);
+            let bcnt = __engine("map_get", st, "lbrk_cnt_" + depth) + 0;
+            __engine("map_set", st, "lbrk_" + depth + "_" + bcnt, bpc);
+            __engine("map_set", st, "lbrk_cnt_" + depth, bcnt + 1);
+        }
+        return 0;
+    }
+    if orig == 108 {
+        let depth = __engine("map_get", st, "loop_depth") + 0;
+        if depth > 0 {
+            let spc = __engine("map_get", st, "lstart_" + depth) + 0;
+            vmc_emit(st, op_jump(), 0, (spc >> 8) & 255, spc & 255);
+        }
+        return 0;
+    }
+
+    // ReturnStmt (`kind_tag == 8`)
+    if k == 8 {
+        var r_ret = 0;
+        if __engine("ast_child_count", nid) > 0 {
+            r_ret = vmc_compile_node(st, __engine("ast_child_at", nid, 0));
+        }
+        vmc_emit(st, op_move(), 0, r_ret, 0);
+        vmc_emit(st, op_ret(), 0, 0, 0);
+        return 0;
+    }
+
+    // MemberExpr (`kind_tag == 17`)
+    if k == 17 && __engine("ast_child_count", nid) > 0 {
+        let r_obj = vmc_compile_node(st, __engine("ast_child_at", nid, 0));
+        let fld_txt = __engine("sym_str", __engine("ast_node_sym", nid));
+        let r_key = vmc_emit_load_const(st, vmc_add_str_const(st, fld_txt));
+        let r_hook = vmc_emit_load_const(st, vmc_add_str_const(st, nameof(map_get)));
+        let seq = (__engine("map_get", st, "call_seq") + 0) + 1;
+        __engine("map_set", st, "call_seq", seq);
+        __engine("map_set", st, "carg_" + seq + "_0", r_obj);
+        __engine("map_set", st, "carg_" + seq + "_1", r_key);
+        vmc_stage_call_args(st, seq, 2);
+        let dst = vmc_alloc_temp(st);
+        vmc_emit(st, op_engine_intrinsic(), dst, r_hook, 2);
+        return dst;
+    }
+
+    // CallExpr (`kind_tag == 16`)
+    if k == 16 {
+        return vmc_compile_call(st, nid);
+    }
+
+    // PolyglotBlock (`kind_tag == 13`)
+    if k == 13 {
+        return vmc_emit_load_const(st, vmc_add_scalar_const(st, 3, 0));
+    }
+
+    return 0;
+}
+
+// Compiles a single `FnDecl` (`fn_nid`, `kind_tag == 3`) into `st`.
+pub fn vmc_compile_fn_decl(st: i64, fn_nid: i64) -> i64 {
+    let fname = __engine("sym_str", __engine("ast_node_sym", fn_nid));
+    let fcc = __engine("ast_child_count", fn_nid);
+    if fcc == 0 {
+        return -1;
+    }
+    let body_id = __engine("ast_child_at", fn_nid, 0);
+    let pcount = fcc - 1;
+    let ep = __engine("map_get", st, "icount") + 0;
+    let fns_map = __engine("map_get", st, "fns") + 0;
+    __engine("map_set", fns_map, fname, ep + 1);
+
+    vmc_reset_frame_regs(st);
+    __engine("map_set", st, "cur_s0", __engine("ast_span_start", fn_nid));
+    __engine("map_set", st, "cur_s1", __engine("ast_span_end", fn_nid));
+
+    let vslots = __engine("map_get", st, "vslots") + 0;
+    var pi = 0;
+    while pi < pcount {
+        let pid = __engine("ast_child_at", fn_nid, pi + 1);
+        let psym = __engine("ast_node_sym", pid);
+        let pname = __engine("sym_str", psym);
+        let slot = vmc_alloc_local(st);
+        __engine("map_set", vslots, pname, slot);
+        vmc_record_debug_reg(st, slot, psym, pname);
+        vmc_emit(st, op_move(), slot, pi + 1, 0);
+        pi = pi + 1;
+    }
+
+    let b_reg = vmc_compile_node(st, body_id);
+    vmc_emit(st, op_move(), 0, b_reg, 0);
+    vmc_emit(st, op_ret(), 0, 0, 0);
+
+    if pcount == 0 {
+        return ep;
+    }
+    return -1;
+}
+
+// Walks the entire `RawAstArena` in `PhysicsRegistry` and compiles all functions & top-level items.
+pub fn vmc_compile_arena() -> i64 {
+    let st = vmc_new_state();
+    let node_count = __engine("ast_node_count", 0);
+    var root_id = -1;
+    var ni = node_count - 1;
+    while ni >= 0 {
+        if __engine("ast_orig_kind", ni) == 0 {
+            root_id = ni;
+            break;
+        }
+        ni = ni - 1;
+    }
+    if root_id < 0 {
+        vmc_emit(st, op_move(), 0, 0, 0);
+        vmc_emit(st, op_ret(), 0, 0, 0);
+        vmc_emit(st, op_halt(), 0, 0, 0);
+        return st;
+    }
+
+    __engine("map_set", st, "cur_s0", __engine("ast_span_start", root_id));
+    __engine("map_set", st, "cur_s1", __engine("ast_span_end", root_id));
+    let skip_jump = vmc_emit(st, op_jump(), 0, 0, 0);
+
+    let rcc = __engine("ast_child_count", root_id);
+    var zero_arg_entry = -1;
+    var ci = 0;
+    while ci < rcc {
+        let cid = __engine("ast_child_at", root_id, ci);
+        if __engine("ast_node_kind", cid) == 3 {
+            let cand_ep = vmc_compile_fn_decl(st, cid);
+            if cand_ep >= 0 {
+                zero_arg_entry = cand_ep;
+            }
+        }
+        ci = ci + 1;
+    }
+
+    let top_pc = __engine("map_get", st, "icount") + 0;
+    __engine("map_set", st, "ins_" + skip_jump, encode_jump_to_pc(top_pc));
+
+    vmc_reset_frame_regs(st);
+    var last_reg = 0;
+    ci = 0;
+    while ci < rcc {
+        let cid = __engine("ast_child_at", root_id, ci);
+        let ck = __engine("ast_node_kind", cid);
+        let corig = __engine("ast_orig_kind", cid);
+        if ck != 3 && ck != 1 && ck != 2 && ck != 11 && corig != 1 {
+            __engine("map_set", st, "next_temp", 96);
+            last_reg = vmc_compile_node(st, cid);
+        }
+        ci = ci + 1;
+    }
+
+    if last_reg == 0 && zero_arg_entry >= 0 {
+        let dst = vmc_alloc_temp(st);
+        vmc_emit(st, op_call(), dst, (zero_arg_entry >> 8) & 255, zero_arg_entry & 255);
+        last_reg = dst;
+    }
+
+    vmc_emit(st, op_move(), 0, last_reg, 0);
+    vmc_emit(st, op_ret(), 0, 0, 0);
+    vmc_emit(st, op_halt(), 0, 0, 0);
+
+    // Patch forward / recursive Call instructions
+    let fns_map = __engine("map_get", st, "fns") + 0;
+    let pcnt = __engine("map_get", st, "patch_cnt") + 0;
+    var pi = 0;
+    while pi < pcnt {
+        let ppc = __engine("map_get", st, "patch_pc_" + pi) + 0;
+        let pfn = __engine("map_get", st, "patch_fn_" + pi);
+        let orig_w = __engine("map_get", st, "ins_" + ppc) + 0;
+        let cdst = decode_pilvm_dst(orig_w);
+        let ep_plus = __engine("map_get", fns_map, pfn) + 0;
+        if ep_plus > 0 {
+            let ep = ep_plus - 1;
+            __engine("map_set", st, "ins_" + ppc, encode_pilvm_instruction(op_call(), cdst, (ep >> 8) & 255, ep & 255));
+        } else {
+            __engine("map_set", st, "ins_" + ppc, encode_pilvm_instruction(op_nop(), cdst, 0, 0));
+        }
+        pi = pi + 1;
+    }
+
+    return st;
+}
+
+// Compiles `RawAstArena` in `PhysicsRegistry` into lowercase hex `.pilc` v3 binary bytes.
+pub fn compile_arena_to_pilc_hex() -> str {
+    let st = vmc_compile_arena();
+    return pilc_serialize_state_hex(st);
+}
+
+// Emits PC-to-ByteSpan and local register-to-symbol debug manifest for `PhysicsRegistry`.
+pub fn compile_arena_debug_manifest() -> str {
+    let st = vmc_compile_arena();
+    return pilc_format_debug_manifest(st);
 }

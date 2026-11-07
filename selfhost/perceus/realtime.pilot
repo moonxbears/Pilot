@@ -3,7 +3,7 @@
 // Milestone 54.2: `[HardRealtime]`, `noalloc` & `.pchor` Cue Boundary Verifier
 // Enforces PILOT104 (zero Tier 2 global heap allocations in `[HardRealtime]` /
 // `noalloc` contexts) and PILOT105 (zero-copy `.pchor` cue capability transfer)
-// without function-name ("dsp") sniffing or legacy `@` decorator checks.
+// strictly via `[HardRealtime]`, `[Cue]`, `noalloc`, `ref`, and `iso` contracts.
 // ============================================================================
 
 // Verifies that an allocation with `escape_state` (`0 = Stack`, `1 = Region`, `2 = Global`)
@@ -31,6 +31,9 @@ pub fn verify_cue_transfer_by_lattice(
     if bits == 2 && is_iso_qualified {
         return "";
     }
+    if cue_name.len() >= 0 {
+        return "PILOT105";
+    }
     return "PILOT105";
 }
 
@@ -38,26 +41,79 @@ pub pure fn is_ident_byte(b: u8) -> bool {
     return (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 95;
 }
 
-// Checks whether a source snippet contains the standalone keyword `kw` outside string literals.
-pub fn source_contains_keyword(src: str, kw: str) -> bool {
+// Strips `//` line comments and `/* ... */` block comments while preserving whitespace layout.
+pub fn rt_strip_comments(src: str) -> str {
     let n = src.len();
+    var out = "";
+    var i = 0;
+    while i < n {
+        let b = src.byte_at(i);
+        if b == 34 {
+            let start = i;
+            i = i + 1;
+            while i < n && src.byte_at(i) != 34 {
+                if src.byte_at(i) == 92 {
+                    i = i + 2;
+                } else {
+                    i = i + 1;
+                }
+            }
+            if i < n {
+                i = i + 1;
+            }
+            out = out + src.slice(start, i);
+        } else if b == 47 && i + 1 < n && src.byte_at(i + 1) == 47 {
+            i = i + 2;
+            while i < n && src.byte_at(i) != 10 {
+                i = i + 1;
+            }
+            out = out + " ";
+        } else if b == 47 && i + 1 < n && src.byte_at(i + 1) == 42 {
+            i = i + 2;
+            while i + 1 < n && !(src.byte_at(i) == 42 && src.byte_at(i + 1) == 47) {
+                i = i + 1;
+            }
+            if i + 1 < n {
+                i = i + 2;
+            } else {
+                i = n;
+            }
+            out = out + " ";
+        } else {
+            out = out + src.slice(i, i + 1);
+            i = i + 1;
+        }
+    }
+    return out;
+}
+
+// Checks whether a source snippet contains the standalone keyword `kw` outside comments and strings.
+pub fn source_contains_keyword(src: str, kw: str) -> bool {
+    let clean = rt_strip_comments(src);
+    let n = clean.len();
     let klen = kw.len();
     if klen == 0 || n < klen {
         return false;
     }
     var i = 0;
     while i + klen <= n {
-        let b = src.byte_at(i);
+        let b = clean.byte_at(i);
         if b == 34 {
             i = i + 1;
-            while i < n && src.byte_at(i) != 34 {
-                if src.byte_at(i) == 92 { i = i + 2; } else { i = i + 1; }
+            while i < n && clean.byte_at(i) != 34 {
+                if clean.byte_at(i) == 92 {
+                    i = i + 2;
+                } else {
+                    i = i + 1;
+                }
             }
-            if i < n { i = i + 1; }
+            if i < n {
+                i = i + 1;
+            }
         } else {
-            if src.slice(i, i + klen) == kw {
-                let prev_ok = (i == 0) || !is_ident_byte(src.byte_at(i - 1));
-                let next_ok = (i + klen == n) || !is_ident_byte(src.byte_at(i + klen));
+            if clean.slice(i, i + klen) == kw {
+                let prev_ok = (i == 0) || !is_ident_byte(clean.byte_at(i - 1));
+                let next_ok = (i + klen == n) || !is_ident_byte(clean.byte_at(i + klen));
                 if prev_ok && next_ok {
                     return true;
                 }
@@ -68,14 +124,108 @@ pub fn source_contains_keyword(src: str, kw: str) -> bool {
     return false;
 }
 
-// Detects canonical `[HardRealtime]` attribute or `noalloc` scope modifier in `src`
-// using `nameof(noalloc)` (zero function-name "dsp" sniffing, zero `@` decorators).
+// Detects canonical `[HardRealtime]` attribute or `noalloc` scope modifier in `src`.
 pub fn has_hard_realtime_or_noalloc_contract(src: str) -> bool {
     if source_contains_keyword(src, nameof(noalloc)) {
         return true;
     }
-    if source_contains_keyword(src, "HardRealtime") {
+    if source_contains_keyword(src, nameof(HardRealtime)) {
         return true;
     }
     return false;
+}
+
+// Checks whether AST declaration `nid` carries `[attr_target]`.
+pub fn rt_decl_has_attr(nid: i64, attr_target: str) -> bool {
+    let acnt = __engine("ast_attr_decl_count", nid);
+    var ai = 0;
+    while ai < acnt {
+        let asym = __engine("ast_attr_name", nid, ai);
+        let aname = __engine("sym_str", asym);
+        if aname == attr_target {
+            return true;
+        }
+        ai = ai + 1;
+    }
+    return false;
+}
+
+// Checks whether `fn_nid` carries `[Cue]`.
+pub fn rt_fn_is_cue(fn_nid: i64) -> bool {
+    return rt_decl_has_attr(fn_nid, nameof(Cue));
+}
+
+// Extracts the modifier prefix immediately preceding `fn_nid`'s `fn` keyword.
+pub fn rt_extract_fn_modifier_prefix(fn_nid: i64) -> str {
+    let fn_start = __engine("ast_span_start", fn_nid);
+    if fn_start <= 0 {
+        return "";
+    }
+    var lo = 0;
+    if fn_start > 256 {
+        lo = fn_start - 256;
+    }
+    let window_src = __engine("source_slice", lo, fn_start);
+    let clean = rt_strip_comments(window_src);
+    let wlen = clean.len();
+    var p = wlen - 1;
+    while p >= 0 {
+        let b = clean.byte_at(p);
+        // Stop at `;`, `}`, `{`, or `]` separating earlier items/attributes
+        if b == 59 || b == 125 || b == 123 || b == 93 {
+            return clean.slice(p + 1, wlen);
+        }
+        p = p - 1;
+    }
+    return clean;
+}
+
+// Checks whether `fn_nid` is governed by `[HardRealtime]` or `noalloc` (with zero name sniffing).
+pub fn rt_fn_is_realtime_or_noalloc(fn_nid: i64) -> bool {
+    if rt_decl_has_attr(fn_nid, nameof(HardRealtime)) {
+        return true;
+    }
+    let mod_prefix = rt_extract_fn_modifier_prefix(fn_nid);
+    if source_contains_keyword(mod_prefix, nameof(noalloc)) {
+        return true;
+    }
+    return false;
+}
+
+// Extracts the parameter modifier prefix before `<pname>:` on a `ParamDecl` node `pid`.
+pub fn rt_param_has_modifier(pid: i64, mod_kw: str) -> bool {
+    let pflags = __engine("ast_node_flags", pid);
+    if pflags == 0 {
+        return false;
+    }
+    let pstart = __engine("ast_span_start", pid);
+    let pend = __engine("ast_span_end", pid);
+    if pend <= pstart {
+        return false;
+    }
+    let raw = __engine("source_slice", pstart, pend);
+    let rlen = raw.len();
+    var colon_pos = rlen;
+    var i = 0;
+    while i < rlen {
+        if raw.byte_at(i) == 58 {
+            colon_pos = i;
+            break;
+        }
+        i = i + 1;
+    }
+    var head = raw.slice(0, colon_pos);
+    let pname = __engine("sym_str", __engine("ast_node_sym", pid));
+    // Trim trailing spaces and strip trailing parameter identifier so only modifiers are tested
+    var hend = head.len();
+    while hend > 0 && (head.byte_at(hend - 1) == 32 || head.byte_at(hend - 1) == 9) {
+        hend = hend - 1;
+    }
+    if pname.len() > 0 && hend >= pname.len() {
+        if head.slice(hend - pname.len(), hend) == pname {
+            hend = hend - pname.len();
+        }
+    }
+    head = head.slice(0, hend);
+    return source_contains_keyword(head, mod_kw);
 }

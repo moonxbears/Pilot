@@ -1,9 +1,9 @@
 // ============================================================================
 // FILE: selfhost/perceus/optimizer.pilot
-// Milestone 54.1: Unified Perceus Lattice Optimizer Pass
+// Milestone 54.1 & 54.2: Unified Perceus Lattice Optimizer & Verifier Pass
 // Coordinates 2-bit lattice ARC insertion, drop-guided reuse, borrow-escape
 // verification (`ESCAPE001`–`ESCAPE003`), and `[HardRealtime]`/`noalloc` checks
-// (`PILOT104`–`PILOT105`) in pure Pilot.
+// (`PILOT104`–`PILOT105`) in pure Pilot over `PhysicsRegistry`.
 // ============================================================================
 
 pub struct PerceusReport {
@@ -31,11 +31,60 @@ pub fn create_perceus_report(
 }
 
 // Runs the Perceus `[HardRealtime]` / `noalloc` static verification pass over `src`.
-// Returns `"PILOT104"` if a `[HardRealtime]` or `noalloc` context performs an escaping
-// heap container allocation (`[...]` list/map literal escaping to global heap), else `""`.
 pub fn analyze_perceus_realtime_source(src: str, has_global_heap_escape: bool) -> str {
     if has_hard_realtime_or_noalloc_contract(src) && has_global_heap_escape {
         return "PILOT104";
     }
     return "";
+}
+
+// Verifies a single `FnDecl` (`fn_nid`) in `PhysicsRegistry`, returning diagnostics emitted.
+pub fn opt_verify_single_fn(fn_nid: i64, memo: i64, node_count: i64) -> i64 {
+    let fcc = __engine("ast_child_count", fn_nid);
+    if fcc == 0 {
+        return 0;
+    }
+    let env = __engine("map_new");
+    var pi = 1;
+    while pi < fcc {
+        let pid = __engine("ast_child_at", fn_nid, pi);
+        if __engine("ast_node_kind", pid) == 21 {
+            let pname = __engine("sym_str", __engine("ast_node_sym", pid));
+            let ptsym = __engine("ast_node_raw_bits", pid);
+            let plat = arc_deduce_type_lattice(ptsym, node_count, memo, 0);
+            var is_ref = 0;
+            if rt_param_has_modifier(pid, nameof(ref)) {
+                is_ref = 1;
+            }
+            var is_iso = 0;
+            if rt_param_has_modifier(pid, nameof(iso)) {
+                is_iso = 1;
+            }
+            __engine("map_set", env, "vts_" + pname, ptsym + 1);
+            __engine("map_set", env, "elat_" + pname, plat + 1);
+            __engine("map_set", env, "eref_" + pname, is_ref);
+            __engine("map_set", env, "eiso_" + pname, is_iso);
+        }
+        pi = pi + 1;
+    }
+
+    let in_rt = rt_fn_is_realtime_or_noalloc(fn_nid);
+    let body_id = __engine("ast_child_at", fn_nid, 0);
+    return esc_walk_perceus_node(body_id, env, memo, node_count, in_rt);
+}
+
+// Walks all `FnDecl`s in `PhysicsRegistry`, enforcing ESCAPE001–003, PILOT105, and PILOT104,
+// and returning total diagnostics emitted.
+pub fn verify_perceus_unit() -> i64 {
+    let node_count = __engine("ast_node_count", 0);
+    let memo = __engine("map_new");
+    var total_diags = 0;
+    var nid = 0;
+    while nid < node_count {
+        if __engine("ast_node_kind", nid) == 3 {
+            total_diags = total_diags + opt_verify_single_fn(nid, memo, node_count);
+        }
+        nid = nid + 1;
+    }
+    return total_diags;
 }

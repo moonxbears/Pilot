@@ -1,8 +1,9 @@
 // ============================================================================
 // FILE: selfhost/vm/pilc_writer.pilot
 // Milestone 55.1: Self-Hosted `.pilc` v3 Binary Container & Debug Table Writer
-// Formats `PIL3` magic headers, version 3 metadata, constant pool descriptors,
-// 32-bit instruction streams, and PC-to-ByteSpan debug tables in pure Pilot.
+// Formats `PIL3` magic headers, version 3 metadata, SSO (`<=14B`) + heap (`>14B`)
+// constant pool descriptors, 32-bit instruction streams, and PC-to-ByteSpan /
+// register-to-symbol debug manifests in pure Pilot.
 // ============================================================================
 
 pub struct PilcContainerSummary {
@@ -23,13 +24,7 @@ pub pure fn pilc_v3_version() -> i64 {
     return 3;
 }
 
-// Computes the exact serialized byte size of a `.pilc` v3 binary image:
-// - 4 bytes magic (`"PIL3"`)
-// - 4 bytes version (`3`)
-// - 4 bytes constant count + `16 * const_count` bytes
-// - 4 bytes heap string table length + `heap_str_bytes`
-// - 4 bytes instruction count + `4 * instruction_count` bytes
-// - Optional debug section: `8 * debug_span_count` + `12 * debug_reg_count`
+// Computes the exact serialized byte size of a `.pilc` v3 binary image.
 pub pure fn compute_pilc_v3_byte_size(
     const_count: i64,
     heap_str_bytes: i64,
@@ -72,4 +67,164 @@ pub fn create_pilc_container_summary(
 // Validates that a `.pilc` header starts with `"PIL3"` magic and version `3`.
 pub fn validate_pilc_v3_header(magic: str, version: i64) -> bool {
     return magic == pilc_v3_magic() && version == pilc_v3_version();
+}
+
+// Encodes a single byte (`0..255`) as 2 lowercase hex digits.
+pub pure fn pilc_byte_hex(b: i64) -> str {
+    let hex_digits = "0123456789abcdef";
+    let hi = (b >> 4) & 15;
+    let lo = b & 15;
+    return hex_digits.slice(hi, hi + 1) + hex_digits.slice(lo, lo + 1);
+}
+
+// Encodes a 32-bit unsigned value as 4 little-endian bytes (`8` hex chars).
+pub pure fn pilc_u32_le_hex(v: i64) -> str {
+    let b0 = pilc_byte_hex(v & 255);
+    let b1 = pilc_byte_hex((v >> 8) & 255);
+    let b2 = pilc_byte_hex((v >> 16) & 255);
+    let b3 = pilc_byte_hex((v >> 24) & 255);
+    return b0 + b1 + b2 + b3;
+}
+
+// Encodes a 64-bit value (`i64` / `u64` two's complement) as 8 little-endian bytes (`16` hex chars).
+pub pure fn pilc_u64_le_hex(v: i64) -> str {
+    var out = "";
+    var k = 0;
+    while k < 8 {
+        let shift = k * 8;
+        out = out + pilc_byte_hex((v >> shift) & 255);
+        k = k + 1;
+    }
+    return out;
+}
+
+// Encodes raw ASCII/UTF-8 bytes of `s` as lowercase hex (`2 * s.len()` chars).
+pub pure fn pilc_raw_str_hex(s: str) -> str {
+    let n = s.len();
+    var out = "";
+    var i = 0;
+    while i < n {
+        out = out + pilc_byte_hex(s.byte_at(i));
+        i = i + 1;
+    }
+    return out;
+}
+
+// Encodes a `TAG_SSO_STR = 8` (`len <= 14`) 16-byte constant entry (`meta[0..8] + payload[0..8]`).
+pub pure fn pilc_sso_str_entry_hex(s: str) -> str {
+    let slen = s.len();
+    var out = pilc_byte_hex(8) + pilc_byte_hex(slen);
+    var k = 0;
+    while k < 6 {
+        if k < slen {
+            out = out + pilc_byte_hex(s.byte_at(k));
+        } else {
+            out = out + "00";
+        }
+        k = k + 1;
+    }
+    k = 6;
+    while k < 14 {
+        if k < slen {
+            out = out + pilc_byte_hex(s.byte_at(k));
+        } else {
+            out = out + "00";
+        }
+        k = k + 1;
+    }
+    return out;
+}
+
+// Encodes a `TAG_HEAP_STR = 9` (`len > 14`) 16-byte constant entry referencing `heap_byte_off`.
+pub pure fn pilc_heap_str_entry_hex(slen: i64, heap_byte_off: i64) -> str {
+    let tag_meta = 9 | (slen << 8);
+    return pilc_u64_le_hex(tag_meta) + pilc_u64_le_hex(heap_byte_off);
+}
+
+// Serializes compiled state map `st` into a complete `PIL3` v3 binary hex image.
+pub fn pilc_serialize_state_hex(st: i64) -> str {
+    let magic_hex = pilc_raw_str_hex(pilc_v3_magic());
+    let ver_hex = pilc_u32_le_hex(pilc_v3_version());
+    let ccount = __engine("map_get", st, "ccount") + 0;
+    var consts_hex = "";
+    var heap_hex = "";
+    var heap_byte_len = 0;
+
+    var ci = 0;
+    while ci < ccount {
+        let ctag = __engine("map_get", st, "ctag_" + ci) + 0;
+        if ctag == 0 {
+            consts_hex = consts_hex + pilc_u64_le_hex(0) + pilc_u64_le_hex(0);
+        } else if ctag == 2 {
+            let bval = __engine("map_get", st, "cpay_" + ci) + 0;
+            consts_hex = consts_hex + pilc_u64_le_hex(2) + pilc_u64_le_hex(bval);
+        } else if ctag == 3 {
+            let ival = __engine("map_get", st, "cpay_" + ci) + 0;
+            consts_hex = consts_hex + pilc_u64_le_hex(3) + pilc_u64_le_hex(ival);
+        } else if ctag == 5 {
+            let fbits = __engine("map_get", st, "cpay_" + ci) + 0;
+            consts_hex = consts_hex + pilc_u64_le_hex(5) + pilc_u64_le_hex(fbits);
+        } else if ctag == 8 {
+            let sval = __engine("map_get", st, "cstr_" + ci);
+            let slen = sval.len();
+            if slen <= 14 {
+                consts_hex = consts_hex + pilc_sso_str_entry_hex(sval);
+            } else {
+                consts_hex = consts_hex + pilc_heap_str_entry_hex(slen, heap_byte_len);
+                heap_hex = heap_hex + pilc_u32_le_hex(slen) + pilc_raw_str_hex(sval);
+                heap_byte_len = heap_byte_len + 4 + slen;
+            }
+        }
+        ci = ci + 1;
+    }
+
+    let icount = __engine("map_get", st, "icount") + 0;
+    var code_hex = "";
+    var pc = 0;
+    while pc < icount {
+        let word = __engine("map_get", st, "ins_" + pc) + 0;
+        code_hex = code_hex + pilc_u32_le_hex(word);
+        pc = pc + 1;
+    }
+
+    return magic_hex
+        + ver_hex
+        + pilc_u32_le_hex(ccount)
+        + consts_hex
+        + pilc_u32_le_hex(heap_byte_len)
+        + heap_hex
+        + pilc_u32_le_hex(icount)
+        + code_hex;
+}
+
+// Formats `"SPANS:<pc>:<start>:<end>,...|REGS:<reg>:<sym_id>:<name>,..."` from compiled state `st`.
+pub fn pilc_format_debug_manifest(st: i64) -> str {
+    let icount = __engine("map_get", st, "icount") + 0;
+    var spans_out = "SPANS:";
+    var pc = 0;
+    while pc < icount {
+        let s0 = __engine("map_get", st, "isp0_" + pc) + 0;
+        let s1 = __engine("map_get", st, "isp1_" + pc) + 0;
+        if pc > 0 {
+            spans_out = spans_out + ",";
+        }
+        spans_out = spans_out + pc + ":" + s0 + ":" + s1;
+        pc = pc + 1;
+    }
+
+    let rcount = __engine("map_get", st, "dbg_rcount") + 0;
+    var regs_out = "REGS:";
+    var ri = 0;
+    while ri < rcount {
+        let rslot = __engine("map_get", st, "dbg_rslot_" + ri) + 0;
+        let rsym = __engine("map_get", st, "dbg_rsym_" + ri) + 0;
+        let rname = __engine("map_get", st, "dbg_rname_" + ri);
+        if ri > 0 {
+            regs_out = regs_out + ",";
+        }
+        regs_out = regs_out + rslot + ":" + rsym + ":" + rname;
+        ri = ri + 1;
+    }
+
+    return spans_out + "|" + regs_out;
 }
