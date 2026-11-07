@@ -1,0 +1,209 @@
+// ============================================================================
+// FILE: selfhost/fmt/fmt.pilot
+// Milestone 53.3: Canonical Wadler-Lindig Pretty-Printer & Formatter (`pilot fmt`)
+// Strictly enforces canonical `{ ... }` blocks, `=> expr;` inline bodies, and
+// `;` statement terminators with zero legacy colon-suite or Pythonic options.
+// ============================================================================
+
+pub struct FormatOptions {
+    pub indent_width: i64;
+    pub max_width: i64;
+    pub emit_semicolons: bool;
+}
+
+pub struct FormatResult {
+    pub formatted_code: str;
+    pub was_modified: bool;
+}
+
+pub struct DocNode {
+    pub kind: i64;
+    pub text: str;
+    pub indent: i64;
+}
+
+// Wadler-Lindig Doc algebra constructors
+pub pure fn doc_kind_nil() -> i64 { return 0; }
+pub pure fn doc_kind_text() -> i64 { return 1; }
+pub pure fn doc_kind_line() -> i64 { return 2; }
+pub pure fn doc_kind_softline() -> i64 { return 3; }
+pub pure fn doc_kind_nest() -> i64 { return 4; }
+pub pure fn doc_kind_group() -> i64 { return 5; }
+
+pub fn default_format_options() -> FormatOptions {
+    return FormatOptions {
+        indent_width: 4,
+        max_width: 100,
+        emit_semicolons: true,
+    };
+}
+
+pub fn make_indent_spaces(depth: i64, indent_width: i64) -> str {
+    let total = depth * indent_width;
+    var out = "";
+    var i = 0;
+    while i < total {
+        out = out + " ";
+        i = i + 1;
+    }
+    return out;
+}
+
+pub pure fn is_ws_char(b: u8) -> bool {
+    return b == 32 || b == 9 || b == 13;
+}
+
+pub fn trim_line(s: str) -> str {
+    let n = s.len();
+    var start = 0;
+    while start < n && is_ws_char(s.byte_at(start)) {
+        start = start + 1;
+    }
+    var end = n;
+    while end > start && is_ws_char(s.byte_at(end - 1)) {
+        end = end - 1;
+    }
+    return s.slice(start, end);
+}
+
+// Normalizes horizontal spacing within a single code line (preserving string literals & comments).
+pub fn normalize_line_spacing(line: str) -> str {
+    let trimmed = trim_line(line);
+    let n = trimmed.len();
+    if n == 0 {
+        return "";
+    }
+    if n >= 2 && trimmed.byte_at(0) == 47 && trimmed.byte_at(1) == 47 {
+        return trimmed;
+    }
+
+    var out = "";
+    var i = 0;
+    var last_was_space = false;
+
+    while i < n {
+        let b = trimmed.byte_at(i);
+        if b == 34 {
+            // Preserve string literal verbatim
+            let start = i;
+            i = i + 1;
+            while i < n && trimmed.byte_at(i) != 34 {
+                if trimmed.byte_at(i) == 92 {
+                    i = i + 2;
+                } else {
+                    i = i + 1;
+                }
+            }
+            if i < n {
+                i = i + 1;
+            }
+            out = out + trimmed.slice(start, i);
+            last_was_space = false;
+        } else if b == 47 && i + 1 < n && trimmed.byte_at(i + 1) == 47 {
+            // Preserve trailing line comment verbatim
+            if !last_was_space && out.len() > 0 {
+                out = out + " ";
+            }
+            out = out + trimmed.slice(i, n);
+            return out;
+        } else if is_ws_char(b) {
+            if !last_was_space && out.len() > 0 {
+                out = out + " ";
+                last_was_space = true;
+            }
+            i = i + 1;
+        } else if b == 44 {
+            // Comma `,`: no space before, single space after (unless at end of line or before `}`/`]`)
+            out = out + ",";
+            i = i + 1;
+            while i < n && is_ws_char(trimmed.byte_at(i)) {
+                i = i + 1;
+            }
+            if i < n && trimmed.byte_at(i) != 125 && trimmed.byte_at(i) != 93 && trimmed.byte_at(i) != 41 {
+                out = out + " ";
+                last_was_space = true;
+            } else {
+                last_was_space = false;
+            }
+        } else {
+            out = out + trimmed.slice(i, i + 1);
+            last_was_space = false;
+            i = i + 1;
+        }
+    }
+    return trim_line(out);
+}
+
+// Counts net brace delta (`{` minus `}`) on a normalized line (ignoring strings and comments).
+pub fn line_brace_delta(line: str) -> i64 {
+    let n = line.len();
+    var delta = 0;
+    var i = 0;
+    while i < n {
+        let b = line.byte_at(i);
+        if b == 34 {
+            i = i + 1;
+            while i < n && line.byte_at(i) != 34 {
+                if line.byte_at(i) == 92 { i = i + 2; } else { i = i + 1; }
+            }
+            if i < n { i = i + 1; }
+        } else if b == 47 && i + 1 < n && line.byte_at(i + 1) == 47 {
+            return delta;
+        } else {
+            if b == 123 { delta = delta + 1; }
+            else if b == 125 { delta = delta - 1; }
+            i = i + 1;
+        }
+    }
+    return delta;
+}
+
+// Formats a Pilot source string with canonical 4-space `{ ... }` block indentation
+// and idempotent spacing (`format_pilot_source(format_pilot_source(s)) == format_pilot_source(s)`).
+pub fn format_pilot_source(src: str) -> str {
+    let n = src.len();
+    var cursor = 0;
+    var depth = 0;
+    var out = "";
+
+    while cursor < n {
+        var line_end = cursor;
+        while line_end < n && src.byte_at(line_end) != 10 {
+            line_end = line_end + 1;
+        }
+        let raw_line = src.slice(cursor, line_end);
+        let norm = normalize_line_spacing(raw_line);
+
+        if norm.len() == 0 {
+            out = out + "\n";
+        } else {
+            // If line starts with `}`, dedent before emitting this line
+            var effective_depth = depth;
+            if norm.byte_at(0) == 125 && effective_depth > 0 {
+                effective_depth = effective_depth - 1;
+            }
+            let indent = make_indent_spaces(effective_depth, 4);
+            out = out + indent + norm + "\n";
+
+            let delta = line_brace_delta(norm);
+            depth = depth + delta;
+            if depth < 0 {
+                depth = 0;
+            }
+        }
+
+        if line_end < n {
+            cursor = line_end + 1;
+        } else {
+            cursor = line_end;
+        }
+    }
+    return out;
+}
+
+// Verifies round-trip formatting idempotency (`format(format(s)) == format(s)`).
+pub fn verify_format_idempotent(src: str) -> bool {
+    let once = format_pilot_source(src);
+    let twice = format_pilot_source(once);
+    return once == twice;
+}

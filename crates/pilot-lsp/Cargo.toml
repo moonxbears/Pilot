@@ -17,8 +17,6 @@ path = "src/lib.rs"
 [dependencies]
 pilot-span = { path = "../pilot-span" }
 pilot-lexer = { path = "../pilot-lexer" }
-pilot-syntax = { path = "../pilot-syntax" }
-pilot-fmt = { path = "../pilot-fmt" }
 pilot-incremental = { path = "../pilot-incremental" }
 pilot-db = { path = "../pilot-db" }
 pilot-parser = { path = "../pilot-parser" }

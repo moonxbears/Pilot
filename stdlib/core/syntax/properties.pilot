@@ -10,9 +10,9 @@ use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
 
 comptime {
-    __engine("bind_receptor", "get", 23, 0);
-    __engine("bind_receptor", "set", 24, 0);
-    __engine("bind_receptor", "op",  25, 0);
+    __engine("bind_receptor", nameof(get), 23, 0);
+    __engine("bind_receptor", nameof(set), 24, 0);
+    __engine("bind_receptor", nameof(op),  25, 0);
 }
 
 pub syntax {

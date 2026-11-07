@@ -10,23 +10,23 @@ use Pilot.Core.Interfaces.*;
 
 comptime {
     // Axis 1: Canonical 10-Tier Spatial Visibility Lattice (`0..9`)
-    __engine("register_modifier", "priv",        0);
-    __engine("register_modifier", "private",     0);
-    __engine("register_modifier", "file",        1);
-    __engine("register_modifier", "fileprivate", 1);
-    __engine("register_modifier", "prot",        3);
-    __engine("register_modifier", "protected",   3);
-    __engine("register_modifier", "pkg",         4);
-    __engine("register_modifier", "package",     4);
-    __engine("register_modifier", "int",         6);
-    __engine("register_modifier", "internal",    6);
-    __engine("register_modifier", "pub",         7);
-    __engine("register_modifier", "public",      7);
-    __engine("register_modifier", "open",        8);
-    __engine("register_modifier", "export",      9);
+    __engine("register_modifier", nameof(priv),        0);
+    __engine("register_modifier", nameof(private),     0);
+    __engine("register_modifier", nameof(file),        1);
+    __engine("register_modifier", nameof(fileprivate), 1);
+    __engine("register_modifier", nameof(prot),        3);
+    __engine("register_modifier", nameof(protected),   3);
+    __engine("register_modifier", nameof(pkg),         4);
+    __engine("register_modifier", nameof(package),     4);
+    __engine("register_modifier", nameof(int),         6);
+    __engine("register_modifier", nameof(internal),    6);
+    __engine("register_modifier", nameof(pub),         7);
+    __engine("register_modifier", nameof(public),      7);
+    __engine("register_modifier", nameof(open),        8);
+    __engine("register_modifier", nameof(export),      9);
 
     // Axis 2: Compile-Time Clearance Rings (`lvl(N)` & shorthand `lvl0`..`lvl100`)
-    __engine("register_parametric_modifier", "lvl", "set_clearance_ring");
+    __engine("register_parametric_modifier", nameof(lvl), "set_clearance_ring");
     __engine("register_modifier", "lvl0",   "set_clearance_ring_0");
     __engine("register_modifier", "lvl1",   "set_clearance_ring_1");
     __engine("register_modifier", "lvl2",   "set_clearance_ring_2");
@@ -37,14 +37,14 @@ comptime {
 }
 
 pub pure fn visibility_tier_of(word: str) -> i32 {
-    if word == "priv" || word == "private" { return 0; }
-    if word == "file" || word == "fileprivate" { return 1; }
-    if word == "prot" || word == "protected" { return 3; }
-    if word == "pkg" || word == "package" { return 4; }
-    if word == "int" || word == "internal" { return 6; }
-    if word == "pub" || word == "public" { return 7; }
-    if word == "open" { return 8; }
-    if word == "export" { return 9; }
+    if word == nameof(priv) || word == nameof(private) { return 0; }
+    if word == nameof(file) || word == nameof(fileprivate) { return 1; }
+    if word == nameof(prot) || word == nameof(protected) { return 3; }
+    if word == nameof(pkg) || word == nameof(package) { return 4; }
+    if word == nameof(int) || word == nameof(internal) { return 6; }
+    if word == nameof(pub) || word == nameof(public) { return 7; }
+    if word == nameof(open) { return 8; }
+    if word == nameof(export) { return 9; }
     return 15;
 }
 

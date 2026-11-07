@@ -9,8 +9,8 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.TryCatch;
 use Pilot.Core.Genesis.*;
 
 comptime {
-    __engine("bind_receptor", "try",   18, 0);
-    __engine("bind_receptor", "catch", 19, 0);
+    __engine("bind_receptor", nameof(try),   18, 0);
+    __engine("bind_receptor", nameof(catch), 19, 0);
     __engine("bind_receptor", "!",     34, 1);
 }
 

@@ -403,21 +403,21 @@ comptime {
     __engine(Cfg.Hooks.module_kw,   Cfg.Tokens.kw_pkg,  Cfg.Tokens.act_pkg);
     __engine(Cfg.Hooks.module_kw,   Cfg.Tokens.kw_use,  Cfg.Tokens.act_use);
     __engine(Cfg.Hooks.receiver_id, Cfg.Tokens.kw_self, Cfg.Tokens.kw_field, Cfg.Tokens.kw_value);
-    __engine(Cfg.Hooks.receptor, "true",  1, 1);
-    __engine(Cfg.Hooks.receptor, "false", 1, 0);
-    __engine(Cfg.Hooks.receptor, "none",  2, 0);
-    __engine(Cfg.Hooks.receptor, "else",  3, 0);
+    __engine(Cfg.Hooks.receptor, nameof(true),  1, 1);
+    __engine(Cfg.Hooks.receptor, nameof(false), 1, 0);
+    __engine(Cfg.Hooks.receptor, nameof(none),  2, 0);
+    __engine(Cfg.Hooks.receptor, nameof(else),  3, 0);
     __engine(Cfg.Hooks.receptor, Cfg.Tokens.kw_syntax, 4, 0);
     __engine(Cfg.Hooks.receptor, "type_construct",      5, 0);
     __engine(Cfg.Hooks.receptor, "attribute_construct", 6, 0);
-    __engine(Cfg.Hooks.receptor, "extern",   7,  0);
+    __engine(Cfg.Hooks.receptor, nameof(extern),   7,  0);
     __engine(Cfg.Hooks.receptor, "lib",      8,  0);
-    __engine(Cfg.Hooks.receptor, "break",    13, 0);
-    __engine(Cfg.Hooks.receptor, "continue", 13, 1);
-    __engine(Cfg.Hooks.receptor, "get",      23, 0);
-    __engine(Cfg.Hooks.receptor, "set",      24, 0);
-    __engine(Cfg.Hooks.receptor, "op",       25, 0);
-    __engine(Cfg.Hooks.receptor, "as",       29, 0);
+    __engine(Cfg.Hooks.receptor, nameof(break),    13, 0);
+    __engine(Cfg.Hooks.receptor, nameof(continue), 13, 1);
+    __engine(Cfg.Hooks.receptor, nameof(get),      23, 0);
+    __engine(Cfg.Hooks.receptor, nameof(set),      24, 0);
+    __engine(Cfg.Hooks.receptor, nameof(op),       25, 0);
+    __engine(Cfg.Hooks.receptor, nameof(as),       29, 0);
     __engine(Cfg.Hooks.receptor, "view",     29, 1);
 
     // 4. Register Global Pratt Operator Precedences ONCE for the Entire Language

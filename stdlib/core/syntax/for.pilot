@@ -10,11 +10,11 @@ use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
 
 comptime {
-    __engine("bind_receptor", "for",      9,  0);
-    __engine("bind_receptor", "in",       10, 0);
-    __engine("bind_receptor", "then",     11, 0);
-    __engine("bind_receptor", "break",    13, 0);
-    __engine("bind_receptor", "continue", 13, 1);
+    __engine("bind_receptor", nameof(for),      9,  0);
+    __engine("bind_receptor", nameof(in),       10, 0);
+    __engine("bind_receptor", nameof(then),     11, 0);
+    __engine("bind_receptor", nameof(break),    13, 0);
+    __engine("bind_receptor", nameof(continue), 13, 1);
 }
 
 pub syntax {

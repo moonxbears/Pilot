@@ -14,7 +14,6 @@ dependencies = [
  "pilot-parser",
  "pilot-rt",
  "pilot-span",
- "pilot-syntax",
  "pilot-vm",
 ]
 
@@ -41,7 +40,6 @@ dependencies = [
  "pilot-lexer",
  "pilot-parser",
  "pilot-rt",
- "pilot-syntax",
 ]
 
 [[package]]
@@ -53,7 +51,6 @@ dependencies = [
  "pilot-bench",
  "pilot-codegen",
  "pilot-dap",
- "pilot-fmt",
  "pilot-intern",
  "pilot-lexer",
  "pilot-lsp",
@@ -64,7 +61,6 @@ dependencies = [
  "pilot-polyglot",
  "pilot-rt",
  "pilot-span",
- "pilot-syntax",
  "pilot-transpile",
  "pilot-vm",
 ]
@@ -108,7 +104,6 @@ dependencies = [
  "pilot-lsp-macros",
  "pilot-parser",
  "pilot-span",
- "pilot-syntax",
 ]
 
 [[package]]
@@ -120,7 +115,6 @@ dependencies = [
  "pilot-ast",
  "pilot-codegen",
  "pilot-db",
- "pilot-fmt",
  "pilot-incremental",
  "pilot-intern",
  "pilot-lexer",
@@ -130,18 +124,8 @@ dependencies = [
  "pilot-polyglot",
  "pilot-rt",
  "pilot-span",
- "pilot-syntax",
  "pilot-transpile",
  "pilot-vm",
-]
-
-[[package]]
-name = "pilot-fmt"
-version = "1.1.51"
-dependencies = [
- "pilot-lexer",
- "pilot-span",
- "pilot-syntax",
 ]
 
 [[package]]
@@ -150,7 +134,6 @@ version = "1.1.51"
 dependencies = [
  "pilot-lexer",
  "pilot-span",
- "pilot-syntax",
 ]
 
 [[package]]
@@ -175,7 +158,6 @@ dependencies = [
  "pilot-analysis",
  "pilot-ast",
  "pilot-db",
- "pilot-fmt",
  "pilot-incremental",
  "pilot-intern",
  "pilot-lexer",
@@ -183,7 +165,6 @@ dependencies = [
  "pilot-parser",
  "pilot-rt",
  "pilot-span",
- "pilot-syntax",
  "pilot-vm",
 ]
 
@@ -220,11 +201,9 @@ version = "1.1.51"
 dependencies = [
  "pilot-analysis",
  "pilot-ast",
- "pilot-fmt",
  "pilot-parser",
  "pilot-rt",
  "pilot-span",
- "pilot-syntax",
  "pilot-vm",
 ]
 
@@ -257,22 +236,11 @@ name = "pilot-span"
 version = "1.1.51"
 
 [[package]]
-name = "pilot-syntax"
-version = "1.1.51"
-dependencies = [
- "pilot-ast",
- "pilot-intern",
- "pilot-lexer",
- "pilot-span",
-]
-
-[[package]]
 name = "pilot-transpile"
 version = "0.1.0"
 dependencies = [
  "pilot-analysis",
  "pilot-ast",
- "pilot-fmt",
  "pilot-intern",
  "pilot-parser",
  "pilot-span",

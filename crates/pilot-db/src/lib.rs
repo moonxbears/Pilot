@@ -10,11 +10,11 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 use pilot_analysis::{AnalysisPipeline, AnalysisResult};
-use pilot_ast::{AstArena, NodeId};
-use pilot_incremental::{reparse_incremental, TextEdit};
+use pilot_ast::{AstArena, NodeId, NodeKind};
+use pilot_incremental::{parse_cst, reparse_incremental, GreenElement, GreenNode, SyntaxKind, SyntaxNode, TextEdit};
+use pilot_intern::SymbolId;
 use pilot_lsp_macros::lsp_query;
 use pilot_span::ByteSpan;
-use pilot_syntax::{parse_cst, GreenNode, SyntaxKind, SyntaxNode};
 
 /// Memoized full-module AST + bidirectional static analysis result for a file revision.
 pub struct ModuleAnalysis {
@@ -210,20 +210,20 @@ impl Database {
             return Some(cached.clone());
         }
 
-        let syntax_root = SyntaxNode::new_root(entry.cst.clone());
+        let arena = pilot_parser::parse(&entry.source);
         let mut stmts = 0;
         let mut vars = Vec::new();
 
-        for child in syntax_root.child_nodes() {
-            if child.kind() == SyntaxKind::FnDecl {
-                let name = child.tokens().find(|t| t.kind() == SyntaxKind::Ident).map(|t| t.text().to_string()).unwrap_or_default();
-                if name == fn_name {
-                    for stmt in child.child_nodes() {
+        for n in &arena.nodes {
+            if n.node_kind() == NodeKind::FnDecl && arena.interner.resolve(SymbolId(n.lhs)) == fn_name {
+                let body_id = NodeId(*arena.extra_children.get(n.rhs as usize).unwrap_or(&u32::MAX));
+                if body_id.is_some() {
+                    let bnode = arena.node(body_id);
+                    for &cid in arena.children_slice(bnode.lhs, bnode.rhs) {
                         stmts += 1;
-                        if matches!(stmt.kind(), SyntaxKind::LetStmt | SyntaxKind::VarStmt) {
-                            if let Some(var_tok) = stmt.tokens().find(|t| t.kind() == SyntaxKind::Ident) {
-                                vars.push(var_tok.text().to_string());
-                            }
+                        let snode = arena.node(NodeId(cid));
+                        if matches!(snode.node_kind(), NodeKind::LetStmt | NodeKind::VarStmt) {
+                            vars.push(arena.interner.resolve(SymbolId(snode.lhs)).to_string());
                         }
                     }
                 }
@@ -288,21 +288,23 @@ pub fn document_symbols_query(db: &Database, file_id: FileId) -> Option<Arc<Item
     db.module_item_tree(file_id)
 }
 
-fn collect_header_tokens(node: &SyntaxNode, tokens: &mut Vec<String>) -> bool {
+fn collect_header_tokens(node: &GreenNode, tokens: &mut Vec<String>) -> bool {
     for elem in node.children() {
         match elem {
-            pilot_syntax::SyntaxElement::Node(child) => {
-                if child.kind() == SyntaxKind::BlockExpr {
+            GreenElement::Node(child) => {
+                if child.kind == SyntaxKind::BlockExpr {
                     return true;
                 }
-                if collect_header_tokens(&child, tokens) {
+                if collect_header_tokens(child, tokens) {
                     return true;
                 }
             }
-            pilot_syntax::SyntaxElement::Token(tok) => {
-                let k = tok.kind();
-                if !matches!(k, SyntaxKind::Whitespace | SyntaxKind::Newline | SyntaxKind::BlockComment | SyntaxKind::LineComment) {
-                    tokens.push(tok.text().to_string());
+            GreenElement::Token(tok) => {
+                if tok.text == "{" {
+                    return true;
+                }
+                if !matches!(tok.kind, SyntaxKind::Whitespace | SyntaxKind::Newline | SyntaxKind::BlockComment | SyntaxKind::LineComment) {
+                    tokens.push(tok.text.clone());
                 }
             }
         }
@@ -329,26 +331,29 @@ fn format_signature_tokens(tokens: &[String]) -> String {
 fn extract_item_tree(file_id: FileId, root: &SyntaxNode) -> ItemTree {
     let mut items = Vec::new();
 
-    for node in root.child_nodes() {
-        let k = node.kind();
+    for elem in root.green().children() {
+        let GreenElement::Node(node) = elem else { continue };
+        let k = node.kind;
         if matches!(
             k,
             SyntaxKind::FnDecl
-                | SyntaxKind::ClassDecl
                 | SyntaxKind::StructDecl
-                | SyntaxKind::RecordDecl
-                | SyntaxKind::TypeAdtDecl
                 | SyntaxKind::InterfaceDecl
-                | SyntaxKind::ExtendDecl
                 | SyntaxKind::ImportDecl
-                | SyntaxKind::FromImportDecl
-                | SyntaxKind::ConstDecl
         ) {
-            let name = node.tokens().find(|t| t.kind() == SyntaxKind::Ident).map(|t| t.text().to_string()).unwrap_or_else(|| "anon".to_string());
+            let name = node
+                .children()
+                .iter()
+                .filter_map(|e| match e {
+                    GreenElement::Token(t) if t.kind == SyntaxKind::Ident => Some(t.text.as_str()),
+                    _ => None,
+                })
+                .find(|&s| !matches!(s, "pub" | "priv" | "prot" | "pkg" | "int" | "file" | "open" | "export" | "pure" | "static" | "partial" | "ext" | "async" | "use" | "import"))
+                .unwrap_or("anon")
+                .to_string();
 
-            // Build signature text excluding the inner BlockExpr body
             let mut header_toks = Vec::new();
-            collect_header_tokens(&node, &mut header_toks);
+            collect_header_tokens(node, &mut header_toks);
             let sig_text = if !header_toks.is_empty() {
                 format_signature_tokens(&header_toks)
             } else {

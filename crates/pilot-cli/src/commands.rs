@@ -8,7 +8,6 @@ use std::time::Instant;
 
 use pilot_analysis::AnalysisPipeline;
 use pilot_codegen::{BuildDriver, BuildOptions, BuildTarget, OptLevel};
-use pilot_fmt::{format_source, FormatOptions};
 use pilot_parser::parse;
 use pilot_rt::BumpRegion;
 use pilot_transpile::{ForeignAstIngester, IngestOptions, IrModule, TargetLanguage, Transpiler};
@@ -279,12 +278,12 @@ pub fn cmd_fmt(args: &[String]) {
         match arg.as_str() {
             "--check" => check_only = true,
             "-w" | "--write" => write_mode = true,
-            "--migrate-syntax" => migrate_syntax = true,
-            path => files.push(path),
+            path if !path.starts_with('-') => files.push(path),
+            _ => {}
         }
     }
 
-    let opts = FormatOptions::default();
+    let fmt_pilot_src = include_str!("../../../../selfhost/fmt/fmt.pilot");
 
     for file_path in files {
         let src = match fs::read_to_string(file_path) {
@@ -295,12 +294,11 @@ pub fn cmd_fmt(args: &[String]) {
             }
         };
 
-        let output = if migrate_syntax {
-            pilot_fmt::migrate_syntax(&src)
-        } else {
-            let res = format_source(&src, &opts);
-            res.formatted_code
-        };
+        let script = format!("{}\nformat_pilot_source({:?});\n", fmt_pilot_src, src);
+        let arena = parse(&script);
+        let mut vm = pilot_vm::PilVirtualMachine::new();
+        vm.load_binary(pilot_vm::BytecodeCompiler::compile(&arena, arena.root));
+        let output = vm.run().to_string_repr();
 
         if check_only {
             if output != src {
@@ -669,14 +667,13 @@ pub fn cmd_repl() {
             break;
         }
 
-        let cst = pilot_syntax::parse_cst(trimmed);
-        if !cst.diagnostics.is_empty() {
-            for diag in &cst.diagnostics {
-                println!("Syntax error: {}", diag.message);
+        let arena = parse(trimmed);
+        if !arena.diagnostics.is_empty() {
+            for (_, msg) in &arena.diagnostics {
+                println!("Syntax error: {}", msg);
             }
             continue;
         }
-        let arena = parse(trimmed);
         let binary = pilot_vm::BytecodeCompiler::compile(&arena, arena.root);
         vm.load_binary(binary);
         let res = vm.run();

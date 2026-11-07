@@ -269,11 +269,6 @@ fn test_selfhost_ide_sync_pilot_generates_all_4_vscode_artifacts_and_hover_badge
     let sem_resp = server.handle_message(&sem_req).expect("Expected semantic tokens response");
     assert!(sem_resp.contains("data"), "Semantic tokens response must have data array: {}", sem_resp);
 
-    let pairs = pilot_fmt::syntax_migration_pairs();
-    assert!(!pairs.is_empty(), "Syntax migration pairs must be loaded");
-    let migrated = pilot_fmt::migrate_syntax("def add(x: int) -> int: return x");
-    assert!(migrated.contains("fn add"), "Migrated syntax should use 'fn': {}", migrated);
-
     let ide_sync_src = include_str!("../../../selfhost/ide_sync.pilot");
     let snap = BootstrapSnapshot::global();
     let mut snap_tables = snap.tables.clone();
