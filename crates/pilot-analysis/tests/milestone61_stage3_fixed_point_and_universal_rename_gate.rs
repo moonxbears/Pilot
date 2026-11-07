@@ -469,7 +469,7 @@ pub fn test_61_1_standalone_selfhost_lexer_16b_ast_pratt_precedence_and_quote_sp
         "Homoiconic `syntax` quote splicing failed to expand macro into `IfExpr(!cond)`"
     );
     assert_eq!(
-        cols[4], "&&>(==>(+>*-),!)",
+        cols[4], "&&>(==>(+>*,-),!)",
         "Pratt precedence hierarchy mismatch"
     );
     guard.finish();
