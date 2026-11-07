@@ -61,6 +61,64 @@ use pilot_parser::parse;
 use pilot_rt::PilotVal;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/anticheat.rs"]
+mod anticheat;
+
+const PERCEUS_GROUP: &[&str] = &[
+    "selfhost/perceus/arc.pilot",
+    "selfhost/perceus/escape.pilot",
+    "selfhost/perceus/realtime.pilot",
+    "selfhost/perceus/optimizer.pilot",
+];
+
+const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
+    milestone_id: 54,
+    test_file_rel: "crates/pilot-analysis/tests/milestone54_perceus_ownership_and_escape.rs",
+    expected_test_count: 2,
+    files: &[
+        anticheat::FileAuditRule {
+            path: "selfhost/perceus/arc.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &["@hard_realtime"],
+            forbidden_string_substrings: &["dsp", "@hard_realtime"],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/perceus/escape.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &["@hard_realtime"],
+            forbidden_string_substrings: &["dsp", "@hard_realtime"],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/perceus/realtime.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &["@hard_realtime"],
+            forbidden_string_substrings: &["dsp", "@hard_realtime"],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/perceus/optimizer.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &["@hard_realtime"],
+            forbidden_string_substrings: &["dsp", "@hard_realtime"],
+        },
+    ],
+    required_group_pub_fns: &[
+        ("perceus_schedule_fn", PERCEUS_GROUP),
+        ("verify_perceus_unit", PERCEUS_GROUP),
+    ],
+};
+
 struct Rng(u64);
 
 impl Rng {
@@ -177,6 +235,10 @@ fn run_perceus_on_program(target_program: &str, tail_expr: &str) -> (PilotVal, V
 
 #[test]
 fn test_54_1_real_ast_perceus_arc_dup_last_use_drop_reuse_and_lifo_guards() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_54_1_real_ast_perceus_arc_dup_last_use_drop_reuse_and_lifo_guards",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5401);
     let snap = BootstrapSnapshot::global();
     for rel in [
@@ -347,10 +409,15 @@ fn test_54_1_real_ast_perceus_arc_dup_last_use_drop_reuse_and_lifo_guards() {
             trial, expected_lifo, s_guards
         );
     }
+    guard.finish();
 }
 
 #[test]
 fn test_54_2_and_54_3_real_ast_escape_realtime_cue_verifiers_and_dsp_decoy_trap() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_54_2_and_54_3_real_ast_escape_realtime_cue_verifiers_and_dsp_decoy_trap",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5402);
 
     // Static check: forbid `"dsp"` name sniffing or `@hard_realtime` in selfhost/perceus/*.pilot
@@ -537,4 +604,5 @@ fn test_54_2_and_54_3_real_ast_escape_realtime_cue_verifiers_and_dsp_decoy_trap(
     let root = ws_root();
     assert!(!root.join("crates/pilot-perceus").exists(), "crates/pilot-perceus must be deleted");
     assert!(!read_ws("Cargo.toml").contains("pilot-perceus"));
+    guard.finish();
 }

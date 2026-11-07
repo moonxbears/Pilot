@@ -78,6 +78,72 @@ use pilot_intern::SymbolId;
 use pilot_parser::{parse, parse_and_ingest, parse_with_tables, ParserTables};
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine, PilcBinary};
 
+#[path = "common/anticheat.rs"]
+mod anticheat;
+
+const SH_AST_GROUP: &[&str] = &["selfhost/ast.pilot", "selfhost/parser.pilot"];
+
+const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
+    milestone_id: 61,
+    test_file_rel: "crates/pilot-analysis/tests/milestone61_stage3_fixed_point_and_universal_rename_gate.rs",
+    expected_test_count: 3,
+    files: &[
+        anticheat::FileAuditRule {
+            path: "selfhost/lexer.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[
+                "sh_tokenize",
+                "sh_token_count",
+                "sh_token_text",
+                "sh_token_tag",
+                "sh_token_matching_bracket",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &["ast_node_kind", "ast_child_at"],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/ast.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &["ast_node_kind", "ast_child_at", "expanded syntax "],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/parser.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &["sh_parse_program"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &["ast_node_kind", "ast_child_at", "expanded syntax "],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/pilotc.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[
+                "pilotc_compile_source_to_c11",
+                "pilotc_bootstrap_stage_c11",
+                "pilotc_bootstrap_stage_pilc_hex",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &["system(", "host_spawn_eval"],
+            forbidden_string_substrings: &["pilot build", "PILOTC_BINARY["],
+        },
+    ],
+    required_group_pub_fns: &[
+        ("sh_ast_root", SH_AST_GROUP),
+        ("sh_ast_kind_name", SH_AST_GROUP),
+        ("sh_ast_op_text", SH_AST_GROUP),
+        ("sh_ast_child_count", SH_AST_GROUP),
+        ("sh_ast_child_at", SH_AST_GROUP),
+    ],
+};
+
 fn eval_with_mounted_physics(driver_src: &str, target_src: &str, physics: &PhysicsRegistry) -> String {
     let drv_arena = parse(driver_src);
     assert!(
@@ -255,6 +321,10 @@ fn collect_type_named_symbols(arena: &AstArena, id: NodeId, out: &mut Vec<String
 
 #[test]
 fn test_61_1_standalone_selfhost_lexer_16b_ast_pratt_precedence_and_quote_splicing() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_61_1_standalone_selfhost_lexer_16b_ast_pratt_precedence_and_quote_splicing",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
 
@@ -400,10 +470,15 @@ fn test_61_1_standalone_selfhost_lexer_16b_ast_pratt_precedence_and_quote_splici
         cols[4], "&&>(==>(+>*-),!)",
         "Pratt precedence hierarchy mismatch"
     );
+    guard.finish();
 }
 
 #[test]
 fn test_61_2_stage3_bootstrap_fixed_point_clang_native_and_pilc_sha256_parity() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_61_2_stage3_bootstrap_fixed_point_clang_native_and_pilc_sha256_parity",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
 
@@ -502,10 +577,15 @@ fn test_61_2_stage3_bootstrap_fixed_point_clang_native_and_pilc_sha256_parity() 
         Some(expected_a),
         "Stage-3 deserialized .pilc executed to wrong value on PilVirtualMachine"
     );
+    guard.finish();
 }
 
 #[test]
 fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_across_7_backends() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_across_7_backends",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
 
@@ -844,4 +924,5 @@ fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_acros
             dap_json
         );
     }
+    guard.finish();
 }

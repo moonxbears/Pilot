@@ -83,6 +83,165 @@ use pilot_ast::NodeKind;
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/anticheat.rs"]
+mod anticheat;
+
+const CLI_BUILD_GROUP: &[&str] = &["selfhost/cli/main.pilot", "selfhost/cli/build_cmd.pilot"];
+
+const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
+    milestone_id: 60,
+    test_file_rel: "crates/pilot-analysis/tests/milestone60_selfhost_cli_pkg_perf_and_bench.rs",
+    expected_test_count: 3,
+    files: &[
+        anticheat::FileAuditRule {
+            path: "selfhost/pkg/manifest.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[
+                "generate_default_manifest_json",
+                "parse_manifest_json",
+                "manifest_get_name",
+                "manifest_get_version",
+                "manifest_dep_count",
+                "manifest_dep_version",
+                "scaffold_canonical_main_pilot",
+                "compute_package_lockfile_json",
+                "verify_lockfile_integrity",
+            ],
+            required_code_markers: &["sha256_hex"],
+            forbidden_code_markers: &["14695981039346656037", "0xcbf29ce484222325"],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/pkg/archive.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[
+                "pilpkg_new",
+                "pilpkg_add_file",
+                "pilpkg_serialize",
+                "pilpkg_file_count",
+                "pilpkg_extract_file",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/pkg/venv.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["format_pilotvenv_cfg", "parse_pilotvenv_version"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/pkg/interop.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["parse_ecosystem_spec"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/perf/profiler.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[
+                "profile_folded_stacks_to_svg",
+                "profile_folded_stacks_to_chrome_trace",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/perf/wcet.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &["verify_arena_wcet"],
+            required_code_markers: &["__engine"],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/perf/optimizer.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &["optimize_mounted_pilot_source"],
+            required_code_markers: &["__engine"],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &["1024 * 1024"],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/bench/bench.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["compute_bench_stats_json"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/cli/main.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &["system("],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/cli/build_cmd.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &["system("],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/cli/test_runner.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &["discover_arena_tests", "summarize_test_suite_json"],
+            required_code_markers: &["__engine"],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/cli/diff_test.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["check_differential_backends"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/cli/repl.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &["repl_session_new", "repl_eval_line"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/pilotc.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &["system("],
+            forbidden_string_substrings: &["pilot build"],
+        },
+    ],
+    required_group_pub_fns: &[("parse_cli_build_args", CLI_BUILD_GROUP)],
+};
+
 fn eval_with_mounted_physics(driver_src: &str, target_src: &str, physics: &PhysicsRegistry) -> String {
     let drv_arena = parse(driver_src);
     assert!(
@@ -180,6 +339,10 @@ fn python_sha256_hex(payload: &str) -> String {
 
 #[test]
 fn test_60_1_pkg_manifest_parser_real_sha256_lockfile_multifile_pilpkg_and_venv() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_60_1_pkg_manifest_parser_real_sha256_lockfile_multifile_pilpkg_and_venv",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
 
@@ -289,10 +452,15 @@ fn test_60_1_pkg_manifest_parser_real_sha256_lockfile_multifile_pilpkg_and_venv(
         format!("cargo|{}|1.4.2;pip|{}|2.3.1;npm|vite|5.4.0", dep_a, dep_b),
         "Foreign ecosystem spec parser failed"
     );
+    guard.finish();
 }
 
 #[test]
 fn test_60_2_live_vmhook_flamegraph_svg_ast_wcet_and_real_constant_folding_optimizer() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_60_2_live_vmhook_flamegraph_svg_ast_wcet_and_real_constant_folding_optimizer",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
 
@@ -510,10 +678,15 @@ print("OK")
     let mut exec_vm = PilVirtualMachine::new();
     exec_vm.load_binary(BytecodeCompiler::compile(&exec_arena, exec_arena.root));
     assert_eq!(exec_vm.run().as_int(), Some(x_arg + expected_const));
+    guard.finish();
 }
 
 #[test]
 fn test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_crate_purge() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_crate_purge",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
 
@@ -622,4 +795,5 @@ fn test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_crate
         expected_repl,
         cols[4]
     );
+    guard.finish();
 }

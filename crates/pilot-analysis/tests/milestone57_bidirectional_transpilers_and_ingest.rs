@@ -40,6 +40,116 @@ use pilot_analysis::{flatten_ast, handle_engine_intrinsic, run_pilot_analyzer, P
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/anticheat.rs"]
+mod anticheat;
+
+const TRANSPILE_BANNED_CHEATS: &[&str] = &[
+    "get_service_data",
+    "Shape::Circle",
+    "Channel::receive",
+    "String.prototype.shout",
+    "head_pt",
+];
+
+const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
+    milestone_id: 57,
+    test_file_rel: "crates/pilot-analysis/tests/milestone57_bidirectional_transpilers_and_ingest.rs",
+    expected_test_count: 2,
+    files: &[
+        anticheat::FileAuditRule {
+            path: "selfhost/transpile/ir.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[],
+            required_code_markers: &["__engine"],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/transpile/emit_rust.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["transpile_arena_to_rust"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/transpile/emit_c.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["transpile_arena_to_c"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/transpile/emit_cpp.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["transpile_arena_to_cpp"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/transpile/emit_csharp.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["transpile_arena_to_csharp"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/transpile/emit_python.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["transpile_arena_to_python"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/transpile/emit_js.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["transpile_arena_to_js"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/transpile/emit_lua.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["transpile_arena_to_lua"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: TRANSPILE_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/transpile/ingest.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["ingest_foreign_source"],
+            required_code_markers: &[],
+            forbidden_code_markers: &["host_spawn_eval"],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "stdlib/pkg/licensing.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["is_viable_spdx_license"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+    ],
+    required_group_pub_fns: &[],
+};
+
 struct Rng(u64);
 
 impl Rng {
@@ -170,6 +280,10 @@ fn run_transpiler_on_arena(target_program: &str, call_expr: &str) -> String {
 
 #[test]
 fn test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host_toolchains() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host_toolchains",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5701);
     let tmp = std::env::temp_dir().join(format!("pilot_m57_{}_{}", std::process::id(), rng.next_u64()));
     std::fs::create_dir_all(&tmp).unwrap();
@@ -361,10 +475,15 @@ fn test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host_too
     }
 
     let _ = std::fs::remove_dir_all(&tmp);
+    guard.finish();
 }
 
 #[test]
 fn test_57_3_and_57_4_six_language_foreign_ingesters_vm_execution_spdx_and_crate_purge() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_57_3_and_57_4_six_language_foreign_ingesters_vm_execution_spdx_and_crate_purge",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5703);
     let ingest_mod = read_ws("selfhost/transpile/ingest.pilot");
     let license_mod = read_ws("stdlib/pkg/licensing.pilot");
@@ -590,4 +709,5 @@ fn test_57_3_and_57_4_six_language_foreign_ingesters_vm_execution_spdx_and_crate
     let root = ws_root();
     assert!(!root.join("crates/pilot-transpile").exists());
     assert!(!read_ws("Cargo.toml").contains("pilot-transpile"));
+    guard.finish();
 }

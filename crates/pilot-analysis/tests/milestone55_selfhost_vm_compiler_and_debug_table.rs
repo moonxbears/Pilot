@@ -48,6 +48,41 @@ use pilot_parser::parse;
 use pilot_vm::pilc::PilcBinary;
 use pilot_vm::{BytecodeCompiler, Opcode, PilVirtualMachine, PILC_V3_MAGIC, PILC_V3_VERSION};
 
+#[path = "common/anticheat.rs"]
+mod anticheat;
+
+const VM_GROUP: &[&str] = &["selfhost/vm/compiler.pilot", "selfhost/vm/pilc_writer.pilot"];
+
+const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
+    milestone_id: 55,
+    test_file_rel: "crates/pilot-analysis/tests/milestone55_selfhost_vm_compiler_and_debug_table.rs",
+    expected_test_count: 3,
+    files: &[
+        anticheat::FileAuditRule {
+            path: "selfhost/vm/compiler.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[],
+            required_code_markers: &["__engine"],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &["main"],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/vm/pilc_writer.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+    ],
+    required_group_pub_fns: &[
+        ("compile_arena_to_pilc_hex", VM_GROUP),
+        ("compile_arena_debug_manifest", VM_GROUP),
+    ],
+};
+
 struct Rng(u64);
 
 impl Rng {
@@ -182,6 +217,10 @@ fn selfhost_compile_program(target_program: &str) -> (PilcBinary, String) {
 
 #[test]
 fn test_55_1_selfhost_compiler_emits_executable_pilc_for_randomized_recursive_and_loop_programs() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_55_1_selfhost_compiler_emits_executable_pilc_for_randomized_recursive_and_loop_programs",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5501);
 
     // Static check: forbid hardcoded `"main"` special-casing in `selfhost/vm/compiler.pilot`
@@ -308,10 +347,15 @@ fn test_55_1_selfhost_compiler_emits_executable_pilc_for_randomized_recursive_an
             dbg_manifest
         );
     }
+    guard.finish();
 }
 
 #[test]
 fn test_55_2_sso_and_heap_string_constants_and_zero_arg_entry_without_main_hardcoding() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_55_2_sso_and_heap_string_constants_and_zero_arg_entry_without_main_hardcoding",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5502);
 
     for trial in 0..5 {
@@ -345,10 +389,15 @@ fn test_55_2_sso_and_heap_string_constants_and_zero_arg_entry_without_main_hardc
             trial, entry_name
         );
     }
+    guard.finish();
 }
 
 #[test]
 fn test_55_3_and_55_4_debug_tables_opcode_purification_and_line_caps() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_55_3_and_55_4_debug_tables_opcode_purification_and_line_caps",
+        &ANTICHEAT_SPEC,
+    );
     let root = ws_root();
     assert!(
         !root.join("crates/pilot-vm/src/compiler.rs").exists(),
@@ -378,4 +427,5 @@ fn test_55_3_and_55_4_debug_tables_opcode_purification_and_line_caps() {
     assert_eq!(binary.instructions.len(), binary.pc_spans.len());
     assert!(!binary.reg_symbols.is_empty());
     assert!(binary.instructions.iter().any(|ins| ins.opcode() == Opcode::EngineIntrinsic));
+    guard.finish();
 }

@@ -57,6 +57,75 @@ use pilot_parser::parse;
 use pilot_rt::PilotVal;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/anticheat.rs"]
+mod anticheat;
+
+const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
+    milestone_id: 52,
+    test_file_rel: "crates/pilot-analysis/tests/milestone52_pilot_preprocessor_and_receptors.rs",
+    expected_test_count: 3,
+    files: &[
+        anticheat::FileAuditRule {
+            path: "selfhost/preprocessor.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[
+                "eval_preproc_condition",
+                "preprocess_source",
+                "validate_preprocessor_directives",
+            ],
+            required_code_markers: &[
+                "PREPROC001",
+                "PREPROC002",
+                "PREPROC003",
+                "PREPROC004",
+                "PREPROC005",
+                "PREPROC006",
+                "PREPROC007",
+                "PREPROC008",
+            ],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "stdlib/core/syntax/unit_decl.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[
+                "unit_family_for_suffix",
+                "unit_scale_to_base",
+                "convert_unit_literal_to_base",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "stdlib/core/syntax/fstring.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[
+                "count_fstring_holes",
+                "extract_fstring_hole_expr",
+                "desugar_fstring_to_concat",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "stdlib/core/keywords.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["keyword_namespace", "keyword_name"],
+            required_code_markers: &["register_keyword"],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+    ],
+    required_group_pub_fns: &[],
+};
+
 struct Rng(u64);
 
 impl Rng {
@@ -138,6 +207,10 @@ fn eval_pilot_expr(module_src: &str, tail_expr: &str) -> PilotVal {
 
 #[test]
 fn test_52_1_nested_if_stack_inactive_isolation_and_boolean_algebra() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_52_1_nested_if_stack_inactive_isolation_and_boolean_algebra",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5210);
     let snap = BootstrapSnapshot::global();
     let mut tables = snap.tables.clone();
@@ -300,10 +373,15 @@ fn test_52_1_nested_if_stack_inactive_isolation_and_boolean_algebra() {
             preprocessed
         );
     }
+    guard.finish();
 }
 
 #[test]
 fn test_52_1_all_eight_preproc_diagnostics_and_pragma_suppression() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_52_1_all_eight_preproc_diagnostics_and_pragma_suppression",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5211);
     let preproc_src = read_ws("selfhost/preprocessor.pilot");
 
@@ -360,10 +438,15 @@ fn test_52_1_all_eight_preproc_diagnostics_and_pragma_suppression() {
     // PREPROC007 & PREPROC008: nested `#region` / `#endregion`
     assert!(check_diag("#region Outer\n#region Inner\n#endregion\n", "").contains("PREPROC007"));
     assert!(check_diag("#region A\n#endregion\n#endregion\n", "").contains("PREPROC008"));
+    guard.finish();
 }
 
 #[test]
 fn test_52_3_unit_receptors_fstring_execution_and_hierarchical_keywords() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_52_3_unit_receptors_fstring_execution_and_hierarchical_keywords",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5230);
     let unit_src = read_ws("stdlib/core/syntax/unit_decl.pilot");
     let fstr_src = read_ws("stdlib/core/syntax/fstring.pilot");
@@ -528,4 +611,5 @@ fn test_52_3_unit_receptors_fstring_execution_and_hierarchical_keywords() {
             name
         );
     }
+    guard.finish();
 }

@@ -50,6 +50,67 @@ use pilot_rt::PilotVal;
 use pilot_vm::pilc::{PilcBinary, PILC_V3_MAGIC};
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/anticheat.rs"]
+mod anticheat;
+
+const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
+    milestone_id: 50,
+    test_file_rel: "crates/pilot-analysis/tests/milestone50_lossless_bridge_and_reflection.rs",
+    expected_test_count: 4,
+    files: &[
+        anticheat::FileAuditRule {
+            path: "stdlib/core/bootstrap.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[
+                "bootstrap_stage_count",
+                "bootstrap_stage_path",
+                "bootstrap_stage_ring",
+                "bootstrap_stage_at",
+            ],
+            required_code_markers: &[".len"],
+            forbidden_code_markers: &["return 8;"],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/diagnostics.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &["verify_unit_diagnostics"],
+            required_code_markers: &["__engine", "EnforceCoreNaming", "LatticeContractMismatch"],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/attr_weaver.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[
+                "highest_weight_attr_index",
+                "weave_sorted_attr_names",
+                "weave_unit_attributes",
+            ],
+            required_code_markers: &["__engine", "ATTR001", "ATTR002"],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/analyzer.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[
+                "compute_field_projection_offset",
+                "compute_soa_projection",
+                "verify_capability_transition",
+            ],
+            required_code_markers: &["__engine", "layout_field_offset"],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+    ],
+    required_group_pub_fns: &[],
+};
+
 struct Rng(u64);
 
 impl Rng {
@@ -116,6 +177,10 @@ fn run_vm_with_registry(script: &str, reg: &mut PhysicsRegistry) -> PilotVal {
 
 #[test]
 fn test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5001_A11CE);
     let bit_widths = [8u32, 16, 32, 64, 128];
 
@@ -373,10 +438,15 @@ fn test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts() {
         assert_eq!(observed_quotes, expected_quotes);
         assert!(saw_list_n, "ListExpr child count {} must survive", list_len);
     }
+    guard.finish();
 }
 
 #[test]
 fn test_50_2_open_keyword_reflection_and_randomized_user_categories() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_50_2_open_keyword_reflection_and_randomized_user_categories",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5002_BEEF);
     let empty_arena = parse("");
     let (flat, syms) = flatten_ast(&empty_arena, empty_arena.root);
@@ -495,10 +565,15 @@ fn test_50_2_open_keyword_reflection_and_randomized_user_categories() {
             assert_eq!(&got_doc, doc);
         }
     }
+    guard.finish();
 }
 
 #[test]
 fn test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_sorted_weaver() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_sorted_weaver",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5003_CAFE);
     let root = workspace_root();
 
@@ -766,10 +841,15 @@ fn test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_sorte
             "Must emit ATTR002 for interceptor attribute on field"
         );
     }
+    guard.finish();
 }
 
 #[test]
 fn test_50_4_and_50_5_target_width_projections_pilc_snapshot_and_gate1_gate2_contraction() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_50_4_and_50_5_target_width_projections_pilc_snapshot_and_gate1_gate2_contraction",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5004_F00D);
     let root = workspace_root();
 
@@ -880,4 +960,5 @@ fn test_50_4_and_50_5_target_width_projections_pilc_snapshot_and_gate1_gate2_con
     let reloaded = PilcBinary::load_from_bytes(&bytes).expect("PilcBinary::load_from_bytes");
     assert_eq!(reloaded.instructions.len(), bin.instructions.len());
     assert_eq!(reloaded.constants.len(), bin.constants.len());
+    guard.finish();
 }

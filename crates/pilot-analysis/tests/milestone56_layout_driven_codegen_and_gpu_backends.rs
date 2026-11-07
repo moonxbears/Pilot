@@ -54,6 +54,137 @@ use pilot_analysis::{flatten_ast, handle_engine_intrinsic, run_pilot_analyzer, P
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/anticheat.rs"]
+mod anticheat;
+
+const C_CODEGEN_GROUP: &[&str] = &[
+    "selfhost/codegen/physics.pilot",
+    "selfhost/codegen/c_types.pilot",
+    "selfhost/codegen/c_header.pilot",
+    "selfhost/codegen/c_emitter.pilot",
+];
+
+const GPU_CODEGEN_GROUP: &[&str] = &[
+    "selfhost/codegen/physics.pilot",
+    "selfhost/codegen/gpu_c_dialects.pilot",
+    "selfhost/codegen/gpu_shaders.pilot",
+    "selfhost/codegen/gpu_llvm.pilot",
+];
+
+const CODEGEN_BANNED_CHEATS: &[&str] = &[
+    "ExprNode",
+    "TransformFrame",
+    "FlowState",
+    "c[idx] = a[idx] + b[idx]",
+];
+
+const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
+    milestone_id: 56,
+    test_file_rel: "crates/pilot-analysis/tests/milestone56_layout_driven_codegen_and_gpu_backends.rs",
+    expected_test_count: 3,
+    files: &[
+        anticheat::FileAuditRule {
+            path: "selfhost/codegen/physics.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[],
+            required_code_markers: &["__engine"],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: CODEGEN_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/codegen/c_types.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: CODEGEN_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/codegen/c_header.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: CODEGEN_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/codegen/c_emitter.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: CODEGEN_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/codegen/llvm_emitter.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["emit_arena_llvm_ir"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: CODEGEN_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/codegen/wasm_emitter.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[
+                "emit_arena_wasm_hex",
+                "emit_arena_wat",
+                "emit_arena_wasm_mjs",
+                "emit_arena_wasm_dts",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: CODEGEN_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/codegen/asm_emitter.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &["emit_arena_x86_64_asm"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: CODEGEN_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/codegen/gpu_c_dialects.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: CODEGEN_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/codegen/gpu_shaders.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: CODEGEN_BANNED_CHEATS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/codegen/gpu_llvm.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: CODEGEN_BANNED_CHEATS,
+        },
+    ],
+    required_group_pub_fns: &[
+        ("emit_arena_c11", C_CODEGEN_GROUP),
+        ("emit_arena_gpu_kernel", GPU_CODEGEN_GROUP),
+    ],
+};
+
 struct Rng(u64);
 
 impl Rng {
@@ -187,6 +318,10 @@ fn run_codegen_on_arena(target_program: &str, codegen_files: &[&str], call_expr:
 
 #[test]
 fn test_56_1_layout_driven_c11_backend_compiled_and_executed_by_clang() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_56_1_layout_driven_c11_backend_compiled_and_executed_by_clang",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5601);
     let tmp = make_temp_dir("c11", &mut rng);
 
@@ -290,10 +425,15 @@ fn test_56_1_layout_driven_c11_backend_compiled_and_executed_by_clang() {
         assert_eq!(actual, expected, "Trial {}: C11 execution mismatch!", trial);
     }
     let _ = std::fs::remove_dir_all(&tmp);
+    guard.finish();
 }
 
 #[test]
 fn test_56_3_llvm_ir_wasm_binary_and_x86_64_asm_executed_by_clang_and_node() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_56_3_llvm_ir_wasm_binary_and_x86_64_asm_executed_by_clang_and_node",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5603);
     let tmp = make_temp_dir("llvm_wasm_asm", &mut rng);
 
@@ -443,10 +583,15 @@ fn test_56_3_llvm_ir_wasm_binary_and_x86_64_asm_executed_by_clang_and_node() {
     );
 
     let _ = std::fs::remove_dir_all(&tmp);
+    guard.finish();
 }
 
 #[test]
 fn test_56_2_and_56_4_all_eight_gpu_backends_ast_lowering_cpu_execution_and_legacy_purge() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_56_2_and_56_4_all_eight_gpu_backends_ast_lowering_cpu_execution_and_legacy_purge",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5602);
     let tmp = make_temp_dir("gpu", &mut rng);
 
@@ -632,4 +777,5 @@ fn test_56_2_and_56_4_all_eight_gpu_backends_ast_lowering_cpu_execution_and_lega
     }
     assert!(read_ws("crates/pilot-codegen/src/lib.rs").lines().count() <= 120);
     assert!(read_ws("crates/pilot-rt/src/c_abi.rs").lines().count() <= 220);
+    guard.finish();
 }

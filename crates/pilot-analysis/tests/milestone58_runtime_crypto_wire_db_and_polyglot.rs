@@ -108,6 +108,179 @@ use pilot_parser::parse;
 use pilot_rt::PilotVal;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/anticheat.rs"]
+mod anticheat;
+
+const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
+    milestone_id: 58,
+    test_file_rel: "crates/pilot-analysis/tests/milestone58_runtime_crypto_wire_db_and_polyglot.rs",
+    expected_test_count: 7,
+    files: &[
+        anticheat::FileAuditRule {
+            path: "selfhost/ffi_bindgen.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["generate_ffi_binding", "generate_arena_c_ffi_header"],
+            required_code_markers: &["__engine"],
+            forbidden_code_markers: &["host_spawn_eval"],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "stdlib/crypto/hash.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[
+                "sha256_hex",
+                "sha512_hex",
+                "blake3_hex",
+                "hmac_sha256_hex",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &["14695981039346656037", "0xcbf29ce484222325", "host_spawn_eval"],
+            forbidden_string_substrings: &[
+                "sha256_computed",
+                "blake3_computed",
+                "openssl",
+                "hashlib",
+                "libcrypto",
+                "python3",
+            ],
+        },
+        anticheat::FileAuditRule {
+            path: "stdlib/crypto/ed25519.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[
+                "ed25519_public_key_hex",
+                "ed25519_sign_hex",
+                "ed25519_verify_hex",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &["2147483647", "host_spawn_eval"],
+            forbidden_string_substrings: &[
+                "openssl",
+                "libsodium",
+                "libcrypto",
+                "crypto.sign",
+                "crypto.verify",
+            ],
+        },
+        anticheat::FileAuditRule {
+            path: "stdlib/core/reactive.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[
+                "rx_graph_new",
+                "rx_source",
+                "rx_derived",
+                "rx_set",
+                "rx_read",
+                "rx_recompute_count",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &["host_spawn_eval"],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "stdlib/core/effects.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[
+                "effect_store_new",
+                "effect_store_put",
+                "effect_store_get",
+                "effect_sandbox_begin",
+                "effect_sandbox_put",
+                "effect_sandbox_delete",
+                "effect_sandbox_get",
+                "effect_sandbox_rollback",
+                "effect_sandbox_commit",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &["host_spawn_eval"],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "stdlib/http/http.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["http_get", "http_post", "http_header_get"],
+            required_code_markers: &["tcp_connect", "tcp_send", "tcp_recv"],
+            forbidden_code_markers: &["host_spawn_eval"],
+            forbidden_string_substrings: &["curl", "urllib", "requests"],
+        },
+        anticheat::FileAuditRule {
+            path: "stdlib/polyglot/shm.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["create_shm_owned_buffer", "project_shm_borrowed_view"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "stdlib/polyglot/marshal.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[
+                "json_parse",
+                "json_get_str",
+                "json_get_int",
+                "json_get_bool",
+                "json_array_len",
+                "json_stringify",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &["host_spawn_eval"],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "stdlib/polyglot/bridge.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["polyglot_eval_json"],
+            required_code_markers: &["host_spawn_eval"],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "stdlib/db/sql_engine.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["sql_db_new", "sql_exec"],
+            required_code_markers: &[],
+            forbidden_code_markers: &["host_spawn_eval"],
+            forbidden_string_substrings: &["sqlite3", "libsqlite", "item_"],
+        },
+        anticheat::FileAuditRule {
+            path: "stdlib/db/postgres_wire.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[
+                "pg_encode_startup_hex",
+                "pg_decode_startup_info",
+                "pg_encode_query_hex",
+                "pg_decode_query_sql",
+                "pg_encode_data_row_hex",
+                "pg_decode_data_row_pipe",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &["host_spawn_eval"],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "stdlib/db/mysql_wire.pilot",
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &["mysql_encode_com_query_hex", "mysql_decode_com_query"],
+            required_code_markers: &[],
+            forbidden_code_markers: &["host_spawn_eval"],
+            forbidden_string_substrings: &[],
+        },
+    ],
+    required_group_pub_fns: &[],
+};
+
 struct SplitMix64 {
     state: u64,
 }
@@ -450,6 +623,10 @@ fn flip_hex_bit(hex_str: &str, byte_idx: usize, bit_mask: u8) -> String {
 
 #[test]
 fn test_58_1_ffi_bindgen_clang_c11_header_and_rt_getrandom_dlopen() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_58_1_ffi_bindgen_clang_c11_header_and_rt_getrandom_dlopen",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
 
@@ -552,10 +729,15 @@ fn test_58_1_ffi_bindgen_clang_c11_header_and_rt_getrandom_dlopen() {
         String::from_utf8_lossy(&clang_out.stderr),
         hdr
     );
+    guard.finish();
 }
 
 #[test]
 fn test_58_2a_sha256_sha512_blake3_and_hmac_randomized_boundary_oracles() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_58_2a_sha256_sha512_blake3_and_hmac_randomized_boundary_oracles",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
     let hash_src = std::fs::read_to_string(root.join("stdlib/crypto/hash.pilot"))
@@ -613,10 +795,15 @@ fn test_58_2a_sha256_sha512_blake3_and_hmac_randomized_boundary_oracles() {
         assert_eq!(parts[3], exp_hms, "HMAC-SHA256 (short key) mismatch at byte length {}", m.len());
         assert_eq!(parts[4], exp_hml, "HMAC-SHA256 (long >64B key) mismatch at byte length {}", m.len());
     }
+    guard.finish();
 }
 
 #[test]
 fn test_58_2b_ed25519_rfc8032_bidirectional_node_oracle_and_malleability_rejection() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_58_2b_ed25519_rfc8032_bidirectional_node_oracle_and_malleability_rejection",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
     let hash_src = std::fs::read_to_string(root.join("stdlib/crypto/hash.pilot"))
@@ -697,10 +884,15 @@ fn test_58_2b_ed25519_rfc8032_bidirectional_node_oracle_and_malleability_rejecti
         cols[6], "PASS",
         "Ed25519 external verification or forgery/S+L malleability rejection failed"
     );
+    guard.finish();
 }
 
 #[test]
 fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
 
@@ -940,10 +1132,15 @@ fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() {
         "Invalid HTTP/1.1 POST wire request:\n{}",
         reqs[1]
     );
+    guard.finish();
 }
 
 #[test]
 fn test_58_4a_shm_bounds_json_marshal_and_polyglot_python_node_bridges() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_58_4a_shm_bounds_json_marshal_and_polyglot_python_node_bridges",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
 
@@ -1026,10 +1223,15 @@ fn test_58_4a_shm_bounds_json_marshal_and_polyglot_python_node_bridges() {
         ((v_a + v_b) * 3).to_string(),
         "Node polyglot bridge evaluation mismatch"
     );
+    guard.finish();
 }
 
 #[test]
 fn test_58_4b_relational_sql_sqlite3_oracle_and_postgres_mysql_binary_wire_frames() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_58_4b_relational_sql_sqlite3_oracle_and_postgres_mysql_binary_wire_frames",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
 
@@ -1193,10 +1395,15 @@ print(json.dumps(select_outputs))
     assert_eq!(segs[4], format!("{}|{}", dr_c0, dr_c1), "PostgreSQL v3 DataRow >256B decode mismatch");
     assert_eq!(segs[5], exp_my_q_hex, "MySQL COM_QUERY 3-byte LE binary frame mismatch");
     assert_eq!(segs[6], format!("{}|{}", my_seq, long_sql), "MySQL COM_QUERY decode mismatch");
+    guard.finish();
 }
 
 #[test]
 fn test_58_5_legacy_polyglot_crypto_deleted_and_strict_rust_loc_caps() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_58_5_legacy_polyglot_crypto_deleted_and_strict_rust_loc_caps",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     assert!(
         !root.join("crates/pilot-polyglot").exists(),
@@ -1244,4 +1451,5 @@ fn test_58_5_legacy_polyglot_crypto_deleted_and_strict_rust_loc_caps() {
         }
     }
     assert!(ffi_lines <= 300, "crates/pilot-ffi/src total LOC ({}) must be <= 300", ffi_lines);
+    guard.finish();
 }

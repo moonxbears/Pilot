@@ -60,6 +60,81 @@ use pilot_parser::parse;
 use pilot_rt::PilotVal;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
+#[path = "common/anticheat.rs"]
+mod anticheat;
+
+const CST_GROUP: &[&str] = &["selfhost/cst/cst.pilot", "selfhost/cst/cst_parser.pilot"];
+
+const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
+    milestone_id: 53,
+    test_file_rel: "crates/pilot-analysis/tests/milestone53_cst_recovery_and_formatter.rs",
+    expected_test_count: 3,
+    files: &[
+        anticheat::FileAuditRule {
+            path: "selfhost/cst/cst.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/cst/cst_parser.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &["parse_lossless_cst"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/cst/incremental.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &["incremental_reparse_cst"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/cst/cst_recovery.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[
+                "suggest_keyword_typo",
+                "is_stmt_sync_anchor",
+                "is_decl_sync_anchor",
+            ],
+            required_code_markers: &["query_registered_symbols", "nameof("],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/fmt/fmt.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[
+                "format_pilot_with_width",
+                "format_pilot_source",
+                "verify_format_idempotent",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+    ],
+    required_group_pub_fns: &[
+        ("cst_node_kind", CST_GROUP),
+        ("cst_child_count", CST_GROUP),
+        ("cst_child_at", CST_GROUP),
+        ("cst_node_text", CST_GROUP),
+        ("cst_detect_missing_ident", CST_GROUP),
+        ("cst_detect_missing_rparen", CST_GROUP),
+        ("cst_detect_missing_rbrace", CST_GROUP),
+    ],
+};
+
 struct Rng(u64);
 
 impl Rng {
@@ -163,6 +238,10 @@ fn run_with_registry(modules: &[&str], tail_src: &str, reg_setup: impl FnOnce(&m
 
 #[test]
 fn test_53_1_hierarchical_lossless_cst_and_green_node_incremental_reuse() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_53_1_hierarchical_lossless_cst_and_green_node_incremental_reuse",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5301);
     let cst_src = read_ws("selfhost/cst/cst.pilot");
     let par_src = read_ws("selfhost/cst/cst_parser.pilot");
@@ -274,10 +353,15 @@ fn test_53_1_hierarchical_lossless_cst_and_green_node_incremental_reuse() {
             trial, out
         );
     }
+    guard.finish();
 }
 
 #[test]
 fn test_53_2_live_dynamic_keyword_typo_recovery_beyond_u128_and_recovery_markers() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_53_2_live_dynamic_keyword_typo_recovery_beyond_u128_and_recovery_markers",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5302);
     let rec_src = read_ws("selfhost/cst/cst_recovery.pilot");
     let par_src = read_ws("selfhost/cst/cst_parser.pilot");
@@ -390,10 +474,15 @@ fn test_53_2_live_dynamic_keyword_typo_recovery_beyond_u128_and_recovery_markers
             trial
         );
     }
+    guard.finish();
 }
 
 #[test]
 fn test_53_3_and_53_4_wadler_lindig_width_formatter_semantic_parity_and_crate_purge() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_53_3_and_53_4_wadler_lindig_width_formatter_semantic_parity_and_crate_purge",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5303);
     let fmt_src = read_ws("selfhost/fmt/fmt.pilot");
 
@@ -500,4 +589,5 @@ fn test_53_3_and_53_4_wadler_lindig_width_formatter_semantic_parity_and_crate_pu
     assert!(!root.join("crates/pilot-fmt").exists(), "crates/pilot-fmt must be deleted");
     let cargo_toml = read_ws("Cargo.toml");
     assert!(!cargo_toml.contains("pilot-syntax") && !cargo_toml.contains("pilot-fmt"));
+    guard.finish();
 }

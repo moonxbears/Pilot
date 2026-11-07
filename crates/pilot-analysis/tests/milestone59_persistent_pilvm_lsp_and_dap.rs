@@ -78,6 +78,122 @@ use pilot_parser::parse;
 use pilot_span::LineIndex;
 use pilot_vm::{BytecodeCompiler, Opcode, PilVirtualMachine};
 
+#[path = "common/anticheat.rs"]
+mod anticheat;
+
+const DAP_BANNED_MOCKS: &[&str] = &["Apples", "production_cluster_db", "7fff2000"];
+
+const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
+    milestone_id: 59,
+    test_file_rel: "crates/pilot-analysis/tests/milestone59_persistent_pilvm_lsp_and_dap.rs",
+    expected_test_count: 3,
+    files: &[
+        anticheat::FileAuditRule {
+            path: "selfhost/ide/vscode_gen.pilot",
+            max_lines: 1000,
+            name_blind: true,
+            required_pub_fns: &[
+                "dumps_tm_language",
+                "dumps_package_json",
+                "dumps_language_configuration",
+                "dumps_snippets",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &["fs_read_text"],
+            forbidden_string_substrings: &[
+                "bool|usize|i8",
+                "BUILTIN_DOCS",
+                "KEYWORD_DOCS",
+                "e:/Pilot",
+            ],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/lsp/handlers.pilot",
+            max_lines: 1000,
+            name_blind: true,
+            required_pub_fns: &[],
+            required_code_markers: &["lsp_query_method", "lsp_set_result", "nameof("],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &["bool|usize|i8", "BUILTIN_DOCS", "STR_METHOD_DOCS"],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/lsp/ide_db.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &["apply_doc_span_edit", "should_early_cutoff"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &[],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/lsp/server.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[
+                "encode_lsp_frame",
+                "lsp_session_new",
+                "lsp_session_feed_stream",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &["resident_pilvm_lsp"],
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/dap/vm_controller.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &["should_pause_at_pc"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: DAP_BANNED_MOCKS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/dap/cli_dbg.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &["parse_cli_dbg_action", "parse_cli_dbg_arg"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: DAP_BANNED_MOCKS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/dap/inspector.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[
+                "format_register_variable_json",
+                "inspect_struct_fields_json",
+            ],
+            required_code_markers: &["layout_field_offset"],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: DAP_BANNED_MOCKS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/dap/repl_eval.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &["eval_dap_watch_expr", "format_dap_evaluate_response"],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: DAP_BANNED_MOCKS,
+        },
+        anticheat::FileAuditRule {
+            path: "selfhost/dap/server.pilot",
+            max_lines: 1500,
+            name_blind: true,
+            required_pub_fns: &[
+                "encode_dap_frame",
+                "build_dap_stack_trace_frame",
+                "route_dap_command",
+            ],
+            required_code_markers: &[],
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: DAP_BANNED_MOCKS,
+        },
+    ],
+    required_group_pub_fns: &[],
+};
+
 struct SplitMix64 {
     state: u64,
 }
@@ -225,6 +341,10 @@ fn run_lsp_handler_query(target_doc: &str, handlers_src: &str, method: &str, off
 
 #[test]
 fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matrix() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matrix",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
 
@@ -405,10 +525,15 @@ fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matrix() 
         helper_fn,
         prep_user
     );
+    guard.finish();
 }
 
 #[test]
 fn test_59_2_incremental_span_edits_adversarial_early_cutoff_and_persistent_lsp_stream() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_59_2_incremental_span_edits_adversarial_early_cutoff_and_persistent_lsp_stream",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
 
@@ -537,10 +662,15 @@ fn test_59_2_incremental_span_edits_adversarial_early_cutoff_and_persistent_lsp_
         live_fn_v2,
         frames[1]
     );
+    guard.finish();
 }
 
 #[test]
 fn test_59_3_and_59_4_live_vmhook_dap_stepping_watch_eval_inspector_and_5_crate_purge() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_59_3_and_59_4_live_vmhook_dap_stepping_watch_eval_inspector_and_5_crate_purge",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
 
@@ -798,4 +928,5 @@ fn test_59_3_and_59_4_live_vmhook_dap_stepping_watch_eval_inspector_and_5_crate_
         "Name-Blind PhysicsRegistry struct field offset inspection expected offsets 0, 8, 16, got:\n{}",
         cols[5]
     );
+    guard.finish();
 }

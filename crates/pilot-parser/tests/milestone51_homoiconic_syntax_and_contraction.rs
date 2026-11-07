@@ -38,6 +38,52 @@ use pilot_ast::{
 use pilot_intern::SymbolId;
 use pilot_parser::{parse, parse_and_ingest, ParserTables};
 
+#[path = "../../pilot-analysis/tests/common/anticheat.rs"]
+mod anticheat;
+
+macro_rules! syntax_rule {
+    ($path:expr, $req:expr) => {
+        anticheat::FileAuditRule {
+            path: $path,
+            max_lines: 1500,
+            name_blind: false,
+            required_pub_fns: &[],
+            required_code_markers: $req,
+            forbidden_code_markers: &[],
+            forbidden_string_substrings: &["*void", "0b00 (IValue)"],
+        }
+    };
+}
+
+const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
+    milestone_id: 51,
+    test_file_rel: "crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs",
+    expected_test_count: 4,
+    files: &[
+        syntax_rule!("stdlib/core/syntax/type_construct.pilot", &["syntax", "type_construct", "quote"]),
+        syntax_rule!("stdlib/core/syntax/visibility.pilot", &["register_modifier", "nameof("]),
+        syntax_rule!("stdlib/core/syntax/scope_header.pilot", &["nameof("]),
+        syntax_rule!("stdlib/core/syntax/attribute.pilot", &["quote"]),
+        syntax_rule!("stdlib/core/syntax/lifecycle.pilot", &["nameof("]),
+        syntax_rule!("stdlib/core/syntax/properties.pilot", &["nameof("]),
+        syntax_rule!("stdlib/core/syntax/module_ext.pilot", &["nameof("]),
+        syntax_rule!("stdlib/core/syntax/for.pilot", &["nameof("]),
+        syntax_rule!("stdlib/core/syntax/while.pilot", &["syntax", "quote", "loop"]),
+        syntax_rule!("stdlib/core/syntax/until.pilot", &["syntax", "quote", "loop"]),
+        syntax_rule!("stdlib/core/syntax/switch.pilot", &["nameof("]),
+        syntax_rule!("stdlib/core/syntax/guard.pilot", &["nameof("]),
+        syntax_rule!("stdlib/core/syntax/try_catch.pilot", &["nameof("]),
+        syntax_rule!("stdlib/core/syntax/expr_sugar.pilot", &["__engine"]),
+        syntax_rule!("stdlib/core/syntax/unit_decl.pilot", &["unit"]),
+        syntax_rule!("stdlib/db/sql_syntax.pilot", &["nameof("]),
+        syntax_rule!("stdlib/polyglot/polyglot_syntax.pilot", &["nameof("]),
+        syntax_rule!("stdlib/realtime/rt_syntax.pilot", &["nameof("]),
+        syntax_rule!("stdlib/asyncio/select_syntax.pilot", &["nameof("]),
+        syntax_rule!("stdlib/contracts/contracts_syntax.pilot", &["nameof("]),
+    ],
+    required_group_pub_fns: &[],
+};
+
 struct Rng(u64);
 
 impl Rng {
@@ -263,6 +309,10 @@ fn eval_node(arena: &AstArena, id: NodeId, env: &mut HashMap<String, i64>) -> Fl
 
 #[test]
 fn test_51_1_randomized_type_construct_precedence_and_executable_homoiconic_macros() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_51_1_randomized_type_construct_precedence_and_executable_homoiconic_macros",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5101_ABCD);
 
     // 1. Verify full Pratt type precedence (`Postfix 30 > Intersection 20 > Union 15 > Arrow 10 > Fallible 5`)
@@ -419,10 +469,15 @@ fn test_51_1_randomized_type_construct_precedence_and_executable_homoiconic_macr
             );
         }
     }
+    guard.finish();
 }
 
 #[test]
 fn test_51_2_surface_syntax_distributive_headers_call_quotes_and_diagnostics() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_51_2_surface_syntax_distributive_headers_call_quotes_and_diagnostics",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5102_DEAD);
     let fn_fast = rng.ident("fast_op");
     let struct_w = format!(
@@ -551,10 +606,15 @@ fn test_51_2_surface_syntax_distributive_headers_call_quotes_and_diagnostics() {
             legacy
         );
     }
+    guard.finish();
 }
 
 #[test]
 fn test_51_3_domain_syntax_packages_and_strict_nameof_hygiene() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_51_3_domain_syntax_packages_and_strict_nameof_hygiene",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
 
     let domain_src = r#"
@@ -658,10 +718,15 @@ fn test_51_3_domain_syntax_packages_and_strict_nameof_hygiene() {
             }
         }
     }
+    guard.finish();
 }
 
 #[test]
 fn test_51_4_rust_parser_and_ast_contraction_and_name_blind_purity() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_51_4_rust_parser_and_ast_contraction_and_name_blind_purity",
+        &ANTICHEAT_SPEC,
+    );
     let root = workspace_root();
     assert_eq!(std::mem::size_of::<AstNode>(), 16);
 
@@ -704,4 +769,5 @@ fn test_51_4_rust_parser_and_ast_contraction_and_name_blind_purity() {
         !root.join("selfhost/scope_header.pilot").exists(),
         "Superseded selfhost/scope_header.pilot must remain deleted"
     );
+    guard.finish();
 }

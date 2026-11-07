@@ -21,6 +21,25 @@ use pilot_lexer::{tokenize, TokenFlags, TokenKind};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[path = "../../pilot-analysis/tests/common/anticheat.rs"]
+mod anticheat;
+
+const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
+    milestone_id: 52,
+    test_file_rel: "crates/pilot-lexer/tests/milestone52_seed_lexer_and_preprocessor.rs",
+    expected_test_count: 4,
+    files: &[anticheat::FileAuditRule {
+        path: "selfhost/preprocessor.pilot",
+        max_lines: 1500,
+        name_blind: false,
+        required_pub_fns: &[],
+        required_code_markers: &["PREPROC001"],
+        forbidden_code_markers: &[],
+        forbidden_string_substrings: &[],
+    }],
+    required_group_pub_fns: &[],
+};
+
 struct Rng(u64);
 
 impl Rng {
@@ -66,6 +85,10 @@ fn ws_root() -> PathBuf {
 
 #[test]
 fn test_52_2_strict_14_seed_keywords_and_randomized_ident_boundary() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_52_2_strict_14_seed_keywords_and_randomized_ident_boundary",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5201);
     let seeds = [
         ("__engine", TokenKind::KwEngine),
@@ -141,10 +164,15 @@ fn test_52_2_strict_14_seed_keywords_and_randomized_ident_boundary() {
         assert_eq!(tape.kind(0), TokenKind::Ident);
         assert!(!tape.kind(0).is_keyword());
     }
+    guard.finish();
 }
 
 #[test]
 fn test_52_2_two_way_dot_call_quotes_and_nested_bracket_matching() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_52_2_two_way_dot_call_quotes_and_nested_bracket_matching",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5202);
 
     // 1. Two-way dot (`InfixDot` vs `PrefixDot`)
@@ -260,10 +288,15 @@ fn test_52_2_two_way_dot_call_quotes_and_nested_bracket_matching() {
         }
         assert!(open_count >= 8);
     }
+    guard.finish();
 }
 
 #[test]
 fn test_52_3_name_blind_unit_suffixes_fstrings_and_keywords_randomized() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_52_3_name_blind_unit_suffixes_fstrings_and_keywords_randomized",
+        &ANTICHEAT_SPEC,
+    );
     let mut rng = Rng::new(0x5203);
     for _ in 0..8 {
         let u1 = rng.alpha_word(4);
@@ -301,10 +334,15 @@ fn test_52_3_name_blind_unit_suffixes_fstrings_and_keywords_randomized() {
         assert_eq!(interp_tokens, vec![(TokenKind::StrLit, "f\"v={a}\"".to_string())]);
         assert_eq!(kw_lits, vec![format!(":{}/{}", ns, kw)]);
     }
+    guard.finish();
 }
 
 #[test]
 fn test_52_4_contraction_caps_and_legacy_deletion_invariants() {
+    let guard = anticheat::AntiCheatGuard::arm(
+        "test_52_4_contraction_caps_and_legacy_deletion_invariants",
+        &ANTICHEAT_SPEC,
+    );
     let workspace_root = ws_root();
 
     assert!(
@@ -390,4 +428,5 @@ fn test_52_4_contraction_caps_and_legacy_deletion_invariants() {
             line
         );
     }
+    guard.finish();
 }
