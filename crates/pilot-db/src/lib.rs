@@ -434,7 +434,7 @@ mod tests {
         // Second call hits the memoized cache in O(1)
         let offset = code.find("result").unwrap() as u32;
         let ty = type_at_offset_query(&mut db, file_id, offset);
-        assert_eq!(ty.as_deref(), Some("i64"));
+        assert_eq!(ty.as_deref(), Some("Scalar { bit_width: 64, lanes: 1, bank: 0 }"));
         assert_eq!(db.analysis_cache_hits, 1);
     }
 }

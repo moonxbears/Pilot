@@ -212,14 +212,22 @@ pub struct DeclModifiers {
     pub is_ext: bool,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ScopeHeader {
+    pub mods: DeclModifiers,
+    pub attrs: Vec<AstAttribute>,
+    pub return_type: NodeId,
+    pub is_fn: bool,
+}
+
 pub struct Parser<'a> {
     src: &'a str,
     tape: TokenTape,
     pos: usize,
     pub arena: AstArena,
     pub errors: Vec<String>,
-    pub active_header: Option<DeclModifiers>,
-    pub header_stack: Vec<Option<DeclModifiers>>,
+    pub active_header: Option<ScopeHeader>,
+    pub header_stack: Vec<Option<ScopeHeader>>,
     pub tables: ParserTables,
     pub top_children: Vec<NodeId>,
 }
@@ -944,33 +952,34 @@ impl<'a> Parser<'a> {
             }
         }
 
-        if let Some(active) = self.active_header {
+        if let Some(ref active) = self.active_header {
+            let active_mods = active.mods;
             if vis.is_none() {
-                vis = active.vis;
+                vis = active_mods.vis;
             }
             if clearance.is_none() {
-                clearance = active.clearance;
+                clearance = active_mods.clearance;
             }
             if clearance_expr.is_none() {
-                clearance_expr = active.clearance_expr;
+                clearance_expr = active_mods.clearance_expr;
             }
             if !is_static {
-                is_static = active.is_static;
+                is_static = active_mods.is_static;
             }
             if !is_pure {
-                is_pure = active.is_pure;
+                is_pure = active_mods.is_pure;
             }
             if !is_mut {
-                is_mut = active.is_mut;
+                is_mut = active_mods.is_mut;
             }
             if !is_partial {
-                is_partial = active.is_partial;
+                is_partial = active_mods.is_partial;
             }
             if !is_comptime {
-                is_comptime = active.is_comptime;
+                is_comptime = active_mods.is_comptime;
             }
             if !is_ext {
-                is_ext = active.is_ext;
+                is_ext = active_mods.is_ext;
             }
         }
 
@@ -1156,20 +1165,56 @@ impl<'a> Parser<'a> {
         clauses
     }
 
-    fn try_parse_decl_header(&mut self) -> bool {
+    fn try_parse_decl_header(&mut self, attrs: Vec<AstAttribute>) -> bool {
         let mut p = self.pos;
         let mut count = 0;
+        let mut is_fn = false;
+        let mut has_arrow = false;
         while p < self.tape.len() {
             let k = self.tape.kind(p);
             if k == TokenKind::Colon {
-                if count > 0 && p + 1 < self.tape.len() && self.tape.kind(p + 1) != TokenKind::Colon {
+                if (count > 0 || is_fn || has_arrow || !attrs.is_empty()) && p + 1 < self.tape.len() && self.tape.kind(p + 1) != TokenKind::Colon {
                     let mods = self.parse_modifiers();
+                    if self.at(TokenKind::KwFn) || (self.is_ident_like() && self.text() == "fn") {
+                        self.advance();
+                    }
+                    let ret_type = if self.at(TokenKind::Arrow) {
+                        self.advance();
+                        self.parse_type()
+                    } else {
+                        self.header_stack.last().and_then(|h| h.as_ref()).map(|h| h.return_type).unwrap_or(NodeId::NONE)
+                    };
                     self.expect(TokenKind::Colon);
                     self.consume_semi_or_newlines();
-                    self.active_header = Some(mods);
+                    let mut scope_attrs = self.header_stack.last().and_then(|h| h.as_ref()).map(|h| h.attrs.clone()).unwrap_or_default();
+                    for a in attrs {
+                        if !scope_attrs.iter().any(|sa| sa.name == a.name) {
+                            scope_attrs.push(a);
+                        }
+                    }
+                    self.active_header = Some(ScopeHeader {
+                        mods,
+                        attrs: scope_attrs,
+                        return_type: ret_type,
+                        is_fn,
+                    });
                     return true;
                 }
                 break;
+            }
+            if k == TokenKind::Arrow {
+                has_arrow = true;
+                p += 1;
+                while p < self.tape.len() && self.tape.kind(p) != TokenKind::Colon && self.tape.kind(p) != TokenKind::Semicolon && self.tape.kind(p) != TokenKind::LBrace {
+                    p += 1;
+                }
+                continue;
+            }
+            if k == TokenKind::KwFn || (k == TokenKind::Ident && self.tape.text(p, self.src) == "fn") {
+                is_fn = true;
+                count += 1;
+                p += 1;
+                continue;
             }
             if k == TokenKind::Ident || self.tape.flag(p).contains(TokenFlags::IS_KEYWORD) {
                 let t = self.tape.text(p, self.src);
@@ -1364,16 +1409,32 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_stmt_or_decl(&mut self) -> NodeId {
-        let attrs = self.parse_attributes();
-        let node = self.parse_stmt_or_decl_inner();
-        if node.is_some() && !attrs.is_empty() {
-            self.arena.node_attributes.entry(node.0).or_default().extend(attrs);
+        let local_attrs = self.parse_attributes();
+        let node = self.parse_stmt_or_decl_inner(local_attrs.clone());
+        if node.is_some() {
+            let mut final_attrs = Vec::new();
+            if let Some(ref header) = self.active_header {
+                for ha in &header.attrs {
+                    if !local_attrs.iter().any(|la| la.name == ha.name) {
+                        final_attrs.push(ha.clone());
+                    }
+                }
+            }
+            final_attrs.extend(local_attrs);
+            if !final_attrs.is_empty() {
+                let entry = self.arena.node_attributes.entry(node.0).or_default();
+                for a in final_attrs {
+                    if !entry.iter().any(|ea| ea.name == a.name) {
+                        entry.push(a);
+                    }
+                }
+            }
         }
         node
     }
 
-    fn parse_stmt_or_decl_inner(&mut self) -> NodeId {
-        if self.try_parse_decl_header() {
+    fn parse_stmt_or_decl_inner(&mut self, attrs: Vec<AstAttribute>) -> NodeId {
+        if self.try_parse_decl_header(attrs.clone()) {
             return NodeId::NONE;
         }
 
@@ -1394,8 +1455,19 @@ impl<'a> Parser<'a> {
             let start_span = self.span();
             self.advance(); // consume 'struct'
             self.advance(); // consume '{'
-            self.header_stack.push(self.active_header);
-            self.active_header = Some(mods);
+            self.header_stack.push(self.active_header.clone());
+            let mut block_attrs = self.active_header.as_ref().map(|h| h.attrs.clone()).unwrap_or_default();
+            for a in attrs {
+                if !block_attrs.iter().any(|ba| ba.name == a.name) {
+                    block_attrs.push(a);
+                }
+            }
+            self.active_header = Some(ScopeHeader {
+                mods,
+                attrs: block_attrs,
+                return_type: NodeId::NONE,
+                is_fn: false,
+            });
             let mut children = Vec::new();
             while !self.at_end() && !self.at(TokenKind::RBrace) {
                 self.consume_semi_or_newlines();
@@ -1414,8 +1486,14 @@ impl<'a> Parser<'a> {
                 };
                 if s_node.is_some() {
                     self.apply_decl_mods(s_node, item_mods, Some(VisibilityTier::Internal));
-                    if !item_attrs.is_empty() {
-                        self.arena.node_attributes.entry(s_node.0).or_default().extend(item_attrs);
+                    let mut effective_attrs = self.active_header.as_ref().map(|h| h.attrs.clone()).unwrap_or_default();
+                    for a in item_attrs {
+                        if !effective_attrs.iter().any(|ea| ea.name == a.name) {
+                            effective_attrs.push(a);
+                        }
+                    }
+                    if !effective_attrs.is_empty() {
+                        self.arena.node_attributes.entry(s_node.0).or_default().extend(effective_attrs);
                     }
                     children.push(s_node);
                 }
@@ -1437,8 +1515,19 @@ impl<'a> Parser<'a> {
             let start_span = self.span();
             self.advance(); // consume 'interface'
             self.advance(); // consume '{'
-            self.header_stack.push(self.active_header);
-            self.active_header = Some(mods);
+            self.header_stack.push(self.active_header.clone());
+            let mut block_attrs = self.active_header.as_ref().map(|h| h.attrs.clone()).unwrap_or_default();
+            for a in attrs {
+                if !block_attrs.iter().any(|ba| ba.name == a.name) {
+                    block_attrs.push(a);
+                }
+            }
+            self.active_header = Some(ScopeHeader {
+                mods,
+                attrs: block_attrs,
+                return_type: NodeId::NONE,
+                is_fn: false,
+            });
             let mut children = Vec::new();
             while !self.at_end() && !self.at(TokenKind::RBrace) {
                 self.consume_semi_or_newlines();
@@ -1457,10 +1546,132 @@ impl<'a> Parser<'a> {
                 };
                 if i_node.is_some() {
                     self.apply_decl_mods(i_node, item_mods, Some(VisibilityTier::Internal));
-                    if !item_attrs.is_empty() {
-                        self.arena.node_attributes.entry(i_node.0).or_default().extend(item_attrs);
+                    let mut effective_attrs = self.active_header.as_ref().map(|h| h.attrs.clone()).unwrap_or_default();
+                    for a in item_attrs {
+                        if !effective_attrs.iter().any(|ea| ea.name == a.name) {
+                            effective_attrs.push(a);
+                        }
+                    }
+                    if !effective_attrs.is_empty() {
+                        self.arena.node_attributes.entry(i_node.0).or_default().extend(effective_attrs);
                     }
                     children.push(i_node);
+                }
+                if self.pos == start_pos {
+                    self.advance();
+                }
+                self.consume_semi_or_newlines();
+            }
+            self.expect(TokenKind::RBrace);
+            self.active_header = self.header_stack.pop().unwrap_or(None);
+            return self.arena.alloc_list_node(
+                NodeKind::BlockExpr,
+                0,
+                ByteSpan::new(start_span.start, self.prev_span().end),
+                &children,
+            );
+        }
+
+        let is_fn_kw = self.at(TokenKind::KwFn) || (self.is_ident_like() && self.text() == "fn");
+        if is_fn_kw && (self.peek_ahead(1) == TokenKind::LBrace || self.peek_ahead(1) == TokenKind::Arrow) {
+            let start_span = self.span();
+            self.advance(); // consume 'fn'
+            let ret_type = if self.at(TokenKind::Arrow) {
+                self.advance();
+                self.parse_type()
+            } else {
+                self.active_header.as_ref().map(|h| h.return_type).unwrap_or(NodeId::NONE)
+            };
+            self.expect(TokenKind::LBrace);
+            self.header_stack.push(self.active_header.clone());
+            let mut block_attrs = self.active_header.as_ref().map(|h| h.attrs.clone()).unwrap_or_default();
+            for a in attrs {
+                if !block_attrs.iter().any(|ba| ba.name == a.name) {
+                    block_attrs.push(a);
+                }
+            }
+            self.active_header = Some(ScopeHeader {
+                mods,
+                attrs: block_attrs,
+                return_type: ret_type,
+                is_fn: true,
+            });
+            let mut children = Vec::new();
+            while !self.at_end() && !self.at(TokenKind::RBrace) {
+                self.consume_semi_or_newlines();
+                if self.at(TokenKind::RBrace) || self.at_end() {
+                    break;
+                }
+                let start_pos = self.pos;
+                let item_attrs = self.parse_attributes();
+                let item_mods = self.parse_modifiers();
+                let fn_child = if self.at(TokenKind::KwFn) || (self.is_ident_like() && self.text() == "fn") {
+                    self.parse_fn_decl()
+                } else if self.is_ident_like() || self.peek().is_keyword() {
+                    self.parse_fn_decl_headless(item_mods.is_mut, item_mods.is_static)
+                } else {
+                    self.parse_stmt_or_decl()
+                };
+                if fn_child.is_some() {
+                    self.apply_decl_mods(fn_child, item_mods, Some(VisibilityTier::Internal));
+                    let mut effective_attrs = self.active_header.as_ref().map(|h| h.attrs.clone()).unwrap_or_default();
+                    for a in item_attrs {
+                        if !effective_attrs.iter().any(|ea| ea.name == a.name) {
+                            effective_attrs.push(a);
+                        }
+                    }
+                    if !effective_attrs.is_empty() {
+                        let entry = self.arena.node_attributes.entry(fn_child.0).or_default();
+                        for a in effective_attrs {
+                            if !entry.iter().any(|ea| ea.name == a.name) {
+                                entry.push(a);
+                            }
+                        }
+                    }
+                    children.push(fn_child);
+                }
+                if self.pos == start_pos {
+                    self.advance();
+                }
+                self.consume_semi_or_newlines();
+            }
+            self.expect(TokenKind::RBrace);
+            self.active_header = self.header_stack.pop().unwrap_or(None);
+            return self.arena.alloc_list_node(
+                NodeKind::BlockExpr,
+                0,
+                ByteSpan::new(start_span.start, self.prev_span().end),
+                &children,
+            );
+        }
+
+        let has_mods = mods.vis.is_some() || mods.clearance.is_some() || mods.is_static || mods.is_pure || mods.is_mut || mods.is_partial || mods.is_comptime || mods.is_ext;
+        if (has_mods || !attrs.is_empty()) && self.at(TokenKind::LBrace) {
+            let start_span = self.span();
+            self.advance(); // consume '{'
+            self.header_stack.push(self.active_header.clone());
+            let mut block_attrs = self.active_header.as_ref().map(|h| h.attrs.clone()).unwrap_or_default();
+            for a in attrs {
+                if !block_attrs.iter().any(|ba| ba.name == a.name) {
+                    block_attrs.push(a);
+                }
+            }
+            self.active_header = Some(ScopeHeader {
+                mods,
+                attrs: block_attrs,
+                return_type: NodeId::NONE,
+                is_fn: false,
+            });
+            let mut children = Vec::new();
+            while !self.at_end() && !self.at(TokenKind::RBrace) {
+                self.consume_semi_or_newlines();
+                if self.at(TokenKind::RBrace) || self.at_end() {
+                    break;
+                }
+                let start_pos = self.pos;
+                let child = self.parse_stmt_or_decl();
+                if child.is_some() {
+                    children.push(child);
                 }
                 if self.pos == start_pos {
                     self.advance();
@@ -1846,8 +2057,16 @@ impl<'a> Parser<'a> {
             }
         }
 
-        if self.at(TokenKind::KwFn) || (self.is_ident_like() && self.text() == "fn") {
-            let fn_node = self.parse_fn_decl_modifiers(is_mut, is_static);
+        if (self.at(TokenKind::KwFn) || (self.is_ident_like() && self.text() == "fn"))
+            || (self.active_header.as_ref().map(|h| h.is_fn).unwrap_or(false)
+                && self.is_ident_like()
+                && self.peek_ahead(1) == TokenKind::LParen)
+        {
+            let fn_node = if self.at(TokenKind::KwFn) || (self.is_ident_like() && self.text() == "fn") {
+                self.parse_fn_decl_modifiers(is_mut, is_static)
+            } else {
+                self.parse_fn_decl_headless(is_mut, is_static)
+            };
             let vis = vis_opt.unwrap_or(VisibilityTier::Private);
             self.arena.node_visibility.insert(fn_node.0, vis);
             if let Some(c) = clr_opt {
@@ -2825,6 +3044,10 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::Arrow) {
             self.advance();
             ret_type_node = self.parse_type();
+        } else if let Some(ref header) = self.active_header {
+            if header.return_type.is_some() {
+                ret_type_node = header.return_type;
+            }
         }
 
         self.consume_semi_or_newlines();
@@ -4705,7 +4928,7 @@ impl<'a> Parser<'a> {
             ));
         }
 
-        self.header_stack.push(self.active_header);
+        self.header_stack.push(self.active_header.clone());
         let mut children = Vec::new();
         while !self.at_end() && !self.at(TokenKind::RBrace) && !self.at(TokenKind::VirtualRBrace) {
             self.consume_semi_or_newlines();
@@ -7173,5 +7396,84 @@ mod tests {
         let arena = p.parse_program();
         assert!(p.errors.is_empty(), "Switch and C# closures must parse without errors: {:?}", p.errors);
         assert!(arena.nodes.len() > 10);
+    }
+
+    #[test]
+    fn test_distributive_scoped_attributes_and_return_types() {
+        // 1. Distributive struct block with attributes & visibility
+        let code1 = r#"
+            [JsonObject] pub struct {
+                User { id: i64 },
+                Session { token: str },
+            }
+        "#;
+        let mut p1 = Parser::new(code1, tokenize(code1));
+        let a1 = p1.parse_program();
+        assert!(p1.errors.is_empty(), "Errors in code1: {:?}", p1.errors);
+        let block1_id = a1.children_slice(a1.node(a1.root).lhs, a1.node(a1.root).rhs)[0];
+        let blk_node1 = a1.node(NodeId(block1_id));
+        let struct_ids = a1.children_slice(blk_node1.lhs, blk_node1.rhs);
+        assert_eq!(struct_ids.len(), 2);
+        for &s_id in struct_ids {
+            let attrs = a1.node_attributes.get(&s_id).expect("struct must inherit attribute");
+            assert!(attrs.iter().any(|a| a1.interner.resolve(a.name) == "JsonObject"));
+            assert_eq!(a1.node_visibility.get(&s_id), Some(&VisibilityTier::Public));
+        }
+
+        // 2. Distributive section label with attributes and return type
+        let code2 = r#"
+            [Inline] pub fn -> i64:
+                zero() => 0;
+                one() => 1;
+        "#;
+        let mut p2 = Parser::new(code2, tokenize(code2));
+        let a2 = p2.parse_program();
+        assert!(p2.errors.is_empty(), "Errors in code2: {:?}", p2.errors);
+        let fn_ids = a2.children_slice(a2.node(a2.root).lhs, a2.node(a2.root).rhs);
+        assert_eq!(fn_ids.len(), 2);
+        for &f_id in fn_ids {
+            let attrs = a2.node_attributes.get(&f_id).expect("fn must inherit attribute");
+            assert!(attrs.iter().any(|a| a2.interner.resolve(a.name) == "Inline"));
+            assert_eq!(a2.node_visibility.get(&f_id), Some(&VisibilityTier::Public));
+            assert!(a2.type_annotations.contains_key(&f_id), "fn must inherit return type annotation");
+        }
+
+        // 3. Distributive fn block with return type
+        let code3 = r#"
+            pub fn -> f64 {
+                square(x: f64) => x * x;
+                hypot(x: f64, y: f64) => x;
+            }
+        "#;
+        let mut p3 = Parser::new(code3, tokenize(code3));
+        let a3 = p3.parse_program();
+        assert!(p3.errors.is_empty(), "Errors in code3: {:?}", p3.errors);
+        let block3_id = a3.children_slice(a3.node(a3.root).lhs, a3.node(a3.root).rhs)[0];
+        let blk_node3 = a3.node(NodeId(block3_id));
+        let fn3_ids = a3.children_slice(blk_node3.lhs, blk_node3.rhs);
+        assert_eq!(fn3_ids.len(), 2);
+        for &f_id in fn3_ids {
+            assert!(a3.type_annotations.contains_key(&f_id), "fn in fn block must inherit return type annotation");
+        }
+
+        // 4. Distributive general block
+        let code4 = r#"
+            [Serializable] pub {
+                struct Msg { id: i64 }
+                fn ping() => 1;
+            }
+        "#;
+        let mut p4 = Parser::new(code4, tokenize(code4));
+        let a4 = p4.parse_program();
+        assert!(p4.errors.is_empty(), "Errors in code4: {:?}", p4.errors);
+        let block4_id = a4.children_slice(a4.node(a4.root).lhs, a4.node(a4.root).rhs)[0];
+        let blk_node4 = a4.node(NodeId(block4_id));
+        let item4_ids = a4.children_slice(blk_node4.lhs, blk_node4.rhs);
+        assert_eq!(item4_ids.len(), 2);
+        for &id in item4_ids {
+            let attrs = a4.node_attributes.get(&id).expect("item must inherit Serializable attribute");
+            assert!(attrs.iter().any(|a| a4.interner.resolve(a.name) == "Serializable"));
+            assert_eq!(a4.node_visibility.get(&id), Some(&VisibilityTier::Public));
+        }
     }
 }
