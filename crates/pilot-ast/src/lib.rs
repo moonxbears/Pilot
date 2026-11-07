@@ -1,7 +1,7 @@
 //! 16-Byte Cache-Packed Flat `AstArena` & Grammar Invariants (`pilot-ast`).
 //! Every `AstNode` is strictly **16 bytes**, `Copy`, and pointer-free; zero `HashMap`s exist on `AstArena`.
 
-use pilot_intern::{Interner, KeywordId, SymbolId};
+use pilot_intern::{Interner, SymbolId};
 use pilot_span::ByteSpan;
 
 #[repr(transparent)]
@@ -284,7 +284,7 @@ impl AstArena {
         let sym = self.interner.intern(value); self.alloc_node(NodeKind::StrLit, 0, span, sym.0, 0)
     }
     #[inline] pub fn alloc_keyword(&mut self, raw_kw: &str, span: ByteSpan) -> NodeId {
-        let kw: KeywordId = self.interner.intern_keyword(raw_kw); self.alloc_node(NodeKind::KeywordLit, 0, span, kw.0, 0)
+        let sym = self.interner.intern(raw_kw.strip_prefix(':').unwrap_or(raw_kw)); self.alloc_node(NodeKind::KeywordLit, 0, span, sym.0, 0)
     }
     #[inline] pub fn alloc_polyglot_block(&mut self, lang: &str, code: &str, flags: u16, span: ByteSpan) -> NodeId {
         let (l, c) = (self.interner.intern(lang), self.interner.intern(code));
@@ -342,9 +342,7 @@ impl AstArena {
             NodeKind::StrLit => out.push_str(&format!("(Str {:?})", self.interner.resolve(SymbolId(n.lhs)))),
             NodeKind::NoneLit => out.push_str("(None)"),
             NodeKind::KeywordLit => {
-                if let Some(kw) = self.interner.resolve_keyword(KeywordId(n.lhs)) {
-                    out.push_str("(Kw :"); out.push_str(self.interner.resolve(kw.raw_symbol)); out.push(')');
-                } else { out.push_str("(Kw :?)"); }
+                out.push_str("(Kw :"); out.push_str(self.interner.resolve(SymbolId(n.lhs))); out.push(')');
             }
             NodeKind::ImportDecl | NodeKind::FnDecl | NodeKind::TypeAdtDecl
             | NodeKind::StructDecl | NodeKind::InterfaceDecl | NodeKind::ExtendDecl => {

@@ -230,14 +230,14 @@ flowchart TD
 ---
 
 ### Milestone 52: 14-Token Seed Lexer Contraction & Preprocessor Migration
-- **Status**: 🔲 Planned
+- **Status**: ✅ Completed
 - **Goal**: Shrink `crates/pilot-lexer` from `2,003` lines to `~856` lines and `crates/pilot-intern` from `218` lines to `~155` lines, enforcing the strict 14-seed-token boundary at the lexical layer.
 - **Deliverables**:
-  - [ ] **52.1: 100% Pilot Conditional Preprocessor (`selfhost/preprocessor.pilot`, `~320L`)**: Migrate `#define`, `#undef`, `#if`/`#elif`/`#else`/`#endif`, `#region`/`#endregion`, `#error`, `#warning`, and `#pragma warning` (`PREPROC001`–`PREPROC008`) into `selfhost/preprocessor.pilot`.
-  - [ ] **52.2: Strip ~176 Non-Seed `Kw*` Variants (`pilot-lexer/src/token.rs` & `keywords.rs`)**: Retain strictly the 14 `Kw*` seed variants + raw literals/operators/delimiters.
-  - [ ] **52.3: Unit Suffixes, `f"..."` Splicing & `:ns/kw` Receptors in Pilot**: Replace hardcoded `"ns"`..`"TB"` suffixes in `lexer.rs` with generic adjacent-ident flag handled by `stdlib/core/syntax/unit_decl.pilot` (`~140L`); implement `f"..."` brace interpolation in `stdlib/core/syntax/fstring.pilot` (`~120L`); move `:ns/kw` namespace splitting from `pilot-intern` to `stdlib/core/keywords.pilot` (`~60L`).
-  - [ ] **52.4: Legacy Lexer, Preprocessor & Interner Cleanup**: Delete `crates/pilot-lexer/src/preproc.rs` (`397L`) outright; delete all ~176 non-seed `TokenKind::Kw*` variants (`KwDef`, `KwMut`, `KwMatch`, `KwClass`, `KwRecord`, `KwElif`, `KwLambda`, 50+ SQL/domain `Kw*`, `DurationLit`, `FrequencyLit`, `MemoryLit`, `VirtualLBrace`, `VirtualRBrace`) from `token.rs` and `keywords.rs`; delete process-global `DYNAMIC_KEYWORDS` `RwLock`; delete hardcoded unit-suffix chains and `$"..."`/`f"..."` lexer special cases from `lexer.rs`; delete `:ns/kw` splitting helpers and `"SliceBuffer"`/`"RangeWindow"` test literals from `crates/pilot-intern/src/lib.rs`; scrub prohibited `#` comments from `selfhost/preprocessor.pilot`.
-- **Verification Gate**: `pilot-lexer` total `<= 900` LOC; `preproc.rs` deleted; `TokenKind` contains exactly 14 keyword variants and zero legacy virtual-indent or domain token kinds.
+  - [x] **52.1: 100% Pilot Conditional Preprocessor (`selfhost/preprocessor.pilot`, `~320L`)**: Migrate `#define`, `#undef`, `#if`/`#elif`/`#else`/`#endif`, `#region`/`#endregion`, `#error`, `#warning`, and `#pragma warning` (`PREPROC001`–`PREPROC008`) into `selfhost/preprocessor.pilot`.
+  - [x] **52.2: Strip ~176 Non-Seed `Kw*` Variants (`pilot-lexer/src/token.rs` & `keywords.rs`)**: Retain strictly the 14 `Kw*` seed variants + raw literals/operators/delimiters.
+  - [x] **52.3: Unit Suffixes, `f"..."` Splicing & `:ns/kw` Receptors in Pilot**: Replace hardcoded `"ns"`..`"TB"` suffixes in `lexer.rs` with generic adjacent-ident flag handled by `stdlib/core/syntax/unit_decl.pilot` (`~140L`); implement `f"..."` brace interpolation in `stdlib/core/syntax/fstring.pilot` (`~120L`); move `:ns/kw` namespace splitting from `pilot-intern` to `stdlib/core/keywords.pilot` (`~60L`).
+  - [x] **52.4: Legacy Lexer, Preprocessor & Interner Cleanup**: Delete `crates/pilot-lexer/src/preproc.rs` (`397L`) outright; delete all ~176 non-seed `TokenKind::Kw*` variants (`KwDef`, `KwMut`, `KwMatch`, `KwClass`, `KwRecord`, `KwElif`, `KwLambda`, 50+ SQL/domain `Kw*`, `DurationLit`, `FrequencyLit`, `MemoryLit`, `VirtualLBrace`, `VirtualRBrace`) from `token.rs` and `keywords.rs`; delete process-global `DYNAMIC_KEYWORDS` `RwLock`; delete hardcoded unit-suffix chains and `$"..."`/`f"..."` lexer special cases from `lexer.rs`; delete `:ns/kw` splitting helpers and `"SliceBuffer"`/`"RangeWindow"` test literals from `crates/pilot-intern/src/lib.rs`; scrub prohibited `#` comments from `selfhost/preprocessor.pilot`.
+- **Verification Gate**: `pilot-lexer` total `<= 900` LOC (`854` LOC); `pilot-intern/src/lib.rs <= 165` LOC (`146` LOC); `preproc.rs` deleted; `TokenKind` contains strictly 14 keyword variants and zero legacy virtual-indent or domain token kinds.
 
 ---
 

@@ -827,3 +827,59 @@ pub partial struct {
     [KeywordDefAttr(37, "CoW transactional dry-run effect plan projection (!?).")]
     call_quote_plan {}
 }
+
+// =========================================================================
+// 4. HIERARCHICAL `:ns/kw` KEYWORD LITERAL RECEPTORS & SPLITTING
+// =========================================================================
+
+[Layout(c_abi)]
+pub struct KeywordDescriptor : IValue {
+    pub namespace: str;
+    pub name:      str;
+}
+
+pub fn keyword_strip_colon(raw: str) -> str {
+    let n = raw.len();
+    if n > 0 && raw.byte_at(0) == 58 {
+        return raw.slice(1, n);
+    }
+    return raw;
+}
+
+pub fn keyword_slash_index(stripped: str) -> i64 {
+    let n = stripped.len();
+    var i = 0;
+    while i < n {
+        if stripped.byte_at(i) == 47 {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+pub fn keyword_namespace(raw: str) -> str {
+    let stripped = keyword_strip_colon(raw);
+    let slash_idx = keyword_slash_index(stripped);
+    if slash_idx > 0 {
+        return stripped.slice(0, slash_idx);
+    }
+    return "";
+}
+
+pub fn keyword_name(raw: str) -> str {
+    let stripped = keyword_strip_colon(raw);
+    let slash_idx = keyword_slash_index(stripped);
+    if slash_idx >= 0 {
+        return stripped.slice(slash_idx + 1, stripped.len());
+    }
+    return stripped;
+}
+
+pub fn keyword_split(raw: str) -> KeywordDescriptor {
+    return KeywordDescriptor {
+        namespace: keyword_namespace(raw),
+        name:      keyword_name(raw),
+    };
+}
+

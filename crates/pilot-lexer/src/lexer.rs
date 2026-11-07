@@ -1,626 +1,419 @@
-//! Milestone 29.3, 29.4 & 29.5: Modal Lexer, Indentation Desugaring & Delimiter Linking.
+//! Milestone 29.3 & 52: Single-Pass Name-Blind Seed Lexer.
+//!
+//! Emits a Struct-of-Arrays `TokenTape` recognizing strictly the 14 hardware seed keywords,
+//! raw atomic literals (with name-blind `TokenFlags::IS_DIMENSIONAL` and `IS_INTERPOLATED`),
+//! two-way dot (`InfixDot` vs `PrefixDot`), and 6 homoiconic call-quote projections.
 
 use pilot_span::ByteSpan;
 use crate::keywords::lookup_keyword;
-use crate::preproc::{Preprocessor, PreprocessorOptions, PreprocessorResult};
-use crate::simd::*;
+use crate::simd::{
+    scan_ident_run, scan_quoted_string_end, scan_to_block_comment_end,
+    scan_to_newline, scan_triple_string_end, scan_whitespace_run,
+};
 use crate::token::{TokenFlags, TokenKind, TokenTape};
 
 pub struct Lexer<'a> {
-    src: &'a str,
+    source: &'a str,
     bytes: &'a [u8],
-    cursor: usize,
+    pos: usize,
     tape: TokenTape,
-    preproc: PreprocessorResult,
-    inactive_cursor: usize,
-
-    // Delimiter nesting state (suppresses indentation inside (), [], {})
-    paren_depth: u32,
-    bracket_depth: u32,
-    brace_depth: u32,
-
-    // Balanced delimiter stack for O(1) bracket_links
-    bracket_stack: Vec<(TokenKind, u32)>,
+    open_brackets: Vec<(TokenKind, u32)>,
+    last_token_can_precede_infix_dot: bool,
+    preceded_by_ws: bool,
+    preceded_by_nl: bool,
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(src: &'a str, options: PreprocessorOptions) -> Self {
-        let preproc = Preprocessor::new(options).process(src);
+    pub fn new(source: &'a str) -> Self {
+        let est_tokens = (source.len() / 4).max(16);
         Self {
-            src,
-            bytes: src.as_bytes(),
-            cursor: 0,
-            tape: TokenTape::with_capacity(src.len() / 4 + 32),
-            preproc,
-            inactive_cursor: 0,
-            paren_depth: 0,
-            bracket_depth: 0,
-            brace_depth: 0,
-            bracket_stack: Vec::new(),
+            source,
+            bytes: source.as_bytes(),
+            pos: 0,
+            tape: TokenTape::with_capacity(est_tokens),
+            open_brackets: Vec::with_capacity(32),
+            last_token_can_precede_infix_dot: false,
+            preceded_by_ws: true,
+            preceded_by_nl: true,
         }
     }
 
-    /// Tokenizes the entire source, populating and returning the SoA `TokenTape`.
     pub fn tokenize(mut self) -> TokenTape {
-        while self.cursor < self.bytes.len() {
-            // Check if cursor is within an inactive span from the preprocessor
-            if self.skip_inactive_if_any() {
-                continue;
-            }
-
-
-            let start = self.cursor;
-            let b = self.bytes[start];
-
-            // 1. Newlines and Line Starts (Pythonic Indentation Handling)
-            if b == b'\n' || (b == b'\r' && start + 1 < self.bytes.len() && self.bytes[start + 1] == b'\n') {
-                let nl_len = if b == b'\r' { 2 } else { 1 };
-                self.cursor += nl_len;
-                self.handle_newline_and_indentation(start as u32, (start + nl_len) as u32);
-                continue;
-            }
-
-            // 2. Whitespace run
-            let ws_len = scan_whitespace_run(self.bytes, self.cursor);
+        while self.pos < self.bytes.len() {
+            let ws_len = scan_whitespace_run(self.bytes, self.pos);
             if ws_len > 0 {
-                self.cursor += ws_len;
+                self.pos += ws_len;
+                self.preceded_by_ws = true;
+                continue;
+            }
+            if self.pos >= self.bytes.len() {
+                break;
+            }
+
+            let start = self.pos;
+            let b0 = self.bytes[start];
+            let b1 = self.peek_at(start + 1);
+            let b2 = self.peek_at(start + 2);
+
+            if b0 == b'\n' {
+                self.pos += 1;
+                self.emit(TokenKind::Newline, TokenFlags::NONE, start, self.pos, false);
+                self.preceded_by_ws = true;
+                self.preceded_by_nl = true;
                 continue;
             }
 
-            // 3. Comments (// line comments or /* ... */ block comments)
-            if b == b'/' && start + 1 < self.bytes.len() {
-                if self.bytes[start + 1] == b'/' {
-                    let end = scan_to_newline(self.bytes, self.cursor);
-                    let span = ByteSpan::new(start as u32, end as u32);
-                    self.cursor = end;
-                    self.push_token(TokenKind::Comment, TokenFlags::NONE, span);
-                    continue;
-                } else if self.bytes[start + 1] == b'*' {
-                    let end = scan_to_block_comment_end(self.bytes, self.cursor + 2);
-                    let span = ByteSpan::new(start as u32, end as u32);
-                    self.cursor = end;
-                    self.push_token(TokenKind::BlockComment, TokenFlags::NONE, span);
-                    continue;
-                }
+            // Comments & Stage-0 Preprocessor Directive Lines (`//`, `/* ... */`, `#...`)
+            if b0 == b'#' {
+                let kind = if start == 0 && b1 == b'!' { TokenKind::Shebang } else { TokenKind::Comment };
+                let end = scan_to_newline(self.bytes, start + 1);
+                self.pos = end;
+                self.emit(kind, TokenFlags::NONE, start, end, false);
+                continue;
             }
-
-            // 4. Raw DSL Blocks: ```lang ... ```
-            if b == b'`' && start + 2 < self.bytes.len() && self.bytes[start + 1] == b'`' && self.bytes[start + 2] == b'`' {
-                let mut end = start + 3;
-                while end + 2 < self.bytes.len() {
-                    if self.bytes[end] == b'`' && self.bytes[end + 1] == b'`' && self.bytes[end + 2] == b'`' {
-                        end += 3;
-                        break;
-                    }
-                    end += 1;
-                }
-                let span = ByteSpan::new(start as u32, end as u32);
-                self.cursor = end;
-                self.push_token(TokenKind::RawDslBlock, TokenFlags::NONE, span);
+            if b0 == b'/' && b1 == b'/' && b2 != b'=' {
+                let end = scan_to_newline(self.bytes, start + 2);
+                self.pos = end;
+                self.emit(TokenKind::Comment, TokenFlags::NONE, start, end, false);
+                continue;
+            }
+            if b0 == b'/' && b1 == b'*' {
+                let end = scan_to_block_comment_end(self.bytes, start + 2);
+                self.pos = end;
+                self.emit(TokenKind::BlockComment, TokenFlags::NONE, start, end, false);
                 continue;
             }
 
-            // 4b. Backtick Raw Identifiers: `type`, `fn`, `struct`
-            if b == b'`' && start + 1 < self.bytes.len() && self.bytes[start + 1] != b'`' {
-                let mut end = start + 1;
-                while end < self.bytes.len() && self.bytes[end] != b'`' && self.bytes[end] != b'\n' && self.bytes[end] != b'\r' {
-                    end += 1;
+            // Prefixed strings (`f"..."`, `r"..."`, `b"..."`)
+            if (b0 == b'f' || b0 == b'F' || b0 == b'r' || b0 == b'R' || b0 == b'b' || b0 == b'B')
+                && (b1 == b'"' || b1 == b'\'')
+            {
+                let mut extra = TokenFlags::NONE;
+                if b0 == b'f' || b0 == b'F' {
+                    extra.insert(TokenFlags::IS_INTERPOLATED);
+                } else if b0 == b'r' || b0 == b'R' {
+                    extra.insert(TokenFlags::IS_RAW_STRING);
                 }
-                if end < self.bytes.len() && self.bytes[end] == b'`' && end > start + 1 {
-                    let span = ByteSpan::new(start as u32, (end + 1) as u32);
-                    self.cursor = end + 1;
-                    self.push_token(TokenKind::Ident, TokenFlags::NONE, span);
-                    continue;
-                }
-            }
-
-            // 5. Triple Strings (""" or ''')
-            if (b == b'"' || b == b'\'') && start + 2 < self.bytes.len() && self.bytes[start + 1] == b && self.bytes[start + 2] == b {
-                let end = scan_triple_string_end(self.bytes, start + 3, b);
-                let span = ByteSpan::new(start as u32, end as u32);
-                self.cursor = end;
-                self.push_token(TokenKind::TripleStrLit, TokenFlags::NONE, span);
+                self.scan_string_literal(start, start + 1, b1, extra);
                 continue;
             }
 
-            // 6. F-Strings: f"..." or f'...'
-            if (b == b'f' || b == b'F') && start + 1 < self.bytes.len() && (self.bytes[start + 1] == b'"' || self.bytes[start + 1] == b'\'') {
-                self.scan_fstring(start, self.bytes[start + 1]);
+            // Standard or triple-quoted strings (`"..."`, `"""..."""`)
+            if b0 == b'"' || b0 == b'\'' {
+                self.scan_string_literal(start, start, b0, TokenFlags::NONE);
                 continue;
             }
 
-            // 7. Regular Strings: "..." or '...'
-            if b == b'"' || b == b'\'' {
-                let end_quote = scan_quoted_string_end(self.bytes, start + 1, b);
-                let end = if end_quote < self.bytes.len() && self.bytes[end_quote] == b { end_quote + 1 } else { end_quote };
-                let span = ByteSpan::new(start as u32, end as u32);
-                self.cursor = end;
-                self.push_token(TokenKind::StrLit, TokenFlags::NONE, span);
-                continue;
-            }
-
-            // 8. Call-Quoting Projections (Invariant #1 & M17):
-            // Emit CallQuote* IF AND ONLY IF immediately followed by `(` with zero intervening whitespace
-            if b == b'!' {
-                if self.try_scan_call_quote(start).is_some() {
-                    continue;
-                }
-            }
-
-            // 9. Numeric and Dimensional Literals (Int, Hex, Bin, Oct, Float, Duration, Frequency, Memory)
-            if b >= b'0' && b <= b'9' {
+            // Numeric & Name-Blind Dimensional Literals (`42`, `0xFF`, `3.14`, `250ms`, `64KB`)
+            if b0.is_ascii_digit() {
                 self.scan_number_or_dimension(start);
                 continue;
             }
 
-            // 10. First-Class Keywords (:ns/kw or :kw)
-            if b == b':' && start + 1 < self.bytes.len() && (self.bytes[start + 1].is_ascii_alphabetic() || self.bytes[start + 1] == b'_') {
-                let mut end = start + 1;
-                while end < self.bytes.len() {
-                    let c = self.bytes[end];
-                    if c.is_ascii_alphanumeric() || c == b'_' || c == b'/' {
-                        end += 1;
+            // Hierarchical `:ns/kw` Keyword Literals vs `:` / `::` / `:=` / `:=:`
+            if b0 == b':' {
+                if b1 == b':' {
+                    self.pos += 2;
+                    self.emit(TokenKind::DoubleColon, TokenFlags::NONE, start, self.pos, false);
+                    continue;
+                }
+                if b1 == b'=' {
+                    if b2 == b':' {
+                        self.pos += 3;
+                        self.emit(TokenKind::SwapEqual, TokenFlags::NONE, start, self.pos, false);
                     } else {
-                        break;
+                        self.pos += 2;
+                        self.emit(TokenKind::Walrus, TokenFlags::NONE, start, self.pos, false);
                     }
+                    continue;
                 }
-                let span = ByteSpan::new(start as u32, end as u32);
-                self.cursor = end;
-                self.push_token(TokenKind::KeywordLit, TokenFlags::NONE, span);
+                if (b1.is_ascii_alphabetic() || b1 == b'_') && self.preceded_by_ws {
+                    let mut end = start + 1 + scan_ident_run(self.bytes, start + 1);
+                    if self.peek_at(end) == b'/' {
+                        let ns_part = scan_ident_run(self.bytes, end + 1);
+                        if ns_part > 0 {
+                            end += 1 + ns_part;
+                        }
+                    }
+                    self.pos = end;
+                    self.emit(TokenKind::KeywordLit, TokenFlags::NONE, start, end, true);
+                    continue;
+                }
+                self.pos += 1;
+                self.emit(TokenKind::Colon, TokenFlags::NONE, start, self.pos, false);
                 continue;
             }
 
-            // 11. Identifiers and Keywords
-            if (b >= b'a' && b <= b'z') || (b >= b'A' && b <= b'Z') || b == b'_' {
-                let id_len = scan_ident_run(self.bytes, start);
-                let end = start + id_len;
-                let ident = &self.src[start..end];
-                let span = ByteSpan::new(start as u32, end as u32);
-                self.cursor = end;
+            // Identifiers & The 14 Hardware Seed Keywords
+            if b0.is_ascii_alphabetic() || b0 == b'_' {
+                let len = scan_ident_run(self.bytes, start);
+                let end = start + len;
+                let ident_str = &self.source[start..end];
+                let kind = lookup_keyword(ident_str).unwrap_or(TokenKind::Ident);
+                self.pos = end;
+                let can_infix = matches!(kind, TokenKind::Ident | TokenKind::KwEngine);
+                self.emit(kind, TokenFlags::NONE, start, end, can_infix);
+                continue;
+            }
 
-                if let Some((kw_kind, is_ctx)) = lookup_keyword(ident) {
-                    let mut flags = TokenFlags::IS_KEYWORD;
-                    if is_ctx {
-                        flags.insert(TokenFlags::IS_CONTEXTUAL_IDENT);
-                    }
-                    self.push_token(kw_kind, flags, span);
+            // Homoiconic Call-Quoting Projections (`!(`, `!!(`, `!&(`, `!^(`, `!@(`, `!?(`, `!=`, `!`)
+            if b0 == b'!' {
+                if b1 == b'=' {
+                    self.pos += 2;
+                    self.emit(TokenKind::NotEqual, TokenFlags::NONE, start, self.pos, false);
+                    continue;
+                }
+                if b1 == b'(' {
+                    self.pos += 1;
+                    self.emit(TokenKind::CallQuoteShallow, TokenFlags::FOLLOWED_BY_LPAREN, start, self.pos, false);
+                    continue;
+                }
+                let cq = match (b1, b2) {
+                    (b'!', b'(') => Some(TokenKind::CallQuoteDeep),
+                    (b'&', b'(') => Some(TokenKind::CallQuoteAbi),
+                    (b'^', b'(') => Some(TokenKind::CallQuoteReact),
+                    (b'@', b'(') => Some(TokenKind::CallQuoteAdjoint),
+                    (b'?', b'(') => Some(TokenKind::CallQuoteEffect),
+                    _ => None,
+                };
+                if let Some(kind) = cq {
+                    self.pos += 2;
+                    self.emit(kind, TokenFlags::FOLLOWED_BY_LPAREN, start, self.pos, false);
+                    continue;
+                }
+                self.pos += 1;
+                self.emit(TokenKind::Exclamation, TokenFlags::NONE, start, self.pos, true);
+                continue;
+            }
+
+            // Dots & Ranges (`.`, `..`, `..=`, `..<`, `...`)
+            if b0 == b'.' {
+                if b1 == b'.' {
+                    let (kind, adv) = match b2 {
+                        b'=' => (TokenKind::DotDotEqual, 3),
+                        b'<' => (TokenKind::DotDotLess, 3),
+                        b'.' => (TokenKind::Ellipsis, 3),
+                        _ => (TokenKind::DotDot, 2),
+                    };
+                    self.pos += adv;
+                    self.emit(kind, TokenFlags::NONE, start, self.pos, false);
+                    continue;
+                }
+                self.pos += 1;
+                let dot_kind = if !self.preceded_by_ws && !self.preceded_by_nl && self.last_token_can_precede_infix_dot {
+                    TokenKind::InfixDot
                 } else {
-                    self.push_token(TokenKind::Ident, TokenFlags::NONE, span);
-                }
+                    TokenKind::PrefixDot
+                };
+                self.emit(dot_kind, TokenFlags::NONE, start, self.pos, false);
                 continue;
             }
 
-            // 12. Multi-character and Single-character Operators and Delimiters
-            self.scan_operator_or_delimiter(start);
+            self.scan_operator_or_delimiter(start, b0, b1, b2);
         }
 
-
-        let eof_span = ByteSpan::new(self.cursor as u32, self.cursor as u32);
-        self.push_token(TokenKind::Eof, TokenFlags::NONE, eof_span);
-
+        let eof_pos = self.bytes.len();
+        self.emit(TokenKind::Eof, TokenFlags::NONE, eof_pos, eof_pos, false);
         self.tape
     }
 
-    fn skip_inactive_if_any(&mut self) -> bool {
-        while self.inactive_cursor < self.preproc.inactive_spans.len() {
-            let span = self.preproc.inactive_spans[self.inactive_cursor];
-            if (self.cursor as u32) < span.start {
-                break;
-            }
-            if (self.cursor as u32) < span.end {
-                self.cursor = span.end as usize;
-                return true;
-            }
-            self.inactive_cursor += 1;
+    fn scan_string_literal(&mut self, token_start: usize, quote_pos: usize, quote: u8, extra_flags: TokenFlags) {
+        if self.peek_at(quote_pos + 1) == quote && self.peek_at(quote_pos + 2) == quote {
+            let end = scan_triple_string_end(self.bytes, quote_pos + 3, quote);
+            self.pos = end;
+            self.emit(TokenKind::TripleStrLit, extra_flags, token_start, end, true);
+        } else {
+            let close_idx = scan_quoted_string_end(self.bytes, quote_pos + 1, quote);
+            let end = if close_idx < self.bytes.len() && self.bytes[close_idx] == quote {
+                close_idx + 1
+            } else {
+                close_idx
+            };
+            self.pos = end;
+            self.emit(TokenKind::StrLit, extra_flags, token_start, end, true);
         }
-        false
     }
 
-    fn push_token(&mut self, kind: TokenKind, flags: TokenFlags, span: ByteSpan) {
-        let idx = self.tape.push(kind, flags, span);
+    fn scan_number_or_dimension(&mut self, start: usize) {
+        let b0 = self.bytes[start];
+        let b1 = self.peek_at(start + 1);
+        let mut cur = start;
+        let mut kind = TokenKind::IntLit;
 
-        // Update balanced delimiter jump table (O(1) bracket_links)
-        if kind.is_delimiter_open() {
-            self.bracket_stack.push((kind, idx));
-        } else if kind.is_delimiter_close() {
-            if let Some((open_kind, open_idx)) = self.bracket_stack.pop() {
-                if open_kind.matching_delimiter() == Some(kind) {
+        if b0 == b'0' && (b1 == b'x' || b1 == b'X') {
+            kind = TokenKind::HexIntLit;
+            cur += 2;
+            while cur < self.bytes.len() && (self.bytes[cur].is_ascii_hexdigit() || self.bytes[cur] == b'_') {
+                cur += 1;
+            }
+        } else if b0 == b'0' && (b1 == b'b' || b1 == b'B') {
+            kind = TokenKind::BinIntLit;
+            cur += 2;
+            while cur < self.bytes.len() && (self.bytes[cur] == b'0' || self.bytes[cur] == b'1' || self.bytes[cur] == b'_') {
+                cur += 1;
+            }
+        } else if b0 == b'0' && (b1 == b'o' || b1 == b'O') {
+            kind = TokenKind::OctIntLit;
+            cur += 2;
+            while cur < self.bytes.len() && ((self.bytes[cur] >= b'0' && self.bytes[cur] <= b'7') || self.bytes[cur] == b'_') {
+                cur += 1;
+            }
+        } else {
+            while cur < self.bytes.len() && (self.bytes[cur].is_ascii_digit() || self.bytes[cur] == b'_') {
+                cur += 1;
+            }
+            if cur + 1 < self.bytes.len() && self.bytes[cur] == b'.' && self.bytes[cur + 1].is_ascii_digit() {
+                kind = TokenKind::FloatLit;
+                cur += 1;
+                while cur < self.bytes.len() && (self.bytes[cur].is_ascii_digit() || self.bytes[cur] == b'_') {
+                    cur += 1;
+                }
+            }
+            if cur < self.bytes.len() && (self.bytes[cur] == b'e' || self.bytes[cur] == b'E') {
+                let next_e = self.peek_at(cur + 1);
+                if next_e.is_ascii_digit() || ((next_e == b'+' || next_e == b'-') && self.peek_at(cur + 2).is_ascii_digit()) {
+                    kind = TokenKind::FloatLit;
+                    cur += if next_e == b'+' || next_e == b'-' { 2 } else { 1 };
+                    while cur < self.bytes.len() && (self.bytes[cur].is_ascii_digit() || self.bytes[cur] == b'_') {
+                        cur += 1;
+                    }
+                }
+            }
+        }
+
+        // Name-blind dimensional unit suffix check (`250ms`, `2.4GHz`, `64KB`, `100mol`, etc.):
+        // Any adjacent non-seed alphabetic identifier run marks `TokenFlags::IS_DIMENSIONAL`.
+        let mut flags = TokenFlags::NONE;
+        if (kind == TokenKind::IntLit || kind == TokenKind::FloatLit)
+            && cur < self.bytes.len()
+            && self.bytes[cur].is_ascii_alphabetic()
+        {
+            let unit_len = scan_ident_run(self.bytes, cur);
+            if unit_len > 0 && lookup_keyword(&self.source[cur..cur + unit_len]).is_none() {
+                cur += unit_len;
+                flags.insert(TokenFlags::IS_DIMENSIONAL);
+            }
+        }
+
+        self.pos = cur;
+        self.emit(kind, flags, start, cur, true);
+    }
+
+    fn scan_operator_or_delimiter(&mut self, start: usize, b0: u8, b1: u8, b2: u8) {
+        let (kind, len, can_infix_dot) = match (b0, b1, b2) {
+            (b'(', _, _) => (TokenKind::LParen, 1, false),
+            (b')', _, _) => (TokenKind::RParen, 1, true),
+            (b'[', _, _) => (TokenKind::LBracket, 1, false),
+            (b']', _, _) => (TokenKind::RBracket, 1, true),
+            (b'{', _, _) => (TokenKind::LBrace, 1, false),
+            (b'}', _, _) => (TokenKind::RBrace, 1, true),
+            (b';', _, _) => (TokenKind::Semicolon, 1, false),
+            (b',', _, _) => (TokenKind::Comma, 1, false),
+            (b'$', _, _) => (TokenKind::Dollar, 1, false),
+            (b'~', b'>', _) => (TokenKind::TildeGreater, 2, false),
+            (b'~', _, _) => (TokenKind::Tilde, 1, false),
+            (b'@', b'>', _) => (TokenKind::JsonContains, 2, false),
+            (b'@', _, _) => (TokenKind::At, 1, false),
+            (b'?', b'.', b'.') => (TokenKind::SafeCascade, 3, false),
+            (b'?', b'?', b'=') => (TokenKind::CoalesceEqual, 3, false),
+            (b'?', b'.', _) => (TokenKind::SafeNav, 2, false),
+            (b'?', b'?', _) => (TokenKind::Coalesce, 2, false),
+            (b'?', _, _) => (TokenKind::Question, 1, true),
+            (b'+', b'=', _) => (TokenKind::PlusEqual, 2, false),
+            (b'+', b'|', _) => (TokenKind::PlusPipe, 2, false),
+            (b'+', b'%', _) => (TokenKind::PlusPercent, 2, false),
+            (b'+', b'?', _) => (TokenKind::PlusQuestion, 2, false),
+            (b'+', _, _) => (TokenKind::Plus, 1, false),
+            (b'-', b'>', b'>') => (TokenKind::JsonGetText, 3, false),
+            (b'-', b'>', _) => (TokenKind::Arrow, 2, false),
+            (b'-', b'=', _) => (TokenKind::MinusEqual, 2, false),
+            (b'-', b'|', _) => (TokenKind::MinusPipe, 2, false),
+            (b'-', b'%', _) => (TokenKind::MinusPercent, 2, false),
+            (b'-', b'?', _) => (TokenKind::MinusQuestion, 2, false),
+            (b'-', _, _) => (TokenKind::Minus, 1, false),
+            (b'*', b'*', b'=') => (TokenKind::DoubleStarEqual, 3, false),
+            (b'*', b'.', b'.') => (TokenKind::StarDotDot, 3, false),
+            (b'*', b'*', _) => (TokenKind::DoubleStar, 2, false),
+            (b'*', b'=', _) => (TokenKind::StarEqual, 2, false),
+            (b'*', b'|', _) => (TokenKind::StarPipe, 2, false),
+            (b'*', b'%', _) => (TokenKind::StarPercent, 2, false),
+            (b'*', b'?', _) => (TokenKind::StarQuestion, 2, false),
+            (b'*', _, _) => (TokenKind::Star, 1, false),
+            (b'/', b'/', b'=') => (TokenKind::DoubleSlashEqual, 3, false),
+            (b'/', b'/', _) => (TokenKind::DoubleSlash, 2, false),
+            (b'/', b'=', _) => (TokenKind::SlashEqual, 2, false),
+            (b'/', _, _) => (TokenKind::Slash, 1, false),
+            (b'%', b'%', _) => (TokenKind::DoublePercent, 2, false),
+            (b'%', b'=', _) => (TokenKind::PercentEqual, 2, false),
+            (b'%', _, _) => (TokenKind::Percent, 1, false),
+            (b'&', b'&', _) => (TokenKind::DoubleAmper, 2, false),
+            (b'&', b'=', _) => (TokenKind::AmperEqual, 2, false),
+            (b'&', _, _) => (TokenKind::Amper, 1, false),
+            (b'|', b'|', _) => (TokenKind::DoublePipe, 2, false),
+            (b'|', b'>', _) => (TokenKind::PipeForward, 2, false),
+            (b'|', b'=', _) => (TokenKind::VbarEqual, 2, false),
+            (b'|', _, _) => (TokenKind::Vbar, 1, false),
+            (b'^', b'=', _) => (TokenKind::CaretEqual, 2, false),
+            (b'^', _, _) => (TokenKind::Caret, 1, false),
+            (b'=', b'=', _) => (TokenKind::EqEqual, 2, false),
+            (b'=', b'>', _) => (TokenKind::FatArrow, 2, false),
+            (b'=', _, _) => (TokenKind::Equal, 1, false),
+            (b'<', b'=', b'>') => (TokenKind::Spaceship, 3, false),
+            (b'<', b'<', b'=') => (TokenKind::ShiftLeftEqual, 3, false),
+            (b'<', b'<', _) => (TokenKind::ShiftLeft, 2, false),
+            (b'<', b'=', _) => (TokenKind::LessEqual, 2, false),
+            (b'<', b'-', _) => (TokenKind::ArrowLeft, 2, false),
+            (b'<', b'|', _) => (TokenKind::PipeBackward, 2, false),
+            (b'<', b'@', _) => (TokenKind::JsonContained, 2, false),
+            (b'<', _, _) => (TokenKind::Less, 1, false),
+            (b'>', b'.', b'.') => {
+                if self.peek_at(start + 3) == b'<' {
+                    (TokenKind::GreaterDotDotLess, 4, false)
+                } else {
+                    (TokenKind::GreaterDotDot, 3, false)
+                }
+            }
+            (b'>', b'>', b'=') => (TokenKind::ShiftRightEqual, 3, false),
+            (b'>', b'>', _) => (TokenKind::ShiftRight, 2, false),
+            (b'>', b'=', _) => (TokenKind::GreaterEqual, 2, false),
+            (b'>', _, _) => (TokenKind::Greater, 1, false),
+            _ => (TokenKind::ErrorToken, 1, false),
+        };
+        self.pos = start + len;
+        self.emit(kind, TokenFlags::NONE, start, self.pos, can_infix_dot);
+    }
+
+    #[inline(always)]
+    fn peek_at(&self, idx: usize) -> u8 {
+        if idx < self.bytes.len() { self.bytes[idx] } else { 0 }
+    }
+
+    #[inline]
+    fn emit(&mut self, kind: TokenKind, mut flags: TokenFlags, start: usize, end: usize, can_precede_infix_dot: bool) {
+        if self.preceded_by_ws { flags.insert(TokenFlags::PRECEDED_BY_WS); }
+        if self.preceded_by_nl { flags.insert(TokenFlags::PRECEDED_BY_NEWLINE); }
+        if self.peek_at(end) == b'(' { flags.insert(TokenFlags::FOLLOWED_BY_LPAREN); }
+        let idx = self.tape.push(kind, flags, ByteSpan::new(start as u32, end as u32));
+        match kind {
+            TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => self.open_brackets.push((kind, idx)),
+            TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                let expected = match kind {
+                    TokenKind::RParen => TokenKind::LParen,
+                    TokenKind::RBracket => TokenKind::LBracket,
+                    _ => TokenKind::LBrace,
+                };
+                if let Some(&(_, open_idx)) = self.open_brackets.last().filter(|&&(k, _)| k == expected) {
+                    self.open_brackets.pop();
                     self.tape.bracket_links[open_idx as usize] = idx;
                     self.tape.bracket_links[idx as usize] = open_idx;
                 }
             }
+            _ => {}
         }
-    }
-
-    fn handle_newline_and_indentation(&mut self, nl_start: u32, nl_end: u32) {
-        // If inside (), [], {}, suppress virtual newline
-        if self.paren_depth > 0 || self.bracket_depth > 0 || self.brace_depth > 0 {
-            return;
+        if !matches!(kind, TokenKind::Comment | TokenKind::BlockComment | TokenKind::Newline | TokenKind::Shebang) {
+            self.last_token_can_precede_infix_dot = can_precede_infix_dot;
+            self.preceded_by_ws = false;
+            self.preceded_by_nl = false;
         }
-
-        self.push_token(TokenKind::Newline, TokenFlags::NONE, ByteSpan::new(nl_start, nl_end));
-    }
-
-    fn try_scan_call_quote(&mut self, start: usize) -> Option<()> {
-        let b1 = if start + 1 < self.bytes.len() { self.bytes[start + 1] } else { 0 };
-
-        let (kind, len) = match b1 {
-            b'!' => (TokenKind::CallQuoteDeep, 2),
-            b'&' => (TokenKind::CallQuoteAbi, 2),
-            b'^' => (TokenKind::CallQuoteReact, 2),
-            b'@' => (TokenKind::CallQuoteAdjoint, 2),
-            b'?' => (TokenKind::CallQuoteEffect, 2),
-            _ => (TokenKind::CallQuoteShallow, 1),
-        };
-
-        // Milestone 17 & Invariant #1: Only emit CallQuote* if followed immediately by '(' with zero whitespace
-        if start + len < self.bytes.len() && self.bytes[start + len] == b'(' {
-            let span = ByteSpan::new(start as u32, (start + len) as u32);
-            self.cursor = start + len;
-            self.push_token(kind, TokenFlags::NONE, span);
-            return Some(());
-        }
-
-        None
-    }
-
-    fn scan_number_or_dimension(&mut self, start: usize) {
-        let mut cur = start;
-
-        // Check for Hex (0x), Bin (0b), Oct (0o)
-        if self.bytes[cur] == b'0' && cur + 1 < self.bytes.len() {
-            let spec = self.bytes[cur + 1];
-            if spec == b'x' || spec == b'X' {
-                cur += 2;
-                while cur < self.bytes.len() && (self.bytes[cur].is_ascii_hexdigit() || self.bytes[cur] == b'_') {
-                    cur += 1;
-                }
-                let span = ByteSpan::new(start as u32, cur as u32);
-                self.cursor = cur;
-                self.push_token(TokenKind::HexIntLit, TokenFlags::NONE, span);
-                return;
-            } else if spec == b'b' || spec == b'B' {
-                cur += 2;
-                while cur < self.bytes.len() && (self.bytes[cur] == b'0' || self.bytes[cur] == b'1' || self.bytes[cur] == b'_') {
-                    cur += 1;
-                }
-                let span = ByteSpan::new(start as u32, cur as u32);
-                self.cursor = cur;
-                self.push_token(TokenKind::BinIntLit, TokenFlags::NONE, span);
-                return;
-            } else if spec == b'o' || spec == b'O' {
-                cur += 2;
-                while cur < self.bytes.len() && (self.bytes[cur] >= b'0' && self.bytes[cur] <= b'7' || self.bytes[cur] == b'_') {
-                    cur += 1;
-                }
-                let span = ByteSpan::new(start as u32, cur as u32);
-                self.cursor = cur;
-                self.push_token(TokenKind::OctIntLit, TokenFlags::NONE, span);
-                return;
-            }
-        }
-
-        // Standard decimal integer or float
-        let mut is_float = false;
-        while cur < self.bytes.len() && (self.bytes[cur].is_ascii_digit() || self.bytes[cur] == b'_') {
-            cur += 1;
-        }
-
-        // Check for decimal point not followed by a dot (to avoid consuming `..`)
-        if cur + 1 < self.bytes.len() && self.bytes[cur] == b'.' && self.bytes[cur + 1].is_ascii_digit() {
-            is_float = true;
-            cur += 1;
-            while cur < self.bytes.len() && (self.bytes[cur].is_ascii_digit() || self.bytes[cur] == b'_') {
-                cur += 1;
-            }
-        }
-
-        // Exponent: e.g. 1e-4
-        if cur < self.bytes.len() && (self.bytes[cur] == b'e' || self.bytes[cur] == b'E') {
-            is_float = true;
-            cur += 1;
-            if cur < self.bytes.len() && (self.bytes[cur] == b'+' || self.bytes[cur] == b'-') {
-                cur += 1;
-            }
-            while cur < self.bytes.len() && (self.bytes[cur].is_ascii_digit() || self.bytes[cur] == b'_') {
-                cur += 1;
-            }
-        }
-
-        // Check for physical unit suffix (Duration, Frequency, Memory)
-        let rem = &self.src[cur..];
-        let (dim_kind, dim_len) = if rem.starts_with("ns") {
-            (Some(TokenKind::DurationLit), 2)
-        } else if rem.starts_with("us") || rem.starts_with("ms") {
-            (Some(TokenKind::DurationLit), 2)
-        } else if rem.starts_with("min") {
-            (Some(TokenKind::DurationLit), 3)
-        } else if rem.starts_with('s') && !rem.starts_with("struct") {
-            (Some(TokenKind::DurationLit), 1)
-        } else if rem.starts_with('h') {
-            (Some(TokenKind::DurationLit), 1)
-        } else if rem.starts_with("GHz") || rem.starts_with("MHz") || rem.starts_with("kHz") {
-            (Some(TokenKind::FrequencyLit), 3)
-        } else if rem.starts_with("Hz") {
-            (Some(TokenKind::FrequencyLit), 2)
-        } else if rem.starts_with("TB") || rem.starts_with("GB") || rem.starts_with("MB") || rem.starts_with("KB") {
-            (Some(TokenKind::MemoryLit), 2)
-        } else if rem.starts_with('B') {
-            (Some(TokenKind::MemoryLit), 1)
-        } else {
-            (None, 0)
-        };
-
-        if let Some(kind) = dim_kind {
-            cur += dim_len;
-            let span = ByteSpan::new(start as u32, cur as u32);
-            self.cursor = cur;
-            self.push_token(kind, TokenFlags::IS_DIMENSIONAL, span);
-        } else {
-            let kind = if is_float { TokenKind::FloatLit } else { TokenKind::IntLit };
-            let span = ByteSpan::new(start as u32, cur as u32);
-            self.cursor = cur;
-            self.push_token(kind, TokenFlags::NONE, span);
-        }
-    }
-
-    fn scan_fstring(&mut self, start: usize, quote: u8) {
-        let is_triple = start + 3 < self.bytes.len() && self.bytes[start + 2] == quote && self.bytes[start + 3] == quote;
-        let mut cur = if is_triple { start + 4 } else { start + 2 };
-        let seg_start = start;
-
-        while cur < self.bytes.len() {
-            let b = self.bytes[cur];
-            if b == b'\\' {
-                cur += 2;
-                continue;
-            }
-            if is_triple {
-                if b == quote && cur + 2 < self.bytes.len() && self.bytes[cur + 1] == quote && self.bytes[cur + 2] == quote {
-                    cur += 3;
-                    let span = ByteSpan::new(seg_start as u32, cur as u32);
-                    self.cursor = cur;
-                    self.push_token(TokenKind::StrLit, TokenFlags::NONE, span);
-                    return;
-                }
-            } else if b == quote {
-                cur += 1;
-                let span = ByteSpan::new(seg_start as u32, cur as u32);
-                self.cursor = cur;
-                self.push_token(TokenKind::StrLit, TokenFlags::NONE, span);
-                return;
-            }
-            cur += 1;
-        }
-
-        let span = ByteSpan::new(start as u32, cur as u32);
-        self.cursor = cur;
-        self.push_token(TokenKind::StrLit, TokenFlags::NONE, span);
-    }
-
-    fn scan_operator_or_delimiter(&mut self, start: usize) {
-        let b = self.bytes[start];
-        let b1 = if start + 1 < self.bytes.len() { self.bytes[start + 1] } else { 0 };
-        let b2 = if start + 2 < self.bytes.len() { self.bytes[start + 2] } else { 0 };
-
-        // Check for *.. and *...tree adjacent dots
-        if b == b'*' && b1 == b'.' && b2 == b'.' {
-            if start + 3 < self.bytes.len() && self.bytes[start + 3] == b'.' {
-                self.tape.push_diagnostic("Syntax Error: ambiguous adjacent dots; add a space before '.<ident>' to access 'self.<ident>'".to_string());
-                self.cursor = start + 4;
-                self.push_token(TokenKind::StarDotDot, TokenFlags::NONE, ByteSpan::new(start as u32, (start + 3) as u32));
-                self.push_token(TokenKind::PrefixDot, TokenFlags::NONE, ByteSpan::new((start + 3) as u32, (start + 4) as u32));
-                return;
-            } else {
-                self.cursor = start + 3;
-                self.push_token(TokenKind::StarDotDot, TokenFlags::NONE, ByteSpan::new(start as u32, (start + 3) as u32));
-                return;
-            }
-        }
-
-        // Check for 0...count ambiguous adjacent dots
-        if b == b'.' && b1 == b'.' && b2 == b'.' {
-            let prev_is_token_char = start > 0 && match self.bytes[start - 1] {
-                b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' => true,
-                _ => false,
-            };
-            let next_is_ident_char = start + 3 < self.bytes.len() && match self.bytes[start + 3] {
-                b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' => true,
-                _ => false,
-            };
-            if prev_is_token_char || next_is_ident_char {
-                self.tape.push_diagnostic("Syntax Error: ambiguous adjacent dots; add a space before '.<ident>' to access 'self.<ident>'".to_string());
-                self.cursor = start + 3;
-                self.push_token(TokenKind::DotDot, TokenFlags::NONE, ByteSpan::new(start as u32, (start + 2) as u32));
-                self.push_token(TokenKind::PrefixDot, TokenFlags::NONE, ByteSpan::new((start + 2) as u32, (start + 3) as u32));
-                return;
-            }
-        }
-
-        // 4-character operators
-        if start + 3 < self.bytes.len()
-            && b == b'>'
-            && b1 == b'.'
-            && b2 == b'.'
-            && self.bytes[start + 3] == b'<'
-        {
-            self.cursor = start + 4;
-            self.push_token(
-                TokenKind::GreaterDotDotLess,
-                TokenFlags::NONE,
-                ByteSpan::new(start as u32, (start + 4) as u32),
-            );
-            return;
-        }
-
-        // 3-character operators
-        let (kind, len) = match (b, b1, b2) {
-            (b'<', b'=', b'>') => (TokenKind::Spaceship, 3),
-            (b':', b'=', b':') => (TokenKind::SwapEqual, 3),
-            (b'>', b'.', b'.') => (TokenKind::GreaterDotDot, 3),
-            (b'-', b'>', b'>') => (TokenKind::JsonGetText, 3),
-            (b'?', b'.', b'.') => (TokenKind::SafeCascade, 3),
-            (b'?', b'?', b'=') => (TokenKind::CoalesceEqual, 3),
-            (b'.', b'.', b'=') => (TokenKind::DotDotEqual, 3),
-            (b'.', b'.', b'<') => (TokenKind::DotDotLess, 3),
-            (b'.', b'.', b'.') => (TokenKind::Ellipsis, 3),
-            (b'*', b'*', b'=') => (TokenKind::DoubleStarEqual, 3),
-            (b'/', b'/', b'=') => (TokenKind::DoubleSlashEqual, 3),
-            (b'<', b'<', b'=') => (TokenKind::ShiftLeftEqual, 3),
-            (b'>', b'>', b'=') => (TokenKind::ShiftRightEqual, 3),
-            _ => (TokenKind::ErrorToken, 0),
-        };
-
-        if len > 0 {
-            self.cursor = start + len;
-            self.push_token(kind, TokenFlags::NONE, ByteSpan::new(start as u32, (start + len) as u32));
-            return;
-        }
-
-        // 2-character operators
-        let (kind, len) = match (b, b1) {
-            (b':', b':') => (TokenKind::ColonColon, 2),
-            (b'&', b'&') => (TokenKind::DoubleAmper, 2),
-            (b'|', b'|') => (TokenKind::DoublePipe, 2),
-            (b':', b'=') => (TokenKind::Walrus, 2),
-            (b'<', b'-') => (TokenKind::ArrowLeft, 2),
-            (b'-', b'>') => (TokenKind::Arrow, 2),
-            (b'=', b'>') => (TokenKind::FatArrow, 2),
-            (b'|', b'>') => (TokenKind::PipeForward, 2),
-            (b'<', b'|') => (TokenKind::PipeBackward, 2),
-            (b'?', b'.') => (TokenKind::SafeNav, 2),
-            (b'?', b'?') => (TokenKind::Coalesce, 2),
-            (b'@', b'>') => (TokenKind::JsonContains, 2),
-            (b'<', b'@') => (TokenKind::JsonContained, 2),
-            (b'.', b'.') => (TokenKind::DotDot, 2),
-            (b'*', b'*') => (TokenKind::DoubleStar, 2),
-            (b'/', b'/') => (TokenKind::DoubleSlash, 2),
-            (b'=', b'=') => (TokenKind::EqEqual, 2),
-            (b'!', b'=') | (b'<', b'>') => (TokenKind::NotEqual, 2),
-            (b'<', b'=') => (TokenKind::LessEqual, 2),
-            (b'>', b'=') => (TokenKind::GreaterEqual, 2),
-            (b'<', b'<') => (TokenKind::ShiftLeft, 2),
-            (b'>', b'>') => (TokenKind::ShiftRight, 2),
-            (b'+', b'=') => (TokenKind::PlusEqual, 2),
-            (b'-', b'=') => (TokenKind::MinusEqual, 2),
-            (b'*', b'=') => (TokenKind::StarEqual, 2),
-            (b'/', b'=') => (TokenKind::SlashEqual, 2),
-            (b'%', b'=') => (TokenKind::PercentEqual, 2),
-            (b'+', b'|') => (TokenKind::PlusPipe, 2),
-            (b'-', b'|') => (TokenKind::MinusPipe, 2),
-            (b'*', b'|') => (TokenKind::StarPipe, 2),
-            (b'+', b'%') => (TokenKind::PlusPercent, 2),
-            (b'-', b'%') => (TokenKind::MinusPercent, 2),
-            (b'*', b'%') => (TokenKind::StarPercent, 2),
-            (b'+', b'?') => (TokenKind::PlusQuestion, 2),
-            (b'-', b'?') => (TokenKind::MinusQuestion, 2),
-            (b'*', b'?') => (TokenKind::StarQuestion, 2),
-            (b'%', b'%') => (TokenKind::DoublePercent, 2),
-            (b'~', b'>') => (TokenKind::TildeGreater, 2),
-            (b'&', b'=') => (TokenKind::AmperEqual, 2),
-            (b'|', b'=') => (TokenKind::VbarEqual, 2),
-            (b'^', b'=') => (TokenKind::CaretEqual, 2),
-            _ => (TokenKind::ErrorToken, 0),
-        };
-
-        if len > 0 {
-            self.cursor = start + len;
-            self.push_token(kind, TokenFlags::NONE, ByteSpan::new(start as u32, (start + len) as u32));
-            return;
-        }
-
-        // Single-character delimiters and operators
-        let (kind, flags) = match b {
-            b'(' => {
-                self.paren_depth += 1;
-                (TokenKind::LParen, TokenFlags::IS_DELIMITER_OPEN)
-            }
-            b')' => {
-                self.paren_depth = self.paren_depth.saturating_sub(1);
-                (TokenKind::RParen, TokenFlags::IS_DELIMITER_CLOSE)
-            }
-            b'[' => {
-                self.bracket_depth += 1;
-                (TokenKind::LBracket, TokenFlags::IS_DELIMITER_OPEN)
-            }
-            b']' => {
-                self.bracket_depth = self.bracket_depth.saturating_sub(1);
-                (TokenKind::RBracket, TokenFlags::IS_DELIMITER_CLOSE)
-            }
-            b'{' => {
-                self.brace_depth += 1;
-                (TokenKind::LBrace, TokenFlags::IS_DELIMITER_OPEN)
-            }
-            b'}' => {
-                self.brace_depth = self.brace_depth.saturating_sub(1);
-                (TokenKind::RBrace, TokenFlags::IS_DELIMITER_CLOSE)
-            }
-            b':' => (TokenKind::Colon, TokenFlags::NONE),
-            b';' => (TokenKind::Semicolon, TokenFlags::NONE),
-            b',' => (TokenKind::Comma, TokenFlags::NONE),
-            b'.' => {
-                let is_adjacent = if let Some(&last_kind) = self.tape.kinds.last() {
-                    if let Some(&last_span) = self.tape.spans.last() {
-                        (last_kind == TokenKind::DotDot || last_kind == TokenKind::DotDotEqual || last_kind == TokenKind::DotDotLess || last_kind == TokenKind::StarDotDot)
-                            && last_span.end == start as u32
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-                if is_adjacent {
-                    self.tape.push_diagnostic("Syntax Error: ambiguous adjacent dots; add a space before '.<ident>' to access 'self.<ident>'".to_string());
-                    self.cursor = start + 1;
-                    self.push_token(TokenKind::PrefixDot, TokenFlags::NONE, ByteSpan::new(start as u32, (start + 1) as u32));
-                    return;
-                }
-
-                if start + 1 < self.bytes.len() && self.bytes[start + 1].is_ascii_digit() {
-                    let is_infix = start > 0 && match self.bytes[start - 1] {
-                        b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b')' | b']' | b'}' | b'"' | b'\'' => true,
-                        _ => false,
-                    };
-                    if !is_infix {
-                        self.tape.push_diagnostic("Syntax Error: invalid float literal; Help: prefix float literals with 0 ('0.5')".to_string());
-                        self.cursor = start + 1;
-                        self.push_token(TokenKind::PrefixDot, TokenFlags::NONE, ByteSpan::new(start as u32, (start + 1) as u32));
-                        return;
-                    }
-                }
-
-                let dot_kind = if start == 0 {
-                    TokenKind::PrefixDot
-                } else {
-                    match self.bytes[start - 1] {
-                        b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b')' | b']' | b'}' | b'"' | b'\'' => TokenKind::InfixDot,
-                        _ => TokenKind::PrefixDot,
-                    }
-                };
-                (dot_kind, TokenFlags::NONE)
-            }
-            b'@' => (TokenKind::At, TokenFlags::NONE),
-            b'?' => (TokenKind::Question, TokenFlags::NONE),
-            b'!' => (TokenKind::Exclamation, TokenFlags::NONE),
-            b'~' => (TokenKind::Tilde, TokenFlags::NONE),
-            b'$' => (TokenKind::Dollar, TokenFlags::NONE),
-            b'`' => (TokenKind::Backquote, TokenFlags::NONE),
-            b'_' => (TokenKind::Underscore, TokenFlags::NONE),
-            b'+' => (TokenKind::Plus, TokenFlags::NONE),
-            b'-' => (TokenKind::Minus, TokenFlags::NONE),
-            b'*' => (TokenKind::Star, TokenFlags::NONE),
-            b'/' => (TokenKind::Slash, TokenFlags::NONE),
-            b'%' => (TokenKind::Percent, TokenFlags::NONE),
-            b'=' => (TokenKind::Equal, TokenFlags::NONE),
-            b'<' => (TokenKind::Less, TokenFlags::NONE),
-            b'>' => (TokenKind::Greater, TokenFlags::NONE),
-            b'&' => (TokenKind::Amper, TokenFlags::NONE),
-            b'|' => (TokenKind::Vbar, TokenFlags::NONE),
-            b'^' => (TokenKind::Caret, TokenFlags::NONE),
-            _ => (TokenKind::ErrorToken, TokenFlags::NONE),
-        };
-
-        self.cursor = start + 1;
-        self.push_token(kind, flags, ByteSpan::new(start as u32, (start + 1) as u32));
     }
 }

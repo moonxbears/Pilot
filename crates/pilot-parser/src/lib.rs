@@ -184,6 +184,7 @@ pub fn bootstrap_tables() -> &'static ParserTables { BOOTSTRAP_TABLES.get_or_ini
             include_str!("../../../stdlib/core/syntax/while.pilot"), include_str!("../../../stdlib/core/syntax/until.pilot"),
             include_str!("../../../stdlib/core/syntax/switch.pilot"), include_str!("../../../stdlib/core/syntax/guard.pilot"),
             include_str!("../../../stdlib/core/syntax/try_catch.pilot"), include_str!("../../../stdlib/core/syntax/expr_sugar.pilot"),
+            include_str!("../../../stdlib/core/syntax/fstring.pilot"),
             include_str!("../../../stdlib/core/syntax/unit_decl.pilot"), include_str!("../../../stdlib/db/sql_syntax.pilot"),
             include_str!("../../../stdlib/polyglot/polyglot_syntax.pilot"), include_str!("../../../stdlib/realtime/rt_syntax.pilot"),
             include_str!("../../../stdlib/asyncio/select_syntax.pilot"),
@@ -201,7 +202,7 @@ fn is_seed_kw(k: TokenKind) -> bool { matches!(k, TokenKind::KwEngine | TokenKin
         | TokenKind::KwReturn | TokenKind::KwYield | TokenKind::KwDefer | TokenKind::KwComptime
         | TokenKind::KwQuote | TokenKind::KwAsm) }
 #[inline]
-fn is_word_tok(k: TokenKind) -> bool { k == TokenKind::Ident || (k.is_keyword() && !is_seed_kw(k)) }
+fn is_word_tok(k: TokenKind) -> bool { k == TokenKind::Ident }
 #[derive(Clone, Debug, Default)]
 struct PendingAttr { name: SymbolId, args: Vec<NodeId>, is_mut: bool, bind_sym: SymbolId }
 #[derive(Clone, Debug, Default)]
@@ -786,7 +787,7 @@ impl<'a> Parser<'a> {
         self.no_struct_lit = true; let scrut = self.parse_expr(); self.no_struct_lit = false; self.expect(TokenKind::LBrace);
         let mut ch = vec![scrut]; while !self.at_end() && !self.at(TokenKind::RBrace) {
             self.skip_seps(); if self.at(TokenKind::RBrace) || self.at_end() { break; }
-            let asp = self.span(); let pat = if self.is_rec(16) || self.eat(TokenKind::Underscore) { if self.is_rec(16) { self.advance(); }
+            let asp = self.span(); let pat = if self.is_rec(16) || (self.is_word() && self.text() == "_") { self.advance();
                 self.arena.alloc_node(NodeKind::PatWildcard, 0, asp, 0, 0)
             } else { if self.is_rec(15) { self.advance(); } self.parse_pattern() };
             if self.eat(TokenKind::KwIf) || self.is_rec(28) { self.no_struct_lit = true; let _ = self.parse_expr(); self.no_struct_lit = false; }
@@ -807,7 +808,7 @@ impl<'a> Parser<'a> {
         while self.eat(TokenKind::Vbar) { let (sp, rhs) = (self.arena.span(lhs), self.parse_pat_atom()); lhs = self.arena.alloc_node(NodeKind::PatOr, 0, sp, lhs.0, rhs.0); }
         lhs }
     fn parse_pat_atom(&mut self) -> NodeId { let sp = self.span();
-        if self.eat(TokenKind::Underscore) { return self.arena.alloc_node(NodeKind::PatWildcard, 0, sp, 0, 0); }
+        if self.is_word() && self.text() == "_" { self.advance(); return self.arena.alloc_node(NodeKind::PatWildcard, 0, sp, 0, 0); }
         if self.eat(TokenKind::LParen) { let mut ps = Vec::new();
             while !self.at_end() && !self.at(TokenKind::RParen) { ps.push(self.parse_pattern()); if !self.eat(TokenKind::Comma) { break; } }
             self.expect(TokenKind::RParen);
@@ -900,6 +901,8 @@ impl<'a> Parser<'a> {
         }
         lhs }
     fn parse_prefix(&mut self) -> NodeId { let sp = self.span(); match self.peek() {
+            TokenKind::IntLit | TokenKind::FloatLit if self.tape.flag(self.cur()).contains(pilot_lexer::TokenFlags::IS_DIMENSIONAL) => {
+                let sym = self.intern_cur(); self.arena.alloc_node(NodeKind::UnitLit, 1, sp, sym.0, 0) }
             TokenKind::IntLit => { let v = self.text().replace('_', "").parse().unwrap_or(0); self.advance(); self.arena.alloc_int(v, sp) }
             TokenKind::HexIntLit => { let v = i64::from_str_radix(&self.text()[2..].replace('_', ""), 16).unwrap_or(0); self.advance(); self.arena.alloc_int(v, sp) }
             TokenKind::BinIntLit => { let v = i64::from_str_radix(&self.text()[2..].replace('_', ""), 2).unwrap_or(0); self.advance(); self.arena.alloc_int(v, sp) }
@@ -910,9 +913,6 @@ impl<'a> Parser<'a> {
                 let inner = if (s.starts_with("\"\"\"") || s.starts_with("'''")) && s.len() >= 6 { &s[3..s.len() - 3] }
                 else if s.len() >= 2 { &s[1..s.len() - 1] } else { s }; let unesc = unescape_str(inner); self.advance();
                 let sym = self.arena.interner.intern(&unesc); self.arena.alloc_node(NodeKind::StrLit, is_f as u16, sp, sym.0, 0) }
-            TokenKind::DurationLit | TokenKind::FrequencyLit | TokenKind::MemoryLit => {
-                let f = match self.peek() { TokenKind::DurationLit => 1, TokenKind::FrequencyLit => 2, _ => 3 };
-                let sym = self.intern_cur(); self.arena.alloc_node(NodeKind::UnitLit, f, sp, sym.0, 0) }
             TokenKind::KeywordLit => { let t = self.text(); self.advance(); self.arena.alloc_keyword(t, sp) }
             TokenKind::KwIf => self.parse_if(),
             TokenKind::KwQuote | TokenKind::KwComptime => { self.advance(); if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() } }

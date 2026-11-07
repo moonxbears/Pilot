@@ -1,7 +1,7 @@
-//! Milestone 28.2: Zero-Copy Arena String & `:ns/kw` Keyword Interner (`pilot-intern`)
+//! Milestone 28.2 & 52.3: Zero-Copy Arena String Interner (`pilot-intern`).
 //!
 //! Stores all interned UTF-8 strings in a single contiguous byte buffer (`Vec<u8>`) indexed by
-//! `ByteSpan`, using an open-addressed hash table so repeated identifier/keyword lookups allocate
+//! `ByteSpan`, using an open-addressed hash table so repeated identifier lookups allocate
 //! **0 bytes** on the heap.
 
 use pilot_span::ByteSpan;
@@ -13,27 +13,17 @@ pub struct SymbolId(pub u32);
 
 impl SymbolId {
     pub const NONE: Self = Self(u32::MAX);
+    pub const EMPTY: Self = Self(0);
 
-    #[inline]
+    #[inline(always)]
     pub const fn is_none(self) -> bool {
         self.0 == u32::MAX
     }
-}
 
-/// 32-bit `Copy` interned first-class keyword handle (`:kw` or `:namespace/kw`, Milestone 17).
-#[repr(transparent)]
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct KeywordId(pub u32);
-
-impl KeywordId {
-    pub const NONE: Self = Self(u32::MAX);
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct KeywordEntry {
-    pub raw_symbol: SymbolId,
-    pub namespace: SymbolId,
-    pub name: SymbolId,
+    #[inline(always)]
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -42,7 +32,6 @@ pub struct Interner {
     spans: Vec<ByteSpan>,
     hashes: Vec<u64>,
     buckets: Vec<u32>, // u32::MAX = empty slot, else SymbolId index
-    keywords: Vec<KeywordEntry>,
 }
 
 const EMPTY_BUCKET: u32 = u32::MAX;
@@ -65,9 +54,7 @@ impl Interner {
             spans: Vec::with_capacity(expected_symbols),
             hashes: Vec::with_capacity(expected_symbols),
             buckets: vec![EMPTY_BUCKET; bucket_cap],
-            keywords: Vec::new(),
         };
-        // SymbolId(0) is always the empty string ""
         let _ = interner.intern("");
         interner
     }
@@ -106,36 +93,10 @@ impl Interner {
         if (self.spans.len() * 10) >= (self.buckets.len() * 7) {
             self.rehash();
         }
-
         SymbolId(sym_idx)
     }
 
-    /// Interns a Pilot keyword (`:ok` or `:http/ok` or `ok`) into a `KeywordId(u32)`.
-    pub fn intern_keyword(&mut self, raw: &str) -> KeywordId {
-        let stripped = raw.strip_prefix(':').unwrap_or(raw);
-        let raw_symbol = self.intern(stripped);
-        let (ns_sym, name_sym) = if let Some((ns, name)) = stripped.split_once('/') {
-            (self.intern(ns), self.intern(name))
-        } else {
-            (SymbolId::NONE, raw_symbol)
-        };
-
-        for (idx, kw) in self.keywords.iter().enumerate() {
-            if kw.raw_symbol == raw_symbol {
-                return KeywordId(idx as u32);
-            }
-        }
-
-        let id = KeywordId(self.keywords.len() as u32);
-        self.keywords.push(KeywordEntry {
-            raw_symbol,
-            namespace: ns_sym,
-            name: name_sym,
-        });
-        id
-    }
-
-    #[inline]
+    #[inline(always)]
     pub fn resolve(&self, id: SymbolId) -> &str {
         if id.is_none() || (id.0 as usize) >= self.spans.len() {
             return "";
@@ -145,19 +106,9 @@ impl Interner {
         unsafe { core::str::from_utf8_unchecked(slice) }
     }
 
-    #[inline]
-    pub fn resolve_keyword(&self, id: KeywordId) -> Option<KeywordEntry> {
-        self.keywords.get(id.0 as usize).copied()
-    }
-
-    #[inline]
+    #[inline(always)]
     pub fn symbol_count(&self) -> usize {
         self.spans.len()
-    }
-
-    #[inline]
-    pub fn keyword_count(&self) -> usize {
-        self.keywords.len()
     }
 
     fn rehash(&mut self) {
@@ -198,21 +149,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn intern_deduplicates_strings_and_hierarchical_keywords() {
+    fn intern_deduplicates_strings_in_contiguous_arena() {
         let mut interner = Interner::new();
-        let s1 = interner.intern("SliceBuffer");
-        let s2 = interner.intern("RangeWindow");
-        let s3 = interner.intern("SliceBuffer");
+        let s1 = interner.intern("alpha_item");
+        let s2 = interner.intern("beta_item");
+        let s3 = interner.intern("alpha_item");
         assert_eq!(s1, s3);
         assert_ne!(s1, s2);
-        assert_eq!(interner.resolve(s1), "SliceBuffer");
-        assert_eq!(interner.resolve(s2), "RangeWindow");
-
-        let kw1 = interner.intern_keyword(":http/ok");
-        let kw2 = interner.intern_keyword("http/ok");
-        assert_eq!(kw1, kw2);
-        let entry = interner.resolve_keyword(kw1).unwrap();
-        assert_eq!(interner.resolve(entry.namespace), "http");
-        assert_eq!(interner.resolve(entry.name), "ok");
+        assert_eq!(interner.resolve(s1), "alpha_item");
+        assert_eq!(interner.resolve(s2), "beta_item");
     }
 }

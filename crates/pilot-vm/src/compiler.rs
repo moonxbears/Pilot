@@ -771,6 +771,40 @@ impl BytecodeCompiler {
                             }
                             return dst;
                         }
+                    } else if callee_node.node_kind() == NodeKind::MemberExpr {
+                        let m_name = arena.interner.resolve(SymbolId(callee_node.rhs));
+                        let hook = match m_name {
+                            "len" => Some("str_len"),
+                            "byte_at" => Some("str_byte_at"),
+                            "slice" | "substring" => Some("str_slice"),
+                            _ => None,
+                        };
+                        if let Some(h) = hook {
+                            let c_idx = self.add_constant(PilotVal::from_str(h));
+                            let r_hook = self.alloc_reg();
+                            self.emit(Opcode::LoadConst, r_hook, (c_idx >> 8) as u8, (c_idx & 0xFF) as u8);
+                            let mut arg_regs = vec![self.compile_node(arena, NodeId(callee_node.lhs))];
+                            for i in 1..arg_len {
+                                arg_regs.push(self.compile_node(arena, NodeId(arena.extra_children[arg_start + i])));
+                            }
+                            let num_args = arg_regs.len() as u8;
+                            let mut final_args = Vec::with_capacity(arg_regs.len());
+                            for &r in &arg_regs {
+                                if r >= 1 && r <= num_args {
+                                    let tmp = self.alloc_reg();
+                                    self.emit(Opcode::Move, tmp, r, 0);
+                                    final_args.push(tmp);
+                                } else {
+                                    final_args.push(r);
+                                }
+                            }
+                            for (i, &r) in final_args.iter().enumerate() {
+                                self.emit(Opcode::Move, (i + 1) as u8, r, 0);
+                            }
+                            let dst = self.alloc_reg();
+                            self.emit(Opcode::EngineIntrinsic, dst, r_hook, num_args);
+                            return dst;
+                        }
                     }
                 }
                 0

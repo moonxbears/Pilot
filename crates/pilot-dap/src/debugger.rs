@@ -1801,11 +1801,7 @@ impl PilotDebugger {
                 (PilotVal::from_str(s), ty.to_string())
             }
             NodeKind::KeywordLit => {
-                let mut txt = if let Some(kw) = arena.interner.resolve_keyword(pilot_intern::KeywordId(node.lhs)) {
-                    format!(":{}", arena.interner.resolve(kw.raw_symbol))
-                } else {
-                    arena.interner.resolve(SymbolId(node.lhs)).to_string()
-                };
+                let mut txt = arena.interner.resolve(SymbolId(node.lhs)).to_string();
                 if !txt.starts_with(':') {
                     txt = format!(":{}", txt);
                 }

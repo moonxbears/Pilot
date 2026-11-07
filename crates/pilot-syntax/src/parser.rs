@@ -382,7 +382,7 @@ pub fn scan_raw_tokens<'a>(src: &'a str) -> Vec<RawToken<'a>> {
             let ident = &src[start..cur];
             let kind = if ident == "_" {
                 SyntaxKind::Underscore
-            } else if let Some((kw, _)) = lookup_keyword(ident) {
+            } else if let Some(kw) = lookup_keyword(ident) {
                 SyntaxKind::from_token_kind(kw)
             } else {
                 match ident {

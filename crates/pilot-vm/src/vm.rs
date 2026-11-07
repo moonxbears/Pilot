@@ -306,10 +306,28 @@ impl PilVirtualMachine {
                     for i in 1..=num_args {
                         args.push(unsafe { *self.registers.get_unchecked(i) });
                     }
-                    if let Some(ref mut handler) = self.engine_handler {
-                        let res = handler(&hook_name, &args).unwrap_or(PilotVal::NULL);
-                        unsafe { *self.registers.get_unchecked_mut(dst) = res };
-                    }
+                    let res = match hook_name.as_str() {
+                        "str_len" if !args.is_empty() => PilotVal::from_int(args[0].to_string_repr().len() as i64),
+                        "str_byte_at" if args.len() >= 2 => {
+                            let s = args[0].to_string_repr();
+                            let idx = args[1].as_int().unwrap_or(0) as usize;
+                            PilotVal::from_int(s.as_bytes().get(idx).copied().unwrap_or(0) as i64)
+                        }
+                        "str_slice" if args.len() >= 3 => {
+                            let s = args[0].to_string_repr();
+                            let a = (args[1].as_int().unwrap_or(0).max(0) as usize).min(s.len());
+                            let b = (args[2].as_int().unwrap_or(0).max(0) as usize).min(s.len()).max(a);
+                            PilotVal::from_str(&s[a..b])
+                        }
+                        _ => {
+                            if let Some(ref mut handler) = self.engine_handler {
+                                handler(&hook_name, &args).unwrap_or(PilotVal::NULL)
+                            } else {
+                                PilotVal::NULL
+                            }
+                        }
+                    };
+                    unsafe { *self.registers.get_unchecked_mut(dst) = res };
                 }
                 Opcode::Halt => {
                     break;

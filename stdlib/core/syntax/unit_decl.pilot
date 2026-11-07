@@ -1,14 +1,117 @@
 // =========================================================================
 // FILE: stdlib/core/syntax/unit_decl.pilot
-// COMPILATION UNIT WRAPPER MACRO (`unit(decl)`)
+// COMPILATION UNIT WRAPPER MACRO (`unit(decl)`) & DIMENSIONAL UNIT REGISTRY
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.UnitDecl;
 
 use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
 
 pub syntax {
     unit(decl) => quote {
         $decl
+    };
+}
+
+// =========================================================================
+// DIMENSIONAL UNIT FAMILIES & SCALE DESCRIPTORS (100% Pilot-Hosted)
+// =========================================================================
+
+[Layout(c_abi)]
+pub struct UnitDescriptor : IValue {
+    pub suffix: str;
+    pub family: i64;
+    pub base_multiplier: i64;
+}
+
+pub pure fn unit_family_for_suffix(suffix: str) -> i64 {
+    // 1 = Duration, 2 = Frequency, 3 = Memory, 4 = SI Physical
+    if suffix == "ns" || suffix == "us" || suffix == "ms" || suffix == "s" || suffix == "min" || suffix == "h" {
+        return 1;
+    }
+    if suffix == "Hz" || suffix == "kHz" || suffix == "MHz" || suffix == "GHz" {
+        return 2;
+    }
+    if suffix == "B" || suffix == "KB" || suffix == "MB" || suffix == "GB" || suffix == "TB" {
+        return 3;
+    }
+    if suffix == "m" || suffix == "kg" || suffix == "A" || suffix == "K" || suffix == "mol" || suffix == "cd" {
+        return 4;
+    }
+    return 0;
+}
+
+pub pure fn unit_scale_to_base(suffix: str) -> i64 {
+    // Duration -> nanoseconds (ns = 1)
+    if suffix == "ns" {
+        return 1;
+    }
+    if suffix == "us" {
+        return 1000;
+    }
+    if suffix == "ms" {
+        return 1000000;
+    }
+    if suffix == "s" {
+        return 1000000000;
+    }
+    if suffix == "min" {
+        return 60000000000;
+    }
+    if suffix == "h" {
+        return 3600000000000;
+    }
+    // Frequency -> Hertz (Hz = 1)
+    if suffix == "Hz" {
+        return 1;
+    }
+    if suffix == "kHz" {
+        return 1000;
+    }
+    if suffix == "MHz" {
+        return 1000000;
+    }
+    if suffix == "GHz" {
+        return 1000000000;
+    }
+    // Memory -> Bytes (B = 1, IEC/binary powers of 1024)
+    if suffix == "B" {
+        return 1;
+    }
+    if suffix == "KB" {
+        return 1024;
+    }
+    if suffix == "MB" {
+        return 1048576;
+    }
+    if suffix == "GB" {
+        return 1073741824;
+    }
+    if suffix == "TB" {
+        return 1099511627776;
+    }
+    return 1;
+}
+
+pub fn split_numeric_and_unit_suffix(raw_lit: str) -> UnitDescriptor {
+    let n = raw_lit.len();
+    var split_idx = n;
+    var i = 0;
+    while i < n {
+        let b = raw_lit.byte_at(i);
+        let is_num_char = (b >= 48 && b <= 57) || b == 46 || b == 95;
+        if !is_num_char {
+            split_idx = i;
+            i = n;
+        } else {
+            i = i + 1;
+        }
+    }
+    let suffix = raw_lit.slice(split_idx, n);
+    return UnitDescriptor {
+        suffix: suffix,
+        family: unit_family_for_suffix(suffix),
+        base_multiplier: unit_scale_to_base(suffix),
     };
 }
