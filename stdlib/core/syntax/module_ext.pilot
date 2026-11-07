@@ -10,20 +10,20 @@ use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
 
 comptime {
-    __engine("register_module_kw", "pkg", "declare_package_scope");
-    __engine("register_module_kw", "use", "import_symbol_path");
-    __engine("register_modifier",  "ext",       "extension_member");
-    __engine("register_modifier",  "extension", "extension_member");
-    __engine("register_modifier",  "const",     "binding_const");
-    __engine("bind_receptor", "type",     26, 0);
-    __engine("bind_receptor", "enum",     27, 0);
-    __engine("bind_receptor", "where",    28, 0);
-    __engine("bind_receptor", "as",       29, 0);
-    __engine("bind_receptor", "view",     29, 1);
-    __engine("bind_receptor", "coalesce", 30, 0);
-    __engine("bind_receptor", "with",     30, 1);
-    __engine("bind_receptor", "without",  30, 2);
-    __engine("bind_receptor", "on",       30, 3);
+    __engine("register_module_kw", nameof(pkg), "declare_package_scope");
+    __engine("register_module_kw", nameof(use), "import_symbol_path");
+    __engine("register_modifier",  nameof(ext),       "extension_member");
+    __engine("register_modifier",  nameof(extension), "extension_member");
+    __engine("register_modifier",  nameof(const),     "binding_const");
+    __engine("bind_receptor", nameof(type),     26, 0);
+    __engine("bind_receptor", nameof(enum),     27, 0);
+    __engine("bind_receptor", nameof(where),    28, 0);
+    __engine("bind_receptor", nameof(as),       29, 0);
+    __engine("bind_receptor", nameof(view),     29, 1);
+    __engine("bind_receptor", nameof(coalesce), 30, 0);
+    __engine("bind_receptor", nameof(with),     30, 1);
+    __engine("bind_receptor", nameof(without),  30, 2);
+    __engine("bind_receptor", nameof(on),       30, 3);
 }
 
 pub syntax {

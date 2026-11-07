@@ -206,7 +206,7 @@ fn eval_pilot_expr(module_src: &str, tail_expr: &str) -> PilotVal {
 }
 
 #[test]
-fn test_52_1_nested_if_stack_inactive_isolation_and_boolean_algebra() {
+pub fn test_52_1_nested_if_stack_inactive_isolation_and_boolean_algebra() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_52_1_nested_if_stack_inactive_isolation_and_boolean_algebra",
         &ANTICHEAT_SPEC,
@@ -377,7 +377,7 @@ fn test_52_1_nested_if_stack_inactive_isolation_and_boolean_algebra() {
 }
 
 #[test]
-fn test_52_1_all_eight_preproc_diagnostics_and_pragma_suppression() {
+pub fn test_52_1_all_eight_preproc_diagnostics_and_pragma_suppression() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_52_1_all_eight_preproc_diagnostics_and_pragma_suppression",
         &ANTICHEAT_SPEC,
@@ -442,7 +442,7 @@ fn test_52_1_all_eight_preproc_diagnostics_and_pragma_suppression() {
 }
 
 #[test]
-fn test_52_3_unit_receptors_fstring_execution_and_hierarchical_keywords() {
+pub fn test_52_3_unit_receptors_fstring_execution_and_hierarchical_keywords() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_52_3_unit_receptors_fstring_execution_and_hierarchical_keywords",
         &ANTICHEAT_SPEC,

@@ -7,9 +7,9 @@ pub pkg Pilot.Asyncio.Syntax;
 use Pilot.Core.Genesis.*;
 
 comptime {
-    __engine("register_modifier", "async", "effect_async");
-    __engine("bind_receptor", "await",   33, 17);
-    __engine("bind_receptor", "select",  33, 7);
+    __engine("register_modifier", nameof(async), "effect_async");
+    __engine("bind_receptor", nameof(await),   33, 17);
+    __engine("bind_receptor", nameof(select),  33, 7);
 
     __engine("register_pratt_op", "<-", infix,  5,  right);
     __engine("register_pratt_op", "<-", prefix, 80, right);

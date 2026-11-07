@@ -8,12 +8,12 @@ pub pkg Pilot.Contracts.Syntax;
 use Pilot.Core.Genesis.*;
 
 comptime {
-    __engine("bind_receptor", "requires",  33, 18);
-    __engine("bind_receptor", "ensures",   33, 19);
-    __engine("bind_receptor", "invariant", 33, 20);
-    __engine("bind_receptor", "adapter",   33, 21);
-    __engine("bind_receptor", "context",   33, 22);
-    __engine("bind_receptor", "each",      33, 23);
+    __engine("bind_receptor", nameof(requires),  33, 18);
+    __engine("bind_receptor", nameof(ensures),   33, 19);
+    __engine("bind_receptor", nameof(invariant), 33, 20);
+    __engine("bind_receptor", nameof(adapter),   33, 21);
+    __engine("bind_receptor", nameof(context),   33, 22);
+    __engine("bind_receptor", nameof(each),      33, 23);
 }
 
 pub syntax {

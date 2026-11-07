@@ -279,7 +279,7 @@ fn run_transpiler_on_arena(target_program: &str, call_expr: &str) -> String {
 }
 
 #[test]
-fn test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host_toolchains() {
+pub fn test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host_toolchains() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host_toolchains",
         &ANTICHEAT_SPEC,
@@ -479,7 +479,7 @@ fn test_57_1_and_57_2_seven_target_transpilers_compiled_and_executed_on_host_too
 }
 
 #[test]
-fn test_57_3_and_57_4_six_language_foreign_ingesters_vm_execution_spdx_and_crate_purge() {
+pub fn test_57_3_and_57_4_six_language_foreign_ingesters_vm_execution_spdx_and_crate_purge() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_57_3_and_57_4_six_language_foreign_ingesters_vm_execution_spdx_and_crate_purge",
         &ANTICHEAT_SPEC,

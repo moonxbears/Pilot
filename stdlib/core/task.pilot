@@ -38,7 +38,7 @@ pub partial struct {
     }
 }
 
-pub struct {
+pub partial struct {
     // 1. Shallow Call Quote (`fn!(args...)` -> `CallExpr<TReturn>`) — `0b00` `IValue`
     [Lang(Cfg.Lang.call_expr_slot), Layout(c_abi)]
     CallExpr<TReturn: IAnyValue> : IValue {

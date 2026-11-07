@@ -237,7 +237,7 @@ fn run_with_registry(modules: &[&str], tail_src: &str, reg_setup: impl FnOnce(&m
 }
 
 #[test]
-fn test_53_1_hierarchical_lossless_cst_and_green_node_incremental_reuse() {
+pub fn test_53_1_hierarchical_lossless_cst_and_green_node_incremental_reuse() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_53_1_hierarchical_lossless_cst_and_green_node_incremental_reuse",
         &ANTICHEAT_SPEC,
@@ -357,7 +357,7 @@ fn test_53_1_hierarchical_lossless_cst_and_green_node_incremental_reuse() {
 }
 
 #[test]
-fn test_53_2_live_dynamic_keyword_typo_recovery_beyond_u128_and_recovery_markers() {
+pub fn test_53_2_live_dynamic_keyword_typo_recovery_beyond_u128_and_recovery_markers() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_53_2_live_dynamic_keyword_typo_recovery_beyond_u128_and_recovery_markers",
         &ANTICHEAT_SPEC,
@@ -478,7 +478,7 @@ fn test_53_2_live_dynamic_keyword_typo_recovery_beyond_u128_and_recovery_markers
 }
 
 #[test]
-fn test_53_3_and_53_4_wadler_lindig_width_formatter_semantic_parity_and_crate_purge() {
+pub fn test_53_3_and_53_4_wadler_lindig_width_formatter_semantic_parity_and_crate_purge() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_53_3_and_53_4_wadler_lindig_width_formatter_semantic_parity_and_crate_purge",
         &ANTICHEAT_SPEC,

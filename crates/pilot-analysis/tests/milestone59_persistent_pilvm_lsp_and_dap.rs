@@ -340,7 +340,7 @@ fn run_lsp_handler_query(target_doc: &str, handlers_src: &str, method: &str, off
 }
 
 #[test]
-fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matrix() {
+pub fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matrix() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matrix",
         &ANTICHEAT_SPEC,
@@ -529,7 +529,7 @@ fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matrix() 
 }
 
 #[test]
-fn test_59_2_incremental_span_edits_adversarial_early_cutoff_and_persistent_lsp_stream() {
+pub fn test_59_2_incremental_span_edits_adversarial_early_cutoff_and_persistent_lsp_stream() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_59_2_incremental_span_edits_adversarial_early_cutoff_and_persistent_lsp_stream",
         &ANTICHEAT_SPEC,
@@ -666,7 +666,7 @@ fn test_59_2_incremental_span_edits_adversarial_early_cutoff_and_persistent_lsp_
 }
 
 #[test]
-fn test_59_3_and_59_4_live_vmhook_dap_stepping_watch_eval_inspector_and_5_crate_purge() {
+pub fn test_59_3_and_59_4_live_vmhook_dap_stepping_watch_eval_inspector_and_5_crate_purge() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_59_3_and_59_4_live_vmhook_dap_stepping_watch_eval_inspector_and_5_crate_purge",
         &ANTICHEAT_SPEC,

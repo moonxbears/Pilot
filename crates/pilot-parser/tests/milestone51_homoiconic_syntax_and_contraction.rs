@@ -308,7 +308,7 @@ fn eval_node(arena: &AstArena, id: NodeId, env: &mut HashMap<String, i64>) -> Fl
 }
 
 #[test]
-fn test_51_1_randomized_type_construct_precedence_and_executable_homoiconic_macros() {
+pub fn test_51_1_randomized_type_construct_precedence_and_executable_homoiconic_macros() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_51_1_randomized_type_construct_precedence_and_executable_homoiconic_macros",
         &ANTICHEAT_SPEC,
@@ -473,7 +473,7 @@ fn test_51_1_randomized_type_construct_precedence_and_executable_homoiconic_macr
 }
 
 #[test]
-fn test_51_2_surface_syntax_distributive_headers_call_quotes_and_diagnostics() {
+pub fn test_51_2_surface_syntax_distributive_headers_call_quotes_and_diagnostics() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_51_2_surface_syntax_distributive_headers_call_quotes_and_diagnostics",
         &ANTICHEAT_SPEC,
@@ -610,7 +610,7 @@ fn test_51_2_surface_syntax_distributive_headers_call_quotes_and_diagnostics() {
 }
 
 #[test]
-fn test_51_3_domain_syntax_packages_and_strict_nameof_hygiene() {
+pub fn test_51_3_domain_syntax_packages_and_strict_nameof_hygiene() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_51_3_domain_syntax_packages_and_strict_nameof_hygiene",
         &ANTICHEAT_SPEC,
@@ -722,7 +722,7 @@ fn test_51_3_domain_syntax_packages_and_strict_nameof_hygiene() {
 }
 
 #[test]
-fn test_51_4_rust_parser_and_ast_contraction_and_name_blind_purity() {
+pub fn test_51_4_rust_parser_and_ast_contraction_and_name_blind_purity() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_51_4_rust_parser_and_ast_contraction_and_name_blind_purity",
         &ANTICHEAT_SPEC,

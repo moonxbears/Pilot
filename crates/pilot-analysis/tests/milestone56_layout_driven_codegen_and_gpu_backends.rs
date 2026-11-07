@@ -317,7 +317,7 @@ fn run_codegen_on_arena(target_program: &str, codegen_files: &[&str], call_expr:
 }
 
 #[test]
-fn test_56_1_layout_driven_c11_backend_compiled_and_executed_by_clang() {
+pub fn test_56_1_layout_driven_c11_backend_compiled_and_executed_by_clang() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_56_1_layout_driven_c11_backend_compiled_and_executed_by_clang",
         &ANTICHEAT_SPEC,
@@ -429,7 +429,7 @@ fn test_56_1_layout_driven_c11_backend_compiled_and_executed_by_clang() {
 }
 
 #[test]
-fn test_56_3_llvm_ir_wasm_binary_and_x86_64_asm_executed_by_clang_and_node() {
+pub fn test_56_3_llvm_ir_wasm_binary_and_x86_64_asm_executed_by_clang_and_node() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_56_3_llvm_ir_wasm_binary_and_x86_64_asm_executed_by_clang_and_node",
         &ANTICHEAT_SPEC,
@@ -587,7 +587,7 @@ fn test_56_3_llvm_ir_wasm_binary_and_x86_64_asm_executed_by_clang_and_node() {
 }
 
 #[test]
-fn test_56_2_and_56_4_all_eight_gpu_backends_ast_lowering_cpu_execution_and_legacy_purge() {
+pub fn test_56_2_and_56_4_all_eight_gpu_backends_ast_lowering_cpu_execution_and_legacy_purge() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_56_2_and_56_4_all_eight_gpu_backends_ast_lowering_cpu_execution_and_legacy_purge",
         &ANTICHEAT_SPEC,

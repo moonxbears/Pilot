@@ -176,7 +176,7 @@ fn run_vm_with_registry(script: &str, reg: &mut PhysicsRegistry) -> PilotVal {
 }
 
 #[test]
-fn test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts() {
+pub fn test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts",
         &ANTICHEAT_SPEC,
@@ -442,7 +442,7 @@ fn test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts() {
 }
 
 #[test]
-fn test_50_2_open_keyword_reflection_and_randomized_user_categories() {
+pub fn test_50_2_open_keyword_reflection_and_randomized_user_categories() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_50_2_open_keyword_reflection_and_randomized_user_categories",
         &ANTICHEAT_SPEC,
@@ -569,7 +569,7 @@ fn test_50_2_open_keyword_reflection_and_randomized_user_categories() {
 }
 
 #[test]
-fn test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_sorted_weaver() {
+pub fn test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_sorted_weaver() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_sorted_weaver",
         &ANTICHEAT_SPEC,
@@ -845,7 +845,7 @@ fn test_50_3_bootstrap_manifest_randomized_naming_verifier_and_full_weight_sorte
 }
 
 #[test]
-fn test_50_4_and_50_5_target_width_projections_pilc_snapshot_and_gate1_gate2_contraction() {
+pub fn test_50_4_and_50_5_target_width_projections_pilc_snapshot_and_gate1_gate2_contraction() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_50_4_and_50_5_target_width_projections_pilc_snapshot_and_gate1_gate2_contraction",
         &ANTICHEAT_SPEC,

@@ -499,7 +499,7 @@ pub partial interface IAttribute {}
 
 // Pure-Pilot Context-Sensitive Semantic Token Solver
 [Lang(Cfg.Lang.ide_policy_slot), Layout(c_abi)]
-pub struct IdeContextPolicy : IValue {
+pub partial struct IdeContextPolicy : IValue {
     pub static pure fn classify(
         inherited_kind: u32,
         inherited_mods: u32,

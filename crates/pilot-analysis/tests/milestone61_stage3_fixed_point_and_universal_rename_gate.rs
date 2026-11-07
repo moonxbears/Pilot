@@ -248,7 +248,9 @@ fn python_sha256_bytes(bytes: &[u8]) -> String {
 }
 
 fn compile_and_run_c11_i64(c_src: &str, call_expr_c: &str, tag: &str) -> i64 {
-    let tmp = std::env::temp_dir().join(format!("pilot_m61_{}_{}", std::process::id(), tag));
+    static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = std::env::temp_dir().join(format!("pilot_m61_{}_{}_{}", std::process::id(), seq, tag));
     let c_path = tmp.with_extension("c");
     let bin_path = tmp.with_extension("bin");
     let full_c = format!(
@@ -320,7 +322,7 @@ fn collect_type_named_symbols(arena: &AstArena, id: NodeId, out: &mut Vec<String
 }
 
 #[test]
-fn test_61_1_standalone_selfhost_lexer_16b_ast_pratt_precedence_and_quote_splicing() {
+pub fn test_61_1_standalone_selfhost_lexer_16b_ast_pratt_precedence_and_quote_splicing() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_61_1_standalone_selfhost_lexer_16b_ast_pratt_precedence_and_quote_splicing",
         &ANTICHEAT_SPEC,
@@ -474,7 +476,7 @@ fn test_61_1_standalone_selfhost_lexer_16b_ast_pratt_precedence_and_quote_splici
 }
 
 #[test]
-fn test_61_2_stage3_bootstrap_fixed_point_clang_native_and_pilc_sha256_parity() {
+pub fn test_61_2_stage3_bootstrap_fixed_point_clang_native_and_pilc_sha256_parity() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_61_2_stage3_bootstrap_fixed_point_clang_native_and_pilc_sha256_parity",
         &ANTICHEAT_SPEC,
@@ -581,7 +583,7 @@ fn test_61_2_stage3_bootstrap_fixed_point_clang_native_and_pilc_sha256_parity() 
 }
 
 #[test]
-fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_across_7_backends() {
+pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_across_7_backends() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_across_7_backends",
         &ANTICHEAT_SPEC,

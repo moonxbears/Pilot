@@ -7,13 +7,13 @@ pub pkg Pilot.Db.Syntax;
 use Pilot.Core.Genesis.*;
 
 comptime {
-    __engine("bind_receptor", "database", 33, 1);
-    __engine("bind_receptor", "from",     33, 6);
-    __engine("bind_receptor", "select",   33, 7);
+    __engine("bind_receptor", nameof(database), 33, 1);
+    __engine("bind_receptor", nameof(from),     33, 6);
+    __engine("bind_receptor", nameof(select),   33, 7);
 
-    __engine("register_pratt_op", "union",     infix, 12, left);
-    __engine("register_pratt_op", "intersect", infix, 14, left);
-    __engine("register_pratt_op", "except",    infix, 12, left);
+    __engine("register_pratt_op", nameof(union),     infix, 12, left);
+    __engine("register_pratt_op", nameof(intersect), infix, 14, left);
+    __engine("register_pratt_op", nameof(except),    infix, 12, left);
 }
 
 pub syntax {

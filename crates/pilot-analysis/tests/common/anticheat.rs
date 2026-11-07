@@ -11,6 +11,56 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Condvar, Mutex, OnceLock};
+use std::thread::ThreadId;
+
+struct ReentrantLockTicket;
+
+fn global_serial_lock() -> &'static (Mutex<Option<(ThreadId, usize)>>, Condvar) {
+    static LOCK: OnceLock<(Mutex<Option<(ThreadId, usize)>>, Condvar)> = OnceLock::new();
+    LOCK.get_or_init(|| (Mutex::new(None), Condvar::new()))
+}
+
+impl ReentrantLockTicket {
+    fn acquire() -> Self {
+        let tid = std::thread::current().id();
+        let (lock, cvar) = global_serial_lock();
+        let mut guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            match *guard {
+                None => {
+                    *guard = Some((tid, 1));
+                    return Self;
+                }
+                Some((owner, depth)) if owner == tid => {
+                    *guard = Some((tid, depth + 1));
+                    return Self;
+                }
+                Some(_) => {
+                    guard = cvar.wait(guard).unwrap_or_else(|e| e.into_inner());
+                }
+            }
+        }
+    }
+}
+
+impl Drop for ReentrantLockTicket {
+    fn drop(&mut self) {
+        let tid = std::thread::current().id();
+        let (lock, cvar) = global_serial_lock();
+        let mut guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((owner, depth)) = *guard {
+            if owner == tid {
+                if depth <= 1 {
+                    *guard = None;
+                    cvar.notify_all();
+                } else {
+                    *guard = Some((tid, depth - 1));
+                }
+            }
+        }
+    }
+}
 
 pub struct FileAuditRule {
     pub path: &'static str,
@@ -31,6 +81,7 @@ pub struct MilestoneAuditSpec {
 }
 
 pub struct AntiCheatGuard<'a> {
+    _lock: ReentrantLockTicket,
     test_name: &'static str,
     spec: &'a MilestoneAuditSpec,
     root: PathBuf,
@@ -39,10 +90,12 @@ pub struct AntiCheatGuard<'a> {
 
 impl<'a> AntiCheatGuard<'a> {
     pub fn arm(test_name: &'static str, spec: &'a MilestoneAuditSpec) -> Self {
+        let lock = ReentrantLockTicket::acquire();
         let root = workspace_root();
         // Pre-flight seal check: ensure frozen Rust/Cargo/Gate files are untouched BEFORE running any code.
         verify_frozen_rust_and_gate_tamper_seal(&root, test_name, spec.milestone_id);
         Self {
+            _lock: lock,
             test_name,
             spec,
             root,
@@ -91,7 +144,7 @@ const SHA256_K: [u32; 64] = [
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ];
 
-fn sha256_hex(data: &[u8]) -> String {
+pub fn sha256_hex(data: &[u8]) -> String {
     let mut h: [u32; 8] = [
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
         0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
@@ -246,6 +299,7 @@ const MILESTONE_TEST_MANIFEST: &[(&str, usize)] = &[
     ("crates/pilot-analysis/tests/milestone59_persistent_pilvm_lsp_and_dap.rs", 3),
     ("crates/pilot-analysis/tests/milestone60_selfhost_cli_pkg_perf_and_bench.rs", 3),
     ("crates/pilot-analysis/tests/milestone61_stage3_fixed_point_and_universal_rename_gate.rs", 3),
+    ("crates/pilot-analysis/tests/mega_all_milestones_simultaneous_gate.rs", 1),
 ];
 
 const GLOBAL_BANNED_LEAK_SUBSTRINGS: &[&str] = &[
@@ -532,12 +586,99 @@ fn verify_test_suite_self_integrity(root: &Path, test_name: &str, spec: &Milesto
             "ANTI-CHEAT [PASS 3: UNHOOKED_ANTICHEAT_GUARD] [M{}::{}]: '{}' has {} #[test]s but arm={} / finish={}!",
             spec.milestone_id, test_name, rel_path, min_tests, arm_cnt, fin_cnt
         );
+
+        if rel_path == "crates/pilot-analysis/tests/mega_all_milestones_simultaneous_gate.rs" {
+            for mod_prefix in [
+                "m50::test_",
+                "m51::test_",
+                "m52_lexer::test_",
+                "m52_analysis::test_",
+                "m53::test_",
+                "m54::test_",
+                "m55::test_",
+                "m56::test_",
+                "m57::test_",
+                "m58::test_",
+                "m59::test_",
+                "m60::test_",
+                "m61::test_",
+            ] {
+                assert!(
+                    code_only.contains(mod_prefix),
+                    "ANTI-CHEAT [PASS 3: GUTTED_MEGA_TEST] [M{}::{}]: Mega test is missing invocation of '{}'!",
+                    spec.milestone_id, test_name, mod_prefix
+                );
+            }
+            let mega_calls = code_only.matches("::test_").count();
+            assert!(
+                mega_calls >= 44 && code_only.matches("snapshot_all_pilot_sha256(").count() >= 2,
+                "ANTI-CHEAT [PASS 3: GUTTED_MEGA_TEST] [M{}::{}]: Mega test must invoke all 44 milestone tests (found {}) and verify pre/post SHA-256 .pilot snapshots!",
+                spec.milestone_id, test_name, mega_calls
+            );
+        }
     }
     assert!(
         matched_current,
         "ANTI-CHEAT [PASS 3: UNREGISTERED_SPEC] [M{}::{}]: '{}' missing from MILESTONE_TEST_MANIFEST",
         spec.milestone_id, test_name, spec.test_file_rel
     );
+
+    verify_agent_test_readme_integrity(root, test_name, spec.milestone_id);
+}
+
+fn verify_agent_test_readme_integrity(root: &Path, test_name: &str, milestone_id: u32) {
+    let readme_path = root.join("agent_test_readme.md");
+    let raw = std::fs::read_to_string(&readme_path).unwrap_or_else(|e| {
+        panic!(
+            "ANTI-CHEAT [PASS 3B: MISSING_AGENT_TEST_README] [M{}::{}]: 'agent_test_readme.md' missing at workspace root: {}",
+            milestone_id, test_name, e
+        )
+    });
+
+    const LEDGER_IDS: &[&str] = &[
+        "M50", "M51", "M52", "M53", "M54", "M55", "M56", "M57", "M58", "M59", "M60", "M61", "MEGA",
+    ];
+
+    let mut statuses: Vec<(&str, bool)> = Vec::with_capacity(LEDGER_IDS.len());
+    for &id in LEDGER_IDS {
+        let unchecked_prefix = format!("- [ ] {}:", id);
+        let checked_lo_prefix = format!("- [x] {}:", id);
+        let checked_hi_prefix = format!("- [X] {}:", id);
+
+        let mut matches_found = 0usize;
+        let mut is_checked = false;
+        for line in raw.lines() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with(&unchecked_prefix) {
+                matches_found += 1;
+                is_checked = false;
+            } else if trimmed.starts_with(&checked_lo_prefix) || trimmed.starts_with(&checked_hi_prefix) {
+                matches_found += 1;
+                is_checked = true;
+            }
+        }
+        assert_eq!(
+            matches_found, 1,
+            "ANTI-CHEAT [PASS 3B: CORRUPTED_MILESTONE_LEDGER] [M{}::{}]: Expected exactly 1 ledger line `- [ ] {}:` or `- [x] {}:` in agent_test_readme.md, found {}!",
+            milestone_id, test_name, id, id, matches_found
+        );
+        statuses.push((id, is_checked));
+    }
+
+    // Strict cumulative prefix-monotonicity: `[x]` may NEVER appear after an incomplete `[ ]` prerequisite!
+    let mut first_unchecked: Option<&str> = None;
+    for &(id, checked) in &statuses {
+        if !checked {
+            if first_unchecked.is_none() {
+                first_unchecked = Some(id);
+            }
+        } else if let Some(prev_missing) = first_unchecked {
+            panic!(
+                "ANTI-CHEAT [PASS 3B: ILLEGAL_NON_CUMULATIVE_CHECKMARK] [M{}::{}]: '{}' is marked [x] in agent_test_readme.md while earlier prerequisite '{}' is still [ ]! A milestone may ONLY be marked [x] after passing ALL of its own tests AND ALL previous milestone tests simultaneously.",
+                milestone_id, test_name, id, prev_missing
+            );
+        }
+    }
 }
 
 fn verify_deleted_legacy_and_global_pilot_caps(root: &Path, test_name: &str, milestone_id: u32) {

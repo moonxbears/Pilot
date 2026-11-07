@@ -15,3 +15,13 @@ pub syntax {
     on_missed(body)      => quote { { $body } };
     fallback(body)       => quote { { $body } };
 }
+
+pub pure fn is_realtime_construct(word: str) -> bool {
+    return word == nameof(noalloc)
+        || word == nameof(region)
+        || word == nameof(deadline)
+        || word == nameof(within)
+        || word == nameof(periodic)
+        || word == nameof(on_missed)
+        || word == nameof(fallback);
+}

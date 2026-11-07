@@ -234,7 +234,7 @@ fn run_perceus_on_program(target_program: &str, tail_expr: &str) -> (PilotVal, V
 }
 
 #[test]
-fn test_54_1_real_ast_perceus_arc_dup_last_use_drop_reuse_and_lifo_guards() {
+pub fn test_54_1_real_ast_perceus_arc_dup_last_use_drop_reuse_and_lifo_guards() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_54_1_real_ast_perceus_arc_dup_last_use_drop_reuse_and_lifo_guards",
         &ANTICHEAT_SPEC,
@@ -413,7 +413,7 @@ fn test_54_1_real_ast_perceus_arc_dup_last_use_drop_reuse_and_lifo_guards() {
 }
 
 #[test]
-fn test_54_2_and_54_3_real_ast_escape_realtime_cue_verifiers_and_dsp_decoy_trap() {
+pub fn test_54_2_and_54_3_real_ast_escape_realtime_cue_verifiers_and_dsp_decoy_trap() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_54_2_and_54_3_real_ast_escape_realtime_cue_verifiers_and_dsp_decoy_trap",
         &ANTICHEAT_SPEC,

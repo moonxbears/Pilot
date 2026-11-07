@@ -27,13 +27,13 @@ comptime {
 
     // Axis 2: Compile-Time Clearance Rings (`lvl(N)` & shorthand `lvl0`..`lvl100`)
     __engine("register_parametric_modifier", nameof(lvl), "set_clearance_ring");
-    __engine("register_modifier", "lvl0",   "set_clearance_ring_0");
-    __engine("register_modifier", "lvl1",   "set_clearance_ring_1");
-    __engine("register_modifier", "lvl2",   "set_clearance_ring_2");
-    __engine("register_modifier", "lvl3",   "set_clearance_ring_3");
-    __engine("register_modifier", "lvl80",  "set_clearance_ring_80");
-    __engine("register_modifier", "lvl90",  "set_clearance_ring_90");
-    __engine("register_modifier", "lvl100", "set_clearance_ring_100");
+    __engine("register_modifier", nameof(lvl0),   "set_clearance_ring_0");
+    __engine("register_modifier", nameof(lvl1),   "set_clearance_ring_1");
+    __engine("register_modifier", nameof(lvl2),   "set_clearance_ring_2");
+    __engine("register_modifier", nameof(lvl3),   "set_clearance_ring_3");
+    __engine("register_modifier", nameof(lvl80),  "set_clearance_ring_80");
+    __engine("register_modifier", nameof(lvl90),  "set_clearance_ring_90");
+    __engine("register_modifier", nameof(lvl100), "set_clearance_ring_100");
 }
 
 pub pure fn visibility_tier_of(word: str) -> i32 {

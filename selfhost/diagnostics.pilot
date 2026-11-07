@@ -132,6 +132,25 @@ pub fn unit_enforces_core_naming(node_count: i64) -> bool {
     return false;
 }
 
+pub fn is_lowercase_primitive_ident(s: str) -> bool {
+    let slen = __engine(DiagHooks.str_len, s);
+    if slen <= 0 {
+        return false;
+    }
+    var idx = 0;
+    while idx < slen {
+        let ch = __engine(DiagHooks.str_byte_at, s, idx);
+        let is_lower = ch >= 97 && ch <= 122;
+        let is_digit = ch >= 48 && ch <= 57;
+        let is_under = ch == 95;
+        if !is_lower && !is_digit && !is_under {
+            return false;
+        }
+        idx = idx + 1;
+    }
+    return true;
+}
+
 pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
     let kind = __engine(DiagHooks.ast_node_kind, nid);
     if kind != 1 {
@@ -158,8 +177,14 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
 
     if kind == 2 {
         if enforce_naming {
-            let c1 = __engine(DiagHooks.str_byte_at, name, 1);
-            if c0 != 73 || c1 < 65 || c1 > 90 {
+            var bad_iface = (c0 != 73) || (nlen < 2);
+            if !bad_iface {
+                let c1 = __engine(DiagHooks.str_byte_at, name, 1);
+                if c1 < 65 || c1 > 90 {
+                    bad_iface = true;
+                }
+            }
+            if bad_iface {
                 let msg = format_core_naming_violation(
                     "InterfacePrefix",
                     "Interface '" + name + "' must begin with 'I' followed by PascalCase"
@@ -206,7 +231,16 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
 
     if enforce_naming {
         if !is_partial {
-            if !is_lang {
+            if is_lang {
+                if !is_lowercase_primitive_ident(name) {
+                    let lprim_msg = format_core_naming_violation(
+                        "LangPrimitiveLowercase",
+                        "[Lang] primitive struct '" + name + "' must use lowercase identifier characters"
+                    );
+                    __engine(DiagHooks.ast_emit_diag, nid, 1, lprim_msg);
+                    return 1;
+                }
+            } else {
                 if c0 < 65 || c0 > 90 {
                     let pmsg = format_core_naming_violation(
                         "StructPascalCase",
@@ -214,6 +248,17 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
                     );
                     __engine(DiagHooks.ast_emit_diag, nid, 1, pmsg);
                     return 1;
+                }
+                if c0 == 73 && nlen >= 2 {
+                    let sc1 = __engine(DiagHooks.str_byte_at, name, 1);
+                    if sc1 >= 65 && sc1 <= 90 {
+                        let imsg = format_core_naming_violation(
+                            "ReservedInterfacePrefix",
+                            "Struct '" + name + "' cannot begin with reserved interface prefix 'I' + uppercase"
+                        );
+                        __engine(DiagHooks.ast_emit_diag, nid, 1, imsg);
+                        return 1;
+                    }
                 }
                 if has_iattr {
                     if !str_ends_with(name, "Attr") {

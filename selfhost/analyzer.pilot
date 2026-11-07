@@ -611,14 +611,20 @@ pub fn infer_node(i: i64, node_count: i64) -> i64 {
 
 pub fn verify_capability_transition(src_cap: i64, dst_cap: i64) -> bool {
     // 0 = VALUE (`0b00`), 1 = BORROW_REF (`0b01`), 4 = OWNED_OBJ (`0b10`), 5 = SCOPED_GUARD (`0b11`)
-    if src_cap == 0 {
+    if src_cap == dst_cap {
         return true;
+    }
+    if src_cap == 0 {
+        return dst_cap == 1;
     }
     if src_cap == 4 {
         if dst_cap == 1 { return true; }
         if dst_cap == 5 { return true; }
     }
-    return src_cap == dst_cap;
+    if src_cap == 5 {
+        return dst_cap == 1;
+    }
+    return false;
 }
 
 pub fn compute_field_projection_offset(agg_lid: i64, field_idx: i64) -> i64 {
@@ -628,10 +634,35 @@ pub fn compute_field_projection_offset(agg_lid: i64, field_idx: i64) -> i64 {
 pub fn compute_soa_projection(elem_lid: i64, ptr_bits: i64) -> i64 {
     // Target-pointer-width-aware SOA column slice (`{ ptr<TField>, usize }` -> 8B on 32-bit, 16B on 64-bit)
     let w = if ptr_bits > 0 { ptr_bits } else { 64 };
-    let ptr_word_lid = __engine(Cfg.ast.layout_scalar, w, 1, 0);
+    let elem_metrics = __engine(Cfg.ast.layout_metrics, elem_lid);
+    var ptr_word_lid = 0;
+    if w == 64 && elem_metrics >= 0 {
+        ptr_word_lid = __engine(Cfg.ast.layout_ptr, elem_lid, 1, 0);
+    } else {
+        ptr_word_lid = __engine(Cfg.ast.layout_scalar, w, 1, 0);
+    }
     let len_word_lid = __engine(Cfg.ast.layout_scalar, w, 1, 0);
     let soa_slice_lid = __engine(Cfg.ast.layout_aggregate, ptr_word_lid, len_word_lid);
     return soa_slice_lid;
+}
+
+pub fn is_lowercase_lang_ident(s: str) -> bool {
+    let slen = __engine(Cfg.ast.str_len, s);
+    if slen <= 0 {
+        return false;
+    }
+    var idx = 0;
+    while idx < slen {
+        let ch = __engine(Cfg.ast.str_byte_at, s, idx);
+        let is_lower = ch >= 97 && ch <= 122;
+        let is_digit = ch >= 48 && ch <= 57;
+        let is_under = ch == 95;
+        if !is_lower && !is_digit && !is_under {
+            return false;
+        }
+        idx = idx + 1;
+    }
+    return true;
 }
 
 pub fn str_ends_with_bytes(s: str, suffix: str) -> bool {
@@ -692,8 +723,14 @@ pub fn verify_decl_contracts(nid: i64, enforce_naming: bool) -> i64 {
 
     if kind == 2 {
         if enforce_naming {
-            let c1 = __engine(Cfg.ast.str_byte_at, name, 1);
-            if c0 != 73 || c1 < 65 || c1 > 90 {
+            var bad_iface = (c0 != 73) || (nlen < 2);
+            if !bad_iface {
+                let c1 = __engine(Cfg.ast.str_byte_at, name, 1);
+                if c1 < 65 || c1 > 90 {
+                    bad_iface = true;
+                }
+            }
+            if bad_iface {
                 __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [InterfacePrefix] Interface '" + name + "' must begin with 'I' + PascalCase");
             }
         }
@@ -731,20 +768,35 @@ pub fn verify_decl_contracts(nid: i64, enforce_naming: bool) -> i64 {
 
     if enforce_naming {
         if !is_partial {
-            if !is_lang {
+            if is_lang {
+                if !is_lowercase_lang_ident(name) {
+                    __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [LangPrimitiveLowercase] [Lang] primitive struct '" + name + "' must be lowercase");
+                }
+            } else {
+                var prefix_violation = false;
                 if c0 < 65 || c0 > 90 {
                     __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [StructPascalCase] Core struct '" + name + "' must be PascalCase");
-                } else if has_iattr {
-                    if !str_ends_with_bytes(name, "Attr") {
-                        __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [AttributeSuffix] Attribute struct '" + name + "' must end with 'Attr'");
+                    prefix_violation = true;
+                } else if c0 == 73 && nlen >= 2 {
+                    let sc1 = __engine(Cfg.ast.str_byte_at, name, 1);
+                    if sc1 >= 65 && sc1 <= 90 {
+                        __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [ReservedInterfacePrefix] Struct '" + name + "' cannot begin with reserved interface prefix 'I' + uppercase");
+                        prefix_violation = true;
                     }
-                } else if has_iguard || (has_iref && has_iobj) {
-                    if !str_ends_with_bytes(name, "Guard") && !str_ends_with_bytes(name, "Scope") && !str_ends_with_bytes(name, "Lease") {
-                        __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [ScopedGuardSuffix] IGuard struct '" + name + "' must end with 'Guard', 'Scope', or 'Lease'");
-                    }
-                } else if has_iref {
-                    if !str_ends_with_bytes(name, "View") && !str_ends_with_bytes(name, "Lens") && !str_ends_with_bytes(name, "Cursor") && !str_ends_with_bytes(name, "Enumerator") {
-                        __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [ReferenceViewSuffix] IReference struct '" + name + "' must end with 'View', 'Lens', 'Cursor', or 'Enumerator'");
+                }
+                if !prefix_violation {
+                    if has_iattr {
+                        if !str_ends_with_bytes(name, "Attr") {
+                            __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [AttributeSuffix] Attribute struct '" + name + "' must end with 'Attr'");
+                        }
+                    } else if has_iguard || (has_iref && has_iobj) {
+                        if !str_ends_with_bytes(name, "Guard") && !str_ends_with_bytes(name, "Scope") && !str_ends_with_bytes(name, "Lease") {
+                            __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [ScopedGuardSuffix] IGuard struct '" + name + "' must end with 'Guard', 'Scope', or 'Lease'");
+                        }
+                    } else if has_iref {
+                        if !str_ends_with_bytes(name, "View") && !str_ends_with_bytes(name, "Lens") && !str_ends_with_bytes(name, "Cursor") && !str_ends_with_bytes(name, "Enumerator") {
+                            __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [ReferenceViewSuffix] IReference struct '" + name + "' must end with 'View', 'Lens', 'Cursor', or 'Enumerator'");
+                        }
                     }
                 }
             }

@@ -622,7 +622,7 @@ fn flip_hex_bit(hex_str: &str, byte_idx: usize, bit_mask: u8) -> String {
 }
 
 #[test]
-fn test_58_1_ffi_bindgen_clang_c11_header_and_rt_getrandom_dlopen() {
+pub fn test_58_1_ffi_bindgen_clang_c11_header_and_rt_getrandom_dlopen() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_58_1_ffi_bindgen_clang_c11_header_and_rt_getrandom_dlopen",
         &ANTICHEAT_SPEC,
@@ -733,7 +733,7 @@ fn test_58_1_ffi_bindgen_clang_c11_header_and_rt_getrandom_dlopen() {
 }
 
 #[test]
-fn test_58_2a_sha256_sha512_blake3_and_hmac_randomized_boundary_oracles() {
+pub fn test_58_2a_sha256_sha512_blake3_and_hmac_randomized_boundary_oracles() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_58_2a_sha256_sha512_blake3_and_hmac_randomized_boundary_oracles",
         &ANTICHEAT_SPEC,
@@ -799,7 +799,7 @@ fn test_58_2a_sha256_sha512_blake3_and_hmac_randomized_boundary_oracles() {
 }
 
 #[test]
-fn test_58_2b_ed25519_rfc8032_bidirectional_node_oracle_and_malleability_rejection() {
+pub fn test_58_2b_ed25519_rfc8032_bidirectional_node_oracle_and_malleability_rejection() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_58_2b_ed25519_rfc8032_bidirectional_node_oracle_and_malleability_rejection",
         &ANTICHEAT_SPEC,
@@ -888,7 +888,7 @@ fn test_58_2b_ed25519_rfc8032_bidirectional_node_oracle_and_malleability_rejecti
 }
 
 #[test]
-fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() {
+pub fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11",
         &ANTICHEAT_SPEC,
@@ -1136,7 +1136,7 @@ fn test_58_3_glitch_free_diamond_reactive_cow_effects_and_real_tcp_http11() {
 }
 
 #[test]
-fn test_58_4a_shm_bounds_json_marshal_and_polyglot_python_node_bridges() {
+pub fn test_58_4a_shm_bounds_json_marshal_and_polyglot_python_node_bridges() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_58_4a_shm_bounds_json_marshal_and_polyglot_python_node_bridges",
         &ANTICHEAT_SPEC,
@@ -1227,7 +1227,7 @@ fn test_58_4a_shm_bounds_json_marshal_and_polyglot_python_node_bridges() {
 }
 
 #[test]
-fn test_58_4b_relational_sql_sqlite3_oracle_and_postgres_mysql_binary_wire_frames() {
+pub fn test_58_4b_relational_sql_sqlite3_oracle_and_postgres_mysql_binary_wire_frames() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_58_4b_relational_sql_sqlite3_oracle_and_postgres_mysql_binary_wire_frames",
         &ANTICHEAT_SPEC,
@@ -1399,7 +1399,7 @@ print(json.dumps(select_outputs))
 }
 
 #[test]
-fn test_58_5_legacy_polyglot_crypto_deleted_and_strict_rust_loc_caps() {
+pub fn test_58_5_legacy_polyglot_crypto_deleted_and_strict_rust_loc_caps() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_58_5_legacy_polyglot_crypto_deleted_and_strict_rust_loc_caps",
         &ANTICHEAT_SPEC,

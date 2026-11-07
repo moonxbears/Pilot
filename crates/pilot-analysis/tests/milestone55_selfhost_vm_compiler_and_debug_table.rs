@@ -216,7 +216,7 @@ fn selfhost_compile_program(target_program: &str) -> (PilcBinary, String) {
 }
 
 #[test]
-fn test_55_1_selfhost_compiler_emits_executable_pilc_for_randomized_recursive_and_loop_programs() {
+pub fn test_55_1_selfhost_compiler_emits_executable_pilc_for_randomized_recursive_and_loop_programs() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_55_1_selfhost_compiler_emits_executable_pilc_for_randomized_recursive_and_loop_programs",
         &ANTICHEAT_SPEC,
@@ -351,7 +351,7 @@ fn test_55_1_selfhost_compiler_emits_executable_pilc_for_randomized_recursive_an
 }
 
 #[test]
-fn test_55_2_sso_and_heap_string_constants_and_zero_arg_entry_without_main_hardcoding() {
+pub fn test_55_2_sso_and_heap_string_constants_and_zero_arg_entry_without_main_hardcoding() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_55_2_sso_and_heap_string_constants_and_zero_arg_entry_without_main_hardcoding",
         &ANTICHEAT_SPEC,
@@ -393,7 +393,7 @@ fn test_55_2_sso_and_heap_string_constants_and_zero_arg_entry_without_main_hardc
 }
 
 #[test]
-fn test_55_3_and_55_4_debug_tables_opcode_purification_and_line_caps() {
+pub fn test_55_3_and_55_4_debug_tables_opcode_purification_and_line_caps() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_55_3_and_55_4_debug_tables_opcode_purification_and_line_caps",
         &ANTICHEAT_SPEC,

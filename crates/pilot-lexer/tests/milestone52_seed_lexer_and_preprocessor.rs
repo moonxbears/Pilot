@@ -84,7 +84,7 @@ fn ws_root() -> PathBuf {
 }
 
 #[test]
-fn test_52_2_strict_14_seed_keywords_and_randomized_ident_boundary() {
+pub fn test_52_2_strict_14_seed_keywords_and_randomized_ident_boundary() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_52_2_strict_14_seed_keywords_and_randomized_ident_boundary",
         &ANTICHEAT_SPEC,
@@ -168,7 +168,7 @@ fn test_52_2_strict_14_seed_keywords_and_randomized_ident_boundary() {
 }
 
 #[test]
-fn test_52_2_two_way_dot_call_quotes_and_nested_bracket_matching() {
+pub fn test_52_2_two_way_dot_call_quotes_and_nested_bracket_matching() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_52_2_two_way_dot_call_quotes_and_nested_bracket_matching",
         &ANTICHEAT_SPEC,
@@ -292,7 +292,7 @@ fn test_52_2_two_way_dot_call_quotes_and_nested_bracket_matching() {
 }
 
 #[test]
-fn test_52_3_name_blind_unit_suffixes_fstrings_and_keywords_randomized() {
+pub fn test_52_3_name_blind_unit_suffixes_fstrings_and_keywords_randomized() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_52_3_name_blind_unit_suffixes_fstrings_and_keywords_randomized",
         &ANTICHEAT_SPEC,
@@ -338,7 +338,7 @@ fn test_52_3_name_blind_unit_suffixes_fstrings_and_keywords_randomized() {
 }
 
 #[test]
-fn test_52_4_contraction_caps_and_legacy_deletion_invariants() {
+pub fn test_52_4_contraction_caps_and_legacy_deletion_invariants() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_52_4_contraction_caps_and_legacy_deletion_invariants",
         &ANTICHEAT_SPEC,

@@ -106,6 +106,55 @@ pub fn highest_weight_attr_index(nid: i64) -> i64 {
     return best_idx;
 }
 
+// Returns comma-separated attribute names attached to `nid` sorted in strictly descending
+// order of `weight: i32` (default `10` if 0 args), preserving original attachment order on ties.
+pub fn weave_sorted_attr_names(nid: i64) -> str {
+    let ac = __engine(WeaverHooks.ast_attr_decl_count, nid);
+    if ac <= 0 {
+        return "";
+    }
+    var out = "";
+    var step = 0;
+    var has_prev = false;
+    var prev_w = 0;
+    var prev_idx = -1;
+    while step < ac {
+        var found = false;
+        var best_w = 0;
+        var best_idx = -1;
+        var k = 0;
+        while k < ac {
+            let w = extract_attr_weight(nid, k);
+            var eligible = true;
+            if has_prev {
+                eligible = (w < prev_w) || (w == prev_w && k > prev_idx);
+            }
+            if eligible {
+                if !found || (w > best_w) || (w == best_w && k < best_idx) {
+                    found = true;
+                    best_w = w;
+                    best_idx = k;
+                }
+            }
+            k = k + 1;
+        }
+        if found {
+            let asym = __engine(WeaverHooks.ast_attr_name, nid, best_idx);
+            let aname = __engine(WeaverHooks.sym_str, asym);
+            if step > 0 {
+                out = out + "," + aname;
+            } else {
+                out = aname;
+            }
+            has_prev = true;
+            prev_w = best_w;
+            prev_idx = best_idx;
+        }
+        step = step + 1;
+    }
+    return out;
+}
+
 // Validates and weaves attributes on `nid`; returns `1` if `nid` carries an ECS `IEcsRule` (Pillar 7)
 pub fn weave_node_attributes(nid: i64, node_count: i64) -> i64 {
     let ac = __engine(WeaverHooks.ast_attr_decl_count, nid);

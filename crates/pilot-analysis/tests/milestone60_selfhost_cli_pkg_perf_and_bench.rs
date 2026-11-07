@@ -338,7 +338,7 @@ fn python_sha256_hex(payload: &str) -> String {
 }
 
 #[test]
-fn test_60_1_pkg_manifest_parser_real_sha256_lockfile_multifile_pilpkg_and_venv() {
+pub fn test_60_1_pkg_manifest_parser_real_sha256_lockfile_multifile_pilpkg_and_venv() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_60_1_pkg_manifest_parser_real_sha256_lockfile_multifile_pilpkg_and_venv",
         &ANTICHEAT_SPEC,
@@ -456,7 +456,7 @@ fn test_60_1_pkg_manifest_parser_real_sha256_lockfile_multifile_pilpkg_and_venv(
 }
 
 #[test]
-fn test_60_2_live_vmhook_flamegraph_svg_ast_wcet_and_real_constant_folding_optimizer() {
+pub fn test_60_2_live_vmhook_flamegraph_svg_ast_wcet_and_real_constant_folding_optimizer() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_60_2_live_vmhook_flamegraph_svg_ast_wcet_and_real_constant_folding_optimizer",
         &ANTICHEAT_SPEC,
@@ -682,7 +682,7 @@ print("OK")
 }
 
 #[test]
-fn test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_crate_purge() {
+pub fn test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_crate_purge() {
     let guard = anticheat::AntiCheatGuard::arm(
         "test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_stateful_repl_and_crate_purge",
         &ANTICHEAT_SPEC,
