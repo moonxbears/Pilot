@@ -1,1 +1,446 @@
-{}
+{
+    "name": "pilot-lang",
+    "displayName": "Pilot Language Support",
+    "description": "Syntax highlighting, semantic analysis, type checking, and Language Server (LSP) integration for the Pilot programming language.",
+    "version": "1.1.51",
+    "publisher": "pilot-lang",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/moonxbears/Pilot.git",
+        "directory": "vscode-pilot"
+    },
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Linters"
+    ],
+    "activationEvents": [
+        "onLanguage:pilot",
+        "onDebug",
+        "onCommand:pilot.runCurrentFile",
+        "onCommand:pilot.debugCurrentFile",
+        "onCommand:pilot.debugCurrentFileDap",
+        "onCommand:pilot.createLaunchConfig",
+        "onCommand:pilot.runAllTests",
+        "onCommand:pilot.runCurrentTest",
+        "onCommand:pilot.refreshTests"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "semanticTokenTypes": [
+            {
+                "id": "namespace",
+                "description": "Style for namespaces"
+            },
+            {
+                "id": "type",
+                "description": "Style for types"
+            },
+            {
+                "id": "class",
+                "description": "Style for classes"
+            },
+            {
+                "id": "enum",
+                "description": "Style for enums"
+            },
+            {
+                "id": "interface",
+                "description": "Style for interfaces"
+            },
+            {
+                "id": "struct",
+                "description": "Style for structs"
+            },
+            {
+                "id": "typeParameter",
+                "description": "Style for generic type parameters"
+            },
+            {
+                "id": "parameter",
+                "description": "Style for function parameters"
+            },
+            {
+                "id": "variable",
+                "description": "Style for variables"
+            },
+            {
+                "id": "property",
+                "description": "Style for properties and fields"
+            },
+            {
+                "id": "enumMember",
+                "description": "Style for enum variants"
+            },
+            {
+                "id": "event",
+                "description": "Style for events"
+            },
+            {
+                "id": "function",
+                "description": "Style for functions"
+            },
+            {
+                "id": "method",
+                "description": "Style for methods"
+            },
+            {
+                "id": "macro",
+                "description": "Style for macros"
+            },
+            {
+                "id": "keyword",
+                "description": "Style for keywords"
+            },
+            {
+                "id": "modifier",
+                "description": "Style for modifiers"
+            },
+            {
+                "id": "comment",
+                "description": "Style for comments"
+            },
+            {
+                "id": "string",
+                "description": "Style for strings"
+            },
+            {
+                "id": "number",
+                "description": "Style for numbers"
+            },
+            {
+                "id": "regexp",
+                "description": "Style for regexes"
+            },
+            {
+                "id": "operator",
+                "description": "Style for operators"
+            },
+            {
+                "id": "decorator",
+                "description": "Style for attributes and decorators"
+            }
+        ],
+        "semanticTokenModifiers": [
+            {
+                "id": "declaration",
+                "description": "Annotates symbol declarations"
+            },
+            {
+                "id": "definition",
+                "description": "Annotates symbol definitions"
+            },
+            {
+                "id": "readonly",
+                "description": "Annotates readonly or immutable symbols"
+            },
+            {
+                "id": "static",
+                "description": "Annotates static members"
+            },
+            {
+                "id": "deprecated",
+                "description": "Annotates deprecated members"
+            },
+            {
+                "id": "abstract",
+                "description": "Annotates abstract members"
+            },
+            {
+                "id": "async",
+                "description": "Annotates async members"
+            },
+            {
+                "id": "modification",
+                "description": "Annotates mutating targets"
+            },
+            {
+                "id": "documentation",
+                "description": "Annotates doc comments"
+            },
+            {
+                "id": "defaultLibrary",
+                "description": "Annotates stdlib / built-in members"
+            },
+            {
+                "id": "constructor",
+                "description": "Annotates constructors"
+            },
+            {
+                "id": "callable",
+                "description": "Annotates callable variables"
+            }
+        ],
+        "languages": [
+            {
+                "id": "pilot",
+                "aliases": [
+                    "Pilot",
+                    "pilot"
+                ],
+                "extensions": [
+                    ".pilot",
+                    ".pchor"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "pilot",
+                "scopeName": "source.pilot",
+                "path": "./syntaxes/pilot.tmLanguage.json"
+            }
+        ],
+        "snippets": [
+            {
+                "language": "pilot",
+                "path": "./snippets/pilot.json"
+            }
+        ],
+        "breakpoints": [
+            {
+                "language": "pilot"
+            }
+        ],
+        "commands": [
+            {
+                "command": "pilot.restartLanguageServer",
+                "title": "Pilot: Restart Language Server"
+            },
+            {
+                "command": "pilot.runCurrentFile",
+                "title": "Pilot: Run Current File",
+                "icon": "$(play)"
+            },
+            {
+                "command": "pilot.debugCurrentFile",
+                "title": "Pilot: Debug Current File",
+                "icon": "$(debug-alt)"
+            },
+            {
+                "command": "pilot.debugCurrentFileDap",
+                "title": "Pilot: Debug in Debug Console (DAP)",
+                "icon": "$(debug-alt)"
+            },
+            {
+                "command": "pilot.createLaunchConfig",
+                "title": "Pilot: Add Run & Debug Configurations to launch.json"
+            },
+            {
+                "command": "pilot.runAllTests",
+                "title": "Pilot: Run All Tests",
+                "icon": "$(run-all)"
+            },
+            {
+                "command": "pilot.runCurrentTest",
+                "title": "Pilot: Run Current Test File",
+                "icon": "$(play)"
+            },
+            {
+                "command": "pilot.refreshTests",
+                "title": "Pilot: Refresh Tests",
+                "icon": "$(refresh)"
+            }
+        ],
+        "menus": {
+            "editor/title/run": [
+                {
+                    "command": "pilot.debugCurrentFileDap",
+                    "when": "resourceExtname == .pilot",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "pilot.runCurrentFile",
+                    "when": "resourceExtname == .pilot",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "pilot.debugCurrentFile",
+                    "when": "resourceExtname == .pilot",
+                    "group": "navigation@2"
+                },
+                {
+                    "command": "pilot.runCurrentTest",
+                    "when": "resourceExtname == .pilot",
+                    "group": "navigation@3"
+                }
+            ],
+            "editor/context": [
+                {
+                    "command": "pilot.runCurrentTest",
+                    "when": "resourceExtname == .pilot",
+                    "group": "navigation@3"
+                }
+            ]
+        },
+        "debuggers": [
+            {
+                "type": "pilot",
+                "label": "Pilot",
+                "languages": [
+                    "pilot"
+                ],
+                "configurationAttributes": {
+                    "launch": {
+                        "required": [
+                            "program"
+                        ],
+                        "properties": {
+                            "editor.semanticHighlighting.enabled": {
+                                "type": "boolean",
+                                "default": true,
+                                "description": "Enables semantic highlighting for Pilot files"
+                            },
+                            "program": {
+                                "type": "string",
+                                "description": "Path to the .pilot script to run or debug.",
+                                "default": "${file}"
+                            },
+                            "mode": {
+                                "type": "string",
+                                "description": "Execution mode: 'dap' for VS Code GUI debugger & Debug Console, 'debug' for interactive terminal debugging, 'run' for standard execution.",
+                                "enum": [
+                                    "dap",
+                                    "debug",
+                                    "run"
+                                ],
+                                "default": "dap"
+                            },
+                            "args": {
+                                "type": "array",
+                                "description": "Command line arguments passed to the script.",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "default": []
+                            },
+                            "pilotPath": {
+                                "type": "string",
+                                "description": "Path to the pilot executable (default: 'pilot')",
+                                "default": "pilot"
+                            },
+                            "stopOnEntry": {
+                                "type": "boolean",
+                                "description": "Automatically stop at program entry.",
+                                "default": false
+                            },
+                            "internalConsoleOptions": {
+                                "type": "string",
+                                "description": "Controls when the internal debug console should be opened.",
+                                "enum": [
+                                    "neverOpen",
+                                    "openOnSessionStart",
+                                    "openOnFirstSessionStart"
+                                ],
+                                "default": "openOnSessionStart"
+                            }
+                        }
+                    }
+                },
+                "initialConfigurations": [
+                    {
+                        "type": "pilot",
+                        "request": "launch",
+                        "name": "Pilot: Debug in Console (DAP)",
+                        "mode": "dap",
+                        "program": "",
+                        "stopOnEntry": false,
+                        "internalConsoleOptions": "openOnSessionStart",
+                        "args": []
+                    },
+                    {
+                        "type": "pilot",
+                        "request": "launch",
+                        "name": "Pilot: Debug Current File (Terminal)",
+                        "mode": "debug",
+                        "program": "",
+                        "args": []
+                    },
+                    {
+                        "type": "pilot",
+                        "request": "launch",
+                        "name": "Pilot: Run Current File",
+                        "mode": "run",
+                        "program": "",
+                        "args": []
+                    }
+                ],
+                "configurationSnippets": [
+                    {
+                        "label": "Pilot: Debug in Console (DAP)",
+                        "description": "Start a full interactive DAP debugger session in the VS Code Debug Console",
+                        "body": {
+                            "type": "pilot",
+                            "request": "launch",
+                            "name": "Pilot: Debug in Console (DAP)",
+                            "mode": "dap",
+                            "program": "^\"\"",
+                            "stopOnEntry": false,
+                            "internalConsoleOptions": "openOnSessionStart",
+                            "args": []
+                        }
+                    },
+                    {
+                        "label": "Pilot: Debug Current File (Terminal)",
+                        "description": "Start an interactive terminal debugger session for the current Pilot file",
+                        "body": {
+                            "type": "pilot",
+                            "request": "launch",
+                            "name": "Pilot: Debug Current File",
+                            "mode": "debug",
+                            "program": "^\"\"",
+                            "args": []
+                        }
+                    },
+                    {
+                        "label": "Pilot: Run Current File",
+                        "description": "Run the currently open Pilot file",
+                        "body": {
+                            "type": "pilot",
+                            "request": "launch",
+                            "name": "Pilot: Run Current File",
+                            "mode": "run",
+                            "program": "^\"\"",
+                            "args": []
+                        }
+                    }
+                ]
+            }
+        ],
+        "configuration": {
+            "title": "Pilot Language",
+            "properties": {
+                "pilot.languageServer.serverPath": {
+                    "type": "string",
+                    "default": "pilot-lsp",
+                    "description": "Optional explicit path to pilot-lsp or pilot executable."
+                },
+                "pilot.compiler.executablePath": {
+                    "type": "string",
+                    "default": "pilot",
+                    "description": "Optional explicit path to the pilot compiler executable."
+                },
+                "pilot.dap.serverPath": {
+                    "type": "string",
+                    "default": "pilot-dap",
+                    "description": "Optional explicit path to pilot-dap or pilot executable."
+                }
+            }
+        }
+    },
+    "devDependencies": {
+        "@types/node": "^26.6.5",
+        "@types/vscode": "^1.85.0",
+        "typescript": "^7.0.2"
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p .",
+        "watch": "tsc -watch -p .",
+        "package": "vsce package"
+    }
+}

@@ -1063,8 +1063,8 @@ pub pure fn build_package_json_model(version: str = "1.1.51") -> PackageJsonMode
 }
 
 pub fn dumps_package_json(version: str = "1.1.51", indent: i64 = 2) -> str {
-    let content = load("vscode-pilot/package.json");
-    if len(content) > 0 {
+    let content = __engine("fs_read_text", "vscode-pilot/package.json");
+    if len(content) > 2 {
         return content;
     }
     return "{}";

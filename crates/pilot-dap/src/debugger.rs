@@ -227,6 +227,95 @@ fn unpack_call(arena: &AstArena, node: AstNode) -> Option<(NodeId, Vec<NodeId>)>
     Some((callee, args))
 }
 
+fn find_toplevel_op<'a>(s: &'a str, op: &str, last: bool) -> Option<(&'a str, &'a str)> {
+    let mut in_str = false;
+    let mut quote_char = ' ';
+    let mut paren_depth = 0;
+    let mut bracket_depth = 0;
+    let s_bytes = s.as_bytes();
+    let op_bytes = op.as_bytes();
+    let mut found = None;
+
+    let mut i = 0;
+    while i < s_bytes.len() {
+        let b = s_bytes[i];
+        if (b == b'"' || b == b'\'') && (i == 0 || s_bytes[i - 1] != b'\\') {
+            if !in_str {
+                in_str = true;
+                quote_char = b as char;
+            } else if quote_char == b as char {
+                in_str = false;
+            }
+        } else if !in_str {
+            if b == b'(' {
+                paren_depth += 1;
+            } else if b == b')' && paren_depth > 0 {
+                paren_depth -= 1;
+            } else if b == b'[' {
+                bracket_depth += 1;
+            } else if b == b']' && bracket_depth > 0 {
+                bracket_depth -= 1;
+            } else if paren_depth == 0 && bracket_depth == 0 {
+                if s[i..].starts_with(op) {
+                    let before = if i > 0 { s_bytes[i - 1] } else { 0 };
+                    let after = if i + op_bytes.len() < s_bytes.len() { s_bytes[i + op_bytes.len()] } else { 0 };
+                    let valid = match op {
+                        "=" => before != b'=' && before != b'<' && before != b'>' && before != b'!' && after != b'=',
+                        "<" => before != b'<' && after != b'=' && after != b'<',
+                        ">" => before != b'>' && after != b'=' && after != b'>',
+                        "&" => before != b'&' && after != b'&',
+                        "|" => before != b'|' && after != b'|',
+                        "-" => {
+                            let prefix = s[..i].trim();
+                            !prefix.is_empty() && after != b'>'
+                        }
+                        _ => true,
+                    };
+                    if valid {
+                        found = Some((&s[..i], &s[i + op_bytes.len()..]));
+                        if !last {
+                            return found;
+                        }
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    found
+}
+
+fn is_enclosed_in_parens(s: &str) -> bool {
+    let s = s.trim();
+    if !s.starts_with('(') || !s.ends_with(')') || s.len() < 2 {
+        return false;
+    }
+    let s_bytes = s.as_bytes();
+    let mut in_str = false;
+    let mut quote_char = ' ';
+    let mut depth = 0;
+    for (i, &b) in s_bytes.iter().enumerate() {
+        if (b == b'"' || b == b'\'') && (i == 0 || s_bytes[i - 1] != b'\\') {
+            if !in_str {
+                in_str = true;
+                quote_char = b as char;
+            } else if quote_char == b as char {
+                in_str = false;
+            }
+        } else if !in_str {
+            if b == b'(' {
+                depth += 1;
+            } else if b == b')' {
+                depth -= 1;
+                if depth == 0 && i < s_bytes.len() - 1 {
+                    return false;
+                }
+            }
+        }
+    }
+    depth == 0
+}
+
 impl PilotDebugger {
     pub fn new() -> Self {
         Self {
@@ -4116,8 +4205,86 @@ impl PilotDebugger {
         self.state = DebuggerState::Paused("pause".to_string());
     }
 
+    pub fn evaluate_mut(&mut self, expr: &str, frame_id: Option<u32>) -> Result<(PilotVal, String), String> {
+        let trimmed = expr.trim();
+        // Variable assignment: x = expr, let x = expr, var x = expr
+        if let Some((lhs, rhs)) = find_toplevel_op(trimmed, "=", false) {
+            let var_raw = lhs.trim();
+            let var_name = var_raw.strip_prefix("let ").or_else(|| var_raw.strip_prefix("var ")).unwrap_or(var_raw).trim();
+            if !var_name.is_empty() && var_name.chars().all(|c| c.is_alphanumeric() || c == '_') && !var_name.chars().next().unwrap().is_ascii_digit() {
+                let (val, ty) = self.evaluate(rhs.trim(), frame_id)?;
+                let assigned = if let Some(fid) = frame_id {
+                    if let Some(frame) = self.call_stack.iter_mut().find(|f| f.id == fid) {
+                        frame.locals.insert(var_name.to_string(), val);
+                        frame.local_types.insert(var_name.to_string(), ty.clone());
+                        true
+                    } else { false }
+                } else if let Some(frame) = self.call_stack.last_mut() {
+                    frame.locals.insert(var_name.to_string(), val);
+                    frame.local_types.insert(var_name.to_string(), ty.clone());
+                    true
+                } else { false };
+                if !assigned {
+                    self.globals.insert(var_name.to_string(), val);
+                    self.global_types.insert(var_name.to_string(), ty.clone());
+                }
+                return Ok((val, ty));
+            }
+        }
+        self.evaluate(expr, frame_id)
+    }
+
     pub fn evaluate(&self, expr: &str, frame_id: Option<u32>) -> Result<(PilotVal, String), String> {
         let trimmed = expr.trim();
+        if trimmed.is_empty() {
+            return Ok((PilotVal::NULL, "none".to_string()));
+        }
+
+        // REPL convenience commands
+        if trimmed == "help" || trimmed == "?" {
+            let help_text = "Pilot Debug Console:\n  - Evaluate expressions: x + 1, arr[0], obj.field, f\"{x}\"\n  - Assign variables: x = 10, name = \"hello\"\n  - Inspect state: 'locals', 'globals', 'stack'";
+            return Ok((PilotVal::from_str(help_text), "info".to_string()));
+        }
+        if trimmed == "locals" || trimmed == "vars" {
+            let frame = if let Some(fid) = frame_id {
+                self.call_stack.iter().find(|f| f.id == fid)
+            } else {
+                self.call_stack.last()
+            };
+            if let Some(f) = frame {
+                let mut lines: Vec<String> = f.locals.iter().map(|(k, v)| {
+                    let ty = f.local_types.get(k).cloned().unwrap_or_else(|| "any".to_string());
+                    format!("{}: {} = {}", k, ty, v.to_string_repr())
+                }).collect();
+                lines.sort();
+                let res = if lines.is_empty() { "(no locals in current frame)".to_string() } else { lines.join("\n") };
+                return Ok((PilotVal::from_str(&res), "locals".to_string()));
+            } else {
+                return Ok((PilotVal::from_str("(no active stack frame)"), "locals".to_string()));
+            }
+        }
+        if trimmed == "globals" {
+            let mut lines: Vec<String> = self.globals.iter().map(|(k, v)| {
+                let ty = self.global_types.get(k).cloned().unwrap_or_else(|| "any".to_string());
+                format!("{}: {} = {}", k, ty, v.to_string_repr())
+            }).collect();
+            lines.sort();
+            let res = if lines.is_empty() { "(no globals)".to_string() } else { lines.join("\n") };
+            return Ok((PilotVal::from_str(&res), "globals".to_string()));
+        }
+        if trimmed == "stack" || trimmed == "bt" {
+            let mut lines = Vec::new();
+            for (idx, f) in self.call_stack.iter().enumerate() {
+                lines.push(format!("#{}: {}() at {}:{}", idx, f.name, f.file, f.line));
+            }
+            let res = if lines.is_empty() { "(empty stack)".to_string() } else { lines.join("\n") };
+            return Ok((PilotVal::from_str(&res), "stack".to_string()));
+        }
+
+        // Outer parentheses: (expr)
+        if is_enclosed_in_parens(trimmed) {
+            return self.evaluate(&trimmed[1..trimmed.len() - 1], frame_id);
+        }
 
         // 1. Check frame locals if frame_id specified
         if let Some(fid) = frame_id {
@@ -4201,30 +4368,30 @@ impl PilotDebugger {
                         }
                     }
                     DebugCompoundVal::List(items) | DebugCompoundVal::Tuple(items) => {
-                        if member_name == "len" || member_name == "length" {
+                        if member_name == "len" || member_name == "length" || member_name == "len()" || member_name == "length()" {
                             return Ok((PilotVal::from_int(items.len() as i64), "int".to_string()));
                         }
                     }
                     DebugCompoundVal::Map(pairs) => {
-                        if member_name == "len" || member_name == "length" {
+                        if member_name == "len" || member_name == "length" || member_name == "len()" || member_name == "length()" {
                             return Ok((PilotVal::from_int(pairs.len() as i64), "int".to_string()));
                         }
                     }
                     _ => {}
                 }
             }
-            if member_name == "len" || member_name == "length" {
+            if member_name == "len" || member_name == "length" || member_name == "len()" || member_name == "length()" {
                 return Ok((PilotVal::from_int(target_str.len() as i64), "int".to_string()));
             }
-            if member_name == "to_string" {
+            if member_name == "to_string" || member_name == "to_string()" {
                 return Ok((target_val, "str".to_string()));
             }
-            if member_name == "type_of" {
+            if member_name == "type_of" || member_name == "type_of()" {
                 return Ok((PilotVal::from_str(&target_ty), "str".to_string()));
             }
         }
 
-        // 5. Index expression: arr[0] or map["k"]
+        // 6. Index expression: arr[0] or map["k"]
         if trimmed.ends_with(']') {
             if let Some((target_name, idx_part)) = trimmed.split_once('[') {
                 let idx_str = idx_part.trim_end_matches(']').trim();
@@ -4253,7 +4420,17 @@ impl PilotDebugger {
             }
         }
 
-        // 6. Primitive literals
+        // 7. Primitive literals
+        if let Some(hex_str) = trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
+            if let Ok(i) = i64::from_str_radix(hex_str, 16) {
+                return Ok((PilotVal::from_int(i), "int".to_string()));
+            }
+        }
+        if let Some(bin_str) = trimmed.strip_prefix("0b").or_else(|| trimmed.strip_prefix("0B")) {
+            if let Ok(i) = i64::from_str_radix(bin_str, 2) {
+                return Ok((PilotVal::from_int(i), "int".to_string()));
+            }
+        }
         if let Ok(i) = trimmed.parse::<i64>() {
             return Ok((PilotVal::from_int(i), "int".to_string()));
         }
@@ -4266,34 +4443,72 @@ impl PilotDebugger {
         if trimmed == "false" {
             return Ok((PilotVal::FALSE, "bool".to_string()));
         }
-        if trimmed == "null" || trimmed == "none" {
+        if trimmed == "null" || trimmed == "none" || trimmed == "nil" || trimmed == "void" {
             return Ok((PilotVal::NULL, "none".to_string()));
         }
 
-        // 7. Binary operators and comparisons
-        if let Some((l_str, r_str)) = trimmed.split_once(">=") {
+        // 8. Logical OR: ||, or
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, "||", true).or_else(|| find_toplevel_op(trimmed, " or ", true)) {
+            let (l_val, _) = self.evaluate(l_str, frame_id)?;
+            let (r_val, _) = self.evaluate(r_str, frame_id)?;
+            let res = l_val.as_bool().unwrap_or(false) || r_val.as_bool().unwrap_or(false);
+            return Ok((PilotVal::from_bool(res), "bool".to_string()));
+        }
+
+        // 9. Logical AND: &&, and
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, "&&", true).or_else(|| find_toplevel_op(trimmed, " and ", true)) {
+            let (l_val, _) = self.evaluate(l_str, frame_id)?;
+            let (r_val, _) = self.evaluate(r_str, frame_id)?;
+            let res = l_val.as_bool().unwrap_or(false) && r_val.as_bool().unwrap_or(false);
+            return Ok((PilotVal::from_bool(res), "bool".to_string()));
+        }
+
+        // 10. Unary NOT: !expr, not expr
+        if (trimmed.starts_with('!') && !trimmed.starts_with("!=")) || trimmed.starts_with("not ") {
+            let sub = if trimmed.starts_with('!') { &trimmed[1..] } else { &trimmed[4..] };
+            let (val, _) = self.evaluate(sub, frame_id)?;
+            let b = !val.as_bool().unwrap_or(false);
+            return Ok((PilotVal::from_bool(b), "bool".to_string()));
+        }
+
+        // 11. Comparison: ==, !=, >=, <=, >, <
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, "==", true) {
+            let (l_val, _) = self.evaluate(l_str, frame_id)?;
+            let (r_val, _) = self.evaluate(r_str, frame_id)?;
+            return Ok((PilotVal::from_bool(l_val == r_val || l_val.to_string_repr() == r_val.to_string_repr()), "bool".to_string()));
+        }
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, "!=", true) {
+            let (l_val, _) = self.evaluate(l_str, frame_id)?;
+            let (r_val, _) = self.evaluate(r_str, frame_id)?;
+            return Ok((PilotVal::from_bool(l_val != r_val && l_val.to_string_repr() != r_val.to_string_repr()), "bool".to_string()));
+        }
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, ">=", true) {
             let (l_val, _) = self.evaluate(l_str, frame_id)?;
             let (r_val, _) = self.evaluate(r_str, frame_id)?;
             let ge = l_val.as_int().unwrap_or(0) >= r_val.as_int().unwrap_or(0);
             return Ok((PilotVal::from_bool(ge), "bool".to_string()));
         }
-        if let Some((l_str, r_str)) = trimmed.split_once("<=") {
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, "<=", true) {
             let (l_val, _) = self.evaluate(l_str, frame_id)?;
             let (r_val, _) = self.evaluate(r_str, frame_id)?;
             let le = l_val.as_int().unwrap_or(0) <= r_val.as_int().unwrap_or(0);
             return Ok((PilotVal::from_bool(le), "bool".to_string()));
         }
-        if let Some((l_str, r_str)) = trimmed.split_once("==") {
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, ">", true) {
             let (l_val, _) = self.evaluate(l_str, frame_id)?;
             let (r_val, _) = self.evaluate(r_str, frame_id)?;
-            return Ok((PilotVal::from_bool(l_val == r_val || l_val.to_string_repr() == r_val.to_string_repr()), "bool".to_string()));
+            let gt = l_val.as_int().unwrap_or(0) > r_val.as_int().unwrap_or(0);
+            return Ok((PilotVal::from_bool(gt), "bool".to_string()));
         }
-        if let Some((l_str, r_str)) = trimmed.split_once("!=") {
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, "<", true) {
             let (l_val, _) = self.evaluate(l_str, frame_id)?;
             let (r_val, _) = self.evaluate(r_str, frame_id)?;
-            return Ok((PilotVal::from_bool(l_val != r_val && l_val.to_string_repr() != r_val.to_string_repr()), "bool".to_string()));
+            let lt = l_val.as_int().unwrap_or(0) < r_val.as_int().unwrap_or(0);
+            return Ok((PilotVal::from_bool(lt), "bool".to_string()));
         }
-        if let Some((l_str, r_str)) = trimmed.split_once('+') {
+
+        // 12. Additive: +, -
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, "+", true) {
             let (l_val, _) = self.evaluate(l_str, frame_id)?;
             let (r_val, _) = self.evaluate(r_str, frame_id)?;
             if l_val.is_int() && r_val.is_int() {
@@ -4307,15 +4522,78 @@ impl PilotDebugger {
                 return Ok((PilotVal::from_str(&s), "str".to_string()));
             }
         }
-        if let Some((l_str, r_str)) = trimmed.split_once('-') {
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, "-", true) {
             let (l_val, _) = self.evaluate(l_str, frame_id)?;
             let (r_val, _) = self.evaluate(r_str, frame_id)?;
+            if l_val.is_float() || r_val.is_float() {
+                let l = l_val.as_float().or_else(|| l_val.as_int().map(|i| i as f64)).unwrap_or(0.0);
+                let r = r_val.as_float().or_else(|| r_val.as_int().map(|i| i as f64)).unwrap_or(0.0);
+                return Ok((PilotVal::from_float(l - r), "float".to_string()));
+            }
             return Ok((PilotVal::from_int(l_val.as_int().unwrap_or(0) - r_val.as_int().unwrap_or(0)), "int".to_string()));
         }
-        if let Some((l_str, r_str)) = trimmed.split_once('*') {
+
+        // 13. Multiplicative: *, /, %
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, "*", true) {
             let (l_val, _) = self.evaluate(l_str, frame_id)?;
             let (r_val, _) = self.evaluate(r_str, frame_id)?;
+            if l_val.is_float() || r_val.is_float() {
+                let l = l_val.as_float().or_else(|| l_val.as_int().map(|i| i as f64)).unwrap_or(0.0);
+                let r = r_val.as_float().or_else(|| r_val.as_int().map(|i| i as f64)).unwrap_or(0.0);
+                return Ok((PilotVal::from_float(l * r), "float".to_string()));
+            }
             return Ok((PilotVal::from_int(l_val.as_int().unwrap_or(0) * r_val.as_int().unwrap_or(0)), "int".to_string()));
+        }
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, "/", true) {
+            let (l_val, _) = self.evaluate(l_str, frame_id)?;
+            let (r_val, _) = self.evaluate(r_str, frame_id)?;
+            if l_val.is_float() || r_val.is_float() {
+                let l = l_val.as_float().or_else(|| l_val.as_int().map(|i| i as f64)).unwrap_or(0.0);
+                let r = r_val.as_float().or_else(|| r_val.as_int().map(|i| i as f64)).unwrap_or(1.0);
+                if r != 0.0 {
+                    return Ok((PilotVal::from_float(l / r), "float".to_string()));
+                }
+            } else {
+                let r = r_val.as_int().unwrap_or(1);
+                if r != 0 {
+                    return Ok((PilotVal::from_int(l_val.as_int().unwrap_or(0) / r), "int".to_string()));
+                }
+            }
+        }
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, "%", true) {
+            let (l_val, _) = self.evaluate(l_str, frame_id)?;
+            let (r_val, _) = self.evaluate(r_str, frame_id)?;
+            let r = r_val.as_int().unwrap_or(1);
+            if r != 0 {
+                return Ok((PilotVal::from_int(l_val.as_int().unwrap_or(0) % r), "int".to_string()));
+            }
+        }
+
+        // 14. Bitwise: >>, <<, &, |, ^
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, ">>", true) {
+            let (l_val, _) = self.evaluate(l_str, frame_id)?;
+            let (r_val, _) = self.evaluate(r_str, frame_id)?;
+            return Ok((PilotVal::from_int(l_val.as_int().unwrap_or(0) >> r_val.as_int().unwrap_or(0)), "int".to_string()));
+        }
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, "<<", true) {
+            let (l_val, _) = self.evaluate(l_str, frame_id)?;
+            let (r_val, _) = self.evaluate(r_str, frame_id)?;
+            return Ok((PilotVal::from_int(l_val.as_int().unwrap_or(0) << r_val.as_int().unwrap_or(0)), "int".to_string()));
+        }
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, "&", true) {
+            let (l_val, _) = self.evaluate(l_str, frame_id)?;
+            let (r_val, _) = self.evaluate(r_str, frame_id)?;
+            return Ok((PilotVal::from_int(l_val.as_int().unwrap_or(0) & r_val.as_int().unwrap_or(0)), "int".to_string()));
+        }
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, "|", true) {
+            let (l_val, _) = self.evaluate(l_str, frame_id)?;
+            let (r_val, _) = self.evaluate(r_str, frame_id)?;
+            return Ok((PilotVal::from_int(l_val.as_int().unwrap_or(0) | r_val.as_int().unwrap_or(0)), "int".to_string()));
+        }
+        if let Some((l_str, r_str)) = find_toplevel_op(trimmed, "^", true) {
+            let (l_val, _) = self.evaluate(l_str, frame_id)?;
+            let (r_val, _) = self.evaluate(r_str, frame_id)?;
+            return Ok((PilotVal::from_int(l_val.as_int().unwrap_or(0) ^ r_val.as_int().unwrap_or(0)), "int".to_string()));
         }
 
         Err(format!("Cannot evaluate '{}'", expr))

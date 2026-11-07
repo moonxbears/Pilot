@@ -1,0 +1,21 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/scope_header.pilot
+// DISTRIBUTIVE SCOPE HEADER SYNTAX SPECIFICATION
+// (`[Attrs] (pub|priv|...) [fn] [-> Type]:` & `[Attrs] Type { ... }`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.ScopeHeader;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub partial struct {
+    // Structural descriptor for scope header state
+    [Layout(c_abi)]
+    ScopeHeaderDescriptor : IValue {
+        pub modifiers:   str;
+        pub attributes:  str;
+        pub return_type: str;
+        pub is_fn:       bool;
+    }
+}

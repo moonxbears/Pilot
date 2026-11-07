@@ -48,3 +48,25 @@ pub fn parse_literal_int(s: str) -> i64 {
     }
     return val;
 }
+
+pub struct SelfHostParser : IObject {
+    pub scope_stack: Pilot.SelfHost.ScopeHeader.ScopeHeaderStack;
+
+    ~self() {}
+
+    pub static fn create() -> SelfHostParser => SelfHostParser {
+        scope_stack: Pilot.SelfHost.ScopeHeader.ScopeHeaderStack.create(),
+    };
+
+    pub fn push_header(header: Pilot.SelfHost.ScopeHeader.ScopeHeader) -> void {
+        self.scope_stack.push(header);
+    }
+
+    pub fn pop_header() -> Pilot.SelfHost.ScopeHeader.ScopeHeader {
+        return self.scope_stack.pop();
+    }
+
+    pub fn current_header() -> Pilot.SelfHost.ScopeHeader.ScopeHeader {
+        return self.scope_stack.current();
+    }
+}

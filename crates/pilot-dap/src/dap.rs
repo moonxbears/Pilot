@@ -306,12 +306,16 @@ impl DapServer {
             "evaluate" => {
                 let expr = args.and_then(|a| a.get("expression")).and_then(|e| e.as_str()).unwrap_or("");
                 let frame_id = args.and_then(|a| a.get("frameId")).and_then(|f| f.as_u64()).map(|n| n as u32);
-                match self.debugger.evaluate(expr, frame_id) {
+                match self.debugger.evaluate_mut(expr, frame_id) {
                     Ok((val, ty)) => {
+                        let val_str = val.to_string_repr();
+                        let child_ref = self.resolve_child_ref(expr.trim(), &val_str);
+                        let display_val = self.format_var_display(expr.trim(), &val_str);
                         let body = format!(
-                            r#"{{"result":{},"type":"{}","variablesReference":0}}"#,
-                            escape_json_str(&val.to_string_repr()),
-                            ty
+                            r#"{{"result":{},"type":{},"variablesReference":{}}}"#,
+                            escape_json_str(&display_val),
+                            escape_json_str(&ty),
+                            child_ref
                         );
                         Some(format_dap_response(seq, "evaluate", true, &body))
                     }

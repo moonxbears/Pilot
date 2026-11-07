@@ -1005,11 +1005,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
             await vscode.debug.startDebugging(undefined, {
                 type: 'pilot',
-                name: 'Pilot: Debug with GUI (DAP)',
+                name: 'Pilot: Debug in Console (DAP)',
                 request: 'launch',
                 program: filePath,
                 mode: 'dap',
-                stopOnEntry: false
+                stopOnEntry: false,
+                internalConsoleOptions: 'openOnSessionStart'
             });
             vscode.commands.executeCommand('workbench.debug.action.focusRepl');
         }),
@@ -1346,6 +1347,16 @@ class PilotDebugConfigurationProvider implements vscode.DebugConfigurationProvid
             {
                 type: 'pilot',
                 request: 'launch',
+                name: 'Pilot: Debug in Console (DAP)',
+                mode: 'dap',
+                program: '${file}',
+                args: [],
+                stopOnEntry: false,
+                internalConsoleOptions: 'openOnSessionStart'
+            },
+            {
+                type: 'pilot',
+                request: 'launch',
                 name: 'Pilot: Run Current File',
                 mode: 'run',
                 program: '${file}',
@@ -1354,16 +1365,8 @@ class PilotDebugConfigurationProvider implements vscode.DebugConfigurationProvid
             {
                 type: 'pilot',
                 request: 'launch',
-                name: 'Pilot: Debug Current File',
+                name: 'Pilot: Debug Current File (Terminal)',
                 mode: 'debug',
-                program: '${file}',
-                args: []
-            },
-            {
-                type: 'pilot',
-                request: 'launch',
-                name: 'Pilot: Debug with GUI (DAP)',
-                mode: 'dap',
                 program: '${file}',
                 args: []
             }
@@ -1379,11 +1382,12 @@ class PilotDebugConfigurationProvider implements vscode.DebugConfigurationProvid
             const editor = vscode.window.activeTextEditor;
             if (editor && editor.document.languageId === 'pilot') {
                 config.type = 'pilot';
-                config.name = 'Pilot: Debug Current File';
+                config.name = 'Pilot: Debug in Console (DAP)';
                 config.request = 'launch';
                 config.program = editor.document.fileName;
-                config.mode = 'debug';
+                config.mode = 'dap';
                 config.stopOnEntry = false;
+                config.internalConsoleOptions = 'openOnSessionStart';
             } else {
                 return null;
             }
@@ -1460,7 +1464,8 @@ class PilotDebugAdapter implements vscode.DebugAdapter {
             case 'initialize': {
                 this.sendResponse(request, {
                     supportsConfigurationDoneRequest: true,
-                    supportsTerminateRequest: true
+                    supportsTerminateRequest: true,
+                    supportsEvaluateForHovers: true
                 });
                 this.sendEvent('initialized');
                 break;
@@ -1477,6 +1482,19 @@ class PilotDebugAdapter implements vscode.DebugAdapter {
             case 'threads': {
                 this.sendResponse(request, {
                     threads: [{ id: 1, name: 'Main Thread' }]
+                });
+                break;
+            }
+            case 'evaluate': {
+                const expr = (request.arguments?.expression || '').trim();
+                if (this.childProcess && this.childProcess.stdin && !this.childProcess.stdin.destroyed) {
+                    try {
+                        this.childProcess.stdin.write(expr + '\n');
+                    } catch {}
+                }
+                this.sendResponse(request, {
+                    result: `[Pilot Debug Console]: ${expr}`,
+                    variablesReference: 0
                 });
                 break;
             }
@@ -1640,6 +1658,16 @@ async function addOrUpdateLaunchJson(showNotice = true): Promise<void> {
         {
             type: 'pilot',
             request: 'launch',
+            name: 'Pilot: Debug in Console (DAP)',
+            mode: 'dap',
+            program: '${file}',
+            stopOnEntry: false,
+            internalConsoleOptions: 'openOnSessionStart',
+            args: []
+        },
+        {
+            type: 'pilot',
+            request: 'launch',
             name: 'Pilot: Run Current File',
             mode: 'run',
             program: '${file}',
@@ -1656,16 +1684,8 @@ async function addOrUpdateLaunchJson(showNotice = true): Promise<void> {
         {
             type: 'pilot',
             request: 'launch',
-            name: 'Pilot: Debug Current File',
+            name: 'Pilot: Debug Current File (Terminal)',
             mode: 'debug',
-            program: '${file}',
-            args: []
-        },
-        {
-            type: 'pilot',
-            request: 'launch',
-            name: 'Pilot: Debug with GUI (DAP)',
-            mode: 'dap',
             program: '${file}',
             args: []
         }

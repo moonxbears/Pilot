@@ -1,0 +1,125 @@
+// ==============================================================================
+// Test 39: Pilot-Hosted Distributive Scope Headers & Attribute Propagation
+// Validates 100% Pilot-hosted ScopeHeader, ScopeHeaderStack, multi-modifier
+// classification, multi-attribute extraction, deduplication, and desugaring.
+// ==============================================================================
+
+use Pilot.SelfHost.ScopeHeader::*;
+
+// 1. Verify ScopeHeader instantiation with multiple modifiers & attributes
+let header = ScopeHeader.with_all("pub static pure", "[Inline, Pure]", "i64", "fn", true, false);
+assert(header.modifiers == "pub static pure");
+assert(header.attributes == "[Inline, Pure]");
+assert(header.return_type == "i64");
+assert(header.target_kind == "fn");
+assert(header.is_fn == true);
+assert(header.is_block == false);
+assert(header.is_active == true);
+
+// 2. Verify ScopeHeaderStack lifecycle (push, current, pop, depth)
+var stack = ScopeHeaderStack.create();
+assert(stack.depth == 0);
+assert(!stack.is_active());
+
+stack.push(header);
+assert(stack.depth == 1);
+assert(stack.is_active());
+assert(stack.current().return_type == "i64");
+assert(stack.current().modifiers == "pub static pure");
+
+let popped = stack.pop();
+assert(popped.return_type == "i64");
+assert(stack.depth == 0);
+assert(!stack.is_active());
+
+// 3. Verify Applicable Keyword Classification in Pilot
+assert(is_visibility_modifier("pub"));
+assert(is_visibility_modifier("public"));
+assert(is_visibility_modifier("priv"));
+assert(is_visibility_modifier("prot"));
+assert(is_visibility_modifier("pkg"));
+assert(is_visibility_modifier("int"));
+assert(is_visibility_modifier("file"));
+assert(is_visibility_modifier("open"));
+assert(is_visibility_modifier("export"));
+
+assert(is_declaration_modifier("static"));
+assert(is_declaration_modifier("pure"));
+assert(is_declaration_modifier("partial"));
+assert(is_declaration_modifier("var"));
+assert(is_declaration_modifier("comptime"));
+assert(is_declaration_modifier("ext"));
+
+assert(is_clearance_modifier("lvl(1)"));
+assert(is_clearance_modifier("lvl2"));
+assert(is_clearance_modifier("lvl(admin, 3)"));
+
+assert(is_target_construct("fn"));
+assert(is_target_construct("struct"));
+assert(is_target_construct("interface"));
+assert(is_target_construct("class"));
+
+assert(is_header_keyword("pub"));
+assert(is_header_keyword("pure"));
+assert(is_header_keyword("lvl0"));
+assert(is_header_keyword("struct"));
+
+// 4. Verify Multi-Attribute Extraction in Pilot
+let raw_multi_attr = "[Inline, Pure] [Cold] pub static pure fn -> i64:";
+let extracted_attrs = extract_attributes_prefix(raw_multi_attr);
+assert(extracted_attrs == "[[Inline, Pure], [Cold]]" || extracted_attrs.contains("Inline"));
+
+let stripped_rest = strip_attributes_prefix(raw_multi_attr);
+assert(stripped_rest == "pub static pure fn -> i64:");
+
+// 5. Verify Attribute Extraction & Local Override Deduplication
+let a1 = extract_attr_name("[JsonObject]");
+assert(a1 == "JsonObject");
+
+let a2 = extract_attr_name("[Clamp(0, 100)]");
+assert(a2 == "Clamp");
+
+let merged1 = merge_attributes("[JsonObject]", "[Serializable]");
+assert(merged1.contains("JsonObject") && merged1.contains("Serializable"));
+
+let merged2 = merge_attributes("[Tag(\"outer\")]", "[Tag(\"inner\")]");
+assert(merged2.contains("inner"));
+
+// 6. Verify Multi-Modifier Header Detection & Parsing in Pilot
+assert(is_scope_header("pub:"));
+assert(is_scope_header("pub static pure:"));
+assert(is_scope_header("lvl(2) pub static pure fn -> f64:"));
+assert(is_scope_header("[Inline, Pure] [Cold] pub static pure fn -> i64:"));
+assert(is_scope_header("[JsonObject] pub struct {"));
+assert(is_scope_header("pub fn -> f64 {"));
+assert(is_scope_header("[Serializable] pub {"));
+assert(!is_scope_header("let x = 10;"));
+assert(!is_scope_header("case 1:"));
+assert(!is_scope_header("default:"));
+
+let parsed_multi = parse_scope_header("[Inline] [Pure] pub static pure fn -> i64:");
+assert(parsed_multi.is_fn == true);
+assert(parsed_multi.return_type == "i64");
+assert(parsed_multi.modifiers == "pub static pure");
+assert(parsed_multi.attributes.contains("Inline"));
+assert(parsed_multi.is_block == false);
+
+let parsed_block = parse_scope_header("[JsonObject] pub struct {");
+assert(parsed_block.target_kind == "struct");
+assert(parsed_block.modifiers == "pub");
+assert(parsed_block.attributes.contains("JsonObject"));
+assert(parsed_block.is_block == true);
+
+// 7. Verify Scope Header Desugaring in Pure Pilot
+let sample_section = "[Inline] pub static pure fn -> i64:\nzero() => 0;\none() => 1;\n";
+let desugared_sec = desugar_scope_headers(sample_section);
+assert(desugared_sec.contains("pub static pure"));
+assert(desugared_sec.contains("[Inline]"));
+assert(desugared_sec.contains("-> i64"));
+
+let sample_block = "[JsonObject] pub struct {\nUser { id: i64 },\nSession { token: str },\n};\n";
+let desugared_blk = desugar_scope_headers(sample_block);
+assert(desugared_blk.contains("[JsonObject] pub struct User"));
+assert(desugared_blk.contains("[JsonObject] pub struct Session"));
+
+println("Test 39 (Pilot-Hosted Scope Headers with Multi-Modifiers) passed successfully.");

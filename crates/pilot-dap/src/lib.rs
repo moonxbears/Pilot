@@ -937,4 +937,47 @@ apple.set_test(42);
         assert_eq!(ty, "str");
         assert_eq!(val.to_string_repr(), "Test: 42");
     }
+
+    #[test]
+    fn test_debug_console_repl_and_evaluation() {
+        let mut dap = DapServer::new();
+
+        // 1. Test arithmetic expressions in Debug Console
+        let resp = dap.handle_message(r#"{"seq":1,"command":"evaluate","arguments":{"expression":"10 + 20 * 2","context":"repl"}}"#).unwrap();
+        assert!(resp.contains(r#""result":"50""#));
+        assert!(resp.contains(r#""type":"int""#));
+
+        // 2. Test parenthesized arithmetic
+        let resp = dap.handle_message(r#"{"seq":2,"command":"evaluate","arguments":{"expression":"(10 + 20) * 2","context":"repl"}}"#).unwrap();
+        assert!(resp.contains(r#""result":"60""#));
+
+        // 3. Test division and modulo
+        let resp = dap.handle_message(r#"{"seq":3,"command":"evaluate","arguments":{"expression":"100 / 4","context":"repl"}}"#).unwrap();
+        assert!(resp.contains(r#""result":"25""#));
+        let resp = dap.handle_message(r#"{"seq":4,"command":"evaluate","arguments":{"expression":"17 % 5","context":"repl"}}"#).unwrap();
+        assert!(resp.contains(r#""result":"2""#));
+
+        // 4. Test comparisons and logical operators
+        let resp = dap.handle_message(r#"{"seq":5,"command":"evaluate","arguments":{"expression":"10 > 5 && 3 < 4","context":"repl"}}"#).unwrap();
+        assert!(resp.contains(r#""result":"true""#));
+        assert!(resp.contains(r#""type":"bool""#));
+
+        let resp = dap.handle_message(r#"{"seq":6,"command":"evaluate","arguments":{"expression":"!false","context":"repl"}}"#).unwrap();
+        assert!(resp.contains(r#""result":"true""#));
+
+        // 5. Test variable assignment in Debug Console REPL
+        let resp = dap.handle_message(r#"{"seq":7,"command":"evaluate","arguments":{"expression":"my_var = 42","context":"repl"}}"#).unwrap();
+        assert!(resp.contains(r#""result":"42""#));
+
+        // 6. Test evaluating the newly assigned variable
+        let resp = dap.handle_message(r#"{"seq":8,"command":"evaluate","arguments":{"expression":"my_var + 8","context":"repl"}}"#).unwrap();
+        assert!(resp.contains(r#""result":"50""#));
+
+        // 7. Test REPL commands: help, globals
+        let resp = dap.handle_message(r#"{"seq":9,"command":"evaluate","arguments":{"expression":"help","context":"repl"}}"#).unwrap();
+        assert!(resp.contains("Pilot Debug Console"));
+
+        let resp = dap.handle_message(r#"{"seq":10,"command":"evaluate","arguments":{"expression":"globals","context":"repl"}}"#).unwrap();
+        assert!(resp.contains("my_var"));
+    }
 }

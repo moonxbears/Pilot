@@ -434,3 +434,34 @@ fn test_pilot_hosted_ide_sync_hover_completion_and_definition() {
     let def_resp = server.handle_message(&def_req).expect("definition response");
     assert!(def_resp.contains("range"), "Definition must return range: {}", def_resp);
 }
+
+/// Test 8: Verify selfhost/scope_header.pilot evaluates cleanly in bootstrap VM
+#[test]
+fn test_selfhost_scope_header_pilot_evaluates_cleanly() {
+    let scope_header_src = include_str!("../../../selfhost/scope_header.pilot");
+    let snap = BootstrapSnapshot::global();
+    let mut snap_tables = snap.tables.clone();
+    let mut snap_vm = snap.vm.clone();
+    let eval_res = pilot_analysis::eval_file_with_tables(scope_header_src, &mut snap_tables, &mut snap_vm);
+    assert!(eval_res.is_ok(), "selfhost/scope_header.pilot must evaluate cleanly: {:?}", eval_res.err());
+    let arena = eval_res.unwrap();
+    assert!(arena.root.is_some(), "AST arena must have root");
+
+    // Also verify preprocessor and parser integration
+    let preproc_src = include_str!("../../../selfhost/preprocessor.pilot");
+    let mut preproc_tables = snap.tables.clone();
+    let mut preproc_vm = snap.vm.clone();
+    let eval_preproc = pilot_analysis::eval_file_with_tables(preproc_src, &mut preproc_tables, &mut preproc_vm);
+    assert!(eval_preproc.is_ok(), "selfhost/preprocessor.pilot must evaluate cleanly: {:?}", eval_preproc.err());
+
+    let parser_src = include_str!("../../../selfhost/parser.pilot");
+    let mut parser_tables = snap.tables.clone();
+    let mut parser_vm = snap.vm.clone();
+    let eval_parser = pilot_analysis::eval_file_with_tables(parser_src, &mut parser_tables, &mut parser_vm);
+    assert!(eval_parser.is_ok(), "selfhost/parser.pilot must evaluate cleanly: {:?}", eval_parser.err());
+
+    // Also verify tests/39_pilot_scope_headers.pilot
+    let test39_src = include_str!("../../../tests/39_pilot_scope_headers.pilot");
+    let test39_arena = pilot_parser::parse(test39_src);
+    assert!(test39_arena.root.is_some(), "tests/39_pilot_scope_headers.pilot must parse cleanly");
+}
