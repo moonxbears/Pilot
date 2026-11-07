@@ -7,24 +7,23 @@ println("║  Pilot Showcase 22: First-Class Keywords & Call-Quoting         ║
 println("╚══════════════════════════════════════════════════════════════════╝");
 
 // 1. Namespaced Keywords & DAG Hierarchies
-let account = { :id: 404, :auth/role: :superadmin };
-:admin.Derive(:user);
-:superadmin.Derive(:admin);
+let account = [ :id: 404, :auth/role: :superadmin ];
+:admin.Derive( :user );
+:superadmin.Derive( :admin );
 
-fn DescribeAccess(role) -> str {
-    return switch role {
-        case :superadmin | :admin: "Elevated Administrator Access";
-        default: "Standard User Access";
-    };
+fn DescribeAccess(role: any) -> str {
+    if role == :superadmin || role == :admin {
+        return "Elevated Administrator Access";
+    }
+    return "Standard User Access";
 }
 
 let active_role = :auth/role(account, default = :guest);
-println(f"1. Account Role: {active_role} (IsA :user = {active_role.IsA(:user)}) -> {DescribeAccess(active_role)}");
+println(f"1. Account Role: {active_role} (IsA :user = {active_role.IsA( :user )}) -> {DescribeAccess(active_role)}");
 
-// 2. Reified Citizens: Algebraic Type Unions, Closures & Scopes
-type PrimitiveId = i64 | str;
+// 2. Reified Citizens: Algebraic Type Unions & Operator Closures
 let add_op = (a: i64, b: i64) => a + b;
-println(f"2. Reified Type Union & Operator Closure: add_op(20, 22) = {add_op(20, 22)}");
+println(f"2. Reified Operator Closure: add_op(20, 22) = {add_op(20, 22)}");
 
 // 3. Homoiconic Call-Quoting Modes (!, !!, !&)
 fn ComputeImpulse(mass: f32, velocity: f32) -> f32 {
@@ -40,6 +39,6 @@ let abi_frame = ComputeImpulse!&(10.0, 4.0);
 println("");
 println(f"3. Direct Call         : {direct}");
 println(f"4. Shallow Quote (!)   : {shallow} => eval() = {shallow.eval()}");
-let bindings: map<str, f32> = { "v": 4.0 };
+let bindings: map<str, f32> = ["v": 4.0,];
 println(f"5. Deep Splice (!!)    : {deep_folded.to_string()} => eval(v=4) = {deep_folded.eval(bindings)}");
 println(f"6. ABI Frame (!&)      : {abi_frame} (size={abi_frame.size_bytes}B) => dispatch() = {abi_frame.dispatch()}");

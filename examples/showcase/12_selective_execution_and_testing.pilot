@@ -8,12 +8,12 @@
 //      pilot test examples/showcase/12_selective_execution_and_testing.pilot
 //   3. Benchmarking performance with [Bench] / [Benchmark]:
 //      pilot bench examples/showcase/12_selective_execution_and_testing.pilot -n 100
-//   4. Skipping top-level __main__ guards during selective runs
+//   4. Canonical `pub fn main()` entrypoint (skipped automatically under `pilot test` / `pilot bench`)
 // ==============================================================================
 
 // --- Selective Functions Callable Directly by Name ---
 
-fn compute_euler(terms: i64) -> f64 {
+pub fn compute_euler(terms: i64) -> f64 {
     var e = 1.0;
     var fact = 1.0;
     for i in 1..terms {
@@ -26,7 +26,7 @@ fn compute_euler(terms: i64) -> f64 {
     return e;
 }
 
-fn transform_record(name: str, score: i64) -> str {
+pub fn transform_entry(name: str, score: i64) -> str {
     var grade = "B";
     if score >= 90 {
         grade = "A";
@@ -37,18 +37,18 @@ fn transform_record(name: str, score: i64) -> str {
 // --- Selective Unit Tests ([Test] or test_*) ---
 
 [Test]
-fn verify_euler_approximation() {
+pub fn verify_euler_approximation() {
     let approx = compute_euler(50);
     assert(approx > 2.71 && approx < 2.73, "Euler's number approximation failed");
 }
 
 [Test]
-fn verify_transform_record() {
-    let res = transform_record("Alice", 95);
-    assert(res == "Student: Alice | Grade: A", "Record formatting failed");
+pub fn verify_transform_entry() {
+    let res = transform_entry("Alice", 95);
+    assert(res == "Student: Alice | Grade: A", "Entry formatting failed");
 }
 
-fn test_arithmetic_properties() {
+pub fn test_arithmetic_properties() {
     var x = 10;
     var y = 20;
     assert(x + y == 30, "Addition invariant failed");
@@ -58,16 +58,16 @@ fn test_arithmetic_properties() {
 // --- Selective Benchmarks ([Bench] / [Benchmark] or bench_*) ---
 
 [Benchmark]
-fn bench_euler_convergence() -> f64 {
+pub fn bench_euler_convergence() -> f64 {
     return compute_euler(50);
 }
 
 [Bench]
-fn bench_record_formatting() -> str {
-    return transform_record("BenchmarkUser", 92);
+pub fn bench_entry_formatting() -> str {
+    return transform_entry("BenchmarkUser", 92);
 }
 
-fn bench_fibonacci_iterative() -> i64 {
+pub fn bench_fibonacci_iterative() -> i64 {
     var a = 0;
     var b = 1;
     for i in 0..30 {
@@ -78,13 +78,13 @@ fn bench_fibonacci_iterative() -> i64 {
     return a;
 }
 
-// --- Top-Level Script Logic (Guarded by __name__ == "__main__") ---
-if __name__ == "__main__" {
+// --- Canonical Application Entrypoint ---
+pub fn main() -> void {
     println("=================================================================");
     println("  Pilot Showcase 12: Selective Execution, Testing & Benchmarking ");
     println("=================================================================");
     println("This file can be run in multiple modes:");
-    println("  1. Whole file:       pilot examples/showcase/12_selective_execution_and_testing.pilot");
+    println("  1. Whole file:       pilot run examples/showcase/12_selective_execution_and_testing.pilot");
     println("  2. Function only:    pilot run examples/showcase/12_selective_execution_and_testing.pilot::compute_euler 500");
     println("  3. Test suite:       pilot test examples/showcase/12_selective_execution_and_testing.pilot");
     println("  4. Benchmark suite:  pilot bench examples/showcase/12_selective_execution_and_testing.pilot -n 200");

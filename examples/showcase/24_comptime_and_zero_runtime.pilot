@@ -50,14 +50,14 @@ println(f"[1] Frozen CRC8 .rodata table (is_frozen={CRC8_PREVIEW.is_frozen}): {C
 // -----------------------------------------------------------------------------
 // 2. Minimal Perfect-Hash `.rodata` Map (`PilotFrozenMap`)
 // -----------------------------------------------------------------------------
-const CAN_BUS_IDS = comptime({
+let CAN_BUS_IDS = comptime([
     "motor_torque": 0x101,
     "wheel_speed":  0x102,
     "battery_soc":  0x201,
     "imu_accel":    0x301,
     "lidar_sync":   0x401,
     "estop_cmd":    0x001,
-});
+]);
 
 println(f"[2] CAN_BUS_IDS frozen={CAN_BUS_IDS.is_frozen}, perfect_hash={CAN_BUS_IDS.is_perfect_hash}, table_size={CAN_BUS_IDS.table_size}");
 println(f"    estop_cmd=0x{CAN_BUS_IDS[\"estop_cmd\"]}, lidar_sync=0x{CAN_BUS_IDS[\"lidar_sync\"]}");
@@ -105,7 +105,7 @@ struct ControlSample : IValue {
 
 [ZeroRuntime]
 fn process_imu_packet(var pkt: ImuPacket) -> ControlSample {
-    let gravity_comp = 9.81<m/s**2>;
+    let gravity_comp = 9.81;
     pkt.accel_mps2 = pkt.accel_mps2 - gravity_comp;
     return ControlSample(pkt.accel_mps2, pkt.timestamp_us);
 }
@@ -117,7 +117,9 @@ println(f"[4] [ZeroRuntime] DTO projection: timestamp={sample.timestamp_us}us, n
 // -----------------------------------------------------------------------------
 // 5. O(1) Lexical Upvalue Display & Contextual DI Display Slots
 // -----------------------------------------------------------------------------
-fn scale_signal(val: f64, context gain: f64) -> f64 {
+fn scale_signal(val: f64) -> f64
+    where context(gain: f64)
+{
     return val * gain;
 }
 
@@ -129,7 +131,8 @@ fn run_control_loop(initial_offset: f64) -> f64 {
     }
 
     var out = 0.0;
-    with context gain = 4.0 {
+    context(gain = 4.0) {
+        let gain = 4.0;
         out = scale_signal(apply_bias(sample.accel_mps2));
     }
     return out;

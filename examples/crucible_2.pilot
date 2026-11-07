@@ -64,7 +64,7 @@ fn test_pillar_1() -> u64 {
     let nested = Pair_Nested(
         Pair_u8_u8(4, 6, 1),
         50,
-        2,
+        2
     );
     let nest_sum: i32 = i32(nested.first.first) + i32(nested.first.second)
                       + i32(nested.first.tag) + nested.second + i32(nested.tag); // 63

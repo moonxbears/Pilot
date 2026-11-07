@@ -31,23 +31,28 @@ struct DatabaseConnection : IValue {
     }
 }
 
-// Functions declare what they need with 'context':
-fn low_level_save_record(record_id: i64, context db: DatabaseConnection, context logger: Logger) -> str {
-    logger.log(f"Writing record #{record_id} to persistence storage...");
-    db.query(f"INSERT INTO telemetry_records VALUES ({record_id});");
-    logger.log(f"Record #{record_id} successfully committed.");
+// Functions declare contextual requirements via `where context(...)`:
+fn low_level_save_entry(entry_id: i64) -> str
+    where context(db: DatabaseConnection, logger: Logger)
+{
+    logger.log(f"Writing entry #{entry_id} to persistence storage...");
+    db.query(f"INSERT INTO telemetry_entries VALUES ({entry_id});");
+    logger.log(f"Entry #{entry_id} successfully committed.");
     return "SAVED";
 }
 
-fn intermediate_workflow(record_id: i64, context db: DatabaseConnection, context logger: Logger) -> str {
-    logger.log(f"Initiating intermediate workflow for record #{record_id}");
-    // Neither 'db' nor 'logger' need to be passed explicitly!
-    // They are automatically and implicitly routed down the call stack.
-    let status = low_level_save_record(record_id);
+fn intermediate_workflow(entry_id: i64) -> str
+    where context(db: DatabaseConnection, logger: Logger)
+{
+    logger.log(f"Initiating intermediate workflow for entry #{entry_id}");
+    // Neither 'db' nor 'logger' need to be passed explicitly at the call site!
+    let status = low_level_save_entry(entry_id);
     return status;
 }
 
-fn top_level_handler(payload_id: i64, context db: DatabaseConnection, context logger: Logger) -> str {
+fn top_level_handler(payload_id: i64) -> str
+    where context(db: DatabaseConnection, logger: Logger)
+{
     logger.log(f"Top-level request received for payload {payload_id}");
     return intermediate_workflow(payload_id);
 }
@@ -56,10 +61,12 @@ println("\n--- Initializing Contextual Dependencies ---");
 let main_db = DatabaseConnection("postgresql://prod-cluster.internal:5432/app");
 let app_logger = Logger("AuthService");
 
-println("Binding dependencies into execution environment via 'with context':");
+println("Binding dependencies into execution environment via 'context(...)':");
 
-with context db = main_db, logger = app_logger {
-    println("\nCalling top_level_handler(7712)... Notice how db & logger are implicitly passed!");
+context(db = main_db, logger = app_logger) {
+    let db = main_db;
+    let logger = app_logger;
+    println("\nCalling top_level_handler(7712)... Notice how db & logger are implicitly routed!");
     let outcome = top_level_handler(7712);
     println(f"\nFinal Outcome: {outcome}");
 }

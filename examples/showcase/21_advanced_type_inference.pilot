@@ -2,9 +2,42 @@
 // Showcase 21: Advanced Type Inference — Bidirectional, Flow-Sensitive & Row-Polymorphic
 // =============================================================================
 
-record Product(title: str, price: f64, in_stock: bool);
-record Frame2D(width: i64, height: i64, name: str);
-record Canvas2D(width: f64, height: f64);
+pub struct Product : IValue {
+    pub:
+        title: str;
+        price: f64;
+        in_stock: bool;
+
+        self(title: str, price: f64, in_stock: bool) {
+            .title = title;
+            .price = price;
+            .in_stock = in_stock;
+        }
+}
+
+pub struct Frame2D : IValue {
+    pub:
+        width: i64;
+        height: i64;
+        name: str;
+
+        self(width: i64, height: i64, name: str) {
+            .width = width;
+            .height = height;
+            .name = name;
+        }
+}
+
+pub struct Canvas2D : IValue {
+    pub:
+        width: f64;
+        height: f64;
+
+        self(width: f64, height: f64) {
+            .width = width;
+            .height = height;
+        }
+}
 
 // 1. Structural Row Polymorphism: infers `({ width: T, height: T, ..R } where T: INumber<T>) -> T`
 fn compute_area(surface) => surface.width * surface.height;

@@ -25,8 +25,8 @@ let pg_conn: str = "postgres://app_user:secret@localhost:5432/corp_metrics";
 let sql_conn: str = "sqlite://home/moony/Documents/dev/personal/crm_entities.db";
 println("\n[1] Executing Parameterized SQL Block with Compile-Time Inference:");
 
-let metrics_dataset = sqlite(sql_conn) {
-    select 'Record ID'
+let metrics_dataset = sqlite {
+    select "Company ID", "Company Name", count(*) as total_events, revenue * 1.1 as adjusted_revenue
     from companies
 };
 
@@ -99,9 +99,9 @@ struct Table<TRow> : IValue {
 }
 
 let customer_table = Table([
-    { "id": 101, "name": "Acme Corp",  "tier": "Enterprise", "mrr": 4500.0 },
-    { "id": 102, "name": "Beta Labs",  "tier": "Growth",     "mrr": 1200.0 },
-    { "id": 103, "name": "Gamma Devs", "tier": "Enterprise", "mrr": 8900.0 },
+    ["id": 101, "name": "Acme Corp",  "tier": "Enterprise", "mrr": 4500.0,],
+    ["id": 102, "name": "Beta Labs",  "tier": "Growth",     "mrr": 1200.0,],
+    ["id": 103, "name": "Gamma Devs", "tier": "Enterprise", "mrr": 8900.0,],
 ]);
 
 let enterprise_customers = customer_table

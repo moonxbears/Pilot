@@ -1,24 +1,25 @@
 // =============================================================================
-// Tutorial 02: Control Flow, Loops, Ranges, Unpacking & Functional Pipelines
+// Tutorial 02: Control Flow, 3-Tier Dynamic Loops, Ranges & Splat Unpacking
 // =============================================================================
 
 // --- 1. If / Else If / Else Expressions ---
-// In Pilot, if-statements are expressions that evaluate to a value.
+// In Pilot, `if` is an expression that evaluates directly to a value.
 let score = 88;
 let grade = if score >= 90 {
-    "A";
+    "A"
 } else if score >= 80 {
-    "B";
+    "B"
 } else if score >= 70 {
-    "C";
+    "C"
 } else {
-    "F";
+    "F"
 };
 println(f"Score {score} yields grade {grade}");
 
-// --- 2. Inline Assignment Expression (The Walrus Operator `:=`) ---
+// --- 2. Scoped Block Expressions ---
 let threshold = 50;
-if (let sample_reading := score * 2) > 100 {
+let sample_reading = score * 2;
+if sample_reading > threshold {
     println(f"Sample reading {sample_reading} exceeds threshold {threshold}");
 }
 
@@ -26,41 +27,32 @@ if (let sample_reading := score * 2) > 100 {
 var countdown = 3;
 while countdown > 0 {
     println(f"T-minus {countdown}...");
-    countdown -= 1;
+    countdown = countdown - 1;
 }
 
-// --- 4. For-in Loops and Range Expressions ---
-// Range operators:
-//   `0..=5`  -> Inclusive span [0, 5] (0, 1, 2, 3, 4, 5)
-//   `0..<5`  -> Half-open range [0, 5) (0, 1, 2, 3, 4)
-for i in 0..<3 {
+// --- 4. 3-Tier `for` Expressions and Range / Span Operators ---
+//   `0 ..= 5` / `0 .. 5` -> Inclusive span<i64>  [0, 5]
+//   `0 ..< 5`            -> Half-open range<i64> [0, 5)
+//   `0 .. 10 : 2`        -> Stepped step<i64>    (0, 2, 4, 6, 8, 10)
+for i in 0 ..< 3 {
     println(f"Iteration: {i}");
 }
 
-// --- 5. Collection Expressions with Splat (`*`) and Key-Value Pairs (`**`) ---
-let row_a = [1, 2, 3];
-let row_b = [4, 5, 6];
-let combined_list = [*row_a, *row_b];
-let surrounded = [0, *row_a, 99, *row_b, 100];
-
-// Map and target-typed collection unpacking:
-let base_dict: map<str, str> = ["host": "localhost", "port": "8080"];
-let extended_dict: map<str, str> = [**base_dict, "ssl": "true", "timeout": "30s"];
-let base_set: i64[] = [10, 20];
-let extended_set: i64[] = [*base_set, 30, 40];
-
-// --- 6. Collection Transformations ---
-let raw_numbers: i64[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-var odd_squares: i64[] = [];
-for x in raw_numbers {
+// Expression-oriented `for` yielding directly into a contiguous `i64[]` slice:
+let raw_numbers: i64[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10,];
+let odd_squares: i64[] = for x in raw_numbers {
     if x % 2 != 0 {
-        odd_squares.append(x * x);
+        yield x * x;
     }
-}
+};
 
-var indexed_map: map<str, i64> = [];
-for n in [1, 2, 3] {
-    indexed_map[f"item_{n}"] = n * 10;
-}
+// --- 5. Collection Expressions with Splat (`*`) and Key-Value Pairs (`**`) ---
+let row_a = [1, 2, 3,];
+let row_b = [4, 5, 6,];
+let combined_list = [*row_a, *row_b,];
+let surrounded = [0, *row_a, 99, *row_b, 100,];
 
-println(f"Odd squares count: {len(odd_squares)}, Tutorial 02 completed successfully.");
+let base_dict: map<str, str> = ["host": "localhost", "port": "8080",];
+let extended_dict: map<str, str> = [**base_dict, "ssl": "true", "timeout": "30s",];
+
+println(f"Odd squares count: {len(odd_squares)}, Combined len: {len(combined_list)}");

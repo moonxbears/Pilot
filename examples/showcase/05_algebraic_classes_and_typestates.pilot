@@ -75,7 +75,8 @@ println(f"\nGuest Instance Created: Username={guest.username}");
 // 2. Compile-Time Typestates (`state` State Machines)
 println("\n--- 2. Compile-Time Typestate Machines ---");
 
-state SocketPhase {
+[Typestate]
+enum SocketPhase {
     Disconnected,
     Connected,
 }

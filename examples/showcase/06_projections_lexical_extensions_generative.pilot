@@ -42,7 +42,7 @@ println(f"  DTO Department: {public_dto.department}");
 // 2. Lexical Scoped Extensions (`ext` & `use ext`)
 println("\n--- 2. Lexical Scoped Extensions ---");
 
-pub ext StringFormatting on str {
+pub ext StringFormatting : str {
     pub pure fn to_shouting() -> str => self + "!!!";
 
     pub pure fn quote_wrapped() -> str => ">> " + self + " <<";

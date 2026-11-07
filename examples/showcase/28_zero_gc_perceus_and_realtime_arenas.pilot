@@ -75,7 +75,7 @@ fn run_motor_actuator(target_pos: f64) -> f64 {
     var output_drive = 0.0;
     noalloc {
         var pos = 0.0;
-        for step in 0..10 bounded 10 {
+        for step in 0..<10 {
             output_drive = compute_pid_output(target_pos, pos);
             pos = pos + (output_drive * 0.1);
         }

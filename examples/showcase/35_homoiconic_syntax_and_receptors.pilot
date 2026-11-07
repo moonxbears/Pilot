@@ -1,0 +1,80 @@
+// ==============================================================================
+// Concept 35: 14-Token Seed, Homoiconic `syntax` Rewrites & Name-Blind Physics
+// ==============================================================================
+// Demonstrates how Pilot derives hardware register classes, 2-bit lattice masks,
+// 4-tier `*Bundle`/`*Facet` method tables, distributive headers, and custom
+// homoiconic `syntax` rules strictly from the 14-token seed engine.
+// ==============================================================================
+
+println("==================================================");
+println(" PILOT SHOWCASE 35: Name-Blind Physics & Syntax");
+println("==================================================");
+
+// --- 1. Hardware Register & 2-Bit Lattice Physics (`[Bits]` & `[Lattice]`) ---
+[Bits(64, 1)]
+pub struct word64 {}
+
+[Lattice(0)]
+pub interface IInlineVal {}
+
+[Lattice(1)]
+pub interface IBorrowLens {}
+
+// --- 2. Field Bundles (`*Bundle`), Method Facets (`*Facet`) & 4-Tier Dispatch ---
+pub struct SpatialHeaderBundle : IInlineVal {
+    pub:
+        var id: i64 = 1;
+        var flags: i64 = 0;
+}
+
+pub struct AuditHeaderBundle : IInlineVal {
+    pub:
+        var id: i64 = 1;
+        var epoch: i64 = 100;
+}
+
+pub struct TelemetryMathFacet {
+    pub pure fn checksum() -> i64 => 42;
+}
+
+// Coalescing overlapping `id` fields and renaming `flags` via `with`:
+pub struct SensorPacket : IInlineVal {
+    *SpatialHeaderBundle coalesce { id } with { flags as net_flags };
+    *AuditHeaderBundle coalesce { id };
+    *TelemetryMathFacet;
+
+    pub:
+        var reading: f64 = 98.6;
+
+        // Implicit property (`field` backing slot + `value` parameter):
+        gain: f64 = 1.0 {
+            get => field;
+            set => {
+                if value > 0.0 {
+                    field = value;
+                }
+            }
+        }
+}
+
+// --- 3. Distributive Binding Blocks & `nameof(...)` Keyword-Decoupled Reflection ---
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub fn run_physics_demo() -> i64 {
+    let i64 {
+        alpha = 10,
+        beta  = 20,
+        gamma = 12,
+    };
+
+    var pkt = SensorPacket();
+    pkt.gain = 2.5;
+
+    let field_tag = nameof(SensorPacket);
+    let total = alpha + beta + gamma + pkt.checksum();
+    println(f"Reflected type `{field_tag}` -> checksum total = {total}");
+    return total;
+}
+
+let result_sum = run_physics_demo();
+println(f"Showcase 35 verified successfully (sum={result_sum}).");

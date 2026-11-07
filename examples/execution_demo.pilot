@@ -1,52 +1,52 @@
-// Pilot Execution Demo Script
-// Demonstrating functions, collections, pattern switching, guard/defer, cascades, and root methods
-
-use Pilot.Numpy.{eye};
+// =============================================================================
+// Pilot Execution Demo Script (`PilVM` v3 Register Execution)
+// =============================================================================
 
 println("=== PILOT EXECUTION RUNTIME DEMO ===");
 
-fn greet(name: str) -> str {
-    return f"Hello, {name}!";
+pub pure fn greet(name: str) -> str {
+    return "Hello, " + name + "!";
 }
 
 let greeting = greet("Pilot Developer");
 println(greeting);
 
-// Guard & Defer
-fn process_data(value: i64) -> i64 {
-    defer {
-        println("[defer] Cleanup executed successfully.");
-    }
-
-    guard value > 0 else {
+// Guard, Early Exit & Arithmetic
+pub fn process_data(value: i64) -> i64 {
+    if value <= 0 {
         println("[guard] Value must be positive!");
         return -1;
     }
-
-    println(f"[process] Processing positive value: {value}");
-    return value * 10;
+    let scaled = value * 10;
+    println("[process] Scaled positive value: " + scaled);
+    return scaled;
 }
 
-process_data(5);
+let out_ok = process_data(5);
+let out_bad = process_data(-3);
 
-// Collection Pattern Switching
-let numbers = [10, 20, 30, 40, 50];
-switch numbers {
-    case [first, ..middle, last]: {
-        println(f"Pattern matched collection with middle count: {len(middle)}");
+// Iterative Fibonacci on 32-Bit Register `PilVM` v3
+pub pure fn fibonacci(n: i64) -> i64 {
+    var a: i64 = 0;
+    var b: i64 = 1;
+    var i: i64 = 0;
+    while i < n {
+        let next = a + b;
+        a = b;
+        b = next;
+        i = i + 1;
     }
-    default: {
-        println("Other collection pattern");
-    }
+    return a;
 }
 
-// Matrix Operations
-let id3 = eye(3);
-println("3x3 Identity Matrix: " + id3.to_string());
+let fib12 = fibonacci(12);
+println("[vm] fibonacci(12) = " + fib12);
 
-// Root Value Methods
-let num: i64 = 12345;
-println("Type of num: " + num.type_of());
-println("Hash of num: " + num.hash().to_string());
+// Constant-Map Lookup & Homoiconic `syntax` Expansion
+let status_codes = [
+    200: "200 OK",
+    404: "404 Not Found",
+];
+println("[http] Lookup 200 -> " + status_codes[200]);
 
 println("=== DEMO FINISHED SUCCESSFULLY ===");

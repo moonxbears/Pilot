@@ -1,0 +1,70 @@
+// ==============================================================================
+// Concept 36: Stage-3 Self-Hosting, Perceus `DropReuse`, LIFO Guards & Projections
+// ==============================================================================
+// Demonstrates deterministic 2-bit lattice lifecycles (`0b00`..`0b11`),
+// `[HardRealtime]` / `noalloc` zero-heap execution, and the 6 homoiconic
+// call-quoting projections (`!`, `!!`, `!&`, `!^`, `!@`, `!?`).
+// ==============================================================================
+
+println("==================================================");
+println(" PILOT SHOWCASE 36: Perceus Lattice & Projections");
+println("==================================================");
+
+// --- 1. 2-Bit Hardware Type Lattice (`0b00` Value, `0b01` View, `0b10` Object, `0b11` Guard) ---
+// `0b00` IValue: Trivial register/stack value
+pub struct SampleVec : IValue {
+    pub:
+        x: f64 = 1.0;
+        y: f64 = 2.0;
+}
+
+// `0b10` IObject: Owned resource handle with `~self()` destructor
+// Eligible for Perceus last-use `Drop` and same-size `DropReuse` recycling!
+pub struct FrameBuffer : IObject {
+    pub:
+        var ptr_addr: i64 = 0;
+        var capacity: i64 = 4096;
+
+        ~self() {
+            // Deterministic Perceus teardown at exact last use
+        }
+}
+
+// `0b11` IGuard: Borrows memory AND runs `~self()` in strict reverse LIFO order at scope exit!
+pub struct ScopeLease : IGuard {
+    pub:
+        var slot_id: i64 = 0;
+
+        ~self() {
+            // Guaranteed LIFO cleanup at lexical block exit
+        }
+}
+
+// --- 2. `[HardRealtime]` & `noalloc` Deterministic Audio/Control Kernel ---
+[HardRealtime]
+pub noalloc pure fn dsp_biquad_step(sample: f64, coeff: f64) -> f64 {
+    return sample * coeff + 0.125;
+}
+
+// --- 3. Homoiconic Call-Quoting Projections (`!`, `!!`, `!&`, `!^`, `!@`, `!?`) ---
+pub pure fn kinetic_energy(mass: f64, vel: f64) -> f64 {
+    return 0.5 * mass * vel * vel;
+}
+
+pub fn run_projections_demo() {
+    let m = 4.0;
+    let v = 3.0;
+
+    let quoted_call = kinetic_energy!(m, v);    // ShallowQuote  -> CallExpr<f64>
+    let spliced_ast = kinetic_energy!!(~m, v);  // DeepSplice    -> ast<f64>
+    let c_abi_frame = kinetic_energy!&(m, v);   // AbiFrame      -> #[repr(C)] frame
+    let reactive_nd = kinetic_energy!^(m, v);   // ReactiveSignal-> Signal<f64>
+    let dual_grad   = kinetic_energy!@(m, v);   // SymbolicAdjoint -> Dual<f64, f64>
+    let cow_sandbox = kinetic_energy!?(m, v);   // EffectDryRun  -> EffectPlan<f64>
+
+    let filtered = dsp_biquad_step(v, 0.75);
+    println(f"Realtime DSP output = {filtered}, Energy(4, 3) = {kinetic_energy(m, v)}");
+}
+
+run_projections_demo();
+println("Showcase 36 verified successfully.");

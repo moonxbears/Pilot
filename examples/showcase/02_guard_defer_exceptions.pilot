@@ -63,23 +63,28 @@ fn simulate_resource_workflow() -> void {
 simulate_resource_workflow();
 println("Workflow finished and all deferred actions executed in LIFO order!");
 
-// 3. Structured Error Protections (Try / Catch / Finally)
-println("\n--- 3. Structured Protections (Try / Catch / Finally) ---");
+// 3. Values-First Error Propagation & Structured Recovery (`T ! E` + `try` / `catch`)
+println("\n--- 3. Values-First Error Propagation (`T ! E`, `?`, `defer` & `catch`) ---");
+
+fn checked_division(numerator: f64, denominator: f64) -> f64 ! str {
+    guard denominator != 0.0 else {
+        return err("DivideByZeroError: Denominator cannot be zero.");
+    }
+    return ok(numerator / denominator);
+}
 
 fn dangerous_division(numerator: f64, denominator: f64) -> f64? {
     println(f"\nEvaluating: {numerator} / {denominator}");
+    defer {
+        println("  [DEFER CLEANUP] Cleanup complete (always runs on scope exit).");
+    }
     try {
-        if denominator == 0.0 {
-            raise "DivideByZeroError: Denominator cannot be zero.";
-        }
-        let quotient = numerator / denominator;
+        let quotient = checked_division(numerator, denominator)?;
         println(f"  Computed quotient: {quotient}");
         return quotient;
-    } catch (err) {
-        println(f"  [CAUGHT EXCEPTION] Handled error gracefully: {err}");
+    } catch err {
+        println(f"  [CAUGHT ERROR] Handled values-first failure gracefully: {err}");
         return none;
-    } finally {
-        println("  [FINALLY BLOCK] Cleanup complete (always runs).");
     }
 }
 

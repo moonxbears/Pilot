@@ -18,13 +18,13 @@ fn test_socket_module() -> void {
     let packed = socket.inet_aton("127.0.0.1");
     assert(len(packed) == 4, "Packed IP should have 4 bytes");
     let unpacked = socket.inet_ntoa(packed);
-    assert(unpacked == "127.0.0.1", "Unpacked IP should match 127.0.0.1");
+    assert(unpacked == "127.0.0.1", "Unpacked IP should equal 127.0.0.1");
 
     // Socket instance
     var sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
     sock.settimeout(5.0);
-    assert(sock.family == socket.AF_INET, "Socket family match");
-    assert(sock.type == socket.SOCK_STREAM, "Socket type match");
+    assert(sock.family == socket.AF_INET, "Socket family check");
+    assert(sock.type == socket.SOCK_STREAM, "Socket type check");
     sock.close();
     print("Pilot.Socket passed!");
 }
@@ -77,7 +77,7 @@ fn test_urllib_module() -> void {
     let req = urllib.Request("https://httpbin.org/get", none, ["User-Agent": "Pilot"]);
     assert(req.get_method() == "GET", "default method is GET");
     assert(req.has_header("User-Agent"), "has User-Agent header");
-    assert(req.get_header("User-Agent") == "Pilot", "header value match");
+    assert(req.get_header("User-Agent") == "Pilot", "header value check");
 
     print("Pilot.Urllib passed!");
 }
@@ -105,14 +105,14 @@ fn test_http_module() -> void {
     var cookie = http.SimpleCookie();
     cookie.load("session_id=xyz123; user=alice");
     let c1 = cookie.get_cookie("session_id");
-    assert(c1.value == "xyz123", "cookie session_id match");
+    assert(c1.value == "xyz123", "cookie session_id check");
 
     // 4. BaseHTTPRequestHandler mock
     let raw_req = "GET /api/test HTTP/1.1\r\nHost: localhost\r\nAccept: text/plain\r\n\r\n";
     var handler = http.BaseHTTPRequestHandler(raw_req);
     assert(handler.command == "GET", "handler command GET");
-    assert(handler.path == "/api/test", "handler path match");
-    assert(handler.headers["Host"] == "localhost", "handler header match");
+    assert(handler.path == "/api/test", "handler path check");
+    assert(handler.headers["Host"] == "localhost", "handler header check");
     handler.send_response(200);
     handler.send_header("Content-Type", "application/json");
     handler.end_headers();

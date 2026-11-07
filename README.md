@@ -1,49 +1,69 @@
 # Pilot Programming Language
 
-> **Self-Hosted, Zero-GC, Type-Safe, Configurable, Decoupled, and Multi-Target.**
+> **Self-Hosted (Stage-3 Fixed-Point), Name-Blind 14-Token Seed, Deterministic Zero-GC, Type-Safe, and Multi-Target.**
 
-**Pilot** is a modern systems and application programming language built on an **Engine-Positive 14-Token Rust Core** that self-bootstraps its type system, operators, control flow, IDE intelligence, and standard library in pure Pilot (`stdlib/core/`). Pilot unifies C#-grade ergonomics (`interface` hierarchies, implicit properties & indexers, operator contracts, `[...]` attribute pipelines, distributive headers, LINQ/SQL) with deterministic 3-tier Perceus memory management, zero-marshalling `SliceBuffer<T>` / `stride<T>` C-ABI layouts, homoiconic call-quoting (`!`, `!!`, `!&`, `!^`, `!@`, `!?`), polyglot interoperability, and native compilation to **PilVM v3 Bytecode, C11/C23 (Clang), LLVM IR, WebAssembly (WASI), x86_64/ARM64 ASM, and NVIDIA/AMD/WebGPU compute kernels**.
+**Pilot** (`v1.1.51`) is a modern systems and application programming language built on an irreducible **14-Token Name-Blind Rust Hardware & Physics Engine** (`5,312` LOC across 12 crates) that self-bootstraps over **90% of its compiler, syntax grammar, type library, memory verifier, code emitters, LSP/DAP tooling, and standard library in pure Pilot** (`stdlib/` and `selfhost/`).
+
+Pilot unifies C#-grade ergonomics (`interface` hierarchies, implicit `field`/`value` properties & indexers, operator contracts, `[...]` attribute pipelines, distributive headers, Fluid Cascades `..`, native LINQ/SQL) with deterministic **2-Bit Hardware Lattice Perceus ARC + lexical arenas (`0.0 ms` GC pauses)**, 6 homoiconic call-quoting projections (`!`, `!!`, `!&`, `!^`, `!@`, `!?`), bidirectional 7-language source transpilation, and native compilation to **PilVM v3 (`.pilc`), C11/C23 (`clang`), LLVM IR, WebAssembly (`WASI`), x86_64/ARM64 assembly, and 8 GPU compute targets**.
 
 ---
 
-## Core Architectural Highlights
+## Architectural Highlights
 
-- **14-Token Seed Engine + 4-Stage Self-Genesis (`stdlib/core/`):** The Rust compiler hardcodes strictly **14 seed tokens** (`__engine`, `struct`, `interface`, `fn`, `let`, `ref`, `if`, `loop`, `return`, `yield`, `defer`, `comptime`, `quote`, `asm`) with zero hardcoded type or symbol names. At Line 1 of `stdlib/core/core.pilot`, a compile-time `Cfg` table registers all modifiers, Pratt operator precedences, `[...]` attributes, and SSA intrinsics, then permanently seals the bootstrap bridge (`seal_bootstrap_bridge`).
-- **Single Origin (`IAnyValue`) & 2-Bit Hardware Type Lattice:** Every type originates from `IAnyValue` with **0 runtime header bytes** and is classified in 1 CPU cycle via bitwise-OR of its fields and `~self()` destructor:
-  - **`0b00` `IValue`:** Bit-copyable inline data (`i64`, `f64`, `Vec3`, `array<T, N>`, `RangeWindow<T>`).
-  - **`0b01` `IReference`:** Borrowed zero-copy memory views (`slice<T>`, `stride<T>`, `str`, `map<K, V>`, `ref<T>`).
-  - **`0b10` `IObject`:** Owned handles with deterministic `~self()` teardown (`SliceBuffer<T>`, `List<T>`, `Signal<T>`, `iso<T>`).
-  - **`0b11` `IGuard`:** Scoped RAII tokens combining borrowed views with `~self()` cleanup (`MutexGuard<T>`, `ArenaScope`).
-- **4-Tier `MethodTable`, `*Bundle` & `*Facet` Composition:** Replaces vtable-heavy OOP base classes with `interface` contracts, auto-implemented default methods, field-bearing `*Bundle` splices, and method-only `*Facet` splices with explicit compile-time collision resolution (`coalesce`, `with`, `without`).
-- **8-Pillar `[...]` Attribute & Pilot-Hosted IDE Engine:** Supports weighted execution pipelines (`IAttribute`), SSA entry/exit interceptors (`IInterceptor`), computed property formulas (`IFormulaAttribute`), reactive setter hooks (`IReactiveAttribute`), hierarchical inheritance (`IInheritedAttribute`), ECS rule scheduling (`IEcsRule`), non-destructive function cloning & windowed AST patching (`IPatchAttribute` / `[Patch]`), and Pilot-hosted LSP semantic token classification (`IIdeTokenAttribute` / `[IdeToken]` + `selfhost/ide_sync.pilot`).
-- **Homoiconic Call-Quoting & Semantic Projections:** Zero-whitespace call-quoting operators project any function call into an AST descriptor (`fn!(a, b)`), constant-folded deep splice (`fn!!(~a, b)`), zero-marshalling `#[repr(C)]` C-ABI call frame (`fn!&(a, b)`), glitch-free reactive signal (`fn!^(a, b)`), compile-time symbolic derivative (`fn!@(a, b)`), or Copy-on-Write dry-run plan (`fn!?(a, b)`).
-- **Worry-Free 3-Tier Deterministic Zero-GC Memory:** Combines 16-byte `PilotVal` registers (with 14-byte inline SSO strings and niche-unboxed `T?` / `T ! E`), 64KB thread-local lexical bump arenas, and Perceus linear ARC with `drop_reuse` in-place recycling (`0.0 ms` GC pauses).
-- **Deep Polyglot Interop, 7-Target Transpilation & Universal Packaging:** Execute inline `python`, `js`, `lua`, `c`, `cpp`, `rust`, `java`, `asm`, and `postgresql`/`sqlite` blocks, transpile bidirectionally (`pilot --emit` / `pilot --from`), and manage native or foreign packages (`NuGet`, `npm`, `pip`, `Cargo`, `Maven`, `LuaRocks`) via `pilot pkg` and `pilot venv`.
+- **The Strict 14-Token Boundary & Universal Name-Blind Contract:**
+  The Rust seed engine hardcodes strictly **14 tokens** (`__engine`, `struct`, `interface`, `fn`, `let`, `ref`, `if`, `loop`, `return`, `yield`, `defer`, `comptime`, `quote`, `asm`) and **zero** primitive or composite type names. Every scalar, slice, option, result, range, closure, and call-quote frame is derived strictly from 5 name-blind mechanisms:
+  1. **Register & Layout Physics (`[Bits]` & `[Layout]`):** Deduces CPU register classes (`gpr_signed`, `gpr_unsigned`, `simd_float`, `simd_vector`, `raw_ptr`, `unit`, `noreturn`), bit widths, inline array `repeat`, and `niche` packing directly from layout descriptors.
+  2. **Structural Field Anatomy (`TypeDef.fields` & `LatticeBits`):** Deduces contiguous views (`{ ptr<T>, usize }` + `0b01`), strided lenses (`{ ptr<T>, usize, isize }` + `0b01`), owned buffers (`{ ptr<T>, usize, usize }` + `0b10`), and bounds pairs (`{ T, T }` + `0b00`) from byte offsets and lattice bits.
+  3. **Pure Pilot Homoiconic Syntax Rewrites (`syntax` & `syntax type_construct`):** Rewrites symbolic types (`T[]`, `T[N]`, `T[..]`, `T@N`, `T?`, `T!E`, `(A) => R`) and surface statements (`for`, `while`, `until`, `switch`, `guard`, `try`/`catch`, `select`, `requires`/`ensures`) in `stdlib/core/syntax/*.pilot`.
+  4. **Operator & Protocol Contracts (`MethodTable`):** Deduces postfix `expr?` (`ITryOperator`), iteration (`get_enumerator()`), and `implicit` value lifting from resolved method tables.
+  5. **`TypeId` Receptor Slots (`bind_receptor` & `nameof`):** Binds lexed literals and homoiconic call-quote projections to registered `TypeId` handles by structural field index (`0`, `1`, ...).
+  - *Verified continuously by the **Universal Rename Litmus Gate**: renaming `char` $\rightarrow$ `c32`, `slice` $\rightarrow$ `window`, `option` $\rightarrow$ `maybe`, `result` $\rightarrow$ `outcome`, and `range` $\rightarrow$ `interval` in `stdlib/core/` compiles and emits valid code across all backends with zero Rust source changes.*
+
+- **Single Origin (`IAnyValue`) & 2-Bit Hardware Type Lattice:**
+  Every type originates from `IAnyValue` (**0 runtime header bytes**) and is classified in 1 CPU cycle via bitwise-OR of its stored fields and `~self()` destructor (`Bit 0` = borrows memory, `Bit 1` = owns `~self()` destructor):
+  - **`0b00` `IValue`:** Trivial `memcpy` value types (`i64`, `f64`, `Vec3`, `array<T, N>`, `RangeWindow<T>`, `Dual<T, G>`), eligible for zero-copy `.pchor` cues and `as view` casts.
+  - **`0b01` `IReference`:** Borrowed zero-copy windows (`slice<T>`, `stride<T>`, `str`, `SliceView<T>`, `OffsetLens<T>`); lexical escape verified by `selfhost/perceus/escape.pilot` (`ESCAPE001`–`ESCAPE003`).
+  - **`0b10` `IObject`:** Owned heap/resource handles with `~self()` (`SliceBuffer<T>`, `List<T>`, `Signal<T>`, `EffectPlan<T>`); Perceus move-by-default, exact last-use `Drop`, and same-size `DropReuse` in-place recycling (`selfhost/perceus/arc.pilot`).
+  - **`0b11` `IGuard`:** Scoped RAII guards (`MutexGuard<T>`, `ArenaScope`, `TxLease`) combining borrowed references with strict reverse-declaration **LIFO `ScopeExitDrop`**.
+
+- **4-Tier `MethodTable`, `*Bundle` & `*Facet` Composition:**
+  Replaces fragile OOP inheritance chains with deterministic 4-tier dispatch: Tier 1 (`struct` / `partial struct`) > Tier 2 (field-bearing `*Bundle` or 0-field `*Facet` splices with `coalesce`, `with`, `without`) > Tier 3 (sub-`interface` default) > Tier 4 (base `interface` default), alongside file-wide and lexically scoped `ext` / `use ext` extensions.
+
+- **6 Homoiconic Call-Quoting Modes (Zero-Whitespace `(` Lookahead):**
+  - `fn!(a, b)` $\rightarrow$ `CallExpr<TReturn>` (`ShallowQuote` typed AST call descriptor)
+  - `fn!!(~a, b)` $\rightarrow$ `ast<TReturn>` (`DeepSplice` with `~` compile-time unquoting)
+  - `fn!&(a, b)` $\rightarrow$ `frame<FnSig>` (`AbiFrame` zero-marshalling `#[repr(C)]` call struct)
+  - `fn!^(a, b)` $\rightarrow$ `Signal<TReturn>` (`ReactiveSignal` glitch-free topological push-pull node)
+  - `fn!@(a, b)` $\rightarrow$ `Dual<TReturn, TGrad>` (`SymbolicAdjoint` compile-time CSE forward/reverse derivative)
+  - `fn!?(a, b)` $\rightarrow$ `EffectPlan<TReturn>` (`EffectDryRun` Copy-on-Write transactional sandbox)
+
+- **Stage-3 Fixed-Point Self-Hosting & Multi-Target Codegen (`selfhost/`):**
+  `selfhost/pilotc.pilot` compiles itself to both native C11 (`clang`) and `.pilc` v3 bytecode with bit-for-bit **Stage-2 == Stage-3 SHA-256 parity**, backed by pure-Pilot emitters for **C11, LLVM IR, WASM (`WASI`), x86_64/ARM64 ASM, 8 GPU backends (`PTX`, `AMDGPU`, `SPIR-V`, `WGSL`, `MSL`, `HLSL`, `CUDA C++`, `HIP C++`), 7 bidirectional transpilers (`C`, `C++`, `C#`, `Rust`, `Python`, `JS`, `Lua`)**, lossless Red/Green CST & Wadler-Lindig formatting, resident incremental LSP, and `VmHook`-stepped DAP debugging.
 
 ---
 
 ## Canonical Syntax & Type Reference
 
-### 1. Single-Word `lowercase` Primitives & Symbolic Shorthands
+### 1. Symbolic Type Rewrites (`stdlib/core/syntax/type_construct.pilot`)
 
-| Symbolic Form | Canonical `lowercase` Type | Lattice | Backing Interface / C-ABI Layout |
+| Symbolic Form | Canonical `lowercase` Type | Lattice | Structural Layout / Protocol Contract |
 | :--- | :--- | :--- | :--- |
-| `T[]` | `slice<T>` | `0b01` | `IReadOnlyList<T>` (`{ ptr<T>, usize }`, 16B) |
-| `T[N]` | `array<T, const N: usize>` | `0b00` | `IList<T>` (Inline `N * sizeof(T)` bytes) |
-| `T[..]` | `stride<T>` | `0b01` | `IReadOnlyList<T>` (`{ ptr<T>, usize, isize }`, 24B) |
-| `T@N` | `simd<T, const N: usize>` | `0b00` | `IValue` (Hardware SIMD vector register) |
-| `T*` | `ptr<T>` | `0b01` | `IIndexGet<usize, T>`, `IIndexSet<usize, T>` (8B) |
+| `T[]` | `slice<T>` | `0b01` | `{ ptr<T>, usize }` (16B contiguous view, `IReadOnlyList<T>`) |
+| `T[N]` | `array<T, const N: usize>` | `0b00` | Inline `N * sizeof(T)` bytes (`IList<T>`) |
+| `T[..]` | `stride<T>` | `0b01` | `{ ptr<T>, usize, isize }` (24B strided lens) |
+| `T@N` | `simd<T, const N: usize>` | `0b00` | Hardware SIMD vector register (`IValue`) |
+| `T*` | `ptr<T>` | `0b01` | Raw 8-byte pointer (`IIndexGet<usize, T>`, `IIndexSet<usize, T>`) |
 | `&T` / `&var T` | `ref<T>` / `var ref<T>` | `0b01` | Lexical immutable / mutable borrow |
-| `~T` | `iso<T>` | `0b10` | Unique Perceus heap/arena ownership handle |
-| `T?` | `option<T>` | `0b00*` | `ITryOperator`, `ICoalesceOperator` (Niche-unboxed) |
-| `T ! E` | `result<T, E>` | `0b00*` | `ITryOperator` (Must-use register return) |
-| `(A, B) => R` | `fn<(A, B), R>` | `0b01` | Callable closure view (`{ ptr<void>, ptr<void> }`) |
-| `a ..< b` | `range<T>` | `0b00` | `IRangeOperator<T>` (Half-open `[a, b)`) |
-| `a .. b` / `a ..= b` | `span<T>` | `0b00` | `ISpanOperator<T>` (Inclusive `[a, b]`) |
-| `a .. b : s` | `step<T>` | `0b00` | `IStepOperator<T>` (Stepped sequence) |
-| `fn!&(a, b)` | `frame<TSig>` | `0b00` | Zero-marshalling C-ABI call frame (`#[repr(C)]`) |
+| `~T` | `iso<T>` | `0b10` | Isolated Perceus heap/cue transfer handle |
+| `T?` | `option<T>` | `0b00*` | Niche-unboxed optional (`ITryOperator`, `ICoalesceOperator`) |
+| `T ! E` | `result<T, E>` | `0b00*` | Values-first must-use outcome (`ITryOperator`) |
+| `(A, B) => R` | `fn<(A, B), R>` | `0b01` | Closure view (`{ ptr<void>, ptr<void> }`) |
+| `a ..< b` | `range<T>` | `0b00` | Half-open `[a, b)` (`IRangeOperator<T>`) |
+| `a .. b` / `a ..= b` | `span<T>` | `0b00` | Inclusive `[a, b]` (`ISpanOperator<T>`) |
+| `a .. b : s` | `step<T>` | `0b00` | Stepped progression (`IStepOperator<T>`) |
+| `fn!&(a, b)` | `frame<TSig>` | `0b00` | Zero-marshalling `#[repr(C)]` C-ABI call frame |
 
-### 2. Distributive Headers, Implicit Properties & 8-Pillar `[...]` Attributes
+### 2. Distributive Headers, Implicit Properties & `[...]` Attribute Pipelines
 
 ```pilot
 [EnforceCoreNaming]
@@ -51,13 +71,13 @@ pub pkg Pilot.Core.Showcase;
 
 pub fn distributive_demo() {
     let List<i32> {
-        myarr1 = [1, 2, 3],
-        myarr2 = [4, 5, 6,],
+        primary = [1, 2, 3,],
+        backup  = [4, 5, 6,],
     };
 
     var Vec3<f64> {
-        a = (1.0, 2.0, 3.0),
-        b = (9.0, 8.0, 7.0,),
+        origin = (0.0, 0.0, 0.0),
+        target = (9.0, 8.0, 7.0,),
     };
 }
 
@@ -66,44 +86,58 @@ pub struct CombatUnit : IValue {
         base_atk:  f32 = 50.0;
         crit_mult: f32 = 1.5;
 
-        // Self-backed implicit property (`field` & `value`) with reactive attributes:
-        [Clamp(min: 0.0, max: 1000.0, weight: 100), OnChange((old, cur) => Log.info(f"HP: {old} -> {cur}"))]
+        // Implicit property (`field` backing slot + `value` setter parameter):
+        [Clamp(min: 0.0, max: 1000.0, weight: 100)]
         hp: f32 = 100.0 {
             get => field;
             set => { field = value; }
         }
 
-        // Formula Evaluator synthesizes computed getter at compile time:
         [Formula((u) => u.base_atk * u.crit_mult)]
         effective_atk: f32 { get; }
 
         [TraceSpan(name: "apply_damage", weight: 50)]
-        var fn apply_damage(dmg: f32)
-            requires dmg >= 0.0
-            ensures .hp <= old(.hp)
-        {
-            .hp = .hp - dmg;
+        var fn apply_damage(dmg: f32) {
+            if dmg >= 0.0 {
+                .hp = .hp - dmg;
+            }
         }
 }
 ```
 
-### 3. Values-First Errors (`T ! E`), `switch` & 3-Tier Dynamic `for` Loops
+### 3. Values-First Errors (`T ! E`), `guard`, `switch` & 3-Tier Dynamic `for` Loops
 
 ```pilot
-pub fn process_window(inputs: str[]) -> i64[] ! ParseError {
-    // 3-tier expression-oriented `for` loop yielding into a zero-marshalling `SliceBuffer<i64>`:
-    let scaled: i64[] = for (i in 0 ..< inputs.count) {
-        let val: i64 = inputs[i].trim().parse_i64()?;
-        if val < 0 {
-            continue 0 .. 2, ...; // Pushes remaining window onto `RangeWindow<usize>` worklist!
-        }
-        yield switch val {
-            case 0:       1;
-            case 1 .. 10: val * 10;
-            default:      val;
+pub fn scale_telemetry(samples: i64[]) -> i64[] ! str {
+    guard samples.len() > 0 else {
+        return err("empty sample window");
+    }
+
+    // Expression-oriented 3-tier `for` loop yielding a contiguous `SliceBuffer<i64>`:
+    let scaled: i64[] = for i in 0 ..< samples.len() {
+        let raw = samples[i];
+        yield switch raw {
+            case 0:         1;
+            case (1 .. 10): raw * 10;
+            default:        raw;
         };
     };
     return ok(scaled);
+}
+```
+
+### 4. Homoiconic Call-Quoting (`!`, `!!`, `!&`, `!^`, `!@`, `!?`)
+
+```pilot
+pub pure fn energy(mass: f64, vel: f64) -> f64 => 0.5 * mass * vel * vel;
+
+pub fn projections_demo(m: f64, v: f64) {
+    let shallow_ast = energy!(m, v);     // CallExpr<f64>  (ShallowQuote)
+    let deep_ast    = energy!!(~m, v);   // ast<f64>       (DeepSplice with `~m` unquoted)
+    let abi_frame   = energy!&(m, v);    // frame<...>     (#[repr(C)] zero-marshalling struct)
+    let live_sig    = energy!^(m, v);    // Signal<f64>    (Glitch-free push-pull reactive node)
+    let dual_grad   = energy!@(m, v);    // Dual<f64, f64> (Compile-time symbolic derivative)
+    let dry_run     = energy!?(m, v);    // EffectPlan<f64>(Copy-on-Write transactional sandbox)
 }
 ```
 
@@ -113,78 +147,81 @@ pub fn process_window(inputs: str[]) -> i64[] ! ParseError {
 
 ```plaintext
 Pilot/
-├── crates/
-│   ├── pilot-arena/         # 64KB slab bump allocator & typed generational arenas
-│   ├── pilot-span/          # Zero-copy SIMD SWAR byte spans & LineIndex
-│   ├── pilot-intern/        # Lock-free symbol & `:ns/kw` keyword interner
-│   ├── pilot-lexer/         # 14-token seed SIMD lexer, `#if` preprocessor & `bracket_links`
-│   ├── pilot-syntax/        # Rowan-style lossless Red/Green CST & panic-free recovery
-│   ├── pilot-ast/           # 16-byte cache-packed `AstNode`, `AstArena` & IDE presentation policies
-│   ├── pilot-parser/        # Interleaved recursive-descent + Pratt parser & `ParserTables`
-│   ├── pilot-analysis/      # 2-bit lattice, 4-tier `MethodTable`, HM/row inference, `comptime` `Cfg`,
-│   │                        # `[Patch]`, autodiff (`!@`), call-quoting (`!&`), loops, dimensions & contracts
-│   ├── pilot-perceus/       # 2-bit lattice-driven Perceus ARC, escape analysis & realtime verifier
-│   ├── pilot-vm/            # 32-bit register `PilVM` v3 & zero-deserialization `.pilc` v3 cache
-│   ├── pilot-codegen/       # LLVM IR, C11/C23 (Clang), x86_64/ARM64 ASM, WASM & GPU (CUDA/ROCm/Vulkan/WGSL)
-│   ├── pilot-transpile/     # Bidirectional transpiler (`--emit` / `--from`) across 7 languages
-│   ├── pilot-polyglot/      # Zero-copy `SliceBuffer` FFI & SQL bridges (Python, JS, Lua, C/C++, Rust, Postgres)
-│   ├── pilot-db/            # In-memory relational database, B-Tree indexing & LINQ/SQL engine
-│   ├── pilot-fmt/           # Lossless Red/Green CST formatter & Pilot-driven syntax migration engine
-│   ├── pilot-incremental/   # Salsa-style early-cutoff query memoization
-│   ├── pilot-perf/          # Multi-target profiler, WCET analyzer & CST auto-optimizer
-│   ├── pilot-pkg/           # Universal package manager, foreign interop & `pilot venv`
-│   ├── pilot-lsp/           # Pilot-driven JSON-RPC 2.0 Language Server (`[IdeToken]`, hover lattice badges)
-│   ├── pilot-dap/           # Native Debug Adapter Protocol server & interactive CLI debugger
-│   ├── pilot-ffi/           # C-ABI compiler bridge
-│   ├── pilot-rt/            # Linkable zero-GC C-ABI runtime (`libpilot_rt.a` / `pilot_runtime.h`)
-│   ├── pilot-bench/         # Cross-language nanosecond benchmark suite
-│   └── pilot-cli/           # Unified `pilot` toolchain binary
-├── stdlib/
-│   ├── core/                # 4-Stage Self-Genesis (`core`, `operator`, `mem`, `option`, `result`, `task`, `builtins`, `meta`)
-│   └── ...                  # 37 canonical standard library modules (`formats`, `json`, `csv`, `pickle`, `tomllib`,
-│                            # `collections`, `math`, `numpy`, `pandas`, `matplotlib`, `scikit`, `io`, `asyncio`, `http`, etc.)
-├── selfhost/                # Self-hosted Pilot compiler & IDE generator (`ide_sync.pilot`, `lexer`, `parser`, `analyzer`, `emitter`, `pilotc`)
-├── tools/pilot-kernel/      # Jupyter Notebook kernel (`pilot_kernel`)
-├── tests/                   # End-to-end integration suites & multi-backend differential suites
-├── examples/                # Progressive `tutorial/` (7), `showcase/` (36), `benchmarks/` & `notebook_demo.ipynb`
-└── vscode-pilot/            # Visual Studio Code extension with Pilot-synced grammar, snippets, LSP & DAP
+├── crates/                      # Irreducible 14-Token Name-Blind Hardware & Physics Engine (12 crates)
+│   ├── pilot-arena/             # 64KB slab bump allocator & typed generational arenas
+│   ├── pilot-span/              # Zero-copy SIMD SWAR byte spans & LineIndex
+│   ├── pilot-intern/            # Lock-free symbol & `:ns/kw` interner (14 seed keywords only)
+│   ├── pilot-ast/               # Packed 16-byte `AstNode` & `AstArena`
+│   ├── pilot-lexer/             # 14-token SIMD lexer, two-way dot, 6 call-quote modes & `bracket_links`
+│   ├── pilot-parser/            # 14-token seed recursive-descent + Pratt parser & `ParserTables`
+│   ├── pilot-analysis/          # Hardware layout physics (`LayoutTable`), `PhysicsRegistry` & bootstrap bridge
+│   ├── pilot-rt/                # Zero-GC C-ABI runtime (`PilotVal` 14B SSO, OS `getrandom`, sockets, `dlopen`, threads)
+│   ├── pilot-vm/                # 32-bit register `PilVM` v3, `VmHook` & `.pilc` v3 (`PIL3`) binary loader
+│   ├── pilot-codegen/           # System toolchain link driver (`BuildDriver` -> `selfhost/codegen/*`)
+│   ├── pilot-ffi/               # Minimal C-ABI host shim (`<= 180` LOC -> `selfhost/ffi_bindgen.pilot`)
+│   └── pilot-cli/               # Thin `.pilc` & self-hosted CLI bootstrapper (`<= 100` LOC)
+├── stdlib/                      # Pure Pilot Self-Genesis & Standard Library
+│   ├── core/                    # 4-Stage Self-Genesis (`bootstrap`, `core`, `operator`, `mem`, `option`, `result`,
+│   │   ├── primitives/          # 39 `[Lang]` layout-bound primitives (`i8`..`i128`, `f16`..`f128`, `slice`, `simd`, `frame`, ...)
+│   │   ├── operators/           # 19 algebraic & structural operator contracts (`ITryOperator`, `ISplatOperator`, ...)
+│   │   └── syntax/              # 16 homoiconic `syntax` & `syntax type_construct` modules (`for`, `switch`, `guard`, ...)
+│   ├── crypto/                  # Pure Pilot SHA-256, SHA-512, BLAKE3, HMAC-SHA256 & RFC 8032 Ed25519
+│   ├── db/                      # Relational SQL/B-Tree engine, PostgreSQL v3 & MySQL binary wire protocols
+│   ├── http/                    # HTTP/1.1 client/server over `pilot-rt` raw TCP sockets
+│   ├── polyglot/                # Bounds-checked SHM views, JSON marshaling & Python/Node/C bridges
+│   ├── pkg/                     # SPDX license expression parser & compatibility gate (`licensing.pilot`)
+│   └── ...                      # 35+ standard library packages (`collections`, `asyncio`, `realtime`, `contracts`, `numpy`, ...)
+├── selfhost/                    # Self-Hosted Pilot Compiler, Backends & Developer Toolchain
+│   ├── pilotc.pilot             # Stage-3 fixed-point compiler driver (Stage-2 == Stage-3 parity)
+│   ├── lexer.pilot / parser.pilot / ast.pilot / preprocessor.pilot
+│   ├── analyzer.pilot / attr_weaver.pilot / diagnostics.pilot / ffi_bindgen.pilot
+│   ├── cst/ & fmt/              # Lossless Red/Green CST, O(1) bracket recovery & Wadler-Lindig formatter
+│   ├── perceus/                 # 2-bit lattice Perceus ARC (`Dup`/`Drop`/`DropReuse`), escape & `[HardRealtime]` verifier
+│   ├── vm/                      # `PilVM` v3 bytecode compiler & `.pilc` v3 debug-table binary writer
+│   ├── codegen/                 # Layout-driven C11, LLVM IR, WASM, x86_64/ARM64 ASM & 8 GPU shader/kernel emitters
+│   ├── transpile/               # 7-language emitters (`c`, `cpp`, `csharp`, `rust`, `python`, `js`, `lua`) & 6 ingesters
+│   ├── lsp/ & dap/ & ide/       # Persistent incremental PilVM LSP, `VmHook`-stepped DAP & VS Code grammar generator
+│   └── cli/ & pkg/ & perf/ & bench/ # Self-hosted CLI router, REPL, `pilot.toml`/archive/venv, profiler, WCET & optimizer
+├── examples/                    # Canonical Tutorials (`tutorial/`), Concept Showcases (`showcase/`) & Benchmarks
+├── scripts/                     # 4 Automated Architecture & Name-Blind Verification Gates (`gate1`–`gate4`)
+└── vscode-pilot/                # Visual Studio Code extension generated via `selfhost/ide/vscode_gen.pilot`
 ```
 
 ---
 
-## Build, Verification & CLI Summary
+## Build, Toolchain & Verification Commands
 
 ```bash
-# Build release binaries (`pilot`, `pilot-lsp`, `pilot-dap`)
+# Build the Pilot CLI binary
 cargo build --release
 
-# Run all workspace unit tests & phase verification gates
+# Execute a Pilot source file or precompiled `.pilc` v3 binary
+./target/release/pilot run examples/execution_demo.pilot
+
+# Verify syntax, 2-bit hardware lattice, clearance rings & Perceus contracts
+./target/release/pilot check examples/overview.pilot
+
+# Compile source to `.pilc` v3 bytecode or native AOT executable
+./target/release/pilot compile examples/execution_demo.pilot -o execution_demo.pilc
+./target/release/pilot build examples/execution_demo.pilot
+
+# Bidirectional source transpilation (`c`, `cpp`, `csharp`, `rust`, `python`, `js`, `lua`)
+./target/release/pilot --emit rust app.pilot -o app.rs
+./target/release/pilot --from python lib.py -o lib.pilot
+
+# Launch resident PilVM Language Server, stepped DAP server, or sync VS Code grammar
+./target/release/pilot lsp
+./target/release/pilot debug app.pilot
+./target/release/pilot ide-sync
+
+# Run all interactive concept showcases (`examples/showcase/`)
+bash examples/showcase/run_all.sh
+
+# Run the 4 Name-Blind & Rust Contraction Architecture Gates
+python3 scripts/gate1_check.py && python3 scripts/gate2_check.py
+python3 scripts/gate3_check.py && python3 scripts/gate4_selfhost_contraction.py
+
+# Run all workspace unit tests & the simultaneous 44-test Milestone 50–61 Mega Gate
 cargo test --workspace
-
-# Precompile `stdlib/` into content-addressed `.pilc` v3 bytecode cache
-pilot compile --stdlib
-
-# Zero-allocation syntax, lattice, clearance & semantic verification
-pilot check app.pilot [--comptime-audit]
-
-# Run integration suites & multi-backend differential verification
-pilot test
-pilot test --differential
-
-# Native AOT, LLVM IR, C11/C23, WASM & Multi-Vendor GPU compilation
-pilot build app.pilot --target=native|llvm|c|wasm|gpu [-O3] [--burst]
-pilot build kernel.pilot --gpu --gpu-backend=cuda|rocm|vulkan|wgpu
-
-# Lossless CST formatting, syntax migration & Pilot-driven VS Code artifact sync
-pilot fmt <path> [--check | --write | --migrate-syntax]
-pilot ide-sync
-
-# Profiling, packaging & virtual environments
-pilot perf profile|analyze|optimize <file.pilot>
-pilot pkg init|add|install|pack
-pilot venv create .venv
-
-# Bidirectional transpilation (`c`, `cpp`, `csharp`, `rust`, `python`, `js`, `lua`)
-pilot --emit rust app.pilot -o app.rs
-pilot --from python --strict-pilot --viable-license-only lib.py -o lib.pilot
+cargo test -p pilot-analysis --test mega_all_milestones_simultaneous_gate
 ```

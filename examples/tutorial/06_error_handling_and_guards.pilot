@@ -1,18 +1,16 @@
 // =============================================================================
-// Tutorial 06: Modern Error Handling, Guards, Defer & Null Safety
+// Tutorial 06: Values-First Errors (`T ! E`), `option<T>` (`T?`), `guard` & `defer`
 // =============================================================================
 
-// --- 1. Safe Navigation (?.) and Null Coalesce (??) ---
+// --- 1. Null-Safety (`T?`), Safe Navigation (`?.`) & Coalesce (`??`) ---
 let nullable_text: str? = none;
-let length_display = nullable_text?.Length ?? "Default Length";
+let length_display = nullable_text ?? "Default Text";
 println(f"Display: {length_display}");
 
-// Coalesce assignment (??=) assigns only if current value is none
 var fallback_config: str? = none;
-fallback_config ??= "production.env";
+fallback_config = fallback_config ?? "production.env";
 
-// --- 2. Flat Happy-Path Early Exit with Guard ---
-// Guard statements enforce preconditions without deep if/else nesting.
+// --- 2. Flat Happy-Path Early Exit with `guard` ---
 fn process_user_id(raw_id: i64?) -> str {
     guard some raw_id else {
         return "ERROR: Missing user ID";
@@ -23,9 +21,7 @@ fn process_user_id(raw_id: i64?) -> str {
 println(process_user_id(none));
 println(process_user_id(42));
 
-// --- 3. Scope Cleanup with Defer ---
-// Defer ensures statements run when the enclosing function or block exits,
-// regardless of whether exit happened normally or via early return.
+// --- 3. Deterministic Scope Cleanup with `defer` ---
 fn run_transaction() -> void {
     println("Acquiring database connection lock...");
     defer {
@@ -36,14 +32,21 @@ fn run_transaction() -> void {
 
 run_transaction();
 
-// --- 4. Structured Error Recovery (try / catch / finally) ---
-try {
-    let divisor = 0;
-    if divisor == 0 {
-        raise "DivideByZeroException";
+// --- 4. Values-First Error Propagation (`T ! E` + Postfix `?` + `catch`) ---
+pub pure fn checked_divide(numerator: i64, denominator: i64) -> i64 ! str {
+    guard denominator != 0 else {
+        return err("DivideByZero");
     }
-} catch (err) {
-    println(f"Caught handled exception: {err}");
-} finally {
-    println("Finally block executed regardless of exception state.");
+    return ok(numerator / denominator);
 }
+
+pub fn compute_ratio(a: i64, b: i64) -> i64 ! str {
+    let q = checked_divide(a, b)?;
+    return ok(q * 10);
+}
+
+let safe_val = compute_ratio(100, 0) catch err_msg => {
+    println(f"Recovered values-first error: {err_msg}");
+    -1
+};
+println(f"Final computed value: {safe_val}");

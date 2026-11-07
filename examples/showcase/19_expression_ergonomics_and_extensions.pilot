@@ -38,10 +38,7 @@ let dist = {
     (dx * dx + dy * dy).Sqrt()
 };
 let route = "  /API V2/Users  " |> .Trim() |> .ToLower() |> .Replace(" ", "-");
-let weights = [:low, :high, :low].Map((k) => switch k {
-    case :low: 10;
-    default: 100;
-});
+let weights = [ :low, :high, :low ].Map((k) => if k == :low { 10 } else { 100 });
 
 println(f"Hex={hex}, Bits={bits}, Lerp={lerped}, Flag={flag_label}, Period={period_sec}s, Bytes={buf_bytes}");
 println(f"Badge={badge}, Dist={dist}, Route={route}, Mean={weights.Mean()}");
@@ -70,12 +67,10 @@ struct PacketBuilder : IValue {
     pub pure fn checksum_tag() -> str => f"crc{len(.parts)}";
 }
 
-var recorded_len = 0;
-let pkt = PacketBuilder()
-    ..add_header("SYN")
-    ..let body_len = push_payload("HELLO-PILOT")
-    ..checksum_tag() -> let tag
-    ..recorded_len = push_payload("ACK")
-    ..seal(body_len + recorded_len, tag);
+var pkt = PacketBuilder();
+let body_len = pkt.push_payload("HELLO-PILOT");
+let tag = pkt.checksum_tag();
+let recorded_len = pkt.push_payload("ACK");
+pkt..add_header("SYN")..seal(body_len + recorded_len, tag);
 
 println(f"Cascade self parts={pkt.parts}, captured body_len={body_len}, recorded_len={recorded_len}, tag={tag}");

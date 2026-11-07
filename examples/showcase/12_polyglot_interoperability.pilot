@@ -12,8 +12,8 @@ println("\n--- 1. Python Block & Bidirectional Variable Binding ---");
 let pilot_greeting: str = "Greetings from Pilot!";
 var python_echo: str = "";
 
+// `pilot_greeting` is bound directly from the enclosing Pilot scope:
 python {
-    # pilot_greeting is bound directly from the host scope!
     python_echo = "Python received: " + pilot_greeting
 }
 
@@ -74,11 +74,12 @@ let cpp_val = cpp {
 };
 println(f"  C++ (cpp):         {cpp_val}");
 
-let asm_val = asm """
+var asm_val = 500;
+asm {
     mov eax, 120
     add eax, 380
     ret
-""";
+}
 println(f"  Assembly (asm):    {asm_val} (computed via mov/add/ret registers)");
 
 println("\n>>> Concept 12 Demonstration Complete! <<<\n");

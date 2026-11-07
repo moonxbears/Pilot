@@ -1,47 +1,39 @@
 // =============================================================================
-// Tutorial 07: Concurrency, Asynchronous Tasks, Channels & Multiplexing
+// Tutorial 07: Structured Concurrency, `async` / `await`, `spawn` & Channels
 // =============================================================================
 
-// --- 1. Communication Channels (Channel<T>) ---
-// Pilot uses CSP-style typed channels for thread-safe message passing.
+use Pilot.Asyncio as asyncio;
+
+// --- 1. Typed Communication Channels (`<-`) ---
 let data_ch = Channel(10);
 let control_ch = Channel(5);
 
-fn channel_capacity(ch: Channel<i64>) -> i64 {
-    return len(ch);
-}
-
-// --- 2. Asynchronous Functions and Tasks ---
+// --- 2. Asynchronous Functions & Concurrent `spawn` ---
 async fn compute_telemetry(sensor_id: i64) -> i64 {
     println(f"Computing telemetry for sensor {sensor_id}...");
     return sensor_id * 100;
 }
 
-// Spawning asynchronous concurrent tasks
-spawn(compute_telemetry(1));
-spawn(compute_telemetry(2));
+let task_a = spawn(compute_telemetry(1));
+let task_b = spawn(compute_telemetry(2));
 
-// --- 3. Sending and Receiving Messages ---
-// Send operator: `channel <- value`
+let res_a = await(task_a);
+let res_b = await(task_b);
+println(f"Telemetry results: {res_a}, {res_b}");
+
+// --- 3. Non-Blocking Channel Send & Receive (`<-`) ---
 data_ch <- 42;
 control_ch <- "STATUS_OK";
 
-// Receive operator: `val = <-channel`
 let received_val = <-data_ch;
-println(f"Received from data channel: {received_val}");
+let control_msg = <-control_ch;
+println(f"Channel payload={received_val}, control={control_msg}");
 
-// --- 4. Event Multiplexing with Select ---
-// Multiplexes across multiple channels with optional timeout and default branches.
-select {
-    <-control_ch => {
-        println("Handled control signal from channel.");
-    }
-    timeout 50ms => {
-        println("Timed out waiting on channels.");
-    }
-    default => {
-        println("Channels idle; proceeding.");
-    }
-}
-
+// --- 4. Event-Loop Task Combinators ---
+let gathered = asyncio.gather([
+    () => 10,
+    () => 20,
+    () => 30,
+]);
+println(f"Gathered async batch: {gathered}");
 println("Tutorial 07 completed successfully.");

@@ -2,7 +2,20 @@
 // Showcase 17: Concise Modern Null-Safety System (`T?` Optionals, Zero NREs)
 // =============================================================================
 
-record Account(id: i64, username: str, email: str?, tier: str?);
+pub struct Account : IValue {
+    pub:
+        id: i64;
+        username: str;
+        email: str?;
+        tier: str?;
+
+        self(id: i64, username: str, email: str?, tier: str?) {
+            .id = id;
+            .username = username;
+            .email = email;
+            .tier = tier;
+        }
+}
 
 fn render_badge(acct: Account?) -> str {
     // 1. In-place `guard some` narrowing without `let acct = acct` repetition

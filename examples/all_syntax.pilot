@@ -1,8 +1,9 @@
 // ==============================================================================
-// Pilot Omnibus Syntax Showcase: Complete Language Specification in a Single File
+// Pilot Omnibus Syntax Showcase: Complete Canonical Language Specification
 // ==============================================================================
-// This file demonstrates every canonical syntactic construct, keyword, operator,
-// and grammar production available in the Pilot programming language.
+// Demonstrates every canonical syntactic construct, modifier, operator,
+// 2-bit hardware lattice contract, distributive header, and homoiconic form
+// available in the Pilot programming language.
 
 // ==============================================================================
 // 1. Preprocessor Directives
@@ -21,8 +22,7 @@ use Pilot.Math as math;
 use Pilot.Sys as system;
 use Pilot.Collections.{HashMap};
 
-// Foreign Interface & Polyglot ABI Declarations
-extern "python" module "numpy" {
+extern "python" lib "numpy" {
     fn polyglot_array_rank() -> i64;
 }
 
@@ -34,130 +34,132 @@ extern "rust" lib "libphysics" {
     fn compute_impulse(mass: f32, velocity: f32) -> f32;
 }
 
-extern "csharp" assembly "System.Data" {
+extern "csharp" lib "System.Data" {
     struct SqlConnection : IValue {
         pub:
-        fn open() -> void;
-        fn close() -> void;
+            fn open() -> void;
+            fn close() -> void;
     }
 }
 
 // ==============================================================================
-// 3. Type Definitions: Structs, Interfaces, ADTs, Enums, Typestates & Actors
+// 3. Structs, Interfaces, Bundles, Facets, Enums, Typestates & Actors
 // ==============================================================================
 
-// Value-Semantic Unboxed Structs
-struct Point : IValue {
-    let x: f64;
-    let y: f64;
+pub struct Point : IValue {
+    pub:
+        x: f64;
+        y: f64;
 }
 
-struct Config : IValue {
-    let host: str;
-    let port: i64;
-    let secure: bool;
+pub struct Config : IValue {
+    pub:
+        host: str;
+        port: i64;
+        secure: bool;
 }
 
-// Memory Structs with Operator Overloading
-struct Vector3 : IValue {
-    let x: f64;
-    let y: f64;
-    let z: f64;
+pub struct Vector3 : IValue {
+    pub:
+        x: f64;
+        y: f64;
+        z: f64;
 
-    pub op +(other: Vector3) -> Vector3 {
-        return Vector3(self.x + other.x, self.y + other.y, self.z + other.z);
-    }
+        op + (other: Vector3) -> Vector3 {
+            return Vector3(self.x + other.x, self.y + other.y, self.z + other.z);
+        }
 }
 
-// Interface Contracts (Parameterized / Generics)
-interface ISerializable {
+pub interface ISerializable {
     fn serialize() -> str;
 }
 
-interface IDeserializable<T> {
+pub interface IDeserializable<T> {
     fn deserialize(payload: str) -> T;
 }
 
-// Algebraic Data Types (Sum Types / Tagged Unions)
-type Shape =
-    | Circle(radius: f64)
-    | Rectangle(width: f64, height: f64)
-    | Polygon(points: Point[])
-    | Origin;
+// Algebraic Sum Types (`enum` with Payload Variants)
+pub enum Shape {
+    Circle(radius: f64),
+    Rectangle(width: f64, height: f64),
+    Polygon(pts: Point[]),
+    Origin,
+}
 
-// Enumerations with Payloads
-enum ConnectionState {
+[Typestate]
+pub enum ConnectionState {
     Disconnected,
     Connecting,
     Connected,
     Reconnecting(i64),
 }
 
-// Rich Struct with Typestates, Variation B Properties, Methods, and Builders
-struct NetworkNode : IValue {
+// Field Bundle (`*Bundle`) & Method Facet (`*Facet`) Composition
+pub struct NodeIdentityBundle : IValue {
+    pub:
+        var node_epoch: i64 = 1;
+}
+
+pub struct NodeDiagnosticsFacet {
+    pub pure fn health_code() -> i64 => 200;
+}
+
+// Rich Struct with Distributive Headers, Implicit Properties & Fluid Builders
+pub struct NetworkNode : IValue {
+    *NodeIdentityBundle;
+    *NodeDiagnosticsFacet;
+
     priv:
-    var _id: i64 = 0;
-    var _name: str = "node";
-    var _status: str = "idle";
+        var _id: i64 = 0;
+        var _name: str = "node";
 
     pub:
-    var tags: str[] = [];
+        var tags: str[] = [];
+        var phase: ConnectionState = ::Disconnected;
 
-    // Typestate definitions
-    state Initialized {
-        fn connect() -> void {}
-    }
-    state Connected {
-        fn transmit(data: str) -> void {}
-    }
+        // Implicit property (`field` backing slot + `value` setter parameter):
+        status: str = "idle" {
+            get => field;
+            set => { field = value; }
+        }
 
-    self(id: i64, name: str) {
-        self._id = id;
-        self._name = name;
-        self._status = "initialized";
-    }
+        self(id: i64, name: str) {
+            ._id = id;
+            ._name = name;
+            .status = "initialized";
+        }
 
-    status: str {
-        get => self._status;
-        set(val: str) => { self._status = val; }
-    }
+        pure fn get_id() -> i64 => ._id;
+        pure fn get_name() -> str => ._name;
 
-    fn get_id() -> i64 {
-        return self._id;
-    }
+        var fn set_title(title: str) -> NetworkNode {
+            ._name = title;
+            return self;
+        }
 
-    fn get_name() -> str {
-        return self._name;
-    }
+        var fn set_status(st: str) -> NetworkNode {
+            .status = st;
+            return self;
+        }
 
-    // Fluid builder-pattern methods for cascade chaining (..)
-    var fn set_title(title: str) -> NetworkNode {
-        self._name = title;
-        return self;
-    }
-
-    var fn set_status(st: str) -> NetworkNode {
-        self._status = st;
-        return self;
-    }
-
-    var fn add_tag(tag: str) -> NetworkNode {
-        self.tags.append(tag);
-        return self;
-    }
+        var fn add_tag(tag: str) -> NetworkNode {
+            .tags.append(tag);
+            return self;
+        }
 }
 
-// Concurrency Actor
-actor EventBus {
-    var event_count: i64 = 0;
+[Actor]
+pub struct EventBus : IValue {
+    pub:
+        var event_count: i64 = 0;
 
-    async fn publish(topic: str, payload: str) -> void {
-        self.event_count += 1;
-    }
+        async var fn publish(topic: str, payload: str) -> void {
+            .event_count += 1;
+        }
 }
 
-// Scoped Lexical Extension
-pub ext StringHelpers on str {
+// Named Scoped Lexical Extension (`:` target syntax)
+pub ext StringHelpers : str {
     pub pure fn shout() -> str {
         return self + "!";
     }
@@ -171,27 +173,26 @@ adapter str -> i64 {
 #endregion Type System and Model Definitions
 
 // ==============================================================================
-// 4. Global Variables, Constants, and Modifiers
+// 4. Module-Level Bindings & Homoiconic Syntax Rules
 // ==============================================================================
-pub const MAX_CONNECTIONS: i64 = 4096;
+pub let MAX_CONNECTIONS: i64 = 4096;
 pub let APP_NAME: str = "Pilot Omnibus";
 priv var g_transaction_id: i64 = 1000;
+
+pub syntax {
+    log_metric(name, value) => quote {
+        print($name + ": " + $value)
+    };
+}
 
 // ==============================================================================
 // 5. Functions, Attributes, Design-by-Contract & Closures
 // ==============================================================================
 
-// Pure mathematical function
-pub pure fn square(x: i64) -> i64 {
-    return x * x;
-}
+pub pure fn square(x: i64) -> i64 => x * x;
 
-// Generic function with Type Parameters
-fn identity<T>(val: T) -> T {
-    return val;
-}
+pub pure fn identity<T>(val: T) -> T => val;
 
-// Compile-time evaluable function
 comptime fn compute_factorial(n: i64) -> i64 {
     var acc = 1;
     for i in 2..=n {
@@ -200,10 +201,9 @@ comptime fn compute_factorial(n: i64) -> i64 {
     return acc;
 }
 
-const FACT_5: i64 = comptime(compute_factorial(5));
+let FACT_5: i64 = comptime(compute_factorial(5));
 
-// Design-by-Contract function with requires, ensures, and old()
-fn safe_bank_withdraw(var balance: i64, amount: i64) -> i64
+pub fn safe_bank_withdraw(var balance: i64, amount: i64) -> i64
     requires amount > 0 && balance >= amount
     ensures result == old(balance) - amount
 {
@@ -211,41 +211,38 @@ fn safe_bank_withdraw(var balance: i64, amount: i64) -> i64
     return balance;
 }
 
-// Recursive function
-fn factorial(n: i64) -> i64 {
+pub pure fn factorial(n: i64) -> i64 {
     if n <= 1 {
         return 1;
     }
     return n * factorial(n - 1);
 }
 
-// Asynchronous function
-async fn fetch_remote_status(endpoint: str) -> str {
+pub async fn fetch_remote_status(endpoint: str) -> str {
     return "ONLINE: " + endpoint;
 }
 
-// Contextual parameter function for Dependency Injection
-fn get_service_data(context db: str) -> str {
+pub fn get_service_data(db: str) -> str
+    where context(db: str)
+{
     return "Data queried from: " + db;
 }
 
-// Function with homoiconic call-quoting capabilities
-fn ComputeImpulse(mass: f64, velocity: f64) -> f64 {
+pub pure fn ComputeImpulse(mass: f64, velocity: f64) -> f64 {
     return 0.5 * mass * velocity * velocity;
 }
 
-// Compile-Time AST Macro
-macro log_metric(name, value) {
-    print(name + ": " + value);
+// ==============================================================================
+// 6. Statement & Expression Tour
+// ==============================================================================
+pub database AppDb {
+    pub uri: str;
 }
 
-// ==============================================================================
-// 6. Demonstrating All Statement & Expression Syntax
-// ==============================================================================
-fn run_omnibus_showcase() -> void {
+pub fn run_omnibus_showcase() -> void {
     print("=== Pilot Omnibus Syntax Tour ===");
 
-    // --- 6.1 Variable Bindings & Primitives ---
+    // --- 6.1 Variable Bindings, Distributive Blocks & Primitives ---
     let immutable_int: i64 = 42;
     let hex_val: i64 = 0x2A;
     let bin_val: i64 = 0b101010;
@@ -254,23 +251,20 @@ fn run_omnibus_showcase() -> void {
     let scientific: f64 = 1.0e-4;
     let boolean_val: bool = true;
     let char_val: char = 'P';
-    let raw_string: str = """Multiple lines
-    of string data
-    without escaping""";
     let f_string: str = f"Interpolated integer: {immutable_int}, float: {float_val}";
 
-    var mutable_counter: i64 = 0;
+    // Distributive binding block (`AGENTS.md` §2.9):
+    let i64 {
+        batch_a = 10,
+        batch_b = 20,
+        batch_c = 12,
+    };
+
+    var mutable_counter: i64 = batch_a + batch_b + batch_c;
     mutable_counter += 1;
     mutable_counter *= 2;
 
-    // Dynamic typing and reference binding
-    let dynamic_target: any = "Dynamic typed string";
     let counter_ref: ref<i64> = ref mutable_counter;
-
-    let computed_val = immutable_int * 2;
-    if computed_val > 50 {
-        mutable_counter += computed_val;
-    }
 
     // --- 6.2 Real-Time Duration, Frequency & Memory Literals ---
     let clk_ns = 25ns;
@@ -282,79 +276,69 @@ fn run_omnibus_showcase() -> void {
     let buffer_kb = 64KB;
     let cache_mb = 16MB;
 
-    // --- 6.3 Collections & Data Structures ---
-    let numbers_list: i64[] = [1, 2, 3, 4, 5];
-    let string_map: map<str, i64> = ["alpha": 1, "beta": 2, "gamma": 3];
-    let number_tuple = (10, "tuple_element", true, 3.14);
-    let matrix_2d = [[1.0, 2.0], [3.0, 4.0]];
+    // --- 6.3 Collections, Splat (`*`) & Key-Value Pairs (`**`) ---
+    let numbers_list: i64[] = [1, 2, 3, 4, 5,];
+    let string_map: map<str, i64> = ["alpha": 1, "beta": 2, "gamma": 3,];
+    let number_tuple = (10, "tuple_element", true, 3.14,);
+    let matrix_2d = [[1.0, 2.0,], [3.0, 4.0,],];
 
-    // Collection spread syntax (*expr)
-    let spread_list = [0, *numbers_list, 99];
-
-    // Slicing and indexing
+    let spread_list = [0, *numbers_list, 99,];
     let first_elem = numbers_list[0];
     let sliced_sublist = numbers_list[1..4];
     let map_lookup = string_map["alpha"];
 
-    // 3-Tier `for` collection yield expression
-    let squares = for x in numbers_list {
+    // 3-Tier `for` collection yield expression:
+    let odd_squares: i64[] = for x in numbers_list {
         if x % 2 != 0 {
             yield x * x;
         }
     };
 
-    // --- 6.4 Destructuring Unpacking ---
-    let (tup_a, tup_b, tup_c, tup_d) = number_tuple;
-    let [head, ..tail] = numbers_list;
-
-    // --- 6.5 Control Flow: if / else if / else ---
-    var category = "medium";
-    if immutable_int > 100 {
-        category = "high";
+    // --- 6.4 Control Flow: `if` / `else if` / `else` ---
+    let category = if immutable_int > 100 {
+        "high"
     } else if immutable_int < 0 {
-        category = "negative";
+        "negative"
     } else {
-        category = "standard";
-    }
+        "standard"
+    };
 
-    let cond_result = if mutable_counter > 10 { "approved" } else { "pending" };
-
-    // --- 6.6 Loops: loop, while, for, labeled break/continue, bounded ---
+    // --- 6.5 Loops: `while`, `until`, 3-Tier `for` (`ScalarBreak` + `then`) ---
     var loop_i = 0;
     while loop_i < 5 {
         loop_i += 1;
     }
 
-    // Bounded loop for real-time safety verification
     var bounded_i = 0;
-    while bounded_i < 100 bounded 100 {
+    until bounded_i >= 100 {
         bounded_i += 1;
     }
 
-    // For loop over range and collections
     var sum = 0;
     for num in 0..10 {
         sum += num;
     }
 
-    // Labeled nested loops with early exit
-    outer_loop: for row in 0..5 {
-        inner_loop: for col in 0..5 {
+    let found_row = for row in 0..<5 {
+        for col in 0..<5 {
+            if col == 1 {
+                continue;
+            }
             if row == 2 && col == 2 {
-                break outer_loop;
-            } else if col == 1 {
-                continue inner_loop;
+                break;
             }
         }
-    }
+        if row == 2 {
+            break row;
+        }
+    } then -1;
 
-    // --- 6.7 Guard & Defer ---
+    // --- 6.6 `guard` & LIFO `defer` ---
     guard immutable_int > 0 else {
         print("Guard assertion failed!");
         return;
     }
 
-    // LIFO Defer cleanup stack
     defer {
         print("Execution completed: running LIFO defer cleanup step 2");
     }
@@ -362,72 +346,59 @@ fn run_omnibus_showcase() -> void {
         print("Execution completed: running LIFO defer cleanup step 1");
     }
 
-    // --- 6.8 Values-First Error & Null-Safety (`T?`, `??`, `catch`) ---
-    assert(immutable_int == 42, "Sanity check on immutable_int");
-
+    // --- 6.7 Values-First Error & Null-Safety (`T?`, `??`, `T ! E`) ---
     let nullable_val: str? = none;
     let fallback_val = nullable_val ?? "default_text";
 
-    // --- 6.9 Fluid Builder Cascades (..) & Safe Cascades (?..) ---
+    // --- 6.8 Fluid Builder Cascades (`..`) & Safe Cascades (`?..`) ---
     var node = NetworkNode(1, "gateway_primary");
     node..set_title("Master Controller")..set_status("Synchronized")..add_tag("cluster-a")..add_tag("ha-master");
 
     let maybe_node: NetworkNode? = node;
     maybe_node?..set_status("Safe cascade verified");
 
-    // --- 6.10 Pattern Branching (switch / case / if / or-patterns) ---
-    let shape_inst: Shape = Shape.Rectangle(10.0, 10.0);
+    // --- 6.9 Exhaustive Pattern Branching (`switch`) ---
+    let shape_inst: Shape = ::Rectangle(10.0, 10.0);
     let shape_desc = switch shape_inst {
-        case Shape.Origin: "origin";
-        case Shape.Circle(r): f"circle radius {r}";
-        case Shape.Rectangle(w, h) if w == h: f"square of side {w}";
-        case Shape.Rectangle(w, h): f"rectangle {w}x{h}";
-        case Shape.Polygon(pts): f"polygon with {len(pts)} points";
+        case Origin: "origin";
+        case Circle(r): f"circle radius {r}";
+        case Rectangle(w, h) if w == h: f"square of side {w}";
+        case Rectangle(w, h): f"rectangle {w}x{h}";
+        case Polygon(pts): f"polygon with {len(pts)} points";
         default: "unknown shape";
     };
 
-    // Primitive pattern switch with or-pattern (|) and ranges (..=)
     let score = 85;
     let grade = switch score {
-        case 90..=100: "A";
-        case 80..=89: "B";
-        case 70..=79: "C";
-        case 0 | 1 | 2: "Critical Failure";
-        default: "Passing";
+        case (90..=100): "A";
+        case (80..=89):  "B";
+        case (70..=79):  "C";
+        case 0 | 1 | 2:  "Critical Failure";
+        default:         "Passing";
     };
 
-    // --- 6.11 Functional Programming, Closures & Pipelining (|>, <|) ---
-    // C#-style fat-arrow closures ((x) => expr, (a, b) => expr)
+    // --- 6.10 Closures & Pipelines (`|>`, `<|`) ---
     let add_five = (x: i64) => x + 5;
     let double_val = (x: i64) => x * 2;
-    let sum_pair = (a: i64, b: i64) => a + b;
-    let get_answer = () => 42;
-
-    // Forward pipeline operator (|>)
     let piped_value = 10 |> add_five |> double_val;
-    print(f"Pipelined result ((10 + 5) * 2): {piped_value}");
-
-    // Backward pipeline operator (<|)
     let rev_piped = double_val <| 25;
 
-    // --- 6.12 Binary, Logical & Bitwise Operators ---
+    // --- 6.11 Arithmetic, Logical & Bitwise Operators ---
     let arithmetic = (10 + 5 - 2) * 4 / 2;
     let bitwise = (0b1100 & 0b1010) | (0b0011 ^ 0b0001) << 1 >> 1;
     let bit_not = ~bitwise;
-    let logical = (true && !false) || (false && true) || (!false);
-    let comparison = (10 < 20) && (20 <= 20) && (30 > 15) && (15 >= 15) && (10 == 10) && (10 != 5);
+    let logical = (true && !false) || (false && true);
 
-    // --- 6.13 Real-Time & Deterministic Memory Regions ---
+    // --- 6.12 Real-Time & Deterministic Arena Regions ---
     noalloc {
         let local_val = 100;
         let double_local = local_val * 2;
     }
 
     region TransientArena {
-        let arena_scratch = [1, 2, 3];
+        let arena_scratch = [1, 2, 3,];
     }
 
-    // Real-Time Scheduling Blocks
     deadline 50ms {
         let d_val = 10;
     }
@@ -436,11 +407,12 @@ fn run_omnibus_showcase() -> void {
         let w_val = 20;
     }
 
-    periodic 10ms priority 1 jitter 50us {
+    periodic 10ms {
         let p_val = 30;
+        break;
     }
 
-    // --- 6.14 Concurrency, Channels & Multiplexing ---
+    // --- 6.13 Concurrency, Channels & Multiplexing ---
     let ch = Channel<i64>(10);
     spawn {
         ch <- 42;
@@ -458,69 +430,60 @@ fn run_omnibus_showcase() -> void {
     }
 
     select {
-        case val = <-ch {
-            print(f"Channel read: {val}");
-        }
-        case ch <- 100 {
-            print("Channel write");
-        }
-        timeout 100ms {
-            print("Channel select timeout");
-        }
+        let val = <-ch;
+        print(f"Channel read: {val}");
+        ch <- 100;
     }
 
-    // --- 6.15 In-Memory Database & Relational SQL Queries ---
+    // --- 6.14 Relational LINQ Queries, Set Algebra & Embedded SQL ---
     let users_table = [
-        ["id": 1, "name": "Alice", "role": "admin", "active": true],
-        ["id": 2, "name": "Bob", "role": "engineer", "active": true],
-        ["id": 3, "name": "Charlie", "role": "guest", "active": false],
+        ["id": 1, "name": "Alice",   "role": "admin",    "active": true,],
+        ["id": 2, "name": "Bob",     "role": "engineer", "active": true,],
+        ["id": 3, "name": "Charlie", "role": "guest",    "active": false,],
     ];
 
-    // LINQ-Style declarative relational query
     let active_admins = from u in users_table
         where u["active"] == true && u["role"] == "admin"
         order by u["name"] ascending
         select u["name"];
 
-    // SQL-First embedded query block
-    let engineer_names = select u["name"] from users_table as u where u["role"] == "engineer";
+    let engineer_names = from u in users_table
+        where u["role"] == "engineer"
+        select u["name"];
 
-    // Relational Set Operations
-    let combined_users = active_admins union all engineer_names;
+    let combined_users = active_admins union engineer_names;
     let intersect_users = active_admins intersect engineer_names;
     let except_users = active_admins except engineer_names;
 
-    // Database ACID transaction block
-    database app_db = connect("memory://");
     transaction {
         savepoint sp1;
         commit;
-        rollback to savepoint sp1;
+        rollback;
     }
 
-    // Table Mutation Statements
-    insert into app_db.users (id, name) values (10, "Dave") on conflict do nothing;
-    update app_db.users set active = false where id == 10;
-    delete from app_db.users where id == 999;
+    sql {
+        INSERT INTO users (id, name) VALUES (10, 'Dave') ON CONFLICT DO NOTHING;
+        UPDATE users SET active = 0 WHERE id = 10;
+        DELETE FROM users WHERE id = 999;
+    }
 
-    // --- 6.16 Scoped Contexts & Lexical Extensions ---
+    // --- 6.15 Scoped Contexts & Lexical Extensions ---
     use ext StringHelpers {
         let shouted_text = "pilot language".shout();
     }
 
-    with context let db = "production_cluster_db" {
+    context(db = "production_cluster_db") {
+        let db = "production_cluster_db";
         let service_resp = get_service_data(db);
     }
 
-    // --- 6.17 Metaprogramming, Quoting & Homoiconic Forms ---
+    // --- 6.16 Homoiconic Quoting, AST Splicing & 6 Call-Quoting Modes ---
     let status_keyword = :active;
     let role_keyword = :user/role;
 
-    // Homoiconic Quoting & AST Splicing ($node)
     let quoted_ast = quote { 1 + 2 * 3 };
     let spliced_ast = quote { 100 + $quoted_ast };
 
-    // 6 Call-Quoting Modes (!, !!, ~, !&, !^, !@, !?)
     let v: f64 = 5.0;
     let shallow_quoted = ComputeImpulse!(10.0, 5.0);
     let deep_quoted = ComputeImpulse!!(~10.0, v);
@@ -529,13 +492,10 @@ fn run_omnibus_showcase() -> void {
     let adjoint_dual = ComputeImpulse!@(10.0, 5.0);
     let dry_run_plan = ComputeImpulse!?(10.0, 5.0);
 
-    // Nameof operator
     let struct_type_name = nameof(NetworkNode);
+    log_metric("cpu_utilization", "85%");
 
-    // Macro call
-    log_metric!("cpu_utilization", "85%");
-
-    // --- 6.18 Inline Polyglot Blocks ---
+    // --- 6.17 Inline Polyglot & Assembly Blocks ---
     python {
         print("Executing inline Python 3.12 interop block")
     }
@@ -545,7 +505,6 @@ fn run_omnibus_showcase() -> void {
     }
 
     c {
-        /* inline C11 block */
         printf("Executing inline C11 block\n");
     }
 
@@ -558,16 +517,11 @@ fn run_omnibus_showcase() -> void {
     }
 
     lua {
-        -- inline Lua block
         print("Executing inline Lua 5.4 block")
     }
 
     asm {
-        // inline x86_64 / aarch64 assembly block
-    }
-
-    sql {
-        SELECT 1 AS status;
+        nop
     }
 
     print("=== Pilot Omnibus Syntax Tour Finished Successfully ===");
@@ -576,6 +530,6 @@ fn run_omnibus_showcase() -> void {
 // ==============================================================================
 // 7. Entry Point
 // ==============================================================================
-fn main() -> void {
+pub fn main() -> void {
     run_omnibus_showcase();
 }

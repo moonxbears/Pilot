@@ -10,16 +10,16 @@ println("==================================================");
 println("\n--- 1. Native PostgreSQL Inline Block ---");
 
 println("Executing inline postgresql { ... } block directly in Pilot:");
-let psql_records = postgresql {
+let psql_rows = postgresql {
     select id, name, count(*)
     from system_metrics tb
     where tb.id in (1, 2, 3, 4, 5);
 };
 
-println(f"Returned {len(psql_records)} record rows from PostgreSQL engine.");
+println(f"Returned {len(psql_rows)} dataset rows from PostgreSQL engine.");
 println("Iterating over returned row objects and accessing fields:");
 
-for row in psql_records {
+for row in psql_rows {
     println(f"  Row #{row.id}: name='{row.name}'");
 }
 
@@ -41,10 +41,10 @@ for account in mysql_results {
 println("\n--- 3. In-Memory Relational Operations ---");
 
 let transactions = [
-    { "id": 1, "customer": "Alice", "amount": 250.0, "category": "Hardware" },
-    { "id": 2, "customer": "Bob",   "amount": 420.0, "category": "Software" },
-    { "id": 3, "customer": "Alice", "amount": 180.0, "category": "Cloud" },
-    { "id": 4, "customer": "Carol", "amount": 950.0, "category": "Hardware" },
+    ["id": 1, "customer": "Alice", "amount": 250.0, "category": "Hardware",],
+    ["id": 2, "customer": "Bob",   "amount": 420.0, "category": "Software",],
+    ["id": 3, "customer": "Alice", "amount": 180.0, "category": "Cloud",],
+    ["id": 4, "customer": "Carol", "amount": 950.0, "category": "Hardware",],
 ];
 
 println("Raw Transactions Dataset:");

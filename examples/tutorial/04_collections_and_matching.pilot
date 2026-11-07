@@ -1,37 +1,42 @@
 // =============================================================================
-// Tutorial 04: Collections, Pattern Switching & Destructuring
+// Tutorial 04: Collections, Algebraic Enums, `switch` & Destructuring
 // =============================================================================
 
-// --- 1. Collection Types ---
-let numbers_list: i64[] = [10, 20, 30, 40];
-let user_tuple = (101, "Alice", true);
-let config_map = {"host": "127.0.0.1", "port": "8080"};
+// --- 1. Canonical Collection Literals (`[...]` & `[k: v,]`) ---
+let numbers_list: i64[] = [10, 20, 30, 40,];
+let user_tuple = (101, "Alice", true,);
+let config_map: map<str, str> = [
+    "host": "127.0.0.1",
+    "port": "8080",
+];
 
-// --- 2. Tuple and Slice Destructuring ---
-let (user_id, username, is_admin) = user_tuple;
-let [head, ..tail] = numbers_list;
+// --- 2. Tuple Indexing & Distributive Bindings ---
+let user_id = user_tuple.0;
+let username = user_tuple.1;
+let head = numbers_list[0];
 
-println(f"User {user_id} ({username}), Head element: {head}");
+println(f"User {user_id} ({username}), Head element: {head}, Host: {config_map[\"host\"]}");
 
-// --- 3. Algebraic Data Types (ADTs / Enums) ---
-type Shape =
-    | Circle(radius: f64)
-    | Rectangle(width: f64, height: f64)
-    | Point;
+// --- 3. Algebraic Data Types (`enum` with Payload Variants) ---
+pub enum Shape {
+    Circle(radius: f64),
+    Rectangle(width: f64, height: f64),
+    Point,
+}
 
-// --- 4. Exhaustive Pattern Branching with Switch / Case / When ---
-fn describe_shape(s: Shape) -> str {
+// --- 4. Exhaustive Pattern Branching with `switch` & `::Variant` ---
+pub pure fn describe_shape(s: Shape) -> str {
     return switch s {
         case Point: "Single coordinate point";
-        case Circle(r) when r > 50.0: f"Large circle radius={r}";
+        case Circle(r) if r > 50.0: f"Large circle radius={r}";
         case Circle(r): f"Standard circle radius={r}";
-        case Rectangle(w, h) when w == h: f"Square of side {w}";
+        case Rectangle(w, h) if w == h: f"Square of side {w}";
         case Rectangle(w, h): f"Rectangle {w}x{h}";
     };
 }
 
-let c = Circle(12.5);
-let r = Rectangle(10.0, 10.0);
+let c: Shape = ::Circle(12.5);
+let r: Shape = ::Rectangle(10.0, 10.0);
 
 println(describe_shape(c));
 println(describe_shape(r));

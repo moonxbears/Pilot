@@ -1,58 +1,68 @@
 // =============================================================================
-// Tutorial 05: Structs, Implicit Properties, Extensions & Fluid Cascades (..)
+// Tutorial 05: Structs, Distributive Headers, Implicit Properties & Cascades
 // =============================================================================
 
-// --- 1. Value Structs, Constructors and Implicit-Receiver Methods ---
-struct NetworkPacket : IValue {
-    pub var source_id: i64 = 0;
-    pub var destination_id: i64 = 0;
-    pub var payload: str = "";
-    pub var encrypted: bool = false;
+// --- 1. `0b00` Value Structs, Distributive `pub:` Headers & Implicit Properties ---
+pub struct NetworkPacket : IValue {
+    pub:
+        var source_id: i64 = 0;
+        var destination_id: i64 = 0;
+        var payload: str = "";
+        var encrypted: bool = false;
 
-    pub self() {
-        .source_id = 0;
-        .destination_id = 0;
-        .payload = "";
-        .encrypted = false;
-    }
+        // Implicit property using `field` backing storage and `value` parameter:
+        ttl: i64 = 64 {
+            get => field;
+            set => {
+                if value > 0 {
+                    field = value;
+                }
+            }
+        }
 
-    pub var fn set_source(src: i64) -> void {
-        .source_id = src;
-    }
+        self() {
+            .source_id = 0;
+            .destination_id = 0;
+            .payload = "";
+            .encrypted = false;
+        }
 
-    pub var fn set_destination(dst: i64) -> void {
-        .destination_id = dst;
-    }
+        var fn set_source(src: i64) -> void {
+            .source_id = src;
+        }
 
-    pub var fn attach_payload(data: str) -> void {
-        .payload = data;
-    }
+        var fn set_destination(dst: i64) -> void {
+            .destination_id = dst;
+        }
 
-    pub var fn set_encrypted(state: bool) -> void {
-        .encrypted = state;
-    }
+        var fn attach_payload(data: str) -> void {
+            .payload = data;
+        }
+
+        var fn set_encrypted(state: bool) -> void {
+            .encrypted = state;
+        }
 }
 
-// --- 2. Fluid Builder Cascades (..) ---
-// The cascade operator (..) invokes methods on a receiver while returning
-// the receiver itself, eliminating repetitive boilerplate variables.
+// --- 2. Fluid Builder Cascades (`..`) ---
+// `..` mutates/calls methods on the root receiver and evaluates back to it.
 var packet = NetworkPacket();
 packet..set_source(101)..set_destination(202)..attach_payload("SENSOR_TELEMETRY")..set_encrypted(true);
 
 println(f"Configured packet for destination: {packet.destination_id}");
 
-// --- 3. Nullable Values and Safe Cascades (?..) ---
+// --- 3. Nullable Values and Safe Cascades (`?..`) ---
 var maybe_packet: NetworkPacket? = packet;
 maybe_packet?..attach_payload("SAFE_UPDATE");
 
-// --- 4. Interfaces and Extensions ---
-interface IDescribable {
+// --- 4. Interfaces and Scoped Extensions (`ext`) ---
+pub interface IDescribable {
     fn describe() -> str;
 }
 
 pub ext NetworkPacket {
     pub pure fn summary() -> str {
-        return f"Packet[src={.source_id}, dst={.destination_id}]";
+        return f"Packet[src={.source_id}, dst={.destination_id}, ttl={.ttl}]";
     }
 }
 

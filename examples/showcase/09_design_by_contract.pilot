@@ -62,7 +62,7 @@ println(f"Attempting transfer exceeding source balance ($10,000.0 > ${checking.b
 
 try {
     execute_funds_transfer(10000.0, checking, savings);
-} catch (contract_err) {
+} catch contract_err {
     println(f"  [CONTRACT ENFORCED] Precondition violation trapped: {contract_err}");
 }
 

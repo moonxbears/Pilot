@@ -752,17 +752,23 @@ pub fn test_58_2a_sha256_sha512_blake3_and_hmac_randomized_boundary_oracles() {
     let long_key = rng.ascii_payload(91); // > 64B HMAC key (forces SHA-256 key compression!)
 
     let mut calls = String::new();
-    calls.push_str("var __acc = \"\";\n");
-    for (idx, m) in msgs.iter().enumerate() {
+    calls.push_str(
+        "var __acc = \"\";\n\
+         var __s256 = \"\";\n\
+         var __s512 = \"\";\n\
+         var __b3 = \"\";\n\
+         var __hm_s = \"\";\n\
+         var __hm_l = \"\";\n",
+    );
+    for m in &msgs {
         let esc = escape_pilot_str(m);
         calls.push_str(&format!(
-            "let s256_{idx} = sha256_hex(\"{esc}\");\n\
-             let s512_{idx} = sha512_hex(\"{esc}\");\n\
-             let b3_{idx} = blake3_hex(\"{esc}\");\n\
-             let hm_s_{idx} = hmac_sha256_hex(\"{sk}\", \"{esc}\");\n\
-             let hm_l_{idx} = hmac_sha256_hex(\"{lk}\", \"{esc}\");\n\
-             __acc = __acc + s256_{idx} + \"|\" + s512_{idx} + \"|\" + b3_{idx} + \"|\" + hm_s_{idx} + \"|\" + hm_l_{idx} + \"\\n\";\n",
-            idx = idx,
+            "__s256 = sha256_hex(\"{esc}\");\n\
+             __s512 = sha512_hex(\"{esc}\");\n\
+             __b3 = blake3_hex(\"{esc}\");\n\
+             __hm_s = hmac_sha256_hex(\"{sk}\", \"{esc}\");\n\
+             __hm_l = hmac_sha256_hex(\"{lk}\", \"{esc}\");\n\
+             __acc = __acc + __s256 + \"|\" + __s512 + \"|\" + __b3 + \"|\" + __hm_s + \"|\" + __hm_l + \"\\n\";\n",
             esc = esc,
             sk = escape_pilot_str(&short_key),
             lk = escape_pilot_str(&long_key),
