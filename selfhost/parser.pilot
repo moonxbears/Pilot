@@ -49,6 +49,35 @@ pub fn parse_literal_int(s: str) -> i64 {
     return val;
 }
 
+[Layout(c_abi)]
+pub struct AttributedDeclNode : IValue {
+    pub attributes: str;
+    pub decl_src:   str;
+    pub kind:       i64;
+
+    pub static pure fn create(attributes: str, decl_src: str, kind: i64) -> AttributedDeclNode => AttributedDeclNode {
+        attributes: attributes,
+        decl_src:   decl_src,
+        kind:       kind,
+    };
+}
+
+pub pure fn is_attributed_declaration(src: str) -> bool {
+    let trimmed = src.trim();
+    if !trimmed.starts_with("[") {
+        return false;
+    }
+    let rest = Pilot.SelfHost.ScopeHeader.strip_attributes_prefix(trimmed);
+    return rest != "";
+}
+
+pub pure fn parse_attributed_declaration(src: str) -> AttributedDeclNode {
+    let trimmed = src.trim();
+    let attrs = Pilot.SelfHost.ScopeHeader.extract_attributes_prefix(trimmed);
+    let decl = Pilot.SelfHost.ScopeHeader.strip_attributes_prefix(trimmed);
+    return AttributedDeclNode.create(attrs, decl, Pilot.SelfHost.Ast.NODE_ATTRIBUTED_DECL);
+}
+
 pub struct SelfHostParser : IObject {
     pub scope_stack: Pilot.SelfHost.ScopeHeader.ScopeHeaderStack;
 
@@ -68,5 +97,12 @@ pub struct SelfHostParser : IObject {
 
     pub fn current_header() -> Pilot.SelfHost.ScopeHeader.ScopeHeader {
         return self.scope_stack.current();
+    }
+
+    pub fn parse_declaration_with_scope(src: str) -> AttributedDeclNode {
+        let local = parse_attributed_declaration(src);
+        let active_hdr = self.current_header();
+        let merged_attrs = Pilot.SelfHost.ScopeHeader.merge_attributes(active_hdr.attributes, local.attributes);
+        return AttributedDeclNode.create(merged_attrs, local.decl_src, local.kind);
     }
 }

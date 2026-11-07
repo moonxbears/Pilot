@@ -28,6 +28,8 @@ pub const NODE_WHILE_STMT: i64 = 106;
 pub const NODE_FN_DECL: i64 = 107;
 pub const NODE_EXPR_STMT: i64 = 108;
 pub const NODE_PROGRAM: i64 = 109;
+pub const NODE_ATTR: i64 = 110;
+pub const NODE_ATTRIBUTED_DECL: i64 = 111;
 
 pub const NODE_BINARY_EXPR: i64 = 201;
 pub const NODE_UNARY_EXPR: i64 = 202;
@@ -61,6 +63,8 @@ pub fn get_node_kind_name(kind: i64) -> str {
     if kind == 105 { return "IfStmt"; }
     if kind == 106 { return "WhileStmt"; }
     if kind == 107 { return "FnDecl"; }
+    if kind == 110 { return "Attr"; }
+    if kind == 111 { return "AttributedDecl"; }
     if kind == 201 { return "BinaryExpr"; }
     if kind == 203 { return "CallExpr"; }
     return "Unknown";
