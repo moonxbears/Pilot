@@ -1,6 +1,7 @@
 // ==============================================================================
 // FILE: selfhost/ast.pilot
-// Milestone 61.1: 16-Byte Flat AST Node Layout & Arena Descriptors in Pilot
+// Pilot-First Mutable AST Arena, Perceus Slot Recycling (`drop_reuse`),
+// Lexical Hygiene & Homoiconic `quote` / `$splice` / `$*splat` / `~unquote` Engine
 // ==============================================================================
 pub pkg Pilot.SelfHost.Ast;
 
@@ -13,50 +14,236 @@ pub enum ShNodeKind {
     FnDecl,
     LetStmt,
     VarStmt,
+    AssignStmt,
     IfExpr,
     WhileStmt,
+    LoopStmt,
     ReturnStmt,
     BlockExpr,
     BinaryExpr,
     UnaryExpr,
     CallExpr,
     IntLit,
+    StrLit,
+    BoolLit,
     IdentExpr,
     RawQuote,
     TemplateQuote,
     SpliceHole,
     SplatHole,
+    UnquoteEscape,
+    SeqFragment,
     SyntaxCaseArm,
 }
 
+let ShNodeKindId = [
+    Program: 0,
+    StructDecl: 1,
+    InterfaceDecl: 2,
+    FnDecl: 3,
+    LetStmt: 4,
+    VarStmt: 5,
+    AssignStmt: 6,
+    IfExpr: 7,
+    WhileStmt: 8,
+    LoopStmt: 9,
+    ReturnStmt: 10,
+    BlockExpr: 11,
+    BinaryExpr: 12,
+    UnaryExpr: 13,
+    CallExpr: 14,
+    IntLit: 15,
+    StrLit: 16,
+    BoolLit: 17,
+    IdentExpr: 18,
+    RawQuote: 19,
+    TemplateQuote: 20,
+    SpliceHole: 21,
+    SplatHole: 22,
+    UnquoteEscape: 23,
+    SeqFragment: 24,
+    SyntaxCaseArm: 25,
+];
+
+let ShNodeKindNames = [
+    0: "Program",
+    1: "StructDecl",
+    2: "InterfaceDecl",
+    3: "FnDecl",
+    4: "LetStmt",
+    5: "VarStmt",
+    6: "AssignStmt",
+    7: "IfExpr",
+    8: "WhileStmt",
+    9: "LoopStmt",
+    10: "ReturnStmt",
+    11: "BlockExpr",
+    12: "BinaryExpr",
+    13: "UnaryExpr",
+    14: "CallExpr",
+    15: "IntLit",
+    16: "StrLit",
+    17: "BoolLit",
+    18: "IdentExpr",
+    19: "RawQuote",
+    20: "TemplateQuote",
+    21: "SpliceHole",
+    22: "SplatHole",
+    23: "UnquoteEscape",
+    24: "SeqFragment",
+    25: "SyntaxCaseArm",
+];
+
+// 16-byte hardware-packed descriptor: kind(2B) + flags(2B) + span_start(4B) + lhs(4B) + rhs(4B)
 pub pure fn sh_sizeof_ast_node() -> i64 {
-    return 16;
+    let hdr_bytes = 2 + 2;
+    let payload_bytes = 4 + 4 + 4;
+    return hdr_bytes + payload_bytes;
 }
+
+pub pure fn sh_node_kind_name(kind: ShNodeKind) -> str {
+    let nm = ShNodeKindNames[kind];
+    if __engine("str_len", nm) > 0 {
+        return nm;
+    }
+    return "Unknown";
+}
+
+pub pure fn sh_kind_tag_from_name(kind_name: str) -> ShNodeKind {
+    if kind_name == "Program" { return ShNodeKindId.Program; }
+    if kind_name == "StructDecl" { return ShNodeKindId.StructDecl; }
+    if kind_name == "InterfaceDecl" { return ShNodeKindId.InterfaceDecl; }
+    if kind_name == "FnDecl" { return ShNodeKindId.FnDecl; }
+    if kind_name == "LetStmt" { return ShNodeKindId.LetStmt; }
+    if kind_name == "VarStmt" { return ShNodeKindId.VarStmt; }
+    if kind_name == "AssignStmt" { return ShNodeKindId.AssignStmt; }
+    if kind_name == "IfExpr" { return ShNodeKindId.IfExpr; }
+    if kind_name == "WhileStmt" { return ShNodeKindId.WhileStmt; }
+    if kind_name == "LoopStmt" { return ShNodeKindId.LoopStmt; }
+    if kind_name == "ReturnStmt" { return ShNodeKindId.ReturnStmt; }
+    if kind_name == "BlockExpr" { return ShNodeKindId.BlockExpr; }
+    if kind_name == "BinaryExpr" { return ShNodeKindId.BinaryExpr; }
+    if kind_name == "UnaryExpr" { return ShNodeKindId.UnaryExpr; }
+    if kind_name == "CallExpr" { return ShNodeKindId.CallExpr; }
+    if kind_name == "IntLit" { return ShNodeKindId.IntLit; }
+    if kind_name == "StrLit" { return ShNodeKindId.StrLit; }
+    if kind_name == "BoolLit" { return ShNodeKindId.BoolLit; }
+    if kind_name == "IdentExpr" { return ShNodeKindId.IdentExpr; }
+    if kind_name == "RawQuote" { return ShNodeKindId.RawQuote; }
+    if kind_name == "TemplateQuote" { return ShNodeKindId.TemplateQuote; }
+    if kind_name == "SpliceHole" { return ShNodeKindId.SpliceHole; }
+    if kind_name == "SplatHole" { return ShNodeKindId.SplatHole; }
+    if kind_name == "UnquoteEscape" { return ShNodeKindId.UnquoteEscape; }
+    if kind_name == "SeqFragment" { return ShNodeKindId.SeqFragment; }
+    if kind_name == "SyntaxCaseArm" { return ShNodeKindId.SyntaxCaseArm; }
+    return ShNodeKindId.Program;
+}
+
+// ==============================================================================
+// 1. Mutable AST Arena Lifecycle, Generation Tracking & Perceus Slot Reuse
+// ==============================================================================
 
 pub fn sh_ast_new() -> i64 {
     let arena = __engine("map_new");
     __engine("map_set", arena, "node_count", 0);
+    __engine("map_set", arena, "live_count", 0);
+    __engine("map_set", arena, "free_top", 0);
+    __engine("map_set", arena, "generation", 1);
+    __engine("map_set", arena, "hygiene_seq", 1);
     __engine("map_set", arena, "root", -1);
     return arena;
+}
+
+fn sh_ast_bump_gen(arena: i64) -> i64 {
+    let g = __engine("map_get", arena, "generation");
+    let next_g = g + 1;
+    __engine("map_set", arena, "generation", next_g);
+    return next_g;
+}
+
+fn sh_ast_init_slot(arena: i64, nid: i64, kind_name: str, op_text: str) -> i64 {
+    __engine("map_set", arena, nid + "_kind", kind_name);
+    __engine("map_set", arena, nid + "_op", op_text);
+    __engine("map_set", arena, nid + "_flags", 0);
+    __engine("map_set", arena, nid + "_parent", -1);
+    __engine("map_set", arena, nid + "_span_s", 0);
+    __engine("map_set", arena, nid + "_span_e", 0);
+    __engine("map_set", arena, nid + "_child_count", 0);
+    let live = __engine("map_get", arena, "live_count");
+    __engine("map_set", arena, "live_count", live + 1);
+    sh_ast_bump_gen(arena);
+    return nid;
 }
 
 pub fn sh_ast_alloc_node(arena: i64, kind_name: str, op_text: str) -> i64 {
     let nid = __engine("map_get", arena, "node_count");
     __engine("map_set", arena, "node_count", nid + 1);
-    __engine("map_set", arena, nid + "_kind", kind_name);
-    __engine("map_set", arena, nid + "_op", op_text);
-    __engine("map_set", arena, nid + "_child_count", 0);
-    return nid;
+    return sh_ast_init_slot(arena, nid, kind_name, op_text);
 }
 
-pub fn sh_ast_add_child(arena: i64, parent: i64, child: i64) -> void {
-    let cnt = __engine("map_get", arena, parent + "_child_count");
-    __engine("map_set", arena, parent + "_child_" + cnt, child);
-    __engine("map_set", arena, parent + "_child_count", cnt + 1);
+// Perceus `drop_reuse`: recycles tombstoned 16-byte node slots before growing arena
+pub fn sh_ast_alloc_reuse_node(arena: i64, kind_name: str, op_text: str) -> i64 {
+    let ftop = __engine("map_get", arena, "free_top");
+    if ftop > 0 {
+        let next_top = ftop - 1;
+        let reused_nid = __engine("map_get", arena, "free_" + next_top);
+        __engine("map_set", arena, "free_top", next_top);
+        return sh_ast_init_slot(arena, reused_nid, kind_name, op_text);
+    }
+    return sh_ast_alloc_node(arena, kind_name, op_text);
+}
+
+pub fn sh_ast_free_node(arena: i64, node_id: i64) -> bool {
+    if node_id < 0 { return false; }
+    let fl = sh_ast_flags(arena, node_id);
+    if (fl & 32768) != 0 { return false; }
+
+    let ccnt = sh_ast_child_count(arena, node_id);
+    var i = 0;
+    while i < ccnt {
+        let ch = sh_ast_child_at(arena, node_id, i);
+        if ch >= 0 && sh_ast_parent(arena, ch) == node_id {
+            __engine("map_set", arena, ch + "_parent", -1);
+        }
+        i = i + 1;
+    }
+    __engine("map_set", arena, node_id + "_flags", fl | 32768);
+    __engine("map_set", arena, node_id + "_child_count", 0);
+    __engine("map_set", arena, node_id + "_parent", -1);
+
+    let ftop = __engine("map_get", arena, "free_top");
+    __engine("map_set", arena, "free_" + ftop, node_id);
+    __engine("map_set", arena, "free_top", ftop + 1);
+
+    let live = __engine("map_get", arena, "live_count");
+    if live > 0 {
+        __engine("map_set", arena, "live_count", live - 1);
+    }
+    sh_ast_bump_gen(arena);
+    return true;
+}
+
+pub fn sh_ast_node_count(arena: i64) -> i64 {
+    let cnt = __engine("map_get", arena, "node_count");
+    if cnt != null { return cnt; }
+    return 0;
+}
+
+pub fn sh_ast_live_count(arena: i64) -> i64 {
+    let cnt = __engine("map_get", arena, "live_count");
+    if cnt != null { return cnt; }
+    return 0;
+}
+
+pub fn sh_ast_generation(arena: i64) -> i64 {
+    let g = __engine("map_get", arena, "generation");
+    if g != null { return g; }
+    return 0;
 }
 
 pub fn sh_ast_set_root(arena: i64, root_nid: i64) -> void {
     __engine("map_set", arena, "root", root_nid);
+    sh_ast_bump_gen(arena);
 }
 
 pub fn sh_ast_root(arena: i64) -> i64 {
@@ -65,24 +252,73 @@ pub fn sh_ast_root(arena: i64) -> i64 {
     return -1;
 }
 
+// ==============================================================================
+// 2. Node Introspection & In-Place Field / Child-List Mutation
+// ==============================================================================
+
 pub fn sh_ast_kind_name(arena: i64, node_id: i64) -> str {
     let k = __engine("map_get", arena, node_id + "_kind");
     if k != null { return k; }
     return "Unknown";
 }
 
-pub pure fn sh_node_kind_name(kind: ShNodeKind) -> str {
-    return "Program";
-}
-
 pub fn sh_ast_kind(arena: i64, node_id: i64) -> ShNodeKind {
-    return ::Program;
+    let k_name = sh_ast_kind_name(arena, node_id);
+    return sh_kind_tag_from_name(k_name);
 }
 
 pub fn sh_ast_op_text(arena: i64, node_id: i64) -> str {
     let op = __engine("map_get", arena, node_id + "_op");
     if op != null { return op; }
     return "";
+}
+
+pub fn sh_ast_flags(arena: i64, node_id: i64) -> i64 {
+    let fl = __engine("map_get", arena, node_id + "_flags");
+    if fl != null { return fl; }
+    return 0;
+}
+
+pub fn sh_ast_is_tombstone(arena: i64, node_id: i64) -> bool {
+    return (sh_ast_flags(arena, node_id) & 32768) != 0;
+}
+
+pub fn sh_ast_parent(arena: i64, node_id: i64) -> i64 {
+    let p = __engine("map_get", arena, node_id + "_parent");
+    if p != null { return p; }
+    return -1;
+}
+
+pub fn sh_ast_span_start(arena: i64, node_id: i64) -> i64 {
+    let s = __engine("map_get", arena, node_id + "_span_s");
+    if s != null { return s; }
+    return 0;
+}
+
+pub fn sh_ast_span_end(arena: i64, node_id: i64) -> i64 {
+    let e = __engine("map_get", arena, node_id + "_span_e");
+    if e != null { return e; }
+    return 0;
+}
+
+pub fn sh_ast_set_kind(arena: i64, node_id: i64, new_kind: str) -> void {
+    __engine("map_set", arena, node_id + "_kind", new_kind);
+    sh_ast_bump_gen(arena);
+}
+
+pub fn sh_ast_set_op_text(arena: i64, node_id: i64, new_op: str) -> void {
+    __engine("map_set", arena, node_id + "_op", new_op);
+    sh_ast_bump_gen(arena);
+}
+
+pub fn sh_ast_set_flags(arena: i64, node_id: i64, flags: i64) -> void {
+    __engine("map_set", arena, node_id + "_flags", flags);
+    sh_ast_bump_gen(arena);
+}
+
+pub fn sh_ast_set_span(arena: i64, node_id: i64, start_byte: i64, end_byte: i64) -> void {
+    __engine("map_set", arena, node_id + "_span_s", start_byte);
+    __engine("map_set", arena, node_id + "_span_e", end_byte);
 }
 
 pub fn sh_ast_child_count(arena: i64, node_id: i64) -> i64 {
@@ -92,15 +328,213 @@ pub fn sh_ast_child_count(arena: i64, node_id: i64) -> i64 {
 }
 
 pub fn sh_ast_child_at(arena: i64, node_id: i64, idx: i64) -> i64 {
+    let cnt = sh_ast_child_count(arena, node_id);
+    if idx < 0 || idx >= cnt { return -1; }
     let ch = __engine("map_get", arena, node_id + "_child_" + idx);
     if ch != null { return ch; }
     return -1;
 }
 
-// Option 1 Quoting Constructors: raw, quote, splice, splat
+pub fn sh_ast_add_child(arena: i64, parent: i64, child: i64) -> void {
+    if parent < 0 || child < 0 { return; }
+    let cnt = sh_ast_child_count(arena, parent);
+    __engine("map_set", arena, parent + "_child_" + cnt, child);
+    __engine("map_set", arena, parent + "_child_count", cnt + 1);
+    __engine("map_set", arena, child + "_parent", parent);
+    sh_ast_bump_gen(arena);
+}
+
+pub fn sh_ast_set_child_at(arena: i64, parent: i64, idx: i64, new_child: i64) -> bool {
+    let cnt = sh_ast_child_count(arena, parent);
+    if idx < 0 || idx >= cnt || new_child < 0 { return false; }
+    let old_ch = sh_ast_child_at(arena, parent, idx);
+    if old_ch >= 0 && sh_ast_parent(arena, old_ch) == parent {
+        __engine("map_set", arena, old_ch + "_parent", -1);
+    }
+    __engine("map_set", arena, parent + "_child_" + idx, new_child);
+    __engine("map_set", arena, new_child + "_parent", parent);
+    sh_ast_bump_gen(arena);
+    return true;
+}
+
+pub fn sh_ast_insert_child(arena: i64, parent: i64, idx: i64, child: i64) -> void {
+    if parent < 0 || child < 0 { return; }
+    let cnt = sh_ast_child_count(arena, parent);
+    var pos = idx;
+    if pos < 0 { pos = 0; }
+    if pos > cnt { pos = cnt; }
+    var k = cnt;
+    while k > pos {
+        let prev = sh_ast_child_at(arena, parent, k - 1);
+        __engine("map_set", arena, parent + "_child_" + k, prev);
+        k = k - 1;
+    }
+    __engine("map_set", arena, parent + "_child_" + pos, child);
+    __engine("map_set", arena, parent + "_child_count", cnt + 1);
+    __engine("map_set", arena, child + "_parent", parent);
+    sh_ast_bump_gen(arena);
+}
+
+pub fn sh_ast_remove_child_at(arena: i64, parent: i64, idx: i64) -> i64 {
+    let cnt = sh_ast_child_count(arena, parent);
+    if idx < 0 || idx >= cnt { return -1; }
+    let removed = sh_ast_child_at(arena, parent, idx);
+    var k = idx;
+    while k + 1 < cnt {
+        let nxt = sh_ast_child_at(arena, parent, k + 1);
+        __engine("map_set", arena, parent + "_child_" + k, nxt);
+        k = k + 1;
+    }
+    __engine("map_set", arena, parent + "_child_count", cnt - 1);
+    if removed >= 0 && sh_ast_parent(arena, removed) == parent {
+        __engine("map_set", arena, removed + "_parent", -1);
+    }
+    sh_ast_bump_gen(arena);
+    return removed;
+}
+
+// Splices 0, 1, or N nodes (unpacking `SeqFragment` / `SplatHole` automatically) into `parent` at `idx`
+pub fn sh_ast_splice_children(arena: i64, parent: i64, idx: i64, remove_count: i64, payload_nid: i64) -> i64 {
+    var rem = 0;
+    while rem < remove_count {
+        if sh_ast_remove_child_at(arena, parent, idx) < 0 {
+            break;
+        }
+        rem = rem + 1;
+    }
+    if payload_nid >= 0 {
+        let pk = sh_ast_kind_name(arena, payload_nid);
+        if pk == "SeqFragment" || pk == "SplatHole" {
+            let scnt = sh_ast_child_count(arena, payload_nid);
+            var si = 0;
+            while si < scnt {
+                let item = sh_ast_child_at(arena, payload_nid, si);
+                sh_ast_insert_child(arena, parent, idx + si, item);
+                si = si + 1;
+            }
+        } else {
+            sh_ast_insert_child(arena, parent, idx, payload_nid);
+        }
+    }
+    return sh_ast_child_count(arena, parent);
+}
+
+// Rewires `target_nid`'s parent slot (or arena root) to point to `replacement_nid`
+pub fn sh_ast_replace_node(arena: i64, target_nid: i64, replacement_nid: i64) -> bool {
+    if target_nid < 0 || replacement_nid < 0 { return false; }
+    let p = sh_ast_parent(arena, target_nid);
+    if p >= 0 {
+        let cnt = sh_ast_child_count(arena, p);
+        var i = 0;
+        while i < cnt {
+            if sh_ast_child_at(arena, p, i) == target_nid {
+                return sh_ast_set_child_at(arena, p, i, replacement_nid);
+            }
+            i = i + 1;
+        }
+    }
+    if sh_ast_root(arena) == target_nid {
+        sh_ast_set_root(arena, replacement_nid);
+        return true;
+    }
+    return false;
+}
+
+// Mutates `target_nid` in-place to mirror `src_nid` while keeping `target_nid`'s identity & parent link
+pub fn sh_ast_mutate_in_place(arena: i64, target_nid: i64, src_nid: i64) -> void {
+    if target_nid < 0 || src_nid < 0 || target_nid == src_nid { return; }
+    let old_cnt = sh_ast_child_count(arena, target_nid);
+    var i = 0;
+    while i < old_cnt {
+        let och = sh_ast_child_at(arena, target_nid, i);
+        if och >= 0 && sh_ast_parent(arena, och) == target_nid {
+            __engine("map_set", arena, och + "_parent", -1);
+        }
+        i = i + 1;
+    }
+    __engine("map_set", arena, target_nid + "_kind", sh_ast_kind_name(arena, src_nid));
+    __engine("map_set", arena, target_nid + "_op", sh_ast_op_text(arena, src_nid));
+    __engine("map_set", arena, target_nid + "_flags", sh_ast_flags(arena, src_nid));
+    __engine("map_set", arena, target_nid + "_child_count", 0);
+    let ncnt = sh_ast_child_count(arena, src_nid);
+    var j = 0;
+    while j < ncnt {
+        sh_ast_add_child(arena, target_nid, sh_ast_child_at(arena, src_nid, j));
+        j = j + 1;
+    }
+    sh_ast_bump_gen(arena);
+}
+
+// ==============================================================================
+// 3. Deep Subtree Cloning & Cross-Arena Import
+// ==============================================================================
+
+pub fn sh_ast_clone_subtree(arena: i64, sub_root: i64) -> i64 {
+    if sub_root < 0 { return -1; }
+    let copy_nid = sh_ast_alloc_node(
+        arena,
+        sh_ast_kind_name(arena, sub_root),
+        sh_ast_op_text(arena, sub_root)
+    );
+    sh_ast_set_flags(arena, copy_nid, sh_ast_flags(arena, sub_root));
+    sh_ast_set_span(
+        arena,
+        copy_nid,
+        sh_ast_span_start(arena, sub_root),
+        sh_ast_span_end(arena, sub_root)
+    );
+    let sig = __engine("map_get", arena, sub_root + "_sig");
+    if sig != null {
+        __engine("map_set", arena, copy_nid + "_sig", sig);
+    }
+    let arity = __engine("map_get", arena, sub_root + "_arity");
+    if arity != null {
+        __engine("map_set", arena, copy_nid + "_arity", arity);
+    }
+    let ccnt = sh_ast_child_count(arena, sub_root);
+    var i = 0;
+    while i < ccnt {
+        let ch_copy = sh_ast_clone_subtree(arena, sh_ast_child_at(arena, sub_root, i));
+        if ch_copy >= 0 {
+            sh_ast_add_child(arena, copy_nid, ch_copy);
+        }
+        i = i + 1;
+    }
+    return copy_nid;
+}
+
+pub fn sh_ast_import_subtree(dst_arena: i64, src_arena: i64, src_nid: i64) -> i64 {
+    if src_nid < 0 { return -1; }
+    let dst_nid = sh_ast_alloc_node(
+        dst_arena,
+        sh_ast_kind_name(src_arena, src_nid),
+        sh_ast_op_text(src_arena, src_nid)
+    );
+    sh_ast_set_flags(dst_arena, dst_nid, sh_ast_flags(src_arena, src_nid));
+    sh_ast_set_span(
+        dst_arena,
+        dst_nid,
+        sh_ast_span_start(src_arena, src_nid),
+        sh_ast_span_end(src_arena, src_nid)
+    );
+    let ccnt = sh_ast_child_count(src_arena, src_nid);
+    var i = 0;
+    while i < ccnt {
+        let ch = sh_ast_import_subtree(dst_arena, src_arena, sh_ast_child_at(src_arena, src_nid, i));
+        if ch >= 0 {
+            sh_ast_add_child(dst_arena, dst_nid, ch);
+        }
+        i = i + 1;
+    }
+    return dst_nid;
+}
+
+// ==============================================================================
+// 4. Homoiconic Quoting, Splicing (`$x`, `$*xs`), Unquoting (`~expr`) & Hygiene
+// ==============================================================================
+
 pub fn sh_ast_alloc_raw(arena: i64, verbatim_code: str) -> i64 {
-    let nid = sh_ast_alloc_node(arena, "RawQuote", verbatim_code);
-    return nid;
+    return sh_ast_alloc_node(arena, "RawQuote", verbatim_code);
 }
 
 pub fn sh_ast_alloc_template(arena: i64, template_body: i64) -> i64 {
@@ -113,6 +547,7 @@ pub fn sh_ast_alloc_template(arena: i64, template_body: i64) -> i64 {
 
 pub fn sh_ast_alloc_splice(arena: i64, slot_name: str, node: i64) -> i64 {
     let nid = sh_ast_alloc_node(arena, "SpliceHole", slot_name);
+    sh_ast_set_flags(arena, nid, 1);
     if node >= 0 {
         sh_ast_add_child(arena, nid, node);
     }
@@ -121,13 +556,26 @@ pub fn sh_ast_alloc_splice(arena: i64, slot_name: str, node: i64) -> i64 {
 
 pub fn sh_ast_alloc_splat(arena: i64, slot_name: str, nodes: i64) -> i64 {
     let nid = sh_ast_alloc_node(arena, "SplatHole", slot_name);
+    sh_ast_set_flags(arena, nid, 3);
     if nodes >= 0 {
         sh_ast_add_child(arena, nid, nodes);
     }
     return nid;
 }
 
-// Syntax Overloading Arm Constructor & Matcher
+pub fn sh_ast_alloc_unquote(arena: i64, expr_nid: i64) -> i64 {
+    let nid = sh_ast_alloc_node(arena, "UnquoteEscape", "~");
+    sh_ast_set_flags(arena, nid, 4);
+    if expr_nid >= 0 {
+        sh_ast_add_child(arena, nid, expr_nid);
+    }
+    return nid;
+}
+
+pub fn sh_ast_alloc_seq(arena: i64) -> i64 {
+    return sh_ast_alloc_node(arena, "SeqFragment", "");
+}
+
 pub fn sh_ast_alloc_syntax_arm(arena: i64, arity: i64, pattern_tag: str, body: i64) -> i64 {
     let nid = sh_ast_alloc_node(arena, "SyntaxCaseArm", pattern_tag);
     __engine("map_set", arena, nid + "_arity", arity);
@@ -145,5 +593,386 @@ pub fn sh_ast_syntax_arm_arity(arena: i64, arm_id: i64) -> i64 {
 
 pub fn sh_ast_match_syntax_arm(arena: i64, arm_id: i64, arg_count: i64) -> bool {
     let arity = sh_ast_syntax_arm_arity(arena, arm_id);
+    if arity == -1 { return true; }
     return arity == arg_count;
+}
+
+pub fn sh_ast_bindings_new() -> i64 {
+    let b = __engine("map_new");
+    __engine("map_set", b, "count", 0);
+    return b;
+}
+
+pub fn sh_ast_bind_node(bindings: i64, slot_name: str, nid: i64) -> void {
+    __engine("map_set", bindings, "node_" + slot_name, nid);
+    __engine("map_set", bindings, "has_" + slot_name, 1);
+}
+
+pub fn sh_ast_bind_seq(bindings: i64, slot_name: str, seq_nid: i64) -> void {
+    __engine("map_set", bindings, "node_" + slot_name, seq_nid);
+    __engine("map_set", bindings, "has_" + slot_name, 2);
+}
+
+pub fn sh_ast_bind_const(bindings: i64, name: str, val: i64) -> void {
+    __engine("map_set", bindings, "const_" + name, val);
+    __engine("map_set", bindings, "has_const_" + name, 1);
+}
+
+fn sh_parse_int_str(s: str) -> i64 {
+    let n = __engine("str_len", s);
+    if n == 0 { return 0; }
+    var i = 0;
+    var neg = false;
+    if __engine("str_byte_at", s, 0) == 45 {
+        neg = true;
+        i = 1;
+    }
+    var acc = 0;
+    while i < n {
+        let b = __engine("str_byte_at", s, i);
+        if b >= 48 && b <= 57 {
+            acc = acc * 10 + (b - 48);
+        }
+        i = i + 1;
+    }
+    if neg { return 0 - acc; }
+    return acc;
+}
+
+// Evaluates compile-time `~expr` unquote trees into integer constants
+pub fn sh_ast_eval_const_expr(arena: i64, nid: i64, bindings: i64) -> i64 {
+    if nid < 0 { return 0; }
+    let k = sh_ast_kind_name(arena, nid);
+    let op = sh_ast_op_text(arena, nid);
+
+    if k == "IntLit" {
+        return sh_parse_int_str(op);
+    }
+    if k == "BoolLit" {
+        if op == "true" { return 1; }
+        return 0;
+    }
+    if k == "IdentExpr" {
+        if bindings >= 0 && __engine("map_get", bindings, "has_const_" + op) == 1 {
+            return __engine("map_get", bindings, "const_" + op);
+        }
+        if bindings >= 0 && __engine("map_get", bindings, "has_" + op) == 1 {
+            let bn = __engine("map_get", bindings, "node_" + op);
+            return sh_ast_eval_const_expr(arena, bn, bindings);
+        }
+        return 0;
+    }
+    if k == "SpliceHole" {
+        if bindings >= 0 && __engine("map_get", bindings, "has_" + op) == 1 {
+            let sn = __engine("map_get", bindings, "node_" + op);
+            return sh_ast_eval_const_expr(arena, sn, bindings);
+        }
+        return 0;
+    }
+    if k == "UnaryExpr" {
+        let v = sh_ast_eval_const_expr(arena, sh_ast_child_at(arena, nid, 0), bindings);
+        if op == "-" { return 0 - v; }
+        if op == "!" { return if v == 0 { 1 } else { 0 }; }
+        return v;
+    }
+    if k == "BinaryExpr" {
+        let lv = sh_ast_eval_const_expr(arena, sh_ast_child_at(arena, nid, 0), bindings);
+        let rv = sh_ast_eval_const_expr(arena, sh_ast_child_at(arena, nid, 1), bindings);
+        if op == "+" { return lv + rv; }
+        if op == "-" { return lv - rv; }
+        if op == "*" { return lv * rv; }
+        if op == "/" { return if rv != 0 { lv / rv } else { 0 }; }
+        if op == "%" { return if rv != 0 { lv % rv } else { 0 }; }
+        if op == "==" { return if lv == rv { 1 } else { 0 }; }
+        if op == "!=" { return if lv != rv { 1 } else { 0 }; }
+        if op == "<" { return if lv < rv { 1 } else { 0 }; }
+        if op == "<=" { return if lv <= rv { 1 } else { 0 }; }
+        if op == ">" { return if lv > rv { 1 } else { 0 }; }
+        if op == ">=" { return if lv >= rv { 1 } else { 0 }; }
+        if op == "&&" { return if lv != 0 && rv != 0 { 1 } else { 0 }; }
+        if op == "||" { return if lv != 0 || rv != 0 { 1 } else { 0 }; }
+    }
+    return 0;
+}
+
+// Collects template-local `LetStmt`/`VarStmt` names for lexical hygiene alpha-renaming
+fn sh_collect_hygiene_locals(arena: i64, nid: i64, hyg_map: i64, suffix: str) -> void {
+    if nid < 0 { return; }
+    let k = sh_ast_kind_name(arena, nid);
+    if k == "RawQuote" || k == "SpliceHole" || k == "SplatHole" || k == "UnquoteEscape" {
+        return;
+    }
+    if k == "LetStmt" || k == "VarStmt" {
+        let vname = sh_ast_op_text(arena, nid);
+        if __engine("str_len", vname) > 0 {
+            __engine("map_set", hyg_map, "ren_" + vname, vname + suffix);
+            __engine("map_set", hyg_map, "has_" + vname, 1);
+        }
+    }
+    let ccnt = sh_ast_child_count(arena, nid);
+    var i = 0;
+    while i < ccnt {
+        sh_collect_hygiene_locals(arena, sh_ast_child_at(arena, nid, i), hyg_map, suffix);
+        i = i + 1;
+    }
+}
+
+fn sh_instantiate_node_rec(arena: i64, tpl_nid: i64, bindings: i64, hyg_map: i64) -> i64 {
+    if tpl_nid < 0 { return -1; }
+    let k = sh_ast_kind_name(arena, tpl_nid);
+    let op = sh_ast_op_text(arena, tpl_nid);
+
+    if k == "RawQuote" {
+        return sh_ast_clone_subtree(arena, tpl_nid);
+    }
+    if k == "TemplateQuote" {
+        if sh_ast_child_count(arena, tpl_nid) > 0 {
+            return sh_instantiate_node_rec(arena, sh_ast_child_at(arena, tpl_nid, 0), bindings, hyg_map);
+        }
+        return -1;
+    }
+    if k == "SpliceHole" {
+        if bindings >= 0 && __engine("map_get", bindings, "has_" + op) != null {
+            let bound = __engine("map_get", bindings, "node_" + op);
+            return sh_ast_clone_subtree(arena, bound);
+        }
+        if sh_ast_child_count(arena, tpl_nid) > 0 {
+            return sh_ast_clone_subtree(arena, sh_ast_child_at(arena, tpl_nid, 0));
+        }
+        return sh_ast_alloc_node(arena, "IdentExpr", op);
+    }
+    if k == "SplatHole" {
+        if bindings >= 0 && __engine("map_get", bindings, "has_" + op) != null {
+            let bound_seq = __engine("map_get", bindings, "node_" + op);
+            return sh_ast_clone_subtree(arena, bound_seq);
+        }
+        if sh_ast_child_count(arena, tpl_nid) > 0 {
+            return sh_ast_clone_subtree(arena, sh_ast_child_at(arena, tpl_nid, 0));
+        }
+        return sh_ast_alloc_seq(arena);
+    }
+    if k == "UnquoteEscape" {
+        let inner = sh_ast_child_at(arena, tpl_nid, 0);
+        let folded = sh_ast_eval_const_expr(arena, inner, bindings);
+        return sh_ast_alloc_node(arena, "IntLit", "" + folded);
+    }
+
+    var final_op = op;
+    if (k == "LetStmt" || k == "VarStmt" || k == "IdentExpr") && hyg_map >= 0 {
+        if __engine("map_get", hyg_map, "has_" + op) == 1 {
+            final_op = __engine("map_get", hyg_map, "ren_" + op);
+        }
+    }
+
+    let out_nid = sh_ast_alloc_node(arena, k, final_op);
+    sh_ast_set_flags(arena, out_nid, sh_ast_flags(arena, tpl_nid));
+    let ccnt = sh_ast_child_count(arena, tpl_nid);
+    var i = 0;
+    while i < ccnt {
+        let ch_tpl = sh_ast_child_at(arena, tpl_nid, i);
+        let ch_inst = sh_instantiate_node_rec(arena, ch_tpl, bindings, hyg_map);
+        if ch_inst >= 0 {
+            let inst_k = sh_ast_kind_name(arena, ch_inst);
+            if inst_k == "SeqFragment" || inst_k == "SplatHole" {
+                let scnt = sh_ast_child_count(arena, ch_inst);
+                var si = 0;
+                while si < scnt {
+                    sh_ast_add_child(arena, out_nid, sh_ast_child_at(arena, ch_inst, si));
+                    si = si + 1;
+                }
+            } else {
+                sh_ast_add_child(arena, out_nid, ch_inst);
+            }
+        }
+        i = i + 1;
+    }
+    return out_nid;
+}
+
+// Instantiates a homoiconic `quote` template with `$hole`, `$*splat`, `~unquote`, and lexical hygiene
+pub fn sh_ast_instantiate_quote(arena: i64, template_nid: i64, bindings: i64) -> i64 {
+    let hseq = __engine("map_get", arena, "hygiene_seq");
+    __engine("map_set", arena, "hygiene_seq", hseq + 1);
+    let hyg_map = __engine("map_new");
+    sh_collect_hygiene_locals(arena, template_nid, hyg_map, "__hyg" + hseq);
+    return sh_instantiate_node_rec(arena, template_nid, bindings, hyg_map);
+}
+
+// ==============================================================================
+// 5. In-Place Constant Folding, S-Expr Printer & Canonical Pilot Code Emitter
+// ==============================================================================
+
+fn sh_is_pure_const_lit(arena: i64, nid: i64) -> bool {
+    if nid < 0 { return false; }
+    let k = sh_ast_kind_name(arena, nid);
+    return k == "IntLit" || k == "BoolLit";
+}
+
+// Mutates constant arithmetic/boolean subtrees in-place inside `arena`; returns folded count
+pub fn sh_ast_fold_constants_in_place(arena: i64, root_nid: i64) -> i64 {
+    if root_nid < 0 { return 0; }
+    var folds = 0;
+    let ccnt = sh_ast_child_count(arena, root_nid);
+    var i = 0;
+    while i < ccnt {
+        folds = folds + sh_ast_fold_constants_in_place(arena, sh_ast_child_at(arena, root_nid, i));
+        i = i + 1;
+    }
+    let k = sh_ast_kind_name(arena, root_nid);
+    if k == "UnaryExpr" && ccnt == 1 {
+        let c0 = sh_ast_child_at(arena, root_nid, 0);
+        if sh_is_pure_const_lit(arena, c0) {
+            let v = sh_ast_eval_const_expr(arena, root_nid, -1);
+            let op = sh_ast_op_text(arena, root_nid);
+            let lit = if op == "!" {
+                sh_ast_alloc_node(arena, "BoolLit", if v != 0 { "true" } else { "false" })
+            } else {
+                sh_ast_alloc_node(arena, "IntLit", "" + v)
+            };
+            sh_ast_mutate_in_place(arena, root_nid, lit);
+            sh_ast_free_node(arena, lit);
+            folds = folds + 1;
+        }
+    } else if k == "BinaryExpr" && ccnt == 2 {
+        let lhs = sh_ast_child_at(arena, root_nid, 0);
+        let rhs = sh_ast_child_at(arena, root_nid, 1);
+        if sh_is_pure_const_lit(arena, lhs) && sh_is_pure_const_lit(arena, rhs) {
+            let op = sh_ast_op_text(arena, root_nid);
+            let v = sh_ast_eval_const_expr(arena, root_nid, -1);
+            let is_cmp = op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=" || op == "&&" || op == "||";
+            let lit = if is_cmp {
+                sh_ast_alloc_node(arena, "BoolLit", if v != 0 { "true" } else { "false" })
+            } else {
+                sh_ast_alloc_node(arena, "IntLit", "" + v)
+            };
+            sh_ast_mutate_in_place(arena, root_nid, lit);
+            sh_ast_free_node(arena, lit);
+            folds = folds + 1;
+        }
+    }
+    return folds;
+}
+
+pub fn sh_ast_emit_sexpr(arena: i64, node_id: i64) -> str {
+    if node_id < 0 { return "()"; }
+    let k = sh_ast_kind_name(arena, node_id);
+    let op = sh_ast_op_text(arena, node_id);
+    let hdr = if __engine("str_len", op) > 0 { k + ":" + op } else { k };
+    let ccnt = sh_ast_child_count(arena, node_id);
+    if ccnt == 0 {
+        return "(" + hdr + ")";
+    }
+    var out = "(" + hdr;
+    var i = 0;
+    while i < ccnt {
+        out = out + " " + sh_ast_emit_sexpr(arena, sh_ast_child_at(arena, node_id, i));
+        i = i + 1;
+    }
+    return out + ")";
+}
+
+pub fn sh_ast_emit_pilot(arena: i64, node_id: i64) -> str {
+    if node_id < 0 { return ""; }
+    let k = sh_ast_kind_name(arena, node_id);
+    let op = sh_ast_op_text(arena, node_id);
+    let ccnt = sh_ast_child_count(arena, node_id);
+
+    if k == "IntLit" || k == "BoolLit" || k == "IdentExpr" || k == "StrLit" || k == "RawQuote" {
+        return op;
+    }
+    if k == "SpliceHole" {
+        return "$" + op;
+    }
+    if k == "SplatHole" {
+        return "$*" + op;
+    }
+    if k == "UnquoteEscape" {
+        return "~(" + sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0)) + ")";
+    }
+    if k == "UnaryExpr" {
+        return "(" + op + sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0)) + ")";
+    }
+    if k == "BinaryExpr" {
+        let ls = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0));
+        let rs = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 1));
+        return "(" + ls + " " + op + " " + rs + ")";
+    }
+    if k == "CallExpr" {
+        var args_s = "";
+        var ai = 0;
+        while ai < ccnt {
+            if ai > 0 { args_s = args_s + ", "; }
+            args_s = args_s + sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, ai));
+            ai = ai + 1;
+        }
+        return op + "(" + args_s + ")";
+    }
+    if k == "LetStmt" {
+        return "let " + op + " = " + sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0)) + ";";
+    }
+    if k == "VarStmt" {
+        return "var " + op + " = " + sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0)) + ";";
+    }
+    if k == "AssignStmt" {
+        let lhs_s = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0));
+        let rhs_s = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 1));
+        return lhs_s + " = " + rhs_s + ";";
+    }
+    if k == "ReturnStmt" {
+        if ccnt > 0 {
+            return "return " + sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0)) + ";";
+        }
+        return "return;";
+    }
+    if k == "IfExpr" {
+        let cond_s = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0));
+        let then_s = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 1));
+        if ccnt >= 3 {
+            let else_s = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 2));
+            return "if " + cond_s + " " + then_s + " else " + else_s;
+        }
+        return "if " + cond_s + " " + then_s;
+    }
+    if k == "WhileStmt" {
+        let wcond = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0));
+        let wbody = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 1));
+        return "while " + wcond + " " + wbody;
+    }
+    if k == "LoopStmt" {
+        return "loop " + sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0));
+    }
+    if k == "BlockExpr" {
+        var b_out = "{ ";
+        var bi = 0;
+        while bi < ccnt {
+            let ch = sh_ast_child_at(arena, node_id, bi);
+            let ch_k = sh_ast_kind_name(arena, ch);
+            let ch_s = sh_ast_emit_pilot(arena, ch);
+            let needs_semi = ch_k == "BinaryExpr" || ch_k == "UnaryExpr" || ch_k == "CallExpr" || ch_k == "IdentExpr" || ch_k == "IntLit";
+            b_out = b_out + ch_s + (if needs_semi { "; " } else { " " });
+            bi = bi + 1;
+        }
+        return b_out + "}";
+    }
+    if k == "FnDecl" {
+        let sig = __engine("map_get", arena, node_id + "_sig");
+        let sig_s = if sig != null { sig } else { "()" };
+        let body_s = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0));
+        return "pub fn " + op + sig_s + " " + body_s;
+    }
+    if k == "Program" || k == "SeqFragment" {
+        var p_out = "";
+        var pi = 0;
+        while pi < ccnt {
+            if pi > 0 { p_out = p_out + "\n"; }
+            let item = sh_ast_child_at(arena, node_id, pi);
+            let item_k = sh_ast_kind_name(arena, item);
+            let item_s = sh_ast_emit_pilot(arena, item);
+            let top_semi = item_k == "BinaryExpr" || item_k == "UnaryExpr" || item_k == "CallExpr" || item_k == "IdentExpr" || item_k == "IntLit";
+            p_out = p_out + item_s + (if top_semi { ";" } else { "" });
+            pi = pi + 1;
+        }
+        return p_out;
+    }
+    return "";
 }

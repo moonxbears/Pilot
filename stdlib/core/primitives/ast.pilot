@@ -1,6 +1,11 @@
 // =========================================================================
 // FILE: stdlib/core/primitives/ast.pilot
-// HOMOICONIC ABSTRACT SYNTAX TREE NODE REPRESENTATION (`ast<TReturn>`, 0b00 IValue)
+// HOMOICONIC ABSTRACT SYNTAX TREE & MUTABLE ARENA PRIMITIVES
+//   - `ast<TReturn>`      (`0b00 : IValue`)     — Typed AST node handle
+//   - `AstNodeSlot`       (`0b00 : IValue`)     — 16-byte packed node descriptor
+//   - `AstSpliceBinding`  (`0b00 : IValue`)     — Homoiconic `$hole` / `$*seq` binding
+//   - `AstSubtreeView`    (`0b01 : IReference`) — Lexical borrowed subtree cursor
+//   - `AstArenaBuffer`    (`0b10 : IObject`)    — Perceus-owned mutable AST arena
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Primitives.Ast;
@@ -9,8 +14,148 @@ use Pilot.Core.Genesis::*;
 use Pilot.Core.Interfaces::*;
 use Pilot.Core.Keywords::*;
 
+pub interface IMutableAstArena : IAnyValue {
+    pub pure fn node_count() -> usize;
+    pub pure fn root_node_id() -> usize;
+    pub pure fn generation_id() -> u32;
+}
+
 [KeywordDefAttr(29, "Homoiconic abstract syntax tree node representation.")]
 [Lang(Cfg.Lang.ast_t), Layout(c_abi)]
 pub partial struct ast<TReturn: IAnyValue> : IValue {
     pub node_id: usize;
+
+    pub static pure fn invalid() -> ast<TReturn> => ast<TReturn> { node_id: 4294967295 };
+
+    pub pure:
+        fn is_none()  -> bool => .node_id == 4294967295;
+        fn is_valid() -> bool => .node_id != 4294967295;
+}
+
+pub struct {
+    // Exact 16-byte hardware-aligned AST node descriptor (`sizeof == 16`):
+    //   bytes 0..2  : `kind`       (u16 canonical node tag)
+    //   bytes 2..4  : `flags`      (u16 operator / splice / tombstone bitflags)
+    //   bytes 4..8  : `span_start` (u32 byte offset into source buffer)
+    //   bytes 8..12 : `lhs`        (u32 primary child, symbol id, or slice start)
+    //   bytes 12..16: `rhs`        (u32 secondary child, type id, or slice len)
+    [Layout(c_abi)]
+    AstNodeSlot : IValue {
+        pub kind:       u16;
+        pub flags:      u16;
+        pub span_start: u32;
+        pub lhs:        u32;
+        pub rhs:        u32;
+
+        pub pure:
+            fn is_tombstone() -> bool => (.flags & 32768) != 0;
+            fn is_splice()    -> bool => (.flags & 1) != 0;
+            fn is_variadic()  -> bool => (.flags & 2) != 0;
+
+            fn with_kind(new_kind: u16) -> AstNodeSlot => AstNodeSlot {
+                kind:       new_kind,
+                flags:      .flags,
+                span_start: .span_start,
+                lhs:        .lhs,
+                rhs:        .rhs,
+            };
+
+            fn with_flags(new_flags: u16) -> AstNodeSlot => AstNodeSlot {
+                kind:       .kind,
+                flags:      new_flags,
+                span_start: .span_start,
+                lhs:        .lhs,
+                rhs:        .rhs,
+            };
+
+            fn with_children(new_lhs: u32, new_rhs: u32) -> AstNodeSlot => AstNodeSlot {
+                kind:       .kind,
+                flags:      .flags,
+                span_start: .span_start,
+                lhs:        new_lhs,
+                rhs:        new_rhs,
+            };
+
+            fn mark_tombstone() -> AstNodeSlot => AstNodeSlot {
+                kind:       .kind,
+                flags:      .flags | 32768,
+                span_start: .span_start,
+                lhs:        4294967295,
+                rhs:        4294967295,
+            };
+    }
+
+    [Layout(c_abi)]
+    AstSpliceBinding : IValue {
+        pub slot_name:     str;
+        pub bound_node_id: usize;
+        pub is_variadic:   bool;
+
+        pub static pure:
+            fn single(name: str, nid: usize) -> AstSpliceBinding => AstSpliceBinding {
+                slot_name:     name,
+                bound_node_id: nid,
+                is_variadic:   false,
+            };
+
+            fn sequence(name: str, seq_nid: usize) -> AstSpliceBinding => AstSpliceBinding {
+                slot_name:     name,
+                bound_node_id: seq_nid,
+                is_variadic:   true,
+            };
+    }
+
+    // `0b01 : IReference` — Borrowed window over a subtree in a `AstArenaBuffer`;
+    // lexical escape & generation checked by Perceus.
+    [Layout(c_abi)]
+    AstSubtreeView : IReference {
+        pub arena_handle: usize;
+        pub root_node_id: usize;
+        pub generation:   u32;
+
+        pub pure fn is_valid_root() -> bool => .root_node_id != 4294967295;
+    }
+
+    // `0b10 : IObject` — Perceus-owned Mutable AST Arena with move-by-default
+    // and deterministic `~self()` scope reclamation / `drop_reuse`.
+    [Layout(c_abi)]
+    AstArenaBuffer : IMutableAstArena, IObject {
+        pub arena_handle: usize;
+        pub count:        usize;
+        pub root_id:      usize;
+        pub generation:   u32;
+
+        ~self() {
+            .count = 0;
+            .root_id = 4294967295;
+        }
+
+        pub pure:
+            fn node_count()    -> usize => .count;
+            fn root_node_id()  -> usize => .root_id;
+            fn generation_id() -> u32   => .generation;
+
+            fn view_subtree(sub_root: usize) -> AstSubtreeView => AstSubtreeView {
+                arena_handle: .arena_handle,
+                root_node_id: sub_root,
+                generation:   .generation,
+            };
+
+        pub var:
+            fn bump_generation() {
+                .generation = .generation + 1;
+            }
+
+            fn set_root(new_root: usize) {
+                .root_id = new_root;
+                .generation = .generation + 1;
+            }
+
+            fn register_alloc() -> usize {
+                let id = .count;
+                .count = .count + 1;
+                .generation = .generation + 1;
+                return id;
+            }
+    }
 }

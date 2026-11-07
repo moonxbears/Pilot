@@ -329,6 +329,11 @@ pub struct {
                 .cloned_root = __replace_ast(.cloned_root, pattern, replacement);
             }
 
+            fn splice_hole(hole: ast, payload: ast) -> ast {
+                .cloned_root = __replace_ast(.cloned_root, hole, payload);
+                return .cloned_root;
+            }
+
             fn patch() -> ast => __parse_ast(.source_buf, .cloned_root);
     }
 
@@ -341,7 +346,7 @@ pub struct {
         pub rewrite:   fn<str, str>;
         pub weight:    i32;
 
-        pub pure fn clone_ast() -> ast => __ssa_cast(Cfg.Ssa.bitcast, 0, ast);
+        pub pure fn clone_ast() -> ast => __parse_ast(.rewrite(__ast_lines(.target_fn, .part.kind)));
         pub var  fn patch()     -> ast => .clone_ast();
     }
 }

@@ -1,12 +1,12 @@
 // =========================================================================
 // FILE: stdlib/core/syntax/quote.pilot
-// HOMOICONIC AST QUOTING, UNQUOTING & SYNTAX OVERLOADING CONSTRUCTS
-// Option 1 Implementation:
-//   - `raw`:    Literal verbatim AST quotation (quote)
-//   - `quote`:  Quasiquoted code template with holes (quasiquote)
-//   - `splice`: Single AST subtree hole unquote (unquote)
-//   - `splat`:  Sequence AST collection unpack/splice (unquote-slice)
-//   - Multi-case syntax overloading dispatch
+// HOMOICONIC AST QUOTING, UNQUOTING, HYGIENE & SYNTAX OVERLOADING CONSTRUCTS
+//   - `raw`:          Literal verbatim AST quotation (zero hole evaluation)
+//   - `quote`:        Quasiquoted code template with `$hole` / `$*seq` / `~expr`
+//   - `splice`:       Single AST subtree hole unquote (`$node`)
+//   - `splat`:        Variadic AST sequence unquote-slice (`*$nodes` / `$*nodes`)
+//   - `unquote_eval`: Compile-time `~expr` escape inside `quote { ... }`
+//   - Multi-case syntax overloading dispatch (`SyntaxArm` / `SyntaxMatch`)
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Quote;
@@ -15,65 +15,114 @@ use Pilot.Core.Genesis::*;
 use Pilot.Core.Interfaces::*;
 
 pub partial struct {
-    // AST Quoting marker contract
+    // Lexical hygiene scope stamp preventing local variable capture across macro expansions
     [Layout(c_abi)]
-    AstQuoteContext : IValue {
-        pub depth: usize;
-        pub is_spliced: bool;
+    HygieneScope : IValue {
+        pub invocation_id: usize;
+        pub macro_depth:   usize;
+
+        pub static pure fn root() -> HygieneScope => HygieneScope {
+            invocation_id: 0,
+            macro_depth:   0,
+        };
+
+        pub pure fn child_invocation(next_id: usize) -> HygieneScope => HygieneScope {
+            invocation_id: next_id,
+            macro_depth:   .macro_depth + 1,
+        };
     }
 
-    // 1. Literal Verbatim AST Quote (raw)
+    // AST Quoting & Hygiene State Machine
+    [Layout(c_abi)]
+    AstQuoteContext : IValue {
+        pub depth:      usize;
+        pub is_spliced: bool;
+        pub hygiene_id: usize;
+
+        pub static pure fn initial() -> AstQuoteContext => AstQuoteContext {
+            depth:      0,
+            is_spliced: false,
+            hygiene_id: 0,
+        };
+
+        pub pure:
+            fn enter_quote(next_hygiene: usize) -> AstQuoteContext => AstQuoteContext {
+                depth:      .depth + 1,
+                is_spliced: false,
+                hygiene_id: next_hygiene,
+            };
+
+            fn enter_unquote() -> AstQuoteContext => AstQuoteContext {
+                depth:      if .depth > 0 { .depth - 1 } else { 0 },
+                is_spliced: true,
+                hygiene_id: .hygiene_id,
+            };
+
+            fn is_quoting() -> bool => .depth > 0;
+    }
+
+    // 1. Literal Verbatim AST Quote (`raw`)
     [Layout(c_abi)]
     RawQuote<TReturn: IAnyValue> : IValue {
-        pub node_id: usize;
+        pub node_id:  usize;
         pub verbatim: str;
     }
 
-    // 2. Quasiquoted Template AST (quote)
+    // 2. Quasiquoted Template AST (`quote`)
     [Layout(c_abi)]
     TemplateQuote<TReturn: IAnyValue> : IValue {
-        pub node_id: usize;
+        pub node_id:    usize;
         pub hole_count: usize;
+        pub hygiene_id: usize;
+
+        pub pure fn has_holes() -> bool => .hole_count > 0;
     }
 
-    // 3. Single-Node Hole Unquote (splice)
+    // 3. Single-Node Hole Unquote (`$node` / `splice`)
     [Layout(c_abi)]
     SpliceHole<TNode: IAnyValue> : IValue {
         pub slot_id: usize;
         pub payload: TNode;
     }
 
-    // 4. Sequence-Collection Unquote-Slice (splat)
+    // 4. Variadic Sequence Unquote-Slice (`*$nodes` / `$*nodes` / `splat`)
     [Layout(c_abi)]
     SplatHole<TNodes: IAnyValue> : IValue {
-        pub slot_id: usize;
+        pub slot_id:    usize;
         pub item_count: usize;
-        pub payload: TNodes;
+        pub payload:    TNodes;
     }
 
-    // 5. Overloaded Syntax Case Branch Carrier
+    // 5. Compile-Time `~expr` Unquote Escape Carrier
+    [Layout(c_abi)]
+    UnquoteEscape<TExpr: IAnyValue> : IValue {
+        pub expr_node_id: usize;
+        pub folded_value: TExpr;
+    }
+
+    // 6. Overloaded Syntax Case Branch Carrier
     [Layout(c_abi)]
     SyntaxArm<TPattern: IAnyValue> : IValue {
-        pub arity: usize;
+        pub arity:   usize;
         pub pattern: TPattern;
-        pub tag: str;
+        pub tag:     str;
     }
 
     [Layout(c_abi)]
     SyntaxMatch<TTarget: IAnyValue> : IValue {
-        pub target: TTarget;
+        pub target:    TTarget;
         pub arm_count: usize;
     }
 }
 
-// Receptors and compile-time registrations
+// Receptors and compile-time registrations (using unquoted `nameof(...)`)
 comptime {
-    __engine("bind_receptor", "raw", 36, 1);
-    __engine("bind_receptor", "splice", 36, 2);
-    __engine("bind_receptor", "splat", 36, 3);
+    __engine("bind_receptor", nameof(raw), 36, 1);
+    __engine("bind_receptor", nameof(splice), 36, 2);
+    __engine("bind_receptor", nameof(splat), 36, 3);
 }
 
-// Canonical Homoiconic Syntax Macros for Option 1
+// Canonical Homoiconic Syntax Macros
 pub syntax {
     // Verbatim literal quote (no hole evaluation)
     raw(body) => quote {
@@ -88,6 +137,11 @@ pub syntax {
     // Unquote-slice sequence of AST nodes into template
     splat(nodes) => quote {
         *$nodes
+    };
+
+    // Compile-time unquote escape inside quasiquoted template
+    unquote_eval(expr) => quote {
+        ~$expr
     };
 
     // Multi-case syntax macro overloading: dispatch across case arms by arity/pattern
