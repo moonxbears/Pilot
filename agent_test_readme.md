@@ -39,11 +39,11 @@ Every single `#[test]` across the workspace runs [`AntiCheatGuard`](crates/pilot
 - [x] M55: Self-Hosted PilVM v3 Bytecode Compiler, `.pilc` Binary Serializer & Debug Span/Register Tables (`milestone55_selfhost_vm_compiler_and_debug_table`)
 - [x] M56: Layout-Driven C11, LLVM IR, WASM, x86_64 ASM & 8-Backend GPU Codegen (`milestone56_layout_driven_codegen_and_gpu_backends`)
 - [x] M57: 7-Target Source Transpilers, 6-Language Foreign Ingesters & Boolean SPDX License Evaluator (`milestone57_bidirectional_transpilers_and_ingest`)
-- [ ] M58: Purified Runtime FFI Bindgen, RFC Crypto (SHA-256/512, BLAKE3, HMAC, Ed25519), Glitch-Free Reactive, CoW Effects, TCP HTTP/1.1, Polyglot & Wire DB (`milestone58_runtime_crypto_wire_db_and_polyglot`)
-- [ ] M59: Strict-JSON VS Code Generator, Persistent PilVM LSP & Live `VmHook`-Stepped DAP (`milestone59_persistent_pilvm_lsp_and_dap`)
-- [ ] M60: Self-Hosted CLI, Package/Venv/Archive Manager, Flamegraph Profiler, AST WCET & Constant-Folding Optimizer (`milestone60_selfhost_cli_pkg_perf_and_bench`)
-- [ ] M61: Standalone Self-Hosted Lexer/Parser, Stage-3 Fixed-Point (`pilotc2 == pilotc3`) & Dual-Pass Universal Rename Litmus (`milestone61_stage3_fixed_point_and_universal_rename_gate`)
-- [ ] MEGA: Simultaneous Full-Suite Gate — All 13 Milestone Suites (44 Tests Across M50–M61) Passing Together (`mega_all_milestones_simultaneous_gate`)
+- [x] M58: Purified Runtime FFI Bindgen, RFC Crypto (SHA-256/512, BLAKE3, HMAC, Ed25519), Glitch-Free Reactive, CoW Effects, TCP HTTP/1.1, Polyglot & Wire DB (`milestone58_runtime_crypto_wire_db_and_polyglot`)
+- [x] M59: Strict-JSON VS Code Generator, Persistent PilVM LSP & Live `VmHook`-Stepped DAP (`milestone59_persistent_pilvm_lsp_and_dap`)
+- [x] M60: Self-Hosted CLI, Package/Venv/Archive Manager, Flamegraph Profiler, AST WCET & Constant-Folding Optimizer (`milestone60_selfhost_cli_pkg_perf_and_bench`)
+- [x] M61: Standalone Self-Hosted Lexer/Parser, Stage-3 Fixed-Point (`pilotc2 == pilotc3`) & Dual-Pass Universal Rename Litmus (`milestone61_stage3_fixed_point_and_universal_rename_gate`)
+- [x] MEGA: Simultaneous Full-Suite Gate — All 13 Milestone Suites (44 Tests Across M50–M61) Passing Together (`mega_all_milestones_simultaneous_gate`)
 
 ---
 
