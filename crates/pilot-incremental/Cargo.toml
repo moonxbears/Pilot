@@ -9,4 +9,3 @@ description = "Sub-millisecond incremental lexing and GreenNode subtree splicing
 [dependencies]
 pilot-span = { path = "../pilot-span" }
 pilot-lexer = { path = "../pilot-lexer" }
-pilot-syntax = { path = "../pilot-syntax" }

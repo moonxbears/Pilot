@@ -8,7 +8,7 @@ pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Guard;
 use Pilot.Core.Genesis.*;
 
 comptime {
-    __engine("bind_receptor", "guard", 17, 0);
+    __engine("bind_receptor", nameof(guard), 17, 0);
 }
 
 pub syntax {

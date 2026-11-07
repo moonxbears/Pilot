@@ -12,36 +12,36 @@ use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
 
 pub pure fn is_visibility_modifier(word: str) -> bool {
-    return word == "pub" || word == "public"
-        || word == "priv" || word == "private"
-        || word == "prot" || word == "protected"
-        || word == "pkg" || word == "package"
-        || word == "int" || word == "internal"
-        || word == "file" || word == "fileprivate"
-        || word == "open" || word == "export";
+    return word == nameof(pub) || word == nameof(public)
+        || word == nameof(priv) || word == nameof(private)
+        || word == nameof(prot) || word == nameof(protected)
+        || word == nameof(pkg) || word == nameof(package)
+        || word == nameof(int) || word == nameof(internal)
+        || word == nameof(file) || word == nameof(fileprivate)
+        || word == nameof(open) || word == nameof(export);
 }
 
 pub pure fn is_declaration_modifier(word: str) -> bool {
-    return word == "static" || word == "pure"
-        || word == "partial" || word == "var"
-        || word == "comptime" || word == "ext"
-        || word == "extension" || word == "async";
+    return word == nameof(static) || word == nameof(pure)
+        || word == nameof(partial) || word == nameof(var)
+        || word == nameof(comptime) || word == nameof(ext)
+        || word == nameof(extension) || word == nameof(async);
 }
 
 pub pure fn is_clearance_modifier(word: str) -> bool {
     if word.starts_with("lvl(") && word.ends_with(")") {
         return true;
     }
-    if word.starts_with("lvl") && word.len() <= 6 {
+    if word.starts_with(nameof(lvl)) && word.len() <= 6 {
         return true;
     }
     return false;
 }
 
 pub pure fn is_target_construct(word: str) -> bool {
-    return word == "fn" || word == "struct"
-        || word == "interface" || word == "enum"
-        || word == "type" || word == "let" || word == "var";
+    return word == nameof(fn) || word == nameof(struct)
+        || word == nameof(interface) || word == nameof(enum)
+        || word == nameof(type) || word == nameof(let) || word == nameof(var);
 }
 
 pub pure fn is_header_keyword(word: str) -> bool {
@@ -284,9 +284,9 @@ pub fn parse_scope_header(line: str) -> ScopeHeader {
     while i < w_count {
         let w = words[i].trim();
         if w != "" {
-            if w == "fn" {
+            if w == nameof(fn) {
                 is_fn = true;
-                target = "fn";
+                target = nameof(fn);
             } else if is_target_construct(w) {
                 target = w;
             } else if is_header_keyword(w) {
@@ -352,7 +352,7 @@ pub fn desugar_scope_headers(src: str) -> str {
                         let rhs = decl.substring(arrow_pos, decl.len()).trim();
                         decl = f"{lhs} -> {cur.return_type} {rhs}";
                     }
-                } else if cur.target_kind == "struct" || cur.target_kind == "interface" {
+                } else if cur.target_kind == nameof(struct) || cur.target_kind == nameof(interface) {
                     if cur.modifiers != "" && !decl.starts_with(cur.modifiers) {
                         decl = f"{cur.modifiers} {decl}";
                     }

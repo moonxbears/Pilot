@@ -1,5 +1,6 @@
 //! Milestone 34.4: Zero-Allocation Register-Based Virtual Machine Engine (`PilVirtualMachine`).
 
+use std::collections::HashMap;
 use pilot_rt::PilotVal;
 use crate::instruction::{Instruction, Opcode};
 use crate::pilc::PilcBinary;
@@ -13,6 +14,7 @@ pub struct PilVirtualMachine {
     pub instructions: Vec<Instruction>,
     pub pc: usize,
     pub call_stack: Vec<(usize, [PilotVal; 256], u8)>,
+    pub heap_maps: Vec<HashMap<String, PilotVal>>,
     pub hook: Option<VmHook>,
     pub engine_handler: Option<EngineIntrinsicHandler>,
 }
@@ -31,6 +33,7 @@ impl PilVirtualMachine {
             instructions: Vec::new(),
             pc: 0,
             call_stack: Vec::with_capacity(64),
+            heap_maps: Vec::new(),
             hook: None,
             engine_handler: None,
         }
@@ -307,17 +310,45 @@ impl PilVirtualMachine {
                         args.push(unsafe { *self.registers.get_unchecked(i) });
                     }
                     let res = match hook_name.as_str() {
-                        "str_len" if !args.is_empty() => PilotVal::from_int(args[0].to_string_repr().len() as i64),
+                        "str_len" if !args.is_empty() => {
+                            if args[0].is_null() {
+                                PilotVal::from_int(0)
+                            } else {
+                                PilotVal::from_int(args[0].to_string_repr().len() as i64)
+                            }
+                        }
                         "str_byte_at" if args.len() >= 2 => {
-                            let s = args[0].to_string_repr();
+                            let s = if args[0].is_null() { String::new() } else { args[0].to_string_repr() };
                             let idx = args[1].as_int().unwrap_or(0) as usize;
                             PilotVal::from_int(s.as_bytes().get(idx).copied().unwrap_or(0) as i64)
                         }
                         "str_slice" if args.len() >= 3 => {
-                            let s = args[0].to_string_repr();
+                            let s = if args[0].is_null() { String::new() } else { args[0].to_string_repr() };
                             let a = (args[1].as_int().unwrap_or(0).max(0) as usize).min(s.len());
                             let b = (args[2].as_int().unwrap_or(0).max(0) as usize).min(s.len()).max(a);
                             PilotVal::from_str(&s[a..b])
+                        }
+                        "map_new" => {
+                            let idx = self.heap_maps.len();
+                            self.heap_maps.push(HashMap::new());
+                            PilotVal::from_int(idx as i64)
+                        }
+                        "map_set" if args.len() >= 3 => {
+                            let idx = args[0].as_int().unwrap_or(-1);
+                            let key = args[1].to_string_repr();
+                            if idx >= 0 && (idx as usize) < self.heap_maps.len() {
+                                self.heap_maps[idx as usize].insert(key, args[2]);
+                            }
+                            args[0]
+                        }
+                        "map_get" if args.len() >= 2 => {
+                            let idx = args[0].as_int().unwrap_or(-1);
+                            let key = args[1].to_string_repr();
+                            if idx >= 0 && (idx as usize) < self.heap_maps.len() {
+                                self.heap_maps[idx as usize].get(&key).copied().unwrap_or(PilotVal::NULL)
+                            } else {
+                                PilotVal::NULL
+                            }
                         }
                         _ => {
                             if let Some(ref mut handler) = self.engine_handler {

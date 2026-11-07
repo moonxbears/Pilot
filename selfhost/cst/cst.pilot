@@ -1,0 +1,214 @@
+// ============================================================================
+// FILE: selfhost/cst/cst.pilot
+// Milestone 53.1: Lossless Red-Green Concrete Syntax Tree (CST) in Pure Pilot
+// Immutable width-relative GreenNodes & ephemeral parent-linked SyntaxNodes
+// ============================================================================
+
+pub struct GreenToken {
+    pub kind: i64;
+    pub text: str;
+    pub text_len: i64;
+}
+
+pub struct GreenNode {
+    pub kind: i64;
+    pub text_len: i64;
+    pub child_count: i64;
+    pub has_missing_ident: bool;
+    pub has_missing_rparen: bool;
+    pub raw_text: str;
+}
+
+pub struct SyntaxToken {
+    pub kind: i64;
+    pub offset: i64;
+    pub text_len: i64;
+    pub text: str;
+}
+
+pub struct SyntaxNode {
+    pub kind: i64;
+    pub parent_offset: i64;
+    pub offset: i64;
+    pub text_len: i64;
+    pub child_count: i64;
+    pub has_missing_ident: bool;
+    pub has_missing_rparen: bool;
+    pub raw_text: str;
+}
+
+pub struct CstDiagnostic {
+    pub start: i64;
+    pub end: i64;
+    pub message: str;
+    pub fix_it_replacement: str;
+}
+
+// Canonical CST SyntaxKind constants (aligned with 14-seed TokenKind + CST nodes)
+pub pure fn cst_kind_eof() -> i64 { return 0; }
+pub pure fn cst_kind_newline() -> i64 { return 1; }
+pub pure fn cst_kind_comment() -> i64 { return 2; }
+pub pure fn cst_kind_block_comment() -> i64 { return 3; }
+pub pure fn cst_kind_shebang() -> i64 { return 4; }
+pub pure fn cst_kind_whitespace() -> i64 { return 6; }
+pub pure fn cst_kind_ident() -> i64 { return 20; }
+pub pure fn cst_kind_program() -> i64 { return 500; }
+pub pure fn cst_kind_fn_decl() -> i64 { return 501; }
+pub pure fn cst_kind_struct_decl() -> i64 { return 502; }
+pub pure fn cst_kind_interface_decl() -> i64 { return 503; }
+pub pure fn cst_kind_let_stmt() -> i64 { return 504; }
+pub pure fn cst_kind_block_expr() -> i64 { return 505; }
+pub pure fn cst_kind_error_node() -> i64 { return 590; }
+pub pure fn cst_kind_missing_ident() -> i64 { return 591; }
+pub pure fn cst_kind_missing_rparen() -> i64 { return 592; }
+pub pure fn cst_kind_missing_rbrace() -> i64 { return 593; }
+
+pub pure fn is_trivia_cst_kind(kind: i64) -> bool {
+    return kind == 1 || kind == 2 || kind == 3 || kind == 4 || kind == 6;
+}
+
+pub pure fn is_synthetic_missing_kind(kind: i64) -> bool {
+    return kind == 591 || kind == 592 || kind == 593;
+}
+
+pub fn green_token_create(kind: i64, text: str) -> GreenToken {
+    if is_synthetic_missing_kind(kind) {
+        return GreenToken {
+            kind: kind,
+            text: "",
+            text_len: 0,
+        };
+    }
+    return GreenToken {
+        kind: kind,
+        text: text,
+        text_len: text.len(),
+    };
+}
+
+pub fn green_node_create(
+    kind: i64,
+    child_count: i64,
+    has_missing_ident: bool,
+    has_missing_rparen: bool,
+    raw_text: str
+) -> GreenNode {
+    return GreenNode {
+        kind: kind,
+        text_len: raw_text.len(),
+        child_count: child_count,
+        has_missing_ident: has_missing_ident,
+        has_missing_rparen: has_missing_rparen,
+        raw_text: raw_text,
+    };
+}
+
+pub fn green_node_to_text(node: GreenNode) -> str {
+    return node.raw_text;
+}
+
+pub fn syntax_node_new_root(green: GreenNode) -> SyntaxNode {
+    return SyntaxNode {
+        kind: green.kind,
+        parent_offset: 0,
+        offset: 0,
+        text_len: green.text_len,
+        child_count: green.child_count,
+        has_missing_ident: green.has_missing_ident,
+        has_missing_rparen: green.has_missing_rparen,
+        raw_text: green.raw_text,
+    };
+}
+
+pub fn syntax_node_child_at_offset(
+    parent: SyntaxNode,
+    child_kind: i64,
+    rel_offset: i64,
+    child_text: str
+) -> SyntaxNode {
+    let abs_offset = parent.offset + rel_offset;
+    return SyntaxNode {
+        kind: child_kind,
+        parent_offset: parent.offset,
+        offset: abs_offset,
+        text_len: child_text.len(),
+        child_count: 1,
+        has_missing_ident: false,
+        has_missing_rparen: false,
+        raw_text: child_text,
+    };
+}
+
+pub pure fn syntax_node_start_offset(node: SyntaxNode) -> i64 {
+    return node.offset;
+}
+
+pub pure fn syntax_node_end_offset(node: SyntaxNode) -> i64 {
+    return node.offset + node.text_len;
+}
+
+pub pure fn syntax_node_contains_offset(node: SyntaxNode, byte_offset: i64) -> bool {
+    return byte_offset >= node.offset && byte_offset <= (node.offset + node.text_len);
+}
+
+pub fn syntax_node_to_text(node: SyntaxNode) -> str {
+    return node.raw_text;
+}
+
+// Counts top-level syntactic declaration islands (`{ ... }` or `;`-terminated) in `src`.
+pub fn count_cst_top_level_children(src: str) -> i64 {
+    let n = src.len();
+    var count = 0;
+    var brace_depth = 0;
+    var paren_depth = 0;
+    var in_token = false;
+    var i = 0;
+    while i < n {
+        let b = src.byte_at(i);
+        // Skip line comments `//`
+        if b == 47 && i + 1 < n && src.byte_at(i + 1) == 47 {
+            while i < n && src.byte_at(i) != 10 {
+                i = i + 1;
+            }
+        } else if b == 34 {
+            // Skip string literals `"..."`
+            in_token = true;
+            i = i + 1;
+            while i < n && src.byte_at(i) != 34 {
+                if src.byte_at(i) == 92 {
+                    i = i + 2;
+                } else {
+                    i = i + 1;
+                }
+            }
+            if i < n {
+                i = i + 1;
+            }
+        } else {
+            if b != 32 && b != 9 && b != 10 && b != 13 {
+                in_token = true;
+            }
+            if b == 40 {
+                paren_depth = paren_depth + 1;
+            } else if b == 41 && paren_depth > 0 {
+                paren_depth = paren_depth - 1;
+            } else if b == 123 {
+                brace_depth = brace_depth + 1;
+            } else if b == 125 && brace_depth > 0 {
+                brace_depth = brace_depth - 1;
+                if brace_depth == 0 && paren_depth == 0 && in_token {
+                    count = count + 1;
+                    in_token = false;
+                }
+            } else if b == 59 && brace_depth == 0 && paren_depth == 0 && in_token {
+                count = count + 1;
+                in_token = false;
+            }
+            i = i + 1;
+        }
+    }
+    if in_token {
+        count = count + 1;
+    }
+    return count;
+}

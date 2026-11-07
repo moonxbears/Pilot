@@ -9,7 +9,6 @@ description = "Salsa-style revision-tracked incremental query database with earl
 [dependencies]
 pilot-span = { path = "../pilot-span" }
 pilot-lexer = { path = "../pilot-lexer" }
-pilot-syntax = { path = "../pilot-syntax" }
 pilot-incremental = { path = "../pilot-incremental" }
 pilot-ast = { path = "../pilot-ast" }
 pilot-parser = { path = "../pilot-parser" }

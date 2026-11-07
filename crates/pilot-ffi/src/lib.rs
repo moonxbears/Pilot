@@ -229,121 +229,6 @@ pub unsafe extern "C" fn pilot_token_tape_free(handle: *mut PilotFfiTokenTapeHan
     }
 }
 
-// =========================================================================
-// Milestone 31: Lossless CST & Native Wadler-Lindig Formatter C-ABI Exports
-// =========================================================================
-
-/// Opaque C-ABI handle owning a lossless `ParsedCst`.
-pub struct PilotFfiCstHandle {
-    pub cst: pilot_syntax::ParsedCst,
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn pilot_cst_parse(
-    utf8_ptr: *const u8,
-    utf8_len: usize,
-) -> *mut PilotFfiCstHandle {
-    let slice: &[u8] = if utf8_ptr.is_null() || utf8_len == 0 {
-        &[]
-    } else {
-        core::slice::from_raw_parts(utf8_ptr, utf8_len)
-    };
-    let src = core::str::from_utf8(slice).unwrap_or("");
-    let cst = pilot_syntax::parse_cst(src);
-    Box::into_raw(Box::new(PilotFfiCstHandle { cst }))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn pilot_cst_free(handle: *mut PilotFfiCstHandle) {
-    if !handle.is_null() {
-        drop(Box::from_raw(handle));
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn pilot_cst_diagnostic_count(handle: *const PilotFfiCstHandle) -> usize {
-    if handle.is_null() {
-        return 0;
-    }
-    (*handle).cst.diagnostics.len()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn pilot_cst_has_missing_ident(handle: *const PilotFfiCstHandle) -> bool {
-    if handle.is_null() {
-        return false;
-    }
-    (*handle).cst.root.descendants().any(|e| e.kind() == pilot_syntax::SyntaxKind::MissingIdent)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn pilot_cst_has_missing_rparen(handle: *const PilotFfiCstHandle) -> bool {
-    if handle.is_null() {
-        return false;
-    }
-    (*handle).cst.root.descendants().any(|e| e.kind() == pilot_syntax::SyntaxKind::MissingRParen)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn pilot_cst_to_text(
-    handle: *const PilotFfiCstHandle,
-    out_len: *mut usize,
-) -> *mut u8 {
-    if handle.is_null() {
-        if !out_len.is_null() {
-            *out_len = 0;
-        }
-        return core::ptr::null_mut();
-    }
-    let text = (*handle).cst.to_text();
-    let bytes = text.into_bytes();
-    if !out_len.is_null() {
-        *out_len = bytes.len();
-    }
-    let mut boxed = bytes.into_boxed_slice();
-    let ptr = boxed.as_mut_ptr();
-    core::mem::forget(boxed);
-    ptr
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn pilot_format_source(
-    utf8_ptr: *const u8,
-    utf8_len: usize,
-    use_colon_suites: i32,
-    emit_semicolons: bool,
-    out_len: *mut usize,
-    out_modified: *mut bool,
-) -> *mut u8 {
-    let slice: &[u8] = if utf8_ptr.is_null() || utf8_len == 0 {
-        &[]
-    } else {
-        core::slice::from_raw_parts(utf8_ptr, utf8_len)
-    };
-    let src = core::str::from_utf8(slice).unwrap_or("");
-    let options = pilot_fmt::FormatOptions {
-        use_colon_suites: match use_colon_suites {
-            1 => Some(true),
-            0 => Some(false),
-            _ => None,
-        },
-        emit_semicolons,
-        ..Default::default()
-    };
-    let result = pilot_fmt::format_source(src, &options);
-    if !out_modified.is_null() {
-        *out_modified = result.was_modified;
-    }
-    let bytes = result.formatted_code.into_bytes();
-    if !out_len.is_null() {
-        *out_len = bytes.len();
-    }
-    let mut boxed = bytes.into_boxed_slice();
-    let ptr = boxed.as_mut_ptr();
-    core::mem::forget(boxed);
-    ptr
-}
-
 #[no_mangle]
 pub unsafe extern "C" fn pilot_free_string(ptr: *mut u8, len: usize) {
     if !ptr.is_null() && len > 0 {
@@ -353,52 +238,8 @@ pub unsafe extern "C" fn pilot_free_string(ptr: *mut u8, len: usize) {
 }
 
 // =========================================================================
-// Milestone 32: Incremental Reparsing, Database & Native LSP C-ABI Exports
+// Milestone 32: Incremental Database & Native LSP C-ABI Exports
 // =========================================================================
-
-#[no_mangle]
-pub unsafe extern "C" fn pilot_incremental_reparse(
-    old_cst: *const PilotFfiCstHandle,
-    old_src_ptr: *const u8,
-    old_src_len: usize,
-    start: u32,
-    end: u32,
-    rep_ptr: *const u8,
-    rep_len: usize,
-    out_micros: *mut u64,
-    out_reused: *mut usize,
-) -> *mut PilotFfiCstHandle {
-    if old_cst.is_null() {
-        return core::ptr::null_mut();
-    }
-    let old_src = if old_src_ptr.is_null() || old_src_len == 0 {
-        ""
-    } else {
-        core::str::from_utf8(core::slice::from_raw_parts(old_src_ptr, old_src_len)).unwrap_or("")
-    };
-    let rep_str = if rep_ptr.is_null() || rep_len == 0 {
-        ""
-    } else {
-        core::str::from_utf8(core::slice::from_raw_parts(rep_ptr, rep_len)).unwrap_or("")
-    };
-
-    let edit = pilot_incremental::TextEdit::new(start, end, rep_str);
-    let old_root = (*old_cst).cst.root.green();
-    let res = pilot_incremental::reparse_incremental(old_root, old_src, &edit);
-
-    if !out_micros.is_null() {
-        *out_micros = res.metrics.reparse_time_micros;
-    }
-    if !out_reused.is_null() {
-        *out_reused = res.metrics.reused_nodes;
-    }
-
-    let parsed_cst = pilot_syntax::ParsedCst {
-        root: pilot_syntax::SyntaxNode::new_root(res.new_root),
-        diagnostics: Vec::new(),
-    };
-    Box::into_raw(Box::new(PilotFfiCstHandle { cst: parsed_cst }))
-}
 
 #[no_mangle]
 pub unsafe extern "C" fn pilot_db_new() -> *mut pilot_db::Database {
@@ -1028,64 +869,13 @@ mod tests {
     }
 
     #[test]
-    fn ffi_c_abi_lossless_cst_and_format() {
-        let src = b"// Test comment\nfn run(x: i64) -> i64 {\n    return x + 1;\n}\n";
-        unsafe {
-            // Test CST parsing and roundtrip text
-            let cst_handle = pilot_cst_parse(src.as_ptr(), src.len());
-            assert!(!cst_handle.is_null());
-            assert_eq!(pilot_cst_diagnostic_count(cst_handle), 0);
-
-            let mut out_len = 0usize;
-            let text_ptr = pilot_cst_to_text(cst_handle, &mut out_len);
-            assert!(!text_ptr.is_null());
-            assert_eq!(out_len, src.len());
-
-            let text_bytes = core::slice::from_raw_parts(text_ptr, out_len);
-            assert_eq!(text_bytes, src.as_slice());
-            pilot_free_string(text_ptr, out_len);
-            pilot_cst_free(cst_handle);
-
-            // Test native Wadler-Lindig formatter
-            let mut fmt_len = 0usize;
-            let mut modified = false;
-            let fmt_ptr = pilot_format_source(src.as_ptr(), src.len(), 1, false, &mut fmt_len, &mut modified);
-            assert!(!fmt_ptr.is_null());
-            assert!(fmt_len > 0);
-            let fmt_slice = core::slice::from_raw_parts(fmt_ptr, fmt_len);
-            let fmt_str = core::str::from_utf8(fmt_slice).unwrap();
-            assert!(fmt_str.contains("fn run(x: i64) -> i64"));
-            pilot_free_string(fmt_ptr, fmt_len);
-        }
-    }
-
-    #[test]
     fn ffi_c_abi_incremental_reparse_db_and_lsp() {
         let src = b"fn calc(x: i64) -> i64 {\n    return x + 10;\n}\n";
         let src_str = core::str::from_utf8(src).unwrap();
         let target_offset = src_str.find("10").unwrap() as u32;
         unsafe {
-            // 1. CST and Incremental Reparse via C-ABI
-            let cst = pilot_cst_parse(src.as_ptr(), src.len());
-            assert!(!cst.is_null());
-
             let rep = b"20";
-            let mut micros = 0u64;
-            let mut reused = 0usize;
-            let new_cst = pilot_incremental_reparse(cst, src.as_ptr(), src.len(), target_offset, target_offset + 2, rep.as_ptr(), rep.len(), &mut micros, &mut reused);
-            assert!(!new_cst.is_null());
-            assert!(micros < 5000);
-
-            let mut out_len = 0usize;
-            let text_ptr = pilot_cst_to_text(new_cst, &mut out_len);
-            let text = core::str::from_utf8(core::slice::from_raw_parts(text_ptr, out_len)).unwrap();
-            assert!(text.contains("return x + 20;"));
-            pilot_free_string(text_ptr, out_len);
-
-            pilot_cst_free(cst);
-            pilot_cst_free(new_cst);
-
-            // 2. Incremental Database with Early Cutoff
+            // 1. Incremental Database with Early Cutoff
             let db = pilot_db_new();
             assert!(!db.is_null());
             pilot_db_set_source(db, 1, src.as_ptr(), src.len());

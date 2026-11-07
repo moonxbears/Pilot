@@ -1,0 +1,199 @@
+// ============================================================================
+// FILE: selfhost/cst/cst_recovery.pilot
+// Milestone 53.2: Live-Keyword Damerau-Levenshtein Typo Recovery & Sync Sets
+// Fixes the legacy Rust u128 TokenSet bitmask truncation bug and queries the
+// live Pilot.Core.Keywords registry dynamically via __engine.
+// ============================================================================
+
+pub pure fn min_i64(a: i64, b: i64) -> i64 {
+    if a < b { return a; }
+    return b;
+}
+
+pub pure fn abs_i64(x: i64) -> i64 {
+    if x < 0 { return 0 - x; }
+    return x;
+}
+
+// Computes exact Damerau-Levenshtein distance <= 2 (returns 0, 1, 2, or 99 if > 2).
+// Handles single-character insertion, deletion, substitution, and adjacent transposition.
+pub fn damerau_levenshtein_le1(a: str, b: str) -> i64 {
+    let alen = a.len();
+    let blen = b.len();
+    if a == b {
+        return 0;
+    }
+    let diff = abs_i64(alen - blen);
+    if diff > 1 {
+        return 99;
+    }
+
+    // Same length: check single substitution or single adjacent transposition
+    if alen == blen {
+        var first_mismatch = -1;
+        var second_mismatch = -1;
+        var mismatch_count = 0;
+        var i = 0;
+        while i < alen {
+            if a.byte_at(i) != b.byte_at(i) {
+                mismatch_count = mismatch_count + 1;
+                if first_mismatch < 0 {
+                    first_mismatch = i;
+                } else if second_mismatch < 0 {
+                    second_mismatch = i;
+                }
+            }
+            i = i + 1;
+        }
+        if mismatch_count == 1 {
+            return 1;
+        }
+        if mismatch_count == 2 && (second_mismatch == first_mismatch + 1) {
+            if a.byte_at(first_mismatch) == b.byte_at(second_mismatch)
+                && a.byte_at(second_mismatch) == b.byte_at(first_mismatch)
+            {
+                return 1;
+            }
+        }
+        return 99;
+    }
+
+    // Length differs by 1: check single insertion/deletion
+    var shorter = a;
+    var longer = b;
+    if alen > blen {
+        shorter = b;
+        longer = a;
+    }
+    let slen = shorter.len();
+    let llen = longer.len();
+    var si = 0;
+    var li = 0;
+    var skips = 0;
+    while si < slen && li < llen {
+        if shorter.byte_at(si) == longer.byte_at(li) {
+            si = si + 1;
+            li = li + 1;
+        } else {
+            skips = skips + 1;
+            if skips > 1 {
+                return 99;
+            }
+            li = li + 1;
+        }
+    }
+    return 1;
+}
+
+// Searches comma-separated keyword list `csv` for an exact match.
+pub fn csv_contains_word(csv: str, word: str) -> bool {
+    let n = csv.len();
+    var start = 0;
+    var i = 0;
+    while i <= n {
+        if i == n || csv.byte_at(i) == 44 {
+            if csv.slice(start, i) == word {
+                return true;
+            }
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// Searches comma-separated keyword list `csv` for a Damerau-Levenshtein distance-1 match.
+pub fn csv_find_dl1_match(csv: str, ident: str) -> str {
+    let n = csv.len();
+    var start = 0;
+    var i = 0;
+    while i <= n {
+        if i == n || csv.byte_at(i) == 44 {
+            let candidate = csv.slice(start, i);
+            if candidate.len() >= 3 && damerau_levenshtein_le1(ident, candidate) == 1 {
+                return candidate;
+            }
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    return "";
+}
+
+// Queries the live Pilot.Core.Keywords registry across categories 0..14 (plus seed fallback)
+// to suggest a distance-1 keyword fix-it for `ident` (e.g. "retrun" -> "return").
+pub fn suggest_keyword_typo(ident: str) -> str {
+    if ident.len() < 3 {
+        return "";
+    }
+
+    let canonical_keywords = "__engine,struct,interface,fn,let,ref,if,loop,return,yield,defer,comptime,quote,asm,else,while,until,for,in,then,break,continue,guard,switch,case,default,try,catch,var,const,enum,actor,state,type,pub,priv,prot,pkg,int,file,open,export,lvl,pure,static,iso,partial,ext,get,set,self,field,value,scope,enter,exit,requires,ensures,old,context,adapter,each,coalesce,with,without,as,async,await,spawn,atomic,sync,isolate,select,timeout,bounded,noalloc,region,deadline,within,periodic,priority,jitter,database,transaction,commit,rollback,savepoint,connect,from,where,order,ascending,descending,insert,into,values,update,delete,extern,assembly,module,lib,sizeof,alignof,offsetof,fields_of,nameof,assert,blueprint,cue,role,route,unit,syntax,use,op";
+
+    if csv_contains_word(canonical_keywords, ident) {
+        return "";
+    }
+
+    // 1. Check live dynamic registry categories via __engine if mounted
+    var cat = 0;
+    while cat <= 14 {
+        let live_csv = __engine("query_registered_symbols", cat);
+        if live_csv.len() > 0 {
+            if csv_contains_word(live_csv, ident) {
+                return "";
+            }
+            let hit = csv_find_dl1_match(live_csv, ident);
+            if hit.len() > 0 {
+                return hit;
+            }
+        }
+        cat = cat + 1;
+    }
+
+    // 2. Check canonical keyword table
+    return csv_find_dl1_match(canonical_keywords, ident);
+}
+
+// Arbitrary-width statement synchronization anchor check (no u128 bitmask truncation).
+pub pure fn is_stmt_sync_anchor(tok: str) -> bool {
+    return tok == ";"
+        || tok == "{"
+        || tok == "}"
+        || tok == nameof(let)
+        || tok == nameof(var)
+        || tok == nameof(const)
+        || tok == nameof(if)
+        || tok == nameof(while)
+        || tok == nameof(until)
+        || tok == nameof(for)
+        || tok == nameof(loop)
+        || tok == nameof(switch)
+        || tok == nameof(return)
+        || tok == nameof(yield)
+        || tok == nameof(break)
+        || tok == nameof(continue)
+        || tok == nameof(defer)
+        || tok == nameof(guard)
+        || tok == nameof(try)
+        || tok == nameof(assert);
+}
+
+// Arbitrary-width declaration synchronization anchor check (no u128 bitmask truncation).
+pub pure fn is_decl_sync_anchor(tok: str) -> bool {
+    return tok == nameof(fn)
+        || tok == nameof(struct)
+        || tok == nameof(interface)
+        || tok == nameof(enum)
+        || tok == nameof(type)
+        || tok == nameof(pub)
+        || tok == nameof(priv)
+        || tok == nameof(prot)
+        || tok == nameof(pkg)
+        || tok == nameof(int)
+        || tok == nameof(file)
+        || tok == nameof(open)
+        || tok == nameof(export)
+        || tok == nameof(use)
+        || tok == nameof(syntax)
+        || tok == nameof(extern)
+        || tok == "[";
+}

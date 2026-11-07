@@ -19,10 +19,10 @@ comptime {
     __engine("register_pratt_op", "->",  infix,  20, left);
     __engine("register_pratt_op", "->>", infix,  20, left);
 
-    __engine("bind_receptor", "and",  31, 14);
-    __engine("bind_receptor", "or",   31, 15);
-    __engine("bind_receptor", "not",  31, 1);
-    __engine("bind_receptor", "is",     31, 25);
-    __engine("bind_receptor", "some",   31, 2);
-    __engine("bind_receptor", "nameof", 33, 25);
+    __engine("bind_receptor", nameof(and),  31, 14);
+    __engine("bind_receptor", nameof(or),   31, 15);
+    __engine("bind_receptor", nameof(not),  31, 1);
+    __engine("bind_receptor", nameof(is),     31, 25);
+    __engine("bind_receptor", nameof(some),   31, 2);
+    __engine("bind_receptor", nameof(nameof), 33, 25);
 }
