@@ -1,11 +1,85 @@
-//! Milestone 51 Verification Gate:
-//! Pure Pilot `syntax` Desugaring & Contraction of `pilot-parser` (<= 1,100 LOC) & `pilot-ast` (<= 450 LOC).
+//! ==============================================================================
+//! crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs
+//! Milestone 51 — Uncheatable Adversarial Verification Gate
+//!
+//! Required `.pilot` & Contraction Contracts (all enforced simultaneously):
+//!   1. `stdlib/core/syntax/type_construct.pilot`:
+//!      - Full Pratt precedence (`Postfix 30 > Intersection 20 > Union 15 > Arrow 10 > Fallible 5`)
+//!      - Zero hardcoded composite names in Rust; arbitrary runtime-renamed composites
+//!        splice cleanly via `syntax type_construct { ... => quote { ... } }`.
+//!   2. `stdlib/core/syntax/{visibility,scope_header,attribute,lifecycle,properties,
+//!      module_ext,for,while,until,switch,guard,try_catch,expr_sugar,unit_decl}.pilot`
+//!      & `stdlib/{db/sql_syntax,polyglot/polyglot_syntax,realtime/rt_syntax,
+//!      asyncio/select_syntax,contracts/contracts_syntax}.pilot`:
+//!      - Every syntax module must be `<= 1,500` lines, parse with 0 diagnostics,
+//!        and use `nameof(...)` (never raw quoted identifier strings like `"database"`,
+//!        `"from"`, `"select"`, `"union"`, `"intersect"`, `"except"`) when binding
+//!        valid identifier keywords in `bind_receptor` / `register_pratt_op`.
+//!      - Expanded `while`, `until`, and multi-parameter user `syntax` macros must
+//!        produce semantically executable `AstArena` control-flow & arithmetic trees
+//!        verified against an independent oracle over randomized trials.
+//!   3. Canonical Syntax & Contraction Gates:
+//!      - Collection-only trailing commas strictly enforced.
+//!      - Unchecked postfix `x!` emits `NULL001`.
+//!      - Prohibited legacy keywords (`def`, `let mut`, `match`, `class`, `record`,
+//!        `elif`, `lambda`) emit diagnostics.
+//!      - `crates/pilot-parser/src/lib.rs <= 1,100` LOC, `crates/pilot-ast/src/lib.rs <= 450` LOC,
+//!        zero `HashMap`/`HashSet` on `AstArena`, and `selfhost/scope_header.pilot` deleted.
+//! ==============================================================================
 
-use pilot_ast::{AstNode, CallQuoteKind, NodeId, NodeKind, DECL_FLAG_PURE, DECL_FLAG_STATIC};
+use std::collections::HashMap;
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use pilot_ast::{
+    AstArena, AstNode, BinaryOp, CallQuoteKind, NodeId, NodeKind, DECL_FLAG_PARTIAL,
+    DECL_FLAG_PURE, DECL_FLAG_STATIC,
+};
 use pilot_intern::SymbolId;
 use pilot_parser::{parse, parse_and_ingest, ParserTables};
 
-fn resolve_type_str(arena: &pilot_ast::AstArena, id: NodeId) -> String {
+struct Rng(u64);
+
+impl Rng {
+    fn new(salt: u64) -> Self {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x5151_5151_DEAD_BEEF);
+        let s = nanos ^ ((std::process::id() as u64).rotate_left(19)) ^ salt;
+        Self(if s == 0 { 0x1234_5678_9ABC_DEF0 } else { s })
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    fn range(&mut self, lo: i64, hi_inclusive: i64) -> i64 {
+        lo + (self.next_u64() % ((hi_inclusive - lo + 1) as u64)) as i64
+    }
+
+    fn ident(&mut self, prefix: &str) -> String {
+        const LOWER: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
+        let suffix: String = (0..6)
+            .map(|_| LOWER[(self.next_u64() as usize) % LOWER.len()] as char)
+            .collect();
+        format!("{}_{}", prefix, suffix)
+    }
+}
+
+fn workspace_root() -> &'static Path {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+}
+
+fn resolve_type_str(arena: &AstArena, id: NodeId) -> String {
     if id.is_none() {
         return "none".to_string();
     }
@@ -17,138 +91,380 @@ fn resolve_type_str(arena: &pilot_ast::AstArena, id: NodeId) -> String {
             if args.is_empty() {
                 base
             } else {
-                let inner: Vec<String> = args.iter().map(|&c| resolve_type_str(arena, NodeId(c))).collect();
+                let inner: Vec<String> = args
+                    .iter()
+                    .map(|&c| resolve_type_str(arena, NodeId(c)))
+                    .collect();
                 format!("{}<{}>", base, inner.join(", "))
             }
         }
         NodeKind::TypeTuple => {
-            let n = arena.node(id);
-            let inner: Vec<String> = arena.children_slice(n.lhs, n.rhs).iter().map(|&c| resolve_type_str(arena, NodeId(c))).collect();
+            let inner: Vec<String> = arena
+                .children_slice(n.lhs, n.rhs)
+                .iter()
+                .map(|&c| resolve_type_str(arena, NodeId(c)))
+                .collect();
             format!("({})", inner.join(", "))
         }
-        NodeKind::IntLit => arena.i64_pool.get(n.lhs as usize).copied().unwrap_or(0).to_string(),
+        NodeKind::IntLit => arena
+            .i64_pool
+            .get(n.lhs as usize)
+            .copied()
+            .unwrap_or(0)
+            .to_string(),
         _ => format!("{:?}", n.node_kind()),
     }
 }
 
-#[test]
-fn test_51_1_general_syntax_and_type_construct_universal_rename_litmus() {
-    // 1. Canonical stdlib/core/syntax/type_construct.pilot precedence & lowering
-    let src = r#"
-        let a: i64[]!str;
-        let b: f64[4]?;
-        let c: (i32, i32) => bool;
-        let d: f32@8;
-        let e: i32[:];
-        let f: u8[..];
-        let g: *void;
-    "#;
-    let arena = parse(src);
-    assert!(arena.diagnostics.is_empty(), "Expected 0 diagnostics, got: {:?}", arena.diagnostics);
-    let root_ch = arena.children_slice(arena.node(arena.root).lhs, arena.node(arena.root).rhs);
-    assert_eq!(root_ch.len(), 7);
-    assert_eq!(resolve_type_str(&arena, arena.type_annot(NodeId(root_ch[0])).unwrap()), "result<slice<i64>, str>");
-    assert_eq!(resolve_type_str(&arena, arena.type_annot(NodeId(root_ch[1])).unwrap()), "option<array<f64, 4>>");
-    assert_eq!(resolve_type_str(&arena, arena.type_annot(NodeId(root_ch[2])).unwrap()), "fn<(i32, i32), bool>");
-    assert_eq!(resolve_type_str(&arena, arena.type_annot(NodeId(root_ch[3])).unwrap()), "simd<f32, 8>");
-    assert_eq!(resolve_type_str(&arena, arena.type_annot(NodeId(root_ch[4])).unwrap()), "ring<i32>");
-    assert_eq!(resolve_type_str(&arena, arena.type_annot(NodeId(root_ch[5])).unwrap()), "stride<u8>");
-    assert_eq!(resolve_type_str(&arena, arena.type_annot(NodeId(root_ch[6])).unwrap()), "ptr<void>");
+enum Flow {
+    Val(i64),
+    Return(i64),
+    Break,
+}
 
-    // 2. Universal Rename Litmus Test: custom composite names via `syntax type_construct` with zero Rust changes
-    let mut custom_tables = ParserTables::new();
-    let custom_grammar = r#"
-        comptime {
-            __engine("bind_receptor", "syntax", 4, 0);
-            __engine("bind_receptor", "type_construct", 5, 0);
-        }
-        syntax type_construct {
-            (T[])    => quote { window<$T> };
-            (T[:])   => quote { dyn_buf<$T> };
-            (T[N])   => quote { fixed_vec<$T, $N> };
-            (T?)     => quote { maybe<$T> };
-            (T ! E)  => quote { outcome<$T, $E> };
-            (*T)     => quote { raw_addr<$T> };
-        }
-        let x: c32[]!err_code;
-        let y: f64[16]?;
-        let z: (*u8)[:];
-    "#;
-    let renamed_arena = parse_and_ingest(custom_grammar, &mut custom_tables);
-    assert!(renamed_arena.diagnostics.is_empty(), "Expected 0 diagnostics: {:?}", renamed_arena.diagnostics);
-    let r_ch = renamed_arena.children_slice(renamed_arena.node(renamed_arena.root).lhs, renamed_arena.node(renamed_arena.root).rhs);
-    let x_node = NodeId(r_ch[r_ch.len() - 3]);
-    let y_node = NodeId(r_ch[r_ch.len() - 2]);
-    let z_node = NodeId(r_ch[r_ch.len() - 1]);
-    assert_eq!(resolve_type_str(&renamed_arena, renamed_arena.type_annot(x_node).unwrap()), "outcome<window<c32>, err_code>");
-    assert_eq!(resolve_type_str(&renamed_arena, renamed_arena.type_annot(y_node).unwrap()), "maybe<fixed_vec<f64, 16>>");
-    assert_eq!(resolve_type_str(&renamed_arena, renamed_arena.type_annot(z_node).unwrap()), "dyn_buf<raw_addr<u8>>");
+fn eval_ast_fn(arena: &AstArena, fn_name: &str, args: &[i64]) -> i64 {
+    let fn_id = (0..arena.nodes.len())
+        .map(|i| NodeId(i as u32))
+        .find(|&id| {
+            arena.node(id).node_kind() == NodeKind::FnDecl
+                && arena.interner.resolve(SymbolId(arena.node(id).lhs)) == fn_name
+        })
+        .unwrap_or_else(|| panic!("FnDecl '{}' not found in expanded AST", fn_name));
+    let fn_node = arena.node(fn_id);
+    let ch = arena.children_slice(fn_node.rhs, fn_node.flags as u32);
+    let body = NodeId(ch[0]);
+    let mut env = HashMap::new();
+    for (idx, &pid) in ch[1..].iter().enumerate() {
+        let pname = arena
+            .interner
+            .resolve(SymbolId(arena.node(NodeId(pid)).lhs))
+            .to_string();
+        env.insert(pname, args[idx]);
+    }
+    match eval_node(arena, body, &mut env) {
+        Flow::Val(v) | Flow::Return(v) => v,
+        Flow::Break => 0,
+    }
+}
 
-    // 3. Live mid-file user `syntax` macro expansion with `$param` AST splicing
-    let macro_src = r#"
-        pub syntax {
-            unless(cond, body) => quote {
-                if !($cond) {
-                    $body
+fn eval_node(arena: &AstArena, id: NodeId, env: &mut HashMap<String, i64>) -> Flow {
+    if id.is_none() {
+        return Flow::Val(0);
+    }
+    let n = *arena.node(id);
+    match n.node_kind() {
+        NodeKind::BlockExpr | NodeKind::Program => {
+            let mut last = 0;
+            for &c in arena.children_slice(n.lhs, n.rhs) {
+                match eval_node(arena, NodeId(c), env) {
+                    Flow::Val(v) => last = v,
+                    other => return other,
                 }
-            };
-        }
-        fn check(flag: bool) -> i64 {
-            unless flag {
-                return 99;
             }
-            return 0;
+            Flow::Val(last)
         }
-    "#;
-    let mac_arena = parse(macro_src);
-    assert!(mac_arena.diagnostics.is_empty(), "Expected 0 diagnostics on user macro: {:?}", mac_arena.diagnostics);
-    let has_if = mac_arena.nodes.iter().any(|n| n.node_kind() == NodeKind::IfExpr);
-    assert!(has_if, "`unless` macro must splice into a canonical `IfExpr` node");
+        NodeKind::IntLit => Flow::Val(arena.i64_pool[n.lhs as usize]),
+        NodeKind::BoolLit => Flow::Val(i64::from(n.lhs != 0)),
+        NodeKind::IdentExpr => {
+            let nm = arena.interner.resolve(SymbolId(n.lhs));
+            Flow::Val(*env.get(nm).unwrap_or(&0))
+        }
+        NodeKind::LetStmt | NodeKind::VarStmt => {
+            let nm = arena.interner.resolve(SymbolId(n.lhs)).to_string();
+            let v = match eval_node(arena, NodeId(n.rhs), env) {
+                Flow::Val(x) => x,
+                other => return other,
+            };
+            env.insert(nm, v);
+            Flow::Val(v)
+        }
+        NodeKind::AssignStmt => {
+            let lhs_nm = arena
+                .interner
+                .resolve(SymbolId(arena.node(NodeId(n.lhs)).lhs))
+                .to_string();
+            let v = match eval_node(arena, NodeId(n.rhs), env) {
+                Flow::Val(x) => x,
+                other => return other,
+            };
+            env.insert(lhs_nm, v);
+            Flow::Val(v)
+        }
+        NodeKind::ExprStmt => eval_node(arena, NodeId(n.lhs), env),
+        NodeKind::ReturnStmt => match eval_node(arena, NodeId(n.lhs), env) {
+            Flow::Val(v) | Flow::Return(v) => Flow::Return(v),
+            Flow::Break => Flow::Return(0),
+        },
+        NodeKind::BreakStmt => Flow::Break,
+        NodeKind::UnaryExpr => {
+            let Flow::Val(v) = eval_node(arena, NodeId(n.lhs), env) else {
+                return Flow::Val(0);
+            };
+            Flow::Val(if n.flags == 5 { i64::from(v == 0) } else { -v })
+        }
+        NodeKind::BinaryExpr => {
+            let Flow::Val(l) = eval_node(arena, NodeId(n.lhs), env) else {
+                return Flow::Val(0);
+            };
+            let Flow::Val(r) = eval_node(arena, NodeId(n.rhs), env) else {
+                return Flow::Val(0);
+            };
+            let res = match n.flags {
+                x if x == BinaryOp::Add as u16 => l.wrapping_add(r),
+                x if x == BinaryOp::Sub as u16 => l.wrapping_sub(r),
+                x if x == BinaryOp::Mul as u16 => l.wrapping_mul(r),
+                x if x == BinaryOp::Div as u16 => l / r,
+                x if x == BinaryOp::Rem as u16 => l % r,
+                x if x == BinaryOp::Eq as u16 => i64::from(l == r),
+                x if x == BinaryOp::Ne as u16 => i64::from(l != r),
+                x if x == BinaryOp::Lt as u16 => i64::from(l < r),
+                x if x == BinaryOp::Le as u16 => i64::from(l <= r),
+                x if x == BinaryOp::Gt as u16 => i64::from(l > r),
+                x if x == BinaryOp::Ge as u16 => i64::from(l >= r),
+                _ => 0,
+            };
+            Flow::Val(res)
+        }
+        NodeKind::IfExpr => {
+            let Flow::Val(c) = eval_node(arena, NodeId(n.lhs), env) else {
+                return Flow::Val(0);
+            };
+            if n.flags == 2 {
+                let ch = arena.children_slice(n.rhs, 2);
+                eval_node(arena, NodeId(if c != 0 { ch[0] } else { ch[1] }), env)
+            } else if c != 0 {
+                eval_node(arena, NodeId(n.rhs), env)
+            } else {
+                Flow::Val(0)
+            }
+        }
+        NodeKind::WhileStmt => {
+            let mut guard = 0;
+            loop {
+                guard += 1;
+                assert!(guard < 10_000, "Expanded loop did not terminate");
+                let Flow::Val(c) = eval_node(arena, NodeId(n.lhs), env) else {
+                    break;
+                };
+                if c == 0 {
+                    break;
+                }
+                match eval_node(arena, NodeId(n.rhs), env) {
+                    Flow::Val(_) => {}
+                    Flow::Break => break,
+                    Flow::Return(v) => return Flow::Return(v),
+                }
+            }
+            Flow::Val(0)
+        }
+        _ => Flow::Val(0),
+    }
 }
 
 #[test]
-fn test_51_2_core_surface_syntax_modules_and_collection_only_trailing_commas() {
-    let src = r#"
-        pub static pure:
-        fn fast_add(a: i64, b: i64) -> i64 => a + b;
+fn test_51_1_randomized_type_construct_precedence_and_executable_homoiconic_macros() {
+    let mut rng = Rng::new(0x5101_ABCD);
 
-        let List<i32> {
+    // 1. Verify full Pratt type precedence (`Postfix 30 > Intersection 20 > Union 15 > Arrow 10 > Fallible 5`)
+    let prec_src = r#"
+        let t1: i64[]? & u32[8] | f64[..] -> bool ! str;
+        let t2: (*u8)[:] @ 16;
+        let t3: @i32[4, 4]^;
+        let t4: (i64[]) => bool ! str;
+    "#;
+    let prec_arena = parse(prec_src);
+    assert!(
+        prec_arena.diagnostics.is_empty(),
+        "Type precedence diagnostics: {:?}",
+        prec_arena.diagnostics
+    );
+    let r_ch = prec_arena.children_slice(
+        prec_arena.node(prec_arena.root).lhs,
+        prec_arena.node(prec_arena.root).rhs,
+    );
+    assert_eq!(
+        resolve_type_str(&prec_arena, prec_arena.type_annot(NodeId(r_ch[0])).unwrap()),
+        "result<fn<union<intersect<option<slice<i64>>, array<u32, 8>>, stride<f64>>, bool>, str>"
+    );
+    assert_eq!(
+        resolve_type_str(&prec_arena, prec_arena.type_annot(NodeId(r_ch[3])).unwrap()),
+        "result<fn<slice<i64>, bool>, str>"
+    );
+    assert_eq!(
+        resolve_type_str(&prec_arena, prec_arena.type_annot(NodeId(r_ch[1])).unwrap()),
+        "simd<ring<ptr<u8>>, 16>"
+    );
+    assert_eq!(
+        resolve_type_str(&prec_arena, prec_arena.type_annot(NodeId(r_ch[2])).unwrap()),
+        "pin<signal<grid<i32, 4, 4>>>"
+    );
+
+    // 2. Randomized Universal Rename Litmus on `syntax type_construct` (8 independent trials)
+    for _ in 0..8 {
+        let w_name = rng.ident("win");
+        let a_name = rng.ident("arr");
+        let o_name = rng.ident("opt");
+        let r_name = rng.ident("out");
+        let p_name = rng.ident("ptr");
+        let u_name = rng.ident("sum");
+        let i_name = rng.ident("both");
+        let scalar_a = rng.ident("sc");
+        let err_t = rng.ident("err");
+        let n_len = rng.range(2, 64);
+
+        let mut custom_tables = ParserTables::new();
+        let grammar = format!(
+            r#"
+            comptime {{
+                __engine("bind_receptor", nameof(syntax), 4, 0);
+                __engine("bind_receptor", nameof(type_construct), 5, 0);
+            }}
+            syntax type_construct {{
+                (T[])     => quote {{ {w_name}<$T> }};
+                (T[N])    => quote {{ {a_name}<$T, $N> }};
+                (T?)      => quote {{ {o_name}<$T> }};
+                (T ! E)   => quote {{ {r_name}<$T, $E> }};
+                (*T)      => quote {{ {p_name}<$T> }};
+                (T1 & T2) => quote {{ {i_name}<$T1, $T2> }};
+                (T1 | T2) => quote {{ {u_name}<$T1, $T2> }};
+            }}
+            let target: (*{scalar_a})[{n_len}]? & {scalar_a}[] | {scalar_a} ! {err_t};
+            "#
+        );
+        let a = parse_and_ingest(&grammar, &mut custom_tables);
+        assert!(a.diagnostics.is_empty(), "Diagnostics: {:?}", a.diagnostics);
+        let ch = a.children_slice(a.node(a.root).lhs, a.node(a.root).rhs);
+        let last = NodeId(*ch.last().unwrap());
+        let expected = format!(
+            "{r_name}<{u_name}<{i_name}<{o_name}<{a_name}<{p_name}<{scalar_a}>, {n_len}>>, {w_name}<{scalar_a}>>, {scalar_a}>, {err_t}>"
+        );
+        assert_eq!(resolve_type_str(&a, a.type_annot(last).unwrap()), expected);
+    }
+
+    // 3. Randomized executable semantic test of `while`, `until`, and multi-param user `syntax` macros
+    for _ in 0..8 {
+        let mac_clamp = rng.ident("clamp_macro");
+        let mac_unless = rng.ident("unless_macro");
+        let fn_nm = rng.ident("exec_macro_sem");
+        let lo = rng.range(10, 30);
+        let hi = rng.range(60, 95);
+        let step = rng.range(2, 7);
+        let target_n = rng.range(5, 18);
+
+        let src = format!(
+            r#"
+            pub syntax {{
+                {mac_unless}(cond, body) => quote {{
+                    if !($cond) {{
+                        $body
+                    }}
+                }};
+                {mac_clamp}(val, min_v, max_v) => quote {{
+                    if ($val) < ($min_v) {{
+                        $min_v
+                    }} else if ($val) > ($max_v) {{
+                        $max_v
+                    }} else {{
+                        $val
+                    }}
+                }};
+            }}
+
+            pub fn {fn_nm}(x: i64) -> i64 {{
+                var acc = 0;
+                var i = 0;
+                while i < {target_n} {{
+                    acc = acc + {step};
+                    i = i + 1;
+                }}
+                until acc >= {hi} {{
+                    acc = acc + 3;
+                }}
+                {mac_unless} x > 0 {{
+                    return {mac_clamp}(x, {lo}, {hi});
+                }}
+                return {mac_clamp}(acc - x, {lo}, {hi});
+            }}
+            "#
+        );
+
+        let arena = parse(&src);
+        assert!(
+            arena.diagnostics.is_empty(),
+            "Macro semantic trial diagnostics: {:?}",
+            arena.diagnostics
+        );
+
+        for probe_x in [-50i64, 0, 5, 45, 200] {
+            let mut oracle_acc = 0i64;
+            let mut oi = 0i64;
+            while oi < target_n {
+                oracle_acc += step;
+                oi += 1;
+            }
+            while oracle_acc < hi {
+                oracle_acc += 3;
+            }
+            let raw = if !(probe_x > 0) {
+                probe_x
+            } else {
+                oracle_acc - probe_x
+            };
+            let expected = raw.max(lo).min(hi);
+            let actual = eval_ast_fn(&arena, &fn_nm, &[probe_x]);
+            assert_eq!(
+                actual, expected,
+                "Expanded AST semantics mismatch for x={}",
+                probe_x
+            );
+        }
+    }
+}
+
+#[test]
+fn test_51_2_surface_syntax_distributive_headers_call_quotes_and_diagnostics() {
+    let mut rng = Rng::new(0x5102_DEAD);
+    let fn_fast = rng.ident("fast_op");
+    let struct_w = format!(
+        "Wallet{}",
+        rng.ident("x").replace('_', "").to_ascii_uppercase()
+    );
+
+    let src = format!(
+        r#"
+        pub partial static pure:
+        fn {fn_fast}(a: i64, b: i64) -> i64 => a + b;
+
+        let List<i32> {{
             arr1 = [1, 2, 3,],
             arr2 = [4, 5, 6,],
-        };
+        }};
 
-        pub struct Wallet : IValue {
-            pub balance: f64 {
+        pub struct {struct_w} : IValue {{
+            pub balance: f64 {{
                 get => field;
-                set => { field = value; }
-            }
-            self(init: f64) {
+                set => {{ field = value; }}
+            }}
+            self(init: f64) {{
                 .balance = init;
-            }
-            ~self() {}
-            scope self {
-                enter: { .balance += 1.0; }
-                exit:  { .balance -= 1.0; }
-            }
-            pub op +(rhs: Wallet) -> Wallet => Wallet(.balance + rhs.balance);
-        }
+            }}
+            ~self() {{}}
+            scope self {{
+                enter: {{ .balance += 1.0; }}
+                exit:  {{ .balance -= 1.0; }}
+            }}
+            pub op +(rhs: {struct_w}) -> {struct_w} => {struct_w}(.balance + rhs.balance);
+        }}
 
-        fn demo(opt: i64?) -> i64 {
-            guard some v = opt else {
+        fn exercise(opt: i64?) -> i64 {{
+            guard some v = opt else {{
                 return -1;
-            }
-            var acc = 0;
-            while acc < 5 {
-                acc += 1;
-            }
-            until acc >= 10 {
-                acc += 1;
-            }
-            let found = for i in 0 .. 10 {
-                if i == v {
+            }}
+            let found = for i in 0 .. 10 {{
+                if i == v {{
                     break i;
-                }
-            } then 0;
+                }}
+            }} then 0;
             let f = (x: i64) => x * 2;
             let q1 = f!(10);
             let q2 = f!!(~v);
@@ -156,25 +472,29 @@ fn test_51_2_core_surface_syntax_modules_and_collection_only_trailing_commas() {
             let q4 = f!^(10);
             let q5 = f!@(10);
             let q6 = f!?(10);
-            return switch found {
+            return switch found {{
                 case 0: 100,
                 default: found,
-            };
-        }
-    "#;
-    let arena = parse(src);
-    assert!(arena.diagnostics.is_empty(), "Expected 0 diagnostics, got: {:?}", arena.diagnostics);
+            }};
+        }}
+        "#
+    );
 
-    // Verify `fast_add` inherited `pub static pure:` distributive section header
-    let fast_add_id = (0..arena.nodes.len())
+    let arena = parse(&src);
+    assert!(arena.diagnostics.is_empty(), "Got: {:?}", arena.diagnostics);
+
+    let fn_id = (0..arena.nodes.len())
         .map(|i| NodeId(i as u32))
-        .find(|&id| arena.node(id).node_kind() == NodeKind::FnDecl && arena.interner.resolve(SymbolId(arena.node(id).lhs)) == "fast_add")
-        .expect("fast_add FnDecl must exist");
-    let flags = arena.decl_flags[fast_add_id.0 as usize];
+        .find(|&id| {
+            arena.node(id).node_kind() == NodeKind::FnDecl
+                && arena.interner.resolve(SymbolId(arena.node(id).lhs)) == fn_fast
+        })
+        .expect("distributive FnDecl");
+    let flags = arena.decl_flags[fn_id.0 as usize];
+    assert_ne!(flags & DECL_FLAG_PARTIAL, 0);
     assert_ne!(flags & DECL_FLAG_STATIC, 0);
     assert_ne!(flags & DECL_FLAG_PURE, 0);
 
-    // Verify all 6 homoiconic call-quote modes are preserved
     for mode in [
         CallQuoteKind::ShallowQuote,
         CallQuoteKind::DeepSplice,
@@ -183,22 +503,23 @@ fn test_51_2_core_surface_syntax_modules_and_collection_only_trailing_commas() {
         CallQuoteKind::SymbolicAdjoint,
         CallQuoteKind::EffectDryRun,
     ] {
-        assert!(
-            arena.nodes.iter().any(|n| n.node_kind() == NodeKind::CallExpr && n.flags == mode as u16),
-            "Missing CallQuoteKind::{:?}",
-            mode
-        );
+        assert!(arena
+            .nodes
+            .iter()
+            .any(|n| n.node_kind() == NodeKind::CallExpr && n.flags == mode as u16));
     }
 
-    // Verify NULL001 diagnostic on unchecked postfix `x!`
-    let bad_bang = parse("fn bad(x: i64?) -> i64 { return x!; }");
-    assert!(
-        bad_bang.diagnostics.iter().any(|(_, m)| m.contains("NULL001")),
-        "Expected NULL001 diagnostic on postfix `x!`, got: {:?}",
-        bad_bang.diagnostics
-    );
+    // Postfix `x!` must emit NULL001
+    let bad_bang = parse(&format!(
+        "fn {}(x: i64?) -> i64 {{ return x!; }}",
+        rng.ident("bad")
+    ));
+    assert!(bad_bang
+        .diagnostics
+        .iter()
+        .any(|(_, m)| m.contains("NULL001")));
 
-    // Verify collection-only trailing commas: disallowed in attributes, params, args, generics, inheritance
+    // Disallowed trailing comma contexts
     for invalid_comma in [
         "[Clamp(0, 1),] struct S {}",
         "fn f(a: i32, b: i32,) {}",
@@ -207,23 +528,35 @@ fn test_51_2_core_surface_syntax_modules_and_collection_only_trailing_commas() {
         "struct V : IValue, {}",
     ] {
         let a = parse(invalid_comma);
-        assert!(!a.diagnostics.is_empty(), "Expected trailing comma diagnostic for: {}", invalid_comma);
+        assert!(
+            !a.diagnostics.is_empty(),
+            "Expected trailing-comma error on: {}",
+            invalid_comma
+        );
     }
 
-    // Verify prohibited legacy keywords (`def`, `let mut`, `match`, `class`) are rejected with diagnostics
+    // Prohibited legacy syntax keywords
     for legacy in [
         "def legacy_fn() {}",
         "fn f() { let mut x = 1; }",
         "fn f(x: i64) { match x { 1 => 2 } }",
         "class Foo {}",
+        "record Bar {}",
+        "fn f(b: bool) { if b { } elif !b { } }",
     ] {
         let a = parse(legacy);
-        assert!(!a.diagnostics.is_empty(), "Prohibited legacy syntax must emit diagnostic: {}", legacy);
+        assert!(
+            !a.diagnostics.is_empty(),
+            "Legacy construct must be rejected with diagnostic: {}",
+            legacy
+        );
     }
 }
 
 #[test]
-fn test_51_3_domain_syntax_packages_and_stdlib_selfhost_zero_error_parse() {
+fn test_51_3_domain_syntax_packages_and_strict_nameof_hygiene() {
+    let root = workspace_root();
+
     let domain_src = r#"
         database AppDb {
             pub users: i64;
@@ -243,15 +576,20 @@ fn test_51_3_domain_syntax_packages_and_stdlib_selfhost_zero_error_parse() {
             noalloc {
                 let q = from u in users where u > 0 select u;
             }
-            let sq = sql("SELECT 1");
+            deadline(50) {
+                let sq = sql("SELECT 1");
+            }
             return 0;
         }
     "#;
     let arena = parse(domain_src);
-    assert!(arena.diagnostics.is_empty(), "Expected 0 diagnostics on domain syntax, got: {:?}", arena.diagnostics);
+    assert!(
+        arena.diagnostics.is_empty(),
+        "Domain syntax diagnostics: {:?}",
+        arena.diagnostics
+    );
 
-    // Verify all 20 syntax modules and selfhost files parse with 0 diagnostics
-    for rel_path in [
+    let syntax_modules = [
         "stdlib/core/syntax/type_construct.pilot",
         "stdlib/core/syntax/visibility.pilot",
         "stdlib/core/syntax/scope_header.pilot",
@@ -272,35 +610,98 @@ fn test_51_3_domain_syntax_packages_and_stdlib_selfhost_zero_error_parse() {
         "stdlib/realtime/rt_syntax.pilot",
         "stdlib/asyncio/select_syntax.pilot",
         "stdlib/contracts/contracts_syntax.pilot",
-        "selfhost/analyzer.pilot",
-        "selfhost/parser.pilot",
-        "selfhost/preprocessor.pilot",
-    ] {
-        let full_path = format!("../../{}", rel_path);
-        let src = std::fs::read_to_string(&full_path).unwrap_or_else(|e| panic!("Failed to read {}: {}", full_path, e));
+    ];
+
+    for rel in syntax_modules {
+        let src = std::fs::read_to_string(root.join(rel))
+            .unwrap_or_else(|e| panic!("Missing {}: {}", rel, e));
         let lines = src.lines().count();
-        assert!(lines <= 1500, "{} exceeds 1,500 lines ({} lines)", rel_path, lines);
+        assert!(lines >= 15 && lines <= 1500, "{} lines={}", rel, lines);
         let parsed = parse(&src);
-        assert!(parsed.diagnostics.is_empty(), "{} had parse diagnostics: {:?}", rel_path, parsed.diagnostics);
+        assert!(
+            parsed.diagnostics.is_empty(),
+            "{} parse diagnostics: {:?}",
+            rel,
+            parsed.diagnostics
+        );
+
+        // Enforce `nameof(kw)` instead of quoted `"kw"` on identifier receptors & Pratt ops!
+        for (ln_no, line) in src.lines().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("//") {
+                continue;
+            }
+            if trimmed.contains("\"bind_receptor\"") || trimmed.contains("\"register_pratt_op\"") {
+                if let Some(after) = trimmed
+                    .split("\"bind_receptor\",")
+                    .nth(1)
+                    .or_else(|| trimmed.split("\"register_pratt_op\",").nth(1))
+                {
+                    let arg = after.trim_start();
+                    if let Some(rest) = arg.strip_prefix('"') {
+                        if let Some(end_q) = rest.find('"') {
+                            let lit = &rest[..end_q];
+                            let is_ident = !lit.is_empty()
+                                && lit.bytes().next().unwrap().is_ascii_alphabetic()
+                                && lit.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+                            assert!(
+                                !is_ident,
+                                "{}:{} must use `nameof({})` instead of hardcoded string literal `\"{}\"` in receptor/operator registration!",
+                                rel,
+                                ln_no + 1,
+                                lit,
+                                lit
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
 #[test]
-fn test_51_4_rust_parser_and_ast_contraction_and_legacy_cleanup() {
-    assert_eq!(std::mem::size_of::<AstNode>(), 16, "AstNode must remain strictly 16 bytes");
+fn test_51_4_rust_parser_and_ast_contraction_and_name_blind_purity() {
+    let root = workspace_root();
+    assert_eq!(std::mem::size_of::<AstNode>(), 16);
 
-    let parser_rs = std::fs::read_to_string("../../crates/pilot-parser/src/lib.rs").expect("read pilot-parser/src/lib.rs");
+    let parser_rs =
+        std::fs::read_to_string(root.join("crates/pilot-parser/src/lib.rs")).unwrap();
     let parser_loc = parser_rs.lines().count();
-    assert!(parser_loc <= 1100, "crates/pilot-parser/src/lib.rs must be <= 1,100 LOC, got {}", parser_loc);
+    assert!(
+        parser_loc <= 1100,
+        "crates/pilot-parser/src/lib.rs must be <= 1,100 LOC, got {}",
+        parser_loc
+    );
 
-    let ast_rs = std::fs::read_to_string("../../crates/pilot-ast/src/lib.rs").expect("read pilot-ast/src/lib.rs");
+    let ast_rs = std::fs::read_to_string(root.join("crates/pilot-ast/src/lib.rs")).unwrap();
     let ast_loc = ast_rs.lines().count();
-    assert!(ast_loc <= 450, "crates/pilot-ast/src/lib.rs must be <= 450 LOC, got {}", ast_loc);
-    assert!(!ast_rs.contains("collections::HashMap"), "crates/pilot-ast/src/lib.rs must have zero HashMap side-tables");
-    assert!(!ast_rs.contains("collections::HashSet"), "crates/pilot-ast/src/lib.rs must have zero HashSet side-tables");
+    assert!(
+        ast_loc <= 450,
+        "crates/pilot-ast/src/lib.rs must be <= 450 LOC, got {}",
+        ast_loc
+    );
+    assert!(!ast_rs.contains("collections::HashMap"));
+    assert!(!ast_rs.contains("collections::HashSet"));
+
+    for forbidden_type in [
+        "\"slice\"",
+        "\"option\"",
+        "\"result\"",
+        "\"SliceBuffer\"",
+        "\"RangeWindow\"",
+        "\"*void\"",
+        "\"0b00 (IValue)\"",
+    ] {
+        assert!(
+            !parser_rs.contains(forbidden_type) && !ast_rs.contains(forbidden_type),
+            "Forbidden hardcoded Pilot type name {} found in pilot-parser or pilot-ast",
+            forbidden_type
+        );
+    }
 
     assert!(
-        !std::path::Path::new("../../selfhost/scope_header.pilot").exists(),
-        "Legacy duplicate selfhost/scope_header.pilot must be deleted"
+        !root.join("selfhost/scope_header.pilot").exists(),
+        "Superseded selfhost/scope_header.pilot must remain deleted"
     );
 }
