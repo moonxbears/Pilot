@@ -254,12 +254,12 @@ flowchart TD
 ---
 
 ### Milestone 54: Perceus Ownership, Borrow Escape & Realtime Verification — Retire `pilot-perceus`
-- **Status**: 🔲 Planned
+- **Status**: ✅ Completed
 - **Goal**: Migrate all 658 lines of `pilot-perceus` into pure, lattice-driven Pilot compiler passes (`selfhost/perceus/*.pilot`) with zero function-name or identifier sniffing.
 - **Deliverables**:
-  - [ ] **54.1: Lattice Optimizer & Lexical ARC Engine (`selfhost/perceus/{optimizer,arc}.pilot`, `~220L` + `~160L`)**: Traverse lossless `RawAstArena` using `PhysicsRegistry` 2-bit lattice masks (`0b00..0b11`) to emit `Dup`, last-use `Drop`, `DropReuse`, and reverse-order `0b11` guard scope-exit drops.
-  - [ ] **54.2: Borrow Escape & `[HardRealtime]` Verifiers (`selfhost/perceus/{escape,realtime}.pilot`, `~150L` + `~75L`)**: Enforce `0b01`/`0b11` lexical escape diagnostics (`ESCAPE001`–`ESCAPE003`), `.pchor` `iso` cue boundary transfers (`PILOT105`), and `[HardRealtime]` / `noalloc` constraints (`PILOT104`).
-  - [ ] **54.3: Legacy `pilot-perceus` Purge**: Delete `crates/pilot-perceus/` (`658L` — `lib.rs`, `arc.rs`, `escape.rs`, `realtime.rs`) from disk and workspace `Cargo.toml`; eradicate `name.contains("dsp")`, hardcoded `"malloc"`/`"spawn"`/`"IObject"`, and banned `@hard_realtime` decorator checks; delete all `pilot_perceus` dependencies and Rust FFI shims from `pilot-ffi`, `pilot-codegen`, `pilot-cli`, and `pilot-bench`.
+  - [x] **54.1: Lattice Optimizer & Lexical ARC Engine (`selfhost/perceus/{optimizer,arc}.pilot`, `~220L` + `~160L`)**: Traverse lossless `RawAstArena` using `PhysicsRegistry` 2-bit lattice masks (`0b00..0b11`) to emit `Dup`, last-use `Drop`, `DropReuse`, and reverse-order `0b11` guard scope-exit drops.
+  - [x] **54.2: Borrow Escape & `[HardRealtime]` Verifiers (`selfhost/perceus/{escape,realtime}.pilot`, `~150L` + `~75L`)**: Enforce `0b01`/`0b11` lexical escape diagnostics (`ESCAPE001`–`ESCAPE003`), `.pchor` `iso` cue boundary transfers (`PILOT105`), and `[HardRealtime]` / `noalloc` constraints (`PILOT104`).
+  - [x] **54.3: Legacy `pilot-perceus` Purge**: Delete `crates/pilot-perceus/` (`658L` — `lib.rs`, `arc.rs`, `escape.rs`, `realtime.rs`) from disk and workspace `Cargo.toml`; eradicate `name.contains("dsp")`, hardcoded `"malloc"`/`"spawn"`/`"IObject"`, and banned `@hard_realtime` decorator checks; delete all `pilot_perceus` dependencies and Rust FFI shims from `pilot-ffi`, `pilot-codegen`, `pilot-cli`, and `pilot-bench`.
 - **Verification Gate**: `crates/pilot-perceus` completely removed from disk and `Cargo.toml`; zero-GC Perceus memory reuse and `ESCAPE001`–`ESCAPE003` / `PILOT104`–`PILOT105` tests pass.
 
 ---

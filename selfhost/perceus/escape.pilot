@@ -1,0 +1,69 @@
+// ============================================================================
+// FILE: selfhost/perceus/escape.pilot
+// Milestone 54.2: Lexical Borrow-Escape & Allocation Tier Placement Verifier
+// Enforces ESCAPE001, ESCAPE002, and ESCAPE003 strictly from the 2-bit lattice
+// (`Bit 0 != 0` => borrows memory: `0b01` Reference View or `0b11` Scoped Guard).
+// ============================================================================
+
+pub pure fn escape_state_stack() -> i64 { return 0; }
+pub pure fn escape_state_region() -> i64 { return 1; }
+pub pure fn escape_state_global() -> i64 { return 2; }
+
+// Monotonically escalates an allocation site's escape state (`Stack < Region < Global`).
+pub pure fn escalate_escape_state(current_state: i64, new_state: i64) -> i64 {
+    if new_state > current_state {
+        return new_state;
+    }
+    return current_state;
+}
+
+// Determines initial escape placement tier from 2-bit lattice and whether the binding
+// escapes the enclosing lexical block or function return.
+pub pure fn classify_allocation_escape_tier(
+    lattice_bits: i64,
+    escapes_statement: bool,
+    escapes_function: bool
+) -> i64 {
+    let bits = lattice_bits & 3;
+    if bits == 0 {
+        return 0;
+    }
+    if escapes_function {
+        return 2;
+    }
+    if escapes_statement {
+        return 1;
+    }
+    return 0;
+}
+
+// 1-cycle `LatticeBits` borrow-escape verifier for `0b01` (`IReference`) and `0b11` (`IGuard`).
+// When `(lattice_bits & 1) != 0`:
+// 1. `ESCAPE001`: Cannot cross a `.pchor` `cue` or thread boundary.
+// 2. `ESCAPE002`: Cannot be stored inside an `IObject` (`0b10`) heap container.
+// 3. `ESCAPE003`: Cannot escape function `return` unless tied to an input `ref` parameter.
+pub fn verify_borrow_escape_by_lattice(
+    var_name: str,
+    lattice_bits: i64,
+    tied_to_input_ref_param: bool,
+    stored_in_container_lattice: i64,
+    crosses_cue_boundary: bool
+) -> str {
+    let bits = lattice_bits & 3;
+    if (bits & 1) == 0 {
+        return "";
+    }
+    if crosses_cue_boundary {
+        return "ESCAPE001";
+    }
+    if stored_in_container_lattice >= 0 {
+        let cbits = stored_in_container_lattice & 3;
+        if (cbits & 2) != 0 && (cbits & 1) == 0 {
+            return "ESCAPE002";
+        }
+    }
+    if !tied_to_input_ref_param {
+        return "ESCAPE003";
+    }
+    return "";
+}

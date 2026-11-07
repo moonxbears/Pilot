@@ -55,7 +55,6 @@ dependencies = [
  "pilot-lexer",
  "pilot-lsp",
  "pilot-parser",
- "pilot-perceus",
  "pilot-perf",
  "pilot-pkg",
  "pilot-polyglot",
@@ -73,7 +72,6 @@ dependencies = [
  "pilot-ast",
  "pilot-intern",
  "pilot-parser",
- "pilot-perceus",
  "pilot-polyglot",
  "pilot-rt",
  "pilot-span",
@@ -120,7 +118,6 @@ dependencies = [
  "pilot-lexer",
  "pilot-lsp",
  "pilot-parser",
- "pilot-perceus",
  "pilot-polyglot",
  "pilot-rt",
  "pilot-span",
@@ -180,18 +177,6 @@ dependencies = [
  "pilot-ast",
  "pilot-intern",
  "pilot-lexer",
- "pilot-span",
-]
-
-[[package]]
-name = "pilot-perceus"
-version = "0.1.0"
-dependencies = [
- "pilot-analysis",
- "pilot-arena",
- "pilot-ast",
- "pilot-intern",
- "pilot-parser",
  "pilot-span",
 ]
 

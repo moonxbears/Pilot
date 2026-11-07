@@ -21,12 +21,6 @@ pub struct PilotFfiAnalysisHandle {
     pub result: pilot_analysis::AnalysisResult,
 }
 
-/// Opaque C-ABI handle owning Perceus optimizer results.
-pub struct PilotFfiPerceusHandle {
-    pub optimizer: pilot_perceus::PerceusOptimizer,
-    pub report: pilot_perceus::PerceusReport,
-}
-
 /// Opaque C-ABI handle owning a scanned `TokenTape` and `LineIndex`.
 pub struct PilotFfiTokenTapeHandle {
     pub tape: TokenTape,
@@ -376,81 +370,6 @@ pub unsafe extern "C" fn pilot_analysis_diagnostic_count(handle: *const PilotFfi
 pub unsafe extern "C" fn pilot_analysis_has_errors(handle: *const PilotFfiAnalysisHandle) -> u8 {
     if handle.is_null() { return 0; }
     if (*handle).result.has_errors() { 1 } else { 0 }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn pilot_perceus_run(
-    arena_handle: *const PilotFfiArenaHandle,
-) -> *mut PilotFfiPerceusHandle {
-    if arena_handle.is_null() {
-        return core::ptr::null_mut();
-    }
-    let mut opt = pilot_perceus::PerceusOptimizer::new();
-    let arena = &(*arena_handle).arena;
-    // Walk nodes and identify allocations
-    for node in &arena.nodes {
-        let kind = node.node_kind();
-        match kind {
-            NodeKind::StrLit => {
-                opt.escape.record_allocation("str_literal", "str", pilot_perceus::EscapeState::Stack);
-            }
-            NodeKind::ListExpr => {
-                // Tier 1 Region bump allocation by default
-                let site = opt.escape.record_allocation("list_literal", "List", pilot_perceus::EscapeState::Region);
-                // If it's the root return expression, escalate to global
-                if arena.root.is_some() && arena.node(arena.root).node_kind() == NodeKind::ReturnStmt {
-                    opt.escape.mark_escaped(site, pilot_perceus::EscapeState::Global);
-                }
-            }
-            _ => {}
-        }
-    }
-    // Simulate drop reuse optimization
-    opt.arc.elide_borrowed_retain();
-    opt.arc.insert_drop_reuse("old_cell", "new_cell");
-
-    let report = opt.generate_report();
-    Box::into_raw(Box::new(PilotFfiPerceusHandle {
-        optimizer: opt,
-        report,
-    }))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn pilot_perceus_free(handle: *mut PilotFfiPerceusHandle) {
-    if !handle.is_null() {
-        drop(Box::from_raw(handle));
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn pilot_perceus_region_alloc_count(handle: *const PilotFfiPerceusHandle) -> usize {
-    if handle.is_null() { return 0; }
-    (*handle).report.region_allocs
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn pilot_perceus_stack_alloc_count(handle: *const PilotFfiPerceusHandle) -> usize {
-    if handle.is_null() { return 0; }
-    (*handle).report.stack_allocs
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn pilot_perceus_global_alloc_count(handle: *const PilotFfiPerceusHandle) -> usize {
-    if handle.is_null() { return 0; }
-    (*handle).report.global_allocs
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn pilot_perceus_drop_reuse_count(handle: *const PilotFfiPerceusHandle) -> usize {
-    if handle.is_null() { return 0; }
-    (*handle).report.drop_reuses
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn pilot_perceus_elided_retain_count(handle: *const PilotFfiPerceusHandle) -> usize {
-    if handle.is_null() { return 0; }
-    (*handle).report.elided_retains
 }
 
 #[no_mangle]
@@ -916,13 +835,6 @@ mod tests {
             assert!(!analysis.is_null());
             assert_eq!(pilot_analysis_has_errors(analysis), 0);
             pilot_analysis_free(analysis);
-
-            // 2. Perceus Optimizer Pass
-            let perceus = pilot_perceus_run(arena);
-            assert!(!perceus.is_null());
-            assert_eq!(pilot_perceus_drop_reuse_count(perceus), 1);
-            assert_eq!(pilot_perceus_elided_retain_count(perceus), 1);
-            pilot_perceus_free(perceus);
 
             pilot_arena_free(arena);
         }

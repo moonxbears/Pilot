@@ -1,0 +1,134 @@
+// ============================================================================
+// FILE: selfhost/perceus/arc.pilot
+// Milestone 54.1: 2-Bit Lattice Perceus ARC Engine & Drop-Guided Memory Reuse
+// Zero hardcoded type names; operates strictly on 2-bit hardware lattice masks
+// (`0b00` Value, `0b01` Reference View, `0b10` Owned Object, `0b11` Scoped Guard).
+// ============================================================================
+
+pub struct BindingLifecycleState {
+    pub lattice_bits: i64;
+    pub move_by_default: bool;
+    pub is_moved: bool;
+    pub allow_early_last_use_drop: bool;
+    pub needs_scope_exit_drop: bool;
+    pub elided_retain: bool;
+}
+
+pub pure fn ownership_trivial_bit_copy() -> i64 { return 0; }
+pub pure fn ownership_lexical_borrow_only() -> i64 { return 1; }
+pub pure fn ownership_move_and_drop() -> i64 { return 2; }
+pub pure fn ownership_scoped_guard_move_and_drop() -> i64 { return 3; }
+
+// 1-cycle bitwise classification of Perceus lifecycle action from 2-bit lattice (`0..3`).
+pub pure fn classify_perceus_action(lattice: i64) -> i64 {
+    let bits = lattice & 3;
+    if bits == 0 { return 0; }
+    if bits == 1 { return 1; }
+    if bits == 2 { return 2; }
+    return 3;
+}
+
+// 1-cycle bitwise lattice check for local binding lifecycle registration:
+// - If `(lattice_bits & 2) == 0` (`0b00` or `0b01`), elides retain/drop tracking.
+// - If `(lattice_bits & 2) != 0` (`0b10` or `0b11`), marks move-by-default and schedules
+//   `~self()` at scope exit (allowing early last-use drop only when `(lattice_bits & 1) == 0`).
+pub fn track_binding_by_lattice(var_name: str, lattice_bits: i64) -> BindingLifecycleState {
+    let bits = lattice_bits & 3;
+    if (bits & 2) == 0 {
+        return BindingLifecycleState {
+            lattice_bits: bits,
+            move_by_default: false,
+            is_moved: false,
+            allow_early_last_use_drop: false,
+            needs_scope_exit_drop: false,
+            elided_retain: true,
+        };
+    }
+    let is_guard = (bits & 1) != 0;
+    return BindingLifecycleState {
+        lattice_bits: bits,
+        move_by_default: true,
+        is_moved: false,
+        allow_early_last_use_drop: !is_guard,
+        needs_scope_exit_drop: true,
+        elided_retain: false,
+    };
+}
+
+// Checks whether passing/assigning a binding of `lattice_bits` moves ownership (`true`)
+// or performs a trivial bit-copy (`false`).
+pub pure fn requires_move_on_transfer(lattice_bits: i64) -> bool {
+    return (lattice_bits & 2) != 0;
+}
+
+// Emits the canonical Perceus ARC drop operation for `var_name` with `lattice_bits`.
+// - `0b00` / `0b01`: returns `""` (no destructor).
+// - `0b10` (`IObject`): emits `"Drop:<var>"` on last use (`!at_scope_exit`) or `"ScopeExitDrop:<var>"` at scope exit.
+// - `0b11` (`IGuard`): strictly forbids early drop before scope exit (`""` when `!at_scope_exit`),
+//   and emits `"ScopeExitDrop:<var>"` at scope exit.
+pub fn emit_drop_op_for_lattice(var_name: str, lattice_bits: i64, at_scope_exit: bool) -> str {
+    let bits = lattice_bits & 3;
+    if (bits & 2) == 0 {
+        return "";
+    }
+    let is_guard = (bits & 1) != 0;
+    if !at_scope_exit {
+        if is_guard {
+            return "";
+        }
+        return "Drop:" + var_name;
+    }
+    return "ScopeExitDrop:" + var_name;
+}
+
+// Emits a Perceus `DropReuse` token when a dropped `0b10` object's layout size matches
+// an immediately following allocation (`rc == 1` in-place memory recycling).
+pub fn emit_drop_reuse_op(
+    dropped_var: str,
+    dropped_lattice: i64,
+    dropped_size: i64,
+    target_var: str,
+    target_size: i64
+) -> str {
+    let bits = dropped_lattice & 3;
+    if bits == 2 && dropped_size > 0 && dropped_size == target_size {
+        return "DropReuse:" + dropped_var + "->" + target_var;
+    }
+    if (bits & 2) != 0 {
+        return "Drop:" + dropped_var;
+    }
+    return "";
+}
+
+// Emits reverse-order (LIFO) `ScopeExitDrop` instructions for comma-separated `0b11` guards
+// declared in a lexical block (`"g1,g2,g3"` -> `"ScopeExitDrop:g3;ScopeExitDrop:g2;ScopeExitDrop:g1"`).
+pub fn emit_reverse_guard_drops(guards_csv: str) -> str {
+    let n = guards_csv.len();
+    if n == 0 {
+        return "";
+    }
+    var out = "";
+    var end = n;
+    var i = n - 1;
+    while i >= 0 {
+        if guards_csv.byte_at(i) == 44 {
+            let gname = guards_csv.slice(i + 1, end);
+            if gname.len() > 0 {
+                if out.len() > 0 {
+                    out = out + ";";
+                }
+                out = out + "ScopeExitDrop:" + gname;
+            }
+            end = i;
+        }
+        i = i - 1;
+    }
+    let first = guards_csv.slice(0, end);
+    if first.len() > 0 {
+        if out.len() > 0 {
+            out = out + ";";
+        }
+        out = out + "ScopeExitDrop:" + first;
+    }
+    return out;
+}

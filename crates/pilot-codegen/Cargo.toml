@@ -10,5 +10,4 @@ pilot-rt = { path = "../pilot-rt" }
 pilot-span = { path = "../pilot-span" }
 pilot-intern = { path = "../pilot-intern" }
 pilot-parser = { path = "../pilot-parser" }
-pilot-perceus = { path = "../pilot-perceus" }
 pilot-polyglot = { path = "../pilot-polyglot" }
