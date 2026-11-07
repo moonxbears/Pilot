@@ -1,6 +1,12 @@
 // =========================================================================
 // FILE: stdlib/core/syntax/quote.pilot
-// HOMOICONIC AST QUOTING & COMPILE-TIME UNQUOTING CONSTRUCTS
+// HOMOICONIC AST QUOTING, UNQUOTING & SYNTAX OVERLOADING CONSTRUCTS
+// Option 1 Implementation:
+//   - `raw`:    Literal verbatim AST quotation (quote)
+//   - `quote`:  Quasiquoted code template with holes (quasiquote)
+//   - `splice`: Single AST subtree hole unquote (unquote)
+//   - `splat`:  Sequence AST collection unpack/splice (unquote-slice)
+//   - Multi-case syntax overloading dispatch
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Quote;
@@ -15,4 +21,85 @@ pub partial struct {
         pub depth: usize;
         pub is_spliced: bool;
     }
+
+    // 1. Literal Verbatim AST Quote (raw)
+    [Layout(c_abi)]
+    RawQuote<TReturn: IAnyValue> : IValue {
+        pub node_id: usize;
+        pub verbatim: str;
+    }
+
+    // 2. Quasiquoted Template AST (quote)
+    [Layout(c_abi)]
+    TemplateQuote<TReturn: IAnyValue> : IValue {
+        pub node_id: usize;
+        pub hole_count: usize;
+    }
+
+    // 3. Single-Node Hole Unquote (splice)
+    [Layout(c_abi)]
+    SpliceHole<TNode: IAnyValue> : IValue {
+        pub slot_id: usize;
+        pub payload: TNode;
+    }
+
+    // 4. Sequence-Collection Unquote-Slice (splat)
+    [Layout(c_abi)]
+    SplatHole<TNodes: IAnyValue> : IValue {
+        pub slot_id: usize;
+        pub item_count: usize;
+        pub payload: TNodes;
+    }
+
+    // 5. Overloaded Syntax Case Branch Carrier
+    [Layout(c_abi)]
+    SyntaxArm<TPattern: IAnyValue> : IValue {
+        pub arity: usize;
+        pub pattern: TPattern;
+        pub tag: str;
+    }
+
+    [Layout(c_abi)]
+    SyntaxMatch<TTarget: IAnyValue> : IValue {
+        pub target: TTarget;
+        pub arm_count: usize;
+    }
+}
+
+// Receptors and compile-time registrations
+comptime {
+    __engine("bind_receptor", "raw", 36, 1);
+    __engine("bind_receptor", "splice", 36, 2);
+    __engine("bind_receptor", "splat", 36, 3);
+}
+
+// Canonical Homoiconic Syntax Macros for Option 1
+pub syntax {
+    // Verbatim literal quote (no hole evaluation)
+    raw(body) => quote {
+        $body
+    };
+
+    // Unquote single AST node into template
+    splice(node) => quote {
+        $node
+    };
+
+    // Unquote-slice sequence of AST nodes into template
+    splat(nodes) => quote {
+        *$nodes
+    };
+
+    // Multi-case syntax macro overloading: dispatch across case arms by arity/pattern
+    syntax_overload(target, arms) => quote {
+        switch $target {
+            $arms
+        }
+    };
+
+    syntax_case(pattern, body) => quote {
+        case $pattern: {
+            return $body;
+        }
+    };
 }

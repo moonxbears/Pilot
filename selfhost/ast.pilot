@@ -22,6 +22,11 @@ pub enum ShNodeKind {
     CallExpr,
     IntLit,
     IdentExpr,
+    RawQuote,
+    TemplateQuote,
+    SpliceHole,
+    SplatHole,
+    SyntaxCaseArm,
 }
 
 pub pure fn sh_sizeof_ast_node() -> i64 {
@@ -90,4 +95,55 @@ pub fn sh_ast_child_at(arena: i64, node_id: i64, idx: i64) -> i64 {
     let ch = __engine("map_get", arena, node_id + "_child_" + idx);
     if ch != null { return ch; }
     return -1;
+}
+
+// Option 1 Quoting Constructors: raw, quote, splice, splat
+pub fn sh_ast_alloc_raw(arena: i64, verbatim_code: str) -> i64 {
+    let nid = sh_ast_alloc_node(arena, "RawQuote", verbatim_code);
+    return nid;
+}
+
+pub fn sh_ast_alloc_template(arena: i64, template_body: i64) -> i64 {
+    let nid = sh_ast_alloc_node(arena, "TemplateQuote", "");
+    if template_body >= 0 {
+        sh_ast_add_child(arena, nid, template_body);
+    }
+    return nid;
+}
+
+pub fn sh_ast_alloc_splice(arena: i64, slot_name: str, node: i64) -> i64 {
+    let nid = sh_ast_alloc_node(arena, "SpliceHole", slot_name);
+    if node >= 0 {
+        sh_ast_add_child(arena, nid, node);
+    }
+    return nid;
+}
+
+pub fn sh_ast_alloc_splat(arena: i64, slot_name: str, nodes: i64) -> i64 {
+    let nid = sh_ast_alloc_node(arena, "SplatHole", slot_name);
+    if nodes >= 0 {
+        sh_ast_add_child(arena, nid, nodes);
+    }
+    return nid;
+}
+
+// Syntax Overloading Arm Constructor & Matcher
+pub fn sh_ast_alloc_syntax_arm(arena: i64, arity: i64, pattern_tag: str, body: i64) -> i64 {
+    let nid = sh_ast_alloc_node(arena, "SyntaxCaseArm", pattern_tag);
+    __engine("map_set", arena, nid + "_arity", arity);
+    if body >= 0 {
+        sh_ast_add_child(arena, nid, body);
+    }
+    return nid;
+}
+
+pub fn sh_ast_syntax_arm_arity(arena: i64, arm_id: i64) -> i64 {
+    let a = __engine("map_get", arena, arm_id + "_arity");
+    if a != null { return a; }
+    return 0;
+}
+
+pub fn sh_ast_match_syntax_arm(arena: i64, arm_id: i64, arg_count: i64) -> bool {
+    let arity = sh_ast_syntax_arm_arity(arena, arm_id);
+    return arity == arg_count;
 }

@@ -270,3 +270,27 @@ pub fn sh_parse_program(src: str) -> i64 {
 
     return arena;
 }
+
+// Option 1 Quoting & Splicing Helpers: raw, quote, splice, splat
+pub fn sh_expand_quote_splice(arena: i64, parent: i64, slot_name: str, node: i64) -> void {
+    let nid = sh_ast_alloc_splice(arena, slot_name, node);
+    sh_ast_add_child(arena, parent, nid);
+}
+
+pub fn sh_expand_quote_splat(arena: i64, parent: i64, slot_name: str, nodes: i64) -> void {
+    let nid = sh_ast_alloc_splat(arena, slot_name, nodes);
+    sh_ast_add_child(arena, parent, nid);
+}
+
+pub fn sh_select_syntax_overload(arena: i64, arm_list: i64, arg_count: i64) -> i64 {
+    let cnt = sh_ast_child_count(arena, arm_list);
+    var i = 0;
+    while i < cnt {
+        let arm = sh_ast_child_at(arena, arm_list, i);
+        if sh_ast_match_syntax_arm(arena, arm, arg_count) {
+            return arm;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
