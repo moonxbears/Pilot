@@ -1,0 +1,75 @@
+// ============================================================================
+// FILE: selfhost/vm/pilc_writer.pilot
+// Milestone 55.1: Self-Hosted `.pilc` v3 Binary Container & Debug Table Writer
+// Formats `PIL3` magic headers, version 3 metadata, constant pool descriptors,
+// 32-bit instruction streams, and PC-to-ByteSpan debug tables in pure Pilot.
+// ============================================================================
+
+pub struct PilcContainerSummary {
+    pub magic: str;
+    pub version: i64;
+    pub const_count: i64;
+    pub instruction_count: i64;
+    pub debug_span_count: i64;
+    pub debug_reg_count: i64;
+    pub total_byte_size: i64;
+}
+
+pub pure fn pilc_v3_magic() -> str {
+    return "PIL3";
+}
+
+pub pure fn pilc_v3_version() -> i64 {
+    return 3;
+}
+
+// Computes the exact serialized byte size of a `.pilc` v3 binary image:
+// - 4 bytes magic (`"PIL3"`)
+// - 4 bytes version (`3`)
+// - 4 bytes constant count + `16 * const_count` bytes
+// - 4 bytes heap string table length + `heap_str_bytes`
+// - 4 bytes instruction count + `4 * instruction_count` bytes
+// - Optional debug section: `8 * debug_span_count` + `12 * debug_reg_count`
+pub pure fn compute_pilc_v3_byte_size(
+    const_count: i64,
+    heap_str_bytes: i64,
+    instruction_count: i64,
+    debug_span_count: i64,
+    debug_reg_count: i64
+) -> i64 {
+    let header_and_counts = 4 + 4 + 4 + 4 + 4;
+    let const_bytes = const_count * 16;
+    let code_bytes = instruction_count * 4;
+    let debug_bytes = (debug_span_count * 8) + (debug_reg_count * 12);
+    return header_and_counts + const_bytes + heap_str_bytes + code_bytes + debug_bytes;
+}
+
+pub fn create_pilc_container_summary(
+    const_count: i64,
+    heap_str_bytes: i64,
+    instruction_count: i64,
+    debug_span_count: i64,
+    debug_reg_count: i64
+) -> PilcContainerSummary {
+    let total = compute_pilc_v3_byte_size(
+        const_count,
+        heap_str_bytes,
+        instruction_count,
+        debug_span_count,
+        debug_reg_count
+    );
+    return PilcContainerSummary {
+        magic: pilc_v3_magic(),
+        version: pilc_v3_version(),
+        const_count: const_count,
+        instruction_count: instruction_count,
+        debug_span_count: debug_span_count,
+        debug_reg_count: debug_reg_count,
+        total_byte_size: total,
+    };
+}
+
+// Validates that a `.pilc` header starts with `"PIL3"` magic and version `3`.
+pub fn validate_pilc_v3_header(magic: str, version: i64) -> bool {
+    return magic == pilc_v3_magic() && version == pilc_v3_version();
+}

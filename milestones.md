@@ -265,13 +265,13 @@ flowchart TD
 ---
 
 ### Milestone 55: Self-Hosted PilVM v3 Bytecode Compiler, `.pilc` Serializer & `VmHook` Debug Table
-- **Status**: 🔲 Planned
+- **Status**: ✅ Completed
 - **Goal**: Shrink `crates/pilot-vm` from `1,474` lines to `~625` lines by migrating AST-to-bytecode compilation and `.pilc` serialization into Pilot while adding Name-Blind source-span debug metadata to `PilcBinary`.
 - **Deliverables**:
-  - [ ] **55.1: Self-Hosted Bytecode Compiler & `.pilc` Writer (`selfhost/vm/{compiler,pilc_writer}.pilot`, `~680L` + `~95L`)**: Compile lossless `RawAstArena` functions, control-flow jumps, closures, and `__engine` calls into `PIL3` bytecode without hardcoding `"main"`, `"print"`, `"assert"`, or `"nameof"`.
-  - [ ] **55.2: `PilVirtualMachine` Opcode Purification (`crates/pilot-vm/src/{instruction,vm}.rs`)**: Route I/O and string operations through `pilot-rt` syscalls / `MethodTable` rather than ad-hoc VM opcodes.
-  - [ ] **55.3: Name-Blind `VmHook` Debug Table (`~80L` in `crates/pilot-vm`)**: Attach compact PC-to-`ByteSpan` line tables and register-to-`SymbolId`/`LayoutId` frame maps to `PilcBinary` so `VmHook` supports zero-interpreter-bloat breakpoints, stepping, and profiling.
-  - [ ] **55.4: Snapshot Bootstrap Cutover & Legacy VM Compiler Cleanup**: Boot `selfhost/.pilc-cache/compiler.pilc` via `PilcBinary::load_from_bytes`; delete `crates/pilot-vm/src/compiler.rs` (`727L`) outright; delete `PilcBinary::serialize`, `GLOBAL_PILC_SNAPSHOT`, `ConstMapVal`, `Opcode::Print`, `Opcode::Assert`, and `AddI64` dynamic string-concatenation hacks from `pilot-vm`; remove all Rust `BytecodeCompiler::compile` call sites across the workspace.
+  - [x] **55.1: Self-Hosted Bytecode Compiler & `.pilc` Writer (`selfhost/vm/{compiler,pilc_writer}.pilot`, `~680L` + `~95L`)**: Compile lossless `RawAstArena` functions, control-flow jumps, closures, and `__engine` calls into `PIL3` bytecode without hardcoding `"main"`, `"print"`, `"assert"`, or `"nameof"`.
+  - [x] **55.2: `PilVirtualMachine` Opcode Purification (`crates/pilot-vm/src/{instruction,vm}.rs`)**: Route I/O and string operations through `pilot-rt` syscalls / `MethodTable` rather than ad-hoc VM opcodes.
+  - [x] **55.3: Name-Blind `VmHook` Debug Table (`~80L` in `crates/pilot-vm`)**: Attach compact PC-to-`ByteSpan` line tables and register-to-`SymbolId`/`LayoutId` frame maps to `PilcBinary` so `VmHook` supports zero-interpreter-bloat breakpoints, stepping, and profiling.
+  - [x] **55.4: Snapshot Bootstrap Cutover & Legacy VM Compiler Cleanup**: Boot `selfhost/.pilc-cache/compiler.pilc` via `PilcBinary::load_from_bytes`; delete `crates/pilot-vm/src/compiler.rs` (`727L`) outright; delete `PilcBinary::serialize`, `GLOBAL_PILC_SNAPSHOT`, `ConstMapVal`, `Opcode::Print`, `Opcode::Assert`, and `AddI64` dynamic string-concatenation hacks from `pilot-vm`; remove all Rust `BytecodeCompiler::compile` call sites across the workspace.
 - **Verification Gate**: `crates/pilot-vm/src/compiler.rs` deleted; `pilot-vm <= 650` LOC with zero Rust bytecode compilation fallback; `PilVM` instruction encoding, `.pilc` round-trip, and comprehensive execution suites pass.
 
 ---

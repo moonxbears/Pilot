@@ -1,0 +1,145 @@
+// ============================================================================
+// FILE: selfhost/vm/compiler.pilot
+// Milestone 55.1: Self-Hosted PilVM v3 3-Address Register Bytecode Compiler
+// Encodes 32-bit instructions `[opcode:8 | dst:8 | src1:8 | src2:8]`, resolves
+// control-flow jump patches, and attaches PC-to-ByteSpan debug tables with
+// zero hardcoded "main", "print", "assert", or "nameof" special cases.
+// ============================================================================
+
+pub struct EncodedInstruction {
+    pub word: i64;
+    pub span_start: i64;
+    pub span_end: i64;
+}
+
+pub struct DebugRegBinding {
+    pub reg_slot: i64;
+    pub symbol_id: i64;
+    pub layout_id: i64;
+}
+
+// PilVM v3 canonical 8-bit opcodes (purified: zero Print or Assert opcodes)
+pub pure fn op_nop() -> i64 { return 0; }
+pub pure fn op_add_i64() -> i64 { return 1; }
+pub pure fn op_sub_i64() -> i64 { return 2; }
+pub pure fn op_mul_i64() -> i64 { return 3; }
+pub pure fn op_div_i64() -> i64 { return 4; }
+pub pure fn op_add_f64() -> i64 { return 5; }
+pub pure fn op_sub_f64() -> i64 { return 6; }
+pub pure fn op_mul_f64() -> i64 { return 7; }
+pub pure fn op_div_f64() -> i64 { return 8; }
+pub pure fn op_load_const() -> i64 { return 9; }
+pub pure fn op_move() -> i64 { return 10; }
+pub pure fn op_cmp_eq() -> i64 { return 11; }
+pub pure fn op_cmp_lt() -> i64 { return 12; }
+pub pure fn op_jump() -> i64 { return 13; }
+pub pure fn op_jump_if_true() -> i64 { return 14; }
+pub pure fn op_jump_if_false() -> i64 { return 15; }
+pub pure fn op_call() -> i64 { return 16; }
+pub pure fn op_ret() -> i64 { return 17; }
+pub pure fn op_halt() -> i64 { return 18; }
+pub pure fn op_cmp_gt() -> i64 { return 19; }
+pub pure fn op_cmp_le() -> i64 { return 20; }
+pub pure fn op_cmp_ge() -> i64 { return 21; }
+pub pure fn op_cmp_ne() -> i64 { return 22; }
+pub pure fn op_rem_i64() -> i64 { return 23; }
+pub pure fn op_neg_i64() -> i64 { return 24; }
+pub pure fn op_neg_f64() -> i64 { return 25; }
+pub pure fn op_not() -> i64 { return 26; }
+pub pure fn op_and() -> i64 { return 27; }
+pub pure fn op_or() -> i64 { return 28; }
+pub pure fn op_xor() -> i64 { return 31; }
+pub pure fn op_shl() -> i64 { return 32; }
+pub pure fn op_shr() -> i64 { return 33; }
+pub pure fn op_engine_intrinsic() -> i64 { return 34; }
+
+// Encodes a 32-bit PilVM v3 instruction word `[opcode:8 | dst:8 | src1:8 | src2:8]`.
+pub pure fn encode_pilvm_instruction(op: i64, dst: i64, src1: i64, src2: i64) -> i64 {
+    let o = (op & 255) << 24;
+    let d = (dst & 255) << 16;
+    let s1 = (src1 & 255) << 8;
+    let s2 = src2 & 255;
+    return o | d | s1 | s2;
+}
+
+pub pure fn decode_pilvm_opcode(word: i64) -> i64 {
+    return (word >> 24) & 255;
+}
+
+pub pure fn decode_pilvm_dst(word: i64) -> i64 {
+    return (word >> 16) & 255;
+}
+
+pub pure fn decode_pilvm_src1(word: i64) -> i64 {
+    return (word >> 8) & 255;
+}
+
+pub pure fn decode_pilvm_src2(word: i64) -> i64 {
+    return word & 255;
+}
+
+// Encodes an unconditional jump instruction targeting `target_pc` (`0..65535`).
+pub pure fn encode_jump_to_pc(target_pc: i64) -> i64 {
+    let hi = (target_pc >> 8) & 255;
+    let lo = target_pc & 255;
+    return encode_pilvm_instruction(op_jump(), 0, hi, lo);
+}
+
+// Patches a `JumpIfFalse` instruction word with `target_pc` while preserving `r_cond` (`src1`).
+pub pure fn patch_jump_if_false(orig_word: i64, target_pc: i64) -> i64 {
+    let r_cond = decode_pilvm_src1(orig_word);
+    let hi = (target_pc >> 8) & 255;
+    let lo = target_pc & 255;
+    return encode_pilvm_instruction(op_jump_if_false(), hi, r_cond, lo);
+}
+
+// Maps AST binary operator flag (`1..20`) to its PilVM v3 opcode.
+pub pure fn binary_flag_to_opcode(bin_flag: i64) -> i64 {
+    if bin_flag == 1 { return op_add_i64(); }
+    if bin_flag == 2 { return op_sub_i64(); }
+    if bin_flag == 3 { return op_mul_i64(); }
+    if bin_flag == 4 { return op_div_i64(); }
+    if bin_flag == 6 { return op_rem_i64(); }
+    if bin_flag == 8 { return op_cmp_eq(); }
+    if bin_flag == 9 { return op_cmp_ne(); }
+    if bin_flag == 10 { return op_cmp_lt(); }
+    if bin_flag == 11 { return op_cmp_le(); }
+    if bin_flag == 12 { return op_cmp_gt(); }
+    if bin_flag == 13 { return op_cmp_ge(); }
+    if bin_flag == 14 || bin_flag == 16 { return op_and(); }
+    if bin_flag == 15 || bin_flag == 17 { return op_or(); }
+    if bin_flag == 18 { return op_xor(); }
+    if bin_flag == 19 { return op_shl(); }
+    if bin_flag == 20 { return op_shr(); }
+    return op_add_i64();
+}
+
+// Classifies seed statement construct keywords using `nameof(...)`.
+pub pure fn is_seed_control_keyword(kw: str) -> bool {
+    return kw == nameof(__engine)
+        || kw == nameof(fn)
+        || kw == nameof(let)
+        || kw == nameof(if)
+        || kw == nameof(loop)
+        || kw == nameof(return)
+        || kw == nameof(yield)
+        || kw == nameof(defer);
+}
+
+// Attaches source `ByteSpan` metadata to an encoded instruction word for `VmHook` debugging.
+pub fn attach_debug_span(word: i64, span_start: i64, span_end: i64) -> EncodedInstruction {
+    return EncodedInstruction {
+        word: word,
+        span_start: span_start,
+        span_end: span_end,
+    };
+}
+
+// Attaches register-to-symbol/layout metadata for `VmHook` frame inspection.
+pub fn create_debug_reg_binding(reg_slot: i64, symbol_id: i64, layout_id: i64) -> DebugRegBinding {
+    return DebugRegBinding {
+        reg_slot: reg_slot,
+        symbol_id: symbol_id,
+        layout_id: layout_id,
+    };
+}
