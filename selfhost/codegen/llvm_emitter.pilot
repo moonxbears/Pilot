@@ -2,7 +2,7 @@
 // FILE: selfhost/codegen/llvm_emitter.pilot
 // Milestone 56.3: Layout-Aware LLVM IR SSA Emitter
 // Deduces LLVM IR types strictly from `(reg_class, bit_width)` layout physics
-// and emits SSA modules, Perceus ARC declarations, and typed functions.
+// and emits SSA modules, `alloca` stack slots, branches, loops, and calls.
 // ============================================================================
 
 pub struct LlvmModuleArtifact {
@@ -63,4 +63,386 @@ pub fn build_llvm_module(
         ir_text: text,
         fn_count: fn_count,
     };
+}
+
+pub fn ll_next_tmp(st: i64) -> str {
+    let id = (__engine("map_get", st, "tid") + 0) + 1;
+    __engine("map_set", st, "tid", id);
+    return "%t" + id;
+}
+
+pub fn ll_next_lbl(st: i64) -> i64 {
+    let id = (__engine("map_get", st, "lid") + 0) + 1;
+    __engine("map_set", st, "lid", id);
+    return id;
+}
+
+pub fn ll_emit_line(st: i64, line: str) -> i64 {
+    let cur = __engine("map_get", st, "code");
+    __engine("map_set", st, "code", cur + "  " + line + "\n");
+    return 0;
+}
+
+pub fn ll_emit_label(st: i64, lbl: str) -> i64 {
+    let cur = __engine("map_get", st, "code");
+    __engine("map_set", st, "code", cur + lbl + ":\n");
+    __engine("map_set", st, "term", 0);
+    return 0;
+}
+
+pub fn ll_emit_expr(st: i64, nid: i64) -> str {
+    if nid < 0 { return "0"; }
+    let k = __engine("ast_node_kind", nid);
+    let orig = __engine("ast_orig_kind", nid);
+
+    if k == 15 {
+        let lk = __engine("ast_node_lit_kind", nid);
+        if lk == 1 {
+            return "" + __engine("ast_node_raw_bits", nid);
+        }
+        if lk == 4 {
+            if __engine("ast_node_raw_bits", nid) != 0 { return "1"; }
+            return "0";
+        }
+        return "0";
+    }
+
+    if k == 14 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
+        let tmp = ll_next_tmp(st);
+        ll_emit_line(st, tmp + " = load i64, ptr %slot_" + vname);
+        return tmp;
+    }
+
+    if orig == 206 {
+        let sub = ll_emit_expr(st, __engine("ast_child_at", nid, 0));
+        let fl = __engine("ast_node_flags", nid);
+        if fl == 0 {
+            let t0 = ll_next_tmp(st);
+            ll_emit_line(st, t0 + " = sub i64 0, " + sub);
+            return t0;
+        }
+        if fl == 4 {
+            let t1 = ll_next_tmp(st);
+            ll_emit_line(st, t1 + " = xor i64 " + sub + ", -1");
+            return t1;
+        }
+        if fl == 5 {
+            let tc = ll_next_tmp(st);
+            let tz = ll_next_tmp(st);
+            ll_emit_line(st, tc + " = icmp eq i64 " + sub + ", 0");
+            ll_emit_line(st, tz + " = zext i1 " + tc + " to i64");
+            return tz;
+        }
+        return sub;
+    }
+
+    if k == 19 {
+        let lhs = ll_emit_expr(st, __engine("ast_child_at", nid, 0));
+        let rhs = ll_emit_expr(st, __engine("ast_child_at", nid, 1));
+        let op = __engine("ast_node_raw_bits", nid);
+        if op >= 8 && op <= 13 {
+            var pred = "eq";
+            if op == 9 { pred = "ne"; }
+            else if op == 10 { pred = "slt"; }
+            else if op == 11 { pred = "sle"; }
+            else if op == 12 { pred = "sgt"; }
+            else if op == 13 { pred = "sge"; }
+            let tc = ll_next_tmp(st);
+            let tz = ll_next_tmp(st);
+            ll_emit_line(st, tc + " = icmp " + pred + " i64 " + lhs + ", " + rhs);
+            ll_emit_line(st, tz + " = zext i1 " + tc + " to i64");
+            return tz;
+        }
+        if op == 14 || op == 15 {
+            let lb = ll_next_tmp(st);
+            let rb = ll_next_tmp(st);
+            let cb = ll_next_tmp(st);
+            let cz = ll_next_tmp(st);
+            ll_emit_line(st, lb + " = icmp ne i64 " + lhs + ", 0");
+            ll_emit_line(st, rb + " = icmp ne i64 " + rhs + ", 0");
+            let lop = if op == 14 { "and" } else { "or" };
+            ll_emit_line(st, cb + " = " + lop + " i1 " + lb + ", " + rb);
+            ll_emit_line(st, cz + " = zext i1 " + cb + " to i64");
+            return cz;
+        }
+        var aop = "add";
+        if op == 2 { aop = "sub"; }
+        else if op == 3 { aop = "mul"; }
+        else if op == 4 { aop = "sdiv"; }
+        else if op == 6 { aop = "srem"; }
+        else if op == 16 { aop = "and"; }
+        else if op == 17 { aop = "or"; }
+        else if op == 18 { aop = "xor"; }
+        else if op == 19 { aop = "shl"; }
+        else if op == 20 { aop = "ashr"; }
+        let dst = ll_next_tmp(st);
+        ll_emit_line(st, dst + " = " + aop + " i64 " + lhs + ", " + rhs);
+        return dst;
+    }
+
+    if k == 16 {
+        let cname = __engine("sym_str", __engine("ast_node_sym", __engine("ast_child_at", nid, 0)));
+        let cc = __engine("ast_child_count", nid);
+        var args = "";
+        var ai = 1;
+        while ai < cc {
+            let av = ll_emit_expr(st, __engine("ast_child_at", nid, ai));
+            if ai > 1 { args = args + ", "; }
+            args = args + "i64 " + av;
+            ai = ai + 1;
+        }
+        let is_void = (__engine("map_get", st, "fn_void_" + cname) + 0) == 1;
+        if is_void {
+            ll_emit_line(st, "call void @" + cname + "(" + args + ")");
+            return "0";
+        }
+        let cr = ll_next_tmp(st);
+        ll_emit_line(st, cr + " = call i64 @" + cname + "(" + args + ")");
+        return cr;
+    }
+
+    return "0";
+}
+
+pub fn ll_emit_stmt(st: i64, nid: i64) -> i64 {
+    if nid < 0 || (__engine("map_get", st, "term") + 0) == 1 {
+        return 0;
+    }
+    let k = __engine("ast_node_kind", nid);
+    let orig = __engine("ast_orig_kind", nid);
+
+    if k == 18 {
+        let cc = __engine("ast_child_count", nid);
+        var ci = 0;
+        while ci < cc {
+            if (__engine("map_get", st, "term") + 0) == 1 {
+                return 0;
+            }
+            ll_emit_stmt(st, __engine("ast_child_at", nid, ci));
+            ci = ci + 1;
+        }
+        return 0;
+    }
+
+    if k == 4 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
+        let val = if __engine("ast_child_count", nid) > 0 {
+            ll_emit_expr(st, __engine("ast_child_at", nid, 0))
+        } else {
+            "0"
+        };
+        ll_emit_line(st, "store i64 " + val + ", ptr %slot_" + vname);
+        return 0;
+    }
+
+    if k == 20 {
+        let lhs_nid = __engine("ast_child_at", nid, 0);
+        let vname = __engine("sym_str", __engine("ast_node_sym", lhs_nid));
+        let rhs = ll_emit_expr(st, __engine("ast_child_at", nid, 1));
+        ll_emit_line(st, "store i64 " + rhs + ", ptr %slot_" + vname);
+        return 0;
+    }
+
+    if k == 6 {
+        let cv = ll_emit_expr(st, __engine("ast_child_at", nid, 0));
+        let ci1 = ll_next_tmp(st);
+        ll_emit_line(st, ci1 + " = icmp ne i64 " + cv + ", 0");
+        let id = ll_next_lbl(st);
+        let t_lbl = "if_then_" + id;
+        let e_lbl = "if_else_" + id;
+        let m_lbl = "if_end_" + id;
+        if __engine("ast_child_count", nid) >= 3 {
+            ll_emit_line(st, "br i1 " + ci1 + ", label %" + t_lbl + ", label %" + e_lbl);
+            ll_emit_label(st, t_lbl);
+            ll_emit_stmt(st, __engine("ast_child_at", nid, 1));
+            var need_merge = 0;
+            if (__engine("map_get", st, "term") + 0) == 0 {
+                ll_emit_line(st, "br label %" + m_lbl);
+                need_merge = 1;
+            }
+            ll_emit_label(st, e_lbl);
+            ll_emit_stmt(st, __engine("ast_child_at", nid, 2));
+            if (__engine("map_get", st, "term") + 0) == 0 {
+                ll_emit_line(st, "br label %" + m_lbl);
+                need_merge = 1;
+            }
+            if need_merge == 1 {
+                ll_emit_label(st, m_lbl);
+            } else {
+                __engine("map_set", st, "term", 1);
+            }
+        } else {
+            ll_emit_line(st, "br i1 " + ci1 + ", label %" + t_lbl + ", label %" + m_lbl);
+            ll_emit_label(st, t_lbl);
+            ll_emit_stmt(st, __engine("ast_child_at", nid, 1));
+            if (__engine("map_get", st, "term") + 0) == 0 {
+                ll_emit_line(st, "br label %" + m_lbl);
+            }
+            ll_emit_label(st, m_lbl);
+        }
+        return 0;
+    }
+
+    if k == 7 && orig == 106 {
+        let id = ll_next_lbl(st);
+        let c_lbl = "wh_cond_" + id;
+        let b_lbl = "wh_body_" + id;
+        let x_lbl = "wh_end_" + id;
+        ll_emit_line(st, "br label %" + c_lbl);
+        ll_emit_label(st, c_lbl);
+        let cv = ll_emit_expr(st, __engine("ast_child_at", nid, 0));
+        let ci1 = ll_next_tmp(st);
+        ll_emit_line(st, ci1 + " = icmp ne i64 " + cv + ", 0");
+        ll_emit_line(st, "br i1 " + ci1 + ", label %" + b_lbl + ", label %" + x_lbl);
+
+        let ld = (__engine("map_get", st, "ldepth") + 0) + 1;
+        __engine("map_set", st, "ldepth", ld);
+        __engine("map_set", st, "lcond_" + ld, c_lbl);
+        __engine("map_set", st, "lend_" + ld, x_lbl);
+
+        ll_emit_label(st, b_lbl);
+        ll_emit_stmt(st, __engine("ast_child_at", nid, 1));
+        if (__engine("map_get", st, "term") + 0) == 0 {
+            ll_emit_line(st, "br label %" + c_lbl);
+        }
+        __engine("map_set", st, "ldepth", ld - 1);
+        ll_emit_label(st, x_lbl);
+        return 0;
+    }
+
+    if orig == 107 {
+        let ld = __engine("map_get", st, "ldepth") + 0;
+        if ld > 0 {
+            ll_emit_line(st, "br label %" + __engine("map_get", st, "lend_" + ld));
+            __engine("map_set", st, "term", 1);
+        }
+        return 0;
+    }
+
+    if orig == 108 {
+        let ld = __engine("map_get", st, "ldepth") + 0;
+        if ld > 0 {
+            ll_emit_line(st, "br label %" + __engine("map_get", st, "lcond_" + ld));
+            __engine("map_set", st, "term", 1);
+        }
+        return 0;
+    }
+
+    if k == 8 {
+        let is_void = (__engine("map_get", st, "cur_void") + 0) == 1;
+        if is_void || __engine("ast_child_count", nid) == 0 {
+            ll_emit_line(st, "ret void");
+        } else {
+            let rv = ll_emit_expr(st, __engine("ast_child_at", nid, 0));
+            ll_emit_line(st, "ret i64 " + rv);
+        }
+        __engine("map_set", st, "term", 1);
+        return 0;
+    }
+
+    if orig == 110 && __engine("ast_child_count", nid) > 0 {
+        ll_emit_expr(st, __engine("ast_child_at", nid, 0));
+        return 0;
+    }
+
+    return 0;
+}
+
+pub fn ll_emit_fn_decl(fn_nid: i64, fn_meta: i64) -> str {
+    let fname = __engine("sym_str", __engine("ast_node_sym", fn_nid));
+    let rty_name = cg_fn_return_type_name(fn_nid);
+    let rdesc = cg_resolve_type_physics(rty_name);
+    let is_void = rdesc.reg_class == 0 || rdesc.reg_class == 1;
+    let ret_ll = if is_void { "void" } else { "i64" };
+
+    let st = __engine("map_new");
+    __engine("map_set", st, "code", "");
+    __engine("map_set", st, "tid", 0);
+    __engine("map_set", st, "lid", 0);
+    __engine("map_set", st, "term", 0);
+    __engine("map_set", st, "ldepth", 0);
+    __engine("map_set", st, "cur_void", if is_void { 1 } else { 0 });
+
+    let fcnt = __engine("map_get", fn_meta, "fcnt") + 0;
+    var fi = 0;
+    while fi < fcnt {
+        let nm = __engine("map_get", fn_meta, "fname_" + fi);
+        let vd = __engine("map_get", fn_meta, "fvoid_" + fi) + 0;
+        __engine("map_set", st, "fn_void_" + nm, vd);
+        fi = fi + 1;
+    }
+
+    let cc = __engine("ast_child_count", fn_nid);
+    var psig = "";
+    var pi = 1;
+    while pi < cc {
+        let p_nid = __engine("ast_child_at", fn_nid, pi);
+        if __engine("ast_node_kind", p_nid) == 21 {
+            let pname = __engine("sym_str", __engine("ast_node_sym", p_nid));
+            if __engine("str_len", psig) > 0 { psig = psig + ", "; }
+            psig = psig + "i64 %arg_" + pname;
+            __engine("map_set", st, "lseen_" + pname, 1);
+            ll_emit_line(st, "%slot_" + pname + " = alloca i64");
+            ll_emit_line(st, "store i64 %arg_" + pname + ", ptr %slot_" + pname);
+        }
+        pi = pi + 1;
+    }
+
+    let body_nid = __engine("ast_child_at", fn_nid, 0);
+    __engine("map_set", st, "lcnt", 0);
+    let lcnt = cg_collect_fn_locals(body_nid, st);
+    var li = 0;
+    while li < lcnt {
+        let lv = __engine("map_get", st, "lname_" + li);
+        ll_emit_line(st, "%slot_" + lv + " = alloca i64");
+        li = li + 1;
+    }
+
+    ll_emit_stmt(st, body_nid);
+    if (__engine("map_get", st, "term") + 0) == 0 {
+        if is_void {
+            ll_emit_line(st, "ret void");
+        } else {
+            ll_emit_line(st, "ret i64 0");
+        }
+    }
+
+    return "define " + ret_ll + " @" + fname + "(" + psig + ") {\nentry:\n"
+        + __engine("map_get", st, "code") + "}\n\n";
+}
+
+// Emits a valid typed LLVM IR SSA module for all functions in `RawAstArena`.
+pub fn emit_arena_llvm_ir() -> str {
+    let prog = cg_target_prog_nid();
+    let meta = __engine("map_new");
+    __engine("map_set", meta, "fcnt", 0);
+
+    if prog >= 0 {
+        let cc = __engine("ast_child_count", prog);
+        var ci = 0;
+        while ci < cc {
+            let item = __engine("ast_child_at", prog, ci);
+            if __engine("ast_node_kind", item) == 3 && (__engine("ast_decl_flags", item) & 256) == 0 {
+                let nm = __engine("sym_str", __engine("ast_node_sym", item));
+                let rdesc = cg_resolve_type_physics(cg_fn_return_type_name(item));
+                let idx = __engine("map_get", meta, "fcnt") + 0;
+                __engine("map_set", meta, "fname_" + idx, nm);
+                __engine("map_set", meta, "fvoid_" + idx, if rdesc.reg_class == 0 || rdesc.reg_class == 1 { 1 } else { 0 });
+                __engine("map_set", meta, "fnid_" + idx, item);
+                __engine("map_set", meta, "fcnt", idx + 1);
+            }
+            ci = ci + 1;
+        }
+    }
+
+    var defs = "";
+    let fcnt = __engine("map_get", meta, "fcnt") + 0;
+    var fi = 0;
+    while fi < fcnt {
+        defs = defs + ll_emit_fn_decl(__engine("map_get", meta, "fnid_" + fi) + 0, meta);
+        fi = fi + 1;
+    }
+
+    return emit_llvm_module_header("arena_module") + defs;
 }

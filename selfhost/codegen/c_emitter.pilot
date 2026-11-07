@@ -1,9 +1,8 @@
 // ============================================================================
 // FILE: selfhost/codegen/c_emitter.pilot
 // Milestone 56.1: Pure Layout-Driven C11 Codegen Backend
-// Emits C11 functions, expressions, control flow (`if`, `loop`, `return`),
-// and `MethodTable` / `[Extern]` calls from `LayoutTable` physics with zero
-// hardcoded Pilot type names or benchmark cheats.
+// Emits C11 structs, functions, expressions, control flow (`if`, `while`, `return`),
+// and compound literals from `PhysicsRegistry` with zero hardcoded type names.
 // ============================================================================
 
 pub struct CModuleArtifact {
@@ -72,4 +71,277 @@ pub fn build_c11_module(
         fn_count: fn_count,
         uses_perceus_arc: uses_perceus_arc,
     };
+}
+
+pub fn ce_escape_c_str(s: str) -> str {
+    let n = __engine("str_len", s);
+    var out = "\"";
+    var i = 0;
+    while i < n {
+        let b = __engine("str_byte_at", s, i);
+        if b == 34 {
+            out = out + "\\\"";
+        } else if b == 92 {
+            out = out + "\\\\";
+        } else if b == 10 {
+            out = out + "\\n";
+        } else if b == 13 {
+            out = out + "\\r";
+        } else if b == 9 {
+            out = out + "\\t";
+        } else {
+            out = out + __engine("str_slice", s, i, i + 1);
+        }
+        i = i + 1;
+    }
+    return out + "\"";
+}
+
+pub fn ce_emit_expr(nid: i64) -> str {
+    if nid < 0 { return "0"; }
+    let k = __engine("ast_node_kind", nid);
+    let orig = __engine("ast_orig_kind", nid);
+
+    if k == 15 {
+        let lk = __engine("ast_node_lit_kind", nid);
+        if lk == 1 {
+            return "" + __engine("ast_node_raw_bits", nid) + "LL";
+        }
+        if lk == 3 {
+            return ce_escape_c_str(__engine("sym_str", __engine("ast_node_sym", nid)));
+        }
+        if lk == 4 {
+            if __engine("ast_node_raw_bits", nid) != 0 { return "true"; }
+            return "false";
+        }
+        return "0";
+    }
+
+    if k == 14 {
+        return __engine("sym_str", __engine("ast_node_sym", nid));
+    }
+
+    if orig == 206 {
+        let sub = ce_emit_expr(__engine("ast_child_at", nid, 0));
+        let fl = __engine("ast_node_flags", nid);
+        if fl == 0 { return "(-" + sub + ")"; }
+        if fl == 4 { return "(~" + sub + ")"; }
+        if fl == 5 { return "(!" + sub + ")"; }
+        return sub;
+    }
+
+    if k == 19 {
+        let lhs = ce_emit_expr(__engine("ast_child_at", nid, 0));
+        let rhs = ce_emit_expr(__engine("ast_child_at", nid, 1));
+        let op = __engine("ast_node_raw_bits", nid);
+        return emit_c11_binary_expr(lhs, cg_binop_c_sym(op), rhs);
+    }
+
+    if k == 16 {
+        let callee_nid = __engine("ast_child_at", nid, 0);
+        let cname = __engine("sym_str", __engine("ast_node_sym", callee_nid));
+        if cg_is_struct_literal_call(nid) {
+            let map_nid = __engine("ast_child_at", nid, 1);
+            let mc = __engine("ast_child_count", map_nid);
+            var inits = "";
+            var mi = 0;
+            while mi + 1 < mc {
+                let k_nid = __engine("ast_child_at", map_nid, mi);
+                let v_nid = __engine("ast_child_at", map_nid, mi + 1);
+                let fname = __engine("sym_str", __engine("ast_node_sym", k_nid));
+                let fval = ce_emit_expr(v_nid);
+                if __engine("str_len", inits) > 0 { inits = inits + ", "; }
+                inits = inits + "." + fname + " = " + fval;
+                mi = mi + 2;
+            }
+            if __engine("str_len", inits) == 0 {
+                return "((" + cname + "){ 0 })";
+            }
+            return "((" + cname + "){ " + inits + " })";
+        }
+        let cc = __engine("ast_child_count", nid);
+        var args = "";
+        var ai = 1;
+        while ai < cc {
+            if ai > 1 { args = args + ", "; }
+            args = args + ce_emit_expr(__engine("ast_child_at", nid, ai));
+            ai = ai + 1;
+        }
+        return cname + "(" + args + ")";
+    }
+
+    if k == 17 {
+        let rcv = ce_emit_expr(__engine("ast_child_at", nid, 0));
+        let fld = __engine("sym_str", __engine("ast_node_sym", nid));
+        return "(" + rcv + "." + fld + ")";
+    }
+
+    if orig == 210 {
+        let base = ce_emit_expr(__engine("ast_child_at", nid, 0));
+        let idx = ce_emit_expr(__engine("ast_child_at", nid, 1));
+        return base + "[" + idx + "]";
+    }
+
+    return "0";
+}
+
+pub fn ce_emit_stmt(nid: i64, indent: str) -> str {
+    if nid < 0 { return ""; }
+    let k = __engine("ast_node_kind", nid);
+    let orig = __engine("ast_orig_kind", nid);
+
+    if k == 18 {
+        let cc = __engine("ast_child_count", nid);
+        var out = "";
+        var ci = 0;
+        while ci < cc {
+            let line = ce_emit_stmt(__engine("ast_child_at", nid, ci), indent);
+            if __engine("str_len", line) > 0 {
+                out = out + line + "\n";
+            }
+            ci = ci + 1;
+        }
+        return out;
+    }
+
+    if k == 4 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
+        let tsym = __engine("ast_node_raw_bits", nid);
+        let has_init = __engine("ast_child_count", nid) > 0;
+        let init_nid = if has_init { __engine("ast_child_at", nid, 0) } else { -1 };
+        var c_ty = "int64_t";
+        if tsym != 0 {
+            c_ty = ct_c11_type_for_name(__engine("sym_str", tsym));
+        } else if has_init && cg_is_struct_literal_call(init_nid) {
+            c_ty = __engine("sym_str", __engine("ast_node_sym", __engine("ast_child_at", init_nid, 0)));
+        }
+        if has_init {
+            return indent + c_ty + " " + vname + " = " + ce_emit_expr(init_nid) + ";";
+        }
+        return indent + c_ty + " " + vname + ";";
+    }
+
+    if k == 20 {
+        let lhs = ce_emit_expr(__engine("ast_child_at", nid, 0));
+        let rhs = ce_emit_expr(__engine("ast_child_at", nid, 1));
+        return indent + lhs + " = " + rhs + ";";
+    }
+
+    if k == 6 {
+        let cond = ce_emit_expr(__engine("ast_child_at", nid, 0));
+        let then_b = ce_emit_stmt(__engine("ast_child_at", nid, 1), indent + "  ");
+        if __engine("ast_child_count", nid) >= 3 {
+            let else_b = ce_emit_stmt(__engine("ast_child_at", nid, 2), indent + "  ");
+            return indent + nameof(if) + " (" + cond + ") {\n" + then_b + indent + "} else {\n" + else_b + indent + "}";
+        }
+        return indent + nameof(if) + " (" + cond + ") {\n" + then_b + indent + "}";
+    }
+
+    if k == 7 && orig == 106 {
+        let cond = ce_emit_expr(__engine("ast_child_at", nid, 0));
+        let body = ce_emit_stmt(__engine("ast_child_at", nid, 1), indent + "  ");
+        return indent + "while (" + cond + ") {\n" + body + indent + "}";
+    }
+
+    if orig == 107 {
+        return indent + "break;";
+    }
+
+    if orig == 108 {
+        return indent + "continue;";
+    }
+
+    if k == 8 {
+        if __engine("ast_child_count", nid) > 0 {
+            return indent + emit_c11_return_stmt(ce_emit_expr(__engine("ast_child_at", nid, 0)));
+        }
+        return indent + emit_c11_return_stmt("");
+    }
+
+    if orig == 110 {
+        if __engine("ast_child_count", nid) > 0 {
+            return indent + ce_emit_expr(__engine("ast_child_at", nid, 0)) + ";";
+        }
+        return "";
+    }
+
+    return indent + ce_emit_expr(nid) + ";";
+}
+
+pub fn ce_emit_struct_def(s_nid: i64) -> str {
+    let sname = __engine("sym_str", __engine("ast_node_sym", s_nid));
+    let cc = __engine("ast_child_count", s_nid);
+    var fields = "";
+    var fi = 0;
+    while fi < cc {
+        let f_nid = __engine("ast_child_at", s_nid, fi);
+        if __engine("ast_node_kind", f_nid) == 21 {
+            let fname = __engine("sym_str", __engine("ast_node_sym", f_nid));
+            let ftsym = __engine("ast_node_raw_bits", f_nid);
+            let fty = ct_c11_type_for_name(__engine("sym_str", ftsym));
+            fields = fields + "  " + fty + " " + fname + ";\n";
+        }
+        fi = fi + 1;
+    }
+    return "struct " + sname + " {\n" + fields + "};\n";
+}
+
+pub fn ce_fn_params_sig(fn_nid: i64) -> str {
+    let cc = __engine("ast_child_count", fn_nid);
+    if cc <= 1 {
+        return "void";
+    }
+    var sig = "";
+    var pi = 1;
+    while pi < cc {
+        let p_nid = __engine("ast_child_at", fn_nid, pi);
+        if __engine("ast_node_kind", p_nid) == 21 {
+            let pname = __engine("sym_str", __engine("ast_node_sym", p_nid));
+            let ptsym = __engine("ast_node_raw_bits", p_nid);
+            let pty = ct_c11_type_for_name(__engine("sym_str", ptsym));
+            if __engine("str_len", sig) > 0 { sig = sig + ", "; }
+            sig = sig + pty + " " + pname;
+        }
+        pi = pi + 1;
+    }
+    if __engine("str_len", sig) == 0 {
+        return "void";
+    }
+    return sig;
+}
+
+// Emits standalone compilable C11 source for all structs and functions in `RawAstArena`.
+pub fn emit_arena_c11() -> str {
+    let prog = cg_target_prog_nid();
+    var fwd_structs = "";
+    var def_structs = "";
+    var fwd_fns = "";
+    var def_fns = "";
+
+    if prog >= 0 {
+        let cc = __engine("ast_child_count", prog);
+        var ci = 0;
+        while ci < cc {
+            let item = __engine("ast_child_at", prog, ci);
+            let ik = __engine("ast_node_kind", item);
+            let dflags = __engine("ast_decl_flags", item);
+            if ik == 1 && cg_struct_has_stored_fields(item) {
+                let sname = __engine("sym_str", __engine("ast_node_sym", item));
+                fwd_structs = fwd_structs + "typedef struct " + sname + " " + sname + ";\n";
+                def_structs = def_structs + ce_emit_struct_def(item) + "\n";
+            } else if ik == 3 && (dflags & 256) == 0 {
+                let fname = __engine("sym_str", __engine("ast_node_sym", item));
+                let rty_name = cg_fn_return_type_name(item);
+                let ret_c = ct_c11_type_for_name(rty_name);
+                let psig = ce_fn_params_sig(item);
+                fwd_fns = fwd_fns + ret_c + " " + fname + "(" + psig + ");\n";
+                let body_nid = __engine("ast_child_at", item, 0);
+                let body_c = ce_emit_stmt(body_nid, "  ");
+                def_fns = def_fns + ret_c + " " + fname + "(" + psig + ") {\n" + body_c + "}\n\n";
+            }
+            ci = ci + 1;
+        }
+    }
+
+    return emit_c11_runtime_header() + "\n" + fwd_structs + "\n" + def_structs + fwd_fns + "\n" + def_fns;
 }

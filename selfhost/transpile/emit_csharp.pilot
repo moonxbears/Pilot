@@ -8,14 +8,20 @@
 pub pure fn csharp_type_for_physics(reg_class: i64, bit_width: i64) -> str {
     if reg_class == 0 || reg_class == 1 { return "void"; }
     if reg_class == 2 {
+        if bit_width <= 8 { return "sbyte"; }
+        if bit_width <= 16 { return "short"; }
         if bit_width <= 32 { return "int"; }
         return "long";
     }
     if reg_class == 3 {
         if bit_width == 1 { return "bool"; }
+        if bit_width <= 8 { return "byte"; }
+        if bit_width <= 16 { return "ushort"; }
+        if bit_width <= 32 { return "uint"; }
         return "ulong";
     }
     if reg_class == 4 {
+        if bit_width <= 32 { return "float"; }
         return "double";
     }
     return "string";
@@ -38,4 +44,243 @@ pub pure fn emit_csharp_function_source(
         + "        " + nameof(return) + " " + body_expr + ";\n"
         + "    }\n"
         + "}\n";
+}
+
+pub fn tcs_map_type_name(type_name: str) -> str {
+    if __engine("str_len", type_name) == 0 {
+        return "void";
+    }
+    let ph = tir_resolve_type_physics(type_name);
+    if ph.reg_class == 7 {
+        return type_name;
+    }
+    return csharp_type_for_physics(ph.reg_class, ph.bit_width);
+}
+
+pub fn tcs_emit_expr(nid: i64) -> str {
+    if nid < 0 { return "0"; }
+    let k = __engine("ast_node_kind", nid);
+    let ok = __engine("ast_orig_kind", nid);
+
+    if k == 14 {
+        return __engine("sym_str", __engine("ast_node_sym", nid));
+    }
+    if k == 15 {
+        let lk = __engine("ast_node_lit_kind", nid);
+        if lk == 1 {
+            return "" + __engine("ast_node_raw_bits", nid);
+        }
+        if lk == 2 {
+            return __engine("source_slice", __engine("ast_span_start", nid), __engine("ast_span_end", nid));
+        }
+        if lk == 3 {
+            return tir_escape_str_lit(__engine("sym_str", __engine("ast_node_sym", nid)));
+        }
+        if lk == 4 {
+            if __engine("ast_node_raw_bits", nid) != 0 { return "true"; }
+            return "false";
+        }
+        return "0";
+    }
+    if ok == 206 {
+        let inner = tcs_emit_expr(__engine("ast_child_at", nid, 0));
+        let fl = __engine("ast_node_flags", nid);
+        if fl == 5 { return "(!" + inner + ")"; }
+        if fl == 4 { return "(~" + inner + ")"; }
+        return "(-" + inner + ")";
+    }
+    if k == 19 {
+        let op = __engine("ast_node_raw_bits", nid);
+        let lhs = tcs_emit_expr(__engine("ast_child_at", nid, 0));
+        let rhs = tcs_emit_expr(__engine("ast_child_at", nid, 1));
+        return "(" + lhs + " " + tir_binop_sym(op) + " " + rhs + ")";
+    }
+    if k == 16 {
+        let cc = __engine("ast_child_count", nid);
+        if cc <= 0 { return "0"; }
+        let callee_nid = __engine("ast_child_at", nid, 0);
+        let cname = __engine("sym_str", __engine("ast_node_sym", callee_nid));
+        if tir_is_struct_literal_call(nid) {
+            let map_nid = __engine("ast_child_at", nid, 1);
+            let mcc = __engine("ast_child_count", map_nid);
+            var fields_s = "";
+            var mi = 0;
+            while mi + 1 < mcc {
+                let k_nid = __engine("ast_child_at", map_nid, mi);
+                let v_nid = __engine("ast_child_at", map_nid, mi + 1);
+                let fname = __engine("sym_str", __engine("ast_node_sym", k_nid));
+                if __engine("str_len", fields_s) > 0 {
+                    fields_s = fields_s + ", ";
+                }
+                fields_s = fields_s + fname + " = " + tcs_emit_expr(v_nid);
+                mi = mi + 2;
+            }
+            return "new " + cname + " { " + fields_s + " }";
+        }
+        var args_s = "";
+        var ai = 1;
+        while ai < cc {
+            if ai > 1 { args_s = args_s + ", "; }
+            args_s = args_s + tcs_emit_expr(__engine("ast_child_at", nid, ai));
+            ai = ai + 1;
+        }
+        return cname + "(" + args_s + ")";
+    }
+    if k == 17 {
+        let recv = tcs_emit_expr(__engine("ast_child_at", nid, 0));
+        let fld = __engine("sym_str", __engine("ast_node_sym", nid));
+        return recv + "." + fld;
+    }
+    if ok == 210 {
+        let base_e = tcs_emit_expr(__engine("ast_child_at", nid, 0));
+        let idx_e = tcs_emit_expr(__engine("ast_child_at", nid, 1));
+        return base_e + "[" + idx_e + "]";
+    }
+    return "0";
+}
+
+pub fn tcs_emit_block_body(blk_nid: i64, depth: i64) -> str {
+    if blk_nid < 0 { return ""; }
+    if __engine("ast_node_kind", blk_nid) != 18 {
+        return tcs_emit_stmt(blk_nid, depth);
+    }
+    let cc = __engine("ast_child_count", blk_nid);
+    var out = "";
+    var i = 0;
+    while i < cc {
+        out = out + tcs_emit_stmt(__engine("ast_child_at", blk_nid, i), depth);
+        i = i + 1;
+    }
+    return out;
+}
+
+pub fn tcs_emit_stmt(nid: i64, depth: i64) -> str {
+    if nid < 0 { return ""; }
+    let k = __engine("ast_node_kind", nid);
+    let ok = __engine("ast_orig_kind", nid);
+    let ind = tir_indent_spaces(depth);
+
+    if k == 18 {
+        return tcs_emit_block_body(nid, depth);
+    }
+    if k == 4 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
+        let tsym = __engine("ast_node_raw_bits", nid);
+        var vty = "var";
+        if tsym != 0 {
+            let tname = __engine("sym_str", tsym);
+            if __engine("str_len", tname) > 0 {
+                vty = tcs_map_type_name(tname);
+            }
+        }
+        let init_s = if __engine("ast_child_count", nid) > 0 {
+            tcs_emit_expr(__engine("ast_child_at", nid, 0))
+        } else {
+            "0"
+        };
+        return ind + vty + " " + vname + " = " + init_s + ";\n";
+    }
+    if k == 20 {
+        let lhs = tcs_emit_expr(__engine("ast_child_at", nid, 0));
+        let rhs = tcs_emit_expr(__engine("ast_child_at", nid, 1));
+        return ind + lhs + " = " + rhs + ";\n";
+    }
+    if k == 6 {
+        let cond_s = tcs_emit_expr(__engine("ast_child_at", nid, 0));
+        let then_s = tcs_emit_block_body(__engine("ast_child_at", nid, 1), depth + 1);
+        var res = ind + "if (" + cond_s + ") {\n" + then_s + ind + "}";
+        if __engine("ast_child_count", nid) >= 3 {
+            let else_s = tcs_emit_block_body(__engine("ast_child_at", nid, 2), depth + 1);
+            res = res + " else {\n" + else_s + ind + "}";
+        }
+        return res + "\n";
+    }
+    if k == 7 || ok == 106 {
+        if ok == 105 {
+            let lbody = tcs_emit_block_body(__engine("ast_child_at", nid, 0), depth + 1);
+            return ind + "while (true) {\n" + lbody + ind + "}\n";
+        }
+        let wcond = tcs_emit_expr(__engine("ast_child_at", nid, 0));
+        let wbody = tcs_emit_block_body(__engine("ast_child_at", nid, 1), depth + 1);
+        return ind + "while (" + wcond + ") {\n" + wbody + ind + "}\n";
+    }
+    if ok == 107 { return ind + "break;\n"; }
+    if ok == 108 { return ind + "continue;\n"; }
+    if k == 8 {
+        if __engine("ast_child_count", nid) > 0 {
+            return ind + "return " + tcs_emit_expr(__engine("ast_child_at", nid, 0)) + ";\n";
+        }
+        return ind + "return;\n";
+    }
+    if ok == 110 {
+        if __engine("ast_child_count", nid) > 0 {
+            return ind + tcs_emit_expr(__engine("ast_child_at", nid, 0)) + ";\n";
+        }
+        return "";
+    }
+    return ind + tcs_emit_expr(nid) + ";\n";
+}
+
+pub fn transpile_arena_to_csharp() -> str {
+    let prog = tir_target_prog_nid();
+    if prog < 0 { return ""; }
+    let cc = __engine("ast_child_count", prog);
+    var out = "using System;\n\n";
+
+    // 1. Emit composite value structs
+    var i = 0;
+    while i < cc {
+        let ch = __engine("ast_child_at", prog, i);
+        if __engine("ast_node_kind", ch) == 1 && tir_struct_has_stored_fields(ch) {
+            let sname = __engine("sym_str", __engine("ast_node_sym", ch));
+            out = out + "public struct " + sname + " {\n";
+            let fcc = __engine("ast_child_count", ch);
+            var fi = 0;
+            while fi < fcc {
+                let fch = __engine("ast_child_at", ch, fi);
+                if __engine("ast_node_kind", fch) == 21 {
+                    let fname = __engine("sym_str", __engine("ast_node_sym", fch));
+                    let fty = tcs_map_type_name(__engine("sym_str", __engine("ast_node_raw_bits", fch)));
+                    out = out + "    public " + fty + " " + fname + ";\n";
+                }
+                fi = fi + 1;
+            }
+            out = out + "}\n\n";
+        }
+        i = i + 1;
+    }
+
+    // 2. Emit static module class with lowered static methods
+    out = out + "public static class PilotTranspiledModule {\n";
+    i = 0;
+    while i < cc {
+        let fn_nid = __engine("ast_child_at", prog, i);
+        if __engine("ast_node_kind", fn_nid) == 3 && (__engine("ast_decl_flags", fn_nid) & 256) == 0 {
+            let fname = __engine("sym_str", __engine("ast_node_sym", fn_nid));
+            let rty = tcs_map_type_name(tir_fn_return_type_name(fn_nid));
+            let fcc = __engine("ast_child_count", fn_nid);
+            var params_s = "";
+            var pi = 1;
+            while pi < fcc {
+                let pch = __engine("ast_child_at", fn_nid, pi);
+                if __engine("ast_node_kind", pch) == 21 {
+                    let pname = __engine("sym_str", __engine("ast_node_sym", pch));
+                    let pty = tcs_map_type_name(__engine("sym_str", __engine("ast_node_raw_bits", pch)));
+                    if __engine("str_len", params_s) > 0 { params_s = params_s + ", "; }
+                    params_s = params_s + pty + " " + pname;
+                }
+                pi = pi + 1;
+            }
+            let body_s = if fcc > 0 {
+                tcs_emit_block_body(__engine("ast_child_at", fn_nid, 0), 2)
+            } else {
+                ""
+            };
+            out = out + "    public static " + rty + " " + fname + "(" + params_s + ") {\n" + body_s + "    }\n\n";
+        }
+        i = i + 1;
+    }
+    out = out + "}\n";
+
+    return out;
 }

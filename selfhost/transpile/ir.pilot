@@ -32,6 +32,13 @@ pub struct IrStructFieldDescriptor {
     pub bit_width: i64;
 }
 
+pub struct IrLayoutPhysics {
+    pub reg_class: i64;
+    pub bit_width: i64;
+    pub lanes: i64;
+    pub field_count: i64;
+}
+
 // Classifies an IR type category strictly from `(reg_class, bit_width)` physics:
 // 0=void, 1=signed_int, 2=unsigned_int, 3=bool, 4=float, 5=pointer/str, 6=struct
 pub pure fn classify_ir_physics(reg_class: i64, bit_width: i64) -> i64 {
@@ -95,4 +102,229 @@ pub pure fn is_transpilable_seed_construct(kw: str) -> bool {
         || kw == nameof(if)
         || kw == nameof(loop)
         || kw == nameof(return);
+}
+
+pub pure fn tir_is_ident_byte(b: i64) -> bool {
+    return (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 95;
+}
+
+pub pure fn tir_indent_spaces(depth: i64) -> str {
+    var out = "";
+    var d = 0;
+    while d < depth {
+        out = out + "    ";
+        d = d + 1;
+    }
+    return out;
+}
+
+// Finds the primary user `Program` root node (skipping mounted bootstrap declarations).
+pub fn tir_target_prog_nid() -> i64 {
+    let total = __engine("ast_node_count");
+    var i = 0;
+    while i < total {
+        if __engine("ast_orig_kind", i) == 0 && __engine("ast_span_start", i) < 4000000000 {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// Finds a `StructDecl` (`kind_tag == 1`) matching `type_name`, preferring user declarations.
+pub fn tir_find_struct_by_name(type_name: str) -> i64 {
+    if __engine("str_len", type_name) <= 0 {
+        return -1;
+    }
+    let total = __engine("ast_node_count");
+    var i = 0;
+    while i < total {
+        if __engine("ast_node_kind", i) == 1 && __engine("ast_span_start", i) < 4000000000 {
+            if __engine("sym_str", __engine("ast_node_sym", i)) == type_name {
+                return i;
+            }
+        }
+        i = i + 1;
+    }
+    i = 0;
+    while i < total {
+        if __engine("ast_node_kind", i) == 1 {
+            if __engine("sym_str", __engine("ast_node_sym", i)) == type_name {
+                return i;
+            }
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// Returns true iff `s_nid` declares one or more stored aggregate fields (`kind_tag == 21` or `4`).
+pub fn tir_struct_has_stored_fields(s_nid: i64) -> bool {
+    if s_nid < 0 { return false; }
+    let my_sym = __engine("ast_node_sym", s_nid);
+    let cc = __engine("ast_child_count", s_nid);
+    var i = 0;
+    while i < cc {
+        let ch = __engine("ast_child_at", s_nid, i);
+        let fk = __engine("ast_node_kind", ch);
+        if fk == 21 || fk == 4 {
+            if __engine("ast_node_raw_bits", ch) != my_sym {
+                return true;
+            }
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// Resolves `(reg_class, bit_width, lanes, field_count)` strictly from `[Bits(...)]` & field anatomy.
+pub fn tir_resolve_type_physics(type_name: str) -> IrLayoutPhysics {
+    if __engine("str_len", type_name) == 0 {
+        return IrLayoutPhysics { reg_class: 0, bit_width: 0, lanes: 1, field_count: 0 };
+    }
+    let s_nid = tir_find_struct_by_name(type_name);
+    if s_nid >= 0 {
+        if !tir_struct_has_stored_fields(s_nid) {
+            let decl_cnt = __engine("ast_attr_decl_count", s_nid);
+            var matched = -1;
+            var di = 0;
+            while di < decl_cnt {
+                let argc = __engine("ast_attr_decl_arg_count", s_nid, di);
+                if argc == 2 || argc == 3 {
+                    let aname = __engine("sym_str", __engine("ast_attr_name", s_nid, di));
+                    if matched < 0 || aname == "Bits" {
+                        matched = di;
+                    }
+                }
+                di = di + 1;
+            }
+            if matched >= 0 {
+                let argc2 = __engine("ast_attr_decl_arg_count", s_nid, matched);
+                let w = __engine("ast_attr_decl_arg", s_nid, matched, 0);
+                var lanes = 1;
+                var bank = __engine("ast_attr_decl_arg", s_nid, matched, 1);
+                if argc2 == 3 {
+                    lanes = bank;
+                    bank = __engine("ast_attr_decl_arg", s_nid, matched, 2);
+                }
+                return IrLayoutPhysics { reg_class: bank, bit_width: w, lanes: lanes, field_count: 0 };
+            }
+            let flat_cnt = __engine("ast_attr_count", s_nid);
+            if flat_cnt >= 2 {
+                let w0 = __engine("ast_attr_arg", s_nid, 0);
+                var ln0 = 1;
+                var bk0 = __engine("ast_attr_arg", s_nid, 1);
+                if flat_cnt >= 3 {
+                    ln0 = bk0;
+                    bk0 = __engine("ast_attr_arg", s_nid, 2);
+                }
+                return IrLayoutPhysics { reg_class: bk0, bit_width: w0, lanes: ln0, field_count: 0 };
+            }
+            return IrLayoutPhysics { reg_class: 0, bit_width: 0, lanes: 1, field_count: 0 };
+        }
+        let cc = __engine("ast_child_count", s_nid);
+        var fcnt = 0;
+        var fi = 0;
+        while fi < cc {
+            let fch = __engine("ast_child_at", s_nid, fi);
+            if __engine("ast_node_kind", fch) == 21 {
+                fcnt = fcnt + 1;
+            }
+            fi = fi + 1;
+        }
+        return IrLayoutPhysics { reg_class: 7, bit_width: fcnt * 64, lanes: 1, field_count: fcnt };
+    }
+    return IrLayoutPhysics { reg_class: 2, bit_width: 64, lanes: 1, field_count: 0 };
+}
+
+// Extracts the return type identifier after `->` in `FnDecl` signature header (or `""` for unit).
+pub fn tir_fn_return_type_name(fn_nid: i64) -> str {
+    let s0 = __engine("ast_span_start", fn_nid);
+    var s1 = __engine("ast_span_end", fn_nid);
+    if __engine("ast_child_count", fn_nid) > 0 {
+        let body_s = __engine("ast_span_start", __engine("ast_child_at", fn_nid, 0));
+        if body_s > s0 && body_s < s1 {
+            s1 = body_s;
+        }
+    }
+    let hdr = __engine("source_slice", s0, s1);
+    let n = __engine("str_len", hdr);
+    var pdepth = 0;
+    var i = 0;
+    while i + 1 < n {
+        let b = __engine("str_byte_at", hdr, i);
+        if b == 40 {
+            pdepth = pdepth + 1;
+        } else if b == 41 {
+            if pdepth > 0 { pdepth = pdepth - 1; }
+        } else if pdepth == 0 && b == 45 && __engine("str_byte_at", hdr, i + 1) == 62 {
+            var j = i + 2;
+            while j < n && __engine("str_byte_at", hdr, j) <= 32 {
+                j = j + 1;
+            }
+            let t_start = j;
+            while j < n && tir_is_ident_byte(__engine("str_byte_at", hdr, j)) {
+                j = j + 1;
+            }
+            if j > t_start {
+                return __engine("str_slice", hdr, t_start, j);
+            }
+            return "";
+        }
+        i = i + 1;
+    }
+    return "";
+}
+
+pub fn tir_is_struct_literal_call(nid: i64) -> bool {
+    if __engine("ast_node_kind", nid) != 16 || __engine("ast_child_count", nid) != 2 {
+        return false;
+    }
+    return __engine("ast_orig_kind", __engine("ast_child_at", nid, 1)) == 219;
+}
+
+pub pure fn tir_binop_sym(op: i64) -> str {
+    if op == 1 { return "+"; }
+    if op == 2 { return "-"; }
+    if op == 3 { return "*"; }
+    if op == 4 { return "/"; }
+    if op == 6 { return "%"; }
+    if op == 8 { return "=="; }
+    if op == 9 { return "!="; }
+    if op == 10 { return "<"; }
+    if op == 11 { return "<="; }
+    if op == 12 { return ">"; }
+    if op == 13 { return ">="; }
+    if op == 14 { return "&&"; }
+    if op == 15 { return "||"; }
+    if op == 16 { return "&"; }
+    if op == 17 { return "|"; }
+    if op == 18 { return "^"; }
+    if op == 19 { return "<<"; }
+    if op == 20 { return ">>"; }
+    return "+";
+}
+
+pub fn tir_escape_str_lit(raw_s: str) -> str {
+    let n = __engine("str_len", raw_s);
+    var out = "\"";
+    var i = 0;
+    while i < n {
+        let b = __engine("str_byte_at", raw_s, i);
+        if b == 34 {
+            out = out + "\\\"";
+        } else if b == 92 {
+            out = out + "\\\\";
+        } else if b == 10 {
+            out = out + "\\n";
+        } else if b == 13 {
+            out = out + "\\r";
+        } else if b == 9 {
+            out = out + "\\t";
+        } else {
+            out = out + __engine("str_slice", raw_s, i, i + 1);
+        }
+        i = i + 1;
+    }
+    return out + "\"";
 }

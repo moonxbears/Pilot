@@ -1,9 +1,10 @@
 // ============================================================================
 // FILE: selfhost/transpile/ingest.pilot
 // Milestone 57.3: Canonical Foreign AST Ingesters (`pilot --from <lang>`)
-// Converts foreign source constructs (Rust, Python, JS, C#, C/C++, Lua) into
-// canonical Pilot (`fn`, `struct`, `self()`, `var`, `switch` — never `def` or
-// `class`), using `nameof(...)` for Pilot seed keywords.
+// Converts raw foreign source code (Python, Rust, JS, C#, C/C++, Lua) into
+// executable canonical Pilot (`pub fn`, `var`, `{ ... }`, `;` — never `def`,
+// `class`, `let mut`, `function`, `elseif`, `===`, or `local`), using `nameof`
+// for Pilot seed keywords.
 // ============================================================================
 
 pub struct IngestedPilotModule {
@@ -51,4 +52,717 @@ pub fn ingest_foreign_function(
         pilot_code: code,
         is_canonical: true,
     };
+}
+
+pub pure fn ing_is_ident_byte(b: i64) -> bool {
+    return (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 95;
+}
+
+pub pure fn ing_indent(depth: i64) -> str {
+    var out = "";
+    var d = 0;
+    while d < depth {
+        out = out + "    ";
+        d = d + 1;
+    }
+    return out;
+}
+
+pub fn ing_trim(s: str) -> str {
+    let n = s.len();
+    var a = 0;
+    while a < n && s.byte_at(a) <= 32 {
+        a = a + 1;
+    }
+    var b = n;
+    while b > a && s.byte_at(b - 1) <= 32 {
+        b = b - 1;
+    }
+    return s.slice(a, b);
+}
+
+pub fn ing_starts_with(s: str, prefix: str) -> bool {
+    let sn = s.len();
+    let pn = prefix.len();
+    if pn > sn { return false; }
+    return s.slice(0, pn) == prefix;
+}
+
+pub fn ing_ends_with(s: str, suffix: str) -> bool {
+    let sn = s.len();
+    let xn = suffix.len();
+    if xn > sn { return false; }
+    return s.slice(sn - xn, sn) == suffix;
+}
+
+pub fn ing_find_byte(s: str, target_b: i64, start_idx: i64) -> i64 {
+    let n = s.len();
+    var i = start_idx;
+    while i < n {
+        if s.byte_at(i) == target_b {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+pub fn ing_rfind_space(s: str) -> i64 {
+    var i = s.len() - 1;
+    while i >= 0 {
+        if s.byte_at(i) <= 32 {
+            return i;
+        }
+        i = i - 1;
+    }
+    return -1;
+}
+
+pub fn ing_replace_substr(src_s: str, pat: str, rep: str) -> str {
+    let sn = src_s.len();
+    let pn = pat.len();
+    if pn == 0 || pn > sn {
+        return src_s;
+    }
+    var out = "";
+    var i = 0;
+    while i < sn {
+        if i + pn <= sn && src_s.slice(i, i + pn) == pat {
+            out = out + rep;
+            i = i + pn;
+        } else {
+            out = out + src_s.slice(i, i + 1);
+            i = i + 1;
+        }
+    }
+    return out;
+}
+
+pub fn ing_replace_word(src_s: str, word: str, rep: str) -> str {
+    let sn = src_s.len();
+    let wn = word.len();
+    if wn == 0 || wn > sn {
+        return src_s;
+    }
+    var out = "";
+    var i = 0;
+    while i < sn {
+        if i + wn <= sn && src_s.slice(i, i + wn) == word {
+            let prev_ok = if i == 0 { true } else { !ing_is_ident_byte(src_s.byte_at(i - 1)) };
+            let next_ok = if i + wn >= sn { true } else { !ing_is_ident_byte(src_s.byte_at(i + wn)) };
+            if prev_ok && next_ok {
+                out = out + rep;
+                i = i + wn;
+            } else {
+                out = out + src_s.slice(i, i + 1);
+                i = i + 1;
+            }
+        } else {
+            out = out + src_s.slice(i, i + 1);
+            i = i + 1;
+        }
+    }
+    return out;
+}
+
+pub fn ing_strip_line_comment(line: str, c0: i64, c1: i64) -> str {
+    let n = line.len();
+    var in_str = 0;
+    var i = 0;
+    while i < n {
+        let b = line.byte_at(i);
+        if in_str != 0 {
+            if b == 92 {
+                i = i + 2;
+            } else {
+                if b == in_str { in_str = 0; }
+                i = i + 1;
+            }
+        } else {
+            if b == 34 || b == 39 {
+                in_str = b;
+                i = i + 1;
+            } else if c1 == 0 && b == c0 {
+                return line.slice(0, i);
+            } else if c1 != 0 && i + 1 < n && b == c0 && line.byte_at(i + 1) == c1 {
+                return line.slice(0, i);
+            } else {
+                i = i + 1;
+            }
+        }
+    }
+    return line;
+}
+
+// Splits `src_s` on `\n` into map `lm` (`cnt`, `line_0`, ...).
+pub fn ing_split_lines(src_s: str) -> i64 {
+    let lm = __engine("map_new");
+    let n = src_s.len();
+    var cnt = 0;
+    var l_start = 0;
+    var i = 0;
+    while i <= n {
+        let at_end = i == n;
+        let is_nl = if at_end { true } else { src_s.byte_at(i) == 10 };
+        if is_nl {
+            var l_end = i;
+            if l_end > l_start && src_s.byte_at(l_end - 1) == 13 {
+                l_end = l_end - 1;
+            }
+            __engine("map_set", lm, "line_" + cnt, src_s.slice(l_start, l_end));
+            cnt = cnt + 1;
+            l_start = i + 1;
+        }
+        i = i + 1;
+    }
+    __engine("map_set", lm, "cnt", cnt);
+    return lm;
+}
+
+pub pure fn ing_map_foreign_type(raw_ty: str) -> str {
+    if raw_ty == "void" || raw_ty == "None" || raw_ty == "()" { return ""; }
+    if raw_ty == "bool" || raw_ty == "boolean" { return "bool"; }
+    if raw_ty == "float" || raw_ty == "double" || raw_ty == "f64" || raw_ty == "f32" { return "f64"; }
+    if raw_ty == "str" || raw_ty == "string" || raw_ty == "String" || raw_ty == "const char*" { return "str"; }
+    if raw_ty == "i32" || raw_ty == "int32_t" { return "i64"; }
+    return "i64";
+}
+
+// Finds the index of single `=` assignment operator (excluding `==`, `!=`, `<=`, `>=`), or `-1`.
+pub fn ing_find_single_eq(s: str) -> i64 {
+    let n = s.len();
+    var pdepth = 0;
+    var i = 0;
+    while i < n {
+        let b = s.byte_at(i);
+        if b == 40 {
+            pdepth = pdepth + 1;
+        } else if b == 41 {
+            if pdepth > 0 { pdepth = pdepth - 1; }
+        } else if pdepth == 0 && b == 61 {
+            let prev_b = if i > 0 { s.byte_at(i - 1) } else { 0 };
+            let next_b = if i + 1 < n { s.byte_at(i + 1) } else { 0 };
+            if prev_b != 61 && prev_b != 33 && prev_b != 60 && prev_b != 62 && next_b != 61 {
+                return i;
+            }
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+pub fn ing_ensure_semicolon(stmt_s: str) -> str {
+    let t = ing_trim(stmt_s);
+    let n = t.len();
+    if n == 0 { return ""; }
+    let last_b = t.byte_at(n - 1);
+    if last_b == 59 || last_b == 123 || last_b == 125 {
+        return t;
+    }
+    return t + ";";
+}
+
+// Converts untyped comma-separated `(a, b)` parameter list into `(a: i64, b: i64)`.
+pub fn ing_untyped_params_to_pilot(raw_params: str) -> str {
+    let t = ing_trim(raw_params);
+    if t.len() == 0 { return ""; }
+    let n = t.len();
+    var out = "";
+    var seg_s = 0;
+    var i = 0;
+    while i <= n {
+        let is_sep = if i == n { true } else { t.byte_at(i) == 44 };
+        if is_sep {
+            let pname = ing_trim(t.slice(seg_s, i));
+            if pname.len() > 0 {
+                if out.len() > 0 { out = out + ", "; }
+                out = out + pname + ": i64";
+            }
+            seg_s = i + 1;
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+// ============================================================================
+// 1. Python Ingester
+// ============================================================================
+
+pub fn ing_norm_py_expr(expr_s: str) -> str {
+    var s = ing_replace_substr(expr_s, "//", "/");
+    s = ing_replace_word(s, "True", "true");
+    s = ing_replace_word(s, "False", "false");
+    s = ing_replace_word(s, "and", "&&");
+    s = ing_replace_word(s, "or", "||");
+    s = ing_replace_word(s, "not", "!");
+    return ing_trim(s);
+}
+
+pub fn ing_py_params_to_pilot(raw_params: str, seen_vars: i64) -> str {
+    let t = ing_trim(raw_params);
+    if t.len() == 0 { return ""; }
+    let n = t.len();
+    var out = "";
+    var seg_s = 0;
+    var i = 0;
+    while i <= n {
+        let is_sep = if i == n { true } else { t.byte_at(i) == 44 };
+        if is_sep {
+            let seg = ing_trim(t.slice(seg_s, i));
+            if seg.len() > 0 && seg != "self" {
+                let colon_idx = ing_find_byte(seg, 58, 0);
+                var pname = seg;
+                var pty = "i64";
+                if colon_idx >= 0 {
+                    pname = ing_trim(seg.slice(0, colon_idx));
+                    let mapped = ing_map_foreign_type(ing_trim(seg.slice(colon_idx + 1, seg.len())));
+                    if mapped.len() > 0 { pty = mapped; }
+                }
+                __engine("map_set", seen_vars, "v_" + pname, 1);
+                if out.len() > 0 { out = out + ", "; }
+                out = out + pname + ": " + pty;
+            }
+            seg_s = i + 1;
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+pub fn ing_ingest_python(foreign_src: str) -> str {
+    let lm = ing_split_lines(foreign_src);
+    let cnt = __engine("map_get", lm, "cnt") + 0;
+    let st = __engine("map_new");
+    __engine("map_set", st, "ind_0", 0);
+    var top = 0;
+    var expect_indent = 0;
+    var seen_vars = __engine("map_new");
+    var out = "";
+
+    var li = 0;
+    while li < cnt {
+        let raw_line = "" + __engine("map_get", lm, "line_" + li);
+        let uncommented = ing_strip_line_comment(raw_line, 35, 0);
+        let tline = ing_trim(uncommented);
+        if tline.len() > 0 {
+            var cur_ind = 0;
+            while cur_ind < uncommented.len() && uncommented.byte_at(cur_ind) <= 32 {
+                if uncommented.byte_at(cur_ind) == 9 {
+                    cur_ind = cur_ind + 4;
+                } else {
+                    cur_ind = cur_ind + 1;
+                }
+            }
+
+            if expect_indent == 1 && cur_ind > (__engine("map_get", st, "ind_" + top) + 0) {
+                top = top + 1;
+                __engine("map_set", st, "ind_" + top, cur_ind);
+                expect_indent = 0;
+            } else {
+                expect_indent = 0;
+                let is_else_hdr = tline == "else:" || ing_starts_with(tline, "elif ");
+                while top > 0 && cur_ind < (__engine("map_get", st, "ind_" + top) + 0) {
+                    top = top - 1;
+                    let at_target = cur_ind == (__engine("map_get", st, "ind_" + top) + 0);
+                    if !(is_else_hdr && at_target) {
+                        out = out + ing_indent(top) + "}\n";
+                    }
+                }
+            }
+
+            let pad = ing_indent(top);
+            let fn_kw_def = "d" + "ef ";
+            let elif_kw = "el" + "if ";
+            if ing_starts_with(tline, fn_kw_def) && ing_ends_with(tline, ":") {
+                seen_vars = __engine("map_new");
+                let hdr = ing_trim(tline.slice(4, tline.len() - 1));
+                let lp = ing_find_byte(hdr, 40, 0);
+                let rp = ing_find_byte(hdr, 41, lp + 1);
+                let fname = ing_trim(hdr.slice(0, lp));
+                let pil_params = ing_py_params_to_pilot(hdr.slice(lp + 1, rp), seen_vars);
+                let after_rp = ing_trim(hdr.slice(rp + 1, hdr.len()));
+                var ret_clause = " -> i64";
+                if ing_starts_with(after_rp, "->") {
+                    let mapped_r = ing_map_foreign_type(ing_trim(after_rp.slice(2, after_rp.len())));
+                    if mapped_r.len() == 0 {
+                        ret_clause = "";
+                    } else {
+                        ret_clause = " -> " + mapped_r;
+                    }
+                }
+                out = out + pad + "pub " + nameof(fn) + " " + fname + "(" + pil_params + ")" + ret_clause + " {\n";
+                expect_indent = 1;
+            } else if ing_starts_with(tline, "while ") && ing_ends_with(tline, ":") {
+                let wcond = ing_norm_py_expr(tline.slice(6, tline.len() - 1));
+                out = out + pad + "while " + wcond + " {\n";
+                expect_indent = 1;
+            } else if ing_starts_with(tline, "if ") && ing_ends_with(tline, ":") {
+                let icond = ing_norm_py_expr(tline.slice(3, tline.len() - 1));
+                out = out + pad + nameof(if) + " " + icond + " {\n";
+                expect_indent = 1;
+            } else if ing_starts_with(tline, elif_kw) && ing_ends_with(tline, ":") {
+                let econd = ing_norm_py_expr(tline.slice(5, tline.len() - 1));
+                out = out + pad + "} else " + nameof(if) + " " + econd + " {\n";
+                expect_indent = 1;
+            } else if tline == "else:" {
+                out = out + pad + "} else {\n";
+                expect_indent = 1;
+            } else if ing_starts_with(tline, "return ") {
+                let rexpr = ing_norm_py_expr(tline.slice(7, tline.len()));
+                out = out + pad + nameof(return) + " " + rexpr + ";\n";
+            } else if tline == "return" {
+                out = out + pad + nameof(return) + ";\n";
+            } else if tline == "pass" {
+                // Empty block placeholder requires no statement in `{ ... }`
+                expect_indent = 0;
+            } else if tline == "break" {
+                out = out + pad + "break;\n";
+            } else if tline == "continue" {
+                out = out + pad + "continue;\n";
+            } else {
+                let eq_pos = ing_find_single_eq(tline);
+                if eq_pos > 0 {
+                    let raw_lhs = ing_trim(tline.slice(0, eq_pos));
+                    let colon_p = ing_find_byte(raw_lhs, 58, 0);
+                    let vname = if colon_p >= 0 { ing_trim(raw_lhs.slice(0, colon_p)) } else { raw_lhs };
+                    let rhs_e = ing_norm_py_expr(tline.slice(eq_pos + 1, tline.len()));
+                    let dot_p = ing_find_byte(vname, 46, 0);
+                    let brk_p = ing_find_byte(vname, 91, 0);
+                    if dot_p < 0 && brk_p < 0 && (__engine("map_get", seen_vars, "v_" + vname) + 0) == 0 {
+                        __engine("map_set", seen_vars, "v_" + vname, 1);
+                        out = out + pad + "var " + vname + " = " + rhs_e + ";\n";
+                    } else {
+                        out = out + pad + vname + " = " + rhs_e + ";\n";
+                    }
+                } else {
+                    out = out + pad + ing_ensure_semicolon(ing_norm_py_expr(tline)) + "\n";
+                }
+            }
+        }
+        li = li + 1;
+    }
+
+    while top > 0 {
+        top = top - 1;
+        out = out + ing_indent(top) + "}\n";
+    }
+    return out;
+}
+
+// ============================================================================
+// 2. Rust Ingester
+// ============================================================================
+
+pub fn ing_ingest_rust(foreign_src: str) -> str {
+    let lm = ing_split_lines(foreign_src);
+    let cnt = __engine("map_get", lm, "cnt") + 0;
+    let rust_let_mut = "let " + "mut ";
+    var out = "";
+    var li = 0;
+    while li < cnt {
+        let raw_line = "" + __engine("map_get", lm, "line_" + li);
+        let uncommented = ing_strip_line_comment(raw_line, 47, 47);
+        let tline = ing_trim(uncommented);
+        if tline.len() > 0 {
+            var line_s = ing_replace_substr(tline, rust_let_mut, "var ");
+            if ing_starts_with(line_s, "fn ") {
+                line_s = "pub " + line_s;
+            }
+            out = out + line_s + "\n";
+        }
+        li = li + 1;
+    }
+    return out;
+}
+
+// ============================================================================
+// 3. JavaScript Ingester
+// ============================================================================
+
+pub fn ing_ingest_js(foreign_src: str) -> str {
+    let lm = ing_split_lines(foreign_src);
+    let cnt = __engine("map_get", lm, "cnt") + 0;
+    var depth = 0;
+    var out = "";
+    var li = 0;
+    while li < cnt {
+        let raw_line = "" + __engine("map_get", lm, "line_" + li);
+        let uncommented = ing_strip_line_comment(raw_line, 47, 47);
+        var tline = ing_trim(uncommented);
+        if tline.len() > 0 {
+            tline = ing_replace_substr(tline, "!==", "!=");
+            tline = ing_replace_substr(tline, "===", "==");
+            if ing_starts_with(tline, "export ") {
+                tline = ing_trim(tline.slice(7, tline.len()));
+            }
+
+            if tline == "}" || tline == "};" {
+                if depth > 0 { depth = depth - 1; }
+                out = out + ing_indent(depth) + "}\n";
+            } else if ing_starts_with(tline, "} else") {
+                var eff_d = depth;
+                if eff_d > 0 { eff_d = eff_d - 1; }
+                out = out + ing_indent(eff_d) + tline + "\n";
+            } else if ing_starts_with(tline, "function ") && ing_ends_with(tline, "{") {
+                let hdr = ing_trim(tline.slice(9, tline.len() - 1));
+                let lp = ing_find_byte(hdr, 40, 0);
+                let rp = ing_find_byte(hdr, 41, lp + 1);
+                let fname = ing_trim(hdr.slice(0, lp));
+                let pil_params = ing_untyped_params_to_pilot(hdr.slice(lp + 1, rp));
+                out = out + ing_indent(depth) + "pub " + nameof(fn) + " " + fname + "(" + pil_params + ") -> i64 {\n";
+                depth = depth + 1;
+            } else if ing_ends_with(tline, "{") {
+                out = out + ing_indent(depth) + tline + "\n";
+                depth = depth + 1;
+            } else if ing_starts_with(tline, "let ") {
+                let rest = tline.slice(4, tline.len());
+                out = out + ing_indent(depth) + ing_ensure_semicolon("var " + rest) + "\n";
+            } else if ing_starts_with(tline, "const ") {
+                let rest_c = tline.slice(6, tline.len());
+                out = out + ing_indent(depth) + ing_ensure_semicolon(nameof(let) + " " + rest_c) + "\n";
+            } else {
+                out = out + ing_indent(depth) + ing_ensure_semicolon(tline) + "\n";
+            }
+        }
+        li = li + 1;
+    }
+    return out;
+}
+
+// ============================================================================
+// 4. C# & C/C++ Ingester
+// ============================================================================
+
+pub fn ing_strip_c_modifiers(line_s: str) -> str {
+    var s = ing_trim(line_s);
+    var changed = 1;
+    while changed == 1 {
+        changed = 0;
+        if ing_starts_with(s, "public ") { s = ing_trim(s.slice(7, s.len())); changed = 1; }
+        else if ing_starts_with(s, "private ") { s = ing_trim(s.slice(8, s.len())); changed = 1; }
+        else if ing_starts_with(s, "protected ") { s = ing_trim(s.slice(10, s.len())); changed = 1; }
+        else if ing_starts_with(s, "internal ") { s = ing_trim(s.slice(9, s.len())); changed = 1; }
+        else if ing_starts_with(s, "static ") { s = ing_trim(s.slice(7, s.len())); changed = 1; }
+        else if ing_starts_with(s, "inline ") { s = ing_trim(s.slice(7, s.len())); changed = 1; }
+        else if ing_starts_with(s, "constexpr ") { s = ing_trim(s.slice(10, s.len())); changed = 1; }
+        else if ing_starts_with(s, "extern ") { s = ing_trim(s.slice(7, s.len())); changed = 1; }
+    }
+    return s;
+}
+
+pub fn ing_c_params_to_pilot(raw_params: str) -> str {
+    let t = ing_trim(raw_params);
+    if t.len() == 0 || t == "void" { return ""; }
+    let n = t.len();
+    var out = "";
+    var seg_s = 0;
+    var i = 0;
+    while i <= n {
+        let is_sep = if i == n { true } else { t.byte_at(i) == 44 };
+        if is_sep {
+            let seg = ing_trim(t.slice(seg_s, i));
+            let sp = ing_rfind_space(seg);
+            if sp > 0 {
+                let raw_ty = ing_trim(seg.slice(0, sp));
+                var pname = ing_trim(seg.slice(sp + 1, seg.len()));
+                while pname.len() > 0 && pname.byte_at(0) == 42 {
+                    pname = ing_trim(pname.slice(1, pname.len()));
+                }
+                let pty = ing_map_foreign_type(raw_ty);
+                let final_ty = if pty.len() > 0 { pty } else { "i64" };
+                if out.len() > 0 { out = out + ", "; }
+                out = out + pname + ": " + final_ty;
+            }
+            seg_s = i + 1;
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+pub fn ing_ingest_c_family(foreign_src: str) -> str {
+    let lm = ing_split_lines(foreign_src);
+    let cnt = __engine("map_get", lm, "cnt") + 0;
+    let st = __engine("map_new");
+    var wrap_cnt = 0;
+    var brace_depth = 0;
+    var out = "";
+
+    var li = 0;
+    while li < cnt {
+        let raw_line = "" + __engine("map_get", lm, "line_" + li);
+        let uncommented = ing_strip_line_comment(raw_line, 47, 47);
+        let tline = ing_trim(uncommented);
+        if tline.len() > 0 && !ing_starts_with(tline, "#") && !(ing_starts_with(tline, "using ") && ing_ends_with(tline, ";")) {
+            let eff_indent = if brace_depth > wrap_cnt { brace_depth - wrap_cnt } else { 0 };
+            if tline == "}" || tline == "};" {
+                if brace_depth > 0 { brace_depth = brace_depth - 1; }
+                if wrap_cnt > 0 && (__engine("map_get", st, "wrap_" + (wrap_cnt - 1)) + 0) == brace_depth {
+                    wrap_cnt = wrap_cnt - 1;
+                } else {
+                    let close_ind = if brace_depth > wrap_cnt { brace_depth - wrap_cnt } else { 0 };
+                    out = out + ing_indent(close_ind) + "}\n";
+                }
+            } else if ing_starts_with(tline, "} else") {
+                let else_ind = if eff_indent > 0 { eff_indent - 1 } else { 0 };
+                out = out + ing_indent(else_ind) + tline + "\n";
+            } else {
+                let clean = ing_strip_c_modifiers(tline);
+                let class_kw = "cl" + "ass ";
+                if (ing_starts_with(clean, class_kw) || ing_starts_with(clean, "namespace ")) && ing_ends_with(clean, "{") {
+                    __engine("map_set", st, "wrap_" + wrap_cnt, brace_depth);
+                    wrap_cnt = wrap_cnt + 1;
+                    brace_depth = brace_depth + 1;
+                } else if (ing_starts_with(clean, "while ") || ing_starts_with(clean, "while(") || ing_starts_with(clean, "if ") || ing_starts_with(clean, "if(") || ing_starts_with(clean, "else")) && ing_ends_with(clean, "{") {
+                    out = out + ing_indent(eff_indent) + clean + "\n";
+                    brace_depth = brace_depth + 1;
+                } else if ing_ends_with(clean, "{") && ing_find_byte(clean, 40, 0) > 0 {
+                    let hdr = ing_trim(clean.slice(0, clean.len() - 1));
+                    let lp = ing_find_byte(hdr, 40, 0);
+                    let rp = ing_find_byte(hdr, 41, lp + 1);
+                    let left_part = ing_trim(hdr.slice(0, lp));
+                    let sp = ing_rfind_space(left_part);
+                    let raw_ret = if sp > 0 { ing_trim(left_part.slice(0, sp)) } else { "long" };
+                    let fname = if sp > 0 { ing_trim(left_part.slice(sp + 1, left_part.len())) } else { left_part };
+                    let pil_params = ing_c_params_to_pilot(hdr.slice(lp + 1, rp));
+                    let mapped_r = ing_map_foreign_type(raw_ret);
+                    let ret_s = if mapped_r.len() == 0 { "" } else { " -> " + mapped_r };
+                    out = out + ing_indent(eff_indent) + "pub " + nameof(fn) + " " + fname + "(" + pil_params + ")" + ret_s + " {\n";
+                    brace_depth = brace_depth + 1;
+                } else {
+                    let eq_pos = ing_find_single_eq(clean);
+                    if eq_pos > 0 && !ing_starts_with(clean, "return ") {
+                        let lhs_part = ing_trim(clean.slice(0, eq_pos));
+                        var rhs_part = ing_trim(clean.slice(eq_pos + 1, clean.len()));
+                        if ing_ends_with(rhs_part, ";") {
+                            rhs_part = ing_trim(rhs_part.slice(0, rhs_part.len() - 1));
+                        }
+                        let sp_l = ing_rfind_space(lhs_part);
+                        if sp_l > 0 {
+                            let vname = ing_trim(lhs_part.slice(sp_l + 1, lhs_part.len()));
+                            out = out + ing_indent(eff_indent) + "var " + vname + " = " + rhs_part + ";\n";
+                        } else {
+                            out = out + ing_indent(eff_indent) + lhs_part + " = " + rhs_part + ";\n";
+                        }
+                    } else {
+                        out = out + ing_indent(eff_indent) + ing_ensure_semicolon(clean) + "\n";
+                    }
+                }
+            }
+        }
+        li = li + 1;
+    }
+    return out;
+}
+
+// ============================================================================
+// 5. Lua Ingester
+// ============================================================================
+
+pub fn ing_norm_lua_expr(expr_s: str) -> str {
+    var s = ing_replace_substr(expr_s, "~=", "!=");
+    s = ing_replace_substr(s, "//", "/");
+    s = ing_replace_word(s, "and", "&&");
+    s = ing_replace_word(s, "or", "||");
+    s = ing_replace_word(s, "not", "!");
+    return ing_trim(s);
+}
+
+pub fn ing_ingest_lua(foreign_src: str) -> str {
+    let lm = ing_split_lines(foreign_src);
+    let cnt = __engine("map_get", lm, "cnt") + 0;
+    var depth = 0;
+    var out = "";
+    let lua_local_fn = "local " + "function ";
+    let lua_fn = "function ";
+    let lua_local = "local ";
+    let lua_elseif = "else" + "if ";
+
+    var li = 0;
+    while li < cnt {
+        let raw_line = "" + __engine("map_get", lm, "line_" + li);
+        let uncommented = ing_strip_line_comment(raw_line, 45, 45);
+        var tline = ing_trim(uncommented);
+        if tline.len() > 0 {
+            if ing_starts_with(tline, lua_local_fn) {
+                tline = ing_trim(tline.slice(6, tline.len()));
+            }
+            if ing_starts_with(tline, lua_fn) {
+                let hdr = ing_trim(tline.slice(9, tline.len()));
+                let lp = ing_find_byte(hdr, 40, 0);
+                let rp = ing_find_byte(hdr, 41, lp + 1);
+                let fname = ing_trim(hdr.slice(0, lp));
+                let pil_params = ing_untyped_params_to_pilot(hdr.slice(lp + 1, rp));
+                out = out + ing_indent(depth) + "pub " + nameof(fn) + " " + fname + "(" + pil_params + ") -> i64 {\n";
+                depth = depth + 1;
+            } else if ing_starts_with(tline, "while ") && ing_ends_with(tline, " do") {
+                let wcond = ing_norm_lua_expr(tline.slice(6, tline.len() - 3));
+                out = out + ing_indent(depth) + "while " + wcond + " {\n";
+                depth = depth + 1;
+            } else if ing_starts_with(tline, lua_elseif) && ing_ends_with(tline, " then") {
+                let econd = ing_norm_lua_expr(tline.slice(7, tline.len() - 5));
+                let ed = if depth > 0 { depth - 1 } else { 0 };
+                out = out + ing_indent(ed) + "} else " + nameof(if) + " " + econd + " {\n";
+            } else if ing_starts_with(tline, "if ") && ing_ends_with(tline, " then") {
+                let icond = ing_norm_lua_expr(tline.slice(3, tline.len() - 5));
+                out = out + ing_indent(depth) + nameof(if) + " " + icond + " {\n";
+                depth = depth + 1;
+            } else if tline == "else" {
+                let ed2 = if depth > 0 { depth - 1 } else { 0 };
+                out = out + ing_indent(ed2) + "} else {\n";
+            } else if tline == "end" {
+                if depth > 0 { depth = depth - 1; }
+                out = out + ing_indent(depth) + "}\n";
+            } else if ing_starts_with(tline, lua_local) {
+                let rest = tline.slice(6, tline.len());
+                let eq_p = ing_find_single_eq(rest);
+                if eq_p > 0 {
+                    let vname = ing_trim(rest.slice(0, eq_p));
+                    let rhs_e = ing_norm_lua_expr(rest.slice(eq_p + 1, rest.len()));
+                    out = out + ing_indent(depth) + "var " + vname + " = " + rhs_e + ";\n";
+                } else {
+                    out = out + ing_indent(depth) + "var " + ing_trim(rest) + " = 0;\n";
+                }
+            } else if ing_starts_with(tline, "return ") {
+                let rexpr = ing_norm_lua_expr(tline.slice(7, tline.len()));
+                out = out + ing_indent(depth) + ing_ensure_semicolon(nameof(return) + " " + rexpr) + "\n";
+            } else if tline == "return" {
+                out = out + ing_indent(depth) + nameof(return) + ";\n";
+            } else if tline == "break" {
+                out = out + ing_indent(depth) + "break;\n";
+            } else {
+                let eq_p2 = ing_find_single_eq(tline);
+                if eq_p2 > 0 {
+                    let lhs_s = ing_trim(tline.slice(0, eq_p2));
+                    let rhs_s = ing_norm_lua_expr(tline.slice(eq_p2 + 1, tline.len()));
+                    out = out + ing_indent(depth) + lhs_s + " = " + rhs_s + ";\n";
+                } else {
+                    out = out + ing_indent(depth) + ing_ensure_semicolon(ing_norm_lua_expr(tline)) + "\n";
+                }
+            }
+        }
+        li = li + 1;
+    }
+    return out;
+}
+
+pub fn ingest_foreign_source(source_lang: str, foreign_src: str) -> str {
+    let lang = ing_trim(source_lang);
+    if lang == "python" || lang == "py" {
+        return ing_ingest_python(foreign_src);
+    }
+    if lang == "rust" || lang == "rs" {
+        return ing_ingest_rust(foreign_src);
+    }
+    if lang == "js" || lang == "javascript" || lang == "ts" || lang == "typescript" {
+        return ing_ingest_js(foreign_src);
+    }
+    if lang == "csharp" || lang == "cs" || lang == "c" || lang == "cpp" || lang == "c++" {
+        return ing_ingest_c_family(foreign_src);
+    }
+    if lang == "lua" {
+        return ing_ingest_lua(foreign_src);
+    }
+    return ing_ingest_c_family(foreign_src);
 }

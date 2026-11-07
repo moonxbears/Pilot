@@ -1,16 +1,181 @@
 // ============================================================================
 // FILE: stdlib/pkg/licensing.pilot
 // Milestone 57.3: Self-Hosted SPDX Permissive License Compatibility Verifier
-// Replaces `crates/pilot-transpile/src/licensing.rs` in pure Pilot.
+// Evaluates both atomic SPDX identifiers and compound boolean SPDX expressions
+// (`AND`, `OR`, `WITH`, and nested `(...)` parentheses) in pure Pilot.
 // ============================================================================
 
-pub pure fn is_viable_spdx_license(spdx_id: str) -> bool {
-    return spdx_id == "MIT"
-        || spdx_id == "Apache-2.0"
-        || spdx_id == "BSD-2-Clause"
-        || spdx_id == "BSD-3-Clause"
-        || spdx_id == "ISC"
-        || spdx_id == "CC0-1.0"
-        || spdx_id == "Unlicense"
-        || spdx_id == "0BSD";
+pub pure fn spdx_is_ident_char(b: i64) -> bool {
+    return (b >= 65 && b <= 90)
+        || (b >= 97 && b <= 122)
+        || (b >= 48 && b <= 57)
+        || b == 45
+        || b == 46
+        || b == 43;
+}
+
+pub pure fn spdx_is_permissive_atom(lic_id: str) -> bool {
+    return lic_id == "MIT"
+        || lic_id == "MIT-0"
+        || lic_id == "Apache-2.0"
+        || lic_id == "BSD-2-Clause"
+        || lic_id == "BSD-3-Clause"
+        || lic_id == "ISC"
+        || lic_id == "CC0-1.0"
+        || lic_id == "Unlicense"
+        || lic_id == "0BSD"
+        || lic_id == "Zlib"
+        || lic_id == "BSL-1.0"
+        || lic_id == "Artistic-2.0"
+        || lic_id == "Python-2.0"
+        || lic_id == "Unicode-3.0"
+        || lic_id == "Unicode-DFS-2016";
+}
+
+pub pure fn spdx_is_approved_exception(exc_id: str) -> bool {
+    return exc_id == "LLVM-exception"
+        || exc_id == "Swift-exception"
+        || exc_id == "Universal-FOSS-exception-1.0";
+}
+
+pub fn spdx_parse_atom(st: i64) -> bool {
+    if (__engine("map_get", st, "ok") + 0) == 0 {
+        return false;
+    }
+    let pos = __engine("map_get", st, "pos") + 0;
+    let cnt = __engine("map_get", st, "cnt") + 0;
+    if pos >= cnt {
+        __engine("map_set", st, "ok", 0);
+        return false;
+    }
+    let tk = "" + __engine("map_get", st, "tok_" + pos);
+    if tk == "(" {
+        __engine("map_set", st, "pos", pos + 1);
+        let inner = spdx_parse_or(st);
+        if (__engine("map_get", st, "ok") + 0) == 0 {
+            return false;
+        }
+        let p2 = __engine("map_get", st, "pos") + 0;
+        if p2 >= cnt {
+            __engine("map_set", st, "ok", 0);
+            return false;
+        }
+        let close_tk = "" + __engine("map_get", st, "tok_" + p2);
+        if close_tk != ")" {
+            __engine("map_set", st, "ok", 0);
+            return false;
+        }
+        __engine("map_set", st, "pos", p2 + 1);
+        return inner;
+    }
+    if tk == ")" || tk == "AND" || tk == "OR" || tk == "WITH" {
+        __engine("map_set", st, "ok", 0);
+        return false;
+    }
+    __engine("map_set", st, "pos", pos + 1);
+    var atom_ok = spdx_is_permissive_atom(tk);
+
+    // Optional `<license> WITH <exception>` suffix
+    let next_p = pos + 1;
+    if next_p < cnt {
+        let next_tk = "" + __engine("map_get", st, "tok_" + next_p);
+        if next_tk == "WITH" || next_tk == "with" {
+            if next_p + 1 >= cnt {
+                __engine("map_set", st, "ok", 0);
+                return false;
+            }
+            let exc_tk = "" + __engine("map_get", st, "tok_" + (next_p + 1));
+            __engine("map_set", st, "pos", next_p + 2);
+            if !spdx_is_approved_exception(exc_tk) {
+                atom_ok = false;
+            }
+        }
+    }
+    return atom_ok;
+}
+
+pub fn spdx_parse_and(st: i64) -> bool {
+    var acc = spdx_parse_atom(st);
+    while 1 == (__engine("map_get", st, "ok") + 0) {
+        let pos = __engine("map_get", st, "pos") + 0;
+        let cnt = __engine("map_get", st, "cnt") + 0;
+        if pos >= cnt {
+            break;
+        }
+        let tk = "" + __engine("map_get", st, "tok_" + pos);
+        if tk != "AND" && tk != "and" {
+            break;
+        }
+        __engine("map_set", st, "pos", pos + 1);
+        let rhs = spdx_parse_atom(st);
+        acc = if acc { rhs } else { false };
+    }
+    return acc;
+}
+
+pub fn spdx_parse_or(st: i64) -> bool {
+    var acc = spdx_parse_and(st);
+    while 1 == (__engine("map_get", st, "ok") + 0) {
+        let pos = __engine("map_get", st, "pos") + 0;
+        let cnt = __engine("map_get", st, "cnt") + 0;
+        if pos >= cnt {
+            break;
+        }
+        let tk = "" + __engine("map_get", st, "tok_" + pos);
+        if tk != "OR" && tk != "or" {
+            break;
+        }
+        __engine("map_set", st, "pos", pos + 1);
+        let rhs = spdx_parse_and(st);
+        acc = if acc { true } else { rhs };
+    }
+    return acc;
+}
+
+pub fn is_viable_spdx_license(spdx_expr: str) -> bool {
+    let n = spdx_expr.len();
+    if n == 0 {
+        return false;
+    }
+    let st = __engine("map_new");
+    var cnt = 0;
+    var i = 0;
+    while i < n {
+        let b = spdx_expr.byte_at(i);
+        if b <= 32 {
+            i = i + 1;
+        } else if b == 40 {
+            __engine("map_set", st, "tok_" + cnt, "(");
+            cnt = cnt + 1;
+            i = i + 1;
+        } else if b == 41 {
+            __engine("map_set", st, "tok_" + cnt, ")");
+            cnt = cnt + 1;
+            i = i + 1;
+        } else if spdx_is_ident_char(b) {
+            let t_start = i;
+            while i < n && spdx_is_ident_char(spdx_expr.byte_at(i)) {
+                i = i + 1;
+            }
+            __engine("map_set", st, "tok_" + cnt, spdx_expr.slice(t_start, i));
+            cnt = cnt + 1;
+        } else {
+            return false;
+        }
+    }
+    if cnt == 0 {
+        return false;
+    }
+    __engine("map_set", st, "cnt", cnt);
+    __engine("map_set", st, "pos", 0);
+    __engine("map_set", st, "ok", 1);
+
+    let res = spdx_parse_or(st);
+    if (__engine("map_get", st, "ok") + 0) != 1 {
+        return false;
+    }
+    if (__engine("map_get", st, "pos") + 0) != cnt {
+        return false;
+    }
+    return res;
 }

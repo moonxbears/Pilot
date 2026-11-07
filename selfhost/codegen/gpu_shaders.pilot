@@ -55,3 +55,364 @@ pub fn emit_spirv_compute_module(
         shader_source: src,
     };
 }
+
+pub fn gs_expr_is_float(nid: i64, st: i64) -> bool {
+    if nid < 0 { return false; }
+    let k = __engine("ast_node_kind", nid);
+    let orig = __engine("ast_orig_kind", nid);
+    if k == 15 && __engine("ast_node_lit_kind", nid) == 2 { return true; }
+    if orig == 210 {
+        let base_nid = __engine("ast_child_at", nid, 0);
+        let bname = __engine("sym_str", __engine("ast_node_sym", base_nid));
+        return (__engine("map_get", st, "is_ptr_" + bname) + 0) == 1;
+    }
+    if k == 14 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
+        return (__engine("map_get", st, "is_flt_" + vname) + 0) == 1;
+    }
+    if k == 19 {
+        let op = __engine("ast_node_raw_bits", nid);
+        if op >= 8 && op <= 15 { return false; }
+        return gs_expr_is_float(__engine("ast_child_at", nid, 0), st)
+            || gs_expr_is_float(__engine("ast_child_at", nid, 1), st);
+    }
+    if orig == 206 {
+        return gs_expr_is_float(__engine("ast_child_at", nid, 0), st);
+    }
+    return false;
+}
+
+pub fn gs_wgsl_expr(nid: i64, st: i64, want_float: bool) -> str {
+    if nid < 0 { return "0"; }
+    let k = __engine("ast_node_kind", nid);
+    let orig = __engine("ast_orig_kind", nid);
+    if k == 15 {
+        let lk = __engine("ast_node_lit_kind", nid);
+        if lk == 1 {
+            let v = __engine("ast_node_raw_bits", nid);
+            if want_float {
+                return "f32(" + v + ")";
+            }
+            return "" + v;
+        }
+        if lk == 2 {
+            return __engine("source_slice", __engine("ast_span_start", nid), __engine("ast_span_end", nid));
+        }
+        if lk == 4 {
+            return if __engine("ast_node_raw_bits", nid) != 0 { "true" } else { "false" };
+        }
+        return "0";
+    }
+    if k == 14 {
+        let nm = __engine("sym_str", __engine("ast_node_sym", nid));
+        if want_float && (__engine("map_get", st, "is_flt_" + nm) + 0) == 0 {
+            return "f32(" + nm + ")";
+        }
+        return nm;
+    }
+    if orig == 210 {
+        let base = gs_wgsl_expr(__engine("ast_child_at", nid, 0), st, false);
+        let idx = gs_wgsl_expr(__engine("ast_child_at", nid, 1), st, false);
+        return base + "[u32(" + idx + ")]";
+    }
+    if orig == 206 {
+        let fl = __engine("ast_node_flags", nid);
+        let inner = gs_wgsl_expr(__engine("ast_child_at", nid, 0), st, want_float);
+        if fl == 5 { return "!(" + inner + ")"; }
+        return "-(" + inner + ")";
+    }
+    if k == 19 {
+        let op = __engine("ast_node_raw_bits", nid);
+        let sub_flt = want_float || gs_expr_is_float(nid, st);
+        let lhs = gs_wgsl_expr(__engine("ast_child_at", nid, 0), st, sub_flt);
+        let rhs = gs_wgsl_expr(__engine("ast_child_at", nid, 1), st, sub_flt);
+        return "(" + lhs + " " + cg_binop_c_sym(op) + " " + rhs + ")";
+    }
+    if k == 16 {
+        if gc_is_gid_call(nid) {
+            return "i32(__gid.x)";
+        }
+        let cal = __engine("sym_str", __engine("ast_node_sym", __engine("ast_child_at", nid, 0)));
+        let cc = __engine("ast_child_count", nid);
+        var args = "";
+        var ai = 1;
+        while ai < cc {
+            if ai > 1 { args = args + ", "; }
+            args = args + gs_wgsl_expr(__engine("ast_child_at", nid, ai), st, false);
+            ai = ai + 1;
+        }
+        return cal + "(" + args + ")";
+    }
+    return "0";
+}
+
+pub fn gs_wgsl_stmt(nid: i64, st: i64, indent: str) -> str {
+    let k = __engine("ast_node_kind", nid);
+    if k == 18 {
+        let cc = __engine("ast_child_count", nid);
+        var out = "";
+        var ci = 0;
+        while ci < cc {
+            out = out + gs_wgsl_stmt(__engine("ast_child_at", nid, ci), st, indent);
+            ci = ci + 1;
+        }
+        return out;
+    }
+    if k == 4 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
+        let is_mut = __engine("ast_orig_kind", nid) == 101;
+        let kw = if is_mut { "var " } else { nameof(let) + " " };
+        var init_nid = -1;
+        if __engine("ast_child_count", nid) > 0 {
+            init_nid = __engine("ast_child_at", nid, 0);
+        }
+        let flt = gs_expr_is_float(init_nid, st);
+        if flt {
+            __engine("map_set", st, "is_flt_" + vname, 1);
+        }
+        let init_s = if init_nid >= 0 { gs_wgsl_expr(init_nid, st, flt) } else { "0" };
+        return indent + kw + vname + " = " + init_s + ";\n";
+    }
+    if k == 20 {
+        let lhs_nid = __engine("ast_child_at", nid, 0);
+        let rhs_nid = __engine("ast_child_at", nid, 1);
+        let flt = gs_expr_is_float(lhs_nid, st) || gs_expr_is_float(rhs_nid, st);
+        let lhs_s = gs_wgsl_expr(lhs_nid, st, false);
+        let rhs_s = gs_wgsl_expr(rhs_nid, st, flt);
+        return indent + lhs_s + " = " + rhs_s + ";\n";
+    }
+    if k == 8 {
+        if __engine("ast_child_count", nid) > 0 {
+            let rv = gs_wgsl_expr(__engine("ast_child_at", nid, 0), st, false);
+            return indent + nameof(let) + " __wgsl_ret = " + rv + ";\n" + indent + "return;\n";
+        }
+        return indent + "return;\n";
+    }
+    if k == 6 {
+        let cond_s = gs_wgsl_expr(__engine("ast_child_at", nid, 0), st, false);
+        let then_s = gs_wgsl_stmt(__engine("ast_child_at", nid, 1), st, indent + "  ");
+        var res = indent + nameof(if) + " (" + cond_s + ") {\n" + then_s + indent + "}";
+        if __engine("ast_child_count", nid) >= 3 {
+            let else_s = gs_wgsl_stmt(__engine("ast_child_at", nid, 2), st, indent + "  ");
+            res = res + " else {\n" + else_s + indent + "}";
+        }
+        return res + "\n";
+    }
+    return indent + gs_wgsl_expr(nid, st, false) + ";\n";
+}
+
+pub fn gs_emit_wgsl_from_arena(kernel_name: str) -> str {
+    let fn_nid = cg_find_fn_by_name(kernel_name);
+    if fn_nid < 0 { return ""; }
+    let st = __engine("map_new");
+    let cc = __engine("ast_child_count", fn_nid);
+    var bindings = "";
+    var bi = 0;
+    var pi = 1;
+    while pi < cc {
+        let pch = __engine("ast_child_at", fn_nid, pi);
+        if __engine("ast_node_kind", pch) == 21 {
+            let pname = __engine("sym_str", __engine("ast_node_sym", pch));
+            let ptname = __engine("sym_str", __engine("ast_node_raw_bits", pch));
+            let p = cg_resolve_type_physics(ptname);
+            if p.reg_class == 6 {
+                __engine("map_set", st, "is_ptr_" + pname, 1);
+                bindings = bindings + "@group(0) @binding(" + bi + ") var<storage, read_write> " + pname + ": array<f32>;\n";
+            } else if p.reg_class == 4 {
+                __engine("map_set", st, "is_flt_" + pname, 1);
+                bindings = bindings + "@group(0) @binding(" + bi + ") var<uniform> " + pname + ": f32;\n";
+            } else {
+                bindings = bindings + "@group(0) @binding(" + bi + ") var<uniform> " + pname + ": i32;\n";
+            }
+            bi = bi + 1;
+        }
+        pi = pi + 1;
+    }
+    let body_src = gs_wgsl_stmt(__engine("ast_child_at", fn_nid, 0), st, "  ");
+    return bindings + "\n@compute @workgroup_size(64, 1, 1)\n"
+        + nameof(fn) + " " + kernel_name + "(@builtin(global_invocation_id) __gid: vec3<u32>) {\n"
+        + body_src
+        + "}\n";
+}
+
+pub fn gs_next_spv_id(st: i64, prefix: str) -> str {
+    let n = (__engine("map_get", st, "spv_n") + 0) + 1;
+    __engine("map_set", st, "spv_n", n);
+    return "%" + prefix + "_" + n;
+}
+
+pub fn gs_spv_append(st: i64, line: str) -> i64 {
+    let cur = "" + __engine("map_get", st, "spv_ops");
+    __engine("map_set", st, "spv_ops", cur + "  " + line + "\n");
+    return 0;
+}
+
+pub fn gs_spirv_expr(nid: i64, st: i64, want_float: bool) -> str {
+    if nid < 0 { return "%int_0"; }
+    let k = __engine("ast_node_kind", nid);
+    let orig = __engine("ast_orig_kind", nid);
+    if k == 15 && __engine("ast_node_lit_kind", nid) == 1 {
+        let v = __engine("ast_node_raw_bits", nid);
+        let cid = gs_next_spv_id(st, "const");
+        if want_float {
+            gs_spv_append(st, cid + " = OpConstant %float " + v + ".0");
+        } else {
+            gs_spv_append(st, cid + " = OpConstant %int " + v);
+        }
+        return cid;
+    }
+    if k == 14 {
+        let nm = __engine("sym_str", __engine("ast_node_sym", nid));
+        if (__engine("map_get", st, "has_ssa_" + nm) + 0) == 1 {
+            return "" + __engine("map_get", st, "ssa_" + nm);
+        }
+        return "%param_" + nm;
+    }
+    if orig == 210 {
+        let base_nm = __engine("sym_str", __engine("ast_node_sym", __engine("ast_child_at", nid, 0)));
+        let idx_v = gs_spirv_expr(__engine("ast_child_at", nid, 1), st, false);
+        let ptr_id = gs_next_spv_id(st, "ptr");
+        let val_id = gs_next_spv_id(st, "ld");
+        gs_spv_append(st, ptr_id + " = OpAccessChain %_ptr_StorageBuffer_float %param_" + base_nm + " %int_0 " + idx_v);
+        gs_spv_append(st, val_id + " = OpLoad %float " + ptr_id);
+        return val_id;
+    }
+    if k == 16 && gc_is_gid_call(nid) {
+        let gv = gs_next_spv_id(st, "gidv");
+        let gx = gs_next_spv_id(st, "gidx");
+        gs_spv_append(st, gv + " = OpLoad %v3uint %gl_GlobalInvocationID");
+        gs_spv_append(st, gx + " = OpCompositeExtract %int " + gv + " 0");
+        return gx;
+    }
+    if k == 19 {
+        let op = __engine("ast_node_raw_bits", nid);
+        let flt = want_float || gs_expr_is_float(nid, st);
+        let l = gs_spirv_expr(__engine("ast_child_at", nid, 0), st, flt);
+        let r = gs_spirv_expr(__engine("ast_child_at", nid, 1), st, flt);
+        let dst = gs_next_spv_id(st, "alu");
+        if op == 1 {
+            gs_spv_append(st, dst + " = " + (if flt { "OpFAdd %float " } else { "OpIAdd %int " }) + l + " " + r);
+            return dst;
+        }
+        if op == 2 {
+            gs_spv_append(st, dst + " = " + (if flt { "OpFSub %float " } else { "OpISub %int " }) + l + " " + r);
+            return dst;
+        }
+        if op == 3 {
+            gs_spv_append(st, dst + " = " + (if flt { "OpFMul %float " } else { "OpIMul %int " }) + l + " " + r);
+            return dst;
+        }
+        if op == 4 {
+            gs_spv_append(st, dst + " = " + (if flt { "OpFDiv %float " } else { "OpSDiv %int " }) + l + " " + r);
+            return dst;
+        }
+        if op == 10 {
+            gs_spv_append(st, dst + " = OpSLessThan %bool " + l + " " + r);
+            return dst;
+        }
+        gs_spv_append(st, dst + " = OpIAdd %int " + l + " " + r);
+        return dst;
+    }
+    return "%int_0";
+}
+
+pub fn gs_spirv_stmt(nid: i64, st: i64) -> i64 {
+    let k = __engine("ast_node_kind", nid);
+    if k == 18 {
+        let cc = __engine("ast_child_count", nid);
+        var ci = 0;
+        while ci < cc {
+            gs_spirv_stmt(__engine("ast_child_at", nid, ci), st);
+            ci = ci + 1;
+        }
+        return 0;
+    }
+    if k == 4 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
+        if __engine("ast_child_count", nid) > 0 {
+            let init_nid = __engine("ast_child_at", nid, 0);
+            let flt = gs_expr_is_float(init_nid, st);
+            if flt { __engine("map_set", st, "is_flt_" + vname, 1); }
+            let sv = gs_spirv_expr(init_nid, st, flt);
+            __engine("map_set", st, "has_ssa_" + vname, 1);
+            __engine("map_set", st, "ssa_" + vname, sv);
+        }
+        return 0;
+    }
+    if k == 20 {
+        let lhs_nid = __engine("ast_child_at", nid, 0);
+        let rhs_nid = __engine("ast_child_at", nid, 1);
+        if __engine("ast_orig_kind", lhs_nid) == 210 {
+            let out_nm = __engine("sym_str", __engine("ast_node_sym", __engine("ast_child_at", lhs_nid, 0)));
+            let idx_v = gs_spirv_expr(__engine("ast_child_at", lhs_nid, 1), st, false);
+            let rhs_v = gs_spirv_expr(rhs_nid, st, true);
+            let dst_ptr = gs_next_spv_id(st, "outptr");
+            gs_spv_append(st, dst_ptr + " = OpAccessChain %_ptr_StorageBuffer_float %param_" + out_nm + " %int_0 " + idx_v);
+            gs_spv_append(st, "OpStore " + dst_ptr + " " + rhs_v);
+            return 0;
+        }
+        let vname = __engine("sym_str", __engine("ast_node_sym", lhs_nid));
+        let rv = gs_spirv_expr(rhs_nid, st, gs_expr_is_float(rhs_nid, st));
+        __engine("map_set", st, "has_ssa_" + vname, 1);
+        __engine("map_set", st, "ssa_" + vname, rv);
+        return 0;
+    }
+    if k == 6 {
+        let cond_v = gs_spirv_expr(__engine("ast_child_at", nid, 0), st, false);
+        let lbl_then = gs_next_spv_id(st, "then");
+        let lbl_merge = gs_next_spv_id(st, "merge");
+        gs_spv_append(st, "OpSelectionMerge " + lbl_merge + " None");
+        gs_spv_append(st, "OpBranchConditional " + cond_v + " " + lbl_then + " " + lbl_merge);
+        gs_spv_append(st, lbl_then + " = OpLabel");
+        gs_spirv_stmt(__engine("ast_child_at", nid, 1), st);
+        gs_spv_append(st, "OpBranch " + lbl_merge);
+        gs_spv_append(st, lbl_merge + " = OpLabel");
+        return 0;
+    }
+    if k == 8 && __engine("ast_child_count", nid) > 0 {
+        gs_spirv_expr(__engine("ast_child_at", nid, 0), st, false);
+        return 0;
+    }
+    return 0;
+}
+
+pub fn gs_emit_spirv_from_arena(kernel_name: str) -> str {
+    let fn_nid = cg_find_fn_by_name(kernel_name);
+    if fn_nid < 0 { return ""; }
+    let st = __engine("map_new");
+    __engine("map_set", st, "spv_n", 0);
+    __engine("map_set", st, "spv_ops", "");
+    let cc = __engine("ast_child_count", fn_nid);
+    var decls = "";
+    var pi = 1;
+    while pi < cc {
+        let pch = __engine("ast_child_at", fn_nid, pi);
+        if __engine("ast_node_kind", pch) == 21 {
+            let pname = __engine("sym_str", __engine("ast_node_sym", pch));
+            let ptname = __engine("sym_str", __engine("ast_node_raw_bits", pch));
+            let p = cg_resolve_type_physics(ptname);
+            if p.reg_class == 6 {
+                __engine("map_set", st, "is_ptr_" + pname, 1);
+                decls = decls + "%param_" + pname + " = OpVariable %_ptr_StorageBuffer_arr StorageBuffer\n";
+            } else {
+                decls = decls + "%param_" + pname + " = OpVariable %_ptr_Uniform_int Uniform\n";
+            }
+        }
+        pi = pi + 1;
+    }
+    gs_spirv_stmt(__engine("ast_child_at", fn_nid, 0), st);
+    let ops = "" + __engine("map_get", st, "spv_ops");
+    return "; SPIR-V\n"
+        + "; Version: 1.6\n"
+        + "OpCapability Shader\n"
+        + "OpMemoryModel Logical GLSL450\n"
+        + "OpEntryPoint GLCompute %" + kernel_name + " \"" + kernel_name + "\" %gl_GlobalInvocationID\n"
+        + "OpExecutionMode %" + kernel_name + " LocalSize 64 1 1\n"
+        + "%int_0 = OpConstant %int 0\n"
+        + decls
+        + "%" + kernel_name + " = OpFunction %void None %fn_ty\n"
+        + "%entry = OpLabel\n"
+        + ops
+        + "  OpReturn\n"
+        + "OpFunctionEnd\n";
+}

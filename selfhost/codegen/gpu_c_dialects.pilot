@@ -89,3 +89,234 @@ pub fn emit_openmp_kernel(
         source_code: src,
     };
 }
+
+pub fn gc_param_c_type(tname: str, dialect: str) -> str {
+    let p = cg_resolve_type_physics(tname);
+    if p.reg_class == 6 {
+        if dialect == "opencl" {
+            return "__global float*";
+        }
+        return "float*";
+    }
+    if p.reg_class == 4 {
+        if p.bit_width <= 32 { return "float"; }
+        return "double";
+    }
+    if p.reg_class == 3 {
+        if dialect == "opencl" { return "ulong"; }
+        return "uint64_t";
+    }
+    if dialect == "opencl" {
+        return "long";
+    }
+    return "int64_t";
+}
+
+pub fn gc_is_gid_call(nid: i64) -> bool {
+    if nid < 0 { return false; }
+    if __engine("ast_node_kind", nid) != 16 || __engine("ast_child_count", nid) < 1 {
+        return false;
+    }
+    let cal = __engine("ast_child_at", nid, 0);
+    return __engine("sym_str", __engine("ast_node_sym", cal)) == "gpu_global_id";
+}
+
+pub pure fn gc_gid_intrinsic(dialect: str) -> str {
+    if dialect == "cuda" {
+        return "((int64_t)blockIdx.x * (int64_t)blockDim.x + (int64_t)threadIdx.x)";
+    }
+    if dialect == "hip" {
+        return "((int64_t)hipBlockIdx_x * (int64_t)hipBlockDim_x + (int64_t)hipThreadIdx_x)";
+    }
+    if dialect == "opencl" {
+        return "((long)get_global_id(0))";
+    }
+    return "idx";
+}
+
+pub fn gc_emit_expr(nid: i64, dialect: str) -> str {
+    if nid < 0 { return "0"; }
+    let k = __engine("ast_node_kind", nid);
+    let orig = __engine("ast_orig_kind", nid);
+    if k == 15 {
+        let lk = __engine("ast_node_lit_kind", nid);
+        if lk == 1 {
+            return "" + __engine("ast_node_raw_bits", nid);
+        }
+        if lk == 2 {
+            return __engine("source_slice", __engine("ast_span_start", nid), __engine("ast_span_end", nid));
+        }
+        if lk == 4 {
+            return if __engine("ast_node_raw_bits", nid) != 0 { "1" } else { "0" };
+        }
+        return "0";
+    }
+    if k == 14 {
+        return __engine("sym_str", __engine("ast_node_sym", nid));
+    }
+    if orig == 210 {
+        let base = gc_emit_expr(__engine("ast_child_at", nid, 0), dialect);
+        let idx = gc_emit_expr(__engine("ast_child_at", nid, 1), dialect);
+        return base + "[" + idx + "]";
+    }
+    if k == 17 {
+        let recv = gc_emit_expr(__engine("ast_child_at", nid, 0), dialect);
+        let fname = __engine("sym_str", __engine("ast_node_sym", nid));
+        return recv + "." + fname;
+    }
+    if orig == 206 {
+        let fl = __engine("ast_node_flags", nid);
+        let inner = gc_emit_expr(__engine("ast_child_at", nid, 0), dialect);
+        if fl == 4 { return "(~" + inner + ")"; }
+        if fl == 5 { return "(!" + inner + ")"; }
+        return "(-" + inner + ")";
+    }
+    if k == 19 {
+        let lhs = gc_emit_expr(__engine("ast_child_at", nid, 0), dialect);
+        let rhs = gc_emit_expr(__engine("ast_child_at", nid, 1), dialect);
+        let op = cg_binop_c_sym(__engine("ast_node_raw_bits", nid));
+        return "(" + lhs + " " + op + " " + rhs + ")";
+    }
+    if k == 16 {
+        if gc_is_gid_call(nid) {
+            return gc_gid_intrinsic(dialect);
+        }
+        let cal = __engine("sym_str", __engine("ast_node_sym", __engine("ast_child_at", nid, 0)));
+        let cc = __engine("ast_child_count", nid);
+        var args = "";
+        var ai = 1;
+        while ai < cc {
+            if ai > 1 { args = args + ", "; }
+            args = args + gc_emit_expr(__engine("ast_child_at", nid, ai), dialect);
+            ai = ai + 1;
+        }
+        return cal + "(" + args + ")";
+    }
+    return "0";
+}
+
+pub fn gc_emit_stmt(nid: i64, dialect: str, indent: str) -> str {
+    let k = __engine("ast_node_kind", nid);
+    let orig = __engine("ast_orig_kind", nid);
+    if k == 18 {
+        return gc_emit_block_stmts(nid, dialect, indent);
+    }
+    if k == 4 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
+        let tsym = __engine("ast_node_raw_bits", nid);
+        var cty = if dialect == "opencl" { "long" } else { "int64_t" };
+        if tsym > 0 {
+            cty = gc_param_c_type(__engine("sym_str", tsym), dialect);
+        }
+        let init = if __engine("ast_child_count", nid) > 0 {
+            gc_emit_expr(__engine("ast_child_at", nid, 0), dialect)
+        } else {
+            "0"
+        };
+        return indent + cty + " " + vname + " = " + init + ";\n";
+    }
+    if k == 20 {
+        let lhs = gc_emit_expr(__engine("ast_child_at", nid, 0), dialect);
+        let rhs = gc_emit_expr(__engine("ast_child_at", nid, 1), dialect);
+        return indent + lhs + " = " + rhs + ";\n";
+    }
+    if k == 8 {
+        if __engine("ast_child_count", nid) > 0 {
+            return indent + "return " + gc_emit_expr(__engine("ast_child_at", nid, 0), dialect) + ";\n";
+        }
+        return indent + "return;\n";
+    }
+    if k == 6 {
+        let cond = gc_emit_expr(__engine("ast_child_at", nid, 0), dialect);
+        let then_s = gc_emit_stmt(__engine("ast_child_at", nid, 1), dialect, indent + "  ");
+        var res = indent + nameof(if) + " (" + cond + ") {\n" + then_s + indent + "}";
+        if __engine("ast_child_count", nid) >= 3 {
+            let else_s = gc_emit_stmt(__engine("ast_child_at", nid, 2), dialect, indent + "  ");
+            res = res + " else {\n" + else_s + indent + "}";
+        }
+        return res + "\n";
+    }
+    if k == 7 {
+        let cond = gc_emit_expr(__engine("ast_child_at", nid, 0), dialect);
+        let body_s = gc_emit_stmt(__engine("ast_child_at", nid, 1), dialect, indent + "  ");
+        return indent + "while (" + cond + ") {\n" + body_s + indent + "}\n";
+    }
+    if orig == 110 && __engine("ast_child_count", nid) > 0 {
+        return indent + gc_emit_expr(__engine("ast_child_at", nid, 0), dialect) + ";\n";
+    }
+    return indent + gc_emit_expr(nid, dialect) + ";\n";
+}
+
+pub fn gc_emit_block_stmts(blk_nid: i64, dialect: str, indent: str) -> str {
+    let cc = __engine("ast_child_count", blk_nid);
+    var out = "";
+    var ci = 0;
+    while ci < cc {
+        let st_nid = __engine("ast_child_at", blk_nid, ci);
+        if dialect == "openmp" && __engine("ast_node_kind", st_nid) == 4 && __engine("ast_child_count", st_nid) > 0 {
+            let init_nid = __engine("ast_child_at", st_nid, 0);
+            if gc_is_gid_call(init_nid) && ci + 1 < cc {
+                let vname = __engine("sym_str", __engine("ast_node_sym", st_nid));
+                let next_nid = __engine("ast_child_at", blk_nid, ci + 1);
+                if __engine("ast_node_kind", next_nid) == 6 && __engine("ast_child_count", next_nid) == 2 {
+                    let cond_nid = __engine("ast_child_at", next_nid, 0);
+                    if __engine("ast_node_kind", cond_nid) == 19 && __engine("ast_node_raw_bits", cond_nid) == 10 {
+                        let bound_s = gc_emit_expr(__engine("ast_child_at", cond_nid, 1), dialect);
+                        let inner_s = gc_emit_stmt(__engine("ast_child_at", next_nid, 1), dialect, indent + "  ");
+                        out = out + indent + "#pragma omp target teams distribute parallel for simd\n"
+                            + indent + "for (int64_t " + vname + " = 0; " + vname + " < " + bound_s + "; ++" + vname + ") {\n"
+                            + inner_s
+                            + indent + "}\n";
+                        ci = ci + 2;
+                        continue;
+                    }
+                }
+            }
+        }
+        out = out + gc_emit_stmt(st_nid, dialect, indent);
+        ci = ci + 1;
+    }
+    return out;
+}
+
+pub fn gc_emit_c_dialect_kernel(dialect: str, kernel_name: str) -> str {
+    let fn_nid = cg_find_fn_by_name(kernel_name);
+    if fn_nid < 0 {
+        return "";
+    }
+    let cc = __engine("ast_child_count", fn_nid);
+    var params = "";
+    var pi = 1;
+    while pi < cc {
+        let pch = __engine("ast_child_at", fn_nid, pi);
+        if __engine("ast_node_kind", pch) == 21 {
+            if __engine("str_len", params) > 0 {
+                params = params + ", ";
+            }
+            let pname = __engine("sym_str", __engine("ast_node_sym", pch));
+            let ptname = __engine("sym_str", __engine("ast_node_raw_bits", pch));
+            params = params + gc_param_c_type(ptname, dialect) + " " + pname;
+        }
+        pi = pi + 1;
+    }
+    let ret_tname = cg_fn_return_type_name(fn_nid);
+    var ret_c = "void";
+    if __engine("str_len", ret_tname) > 0 {
+        let rp = cg_resolve_type_physics(ret_tname);
+        if rp.reg_class != 0 {
+            ret_c = gc_param_c_type(ret_tname, dialect);
+        }
+    }
+    let body_nid = __engine("ast_child_at", fn_nid, 0);
+    let body_src = gc_emit_block_stmts(body_nid, dialect, "  ");
+    if dialect == "cuda" {
+        return "#include <cuda_runtime.h>\n#include <stdint.h>\n\nextern \"C\" __global__ " + ret_c + " " + kernel_name + "(" + params + ") {\n" + body_src + "}\n";
+    }
+    if dialect == "hip" {
+        return "#include <hip/hip_runtime.h>\n#include <stdint.h>\n\nextern \"C\" __global__ " + ret_c + " " + kernel_name + "(" + params + ") {\n" + body_src + "}\n";
+    }
+    if dialect == "opencl" {
+        return "__kernel " + ret_c + " " + kernel_name + "(" + params + ") {\n" + body_src + "}\n";
+    }
+    return "#include <omp.h>\n#include <stdint.h>\n\n" + ret_c + " " + kernel_name + "(" + params + ") {\n" + body_src + "}\n";
+}

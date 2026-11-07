@@ -1,7 +1,7 @@
 // ============================================================================
 // FILE: selfhost/codegen/asm_emitter.pilot
 // Milestone 56.3: Layout-Aware Native & SIMD Vector Assembly Emitter
-// Emits x86_64 / AVX2 / FMA assembly modules from layout physics descriptors.
+// Emits System V AMD64 x86_64 & AVX2/SSE assembly strictly from layout physics.
 // ============================================================================
 
 pub struct AsmModuleArtifact {
@@ -37,4 +37,402 @@ pub fn build_asm_module(
         asm_text: emit_x86_64_function_asm(module_name, fn_name, body_insns, use_simd),
         uses_avx2_simd: use_simd,
     };
+}
+
+pub pure fn as_sysv_arg_reg(idx: i64) -> str {
+    if idx == 0 { return "%rdi"; }
+    if idx == 1 { return "%rsi"; }
+    if idx == 2 { return "%rdx"; }
+    if idx == 3 { return "%rcx"; }
+    if idx == 4 { return "%r8"; }
+    return "%r9";
+}
+
+pub fn as_next_lbl(st: i64) -> i64 {
+    let id = (__engine("map_get", st, "lid") + 0) + 1;
+    __engine("map_set", st, "lid", id);
+    return id;
+}
+
+pub fn as_emit_insn(st: i64, line: str) -> i64 {
+    let cur = __engine("map_get", st, "code");
+    __engine("map_set", st, "code", cur + "\t" + line + "\n");
+    return 0;
+}
+
+pub fn as_emit_lbl(st: i64, lbl: str) -> i64 {
+    let cur = __engine("map_get", st, "code");
+    __engine("map_set", st, "code", cur + lbl + ":\n");
+    return 0;
+}
+
+pub fn as_temp_off(st: i64, depth: i64) -> i64 {
+    let base = __engine("map_get", st, "tbase") + 0;
+    return (base + depth + 1) * 8;
+}
+
+// Evaluates AST expression `nid` into `%rax` using frame-allocated temporaries at `depth`.
+pub fn as_emit_expr(st: i64, nid: i64, depth: i64) -> i64 {
+    if nid < 0 {
+        as_emit_insn(st, "xorl %eax, %eax");
+        return 0;
+    }
+    let k = __engine("ast_node_kind", nid);
+    let orig = __engine("ast_orig_kind", nid);
+
+    if k == 15 {
+        let lk = __engine("ast_node_lit_kind", nid);
+        if lk == 1 {
+            as_emit_insn(st, "movabsq $" + __engine("ast_node_raw_bits", nid) + ", %rax");
+            return 0;
+        }
+        if lk == 4 {
+            if __engine("ast_node_raw_bits", nid) != 0 {
+                as_emit_insn(st, "movl $1, %eax");
+            } else {
+                as_emit_insn(st, "xorl %eax, %eax");
+            }
+            return 0;
+        }
+        as_emit_insn(st, "xorl %eax, %eax");
+        return 0;
+    }
+
+    if k == 14 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
+        let off = __engine("map_get", st, "off_" + vname) + 0;
+        as_emit_insn(st, "movq -" + off + "(%rbp), %rax");
+        return 0;
+    }
+
+    if orig == 206 {
+        as_emit_expr(st, __engine("ast_child_at", nid, 0), depth);
+        let fl = __engine("ast_node_flags", nid);
+        if fl == 0 {
+            as_emit_insn(st, "negq %rax");
+        } else if fl == 4 {
+            as_emit_insn(st, "notq %rax");
+        } else if fl == 5 {
+            as_emit_insn(st, "testq %rax, %rax");
+            as_emit_insn(st, "sete %al");
+            as_emit_insn(st, "movzbq %al, %rax");
+        }
+        return 0;
+    }
+
+    if k == 19 {
+        as_emit_expr(st, __engine("ast_child_at", nid, 0), depth);
+        let toff = as_temp_off(st, depth);
+        as_emit_insn(st, "movq %rax, -" + toff + "(%rbp)");
+        as_emit_expr(st, __engine("ast_child_at", nid, 1), depth + 1);
+        as_emit_insn(st, "movq %rax, %rcx");
+        as_emit_insn(st, "movq -" + toff + "(%rbp), %rax");
+
+        let op = __engine("ast_node_raw_bits", nid);
+        if op == 1 {
+            as_emit_insn(st, "addq %rcx, %rax");
+        } else if op == 2 {
+            as_emit_insn(st, "subq %rcx, %rax");
+        } else if op == 3 {
+            as_emit_insn(st, "imulq %rcx, %rax");
+        } else if op == 4 {
+            as_emit_insn(st, "cqto");
+            as_emit_insn(st, "idivq %rcx");
+        } else if op == 6 {
+            as_emit_insn(st, "cqto");
+            as_emit_insn(st, "idivq %rcx");
+            as_emit_insn(st, "movq %rdx, %rax");
+        } else if op >= 8 && op <= 13 {
+            as_emit_insn(st, "cmpq %rcx, %rax");
+            var cc_ins = "sete";
+            if op == 9 { cc_ins = "setne"; }
+            else if op == 10 { cc_ins = "setl"; }
+            else if op == 11 { cc_ins = "setle"; }
+            else if op == 12 { cc_ins = "setg"; }
+            else if op == 13 { cc_ins = "setge"; }
+            as_emit_insn(st, cc_ins + " %al");
+            as_emit_insn(st, "movzbq %al, %rax");
+        } else if op == 14 {
+            as_emit_insn(st, "testq %rax, %rax");
+            as_emit_insn(st, "setne %al");
+            as_emit_insn(st, "testq %rcx, %rcx");
+            as_emit_insn(st, "setne %cl");
+            as_emit_insn(st, "andb %cl, %al");
+            as_emit_insn(st, "movzbq %al, %rax");
+        } else if op == 15 {
+            as_emit_insn(st, "orq %rcx, %rax");
+            as_emit_insn(st, "setne %al");
+            as_emit_insn(st, "movzbq %al, %rax");
+        } else if op == 16 {
+            as_emit_insn(st, "andq %rcx, %rax");
+        } else if op == 17 {
+            as_emit_insn(st, "orq %rcx, %rax");
+        } else if op == 18 {
+            as_emit_insn(st, "xorq %rcx, %rax");
+        } else if op == 19 {
+            as_emit_insn(st, "salq %cl, %rax");
+        } else if op == 20 {
+            as_emit_insn(st, "sarq %cl, %rax");
+        }
+        return 0;
+    }
+
+    if k == 16 {
+        let cname = __engine("sym_str", __engine("ast_node_sym", __engine("ast_child_at", nid, 0)));
+        let cc = __engine("ast_child_count", nid);
+        let acnt = cc - 1;
+        var ai = 0;
+        while ai < acnt && ai < 6 {
+            as_emit_expr(st, __engine("ast_child_at", nid, ai + 1), depth + ai);
+            let aoff = as_temp_off(st, depth + ai);
+            as_emit_insn(st, "movq %rax, -" + aoff + "(%rbp)");
+            ai = ai + 1;
+        }
+        ai = 0;
+        while ai < acnt && ai < 6 {
+            let aoff = as_temp_off(st, depth + ai);
+            as_emit_insn(st, "movq -" + aoff + "(%rbp), " + as_sysv_arg_reg(ai));
+            ai = ai + 1;
+        }
+        as_emit_insn(st, "callq " + cname);
+        return 0;
+    }
+
+    as_emit_insn(st, "xorl %eax, %eax");
+    return 0;
+}
+
+pub fn as_emit_stmt(st: i64, nid: i64) -> i64 {
+    if nid < 0 { return 0; }
+    let k = __engine("ast_node_kind", nid);
+    let orig = __engine("ast_orig_kind", nid);
+
+    if k == 18 {
+        let cc = __engine("ast_child_count", nid);
+        var ci = 0;
+        while ci < cc {
+            as_emit_stmt(st, __engine("ast_child_at", nid, ci));
+            ci = ci + 1;
+        }
+        return 0;
+    }
+
+    if k == 4 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
+        let off = __engine("map_get", st, "off_" + vname) + 0;
+        if __engine("ast_child_count", nid) > 0 {
+            as_emit_expr(st, __engine("ast_child_at", nid, 0), 0);
+        } else {
+            as_emit_insn(st, "xorl %eax, %eax");
+        }
+        as_emit_insn(st, "movq %rax, -" + off + "(%rbp)");
+        return 0;
+    }
+
+    if k == 20 {
+        let lhs_nid = __engine("ast_child_at", nid, 0);
+        let vname = __engine("sym_str", __engine("ast_node_sym", lhs_nid));
+        let off = __engine("map_get", st, "off_" + vname) + 0;
+        as_emit_expr(st, __engine("ast_child_at", nid, 1), 0);
+        as_emit_insn(st, "movq %rax, -" + off + "(%rbp)");
+        return 0;
+    }
+
+    if k == 6 {
+        let id = as_next_lbl(st);
+        let e_lbl = ".Lif_else_" + id;
+        let m_lbl = ".Lif_end_" + id;
+        as_emit_expr(st, __engine("ast_child_at", nid, 0), 0);
+        as_emit_insn(st, "testq %rax, %rax");
+        if __engine("ast_child_count", nid) >= 3 {
+            as_emit_insn(st, "je " + e_lbl);
+            as_emit_stmt(st, __engine("ast_child_at", nid, 1));
+            as_emit_insn(st, "jmp " + m_lbl);
+            as_emit_lbl(st, e_lbl);
+            as_emit_stmt(st, __engine("ast_child_at", nid, 2));
+            as_emit_lbl(st, m_lbl);
+        } else {
+            as_emit_insn(st, "je " + m_lbl);
+            as_emit_stmt(st, __engine("ast_child_at", nid, 1));
+            as_emit_lbl(st, m_lbl);
+        }
+        return 0;
+    }
+
+    if k == 7 && orig == 106 {
+        let id = as_next_lbl(st);
+        let c_lbl = ".Lwh_cond_" + id;
+        let x_lbl = ".Lwh_end_" + id;
+        let ld = (__engine("map_get", st, "ldepth") + 0) + 1;
+        __engine("map_set", st, "ldepth", ld);
+        __engine("map_set", st, "lcond_" + ld, c_lbl);
+        __engine("map_set", st, "lend_" + ld, x_lbl);
+
+        as_emit_lbl(st, c_lbl);
+        as_emit_expr(st, __engine("ast_child_at", nid, 0), 0);
+        as_emit_insn(st, "testq %rax, %rax");
+        as_emit_insn(st, "je " + x_lbl);
+        as_emit_stmt(st, __engine("ast_child_at", nid, 1));
+        as_emit_insn(st, "jmp " + c_lbl);
+        as_emit_lbl(st, x_lbl);
+
+        __engine("map_set", st, "ldepth", ld - 1);
+        return 0;
+    }
+
+    if orig == 107 {
+        let ld = __engine("map_get", st, "ldepth") + 0;
+        if ld > 0 {
+            as_emit_insn(st, "jmp " + __engine("map_get", st, "lend_" + ld));
+        }
+        return 0;
+    }
+
+    if orig == 108 {
+        let ld = __engine("map_get", st, "ldepth") + 0;
+        if ld > 0 {
+            as_emit_insn(st, "jmp " + __engine("map_get", st, "lcond_" + ld));
+        }
+        return 0;
+    }
+
+    if k == 8 {
+        if __engine("ast_child_count", nid) > 0 {
+            as_emit_expr(st, __engine("ast_child_at", nid, 0), 0);
+        } else {
+            as_emit_insn(st, "xorl %eax, %eax");
+        }
+        as_emit_insn(st, "jmp " + __engine("map_get", st, "ret_lbl"));
+        return 0;
+    }
+
+    if orig == 110 && __engine("ast_child_count", nid) > 0 {
+        as_emit_expr(st, __engine("ast_child_at", nid, 0), 0);
+        return 0;
+    }
+
+    return 0;
+}
+
+pub fn as_find_first_binop(nid: i64) -> i64 {
+    if nid < 0 { return 1; }
+    if __engine("ast_node_kind", nid) == 19 {
+        return __engine("ast_node_raw_bits", nid);
+    }
+    let cc = __engine("ast_child_count", nid);
+    var ci = 0;
+    while ci < cc {
+        let sub = as_find_first_binop(__engine("ast_child_at", nid, ci));
+        if sub > 1 { return sub; }
+        ci = ci + 1;
+    }
+    return 1;
+}
+
+pub fn as_emit_simd_fn(fn_nid: i64, rdesc: LayoutDescriptor) -> str {
+    let fname = __engine("sym_str", __engine("ast_node_sym", fn_nid));
+    let body_nid = __engine("ast_child_at", fn_nid, 0);
+    let op = as_find_first_binop(body_nid);
+    let is_ymm = rdesc.repeat_count >= 8;
+    let is_f64_lane = rdesc.bit_width >= 64;
+    let suf = if is_f64_lane { "pd" } else { "ps" };
+    var root_op = "vadd";
+    if op == 2 { root_op = "vsub"; }
+    else if op == 3 { root_op = "vmul"; }
+    else if op == 4 { root_op = "vdiv"; }
+    let regs = if is_ymm { "%ymm1, %ymm0, %ymm0" } else { "%xmm1, %xmm0, %xmm0" };
+    return "\t.globl\t" + fname + "\n"
+        + fname + ":\n"
+        + "\t" + root_op + suf + " " + regs + "\n"
+        + "\tretq\n\n";
+}
+
+// Emits System V AMD64 `.s` assembly for all scalar and SIMD functions in `RawAstArena`.
+pub fn emit_arena_x86_64_asm() -> str {
+    let prog = cg_target_prog_nid();
+    let st = __engine("map_new");
+    __engine("map_set", st, "lid", 0);
+    var out = "\t.text\n";
+
+    if prog >= 0 {
+        let cc = __engine("ast_child_count", prog);
+        var ci = 0;
+        var fn_seq = 0;
+        while ci < cc {
+            let item = __engine("ast_child_at", prog, ci);
+            if __engine("ast_node_kind", item) == 3 && (__engine("ast_decl_flags", item) & 256) == 0 {
+                let fname = __engine("sym_str", __engine("ast_node_sym", item));
+                let rdesc = cg_resolve_type_physics(cg_fn_return_type_name(item));
+                if rdesc.reg_class == 5 {
+                    out = out + as_emit_simd_fn(item, rdesc);
+                } else {
+                    fn_seq = fn_seq + 1;
+                    let fst = __engine("map_new");
+                    __engine("map_set", fst, "code", "");
+                    __engine("map_set", fst, "lid", (__engine("map_get", st, "lid") + 0));
+                    __engine("map_set", fst, "ldepth", 0);
+                    let ret_lbl = ".Lret_fn_" + fn_seq;
+                    __engine("map_set", fst, "ret_lbl", ret_lbl);
+
+                    let fcc = __engine("ast_child_count", item);
+                    var pcnt = 0;
+                    var pi = 1;
+                    while pi < fcc {
+                        let p_nid = __engine("ast_child_at", item, pi);
+                        if __engine("ast_node_kind", p_nid) == 21 {
+                            let pname = __engine("sym_str", __engine("ast_node_sym", p_nid));
+                            pcnt = pcnt + 1;
+                            __engine("map_set", fst, "off_" + pname, pcnt * 8);
+                            __engine("map_set", fst, "lseen_" + pname, 1);
+                        }
+                        pi = pi + 1;
+                    }
+
+                    let body_nid = __engine("ast_child_at", item, 0);
+                    __engine("map_set", fst, "lcnt", 0);
+                    let lcnt = cg_collect_fn_locals(body_nid, fst);
+                    var li = 0;
+                    while li < lcnt {
+                        let lv = __engine("map_get", fst, "lname_" + li);
+                        __engine("map_set", fst, "off_" + lv, (pcnt + li + 1) * 8);
+                        li = li + 1;
+                    }
+
+                    __engine("map_set", fst, "tbase", pcnt + lcnt);
+                    let total_slots = pcnt + lcnt + 32;
+                    let frame_bytes = ((total_slots * 8 + 15) / 16) * 16;
+
+                    as_emit_insn(fst, "pushq %rbp");
+                    as_emit_insn(fst, "movq %rsp, %rbp");
+                    as_emit_insn(fst, "subq $" + frame_bytes + ", %rsp");
+
+                    pi = 1;
+                    var pidx = 0;
+                    while pi < fcc {
+                        let p_nid = __engine("ast_child_at", item, pi);
+                        if __engine("ast_node_kind", p_nid) == 21 && pidx < 6 {
+                            let pname = __engine("sym_str", __engine("ast_node_sym", p_nid));
+                            let off = __engine("map_get", fst, "off_" + pname) + 0;
+                            as_emit_insn(fst, "movq " + as_sysv_arg_reg(pidx) + ", -" + off + "(%rbp)");
+                            pidx = pidx + 1;
+                        }
+                        pi = pi + 1;
+                    }
+
+                    as_emit_stmt(fst, body_nid);
+                    as_emit_insn(fst, "xorl %eax, %eax");
+                    as_emit_lbl(fst, ret_lbl);
+                    as_emit_insn(fst, "movq %rbp, %rsp");
+                    as_emit_insn(fst, "popq %rbp");
+                    as_emit_insn(fst, "retq");
+
+                    __engine("map_set", st, "lid", __engine("map_get", fst, "lid") + 0);
+                    out = out + "\t.globl\t" + fname + "\n" + fname + ":\n" + __engine("map_get", fst, "code") + "\n";
+                }
+            }
+            ci = ci + 1;
+        }
+    }
+
+    return out + "\t.section\t.note.GNU-stack,\"\",@progbits\n";
 }

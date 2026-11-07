@@ -2,7 +2,8 @@
 // FILE: selfhost/codegen/physics.pilot
 // Milestone 56.1: Hardware Register & Layout Physics Engine
 // Derives CPU/GPU register classes, bit widths, byte sizes, alignments, and
-// 2-bit Perceus hardware lattice classifications strictly from layout physics.
+// 2-bit Perceus hardware lattice classifications strictly from layout physics
+// and mounted `PhysicsRegistry` (`RawAstArena` + `LayoutTable`) queries.
 // ============================================================================
 
 pub struct LayoutDescriptor {
@@ -63,4 +64,248 @@ pub pure fn lattice_borrows_memory(lattice_bits: i64) -> bool {
 
 pub pure fn lattice_owns_destructor(lattice_bits: i64) -> bool {
     return (lattice_bits & 2) != 0;
+}
+
+pub pure fn cg_is_ident_byte(b: i64) -> bool {
+    return (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 95;
+}
+
+// Finds the primary user `Program` root node (excluding mounted `span_start == u32::MAX` units).
+pub fn cg_target_prog_nid() -> i64 {
+    let total = __engine("ast_node_count");
+    var i = 0;
+    while i < total {
+        if __engine("ast_orig_kind", i) == 0 && __engine("ast_span_start", i) < 4000000000 {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// Finds a `StructDecl` (`kind_tag == 1`) matching `type_name`, preferring user declarations.
+pub fn cg_find_struct_by_name(type_name: str) -> i64 {
+    if __engine("str_len", type_name) <= 0 {
+        return -1;
+    }
+    let total = __engine("ast_node_count");
+    var i = 0;
+    while i < total {
+        if __engine("ast_node_kind", i) == 1 && __engine("ast_span_start", i) < 4000000000 {
+            if __engine("sym_str", __engine("ast_node_sym", i)) == type_name {
+                return i;
+            }
+        }
+        i = i + 1;
+    }
+    i = 0;
+    while i < total {
+        if __engine("ast_node_kind", i) == 1 {
+            if __engine("sym_str", __engine("ast_node_sym", i)) == type_name {
+                return i;
+            }
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// Finds a target `FnDecl` (`kind_tag == 3`) by name.
+pub fn cg_find_fn_by_name(fn_name: str) -> i64 {
+    let prog = cg_target_prog_nid();
+    if prog >= 0 {
+        let cc = __engine("ast_child_count", prog);
+        var ci = 0;
+        while ci < cc {
+            let ch = __engine("ast_child_at", prog, ci);
+            if __engine("ast_node_kind", ch) == 3 && __engine("sym_str", __engine("ast_node_sym", ch)) == fn_name {
+                return ch;
+            }
+            ci = ci + 1;
+        }
+    }
+    let total = __engine("ast_node_count");
+    var j = 0;
+    while j < total {
+        if __engine("ast_node_kind", j) == 3 && __engine("ast_span_start", j) < 4000000000 {
+            if __engine("sym_str", __engine("ast_node_sym", j)) == fn_name {
+                return j;
+            }
+        }
+        j = j + 1;
+    }
+    return -1;
+}
+
+// Returns true iff `s_nid` declares one or more stored aggregate fields (`kind_tag == 21` or `4`).
+pub fn cg_struct_has_stored_fields(s_nid: i64) -> bool {
+    if s_nid < 0 { return false; }
+    let my_sym = __engine("ast_node_sym", s_nid);
+    let cc = __engine("ast_child_count", s_nid);
+    var i = 0;
+    while i < cc {
+        let ch = __engine("ast_child_at", s_nid, i);
+        let fk = __engine("ast_node_kind", ch);
+        if fk == 21 || fk == 4 {
+            if __engine("ast_node_raw_bits", ch) != my_sym {
+                return true;
+            }
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// Resolves hardware register & bit-width physics for `type_name` strictly from `[Bits(...)]` & `LayoutTable`.
+pub fn cg_resolve_type_physics(type_name: str) -> LayoutDescriptor {
+    if __engine("str_len", type_name) == 0 {
+        return create_layout_descriptor(0, 0, 0, 1, 0, 0);
+    }
+    let s_nid = cg_find_struct_by_name(type_name);
+    if s_nid >= 0 {
+        let bound_lid = __engine("ast_get_bound_layout", s_nid);
+        let lid = if bound_lid == 4294967295 { 0 } else { bound_lid };
+        if !cg_struct_has_stored_fields(s_nid) {
+            let decl_cnt = __engine("ast_attr_decl_count", s_nid);
+            var matched = -1;
+            var di = 0;
+            while di < decl_cnt {
+                let argc = __engine("ast_attr_decl_arg_count", s_nid, di);
+                if argc == 2 || argc == 3 {
+                    let aname = __engine("sym_str", __engine("ast_attr_name", s_nid, di));
+                    if matched < 0 || aname == "Bits" {
+                        matched = di;
+                    }
+                }
+                di = di + 1;
+            }
+            if matched >= 0 {
+                let argc = __engine("ast_attr_decl_arg_count", s_nid, matched);
+                let w = __engine("ast_attr_decl_arg", s_nid, matched, 0);
+                var lanes = 1;
+                var bank = __engine("ast_attr_decl_arg", s_nid, matched, 1);
+                if argc == 3 {
+                    lanes = bank;
+                    bank = __engine("ast_attr_decl_arg", s_nid, matched, 2);
+                }
+                return create_layout_descriptor(lid, bank, w, lanes, 0, 0);
+            }
+            let flat_cnt = __engine("ast_attr_count", s_nid);
+            if flat_cnt >= 2 {
+                let w0 = __engine("ast_attr_arg", s_nid, 0);
+                var ln0 = 1;
+                var bk0 = __engine("ast_attr_arg", s_nid, 1);
+                if flat_cnt >= 3 {
+                    ln0 = bk0;
+                    bk0 = __engine("ast_attr_arg", s_nid, 2);
+                }
+                return create_layout_descriptor(lid, bk0, w0, ln0, 0, 0);
+            }
+            return create_layout_descriptor(lid, 0, 0, 1, 0, 0);
+        }
+        let cc = __engine("ast_child_count", s_nid);
+        var fcnt = 0;
+        var fi = 0;
+        while fi < cc {
+            let fch = __engine("ast_child_at", s_nid, fi);
+            if __engine("ast_node_kind", fch) == 21 {
+                fcnt = fcnt + 1;
+            }
+            fi = fi + 1;
+        }
+        let bsz = if bound_lid != 4294967295 { __engine("layout_metrics", bound_lid) } else { fcnt * 8 };
+        return create_layout_descriptor(lid, 7, bsz * 8, 1, fcnt, 0);
+    }
+    return create_layout_descriptor(0, 2, 64, 1, 0, 0);
+}
+
+// Extracts the return type identifier after `->` in `FnDecl` signature header (or `""` for `void`).
+pub fn cg_fn_return_type_name(fn_nid: i64) -> str {
+    let s0 = __engine("ast_span_start", fn_nid);
+    var s1 = __engine("ast_span_end", fn_nid);
+    if __engine("ast_child_count", fn_nid) > 0 {
+        let body_s = __engine("ast_span_start", __engine("ast_child_at", fn_nid, 0));
+        if body_s > s0 && body_s < s1 {
+            s1 = body_s;
+        }
+    }
+    let hdr = __engine("source_slice", s0, s1);
+    let n = __engine("str_len", hdr);
+    var pdepth = 0;
+    var i = 0;
+    while i + 1 < n {
+        let b = __engine("str_byte_at", hdr, i);
+        if b == 40 {
+            pdepth = pdepth + 1;
+        } else if b == 41 {
+            if pdepth > 0 { pdepth = pdepth - 1; }
+        } else if pdepth == 0 && b == 45 && __engine("str_byte_at", hdr, i + 1) == 62 {
+            var j = i + 2;
+            while j < n && __engine("str_byte_at", hdr, j) <= 32 {
+                j = j + 1;
+            }
+            let t_start = j;
+            while j < n && cg_is_ident_byte(__engine("str_byte_at", hdr, j)) {
+                j = j + 1;
+            }
+            if j > t_start {
+                return __engine("str_slice", hdr, t_start, j);
+            }
+            return "";
+        }
+        i = i + 1;
+    }
+    return "";
+}
+
+pub pure fn cg_binop_c_sym(op: i64) -> str {
+    if op == 1 { return "+"; }
+    if op == 2 { return "-"; }
+    if op == 3 { return "*"; }
+    if op == 4 { return "/"; }
+    if op == 6 { return "%"; }
+    if op == 8 { return "=="; }
+    if op == 9 { return "!="; }
+    if op == 10 { return "<"; }
+    if op == 11 { return "<="; }
+    if op == 12 { return ">"; }
+    if op == 13 { return ">="; }
+    if op == 14 { return "&&"; }
+    if op == 15 { return "||"; }
+    if op == 16 { return "&"; }
+    if op == 17 { return "|"; }
+    if op == 18 { return "^"; }
+    if op == 19 { return "<<"; }
+    if op == 20 { return ">>"; }
+    return "+";
+}
+
+pub fn cg_is_struct_literal_call(nid: i64) -> bool {
+    if __engine("ast_node_kind", nid) != 16 || __engine("ast_child_count", nid) != 2 {
+        return false;
+    }
+    return __engine("ast_orig_kind", __engine("ast_child_at", nid, 1)) == 219;
+}
+
+// Walks `nid` to collect all unique `LetStmt`/`VarStmt` local variable declarations into `st`.
+pub fn cg_collect_fn_locals(nid: i64, st: i64) -> i64 {
+    if nid < 0 { return 0; }
+    let k = __engine("ast_node_kind", nid);
+    if k == 4 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
+        if (__engine("map_get", st, "lseen_" + vname) + 0) == 0 {
+            __engine("map_set", st, "lseen_" + vname, 1);
+            let idx = __engine("map_get", st, "lcnt") + 0;
+            __engine("map_set", st, "lname_" + idx, vname);
+            __engine("map_set", st, "ltsym_" + idx, __engine("ast_node_raw_bits", nid));
+            __engine("map_set", st, "lcnt", idx + 1);
+        }
+    }
+    let cc = __engine("ast_child_count", nid);
+    var ci = 0;
+    while ci < cc {
+        cg_collect_fn_locals(__engine("ast_child_at", nid, ci), st);
+        ci = ci + 1;
+    }
+    return __engine("map_get", st, "lcnt") + 0;
 }

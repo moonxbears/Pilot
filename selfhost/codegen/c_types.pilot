@@ -17,6 +17,7 @@ pub struct CTypeMapping {
 // Reg classes: 0=unit, 1=noreturn, 2=gpr_signed, 3=gpr_unsigned,
 // 4=simd_float, 5=simd_vector, 6=raw_ptr, 7=composite.
 pub pure fn c11_type_for_physics(reg_class: i64, bit_width: i64, layout_id: i64) -> str {
+    let _lid = layout_id;
     if reg_class == 0 || reg_class == 1 {
         return "void";
     }
@@ -43,12 +44,17 @@ pub pure fn c11_type_for_physics(reg_class: i64, bit_width: i64, layout_id: i64)
     return "PilotLayoutStruct";
 }
 
+// Resolves a Pilot type name to its C11 type strictly via `cg_resolve_type_physics`.
+pub fn ct_c11_type_for_name(type_name: str) -> str {
+    let desc = cg_resolve_type_physics(type_name);
+    if desc.reg_class == 7 {
+        return type_name;
+    }
+    return c11_type_for_physics(desc.reg_class, desc.bit_width, desc.layout_id);
+}
+
 // Deduces structural composite shape from `(field_count, lattice_bits)`
-// per AGENTS.md §1 Mechanism 2 (Structural Field Anatomy):
-// - 2 fields + 0b01 -> contiguous view (`{ void* ptr; size_t len; }`)
-// - 3 fields + 0b01 -> strided lens (`{ void* ptr; size_t len; ptrdiff_t stride; }`)
-// - 3 fields + 0b10 -> owned buffer (`{ void* ptr; size_t len; size_t cap; }`)
-// - 2 fields + 0b00 -> bounds pair (`{ int64_t lo; int64_t hi; }`)
+// per AGENTS.md §1 Mechanism 2 (Structural Field Anatomy).
 pub pure fn deduce_structural_c_typedef(field_count: i64, lattice_bits: i64) -> str {
     if field_count == 2 && lattice_bits == 1 {
         return "typedef struct { void* ptr; size_t len; } PilotView2;";

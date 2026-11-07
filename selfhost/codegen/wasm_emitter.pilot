@@ -1,8 +1,8 @@
 // ============================================================================
 // FILE: selfhost/codegen/wasm_emitter.pilot
 // Milestone 56.3: Layout-Aware WebAssembly (WAT / `.wasm` / `.mjs` / `.d.ts`) Emitter
-// Deduces WASM value types from `(reg_class, bit_width)` physics, emits WAT
-// modules with WASI Preview 1 imports, and generates JS/TS host bindings.
+// Deduces WASM value types from `(reg_class, bit_width)` physics, emits binary
+// WASM v1 modules (`\0asm\x01\x00\x00\x00`), WAT text, and JS/TS host bindings.
 // ============================================================================
 
 pub struct WasmBundleArtifact {
@@ -30,25 +30,25 @@ pub pure fn wasm_binary_magic_word() -> i64 {
 
 pub pure fn emit_wat_module(module_name: str, body_expr: str) -> str {
     return "(module ;; " + module_name + "\n"
-        + "  (import \"wasi_snapshot_preview1\" \"fd_write\" (func $fd_write (param i32 i32 i32 i32) (result i32)))\n"
         + "  (memory (export \"memory\") 1)\n"
-        + "  (func (export \"main\") (result i64)\n"
+        + "  (func (export \"entry\") (result i64)\n"
         + "    " + body_expr + "\n"
         + "  )\n"
         + ")\n";
 }
 
 pub pure fn emit_wasm_mjs_bindings(module_name: str) -> str {
-    return "export async function loadPilotModule(wasmBytes) {\n"
+    return "// Bindings for " + module_name + "\n"
+        + "export async function loadPilotModule(wasmBytes) {\n"
         + "  const { instance } = await WebAssembly.instantiate(wasmBytes, {});\n"
         + "  return instance.exports;\n"
         + "}\n";
 }
 
 pub pure fn emit_wasm_dts_bindings(module_name: str) -> str {
-    return "export interface PilotModule {\n"
+    return "// Type declarations for " + module_name + "\n"
+        + "export interface PilotModule {\n"
         + "  readonly memory: WebAssembly.Memory;\n"
-        + "  main(): bigint;\n"
         + "}\n"
         + "export function loadPilotModule(wasmBytes: BufferSource): Promise<PilotModule>;\n";
 }
@@ -61,4 +61,445 @@ pub fn build_wasm_bundle(module_name: str, body_expr: str) -> WasmBundleArtifact
         dts_bindings: emit_wasm_dts_bindings(module_name),
         magic_word: wasm_binary_magic_word(),
     };
+}
+
+pub pure fn wm_nib_hex(n: i64) -> str {
+    let v = n & 15;
+    if v == 0 { return "0"; }
+    if v == 1 { return "1"; }
+    if v == 2 { return "2"; }
+    if v == 3 { return "3"; }
+    if v == 4 { return "4"; }
+    if v == 5 { return "5"; }
+    if v == 6 { return "6"; }
+    if v == 7 { return "7"; }
+    if v == 8 { return "8"; }
+    if v == 9 { return "9"; }
+    if v == 10 { return "a"; }
+    if v == 11 { return "b"; }
+    if v == 12 { return "c"; }
+    if v == 13 { return "d"; }
+    if v == 14 { return "e"; }
+    return "f";
+}
+
+pub pure fn wm_byte_hex(b: i64) -> str {
+    return wm_nib_hex((b >> 4) & 15) + wm_nib_hex(b & 15);
+}
+
+pub fn wm_uleb_hex(val: i64) -> str {
+    var v = if val < 0 { 0 } else { val };
+    var out = "";
+    var more = true;
+    while more {
+        var b = v & 127;
+        v = v >> 7;
+        if v != 0 {
+            b = b | 128;
+        } else {
+            more = false;
+        }
+        out = out + wm_byte_hex(b);
+    }
+    return out;
+}
+
+pub fn wm_sleb_hex(val: i64) -> str {
+    var cur = val;
+    var out = "";
+    var more = true;
+    while more {
+        var b = cur & 127;
+        cur = cur >> 7;
+        let sign_bit = (b & 64) != 0;
+        if (cur == 0 && !sign_bit) || (cur == -1 && sign_bit) {
+            more = false;
+        } else {
+            b = b | 128;
+        }
+        out = out + wm_byte_hex(b);
+    }
+    return out;
+}
+
+pub fn wm_str_vec_hex(s: str) -> str {
+    let n = __engine("str_len", s);
+    var out = wm_uleb_hex(n);
+    var i = 0;
+    while i < n {
+        out = out + wm_byte_hex(__engine("str_byte_at", s, i));
+        i = i + 1;
+    }
+    return out;
+}
+
+pub fn wm_section_hex(sec_id: i64, payload_hex: str) -> str {
+    let byte_len = __engine("str_len", payload_hex) / 2;
+    return wm_byte_hex(sec_id) + wm_uleb_hex(byte_len) + payload_hex;
+}
+
+pub fn wm_emit_expr_hex(st: i64, nid: i64) -> str {
+    if nid < 0 { return "4200"; }
+    let k = __engine("ast_node_kind", nid);
+    let orig = __engine("ast_orig_kind", nid);
+
+    if k == 15 {
+        let lk = __engine("ast_node_lit_kind", nid);
+        if lk == 1 {
+            return "42" + wm_sleb_hex(__engine("ast_node_raw_bits", nid));
+        }
+        if lk == 4 {
+            if __engine("ast_node_raw_bits", nid) != 0 { return "4201"; }
+            return "4200";
+        }
+        return "4200";
+    }
+
+    if k == 14 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
+        let idx = __engine("map_get", st, "loc_" + vname) + 0;
+        return "20" + wm_uleb_hex(idx);
+    }
+
+    if orig == 206 {
+        let sub = wm_emit_expr_hex(st, __engine("ast_child_at", nid, 0));
+        let fl = __engine("ast_node_flags", nid);
+        if fl == 0 {
+            return "4200" + sub + "7d";
+        }
+        if fl == 4 {
+            return sub + "427f85";
+        }
+        if fl == 5 {
+            return sub + "50ad";
+        }
+        return sub;
+    }
+
+    if k == 19 {
+        let lhs = wm_emit_expr_hex(st, __engine("ast_child_at", nid, 0));
+        let rhs = wm_emit_expr_hex(st, __engine("ast_child_at", nid, 1));
+        let op = __engine("ast_node_raw_bits", nid);
+        if op == 1 { return lhs + rhs + "7c"; }
+        if op == 2 { return lhs + rhs + "7d"; }
+        if op == 3 { return lhs + rhs + "7e"; }
+        if op == 4 { return lhs + rhs + "7f"; }
+        if op == 6 { return lhs + rhs + "81"; }
+        if op == 8 { return lhs + rhs + "51ad"; }
+        if op == 9 { return lhs + rhs + "52ad"; }
+        if op == 10 { return lhs + rhs + "53ad"; }
+        if op == 11 { return lhs + rhs + "57ad"; }
+        if op == 12 { return lhs + rhs + "55ad"; }
+        if op == 13 { return lhs + rhs + "59ad"; }
+        if op == 14 { return lhs + "420052ad" + rhs + "420052ad83"; }
+        if op == 15 { return lhs + "420052ad" + rhs + "420052ad84"; }
+        if op == 16 { return lhs + rhs + "83"; }
+        if op == 17 { return lhs + rhs + "84"; }
+        if op == 18 { return lhs + rhs + "85"; }
+        if op == 19 { return lhs + rhs + "86"; }
+        if op == 20 { return lhs + rhs + "87"; }
+        return lhs + rhs + "7c";
+    }
+
+    if k == 16 {
+        let cname = __engine("sym_str", __engine("ast_node_sym", __engine("ast_child_at", nid, 0)));
+        let cc = __engine("ast_child_count", nid);
+        var args = "";
+        var ai = 1;
+        while ai < cc {
+            args = args + wm_emit_expr_hex(st, __engine("ast_child_at", nid, ai));
+            ai = ai + 1;
+        }
+        let fidx = __engine("map_get", st, "fidx_" + cname) + 0;
+        let is_void = (__engine("map_get", st, "fvoid_" + cname) + 0) == 1;
+        let call_hex = args + "10" + wm_uleb_hex(fidx);
+        if is_void {
+            return call_hex + "4200";
+        }
+        return call_hex;
+    }
+
+    return "4200";
+}
+
+pub fn wm_emit_stmt_hex(st: i64, nid: i64) -> str {
+    if nid < 0 { return ""; }
+    let k = __engine("ast_node_kind", nid);
+    let orig = __engine("ast_orig_kind", nid);
+
+    if k == 18 {
+        let cc = __engine("ast_child_count", nid);
+        var out = "";
+        var ci = 0;
+        while ci < cc {
+            out = out + wm_emit_stmt_hex(st, __engine("ast_child_at", nid, ci));
+            ci = ci + 1;
+        }
+        return out;
+    }
+
+    if k == 4 {
+        let vname = __engine("sym_str", __engine("ast_node_sym", nid));
+        let idx = __engine("map_get", st, "loc_" + vname) + 0;
+        if __engine("ast_child_count", nid) > 0 {
+            return wm_emit_expr_hex(st, __engine("ast_child_at", nid, 0)) + "21" + wm_uleb_hex(idx);
+        }
+        return "420021" + wm_uleb_hex(idx);
+    }
+
+    if k == 20 {
+        let lhs_nid = __engine("ast_child_at", nid, 0);
+        let vname = __engine("sym_str", __engine("ast_node_sym", lhs_nid));
+        let idx = __engine("map_get", st, "loc_" + vname) + 0;
+        return wm_emit_expr_hex(st, __engine("ast_child_at", nid, 1)) + "21" + wm_uleb_hex(idx);
+    }
+
+    if k == 6 {
+        let cond_hex = wm_emit_expr_hex(st, __engine("ast_child_at", nid, 0)) + "420052";
+        let old_d = __engine("map_get", st, "cdepth") + 0;
+        __engine("map_set", st, "cdepth", old_d + 1);
+        let then_hex = wm_emit_stmt_hex(st, __engine("ast_child_at", nid, 1));
+        var else_hex = "";
+        if __engine("ast_child_count", nid) >= 3 {
+            else_hex = "05" + wm_emit_stmt_hex(st, __engine("ast_child_at", nid, 2));
+        }
+        __engine("map_set", st, "cdepth", old_d);
+        return cond_hex + "0440" + then_hex + else_hex + "0b";
+    }
+
+    if k == 7 && orig == 106 {
+        let old_d = __engine("map_get", st, "cdepth") + 0;
+        let brk_lvl = old_d + 1;
+        let cnt_lvl = old_d + 2;
+        let ld = (__engine("map_get", st, "ldepth") + 0) + 1;
+        __engine("map_set", st, "ldepth", ld);
+        __engine("map_set", st, "lbrk_" + ld, brk_lvl);
+        __engine("map_set", st, "lcnt_" + ld, cnt_lvl);
+        __engine("map_set", st, "cdepth", cnt_lvl);
+
+        let cond_exit = wm_emit_expr_hex(st, __engine("ast_child_at", nid, 0)) + "500d01";
+        let body_hex = wm_emit_stmt_hex(st, __engine("ast_child_at", nid, 1));
+
+        __engine("map_set", st, "cdepth", old_d);
+        __engine("map_set", st, "ldepth", ld - 1);
+        return "02400340" + cond_exit + body_hex + "0c000b0b";
+    }
+
+    if orig == 107 {
+        let ld = __engine("map_get", st, "ldepth") + 0;
+        if ld > 0 {
+            let cur_d = __engine("map_get", st, "cdepth") + 0;
+            let brk_lvl = __engine("map_get", st, "lbrk_" + ld) + 0;
+            return "0c" + wm_uleb_hex(cur_d - brk_lvl);
+        }
+        return "";
+    }
+
+    if orig == 108 {
+        let ld = __engine("map_get", st, "ldepth") + 0;
+        if ld > 0 {
+            let cur_d = __engine("map_get", st, "cdepth") + 0;
+            let cnt_lvl = __engine("map_get", st, "lcnt_" + ld) + 0;
+            return "0c" + wm_uleb_hex(cur_d - cnt_lvl);
+        }
+        return "";
+    }
+
+    if k == 8 {
+        let is_void = (__engine("map_get", st, "cur_void") + 0) == 1;
+        if is_void || __engine("ast_child_count", nid) == 0 {
+            return "0f";
+        }
+        return wm_emit_expr_hex(st, __engine("ast_child_at", nid, 0)) + "0f";
+    }
+
+    if orig == 110 && __engine("ast_child_count", nid) > 0 {
+        return wm_emit_expr_hex(st, __engine("ast_child_at", nid, 0)) + "1a";
+    }
+
+    return "";
+}
+
+pub fn wm_collect_arena_fns() -> i64 {
+    let meta = __engine("map_new");
+    __engine("map_set", meta, "fcnt", 0);
+    let prog = cg_target_prog_nid();
+    if prog >= 0 {
+        let cc = __engine("ast_child_count", prog);
+        var ci = 0;
+        while ci < cc {
+            let item = __engine("ast_child_at", prog, ci);
+            if __engine("ast_node_kind", item) == 3 && (__engine("ast_decl_flags", item) & 256) == 0 {
+                let nm = __engine("sym_str", __engine("ast_node_sym", item));
+                let rdesc = cg_resolve_type_physics(cg_fn_return_type_name(item));
+                let idx = __engine("map_get", meta, "fcnt") + 0;
+                __engine("map_set", meta, "fname_" + idx, nm);
+                __engine("map_set", meta, "fnid_" + idx, item);
+                __engine("map_set", meta, "fvoid_" + idx, if rdesc.reg_class == 0 || rdesc.reg_class == 1 { 1 } else { 0 });
+                __engine("map_set", meta, "fidx_" + nm, idx);
+                __engine("map_set", meta, "fvoid_" + nm, if rdesc.reg_class == 0 || rdesc.reg_class == 1 { 1 } else { 0 });
+                __engine("map_set", meta, "fcnt", idx + 1);
+            }
+            ci = ci + 1;
+        }
+    }
+    return meta;
+}
+
+// Emits a valid WebAssembly v1 binary module as lowercase hex exporting all functions in `RawAstArena`.
+pub fn emit_arena_wasm_hex() -> str {
+    let meta = wm_collect_arena_fns();
+    let fcnt = __engine("map_get", meta, "fcnt") + 0;
+    let header = "0061736d01000000";
+    if fcnt == 0 {
+        return header + wm_section_hex(5, "010001");
+    }
+
+    var type_entries = "";
+    var func_entries = "";
+    var export_entries = "";
+    var code_entries = "";
+
+    var fi = 0;
+    while fi < fcnt {
+        let fn_nid = __engine("map_get", meta, "fnid_" + fi) + 0;
+        let fname = __engine("map_get", meta, "fname_" + fi);
+        let is_void = (__engine("map_get", meta, "fvoid_" + fi) + 0) == 1;
+
+        let st = __engine("map_new");
+        __engine("map_set", st, "cdepth", 0);
+        __engine("map_set", st, "ldepth", 0);
+        __engine("map_set", st, "cur_void", if is_void { 1 } else { 0 });
+
+        var m_i = 0;
+        while m_i < fcnt {
+            let m_nm = __engine("map_get", meta, "fname_" + m_i);
+            __engine("map_set", st, "fidx_" + m_nm, m_i);
+            __engine("map_set", st, "fvoid_" + m_nm, __engine("map_get", meta, "fvoid_" + m_i) + 0);
+            m_i = m_i + 1;
+        }
+
+        let cc = __engine("ast_child_count", fn_nid);
+        var pcnt = 0;
+        var ptypes_hex = "";
+        var pi = 1;
+        while pi < cc {
+            let p_nid = __engine("ast_child_at", fn_nid, pi);
+            if __engine("ast_node_kind", p_nid) == 21 {
+                let pname = __engine("sym_str", __engine("ast_node_sym", p_nid));
+                __engine("map_set", st, "loc_" + pname, pcnt);
+                __engine("map_set", st, "lseen_" + pname, 1);
+                ptypes_hex = ptypes_hex + "7e";
+                pcnt = pcnt + 1;
+            }
+            pi = pi + 1;
+        }
+
+        let rtypes_hex = if is_void { "00" } else { "017e" };
+        type_entries = type_entries + "60" + wm_uleb_hex(pcnt) + ptypes_hex + rtypes_hex;
+        func_entries = func_entries + wm_uleb_hex(fi);
+        export_entries = export_entries + wm_str_vec_hex(fname) + "00" + wm_uleb_hex(fi);
+
+        let body_nid = __engine("ast_child_at", fn_nid, 0);
+        __engine("map_set", st, "lcnt", 0);
+        let lcnt = cg_collect_fn_locals(body_nid, st);
+        var li = 0;
+        while li < lcnt {
+            let lv = __engine("map_get", st, "lname_" + li);
+            __engine("map_set", st, "loc_" + lv, pcnt + li);
+            li = li + 1;
+        }
+
+        let locals_hex = if lcnt > 0 { "01" + wm_uleb_hex(lcnt) + "7e" } else { "00" };
+        let insns_hex = wm_emit_stmt_hex(st, body_nid);
+        let tail_hex = if is_void { "0b" } else { "42000b" };
+        let fn_body_hex = locals_hex + insns_hex + tail_hex;
+        code_entries = code_entries + wm_uleb_hex(__engine("str_len", fn_body_hex) / 2) + fn_body_hex;
+
+        fi = fi + 1;
+    }
+
+    export_entries = export_entries + wm_str_vec_hex("memory") + "0200";
+
+    let sec1 = wm_section_hex(1, wm_uleb_hex(fcnt) + type_entries);
+    let sec3 = wm_section_hex(3, wm_uleb_hex(fcnt) + func_entries);
+    let sec5 = wm_section_hex(5, "010001");
+    let sec7 = wm_section_hex(7, wm_uleb_hex(fcnt + 1) + export_entries);
+    let sec10 = wm_section_hex(10, wm_uleb_hex(fcnt) + code_entries);
+
+    return header + sec1 + sec3 + sec5 + sec7 + sec10;
+}
+
+// Emits WebAssembly Text Format (WAT) for all functions in `RawAstArena`.
+pub fn emit_arena_wat() -> str {
+    let meta = wm_collect_arena_fns();
+    let fcnt = __engine("map_get", meta, "fcnt") + 0;
+    var funcs = "";
+    var fi = 0;
+    while fi < fcnt {
+        let fn_nid = __engine("map_get", meta, "fnid_" + fi) + 0;
+        let fname = __engine("map_get", meta, "fname_" + fi);
+        let is_void = (__engine("map_get", meta, "fvoid_" + fi) + 0) == 1;
+        let cc = __engine("ast_child_count", fn_nid);
+        var params_wat = "";
+        var pi = 1;
+        while pi < cc {
+            let p_nid = __engine("ast_child_at", fn_nid, pi);
+            if __engine("ast_node_kind", p_nid) == 21 {
+                let pname = __engine("sym_str", __engine("ast_node_sym", p_nid));
+                params_wat = params_wat + " (param $" + pname + " i64)";
+            }
+            pi = pi + 1;
+        }
+        let res_wat = if is_void { "" } else { " (result i64)" };
+        let body_wat = if is_void { "nop" } else { "i64.const 0" };
+        funcs = funcs + "  (func $" + fname + " (export \"" + fname + "\")" + params_wat + res_wat + "\n    " + body_wat + "\n  )\n";
+        fi = fi + 1;
+    }
+    return "(module\n  (memory (export \"memory\") 1)\n" + funcs + ")\n";
+}
+
+// Emits ES2023 `.mjs` WebAssembly loader bindings for `RawAstArena`.
+pub fn emit_arena_wasm_mjs() -> str {
+    let meta = wm_collect_arena_fns();
+    let fcnt = __engine("map_get", meta, "fcnt") + 0;
+    var names = "";
+    var fi = 0;
+    while fi < fcnt {
+        if fi > 0 { names = names + ", "; }
+        names = names + "\"" + __engine("map_get", meta, "fname_" + fi) + "\"";
+        fi = fi + 1;
+    }
+    return "export const exportedFunctions = [" + names + "];\n"
+        + emit_wasm_mjs_bindings("arena");
+}
+
+// Emits TypeScript `.d.ts` interface declarations for `RawAstArena` exports.
+pub fn emit_arena_wasm_dts() -> str {
+    let meta = wm_collect_arena_fns();
+    let fcnt = __engine("map_get", meta, "fcnt") + 0;
+    var members = "  readonly memory: WebAssembly.Memory;\n";
+    var fi = 0;
+    while fi < fcnt {
+        let fn_nid = __engine("map_get", meta, "fnid_" + fi) + 0;
+        let fname = __engine("map_get", meta, "fname_" + fi);
+        let is_void = (__engine("map_get", meta, "fvoid_" + fi) + 0) == 1;
+        let cc = __engine("ast_child_count", fn_nid);
+        var psig = "";
+        var pi = 1;
+        while pi < cc {
+            let p_nid = __engine("ast_child_at", fn_nid, pi);
+            if __engine("ast_node_kind", p_nid) == 21 {
+                let pname = __engine("sym_str", __engine("ast_node_sym", p_nid));
+                if __engine("str_len", psig) > 0 { psig = psig + ", "; }
+                psig = psig + pname + ": bigint";
+            }
+            pi = pi + 1;
+        }
+        let rts = if is_void { "void" } else { "bigint" };
+        members = members + "  " + fname + "(" + psig + "): " + rts + ";\n";
+        fi = fi + 1;
+    }
+    return "export interface PilotModule {\n" + members + "}\n"
+        + "export function loadPilotModule(wasmBytes: BufferSource): Promise<PilotModule>;\n";
 }
