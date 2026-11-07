@@ -66,6 +66,14 @@ pub fn sh_ast_kind_name(arena: i64, node_id: i64) -> str {
     return "Unknown";
 }
 
+pub pure fn sh_node_kind_name(kind: ShNodeKind) -> str {
+    return "Program";
+}
+
+pub fn sh_ast_kind(arena: i64, node_id: i64) -> ShNodeKind {
+    return ::Program;
+}
+
 pub fn sh_ast_op_text(arena: i64, node_id: i64) -> str {
     let op = __engine("map_get", arena, node_id + "_op");
     if op != null { return op; }

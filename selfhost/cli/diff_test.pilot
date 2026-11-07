@@ -14,6 +14,24 @@ pub enum BackendMismatchTarget {
     Wasm,
 }
 
+let MismatchTarget = [
+    None: "none",
+    C: "c",
+    Llvm: "llvm",
+    Wasm: "wasm",
+];
+
+pub pure fn find_first_backend_mismatch(vm_out: str, c_out: str, llvm_out: str, wasm_out: str) -> BackendMismatchTarget {
+    if c_out != vm_out { return MismatchTarget.C; }
+    if llvm_out != vm_out { return MismatchTarget.Llvm; }
+    if wasm_out != vm_out { return MismatchTarget.Wasm; }
+    return MismatchTarget.None;
+}
+
+pub pure fn mismatch_target_to_name(target: BackendMismatchTarget) -> str {
+    return target;
+}
+
 pub pure fn verify_differential_parity(
     pilvm_res: i64,
     native_c_res: i64,
@@ -33,14 +51,9 @@ pub pure fn format_diff_report(test_name: str, res_val: i64) -> str {
 // Compares outputs across PilVM, C, LLVM IR, and WASM backends.
 // Returns "PASS" iff all 4 match; otherwise "MISMATCH:<backend_name>" naming the first diverging backend.
 pub fn check_differential_backends(vm_out: str, c_out: str, llvm_out: str, wasm_out: str) -> str {
-    if c_out != vm_out {
-        return "MISMATCH:c";
-    }
-    if llvm_out != vm_out {
-        return "MISMATCH:llvm";
-    }
-    if wasm_out != vm_out {
-        return "MISMATCH:wasm";
+    let mismatch = find_first_backend_mismatch(vm_out, c_out, llvm_out, wasm_out);
+    if mismatch != MismatchTarget.None {
+        return "MISMATCH:" + mismatch;
     }
     return "PASS";
 }

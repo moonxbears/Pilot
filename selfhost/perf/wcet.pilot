@@ -12,10 +12,42 @@ pub enum WcetResultStatus {
     FailWcetExceeded,
 }
 
+let WcetStatusId = [
+    Pass: 0,
+    FailUnboundedLoop: 1,
+    FailWcetExceeded: 2,
+];
+
 pub enum LoopConstructKind {
     None,
     BoundedFor,
     UnboundedWhile,
+}
+
+let LoopKindId = [
+    None: 0,
+    BoundedFor: 1,
+    UnboundedWhile: 2,
+];
+
+pub pure fn wcet_status_to_string(status: WcetResultStatus, cycles: i64, budget: i64) -> str {
+    if status == WcetStatusId.FailUnboundedLoop {
+        return "FAIL:UNBOUNDED_LOOP";
+    }
+    if status == WcetStatusId.FailWcetExceeded {
+        return "FAIL:WCET_EXCEEDED";
+    }
+    return "PASS:" + cycles + "/" + budget;
+}
+
+pub pure fn detect_loop_kind(orig_kind: i64) -> LoopConstructKind {
+    if orig_kind == 106 {
+        return LoopKindId.UnboundedWhile;
+    }
+    if orig_kind == 204 {
+        return LoopKindId.BoundedFor;
+    }
+    return LoopKindId.None;
 }
 
 pub fn verify_arena_wcet() -> str {
@@ -25,9 +57,9 @@ pub fn verify_arena_wcet() -> str {
     var i = 0;
     while i < node_count {
         let orig = __engine("ast_orig_kind", i);
-        // NodeKind::WhileStmt is 106
-        if orig == 106 {
-            return "FAIL:UNBOUNDED_LOOP";
+        let lk = detect_loop_kind(orig);
+        if lk == LoopKindId.UnboundedWhile {
+            return wcet_status_to_string(WcetStatusId.FailUnboundedLoop, 0, 0);
         }
         i = i + 1;
     }
@@ -81,7 +113,7 @@ pub fn verify_arena_wcet() -> str {
 
     let cycles = if found_loop { loop_bound * body_ops } else { 10 };
     if budget > 0 && cycles > budget {
-        return "FAIL:WCET_EXCEEDED";
+        return wcet_status_to_string(WcetStatusId.FailWcetExceeded, cycles, budget);
     }
-    return "PASS:" + cycles + "/" + budget;
+    return wcet_status_to_string(WcetStatusId.Pass, cycles, budget);
 }

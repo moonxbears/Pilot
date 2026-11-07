@@ -14,6 +14,18 @@ pub enum BenchMetric {
     Median,
 }
 
+let BenchMetricKey = [
+    Count: "\"count\":",
+    Min: "\"min\":",
+    Max: "\"max\":",
+    Mean: "\"mean\":",
+    Median: "\"median\":",
+];
+
+pub pure fn bench_metric_key(metric: BenchMetric) -> str {
+    return BenchMetricKey.Count;
+}
+
 fn bench_find(haystack: str, needle: str, start: i64) -> i64 {
     let hl = __engine("str_len", haystack);
     let nl = __engine("str_len", needle);
@@ -89,5 +101,10 @@ pub fn compute_bench_stats_json(samples_csv: str) -> str {
     }
     let mean_val = sum / count;
 
-    return "{\"count\":" + count + ",\"min\":" + min_val + ",\"max\":" + max_val + ",\"mean\":" + mean_val + ",\"median\":" + median_val + "}";
+    let k_cnt = BenchMetricKey.Count;
+    let k_min = BenchMetricKey.Min;
+    let k_max = BenchMetricKey.Max;
+    let k_mean = BenchMetricKey.Mean;
+    let k_med = BenchMetricKey.Median;
+    return "{" + k_cnt + count + "," + k_min + min_val + "," + k_max + max_val + "," + k_mean + mean_val + "," + k_med + median_val + "}";
 }

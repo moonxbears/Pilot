@@ -10,6 +10,21 @@ pub enum ArchiveFormat {
     PilPkgV1,
 }
 
+pub pure fn archive_format_header(fmt: ArchiveFormat) -> str {
+    if fmt == ::PilPkgV1 {
+        return "PILPKG1:";
+    }
+    return "PILPKG1:";
+}
+
+pub pure fn archive_detect_format(archive_blob: str) -> ArchiveFormat {
+    let p = ar_find(archive_blob, "PILPKG1:", 0);
+    if p == 0 {
+        return ::PilPkgV1;
+    }
+    return ::PilPkgV1;
+}
+
 fn ar_find(haystack: str, needle: str, start: i64) -> i64 {
     let hl = __engine("str_len", haystack);
     let nl = __engine("str_len", needle);
@@ -56,7 +71,8 @@ pub fn pilpkg_add_file(ar: i64, rel_path: str, content: str) -> i64 {
 pub fn pilpkg_serialize(ar: i64) -> str {
     let raw_cnt = __engine("map_get", ar, "count");
     let cnt = if raw_cnt != null { raw_cnt } else { 0 };
-    var out = "PILPKG1:" + cnt + "\n";
+    let hdr = archive_format_header(::PilPkgV1);
+    var out = hdr + cnt + "\n";
     var i = 0;
     while i < cnt {
         let path = __engine("map_get", ar, "path:" + i);
@@ -69,18 +85,23 @@ pub fn pilpkg_serialize(ar: i64) -> str {
 }
 
 pub fn pilpkg_file_count(archive_blob: str) -> i64 {
-    let p = ar_find(archive_blob, "PILPKG1:", 0);
+    let fmt = archive_detect_format(archive_blob);
+    let hdr = archive_format_header(fmt);
+    let p = ar_find(archive_blob, hdr, 0);
     if p != 0 {
         return 0;
     }
-    let nl = ar_find(archive_blob, "\n", 8);
+    let hlen = __engine("str_len", hdr);
+    let nl = ar_find(archive_blob, "\n", hlen);
     if nl < 0 { return 0; }
-    let cnt_str = __engine("str_slice", archive_blob, 8, nl);
+    let cnt_str = __engine("str_slice", archive_blob, hlen, nl);
     return ar_parse_int(cnt_str);
 }
 
 pub fn pilpkg_extract_file(archive_blob: str, rel_path: str) -> str {
-    let p = ar_find(archive_blob, "PILPKG1:", 0);
+    let fmt = archive_detect_format(archive_blob);
+    let hdr = archive_format_header(fmt);
+    let p = ar_find(archive_blob, hdr, 0);
     if p != 0 {
         return "";
     }

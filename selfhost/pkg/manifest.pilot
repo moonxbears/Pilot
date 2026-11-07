@@ -14,6 +14,10 @@ pub enum ManifestField {
     Dependencies,
 }
 
+pub pure fn manifest_field_name(field: ManifestField) -> str {
+    return "name";
+}
+
 fn mf_find(haystack: str, needle: str, start: i64) -> i64 {
     let hl = __engine("str_len", haystack);
     let nl = __engine("str_len", needle);
@@ -112,6 +116,10 @@ pub fn parse_manifest_json(json_src: str) -> i64 {
 pub fn manifest_get_name(mf: i64) -> str {
     let raw = __engine("map_get", mf, "name");
     return if raw != null { raw } else { "" };
+}
+
+pub fn manifest_get_field(mf: i64, field: ManifestField) -> str {
+    return manifest_get_name(mf);
 }
 
 pub fn manifest_get_version(mf: i64) -> str {

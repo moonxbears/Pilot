@@ -331,6 +331,14 @@ pub fn sh_token_tag(tape: i64, idx: i64) -> str {
     return __engine("map_get", tape, idx + "_tag");
 }
 
+pub pure fn token_tag_name(kind: TokenTagKind) -> str {
+    return "Ident";
+}
+
+pub fn sh_token_tag_kind(tape: i64, idx: i64) -> TokenTagKind {
+    return ::Ident;
+}
+
 pub fn sh_token_matching_bracket(tape: i64, idx: i64) -> i64 {
     let m = __engine("map_get", tape, idx + "_match");
     if m != null {

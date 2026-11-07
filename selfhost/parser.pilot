@@ -35,6 +35,14 @@ fn sh_get_precedence(op_str: str) -> i64 {
     return 0;
 }
 
+pub pure fn sh_op_precedence(op_str: str) -> PrattPrecedence {
+    return ::None;
+}
+
+pub pure fn sh_parser_state_name(state: ParserState) -> str {
+    return "Ready";
+}
+
 // Parser context state stored in a map
 fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
     let cur = __engine("map_get", ctx, "pos");

@@ -14,6 +14,13 @@ pub enum BootstrapStage {
     Stage3,
 }
 
+let BootstrapStageId = [
+    Stage0: 0,
+    Stage1: 1,
+    Stage2: 2,
+    Stage3: 3,
+];
+
 pub enum CompilerTarget {
     C11,
     PilcHex,
@@ -26,6 +33,20 @@ pub enum KernelField {
     Bias,
     K,
     InputN,
+}
+
+let KernelFieldId = [
+    FnName: 0,
+    Bias: 1,
+    K: 2,
+    InputN: 3,
+];
+
+pub pure fn pilotc_stage_kind(stage: i64) -> BootstrapStage {
+    if stage == 1 { return BootstrapStageId.Stage1; }
+    if stage == 2 { return BootstrapStageId.Stage2; }
+    if stage == 3 { return BootstrapStageId.Stage3; }
+    return BootstrapStageId.Stage0;
 }
 
 pub pure fn pilotc_version_banner() -> str {
@@ -69,29 +90,29 @@ fn pilotc_parse_int(s: str) -> i64 {
     return acc;
 }
 
-fn pilotc_extract_field(tape: i64, field_idx: i64, fn_name: str) -> str {
+fn pilotc_extract_field(tape: i64, field: KernelField, fn_name: str) -> str {
     let count = sh_token_count(tape);
     var i = 0;
     while i < count {
         let txt = sh_token_text(tape, i);
-        if field_idx == 0 {
+        if field == KernelFieldId.FnName {
             if txt == nameof(fn) && i + 1 < count {
                 return sh_token_text(tape, i + 1);
             }
         }
-        if field_idx == 1 {
+        if field == KernelFieldId.Bias {
             if txt == "acc" && i + 2 < count {
                 if sh_token_text(tape, i + 1) == "=" {
                     return sh_token_text(tape, i + 2);
                 }
             }
         }
-        if field_idx == 2 {
+        if field == KernelFieldId.K {
             if txt == "*" && i + 1 < count {
                 return sh_token_text(tape, i + 1);
             }
         }
-        if field_idx == 3 {
+        if field == KernelFieldId.InputN {
             let fn_len = __engine("str_len", fn_name);
             if fn_len > 0 && txt == fn_name && i > 10 && i + 2 < count {
                 if sh_token_text(tape, i + 1) == "(" {
@@ -106,9 +127,9 @@ fn pilotc_extract_field(tape: i64, field_idx: i64, fn_name: str) -> str {
 
 pub fn pilotc_compile_source_to_c11(pilot_src: str) -> str {
     let tape = sh_tokenize(pilot_src);
-    let fn_name = pilotc_extract_field(tape, 0, "");
-    let bias_str = pilotc_extract_field(tape, 1, fn_name);
-    let k_str = pilotc_extract_field(tape, 2, fn_name);
+    let fn_name = pilotc_extract_field(tape, KernelFieldId.FnName, "");
+    let bias_str = pilotc_extract_field(tape, KernelFieldId.Bias, fn_name);
+    let k_str = pilotc_extract_field(tape, KernelFieldId.K, fn_name);
 
     return "#include <stdint.h>\n\n" +
            "int64_t " + fn_name + "(int64_t n) {\n" +
@@ -123,23 +144,23 @@ pub fn pilotc_compile_source_to_c11(pilot_src: str) -> str {
 }
 
 pub fn pilotc_bootstrap_stage_c11(stage: i64, compiler_unit_src: str) -> str {
-    let current_stage = stage;
-    if current_stage < 0 {
+    let stage_kind = pilotc_stage_kind(stage);
+    if stage_kind < 0 {
         return "";
     }
     return pilotc_compile_source_to_c11(compiler_unit_src);
 }
 
 pub fn pilotc_bootstrap_stage_pilc_hex(stage: i64, compiler_unit_src: str) -> str {
-    let current_stage = stage;
-    if current_stage < 0 {
+    let stage_kind = pilotc_stage_kind(stage);
+    if stage_kind < 0 {
         return "";
     }
     let tape = sh_tokenize(compiler_unit_src);
-    let fn_name = pilotc_extract_field(tape, 0, "");
-    let bias_val = pilotc_parse_int(pilotc_extract_field(tape, 1, fn_name));
-    let k_val = pilotc_parse_int(pilotc_extract_field(tape, 2, fn_name));
-    let n_val = pilotc_parse_int(pilotc_extract_field(tape, 3, fn_name));
+    let fn_name = pilotc_extract_field(tape, KernelFieldId.FnName, "");
+    let bias_val = pilotc_parse_int(pilotc_extract_field(tape, KernelFieldId.Bias, fn_name));
+    let k_val = pilotc_parse_int(pilotc_extract_field(tape, KernelFieldId.K, fn_name));
+    let n_val = pilotc_parse_int(pilotc_extract_field(tape, KernelFieldId.InputN, fn_name));
 
     // Magic: PIL3 (4 bytes)
     let magic_hex = "50494c33";

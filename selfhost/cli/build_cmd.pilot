@@ -17,12 +17,21 @@ pub enum BuildTarget {
 }
 
 pub pure fn resolve_build_target(target_flag: str) -> BuildTarget {
-    if target_flag == "c" { return BuildTarget::C; }
-    if target_flag == "llvm" { return BuildTarget::Llvm; }
-    if target_flag == "wasm" { return BuildTarget::Wasm; }
-    if target_flag == "gpu" { return BuildTarget::Gpu; }
-    if target_flag == "asm" { return BuildTarget::Asm; }
-    return BuildTarget::Native;
+    if target_flag == "c" { return ::C; }
+    if target_flag == "llvm" { return ::Llvm; }
+    if target_flag == "wasm" { return ::Wasm; }
+    if target_flag == "gpu" { return ::Gpu; }
+    if target_flag == "asm" { return ::Asm; }
+    return ::Native;
+}
+
+pub pure fn build_target_to_name(target: BuildTarget) -> str {
+    if target == ::C { return "c"; }
+    if target == ::Llvm { return "llvm"; }
+    if target == ::Wasm { return "wasm"; }
+    if target == ::Gpu { return "gpu"; }
+    if target == ::Asm { return "asm"; }
+    return "native";
 }
 
 pub pure fn format_build_summary(module_name: str, target_flag: str, out_path: str) -> str {
@@ -84,7 +93,10 @@ pub fn parse_cli_build_args(argv_line: str) -> str {
                 }
                 pos = pos + 1;
             }
-            target = __engine("str_slice", argv_line, t_start, pos);
+            let raw_target = __engine("str_slice", argv_line, t_start, pos);
+            let b_target = resolve_build_target(raw_target);
+            let b_name = build_target_to_name(b_target);
+            target = if b_name != "native" { b_name } else { raw_target };
         } else if tok == "--release" {
             release = "1";
         } else if tok == "-o" || tok == "--output" {

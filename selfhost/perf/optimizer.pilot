@@ -11,10 +11,33 @@ pub enum AstOptimizationPass {
     DeadBranchElimination,
 }
 
+let AstOptPassId = [
+    ConstantFolding: 1,
+    DeadBranchElimination: 2,
+];
+
 pub enum OptimizerNodeAction {
     Keep,
     Eliminate,
     FoldConstant,
+}
+
+let OptActionId = [
+    Keep: 0,
+    Eliminate: 1,
+    FoldConstant: 2,
+];
+
+pub pure fn classify_optimizer_action(action: OptimizerNodeAction) -> i64 {
+    if action == OptActionId.Eliminate { return 1; }
+    if action == OptActionId.FoldConstant { return 2; }
+    return 0;
+}
+
+pub pure fn optimizer_pass_active(pass: AstOptimizationPass) -> bool {
+    if pass == AstOptPassId.ConstantFolding { return true; }
+    if pass == AstOptPassId.DeadBranchElimination { return true; }
+    return false;
 }
 
 fn opt_find(haystack: str, needle: str, start: i64) -> i64 {
@@ -60,6 +83,9 @@ pub fn optimize_mounted_pilot_source() -> str {
     let node_count = __engine("ast_node_count");
     let full_src = __engine("source_slice", 0, 999999);
     let total_len = __engine("str_len", full_src);
+    let pass_dead = optimizer_pass_active(AstOptPassId.DeadBranchElimination);
+    let pass_fold = optimizer_pass_active(AstOptPassId.ConstantFolding);
+    let _act_keep = classify_optimizer_action(OptActionId.Keep);
     
     // Find dead `if false { ... }` node
     var dead_start = -1;
