@@ -195,6 +195,10 @@ pub fn loads(s: str, strict_unique_keys: bool = false) -> any ! JSONDecodeError 
 pub fn dumps(obj: any, indent: i64 = -1, sort_keys: bool = false) -> str {
     let pretty: bool = indent >= 0;
     let spaces: i64 = if indent >= 0 { indent } else { 2 };
+    let k = type_of(obj);
+    if k == "object" || (k != "string" && k != "str" && k != "int" && k != "uint" && k != "float" && k != "decimal" && k != "bool" && k != "list" && k != "map" && k != "tuple" && k != "set" && k != "keyword" && !__opt_is_none(obj)) {
+        return obj.emit_json(spaces);
+    }
     return json_stringify(obj, pretty, spaces);
 }
 

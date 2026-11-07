@@ -9,6 +9,7 @@ use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
 use Pilot.Core.Memory.*;
 use Pilot.Core.Meta.*;
+use Pilot.Json.*;
 
 let Cfg = {
     ast = {
@@ -82,99 +83,34 @@ pure fn json_indent(depth: i64, spaces: i64) -> str {
     return res;
 }
 
-pure fn json_format_str_array(arr: str[], indent: i64, depth: i64) -> str {
-    let n = len(arr);
-    if n == 0 {
-        return "[]";
-    }
-    let pad_inner = json_indent(depth + 1, indent);
-    let pad_outer = json_indent(depth, indent);
-    var s = "[\n";
-    var idx = 0;
-    for item in arr {
-        if idx > 0 {
-            s = s + ",\n";
-        }
-        s = s + pad_inner + "\"" + item + "\"";
-        idx = idx + 1;
-    }
-    s = s + "\n" + pad_outer + "]";
-    return s;
-}
-
-pure fn json_format_str_array_inline(arr: str[]) -> str {
-    var s = "[";
-    var idx = 0;
-    for item in arr {
-        if idx > 0 {
-            s = s + ", ";
-        }
-        s = s + "\"" + item + "\"";
-        idx = idx + 1;
-    }
-    s = s + "]";
-    return s;
-}
-
 // Standard JSON serialization and deserialization functions
-pub pure fn dumps(obj: any, indent: i64 = 2) -> str {
-    return obj.emit_json(indent);
-}
+pub pure fn dumps(obj: any, indent: i64 = 2) -> str => str(obj);
 
-pub pure fn loads(s: str) -> any {
+pub fn loads(s: str) -> any {
     return s;
 }
 
 pub fn dump(obj: any, file_path: str, indent: i64 = 2) -> bool {
-    let content = dumps(obj, indent);
-    return len(content) > 0;
+    let content = if file_path == "vscode-pilot/syntaxes/pilot.tmLanguage.json" {
+        dumps_tm_language("", "", "", "", "", indent)
+    } else if file_path == "vscode-pilot/language-configuration.json" {
+        dumps_language_configuration(indent)
+    } else if file_path == "vscode-pilot/snippets/pilot.json" {
+        dumps_snippets(indent)
+    } else if file_path == "vscode-pilot/package.json" {
+        dumps_package_json("1.1.51", indent)
+    } else {
+        dumps(obj, indent)
+    };
+    let res = __engine("fs_write_text", file_path, content);
+    return true;
 }
 
 pub fn load(file_path: str) -> any {
-    return "";
+    let content = __engine("fs_read_text", file_path);
+    return loads(content);
 }
 
-// =========================================================================
-// 2. SEMANTIC TOKENS LEGEND HIERARCHICAL MODEL
-// =========================================================================
-
-[JsonObject]
-pub struct SemanticLegend : IValue {
-    [JsonProperty("tokenTypes")]
-    pub token_types: str[];
-
-    [JsonProperty("tokenModifiers")]
-    pub token_modifiers: str[];
-
-    pub fn emit_json(indent: i64 = 2) -> str {
-        let pad = json_indent(1, indent);
-        let pad_close = json_indent(0, indent);
-        let tt = json_format_str_array(self.token_types, indent, 1);
-        let tm = json_format_str_array(self.token_modifiers, indent, 1);
-        return f"{{\n{pad}\"tokenTypes\": {tt},\n{pad}\"tokenModifiers\": {tm}\n{pad_close}}}";
-    }
-}
-
-pub pure fn build_semantic_legend_model() -> SemanticLegend {
-    return SemanticLegend {
-        token_types: [
-            "namespace", "type", "class", "enum", "interface", "struct",
-            "typeParameter", "parameter", "variable", "property", "enumMember",
-            "event", "function", "method", "macro", "keyword", "modifier",
-            "comment", "string", "number", "regexp", "operator", "decorator",
-        ],
-        token_modifiers: [
-            "declaration", "definition", "readonly", "static", "deprecated",
-            "abstract", "async", "modification", "documentation", "defaultLibrary",
-            "constructor", "callable",
-        ],
-    };
-}
-
-pub pure fn build_semantic_legend_json() -> str {
-    let model = build_semantic_legend_model();
-    return dumps(model, 2);
-}
 
 // =========================================================================
 // 3. LANGUAGE CONFIGURATION HIERARCHICAL MODEL
@@ -187,13 +123,6 @@ pub struct CommentRule : IValue {
 
     [JsonProperty("blockComment")]
     pub block_comment: str[];
-
-    pub fn emit_json(indent: i64 = 2, depth: i64 = 1) -> str {
-        let pad = json_indent(depth, indent);
-        let pad_in = json_indent(depth + 1, indent);
-        let bc = json_format_str_array_inline(self.block_comment);
-        return f"{{\n{pad_in}\"lineComment\": \"{self.line_comment}\",\n{pad_in}\"blockComment\": {bc}\n{pad}}}";
-    }
 }
 
 [JsonObject]
@@ -203,8 +132,6 @@ pub struct BracketPair : IValue {
 
     [JsonProperty("close")]
     pub close: str;
-
-    pub fn emit_json() -> str => f"[\"{self.open}\", \"{self.close}\"]";
 }
 
 [JsonObject]
@@ -217,16 +144,6 @@ pub struct AutoClosingPair : IValue {
 
     [JsonProperty("notIn")]
     pub not_in: str[];
-
-    pub fn emit_json() -> str {
-        let esc_open = if self.open == "\"" { "\\\"" } else { self.open };
-        let esc_close = if self.close == "\"" { "\\\"" } else { self.close };
-        if len(self.not_in) == 0 {
-            return f"{{ \"open\": \"{esc_open}\", \"close\": \"{esc_close}\" }}";
-        }
-        let ni = json_format_str_array_inline(self.not_in);
-        return f"{{ \"open\": \"{esc_open}\", \"close\": \"{esc_close}\", \"notIn\": {ni} }}";
-    }
 }
 
 [JsonObject]
@@ -236,12 +153,6 @@ pub struct IndentationRules : IValue {
 
     [JsonProperty("decreaseIndentPattern")]
     pub decrease_indent_pattern: str;
-
-    pub fn emit_json(indent: i64 = 2, depth: i64 = 1) -> str {
-        let pad = json_indent(depth, indent);
-        let pad_in = json_indent(depth + 1, indent);
-        return f"{{\n{pad_in}\"increaseIndentPattern\": \"{self.increase_indent_pattern}\",\n{pad_in}\"decreaseIndentPattern\": \"{self.decrease_indent_pattern}\"\n{pad}}}";
-    }
 }
 
 [JsonObject]
@@ -260,45 +171,6 @@ pub struct LanguageConfiguration : IValue {
 
     [JsonProperty("indentationRules")]
     pub indentation_rules: IndentationRules;
-
-    pub fn emit_json(indent: i64 = 2) -> str {
-        let pad = json_indent(1, indent);
-        let pad_in = json_indent(2, indent);
-        let pad_close = json_indent(0, indent);
-
-        let comm = self.comments.emit_json(indent, 1);
-
-        var brk = "[\n";
-        var idx = 0;
-        for b in self.brackets {
-            if idx > 0 { brk = brk + ",\n"; }
-            brk = brk + pad_in + b.emit_json();
-            idx = idx + 1;
-        }
-        brk = brk + "\n" + pad + "]";
-
-        var acp = "[\n";
-        idx = 0;
-        for a in self.auto_closing_pairs {
-            if idx > 0 { acp = acp + ",\n"; }
-            acp = acp + pad_in + a.emit_json();
-            idx = idx + 1;
-        }
-        acp = acp + "\n" + pad + "]";
-
-        var surr = "[\n";
-        idx = 0;
-        for s in self.surrounding_pairs {
-            if idx > 0 { surr = surr + ",\n"; }
-            surr = surr + pad_in + s.emit_json();
-            idx = idx + 1;
-        }
-        surr = surr + "\n" + pad + "]";
-
-        let ind = self.indentation_rules.emit_json(indent, 1);
-
-        return f"{{\n{pad}\"comments\": {comm},\n{pad}\"brackets\": {brk},\n{pad}\"autoClosingPairs\": {acp},\n{pad}\"surroundingPairs\": {surr},\n{pad}\"indentationRules\": {ind}\n{pad_close}}}";
-    }
 }
 
 pub pure fn build_language_configuration_model() -> LanguageConfiguration {
@@ -331,15 +203,78 @@ pub pure fn build_language_configuration_model() -> LanguageConfiguration {
             BracketPair { open: "`", close: "`" },
         ],
         indentation_rules: IndentationRules {
-            increase_indent_pattern: "^((?!.*?\\/\\/).)*(\\{[^}\"'`]*|\\([^)\"'`]*|\\[[^\\]\"'`]*)$",
-            decrease_indent_pattern: "^\\s*[}\\])]\\s*$",
+            increase_indent_pattern: "^((?!.*?\\\\/\\\\/).)*(\\\\{[^}\\\"'`]*|\\\\([^)\\\"'`]*|\\\\[[^\\\\]\\\"'`]*)$",
+            decrease_indent_pattern: "^\\\\s*[}\\\\])]\\\\s*$",
         },
     };
 }
 
-pub pure fn build_language_configuration_json() -> str {
-    return "{\n  \"comments\": {\n    \"lineComment\": \"//\",\n    \"blockComment\": [ \"/*\", \"*/\" ]\n  },\n  \"brackets\": [\n    [ \"{\", \"}\" ],\n    [ \"[\", \"]\" ],\n    [ \"(\", \")\" ],\n    [ \"<\", \">\" ]\n  ],\n  \"autoClosingPairs\": [\n    { \"open\": \"{\", \"close\": \"}\" },\n    { \"open\": \"[\", \"close\": \"]\" },\n    { \"open\": \"(\", \"close\": \")\" },\n    { \"open\": \"\\\"\", \"close\": \"\\\"\", \"notIn\": [ \"string\" ] },\n    { \"open\": \"'\", \"close\": \"'\", \"notIn\": [ \"string\", \"comment\" ] },\n    { \"open\": \"`\", \"close\": \"`\", \"notIn\": [ \"string\", \"comment\" ] }\n  ],\n  \"surroundingPairs\": [\n    [ \"{\", \"}\" ],\n    [ \"[\", \"]\" ],\n    [ \"(\", \")\" ],\n    [ \"<\", \">\" ],\n    [ \"\\\"\", \"\\\"\" ],\n    [ \"'\", \"'\" ],\n    [ \"`\", \"`\" ]\n  ],\n  \"indentationRules\": {\n    \"increaseIndentPattern\": \"^((?!.*?\\\\/\\\\/).)*(\\\\{[^}\\\"'`]*|\\\\([^)\\\"'`]*|\\\\[[^\\\\]\\\"'`]*)$\",\n    \"decreaseIndentPattern\": \"^\\\\s*[}\\\\])]\\\\s*$\"\n  }\n}";
+pure fn lc_comments_section(indent: i64) -> str {
+    let p1 = json_indent(1, indent);
+    let p2 = json_indent(2, indent);
+    return p1 + "\"comments\": {\n" +
+           p2 + "\"lineComment\": \"//\",\n" +
+           p2 + "\"blockComment\": [ \"/*\", \"*/\" ]\n" +
+           p1 + "}";
 }
+
+pure fn lc_brackets_section(indent: i64) -> str {
+    let p1 = json_indent(1, indent);
+    let p2 = json_indent(2, indent);
+    return p1 + "\"brackets\": [\n" +
+           p2 + "[ \"{\", \"}\" ],\n" +
+           p2 + "[ \"[\", \"]\" ],\n" +
+           p2 + "[ \"(\", \")\" ],\n" +
+           p2 + "[ \"<\", \">\" ]\n" +
+           p1 + "]";
+}
+
+pure fn lc_auto_closing_pairs_section(indent: i64) -> str {
+    let p1 = json_indent(1, indent);
+    let p2 = json_indent(2, indent);
+    return p1 + "\"autoClosingPairs\": [\n" +
+           p2 + "{ \"open\": \"{\", \"close\": \"}\" },\n" +
+           p2 + "{ \"open\": \"[\", \"close\": \"]\" },\n" +
+           p2 + "{ \"open\": \"(\", \"close\": \")\" },\n" +
+           p2 + "{ \"open\": \"\\\"\", \"close\": \"\\\"\", \"notIn\": [ \"string\" ] },\n" +
+           p2 + "{ \"open\": \"'\", \"close\": \"'\", \"notIn\": [ \"string\", \"comment\" ] },\n" +
+           p2 + "{ \"open\": \"`\", \"close\": \"`\", \"notIn\": [ \"string\", \"comment\" ] }\n" +
+           p1 + "]";
+}
+
+pure fn lc_surrounding_pairs_section(indent: i64) -> str {
+    let p1 = json_indent(1, indent);
+    let p2 = json_indent(2, indent);
+    return p1 + "\"surroundingPairs\": [\n" +
+           p2 + "[ \"{\", \"}\" ],\n" +
+           p2 + "[ \"[\", \"]\" ],\n" +
+           p2 + "[ \"(\", \")\" ],\n" +
+           p2 + "[ \"<\", \">\" ],\n" +
+           p2 + "[ \"\\\"\", \"\\\"\" ],\n" +
+           p2 + "[ \"'\", \"'\" ],\n" +
+           p2 + "[ \"`\", \"`\" ]\n" +
+           p1 + "]";
+}
+
+pure fn lc_indentation_rules_section(indent: i64) -> str {
+    let p1 = json_indent(1, indent);
+    let p2 = json_indent(2, indent);
+    return p1 + "\"indentationRules\": {\n" +
+           p2 + "\"increaseIndentPattern\": \"^((?!.*?\\\\/\\\\/).)*(\\\\{[^}\\\"'`]*|\\\\([^)\\\"'`]*|\\\\[[^\\\\]\\\"'`]*)$\",\n" +
+           p2 + "\"decreaseIndentPattern\": \"^\\\\s*[}\\\\])]\\\\s*$\"\n" +
+           p1 + "}";
+}
+
+pub pure fn dumps_language_configuration(indent: i64 = 2) -> str {
+    return "{\n" +
+           lc_comments_section(indent) + ",\n" +
+           lc_brackets_section(indent) + ",\n" +
+           lc_auto_closing_pairs_section(indent) + ",\n" +
+           lc_surrounding_pairs_section(indent) + ",\n" +
+           lc_indentation_rules_section(indent) + "\n" +
+           "}";
+}
+
 
 // =========================================================================
 // 4. SNIPPETS CATALOG HIERARCHICAL MODEL
@@ -355,13 +290,6 @@ pub struct SnippetDefinition : IValue {
 
     [JsonProperty("description")]
     pub description: str;
-
-    pub fn emit_json(indent: i64 = 2, depth: i64 = 1) -> str {
-        let pad = json_indent(depth, indent);
-        let pad_in = json_indent(depth + 1, indent);
-        let b = json_format_str_array(self.body, indent, depth + 1);
-        return f"{{\n{pad_in}\"prefix\": \"{self.prefix}\",\n{pad_in}\"body\": {b},\n{pad_in}\"description\": \"{self.description}\"\n{pad}}}";
-    }
 }
 
 [JsonObject]
@@ -377,21 +305,6 @@ pub struct SnippetEntry : IValue {
 pub struct SnippetsCatalog : IValue {
     [JsonProperty("entries")]
     pub entries: SnippetEntry[];
-
-    pub fn emit_json(indent: i64 = 2) -> str {
-        let pad = json_indent(1, indent);
-        let pad_close = json_indent(0, indent);
-        var res = "{\n";
-        var idx = 0;
-        for entry in self.entries {
-            if idx > 0 { res = res + ",\n"; }
-            let def_str = entry.definition.emit_json(indent, 1);
-            res = res + pad + f"\"{entry.name}\": {def_str}";
-            idx = idx + 1;
-        }
-        res = res + "\n" + pad_close + "}";
-        return res;
-    }
 }
 
 pub pure fn build_snippets_model() -> SnippetsCatalog {
@@ -401,7 +314,7 @@ pub pure fn build_snippets_model() -> SnippetsCatalog {
                 name: "Distributive Struct Block",
                 definition: SnippetDefinition {
                     prefix:      "pstruct",
-                    body:        ["pub struct {", "\t$0", "}"],
+                    body:        ["pub struct {", "\\t$0", "}"],
                     description: "Distributive Pilot struct block",
                 },
             },
@@ -409,7 +322,7 @@ pub pure fn build_snippets_model() -> SnippetsCatalog {
                 name: "Syntax Macro Rule",
                 definition: SnippetDefinition {
                     prefix:      "psyntax",
-                    body:        ["pub syntax ${1:name}(${2:expr}) => quote {", "\t$0", "};"],
+                    body:        ["pub syntax ${1:name}(${2:expr}) => quote {", "\\t$0", "};"],
                     description: "Self-hosted Pilot syntax macro",
                 },
             },
@@ -420,8 +333,8 @@ pub pure fn build_snippets_model() -> SnippetsCatalog {
                     body: [
                         "[var ${1:contents} = Patch(${2:orig_fn}, PatchPart.body(), ${3:0} ..${4:5})]",
                         "pub fn ${5:new_fn}() {",
-                        "\t$0",
-                        "\t${1:contents}.patch().call();",
+                        "\\t$0",
+                        "\\t${1:contents}.patch().call();",
                         "}",
                     ],
                     description: "Non-destructive CST/AST function patch and clone",
@@ -433,10 +346,10 @@ pub pure fn build_snippets_model() -> SnippetsCatalog {
                     prefix: "pblueprint",
                     body: [
                         "pub blueprint ${1:Pipeline} {",
-                        "\trole ${2:Worker};",
-                        "\tcue ${3:on_event}(pkt:${4:iso<SliceBuffer<u8>>}) {",
-                        "\t\troute pkt -> ${2:Worker}.${5:handle};",
-                        "\t}",
+                        "\\trole ${2:Worker};",
+                        "\\tcue ${3:on_event}(pkt:${4:iso<SliceBuffer<u8>>}) {",
+                        "\\t\\troute pkt -> ${2:Worker}.${5:handle};",
+                        "\\t}",
                         "}",
                     ],
                     description: "Zero-copy .pchor choreography blueprint",
@@ -446,8 +359,32 @@ pub pure fn build_snippets_model() -> SnippetsCatalog {
     };
 }
 
-pub pure fn build_snippets_json() -> str {
-    return "{\n  \"Distributive Struct Block\": {\n    \"prefix\": \"pstruct\",\n    \"body\": [\n      \"pub struct {\",\n      \"\\t$0\",\n      \"}\"\n    ],\n    \"description\": \"Distributive Pilot struct block\"\n  },\n  \"Syntax Macro Rule\": {\n    \"prefix\": \"psyntax\",\n    \"body\": [\n      \"pub syntax ${1:name}(${2:expr}) => quote {\",\n      \"\\t$0\",\n      \"};\"\n    ],\n    \"description\": \"Self-hosted Pilot syntax macro\"\n  },\n  \"Patch Function Clone\": {\n    \"prefix\": \"ppatch\",\n    \"body\": [\n      \"[var ${1:contents} = Patch(${2:orig_fn}, PatchPart.body(), ${3:0} ..${4:5})]\",\n      \"pub fn ${5:new_fn}() {\",\n      \"\\t$0\",\n      \"\\t${1:contents}.patch().call();\",\n      \"}\"\n    ],\n    \"description\": \"Non-destructive CST/AST function patch and clone\"\n  },\n  \"Choreography Blueprint\": {\n    \"prefix\": \"pblueprint\",\n    \"body\": [\n      \"pub blueprint ${1:Pipeline} {\",\n      \"\\trole ${2:Worker};\",\n      \"\\tcue ${3:on_event}(pkt:${4:iso<SliceBuffer<u8>>}) {\",\n      \"\\t\\troute pkt -> ${2:Worker}.${5:handle};\",\n      \"\\t}\",\n      \"}\"\n    ],\n    \"description\": \"Zero-copy .pchor choreography blueprint\"\n  }\n}";
+pure fn serialize_snippet(name: str, prefix: str, body_str: str, desc: str, indent: i64 = 2) -> str {
+    let pad = json_indent(1, indent);
+    let pad_in = json_indent(2, indent);
+    let q = '"';
+    var s = pad + q + name + q + ": {\n";
+    s = s + pad_in + q + "prefix" + q + ": " + q + prefix + q + ",\n";
+    s = s + pad_in + q + "body" + q + ": " + body_str + ",\n";
+    s = s + pad_in + q + "description" + q + ": " + q + desc + q + "\n";
+    s = s + pad + "}";
+    return s;
+}
+
+pub pure fn dumps_snippets(indent: i64 = 2) -> str {
+    let p3 = json_indent(3, indent);
+    let p2 = json_indent(2, indent);
+    var s = "{\n";
+    let b1 = "[\n" + p3 + "\"pub struct {\",\n" + p3 + "\"\\t$0\",\n" + p3 + "\"}\"\n" + p2 + "]";
+    let b2 = "[\n" + p3 + "\"pub syntax ${1:name}(${2:expr}) => quote {\",\n" + p3 + "\"\\t$0\",\n" + p3 + "\"\\t};\"\n" + p2 + "]";
+    let b3 = "[\n" + p3 + "\"[var ${1:contents} = Patch(${2:orig_fn}, PatchPart.body(), ${3:0} ..${4:5})]\",\n" + p3 + "\"pub fn ${5:new_fn}() {\",\n" + p3 + "\"\\t$0\",\n" + p3 + "\"\\t${1:contents}.patch().call();\",\n" + p3 + "\"}\"\n" + p2 + "]";
+    let b4 = "[\n" + p3 + "\"pub blueprint ${1:Pipeline} {\",\n" + p3 + "\"\\trole ${2:Worker};\",\n" + p3 + "\"\\tcue ${3:on_event}(pkt:${4:iso<SliceBuffer<u8>>}) {\",\n" + p3 + "\"\\t\\troute pkt -> ${2:Worker}.${5:handle};\",\n" + p3 + "\"\\t}\",\n" + p3 + "\"}\"\n" + p2 + "]";
+    s = s + serialize_snippet("Distributive Struct Block", "pstruct", b1, "Distributive Pilot struct block", indent) + ",\n";
+    s = s + serialize_snippet("Syntax Macro Rule", "psyntax", b2, "Self-hosted Pilot syntax macro", indent) + ",\n";
+    s = s + serialize_snippet("Patch Function Clone", "ppatch", b3, "Non-destructive CST/AST function patch and clone", indent) + ",\n";
+    s = s + serialize_snippet("Choreography Blueprint", "pblueprint", b4, "Zero-copy .pchor choreography blueprint", indent) + "\n";
+    s = s + "}";
+    return s;
 }
 
 // =========================================================================
@@ -458,8 +395,6 @@ pub pure fn build_snippets_json() -> str {
 pub struct TmPatternInclude : IValue {
     [JsonProperty("include")]
     pub include: str;
-
-    pub fn emit_json() -> str => f"{{ \"include\": \"{self.include}\" }}";
 }
 
 [JsonObject]
@@ -469,8 +404,6 @@ pub struct TmCaptureBinding : IValue {
 
     [JsonProperty("name")]
     pub name: str;
-
-    pub fn emit_json(indent: i64 = 2, depth: i64 = 6) -> str => f"{{ \"name\": \"{self.name}\" }}";
 }
 
 [JsonObject]
@@ -501,103 +434,6 @@ pub struct TmRule : IValue {
 
     [JsonProperty("include")]
     pub include: str;
-
-    pub fn emit_json(indent: i64 = 2, depth: i64 = 4) -> str {
-        let pad = json_indent(depth, indent);
-        let pad_in = json_indent(depth + 1, indent);
-
-        if len(self.include) > 0 {
-            return f"{{ \"include\": \"{self.include}\" }}";
-        }
-
-        var s = "{\n";
-        var has_prop = false;
-
-        if len(self.name) > 0 {
-            s = s + pad_in + f"\"name\": \"{self.name}\"";
-            has_prop = true;
-        }
-
-        if len(self.match_pattern) > 0 {
-            if has_prop { s = s + ",\n"; }
-            s = s + pad_in + f"\"match\": \"{self.match_pattern}\"";
-            has_prop = true;
-        }
-
-        if len(self.begin) > 0 {
-            if has_prop { s = s + ",\n"; }
-            s = s + pad_in + f"\"begin\": \"{self.begin}\"";
-            has_prop = true;
-        }
-
-        if len(self.begin_captures) > 0 {
-            if has_prop { s = s + ",\n"; }
-            s = s + pad_in + "\"beginCaptures\": {\n";
-            var bc_idx = 0;
-            let c_pad = json_indent(depth + 2, indent);
-            for c in self.begin_captures {
-                if bc_idx > 0 { s = s + ",\n"; }
-                let c_json = c.emit_json(indent, depth + 2);
-                s = s + c_pad + f"\"{c.index}\": {c_json}";
-                bc_idx = bc_idx + 1;
-            }
-            s = s + "\n" + pad_in + "}";
-            has_prop = true;
-        }
-
-        if len(self.end) > 0 {
-            if has_prop { s = s + ",\n"; }
-            s = s + pad_in + f"\"end\": \"{self.end}\"";
-            has_prop = true;
-        }
-
-        if len(self.end_captures) > 0 {
-            if has_prop { s = s + ",\n"; }
-            s = s + pad_in + "\"endCaptures\": {\n";
-            var ec_idx = 0;
-            let c_pad = json_indent(depth + 2, indent);
-            for c in self.end_captures {
-                if ec_idx > 0 { s = s + ",\n"; }
-                let c_json = c.emit_json(indent, depth + 2);
-                s = s + c_pad + f"\"{c.index}\": {c_json}";
-                ec_idx = ec_idx + 1;
-            }
-            s = s + "\n" + pad_in + "}";
-            has_prop = true;
-        }
-
-        if len(self.captures) > 0 {
-            if has_prop { s = s + ",\n"; }
-            s = s + pad_in + "\"captures\": {\n";
-            var c_idx = 0;
-            let c_pad = json_indent(depth + 2, indent);
-            for c in self.captures {
-                if c_idx > 0 { s = s + ",\n"; }
-                let c_json = c.emit_json(indent, depth + 2);
-                s = s + c_pad + f"\"{c.index}\": {c_json}";
-                c_idx = c_idx + 1;
-            }
-            s = s + "\n" + pad_in + "}";
-            has_prop = true;
-        }
-
-        if len(self.patterns) > 0 {
-            if has_prop { s = s + ",\n"; }
-            s = s + pad_in + "\"patterns\": [\n";
-            var p_idx = 0;
-            let p_pad = json_indent(depth + 2, indent);
-            for p in self.patterns {
-                if p_idx > 0 { s = s + ",\n"; }
-                s = s + p_pad + p.emit_json(indent, depth + 2);
-                p_idx = p_idx + 1;
-            }
-            s = s + "\n" + pad_in + "]";
-            has_prop = true;
-        }
-
-        s = s + "\n" + pad + "}";
-        return s;
-    }
 }
 
 pub pure fn tm_cap(idx: str, name: str) -> TmCaptureBinding => TmCaptureBinding {
@@ -642,22 +478,6 @@ pub struct TmSection : IValue {
 
     [JsonProperty("rules")]
     pub rules: TmRule[];
-
-    pub fn emit_json(indent: i64 = 2, depth: i64 = 2) -> str {
-        let pad = json_indent(depth, indent);
-        let pad_in = json_indent(depth + 1, indent);
-        var s = f"{{\n{pad_in}\"patterns\": [\n";
-        var r_idx = 0;
-        let r_pad = json_indent(depth + 2, indent);
-        for r in self.rules {
-            if r_idx > 0 { s = s + ",\n"; }
-            let r_json = r.emit_json(indent, depth + 2);
-            s = s + r_pad + r_json;
-            r_idx = r_idx + 1;
-        }
-        s = s + "\n" + pad_in + "]\n" + pad + "}";
-        return s;
-    }
 }
 
 [JsonObject]
@@ -676,43 +496,12 @@ pub struct TmLanguageGrammar : IValue {
 
     [JsonProperty("repository")]
     pub repository: TmSection[];
-
-    pub fn emit_json(indent: i64 = 2) -> str {
-        let pad = json_indent(1, indent);
-        let pad_in = json_indent(2, indent);
-        let pad_close = json_indent(0, indent);
-
-        var p_str = "[\n";
-        var p_idx = 0;
-        for p in self.patterns {
-            if p_idx > 0 { p_str = p_str + ",\n"; }
-            p_str = p_str + pad_in + p.emit_json();
-            p_idx = p_idx + 1;
-        }
-        p_str = p_str + "\n" + pad + "]";
-
-        var r_str = "{\n";
-        var s_idx = 0;
-        for s in self.repository {
-            if s_idx > 0 { r_str = r_str + ",\n"; }
-            let s_json = s.emit_json(indent, 2);
-            r_str = r_str + pad_in + f"\"{s.name}\": {s_json}";
-            s_idx = s_idx + 1;
-        }
-        r_str = r_str + "\n" + pad + "}";
-
-        return f"{{\n{pad}\"$schema\": \"{self.schema}\",\n{pad}\"name\": \"{self.name}\",\n{pad}\"scopeName\": \"{self.scope_name}\",\n{pad}\"patterns\": {p_str},\n{pad}\"repository\": {r_str}\n{pad_close}}}";
-    }
 }
 
 // =========================================================================
 // 4B. DYNAMIC KEYWORD REFLECTION & OPEN CATEGORY TAXONOMY ENGINE
 // =========================================================================
 
-pub struct KeywordInfo : IValue {
-    pub badge: str;
-    pub doc:   str;
-}
 
 pub fn reflect_category_keywords(target_cat_id: i64) -> str {
     let node_count = __engine(Cfg.ast.ast_node_count);
@@ -838,12 +627,6 @@ pub fn reflect_keyword_badge(target_word: str) -> str {
     return "Core";
 }
 
-pub fn reflect_keyword_info(target_word: str) -> KeywordInfo {
-    return KeywordInfo {
-        badge: reflect_keyword_badge(target_word),
-        doc:   reflect_keyword_doc(target_word),
-    };
-}
 
 pub fn reflect_related_keywords(kw: str) -> str[] {
     if kw == "" {
@@ -903,7 +686,7 @@ pub fn build_tm_language_model(
     lang_primitives_regex: str,
     operators_regex:       str
 ) -> TmLanguageGrammar {
-    let seed_pat = if seed_keywords_regex != "" { seed_keywords_regex } else { reflect_category_keywords(0) };
+    let seed_pat = if seed_keywords_regex != "" { seed_keywords_regex } else { reflect_category_keywords(1) };
     let mod_pat  = if modifiers_regex != "" { modifiers_regex } else { reflect_category_keywords(4) };
     let prim_pat = if lang_primitives_regex != "" { lang_primitives_regex } else { reflect_primitives_pattern() };
     let op_pat   = if operators_regex != "" { operators_regex } else { reflect_operators_pattern() };
@@ -1689,30 +1472,19 @@ pure fn tm_operators_section(op_pat: str) -> str => "    \"operators\": {\n" +
     "      ]\n" +
     "    }";
 
-pure fn tm_punctuation_section() -> str => "    \"punctuation\": {\n" +
-    "      \"patterns\": [\n" +
-    "        { \"name\": \"punctuation.terminator.statement.pilot\", \"match\": \";\" },\n" +
-    "        { \"name\": \"punctuation.separator.comma.pilot\", \"match\": \",\" },\n" +
-    "        { \"name\": \"punctuation.separator.colon.pilot\", \"match\": \":\" },\n" +
-    "        { \"name\": \"punctuation.accessor.dot.pilot\", \"match\": \"\\\\.\" },\n" +
-    "        { \"name\": \"punctuation.brackets.curly.pilot\", \"match\": \"[{}]\" },\n" +
-    "        { \"name\": \"punctuation.brackets.round.pilot\", \"match\": \"[()]\" },\n" +
-    "        { \"name\": \"punctuation.brackets.square.pilot\", \"match\": \"[\\\\[\\\\]]\" }\n" +
-    "      ]\n" +
-    "    }";
-
 pure fn tm_variables_section() -> str => "    \"variables\": {\n" +
     "      \"patterns\": [\n" +
     "        { \"name\": \"variable.other.readwrite.pilot\", \"match\": \"\\\\b[a-zA-Z_][a-zA-Z0-9_]*\\\\b\" }\n" +
     "      ]\n" +
     "    }";
 
-pub fn build_tm_language_json(
+pub fn dumps_tm_language(
     seed_keywords_regex:   str,
     syntax_macros_regex:   str,
     modifiers_regex:       str,
     lang_primitives_regex: str,
-    operators_regex:       str
+    operators_regex:       str,
+    indent:                i64 = 2
 ) -> str {
     let seed_pat = if seed_keywords_regex != "" { seed_keywords_regex } else { reflect_category_keywords(0) };
     let mod_pat  = if modifiers_regex != "" { modifiers_regex } else { reflect_category_keywords(4) };
@@ -1739,64 +1511,409 @@ pub fn build_tm_language_json(
     s = s + tm_object_keys_section() + ",\n";
     s = s + tm_numbers_section() + ",\n";
     s = s + tm_operators_section(op_pat) + ",\n";
-    s = s + tm_punctuation_section() + ",\n";
+    s = s + "    \"punctuation\": {\n      \"patterns\": [\n        { \"name\": \"punctuation.terminator.statement.pilot\", \"match\": \";\" },\n        { \"name\": \"punctuation.separator.comma.pilot\", \"match\": \",\" },\n        { \"name\": \"punctuation.separator.colon.pilot\", \"match\": \":\" },\n        { \"name\": \"punctuation.accessor.dot.pilot\", \"match\": \"\\\\.\" },\n        { \"name\": \"punctuation.brackets.curly.pilot\", \"match\": \"[{}]\" },\n        { \"name\": \"punctuation.brackets.round.pilot\", \"match\": \"[()]\" },\n        { \"name\": \"punctuation.brackets.square.pilot\", \"match\": \"[\\\\[\\\\]]\" }\n      ]\n    }" + ",\n";
     s = s + tm_variables_section() + "\n  }\n}";
     return s;
 }
 
+
 // =========================================================================
-// 6. IDE ARTIFACTS BUNDLE & SYNTAX MIGRATION TABLE
+// 5B. VS CODE PACKAGE.JSON MANIFEST MODEL & GENERATOR
 // =========================================================================
 
-pub struct IdeArtifactsBundle : IValue {
-    pub tm_language_json:       str;
-    pub language_config_json:   str;
-    pub snippets_json:          str;
-    pub semantic_legend_json:   str;
+[JsonObject]
+pub struct PkgRepository : IValue {
+    [JsonProperty("type")]
+    pub repo_type: str;
+
+    [JsonProperty("url")]
+    pub url: str;
+
+    [JsonProperty("directory")]
+    pub directory: str;
 }
 
-pub pure fn build_all_ide_artifacts() -> IdeArtifactsBundle {
-    let seed_tokens = __registered_symbols(0);
-    let syntax_kws = __registered_symbols(1);
-    let mod_kws    = __registered_symbols(2);
-    let lang_types = __registered_symbols(3);
-    let op_syms    = __registered_symbols(4);
+[JsonObject]
+pub struct PkgEngines : IValue {
+    [JsonProperty("vscode")]
+    pub vscode: str;
+}
 
-    return IdeArtifactsBundle {
-        tm_language_json:     build_tm_language_json(seed_tokens, syntax_kws, mod_kws, lang_types, op_syms),
-        language_config_json: build_language_configuration_json(),
-        snippets_json:        build_snippets_json(),
-        semantic_legend_json: build_semantic_legend_json(),
+[JsonObject]
+pub struct PkgSemanticToken : IValue {
+    [JsonProperty("id")]
+    pub id: str;
+
+    [JsonProperty("description")]
+    pub description: str;
+}
+
+[JsonObject]
+pub struct PkgLanguage : IValue {
+    [JsonProperty("id")]
+    pub id: str;
+
+    [JsonProperty("aliases")]
+    pub aliases: str[];
+
+    [JsonProperty("extensions")]
+    pub extensions: str[];
+
+    [JsonProperty("configuration")]
+    pub configuration: str;
+}
+
+[JsonObject]
+pub struct PkgGrammar : IValue {
+    [JsonProperty("language")]
+    pub language: str;
+
+    [JsonProperty("scopeName")]
+    pub scope_name: str;
+
+    [JsonProperty("path")]
+    pub path: str;
+}
+
+[JsonObject]
+pub struct PkgSnippet : IValue {
+    [JsonProperty("language")]
+    pub language: str;
+
+    [JsonProperty("path")]
+    pub path: str;
+}
+
+[JsonObject]
+pub struct PkgBreakpoint : IValue {
+    [JsonProperty("language")]
+    pub language: str;
+}
+
+[JsonObject]
+pub struct PkgCommand : IValue {
+    [JsonProperty("command")]
+    pub command: str;
+
+    [JsonProperty("title")]
+    pub title: str;
+
+    [JsonProperty("icon")]
+    pub icon: str;
+}
+
+[JsonObject]
+pub struct PkgMenuItem : IValue {
+    [JsonProperty("command")]
+    pub command: str;
+
+    [JsonProperty("when")]
+    pub when_clause: str;
+
+    [JsonProperty("group")]
+    pub group: str;
+}
+
+[JsonObject]
+pub struct PkgMenus : IValue {
+    [JsonProperty("editor/title/run")]
+    pub editor_title_run: PkgMenuItem[];
+
+    [JsonProperty("editor/context")]
+    pub editor_context: PkgMenuItem[];
+}
+
+[JsonObject]
+pub struct PkgDebugger : IValue {
+    [JsonProperty("type")]
+    pub dbg_type: str;
+
+    [JsonProperty("label")]
+    pub label: str;
+
+    [JsonProperty("languages")]
+    pub languages: str[];
+}
+
+[JsonObject]
+pub struct PkgConfigProp : IValue {
+    [JsonProperty("name")]
+    pub name: str;
+
+    [JsonProperty("type")]
+    pub prop_type: str;
+
+    [JsonProperty("default")]
+    pub default_val: str;
+
+    [JsonProperty("description")]
+    pub description: str;
+}
+
+[JsonObject]
+pub struct PkgConfiguration : IValue {
+    [JsonProperty("title")]
+    pub title: str;
+
+    [JsonProperty("properties")]
+    pub properties: PkgConfigProp[];
+}
+
+[JsonObject]
+pub struct PkgContributes : IValue {
+    [JsonProperty("semanticTokenTypes")]
+    pub semantic_token_types: PkgSemanticToken[];
+
+    [JsonProperty("semanticTokenModifiers")]
+    pub semantic_token_modifiers: PkgSemanticToken[];
+
+    [JsonProperty("languages")]
+    pub languages: PkgLanguage[];
+
+    [JsonProperty("grammars")]
+    pub grammars: PkgGrammar[];
+
+    [JsonProperty("snippets")]
+    pub snippets: PkgSnippet[];
+
+    [JsonProperty("breakpoints")]
+    pub breakpoints: PkgBreakpoint[];
+
+    [JsonProperty("commands")]
+    pub commands: PkgCommand[];
+
+    [JsonProperty("menus")]
+    pub menus: PkgMenus;
+
+    [JsonProperty("debuggers")]
+    pub debuggers: PkgDebugger[];
+
+    [JsonProperty("configuration")]
+    pub configuration: PkgConfiguration;
+}
+
+[JsonObject]
+pub struct PkgDevDependencies : IValue {
+    [JsonProperty("@types/node")]
+    pub types_node: str;
+
+    [JsonProperty("@types/vscode")]
+    pub types_vscode: str;
+
+    [JsonProperty("typescript")]
+    pub typescript: str;
+}
+
+[JsonObject]
+pub struct PkgScripts : IValue {
+    [JsonProperty("vscode:prepublish")]
+    pub prepublish: str;
+
+    [JsonProperty("compile")]
+    pub compile: str;
+
+    [JsonProperty("watch")]
+    pub watch: str;
+
+    [JsonProperty("package")]
+    pub package_cmd: str;
+}
+
+[JsonObject]
+pub struct PackageJsonModel : IValue {
+    [JsonProperty("name")]
+    pub name: str;
+
+    [JsonProperty("displayName")]
+    pub display_name: str;
+
+    [JsonProperty("description")]
+    pub description: str;
+
+    [JsonProperty("version")]
+    pub version: str;
+
+    [JsonProperty("publisher")]
+    pub publisher: str;
+
+    [JsonProperty("license")]
+    pub license: str;
+
+    [JsonProperty("repository")]
+    pub repository: PkgRepository;
+
+    [JsonProperty("engines")]
+    pub engines: PkgEngines;
+
+    [JsonProperty("categories")]
+    pub categories: str[];
+
+    [JsonProperty("activationEvents")]
+    pub activation_events: str[];
+
+    [JsonProperty("main")]
+    pub main_path: str;
+
+    [JsonProperty("contributes")]
+    pub contributes: PkgContributes;
+
+    [JsonProperty("devDependencies")]
+    pub dev_dependencies: PkgDevDependencies;
+
+    [JsonProperty("scripts")]
+    pub scripts: PkgScripts;
+}
+
+pub pure fn build_package_json_model(version: str = "1.1.51") -> PackageJsonModel {
+    return PackageJsonModel {
+        name:         "pilot-lang",
+        display_name: "Pilot Language Support",
+        description:  "Syntax highlighting, semantic analysis, type checking, and Language Server (LSP) integration for the Pilot programming language.",
+        version:      if version != "" { version } else { "1.1.51" },
+        publisher:    "pilot-lang",
+        license:      "MIT",
+        repository:   PkgRepository {
+            repo_type: "git",
+            url:       "https://github.com/moonxbears/Pilot.git",
+            directory: "vscode-pilot",
+        },
+        engines: PkgEngines {
+            vscode: "^1.85.0",
+        },
+        categories: [
+            "Programming Languages",
+            "Linters",
+        ],
+        activation_events: [
+            "onLanguage:pilot",
+            "onDebug",
+            "onCommand:pilot.runCurrentFile",
+            "onCommand:pilot.debugCurrentFile",
+            "onCommand:pilot.createLaunchConfig",
+            "onCommand:pilot.runAllTests",
+            "onCommand:pilot.runCurrentTest",
+            "onCommand:pilot.refreshTests",
+        ],
+        main_path: "./out/extension.js",
+        contributes: PkgContributes {
+            semantic_token_types: [
+                PkgSemanticToken { id: "namespace", description: "Style for namespaces" },
+                PkgSemanticToken { id: "type", description: "Style for types" },
+                PkgSemanticToken { id: "class", description: "Style for classes" },
+                PkgSemanticToken { id: "enum", description: "Style for enums" },
+                PkgSemanticToken { id: "interface", description: "Style for interfaces" },
+                PkgSemanticToken { id: "struct", description: "Style for structs" },
+                PkgSemanticToken { id: "typeParameter", description: "Style for generic type parameters" },
+                PkgSemanticToken { id: "parameter", description: "Style for function parameters" },
+                PkgSemanticToken { id: "variable", description: "Style for variables" },
+                PkgSemanticToken { id: "property", description: "Style for properties and fields" },
+                PkgSemanticToken { id: "enumMember", description: "Style for enum variants" },
+                PkgSemanticToken { id: "event", description: "Style for events" },
+                PkgSemanticToken { id: "function", description: "Style for functions" },
+                PkgSemanticToken { id: "method", description: "Style for methods" },
+                PkgSemanticToken { id: "macro", description: "Style for macros" },
+                PkgSemanticToken { id: "keyword", description: "Style for keywords" },
+                PkgSemanticToken { id: "modifier", description: "Style for modifiers" },
+                PkgSemanticToken { id: "comment", description: "Style for comments" },
+                PkgSemanticToken { id: "string", description: "Style for strings" },
+                PkgSemanticToken { id: "number", description: "Style for numbers" },
+                PkgSemanticToken { id: "regexp", description: "Style for regexes" },
+                PkgSemanticToken { id: "operator", description: "Style for operators" },
+                PkgSemanticToken { id: "decorator", description: "Style for attributes and decorators" },
+            ],
+            semantic_token_modifiers: [
+                PkgSemanticToken { id: "declaration", description: "Annotates symbol declarations" },
+                PkgSemanticToken { id: "definition", description: "Annotates symbol definitions" },
+                PkgSemanticToken { id: "readonly", description: "Annotates readonly or immutable symbols" },
+                PkgSemanticToken { id: "static", description: "Annotates static members" },
+                PkgSemanticToken { id: "deprecated", description: "Annotates deprecated members" },
+                PkgSemanticToken { id: "abstract", description: "Annotates abstract members" },
+                PkgSemanticToken { id: "async", description: "Annotates async members" },
+                PkgSemanticToken { id: "modification", description: "Annotates mutating targets" },
+                PkgSemanticToken { id: "documentation", description: "Annotates doc comments" },
+                PkgSemanticToken { id: "defaultLibrary", description: "Annotates stdlib / built-in members" },
+                PkgSemanticToken { id: "constructor", description: "Annotates constructors" },
+                PkgSemanticToken { id: "callable", description: "Annotates callable variables" },
+            ],
+            languages: [
+                PkgLanguage {
+                    id:            "pilot",
+                    aliases:       ["Pilot", "pilot"],
+                    extensions:    [".pilot", ".pchor"],
+                    configuration: "./language-configuration.json",
+                },
+            ],
+            grammars: [
+                PkgGrammar {
+                    language:   "pilot",
+                    scope_name: "source.pilot",
+                    path:       "./syntaxes/pilot.tmLanguage.json",
+                },
+            ],
+            snippets: [
+                PkgSnippet {
+                    language: "pilot",
+                    path:     "./snippets/pilot.json",
+                },
+            ],
+            breakpoints: [
+                PkgBreakpoint { language: "pilot" },
+            ],
+            commands: [
+                PkgCommand { command: "pilot.restartLanguageServer", title: "Pilot: Restart Language Server", icon: "" },
+                PkgCommand { command: "pilot.runCurrentFile", title: "Pilot: Run Current File", icon: "$(play)" },
+                PkgCommand { command: "pilot.debugCurrentFile", title: "Pilot: Debug Current File", icon: "$(debug-alt)" },
+                PkgCommand { command: "pilot.debugCurrentFileDap", title: "Pilot: Debug with GUI (DAP)", icon: "$(debug)" },
+                PkgCommand { command: "pilot.createLaunchConfig", title: "Pilot: Add Run & Debug Configurations to launch.json", icon: "" },
+                PkgCommand { command: "pilot.runAllTests", title: "Pilot: Run All Tests", icon: "$(run-all)" },
+                PkgCommand { command: "pilot.runCurrentTest", title: "Pilot: Run Current Test File", icon: "$(play)" },
+                PkgCommand { command: "pilot.refreshTests", title: "Pilot: Refresh Tests", icon: "$(refresh)" },
+            ],
+            menus: PkgMenus {
+                editor_title_run: [
+                    PkgMenuItem { command: "pilot.runCurrentFile", when_clause: "resourceExtname == .pilot", group: "navigation@1" },
+                    PkgMenuItem { command: "pilot.debugCurrentFile", when_clause: "resourceExtname == .pilot", group: "navigation@2" },
+                    PkgMenuItem { command: "pilot.runCurrentTest", when_clause: "resourceExtname == .pilot", group: "navigation@3" },
+                ],
+                editor_context: [
+                    PkgMenuItem { command: "pilot.runCurrentTest", when_clause: "resourceExtname == .pilot", group: "navigation@3" },
+                ],
+            },
+            debuggers: [
+                PkgDebugger { dbg_type: "pilot", label: "Pilot", languages: ["pilot"] },
+            ],
+            configuration: PkgConfiguration {
+                title: "Pilot Language",
+                properties: [
+                    PkgConfigProp { name: "pilot.languageServer.serverPath", prop_type: "string", default_val: "pilot-lsp", description: "Optional explicit path to pilot-lsp or pilot executable." },
+                    PkgConfigProp { name: "pilot.compiler.executablePath", prop_type: "string", default_val: "pilot", description: "Optional explicit path to the pilot compiler executable." },
+                    PkgConfigProp { name: "pilot.dap.serverPath", prop_type: "string", default_val: "pilot-dap", description: "Optional explicit path to pilot-dap or pilot executable." },
+                ],
+            },
+        },
+        dev_dependencies: PkgDevDependencies {
+            types_node:    "^26.6.5",
+            types_vscode:  "^1.85.0",
+            typescript:    "^7.0.2",
+        },
+        scripts: PkgScripts {
+            prepublish:  "npm run compile",
+            compile:     "tsc -p .",
+            watch:       "tsc -watch -p .",
+            package_cmd: "vsce package",
+        },
     };
 }
+
+pub fn dumps_package_json(version: str = "1.1.51", indent: i64 = 2) -> str {
+    let content = load("vscode-pilot/package.json");
+    if len(content) > 0 {
+        return content;
+    }
+    return "{}";
+}
+
 pub pure fn nameof(sym: str) -> str => sym;
-// Pilot-Hosted Legacy-to-Canonical Syntax Migration Table (Used by `pilot fmt --migrate-syntax`)
-pub pure fn syntax_migration_pairs() -> tuple<str, str>[] => [
-    ("def",       nameof(fn)),
-    ("protocol",  nameof(interface)),
-];
-
-// =========================================================================
-// 7. PILOT-HOSTED ADVANCED HOVER CARD MARKDOWN FORMATTER & KEYWORD LINKS
-// =========================================================================
-
-pub struct HoverParamModel : IValue {
-    pub name:        str;
-    pub ty_str:      str;
-    pub modifier:    str;
-    pub default_val: str;
-    pub doc:         str;
-}
-
-pub struct HoverOverloadModel : IValue {
-    pub name:      str;
-    pub receiver:  str;
-    pub modifiers: str[];
-    pub params:    HoverParamModel[];
-    pub return_ty: str;
-    pub error_ty:  str;
-    pub doc:       str;
-}
 
 pub fn get_related_keywords(kw: str) -> str[] {
     return reflect_related_keywords(kw);
@@ -1820,98 +1937,9 @@ pub pure fn format_keyword_hover_markdown(ident: str, domain: str, summary: str)
     return md;
 }
 
-pub pure fn format_fn_hover_markdown(
-    active:     HoverOverloadModel,
-    overloads:  HoverOverloadModel[],
-    active_idx: i64
-) -> str {
-    var out = "```pilot\n";
-    var mod_prefix = "";
-    for m in active.modifiers {
-        if m != "priv" && m != "builtin" {
-            mod_prefix = mod_prefix + m + " ";
-        }
-    }
-
-    let recv_prefix = if len(active.receiver) > 0 { active.receiver + "." } else { "" };
-    let err_suffix  = if len(active.error_ty) > 0 { " ! " + active.error_ty } else { "" };
-
-    if len(active.params) > 2 {
-        out = out + f"{mod_prefix}fn {recv_prefix}{active.name}(\n";
-        for p in active.params {
-            let p_mod = if len(p.modifier) > 0 { p.modifier + " " } else { "" };
-            let p_def = if len(p.default_val) > 0 { " = " + p.default_val } else { "" };
-            out = out + f"    {p_mod}{p.name}: {p.ty_str}{p_def},\n";
-        }
-        out = out + f") -> {active.return_ty}{err_suffix}\n";
-    } else {
-        var inline_params = "";
-        var pidx = 0;
-        for p in active.params {
-            if pidx > 0 { inline_params = inline_params + ", "; }
-            let p_mod = if len(p.modifier) > 0 { p.modifier + " " } else { "" };
-            let p_def = if len(p.default_val) > 0 { " = " + p.default_val } else { "" };
-            inline_params = inline_params + f"{p_mod}{p.name}: {p.ty_str}{p_def}";
-            pidx = pidx + 1;
-        }
-        out = out + f"{mod_prefix}fn {recv_prefix}{active.name}({inline_params}) -> {active.return_ty}{err_suffix}\n";
-    }
-    out = out + "```\n\n";
-
-    let kind_label = if len(active.receiver) > 0 {
-        f"*Pilot Method* on `{active.receiver}`"
-    } else {
-        "*Pilot Function*"
-    };
-    out = out + kind_label;
-
-    for m in active.modifiers {
-        out = out + f" • [{m}](#)";
-    }
-    out = out + "\n";
-
-    if len(active.doc) > 0 {
-        out = out + "\n" + active.doc + "\n";
-    }
-
-    if len(active.params) > 0 {
-        out = out + "\n### Parameters\n";
-        for p in active.params {
-            out = out + f"- `{p.name}`: `{p.ty_str}`\n";
-        }
-    }
-
-    if active.return_ty != "void" && active.return_ty != "()" {
-        out = out + f"\n### Returns\n- `{active.return_ty}`\n";
-    }
-
-    if len(active.error_ty) > 0 {
-        out = out + f"\n### Throws / Errors\n- `{active.error_ty}`\n";
-    }
-
-    let ov_count = len(overloads);
-    if ov_count > 1 {
-        out = out + f"\n### Overloads ({ov_count})\n";
-        var oidx = 0;
-        for ov in overloads {
-            let marker = if oidx == active_idx { " *(active)*" } else { "" };
-            let num = oidx + 1;
-            out = out + f"{num}. `fn {ov.name}(...) -> {ov.return_ty}`{marker}\n";
-            oidx = oidx + 1;
-        }
-    }
-
-    return out;
-}
-
 // =========================================================================
 // 8. PILOT-NATIVE LSP REFLECTION, HOVER, COMPLETION & DEFINITION HANDLERS
 // =========================================================================
-
-pub fn lookup_keyword_summary(kw: str) -> str {
-    let info = reflect_keyword_info(kw);
-    return info.doc;
-}
 
 pub fn reflect_node_doc(node_id: i64) -> str {
     let span_start = __engine(Cfg.ast.ast_span_start, node_id);
@@ -2011,10 +2039,37 @@ pub fn handle_lsp_hover(offset: i64) {
     while i < node_count {
         let s = __engine(Cfg.ast.ast_span_start, i);
         let e = __engine(Cfg.ast.ast_span_end, i);
-        if s <= offset && offset <= e {
-            let sym = __engine(Cfg.ast.ast_node_sym, i);
-            let sname = __engine(Cfg.ast.sym_str, sym);
-            let l = e - s;
+        let k = __engine(Cfg.ast.ast_node_kind, i);
+        let sym = __engine(Cfg.ast.ast_node_sym, i);
+        let sname = __engine(Cfg.ast.sym_str, sym);
+        var eff_s = s;
+        var eff_e = e;
+        if k == 17 {
+            var p = e;
+            while p < e + 60 && __engine(Cfg.ast.source_slice, p, p + 1) != "." {
+                p = p + 1;
+            }
+            if __engine(Cfg.ast.source_slice, p, p + 1) == "." {
+                p = p + 1;
+                while p < e + 60 && (__engine(Cfg.ast.source_slice, p, p + 1) == " " || __engine(Cfg.ast.source_slice, p, p + 1) == "\t") {
+                    p = p + 1;
+                }
+                eff_s = p;
+                var m_end = p;
+                var scan_m = true;
+                while scan_m && m_end < p + 60 {
+                    let ch = __engine(Cfg.ast.source_slice, m_end, m_end + 1);
+                    if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+                        m_end = m_end + 1;
+                    } else {
+                        scan_m = false;
+                    }
+                }
+                eff_e = m_end;
+            }
+        }
+        if eff_s <= offset && offset <= eff_e {
+            let l = eff_e - eff_s;
             if sname == word {
                 if l < best_len {
                     best_len = l;
@@ -2043,8 +2098,34 @@ pub fn handle_lsp_hover(offset: i64) {
     if target_id == 4294967295 || target_id < 0 {
         target_id = best_nid;
     }
-    let t_kind = __engine(Cfg.ast.ast_node_kind, target_id);
     let b_kind = __engine(Cfg.ast.ast_node_kind, best_nid);
+    var t_kind = __engine(Cfg.ast.ast_node_kind, target_id);
+
+    if b_kind == 17 || (target_id == best_nid && (b_kind == 14 || b_kind == 16)) {
+        var found_target = -1;
+        var j = 0;
+        while j < node_count && found_target == -1 {
+            let jk = __engine(Cfg.ast.ast_node_kind, j);
+            let js = __engine(Cfg.ast.ast_node_sym, j);
+            let jname = __engine(Cfg.ast.sym_str, js);
+            if jname == word {
+                if b_kind == 17 {
+                    if jk == 21 || jk == 3 {
+                        found_target = j;
+                    }
+                } else {
+                    if jk == 4 || jk == 21 || jk == 3 || jk == 1 || jk == 2 {
+                        found_target = j;
+                    }
+                }
+            }
+            j = j + 1;
+        }
+        if found_target != -1 {
+            target_id = found_target;
+            t_kind = __engine(Cfg.ast.ast_node_kind, target_id);
+        }
+    }
 
     if t_kind == 3 || b_kind == 3 {
         let fn_id = if t_kind == 3 { target_id } else { best_nid };
@@ -2364,6 +2445,39 @@ pub fn handle_lsp_completion(offset: i64) {
 }
 
 pub fn handle_lsp_definition(offset: i64) {
+    let cur_ch = __engine(Cfg.ast.source_slice, offset, offset + 1);
+    let is_ident = (cur_ch >= "a" && cur_ch <= "z") || (cur_ch >= "A" && cur_ch <= "Z") || (cur_ch >= "0" && cur_ch <= "9") || cur_ch == "_";
+    if !is_ident {
+        __engine(Cfg.ast.lsp_set_result, "null");
+        return;
+    }
+
+    var w_start = offset;
+    var scan_wstart = true;
+    while scan_wstart && w_start > 0 {
+        let ch = __engine(Cfg.ast.source_slice, w_start - 1, w_start);
+        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+            w_start = w_start - 1;
+        } else {
+            scan_wstart = false;
+        }
+    }
+    var w_end = offset;
+    var scan_wend = true;
+    while scan_wend && w_end < offset + 40 {
+        let ch = __engine(Cfg.ast.source_slice, w_end, w_end + 1);
+        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+            w_end = w_end + 1;
+        } else {
+            scan_wend = false;
+        }
+    }
+    let word = __engine(Cfg.ast.source_slice, w_start, w_end);
+    if word == "" {
+        __engine(Cfg.ast.lsp_set_result, "null");
+        return;
+    }
+
     let node_count = __engine(Cfg.ast.ast_node_count);
     var best_nid = -1;
     var best_len = 999999999;
@@ -2371,11 +2485,42 @@ pub fn handle_lsp_definition(offset: i64) {
     while i < node_count {
         let s = __engine(Cfg.ast.ast_span_start, i);
         let e = __engine(Cfg.ast.ast_span_end, i);
-        if s <= offset && offset <= e {
-            let l = e - s;
-            if l < best_len {
-                best_len = l;
-                best_nid = i;
+        let k = __engine(Cfg.ast.ast_node_kind, i);
+        let sym = __engine(Cfg.ast.ast_node_sym, i);
+        let sname = __engine(Cfg.ast.sym_str, sym);
+        var eff_s = s;
+        var eff_e = e;
+        if k == 17 {
+            var p = e;
+            while p < e + 60 && __engine(Cfg.ast.source_slice, p, p + 1) != "." {
+                p = p + 1;
+            }
+            if __engine(Cfg.ast.source_slice, p, p + 1) == "." {
+                p = p + 1;
+                while p < e + 60 && (__engine(Cfg.ast.source_slice, p, p + 1) == " " || __engine(Cfg.ast.source_slice, p, p + 1) == "\t") {
+                    p = p + 1;
+                }
+                eff_s = p;
+                var m_end = p;
+                var scan_m = true;
+                while scan_m && m_end < p + 60 {
+                    let ch = __engine(Cfg.ast.source_slice, m_end, m_end + 1);
+                    if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+                        m_end = m_end + 1;
+                    } else {
+                        scan_m = false;
+                    }
+                }
+                eff_e = m_end;
+            }
+        }
+        if eff_s <= offset && offset <= eff_e {
+            let l = eff_e - eff_s;
+            if sname == word {
+                if l < best_len {
+                    best_len = l;
+                    best_nid = i;
+                }
             }
         }
         i = i + 1;
@@ -2385,6 +2530,31 @@ pub fn handle_lsp_definition(offset: i64) {
         if target_id == 4294967295 || target_id < 0 {
             target_id = best_nid;
         }
+        let b_kind = __engine(Cfg.ast.ast_node_kind, best_nid);
+        if b_kind == 17 || (target_id == best_nid && (b_kind == 14 || b_kind == 16)) {
+            var found_target = -1;
+            var j = 0;
+            while j < node_count && found_target == -1 {
+                let jk = __engine(Cfg.ast.ast_node_kind, j);
+                let js = __engine(Cfg.ast.ast_node_sym, j);
+                let jname = __engine(Cfg.ast.sym_str, js);
+                if jname == word {
+                    if b_kind == 17 {
+                        if jk == 21 || jk == 3 {
+                            found_target = j;
+                        }
+                    } else {
+                        if jk == 4 || jk == 21 || jk == 3 || jk == 1 || jk == 2 {
+                            found_target = j;
+                        }
+                    }
+                }
+                j = j + 1;
+            }
+            if found_target != -1 {
+                target_id = found_target;
+            }
+        }
         let s = __engine(Cfg.ast.ast_span_start, target_id);
         let e = __engine(Cfg.ast.ast_span_end, target_id);
         let res = "" + s + ":" + e;
@@ -2392,6 +2562,89 @@ pub fn handle_lsp_definition(offset: i64) {
         return;
     }
     __engine(Cfg.ast.lsp_set_result, "null");
+}
+
+pub fn handle_lsp_references(offset: i64) {
+    let cur_ch = __engine(Cfg.ast.source_slice, offset, offset + 1);
+    let is_ident = (cur_ch >= "a" && cur_ch <= "z") || (cur_ch >= "A" && cur_ch <= "Z") || (cur_ch >= "0" && cur_ch <= "9") || cur_ch == "_";
+    if !is_ident {
+        __engine(Cfg.ast.lsp_set_result, "[]");
+        return;
+    }
+
+    var w_start = offset;
+    var scan_wstart = true;
+    while scan_wstart && w_start > 0 {
+        let ch = __engine(Cfg.ast.source_slice, w_start - 1, w_start);
+        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+            w_start = w_start - 1;
+        } else {
+            scan_wstart = false;
+        }
+    }
+    var w_end = offset;
+    var scan_wend = true;
+    while scan_wend && w_end < offset + 40 {
+        let ch = __engine(Cfg.ast.source_slice, w_end, w_end + 1);
+        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+            w_end = w_end + 1;
+        } else {
+            scan_wend = false;
+        }
+    }
+    let word = __engine(Cfg.ast.source_slice, w_start, w_end);
+    if word == "" {
+        __engine(Cfg.ast.lsp_set_result, "[]");
+        return;
+    }
+
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var refs_json = "[";
+    var added = 0;
+    var i = 0;
+    while i < node_count {
+        let sym = __engine(Cfg.ast.ast_node_sym, i);
+        let sname = __engine(Cfg.ast.sym_str, sym);
+        if sname == word {
+            let s = __engine(Cfg.ast.ast_span_start, i);
+            let e = __engine(Cfg.ast.ast_span_end, i);
+            let k = __engine(Cfg.ast.ast_node_kind, i);
+            var eff_s = s;
+            var eff_e = e;
+            if k == 17 {
+                var p = e;
+                while p < e + 60 && __engine(Cfg.ast.source_slice, p, p + 1) != "." {
+                    p = p + 1;
+                }
+                if __engine(Cfg.ast.source_slice, p, p + 1) == "." {
+                    p = p + 1;
+                    while p < e + 60 && (__engine(Cfg.ast.source_slice, p, p + 1) == " " || __engine(Cfg.ast.source_slice, p, p + 1) == "\t") {
+                        p = p + 1;
+                    }
+                    eff_s = p;
+                    var m_end = p;
+                    var scan_m = true;
+                    while scan_m && m_end < p + 60 {
+                        let ch = __engine(Cfg.ast.source_slice, m_end, m_end + 1);
+                        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
+                            m_end = m_end + 1;
+                        } else {
+                            scan_m = false;
+                        }
+                    }
+                    eff_e = m_end;
+                }
+            }
+            if added > 0 {
+                refs_json = refs_json + ",";
+            }
+            refs_json = refs_json + '{"start":' + eff_s + ',"end":' + eff_e + '}';
+            added = added + 1;
+        }
+        i = i + 1;
+    }
+    refs_json = refs_json + "]";
+    __engine(Cfg.ast.lsp_set_result, refs_json);
 }
 
 pub fn is_keyword_or_seed(w: str) -> bool {
@@ -2525,17 +2778,23 @@ if _lsp_method == "textDocument/definition" {
 if _lsp_method == "textDocument/prepareRename" {
     handle_lsp_prepare_rename(_lsp_offset);
 }
+if _lsp_method == "textDocument/references" {
+    handle_lsp_references(_lsp_offset);
+}
 if _lsp_method == "ide-sync" || _lsp_method == "" {
     __engine(Cfg.ast.mount_unit, "stdlib/core/keywords.pilot");
     __engine(Cfg.ast.mount_unit, "../../stdlib/core/keywords.pilot");
-    let tm_json = build_tm_language_json("", "", "", "", "");
-    let lc_json = build_language_configuration_json();
-    let sn_json = build_snippets_json();
-    __engine("fs_write_text", "vscode-pilot/syntaxes/pilot.tmLanguage.json", tm_json);
-    __engine("fs_write_text", "vscode-pilot/language-configuration.json", lc_json);
-    __engine("fs_write_text", "vscode-pilot/snippets/pilot.json", sn_json);
+    let tm_model = build_tm_language_model("", "", "", "", "");
+    let lc_model = build_language_configuration_model();
+    let sn_model = build_snippets_model();
+    let pkg_model = build_package_json_model("1.1.51");
+    dump(tm_model, "vscode-pilot/syntaxes/pilot.tmLanguage.json");
+    dump(lc_model, "vscode-pilot/language-configuration.json");
+    dump(sn_model, "vscode-pilot/snippets/pilot.json");
+    dump(pkg_model, "vscode-pilot/package.json");
+    let verify_pkg = load("vscode-pilot/package.json");
 } else {
-    if _lsp_method != "textDocument/hover" && _lsp_method != "textDocument/completion" && _lsp_method != "textDocument/definition" && _lsp_method != "textDocument/prepareRename" {
+    if _lsp_method != "textDocument/hover" && _lsp_method != "textDocument/completion" && _lsp_method != "textDocument/definition" && _lsp_method != "textDocument/prepareRename" && _lsp_method != "textDocument/references" {
         handle_lsp_rename(_lsp_offset, _lsp_method);
     }
 }

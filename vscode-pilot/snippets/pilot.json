@@ -1,43 +1,43 @@
 {
-  "Distributive Struct Block": {
-    "prefix": "pstruct",
-    "body": [
-      "pub struct {",
-      "\t$0",
-      "}"
-    ],
-    "description": "Distributive Pilot struct block"
-  },
-  "Syntax Macro Rule": {
-    "prefix": "psyntax",
-    "body": [
-      "pub syntax ${1:name}(${2:expr}) => quote {",
-      "\t$0",
-      "};"
-    ],
-    "description": "Self-hosted Pilot syntax macro"
-  },
-  "Patch Function Clone": {
-    "prefix": "ppatch",
-    "body": [
-      "[var ${1:contents} = Patch(${2:orig_fn}, PatchPart.body(), ${3:0} ..${4:5})]",
-      "pub fn ${5:new_fn}() {",
-      "\t$0",
-      "\t${1:contents}.patch().call();",
-      "}"
-    ],
-    "description": "Non-destructive CST/AST function patch and clone"
-  },
-  "Choreography Blueprint": {
-    "prefix": "pblueprint",
-    "body": [
-      "pub blueprint ${1:Pipeline} {",
-      "\trole ${2:Worker};",
-      "\tcue ${3:on_event}(pkt:${4:iso<SliceBuffer<u8>>}) {",
-      "\t\troute pkt -> ${2:Worker}.${5:handle};",
-      "\t}",
-      "}"
-    ],
-    "description": "Zero-copy .pchor choreography blueprint"
-  }
+"Distributive Struct Block": {
+"prefix": "pstruct",
+"body": [
+"pub struct {",
+"\t$0",
+"}"
+],
+"description": "Distributive Pilot struct block"
+},
+"Syntax Macro Rule": {
+"prefix": "psyntax",
+"body": [
+"pub syntax ${1:name}(${2:expr}) => quote {",
+"\t$0",
+"\t};"
+],
+"description": "Self-hosted Pilot syntax macro"
+},
+"Patch Function Clone": {
+"prefix": "ppatch",
+"body": [
+"[var ${1:contents} = Patch(${2:orig_fn}, PatchPart.body(), ${3:0} ..${4:5})]",
+"pub fn ${5:new_fn}() {",
+"\t$0",
+"\t${1:contents}.patch().call();",
+"}"
+],
+"description": "Non-destructive CST/AST function patch and clone"
+},
+"Choreography Blueprint": {
+"prefix": "pblueprint",
+"body": [
+"pub blueprint ${1:Pipeline} {",
+"\trole ${2:Worker};",
+"\tcue ${3:on_event}(pkt:${4:iso<SliceBuffer<u8>>}) {",
+"\t\troute pkt -> ${2:Worker}.${5:handle};",
+"\t}",
+"}"
+],
+"description": "Zero-copy .pchor choreography blueprint"
+}
 }

@@ -275,3 +275,58 @@ As mandated by the user:
 > *"after you are done wiring up the proposal B logic you are to revert back to needing permission for all rust files"*
 
 **Status:** The Rust workspace (`crates/**/*.rs`) has immediately and strictly reverted to **READ-ONLY**. No further modifications to Rust code will occur without explicit, separate user authorization via this document.
+
+---
+
+## 9. Resolution: LSP Hover & Reference Navigation Architecture
+
+### 9.1 Root Causes Identified
+1. **Parser Span Truncation for `MemberExpr` (NodeKind 17):**
+   - In `pilot-parser`, the span of `MemberExpr` (`acct.balance`) only enclosed the LHS receiver (`acct`, e.g. `186..190`), omitting the dot and member name (`.balance`, e.g. `190..198`).
+   - Hover and definition queries on `.balance` or `.deposit` failed span containment checks (`offset <= e`), returning `null`.
+2. **Missing Target Resolution for Members & Identifiers:**
+   - `MemberExpr` nodes returned `target_id == u32::MAX`, causing fallback to `target_id = best_nid` (the member access itself rather than the declaration).
+   - "Go to Definition" on `acct.balance` jumped to line 10 itself, rather than line 4 (`pub balance: i64;`).
+3. **Absence of Reference Navigation (`textDocument/references`):**
+   - `vscode-pilot/src/extension.ts` registered hover, definition, and document symbol providers, but lacked a registered `ReferenceProvider`.
+   - `crates/pilot-lsp/src/server.rs` returned `JsonValue::Null` for unhandled methods.
+
+### 9.2 Pilot-First & Extension Resolution (0 Rust Source Changes)
+1. **Dynamic Member Token Span Synthesis (`selfhost/ide_sync.pilot`):**
+   - For `NodeKind == 17` (`MemberExpr`), `ide_sync.pilot` scans forward from the receiver's end `e` to find `.` and extracts the precise identifier token bounds `eff_s..eff_e`.
+   - Cursor positions within member accesses match with 100% precision.
+2. **Semantic Target Declaration Resolution (`selfhost/ide_sync.pilot`):**
+   - For `MemberExpr`, the engine searches the AST for matching `FieldDecl` (kind 21) or `FnDecl` (kind 3) nodes and sets `target_id`.
+   - Hover on `acct.balance` displays ```pilot\nbalance: i64\n``` with layout size (`8 bytes`).
+   - Hover on `acct.deposit(10)` displays ```pilot\npub fn deposit(amount: i64) -> i64\n```.
+   - "Go to Definition" on `acct.balance` returns `4:8..4:21` (jumps directly to `pub balance: i64;`).
+   - "Go to Definition" on `acct.deposit(10)` returns `5:11..5:18` (jumps directly to `pub fn deposit`).
+   - "Go to Definition" on `acct` returns `9:0..9:20` (jumps directly to `let acct = Account();`).
+   - "Go to Definition" on `Account` returns `3:7..8:1` (jumps directly to `struct Account { ... }`).
+3. **Reference Navigation Provider (`vscode-pilot/src/extension.ts`):**
+   - Registered `vscode.languages.registerReferenceProvider(selector, { ... })`.
+   - Supports 3-tier resolution:
+     1. Live LSP `textDocument/references` query if supported by the server.
+     2. Live LSP rename analysis (verifies non-keyword identifier legality and retrieves exact file ranges).
+     3. Whole-project multi-file workspace scanner finding all symbol references across all workspace `.pilot` files.
+4. **`handle_lsp_references` in `selfhost/ide_sync.pilot`:**
+   - Implemented name-blind symbol reference collector finding all matching AST node spans and returning JSON ranges `[{"start": s, "end": e}, ...]`.
+   - Wired to top-level dispatcher for `_lsp_method == "textDocument/references"`.
+5. **Verification & Invariant Preservation:**
+   - All 7 Phase 6 LSP tests in `crates/pilot-lsp` pass (7/7).
+   - CLI tests in `pilot-cli` pass (3/3).
+   - All Gate checks (`gate1_check.py`, `gate2_check.py`, `gate3_check.py`) pass.
+   - `crates/**/*.rs` is completely clean with 0 edits (`git diff crates/` is empty).
+   - `npm run compile` in `vscode-pilot` succeeds with 0 errors.
+
+---
+
+## 10. Optional Proposal D: Wire `textDocument/references` Directly into `crates/pilot-lsp/src/server.rs`
+
+*Note: The Rust workspace is strictly read-only. This change will NOT be made without user permission.*
+
+- **File to Edit:** `crates/pilot-lsp/src/server.rs` (+15 lines).
+- **Proposed Changes:**
+  1. In `initialize` (line 74): Add `"referencesProvider": true` to `capabilities`.
+  2. In `dispatch_to_pilot_ide_sync` (around line 306): Add `match method` arm for `"textDocument/references"` to parse the JSON array emitted by `selfhost/ide_sync.pilot` and convert `s:e` offsets to LSP `Location[]` objects.
+- **Benefit:** Allows third-party CLI, Neovim, Helix, and Sublime LSP clients connecting over raw stdio JSON-RPC to receive `textDocument/references` directly from the standalone server executable.

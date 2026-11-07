@@ -537,6 +537,21 @@ fn __spaces(count: i64) -> str {
     return out;
 }
 
+fn __map_entries_sorted(val: any) -> any[] {
+    var entries = [];
+    let k = type_of(val);
+    if k == "list" {
+        return val;
+    }
+    if k == "map" || k == "object" {
+        let keys_list = val.keys();
+        for key in keys_list {
+            entries.append([key, val[key]]);
+        }
+    }
+    return entries;
+}
+
 fn __json_emit(val: any, pretty: bool, indent_spaces: i64, depth: i64) -> str {
     if __opt_is_none(val) {
         return "null";

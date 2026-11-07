@@ -629,6 +629,129 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 return new vscode.Location(vscode.Uri.parse(res.uri), range);
             }
         }),
+        vscode.languages.registerReferenceProvider(selector, {
+            async provideReferences(
+                document: vscode.TextDocument,
+                position: vscode.Position,
+                context: vscode.ReferenceContext
+            ): Promise<vscode.Location[]> {
+                client.notifyDidOpen(document);
+                const wordRange = document.getWordRangeAtPosition(position);
+                if (!wordRange) {
+                    return [];
+                }
+                const word = document.getText(wordRange);
+                if (!word || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(word)) {
+                    return [];
+                }
+
+                // 1. Try LSP textDocument/references
+                try {
+                    const lspRefs = await client.sendRequest('textDocument/references', {
+                        textDocument: { uri: document.uri.toString() },
+                        position: { line: position.line, character: position.character },
+                        context: { includeDeclaration: context.includeDeclaration }
+                    });
+                    if (Array.isArray(lspRefs) && lspRefs.length > 0) {
+                        return lspRefs.map((r: any) => new vscode.Location(
+                            vscode.Uri.parse(r.uri),
+                            new vscode.Range(r.range.start.line, r.range.start.character, r.range.end.line, r.range.end.character)
+                        ));
+                    }
+                } catch {
+                    // fallback to document & workspace search
+                }
+
+                // 2. Try LSP rename query which verifies identifier legality and returns all file ranges
+                try {
+                    const renameRes = await client.sendRequest('textDocument/rename', {
+                        textDocument: { uri: document.uri.toString() },
+                        position: { line: position.line, character: position.character },
+                        newName: word
+                    });
+                    if (renameRes && renameRes.changes) {
+                        const locations: vscode.Location[] = [];
+                        for (const fileUri of Object.keys(renameRes.changes)) {
+                            const edits = renameRes.changes[fileUri];
+                            if (Array.isArray(edits)) {
+                                for (const edit of edits) {
+                                    if (edit.range) {
+                                        locations.push(new vscode.Location(
+                                            vscode.Uri.parse(fileUri),
+                                            new vscode.Range(
+                                                edit.range.start.line,
+                                                edit.range.start.character,
+                                                edit.range.end.line,
+                                                edit.range.end.character
+                                            )
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        if (locations.length > 0) {
+                            const escWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                            const regex = new RegExp(`\\b${escWord}\\b`, 'g');
+                            const files = await vscode.workspace.findFiles('**/*.pilot', '**/node_modules/**');
+                            for (const file of files) {
+                                if (file.toString() === document.uri.toString()) {
+                                    continue;
+                                }
+                                try {
+                                    const otherDoc = await vscode.workspace.openTextDocument(file);
+                                    const otherText = otherDoc.getText();
+                                    let match: RegExpExecArray | null;
+                                    while ((match = regex.exec(otherText)) !== null) {
+                                        const startPos = otherDoc.positionAt(match.index);
+                                        const endPos = otherDoc.positionAt(match.index + word.length);
+                                        locations.push(new vscode.Location(otherDoc.uri, new vscode.Range(startPos, endPos)));
+                                    }
+                                } catch {
+                                    // ignore unreadable files
+                                }
+                            }
+                            return locations;
+                        }
+                    }
+                } catch {
+                    // fallback
+                }
+
+                // 3. Fallback: Direct whole-word document & workspace scan
+                const locations: vscode.Location[] = [];
+                const escWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regex = new RegExp(`\\b${escWord}\\b`, 'g');
+                
+                const text = document.getText();
+                let match: RegExpExecArray | null;
+                while ((match = regex.exec(text)) !== null) {
+                    const startPos = document.positionAt(match.index);
+                    const endPos = document.positionAt(match.index + word.length);
+                    locations.push(new vscode.Location(document.uri, new vscode.Range(startPos, endPos)));
+                }
+
+                const files = await vscode.workspace.findFiles('**/*.pilot', '**/node_modules/**');
+                for (const file of files) {
+                    if (file.toString() === document.uri.toString()) {
+                        continue;
+                    }
+                    try {
+                        const otherDoc = await vscode.workspace.openTextDocument(file);
+                        const otherText = otherDoc.getText();
+                        let otherMatch: RegExpExecArray | null;
+                        while ((otherMatch = regex.exec(otherText)) !== null) {
+                            const startPos = otherDoc.positionAt(otherMatch.index);
+                            const endPos = otherDoc.positionAt(otherMatch.index + word.length);
+                            locations.push(new vscode.Location(otherDoc.uri, new vscode.Range(startPos, endPos)));
+                        }
+                    } catch {
+                        // ignore unreadable files
+                    }
+                }
+
+                return locations;
+            }
+        }),
         vscode.languages.registerDocumentSymbolProvider(selector, {
             async provideDocumentSymbols(document: vscode.TextDocument): Promise<vscode.DocumentSymbol[]> {
                 client.notifyDidOpen(document);
