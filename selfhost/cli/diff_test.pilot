@@ -7,6 +7,13 @@ pub pkg Pilot.SelfHost.Cli.DiffTest;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
+pub enum BackendMismatchTarget {
+    None,
+    C,
+    Llvm,
+    Wasm,
+}
+
 pub pure fn verify_differential_parity(
     pilvm_res: i64,
     native_c_res: i64,
@@ -21,4 +28,19 @@ pub pure fn verify_differential_parity(
 
 pub pure fn format_diff_report(test_name: str, res_val: i64) -> str {
     return "PASS: " + test_name + " [PilVM: " + res_val + " == Native: " + res_val + " == LLVM: " + res_val + "] [WASM: OK, C: OK]";
+}
+
+// Compares outputs across PilVM, C, LLVM IR, and WASM backends.
+// Returns "PASS" iff all 4 match; otherwise "MISMATCH:<backend_name>" naming the first diverging backend.
+pub fn check_differential_backends(vm_out: str, c_out: str, llvm_out: str, wasm_out: str) -> str {
+    if c_out != vm_out {
+        return "MISMATCH:c";
+    }
+    if llvm_out != vm_out {
+        return "MISMATCH:llvm";
+    }
+    if wasm_out != vm_out {
+        return "MISMATCH:wasm";
+    }
+    return "PASS";
 }

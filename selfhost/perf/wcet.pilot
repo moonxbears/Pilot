@@ -1,31 +1,87 @@
 // =========================================================================
 // FILE: selfhost/perf/wcet.pilot
 // Milestone 60.2: Static WCET & [HardRealtime] Loop Bound Verifier
-// Replaces crates/pilot-perf/src/analyze.rs in Pure Pilot.
 // =========================================================================
 pub pkg Pilot.SelfHost.Perf.Wcet;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
-pub fn audit_realtime_ast_loops() -> i64 {
-    let count = __engine("ast_node_count");
-    var unbounded_loops = 0;
+pub enum WcetResultStatus {
+    Pass,
+    FailUnboundedLoop,
+    FailWcetExceeded,
+}
+
+pub enum LoopConstructKind {
+    None,
+    BoundedFor,
+    UnboundedWhile,
+}
+
+pub fn verify_arena_wcet() -> str {
+    let node_count = __engine("ast_node_count");
+    
+    // Check for unbounded while loop
     var i = 0;
-    while i < count {
-        let k = __engine("ast_node_kind", i);
-        // k == 7 is ForExpr / WhileStmt / Loop
-        if k == 7 {
-            let cc = __engine("ast_child_count", i);
-            if cc < 2 {
-                unbounded_loops = unbounded_loops + 1;
-            }
+    while i < node_count {
+        let orig = __engine("ast_orig_kind", i);
+        // NodeKind::WhileStmt is 106
+        if orig == 106 {
+            return "FAIL:UNBOUNDED_LOOP";
         }
         i = i + 1;
     }
-    return unbounded_loops;
-}
 
-pub pure fn format_wcet_report(fn_name: str, est_cycles: i64, budget_cycles: i64) -> str {
-    let status = if est_cycles <= budget_cycles { "PASS" } else { "EXCEEDED" };
-    return "[WCET " + status + "] " + nameof(fn) + " " + fn_name + ": " + est_cycles + " / " + budget_cycles + " cycles";
+    // Search for [Wcet(budget)]
+    var budget = 0;
+    var j = 0;
+    while j < node_count {
+        let attr_cnt = __engine("ast_attr_decl_count", j);
+        if attr_cnt > 0 {
+            var ai = 0;
+            while ai < attr_cnt {
+                let name_sym = __engine("ast_attr_name", j, ai);
+                let name = __engine("sym_str", name_sym);
+                if name == "Wcet" {
+                    budget = __engine("ast_attr_decl_arg", j, ai, 0);
+                }
+                ai = ai + 1;
+            }
+        }
+        j = j + 1;
+    }
+
+    // If bounded for loop, count iterations and body cost
+    var loop_bound = 1;
+    var body_ops = 1;
+    var found_loop = false;
+    var m = 0;
+    while m < node_count {
+        let orig = __engine("ast_orig_kind", m);
+        // NodeKind::ForExpr is 204
+        if orig == 204 {
+            found_loop = true;
+            let cc = __engine("ast_child_count", m);
+            if cc >= 2 {
+                let iter_node = __engine("ast_child_at", m, 0);
+                let body_node = __engine("ast_child_at", m, 1);
+                // In binary range (RangeExpr == 220 or BinaryExpr == 19)
+                let iter_orig = __engine("ast_orig_kind", iter_node);
+                if iter_orig == 220 || __engine("ast_node_kind", iter_node) == 19 {
+                    let rhs = __engine("ast_child_at", iter_node, 1);
+                    if __engine("ast_node_kind", rhs) == 15 || __engine("ast_orig_kind", rhs) == 301 {
+                        loop_bound = __engine("ast_node_raw_bits", rhs);
+                    }
+                }
+                body_ops = __engine("ast_child_count", body_node) + 2;
+            }
+        }
+        m = m + 1;
+    }
+
+    let cycles = if found_loop { loop_bound * body_ops } else { 10 };
+    if budget > 0 && cycles > budget {
+        return "FAIL:WCET_EXCEEDED";
+    }
+    return "PASS:" + cycles + "/" + budget;
 }

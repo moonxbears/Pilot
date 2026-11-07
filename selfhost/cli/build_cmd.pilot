@@ -7,16 +7,111 @@ pub pkg Pilot.SelfHost.Cli.BuildCmd;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
-// Target codes: 0=native, 1=c, 2=llvm, 3=wasm, 4=gpu, 5=asm
-pub pure fn resolve_build_target(target_flag: str) -> i64 {
-    if target_flag == "c" { return 1; }
-    if target_flag == "llvm" { return 2; }
-    if target_flag == "wasm" { return 3; }
-    if target_flag == "gpu" { return 4; }
-    if target_flag == "asm" { return 5; }
-    return 0;
+pub enum BuildTarget {
+    Native,
+    C,
+    Llvm,
+    Wasm,
+    Gpu,
+    Asm,
+}
+
+pub pure fn resolve_build_target(target_flag: str) -> BuildTarget {
+    if target_flag == "c" { return BuildTarget::C; }
+    if target_flag == "llvm" { return BuildTarget::Llvm; }
+    if target_flag == "wasm" { return BuildTarget::Wasm; }
+    if target_flag == "gpu" { return BuildTarget::Gpu; }
+    if target_flag == "asm" { return BuildTarget::Asm; }
+    return BuildTarget::Native;
 }
 
 pub pure fn format_build_summary(module_name: str, target_flag: str, out_path: str) -> str {
     return "Built " + module_name + " [" + target_flag + "] -> " + out_path;
+}
+
+// Parses e.g. "build app/guidance.pilot --target wasm --release -o out/guidance.wasm"
+// into "<cmd>|<input>|<target>|<release_0_or_1>|<out>"
+pub fn parse_cli_build_args(argv_line: str) -> str {
+    let len = __engine("str_len", argv_line);
+    var cmd = "";
+    var input = "";
+    var target = "native";
+    var release = "0";
+    var out_path = "";
+
+    var pos = 0;
+    var token_idx = 0;
+    while pos < len {
+        // Skip whitespace
+        while pos < len {
+            let ch = __engine("str_slice", argv_line, pos, pos + 1);
+            if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+                pos = pos + 1;
+            } else {
+                break;
+            }
+        }
+        if pos >= len { break; }
+
+        let start = pos;
+        while pos < len {
+            let ch = __engine("str_slice", argv_line, pos, pos + 1);
+            if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+                break;
+            }
+            pos = pos + 1;
+        }
+        let tok = __engine("str_slice", argv_line, start, pos);
+
+        if token_idx == 0 {
+            cmd = tok;
+            token_idx = 1;
+        } else if tok == "--target" {
+            // Next token is target
+            while pos < len {
+                let ch = __engine("str_slice", argv_line, pos, pos + 1);
+                if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+                    pos = pos + 1;
+                } else {
+                    break;
+                }
+            }
+            let t_start = pos;
+            while pos < len {
+                let ch = __engine("str_slice", argv_line, pos, pos + 1);
+                if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+                    break;
+                }
+                pos = pos + 1;
+            }
+            target = __engine("str_slice", argv_line, t_start, pos);
+        } else if tok == "--release" {
+            release = "1";
+        } else if tok == "-o" || tok == "--output" {
+            // Next token is output path
+            while pos < len {
+                let ch = __engine("str_slice", argv_line, pos, pos + 1);
+                if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+                    pos = pos + 1;
+                } else {
+                    break;
+                }
+            }
+            let o_start = pos;
+            while pos < len {
+                let ch = __engine("str_slice", argv_line, pos, pos + 1);
+                if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+                    break;
+                }
+                pos = pos + 1;
+            }
+            out_path = __engine("str_slice", argv_line, o_start, pos);
+        } else {
+            if input == "" && __engine("str_slice", tok, 0, 1) != "-" {
+                input = tok;
+            }
+        }
+    }
+
+    return cmd + "|" + input + "|" + target + "|" + release + "|" + out_path;
 }

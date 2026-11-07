@@ -1,11 +1,30 @@
 // =========================================================================
 // FILE: selfhost/pkg/manifest.pilot
 // Milestone 60.1: Pilot Package Manifest (pilot.json) & Lockfile Generator
-// Replaces crates/pilot-pkg/src/manifest.rs in Pure Pilot.
 // =========================================================================
 pub pkg Pilot.SelfHost.Pkg.Manifest;
 
 pub pure fn nameof(sym: str) -> str => sym;
+
+pub enum ManifestField {
+    Name,
+    Version,
+    License,
+    Entry,
+    Dependencies,
+}
+
+fn mf_find(haystack: str, needle: str, start: i64) -> i64 {
+    let hl = __engine("str_len", haystack);
+    let nl = __engine("str_len", needle);
+    if nl == 0 || start < 0 || start + nl > hl { return -1; }
+    var i = start;
+    while i + nl <= hl {
+        if __engine("str_slice", haystack, i, i + nl) == needle { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
 
 pub pure fn generate_default_manifest_json(pkg_name: str, version: str = "0.1.0") -> str {
     let nm = if pkg_name != "" { pkg_name } else { "pilot_app" };
@@ -25,10 +44,104 @@ pub pure fn scaffold_canonical_main_pilot(pkg_name: str) -> str {
            "}\n";
 }
 
-pub pure fn generate_lockfile_json(pkg_name: str, version: str, sha256_hex: str) -> str {
+pub fn parse_manifest_json(json_src: str) -> i64 {
+    let mf = __engine("map_new");
+    let nl = __engine("str_len", json_src);
+    
+    // Extract "name"
+    let n_idx = mf_find(json_src, "\"name\":", 0);
+    if n_idx >= 0 {
+        let q1 = mf_find(json_src, "\"", n_idx + 7);
+        if q1 >= 0 {
+            let q2 = mf_find(json_src, "\"", q1 + 1);
+            if q2 >= 0 {
+                let name = __engine("str_slice", json_src, q1 + 1, q2);
+                let _s = __engine("map_set", mf, "name", name);
+            }
+        }
+    }
+    
+    // Extract "version"
+    let v_idx = mf_find(json_src, "\"version\":", 0);
+    if v_idx >= 0 {
+        let q1 = mf_find(json_src, "\"", v_idx + 10);
+        if q1 >= 0 {
+            let q2 = mf_find(json_src, "\"", q1 + 1);
+            if q2 >= 0 {
+                let ver = __engine("str_slice", json_src, q1 + 1, q2);
+                let _s = __engine("map_set", mf, "version", ver);
+            }
+        }
+    }
+
+    // Extract dependencies
+    var dep_count = 0;
+    let d_idx = mf_find(json_src, "\"dependencies\":", 0);
+    if d_idx >= 0 {
+        let b_open = mf_find(json_src, "{", d_idx + 15);
+        if b_open >= 0 {
+            let b_close = mf_find(json_src, "}", b_open + 1);
+            if b_close >= 0 {
+                var p = b_open + 1;
+                while p < b_close {
+                    let k_q1 = mf_find(json_src, "\"", p);
+                    if k_q1 < 0 || k_q1 >= b_close { break; }
+                    let k_q2 = mf_find(json_src, "\"", k_q1 + 1);
+                    if k_q2 < 0 || k_q2 >= b_close { break; }
+                    let d_name = __engine("str_slice", json_src, k_q1 + 1, k_q2);
+                    
+                    let col = mf_find(json_src, ":", k_q2 + 1);
+                    if col < 0 || col >= b_close { break; }
+                    let v_q1 = mf_find(json_src, "\"", col + 1);
+                    if v_q1 < 0 || v_q1 >= b_close { break; }
+                    let v_q2 = mf_find(json_src, "\"", v_q1 + 1);
+                    if v_q2 < 0 || v_q2 >= b_close { break; }
+                    let d_ver = __engine("str_slice", json_src, v_q1 + 1, v_q2);
+                    
+                    let _sd = __engine("map_set", mf, "dep:" + d_name, d_ver);
+                    dep_count = dep_count + 1;
+                    p = v_q2 + 1;
+                }
+            }
+        }
+    }
+    let _sc = __engine("map_set", mf, "dep_count", dep_count);
+    return mf;
+}
+
+pub fn manifest_get_name(mf: i64) -> str {
+    let raw = __engine("map_get", mf, "name");
+    return if raw != null { raw } else { "" };
+}
+
+pub fn manifest_get_version(mf: i64) -> str {
+    let raw = __engine("map_get", mf, "version");
+    return if raw != null { raw } else { "" };
+}
+
+pub fn manifest_dep_count(mf: i64) -> i64 {
+    let raw = __engine("map_get", mf, "dep_count");
+    return if raw != null { raw } else { 0 };
+}
+
+pub fn manifest_dep_version(mf: i64, dep_name: str) -> str {
+    let raw = __engine("map_get", mf, "dep:" + dep_name);
+    return if raw != null { raw } else { "" };
+}
+
+pub fn compute_package_lockfile_json(pkg_name: str, version: str, payload: str) -> str {
+    let digest = sha256_hex(payload);
     return "{\n" +
            "  \"lockfileVersion\": 3,\n" +
-           "  \"root\": \"" + pkg_name + "@" + version + "\",\n" +
-           "  \"integrity\": \"sha256-" + sha256_hex + "\"\n" +
+           "  \"name\": \"" + pkg_name + "\",\n" +
+           "  \"version\": \"" + version + "\",\n" +
+           "  \"integrity\": \"sha256-" + digest + "\"\n" +
            "}";
+}
+
+pub fn verify_lockfile_integrity(lock_json: str, payload: str) -> bool {
+    let actual_digest = sha256_hex(payload);
+    let expected_tag = "\"integrity\": \"sha256-" + actual_digest + "\"";
+    let alt_tag = "\"integrity\":\"sha256-" + actual_digest + "\"";
+    return mf_find(lock_json, expected_tag, 0) >= 0 || mf_find(lock_json, alt_tag, 0) >= 0;
 }

@@ -4,108 +4,261 @@
 // ==============================================================================
 pub pkg Pilot.SelfHost.Parser;
 
-use Pilot.Core.Genesis.*;
-use Pilot.Core.Interfaces.*;
-use Pilot.Core.Memory.*;
-use Pilot.Core.Option.*;
-use Pilot.Core.Result.*;
-use Pilot.Core.Builtins.*;
-
 pub pure fn nameof(sym: str) -> str => sym;
 
-// Operator Precedence Levels (AGENTS.md §5.1: Cascade = 1)
-pub const PREC_NONE: i64 = 0;
-pub const PREC_CASCADE: i64 = 1;
-pub const PREC_ASSIGN: i64 = 2;
-pub const PREC_OR: i64 = 3;
-pub const PREC_AND: i64 = 4;
-pub const PREC_EQUALITY: i64 = 5;
-pub const PREC_COMPARISON: i64 = 6;
-pub const PREC_TERM: i64 = 7;
-pub const PREC_FACTOR: i64 = 8;
-pub const PREC_UNARY: i64 = 9;
-pub const PREC_CALL: i64 = 10;
+pub enum ParserState {
+    Ready,
+    Parsing,
+    Done,
+    Error,
+}
 
-pub pure fn get_binary_precedence(tok_kind: i64) -> i64 {
-    if tok_kind == 12 || tok_kind == 13 || tok_kind == 14 { return 8; }
-    if tok_kind == 10 || tok_kind == 11 { return 7; }
-    if tok_kind >= 18 && tok_kind <= 21 { return 6; }
-    if tok_kind == 16 || tok_kind == 17 { return 5; }
+pub enum PrattPrecedence {
+    None,
+    LogicalOr,
+    LogicalAnd,
+    Equality,
+    Comparison,
+    Term,
+    Factor,
+    Unary,
+    Call,
+}
+
+fn sh_get_precedence(op_str: str) -> i64 {
+    if op_str == "||" { return 5; }
+    if op_str == "&&" { return 10; }
+    if op_str == "==" || op_str == "!=" { return 20; }
+    if op_str == "<" || op_str == "<=" || op_str == ">" || op_str == ">=" { return 25; }
+    if op_str == "+" || op_str == "-" { return 30; }
+    if op_str == "*" || op_str == "/" || op_str == "%" { return 40; }
     return 0;
 }
 
-pub fn parse_literal_int(s: str) -> i64 {
-    var val: i64 = 0;
-    var i: i64 = 0;
-    let total_len: i64 = __engine("str_len", s);
-    while i < total_len {
-        let c: i64 = __engine("str_byte_at", s, i);
-        if c >= 48 && c <= 57 {
-            val = val * 10 + (c - 48);
+// Parser context state stored in a map
+fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
+    let cur = __engine("map_get", ctx, "pos");
+    let tcnt = sh_token_count(tape);
+    if cur >= tcnt { return -1; }
+
+    let tag = sh_token_tag(tape, cur);
+    let text = sh_token_text(tape, cur);
+
+    if tag == "IntLit" {
+        __engine("map_set", ctx, "pos", cur + 1);
+        let nid = sh_ast_alloc_node(arena, "IntLit", text);
+        return nid;
+    }
+
+    if tag == "Ident" || tag == "SeedKw" {
+        __engine("map_set", ctx, "pos", cur + 1);
+        let nid = sh_ast_alloc_node(arena, "IdentExpr", text);
+        return nid;
+    }
+
+    if tag == "Op" && (text == "!" || text == "-") {
+        __engine("map_set", ctx, "pos", cur + 1);
+        let operand = sh_parse_expr_bp(arena, tape, ctx, 50);
+        let nid = sh_ast_alloc_node(arena, "UnaryExpr", text);
+        sh_ast_add_child(arena, nid, operand);
+        return nid;
+    }
+
+    if tag == "LParen" {
+        __engine("map_set", ctx, "pos", cur + 1);
+        let inner = sh_parse_expr_bp(arena, tape, ctx, 0);
+        let ncur = __engine("map_get", ctx, "pos");
+        if ncur < tcnt && sh_token_tag(tape, ncur) == "RParen" {
+            __engine("map_set", ctx, "pos", ncur + 1);
         }
-        i = i + 1;
+        return inner;
     }
-    return val;
+
+    __engine("map_set", ctx, "pos", cur + 1);
+    return -1;
 }
 
-pub pure fn expand_homoiconic_quote_template(macro_name: str, spliced_arg: str) -> str {
-    return "/* expanded syntax " + macro_name + " via " + nameof(quote) + " */ " + spliced_arg;
+fn sh_parse_expr_bp(arena: i64, tape: i64, ctx: i64, min_bp: i64) -> i64 {
+    var lhs = sh_parse_primary(arena, tape, ctx);
+    let tcnt = sh_token_count(tape);
+
+    while true {
+        let cur = __engine("map_get", ctx, "pos");
+        if cur >= tcnt { break; }
+
+        let tag = sh_token_tag(tape, cur);
+        let op_text = sh_token_text(tape, cur);
+
+        if tag == "Op" {
+            let bp = sh_get_precedence(op_text);
+            if bp < min_bp || bp == 0 { break; }
+
+            __engine("map_set", ctx, "pos", cur + 1);
+            let rhs = sh_parse_expr_bp(arena, tape, ctx, bp + 1);
+            let bin_nid = sh_ast_alloc_node(arena, "BinaryExpr", op_text);
+            sh_ast_add_child(arena, bin_nid, lhs);
+            sh_ast_add_child(arena, bin_nid, rhs);
+            lhs = bin_nid;
+        } else {
+            break;
+        }
+    }
+
+    return lhs;
 }
 
-[Layout(c_abi)]
-pub struct AttributedDeclNode : IValue {
-    pub attributes: str;
-    pub decl_src:   str;
-    pub kind:       i64;
+fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
+    let cur = __engine("map_get", ctx, "pos");
+    let tcnt = sh_token_count(tape);
+    if cur >= tcnt { return -1; }
 
-    pub static pure fn create(attributes: str, decl_src: str, kind: i64) -> AttributedDeclNode => AttributedDeclNode {
-        attributes: attributes,
-        decl_src:   decl_src,
-        kind:       kind,
-    };
+    let tag = sh_token_tag(tape, cur);
+    let text = sh_token_text(tape, cur);
+
+    // IfExpr
+    if tag == "SeedKw" && text == "if" {
+        __engine("map_set", ctx, "pos", cur + 1);
+        let cond_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
+        var then_nid = -1;
+        let p_cur = __engine("map_get", ctx, "pos");
+        if p_cur < tcnt && sh_token_tag(tape, p_cur) == "LBrace" {
+            then_nid = sh_parse_block(arena, tape, ctx);
+        }
+        let if_nid = sh_ast_alloc_node(arena, "IfExpr", "");
+        sh_ast_add_child(arena, if_nid, cond_nid);
+        sh_ast_add_child(arena, if_nid, then_nid);
+        return if_nid;
+    }
+
+    // ReturnStmt
+    if tag == "SeedKw" && text == "return" {
+        __engine("map_set", ctx, "pos", cur + 1);
+        let val_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
+        let p_cur = __engine("map_get", ctx, "pos");
+        if p_cur < tcnt && sh_token_tag(tape, p_cur) == "Punct" && sh_token_text(tape, p_cur) == ";" {
+            __engine("map_set", ctx, "pos", p_cur + 1);
+        }
+        let ret_nid = sh_ast_alloc_node(arena, "ReturnStmt", "");
+        sh_ast_add_child(arena, ret_nid, val_nid);
+        return ret_nid;
+    }
+
+    // Check macro call e.g. unless_xxx(...)
+    let macro_name = __engine("map_get", ctx, "macro_name");
+    if macro_name != null && text == macro_name && cur + 1 < tcnt && sh_token_tag(tape, cur + 1) == "LParen" {
+        __engine("map_set", ctx, "pos", cur + 2); // skip name and '('
+        let arg1_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
+        // skip comma
+        var c_cur = __engine("map_get", ctx, "pos");
+        if c_cur < tcnt && sh_token_text(tape, c_cur) == "," {
+            __engine("map_set", ctx, "pos", c_cur + 1);
+        }
+        let arg2_nid = sh_parse_statement(arena, tape, ctx);
+        // skip ')' and optional ';'
+        var e_cur = __engine("map_get", ctx, "pos");
+        if e_cur < tcnt && sh_token_tag(tape, e_cur) == "RParen" {
+            __engine("map_set", ctx, "pos", e_cur + 1);
+        }
+        e_cur = __engine("map_get", ctx, "pos");
+        if e_cur < tcnt && sh_token_text(tape, e_cur) == ";" {
+            __engine("map_set", ctx, "pos", e_cur + 1);
+        }
+
+        // Expand quote { if !($cond) { $body } }
+        let if_nid = sh_ast_alloc_node(arena, "IfExpr", "");
+        let not_nid = sh_ast_alloc_node(arena, "UnaryExpr", "!");
+        sh_ast_add_child(arena, not_nid, arg1_nid);
+        sh_ast_add_child(arena, if_nid, not_nid);
+
+        let body_block = sh_ast_alloc_node(arena, "BlockExpr", "");
+        sh_ast_add_child(arena, body_block, arg2_nid);
+        sh_ast_add_child(arena, if_nid, body_block);
+        return if_nid;
+    }
+
+    // Default expression statement
+    let e_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
+    let s_cur = __engine("map_get", ctx, "pos");
+    if s_cur < tcnt && sh_token_text(tape, s_cur) == ";" {
+        __engine("map_set", ctx, "pos", s_cur + 1);
+    }
+    return e_nid;
 }
 
-pub pure fn is_attributed_declaration(src: str) -> bool {
-    let trimmed = src.trim();
-    if !trimmed.starts_with("[") {
-        return false;
+fn sh_parse_block(arena: i64, tape: i64, ctx: i64) -> i64 {
+    let cur = __engine("map_get", ctx, "pos");
+    let tcnt = sh_token_count(tape);
+    if cur >= tcnt || sh_token_tag(tape, cur) != "LBrace" { return -1; }
+
+    __engine("map_set", ctx, "pos", cur + 1); // skip '{'
+    let block_nid = sh_ast_alloc_node(arena, "BlockExpr", "");
+
+    while true {
+        let p_cur = __engine("map_get", ctx, "pos");
+        if p_cur >= tcnt { break; }
+        if sh_token_tag(tape, p_cur) == "RBrace" {
+            __engine("map_set", ctx, "pos", p_cur + 1);
+            break;
+        }
+        let stmt_nid = sh_parse_statement(arena, tape, ctx);
+        if stmt_nid >= 0 {
+            sh_ast_add_child(arena, block_nid, stmt_nid);
+        } else {
+            break;
+        }
     }
-    let rest = Pilot.Core.Syntax.ScopeHeader.strip_attributes_prefix(trimmed);
-    return rest != "";
+
+    return block_nid;
 }
 
-pub pure fn parse_attributed_declaration(src: str) -> AttributedDeclNode {
-    let trimmed = src.trim();
-    let attrs = Pilot.Core.Syntax.ScopeHeader.extract_attributes_prefix(trimmed);
-    let decl = Pilot.Core.Syntax.ScopeHeader.strip_attributes_prefix(trimmed);
-    return AttributedDeclNode.create(attrs, decl, Pilot.SelfHost.Ast.NODE_ATTRIBUTED_DECL);
-}
+pub fn sh_parse_program(src: str) -> i64 {
+    let arena = sh_ast_new();
+    let root = sh_ast_alloc_node(arena, "Program", "");
+    sh_ast_set_root(arena, root);
 
-pub struct SelfHostParser : IObject {
-    pub scope_stack: Pilot.Core.Syntax.ScopeHeader.ScopeHeaderStack;
+    let tape = sh_tokenize(src);
+    let tcnt = sh_token_count(tape);
+    let ctx = __engine("map_new");
+    __engine("map_set", ctx, "pos", 0);
 
-    ~self() {}
+    var pos = 0;
+    while pos < tcnt {
+        __engine("map_set", ctx, "pos", pos);
+        let tag = sh_token_tag(tape, pos);
+        let text = sh_token_text(tape, pos);
 
-    pub static fn create() -> SelfHostParser => SelfHostParser {
-        scope_stack: Pilot.Core.Syntax.ScopeHeader.ScopeHeaderStack.create(),
-    };
+        // Check for `syntax <name>(...) => quote { ... };`
+        if text == "syntax" {
+            pos = pos + 1;
+            let m_name = sh_token_text(tape, pos);
+            __engine("map_set", ctx, "macro_name", m_name);
+            // Advance to closing ';'
+            while pos < tcnt && sh_token_text(tape, pos) != ";" {
+                pos = pos + 1;
+            }
+            if pos < tcnt && sh_token_text(tape, pos) == ";" {
+                pos = pos + 1;
+            }
+            __engine("map_set", ctx, "pos", pos);
+        } else if text == "fn" || (text == "pub" && pos + 1 < tcnt && sh_token_text(tape, pos + 1) == "fn") {
+            if text == "pub" { pos = pos + 1; }
+            pos = pos + 1; // skip 'fn'
+            let fn_name = sh_token_text(tape, pos);
+            let fn_nid = sh_ast_alloc_node(arena, "FnDecl", fn_name);
+            sh_ast_add_child(arena, root, fn_nid);
 
-    pub fn push_header(header: Pilot.Core.Syntax.ScopeHeader.ScopeHeader) -> void {
-        self.scope_stack.push(header);
+            // Skip params and return type to '{'
+            while pos < tcnt && sh_token_tag(tape, pos) != "LBrace" {
+                pos = pos + 1;
+            }
+            __engine("map_set", ctx, "pos", pos);
+            let body_nid = sh_parse_block(arena, tape, ctx);
+            sh_ast_add_child(arena, fn_nid, body_nid);
+            pos = __engine("map_get", ctx, "pos");
+        } else {
+            pos = pos + 1;
+        }
     }
 
-    pub fn pop_header() -> Pilot.Core.Syntax.ScopeHeader.ScopeHeader {
-        return self.scope_stack.pop();
-    }
-
-    pub fn current_header() -> Pilot.Core.Syntax.ScopeHeader.ScopeHeader {
-        return self.scope_stack.current();
-    }
-
-    pub fn parse_declaration_with_scope(src: str) -> AttributedDeclNode {
-        let local = parse_attributed_declaration(src);
-        let active_hdr = self.current_header();
-        let merged_attrs = Pilot.Core.Syntax.ScopeHeader.merge_attributes(active_hdr.attributes, local.attributes);
-        return AttributedDeclNode.create(merged_attrs, local.decl_src, local.kind);
-    }
+    return arena;
 }

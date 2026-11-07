@@ -1,29 +1,37 @@
 // =========================================================================
 // FILE: selfhost/pkg/interop.pilot
 // Milestone 60.1: Cross-Ecosystem Package Spec Resolver (cargo:, pip:, npm:)
-// Replaces crates/pilot-pkg/src/interop.rs in Pure Pilot.
 // =========================================================================
 pub pkg Pilot.SelfHost.Pkg.Interop;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
-// Ecosystem codes: 0 = pilot, 1 = cargo, 2 = pip, 3 = npm
-pub fn detect_package_ecosystem(spec: str) -> i64 {
-    let b0 = __engine("str_byte_at", spec, 0);
-    let b1 = __engine("str_byte_at", spec, 1);
-    let b2 = __engine("str_byte_at", spec, 2);
-    let b3 = __engine("str_byte_at", spec, 3);
-    // "car" -> cargo:
-    if b0 == 99 && b1 == 97 && b2 == 114 {
-        return 1;
+pub enum Ecosystem {
+    Pilot,
+    Cargo,
+    Pip,
+    Npm,
+}
+
+fn interop_find(haystack: str, needle: str, start: i64) -> i64 {
+    let hl = __engine("str_len", haystack);
+    let nl = __engine("str_len", needle);
+    if nl == 0 || start < 0 || start + nl > hl { return -1; }
+    var i = start;
+    while i + nl <= hl {
+        if __engine("str_slice", haystack, i, i + nl) == needle { return i; }
+        i = i + 1;
     }
-    // "pip:" -> ':' is 58
-    if b0 == 112 && b1 == 105 && b2 == 112 && b3 == 58 {
-        return 2;
-    }
-    // "npm:"
-    if b0 == 110 && b1 == 112 && b2 == 109 && b3 == 58 {
-        return 3;
-    }
-    return 0;
+    return -1;
+}
+
+pub fn parse_ecosystem_spec(spec: str) -> str {
+    let col = interop_find(spec, ":", 0);
+    if col < 0 { return spec; }
+    let at = interop_find(spec, "@", col + 1);
+    if at < 0 { return spec; }
+    let eco = __engine("str_slice", spec, 0, col);
+    let pkg = __engine("str_slice", spec, col + 1, at);
+    let ver = __engine("str_slice", spec, at + 1, __engine("str_len", spec));
+    return eco + "|" + pkg + "|" + ver;
 }

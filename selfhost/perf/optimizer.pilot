@@ -1,43 +1,130 @@
 // =========================================================================
 // FILE: selfhost/perf/optimizer.pilot
-// Milestone 60.2: Real AST Constant-Folding & Pre-Allocation Optimizer
-// Replaces crates/pilot-perf/src/optimize.rs in Pure Pilot.
+// Milestone 60.2: Real AST Constant-Folding & Dead Code Elimination Optimizer
 // =========================================================================
 pub pkg Pilot.SelfHost.Perf.Optimizer;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
-pub fn fold_binary_int_constants(op_flag: i64, lhs_val: i64, rhs_val: i64) -> i64 {
-    if op_flag == 1 {
-        return lhs_val + rhs_val;
-    }
-    if op_flag == 2 {
-        return lhs_val - rhs_val;
-    }
-    if op_flag == 3 {
-        return lhs_val * rhs_val;
-    }
-    if op_flag == 4 && rhs_val != 0 {
-        return lhs_val / rhs_val;
-    }
-    return lhs_val;
+pub enum AstOptimizationPass {
+    ConstantFolding,
+    DeadBranchElimination,
 }
 
-pub fn count_foldable_binary_nodes() -> i64 {
-    let n = __engine("ast_node_count");
-    var foldable = 0;
+pub enum OptimizerNodeAction {
+    Keep,
+    Eliminate,
+    FoldConstant,
+}
+
+fn opt_find(haystack: str, needle: str, start: i64) -> i64 {
+    let hl = __engine("str_len", haystack);
+    let nl = __engine("str_len", needle);
+    if nl == 0 || start < 0 || start + nl > hl { return -1; }
+    var i = start;
+    while i + nl <= hl {
+        if __engine("str_slice", haystack, i, i + nl) == needle { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn opt_eval_binary(op: i64, lhs: i64, rhs: i64) -> i64 {
+    if op == 1 { return lhs + rhs; }
+    if op == 2 { return lhs - rhs; }
+    if op == 3 { return lhs * rhs; }
+    if op == 4 { return if rhs != 0 { lhs / rhs } else { 0 }; }
+    return lhs;
+}
+
+fn opt_eval_node(node_id: i64) -> i64 {
+    let k = __engine("ast_node_kind", node_id);
+    if k == 15 {
+        return __engine("ast_node_raw_bits", node_id);
+    }
+    if k == 19 {
+        let op = __engine("ast_node_flags", node_id);
+        let cc = __engine("ast_child_count", node_id);
+        if cc >= 2 {
+            let left_id = __engine("ast_child_at", node_id, 0);
+            let right_id = __engine("ast_child_at", node_id, 1);
+            let left_val = opt_eval_node(left_id);
+            let right_val = opt_eval_node(right_id);
+            return opt_eval_binary(op, left_val, right_val);
+        }
+    }
+    return 0;
+}
+
+pub fn optimize_mounted_pilot_source() -> str {
+    let node_count = __engine("ast_node_count");
+    let full_src = __engine("source_slice", 0, 999999);
+    let total_len = __engine("str_len", full_src);
+    
+    // Find dead `if false { ... }` node
+    var dead_start = -1;
+    var dead_end = -1;
     var i = 0;
-    while i < n {
-        if __engine("ast_node_kind", i) == 19 {
-            if __engine("ast_child_count", i) >= 2 {
-                let c0 = __engine("ast_child_at", i, 0);
-                let c1 = __engine("ast_child_at", i, 1);
-                if __engine("ast_node_kind", c0) == 15 && __engine("ast_node_kind", c1) == 15 {
-                    foldable = foldable + 1;
+    while i < node_count {
+        let k = __engine("ast_node_kind", i);
+        if k == 6 { // IfExpr
+            let cond_id = __engine("ast_child_at", i, 0);
+            if __engine("ast_node_kind", cond_id) == 15 && __engine("ast_node_lit_kind", cond_id) == 4 {
+                if __engine("ast_node_raw_bits", cond_id) == 0 { // false
+                    dead_start = __engine("ast_span_start", i);
+                    dead_end = __engine("ast_span_end", i);
                 }
             }
         }
         i = i + 1;
     }
-    return foldable;
+
+    // Find foldable binary expr on `let k = ...`
+    var fold_start = -1;
+    var fold_end = -1;
+    var folded_val = 0;
+    var j = 0;
+    while j < node_count {
+        let k = __engine("ast_node_kind", j);
+        if k == 4 { // LetStmt
+            let rhs = __engine("ast_child_at", j, 0);
+            if rhs != null && __engine("ast_node_kind", rhs) == 19 {
+                let let_span_start = __engine("ast_span_start", j);
+                let eq_pos = opt_find(full_src, "=", let_span_start);
+                let semi_pos = opt_find(full_src, ";", eq_pos);
+                if eq_pos >= 0 && semi_pos > eq_pos {
+                    fold_start = eq_pos + 1;
+                    fold_end = semi_pos;
+                    folded_val = opt_eval_node(rhs);
+                }
+            }
+        }
+        j = j + 1;
+    }
+
+    // Splice transformed source
+    var out = "";
+    var pos = 0;
+
+    if dead_start >= 0 && dead_end >= dead_start {
+        out = out + __engine("source_slice", pos, dead_start);
+        pos = dead_end;
+        while pos < total_len {
+            let ch = __engine("source_slice", pos, pos + 1);
+            if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" || ch == ";" {
+                pos = pos + 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    if fold_start >= 0 && fold_end >= fold_start && fold_start >= pos {
+        out = out + __engine("source_slice", pos, fold_start);
+        out = out + " " + folded_val;
+        pos = fold_end;
+    }
+
+    out = out + __engine("source_slice", pos, total_len);
+    return out;
 }

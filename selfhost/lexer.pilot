@@ -4,140 +4,337 @@
 // ==============================================================================
 pub pkg Pilot.SelfHost.Lexer;
 
-use Pilot.Core.Genesis.*;
-use Pilot.Core.Interfaces.*;
-use Pilot.Core.Memory.*;
-
 pub pure fn nameof(sym: str) -> str => sym;
 
-pub const TOK_EOF: i64 = 0;
-pub const TOK_INT: i64 = 1;
-pub const TOK_FLOAT: i64 = 2;
-pub const TOK_STR: i64 = 3;
-pub const TOK_IDENT: i64 = 4;
-pub const TOK_KEYWORD: i64 = 5;
-pub const TOK_PREFIX_DOT: i64 = 6;
-pub const TOK_INFIX_DOT: i64 = 7;
-
-pub const TOK_PLUS: i64 = 10;
-pub const TOK_MINUS: i64 = 11;
-pub const TOK_STAR: i64 = 12;
-pub const TOK_SLASH: i64 = 13;
-pub const TOK_PERCENT: i64 = 14;
-pub const TOK_EQUAL: i64 = 15;
-pub const TOK_EQEQ: i64 = 16;
-pub const TOK_NE: i64 = 17;
-pub const TOK_LT: i64 = 18;
-pub const TOK_LE: i64 = 19;
-pub const TOK_GT: i64 = 20;
-pub const TOK_GE: i64 = 21;
-pub const TOK_ARROW: i64 = 22;
-
-pub const TOK_LPAREN: i64 = 30;
-pub const TOK_RPAREN: i64 = 31;
-pub const TOK_LBRACE: i64 = 32;
-pub const TOK_RBRACE: i64 = 33;
-pub const TOK_LBRACKET: i64 = 34;
-pub const TOK_RBRACKET: i64 = 35;
-pub const TOK_COMMA: i64 = 36;
-pub const TOK_COLON: i64 = 37;
-pub const TOK_SEMICOLON: i64 = 38;
-
-pub pure fn is_digit(c: i64) -> bool {
-    return c >= 48 && c <= 57;
+pub enum TokenTagKind {
+    SeedKw,
+    Ident,
+    IntLit,
+    StrLit,
+    FStrLit,
+    InfixDot,
+    PrefixDot,
+    CallQuoteShallow,
+    CallQuoteDeep,
+    CallQuoteAbi,
+    CallQuoteSignal,
+    CallQuoteAdjoint,
+    CallQuoteEffect,
+    LParen,
+    RParen,
+    LBracket,
+    RBracket,
+    LBrace,
+    RBrace,
+    Op,
+    Punct,
+    Eof,
 }
 
-pub pure fn is_alpha(c: i64) -> bool {
-    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95;
+fn sh_is_digit(b: i64) -> bool {
+    return b >= 48 && b <= 57;
 }
 
-pub pure fn is_alphanumeric(c: i64) -> bool {
-    return is_alpha(c) || is_digit(c);
+fn sh_is_alpha(b: i64) -> bool {
+    return (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
 }
 
-// Recognizes strictly the 14 canonical Pilot seed tokens using nameof()
-pub pure fn is_keyword(s: str) -> bool {
-    if s == nameof(__engine) { return true; }
-    if s == nameof(struct) { return true; }
-    if s == nameof(interface) { return true; }
-    if s == nameof(fn) { return true; }
-    if s == nameof(let) { return true; }
-    if s == nameof(ref) { return true; }
-    if s == nameof(if) { return true; }
-    if s == nameof(loop) { return true; }
-    if s == nameof(return) { return true; }
-    if s == nameof(yield) { return true; }
-    if s == nameof(defer) { return true; }
-    if s == nameof(comptime) { return true; }
-    if s == nameof(quote) { return true; }
-    if s == nameof(asm) { return true; }
+fn sh_is_id_char(b: i64) -> bool {
+    return sh_is_alpha(b) || sh_is_digit(b);
+}
+
+// 14 strict canonical Pilot seed keywords (Zero hardcoded type names)
+fn sh_is_seed_kw(w: str) -> bool {
+    if w == nameof(__engine) { return true; }
+    if w == nameof(struct) { return true; }
+    if w == nameof(interface) { return true; }
+    if w == nameof(fn) { return true; }
+    if w == nameof(let) { return true; }
+    if w == nameof(ref) { return true; }
+    if w == nameof(if) { return true; }
+    if w == nameof(loop) { return true; }
+    if w == nameof(return) { return true; }
+    if w == nameof(yield) { return true; }
+    if w == nameof(defer) { return true; }
+    if w == nameof(comptime) { return true; }
+    if w == nameof(quote) { return true; }
+    if w == nameof(asm) { return true; }
     return false;
 }
 
-// Two-Way Dot (AGENTS.md §5.1): InfixDot (7) if preceded immediately by ident/literal/) / ] / }, else PrefixDot (6)
-pub pure fn classify_two_way_dot(prev_byte: i64) -> i64 {
-    if is_alphanumeric(prev_byte) || prev_byte == 41 || prev_byte == 93 || prev_byte == 125 {
-        return 7;
-    }
-    return 6;
-}
-
-// 6 Homoiconic Call-Quoting Modes (AGENTS.md §5.4): !, !!, !&, !^, !@, !?
-pub pure fn classify_call_quote_mode(sigil_second_byte: i64) -> i64 {
-    if sigil_second_byte == 40 { return 1; }  // !(  -> ShallowQuote
-    if sigil_second_byte == 33 { return 2; }  // !!( -> DeepSplice
-    if sigil_second_byte == 38 { return 3; }  // !&( -> AbiFrame
-    if sigil_second_byte == 94 { return 4; }  // !^( -> ReactiveSignal
-    if sigil_second_byte == 64 { return 5; }  // !@( -> SymbolicAdjoint
-    if sigil_second_byte == 63 { return 6; }  // !?( -> EffectDryRun
-    return 0;
-}
-
-pub fn scan_token_count(src: str) -> i64 {
-    let n = __engine("str_len", src);
+pub fn sh_tokenize(src: str) -> i64 {
+    let tape = __engine("map_new");
+    let len = __engine("str_len", src);
+    var pos = 0;
     var count = 0;
-    var i = 0;
-    while i < n {
-        let b = __engine("str_byte_at", src, i);
+    var prev_token_end = -1;
+    var prev_token_is_infix_predecessor = false;
+
+    // Stack for bracket matching
+    let bracket_stack = __engine("map_new");
+    var b_top = 0;
+
+    while pos < len {
+        let b = __engine("str_byte_at", src, pos);
+
+        // Skip whitespace
         if b == 32 || b == 9 || b == 10 || b == 13 {
-            i = i + 1;
-        } else if is_alpha(b) {
-            count = count + 1;
-            while i < n && is_alphanumeric(__engine("str_byte_at", src, i)) {
-                i = i + 1;
+            pos = pos + 1;
+        } else if b == 47 && pos + 1 < len && __engine("str_byte_at", src, pos + 1) == 47 {
+            // Line comment // ...
+            pos = pos + 2;
+            while pos < len {
+                let cb = __engine("str_byte_at", src, pos);
+                pos = pos + 1;
+                if cb == 10 { break; }
             }
-        } else if is_digit(b) {
-            count = count + 1;
-            while i < n && is_digit(__engine("str_byte_at", src, i)) {
-                i = i + 1;
+        } else if b == 47 && pos + 1 < len && __engine("str_byte_at", src, pos + 1) == 42 {
+            // Block comment /* ... */
+            pos = pos + 2;
+            while pos + 1 < len {
+                let cb1 = __engine("str_byte_at", src, pos);
+                let cb2 = __engine("str_byte_at", src, pos + 1);
+                if cb1 == 42 && cb2 == 47 {
+                    pos = pos + 2;
+                    break;
+                }
+                pos = pos + 1;
             }
+        } else if b == 34 || (b == 102 && pos + 1 < len && __engine("str_byte_at", src, pos + 1) == 34) {
+            // String literal "..." or f"..."
+            let is_fstr = b == 102;
+            let start = pos;
+            if is_fstr { pos = pos + 1; }
+            pos = pos + 1; // skip opening quote
+            while pos < len {
+                let cb = __engine("str_byte_at", src, pos);
+                if cb == 92 && pos + 1 < len { // escape \
+                    pos = pos + 2;
+                } else if cb == 34 { // closing quote
+                    pos = pos + 1;
+                    break;
+                } else {
+                    pos = pos + 1;
+                }
+            }
+            let s_text = __engine("str_slice", src, start, pos);
+            let s_tag = if is_fstr { "FStrLit" } else { "StrLit" };
+            __engine("map_set", tape, count + "_text", s_text);
+            __engine("map_set", tape, count + "_tag", s_tag);
+            __engine("map_set", tape, count + "_match", -1);
+            prev_token_end = pos;
+            prev_token_is_infix_predecessor = true;
+            count = count + 1;
+        } else if b == 46 { // '.'
+            let is_infix = prev_token_is_infix_predecessor && (prev_token_end == pos);
+            let dot_tag = if is_infix { "InfixDot" } else { "PrefixDot" };
+            __engine("map_set", tape, count + "_text", ".");
+            __engine("map_set", tape, count + "_tag", dot_tag);
+            __engine("map_set", tape, count + "_match", -1);
+            prev_token_end = pos + 1;
+            prev_token_is_infix_predecessor = false;
+            count = count + 1;
+            pos = pos + 1;
+        } else if b == 33 { // '!'
+            // Check for call-quote modes (zero whitespace before '(')
+            // !( -> ShallowQuote
+            // !!( -> DeepSplice
+            // !&( -> AbiFrame
+            // !^( -> ReactiveSignal
+            // !@( -> SymbolicAdjoint
+            // !?( -> EffectDryRun
+            var call_quote_tag = "";
+            var sigil_len = 0;
+            if pos + 1 < len && __engine("str_byte_at", src, pos + 1) == 40 { // !(
+                call_quote_tag = "CallQuoteShallow";
+                sigil_len = 1;
+            } else if pos + 2 < len && __engine("str_byte_at", src, pos + 2) == 40 {
+                let nb = __engine("str_byte_at", src, pos + 1);
+                if nb == 33 { call_quote_tag = "CallQuoteDeep"; sigil_len = 2; }
+                else if nb == 38 { call_quote_tag = "CallQuoteAbi"; sigil_len = 2; }
+                else if nb == 94 { call_quote_tag = "CallQuoteSignal"; sigil_len = 2; }
+                else if nb == 64 { call_quote_tag = "CallQuoteAdjoint"; sigil_len = 2; }
+                else if nb == 63 { call_quote_tag = "CallQuoteEffect"; sigil_len = 2; }
+            }
+
+            if call_quote_tag != "" {
+                let sig_text = __engine("str_slice", src, pos, pos + sigil_len);
+                __engine("map_set", tape, count + "_text", sig_text);
+                __engine("map_set", tape, count + "_tag", call_quote_tag);
+                __engine("map_set", tape, count + "_match", -1);
+                prev_token_end = pos + sigil_len;
+                prev_token_is_infix_predecessor = false;
+                count = count + 1;
+                pos = pos + sigil_len;
+            } else if pos + 1 < len && __engine("str_byte_at", src, pos + 1) == 61 { // !=
+                __engine("map_set", tape, count + "_text", "!=");
+                __engine("map_set", tape, count + "_tag", "Op");
+                __engine("map_set", tape, count + "_match", -1);
+                prev_token_end = pos + 2;
+                prev_token_is_infix_predecessor = false;
+                count = count + 1;
+                pos = pos + 2;
+            } else {
+                __engine("map_set", tape, count + "_text", "!");
+                __engine("map_set", tape, count + "_tag", "Op");
+                __engine("map_set", tape, count + "_match", -1);
+                prev_token_end = pos + 1;
+                prev_token_is_infix_predecessor = false;
+                count = count + 1;
+                pos = pos + 1;
+            }
+        } else if b == 40 { // '('
+            __engine("map_set", tape, count + "_text", "(");
+            __engine("map_set", tape, count + "_tag", "LParen");
+            __engine("map_set", tape, count + "_match", -1);
+            __engine("map_set", bracket_stack, b_top, count);
+            b_top = b_top + 1;
+            prev_token_end = pos + 1;
+            prev_token_is_infix_predecessor = false;
+            count = count + 1;
+            pos = pos + 1;
+        } else if b == 41 { // ')'
+            __engine("map_set", tape, count + "_text", ")");
+            __engine("map_set", tape, count + "_tag", "RParen");
+            __engine("map_set", tape, count + "_match", -1);
+            if b_top > 0 {
+                b_top = b_top - 1;
+                let open_idx = __engine("map_get", bracket_stack, b_top);
+                __engine("map_set", tape, open_idx + "_match", count);
+                __engine("map_set", tape, count + "_match", open_idx);
+            }
+            prev_token_end = pos + 1;
+            prev_token_is_infix_predecessor = true;
+            count = count + 1;
+            pos = pos + 1;
+        } else if b == 91 { // '['
+            __engine("map_set", tape, count + "_text", "[");
+            __engine("map_set", tape, count + "_tag", "LBracket");
+            __engine("map_set", tape, count + "_match", -1);
+            __engine("map_set", bracket_stack, b_top, count);
+            b_top = b_top + 1;
+            prev_token_end = pos + 1;
+            prev_token_is_infix_predecessor = false;
+            count = count + 1;
+            pos = pos + 1;
+        } else if b == 93 { // ']'
+            __engine("map_set", tape, count + "_text", "]");
+            __engine("map_set", tape, count + "_tag", "RBracket");
+            __engine("map_set", tape, count + "_match", -1);
+            if b_top > 0 {
+                b_top = b_top - 1;
+                let open_idx = __engine("map_get", bracket_stack, b_top);
+                __engine("map_set", tape, open_idx + "_match", count);
+                __engine("map_set", tape, count + "_match", open_idx);
+            }
+            prev_token_end = pos + 1;
+            prev_token_is_infix_predecessor = true;
+            count = count + 1;
+            pos = pos + 1;
+        } else if b == 123 { // '{'
+            __engine("map_set", tape, count + "_text", "{");
+            __engine("map_set", tape, count + "_tag", "LBrace");
+            __engine("map_set", tape, count + "_match", -1);
+            __engine("map_set", bracket_stack, b_top, count);
+            b_top = b_top + 1;
+            prev_token_end = pos + 1;
+            prev_token_is_infix_predecessor = false;
+            count = count + 1;
+            pos = pos + 1;
+        } else if b == 125 { // '}'
+            __engine("map_set", tape, count + "_text", "}");
+            __engine("map_set", tape, count + "_tag", "RBrace");
+            __engine("map_set", tape, count + "_match", -1);
+            if b_top > 0 {
+                b_top = b_top - 1;
+                let open_idx = __engine("map_get", bracket_stack, b_top);
+                __engine("map_set", tape, open_idx + "_match", count);
+                __engine("map_set", tape, count + "_match", open_idx);
+            }
+            prev_token_end = pos + 1;
+            prev_token_is_infix_predecessor = true;
+            count = count + 1;
+            pos = pos + 1;
+        } else if b == 59 || b == 44 || b == 58 { // ';', ',', ':'
+            let p_txt = __engine("str_slice", src, pos, pos + 1);
+            __engine("map_set", tape, count + "_text", p_txt);
+            __engine("map_set", tape, count + "_tag", "Punct");
+            __engine("map_set", tape, count + "_match", -1);
+            prev_token_end = pos + 1;
+            prev_token_is_infix_predecessor = false;
+            count = count + 1;
+            pos = pos + 1;
+        } else if sh_is_digit(b) {
+            let start = pos;
+            while pos < len && sh_is_digit(__engine("str_byte_at", src, pos)) {
+                pos = pos + 1;
+            }
+            let num_text = __engine("str_slice", src, start, pos);
+            __engine("map_set", tape, count + "_text", num_text);
+            __engine("map_set", tape, count + "_tag", "IntLit");
+            __engine("map_set", tape, count + "_match", -1);
+            prev_token_end = pos;
+            prev_token_is_infix_predecessor = true;
+            count = count + 1;
+        } else if sh_is_alpha(b) {
+            let start = pos;
+            while pos < len && sh_is_id_char(__engine("str_byte_at", src, pos)) {
+                pos = pos + 1;
+            }
+            let id_text = __engine("str_slice", src, start, pos);
+            let tag = if sh_is_seed_kw(id_text) { "SeedKw" } else { "Ident" };
+            __engine("map_set", tape, count + "_text", id_text);
+            __engine("map_set", tape, count + "_tag", tag);
+            __engine("map_set", tape, count + "_match", -1);
+            prev_token_end = pos;
+            prev_token_is_infix_predecessor = true;
+            count = count + 1;
         } else {
+            // Multi-char operators e.g. ==, <=, >=, &&, ||, =>, ->
+            var op_len = 1;
+            if pos + 1 < len {
+                let b2 = __engine("str_byte_at", src, pos + 1);
+                if (b == 61 && b2 == 61) || // ==
+                   (b == 60 && b2 == 61) || // <=
+                   (b == 62 && b2 == 61) || // >=
+                   (b == 38 && b2 == 38) || // &&
+                   (b == 124 && b2 == 124) || // ||
+                   (b == 61 && b2 == 62) || // =>
+                   (b == 45 && b2 == 62) {  // ->
+                    op_len = 2;
+                }
+            }
+            let op_text = __engine("str_slice", src, pos, pos + op_len);
+            __engine("map_set", tape, count + "_text", op_text);
+            __engine("map_set", tape, count + "_tag", "Op");
+            __engine("map_set", tape, count + "_match", -1);
+            prev_token_end = pos + op_len;
+            prev_token_is_infix_predecessor = false;
             count = count + 1;
-            i = i + 1;
+            pos = pos + op_len;
         }
     }
-    return count;
+
+    __engine("map_set", tape, "count", count);
+    return tape;
 }
 
-pub pure fn get_token_kind_name(kind: i64) -> str {
-    if kind == 0 { return "EOF"; }
-    if kind == 1 { return "INT"; }
-    if kind == 2 { return "FLOAT"; }
-    if kind == 3 { return "STR"; }
-    if kind == 4 { return "IDENT"; }
-    if kind == 5 { return "KEYWORD"; }
-    if kind == 6 { return "PREFIX_DOT"; }
-    if kind == 7 { return "INFIX_DOT"; }
-    if kind == 10 { return "PLUS"; }
-    if kind == 11 { return "MINUS"; }
-    if kind == 12 { return "STAR"; }
-    if kind == 13 { return "SLASH"; }
-    if kind == 15 { return "EQUAL"; }
-    if kind == 16 { return "EQEQ"; }
-    if kind == 22 { return "ARROW"; }
-    if kind == 30 { return "LPAREN"; }
-    if kind == 31 { return "RPAREN"; }
-    if kind == 32 { return "LBRACE"; }
-    if kind == 33 { return "RBRACE"; }
-    return "UNKNOWN";
+pub fn sh_token_count(tape: i64) -> i64 {
+    return __engine("map_get", tape, "count");
+}
+
+pub fn sh_token_text(tape: i64, idx: i64) -> str {
+    return __engine("map_get", tape, idx + "_text");
+}
+
+pub fn sh_token_tag(tape: i64, idx: i64) -> str {
+    return __engine("map_get", tape, idx + "_tag");
+}
+
+pub fn sh_token_matching_bracket(tape: i64, idx: i64) -> i64 {
+    let m = __engine("map_get", tape, idx + "_match");
+    if m != null {
+        return m;
+    }
+    return -1;
 }

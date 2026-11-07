@@ -7,10 +7,94 @@ pub pkg Pilot.SelfHost.Cli.TestRunner;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
+pub enum TestOutcome {
+    Fail,
+    Pass,
+}
+
 pub pure fn format_test_pass_json(file_path: str, test_name: str, nodes: i64, instructions: i64) -> str {
     return "{\"event\":\"pass\",\"file\":\"" + file_path + "\",\"name\":\"" + test_name + "\",\"nodes\":" + nodes + ",\"instructions\":" + instructions + "}";
 }
 
 pub pure fn format_test_summary_json(passed: i64, failed: i64, total: i64) -> str {
     return "{\"event\":\"summary\",\"passed\":" + passed + ",\"failed\":" + failed + ",\"total\":" + total + "}";
+}
+
+// Discovers test functions in the mounted AstArena (starts with "test_" or marked with [Test])
+// Returns "|"-joined names of matching functions
+pub fn discover_arena_tests() -> str {
+    let node_count = __engine("ast_node_count");
+    var out = "";
+    var i = 0;
+    while i < node_count {
+        let k = __engine("ast_node_kind", i);
+        // NodeKind::FnDecl has kind_tag 3
+        if k == 3 {
+            let sym = __engine("ast_node_sym", i);
+            let name = __engine("sym_str", sym);
+            let nlen = __engine("str_len", name);
+            var is_test = false;
+            if nlen >= 5 {
+                let prefix = __engine("str_slice", name, 0, 5);
+                if prefix == "test_" {
+                    is_test = true;
+                }
+            }
+            if !is_test {
+                let attr_cnt = __engine("ast_attr_decl_count", i);
+                var ai = 0;
+                while ai < attr_cnt {
+                    let a_sym = __engine("ast_attr_name", i, ai);
+                    let a_name = __engine("sym_str", a_sym);
+                    if a_name == "Test" {
+                        is_test = true;
+                    }
+                    ai = ai + 1;
+                }
+            }
+            if is_test {
+                if out == "" {
+                    out = name;
+                } else {
+                    out = out + "|" + name;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+// Summarizes CSV results e.g. "t1:1,t2:0,extra:1" -> {"passed":2,"failed":1,"total":3}
+pub fn summarize_test_suite_json(results_csv: str) -> str {
+    let len = __engine("str_len", results_csv);
+    var passed = 0;
+    var failed = 0;
+    var pos = 0;
+
+    while pos < len {
+        // Find next comma or end
+        var end = pos;
+        while end < len {
+            let ch = __engine("str_slice", results_csv, end, end + 1);
+            if ch == "," { break; }
+            end = end + 1;
+        }
+
+        let item = __engine("str_slice", results_csv, pos, end);
+        let item_len = __engine("str_len", item);
+        if item_len >= 2 {
+            let last_ch = __engine("str_slice", item, item_len - 1, item_len);
+            if last_ch == "1" {
+                passed = passed + 1;
+            } else if last_ch == "0" {
+                failed = failed + 1;
+            }
+        }
+
+        pos = end + 1;
+    }
+
+    let total = passed + failed;
+    return "{\"passed\":" + passed + ",\"failed\":" + failed + ",\"total\":" + total + "}";
 }

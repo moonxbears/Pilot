@@ -1,20 +1,35 @@
 // =========================================================================
 // FILE: selfhost/pkg/venv.pilot
 // Milestone 60.1: Isolated Virtual Environment Manager (pilotvenv.cfg)
-// Replaces crates/pilot-pkg/src/venv.pilot in Pure Pilot.
 // =========================================================================
 pub pkg Pilot.SelfHost.Pkg.Venv;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
-pub pure fn format_pilotvenv_cfg(venv_name: str, compiler_version: str = "1.1.51") -> str {
-    return "home = /usr/local/bin\n" +
-           "include-system-site-packages = false\n" +
-           "version = " + compiler_version + "\n" +
-           "prompt = (" + venv_name + ")\n";
+fn venv_find(haystack: str, needle: str, start: i64) -> i64 {
+    let hl = __engine("str_len", haystack);
+    let nl = __engine("str_len", needle);
+    if nl == 0 || start < 0 || start + nl > hl { return -1; }
+    var i = start;
+    while i + nl <= hl {
+        if __engine("str_slice", haystack, i, i + nl) == needle { return i; }
+        i = i + 1;
+    }
+    return -1;
 }
 
-pub pure fn format_posix_activate_script(venv_path: str) -> str {
-    return "export PILOT_VENV=\"" + venv_path + "\"\n" +
-           "export PATH=\"" + venv_path + "/bin:$PATH\"\n";
+pub pure fn format_pilotvenv_cfg(venv_dir: str, compiler_ver: str) -> str {
+    return "home = /usr/local/bin\n" +
+           "include-system-site-packages = false\n" +
+           "version = " + compiler_ver + "\n" +
+           "prompt = (" + venv_dir + ")\n";
+}
+
+pub pure fn parse_pilotvenv_version(cfg_text: str) -> str {
+    let v_idx = venv_find(cfg_text, "version = ", 0);
+    if v_idx < 0 { return ""; }
+    let s = v_idx + 10;
+    let nl = venv_find(cfg_text, "\n", s);
+    let end = if nl >= 0 { nl } else { __engine("str_len", cfg_text) };
+    return __engine("str_slice", cfg_text, s, end);
 }

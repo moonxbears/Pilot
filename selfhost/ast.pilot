@@ -4,82 +4,82 @@
 // ==============================================================================
 pub pkg Pilot.SelfHost.Ast;
 
-use Pilot.Core.Genesis.*;
-use Pilot.Core.Interfaces.*;
-use Pilot.Core.Memory.*;
-
 pub pure fn nameof(sym: str) -> str => sym;
 
-// Node Kind Constants
-pub const NODE_UNKNOWN: i64 = 0;
-pub const NODE_INT_LIT: i64 = 1;
-pub const NODE_FLOAT_LIT: i64 = 2;
-pub const NODE_STR_LIT: i64 = 3;
-pub const NODE_BOOL_LIT: i64 = 4;
-pub const NODE_IDENT: i64 = 5;
-
-pub const NODE_LET_STMT: i64 = 101;
-pub const NODE_VAR_STMT: i64 = 102;
-pub const NODE_ASSIGN_STMT: i64 = 103;
-pub const NODE_RETURN_STMT: i64 = 104;
-pub const NODE_IF_STMT: i64 = 105;
-pub const NODE_WHILE_STMT: i64 = 106;
-pub const NODE_FN_DECL: i64 = 107;
-pub const NODE_EXPR_STMT: i64 = 108;
-pub const NODE_PROGRAM: i64 = 109;
-pub const NODE_ATTR: i64 = 110;
-pub const NODE_ATTRIBUTED_DECL: i64 = 111;
-pub const NODE_STRUCT_DECL: i64 = 112;
-pub const NODE_INTERFACE_DECL: i64 = 113;
-pub const NODE_QUOTE_EXPR: i64 = 114;
-
-pub const NODE_BINARY_EXPR: i64 = 201;
-pub const NODE_UNARY_EXPR: i64 = 202;
-pub const NODE_CALL_EXPR: i64 = 203;
-pub const NODE_MEMBER_EXPR: i64 = 204;
-pub const NODE_INDEX_EXPR: i64 = 205;
-
-// Binary Operator Constants
-pub const OP_ADD: i64 = 1;
-pub const OP_SUB: i64 = 2;
-pub const OP_MUL: i64 = 3;
-pub const OP_DIV: i64 = 4;
-pub const OP_MOD: i64 = 5;
-pub const OP_EQ: i64 = 8;
-pub const OP_NE: i64 = 9;
-pub const OP_LT: i64 = 10;
-pub const OP_LE: i64 = 11;
-pub const OP_GT: i64 = 12;
-pub const OP_GE: i64 = 13;
-pub const OP_AND: i64 = 14;
-pub const OP_OR: i64 = 15;
-
-// Packs (kind: u16, flags: u16, lhs: u32) into the low 64-bit word of a 16-byte AstNode
-pub pure fn pack_ast_node_low64(kind: i64, flags: i64, lhs: i64) -> i64 {
-    return (kind & 65535) + ((flags & 65535) * 65536) + (lhs * 4294967296);
+pub enum ShNodeKind {
+    Program,
+    StructDecl,
+    InterfaceDecl,
+    FnDecl,
+    LetStmt,
+    VarStmt,
+    IfExpr,
+    WhileStmt,
+    ReturnStmt,
+    BlockExpr,
+    BinaryExpr,
+    UnaryExpr,
+    CallExpr,
+    IntLit,
+    IdentExpr,
 }
 
-pub pure fn sizeof_selfhost_ast_node() -> i64 {
+pub pure fn sh_sizeof_ast_node() -> i64 {
     return 16;
 }
 
-pub pure fn get_node_kind_name(kind: i64) -> str {
-    if kind == 1 { return "IntLit"; }
-    if kind == 2 { return "FloatLit"; }
-    if kind == 3 { return "StrLit"; }
-    if kind == 4 { return "BoolLit"; }
-    if kind == 5 { return "Ident"; }
-    if kind == 101 { return "LetStmt"; }
-    if kind == 104 { return "ReturnStmt"; }
-    if kind == 105 { return "IfStmt"; }
-    if kind == 106 { return "WhileStmt"; }
-    if kind == 107 { return "FnDecl"; }
-    if kind == 110 { return "Attr"; }
-    if kind == 111 { return "AttributedDecl"; }
-    if kind == 112 { return "StructDecl"; }
-    if kind == 113 { return "InterfaceDecl"; }
-    if kind == 114 { return "QuoteExpr"; }
-    if kind == 201 { return "BinaryExpr"; }
-    if kind == 203 { return "CallExpr"; }
+pub fn sh_ast_new() -> i64 {
+    let arena = __engine("map_new");
+    __engine("map_set", arena, "node_count", 0);
+    __engine("map_set", arena, "root", -1);
+    return arena;
+}
+
+pub fn sh_ast_alloc_node(arena: i64, kind_name: str, op_text: str) -> i64 {
+    let nid = __engine("map_get", arena, "node_count");
+    __engine("map_set", arena, "node_count", nid + 1);
+    __engine("map_set", arena, nid + "_kind", kind_name);
+    __engine("map_set", arena, nid + "_op", op_text);
+    __engine("map_set", arena, nid + "_child_count", 0);
+    return nid;
+}
+
+pub fn sh_ast_add_child(arena: i64, parent: i64, child: i64) -> void {
+    let cnt = __engine("map_get", arena, parent + "_child_count");
+    __engine("map_set", arena, parent + "_child_" + cnt, child);
+    __engine("map_set", arena, parent + "_child_count", cnt + 1);
+}
+
+pub fn sh_ast_set_root(arena: i64, root_nid: i64) -> void {
+    __engine("map_set", arena, "root", root_nid);
+}
+
+pub fn sh_ast_root(arena: i64) -> i64 {
+    let r = __engine("map_get", arena, "root");
+    if r != null { return r; }
+    return -1;
+}
+
+pub fn sh_ast_kind_name(arena: i64, node_id: i64) -> str {
+    let k = __engine("map_get", arena, node_id + "_kind");
+    if k != null { return k; }
     return "Unknown";
+}
+
+pub fn sh_ast_op_text(arena: i64, node_id: i64) -> str {
+    let op = __engine("map_get", arena, node_id + "_op");
+    if op != null { return op; }
+    return "";
+}
+
+pub fn sh_ast_child_count(arena: i64, node_id: i64) -> i64 {
+    let cnt = __engine("map_get", arena, node_id + "_child_count");
+    if cnt != null { return cnt; }
+    return 0;
+}
+
+pub fn sh_ast_child_at(arena: i64, node_id: i64, idx: i64) -> i64 {
+    let ch = __engine("map_get", arena, node_id + "_child_" + idx);
+    if ch != null { return ch; }
+    return -1;
 }
