@@ -26,6 +26,7 @@ pub struct BytecodeCompiler {
     fn_entries: HashMap<String, (u16, Vec<String>)>,
     call_patches: Vec<(usize, String)>,
     const_maps: HashMap<String, ConstMapVal>,
+    loop_stack: Vec<(u16, Vec<usize>)>,
     next_local_reg: u8,
     next_reg: u8,
 }
@@ -45,6 +46,7 @@ impl BytecodeCompiler {
             fn_entries: HashMap::new(),
             call_patches: Vec::new(),
             const_maps: HashMap::new(),
+            loop_stack: Vec::new(),
             next_local_reg: 17, // r17..95 reserved for named local variables
             next_reg: 96,       // r96..255 reserved for temporary expressions
         }
@@ -372,69 +374,27 @@ impl BytecodeCompiler {
                         _ => {}
                     }
                 }
-                let r_obj = self.compile_node(arena, NodeId(node.lhs));
-                let m_name = arena.interner.resolve(SymbolId(node.rhs));
-                let c_key = self.add_constant(PilotVal::from_str(m_name));
-                let r_key = self.alloc_reg();
-                self.emit(Opcode::LoadConst, r_key, (c_key >> 8) as u8, (c_key & 0xFF) as u8);
-                let c_hook = self.add_constant(PilotVal::from_str("map_get"));
-                let r_hook = self.alloc_reg();
-                self.emit(Opcode::LoadConst, r_hook, (c_hook >> 8) as u8, (c_hook & 0xFF) as u8);
-                let r_obj_safe = if r_obj == 1 || r_obj == 2 {
-                    let tmp = self.alloc_reg();
-                    self.emit(Opcode::Move, tmp, r_obj, 0);
-                    tmp
-                } else {
-                    r_obj
-                };
-                self.emit(Opcode::Move, 1, r_obj_safe, 0);
-                self.emit(Opcode::Move, 2, r_key, 0);
-                let dst = self.alloc_reg();
-                self.emit(Opcode::EngineIntrinsic, dst, r_hook, 2);
-                dst
-            }
-
-            NodeKind::MapExpr => {
-                let c_new = self.add_constant(PilotVal::from_str("map_new"));
-                let r_new = self.alloc_reg();
-                self.emit(Opcode::LoadConst, r_new, (c_new >> 8) as u8, (c_new & 0xFF) as u8);
-                let r_map = self.alloc_reg();
-                self.emit(Opcode::EngineIntrinsic, r_map, r_new, 0);
-
-                let c_set = self.add_constant(PilotVal::from_str("map_set"));
-                let r_set = self.alloc_reg();
-                self.emit(Opcode::LoadConst, r_set, (c_set >> 8) as u8, (c_set & 0xFF) as u8);
-
-                let children = arena.children_slice(node.lhs, node.rhs);
-                let mut i = 0;
-                while i + 1 < children.len() {
-                    let k_id = NodeId(children[i]);
-                    let v_id = NodeId(children[i + 1]);
-                    let k_node = arena.node(k_id);
-                    let k_name = match k_node.node_kind() {
-                        NodeKind::IdentExpr | NodeKind::StrLit => {
-                            arena.interner.resolve(SymbolId(k_node.lhs)).to_string()
+                let lhs_node = arena.node(NodeId(node.lhs));
+                if lhs_node.node_kind() == NodeKind::IdentExpr {
+                    let lhs_name = arena.interner.resolve(SymbolId(lhs_node.lhs));
+                    if let Some(&r_obj) = self.var_slots.get(lhs_name) {
+                        if !self.const_maps.contains_key(lhs_name) {
+                            let m_name = arena.interner.resolve(SymbolId(node.rhs));
+                            let c_key = self.add_constant(PilotVal::from_str(m_name));
+                            let r_key = self.alloc_reg();
+                            self.emit(Opcode::LoadConst, r_key, (c_key >> 8) as u8, (c_key & 0xFF) as u8);
+                            let c_hook = self.add_constant(PilotVal::from_str("map_get"));
+                            let r_hook = self.alloc_reg();
+                            self.emit(Opcode::LoadConst, r_hook, (c_hook >> 8) as u8, (c_hook & 0xFF) as u8);
+                            self.emit(Opcode::Move, 1, r_obj, 0);
+                            self.emit(Opcode::Move, 2, r_key, 0);
+                            let dst = self.alloc_reg();
+                            self.emit(Opcode::EngineIntrinsic, dst, r_hook, 2);
+                            return dst;
                         }
-                        _ => String::new(),
-                    };
-                    let c_k = self.add_constant(PilotVal::from_str(&k_name));
-                    let r_k = self.alloc_reg();
-                    self.emit(Opcode::LoadConst, r_k, (c_k >> 8) as u8, (c_k & 0xFF) as u8);
-                    let r_v = self.compile_node(arena, v_id);
-                    let r_v_safe = if r_v >= 1 && r_v <= 3 {
-                        let tmp = self.alloc_reg();
-                        self.emit(Opcode::Move, tmp, r_v, 0);
-                        tmp
-                    } else {
-                        r_v
-                    };
-                    self.emit(Opcode::Move, 1, r_map, 0);
-                    self.emit(Opcode::Move, 2, r_k, 0);
-                    self.emit(Opcode::Move, 3, r_v_safe, 0);
-                    self.emit(Opcode::EngineIntrinsic, r_map, r_set, 3);
-                    i += 2;
+                    }
                 }
-                r_map
+                0
             }
 
             NodeKind::IndexExpr => {
@@ -609,7 +569,10 @@ impl BytecodeCompiler {
                 let r_cond = self.compile_node(arena, NodeId(node.lhs));
                 let jump_false_idx = self.emit(Opcode::JumpIfFalse, 0, r_cond, 0);
 
+                self.loop_stack.push((loop_start, Vec::new()));
                 self.compile_node(arena, NodeId(node.rhs));
+                let (_, break_jumps) = self.loop_stack.pop().unwrap_or((loop_start, Vec::new()));
+
                 self.emit(
                     Opcode::Jump,
                     0,
@@ -624,7 +587,37 @@ impl BytecodeCompiler {
                     r_cond,
                     (loop_end & 0xFF) as u8,
                 );
+                for b_idx in break_jumps {
+                    self.instructions[b_idx] = Instruction::encode(
+                        Opcode::Jump,
+                        0,
+                        (loop_end >> 8) as u8,
+                        (loop_end & 0xFF) as u8,
+                    );
+                }
 
+                0
+            }
+
+            NodeKind::BreakStmt => {
+                if !self.loop_stack.is_empty() {
+                    let j = self.emit(Opcode::Jump, 0, 0, 0);
+                    if let Some((_, ref mut breaks)) = self.loop_stack.last_mut() {
+                        breaks.push(j);
+                    }
+                }
+                0
+            }
+
+            NodeKind::ContinueStmt => {
+                if let Some(&(loop_start, _)) = self.loop_stack.last() {
+                    self.emit(
+                        Opcode::Jump,
+                        0,
+                        (loop_start >> 8) as u8,
+                        (loop_start & 0xFF) as u8,
+                    );
+                }
                 0
             }
 
@@ -776,12 +769,53 @@ impl BytecodeCompiler {
                             return 0;
                         } else if name == "nameof" && arg_len > 1 {
                             let arg_id = NodeId(arena.extra_children[arg_start + 1]);
+                            let arg_node = arena.node(arg_id);
+                            if arg_node.node_kind() == NodeKind::IdentExpr {
+                                let s = arena.interner.resolve(SymbolId(arg_node.lhs));
+                                let const_idx = self.add_constant(PilotVal::from_str(s));
+                                let dst = self.alloc_reg();
+                                self.emit(Opcode::LoadConst, dst, (const_idx >> 8) as u8, (const_idx & 0xFF) as u8);
+                                return dst;
+                            }
                             return self.compile_node(arena, arg_id);
                         } else if arg_len == 2
                             && arena.node(NodeId(arena.extra_children[arg_start + 1])).node_kind() == NodeKind::MapExpr
                             && !self.fn_entries.contains_key(name)
                         {
-                            return self.compile_node(arena, NodeId(arena.extra_children[arg_start + 1]));
+                            let map_node = *arena.node(NodeId(arena.extra_children[arg_start + 1]));
+                            let c_new = self.add_constant(PilotVal::from_str("map_new"));
+                            let r_new = self.alloc_reg();
+                            self.emit(Opcode::LoadConst, r_new, (c_new >> 8) as u8, (c_new & 0xFF) as u8);
+                            let r_map = self.alloc_local_reg();
+                            self.emit(Opcode::EngineIntrinsic, r_map, r_new, 0);
+
+                            let c_set = self.add_constant(PilotVal::from_str("map_set"));
+                            let r_set = self.alloc_local_reg();
+                            self.emit(Opcode::LoadConst, r_set, (c_set >> 8) as u8, (c_set & 0xFF) as u8);
+
+                            let children = arena.children_slice(map_node.lhs, map_node.rhs);
+                            let mut i = 0;
+                            while i + 1 < children.len() {
+                                let k_id = NodeId(children[i]);
+                                let v_id = NodeId(children[i + 1]);
+                                let k_node = arena.node(k_id);
+                                let k_name = match k_node.node_kind() {
+                                    NodeKind::IdentExpr | NodeKind::StrLit => {
+                                        arena.interner.resolve(SymbolId(k_node.lhs)).to_string()
+                                    }
+                                    _ => String::new(),
+                                };
+                                let r_v = self.compile_node(arena, v_id);
+                                let c_k = self.add_constant(PilotVal::from_str(&k_name));
+                                let r_k = self.alloc_reg();
+                                self.emit(Opcode::LoadConst, r_k, (c_k >> 8) as u8, (c_k & 0xFF) as u8);
+                                self.emit(Opcode::Move, 1, r_map, 0);
+                                self.emit(Opcode::Move, 2, r_k, 0);
+                                self.emit(Opcode::Move, 3, r_v, 0);
+                                self.emit(Opcode::EngineIntrinsic, r_map, r_set, 3);
+                                i += 2;
+                            }
+                            return r_map;
                         } else if name == "__engine" && arg_len > 1 {
                             let hook_arg = NodeId(arena.extra_children[arg_start + 1]);
                             let r_hook = self.compile_node(arena, hook_arg);

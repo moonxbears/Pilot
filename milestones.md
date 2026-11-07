@@ -242,13 +242,13 @@ flowchart TD
 ---
 
 ### Milestone 53: Lossless CST, Typo Recovery & Wadler-Lindig Formatter — Retire `pilot-syntax` & `pilot-fmt`
-- **Status**: 🔲 Planned
+- **Status**: ✅ Completed
 - **Goal**: Eliminate the entire 3,449-line duplicate CST lexer/parser (`pilot-syntax`) and 786-line Rust formatter (`pilot-fmt`) in favor of canonical Pilot implementations.
 - **Deliverables**:
-  - [ ] **53.1: Lossless Red-Green CST & Incremental Splicer (`selfhost/cst/{cst,incremental}.pilot`, `~420L` + `~180L`)**: Implement immutable width-relative `GreenNode`s, ephemeral parent-linked `SyntaxNode` cursors, and sub-millisecond edit island reuse in Pilot.
-  - [ ] **53.2: Live-Keyword Recovery & Trivia CST Parser (`selfhost/cst/{cst_recovery,cst_parser}.pilot`, `~190L` + `~900L`)**: Consume `TokenTape` directly (zero duplicate lexing) and query `Pilot.Core.Keywords` dynamically for Damerau-Levenshtein typo fix-its (fixing the `u128` bitmask truncation bug).
-  - [ ] **53.3: Canonical Wadler-Lindig Formatter (`selfhost/fmt/fmt.pilot`, `~520L`)**: Implement `Doc` layout algebra and strictly canonical `{ ... }` / `=> expr;` pretty-printing.
-  - [ ] **53.4: Legacy `pilot-syntax` & `pilot-fmt` Purge**: Delete `crates/pilot-syntax/` (`3,449L` — including the 898-line duplicate `SyntaxKind` enum and duplicate lexer) and `crates/pilot-fmt/` (`786L` — including prohibited `use_colon_suites` and legacy `migrate_syntax` rewrite tables) from disk and workspace `Cargo.toml`; remove all `pilot_syntax`/`pilot_fmt` imports, C-ABI FFI shims in `pilot-ffi`, and Rust formatting callers across `pilot-cli` and `pilot-lsp`.
+  - [x] **53.1: Lossless Red-Green CST & Incremental Splicer (`selfhost/cst/{cst,incremental}.pilot`, `~420L` + `~180L`)**: Implement immutable width-relative `GreenNode`s, ephemeral parent-linked `SyntaxNode` cursors, and sub-millisecond edit island reuse in Pilot.
+  - [x] **53.2: Live-Keyword Recovery & Trivia CST Parser (`selfhost/cst/{cst_recovery,cst_parser}.pilot`, `~190L` + `~900L`)**: Consume `TokenTape` directly (zero duplicate lexing) and query `Pilot.Core.Keywords` dynamically for Damerau-Levenshtein typo fix-its (fixing the `u128` bitmask truncation bug).
+  - [x] **53.3: Canonical Wadler-Lindig Formatter (`selfhost/fmt/fmt.pilot`, `~520L`)**: Implement `Doc` layout algebra and strictly canonical `{ ... }` / `=> expr;` pretty-printing.
+  - [x] **53.4: Legacy `pilot-syntax` & `pilot-fmt` Purge**: Delete `crates/pilot-syntax/` (`3,449L` — including the 898-line duplicate `SyntaxKind` enum and duplicate lexer) and `crates/pilot-fmt/` (`786L` — including prohibited `use_colon_suites` and legacy `migrate_syntax` rewrite tables) from disk and workspace `Cargo.toml`; remove all `pilot_syntax`/`pilot_fmt` imports, C-ABI FFI shims in `pilot-ffi`, and Rust formatting callers across `pilot-cli` and `pilot-lsp`.
 - **Verification Gate**: `crates/pilot-syntax` and `crates/pilot-fmt` completely removed from disk and `Cargo.toml`; `pilot fmt` round-trip idempotency and sub-millisecond incremental reparse benchmarks pass.
 
 ---

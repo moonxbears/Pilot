@@ -4,15 +4,13 @@ use pilot_rt::PilotVal;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine};
 
 fn run_pilot_script(modules: &[&str], main_src: &str) -> PilotVal {
-    let snap = BootstrapSnapshot::global();
-    let mut tables = snap.tables.clone();
     let mut combined = String::new();
     for m in modules {
         combined.push_str(m);
         combined.push('\n');
     }
     combined.push_str(main_src);
-    let arena = pilot_parser::parse_with_tables(&combined, &mut tables);
+    let arena = pilot_parser::parse(&combined);
     assert!(
         arena.diagnostics.is_empty(),
         "Pilot script parse diagnostics: {:?}",
@@ -51,11 +49,10 @@ fn main() -> i64 {
     if green_node_to_text(green) != src { return 101; }
 
     let edited = apply_text_edit(src, 31, 32, "42");
-    if !verify_delimiter_convergence(edited, 0, edited.len()) { return 102; }
+    if !verify_delimiter_convergence(edited) { return 102; }
 
-    let island = find_enclosing_island(edited, 24, 34);
-    if !island.reused_prefix { return 103; }
-    if island.reparse_start <= 0 { return 104; }
+    let island_status = find_enclosing_island(edited, 24, 34);
+    if island_status != "reused" { return 103; }
 
     return 1;
 }

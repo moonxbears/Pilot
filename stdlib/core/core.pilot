@@ -403,6 +403,7 @@ comptime {
     __engine(Cfg.Hooks.module_kw,   Cfg.Tokens.kw_pkg,  Cfg.Tokens.act_pkg);
     __engine(Cfg.Hooks.module_kw,   Cfg.Tokens.kw_use,  Cfg.Tokens.act_use);
     __engine(Cfg.Hooks.receiver_id, Cfg.Tokens.kw_self, Cfg.Tokens.kw_field, Cfg.Tokens.kw_value);
+    __engine(Cfg.Hooks.receptor, Cfg.Tokens.kw_nameof, 33, 25);
     __engine(Cfg.Hooks.receptor, nameof(true),  1, 1);
     __engine(Cfg.Hooks.receptor, nameof(false), 1, 0);
     __engine(Cfg.Hooks.receptor, nameof(none),  2, 0);

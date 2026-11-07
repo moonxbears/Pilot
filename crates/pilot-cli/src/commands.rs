@@ -271,7 +271,6 @@ pub fn cmd_fmt(args: &[String]) {
 
     let mut check_only = false;
     let mut write_mode = false;
-    let mut migrate_syntax = false;
     let mut files = Vec::new();
 
     for arg in args {
@@ -283,7 +282,7 @@ pub fn cmd_fmt(args: &[String]) {
         }
     }
 
-    let fmt_pilot_src = include_str!("../../../../selfhost/fmt/fmt.pilot");
+    let fmt_pilot_src = include_str!("../../../selfhost/fmt/fmt.pilot");
 
     for file_path in files {
         let src = match fs::read_to_string(file_path) {
