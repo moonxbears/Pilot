@@ -290,11 +290,6 @@
                             "program"
                         ],
                         "properties": {
-                            "editor.semanticHighlighting.enabled": {
-                                "type": "boolean",
-                                "default": true,
-                                "description": "Enables semantic highlighting for Pilot files"
-                            },
                             "program": {
                                 "type": "string",
                                 "description": "Path to the .pilot script to run or debug.",

@@ -655,7 +655,7 @@ pub fn build_tm_language_model(
     lang_primitives_regex: str = "",
     operators_regex:       str = ""
 ) -> any {
-    return load("vscode-pilot/syntaxes/pilot.tmLanguage.json");
+    return __engine("fs_read_text", "vscode-pilot/syntaxes/pilot.tmLanguage.json");
 }
 
 pub fn dumps_tm_language(
@@ -666,8 +666,8 @@ pub fn dumps_tm_language(
     operators_regex:       str = "",
     indent:                i64 = 2
 ) -> str {
-    let content = load("vscode-pilot/syntaxes/pilot.tmLanguage.json");
-    if len(content) > 0 {
+    let content = __engine("fs_read_text", "vscode-pilot/syntaxes/pilot.tmLanguage.json");
+    if len(content) > 2 {
         return content;
     }
     return "{}";

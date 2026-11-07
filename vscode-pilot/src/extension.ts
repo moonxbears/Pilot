@@ -560,12 +560,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             selector,
             {
                 onDidChangeSemanticTokens: semanticTokensEmitter.event,
-                async provideDocumentSemanticTokens(document: vscode.TextDocument): Promise<vscode.SemanticTokens> {
+                async provideDocumentSemanticTokens(document: vscode.TextDocument): Promise<vscode.SemanticTokens | null> {
                     client.notifyDidOpen(document);
                     const res = await client.sendRequest('textDocument/semanticTokens/full', {
                         textDocument: { uri: document.uri.toString() }
                     });
-                    const data = res?.data ?? [];
+                    const data = res?.data;
+                    if (!data || !Array.isArray(data) || data.length === 0) {
+                        return null;
+                    }
                     return new vscode.SemanticTokens(new Uint32Array(data));
                 }
             },
