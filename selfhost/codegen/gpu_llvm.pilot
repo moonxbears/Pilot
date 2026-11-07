@@ -1,0 +1,68 @@
+// ============================================================================
+// FILE: selfhost/codegen/gpu_llvm.pilot
+// Milestone 56.2: AST-Lowering Direct LLVM IR for NVPTX & AMDGPU
+// Lowers resolved kernel parameters, hardware thread-index intrinsics, and
+// AST body SSA operations into NVPTX64 and AMDGCN LLVM IR modules.
+// ============================================================================
+
+pub struct GpuLlvmIrArtifact {
+    pub target_triple: str;
+    pub kernel_name: str;
+    pub llvm_ir: str;
+}
+
+pub fn emit_nvptx_llvm_ir_module(
+    kernel_name: str,
+    llvm_params: str,
+    ssa_body_ops: str
+) -> GpuLlvmIrArtifact {
+    let triple = "nvptx64-nvidia-cuda";
+    let ir = "target triple = \"" + triple + "\"\n\n"
+        + "declare i32 @llvm.nvvm.read.ptx.sreg.tid.x() nounwind readnone\n"
+        + "declare i32 @llvm.nvvm.read.ptx.sreg.ctaid.x() nounwind readnone\n"
+        + "declare i32 @llvm.nvvm.read.ptx.sreg.ntid.x() nounwind readnone\n\n"
+        + "define void @" + kernel_name + "(" + llvm_params + ") {\n"
+        + "entry:\n"
+        + "  %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()\n"
+        + "  %bid = call i32 @llvm.nvvm.read.ptx.sreg.ctaid.x()\n"
+        + "  %bdim = call i32 @llvm.nvvm.read.ptx.sreg.ntid.x()\n"
+        + "  %off = mul i32 %bid, %bdim\n"
+        + "  %gid32 = add i32 %off, %tid\n"
+        + "  %idx = sext i32 %gid32 to i64\n"
+        + "  " + ssa_body_ops + "\n"
+        + "  ret void\n"
+        + "}\n\n"
+        + "!nvvm.annotations = !{!0}\n"
+        + "!0 = !{ptr @" + kernel_name + ", !\"kernel\", i32 1}\n";
+    return GpuLlvmIrArtifact {
+        target_triple: triple,
+        kernel_name: kernel_name,
+        llvm_ir: ir,
+    };
+}
+
+pub fn emit_amdgpu_llvm_ir_module(
+    kernel_name: str,
+    llvm_params: str,
+    ssa_body_ops: str
+) -> GpuLlvmIrArtifact {
+    let triple = "amdgcn-amd-amdhsa";
+    let ir = "target triple = \"" + triple + "\"\n\n"
+        + "declare i32 @llvm.amdgcn.workitem.id.x() nounwind readnone\n"
+        + "declare i32 @llvm.amdgcn.workgroup.id.x() nounwind readnone\n\n"
+        + "define amdgpu_kernel void @" + kernel_name + "(" + llvm_params + ") {\n"
+        + "entry:\n"
+        + "  %tid = call i32 @llvm.amdgcn.workitem.id.x()\n"
+        + "  %bid = call i32 @llvm.amdgcn.workgroup.id.x()\n"
+        + "  %off = mul i32 %bid, 64\n"
+        + "  %gid32 = add i32 %off, %tid\n"
+        + "  %idx = sext i32 %gid32 to i64\n"
+        + "  " + ssa_body_ops + "\n"
+        + "  ret void\n"
+        + "}\n";
+    return GpuLlvmIrArtifact {
+        target_triple: triple,
+        kernel_name: kernel_name,
+        llvm_ir: ir,
+    };
+}

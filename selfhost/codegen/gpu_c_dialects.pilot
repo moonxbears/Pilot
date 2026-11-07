@@ -1,0 +1,91 @@
+// ============================================================================
+// FILE: selfhost/codegen/gpu_c_dialects.pilot
+// Milestone 56.2: AST-Lowering GPU C-Dialect Backends (CUDA, HIP, OpenCL, OpenMP)
+// Lowers resolved kernel parameters, thread-index intrinsics, bounds guards,
+// and AST body expressions into CUDA, ROCm/HIP, OpenCL C, and OpenMP Offload.
+// ============================================================================
+
+pub struct GpuKernelArtifact {
+    pub backend_name: str;
+    pub kernel_name: str;
+    pub source_code: str;
+}
+
+pub fn emit_cuda_kernel(
+    kernel_name: str,
+    params_sig: str,
+    bound_expr: str,
+    body_stmt: str
+) -> GpuKernelArtifact {
+    let src = "#include <cuda_runtime.h>\n#include <stdint.h>\n\n"
+        + "extern \"C\" __global__ void " + kernel_name + "(" + params_sig + ") {\n"
+        + "  int64_t idx = (int64_t)blockIdx.x * (int64_t)blockDim.x + (int64_t)threadIdx.x;\n"
+        + "  " + nameof(if) + " (idx < " + bound_expr + ") {\n"
+        + "    " + body_stmt + "\n"
+        + "  }\n"
+        + "}\n";
+    return GpuKernelArtifact {
+        backend_name: "cuda",
+        kernel_name: kernel_name,
+        source_code: src,
+    };
+}
+
+pub fn emit_hip_kernel(
+    kernel_name: str,
+    params_sig: str,
+    bound_expr: str,
+    body_stmt: str
+) -> GpuKernelArtifact {
+    let src = "#include <hip/hip_runtime.h>\n#include <stdint.h>\n\n"
+        + "extern \"C\" __global__ void " + kernel_name + "(" + params_sig + ") {\n"
+        + "  int64_t idx = (int64_t)hipBlockIdx_x * (int64_t)hipBlockDim_x + (int64_t)hipThreadIdx_x;\n"
+        + "  " + nameof(if) + " (idx < " + bound_expr + ") {\n"
+        + "    " + body_stmt + "\n"
+        + "  }\n"
+        + "}\n";
+    return GpuKernelArtifact {
+        backend_name: "hip",
+        kernel_name: kernel_name,
+        source_code: src,
+    };
+}
+
+pub fn emit_opencl_kernel(
+    kernel_name: str,
+    params_sig: str,
+    bound_expr: str,
+    body_stmt: str
+) -> GpuKernelArtifact {
+    let src = "__kernel void " + kernel_name + "(" + params_sig + ") {\n"
+        + "  long idx = (long)get_global_id(0);\n"
+        + "  " + nameof(if) + " (idx < " + bound_expr + ") {\n"
+        + "    " + body_stmt + "\n"
+        + "  }\n"
+        + "}\n";
+    return GpuKernelArtifact {
+        backend_name: "opencl",
+        kernel_name: kernel_name,
+        source_code: src,
+    };
+}
+
+pub fn emit_openmp_kernel(
+    kernel_name: str,
+    params_sig: str,
+    bound_expr: str,
+    body_stmt: str
+) -> GpuKernelArtifact {
+    let src = "#include <omp.h>\n#include <stdint.h>\n\n"
+        + "void " + kernel_name + "(" + params_sig + ") {\n"
+        + "  #pragma omp target teams distribute parallel for simd\n"
+        + "  for (int64_t idx = 0; idx < " + bound_expr + "; ++idx) {\n"
+        + "    " + body_stmt + "\n"
+        + "  }\n"
+        + "}\n";
+    return GpuKernelArtifact {
+        backend_name: "openmp",
+        kernel_name: kernel_name,
+        source_code: src,
+    };
+}

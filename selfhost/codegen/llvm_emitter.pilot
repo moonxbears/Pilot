@@ -1,0 +1,66 @@
+// ============================================================================
+// FILE: selfhost/codegen/llvm_emitter.pilot
+// Milestone 56.3: Layout-Aware LLVM IR SSA Emitter
+// Deduces LLVM IR types strictly from `(reg_class, bit_width)` layout physics
+// and emits SSA modules, Perceus ARC declarations, and typed functions.
+// ============================================================================
+
+pub struct LlvmModuleArtifact {
+    pub module_name: str;
+    pub ir_text: str;
+    pub fn_count: i64;
+}
+
+// Maps `(reg_class, bit_width)` physics to LLVM IR type syntax.
+pub pure fn llvm_type_for_physics(reg_class: i64, bit_width: i64) -> str {
+    if reg_class == 0 || reg_class == 1 {
+        return "void";
+    }
+    if reg_class == 2 || reg_class == 3 {
+        if bit_width == 1 { return "i1"; }
+        if bit_width <= 8 { return "i8"; }
+        if bit_width <= 16 { return "i16"; }
+        if bit_width <= 32 { return "i32"; }
+        return "i64";
+    }
+    if reg_class == 4 {
+        if bit_width <= 32 { return "float"; }
+        return "double";
+    }
+    if reg_class == 6 {
+        return "ptr";
+    }
+    return "ptr";
+}
+
+pub pure fn emit_llvm_module_header(module_name: str) -> str {
+    return "source_filename = \"" + module_name + ".pilot\"\n"
+        + "declare ptr @pilot_rt_dup(ptr)\n"
+        + "declare void @pilot_rt_drop(ptr, ptr)\n"
+        + "declare ptr @pilot_rt_drop_reuse(ptr, i64)\n\n";
+}
+
+pub pure fn emit_llvm_function(
+    fn_name: str,
+    ret_llvm_ty: str,
+    params_sig: str,
+    ssa_body: str
+) -> str {
+    return "define " + ret_llvm_ty + " @" + fn_name + "(" + params_sig + ") {\n"
+        + "entry:\n"
+        + "  " + ssa_body + "\n"
+        + "}\n";
+}
+
+pub fn build_llvm_module(
+    module_name: str,
+    fn_defs: str,
+    fn_count: i64
+) -> LlvmModuleArtifact {
+    let text = emit_llvm_module_header(module_name) + fn_defs;
+    return LlvmModuleArtifact {
+        module_name: module_name,
+        ir_text: text,
+        fn_count: fn_count,
+    };
+}

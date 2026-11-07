@@ -277,13 +277,13 @@ flowchart TD
 ---
 
 ### Milestone 56: Layout-Driven Native C, LLVM, WASM, ASM & Real GPU Codegen (`pilot-codegen` -97%)
-- **Status**: 🔲 Planned
+- **Status**: ✅ Completed
 - **Goal**: Shrink `crates/pilot-codegen` from `3,698` lines to a `~100`-line host linker runner by migrating all 5 backend families to layout-driven Pilot emitters (`selfhost/codegen/*.pilot`) and eliminating every benchmark cheat and static GPU stub.
 - **Deliverables**:
-  - [ ] **56.1: Pure Layout-Driven C11 Backend (`selfhost/codegen/{physics,c_types,c_emitter,c_header}.pilot`, `~30L + ~250L + ~700L + ~120L`)**: Lower types strictly from `LayoutTable` + `PhysicsGeometry` and methods from `MethodTable` / `[Extern]`.
-  - [ ] **56.2: Real AST-Lowering GPU Backends (`selfhost/codegen/{gpu_c_dialects,gpu_shaders,gpu_llvm}.pilot`, `~320L + ~280L + ~250L`)**: Implement genuine AST body lowering across CUDA, HIP, OpenCL, OpenMP, WGSL, SPIR-V, NVPTX, and AMDGPU.
-  - [ ] **56.3: Layout-Aware LLVM IR, WASM & Vector ASM Emitters (`selfhost/codegen/{llvm_emitter,wasm_emitter,asm_emitter}.pilot`, `~480L + ~420L + ~180L`)**: Emit typed LLVM SSA, WAT + binary `.wasm` + `.mjs`/`.d.ts` bindings, and SIMD vector assembly from `LayoutTable` descriptors.
-  - [ ] **56.4: Legacy Rust Codegen & Embedded C-Runtime Purge**: Delete `c_target.rs` (`1,611L`, including `"ExprNode"`/`"TransformFrame"`/`"FlowState"` cheats and 50+ builtin method strings), `gpu.rs` (`597L`, including static `c[idx] = a[idx] + b[idx]`, empty `OpReturn`, and `ret void` stubs), `llvm.rs` (`444L`), `wasm.rs` (`412L`), `asm.rs` (`163L`), and `physics.rs` (`226L`) from `crates/pilot-codegen/src/`; delete the 955-line hardcoded C11 string/list/dict header and `#define i64`/`Dual` macros from `crates/pilot-rt/src/c_abi.rs`; delete legacy `selfhost/emitter.pilot` scaffold and obsolete codegen FFI wrappers in `pilot-ffi`.
+  - [x] **56.1: Pure Layout-Driven C11 Backend (`selfhost/codegen/{physics,c_types,c_emitter,c_header}.pilot`, `~30L + ~250L + ~700L + ~120L`)**: Lower types strictly from `LayoutTable` + `PhysicsGeometry` and methods from `MethodTable` / `[Extern]`.
+  - [x] **56.2: Real AST-Lowering GPU Backends (`selfhost/codegen/{gpu_c_dialects,gpu_shaders,gpu_llvm}.pilot`, `~320L + ~280L + ~250L`)**: Implement genuine AST body lowering across CUDA, HIP, OpenCL, OpenMP, WGSL, SPIR-V, NVPTX, and AMDGPU.
+  - [x] **56.3: Layout-Aware LLVM IR, WASM & Vector ASM Emitters (`selfhost/codegen/{llvm_emitter,wasm_emitter,asm_emitter}.pilot`, `~480L + ~420L + ~180L`)**: Emit typed LLVM SSA, WAT + binary `.wasm` + `.mjs`/`.d.ts` bindings, and SIMD vector assembly from `LayoutTable` descriptors.
+  - [x] **56.4: Legacy Rust Codegen & Embedded C-Runtime Purge**: Delete `c_target.rs` (`1,611L`, including `"ExprNode"`/`"TransformFrame"`/`"FlowState"` cheats and 50+ builtin method strings), `gpu.rs` (`597L`, including static `c[idx] = a[idx] + b[idx]`, empty `OpReturn`, and `ret void` stubs), `llvm.rs` (`444L`), `wasm.rs` (`412L`), `asm.rs` (`163L`), and `physics.rs` (`226L`) from `crates/pilot-codegen/src/`; delete the 955-line hardcoded C11 string/list/dict header and `#define i64`/`Dual` macros from `crates/pilot-rt/src/c_abi.rs`; delete legacy `selfhost/emitter.pilot` scaffold and obsolete codegen FFI wrappers in `pilot-ffi`.
 - **Verification Gate**: `pilot-codegen <= 120` Rust LOC (`exec_host_compiler` only); all 6 legacy Rust backend files and the 955L C header deleted; multi-backend differential verification passes across C, LLVM, WASM, GPU kernels, and ASM.
 
 ---

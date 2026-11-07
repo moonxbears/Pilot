@@ -1,0 +1,66 @@
+// ============================================================================
+// FILE: selfhost/codegen/physics.pilot
+// Milestone 56.1: Hardware Register & Layout Physics Engine
+// Derives CPU/GPU register classes, bit widths, byte sizes, alignments, and
+// 2-bit Perceus hardware lattice classifications strictly from layout physics.
+// ============================================================================
+
+pub struct LayoutDescriptor {
+    pub layout_id: i64;
+    pub reg_class: i64;
+    pub bit_width: i64;
+    pub repeat_count: i64;
+    pub field_count: i64;
+    pub lattice_bits: i64;
+}
+
+// Canonical hardware register classes (AGENTS.md §1 Mechanism 1)
+pub pure fn reg_unit() -> i64 { return 0; }
+pub pure fn reg_noreturn() -> i64 { return 1; }
+pub pure fn reg_gpr_signed() -> i64 { return 2; }
+pub pure fn reg_gpr_unsigned() -> i64 { return 3; }
+pub pure fn reg_simd_float() -> i64 { return 4; }
+pub pure fn reg_simd_vector() -> i64 { return 5; }
+pub pure fn reg_raw_ptr() -> i64 { return 6; }
+pub pure fn reg_composite() -> i64 { return 7; }
+
+pub fn create_layout_descriptor(
+    layout_id: i64,
+    reg_class: i64,
+    bit_width: i64,
+    repeat_count: i64,
+    field_count: i64,
+    lattice_bits: i64
+) -> LayoutDescriptor {
+    return LayoutDescriptor {
+        layout_id: layout_id,
+        reg_class: reg_class,
+        bit_width: bit_width,
+        repeat_count: repeat_count,
+        field_count: field_count,
+        lattice_bits: lattice_bits,
+    };
+}
+
+pub pure fn compute_byte_size(bit_width: i64, repeat_count: i64) -> i64 {
+    if bit_width <= 0 { return 0; }
+    let elem_bytes = (bit_width + 7) / 8;
+    let reps = if repeat_count > 1 { repeat_count } else { 1 };
+    return elem_bytes * reps;
+}
+
+pub pure fn compute_byte_align(bit_width: i64) -> i64 {
+    if bit_width <= 8 { return 1; }
+    if bit_width <= 16 { return 2; }
+    if bit_width <= 32 { return 4; }
+    if bit_width <= 64 { return 8; }
+    return 16;
+}
+
+pub pure fn lattice_borrows_memory(lattice_bits: i64) -> bool {
+    return (lattice_bits & 1) != 0;
+}
+
+pub pure fn lattice_owns_destructor(lattice_bits: i64) -> bool {
+    return (lattice_bits & 2) != 0;
+}

@@ -1,0 +1,81 @@
+// ============================================================================
+// FILE: selfhost/codegen/c_types.pilot
+// Milestone 56.1: Pure Layout-Driven C11 Type & Structural Anatomy Lowering
+// Maps hardware register classes, bit widths, and 2-bit lattice anatomy
+// into standard C11 types (`int64_t`, `uint8_t`, `double`, `void*`, and
+// structural `typedef struct`) with zero hardcoded Pilot type names.
+// ============================================================================
+
+pub struct CTypeMapping {
+    pub layout_id: i64;
+    pub c_type_name: str;
+    pub is_composite: bool;
+    pub byte_size: i64;
+}
+
+// Deduces C11 scalar type strictly from `(reg_class, bit_width)` physics.
+// Reg classes: 0=unit, 1=noreturn, 2=gpr_signed, 3=gpr_unsigned,
+// 4=simd_float, 5=simd_vector, 6=raw_ptr, 7=composite.
+pub pure fn c11_type_for_physics(reg_class: i64, bit_width: i64, layout_id: i64) -> str {
+    if reg_class == 0 || reg_class == 1 {
+        return "void";
+    }
+    if reg_class == 2 {
+        if bit_width <= 8 { return "int8_t"; }
+        if bit_width <= 16 { return "int16_t"; }
+        if bit_width <= 32 { return "int32_t"; }
+        return "int64_t";
+    }
+    if reg_class == 3 {
+        if bit_width == 1 { return "bool"; }
+        if bit_width <= 8 { return "uint8_t"; }
+        if bit_width <= 16 { return "uint16_t"; }
+        if bit_width <= 32 { return "uint32_t"; }
+        return "uint64_t";
+    }
+    if reg_class == 4 {
+        if bit_width <= 32 { return "float"; }
+        return "double";
+    }
+    if reg_class == 6 {
+        return "void*";
+    }
+    return "PilotLayoutStruct";
+}
+
+// Deduces structural composite shape from `(field_count, lattice_bits)`
+// per AGENTS.md §1 Mechanism 2 (Structural Field Anatomy):
+// - 2 fields + 0b01 -> contiguous view (`{ void* ptr; size_t len; }`)
+// - 3 fields + 0b01 -> strided lens (`{ void* ptr; size_t len; ptrdiff_t stride; }`)
+// - 3 fields + 0b10 -> owned buffer (`{ void* ptr; size_t len; size_t cap; }`)
+// - 2 fields + 0b00 -> bounds pair (`{ int64_t lo; int64_t hi; }`)
+pub pure fn deduce_structural_c_typedef(field_count: i64, lattice_bits: i64) -> str {
+    if field_count == 2 && lattice_bits == 1 {
+        return "typedef struct { void* ptr; size_t len; } PilotView2;";
+    }
+    if field_count == 3 && lattice_bits == 1 {
+        return "typedef struct { void* ptr; size_t len; ptrdiff_t stride; } PilotLens3;";
+    }
+    if field_count == 3 && lattice_bits == 2 {
+        return "typedef struct { void* ptr; size_t len; size_t cap; } PilotBuffer3;";
+    }
+    if field_count == 2 && lattice_bits == 0 {
+        return "typedef struct { int64_t f0; int64_t f1; } PilotPair2;";
+    }
+    return "typedef struct { int64_t f0; } PilotComposite;";
+}
+
+pub fn map_layout_to_c11(
+    layout_id: i64,
+    reg_class: i64,
+    bit_width: i64
+) -> CTypeMapping {
+    let c_ty = c11_type_for_physics(reg_class, bit_width, layout_id);
+    let bytes = if bit_width > 0 { (bit_width + 7) / 8 } else { 0 };
+    return CTypeMapping {
+        layout_id: layout_id,
+        c_type_name: c_ty,
+        is_composite: reg_class == 7,
+        byte_size: bytes,
+    };
+}

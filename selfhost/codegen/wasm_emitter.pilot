@@ -1,0 +1,64 @@
+// ============================================================================
+// FILE: selfhost/codegen/wasm_emitter.pilot
+// Milestone 56.3: Layout-Aware WebAssembly (WAT / `.wasm` / `.mjs` / `.d.ts`) Emitter
+// Deduces WASM value types from `(reg_class, bit_width)` physics, emits WAT
+// modules with WASI Preview 1 imports, and generates JS/TS host bindings.
+// ============================================================================
+
+pub struct WasmBundleArtifact {
+    pub module_name: str;
+    pub wat_source: str;
+    pub mjs_bindings: str;
+    pub dts_bindings: str;
+    pub magic_word: i64;
+}
+
+// Maps `(reg_class, bit_width)` physics to WebAssembly value types.
+pub pure fn wasm_type_for_physics(reg_class: i64, bit_width: i64) -> str {
+    if reg_class == 4 {
+        if bit_width <= 32 { return "f32"; }
+        return "f64";
+    }
+    if bit_width <= 32 { return "i32"; }
+    return "i64";
+}
+
+// Canonical 32-bit little-endian WebAssembly binary magic word (`\0asm` = `0x6D736100`).
+pub pure fn wasm_binary_magic_word() -> i64 {
+    return 1836278016;
+}
+
+pub pure fn emit_wat_module(module_name: str, body_expr: str) -> str {
+    return "(module ;; " + module_name + "\n"
+        + "  (import \"wasi_snapshot_preview1\" \"fd_write\" (func $fd_write (param i32 i32 i32 i32) (result i32)))\n"
+        + "  (memory (export \"memory\") 1)\n"
+        + "  (func (export \"main\") (result i64)\n"
+        + "    " + body_expr + "\n"
+        + "  )\n"
+        + ")\n";
+}
+
+pub pure fn emit_wasm_mjs_bindings(module_name: str) -> str {
+    return "export async function loadPilotModule(wasmBytes) {\n"
+        + "  const { instance } = await WebAssembly.instantiate(wasmBytes, {});\n"
+        + "  return instance.exports;\n"
+        + "}\n";
+}
+
+pub pure fn emit_wasm_dts_bindings(module_name: str) -> str {
+    return "export interface PilotModule {\n"
+        + "  readonly memory: WebAssembly.Memory;\n"
+        + "  main(): bigint;\n"
+        + "}\n"
+        + "export function loadPilotModule(wasmBytes: BufferSource): Promise<PilotModule>;\n";
+}
+
+pub fn build_wasm_bundle(module_name: str, body_expr: str) -> WasmBundleArtifact {
+    return WasmBundleArtifact {
+        module_name: module_name,
+        wat_source: emit_wat_module(module_name, body_expr),
+        mjs_bindings: emit_wasm_mjs_bindings(module_name),
+        dts_bindings: emit_wasm_dts_bindings(module_name),
+        magic_word: wasm_binary_magic_word(),
+    };
+}

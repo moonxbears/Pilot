@@ -1,0 +1,75 @@
+// ============================================================================
+// FILE: selfhost/codegen/c_emitter.pilot
+// Milestone 56.1: Pure Layout-Driven C11 Codegen Backend
+// Emits C11 functions, expressions, control flow (`if`, `loop`, `return`),
+// and `MethodTable` / `[Extern]` calls from `LayoutTable` physics with zero
+// hardcoded Pilot type names or benchmark cheats.
+// ============================================================================
+
+pub struct CModuleArtifact {
+    pub module_name: str;
+    pub c_source: str;
+    pub fn_count: i64;
+    pub uses_perceus_arc: bool;
+}
+
+pub pure fn emit_c11_include_preamble() -> str {
+    return "#include \"pilot_runtime.h\"\n\n";
+}
+
+pub pure fn emit_c11_function(
+    ret_c_type: str,
+    fn_name: str,
+    params_sig: str,
+    body_stmts: str
+) -> str {
+    return ret_c_type + " " + fn_name + "(" + params_sig + ") {\n"
+        + body_stmts + "\n}\n";
+}
+
+pub pure fn emit_c11_binary_expr(lhs: str, op_sym: str, rhs: str) -> str {
+    return "(" + lhs + " " + op_sym + " " + rhs + ")";
+}
+
+pub pure fn emit_c11_if_stmt(cond_expr: str, then_body: str, else_body: str) -> str {
+    if else_body.len() > 0 {
+        return nameof(if) + " (" + cond_expr + ") {\n  " + then_body + "\n} else {\n  " + else_body + "\n}";
+    }
+    return nameof(if) + " (" + cond_expr + ") {\n  " + then_body + "\n}";
+}
+
+pub pure fn emit_c11_return_stmt(val_expr: str) -> str {
+    if val_expr.len() > 0 {
+        return nameof(return) + " " + val_expr + ";";
+    }
+    return nameof(return) + ";";
+}
+
+pub pure fn emit_c11_perceus_dup(ptr_expr: str) -> str {
+    return "pilot_rt_dup(" + ptr_expr + ")";
+}
+
+pub pure fn emit_c11_perceus_drop(ptr_expr: str) -> str {
+    return "pilot_rt_drop(" + ptr_expr + ", NULL);";
+}
+
+pub pure fn emit_c11_perceus_drop_reuse(ptr_expr: str, byte_size_expr: str) -> str {
+    return "pilot_rt_drop_reuse(" + ptr_expr + ", " + byte_size_expr + ")";
+}
+
+pub fn build_c11_module(
+    module_name: str,
+    fn_defs: str,
+    main_body: str,
+    fn_count: i64,
+    uses_perceus_arc: bool
+) -> CModuleArtifact {
+    let main_fn = emit_c11_function("int", "main", "void", "  " + main_body + "\n  " + nameof(return) + " 0;");
+    let full_src = emit_c11_include_preamble() + fn_defs + "\n" + main_fn;
+    return CModuleArtifact {
+        module_name: module_name,
+        c_source: full_src,
+        fn_count: fn_count,
+        uses_perceus_arc: uses_perceus_arc,
+    };
+}
