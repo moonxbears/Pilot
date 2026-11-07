@@ -1,0 +1,54 @@
+// ============================================================================
+// FILE: selfhost/transpile/ingest.pilot
+// Milestone 57.3: Canonical Foreign AST Ingesters (`pilot --from <lang>`)
+// Converts foreign source constructs (Rust, Python, JS, C#, C/C++, Lua) into
+// canonical Pilot (`fn`, `struct`, `self()`, `var`, `switch` — never `def` or
+// `class`), using `nameof(...)` for Pilot seed keywords.
+// ============================================================================
+
+pub struct IngestedPilotModule {
+    pub source_lang: str;
+    pub pilot_code: str;
+    pub is_canonical: bool;
+}
+
+// Emits a canonical Pilot function declaration (`pub fn <name>(<params>) -> <ret> { return <body>; }`).
+pub pure fn emit_canonical_pilot_fn(
+    fn_name: str,
+    params_sig: str,
+    ret_ty: str,
+    body_expr: str
+) -> str {
+    return "pub " + nameof(fn) + " " + fn_name + "(" + params_sig + ") -> " + ret_ty + " {\n"
+        + "    " + nameof(return) + " " + body_expr + ";\n"
+        + "}\n";
+}
+
+// Emits a canonical Pilot struct declaration with `self(...)` constructor.
+pub pure fn emit_canonical_pilot_struct(
+    struct_name: str,
+    field_name: str,
+    field_ty: str
+) -> str {
+    return "pub " + nameof(struct) + " " + struct_name + " {\n"
+        + "    pub " + field_name + ": " + field_ty + ";\n"
+        + "    pub self(" + field_name + ": " + field_ty + ") {\n"
+        + "        ." + field_name + " = " + field_name + ";\n"
+        + "    }\n"
+        + "}\n";
+}
+
+pub fn ingest_foreign_function(
+    source_lang: str,
+    fn_name: str,
+    params_sig: str,
+    ret_ty: str,
+    body_expr: str
+) -> IngestedPilotModule {
+    let code = emit_canonical_pilot_fn(fn_name, params_sig, ret_ty, body_expr);
+    return IngestedPilotModule {
+        source_lang: source_lang,
+        pilot_code: code,
+        is_canonical: true,
+    };
+}

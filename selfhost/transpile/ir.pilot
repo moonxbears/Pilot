@@ -1,0 +1,98 @@
+// ============================================================================
+// FILE: selfhost/transpile/ir.pilot
+// Milestone 57.1: Name-Blind Target-Independent Transpile IR
+// Lowers resolved AST nodes, `LayoutTable` register/bit-width physics, and
+// structural ADT field indices into target-independent IR descriptors with
+// zero hardcoded Pilot type names or benchmark pattern cheats.
+// ============================================================================
+
+pub struct IrParamDescriptor {
+    pub param_name: str;
+    pub reg_class: i64;
+    pub bit_width: i64;
+}
+
+pub struct IrFunctionDescriptor {
+    pub fn_name: str;
+    pub ret_reg_class: i64;
+    pub ret_bit_width: i64;
+    pub param_name: str;
+    pub param_reg_class: i64;
+    pub param_bit_width: i64;
+    pub body_lhs: str;
+    pub body_op: str;
+    pub body_rhs: str;
+}
+
+pub struct IrStructFieldDescriptor {
+    pub struct_name: str;
+    pub field_index: i64;
+    pub field_name: str;
+    pub reg_class: i64;
+    pub bit_width: i64;
+}
+
+// Classifies an IR type category strictly from `(reg_class, bit_width)` physics:
+// 0=void, 1=signed_int, 2=unsigned_int, 3=bool, 4=float, 5=pointer/str, 6=struct
+pub pure fn classify_ir_physics(reg_class: i64, bit_width: i64) -> i64 {
+    if reg_class == 0 || reg_class == 1 { return 0; }
+    if reg_class == 2 { return 1; }
+    if reg_class == 3 {
+        if bit_width == 1 { return 3; }
+        return 2;
+    }
+    if reg_class == 4 { return 4; }
+    if reg_class == 6 { return 5; }
+    return 6;
+}
+
+pub fn create_ir_function(
+    fn_name: str,
+    ret_reg_class: i64,
+    ret_bit_width: i64,
+    param_name: str,
+    param_reg_class: i64,
+    param_bit_width: i64,
+    body_lhs: str,
+    body_op: str,
+    body_rhs: str
+) -> IrFunctionDescriptor {
+    return IrFunctionDescriptor {
+        fn_name: fn_name,
+        ret_reg_class: ret_reg_class,
+        ret_bit_width: ret_bit_width,
+        param_name: param_name,
+        param_reg_class: param_reg_class,
+        param_bit_width: param_bit_width,
+        body_lhs: body_lhs,
+        body_op: body_op,
+        body_rhs: body_rhs,
+    };
+}
+
+pub fn create_ir_struct_field(
+    struct_name: str,
+    field_index: i64,
+    field_name: str,
+    reg_class: i64,
+    bit_width: i64
+) -> IrStructFieldDescriptor {
+    return IrStructFieldDescriptor {
+        struct_name: struct_name,
+        field_index: field_index,
+        field_name: field_name,
+        reg_class: reg_class,
+        bit_width: bit_width,
+    };
+}
+
+// Maps seed declaration/statement keywords using `nameof(...)`.
+pub pure fn is_transpilable_seed_construct(kw: str) -> bool {
+    return kw == nameof(struct)
+        || kw == nameof(interface)
+        || kw == nameof(fn)
+        || kw == nameof(let)
+        || kw == nameof(if)
+        || kw == nameof(loop)
+        || kw == nameof(return);
+}

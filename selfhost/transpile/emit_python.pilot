@@ -1,0 +1,14 @@
+// ============================================================================
+// FILE: selfhost/transpile/emit_python.pilot
+// Milestone 57.2: Modular Python 3 Source Emitter (`pilot --emit python`)
+// Emits clean Python 3 functions and classes from Name-Blind Transpile IR.
+// ============================================================================
+
+pub pure fn emit_python_function_source(
+    fn_name: str,
+    params_list: str,
+    body_expr: str
+) -> str {
+    return "def " + fn_name + "(" + params_list + "):\n"
+        + "    " + nameof(return) + " " + body_expr + "\n";
+}

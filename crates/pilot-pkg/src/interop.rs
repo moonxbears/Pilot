@@ -1,7 +1,13 @@
-//! Milestone 8 & Milestone 43.3: Foreign Ecosystem Interop Package Adapters & License Auditing.
+//! Milestone 8 & Milestone 57.3: Foreign Ecosystem Interop Package Adapters & License Auditing.
 
-use pilot_transpile::LicenseVerifier;
 use crate::manifest::PackageManifest;
+
+pub fn is_viable_spdx_license(spdx_id: &str) -> bool {
+    let trimmed = spdx_id.trim();
+    ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "CC0-1.0", "Unlicense", "0BSD"]
+        .iter()
+        .any(|&l| l.eq_ignore_ascii_case(trimmed))
+}
 
 /// Parsed package specification.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,7 +56,7 @@ pub fn audit_manifest_licenses(manifest: &PackageManifest) -> AuditReport {
     let mut non_compliant = Vec::new();
 
     // Check project itself
-    if LicenseVerifier::is_viable_license(&manifest.license) {
+    if is_viable_spdx_license(&manifest.license) {
         compliant.push((manifest.name.clone(), manifest.license.clone()));
     } else {
         non_compliant.push((manifest.name.clone(), manifest.license.clone()));

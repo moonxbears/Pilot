@@ -1,0 +1,15 @@
+// ============================================================================
+// FILE: selfhost/transpile/emit_js.pilot
+// Milestone 57.2: Modular ES2023 JavaScript Source Emitter (`pilot --emit js`)
+// Emits clean ES2023 modules with zero injected prototype hacks.
+// ============================================================================
+
+pub pure fn emit_js_function_source(
+    fn_name: str,
+    params_list: str,
+    body_expr: str
+) -> str {
+    return "export function " + fn_name + "(" + params_list + ") {\n"
+        + "  " + nameof(return) + " " + body_expr + ";\n"
+        + "}\n";
+}

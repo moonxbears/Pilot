@@ -1,0 +1,41 @@
+// ============================================================================
+// FILE: selfhost/transpile/emit_csharp.pilot
+// Milestone 57.2: Modular C# 12 Source Emitter (`pilot --emit csharp`)
+// Maps `(reg_class, bit_width)` physics into C# types (`long`, `ulong`,
+// `double`, `bool`, `string`) with zero hardcoded Pilot type names.
+// ============================================================================
+
+pub pure fn csharp_type_for_physics(reg_class: i64, bit_width: i64) -> str {
+    if reg_class == 0 || reg_class == 1 { return "void"; }
+    if reg_class == 2 {
+        if bit_width <= 32 { return "int"; }
+        return "long";
+    }
+    if reg_class == 3 {
+        if bit_width == 1 { return "bool"; }
+        return "ulong";
+    }
+    if reg_class == 4 {
+        return "double";
+    }
+    return "string";
+}
+
+pub pure fn emit_csharp_function_source(
+    class_name: str,
+    fn_name: str,
+    param_name: str,
+    param_reg: i64,
+    param_bits: i64,
+    ret_reg: i64,
+    ret_bits: i64,
+    body_expr: str
+) -> str {
+    let p_ty = csharp_type_for_physics(param_reg, param_bits);
+    let r_ty = csharp_type_for_physics(ret_reg, ret_bits);
+    return "using System;\n\npublic static class " + class_name + " {\n"
+        + "    public static " + r_ty + " " + fn_name + "(" + p_ty + " " + param_name + ") {\n"
+        + "        " + nameof(return) + " " + body_expr + ";\n"
+        + "    }\n"
+        + "}\n";
+}

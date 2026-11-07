@@ -1,0 +1,39 @@
+// ============================================================================
+// FILE: selfhost/transpile/emit_cpp.pilot
+// Milestone 57.2: Modular C++20 Source Emitter (`pilot --emit cpp`)
+// Maps `(reg_class, bit_width)` physics into C++20 types (`std::int64_t`,
+// `double`, `bool`, `std::string`) with zero hardcoded Pilot type names.
+// ============================================================================
+
+pub pure fn cpp_type_for_physics(reg_class: i64, bit_width: i64) -> str {
+    if reg_class == 0 || reg_class == 1 { return "void"; }
+    if reg_class == 2 {
+        if bit_width <= 32 { return "std::int32_t"; }
+        return "std::int64_t";
+    }
+    if reg_class == 3 {
+        if bit_width == 1 { return "bool"; }
+        return "std::uint64_t";
+    }
+    if reg_class == 4 {
+        return "double";
+    }
+    return "std::string";
+}
+
+pub pure fn emit_cpp_function_source(
+    fn_name: str,
+    param_name: str,
+    param_reg: i64,
+    param_bits: i64,
+    ret_reg: i64,
+    ret_bits: i64,
+    body_expr: str
+) -> str {
+    let p_ty = cpp_type_for_physics(param_reg, param_bits);
+    let r_ty = cpp_type_for_physics(ret_reg, ret_bits);
+    return "#include <cstdint>\n#include <string>\n\n"
+        + r_ty + " " + fn_name + "(" + p_ty + " " + param_name + ") {\n"
+        + "    " + nameof(return) + " " + body_expr + ";\n"
+        + "}\n";
+}

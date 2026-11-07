@@ -1,0 +1,40 @@
+// ============================================================================
+// FILE: selfhost/transpile/emit_c.pilot
+// Milestone 57.2: Modular C11 Source Emitter (`pilot --emit c`)
+// Maps `(reg_class, bit_width)` physics into C11 types (`int64_t`, `double`,
+// `bool`, `const char*`) with zero hardcoded Pilot type names.
+// ============================================================================
+
+pub pure fn c_target_type_for_physics(reg_class: i64, bit_width: i64) -> str {
+    if reg_class == 0 || reg_class == 1 { return "void"; }
+    if reg_class == 2 {
+        if bit_width <= 32 { return "int32_t"; }
+        return "int64_t";
+    }
+    if reg_class == 3 {
+        if bit_width == 1 { return "bool"; }
+        return "uint64_t";
+    }
+    if reg_class == 4 {
+        if bit_width <= 32 { return "float"; }
+        return "double";
+    }
+    return "const char*";
+}
+
+pub pure fn emit_c_function_source(
+    fn_name: str,
+    param_name: str,
+    param_reg: i64,
+    param_bits: i64,
+    ret_reg: i64,
+    ret_bits: i64,
+    body_expr: str
+) -> str {
+    let p_ty = c_target_type_for_physics(param_reg, param_bits);
+    let r_ty = c_target_type_for_physics(ret_reg, ret_bits);
+    return "#include <stdint.h>\n#include <stdbool.h>\n\n"
+        + r_ty + " " + fn_name + "(" + p_ty + " " + param_name + ") {\n"
+        + "    " + nameof(return) + " " + body_expr + ";\n"
+        + "}\n";
+}

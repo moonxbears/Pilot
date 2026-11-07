@@ -1,0 +1,53 @@
+// ============================================================================
+// FILE: selfhost/transpile/emit_rust.pilot
+// Milestone 57.2: Modular Rust Source Emitter (`pilot --emit rust`)
+// Maps `(reg_class, bit_width)` physics into Rust types (`i8..i64`, `u8..u64`,
+// `f32`, `f64`, `bool`, `&str`) with zero hardcoded Pilot type names.
+// ============================================================================
+
+pub struct EmittedTargetSource {
+    pub target_lang: str;
+    pub source_code: str;
+}
+
+pub pure fn rust_type_for_physics(reg_class: i64, bit_width: i64) -> str {
+    if reg_class == 0 || reg_class == 1 { return "()"; }
+    if reg_class == 2 {
+        if bit_width <= 8 { return "i8"; }
+        if bit_width <= 16 { return "i16"; }
+        if bit_width <= 32 { return "i32"; }
+        return "i64";
+    }
+    if reg_class == 3 {
+        if bit_width == 1 { return "bool"; }
+        if bit_width <= 8 { return "u8"; }
+        if bit_width <= 16 { return "u16"; }
+        if bit_width <= 32 { return "u32"; }
+        return "u64";
+    }
+    if reg_class == 4 {
+        if bit_width <= 32 { return "f32"; }
+        return "f64";
+    }
+    return "&'static str";
+}
+
+pub fn emit_rust_function(
+    fn_name: str,
+    param_name: str,
+    param_reg: i64,
+    param_bits: i64,
+    ret_reg: i64,
+    ret_bits: i64,
+    body_expr: str
+) -> EmittedTargetSource {
+    let p_ty = rust_type_for_physics(param_reg, param_bits);
+    let r_ty = rust_type_for_physics(ret_reg, ret_bits);
+    let code = "pub " + nameof(fn) + " " + fn_name + "(" + param_name + ": " + p_ty + ") -> " + r_ty + " {\n"
+        + "    " + body_expr + "\n"
+        + "}\n";
+    return EmittedTargetSource {
+        target_lang: "rust",
+        source_code: code,
+    };
+}

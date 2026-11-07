@@ -1,0 +1,16 @@
+// ============================================================================
+// FILE: stdlib/pkg/licensing.pilot
+// Milestone 57.3: Self-Hosted SPDX Permissive License Compatibility Verifier
+// Replaces `crates/pilot-transpile/src/licensing.rs` in pure Pilot.
+// ============================================================================
+
+pub pure fn is_viable_spdx_license(spdx_id: str) -> bool {
+    return spdx_id == "MIT"
+        || spdx_id == "Apache-2.0"
+        || spdx_id == "BSD-2-Clause"
+        || spdx_id == "BSD-3-Clause"
+        || spdx_id == "ISC"
+        || spdx_id == "CC0-1.0"
+        || spdx_id == "Unlicense"
+        || spdx_id == "0BSD";
+}

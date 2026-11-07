@@ -12,4 +12,3 @@ path = "src/lib.rs"
 
 [dependencies]
 pilot-rt = { path = "../pilot-rt" }
-pilot-transpile = { path = "../pilot-transpile" }

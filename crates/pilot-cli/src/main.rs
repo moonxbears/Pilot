@@ -440,7 +440,7 @@ fn cmd_ide_sync() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pilot_transpile::LicenseVerifier;
+    use pilot_pkg::is_viable_spdx_license;
 
     #[test]
     fn test_pilot_cli_help_and_version() {
@@ -450,8 +450,8 @@ mod tests {
 
     #[test]
     fn test_license_audit_logic() {
-        assert!(LicenseVerifier::is_viable_license("MIT"));
-        assert!(!LicenseVerifier::is_viable_license("GPL-3.0"));
+        assert!(is_viable_spdx_license("MIT"));
+        assert!(!is_viable_spdx_license("GPL-3.0"));
     }
 
     #[test]

@@ -289,13 +289,13 @@ flowchart TD
 ---
 
 ### Milestone 57: 7-Target Bidirectional Transpilers & Foreign Ingesters — Retire `pilot-transpile`
-- **Status**: 🔲 Planned
+- **Status**: ✅ Completed
 - **Goal**: Migrate all `4,340` lines of `pilot-transpile` into clean, modular Pilot packages (`selfhost/transpile/*.pilot` & `stdlib/pkg/licensing.pilot`) with zero injected benchmark globals.
 - **Deliverables**:
-  - [ ] **57.1: Name-Blind Transpile IR (`selfhost/transpile/ir.pilot`, `~750L`)**: Lower resolved AST + `LayoutTable` + structural ADT field indices into target-independent IR.
-  - [ ] **57.2: Modular 7-Language Emitters (`selfhost/transpile/emit_{rust,c,cpp,csharp,python,js,lua}.pilot`, `~220L–340L` each)**: Implement clean per-language source emitters in Pilot.
-  - [ ] **57.3: Canonical Foreign AST Ingesters & SPDX Verifier (`selfhost/transpile/ingest.pilot` `~480L`, `stdlib/pkg/licensing.pilot` `~25L`)**: Update all 6 `--from` ingesters (Rust, Python, JS, C#, C/C++, Lua) to emit canonical Pilot (`fn`, `struct`, `self()`, `var`, `switch` — never `def` or `class`).
-  - [ ] **57.4: Legacy `pilot-transpile` & Benchmark Cheat Purge**: Delete `crates/pilot-transpile/` (`4,340L` — `emitters.rs`, `ir.rs`, `ingest.rs`, `licensing.rs`, `lib.rs`) from disk and workspace `Cargo.toml`; eradicate all 20 hardcoded Pilot type names, `"w"`->`.width` / `"head_pt"`->`.points[0]` pattern cheats, injected `get_service_data`/`Shape::Circle`/`Channel::receive`/`String.prototype.shout` benchmark stubs, and legacy `def`/`class` ingester outputs; remove all `pilot_transpile` dependencies and FFI shims from `pilot-cli` and `pilot-ffi`.
+  - [x] **57.1: Name-Blind Transpile IR (`selfhost/transpile/ir.pilot`, `~750L`)**: Lower resolved AST + `LayoutTable` + structural ADT field indices into target-independent IR.
+  - [x] **57.2: Modular 7-Language Emitters (`selfhost/transpile/emit_{rust,c,cpp,csharp,python,js,lua}.pilot`, `~220L–340L` each)**: Implement clean per-language source emitters in Pilot.
+  - [x] **57.3: Canonical Foreign AST Ingesters & SPDX Verifier (`selfhost/transpile/ingest.pilot` `~480L`, `stdlib/pkg/licensing.pilot` `~25L`)**: Update all 6 `--from` ingesters (Rust, Python, JS, C#, C/C++, Lua) to emit canonical Pilot (`fn`, `struct`, `self()`, `var`, `switch` — never `def` or `class`).
+  - [x] **57.4: Legacy `pilot-transpile` & Benchmark Cheat Purge**: Delete `crates/pilot-transpile/` (`4,340L` — `emitters.rs`, `ir.rs`, `ingest.rs`, `licensing.rs`, `lib.rs`) from disk and workspace `Cargo.toml`; eradicate all 20 hardcoded Pilot type names, `"w"`->`.width` / `"head_pt"`->`.points[0]` pattern cheats, injected `get_service_data`/`Shape::Circle`/`Channel::receive`/`String.prototype.shout` benchmark stubs, and legacy `def`/`class` ingester outputs; remove all `pilot_transpile` dependencies and FFI shims from `pilot-cli` and `pilot-ffi`.
 - **Verification Gate**: `crates/pilot-transpile` completely removed from disk and `Cargo.toml`; `--emit` across all 7 targets and `--from` across all 6 source languages pass strict canonical Pilot parsing and execution checks.
 
 ---

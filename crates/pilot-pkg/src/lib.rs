@@ -14,7 +14,7 @@ pub mod interop;
 pub use manifest::{LockedPackage, PackageLock, PackageManifest};
 pub use archive::{pack_directory, unpack_archive};
 pub use venv::{get_active_venv, init_venv, PilotVenvConfig, PILOT_VENV_CFG, PILOT_VENV_ENV_VAR};
-pub use interop::{audit_manifest_licenses, parse_package_spec, AuditReport, ParsedPackageSpec};
+pub use interop::{audit_manifest_licenses, is_viable_spdx_license, parse_package_spec, AuditReport, ParsedPackageSpec};
 
 #[cfg(test)]
 mod tests {
