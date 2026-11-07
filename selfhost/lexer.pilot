@@ -1,19 +1,14 @@
 // ==============================================================================
-// selfhost/lexer.pilot: Tokenizer & Scanner Written in Pilot
+// FILE: selfhost/lexer.pilot
+// Milestone 61.1: Standalone Self-Hosted TokenTape Scanner & 14-Token Seed Lexer
 // ==============================================================================
-
 pub pkg Pilot.SelfHost.Lexer;
 
 use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
 use Pilot.Core.Memory.*;
-use Pilot.Core.Option.*;
-use Pilot.Core.Result.*;
-use Pilot.Core.Builtins.*;
 
-extern "c" {
-    fn strcmp(s1: str, s2: str) -> i32;
-}
+pub pure fn nameof(sym: str) -> str => sym;
 
 pub const TOK_EOF: i64 = 0;
 pub const TOK_INT: i64 = 1;
@@ -21,6 +16,8 @@ pub const TOK_FLOAT: i64 = 2;
 pub const TOK_STR: i64 = 3;
 pub const TOK_IDENT: i64 = 4;
 pub const TOK_KEYWORD: i64 = 5;
+pub const TOK_PREFIX_DOT: i64 = 6;
+pub const TOK_INFIX_DOT: i64 = 7;
 
 pub const TOK_PLUS: i64 = 10;
 pub const TOK_MINUS: i64 = 11;
@@ -46,44 +43,91 @@ pub const TOK_COMMA: i64 = 36;
 pub const TOK_COLON: i64 = 37;
 pub const TOK_SEMICOLON: i64 = 38;
 
-pub fn is_digit(c: i64) -> bool {
+pub pure fn is_digit(c: i64) -> bool {
     return c >= 48 && c <= 57;
 }
 
-pub fn is_alpha(c: i64) -> bool {
+pub pure fn is_alpha(c: i64) -> bool {
     return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95;
 }
 
-pub fn is_alphanumeric(c: i64) -> bool {
+pub pure fn is_alphanumeric(c: i64) -> bool {
     return is_alpha(c) || is_digit(c);
 }
 
-// Recognizes strictly the 14 canonical Pilot seed tokens
-pub fn is_keyword(s: str) -> bool {
-    if strcmp(s, "__engine") == 0 { return true; }
-    if strcmp(s, "struct") == 0 { return true; }
-    if strcmp(s, "interface") == 0 { return true; }
-    if strcmp(s, "fn") == 0 { return true; }
-    if strcmp(s, "let") == 0 { return true; }
-    if strcmp(s, "ref") == 0 { return true; }
-    if strcmp(s, "if") == 0 { return true; }
-    if strcmp(s, "loop") == 0 { return true; }
-    if strcmp(s, "return") == 0 { return true; }
-    if strcmp(s, "yield") == 0 { return true; }
-    if strcmp(s, "defer") == 0 { return true; }
-    if strcmp(s, "comptime") == 0 { return true; }
-    if strcmp(s, "quote") == 0 { return true; }
-    if strcmp(s, "asm") == 0 { return true; }
+// Recognizes strictly the 14 canonical Pilot seed tokens using nameof()
+pub pure fn is_keyword(s: str) -> bool {
+    if s == nameof(__engine) { return true; }
+    if s == nameof(struct) { return true; }
+    if s == nameof(interface) { return true; }
+    if s == nameof(fn) { return true; }
+    if s == nameof(let) { return true; }
+    if s == nameof(ref) { return true; }
+    if s == nameof(if) { return true; }
+    if s == nameof(loop) { return true; }
+    if s == nameof(return) { return true; }
+    if s == nameof(yield) { return true; }
+    if s == nameof(defer) { return true; }
+    if s == nameof(comptime) { return true; }
+    if s == nameof(quote) { return true; }
+    if s == nameof(asm) { return true; }
     return false;
 }
 
-pub fn get_token_kind_name(kind: i64) -> str {
+// Two-Way Dot (AGENTS.md §5.1): InfixDot (7) if preceded immediately by ident/literal/) / ] / }, else PrefixDot (6)
+pub pure fn classify_two_way_dot(prev_byte: i64) -> i64 {
+    if is_alphanumeric(prev_byte) || prev_byte == 41 || prev_byte == 93 || prev_byte == 125 {
+        return 7;
+    }
+    return 6;
+}
+
+// 6 Homoiconic Call-Quoting Modes (AGENTS.md §5.4): !, !!, !&, !^, !@, !?
+pub pure fn classify_call_quote_mode(sigil_second_byte: i64) -> i64 {
+    if sigil_second_byte == 40 { return 1; }  // !(  -> ShallowQuote
+    if sigil_second_byte == 33 { return 2; }  // !!( -> DeepSplice
+    if sigil_second_byte == 38 { return 3; }  // !&( -> AbiFrame
+    if sigil_second_byte == 94 { return 4; }  // !^( -> ReactiveSignal
+    if sigil_second_byte == 64 { return 5; }  // !@( -> SymbolicAdjoint
+    if sigil_second_byte == 63 { return 6; }  // !?( -> EffectDryRun
+    return 0;
+}
+
+pub fn scan_token_count(src: str) -> i64 {
+    let n = __engine("str_len", src);
+    var count = 0;
+    var i = 0;
+    while i < n {
+        let b = __engine("str_byte_at", src, i);
+        if b == 32 || b == 9 || b == 10 || b == 13 {
+            i = i + 1;
+        } else if is_alpha(b) {
+            count = count + 1;
+            while i < n && is_alphanumeric(__engine("str_byte_at", src, i)) {
+                i = i + 1;
+            }
+        } else if is_digit(b) {
+            count = count + 1;
+            while i < n && is_digit(__engine("str_byte_at", src, i)) {
+                i = i + 1;
+            }
+        } else {
+            count = count + 1;
+            i = i + 1;
+        }
+    }
+    return count;
+}
+
+pub pure fn get_token_kind_name(kind: i64) -> str {
     if kind == 0 { return "EOF"; }
     if kind == 1 { return "INT"; }
     if kind == 2 { return "FLOAT"; }
     if kind == 3 { return "STR"; }
     if kind == 4 { return "IDENT"; }
     if kind == 5 { return "KEYWORD"; }
+    if kind == 6 { return "PREFIX_DOT"; }
+    if kind == 7 { return "INFIX_DOT"; }
     if kind == 10 { return "PLUS"; }
     if kind == 11 { return "MINUS"; }
     if kind == 12 { return "STAR"; }

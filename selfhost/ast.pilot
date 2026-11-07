@@ -1,15 +1,14 @@
 // ==============================================================================
-// selfhost/ast.pilot: AST Node Definitions & Arena Layout for Self-Hosted Pilot
+// FILE: selfhost/ast.pilot
+// Milestone 61.1: 16-Byte Flat AST Node Layout & Arena Descriptors in Pilot
 // ==============================================================================
-
 pub pkg Pilot.SelfHost.Ast;
 
 use Pilot.Core.Genesis.*;
 use Pilot.Core.Interfaces.*;
 use Pilot.Core.Memory.*;
-use Pilot.Core.Option.*;
-use Pilot.Core.Result.*;
-use Pilot.Core.Builtins.*;
+
+pub pure fn nameof(sym: str) -> str => sym;
 
 // Node Kind Constants
 pub const NODE_UNKNOWN: i64 = 0;
@@ -30,6 +29,9 @@ pub const NODE_EXPR_STMT: i64 = 108;
 pub const NODE_PROGRAM: i64 = 109;
 pub const NODE_ATTR: i64 = 110;
 pub const NODE_ATTRIBUTED_DECL: i64 = 111;
+pub const NODE_STRUCT_DECL: i64 = 112;
+pub const NODE_INTERFACE_DECL: i64 = 113;
+pub const NODE_QUOTE_EXPR: i64 = 114;
 
 pub const NODE_BINARY_EXPR: i64 = 201;
 pub const NODE_UNARY_EXPR: i64 = 202;
@@ -52,7 +54,16 @@ pub const OP_GE: i64 = 13;
 pub const OP_AND: i64 = 14;
 pub const OP_OR: i64 = 15;
 
-pub fn get_node_kind_name(kind: i64) -> str {
+// Packs (kind: u16, flags: u16, lhs: u32) into the low 64-bit word of a 16-byte AstNode
+pub pure fn pack_ast_node_low64(kind: i64, flags: i64, lhs: i64) -> i64 {
+    return (kind & 65535) + ((flags & 65535) * 65536) + (lhs * 4294967296);
+}
+
+pub pure fn sizeof_selfhost_ast_node() -> i64 {
+    return 16;
+}
+
+pub pure fn get_node_kind_name(kind: i64) -> str {
     if kind == 1 { return "IntLit"; }
     if kind == 2 { return "FloatLit"; }
     if kind == 3 { return "StrLit"; }
@@ -65,6 +76,9 @@ pub fn get_node_kind_name(kind: i64) -> str {
     if kind == 107 { return "FnDecl"; }
     if kind == 110 { return "Attr"; }
     if kind == 111 { return "AttributedDecl"; }
+    if kind == 112 { return "StructDecl"; }
+    if kind == 113 { return "InterfaceDecl"; }
+    if kind == 114 { return "QuoteExpr"; }
     if kind == 201 { return "BinaryExpr"; }
     if kind == 203 { return "CallExpr"; }
     return "Unknown";

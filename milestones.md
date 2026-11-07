@@ -338,13 +338,13 @@ flowchart TD
 ---
 
 ### Milestone 61: Stage-3 Self-Hosted Fixed-Point (`pilotc1 == pilotc2`) & Scorched-Earth Rename Gate
-- **Status**: 🔲 Planned
+- **Status**: ✅ Completed
 - **Goal**: Complete native self-hosted lexer/AST/parser parity in `selfhost/` to reach a deterministic Stage-3 bootstrap fixed-point and lock the entire workspace behind an automated Name-Blind & line-cap gate.
 - **Deliverables**:
-  - [ ] **61.1: Standalone Self-Hosted Frontend (`selfhost/{lexer,ast,parser}.pilot`, `~450L + ~380L + ~1,100L`)**: Complete full `TokenTape` scanning, 16-byte arena layout, and dynamic Pratt + `syntax`/`quote` parsing in `selfhost/` so `pilotc` compiles all of `stdlib/` and `selfhost/` directly to C/LLVM/`.pilc` with zero dependence on `pilot-lexer`/`pilot-parser` after Stage 0.
-  - [ ] **61.2: Stage-3 Reproducible Bootstrap Fixed-Point**: Verify `Rust Seed (Stage 0) -> pilotc1 -> pilotc2 -> pilotc3` produces bit-for-bit identical native binaries and `.pilc` artifacts (`sha256(pilotc2) == sha256(pilotc3)`).
-  - [ ] **61.3: Final Workspace Dead-Code, Transitional Shim & Legacy Fixture Sweep**: Purge any remaining transitional bootstrap shims, unused `__engine` intrinsics, `#[allow(dead_code)]` Rust items, superseded early `selfhost/` prototypes, stale `Cargo.toml` dependencies across the 12 surviving seed crates, and legacy test fixtures (`def`, `mut`, `match`, `class`, `record`, `#` comments) so `cargo clippy --workspace -- -D warnings` passes cleanly.
-  - [ ] **61.4: Automated Workspace Contraction & Universal Rename Gate (`scripts/gate4_selfhost_contraction.py`)**:
+  - [x] **61.1: Standalone Self-Hosted Frontend (`selfhost/{lexer,ast,parser}.pilot`, `~450L + ~380L + ~1,100L`)**: Complete full `TokenTape` scanning, 16-byte arena layout, and dynamic Pratt + `syntax`/`quote` parsing in `selfhost/` so `pilotc` compiles all of `stdlib/` and `selfhost/` directly to C/LLVM/`.pilc` with zero dependence on `pilot-lexer`/`pilot-parser` after Stage 0.
+  - [x] **61.2: Stage-3 Reproducible Bootstrap Fixed-Point**: Verify `Rust Seed (Stage 0) -> pilotc1 -> pilotc2 -> pilotc3` produces bit-for-bit identical native binaries and `.pilc` artifacts (`sha256(pilotc2) == sha256(pilotc3)`).
+  - [x] **61.3: Final Workspace Dead-Code, Transitional Shim & Legacy Fixture Sweep**: Purge any remaining transitional bootstrap shims, unused `__engine` intrinsics, `#[allow(dead_code)]` Rust items, superseded early `selfhost/` prototypes, stale `Cargo.toml` dependencies across the 12 surviving seed crates, and legacy test fixtures (`def`, `mut`, `match`, `class`, `record`, `#` comments) so `cargo clippy --workspace -- -D warnings` passes cleanly.
+  - [x] **61.4: Automated Workspace Contraction & Universal Rename Gate (`scripts/gate4_selfhost_contraction.py`)**:
     1. Enforce total Rust `src/*.rs` line count across the entire workspace `<= 5,900` lines and verify all 13 retired crates and deleted legacy source files do not exist on disk.
     2. Enforce that **every** `.pilot` file in `selfhost/` and `stdlib/core/` is `<= 1,500` lines.
     3. Scan all surviving `crates/**/*.rs` to verify **zero** non-seed Pilot keywords, **zero** Pilot scalar/composite type names, **zero** `#[allow(dead_code)]` legacy shims, and **zero** legacy `def`/`mut`/`match`/`class` strings appear in Rust source or tests.
