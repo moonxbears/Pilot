@@ -78,7 +78,7 @@ impl<'a> ComptimeEvaluator<'a> {
 }
 
 pub fn bootstrap_core_file(source: &str, parser_tables: &mut ParserTables, comptime_vm: &mut ComptimeEngine) -> Result<AstArena, BootstrapDiagnostic> {
-    let arena = pilot_parser::parse_with_tables(source, parser_tables);
+    let arena = pilot_parser::parse_and_ingest(source, parser_tables);
     for (idx, node) in arena.nodes.iter().enumerate() {
         if node.node_kind() == NodeKind::ComptimeExpr { let _ = comptime_vm.eval_ast_node(&arena, NodeId(idx as u32)); }
     }
@@ -109,7 +109,10 @@ impl BootstrapSnapshot {
                 let src = std::fs::read_to_string(ws_root.join(&rel_path)).or_else(|_| std::fs::read_to_string(&rel_path))
                     .unwrap_or_else(|e| panic!("Bootstrap stage {} ('{}') unreadable: {}", idx, rel_path, e));
                 let arena = bootstrap_core_file(&src, &mut tables, &mut vm).unwrap_or_else(|e| panic!("Bootstrap stage '{}' failed: {:?}", rel_path, e));
-                let pkg = arena.pkg_decls.iter().next().map(|&n| arena.interner.resolve(SymbolId(arena.node(NodeId(n)).lhs)).to_string()).unwrap_or(rel_path);
+                let pkg = arena.decl_flags.iter().enumerate()
+                    .find(|(_, &f)| (f & pilot_ast::DECL_FLAG_PKG) != 0)
+                    .map(|(n, _)| arena.interner.resolve(SymbolId(arena.node(NodeId(n as u32)).lhs)).to_string())
+                    .unwrap_or(rel_path);
                 arenas.push((pkg, arena));
             }
             BootstrapSnapshot { tables, vm, arenas }

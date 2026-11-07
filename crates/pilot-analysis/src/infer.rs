@@ -84,7 +84,7 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
                 let mut f_ids = Vec::new();
                 for &c_id in arena.children_slice(b_node.lhs, b_node.rhs) {
                     let ck = arena.node(NodeId(c_id)).node_kind();
-                    if ck == NodeKind::ParamDecl || (matches!(ck, NodeKind::LetStmt | NodeKind::VarStmt) && arena.type_annotations.contains_key(&c_id)) {
+                    if ck == NodeKind::ParamDecl || (matches!(ck, NodeKind::LetStmt | NodeKind::VarStmt) && arena.type_annot(NodeId(c_id)).is_some()) {
                         struct_field_nodes.insert(c_id); f_ids.push(c_id);
                     } else {
                         if ck == NodeKind::DestructorDecl { struct_dtor_nodes.insert(idx as u32); }
@@ -97,19 +97,23 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
     }
 
     let extract_sym = |id: NodeId| -> u32 {
-        if id.is_none() || (id.0 as usize) >= arena.nodes.len() { 0 }
-        else { arena.type_base_symbols.get(&id.0).map_or_else(|| arena.node(id).lhs, |s| s.0) }
+        if id.is_none() || (id.0 as usize) >= arena.nodes.len() { 0 } else { arena.node(id).lhs }
     };
+    let (mut attrs_map, mut bases_map): (HashMap<u32, Vec<usize>>, HashMap<u32, Vec<NodeId>>) = (HashMap::new(), HashMap::new());
+    for (ai, attr) in arena.attrs.iter().enumerate() { attrs_map.entry(attr.target.0).or_default().push(ai); }
+    for &(owner, base_ty) in &arena.base_types { bases_map.entry(owner.0).or_default().push(base_ty); }
 
     for (idx, node) in arena.nodes.iter().enumerate() {
         let (idx_u32, span, kind) = (idx as u32, arena.span(NodeId(idx as u32)), node.node_kind());
         let (first_attr_arg, first_attr) = (attr_args.len() as u32, raw_attrs.len() as u32);
         let (mut attr_arg_count, mut attr_count) = (0u16, 0u16);
-        if let Some(attrs) = arena.node_attributes.get(&idx_u32) {
-            for attr in attrs {
+        if let Some(a_indices) = attrs_map.get(&idx_u32) {
+            for &ai in a_indices {
+                let attr = arena.attrs[ai];
                 if attr.name.0 != 0 { symbol_strings.insert(attr.name.0, arena.interner.resolve(attr.name).to_string()); }
                 let (this_first, mut this_cnt) = (attr_args.len() as u32, 0u16);
-                for &a in &attr.args {
+                for &a_raw in arena.children_slice(attr.args_start, attr.args_len as u32) {
+                    let a = NodeId(a_raw);
                     let an = arena.node(a);
                     let (val, ak) = match an.node_kind() {
                         NodeKind::IntLit => (arena.i64_pool.get(an.lhs as usize).copied().unwrap_or(0), 0u8),
@@ -132,23 +136,19 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
         }
 
         let (first_base, mut base_count) = (base_syms.len() as u32, 0u16);
-        if let Some(bases) = arena.struct_base_types.get(&idx_u32) {
+        if let Some(bases) = bases_map.get(&idx_u32) {
             for &b in bases {
                 let bsym = extract_sym(b);
                 if bsym != 0 { symbol_strings.insert(bsym, arena.interner.resolve(SymbolId(bsym)).to_string()); base_syms.push(bsym); base_count += 1; }
             }
         }
 
-        let mut decl_flags = arena.node_visibility.get(&idx_u32).map_or(15u16, |v| *v as u16);
-        for (cond, bit) in [
-            (arena.partial_types.contains(&idx_u32), 16), (arena.static_methods.contains(&idx_u32), 32),
-            (arena.pure_methods.contains(&idx_u32), 64), (arena.mut_methods.contains(&idx_u32) || kind == NodeKind::VarStmt, 128),
-            (arena.comptime_fns.contains(&idx_u32), 256), (arena.pkg_decls.contains(&idx_u32), 512),
-            (struct_dtor_nodes.contains(&idx_u32), 1024),
-        ] { if cond { decl_flags |= bit; } }
+        let mut decl_flags = arena.decl_flags.get(idx).copied().unwrap_or(15u16);
+        if kind == NodeKind::VarStmt { decl_flags |= 128; }
+        if struct_dtor_nodes.contains(&idx_u32) { decl_flags |= 1024; }
 
         let (kind_tag, sym_id, raw_bits, lit_kind) = if struct_field_nodes.contains(&idx_u32) {
-            let ty_id = if kind == NodeKind::ParamDecl { NodeId(node.rhs) } else { arena.type_annotations.get(&idx_u32).copied().unwrap_or(NodeId::NONE) };
+            let ty_id = if kind == NodeKind::ParamDecl { NodeId(node.rhs) } else { arena.type_annot(NodeId(idx_u32)).unwrap_or(NodeId::NONE) };
             let ty_sym = extract_sym(ty_id);
             if ty_sym != 0 { symbol_strings.insert(ty_sym, arena.interner.resolve(SymbolId(ty_sym)).to_string()); }
             (21u8, node.lhs, ty_sym as u64, 0u8)
@@ -163,7 +163,7 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
                     (21, node.lhs, ty_sym as u64, 0)
                 }
                 NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
-                    let ty_sym = arena.type_annotations.get(&idx_u32).copied().map(extract_sym).unwrap_or(0);
+                    let ty_sym = arena.type_annot(NodeId(idx_u32)).map(extract_sym).unwrap_or(0);
                     if ty_sym != 0 { symbol_strings.insert(ty_sym, arena.interner.resolve(SymbolId(ty_sym)).to_string()); }
                     (4, node.lhs, ty_sym as u64, 0)
                 }
@@ -184,8 +184,8 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
                 NodeKind::BlockExpr => (18, 0, 0, 0),
                 NodeKind::BinaryExpr => (19, 0, node.flags as u64, 0),
                 NodeKind::AssignStmt => (20, 0, 0, 0),
-                NodeKind::ImportDecl | NodeKind::TypeAdtDecl | NodeKind::AdtVariant | NodeKind::RecordDecl
-                | NodeKind::ClassDecl | NodeKind::ExtendDecl | NodeKind::PatBind | NodeKind::PatVariant | NodeKind::UnitLit => (255, node.lhs, node.flags as u64, 0),
+                NodeKind::ImportDecl | NodeKind::TypeAdtDecl | NodeKind::AdtVariant
+                | NodeKind::ExtendDecl | NodeKind::PatBind | NodeKind::PatVariant | NodeKind::UnitLit => (255, node.lhs, node.flags as u64, 0),
                 _ => (255, 0, node.flags as u64, 0),
             }
         };
@@ -196,16 +196,18 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
         if !struct_field_nodes.contains(&idx_u32) {
             match kind {
                 NodeKind::StructDecl => if let Some(f_ids) = struct_fields_map.get(&idx_u32) { for &f in f_ids { child_links.push(f); child_count += 1; } },
-                NodeKind::InterfaceDecl | NodeKind::RecordDecl | NodeKind::ClassDecl | NodeKind::ExtendDecl => {
+                NodeKind::InterfaceDecl | NodeKind::ExtendDecl => {
                     if node.rhs != 0 && node.rhs != u32::MAX && (node.rhs as usize) < arena.nodes.len() {
                         let bn = *arena.node(NodeId(node.rhs));
                         if bn.node_kind() == NodeKind::BlockExpr { for &c in arena.children_slice(bn.lhs, bn.rhs) { push_ch(c); } } else { push_ch(node.rhs); }
                     }
                 }
-                NodeKind::FnDecl | NodeKind::AdtVariant | NodeKind::PatVariant => for &c in arena.children_slice(node.rhs, node.flags as u32) { push_ch(c); },
+                NodeKind::FnDecl | NodeKind::AdtVariant | NodeKind::PatVariant | NodeKind::TypeNamed => {
+                    for &c in arena.children_slice(node.rhs, node.flags as u32) { push_ch(c); }
+                }
                 NodeKind::TypeAdtDecl => if node.flags > 0 { for &c in arena.children_slice(node.rhs, node.flags as u32) { push_ch(c); } } else { push_ch(node.rhs); },
                 NodeKind::LambdaExpr => { for &c in arena.children_slice(node.lhs, node.flags as u32) { push_ch(c); } push_ch(node.rhs); }
-                NodeKind::ForExpr => { if let Some(&it) = arena.for_iter_nodes.get(&idx_u32) { push_ch(it.0); } push_ch(node.rhs); }
+                NodeKind::ForExpr => { let it = arena.for_iter(NodeId(idx_u32)); if it.is_some() { push_ch(it.0); } push_ch(node.rhs); let th = arena.for_then(NodeId(idx_u32)); if th.is_some() { push_ch(th.0); } }
                 NodeKind::IfExpr => {
                     push_ch(node.lhs);
                     if node.flags >= 2 { for &c in arena.children_slice(node.rhs, node.flags as u32) { push_ch(c); } } else { push_ch(node.rhs); }
@@ -217,15 +219,13 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
                 }
                 NodeKind::BinaryExpr | NodeKind::AssignStmt | NodeKind::WhileStmt | NodeKind::IndexExpr | NodeKind::CascadeExpr
                 | NodeKind::PipeExpr | NodeKind::CatchRecoveryExpr | NodeKind::CoalesceExpr | NodeKind::RangeExpr
-                | NodeKind::GuardStmt | NodeKind::MatchArm | NodeKind::ScopeDecl | NodeKind::TypeIntersection
-                | NodeKind::TypeUnion | NodeKind::TypeFn | NodeKind::TypeFallible | NodeKind::TypeMap | NodeKind::PatOr | NodeKind::PatRange => {
+                | NodeKind::GuardStmt | NodeKind::MatchArm | NodeKind::ScopeDecl | NodeKind::PatOr | NodeKind::PatRange => {
                     push_ch(node.lhs); push_ch(node.rhs);
                 }
                 NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl | NodeKind::CatchClause => push_ch(node.rhs),
                 NodeKind::MemberExpr | NodeKind::UnaryExpr | NodeKind::ReturnStmt | NodeKind::YieldStmt | NodeKind::DeferStmt
                 | NodeKind::ExprStmt | NodeKind::TryPropagateExpr | NodeKind::DestructorDecl | NodeKind::DynamicMemberDecl
-                | NodeKind::ComptimeExpr | NodeKind::TypeOptional | NodeKind::TypeList | NodeKind::PatLiteral => push_ch(node.lhs),
-                NodeKind::TypeSlice => if node.flags == 9 { for &c in arena.children_slice(node.lhs, node.rhs) { push_ch(c); } } else { push_ch(node.lhs); push_ch(node.rhs); },
+                | NodeKind::ComptimeExpr | NodeKind::PatLiteral => push_ch(node.lhs),
                 _ => {}
             }
         }

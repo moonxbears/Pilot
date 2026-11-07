@@ -147,6 +147,9 @@ impl BytecodeCompiler {
                         NodeKind::IdentExpr | NodeKind::StrLit => {
                             arena.interner.resolve(SymbolId(k_node.lhs)).to_string()
                         }
+                        NodeKind::IntLit => {
+                            arena.i64_pool.get(k_node.lhs as usize).map(|v| v.to_string()).unwrap_or_default()
+                        }
                         _ => String::new(),
                     };
                     if !k_name.is_empty() {
@@ -178,7 +181,9 @@ impl BytecodeCompiler {
                 if let ConstMapVal::Map(map) = parent_val {
                     let member_sym = SymbolId(node.rhs);
                     let member_name = arena.interner.resolve(member_sym);
-                    map.get(member_name).cloned()
+                    map.get(member_name)
+                        .cloned()
+                        .or_else(|| (member_name == "len").then_some(ConstMapVal::Int(map.len() as i64)))
                 } else {
                     None
                 }
@@ -366,6 +371,44 @@ impl BytecodeCompiler {
                         }
                         _ => {}
                     }
+                }
+                0
+            }
+
+            NodeKind::IndexExpr => {
+                if let Some(ConstMapVal::Map(map)) = self.resolve_const_member(arena, NodeId(node.lhs)) {
+                    let r_idx = self.compile_node(arena, NodeId(node.rhs));
+                    let dst = self.alloc_reg();
+                    let empty_c = self.add_constant(PilotVal::from_str(""));
+                    self.emit(Opcode::LoadConst, dst, (empty_c >> 8) as u8, (empty_c & 0xFF) as u8);
+                    for (k_str, v_val) in &map {
+                        let k_const = if let Ok(ki) = k_str.parse::<i64>() {
+                            self.add_constant(PilotVal::from_int(ki))
+                        } else {
+                            self.add_constant(PilotVal::from_str(k_str))
+                        };
+                        let r_k = self.alloc_reg();
+                        self.emit(Opcode::LoadConst, r_k, (k_const >> 8) as u8, (k_const & 0xFF) as u8);
+                        let r_eq = self.alloc_reg();
+                        self.emit(Opcode::CmpEq, r_eq, r_idx, r_k);
+                        let jf = self.emit(Opcode::JumpIfFalse, 0, r_eq, 0);
+                        let v_c = match v_val {
+                            ConstMapVal::Str(s) => self.add_constant(PilotVal::from_str(s)),
+                            ConstMapVal::Int(i) => self.add_constant(PilotVal::from_int(*i)),
+                            ConstMapVal::Float(f) => self.add_constant(PilotVal::from_float(*f)),
+                            ConstMapVal::Bool(b) => self.add_constant(PilotVal::from_bool(*b)),
+                            ConstMapVal::Map(_) => empty_c,
+                        };
+                        self.emit(Opcode::LoadConst, dst, (v_c >> 8) as u8, (v_c & 0xFF) as u8);
+                        let after = self.instructions.len() as u16;
+                        self.instructions[jf] = Instruction::encode(
+                            Opcode::JumpIfFalse,
+                            (after >> 8) as u8,
+                            r_eq,
+                            (after & 0xFF) as u8,
+                        );
+                    }
+                    return dst;
                 }
                 0
             }

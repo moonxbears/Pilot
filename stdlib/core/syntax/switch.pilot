@@ -1,11 +1,17 @@
 // =========================================================================
 // FILE: stdlib/core/syntax/switch.pilot
-// PATTERN-MATCHING SWITCH SYNTAX MACRO (`switch(target, arms)`)
+// EXHAUSTIVE PATTERN-BRANCHING `switch` EXPRESSION & STATEMENT (`case`, `default`)
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Switch;
 
-use Pilot.Core.Genesis::*;
+use Pilot.Core.Genesis.*;
+
+comptime {
+    __engine("bind_receptor", "switch",  14, 0);
+    __engine("bind_receptor", "case",    15, 0);
+    __engine("bind_receptor", "default", 16, 0);
+}
 
 pub syntax {
     switch(target, arms) => quote {

@@ -4,7 +4,7 @@
 // classification, multi-attribute extraction, deduplication, and desugaring.
 // ==============================================================================
 
-use Pilot.SelfHost.ScopeHeader::*;
+use Pilot.Core.Syntax.ScopeHeader::*;
 
 // 1. Verify ScopeHeader instantiation with multiple modifiers & attributes
 let header = ScopeHeader.with_all("pub static pure", "[Inline, Pure]", "i64", "fn", true, false);
@@ -57,7 +57,7 @@ assert(is_clearance_modifier("lvl(admin, 3)"));
 assert(is_target_construct("fn"));
 assert(is_target_construct("struct"));
 assert(is_target_construct("interface"));
-assert(is_target_construct("class"));
+assert(is_target_construct("enum"));
 
 assert(is_header_keyword("pub"));
 assert(is_header_keyword("pure"));

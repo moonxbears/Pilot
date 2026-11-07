@@ -884,7 +884,7 @@ pub fn parse_lightweight_skeleton_to_arena(src: &str) -> AstArena {
             let expr = parse_simple_expr(&mut arena, rest.trim(), span);
             let id = arena.alloc_node(NodeKind::ReturnStmt, 0, span, expr.0, 0);
             top_children.push(id);
-        } else if let Some(rest) = clean.strip_prefix("def ") {
+        } else if let Some(rest) = clean.strip_prefix("fn ") {
             let name = rest
                 .split(|c: char| c == '(' || c.is_whitespace())
                 .next()
@@ -900,13 +900,13 @@ pub fn parse_lightweight_skeleton_to_arena(src: &str) -> AstArena {
             let sym = arena.interner.intern(name);
             let id = arena.alloc_node(NodeKind::TypeAdtDecl, 0, span, sym.0, 0);
             top_children.push(id);
-        } else if let Some(rest) = clean.strip_prefix("class ") {
+        } else if let Some(rest) = clean.strip_prefix("struct ") {
             let name = rest
                 .split(|c: char| c == '{' || c == '(' || c.is_whitespace())
                 .next()
-                .unwrap_or("Class");
+                .unwrap_or("Struct");
             let sym = arena.interner.intern(name);
-            let id = arena.alloc_node(NodeKind::ClassDecl, 0, span, sym.0, 0);
+            let id = arena.alloc_node(NodeKind::StructDecl, 0, span, sym.0, 0);
             top_children.push(id);
         } else if clean != "}" {
             let expr = parse_simple_expr(&mut arena, clean, span);
@@ -1061,7 +1061,7 @@ mod tests {
 
     #[test]
     fn ffi_c_abi_incremental_reparse_db_and_lsp() {
-        let src = b"def calc(x: i64) -> i64 {\n    return x + 10;\n}\n";
+        let src = b"fn calc(x: i64) -> i64 {\n    return x + 10;\n}\n";
         let src_str = core::str::from_utf8(src).unwrap();
         let target_offset = src_str.find("10").unwrap() as u32;
         unsafe {

@@ -213,7 +213,7 @@ def helper() -> i64 {
 
     #[test]
     fn test_incremental_reparse_escalates_on_cross_boundary_edit() {
-        let code = "def f1() { return 1; }\ndef f2() { return 2; }\n";
+        let code = "fn f1() { return 1; }\nfn f2() { return 2; }\n";
         let initial = parse_cst(code);
 
         // Edit that deletes the boundary between the two functions

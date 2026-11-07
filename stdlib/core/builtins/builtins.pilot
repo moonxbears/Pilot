@@ -12,96 +12,17 @@ use Pilot.Core.Memory.*;
 use Pilot.Core.Option.*;
 use Pilot.Core.Result.*;
 use Pilot.Core.Callables.*;
+use Pilot.Core.Syntax.TypeConstruct.*;
+use Pilot.Core.Syntax.For.*;
+use Pilot.Core.Syntax.While.*;
+use Pilot.Core.Syntax.Until.*;
+use Pilot.Core.Syntax.Guard.*;
+use Pilot.Core.Syntax.Switch.*;
+use Pilot.Core.Syntax.TryCatch.*;
+use Pilot.Core.Syntax.UnitDecl.*;
 
 // =========================================================================
-// 1. TYPE-POSITION SYMBOL CONSTRUCTS (`syntax type_construct`)
-// Maps concise suffix/infix symbols to canonical lowercase `[Lang]` structs
-// =========================================================================
-pub syntax type_construct {
-    (T[])          => quote { slice<$T> };
-    (T[N])         => quote { array<$T, $N> };
-    (T[N, M])      => quote { grid<$T, $N, $M> };
-    (T[..])        => quote { stride<$T> };
-    (T[:])         => quote { ring<$T> };
-    (T @ N)        => quote { simd<$T, $N> };
-    (T^)           => quote { signal<$T> };
-    (@T)           => quote { pin<$T> };
-    (T?)           => quote { option<$T> };
-    (T ! E)        => quote { result<$T, $E> };
-    ((A) => R)     => quote { fn<$A, $R> };
-    (T1 | T2)      => quote { union<$T1, $T2> };
-}
-
-// =========================================================================
-// 2. STATEMENT & EXPRESSION SYNTAX MACROS (`for`, `while`, `until`, `unit`)
-// =========================================================================
-pub syntax {
-    while(cond, body) => quote {
-        loop {
-            if !($cond) { break; }
-            $body
-        }
-    };
-
-    until(cond, body) => quote {
-        loop {
-            if $cond { break; }
-            $body
-        }
-    };
-
-    for(binding, iterable, body) => quote {
-        {
-            var __enum = ($iterable).get_enumerator();
-            loop {
-                if !__enum.move_next() { break; }
-                let $binding = __enum.current;
-                $body
-            }
-        }
-    };
-
-    guard(cond, else_body) => quote {
-        if !($cond) {
-            $else_body
-        }
-    };
-
-    switch(target, arms) => quote {
-        {
-            let __sw_target = $target;
-            $arms
-        }
-    };
-
-    case(pat, body) => quote {
-        if __sw_target == $pat {
-            $body
-        }
-    };
-
-    default(body) => quote {
-        $body
-    };
-
-    try(body, handler) => quote {
-        {
-            $body
-            $handler
-        }
-    };
-
-    catch(err_pat, body) => quote {
-        $body
-    };
-
-    unit(decl) => quote {
-        $decl
-    };
-}
-
-// =========================================================================
-// 3. ZERO-FIELD SSA OPERATOR FACETS FOR SIGNED, UNSIGNED & FLOAT REGISTERS
+// 1. ZERO-FIELD SSA OPERATOR FACETS FOR SIGNED, UNSIGNED & FLOAT REGISTERS
 // Spliced into every hardware register width (`i8`..`i128`, `u8`..`u128`, `f16`..`f128`)
 // =========================================================================
 let SignedIntSsaFacet<TSelf: IValue> = {

@@ -14,7 +14,7 @@ pub fn generate_benchmark_corpus(lines: usize) -> String {
         let rem = i % 5;
         match rem {
             0 => out.push_str(&format!(
-                "/// Computes the aggregate financial return over interval {}\ndef calculate_market_portfolio_{}(initial_balance: float, interest_rate: float, duration_years: int) -> float {{\n    let accrued_factor = 1.0 + interest_rate;\n    return initial_balance * accrued_factor;\n}}\n\n",
+                "/// Computes the aggregate financial return over interval {}\nfn calculate_market_portfolio_{}(initial_balance: float, interest_rate: float, duration_years: int) -> float {{\n    let accrued_factor = 1.0 + interest_rate;\n    return initial_balance * accrued_factor;\n}}\n\n",
                 i, i
             )),
             1 => out.push_str(&format!(
@@ -103,12 +103,12 @@ mod tests {
     fn test_incremental_lsp_keystroke_latency_sub_millisecond() {
         let mut db = Database::new();
         let file_id = FileId(1);
-        let code = r#"def calculate(x: i64) -> i64 {
+        let code = r#"fn calculate(x: i64) -> i64 {
     let a = x + 10;
     return a;
 }
 
-def helper() -> i64 {
+fn helper() -> i64 {
     return 42;
 }
 "#;

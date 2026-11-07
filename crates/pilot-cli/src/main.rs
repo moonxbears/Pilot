@@ -471,7 +471,7 @@ mod tests {
         let tmp_out_pilot = tmp_dir.join("test_from_output.pilot");
         cmd_from(&["rust".to_string(), "--strict-pilot".to_string(), tmp_rs.to_string_lossy().to_string(), "-o".to_string(), tmp_out_pilot.to_string_lossy().to_string()]);
         let pilot_content = fs::read_to_string(&tmp_out_pilot).unwrap();
-        assert!(pilot_content.contains("def mul"));
+        assert!(pilot_content.contains("fn mul"));
 
         let _ = fs::remove_file(&tmp_pilot);
         let _ = fs::remove_file(&tmp_out_py);

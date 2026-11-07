@@ -129,12 +129,14 @@ impl PerceusOptimizer {
                 }
             }
             pilot_ast::NodeKind::CallExpr => {
-                let callee = *arena.node(pilot_ast::NodeId(node.lhs));
-                if callee.node_kind() == pilot_ast::NodeKind::IdentExpr {
-                    let cname = arena.interner.resolve(pilot_intern::SymbolId(callee.lhs));
-                    if cname == "malloc" || cname == "spawn" {
-                        if in_noalloc {
-                            self.realtime.verify_noalloc_block(cname, EscapeState::Global, span);
+                if let Some(&callee_id) = arena.children_slice(node.lhs, node.rhs).first() {
+                    let callee = *arena.node(pilot_ast::NodeId(callee_id));
+                    if callee.node_kind() == pilot_ast::NodeKind::IdentExpr {
+                        let cname = arena.interner.resolve(pilot_intern::SymbolId(callee.lhs));
+                        if cname == "malloc" || cname == "spawn" {
+                            if in_noalloc {
+                                self.realtime.verify_noalloc_block(cname, EscapeState::Global, span);
+                            }
                         }
                     }
                 }

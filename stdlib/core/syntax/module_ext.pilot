@@ -1,0 +1,32 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/module_ext.pilot
+// PACKAGES (`pkg`), IMPORTS (`use` / `use ext`), EXTENSIONS (`ext`),
+// `*Bundle` COLLISION MODIFIERS (`coalesce`/`with`/`without`), `type` & `enum`
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.ModuleExt;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+
+comptime {
+    __engine("register_module_kw", "pkg", "declare_package_scope");
+    __engine("register_module_kw", "use", "import_symbol_path");
+    __engine("register_modifier",  "ext",       "extension_member");
+    __engine("register_modifier",  "extension", "extension_member");
+    __engine("register_modifier",  "const",     "binding_const");
+    __engine("bind_receptor", "type",     26, 0);
+    __engine("bind_receptor", "enum",     27, 0);
+    __engine("bind_receptor", "where",    28, 0);
+    __engine("bind_receptor", "as",       29, 0);
+    __engine("bind_receptor", "view",     29, 1);
+    __engine("bind_receptor", "coalesce", 30, 0);
+    __engine("bind_receptor", "with",     30, 1);
+    __engine("bind_receptor", "without",  30, 2);
+    __engine("bind_receptor", "on",       30, 3);
+}
+
+pub syntax {
+    coalesce(fields) => quote { $fields };
+    without(methods) => quote { $methods };
+}

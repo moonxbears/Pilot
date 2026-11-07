@@ -1,11 +1,15 @@
 // =========================================================================
 // FILE: stdlib/core/syntax/guard.pilot
-// GUARD EARLY EXIT SYNTAX MACRO (`guard(cond, else_body)`)
+// DIVERGING EARLY-EXIT `guard ... else` SYNTAX (`NULL002`)
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Guard;
 
-use Pilot.Core.Genesis::*;
+use Pilot.Core.Genesis.*;
+
+comptime {
+    __engine("bind_receptor", "guard", 17, 0);
+}
 
 pub syntax {
     guard(cond, else_body) => quote {

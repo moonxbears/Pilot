@@ -1,0 +1,17 @@
+// =========================================================================
+// FILE: stdlib/realtime/rt_syntax.pilot
+// OPT-IN DETERMINISTIC REAL-TIME (`noalloc`, `region`, `deadline`, `periodic`)
+// =========================================================================
+pub pkg Pilot.Realtime.Syntax;
+
+use Pilot.Core.Genesis.*;
+
+pub syntax {
+    noalloc(body)        => quote { { $body } };
+    region(pool, body)   => quote { { $body } };
+    deadline(b, body)    => quote { { let __rt_budget = $b; $body } };
+    within(b, body)      => quote { { let __rt_within = $b; $body } };
+    periodic(p, body)    => quote { loop { let __rt_period = $p; $body } };
+    on_missed(body)      => quote { { $body } };
+    fallback(body)       => quote { { $body } };
+}

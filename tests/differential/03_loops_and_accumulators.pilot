@@ -1,15 +1,15 @@
-# Differential Suite 03: Loops & Invariant Accumulators
+// Differential Suite 03: Loops & Invariant Accumulators
 
-def accumulate_sum(limit: int) -> int {
-    var total: int = 0
-    var i: int = 1
+fn accumulate_sum(limit: int) -> int {
+    var total: int = 0;
+    var i: int = 1;
     while i <= limit {
-        total = total + i * i
-        i = i + 1
+        total = total + i * i;
+        i = i + 1;
     }
-    return total
+    return total;
 }
 
-def main() -> int {
-    return accumulate_sum(10)
+fn main() -> int {
+    return accumulate_sum(10);
 }

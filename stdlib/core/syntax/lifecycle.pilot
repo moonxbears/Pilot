@@ -1,0 +1,25 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/lifecycle.pilot
+// DUNDER-FREE LIFECYCLE SYNTAX (`self(...)`, `~self()`, `scope self`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Lifecycle;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+
+comptime {
+    __engine("bind_receiver_ident", "self", "field", "value");
+    __engine("bind_receptor", "scope", 20, 0);
+    __engine("bind_receptor", "enter", 21, 0);
+    __engine("bind_receptor", "exit",  22, 0);
+}
+
+pub syntax {
+    scope(enter_body, exit_body) => quote {
+        {
+            $enter_body
+            defer { $exit_body }
+        }
+    };
+}

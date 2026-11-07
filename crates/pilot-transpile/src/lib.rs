@@ -121,19 +121,19 @@ mod tests {
         // 1. Rust ingestion
         let rs_src = "pub fn compute(val: i64) -> Option<i64> {\n    let mut x = val;\n    x\n}";
         let pilot_rs = ForeignAstIngester::ingest_to_pilot_source(rs_src, TargetLanguage::Rust, &opts).unwrap();
-        assert!(pilot_rs.contains("def compute"));
+        assert!(pilot_rs.contains("fn compute"));
         assert!(pilot_rs.contains("var x = val;"));
 
         // 2. Python ingestion
         let py_src = "def process(item):\n    x = item\n    return x\n";
         let pilot_py = ForeignAstIngester::ingest_to_pilot_source(py_src, TargetLanguage::Python, &opts).unwrap();
-        assert!(pilot_py.contains("def process(item) {"));
+        assert!(pilot_py.contains("fn process(item) {"));
         assert!(pilot_py.contains("let x = item"));
 
         // 3. JavaScript ingestion
         let js_src = "function greet(name) {\n    const msg = name;\n    console.log(msg);\n}";
         let pilot_js = ForeignAstIngester::ingest_to_pilot_source(js_src, TargetLanguage::JavaScript, &opts).unwrap();
-        assert!(pilot_js.contains("def greet(name)"));
+        assert!(pilot_js.contains("fn greet(name)"));
         assert!(pilot_js.contains("let msg = name;"));
         assert!(pilot_js.contains("println(msg);"));
     }
@@ -142,12 +142,12 @@ mod tests {
     fn test_transpile_struct_and_class_with_methods() {
         let code = r#"
 struct Point {
-    x: int
-    y: int
+    x: int;
+    y: int;
 }
 
-class Counter {
-    val: int
+struct Counter : IObject {
+    val: int;
 
     fn inc() -> int {
         return self.val + 1;
@@ -264,21 +264,21 @@ fn process_data(limit: int) -> int {
         // 1. Python class ingestion
         let py_cls = "class Counter:\n    def __init__(self, val):\n        self.val = val\n\n    def inc(self):\n        self.val = self.val + 1\n        return self.val\n";
         let pilot_py = ForeignAstIngester::ingest_to_pilot_source(py_cls, TargetLanguage::Python, &opts).unwrap();
-        assert!(pilot_py.contains("class Counter {"));
-        assert!(pilot_py.contains("def init(val) {"));
-        assert!(pilot_py.contains("def inc() {"));
+        assert!(pilot_py.contains("struct Counter : IObject {"));
+        assert!(pilot_py.contains("self(val) {"));
+        assert!(pilot_py.contains("fn inc() {"));
 
         // 2. JavaScript class ingestion
         let js_cls = "class Vector {\n    constructor(x, y) {\n        this.x = x;\n        this.y = y;\n    }\n}\n";
         let pilot_js = ForeignAstIngester::ingest_to_pilot_source(js_cls, TargetLanguage::JavaScript, &opts).unwrap();
-        assert!(pilot_js.contains("class Vector {"));
-        assert!(pilot_js.contains("def init(x, y) {"));
+        assert!(pilot_js.contains("struct Vector : IObject {"));
+        assert!(pilot_js.contains("self(x, y) {"));
 
         // 3. C# class ingestion
         let cs_cls = "public class Greeter {\n    public static void SayHello(string name) {\n        Console.WriteLine(name);\n    }\n}\n";
         let pilot_cs = ForeignAstIngester::ingest_to_pilot_source(cs_cls, TargetLanguage::CSharp, &opts).unwrap();
-        assert!(pilot_cs.contains("class Greeter {"));
-        assert!(pilot_cs.contains("def SayHello(string name) {"));
+        assert!(pilot_cs.contains("struct Greeter : IObject {"));
+        assert!(pilot_cs.contains("static fn SayHello(name: string) {"));
         assert!(pilot_cs.contains("println(name);"));
     }
 }

@@ -1,0 +1,29 @@
+// =========================================================================
+// FILE: stdlib/db/sql_syntax.pilot
+// OPT-IN NATIVE DATABASE, TRANSACTION & LINQ/SQL QUERY SYNTAX PACKAGE
+// =========================================================================
+pub pkg Pilot.Db.Syntax;
+
+use Pilot.Core.Genesis.*;
+
+comptime {
+    __engine("bind_receptor", "database", 33, 1);
+    __engine("bind_receptor", "from",     33, 6);
+    __engine("bind_receptor", "select",   33, 7);
+
+    __engine("register_pratt_op", "union",     infix, 12, left);
+    __engine("register_pratt_op", "intersect", infix, 14, left);
+    __engine("register_pratt_op", "except",    infix, 12, left);
+}
+
+pub syntax {
+    transaction(body) => quote {
+        {
+            $body
+        }
+    };
+
+    savepoint(name) => quote { $name };
+    commit()        => quote { 0 };
+    rollback()      => quote { 0 };
+}

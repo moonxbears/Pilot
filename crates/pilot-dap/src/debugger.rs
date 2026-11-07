@@ -365,32 +365,19 @@ impl PilotDebugger {
         let analysis = pilot_analysis::pipeline::AnalysisPipeline::analyze(&arena, arena.root);
 
         // Collect all record, struct, class, and ADT definitions
-        for (i, node) in arena.nodes.iter().enumerate() {
+        for (_i, node) in arena.nodes.iter().enumerate() {
             match node.node_kind() {
-                NodeKind::RecordDecl => {
+                NodeKind::StructDecl => {
                     let name = arena.interner.resolve(SymbolId(node.lhs)).to_string();
-                    let field_names = if let Some(fields) = arena.record_fields.get(&(i as u32)) {
-                        fields.iter().map(|(sym, _)| arena.interner.resolve(*sym).to_string()).collect()
-                    } else {
-                        Vec::new()
-                    };
-                    records.insert(name, field_names);
-                }
-                NodeKind::StructDecl | NodeKind::ClassDecl => {
-                    let name = arena.interner.resolve(SymbolId(node.lhs)).to_string();
-                    let mut field_names = if let Some(fields) = arena.record_fields.get(&(i as u32)) {
-                        fields.iter().map(|(sym, _)| arena.interner.resolve(*sym).to_string()).collect()
-                    } else {
-                        Vec::new()
-                    };
-                    if field_names.is_empty() && node.rhs > 0 {
+                    let mut field_names = Vec::new();
+                    if node.rhs > 0 && node.rhs != u32::MAX {
                         let body_node = arena.node(NodeId(node.rhs));
                         if body_node.node_kind() == NodeKind::BlockExpr {
                             let b_children = arena.children_slice(body_node.lhs, body_node.rhs);
                             for &stmt_id in b_children {
                                 let s_node = arena.node(NodeId(stmt_id));
                                 match s_node.node_kind() {
-                                    NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
+                                    NodeKind::ParamDecl | NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl => {
                                         let f_name = arena.interner.resolve(SymbolId(s_node.lhs)).to_string();
                                         field_names.push(f_name);
                                     }
@@ -445,14 +432,11 @@ impl PilotDebugger {
                             }
                             functions.insert(name, (NodeId(child_id), params, body_node, line_1 as u32));
                         }
-                        NodeKind::RecordDecl
-                        | NodeKind::StructDecl
-                        | NodeKind::ClassDecl
+                        NodeKind::StructDecl
                         | NodeKind::TypeAdtDecl
                         | NodeKind::InterfaceDecl
                         | NodeKind::ExtendDecl
                         | NodeKind::ImportDecl
-                        | NodeKind::FromImportDecl
                         | NodeKind::ConstructorDecl
                         | NodeKind::DestructorDecl
                         | NodeKind::ScopeDecl
@@ -518,8 +502,8 @@ impl PilotDebugger {
                 if matches!(node.node_kind(), NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl) {
                     let ty_str = if let Some(Some(lid)) = analysis.physics.node_layouts.get(child_id as usize) {
                         format!("layout#{}", lid.0)
-                    } else if let Some(annot_id) = arena.type_annotations.get(&(child_id as u32)) {
-                        let annot_node = arena.node(*annot_id);
+                    } else if let Some(annot_id) = arena.type_annot(NodeId(child_id)) {
+                        let annot_node = arena.node(annot_id);
                         if annot_node.node_kind() == NodeKind::TypeNamed {
                             arena.interner.resolve(SymbolId(annot_node.lhs)).to_string()
                         } else {
@@ -645,22 +629,13 @@ impl PilotDebugger {
         match n.node_kind() {
             NodeKind::TypeNamed => {
                 let name = arena.interner.resolve(SymbolId(n.lhs)).to_string();
-                (name, None)
-            }
-            NodeKind::TypeSlice => {
-                let elem_str = self.extract_type_from_node(arena, NodeId(n.lhs)).0;
-                let kind_str = match n.flags {
-                    1 => "SliceBuffer",
-                    2 => "SliceView",
-                    3 => "StridedSlice",
-                    4 => "View",
-                    _ => "Slice",
-                };
-                (kind_str.to_string(), Some(elem_str))
-            }
-            NodeKind::TypeList => {
-                let elem_str = self.extract_type_from_node(arena, NodeId(n.lhs)).0;
-                ("List".to_string(), Some(elem_str))
+                let args = arena.type_args(id);
+                if let Some(&first) = args.first() {
+                    let elem_str = self.extract_type_from_node(arena, NodeId(first)).0;
+                    (name, Some(elem_str))
+                } else {
+                    (name, None)
+                }
             }
             NodeKind::TypeTuple => {
                 let children = arena.children_slice(n.lhs, n.rhs);
@@ -1412,7 +1387,7 @@ impl PilotDebugger {
                 }
 
                 // Initial loop entry
-                let iter_node = arena.for_iter_nodes.get(&node_id.0).copied().unwrap_or(NodeId::NONE);
+                let iter_node = arena.for_iter(node_id);
                 let (iter_val, _) = self.eval_ast_node(arena, iter_node);
 
                 let mut items = Vec::new();
@@ -1719,8 +1694,8 @@ impl PilotDebugger {
         let node = *arena.node(node_id);
         let var_name = arena.interner.resolve(SymbolId(node.lhs)).to_string();
         let body_node = NodeId(node.rhs);
-        let iter_node = arena.for_iter_nodes.get(&node_id.0).copied().unwrap_or(NodeId::NONE);
-        let then_node = arena.for_then_nodes.get(&node_id.0).copied().unwrap_or(NodeId::NONE);
+        let iter_node = arena.for_iter(node_id);
+        let then_node = arena.for_then(node_id);
 
         let initial_items = self.extract_iterable_items(arena, iter_node);
         let mut worklist: std::collections::VecDeque<(PilotVal, String)> = initial_items.into();

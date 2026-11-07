@@ -638,7 +638,7 @@ pub struct IdeContextPolicy : IValue {
     }
 }
 
-// Pure-Pilot Hover & Inlay Hint Formatter (Replaces hardcoded strings in `pilot-lsp`)
+// Pure-Pilot Hover & Inlay Hint Formatter (Replaces hardcoded strings in `pilot-lsp` & `pilot-ast`)
 pub struct IdePresentationPolicy : IValue {
     pub static pure:
         fn lattice_badge(bits: u8) -> str =>
@@ -652,5 +652,116 @@ pub struct IdePresentationPolicy : IValue {
 
         fn format_capture_inlay_hint(captures_csv: str) -> str =>
             f"/* captures: {captures_csv} */";
+}
+
+pub pure fn ide_classify_packed(inherited_kind: i64, inherited_mods: i64, ctx: i64, lattice_bits: i64) -> i64 {
+    var mods: i64 = inherited_mods;
+    if (ctx & 1) != 0 {
+        mods = mods | 1;
+    }
+    if (ctx & 4096) != 0 {
+        mods = (mods & 4294967291) | 128;
+    }
+    if (ctx & 16777216) != 0 {
+        mods = mods | 8;
+    }
+    if (ctx & 8388608) != 0 {
+        return (21 << 32) | (mods | 2);
+    }
+    if (ctx & 256) != 0 {
+        if (ctx & 512) != 0 {
+            return (6 << 32) | (mods | 8);
+        }
+        return (7 << 32) | (mods | 8);
+    }
+    if (ctx & 1024) != 0 {
+        return (14 << 32) | (mods | 8);
+    }
+    if ((ctx & 16) != 0) && ((ctx & 8) == 0) {
+        if (ctx & 1048576) != 0 {
+            return (9 << 32) | (mods | 512 | 128);
+        }
+        if (ctx & 2097152) != 0 {
+            return (7 << 32) | (mods | 512 | 4);
+        }
+    }
+    if (ctx & 32) != 0 {
+        if (ctx & 65536) != 0 {
+            return (22 << 32) | mods;
+        }
+    }
+    if (ctx & 64) != 0 {
+        return (inherited_kind << 32) | (mods | 8);
+    }
+    if (ctx & 524288) != 0 {
+        return (6 << 32) | (mods | 512);
+    }
+    if (ctx & 128) != 0 {
+        return (10 << 32) | (mods | 4);
+    }
+    if (ctx & 2) != 0 {
+        if ((ctx & 262144) != 0) && ((ctx & 4194304) == 0) {
+            return (14 << 32) | mods;
+        }
+        if (ctx & 65536) != 0 {
+            if (ctx & 131072) != 0 {
+                return (1 << 32) | (mods | 512);
+            }
+            let ctor_k = if (lattice_bits & 2) != 0 { 2 } else { 5 };
+            return (ctor_k << 32) | (mods | 1024);
+        }
+        if (ctx & 8192) != 0 {
+            let var_k = if (ctx & 32768) != 0 { 9 } else { inherited_kind };
+            return (var_k << 32) | (mods | 2048);
+        }
+        if (ctx & 16384) != 0 {
+            return (13 << 32) | mods;
+        }
+        return (12 << 32) | mods;
+    }
+    if (ctx & 8) != 0 {
+        if (ctx & 16384) != 0 {
+            return (13 << 32) | mods;
+        }
+        if (ctx & 32768) != 0 {
+            return (9 << 32) | mods;
+        }
+    }
+    if ((ctx & 4) != 0) || ((ctx & 65536) != 0) {
+        if (ctx & 131072) != 0 {
+            return (1 << 32) | (mods | 512);
+        }
+        if inherited_kind != 0 {
+            return (inherited_kind << 32) | mods;
+        }
+        let ty_k = if (lattice_bits & 2) != 0 { 2 } else { 5 };
+        return (ty_k << 32) | mods;
+    }
+    if (ctx & 2048) != 0 {
+        if (ctx & 4194304) == 0 {
+            return (16 << 32) | (mods | 8);
+        }
+    }
+    if ((ctx & 262144) != 0) && ((ctx & 4194304) == 0) {
+        return (14 << 32) | mods;
+    }
+    return (inherited_kind << 32) | mods;
+}
+
+pub pure fn ide_format_type_hover(name: str, byte_size: i64, byte_align: i64, bits: i64) -> str {
+    let badge = if bits == 0 {
+        "0b00 IValue (Trivial Copy)"
+    } else if bits == 1 {
+        "0b01 IReference (Lexical Borrow)"
+    } else if bits == 2 {
+        "0b10 IObject (Perceus Move + ~self)"
+    } else {
+        "0b11 IGuard (Scoped RAII + Borrow)"
+    };
+    return "**" + name + "** — `" + byte_size + " bytes` (`align " + byte_align + "`) | `" + badge + "`";
+}
+
+pub pure fn ide_format_capture_inlay_hint(captures_csv: str) -> str {
+    return "/* captures: " + captures_csv + " */";
 }
 

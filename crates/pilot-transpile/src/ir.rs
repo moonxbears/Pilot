@@ -82,6 +82,24 @@ impl IrType {
         match node.node_kind() {
             NodeKind::TypeNamed => {
                 let name = arena.interner.resolve(SymbolId(node.lhs));
+                let args = arena.type_args(id);
+                if !args.is_empty() {
+                    match name {
+                        "slice" | "List" | "array" | "SliceBuffer" | "SliceView" => {
+                            return Self::List(Box::new(Self::from_type_spec(arena, NodeId(args[0]))));
+                        }
+                        "option" => {
+                            return Self::Option(Box::new(Self::from_type_spec(arena, NodeId(args[0]))));
+                        }
+                        "map" if args.len() >= 2 => {
+                            return Self::Map {
+                                key: Box::new(Self::from_type_spec(arena, NodeId(args[0]))),
+                                value: Box::new(Self::from_type_spec(arena, NodeId(args[1]))),
+                            };
+                        }
+                        _ => {}
+                    }
+                }
                 match name {
                     "void" | "unit" => Self::Void,
                     "bool" => Self::Bool,
@@ -90,23 +108,6 @@ impl IrType {
                     "str" | "string" => Self::String,
                     other => Self::Custom(other.to_string()),
                 }
-            }
-            NodeKind::TypeList | NodeKind::TypeSlice => {
-                let elem = if node.lhs != 0 {
-                    Self::from_type_spec(arena, NodeId(node.lhs))
-                } else {
-                    Self::Int
-                };
-                Self::List(Box::new(elem))
-            }
-            NodeKind::TypeOptional => {
-                let inner = Self::from_type_spec(arena, NodeId(node.lhs));
-                Self::Option(Box::new(inner))
-            }
-            NodeKind::TypeMap => {
-                let key = Self::from_type_spec(arena, NodeId(node.lhs));
-                let val = Self::from_type_spec(arena, NodeId(node.rhs));
-                Self::Map { key: Box::new(key), value: Box::new(val) }
             }
             NodeKind::TypeTuple => {
                 let children = arena.children_slice(node.lhs, node.rhs);
@@ -281,23 +282,7 @@ impl IrModule {
                     NodeKind::FnDecl => {
                         functions.push(Self::lower_fn(arena, analysis, child_id));
                     }
-                    NodeKind::RecordDecl => {
-                        let name = arena.interner.resolve(SymbolId(node.lhs)).to_string();
-                        let mut fields = Vec::new();
-                        if let Some(rec_fields) = arena.record_fields.get(&child_id.0) {
-                            for &(f_sym, f_ty_node) in rec_fields {
-                                let f_name = arena.interner.resolve(f_sym).to_string();
-                                let f_ty = if f_ty_node.is_some() {
-                                    IrType::from_type_spec(arena, f_ty_node)
-                                } else {
-                                    IrType::Int
-                                };
-                                fields.push((f_name, f_ty));
-                            }
-                        }
-                        type_decls.push(IrTypeDecl::Record { name, fields });
-                    }
-                    NodeKind::StructDecl | NodeKind::ClassDecl => {
+                    NodeKind::StructDecl => {
                         let name = arena.interner.resolve(SymbolId(node.lhs)).to_string();
                         let mut fields = Vec::new();
                         let mut methods = Vec::new();
@@ -308,9 +293,18 @@ impl IrModule {
                                 for &c_id in children {
                                     let c_node = arena.node(NodeId(c_id));
                                     match c_node.node_kind() {
+                                        NodeKind::ParamDecl => {
+                                            let f_name = arena.interner.resolve(SymbolId(c_node.lhs)).to_string();
+                                            let f_ty = if NodeId(c_node.rhs).is_some() {
+                                                IrType::from_type_spec(arena, NodeId(c_node.rhs))
+                                            } else {
+                                                IrType::Int
+                                            };
+                                            fields.push((f_name, f_ty));
+                                        }
                                         NodeKind::VarStmt | NodeKind::LetStmt | NodeKind::ConstDecl => {
                                             let f_name = arena.interner.resolve(SymbolId(c_node.lhs)).to_string();
-                                            let f_ty = if let Some(&ann) = arena.type_annotations.get(&c_id) {
+                                            let f_ty = if let Some(ann) = arena.type_annot(NodeId(c_id)) {
                                                 IrType::from_type_spec(arena, ann)
                                             } else {
                                                 IrType::Int
@@ -325,7 +319,11 @@ impl IrModule {
                                 }
                             }
                         }
-                        if node.node_kind() == NodeKind::ClassDecl {
+                        let is_obj = !methods.is_empty()
+                            || arena.base_types.iter().any(|&(owner, b)| {
+                                owner == child_id && arena.interner.resolve(SymbolId(arena.node(b).lhs)) == "IObject"
+                            });
+                        if is_obj {
                             type_decls.push(IrTypeDecl::Class { name, fields, methods });
                         } else {
                             type_decls.push(IrTypeDecl::Struct { name, fields });
@@ -455,7 +453,7 @@ impl IrModule {
             }
         }
 
-        let ret_type = if let Some(&ann) = arena.type_annotations.get(&fn_id.0) {
+        let ret_type = if let Some(ann) = arena.type_annot(fn_id) {
             IrType::from_type_spec(arena, ann)
         } else if fn_name == "main" {
             IrType::Int
@@ -549,7 +547,7 @@ impl IrModule {
                 };
                 let init_id = NodeId(node.rhs);
                 let init = Self::lower_expr(arena, analysis, init_id);
-                let ty = if let Some(&ann) = arena.type_annotations.get(&id.0) {
+                let ty = if let Some(ann) = arena.type_annot(id) {
                     IrType::from_type_spec(arena, ann)
                 } else if let Some(Some(_)) = analysis.physics.node_layouts.get(id.0 as usize) {
                     IrType::from_analysis(&analysis.physics, id.0)
@@ -568,7 +566,7 @@ impl IrModule {
                 };
                 let init_id = NodeId(node.rhs);
                 let init = Self::lower_expr(arena, analysis, init_id);
-                let ty = if let Some(&ann) = arena.type_annotations.get(&id.0) {
+                let ty = if let Some(ann) = arena.type_annot(id) {
                     IrType::from_type_spec(arena, ann)
                 } else if let Some(Some(_)) = analysis.physics.node_layouts.get(id.0 as usize) {
                     IrType::from_analysis(&analysis.physics, id.0)
@@ -620,7 +618,8 @@ impl IrModule {
                 let var = arena.interner.resolve(SymbolId(node.lhs)).to_string();
                 let mut body = Vec::new();
                 Self::collect_stmts(arena, analysis, NodeId(node.rhs), &mut body);
-                let iter = if let Some(&iter_id) = arena.for_iter_nodes.get(&id.0) {
+                let iter_id = arena.for_iter(id);
+                let iter = if iter_id.is_some() {
                     Self::lower_expr(arena, analysis, iter_id)
                 } else {
                     IrExpr::Call {
@@ -910,7 +909,8 @@ impl IrModule {
             }
             NodeKind::ForExpr => {
                 let var = arena.interner.resolve(SymbolId(node.lhs)).to_string();
-                let iter = if let Some(&iter_id) = arena.for_iter_nodes.get(&id.0) {
+                let iter_id = arena.for_iter(id);
+                let iter = if iter_id.is_some() {
                     Box::new(Self::lower_expr(arena, analysis, iter_id))
                 } else {
                     Box::new(IrExpr::Var("iter".to_string()))

@@ -1,11 +1,18 @@
 // =========================================================================
 // FILE: stdlib/core/syntax/try_catch.pilot
-// TRY-CATCH ERROR HANDLING STATEMENT MACRO (`try(body, handler)`)
+// VALUES-FIRST `try`/`catch`, INLINE `expr catch`, POSTFIX `?` (`ITryOperator`)
+// & PROHIBITED UNCHECKED POSTFIX `x!` (`NULL001`) LINT RECEPTOR
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.TryCatch;
 
-use Pilot.Core.Genesis::*;
+use Pilot.Core.Genesis.*;
+
+comptime {
+    __engine("bind_receptor", "try",   18, 0);
+    __engine("bind_receptor", "catch", 19, 0);
+    __engine("bind_receptor", "!",     34, 1);
+}
 
 pub syntax {
     try(body, handler) => quote {

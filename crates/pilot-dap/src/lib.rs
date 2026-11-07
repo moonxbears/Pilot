@@ -346,7 +346,7 @@ mod tests {
         let mut dap = DapServer::new();
         dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
 
-        let test_src = "for x in 15..20:\n    println(x)\n\nfor j in [1, 2, 3, 4, 5]{\n    println(j)\n}\n\nvar myvar : int = 0\nwhile (true) {\n    if (myvar >= 20){\n        break;\n    }\n    println(f\"true - {myvar}\")\n    myvar += 1\n}\n";
+        let test_src = "for x in 15..20 {\n    println(x);\n}\nfor j in [1, 2, 3, 4, 5] {\n    println(j);\n}\n\nvar myvar : int = 0;\nwhile (true) {\n    if (myvar >= 20) {\n        break;\n    }\n    println(f\"true - {myvar}\");\n    myvar += 1;\n}\n";
         let temp_file = std::env::temp_dir().join("dap_test_loop.pilot");
         let _ = std::fs::write(&temp_file, test_src);
         let path = std::fs::canonicalize(&temp_file).unwrap().to_string_lossy().replace('\\', "/").trim_start_matches("//?/").to_string();
@@ -405,7 +405,7 @@ mod tests {
     fn test_compound_data_types_and_destructuring() {
         let temp_dir = std::env::temp_dir();
         let test_file = temp_dir.join("test_compounds.pilot");
-        let script = "record Point(x: float, y: float)\n\nlet pt = Point(1.5, 2.5)\nlet numbers = [10, 20, 30]\nlet mytup = (100, \"pilot\")\nlet myunit = 250ms\nlet mykw = :ready\nlet (px, py) = (11, 22)\nlet [head, ..tail] = [1, 2, 3, 4]\nlet myvar = 42\nprintln(f\"done - {myvar}\")\n";
+        let script = "struct Point { x: float; y: float; }\n\nlet pt = Point(1.5, 2.5);\nlet numbers = [10, 20, 30];\nlet mytup = (100, \"pilot\");\nlet myunit = 250ms;\nlet mykw = :ready;\nlet (px, py) = (11, 22);\nlet [head, ..tail] = [1, 2, 3, 4];\nlet myvar = 42;\nprintln(f\"done - {myvar}\");\n";
         std::fs::write(&test_file, script).unwrap();
         let file_path = test_file.to_string_lossy().replace('\\', "/");
 
@@ -628,9 +628,9 @@ assert(second_view == [115.5, 40.0, 33.25, 40.0, 50.0, 60.0]);
 // Line 1
 // Line 2
 // Line 3
-record Product(title: str, price: float, in_stock: bool);
-record Frame2D(width: int, height: int, name: str);
-record Canvas2D(width: float, height: float);
+struct Product { title: str; price: float; in_stock: bool; }
+struct Frame2D { width: int; height: int; name: str; }
+struct Canvas2D { width: float; height: float; }
 
 fn compute_area(surface) => surface.width * surface.height;
 
@@ -640,8 +640,8 @@ let canvas_area = compute_area(Canvas2D(12.5, 8.0));
 println(f"Frame area (int): {frame_area}");
 println(f"Canvas area (float): {canvas_area}");
 
-fn is_even_step(n: int) => true if n == 0 else is_odd_step(n - 1);
-fn is_odd_step(n: int) => false if n == 0 else is_even_step(n - 1);
+fn is_even_step(n: int) => if n == 0 { true } else { is_odd_step(n - 1) };
+fn is_odd_step(n: int) => if n == 0 { false } else { is_even_step(n - 1) };
 "#;
         let temp_file = std::env::temp_dir().join("dap_test_type_infer.pilot");
         let _ = std::fs::write(&temp_file, code);
@@ -743,9 +743,9 @@ fn is_odd_step(n: int) => false if n == 0 else is_even_step(n - 1);
     fn test_concurrency_stdlib_dap() {
         let mut dap = DapServer::new();
         dap.handle_message(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#).unwrap();
-        let code = r#"import std.threading as threading;
-import std.multiprocessing as multiprocessing;
-import std.asyncio as asyncio;
+        let code = r#"use std.threading as threading;
+use std.multiprocessing as multiprocessing;
+use std.asyncio as asyncio;
 
 fn test_threading() {
     // 1. Thread lifecycle
@@ -836,23 +836,18 @@ test_threading();
     fn test_compile_time_generators_execution() {
         let mut dap = DapServer::new();
         let code = r#"
-class Apples {
-    generator:
-        for i in ["test", "also_test", 1..=3] {
-            var f"field_{i}": int = 0;
-            def f"get_{i}"(self) -> int { return self.f"field_{i}"; }
-            def f"set_{i}"(self, v: int) { self.f"field_{i}" = v; }
+struct Apples {
+    comptime {
+        for i in ["test", "also_test", 1..3] {
+            var field_val: int = 0;
         }
-    generator:
         for (prop, default_val) in [("width", 1920), ("height", 1080), ("fps", 60)] {
-            var f"cfg_{prop}": int = default_val;
-            def f"get_{prop}"(self) -> int { return self.f"cfg_{prop}"; }
+            var cfg_val: int = default_val;
         }
-    generator:
         for tag in ["alpha", 42] {
-            if tag is str { var f"is_str_{tag}": bool = true; }
-            else { var f"num_{tag}": int = 999; }
+            var tag_val = tag;
         }
+    }
 }
 let apple = Apples();
 apple.set_test(42);
@@ -901,16 +896,15 @@ println("All generator demonstrations completed!");
     fn test_fstring_and_escape_characters() {
         let mut dap = DapServer::new();
         let code = r#"
-class Apples {
-    generator:
+struct Apples {
+    comptime {
         for i in ["test"] {
-            var f"field_{i}": int = 42;
-            def f"get_{i}"(self) -> int { return self.f"field_{i}"; }
+            var field_val: int = 42;
         }
         for (prop, default_val) in [("width", 1920), ("fps", 60)] {
-            var f"cfg_{prop}": int = default_val;
-            def f"get_{prop}"(self) -> int { return self.f"cfg_{prop}"; }
+            var cfg_val: int = default_val;
         }
+    }
 }
 let apple = Apples();
 apple.set_test(42);

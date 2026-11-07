@@ -20,7 +20,7 @@ mod tests {
 
     #[test]
     fn test_profiler_reports_and_flamegraph_exports() {
-        let code = "def compute() -> i64 {\n    let mut sum: i64 = 0;\n    return sum;\n}\n";
+        let code = "fn compute() -> i64 {\n    var sum: i64 = 0;\n    return sum;\n}\n";
         let report = ExecutionProfiler::profile_source(code, "test.pilot").expect("Profile failed");
 
         assert_eq!(report.file_path, "test.pilot");
@@ -40,8 +40,8 @@ mod tests {
     #[test]
     fn test_static_wcet_analyzer_diagnostics() {
         let code = r#"
-@hard_realtime
-def realtime_task() {
+[HardRealtime]
+fn realtime_task() {
     let list = [1, 2, 3];
     for i in 0..10 {
         for j in 0..10 {
@@ -53,14 +53,14 @@ def realtime_task() {
         let arena = pilot_parser::parse(code);
         let diags = StaticWcetAnalyzer::analyze(code, &arena);
 
-        assert!(diags.iter().any(|d| d.code == "PERF001")); // Nested loop O(N^2)
-        assert!(diags.iter().any(|d| d.code == "PERF003")); // Allocation in @hard_realtime
-        assert!(diags.iter().any(|d| d.code == "PERF006")); // Append in loop
+        assert!(diags.iter().any(|d| d.code == "PERF001"));
+        assert!(diags.iter().any(|d| d.code == "PERF003"));
+        assert!(diags.iter().any(|d| d.code == "PERF006"));
     }
 
     #[test]
     fn test_cst_source_optimizer_diff_and_apply() {
-        let original = "def calc() {\n    for i in 0..10 {\n        let k = 1024 * 1024;\n    }\n}\n";
+        let original = "fn calc() {\n    for i in 0..10 {\n        let k = 1024 * 1024;\n    }\n}\n";
         let optimized = CstSourceOptimizer::optimize_source(original);
         assert!(optimized.contains("comptime { 1024 * 1024 }"));
 

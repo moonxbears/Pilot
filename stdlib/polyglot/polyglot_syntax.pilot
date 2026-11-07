@@ -1,0 +1,36 @@
+// =========================================================================
+// FILE: stdlib/polyglot/polyglot_syntax.pilot
+// OPT-IN FFI (`extern`) & INLINE POLYGLOT BLOCK SYNTAX PACKAGE
+// =========================================================================
+pub pkg Pilot.Polyglot.Syntax;
+
+use Pilot.Core.Genesis.*;
+
+comptime {
+    __engine("bind_receptor", "extern",     7,  0);
+    __engine("bind_receptor", "lib",        8,  0);
+
+    __engine("bind_receptor", "c",          32, 1);
+    __engine("bind_receptor", "cpp",        32, 2);
+    __engine("bind_receptor", "rust",       32, 3);
+    __engine("bind_receptor", "rs",         32, 3);
+    __engine("bind_receptor", "python",     32, 4);
+    __engine("bind_receptor", "py",         32, 4);
+    __engine("bind_receptor", "js",         32, 5);
+    __engine("bind_receptor", "javascript", 32, 5);
+    __engine("bind_receptor", "ts",         32, 6);
+    __engine("bind_receptor", "typescript", 32, 6);
+    __engine("bind_receptor", "csharp",     32, 7);
+    __engine("bind_receptor", "cs",         32, 7);
+    __engine("bind_receptor", "lua",        32, 8);
+    __engine("bind_receptor", "sql",        32, 9);
+    __engine("bind_receptor", "postgres",   32, 10);
+    __engine("bind_receptor", "postgresql", 32, 10);
+    __engine("bind_receptor", "mysql",      32, 11);
+    __engine("bind_receptor", "sqlite",     32, 12);
+    __engine("bind_receptor", "wgsl",       32, 13);
+    __engine("bind_receptor", "ptx",        32, 14);
+    __engine("bind_receptor", "msl",        32, 15);
+    __engine("bind_receptor", "java",       32, 16);
+    __engine("bind_receptor", "assembly",   32, 17);
+}

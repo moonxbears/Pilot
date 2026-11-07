@@ -19,7 +19,7 @@ impl StaticWcetAnalyzer {
     pub fn analyze(src: &str, arena: &AstArena) -> Vec<PerfDiagnostic> {
         let mut diagnostics = Vec::new();
 
-        let is_hard_realtime = src.contains("@hard_realtime") || src.contains("@noalloc");
+        let is_hard_realtime = src.contains("[HardRealtime]") || src.contains("[NoAlloc]") || src.contains("noalloc");
         let mut loop_depth = 0usize;
         let mut inside_loop = false;
 

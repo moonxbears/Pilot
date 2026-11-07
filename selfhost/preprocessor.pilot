@@ -65,5 +65,5 @@ pub fn preprocess_strip_comments(src: str, out_buf: any) -> i64 {
 }
 
 pub fn preprocess_scope_headers(src: str) -> str {
-    return Pilot.SelfHost.ScopeHeader.desugar_scope_headers(src);
+    return Pilot.Core.Syntax.ScopeHeader.desugar_scope_headers(src);
 }

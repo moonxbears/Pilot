@@ -1,0 +1,53 @@
+// =========================================================================
+// FILE: stdlib/core/syntax/visibility.pilot
+// TWO-AXIS VISIBILITY (`priv`..`export`) & CLEARANCE RINGS (`lvl(N)` / `lvlN`)
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.Visibility;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+
+comptime {
+    // Axis 1: Canonical 10-Tier Spatial Visibility Lattice (`0..9`)
+    __engine("register_modifier", "priv",        0);
+    __engine("register_modifier", "private",     0);
+    __engine("register_modifier", "file",        1);
+    __engine("register_modifier", "fileprivate", 1);
+    __engine("register_modifier", "prot",        3);
+    __engine("register_modifier", "protected",   3);
+    __engine("register_modifier", "pkg",         4);
+    __engine("register_modifier", "package",     4);
+    __engine("register_modifier", "int",         6);
+    __engine("register_modifier", "internal",    6);
+    __engine("register_modifier", "pub",         7);
+    __engine("register_modifier", "public",      7);
+    __engine("register_modifier", "open",        8);
+    __engine("register_modifier", "export",      9);
+
+    // Axis 2: Compile-Time Clearance Rings (`lvl(N)` & shorthand `lvl0`..`lvl100`)
+    __engine("register_parametric_modifier", "lvl", "set_clearance_ring");
+    __engine("register_modifier", "lvl0",   "set_clearance_ring_0");
+    __engine("register_modifier", "lvl1",   "set_clearance_ring_1");
+    __engine("register_modifier", "lvl2",   "set_clearance_ring_2");
+    __engine("register_modifier", "lvl3",   "set_clearance_ring_3");
+    __engine("register_modifier", "lvl80",  "set_clearance_ring_80");
+    __engine("register_modifier", "lvl90",  "set_clearance_ring_90");
+    __engine("register_modifier", "lvl100", "set_clearance_ring_100");
+}
+
+pub pure fn visibility_tier_of(word: str) -> i32 {
+    if word == "priv" || word == "private" { return 0; }
+    if word == "file" || word == "fileprivate" { return 1; }
+    if word == "prot" || word == "protected" { return 3; }
+    if word == "pkg" || word == "package" { return 4; }
+    if word == "int" || word == "internal" { return 6; }
+    if word == "pub" || word == "public" { return 7; }
+    if word == "open" { return 8; }
+    if word == "export" { return 9; }
+    return 15;
+}
+
+pub pure fn can_access_ring(caller_lvl: i32, required_lvl: i32) -> bool {
+    return caller_lvl >= required_lvl;
+}

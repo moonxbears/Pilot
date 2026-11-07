@@ -83,13 +83,15 @@ impl ForeignAstIngester {
                 l = l.replace("pub enum ", "enum ");
             }
             // Function definition
-            if l.contains("pub async fn ") || l.contains("async fn ") {
-                l = l.replace("pub async fn ", "async def ").replace("async fn ", "async def ");
-            } else if (l.contains("pub fn ") || l.contains("fn ")) && l.contains('(') {
-                l = l.replace("pub fn ", "def ").replace("fn ", "def ");
+            if l.contains("pub async fn ") {
+                l = l.replace("pub async fn ", "async fn ");
+            } else if l.contains("pub fn ") && l.contains('(') {
+                l = l.replace("pub fn ", "fn ");
                 if strict {
                     l = l.replace("Option<", "").replace("Result<", "");
                 }
+            } else if l.contains("fn ") && l.contains('(') && strict {
+                l = l.replace("Option<", "").replace("Result<", "");
             }
             if l.contains("let mut ") {
                 l = l.replace("let mut ", "var ");
@@ -165,22 +167,23 @@ impl ForeignAstIngester {
                 if header.starts_with("class ") {
                     if let Some(paren_pos) = header.find('(') {
                         let name = header[6..paren_pos].trim();
-                        l = format!("class {} {{", name);
+                        l = format!("struct {} : IObject {{", name);
                     } else {
-                        l = format!("{} {{", header);
+                        let name = header[6..].trim();
+                        l = format!("struct {} : IObject {{", name);
                     }
                 } else if header.starts_with("def ") {
                     let sig = &header[4..];
                     if sig.starts_with("__init__(self,") {
-                        l = format!("def init({}) {{", sig["__init__(self,".len()..sig.len()-1].trim());
+                        l = format!("self({}) {{", sig["__init__(self,".len()..sig.len()-1].trim());
                     } else if sig.starts_with("__init__(self)") {
-                        l = "def init() {".to_string();
+                        l = "self() {".to_string();
                     } else if sig.contains("(self,") {
-                        l = format!("def {} {{", sig.replace("(self,", "("));
+                        l = format!("fn {} {{", sig.replace("(self,", "("));
                     } else if sig.contains("(self)") {
-                        l = format!("def {} {{", sig.replace("(self)", "()"));
+                        l = format!("fn {} {{", sig.replace("(self)", "()"));
                     } else {
-                        l = format!("def {} {{", sig);
+                        l = format!("fn {} {{", sig);
                     }
                 } else {
                     l = format!("{} {{", header);
@@ -232,13 +235,22 @@ impl ForeignAstIngester {
         let mut out = String::with_capacity(src.len());
         for line in src.lines() {
             let mut l = line.to_string();
+            if l.starts_with("class ") || l.contains(" class ") {
+                if let Some(brace) = l.find('{') {
+                    let prefix = l[..brace].trim_end().replacen("class ", "struct ", 1);
+                    l = format!("{} : IObject {{", prefix);
+                }
+            }
             if l.contains("export async function ") || l.contains("async function ") {
-                l = l.replace("export async function ", "async def ").replace("async function ", "async def ");
+                l = l.replace("export async function ", "async fn ").replace("async function ", "async fn ");
             } else if l.contains("export function ") || l.contains("function ") {
-                l = l.replace("export function ", "def ").replace("function ", "def ");
+                l = l.replace("export function ", "fn ").replace("function ", "fn ");
             }
             if l.contains("constructor(") {
-                l = l.replace("constructor(", "def init(");
+                l = l.replace("constructor(", "self(");
+            }
+            if l.contains("this.") {
+                l = l.replace("this.", "self.");
             }
             if l.contains("const ") {
                 l = l.replace("const ", "let ");
@@ -287,13 +299,18 @@ impl ForeignAstIngester {
                 l = l.replace("Console.Write(", "print(");
             }
             if l.contains("public class ") {
-                l = l.replace("public class ", "class ");
+                if let Some(brace) = l.find('{') {
+                    let prefix = l[..brace].trim_end().replace("public class ", "struct ");
+                    l = format!("{} : IObject {{", prefix);
+                } else {
+                    l = l.replace("public class ", "struct ");
+                }
             }
             if l.contains("public struct ") {
                 l = l.replace("public struct ", "struct ");
             }
             if l.contains("public record ") {
-                l = l.replace("public record ", "record ");
+                l = l.replace("public record ", "struct ");
             }
             if (l.contains("public static ") || l.contains("public ")) && l.contains('(') {
                 let trimmed_l = l.trim();
@@ -303,9 +320,28 @@ impl ForeignAstIngester {
                     let rest = &l[pos + prefix.len()..];
                     let parts: Vec<&str> = rest.split_whitespace().collect();
                     if parts.len() >= 2 {
-                        let fn_part = parts[1..].join(" ");
+                        let raw_fn = parts[1..].join(" ");
+                        let fn_part = if let (Some(lp), Some(rp)) = (raw_fn.find('('), raw_fn.find(')')) {
+                            let params_raw = &raw_fn[lp + 1..rp];
+                            let conv_params: Vec<String> = params_raw
+                                .split(',')
+                                .filter(|s| !s.trim().is_empty())
+                                .map(|p| {
+                                    let pw: Vec<&str> = p.split_whitespace().collect();
+                                    if pw.len() == 2 {
+                                        format!("{}: {}", pw[1], pw[0])
+                                    } else {
+                                        p.trim().to_string()
+                                    }
+                                })
+                                .collect();
+                            format!("{}({}){}", &raw_fn[..lp], conv_params.join(", "), &raw_fn[rp + 1..])
+                        } else {
+                            raw_fn
+                        };
                         let indent_len = l.len() - l.trim_start().len();
-                        l = format!("{}def {}", &l[..indent_len], fn_part);
+                        let fn_kw = if is_static { "static fn" } else { "fn" };
+                        l = format!("{}{} {}", &l[..indent_len], fn_kw, fn_part);
                     }
                 }
             }
@@ -333,16 +369,16 @@ impl ForeignAstIngester {
                 l = l.replace("printf(", "println(");
             }
             if l.contains("int main(") {
-                l = l.replace("int main(", "def main(");
+                l = l.replace("int main(", "fn main(");
             } else if l.contains("void main(") {
-                l = l.replace("void main(", "def main(");
+                l = l.replace("void main(", "fn main(");
             }
             for ret_type in &["void ", "int ", "double ", "float ", "bool ", "auto "] {
                 let trimmed_l = l.trim();
                 if trimmed_l.starts_with(ret_type) && trimmed_l.contains('(') && !trimmed_l.contains('=') && !trimmed_l.contains(';') {
                     let indent_len = l.len() - l.trim_start().len();
                     let rest = &trimmed_l[ret_type.len()..];
-                    l = format!("{}def {}", &l[..indent_len], rest);
+                    l = format!("{}fn {}", &l[..indent_len], rest);
                     break;
                 }
             }
@@ -368,11 +404,11 @@ impl ForeignAstIngester {
             if trimmed.starts_with("local function ") {
                 let rest = &trimmed["local function ".len()..];
                 let indent_len = l.len() - l.trim_start().len();
-                l = format!("{}def {} {{", &l[..indent_len], rest);
+                l = format!("{}fn {} {{", &l[..indent_len], rest);
             } else if trimmed.starts_with("function ") {
                 let rest = &trimmed["function ".len()..];
                 let indent_len = l.len() - l.trim_start().len();
-                l = format!("{}def {} {{", &l[..indent_len], rest);
+                l = format!("{}fn {} {{", &l[..indent_len], rest);
             } else if trimmed == "end" {
                 let indent_len = l.len() - l.trim_start().len();
                 l = format!("{}}}", &l[..indent_len]);

@@ -132,15 +132,11 @@ struct CGenContext<'a> {
 
 impl<'a> CGenContext<'a> {
     fn new(arena: &'a AstArena, analysis: &'a AnalysisResult, source: &'a str) -> Self {
-        let mut class_names = HashSet::new();
+        let class_names = HashSet::new();
         let mut struct_names = HashSet::new();
         for node in &arena.nodes {
             match node.node_kind() {
-                NodeKind::ClassDecl => {
-                    let name = arena.interner.resolve(SymbolId(node.lhs));
-                    class_names.insert(name.to_string());
-                }
-                NodeKind::StructDecl | NodeKind::RecordDecl | NodeKind::TypeAdtDecl => {
+                NodeKind::StructDecl | NodeKind::TypeAdtDecl => {
                     let name = arena.interner.resolve(SymbolId(node.lhs));
                     struct_names.insert(name.to_string());
                 }
@@ -271,15 +267,20 @@ impl<'a> CGenContext<'a> {
         match t_node.node_kind() {
             NodeKind::TypeNamed => {
                 let t_name = self.arena.interner.resolve(SymbolId(t_node.lhs));
+                let args = self.arena.type_args(type_spec_id);
+                if !args.is_empty() && matches!(t_name, "slice" | "array" | "stride" | "SliceBuffer" | "SliceView") {
+                    let inner_ty = self.resolve_c_type_from_spec(NodeId(args[0]));
+                    return format!("{}*", inner_ty);
+                }
                 match t_name {
-                    "string" => "const char*".to_string(),
+                    "string" | "str" => "const char*".to_string(),
                     "list" | "List" => "PilotList*".to_string(),
                     "void" => "void".to_string(),
                     "never" => "_Noreturn void".to_string(),
-                    "int" => "int64_t".to_string(),
-                    "uint" => "uint64_t".to_string(),
-                    "byte" => "uint8_t".to_string(),
-                    "float" => "double".to_string(),
+                    "int" | "i64" => "int64_t".to_string(),
+                    "uint" | "u64" => "uint64_t".to_string(),
+                    "byte" | "u8" => "uint8_t".to_string(),
+                    "float" | "f64" => "double".to_string(),
                     "FILE" => "FILE*".to_string(),
                     "FlowState" => "FlowState*".to_string(),
                     other => {
@@ -291,14 +292,6 @@ impl<'a> CGenContext<'a> {
                     }
                 }
             }
-            NodeKind::TypeSlice | NodeKind::TypeList => {
-                let inner_ty = if t_node.lhs != 0 {
-                    self.resolve_c_type_from_spec(NodeId(t_node.lhs))
-                } else {
-                    "int64_t".to_string()
-                };
-                format!("{}*", inner_ty)
-            }
             _ => "int64_t".to_string(),
         }
     }
@@ -307,35 +300,32 @@ impl<'a> CGenContext<'a> {
         for i in 0..self.arena.nodes.len() {
             let node = self.arena.nodes[i];
             match node.node_kind() {
-                NodeKind::RecordDecl | NodeKind::StructDecl | NodeKind::ClassDecl | NodeKind::InterfaceDecl => {
+                NodeKind::StructDecl | NodeKind::InterfaceDecl => {
                     let name = self.arena.interner.resolve(SymbolId(node.lhs));
-                    // Skip standard C library structures
                     if name == "timespec" || name == "timeval" || name == "tm" || name == "stat" {
                         continue;
                     }
                     if self.declared_types.insert(name.to_string()) {
                         writeln!(&mut self.out, "typedef struct {} {{", name).unwrap();
                         let mut has_fields = false;
-                        if let Some(rec_fields) = self.arena.record_fields.get(&(i as u32)) {
-                            for &(f_sym, f_ty_node) in rec_fields {
-                                let f_name = self.arena.interner.resolve(f_sym);
-                                let f_ty = if f_ty_node.is_some() {
-                                    self.resolve_c_type_from_spec(f_ty_node)
-                                } else {
-                                    "int64_t".to_string()
-                                };
-                                writeln!(&mut self.out, "    {} {};", f_ty, f_name).unwrap();
-                                has_fields = true;
-                            }
-                        } else if NodeId(node.rhs).is_some() && node.rhs != 0 {
+                        if NodeId(node.rhs).is_some() && node.rhs != 0 {
                             let body = *self.arena.node(NodeId(node.rhs));
                             if body.node_kind() == NodeKind::BlockExpr {
                                 let children = self.arena.children_slice(body.lhs, body.rhs);
                                 for &c_id in children {
                                     let c_node = *self.arena.node(NodeId(c_id));
-                                    if matches!(c_node.node_kind(), NodeKind::VarStmt | NodeKind::LetStmt | NodeKind::ConstDecl) {
+                                    if c_node.node_kind() == NodeKind::ParamDecl {
                                         let f_name = self.arena.interner.resolve(SymbolId(c_node.lhs));
-                                        let f_ty = if let Some(&ann_id) = self.arena.type_annotations.get(&c_id) {
+                                        let f_ty = if NodeId(c_node.rhs).is_some() {
+                                            self.resolve_c_type_from_spec(NodeId(c_node.rhs))
+                                        } else {
+                                            "int64_t".to_string()
+                                        };
+                                        writeln!(&mut self.out, "    {} {};", f_ty, f_name).unwrap();
+                                        has_fields = true;
+                                    } else if matches!(c_node.node_kind(), NodeKind::VarStmt | NodeKind::LetStmt | NodeKind::ConstDecl) {
+                                        let f_name = self.arena.interner.resolve(SymbolId(c_node.lhs));
+                                        let f_ty = if let Some(ann_id) = self.arena.type_annot(NodeId(c_id)) {
                                             self.resolve_c_type_from_spec(ann_id)
                                         } else {
                                             "int64_t".to_string()
@@ -346,17 +336,9 @@ impl<'a> CGenContext<'a> {
                                 }
                             }
                         }
-                        let is_class = node.node_kind() == NodeKind::ClassDecl;
-                        if !has_fields && !is_class {
-                            // Empty struct for ZST (Clang/GCC extension: sizeof == 0)
-                        } else if !has_fields {
-                            writeln!(&mut self.out, "    int64_t dummy;").unwrap();
-                        }
                         writeln!(&mut self.out, "}} {};\n", name).unwrap();
 
-                        if is_class {
-                            writeln!(&mut self.out, "#define {}() (({}*)calloc(1, sizeof({})))\n", name, name, name).unwrap();
-                        } else if !has_fields {
+                        if !has_fields {
                             writeln!(&mut self.out, "#define {}(...) (({}){{}})\n", name, name).unwrap();
                         } else {
                             writeln!(&mut self.out, "#define {}(...) (({}){{ __VA_ARGS__ }})\n", name, name).unwrap();
@@ -390,7 +372,7 @@ impl<'a> CGenContext<'a> {
         if name == "main" {
             return "int".to_string();
         }
-        if let Some(&ann) = self.arena.type_annotations.get(&fn_id.0) {
+        if let Some(ann) = self.arena.type_annot(fn_id) {
             return self.resolve_c_type_from_spec(ann);
         }
         if name.starts_with("print_") || name.starts_with("emit_") {
@@ -435,7 +417,7 @@ impl<'a> CGenContext<'a> {
                 let p_name = self.arena.interner.resolve(SymbolId(p_node.lhs));
                 let ty = if p_node.rhs != NodeId::NONE.0 {
                     self.resolve_c_type_from_spec(NodeId(p_node.rhs))
-                } else if let Some(&ann_id) = self.arena.type_annotations.get(&p_id) {
+                } else if let Some(ann_id) = self.arena.type_annot(NodeId(p_id)) {
                     self.resolve_c_type_from_spec(ann_id)
                 } else {
                     self.infer_c_type(NodeId(p_id)).to_string()
@@ -489,7 +471,7 @@ impl<'a> CGenContext<'a> {
                         self.emit_function_decl(child_id);
                     }
                 }
-                NodeKind::RecordDecl | NodeKind::StructDecl | NodeKind::TypeAdtDecl | NodeKind::ClassDecl | NodeKind::InterfaceDecl | NodeKind::ExtendDecl | NodeKind::ImportDecl | NodeKind::FromImportDecl => {
+                NodeKind::StructDecl | NodeKind::TypeAdtDecl | NodeKind::InterfaceDecl | NodeKind::ExtendDecl | NodeKind::ImportDecl => {
                     // Handled in preamble / types
                 }
                 _ => {
@@ -983,7 +965,7 @@ impl<'a> CGenContext<'a> {
 
                 if init_id.is_some() {
                     let mut expr_code = self.emit_expr(init_id);
-                    let ann_type = self.arena.type_annotations.get(&id.0).map(|&ann| self.resolve_c_type_from_spec(ann));
+                    let ann_type = self.arena.type_annot(id).map(|ann| self.resolve_c_type_from_spec(ann));
                     let ty = self.infer_c_type(init_id);
                     let init_inferred = self.infer_init_expr_type(init_id);
                     let mut is_array_decl = false;
@@ -1181,7 +1163,8 @@ impl<'a> CGenContext<'a> {
             NodeKind::ForExpr => {
                 let var_name = self.arena.interner.resolve(SymbolId(node.lhs));
                 let mut upper = "100".to_string();
-                if let Some(&iter_id) = self.arena.for_iter_nodes.get(&id.0) {
+                let iter_id = self.arena.for_iter(id);
+                if iter_id.is_some() {
                     let iter_node = *self.arena.node(iter_id);
                     if iter_node.node_kind() == NodeKind::BinaryExpr {
                         upper = self.emit_expr(NodeId(iter_node.rhs));

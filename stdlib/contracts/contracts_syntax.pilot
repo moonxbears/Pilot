@@ -1,0 +1,23 @@
+// =========================================================================
+// FILE: stdlib/contracts/contracts_syntax.pilot
+// OPT-IN DESIGN-BY-CONTRACT (`requires`, `ensures`, `invariant`),
+// CONTEXT DI (`context` / `with`) & ADAPTERS (`adapter`, `each`)
+// =========================================================================
+pub pkg Pilot.Contracts.Syntax;
+
+use Pilot.Core.Genesis.*;
+
+comptime {
+    __engine("bind_receptor", "requires",  33, 18);
+    __engine("bind_receptor", "ensures",   33, 19);
+    __engine("bind_receptor", "invariant", 33, 20);
+    __engine("bind_receptor", "adapter",   33, 21);
+    __engine("bind_receptor", "context",   33, 22);
+    __engine("bind_receptor", "each",      33, 23);
+}
+
+pub syntax {
+    requires(cond)  => quote { if !($cond) { return; } };
+    ensures(cond)   => quote { if !($cond) { return; } };
+    invariant(cond) => quote { if !($cond) { return; } };
+}

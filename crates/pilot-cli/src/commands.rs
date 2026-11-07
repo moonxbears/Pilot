@@ -711,7 +711,7 @@ pub fn cmd_pkg(args: &[String]) {
                 let _ = fs::create_dir_all("src");
                 let main_path = "src/main.pilot";
                 if !Path::new(main_path).exists() {
-                    let _ = fs::write(main_path, "def main() {\n    println(\"Hello from Pilot package!\");\n}\n");
+                    let _ = fs::write(main_path, "fn main() {\n    println(\"Hello from Pilot package!\");\n}\n");
                 }
                 let lock = pilot_pkg::PackageLock::generate(&manifest);
                 let _ = lock.save("pilot.lock.json");

@@ -1,13 +1,19 @@
 // =========================================================================
 // FILE: stdlib/core/syntax/type_construct.pilot
 // TYPE-POSITION SYMBOL CONSTRUCT MACROS (`syntax type_construct`)
-// Maps concise suffix/infix symbols to canonical lowercase `[Lang]` structs
+// Maps symbolic suffix/prefix/infix constructs to canonical `[Lang]` types
+// obeying Pratt Type-Spec Binding-Power Invariant #6:
+//   Postfix (`?`, `[]`, `[N]`, `[..]`, `[:]`, `@`, `^`) = 30
+//   > Intersection (`&`) = 20
+//   > Union (`|`) = 15
+//   > Function Arrow (`=>`, `->`) = 10
+//   > Fallible (`!`) = 5
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.TypeConstruct;
 
-use Pilot.Core.Genesis::*;
-use Pilot.Core.Interfaces::*;
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
 
 pub syntax type_construct {
     (T[])          => quote { slice<$T> };
@@ -18,8 +24,11 @@ pub syntax type_construct {
     (T @ N)        => quote { simd<$T, $N> };
     (T^)           => quote { signal<$T> };
     (@T)           => quote { pin<$T> };
+    (*T)           => quote { ptr<$T> };
     (T?)           => quote { option<$T> };
-    (T ! E)        => quote { result<$T, $E> };
-    ((A) => R)     => quote { fn<$A, $R> };
+    (T1 & T2)      => quote { intersect<$T1, $T2> };
     (T1 | T2)      => quote { union<$T1, $T2> };
+    ((A) => R)     => quote { fn<$A, $R> };
+    (A -> R)       => quote { fn<$A, $R> };
+    (T ! E)        => quote { result<$T, $E> };
 }

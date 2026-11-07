@@ -1,12 +1,21 @@
 // =========================================================================
 // FILE: stdlib/core/syntax/for.pilot
-// FOR ITERATION STATEMENT SYNTAX MACRO (`for(binding, iterable, body)`)
+// 3-TIER DYNAMIC `for` EXPRESSION & STATEMENT (`FixedScalar`, `MutableBounds`,
+// `WorklistStack` LIFO `continue a..b, ...;`, `CollectionYield` & `then`)
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.For;
 
-use Pilot.Core.Genesis::*;
-use Pilot.Core.Interfaces::*;
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+
+comptime {
+    __engine("bind_receptor", "for",      9,  0);
+    __engine("bind_receptor", "in",       10, 0);
+    __engine("bind_receptor", "then",     11, 0);
+    __engine("bind_receptor", "break",    13, 0);
+    __engine("bind_receptor", "continue", 13, 1);
+}
 
 pub syntax {
     for(binding, iterable, body) => quote {

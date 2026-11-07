@@ -1,12 +1,12 @@
-# Differential Suite 02: Recursive Call Stack & Frame Layout
+// Differential Suite 02: Recursive Call Stack & Frame Layout
 
-def fib(n: int) -> int {
+fn fib(n: int) -> int {
     if n <= 1 {
-        return n
+        return n;
     }
-    return fib(n - 1) + fib(n - 2)
+    return fib(n - 1) + fib(n - 2);
 }
 
-def main() -> int {
-    return fib(12)
+fn main() -> int {
+    return fib(12);
 }

@@ -46,6 +46,7 @@ comptime {
             ast_replace:  "replace_ast_pattern",
             attr_weave:   "register_attr_weaver",
             sym_registry: "query_registered_symbols",
+            receptor:     "bind_receptor",
         },
 
         // 2. Canonical `[Lang("...")]` Identifiers (Exported to `stdlib/core/*`)
@@ -217,9 +218,11 @@ comptime {
 
             vis_priv:     "priv",
             vis_file:     "file",
+            vis_prot:     "prot",
             vis_pkg:      "pkg",
             vis_int:      "int",
             vis_pub:      "pub",
+            vis_open:     "open",
             vis_export:   "export",
 
             mod_pure:     "pure",
@@ -325,9 +328,6 @@ comptime {
         },
     };
 }
-extern "rust" lib "libphysics" {
-    pub fn __engine(hook_name: str, ...) -> any;
-}
 // =========================================================================
 // STEP 1: DEFINE & BIND CORE `[...]` BRACKET ATTRIBUTES
 // =========================================================================
@@ -379,13 +379,15 @@ comptime fn __bootstrap_syntax(kw_name, params, body) => quote {
 // STEP 3: REGISTER MODIFIERS, MODULE KEYWORDS, RECEIVER & PRATT PRECEDENCES
 // =========================================================================
 comptime {
-    // 1. Short Access Visibility Rings (0..5)
+    // 1. Canonical Axis-1 Spatial Visibility Lattice (0..9)
     __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_priv,    0);
     __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_file,    1);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_pkg,     2);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_int,     3);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_pub,     4);
-    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_export,  5);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_prot,    3);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_pkg,     4);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_int,     6);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_pub,     7);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_open,    8);
+    __engine(Cfg.Hooks.modifier, Cfg.Tokens.vis_export,  9);
 
     // 2. Semantic Declaration & Mutability Modifiers (`var` replaces `mut`)
     __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_pure,    Cfg.Tokens.act_pure);
@@ -396,14 +398,32 @@ comptime {
     __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_partial, Cfg.Tokens.act_partial);
     __engine(Cfg.Hooks.modifier, Cfg.Tokens.mod_ext,     Cfg.Tokens.act_ext);
 
-    // 3. Clearance Ring (`lvl`), Package (`pkg`), Import (`use`) & Implicit `self`
+    // 3. Clearance Ring (`lvl`), Package (`pkg`), Import (`use`), Receptors & Implicit `self`
     __engine(Cfg.Hooks.param_mod,   Cfg.Tokens.kw_lvl,  Cfg.Tokens.act_ring);
     __engine(Cfg.Hooks.module_kw,   Cfg.Tokens.kw_pkg,  Cfg.Tokens.act_pkg);
     __engine(Cfg.Hooks.module_kw,   Cfg.Tokens.kw_use,  Cfg.Tokens.act_use);
     __engine(Cfg.Hooks.receiver_id, Cfg.Tokens.kw_self, Cfg.Tokens.kw_field, Cfg.Tokens.kw_value);
+    __engine(Cfg.Hooks.receptor, "true",  1, 1);
+    __engine(Cfg.Hooks.receptor, "false", 1, 0);
+    __engine(Cfg.Hooks.receptor, "none",  2, 0);
+    __engine(Cfg.Hooks.receptor, "else",  3, 0);
+    __engine(Cfg.Hooks.receptor, Cfg.Tokens.kw_syntax, 4, 0);
+    __engine(Cfg.Hooks.receptor, "type_construct",      5, 0);
+    __engine(Cfg.Hooks.receptor, "attribute_construct", 6, 0);
+    __engine(Cfg.Hooks.receptor, "extern",   7,  0);
+    __engine(Cfg.Hooks.receptor, "lib",      8,  0);
+    __engine(Cfg.Hooks.receptor, "break",    13, 0);
+    __engine(Cfg.Hooks.receptor, "continue", 13, 1);
+    __engine(Cfg.Hooks.receptor, "get",      23, 0);
+    __engine(Cfg.Hooks.receptor, "set",      24, 0);
+    __engine(Cfg.Hooks.receptor, "op",       25, 0);
+    __engine(Cfg.Hooks.receptor, "as",       29, 0);
+    __engine(Cfg.Hooks.receptor, "view",     29, 1);
 
     // 4. Register Global Pratt Operator Precedences ONCE for the Entire Language
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_coal,   Cfg.Ops.fix_infix,   Cfg.Ops.prec_coal,   Cfg.Ops.assoc_right);
+    __engine(Cfg.Hooks.pratt_op, "||",               Cfg.Ops.fix_infix,   Cfg.Ops.prec_or,     Cfg.Ops.assoc_left);
+    __engine(Cfg.Hooks.pratt_op, "&&",               Cfg.Ops.fix_infix,   Cfg.Ops.prec_and,    Cfg.Ops.assoc_left);
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_bitor,  Cfg.Ops.fix_infix,   Cfg.Ops.prec_bitor,  Cfg.Ops.assoc_left);
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_xor,    Cfg.Ops.fix_infix,   Cfg.Ops.prec_xor,    Cfg.Ops.assoc_left);
     __engine(Cfg.Hooks.pratt_op, Cfg.Ops.sym_bitand, Cfg.Ops.fix_infix,   Cfg.Ops.prec_bitand, Cfg.Ops.assoc_left);
@@ -453,37 +473,22 @@ comptime {
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Genesis;
 
+extern "rust" lib "libphysics" {
+    pub fn __engine(hook_name: str, ...) -> any;
+}
+
 // =========================================================================
 // STEP 4: PAIRED CFG KEYWORDS (`break`, `continue`, `op`) & SSA/REFLECTION HOOKS
 // =========================================================================
-pub syntax type_construct {
-    ($t: type) []           => quote { slice<$t> };
-    ($t: type) [..]         => quote { stride<$t> };
-    ($t: type) [:]          => quote { stride<$t> };
-    ($t: type) [N]          => quote { array<$t, N> };
-    ($t: type) [N, M]       => quote { grid<$t, N, M> };
-    ($t: type) ?            => quote { option<$t> };
-    ($t: type) ! ($e: type) => quote { result<$t, $e> };
-    ($t: type) @ N          => quote { simd<$t, N> };
-    @ ($t: type)            => quote { pin<$t> };
-    ($t: type) ^            => quote { signal<$t> };
-    ($a: type) => ($r: type)=> quote { fn<$a, $r> };
+pub syntax {
+    break()           => __engine(Cfg.Hooks.jmp_exit);
+    continue()        => __engine(Cfg.Hooks.jmp_head);
+    op(sig, body)     => __engine(Cfg.Hooks.decl_op, sig, body);
+    while(cond, body) => quote { loop { if !($cond) { break; } $body } };
 }
 
-pub syntax {
-    break()                     => __engine(Cfg.Hooks.jmp_exit);
-    continue()                  => __engine(Cfg.Hooks.jmp_head);
-    op(sig, body)               => __engine(Cfg.Hooks.decl_op, sig, body);
-    while(cond, body)           => quote { loop { if (!($cond)) { break; } $body } };
-    until(cond, body)           => quote { loop { if ($cond) { break; } $body } };
-    for(iter, body)             => quote { loop { if (!($iter)) { break; } $body } };
-    guard(cond, else_body)      => quote { if (!($cond)) { $else_body } };
-    switch(val, arms)           => quote { switch ($val) { $arms } };
-    case(pat, body)             => quote { case $pat: { $body } };
-    default(body)               => quote { default: { $body } };
-    try(body, catch_arms)       => quote { try { $body } $catch_arms };
-    catch(err, body)            => quote { catch ($err) { $body } };
-    unit(decl)                  => quote { $decl };
+pub syntax type_construct {
+    ((A) => R) => quote { fn<$A, $R> };
 }
 
 // Ring 80 (`lvl(80)`): Restricted to `Pilot.Core` SIMD/Primitive Implementations
