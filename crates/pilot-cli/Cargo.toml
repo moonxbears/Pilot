@@ -18,7 +18,6 @@ pilot-analysis = { path = "../pilot-analysis" }
 pilot-rt = { path = "../pilot-rt" }
 pilot-vm = { path = "../pilot-vm" }
 pilot-codegen = { path = "../pilot-codegen" }
-pilot-polyglot = { path = "../pilot-polyglot" }
 pilot-lsp = { path = "../pilot-lsp" }
 pilot-dap = { path = "../pilot-dap" }
 pilot-pkg = { path = "../pilot-pkg" }

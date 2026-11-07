@@ -1,0 +1,33 @@
+// ============================================================================
+// FILE: stdlib/core/reactive.pilot
+// Milestone 58.3: Glitch-Free Push-Pull Reactive Signal Nodes (`!^`)
+// Migrates `Signal<T>` from `crates/pilot-rt/src/concurrency.rs` into Pilot.
+// ============================================================================
+
+pub struct ReactiveSignalNode {
+    pub signal_id: i64;
+    pub current_val: i64;
+    pub epoch: i64;
+    pub is_dirty: bool;
+}
+
+pub fn create_reactive_signal(signal_id: i64, initial_val: i64) -> ReactiveSignalNode {
+    return ReactiveSignalNode {
+        signal_id: signal_id,
+        current_val: initial_val,
+        epoch: 1,
+        is_dirty: false,
+    };
+}
+
+pub fn update_reactive_signal(sig: ReactiveSignalNode, next_val: i64) -> ReactiveSignalNode {
+    if sig.current_val == next_val {
+        return sig;
+    }
+    return ReactiveSignalNode {
+        signal_id: sig.signal_id,
+        current_val: next_val,
+        epoch: sig.epoch + 1,
+        is_dirty: true,
+    };
+}

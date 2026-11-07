@@ -1,0 +1,34 @@
+// ============================================================================
+// FILE: stdlib/polyglot/shm.pilot
+// Milestone 58.4: Zero-Copy Contiguous Shared-Memory Descriptor (`0b10` / `0b01`)
+// Replaces `crates/pilot-polyglot/src/slice.rs` (`SliceBuffer`) in pure Pilot.
+// ============================================================================
+
+pub struct ShmWindowDescriptor {
+    pub base_addr: i64;
+    pub elem_count: i64;
+    pub elem_byte_stride: i64;
+    pub capacity: i64;
+    pub lattice_bits: i64;
+}
+
+pub fn create_shm_owned_buffer(base_addr: i64, capacity: i64, elem_byte_stride: i64) -> ShmWindowDescriptor {
+    return ShmWindowDescriptor {
+        base_addr: base_addr,
+        elem_count: 0,
+        elem_byte_stride: elem_byte_stride,
+        capacity: capacity,
+        lattice_bits: 2,
+    };
+}
+
+pub fn project_shm_borrowed_view(buf: ShmWindowDescriptor, offset_elems: i64, view_len: i64) -> ShmWindowDescriptor {
+    let sub_addr = buf.base_addr + (offset_elems * buf.elem_byte_stride);
+    return ShmWindowDescriptor {
+        base_addr: sub_addr,
+        elem_count: view_len,
+        elem_byte_stride: buf.elem_byte_stride,
+        capacity: view_len,
+        lattice_bits: 1,
+    };
+}

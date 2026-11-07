@@ -221,8 +221,7 @@ pub fn compile_stdlib() {
         let binary = pilot_vm::BytecodeCompiler::compile(&arena, arena.root);
         let bytes = binary.serialize();
 
-        let sha_bytes = pilot_rt::sha256(src.as_bytes());
-        let hash_hex: String = sha_bytes.iter().take(8).map(|b| format!("{:02x}", b)).collect();
+        let hash_hex = format!("{:016x}", bytes.len() as u64 ^ (src.len() as u64).rotate_left(17));
 
         let canon_pilc = cache_dir.join(format!("{}.pilc", mod_name));
         let _ = fs::write(&canon_pilc, &bytes);

@@ -57,7 +57,6 @@ dependencies = [
  "pilot-parser",
  "pilot-perf",
  "pilot-pkg",
- "pilot-polyglot",
  "pilot-rt",
  "pilot-span",
  "pilot-vm",
@@ -71,7 +70,6 @@ dependencies = [
  "pilot-ast",
  "pilot-intern",
  "pilot-parser",
- "pilot-polyglot",
  "pilot-rt",
  "pilot-span",
 ]
@@ -117,7 +115,6 @@ dependencies = [
  "pilot-lexer",
  "pilot-lsp",
  "pilot-parser",
- "pilot-polyglot",
  "pilot-rt",
  "pilot-span",
  "pilot-vm",
@@ -195,14 +192,6 @@ name = "pilot-pkg"
 version = "1.1.51"
 dependencies = [
  "pilot-rt",
-]
-
-[[package]]
-name = "pilot-polyglot"
-version = "0.1.0"
-dependencies = [
- "pilot-rt",
- "pilot-span",
 ]
 
 [[package]]

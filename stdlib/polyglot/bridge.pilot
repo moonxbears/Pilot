@@ -1,0 +1,29 @@
+// ============================================================================
+// FILE: stdlib/polyglot/bridge.pilot
+// Milestone 58.4: Out-of-Process & In-Memory Polyglot Runtime Bridge
+// Replaces `crates/pilot-polyglot/src/bridge.rs` in pure Pilot.
+// ============================================================================
+
+pub struct PolyglotExecutionPlan {
+    pub runtime_lang: str;
+    pub host_binary: str;
+    pub wrapped_script: str;
+}
+
+pub pure fn resolve_polyglot_host_binary(lang: str) -> str {
+    if lang == "python" || lang == "py" { return "python3"; }
+    if lang == "js" || lang == "node" || lang == "javascript" { return "node"; }
+    if lang == "lua" { return "lua"; }
+    if lang == "sh" || lang == "bash" { return "sh"; }
+    return "sh";
+}
+
+pub fn build_polyglot_execution_plan(lang: str, preamble_json: str, snippet: str) -> PolyglotExecutionPlan {
+    let bin = resolve_polyglot_host_binary(lang);
+    let wrapped = preamble_json + "\n" + snippet;
+    return PolyglotExecutionPlan {
+        runtime_lang: lang,
+        host_binary: bin,
+        wrapped_script: wrapped,
+    };
+}

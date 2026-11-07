@@ -1,0 +1,25 @@
+// ============================================================================
+// FILE: stdlib/db/postgres_wire.pilot
+// Milestone 58.4: PostgreSQL v3 Wire Protocol Frame Encoder (`Startup` & `Q`)
+// ============================================================================
+
+pub struct PostgresWirePacket {
+    pub msg_tag_byte: i64;
+    pub payload_len: i64;
+    pub query_sql: str;
+}
+
+// PostgreSQL v3 protocol version `3.0` (`196608 = (3 << 16) | 0`).
+pub pure fn postgres_v3_protocol_version() -> i64 {
+    return 196608;
+}
+
+// Encodes a PostgreSQL v3 Simple Query (`'Q'` = `81`) wire packet descriptor.
+pub fn encode_postgres_query_packet(sql: str) -> PostgresWirePacket {
+    let total_len = 4 + sql.len() + 1;
+    return PostgresWirePacket {
+        msg_tag_byte: 81,
+        payload_len: total_len,
+        query_sql: sql,
+    };
+}

@@ -1,0 +1,73 @@
+// ============================================================================
+// FILE: selfhost/ffi_bindgen.pilot
+// Milestone 58.1: Self-Hosted C Header & Host FFI Binding Generator
+// Generates C-ABI extern prototypes and host `LibraryImport` / `dlopen`
+// bindings from `LayoutTable` physics descriptors in pure Pilot.
+// ============================================================================
+
+pub struct FfiBindingBundle {
+    pub symbol_name: str;
+    pub c_prototype: str;
+    pub csharp_library_import: str;
+}
+
+pub pure fn ffi_c_type_for_physics(reg_class: i64, bit_width: i64) -> str {
+    if reg_class == 0 || reg_class == 1 { return "void"; }
+    if reg_class == 2 {
+        if bit_width <= 32 { return "int32_t"; }
+        return "int64_t";
+    }
+    if reg_class == 3 {
+        if bit_width == 1 { return "uint8_t"; }
+        if bit_width <= 32 { return "uint32_t"; }
+        return "uint64_t";
+    }
+    if reg_class == 4 {
+        if bit_width <= 32 { return "float"; }
+        return "double";
+    }
+    return "void*";
+}
+
+pub pure fn ffi_csharp_type_for_physics(reg_class: i64, bit_width: i64) -> str {
+    if reg_class == 0 || reg_class == 1 { return "void"; }
+    if reg_class == 2 {
+        if bit_width <= 32 { return "int"; }
+        return "long";
+    }
+    if reg_class == 3 {
+        if bit_width == 1 { return "byte"; }
+        if bit_width <= 32 { return "uint"; }
+        return "ulong";
+    }
+    if reg_class == 4 {
+        if bit_width <= 32 { return "float"; }
+        return "double";
+    }
+    return "nint";
+}
+
+pub fn generate_ffi_binding(
+    lib_name: str,
+    symbol_name: str,
+    param_name: str,
+    param_reg: i64,
+    param_bits: i64,
+    ret_reg: i64,
+    ret_bits: i64
+) -> FfiBindingBundle {
+    let c_p = ffi_c_type_for_physics(param_reg, param_bits);
+    let c_r = ffi_c_type_for_physics(ret_reg, ret_bits);
+    let cs_p = ffi_csharp_type_for_physics(param_reg, param_bits);
+    let cs_r = ffi_csharp_type_for_physics(ret_reg, ret_bits);
+
+    let c_proto = "extern " + c_r + " " + symbol_name + "(" + c_p + " " + param_name + ");";
+    let cs_imp = "[LibraryImport(\"" + lib_name + "\", EntryPoint = \"" + symbol_name + "\")]\n"
+        + "internal static partial " + cs_r + " " + symbol_name + "(" + cs_p + " " + param_name + ");";
+
+    return FfiBindingBundle {
+        symbol_name: symbol_name,
+        c_prototype: c_proto,
+        csharp_library_import: cs_imp,
+    };
+}

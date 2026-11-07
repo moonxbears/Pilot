@@ -1,0 +1,29 @@
+// ============================================================================
+// FILE: stdlib/polyglot/marshal.pilot
+// Milestone 58.4: Polyglot JSON & Variable Marshaling Engine
+// Replaces `crates/pilot-polyglot/src/marshal.pilot` in pure Pilot.
+// ============================================================================
+
+pub struct MarshaledBinding {
+    pub var_name: str;
+    pub json_payload: str;
+    pub reg_class: i64;
+}
+
+pub fn marshal_int_binding(var_name: str, val_str: str) -> MarshaledBinding {
+    let json = "{\"" + var_name + "\":" + val_str + "}";
+    return MarshaledBinding {
+        var_name: var_name,
+        json_payload: json,
+        reg_class: 2,
+    };
+}
+
+pub fn marshal_str_binding(var_name: str, val_str: str) -> MarshaledBinding {
+    let json = "{\"" + var_name + "\":\"" + val_str + "\"}";
+    return MarshaledBinding {
+        var_name: var_name,
+        json_payload: json,
+        reg_class: 6,
+    };
+}

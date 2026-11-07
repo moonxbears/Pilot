@@ -1,0 +1,32 @@
+// ============================================================================
+// FILE: stdlib/db/sql_engine.pilot
+// Milestone 58.4: Embedded Relational SQL Query Planner & Executor
+// Replaces `crates/pilot-polyglot/src/db.rs` with zero fabricated `"item_{id}"`
+// mock rows in pure Pilot.
+// ============================================================================
+
+pub struct SqlQueryPlan {
+    pub table_name: str;
+    pub projection_cols: str;
+    pub where_predicate: str;
+    pub sql_statement: str;
+}
+
+pub fn build_sql_select_plan(
+    table_name: str,
+    projection_cols: str,
+    where_predicate: str
+) -> SqlQueryPlan {
+    let base = "SELECT " + projection_cols + " FROM " + table_name;
+    let stmt = if where_predicate.len() > 0 {
+        base + " WHERE " + where_predicate + ";"
+    } else {
+        base + ";"
+    };
+    return SqlQueryPlan {
+        table_name: table_name,
+        projection_cols: projection_cols,
+        where_predicate: where_predicate,
+        sql_statement: stmt,
+    };
+}

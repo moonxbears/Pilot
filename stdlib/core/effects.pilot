@@ -1,0 +1,57 @@
+// ============================================================================
+// FILE: stdlib/core/effects.pilot
+// Milestone 58.3: Transactional Copy-on-Write Effect Dry-Run Sandbox (`!?`)
+// Migrates `ShadowEffectContext` from `crates/pilot-rt/src/concurrency.rs`
+// into pure Pilot.
+// ============================================================================
+
+pub struct ShadowEffectFrame {
+    pub base_val: i64;
+    pub staged_val: i64;
+    pub has_staged_write: bool;
+    pub is_committed: bool;
+}
+
+pub fn begin_effect_dry_run(base_val: i64) -> ShadowEffectFrame {
+    return ShadowEffectFrame {
+        base_val: base_val,
+        staged_val: base_val,
+        has_staged_write: false,
+        is_committed: false,
+    };
+}
+
+pub fn stage_effect_write(frame: ShadowEffectFrame, new_val: i64) -> ShadowEffectFrame {
+    return ShadowEffectFrame {
+        base_val: frame.base_val,
+        staged_val: new_val,
+        has_staged_write: true,
+        is_committed: false,
+    };
+}
+
+pub pure fn read_effect_value(frame: ShadowEffectFrame) -> i64 {
+    if frame.has_staged_write || frame.is_committed {
+        return frame.staged_val;
+    }
+    return frame.base_val;
+}
+
+pub fn rollback_effect_dry_run(frame: ShadowEffectFrame) -> ShadowEffectFrame {
+    return ShadowEffectFrame {
+        base_val: frame.base_val,
+        staged_val: frame.base_val,
+        has_staged_write: false,
+        is_committed: false,
+    };
+}
+
+pub fn commit_effect_dry_run(frame: ShadowEffectFrame) -> ShadowEffectFrame {
+    let next_base = if frame.has_staged_write { frame.staged_val } else { frame.base_val };
+    return ShadowEffectFrame {
+        base_val: next_base,
+        staged_val: next_base,
+        has_staged_write: false,
+        is_committed: true,
+    };
+}

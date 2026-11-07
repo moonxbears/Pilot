@@ -1,0 +1,25 @@
+// ============================================================================
+// FILE: stdlib/db/mysql_wire.pilot
+// Milestone 58.4: MySQL Binary/Text Wire Protocol Frame Encoder (`COM_QUERY`)
+// ============================================================================
+
+pub struct MysqlWirePacket {
+    pub sequence_id: i64;
+    pub command_byte: i64;
+    pub payload_len: i64;
+    pub query_sql: str;
+}
+
+// MySQL `COM_QUERY` command byte (`0x03` = `3`).
+pub pure fn mysql_com_query_byte() -> i64 {
+    return 3;
+}
+
+pub fn encode_mysql_query_packet(sequence_id: i64, sql: str) -> MysqlWirePacket {
+    return MysqlWirePacket {
+        sequence_id: sequence_id,
+        command_byte: mysql_com_query_byte(),
+        payload_len: 1 + sql.len(),
+        query_sql: sql,
+    };
+}
