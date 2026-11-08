@@ -1,0 +1,96 @@
+// =============================================================================
+// FILE: selfhost/diagnostics/warnings.pilot
+// Pilot Semantic Diagnostics: Warning Diagnostic Catalog (Severity 2)
+// =============================================================================
+pub pkg Pilot.Diagnostics.Warnings;
+
+pub struct WarningDef : IValue {
+    pub code: str;
+    pub title: str;
+    pub description: str;
+    pub category: str;
+}
+
+pub let WARNINGS = [
+    // -------------------------------------------------------------------------
+    // 1. Control Flow & Liveness (UNREACH001, LOOP005)
+    // -------------------------------------------------------------------------
+    WarningDef {
+        code: "UNREACH001",
+        title: "Unreachable Code",
+        description: "Unreachable code detected after diverging statement (return, break, continue, panic)",
+        category: "ControlFlow",
+    },
+    WarningDef {
+        code: "LOOP005",
+        title: "Potential Infinite Loop",
+        description: "'while true' loop contains no 'break', 'return', or diverging exit statement",
+        category: "ControlFlow",
+    },
+
+    // -------------------------------------------------------------------------
+    // 2. Conditionals & Dead Branches (COND001, COND002)
+    // -------------------------------------------------------------------------
+    WarningDef {
+        code: "COND001",
+        title: "Constant Condition Expression",
+        description: "Condition expression is a compile-time boolean constant; one branch is unreachable",
+        category: "DeadCode",
+    },
+    WarningDef {
+        code: "COND002",
+        title: "Empty Conditional Branch",
+        description: "Empty branch body in 'if' statement; execution has no effect",
+        category: "DeadCode",
+    },
+
+    // -------------------------------------------------------------------------
+    // 3. Unimplemented Stubs & Declarations (UNIMP001 - UNIMP004)
+    // -------------------------------------------------------------------------
+    WarningDef {
+        code: "UNIMP001",
+        title: "Placeholder Stub Invocation",
+        description: "Invocation of placeholder 'todo()' or 'unimplemented()' stub",
+        category: "Completeness",
+    },
+    WarningDef {
+        code: "UNIMP002",
+        title: "Empty Function Implementation",
+        description: "Function declares a non-void return type but contains an empty body",
+        category: "Completeness",
+    },
+    WarningDef {
+        code: "UNIMP003",
+        title: "Missing Interface Method",
+        description: "Struct declares interface conformance but lacks required contract implementation",
+        category: "Completeness",
+    },
+    WarningDef {
+        code: "UNIMP004",
+        title: "Unimplemented Attribute Marker",
+        description: "Declaration is marked with '[Unimplemented]' or '[Todo]' attribute",
+        category: "Completeness",
+    },
+
+    // -------------------------------------------------------------------------
+    // 4. Deprecations, Unused Code & Directives (ERR005, UNUSED001, PREPROC006)
+    // -------------------------------------------------------------------------
+    WarningDef {
+        code: "ERR005",
+        title: "Legacy Try-Catch Usage",
+        description: "Legacy 'try'/'catch' syntax used in native code; prefer values-first '!' and '?' operators",
+        category: "Deprecation",
+    },
+    WarningDef {
+        code: "UNUSED001",
+        title: "Unused Local Variable",
+        description: "Variable or parameter is declared but never referenced in enclosing scope",
+        category: "DeadCode",
+    },
+    WarningDef {
+        code: "PREPROC006",
+        title: "User Preprocessor Warning",
+        description: "Explicit compile warning emitted via #warning preprocessor directive",
+        category: "Preprocessor",
+    },
+];

@@ -4,7 +4,7 @@ use Pilot.Core.Reflect.*;
 
 
 
-
+var undeclared;
 var unused_int : i32 = 5;
 fn unused_function() -> void {}
 

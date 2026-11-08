@@ -320,3 +320,109 @@ fn test_semantic_pattern_matching_diagnostics() {
     let res = check_src("fn test_good_sw(x: i64) -> i64 { return switch x { case 1: 1, case _: 0 }; }");
     assert!(!res.diagnostics.iter().any(|d| d.message.contains("MATCH002")), "Unexpected MATCH002 on valid arms: {:?}", res.diagnostics);
 }
+
+#[test]
+fn test_semantic_warning_and_unimplemented_diagnostics() {
+    // 1. UNREACH001: Unreachable code after return
+    let res = check_src("fn test_unreach() -> i64 { return 42; let dead = 10; return dead; }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("UNREACH001")), "Expected UNREACH001 on dead code: {:?}", res.diagnostics);
+    let d = res.diagnostics.iter().find(|d| d.message.contains("UNREACH001")).unwrap();
+    assert_eq!(d.severity, pilot_analysis::DiagnosticSeverity::Warning);
+
+    // Valid: reachable code
+    let res = check_src("fn test_reach() -> i64 { let alive = 10; return alive; }");
+    assert!(!res.diagnostics.iter().any(|d| d.message.contains("UNREACH001")), "Unexpected UNREACH001: {:?}", res.diagnostics);
+
+    // 2. LOOP005: Potential infinite loop
+    let res = check_src("fn test_inf() { while true { let x = 1; } }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("LOOP005")), "Expected LOOP005 on infinite loop: {:?}", res.diagnostics);
+    let d = res.diagnostics.iter().find(|d| d.message.contains("LOOP005")).unwrap();
+    assert_eq!(d.severity, pilot_analysis::DiagnosticSeverity::Warning);
+
+    // Valid: loop with break
+    let res = check_src("fn test_finite() { while true { break; } }");
+    assert!(!res.diagnostics.iter().any(|d| d.message.contains("LOOP005")), "Unexpected LOOP005 on break loop: {:?}", res.diagnostics);
+
+    // 3. COND001: Compile-time constant condition
+    let res = check_src("fn test_cond(x: i64) { if false { let y = 1; } }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("COND001")), "Expected COND001 on const cond: {:?}", res.diagnostics);
+
+    // 4. COND002: Empty branch in condition
+    let res = check_src("fn test_empty_if(x: i64) { if x > 0 {} }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("COND002")), "Expected COND002 on empty branch: {:?}", res.diagnostics);
+
+    // 5. UNIMP001: Call to todo() or unimplemented()
+    let res = check_src("fn test_todo() { todo(); }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("UNIMP001")), "Expected UNIMP001 on todo(): {:?}", res.diagnostics);
+    let res = check_src("fn test_unimp() { unimplemented(); }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("UNIMP001")), "Expected UNIMP001 on unimplemented(): {:?}", res.diagnostics);
+
+    // 6. UNIMP002: Function declaring return type with empty body
+    let res = check_src("fn test_empty_body() -> i64 {}");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("UNIMP002")), "Expected UNIMP002 on empty fn body: {:?}", res.diagnostics);
+
+    // Valid: non-empty body
+    let res = check_src("fn test_valid_body() -> i64 { return 1; }");
+    assert!(!res.diagnostics.iter().any(|d| d.message.contains("UNIMP002")), "Unexpected UNIMP002 on valid fn: {:?}", res.diagnostics);
+
+    // 7. UNIMP003: Struct missing interface method
+    let res = check_src("interface IWorker { fn perform() -> i64; } struct BadWorker : IWorker { pub id: i64; }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("UNIMP003")), "Expected UNIMP003 on missing iface method: {:?}", res.diagnostics);
+
+    // Valid: struct implementing interface method
+    let res = check_src("interface IWorker { fn perform() -> i64; } struct GoodWorker : IWorker { pub id: i64; pub fn perform() -> i64 { return 1; } }");
+    assert!(!res.diagnostics.iter().any(|d| d.message.contains("UNIMP003")), "Unexpected UNIMP003 on implemented iface: {:?}", res.diagnostics);
+
+    // 8. UNIMP004: [Unimplemented] attribute
+    let res = check_src("[Unimplemented] struct FutureFeature { pub x: i64; }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("UNIMP004")), "Expected UNIMP004 on [Unimplemented]: {:?}", res.diagnostics);
+}
+
+#[test]
+fn test_semantic_info_and_optimization_diagnostics() {
+    // 1. OPT001: Constant binary expression can be folded at compile time
+    let res = check_src("fn test_fold() -> i64 { return 10 + 20; }");
+    assert!(
+        res.diagnostics.iter().any(|d| d.code == "OPT001" && d.severity == pilot_analysis::DiagnosticSeverity::Info),
+        "Expected OPT001 info on constant addition: {:?}",
+        res.diagnostics
+    );
+
+    // Non-constant binary expr does not trigger OPT001
+    let res = check_src("fn test_non_const(x: i64) -> i64 { return x + 1; }");
+    assert!(
+        !res.diagnostics.iter().any(|d| d.code == "OPT001"),
+        "Unexpected OPT001 on non-constant expr: {:?}",
+        res.diagnostics
+    );
+
+    // 2. OPT002: Bounded loop unrolling candidate
+    let res = check_src("fn test_unroll() { for i in 0 .. 4 { let y = i; } }");
+    assert!(
+        res.diagnostics.iter().any(|d| d.code == "OPT002" && d.severity == pilot_analysis::DiagnosticSeverity::Info),
+        "Expected OPT002 info on bounded loop: {:?}",
+        res.diagnostics
+    );
+}
+
+#[test]
+fn test_diagnostic_catalogs_parsed_cleanly() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    for catalog_rel in [
+        "selfhost/diagnostics/errors.pilot",
+        "selfhost/diagnostics/warnings.pilot",
+        "selfhost/diagnostics/infos.pilot",
+    ] {
+        let p = root.join(catalog_rel);
+        assert!(p.exists(), "Diagnostic catalog file must exist: {:?}", p);
+        let src = std::fs::read_to_string(&p).expect("read catalog");
+        let parsed = parse(&src);
+        assert!(
+            parsed.diagnostics.is_empty(),
+            "Diagnostic catalog {:?} must parse with 0 diagnostics, got: {:?}",
+            catalog_rel,
+            parsed.diagnostics
+        );
+    }
+}
+

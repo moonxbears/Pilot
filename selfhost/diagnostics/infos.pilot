@@ -1,0 +1,78 @@
+// =============================================================================
+// FILE: selfhost/diagnostics/infos.pilot
+// Pilot Semantic Diagnostics: Info & Optimization Catalog (Severity 3)
+// =============================================================================
+pub pkg Pilot.Diagnostics.Infos;
+
+pub struct InfoDef : IValue {
+    pub code: str;
+    pub title: str;
+    pub description: str;
+    pub category: str;
+}
+
+pub let INFOS = [
+    // -------------------------------------------------------------------------
+    // 1. Compile-Time Optimization Candidates (OPT001 - OPT010)
+    // -------------------------------------------------------------------------
+    InfoDef {
+        code: "OPT001",
+        title: "Constant Binary Expression Folding",
+        description: "Binary arithmetic or logic expression with literal operands can be folded at compile time",
+        category: "Optimization",
+    },
+    InfoDef {
+        code: "OPT002",
+        title: "Bounded Loop Unrolling",
+        description: "Bounded loop with compile-time known range is an eligible candidate for unrolling",
+        category: "Optimization",
+    },
+    InfoDef {
+        code: "OPT003",
+        title: "Leaf Function Inlining",
+        description: "Small leaf function is an eligible candidate for automatic compile-time inlining",
+        category: "Optimization",
+    },
+    InfoDef {
+        code: "OPT004",
+        title: "Value Type Register Packing",
+        description: "0b00 value type layout fits within standard CPU hardware registers (memcpy eligible)",
+        category: "Optimization",
+    },
+    InfoDef {
+        code: "OPT005",
+        title: "Perceus Drop-Reuse In-Place Update",
+        description: "0b10 buffer variable is uniquely owned and eligible for destructive in-place reuse",
+        category: "PerceusOptimization",
+    },
+    InfoDef {
+        code: "OPT006",
+        title: "Zero-Copy Reference View Borrowing",
+        description: "Contiguous buffer slice can be borrowed as 0b01 view with zero heap allocations",
+        category: "MemoryOptimization",
+    },
+    InfoDef {
+        code: "OPT007",
+        title: "Structure of Arrays (SoA) Vectorization",
+        description: "Contiguous struct array layout enables SIMD auto-vectorization across parallel lanes",
+        category: "SimdOptimization",
+    },
+    InfoDef {
+        code: "OPT008",
+        title: "Common Subexpression Elimination (CSE)",
+        description: "Pure subexpression computes identical value across basic block; eligible for CSE",
+        category: "Optimization",
+    },
+    InfoDef {
+        code: "OPT009",
+        title: "Tail-Call Elimination",
+        description: "Recursive call in tail position can be transformed into iterative loop without stack frame overhead",
+        category: "Optimization",
+    },
+    InfoDef {
+        code: "OPT010",
+        title: "Dead Branch Pruning",
+        description: "Compile-time evaluated branch condition allows unselected branch to be eliminated from codegen",
+        category: "Optimization",
+    },
+];

@@ -59,34 +59,16 @@ pub fn resolve_type_sym(type_sym: i64, node_count: i64) -> i64 {
     var j = 0;
     while j < node_count {
         let k = __engine(Cfg.ast.ast_node_kind, j);
-        if k == 1 {
-            let s = __engine(Cfg.ast.ast_node_sym, j);
-            if s == type_sym {
-                let lid = infer_struct(j, node_count);
-                return lid;
-            }
+        if k == 1 && __engine(Cfg.ast.ast_node_sym, j) == type_sym {
+            return infer_struct(j, node_count);
+        }
+        if k == 21 && __engine(Cfg.ast.ast_node_raw_bits, j) == type_sym {
+            let ex = __engine(Cfg.ast.ast_get_bound_layout, j);
+            if ex != 4294967295 { return ex; }
         }
         j = j + 1;
     }
-
-    // Fallback for external/undeclared type symbols: reuse if already bound, else register on demand
-    j = 0;
-    while j < node_count {
-        let k = __engine(Cfg.ast.ast_node_kind, j);
-        if k == 21 {
-            let b = __engine(Cfg.ast.ast_node_raw_bits, j);
-            if b == type_sym {
-                let ex = __engine(Cfg.ast.ast_get_bound_layout, j);
-                if ex != 4294967295 {
-                    return ex;
-                }
-            }
-        }
-        j = j + 1;
-    }
-
-    let ext_lid = __engine(Cfg.ast.layout_scalar, 64, 1, 0);
-    return ext_lid;
+    return __engine(Cfg.ast.layout_scalar, 64, 1, 0);
 }
 
 pub fn infer_struct(s_id: i64, node_count: i64) -> i64 {
@@ -493,66 +475,24 @@ pub fn infer_node(i: i64, node_count: i64) -> i64 {
         return 0;
     }
 
-    if kind == 16 {
-        return infer_call_expr(i, node_count);
-    }
+    if kind == 16 { return infer_call_expr(i, node_count); }
+    if kind == 17 { return infer_member_expr(i, node_count); }
+    if kind == 19 { return infer_binary_expr(i, node_count); }
 
-    if kind == 17 {
-        return infer_member_expr(i, node_count);
-    }
-
-    if kind == 19 {
-        return infer_binary_expr(i, node_count);
-    }
-
-    if kind == 9 {
-        let c_count = __engine(Cfg.ast.ast_child_count, i);
-        if c_count > 0 {
-            let val_id = __engine(Cfg.ast.ast_child_at, i, 0);
-            let val_lid = __engine(Cfg.ast.ast_get_bound_layout, val_id);
-            if val_lid != 4294967295 {
-                __engine(Cfg.ast.ast_bind_layout, i, val_lid);
-                return val_lid;
-            }
+    if (kind == 8 || kind == 9) && __engine(Cfg.ast.ast_child_count, i) > 0 {
+        let val_lid = __engine(Cfg.ast.ast_get_bound_layout, __engine(Cfg.ast.ast_child_at, i, 0));
+        if val_lid != 4294967295 {
+            __engine(Cfg.ast.ast_bind_layout, i, val_lid);
+            return val_lid;
         }
         return 0;
     }
 
-    if kind == 7 {
-        let c_count = __engine(Cfg.ast.ast_child_count, i);
-        if c_count > 0 {
-            let body_id = __engine(Cfg.ast.ast_child_at, i, c_count - 1);
-            let body_lid = __engine(Cfg.ast.ast_get_bound_layout, body_id);
-            if body_lid != 4294967295 {
-                __engine(Cfg.ast.ast_bind_layout, i, body_lid);
-                return body_lid;
-            }
-        }
-        return 0;
-    }
-
-    if kind == 8 {
-        let c_count = __engine(Cfg.ast.ast_child_count, i);
-        if c_count > 0 {
-            let val_id = __engine(Cfg.ast.ast_child_at, i, 0);
-            let val_lid = __engine(Cfg.ast.ast_get_bound_layout, val_id);
-            if val_lid != 4294967295 {
-                __engine(Cfg.ast.ast_bind_layout, i, val_lid);
-                return val_lid;
-            }
-        }
-        return 0;
-    }
-
-    if kind == 18 {
-        let c_count = __engine(Cfg.ast.ast_child_count, i);
-        if c_count > 0 {
-            let last_id = __engine(Cfg.ast.ast_child_at, i, c_count - 1);
-            let last_lid = __engine(Cfg.ast.ast_get_bound_layout, last_id);
-            if last_lid != 4294967295 {
-                __engine(Cfg.ast.ast_bind_layout, i, last_lid);
-                return last_lid;
-            }
+    if (kind == 7 || kind == 18) && __engine(Cfg.ast.ast_child_count, i) > 0 {
+        let last_lid = __engine(Cfg.ast.ast_get_bound_layout, __engine(Cfg.ast.ast_child_at, i, __engine(Cfg.ast.ast_child_count, i) - 1));
+        if last_lid != 4294967295 {
+            __engine(Cfg.ast.ast_bind_layout, i, last_lid);
+            return last_lid;
         }
         return 0;
     }
@@ -565,14 +505,10 @@ pub fn infer_node(i: i64, node_count: i64) -> i64 {
             if c_count >= 3 {
                 let else_id = __engine(Cfg.ast.ast_child_at, i, 2);
                 let else_lid = __engine(Cfg.ast.ast_get_bound_layout, else_id);
-                if then_lid != 4294967295 {
-                    if else_lid != 4294967295 {
-                        if then_lid != else_lid {
-                            let u_lid = __engine(Cfg.ast.layout_union, 8, then_lid, else_lid);
-                            __engine(Cfg.ast.ast_bind_layout, i, u_lid);
-                            return u_lid;
-                        }
-                    }
+                if then_lid != 4294967295 && else_lid != 4294967295 && then_lid != else_lid {
+                    let u_lid = __engine(Cfg.ast.layout_union, 8, then_lid, else_lid);
+                    __engine(Cfg.ast.ast_bind_layout, i, u_lid);
+                    return u_lid;
                 }
             }
             if then_lid != 4294967295 {
@@ -600,20 +536,10 @@ pub fn infer_node(i: i64, node_count: i64) -> i64 {
 }
 
 pub fn verify_capability_transition(src_cap: i64, dst_cap: i64) -> bool {
-    // 0 = VALUE (`0b00`), 1 = BORROW_REF (`0b01`), 4 = OWNED_OBJ (`0b10`), 5 = SCOPED_GUARD (`0b11`)
-    if src_cap == dst_cap {
-        return true;
-    }
-    if src_cap == 0 {
-        return dst_cap == 1;
-    }
-    if src_cap == 4 {
-        if dst_cap == 1 { return true; }
-        if dst_cap == 5 { return true; }
-    }
-    if src_cap == 5 {
-        return dst_cap == 1;
-    }
+    if src_cap == dst_cap { return true; }
+    if src_cap == 0 { return dst_cap == 1; }
+    if src_cap == 4 { return dst_cap == 1 || dst_cap == 5; }
+    if src_cap == 5 { return dst_cap == 1; }
     return false;
 }
 
@@ -741,10 +667,7 @@ pub fn verify_decl_contracts(nid: i64, enforce_naming: bool) -> i64 {
         if bnm == "IReference" { has_iref = true; }
         if bnm == "IObject" { has_iobj = true; }
         if bnm == "IGuard" { has_iguard = true; }
-        if bnm == "IAttribute" || bnm == "IInheritedAttribute" || bnm == "IInterceptor" || bnm == "IEcsRule" {
-            has_iattr = true;
-        }
-        if str_ends_with_bytes(bnm, "Attribute") {
+        if bnm == "IAttribute" || bnm == "IInheritedAttribute" || bnm == "IInterceptor" || bnm == "IEcsRule" || str_ends_with_bytes(bnm, "Attribute") {
             has_iattr = true;
         }
         bi = bi + 1;
@@ -929,19 +852,8 @@ pub fn verify_ident_not_keyword(nid: i64, kw_set: str) -> i64 {
 
 pub fn is_type_name_or_sym_optional(sym: i64, name: str, node_count: i64) -> bool {
     let nlen = name.len();
-    if nlen > 0 {
-        let last_ch = name.byte_at(nlen - 1);
-        if last_ch == 63 {
-            return true;
-        }
-    }
-    if nlen == 6 {
-        if name.byte_at(0) == 111 && name.byte_at(1) == 112 && name.byte_at(2) == 116 {
-            if name.byte_at(3) == 105 && name.byte_at(4) == 111 && name.byte_at(5) == 110 {
-                return true;
-            }
-        }
-    }
+    if nlen > 0 && name.byte_at(nlen - 1) == 63 { return true; }
+    if nlen == 6 && name.byte_at(0) == 111 && name.byte_at(1) == 112 && name.byte_at(2) == 116 && name.byte_at(3) == 105 && name.byte_at(4) == 111 && name.byte_at(5) == 110 { return true; }
     return false;
 }
 
@@ -949,18 +861,10 @@ pub fn is_type_fallible(sym: i64, name: str, node_count: i64) -> bool {
     let nlen = name.len();
     var idx = 0;
     while idx < nlen {
-        if name.byte_at(idx) == 33 {
-            return true;
-        }
+        if name.byte_at(idx) == 33 { return true; }
         idx = idx + 1;
     }
-    if nlen == 6 {
-        if name.byte_at(0) == 114 && name.byte_at(1) == 101 && name.byte_at(2) == 115 {
-            if name.byte_at(3) == 117 && name.byte_at(4) == 108 && name.byte_at(5) == 116 {
-                return true;
-            }
-        }
-    }
+    if nlen == 6 && name.byte_at(0) == 114 && name.byte_at(1) == 101 && name.byte_at(2) == 115 && name.byte_at(3) == 117 && name.byte_at(4) == 108 && name.byte_at(5) == 116 { return true; }
     return false;
 }
 
@@ -1112,43 +1016,19 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
         }
     }
 
-    if ok == 209 {
-        let cc = __engine(Cfg.ast.ast_child_count, i);
-        if cc > 0 {
-            let recv = __engine(Cfg.ast.ast_child_at, i, 0);
-            let recv_ok = __engine(Cfg.ast.ast_orig_kind, recv);
-            if recv_ok != 213 {
-                let recv_tid = __engine(Cfg.ast.ast_get_bound_target, recv);
-                if recv_tid != 4294967295 && recv_tid >= 0 {
-                    let t_sym = __engine(Cfg.ast.ast_node_raw_bits, recv_tid);
-                    if t_sym > 0 {
-                        let t_name = __engine(Cfg.ast.sym_str, t_sym);
-                        if is_type_name_or_sym_optional(t_sym, t_name, node_count) {
-                            __engine(Cfg.ast.ast_emit_diag, i, 1, "NULL002: Member access on optional type requires '?.' safe navigation or unwrapping");
-                            return 1;
-                        }
+    if (ok == 209 || ok == 210) && __engine(Cfg.ast.ast_child_count, i) > 0 {
+        let recv = __engine(Cfg.ast.ast_child_at, i, 0);
+        if __engine(Cfg.ast.ast_orig_kind, recv) != 213 {
+            let recv_tid = __engine(Cfg.ast.ast_get_bound_target, recv);
+            if recv_tid != 4294967295 && recv_tid >= 0 {
+                let t_sym = __engine(Cfg.ast.ast_node_raw_bits, recv_tid);
+                if t_sym > 0 && is_type_name_or_sym_optional(t_sym, __engine(Cfg.ast.sym_str, t_sym), node_count) {
+                    if ok == 209 {
+                        __engine(Cfg.ast.ast_emit_diag, i, 1, "NULL002: Member access on optional type requires '?.' safe navigation or unwrapping");
+                    } else {
+                        __engine(Cfg.ast.ast_emit_diag, i, 1, "NULL005: Index access on optional type requires safe navigation or unwrapping");
                     }
-                }
-            }
-        }
-    }
-
-    if ok == 210 {
-        let cc = __engine(Cfg.ast.ast_child_count, i);
-        if cc > 0 {
-            let recv = __engine(Cfg.ast.ast_child_at, i, 0);
-            let recv_ok = __engine(Cfg.ast.ast_orig_kind, recv);
-            if recv_ok != 213 {
-                let recv_tid = __engine(Cfg.ast.ast_get_bound_target, recv);
-                if recv_tid != 4294967295 && recv_tid >= 0 {
-                    let t_sym = __engine(Cfg.ast.ast_node_raw_bits, recv_tid);
-                    if t_sym > 0 {
-                        let t_name = __engine(Cfg.ast.sym_str, t_sym);
-                        if is_type_name_or_sym_optional(t_sym, t_name, node_count) {
-                            __engine(Cfg.ast.ast_emit_diag, i, 1, "NULL005: Index access on optional type requires safe navigation or unwrapping");
-                            return 1;
-                        }
-                    }
+                    return 1;
                 }
             }
         }
@@ -1322,6 +1202,199 @@ pub fn verify_pattern_matching(i: i64, node_count: i64) -> i64 {
     return 0;
 }
 
+pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
+    let ok = __engine(Cfg.ast.ast_orig_kind, i);
+    let kind = __engine(Cfg.ast.ast_node_kind, i);
+
+    // 1. UNIMP004: [Unimplemented] or [Todo] attribute on declaration
+    if (kind == 1 || kind == 2 || kind == 3) && (has_attr_named(i, "Unimplemented") || has_attr_named(i, "Todo")) {
+        let name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
+        __engine(Cfg.ast.ast_emit_diag, i, 2, "UNIMP004: Declaration '" + name + "' is marked as unimplemented or todo");
+    }
+
+    // 2. UNIMP001: Calls to todo() or unimplemented()
+    if ok == 207 {
+        let cc = __engine(Cfg.ast.ast_child_count, i);
+        var callee = 0;
+        if cc > 0 { callee = __engine(Cfg.ast.ast_child_at, i, 0); }
+        let csym = __engine(Cfg.ast.ast_node_sym, callee);
+        if csym != 0 {
+            let cname = __engine(Cfg.ast.sym_str, csym);
+            if cname == "todo" || cname == "unimplemented" {
+                __engine(Cfg.ast.ast_emit_diag, i, 2, "UNIMP001: Call to unimplemented placeholder ('" + cname + "')");
+            }
+        }
+    }
+
+    // 3. UNIMP002: Function declares non-void return type but has empty body
+    if kind == 3 {
+        let ret_sym = __engine(Cfg.ast.ast_node_raw_bits, i);
+        if ret_sym > 0 {
+            let rname = __engine(Cfg.ast.sym_str, ret_sym);
+            if rname != "void" && rname != "never" && rname.len() > 0 && __engine(Cfg.ast.ast_child_count, i) > 0 {
+                let body = __engine(Cfg.ast.ast_child_at, i, 0);
+                if __engine(Cfg.ast.ast_orig_kind, body) == 200 && __engine(Cfg.ast.ast_child_count, body) == 0 {
+                    let fn_name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
+                    __engine(Cfg.ast.ast_emit_diag, i, 2, "UNIMP002: Function '" + fn_name + "' declares return type '" + rname + "' but has an empty or unimplemented body");
+                }
+            }
+        }
+    }
+
+    // 4. UNIMP003: Struct missing interface methods
+    if kind == 1 {
+        let bc = __engine(Cfg.ast.ast_base_count, i);
+        var bi = 0;
+        while bi < bc {
+            let bsym = __engine(Cfg.ast.ast_base_at, i, bi);
+            var iface_nid = -1;
+            var j = 0;
+            while j < node_count && iface_nid < 0 {
+                if __engine(Cfg.ast.ast_node_kind, j) == 2 && __engine(Cfg.ast.ast_node_sym, j) == bsym { iface_nid = j; }
+                j = j + 1;
+            }
+            if iface_nid >= 0 {
+                let icc = __engine(Cfg.ast.ast_child_count, iface_nid);
+                var mi = 0;
+                while mi < icc {
+                    let mn = __engine(Cfg.ast.ast_child_at, iface_nid, mi);
+                    if __engine(Cfg.ast.ast_node_kind, mn) == 3 {
+                        let msym = __engine(Cfg.ast.ast_node_sym, mn);
+                        let scc = __engine(Cfg.ast.ast_child_count, i);
+                        var s_has = false;
+                        var si = 0;
+                        while si < scc && !s_has {
+                            if __engine(Cfg.ast.ast_node_sym, __engine(Cfg.ast.ast_child_at, i, si)) == msym { s_has = true; }
+                            si = si + 1;
+                        }
+                        if !s_has {
+                            let snm = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
+                            let inm = __engine(Cfg.ast.sym_str, bsym);
+                            let mnm = __engine(Cfg.ast.sym_str, msym);
+                            __engine(Cfg.ast.ast_emit_diag, i, 2, "UNIMP003: Struct '" + snm + "' does not implement required interface method '" + mnm + "' of interface '" + inm + "'");
+                        }
+                    }
+                    mi = mi + 1;
+                }
+            }
+            bi = bi + 1;
+        }
+    }
+
+    // 5. UNREACH001: Unreachable code after diverging statement in BlockExpr
+    if ok == 200 {
+        let cc = __engine(Cfg.ast.ast_child_count, i);
+        var ci = 0;
+        var diverged = false;
+        while ci < cc && !diverged {
+            let stmt = __engine(Cfg.ast.ast_child_at, i, ci);
+            let sok = __engine(Cfg.ast.ast_orig_kind, stmt);
+            if sok == 103 || sok == 107 || sok == 108 { diverged = true; }
+            else if sok == 110 && __engine(Cfg.ast.ast_child_count, stmt) > 0 {
+                let e = __engine(Cfg.ast.ast_child_at, stmt, 0);
+                if __engine(Cfg.ast.ast_orig_kind, e) == 207 && __engine(Cfg.ast.ast_child_count, e) > 0 {
+                    let cn = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, __engine(Cfg.ast.ast_child_at, e, 0)));
+                    if cn == "panic" || cn == "fail" { diverged = true; }
+                }
+            }
+            if diverged && (ci + 1) < cc {
+                __engine(Cfg.ast.ast_emit_diag, __engine(Cfg.ast.ast_child_at, i, ci + 1), 2, "UNREACH001: Unreachable code detected after diverging statement");
+            }
+            ci = ci + 1;
+        }
+    }
+
+    // 6. LOOP005: Potential infinite loop on WhileStmt
+    if ok == 106 {
+        let cc = __engine(Cfg.ast.ast_child_count, i);
+        var cond = 0;
+        var body = -1;
+        if cc >= 2 { cond = __engine(Cfg.ast.ast_child_at, i, 0); body = __engine(Cfg.ast.ast_child_at, i, 1); }
+        else if cc == 1 { body = __engine(Cfg.ast.ast_child_at, i, 0); }
+        if body >= 0 {
+            let cok = __engine(Cfg.ast.ast_orig_kind, cond);
+            var is_const_true = false;
+            if cok == 303 && __engine(Cfg.ast.ast_node_raw_bits, cond) == 1 { is_const_true = true; }
+            if cok == 301 && __engine(Cfg.ast.ast_node_raw_bits, cond) != 0 { is_const_true = true; }
+            if is_const_true {
+                let bcc = __engine(Cfg.ast.ast_child_count, body);
+                var has_exit = false;
+                var bi = 0;
+                while bi < bcc && !has_exit {
+                    let bs = __engine(Cfg.ast.ast_child_at, body, bi);
+                    let bs_ok = __engine(Cfg.ast.ast_orig_kind, bs);
+                    if bs_ok == 107 || bs_ok == 103 { has_exit = true; }
+                    if bs_ok == 201 {
+                        let icc = __engine(Cfg.ast.ast_child_count, bs);
+                        var ii = 1;
+                        while ii < icc && !has_exit {
+                            let arm = __engine(Cfg.ast.ast_child_at, bs, ii);
+                            let acc = __engine(Cfg.ast.ast_child_count, arm);
+                            var ai = 0;
+                            while ai < acc && !has_exit {
+                                let as_ok = __engine(Cfg.ast.ast_orig_kind, __engine(Cfg.ast.ast_child_at, arm, ai));
+                                if as_ok == 107 || as_ok == 103 { has_exit = true; }
+                                ai = ai + 1;
+                            }
+                            ii = ii + 1;
+                        }
+                    }
+                    bi = bi + 1;
+                }
+                if !has_exit {
+                    __engine(Cfg.ast.ast_emit_diag, i, 2, "LOOP005: Potential infinite loop detected; condition is always true and body contains no 'break' or 'return' statement");
+                }
+            }
+        }
+    }
+
+    // 7. COND001 & COND002: Constant condition / empty branch in IfExpr
+    if ok == 201 {
+        let cc = __engine(Cfg.ast.ast_child_count, i);
+        var cond = 0;
+        var then_b = -1;
+        if cc >= 2 { cond = __engine(Cfg.ast.ast_child_at, i, 0); then_b = __engine(Cfg.ast.ast_child_at, i, 1); }
+        else if cc == 1 { then_b = __engine(Cfg.ast.ast_child_at, i, 0); }
+        let cok = __engine(Cfg.ast.ast_orig_kind, cond);
+        if cok == 303 {
+            __engine(Cfg.ast.ast_emit_diag, cond, 2, "COND001: Condition expression is a compile-time boolean constant; one branch is unreachable");
+        }
+        if then_b >= 0 && __engine(Cfg.ast.ast_orig_kind, then_b) == 200 && __engine(Cfg.ast.ast_child_count, then_b) == 0 {
+            __engine(Cfg.ast.ast_emit_diag, then_b, 2, "COND002: Empty branch in 'if' statement; branch has no effect");
+        }
+    }
+
+    // 8. OPT001: Constant binary expression folding candidate (Info)
+    if ok == 205 && __engine(Cfg.ast.ast_child_count, i) >= 2 {
+        let op = __engine(Cfg.ast.ast_node_raw_bits, i);
+        if op >= 1 && op <= 20 {
+            let left = __engine(Cfg.ast.ast_child_at, i, 0);
+            let right = __engine(Cfg.ast.ast_child_at, i, 1);
+            let lok = __engine(Cfg.ast.ast_orig_kind, left);
+            let rok = __engine(Cfg.ast.ast_orig_kind, right);
+            if (lok >= 301 && lok <= 304) && (rok >= 301 && rok <= 304) {
+                if !(op >= 4 && op <= 6 && __engine(Cfg.ast.ast_node_raw_bits, right) == 0) {
+                    __engine(Cfg.ast.ast_emit_diag, i, 3, "OPT001: Constant binary expression can be folded at compile time");
+                }
+            }
+        }
+    }
+
+    // 9. OPT002: Bounded loop unrolling candidate (Info)
+    if ok == 204 && __engine(Cfg.ast.ast_child_count, i) > 0 {
+        let iter = __engine(Cfg.ast.ast_child_at, i, 0);
+        let iok = __engine(Cfg.ast.ast_orig_kind, iter);
+        if iok == 220 || iok == 205 {
+            let iop = __engine(Cfg.ast.ast_node_raw_bits, iter);
+            if iok == 220 || iop == 23 || iop == 24 {
+                __engine(Cfg.ast.ast_emit_diag, i, 3, "OPT002: Bounded loop is an eligible candidate for compile-time unrolling");
+            }
+        }
+    }
+
+    return 0;
+}
+
 pub fn analyze_unit(unit_id: i64) -> i64 {
     let node_count = __engine(Cfg.ast.ast_node_count);
     if node_count == 0 {
@@ -1386,13 +1459,14 @@ pub fn analyze_unit(unit_id: i64) -> i64 {
         i = i + 1;
     }
 
-    // Pass 6: Null-safety, Values-first error, and Loop ergonomics verification
+    // Pass 6: Null-safety, Values-first error, Loop ergonomics, and Warning diagnostics
     i = 0;
     while i < node_count {
         verify_null_safety(i, node_count);
         verify_error_flow(i, node_count);
         verify_loop_ergonomics(i, node_count);
         verify_pattern_matching(i, node_count);
+        verify_warnings_and_unimplemented(i, node_count);
         i = i + 1;
     }
 

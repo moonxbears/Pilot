@@ -1,0 +1,248 @@
+// =============================================================================
+// FILE: selfhost/diagnostics/errors.pilot
+// Pilot Semantic Diagnostics: Error Diagnostic Catalog (Severity 1)
+// =============================================================================
+pub pkg Pilot.Diagnostics.Errors;
+
+pub struct ErrorDef : IValue {
+    pub code: str;
+    pub title: str;
+    pub description: str;
+    pub category: str;
+}
+
+pub let ERRORS = [
+    // -------------------------------------------------------------------------
+    // 1. Null Safety & Fallible Errors (NULL001 - NULL005, ERR001)
+    // -------------------------------------------------------------------------
+    ErrorDef {
+        code: "NULL001",
+        title: "Unchecked Null Assertion",
+        description: "Unchecked postfix '!' is prohibited; use '?', '??', or 'guard'",
+        category: "NullSafety",
+    },
+    ErrorDef {
+        code: "NULL002",
+        title: "Non-Diverging Guard Statement",
+        description: "'guard' statement requires an 'else' block with early exit (return, break, continue, panic)",
+        category: "NullSafety",
+    },
+    ErrorDef {
+        code: "NULL003",
+        title: "Invalid None Return",
+        description: "Cannot return 'none' from a function with non-nullable return type",
+        category: "NullSafety",
+    },
+    ErrorDef {
+        code: "NULL004",
+        title: "Invalid None Argument",
+        description: "Cannot pass 'none' to a parameter with non-nullable type",
+        category: "NullSafety",
+    },
+    ErrorDef {
+        code: "NULL005",
+        title: "Unchecked Optional Indexing",
+        description: "Cannot index into optional or nullable collection without explicit unwrap or safe navigation '?['",
+        category: "NullSafety",
+    },
+    ErrorDef {
+        code: "ERR001",
+        title: "Unhandled Fallible Result",
+        description: "Fallible function returning 'result<T, E>' / 'T ! E' must be handled using '?', 'catch', or 'guard'",
+        category: "ValuesFirstError",
+    },
+
+    // -------------------------------------------------------------------------
+    // 2. Loop Ergonomics & Control Flow (LOOP001 - LOOP004, MATCH002)
+    // -------------------------------------------------------------------------
+    ErrorDef {
+        code: "LOOP001",
+        title: "Mixed Loop Break and Yield",
+        description: "Cannot mix 'break <expr>' and 'yield <expr>' in the same for loop body",
+        category: "LoopErgonomics",
+    },
+    ErrorDef {
+        code: "LOOP002",
+        title: "Mixed Valued and Void Break",
+        description: "Cannot mix 'break <expr>' with bare 'break;' in the same loop expression",
+        category: "LoopErgonomics",
+    },
+    ErrorDef {
+        code: "LOOP003",
+        title: "Then Clause Without Valued Break",
+        description: "Loop has a 'then' fallback clause but contains no 'break <expr>'",
+        category: "LoopErgonomics",
+    },
+    ErrorDef {
+        code: "LOOP004",
+        title: "Statement Yield in Non-Generator",
+        description: "Cannot yield inside statement-position for in non-generator function; use let binding to collect yields",
+        category: "LoopErgonomics",
+    },
+    ErrorDef {
+        code: "MATCH002",
+        title: "Unreachable Pattern Arm",
+        description: "Unreachable pattern arm after wildcard '_' or catch-all pattern",
+        category: "PatternMatching",
+    },
+
+    // -------------------------------------------------------------------------
+    // 3. Compile-Time Arithmetic & Lexical Safety (DIV001, KW001)
+    // -------------------------------------------------------------------------
+    ErrorDef {
+        code: "DIV001",
+        title: "Compile-Time Division by Zero",
+        description: "Division or modulo by zero detected in compile-time constant expression",
+        category: "Arithmetic",
+    },
+    ErrorDef {
+        code: "KW001",
+        title: "Reserved Keyword Used as Identifier",
+        description: "Reserved language keyword used as identifier without escape",
+        category: "Syntax",
+    },
+
+    // -------------------------------------------------------------------------
+    // 4. Memory Lattice & Core Naming Contracts (LATTICE001, NAMING001 - NAMING007)
+    // -------------------------------------------------------------------------
+    ErrorDef {
+        code: "LATTICE001",
+        title: "Lattice Contract Mismatch",
+        description: "0b00 value type declaring destructor or conflicting memory ownership semantics",
+        category: "HardwareLattice",
+    },
+    ErrorDef {
+        code: "NAMING001",
+        title: "Interface Naming Violation",
+        description: "Interface must begin with 'I' followed by PascalCase",
+        category: "NamingTaxonomy",
+    },
+    ErrorDef {
+        code: "NAMING002",
+        title: "Primitive Naming Violation",
+        description: "[Lang] primitive struct must use lowercase identifier characters",
+        category: "NamingTaxonomy",
+    },
+    ErrorDef {
+        code: "NAMING003",
+        title: "Core Struct PascalCase Violation",
+        description: "Core struct must use PascalCase unless [Lang] or partial",
+        category: "NamingTaxonomy",
+    },
+    ErrorDef {
+        code: "NAMING004",
+        title: "Reserved Interface Prefix on Struct",
+        description: "Struct cannot begin with reserved interface prefix 'I' followed by uppercase character",
+        category: "NamingTaxonomy",
+    },
+    ErrorDef {
+        code: "NAMING005",
+        title: "Attribute Suffix Violation",
+        description: "Attribute struct must end with 'Attr' suffix",
+        category: "NamingTaxonomy",
+    },
+    ErrorDef {
+        code: "NAMING006",
+        title: "Scoped Guard Suffix Violation",
+        description: "0b11 IGuard struct must end with 'Guard', 'Scope', or 'Lease'",
+        category: "NamingTaxonomy",
+    },
+    ErrorDef {
+        code: "NAMING007",
+        title: "Reference View Suffix Violation",
+        description: "0b01 IReference struct must end with 'View', 'Lens', 'Cursor', or 'Enumerator'",
+        category: "NamingTaxonomy",
+    },
+
+    // -------------------------------------------------------------------------
+    // 5. Perceus Ownership & Escape Verification (ESCAPE001 - ESCAPE003, PILOT104 - PILOT105)
+    // -------------------------------------------------------------------------
+    ErrorDef {
+        code: "ESCAPE001",
+        title: "Cue Boundary Escape",
+        description: "Passing 0b01 reference view or 0b11 scoped guard across asynchronous [Cue] function boundary",
+        category: "PerceusOwnership",
+    },
+    ErrorDef {
+        code: "ESCAPE002",
+        title: "Lexical Reference Escape",
+        description: "0b01 reference view escapes its declaring lexical scope or is returned from function",
+        category: "PerceusOwnership",
+    },
+    ErrorDef {
+        code: "ESCAPE003",
+        title: "Scoped Guard Escape",
+        description: "0b11 scoped guard escapes its stack allocation frame",
+        category: "PerceusOwnership",
+    },
+    ErrorDef {
+        code: "PILOT104",
+        title: "Heap Allocation in Real-Time Context",
+        description: "Dynamic collection or heap allocation inside [HardRealtime] or noalloc function",
+        category: "RealTime",
+    },
+    ErrorDef {
+        code: "PILOT105",
+        title: "Thread Dispatch in Real-Time Context",
+        description: "Non-deterministic threading or dispatch in [HardRealtime] context",
+        category: "RealTime",
+    },
+
+    // -------------------------------------------------------------------------
+    // 6. Reactive Attributes & Preprocessor Directives (ATTR001 - ATTR002, PREPROC001 - PREPROC005, PREPROC007 - PREPROC008)
+    // -------------------------------------------------------------------------
+    ErrorDef {
+        code: "ATTR001",
+        title: "Reactive Attribute on Interface",
+        description: "Reactive or formula attribute attached directly to 0-byte interface declaration",
+        category: "AttributeWeaver",
+    },
+    ErrorDef {
+        code: "ATTR002",
+        title: "Conflicting Attribute Weights",
+        description: "Conflicting attribute pipeline weights or circular reactive dependency",
+        category: "AttributeWeaver",
+    },
+    ErrorDef {
+        code: "PREPROC001",
+        title: "Malformed Preprocessor Directive",
+        description: "Unknown preprocessor directive or empty #define identifier",
+        category: "Preprocessor",
+    },
+    ErrorDef {
+        code: "PREPROC002",
+        title: "Unclosed Conditional Directive",
+        description: "Missing #endif for #if or #ifdef conditional block",
+        category: "Preprocessor",
+    },
+    ErrorDef {
+        code: "PREPROC003",
+        title: "Extraneous Preprocessor Block Terminator",
+        description: "Unexpected #endif or #else without matching #if directive",
+        category: "Preprocessor",
+    },
+    ErrorDef {
+        code: "PREPROC004",
+        title: "Duplicate Preprocessor Else Clause",
+        description: "Duplicate #else in conditional preprocessor block",
+        category: "Preprocessor",
+    },
+    ErrorDef {
+        code: "PREPROC005",
+        title: "User Preprocessor Error",
+        description: "Explicit compile error emitted via #error preprocessor directive",
+        category: "Preprocessor",
+    },
+    ErrorDef {
+        code: "PREPROC007",
+        title: "Unclosed Preprocessor Region",
+        description: "Unclosed #region directive without matching #endregion",
+        category: "Preprocessor",
+    },
+    ErrorDef {
+        code: "PREPROC008",
+        title: "Extraneous Preprocessor End Region",
+        description: "Unexpected #endregion without matching #region directive",
+        category: "Preprocessor",
+    },
+];
