@@ -20,7 +20,7 @@ fn is_ident_byte(b: i64) -> bool {
 }
 
 pub fn extract_item_tree_signature(source: str) -> str {
-    let n = __engine("str_len", source);
+    let n = source.len();
     let fn_kw = nameof(fn);
     var sig = "";
     var fn_body_depth = 0;
@@ -28,19 +28,19 @@ pub fn extract_item_tree_signature(source: str) -> str {
     var paren_depth = 0;
     var i = 0;
     while i < n {
-        let b = __engine("str_byte_at", source, i);
+        let b = source.byte_at(i);
         // Handle line comments //
-        if b == 47 && i + 1 < n && __engine("str_byte_at", source, i + 1) == 47 {
+        if b == 47 && i + 1 < n && source.byte_at(i + 1) == 47 {
             i = i + 2;
-            while i < n && __engine("str_byte_at", source, i) != 10 {
+            while i < n && source.byte_at(i) != 10 {
                 i = i + 1;
             }
-        } else if b == 47 && i + 1 < n && __engine("str_byte_at", source, i + 1) == 42 {
+        } else if b == 47 && i + 1 < n && source.byte_at(i + 1) == 42 {
             // Handle block comments /* ... */
             i = i + 2;
             var in_blk = true;
             while i + 1 < n && in_blk {
-                if __engine("str_byte_at", source, i) == 42 && __engine("str_byte_at", source, i + 1) == 47 {
+                if source.byte_at(i) == 42 && source.byte_at(i + 1) == 47 {
                     in_blk = false;
                     i = i + 2;
                 } else {
@@ -54,7 +54,7 @@ pub fn extract_item_tree_signature(source: str) -> str {
             i = i + 1;
             var in_lit = true;
             while i < n && in_lit {
-                let cb = __engine("str_byte_at", source, i);
+                let cb = source.byte_at(i);
                 if cb == 92 {
                     i = i + 2;
                 } else if cb == quote_b {
@@ -65,7 +65,7 @@ pub fn extract_item_tree_signature(source: str) -> str {
                 }
             }
             if fn_body_depth == 0 {
-                sig = sig + __engine("str_slice", source, lit_start, i);
+                sig = sig + source.slice(lit_start, i);
             }
         } else if fn_body_depth > 0 {
             if b == 123 {
@@ -81,10 +81,10 @@ pub fn extract_item_tree_signature(source: str) -> str {
             // fn_body_depth == 0: we are in top-level / struct / interface / fn header
             if is_ident_byte(b) {
                 let w_start = i;
-                while i < n && is_ident_byte(__engine("str_byte_at", source, i)) {
+                while i < n && is_ident_byte(source.byte_at(i)) {
                     i = i + 1;
                 }
-                let word = __engine("str_slice", source, w_start, i);
+                let word = source.slice(w_start, i);
                 if word == fn_kw {
                     pending_fn_body = true;
                     paren_depth = 0;
@@ -108,10 +108,10 @@ pub fn extract_item_tree_signature(source: str) -> str {
                         pending_fn_body = false;
                         fn_body_depth = 1;
                     } else {
-                        sig = sig + __engine("str_slice", source, i, i + 1);
+                        sig = sig + source.slice(i, i + 1);
                     }
                 } else {
-                    sig = sig + __engine("str_slice", source, i, i + 1);
+                    sig = sig + source.slice(i, i + 1);
                 }
                 i = i + 1;
             }

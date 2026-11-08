@@ -263,9 +263,23 @@ pub let ERRORS = [
         category: "Visibility",
         reference: "C# CS0122 / Rust E0603",
     },
+    ErrorDef {
+        code: "VIS001",
+        title: "Inaccessible Member Access",
+        description: "Cannot access private or internal member outside its declaring scope",
+        category: "Visibility",
+        reference: "C# CS0122 / Rust E0603 / Pilot AGENTS.md §5.5",
+    },
+    ErrorDef {
+        code: "LVL001",
+        title: "Insufficient Clearance Level",
+        description: "Caller clearance ring level is insufficient to access target requiring higher clearance",
+        category: "ClearanceRings",
+        reference: "Pilot AGENTS.md §5.5 Two-Axis Visibility",
+    },
 
     // -------------------------------------------------------------------------
-    // 7. Loop Ergonomics & Pattern Matching (LOOP001 - LOOP004, MATCH002)
+    // 7. Loop Ergonomics & Pattern Matching (LOOP001 - LOOP005, MATCH002)
     // -------------------------------------------------------------------------
     ErrorDef {
         code: "LOOP001",
@@ -294,6 +308,13 @@ pub let ERRORS = [
         description: "Cannot yield inside statement-position for in non-generator function; use let binding to collect yields",
         category: "LoopErgonomics",
         reference: "Python SyntaxError yield-outside-func",
+    },
+    ErrorDef {
+        code: "LOOP005",
+        title: "Invalid Dynamic Bounds Continuation",
+        description: "Dynamic bounds continuation 'continue a..b' is only supported inside a 'for' loop",
+        category: "LoopErgonomics",
+        reference: "Pilot AGENTS.md §5.4 3-Tier Dynamic for Expressions",
     },
     ErrorDef {
         code: "MATCH002",
@@ -467,5 +488,12 @@ pub let ERRORS = [
         description: "Hardcoded Pilot type or symbol name string in violation of Universal Name-Blind Contract",
         category: "ArchitecturalIntegrity",
         reference: "Pilot AGENTS.md §1 Universal Name-Blind Contract",
+    },
+    ErrorDef {
+        code: "DIM001",
+        title: "Incompatible Dimensional Units",
+        description: "Incompatible physical units in arithmetic operation; units must have matching dimensions",
+        category: "DimensionalAlgebra",
+        reference: "SI Physical Units / Milestone 33.2",
     },
 ];

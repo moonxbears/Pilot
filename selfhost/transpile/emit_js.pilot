@@ -75,7 +75,7 @@ pub fn tjs_emit_expr(nid: i64) -> str {
                 let k_nid = __engine("ast_child_at", map_nid, mi);
                 let v_nid = __engine("ast_child_at", map_nid, mi + 1);
                 let fname = __engine("sym_str", __engine("ast_node_sym", k_nid));
-                if __engine("str_len", fields_s) > 0 {
+                if fields_s.len() > 0 {
                     fields_s = fields_s + ", ";
                 }
                 fields_s = fields_s + fname + ": " + tjs_emit_expr(v_nid);
@@ -199,7 +199,7 @@ pub fn transpile_arena_to_js() -> str {
                 let fch = __engine("ast_child_at", ch, fi);
                 if __engine("ast_node_kind", fch) == 21 {
                     let fname = __engine("sym_str", __engine("ast_node_sym", fch));
-                    if __engine("str_len", cparams) > 0 { cparams = cparams + ", "; }
+                    if cparams.len() > 0 { cparams = cparams + ", "; }
                     cparams = cparams + fname;
                     cbody = cbody + "        this." + fname + " = " + fname + ";\n";
                 }
@@ -223,7 +223,7 @@ pub fn transpile_arena_to_js() -> str {
                 let pch = __engine("ast_child_at", fn_nid, pi);
                 if __engine("ast_node_kind", pch) == 21 {
                     let pname = __engine("sym_str", __engine("ast_node_sym", pch));
-                    if __engine("str_len", params_s) > 0 { params_s = params_s + ", "; }
+                    if params_s.len() > 0 { params_s = params_s + ", "; }
                     params_s = params_s + pname;
                 }
                 pi = pi + 1;

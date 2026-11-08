@@ -47,7 +47,7 @@ pub pure fn emit_csharp_function_source(
 }
 
 pub fn tcs_map_type_name(type_name: str) -> str {
-    if __engine("str_len", type_name) == 0 {
+    if type_name.len() == 0 {
         return "void";
     }
     let ph = tir_resolve_type_physics(type_name);
@@ -109,7 +109,7 @@ pub fn tcs_emit_expr(nid: i64) -> str {
                 let k_nid = __engine("ast_child_at", map_nid, mi);
                 let v_nid = __engine("ast_child_at", map_nid, mi + 1);
                 let fname = __engine("sym_str", __engine("ast_node_sym", k_nid));
-                if __engine("str_len", fields_s) > 0 {
+                if fields_s.len() > 0 {
                     fields_s = fields_s + ", ";
                 }
                 fields_s = fields_s + fname + " = " + tcs_emit_expr(v_nid);
@@ -169,7 +169,7 @@ pub fn tcs_emit_stmt(nid: i64, depth: i64) -> str {
         var vty = "var";
         if tsym != 0 {
             let tname = __engine("sym_str", tsym);
-            if __engine("str_len", tname) > 0 {
+            if tname.len() > 0 {
                 vty = tcs_map_type_name(tname);
             }
         }
@@ -266,7 +266,7 @@ pub fn transpile_arena_to_csharp() -> str {
                 if __engine("ast_node_kind", pch) == 21 {
                     let pname = __engine("sym_str", __engine("ast_node_sym", pch));
                     let pty = tcs_map_type_name(__engine("sym_str", __engine("ast_node_raw_bits", pch)));
-                    if __engine("str_len", params_s) > 0 { params_s = params_s + ", "; }
+                    if params_s.len() > 0 { params_s = params_s + ", "; }
                     params_s = params_s + pty + " " + pname;
                 }
                 pi = pi + 1;

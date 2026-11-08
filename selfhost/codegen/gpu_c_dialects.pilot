@@ -290,7 +290,7 @@ pub fn gc_emit_c_dialect_kernel(dialect: str, kernel_name: str) -> str {
     while pi < cc {
         let pch = __engine("ast_child_at", fn_nid, pi);
         if __engine("ast_node_kind", pch) == 21 {
-            if __engine("str_len", params) > 0 {
+            if params.len() > 0 {
                 params = params + ", ";
             }
             let pname = __engine("sym_str", __engine("ast_node_sym", pch));
@@ -301,7 +301,7 @@ pub fn gc_emit_c_dialect_kernel(dialect: str, kernel_name: str) -> str {
     }
     let ret_tname = cg_fn_return_type_name(fn_nid);
     var ret_c = "void";
-    if __engine("str_len", ret_tname) > 0 {
+    if ret_tname.len() > 0 {
         let rp = cg_resolve_type_physics(ret_tname);
         if rp.reg_class != 0 {
             ret_c = gc_param_c_type(ret_tname, dialect);

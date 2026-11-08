@@ -15,6 +15,11 @@ pub partial struct {
     CallExpr<TReturn: IAnyValue> : IValue {
         pub callee:   str;
         pub arg_repr: str;
+
+        pub self(c: str, a: str) {
+            .callee = c;
+            .arg_repr = a;
+        }
     }
 
     // 2. Glitch-Free Push-Pull Reactive Signal Node (`fn!^(a, b) -> Signal<TReturn>`)
@@ -22,6 +27,12 @@ pub partial struct {
     Signal<TReturn: IAnyValue> : IObject {
         pub value:   TReturn;
         pub version: usize;
+
+        pub self(v: TReturn) {
+            .value = v;
+            .version = 1;
+        }
+
         ~self() {}
     }
 
@@ -30,6 +41,11 @@ pub partial struct {
     Dual<TReturn: IValue, TGrad: IValue> : IValue {
         pub primal:      TReturn;
         pub sensitivity: TGrad;
+
+        pub self(p: TReturn, s: TGrad) {
+            .primal = p;
+            .sensitivity = s;
+        }
     }
 
     // 4. CoW Effect Dry-Run Transaction Plan (`fn!?(a, b) -> EffectPlan<TReturn>`)
@@ -37,6 +53,12 @@ pub partial struct {
     EffectPlan<TReturn: IAnyValue> : IObject {
         pub estimated_ops: usize;
         pub is_committable: bool;
+
+        pub self(ops: usize, committable: bool) {
+            .estimated_ops = ops;
+            .is_committable = committable;
+        }
+
         ~self() {}
     }
 }

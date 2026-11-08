@@ -79,6 +79,77 @@ pub fn format_missing_interface_contract(type_name: str, iface_name: str, method
         + "' from interface '" + iface_name + "'";
 }
 
+pub fn verify_bundle_collision(
+    struct_nid: i64,
+    fld_name: str,
+    is_coalesced: bool,
+    is_without: bool,
+    fld_lid1: i64,
+    fld_lid2: i64
+) -> str {
+    if is_without {
+        return "";
+    }
+    if is_coalesced {
+        if fld_lid1 != fld_lid2 && fld_lid1 >= 0 && fld_lid2 >= 0 {
+            return format_coalesce_field_type_mismatch(fld_name);
+        }
+        return "";
+    }
+    return format_bundle_field_collision(fld_name);
+}
+
+pub fn format_inaccessible_member_access(member_name: str, vis: str) -> str {
+    return "VIS001: Cannot access " + vis + " member '" + member_name + "' from external scope";
+}
+
+pub fn format_insufficient_clearance(target_name: str, req_lvl: i64, caller_lvl: i64) -> str {
+    return "LVL001: Insufficient clearance to access '" + target_name + "' (requires lvl(" + req_lvl + "), caller is lvl(" + caller_lvl + "))";
+}
+
+pub fn format_invalid_dynamic_continuation() -> str {
+    return "LOOP005: Dynamic bounds continuation 'continue a..b' is only supported inside a 'for' loop";
+}
+
+pub fn verify_dynamic_bounds_continuation(enc_loop_orig: i64, has_child: bool) -> str {
+    if has_child && enc_loop_orig != 204 && enc_loop_orig != 7 {
+        return format_invalid_dynamic_continuation();
+    }
+    return "";
+}
+
+pub fn verify_two_axis_visibility(caller_lvl: i64, target_lvl: i64, is_priv: bool, is_same_scope: bool, target_name: str) -> str {
+    if target_lvl > caller_lvl {
+        return format_insufficient_clearance(target_name, target_lvl, caller_lvl);
+    }
+    if is_priv && !is_same_scope {
+        return format_inaccessible_member_access(target_name, "private");
+    }
+    return "";
+}
+
+pub fn verify_bundle_method_collision(
+    method_name: str,
+    has_tier1_override: bool,
+    is_without: bool
+) -> str {
+    if has_tier1_override || is_without {
+        return "";
+    }
+    return format_ambiguous_bundle_method_collision(method_name);
+}
+
+pub fn verify_partial_struct_bundle_splice(
+    bundle_name: str,
+    is_partial: bool,
+    has_fields: bool
+) -> str {
+    if is_partial && has_fields {
+        return format_partial_struct_cannot_splice_fields(bundle_name);
+    }
+    return "";
+}
+
 pub fn format_core_naming_violation(rule: str, detail: str) -> str {
     return "EnforceCoreNaming: [" + rule + "] " + detail;
 }
@@ -177,7 +248,7 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
         if enforce_naming {
             var bad_iface = (c0 != 73) || (nlen < 2);
             if !bad_iface {
-                let c1 = __engine(DiagHooks.str_byte_at, name, 1);
+                let c1 = name.byte_at(1);
                 if c1 < 65 || c1 > 90 {
                     bad_iface = true;
                 }
@@ -248,7 +319,7 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
                     return 1;
                 }
                 if c0 == 73 && nlen >= 2 {
-                    let sc1 = __engine(DiagHooks.str_byte_at, name, 1);
+                    let sc1 = name.byte_at(1);
                     if sc1 >= 65 && sc1 <= 90 {
                         let imsg = format_core_naming_violation(
                             "ReservedInterfacePrefix",
@@ -290,6 +361,10 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
         }
     }
     return 0;
+}
+
+pub fn format_incompatible_dimensions(unit_a: str, unit_b: str) -> str {
+    return "DIM001: Incompatible dimensional units in arithmetic: '" + unit_a + "' vs '" + unit_b + "'";
 }
 
 pub fn verify_unit_diagnostics() -> i64 {

@@ -10,9 +10,17 @@ comptime {
     __engine("register_modifier", nameof(noalloc), nameof(effect_async));
 }
 
+pub struct RealtimeScopeGuard : IGuard {
+    pub is_noalloc: bool;
+    pub self(noalloc_mode: bool) {
+        .is_noalloc = noalloc_mode;
+    }
+    ~self() {}
+}
+
 pub syntax {
-    noalloc(body)        => quote { { $body } };
-    region(pool, body)   => quote { { $body } };
+    noalloc(body)        => quote { { let __rt_guard = RealtimeScopeGuard(true); $body } };
+    region(pool, body)   => quote { { let __rt_region = $pool; $body } };
     deadline(b, body)    => quote { { let __rt_budget = $b; $body } };
     within(b, body)      => quote { { let __rt_within = $b; $body } };
     periodic(p, body)    => quote { loop { let __rt_period = $p; $body } };

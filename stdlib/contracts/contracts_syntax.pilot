@@ -1,6 +1,6 @@
 // =========================================================================
 // FILE: stdlib/contracts/contracts_syntax.pilot
-// OPT-IN DESIGN-BY-CONTRACT (`requires`, `ensures`, `invariant`),
+// OPT-IN DESIGN-BY-CONTRACT (`requires`, `ensures`, `invariant`, `old`),
 // CONTEXT DI (`context` / `with`) & ADAPTERS (`adapter`, `each`)
 // =========================================================================
 pub pkg Pilot.Contracts.Syntax;
@@ -14,10 +14,15 @@ comptime {
     __engine("bind_receptor", nameof(adapter),   33, 21);
     __engine("bind_receptor", nameof(context),   33, 22);
     __engine("bind_receptor", nameof(each),      33, 23);
+    __engine("bind_receptor", nameof(old),       33, 24);
 }
 
 pub syntax {
-    requires(cond)  => quote { if !($cond) { return; } };
-    ensures(cond)   => quote { if !($cond) { return; } };
-    invariant(cond) => quote { if !($cond) { return; } };
+    requires(cond)  => quote { if !($cond) { panic("PreconditionViolation: requires(" + nameof($cond) + ") failed"); } };
+    ensures(cond)   => quote { defer { if !($cond) { panic("PostconditionViolation: ensures(" + nameof($cond) + ") failed"); } } };
+    invariant(cond) => quote {
+        if !($cond) { panic("InvariantViolation: invariant(" + nameof($cond) + ") failed on entry"); }
+        defer { if !($cond) { panic("InvariantViolation: invariant(" + nameof($cond) + ") failed on exit"); } }
+    };
+    old(expr)       => quote { $expr };
 }

@@ -8,14 +8,14 @@ pub pkg Pilot.SelfHost.Lsp.Server;
 pub pure fn nameof(sym: str) -> str => sym;
 
 fn lsp_find_substr(haystack: str, needle: str, start_pos: i64) -> i64 {
-    let h_len = __engine("str_len", haystack);
-    let n_len = __engine("str_len", needle);
+    let h_len = haystack.len();
+    let n_len = needle.len();
     if n_len == 0 || start_pos < 0 || start_pos + n_len > h_len {
         return -1;
     }
     var i = start_pos;
     while i + n_len <= h_len {
-        if __engine("str_slice", haystack, i, i + n_len) == needle {
+        if haystack.slice(i, i + n_len) == needle {
             return i;
         }
         i = i + 1;
@@ -24,10 +24,10 @@ fn lsp_find_substr(haystack: str, needle: str, start_pos: i64) -> i64 {
 }
 
 fn lsp_parse_int_at(s: str, start_pos: i64) -> i64 {
-    let n = __engine("str_len", s);
+    let n = s.len();
     var i = start_pos;
     while i < n {
-        let b = __engine("str_byte_at", s, i);
+        let b = s.byte_at(i);
         if b == 32 || b == 9 || b == 58 {
             i = i + 1;
         } else {
@@ -37,7 +37,7 @@ fn lsp_parse_int_at(s: str, start_pos: i64) -> i64 {
     var val = 0;
     var found = false;
     while i < n {
-        let b = __engine("str_byte_at", s, i);
+        let b = s.byte_at(i);
         if b >= 48 && b <= 57 {
             val = val * 10 + (b - 48);
             found = true;
@@ -58,13 +58,13 @@ fn lsp_extract_json_str_field(json_str: str, key: str) -> str {
     if idx < 0 {
         return "";
     }
-    let n = __engine("str_len", json_str);
-    var i = idx + __engine("str_len", pat);
+    let n = json_str.len();
+    var i = idx + pat.len();
     var out = "";
     while i < n {
-        let b = __engine("str_byte_at", json_str, i);
+        let b = json_str.byte_at(i);
         if b == 92 && i + 1 < n {
-            let nb = __engine("str_byte_at", json_str, i + 1);
+            let nb = json_str.byte_at(i + 1);
             if nb == 110 {
                 out = out + "\n";
             } else if nb == 114 {
@@ -76,13 +76,13 @@ fn lsp_extract_json_str_field(json_str: str, key: str) -> str {
             } else if nb == 92 {
                 out = out + "\\";
             } else {
-                out = out + __engine("str_slice", json_str, i + 1, i + 2);
+                out = out + json_str.slice(i + 1, i + 2);
             }
             i = i + 2;
         } else if b == 34 {
             return out;
         } else {
-            out = out + __engine("str_slice", json_str, i, i + 1);
+            out = out + json_str.slice(i, i + 1);
             i = i + 1;
         }
     }
@@ -95,15 +95,15 @@ fn lsp_extract_json_int_field(json_str: str, key: str) -> i64 {
     if idx < 0 {
         return -1;
     }
-    return lsp_parse_int_at(json_str, idx + __engine("str_len", pat));
+    return lsp_parse_int_at(json_str, idx + pat.len());
 }
 
 fn lsp_escape_json_str(s: str) -> str {
-    let n = __engine("str_len", s);
+    let n = s.len();
     var out = "";
     var i = 0;
     while i < n {
-        let b = __engine("str_byte_at", s, i);
+        let b = s.byte_at(i);
         if b == 34 {
             out = out + "\\\"";
         } else if b == 92 {
@@ -115,7 +115,7 @@ fn lsp_escape_json_str(s: str) -> str {
         } else if b == 9 {
             out = out + "\\t";
         } else {
-            out = out + __engine("str_slice", s, i, i + 1);
+            out = out + s.slice(i, i + 1);
         }
         i = i + 1;
     }
@@ -123,7 +123,7 @@ fn lsp_escape_json_str(s: str) -> str {
 }
 
 fn lsp_position_to_offset(doc: str, line: i64, character: i64) -> i64 {
-    let n = __engine("str_len", doc);
+    let n = doc.len();
     if n == 0 { return 0; }
     if line <= 0 {
         return if character < 0 { 0 } else { if character < n { character } else { n - 1 } };
@@ -131,7 +131,7 @@ fn lsp_position_to_offset(doc: str, line: i64, character: i64) -> i64 {
     var cur_line = 0;
     var i = 0;
     while i < n {
-        let b = __engine("str_byte_at", doc, i);
+        let b = doc.byte_at(i);
         if b == 10 {
             cur_line = cur_line + 1;
             if cur_line == line {
@@ -145,21 +145,21 @@ fn lsp_position_to_offset(doc: str, line: i64, character: i64) -> i64 {
 }
 
 fn lsp_extract_hover_signature(doc: str, offset: i64) -> str {
-    let n = __engine("str_len", doc);
+    let n = doc.len();
     if n == 0 {
         return "";
     }
     let cl_off = if offset < 0 { 0 } else { if offset >= n { n - 1 } else { offset } };
     var line_start = cl_off;
     while line_start > 0 {
-        let b = __engine("str_byte_at", doc, line_start - 1);
+        let b = doc.byte_at(line_start - 1);
         if b == 10 || b == 123 || b == 125 || b == 59 {
             break;
         }
         line_start = line_start - 1;
     }
     while line_start < n {
-        let b = __engine("str_byte_at", doc, line_start);
+        let b = doc.byte_at(line_start);
         if b == 32 || b == 9 || b == 13 || b == 10 {
             line_start = line_start + 1;
         } else {
@@ -168,29 +168,29 @@ fn lsp_extract_hover_signature(doc: str, offset: i64) -> str {
     }
     var sig_end = line_start;
     while sig_end < n {
-        let b = __engine("str_byte_at", doc, sig_end);
+        let b = doc.byte_at(sig_end);
         if b == 123 || b == 59 || b == 10 {
             break;
         }
         sig_end = sig_end + 1;
     }
     while sig_end > line_start {
-        let b = __engine("str_byte_at", doc, sig_end - 1);
+        let b = doc.byte_at(sig_end - 1);
         if b == 32 || b == 9 || b == 13 {
             sig_end = sig_end - 1;
         } else {
             break;
         }
     }
-    return __engine("str_slice", doc, line_start, sig_end);
+    return doc.slice(line_start, sig_end);
 }
 
 pub pure fn lsp_format_hover_params(sig: str) -> str {
-    let slen = __engine("str_len", sig);
+    let slen = sig.len();
     var p_open = -1;
     var i = 0;
     while i < slen && p_open == -1 {
-        if __engine("str_slice", sig, i, i + 1) == "(" {
+        if sig.slice(i, i + 1) == "(" {
             p_open = i;
         }
         i = i + 1;
@@ -201,7 +201,7 @@ pub pure fn lsp_format_hover_params(sig: str) -> str {
     var depth = 1;
     var j = p_open + 1;
     while j < slen && p_close == -1 {
-        let ch = __engine("str_slice", sig, j, j + 1);
+        let ch = sig.slice(j, j + 1);
         if ch == "(" {
             depth = depth + 1;
         } else if ch == ")" {
@@ -214,36 +214,36 @@ pub pure fn lsp_format_hover_params(sig: str) -> str {
     }
     if p_close <= p_open + 1 { return ""; }
 
-    let inner = __engine("str_slice", sig, p_open + 1, p_close).trim();
+    let inner = sig.slice(p_open + 1, p_close).trim();
     if inner == "" { return ""; }
 
     var out = "\\n\\n**Parameters:**";
     var start_idx = 0;
-    let in_len = __engine("str_len", inner);
+    let in_len = inner.len();
     var k = 0;
     var comma_depth = 0;
     while k <= in_len {
         let is_sep = if k == in_len { true } else {
-            let c = __engine("str_slice", inner, k, k + 1);
+            let c = inner.slice(k, k + 1);
             if c == "<" || c == "(" || c == "[" { comma_depth = comma_depth + 1; }
             else if c == ">" || c == ")" || c == "]" { if comma_depth > 0 { comma_depth = comma_depth - 1; } }
             comma_depth == 0 && c == ","
         };
         if is_sep {
-            let param_raw = __engine("str_slice", inner, start_idx, k).trim();
+            let param_raw = inner.slice(start_idx, k).trim();
             if param_raw != "" {
                 var colon_pos = -1;
                 var ci = 0;
-                let plen = __engine("str_len", param_raw);
+                let plen = param_raw.len();
                 while ci < plen && colon_pos == -1 {
-                    if __engine("str_slice", param_raw, ci, ci + 1) == ":" {
+                    if param_raw.slice(ci, ci + 1) == ":" {
                         colon_pos = ci;
                     }
                     ci = ci + 1;
                 }
                 if colon_pos >= 0 {
-                    let pname = __engine("str_slice", param_raw, 0, colon_pos).trim();
-                    let ptype = __engine("str_slice", param_raw, colon_pos + 1, plen).trim();
+                    let pname = param_raw.slice(0, colon_pos).trim();
+                    let ptype = param_raw.slice(colon_pos + 1, plen).trim();
                     out = out + "\\n- `" + pname + "`: [`" + ptype + "`](#" + ptype + ")";
                 } else {
                     out = out + "\\n- `" + param_raw + "`";
@@ -257,18 +257,18 @@ pub pure fn lsp_format_hover_params(sig: str) -> str {
 }
 
 pub pure fn lsp_format_hover_returns(sig: str) -> str {
-    let slen = __engine("str_len", sig);
+    let slen = sig.len();
     var arrow_pos = -1;
     var i = 0;
     while i + 2 <= slen && arrow_pos == -1 {
-        if __engine("str_slice", sig, i, i + 2) == "->" {
+        if sig.slice(i, i + 2) == "->" {
             arrow_pos = i;
         }
         i = i + 1;
     }
     if arrow_pos == -1 { return ""; }
 
-    var ret_part = __engine("str_slice", sig, arrow_pos + 2, slen).trim();
+    var ret_part = sig.slice(arrow_pos + 2, slen).trim();
     if ret_part == "" { return ""; }
 
     return "\\n\\n**Returns:**\\n- [`" + ret_part + "`](#" + ret_part + ")";
@@ -279,21 +279,21 @@ pub pure fn lsp_is_ident_byte(b: i64) -> bool {
 }
 
 pub pure fn lsp_ident_at_offset(doc: str, offset: i64) -> str {
-    let n = __engine("str_len", doc);
+    let n = doc.len();
     if n == 0 || offset < 0 || offset >= n { return ""; }
     var s = offset;
-    while s > 0 && lsp_is_ident_byte(__engine("str_byte_at", doc, s - 1)) { s = s - 1; }
+    while s > 0 && lsp_is_ident_byte(doc.byte_at(s - 1)) { s = s - 1; }
     var e = offset;
-    while e < n && lsp_is_ident_byte(__engine("str_byte_at", doc, e)) { e = e + 1; }
+    while e < n && lsp_is_ident_byte(doc.byte_at(e)) { e = e + 1; }
     if e <= s { return ""; }
-    return __engine("str_slice", doc, s, e);
+    return doc.slice(s, e);
 }
 
 pub pure fn lsp_format_hover_overloads(doc: str, ident: str, cur_sig: str) -> str {
     if ident == "" { return ""; }
     let pat = nameof(fn) + " " + ident + "(";
-    let plen = __engine("str_len", pat);
-    let dlen = __engine("str_len", doc);
+    let plen = pat.len();
+    let dlen = doc.len();
     var pos = 0;
     var count = 0;
     var list_md = "";
@@ -314,8 +314,8 @@ pub pure fn lsp_format_hover_overloads(doc: str, ident: str, cur_sig: str) -> st
 pub pure fn lsp_format_hover_type_refs(doc: str, ident: str, cur_sig: str) -> str {
     if ident == "" { return ""; }
     let pat = ": " + ident;
-    let plen = __engine("str_len", pat);
-    let dlen = __engine("str_len", doc);
+    let plen = pat.len();
+    let dlen = doc.len();
     var pos = 0;
     var count = 0;
     var list_md = "";
@@ -323,7 +323,7 @@ pub pure fn lsp_format_hover_type_refs(doc: str, ident: str, cur_sig: str) -> st
         let hit = lsp_find_substr(doc, pat, pos);
         if hit < 0 { break; }
         let after_idx = hit + plen;
-        let boundary_ok = if after_idx >= dlen { true } else { !lsp_is_ident_byte(__engine("str_byte_at", doc, after_idx)) };
+        let boundary_ok = if after_idx >= dlen { true } else { !lsp_is_ident_byte(doc.byte_at(after_idx)) };
         if boundary_ok {
             let ref_sig = lsp_extract_hover_signature(doc, hit);
             if ref_sig != "" && ref_sig != cur_sig {

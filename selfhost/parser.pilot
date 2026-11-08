@@ -277,16 +277,43 @@ fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
         let awaited = sh_parse_expr_bp(arena, tape, ctx, 50);
         return sh_ast_alloc_unary(arena, "await", awaited);
     }
+    if tag == "Ident" && text == "each" {
+        __engine("map_set", ctx, "pos", cur + 1);
+        let adapted = sh_parse_expr_bp(arena, tape, ctx, 50);
+        return sh_ast_alloc_unary(arena, "each", adapted);
+    }
     if tag == "Ident" && (text == "spawn" || text == "select") && cur + 1 < tcnt && sh_token_tag(tape, cur + 1) == "LBrace" {
         __engine("map_set", ctx, "pos", cur + 1);
         let s_blk = sh_parse_block(arena, tape, ctx);
         return sh_ast_alloc_unary(arena, text, s_blk);
     }
 
+    // 3-Tier dynamic `for binding in iterable { body } [then fallback]`
+    if tag == "Ident" && text == "for" && cur + 2 < tcnt {
+        let b_name = sh_token_text(tape, cur + 1);
+        if sh_token_text(tape, cur + 2) == "in" {
+            __engine("map_set", ctx, "pos", cur + 3);
+            let iter_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
+            let body_nid = sh_parse_block(arena, tape, ctx);
+            let for_nid = sh_ast_alloc_node(arena, "ForExpr", b_name);
+            sh_ast_add_child(arena, for_nid, iter_nid);
+            sh_ast_add_child(arena, for_nid, body_nid);
+            let tp = __engine("map_get", ctx, "pos");
+            if tp < tcnt && sh_token_text(tape, tp) == "then" {
+                __engine("map_set", ctx, "pos", tp + 1);
+                let fallback_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
+                sh_ast_add_child(arena, for_nid, fallback_nid);
+            }
+            return for_nid;
+        }
+    }
+
     if tag == "Ident" || tag == "SeedKw" {
-        // Check expression-position macro expansion OR standard `CallExpr`
-        if cur + 1 < tcnt && sh_token_tag(tape, cur + 1) == "LParen" {
-            if sh_has_macro_name(ctx, text) {
+        // Check expression-position macro expansion, call-quoting, OR standard `CallExpr`
+        let nxt_tag = if cur + 1 < tcnt { sh_token_tag(tape, cur + 1) } else { "" };
+        let is_cq = nxt_tag == "CallQuoteShallow" || nxt_tag == "CallQuoteDeep" || nxt_tag == "CallQuoteAbi" || nxt_tag == "CallQuoteSignal" || nxt_tag == "CallQuoteAdjoint" || nxt_tag == "CallQuoteEffect";
+        if cur + 1 < tcnt && (nxt_tag == "LParen" || is_cq) {
+            if !is_cq && sh_has_macro_name(ctx, text) {
                 return sh_invoke_macro(arena, tape, ctx, text);
             }
             __engine("map_set", ctx, "pos", cur + 2);
@@ -356,6 +383,25 @@ fn sh_parse_expr_bp(arena: i64, tape: i64, ctx: i64, min_bp: i64) -> i64 {
         let op_text = sh_token_text(tape, cur);
 
         if tag == "Op" {
+            if op_text == "->" && cur + 1 < tcnt && sh_token_tag(tape, cur + 1) == "LBrace" {
+                __engine("map_set", ctx, "pos", cur + 2);
+                let proj_nid = sh_ast_alloc_node(arena, "ArrowProjection", "->");
+                sh_ast_add_child(arena, proj_nid, lhs);
+                while __engine("map_get", ctx, "pos") < tcnt && sh_token_tag(tape, __engine("map_get", ctx, "pos")) != "RBrace" {
+                    let fp = __engine("map_get", ctx, "pos");
+                    let f_txt = sh_token_text(tape, fp);
+                    if f_txt != "," {
+                        let fnid = sh_ast_alloc_node(arena, "IdentExpr", f_txt);
+                        sh_ast_add_child(arena, proj_nid, fnid);
+                    }
+                    __engine("map_set", ctx, "pos", fp + 1);
+                }
+                let rb_pos = __engine("map_get", ctx, "pos");
+                if rb_pos < tcnt && sh_token_tag(tape, rb_pos) == "RBrace" { __engine("map_set", ctx, "pos", rb_pos + 1); }
+                lhs = proj_nid;
+                continue;
+            }
+
             let bp = sh_get_precedence(op_text);
             if bp < min_bp || bp == 0 { break; }
 
@@ -410,7 +456,20 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
         let is_var = text == "var";
         var vpos = cur + 1;
         var vname = "";
-        if vpos < tcnt && sh_token_text(tape, vpos) == "$" && vpos + 1 < tcnt {
+        if vpos < tcnt && (sh_token_text(tape, vpos) == "{" || sh_token_text(tape, vpos) == "[" || sh_token_text(tape, vpos) == "(") {
+            let close_tok = if sh_token_text(tape, vpos) == "{" { "}" } else if sh_token_text(tape, vpos) == "[" { "]" } else { ")" };
+            var pat_str = sh_token_text(tape, vpos);
+            vpos = vpos + 1;
+            while vpos < tcnt && sh_token_text(tape, vpos) != close_tok {
+                pat_str = pat_str + sh_token_text(tape, vpos);
+                vpos = vpos + 1;
+            }
+            if vpos < tcnt {
+                pat_str = pat_str + close_tok;
+                vpos = vpos + 1;
+            }
+            vname = pat_str;
+        } else if vpos < tcnt && sh_token_text(tape, vpos) == "$" && vpos + 1 < tcnt {
             vname = "$" + sh_token_text(tape, vpos + 1);
             vpos = vpos + 2;
         } else if vpos < tcnt {
@@ -501,6 +560,114 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
             __engine("map_set", ctx, "pos", p_cur + 1);
         }
         return ret_nid;
+    }
+
+    // `yield [expr];`
+    if (tag == "Ident" || tag == "SeedKw") && text == nameof(yield) {
+        __engine("map_set", ctx, "pos", cur + 1);
+        let y_nid = sh_ast_alloc_node(arena, "YieldStmt", "");
+        let y_cur = __engine("map_get", ctx, "pos");
+        if y_cur < tcnt && sh_token_text(tape, y_cur) != ";" && sh_token_tag(tape, y_cur) != "RBrace" {
+            let val_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
+            if val_nid >= 0 { sh_ast_add_child(arena, y_nid, val_nid); }
+        }
+        let py_cur = __engine("map_get", ctx, "pos");
+        if py_cur < tcnt && sh_token_text(tape, py_cur) == ";" { __engine("map_set", ctx, "pos", py_cur + 1); }
+        return y_nid;
+    }
+
+    // `break [expr];`
+    if (tag == "Ident" || tag == "SeedKw") && text == "break" {
+        __engine("map_set", ctx, "pos", cur + 1);
+        let brk_nid = sh_ast_alloc_node(arena, "BreakStmt", "");
+        let b_cur = __engine("map_get", ctx, "pos");
+        if b_cur < tcnt && sh_token_text(tape, b_cur) != ";" && sh_token_tag(tape, b_cur) != "RBrace" {
+            let val_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
+            if val_nid >= 0 { sh_ast_add_child(arena, brk_nid, val_nid); }
+        }
+        let pb_cur = __engine("map_get", ctx, "pos");
+        if pb_cur < tcnt && sh_token_text(tape, pb_cur) == ";" { __engine("map_set", ctx, "pos", pb_cur + 1); }
+        return brk_nid;
+    }
+
+    // `continue [bounds];`
+    if (tag == "Ident" || tag == "SeedKw") && text == "continue" {
+        __engine("map_set", ctx, "pos", cur + 1);
+        let cont_nid = sh_ast_alloc_node(arena, "ContinueStmt", "");
+        let c_cur = __engine("map_get", ctx, "pos");
+        if c_cur < tcnt && sh_token_text(tape, c_cur) != ";" && sh_token_tag(tape, c_cur) != "RBrace" {
+            let val_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
+            if val_nid >= 0 { sh_ast_add_child(arena, cont_nid, val_nid); }
+        }
+        let pc_cur = __engine("map_get", ctx, "pos");
+        if pc_cur < tcnt && sh_token_text(tape, pc_cur) == ";" { __engine("map_set", ctx, "pos", pc_cur + 1); }
+        return cont_nid;
+    }
+
+    // `context(...) { ... }` ambient contextual scope
+    if tag == "Ident" && text == "context" && cur + 1 < tcnt && sh_token_tag(tape, cur + 1) == "LParen" {
+        __engine("map_set", ctx, "pos", cur + 2);
+        let ctx_nid = sh_ast_alloc_node(arena, "ContextScope", "");
+        while __engine("map_get", ctx, "pos") < tcnt && sh_token_tag(tape, __engine("map_get", ctx, "pos")) != "RParen" {
+            let p_pos = __engine("map_get", ctx, "pos");
+            let b_var = sh_token_text(tape, p_pos);
+            var next_p = p_pos + 1;
+            if next_p < tcnt && sh_token_text(tape, next_p) == "=" {
+                __engine("map_set", ctx, "pos", next_p + 1);
+                let b_val = sh_parse_expr_bp(arena, tape, ctx, 0);
+                let bind_node = sh_ast_alloc_node(arena, "ContextBinding", b_var);
+                sh_ast_add_child(arena, bind_node, b_val);
+                sh_ast_add_child(arena, ctx_nid, bind_node);
+            } else {
+                __engine("map_set", ctx, "pos", next_p);
+            }
+            let c_pos = __engine("map_get", ctx, "pos");
+            if c_pos < tcnt && sh_token_text(tape, c_pos) == "," {
+                __engine("map_set", ctx, "pos", c_pos + 1);
+            }
+        }
+        let rp_pos = __engine("map_get", ctx, "pos");
+        if rp_pos < tcnt && sh_token_tag(tape, rp_pos) == "RParen" {
+            __engine("map_set", ctx, "pos", rp_pos + 1);
+        }
+        let body_nid = sh_parse_block(arena, tape, ctx);
+        sh_ast_add_child(arena, ctx_nid, body_nid);
+        return ctx_nid;
+    }
+
+    // `steal [from] Target [ [m1, m2, ...] ];`
+    if tag == "Ident" && text == "steal" {
+        __engine("map_set", ctx, "pos", cur + 1);
+        let s_pos = __engine("map_get", ctx, "pos");
+        if s_pos < tcnt && sh_token_text(tape, s_pos) == "from" {
+            __engine("map_set", ctx, "pos", s_pos + 1);
+        }
+        let target_pos = __engine("map_get", ctx, "pos");
+        let target_name = if target_pos < tcnt { sh_token_text(tape, target_pos) } else { "" };
+        __engine("map_set", ctx, "pos", target_pos + 1);
+        let steal_nid = sh_ast_alloc_node(arena, "StealDecl", target_name);
+        let b_pos = __engine("map_get", ctx, "pos");
+        if b_pos < tcnt && sh_token_tag(tape, b_pos) == "LBracket" {
+            __engine("map_set", ctx, "pos", b_pos + 1);
+            while __engine("map_get", ctx, "pos") < tcnt && sh_token_tag(tape, __engine("map_get", ctx, "pos")) != "RBracket" {
+                let m_pos = __engine("map_get", ctx, "pos");
+                let m_txt = sh_token_text(tape, m_pos);
+                if m_txt != "," {
+                    let m_node = sh_ast_alloc_node(arena, "IdentExpr", m_txt);
+                    sh_ast_add_child(arena, steal_nid, m_node);
+                }
+                __engine("map_set", ctx, "pos", m_pos + 1);
+            }
+            let rb_pos = __engine("map_get", ctx, "pos");
+            if rb_pos < tcnt && sh_token_tag(tape, rb_pos) == "RBracket" {
+                __engine("map_set", ctx, "pos", rb_pos + 1);
+            }
+        }
+        let end_p = __engine("map_get", ctx, "pos");
+        if end_p < tcnt && sh_token_text(tape, end_p) == ";" {
+            __engine("map_set", ctx, "pos", end_p + 1);
+        }
+        return steal_nid;
     }
 
     // Statement-position homoiconic macro invocation `<macro_name>(...);`
@@ -736,6 +903,21 @@ pub fn sh_parse_program(src: str) -> i64 {
                 pos = if mate_b > pos { mate_b + 1 } else { pos + 1 };
             } else if pos < tcnt {
                 pos = pos + 1;
+            }
+        } else if text == "adapter" {
+            pos = pos + 1;
+            let from_t = if pos < tcnt { sh_token_text(tape, pos) } else { "" };
+            pos = pos + 1;
+            if pos < tcnt && sh_token_text(tape, pos) == "->" { pos = pos + 1; }
+            let to_t = if pos < tcnt { sh_token_text(tape, pos) } else { "" };
+            pos = pos + 1;
+            let ad_nid = sh_ast_alloc_node(arena, "AdapterDecl", from_t + "->" + to_t);
+            sh_ast_add_child(arena, root, ad_nid);
+            if pos < tcnt && sh_token_tag(tape, pos) == "LBrace" {
+                __engine("map_set", ctx, "pos", pos);
+                let body_nid = sh_parse_block(arena, tape, ctx);
+                sh_ast_add_child(arena, ad_nid, body_nid);
+                pos = __engine("map_get", ctx, "pos");
             }
         } else if text == nameof(fn) {
             pos = pos + 1;

@@ -380,7 +380,7 @@ pub fn ll_emit_fn_decl(fn_nid: i64, fn_meta: i64) -> str {
         let p_nid = __engine("ast_child_at", fn_nid, pi);
         if __engine("ast_node_kind", p_nid) == 21 {
             let pname = __engine("sym_str", __engine("ast_node_sym", p_nid));
-            if __engine("str_len", psig) > 0 { psig = psig + ", "; }
+            if psig.len() > 0 { psig = psig + ", "; }
             psig = psig + "i64 %arg_" + pname;
             __engine("map_set", st, "lseen_" + pname, 1);
             ll_emit_line(st, "%slot_" + pname + " = alloca i64");

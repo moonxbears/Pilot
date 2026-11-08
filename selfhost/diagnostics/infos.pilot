@@ -175,3 +175,47 @@ pub let INFOS = [
         reference: "Pilot Distributive Header Grouping",
     },
 ];
+
+pub fn find_info_title(code: str) -> str {
+    var i = 0;
+    while i < INFOS.len() {
+        let inf = INFOS[i];
+        if inf.code == code {
+            return inf.title;
+        }
+        i = i + 1;
+    }
+    return "";
+}
+
+pub fn format_perf001(buf_name: str) -> str {
+    return "PERF001: Redundant buffer clone on '" + buf_name + "'; borrow as reference view";
+}
+
+pub fn format_perf002(coll_name: str, cap: i64) -> str {
+    return "PERF002: Collection '" + coll_name + "' with bounded capacity " + cap + " is eligible for Small Vector Optimization (SVO)";
+}
+
+pub fn format_perf003(branch_name: str) -> str {
+    return "PERF003: Cold error or panic branch '" + branch_name + "' identified for out-of-line alignment";
+}
+
+pub fn format_hint001(fn_name: str) -> str {
+    return "HINT001: Deterministic pure function '" + fn_name + "' is eligible for compile-time memoization";
+}
+
+pub fn format_hint002(method_name: str, type_name: str) -> str {
+    return "HINT002: Method '" + method_name + "' in struct '" + type_name + "' does not access 'self'; declare as 'static' or 'pure'";
+}
+
+pub fn format_hint003(target_var: str) -> str {
+    return "HINT003: If-else assignment to '" + target_var + "' can be simplified to a conditional expression";
+}
+
+pub fn format_hint004(param_name: str, type_name: str) -> str {
+    return "HINT004: Pass 'slice<T>' view rather than owned '" + type_name + "' for parameter '" + param_name + "' to avoid caller cloning";
+}
+
+pub fn format_hint005(loop_name: str) -> str {
+    return "HINT005: Element loop '" + loop_name + "' can be expressed natively using the 'each' vector adapter";
+}

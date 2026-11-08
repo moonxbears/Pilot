@@ -157,6 +157,7 @@ pub fn vmc_new_state() -> i64 {
     __engine("map_set", st, "next_temp", 96);
     __engine("map_set", st, "cur_s0", 0);
     __engine("map_set", st, "cur_s1", 0);
+    __engine("map_set", st, "defer_count", 0);
     __engine("map_set", st, "vslots", __engine("map_new"));
     __engine("map_set", st, "fns", __engine("map_new"));
     return st;
@@ -166,7 +167,21 @@ pub fn vmc_reset_frame_regs(st: i64) -> i64 {
     __engine("map_set", st, "vslots", __engine("map_new"));
     __engine("map_set", st, "next_local", 17);
     __engine("map_set", st, "next_temp", 96);
+    __engine("map_set", st, "defer_count", 0);
     return 0;
+}
+
+// Emits any registered deferred expressions in LIFO order.
+pub fn vmc_emit_defers(st: i64) {
+    let dcnt = __engine("map_get", st, "defer_count") + 0;
+    var di = dcnt - 1;
+    while di >= 0 {
+        let dnid = __engine("map_get", st, "defer_" + di) + 0;
+        if dnid > 0 {
+            vmc_compile_node(st, dnid);
+        }
+        di = di - 1;
+    }
 }
 
 pub fn vmc_alloc_local(st: i64) -> i64 {
@@ -383,6 +398,18 @@ pub fn vmc_compile_call(st: i64, nid: i64) -> i64 {
             __engine("map_set", st, "patch_fn_" + pcnt, cname);
             __engine("map_set", st, "patch_cnt", pcnt + 1);
         }
+        let qk = __engine("ast_node_flags", nid);
+        if qk > 0 {
+            if qk == 4 || qk == 5 || qk == 6 {
+                let r_wrap = vmc_alloc_temp(st);
+                let r_tag = vmc_emit_load_const(st, vmc_add_int_const(st, qk));
+                let r_fn = vmc_emit_load_const(st, vmc_add_str_const(st, "rx_source"));
+                vmc_emit(st, op_move(), 1, r_tag, 0);
+                vmc_emit(st, op_move(), 2, dst, 0);
+                vmc_emit(st, op_engine_intrinsic(), r_wrap, r_fn, 2);
+                return r_wrap;
+            }
+        }
         return dst;
     }
 
@@ -450,6 +477,11 @@ pub fn vmc_compile_loop(st: i64, nid: i64, orig: i64) -> i64 {
             __engine("map_set", st, "loop_depth", depth);
             __engine("map_set", st, "lstart_" + depth, start_pc);
             __engine("map_set", st, "lbrk_cnt_" + depth, 0);
+            __engine("map_set", st, "is_for_" + depth, 1);
+            __engine("map_set", st, "for_slot_" + depth, slot);
+            __engine("map_set", st, "for_end_" + depth, r_end);
+            let loop_dst = vmc_alloc_temp(st);
+            __engine("map_set", st, "loop_dst_" + depth, loop_dst);
 
             vmc_compile_node(st, body_id);
 
@@ -462,12 +494,20 @@ pub fn vmc_compile_loop(st: i64, nid: i64, orig: i64) -> i64 {
             let end_pc = __engine("map_get", st, "icount") + 0;
             let orig_jf = __engine("map_get", st, "ins_" + jf_pc) + 0;
             __engine("map_set", st, "ins_" + jf_pc, patch_jump_if_false(orig_jf, end_pc));
+
+            if __engine("ast_child_count", nid) >= 3 {
+                let r_fallback = vmc_compile_node(st, __engine("ast_child_at", nid, 2));
+                vmc_emit(st, op_move(), loop_dst, r_fallback, 0);
+            }
+            let after_fallback_pc = __engine("map_get", st, "icount") + 0;
+
             var bi = 0;
             while bi < bcnt {
                 let bpc = __engine("map_get", st, "lbrk_" + depth + "_" + bi) + 0;
-                __engine("map_set", st, "ins_" + bpc, encode_jump_to_pc(end_pc));
+                __engine("map_set", st, "ins_" + bpc, encode_jump_to_pc(after_fallback_pc));
                 bi = bi + 1;
             }
+            return loop_dst;
         }
     }
     return 0;
@@ -669,6 +709,13 @@ pub fn vmc_compile_node(st: i64, nid: i64) -> i64 {
     if orig == 107 {
         let depth = __engine("map_get", st, "loop_depth") + 0;
         if depth > 0 {
+            if __engine("ast_child_count", nid) > 0 {
+                let r_val = vmc_compile_node(st, __engine("ast_child_at", nid, 0));
+                let ldst = __engine("map_get", st, "loop_dst_" + depth) + 0;
+                if ldst > 0 {
+                    vmc_emit(st, op_move(), ldst, r_val, 0);
+                }
+            }
             let bpc = vmc_emit(st, op_jump(), 0, 0, 0);
             let bcnt = __engine("map_get", st, "lbrk_cnt_" + depth) + 0;
             __engine("map_set", st, "lbrk_" + depth + "_" + bcnt, bpc);
@@ -679,6 +726,18 @@ pub fn vmc_compile_node(st: i64, nid: i64) -> i64 {
     if orig == 108 {
         let depth = __engine("map_get", st, "loop_depth") + 0;
         if depth > 0 {
+            if __engine("ast_child_count", nid) > 0 {
+                let r_range = __engine("ast_child_at", nid, 0);
+                let is_for = __engine("map_get", st, "is_for_" + depth) + 0;
+                if is_for == 1 && __engine("ast_child_count", r_range) >= 2 {
+                    let slot = __engine("map_get", st, "for_slot_" + depth) + 0;
+                    let r_end = __engine("map_get", st, "for_end_" + depth) + 0;
+                    let r_ns = vmc_compile_node(st, __engine("ast_child_at", r_range, 0));
+                    let r_ne = vmc_compile_node(st, __engine("ast_child_at", r_range, 1));
+                    vmc_emit(st, op_move(), slot, r_ns, 0);
+                    vmc_emit(st, op_move(), r_end, r_ne, 0);
+                }
+            }
             let spc = __engine("map_get", st, "lstart_" + depth) + 0;
             vmc_emit(st, op_jump(), 0, (spc >> 8) & 255, spc & 255);
         }
@@ -691,9 +750,172 @@ pub fn vmc_compile_node(st: i64, nid: i64) -> i64 {
         if __engine("ast_child_count", nid) > 0 {
             r_ret = vmc_compile_node(st, __engine("ast_child_at", nid, 0));
         }
-        vmc_emit(st, op_move(), 0, r_ret, 0);
+        let saved_ret = vmc_alloc_temp(st);
+        vmc_emit(st, op_move(), saved_ret, r_ret, 0);
+        vmc_emit_defers(st);
+        vmc_emit(st, op_move(), 0, saved_ret, 0);
         vmc_emit(st, op_ret(), 0, 0, 0);
         return 0;
+    }
+
+    // DeferStmt (`kind_tag == 10` or `orig == 105`)
+    if k == 10 || orig == 105 {
+        if __engine("ast_child_count", nid) > 0 {
+            let d_child = __engine("ast_child_at", nid, 0);
+            let dcnt = __engine("map_get", st, "defer_count") + 0;
+            __engine("map_set", st, "defer_" + dcnt, d_child);
+            __engine("map_set", st, "defer_count", dcnt + 1);
+        }
+        return 0;
+    }
+
+    // GuardStmt (`orig == 104`)
+    if orig == 104 && __engine("ast_child_count", nid) >= 2 {
+        let r_cond = vmc_compile_node(st, __engine("ast_child_at", nid, 0));
+        let jf_pc = vmc_emit(st, op_jump_if_false(), 0, r_cond, 0);
+        let skip_pc = vmc_emit(st, op_jump(), 0, 0, 0);
+        let else_pc = __engine("map_get", st, "icount") + 0;
+        let orig_jf = __engine("map_get", st, "ins_" + jf_pc) + 0;
+        __engine("map_set", st, "ins_" + jf_pc, patch_jump_if_false(orig_jf, else_pc));
+        vmc_compile_node(st, __engine("ast_child_at", nid, 1));
+        let cont_pc = __engine("map_get", st, "icount") + 0;
+        __engine("map_set", st, "ins_" + skip_pc, encode_jump_to_pc(cont_pc));
+        return 0;
+    }
+
+    // MatchExpr (`orig == 202`)
+    if orig == 202 && __engine("ast_child_count", nid) > 0 {
+        let m_cc = __engine("ast_child_count", nid);
+        let r_target = vmc_compile_node(st, __engine("ast_child_at", nid, 0));
+        let dst = vmc_alloc_temp(st);
+        let jend_map = __engine("map_new");
+        var jend_cnt = 0;
+        var ci = 1;
+        while ci < m_cc {
+            let arm_id = __engine("ast_child_at", nid, ci);
+            let arm_cc = __engine("ast_child_count", arm_id);
+            if arm_cc >= 2 {
+                let pat_id = __engine("ast_child_at", arm_id, 0);
+                let body_id = __engine("ast_child_at", arm_id, 1);
+                let pat_orig = __engine("ast_orig_kind", pat_id);
+                if pat_orig == 500 || pat_id == 0 {
+                    let r_body = vmc_compile_node(st, body_id);
+                    vmc_emit(st, op_move(), dst, r_body, 0);
+                    let jend_pc = vmc_emit(st, op_jump(), 0, 0, 0);
+                    __engine("map_set", jend_map, "j_" + jend_cnt, jend_pc);
+                    jend_cnt = jend_cnt + 1;
+                } else if pat_orig == 501 {
+                    let bsym = __engine("ast_node_sym", pat_id);
+                    let bname = __engine("sym_str", bsym);
+                    let vslots = __engine("map_get", st, "vslots") + 0;
+                    var slot = __engine("map_get", vslots, bname) + 0;
+                    if slot == 0 {
+                        slot = vmc_alloc_local(st);
+                        __engine("map_set", vslots, bname, slot);
+                        vmc_record_debug_reg(st, slot, bsym, bname);
+                    }
+                    vmc_emit(st, op_move(), slot, r_target, 0);
+                    let r_body = vmc_compile_node(st, body_id);
+                    vmc_emit(st, op_move(), dst, r_body, 0);
+                    let jend_pc = vmc_emit(st, op_jump(), 0, 0, 0);
+                    __engine("map_set", jend_map, "j_" + jend_cnt, jend_pc);
+                    jend_cnt = jend_cnt + 1;
+                } else if pat_orig == 508 && __engine("ast_child_count", pat_id) >= 2 {
+                    let r_p0 = vmc_compile_node(st, __engine("ast_child_at", pat_id, 0));
+                    let r_p1 = vmc_compile_node(st, __engine("ast_child_at", pat_id, 1));
+                    let c1 = vmc_alloc_temp(st);
+                    let c2 = vmc_alloc_temp(st);
+                    let r_cmp = vmc_alloc_temp(st);
+                    vmc_emit(st, op_cmp_ge(), c1, r_target, r_p0);
+                    vmc_emit(st, op_cmp_le(), c2, r_target, r_p1);
+                    vmc_emit(st, op_and(), r_cmp, c1, c2);
+                    let jf_pc = vmc_emit(st, op_jump_if_false(), 0, r_cmp, 0);
+                    let r_body = vmc_compile_node(st, body_id);
+                    vmc_emit(st, op_move(), dst, r_body, 0);
+                    let jend_pc = vmc_emit(st, op_jump(), 0, 0, 0);
+                    __engine("map_set", jend_map, "j_" + jend_cnt, jend_pc);
+                    jend_cnt = jend_cnt + 1;
+                    let next_pc = __engine("map_get", st, "icount") + 0;
+                    let orig_jf = __engine("map_get", st, "ins_" + jf_pc) + 0;
+                    __engine("map_set", st, "ins_" + jf_pc, patch_jump_if_false(orig_jf, next_pc));
+                } else {
+                    let r_pat = vmc_compile_node(st, pat_id);
+                    let r_cmp = vmc_alloc_temp(st);
+                    vmc_emit(st, op_cmp_eq(), r_cmp, r_target, r_pat);
+                    let jf_pc = vmc_emit(st, op_jump_if_false(), 0, r_cmp, 0);
+                    let r_body = vmc_compile_node(st, body_id);
+                    vmc_emit(st, op_move(), dst, r_body, 0);
+                    let jend_pc = vmc_emit(st, op_jump(), 0, 0, 0);
+                    __engine("map_set", jend_map, "j_" + jend_cnt, jend_pc);
+                    jend_cnt = jend_cnt + 1;
+                    let next_pc = __engine("map_get", st, "icount") + 0;
+                    let orig_jf = __engine("map_get", st, "ins_" + jf_pc) + 0;
+                    __engine("map_set", st, "ins_" + jf_pc, patch_jump_if_false(orig_jf, next_pc));
+                }
+            }
+            ci = ci + 1;
+        }
+        let end_pc = __engine("map_get", st, "icount") + 0;
+        var ji = 0;
+        while ji < jend_cnt {
+            let jpc = __engine("map_get", jend_map, "j_" + ji) + 0;
+            __engine("map_set", st, "ins_" + jpc, encode_jump_to_pc(end_pc));
+            ji = ji + 1;
+        }
+        return dst;
+    }
+
+    // TryStmt (`orig == 111`)
+    if orig == 111 && __engine("ast_child_count", nid) > 0 {
+        let t_cc = __engine("ast_child_count", nid);
+        let r_try = vmc_compile_node(st, __engine("ast_child_at", nid, 0));
+        let dst = vmc_alloc_temp(st);
+        vmc_emit(st, op_move(), dst, r_try, 0);
+        let jend_pc = vmc_emit(st, op_jump(), 0, 0, 0);
+        var ci = 1;
+        while ci < t_cc {
+            let cid = __engine("ast_child_at", nid, ci);
+            let csym = __engine("ast_node_sym", cid);
+            if csym != 0 {
+                let cname = __engine("sym_str", csym);
+                if cname != "" {
+                    let vslots = __engine("map_get", st, "vslots") + 0;
+                    var slot = __engine("map_get", vslots, cname) + 0;
+                    if slot == 0 {
+                        slot = vmc_alloc_local(st);
+                        __engine("map_set", vslots, cname, slot);
+                        vmc_record_debug_reg(st, slot, csym, cname);
+                    }
+                    let zero_c = vmc_emit_load_const(st, vmc_add_scalar_const(st, 0, 0));
+                    vmc_emit(st, op_move(), slot, zero_c, 0);
+                }
+            }
+            if __engine("ast_child_count", cid) > 0 {
+                let r_c = vmc_compile_node(st, __engine("ast_child_at", cid, 0));
+                vmc_emit(st, op_move(), dst, r_c, 0);
+            }
+            ci = ci + 1;
+        }
+        let end_pc = __engine("map_get", st, "icount") + 0;
+        __engine("map_set", st, "ins_" + jend_pc, encode_jump_to_pc(end_pc));
+        return dst;
+    }
+
+    // CatchRecoveryExpr (`orig == 214`)
+    if orig == 214 && __engine("ast_child_count", nid) >= 2 {
+        let r_lhs = vmc_compile_node(st, __engine("ast_child_at", nid, 0));
+        let jf_pc = vmc_emit(st, op_jump_if_false(), 0, r_lhs, 0);
+        let dst = vmc_alloc_temp(st);
+        vmc_emit(st, op_move(), dst, r_lhs, 0);
+        let jend_pc = vmc_emit(st, op_jump(), 0, 0, 0);
+        let fb_pc = __engine("map_get", st, "icount") + 0;
+        let orig_jf = __engine("map_get", st, "ins_" + jf_pc) + 0;
+        __engine("map_set", st, "ins_" + jf_pc, patch_jump_if_false(orig_jf, fb_pc));
+        let r_fb = vmc_compile_node(st, __engine("ast_child_at", nid, 1));
+        vmc_emit(st, op_move(), dst, r_fb, 0);
+        let end_pc = __engine("map_get", st, "icount") + 0;
+        __engine("map_set", st, "ins_" + jend_pc, encode_jump_to_pc(end_pc));
+        return dst;
     }
 
     // MemberExpr (`kind_tag == 17`)
@@ -719,7 +941,22 @@ pub fn vmc_compile_node(st: i64, nid: i64) -> i64 {
 
     // PolyglotBlock (`kind_tag == 13`)
     if k == 13 {
-        return vmc_emit_load_const(st, vmc_add_scalar_const(st, 3, 0));
+        let lsym = __engine("ast_node_sym", nid);
+        let lang = __engine("sym_str", lsym);
+        let s0 = __engine("ast_span_start", nid);
+        let s1 = __engine("ast_span_end", nid);
+        let raw_src = __engine("source_slice", s0, s1);
+        let seq = (__engine("map_get", st, "call_seq") + 0) + 1;
+        __engine("map_set", st, "call_seq", seq);
+        let r_bin = vmc_emit_load_const(st, vmc_add_str_const(st, lang));
+        let r_code = vmc_emit_load_const(st, vmc_add_str_const(st, raw_src));
+        let r_hook = vmc_emit_load_const(st, vmc_add_str_const(st, nameof(host_spawn_eval)));
+        __engine("map_set", st, "carg_" + seq + "_0", r_bin);
+        __engine("map_set", st, "carg_" + seq + "_1", r_code);
+        vmc_stage_call_args(st, seq, 2);
+        let dst = vmc_alloc_temp(st);
+        vmc_emit(st, op_engine_intrinsic(), dst, r_hook, 2);
+        return dst;
     }
 
     return 0;
@@ -756,7 +993,10 @@ pub fn vmc_compile_fn_decl(st: i64, fn_nid: i64) -> i64 {
     }
 
     let b_reg = vmc_compile_node(st, body_id);
-    vmc_emit(st, op_move(), 0, b_reg, 0);
+    let saved_ret = vmc_alloc_temp(st);
+    vmc_emit(st, op_move(), saved_ret, b_reg, 0);
+    vmc_emit_defers(st);
+    vmc_emit(st, op_move(), 0, saved_ret, 0);
     vmc_emit(st, op_ret(), 0, 0, 0);
 
     if pcount == 0 {
@@ -826,7 +1066,10 @@ pub fn vmc_compile_arena() -> i64 {
         last_reg = dst;
     }
 
-    vmc_emit(st, op_move(), 0, last_reg, 0);
+    let saved_last = vmc_alloc_temp(st);
+    vmc_emit(st, op_move(), saved_last, last_reg, 0);
+    vmc_emit_defers(st);
+    vmc_emit(st, op_move(), 0, saved_last, 0);
     vmc_emit(st, op_ret(), 0, 0, 0);
     vmc_emit(st, op_halt(), 0, 0, 0);
 

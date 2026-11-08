@@ -261,3 +261,35 @@ pub let WARNINGS = [
         reference: "Clean Code / SonarQube S109 / Roslyn CA1303",
     },
 ];
+
+pub fn find_warning_title(code: str) -> str {
+    var i = 0;
+    while i < WARNINGS.len() {
+        let w = WARNINGS[i];
+        if w.code == code {
+            return w.title;
+        }
+        i = i + 1;
+    }
+    return "";
+}
+
+pub fn format_dead001(var_name: str) -> str {
+    return "DEAD001: Mutable variable '" + var_name + "' is declared but never assigned or written after declaration";
+}
+
+pub fn format_unused002(fn_name: str) -> str {
+    return "UNUSED002: Private function or method '" + fn_name + "' is defined but never called or referenced across compilation unit";
+}
+
+pub fn format_unused003(import_target: str) -> str {
+    return "UNUSED003: 'use' import directive '" + import_target + "' does not supply any referenced types or symbols";
+}
+
+pub fn format_unused004(param_name: str) -> str {
+    return "UNUSED004: Function parameter '" + param_name + "' is declared but never read in the body; prefix with '_' or omit";
+}
+
+pub fn format_shadow001(var_name: str, scope_name: str) -> str {
+    return "SHADOW001: Identifier '" + var_name + "' shadows outer binding in scope '" + scope_name + "'";
+}

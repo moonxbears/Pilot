@@ -18,7 +18,7 @@ pub fn build_sql_select_plan(
     where_predicate: str
 ) -> SqlQueryPlan {
     let base = "SELECT " + projection_cols + " FROM " + table_name;
-    let stmt = if __engine("str_len", where_predicate) > 0 {
+    let stmt = if where_predicate.len() > 0 {
         base + " WHERE " + where_predicate + ";"
     } else {
         base + ";"
@@ -32,10 +32,10 @@ pub fn build_sql_select_plan(
 }
 
 pub pure fn sql_trim(s: str) -> str {
-    let n = __engine("str_len", s);
+    let n = s.len();
     var a = 0;
     while a < n {
-        let b = __engine("str_byte_at", s, a);
+        let b = s.byte_at(a);
         if b == 32 || b == 9 || b == 10 || b == 13 || b == 59 {
             a = a + 1;
         } else {
@@ -44,24 +44,24 @@ pub pure fn sql_trim(s: str) -> str {
     }
     var e = n;
     while e > a {
-        let b = __engine("str_byte_at", s, e - 1);
+        let b = s.byte_at(e - 1);
         if b == 32 || b == 9 || b == 10 || b == 13 || b == 59 {
             e = e - 1;
         } else {
             break;
         }
     }
-    return __engine("str_slice", s, a, e);
+    return s.slice(a, e);
 }
 
 pub pure fn sql_unquote(s: str) -> str {
     let t = sql_trim(s);
-    let n = __engine("str_len", t);
+    let n = t.len();
     if n >= 2 {
-        let b0 = __engine("str_byte_at", t, 0);
-        let b1 = __engine("str_byte_at", t, n - 1);
+        let b0 = t.byte_at(0);
+        let b1 = t.byte_at(n - 1);
         if (b0 == 39 && b1 == 39) || (b0 == 34 && b1 == 34) {
-            return __engine("str_slice", t, 1, n - 1);
+            return t.slice(1, n - 1);
         }
     }
     return t;
@@ -69,28 +69,28 @@ pub pure fn sql_unquote(s: str) -> str {
 
 pub pure fn sql_first_word(s: str) -> str {
     let t = sql_trim(s);
-    let n = __engine("str_len", t);
+    let n = t.len();
     var i = 0;
     while i < n {
-        let b = __engine("str_byte_at", t, i);
+        let b = t.byte_at(i);
         if b == 32 || b == 9 || b == 40 {
             break;
         }
         i = i + 1;
     }
-    return __engine("str_slice", t, 0, i);
+    return t.slice(0, i);
 }
 
 pub pure fn sql_find_sub(hay: str, needle: str, from_idx: i64) -> i64 {
-    let nh = __engine("str_len", hay);
-    let nn = __engine("str_len", needle);
+    let nh = hay.len();
+    let nn = needle.len();
     if nn <= 0 || nn > nh {
         return -1;
     }
     let limit = nh - nn;
     var i = from_idx;
     while i <= limit {
-        if __engine("str_slice", hay, i, i + nn) == needle {
+        if hay.slice(i, i + nn) == needle {
             return i;
         }
         i = i + 1;
@@ -100,15 +100,15 @@ pub pure fn sql_find_sub(hay: str, needle: str, from_idx: i64) -> i64 {
 
 pub pure fn sql_is_int_str(s: str) -> bool {
     let t = sql_trim(s);
-    let n = __engine("str_len", t);
+    let n = t.len();
     if n == 0 { return false; }
     var i = 0;
-    if __engine("str_byte_at", t, 0) == 45 {
+    if t.byte_at(0) == 45 {
         if n == 1 { return false; }
         i = 1;
     }
     while i < n {
-        let b = __engine("str_byte_at", t, i);
+        let b = t.byte_at(i);
         if b < 48 || b > 57 {
             return false;
         }
@@ -119,17 +119,17 @@ pub pure fn sql_is_int_str(s: str) -> bool {
 
 pub pure fn sql_parse_int(s: str) -> i64 {
     let t = sql_trim(s);
-    let n = __engine("str_len", t);
+    let n = t.len();
     if n == 0 { return 0; }
     var sign = 1;
     var i = 0;
-    if __engine("str_byte_at", t, 0) == 45 {
+    if t.byte_at(0) == 45 {
         sign = -1;
         i = 1;
     }
     var v = 0;
     while i < n {
-        let b = __engine("str_byte_at", t, i);
+        let b = t.byte_at(i);
         if b >= 48 && b <= 57 {
             v = (v * 10) + (b - 48);
         }
@@ -140,19 +140,19 @@ pub pure fn sql_parse_int(s: str) -> i64 {
 
 pub fn sql_split_csv(s: str) -> i64 {
     let m = __engine("map_new");
-    let n = __engine("str_len", s);
+    let n = s.len();
     var cnt = 0;
     var start = 0;
     var in_q = 0;
     var i = 0;
     while i <= n {
-        let b = if i < n { __engine("str_byte_at", s, i) } else { 44 };
+        let b = if i < n { s.byte_at(i) } else { 44 };
         if b == 39 && in_q == 0 {
             in_q = 1;
         } else if b == 39 && in_q == 1 {
             in_q = 0;
         } else if b == 44 && in_q == 0 {
-            let item = sql_trim(__engine("str_slice", s, start, i));
+            let item = sql_trim(s.slice(start, i));
             __engine("map_set", m, cnt, item);
             cnt = cnt + 1;
             start = i + 1;
@@ -172,8 +172,8 @@ pub fn sql_db_new() -> i64 {
 pub fn sql_exec_create_table(db: i64, q_str: str) -> str {
     let p_open = sql_find_sub(q_str, "(", 0);
     let p_close = sql_find_sub(q_str, ")", p_open + 1);
-    let tname = sql_trim(__engine("str_slice", q_str, 12, p_open));
-    let cols_csv = __engine("str_slice", q_str, p_open + 1, p_close);
+    let tname = sql_trim(q_str.slice(12, p_open));
+    let cols_csv = q_str.slice(p_open + 1, p_close);
     let parts = sql_split_csv(cols_csv);
     let n = __engine("map_get", parts, "cnt") + 0;
     __engine("map_set", db, "t_" + tname + "_ncols", n);
@@ -190,10 +190,10 @@ pub fn sql_exec_create_table(db: i64, q_str: str) -> str {
 
 pub fn sql_exec_insert(db: i64, q_str: str) -> str {
     let v_idx = sql_find_sub(q_str, "VALUES", 0);
-    let tname = sql_trim(__engine("str_slice", q_str, 11, v_idx));
+    let tname = sql_trim(q_str.slice(11, v_idx));
     let p_open = sql_find_sub(q_str, "(", v_idx);
     let p_close = sql_find_sub(q_str, ")", p_open + 1);
-    let vals_csv = __engine("str_slice", q_str, p_open + 1, p_close);
+    let vals_csv = q_str.slice(p_open + 1, p_close);
     let vals = sql_split_csv(vals_csv);
     let ncols = __engine("map_get", db, "t_" + tname + "_ncols") + 0;
     let r_idx = __engine("map_get", db, "t_" + tname + "_nrows") + 0;
@@ -225,7 +225,7 @@ pub fn sql_build_row_map(db: i64, tname: str, r_idx: i64, target_map: i64) -> i6
 
 pub pure fn sql_eval_single_pred(row_m: i64, pred_raw: str) -> bool {
     let pred = sql_trim(pred_raw);
-    if __engine("str_len", pred) == 0 {
+    if pred.len() == 0 {
         return true;
     }
     var cmp_op = "=";
@@ -261,8 +261,8 @@ pub pure fn sql_eval_single_pred(row_m: i64, pred_raw: str) -> bool {
     if op_pos < 0 {
         return true;
     }
-    let lhs_col = sql_trim(__engine("str_slice", pred, 0, op_pos));
-    let rhs_raw = sql_trim(__engine("str_slice", pred, op_pos + op_len, __engine("str_len", pred)));
+    let lhs_col = sql_trim(pred.slice(0, op_pos));
+    let rhs_raw = sql_trim(pred.slice(op_pos + op_len, pred.len()));
     let lhs_val = "" + __engine("map_get", row_m, lhs_col);
     let rhs_val = sql_unquote(rhs_raw);
 
@@ -287,7 +287,7 @@ pub pure fn sql_eval_single_pred(row_m: i64, pred_raw: str) -> bool {
 
 pub pure fn sql_eval_where(row_m: i64, where_clause: str) -> bool {
     let w = sql_trim(where_clause);
-    let n = __engine("str_len", w);
+    let n = w.len();
     if n == 0 {
         return true;
     }
@@ -295,7 +295,7 @@ pub pure fn sql_eval_where(row_m: i64, where_clause: str) -> bool {
     while pos < n {
         let and_idx = sql_find_sub(w, " AND ", pos);
         let seg_end = if and_idx >= 0 { and_idx } else { n };
-        let seg = __engine("str_slice", w, pos, seg_end);
+        let seg = w.slice(pos, seg_end);
         if !sql_eval_single_pred(row_m, seg) {
             return false;
         }
@@ -310,13 +310,13 @@ pub pure fn sql_eval_where(row_m: i64, where_clause: str) -> bool {
 pub fn sql_exec_update(db: i64, q_str: str) -> str {
     let set_idx = sql_find_sub(q_str, " SET ", 0);
     let w_idx = sql_find_sub(q_str, " WHERE ", set_idx);
-    let tname = sql_trim(__engine("str_slice", q_str, 6, set_idx));
-    let set_end = if w_idx >= 0 { w_idx } else { __engine("str_len", q_str) };
-    let assign_s = sql_trim(__engine("str_slice", q_str, set_idx + 5, set_end));
+    let tname = sql_trim(q_str.slice(6, set_idx));
+    let set_end = if w_idx >= 0 { w_idx } else { q_str.len() };
+    let assign_s = sql_trim(q_str.slice(set_idx + 5, set_end));
     let eq_idx = sql_find_sub(assign_s, "=", 0);
-    let set_col = sql_trim(__engine("str_slice", assign_s, 0, eq_idx));
-    let set_val = sql_unquote(__engine("str_slice", assign_s, eq_idx + 1, __engine("str_len", assign_s)));
-    let where_s = if w_idx >= 0 { sql_trim(__engine("str_slice", q_str, w_idx + 7, __engine("str_len", q_str))) } else { "" };
+    let set_col = sql_trim(assign_s.slice(0, eq_idx));
+    let set_val = sql_unquote(assign_s.slice(eq_idx + 1, assign_s.len()));
+    let where_s = if w_idx >= 0 { sql_trim(q_str.slice(w_idx + 7, q_str.len())) } else { "" };
 
     let nrows = __engine("map_get", db, "t_" + tname + "_nrows") + 0;
     var r = 0;
@@ -335,9 +335,9 @@ pub fn sql_exec_update(db: i64, q_str: str) -> str {
 
 pub fn sql_exec_delete(db: i64, q_str: str) -> str {
     let w_idx = sql_find_sub(q_str, " WHERE ", 0);
-    let t_end = if w_idx >= 0 { w_idx } else { __engine("str_len", q_str) };
-    let tname = sql_trim(__engine("str_slice", q_str, 11, t_end));
-    let where_s = if w_idx >= 0 { sql_trim(__engine("str_slice", q_str, w_idx + 7, __engine("str_len", q_str))) } else { "" };
+    let t_end = if w_idx >= 0 { w_idx } else { q_str.len() };
+    let tname = sql_trim(q_str.slice(11, t_end));
+    let where_s = if w_idx >= 0 { sql_trim(q_str.slice(w_idx + 7, q_str.len())) } else { "" };
 
     let nrows = __engine("map_get", db, "t_" + tname + "_nrows") + 0;
     var r = 0;
@@ -356,14 +356,14 @@ pub fn sql_exec_delete(db: i64, q_str: str) -> str {
 
 pub fn sql_exec_select(db: i64, q_str: str) -> str {
     let from_idx = sql_find_sub(q_str, " FROM ", 0);
-    let proj_s = sql_trim(__engine("str_slice", q_str, 6, from_idx));
+    let proj_s = sql_trim(q_str.slice(6, from_idx));
     let proj_cols = sql_split_csv(proj_s);
     let nproj = __engine("map_get", proj_cols, "cnt") + 0;
 
     let join_idx = sql_find_sub(q_str, " JOIN ", from_idx);
     let where_idx = sql_find_sub(q_str, " WHERE ", from_idx);
     let order_idx = sql_find_sub(q_str, " ORDER BY ", from_idx);
-    let qlen = __engine("str_len", q_str);
+    let qlen = q_str.len();
 
     let from_end = if join_idx >= 0 {
         join_idx
@@ -374,7 +374,7 @@ pub fn sql_exec_select(db: i64, q_str: str) -> str {
     } else {
         qlen
     };
-    let t1 = sql_trim(__engine("str_slice", q_str, from_idx + 6, from_end));
+    let t1 = sql_trim(q_str.slice(from_idx + 6, from_end));
 
     var t2 = "";
     var join_lhs = "";
@@ -382,30 +382,30 @@ pub fn sql_exec_select(db: i64, q_str: str) -> str {
     if join_idx >= 0 {
         let on_idx = sql_find_sub(q_str, " ON ", join_idx);
         let join_end = if where_idx >= 0 { where_idx } else if order_idx >= 0 { order_idx } else { qlen };
-        t2 = sql_trim(__engine("str_slice", q_str, join_idx + 6, on_idx));
-        let on_cond = sql_trim(__engine("str_slice", q_str, on_idx + 4, join_end));
+        t2 = sql_trim(q_str.slice(join_idx + 6, on_idx));
+        let on_cond = sql_trim(q_str.slice(on_idx + 4, join_end));
         let eq_p = sql_find_sub(on_cond, "=", 0);
-        join_lhs = sql_trim(__engine("str_slice", on_cond, 0, eq_p));
-        join_rhs = sql_trim(__engine("str_slice", on_cond, eq_p + 1, __engine("str_len", on_cond)));
+        join_lhs = sql_trim(on_cond.slice(0, eq_p));
+        join_rhs = sql_trim(on_cond.slice(eq_p + 1, on_cond.len()));
     }
 
     var where_s = "";
     if where_idx >= 0 {
         let w_end = if order_idx >= 0 { order_idx } else { qlen };
-        where_s = sql_trim(__engine("str_slice", q_str, where_idx + 7, w_end));
+        where_s = sql_trim(q_str.slice(where_idx + 7, w_end));
     }
 
     var order_col = "";
     var order_desc = 0;
     if order_idx >= 0 {
-        let ord_raw = sql_trim(__engine("str_slice", q_str, order_idx + 10, qlen));
+        let ord_raw = sql_trim(q_str.slice(order_idx + 10, qlen));
         let desc_p = sql_find_sub(ord_raw, " DESC", 0);
         let asc_p = sql_find_sub(ord_raw, " ASC", 0);
         if desc_p >= 0 {
-            order_col = sql_trim(__engine("str_slice", ord_raw, 0, desc_p));
+            order_col = sql_trim(ord_raw.slice(0, desc_p));
             order_desc = 1;
         } else if asc_p >= 0 {
-            order_col = sql_trim(__engine("str_slice", ord_raw, 0, asc_p));
+            order_col = sql_trim(ord_raw.slice(0, asc_p));
             order_desc = 0;
         } else {
             order_col = ord_raw;
@@ -419,7 +419,7 @@ pub fn sql_exec_select(db: i64, q_str: str) -> str {
     var r1 = 0;
     while r1 < nrows1 {
         if (__engine("map_get", db, "t_" + t1 + "_r_" + r1 + "_alive") + 0) == 1 {
-            if __engine("str_len", t2) > 0 {
+            if t2.len() > 0 {
                 let nrows2 = __engine("map_get", db, "t_" + t2 + "_nrows") + 0;
                 var r2 = 0;
                 while r2 < nrows2 {
@@ -451,7 +451,7 @@ pub fn sql_exec_select(db: i64, q_str: str) -> str {
     }
 
     // Optional ORDER BY sorting
-    if __engine("str_len", order_col) > 0 && cand_cnt > 1 {
+    if order_col.len() > 0 && cand_cnt > 1 {
         var i = 0;
         while i < cand_cnt {
             var j = i + 1;

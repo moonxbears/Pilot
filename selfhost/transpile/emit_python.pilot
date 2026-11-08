@@ -74,7 +74,7 @@ pub fn tpy_emit_expr(nid: i64) -> str {
                 let k_nid = __engine("ast_child_at", map_nid, mi);
                 let v_nid = __engine("ast_child_at", map_nid, mi + 1);
                 let fname = __engine("sym_str", __engine("ast_node_sym", k_nid));
-                if __engine("str_len", fields_s) > 0 {
+                if fields_s.len() > 0 {
                     fields_s = fields_s + ", ";
                 }
                 fields_s = fields_s + fname + "=" + tpy_emit_expr(v_nid);
@@ -109,7 +109,7 @@ pub fn tpy_emit_block_body(blk_nid: i64, depth: i64) -> str {
     if blk_nid < 0 { return ind + "pass\n"; }
     if __engine("ast_node_kind", blk_nid) != 18 {
         let single = tpy_emit_stmt(blk_nid, depth);
-        if __engine("str_len", single) == 0 {
+        if single.len() == 0 {
             return ind + "pass\n";
         }
         return single;
@@ -124,7 +124,7 @@ pub fn tpy_emit_block_body(blk_nid: i64, depth: i64) -> str {
         out = out + tpy_emit_stmt(__engine("ast_child_at", blk_nid, i), depth);
         i = i + 1;
     }
-    if __engine("str_len", out) == 0 {
+    if out.len() == 0 {
         return ind + "pass\n";
     }
     return out;
@@ -214,7 +214,7 @@ pub fn transpile_arena_to_python() -> str {
                 }
                 fi = fi + 1;
             }
-            if __engine("str_len", init_body) == 0 {
+            if init_body.len() == 0 {
                 init_body = "        pass\n";
             }
             out = out + "class " + sname + ":\n    def __init__(" + init_params + "):\n" + init_body + "\n";
@@ -235,7 +235,7 @@ pub fn transpile_arena_to_python() -> str {
                 let pch = __engine("ast_child_at", fn_nid, pi);
                 if __engine("ast_node_kind", pch) == 21 {
                     let pname = __engine("sym_str", __engine("ast_node_sym", pch));
-                    if __engine("str_len", params_s) > 0 { params_s = params_s + ", "; }
+                    if params_s.len() > 0 { params_s = params_s + ", "; }
                     params_s = params_s + pname;
                 }
                 pi = pi + 1;

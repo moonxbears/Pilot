@@ -95,11 +95,19 @@ pub fn gl_emit_expr(nid: i64, st: i64, backend: str, want_float: bool) -> str {
         return "%" + nm;
     }
     if orig == 210 {
-        let base_nm = __engine("sym_str", __engine("ast_node_sym", __engine("ast_child_at", nid, 0)));
+        let base_nid = __engine("ast_child_at", nid, 0);
+        let base_orig = __engine("ast_orig_kind", base_nid);
+        var base_ptr = "";
+        if base_orig == 210 {
+            base_ptr = gl_emit_expr(base_nid, st, backend, false);
+        } else {
+            let base_nm = __engine("sym_str", __engine("ast_node_sym", base_nid));
+            base_ptr = "%" + base_nm;
+        }
         let idx_v = gl_emit_expr(__engine("ast_child_at", nid, 1), st, backend, false);
         let gep = gl_next_ssa(st, "gep");
         let ld = gl_next_ssa(st, "ld");
-        gl_append(st, gep + " = getelementptr inbounds float, ptr %" + base_nm + ", i64 " + idx_v);
+        gl_append(st, gep + " = getelementptr inbounds float, ptr " + base_ptr + ", i64 " + idx_v);
         gl_append(st, ld + " = load float, ptr " + gep + ", align 4");
         return ld;
     }
@@ -183,11 +191,19 @@ pub fn gl_emit_stmt(nid: i64, st: i64, backend: str) -> i64 {
         let lhs_nid = __engine("ast_child_at", nid, 0);
         let rhs_nid = __engine("ast_child_at", nid, 1);
         if __engine("ast_orig_kind", lhs_nid) == 210 {
-            let out_nm = __engine("sym_str", __engine("ast_node_sym", __engine("ast_child_at", lhs_nid, 0)));
+            let base_nid = __engine("ast_child_at", lhs_nid, 0);
+            let base_orig = __engine("ast_orig_kind", base_nid);
+            var out_ptr = "";
+            if base_orig == 210 {
+                out_ptr = gl_emit_expr(base_nid, st, backend, false);
+            } else {
+                let out_nm = __engine("sym_str", __engine("ast_node_sym", base_nid));
+                out_ptr = "%" + out_nm;
+            }
             let idx_v = gl_emit_expr(__engine("ast_child_at", lhs_nid, 1), st, backend, false);
             let rhs_v = gl_emit_expr(rhs_nid, st, backend, true);
             let gep = gl_next_ssa(st, "outgep");
-            gl_append(st, gep + " = getelementptr inbounds float, ptr %" + out_nm + ", i64 " + idx_v);
+            gl_append(st, gep + " = getelementptr inbounds float, ptr " + out_ptr + ", i64 " + idx_v);
             gl_append(st, "store float " + rhs_v + ", ptr " + gep + ", align 4");
             return 0;
         }
@@ -232,7 +248,7 @@ pub fn gl_emit_gpu_llvm_from_arena(backend: str, kernel_name: str) -> str {
     while pi < cc {
         let pch = __engine("ast_child_at", fn_nid, pi);
         if __engine("ast_node_kind", pch) == 21 {
-            if __engine("str_len", params) > 0 { params = params + ", "; }
+            if params.len() > 0 { params = params + ", "; }
             let pname = __engine("sym_str", __engine("ast_node_sym", pch));
             let ptname = __engine("sym_str", __engine("ast_node_raw_bits", pch));
             let p = cg_resolve_type_physics(ptname);
