@@ -115,9 +115,9 @@ impl PilVirtualMachine {
                         }
                         "str_slice" if args.len() >= 3 => {
                             let s = if args[0].is_null() { String::new() } else { args[0].to_string_repr() };
-                            let a = (args[1].as_int().unwrap_or(0).max(0) as usize).min(s.len());
-                            let b = (args[2].as_int().unwrap_or(0).max(0) as usize).min(s.len()).max(a);
-                            PilotVal::from_str(&s[a..b])
+                            let (mut a, mut b) = ((args[1].as_int().unwrap_or(0).max(0) as usize).min(s.len()), (args[2].as_int().unwrap_or(0).max(0) as usize).min(s.len()));
+                            while !s.is_char_boundary(a) && a < s.len() { a += 1; } while !s.is_char_boundary(b) && b < s.len() { b += 1; }
+                            PilotVal::from_str(&s[a..b.max(a)])
                         }
                         "map_new" => { let idx = self.heap_maps.len(); self.heap_maps.push(HashMap::new()); PilotVal::from_int(idx as i64) }
                         "map_set" if args.len() >= 3 => {

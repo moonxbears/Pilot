@@ -51,9 +51,9 @@ fn cmd_deps(args: &[String]) {
 
 fn cmd_map(args: &[String]) {
     if args.iter().any(|a| a == "--help" || a == "-h") { println!("{}", eval_selfhost("selfhost/cli/map_cmd.pilot", "map_help_banner();")); return; }
-    let target = args.iter().find(|a| !a.starts_with('-')).cloned().unwrap_or_else(|| "src/main.pilot".into());
-    let flags = args.iter().filter(|a| a.starts_with('-')).cloned().collect::<Vec<_>>().join(" ");
-    if let Some(s) = read_src(&target) { println!("{}", eval_selfhost("selfhost/cli/map_cmd.pilot", &format!("format_code_map(\"{target}\", \"{}\", \"{flags}\");", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")))); } }
+    let (target, flags) = (args.iter().find(|a| !a.starts_with('-')).cloned().unwrap_or_else(|| "src/main.pilot".into()), args.iter().filter(|a| a.starts_with('-')).cloned().collect::<Vec<_>>().join(" "));
+    let mut tgts: Vec<String> = if Path::new(&target).is_dir() { fs::read_dir(&target).map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path().to_string_lossy().to_string()).filter(|p| p.ends_with(".pilot")).collect()).unwrap_or_default() } else { vec![target] }; tgts.sort();
+    for t in tgts { if let Some(s) = read_src(&t) { println!("{}", eval_selfhost("selfhost/cli/map_cmd.pilot", &format!("format_code_map(\"{t}\", \"{}\", \"{flags}\");", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")))); } } }
 
 fn cmd_pkg(a: &[String]) {
     let (sub, rest) = (a.first().map(|s| s.as_str()).unwrap_or("help"), a.get(1..).unwrap_or(&[]).join(" "));

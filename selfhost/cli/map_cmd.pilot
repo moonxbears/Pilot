@@ -17,6 +17,10 @@ pub pure fn map_help_banner() -> str {
            "  -f, --fns, --functions Include functions (standalone and methods)\n" +
            "  -m, --members          Include all type members (fields, properties, ctors)\n" +
            "  -a, --all              Include all symbol types\n\n" +
+           "Display Options:\n" +
+           "  -p, --path             Display folder/file path inline for each symbol\n" +
+           "      --file             Display file name inline for each symbol\n" +
+           "      --folder, --dir    Display folder path inline for each symbol\n\n" +
            "Default: displays all symbols if no filter flags are provided.";
 }
 
@@ -70,6 +74,30 @@ fn count_char(s: str, ch: str) -> i64 {
         i = i + 1;
     }
     return count;
+}
+
+fn path_dir(p: str) -> str {
+    var last_slash = -1;
+    var i = 0;
+    while i < p.len() {
+        let b = p.byte_at(i);
+        if b == 47 || b == 92 { last_slash = i; }
+        i = i + 1;
+    }
+    if last_slash < 0 { return "."; }
+    return p.slice(0, last_slash);
+}
+
+fn path_file(p: str) -> str {
+    var last_slash = -1;
+    var i = 0;
+    while i < p.len() {
+        let b = p.byte_at(i);
+        if b == 47 || b == 92 { last_slash = i; }
+        i = i + 1;
+    }
+    if last_slash < 0 { return p; }
+    return p.slice(last_slash + 1, p.len());
 }
 
 fn str_replace_first(s: str, target: str, repl: str) -> str {
@@ -138,6 +166,9 @@ pub fn parse_flags_mask(flags_str: str) -> i64 {
     // bit 1: classes (2)
     // bit 2: fns (4)
     // bit 3: members (8)
+    // bit 4: inline full path (16)
+    // bit 5: inline filename (32)
+    // bit 6: inline folder (64)
     var mask = 0;
     var p = 0;
     let flen = flags_str.len();
@@ -152,7 +183,10 @@ pub fn parse_flags_mask(flags_str: str) -> i64 {
             if word == "--classes" || word == "--types" { mask = mask | 2; }
             if word == "--fns" || word == "--functions" { mask = mask | 4; }
             if word == "--members" { mask = mask | 8; }
-            if word == "--all" { mask = 15; }
+            if word == "--all" { mask = mask | 15; }
+            if word == "--path" || word == "--paths" || word == "--inline-path" || word == "--location" { mask = mask | 16; }
+            if word == "--file" { mask = mask | 32; }
+            if word == "--folder" || word == "--dir" { mask = mask | 64; }
         } else if str_starts_with(word, "-") {
             var i = 1;
             while i < word.len() {
@@ -161,12 +195,13 @@ pub fn parse_flags_mask(flags_str: str) -> i64 {
                 if c == "c" || c == "t" { mask = mask | 2; }
                 if c == "f" { mask = mask | 4; }
                 if c == "m" { mask = mask | 8; }
-                if c == "a" { mask = 15; }
+                if c == "a" { mask = mask | 15; }
+                if c == "p" { mask = mask | 16; }
                 i = i + 1;
             }
         }
     }
-    if mask == 0 { return 15; }
+    if (mask & 15) == 0 { mask = mask | 15; }
     return mask;
 }
 
@@ -376,6 +411,18 @@ pub fn format_code_map(target_path: str, src: str, flags_str: str) -> str {
     let show_classes = (mask & 2) != 0;
     let show_fns = (mask & 4) != 0;
     let show_members = (mask & 8) != 0;
+    let show_path = (mask & 16) != 0;
+    let show_file = (mask & 32) != 0;
+    let show_folder = (mask & 64) != 0;
+
+    var inline_tag = "";
+    if show_path || (show_folder && show_file) {
+        inline_tag = " [" + target_path + "]";
+    } else if show_file {
+        inline_tag = " [" + path_file(target_path) + "]";
+    } else if show_folder {
+        inline_tag = " [" + path_dir(target_path) + "]";
+    }
 
     let entries = extract_code_symbols(src);
 
@@ -429,7 +476,7 @@ pub fn format_code_map(target_path: str, src: str, flags_str: str) -> str {
         cur_root = cur_root + 1;
         let is_last_r = (cur_root == root_count);
         let r_conn = if is_last_r { "└── " } else { "├── " };
-        out = out + r_conn + label + "\n";
+        out = out + r_conn + label + inline_tag + "\n";
         let child_pfx = if is_last_r { "    " } else { "│   " };
 
         if kind == "class" {
@@ -469,7 +516,7 @@ pub fn format_code_map(target_path: str, src: str, flags_str: str) -> str {
                         cur_child = cur_child + 1;
                         let is_last_c = (cur_child == child_count);
                         let c_conn = if is_last_c { "└── " } else { "├── " };
-                        out = out + child_pfx + c_conn + clabel + "\n";
+                        out = out + child_pfx + c_conn + clabel + inline_tag + "\n";
                     }
                 }
             }
