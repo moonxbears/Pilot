@@ -1,6 +1,6 @@
 use Pilot.Collections.*;
-use Pilot.Core.Keywords::*;
-use Pilot.Core.Reflect::*;
+use Pilot.Core.Keywords.*;
+use Pilot.Core.Reflect.*;
 
 var category = 0;
 while category <= 16 {

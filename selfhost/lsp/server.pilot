@@ -122,6 +122,28 @@ fn lsp_escape_json_str(s: str) -> str {
     return out;
 }
 
+fn lsp_position_to_offset(doc: str, line: i64, character: i64) -> i64 {
+    let n = __engine("str_len", doc);
+    if n == 0 { return 0; }
+    if line <= 0 {
+        return if character < 0 { 0 } else { if character < n { character } else { n - 1 } };
+    }
+    var cur_line = 0;
+    var i = 0;
+    while i < n {
+        let b = __engine("str_byte_at", doc, i);
+        if b == 10 {
+            cur_line = cur_line + 1;
+            if cur_line == line {
+                let off = i + 1 + character;
+                return if off < n { off } else { n - 1 };
+            }
+        }
+        i = i + 1;
+    }
+    return if character < n { character } else { n - 1 };
+}
+
 fn lsp_extract_hover_signature(doc: str, offset: i64) -> str {
     let n = __engine("str_len", doc);
     if n == 0 {
@@ -361,13 +383,22 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
             }
             let _s2 = __engine("map_set", sess, "last_doc", new_text);
         } else if method == "textDocument/hover" {
-            let offset = lsp_extract_json_int_field(msg, "offset");
+            var offset = lsp_extract_json_int_field(msg, "offset");
             var doc = "";
             if uri != "" {
                 doc = __engine("map_get", sess, "doc:" + uri);
             }
             if doc == "" {
                 doc = __engine("map_get", sess, "last_doc");
+            }
+            if offset < 0 {
+                let l = lsp_extract_json_int_field(msg, "line");
+                let c = lsp_extract_json_int_field(msg, "character");
+                if l >= 0 {
+                    offset = lsp_position_to_offset(doc, l, c);
+                } else {
+                    offset = 0;
+                }
             }
             let sig = lsp_extract_hover_signature(doc, offset);
             let ident = lsp_ident_at_offset(doc, offset);
@@ -379,7 +410,11 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
             let hover_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":{\"contents\":{\"kind\":\"markdown\",\"value\":\"```pilot\\n" + esc_sig + "\\n```" + p_md + r_md + ov_md + tr_md + "\"}}}";
             out_frames = out_frames + encode_lsp_frame(hover_json);
         } else if method == "textDocument/completion" {
-            let comp_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":[" +
+            var doc = "";
+            if uri != "" { doc = __engine("map_get", sess, "doc:" + uri); }
+            if doc == "" { doc = __engine("map_get", sess, "last_doc"); }
+
+            var comp_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":[" +
                 "{\"label\":\"" + nameof(fn) + "\",\"kind\":14}," +
                 "{\"label\":\"" + nameof(struct) + "\",\"kind\":14}," +
                 "{\"label\":\"" + nameof(interface) + "\",\"kind\":14}," +
@@ -395,14 +430,48 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
                 "{\"label\":\"" + nameof(asm) + "\",\"kind\":14}," +
                 "{\"label\":\"Pilot.Core.Reflect\",\"kind\":9}," +
                 "{\"label\":\"Pilot.Collections\",\"kind\":9}," +
-                "{\"label\":\"Pilot.Crypto\",\"kind\":9}" +
-                "]}";
+                "{\"label\":\"Pilot.Crypto\",\"kind\":9}";
+
+            if lsp_find_substr(doc, "Pilot.Core.Reflect", 0) >= 0 {
+                comp_json = comp_json +
+                    ",{\"label\":\"reflect_category_scope\",\"kind\":3,\"detail\":\"pub fn reflect_category_scope(cat_id: i64) -> str\"}" +
+                    ",{\"label\":\"reflect_category_badge\",\"kind\":3,\"detail\":\"pub fn reflect_category_badge(cat_id: i64) -> str\"}" +
+                    ",{\"label\":\"reflect_keyword_doc\",\"kind\":3,\"detail\":\"pub fn reflect_keyword_doc(cat_id: i64, word: str) -> str\"}" +
+                    ",{\"label\":\"reflect_category_words\",\"kind\":3,\"detail\":\"pub fn reflect_category_words(cat_id: i64) -> str\"}" +
+                    ",{\"label\":\"reflect_type_layout\",\"kind\":3,\"detail\":\"pub fn reflect_type_layout(name: str) -> TypeInfo\"}";
+            }
+            if lsp_find_substr(doc, "Pilot.Collections", 0) >= 0 {
+                comp_json = comp_json +
+                    ",{\"label\":\"List\",\"kind\":7,\"detail\":\"struct List<T>\"}" +
+                    ",{\"label\":\"Map\",\"kind\":7,\"detail\":\"struct Map<K, V>\"}" +
+                    ",{\"label\":\"Set\",\"kind\":7,\"detail\":\"struct Set<T>\"}" +
+                    ",{\"label\":\"Stack\",\"kind\":7,\"detail\":\"struct Stack<T>\"}" +
+                    ",{\"label\":\"Queue\",\"kind\":7,\"detail\":\"struct Queue<T>\"}" +
+                    ",{\"label\":\"Deque\",\"kind\":7,\"detail\":\"struct Deque<T>\"}" +
+                    ",{\"label\":\"LinkedList\",\"kind\":7,\"detail\":\"struct LinkedList<T>\"}" +
+                    ",{\"label\":\"BinaryTree\",\"kind\":7,\"detail\":\"struct BinaryTree<T>\"}" +
+                    ",{\"label\":\"Graph\",\"kind\":7,\"detail\":\"struct Graph<T>\"}";
+            }
+            if lsp_find_substr(doc, "Pilot.Crypto", 0) >= 0 {
+                comp_json = comp_json +
+                    ",{\"label\":\"sha256_hex\",\"kind\":3,\"detail\":\"pub fn sha256_hex(data: str) -> str\"}";
+            }
+            comp_json = comp_json + "]}";
             out_frames = out_frames + encode_lsp_frame(comp_json);
         } else if method == "textDocument/definition" {
-            let offset = lsp_extract_json_int_field(msg, "offset");
+            var offset = lsp_extract_json_int_field(msg, "offset");
             var doc = "";
             if uri != "" { doc = __engine("map_get", sess, "doc:" + uri); }
             if doc == "" { doc = __engine("map_get", sess, "last_doc"); }
+            if offset < 0 {
+                let l = lsp_extract_json_int_field(msg, "line");
+                let c = lsp_extract_json_int_field(msg, "character");
+                if l >= 0 {
+                    offset = lsp_position_to_offset(doc, l, c);
+                } else {
+                    offset = 0;
+                }
+            }
             let ident = lsp_ident_at_offset(doc, offset);
             var def_pos = -1;
             if ident != "" {
