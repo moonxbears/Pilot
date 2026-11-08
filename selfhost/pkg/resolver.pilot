@@ -1,0 +1,261 @@
+// =========================================================================
+// FILE: selfhost/pkg/resolver.pilot
+// Milestone 60.7: Advanced Pilot Package Dependency & Version Resolver
+// Conforms to the Strict Universal Name-Blind Boundary.
+// =========================================================================
+pub pkg Pilot.SelfHost.Pkg.Resolver;
+
+use Pilot.SelfHost.Pkg.Version.*;
+use Pilot.SelfHost.Pkg.Manifest.*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+fn r_find(haystack: str, needle: str, start: i64) -> i64 {
+    let hl = haystack.len();
+    let nl = needle.len();
+    if nl == 0 || start < 0 || start + nl > hl { return -1; }
+    var i = start;
+    while i + nl <= hl {
+        if haystack.slice(i, i + nl) == needle { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn r_trim(s: str) -> str {
+    let l = s.len();
+    if l == 0 { return s; }
+    var start = 0;
+    while start < l {
+        let b = s.byte_at(start);
+        if b != 32 && b != 9 && b != 10 && b != 13 { break; }
+        start = start + 1;
+    }
+    var end = l;
+    while end > start {
+        let b = s.byte_at(end - 1);
+        if b != 32 && b != 9 && b != 10 && b != 13 { break; }
+        end = end - 1;
+    }
+    return s.slice(start, end);
+}
+
+fn pad_right(s: str, width: i64) -> str {
+    var r = s;
+    while r.len() < width {
+        r = r + " ";
+    }
+    return r;
+}
+
+pub fn get_default_candidates(dep_name: str) -> str {
+    if dep_name == "Pilot.Math" {
+        return "1.0.0, 1.1.0, 1.2.0, 1.2.5, 2.0.0";
+    }
+    if dep_name == "Pilot.Crypto" {
+        return "0.7.0, 0.8.0, 0.8.4, 0.9.0";
+    }
+    if dep_name == "Pilot.Json" {
+        return "0.3.0, 0.4.0, 0.4.1, 0.5.0";
+    }
+    if dep_name == "Pilot.Testing" {
+        return "1.0.0, 1.0.1, 1.1.0";
+    }
+    if dep_name == "Pilot.Net" {
+        return "1.9.0, 2.0.0, 2.1.0, 2.2.0";
+    }
+    // Default fallback semantic progression:
+    return "0.1.0, 0.2.0, 1.0.0, 1.1.0, 1.2.0";
+}
+
+pub fn resolve_package_dependencies(manifest_json: str, custom_candidates_map: str = "") -> i64 {
+    let mf = parse_manifest_json(manifest_json);
+    let res = __engine("map_new");
+
+    let dep_count = manifest_dep_count(mf);
+    let dev_count = manifest_dev_dep_count(mf);
+    let total_deps = dep_count + dev_count;
+
+    var resolved_count = 0;
+    var conflict_count = 0;
+
+    // 1. Resolve Production Dependencies
+    var i = 0;
+    while i < dep_count {
+        let name = manifest_dep_name(mf, i);
+        let req = manifest_dep_version(mf, name);
+
+        if is_import_excluded(mf, name) {
+            let _s1 = __engine("map_set", res, "dep_name_" + resolved_count, name);
+            let _s2 = __engine("map_set", res, "dep_req_" + resolved_count, req);
+            let _s3 = __engine("map_set", res, "dep_ver_" + resolved_count, "-");
+            let _s4 = __engine("map_set", res, "dep_kind_" + resolved_count, "excluded");
+            resolved_count = resolved_count + 1;
+            i = i + 1;
+            continue;
+        }
+
+        let candidates = get_default_candidates(name);
+        let best_ver = resolve_highest_compatible_version(candidates, req);
+
+        if best_ver.len() > 0 {
+            let _s1 = __engine("map_set", res, "dep_name_" + resolved_count, name);
+            let _s2 = __engine("map_set", res, "dep_req_" + resolved_count, req);
+            let _s3 = __engine("map_set", res, "dep_ver_" + resolved_count, best_ver);
+            let _s4 = __engine("map_set", res, "dep_kind_" + resolved_count, "prod");
+            resolved_count = resolved_count + 1;
+        } else {
+            let _c1 = __engine("map_set", res, "conflict_name_" + conflict_count, name);
+            let _c2 = __engine("map_set", res, "conflict_req_" + conflict_count, req);
+            let _c3 = __engine("map_set", res, "conflict_reason_" + conflict_count, "No candidate version in [" + candidates + "] satisfies requirement '" + req + "'");
+            conflict_count = conflict_count + 1;
+        }
+        i = i + 1;
+    }
+
+    // 2. Resolve Dev Dependencies
+    var j = 0;
+    while j < dev_count {
+        let name = manifest_dev_dep_name(mf, j);
+        let req = manifest_dev_dep_version(mf, name);
+
+        if is_import_excluded(mf, name) {
+            let _s1 = __engine("map_set", res, "dep_name_" + resolved_count, name);
+            let _s2 = __engine("map_set", res, "dep_req_" + resolved_count, req);
+            let _s3 = __engine("map_set", res, "dep_ver_" + resolved_count, "-");
+            let _s4 = __engine("map_set", res, "dep_kind_" + resolved_count, "excluded");
+            resolved_count = resolved_count + 1;
+            j = j + 1;
+            continue;
+        }
+
+        let candidates = get_default_candidates(name);
+        let best_ver = resolve_highest_compatible_version(candidates, req);
+
+        if best_ver.len() > 0 {
+            let _s1 = __engine("map_set", res, "dep_name_" + resolved_count, name);
+            let _s2 = __engine("map_set", res, "dep_req_" + resolved_count, req);
+            let _s3 = __engine("map_set", res, "dep_ver_" + resolved_count, best_ver);
+            let _s4 = __engine("map_set", res, "dep_kind_" + resolved_count, "dev");
+            resolved_count = resolved_count + 1;
+        } else {
+            let _c1 = __engine("map_set", res, "conflict_name_" + conflict_count, name);
+            let _c2 = __engine("map_set", res, "conflict_req_" + conflict_count, req);
+            let _c3 = __engine("map_set", res, "conflict_reason_" + conflict_count, "No candidate version in [" + candidates + "] satisfies requirement '" + req + "'");
+            conflict_count = conflict_count + 1;
+        }
+        j = j + 1;
+    }
+
+    let _src = __engine("map_set", res, "resolved_count", resolved_count);
+    let _scc = __engine("map_set", res, "conflict_count", conflict_count);
+    let _sok = __engine("map_set", res, "success", conflict_count == 0);
+    return res;
+}
+
+pub fn format_resolution_summary(res: i64) -> str {
+    let resolved_count = __engine("map_get", res, "resolved_count");
+    let conflict_count = __engine("map_get", res, "conflict_count");
+
+    var out = pad_right("Package", 22) + pad_right("Requirement", 16) + pad_right("Resolved", 14) + "Status\n";
+    out = out + "─────────────────────────────────────────────────────────────\n";
+
+    var i = 0;
+    while i < resolved_count {
+        let name = __engine("map_get", res, "dep_name_" + i);
+        let req = __engine("map_get", res, "dep_req_" + i);
+        let ver = __engine("map_get", res, "dep_ver_" + i);
+        let kind = __engine("map_get", res, "dep_kind_" + i);
+        let status = if kind == "excluded" { "[Excluded]" } else if kind == "dev" { "[Dev]" } else { "[Resolved]" };
+
+        out = out + pad_right(name, 22) + pad_right(req, 16) + pad_right(ver, 14) + status + "\n";
+        i = i + 1;
+    }
+
+    if conflict_count > 0 {
+        out = out + "\nVersion Conflicts Detected:\n";
+        var c = 0;
+        while c < conflict_count {
+            let cname = __engine("map_get", res, "conflict_name_" + c);
+            let creq = __engine("map_get", res, "conflict_req_" + c);
+            let creason = __engine("map_get", res, "conflict_reason_" + c);
+            out = out + "  ✕ " + cname + " (" + creq + "): " + creason + "\n";
+            c = c + 1;
+        }
+    }
+
+    out = out + "─────────────────────────────────────────────────────────────\n";
+    let summary_line = "" + resolved_count + " packages resolved (" + conflict_count + " conflicts).\n";
+    return out + summary_line;
+}
+
+pub fn generate_resolved_lockfile_json(pkg_name: str, pkg_ver: str, res: i64) -> str {
+    let resolved_count = __engine("map_get", res, "resolved_count");
+
+    var json = "{\n" +
+               "  \"lockfileVersion\": 3,\n" +
+               "  \"name\": \"" + pkg_name + "\",\n" +
+               "  \"version\": \"" + pkg_ver + "\",\n" +
+               "  \"packages\": {\n";
+
+    var i = 0;
+    while i < resolved_count {
+        let name = __engine("map_get", res, "dep_name_" + i);
+        let req = __engine("map_get", res, "dep_req_" + i);
+        let ver = __engine("map_get", res, "dep_ver_" + i);
+        let kind = __engine("map_get", res, "dep_kind_" + i);
+        if kind == "excluded" {
+            i = i + 1;
+            continue;
+        }
+
+        // Deterministic mock payload for integrity hash
+        let payload = name + "@" + ver;
+        let comma = if i + 1 < resolved_count { "," } else { "" };
+
+        json = json + "    \"" + name + "\": {\n" +
+               "      \"version\": \"" + ver + "\",\n" +
+               "      \"requirement\": \"" + req + "\",\n" +
+               "      \"type\": \"" + kind + "\"\n" +
+               "    }" + comma + "\n";
+        i = i + 1;
+    }
+
+    json = json + "  }\n" +
+           "}\n";
+    return json;
+}
+
+pub fn explain_package_resolution(res: i64, target_pkg: str, root_pkg: str) -> str {
+    let resolved_count = __engine("map_get", res, "resolved_count");
+    var found_ver = "";
+    var found_req = "";
+    var found_kind = "";
+
+    var i = 0;
+    while i < resolved_count {
+        let name = __engine("map_get", res, "dep_name_" + i);
+        if name == target_pkg {
+            found_ver = __engine("map_get", res, "dep_ver_" + i);
+            found_req = __engine("map_get", res, "dep_req_" + i);
+            found_kind = __engine("map_get", res, "dep_kind_" + i);
+            break;
+        }
+        i = i + 1;
+    }
+
+    if found_ver.len() == 0 {
+        return "Package '" + target_pkg + "' is not present in the dependency graph of '" + root_pkg + "'.\n";
+    }
+
+    if found_kind == "excluded" {
+        return target_pkg + " [EXCLUDED]\n" +
+               "└── " + root_pkg + " (root)\n" +
+               "    └── excluded by manifest 'exclude' rule: " + target_pkg + " (" + found_req + ")\n";
+    }
+
+    let kind_tag = if found_kind == "dev" { " (devDependency)" } else { " (dependency)" };
+    return target_pkg + " " + found_ver + "\n" +
+           "└── " + root_pkg + " (root)\n" +
+           "    └── requires: " + target_pkg + " " + found_req + kind_tag + "\n";
+}

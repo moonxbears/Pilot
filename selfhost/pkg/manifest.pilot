@@ -103,6 +103,7 @@ pub fn parse_manifest_json(json_src: str) -> i64 {
                     let d_ver = json_src.slice(v_q1 + 1, v_q2);
                     
                     let _sd = __engine("map_set", mf, "dep:" + d_name, d_ver);
+                    let _sdn = __engine("map_set", mf, "dep_name_" + dep_count, d_name);
                     dep_count = dep_count + 1;
                     p = v_q2 + 1;
                 }
@@ -110,6 +111,64 @@ pub fn parse_manifest_json(json_src: str) -> i64 {
         }
     }
     let _sc = __engine("map_set", mf, "dep_count", dep_count);
+
+    // Extract devDependencies
+    var dev_count = 0;
+    let dev_idx = mf_find(json_src, "\"devDependencies\":", 0);
+    if dev_idx >= 0 {
+        let db_open = mf_find(json_src, "{", dev_idx + 18);
+        if db_open >= 0 {
+            let db_close = mf_find(json_src, "}", db_open + 1);
+            if db_close >= 0 {
+                var dp = db_open + 1;
+                while dp < db_close {
+                    let k_q1 = mf_find(json_src, "\"", dp);
+                    if k_q1 < 0 || k_q1 >= db_close { break; }
+                    let k_q2 = mf_find(json_src, "\"", k_q1 + 1);
+                    if k_q2 < 0 || k_q2 >= db_close { break; }
+                    let d_name = json_src.slice(k_q1 + 1, k_q2);
+                    
+                    let col = mf_find(json_src, ":", k_q2 + 1);
+                    if col < 0 || col >= db_close { break; }
+                    let v_q1 = mf_find(json_src, "\"", col + 1);
+                    if v_q1 < 0 || v_q1 >= db_close { break; }
+                    let v_q2 = mf_find(json_src, "\"", v_q1 + 1);
+                    if v_q2 < 0 || v_q2 >= db_close { break; }
+                    let d_ver = json_src.slice(v_q1 + 1, v_q2);
+                    
+                    let _sdd = __engine("map_set", mf, "dev_dep:" + d_name, d_ver);
+                    let _sddn = __engine("map_set", mf, "dev_dep_name_" + dev_count, d_name);
+                    dev_count = dev_count + 1;
+                    dp = v_q2 + 1;
+                }
+            }
+        }
+    }
+    let _scd = __engine("map_set", mf, "dev_dep_count", dev_count);
+
+    // Extract exclusions ("exclude": ["..."])
+    var ex_count = 0;
+    let ex_idx = mf_find(json_src, "\"exclude\":", 0);
+    if ex_idx >= 0 {
+        let eb_open = mf_find(json_src, "[", ex_idx + 10);
+        if eb_open >= 0 {
+            let eb_close = mf_find(json_src, "]", eb_open + 1);
+            if eb_close >= 0 {
+                var ep = eb_open + 1;
+                while ep < eb_close {
+                    let q1 = mf_find(json_src, "\"", ep);
+                    if q1 < 0 || q1 >= eb_close { break; }
+                    let q2 = mf_find(json_src, "\"", q1 + 1);
+                    if q2 < 0 || q2 >= eb_close { break; }
+                    let ex_val = json_src.slice(q1 + 1, q2);
+                    let _sex = __engine("map_set", mf, "exclude_" + ex_count, ex_val);
+                    ex_count = ex_count + 1;
+                    ep = q2 + 1;
+                }
+            }
+        }
+    }
+    let _scex = __engine("map_set", mf, "exclude_count", ex_count);
     return mf;
 }
 
@@ -135,6 +194,52 @@ pub fn manifest_dep_count(mf: i64) -> i64 {
 pub fn manifest_dep_version(mf: i64, dep_name: str) -> str {
     let raw = __engine("map_get", mf, "dep:" + dep_name);
     return if raw != null { raw } else { "" };
+}
+
+pub fn manifest_dep_name(mf: i64, idx: i64) -> str {
+    let raw = __engine("map_get", mf, "dep_name_" + idx);
+    return if raw != null { raw } else { "" };
+}
+
+pub fn manifest_dev_dep_count(mf: i64) -> i64 {
+    let raw = __engine("map_get", mf, "dev_dep_count");
+    return if raw != null { raw } else { 0 };
+}
+
+pub fn manifest_dev_dep_name(mf: i64, idx: i64) -> str {
+    let raw = __engine("map_get", mf, "dev_dep_name_" + idx);
+    return if raw != null { raw } else { "" };
+}
+
+pub fn manifest_dev_dep_version(mf: i64, dep_name: str) -> str {
+    let raw = __engine("map_get", mf, "dev_dep:" + dep_name);
+    return if raw != null { raw } else { "" };
+}
+
+pub fn manifest_exclude_count(mf: i64) -> i64 {
+    let raw = __engine("map_get", mf, "exclude_count");
+    return if raw != null { raw } else { 0 };
+}
+
+pub fn manifest_exclude_item(mf: i64, idx: i64) -> str {
+    let raw = __engine("map_get", mf, "exclude_" + idx);
+    return if raw != null { raw } else { "" };
+}
+
+pub fn is_import_excluded(mf: i64, import_spec: str) -> bool {
+    let count = manifest_exclude_count(mf);
+    if count <= 0 { return false; }
+    var i = 0;
+    while i < count {
+        let pattern = manifest_exclude_item(mf, i);
+        if pattern.len() > 0 {
+            if import_spec == pattern || mf_find(import_spec, pattern, 0) >= 0 {
+                return true;
+            }
+        }
+        i = i + 1;
+    }
+    return false;
 }
 
 pub fn compute_package_lockfile_json(pkg_name: str, version: str, payload: str) -> str {

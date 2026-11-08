@@ -1,0 +1,264 @@
+// =========================================================================
+// FILE: selfhost/pkg/exclusions.pilot
+// Milestone 60.8: Package & Post-Definition Exclusions Engine ('without')
+// Conforms to the Strict Universal Name-Blind Boundary.
+// =========================================================================
+pub pkg Pilot.SelfHost.Pkg.Exclusions;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+fn e_find(haystack: str, needle: str, start: i64) -> i64 {
+    let hl = haystack.len();
+    let nl = needle.len();
+    if nl == 0 || start < 0 || start + nl > hl { return -1; }
+    var i = start;
+    while i + nl <= hl {
+        if haystack.slice(i, i + nl) == needle { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn e_trim(s: str) -> str {
+    let l = s.len();
+    if l == 0 { return s; }
+    var start = 0;
+    while start < l {
+        let b = s.byte_at(start);
+        if b != 32 && b != 9 && b != 10 && b != 13 { break; }
+        start = start + 1;
+    }
+    var end = l;
+    while end > start {
+        let b = s.byte_at(end - 1);
+        if b != 32 && b != 9 && b != 10 && b != 13 { break; }
+        end = end - 1;
+    }
+    return s.slice(start, end);
+}
+
+fn e_starts_with(s: str, pfx: str) -> bool {
+    let pl = pfx.len();
+    if s.len() < pl { return false; }
+    return s.slice(0, pl) == pfx;
+}
+
+// -------------------------------------------------------------------------
+// 1. MANIFEST-LEVEL PACKAGE EXCLUSIONS (pilot.json)
+// -------------------------------------------------------------------------
+
+pub fn is_core_module_excluded(mod_name: str, exclusions_csv: str) -> bool {
+    if exclusions_csv.len() == 0 { return false; }
+    var p = 0;
+    let clen = exclusions_csv.len();
+    while p < clen {
+        let cpos = e_find(exclusions_csv, ",", p);
+        let epos = if cpos >= 0 { cpos } else { clen };
+        let item = e_trim(exclusions_csv.slice(p, epos));
+        p = epos + 1;
+
+        if item.len() > 0 {
+            if mod_name == item || e_find(mod_name, item, 0) >= 0 {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+pub fn add_exclusion_to_manifest_json(json_src: str, pattern: str) -> str {
+    var src = json_src;
+    let target_key = "\"exclude\":";
+
+    if e_find(src, target_key, 0) < 0 {
+        var last_b = src.len() - 1;
+        while last_b >= 0 {
+            if src.slice(last_b, last_b + 1) == "}" { break; }
+            last_b = last_b - 1;
+        }
+        if last_b < 0 { return src; }
+        src = e_trim(src.slice(0, last_b)) + ",\n  \"exclude\": [\n    \"" + pattern + "\"\n  ]\n}";
+        return src;
+    }
+
+    let idx = e_find(src, target_key, 0);
+    let b_open = e_find(src, "[", idx);
+    if b_open < 0 { return src; }
+    let b_close = e_find(src, "]", b_open);
+    if b_close < 0 { return src; }
+
+    let inner = e_trim(src.slice(b_open + 1, b_close));
+    // If pattern already exists, return unchanged
+    if e_find(inner, "\"" + pattern + "\"", 0) >= 0 {
+        return src;
+    }
+
+    var new_block = "";
+    if inner.len() == 0 {
+        new_block = "[\n    \"" + pattern + "\"\n  ]";
+    } else {
+        new_block = "[\n    " + inner + ",\n    \"" + pattern + "\"\n  ]";
+    }
+
+    return src.slice(0, b_open) + new_block + src.slice(b_close + 1, src.len());
+}
+
+pub fn remove_exclusion_from_manifest_json(json_src: str, pattern: str) -> str {
+    let pat_str = "\"" + pattern + "\"";
+    let p_pos = e_find(json_src, pat_str, 0);
+    if p_pos < 0 { return json_src; }
+
+    var e_pos = e_find(json_src, "\n", p_pos);
+    if e_pos < 0 { e_pos = json_src.len(); }
+    else if e_pos < json_src.len() { e_pos = e_pos + 1; }
+
+    var s_pos = p_pos;
+    while s_pos > 0 {
+        let b = json_src.byte_at(s_pos - 1);
+        if b == 10 || b == 13 { break; }
+        s_pos = s_pos - 1;
+    }
+
+    var res = json_src.slice(0, s_pos) + json_src.slice(e_pos, json_src.len());
+    let tc = e_find(res, ",\n  ]", 0);
+    if tc >= 0 {
+        res = res.slice(0, tc) + "\n  ]" + res.slice(tc + 5, res.len());
+    }
+    return res;
+}
+
+pub fn list_exclusions_summary(json_src: str) -> str {
+    let ex_idx = e_find(json_src, "\"exclude\":", 0);
+    if ex_idx < 0 {
+        return "No package exclusions defined in pilot.json.\n";
+    }
+    let b_open = e_find(json_src, "[", ex_idx + 10);
+    if b_open < 0 { return "No package exclusions defined in pilot.json.\n"; }
+    let b_close = e_find(json_src, "]", b_open + 1);
+    if b_close < 0 { return "No package exclusions defined in pilot.json.\n"; }
+
+    var count = 0;
+    var out = "Configured Package Exclusions:\n";
+    var p = b_open + 1;
+    while p < b_close {
+        let q1 = e_find(json_src, "\"", p);
+        if q1 < 0 || q1 >= b_close { break; }
+        let q2 = e_find(json_src, "\"", q1 + 1);
+        if q2 < 0 || q2 >= b_close { break; }
+        let pattern = json_src.slice(q1 + 1, q2);
+        count = count + 1;
+        out = out + "  - " + pattern + "\n";
+        p = q2 + 1;
+    }
+
+    if count == 0 {
+        return "No package exclusions defined in pilot.json.\n";
+    }
+    return out + "Total: " + count + " exclusions active.\n";
+}
+
+// -------------------------------------------------------------------------
+// 2. POST-DEFINITION MEMBER & SYMBOL EXCLUSIONS ('without')
+// -------------------------------------------------------------------------
+
+pub fn parse_source_exclusions(src: str) -> i64 {
+    let map = __engine("map_new");
+    var ex_count = 0;
+
+    var p = 0;
+    let total_len = src.len();
+    while p < total_len {
+        let w_idx = e_find(src, "without ", p);
+        if w_idx < 0 { break; }
+
+        let after_w = src.slice(w_idx + 8, total_len);
+        let b_open = e_find(after_w, "{", 0);
+        let semi_pos = e_find(after_w, ";", 0);
+
+        // Case A: Block form: without Target { member1, member2 };
+        if b_open >= 0 && (semi_pos < 0 || b_open < semi_pos) {
+            let target_name = e_trim(after_w.slice(0, b_open));
+            let b_close = e_find(after_w, "}", b_open + 1);
+            if b_close >= 0 {
+                let inner = after_w.slice(b_open + 1, b_close);
+                var ip = 0;
+                let ilen = inner.len();
+                while ip < ilen {
+                    var inxt = e_find(inner, ",", ip);
+                    let e_idx = if inxt >= 0 { inxt } else { ilen };
+                    var mem = e_trim(inner.slice(ip, e_idx));
+                    let sm = e_find(mem, ";", 0);
+                    if sm >= 0 { mem = e_trim(mem.slice(0, sm)); }
+                    if mem.len() > 0 {
+                        let _s1 = __engine("map_set", map, "ex_target_" + ex_count, target_name);
+                        let _s2 = __engine("map_set", map, "ex_member_" + ex_count, mem);
+                        let _s3 = __engine("map_set", map, "ex_key:" + target_name + "::" + mem, 1);
+                        ex_count = ex_count + 1;
+                    }
+                    ip = e_idx + 1;
+                }
+                p = w_idx + 8 + b_close + 1;
+                continue;
+            }
+        }
+
+        // Case B: Dot form: without Target.member; or bare without Target;
+        if semi_pos >= 0 {
+            let stmt = e_trim(after_w.slice(0, semi_pos));
+            let dot_pos = e_find(stmt, ".", 0);
+            if dot_pos >= 0 {
+                let target_name = e_trim(stmt.slice(0, dot_pos));
+                let mem = e_trim(stmt.slice(dot_pos + 1, stmt.len()));
+                if target_name.len() > 0 && mem.len() > 0 {
+                    let _s1 = __engine("map_set", map, "ex_target_" + ex_count, target_name);
+                    let _s2 = __engine("map_set", map, "ex_member_" + ex_count, mem);
+                    let _s3 = __engine("map_set", map, "ex_key:" + target_name + "::" + mem, 1);
+                    ex_count = ex_count + 1;
+                }
+            } else if stmt.len() > 0 {
+                let _s1 = __engine("map_set", map, "ex_target_" + ex_count, "*");
+                let _s2 = __engine("map_set", map, "ex_member_" + ex_count, stmt);
+                let _s3 = __engine("map_set", map, "ex_key:*::" + stmt, 1);
+                let _s4 = __engine("map_set", map, "ex_key:::" + stmt, 1);
+                ex_count = ex_count + 1;
+            }
+            p = w_idx + 8 + semi_pos + 1;
+            continue;
+        }
+
+        p = w_idx + 8;
+    }
+
+    let _sc = __engine("map_set", map, "ex_count", ex_count);
+    return map;
+}
+
+pub fn is_member_excluded(map: i64, target_name: str, member_name: str) -> bool {
+    let key1 = "ex_key:" + target_name + "::" + member_name;
+    let hit1 = __engine("map_get", map, key1);
+    if hit1 == 1 { return true; }
+    let key2 = "ex_key:*::" + member_name;
+    let hit2 = __engine("map_get", map, key2);
+    if hit2 == 1 { return true; }
+    let key3 = "ex_key:::" + member_name;
+    let hit3 = __engine("map_get", map, key3);
+    if hit3 == 1 { return true; }
+    return false;
+}
+
+pub fn format_exclusions_report(map: i64) -> str {
+    let ex_count = __engine("map_get", map, "ex_count");
+    if ex_count == null || ex_count == 0 {
+        return "No post-definition symbol exclusions ('without') detected.\n";
+    }
+
+    var out = "Post-Definition Member Exclusions ('without'):\n";
+    var i = 0;
+    while i < ex_count {
+        let tgt = __engine("map_get", map, "ex_target_" + i);
+        let mem = __engine("map_get", map, "ex_member_" + i);
+        out = out + "  - " + tgt + " without {" + mem + "}\n";
+        i = i + 1;
+    }
+    return out + "Total: " + ex_count + " symbols excluded.\n";
+}

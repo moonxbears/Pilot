@@ -6,28 +6,26 @@ use pilot_codegen::{BuildDriver, BuildOptions, BuildTarget};
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine, PilcBinary};
 
+fn read_src(p: &str) -> Option<String> { [p.into(), format!("../{p}"), format!("../../{p}")].into_iter().find_map(|f| fs::read_to_string(f).ok()) }
 fn eval_selfhost(p: &str, tail: &str) -> String {
-    let base = fs::read_to_string(p).unwrap_or_default();
+    let mut base = String::new(); for d in get_deps(p) { if let Some(s) = read_src(&d) { base.push_str(&s); base.push('\n'); } }
+    if let Some(s) = read_src(p) { base.push_str(&s); }
     let arena = parse(&if tail.is_empty() { base } else { format!("{base}\n{tail}\n") });
-    let mut vm = PilVirtualMachine::new(); vm.load_binary(BytecodeCompiler::compile(&arena, arena.root)); vm.run().to_string_repr()
-}
+    let mut vm = PilVirtualMachine::new(); vm.load_binary(BytecodeCompiler::compile(&arena, arena.root)); vm.run().to_string_repr() }
 
 pub fn cmd_emit(a: &[String]) { if a.len() < 2 { return; } let c = match a[0].to_ascii_lowercase().as_str() { "python"|"py" => "def add(a, b):\n    return a + b\n", "rust"|"rs" => "pub fn add(a: i64, b: i64) -> i64 { a + b }\n", "c" => "#include <stdint.h>\nint64_t add(int64_t a, int64_t b) { return a + b; }\n", _ => "// emitted\n" }; if let Some(p) = a.iter().position(|x| x == "-o") { if let Some(o) = a.get(p + 1) { let _ = fs::write(o, c); return; } } print!("{c}"); }
 pub fn cmd_from(a: &[String]) { let c = "pub fn mul(x: i64, y: i64) -> i64 {\n    return x * y;\n}\n"; if let Some(p) = a.iter().position(|x| x == "-o") { if let Some(o) = a.get(p + 1) { let _ = fs::write(o, c); return; } } print!("{c}"); }
 
-fn check_errors(src: &str) -> bool {
-    let res = AnalysisPipeline::analyze_source(src);
-    for d in res.diagnostics.iter().filter(|d| d.is_error()) { eprintln!("Error [{}]: {} at {:?}", d.code, d.message.strip_prefix(&format!("{}: ", d.code)).unwrap_or(&d.message), d.span); }
-    res.has_errors()
-}
+fn check_errors(src: &str) -> bool { let res = AnalysisPipeline::analyze_source(src);
+    for d in res.diagnostics.iter().filter(|d| d.is_error()) { eprintln!("Error [{}]: {} at {:?}", d.code, d.message.strip_prefix(&format!("{}: ", d.code)).unwrap_or(&d.message), d.span); } res.has_errors() }
 
 fn resolve_dep(s: &str) -> Option<String> {
     let r = s.trim_matches(|c: char| c == ';' || c == '*' || c == '.' || c.is_whitespace()).replace('.', "/");
     let sub = r.strip_prefix("Pilot/").or_else(|| r.strip_prefix("pilot/")).unwrap_or(&r).to_ascii_lowercase();
     let fb = if sub.contains("memory") { "stdlib/core/mem.pilot" } else if sub.starts_with("core/") { "stdlib/core/core.pilot" } else { "" };
-    [format!("{r}.pilot"), format!("src/{r}.pilot"), format!("stdlib/{sub}.pilot"), format!("stdlib/{sub}/{sub}.pilot"), fb.into()].into_iter().find(|p| !p.is_empty() && Path::new(p).exists())
+    [format!("{r}.pilot"), format!("{sub}.pilot"), format!("src/{r}.pilot"), format!("stdlib/{sub}.pilot"), format!("stdlib/{sub}/{sub}.pilot"), fb.into()].into_iter().find(|p| !p.is_empty() && read_src(p).is_some())
 }
-fn get_deps(p: &str) -> Vec<String> { fs::read_to_string(p).map(|s| s.lines().filter_map(|l| l.trim().strip_prefix("use ")).filter_map(resolve_dep).filter(|d| d != p).collect()).unwrap_or_default() }
+fn get_deps(p: &str) -> Vec<String> { read_src(p).map(|s| s.lines().filter_map(|l| l.trim().strip_prefix("use ")).filter_map(resolve_dep).filter(|d| d != p).collect()).unwrap_or_default() }
 fn print_tree(p: &str, pfx: &str, last: bool, vis: &mut HashSet<String>, max_d: usize, d: usize) {
     if d == 0 { println!("{p}"); } else { println!("{pfx}{}{p}", if last { "└── " } else { "├── " }); }
     if d < max_d && vis.insert(p.into()) {
@@ -51,16 +49,27 @@ fn cmd_deps(args: &[String]) {
     else { print_tree(&target, "", true, &mut HashSet::new(), max_d, 0); }
 }
 
-fn run_file(path: &str) {
-    if path.ends_with(".pilc") {
-        if let Ok(b) = fs::read(path) { if let Ok(bin) = PilcBinary::load_from_bytes(&b) { let mut vm = PilVirtualMachine::new(); vm.load_binary(bin); if let Some(i) = vm.run().as_int().filter(|&i| i != 0) { println!("RESULT: {i}"); } } }
-        return;
-    }
-    let src = fs::read_to_string(path).unwrap_or_default(); if check_errors(&src) { std::process::exit(1); }
-    let (arena, mut physics) = AnalysisPipeline::load_program(path);
-    let (mut vm, reg_ptr) = (PilVirtualMachine::new(), &mut physics as *mut pilot_analysis::PhysicsRegistry);
+fn cmd_map(args: &[String]) {
+    if args.iter().any(|a| a == "--help" || a == "-h") { println!("{}", eval_selfhost("selfhost/cli/map_cmd.pilot", "map_help_banner();")); return; }
+    let target = args.iter().find(|a| !a.starts_with('-')).cloned().unwrap_or_else(|| "src/main.pilot".into());
+    let flags = args.iter().filter(|a| a.starts_with('-')).cloned().collect::<Vec<_>>().join(" ");
+    if let Some(s) = read_src(&target) { println!("{}", eval_selfhost("selfhost/cli/map_cmd.pilot", &format!("format_code_map(\"{target}\", \"{}\", \"{flags}\");", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")))); } }
+
+fn cmd_pkg(a: &[String]) {
+    let (sub, rest) = (a.first().map(|s| s.as_str()).unwrap_or("help"), a.get(1..).unwrap_or(&[]).join(" "));
+    let (mf, lk) = (fs::read_to_string("pilot.json").unwrap_or_default(), fs::read_to_string("pilot.lock").unwrap_or_default());
+    let out = eval_selfhost("selfhost/cli/pkg_cmd.pilot", &format!("handle_pkg_cmd(\"{sub}\", \"{rest}\", \"{}\", \"{}\");", mf.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n"), lk.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")));
+    for part in out.split("@@WRITE:") { if let Some((path, content)) = part.split_once("@@\n") { let _ = fs::write(path.trim(), content); } }
+    let display = out.split("@@WRITE:").next().unwrap_or(&out); if !display.trim().is_empty() { println!("{}", display.trim()); }
+}
+
+fn run_file(p: &str) {
+    if p.ends_with(".pilc") { if let Ok(b) = fs::read(p) { if let Ok(bin) = PilcBinary::load_from_bytes(&b) { let mut vm = PilVirtualMachine::new(); vm.load_binary(bin); if let Some(i) = vm.run().as_int().filter(|&i| i != 0) { println!("RESULT: {i}"); } } } return; }
+    let src = fs::read_to_string(p).unwrap_or_default(); if check_errors(&src) { std::process::exit(1); }
+    let (arena, mut phy) = AnalysisPipeline::load_program(p);
+    let (mut vm, reg_ptr) = (PilVirtualMachine::new(), &mut phy as *mut pilot_analysis::PhysicsRegistry);
     vm.engine_handler = Some(Box::new(move |op, args| pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, args)));
-    vm.shared_symbols = Some(std::sync::Arc::new(physics.symbol_strings.clone()));
+    vm.shared_symbols = Some(std::sync::Arc::new(phy.symbol_strings.clone()));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
     if let Some(i) = vm.run().as_int().filter(|&i| i != 0) { println!("RESULT: {i}"); }
 }
@@ -71,29 +80,20 @@ fn main() {
     match cmd {
         "-v" | "--version" | "version" => println!("Pilot {} (Self-Hosted PilVM v3)", env!("CARGO_PKG_VERSION")),
         "-h" | "--help" | "help" => println!("{}", eval_selfhost("selfhost/cli/main.pilot", "cli_help_banner();")),
-        "--emit" | "emit" => cmd_emit(&args[1..]),
-        "--from" | "from" => cmd_from(&args[1..]),
+        "--emit" | "emit" => cmd_emit(&args[1..]), "--from" | "from" => cmd_from(&args[1..]),
         "tree" | "deps" => cmd_deps(if cmd == "tree" { &args } else { &args[1..] }),
-        "pkg" => if args.get(1).map(|s| s.as_str()) == Some("tree") { cmd_deps(&["tree".into(), "pilot.json".into()]); } else { let _ = eval_selfhost("selfhost/cli/main.pilot", "cli_help_banner();"); },
+        "map" | "outline" => cmd_map(&args[1..]),
+        "pkg" => cmd_pkg(&args[1..]),
         "run" => if let Some(f) = args.get(1) { run_file(f); },
-        "check" => if let Some(f) = args.get(1) {
-            let src = if f == "-" { let mut s = String::new(); let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut s); s } else { fs::read_to_string(f).unwrap_or_default() };
+        "check" => if let Some(f) = args.get(1) { let src = if f == "-" { let mut s = String::new(); let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut s); s } else { fs::read_to_string(f).unwrap_or_default() };
             let res = AnalysisPipeline::analyze_source(&src); println!("Checked '{f}': {} diagnostics", res.diagnostics.len());
-            for d in &res.diagnostics { println!("  [{}] {}: {} at {:?}", d.severity.as_lsp_code(), d.code, d.message.strip_prefix(&format!("{}: ", d.code)).unwrap_or(&d.message), d.span); }
-            if res.has_errors() { std::process::exit(1); }
-        },
-        "compile" => if let Some(f) = args.get(1) {
-            let src = fs::read_to_string(f).unwrap_or_default(); if check_errors(&src) { std::process::exit(1); }
-            let (arena, out) = (parse(&src), args.get(3).cloned().unwrap_or_else(|| format!("{}.pilc", Path::new(f).file_stem().and_then(|s| s.to_str()).unwrap_or("out"))));
-            let _ = fs::write(out, BytecodeCompiler::compile(&arena, arena.root).serialize());
-        },
-        "build" => if let Some(f) = args.get(1) {
-            let src = fs::read_to_string(f).unwrap_or_default(); if check_errors(&src) { std::process::exit(1); }
-            let _ = BuildDriver::compile_pilot_source("app", &src, &BuildOptions { target: BuildTarget::Native, output_path: PathBuf::from("a.out"), ..Default::default() });
-        },
-        "lsp" => { let _ = eval_selfhost("selfhost/lsp/server.pilot", ""); }
+            for d in &res.diagnostics { println!("  [{}] {}: {} at {:?}", d.severity.as_lsp_code(), d.code, d.message.strip_prefix(&format!("{}: ", d.code)).unwrap_or(&d.message), d.span); } if res.has_errors() { std::process::exit(1); } },
+        "compile" => if let Some(f) = args.get(1) { let src = fs::read_to_string(f).unwrap_or_default(); if check_errors(&src) { std::process::exit(1); }
+            let out = args.get(3).cloned().unwrap_or_else(|| format!("{}.pilc", Path::new(f).file_stem().and_then(|s| s.to_str()).unwrap_or("out"))); let _ = fs::write(out, BytecodeCompiler::compile(&parse(&src), parse(&src).root).serialize()); },
+        "build" => if let Some(f) = args.get(1) { let src = fs::read_to_string(f).unwrap_or_default(); if check_errors(&src) { std::process::exit(1); }
+            let _ = BuildDriver::compile_pilot_source("app", &src, &BuildOptions { target: BuildTarget::Native, output_path: PathBuf::from("a.out"), ..Default::default() }); },
+        "lsp" => { let _ = eval_selfhost("selfhost/lsp/server.pilot", ""); }, "ide-sync" => { let _ = eval_selfhost("selfhost/ide/vscode_gen.pilot", ""); }
         "debug" => if let Some(f) = args.iter().skip(1).find(|a| a.ends_with(".pilot") || a.ends_with(".pilc")) { run_file(f); } else { let _ = eval_selfhost("selfhost/dap/server.pilot", ""); },
-        "ide-sync" => { let _ = eval_selfhost("selfhost/ide/vscode_gen.pilot", ""); }
         other if other.ends_with(".pilot") || other.ends_with(".pilc") => run_file(other),
         _ => { let _ = eval_selfhost("selfhost/cli/main.pilot", "cli_help_banner();"); }
     }

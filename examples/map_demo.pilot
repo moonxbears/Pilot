@@ -1,0 +1,31 @@
+pub pkg Enterprise.Billing, Enterprise.Accounts;
+pub namespace Security;
+
+pub struct PaymentGateway : IGateway {
+    pub api_key: str;
+    pub timeout_ms: i64;
+
+    pub self(key: str, timeout: i64) {
+        self.api_key = key;
+        self.timeout_ms = timeout;
+    }
+
+    pub fn authorize(amount: f64) -> bool {
+        return amount > 0.0;
+    }
+
+    pub fn capture(tx_id: str) -> bool {
+        return true;
+    }
+}
+
+pub interface IAuditor {
+    pub fn log_event(event: str);
+}
+
+pub fn initialize_system() -> bool {
+    return true;
+}
+
+pub fn shutdown_system() {
+}

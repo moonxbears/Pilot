@@ -1,0 +1,480 @@
+// =========================================================================
+// FILE: selfhost/cli/map_cmd.pilot
+// Milestone 60.6: Name-Blind Visual Symbol Map & Outline Generator (Pure Pilot)
+// =========================================================================
+pub pkg Pilot.SelfHost.Cli.MapCmd;
+
+use Pilot.SelfHost.Pkg.Exclusions.*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub pure fn map_help_banner() -> str {
+    return "Usage: pilot map [file.pilot] [options]\n\n" +
+           "Display a structured symbol map/outline of a Pilot source file.\n\n" +
+           "Filter Options (additive):\n" +
+           "  -n, --ns               Include namespaces and packages\n" +
+           "  -c, --classes, --types Include classes, structs, interfaces, and enums\n" +
+           "  -f, --fns, --functions Include functions (standalone and methods)\n" +
+           "  -m, --members          Include all type members (fields, properties, ctors)\n" +
+           "  -a, --all              Include all symbol types\n\n" +
+           "Default: displays all symbols if no filter flags are provided.";
+}
+
+fn str_find(haystack: str, needle: str, start: i64) -> i64 {
+    let hl = haystack.len();
+    let nl = needle.len();
+    if nl == 0 || start < 0 || start + nl > hl { return -1; }
+    var i = start;
+    while i + nl <= hl {
+        if haystack.slice(i, i + nl) == needle { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn str_starts_with(s: str, pfx: str) -> bool {
+    let pl = pfx.len();
+    if s.len() < pl { return false; }
+    return s.slice(0, pl) == pfx;
+}
+
+fn str_contains(haystack: str, needle: str) -> bool {
+    return str_find(haystack, needle, 0) >= 0;
+}
+
+fn str_trim(s: str) -> str {
+    let l = s.len();
+    if l == 0 { return s; }
+    var start = 0;
+    while start < l {
+        let b = s.byte_at(start);
+        if b != 32 && b != 9 && b != 10 && b != 13 { break; }
+        start = start + 1;
+    }
+    var end = l;
+    while end > start {
+        let b = s.byte_at(end - 1);
+        if b != 32 && b != 9 && b != 10 && b != 13 { break; }
+        end = end - 1;
+    }
+    return s.slice(start, end);
+}
+
+fn count_char(s: str, ch: str) -> i64 {
+    var count = 0;
+    var i = 0;
+    while i < s.len() {
+        if s.slice(i, i + 1) == ch {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    return count;
+}
+
+fn str_replace_first(s: str, target: str, repl: str) -> str {
+    let idx = str_find(s, target, 0);
+    if idx < 0 { return s; }
+    return s.slice(0, idx) + repl + s.slice(idx + target.len(), s.len());
+}
+
+fn str_clean_modifiers(s: str) -> str {
+    var r = s;
+    if str_starts_with(r, "pub static pure ") { r = r.slice(16, r.len()); }
+    if str_starts_with(r, "pub pure ") { r = r.slice(9, r.len()); }
+    if str_starts_with(r, "pub static ") { r = r.slice(11, r.len()); }
+    if str_starts_with(r, "pub ext ") { r = r.slice(8, r.len()); }
+    if str_starts_with(r, "pub partial ") { r = r.slice(12, r.len()); }
+    if str_starts_with(r, "partial ") { r = r.slice(8, r.len()); }
+    if str_starts_with(r, "pub ") { r = r.slice(4, r.len()); }
+    if str_starts_with(r, "var ") { r = r.slice(4, r.len()); }
+    if str_starts_with(r, "let ") { r = r.slice(4, r.len()); }
+    return str_trim(r);
+}
+
+fn extract_type_ident(cleaned_header: str) -> str {
+    var s = cleaned_header;
+    if str_starts_with(s, "struct ") { s = s.slice(7, s.len()); }
+    else if str_starts_with(s, "interface ") { s = s.slice(10, s.len()); }
+    else if str_starts_with(s, "enum ") { s = s.slice(5, s.len()); }
+    else if str_starts_with(s, "type ") { s = s.slice(5, s.len()); }
+    s = str_trim(s);
+    var cut = s.len();
+    let l_ang = str_find(s, "<", 0);
+    if l_ang >= 0 && l_ang < cut { cut = l_ang; }
+    let colon = str_find(s, ":", 0);
+    if colon >= 0 && colon < cut { cut = colon; }
+    let eq = str_find(s, "=", 0);
+    if eq >= 0 && eq < cut { cut = eq; }
+    let space = str_find(s, " ", 0);
+    if space >= 0 && space < cut { cut = space; }
+    return str_trim(s.slice(0, cut));
+}
+
+fn extract_fn_ident(sig: str) -> str {
+    let fn_pos = str_find(sig, "fn ", 0);
+    if fn_pos < 0 { return ""; }
+    var after = str_trim(sig.slice(fn_pos + 3, sig.len()));
+    var cut = after.len();
+    let p_pos = str_find(after, "(", 0);
+    if p_pos >= 0 && p_pos < cut { cut = p_pos; }
+    let a_pos = str_find(after, "<", 0);
+    if a_pos >= 0 && a_pos < cut { cut = a_pos; }
+    let s_pos = str_find(after, " ", 0);
+    if s_pos >= 0 && s_pos < cut { cut = s_pos; }
+    return str_trim(after.slice(0, cut));
+}
+
+fn extract_field_ident(sig: str) -> str {
+    var s = sig;
+    let c_pos = str_find(s, ":", 0);
+    if c_pos >= 0 { s = s.slice(0, c_pos); }
+    return str_trim(s);
+}
+
+pub fn parse_flags_mask(flags_str: str) -> i64 {
+    // Flag bitmask:
+    // bit 0: ns (1)
+    // bit 1: classes (2)
+    // bit 2: fns (4)
+    // bit 3: members (8)
+    var mask = 0;
+    var p = 0;
+    let flen = flags_str.len();
+    while p < flen {
+        let nxt = str_find(flags_str, " ", p);
+        let end_idx = if nxt >= 0 { nxt } else { flen };
+        let word = str_trim(flags_str.slice(p, end_idx));
+        p = end_idx + 1;
+
+        if str_starts_with(word, "--") {
+            if word == "--ns" { mask = mask | 1; }
+            if word == "--classes" || word == "--types" { mask = mask | 2; }
+            if word == "--fns" || word == "--functions" { mask = mask | 4; }
+            if word == "--members" { mask = mask | 8; }
+            if word == "--all" { mask = 15; }
+        } else if str_starts_with(word, "-") {
+            var i = 1;
+            while i < word.len() {
+                let c = word.slice(i, i + 1);
+                if c == "n" { mask = mask | 1; }
+                if c == "c" || c == "t" { mask = mask | 2; }
+                if c == "f" { mask = mask | 4; }
+                if c == "m" { mask = mask | 8; }
+                if c == "a" { mask = 15; }
+                i = i + 1;
+            }
+        }
+    }
+    if mask == 0 { return 15; }
+    return mask;
+}
+
+pub fn extract_code_symbols(src: str) -> str {
+    let ex_map = parse_source_exclusions(src);
+    var entries = "";
+    var cur_class = "";
+    var cur_class_ident = "";
+    var brace_depth = 0;
+    var in_block_pkg = false;
+    var block_pkg_kw = "pkg";
+
+    var line_start = 0;
+    let total_len = src.len();
+    while line_start < total_len {
+        var line_end = str_find(src, "\n", line_start);
+        if line_end < 0 { line_end = total_len; }
+        let raw_line = src.slice(line_start, line_end);
+        line_start = line_end + 1;
+
+        var line = str_trim(raw_line);
+        if line.len() == 0 || str_starts_with(line, "//") || str_starts_with(line, "/*") {
+            continue;
+        }
+        let comment_pos = str_find(line, "//", 0);
+        if comment_pos >= 0 {
+            line = str_trim(line.slice(0, comment_pos));
+        }
+
+        // Skip 'without' post-definition exclusions so they are not parsed as declarations
+        if str_starts_with(line, "without ") || str_starts_with(line, "pub without ") {
+            if str_contains(line, "{") && !str_contains(line, "}") {
+                var depth = 1;
+                while line_start < total_len && depth > 0 {
+                    var next_le = str_find(src, "\n", line_start);
+                    if next_le < 0 { next_le = total_len; }
+                    let raw_inner = src.slice(line_start, next_le);
+                    line_start = next_le + 1;
+                    depth = depth + count_char(raw_inner, "{") - count_char(raw_inner, "}");
+                }
+            }
+            continue;
+        }
+
+        // 1. Block pkg or namespace
+        if (str_contains(line, "pkg {") || str_contains(line, "namespace {")) && !in_block_pkg {
+            in_block_pkg = true;
+            block_pkg_kw = if str_contains(line, "namespace") { "namespace" } else { "pkg" };
+            continue;
+        }
+        if in_block_pkg {
+            if str_contains(line, "}") {
+                in_block_pkg = false;
+            } else {
+                var p = 0;
+                let llen = line.len();
+                while p < llen {
+                    let cpos = str_find(line, ",", p);
+                    let epos = if cpos >= 0 { cpos } else { llen };
+                    var item = str_trim(line.slice(p, epos));
+                    let spos = str_find(item, ";", 0);
+                    if spos >= 0 { item = str_trim(item.slice(0, spos)); }
+                    if item.len() > 0 {
+                        entries = entries + "R:ns:" + block_pkg_kw + " " + item + "\n";
+                    }
+                    p = epos + 1;
+                }
+            }
+            continue;
+        }
+
+        // 2. Inline / Comma-separated pkg or namespace
+        if str_starts_with(line, "pkg ") || str_starts_with(line, "pub pkg ") ||
+           str_starts_with(line, "namespace ") || str_starts_with(line, "pub namespace ") {
+            let kw = if str_contains(line, "namespace") { "namespace" } else { "pkg" };
+            let kw_idx = str_find(line, kw, 0);
+            let after = str_trim(line.slice(kw_idx + kw.len(), line.len()));
+            var p = 0;
+            let alen = after.len();
+            while p < alen {
+                let cpos = str_find(after, ",", p);
+                let epos = if cpos >= 0 { cpos } else { alen };
+                var item = str_trim(after.slice(p, epos));
+                let spos = str_find(item, ";", 0);
+                if spos >= 0 { item = str_trim(item.slice(0, spos)); }
+                if item.len() > 0 {
+                    entries = entries + "R:ns:" + kw + " " + item + "\n";
+                }
+                p = epos + 1;
+            }
+            continue;
+        }
+
+        // 3. Class / Struct / Interface / Enum / Type
+        let has_struct = str_contains(line, "struct ") || str_contains(line, "struct{");
+        let has_interface = str_contains(line, "interface ") || str_contains(line, "interface{");
+        let has_enum = str_contains(line, "enum ") || str_contains(line, "enum{");
+        let has_type = str_starts_with(line, "type ") || str_starts_with(line, "pub type ");
+
+        if (has_struct || has_interface || has_enum || has_type) && cur_class.len() == 0 {
+            var header = line;
+            let bpos = str_find(header, "{", 0);
+            if bpos >= 0 { header = str_trim(header.slice(0, bpos)); }
+            let spos = str_find(header, ";", 0);
+            if spos >= 0 { header = str_trim(header.slice(0, spos)); }
+            header = str_clean_modifiers(header);
+            let class_ident = extract_type_ident(header);
+            if is_member_excluded(ex_map, "", class_ident) {
+                if bpos >= 0 {
+                    var depth = 1;
+                    while line_start < total_len && depth > 0 {
+                        var next_le = str_find(src, "\n", line_start);
+                        if next_le < 0 { next_le = total_len; }
+                        let raw_inner = src.slice(line_start, next_le);
+                        line_start = next_le + 1;
+                        depth = depth + count_char(raw_inner, "{") - count_char(raw_inner, "}");
+                    }
+                }
+                continue;
+            }
+            entries = entries + "R:class:" + header + "\n";
+            cur_class = header;
+            cur_class_ident = class_ident;
+            brace_depth = if bpos >= 0 { 1 } else { 0 };
+            if bpos < 0 { cur_class = ""; cur_class_ident = ""; }
+            continue;
+        }
+
+        // 4. Inside a Class / Struct / Interface
+        if cur_class.len() > 0 {
+            let open_b = count_char(line, "{");
+            let close_b = count_char(line, "}");
+            if brace_depth + open_b - close_b <= 0 {
+                cur_class = "";
+                cur_class_ident = "";
+                brace_depth = 0;
+                continue;
+            }
+            brace_depth = brace_depth + open_b - close_b;
+
+            // Constructor
+            if str_contains(line, "self(") && !str_contains(line, "~self(") {
+                if is_member_excluded(ex_map, cur_class_ident, "self") { continue; }
+                var sig = line;
+                let bpos = str_find(sig, "{", 0);
+                if bpos >= 0 { sig = str_trim(sig.slice(0, bpos)); }
+                let spos = str_find(sig, ";", 0);
+                if spos >= 0 { sig = str_trim(sig.slice(0, spos)); }
+                sig = str_clean_modifiers(sig);
+                entries = entries + "C:ctor:ctor " + sig + "\n";
+            } else if str_contains(line, "~self(") {
+                if is_member_excluded(ex_map, cur_class_ident, "~self") { continue; }
+                entries = entries + "C:dtor:dtor ~self()\n";
+            } else if str_contains(line, "fn ") {
+                var sig = line;
+                let bpos = str_find(sig, "{", 0);
+                if bpos >= 0 { sig = str_trim(sig.slice(0, bpos)); }
+                let apos = str_find(sig, "=>", 0);
+                if apos >= 0 { sig = str_trim(sig.slice(0, apos)); }
+                let spos = str_find(sig, ";", 0);
+                if spos >= 0 { sig = str_trim(sig.slice(0, spos)); }
+                sig = str_clean_modifiers(sig);
+                let mem_name = extract_fn_ident(sig);
+                if is_member_excluded(ex_map, cur_class_ident, mem_name) { continue; }
+                entries = entries + "C:fn:" + sig + "\n";
+            } else if str_contains(line, ":") && !str_starts_with(line, "case ") && !str_starts_with(line, "default:") {
+                var sig = line;
+                let bpos = str_find(sig, "{", 0);
+                if bpos >= 0 { sig = str_trim(sig.slice(0, bpos)); }
+                let spos = str_find(sig, ";", 0);
+                if spos >= 0 { sig = str_trim(sig.slice(0, spos)); }
+                sig = str_clean_modifiers(sig);
+                let mem_name = extract_field_ident(sig);
+                if is_member_excluded(ex_map, cur_class_ident, mem_name) { continue; }
+                if bpos >= 0 {
+                    entries = entries + "C:prop:prop " + sig + "\n";
+                } else {
+                    entries = entries + "C:field:field " + sig + "\n";
+                }
+            }
+            continue;
+        }
+
+        // 5. Standalone Top-Level Functions
+        if str_contains(line, "fn ") {
+            var sig = line;
+            let bpos = str_find(sig, "{", 0);
+            if bpos >= 0 { sig = str_trim(sig.slice(0, bpos)); }
+            let apos = str_find(sig, "=>", 0);
+            if apos >= 0 { sig = str_trim(sig.slice(0, apos)); }
+            let spos = str_find(sig, ";", 0);
+            if spos >= 0 { sig = str_trim(sig.slice(0, spos)); }
+            sig = str_clean_modifiers(sig);
+            let fn_name = extract_fn_ident(sig);
+            if is_member_excluded(ex_map, "", fn_name) { continue; }
+            entries = entries + "R:fn:" + sig + "\n";
+            continue;
+        }
+    }
+
+    return entries;
+}
+
+pub fn format_code_map(target_path: str, src: str, flags_str: str) -> str {
+    let mask = parse_flags_mask(flags_str);
+    let show_ns = (mask & 1) != 0;
+    let show_classes = (mask & 2) != 0;
+    let show_fns = (mask & 4) != 0;
+    let show_members = (mask & 8) != 0;
+
+    let entries = extract_code_symbols(src);
+
+    // Pass 1: Count kept root items
+    var root_count = 0;
+    var p = 0;
+    let elen = entries.len();
+    while p < elen {
+        let nxt = str_find(entries, "\n", p);
+        let end_idx = if nxt >= 0 { nxt } else { elen };
+        let l = entries.slice(p, end_idx);
+        p = end_idx + 1;
+
+        if str_starts_with(l, "R:") {
+            let k_end = str_find(l, ":", 2);
+            if k_end >= 0 {
+                let kind = l.slice(2, k_end);
+                if (kind == "ns" && show_ns) || (kind == "class" && show_classes) || (kind == "fn" && show_fns) {
+                    root_count = root_count + 1;
+                }
+            }
+        }
+    }
+
+    var out = target_path + "\n";
+    if root_count == 0 {
+        return out + "└── (no symbols matching filter)\n";
+    }
+
+    // Pass 2: Render tree
+    var cur_root = 0;
+    p = 0;
+    while p < elen {
+        let nxt = str_find(entries, "\n", p);
+        let end_idx = if nxt >= 0 { nxt } else { elen };
+        let l = entries.slice(p, end_idx);
+        p = end_idx + 1;
+
+        if !str_starts_with(l, "R:") {
+            continue;
+        }
+
+        let k_end = str_find(l, ":", 2);
+        if k_end < 0 { continue; }
+        let kind = l.slice(2, k_end);
+        let label = l.slice(k_end + 1, l.len());
+
+        let inc_root = (kind == "ns" && show_ns) || (kind == "class" && show_classes) || (kind == "fn" && show_fns);
+        if !inc_root { continue; }
+
+        cur_root = cur_root + 1;
+        let is_last_r = (cur_root == root_count);
+        let r_conn = if is_last_r { "└── " } else { "├── " };
+        out = out + r_conn + label + "\n";
+        let child_pfx = if is_last_r { "    " } else { "│   " };
+
+        if kind == "class" {
+            // Count kept children under this class
+            var child_count = 0;
+            var scan_k = p;
+            while scan_k < elen {
+                let cnxt = str_find(entries, "\n", scan_k);
+                let cend = if cnxt >= 0 { cnxt } else { elen };
+                let cl = entries.slice(scan_k, cend);
+                if !str_starts_with(cl, "C:") { break; }
+                let ck_end = str_find(cl, ":", 2);
+                if ck_end >= 0 {
+                    let ckind = cl.slice(2, ck_end);
+                    if show_members || (show_fns && ckind == "fn") {
+                        child_count = child_count + 1;
+                    }
+                }
+                scan_k = cend + 1;
+            }
+
+            // Render children
+            var cur_child = 0;
+            while p < elen {
+                let cnxt = str_find(entries, "\n", p);
+                let cend = if cnxt >= 0 { cnxt } else { elen };
+                let cl = entries.slice(p, cend);
+                if !str_starts_with(cl, "C:") { break; }
+                p = cend + 1;
+
+                let ck_end = str_find(cl, ":", 2);
+                if ck_end >= 0 {
+                    let ckind = cl.slice(2, ck_end);
+                    let clabel = cl.slice(ck_end + 1, cl.len());
+                    let inc_child = show_members || (show_fns && ckind == "fn");
+                    if inc_child {
+                        cur_child = cur_child + 1;
+                        let is_last_c = (cur_child == child_count);
+                        let c_conn = if is_last_c { "└── " } else { "├── " };
+                        out = out + child_pfx + c_conn + clabel + "\n";
+                    }
+                }
+            }
+        }
+    }
+
+    return out;
+}

@@ -1,0 +1,295 @@
+// =========================================================================
+// FILE: selfhost/pkg/version.pilot
+// Milestone 60.7: Semantic Versioning (SemVer 2.0) & Range Constraint Matcher
+// Pure Pilot Implementation conforming to the Strict Name-Blind Contract.
+// =========================================================================
+pub pkg Pilot.SelfHost.Pkg.Version;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+fn v_find(haystack: str, needle: str, start: i64) -> i64 {
+    let hl = haystack.len();
+    let nl = needle.len();
+    if nl == 0 || start < 0 || start + nl > hl { return -1; }
+    var i = start;
+    while i + nl <= hl {
+        if haystack.slice(i, i + nl) == needle { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn v_trim(s: str) -> str {
+    let l = s.len();
+    if l == 0 { return s; }
+    var start = 0;
+    while start < l {
+        let b = s.byte_at(start);
+        if b != 32 && b != 9 && b != 10 && b != 13 { break; }
+        start = start + 1;
+    }
+    var end = l;
+    while end > start {
+        let b = s.byte_at(end - 1);
+        if b != 32 && b != 9 && b != 10 && b != 13 { break; }
+        end = end - 1;
+    }
+    return s.slice(start, end);
+}
+
+fn parse_int(s: str) -> i64 {
+    var val = 0;
+    var i = 0;
+    let l = s.len();
+    while i < l {
+        let b = s.byte_at(i);
+        if b >= 48 && b <= 57 {
+            val = val * 10 + (b - 48);
+        } else {
+            break;
+        }
+        i = i + 1;
+    }
+    return val;
+}
+
+fn strip_version_prefix(s: str) -> str {
+    let t = v_trim(s);
+    if t.len() > 0 {
+        let b0 = t.byte_at(0);
+        if b0 == 118 || b0 == 86 { // 'v' or 'V'
+            return t.slice(1, t.len());
+        }
+    }
+    return t;
+}
+
+pub fn parse_semver_prerelease(v_str: str) -> str {
+    let s = strip_version_prefix(v_str);
+    let dash = v_find(s, "-", 0);
+    if dash < 0 { return ""; }
+    let plus = v_find(s, "+", dash + 1);
+    let end_pos = if plus >= 0 { plus } else { s.len() };
+    return s.slice(dash + 1, end_pos);
+}
+
+pub fn parse_semver_part(v_str: str, part_idx: i64) -> i64 {
+    var s = strip_version_prefix(v_str);
+    let dash = v_find(s, "-", 0);
+    if dash >= 0 { s = s.slice(0, dash); }
+    let plus = v_find(s, "+", 0);
+    if plus >= 0 { s = s.slice(0, plus); }
+
+    let dot1 = v_find(s, ".", 0);
+    if part_idx == 0 {
+        let end0 = if dot1 >= 0 { dot1 } else { s.len() };
+        return parse_int(s.slice(0, end0));
+    }
+    if dot1 < 0 { return 0; }
+
+    let dot2 = v_find(s, ".", dot1 + 1);
+    if part_idx == 1 {
+        let end1 = if dot2 >= 0 { dot2 } else { s.len() };
+        return parse_int(s.slice(dot1 + 1, end1));
+    }
+    if dot2 < 0 { return 0; }
+
+    return parse_int(s.slice(dot2 + 1, s.len()));
+}
+
+pub fn parse_semver_major(v_str: str) -> i64 {
+    return parse_semver_part(v_str, 0);
+}
+
+pub fn parse_semver_minor(v_str: str) -> i64 {
+    return parse_semver_part(v_str, 1);
+}
+
+pub fn parse_semver_patch(v_str: str) -> i64 {
+    return parse_semver_part(v_str, 2);
+}
+
+pub fn semver_cmp(v1: str, v2: str) -> i64 {
+    let maj1 = parse_semver_major(v1);
+    let maj2 = parse_semver_major(v2);
+    if maj1 > maj2 { return 1; }
+    if maj1 < maj2 { return -1; }
+
+    let min1 = parse_semver_minor(v1);
+    let min2 = parse_semver_minor(v2);
+    if min1 > min2 { return 1; }
+    if min1 < min2 { return -1; }
+
+    let pat1 = parse_semver_patch(v1);
+    let pat2 = parse_semver_patch(v2);
+    if pat1 > pat2 { return 1; }
+    if pat1 < pat2 { return -1; }
+
+    let pre1 = parse_semver_prerelease(v1);
+    let pre2 = parse_semver_prerelease(v2);
+    // Regular versions (no pre-release) have higher precedence than pre-release versions
+    if pre1.len() == 0 && pre2.len() > 0 { return 1; }
+    if pre1.len() > 0 && pre2.len() == 0 { return -1; }
+    if pre1 < pre2 { return -1; }
+    if pre1 > pre2 { return 1; }
+
+    return 0;
+}
+
+pub fn semver_matches_single(clause: str, ver: str) -> bool {
+    let c = v_trim(clause);
+    if c.len() == 0 || c == "*" { return true; }
+
+    let cl = c.len();
+
+    // Caret requirement (^1.2.3)
+    if c.slice(0, 1) == "^" {
+        let base = c.slice(1, cl);
+        if semver_cmp(ver, base) < 0 { return false; }
+        let b_maj = parse_semver_major(base);
+        let b_min = parse_semver_minor(base);
+        let b_pat = parse_semver_patch(base);
+
+        if b_maj > 0 {
+            let upper = "" + (b_maj + 1) + ".0.0";
+            return semver_cmp(ver, upper) < 0;
+        } else if b_min > 0 {
+            let upper = "0." + (b_min + 1) + ".0";
+            return semver_cmp(ver, upper) < 0;
+        } else {
+            let upper = "0.0." + (b_pat + 1);
+            return semver_cmp(ver, upper) < 0;
+        }
+    }
+
+    // Tilde requirement (~1.2.3)
+    if c.slice(0, 1) == "~" {
+        let base = c.slice(1, cl);
+        if semver_cmp(ver, base) < 0 { return false; }
+        let b_maj = parse_semver_major(base);
+        let b_min = parse_semver_minor(base);
+        let upper = "" + b_maj + "." + (b_min + 1) + ".0";
+        return semver_cmp(ver, upper) < 0;
+    }
+
+    // Greater-than-or-equal (>= 1.2.0)
+    if cl >= 2 && c.slice(0, 2) == ">=" {
+        let base = v_trim(c.slice(2, cl));
+        return semver_cmp(ver, base) >= 0;
+    }
+
+    // Less-than-or-equal (<= 2.0.0)
+    if cl >= 2 && c.slice(0, 2) == "<=" {
+        let base = v_trim(c.slice(2, cl));
+        return semver_cmp(ver, base) <= 0;
+    }
+
+    // Greater-than (> 1.2.0)
+    if c.slice(0, 1) == ">" {
+        let base = v_trim(c.slice(1, cl));
+        return semver_cmp(ver, base) > 0;
+    }
+
+    // Less-than (< 2.0.0)
+    if c.slice(0, 1) == "<" {
+        let base = v_trim(c.slice(1, cl));
+        return semver_cmp(ver, base) < 0;
+    }
+
+    // Exact equal (= 1.2.3)
+    if c.slice(0, 1) == "=" {
+        let base = v_trim(c.slice(1, cl));
+        return semver_cmp(ver, base) == 0;
+    }
+
+    // Wildcards: 1.* or 1.2.*
+    if v_find(c, ".*", 0) >= 0 {
+        let w_dot = v_find(c, ".*", 0);
+        let prefix = c.slice(0, w_dot);
+        let first_dot = v_find(prefix, ".", 0);
+        if first_dot < 0 {
+            // "1.*"
+            let target_maj = parse_int(prefix);
+            return parse_semver_major(ver) == target_maj;
+        } else {
+            // "1.2.*"
+            let target_maj = parse_int(prefix.slice(0, first_dot));
+            let target_min = parse_int(prefix.slice(first_dot + 1, prefix.len()));
+            return parse_semver_major(ver) == target_maj && parse_semver_minor(ver) == target_min;
+        }
+    }
+
+    // Default: exact match
+    return semver_cmp(ver, c) == 0;
+}
+
+pub fn semver_matches(req: str, ver: str) -> bool {
+    let r = v_trim(req);
+    if r.len() == 0 || r == "*" { return true; }
+
+    var p = 0;
+    let rlen = r.len();
+    while p < rlen {
+        let cpos = v_find(r, ",", p);
+        let epos = if cpos >= 0 { cpos } else { rlen };
+        let clause = v_trim(r.slice(p, epos));
+        if !semver_matches_single(clause, ver) {
+            return false;
+        }
+        p = epos + 1;
+    }
+    return true;
+}
+
+pub fn semver_bump_major(ver: str) -> str {
+    let maj = parse_semver_major(ver);
+    return "" + (maj + 1) + ".0.0";
+}
+
+pub fn semver_bump_minor(ver: str) -> str {
+    let maj = parse_semver_major(ver);
+    let min = parse_semver_minor(ver);
+    return "" + maj + "." + (min + 1) + ".0";
+}
+
+pub fn semver_bump_patch(ver: str) -> str {
+    let maj = parse_semver_major(ver);
+    let min = parse_semver_minor(ver);
+    let pat = parse_semver_patch(ver);
+    return "" + maj + "." + min + "." + (pat + 1);
+}
+
+pub fn resolve_highest_compatible_version(candidates_csv: str, req: str) -> str {
+    var best = "";
+    var p = 0;
+    let clen = candidates_csv.len();
+    while p < clen {
+        let cpos = v_find(candidates_csv, ",", p);
+        let epos = if cpos >= 0 { cpos } else { clen };
+        let cand = v_trim(candidates_csv.slice(p, epos));
+        p = epos + 1;
+
+        if cand.len() > 0 && semver_matches(req, cand) {
+            if best.len() == 0 || semver_cmp(cand, best) > 0 {
+                best = cand;
+            }
+        }
+    }
+    return best;
+}
+
+pub fn check_version_conflict(req1: str, req2: str, candidates_csv: str) -> bool {
+    var p = 0;
+    let clen = candidates_csv.len();
+    while p < clen {
+        let cpos = v_find(candidates_csv, ",", p);
+        let epos = if cpos >= 0 { cpos } else { clen };
+        let cand = v_trim(candidates_csv.slice(p, epos));
+        p = epos + 1;
+
+        if cand.len() > 0 && semver_matches(req1, cand) && semver_matches(req2, cand) {
+            return false; // Found a compatible version, no conflict!
+        }
+    }
+    return true; // No version satisfies both requirements!
+}
