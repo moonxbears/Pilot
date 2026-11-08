@@ -104,6 +104,12 @@ pub struct {
     [KeywordCategoryDefAttr(14, "keyword.other.query.pilot", "Metaprogramming", 14)]
     CatMetaprogramming {}
 
+    [KeywordCategoryDefAttr(15, "keyword.other.algebraic.pilot", "Algebraic", 14)]
+    CatAlgebraic {}
+
+    [KeywordCategoryDefAttr(16, "keyword.other.typestate.pilot", "Typestate", 14)]
+    CatTypestate {}
+
     [KeywordCategoryDefAttr(20, "support.type.primitive.pilot entity.name.type.primitive.pilot", "Primitive (Signed Int)", 7)]
     CatSignedInt {}
 
@@ -527,6 +533,14 @@ pub partial struct {
 
     [KeywordDefAttr(14, "Declares an overloaded operator function.")]
     op {}
+
+    // Category 15: Algebraic Composition
+    [KeywordDefAttr(15, "Explicitly overrides inherited interface or bundle default implementations.")]
+    override {}
+
+    // Category 16: Typestate
+    [KeywordDefAttr(16, "Defines a state transition condition in typestate automata.")]
+    transition {}
 
     // Category 20: Signed Integers
     [KeywordDefAttr(20, "8-bit signed two's-complement integer (-128..127).")]

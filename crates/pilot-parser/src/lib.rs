@@ -718,7 +718,7 @@ impl<'a> Parser<'a> {
                         }
                         14 => return self.parse_switch(), 17 => { self.advance();
                             if self.receptor() == Some((31, 2)) || self.at(TokenKind::KwLet) { self.advance(); }
-                            self.no_struct_lit = true; let mut c = self.parse_expr(); if self.eat(TokenKind::Equal) { c = self.parse_expr(); } self.no_struct_lit = false; if self.is_rec(3) { self.advance(); }
+                            self.no_struct_lit = true; let mut c = self.parse_expr(); if self.eat(TokenKind::Equal) { c = self.parse_expr(); } self.no_struct_lit = false; if self.is_rec(3) { self.advance(); } else { self.arena.diagnostics.push((sp, "NULL002: 'guard' statement requires an 'else' block with early exit".into())); }
                             let eb = self.parse_block();
                             return self.arena.alloc_node(NodeKind::GuardStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), c.0, eb.0); }
                         18 => { self.advance(); let tb = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() };

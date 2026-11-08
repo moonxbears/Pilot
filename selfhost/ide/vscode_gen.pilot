@@ -379,6 +379,26 @@ pub fn reflect_category_keywords(target_cat_id: i64) -> str {
     return pat;
 }
 
+pub fn reflect_category_scope(target_cat_id: i64) -> str {
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var idx = 0;
+    while idx < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, idx);
+        if k == 1 {
+            let ac = __engine(Cfg.ast.ast_attr_count, idx);
+            if ac == 4 {
+                let cat = __engine(Cfg.ast.ast_attr_arg, idx, 0);
+                if cat == target_cat_id {
+                    let sym = __engine(Cfg.ast.ast_attr_arg, idx, 1);
+                    return __engine(Cfg.ast.sym_str, sym);
+                }
+            }
+        }
+        idx = idx + 1;
+    }
+    return "";
+}
+
 pub pure fn reflect_seed_keywords_pattern() -> str {
     return nameof(__engine) + "|" + nameof(struct) + "|" + nameof(interface) + "|" +
            nameof(fn) + "|" + nameof(let) + "|" + nameof(ref) + "|" + nameof(if) + "|" +
@@ -389,9 +409,17 @@ pub pure fn reflect_seed_keywords_pattern() -> str {
 pub fn reflect_syntax_pattern() -> str {
     let syn = reflect_category_keywords(36);
     if syn != "" {
-        return "syntax|" + nameof(quote) + "|" + syn;
+        return nameof(quote) + "|" + syn;
     }
-    return "syntax|" + nameof(quote) + "|macro";
+    return nameof(quote);
+}
+
+pub fn reflect_modifiers_pattern() -> str {
+    let v = reflect_category_keywords(3);
+    let m = reflect_category_keywords(4);
+    if v != "" && m != "" { return v + "|" + m; }
+    if v != "" { return v; }
+    return m;
 }
 
 pub pure fn reflect_operators_pattern() -> str {
@@ -471,13 +499,27 @@ pub fn dumps_tm_language(
 ) -> str {
     let seeds = if seed_keywords_regex != "" { seed_keywords_regex } else { reflect_seed_keywords_pattern() };
     let syn = if syntax_macros_regex != "" { syntax_macros_regex } else { reflect_syntax_pattern() };
-    let mods = if modifiers_regex != "" { modifiers_regex } else { "pub|priv|open|export|pure|static" };
+    let mods = if modifiers_regex != "" { modifiers_regex } else { reflect_modifiers_pattern() };
     let prims = if lang_primitives_regex != "" { lang_primitives_regex } else { reflect_primitives_pattern() };
     let ops = if operators_regex != "" { operators_regex } else { reflect_operators_pattern() };
     let p1 = json_indent(1, indent);
     let p2 = json_indent(2, indent);
     let p3 = json_indent(3, indent);
     let p4 = json_indent(4, indent);
+    var extra_kws = "";
+    if seed_keywords_regex == "" {
+        var c = 1;
+        while c <= 16 {
+            if c != 3 && c != 4 {
+                let kws = reflect_category_keywords(c);
+                let sc = reflect_category_scope(c);
+                if kws != "" && sc != "" {
+                    extra_kws = extra_kws + ",\n" + p4 + "{ \"name\": \"" + sc + "\", \"match\": \"\\\\b(" + kws + ")\\\\b\" }";
+                }
+            }
+            c = c + 1;
+        }
+    }
     return "{\n" +
            p1 + "\"$schema\": \"https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json\",\n" +
            p1 + "\"name\": \"Pilot\",\n" +
@@ -505,7 +547,8 @@ pub fn dumps_tm_language(
            p3 + "\"patterns\": [\n" +
            p4 + "{ \"name\": \"keyword.control.seed.pilot\", \"match\": \"\\\\b(" + seeds + ")\\\\b\" },\n" +
            p4 + "{ \"name\": \"keyword.other.syntax.pilot\", \"match\": \"\\\\b(" + syn + ")\\\\b\" },\n" +
-           p4 + "{ \"name\": \"storage.modifier.pilot\", \"match\": \"\\\\b(" + mods + ")\\\\b\" }\n" +
+           p4 + "{ \"name\": \"storage.modifier.pilot\", \"match\": \"\\\\b(" + mods + ")\\\\b\" }" +
+           extra_kws + "\n" +
            p3 + "]\n" +
            p2 + "},\n" +
            p2 + "\"primitives\": {\n" +

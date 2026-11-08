@@ -156,7 +156,7 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
             match kind {
                 NodeKind::StructDecl => (1, node.lhs, 0, 0),
                 NodeKind::InterfaceDecl => (2, node.lhs, 0, 0),
-                NodeKind::FnDecl => (3, node.lhs, 0, 0),
+                NodeKind::FnDecl => { let r = arena.type_annot(NodeId(idx_u32)).map(extract_sym).unwrap_or(0); if r != 0 { symbol_strings.insert(r, arena.interner.resolve(SymbolId(r)).to_string()); } (3, node.lhs, r as u64, 0) },
                 NodeKind::ParamDecl => {
                     let ty_sym = extract_sym(NodeId(node.rhs));
                     if ty_sym != 0 { symbol_strings.insert(ty_sym, arena.interner.resolve(SymbolId(ty_sym)).to_string()); }
@@ -223,7 +223,7 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
                     push_ch(node.lhs); push_ch(node.rhs);
                 }
                 NodeKind::LetStmt | NodeKind::VarStmt | NodeKind::ConstDecl | NodeKind::CatchClause => push_ch(node.rhs),
-                NodeKind::MemberExpr | NodeKind::UnaryExpr | NodeKind::ReturnStmt | NodeKind::YieldStmt | NodeKind::DeferStmt
+                NodeKind::MemberExpr | NodeKind::UnaryExpr | NodeKind::ReturnStmt | NodeKind::YieldStmt | NodeKind::DeferStmt | NodeKind::BreakStmt | NodeKind::ContinueStmt
                 | NodeKind::ExprStmt | NodeKind::TryPropagateExpr | NodeKind::DestructorDecl | NodeKind::DynamicMemberDecl
                 | NodeKind::ComptimeExpr | NodeKind::PatLiteral => push_ch(node.lhs),
                 _ => {}

@@ -85,7 +85,7 @@ fn main() {
             let _ = BuildDriver::compile_pilot_source("app", &fs::read_to_string(f).unwrap_or_default(), &opts);
         },
         "lsp" => { let _ = eval_selfhost("selfhost/lsp/server.pilot", ""); }
-        "debug" => { let _ = eval_selfhost("selfhost/dap/server.pilot", ""); }
+        "debug" => if let Some(f) = args.iter().skip(1).find(|a| a.ends_with(".pilot") || a.ends_with(".pilc")) { run_file(f); } else { let _ = eval_selfhost("selfhost/dap/server.pilot", ""); },
         "ide-sync" => { let _ = eval_selfhost("selfhost/ide/vscode_gen.pilot", ""); }
         other if other.ends_with(".pilot") || other.ends_with(".pilc") => run_file(other),
         _ => { let _ = eval_selfhost("selfhost/cli/main.pilot", "cli_help_banner();"); }

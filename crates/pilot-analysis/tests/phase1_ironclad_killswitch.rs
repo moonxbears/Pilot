@@ -206,3 +206,117 @@ fn test_pilot_hosted_div_by_zero_and_comptime_persistence() {
         "eval_ast_node must persist registered layout back into self.layout_table"
     );
 }
+
+fn check_src(src: &str) -> pilot_analysis::AnalysisResult {
+    let a = parse(src);
+    pilot_analysis::AnalysisPipeline::analyze(&a, a.root)
+}
+
+#[test]
+fn test_semantic_null_safety_diagnostics() {
+    // 1. NULL001: Assigning 'none' to non-nullable type
+    let res = check_src("fn test_bad() { let x: i64 = none; }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("NULL001")), "Expected NULL001 on bad assign: {:?}", res.diagnostics);
+
+    // NULL001: Postfix '!' non-null assertion forbidden
+    let res = check_src("fn test_bang(x: i64?) -> i64 { return x!; }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("NULL001")), "Expected NULL001 on postfix '!': {:?}", res.diagnostics);
+
+    // Valid: Assigning 'none' to optional type
+    let res = check_src("fn test_good() { let x: i64? = none; }");
+    assert!(!res.diagnostics.iter().any(|d| d.message.contains("NULL001")), "Unexpected NULL001 on optional assign: {:?}", res.diagnostics);
+
+    // 2. NULL002: Guard statement without else block
+    let res = check_src("fn test_g(x: i64) { guard x > 0; }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("NULL002")), "Expected NULL002 on guard without else: {:?}", res.diagnostics);
+
+    // NULL002: Guard statement with non-diverging else block
+    let res = check_src("fn test_g2(x: i64) { guard x > 0 else { let y = 1; } }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("NULL002")), "Expected NULL002 on guard fallthrough: {:?}", res.diagnostics);
+
+    // Valid: Guard statement with diverging else block (return)
+    let res = check_src("fn test_g3(x: i64) -> i64 { guard x > 0 else { return 0; } return x; }");
+    assert!(!res.diagnostics.iter().any(|d| d.message.contains("NULL002")), "Unexpected NULL002 on valid guard return: {:?}", res.diagnostics);
+
+    // Valid: Guard statement with diverging else block (panic)
+    let res = check_src("fn test_g4(x: i64) -> i64 { guard x > 0 else { panic(0); } return x; }");
+    assert!(!res.diagnostics.iter().any(|d| d.message.contains("NULL002")), "Unexpected NULL002 on valid guard panic: {:?}", res.diagnostics);
+
+    // 3. NULL003: Returning 'none' from function with non-nullable return type
+    let res = check_src("fn test_ret() -> i64 { return none; }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("NULL003")), "Expected NULL003 on return none: {:?}", res.diagnostics);
+
+    // Valid: Returning 'none' from function with optional return type
+    let res = check_src("fn test_ret_opt() -> i64? { return none; }");
+    assert!(!res.diagnostics.iter().any(|d| d.message.contains("NULL003")), "Unexpected NULL003 on optional return: {:?}", res.diagnostics);
+
+    // 4. NULL004: Passing 'none' to non-nullable parameter
+    let res = check_src("fn helper(x: i64) -> i64 { return x; } fn caller() { helper(none); }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("NULL004")), "Expected NULL004 on arg none: {:?}", res.diagnostics);
+
+    // Valid: Passing 'none' to optional parameter
+    let res = check_src("fn helper_opt(x: i64?) -> i64 { return 0; } fn caller_opt() { helper_opt(none); }");
+    assert!(!res.diagnostics.iter().any(|d| d.message.contains("NULL004")), "Unexpected NULL004 on optional arg: {:?}", res.diagnostics);
+
+    // 5. NULL005: Index access on optional type requires safe navigation or unwrapping
+    let res = check_src("fn test_opt_idx(arr: i64[]?) { let v = arr[0]; }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("NULL005")), "Expected NULL005 on optional indexing: {:?}", res.diagnostics);
+
+    // Valid: Index access on non-optional collection
+    let res = check_src("fn test_good_idx(arr: i64[]) { let v = arr[0]; }");
+    assert!(!res.diagnostics.iter().any(|d| d.message.contains("NULL005")), "Unexpected NULL005 on valid indexing: {:?}", res.diagnostics);
+}
+
+#[test]
+fn test_semantic_values_first_error_and_loop_diagnostics() {
+    // 1. ERR001: Statement-level call to fallible function discarded
+    let res = check_src("fn try_op() -> i64 ! i64 { return 1; } fn caller() { try_op(); }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("ERR001")), "Expected ERR001 on discarded fallible call: {:?}", res.diagnostics);
+
+    // Valid: Fallible call assigned to a let binding
+    let res = check_src("fn try_op() -> i64 ! i64 { return 1; } fn caller() { let x = try_op(); }");
+    assert!(!res.diagnostics.iter().any(|d| d.message.contains("ERR001")), "Unexpected ERR001 on bound call: {:?}", res.diagnostics);
+
+    // Valid: Fallible call handled with catch recovery
+    let res = check_src("fn try_op() -> i64 ! i64 { return 1; } fn caller() { try_op() catch err => 0; }");
+    assert!(!res.diagnostics.iter().any(|d| d.message.contains("ERR001")), "Unexpected ERR001 on catch call: {:?}", res.diagnostics);
+
+    // 2. ERR005: Legacy try/catch in native Pilot code emits warning
+    let res = check_src("fn test_try() { try { let a = 1; } catch e { let b = 2; } }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("ERR005")), "Expected ERR005 on native try/catch: {:?}", res.diagnostics);
+
+    // 3. LOOP001: Cannot mix 'break <expr>' and 'yield <expr>' in same for loop
+    let res = check_src("fn test_loop() { for i in 0 .. 10 { yield i; break i; } }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("LOOP001")), "Expected LOOP001 on mixed break/yield: {:?}", res.diagnostics);
+
+    // 4. LOOP002: Cannot mix valueless 'break;' and valued 'break <expr>;'
+    let res = check_src("fn test_break() { for i in 0 .. 10 { if i == 1 { break; } break i; } }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("LOOP002")), "Expected LOOP002 on mixed break void/value: {:?}", res.diagnostics);
+
+    // 5. LOOP003: Loop completion 'then' branch only valid on ScalarBreak
+    let res = check_src("fn test_then() { for i in 0 .. 10 { let x = i; } then 0; }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("LOOP003")), "Expected LOOP003 on then without valued break: {:?}", res.diagnostics);
+
+    // Valid: ScalarBreak loop with break <expr> and then branch
+    let res = check_src("fn test_good_then() -> i64 { return for i in 0 .. 10 { if i == 5 { break i; } } then 0; }");
+    assert!(!res.diagnostics.iter().any(|d| d.message.contains("LOOP003")), "Unexpected LOOP003 on valid then: {:?}", res.diagnostics);
+
+    // 6. LOOP004: Cannot yield inside statement-position for in non-generator function
+    let res = check_src("fn test_stmt_yield() -> i64 { for i in 0 .. 10 { yield i; } return 0; }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("LOOP004")), "Expected LOOP004 on statement yield: {:?}", res.diagnostics);
+
+    // Valid: Expression-position for loop with yield
+    let res = check_src("fn test_expr_yield() { let items = for i in 0 .. 10 { yield i; }; }");
+    assert!(!res.diagnostics.iter().any(|d| d.message.contains("LOOP004")), "Unexpected LOOP004 on expression yield: {:?}", res.diagnostics);
+}
+
+#[test]
+fn test_semantic_pattern_matching_diagnostics() {
+    // 1. MATCH002: Unreachable pattern after wildcard arm
+    let res = check_src("fn test_sw(x: i64) -> i64 { return switch x { case _: 0, case 1: 1 }; }");
+    assert!(res.diagnostics.iter().any(|d| d.message.contains("MATCH002")), "Expected MATCH002 on unreachable arm: {:?}", res.diagnostics);
+
+    // Valid: Wildcard arm at the end
+    let res = check_src("fn test_good_sw(x: i64) -> i64 { return switch x { case 1: 1, case _: 0 }; }");
+    assert!(!res.diagnostics.iter().any(|d| d.message.contains("MATCH002")), "Unexpected MATCH002 on valid arms: {:?}", res.diagnostics);
+}

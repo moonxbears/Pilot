@@ -286,6 +286,8 @@
         { "name": "keyword.control.database.pilot", "match": "\\b(database|transaction|commit|rollback|savepoint|connect|from|where|order|ascending|descending|insert|into|values|update|delete)\\b" },
         { "name": "keyword.control.foreign.pilot", "match": "\\b(extern|assembly|module|lib)\\b" },
         { "name": "keyword.other.query.pilot", "match": "\\b(sizeof|alignof|offsetof|fields_of|nameof|assert|blueprint|cue|role|route|unit|syntax|use|op)\\b" },
+        { "name": "keyword.other.algebraic.pilot", "match": "\\b(override)\\b" },
+        { "name": "keyword.other.typestate.pilot", "match": "\\b(transition)\\b" },
         { "name": "support.type.primitive.pilot entity.name.type.primitive.pilot", "match": "\\b(i8|i16|i32|i64|i128|isize)\\b" },
         { "name": "support.type.primitive.pilot entity.name.type.primitive.pilot", "match": "\\b(u8|u16|u32|u64|u128|usize)\\b" },
         { "name": "support.type.primitive.pilot entity.name.type.primitive.pilot", "match": "\\b(f16|f32|f64|f128)\\b" },

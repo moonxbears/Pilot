@@ -33,6 +33,7 @@ let Cfg = {
         ast_node_raw_bits: "ast_node_raw_bits",
         ast_node_sym: "ast_node_sym",
         ast_orig_kind: "ast_orig_kind",
+        ast_parent: "ast_parent",
         ast_span_end: "ast_span_end",
         ast_span_start: "ast_span_start",
         layout_aggregate: "layout_aggregate",
@@ -436,29 +437,17 @@ pub fn infer_node(i: i64, node_count: i64) -> i64 {
         let sym = __engine(Cfg.ast.ast_node_sym, i);
         var j = i - 1;
         var found = 0;
-        while j >= 0 {
-            if found == 0 {
-                let jk = __engine(Cfg.ast.ast_node_kind, j);
-                if jk == 4 {
-                    let js = __engine(Cfg.ast.ast_node_sym, j);
-                    if js == sym {
-                        let target_lid = __engine(Cfg.ast.ast_get_bound_layout, j);
-                        if target_lid != 4294967295 {
-                            __engine(Cfg.ast.ast_bind_target, i, j);
-                            __engine(Cfg.ast.ast_bind_layout, i, target_lid);
-                            found = 1;
-                        }
+        while j >= 0 && found == 0 {
+            let jk = __engine(Cfg.ast.ast_node_kind, j);
+            if jk == 4 || jk == 21 {
+                let js = __engine(Cfg.ast.ast_node_sym, j);
+                if js == sym {
+                    __engine(Cfg.ast.ast_bind_target, i, j);
+                    let target_lid = __engine(Cfg.ast.ast_get_bound_layout, j);
+                    if target_lid != 4294967295 {
+                        __engine(Cfg.ast.ast_bind_layout, i, target_lid);
                     }
-                } else if jk == 21 {
-                    let js = __engine(Cfg.ast.ast_node_sym, j);
-                    if js == sym {
-                        let target_lid = __engine(Cfg.ast.ast_get_bound_layout, j);
-                        if target_lid != 4294967295 {
-                            __engine(Cfg.ast.ast_bind_target, i, j);
-                            __engine(Cfg.ast.ast_bind_layout, i, target_lid);
-                            found = 1;
-                        }
-                    }
+                    found = 1;
                 }
             }
             j = j - 1;
@@ -938,6 +927,401 @@ pub fn verify_ident_not_keyword(nid: i64, kw_set: str) -> i64 {
     return 0;
 }
 
+pub fn is_type_name_or_sym_optional(sym: i64, name: str, node_count: i64) -> bool {
+    let nlen = name.len();
+    if nlen > 0 {
+        let last_ch = name.byte_at(nlen - 1);
+        if last_ch == 63 {
+            return true;
+        }
+    }
+    if nlen == 6 {
+        if name.byte_at(0) == 111 && name.byte_at(1) == 112 && name.byte_at(2) == 116 {
+            if name.byte_at(3) == 105 && name.byte_at(4) == 111 && name.byte_at(5) == 110 {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+pub fn is_type_fallible(sym: i64, name: str, node_count: i64) -> bool {
+    let nlen = name.len();
+    var idx = 0;
+    while idx < nlen {
+        if name.byte_at(idx) == 33 {
+            return true;
+        }
+        idx = idx + 1;
+    }
+    if nlen == 6 {
+        if name.byte_at(0) == 114 && name.byte_at(1) == 101 && name.byte_at(2) == 115 {
+            if name.byte_at(3) == 117 && name.byte_at(4) == 108 && name.byte_at(5) == 116 {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
+    let ok = __engine(Cfg.ast.ast_orig_kind, i);
+
+    if ok == 104 {
+        let cc = __engine(Cfg.ast.ast_child_count, i);
+        if cc >= 2 {
+            let eb = __engine(Cfg.ast.ast_child_at, i, 1);
+            let eb_cc = __engine(Cfg.ast.ast_child_count, eb);
+            var eb_diverges = false;
+            var si = 0;
+            while si < eb_cc {
+                let stmt = __engine(Cfg.ast.ast_child_at, eb, si);
+                let s_ok = __engine(Cfg.ast.ast_orig_kind, stmt);
+                if s_ok == 103 || s_ok == 107 || s_ok == 108 || s_ok == 109 {
+                    eb_diverges = true;
+                } else if s_ok == 110 {
+                    let e_cc = __engine(Cfg.ast.ast_child_count, stmt);
+                    if e_cc > 0 {
+                        let expr = __engine(Cfg.ast.ast_child_at, stmt, 0);
+                        let e_ok = __engine(Cfg.ast.ast_orig_kind, expr);
+                        if e_ok == 207 {
+                            let c_cc = __engine(Cfg.ast.ast_child_count, expr);
+                            if c_cc > 0 {
+                                let callee = __engine(Cfg.ast.ast_child_at, expr, 0);
+                                let csym = __engine(Cfg.ast.ast_node_sym, callee);
+                                if csym != 0 {
+                                    let cname = __engine(Cfg.ast.sym_str, csym);
+                                    if cname == "panic" || cname == "fail" {
+                                        eb_diverges = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                si = si + 1;
+            }
+            if !eb_diverges {
+                __engine(Cfg.ast.ast_emit_diag, eb, 1, "NULL002: 'guard' else block must diverge with 'return', 'break', 'continue', 'yield', or 'panic'");
+                return 1;
+            }
+        }
+    }
+
+    if ok == 100 || ok == 101 {
+        let ann_sym = __engine(Cfg.ast.ast_node_raw_bits, i);
+        if ann_sym > 0 {
+            let ann_name = __engine(Cfg.ast.sym_str, ann_sym);
+            if !is_type_name_or_sym_optional(ann_sym, ann_name, node_count) {
+                let cc = __engine(Cfg.ast.ast_child_count, i);
+                if cc > 0 {
+                    let init_node = __engine(Cfg.ast.ast_child_at, i, 0);
+                    let init_ok = __engine(Cfg.ast.ast_orig_kind, init_node);
+                    if init_ok == 305 {
+                        __engine(Cfg.ast.ast_emit_diag, i, 1, "NULL001: Cannot assign 'none' to non-nullable type '" + ann_name + "'");
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+
+    if ok == 102 {
+        let cc = __engine(Cfg.ast.ast_child_count, i);
+        if cc >= 2 {
+            let rhs = __engine(Cfg.ast.ast_child_at, i, 1);
+            let rhs_ok = __engine(Cfg.ast.ast_orig_kind, rhs);
+            if rhs_ok == 305 {
+                let lhs = __engine(Cfg.ast.ast_child_at, i, 0);
+                let lhs_tid = __engine(Cfg.ast.ast_get_bound_target, lhs);
+                var is_opt = false;
+                if lhs_tid != 4294967295 && lhs_tid >= 0 {
+                    let t_sym = __engine(Cfg.ast.ast_node_raw_bits, lhs_tid);
+                    if t_sym > 0 {
+                        let t_name = __engine(Cfg.ast.sym_str, t_sym);
+                        is_opt = is_type_name_or_sym_optional(t_sym, t_name, node_count);
+                    }
+                }
+                if !is_opt {
+                    __engine(Cfg.ast.ast_emit_diag, i, 1, "NULL001: Cannot assign 'none' to non-nullable variable");
+                    return 1;
+                }
+            }
+        }
+    }
+
+    if ok == 103 {
+        let cc = __engine(Cfg.ast.ast_child_count, i);
+        if cc > 0 {
+            let ret_val = __engine(Cfg.ast.ast_child_at, i, 0);
+            let val_ok = __engine(Cfg.ast.ast_orig_kind, ret_val);
+            if val_ok == 305 {
+                var cur = i;
+                var enc_fn = -1;
+                var depth = 0;
+                while cur != 4294967295 && cur >= 0 && depth < 30 {
+                    depth = depth + 1;
+                    let pk = __engine(Cfg.ast.ast_node_kind, cur);
+                    if pk == 3 {
+                        enc_fn = cur;
+                        cur = -1;
+                    } else {
+                        cur = __engine(Cfg.ast.ast_parent, cur);
+                    }
+                }
+                if enc_fn >= 0 {
+                    let ret_ty_sym = __engine(Cfg.ast.ast_node_raw_bits, enc_fn);
+                    if ret_ty_sym > 0 {
+                        let rname = __engine(Cfg.ast.sym_str, ret_ty_sym);
+                        if !is_type_name_or_sym_optional(ret_ty_sym, rname, node_count) {
+                            __engine(Cfg.ast.ast_emit_diag, i, 1, "NULL003: Cannot return 'none' from function with non-nullable return type '" + rname + "'");
+                            return 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if ok == 207 {
+        let cc = __engine(Cfg.ast.ast_child_count, i);
+        if cc > 1 {
+            let target_fn = __engine(Cfg.ast.ast_get_bound_target, i);
+            if target_fn != 4294967295 && target_fn >= 0 {
+                let p_cnt = __engine(Cfg.ast.ast_child_count, target_fn);
+                var ai = 1;
+                while ai < cc {
+                    let arg = __engine(Cfg.ast.ast_child_at, i, ai);
+                    let a_ok = __engine(Cfg.ast.ast_orig_kind, arg);
+                    if a_ok == 305 {
+                        if ai < p_cnt {
+                            let param_node = __engine(Cfg.ast.ast_child_at, target_fn, ai);
+                            let psym = __engine(Cfg.ast.ast_node_raw_bits, param_node);
+                            if psym > 0 {
+                                let pname = __engine(Cfg.ast.sym_str, psym);
+                                if !is_type_name_or_sym_optional(psym, pname, node_count) {
+                                    __engine(Cfg.ast.ast_emit_diag, arg, 1, "NULL004: Cannot pass 'none' to non-nullable parameter '" + pname + "'");
+                                    return 1;
+                                }
+                            }
+                        }
+                    }
+                    ai = ai + 1;
+                }
+            }
+        }
+    }
+
+    if ok == 209 {
+        let cc = __engine(Cfg.ast.ast_child_count, i);
+        if cc > 0 {
+            let recv = __engine(Cfg.ast.ast_child_at, i, 0);
+            let recv_ok = __engine(Cfg.ast.ast_orig_kind, recv);
+            if recv_ok != 213 {
+                let recv_tid = __engine(Cfg.ast.ast_get_bound_target, recv);
+                if recv_tid != 4294967295 && recv_tid >= 0 {
+                    let t_sym = __engine(Cfg.ast.ast_node_raw_bits, recv_tid);
+                    if t_sym > 0 {
+                        let t_name = __engine(Cfg.ast.sym_str, t_sym);
+                        if is_type_name_or_sym_optional(t_sym, t_name, node_count) {
+                            __engine(Cfg.ast.ast_emit_diag, i, 1, "NULL002: Member access on optional type requires '?.' safe navigation or unwrapping");
+                            return 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if ok == 210 {
+        let cc = __engine(Cfg.ast.ast_child_count, i);
+        if cc > 0 {
+            let recv = __engine(Cfg.ast.ast_child_at, i, 0);
+            let recv_ok = __engine(Cfg.ast.ast_orig_kind, recv);
+            if recv_ok != 213 {
+                let recv_tid = __engine(Cfg.ast.ast_get_bound_target, recv);
+                if recv_tid != 4294967295 && recv_tid >= 0 {
+                    let t_sym = __engine(Cfg.ast.ast_node_raw_bits, recv_tid);
+                    if t_sym > 0 {
+                        let t_name = __engine(Cfg.ast.sym_str, t_sym);
+                        if is_type_name_or_sym_optional(t_sym, t_name, node_count) {
+                            __engine(Cfg.ast.ast_emit_diag, i, 1, "NULL005: Index access on optional type requires safe navigation or unwrapping");
+                            return 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
+pub fn verify_error_flow(i: i64, node_count: i64) -> i64 {
+    let ok = __engine(Cfg.ast.ast_orig_kind, i);
+
+    if ok == 110 {
+        let cc = __engine(Cfg.ast.ast_child_count, i);
+        if cc > 0 {
+            let expr = __engine(Cfg.ast.ast_child_at, i, 0);
+            let e_ok = __engine(Cfg.ast.ast_orig_kind, expr);
+            if e_ok == 207 {
+                let target_fn = __engine(Cfg.ast.ast_get_bound_target, expr);
+                if target_fn != 4294967295 && target_fn >= 0 {
+                    let ret_sym = __engine(Cfg.ast.ast_node_raw_bits, target_fn);
+                    if ret_sym > 0 {
+                        let rname = __engine(Cfg.ast.sym_str, ret_sym);
+                        if is_type_fallible(ret_sym, rname, node_count) {
+                            __engine(Cfg.ast.ast_emit_diag, expr, 1, "ERR001: Unhandled fallible return value; must use '?', 'catch', or assign to a binding");
+                            return 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if ok == 111 {
+        var p = __engine(Cfg.ast.ast_parent, i);
+        var in_polyglot = false;
+        var depth = 0;
+        while p != 4294967295 && p >= 0 && depth < 50 {
+            depth = depth + 1;
+            let pk = __engine(Cfg.ast.ast_orig_kind, p);
+            if pk == 222 {
+                in_polyglot = true;
+            }
+            let next_p = __engine(Cfg.ast.ast_parent, p);
+            if next_p == p || next_p >= p {
+                p = -1;
+            } else {
+                p = next_p;
+            }
+        }
+        if !in_polyglot {
+            __engine(Cfg.ast.ast_emit_diag, i, 2, "ERR005: Error stratification lint: legacy 'try/catch' is restricted to polyglot FFI boundaries; use values-first 'T ! E' with '?' or 'catch'");
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+pub fn verify_loop_ergonomics(i: i64, node_count: i64) -> i64 {
+    let ok = __engine(Cfg.ast.ast_orig_kind, i);
+
+    if ok == 204 {
+        let cc = __engine(Cfg.ast.ast_child_count, i);
+        let has_then = (cc >= 3);
+        if cc >= 2 {
+            let body = __engine(Cfg.ast.ast_child_at, i, 1);
+            let b_start = __engine(Cfg.ast.ast_span_start, body);
+            let b_end = __engine(Cfg.ast.ast_span_end, body);
+            var has_yield = false;
+            var has_valued_break = false;
+            var has_void_break = false;
+
+            var k = 0;
+            while k < node_count {
+                let k_start = __engine(Cfg.ast.ast_span_start, k);
+                let k_end = __engine(Cfg.ast.ast_span_end, k);
+                if k_start >= b_start && k_end <= b_end && k != i {
+                    let kok = __engine(Cfg.ast.ast_orig_kind, k);
+                    if kok == 109 {
+                        has_yield = true;
+                    } else if kok == 107 {
+                        let bcc = __engine(Cfg.ast.ast_child_count, k);
+                        if bcc > 0 {
+                            has_valued_break = true;
+                        } else {
+                            has_void_break = true;
+                        }
+                    }
+                }
+                k = k + 1;
+            }
+
+            if has_valued_break && has_yield {
+                __engine(Cfg.ast.ast_emit_diag, i, 1, "LOOP001: Cannot mix 'break <expr>' and 'yield <expr>' in the same 'for' loop");
+                return 1;
+            }
+            if has_void_break && has_valued_break {
+                __engine(Cfg.ast.ast_emit_diag, i, 1, "LOOP002: Cannot mix valueless 'break;' and valued 'break <expr>;' in the same 'for' loop");
+                return 1;
+            }
+            if has_then && !has_valued_break {
+                __engine(Cfg.ast.ast_emit_diag, i, 1, "LOOP003: Loop completion 'then' branch is only valid on a ScalarBreak 'for' loop containing 'break <expr>'");
+                return 1;
+            }
+            if has_yield {
+                let p = __engine(Cfg.ast.ast_parent, i);
+                if p != 4294967295 && p >= 0 {
+                    let pok = __engine(Cfg.ast.ast_orig_kind, p);
+                    if pok == 110 || pok == 200 {
+                        var cur = i;
+                        var enc_fn = -1;
+                        var depth = 0;
+                        while cur != 4294967295 && cur >= 0 && depth < 30 {
+                            depth = depth + 1;
+                            let pk = __engine(Cfg.ast.ast_node_kind, cur);
+                            if pk == 3 {
+                                enc_fn = cur;
+                                cur = -1;
+                            } else {
+                                cur = __engine(Cfg.ast.ast_parent, cur);
+                            }
+                        }
+                        if enc_fn >= 0 {
+                            let r_sym = __engine(Cfg.ast.ast_node_raw_bits, enc_fn);
+                            var is_gen = false;
+                            if r_sym > 0 {
+                                let r_name = __engine(Cfg.ast.sym_str, r_sym);
+                                if r_name.len() >= 6 {
+                                    if r_name.byte_at(0) == 115 && r_name.byte_at(1) == 116 {
+                                        is_gen = true;
+                                    }
+                                }
+                            }
+                            if !is_gen {
+                                __engine(Cfg.ast.ast_emit_diag, i, 1, "LOOP004: Cannot 'yield' inside a statement-position 'for' loop in a non-generator function");
+                                return 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
+pub fn verify_pattern_matching(i: i64, node_count: i64) -> i64 {
+    let ok = __engine(Cfg.ast.ast_orig_kind, i);
+    if ok == 202 {
+        let cc = __engine(Cfg.ast.ast_child_count, i);
+        var wildcard_seen = false;
+        var ai = 1;
+        while ai < cc {
+            let arm = __engine(Cfg.ast.ast_child_at, i, ai);
+            let arm_cc = __engine(Cfg.ast.ast_child_count, arm);
+            if arm_cc > 0 {
+                let pat = __engine(Cfg.ast.ast_child_at, arm, 0);
+                let pat_ok = __engine(Cfg.ast.ast_orig_kind, pat);
+                if wildcard_seen {
+                    __engine(Cfg.ast.ast_emit_diag, arm, 1, "MATCH002: Unreachable pattern in switch arm; previous wildcard arm subsumes this case");
+                    return 1;
+                }
+                if pat_ok == 500 {
+                    wildcard_seen = true;
+                }
+            }
+            ai = ai + 1;
+        }
+    }
+    return 0;
+}
+
 pub fn analyze_unit(unit_id: i64) -> i64 {
     let node_count = __engine(Cfg.ast.ast_node_count);
     if node_count == 0 {
@@ -999,6 +1383,16 @@ pub fn analyze_unit(unit_id: i64) -> i64 {
     i = 0;
     while i < node_count {
         verify_ident_not_keyword(i, kw_set);
+        i = i + 1;
+    }
+
+    // Pass 6: Null-safety, Values-first error, and Loop ergonomics verification
+    i = 0;
+    while i < node_count {
+        verify_null_safety(i, node_count);
+        verify_error_flow(i, node_count);
+        verify_loop_ergonomics(i, node_count);
+        verify_pattern_matching(i, node_count);
         i = i + 1;
     }
 

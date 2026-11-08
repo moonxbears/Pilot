@@ -2,15 +2,47 @@ use Pilot.Collections.*;
 use Pilot.Core.Keywords.*;
 use Pilot.Core.Reflect.*;
 
+
+
+
+var unused_int : i32 = 5;
+fn unused_function() -> void {}
+
+
+
 var category = 0;
-while category <= 16 {
+while category <= 37 {
     let scope = reflect_category_scope(category);
     let badge = reflect_category_badge(category);
+    let words = reflect_category_words(category);
+    let attr_kws = reflect_category_keywords(category);
     print("Category " + category + " [" + badge + "]: " + scope);
+    print("  Words: " + words);
+    if attr_kws != "" {
+        print("  From Attributes: " + attr_kws);
+    }
     category = category + 1;
 }
+
+print("");
+print("=== Keyword Documentation from Attributes ===");
+print("  __engine: " + reflect_keyword_doc(0, "__engine"));
+print("  defer:    " + reflect_keyword_doc(0, "defer"));
+print("  comptime: " + reflect_keyword_doc(0, "comptime"));
+print("  quote:    " + reflect_keyword_doc(0, "quote"));
+print("  asm:      " + reflect_keyword_doc(0, "asm"));
+print("  guard:    " + reflect_keyword_doc(1, "guard"));
+print("  switch:   " + reflect_keyword_doc(1, "switch"));
+print("  while:    " + reflect_keyword_doc(1, "while"));
+print("  scope:    " + reflect_keyword_doc(7, "scope"));
+print("  async:    " + reflect_keyword_doc(11, "async"));
+print("  sizeof:   " + reflect_keyword_doc(14, "sizeof"));
+print("  nameof:   " + reflect_keyword_doc(14, "nameof"));
+
+print("");
+print("=== Current Reflection Environment ===");
 var globalenv = reflect_current_environment();
-print(globalenv)
+print(globalenv);
 
 // var string : str = "Hello, World!";
 // var float : f64 = 3.14159;

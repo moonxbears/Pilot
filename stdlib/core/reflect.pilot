@@ -520,10 +520,7 @@ pub fn reflect_category_scope(cat_id: i64) -> str {
     if live != null && live != "" {
         return live;
     }
-    // 2. O(1) fallback from the global reflection table:
-    if cat_id >= 0 && cat_id < CATEGORY_SCOPES.len {
-        return CATEGORY_SCOPES[cat_id];
-    }
+    
     return "keyword.other.pilot";
 }
 
@@ -533,10 +530,7 @@ pub fn reflect_category_badge(cat_id: i64) -> str {
     if live != null && live != "" {
         return live;
     }
-    // 2. O(1) fallback from the global reflection table:
-    if cat_id >= 0 && cat_id < CATEGORY_BADGES.len {
-        return CATEGORY_BADGES[cat_id];
-    }
+    
     return "Keyword";
 }
 
@@ -559,10 +553,7 @@ pub fn reflect_category_words(cat_id: i64) -> str {
     if live != null && live != "" {
         return live;
     }
-    // 2. O(1) fallback from global table:
-    if cat_id >= 0 && cat_id < CATEGORY_WORDS.len {
-        return CATEGORY_WORDS[cat_id];
-    }
+    
     return "";
 }
 
