@@ -6,6 +6,7 @@ pub pkg Pilot.Core.Keywords;
 
 use Pilot.Core.Genesis::*;
 use Pilot.Core.Interfaces::*;
+use Pilot.Core.Reflect::*;
 
 // =========================================================================
 // 1. DYNAMIC CATEGORY AND KEYWORD REGISTRATION ATTRIBUTES
@@ -932,155 +933,28 @@ pub fn reflect_category_keywords(target_cat_id: i64) -> str {
     return result;
 }
 
-pub pure fn query_category_scope_pure(cat_id: i64) -> str {
-    if cat_id == 0  { return "keyword.control.pilot"; }
-    if cat_id == 1  { return "keyword.control.conditional.pilot"; }
-    if cat_id == 2  { return "storage.modifier.mutability.pilot"; }
-    if cat_id == 3  { return "storage.type.primitive.pilot"; }
-    if cat_id == 4  { return "keyword.operator.pilot"; }
-    if cat_id == 5  { return "entity.name.type.interface.pilot"; }
-    if cat_id == 6  { return "variable.annotation.attribute.pilot"; }
-    if cat_id == 7  { return "keyword.declaration.polyglot.pilot"; }
-    if cat_id == 8  { return "keyword.other.contract.pilot"; }
-    if cat_id == 9  { return "keyword.other.effects.pilot"; }
-    if cat_id == 10 { return "keyword.other.concurrency.pilot"; }
-    if cat_id == 11 { return "keyword.other.realtime.pilot"; }
-    if cat_id == 12 { return "storage.modifier.clearance.pilot"; }
-    if cat_id == 13 { return "keyword.other.units.pilot"; }
-    if cat_id == 14 { return "keyword.other.database.pilot"; }
-    if cat_id == 15 { return "keyword.other.algebraic.pilot"; }
-    if cat_id == 16 { return "keyword.other.typestate.pilot"; }
-    if cat_id == 17 { return "keyword.other.adapters.pilot"; }
-    if cat_id == 18 { return "keyword.other.vectorization.pilot"; }
-    if cat_id == 19 { return "keyword.other.switchboard.pilot"; }
-    if cat_id == 20 { return "keyword.other.dependency_injection.pilot"; }
-    if cat_id == 21 { return "keyword.other.property.pilot"; }
-    if cat_id == 22 { return "keyword.other.indexer.pilot"; }
-    if cat_id == 23 { return "keyword.other.lifecycle.pilot"; }
-    if cat_id == 24 { return "keyword.other.scoping.pilot"; }
-    if cat_id == 25 { return "storage.type.str.pilot"; }
-    if cat_id == 26 { return "storage.type.slice.pilot"; }
-    if cat_id == 27 { return "storage.type.stride.pilot"; }
-    if cat_id == 28 { return "storage.type.array.pilot"; }
-    if cat_id == 29 { return "storage.type.map.pilot"; }
-    if cat_id == 30 { return "storage.type.simd.pilot"; }
-    if cat_id == 31 { return "storage.type.algebraic_primitives.pilot"; }
-    if cat_id == 32 { return "storage.type.algebraic_sugar.pilot"; }
-    if cat_id == 33 { return "keyword.operator.splat.pilot"; }
-    if cat_id == 34 { return "keyword.operator.pairs.pilot"; }
-    if cat_id == 35 { return "keyword.operator.expand.pilot"; }
-    if cat_id == 36 { return "keyword.control.homoiconic.pilot"; }
-    if cat_id == 37 { return "keyword.operator.call_quote.pilot"; }
-    return "keyword.other.pilot";
+pub fn query_category_scope_pure(cat_id: i64) -> str {
+    return reflect_category_scope(cat_id);
 }
 
-pub pure fn query_category_badge_pure(cat_id: i64) -> str {
-    if cat_id == 0  { return "Seed Token"; }
-    if cat_id == 1  { return "Control Flow"; }
-    if cat_id == 2  { return "Modifier"; }
-    if cat_id == 3  { return "Primitive"; }
-    if cat_id == 4  { return "Operator"; }
-    if cat_id == 5  { return "Interface"; }
-    if cat_id == 6  { return "Attribute"; }
-    if cat_id == 7  { return "Polyglot"; }
-    if cat_id == 8  { return "Contract"; }
-    if cat_id == 9  { return "Effect"; }
-    if cat_id == 10 { return "Concurrency"; }
-    if cat_id == 11 { return "Realtime"; }
-    if cat_id == 12 { return "Clearance"; }
-    if cat_id == 13 { return "Unit"; }
-    if cat_id == 14 { return "Database"; }
-    if cat_id == 15 { return "Algebraic"; }
-    if cat_id == 16 { return "Typestate"; }
-    if cat_id == 17 { return "Adapter"; }
-    if cat_id == 18 { return "Vectorization"; }
-    if cat_id == 19 { return "Switchboard"; }
-    if cat_id == 20 { return "Dependency Injection"; }
-    if cat_id == 21 { return "Property"; }
-    if cat_id == 22 { return "Indexer"; }
-    if cat_id == 23 { return "Lifecycle"; }
-    if cat_id == 24 { return "Scoping"; }
-    if cat_id == 25 { return "String View"; }
-    if cat_id == 26 { return "Slice View"; }
-    if cat_id == 27 { return "Strided Lens"; }
-    if cat_id == 28 { return "Inline Array"; }
-    if cat_id == 29 { return "Column Map"; }
-    if cat_id == 30 { return "SIMD Vector"; }
-    if cat_id == 31 { return "Algebraic Primitive"; }
-    if cat_id == 32 { return "Algebraic Sugar"; }
-    if cat_id == 33 { return "Splat Unpack"; }
-    if cat_id == 34 { return "Pairs Unpack"; }
-    if cat_id == 35 { return "Recursive Flatten"; }
-    if cat_id == 36 { return "Homoiconic Syntax"; }
-    if cat_id == 37 { return "Call Quote"; }
-    return "Keyword";
+pub fn query_category_badge_pure(cat_id: i64) -> str {
+    return reflect_category_badge(cat_id);
 }
 
-pub pure fn query_keyword_doc_pure(word: str) -> str {
-    if word == "fn"        { return "Function declaration introducing a callable routine."; }
-    if word == "let"       { return "Immutable lexical variable binding."; }
-    if word == "var"       { return "Mutable lexical variable binding."; }
-    if word == "struct"    { return "Zero-cost compound data layout type declaration."; }
-    if word == "interface" { return "Compile-time zero-byte behavioral contract."; }
-    if word == "ref"       { return "Explicit lexical borrowed memory reference."; }
-    if word == "if"        { return "Conditional branching expression."; }
-    if word == "loop"      { return "Irreducible unbounded loop construct."; }
-    if word == "return"    { return "Early function return statement."; }
-    if word == "yield"     { return "Coroutine generator or loop sequence value yield."; }
-    if word == "defer"     { return "Lexical scope exit deferred action."; }
-    if word == "comptime"  { return "Compile-time stage 1 metaprogramming execution block."; }
-    if word == "quote"     { return "Homoiconic AST quasi-quote constructor."; }
-    if word == "asm"       { return "Inline hardware assembly instruction block."; }
-    if word == "__engine"  { return "Hardware & Structural Physics Engine intrinsic bridge."; }
-    if word == "while"     { return "Syntactic while loop desugared into loop { if !cond break; body }."; }
-    if word == "for"       { return "Structured 3-tier iteration expression over ranges and collections."; }
-    if word == "switch"    { return "Comprehensive pattern branching construct."; }
-    if word == "guard"     { return "Early exit guard assertion evaluating else branch on false."; }
-    if word == "break"     { return "Break out of current loop structure."; }
-    if word == "continue"  { return "Jump to next iteration step of current loop."; }
-    if word == "pub"       { return "Public visibility clearance across all modules."; }
-    if word == "priv"      { return "Private visibility restricted to enclosing scope."; }
-    if word == "pure"      { return "Side-effect-free pure mathematical function."; }
-    if word == "static"    { return "Type-associated or compile-time static storage."; }
-    if word == "iso"       { return "Perceus-isolated unique reference for zero-copy concurrency."; }
-    if word == "partial"   { return "Open type declaration allowing distributive member extension."; }
-    if word == "ext"       { return "Scoped method extension for existing types."; }
-    if word == "lvl"       { return "Two-axis compile-time clearance ring modifier (0..100)."; }
-    return "Pilot language symbol: " + word;
+pub fn query_keyword_doc_pure(word: str) -> str {
+    return reflect_keyword_doc(-1, word);
 }
 
-pub pure fn query_registered_symbols_pure(cat_id: i64, mode: i64, target: str) -> str {
+pub fn query_registered_symbols_pure(cat_id: i64, mode: i64, target: str) -> str {
     if mode == 1 {
-        return query_category_scope_pure(cat_id);
+        return reflect_category_scope(cat_id);
     }
     if mode == 2 {
-        return query_category_badge_pure(cat_id);
+        return reflect_category_badge(cat_id);
     }
     if mode == 3 {
-        return query_keyword_doc_pure(target);
+        return reflect_keyword_doc(cat_id, target);
     }
-    // mode 0: Pipe-delimited keyword string
-    if cat_id == 0 {
-        return "__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm";
-    }
-    if cat_id == 1 {
-        return "while|until|for|switch|guard|break|continue";
-    }
-    if cat_id == 2 {
-        return "pub|priv|file|prot|pkg|int|open|export|pure|static|const|var|iso|partial|ext";
-    }
-    if cat_id == 3 {
-        return "void|never|bool|char|i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|f16|f32|f64|f128|str";
-    }
-    if cat_id == 4 {
-        return "??|||||&&|||^|&|..|..<|..=|==|!=|<|>|<=|>=|<=>|<<|>>|+|-|*|/|%|!|?|~|~>";
-    }
-    if cat_id == 5 {
-        return "IAnyValue|IValue|IReference|IObject|IGuard|IEquatable|IComparable|IEnumerable";
-    }
-    if cat_id == 6 {
-        return "Lang|Bits|Layout|Operator|Inline|Lattice|EnforceCoreNaming|SyntaxMacro|HardRealtime";
-    }
-    return "";
+    return reflect_category_words(cat_id);
 }
 

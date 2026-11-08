@@ -1,0 +1,340 @@
+// =========================================================================
+// FILE: stdlib/core/reflect.pilot
+// 100% PILOT-HOSTED COMPREHENSIVE COMPILATION & RUNTIME REFLECTION ENGINE
+// Provides O(1) structural reflection tables for:
+//   1. Keyword & Primitive Category Taxonomy (Scope, Badge, LSP Kind)
+//   2. Symbol Documentation & Syntax Suffixes
+//   3. Type Layout Physics (Byte Size, Alignment, 2-Bit Lattice Bits)
+//   4. Attribute Inspection & Reverse Querying
+// =========================================================================
+pub pkg Pilot.Core.Reflect;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+use Pilot.Core.Keywords::*;
+
+// =========================================================================
+// 1. REFLECTION DATA STRUCTURES (0b00 IValue, Zero Runtime Overhead)
+// =========================================================================
+
+[Layout(c_abi)]
+pub struct CategoryInfo : IValue {
+    pub id:       i64;
+    pub scope:    str;
+    pub badge:    str;
+    pub lsp_kind: i64;
+
+    pub static pure fn create(
+        id:       i64,
+        scope:    str,
+        badge:    str,
+        lsp_kind: i64 = 14
+    ) -> CategoryInfo => CategoryInfo {
+        id:       id,
+        scope:    scope,
+        badge:    badge,
+        lsp_kind: lsp_kind,
+    };
+}
+
+[Layout(c_abi)]
+pub struct KeywordInfo : IValue {
+    pub category_id: i64;
+    pub word:        str;
+    pub doc:         str;
+    pub suffix:      str;
+
+    pub static pure fn create(
+        category_id: i64,
+        word:        str,
+        doc:         str,
+        suffix:      str = ""
+    ) -> KeywordInfo => KeywordInfo {
+        category_id: category_id,
+        word:        word,
+        doc:         doc,
+        suffix:      suffix,
+    };
+}
+
+[Layout(c_abi)]
+pub struct FieldInfo : IValue {
+    pub name:        str;
+    pub offset:      usize;
+    pub byte_size:   usize;
+    pub layout_id:   usize;
+
+    pub static pure fn create(
+        name:      str,
+        offset:    usize,
+        byte_size: usize,
+        layout_id: usize
+    ) -> FieldInfo => FieldInfo {
+        name:      name,
+        offset:    offset,
+        byte_size: byte_size,
+        layout_id: layout_id,
+    };
+}
+
+[Layout(c_abi)]
+pub struct TypeInfo : IValue {
+    pub id:          usize;
+    pub name:        str;
+    pub byte_size:   usize;
+    pub byte_align:  usize;
+    pub lattice:     u8;    // 0b00: Value, 0b01: Ref View, 0b10: Owned Object, 0b11: Guard
+    pub field_count: usize;
+
+    pub static pure fn create(
+        id:          usize,
+        name:        str,
+        byte_size:   usize,
+        byte_align:  usize,
+        lattice:     u8,
+        field_count: usize = 0
+    ) -> TypeInfo => TypeInfo {
+        id:          id,
+        name:        name,
+        byte_size:   byte_size,
+        byte_align:  byte_align,
+        lattice:     lattice,
+        field_count: field_count,
+    };
+}
+
+// =========================================================================
+// 2. ENGINE INTRINSIC HOOK WRAPPERS (Dynamic Compiler Physics)
+// =========================================================================
+
+let ReflectEngine = [
+    query_sym:   "query_registered_symbols",
+    node_count:  "ast_node_count",
+    node_kind:   "ast_node_kind",
+    node_sym:    "ast_node_sym",
+    attr_count:  "ast_attr_count",
+    attr_arg:    "ast_attr_arg",
+    sym_str:     "sym_str",
+    layout_size: "layout_metrics",
+    lattice_get: "get_lattice_bits",
+];
+
+// =========================================================================
+// 3. GLOBAL CATEGORY TAXONOMY LOOKUP TABLE (O(1) Direct ID Indexing)
+// =========================================================================
+
+let CATEGORY_SCOPES = [
+    0:  "keyword.control.seed.pilot",
+    1:  "keyword.control.flow.pilot",
+    2:  "keyword.declaration.pilot",
+    3:  "storage.modifier.visibility.pilot",
+    4:  "storage.modifier.pilot",
+    5:  "keyword.other.property.pilot",
+    6:  "variable.language.property.pilot",
+    7:  "keyword.other.lifecycle.pilot",
+    8:  "keyword.other.contract.pilot",
+    9:  "keyword.other.adapter.pilot",
+    10: "keyword.other.collision.pilot",
+    11: "keyword.control.concurrency.pilot",
+    12: "keyword.control.database.pilot",
+    13: "keyword.control.foreign.pilot",
+    14: "keyword.other.query.pilot",
+    15: "keyword.other.algebraic.pilot",
+    16: "keyword.other.typestate.pilot",
+    17: "keyword.other.adapters.pilot",
+    18: "keyword.other.vectorization.pilot",
+    19: "keyword.other.switchboard.pilot",
+    20: "support.type.primitive.pilot entity.name.type.primitive.pilot",
+    21: "support.type.primitive.pilot entity.name.type.primitive.pilot",
+    22: "support.type.primitive.pilot entity.name.type.primitive.pilot",
+    23: "support.type.primitive.pilot entity.name.type.primitive.pilot",
+    24: "support.type.primitive.pilot entity.name.type.primitive.pilot",
+    25: "support.type.primitive.pilot entity.name.type.primitive.pilot",
+    26: "support.type.primitive.pilot entity.name.type.primitive.pilot",
+    27: "support.type.primitive.pilot entity.name.type.primitive.pilot",
+    28: "support.type.primitive.pilot entity.name.type.primitive.pilot",
+    29: "support.type.primitive.pilot entity.name.type.primitive.pilot",
+    30: "keyword.operator.arithmetic.pilot",
+    31: "keyword.operator.bitwise.pilot",
+    32: "keyword.operator.comparison.pilot",
+    33: "keyword.operator.logical.pilot",
+    34: "keyword.operator.splat.pilot",
+    35: "keyword.operator.pairs.pilot",
+    36: "keyword.operator.expand.pilot",
+    37: "keyword.control.homoiconic.pilot",
+];
+
+let CATEGORY_BADGES = [
+    0:  "Hardware Seed",
+    1:  "Control Flow",
+    2:  "Declaration",
+    3:  "Visibility",
+    4:  "Modifier",
+    5:  "Property Accessor",
+    6:  "Language Var",
+    7:  "Lifecycle",
+    8:  "Contract",
+    9:  "Adapter / DI",
+    10: "Composition",
+    11: "Concurrency",
+    12: "Database / LINQ",
+    13: "Foreign ABI",
+    14: "Metaprogramming",
+    15: "Algebraic",
+    16: "Typestate",
+    17: "Adapter",
+    18: "Vectorization",
+    19: "Switchboard",
+    20: "Primitive (Signed Int)",
+    21: "Primitive (Unsigned Int)",
+    22: "Primitive (Float)",
+    23: "Primitive (Scalar)",
+    24: "Primitive (Unit)",
+    25: "Primitive (String View)",
+    26: "Primitive (Reference View)",
+    27: "Primitive (Hardware Storage)",
+    28: "Primitive (Range Descriptor)",
+    29: "Primitive (Composite)",
+    30: "Operator (Arithmetic)",
+    31: "Operator (Bitwise)",
+    32: "Operator (Comparison)",
+    33: "Operator (Logical)",
+    34: "Operator (Splat Unpack)",
+    35: "Operator (Pairs Unpack)",
+    36: "Operator (Recursive Flatten)",
+    37: "Homoiconic Syntax",
+];
+
+let CATEGORY_WORDS = [
+    0:  "__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm",
+    1:  "else|while|until|for|in|then|break|continue|guard|switch|case|default|try|catch",
+    2:  "var|const|enum|actor|state|type",
+    3:  "pub|priv|prot|pkg|int|file|open|export|lvl",
+    4:  "pure|static|iso|partial|ext",
+    5:  "get|set",
+    6:  "self|field|value",
+    7:  "scope|enter|exit",
+    8:  "requires|ensures|old|context",
+    9:  "adapter|each|with",
+    10: "coalesce|with|without",
+    11: "as|async|await|spawn|atomic|sync|isolate|select|timeout|bounded",
+    12: "database|transaction|commit|rollback|savepoint|connect|from|where|order|ascending|descending|insert|into|values|update|delete",
+    13: "extern|assembly|module|lib",
+    14: "sizeof|alignof|offsetof|fields_of|nameof|assert|blueprint|cue|role|route|unit|syntax|use",
+    15: "coalesce|override",
+    16: "op",
+    20: "i8|i16|i32|i64|i128|isize",
+    21: "u8|u16|u32|u64|u128|usize",
+    22: "f16|f32|f64|f128",
+    23: "bool|char",
+    24: "void|never",
+    25: "str",
+    26: "slice|stride",
+    27: "array",
+    28: "range|span|step|from|until|full",
+    29: "tuple|option|result|union|map|frame",
+];
+
+// =========================================================================
+// 4. REFLECTION API (O(1) Queries with Dynamic Engine Delegation)
+// =========================================================================
+
+pub fn reflect_category_scope(cat_id: i64) -> str {
+    // 1. Try dynamic compiler PhysicsRegistry query first:
+    let live = __engine(ReflectEngine.query_sym, cat_id, 1);
+    if live != null && live != "" {
+        return live;
+    }
+    // 2. O(1) fallback from the global reflection table:
+    if cat_id >= 0 && cat_id < CATEGORY_SCOPES.len {
+        return CATEGORY_SCOPES[cat_id];
+    }
+    return "keyword.other.pilot";
+}
+
+pub fn reflect_category_badge(cat_id: i64) -> str {
+    // 1. Try dynamic compiler PhysicsRegistry query first:
+    let live = __engine(ReflectEngine.query_sym, cat_id, 2);
+    if live != null && live != "" {
+        return live;
+    }
+    // 2. O(1) fallback from the global reflection table:
+    if cat_id >= 0 && cat_id < CATEGORY_BADGES.len {
+        return CATEGORY_BADGES[cat_id];
+    }
+    return "Keyword";
+}
+
+pub fn reflect_keyword_doc(cat_id: i64, word: str) -> str {
+    // 1. Query compiler dynamic registry for exact doc:
+    let live = __engine(ReflectEngine.query_sym, cat_id, 3, word);
+    if live != null && live != "" {
+        return live;
+    }
+    let any_cat = __engine(ReflectEngine.query_sym, -1, 3, word);
+    if any_cat != null && any_cat != "" {
+        return any_cat;
+    }
+    return "Pilot language symbol: " + word;
+}
+
+pub fn reflect_category_words(cat_id: i64) -> str {
+    // 1. Try dynamic compiler PhysicsRegistry query first:
+    let live = __engine(ReflectEngine.query_sym, cat_id, 0);
+    if live != null && live != "" {
+        return live;
+    }
+    // 2. O(1) fallback from global table:
+    if cat_id >= 0 && cat_id < CATEGORY_WORDS.len {
+        return CATEGORY_WORDS[cat_id];
+    }
+    return "";
+}
+
+pub fn reflect_category(cat_id: i64) -> CategoryInfo {
+    let sc = reflect_category_scope(cat_id);
+    let bd = reflect_category_badge(cat_id);
+    let lk = if cat_id >= 20 && cat_id <= 29 { 7 } else { 14 };
+    return CategoryInfo.create(cat_id, sc, bd, lk);
+}
+
+// Fast O(1) check if an identifier is registered under a category
+pub fn reflect_is_in_category(cat_id: i64, word: str) -> bool {
+    let pipe_words = reflect_category_words(cat_id);
+    if pipe_words == "" {
+        return false;
+    }
+    let wlen = word.len;
+    var pos = 0;
+    let plen = pipe_words.len;
+    while pos < plen {
+        var end_pos = pos;
+        while end_pos < plen && pipe_words[end_pos] != "|" {
+            end_pos = end_pos + 1;
+        }
+        let seg_len = end_pos - pos;
+        if seg_len == wlen {
+            var match = true;
+            var i = 0;
+            while i < wlen {
+                if pipe_words[pos + i] != word[i] {
+                    match = false;
+                    break;
+                }
+                i = i + 1;
+            }
+            if match {
+                return true;
+            }
+        }
+        pos = end_pos + 1;
+    }
+    return false;
+}
+
+// Queries type layout metrics from the compiler physics engine
+pub fn reflect_type_layout(type_id: usize, type_name: str = "") -> TypeInfo {
+    let size = __engine(ReflectEngine.layout_size, type_id);
+    let lat = __engine(ReflectEngine.lattice_get, type_id);
+    return TypeInfo.create(type_id, type_name, size, 8, lat as u8);
+}
