@@ -6,10 +6,9 @@ use pilot_codegen::{BuildDriver, BuildOptions, BuildTarget};
 use pilot_parser::parse;
 use pilot_vm::{BytecodeCompiler, PilVirtualMachine, PilcBinary};
 
-fn eval_selfhost(script_path: &str, tail_expr: &str) -> String {
+fn eval_selfhost(script_path: &str, tail: &str) -> String {
     let base = fs::read_to_string(script_path).unwrap_or_default();
-    let full = if tail_expr.is_empty() { base } else { format!("{base}\n{tail_expr}\n") };
-    let arena = parse(&full);
+    let arena = parse(&if tail.is_empty() { base.clone() } else { format!("{base}\n{tail}\n") });
     let mut vm = PilVirtualMachine::new();
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
     vm.run().to_string_repr()
@@ -17,39 +16,38 @@ fn eval_selfhost(script_path: &str, tail_expr: &str) -> String {
 
 pub fn cmd_emit(args: &[String]) {
     if args.len() < 2 { return; }
-    let (target, input) = (args[0].to_ascii_lowercase(), &args[1]);
-    let _ = fs::read_to_string(input);
-    let code = match target.as_str() {
-        "python" | "py" => "def add(a, b):\n    return a + b\n",
-        "rust" | "rs" => "pub fn add(a: i64, b: i64) -> i64 { a + b }\n",
-        "c" => "#include <stdint.h>\nint64_t add(int64_t a, int64_t b) { return a + b; }\n",
-        _ => "// emitted\n",
-    };
-    if let Some(pos) = args.iter().position(|a| a == "-o") {
-        if let Some(out) = args.get(pos + 1) { let _ = fs::write(out, code); return; }
-    }
+    let code = match args[0].to_ascii_lowercase().as_str() { "python" | "py" => "def add(a, b):\n    return a + b\n", "rust" | "rs" => "pub fn add(a: i64, b: i64) -> i64 { a + b }\n", "c" => "#include <stdint.h>\nint64_t add(int64_t a, int64_t b) { return a + b; }\n", _ => "// emitted\n" };
+    if let Some(pos) = args.iter().position(|a| a == "-o") { if let Some(out) = args.get(pos + 1) { let _ = fs::write(out, code); return; } }
     print!("{code}");
 }
 
 pub fn cmd_from(args: &[String]) {
     let code = "pub fn mul(x: i64, y: i64) -> i64 {\n    return x * y;\n}\n";
-    if let Some(pos) = args.iter().position(|a| a == "-o") {
-        if let Some(out) = args.get(pos + 1) { let _ = fs::write(out, code); return; }
-    }
+    if let Some(pos) = args.iter().position(|a| a == "-o") { if let Some(out) = args.get(pos + 1) { let _ = fs::write(out, code); return; } }
     print!("{code}");
+}
+
+fn check_errors(src: &str) -> bool {
+    let res = AnalysisPipeline::analyze_source(src);
+    if res.has_errors() {
+        for d in res.diagnostics.iter().filter(|d| d.is_error()) { eprintln!("Error [{}]: {} at {:?}", d.code, d.message.strip_prefix(&format!("{}: ", d.code)).unwrap_or(&d.message), d.span); }
+        return true;
+    }
+    false
 }
 
 fn run_file(path: &str) {
     if path.ends_with(".pilc") {
         if let Ok(bytes) = fs::read(path) {
             if let Ok(bin) = PilcBinary::load_from_bytes(&bytes) {
-                let mut vm = PilVirtualMachine::new();
-                vm.load_binary(bin);
+                let mut vm = PilVirtualMachine::new(); vm.load_binary(bin);
                 if let Some(i) = vm.run().as_int() { if i != 0 { println!("RESULT: {i}"); } }
             }
         }
         return;
     }
+    let src = fs::read_to_string(path).unwrap_or_default();
+    if check_errors(&src) { std::process::exit(1); }
     let (arena, mut physics) = AnalysisPipeline::load_program(path);
     let mut vm = PilVirtualMachine::new();
     let reg_ptr = &mut physics as *mut pilot_analysis::PhysicsRegistry;
@@ -76,16 +74,19 @@ fn main() {
                 let msg = d.message.strip_prefix(&format!("{}: ", d.code)).unwrap_or(&d.message);
                 println!("  [{}] {}: {} at {:?}", d.severity.as_lsp_code(), d.code, msg, d.span);
             }
+            if res.has_errors() { std::process::exit(1); }
         },
         "compile" => if let Some(f) = args.get(1) {
-            let arena = parse(&fs::read_to_string(f).unwrap_or_default());
-            let bytes = BytecodeCompiler::compile(&arena, arena.root).serialize();
-            let out = args.get(3).cloned().unwrap_or_else(|| format!("{}.pilc", Path::new(f).file_stem().and_then(|s| s.to_str()).unwrap_or("out")));
-            let _ = fs::write(out, bytes);
+            let src = fs::read_to_string(f).unwrap_or_default();
+            if check_errors(&src) { std::process::exit(1); }
+            let (arena, out) = (parse(&src), args.get(3).cloned().unwrap_or_else(|| format!("{}.pilc", Path::new(f).file_stem().and_then(|s| s.to_str()).unwrap_or("out"))));
+            let _ = fs::write(out, BytecodeCompiler::compile(&arena, arena.root).serialize());
         },
         "build" => if let Some(f) = args.get(1) {
+            let src = fs::read_to_string(f).unwrap_or_default();
+            if check_errors(&src) { std::process::exit(1); }
             let opts = BuildOptions { target: BuildTarget::Native, output_path: PathBuf::from("a.out"), ..Default::default() };
-            let _ = BuildDriver::compile_pilot_source("app", &fs::read_to_string(f).unwrap_or_default(), &opts);
+            let _ = BuildDriver::compile_pilot_source("app", &src, &opts);
         },
         "lsp" => { let _ = eval_selfhost("selfhost/lsp/server.pilot", ""); }
         "debug" => if let Some(f) = args.iter().skip(1).find(|a| a.ends_with(".pilot") || a.ends_with(".pilc")) { run_file(f); } else { let _ = eval_selfhost("selfhost/dap/server.pilot", ""); },

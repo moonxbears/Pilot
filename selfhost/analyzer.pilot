@@ -10,48 +10,20 @@ extern fn __engine(operation: string, ...args: i64) -> i64;
 
 let Cfg = {
     ast = {
-        ast_attr_arg: "ast_attr_arg",
-        ast_attr_count: "ast_attr_count",
-        ast_attr_decl_arg: "ast_attr_decl_arg",
-        ast_attr_decl_arg_count: "ast_attr_decl_arg_count",
-        ast_attr_decl_count: "ast_attr_decl_count",
-        ast_attr_name: "ast_attr_name",
-        ast_base_at: "ast_base_at",
-        ast_base_count: "ast_base_count",
-        ast_bind_layout: "ast_bind_layout",
-        ast_bind_target: "ast_bind_target",
-        ast_child_at: "ast_child_at",
-        ast_child_count: "ast_child_count",
-        ast_decl_flags: "ast_decl_flags",
-        ast_emit_diag: "ast_emit_diag",
-        ast_get_bound_layout: "ast_get_bound_layout",
-        ast_get_bound_target: "ast_get_bound_target",
-        ast_node_count: "ast_node_count",
-        ast_node_flags: "ast_node_flags",
-        ast_node_kind: "ast_node_kind",
-        ast_node_lit_kind: "ast_node_lit_kind",
-        ast_node_raw_bits: "ast_node_raw_bits",
-        ast_node_sym: "ast_node_sym",
-        ast_orig_kind: "ast_orig_kind",
-        ast_parent: "ast_parent",
-        ast_span_end: "ast_span_end",
-        ast_span_start: "ast_span_start",
-        layout_aggregate: "layout_aggregate",
-        layout_field_offset: "layout_field_offset",
-        layout_hw_header: "layout_hw_header",
-        layout_metrics: "layout_metrics",
-        layout_ptr: "layout_ptr",
-        layout_scalar: "layout_scalar",
-        layout_union: "layout_union",
-        lsp_query_method: "lsp_query_method",
-        lsp_query_offset: "lsp_query_offset",
-        lsp_set_result: "lsp_set_result",
-        mount_unit: "mount_unit",
-        query_registered_symbols: "query_registered_symbols",
-        source_slice: "source_slice",
-        str_byte_at: "str_byte_at",
-        str_len: "str_len",
-        sym_str: "sym_str",
+        ast_attr_arg: "ast_attr_arg", ast_attr_count: "ast_attr_count", ast_attr_decl_arg: "ast_attr_decl_arg",
+        ast_attr_decl_arg_count: "ast_attr_decl_arg_count", ast_attr_decl_count: "ast_attr_decl_count", ast_attr_name: "ast_attr_name",
+        ast_base_at: "ast_base_at", ast_base_count: "ast_base_count", ast_bind_layout: "ast_bind_layout",
+        ast_bind_target: "ast_bind_target", ast_child_at: "ast_child_at", ast_child_count: "ast_child_count",
+        ast_decl_flags: "ast_decl_flags", ast_emit_diag: "ast_emit_diag", ast_get_bound_layout: "ast_get_bound_layout",
+        ast_get_bound_target: "ast_get_bound_target", ast_node_count: "ast_node_count", ast_node_flags: "ast_node_flags",
+        ast_node_kind: "ast_node_kind", ast_node_lit_kind: "ast_node_lit_kind", ast_node_raw_bits: "ast_node_raw_bits",
+        ast_node_sym: "ast_node_sym", ast_orig_kind: "ast_orig_kind", ast_parent: "ast_parent",
+        ast_span_end: "ast_span_end", ast_span_start: "ast_span_start", layout_aggregate: "layout_aggregate",
+        layout_field_offset: "layout_field_offset", layout_hw_header: "layout_hw_header", layout_metrics: "layout_metrics",
+        layout_ptr: "layout_ptr", layout_scalar: "layout_scalar", layout_union: "layout_union",
+        lsp_query_method: "lsp_query_method", lsp_query_offset: "lsp_query_offset", lsp_set_result: "lsp_set_result",
+        mount_unit: "mount_unit", query_registered_symbols: "query_registered_symbols", source_slice: "source_slice",
+        str_byte_at: "str_byte_at", str_len: "str_len", sym_str: "sym_str",
     }
 };
 
@@ -92,9 +64,35 @@ pub fn is_suppressed(nid: i64, code: str, msg: str) -> bool {
             idx = idx + 1;
         }
         let p = __engine(Cfg.ast.ast_parent, cur);
-        if p < 0 || p >= 100000 || p == cur { return false; }
+        if p < 0 || p >= 100000 || p == cur { break; }
         cur = p;
         depth = depth + 1;
+    }
+    var k = 0;
+    while k < 10 {
+        let df = __engine(Cfg.ast.ast_decl_flags, k);
+        if (df & 512) != 0 || (df & 128) != 0 {
+            let ac = __engine(Cfg.ast.ast_attr_decl_count, k);
+            var idx = 0;
+            while idx < ac {
+                let asym = __engine(Cfg.ast.ast_attr_name, k, idx);
+                let anm = __engine(Cfg.ast.sym_str, asym);
+                if anm == "Suppress" || anm == "Allow" || anm == "SuppressWarning" || anm == "SuppressMessage" {
+                    let argc = __engine(Cfg.ast.ast_attr_decl_arg_count, k, idx);
+                    if argc == 0 { return true; }
+                    var ai = 0;
+                    while ai < argc {
+                        let arg_sym = __engine(Cfg.ast.ast_attr_decl_arg, k, idx, ai);
+                        let arg_str = __engine(Cfg.ast.sym_str, arg_sym);
+                        if arg_str == code || arg_str == "all" || arg_str == "*" { return true; }
+                        if arg_str.len() > 0 && str_contains(msg, arg_str) { return true; }
+                        ai = ai + 1;
+                    }
+                }
+                idx = idx + 1;
+            }
+        }
+        k = k + 1;
     }
     return false;
 }
@@ -152,27 +150,16 @@ pub fn infer_struct(s_id: i64, node_count: i64) -> i64 {
         var matched_decl = -1;
         while di < decl_cnt {
             let dargc = __engine(Cfg.ast.ast_attr_decl_arg_count, s_id, di);
-            if dargc == 2 || dargc == 3 {
-                matched_decl = di;
-            }
+            if dargc == 2 || dargc == 3 { matched_decl = di; }
             di = di + 1;
         }
         if matched_decl >= 0 {
             let dargc = __engine(Cfg.ast.ast_attr_decl_arg_count, s_id, matched_decl);
             let d0 = __engine(Cfg.ast.ast_attr_decl_arg, s_id, matched_decl, 0);
             let d1 = __engine(Cfg.ast.ast_attr_decl_arg, s_id, matched_decl, 1);
-            var dbank = d1;
-            var dlanes = 1;
-            if dargc == 3 {
-                dlanes = d1;
-                dbank = __engine(Cfg.ast.ast_attr_decl_arg, s_id, matched_decl, 2);
-            }
-            var ds_lid = 0;
-            if dbank == 6 {
-                ds_lid = __engine(Cfg.ast.layout_ptr, 0, 1, 0);
-            } else {
-                ds_lid = __engine(Cfg.ast.layout_scalar, d0, dlanes, dbank);
-            }
+            let dlanes = if dargc == 3 { d1 } else { 1 };
+            let dbank = if dargc == 3 { __engine(Cfg.ast.ast_attr_decl_arg, s_id, matched_decl, 2) } else { d1 };
+            let ds_lid = if dbank == 6 { __engine(Cfg.ast.layout_ptr, 0, 1, 0) } else { __engine(Cfg.ast.layout_scalar, d0, dlanes, dbank) };
             __engine(Cfg.ast.ast_bind_layout, s_id, ds_lid);
             return ds_lid;
         }
@@ -181,18 +168,9 @@ pub fn infer_struct(s_id: i64, node_count: i64) -> i64 {
         if attr_cnt >= 2 {
             let arg0 = __engine(Cfg.ast.ast_attr_arg, s_id, 0);
             let arg1 = __engine(Cfg.ast.ast_attr_arg, s_id, 1);
-            var bank = arg1;
-            var lanes = 1;
-            if attr_cnt >= 3 {
-                lanes = arg1;
-                bank = __engine(Cfg.ast.ast_attr_arg, s_id, 2);
-            }
-            var s_lid = 0;
-            if bank == 6 {
-                s_lid = __engine(Cfg.ast.layout_ptr, 0, 1, 0);
-            } else {
-                s_lid = __engine(Cfg.ast.layout_scalar, arg0, lanes, bank);
-            }
+            let lanes = if attr_cnt >= 3 { arg1 } else { 1 };
+            let bank = if attr_cnt >= 3 { __engine(Cfg.ast.ast_attr_arg, s_id, 2) } else { arg1 };
+            let s_lid = if bank == 6 { __engine(Cfg.ast.layout_ptr, 0, 1, 0) } else { __engine(Cfg.ast.layout_scalar, arg0, lanes, bank) };
             __engine(Cfg.ast.ast_bind_layout, s_id, s_lid);
             return s_lid;
         }
@@ -233,12 +211,8 @@ pub fn infer_struct(s_id: i64, node_count: i64) -> i64 {
             let f_ty_sym = __engine(Cfg.ast.ast_node_raw_bits, f_node);
             let f_lid = resolve_type_sym(f_ty_sym, node_count);
             __engine(Cfg.ast.ast_bind_layout, f_node, f_lid);
-            if num_fields == 0 { f0 = f_lid; }
-            if num_fields == 1 { f1 = f_lid; }
-            if num_fields == 2 { f2 = f_lid; }
-            if num_fields == 3 { f3 = f_lid; }
-            if num_fields == 4 { f4 = f_lid; }
-            if num_fields == 5 { f5 = f_lid; }
+            if num_fields == 0 { f0 = f_lid; } else if num_fields == 1 { f1 = f_lid; } else if num_fields == 2 { f2 = f_lid; }
+            else if num_fields == 3 { f3 = f_lid; } else if num_fields == 4 { f4 = f_lid; } else if num_fields == 5 { f5 = f_lid; }
             num_fields = num_fields + 1;
         }
         fi = fi + 1;
@@ -260,18 +234,9 @@ pub fn resolve_lit_layout(lit_kind: i64, node_count: i64) -> i64 {
     // 1. Check for StructDecl with matching 1-arg attribute (e.g. [DefaultLit(1)])
     var j = 0;
     while j < node_count {
-        let k = __engine(Cfg.ast.ast_node_kind, j);
-        if k == 1 {
-            let attr_cnt = __engine(Cfg.ast.ast_attr_count, j);
-            if attr_cnt == 1 {
-                let a0 = __engine(Cfg.ast.ast_attr_arg, j, 0);
-                if a0 == lit_kind {
-                    let s_lid = __engine(Cfg.ast.ast_get_bound_layout, j);
-                    if s_lid != 4294967295 {
-                        return s_lid;
-                    }
-                }
-            }
+        if __engine(Cfg.ast.ast_node_kind, j) == 1 && __engine(Cfg.ast.ast_attr_count, j) == 1 && __engine(Cfg.ast.ast_attr_arg, j, 0) == lit_kind {
+            let s_lid = __engine(Cfg.ast.ast_get_bound_layout, j);
+            if s_lid != 4294967295 { return s_lid; }
         }
         j = j + 1;
     }
@@ -299,30 +264,16 @@ pub fn resolve_lit_layout(lit_kind: i64, node_count: i64) -> i64 {
     // 3. Reuse previously bound literal of same lit_kind in this AST
     j = 0;
     while j < node_count {
-        let k = __engine(Cfg.ast.ast_node_kind, j);
-        if k == 15 {
-            let lk = __engine(Cfg.ast.ast_node_lit_kind, j);
-            if lk == lit_kind {
-                let ex = __engine(Cfg.ast.ast_get_bound_layout, j);
-                if ex != 4294967295 {
-                    return ex;
-                }
-            }
+        if __engine(Cfg.ast.ast_node_kind, j) == 15 && __engine(Cfg.ast.ast_node_lit_kind, j) == lit_kind {
+            let ex = __engine(Cfg.ast.ast_get_bound_layout, j);
+            if ex != 4294967295 { return ex; }
         }
         j = j + 1;
     }
 
-    // 4. Register on demand when a literal of this kind is actually encountered
-    if lit_kind == 4 {
-        let b_lid = __engine(Cfg.ast.layout_hw_header, 1);
-        return b_lid;
-    }
-    if lit_kind == 2 {
-        let f_lid = __engine(Cfg.ast.layout_hw_header, 13);
-        return f_lid;
-    }
-    let i_lid = __engine(Cfg.ast.layout_hw_header, 10);
-    return i_lid;
+    if lit_kind == 4 { return __engine(Cfg.ast.layout_hw_header, 1); }
+    if lit_kind == 2 { return __engine(Cfg.ast.layout_hw_header, 13); }
+    return __engine(Cfg.ast.layout_hw_header, 10);
 }
 
 pub fn infer_member_expr(i: i64, node_count: i64) -> i64 {
@@ -406,12 +357,10 @@ pub fn infer_binary_expr(i: i64, node_count: i64) -> i64 {
     if c_count > 0 {
         let op = __engine(Cfg.ast.ast_node_raw_bits, i);
         check_div_by_zero(i, op, c_count);
-        if op >= 8 {
-            if op <= 17 {
-                let b_lid = resolve_lit_layout(4, node_count);
-                __engine(Cfg.ast.ast_bind_layout, i, b_lid);
-                return b_lid;
-            }
+        if op >= 8 && op <= 17 {
+            let b_lid = resolve_lit_layout(4, node_count);
+            __engine(Cfg.ast.ast_bind_layout, i, b_lid);
+            return b_lid;
         }
         let lhs_id = __engine(Cfg.ast.ast_child_at, i, 0);
         let lhs_lid = __engine(Cfg.ast.ast_get_bound_layout, lhs_id);
@@ -425,10 +374,8 @@ pub fn infer_binary_expr(i: i64, node_count: i64) -> i64 {
 
 pub fn infer_node(i: i64, node_count: i64) -> i64 {
     let kind = __engine(Cfg.ast.ast_node_kind, i);
-
     if kind == 15 {
-        let lit_kind = __engine(Cfg.ast.ast_node_lit_kind, i);
-        let lit_lid = resolve_lit_layout(lit_kind, node_count);
+        let lit_lid = resolve_lit_layout(__engine(Cfg.ast.ast_node_lit_kind, i), node_count);
         __engine(Cfg.ast.ast_bind_layout, i, lit_lid);
         return lit_lid;
     }
@@ -439,14 +386,12 @@ pub fn infer_node(i: i64, node_count: i64) -> i64 {
         var found = 0;
         while j >= 0 && found == 0 {
             let jk = __engine(Cfg.ast.ast_node_kind, j);
-            if jk == 4 || jk == 21 {
+            if jk == 1 || jk == 2 || jk == 3 || jk == 4 || jk == 21 {
                 let js = __engine(Cfg.ast.ast_node_sym, j);
                 if js == sym {
                     __engine(Cfg.ast.ast_bind_target, i, j);
                     let target_lid = __engine(Cfg.ast.ast_get_bound_layout, j);
-                    if target_lid != 4294967295 {
-                        __engine(Cfg.ast.ast_bind_layout, i, target_lid);
-                    }
+                    if target_lid != 4294967295 { __engine(Cfg.ast.ast_bind_layout, i, target_lid); }
                     found = 1;
                 }
             }
@@ -704,14 +649,10 @@ pub fn verify_decl_contracts(nid: i64, enforce_naming: bool) -> i64 {
             if !prefix_violation {
                 if has_iattr {
                     if !str_ends_with_bytes(name, "Attr") { emit_diag(nid, 1, "EnforceCoreNaming: [AttributeSuffix] Attribute struct '" + name + "' must end with 'Attr'"); }
-                } else if has_iguard || (has_iref && has_iobj) {
-                    if !str_ends_with_bytes(name, "Guard") && !str_ends_with_bytes(name, "Scope") && !str_ends_with_bytes(name, "Lease") {
-                        emit_diag(nid, 1, "EnforceCoreNaming: [ScopedGuardSuffix] IGuard struct '" + name + "' must end with 'Guard', 'Scope', or 'Lease'");
-                    }
-                } else if has_iref {
-                    if !str_ends_with_bytes(name, "View") && !str_ends_with_bytes(name, "Lens") && !str_ends_with_bytes(name, "Cursor") && !str_ends_with_bytes(name, "Enumerator") {
-                        emit_diag(nid, 1, "EnforceCoreNaming: [ReferenceViewSuffix] IReference struct '" + name + "' must end with 'View', 'Lens', 'Cursor', or 'Enumerator'");
-                    }
+                } else if (has_iguard || (has_iref && has_iobj)) && !str_ends_with_bytes(name, "Guard") && !str_ends_with_bytes(name, "Scope") && !str_ends_with_bytes(name, "Lease") {
+                    emit_diag(nid, 1, "EnforceCoreNaming: [ScopedGuardSuffix] IGuard struct '" + name + "' must end with 'Guard', 'Scope', or 'Lease'");
+                } else if has_iref && !str_ends_with_bytes(name, "View") && !str_ends_with_bytes(name, "Lens") && !str_ends_with_bytes(name, "Cursor") && !str_ends_with_bytes(name, "Enumerator") {
+                    emit_diag(nid, 1, "EnforceCoreNaming: [ReferenceViewSuffix] IReference struct '" + name + "' must end with 'View', 'Lens', 'Cursor', or 'Enumerator'");
                 }
             }
         }
@@ -720,31 +661,22 @@ pub fn verify_decl_contracts(nid: i64, enforce_naming: bool) -> i64 {
 }
 
 pub fn is_kw_contextual_ident(name: str) -> bool {
-    if name == "self" || name == "field" || name == "value" || name == "type" || name == "unit" { return true; }
-    if name == "nameof" || name == "__engine" || name == "op" || name == "pkg" || name == "state" { return true; }
-    if name == "get" || name == "set" || name == "open" || name == "role" || name == "route" { return true; }
-    if name == "connect" || name == "exit" || name == "delete" || name == "values" || name == "update" { return true; }
-    if name == "from" || name == "where" || name == "select" || name == "insert" || name == "order" { return true; }
-    if name == "context" || name == "quote" || name == "partial" || name == "blueprint" || name == "cue" { return true; }
+    if name == "self" || name == "field" || name == "value" || name == "type" || name == "unit" || name == "nameof" || name == "__engine" || name == "op" || name == "pkg" || name == "state" { return true; }
+    if name == "get" || name == "set" || name == "open" || name == "role" || name == "route" || name == "connect" || name == "exit" || name == "delete" || name == "values" || name == "update" { return true; }
+    if name == "from" || name == "where" || name == "select" || name == "insert" || name == "order" || name == "context" || name == "quote" || name == "partial" || name == "blueprint" || name == "cue" { return true; }
     return false;
 }
 
 pub fn is_in_pipe_delimited(kw_buf: str, target: str) -> bool {
     let tlen = target.len();
-    if tlen == 0 {
-        return false;
-    }
+    if tlen == 0 { return false; }
     let blen = kw_buf.len();
     var start = 0;
     var i = 0;
     while i <= blen {
         if i == blen || kw_buf.byte_at(i) == 124 || kw_buf.byte_at(i) == 44 {
             let seg_len = i - start;
-            if seg_len == tlen {
-                if kw_buf.slice(start, i) == target {
-                    return true;
-                }
-            }
+            if seg_len == tlen && kw_buf.slice(start, i) == target { return true; }
             start = i + 1;
         }
         i = i + 1;
@@ -756,36 +688,22 @@ pub fn build_dynamic_keyword_set(node_count: i64) -> str {
     var kw_buf = "|__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm|";
     kw_buf = kw_buf + "else|while|until|for|in|then|break|continue|guard|switch|case|default|try|catch|var|const|enum|actor|state|type|pub|priv|prot|pkg|int|file|open|export|lvl|pure|static|iso|partial|ext|scope|enter|exit|requires|ensures|old|context|adapter|each|coalesce|with|without|as|async|await|spawn|atomic|sync|isolate|select|timeout|bounded|noalloc|region|deadline|within|periodic|priority|jitter|database|transaction|commit|rollback|savepoint|connect|from|where|order|ascending|descending|insert|into|values|update|delete|extern|assembly|module|lib|sizeof|alignof|offsetof|fields_of|nameof|assert|blueprint|cue|role|route|unit|syntax|use|op|";
 
-    // 1. Dynamic registry queries across standard keyword categories (0..=16)
     var cat = 0;
-    while cat <= 16 {
-        let live = __engine(Cfg.ast.query_registered_symbols, cat);
-        if live.len() > 0 {
-            kw_buf = kw_buf + live + "|";
-        }
-        cat = cat + 1;
-    }
-
-    // 2. Dynamic registry queries across user/DSL categories (100..=255)
-    cat = 100;
     while cat <= 255 {
-        let live = __engine(Cfg.ast.query_registered_symbols, cat);
-        if live.len() > 0 {
-            kw_buf = kw_buf + live + "|";
+        if cat <= 16 || cat >= 100 {
+            let live = __engine(Cfg.ast.query_registered_symbols, cat);
+            if live.len() > 0 { kw_buf = kw_buf + live + "|"; }
         }
         cat = cat + 1;
     }
 
-    // 3. Scan AST nodes for any in-unit KeywordDef / KeywordDefAttr declarations
     var i = 0;
     while i < node_count {
         if has_attr_named(i, "KeywordDef") || has_attr_named(i, "KeywordDefAttr") {
             let sym = __engine(Cfg.ast.ast_node_sym, i);
             if sym != 0 {
                 let w = __engine(Cfg.ast.sym_str, sym);
-                if w.len() > 0 {
-                    kw_buf = kw_buf + w + "|";
-                }
+                if w.len() > 0 { kw_buf = kw_buf + w + "|"; }
             }
         }
         i = i + 1;
@@ -797,58 +715,33 @@ pub fn build_dynamic_keyword_set(node_count: i64) -> str {
 pub fn verify_ident_not_keyword(nid: i64, kw_set: str) -> i64 {
     let kind = __engine(Cfg.ast.ast_node_kind, nid);
     let okind = __engine(Cfg.ast.ast_orig_kind, nid);
-
-    // Only inspect identifier declarations:
-    // kind 1 (StructDecl), kind 2 (InterfaceDecl), kind 3 (FnDecl),
-    // kind 4 (LetStmt, VarStmt, ConstDecl), kind 21 (ParamDecl, struct field),
-    // kind 255 (TypeAdtDecl okind=5, AdtVariant okind=6, PatBind okind=501)
-    var is_decl = false;
-    if kind == 1 || kind == 2 || kind == 3 || kind == 4 || kind == 21 {
-        is_decl = true;
-    } else if kind == 255 {
-        if okind == 5 || okind == 6 || okind == 501 {
-            is_decl = true;
-        }
-    }
-    if !is_decl {
-        return 0;
-    }
-
-    // Skip definitions of keywords or language primitives themselves
-    if has_attr_named(nid, "KeywordDef") || has_attr_named(nid, "KeywordDefAttr")
-        || has_attr_named(nid, "KeywordCategoryDef") || has_attr_named(nid, "KeywordCategoryDefAttr")
-        || has_attr_named(nid, "Lang") || has_attr_named(nid, "LangPrimitive") {
-        return 0;
-    }
-
+    var is_decl = (kind == 1 || kind == 2 || kind == 3 || kind == 4 || kind == 21);
+    if !is_decl && kind == 255 { is_decl = (okind == 5 || okind == 6 || okind == 501); }
+    if !is_decl { return 0; }
+    if has_attr_named(nid, "KeywordDef") || has_attr_named(nid, "KeywordDefAttr") || has_attr_named(nid, "KeywordCategoryDef") || has_attr_named(nid, "KeywordCategoryDefAttr") || has_attr_named(nid, "Lang") || has_attr_named(nid, "LangPrimitive") { return 0; }
     let sym = __engine(Cfg.ast.ast_node_sym, nid);
-    if sym == 0 {
-        return 0;
-    }
+    if sym == 0 { return 0; }
     let name = __engine(Cfg.ast.sym_str, sym);
-    let nlen = name.len();
-    if nlen == 0 {
-        return 0;
-    }
-
-    // Skip syntax quote placeholders ($ident)
-    let c0 = name.byte_at(0);
-    if c0 == 36 {
-        return 0;
-    }
-
-    // Skip contextual identifiers and built-in hooks
-    if is_kw_contextual_ident(name) {
-        return 0;
-    }
-
-    // Check if name is in the dynamic keyword set
+    if name.len() == 0 || name.byte_at(0) == 36 || is_kw_contextual_ident(name) { return 0; }
     if is_in_pipe_delimited(kw_set, name) {
         emit_diag(nid, 1, "KW001: Identifier '" + name + "' is a keyword and cannot be used as an identifier name");
         return 1;
     }
-
     return 0;
+}
+
+pub fn get_decl_error(target: i64, node_count: i64) -> str {
+    let tk = __engine(Cfg.ast.ast_node_kind, target);
+    if tk == 4 {
+        let init = __engine(Cfg.ast.ast_child_at, target, 0);
+        let ty = __engine(Cfg.ast.ast_child_at, target, 1);
+        if init == 4294967295 && ty == 4294967295 {
+            let s = __engine(Cfg.ast.ast_node_sym, target);
+            let nm = __engine(Cfg.ast.sym_str, s);
+            return "VAR001: Variable '" + nm + "' requires an explicit type annotation or initial value";
+        }
+    }
+    return "";
 }
 
 pub fn is_type_name_or_sym_optional(sym: i64, name: str, node_count: i64) -> bool {
@@ -1404,21 +1297,112 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
             emit_diag(i, 2, "MUT001: Variable '" + name + "' is declared as 'var' but never mutated; prefer immutable 'let'");
         }
     }
-
     return 0;
+}
+
+pub fn is_inside_const_decl(nid: i64) -> bool {
+    var cur = nid; var depth = 0;
+    while cur >= 0 && cur < 100000 && depth < 20 {
+        if __engine(Cfg.ast.ast_orig_kind, cur) == 12 { return true; }
+        let p = __engine(Cfg.ast.ast_parent, cur);
+        if p < 0 || p >= 100000 || p == cur { break; }
+        cur = p; depth = depth + 1;
+    }
+    return false;
+}
+
+pub fn is_inside_executable_scope(nid: i64) -> bool {
+    var cur = nid; var depth = 0;
+    while cur >= 0 && cur < 100000 && depth < 20 {
+        let ok = __engine(Cfg.ast.ast_orig_kind, cur);
+        if ok == 3 || ok == 13 || ok == 14 || ok == 18 || ok == 216 || (ok >= 100 && ok <= 112) { return true; }
+        let p = __engine(Cfg.ast.ast_parent, cur);
+        if p < 0 || p >= 100000 || p == cur { break; }
+        cur = p; depth = depth + 1;
+    }
+    return false;
+}
+
+pub fn verify_hardcoding_contracts(i: i64, has_pkg_no_hardcode: bool, unit_pkg_name: str, targeted_ns: str) -> void {
+    if __engine(Cfg.ast.ast_node_kind, i) != 15 || is_inside_const_decl(i) || !is_inside_executable_scope(i) { return; }
+    var in_scope = has_pkg_no_hardcode;
+    if !in_scope && unit_pkg_name.len() > 0 && targeted_ns.len() > 1 && is_in_pipe_delimited(targeted_ns, unit_pkg_name) { in_scope = true; }
+    if !in_scope {
+        var cur = i; var depth = 0;
+        while cur >= 0 && cur < 100000 && depth < 20 {
+            if has_attr_named(cur, "NoHardcoding") || has_attr_named(cur, "NoHardcodingAttr") || has_attr_named(cur, "NoHardcode") || has_attr_named(cur, "NoHardcodeAttr") { in_scope = true; depth = 20; }
+            let p = __engine(Cfg.ast.ast_parent, cur);
+            if p < 0 || p >= 100000 || p == cur { break; }
+            cur = p; depth = depth + 1;
+        }
+    }
+    if !in_scope { return; }
+    let lk = __engine(Cfg.ast.ast_node_lit_kind, i);
+    if lk == 3 {
+        let sym = __engine(Cfg.ast.ast_node_sym, i);
+        if sym != 0 {
+            let sval = __engine(Cfg.ast.sym_str, sym);
+            if sval.len() > 0 { emit_diag(i, 1, "HARD001: Hardcoded string literal '\"" + sval + "\"' is prohibited in '[NoHardcoding]' scope; extract to a 'const' declaration or configuration"); }
+        }
+    }
+    if lk == 1 || lk == 2 {
+        let raw = __engine(Cfg.ast.ast_node_raw_bits, i);
+        if raw > 1 { emit_diag(i, 1, "HARD001: Hardcoded numeric literal '" + raw + "' is prohibited in '[NoHardcoding]' scope; extract to a 'const' declaration or configuration"); }
+    }
 }
 
 pub fn analyze_unit(unit_id: i64) -> i64 {
     let node_count = __engine(Cfg.ast.ast_node_count);
-    if node_count == 0 {
-        return 0;
-    }
+    if node_count == 0 { return 0; }
 
     var enforce_naming = false;
+    var has_pkg_no_hardcode = false;
+    var has_any_no_hardcode = false;
+    var unit_pkg_name = "";
+    var targeted_no_hardcode_ns = "|";
+
     var ni = 0;
     while ni < node_count {
-        if has_attr_named(ni, "EnforceCoreNaming") || has_attr_named(ni, "EnforceCoreNamingAttr") {
-            enforce_naming = true;
+        if has_attr_named(ni, "EnforceCoreNaming") || has_attr_named(ni, "EnforceCoreNamingAttr") { enforce_naming = true; }
+        let df = __engine(Cfg.ast.ast_decl_flags, ni);
+        let f = __engine(Cfg.ast.ast_node_flags, ni);
+        if (df & 512) != 0 || (f & 512) != 0 || (df & 128) != 0 {
+            let psym = __engine(Cfg.ast.ast_node_sym, ni);
+            if psym != 0 { unit_pkg_name = __engine(Cfg.ast.sym_str, psym); }
+        }
+        let ac = __engine(Cfg.ast.ast_attr_decl_count, ni);
+        var ai = 0;
+        while ai < ac {
+            let asym = __engine(Cfg.ast.ast_attr_name, ni, ai);
+            let aname = __engine(Cfg.ast.sym_str, asym);
+            if aname == "NoHardcoding" || aname == "NoHardcodingAttr" || aname == "NoHardcode" || aname == "NoHardcodeAttr" {
+                has_any_no_hardcode = true;
+                let argc = __engine(Cfg.ast.ast_attr_decl_arg_count, ni, ai);
+                if argc == 0 {
+                    if (df & 512) != 0 || (f & 512) != 0 || (df & 128) != 0 { has_pkg_no_hardcode = true; }
+                }
+                var argi = 0;
+                while argi < argc {
+                    let arg_sym = __engine(Cfg.ast.ast_attr_decl_arg, ni, ai, argi);
+                    let arg_val = __engine(Cfg.ast.sym_str, arg_sym);
+                    if arg_val.len() > 0 { targeted_no_hardcode_ns = targeted_no_hardcode_ns + arg_val + "|"; }
+                    argi = argi + 1;
+                }
+            }
+            if aname == "ApplyToNamespace" || aname == "NamespaceAttr" {
+                let argc = __engine(Cfg.ast.ast_attr_decl_arg_count, ni, ai);
+                if argc >= 2 {
+                    let ns_sym = __engine(Cfg.ast.ast_attr_decl_arg, ni, ai, 0);
+                    let at_sym = __engine(Cfg.ast.ast_attr_decl_arg, ni, ai, 1);
+                    let ns_str = __engine(Cfg.ast.sym_str, ns_sym);
+                    let at_str = __engine(Cfg.ast.sym_str, at_sym);
+                    if at_str == "NoHardcoding" || at_str == "NoHardcode" {
+                        targeted_no_hardcode_ns = targeted_no_hardcode_ns + ns_str + "|";
+                        has_any_no_hardcode = true;
+                    }
+                }
+            }
+            ai = ai + 1;
         }
         ni = ni + 1;
     }
@@ -1432,7 +1416,6 @@ pub fn analyze_unit(unit_id: i64) -> i64 {
         }
         i = i + 1;
     }
-
     // Pass 2: Resolve all function parameter layouts (kind == 21 not already bound as struct fields)
     i = 0;
     while i < node_count {
@@ -1481,6 +1464,28 @@ pub fn analyze_unit(unit_id: i64) -> i64 {
         verify_pattern_matching(i, node_count);
         verify_warnings_and_unimplemented(i, node_count);
         i = i + 1;
+    }
+
+    // Pass 7: Propagate declaration errors to corresponding uses later
+    i = 0;
+    while i < node_count {
+        if __engine(Cfg.ast.ast_node_kind, i) == 14 {
+            let target = __engine(Cfg.ast.ast_get_bound_target, i);
+            if target != 4294967295 && target >= 0 && target != i {
+                let err = get_decl_error(target, node_count);
+                if err.len() > 0 { emit_diag(i, 1, err); }
+            }
+        }
+        i = i + 1;
+    }
+
+    // Pass 8: Anti-hardcoding contract verification ([NoHardcoding])
+    if has_any_no_hardcode {
+        i = 0;
+        while i < node_count {
+            verify_hardcoding_contracts(i, has_pkg_no_hardcode, unit_pkg_name, targeted_no_hardcode_ns);
+            i = i + 1;
+        }
     }
 
     return 1;

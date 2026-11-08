@@ -454,4 +454,18 @@ pub let ERRORS = [
         category: "Preprocessor",
         reference: "C# CS1039",
     },
+    ErrorDef {
+        code: "HARD001",
+        title: "Hardcoded Literal Prohibited",
+        description: "Hardcoded literal value detected in '[NoHardcoding]' scope; extract to a 'const' declaration or configuration",
+        category: "ArchitecturalIntegrity",
+        reference: "Pilot AGENTS.md §1 Anti-Hardcoding Contract / SonarQube S1192 / Roslyn CA1303",
+    },
+    ErrorDef {
+        code: "HARD002",
+        title: "Hardcoded Type or Symbol Name",
+        description: "Hardcoded Pilot type or symbol name string in violation of Universal Name-Blind Contract",
+        category: "ArchitecturalIntegrity",
+        reference: "Pilot AGENTS.md §1 Universal Name-Blind Contract",
+    },
 ];

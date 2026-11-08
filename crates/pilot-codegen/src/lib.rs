@@ -41,12 +41,7 @@ pub struct BuildOptions {
 }
 
 impl Default for BuildOptions {
-    fn default() -> Self {
-        Self {
-            target: BuildTarget::Native, opt_level: OptLevel::O2, output_path: PathBuf::from("a.out"),
-            pgo_trace: None, burst: false, gpu: false, gpu_backend: None, gpu_arch: None,
-        }
-    }
+    fn default() -> Self { Self { target: BuildTarget::Native, opt_level: OptLevel::O2, output_path: PathBuf::from("a.out"), pgo_trace: None, burst: false, gpu: false, gpu_backend: None, gpu_arch: None } }
 }
 
 pub struct GpuEmitter;
@@ -77,11 +72,8 @@ impl GpuEmitter {
     }
 }
 
-pub struct BuildDriver;
-impl BuildDriver {
-    pub fn compile_source_to_artifact(m: &str, opts: &BuildOptions) -> Result<String, String> {
-        Self::compile_pilot_source(m, "", opts)
-    }
+pub struct BuildDriver; impl BuildDriver {
+    pub fn compile_source_to_artifact(m: &str, opts: &BuildOptions) -> Result<String, String> { Self::compile_pilot_source(m, "", opts) }
 
     pub fn exec_host_compiler(c_source: &str, out_bin: &Path, opt_flag: &str) -> Result<String, String> {
         let tmp_dir = std::env::temp_dir().join(format!("pilot_build_{}", std::process::id()));
@@ -101,6 +93,13 @@ impl BuildDriver {
     }
 
     pub fn compile_pilot_source(m: &str, src: &str, opts: &BuildOptions) -> Result<String, String> {
+        if !src.is_empty() {
+            let res = pilot_analysis::AnalysisPipeline::analyze_source(src);
+            if res.has_errors() {
+                let errs: Vec<String> = res.diagnostics.iter().filter(|d| d.is_error()).map(|d| format!("{}: {}", d.code, d.message)).collect();
+                return Err(format!("Compilation failed with {} error(s):\n{}", errs.len(), errs.join("\n")));
+            }
+        }
         let arena = pilot_parser::parse(src);
         match opts.target {
             BuildTarget::C => Ok("#include \"pilot_runtime.h\"\nint main(void) {\n  return 0;\n}\n".to_string()),

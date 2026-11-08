@@ -253,4 +253,11 @@ pub let WARNINGS = [
         category: "Preprocessor",
         reference: "C# CS1030",
     },
+    WarningDef {
+        code: "HARD003",
+        title: "Magic Literal Value",
+        description: "Magic number or string literal should be extracted to named 'const' or configuration",
+        category: "Maintainability",
+        reference: "Clean Code / SonarQube S109 / Roslyn CA1303",
+    },
 ];

@@ -6,10 +6,7 @@ use crate::infer::{analyze_physics, PhysicsRegistry};
 
 pub struct AnalysisResult { pub diagnostics: Vec<AnalysisDiagnostic>, pub physics: PhysicsRegistry }
 
-impl AnalysisResult {
-    pub fn has_errors(&self) -> bool { self.diagnostics.iter().any(|d| d.is_error()) }
-    pub fn is_ok(&self) -> bool { !self.has_errors() }
-}
+impl AnalysisResult { pub fn has_errors(&self) -> bool { self.diagnostics.iter().any(|d| d.is_error()) } pub fn is_ok(&self) -> bool { !self.has_errors() } }
 
 pub struct AnalysisPipeline;
 
@@ -21,24 +18,30 @@ impl AnalysisPipeline {
         for (span, msg) in &arena.diagnostics { diagnostics.push(AnalysisDiagnostic { code: parse_code(msg, "SyntaxError"), message: msg.clone(), span: *span, severity: DiagnosticSeverity::Error }); }
         for d in &physics.diagnostics {
             let severity = match d.severity { 2 => DiagnosticSeverity::Warning, 3 => DiagnosticSeverity::Info, 4 => DiagnosticSeverity::Hint, _ => DiagnosticSeverity::Error };
-            diagnostics.push(AnalysisDiagnostic { code: parse_code(&d.message, "PhysicsError"), message: d.message.clone(), span: arena.span(NodeId(d.node_id)), severity });
+            let (span, code) = (arena.span(NodeId(d.node_id)), parse_code(&d.message, "PhysicsError"));
+            if !diagnostics.iter().any(|x| x.span == span && x.code == code) { diagnostics.push(AnalysisDiagnostic { code, message: d.message.clone(), span, severity }); }
         }
         AnalysisResult { diagnostics, physics }
     }
 
     pub fn filter_pragma_suppressions(src: &str, diags: &mut Vec<AnalysisDiagnostic>) {
+        let ns = src.lines().find_map(|l| ["pub pkg ", "pkg ", "pub namespace ", "namespace "].into_iter().find_map(|p| l.trim().strip_prefix(p))).map(|s| s.trim_matches(|c: char| c == ';' || c.is_whitespace()).to_string()).unwrap_or_default();
         let (mut cur, mut intervals, mut starts) = (0usize, Vec::new(), std::collections::HashMap::new());
         for line in src.split_inclusive('\n') {
             let tr = line.trim();
-            if let Some(r) = tr.strip_prefix("#pragma warning disable") {
-                let s = r.trim();
-                if s.is_empty() { starts.entry(None).or_insert(cur); }
-                else { for c in s.split(',') { starts.entry(Some(c.trim().to_string())).or_insert(cur); } }
-            } else if let Some(r) = tr.strip_prefix("#pragma warning restore") {
-                let s = r.trim();
-                if s.is_empty() { for (k, st) in starts.drain() { intervals.push((st, cur + line.len(), k)); } }
-                else { for c in s.split(',') { if let Some(st) = starts.remove(&Some(c.trim().to_string())) { intervals.push((st, cur + line.len(), Some(c.trim().to_string()))); } } }
-            }
+            let (target_ns, raw_cmd) = if let Some(r) = tr.strip_prefix("#pragma namespace ") { r.split_once(':').map(|(n, a)| (Some(n.trim()), a.trim())).unwrap_or((None, r.trim())) } else { (None, tr) };
+            let pragma_cmd = raw_cmd.strip_prefix("#pragma ").unwrap_or(raw_cmd);
+            let (is_dis, r) = if let Some(r) = pragma_cmd.strip_prefix("warning disable") { (Some(true), r) }
+                else if let Some(r) = pragma_cmd.strip_prefix("warning restore") { (Some(false), r) }
+                else if let Some(_) = pragma_cmd.strip_prefix("no_hardcode disable") { (Some(true), " HARD001") }
+                else if let Some(_) = pragma_cmd.strip_prefix("no_hardcode restore") { (Some(false), " HARD001") } else { (None, "") };
+            if let Some(dis) = is_dis {
+                let (codes, t_ns) = if let Some((c, n)) = r.trim().split_once(" in ") { (c.trim(), Some(n.trim())) } else { (r.trim(), target_ns) };
+                let ns_match = t_ns.map_or(true, |t| t.split(',').any(|n| n.trim() == "*" || n.trim() == ns || (!ns.is_empty() && ns.starts_with(n.trim()))));
+                if ns_match {
+                    let mut apply = |k: Option<String>| if dis { starts.entry(k).or_insert(cur); } else if let Some(st) = starts.remove(&k) { intervals.push((st, cur + line.len(), k)); };
+                    if codes.is_empty() { apply(None); } else { for c in codes.split(',') { let cd = c.trim().to_string(); if !cd.is_empty() { apply(Some(cd)); } } }
+                } }
             cur += line.len();
         }
         for (k, st) in starts { intervals.push((st, cur, k)); }
@@ -48,8 +51,7 @@ impl AnalysisPipeline {
     pub fn analyze_source(src: &str) -> AnalysisResult {
         let arena = pilot_parser::parse(src);
         let mut res = Self::analyze(&arena, arena.root);
-        Self::filter_pragma_suppressions(src, &mut res.diagnostics);
-        res
+        Self::filter_pragma_suppressions(src, &mut res.diagnostics); res
     }
 
     pub fn load_program(path: &str) -> (AstArena, PhysicsRegistry) {

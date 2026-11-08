@@ -1,0 +1,33 @@
+// =========================================================================
+// Example: Applying Attributes and Pragmas to Namespaces, and [NoHardcoding]
+// =========================================================================
+
+// 1. Apply [NoHardcoding] attribute to this namespace:
+[NoHardcoding]
+pub pkg MyCompany.Finance;
+
+// 2. Constants are permitted under [NoHardcoding] (values properly extracted):
+const TAX_RATE: f64 = 0.05;
+const SERVICE_FEE: i64 = 100;
+const STATUS_MESSAGE: str = "Transaction Approved";
+
+// 3. Functions in this namespace with hardcoded literals trigger HARD001:
+pub fn process_payment(amount: i64) -> i64 {
+    // Trivial identity values (0, 1, "") are allowed:
+    var discount = 0;
+    var step = 1;
+    var note = "";
+
+    // Hardcoded numeric magic number (50) -> triggers HARD001!
+    let fee = 50;
+
+    // Hardcoded string literal ("secret_token") -> triggers HARD001!
+    let token = "secret_token";
+
+    return amount - fee;
+}
+
+// 4. Extracting to 'const' avoids hardcoding:
+pub fn process_approved_payment(amount: i64) -> i64 {
+    return amount + SERVICE_FEE;
+}

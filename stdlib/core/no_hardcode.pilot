@@ -1,0 +1,39 @@
+// =========================================================================
+// FILE: stdlib/core/no_hardcode.pilot
+// NO-HARDCODING ATTRIBUTE & NAMESPACE TARGETING CONTRACT
+// Enforces AGENTS.md §1: Zero Hardcoded Literals or Dataset-Specific Logic.
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.NoHardcode;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+
+[Layout(c_abi)]
+pub struct NoHardcodingAttr : IAttribute, IValue {
+    pub allow_constants:  bool;
+    pub check_strings:    bool;
+    pub check_numbers:    bool;
+    pub target_namespace: str;
+    pub weight:           i32;
+
+    pub static pure fn strict() -> NoHardcodingAttr => NoHardcodingAttr {
+        allow_constants:  true,
+        check_strings:    true,
+        check_numbers:    true,
+        target_namespace: "",
+        weight:           100,
+    };
+}
+
+[Layout(c_abi)]
+pub struct NoHardcodeAttr : IAttribute, IValue {
+    pub weight: i32;
+}
+
+[Layout(c_abi)]
+pub struct ApplyToNamespaceAttr : IAttribute, IValue {
+    pub target_namespace: str;
+    pub attribute_name:   str;
+    pub weight:           i32;
+}
