@@ -164,8 +164,8 @@ pub struct Task : IValue {
             if self._future.done() {
                 return;
             }
-            let c = self._coro;
-            let res = c();
+            let coro_fn = self._coro;
+            let res = coro_fn();
             self._future.set_result(res);
         }
 }
@@ -443,4 +443,215 @@ pub struct AsyncQueue : IValue {
         fn qsize() -> i64 {
             return len(self._items);
         }
+}
+
+// ==============================================================================
+// PilVM-Executable Cooperative Event Loop, Futures, Tasks, Channels & `select`
+// ==============================================================================
+
+pub fn async_future_new() -> i64 {
+    let fut = __engine("map_new");
+    __engine("map_set", fut, "kind", "Future");
+    __engine("map_set", fut, "state", "PENDING");
+    __engine("map_set", fut, "has_result", 0);
+    __engine("map_set", fut, "has_error", 0);
+    return fut;
+}
+
+pub fn async_future_resolve(fut: i64, val: any) -> i64 {
+    if __engine("map_get", fut, "state") == "PENDING" {
+        __engine("map_set", fut, "result", val);
+        __engine("map_set", fut, "has_result", 1);
+        __engine("map_set", fut, "state", "FINISHED");
+    }
+    return fut;
+}
+
+pub fn async_future_reject(fut: i64, err_msg: str) -> i64 {
+    if __engine("map_get", fut, "state") == "PENDING" {
+        __engine("map_set", fut, "error", err_msg);
+        __engine("map_set", fut, "has_error", 1);
+        __engine("map_set", fut, "state", "FINISHED");
+    }
+    return fut;
+}
+
+pub fn async_future_cancel(fut: i64) -> bool {
+    if __engine("map_get", fut, "state") != "PENDING" {
+        return false;
+    }
+    __engine("map_set", fut, "state", "CANCELLED");
+    return true;
+}
+
+pub fn async_future_status(fut: i64) -> str {
+    let nil;
+    let st = __engine("map_get", fut, "state");
+    if st != nil { return st; }
+    return "FINISHED";
+}
+
+pub fn async_future_is_done(fut: i64) -> bool {
+    return async_future_status(fut) != "PENDING";
+}
+
+pub fn async_future_is_cancelled(fut: i64) -> bool {
+    return async_future_status(fut) == "CANCELLED";
+}
+
+pub fn async_await(fut_or_val: any) -> any {
+    let nil;
+    let k = __engine("map_get", fut_or_val, "kind");
+    if k == "Future" || k == "Task" {
+        if __engine("map_get", fut_or_val, "state") == "PENDING" {
+            let pending_val = __engine("map_get", fut_or_val, "pending_val");
+            if pending_val != nil {
+                __engine("map_set", fut_or_val, "result", pending_val);
+                __engine("map_set", fut_or_val, "has_result", 1);
+            }
+            __engine("map_set", fut_or_val, "state", "FINISHED");
+        }
+        return __engine("map_get", fut_or_val, "result");
+    }
+    return fut_or_val;
+}
+
+pub fn async_loop_new() -> i64 {
+    let ev = __engine("map_new");
+    __engine("map_set", ev, "kind", "EventLoop");
+    __engine("map_set", ev, "tick", 0);
+    __engine("map_set", ev, "task_count", 0);
+    __engine("map_set", ev, "completed_count", 0);
+    __engine("map_set", ev, "closed", 0);
+    return ev;
+}
+
+pub fn async_spawn_task(ev_loop: i64, name: str, ready_after_ticks: i64, computed_val: any) -> i64 {
+    let idx = __engine("map_get", ev_loop, "task_count");
+    let now_tick = __engine("map_get", ev_loop, "tick");
+    let task_h = __engine("map_new");
+    __engine("map_set", task_h, "kind", "Task");
+    __engine("map_set", task_h, "id", idx + 1);
+    __engine("map_set", task_h, "name", name);
+    __engine("map_set", task_h, "state", "PENDING");
+    __engine("map_set", task_h, "ready_tick", now_tick + ready_after_ticks);
+    __engine("map_set", task_h, "pending_val", computed_val);
+    __engine("map_set", ev_loop, "task_" + idx, task_h);
+    __engine("map_set", ev_loop, "task_count", idx + 1);
+    return task_h;
+}
+
+pub fn async_loop_step(ev_loop: i64) -> i64 {
+    let next_tick = __engine("map_get", ev_loop, "tick") + 1;
+    __engine("map_set", ev_loop, "tick", next_tick);
+    let cnt = __engine("map_get", ev_loop, "task_count");
+    var newly_done = 0;
+    var i = 0;
+    while i < cnt {
+        let t = __engine("map_get", ev_loop, "task_" + i);
+        if __engine("map_get", t, "state") == "PENDING" {
+            let rtick = __engine("map_get", t, "ready_tick");
+            if next_tick >= rtick {
+                let pv = __engine("map_get", t, "pending_val");
+                __engine("map_set", t, "result", pv);
+                __engine("map_set", t, "has_result", 1);
+                __engine("map_set", t, "state", "FINISHED");
+                newly_done = newly_done + 1;
+            }
+        }
+        i = i + 1;
+    }
+    let prev_done = __engine("map_get", ev_loop, "completed_count");
+    __engine("map_set", ev_loop, "completed_count", prev_done + newly_done);
+    return newly_done;
+}
+
+pub fn async_loop_run_until_complete(ev_loop: i64, target_task: i64) -> any {
+    var safety = 0;
+    while !async_future_is_done(target_task) && safety < 256 {
+        async_loop_step(ev_loop);
+        safety = safety + 1;
+    }
+    return async_await(target_task);
+}
+
+pub fn async_channel_new(capacity: i64) -> i64 {
+    let ch = __engine("map_new");
+    __engine("map_set", ch, "kind", "Channel");
+    __engine("map_set", ch, "cap", capacity);
+    __engine("map_set", ch, "head", 0);
+    __engine("map_set", ch, "tail", 0);
+    __engine("map_set", ch, "closed", 0);
+    return ch;
+}
+
+pub fn async_channel_len(ch: i64) -> i64 {
+    return __engine("map_get", ch, "tail") - __engine("map_get", ch, "head");
+}
+
+pub fn async_channel_send(ch: i64, val: any) -> bool {
+    if __engine("map_get", ch, "closed") == 1 { return false; }
+    let cap = __engine("map_get", ch, "cap");
+    if cap > 0 && async_channel_len(ch) >= cap {
+        return false;
+    }
+    let tl = __engine("map_get", ch, "tail");
+    __engine("map_set", ch, "slot_" + tl, val);
+    __engine("map_set", ch, "tail", tl + 1);
+    return true;
+}
+
+pub fn async_channel_recv(ch: i64) -> any {
+    let nil;
+    let hd = __engine("map_get", ch, "head");
+    let tl = __engine("map_get", ch, "tail");
+    if hd >= tl { return nil; }
+    let v = __engine("map_get", ch, "slot_" + hd);
+    __engine("map_set", ch, "head", hd + 1);
+    return v;
+}
+
+pub fn async_channel_close(ch: i64) -> void {
+    __engine("map_set", ch, "closed", 1);
+}
+
+// Multiplexes readiness across two channels (`select` semantics: returns 1 for `ch1`, 2 for `ch2`, 0 if empty)
+pub fn async_select_ready(ch1: i64, ch2: i64) -> i64 {
+    if async_channel_len(ch1) > 0 { return 1; }
+    if async_channel_len(ch2) > 0 { return 2; }
+    return 0;
+}
+
+pub fn async_lock_new() -> i64 {
+    let lk = __engine("map_new");
+    __engine("map_set", lk, "locked", 0);
+    return lk;
+}
+
+pub fn async_lock_acquire(lk: i64) -> bool {
+    if __engine("map_get", lk, "locked") == 1 { return false; }
+    __engine("map_set", lk, "locked", 1);
+    return true;
+}
+
+pub fn async_lock_release(lk: i64) -> void {
+    __engine("map_set", lk, "locked", 0);
+}
+
+pub fn async_event_new() -> i64 {
+    let ev = __engine("map_new");
+    __engine("map_set", ev, "set", 0);
+    return ev;
+}
+
+pub fn async_event_set(ev: i64) -> void {
+    __engine("map_set", ev, "set", 1);
+}
+
+pub fn async_event_clear(ev: i64) -> void {
+    __engine("map_set", ev, "set", 0);
+}
+
+pub fn async_event_is_set(ev: i64) -> bool {
+    return __engine("map_get", ev, "set") == 1;
 }

@@ -860,7 +860,11 @@ pub fn sh_ast_emit_pilot(arena: i64, node_id: i64) -> str {
         return "~(" + sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0)) + ")";
     }
     if k == "UnaryExpr" {
-        return "(" + op + sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0)) + ")";
+        let inner_s = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0));
+        if op == "await" || op == "spawn" {
+            return op + " " + inner_s;
+        }
+        return "(" + op + inner_s + ")";
     }
     if k == "BinaryExpr" {
         let ls = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0));
@@ -929,7 +933,9 @@ pub fn sh_ast_emit_pilot(arena: i64, node_id: i64) -> str {
         let sig = __engine("map_get", arena, node_id + "_sig");
         let sig_s = if sig != nil { sig } else { "()" };
         let body_s = sh_ast_emit_pilot(arena, sh_ast_child_at(arena, node_id, 0));
-        return "pub fn " + op + sig_s + " " + body_s;
+        let is_async = (sh_ast_flags(arena, node_id) & 64) != 0;
+        let prefix_s = if is_async { "pub async fn " } else { "pub fn " };
+        return prefix_s + op + sig_s + " " + body_s;
     }
     if k == "Program" || k == "SeqFragment" {
         var p_out = "";
