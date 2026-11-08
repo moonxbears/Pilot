@@ -9,8 +9,8 @@ while category <= 16 {
     print("Category " + category + " [" + badge + "]: " + scope);
     category = category + 1;
 }
-
-
+var globalenv = reflect_current_environment();
+print(globalenv)
 
 // var string : str = "Hello, World!";
 // var float : f64 = 3.14159;
