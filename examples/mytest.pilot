@@ -1,33 +1,12 @@
 use Pilot.Collections.*;
 use Pilot.Core.Keywords::*;
-
-// Query all categories dynamically (including user DSL categories 100..255):
-pub fn reflect_category_keywords(cat: i64) -> str {
-    if cat == 0 { return "__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm"; }
-    if cat == 1 { return "else|while|until|for|in|then|break|continue|guard|switch|case|default|try|catch"; }
-    if cat == 2 { return "var|const|enum|actor|state|type"; }
-    if cat == 3 { return "pub|priv|prot|pkg|int|file|open|export|lvl"; }
-    if cat == 4 { return "pure|static|iso|partial|ext"; }
-    if cat == 5 { return "get|set"; }
-    if cat == 6 { return "self|field|value"; }
-    if cat == 7 { return "scope|enter|exit"; }
-    if cat == 8 { return "requires|ensures|old|context"; }
-    if cat == 9 { return "adapter|each|with"; }
-    if cat == 10 { return "coalesce|with|without"; }
-    if cat == 11 { return "as|async|await|spawn|atomic|sync|isolate|select|timeout|bounded"; }
-    if cat == 12 { return "database|transaction|commit|rollback|savepoint|connect|from|where|order|ascending|descending|insert|into|values|update|delete"; }
-    if cat == 13 { return "extern|assembly|module|lib"; }
-    if cat == 14 { return "sizeof|alignof|offsetof|fields_of|nameof|assert|blueprint|cue|role|route|unit|syntax|use"; }
-    if cat == 16 { return "op"; }
-    return "";
-}
+use Pilot.Core.Reflect::*;
 
 var category = 0;
 while category <= 16 {
-    let words = reflect_category_keywords(category);
-    if words.len() > 0 {
-        print("Category " + category + ": " + words);
-    }
+    let scope = reflect_category_scope(category);
+    let badge = reflect_category_badge(category);
+    print("Category " + category + " [" + badge + "]: " + scope);
     category = category + 1;
 }
 
