@@ -20,15 +20,15 @@ pub pure fn http_lower_byte(b: i64) -> i64 {
 }
 
 pub pure fn http_ascii_eq_ignore_case(a: str, b: str) -> bool {
-    let na = __engine("str_len", a);
-    let nb = __engine("str_len", b);
+    let na = a.len();
+    let nb = b.len();
     if na != nb {
         return false;
     }
     var i = 0;
     while i < na {
-        let ba = http_lower_byte(__engine("str_byte_at", a, i));
-        let bb = http_lower_byte(__engine("str_byte_at", b, i));
+        let ba = http_lower_byte(a.byte_at(i));
+        let bb = http_lower_byte(b.byte_at(i));
         if ba != bb {
             return false;
         }
@@ -38,10 +38,10 @@ pub pure fn http_ascii_eq_ignore_case(a: str, b: str) -> bool {
 }
 
 pub pure fn http_trim_spaces(s: str) -> str {
-    let n = __engine("str_len", s);
+    let n = s.len();
     var start = 0;
     while start < n {
-        let b = __engine("str_byte_at", s, start);
+        let b = s.byte_at(start);
         if b == 32 || b == 9 || b == 13 || b == 10 {
             start = start + 1;
         } else {
@@ -50,22 +50,22 @@ pub pure fn http_trim_spaces(s: str) -> str {
     }
     var end = n;
     while end > start {
-        let b = __engine("str_byte_at", s, end - 1);
+        let b = s.byte_at(end - 1);
         if b == 32 || b == 9 || b == 13 || b == 10 {
             end = end - 1;
         } else {
             break;
         }
     }
-    return __engine("str_slice", s, start, end);
+    return s.slice(start, end);
 }
 
 pub pure fn http_parse_dec_int(s: str) -> i64 {
-    let n = __engine("str_len", s);
+    let n = s.len();
     var val = 0;
     var i = 0;
     while i < n {
-        let b = __engine("str_byte_at", s, i);
+        let b = s.byte_at(i);
         if b >= 48 && b <= 57 {
             val = (val * 10) + (b - 48);
         }
@@ -76,11 +76,11 @@ pub pure fn http_parse_dec_int(s: str) -> i64 {
 
 pub pure fn http_parse_hex_int(s: str) -> i64 {
     let clean = http_trim_spaces(s);
-    let n = __engine("str_len", clean);
+    let n = clean.len();
     var val = 0;
     var i = 0;
     while i < n {
-        let b = __engine("str_byte_at", clean, i);
+        let b = clean.byte_at(i);
         if b >= 48 && b <= 57 {
             val = (val * 16) + (b - 48);
         } else if b >= 97 && b <= 102 {
@@ -97,39 +97,39 @@ pub pure fn http_parse_hex_int(s: str) -> i64 {
 
 pub fn http_parse_url(url: str) -> i64 {
     let m = __engine("map_new");
-    let n = __engine("str_len", url);
+    let n = url.len();
     var start = 0;
-    if n >= 7 && __engine("str_slice", url, 0, 7) == "http://" {
+    if n >= 7 && url.slice(0, 7) == "http://" {
         start = 7;
-    } else if n >= 8 && __engine("str_slice", url, 0, 8) == "https://" {
+    } else if n >= 8 && url.slice(0, 8) == "https://" {
         start = 8;
     }
 
     var slash = start;
     while slash < n {
-        if __engine("str_byte_at", url, slash) == 47 {
+        if url.byte_at(slash) == 47 {
             break;
         }
         slash = slash + 1;
     }
 
-    let auth = __engine("str_slice", url, start, slash);
-    let path = if slash < n { __engine("str_slice", url, slash, n) } else { "/" };
+    let auth = url.slice(start, slash);
+    let path = if slash < n { url.slice(slash, n) } else { "/" };
 
-    let auth_len = __engine("str_len", auth);
+    let auth_len = auth.len();
     var colon = -1;
     var i = 0;
     while i < auth_len {
-        if __engine("str_byte_at", auth, i) == 58 {
+        if auth.byte_at(i) == 58 {
             colon = i;
             break;
         }
         i = i + 1;
     }
 
-    let host = if colon >= 0 { __engine("str_slice", auth, 0, colon) } else { auth };
+    let host = if colon >= 0 { auth.slice(0, colon) } else { auth };
     let port = if colon >= 0 {
-        http_parse_dec_int(__engine("str_slice", auth, colon + 1, auth_len))
+        http_parse_dec_int(auth.slice(colon + 1, auth_len))
     } else {
         80
     };
@@ -142,10 +142,10 @@ pub fn http_parse_url(url: str) -> i64 {
 }
 
 pub pure fn http_find_crlf(s: str, from_idx: i64) -> i64 {
-    let n = __engine("str_len", s);
+    let n = s.len();
     var i = from_idx;
     while i + 1 < n {
-        if __engine("str_byte_at", s, i) == 13 && __engine("str_byte_at", s, i + 1) == 10 {
+        if s.byte_at(i) == 13 && s.byte_at(i + 1) == 10 {
             return i;
         }
         i = i + 1;
@@ -154,13 +154,13 @@ pub pure fn http_find_crlf(s: str, from_idx: i64) -> i64 {
 }
 
 pub pure fn http_find_header_end(raw: str) -> i64 {
-    let n = __engine("str_len", raw);
+    let n = raw.len();
     var i = 0;
     while i + 3 < n {
-        if __engine("str_byte_at", raw, i) == 13
-            && __engine("str_byte_at", raw, i + 1) == 10
-            && __engine("str_byte_at", raw, i + 2) == 13
-            && __engine("str_byte_at", raw, i + 3) == 10 {
+        if raw.byte_at(i) == 13
+            && raw.byte_at(i + 1) == 10
+            && raw.byte_at(i + 2) == 13
+            && raw.byte_at(i + 3) == 10 {
             return i;
         }
         i = i + 1;
@@ -169,26 +169,26 @@ pub pure fn http_find_header_end(raw: str) -> i64 {
 }
 
 pub pure fn http_lookup_header_in_raw(headers_raw: str, header_name: str) -> str {
-    let n = __engine("str_len", headers_raw);
+    let n = headers_raw.len();
     var pos = 0;
     while pos < n {
         let eol = http_find_crlf(headers_raw, pos);
         let line_end = if eol >= 0 { eol } else { n };
-        let line = __engine("str_slice", headers_raw, pos, line_end);
-        let ln = __engine("str_len", line);
+        let line = headers_raw.slice(pos, line_end);
+        let ln = line.len();
         var colon = -1;
         var i = 0;
         while i < ln {
-            if __engine("str_byte_at", line, i) == 58 {
+            if line.byte_at(i) == 58 {
                 colon = i;
                 break;
             }
             i = i + 1;
         }
         if colon > 0 {
-            let k = http_trim_spaces(__engine("str_slice", line, 0, colon));
+            let k = http_trim_spaces(line.slice(0, colon));
             if http_ascii_eq_ignore_case(k, header_name) {
-                return http_trim_spaces(__engine("str_slice", line, colon + 1, ln));
+                return http_trim_spaces(line.slice(colon + 1, ln));
             }
         }
         if eol < 0 {
@@ -200,7 +200,7 @@ pub pure fn http_lookup_header_in_raw(headers_raw: str, header_name: str) -> str
 }
 
 pub pure fn http_decode_chunked_body(raw_body: str) -> str {
-    let n = __engine("str_len", raw_body);
+    let n = raw_body.len();
     var pos = 0;
     var out = "";
     while pos < n {
@@ -208,7 +208,7 @@ pub pure fn http_decode_chunked_body(raw_body: str) -> str {
         if eol < 0 {
             break;
         }
-        let len_line = __engine("str_slice", raw_body, pos, eol);
+        let len_line = raw_body.slice(pos, eol);
         let chunk_len = http_parse_hex_int(len_line);
         if chunk_len <= 0 {
             break;
@@ -216,9 +216,9 @@ pub pure fn http_decode_chunked_body(raw_body: str) -> str {
         let data_start = eol + 2;
         let data_end = data_start + chunk_len;
         if data_end <= n {
-            out = out + __engine("str_slice", raw_body, data_start, data_end);
+            out = out + raw_body.slice(data_start, data_end);
         } else {
-            out = out + __engine("str_slice", raw_body, data_start, n);
+            out = out + raw_body.slice(data_start, n);
             break;
         }
         pos = data_end + 2;
@@ -230,16 +230,16 @@ pub fn http_parse_raw_response(raw: str) -> HttpResponse {
     let first_eol = http_find_crlf(raw, 0);
     var status_code = 0;
     if first_eol > 0 {
-        let status_line = __engine("str_slice", raw, 0, first_eol);
-        let slen = __engine("str_len", status_line);
+        let status_line = raw.slice(0, first_eol);
+        let slen = status_line.len();
         var sp = 0;
-        while sp < slen && __engine("str_byte_at", status_line, sp) != 32 {
+        while sp < slen && status_line.byte_at(sp) != 32 {
             sp = sp + 1;
         }
-        while sp < slen && __engine("str_byte_at", status_line, sp) == 32 {
+        while sp < slen && status_line.byte_at(sp) == 32 {
             sp = sp + 1;
         }
-        let code_str = __engine("str_slice", status_line, sp, sp + 3);
+        let code_str = status_line.slice(sp, sp + 3);
         status_code = http_parse_dec_int(code_str);
     }
 
@@ -253,8 +253,8 @@ pub fn http_parse_raw_response(raw: str) -> HttpResponse {
     }
 
     let hdr_start = if first_eol >= 0 { first_eol + 2 } else { 0 };
-    let headers_raw = __engine("str_slice", raw, hdr_start, hdr_end);
-    let raw_body = __engine("str_slice", raw, hdr_end + 4, __engine("str_len", raw));
+    let headers_raw = raw.slice(hdr_start, hdr_end);
+    let raw_body = raw.slice(hdr_end + 4, raw.len());
     let te = http_lookup_header_in_raw(headers_raw, "Transfer-Encoding");
     let final_body = if http_ascii_eq_ignore_case(te, "chunked") {
         http_decode_chunked_body(raw_body)
@@ -294,7 +294,7 @@ pub fn http_post(url: str, content_type: str, body: str) -> HttpResponse {
     let u = http_parse_url(url);
     let auth = "" + __engine("map_get", u, "auth");
     let path = "" + __engine("map_get", u, "path");
-    let blen = __engine("str_len", body);
+    let blen = body.len();
 
     let req = "POST " + path + " HTTP/1.1\r\n"
         + "Host: " + auth + "\r\n"

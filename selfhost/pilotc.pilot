@@ -55,7 +55,7 @@ pub pure fn pilotc_version_banner() -> str {
 
 fn hex_char(v: i64) -> str {
     let hex_chars = "0123456789abcdef";
-    return __engine("str_slice", hex_chars, v, v + 1);
+    return hex_chars.slice(v, v + 1);
 }
 
 fn u8_to_hex(b: i64) -> str {
@@ -79,9 +79,9 @@ fn u64_to_hex_le(v: i64) -> str {
 fn pilotc_parse_int(s: str) -> i64 {
     var acc = 0;
     var i = 0;
-    let n = __engine("str_len", s);
+    let n = s.len();
     while i < n {
-        let b = __engine("str_byte_at", s, i);
+        let b = s.byte_at(i);
         if b >= 48 && b <= 57 {
             acc = acc * 10 + (b - 48);
         }
@@ -113,7 +113,7 @@ fn pilotc_extract_field(tape: i64, field: KernelField, fn_name: str) -> str {
             }
         }
         if field == KernelFieldId.InputN {
-            let fn_len = __engine("str_len", fn_name);
+            let fn_len = fn_name.len();
             if fn_len > 0 && txt == fn_name && i > 10 && i + 2 < count {
                 if sh_token_text(tape, i + 1) == "(" {
                     return sh_token_text(tape, i + 2);

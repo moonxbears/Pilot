@@ -451,8 +451,10 @@ pub struct AsyncQueue : IValue {
 
 pub fn async_future_new() -> i64 {
     let fut = __engine("map_new");
+    __engine("map_set", fut, "__async_magic", "__async_task_v1");
     __engine("map_set", fut, "kind", "Future");
     __engine("map_set", fut, "state", "PENDING");
+    __engine("map_set", fut, "is_completed", false);
     __engine("map_set", fut, "has_result", 0);
     __engine("map_set", fut, "has_error", 0);
     return fut;
@@ -462,6 +464,7 @@ pub fn async_future_resolve(fut: i64, val: any) -> i64 {
     if __engine("map_get", fut, "state") == "PENDING" {
         __engine("map_set", fut, "result", val);
         __engine("map_set", fut, "has_result", 1);
+        __engine("map_set", fut, "is_completed", true);
         __engine("map_set", fut, "state", "FINISHED");
     }
     return fut;
@@ -471,6 +474,7 @@ pub fn async_future_reject(fut: i64, err_msg: str) -> i64 {
     if __engine("map_get", fut, "state") == "PENDING" {
         __engine("map_set", fut, "error", err_msg);
         __engine("map_set", fut, "has_error", 1);
+        __engine("map_set", fut, "is_completed", true);
         __engine("map_set", fut, "state", "FINISHED");
     }
     return fut;
@@ -480,6 +484,7 @@ pub fn async_future_cancel(fut: i64) -> bool {
     if __engine("map_get", fut, "state") != "PENDING" {
         return false;
     }
+    __engine("map_set", fut, "is_completed", true);
     __engine("map_set", fut, "state", "CANCELLED");
     return true;
 }
@@ -502,13 +507,14 @@ pub fn async_future_is_cancelled(fut: i64) -> bool {
 pub fn async_await(fut_or_val: any) -> any {
     let nil;
     let k = __engine("map_get", fut_or_val, "kind");
-    if k == "Future" || k == "Task" {
+    if k == "Future" || k == "Task" || __engine("map_get", fut_or_val, "__async_magic") == "__async_task_v1" {
         if __engine("map_get", fut_or_val, "state") == "PENDING" {
             let pending_val = __engine("map_get", fut_or_val, "pending_val");
             if pending_val != nil {
                 __engine("map_set", fut_or_val, "result", pending_val);
                 __engine("map_set", fut_or_val, "has_result", 1);
             }
+            __engine("map_set", fut_or_val, "is_completed", true);
             __engine("map_set", fut_or_val, "state", "FINISHED");
         }
         return __engine("map_get", fut_or_val, "result");
@@ -530,12 +536,15 @@ pub fn async_spawn_task(ev_loop: i64, name: str, ready_after_ticks: i64, compute
     let idx = __engine("map_get", ev_loop, "task_count");
     let now_tick = __engine("map_get", ev_loop, "tick");
     let task_h = __engine("map_new");
+    __engine("map_set", task_h, "__async_magic", "__async_task_v1");
     __engine("map_set", task_h, "kind", "Task");
     __engine("map_set", task_h, "id", idx + 1);
     __engine("map_set", task_h, "name", name);
     __engine("map_set", task_h, "state", "PENDING");
+    __engine("map_set", task_h, "is_completed", false);
     __engine("map_set", task_h, "ready_tick", now_tick + ready_after_ticks);
     __engine("map_set", task_h, "pending_val", computed_val);
+    __engine("map_set", task_h, "result", computed_val);
     __engine("map_set", ev_loop, "task_" + idx, task_h);
     __engine("map_set", ev_loop, "task_count", idx + 1);
     return task_h;
@@ -555,6 +564,7 @@ pub fn async_loop_step(ev_loop: i64) -> i64 {
                 let pv = __engine("map_get", t, "pending_val");
                 __engine("map_set", t, "result", pv);
                 __engine("map_set", t, "has_result", 1);
+                __engine("map_set", t, "is_completed", true);
                 __engine("map_set", t, "state", "FINISHED");
                 newly_done = newly_done + 1;
             }

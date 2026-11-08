@@ -29,11 +29,11 @@ pub fn marshal_str_binding(var_name: str, val_str: str) -> MarshaledBinding {
 }
 
 pub pure fn json_escape_str(s: str) -> str {
-    let n = __engine("str_len", s);
+    let n = s.len();
     var out = "";
     var i = 0;
     while i < n {
-        let b = __engine("str_byte_at", s, i);
+        let b = s.byte_at(i);
         if b == 34 {
             out = out + "\\\"";
         } else if b == 92 {
@@ -45,7 +45,7 @@ pub pure fn json_escape_str(s: str) -> str {
         } else if b == 9 {
             out = out + "\\t";
         } else {
-            out = out + __engine("str_slice", s, i, i + 1);
+            out = out + s.slice(i, i + 1);
         }
         i = i + 1;
     }

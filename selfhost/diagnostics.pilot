@@ -24,8 +24,6 @@ let DiagHooks = {
     ast_base_at: "ast_base_at",
     ast_emit_diag: "ast_emit_diag",
     sym_str: "sym_str",
-    str_len: "str_len",
-    str_byte_at: "str_byte_at",
 };
 
 pub fn lattice_bits_str(bits: i64) -> str {
@@ -86,16 +84,16 @@ pub fn format_core_naming_violation(rule: str, detail: str) -> str {
 }
 
 pub fn str_ends_with(s: str, suffix: str) -> bool {
-    let slen = __engine(DiagHooks.str_len, s);
-    let suflen = __engine(DiagHooks.str_len, suffix);
+    let slen = s.len();
+    let suflen = suffix.len();
     if suflen > slen {
         return false;
     }
     let start = slen - suflen;
     var k = 0;
     while k < suflen {
-        let b1 = __engine(DiagHooks.str_byte_at, s, start + k);
-        let b2 = __engine(DiagHooks.str_byte_at, suffix, k);
+        let b1 = s.byte_at(start + k);
+        let b2 = suffix.byte_at(k);
         if b1 != b2 {
             return false;
         }
@@ -133,13 +131,13 @@ pub fn unit_enforces_core_naming(node_count: i64) -> bool {
 }
 
 pub fn is_lowercase_primitive_ident(s: str) -> bool {
-    let slen = __engine(DiagHooks.str_len, s);
+    let slen = s.len();
     if slen <= 0 {
         return false;
     }
     var idx = 0;
     while idx < slen {
-        let ch = __engine(DiagHooks.str_byte_at, s, idx);
+        let ch = s.byte_at(idx);
         let is_lower = ch >= 97 && ch <= 122;
         let is_digit = ch >= 48 && ch <= 57;
         let is_under = ch == 95;
@@ -160,11 +158,11 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
     }
     let sym = __engine(DiagHooks.ast_node_sym, nid);
     let name = __engine(DiagHooks.sym_str, sym);
-    let nlen = __engine(DiagHooks.str_len, name);
+    let nlen = name.len();
     if nlen == 0 {
         return 0;
     }
-    let c0 = __engine(DiagHooks.str_byte_at, name, 0);
+    let c0 = name.byte_at(0);
     // Skip $name homoiconic quote placeholders inside syntax rules
     if c0 == 36 {
         return 0;

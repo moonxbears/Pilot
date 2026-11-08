@@ -123,18 +123,18 @@ pub fn wm_sleb_hex(val: i64) -> str {
 }
 
 pub fn wm_str_vec_hex(s: str) -> str {
-    let n = __engine("str_len", s);
+    let n = s.len();
     var out = wm_uleb_hex(n);
     var i = 0;
     while i < n {
-        out = out + wm_byte_hex(__engine("str_byte_at", s, i));
+        out = out + wm_byte_hex(s.byte_at(i));
         i = i + 1;
     }
     return out;
 }
 
 pub fn wm_section_hex(sec_id: i64, payload_hex: str) -> str {
-    let byte_len = __engine("str_len", payload_hex) / 2;
+    let byte_len = payload_hex.len() / 2;
     return wm_byte_hex(sec_id) + wm_uleb_hex(byte_len) + payload_hex;
 }
 
@@ -414,7 +414,7 @@ pub fn emit_arena_wasm_hex() -> str {
         let insns_hex = wm_emit_stmt_hex(st, body_nid);
         let tail_hex = if is_void { "0b" } else { "42000b" };
         let fn_body_hex = locals_hex + insns_hex + tail_hex;
-        code_entries = code_entries + wm_uleb_hex(__engine("str_len", fn_body_hex) / 2) + fn_body_hex;
+        code_entries = code_entries + wm_uleb_hex(fn_body_hex.len() / 2) + fn_body_hex;
 
         fi = fi + 1;
     }
@@ -491,7 +491,7 @@ pub fn emit_arena_wasm_dts() -> str {
             let p_nid = __engine("ast_child_at", fn_nid, pi);
             if __engine("ast_node_kind", p_nid) == 21 {
                 let pname = __engine("sym_str", __engine("ast_node_sym", p_nid));
-                if __engine("str_len", psig) > 0 { psig = psig + ", "; }
+                if psig.len() > 0 { psig = psig + ", "; }
                 psig = psig + pname + ": bigint";
             }
             pi = pi + 1;

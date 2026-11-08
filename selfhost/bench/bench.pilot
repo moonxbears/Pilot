@@ -27,23 +27,23 @@ pub pure fn bench_metric_key(metric: BenchMetric) -> str {
 }
 
 fn bench_find(haystack: str, needle: str, start: i64) -> i64 {
-    let hl = __engine("str_len", haystack);
-    let nl = __engine("str_len", needle);
+    let hl = haystack.len();
+    let nl = needle.len();
     if nl == 0 || start < 0 || start + nl > hl { return -1; }
     var i = start;
     while i + nl <= hl {
-        if __engine("str_slice", haystack, i, i + nl) == needle { return i; }
+        if haystack.slice(i, i + nl) == needle { return i; }
         i = i + 1;
     }
     return -1;
 }
 
 fn bench_parse_int(s: str) -> i64 {
-    let n = __engine("str_len", s);
+    let n = s.len();
     var v = 0;
     var i = 0;
     while i < n {
-        let b = __engine("str_byte_at", s, i);
+        let b = s.byte_at(i);
         if b >= 48 && b <= 57 {
             v = v * 10 + (b - 48);
             i = i + 1;
@@ -56,14 +56,14 @@ fn bench_parse_int(s: str) -> i64 {
 
 pub fn compute_bench_stats_json(samples_csv: str) -> str {
     let m = __engine("map_new");
-    let total_len = __engine("str_len", samples_csv);
+    let total_len = samples_csv.len();
     var count = 0;
     var pos = 0;
     while pos < total_len {
         let comma = bench_find(samples_csv, ",", pos);
         let end = if comma >= 0 { comma } else { total_len };
         if end > pos {
-            let num_str = __engine("str_slice", samples_csv, pos, end);
+            let num_str = samples_csv.slice(pos, end);
             let val = bench_parse_int(num_str);
             let _s = __engine("map_set", m, "s:" + count, val);
             count = count + 1;

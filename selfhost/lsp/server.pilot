@@ -253,7 +253,7 @@ pub pure fn lsp_format_hover_returns(sig: str) -> str {
 }
 
 pub fn encode_lsp_frame(json_payload: str) -> str {
-    let byte_len = __engine("str_len", json_payload);
+    let byte_len = json_payload.len();
     return "Content-Length: " + byte_len + "\r\n\r\n" + json_payload;
 }
 
@@ -264,7 +264,7 @@ pub fn lsp_session_new() -> i64 {
 }
 
 pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
-    let total_len = __engine("str_len", framed_stream);
+    let total_len = framed_stream.len();
     var pos = 0;
     var out_frames = "";
     while pos < total_len {
@@ -281,7 +281,7 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
         if body_len < 0 || body_start + body_len > total_len {
             break;
         }
-        let msg = __engine("str_slice", framed_stream, body_start, body_start + body_len);
+        let msg = framed_stream.slice(body_start, body_start + body_len);
         pos = body_start + body_len;
 
         let method = lsp_extract_json_str_field(msg, "method");

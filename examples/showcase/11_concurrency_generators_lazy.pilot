@@ -67,22 +67,36 @@ pub async fn fetch_shard_metric(shard_id: i64) -> i64 {
     return shard_id * 100 + 21;
 }
 
+let kw_task = spawn(compute_heavy_hash(42));
+assert(kw_task.kind == "Task");
+assert(kw_task.state == "PENDING");
+assert(kw_task.is_completed == false);
+println("Keyword `spawn(...)` created Task: state=" + kw_task.state);
+
+let kw_val = await(kw_task);
+assert(kw_task.state == "FINISHED");
+assert(kw_task.is_completed == true);
+assert(kw_val == "HASH_0x56154");
+println("Keyword `await(...)` resolved Task: result=" + kw_val + " (state=" + kw_task.state + ")");
+
 let ev_loop = async_loop_new();
-let hash_task = async_spawn_task(ev_loop, "hash-worker", 2, await compute_heavy_hash(42));
+let hash_task = async_spawn_task(ev_loop, "hash-worker", 2, compute_heavy_hash(42));
 let st_before = __engine("map_get", hash_task, "state");
-println("Spawned async task `hash-worker`: state before await = " + st_before);
+println("Spawned event-loop task `hash-worker`: state before await = " + st_before);
 assert(st_before == "PENDING");
 
-let computed_val = await async_await_task(ev_loop, hash_task);
+let computed_val = await(async_await_task(ev_loop, hash_task));
 let st_after = __engine("map_get", hash_task, "state");
 println("Awaited `hash-worker` result: " + computed_val + " (state=" + st_after + ")");
 assert(st_after == "FINISHED");
 assert(computed_val == "HASH_0x56154");
 
 // Concurrent `gather` across multiple spawned tasks:
-let t_shard1 = async_spawn_task(ev_loop, "shard-1", 1, await fetch_shard_metric(1));
-let t_shard2 = async_spawn_task(ev_loop, "shard-2", 2, await fetch_shard_metric(2));
-let gathered_sum = (await async_await_task(ev_loop, t_shard1)) + (await async_await_task(ev_loop, t_shard2));
+let t_shard1 = spawn(fetch_shard_metric(1));
+let t_shard2 = spawn(fetch_shard_metric(2));
+assert(t_shard1.state == "PENDING" && t_shard2.state == "PENDING");
+let gathered_sum = await(t_shard1) + await(t_shard2);
+assert(t_shard1.state == "FINISHED" && t_shard2.state == "FINISHED");
 println("Gathered concurrent shard metrics sum = " + gathered_sum);
 assert(gathered_sum == 342);
 

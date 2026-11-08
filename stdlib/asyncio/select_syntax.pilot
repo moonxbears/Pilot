@@ -8,7 +8,6 @@ use Pilot.Core.Genesis.*;
 
 comptime {
     __engine("register_modifier", nameof(async), "effect_async");
-    __engine("bind_receptor", nameof(await),   33, 17);
     __engine("bind_receptor", nameof(select),  33, 7);
 
     __engine("register_pratt_op", "<-", infix,  5,  right);
@@ -16,7 +15,25 @@ comptime {
 }
 
 pub syntax {
-    spawn(body)   => quote { { $body } };
+    spawn(body) => quote {
+        let __spawn_val = $body;
+        let __spawn_task = __engine("map_new");
+        __engine("map_set", __spawn_task, "__async_magic", "__async_task_v1");
+        __engine("map_set", __spawn_task, "kind", "Task");
+        __engine("map_set", __spawn_task, "state", "PENDING");
+        __engine("map_set", __spawn_task, "is_completed", false);
+        __engine("map_set", __spawn_task, "result", __spawn_val)
+    };
+    await(fut) => quote {
+        let __await_in = $fut;
+        if __engine("map_get", __await_in, "__async_magic") == "__async_task_v1" {
+            __engine("map_set", __await_in, "state", "FINISHED");
+            __engine("map_set", __await_in, "is_completed", true);
+            __engine("map_get", __await_in, "result")
+        } else {
+            __await_in
+        }
+    };
     sync(body)    => quote { { $body } };
     atomic(body)  => quote { { $body } };
     isolate(body) => quote { { $body } };

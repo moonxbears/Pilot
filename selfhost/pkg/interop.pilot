@@ -28,12 +28,12 @@ pub fn ecosystem_to_str(eco: Ecosystem) -> str {
 }
 
 fn interop_find(haystack: str, needle: str, start: i64) -> i64 {
-    let hl = __engine("str_len", haystack);
-    let nl = __engine("str_len", needle);
+    let hl = haystack.len();
+    let nl = needle.len();
     if nl == 0 || start < 0 || start + nl > hl { return -1; }
     var i = start;
     while i + nl <= hl {
-        if __engine("str_slice", haystack, i, i + nl) == needle { return i; }
+        if haystack.slice(i, i + nl) == needle { return i; }
         i = i + 1;
     }
     return -1;
@@ -44,11 +44,11 @@ pub fn parse_ecosystem_spec(spec: str) -> str {
     if col < 0 { return spec; }
     let at = interop_find(spec, "@", col + 1);
     if at < 0 { return spec; }
-    let eco_str = __engine("str_slice", spec, 0, col);
+    let eco_str = spec.slice(0, col);
     let eco_kind = parse_ecosystem_kind(eco_str);
     let eco_out = ecosystem_to_str(eco_kind);
     let eco = if eco_out != "pilot" { eco_out } else { eco_str };
-    let pkg = __engine("str_slice", spec, col + 1, at);
-    let ver = __engine("str_slice", spec, at + 1, __engine("str_len", spec));
+    let pkg = spec.slice(col + 1, at);
+    let ver = spec.slice(at + 1, spec.len());
     return eco + "|" + pkg + "|" + ver;
 }

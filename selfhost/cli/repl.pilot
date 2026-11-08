@@ -40,22 +40,22 @@ pub fn repl_session_new() -> i64 {
 }
 
 fn repl_is_digit(ch: str) -> bool {
-    let b = __engine("str_byte_at", ch, 0);
+    let b = ch.byte_at(0);
     return b >= 48 && b <= 57;
 }
 
 fn repl_is_alpha(ch: str) -> bool {
     if ch == "_" { return true; }
-    let b = __engine("str_byte_at", ch, 0);
+    let b = ch.byte_at(0);
     return (b >= 65 && b <= 90) || (b >= 97 && b <= 122);
 }
 
 fn repl_parse_int(s: str) -> i64 {
-    let len = __engine("str_len", s);
+    let len = s.len();
     var v = 0;
     var i = 0;
     while i < len {
-        let ch = __engine("str_slice", s, i, i + 1);
+        let ch = s.slice(i, i + 1);
         var d = 0;
         if ch == "1" { d = 1; }
         else if ch == "2" { d = 2; }
@@ -73,10 +73,10 @@ fn repl_parse_int(s: str) -> i64 {
 }
 
 fn repl_trim(s: str) -> str {
-    let len = __engine("str_len", s);
+    let len = s.len();
     var start = 0;
     while start < len {
-        let ch = __engine("str_slice", s, start, start + 1);
+        let ch = s.slice(start, start + 1);
         if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" || ch == ";" {
             start = start + 1;
         } else {
@@ -85,25 +85,25 @@ fn repl_trim(s: str) -> str {
     }
     var end = len;
     while end > start {
-        let ch = __engine("str_slice", s, end - 1, end);
+        let ch = s.slice(end - 1, end);
         if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" || ch == ";" {
             end = end - 1;
         } else {
             break;
         }
     }
-    return __engine("str_slice", s, start, end);
+    return s.slice(start, end);
 }
 
 fn repl_tokenize(src: str) -> i64 {
     let tmap = __engine("map_new");
-    let len = __engine("str_len", src);
+    let len = src.len();
     var pos = 0;
     var count = 0;
 
     while pos < len {
         while pos < len {
-            let ch = __engine("str_slice", src, pos, pos + 1);
+            let ch = src.slice(pos, pos + 1);
             if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
                 pos = pos + 1;
             } else {
@@ -112,7 +112,7 @@ fn repl_tokenize(src: str) -> i64 {
         }
         if pos >= len { break; }
 
-        let ch = __engine("str_slice", src, pos, pos + 1);
+        let ch = src.slice(pos, pos + 1);
         if ch == "+" {
             __engine("map_set", tmap, count + "_kind", 3);
             __engine("map_set", tmap, count + "_text", "+");
@@ -146,14 +146,14 @@ fn repl_tokenize(src: str) -> i64 {
         } else if repl_is_digit(ch) {
             let start = pos;
             while pos < len {
-                let d = __engine("str_slice", src, pos, pos + 1);
+                let d = src.slice(pos, pos + 1);
                 if repl_is_digit(d) {
                     pos = pos + 1;
                 } else {
                     break;
                 }
             }
-            let num_str = __engine("str_slice", src, start, pos);
+            let num_str = src.slice(start, pos);
             let num_val = repl_parse_int(num_str);
             __engine("map_set", tmap, count + "_kind", 1);
             __engine("map_set", tmap, count + "_text", num_str);
@@ -162,14 +162,14 @@ fn repl_tokenize(src: str) -> i64 {
         } else if repl_is_alpha(ch) {
             let start = pos;
             while pos < len {
-                let a = __engine("str_slice", src, pos, pos + 1);
+                let a = src.slice(pos, pos + 1);
                 if repl_is_alpha(a) || repl_is_digit(a) {
                     pos = pos + 1;
                 } else {
                     break;
                 }
             }
-            let ident_str = __engine("str_slice", src, start, pos);
+            let ident_str = src.slice(start, pos);
             __engine("map_set", tmap, count + "_kind", 2);
             __engine("map_set", tmap, count + "_text", ident_str);
             count = count + 1;
@@ -271,10 +271,10 @@ fn repl_eval_str(sess: i64, expr_str: str) -> i64 {
 }
 
 fn repl_find_char(s: str, ch: str) -> i64 {
-    let len = __engine("str_len", s);
+    let len = s.len();
     var i = 0;
     while i < len {
-        if __engine("str_slice", s, i, i + 1) == ch {
+        if s.slice(i, i + 1) == ch {
             return i;
         }
         i = i + 1;
@@ -284,18 +284,18 @@ fn repl_find_char(s: str, ch: str) -> i64 {
 
 pub fn repl_eval_line(sess: i64, line: str) -> str {
     let clean = repl_trim(line);
-    let clen = __engine("str_len", clean);
+    let clen = clean.len();
     if clen == 0 { return "0"; }
 
     // Check if let / var binding
-    let is_let = clen >= 4 && __engine("str_slice", clean, 0, 4) == "let ";
-    let is_var = clen >= 4 && __engine("str_slice", clean, 0, 4) == "var ";
+    let is_let = clen >= 4 && clean.slice(0, 4) == "let ";
+    let is_var = clen >= 4 && clean.slice(0, 4) == "var ";
 
     if is_let || is_var {
         let eq_idx = repl_find_char(clean, "=");
         if eq_idx > 4 {
-            let var_name = repl_trim(__engine("str_slice", clean, 4, eq_idx));
-            let rhs_str = repl_trim(__engine("str_slice", clean, eq_idx + 1, clen));
+            let var_name = repl_trim(clean.slice(4, eq_idx));
+            let rhs_str = repl_trim(clean.slice(eq_idx + 1, clen));
             let res = repl_eval_str(sess, rhs_str);
             __engine("map_set", sess, var_name, res);
             return "" + res;
@@ -305,20 +305,20 @@ pub fn repl_eval_line(sess: i64, line: str) -> str {
     // Check if reassignment e.g. beta = beta - 5
     let eq_pos = repl_find_char(clean, "=");
     if eq_pos > 0 {
-        let prev_ch = __engine("str_slice", clean, eq_pos - 1, eq_pos);
+        let prev_ch = clean.slice(eq_pos - 1, eq_pos);
         var is_assign = true;
         if prev_ch == "=" || prev_ch == "!" || prev_ch == "<" || prev_ch == ">" {
             is_assign = false;
         }
         if eq_pos + 1 < clen {
-            let next_ch = __engine("str_slice", clean, eq_pos + 1, eq_pos + 2);
+            let next_ch = clean.slice(eq_pos + 1, eq_pos + 2);
             if next_ch == "=" {
                 is_assign = false;
             }
         }
         if is_assign {
-            let var_name = repl_trim(__engine("str_slice", clean, 0, eq_pos));
-            let rhs_str = repl_trim(__engine("str_slice", clean, eq_pos + 1, clen));
+            let var_name = repl_trim(clean.slice(0, eq_pos));
+            let rhs_str = repl_trim(clean.slice(eq_pos + 1, clen));
             let res = repl_eval_str(sess, rhs_str);
             __engine("map_set", sess, var_name, res);
             return "" + res;

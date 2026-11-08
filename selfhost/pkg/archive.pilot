@@ -26,23 +26,23 @@ pub pure fn archive_detect_format(archive_blob: str) -> ArchiveFormat {
 }
 
 fn ar_find(haystack: str, needle: str, start: i64) -> i64 {
-    let hl = __engine("str_len", haystack);
-    let nl = __engine("str_len", needle);
+    let hl = haystack.len();
+    let nl = needle.len();
     if nl == 0 || start < 0 || start + nl > hl { return -1; }
     var i = start;
     while i + nl <= hl {
-        if __engine("str_slice", haystack, i, i + nl) == needle { return i; }
+        if haystack.slice(i, i + nl) == needle { return i; }
         i = i + 1;
     }
     return -1;
 }
 
 fn ar_parse_int(s: str) -> i64 {
-    let n = __engine("str_len", s);
+    let n = s.len();
     var v = 0;
     var i = 0;
     while i < n {
-        let b = __engine("str_byte_at", s, i);
+        let b = s.byte_at(i);
         if b >= 48 && b <= 57 {
             v = v * 10 + (b - 48);
             i = i + 1;
@@ -77,7 +77,7 @@ pub fn pilpkg_serialize(ar: i64) -> str {
     while i < cnt {
         let path = __engine("map_get", ar, "path:" + i);
         let content = __engine("map_get", ar, "content:" + i);
-        let clen = __engine("str_len", content);
+        let clen = content.len();
         out = out + path + ":" + clen + "\n" + content + "\n";
         i = i + 1;
     }
@@ -91,10 +91,10 @@ pub fn pilpkg_file_count(archive_blob: str) -> i64 {
     if p != 0 {
         return 0;
     }
-    let hlen = __engine("str_len", hdr);
+    let hlen = hdr.len();
     let nl = ar_find(archive_blob, "\n", hlen);
     if nl < 0 { return 0; }
-    let cnt_str = __engine("str_slice", archive_blob, hlen, nl);
+    let cnt_str = archive_blob.slice(hlen, nl);
     return ar_parse_int(cnt_str);
 }
 
@@ -105,24 +105,24 @@ pub fn pilpkg_extract_file(archive_blob: str, rel_path: str) -> str {
     if p != 0 {
         return "";
     }
-    let total_len = __engine("str_len", archive_blob);
+    let total_len = archive_blob.len();
     let hdr_nl = ar_find(archive_blob, "\n", 0);
     if hdr_nl < 0 { return ""; }
     var pos = hdr_nl + 1;
     while pos < total_len {
         let line_end = ar_find(archive_blob, "\n", pos);
         if line_end < 0 { break; }
-        let meta = __engine("str_slice", archive_blob, pos, line_end);
+        let meta = archive_blob.slice(pos, line_end);
         let col = ar_find(meta, ":", 0);
         if col < 0 { break; }
-        let path = __engine("str_slice", meta, 0, col);
-        let len_str = __engine("str_slice", meta, col + 1, __engine("str_len", meta));
+        let path = meta.slice(0, col);
+        let len_str = meta.slice(col + 1, meta.len());
         let clen = ar_parse_int(len_str);
         let c_start = line_end + 1;
         let c_end = c_start + clen;
         if c_end > total_len { break; }
         if path == rel_path {
-            return __engine("str_slice", archive_blob, c_start, c_end);
+            return archive_blob.slice(c_start, c_end);
         }
         pos = c_end + 1; // skip trailing newline
     }

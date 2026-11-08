@@ -42,10 +42,10 @@ pub fn discover_arena_tests() -> str {
         if k == 3 {
             let sym = __engine("ast_node_sym", i);
             let name = __engine("sym_str", sym);
-            let nlen = __engine("str_len", name);
+            let nlen = name.len();
             var is_test = false;
             if nlen >= 5 {
-                let prefix = __engine("str_slice", name, 0, 5);
+                let prefix = name.slice(0, 5);
                 if prefix == "test_" {
                     is_test = true;
                 }
@@ -77,7 +77,7 @@ pub fn discover_arena_tests() -> str {
 
 // Summarizes CSV results e.g. "t1:1,t2:0,extra:1" -> {"passed":2,"failed":1,"total":3}
 pub fn summarize_test_suite_json(results_csv: str) -> str {
-    let len = __engine("str_len", results_csv);
+    let len = results_csv.len();
     var passed = 0;
     var failed = 0;
     var pos = 0;
@@ -86,15 +86,15 @@ pub fn summarize_test_suite_json(results_csv: str) -> str {
         // Find next comma or end
         var end = pos;
         while end < len {
-            let ch = __engine("str_slice", results_csv, end, end + 1);
+            let ch = results_csv.slice(end, end + 1);
             if ch == "," { break; }
             end = end + 1;
         }
 
-        let item = __engine("str_slice", results_csv, pos, end);
-        let item_len = __engine("str_len", item);
+        let item = results_csv.slice(pos, end);
+        let item_len = item.len();
         if item_len >= 2 {
-            let last_ch = __engine("str_slice", item, item_len - 1, item_len);
+            let last_ch = item.slice(item_len - 1, item_len);
             let outcome = test_outcome_from_code(last_ch);
             if outcome == TestOutcomeId.Pass {
                 passed = passed + 1;

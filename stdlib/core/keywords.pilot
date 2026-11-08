@@ -169,7 +169,7 @@ pub partial struct {
     __engine {}
 
     [KeywordDefAttr(0, "Declares a user-defined record or composite type.")]
-    struct struct {}
+    struct {}
 
     [KeywordDefAttr(0, "Declares a polymorphic contract with zero runtime header overhead.")]
     interface {}
@@ -271,47 +271,47 @@ pub partial struct {
 
     // Category 3: Visibility Modifiers
     [KeywordDefAttr(3, "Unrestricted public visibility across packages and projects.")]
-    struct pub {}
+    pub {}
 
     [KeywordDefAttr(3, "Private visibility restricted to enclosing lexical scope.")]
-    struct priv {}
+    priv {}
 
     [KeywordDefAttr(3, "Protected visibility accessible to derived types and extensions.")]
-    struct prot {}
+    prot {}
 
     [KeywordDefAttr(3, "Package visibility accessible anywhere within current package.")]
-    struct pkg {}
+    pkg {}
 
     [KeywordDefAttr(3, "Internal visibility accessible within compilation boundary.")]
-    struct int {}
+    int {}
 
     [KeywordDefAttr(3, "File-scoped visibility accessible only within current source file.")]
-    struct file {}
+    file {}
 
     [KeywordDefAttr(3, "Open visibility permitting cross-package inheritance and override.")]
     open {}
 
     [KeywordDefAttr(3, "Export visibility exported across dynamic foreign ABI boundaries.")]
-    struct export {}
+    export {}
 
     [KeywordDefAttr(3, "Hierarchical security clearance level ring modifier (lvl0..lvl4).", "[0-9]*")]
-    struct lvl {}
+    lvl {}
 
     // Category 4: Modifiers
     [KeywordDefAttr(4, "Pure referentially transparent function without side effects.")]
-    struct pure {}
+    pure {}
 
     [KeywordDefAttr(4, "Static member bound to type rather than instances.")]
-    struct static {}
+    static {}
 
     [KeywordDefAttr(4, "Isolated reference guarantee for Perceus borrow checking.")]
     iso {}
 
     [KeywordDefAttr(4, "Partial declaration enabling multi-file struct or interface aggregation.")]
-    struct partial {}
+    partial {}
 
     [KeywordDefAttr(4, "Extension method declaration augmenting existing types.")]
-    struct ext {}
+    ext {}
 
     // Category 5: Property Accessors
     [KeywordDefAttr(5, "Getter accessor clause returning property value.")]

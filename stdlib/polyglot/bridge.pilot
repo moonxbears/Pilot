@@ -30,11 +30,11 @@ pub fn build_polyglot_execution_plan(lang: str, preamble_json: str, snippet: str
 }
 
 pub pure fn bridge_quote_str(s: str) -> str {
-    let n = __engine("str_len", s);
+    let n = s.len();
     var out = "\"";
     var i = 0;
     while i < n {
-        let b = __engine("str_byte_at", s, i);
+        let b = s.byte_at(i);
         if b == 34 {
             out = out + "\\\"";
         } else if b == 92 {
@@ -44,7 +44,7 @@ pub pure fn bridge_quote_str(s: str) -> str {
         } else if b == 13 {
             out = out + "\\r";
         } else {
-            out = out + __engine("str_slice", s, i, i + 1);
+            out = out + s.slice(i, i + 1);
         }
         i = i + 1;
     }

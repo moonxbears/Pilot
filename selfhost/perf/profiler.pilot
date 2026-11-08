@@ -20,23 +20,23 @@ pub fn export_profile_by_format(folded_stacks: str, fmt: ProfilerFormat, total_w
 }
 
 fn prof_find(haystack: str, needle: str, start: i64) -> i64 {
-    let hl = __engine("str_len", haystack);
-    let nl = __engine("str_len", needle);
+    let hl = haystack.len();
+    let nl = needle.len();
     if nl == 0 || start < 0 || start + nl > hl { return -1; }
     var i = start;
     while i + nl <= hl {
-        if __engine("str_slice", haystack, i, i + nl) == needle { return i; }
+        if haystack.slice(i, i + nl) == needle { return i; }
         i = i + 1;
     }
     return -1;
 }
 
 fn prof_parse_int(s: str) -> i64 {
-    let n = __engine("str_len", s);
+    let n = s.len();
     var v = 0;
     var i = 0;
     while i < n {
-        let b = __engine("str_byte_at", s, i);
+        let b = s.byte_at(i);
         if b >= 48 && b <= 57 {
             v = v * 10 + (b - 48);
             i = i + 1;
@@ -51,31 +51,31 @@ fn prof_parse_int(s: str) -> i64 {
 // Aggregates samples per frame into map.
 pub fn parse_and_aggregate_folded_stacks(folded_stacks: str) -> i64 {
     let m = __engine("map_new");
-    let total_len = __engine("str_len", folded_stacks);
+    let total_len = folded_stacks.len();
     var pos = 0;
     var frame_count = 0;
     while pos < total_len {
         let nl = prof_find(folded_stacks, "\n", pos);
         let line_end = if nl >= 0 { nl } else { total_len };
         if line_end > pos {
-            let line = __engine("str_slice", folded_stacks, pos, line_end);
+            let line = folded_stacks.slice(pos, line_end);
             let sp = prof_find(line, " ", 0);
             var stack = line;
             var cnt = 1;
             if sp >= 0 {
-                stack = __engine("str_slice", line, 0, sp);
-                cnt = prof_parse_int(__engine("str_slice", line, sp + 1, __engine("str_len", line)));
+                stack = line.slice(0, sp);
+                cnt = prof_parse_int(line.slice(sp + 1, line.len()));
                 if cnt <= 0 { cnt = 1; }
             }
             // Extract leaf function name after last ';'
             var last_semi = -1;
-            let slen = __engine("str_len", stack);
+            let slen = stack.len();
             var si = 0;
             while si < slen {
-                if __engine("str_byte_at", stack, si) == 59 { last_semi = si; }
+                if stack.byte_at(si) == 59 { last_semi = si; }
                 si = si + 1;
             }
-            let fn_name = if last_semi >= 0 { __engine("str_slice", stack, last_semi + 1, slen) } else { stack };
+            let fn_name = if last_semi >= 0 { stack.slice(last_semi + 1, slen) } else { stack };
             
             let cur_val = __engine("map_get", m, "dur:" + fn_name);
             let prev = if cur_val != null { cur_val } else { 0 };

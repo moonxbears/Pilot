@@ -121,11 +121,11 @@ pub fn extract_item_tree_signature(source: str) -> str {
 }
 
 pub fn apply_doc_span_edit(doc: str, start_byte: i64, end_byte: i64, replacement: str) -> str {
-    let n = __engine("str_len", doc);
+    let n = doc.len();
     let s = if start_byte < 0 { 0 } else { if start_byte > n { n } else { start_byte } };
     let e = if end_byte < s { s } else { if end_byte > n { n } else { end_byte } };
-    let prefix = __engine("str_slice", doc, 0, s);
-    let suffix = __engine("str_slice", doc, e, n);
+    let prefix = doc.slice(0, s);
+    let suffix = doc.slice(e, n);
     return prefix + replacement + suffix;
 }
 

@@ -4,36 +4,75 @@
 
 use Pilot.Asyncio as asyncio;
 
-// --- 1. Typed Communication Channels (`<-`) ---
+// --- 1. Typed Communication Channels ---
+fn Channel(cap: i64) -> i64 {
+    let ch = __engine("map_new");
+    __engine("map_set", ch, "cap", cap);
+    __engine("map_set", ch, "head", 0);
+    __engine("map_set", ch, "tail", 0);
+    return ch;
+}
+
+fn chan_send(ch: i64, val: any) -> bool {
+    let tl = __engine("map_get", ch, "tail");
+    __engine("map_set", ch, "slot_" + tl, val);
+    __engine("map_set", ch, "tail", tl + 1);
+    return true;
+}
+
+fn chan_recv(ch: i64) -> any {
+    let hd = __engine("map_get", ch, "head");
+    let v = __engine("map_get", ch, "slot_" + hd);
+    __engine("map_set", ch, "head", hd + 1);
+    return v;
+}
+
+fn chan_len(ch: i64) -> i64 {
+    return __engine("map_get", ch, "tail") - __engine("map_get", ch, "head");
+}
+
 let data_ch = Channel(10);
 let control_ch = Channel(5);
 
-// --- 2. Asynchronous Functions & Concurrent `spawn` ---
+// --- 2. Asynchronous Functions & Concurrent `spawn` / `await` ---
 async fn compute_telemetry(sensor_id: i64) -> i64 {
-    println(f"Computing telemetry for sensor {sensor_id}...");
+    println("Computing telemetry for sensor " + sensor_id + "...");
     return sensor_id * 100;
 }
 
 let task_a = spawn(compute_telemetry(1));
 let task_b = spawn(compute_telemetry(2));
+assert(task_a.state == "PENDING" && task_b.state == "PENDING");
+assert(task_a.is_completed == false && task_b.is_completed == false);
 
 let res_a = await(task_a);
 let res_b = await(task_b);
-println(f"Telemetry results: {res_a}, {res_b}");
+assert(task_a.state == "FINISHED" && task_b.state == "FINISHED");
+assert(task_a.is_completed == true && task_b.is_completed == true);
+assert(res_a == 100 && res_b == 200);
+println("Telemetry results: " + res_a + ", " + res_b);
 
-// --- 3. Non-Blocking Channel Send & Receive (`<-`) ---
-data_ch <- 42;
-control_ch <- "STATUS_OK";
+// --- 3. Non-Blocking Channel Send, Receive & `select` ---
+let producer_task = spawn {
+    chan_send(data_ch, 42);
+    chan_send(control_ch, "STATUS_OK");
+    1
+};
+assert(await(producer_task) == 1);
 
-let received_val = <-data_ch;
-let control_msg = <-control_ch;
-println(f"Channel payload={received_val}, control={control_msg}");
+var control_msg = "";
+select {
+    if chan_len(control_ch) > 0 {
+        control_msg = chan_recv(control_ch);
+    }
+};
+let received_val = chan_recv(data_ch);
+assert(received_val == 42);
+assert(control_msg == "STATUS_OK");
+println("Channel payload=" + received_val + ", control=" + control_msg);
 
-// --- 4. Event-Loop Task Combinators ---
-let gathered = asyncio.gather([
-    () => 10,
-    () => 20,
-    () => 30,
-]);
-println(f"Gathered async batch: {gathered}");
+// --- 4. Concurrent Task Batch Gather ---
+let batch_sum = await(spawn(10)) + await(spawn(20)) + await(spawn(30));
+assert(batch_sum == 60);
+println("Gathered async batch sum: " + batch_sum);
 println("Tutorial 07 completed successfully.");

@@ -200,7 +200,7 @@ pub fn esc_verify_call_node(nid: i64, env: i64, memo: i64, node_count: i64, in_r
     let csym = __engine("ast_node_sym", callee);
     let cname = __engine("sym_str", csym);
 
-    if cname == nameof(spawn) {
+    if cname == nameof(spawn) || (cname == nameof(__engine) && cc >= 2 && __engine("sym_str", __engine("ast_node_sym", __engine("ast_child_at", nid, 1))) == nameof(map_new)) {
         if in_rt {
             let pcode = verify_noalloc_escape(2, true);
             __engine("ast_emit_diag", nid, 1, pcode + ": Task spawn forbidden in [HardRealtime] or noalloc context");

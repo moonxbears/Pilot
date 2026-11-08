@@ -74,11 +74,11 @@ pub fn build_c11_module(
 }
 
 pub fn ce_escape_c_str(s: str) -> str {
-    let n = __engine("str_len", s);
+    let n = s.len();
     var out = "\"";
     var i = 0;
     while i < n {
-        let b = __engine("str_byte_at", s, i);
+        let b = s.byte_at(i);
         if b == 34 {
             out = out + "\\\"";
         } else if b == 92 {
@@ -90,7 +90,7 @@ pub fn ce_escape_c_str(s: str) -> str {
         } else if b == 9 {
             out = out + "\\t";
         } else {
-            out = out + __engine("str_slice", s, i, i + 1);
+            out = out + s.slice(i, i + 1);
         }
         i = i + 1;
     }
@@ -150,11 +150,11 @@ pub fn ce_emit_expr(nid: i64) -> str {
                 let v_nid = __engine("ast_child_at", map_nid, mi + 1);
                 let fname = __engine("sym_str", __engine("ast_node_sym", k_nid));
                 let fval = ce_emit_expr(v_nid);
-                if __engine("str_len", inits) > 0 { inits = inits + ", "; }
+                if inits.len() > 0 { inits = inits + ", "; }
                 inits = inits + "." + fname + " = " + fval;
                 mi = mi + 2;
             }
-            if __engine("str_len", inits) == 0 {
+            if inits.len() == 0 {
                 return "((" + cname + "){ 0 })";
             }
             return "((" + cname + "){ " + inits + " })";
@@ -196,7 +196,7 @@ pub fn ce_emit_stmt(nid: i64, indent: str) -> str {
         var ci = 0;
         while ci < cc {
             let line = ce_emit_stmt(__engine("ast_child_at", nid, ci), indent);
-            if __engine("str_len", line) > 0 {
+            if line.len() > 0 {
                 out = out + line + "\n";
             }
             ci = ci + 1;
@@ -299,12 +299,12 @@ pub fn ce_fn_params_sig(fn_nid: i64) -> str {
             let pname = __engine("sym_str", __engine("ast_node_sym", p_nid));
             let ptsym = __engine("ast_node_raw_bits", p_nid);
             let pty = ct_c11_type_for_name(__engine("sym_str", ptsym));
-            if __engine("str_len", sig) > 0 { sig = sig + ", "; }
+            if sig.len() > 0 { sig = sig + ", "; }
             sig = sig + pty + " " + pname;
         }
         pi = pi + 1;
     }
-    if __engine("str_len", sig) == 0 {
+    if sig.len() == 0 {
         return "void";
     }
     return sig;

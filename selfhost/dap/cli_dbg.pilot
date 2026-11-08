@@ -19,10 +19,10 @@ pub enum CliDbgAction {
 }
 
 fn cli_trim(s: str) -> str {
-    let n = __engine("str_len", s);
+    let n = s.len();
     var a = 0;
     while a < n {
-        let b = __engine("str_byte_at", s, a);
+        let b = s.byte_at(a);
         if b == 32 || b == 9 || b == 13 || b == 10 {
             a = a + 1;
         } else {
@@ -31,24 +31,24 @@ fn cli_trim(s: str) -> str {
     }
     var e = n;
     while e > a {
-        let b = __engine("str_byte_at", s, e - 1);
+        let b = s.byte_at(e - 1);
         if b == 32 || b == 9 || b == 13 || b == 10 {
             e = e - 1;
         } else {
             break;
         }
     }
-    return __engine("str_slice", s, a, e);
+    return s.slice(a, e);
 }
 
 fn cli_verb(cmd_line: str) -> str {
     let t = cli_trim(cmd_line);
-    let n = __engine("str_len", t);
+    let n = t.len();
     var i = 0;
     while i < n {
-        let b = __engine("str_byte_at", t, i);
+        let b = t.byte_at(i);
         if b == 32 || b == 9 {
-            return __engine("str_slice", t, 0, i);
+            return t.slice(0, i);
         }
         i = i + 1;
     }
@@ -87,12 +87,12 @@ pub fn parse_cli_dbg_action(cmd_line: str) -> i64 {
 
 pub fn parse_cli_dbg_arg(cmd_line: str) -> str {
     let t = cli_trim(cmd_line);
-    let n = __engine("str_len", t);
+    let n = t.len();
     var i = 0;
     while i < n {
-        let b = __engine("str_byte_at", t, i);
+        let b = t.byte_at(i);
         if b == 32 || b == 9 {
-            return cli_trim(__engine("str_slice", t, i + 1, n));
+            return cli_trim(t.slice(i + 1, n));
         }
         i = i + 1;
     }

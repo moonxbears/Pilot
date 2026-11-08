@@ -8,7 +8,7 @@ pub pkg Pilot.SelfHost.Dap.Server;
 pub pure fn nameof(sym: str) -> str => sym;
 
 pub fn encode_dap_frame(json_payload: str) -> str {
-    let byte_len = __engine("str_len", json_payload);
+    let byte_len = json_payload.len();
     return "Content-Length: " + byte_len + "\r\n\r\n" + json_payload;
 }
 

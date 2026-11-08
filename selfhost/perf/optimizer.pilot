@@ -41,12 +41,12 @@ pub pure fn optimizer_pass_active(pass: AstOptimizationPass) -> bool {
 }
 
 fn opt_find(haystack: str, needle: str, start: i64) -> i64 {
-    let hl = __engine("str_len", haystack);
-    let nl = __engine("str_len", needle);
+    let hl = haystack.len();
+    let nl = needle.len();
     if nl == 0 || start < 0 || start + nl > hl { return -1; }
     var i = start;
     while i + nl <= hl {
-        if __engine("str_slice", haystack, i, i + nl) == needle { return i; }
+        if haystack.slice(i, i + nl) == needle { return i; }
         i = i + 1;
     }
     return -1;
@@ -82,7 +82,7 @@ fn opt_eval_node(node_id: i64) -> i64 {
 pub fn optimize_mounted_pilot_source() -> str {
     let node_count = __engine("ast_node_count");
     let full_src = __engine("source_slice", 0, 999999);
-    let total_len = __engine("str_len", full_src);
+    let total_len = full_src.len();
     let pass_dead = optimizer_pass_active(AstOptPassId.DeadBranchElimination);
     let pass_fold = optimizer_pass_active(AstOptPassId.ConstantFolding);
     let _act_keep = classify_optimizer_action(OptActionId.Keep);

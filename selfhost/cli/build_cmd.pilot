@@ -41,7 +41,7 @@ pub pure fn format_build_summary(module_name: str, target_flag: str, out_path: s
 // Parses e.g. "build app/guidance.pilot --target wasm --release -o out/guidance.wasm"
 // into "<cmd>|<input>|<target>|<release_0_or_1>|<out>"
 pub fn parse_cli_build_args(argv_line: str) -> str {
-    let len = __engine("str_len", argv_line);
+    let len = argv_line.len();
     var cmd = "";
     var input = "";
     var target = "native";
@@ -53,7 +53,7 @@ pub fn parse_cli_build_args(argv_line: str) -> str {
     while pos < len {
         // Skip whitespace
         while pos < len {
-            let ch = __engine("str_slice", argv_line, pos, pos + 1);
+            let ch = argv_line.slice(pos, pos + 1);
             if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
                 pos = pos + 1;
             } else {
@@ -64,13 +64,13 @@ pub fn parse_cli_build_args(argv_line: str) -> str {
 
         let start = pos;
         while pos < len {
-            let ch = __engine("str_slice", argv_line, pos, pos + 1);
+            let ch = argv_line.slice(pos, pos + 1);
             if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
                 break;
             }
             pos = pos + 1;
         }
-        let tok = __engine("str_slice", argv_line, start, pos);
+        let tok = argv_line.slice(start, pos);
 
         if token_idx == 0 {
             cmd = tok;
@@ -78,7 +78,7 @@ pub fn parse_cli_build_args(argv_line: str) -> str {
         } else if tok == "--target" {
             // Next token is target
             while pos < len {
-                let ch = __engine("str_slice", argv_line, pos, pos + 1);
+                let ch = argv_line.slice(pos, pos + 1);
                 if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
                     pos = pos + 1;
                 } else {
@@ -87,13 +87,13 @@ pub fn parse_cli_build_args(argv_line: str) -> str {
             }
             let t_start = pos;
             while pos < len {
-                let ch = __engine("str_slice", argv_line, pos, pos + 1);
+                let ch = argv_line.slice(pos, pos + 1);
                 if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
                     break;
                 }
                 pos = pos + 1;
             }
-            let raw_target = __engine("str_slice", argv_line, t_start, pos);
+            let raw_target = argv_line.slice(t_start, pos);
             let b_target = resolve_build_target(raw_target);
             let b_name = build_target_to_name(b_target);
             target = if b_name != "native" { b_name } else { raw_target };
@@ -102,7 +102,7 @@ pub fn parse_cli_build_args(argv_line: str) -> str {
         } else if tok == "-o" || tok == "--output" {
             // Next token is output path
             while pos < len {
-                let ch = __engine("str_slice", argv_line, pos, pos + 1);
+                let ch = argv_line.slice(pos, pos + 1);
                 if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
                     pos = pos + 1;
                 } else {
@@ -111,15 +111,15 @@ pub fn parse_cli_build_args(argv_line: str) -> str {
             }
             let o_start = pos;
             while pos < len {
-                let ch = __engine("str_slice", argv_line, pos, pos + 1);
+                let ch = argv_line.slice(pos, pos + 1);
                 if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
                     break;
                 }
                 pos = pos + 1;
             }
-            out_path = __engine("str_slice", argv_line, o_start, pos);
+            out_path = argv_line.slice(o_start, pos);
         } else {
-            if input == "" && __engine("str_slice", tok, 0, 1) != "-" {
+            if input == "" && tok.slice(0, 1) != "-" {
                 input = tok;
             }
         }

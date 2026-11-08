@@ -596,6 +596,15 @@ pub fn vmc_compile_node(st: i64, nid: i64) -> i64 {
         let ufl = __engine("ast_node_flags", nid);
         if ufl == 1 {
             vmc_emit(st, op_move(), dst, r_op, 0);
+        } else if ufl == 3 {
+            let r_key = vmc_emit_load_const(st, vmc_add_str_const(st, nameof(payload)));
+            let r_hook = vmc_emit_load_const(st, vmc_add_str_const(st, nameof(map_get)));
+            let seq = (__engine("map_get", st, "call_seq") + 0) + 1;
+            __engine("map_set", st, "call_seq", seq);
+            __engine("map_set", st, "carg_" + seq + "_0", r_op);
+            __engine("map_set", st, "carg_" + seq + "_1", r_key);
+            vmc_stage_call_args(st, seq, 2);
+            vmc_emit(st, op_engine_intrinsic(), dst, r_hook, 2);
         } else if ufl == 5 {
             vmc_emit(st, op_not(), dst, r_op, 0);
         } else {
@@ -612,7 +621,20 @@ pub fn vmc_compile_node(st: i64, nid: i64) -> i64 {
             return 0;
         }
         let dst = vmc_alloc_temp(st);
-        let bop = binary_flag_to_opcode(__engine("ast_node_flags", nid));
+        let bfl = __engine("ast_node_flags", nid);
+        if bfl == 26 {
+            let r_key = vmc_emit_load_const(st, vmc_add_str_const(st, nameof(payload)));
+            let r_hook = vmc_emit_load_const(st, vmc_add_str_const(st, nameof(map_set)));
+            let seq = (__engine("map_get", st, "call_seq") + 0) + 1;
+            __engine("map_set", st, "call_seq", seq);
+            __engine("map_set", st, "carg_" + seq + "_0", r_l);
+            __engine("map_set", st, "carg_" + seq + "_1", r_key);
+            __engine("map_set", st, "carg_" + seq + "_2", r_r);
+            vmc_stage_call_args(st, seq, 3);
+            vmc_emit(st, op_engine_intrinsic(), dst, r_hook, 3);
+            return dst;
+        }
+        let bop = binary_flag_to_opcode(bfl);
         vmc_emit(st, bop, dst, r_l, r_r);
         return dst;
     }

@@ -64,7 +64,7 @@ fn sh_is_seed_kw(w: str) -> bool {
 
 pub fn sh_tokenize(src: str) -> i64 {
     let tape = __engine("map_new");
-    let len = __engine("str_len", src);
+    let len = src.len();
     var pos = 0;
     var count = 0;
     var prev_token_end = -1;
@@ -75,39 +75,39 @@ pub fn sh_tokenize(src: str) -> i64 {
     var b_top = 0;
 
     while pos < len {
-        let b = __engine("str_byte_at", src, pos);
+        let b = src.byte_at(pos);
 
         // Skip whitespace
         if b == 32 || b == 9 || b == 10 || b == 13 {
             pos = pos + 1;
-        } else if b == 47 && pos + 1 < len && __engine("str_byte_at", src, pos + 1) == 47 {
+        } else if b == 47 && pos + 1 < len && src.byte_at(pos + 1) == 47 {
             // Line comment // ...
             pos = pos + 2;
             while pos < len {
-                let cb = __engine("str_byte_at", src, pos);
+                let cb = src.byte_at(pos);
                 pos = pos + 1;
                 if cb == 10 { break; }
             }
-        } else if b == 47 && pos + 1 < len && __engine("str_byte_at", src, pos + 1) == 42 {
+        } else if b == 47 && pos + 1 < len && src.byte_at(pos + 1) == 42 {
             // Block comment /* ... */
             pos = pos + 2;
             while pos + 1 < len {
-                let cb1 = __engine("str_byte_at", src, pos);
-                let cb2 = __engine("str_byte_at", src, pos + 1);
+                let cb1 = src.byte_at(pos);
+                let cb2 = src.byte_at(pos + 1);
                 if cb1 == 42 && cb2 == 47 {
                     pos = pos + 2;
                     break;
                 }
                 pos = pos + 1;
             }
-        } else if b == 34 || (b == 102 && pos + 1 < len && __engine("str_byte_at", src, pos + 1) == 34) {
+        } else if b == 34 || (b == 102 && pos + 1 < len && src.byte_at(pos + 1) == 34) {
             // String literal "..." or f"..."
             let is_fstr = b == 102;
             let start = pos;
             if is_fstr { pos = pos + 1; }
             pos = pos + 1; // skip opening quote
             while pos < len {
-                let cb = __engine("str_byte_at", src, pos);
+                let cb = src.byte_at(pos);
                 if cb == 92 && pos + 1 < len { // escape \
                     pos = pos + 2;
                 } else if cb == 34 { // closing quote
@@ -117,7 +117,7 @@ pub fn sh_tokenize(src: str) -> i64 {
                     pos = pos + 1;
                 }
             }
-            let s_text = __engine("str_slice", src, start, pos);
+            let s_text = src.slice(start, pos);
             let s_tag = if is_fstr { "FStrLit" } else { "StrLit" };
             __engine("map_set", tape, count + "_text", s_text);
             __engine("map_set", tape, count + "_tag", s_tag);
@@ -145,11 +145,11 @@ pub fn sh_tokenize(src: str) -> i64 {
             // !?( -> EffectDryRun
             var call_quote_tag = "";
             var sigil_len = 0;
-            if pos + 1 < len && __engine("str_byte_at", src, pos + 1) == 40 { // !(
+            if pos + 1 < len && src.byte_at(pos + 1) == 40 { // !(
                 call_quote_tag = "CallQuoteShallow";
                 sigil_len = 1;
-            } else if pos + 2 < len && __engine("str_byte_at", src, pos + 2) == 40 {
-                let nb = __engine("str_byte_at", src, pos + 1);
+            } else if pos + 2 < len && src.byte_at(pos + 2) == 40 {
+                let nb = src.byte_at(pos + 1);
                 if nb == 33 { call_quote_tag = "CallQuoteDeep"; sigil_len = 2; }
                 else if nb == 38 { call_quote_tag = "CallQuoteAbi"; sigil_len = 2; }
                 else if nb == 94 { call_quote_tag = "CallQuoteSignal"; sigil_len = 2; }
@@ -158,7 +158,7 @@ pub fn sh_tokenize(src: str) -> i64 {
             }
 
             if call_quote_tag != "" {
-                let sig_text = __engine("str_slice", src, pos, pos + sigil_len);
+                let sig_text = src.slice(pos, pos + sigil_len);
                 __engine("map_set", tape, count + "_text", sig_text);
                 __engine("map_set", tape, count + "_tag", call_quote_tag);
                 __engine("map_set", tape, count + "_match", -1);
@@ -166,7 +166,7 @@ pub fn sh_tokenize(src: str) -> i64 {
                 prev_token_is_infix_predecessor = false;
                 count = count + 1;
                 pos = pos + sigil_len;
-            } else if pos + 1 < len && __engine("str_byte_at", src, pos + 1) == 61 { // !=
+            } else if pos + 1 < len && src.byte_at(pos + 1) == 61 { // !=
                 __engine("map_set", tape, count + "_text", "!=");
                 __engine("map_set", tape, count + "_tag", "Op");
                 __engine("map_set", tape, count + "_match", -1);
@@ -256,7 +256,7 @@ pub fn sh_tokenize(src: str) -> i64 {
             count = count + 1;
             pos = pos + 1;
         } else if b == 59 || b == 44 || b == 58 { // ';', ',', ':'
-            let p_txt = __engine("str_slice", src, pos, pos + 1);
+            let p_txt = src.slice(pos, pos + 1);
             __engine("map_set", tape, count + "_text", p_txt);
             __engine("map_set", tape, count + "_tag", "Punct");
             __engine("map_set", tape, count + "_match", -1);
@@ -266,10 +266,10 @@ pub fn sh_tokenize(src: str) -> i64 {
             pos = pos + 1;
         } else if sh_is_digit(b) {
             let start = pos;
-            while pos < len && sh_is_digit(__engine("str_byte_at", src, pos)) {
+            while pos < len && sh_is_digit(src.byte_at(pos)) {
                 pos = pos + 1;
             }
-            let num_text = __engine("str_slice", src, start, pos);
+            let num_text = src.slice(start, pos);
             __engine("map_set", tape, count + "_text", num_text);
             __engine("map_set", tape, count + "_tag", "IntLit");
             __engine("map_set", tape, count + "_match", -1);
@@ -278,10 +278,10 @@ pub fn sh_tokenize(src: str) -> i64 {
             count = count + 1;
         } else if sh_is_alpha(b) {
             let start = pos;
-            while pos < len && sh_is_id_char(__engine("str_byte_at", src, pos)) {
+            while pos < len && sh_is_id_char(src.byte_at(pos)) {
                 pos = pos + 1;
             }
-            let id_text = __engine("str_slice", src, start, pos);
+            let id_text = src.slice(start, pos);
             let tag = if sh_is_seed_kw(id_text) { "SeedKw" } else { "Ident" };
             __engine("map_set", tape, count + "_text", id_text);
             __engine("map_set", tape, count + "_tag", tag);
@@ -293,7 +293,7 @@ pub fn sh_tokenize(src: str) -> i64 {
             // Multi-char operators e.g. ==, <=, >=, &&, ||, =>, ->
             var op_len = 1;
             if pos + 1 < len {
-                let b2 = __engine("str_byte_at", src, pos + 1);
+                let b2 = src.byte_at(pos + 1);
                 if (b == 61 && b2 == 61) || // ==
                    (b == 60 && b2 == 61) || // <=
                    (b == 62 && b2 == 61) || // >=
@@ -304,7 +304,7 @@ pub fn sh_tokenize(src: str) -> i64 {
                     op_len = 2;
                 }
             }
-            let op_text = __engine("str_slice", src, pos, pos + op_len);
+            let op_text = src.slice(pos, pos + op_len);
             __engine("map_set", tape, count + "_text", op_text);
             __engine("map_set", tape, count + "_tag", "Op");
             __engine("map_set", tape, count + "_match", -1);
