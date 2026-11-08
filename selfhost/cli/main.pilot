@@ -23,11 +23,13 @@ pub pure fn cli_help_banner() -> str {
            "  lsp                             Start resident PilVM Language Server\n" +
            "  perf <profile|analyze|opt>      Profile and optimize code performance\n" +
            "  compile <file.pilot> [-o out]   Compile source into .pilc v3 bytecode binary\n" +
+           "  tree [file.pilot] [flags]       Display visual dependency tree of imports or packages\n" +
+           "  deps <tree|list|check> [file]   Inspect, list, and verify dependencies\n" +
            "  ide-sync                        Synchronize VS Code extension grammar and schemas";
 }
 
 // Subcommand dispatch codes:
-// 1=run, 2=build, 3=check, 4=fmt, 5=test, 6=repl, 7=pkg, 8=venv, 9=debug, 10=lsp, 11=perf, 12=compile, 13=ide-sync, 0=help
+// 1=run, 2=build, 3=check, 4=fmt, 5=test, 6=repl, 7=pkg, 8=venv, 9=debug, 10=lsp, 11=perf, 12=compile, 13=ide-sync, 14=tree, 15=deps, 0=help
 pub pure fn resolve_cli_subcommand(cmd: str) -> i64 {
     if cmd == "run" { return 1; }
     if cmd == "build" { return 2; }
@@ -42,5 +44,7 @@ pub pure fn resolve_cli_subcommand(cmd: str) -> i64 {
     if cmd == "perf" { return 11; }
     if cmd == "compile" { return 12; }
     if cmd == "ide-sync" { return 13; }
+    if cmd == "tree" { return 14; }
+    if cmd == "deps" { return 15; }
     return 0;
 }

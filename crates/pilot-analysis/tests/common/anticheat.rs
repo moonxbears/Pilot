@@ -241,7 +241,7 @@ const FROZEN_FILE_HASHES: &[(&str, &str)] = &[
     ("crates/pilot-analysis/src/types.rs", "5f1c77c5460f4de51b0e7afbd71cd01af9aa66a870df6cad5c37cc1b4ba07ca2"),
     ("crates/pilot-arena/src/lib.rs", "e8b266d8bc670a83129336a1107b25d0dfdb3216e15722950dad937dd8a359db"),
     ("crates/pilot-ast/src/lib.rs", "36a22291afc94a53b54b1635aea180ef10e25c1feee923d1d5ac78ab291f1f87"),
-    ("crates/pilot-cli/src/main.rs", "e660a7b9c4d6ba725ce093a8b378b6ec16b04382965fdd7f424bcda11becf43c"),
+    ("crates/pilot-cli/src/main.rs", "75a4cb1bff1dba70d6fedd02269db2aac3c6c9b0b6cf8a08d9eb8954456ee196"),
     ("crates/pilot-codegen/src/lib.rs", "5e027849e84b89dd29843b232f50ae2e1be6f9733fa9546597c0d734ddab8f54"),
     ("crates/pilot-ffi/src/lib.rs", "fa6168d1f93f0f2f8223bb8eecbbf497cdbcae66790719b4dc62aa7ffd1061f5"),
     ("crates/pilot-intern/src/lib.rs", "21706d16555027439719fe53cae9235fac0c9238e4f5f2316584d077adb39232"),
