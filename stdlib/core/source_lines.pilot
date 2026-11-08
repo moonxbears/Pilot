@@ -1,0 +1,66 @@
+// =========================================================================
+// FILE: stdlib/core/source_lines.pilot
+// PURE PILOT SOURCE SPAN, LINE COUNTING & OFFSET RESOLUTION
+// Replaces __engine("ast_source_lines")
+// =========================================================================
+pub pkg Pilot.Core.SourceLines;
+
+use Pilot.Core.Genesis::*;
+use Pilot.Core.Interfaces::*;
+
+pub pure fn count_source_lines(src: str, start: usize, end: usize) -> usize {
+    let s = if start > src.len { src.len } else { start };
+    let e = if end > src.len { src.len } else { end };
+    var count: usize = 0;
+    var idx = s;
+    loop {
+        if !(idx < e) { break; }
+        if src[idx] == 10 { // ASCII newline '\n'
+            count = count + 1;
+        }
+        idx = idx + 1;
+    }
+    return count;
+}
+
+pub pure fn offset_to_line_and_col(src: str, offset: usize) -> (usize, usize) {
+    let target = if offset > src.len { src.len } else { offset };
+    var line: usize = 1;
+    var last_line_start: usize = 0;
+    var idx: usize = 0;
+    loop {
+        if !(idx < target) { break; }
+        if src[idx] == 10 {
+            line = line + 1;
+            last_line_start = idx + 1;
+        }
+        idx = idx + 1;
+    }
+    let col = (target - last_line_start) + 1;
+    return (line, col);
+}
+
+pub pure fn get_source_line(src: str, target_line: usize) -> str {
+    if target_line == 0 { return ""; }
+    var current_line: usize = 1;
+    var line_start: usize = 0;
+    var idx: usize = 0;
+    loop {
+        if !(idx < src.len) { break; }
+        if current_line == target_line && line_start == 0 && idx > 0 {
+            line_start = idx;
+        }
+        if src[idx] == 10 {
+            if current_line == target_line {
+                return src.slice(line_start, idx);
+            }
+            current_line = current_line + 1;
+            line_start = idx + 1;
+        }
+        idx = idx + 1;
+    }
+    if current_line == target_line && line_start < src.len {
+        return src.slice(line_start, src.len);
+    }
+    return "";
+}

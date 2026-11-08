@@ -26,6 +26,73 @@ pub partial struct str : IEquatable<str>, IIndexGet<usize, u8>, IReference {
             len:  r.end - r.start,
         };
 
+        // Pure Pilot byte indexing (replaces __engine("str_byte_at"))
+        fn byte_at(idx: usize) -> u8 {
+            if idx >= .len { return 0; }
+            return .data[idx];
+        }
+
+        // Pure Pilot slice view extraction (replaces __engine("str_slice"))
+        fn slice(start: usize, end: usize) -> str {
+            let s = if start > .len { .len } else { start };
+            let e = if end > .len { .len } else { end };
+            if s >= e { return str { data: .data, len: 0 }; }
+            return str {
+                data: .data + s,
+                len:  e - s,
+            };
+        }
+
+        fn is_empty() -> bool => .len == 0;
+
+        fn starts_with(prefix: str) -> bool {
+            if prefix.len > .len { return false; }
+            var i: usize = 0;
+            loop {
+                if !(i < prefix.len) { break; }
+                if .data[i] != prefix.data[i] { return false; }
+                i = i + 1;
+            }
+            return true;
+        }
+
+        fn ends_with(suffix: str) -> bool {
+            if suffix.len > .len { return false; }
+            let offset = .len - suffix.len;
+            var i: usize = 0;
+            loop {
+                if !(i < suffix.len) { break; }
+                if .data[offset + i] != suffix.data[i] { return false; }
+                i = i + 1;
+            }
+            return true;
+        }
+
+        fn index_of(needle: str) -> isize {
+            if needle.len == 0 { return 0; }
+            if needle.len > .len { return -1; }
+            let max_start = .len - needle.len;
+            var i: usize = 0;
+            loop {
+                if i > max_start { break; }
+                var match_found = true;
+                var j: usize = 0;
+                loop {
+                    if !(j < needle.len) { break; }
+                    if .data[i + j] != needle.data[j] {
+                        match_found = false;
+                        break;
+                    }
+                    j = j + 1;
+                }
+                if match_found { return i as isize; }
+                i = i + 1;
+            }
+            return -1;
+        }
+
+        fn contains(needle: str) -> bool => .index_of(needle) >= 0;
+
         op == (rhs: str) -> bool {
             if .len != rhs.len { return false; }
             var idx: usize = 0;
@@ -39,3 +106,10 @@ pub partial struct str : IEquatable<str>, IIndexGet<usize, u8>, IReference {
 
         fn get_enumerator() -> SliceEnumerator<u8> => .as_bytes().get_enumerator();
 }
+
+// Pure Pilot stand-alone functional string primitives (replaces all __engine("str_*") calls)
+pub pure fn str_len_pure(s: str) -> usize => s.len;
+pub pure fn str_byte_at_pure(s: str, idx: usize) -> u8 => s.byte_at(idx);
+pub pure fn str_slice_pure(s: str, start: usize, end: usize) -> str => s.slice(start, end);
+pub pure fn str_index_of_pure(haystack: str, needle: str) -> isize => haystack.index_of(needle);
+pub pure fn str_contains_pure(haystack: str, needle: str) -> bool => haystack.contains(needle);

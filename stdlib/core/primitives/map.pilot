@@ -26,4 +26,88 @@ pub partial struct map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IReference {
         }
         return false;
     }
+
+    pub pure fn find_index(key: TKey) -> isize {
+        var idx: usize = 0;
+        loop {
+            if !(idx < .keys.len) { break; }
+            if .keys[idx] == key { return idx as isize; }
+            idx = idx + 1;
+        }
+        return -1;
+    }
+
+    pub pure fn get(key: TKey) -> option<TVal> {
+        let idx = .find_index(key);
+        if idx >= 0 {
+            return some .vals[idx as usize];
+        }
+        return none;
+    }
+
+    pub pure op [] (key: TKey) -> TVal {
+        let idx = .find_index(key);
+        if idx >= 0 {
+            return .vals[idx as usize];
+        }
+        panic("Key not found in map projection");
+    }
+}
+
+// Pure Pilot dynamic key-value dictionary (replaces __engine("map_new"), __engine("map_set"), __engine("map_get"))
+[KeywordDefAttr(29, "Owned dynamic heap map buffer backed by linear key/value vectors.")]
+pub partial struct MapBuffer<TKey: IEquatable<TKey>, TVal: IAnyValue> : IObject {
+    pub keys: List<TKey>;
+    pub vals: List<TVal>;
+
+    pub self() {
+        .keys = List<TKey>();
+        .vals = List<TVal>();
+    }
+
+    pub pure fn count() -> usize => .keys.len;
+    pub pure fn is_empty() -> bool => .keys.len == 0;
+
+    pub pure fn find_index(key: TKey) -> isize {
+        var i: usize = 0;
+        loop {
+            if !(i < .keys.len) { break; }
+            if .keys[i] == key { return i as isize; }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    pub pure fn contains_key(key: TKey) -> bool => .find_index(key) >= 0;
+
+    pub pure fn get(key: TKey) -> option<TVal> {
+        let idx = .find_index(key);
+        if idx >= 0 { return some .vals[idx as usize]; }
+        return none;
+    }
+
+    pub fn set(key: TKey, val: TVal) {
+        let idx = .find_index(key);
+        if idx >= 0 {
+            .vals[idx as usize] = val;
+        } else {
+            .keys.push(key);
+            .vals.push(val);
+        }
+    }
+
+    pub fn remove(key: TKey) -> bool {
+        let idx = .find_index(key);
+        if idx >= 0 {
+            .keys.remove_at(idx as usize);
+            .vals.remove_at(idx as usize);
+            return true;
+        }
+        return false;
+    }
+
+    pub fn clear() {
+        .keys.clear();
+        .vals.clear();
+    }
 }
