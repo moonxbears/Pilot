@@ -655,6 +655,20 @@ pub struct IdePresentationPolicy : IValue {
         fn format_type_hover(name: str, byte_size: usize, byte_align: usize, bits: u8) -> str =>
             f"**{name}** — `{byte_size} bytes` (`align {byte_align}`) | `{IdePresentationPolicy.lattice_badge(bits)}`";
 
+        fn format_param_hover(param_name: str, param_type: str, target_offset: i64) -> str =>
+            if target_offset >= 0 { f"- `{param_name}`: [`{param_type}`](#decl-{param_type}-{target_offset}) *(offset {target_offset})*" }
+            else { f"- `{param_name}`: [`{param_type}`](#{param_type})" };
+
+        fn format_return_hover(ret_type: str, target_offset: i64) -> str =>
+            if target_offset >= 0 { f"**Returns:**\n- [`{ret_type}`](#decl-{ret_type}-{target_offset}) *(offset {target_offset})*" }
+            else { f"**Returns:**\n- [`{ret_type}`](#{ret_type})" };
+
+        fn format_overload_hover(index: usize, sig: str, decl_offset: i64) -> str =>
+            f"{index}. `{sig}` *(decl offset {decl_offset})*";
+
+        fn format_type_ref_hover(symbol_name: str, context_sig: str, ref_offset: i64) -> str =>
+            f"- [`{symbol_name}`](#ref-{symbol_name}-{ref_offset}): `{context_sig}` *(offset {ref_offset})*";
+
         fn format_capture_inlay_hint(captures_csv: str) -> str =>
             f"/* captures: {captures_csv} */";
 }

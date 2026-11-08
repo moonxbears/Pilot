@@ -182,7 +182,34 @@ pub fn extract_node_signature_str(fn_id: i64) -> str {
     return __engine(Cfg.ast.source_slice, sig_start, sig_end);
 }
 
-pub pure fn format_hover_param_list(sig_str: str) -> str {
+pub fn find_type_decl_node(type_str: str, node_count: i64) -> i64 {
+    if type_str == "" { return -1; }
+    var i = 0;
+    while i < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, i);
+        if k == 1 || k == 2 {
+            let sname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
+            if sname != "" && lsp_str_contains_word(type_str, sname) { return i; }
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+pub fn format_type_ref_link(type_str: str, node_count: i64) -> str {
+    let tid = find_type_decl_node(type_str, node_count);
+    if tid >= 0 {
+        let tname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, tid));
+        let toff = __engine(Cfg.ast.ast_span_start, tid);
+        let lid = __engine(Cfg.ast.ast_get_bound_layout, tid);
+        let bsize = if lid != 4294967295 && lid >= 0 { __engine(Cfg.ast.layout_metrics, lid) } else { 0 };
+        let sz_note = if bsize > 0 { ", " + bsize + " bytes" } else { "" };
+        return "[`" + type_str + "`](#" + tname + ") *(ref [`" + tname + "`](#" + tname + ") @ offset " + toff + sz_note + ")*";
+    }
+    return "[`" + type_str + "`](#" + type_str + ")";
+}
+
+pub fn format_hover_param_list(sig_str: str, node_count: i64) -> str {
     let slen = sig_str.len();
     var p_open = -1;
     var i = 0;
@@ -203,9 +230,9 @@ pub pure fn format_hover_param_list(sig_str: str) -> str {
         }
         j = j + 1;
     }
-    if p_close <= p_open + 1 { return ""; }
+    if p_close <= p_open + 1 { return "\n\n**Parameters:** *(none)*"; }
     let inner = sig_str.slice(p_open + 1, p_close).trim();
-    if inner == "" { return ""; }
+    if inner == "" { return "\n\n**Parameters:** *(none)*"; }
     var out = "\n\n**Parameters:**";
     var start_idx = 0;
     let in_len = inner.len();
@@ -230,8 +257,17 @@ pub pure fn format_hover_param_list(sig_str: str) -> str {
                 }
                 if colon_pos >= 0 {
                     let pname = param_raw.slice(0, colon_pos).trim();
-                    let ptype = param_raw.slice(colon_pos + 1, plen).trim();
-                    out = out + "\n- `" + pname + "`: [`" + ptype + "`](#" + ptype + ")";
+                    let rhs_raw = param_raw.slice(colon_pos + 1, plen).trim();
+                    var eq_pos = -1;
+                    var ei = 0;
+                    let rlen = rhs_raw.len();
+                    while ei < rlen && eq_pos == -1 {
+                        if rhs_raw.slice(ei, ei + 1) == "=" && (ei + 1 >= rlen || rhs_raw.slice(ei + 1, ei + 2) != ">") { eq_pos = ei; }
+                        ei = ei + 1;
+                    }
+                    let ptype = if eq_pos >= 0 { rhs_raw.slice(0, eq_pos).trim() } else { rhs_raw };
+                    let def_note = if eq_pos >= 0 { " *(default: `" + rhs_raw.slice(eq_pos + 1, rlen).trim() + "`)*" } else { "" };
+                    out = out + "\n- `" + pname + "`: " + format_type_ref_link(ptype, node_count) + def_note;
                 } else {
                     out = out + "\n- `" + param_raw + "`";
                 }
@@ -243,7 +279,7 @@ pub pure fn format_hover_param_list(sig_str: str) -> str {
     return out;
 }
 
-pub pure fn format_hover_returns(sig_str: str) -> str {
+pub fn format_hover_returns(sig_str: str, node_count: i64) -> str {
     let slen = sig_str.len();
     var arrow_pos = -1;
     var i = 0;
@@ -251,9 +287,10 @@ pub pure fn format_hover_returns(sig_str: str) -> str {
         if sig_str.slice(i, i + 2) == "->" { arrow_pos = i; }
         i = i + 1;
     }
-    if arrow_pos == -1 { return ""; }
+    let unit_ret = "\n\n**Returns:**\n- [`" + nameof(void) + "`](#" + nameof(void) + ")";
+    if arrow_pos == -1 { return unit_ret; }
     var ret_part = sig_str.slice(arrow_pos + 2, slen).trim();
-    if ret_part == "" { return ""; }
+    if ret_part == "" { return unit_ret; }
     var r_end = ret_part.len();
     var j = 0;
     while j < r_end {
@@ -262,8 +299,8 @@ pub pure fn format_hover_returns(sig_str: str) -> str {
         j = j + 1;
     }
     ret_part = ret_part.slice(0, r_end).trim();
-    if ret_part == "" { return ""; }
-    return "\n\n**Returns:**\n- [`" + ret_part + "`](#" + ret_part + ")";
+    if ret_part == "" { return unit_ret; }
+    return "\n\n**Returns:**\n- " + format_type_ref_link(ret_part, node_count);
 }
 
 pub fn format_hover_overloads(word: str, current_fn_id: i64, node_count: i64) -> str {
@@ -274,12 +311,12 @@ pub fn format_hover_overloads(word: str, current_fn_id: i64, node_count: i64) ->
         if i != current_fn_id {
             let k = __engine(Cfg.ast.ast_node_kind, i);
             if k == 3 {
-                let sym = __engine(Cfg.ast.ast_node_sym, i);
-                let sname = __engine(Cfg.ast.sym_str, sym);
+                let sname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
                 if sname == word {
                     count = count + 1;
                     let osig = extract_node_signature_str(i);
-                    if osig != "" { list_md = list_md + "\n" + count + ". `" + osig + "`"; }
+                    let ooff = __engine(Cfg.ast.ast_span_start, i);
+                    if osig != "" { list_md = list_md + "\n" + count + ". `" + osig + "` *(@ offset " + ooff + ")*"; }
                 }
             }
         }
@@ -300,17 +337,18 @@ pub fn format_hover_type_references(type_name: str, type_id: i64, node_count: i6
                 let sig = extract_node_signature_str(i);
                 if lsp_str_contains_word(sig, type_name) {
                     ref_count = ref_count + 1;
-                    let sym = __engine(Cfg.ast.ast_node_sym, i);
-                    let fname = __engine(Cfg.ast.sym_str, sym);
+                    let fname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
                     ref_md = ref_md + "\n- In [`" + fname + "`](#" + fname + "): `" + sig + "`";
                 }
-            } else if k == 21 {
+            } else if k == 21 || k == 4 {
                 let s = __engine(Cfg.ast.ast_span_start, i);
                 let e = __engine(Cfg.ast.ast_span_end, i);
                 let f_src = __engine(Cfg.ast.source_slice, s, e).trim();
                 if lsp_str_contains_word(f_src, type_name) {
                     ref_count = ref_count + 1;
-                    ref_md = ref_md + "\n- Field in struct: `" + f_src + "`";
+                    let iname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
+                    let role = if k == 21 { "Field/Param" } else { "Binding" };
+                    ref_md = ref_md + "\n- " + role + " [`" + iname + "`](#" + iname + "): `" + f_src + "`";
                 }
             }
         }
@@ -437,12 +475,10 @@ pub fn handle_lsp_hover(offset: i64) {
         let sig_str = extract_node_signature_str(fn_id);
         var md = "```pilot\n" + sig_str + "\n```";
         let doc = reflect_node_doc(fn_id);
-        if doc != "" {
-            md = md + "\n\n---\n" + doc;
-        }
-        let params_md = format_hover_param_list(sig_str);
+        if doc != "" { md = md + "\n\n---\n" + doc; }
+        let params_md = format_hover_param_list(sig_str, node_count);
         if params_md != "" { md = md + params_md; }
-        let ret_md = format_hover_returns(sig_str);
+        let ret_md = format_hover_returns(sig_str, node_count);
         if ret_md != "" { md = md + ret_md; }
         let overloads_md = format_hover_overloads(word, fn_id, node_count);
         if overloads_md != "" { md = md + overloads_md; }
@@ -450,27 +486,38 @@ pub fn handle_lsp_hover(offset: i64) {
         return;
     }
 
-    if t_kind == 1 || b_kind == 1 {
-        let s_id = if t_kind == 1 { target_id } else { best_nid };
-        let sym = __engine(Cfg.ast.ast_node_sym, s_id);
-        var name = __engine(Cfg.ast.sym_str, sym);
+    if t_kind == 1 || b_kind == 1 || t_kind == 2 || b_kind == 2 {
+        let is_iface = t_kind == 2 || (t_kind != 1 && b_kind == 2);
+        let s_id = if t_kind == 1 || t_kind == 2 { target_id } else { best_nid };
+        var name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, s_id));
         if name == "" { name = word; }
-        var lid = __engine(Cfg.ast.ast_get_bound_layout, s_id);
+        let lid = __engine(Cfg.ast.ast_get_bound_layout, s_id);
         let byte_size = if lid != 4294967295 && lid >= 0 { __engine(Cfg.ast.layout_metrics, lid) } else { 0 };
         let doc = reflect_node_doc(s_id);
-        var md = "```pilot\n" + nameof(struct) + " " + name + "\n```\n*Layout Size*: `" + byte_size + " bytes`";
+        let kw_hdr = if is_iface { nameof(interface) } else { nameof(struct) };
+        var md = "```pilot\n" + kw_hdr + " " + name + "\n```\n*Layout Size*: `" + byte_size + " bytes`";
         let c_count = __engine(Cfg.ast.ast_child_count, s_id);
         if c_count > 0 {
-            var ci = 0;
-            var has_f = false;
+            var ci = 0; var has_f = false; var has_m = false;
             while ci < c_count {
                 let c_nid = __engine(Cfg.ast.ast_child_at, s_id, ci);
                 let c_kind = __engine(Cfg.ast.ast_node_kind, c_nid);
                 if c_kind == 21 {
                     if !has_f { md = md + "\n\n**Fields:**"; has_f = true; }
-                    let c_sym = __engine(Cfg.ast.ast_node_sym, c_nid);
-                    let c_name = __engine(Cfg.ast.sym_str, c_sym);
-                    if c_name != "" { md = md + "\n- `" + c_name + "`"; }
+                    let c_name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, c_nid));
+                    let f_slice = __engine(Cfg.ast.source_slice, __engine(Cfg.ast.ast_span_start, c_nid), __engine(Cfg.ast.ast_span_end, c_nid)).trim();
+                    let col_idx = f_slice.find(":");
+                    if col_idx >= 0 {
+                        var ft = f_slice.slice(col_idx + 1, f_slice.len()).trim();
+                        if ft.ends_with(";") { ft = ft.slice(0, ft.len() - 1).trim(); }
+                        md = md + "\n- `" + c_name + "`: " + format_type_ref_link(ft, node_count);
+                    } else if c_name != "" {
+                        md = md + "\n- `" + c_name + "`";
+                    }
+                } else if c_kind == 3 {
+                    if !has_m { md = md + "\n\n**Methods:**"; has_m = true; }
+                    let msig = extract_node_signature_str(c_nid);
+                    if msig != "" { md = md + "\n- `" + msig + "`"; }
                 }
                 ci = ci + 1;
             }
@@ -486,81 +533,53 @@ pub fn handle_lsp_hover(offset: i64) {
         let f_id = if b_kind == 21 { best_nid } else { target_id };
         let f_start = __engine(Cfg.ast.ast_span_start, f_id);
         var f_end = __engine(Cfg.ast.ast_span_end, f_id);
-        var trim_f = true;
-        while trim_f && f_end > f_start {
+        while f_end > f_start {
             let ch = __engine(Cfg.ast.source_slice, f_end - 1, f_end);
-            if ch == ";" || ch == " " || ch == "\t" || ch == "\r" || ch == "\n" {
-                f_end = f_end - 1;
-            } else {
-                trim_f = false;
-            }
+            if ch == ";" || ch == " " || ch == "\t" || ch == "\r" || ch == "\n" { f_end = f_end - 1; } else { break; }
         }
-        var f_slice = __engine(Cfg.ast.source_slice, f_start, f_end);
-        var lid = __engine(Cfg.ast.ast_get_bound_layout, f_id);
-        let byte_size = if lid != 4294967295 && lid >= 0 {
-            __engine(Cfg.ast.layout_metrics, lid)
-        } else {
-            0
-        };
+        let f_slice = __engine(Cfg.ast.source_slice, f_start, f_end);
+        let lid = __engine(Cfg.ast.ast_get_bound_layout, f_id);
+        let byte_size = if lid != 4294967295 && lid >= 0 { __engine(Cfg.ast.layout_metrics, lid) } else { 0 };
         var md = "```pilot\n" + f_slice + "\n```";
-        if byte_size > 0 {
-            md = md + "\n*Layout Size*: `" + byte_size + " bytes`";
+        if byte_size > 0 { md = md + "\n*Layout Size*: `" + byte_size + " bytes`"; }
+        let col_idx = f_slice.find(":");
+        if col_idx >= 0 {
+            let ft = f_slice.slice(col_idx + 1, f_slice.len()).trim();
+            if ft != "" { md = md + "\n*Type*: " + format_type_ref_link(ft, node_count); }
         }
         let doc = reflect_node_doc(f_id);
-        if doc != "" {
-            md = md + "\n\n---\n" + doc;
-        }
+        if doc != "" { md = md + "\n\n---\n" + doc; }
         __engine(Cfg.ast.lsp_set_result, md);
         return;
     }
 
     if b_kind == 4 || t_kind == 4 {
         let v_id = if b_kind == 4 { best_nid } else { target_id };
-        let sym = __engine(Cfg.ast.ast_node_sym, v_id);
-        var vname = __engine(Cfg.ast.sym_str, sym);
-        if vname == "" {
-            vname = word;
-        }
-        var lid = __engine(Cfg.ast.ast_get_bound_layout, v_id);
-        let byte_size = if lid != 4294967295 && lid >= 0 {
-            __engine(Cfg.ast.layout_metrics, lid)
-        } else {
-            0
-        };
+        var vname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, v_id));
+        if vname == "" { vname = word; }
+        let lid = __engine(Cfg.ast.ast_get_bound_layout, v_id);
+        let byte_size = if lid != 4294967295 && lid >= 0 { __engine(Cfg.ast.layout_metrics, lid) } else { 0 };
         var md = "```pilot\n" + nameof(let) + " " + vname;
+        var resolved_tname = "";
         if target_id != v_id {
-            let tsym = __engine(Cfg.ast.ast_node_sym, target_id);
-            let tname = __engine(Cfg.ast.sym_str, tsym);
-            if tname != "" {
-                md = md + ": " + tname;
-            }
+            let tname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, target_id));
+            if tname != "" { md = md + ": " + tname; resolved_tname = tname; }
         }
         md = md + "\n```";
-        if byte_size > 0 {
-            md = md + "\n*Layout Size*: `" + byte_size + " bytes`";
-        }
+        if byte_size > 0 { md = md + "\n*Layout Size*: `" + byte_size + " bytes`"; }
+        if resolved_tname != "" { md = md + "\n*Type*: " + format_type_ref_link(resolved_tname, node_count); }
         __engine(Cfg.ast.lsp_set_result, md);
         return;
     }
 
     var name = word;
     var lid = __engine(Cfg.ast.ast_get_bound_layout, best_nid);
-    if lid == 4294967295 || lid < 0 {
-        lid = __engine(Cfg.ast.ast_get_bound_layout, target_id);
-    }
-    let byte_size = if lid != 4294967295 && lid >= 0 {
-        __engine(Cfg.ast.layout_metrics, lid)
-    } else {
-        0
-    };
+    if lid == 4294967295 || lid < 0 { lid = __engine(Cfg.ast.ast_get_bound_layout, target_id); }
+    let byte_size = if lid != 4294967295 && lid >= 0 { __engine(Cfg.ast.layout_metrics, lid) } else { 0 };
     var md = "```pilot\n" + name + "\n```";
-    if byte_size > 0 {
-        md = md + "\n*Layout Size*: `" + byte_size + " bytes`";
-    }
+    if byte_size > 0 { md = md + "\n*Layout Size*: `" + byte_size + " bytes`"; }
     let doc = reflect_node_doc(target_id);
-    if doc != "" {
-        md = md + "\n\n---\n" + doc;
-    }
+    if doc != "" { md = md + "\n\n---\n" + doc; }
     __engine(Cfg.ast.lsp_set_result, md);
 }
 

@@ -252,6 +252,69 @@ pub pure fn lsp_format_hover_returns(sig: str) -> str {
     return "\\n\\n**Returns:**\\n- [`" + ret_part + "`](#" + ret_part + ")";
 }
 
+pub pure fn lsp_is_ident_byte(b: i64) -> bool {
+    return (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 95;
+}
+
+pub pure fn lsp_ident_at_offset(doc: str, offset: i64) -> str {
+    let n = __engine("str_len", doc);
+    if n == 0 || offset < 0 || offset >= n { return ""; }
+    var s = offset;
+    while s > 0 && lsp_is_ident_byte(__engine("str_byte_at", doc, s - 1)) { s = s - 1; }
+    var e = offset;
+    while e < n && lsp_is_ident_byte(__engine("str_byte_at", doc, e)) { e = e + 1; }
+    if e <= s { return ""; }
+    return __engine("str_slice", doc, s, e);
+}
+
+pub pure fn lsp_format_hover_overloads(doc: str, ident: str, cur_sig: str) -> str {
+    if ident == "" { return ""; }
+    let pat = nameof(fn) + " " + ident + "(";
+    let plen = __engine("str_len", pat);
+    let dlen = __engine("str_len", doc);
+    var pos = 0;
+    var count = 0;
+    var list_md = "";
+    while pos + plen <= dlen {
+        let hit = lsp_find_substr(doc, pat, pos);
+        if hit < 0 { break; }
+        let ov_sig = lsp_extract_hover_signature(doc, hit);
+        if ov_sig != "" && ov_sig != cur_sig {
+            count = count + 1;
+            list_md = list_md + "\\n" + count + ". `" + lsp_escape_json_str(ov_sig) + "` *(offset " + hit + ")*";
+        }
+        pos = hit + plen;
+    }
+    if count == 0 { return ""; }
+    return "\\n\\n**Overloads (" + count + "):**" + list_md;
+}
+
+pub pure fn lsp_format_hover_type_refs(doc: str, ident: str, cur_sig: str) -> str {
+    if ident == "" { return ""; }
+    let pat = ": " + ident;
+    let plen = __engine("str_len", pat);
+    let dlen = __engine("str_len", doc);
+    var pos = 0;
+    var count = 0;
+    var list_md = "";
+    while pos + plen <= dlen && count < 8 {
+        let hit = lsp_find_substr(doc, pat, pos);
+        if hit < 0 { break; }
+        let after_idx = hit + plen;
+        let boundary_ok = if after_idx >= dlen { true } else { !lsp_is_ident_byte(__engine("str_byte_at", doc, after_idx)) };
+        if boundary_ok {
+            let ref_sig = lsp_extract_hover_signature(doc, hit);
+            if ref_sig != "" && ref_sig != cur_sig {
+                count = count + 1;
+                list_md = list_md + "\\n- [`" + lsp_escape_json_str(ref_sig) + "`](#offset-" + hit + ")";
+            }
+        }
+        pos = hit + plen;
+    }
+    if count == 0 { return ""; }
+    return "\\n\\n**Type References (" + count + "):**" + list_md;
+}
+
 pub fn encode_lsp_frame(json_payload: str) -> str {
     let byte_len = json_payload.len();
     return "Content-Length: " + byte_len + "\r\n\r\n" + json_payload;
@@ -307,10 +370,13 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
                 doc = __engine("map_get", sess, "last_doc");
             }
             let sig = lsp_extract_hover_signature(doc, offset);
+            let ident = lsp_ident_at_offset(doc, offset);
             let esc_sig = lsp_escape_json_str(sig);
             let p_md = lsp_format_hover_params(sig);
             let r_md = lsp_format_hover_returns(sig);
-            let hover_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":{\"contents\":{\"kind\":\"markdown\",\"value\":\"```pilot\\n" + esc_sig + "\\n```" + p_md + r_md + "\"}}}";
+            let ov_md = lsp_format_hover_overloads(doc, ident, sig);
+            let tr_md = lsp_format_hover_type_refs(doc, ident, sig);
+            let hover_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":{\"contents\":{\"kind\":\"markdown\",\"value\":\"```pilot\\n" + esc_sig + "\\n```" + p_md + r_md + ov_md + tr_md + "\"}}}";
             out_frames = out_frames + encode_lsp_frame(hover_json);
         } else if method == "textDocument/completion" {
             let comp_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":[{\"label\":\"" + nameof(fn) + "\",\"kind\":14},{\"label\":\"" + nameof(struct) + "\",\"kind\":14},{\"label\":\"" + nameof(interface) + "\",\"kind\":14}]}";
