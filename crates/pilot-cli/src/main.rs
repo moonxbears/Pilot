@@ -50,10 +50,11 @@ fn run_file(path: &str) {
         }
         return;
     }
-    let src = fs::read_to_string(path).unwrap_or_default();
-    let arena = parse(&src);
-    let _ = AnalysisPipeline::analyze(&arena, arena.root);
+    let (arena, mut physics) = AnalysisPipeline::load_program(path);
     let mut vm = PilVirtualMachine::new();
+    let reg_ptr = &mut physics as *mut pilot_analysis::PhysicsRegistry;
+    vm.engine_handler = Some(Box::new(move |op, args| pilot_analysis::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, args)));
+    vm.shared_symbols = Some(std::sync::Arc::new(physics.symbol_strings.clone()));
     vm.load_binary(BytecodeCompiler::compile(&arena, arena.root));
     if let Some(i) = vm.run().as_int() { if i != 0 { println!("RESULT: {i}"); } }
 }
@@ -71,6 +72,7 @@ fn main() {
             let arena = parse(&fs::read_to_string(f).unwrap_or_default());
             let res = AnalysisPipeline::analyze(&arena, arena.root);
             println!("Checked '{}': {} diagnostics", f, res.diagnostics.len());
+            for d in &res.diagnostics { println!("  {}: {} at {:?}", d.code, d.message, d.span); }
         },
         "compile" => if let Some(f) = args.get(1) {
             let arena = parse(&fs::read_to_string(f).unwrap_or_default());

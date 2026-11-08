@@ -20,6 +20,7 @@ pub struct PilVirtualMachine {
     pub heap_maps: Vec<HashMap<String, PilotVal>>,
     pub hook: Option<VmHook>,
     pub engine_handler: Option<EngineIntrinsicHandler>,
+    pub shared_symbols: Option<std::sync::Arc<HashMap<u32, String>>>,
 }
 
 impl Default for PilVirtualMachine { fn default() -> Self { Self::new() } }
@@ -31,6 +32,7 @@ impl PilVirtualMachine {
             registers: [PilotVal::NULL; 256], constants: Vec::new(), instructions: Vec::new(),
             pc_spans: Vec::new(), reg_symbols: Vec::new(), pc: 0,
             call_stack: Vec::with_capacity(64), heap_maps: Vec::new(), hook: None, engine_handler: None,
+            shared_symbols: None,
         }
     }
 
@@ -96,7 +98,15 @@ impl PilVirtualMachine {
                     let hook_name = r1.to_string_repr();
                     let args: Vec<PilotVal> = (1..=src2).map(|i| unsafe { *self.registers.get_unchecked(i) }).collect();
                     let res = match hook_name.as_str() {
-                        "rt_print" => { if let Some(a) = args.first() { println!("{}", a.to_string_repr()); } PilotVal::NULL }
+                        "rt_print" => {
+                            if let Some(a) = args.first() {
+                                if let Some(m) = a.as_int().and_then(|i| self.heap_maps.get(i.max(0) as usize)) {
+                                    let mut items: Vec<String> = m.iter().map(|(k, v)| v.as_int().and_then(|i| self.heap_maps.get(i.max(0) as usize)).map_or_else(|| format!("{k}: {v:?}"), |s| { let mut p: Vec<String> = s.iter().map(|(sk, sv)| format!("{sk}: {sv:?}")).collect(); p.sort(); format!("{k}: {{ {} }}", p.join(", ")) })).collect();
+                                    items.sort(); println!("{{ {} }}", items.join(", "));
+                                } else { println!("{}", a.to_string_repr()); }
+                            }
+                            PilotVal::NULL
+                        }
                         "rt_assert" => { if !args.first().map_or(false, |v| v.as_bool().unwrap_or(false) || v.as_int().unwrap_or(0) != 0) { panic!("Assertion failed in PilVM execution"); } PilotVal::NULL }
                         "str_len" if !args.is_empty() => PilotVal::from_int(if args[0].is_null() { 0 } else { args[0].to_string_repr().len() as i64 }),
                         "str_byte_at" if args.len() >= 2 => {
@@ -119,6 +129,11 @@ impl PilVirtualMachine {
                             let idx = args[0].as_int().unwrap_or(-1);
                             if idx >= 0 && (idx as usize) < self.heap_maps.len() { self.heap_maps[idx as usize].get(&args[1].to_string_repr()).copied().unwrap_or(PilotVal::NULL) } else { PilotVal::NULL }
                         }
+                        "sym_str" if !args.is_empty() => {
+                            let sid = args[0].as_int().unwrap_or(0) as u32;
+                            self.shared_symbols.as_ref().and_then(|s| s.get(&sid)).map_or_else(|| self.engine_handler.as_mut().and_then(|h| h(&hook_name, &args).ok()).unwrap_or(PilotVal::NULL), |s| PilotVal::from_str(s))
+                        }
+                        "get_env" => PilotVal::from_int(0),
                         _ => self.engine_handler.as_mut().and_then(|h| h(&hook_name, &args).ok()).unwrap_or(PilotVal::NULL),
                     };
                     unsafe { *self.registers.get_unchecked_mut(dst) = res };

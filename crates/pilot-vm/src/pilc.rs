@@ -45,10 +45,7 @@ impl PilcBinary {
         for c in &self.constants {
             if c.tag() == pilot_rt::TAG_HEAP_STR {
                 let str_offset = heap_str_data.len() as u64;
-                c.with_str(|s| {
-                    heap_str_data.extend_from_slice(&(s.len() as u32).to_le_bytes());
-                    heap_str_data.extend_from_slice(s.as_bytes());
-                });
+                c.with_str(|s| { heap_str_data.extend_from_slice(&(s.len() as u32).to_le_bytes()); heap_str_data.extend_from_slice(s.as_bytes()); });
                 buf.extend_from_slice(&c.tag_meta.to_le_bytes());
                 buf.extend_from_slice(&str_offset.to_le_bytes());
             } else {
@@ -72,9 +69,7 @@ impl PilcBinary {
         let (mut offset, mut raw_consts) = (12, Vec::with_capacity(const_count));
         for _ in 0..const_count {
             if offset + 16 > bytes.len() { return Err("Truncated constant pool data".into()); }
-            let tag_meta = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
-            let payload = u64::from_le_bytes(bytes[offset + 8..offset + 16].try_into().unwrap());
-            raw_consts.push((tag_meta, payload));
+            raw_consts.push((u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap()), u64::from_le_bytes(bytes[offset + 8..offset + 16].try_into().unwrap())));
             offset += 16;
         }
         if offset + 4 > bytes.len() { return Err("Truncated heap string table header".into()); }
@@ -96,12 +91,11 @@ impl PilcBinary {
         if offset + 4 > bytes.len() { return Err("Truncated code section header".into()); }
         let ins_count = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
         offset += 4;
-        let mut instructions = Vec::with_capacity(ins_count);
-        for _ in 0..ins_count {
-            if offset + 4 > bytes.len() { return Err("Truncated instruction data".into()); }
-            instructions.push(Instruction(u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())));
-            offset += 4;
-        }
+        if offset + ins_count * 4 > bytes.len() { return Err("Truncated instruction data".into()); }
+        let instructions: Vec<Instruction> = (0..ins_count).map(|i| {
+            let o = offset + i * 4;
+            Instruction(u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap()))
+        }).collect();
         Ok(Self::new(constants, instructions))
     }
 }

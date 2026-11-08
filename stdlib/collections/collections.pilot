@@ -249,8 +249,8 @@ pub struct PriorityQueue : IValue {
             return entry_a[1] < entry_b[1];
         }
 
-        var fn push(priority: any, value: any) {
-            let entry = (priority, self._seq, value);
+        var fn push(prio: any, value: any) {
+            let entry = (prio, self._seq, value);
             self._seq = self._seq + 1;
             self._heap.append(entry);
             var idx: i64 = len(self._heap) - 1;
@@ -813,7 +813,7 @@ pub struct Counter : IValue {
             for k in self._counts.keys() {
                 let c: i64 = self._counts[k];
                 if c > 0 {
-                    for _rep in 0..<c {
+                    var _rep = 0; while _rep < c { _rep = _rep + 1;
                         out.append(k);
                     }
                 }

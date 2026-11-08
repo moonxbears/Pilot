@@ -18,28 +18,18 @@ impl ComptimeValue {
     pub fn as_int(&self) -> Option<i64> { match self { Self::Int(v) => Some(*v), Self::Uint(v) => Some(*v as i64), _ => None } }
     pub fn as_uint(&self) -> Option<u128> { match self { Self::Uint(v) => Some(*v), Self::Int(v) if *v >= 0 => Some(*v as u128), _ => None } }
     pub fn as_bool(&self) -> Option<bool> { match self { Self::Bool(b) => Some(*b), _ => None } }
-    pub fn as_str<'a>(&'a self, interner: &'a pilot_intern::Interner) -> Option<&'a str> {
-        match self { Self::Str(sym) | Self::Ident(sym) => Some(interner.resolve(*sym)), _ => None }
-    }
+    pub fn as_str<'a>(&'a self, interner: &'a pilot_intern::Interner) -> Option<&'a str> { match self { Self::Str(sym) | Self::Ident(sym) => Some(interner.resolve(*sym)), _ => None } }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum BootstrapDiagnostic {
-    ParseError { message: String, span: ByteSpan },
-    ExecutionError { message: String, span: ByteSpan },
-    BootstrapBridgeSealedError { message: String, span: ByteSpan },
-    UserCompileError { message: String, span: ByteSpan },
+    ParseError { message: String, span: ByteSpan }, ExecutionError { message: String, span: ByteSpan },
+    BootstrapBridgeSealedError { message: String, span: ByteSpan }, UserCompileError { message: String, span: ByteSpan },
     UnknownEngineHook { hook_name: String, span: ByteSpan },
 }
 
 impl BootstrapDiagnostic {
-    pub fn message(&self) -> &str {
-        match self {
-            Self::ParseError { message, .. } | Self::ExecutionError { message, .. }
-            | Self::BootstrapBridgeSealedError { message, .. } | Self::UserCompileError { message, .. } => message,
-            Self::UnknownEngineHook { hook_name, .. } => hook_name,
-        }
-    }
+    pub fn message(&self) -> &str { match self { Self::ParseError { message, .. } | Self::ExecutionError { message, .. } | Self::BootstrapBridgeSealedError { message, .. } | Self::UserCompileError { message, .. } => message, Self::UnknownEngineHook { hook_name, .. } => hook_name } }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -56,6 +46,21 @@ impl ComptimeEngine {
         let (flat_arena, symbol_strings) = crate::infer::flatten_ast(arena, node_id);
         let mut registry = crate::infer::PhysicsRegistry::new(flat_arena, symbol_strings);
         registry.layouts = self.layout_table.clone();
+        let (mut env_m, mut tgt_m, mut ast_m, mut sym_m) = (std::collections::HashMap::new(), std::collections::HashMap::new(), std::collections::HashMap::new(), std::collections::HashMap::new());
+        tgt_m.insert("architecture".to_string(), PilotVal::from_str(std::env::consts::ARCH));
+        tgt_m.insert("pointer_byte".to_string(), PilotVal::from_int(std::mem::size_of::<usize>() as i64));
+        tgt_m.insert("endianess".to_string(), PilotVal::from_str(if cfg!(target_endian = "little") { "little" } else { "big" }));
+        tgt_m.insert("backend".to_string(), PilotVal::from_str("vm"));
+        tgt_m.insert("cache_line".to_string(), PilotVal::from_int(64));
+        tgt_m.insert("opt_level".to_string(), PilotVal::from_int(2));
+        ast_m.insert("node_count".to_string(), PilotVal::from_int(registry.arena.nodes.len() as i64));
+        ast_m.insert("root_node".to_string(), PilotVal::from_int(0));
+        sym_m.insert("count".to_string(), PilotVal::from_int(registry.symbol_strings.len() as i64));
+        env_m.insert("target".to_string(), PilotVal::from_int(1));
+        env_m.insert("ast".to_string(), PilotVal::from_int(2));
+        env_m.insert("symbols".to_string(), PilotVal::from_int(3));
+        vm.heap_maps.push(env_m); vm.heap_maps.push(tgt_m); vm.heap_maps.push(ast_m); vm.heap_maps.push(sym_m);
+        vm.shared_symbols = Some(std::sync::Arc::new(registry.symbol_strings.clone()));
         let reg_ptr = &mut registry as *mut crate::infer::PhysicsRegistry;
         vm.engine_handler = Some(Box::new(move |op: &str, args: &[PilotVal]| crate::infer::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, args)));
         let ret = vm.run();
