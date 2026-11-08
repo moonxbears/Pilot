@@ -382,7 +382,7 @@ pub fn run_omnibus_showcase() -> void {
     let double_val = (x: i64) => x * 2;
     let piped_value = 10 |> add_five |> double_val;
     let rev_piped = double_val <| 25;
-
+    
     // --- 6.11 Arithmetic, Logical & Bitwise Operators ---
     let arithmetic = (10 + 5 - 2) * 4 / 2;
     let bitwise = (0b1100 & 0b1010) | (0b0011 ^ 0b0001) << 1 >> 1;

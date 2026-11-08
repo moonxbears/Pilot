@@ -4,6 +4,26 @@
         {
             "type": "pilot",
             "request": "launch",
+            "name": "Pilot: Debug with GUI (DAP)",
+            "mode": "dap",
+            "program": "${file}",
+            "stopOnEntry": false,
+            "internalConsoleOptions": "openOnSessionStart",
+            "args": []
+        },
+        {
+            "type": "pilot",
+            "request": "launch",
+            "name": "Pilot: Debug Current File",
+            "mode": "dap",
+            "program": "${file}",
+            "stopOnEntry": true,
+            "internalConsoleOptions": "openOnSessionStart",
+            "args": []
+        },
+        {
+            "type": "pilot",
+            "request": "launch",
             "name": "Pilot: Run Current File",
             "mode": "run",
             "program": "${file}",
@@ -18,22 +38,6 @@
             "args": [
                 "--vm"
             ]
-        },
-        {
-            "type": "pilot",
-            "request": "launch",
-            "name": "Pilot: Debug Current File",
-            "mode": "debug",
-            "program": "${file}",
-            "args": []
-        },
-        {
-            "type": "pilot",
-            "request": "launch",
-            "name": "Pilot: Debug with GUI (DAP)",
-            "mode": "dap",
-            "program": "${file}",
-            "args": []
         }
     ]
 }

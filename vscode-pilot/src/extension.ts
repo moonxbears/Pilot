@@ -987,12 +987,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.isDirty) {
                 await vscode.window.activeTextEditor.document.save();
             }
-            const pilotBin = resolvePilotBinary(context.extensionPath);
-            let terminal = vscode.window.terminals.find(t => t.name === 'Pilot Runner') || vscode.window.createTerminal('Pilot Runner');
-            terminal.show();
-            const isPowerShell = process.platform === 'win32' && (!vscode.env.shell || /powershell|pwsh/i.test(vscode.env.shell));
-            const pilotCmd = pilotBin === 'pilot' ? 'pilot' : (isPowerShell ? `& "${pilotBin}"` : `"${pilotBin}"`);
-            terminal.sendText(`${pilotCmd} debug "${filePath}"`);
+            await vscode.debug.startDebugging(undefined, {
+                type: 'pilot',
+                name: 'Pilot: Debug with GUI (DAP)',
+                request: 'launch',
+                program: filePath,
+                mode: 'dap',
+                stopOnEntry: false,
+                internalConsoleOptions: 'openOnSessionStart'
+            });
+            vscode.commands.executeCommand('workbench.debug.action.focusRepl');
         }),
         vscode.commands.registerCommand('pilot.debugCurrentFileDap', async (uri?: vscode.Uri) => {
             let filePath = uri?.fsPath;
@@ -1407,9 +1411,9 @@ class PilotDebugConfigurationProvider implements vscode.DebugConfigurationProvid
             config.stopOnEntry = false;
         }
 
-        const mode = config.mode || 'run';
-        // For interactive terminal runs and debugs (CLI debugger), run directly in the Pilot Runner terminal
-        if (mode === 'run' || mode === 'debug') {
+        const mode = config.mode || 'dap';
+        // For interactive terminal runs, run directly in the Pilot Runner terminal
+        if (mode === 'run') {
             const pilotBin = resolvePilotBinary(this.extensionPath, config.pilotPath);
             let terminal = vscode.window.terminals.find(t => t.name === 'Pilot Runner') || vscode.window.createTerminal('Pilot Runner');
             terminal.show();
@@ -1417,10 +1421,10 @@ class PilotDebugConfigurationProvider implements vscode.DebugConfigurationProvid
             const pilotCmd = pilotBin === 'pilot' ? 'pilot' : (isPowerShell ? `& "${pilotBin}"` : `"${pilotBin}"`);
             const rawArgs = Array.isArray(config.args) ? config.args : (config.args ? [config.args] : []);
             const argsStr = rawArgs.length > 0 ? ' ' + rawArgs.map((a: any) => `"${a}"`).join(' ') : '';
-            terminal.sendText(`${pilotCmd} ${mode} "${config.program}"${argsStr}`);
+            terminal.sendText(`${pilotCmd} run "${config.program}"${argsStr}`);
             return undefined;
         }
-
+        config.mode = 'dap';
         return config;
     }
 }

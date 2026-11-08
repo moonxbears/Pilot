@@ -442,6 +442,38 @@ pub fn resolve_target_node_id(best_nid: i64, word: str, node_count: i64) -> i64 
     return target_id;
 }
 
+pub fn resolve_nested_tree_hover(word: str, offset: i64) -> str {
+    let src_len = __engine(Cfg.ast.source_len);
+    if src_len <= 0 { return ""; }
+    var d_start = offset;
+    while d_start > 0 {
+        let ch = __engine(Cfg.ast.source_slice, d_start - 1, d_start);
+        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" || ch == "." { d_start = d_start - 1; }
+        else { break; }
+    }
+    var d_end = offset;
+    while d_end < src_len {
+        let ch = __engine(Cfg.ast.source_slice, d_end, d_end + 1);
+        if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" { d_end = d_end + 1; }
+        else { break; }
+    }
+    let dotted_prefix = __engine(Cfg.ast.source_slice, d_start, d_end).trim();
+    let full_src = __engine(Cfg.ast.source_slice, 0, src_len);
+    let p_colon = full_src.find(word + ":");
+    let p_eq = full_src.find(word + " =");
+    let hit = if p_colon >= 0 && (p_eq < 0 || p_colon < p_eq) { p_colon } else { p_eq };
+    if hit < 0 { return ""; }
+    var l_end = hit;
+    while l_end < src_len {
+        let ch = __engine(Cfg.ast.source_slice, l_end, l_end + 1);
+        if ch == "\n" || ch == "\r" { break; }
+        l_end = l_end + 1;
+    }
+    let decl_line = __engine(Cfg.ast.source_slice, hit, l_end).trim();
+    let hdr = if dotted_prefix.find(".") >= 0 { dotted_prefix } else { word };
+    return "```pilot\n" + hdr + " -> " + decl_line + "\n```\n*Declared at*: `offset " + hit + "`";
+}
+
 pub fn handle_lsp_hover(offset: i64) {
     let word = extract_ident_at_offset(offset);
     if word == "" {
@@ -453,6 +485,11 @@ pub fn handle_lsp_hover(offset: i64) {
     let best_nid = find_best_node_for_ident(word, offset, node_count);
 
     if best_nid == -1 {
+        let tree_md = resolve_nested_tree_hover(word, offset);
+        if tree_md != "" {
+            __engine(Cfg.ast.lsp_set_result, tree_md);
+            return;
+        }
         __engine(Cfg.ast.mount_unit, "stdlib/core/keywords.pilot");
         __engine(Cfg.ast.mount_unit, "../../stdlib/core/keywords.pilot");
         let doc = reflect_keyword_doc(word);
