@@ -432,6 +432,18 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
                 "{\"label\":\"Pilot.Collections\",\"kind\":9}," +
                 "{\"label\":\"Pilot.Crypto\",\"kind\":9}";
 
+            if lsp_find_substr(doc, "Pilot.Core", 0) >= 0 {
+                comp_json = comp_json +
+                    ",{\"label\":\"IAnyValue\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
+                    ",{\"label\":\"IValue\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
+                    ",{\"label\":\"IReference\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
+                    ",{\"label\":\"IObject\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
+                    ",{\"label\":\"IGuard\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
+                    ",{\"label\":\"IEnumerable\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
+                    ",{\"label\":\"IComparable\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
+                    ",{\"label\":\"IEquatable\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
+                    ",{\"label\":\"IDisposable\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}";
+            }
             if lsp_find_substr(doc, "Pilot.Core.Reflect", 0) >= 0 {
                 comp_json = comp_json +
                     ",{\"label\":\"reflect_category_scope\",\"kind\":3,\"detail\":\"pub fn reflect_category_scope(cat_id: i64) -> str\"}" +
@@ -442,6 +454,9 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
             }
             if lsp_find_substr(doc, "Pilot.Collections", 0) >= 0 {
                 comp_json = comp_json +
+                    ",{\"label\":\"IList\",\"kind\":8,\"detail\":\"(in Pilot.Collections) interface\",\"labelDetails\":{\"description\":\"Pilot.Collections\"}}" +
+                    ",{\"label\":\"IMap\",\"kind\":8,\"detail\":\"(in Pilot.Collections) interface\",\"labelDetails\":{\"description\":\"Pilot.Collections\"}}" +
+                    ",{\"label\":\"ISet\",\"kind\":8,\"detail\":\"(in Pilot.Collections) interface\",\"labelDetails\":{\"description\":\"Pilot.Collections\"}}" +
                     ",{\"label\":\"List\",\"kind\":7,\"detail\":\"struct List<T>\"}" +
                     ",{\"label\":\"Map\",\"kind\":7,\"detail\":\"struct Map<K, V>\"}" +
                     ",{\"label\":\"Set\",\"kind\":7,\"detail\":\"struct Set<T>\"}" +

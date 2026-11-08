@@ -12,19 +12,13 @@ use Pilot.Core.Meta.*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
-let Cfg = {
-    ast = {
-        ast_attr_arg: "ast_attr_arg", ast_attr_count: "ast_attr_count",
-        ast_child_at: "ast_child_at", ast_child_count: "ast_child_count",
-        ast_emit_diag: "ast_emit_diag", ast_get_bound_layout: "ast_get_bound_layout",
-        ast_get_bound_target: "ast_get_bound_target", ast_node_count: "ast_node_count",
-        ast_node_kind: "ast_node_kind", ast_node_sym: "ast_node_sym",
-        ast_span_end: "ast_span_end", ast_span_start: "ast_span_start",
-        layout_metrics: "layout_metrics", lsp_query_method: "lsp_query_method",
-        lsp_query_offset: "lsp_query_offset", lsp_set_result: "lsp_set_result",
-        mount_unit: "mount_unit", source_slice: "source_slice", sym_str: "sym_str",
-    }
-};
+let Cfg = { ast = {
+    ast_attr_arg: "ast_attr_arg", ast_attr_count: "ast_attr_count", ast_child_at: "ast_child_at", ast_child_count: "ast_child_count",
+    ast_emit_diag: "ast_emit_diag", ast_get_bound_layout: "ast_get_bound_layout", ast_get_bound_target: "ast_get_bound_target", ast_node_count: "ast_node_count",
+    ast_node_kind: "ast_node_kind", ast_node_sym: "ast_node_sym", ast_span_end: "ast_span_end", ast_span_start: "ast_span_start",
+    layout_metrics: "layout_metrics", lsp_query_method: "lsp_query_method", lsp_query_offset: "lsp_query_offset", lsp_set_result: "lsp_set_result",
+    mount_unit: "mount_unit", source_slice: "source_slice", sym_str: "sym_str",
+} };
 
 pub fn reflect_keyword_doc(target_word: str) -> str {
     if target_word == "" { return ""; }
@@ -51,8 +45,7 @@ pub fn reflect_keyword_badge(target_word: str) -> str {
         if __engine(Cfg.ast.ast_node_kind, i) == 1 {
             let ac = __engine(Cfg.ast.ast_attr_count, i);
             if (ac == 2 || ac == 3) && __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i)) == target_word {
-                target_cat_id = __engine(Cfg.ast.ast_attr_arg, i, 0);
-                i = node_count;
+                target_cat_id = __engine(Cfg.ast.ast_attr_arg, i, 0); i = node_count;
             }
         }
         i = i + 1;
@@ -91,15 +84,9 @@ pub fn reflect_node_doc(node_id: i64) -> str {
     }
     if p > win_start + 3 {
         var line_start = p;
-        while line_start > win_start && __engine(Cfg.ast.source_slice, line_start - 1, line_start) != "\n" {
-            line_start = line_start - 1;
-        }
+        while line_start > win_start && __engine(Cfg.ast.source_slice, line_start - 1, line_start) != "\n" { line_start = line_start - 1; }
         var ls = line_start;
-        while ls < p {
-            let ch = __engine(Cfg.ast.source_slice, ls, ls + 1);
-            if ch != " " && ch != "\t" { break; }
-            ls = ls + 1;
-        }
+        while ls < p && (__engine(Cfg.ast.source_slice, ls, ls + 1) == " " || __engine(Cfg.ast.source_slice, ls, ls + 1) == "\t") { ls = ls + 1; }
         if __engine(Cfg.ast.source_slice, ls, ls + 3) == "///" {
             var ds = ls + 3;
             if __engine(Cfg.ast.source_slice, ds, ds + 1) == " " { ds = ds + 1; }
@@ -159,22 +146,14 @@ pub fn extract_node_signature_str(fn_id: i64) -> str {
         if ch == "\n" || ch == ";" || ch == "{" || ch == "}" { break; }
         sig_start = sig_start - 1;
     }
-    while sig_start < fn_start {
-        let ch = __engine(Cfg.ast.source_slice, sig_start, sig_start + 1);
-        if ch != " " && ch != "\t" && ch != "\r" { break; }
-        sig_start = sig_start + 1;
-    }
+    while sig_start < fn_start && (__engine(Cfg.ast.source_slice, sig_start, sig_start + 1) == " " || __engine(Cfg.ast.source_slice, sig_start, sig_start + 1) == "\t") { sig_start = sig_start + 1; }
     var sig_end = fn_start;
     while sig_end < fn_start + 200 {
         let ch = __engine(Cfg.ast.source_slice, sig_end, sig_end + 1);
         if ch == "{" || ch == "=" || ch == ";" || ch == "\n" { break; }
         sig_end = sig_end + 1;
     }
-    while sig_end > fn_start {
-        let ch = __engine(Cfg.ast.source_slice, sig_end - 1, sig_end);
-        if ch != " " && ch != "\t" && ch != "\r" { break; }
-        sig_end = sig_end - 1;
-    }
+    while sig_end > fn_start && (__engine(Cfg.ast.source_slice, sig_end - 1, sig_end) == " " || __engine(Cfg.ast.source_slice, sig_end - 1, sig_end) == "\t") { sig_end = sig_end - 1; }
     return __engine(Cfg.ast.source_slice, sig_start, sig_end);
 }
 
@@ -616,6 +595,20 @@ pub fn handle_lsp_hover(offset: i64) {
     __engine(Cfg.ast.lsp_set_result, md);
 }
 
+fn reflect_node_namespace(nid: i64) -> str {
+    var p = nid;
+    while p >= 0 {
+        let ps = __engine(Cfg.ast.ast_span_start, p);
+        if ps != 4294967295 && ps >= 0 { break; }
+        if (__engine("ast_decl_flags", p) & 512) != 0 {
+            let ns = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, p));
+            if ns != "" { return ns; }
+        }
+        p = p - 1;
+    }
+    return "";
+}
+
 pub fn handle_lsp_completion(offset: i64) {
     let node_count = __engine(Cfg.ast.ast_node_count);
     var p = offset - 1;
@@ -627,17 +620,11 @@ pub fn handle_lsp_completion(offset: i64) {
 
     if p >= 0 && __engine(Cfg.ast.source_slice, p, p + 1) == "." {
         var r_end = p;
-        while r_end > 0 {
-            let ch = __engine(Cfg.ast.source_slice, r_end - 1, r_end);
-            if ch != " " && ch != "\t" { break; }
-            r_end = r_end - 1;
-        }
+        while r_end > 0 && (__engine(Cfg.ast.source_slice, r_end - 1, r_end) == " " || __engine(Cfg.ast.source_slice, r_end - 1, r_end) == "\t") { r_end = r_end - 1; }
         var r_start = r_end;
         while r_start > 0 {
             let ch = __engine(Cfg.ast.source_slice, r_start - 1, r_start);
-            if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" {
-                r_start = r_start - 1;
-            } else { break; }
+            if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" { r_start = r_start - 1; } else { break; }
         }
         let recv_name = __engine(Cfg.ast.source_slice, r_start, r_end);
         __engine(Cfg.ast.ast_emit_diag, 0, 1, "recv=" + recv_name);
@@ -647,12 +634,10 @@ pub fn handle_lsp_completion(offset: i64) {
             var j = 0;
             while j < node_count {
                 let k = __engine(Cfg.ast.ast_node_kind, j);
-                if k == 1 {
+                if k == 1 || k == 2 {
                     let s = __engine(Cfg.ast.ast_span_start, j);
                     let e = __engine(Cfg.ast.ast_span_end, j);
-                    if s <= offset && offset <= e {
-                        s_id = j;
-                    }
+                    if s <= offset && offset <= e { s_id = j; }
                 }
                 j = j + 1;
             }
@@ -660,28 +645,32 @@ pub fn handle_lsp_completion(offset: i64) {
             var j = 0;
             while j < node_count {
                 let k = __engine(Cfg.ast.ast_node_kind, j);
-                if k == 4 || k == 21 {
-                    let sym = __engine(Cfg.ast.ast_node_sym, j);
-                    let nm = __engine(Cfg.ast.sym_str, sym);
-                    if nm == recv_name {
-                        let tid = __engine(Cfg.ast.ast_get_bound_target, j);
-                        if tid != 4294967295 && tid >= 0 {
-                            let tk = __engine(Cfg.ast.ast_node_kind, tid);
-                            if tk == 1 {
-                                s_id = tid;
+                if (k == 4 || k == 21) && __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, j)) == recv_name {
+                    let tid = __engine(Cfg.ast.ast_get_bound_target, j);
+                    if tid != 4294967295 && tid >= 0 {
+                        let tk = __engine(Cfg.ast.ast_node_kind, tid);
+                        if tk == 1 || tk == 2 { s_id = tid; }
+                    }
+                    if s_id == -1 {
+                        let var_lid = __engine(Cfg.ast.ast_get_bound_layout, j);
+                        if var_lid != 4294967295 {
+                            var sj = 0;
+                            while sj < node_count {
+                                let sk = __engine(Cfg.ast.ast_node_kind, sj);
+                                if (sk == 1 || sk == 2) && __engine(Cfg.ast.ast_get_bound_layout, sj) == var_lid { s_id = sj; }
+                                sj = sj + 1;
                             }
                         }
-                        if s_id == -1 {
-                            let var_lid = __engine(Cfg.ast.ast_get_bound_layout, j);
-                            if var_lid != 4294967295 {
+                    }
+                    if s_id == -1 {
+                        let ty_sym = __engine(Cfg.ast.ast_node_raw_bits, j);
+                        if ty_sym != 0 {
+                            let ty_name = __engine(Cfg.ast.sym_str, ty_sym);
+                            if ty_name != "" {
                                 var sj = 0;
                                 while sj < node_count {
-                                    if __engine(Cfg.ast.ast_node_kind, sj) == 1 {
-                                        let s_lid = __engine(Cfg.ast.ast_get_bound_layout, sj);
-                                        if s_lid == var_lid {
-                                            s_id = sj;
-                                        }
-                                    }
+                                    let sk = __engine(Cfg.ast.ast_node_kind, sj);
+                                    if (sk == 1 || sk == 2) && __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, sj)) == ty_name { s_id = sj; }
                                     sj = sj + 1;
                                 }
                             }
@@ -694,6 +683,9 @@ pub fn handle_lsp_completion(offset: i64) {
 
         if s_id != -1 {
             let is_inside_struct = (recv_name == "self");
+            let is_iface_contract = (__engine(Cfg.ast.ast_node_kind, s_id) == 2);
+            let s_start = __engine(Cfg.ast.ast_span_start, s_id);
+            var struct_ext_ns = if s_start == 4294967295 || s_start < 0 { reflect_node_namespace(s_id) } else { "" };
             let c_count = __engine(Cfg.ast.ast_child_count, s_id);
             var items_json = "[";
             var added = 0;
@@ -726,15 +718,63 @@ pub fn handle_lsp_completion(offset: i64) {
                             p_scan = p_scan + 1;
                         }
                     }
-                    let is_hidden = if c_kind == 3 { !is_pub } else { is_priv };
+                    let is_hidden = if is_iface_contract { is_priv } else if c_kind == 3 { !is_pub } else { is_priv };
                     if is_inside_struct || !is_hidden {
                         if added > 0 { items_json = items_json + ", "; }
-                        let k_str = if c_kind == 3 { "2" } else { "5" };
-                        items_json = items_json + '{"label":"' + c_name + '","kind":' + k_str + '}';
+                        var is_prop = is_iface_contract && c_kind != 3;
+                        if !is_prop && c_start >= 0 && c_start != 4294967295 {
+                            let ce = __engine(Cfg.ast.ast_span_end, c_nid);
+                            var sc = c_start;
+                            while sc < ce {
+                                if __engine(Cfg.ast.source_slice, sc, sc + 1) == "{" { is_prop = true; break; }
+                                sc = sc + 1;
+                            }
+                        }
+                        let k_str = if c_kind == 3 { "2" } else if is_prop { "10" } else { "5" };
+                        let desc = if c_kind == 3 { "method" } else if is_prop { "property" } else { "field" };
+                        var ext_ns = struct_ext_ns;
+                        if ext_ns == "" && (c_start == 4294967295 || c_start < 0) { ext_ns = reflect_node_namespace(c_nid); }
+                        let det = if ext_ns != "" { "(in " + ext_ns + ") " + desc } else { desc };
+                        let ld = if ext_ns != "" { ',"labelDetails":{"description":"' + ext_ns + '"}' } else { "" };
+                        items_json = items_json + '{"label":"' + c_name + '","kind":' + k_str + ',"detail":"' + det + '"' + ld + '}';
                         added = added + 1;
                     }
                 }
                 ci = ci + 1;
+            }
+            let bcnt = __engine("ast_base_count", s_id);
+            var bi = 0;
+            while bi < bcnt {
+                let bsym = __engine("ast_base_at", s_id, bi);
+                var b_id = -1;
+                var bj = 0;
+                while bj < node_count {
+                    if __engine(Cfg.ast.ast_node_kind, bj) == 2 && __engine(Cfg.ast.ast_node_sym, bj) == bsym { b_id = bj; bj = node_count; }
+                    bj = bj + 1;
+                }
+                if b_id != -1 {
+                    let b_start = __engine(Cfg.ast.ast_span_start, b_id);
+                    var b_ext_ns = if b_start == 4294967295 || b_start < 0 { reflect_node_namespace(b_id) } else { "" };
+                    let b_cc = __engine(Cfg.ast.ast_child_count, b_id);
+                    var b_ci = 0;
+                    while b_ci < b_cc {
+                        let bc_nid = __engine(Cfg.ast.ast_child_at, b_id, b_ci);
+                        let bc_sym = __engine(Cfg.ast.ast_node_sym, bc_nid);
+                        let bc_name = __engine(Cfg.ast.sym_str, bc_sym);
+                        if bc_name != "" && !lsp_str_contains_word(items_json, "\"" + bc_name + "\"") {
+                            if added > 0 { items_json = items_json + ", "; }
+                            let bc_k = __engine(Cfg.ast.ast_node_kind, bc_nid);
+                            let bk_str = if bc_k == 3 { "2" } else { "10" };
+                            let bdesc = if bc_k == 3 { "method" } else { "property" };
+                            let det = if b_ext_ns != "" { "(in " + b_ext_ns + ") " + bdesc } else { bdesc };
+                            let ld = if b_ext_ns != "" { ',"labelDetails":{"description":"' + b_ext_ns + '"}' } else { "" };
+                            items_json = items_json + '{"label":"' + bc_name + '","kind":' + bk_str + ',"detail":"' + det + '"' + ld + '}';
+                            added = added + 1;
+                        }
+                        b_ci = b_ci + 1;
+                    }
+                }
+                bi = bi + 1;
             }
             items_json = items_json + "]";
             __engine(Cfg.ast.lsp_set_result, items_json);
@@ -747,13 +787,19 @@ pub fn handle_lsp_completion(offset: i64) {
     var ci = 0;
     while ci < node_count && c_count < 60 {
         let ck = __engine(Cfg.ast.ast_node_kind, ci);
-        if ck == 3 || ck == 1 || ck == 2 {
+        let df = __engine("ast_decl_flags", ci);
+        var k_val = if ck == 3 { "3" } else if ck == 1 { "7" } else if ck == 2 { "8" } else if ck == 4 { "6" } else if (df & 512) != 0 { "9" } else { "" };
+        var k_desc = if ck == 3 { "function" } else if ck == 1 { "class" } else if ck == 2 { "interface" } else if ck == 4 { "variable" } else if (df & 512) != 0 { "namespace" } else { "" };
+        if k_val != "" {
             let csym = __engine(Cfg.ast.ast_node_sym, ci);
             let cname = __engine(Cfg.ast.sym_str, csym);
-            if cname != "" && !cname.starts_with("__") {
+            if cname != "" && (cname.len() < 2 || cname.substring(0, 2) != "__") {
                 if c_count > 0 { comp_json = comp_json + ", "; }
-                let k_val = if ck == 3 { "2" } else if ck == 1 { "7" } else { "8" };
-                comp_json = comp_json + '{"label":"' + cname + '","kind":' + k_val + '}';
+                let cs = __engine(Cfg.ast.ast_span_start, ci);
+                var ext_ns = if cs == 4294967295 || cs < 0 { reflect_node_namespace(ci) } else { "" };
+                let det = if ext_ns != "" { "(in " + ext_ns + ") " + k_desc } else { k_desc };
+                let ld = if ext_ns != "" { ',"labelDetails":{"description":"' + ext_ns + '"}' } else { "" };
+                comp_json = comp_json + '{"label":"' + cname + '","kind":' + k_val + ',"detail":"' + det + '"' + ld + '}';
                 c_count = c_count + 1;
             }
         }
@@ -765,10 +811,7 @@ pub fn handle_lsp_completion(offset: i64) {
 
 pub fn handle_lsp_definition(offset: i64) {
     let word = extract_ident_at_offset(offset);
-    if word == "" {
-        __engine(Cfg.ast.lsp_set_result, "null");
-        return;
-    }
+    if word == "" { __engine(Cfg.ast.lsp_set_result, "null"); return; }
     let node_count = __engine(Cfg.ast.ast_node_count);
     let best_nid = find_best_node_for_ident(word, offset, node_count);
     if best_nid != -1 {
@@ -776,8 +819,7 @@ pub fn handle_lsp_definition(offset: i64) {
         let s = __engine(Cfg.ast.ast_span_start, target_id);
         let e = __engine(Cfg.ast.ast_span_end, target_id);
         if s == 4294967295 || s < 0 {
-            let res = "{\"targetNode\":" + target_id + ",\"isImported\":true}";
-            __engine(Cfg.ast.lsp_set_result, res);
+            __engine(Cfg.ast.lsp_set_result, "{\"targetNode\":" + target_id + ",\"isImported\":true}");
             return;
         }
         let pub_s = if s >= 4 { s - 4 } else { s };
@@ -789,15 +831,10 @@ pub fn handle_lsp_definition(offset: i64) {
         var scan_p = 0;
         while scan_p + pat_len <= s {
             if __engine(Cfg.ast.source_slice, scan_p, scan_p + pat_len) == pat {
-                first_decl = scan_p;
-                first_ident = scan_p + 7;
-                scan_p = s + 1;
-            } else {
-                scan_p = scan_p + 1;
-            }
+                first_decl = scan_p; first_ident = scan_p + 7; scan_p = s + 1;
+            } else { scan_p = scan_p + 1; }
         }
-        let res = "{\"start\":" + s + ",\"end\":" + e + ",\"pubStart\":" + pub_s + ",\"identStart\":" + ident_s + ",\"declOffset\":" + first_decl + ",\"identOffset\":" + first_ident + "}";
-        __engine(Cfg.ast.lsp_set_result, res);
+        __engine(Cfg.ast.lsp_set_result, "{\"start\":" + s + ",\"end\":" + e + ",\"pubStart\":" + pub_s + ",\"identStart\":" + ident_s + ",\"declOffset\":" + first_decl + ",\"identOffset\":" + first_ident + "}");
         return;
     }
     __engine(Cfg.ast.lsp_set_result, "null");
@@ -805,10 +842,7 @@ pub fn handle_lsp_definition(offset: i64) {
 
 pub fn handle_lsp_references(offset: i64) {
     let word = extract_ident_at_offset(offset);
-    if word == "" {
-        __engine(Cfg.ast.lsp_set_result, "[]");
-        return;
-    }
+    if word == "" { __engine(Cfg.ast.lsp_set_result, "[]"); return; }
     let node_count = __engine(Cfg.ast.ast_node_count);
     var refs_json = "[";
     var added = 0;
@@ -833,8 +867,7 @@ pub fn handle_lsp_references(offset: i64) {
                         var m_end = p;
                         while m_end < p + 60 {
                             let ch = __engine(Cfg.ast.source_slice, m_end, m_end + 1);
-                            if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" { m_end = m_end + 1; }
-                            else { break; }
+                            if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" { m_end = m_end + 1; } else { break; }
                         }
                         eff_e = m_end;
                     }
@@ -892,10 +925,7 @@ pub fn mount_single_import(raw_spec: str) {
         rel = if ch == "." { rel + "/" } else { rel + ch };
         i = i + 1;
     }
-    if mount_unit_safe(".pilotvenv/packages/" + rel + ".pilot") >= 0 { return; }
-    if mount_unit_safe("venv/packages/" + rel + ".pilot") >= 0 { return; }
-    if mount_unit_safe("src/" + rel + ".pilot") >= 0 { return; }
-    if mount_unit_safe(rel + ".pilot") >= 0 { return; }
+    if mount_unit_safe(".pilotvenv/packages/" + rel + ".pilot") >= 0 || mount_unit_safe("venv/packages/" + rel + ".pilot") >= 0 || mount_unit_safe("src/" + rel + ".pilot") >= 0 || mount_unit_safe(rel + ".pilot") >= 0 { return; }
     let _ = mount_unit_safe("stdlib/" + rel + ".pilot");
 }
 
@@ -919,18 +949,14 @@ pub fn is_keyword_or_seed(w: str) -> bool {
     if w == nameof(__engine) || w == nameof(struct) || w == nameof(interface) || w == nameof(fn) ||
        w == nameof(let) || w == nameof(ref) || w == nameof(if) || w == nameof(loop) ||
        w == nameof(return) || w == nameof(yield) || w == nameof(defer) || w == nameof(comptime) ||
-       w == nameof(quote) || w == nameof(asm) {
-        return true;
-    }
+       w == nameof(quote) || w == nameof(asm) { return true; }
     mount_keywords_if_needed();
     let node_count = __engine(Cfg.ast.ast_node_count);
     var i = 0;
     while i < node_count {
         if __engine(Cfg.ast.ast_node_kind, i) == 1 {
             let ac = __engine(Cfg.ast.ast_attr_count, i);
-            if (ac == 2 || ac == 3) && __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i)) == w {
-                return true;
-            }
+            if (ac == 2 || ac == 3) && __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i)) == w { return true; }
         }
         i = i + 1;
     }
@@ -939,15 +965,11 @@ pub fn is_keyword_or_seed(w: str) -> bool {
 
 pub fn handle_lsp_prepare_rename(offset: i64) {
     let word = extract_ident_at_offset(offset);
-    if word == "" || is_keyword_or_seed(word) {
-        __engine(Cfg.ast.lsp_set_result, "null");
-        return;
-    }
+    if word == "" || is_keyword_or_seed(word) { __engine(Cfg.ast.lsp_set_result, "null"); return; }
     let node_count = __engine(Cfg.ast.ast_node_count);
     let best_nid = find_best_node_for_ident(word, offset, node_count);
     if best_nid != -1 {
-        let sym = __engine(Cfg.ast.ast_node_sym, best_nid);
-        let sname = __engine(Cfg.ast.sym_str, sym);
+        let sname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, best_nid));
         let sym_name = if sname != "" { sname } else { word };
         __engine(Cfg.ast.lsp_set_result, if is_keyword_or_seed(sym_name) { "null" } else { sym_name });
         return;
@@ -959,19 +981,14 @@ pub fn handle_lsp_rename(offset: i64, method_str: str) {
     let pfx = "textDocument/rename:";
     if method_str.len() > pfx.len() && method_str.slice(0, pfx.len()) == pfx {
         let target_word = method_str.slice(pfx.len(), method_str.len());
-        if is_keyword_or_seed(target_word) {
-            __engine(Cfg.ast.lsp_set_result, "null");
-            return;
-        }
+        if is_keyword_or_seed(target_word) { __engine(Cfg.ast.lsp_set_result, "null"); return; }
     }
     handle_lsp_prepare_rename(offset);
 }
 
 mount_doc_imports();
-
 let _lsp_method = __engine(Cfg.ast.lsp_query_method);
 let _lsp_offset = __engine(Cfg.ast.lsp_query_offset);
-
 if _lsp_method == "textDocument/hover" { handle_lsp_hover(_lsp_offset); }
 else if _lsp_method == "textDocument/completion" { handle_lsp_completion(_lsp_offset); }
 else if _lsp_method == "textDocument/definition" { handle_lsp_definition(_lsp_offset); }
