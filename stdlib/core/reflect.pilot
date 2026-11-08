@@ -30,13 +30,13 @@ pub struct LayoutTarget : IValue {
     pub opt_level:    u8;
 
     pub static pure fn create(
-        architecture: str = "x86_64",
-        pointer_byte: usize = 8,
-        endianess:    str = "little",
-        features:     slice<str> = [],
-        backend:      str = "native",
-        cache_line:   usize = 64,
-        opt_level:    u8 = 2
+        architecture: str,
+        pointer_byte: usize,
+        endianess:    str,
+        features:     slice<str>,
+        backend:      str,
+        cache_line:   usize,
+        opt_level:    u8
     ) -> LayoutTarget => LayoutTarget {
         architecture: architecture,
         pointer_byte: pointer_byte,
@@ -74,11 +74,11 @@ pub struct AnatomyInfo : IValue {
     pub stride_step: isize;
 
     pub static pure fn create(
-        kind:        u8 = 0,
-        ptr_offset:  usize = 0,
-        len_offset:  usize = 0,
-        cap_offset:  usize = 0,
-        stride_step: isize = 1
+        kind:        u8,
+        ptr_offset:  usize,
+        len_offset:  usize,
+        cap_offset:  usize,
+        stride_step: isize
     ) -> AnatomyInfo => AnatomyInfo {
         kind:        kind,
         ptr_offset:  ptr_offset,
@@ -169,7 +169,7 @@ pub struct SymbolContext : IValue {
         scopes:        map<usize, str>,
         methods:       map<usize, str>,
         extensions:    map<usize, str>,
-        clearance_lvl: i64 = 0
+        clearance_lvl: i64
     ) -> SymbolContext => SymbolContext {
         scopes:        scopes,
         methods:       methods,
@@ -237,10 +237,10 @@ pub struct VmContext : IValue {
     pub diagnostics_count: usize;
 
     pub static pure fn create(
-        step_budget:       i64 = 1000000,
-        memory_used:       usize = 0,
-        call_depth:        i64 = 0,
-        diagnostics_count: usize = 0
+        step_budget:       i64,
+        memory_used:       usize,
+        call_depth:        i64,
+        diagnostics_count: usize
     ) -> VmContext => VmContext {
         step_budget:       step_budget,
         memory_used:       memory_used,
@@ -371,21 +371,27 @@ pub struct TypeInfo : IValue {
 // =========================================================================
 
 let ReflectEngine = [
-    query_sym:       "query_registered_symbols",
-    node_count:      "ast_node_count",
-    node_kind:       "ast_node_kind",
-    node_sym:        "ast_node_sym",
-    attr_count:      "ast_attr_count",
-    attr_arg:        "ast_attr_arg",
-    sym_str:         "sym_str",
-    layout_size:     "layout_metrics",
-    lattice_get:     "get_lattice_bits",
-    child_count:     "ast_child_count",
-    child_at:        "ast_child_at",
-    attr_decl_count: "ast_attr_decl_count",
-    attr_name:       "ast_attr_name",
-    base_count:      "ast_base_count",
-    base_at:         "ast_base_at",
+    query_sym:            "query_registered_symbols",
+    node_count:           "ast_node_count",
+    node_kind:            "ast_node_kind",
+    orig_kind:            "ast_orig_kind",
+    node_sym:             "ast_node_sym",
+    node_flags:           "ast_node_flags",
+    decl_flags:           "ast_decl_flags",
+    child_count:          "ast_child_count",
+    child_at:             "ast_child_at",
+    attr_count:           "ast_attr_count",
+    attr_arg:             "ast_attr_arg",
+    attr_decl_count:      "ast_attr_decl_count",
+    attr_name:            "ast_attr_name",
+    attr_decl_arg:        "ast_attr_decl_arg",
+    base_count:           "ast_base_count",
+    base_at:              "ast_base_at",
+    sym_str:              "sym_str",
+    layout_size:          "layout_metrics",
+    lattice_get:          "get_lattice_bits",
+    ast_get_bound_layout: "ast_get_bound_layout",
+    ast_get_bound_target: "ast_get_bound_target",
 ];
 
 // =========================================================================
@@ -613,10 +619,21 @@ pub fn reflect_type_layout(type_id: usize, type_name: str = "") -> TypeInfo {
 // =========================================================================
 
 pub fn reflect_target() -> LayoutTarget {
-    let ptr_size = sizeof(usize);
-    let ptr_bytes: usize = if ptr_size > 0 { ptr_size } else { 8 };
-    let arch = if ptr_bytes == 8 { "x86_64" } else { "wasm32" };
-    return LayoutTarget.create(arch, ptr_bytes, "little", ["simd", "atomics"], "native", 64, 2);
+    let ptr_bytes = sizeof(usize);
+    let target_sym = __engine(ReflectEngine.ast_get_bound_target, 0);
+    var target_name = "";
+    if target_sym >= 0 && target_sym < 4294967295 {
+        target_name = __engine(ReflectEngine.sym_str, target_sym);
+    }
+    return LayoutTarget.create(
+        target_name,
+        ptr_bytes,
+        "",
+        [],
+        target_name,
+        0,
+        0
+    );
 }
 
 pub fn reflect_hardware_type(
@@ -642,7 +659,7 @@ pub fn reflect_symbol_context(
     scopes:        map<usize, str>,
     methods:       map<usize, str>,
     extensions:    map<usize, str>,
-    clearance_lvl: i64 = 0
+    clearance_lvl: i64
 ) -> SymbolContext {
     return SymbolContext.create(scopes, methods, extensions, clearance_lvl);
 }
@@ -665,10 +682,10 @@ pub fn reflect_package_context(
 }
 
 pub fn reflect_vm_context(
-    step_budget:       i64 = 1000000,
-    memory_used:       usize = 0,
-    call_depth:        i64 = 0,
-    diagnostics_count: usize = 0
+    step_budget:       i64,
+    memory_used:       usize,
+    call_depth:        i64,
+    diagnostics_count: usize
 ) -> VmContext {
     return VmContext.create(step_budget, memory_used, call_depth, diagnostics_count);
 }
@@ -711,21 +728,40 @@ pub fn reflect_ast_attr_count(node_id: usize) -> usize {
 }
 
 pub comptime fn reflect_hydrate_ast_context() -> AstContext {
-    let total_nodes = __engine(ReflectEngine.node_count);
-    let root_node: i64 = 0;
+    let total_nodes = __engine(ReflectEngine.node_count) as usize;
+    var root_node: i64 = 0;
+    var quotes: map<usize, str> = map<usize, str> { keys: [], vals: [] };
+    var pratt_ops: map<str, i64> = map<str, i64> { keys: [], vals: [] };
 
-    let quotes = map<usize, str> {
-        keys: [1, 2, 3, 4, 5, 6],
-        vals: ["CallExpr", "ast", "frame", "Signal", "Dual", "EffectPlan"],
-    };
+    var nid: usize = 0;
+    loop {
+        if !(nid < total_nodes) { break; }
+        let orig = __engine(ReflectEngine.orig_kind, nid);
+        let sym_id = __engine(ReflectEngine.node_sym, nid);
+        let fl = __engine(ReflectEngine.node_flags, nid);
 
-    let pratt_ops = map<str, i64> {
-        keys: ["?", "??", "catch", "..", "?..", "*", "**", "*.."],
-        vals: [90, 85, 80, 70, 70, 60, 60, 60],
-    };
+        if orig == 0 {
+            root_node = nid as i64;
+        }
+
+        if orig == 18 && sym_id > 0 {
+            let op_str = __engine(ReflectEngine.sym_str, sym_id);
+            if op_str != "" {
+                pratt_ops[op_str] = fl;
+            }
+        }
+
+        let decl_fl = __engine(ReflectEngine.decl_flags, nid);
+        if decl_fl > 0 && decl_fl <= 6 {
+            let q_str = if sym_id > 0 { __engine(ReflectEngine.sym_str, sym_id) } else { "" };
+            quotes[decl_fl as usize] = q_str;
+        }
+
+        nid = nid + 1;
+    }
 
     return AstContext.create(
-        total_nodes as usize,
+        total_nodes,
         root_node,
         0,
         quotes,
@@ -734,46 +770,151 @@ pub comptime fn reflect_hydrate_ast_context() -> AstContext {
 }
 
 pub comptime fn reflect_hydrate_hardware_type() -> HardwareType {
+    let total_nodes = __engine(ReflectEngine.node_count) as usize;
+    var registry: map<usize, TypeInfo> = map<usize, TypeInfo> { keys: [], vals: [] };
+    var lattice: map<usize, u8> = map<usize, u8> { keys: [], vals: [] };
+    var anatomy: map<usize, AnatomyInfo> = map<usize, AnatomyInfo> { keys: [], vals: [] };
+    var registered_classes: map<usize, str> = map<usize, str> { keys: [], vals: [] };
+
+    var nid: usize = 0;
+    loop {
+        if !(nid < total_nodes) { break; }
+        let bound_lid = __engine(ReflectEngine.ast_get_bound_layout, nid);
+        if bound_lid >= 0 && bound_lid < 4294967295 {
+            let lid = bound_lid as usize;
+            if !registry.contains_key(lid) {
+                let sz = __engine(ReflectEngine.layout_size, lid) as usize;
+                let lat = __engine(ReflectEngine.lattice_get, lid) as u8;
+                let s_id = __engine(ReflectEngine.node_sym, nid);
+                let name = __engine(ReflectEngine.sym_str, s_id);
+
+                registry[lid] = TypeInfo.create(lid, name, sz, 8, lat, 0);
+                lattice[lid] = lat;
+
+                var kind_code: u8 = 0;
+                if (lat & 0b11) == 0b01 {
+                    kind_code = 1;
+                } else if (lat & 0b11) == 0b10 {
+                    kind_code = 3;
+                } else if (lat & 0b11) == 0b00 {
+                    kind_code = 4;
+                }
+                anatomy[lid] = AnatomyInfo.create(kind_code, 0, 0, 0, 1);
+            }
+        }
+        nid = nid + 1;
+    }
+
     return HardwareType.create(
-        map<usize, TypeInfo> { keys: [], vals: [] },
-        map<usize, u8>       { keys: [], vals: [] },
-        map<usize, AnatomyInfo> { keys: [], vals: [] },
-        map<usize, str>      { keys: [], vals: [] }
+        registry,
+        lattice,
+        anatomy,
+        registered_classes
     );
 }
 
 pub comptime fn reflect_hydrate_symbol_context() -> SymbolContext {
+    let total_nodes = __engine(ReflectEngine.node_count) as usize;
+    var scopes: map<usize, str> = map<usize, str> { keys: [], vals: [] };
+    var methods: map<usize, str> = map<usize, str> { keys: [], vals: [] };
+    var extensions: map<usize, str> = map<usize, str> { keys: [], vals: [] };
+
+    var nid: usize = 0;
+    loop {
+        if !(nid < total_nodes) { break; }
+        let orig = __engine(ReflectEngine.orig_kind, nid);
+        let sym_id = __engine(ReflectEngine.node_sym, nid);
+        if sym_id > 0 {
+            let sym_name = __engine(ReflectEngine.sym_str, sym_id);
+            if sym_name != "" {
+                if orig == 0 || orig == 8 || orig == 10 {
+                    scopes[nid] = sym_name;
+                } else if orig == 3 || orig == 13 || orig == 14 || orig == 18 {
+                    methods[nid] = sym_name;
+                } else if orig == 11 {
+                    extensions[nid] = sym_name;
+                }
+            }
+        }
+        nid = nid + 1;
+    }
+
     return SymbolContext.create(
-        map<usize, str> { keys: [], vals: [] },
-        map<usize, str> { keys: [], vals: [] },
-        map<usize, str> { keys: [], vals: [] },
+        scopes,
+        methods,
+        extensions,
         0
     );
 }
 
 pub comptime fn reflect_hydrate_attribute_context() -> AttributeContext {
+    let total_nodes = __engine(ReflectEngine.node_count) as usize;
+    var attributes: map<usize, str> = map<usize, str> { keys: [], vals: [] };
+    var weights: map<str, i32> = map<str, i32> { keys: [], vals: [] };
+    var weavers: map<str, str> = map<str, str> { keys: [], vals: [] };
+
+    var nid: usize = 0;
+    loop {
+        if !(nid < total_nodes) { break; }
+        let attr_cnt = __engine(ReflectEngine.attr_decl_count, nid) as usize;
+        var ai: usize = 0;
+        loop {
+            if !(ai < attr_cnt) { break; }
+            let a_sym = __engine(ReflectEngine.attr_name, nid, ai);
+            if a_sym > 0 {
+                let a_name = __engine(ReflectEngine.sym_str, a_sym);
+                if a_name != "" {
+                    attributes[nid] = a_name;
+                    let w_arg = __engine(ReflectEngine.attr_decl_arg, nid, ai, 0);
+                    if w_arg != 0 {
+                        weights[a_name] = w_arg as i32;
+                    }
+                }
+            }
+            ai = ai + 1;
+        }
+        nid = nid + 1;
+    }
+
     return AttributeContext.create(
-        map<usize, str> { keys: [], vals: [] },
-        map<str, i32>   { keys: [], vals: [] },
-        map<str, str>   { keys: [], vals: [] }
+        attributes,
+        weights,
+        weavers
     );
 }
 
 pub comptime fn reflect_hydrate_package_context() -> PackageContext {
-    let mounted_map = map<str, str> {
-        keys: ["Pilot.Core.Reflect", "Pilot.Core.Genesis", "Pilot.Core.Interfaces", "Pilot.Core.Keywords"],
-        vals: ["stdlib/core/reflect.pilot", "stdlib/core/core.pilot", "stdlib/core/operator.pilot", "stdlib/core/keywords.pilot"],
-    };
+    let total_nodes = __engine(ReflectEngine.node_count) as usize;
+    var pkg_name = "";
+    var mounted: map<str, str> = map<str, str> { keys: [], vals: [] };
+    var search_paths: slice<str> = [];
+
+    var nid: usize = 0;
+    loop {
+        if !(nid < total_nodes) { break; }
+        let orig = __engine(ReflectEngine.orig_kind, nid);
+        let sym_id = __engine(ReflectEngine.node_sym, nid);
+        if sym_id > 0 {
+            let sym_name = __engine(ReflectEngine.sym_str, sym_id);
+            if orig == 0 && pkg_name == "" && sym_name != "" {
+                pkg_name = sym_name;
+            } else if orig == 1 && sym_name != "" {
+                mounted[sym_name] = sym_name;
+            }
+        }
+        nid = nid + 1;
+    }
+
     return PackageContext.create(
-        "Pilot.Core",
-        "0.1.0",
-        ["stdlib/core", "stdlib", "src"],
-        mounted_map
+        pkg_name,
+        "",
+        search_paths,
+        mounted
     );
 }
 
 pub comptime fn reflect_hydrate_vm_context() -> VmContext {
-    return VmContext.create(1000000, 0, 0, 0);
+    return VmContext.create(0, 0, 0, 0);
 }
 
 pub comptime fn reflect_hydrate_environment() -> Environment {
