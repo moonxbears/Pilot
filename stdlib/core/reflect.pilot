@@ -12,10 +12,273 @@ pub pkg Pilot.Core.Reflect;
 use Pilot.Core.Genesis::*;
 use Pilot.Core.Interfaces::*;
 use Pilot.Core.Keywords::*;
+use Pilot.Core.Memory::*;
+use Pilot.Core.Option::*;
 
 // =========================================================================
 // 1. REFLECTION DATA STRUCTURES (0b00 IValue, Zero Runtime Overhead)
 // =========================================================================
+
+[Layout(c_abi)]
+pub struct LayoutTarget : IValue {
+    pub architecture: str;
+    pub pointer_byte: usize;
+    pub endianess:    str;
+    pub features:     slice<str>;
+    pub backend:      str;
+    pub cache_line:   usize;
+    pub opt_level:    u8;
+
+    pub static pure fn create(
+        architecture: str = "x86_64",
+        pointer_byte: usize = 8,
+        endianess:    str = "little",
+        features:     slice<str> = [],
+        backend:      str = "native",
+        cache_line:   usize = 64,
+        opt_level:    u8 = 2
+    ) -> LayoutTarget => LayoutTarget {
+        architecture: architecture,
+        pointer_byte: pointer_byte,
+        endianess:    endianess,
+        features:     features,
+        backend:      backend,
+        cache_line:   cache_line,
+        opt_level:    opt_level,
+    };
+
+    pub pure fn is_64bit() -> bool => .pointer_byte == 8;
+    pub pure fn is_little_endian() -> bool => .endianess == "little";
+    pub pure fn has_feature(feature_name: str) -> bool {
+        var idx: usize = 0;
+        loop {
+            if !(idx < .features.len) { break; }
+            if .features[idx] == feature_name { return true; }
+            idx = idx + 1;
+        }
+        return false;
+    }
+}
+
+// 2-Bit Lattice & Field Anatomy Descriptor:
+// Deduce contiguous views ({ ptr<T>, usize } + 0b01),
+// strided lenses ({ ptr<T>, usize, isize } + 0b01),
+// owned buffers ({ ptr<T>, usize, usize } + 0b10),
+// and bounds pairs ({ T, T } + 0b00)
+[Layout(c_abi)]
+pub struct AnatomyInfo : IValue {
+    pub kind:        u8;    // 0: Unknown, 1: ContiguousView, 2: StridedLens, 3: OwnedBuffer, 4: BoundsPair
+    pub ptr_offset:  usize;
+    pub len_offset:  usize;
+    pub cap_offset:  usize;
+    pub stride_step: isize;
+
+    pub static pure fn create(
+        kind:        u8 = 0,
+        ptr_offset:  usize = 0,
+        len_offset:  usize = 0,
+        cap_offset:  usize = 0,
+        stride_step: isize = 1
+    ) -> AnatomyInfo => AnatomyInfo {
+        kind:        kind,
+        ptr_offset:  ptr_offset,
+        len_offset:  len_offset,
+        cap_offset:  cap_offset,
+        stride_step: stride_step,
+    };
+
+    pub pure fn is_contiguous() -> bool => .kind == 1;
+    pub pure fn is_strided() -> bool => .kind == 2;
+    pub pure fn is_owned_buffer() -> bool => .kind == 3;
+    pub pure fn is_bounds_pair() -> bool => .kind == 4;
+}
+
+[Layout(c_abi)]
+pub struct HardwareType : IValue {
+    pub registry:           map<usize, TypeInfo>;
+    pub lattice:            map<usize, u8>;
+    pub anatomy:            map<usize, AnatomyInfo>;
+    pub registered_classes: map<usize, str>;
+
+    pub static pure fn create(
+        registry:           map<usize, TypeInfo>,
+        lattice:            map<usize, u8>,
+        anatomy:            map<usize, AnatomyInfo>,
+        registered_classes: map<usize, str>
+    ) -> HardwareType => HardwareType {
+        registry:           registry,
+        lattice:            lattice,
+        anatomy:            anatomy,
+        registered_classes: registered_classes,
+    };
+
+    pub pure fn get_lattice(type_id: usize) -> u8 {
+        let lat = .lattice.get(type_id);
+        if lat.has_value {
+            return lat.val;
+        }
+        return 0;
+    }
+
+    pub pure fn is_value_type(type_id: usize) -> bool => (.get_lattice(type_id) & 0b11) == 0b00;
+    pub pure fn is_reference(type_id: usize) -> bool => (.get_lattice(type_id) & 0b01) != 0;
+    pub pure fn is_owned(type_id: usize) -> bool => (.get_lattice(type_id) & 0b10) != 0;
+    pub pure fn is_guard(type_id: usize) -> bool => (.get_lattice(type_id) & 0b11) == 0b11;
+}
+
+[Layout(c_abi)]
+pub struct AstContext : IValue {
+    pub node_count:  usize;
+    pub root_node:   i64;
+    pub hygiene_seq: i64;
+    pub quotes:      map<usize, str>;
+    pub pratt_ops:   map<str, i64>;
+
+    pub static pure fn create(
+        node_count:  usize,
+        root_node:   i64,
+        hygiene_seq: i64,
+        quotes:      map<usize, str>,
+        pratt_ops:   map<str, i64>
+    ) -> AstContext => AstContext {
+        node_count:  node_count,
+        root_node:   root_node,
+        hygiene_seq: hygiene_seq,
+        quotes:      quotes,
+        pratt_ops:   pratt_ops,
+    };
+
+    pub pure fn is_quote_mode_registered(mode_id: usize) -> bool => .quotes.contains_key(mode_id);
+    pub pure fn get_pratt_precedence(op_symbol: str) -> i64 {
+        let prec = .pratt_ops.get(op_symbol);
+        if prec.has_value {
+            return prec.val;
+        }
+        return 0;
+    }
+}
+
+[Layout(c_abi)]
+pub struct SymbolContext : IValue {
+    pub scopes:        map<usize, str>;
+    pub methods:       map<usize, str>;
+    pub extensions:    map<usize, str>;
+    pub clearance_lvl: i64;
+
+    pub static pure fn create(
+        scopes:        map<usize, str>,
+        methods:       map<usize, str>,
+        extensions:    map<usize, str>,
+        clearance_lvl: i64 = 0
+    ) -> SymbolContext => SymbolContext {
+        scopes:        scopes,
+        methods:       methods,
+        extensions:    extensions,
+        clearance_lvl: clearance_lvl,
+    };
+
+    pub pure fn has_clearance(lvl: i64) -> bool => .clearance_lvl >= lvl;
+}
+
+[Layout(c_abi)]
+pub struct AttributeContext : IValue {
+    pub attributes: map<usize, str>;
+    pub weights:    map<str, i32>;
+    pub weavers:    map<str, str>;
+
+    pub static pure fn create(
+        attributes: map<usize, str>,
+        weights:    map<str, i32>,
+        weavers:    map<str, str>
+    ) -> AttributeContext => AttributeContext {
+        attributes: attributes,
+        weights:    weights,
+        weavers:    weavers,
+    };
+
+    pub pure fn get_weight(attr_name: str) -> i32 {
+        let w = .weights.get(attr_name);
+        if w.has_value {
+            return w.val;
+        }
+        return 0;
+    }
+
+    pub pure fn has_weaver(attr_name: str) -> bool => .weavers.contains_key(attr_name);
+}
+
+[Layout(c_abi)]
+pub struct PackageContext : IValue {
+    pub name:         str;
+    pub version:      str;
+    pub search_paths: slice<str>;
+    pub mounted:      map<str, str>;
+
+    pub static pure fn create(
+        name:         str,
+        version:      str,
+        search_paths: slice<str>,
+        mounted:      map<str, str>
+    ) -> PackageContext => PackageContext {
+        name:         name,
+        version:      version,
+        search_paths: search_paths,
+        mounted:      mounted,
+    };
+
+    pub pure fn is_mounted(pkg_name: str) -> bool => .mounted.contains_key(pkg_name);
+}
+
+[Layout(c_abi)]
+pub struct VmContext : IValue {
+    pub step_budget:       i64;
+    pub memory_used:       usize;
+    pub call_depth:        i64;
+    pub diagnostics_count: usize;
+
+    pub static pure fn create(
+        step_budget:       i64 = 1000000,
+        memory_used:       usize = 0,
+        call_depth:        i64 = 0,
+        diagnostics_count: usize = 0
+    ) -> VmContext => VmContext {
+        step_budget:       step_budget,
+        memory_used:       memory_used,
+        call_depth:        call_depth,
+        diagnostics_count: diagnostics_count,
+    };
+
+    pub pure fn has_budget() -> bool => .step_budget > 0;
+}
+
+[Layout(c_abi)]
+pub struct Environment : IValue {
+    pub layout:   LayoutTarget;
+    pub types:    HardwareType;
+    pub ast:      AstContext;
+    pub symbols:  SymbolContext;
+    pub attrs:    AttributeContext;
+    pub packages: PackageContext;
+    pub vm:       VmContext;
+
+    pub static pure fn create(
+        layout:   LayoutTarget,
+        types:    HardwareType,
+        ast:      AstContext,
+        symbols:  SymbolContext,
+        attrs:    AttributeContext,
+        packages: PackageContext,
+        vm:       VmContext
+    ) -> Environment => Environment {
+        layout:   layout,
+        types:    types,
+        ast:      ast,
+        symbols:  symbols,
+        attrs:    attrs,
+        packages: packages,
+        vm:       vm,
+    };
+}
 
 [Layout(c_abi)]
 pub struct CategoryInfo : IValue {
@@ -338,3 +601,81 @@ pub fn reflect_type_layout(type_id: usize, type_name: str = "") -> TypeInfo {
     let lat = __engine(ReflectEngine.lattice_get, type_id);
     return TypeInfo.create(type_id, type_name, size, 8, lat as u8);
 }
+
+// =========================================================================
+// 5. COMPILED ENVIRONMENT & CONTEXT REFLECTION FACTORIES
+// =========================================================================
+
+pub fn reflect_target() -> LayoutTarget {
+    let ptr_size = sizeof(usize);
+    let ptr_bytes: usize = if ptr_size > 0 { ptr_size } else { 8 };
+    let arch = if ptr_bytes == 8 { "x86_64" } else { "wasm32" };
+    return LayoutTarget.create(arch, ptr_bytes, "little", ["simd", "atomics"], "native", 64, 2);
+}
+
+pub fn reflect_hardware_type(
+    registry:           map<usize, TypeInfo>,
+    lattice:            map<usize, u8>,
+    anatomy:            map<usize, AnatomyInfo>,
+    registered_classes: map<usize, str>
+) -> HardwareType {
+    return HardwareType.create(registry, lattice, anatomy, registered_classes);
+}
+
+pub fn reflect_ast_context(
+    node_count:  usize,
+    root_node:   i64,
+    hygiene_seq: i64,
+    quotes:      map<usize, str>,
+    pratt_ops:   map<str, i64>
+) -> AstContext {
+    return AstContext.create(node_count, root_node, hygiene_seq, quotes, pratt_ops);
+}
+
+pub fn reflect_symbol_context(
+    scopes:        map<usize, str>,
+    methods:       map<usize, str>,
+    extensions:    map<usize, str>,
+    clearance_lvl: i64 = 0
+) -> SymbolContext {
+    return SymbolContext.create(scopes, methods, extensions, clearance_lvl);
+}
+
+pub fn reflect_attribute_context(
+    attributes: map<usize, str>,
+    weights:    map<str, i32>,
+    weavers:    map<str, str>
+) -> AttributeContext {
+    return AttributeContext.create(attributes, weights, weavers);
+}
+
+pub fn reflect_package_context(
+    name:         str,
+    version:      str,
+    search_paths: slice<str>,
+    mounted:      map<str, str>
+) -> PackageContext {
+    return PackageContext.create(name, version, search_paths, mounted);
+}
+
+pub fn reflect_vm_context(
+    step_budget:       i64 = 1000000,
+    memory_used:       usize = 0,
+    call_depth:        i64 = 0,
+    diagnostics_count: usize = 0
+) -> VmContext {
+    return VmContext.create(step_budget, memory_used, call_depth, diagnostics_count);
+}
+
+pub fn reflect_environment(
+    layout:   LayoutTarget,
+    types:    HardwareType,
+    ast:      AstContext,
+    symbols:  SymbolContext,
+    attrs:    AttributeContext,
+    packages: PackageContext,
+    vm:       VmContext
+) -> Environment {
+    return Environment.create(layout, types, ast, symbols, attrs, packages, vm);
+}
+
