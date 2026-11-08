@@ -1,0 +1,40 @@
+// =========================================================================
+// Example: Multi-Package & Namespace Declarations with Stacked Features
+// =========================================================================
+
+// 1. Stacking Multiple Attributes Across a Comma-Separated Package List:
+// All listed packages inherit [NoHardcoding], [Strict], and [Obsolete].
+[NoHardcoding, Obsolete("Use v2.0 API")]
+pub pkg Finance.Accounts, Finance.Billing, Finance.Audit;
+
+// 2. Block-Grouped Package List:
+// Stack attributes on several packages at once in a distributive block:
+[NoHardcoding]
+pub pkg {
+    Payments.Stripe,
+    Payments.Crypto,
+    Payments.Ledger,
+};
+
+// 3. Block-Grouped Namespace Syntax:
+// 'namespace' keyword is supported alongside 'pkg':
+[NoHardcoding]
+pub namespace {
+    Operations.Shipping,
+    Operations.Logistics,
+};
+
+// 4. Constants are permitted across all these packages:
+const BASE_DISCOUNT: f64 = 0.15;
+const SYSTEM_FEE: i64 = 250;
+
+// 5. Executable functions in these namespaces:
+pub fn process_order(amount: i64) -> i64 {
+    // Identity values (0, 1, "") are allowed:
+    var discount = 0;
+    
+    // Prohibited magic literals trigger HARD001:
+    // let bad_magic = 99; // HARD001!
+
+    return amount - SYSTEM_FEE;
+}

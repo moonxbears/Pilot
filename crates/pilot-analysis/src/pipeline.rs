@@ -25,7 +25,7 @@ impl AnalysisPipeline {
     }
 
     pub fn filter_pragma_suppressions(src: &str, diags: &mut Vec<AnalysisDiagnostic>) {
-        let ns = src.lines().find_map(|l| ["pub pkg ", "pkg ", "pub namespace ", "namespace "].into_iter().find_map(|p| l.trim().strip_prefix(p))).map(|s| s.trim_matches(|c: char| c == ';' || c.is_whitespace()).to_string()).unwrap_or_default();
+        let active_ns: Vec<String> = src.lines().filter_map(|l| ["pub pkg ", "pkg ", "pub namespace ", "namespace "].into_iter().find_map(|p| l.trim().strip_prefix(p))).flat_map(|r| r.trim_matches(|c: char| c == '{' || c == ';' || c.is_whitespace()).split(',')).map(|s| s.trim().trim_matches(|c: char| c == ';' || c.is_whitespace()).to_string()).filter(|s| !s.is_empty()).collect();
         let (mut cur, mut intervals, mut starts) = (0usize, Vec::new(), std::collections::HashMap::new());
         for line in src.split_inclusive('\n') {
             let tr = line.trim();
@@ -37,7 +37,7 @@ impl AnalysisPipeline {
                 else if let Some(_) = pragma_cmd.strip_prefix("no_hardcode restore") { (Some(false), " HARD001") } else { (None, "") };
             if let Some(dis) = is_dis {
                 let (codes, t_ns) = if let Some((c, n)) = r.trim().split_once(" in ") { (c.trim(), Some(n.trim())) } else { (r.trim(), target_ns) };
-                let ns_match = t_ns.map_or(true, |t| t.split(',').any(|n| n.trim() == "*" || n.trim() == ns || (!ns.is_empty() && ns.starts_with(n.trim()))));
+                let ns_match = t_ns.map_or(true, |t| t.split(',').any(|n| n.trim() == "*" || active_ns.iter().any(|ns| ns == n.trim() || ns.starts_with(n.trim()))));
                 if ns_match {
                     let mut apply = |k: Option<String>| if dis { starts.entry(k).or_insert(cur); } else if let Some(st) = starts.remove(&k) { intervals.push((st, cur + line.len(), k)); };
                     if codes.is_empty() { apply(None); } else { for c in codes.split(',') { let cd = c.trim().to_string(); if !cd.is_empty() { apply(Some(cd)); } } }

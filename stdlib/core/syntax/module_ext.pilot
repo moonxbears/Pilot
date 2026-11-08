@@ -11,6 +11,7 @@ use Pilot.Core.Interfaces.*;
 
 comptime {
     __engine("register_module_kw", nameof(pkg), "declare_package_scope");
+    __engine("register_module_kw", nameof(namespace), "declare_package_scope");
     __engine("register_module_kw", nameof(use), "import_symbol_path");
     __engine("register_modifier",  nameof(ext),       "extension_member");
     __engine("register_modifier",  nameof(extension), "extension_member");

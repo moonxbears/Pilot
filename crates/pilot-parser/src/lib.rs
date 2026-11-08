@@ -294,7 +294,7 @@ impl<'a> Parser<'a> {
                 self.advance(); self.eat(TokenKind::LParen); let mut d = 1;
                 while !self.at_end() && d > 0 { if self.at(TokenKind::LParen) { d += 1; } else if self.at(TokenKind::RParen) { d -= 1; } self.advance(); }
                 continue; }
-            if self.tables.module_kws.get(w) == Some(&true) && nx < self.tape.len() && is_word_tok(self.tape.kind(nx)) && !self.tables.modifiers.contains_key(self.tape.text(nx, self.src)) {
+            if self.tables.module_kws.get(w) == Some(&true) && nx < self.tape.len() && (is_word_tok(self.tape.kind(nx)) || self.tape.kind(nx) == TokenKind::LBrace) && !self.tables.modifiers.contains_key(self.tape.text(nx, self.src)) {
                 break; }
             let Some(&act) = self.tables.modifiers.get(w) else { break; }; self.advance(); match act {
                 ModAct::Vis(v) => m.vis = Some(v), ModAct::Partial => m.flags |= DECL_FLAG_PARTIAL,
@@ -334,7 +334,7 @@ impl<'a> Parser<'a> {
                 out.push(self.arena.alloc_node(NodeKind::ComptimeExpr, 0, self.arena.span(b), b.0, 0)); }
             TokenKind::Tilde if in_type_body => out.push(self.parse_dtor(&mods)),
             TokenKind::Star if in_type_body => out.push(self.parse_bundle_splice()), _ if self.is_word() => {
-                if let Some(&is_pkg) = self.tables.module_kws.get(self.text()) { out.push(self.parse_module_decl(is_pkg, &mods)); return; }
+                if let Some(&is_pkg) = self.tables.module_kws.get(self.text()) { self.parse_module_decl(is_pkg, &mods, out); return; }
                 if mods.is_ext && !self.at(TokenKind::KwFn) { out.push(self.parse_extend_decl(&mods)); return; }
                 if raw_mods.flags & DECL_FLAG_MUT != 0 || raw_mods.is_const { self.parse_bindings(out, &mods, def_vis, true); return; }
                 if self.is_rec(4) { out.push(self.parse_syntax_decl(&mods)); return; }
@@ -367,17 +367,31 @@ impl<'a> Parser<'a> {
             4 => out.push(self.parse_enum_decl(&mods, 15, true)), _ => { let saved = self.active_hdr.clone();
                 self.active_hdr = Some(ScopeHeader { mods, target: 0 }); self.parse_item(out, in_type_body); self.active_hdr = saved; }
         } }
-    fn parse_module_decl(&mut self, is_pkg: bool, mods: &DeclMods) -> NodeId { let sp = self.span(); self.advance();
-        if !is_pkg && self.is_word() && self.tables.modifiers.get(self.text()) == Some(&ModAct::Ext) { self.advance(); self.advance();
-            if self.at(TokenKind::LBrace) { return self.parse_block(); } }
-        let mut path = String::new(); while !self.at_end() && !self.at(TokenKind::Semicolon) { if self.is_rec(29) { break; }
-            if !path.is_empty() && self.src[self.prev_span().end as usize..self.span().start as usize].contains('\n') { break; }
-            path.push_str(self.text()); self.advance(); }
-        let alias = if self.is_rec(29) { self.advance(); if self.is_word() { self.intern_cur() } else { SymbolId(0) } } else { SymbolId(0) };
-        let _ = self.eat(TokenKind::Semicolon); let sym = self.arena.interner.intern(&path);
-        let id = self.arena.alloc_node(NodeKind::ImportDecl, 0, ByteSpan::new(sp.start, self.prev_span().end), sym.0, alias.0);
-        let mut m = mods.clone(); if is_pkg { m.flags |= DECL_FLAG_PKG; }
-        self.apply_mods(id, &m, 7); id }
+    fn parse_module_decl(&mut self, is_pkg: bool, mods: &DeclMods, out: &mut Vec<NodeId>) {
+        let sp = self.span(); self.advance();
+        if !is_pkg && self.is_word() && self.tables.modifiers.get(self.text()) == Some(&ModAct::Ext) { self.advance(); self.advance(); if self.at(TokenKind::LBrace) { out.push(self.parse_block()); return; } }
+        let in_block = is_pkg && self.eat(TokenKind::LBrace);
+        loop {
+            if in_block && (self.at_end() || self.at(TokenKind::RBrace)) { break; }
+            let mut path = String::new();
+            while !self.at_end() && !self.at(TokenKind::Semicolon) && !self.at(TokenKind::Comma) && (!in_block || !self.at(TokenKind::RBrace)) {
+                if self.is_rec(29) || (!path.is_empty() && self.src[self.prev_span().end as usize..self.span().start as usize].contains('\n') && !in_block) { break; }
+                path.push_str(self.text()); self.advance();
+            }
+            let alias = if self.is_rec(29) { self.advance(); if self.is_word() { self.intern_cur() } else { SymbolId(0) } } else { SymbolId(0) };
+            let p = path.trim();
+            if !p.is_empty() {
+                let sym = self.arena.interner.intern(p);
+                let id = self.arena.alloc_node(NodeKind::ImportDecl, 0, ByteSpan::new(sp.start, self.prev_span().end), sym.0, alias.0);
+                let mut m = mods.clone(); if is_pkg { m.flags |= DECL_FLAG_PKG; }
+                self.apply_mods(id, &m, 7); out.push(id);
+            }
+            if in_block { let _ = self.eat(TokenKind::Comma); let _ = self.eat(TokenKind::Semicolon); }
+            else if self.eat(TokenKind::Comma) { continue; } else { break; }
+        }
+        if in_block { self.expect(TokenKind::RBrace); }
+        let _ = self.eat(TokenKind::Semicolon);
+    }
     fn parse_generic_params(&mut self) -> Vec<SymbolId> { let mut out = Vec::new(); if !self.eat(TokenKind::Less) { return out; }
         while !self.at_end() && !self.at(TokenKind::Greater) && !self.at(TokenKind::ShiftRight) {
                         if self.is_word() && self.tables.modifiers.get(self.text()) == Some(&ModAct::Const) { self.advance(); }

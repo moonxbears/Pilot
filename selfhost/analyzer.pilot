@@ -1326,7 +1326,10 @@ pub fn is_inside_executable_scope(nid: i64) -> bool {
 pub fn verify_hardcoding_contracts(i: i64, has_pkg_no_hardcode: bool, unit_pkg_name: str, targeted_ns: str) -> void {
     if __engine(Cfg.ast.ast_node_kind, i) != 15 || is_inside_const_decl(i) || !is_inside_executable_scope(i) { return; }
     var in_scope = has_pkg_no_hardcode;
-    if !in_scope && unit_pkg_name.len() > 0 && targeted_ns.len() > 1 && is_in_pipe_delimited(targeted_ns, unit_pkg_name) { in_scope = true; }
+    if !in_scope && unit_pkg_name.len() > 0 && targeted_ns.len() > 1 {
+        var start = 0; var u_i = 0; let u_len = unit_pkg_name.len();
+        while u_i <= u_len { if u_i == u_len || unit_pkg_name.byte_at(u_i) == 124 { let sl = u_i - start; if sl > 0 && is_in_pipe_delimited(targeted_ns, unit_pkg_name.slice(start, u_i)) { in_scope = true; break; } start = u_i + 1; } u_i = u_i + 1; }
+    }
     if !in_scope {
         var cur = i; var depth = 0;
         while cur >= 0 && cur < 100000 && depth < 20 {
@@ -1358,7 +1361,7 @@ pub fn analyze_unit(unit_id: i64) -> i64 {
     var enforce_naming = false;
     var has_pkg_no_hardcode = false;
     var has_any_no_hardcode = false;
-    var unit_pkg_name = "";
+    var unit_pkg_name = "|";
     var targeted_no_hardcode_ns = "|";
 
     var ni = 0;
@@ -1368,7 +1371,7 @@ pub fn analyze_unit(unit_id: i64) -> i64 {
         let f = __engine(Cfg.ast.ast_node_flags, ni);
         if (df & 512) != 0 || (f & 512) != 0 || (df & 128) != 0 {
             let psym = __engine(Cfg.ast.ast_node_sym, ni);
-            if psym != 0 { unit_pkg_name = __engine(Cfg.ast.sym_str, psym); }
+            if psym != 0 { let s = __engine(Cfg.ast.sym_str, psym); if s.len() > 0 { unit_pkg_name = unit_pkg_name + s + "|"; } }
         }
         let ac = __engine(Cfg.ast.ast_attr_decl_count, ni);
         var ai = 0;
