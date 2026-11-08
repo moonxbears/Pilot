@@ -153,3 +153,79 @@ pub fn verify_lockfile_integrity(lock_json: str, payload: str) -> bool {
     let alt_tag = "\"integrity\":\"sha256-" + actual_digest + "\"";
     return mf_find(lock_json, expected_tag, 0) >= 0 || mf_find(lock_json, alt_tag, 0) >= 0;
 }
+
+// =========================================================================
+// 3. TWO-TIER MODULE & PACKAGE DEPENDENCY RESOLVER (Pure Pilot)
+// =========================================================================
+
+pub fn resolve_package_import_path(import_spec: str) -> str {
+    if mf_find(import_spec, "Pilot.Core.Reflect", 0) >= 0 {
+        return "stdlib/core/reflect.pilot";
+    }
+    if mf_find(import_spec, "Pilot.Core.Keywords", 0) >= 0 {
+        return "stdlib/core/keywords.pilot";
+    }
+    if mf_find(import_spec, "Pilot.Core.Option", 0) >= 0 {
+        return "stdlib/core/option.pilot";
+    }
+    if mf_find(import_spec, "Pilot.Core.Result", 0) >= 0 {
+        return "stdlib/core/result.pilot";
+    }
+    if mf_find(import_spec, "Pilot.Core.Memory", 0) >= 0 {
+        return "stdlib/core/mem.pilot";
+    }
+    if mf_find(import_spec, "Pilot.Core.Meta", 0) >= 0 {
+        return "stdlib/core/meta.pilot";
+    }
+    if mf_find(import_spec, "Pilot.Core.Bootstrap", 0) >= 0 {
+        return "stdlib/core/bootstrap.pilot";
+    }
+    if mf_find(import_spec, "Pilot.Core.Task", 0) >= 0 {
+        return "stdlib/core/task.pilot";
+    }
+    if mf_find(import_spec, "Pilot.Collections", 0) >= 0 {
+        return "stdlib/collections/list.pilot";
+    }
+    if mf_find(import_spec, "Pilot.Crypto", 0) >= 0 {
+        return "stdlib/crypto/hash.pilot";
+    }
+    return "";
+}
+
+pub fn mount_import_unit(import_spec: str) -> i64 {
+    let p = resolve_package_import_path(import_spec);
+    if p != "" {
+        let res = __engine("mount_unit", p);
+        if res != null {
+            return res;
+        }
+        return __engine("mount_unit", "../../" + p);
+    }
+    return -1;
+}
+
+pub fn mount_all_ast_imports() -> i64 {
+    let total = __engine("ast_node_count");
+    if total == null || total <= 0 {
+        return 0;
+    }
+    var mounted = 0;
+    var idx = 0;
+    while idx < total {
+        let orig = __engine("ast_orig_kind", idx);
+        if orig == 1 { // NodeKind::ImportDecl = 1
+            let sym = __engine("ast_node_sym", idx);
+            if sym != null && sym != 0 {
+                let spec = __engine("sym_str", sym);
+                if spec != null && spec != "" {
+                    let res = mount_import_unit(spec);
+                    if res != null && res >= 0 {
+                        mounted = mounted + 1;
+                    }
+                }
+            }
+        }
+        idx = idx + 1;
+    }
+    return mounted;
+}
