@@ -29,13 +29,14 @@ Pilot unifies C#-grade ergonomics (`interface` hierarchies, implicit `field`/`va
 - **4-Tier `MethodTable`, `*Bundle` & `*Facet` Composition:**
   Replaces fragile OOP inheritance chains with deterministic 4-tier dispatch: Tier 1 (`struct` / `partial struct`) > Tier 2 (field-bearing `*Bundle` or 0-field `*Facet` splices with `coalesce`, `with`, `without`) > Tier 3 (sub-`interface` default) > Tier 4 (base `interface` default), alongside file-wide and lexically scoped `ext` / `use ext` extensions.
 
-- **6 Homoiconic Call-Quoting Modes (Zero-Whitespace `(` Lookahead):**
+- **6 Homoiconic Call-Quoting Modes & Pilot-First Mutable AST Arena (`selfhost/ast.pilot`):**
   - `fn!(a, b)` $\rightarrow$ `CallExpr<TReturn>` (`ShallowQuote` typed AST call descriptor)
   - `fn!!(~a, b)` $\rightarrow$ `ast<TReturn>` (`DeepSplice` with `~` compile-time unquoting)
   - `fn!&(a, b)` $\rightarrow$ `frame<FnSig>` (`AbiFrame` zero-marshalling `#[repr(C)]` call struct)
   - `fn!^(a, b)` $\rightarrow$ `Signal<TReturn>` (`ReactiveSignal` glitch-free topological push-pull node)
   - `fn!@(a, b)` $\rightarrow$ `Dual<TReturn, TGrad>` (`SymbolicAdjoint` compile-time CSE forward/reverse derivative)
   - `fn!?(a, b)` $\rightarrow$ `EffectPlan<TReturn>` (`EffectDryRun` Copy-on-Write transactional sandbox)
+  - Backed by a **Pilot-First Mutable AST Arena** (`AstNodeSlot` 16B `0b00 : IValue`, `AstSubtreeView` `0b01 : IReference`, `AstArenaBuffer` `0b10 : IObject` with Perceus `drop_reuse` free-list slot recycling, bidirectional parent links, `$hole` & variadic `$*splat` splicing, `~expr` compile-time unquoting, lexical hygiene alpha-renaming, in-place constant folding, and `PhysicsRegistry` hydration via `selfhost/ast_bridge.pilot`).
 
 - **Stage-3 Fixed-Point Self-Hosting & Multi-Target Codegen (`selfhost/`):**
   `selfhost/pilotc.pilot` compiles itself to both native C11 (`clang`) and `.pilc` v3 bytecode with bit-for-bit **Stage-2 == Stage-3 SHA-256 parity**, backed by pure-Pilot emitters for **C11, LLVM IR, WASM (`WASI`), x86_64/ARM64 ASM, 8 GPU backends (`PTX`, `AMDGPU`, `SPIR-V`, `WGSL`, `MSL`, `HLSL`, `CUDA C++`, `HIP C++`), 7 bidirectional transpilers (`C`, `C++`, `C#`, `Rust`, `Python`, `JS`, `Lua`)**, lossless Red/Green CST & Wadler-Lindig formatting, resident incremental LSP, and `VmHook`-stepped DAP debugging.
@@ -173,7 +174,7 @@ Pilot/
 │   └── ...                      # 35+ standard library packages (`collections`, `asyncio`, `realtime`, `contracts`, `numpy`, ...)
 ├── selfhost/                    # Self-Hosted Pilot Compiler, Backends & Developer Toolchain
 │   ├── pilotc.pilot             # Stage-3 fixed-point compiler driver (Stage-2 == Stage-3 parity)
-│   ├── lexer.pilot / parser.pilot / ast.pilot / preprocessor.pilot
+│   ├── lexer.pilot / parser.pilot / ast.pilot / ast_bridge.pilot / preprocessor.pilot
 │   ├── analyzer.pilot / attr_weaver.pilot / diagnostics.pilot / ffi_bindgen.pilot
 │   ├── cst/ & fmt/              # Lossless Red/Green CST, O(1) bracket recovery & Wadler-Lindig formatter
 │   ├── perceus/                 # 2-bit lattice Perceus ARC (`Dup`/`Drop`/`DropReuse`), escape & `[HardRealtime]` verifier

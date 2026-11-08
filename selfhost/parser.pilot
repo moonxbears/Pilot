@@ -34,8 +34,9 @@ pub pure fn sh_parser_state_name(state: i64) -> str {
 // ==============================================================================
 
 fn sh_find_macro_entry(ctx: i64, name: str, arg_count: i64) -> i64 {
+    let nil;
     let mcnt = __engine("map_get", ctx, "macro_count");
-    if mcnt == null || mcnt <= 0 { return -1; }
+    if mcnt == nil || mcnt <= 0 { return -1; }
     var fallback = -1;
     var i = 0;
     while i < mcnt {
@@ -57,8 +58,9 @@ fn sh_find_macro_entry(ctx: i64, name: str, arg_count: i64) -> i64 {
 }
 
 fn sh_has_macro_name(ctx: i64, name: str) -> bool {
+    let nil;
     let mcnt = __engine("map_get", ctx, "macro_count");
-    if mcnt == null || mcnt <= 0 { return false; }
+    if mcnt == nil || mcnt <= 0 { return false; }
     var i = 0;
     while i < mcnt {
         if __engine("map_get", ctx, "m_" + i + "_name") == name {
@@ -134,8 +136,9 @@ fn sh_invoke_macro(arena: i64, tape: i64, ctx: i64, name: str) -> i64 {
 
     let bindings = sh_ast_bindings_new();
     // Copy registered compile-time constants into bindings for `~expr` evaluation
+    let nil;
     let ccnt = __engine("map_get", ctx, "const_count");
-    if ccnt != null && ccnt > 0 {
+    if ccnt != nil && ccnt > 0 {
         var ci = 0;
         while ci < ccnt {
             let cname = __engine("map_get", ctx, "c_" + ci + "_name");
