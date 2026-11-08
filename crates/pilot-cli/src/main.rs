@@ -69,10 +69,13 @@ fn main() {
         "--from" | "from" => cmd_from(&args[1..]),
         "run" => if let Some(f) = args.get(1) { run_file(f); },
         "check" => if let Some(f) = args.get(1) {
-            let arena = parse(&fs::read_to_string(f).unwrap_or_default());
-            let res = AnalysisPipeline::analyze(&arena, arena.root);
+            let src = if f == "-" { let mut s = String::new(); let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut s); s } else { fs::read_to_string(f).unwrap_or_default() };
+            let res = AnalysisPipeline::analyze_source(&src);
             println!("Checked '{}': {} diagnostics", f, res.diagnostics.len());
-            for d in &res.diagnostics { println!("  {}: {} at {:?}", d.code, d.message, d.span); }
+            for d in &res.diagnostics {
+                let msg = d.message.strip_prefix(&format!("{}: ", d.code)).unwrap_or(&d.message);
+                println!("  [{}] {}: {} at {:?}", d.severity.as_lsp_code(), d.code, msg, d.span);
+            }
         },
         "compile" => if let Some(f) = args.get(1) {
             let arena = parse(&fs::read_to_string(f).unwrap_or_default());

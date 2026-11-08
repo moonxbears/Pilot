@@ -2,6 +2,9 @@
 // FILE: selfhost/diagnostics/warnings.pilot
 // Pilot Semantic Diagnostics: Warning Diagnostic Catalog (Severity 2)
 // =============================================================================
+// Reference Inspiration: C# (Roslyn/IDE), Python (Ruff/Flake8), and Rust (clippy/rustc).
+// Minimal forward-facing code: structured purely as an extensible diagnostic list.
+// =============================================================================
 pub pkg Pilot.Diagnostics.Warnings;
 
 pub struct WarningDef : IValue {
@@ -9,88 +12,245 @@ pub struct WarningDef : IValue {
     pub title: str;
     pub description: str;
     pub category: str;
+    pub reference: str;
 }
 
 pub let WARNINGS = [
     // -------------------------------------------------------------------------
-    // 1. Control Flow & Liveness (UNREACH001, LOOP005)
+    // 1. Dead Code & Unused Declarations (UNUSED001 - UNUSED004, DEAD001)
+    // -------------------------------------------------------------------------
+    WarningDef {
+        code: "UNUSED001",
+        title: "Unused Local Variable",
+        description: "Variable is declared but never referenced in enclosing scope; prefix with '_' if intended",
+        category: "DeadCode",
+        reference: "C# CS0219 / Python F841 / Rust unused_variables",
+    },
+    WarningDef {
+        code: "UNUSED002",
+        title: "Unused Private Function or Method",
+        description: "Private function or member is defined but never called or referenced across compilation unit",
+        category: "DeadCode",
+        reference: "C# IDE0051 / Rust dead_code",
+    },
+    WarningDef {
+        code: "UNUSED003",
+        title: "Unused Import Directive",
+        description: "'use' package import statement does not supply any referenced types or symbols",
+        category: "DeadCode",
+        reference: "Python F401 / Rust unused_imports / C# CS8019",
+    },
+    WarningDef {
+        code: "UNUSED004",
+        title: "Unused Function Parameter",
+        description: "Function parameter is declared but never read in the body; prefix with '_' or omit",
+        category: "DeadCode",
+        reference: "C# IDE0060 / Rust unused_variables",
+    },
+    WarningDef {
+        code: "DEAD001",
+        title: "Unassigned Mutable Variable",
+        description: "Mutable variable is declared but never assigned or written after declaration",
+        category: "DeadCode",
+        reference: "C# CS0168 / Rust unused_assignments",
+    },
+
+    // -------------------------------------------------------------------------
+    // 2. Control Flow & Liveness (UNREACH001, LOOP005, COND001, COND002)
     // -------------------------------------------------------------------------
     WarningDef {
         code: "UNREACH001",
-        title: "Unreachable Code",
+        title: "Unreachable Code Detected",
         description: "Unreachable code detected after diverging statement (return, break, continue, panic)",
         category: "ControlFlow",
+        reference: "C# CS0162 / Rust unreachable_code",
     },
     WarningDef {
         code: "LOOP005",
         title: "Potential Infinite Loop",
         description: "'while true' loop contains no 'break', 'return', or diverging exit statement",
         category: "ControlFlow",
+        reference: "Rust clippy::while_true",
     },
-
-    // -------------------------------------------------------------------------
-    // 2. Conditionals & Dead Branches (COND001, COND002)
-    // -------------------------------------------------------------------------
     WarningDef {
         code: "COND001",
         title: "Constant Condition Expression",
         description: "Condition expression is a compile-time boolean constant; one branch is unreachable",
         category: "DeadCode",
+        reference: "Rust clippy::overly_complex_bool_expr / C# CS0472",
     },
     WarningDef {
         code: "COND002",
         title: "Empty Conditional Branch",
         description: "Empty branch body in 'if' statement; execution has no effect",
         category: "DeadCode",
+        reference: "Rust clippy::empty_loop / clippy::no_effect",
     },
 
     // -------------------------------------------------------------------------
-    // 3. Unimplemented Stubs & Declarations (UNIMP001 - UNIMP004)
+    // 3. Suspicious Constructs & Numerical Precision (FLOAT001, MUT001, SHADOW001, RES001)
+    // -------------------------------------------------------------------------
+    WarningDef {
+        code: "FLOAT001",
+        title: "Direct Floating-Point Equality Comparison",
+        description: "Comparing floating-point values with '==' or '!=' can fail due to IEEE-754 precision inaccuracies",
+        category: "Correctness",
+        reference: "Rust clippy::float_cmp / Python math.isclose hint",
+    },
+    WarningDef {
+        code: "MUT001",
+        title: "Unmutated Mutable Variable",
+        description: "Variable is declared with 'var' but never mutated; prefer immutable 'let'",
+        category: "CodeQuality",
+        reference: "Rust unused_mut / C# IDE0044",
+    },
+    WarningDef {
+        code: "SHADOW001",
+        title: "Identifier Shadows Outer Binding",
+        description: "Variable declaration shadows an identifier in an enclosing outer scope",
+        category: "CodeQuality",
+        reference: "Python W0621 / Rust clippy::shadow_same / C# CS0136",
+    },
+    WarningDef {
+        code: "RES001",
+        title: "Potential Scoped Guard Resource Leak",
+        description: "0b11 IGuard allocated without explicit lexical binding; ensure destructor runs via scope exit",
+        category: "Correctness",
+        reference: "C# CA2000 / Python ResourceWarning",
+    },
+    WarningDef {
+        code: "STR001",
+        title: "Suspicious Identity Comparison on String",
+        description: "Comparing string reference identity rather than content equality; use '==' operator",
+        category: "Correctness",
+        reference: "Python SyntaxWarning is-with-literal / C# CS0252",
+    },
+
+    // -------------------------------------------------------------------------
+    // 4. Asynchronous & Concurrency Ergonomics (ASYNC001 - ASYNC003)
+    // -------------------------------------------------------------------------
+    WarningDef {
+        code: "ASYNC001",
+        title: "Async Function Lacks Await Operator",
+        description: "Function is marked 'async' but contains no 'await' expressions; it will run synchronously",
+        category: "Concurrency",
+        reference: "C# CS1998 / Python RuntimeWarning unawaited",
+    },
+    WarningDef {
+        code: "ASYNC002",
+        title: "Fire-and-Forget Discarded Task",
+        description: "Asynchronous task or coroutine is spawned but the return handle is ignored",
+        category: "Concurrency",
+        reference: "C# CS4014 / Python RuntimeWarning coroutine-never-awaited",
+    },
+    WarningDef {
+        code: "ASYNC003",
+        title: "Blocking Call in Asynchronous Method",
+        description: "Synchronous blocking I/O or sleep call inside async method may stall event loop thread",
+        category: "Concurrency",
+        reference: "C# CA1849 / Python asyncio-blocking-warning",
+    },
+
+    // -------------------------------------------------------------------------
+    // 5. Unimplemented Stubs & Declarations (UNIMP001 - UNIMP004)
     // -------------------------------------------------------------------------
     WarningDef {
         code: "UNIMP001",
         title: "Placeholder Stub Invocation",
         description: "Invocation of placeholder 'todo()' or 'unimplemented()' stub",
         category: "Completeness",
+        reference: "Rust todo! macro / C# NotImplementedException",
     },
     WarningDef {
         code: "UNIMP002",
         title: "Empty Function Implementation",
         description: "Function declares a non-void return type but contains an empty body",
         category: "Completeness",
+        reference: "C# CS0535 / Mypy empty-body",
     },
     WarningDef {
         code: "UNIMP003",
         title: "Missing Interface Method",
         description: "Struct declares interface conformance but lacks required contract implementation",
         category: "Completeness",
+        reference: "C# CS0535 / Rust missing-method",
     },
     WarningDef {
         code: "UNIMP004",
         title: "Unimplemented Attribute Marker",
         description: "Declaration is marked with '[Unimplemented]' or '[Todo]' attribute",
         category: "Completeness",
+        reference: "Pilot Selfhost Completeness Tracker",
     },
 
     // -------------------------------------------------------------------------
-    // 4. Deprecations, Unused Code & Directives (ERR005, UNUSED001, PREPROC006)
+    // 6. Code Modernization & Idiomatic Simplifications (CODE001 - CODE006)
     // -------------------------------------------------------------------------
+    WarningDef {
+        code: "CODE001",
+        title: "Collapsible Nested If Statement",
+        description: "Nested 'if' statements without else branch can be collapsed into a single condition with '&&'",
+        category: "Style",
+        reference: "Rust clippy::collapsible_if / Python SIM102",
+    },
+    WarningDef {
+        code: "CODE002",
+        title: "Needless Return in Expression Body",
+        description: "Explicit 'return' keyword in terminal expression position is redundant in Pilot expression blocks",
+        category: "Style",
+        reference: "Rust clippy::needless_return / Ruff RET505",
+    },
+    WarningDef {
+        code: "CODE003",
+        title: "Redundant Closure Forwarding",
+        description: "Closure simply forwards parameters directly to another function; pass function value directly",
+        category: "Style",
+        reference: "Rust clippy::redundant_closure / Python PLC3002",
+    },
+    WarningDef {
+        code: "CODE004",
+        title: "Identical Switch Pattern Arms",
+        description: "Multiple 'switch' arms share identical expression bodies; combine arms using pattern list",
+        category: "Style",
+        reference: "Rust clippy::match_same_arms",
+    },
+    WarningDef {
+        code: "CODE005",
+        title: "Single-Pattern Switch Expression",
+        description: "'switch' with only a single pattern and wildcard can be simplified to an 'if let' or 'if' check",
+        category: "Style",
+        reference: "Rust clippy::single_match",
+    },
+    WarningDef {
+        code: "CODE006",
+        title: "Manual Clamp Range Expression",
+        description: "Manual min/max combination can be simplified to the standard '.clamp(min, max)' method",
+        category: "Style",
+        reference: "Rust clippy::manual_clamp",
+    },
+
+    // -------------------------------------------------------------------------
+    // 7. Deprecations, Migration & Directives (DEPR001, ERR005, PREPROC006)
+    // -------------------------------------------------------------------------
+    WarningDef {
+        code: "DEPR001",
+        title: "Usage of Deprecated Symbol",
+        description: "Symbol or method is marked with '[Deprecated]' attribute and scheduled for removal",
+        category: "Deprecation",
+        reference: "C# CS0618 / Rust deprecated / Python DeprecationWarning",
+    },
     WarningDef {
         code: "ERR005",
         title: "Legacy Try-Catch Usage",
         description: "Legacy 'try'/'catch' syntax used in native code; prefer values-first '!' and '?' operators",
         category: "Deprecation",
-    },
-    WarningDef {
-        code: "UNUSED001",
-        title: "Unused Local Variable",
-        description: "Variable or parameter is declared but never referenced in enclosing scope",
-        category: "DeadCode",
+        reference: "Pilot Values-First Error Model",
     },
     WarningDef {
         code: "PREPROC006",
         title: "User Preprocessor Warning",
         description: "Explicit compile warning emitted via #warning preprocessor directive",
         category: "Preprocessor",
+        reference: "C# CS1030",
     },
 ];

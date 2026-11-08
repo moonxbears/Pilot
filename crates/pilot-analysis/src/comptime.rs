@@ -24,8 +24,7 @@ impl ComptimeValue {
 #[derive(Clone, Debug, PartialEq)]
 pub enum BootstrapDiagnostic {
     ParseError { message: String, span: ByteSpan }, ExecutionError { message: String, span: ByteSpan },
-    BootstrapBridgeSealedError { message: String, span: ByteSpan }, UserCompileError { message: String, span: ByteSpan },
-    UnknownEngineHook { hook_name: String, span: ByteSpan },
+    BootstrapBridgeSealedError { message: String, span: ByteSpan }, UserCompileError { message: String, span: ByteSpan }, UnknownEngineHook { hook_name: String, span: ByteSpan },
 }
 
 impl BootstrapDiagnostic {
@@ -33,9 +32,7 @@ impl BootstrapDiagnostic {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ComptimeEngine {
-    pub layout_table: LayoutTable, pub node_layouts: Vec<Option<LayoutId>>, pub diagnostics: Vec<BootstrapDiagnostic>,
-}
+pub struct ComptimeEngine { pub layout_table: LayoutTable, pub node_layouts: Vec<Option<LayoutId>>, pub diagnostics: Vec<BootstrapDiagnostic> }
 
 impl ComptimeEngine {
     pub fn new() -> Self { Self::default() }
@@ -114,10 +111,8 @@ impl BootstrapSnapshot {
                 let src = std::fs::read_to_string(ws_root.join(&rel_path)).or_else(|_| std::fs::read_to_string(&rel_path))
                     .unwrap_or_else(|e| panic!("Bootstrap stage {} ('{}') unreadable: {}", idx, rel_path, e));
                 let arena = bootstrap_core_file(&src, &mut tables, &mut vm).unwrap_or_else(|e| panic!("Bootstrap stage '{}' failed: {:?}", rel_path, e));
-                let pkg = arena.decl_flags.iter().enumerate()
-                    .find(|(_, &f)| (f & pilot_ast::DECL_FLAG_PKG) != 0)
-                    .map(|(n, _)| arena.interner.resolve(SymbolId(arena.node(NodeId(n as u32)).lhs)).to_string())
-                    .unwrap_or(rel_path);
+                let pkg = arena.decl_flags.iter().enumerate().find(|(_, &f)| (f & pilot_ast::DECL_FLAG_PKG) != 0)
+                    .map(|(n, _)| arena.interner.resolve(SymbolId(arena.node(NodeId(n as u32)).lhs)).to_string()).unwrap_or(rel_path);
                 arenas.push((pkg, arena));
             }
             BootstrapSnapshot { tables, vm, arenas }

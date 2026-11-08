@@ -192,7 +192,7 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
         if sym_id != 0 { symbol_strings.insert(sym_id, arena.interner.resolve(SymbolId(sym_id)).to_string()); }
 
         let (first_child, mut child_count) = (child_links.len() as u32, 0u16);
-        let mut push_ch = |c: u32| { if c != 0 && c != u32::MAX && (c as usize) < arena.nodes.len() { child_links.push(c); child_count += 1; } };
+        let mut push_ch = |c: u32| { if c != u32::MAX && (c as usize) < arena.nodes.len() { child_links.push(c); child_count += 1; } };
         if !struct_field_nodes.contains(&idx_u32) {
             match kind {
                 NodeKind::StructDecl => if let Some(f_ids) = struct_fields_map.get(&idx_u32) { for &f in f_ids { child_links.push(f); child_count += 1; } },

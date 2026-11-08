@@ -18,15 +18,9 @@ pub struct CapabilityBits(pub u8);
 pub type CapabilityPhysics = CapabilityBits;
 
 impl CapabilityBits {
-    pub const IMMUTABLE: Self = Self(0);
-    pub const MUTABLE: Self = Self(1);
-    pub const UNIQUE: Self = Self(2);
-    pub const LINEAR: Self = Self(4);
-    pub const PINNED: Self = Self(8);
-    pub const VALUE: Self = Self(0);
-    pub const BORROW_REF: Self = Self(1);
-    pub const OWNED_OBJ: Self = Self(4);
-    pub const SCOPED_GUARD: Self = Self(5);
+    pub const IMMUTABLE: Self = Self(0); pub const MUTABLE: Self = Self(1); pub const UNIQUE: Self = Self(2);
+    pub const LINEAR: Self = Self(4); pub const PINNED: Self = Self(8); pub const VALUE: Self = Self(0);
+    pub const BORROW_REF: Self = Self(1); pub const OWNED_OBJ: Self = Self(4); pub const SCOPED_GUARD: Self = Self(5);
 
     #[inline(always)] pub const fn from_raw(b: u8) -> Self { Self(b) }
     #[inline(always)] pub const fn raw(self) -> u8 { self.0 }
@@ -47,14 +41,10 @@ pub enum PhysicsGeometry {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct FieldOffset {
-    pub positional_index: u16, pub layout: LayoutId, pub byte_offset: u32, pub element_stride: u32,
-}
+pub struct FieldOffset { pub positional_index: u16, pub layout: LayoutId, pub byte_offset: u32, pub element_stride: u32 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PhysicalLayout {
-    pub id: LayoutId, pub byte_size: u32, pub byte_align: u32, pub geometry: PhysicsGeometry,
-}
+pub struct PhysicalLayout { pub id: LayoutId, pub byte_size: u32, pub byte_align: u32, pub geometry: PhysicsGeometry }
 
 #[derive(Default, Clone, Debug)]
 pub struct LayoutTable { layouts: Vec<PhysicalLayout> }
@@ -66,17 +56,12 @@ impl LayoutTable {
         match header {
             HwScalarHeader::Unit0 | HwScalarHeader::Never0 => self.register_scalar(0, 1, 0),
             HwScalarHeader::Bool8 | HwScalarHeader::U8 => self.register_scalar(8, 1, 0),
-            HwScalarHeader::U16 => self.register_scalar(16, 1, 0),
-            HwScalarHeader::U32 => self.register_scalar(32, 1, 0),
-            HwScalarHeader::U64 => self.register_scalar(64, 1, 0),
-            HwScalarHeader::U128 => self.register_scalar(128, 1, 0),
-            HwScalarHeader::I8 => self.register_scalar(8, 1, 2),
-            HwScalarHeader::I16 => self.register_scalar(16, 1, 2),
-            HwScalarHeader::I32 => self.register_scalar(32, 1, 2),
-            HwScalarHeader::I64 => self.register_scalar(64, 1, 2),
+            HwScalarHeader::U16 => self.register_scalar(16, 1, 0), HwScalarHeader::U32 => self.register_scalar(32, 1, 0),
+            HwScalarHeader::U64 => self.register_scalar(64, 1, 0), HwScalarHeader::U128 => self.register_scalar(128, 1, 0),
+            HwScalarHeader::I8 => self.register_scalar(8, 1, 2), HwScalarHeader::I16 => self.register_scalar(16, 1, 2),
+            HwScalarHeader::I32 => self.register_scalar(32, 1, 2), HwScalarHeader::I64 => self.register_scalar(64, 1, 2),
             HwScalarHeader::I128 => self.register_scalar(128, 1, 2),
-            HwScalarHeader::F32 => self.register_scalar(32, 1, 1),
-            HwScalarHeader::F64 => self.register_scalar(64, 1, 1),
+            HwScalarHeader::F32 => self.register_scalar(32, 1, 1), HwScalarHeader::F64 => self.register_scalar(64, 1, 1),
             HwScalarHeader::RawPtr64 => self.register_pointer(LayoutId(0), CapabilityBits::MUTABLE, 0),
         }
     }
@@ -133,6 +118,5 @@ impl LayoutTable {
     }
 
     pub fn get(&self, id: LayoutId) -> Option<&PhysicalLayout> { self.layouts.get(id.0 as usize) }
-    pub fn len(&self) -> usize { self.layouts.len() }
-    pub fn is_empty(&self) -> bool { self.layouts.is_empty() }
+    pub fn len(&self) -> usize { self.layouts.len() } pub fn is_empty(&self) -> bool { self.layouts.is_empty() }
 }

@@ -2,6 +2,9 @@
 // FILE: selfhost/diagnostics/errors.pilot
 // Pilot Semantic Diagnostics: Error Diagnostic Catalog (Severity 1)
 // =============================================================================
+// Reference Inspiration: C# (Roslyn), Python (Mypy/Ruff), and Rust (rustc).
+// Minimal forward-facing code: structured purely as an extensible diagnostic list.
+// =============================================================================
 pub pkg Pilot.Diagnostics.Errors;
 
 pub struct ErrorDef : IValue {
@@ -9,240 +12,446 @@ pub struct ErrorDef : IValue {
     pub title: str;
     pub description: str;
     pub category: str;
+    pub reference: str;
 }
 
 pub let ERRORS = [
     // -------------------------------------------------------------------------
-    // 1. Null Safety & Fallible Errors (NULL001 - NULL005, ERR001)
+    // 1. Type Safety & Type Mismatches (TYPE001 - TYPE005)
     // -------------------------------------------------------------------------
     ErrorDef {
-        code: "NULL001",
-        title: "Unchecked Null Assertion",
-        description: "Unchecked postfix '!' is prohibited; use '?', '??', or 'guard'",
-        category: "NullSafety",
+        code: "TYPE001",
+        title: "Type Mismatch",
+        description: "Expression of type 'T' cannot be assigned to target of incompatible type 'U'",
+        category: "TypeSafety",
+        reference: "Rust E0308 / C# CS0029 / Mypy assignment-type",
     },
     ErrorDef {
-        code: "NULL002",
-        title: "Non-Diverging Guard Statement",
-        description: "'guard' statement requires an 'else' block with early exit (return, break, continue, panic)",
-        category: "NullSafety",
+        code: "TYPE002",
+        title: "Undefined Type Name",
+        description: "Type name could not be resolved in the current lexical scope or imported packages",
+        category: "TypeSafety",
+        reference: "C# CS0246 / Rust E0412 / Mypy name-defined",
     },
     ErrorDef {
-        code: "NULL003",
-        title: "Invalid None Return",
-        description: "Cannot return 'none' from a function with non-nullable return type",
-        category: "NullSafety",
+        code: "TYPE003",
+        title: "Invalid Type Cast",
+        description: "Cannot cast expression of source type to unrelated target type without explicit conversion operator",
+        category: "TypeSafety",
+        reference: "C# CS0030 / Rust E0605",
     },
     ErrorDef {
-        code: "NULL004",
-        title: "Invalid None Argument",
-        description: "Cannot pass 'none' to a parameter with non-nullable type",
-        category: "NullSafety",
+        code: "TYPE004",
+        title: "Generic Argument Count Mismatch",
+        description: "Generic type or function requires N type arguments, but M were supplied",
+        category: "TypeSafety",
+        reference: "Rust E0107 / C# CS0305",
     },
     ErrorDef {
-        code: "NULL005",
-        title: "Unchecked Optional Indexing",
-        description: "Cannot index into optional or nullable collection without explicit unwrap or safe navigation '?['",
-        category: "NullSafety",
-    },
-    ErrorDef {
-        code: "ERR001",
-        title: "Unhandled Fallible Result",
-        description: "Fallible function returning 'result<T, E>' / 'T ! E' must be handled using '?', 'catch', or 'guard'",
-        category: "ValuesFirstError",
+        code: "TYPE005",
+        title: "Unsatisfied Generic Type Constraint",
+        description: "Type argument does not satisfy interface contract bounds required by generic parameter",
+        category: "TypeSafety",
+        reference: "C# CS0311 / Rust E0277",
     },
 
     // -------------------------------------------------------------------------
-    // 2. Loop Ergonomics & Control Flow (LOOP001 - LOOP004, MATCH002)
+    // 2. Lexical Bindings & Scope Safety (DECL001 - DECL004, KW001, VAR001)
     // -------------------------------------------------------------------------
     ErrorDef {
-        code: "LOOP001",
-        title: "Mixed Loop Break and Yield",
-        description: "Cannot mix 'break <expr>' and 'yield <expr>' in the same for loop body",
-        category: "LoopErgonomics",
+        code: "DECL001",
+        title: "Undeclared Identifier",
+        description: "The name does not exist in the current lexical scope or package context",
+        category: "ScopeResolution",
+        reference: "C# CS0103 / Python F821 / Rust E0425",
     },
     ErrorDef {
-        code: "LOOP002",
-        title: "Mixed Valued and Void Break",
-        description: "Cannot mix 'break <expr>' with bare 'break;' in the same loop expression",
-        category: "LoopErgonomics",
+        code: "DECL002",
+        title: "Duplicate Member Declaration",
+        description: "Type or lexical scope already contains a definition with the identical identifier",
+        category: "ScopeResolution",
+        reference: "C# CS0102 / Rust E0428",
     },
     ErrorDef {
-        code: "LOOP003",
-        title: "Then Clause Without Valued Break",
-        description: "Loop has a 'then' fallback clause but contains no 'break <expr>'",
-        category: "LoopErgonomics",
+        code: "DECL003",
+        title: "Illegal Variable Shadowing",
+        description: "Local binding cannot shadow an existing outer binding across strict boundary",
+        category: "ScopeResolution",
+        reference: "C# CS0136 / Rust clippy::shadow_unrelated",
     },
     ErrorDef {
-        code: "LOOP004",
-        title: "Statement Yield in Non-Generator",
-        description: "Cannot yield inside statement-position for in non-generator function; use let binding to collect yields",
-        category: "LoopErgonomics",
-    },
-    ErrorDef {
-        code: "MATCH002",
-        title: "Unreachable Pattern Arm",
-        description: "Unreachable pattern arm after wildcard '_' or catch-all pattern",
-        category: "PatternMatching",
-    },
-
-    // -------------------------------------------------------------------------
-    // 3. Compile-Time Arithmetic & Lexical Safety (DIV001, KW001)
-    // -------------------------------------------------------------------------
-    ErrorDef {
-        code: "DIV001",
-        title: "Compile-Time Division by Zero",
-        description: "Division or modulo by zero detected in compile-time constant expression",
-        category: "Arithmetic",
+        code: "DECL004",
+        title: "Reassignment to Immutable Binding",
+        description: "Cannot reassign to immutable 'let' binding; declare variable as 'var' to permit mutation",
+        category: "ScopeResolution",
+        reference: "Rust E0384 / Python frozen-attribute",
     },
     ErrorDef {
         code: "KW001",
         title: "Reserved Keyword Used as Identifier",
-        description: "Reserved language keyword used as identifier without escape",
+        description: "Reserved language keyword used as identifier name without '@' escape",
         category: "Syntax",
+        reference: "C# CS1001 / Python SyntaxError / Rust E0900",
+    },
+    ErrorDef {
+        code: "VAR001",
+        title: "Untyped Variable Declaration",
+        description: "Variable declaration requires an explicit type annotation or an initial value",
+        category: "TypeInference",
+        reference: "C# CS0818 / Rust E0282",
     },
 
     // -------------------------------------------------------------------------
-    // 4. Memory Lattice & Core Naming Contracts (LATTICE001, NAMING001 - NAMING007)
+    // 3. Control Flow & Method Returns (FLOW001 - FLOW005)
     // -------------------------------------------------------------------------
     ErrorDef {
-        code: "LATTICE001",
-        title: "Lattice Contract Mismatch",
-        description: "0b00 value type declaring destructor or conflicting memory ownership semantics",
-        category: "HardwareLattice",
+        code: "FLOW001",
+        title: "Missing Return Value",
+        description: "Not all code paths return a value in function with non-void return type",
+        category: "ControlFlow",
+        reference: "C# CS0161 / Rust E0269 / Mypy missing-return",
     },
     ErrorDef {
-        code: "NAMING001",
-        title: "Interface Naming Violation",
-        description: "Interface must begin with 'I' followed by PascalCase",
-        category: "NamingTaxonomy",
+        code: "FLOW002",
+        title: "Constructor Return Disallowed",
+        description: "'self()' constructor cannot return a value; constructors initialize state in-place",
+        category: "ControlFlow",
+        reference: "Python PLE0101 / C# CS0542",
     },
     ErrorDef {
-        code: "NAMING002",
-        title: "Primitive Naming Violation",
-        description: "[Lang] primitive struct must use lowercase identifier characters",
-        category: "NamingTaxonomy",
+        code: "FLOW003",
+        title: "Break Statement Outside Loop",
+        description: "'break' statement is not enclosed within a loop or switch construct",
+        category: "ControlFlow",
+        reference: "C# CS0139 / Python SyntaxError break-outside-loop",
     },
     ErrorDef {
-        code: "NAMING003",
-        title: "Core Struct PascalCase Violation",
-        description: "Core struct must use PascalCase unless [Lang] or partial",
-        category: "NamingTaxonomy",
+        code: "FLOW004",
+        title: "Continue Statement Outside Loop",
+        description: "'continue' statement is not enclosed within an iteration loop header",
+        category: "ControlFlow",
+        reference: "C# CS0140 / Python SyntaxError continue-outside-loop",
     },
     ErrorDef {
-        code: "NAMING004",
-        title: "Reserved Interface Prefix on Struct",
-        description: "Struct cannot begin with reserved interface prefix 'I' followed by uppercase character",
-        category: "NamingTaxonomy",
-    },
-    ErrorDef {
-        code: "NAMING005",
-        title: "Attribute Suffix Violation",
-        description: "Attribute struct must end with 'Attr' suffix",
-        category: "NamingTaxonomy",
-    },
-    ErrorDef {
-        code: "NAMING006",
-        title: "Scoped Guard Suffix Violation",
-        description: "0b11 IGuard struct must end with 'Guard', 'Scope', or 'Lease'",
-        category: "NamingTaxonomy",
-    },
-    ErrorDef {
-        code: "NAMING007",
-        title: "Reference View Suffix Violation",
-        description: "0b01 IReference struct must end with 'View', 'Lens', 'Cursor', or 'Enumerator'",
-        category: "NamingTaxonomy",
+        code: "FLOW005",
+        title: "Non-Exhaustive Pattern Match",
+        description: "'switch' expression pattern arms do not exhaust all variants; add wildcard '_' arm",
+        category: "PatternMatching",
+        reference: "Rust E0004 / C# CS8509",
     },
 
     // -------------------------------------------------------------------------
-    // 5. Perceus Ownership & Escape Verification (ESCAPE001 - ESCAPE003, PILOT104 - PILOT105)
+    // 4. Perceus Ownership & Borrow Physics (OWN001 - OWN003, ESCAPE001 - ESCAPE003)
     // -------------------------------------------------------------------------
+    ErrorDef {
+        code: "OWN001",
+        title: "Use of Moved Value",
+        description: "Uniquely owned 0b10 buffer variable used after its ownership was transferred",
+        category: "PerceusOwnership",
+        reference: "Rust E0382",
+    },
+    ErrorDef {
+        code: "OWN002",
+        title: "Multiple Mutable Borrows",
+        description: "Cannot borrow variable as mutable more than once simultaneously in the same scope",
+        category: "PerceusOwnership",
+        reference: "Rust E0499",
+    },
+    ErrorDef {
+        code: "OWN003",
+        title: "Cannot Mutate Immaturely Borrowed Value",
+        description: "Cannot mutate value or take mutable reference while an active reference view exists",
+        category: "PerceusOwnership",
+        reference: "Rust E0502",
+    },
     ErrorDef {
         code: "ESCAPE001",
         title: "Cue Boundary Escape",
         description: "Passing 0b01 reference view or 0b11 scoped guard across asynchronous [Cue] function boundary",
         category: "PerceusOwnership",
+        reference: "Pilot Ring 100 / Perceus Escape",
     },
     ErrorDef {
         code: "ESCAPE002",
         title: "Lexical Reference Escape",
         description: "0b01 reference view escapes its declaring lexical scope or is returned from function",
         category: "PerceusOwnership",
+        reference: "Rust E0597",
     },
     ErrorDef {
         code: "ESCAPE003",
         title: "Scoped Guard Escape",
-        description: "0b11 scoped guard escapes its stack allocation frame",
+        description: "0b11 scoped guard escapes its stack allocation frame; guards must be lexically bound",
         category: "PerceusOwnership",
+        reference: "C# CA2000 / Perceus Guard",
     },
+
+    // -------------------------------------------------------------------------
+    // 5. Null Safety & Fallible Values-First (NULL001 - NULL005, ERR001)
+    // -------------------------------------------------------------------------
+    ErrorDef {
+        code: "NULL001",
+        title: "Unchecked Null Assertion",
+        description: "Unchecked postfix '!' is prohibited; use '?', '??', or 'guard'",
+        category: "NullSafety",
+        reference: "Rust unwrap / C# CS8602",
+    },
+    ErrorDef {
+        code: "NULL002",
+        title: "Non-Diverging Guard Statement",
+        description: "'guard' statement requires an 'else' block with early exit (return, break, continue, panic)",
+        category: "NullSafety",
+        reference: "Swift guard-else / Rust diverging block",
+    },
+    ErrorDef {
+        code: "NULL003",
+        title: "Invalid None Return",
+        description: "Cannot return 'none' from a function with non-nullable return type",
+        category: "NullSafety",
+        reference: "C# CS8603 / Mypy return-value",
+    },
+    ErrorDef {
+        code: "NULL004",
+        title: "Invalid None Argument",
+        description: "Cannot pass 'none' to a parameter with non-nullable type",
+        category: "NullSafety",
+        reference: "C# CS8604 / Mypy arg-type",
+    },
+    ErrorDef {
+        code: "NULL005",
+        title: "Unchecked Optional Indexing",
+        description: "Cannot index into optional or nullable collection without explicit unwrap or safe navigation '?['",
+        category: "NullSafety",
+        reference: "C# CS8602 / Rust Option-index",
+    },
+    ErrorDef {
+        code: "ERR001",
+        title: "Unhandled Fallible Result",
+        description: "Fallible function returning 'result<T, E>' / 'T ! E' must be handled using '?', 'catch', or 'guard'",
+        category: "ValuesFirstError",
+        reference: "Rust #[must_use] Result / Swift try",
+    },
+
+    // -------------------------------------------------------------------------
+    // 6. Invocation, Member Access & Visibility (CALL001, CALL002, METH001, ACCESS001)
+    // -------------------------------------------------------------------------
+    ErrorDef {
+        code: "CALL001",
+        title: "Argument Count Mismatch",
+        description: "Function expects N arguments, but M were supplied in invocation",
+        category: "FunctionCall",
+        reference: "Python TypeError missing-args / C# CS7036 / Rust E0061",
+    },
+    ErrorDef {
+        code: "CALL002",
+        title: "Expression Not Callable",
+        description: "Target expression of non-function type cannot be invoked as a function or closure",
+        category: "FunctionCall",
+        reference: "Python TypeError not-callable / C# CS1955 / Rust E0618",
+    },
+    ErrorDef {
+        code: "METH001",
+        title: "Member Not Found",
+        description: "Type does not contain definition for specified field, method, or property",
+        category: "MemberAccess",
+        reference: "C# CS1061 / Python AttributeError / Rust E0599",
+    },
+    ErrorDef {
+        code: "ACCESS001",
+        title: "Inaccessible Member Visibility",
+        description: "Member is inaccessible due to its declared visibility level or clearance ring",
+        category: "Visibility",
+        reference: "C# CS0122 / Rust E0603",
+    },
+
+    // -------------------------------------------------------------------------
+    // 7. Loop Ergonomics & Pattern Matching (LOOP001 - LOOP004, MATCH002)
+    // -------------------------------------------------------------------------
+    ErrorDef {
+        code: "LOOP001",
+        title: "Mixed Loop Break and Yield",
+        description: "Cannot mix 'break <expr>' and 'yield <expr>' in the same for loop body",
+        category: "LoopErgonomics",
+        reference: "Python SyntaxError yield-comprehension",
+    },
+    ErrorDef {
+        code: "LOOP002",
+        title: "Mixed Valued and Void Break",
+        description: "Cannot mix 'break <expr>' with bare 'break;' in the same loop expression",
+        category: "LoopErgonomics",
+        reference: "Rust E0571",
+    },
+    ErrorDef {
+        code: "LOOP003",
+        title: "Then Clause Without Valued Break",
+        description: "Loop has a 'then' fallback clause but contains no 'break <expr>'",
+        category: "LoopErgonomics",
+        reference: "Python for-else disambiguation",
+    },
+    ErrorDef {
+        code: "LOOP004",
+        title: "Statement Yield in Non-Generator",
+        description: "Cannot yield inside statement-position for in non-generator function; use let binding to collect yields",
+        category: "LoopErgonomics",
+        reference: "Python SyntaxError yield-outside-func",
+    },
+    ErrorDef {
+        code: "MATCH002",
+        title: "Unreachable Pattern Arm",
+        description: "Unreachable pattern arm after wildcard '_' or catch-all pattern",
+        category: "PatternMatching",
+        reference: "Rust E0001 / C# CS8510",
+    },
+
+    // -------------------------------------------------------------------------
+    // 8. Compile-Time Arithmetic & Lexical Safety (DIV001)
+    // -------------------------------------------------------------------------
+    ErrorDef {
+        code: "DIV001",
+        title: "Compile-Time Division by Zero",
+        description: "Division or modulo by zero detected in compile-time constant expression",
+        category: "Arithmetic",
+        reference: "Rust E0080 / C# CS0020 / Python ZeroDivisionError",
+    },
+
+    // -------------------------------------------------------------------------
+    // 9. Memory Lattice & Core Naming Contracts (LATTICE001, NAMING001 - NAMING007)
+    // -------------------------------------------------------------------------
+    ErrorDef {
+        code: "LATTICE001",
+        title: "Lattice Contract Mismatch",
+        description: "0b00 value type declaring destructor or conflicting memory ownership semantics",
+        category: "HardwareLattice",
+        reference: "Pilot 2-Bit Hardware Lattice",
+    },
+    ErrorDef {
+        code: "NAMING001",
+        title: "Interface Naming Violation",
+        description: "Interface must begin with 'I' followed by PascalCase",
+        category: "NamingTaxonomy",
+        reference: "C# Interface Naming Convention",
+    },
+    ErrorDef {
+        code: "NAMING002",
+        title: "Primitive Naming Violation",
+        description: "[Lang] primitive struct must use lowercase identifier characters",
+        category: "NamingTaxonomy",
+        reference: "Pilot Universal Name-Blind Contract",
+    },
+    ErrorDef {
+        code: "NAMING003",
+        title: "Core Struct PascalCase Violation",
+        description: "Core struct must use PascalCase unless [Lang] or partial",
+        category: "NamingTaxonomy",
+        reference: "C# / Rust PascalCase Struct Convention",
+    },
+    ErrorDef {
+        code: "NAMING004",
+        title: "Reserved Interface Prefix on Struct",
+        description: "Struct cannot begin with reserved interface prefix 'I' followed by uppercase character",
+        category: "NamingTaxonomy",
+        reference: "C# Reserved Prefix Convention",
+    },
+    ErrorDef {
+        code: "NAMING005",
+        title: "Attribute Suffix Violation",
+        description: "Attribute struct must end with 'Attr' suffix",
+        category: "NamingTaxonomy",
+        reference: "C# Attribute Suffix Convention",
+    },
+    ErrorDef {
+        code: "NAMING006",
+        title: "Scoped Guard Suffix Violation",
+        description: "0b11 IGuard struct must end with 'Guard', 'Scope', or 'Lease'",
+        category: "NamingTaxonomy",
+        reference: "Rust RAII Guard Suffix Convention",
+    },
+    ErrorDef {
+        code: "NAMING007",
+        title: "Reference View Suffix Violation",
+        description: "0b01 IReference struct must end with 'View', 'Lens', 'Cursor', or 'Enumerator'",
+        category: "NamingTaxonomy",
+        reference: "Pilot Reference View Taxonomy",
+    },
+
+    // -------------------------------------------------------------------------
+    // 10. Real-Time Guarantees & Preprocessor (PILOT104, PILOT105, PREPROC001 - PREPROC008)
+    // -------------------------------------------------------------------------
     ErrorDef {
         code: "PILOT104",
         title: "Heap Allocation in Real-Time Context",
         description: "Dynamic collection or heap allocation inside [HardRealtime] or noalloc function",
         category: "RealTime",
+        reference: "Rust embedded no_std / Real-Time C",
     },
     ErrorDef {
         code: "PILOT105",
         title: "Thread Dispatch in Real-Time Context",
         description: "Non-deterministic threading or dispatch in [HardRealtime] context",
         category: "RealTime",
+        reference: "Safety-Critical RTOS Constraints",
     },
-
-    // -------------------------------------------------------------------------
-    // 6. Reactive Attributes & Preprocessor Directives (ATTR001 - ATTR002, PREPROC001 - PREPROC005, PREPROC007 - PREPROC008)
-    // -------------------------------------------------------------------------
     ErrorDef {
         code: "ATTR001",
         title: "Reactive Attribute on Interface",
         description: "Reactive or formula attribute attached directly to 0-byte interface declaration",
         category: "AttributeWeaver",
+        reference: "Pilot Reactive Pipeline",
     },
     ErrorDef {
         code: "ATTR002",
         title: "Conflicting Attribute Weights",
         description: "Conflicting attribute pipeline weights or circular reactive dependency",
         category: "AttributeWeaver",
+        reference: "Pilot SSA Weaving Contract",
     },
     ErrorDef {
         code: "PREPROC001",
         title: "Malformed Preprocessor Directive",
         description: "Unknown preprocessor directive or empty #define identifier",
         category: "Preprocessor",
+        reference: "C# CS1024",
     },
     ErrorDef {
         code: "PREPROC002",
         title: "Unclosed Conditional Directive",
         description: "Missing #endif for #if or #ifdef conditional block",
         category: "Preprocessor",
+        reference: "C# CS1027",
     },
     ErrorDef {
         code: "PREPROC003",
         title: "Extraneous Preprocessor Block Terminator",
         description: "Unexpected #endif or #else without matching #if directive",
         category: "Preprocessor",
+        reference: "C# CS1028",
     },
     ErrorDef {
         code: "PREPROC004",
         title: "Duplicate Preprocessor Else Clause",
         description: "Duplicate #else in conditional preprocessor block",
         category: "Preprocessor",
+        reference: "C# CS1030",
     },
     ErrorDef {
         code: "PREPROC005",
         title: "User Preprocessor Error",
         description: "Explicit compile error emitted via #error preprocessor directive",
         category: "Preprocessor",
+        reference: "C# CS1029",
     },
     ErrorDef {
         code: "PREPROC007",
         title: "Unclosed Preprocessor Region",
         description: "Unclosed #region directive without matching #endregion",
         category: "Preprocessor",
+        reference: "C# CS1038",
     },
     ErrorDef {
         code: "PREPROC008",
         title: "Extraneous Preprocessor End Region",
         description: "Unexpected #endregion without matching #region directive",
         category: "Preprocessor",
+        reference: "C# CS1039",
     },
 ];

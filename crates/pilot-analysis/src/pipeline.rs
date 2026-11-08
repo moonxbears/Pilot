@@ -17,16 +17,39 @@ impl AnalysisPipeline {
     pub fn analyze(arena: &AstArena, root: NodeId) -> AnalysisResult {
         let physics = analyze_physics(arena, root, None);
         let mut diagnostics = Vec::with_capacity(arena.diagnostics.len() + physics.diagnostics.len());
-        for (span, msg) in &arena.diagnostics {
-            let code = msg.split_once(": ").filter(|(c, _)| !c.is_empty() && c.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')).map_or_else(|| "SyntaxError".to_string(), |(c, _)| c.to_string());
-            diagnostics.push(AnalysisDiagnostic { code, message: msg.clone(), span: *span, severity: DiagnosticSeverity::Error });
-        }
+        let parse_code = |m: &str, def: &str| m.split_once(": ").filter(|(c, _)| !c.is_empty() && c.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')).map_or(def, |(c, _)| c).to_string();
+        for (span, msg) in &arena.diagnostics { diagnostics.push(AnalysisDiagnostic { code: parse_code(msg, "SyntaxError"), message: msg.clone(), span: *span, severity: DiagnosticSeverity::Error }); }
         for d in &physics.diagnostics {
-            let code = d.message.split_once(": ").filter(|(c, _)| !c.is_empty() && c.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')).map_or_else(|| "PhysicsError".to_string(), |(c, _)| c.to_string());
             let severity = match d.severity { 2 => DiagnosticSeverity::Warning, 3 => DiagnosticSeverity::Info, 4 => DiagnosticSeverity::Hint, _ => DiagnosticSeverity::Error };
-            diagnostics.push(AnalysisDiagnostic { code, message: d.message.clone(), span: arena.span(NodeId(d.node_id)), severity });
+            diagnostics.push(AnalysisDiagnostic { code: parse_code(&d.message, "PhysicsError"), message: d.message.clone(), span: arena.span(NodeId(d.node_id)), severity });
         }
         AnalysisResult { diagnostics, physics }
+    }
+
+    pub fn filter_pragma_suppressions(src: &str, diags: &mut Vec<AnalysisDiagnostic>) {
+        let (mut cur, mut intervals, mut starts) = (0usize, Vec::new(), std::collections::HashMap::new());
+        for line in src.split_inclusive('\n') {
+            let tr = line.trim();
+            if let Some(r) = tr.strip_prefix("#pragma warning disable") {
+                let s = r.trim();
+                if s.is_empty() { starts.entry(None).or_insert(cur); }
+                else { for c in s.split(',') { starts.entry(Some(c.trim().to_string())).or_insert(cur); } }
+            } else if let Some(r) = tr.strip_prefix("#pragma warning restore") {
+                let s = r.trim();
+                if s.is_empty() { for (k, st) in starts.drain() { intervals.push((st, cur + line.len(), k)); } }
+                else { for c in s.split(',') { if let Some(st) = starts.remove(&Some(c.trim().to_string())) { intervals.push((st, cur + line.len(), Some(c.trim().to_string()))); } } }
+            }
+            cur += line.len();
+        }
+        for (k, st) in starts { intervals.push((st, cur, k)); }
+        diags.retain(|d| !intervals.iter().any(|(st, en, c)| (d.span.start as usize) >= *st && (d.span.start as usize) < *en && c.as_ref().map_or(!d.is_error(), |code| code == &d.code)));
+    }
+
+    pub fn analyze_source(src: &str) -> AnalysisResult {
+        let arena = pilot_parser::parse(src);
+        let mut res = Self::analyze(&arena, arena.root);
+        Self::filter_pragma_suppressions(src, &mut res.diagnostics);
+        res
     }
 
     pub fn load_program(path: &str) -> (AstArena, PhysicsRegistry) {
@@ -41,10 +64,7 @@ impl AnalysisPipeline {
         };
         scan(&src, &mut loaded, &mut queue);
         let mut idx = 0;
-        while idx < queue.len() {
-            let p = queue[idx].clone(); idx += 1;
-            if let Ok(c) = std::fs::read_to_string(&p) { scan(&c, &mut loaded, &mut queue); dep_srcs.push(c); }
-        }
+        while idx < queue.len() { let p = queue[idx].clone(); idx += 1; if let Ok(c) = std::fs::read_to_string(&p) { scan(&c, &mut loaded, &mut queue); dep_srcs.push(c); } }
         let full = if dep_srcs.is_empty() { src } else { format!("{}\n{src}", dep_srcs.join("\n")) };
         let arena = pilot_parser::parse(&full);
         let mut physics = analyze_physics(&arena, arena.root, None);

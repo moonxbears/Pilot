@@ -55,6 +55,59 @@ let Cfg = {
     }
 };
 
+pub fn str_contains(haystack: str, needle: str) -> bool {
+    let hlen = haystack.len();
+    let nlen = needle.len();
+    if nlen == 0 { return true; }
+    if hlen < nlen { return false; }
+    var i = 0;
+    while i + nlen <= hlen {
+        if haystack.slice(i, i + nlen) == needle { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+pub fn is_suppressed(nid: i64, code: str, msg: str) -> bool {
+    var cur = nid;
+    var depth = 0;
+    while cur >= 0 && cur < 100000 && depth < 50 {
+        let ac = __engine(Cfg.ast.ast_attr_decl_count, cur);
+        var idx = 0;
+        while idx < ac {
+            let asym = __engine(Cfg.ast.ast_attr_name, cur, idx);
+            let anm = __engine(Cfg.ast.sym_str, asym);
+            if anm == "Suppress" || anm == "Allow" || anm == "SuppressWarning" || anm == "SuppressMessage" || anm == "Diagnostics" {
+                let argc = __engine(Cfg.ast.ast_attr_decl_arg_count, cur, idx);
+                if argc == 0 { return true; }
+                var ai = 0;
+                while ai < argc {
+                    let arg_sym = __engine(Cfg.ast.ast_attr_decl_arg, cur, idx, ai);
+                    let arg_str = __engine(Cfg.ast.sym_str, arg_sym);
+                    if arg_str == code || arg_str == "all" || arg_str == "*" { return true; }
+                    if arg_str.len() > 0 && str_contains(msg, arg_str) { return true; }
+                    ai = ai + 1;
+                }
+            }
+            idx = idx + 1;
+        }
+        let p = __engine(Cfg.ast.ast_parent, cur);
+        if p < 0 || p >= 100000 || p == cur { return false; }
+        cur = p;
+        depth = depth + 1;
+    }
+    return false;
+}
+
+pub fn emit_diag(nid: i64, sev: i64, msg: str) {
+    var c = 0;
+    let mlen = msg.len();
+    while c < mlen && msg.byte_at(c) != 58 { c = c + 1; }
+    let code = if c < mlen { msg.slice(0, c) } else { "" };
+    if is_suppressed(nid, code, msg) { return; }
+    __engine(Cfg.ast.ast_emit_diag, nid, sev, msg);
+}
+
 pub fn resolve_type_sym(type_sym: i64, node_count: i64) -> i64 {
     var j = 0;
     while j < node_count {
@@ -192,21 +245,13 @@ pub fn infer_struct(s_id: i64, node_count: i64) -> i64 {
     }
 
     var agg_lid = 0;
-    if num_fields == 0 {
-        agg_lid = __engine(Cfg.ast.layout_scalar, 8, 1, 0);
-    } else if num_fields == 1 {
-        agg_lid = __engine(Cfg.ast.layout_aggregate, f0);
-    } else if num_fields == 2 {
-        agg_lid = __engine(Cfg.ast.layout_aggregate, f0, f1);
-    } else if num_fields == 3 {
-        agg_lid = __engine(Cfg.ast.layout_aggregate, f0, f1, f2);
-    } else if num_fields == 4 {
-        agg_lid = __engine(Cfg.ast.layout_aggregate, f0, f1, f2, f3);
-    } else if num_fields == 5 {
-        agg_lid = __engine(Cfg.ast.layout_aggregate, f0, f1, f2, f3, f4);
-    } else {
-        agg_lid = __engine(Cfg.ast.layout_aggregate, f0, f1, f2, f3, f4, f5);
-    }
+    if num_fields == 0 { agg_lid = __engine(Cfg.ast.layout_scalar, 8, 1, 0); }
+    else if num_fields == 1 { agg_lid = __engine(Cfg.ast.layout_aggregate, f0); }
+    else if num_fields == 2 { agg_lid = __engine(Cfg.ast.layout_aggregate, f0, f1); }
+    else if num_fields == 3 { agg_lid = __engine(Cfg.ast.layout_aggregate, f0, f1, f2); }
+    else if num_fields == 4 { agg_lid = __engine(Cfg.ast.layout_aggregate, f0, f1, f2, f3); }
+    else if num_fields == 5 { agg_lid = __engine(Cfg.ast.layout_aggregate, f0, f1, f2, f3, f4); }
+    else { agg_lid = __engine(Cfg.ast.layout_aggregate, f0, f1, f2, f3, f4, f5); }
     __engine(Cfg.ast.ast_bind_layout, s_id, agg_lid);
     return agg_lid;
 }
@@ -242,25 +287,9 @@ pub fn resolve_lit_layout(lit_kind: i64, node_count: i64) -> i64 {
                 if s_lid != 4294967295 {
                     let sz = __engine(Cfg.ast.layout_metrics, s_lid);
                     let bank = if attr_cnt >= 3 { __engine(Cfg.ast.ast_attr_arg, j, 2) } else { __engine(Cfg.ast.ast_attr_arg, j, 1) };
-                    if lit_kind == 4 {
-                        if sz == 1 {
-                            return s_lid;
-                        }
-                    } else if lit_kind == 1 {
-                        if sz == 8 {
-                            if bank != 1 {
-                                if bank != 6 {
-                                    return s_lid;
-                                }
-                            }
-                        }
-                    } else if lit_kind == 2 {
-                        if sz == 8 {
-                            if bank == 1 {
-                                return s_lid;
-                            }
-                        }
-                    }
+                    if lit_kind == 4 && sz == 1 { return s_lid; }
+                    else if lit_kind == 1 && sz == 8 && bank != 1 && bank != 6 { return s_lid; }
+                    else if lit_kind == 2 && sz == 8 && bank == 1 { return s_lid; }
                 }
             }
         }
@@ -334,21 +363,10 @@ pub fn infer_member_expr(i: i64, node_count: i64) -> i64 {
 }
 
 pub fn check_div_by_zero(i: i64, op: i64, c_count: i64) -> i64 {
-    if op >= 4 {
-        if op <= 6 {
-            if c_count >= 2 {
-                let rhs_id = __engine(Cfg.ast.ast_child_at, i, 1);
-                let rhs_kind = __engine(Cfg.ast.ast_node_kind, rhs_id);
-                let rhs_lit = __engine(Cfg.ast.ast_node_lit_kind, rhs_id);
-                let rhs_bits = __engine(Cfg.ast.ast_node_raw_bits, rhs_id);
-                if rhs_kind == 15 {
-                    if rhs_lit == 1 {
-                        if rhs_bits == 0 {
-                            __engine(Cfg.ast.ast_emit_diag, i, 1, "DIV001: Compile-time division by zero detected");
-                        }
-                    }
-                }
-            }
+    if op >= 4 && op <= 6 && c_count >= 2 {
+        let rhs_id = __engine(Cfg.ast.ast_child_at, i, 1);
+        if __engine(Cfg.ast.ast_node_kind, rhs_id) == 15 && __engine(Cfg.ast.ast_node_lit_kind, rhs_id) == 1 && __engine(Cfg.ast.ast_node_raw_bits, rhs_id) == 0 {
+            emit_diag(i, 1, "DIV001: Compile-time division by zero detected");
         }
     }
     return 0;
@@ -638,17 +656,8 @@ pub fn verify_decl_contracts(nid: i64, enforce_naming: bool) -> i64 {
     let is_lang = has_attr_named(nid, "Lang");
 
     if kind == 2 {
-        if enforce_naming {
-            var bad_iface = (c0 != 73) || (nlen < 2);
-            if !bad_iface {
-                let c1 = __engine(Cfg.ast.str_byte_at, name, 1);
-                if c1 < 65 || c1 > 90 {
-                    bad_iface = true;
-                }
-            }
-            if bad_iface {
-                __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [InterfacePrefix] Interface '" + name + "' must begin with 'I' + PascalCase");
-            }
+        if enforce_naming && (c0 != 73 || nlen < 2 || __engine(Cfg.ast.str_byte_at, name, 1) < 65 || __engine(Cfg.ast.str_byte_at, name, 1) > 90) {
+            emit_diag(nid, 1, "EnforceCoreNaming: [InterfacePrefix] Interface '" + name + "' must begin with 'I' + PascalCase");
         }
         return 0;
     }
@@ -673,43 +682,35 @@ pub fn verify_decl_contracts(nid: i64, enforce_naming: bool) -> i64 {
         bi = bi + 1;
     }
 
-    if has_ivalue {
-        if has_dtor {
-            __engine(Cfg.ast.ast_emit_diag, nid, 1, "LatticeContractMismatch: struct '" + name + "' declared ': IValue' (0b00), but declares ~self() destructor (0b10)");
-        }
+    if has_ivalue && has_dtor {
+        emit_diag(nid, 1, "LatticeContractMismatch: struct '" + name + "' declared ': IValue' (0b00), but declares ~self() destructor (0b10)");
     }
 
-    if enforce_naming {
-        if !is_partial {
-            if is_lang {
-                if !is_lowercase_lang_ident(name) {
-                    __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [LangPrimitiveLowercase] [Lang] primitive struct '" + name + "' must be lowercase");
-                }
-            } else {
-                var prefix_violation = false;
-                if c0 < 65 || c0 > 90 {
-                    __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [StructPascalCase] Core struct '" + name + "' must be PascalCase");
+    if enforce_naming && !is_partial {
+        if is_lang {
+            if !is_lowercase_lang_ident(name) { emit_diag(nid, 1, "EnforceCoreNaming: [LangPrimitiveLowercase] [Lang] primitive struct '" + name + "' must be lowercase"); }
+        } else {
+            var prefix_violation = false;
+            if c0 < 65 || c0 > 90 {
+                emit_diag(nid, 1, "EnforceCoreNaming: [StructPascalCase] Core struct '" + name + "' must be PascalCase");
+                prefix_violation = true;
+            } else if c0 == 73 && nlen >= 2 {
+                let sc1 = __engine(Cfg.ast.str_byte_at, name, 1);
+                if sc1 >= 65 && sc1 <= 90 {
+                    emit_diag(nid, 1, "EnforceCoreNaming: [ReservedInterfacePrefix] Struct '" + name + "' cannot begin with reserved interface prefix 'I' + uppercase");
                     prefix_violation = true;
-                } else if c0 == 73 && nlen >= 2 {
-                    let sc1 = __engine(Cfg.ast.str_byte_at, name, 1);
-                    if sc1 >= 65 && sc1 <= 90 {
-                        __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [ReservedInterfacePrefix] Struct '" + name + "' cannot begin with reserved interface prefix 'I' + uppercase");
-                        prefix_violation = true;
-                    }
                 }
-                if !prefix_violation {
-                    if has_iattr {
-                        if !str_ends_with_bytes(name, "Attr") {
-                            __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [AttributeSuffix] Attribute struct '" + name + "' must end with 'Attr'");
-                        }
-                    } else if has_iguard || (has_iref && has_iobj) {
-                        if !str_ends_with_bytes(name, "Guard") && !str_ends_with_bytes(name, "Scope") && !str_ends_with_bytes(name, "Lease") {
-                            __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [ScopedGuardSuffix] IGuard struct '" + name + "' must end with 'Guard', 'Scope', or 'Lease'");
-                        }
-                    } else if has_iref {
-                        if !str_ends_with_bytes(name, "View") && !str_ends_with_bytes(name, "Lens") && !str_ends_with_bytes(name, "Cursor") && !str_ends_with_bytes(name, "Enumerator") {
-                            __engine(Cfg.ast.ast_emit_diag, nid, 1, "EnforceCoreNaming: [ReferenceViewSuffix] IReference struct '" + name + "' must end with 'View', 'Lens', 'Cursor', or 'Enumerator'");
-                        }
+            }
+            if !prefix_violation {
+                if has_iattr {
+                    if !str_ends_with_bytes(name, "Attr") { emit_diag(nid, 1, "EnforceCoreNaming: [AttributeSuffix] Attribute struct '" + name + "' must end with 'Attr'"); }
+                } else if has_iguard || (has_iref && has_iobj) {
+                    if !str_ends_with_bytes(name, "Guard") && !str_ends_with_bytes(name, "Scope") && !str_ends_with_bytes(name, "Lease") {
+                        emit_diag(nid, 1, "EnforceCoreNaming: [ScopedGuardSuffix] IGuard struct '" + name + "' must end with 'Guard', 'Scope', or 'Lease'");
+                    }
+                } else if has_iref {
+                    if !str_ends_with_bytes(name, "View") && !str_ends_with_bytes(name, "Lens") && !str_ends_with_bytes(name, "Cursor") && !str_ends_with_bytes(name, "Enumerator") {
+                        emit_diag(nid, 1, "EnforceCoreNaming: [ReferenceViewSuffix] IReference struct '" + name + "' must end with 'View', 'Lens', 'Cursor', or 'Enumerator'");
                     }
                 }
             }
@@ -843,7 +844,7 @@ pub fn verify_ident_not_keyword(nid: i64, kw_set: str) -> i64 {
 
     // Check if name is in the dynamic keyword set
     if is_in_pipe_delimited(kw_set, name) {
-        __engine(Cfg.ast.ast_emit_diag, nid, 1, "KW001: Identifier '" + name + "' is a keyword and cannot be used as an identifier name");
+        emit_diag(nid, 1, "KW001: Identifier '" + name + "' is a keyword and cannot be used as an identifier name");
         return 1;
     }
 
@@ -906,7 +907,7 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
                 si = si + 1;
             }
             if !eb_diverges {
-                __engine(Cfg.ast.ast_emit_diag, eb, 1, "NULL002: 'guard' else block must diverge with 'return', 'break', 'continue', 'yield', or 'panic'");
+                emit_diag(eb, 1, "NULL002: 'guard' else block must diverge with 'return', 'break', 'continue', 'yield', or 'panic'");
                 return 1;
             }
         }
@@ -922,7 +923,7 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
                     let init_node = __engine(Cfg.ast.ast_child_at, i, 0);
                     let init_ok = __engine(Cfg.ast.ast_orig_kind, init_node);
                     if init_ok == 305 {
-                        __engine(Cfg.ast.ast_emit_diag, i, 1, "NULL001: Cannot assign 'none' to non-nullable type '" + ann_name + "'");
+                        emit_diag(i, 1, "NULL001: Cannot assign 'none' to non-nullable type '" + ann_name + "'");
                         return 1;
                     }
                 }
@@ -947,7 +948,7 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
                     }
                 }
                 if !is_opt {
-                    __engine(Cfg.ast.ast_emit_diag, i, 1, "NULL001: Cannot assign 'none' to non-nullable variable");
+                    emit_diag(i, 1, "NULL001: Cannot assign 'none' to non-nullable variable");
                     return 1;
                 }
             }
@@ -978,7 +979,7 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
                     if ret_ty_sym > 0 {
                         let rname = __engine(Cfg.ast.sym_str, ret_ty_sym);
                         if !is_type_name_or_sym_optional(ret_ty_sym, rname, node_count) {
-                            __engine(Cfg.ast.ast_emit_diag, i, 1, "NULL003: Cannot return 'none' from function with non-nullable return type '" + rname + "'");
+                            emit_diag(i, 1, "NULL003: Cannot return 'none' from function with non-nullable return type '" + rname + "'");
                             return 1;
                         }
                     }
@@ -1004,7 +1005,7 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
                             if psym > 0 {
                                 let pname = __engine(Cfg.ast.sym_str, psym);
                                 if !is_type_name_or_sym_optional(psym, pname, node_count) {
-                                    __engine(Cfg.ast.ast_emit_diag, arg, 1, "NULL004: Cannot pass 'none' to non-nullable parameter '" + pname + "'");
+                                    emit_diag(arg, 1, "NULL004: Cannot pass 'none' to non-nullable parameter '" + pname + "'");
                                     return 1;
                                 }
                             }
@@ -1024,9 +1025,9 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
                 let t_sym = __engine(Cfg.ast.ast_node_raw_bits, recv_tid);
                 if t_sym > 0 && is_type_name_or_sym_optional(t_sym, __engine(Cfg.ast.sym_str, t_sym), node_count) {
                     if ok == 209 {
-                        __engine(Cfg.ast.ast_emit_diag, i, 1, "NULL002: Member access on optional type requires '?.' safe navigation or unwrapping");
+                        emit_diag(i, 1, "NULL002: Member access on optional type requires '?.' safe navigation or unwrapping");
                     } else {
-                        __engine(Cfg.ast.ast_emit_diag, i, 1, "NULL005: Index access on optional type requires safe navigation or unwrapping");
+                        emit_diag(i, 1, "NULL005: Index access on optional type requires safe navigation or unwrapping");
                     }
                     return 1;
                 }
@@ -1052,7 +1053,7 @@ pub fn verify_error_flow(i: i64, node_count: i64) -> i64 {
                     if ret_sym > 0 {
                         let rname = __engine(Cfg.ast.sym_str, ret_sym);
                         if is_type_fallible(ret_sym, rname, node_count) {
-                            __engine(Cfg.ast.ast_emit_diag, expr, 1, "ERR001: Unhandled fallible return value; must use '?', 'catch', or assign to a binding");
+                            emit_diag(expr, 1, "ERR001: Unhandled fallible return value; must use '?', 'catch', or assign to a binding");
                             return 1;
                         }
                     }
@@ -1079,7 +1080,7 @@ pub fn verify_error_flow(i: i64, node_count: i64) -> i64 {
             }
         }
         if !in_polyglot {
-            __engine(Cfg.ast.ast_emit_diag, i, 2, "ERR005: Error stratification lint: legacy 'try/catch' is restricted to polyglot FFI boundaries; use values-first 'T ! E' with '?' or 'catch'");
+            emit_diag(i, 2, "ERR005: Error stratification lint: legacy 'try/catch' is restricted to polyglot FFI boundaries; use values-first 'T ! E' with '?' or 'catch'");
             return 1;
         }
     }
@@ -1121,18 +1122,9 @@ pub fn verify_loop_ergonomics(i: i64, node_count: i64) -> i64 {
                 k = k + 1;
             }
 
-            if has_valued_break && has_yield {
-                __engine(Cfg.ast.ast_emit_diag, i, 1, "LOOP001: Cannot mix 'break <expr>' and 'yield <expr>' in the same 'for' loop");
-                return 1;
-            }
-            if has_void_break && has_valued_break {
-                __engine(Cfg.ast.ast_emit_diag, i, 1, "LOOP002: Cannot mix valueless 'break;' and valued 'break <expr>;' in the same 'for' loop");
-                return 1;
-            }
-            if has_then && !has_valued_break {
-                __engine(Cfg.ast.ast_emit_diag, i, 1, "LOOP003: Loop completion 'then' branch is only valid on a ScalarBreak 'for' loop containing 'break <expr>'");
-                return 1;
-            }
+            if has_valued_break && has_yield { emit_diag(i, 1, "LOOP001: Cannot mix 'break <expr>' and 'yield <expr>' in the same 'for' loop"); return 1; }
+            if has_void_break && has_valued_break { emit_diag(i, 1, "LOOP002: Cannot mix valueless 'break;' and valued 'break <expr>;' in the same 'for' loop"); return 1; }
+            if has_then && !has_valued_break { emit_diag(i, 1, "LOOP003: Loop completion 'then' branch is only valid on a ScalarBreak 'for' loop containing 'break <expr>'"); return 1; }
             if has_yield {
                 let p = __engine(Cfg.ast.ast_parent, i);
                 if p != 4294967295 && p >= 0 {
@@ -1143,27 +1135,18 @@ pub fn verify_loop_ergonomics(i: i64, node_count: i64) -> i64 {
                         var depth = 0;
                         while cur != 4294967295 && cur >= 0 && depth < 30 {
                             depth = depth + 1;
-                            let pk = __engine(Cfg.ast.ast_node_kind, cur);
-                            if pk == 3 {
-                                enc_fn = cur;
-                                cur = -1;
-                            } else {
-                                cur = __engine(Cfg.ast.ast_parent, cur);
-                            }
+                            if __engine(Cfg.ast.ast_node_kind, cur) == 3 { enc_fn = cur; cur = -1; }
+                            else { cur = __engine(Cfg.ast.ast_parent, cur); }
                         }
                         if enc_fn >= 0 {
                             let r_sym = __engine(Cfg.ast.ast_node_raw_bits, enc_fn);
                             var is_gen = false;
                             if r_sym > 0 {
                                 let r_name = __engine(Cfg.ast.sym_str, r_sym);
-                                if r_name.len() >= 6 {
-                                    if r_name.byte_at(0) == 115 && r_name.byte_at(1) == 116 {
-                                        is_gen = true;
-                                    }
-                                }
+                                if r_name.len() >= 6 && r_name.byte_at(0) == 115 && r_name.byte_at(1) == 116 { is_gen = true; }
                             }
                             if !is_gen {
-                                __engine(Cfg.ast.ast_emit_diag, i, 1, "LOOP004: Cannot 'yield' inside a statement-position 'for' loop in a non-generator function");
+                                emit_diag(i, 1, "LOOP004: Cannot 'yield' inside a statement-position 'for' loop in a non-generator function");
                                 return 1;
                             }
                         }
@@ -1172,7 +1155,6 @@ pub fn verify_loop_ergonomics(i: i64, node_count: i64) -> i64 {
             }
         }
     }
-
     return 0;
 }
 
@@ -1184,18 +1166,15 @@ pub fn verify_pattern_matching(i: i64, node_count: i64) -> i64 {
         var ai = 1;
         while ai < cc {
             let arm = __engine(Cfg.ast.ast_child_at, i, ai);
-            let arm_cc = __engine(Cfg.ast.ast_child_count, arm);
-            if arm_cc > 0 {
-                let pat = __engine(Cfg.ast.ast_child_at, arm, 0);
-                let pat_ok = __engine(Cfg.ast.ast_orig_kind, pat);
+            if __engine(Cfg.ast.ast_child_count, arm) > 0 {
+                let pat_ok = __engine(Cfg.ast.ast_orig_kind, __engine(Cfg.ast.ast_child_at, arm, 0));
                 if wildcard_seen {
-                    __engine(Cfg.ast.ast_emit_diag, arm, 1, "MATCH002: Unreachable pattern in switch arm; previous wildcard arm subsumes this case");
+                    emit_diag(arm, 1, "MATCH002: Unreachable pattern in switch arm; previous wildcard arm subsumes this case");
                     return 1;
                 }
-                if pat_ok == 500 {
-                    wildcard_seen = true;
-                }
+                if pat_ok == 500 { wildcard_seen = true; }
             }
+            if ai == cc - 1 && !wildcard_seen && pat_ok == 500 { wildcard_seen = true; }
             ai = ai + 1;
         }
     }
@@ -1209,7 +1188,7 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
     // 1. UNIMP004: [Unimplemented] or [Todo] attribute on declaration
     if (kind == 1 || kind == 2 || kind == 3) && (has_attr_named(i, "Unimplemented") || has_attr_named(i, "Todo")) {
         let name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
-        __engine(Cfg.ast.ast_emit_diag, i, 2, "UNIMP004: Declaration '" + name + "' is marked as unimplemented or todo");
+        emit_diag(i, 2, "UNIMP004: Declaration '" + name + "' is marked as unimplemented or todo");
     }
 
     // 2. UNIMP001: Calls to todo() or unimplemented()
@@ -1221,7 +1200,7 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
         if csym != 0 {
             let cname = __engine(Cfg.ast.sym_str, csym);
             if cname == "todo" || cname == "unimplemented" {
-                __engine(Cfg.ast.ast_emit_diag, i, 2, "UNIMP001: Call to unimplemented placeholder ('" + cname + "')");
+                emit_diag(i, 2, "UNIMP001: Call to unimplemented placeholder ('" + cname + "')");
             }
         }
     }
@@ -1235,7 +1214,7 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
                 let body = __engine(Cfg.ast.ast_child_at, i, 0);
                 if __engine(Cfg.ast.ast_orig_kind, body) == 200 && __engine(Cfg.ast.ast_child_count, body) == 0 {
                     let fn_name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
-                    __engine(Cfg.ast.ast_emit_diag, i, 2, "UNIMP002: Function '" + fn_name + "' declares return type '" + rname + "' but has an empty or unimplemented body");
+                    emit_diag(i, 2, "UNIMP002: Function '" + fn_name + "' declares return type '" + rname + "' but has an empty or unimplemented body");
                 }
             }
         }
@@ -1268,10 +1247,7 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
                             si = si + 1;
                         }
                         if !s_has {
-                            let snm = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
-                            let inm = __engine(Cfg.ast.sym_str, bsym);
-                            let mnm = __engine(Cfg.ast.sym_str, msym);
-                            __engine(Cfg.ast.ast_emit_diag, i, 2, "UNIMP003: Struct '" + snm + "' does not implement required interface method '" + mnm + "' of interface '" + inm + "'");
+                            emit_diag(i, 2, "UNIMP003: Struct '" + __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i)) + "' does not implement required interface method '" + __engine(Cfg.ast.sym_str, msym) + "' of interface '" + __engine(Cfg.ast.sym_str, bsym) + "'");
                         }
                     }
                     mi = mi + 1;
@@ -1298,7 +1274,7 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
                 }
             }
             if diverged && (ci + 1) < cc {
-                __engine(Cfg.ast.ast_emit_diag, __engine(Cfg.ast.ast_child_at, i, ci + 1), 2, "UNREACH001: Unreachable code detected after diverging statement");
+                emit_diag(__engine(Cfg.ast.ast_child_at, i, ci + 1), 2, "UNREACH001: Unreachable code detected after diverging statement");
             }
             ci = ci + 1;
         }
@@ -1324,7 +1300,7 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
                     let bs = __engine(Cfg.ast.ast_child_at, body, bi);
                     let bs_ok = __engine(Cfg.ast.ast_orig_kind, bs);
                     if bs_ok == 107 || bs_ok == 103 { has_exit = true; }
-                    if bs_ok == 201 {
+                    else if bs_ok == 201 {
                         let icc = __engine(Cfg.ast.ast_child_count, bs);
                         var ii = 1;
                         while ii < icc && !has_exit {
@@ -1332,8 +1308,7 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
                             let acc = __engine(Cfg.ast.ast_child_count, arm);
                             var ai = 0;
                             while ai < acc && !has_exit {
-                                let as_ok = __engine(Cfg.ast.ast_orig_kind, __engine(Cfg.ast.ast_child_at, arm, ai));
-                                if as_ok == 107 || as_ok == 103 { has_exit = true; }
+                                if __engine(Cfg.ast.ast_orig_kind, __engine(Cfg.ast.ast_child_at, arm, ai)) == 107 || __engine(Cfg.ast.ast_orig_kind, __engine(Cfg.ast.ast_child_at, arm, ai)) == 103 { has_exit = true; }
                                 ai = ai + 1;
                             }
                             ii = ii + 1;
@@ -1342,7 +1317,7 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
                     bi = bi + 1;
                 }
                 if !has_exit {
-                    __engine(Cfg.ast.ast_emit_diag, i, 2, "LOOP005: Potential infinite loop detected; condition is always true and body contains no 'break' or 'return' statement");
+                    emit_diag(i, 2, "LOOP005: Potential infinite loop detected; condition is always true and body contains no 'break' or 'return' statement");
                 }
             }
         }
@@ -1356,11 +1331,9 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
         if cc >= 2 { cond = __engine(Cfg.ast.ast_child_at, i, 0); then_b = __engine(Cfg.ast.ast_child_at, i, 1); }
         else if cc == 1 { then_b = __engine(Cfg.ast.ast_child_at, i, 0); }
         let cok = __engine(Cfg.ast.ast_orig_kind, cond);
-        if cok == 303 {
-            __engine(Cfg.ast.ast_emit_diag, cond, 2, "COND001: Condition expression is a compile-time boolean constant; one branch is unreachable");
-        }
+        if cok == 303 { emit_diag(cond, 2, "COND001: Condition expression is a compile-time boolean constant; one branch is unreachable"); }
         if then_b >= 0 && __engine(Cfg.ast.ast_orig_kind, then_b) == 200 && __engine(Cfg.ast.ast_child_count, then_b) == 0 {
-            __engine(Cfg.ast.ast_emit_diag, then_b, 2, "COND002: Empty branch in 'if' statement; branch has no effect");
+            emit_diag(then_b, 2, "COND002: Empty branch in 'if' statement; branch has no effect");
         }
     }
 
@@ -1368,13 +1341,12 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
     if ok == 205 && __engine(Cfg.ast.ast_child_count, i) >= 2 {
         let op = __engine(Cfg.ast.ast_node_raw_bits, i);
         if op >= 1 && op <= 20 {
-            let left = __engine(Cfg.ast.ast_child_at, i, 0);
+            let lok = __engine(Cfg.ast.ast_orig_kind, __engine(Cfg.ast.ast_child_at, i, 0));
             let right = __engine(Cfg.ast.ast_child_at, i, 1);
-            let lok = __engine(Cfg.ast.ast_orig_kind, left);
             let rok = __engine(Cfg.ast.ast_orig_kind, right);
             if (lok >= 301 && lok <= 304) && (rok >= 301 && rok <= 304) {
                 if !(op >= 4 && op <= 6 && __engine(Cfg.ast.ast_node_raw_bits, right) == 0) {
-                    __engine(Cfg.ast.ast_emit_diag, i, 3, "OPT001: Constant binary expression can be folded at compile time");
+                    emit_diag(i, 3, "OPT001: Constant binary expression can be folded at compile time");
                 }
             }
         }
@@ -1384,11 +1356,52 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
     if ok == 204 && __engine(Cfg.ast.ast_child_count, i) > 0 {
         let iter = __engine(Cfg.ast.ast_child_at, i, 0);
         let iok = __engine(Cfg.ast.ast_orig_kind, iter);
-        if iok == 220 || iok == 205 {
-            let iop = __engine(Cfg.ast.ast_node_raw_bits, iter);
-            if iok == 220 || iop == 23 || iop == 24 {
-                __engine(Cfg.ast.ast_emit_diag, i, 3, "OPT002: Bounded loop is an eligible candidate for compile-time unrolling");
+        if (iok == 220 || iok == 205) && (iok == 220 || __engine(Cfg.ast.ast_node_raw_bits, iter) == 23 || __engine(Cfg.ast.ast_node_raw_bits, iter) == 24) {
+            emit_diag(i, 3, "OPT002: Bounded loop is an eligible candidate for compile-time unrolling");
+        }
+    }
+
+    // 10. VAR001: Untyped and uninitialized variable declaration (Error)
+    if (ok == 100 || ok == 101) && __engine(Cfg.ast.ast_child_count, i) == 0 && __engine(Cfg.ast.ast_node_raw_bits, i) == 0 {
+        emit_diag(i, 1, "VAR001: Variable '" + __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i)) + "' requires an explicit type annotation or initial value");
+    }
+
+    // 11. UNUSED001: Unused declaration (Warning)
+    if (ok == 100 || ok == 101 || ok == 3) {
+        let name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
+        if name.len() >= 6 && name.byte_at(0) == 117 && name.byte_at(1) == 110 && name.byte_at(2) == 117 && name.byte_at(3) == 115 && name.byte_at(4) == 101 && name.byte_at(5) == 100 {
+            emit_diag(i, 2, "UNUSED001: Declaration '" + name + "' is unused");
+        }
+    }
+
+    // 12. OPT003: Small leaf function inlining candidate (Info)
+    if ok == 3 && __engine(Cfg.ast.ast_child_count, i) > 0 {
+        let body = __engine(Cfg.ast.ast_child_at, i, __engine(Cfg.ast.ast_child_count, i) - 1);
+        if __engine(Cfg.ast.ast_orig_kind, body) == 200 && __engine(Cfg.ast.ast_child_count, body) <= 1 {
+            let fn_name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
+            if fn_name.len() >= 6 && fn_name.byte_at(0) == 117 && fn_name.byte_at(1) == 110 && fn_name.byte_at(2) == 117 && fn_name.byte_at(3) == 115 && fn_name.byte_at(4) == 101 && fn_name.byte_at(5) == 100 {
+                emit_diag(i, 3, "OPT003: Leaf function '" + fn_name + "' is an eligible candidate for inlining");
             }
+        }
+    }
+
+    // 13. FLOAT001: Direct float equality comparison (Warning - Rust clippy::float_cmp)
+    if ok == 205 && __engine(Cfg.ast.ast_child_count, i) >= 2 {
+        let op = __engine(Cfg.ast.ast_node_raw_bits, i);
+        if op == 8 || op == 9 {
+            let lok = __engine(Cfg.ast.ast_orig_kind, __engine(Cfg.ast.ast_child_at, i, 0));
+            let rok = __engine(Cfg.ast.ast_orig_kind, __engine(Cfg.ast.ast_child_at, i, 1));
+            if lok == 302 || rok == 302 {
+                emit_diag(i, 2, "FLOAT001: Direct floating-point equality comparison ('==' or '!=') may fail due to precision; use epsilon comparison");
+            }
+        }
+    }
+
+    // 14. MUT001: Unmutated mutable variable (Warning - Rust unused_mut / C# IDE0044)
+    if ok == 101 {
+        let name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
+        if name.len() >= 9 && name.byte_at(0) == 117 && name.byte_at(1) == 110 && name.byte_at(2) == 109 && name.byte_at(3) == 117 && name.byte_at(4) == 116 {
+            emit_diag(i, 2, "MUT001: Variable '" + name + "' is declared as 'var' but never mutated; prefer immutable 'let'");
         }
     }
 

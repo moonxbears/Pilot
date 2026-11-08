@@ -1,0 +1,246 @@
+// =============================================================================
+// FILE: examples/all_diagnostics.pilot
+// Pilot Comprehensive Diagnostics Showcase: All Errors, Warnings, and Infos
+// =============================================================================
+// This file intentionally triggers every compiler diagnostic code across:
+//   - Severity 1 (Errors): Red squigglies
+//   - Severity 2 (Warnings): Yellow squigglies
+//   - Severity 3 (Infos / Optimizations): Blue squigglies
+
+// =============================================================================
+// 1. Core Naming Taxonomy & Memory Lattice (NAMING001-NAMING007, LATTICE001)
+// =============================================================================
+[EnforceCoreNaming]
+
+// NAMING001: Interface name must start with 'I' + PascalCase
+interface bad_interface {}
+
+// NAMING002: [Lang] primitive struct must be lowercase
+[Lang]
+struct BadLangPrimitive {}
+
+// NAMING003: Core struct must be PascalCase
+struct bad_struct_name {}
+
+// NAMING004: Struct cannot start with reserved interface prefix 'I' + uppercase
+struct IBadStructPrefix {}
+
+// NAMING005: Attribute struct must end with 'Attr' suffix
+struct BadAttributeName : IAttribute {}
+
+// NAMING006: 0b11 IGuard struct must end with 'Guard', 'Scope', or 'Lease'
+struct BadGuardName : IGuard {}
+
+// NAMING007: 0b01 IReference struct must end with 'View', 'Lens', 'Cursor', or 'Enumerator'
+struct BadViewName : IReference {}
+
+// LATTICE001: 0b00 IValue struct cannot declare a ~self() destructor
+struct BadLatticeContract : IValue {
+    ~self() {}
+}
+
+// =============================================================================
+// 2. Unimplemented Attributes & Interface Contracts (UNIMP003, UNIMP004)
+// =============================================================================
+
+// UNIMP004: Declaration marked with [Unimplemented] or [Todo] attribute
+[Unimplemented]
+struct FutureFeatureItem {
+    pub x: i64;
+}
+
+[Todo]
+struct AnotherPendingFeature {
+    pub y: i64;
+}
+
+// UNIMP003: Struct missing interface contract implementation
+interface IWorkerContract {
+    fn perform() -> i64;
+}
+
+struct BadWorkerImpl : IWorkerContract {
+    pub id: i64;
+}
+
+// =============================================================================
+// 3. Variable Declarations & Unused Symbols (VAR001, UNUSED001, OPT003)
+// =============================================================================
+
+// VAR001: Variable declaration requires explicit type annotation or initial value
+var untyped_uninit;
+
+// UNUSED001: Local declaration is never used
+var unused_variable: i32 = 42;
+
+// UNUSED001 + OPT003: Unused function & small leaf function eligible for inlining
+fn unused_leaf_inliner() -> void {}
+
+// Helper declarations
+struct Container {
+    pub value: i64;
+}
+
+fn dummy_callee(x: i64) -> i64 {
+    return x;
+}
+
+fn fallible_callee() -> i64 ! i64 {
+    return 1;
+}
+
+// =============================================================================
+// 4. Null-Safety & Fallible Result Handlers (NULL001-NULL005, ERR001, ERR005)
+// =============================================================================
+
+fn test_null_safety(c: Container?, opt_x: i64?, arr: i64[]?) -> i64 {
+    // NULL001: Cannot assign 'none' to non-nullable type
+    let bad_null: i64 = none;
+
+    // NULL001: Unchecked postfix '!' assertion is prohibited
+    let forced = opt_x!;
+
+    // NULL002: Guard statement else block must diverge
+    guard 1 > 0 else {
+        let no_diverge = 1;
+    }
+
+    // NULL002: Member access on optional type requires '?.' safe navigation
+    let m = c.value;
+
+    // NULL004: Cannot pass 'none' to non-nullable parameter
+    dummy_callee(none);
+
+    // NULL005: Index access on optional type requires safe navigation
+    let v = arr[0];
+
+    // ERR001: Unhandled fallible return value
+    fallible_callee();
+
+    return forced + m + v;
+}
+
+fn test_null_return() -> i64 {
+    // NULL003: Cannot return 'none' from function with non-nullable return type
+    return none;
+}
+
+fn test_legacy_try_catch() {
+    // ERR005: Legacy try/catch syntax warning in native Pilot code
+    try {
+        let a = 1;
+    } catch e {
+        let b = 2;
+    }
+}
+
+// =============================================================================
+// 5. Loop Ergonomics & Control Flow (LOOP001-LOOP005, UNREACH001, MATCH002)
+// =============================================================================
+
+fn test_loop_break_and_yield() {
+    // LOOP001 + OPT002: Mixed 'break <expr>' and 'yield <expr>' in same loop
+    for i in 0 .. 10 {
+        yield i;
+        break i;
+    }
+
+    // LOOP002 + OPT002: Mixed valueless 'break;' and valued 'break <expr>;'
+    for j in 0 .. 10 {
+        if j == 1 { break; }
+        break j;
+    }
+
+    // LOOP003 + OPT002: 'then' branch only valid on ScalarBreak with 'break <expr>'
+    for k in 0 .. 10 {
+        let x = k;
+    } then 0;
+}
+
+fn test_statement_yield() -> i64 {
+    // LOOP004 + OPT002: Cannot yield inside statement-position for in non-generator
+    for i in 0 .. 10 {
+        yield i;
+    }
+    return 0;
+}
+
+fn test_infinite_loop() {
+    // LOOP005: Potential infinite loop with constant true condition and no exit
+    while true {
+        let looping = 1;
+    }
+}
+
+fn test_unreachable_code() -> i64 {
+    return 42;
+    // UNREACH001: Unreachable code detected after diverging statement
+    let dead_code = 100;
+    return dead_code;
+}
+
+fn test_unreachable_match_arm(x: i64) -> i64 {
+    // MATCH002: Unreachable pattern in switch arm after wildcard arm
+    return switch x {
+        case _: 0,
+        case 1: 1
+    };
+}
+
+// =============================================================================
+// 6. Arithmetic, Syntax & Conditionals (DIV001, KW001, COND001, COND002)
+// =============================================================================
+
+fn test_arithmetic_and_keywords() -> i64 {
+    // KW001: Reserved language keyword used as identifier
+    let scope = 1;
+
+    // DIV001: Compile-time division by zero detected
+    let div_zero = 10 / 0;
+
+    return scope + div_zero;
+}
+
+fn test_conditionals(x: i64) {
+    // COND001: Condition expression is a compile-time boolean constant
+    if false {
+        let dead_branch = 1;
+    }
+
+    // COND002: Empty branch in 'if' statement
+    if x > 0 {}
+}
+
+// =============================================================================
+// 7. Unimplemented Stubs & Functions (UNIMP001, UNIMP002)
+// =============================================================================
+
+fn test_todo_placeholder() {
+    // UNIMP001: Call to 'todo()' placeholder
+    todo();
+}
+
+fn test_unimplemented_placeholder() {
+    // UNIMP001: Call to 'unimplemented()' placeholder
+    unimplemented();
+}
+
+fn test_empty_function_body() -> i64 {
+    // UNIMP002: Function declares non-void return type but body is empty
+}
+
+// =============================================================================
+// 8. Compile-Time Optimizations (OPT001, OPT002)
+// =============================================================================
+
+fn test_optimizations() -> i64 {
+    // OPT001: Constant binary expression can be folded at compile time
+    let folded = 100 + 200;
+
+    // OPT002: Bounded loop is an eligible candidate for unrolling
+    for i in 0 .. 4 {
+        let y = i;
+    }
+
+    return folded;
+}

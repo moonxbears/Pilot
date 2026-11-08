@@ -2,6 +2,9 @@
 // FILE: selfhost/diagnostics/infos.pilot
 // Pilot Semantic Diagnostics: Info & Optimization Catalog (Severity 3)
 // =============================================================================
+// Reference Inspiration: C# (Roslyn CA rules), Python (Ruff / NumPy hints), and Rust (clippy / LLVM perf).
+// Minimal forward-facing code: structured purely as an extensible diagnostic list.
+// =============================================================================
 pub pkg Pilot.Diagnostics.Infos;
 
 pub struct InfoDef : IValue {
@@ -9,70 +12,166 @@ pub struct InfoDef : IValue {
     pub title: str;
     pub description: str;
     pub category: str;
+    pub reference: str;
 }
 
 pub let INFOS = [
     // -------------------------------------------------------------------------
-    // 1. Compile-Time Optimization Candidates (OPT001 - OPT010)
+    // 1. Compile-Time Evaluation & Inlining (OPT001 - OPT003, OPT008 - OPT010)
     // -------------------------------------------------------------------------
     InfoDef {
         code: "OPT001",
         title: "Constant Binary Expression Folding",
         description: "Binary arithmetic or logic expression with literal operands can be folded at compile time",
         category: "Optimization",
+        reference: "LLVM ConstantFolder / Rust const-eval",
     },
     InfoDef {
         code: "OPT002",
         title: "Bounded Loop Unrolling",
         description: "Bounded loop with compile-time known range is an eligible candidate for unrolling",
         category: "Optimization",
+        reference: "LLVM LoopUnrollPass",
     },
     InfoDef {
         code: "OPT003",
         title: "Leaf Function Inlining",
         description: "Small leaf function is an eligible candidate for automatic compile-time inlining",
         category: "Optimization",
-    },
-    InfoDef {
-        code: "OPT004",
-        title: "Value Type Register Packing",
-        description: "0b00 value type layout fits within standard CPU hardware registers (memcpy eligible)",
-        category: "Optimization",
-    },
-    InfoDef {
-        code: "OPT005",
-        title: "Perceus Drop-Reuse In-Place Update",
-        description: "0b10 buffer variable is uniquely owned and eligible for destructive in-place reuse",
-        category: "PerceusOptimization",
-    },
-    InfoDef {
-        code: "OPT006",
-        title: "Zero-Copy Reference View Borrowing",
-        description: "Contiguous buffer slice can be borrowed as 0b01 view with zero heap allocations",
-        category: "MemoryOptimization",
-    },
-    InfoDef {
-        code: "OPT007",
-        title: "Structure of Arrays (SoA) Vectorization",
-        description: "Contiguous struct array layout enables SIMD auto-vectorization across parallel lanes",
-        category: "SimdOptimization",
+        reference: "C# MethodImplOptions.AggressiveInlining / Rust #[inline]",
     },
     InfoDef {
         code: "OPT008",
         title: "Common Subexpression Elimination (CSE)",
         description: "Pure subexpression computes identical value across basic block; eligible for CSE",
         category: "Optimization",
+        reference: "LLVM EarlyCSEPass",
     },
     InfoDef {
         code: "OPT009",
         title: "Tail-Call Elimination",
         description: "Recursive call in tail position can be transformed into iterative loop without stack frame overhead",
         category: "Optimization",
+        reference: "LLVM TailCallElim",
     },
     InfoDef {
         code: "OPT010",
         title: "Dead Branch Pruning",
         description: "Compile-time evaluated branch condition allows unselected branch to be eliminated from codegen",
         category: "Optimization",
+        reference: "LLVM SimplifyCFGPass",
+    },
+
+    // -------------------------------------------------------------------------
+    // 2. Hardware Layout & Memory Performance (OPT004 - OPT007, PERF001 - PERF003)
+    // -------------------------------------------------------------------------
+    InfoDef {
+        code: "OPT004",
+        title: "Value Type Register Packing",
+        description: "0b00 value type layout fits within standard CPU hardware registers (memcpy eligible)",
+        category: "Optimization",
+        reference: "System V ABI AMD64 Register Classification",
+    },
+    InfoDef {
+        code: "OPT005",
+        title: "Perceus Drop-Reuse In-Place Update",
+        description: "0b10 buffer variable is uniquely owned and eligible for destructive in-place reuse",
+        category: "PerceusOptimization",
+        reference: "Koka Perceus drop-reuse / Pilot Borrow Physics",
+    },
+    InfoDef {
+        code: "OPT006",
+        title: "Zero-Copy Reference View Borrowing",
+        description: "Contiguous buffer slice can be borrowed as 0b01 view with zero heap allocations",
+        category: "MemoryOptimization",
+        reference: "Rust slice reference borrowing / C# ReadOnlySpan<T>",
+    },
+    InfoDef {
+        code: "OPT007",
+        title: "Structure of Arrays (SoA) Vectorization",
+        description: "Contiguous struct array layout enables SIMD auto-vectorization across parallel lanes",
+        category: "SimdOptimization",
+        reference: "SIMD Lane Vectorization / Intel ISPC",
+    },
+    InfoDef {
+        code: "PERF001",
+        title: "Redundant Buffer Clone Elimination",
+        description: "Buffer duplication is redundant because target only reads elements; borrow as reference view",
+        category: "MemoryOptimization",
+        reference: "Rust clippy::redundant_clone",
+    },
+    InfoDef {
+        code: "PERF002",
+        title: "Small Vector Optimization (SVO)",
+        description: "Collection capacity is small and bounded; eligible for inline stack allocation",
+        category: "MemoryOptimization",
+        reference: "LLVM SmallVector<T, N> / C# stackalloc",
+    },
+    InfoDef {
+        code: "PERF003",
+        title: "Cold Branch Alignment",
+        description: "Error handling or panic branch identified as cold; layout optimizer moves code out of main cache line",
+        category: "Optimization",
+        reference: "GCC __builtin_expect / Rust cold attribute",
+    },
+
+    // -------------------------------------------------------------------------
+    // 3. Idiomatic Pilot Patterns & Refactor Hints (HINT001 - HINT008)
+    // -------------------------------------------------------------------------
+    InfoDef {
+        code: "HINT001",
+        title: "Pure Function Memoization",
+        description: "Deterministic function with no side effects is eligible for compile-time or runtime memoization",
+        category: "RefactoringHint",
+        reference: "Rust pure attribute / Python @functools.lru_cache",
+    },
+    InfoDef {
+        code: "HINT002",
+        title: "Static or Pure Method Candidate",
+        description: "Method does not access any 'self' fields and can be declared as a 'static' or 'pure' function",
+        category: "RefactoringHint",
+        reference: "C# CA1822 MarkMembersAsStatic",
+    },
+    InfoDef {
+        code: "HINT003",
+        title: "Ternary Conditional Simplification",
+        description: "Simple if-else assignment can be rewritten more concisely as a conditional expression",
+        category: "RefactoringHint",
+        reference: "Python SIM108 / C# IDE0075",
+    },
+    InfoDef {
+        code: "HINT004",
+        title: "Prefer Reference View Over Allocation",
+        description: "Pass 'slice<T>' view rather than owned 'List<T>' buffer to parameter to avoid caller cloning",
+        category: "RefactoringHint",
+        reference: "Rust clippy::ptr_arg / C# ReadOnlySpan parameter",
+    },
+    InfoDef {
+        code: "HINT005",
+        title: "Call Vectorization via Linear Algebra Each",
+        description: "Element-by-element loop transformation can be expressed natively using the 'each' vector adapter",
+        category: "RefactoringHint",
+        reference: "Python NumPy vectorized operations",
+    },
+    InfoDef {
+        code: "HINT006",
+        title: "Stepped Range Stride Optimization",
+        description: "Stepped range loop with constant step ('0 .. 100 : 4') enables fixed-stride SIMD execution",
+        category: "Optimization",
+        reference: "Pilot Stepped Range Stride Syntax",
+    },
+    InfoDef {
+        code: "HINT007",
+        title: "Homoiconic Call-Quote Elevation",
+        description: "Function call in reflection context can be elevated to zero-copy ABI frame via 'fn!&(a, b)'",
+        category: "Metaprogramming",
+        reference: "Pilot Call-Quoting Ring Physics",
+    },
+    InfoDef {
+        code: "HINT008",
+        title: "Distributive Header Grouping",
+        description: "Multiple declarations sharing common modifiers or types can be grouped in a distributive block",
+        category: "CodeClarity",
+        reference: "Pilot Distributive Header Grouping",
     },
 ];
