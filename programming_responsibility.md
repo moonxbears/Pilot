@@ -324,6 +324,47 @@ These hooks execute operating system syscalls and external process bridges via `
 
 ---
 
+### 5.11 Grouped Obsolete Engine Hooks (Implemented in Pure Pilot)
+
+The following `__engine` calls are **obsolete bootstrap shims**. They have full, native implementations in pure Pilot and are bypassed during native Stage 2/3 execution:
+
+#### Group A: String Inspection & View Operations
+| Obsolete Engine Hook | Pure Pilot Replacement | Location in Codebase |
+| :--- | :--- | :--- |
+| `__engine("str_len", s)` | `s.len` or `str_len_pure(s)` | [`stdlib/core/primitives/str.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/core/primitives/str.pilot#L15) |
+| `__engine("str_byte_at", s, i)` | `s.byte_at(i)` or `s[i]` | [`stdlib/core/primitives/str.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/core/primitives/str.pilot#L23) |
+| `__engine("str_slice", s, a, b)` | `s.slice(a, b)` or `s[a..b]` | [`stdlib/core/primitives/str.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/core/primitives/str.pilot#L26) |
+| `__engine("source_slice", a, b)` | `source_text.slice(a, b)` | [`stdlib/core/primitives/str.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/core/primitives/str.pilot#L33) |
+
+#### Group B: Hash Maps & Dynamic Dictionaries
+| Obsolete Engine Hook | Pure Pilot Replacement | Location in Codebase |
+| :--- | :--- | :--- |
+| `__engine("map_new")` | `MapBuffer<K, V>()` or `OrderedMap()` | [`stdlib/core/primitives/map.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/core/primitives/map.pilot#L43) |
+| `__engine("map_set", m, k, v)` | `m.set(k, v)` or `m[k] = v` | [`stdlib/core/primitives/map.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/core/primitives/map.pilot#L73) |
+| `__engine("map_get", m, k)` | `m.get(k)` or `m[k]` | [`stdlib/core/primitives/map.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/core/primitives/map.pilot#L67) |
+
+#### Group C: Keyword Metadata, Scopes, Badges & Typo Recovery
+| Obsolete Engine Hook | Pure Pilot Replacement | Location in Codebase |
+| :--- | :--- | :--- |
+| `__engine("query_keyword_doc", w)` | `query_keyword_doc_pure(w)` | [`stdlib/core/keywords.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/core/keywords.pilot#L983) |
+| `__engine("query_keyword_badge", c)` | `query_category_badge_pure(c)` | [`stdlib/core/keywords.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/core/keywords.pilot#L941) |
+| `__engine("keyword_category_scope", c)` | `query_category_scope_pure(c)` | [`stdlib/core/keywords.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/core/keywords.pilot#L899) |
+| `__engine("query_category_keywords", c)` | `query_registered_symbols_pure(c, 0, "")` | [`stdlib/core/keywords.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/core/keywords.pilot#L1016) |
+| `__engine("query_registered_symbols", c, m, t)` | `query_registered_symbols_pure(c, m, t)` | [`stdlib/core/keywords.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/core/keywords.pilot#L1016) |
+
+#### Group D: Line Span & Source Metrics
+| Obsolete Engine Hook | Pure Pilot Replacement | Location in Codebase |
+| :--- | :--- | :--- |
+| `__engine("ast_source_lines", ...)` | `count_source_lines(src, start, end)` | [`stdlib/core/source_lines.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/core/source_lines.pilot#L11) |
+
+#### Group E: Runtime Diagnostics & Formatting
+| Obsolete Engine Hook | Pure Pilot Replacement | Location in Codebase |
+| :--- | :--- | :--- |
+| `__engine("rt_print", v)` | Native `stdout` buffer write (`write(1, ...)`) | [`stdlib/io/fs.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/io/fs.pilot) |
+| `__engine("rt_assert", c)` | `if !cond { panic(...) }` inline branch | [`stdlib/core/builtins/builtins.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/core/builtins/builtins.pilot) |
+
+---
+
 ## 6. The 3-Stage Self-Hosting Pipeline
 
 The responsibilities shift completely as Pilot bootstraps itself:
