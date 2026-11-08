@@ -1,0 +1,221 @@
+// ==============================================================================
+// FILE: selfhost/ast_bridge.pilot
+// Mounted PhysicsRegistry -> Pilot Mutable AST Arena Hydration & AOP Weaver
+// Kept separate from `selfhost/{ast,parser}.pilot` so the Stage-3 frontend stays
+// 100% standalone when `PhysicsRegistry` hooks are unmounted.
+// ==============================================================================
+pub pkg Pilot.SelfHost.AstBridge;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+let BridgeHooks = [
+    node_count: "ast_node_count",
+    orig_kind: "ast_orig_kind",
+    node_flags: "ast_node_flags",
+    node_sym: "ast_node_sym",
+    lit_kind: "ast_node_lit_kind",
+    raw_bits: "ast_node_raw_bits",
+    child_count: "ast_child_count",
+    child_at: "ast_child_at",
+    span_start: "ast_span_start",
+    span_end: "ast_span_end",
+    sym_str: "sym_str",
+];
+
+fn bridge_orig_kind_name(orig: i64) -> str {
+    if orig == 0 { return "Program"; }
+    if orig == 3 { return "FnDecl"; }
+    if orig == 8 { return "StructDecl"; }
+    if orig == 10 { return "InterfaceDecl"; }
+    if orig == 100 { return "LetStmt"; }
+    if orig == 101 { return "VarStmt"; }
+    if orig == 102 { return "AssignStmt"; }
+    if orig == 103 { return "ReturnStmt"; }
+    if orig == 106 { return "WhileStmt"; }
+    if orig == 110 { return "ExprStmt"; }
+    if orig == 200 { return "BlockExpr"; }
+    if orig == 201 { return "IfExpr"; }
+    if orig == 205 { return "BinaryExpr"; }
+    if orig == 206 { return "UnaryExpr"; }
+    if orig == 207 { return "CallExpr"; }
+    if orig == 300 { return "IdentExpr"; }
+    if orig == 301 { return "IntLit"; }
+    if orig == 303 { return "BoolLit"; }
+    if orig == 304 { return "StrLit"; }
+    return "IdentExpr";
+}
+
+fn bridge_binop_text(flag_code: i64) -> str {
+    if flag_code == 1 { return "+"; }
+    if flag_code == 2 { return "-"; }
+    if flag_code == 3 { return "*"; }
+    if flag_code == 4 { return "/"; }
+    if flag_code == 6 { return "%"; }
+    if flag_code == 8 { return "=="; }
+    if flag_code == 9 { return "!="; }
+    if flag_code == 10 { return "<"; }
+    if flag_code == 11 { return "<="; }
+    if flag_code == 12 { return ">"; }
+    if flag_code == 13 { return ">="; }
+    if flag_code == 14 { return "&&"; }
+    if flag_code == 15 { return "||"; }
+    return "+";
+}
+
+fn bridge_unop_text(flag_code: i64) -> str {
+    if flag_code == 5 { return "!"; }
+    if flag_code == 2 { return "-"; }
+    return "-";
+}
+
+// Hydrates a live `MutableAstArena` from the mounted `PhysicsRegistry`
+pub fn hydrate_mutable_ast_from_physics() -> i64 {
+    let arena = sh_ast_new();
+    let total = __engine(BridgeHooks.node_count);
+    var nid = 0;
+    while nid < total {
+        let orig = __engine(BridgeHooks.orig_kind, nid);
+        let k_name = bridge_orig_kind_name(orig);
+        let fl = __engine(BridgeHooks.node_flags, nid);
+        let sym = __engine(BridgeHooks.node_sym, nid);
+        let lk = __engine(BridgeHooks.lit_kind, nid);
+        let rbits = __engine(BridgeHooks.raw_bits, nid);
+
+        var op_txt = "";
+        if orig == 205 {
+            op_txt = bridge_binop_text(fl);
+        } else if orig == 206 {
+            op_txt = bridge_unop_text(fl);
+        } else if lk == 1 {
+            op_txt = "" + rbits;
+        } else if lk == 4 {
+            if rbits != 0 {
+                op_txt = "true";
+            } else {
+                op_txt = "false";
+            }
+        } else if sym != 0 {
+            op_txt = __engine(BridgeHooks.sym_str, sym);
+        }
+
+        let alloc_id = sh_ast_alloc_node(arena, k_name, op_txt);
+        sh_ast_set_flags(arena, alloc_id, fl);
+        sh_ast_set_span(
+            arena,
+            alloc_id,
+            __engine(BridgeHooks.span_start, nid),
+            __engine(BridgeHooks.span_end, nid)
+        );
+        if orig == 0 {
+            sh_ast_set_root(arena, alloc_id);
+        }
+        nid = nid + 1;
+    }
+
+    var p = 0;
+    while p < total {
+        let orig_p = __engine(BridgeHooks.orig_kind, p);
+        let cc = __engine(BridgeHooks.child_count, p);
+        if orig_p == 207 && cc > 0 {
+            // In `RawAstArena`, child 0 of `CallExpr` is callee `IdentExpr`
+            let callee_id = __engine(BridgeHooks.child_at, p, 0);
+            sh_ast_set_op_text(arena, p, sh_ast_op_text(arena, callee_id));
+            var ai = 1;
+            while ai < cc {
+                let raw_ch = __engine(BridgeHooks.child_at, p, ai);
+                sh_ast_add_child(arena, p, raw_ch);
+                ai = ai + 1;
+            }
+        } else {
+            var ci = 0;
+            while ci < cc {
+                let ch_id = __engine(BridgeHooks.child_at, p, ci);
+                let ch_orig = __engine(BridgeHooks.orig_kind, ch_id);
+                // Unwrap `ExprStmt` wrapper (`110`) to canonical inner expression
+                let target_ch = if ch_orig == 110 && __engine(BridgeHooks.child_count, ch_id) > 0 {
+                    __engine(BridgeHooks.child_at, ch_id, 0)
+                } else {
+                    ch_id
+                };
+                if orig_p != 3 || ci == 0 {
+                    sh_ast_add_child(arena, p, target_ch);
+                }
+                ci = ci + 1;
+            }
+        }
+        p = p + 1;
+    }
+    return arena;
+}
+
+// Homoiconically weaves Pillar-2 `[Interceptor]` prologue/epilogue calls into `fn_nid`
+pub fn weave_interceptor_prologue_epilogue(
+    arena: i64,
+    fn_nid: i64,
+    enter_callee: str,
+    exit_callee: str
+) -> bool {
+    if fn_nid < 0 || sh_ast_kind_name(arena, fn_nid) != "FnDecl" {
+        return false;
+    }
+    let body = sh_ast_child_at(arena, fn_nid, 0);
+    if body < 0 || sh_ast_kind_name(arena, body) != "BlockExpr" {
+        return false;
+    }
+
+    let tpl_seq = sh_ast_alloc_seq(arena);
+    sh_ast_add_child(arena, tpl_seq, sh_ast_alloc_splice(arena, "on_enter", -1));
+    sh_ast_add_child(arena, tpl_seq, sh_ast_alloc_splat(arena, "orig_stmts", -1));
+    sh_ast_add_child(arena, tpl_seq, sh_ast_alloc_splice(arena, "on_exit", -1));
+    let tpl = sh_ast_alloc_template(arena, tpl_seq);
+
+    let orig_cnt = sh_ast_child_count(arena, body);
+    var keep_cnt = orig_cnt;
+    var trailing_ret = -1;
+    if orig_cnt > 0 {
+        let last = sh_ast_child_at(arena, body, orig_cnt - 1);
+        if sh_ast_kind_name(arena, last) == "ReturnStmt" {
+            trailing_ret = last;
+            keep_cnt = orig_cnt - 1;
+        }
+    }
+
+    let orig_seq = sh_ast_alloc_seq(arena);
+    var i = 0;
+    while i < keep_cnt {
+        sh_ast_add_child(arena, orig_seq, sh_ast_child_at(arena, body, i));
+        i = i + 1;
+    }
+
+    let enter_call = sh_ast_alloc_node(arena, "CallExpr", enter_callee);
+    let exit_call = sh_ast_alloc_node(arena, "CallExpr", exit_callee);
+
+    let bindings = sh_ast_bindings_new();
+    sh_ast_bind_node(bindings, "on_enter", enter_call);
+    sh_ast_bind_seq(bindings, "orig_stmts", orig_seq);
+    sh_ast_bind_node(bindings, "on_exit", exit_call);
+
+    let woven_seq = sh_ast_instantiate_quote(arena, tpl, bindings);
+    sh_ast_splice_children(arena, body, 0, orig_cnt, woven_seq);
+    if trailing_ret >= 0 {
+        sh_ast_add_child(arena, body, trailing_ret);
+    }
+    return true;
+}
+
+// Rewrites all `CallExpr` nodes matching `old_callee` to `new_callee` in-place inside `arena`
+pub fn patch_replace_call_callee(arena: i64, root_nid: i64, old_callee: str, new_callee: str) -> i64 {
+    if root_nid < 0 { return 0; }
+    var count = 0;
+    if sh_ast_kind_name(arena, root_nid) == "CallExpr" && sh_ast_op_text(arena, root_nid) == old_callee {
+        sh_ast_set_op_text(arena, root_nid, new_callee);
+        count = count + 1;
+    }
+    let cc = sh_ast_child_count(arena, root_nid);
+    var i = 0;
+    while i < cc {
+        count = count + patch_replace_call_callee(arena, sh_ast_child_at(arena, root_nid, i), old_callee, new_callee);
+        i = i + 1;
+    }
+    return count;
+}

@@ -1,29 +1,12 @@
 // ==============================================================================
 // FILE: selfhost/parser.pilot
-// Milestone 61.1: Standalone Self-Hosted Pratt, Statement & Syntax/Quote Parser
+// Standalone Self-Hosted Pratt, Statement, Declaration & Homoiconic `quote` Parser
+// Genuinely parses `syntax name(params...) => quote { ... $hole ... $*seq ... ~expr }`
+// into `MutableAstArena` templates and instantiates them via AST splicing & hygiene.
 // ==============================================================================
 pub pkg Pilot.SelfHost.Parser;
 
 pub pure fn nameof(sym: str) -> str => sym;
-
-pub enum ParserState {
-    Ready,
-    Parsing,
-    Done,
-    Error,
-}
-
-pub enum PrattPrecedence {
-    None,
-    LogicalOr,
-    LogicalAnd,
-    Equality,
-    Comparison,
-    Term,
-    Factor,
-    Unary,
-    Call,
-}
 
 fn sh_get_precedence(op_str: str) -> i64 {
     if op_str == "||" { return 5; }
@@ -35,15 +18,183 @@ fn sh_get_precedence(op_str: str) -> i64 {
     return 0;
 }
 
-pub pure fn sh_op_precedence(op_str: str) -> PrattPrecedence {
-    return ::None;
+pub pure fn sh_op_precedence(op_str: str) -> i64 {
+    return sh_get_precedence(op_str);
 }
 
-pub pure fn sh_parser_state_name(state: ParserState) -> str {
+pub pure fn sh_parser_state_name(state: i64) -> str {
+    if state == 1 { return "Parsing"; }
+    if state == 2 { return "Done"; }
+    if state == 3 { return "Error"; }
     return "Ready";
 }
 
-// Parser context state stored in a map
+// ==============================================================================
+// 1. Homoiconic Macro Registry & Argument / Template Splicing Helpers
+// ==============================================================================
+
+fn sh_find_macro_entry(ctx: i64, name: str, arg_count: i64) -> i64 {
+    let mcnt = __engine("map_get", ctx, "macro_count");
+    if mcnt == null || mcnt <= 0 { return -1; }
+    var fallback = -1;
+    var i = 0;
+    while i < mcnt {
+        let mname = __engine("map_get", ctx, "m_" + i + "_name");
+        if mname == name {
+            let pcnt = __engine("map_get", ctx, "m_" + i + "_pcount");
+            let has_var = __engine("map_get", ctx, "m_" + i + "_variadic");
+            if has_var == 1 {
+                if arg_count >= pcnt - 1 {
+                    fallback = i;
+                }
+            } else if pcnt == arg_count {
+                return i;
+            }
+        }
+        i = i + 1;
+    }
+    return fallback;
+}
+
+fn sh_has_macro_name(ctx: i64, name: str) -> bool {
+    let mcnt = __engine("map_get", ctx, "macro_count");
+    if mcnt == null || mcnt <= 0 { return false; }
+    var i = 0;
+    while i < mcnt {
+        if __engine("map_get", ctx, "m_" + i + "_name") == name {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// Parses a single macro call argument (supporting statements like `return 1;` or `let x = 2;` AND expressions)
+fn sh_parse_macro_arg(arena: i64, tape: i64, ctx: i64) -> i64 {
+    let cur = __engine("map_get", ctx, "pos");
+    let tcnt = sh_token_count(tape);
+    if cur >= tcnt { return -1; }
+    let tag = sh_token_tag(tape, cur);
+    let txt = sh_token_text(tape, cur);
+
+    if tag == "LBrace" {
+        return sh_parse_block(arena, tape, ctx);
+    }
+    if txt == nameof(return) || txt == nameof(let) || txt == "var" || txt == "if" || txt == "while" || txt == nameof(loop) {
+        return sh_parse_statement(arena, tape, ctx);
+    }
+    if (tag == "Ident" || tag == "SeedKw") && cur + 1 < tcnt && sh_token_text(tape, cur + 1) == "=" {
+        return sh_parse_statement(arena, tape, ctx);
+    }
+    let expr_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
+    let after = __engine("map_get", ctx, "pos");
+    if after < tcnt && sh_token_text(tape, after) == ";" {
+        __engine("map_set", ctx, "pos", after + 1);
+    }
+    return expr_nid;
+}
+
+fn sh_invoke_macro(arena: i64, tape: i64, ctx: i64, name: str) -> i64 {
+    let start_cur = __engine("map_get", ctx, "pos");
+    let tcnt = sh_token_count(tape);
+    // Advance past `name` and `(`
+    __engine("map_set", ctx, "pos", start_cur + 2);
+
+    let raw_args = __engine("map_new");
+    var acnt = 0;
+    while true {
+        let p = __engine("map_get", ctx, "pos");
+        if p >= tcnt { break; }
+        if sh_token_tag(tape, p) == "RParen" {
+            __engine("map_set", ctx, "pos", p + 1);
+            break;
+        }
+        let arg_nid = sh_parse_macro_arg(arena, tape, ctx);
+        if arg_nid >= 0 {
+            __engine("map_set", raw_args, "a_" + acnt, arg_nid);
+            acnt = acnt + 1;
+        }
+        let c_pos = __engine("map_get", ctx, "pos");
+        if c_pos < tcnt && sh_token_text(tape, c_pos) == "," {
+            __engine("map_set", ctx, "pos", c_pos + 1);
+        } else if c_pos < tcnt && sh_token_tag(tape, c_pos) == "RParen" {
+            __engine("map_set", ctx, "pos", c_pos + 1);
+            break;
+        } else if c_pos == p {
+            __engine("map_set", ctx, "pos", c_pos + 1);
+        }
+    }
+
+    let midx = sh_find_macro_entry(ctx, name, acnt);
+    if midx < 0 { return -1; }
+
+    let pcnt = __engine("map_get", ctx, "m_" + midx + "_pcount");
+    let has_var = __engine("map_get", ctx, "m_" + midx + "_variadic");
+    let tpl_nid = __engine("map_get", ctx, "m_" + midx + "_tpl");
+
+    let bindings = sh_ast_bindings_new();
+    // Copy registered compile-time constants into bindings for `~expr` evaluation
+    let ccnt = __engine("map_get", ctx, "const_count");
+    if ccnt != null && ccnt > 0 {
+        var ci = 0;
+        while ci < ccnt {
+            let cname = __engine("map_get", ctx, "c_" + ci + "_name");
+            let cval = __engine("map_get", ctx, "c_" + ci + "_val");
+            sh_ast_bind_const(bindings, cname, cval);
+            ci = ci + 1;
+        }
+    }
+
+    var pi = 0;
+    while pi < pcnt {
+        let pname = __engine("map_get", ctx, "m_" + midx + "_p_" + pi);
+        let p_is_var = __engine("map_get", ctx, "m_" + midx + "_pvar_" + pi);
+        if p_is_var == 1 || (has_var == 1 && pi == pcnt - 1) {
+            let seq_nid = sh_ast_alloc_seq(arena);
+            var ai = pi;
+            while ai < acnt {
+                sh_ast_add_child(arena, seq_nid, __engine("map_get", raw_args, "a_" + ai));
+                ai = ai + 1;
+            }
+            sh_ast_bind_seq(bindings, pname, seq_nid);
+        } else if pi < acnt {
+            sh_ast_bind_node(bindings, pname, __engine("map_get", raw_args, "a_" + pi));
+        }
+        pi = pi + 1;
+    }
+
+    return sh_ast_instantiate_quote(arena, tpl_nid, bindings);
+}
+
+// ==============================================================================
+// 2. Pratt Expression, Quote Hole (`$x`, `$*xs`, `~expr`) & Statement Parser
+// ==============================================================================
+
+fn sh_parse_quote_template(arena: i64, tape: i64, ctx: i64) -> i64 {
+    let cur = __engine("map_get", ctx, "pos");
+    let tcnt = sh_token_count(tape);
+    if cur >= tcnt { return -1; }
+
+    let tag = sh_token_tag(tape, cur);
+    if tag == "LBrace" {
+        let blk = sh_parse_block(arena, tape, ctx);
+        let bcnt = sh_ast_child_count(arena, blk);
+        if bcnt == 1 {
+            let single = sh_ast_child_at(arena, blk, 0);
+            return sh_ast_alloc_template(arena, single);
+        }
+        let seq = sh_ast_alloc_seq(arena);
+        var i = 0;
+        while i < bcnt {
+            sh_ast_add_child(arena, seq, sh_ast_child_at(arena, blk, i));
+            i = i + 1;
+        }
+        return sh_ast_alloc_template(arena, seq);
+    }
+    let expr_tpl = sh_parse_expr_bp(arena, tape, ctx, 0);
+    return sh_ast_alloc_template(arena, expr_tpl);
+}
+
 fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
     let cur = __engine("map_get", ctx, "pos");
     let tcnt = sh_token_count(tape);
@@ -52,19 +203,107 @@ fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
     let tag = sh_token_tag(tape, cur);
     let text = sh_token_text(tape, cur);
 
+    // Homoiconic splice holes: `$*seq`, `$hole`, `$(hole)`
+    if tag == "Op" && text == "$" {
+        if cur + 2 < tcnt && sh_token_text(tape, cur + 1) == "*" {
+            let sname = sh_token_text(tape, cur + 2);
+            __engine("map_set", ctx, "pos", cur + 3);
+            return sh_ast_alloc_splat(arena, sname, -1);
+        }
+        if cur + 3 < tcnt && sh_token_tag(tape, cur + 1) == "LParen" {
+            let p_name = sh_token_text(tape, cur + 2);
+            __engine("map_set", ctx, "pos", cur + 4);
+            return sh_ast_alloc_splice(arena, p_name, -1);
+        }
+        if cur + 1 < tcnt {
+            let hname = sh_token_text(tape, cur + 1);
+            __engine("map_set", ctx, "pos", cur + 2);
+            return sh_ast_alloc_splice(arena, hname, -1);
+        }
+    }
+
+    // Alternate variadic splat syntax: `*$seq`
+    if tag == "Op" && text == "*" && cur + 2 < tcnt && sh_token_text(tape, cur + 1) == "$" {
+        let vname = sh_token_text(tape, cur + 2);
+        __engine("map_set", ctx, "pos", cur + 3);
+        return sh_ast_alloc_splat(arena, vname, -1);
+    }
+
+    // Homoiconic compile-time unquote escape: `~expr` or `~(expr)`
+    if tag == "Op" && text == "~" {
+        __engine("map_set", ctx, "pos", cur + 1);
+        let u_expr = sh_parse_expr_bp(arena, tape, ctx, 50);
+        return sh_ast_alloc_unquote(arena, u_expr);
+    }
+
+    // First-class `quote { ... }` template expression
+    if text == "quote" {
+        __engine("map_set", ctx, "pos", cur + 1);
+        return sh_parse_quote_template(arena, tape, ctx);
+    }
+
+    // Verbatim `raw("...")` quotation
+    if tag == "Ident" && text == "raw" && cur + 2 < tcnt && sh_token_tag(tape, cur + 1) == "LParen" {
+        let raw_txt = sh_token_text(tape, cur + 2);
+        var next_p = cur + 3;
+        if next_p < tcnt && sh_token_tag(tape, next_p) == "RParen" {
+            next_p = next_p + 1;
+        }
+        __engine("map_set", ctx, "pos", next_p);
+        return sh_ast_alloc_raw(arena, raw_txt);
+    }
+
     if tag == "IntLit" {
         __engine("map_set", ctx, "pos", cur + 1);
-        let nid = sh_ast_alloc_node(arena, "IntLit", text);
-        return nid;
+        return sh_ast_alloc_node(arena, "IntLit", text);
+    }
+
+    if tag == "StrLit" || tag == "FStrLit" {
+        __engine("map_set", ctx, "pos", cur + 1);
+        return sh_ast_alloc_node(arena, "StrLit", text);
+    }
+
+    if tag == "Ident" && (text == "true" || text == "false") {
+        __engine("map_set", ctx, "pos", cur + 1);
+        return sh_ast_alloc_node(arena, "BoolLit", text);
     }
 
     if tag == "Ident" || tag == "SeedKw" {
+        // Check expression-position macro expansion OR standard `CallExpr`
+        if cur + 1 < tcnt && sh_token_tag(tape, cur + 1) == "LParen" {
+            if sh_has_macro_name(ctx, text) {
+                return sh_invoke_macro(arena, tape, ctx, text);
+            }
+            __engine("map_set", ctx, "pos", cur + 2);
+            let call_nid = sh_ast_alloc_node(arena, "CallExpr", text);
+            while true {
+                let ap = __engine("map_get", ctx, "pos");
+                if ap >= tcnt { break; }
+                if sh_token_tag(tape, ap) == "RParen" {
+                    __engine("map_set", ctx, "pos", ap + 1);
+                    break;
+                }
+                let arg = sh_parse_expr_bp(arena, tape, ctx, 0);
+                if arg >= 0 {
+                    sh_ast_add_child(arena, call_nid, arg);
+                }
+                let cp = __engine("map_get", ctx, "pos");
+                if cp < tcnt && sh_token_text(tape, cp) == "," {
+                    __engine("map_set", ctx, "pos", cp + 1);
+                } else if cp < tcnt && sh_token_tag(tape, cp) == "RParen" {
+                    __engine("map_set", ctx, "pos", cp + 1);
+                    break;
+                } else if cp == ap {
+                    __engine("map_set", ctx, "pos", cp + 1);
+                }
+            }
+            return call_nid;
+        }
         __engine("map_set", ctx, "pos", cur + 1);
-        let nid = sh_ast_alloc_node(arena, "IdentExpr", text);
-        return nid;
+        return sh_ast_alloc_node(arena, "IdentExpr", text);
     }
 
-    if tag == "Op" && (text == "!" || text == "-") {
+    if (tag == "Op" || tag == "CallQuoteShallow") && (text == "!" || text == "-") {
         __engine("map_set", ctx, "pos", cur + 1);
         let operand = sh_parse_expr_bp(arena, tape, ctx, 50);
         let nid = sh_ast_alloc_node(arena, "UnaryExpr", text);
@@ -80,6 +319,10 @@ fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
             __engine("map_set", ctx, "pos", ncur + 1);
         }
         return inner;
+    }
+
+    if tag == "LBrace" {
+        return sh_parse_block(arena, tape, ctx);
     }
 
     __engine("map_set", ctx, "pos", cur + 1);
@@ -115,6 +358,25 @@ fn sh_parse_expr_bp(arena: i64, tape: i64, ctx: i64, min_bp: i64) -> i64 {
     return lhs;
 }
 
+fn sh_skip_optional_type_annot(tape: i64, ctx: i64) -> void {
+    let tcnt = sh_token_count(tape);
+    var p = __engine("map_get", ctx, "pos");
+    if p < tcnt && sh_token_text(tape, p) == ":" {
+        p = p + 1;
+        var angle_d = 0;
+        while p < tcnt {
+            let txt = sh_token_text(tape, p);
+            if txt == "<" { angle_d = angle_d + 1; }
+            else if txt == ">" && angle_d > 0 { angle_d = angle_d - 1; }
+            else if angle_d == 0 && (txt == "=" || txt == ";" || txt == "," || txt == ")") {
+                break;
+            }
+            p = p + 1;
+        }
+        __engine("map_set", ctx, "pos", p);
+    }
+}
+
 fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
     let cur = __engine("map_get", ctx, "pos");
     let tcnt = sh_token_count(tape);
@@ -123,8 +385,45 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
     let tag = sh_token_tag(tape, cur);
     let text = sh_token_text(tape, cur);
 
-    // IfExpr
-    if tag == "SeedKw" && text == "if" {
+    // Block statement `{ ... }`
+    if tag == "LBrace" {
+        return sh_parse_block(arena, tape, ctx);
+    }
+
+    // `let name [: Type] = expr;` or `var name [: Type] = expr;`
+    if (tag == "SeedKw" && text == nameof(let)) || (tag == "Ident" && text == "var") {
+        let is_var = text == "var";
+        var vpos = cur + 1;
+        var vname = "";
+        if vpos < tcnt && sh_token_text(tape, vpos) == "$" && vpos + 1 < tcnt {
+            vname = "$" + sh_token_text(tape, vpos + 1);
+            vpos = vpos + 2;
+        } else if vpos < tcnt {
+            vname = sh_token_text(tape, vpos);
+            vpos = vpos + 1;
+        }
+        __engine("map_set", ctx, "pos", vpos);
+        sh_skip_optional_type_annot(tape, ctx);
+        var eq_pos = __engine("map_get", ctx, "pos");
+        var init_nid = -1;
+        if eq_pos < tcnt && sh_token_text(tape, eq_pos) == "=" {
+            __engine("map_set", ctx, "pos", eq_pos + 1);
+            init_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
+        }
+        let end_p = __engine("map_get", ctx, "pos");
+        if end_p < tcnt && sh_token_text(tape, end_p) == ";" {
+            __engine("map_set", ctx, "pos", end_p + 1);
+        }
+        let bind_kind = if is_var { "VarStmt" } else { "LetStmt" };
+        let bind_nid = sh_ast_alloc_node(arena, bind_kind, vname);
+        if init_nid >= 0 {
+            sh_ast_add_child(arena, bind_nid, init_nid);
+        }
+        return bind_nid;
+    }
+
+    // `if cond { ... } [else ...]`
+    if text == "if" {
         __engine("map_set", ctx, "pos", cur + 1);
         let cond_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
         var then_nid = -1;
@@ -135,56 +434,101 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
         let if_nid = sh_ast_alloc_node(arena, "IfExpr", "");
         sh_ast_add_child(arena, if_nid, cond_nid);
         sh_ast_add_child(arena, if_nid, then_nid);
+        let e_cur = __engine("map_get", ctx, "pos");
+        if e_cur < tcnt && sh_token_text(tape, e_cur) == "else" {
+            __engine("map_set", ctx, "pos", e_cur + 1);
+            let after_else = __engine("map_get", ctx, "pos");
+            let else_nid = if after_else < tcnt && sh_token_tag(tape, after_else) == "LBrace" {
+                sh_parse_block(arena, tape, ctx)
+            } else {
+                sh_parse_statement(arena, tape, ctx)
+            };
+            if else_nid >= 0 {
+                sh_ast_add_child(arena, if_nid, else_nid);
+            }
+        }
         return if_nid;
     }
 
-    // ReturnStmt
-    if tag == "SeedKw" && text == "return" {
+    // `while cond { ... }`
+    if tag == "Ident" && text == "while" {
         __engine("map_set", ctx, "pos", cur + 1);
-        let val_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
+        let w_cond = sh_parse_expr_bp(arena, tape, ctx, 0);
+        let w_body = sh_parse_block(arena, tape, ctx);
+        let w_nid = sh_ast_alloc_node(arena, "WhileStmt", "");
+        sh_ast_add_child(arena, w_nid, w_cond);
+        sh_ast_add_child(arena, w_nid, w_body);
+        return w_nid;
+    }
+
+    // `loop { ... }`
+    if tag == "SeedKw" && text == nameof(loop) {
+        __engine("map_set", ctx, "pos", cur + 1);
+        let l_body = sh_parse_block(arena, tape, ctx);
+        let l_nid = sh_ast_alloc_node(arena, "LoopStmt", "");
+        sh_ast_add_child(arena, l_nid, l_body);
+        return l_nid;
+    }
+
+    // `return [expr];`
+    if tag == "SeedKw" && text == nameof(return) {
+        __engine("map_set", ctx, "pos", cur + 1);
+        let ret_nid = sh_ast_alloc_node(arena, "ReturnStmt", "");
+        let r_cur = __engine("map_get", ctx, "pos");
+        if r_cur < tcnt && sh_token_text(tape, r_cur) != ";" && sh_token_tag(tape, r_cur) != "RBrace" {
+            let val_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
+            if val_nid >= 0 {
+                sh_ast_add_child(arena, ret_nid, val_nid);
+            }
+        }
         let p_cur = __engine("map_get", ctx, "pos");
-        if p_cur < tcnt && sh_token_tag(tape, p_cur) == "Punct" && sh_token_text(tape, p_cur) == ";" {
+        if p_cur < tcnt && sh_token_text(tape, p_cur) == ";" {
             __engine("map_set", ctx, "pos", p_cur + 1);
         }
-        let ret_nid = sh_ast_alloc_node(arena, "ReturnStmt", "");
-        sh_ast_add_child(arena, ret_nid, val_nid);
         return ret_nid;
     }
 
-    // Check macro call e.g. unless_xxx(...)
-    let macro_name = __engine("map_get", ctx, "macro_name");
-    if macro_name != null && text == macro_name && cur + 1 < tcnt && sh_token_tag(tape, cur + 1) == "LParen" {
-        __engine("map_set", ctx, "pos", cur + 2); // skip name and '('
-        let arg1_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
-        // skip comma
-        var c_cur = __engine("map_get", ctx, "pos");
-        if c_cur < tcnt && sh_token_text(tape, c_cur) == "," {
-            __engine("map_set", ctx, "pos", c_cur + 1);
+    // Statement-position homoiconic macro invocation `<macro_name>(...);`
+    if (tag == "Ident" || tag == "SeedKw") && cur + 1 < tcnt && sh_token_tag(tape, cur + 1) == "LParen" {
+        if sh_has_macro_name(ctx, text) {
+            let expanded = sh_invoke_macro(arena, tape, ctx, text);
+            let m_after = __engine("map_get", ctx, "pos");
+            if m_after < tcnt && sh_token_text(tape, m_after) == ";" {
+                __engine("map_set", ctx, "pos", m_after + 1);
+            }
+            return expanded;
         }
-        let arg2_nid = sh_parse_statement(arena, tape, ctx);
-        // skip ')' and optional ';'
-        var e_cur = __engine("map_get", ctx, "pos");
-        if e_cur < tcnt && sh_token_tag(tape, e_cur) == "RParen" {
-            __engine("map_set", ctx, "pos", e_cur + 1);
-        }
-        e_cur = __engine("map_get", ctx, "pos");
-        if e_cur < tcnt && sh_token_text(tape, e_cur) == ";" {
-            __engine("map_set", ctx, "pos", e_cur + 1);
-        }
-
-        // Expand quote { if !($cond) { $body } }
-        let if_nid = sh_ast_alloc_node(arena, "IfExpr", "");
-        let not_nid = sh_ast_alloc_node(arena, "UnaryExpr", "!");
-        sh_ast_add_child(arena, not_nid, arg1_nid);
-        sh_ast_add_child(arena, if_nid, not_nid);
-
-        let body_block = sh_ast_alloc_node(arena, "BlockExpr", "");
-        sh_ast_add_child(arena, body_block, arg2_nid);
-        sh_ast_add_child(arena, if_nid, body_block);
-        return if_nid;
     }
 
-    // Default expression statement
+    // Assignment `lhs = rhs;` (including `$lhs = rhs;` inside `quote` templates)
+    if (tag == "Ident" || tag == "SeedKw") && cur + 1 < tcnt && sh_token_text(tape, cur + 1) == "=" {
+        let lhs_id = sh_ast_alloc_node(arena, "IdentExpr", text);
+        __engine("map_set", ctx, "pos", cur + 2);
+        let rhs_id = sh_parse_expr_bp(arena, tape, ctx, 0);
+        let a_end = __engine("map_get", ctx, "pos");
+        if a_end < tcnt && sh_token_text(tape, a_end) == ";" {
+            __engine("map_set", ctx, "pos", a_end + 1);
+        }
+        let asg = sh_ast_alloc_node(arena, "AssignStmt", "=");
+        sh_ast_add_child(arena, asg, lhs_id);
+        sh_ast_add_child(arena, asg, rhs_id);
+        return asg;
+    }
+    if tag == "Op" && text == "$" && cur + 2 < tcnt && sh_token_text(tape, cur + 2) == "=" {
+        let sl_lhs = sh_ast_alloc_splice(arena, sh_token_text(tape, cur + 1), -1);
+        __engine("map_set", ctx, "pos", cur + 3);
+        let sl_rhs = sh_parse_expr_bp(arena, tape, ctx, 0);
+        let sa_end = __engine("map_get", ctx, "pos");
+        if sa_end < tcnt && sh_token_text(tape, sa_end) == ";" {
+            __engine("map_set", ctx, "pos", sa_end + 1);
+        }
+        let s_asg = sh_ast_alloc_node(arena, "AssignStmt", "=");
+        sh_ast_add_child(arena, s_asg, sl_lhs);
+        sh_ast_add_child(arena, s_asg, sl_rhs);
+        return s_asg;
+    }
+
+    // Default expression / hole statement (`$body`, `$*stmts`, `f(x);`, etc.)
     let e_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
     let s_cur = __engine("map_get", ctx, "pos");
     if s_cur < tcnt && sh_token_text(tape, s_cur) == ";" {
@@ -198,7 +542,7 @@ fn sh_parse_block(arena: i64, tape: i64, ctx: i64) -> i64 {
     let tcnt = sh_token_count(tape);
     if cur >= tcnt || sh_token_tag(tape, cur) != "LBrace" { return -1; }
 
-    __engine("map_set", ctx, "pos", cur + 1); // skip '{'
+    __engine("map_set", ctx, "pos", cur + 1);
     let block_nid = sh_ast_alloc_node(arena, "BlockExpr", "");
 
     while true {
@@ -210,13 +554,112 @@ fn sh_parse_block(arena: i64, tape: i64, ctx: i64) -> i64 {
         }
         let stmt_nid = sh_parse_statement(arena, tape, ctx);
         if stmt_nid >= 0 {
-            sh_ast_add_child(arena, block_nid, stmt_nid);
+            let sk = sh_ast_kind_name(arena, stmt_nid);
+            if sk == "SeqFragment" {
+                let scnt = sh_ast_child_count(arena, stmt_nid);
+                var si = 0;
+                while si < scnt {
+                    sh_ast_add_child(arena, block_nid, sh_ast_child_at(arena, stmt_nid, si));
+                    si = si + 1;
+                }
+            } else {
+                sh_ast_add_child(arena, block_nid, stmt_nid);
+            }
         } else {
             break;
         }
     }
 
     return block_nid;
+}
+
+// ==============================================================================
+// 3. Top-Level `syntax` Template Ingestion, Declarations & `sh_parse_program`
+// ==============================================================================
+
+fn sh_parse_syntax_decl(arena: i64, tape: i64, ctx: i64) -> void {
+    let tcnt = sh_token_count(tape);
+    var pos = __engine("map_get", ctx, "pos") + 1; // skip `syntax`
+    if pos >= tcnt { return; }
+
+    let m_name = sh_token_text(tape, pos);
+    pos = pos + 1;
+
+    let m_idx = __engine("map_get", ctx, "macro_count");
+    __engine("map_set", ctx, "macro_count", m_idx + 1);
+    __engine("map_set", ctx, "m_" + m_idx + "_name", m_name);
+
+    var pcount = 0;
+    var has_variadic = 0;
+
+    if pos < tcnt && sh_token_tag(tape, pos) == "LParen" {
+        pos = pos + 1;
+        while pos < tcnt && sh_token_tag(tape, pos) != "RParen" {
+            var is_var_p = 0;
+            if sh_token_text(tape, pos) == "$" { pos = pos + 1; }
+            if pos < tcnt && sh_token_text(tape, pos) == "*" {
+                is_var_p = 1;
+                has_variadic = 1;
+                pos = pos + 1;
+            }
+            if pos < tcnt && sh_token_text(tape, pos) == "$" { pos = pos + 1; }
+            if pos < tcnt && sh_token_tag(tape, pos) != "RParen" && sh_token_text(tape, pos) != "," {
+                let p_name = sh_token_text(tape, pos);
+                __engine("map_set", ctx, "m_" + m_idx + "_p_" + pcount, p_name);
+                __engine("map_set", ctx, "m_" + m_idx + "_pvar_" + pcount, is_var_p);
+                pcount = pcount + 1;
+                pos = pos + 1;
+                // Skip optional `: ast` / `: type` parameter annotation
+                if pos < tcnt && sh_token_text(tape, pos) == ":" {
+                    pos = pos + 1;
+                    while pos < tcnt && sh_token_text(tape, pos) != "," && sh_token_tag(tape, pos) != "RParen" {
+                        pos = pos + 1;
+                    }
+                }
+            }
+            if pos < tcnt && sh_token_text(tape, pos) == "," {
+                pos = pos + 1;
+            }
+        }
+        if pos < tcnt && sh_token_tag(tape, pos) == "RParen" {
+            pos = pos + 1;
+        }
+    }
+
+    __engine("map_set", ctx, "m_" + m_idx + "_pcount", pcount);
+    __engine("map_set", ctx, "m_" + m_idx + "_variadic", has_variadic);
+
+    if pos < tcnt && sh_token_text(tape, pos) == "=>" {
+        pos = pos + 1;
+    }
+    if pos < tcnt && sh_token_text(tape, pos) == "quote" {
+        pos = pos + 1;
+    }
+    __engine("map_set", ctx, "pos", pos);
+    let tpl_nid = sh_parse_quote_template(arena, tape, ctx);
+    __engine("map_set", ctx, "m_" + m_idx + "_tpl", tpl_nid);
+
+    let after = __engine("map_get", ctx, "pos");
+    if after < tcnt && sh_token_text(tape, after) == ";" {
+        __engine("map_set", ctx, "pos", after + 1);
+    }
+}
+
+fn sh_capture_fn_sig_tokens(tape: i64, start_idx: i64, end_idx: i64) -> str {
+    var sig = "";
+    var k = start_idx;
+    while k < end_idx {
+        let tk = sh_token_text(tape, k);
+        if tk == "->" {
+            sig = sig + " -> ";
+        } else if tk == "," || tk == ":" {
+            sig = sig + tk + " ";
+        } else {
+            sig = sig + tk;
+        }
+        k = k + 1;
+    }
+    return sig;
 }
 
 pub fn sh_parse_program(src: str) -> i64 {
@@ -228,6 +671,8 @@ pub fn sh_parse_program(src: str) -> i64 {
     let tcnt = sh_token_count(tape);
     let ctx = __engine("map_new");
     __engine("map_set", ctx, "pos", 0);
+    __engine("map_set", ctx, "macro_count", 0);
+    __engine("map_set", ctx, "const_count", 0);
 
     var pos = 0;
     while pos < tcnt {
@@ -235,43 +680,87 @@ pub fn sh_parse_program(src: str) -> i64 {
         let tag = sh_token_tag(tape, pos);
         let text = sh_token_text(tape, pos);
 
-        // Check for `syntax <name>(...) => quote { ... };`
-        if text == "syntax" {
+        // Skip leading `[Attr(...)]` prefix via O(1) bracket mate
+        if tag == "LBracket" {
+            let mate = sh_token_matching_bracket(tape, pos);
+            pos = if mate > pos { mate + 1 } else { pos + 1 };
+        } else if text == "pub" || text == "pure" || text == "static" {
             pos = pos + 1;
-            let m_name = sh_token_text(tape, pos);
-            __engine("map_set", ctx, "macro_name", m_name);
-            // Advance to closing ';'
-            while pos < tcnt && sh_token_text(tape, pos) != ";" {
+        } else if text == "syntax" {
+            sh_parse_syntax_decl(arena, tape, ctx);
+            pos = __engine("map_get", ctx, "pos");
+        } else if text == "const" && pos + 3 < tcnt && sh_token_text(tape, pos + 2) == "=" {
+            let cname = sh_token_text(tape, pos + 1);
+            __engine("map_set", ctx, "pos", pos + 3);
+            let cexpr = sh_parse_expr_bp(arena, tape, ctx, 0);
+            let cval = sh_ast_eval_const_expr(arena, cexpr, -1);
+            let cidx = __engine("map_get", ctx, "const_count");
+            __engine("map_set", ctx, "c_" + cidx + "_name", cname);
+            __engine("map_set", ctx, "c_" + cidx + "_val", cval);
+            __engine("map_set", ctx, "const_count", cidx + 1);
+            var c_after = __engine("map_get", ctx, "pos");
+            if c_after < tcnt && sh_token_text(tape, c_after) == ";" {
+                c_after = c_after + 1;
+            }
+            pos = c_after;
+        } else if text == nameof(struct) || text == nameof(interface) {
+            let decl_k = if text == nameof(struct) { "StructDecl" } else { "InterfaceDecl" };
+            pos = pos + 1;
+            let d_name = if pos < tcnt { sh_token_text(tape, pos) } else { "" };
+            let d_nid = sh_ast_alloc_node(arena, decl_k, d_name);
+            sh_ast_add_child(arena, root, d_nid);
+            while pos < tcnt && sh_token_tag(tape, pos) != "LBrace" && sh_token_text(tape, pos) != ";" {
                 pos = pos + 1;
             }
-            if pos < tcnt && sh_token_text(tape, pos) == ";" {
+            if pos < tcnt && sh_token_tag(tape, pos) == "LBrace" {
+                let mate_b = sh_token_matching_bracket(tape, pos);
+                pos = if mate_b > pos { mate_b + 1 } else { pos + 1 };
+            } else if pos < tcnt {
                 pos = pos + 1;
             }
-            __engine("map_set", ctx, "pos", pos);
-        } else if text == "fn" || (text == "pub" && pos + 1 < tcnt && sh_token_text(tape, pos + 1) == "fn") {
-            if text == "pub" { pos = pos + 1; }
-            pos = pos + 1; // skip 'fn'
-            let fn_name = sh_token_text(tape, pos);
+        } else if text == nameof(fn) {
+            pos = pos + 1;
+            let fn_name = if pos < tcnt { sh_token_text(tape, pos) } else { "" };
+            pos = pos + 1;
+            let sig_start = pos;
             let fn_nid = sh_ast_alloc_node(arena, "FnDecl", fn_name);
             sh_ast_add_child(arena, root, fn_nid);
 
-            // Skip params and return type to '{'
             while pos < tcnt && sh_token_tag(tape, pos) != "LBrace" {
                 pos = pos + 1;
             }
+            __engine("map_set", arena, fn_nid + "_sig", sh_capture_fn_sig_tokens(tape, sig_start, pos));
             __engine("map_set", ctx, "pos", pos);
             let body_nid = sh_parse_block(arena, tape, ctx);
             sh_ast_add_child(arena, fn_nid, body_nid);
             pos = __engine("map_get", ctx, "pos");
         } else {
-            pos = pos + 1;
+            let top_stmt = sh_parse_statement(arena, tape, ctx);
+            if top_stmt >= 0 {
+                let tk = sh_ast_kind_name(arena, top_stmt);
+                if tk == "SeqFragment" {
+                    let sc = sh_ast_child_count(arena, top_stmt);
+                    var si = 0;
+                    while si < sc {
+                        sh_ast_add_child(arena, root, sh_ast_child_at(arena, top_stmt, si));
+                        si = si + 1;
+                    }
+                } else {
+                    sh_ast_add_child(arena, root, top_stmt);
+                }
+            }
+            let next_p = __engine("map_get", ctx, "pos");
+            pos = if next_p > pos { next_p } else { pos + 1 };
         }
     }
 
     return arena;
 }
 
-// Option 1 Quoting & Splicing Helpers: raw, quote, splice, splat
+// ==============================================================================
+// 4. Homoiconic Quoting, Splicing & Syntax Overload Dispatch Entrypoints
+// ==============================================================================
+
 pub fn sh_expand_quote_splice(arena: i64, parent: i64, slot_name: str, node: i64) -> void {
     let nid = sh_ast_alloc_splice(arena, slot_name, node);
     sh_ast_add_child(arena, parent, nid);
@@ -279,6 +768,11 @@ pub fn sh_expand_quote_splice(arena: i64, parent: i64, slot_name: str, node: i64
 
 pub fn sh_expand_quote_splat(arena: i64, parent: i64, slot_name: str, nodes: i64) -> void {
     let nid = sh_ast_alloc_splat(arena, slot_name, nodes);
+    sh_ast_add_child(arena, parent, nid);
+}
+
+pub fn sh_expand_quote_unquote(arena: i64, parent: i64, expr_nid: i64) -> void {
+    let nid = sh_ast_alloc_unquote(arena, expr_nid);
     sh_ast_add_child(arena, parent, nid);
 }
 

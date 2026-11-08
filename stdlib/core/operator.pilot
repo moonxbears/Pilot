@@ -143,11 +143,11 @@ pub interface {
     }
 
     IIndexSet<TIdx: IAnyValue, TVal: IAnyValue> : IAnyValue {
-        pub var op []= (idx: TIdx, val: TVal);
+        pub op []= (idx: TIdx, val: TVal);
     }
 
     ISwapOperator<TRhs: IAnyValue> : IAnyValue {
-        pub var op :=: (rhs: var ref<TRhs>);
+        pub op :=: (rhs: var ref<TRhs>);
     }
 
     ILensOperator<TLens: IAnyValue, TOut: IAnyValue> : IAnyValue {

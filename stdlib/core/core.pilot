@@ -373,7 +373,7 @@ comptime {
 comptime fn __bootstrap_syntax(kw_name, params, body) => quote {
     [SyntaxMacro($kw_name)]
     comptime fn __syntax_rule($params) { $body }
-};
+}
 
 // =========================================================================
 // STEP 3: REGISTER MODIFIERS, MODULE KEYWORDS, RECEIVER & PRATT PRECEDENCES

@@ -163,6 +163,95 @@ fn lsp_extract_hover_signature(doc: str, offset: i64) -> str {
     return __engine("str_slice", doc, line_start, sig_end);
 }
 
+pub pure fn lsp_format_hover_params(sig: str) -> str {
+    let slen = __engine("str_len", sig);
+    var p_open = -1;
+    var i = 0;
+    while i < slen && p_open == -1 {
+        if __engine("str_slice", sig, i, i + 1) == "(" {
+            p_open = i;
+        }
+        i = i + 1;
+    }
+    if p_open == -1 { return ""; }
+
+    var p_close = -1;
+    var depth = 1;
+    var j = p_open + 1;
+    while j < slen && p_close == -1 {
+        let ch = __engine("str_slice", sig, j, j + 1);
+        if ch == "(" {
+            depth = depth + 1;
+        } else if ch == ")" {
+            depth = depth - 1;
+            if depth == 0 {
+                p_close = j;
+            }
+        }
+        j = j + 1;
+    }
+    if p_close <= p_open + 1 { return ""; }
+
+    let inner = __engine("str_slice", sig, p_open + 1, p_close).trim();
+    if inner == "" { return ""; }
+
+    var out = "\\n\\n**Parameters:**";
+    var start_idx = 0;
+    let in_len = __engine("str_len", inner);
+    var k = 0;
+    var comma_depth = 0;
+    while k <= in_len {
+        let is_sep = if k == in_len { true } else {
+            let c = __engine("str_slice", inner, k, k + 1);
+            if c == "<" || c == "(" || c == "[" { comma_depth = comma_depth + 1; }
+            else if c == ">" || c == ")" || c == "]" { if comma_depth > 0 { comma_depth = comma_depth - 1; } }
+            comma_depth == 0 && c == ","
+        };
+        if is_sep {
+            let param_raw = __engine("str_slice", inner, start_idx, k).trim();
+            if param_raw != "" {
+                var colon_pos = -1;
+                var ci = 0;
+                let plen = __engine("str_len", param_raw);
+                while ci < plen && colon_pos == -1 {
+                    if __engine("str_slice", param_raw, ci, ci + 1) == ":" {
+                        colon_pos = ci;
+                    }
+                    ci = ci + 1;
+                }
+                if colon_pos >= 0 {
+                    let pname = __engine("str_slice", param_raw, 0, colon_pos).trim();
+                    let ptype = __engine("str_slice", param_raw, colon_pos + 1, plen).trim();
+                    out = out + "\\n- `" + pname + "`: [`" + ptype + "`](#" + ptype + ")";
+                } else {
+                    out = out + "\\n- `" + param_raw + "`";
+                }
+            }
+            start_idx = k + 1;
+        }
+        k = k + 1;
+    }
+    return out;
+}
+
+pub pure fn lsp_format_hover_returns(sig: str) -> str {
+    let slen = __engine("str_len", sig);
+    var arrow_pos = -1;
+    var i = 0;
+    while i + 2 <= slen && arrow_pos == -1 {
+        if __engine("str_slice", sig, i, i + 2) == "->" {
+            arrow_pos = i;
+        }
+        i = i + 1;
+    }
+    if arrow_pos == -1 { return ""; }
+
+    var ret_part = __engine("str_slice", sig, arrow_pos + 2, slen).trim();
+    if ret_part == "" { return ""; }
+
+    return "\\n\\n**Returns:**\\n- [`" + ret_part + "`](#" + ret_part + ")";
+}
+
 pub fn encode_lsp_frame(json_payload: str) -> str {
     let byte_len = __engine("str_len", json_payload);
     return "Content-Length: " + byte_len + "\r\n\r\n" + json_payload;
@@ -219,7 +308,9 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
             }
             let sig = lsp_extract_hover_signature(doc, offset);
             let esc_sig = lsp_escape_json_str(sig);
-            let hover_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":{\"contents\":{\"kind\":\"markdown\",\"value\":\"```pilot\\n" + esc_sig + "\\n```\"}}}";
+            let p_md = lsp_format_hover_params(sig);
+            let r_md = lsp_format_hover_returns(sig);
+            let hover_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":{\"contents\":{\"kind\":\"markdown\",\"value\":\"```pilot\\n" + esc_sig + "\\n```" + p_md + r_md + "\"}}}";
             out_frames = out_frames + encode_lsp_frame(hover_json);
         } else if method == "textDocument/completion" {
             let comp_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":[{\"label\":\"" + nameof(fn) + "\",\"kind\":14},{\"label\":\"" + nameof(struct) + "\",\"kind\":14},{\"label\":\"" + nameof(interface) + "\",\"kind\":14}]}";

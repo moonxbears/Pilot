@@ -7,93 +7,6 @@ pub pkg Pilot.SelfHost.Ast;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
-pub enum ShNodeKind {
-    Program,
-    StructDecl,
-    InterfaceDecl,
-    FnDecl,
-    LetStmt,
-    VarStmt,
-    AssignStmt,
-    IfExpr,
-    WhileStmt,
-    LoopStmt,
-    ReturnStmt,
-    BlockExpr,
-    BinaryExpr,
-    UnaryExpr,
-    CallExpr,
-    IntLit,
-    StrLit,
-    BoolLit,
-    IdentExpr,
-    RawQuote,
-    TemplateQuote,
-    SpliceHole,
-    SplatHole,
-    UnquoteEscape,
-    SeqFragment,
-    SyntaxCaseArm,
-}
-
-let ShNodeKindId = [
-    Program: 0,
-    StructDecl: 1,
-    InterfaceDecl: 2,
-    FnDecl: 3,
-    LetStmt: 4,
-    VarStmt: 5,
-    AssignStmt: 6,
-    IfExpr: 7,
-    WhileStmt: 8,
-    LoopStmt: 9,
-    ReturnStmt: 10,
-    BlockExpr: 11,
-    BinaryExpr: 12,
-    UnaryExpr: 13,
-    CallExpr: 14,
-    IntLit: 15,
-    StrLit: 16,
-    BoolLit: 17,
-    IdentExpr: 18,
-    RawQuote: 19,
-    TemplateQuote: 20,
-    SpliceHole: 21,
-    SplatHole: 22,
-    UnquoteEscape: 23,
-    SeqFragment: 24,
-    SyntaxCaseArm: 25,
-];
-
-let ShNodeKindNames = [
-    0: "Program",
-    1: "StructDecl",
-    2: "InterfaceDecl",
-    3: "FnDecl",
-    4: "LetStmt",
-    5: "VarStmt",
-    6: "AssignStmt",
-    7: "IfExpr",
-    8: "WhileStmt",
-    9: "LoopStmt",
-    10: "ReturnStmt",
-    11: "BlockExpr",
-    12: "BinaryExpr",
-    13: "UnaryExpr",
-    14: "CallExpr",
-    15: "IntLit",
-    16: "StrLit",
-    17: "BoolLit",
-    18: "IdentExpr",
-    19: "RawQuote",
-    20: "TemplateQuote",
-    21: "SpliceHole",
-    22: "SplatHole",
-    23: "UnquoteEscape",
-    24: "SeqFragment",
-    25: "SyntaxCaseArm",
-];
-
 // 16-byte hardware-packed descriptor: kind(2B) + flags(2B) + span_start(4B) + lhs(4B) + rhs(4B)
 pub pure fn sh_sizeof_ast_node() -> i64 {
     let hdr_bytes = 2 + 2;
@@ -101,42 +14,64 @@ pub pure fn sh_sizeof_ast_node() -> i64 {
     return hdr_bytes + payload_bytes;
 }
 
-pub pure fn sh_node_kind_name(kind: ShNodeKind) -> str {
-    let nm = ShNodeKindNames[kind];
-    if __engine("str_len", nm) > 0 {
-        return nm;
-    }
+pub pure fn sh_node_kind_name(kind: i64) -> str {
+    if kind == 0 { return "Program"; }
+    if kind == 1 { return "StructDecl"; }
+    if kind == 2 { return "InterfaceDecl"; }
+    if kind == 3 { return "FnDecl"; }
+    if kind == 4 { return "LetStmt"; }
+    if kind == 5 { return "VarStmt"; }
+    if kind == 6 { return "AssignStmt"; }
+    if kind == 7 { return "IfExpr"; }
+    if kind == 8 { return "WhileStmt"; }
+    if kind == 9 { return "LoopStmt"; }
+    if kind == 10 { return "ReturnStmt"; }
+    if kind == 11 { return "BlockExpr"; }
+    if kind == 12 { return "BinaryExpr"; }
+    if kind == 13 { return "UnaryExpr"; }
+    if kind == 14 { return "CallExpr"; }
+    if kind == 15 { return "IntLit"; }
+    if kind == 16 { return "StrLit"; }
+    if kind == 17 { return "BoolLit"; }
+    if kind == 18 { return "IdentExpr"; }
+    if kind == 19 { return "RawQuote"; }
+    if kind == 20 { return "TemplateQuote"; }
+    if kind == 21 { return "SpliceHole"; }
+    if kind == 22 { return "SplatHole"; }
+    if kind == 23 { return "UnquoteEscape"; }
+    if kind == 24 { return "SeqFragment"; }
+    if kind == 25 { return "SyntaxCaseArm"; }
     return "Unknown";
 }
 
-pub pure fn sh_kind_tag_from_name(kind_name: str) -> ShNodeKind {
-    if kind_name == "Program" { return ShNodeKindId.Program; }
-    if kind_name == "StructDecl" { return ShNodeKindId.StructDecl; }
-    if kind_name == "InterfaceDecl" { return ShNodeKindId.InterfaceDecl; }
-    if kind_name == "FnDecl" { return ShNodeKindId.FnDecl; }
-    if kind_name == "LetStmt" { return ShNodeKindId.LetStmt; }
-    if kind_name == "VarStmt" { return ShNodeKindId.VarStmt; }
-    if kind_name == "AssignStmt" { return ShNodeKindId.AssignStmt; }
-    if kind_name == "IfExpr" { return ShNodeKindId.IfExpr; }
-    if kind_name == "WhileStmt" { return ShNodeKindId.WhileStmt; }
-    if kind_name == "LoopStmt" { return ShNodeKindId.LoopStmt; }
-    if kind_name == "ReturnStmt" { return ShNodeKindId.ReturnStmt; }
-    if kind_name == "BlockExpr" { return ShNodeKindId.BlockExpr; }
-    if kind_name == "BinaryExpr" { return ShNodeKindId.BinaryExpr; }
-    if kind_name == "UnaryExpr" { return ShNodeKindId.UnaryExpr; }
-    if kind_name == "CallExpr" { return ShNodeKindId.CallExpr; }
-    if kind_name == "IntLit" { return ShNodeKindId.IntLit; }
-    if kind_name == "StrLit" { return ShNodeKindId.StrLit; }
-    if kind_name == "BoolLit" { return ShNodeKindId.BoolLit; }
-    if kind_name == "IdentExpr" { return ShNodeKindId.IdentExpr; }
-    if kind_name == "RawQuote" { return ShNodeKindId.RawQuote; }
-    if kind_name == "TemplateQuote" { return ShNodeKindId.TemplateQuote; }
-    if kind_name == "SpliceHole" { return ShNodeKindId.SpliceHole; }
-    if kind_name == "SplatHole" { return ShNodeKindId.SplatHole; }
-    if kind_name == "UnquoteEscape" { return ShNodeKindId.UnquoteEscape; }
-    if kind_name == "SeqFragment" { return ShNodeKindId.SeqFragment; }
-    if kind_name == "SyntaxCaseArm" { return ShNodeKindId.SyntaxCaseArm; }
-    return ShNodeKindId.Program;
+pub pure fn sh_kind_tag_from_name(kind_name: str) -> i64 {
+    if kind_name == "Program" { return 0; }
+    if kind_name == "StructDecl" { return 1; }
+    if kind_name == "InterfaceDecl" { return 2; }
+    if kind_name == "FnDecl" { return 3; }
+    if kind_name == "LetStmt" { return 4; }
+    if kind_name == "VarStmt" { return 5; }
+    if kind_name == "AssignStmt" { return 6; }
+    if kind_name == "IfExpr" { return 7; }
+    if kind_name == "WhileStmt" { return 8; }
+    if kind_name == "LoopStmt" { return 9; }
+    if kind_name == "ReturnStmt" { return 10; }
+    if kind_name == "BlockExpr" { return 11; }
+    if kind_name == "BinaryExpr" { return 12; }
+    if kind_name == "UnaryExpr" { return 13; }
+    if kind_name == "CallExpr" { return 14; }
+    if kind_name == "IntLit" { return 15; }
+    if kind_name == "StrLit" { return 16; }
+    if kind_name == "BoolLit" { return 17; }
+    if kind_name == "IdentExpr" { return 18; }
+    if kind_name == "RawQuote" { return 19; }
+    if kind_name == "TemplateQuote" { return 20; }
+    if kind_name == "SpliceHole" { return 21; }
+    if kind_name == "SplatHole" { return 22; }
+    if kind_name == "UnquoteEscape" { return 23; }
+    if kind_name == "SeqFragment" { return 24; }
+    if kind_name == "SyntaxCaseArm" { return 25; }
+    return 0;
 }
 
 // ==============================================================================
@@ -262,7 +197,7 @@ pub fn sh_ast_kind_name(arena: i64, node_id: i64) -> str {
     return "Unknown";
 }
 
-pub fn sh_ast_kind(arena: i64, node_id: i64) -> ShNodeKind {
+pub fn sh_ast_kind(arena: i64, node_id: i64) -> i64 {
     let k_name = sh_ast_kind_name(arena, node_id);
     return sh_kind_tag_from_name(k_name);
 }
