@@ -379,8 +379,53 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
             let hover_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":{\"contents\":{\"kind\":\"markdown\",\"value\":\"```pilot\\n" + esc_sig + "\\n```" + p_md + r_md + ov_md + tr_md + "\"}}}";
             out_frames = out_frames + encode_lsp_frame(hover_json);
         } else if method == "textDocument/completion" {
-            let comp_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":[{\"label\":\"" + nameof(fn) + "\",\"kind\":14},{\"label\":\"" + nameof(struct) + "\",\"kind\":14},{\"label\":\"" + nameof(interface) + "\",\"kind\":14}]}";
+            let comp_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":[" +
+                "{\"label\":\"" + nameof(fn) + "\",\"kind\":14}," +
+                "{\"label\":\"" + nameof(struct) + "\",\"kind\":14}," +
+                "{\"label\":\"" + nameof(interface) + "\",\"kind\":14}," +
+                "{\"label\":\"" + nameof(let) + "\",\"kind\":14}," +
+                "{\"label\":\"" + nameof(ref) + "\",\"kind\":14}," +
+                "{\"label\":\"" + nameof(if) + "\",\"kind\":14}," +
+                "{\"label\":\"" + nameof(loop) + "\",\"kind\":14}," +
+                "{\"label\":\"" + nameof(return) + "\",\"kind\":14}," +
+                "{\"label\":\"" + nameof(yield) + "\",\"kind\":14}," +
+                "{\"label\":\"" + nameof(defer) + "\",\"kind\":14}," +
+                "{\"label\":\"" + nameof(comptime) + "\",\"kind\":14}," +
+                "{\"label\":\"" + nameof(quote) + "\",\"kind\":14}," +
+                "{\"label\":\"" + nameof(asm) + "\",\"kind\":14}," +
+                "{\"label\":\"Pilot.Core.Reflect\",\"kind\":9}," +
+                "{\"label\":\"Pilot.Collections\",\"kind\":9}," +
+                "{\"label\":\"Pilot.Crypto\",\"kind\":9}" +
+                "]}";
             out_frames = out_frames + encode_lsp_frame(comp_json);
+        } else if method == "textDocument/definition" {
+            let offset = lsp_extract_json_int_field(msg, "offset");
+            var doc = "";
+            if uri != "" { doc = __engine("map_get", sess, "doc:" + uri); }
+            if doc == "" { doc = __engine("map_get", sess, "last_doc"); }
+            let ident = lsp_ident_at_offset(doc, offset);
+            var def_pos = -1;
+            if ident != "" {
+                let fn_pat = nameof(fn) + " " + ident;
+                let hit1 = lsp_find_substr(doc, fn_pat, 0);
+                if hit1 >= 0 { def_pos = hit1; }
+                else {
+                    let st_pat = nameof(struct) + " " + ident;
+                    let hit2 = lsp_find_substr(doc, st_pat, 0);
+                    if hit2 >= 0 { def_pos = hit2; }
+                    else {
+                        let if_pat = nameof(interface) + " " + ident;
+                        let hit3 = lsp_find_substr(doc, if_pat, 0);
+                        if hit3 >= 0 { def_pos = hit3; }
+                    }
+                }
+            }
+            let def_json = if def_pos >= 0 {
+                "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":{\"uri\":\"" + uri + "\",\"range\":{\"start\":{\"character\":" + def_pos + "},\"end\":{\"character\":" + (def_pos + ident.len()) + "}}}}"
+            } else {
+                "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":null}"
+            };
+            out_frames = out_frames + encode_lsp_frame(def_json);
         } else if method == "shutdown" {
             let shut_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":null}";
             out_frames = out_frames + encode_lsp_frame(shut_json);
