@@ -46,6 +46,7 @@ let Cfg = {
         lsp_query_offset: "lsp_query_offset",
         lsp_set_result: "lsp_set_result",
         mount_unit: "mount_unit",
+        query_registered_symbols: "query_registered_symbols",
         source_slice: "source_slice",
         str_byte_at: "str_byte_at",
         str_len: "str_len",
@@ -805,6 +806,138 @@ pub fn verify_decl_contracts(nid: i64, enforce_naming: bool) -> i64 {
     return 0;
 }
 
+pub fn is_kw_contextual_ident(name: str) -> bool {
+    if name == "self" || name == "field" || name == "value" || name == "type" || name == "unit" { return true; }
+    if name == "nameof" || name == "__engine" || name == "op" || name == "pkg" || name == "state" { return true; }
+    if name == "get" || name == "set" || name == "open" || name == "role" || name == "route" { return true; }
+    if name == "connect" || name == "exit" || name == "delete" || name == "values" || name == "update" { return true; }
+    if name == "from" || name == "where" || name == "select" || name == "insert" || name == "order" { return true; }
+    if name == "context" || name == "quote" || name == "partial" || name == "blueprint" || name == "cue" { return true; }
+    return false;
+}
+
+pub fn is_in_pipe_delimited(kw_buf: str, target: str) -> bool {
+    let tlen = target.len();
+    if tlen == 0 {
+        return false;
+    }
+    let blen = kw_buf.len();
+    var start = 0;
+    var i = 0;
+    while i <= blen {
+        if i == blen || kw_buf.byte_at(i) == 124 || kw_buf.byte_at(i) == 44 {
+            let seg_len = i - start;
+            if seg_len == tlen {
+                if kw_buf.slice(start, i) == target {
+                    return true;
+                }
+            }
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+pub fn build_dynamic_keyword_set(node_count: i64) -> str {
+    var kw_buf = "|__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm|";
+    kw_buf = kw_buf + "else|while|until|for|in|then|break|continue|guard|switch|case|default|try|catch|var|const|enum|actor|state|type|pub|priv|prot|pkg|int|file|open|export|lvl|pure|static|iso|partial|ext|scope|enter|exit|requires|ensures|old|context|adapter|each|coalesce|with|without|as|async|await|spawn|atomic|sync|isolate|select|timeout|bounded|noalloc|region|deadline|within|periodic|priority|jitter|database|transaction|commit|rollback|savepoint|connect|from|where|order|ascending|descending|insert|into|values|update|delete|extern|assembly|module|lib|sizeof|alignof|offsetof|fields_of|nameof|assert|blueprint|cue|role|route|unit|syntax|use|op|";
+
+    // 1. Dynamic registry queries across standard keyword categories (0..=16)
+    var cat = 0;
+    while cat <= 16 {
+        let live = __engine(Cfg.ast.query_registered_symbols, cat);
+        if live.len() > 0 {
+            kw_buf = kw_buf + live + "|";
+        }
+        cat = cat + 1;
+    }
+
+    // 2. Dynamic registry queries across user/DSL categories (100..=255)
+    cat = 100;
+    while cat <= 255 {
+        let live = __engine(Cfg.ast.query_registered_symbols, cat);
+        if live.len() > 0 {
+            kw_buf = kw_buf + live + "|";
+        }
+        cat = cat + 1;
+    }
+
+    // 3. Scan AST nodes for any in-unit KeywordDef / KeywordDefAttr declarations
+    var i = 0;
+    while i < node_count {
+        if has_attr_named(i, "KeywordDef") || has_attr_named(i, "KeywordDefAttr") {
+            let sym = __engine(Cfg.ast.ast_node_sym, i);
+            if sym != 0 {
+                let w = __engine(Cfg.ast.sym_str, sym);
+                if w.len() > 0 {
+                    kw_buf = kw_buf + w + "|";
+                }
+            }
+        }
+        i = i + 1;
+    }
+
+    return kw_buf;
+}
+
+pub fn verify_ident_not_keyword(nid: i64, kw_set: str) -> i64 {
+    let kind = __engine(Cfg.ast.ast_node_kind, nid);
+    let okind = __engine(Cfg.ast.ast_orig_kind, nid);
+
+    // Only inspect identifier declarations:
+    // kind 1 (StructDecl), kind 2 (InterfaceDecl), kind 3 (FnDecl),
+    // kind 4 (LetStmt, VarStmt, ConstDecl), kind 21 (ParamDecl, struct field),
+    // kind 255 (TypeAdtDecl okind=5, AdtVariant okind=6, PatBind okind=501)
+    var is_decl = false;
+    if kind == 1 || kind == 2 || kind == 3 || kind == 4 || kind == 21 {
+        is_decl = true;
+    } else if kind == 255 {
+        if okind == 5 || okind == 6 || okind == 501 {
+            is_decl = true;
+        }
+    }
+    if !is_decl {
+        return 0;
+    }
+
+    // Skip definitions of keywords or language primitives themselves
+    if has_attr_named(nid, "KeywordDef") || has_attr_named(nid, "KeywordDefAttr")
+        || has_attr_named(nid, "KeywordCategoryDef") || has_attr_named(nid, "KeywordCategoryDefAttr")
+        || has_attr_named(nid, "Lang") || has_attr_named(nid, "LangPrimitive") {
+        return 0;
+    }
+
+    let sym = __engine(Cfg.ast.ast_node_sym, nid);
+    if sym == 0 {
+        return 0;
+    }
+    let name = __engine(Cfg.ast.sym_str, sym);
+    let nlen = name.len();
+    if nlen == 0 {
+        return 0;
+    }
+
+    // Skip syntax quote placeholders ($ident)
+    let c0 = name.byte_at(0);
+    if c0 == 36 {
+        return 0;
+    }
+
+    // Skip contextual identifiers and built-in hooks
+    if is_kw_contextual_ident(name) {
+        return 0;
+    }
+
+    // Check if name is in the dynamic keyword set
+    if is_in_pipe_delimited(kw_set, name) {
+        __engine(Cfg.ast.ast_emit_diag, nid, 1, "KW001: Identifier '" + name + "' is a keyword and cannot be used as an identifier name");
+        return 1;
+    }
+
+    return 0;
+}
+
 pub fn analyze_unit(unit_id: i64) -> i64 {
     let node_count = __engine(Cfg.ast.ast_node_count);
     if node_count == 0 {
@@ -858,6 +991,14 @@ pub fn analyze_unit(unit_id: i64) -> i64 {
     i = 0;
     while i < node_count {
         verify_decl_contracts(i, enforce_naming);
+        i = i + 1;
+    }
+
+    // Pass 5: Dynamic keyword identifier validation
+    let kw_set = build_dynamic_keyword_set(node_count);
+    i = 0;
+    while i < node_count {
+        verify_ident_not_keyword(i, kw_set);
         i = i + 1;
     }
 
