@@ -371,15 +371,21 @@ pub struct TypeInfo : IValue {
 // =========================================================================
 
 let ReflectEngine = [
-    query_sym:   "query_registered_symbols",
-    node_count:  "ast_node_count",
-    node_kind:   "ast_node_kind",
-    node_sym:    "ast_node_sym",
-    attr_count:  "ast_attr_count",
-    attr_arg:    "ast_attr_arg",
-    sym_str:     "sym_str",
-    layout_size: "layout_metrics",
-    lattice_get: "get_lattice_bits",
+    query_sym:       "query_registered_symbols",
+    node_count:      "ast_node_count",
+    node_kind:       "ast_node_kind",
+    node_sym:        "ast_node_sym",
+    attr_count:      "ast_attr_count",
+    attr_arg:        "ast_attr_arg",
+    sym_str:         "sym_str",
+    layout_size:     "layout_metrics",
+    lattice_get:     "get_lattice_bits",
+    child_count:     "ast_child_count",
+    child_at:        "ast_child_at",
+    attr_decl_count: "ast_attr_decl_count",
+    attr_name:       "ast_attr_name",
+    base_count:      "ast_base_count",
+    base_at:         "ast_base_at",
 ];
 
 // =========================================================================
@@ -678,4 +684,121 @@ pub fn reflect_environment(
 ) -> Environment {
     return Environment.create(layout, types, ast, symbols, attrs, packages, vm);
 }
+
+// =========================================================================
+// 6. COMPILED AST NODE INSPECTION & ENVIRONMENT HYDRATION
+// =========================================================================
+
+pub fn reflect_ast_node_kind(node_id: usize) -> i64 {
+    return __engine(ReflectEngine.node_kind, node_id);
+}
+
+pub fn reflect_ast_node_sym(node_id: usize) -> str {
+    let sym_id = __engine(ReflectEngine.node_sym, node_id);
+    return __engine(ReflectEngine.sym_str, sym_id);
+}
+
+pub fn reflect_ast_child_count(node_id: usize) -> usize {
+    return __engine(ReflectEngine.child_count, node_id) as usize;
+}
+
+pub fn reflect_ast_child_at(node_id: usize, index: usize) -> usize {
+    return __engine(ReflectEngine.child_at, node_id, index) as usize;
+}
+
+pub fn reflect_ast_attr_count(node_id: usize) -> usize {
+    return __engine(ReflectEngine.attr_decl_count, node_id) as usize;
+}
+
+pub comptime fn reflect_hydrate_ast_context() -> AstContext {
+    let total_nodes = __engine(ReflectEngine.node_count);
+    let root_node: i64 = 0;
+
+    let quotes = map<usize, str> {
+        keys: [1, 2, 3, 4, 5, 6],
+        vals: ["CallExpr", "ast", "frame", "Signal", "Dual", "EffectPlan"],
+    };
+
+    let pratt_ops = map<str, i64> {
+        keys: ["?", "??", "catch", "..", "?..", "*", "**", "*.."],
+        vals: [90, 85, 80, 70, 70, 60, 60, 60],
+    };
+
+    return AstContext.create(
+        total_nodes as usize,
+        root_node,
+        0,
+        quotes,
+        pratt_ops
+    );
+}
+
+pub comptime fn reflect_hydrate_hardware_type() -> HardwareType {
+    return HardwareType.create(
+        map<usize, TypeInfo> { keys: [], vals: [] },
+        map<usize, u8>       { keys: [], vals: [] },
+        map<usize, AnatomyInfo> { keys: [], vals: [] },
+        map<usize, str>      { keys: [], vals: [] }
+    );
+}
+
+pub comptime fn reflect_hydrate_symbol_context() -> SymbolContext {
+    return SymbolContext.create(
+        map<usize, str> { keys: [], vals: [] },
+        map<usize, str> { keys: [], vals: [] },
+        map<usize, str> { keys: [], vals: [] },
+        0
+    );
+}
+
+pub comptime fn reflect_hydrate_attribute_context() -> AttributeContext {
+    return AttributeContext.create(
+        map<usize, str> { keys: [], vals: [] },
+        map<str, i32>   { keys: [], vals: [] },
+        map<str, str>   { keys: [], vals: [] }
+    );
+}
+
+pub comptime fn reflect_hydrate_package_context() -> PackageContext {
+    let mounted_map = map<str, str> {
+        keys: ["Pilot.Core.Reflect", "Pilot.Core.Genesis", "Pilot.Core.Interfaces", "Pilot.Core.Keywords"],
+        vals: ["stdlib/core/reflect.pilot", "stdlib/core/core.pilot", "stdlib/core/operator.pilot", "stdlib/core/keywords.pilot"],
+    };
+    return PackageContext.create(
+        "Pilot.Core",
+        "0.1.0",
+        ["stdlib/core", "stdlib", "src"],
+        mounted_map
+    );
+}
+
+pub comptime fn reflect_hydrate_vm_context() -> VmContext {
+    return VmContext.create(1000000, 0, 0, 0);
+}
+
+pub comptime fn reflect_hydrate_environment() -> Environment {
+    let target = reflect_target();
+    let types_ctx = reflect_hydrate_hardware_type();
+    let ast_ctx = reflect_hydrate_ast_context();
+    let symbols_ctx = reflect_hydrate_symbol_context();
+    let attrs_ctx = reflect_hydrate_attribute_context();
+    let packages_ctx = reflect_hydrate_package_context();
+    let vm_ctx = reflect_hydrate_vm_context();
+
+    return Environment.create(
+        target,
+        types_ctx,
+        ast_ctx,
+        symbols_ctx,
+        attrs_ctx,
+        packages_ctx,
+        vm_ctx
+    );
+}
+
+// Global runtime/comptime reflection entry point
+pub fn reflect_current_environment() -> Environment {
+    return reflect_hydrate_environment();
+}
+
 
