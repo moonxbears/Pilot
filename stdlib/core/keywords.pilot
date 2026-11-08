@@ -905,6 +905,33 @@ pub fn register_keyword_entry(
 // 5. PURE PILOT KEYWORD & CATEGORY INTROSPECTION (REPLACES __engine("query_*"))
 // =========================================================================
 
+/// Reflects all KeywordDefAttr instances from the active AST arena,
+/// returning structured records (or a pipe-delimited list for category `target_cat_id`).
+pub fn reflect_category_keywords(target_cat_id: i64) -> str {
+    let node_count = __engine("ast_node_count");
+    var result = "";
+    var i = 0;
+    while i < node_count {
+        if __engine("ast_node_kind", i) == 1 { // StructDecl
+            let ac = __engine("ast_attr_decl_count", i);
+            var a = 0;
+            while a < ac {
+                let attr_name = __engine("sym_str", __engine("ast_attr_name", i, a));
+                if attr_name == "KeywordDefAttr" || attr_name == "KeywordDef" {
+                    let cat = __engine("ast_attr_decl_arg", i, a, 0);
+                    if target_cat_id < 0 || cat == target_cat_id {
+                        let name = __engine("sym_str", __engine("ast_node_sym", i));
+                        result = if result == "" { name } else { result + "|" + name };
+                    }
+                }
+                a = a + 1;
+            }
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
 pub pure fn query_category_scope_pure(cat_id: i64) -> str {
     if cat_id == 0  { return "keyword.control.pilot"; }
     if cat_id == 1  { return "keyword.control.conditional.pilot"; }
