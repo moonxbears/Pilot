@@ -1,0 +1,396 @@
+// ==============================================================================
+// selfhost/adapter/wit_abi.pilot
+// Ring 3 / Self-Host Compiler: WebAssembly Canonical ABI & Resource Lifter/Lowerer
+// Package: Pilot.SelfHost.Adapter.WitAbi (Milestone 19)
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Adapter.WitAbi;
+
+use Pilot.SelfHost.Adapter.WitParser;
+
+// ------------------------------------------------------------------------------
+// 1. Canonical ABI Constants & Limits
+// ------------------------------------------------------------------------------
+
+pub pure fn cabi_max_flat_params() -> i64 {
+    return 16;
+}
+
+pub pure fn cabi_max_flat_results() -> i64 {
+    return 1;
+}
+
+// ------------------------------------------------------------------------------
+// 2. Core WASM Flat Representation Types & WasmResult
+// ------------------------------------------------------------------------------
+
+pub struct WasmResult : IValue {
+    pub is_ok:     bool,
+    pub val:       i64,
+    pub str_val:   str,
+    pub err_msg:   str,
+
+    pub pure fn is_err(ref self) -> bool {
+        return !self.is_ok;
+    }
+
+    pub pure fn unwrap(ref self) -> IAnyValue {
+        if self.str_val.len() > 0 {
+            return self.str_val;
+        }
+        return self.val;
+    }
+
+    pub pure fn unwrap_str(ref self) -> str {
+        return self.str_val;
+    }
+
+    pub pure fn unwrap_err(ref self) -> str {
+        return self.err_msg;
+    }
+}
+
+pub pure fn wasm_ok_int(v: i64) -> WasmResult {
+    return WasmResult {
+        is_ok:   true,
+        val:     v,
+        str_val: "",
+        err_msg: "",
+    };
+}
+
+pub pure fn wasm_ok_str(s: str) -> WasmResult {
+    return WasmResult {
+        is_ok:   true,
+        val:     0,
+        str_val: s,
+        err_msg: "",
+    };
+}
+
+pub pure fn wasm_err(msg: str) -> WasmResult {
+    return WasmResult {
+        is_ok:   false,
+        val:     0,
+        str_val: "",
+        err_msg: msg,
+    };
+}
+
+pub enum WasmCoreValType : u8 {
+    I32 = 0,
+    I64 = 1,
+    F32 = 2,
+    F64 = 3,
+}
+
+pub pure fn wasm_val_type_to_str(kind: WasmCoreValType) -> str {
+    if kind == WasmCoreValType::I32 { return "wasm_i32"; }
+    if kind == WasmCoreValType::I64 { return "wasm_i64"; }
+    if kind == WasmCoreValType::F32 { return "wasm_f32"; }
+    return "wasm_f64";
+}
+
+pub pure fn wasm_str_to_val_type(s: str) -> WasmCoreValType {
+    if s == "wasm_i64" || s == "core_i64" { return WasmCoreValType::I64; }
+    if s == "wasm_f32" || s == "core_f32" { return WasmCoreValType::F32; }
+    if s == "wasm_f64" || s == "core_f64" { return WasmCoreValType::F64; }
+    return WasmCoreValType::I32;
+}
+
+// ------------------------------------------------------------------------------
+// 3. Flattening Signatures According to Canonical ABI Specification
+// ------------------------------------------------------------------------------
+
+pub fn cabi_flatten_type(ty: WitTypeRef) -> List<str> {
+    var out: List<str> = [];
+    if ty.kind == WitTypeKind::List || ty.name == "string" || ty.name == "wit_string" {
+        // String and List are flattened to (ptr: i32, len: i32)
+        out.push("wasm_i32");
+        out.push("wasm_i32");
+        return out;
+    }
+    if ty.kind == WitTypeKind::Primitive {
+        if ty.name == "u64" || ty.name == "s64" || ty.name == "int64" {
+            out.push("wasm_i64");
+            return out;
+        }
+        if ty.name == "float32" {
+            out.push("wasm_f32");
+            return out;
+        }
+        if ty.name == "float64" {
+            out.push("wasm_f64");
+            return out;
+        }
+        // bool, u8..u32, s8..s32, char flatten to i32
+        out.push("wasm_i32");
+        return out;
+    }
+    if ty.kind == WitTypeKind::Own || ty.kind == WitTypeKind::Borrow {
+        // Resource handles are 32-bit table indices
+        out.push("wasm_i32");
+        return out;
+    }
+    if ty.kind == WitTypeKind::Option {
+        // Option is discriminant (i32) + payload
+        out.push("wasm_i32");
+        var inner = wit_type_primitive(ty.inner1);
+        var sub = cabi_flatten_type(inner);
+        var i = 0;
+        while i < sub.len() {
+            out.push(sub.get(i));
+            i = i + 1;
+        }
+        return out;
+    }
+    if ty.kind == WitTypeKind::Result {
+        // Result is discriminant (i32) + max payload
+        out.push("wasm_i32");
+        var ok_sub = cabi_flatten_type(wit_type_primitive(ty.inner1));
+        var err_sub = cabi_flatten_type(wit_type_primitive(ty.inner2));
+        var max_len = if ok_sub.len() > err_sub.len() { ok_sub.len() } else { err_sub.len() };
+        var i = 0;
+        while i < max_len {
+            if i < ok_sub.len() {
+                out.push(ok_sub.get(i));
+            } else {
+                out.push(err_sub.get(i));
+            }
+            i = i + 1;
+        }
+        return out;
+    }
+
+    // Default fallback to 32-bit integer
+    out.push("wasm_i32");
+    return out;
+}
+
+pub fn cabi_flatten_params(params: List<WitParam>) -> List<str> {
+    var flat: List<str> = [];
+    var i = 0;
+    while i < params.len() {
+        let p = params.get(i);
+        let p_flat = cabi_flatten_type(p.type_ref);
+        var j = 0;
+        while j < p_flat.len() {
+            flat.push(p_flat.get(j));
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return flat;
+}
+
+pub pure fn cabi_requires_spill(flat_param_count: i64) -> bool {
+    return flat_param_count > 16;
+}
+
+pub pure fn cabi_requires_result_pointer(flat_result_count: i64) -> bool {
+    return flat_result_count > 1;
+}
+
+// ------------------------------------------------------------------------------
+// 4. Canonical ABI Lowered Signature Descriptor
+// ------------------------------------------------------------------------------
+
+pub struct CabiLoweredSignature : IValue {
+    pub core_params:     List<str>,
+    pub core_results:    List<str>,
+    pub uses_param_spill: bool,
+    pub uses_result_ptr:  bool,
+    pub orig_param_count: i64,
+    pub orig_result_count: i64,
+}
+
+pub fn cabi_lower_signature(fn_sig: WitFunction) -> CabiLoweredSignature {
+    let flat_p = cabi_flatten_params(fn_sig.params);
+    let flat_r = cabi_flatten_params(fn_sig.results);
+
+    var core_params: List<str> = [];
+    var core_results: List<str> = [];
+    var uses_param_spill = false;
+    var uses_result_ptr = false;
+
+    // Check parameter spill limit (MAX_FLAT_PARAMS = 16)
+    if cabi_requires_spill(flat_p.len() as i64) {
+        uses_param_spill = true;
+        // Spilled params receive a single indirect pointer
+        core_params.push("wasm_i32");
+    } else {
+        var i = 0;
+        while i < flat_p.len() {
+            core_params.push(flat_p.get(i));
+            i = i + 1;
+        }
+    }
+
+    // Check multi-result pointer limit (MAX_FLAT_RESULTS = 1)
+    if cabi_requires_result_pointer(flat_r.len() as i64) {
+        uses_result_ptr = true;
+        // Result pointer passed as final param to write results into memory
+        core_params.push("wasm_i32");
+    } else {
+        var i = 0;
+        while i < flat_r.len() {
+            core_results.push(flat_r.get(i));
+            i = i + 1;
+        }
+    }
+
+    return CabiLoweredSignature {
+        core_params:      core_params,
+        core_results:     core_results,
+        uses_param_spill:  uses_param_spill,
+        uses_result_ptr:   uses_result_ptr,
+        orig_param_count:  fn_sig.params.len() as i64,
+        orig_result_count: fn_sig.results.len() as i64,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 5. Canonical Realloc & Post-Call Helpers
+// ------------------------------------------------------------------------------
+
+pub struct CabiAllocationPlan : IValue {
+    pub ptr:       i32,
+    pub size:      i32,
+    pub alignment: i32,
+}
+
+pub pure fn cabi_plan_alloc(size: i32, align: i32, current_heap_top: i32) -> CabiAllocationPlan {
+    var a = align;
+    if a < 1 { a = 1; }
+    let rem = current_heap_top % a;
+    let aligned_ptr = if rem == 0 { current_heap_top } else { current_heap_top + (a - rem) };
+    return CabiAllocationPlan {
+        ptr:       aligned_ptr,
+        size:      size,
+        alignment: a,
+    };
+}
+
+pub pure fn cabi_post_call_name(func_name: str) -> str {
+    return "cabi_post_" + func_name;
+}
+
+// ------------------------------------------------------------------------------
+// 6. WASM Component Resource Table & Handle Accounting
+// ------------------------------------------------------------------------------
+
+pub struct WasmResourceEntry : IValue {
+    pub id:           i64,
+    pub res_name:     str,
+    pub payload_ptr:  i64,
+    pub borrow_count: i64,
+    pub is_alive:     bool,
+}
+
+pub struct WasmResourceTable : IObject {
+    pub entries:   List<WasmResourceEntry>,
+    pub next_id:   i64,
+    pub drop_hook: str,
+}
+
+pub fn wasm_resource_table_new() -> WasmResourceTable {
+    return WasmResourceTable {
+        entries:   [],
+        next_id:   1,
+        drop_hook: "[resource-drop]",
+    };
+}
+
+pub fn wasm_resource_allocate(var ref table: WasmResourceTable, res_name: str, payload_ptr: i64) -> i64 {
+    let id = table.next_id;
+    table.next_id = table.next_id + 1;
+    let entry = WasmResourceEntry {
+        id:           id,
+        res_name:     res_name,
+        payload_ptr:  payload_ptr,
+        borrow_count: 0,
+        is_alive:     true,
+    };
+    table.entries.push(entry);
+    return id;
+}
+
+pub fn wasm_resource_borrow(var ref table: WasmResourceTable, id: i64) -> WasmResult {
+    var i = 0;
+    while i < table.entries.len() {
+        var e = table.entries.get(i);
+        if e.id == id {
+            if !e.is_alive {
+                return wasm_err("WASM002: Attempt to borrow destroyed resource handle " + id.to_str());
+            }
+            e.borrow_count = e.borrow_count + 1;
+            table.entries.set(i, e);
+            return wasm_ok_int(e.payload_ptr);
+        }
+        i = i + 1;
+    }
+    return wasm_err("WASM002: Resource handle " + id.to_str() + " not found in handle table");
+}
+
+pub fn wasm_resource_release_borrow(var ref table: WasmResourceTable, id: i64) -> WasmResult {
+    var i = 0;
+    while i < table.entries.len() {
+        var e = table.entries.get(i);
+        if e.id == id {
+            if e.borrow_count <= 0 {
+                return wasm_err("WASM005: Release borrow underflow on handle " + id.to_str());
+            }
+            e.borrow_count = e.borrow_count - 1;
+            table.entries.set(i, e);
+            return wasm_ok_int(1);
+        }
+        i = i + 1;
+    }
+    return wasm_err("WASM002: Resource handle " + id.to_str() + " not found in handle table");
+}
+
+pub fn wasm_resource_drop(var ref table: WasmResourceTable, id: i64) -> WasmResult {
+    var i = 0;
+    while i < table.entries.len() {
+        var e = table.entries.get(i);
+        if e.id == id {
+            if !e.is_alive {
+                return wasm_err("WASM002: Double drop of resource handle " + id.to_str());
+            }
+            if e.borrow_count > 0 {
+                return wasm_err("WASM005: Cannot drop resource handle " + id.to_str() + " with active borrows (" + e.borrow_count.to_str() + ")");
+            }
+            e.is_alive = false;
+            table.entries.set(i, e);
+            return wasm_ok_int(1);
+        }
+        i = i + 1;
+    }
+    return wasm_err("WASM002: Resource handle " + id.to_str() + " not found in handle table");
+}
+
+pub fn wasm_resource_active_borrow_count(table: WasmResourceTable) -> i64 {
+    var total: i64 = 0;
+    var i = 0;
+    while i < table.entries.len() {
+        let e = table.entries.get(i);
+        if e.is_alive {
+            total = total + e.borrow_count;
+        }
+        i = i + 1;
+    }
+    return total;
+}
+
+pub fn wasm_resource_live_count(table: WasmResourceTable) -> i64 {
+    var total: i64 = 0;
+    var i = 0;
+    while i < table.entries.len() {
+        let e = table.entries.get(i);
+        if e.is_alive {
+            total = total + 1;
+        }
+        i = i + 1;
+    }
+    return total;
+}

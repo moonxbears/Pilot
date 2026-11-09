@@ -196,6 +196,7 @@ const MILESTONE_TEST_MANIFEST: &[(&str, usize)] = &[
     ("crates/pilot-analysis/tests/milestone16_rust_crate_and_zero_copy_adapter.rs", 4),
     ("crates/pilot-analysis/tests/milestone17_python_capi_and_zero_copy_tensor.rs", 4),
     ("crates/pilot-analysis/tests/milestone18_javascript_napi_and_typescript_dts.rs", 4),
+    ("crates/pilot-analysis/tests/milestone19_wasm_component_model_and_wit.rs", 4),
     ("crates/pilot-analysis/tests/milestone50_lossless_bridge_and_reflection.rs", 4),
     ("crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs", 4),
     ("crates/pilot-lexer/tests/milestone52_seed_lexer_and_preprocessor.rs", 4),

@@ -1,0 +1,628 @@
+// ==============================================================================
+// selfhost/adapter/wit_parser.pilot
+// Ring 3 / Self-Host Compiler: WebAssembly Component Model & WIT Universal Parser
+// Package: Pilot.SelfHost.Adapter.WitParser (Milestone 19)
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Adapter.WitParser;
+
+// ------------------------------------------------------------------------------
+// 1. Diagnostic Codes (WASM001 .. WASM005)
+// ------------------------------------------------------------------------------
+
+pub pure fn wit_diag_code(idx: i64) -> str {
+    if idx == 1 { return "WASM001: Invalid Binary WASM Magic/Version or Malformed Section"; }
+    if idx == 2 { return "WASM002: WIT Signature Mismatch with Component Import/Export"; }
+    if idx == 3 { return "WASM003: Linear Memory Out-of-Bounds Trap"; }
+    if idx == 4 { return "WASM004: Invalid UTF-8 String Across Canonical ABI"; }
+    if idx == 5 { return "WASM005: borrow<R> Handle Still Active at Call Exit Violation"; }
+    return "WASM000: Unknown WASM Component Diagnostic";
+}
+
+// ------------------------------------------------------------------------------
+// 2. WIT Type AST & 2-Bit Lattice Mapping
+// ------------------------------------------------------------------------------
+
+pub enum WitTypeKind : u8 {
+    Primitive = 0,
+    List = 1,
+    Option = 2,
+    Result = 3,
+    Tuple = 4,
+    Own = 5,
+    Borrow = 6,
+    Named = 7,
+}
+
+pub struct WitTypeRef : IValue {
+    pub kind:   WitTypeKind,
+    pub name:   str,
+    pub inner1: str,
+    pub inner2: str,
+}
+
+pub pure fn wit_type_primitive(name: str) -> WitTypeRef {
+    return WitTypeRef {
+        kind:   WitTypeKind::Primitive,
+        name:   name,
+        inner1: "",
+        inner2: "",
+    };
+}
+
+pub pure fn wit_type_list(elem_ty: str) -> WitTypeRef {
+    return WitTypeRef {
+        kind:   WitTypeKind::List,
+        name:   "list",
+        inner1: elem_ty,
+        inner2: "",
+    };
+}
+
+pub pure fn wit_type_option(elem_ty: str) -> WitTypeRef {
+    return WitTypeRef {
+        kind:   WitTypeKind::Option,
+        name:   "opt",
+        inner1: elem_ty,
+        inner2: "",
+    };
+}
+
+pub pure fn wit_type_result(ok_ty: str, err_ty: str) -> WitTypeRef {
+    return WitTypeRef {
+        kind:   WitTypeKind::Result,
+        name:   "res",
+        inner1: ok_ty,
+        inner2: err_ty,
+    };
+}
+
+pub pure fn wit_type_own(res_name: str) -> WitTypeRef {
+    return WitTypeRef {
+        kind:   WitTypeKind::Own,
+        name:   "own",
+        inner1: res_name,
+        inner2: "",
+    };
+}
+
+pub pure fn wit_type_borrow(res_name: str) -> WitTypeRef {
+    return WitTypeRef {
+        kind:   WitTypeKind::Borrow,
+        name:   "borrow",
+        inner1: res_name,
+        inner2: "",
+    };
+}
+
+pub pure fn wit_type_named(type_name: str) -> WitTypeRef {
+    return WitTypeRef {
+        kind:   WitTypeKind::Named,
+        name:   type_name,
+        inner1: "",
+        inner2: "",
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 3. Exact Isomorphism: WIT Resources <-> Pilot 2-Bit Hardware Lattice
+// ------------------------------------------------------------------------------
+// Bit 0 = Borrows memory (view)
+// Bit 1 = Owns ~self() destructor
+// 0b00: IValue (record, enum, flags, value tuple)
+// 0b01: IReference (borrow<R>, linear memory string / list view)
+// 0b10: IObject (own<R>, [resource-drop]R handle)
+// 0b11: IGuard (WasmInstanceLease scoped execution sandbox)
+
+pub pure fn wit_classify_lattice(ty: WitTypeRef) -> u8 {
+    if ty.kind == WitTypeKind::Borrow {
+        return 1; // 0b01 : IReference
+    }
+    if ty.kind == WitTypeKind::Own {
+        return 2; // 0b10 : IObject
+    }
+    if ty.kind == WitTypeKind::List || ty.name == "string" {
+        return 1; // 0b01 : IReference view into linear memory
+    }
+    return 0; // 0b00 : IValue trivial copy / record
+}
+
+// ------------------------------------------------------------------------------
+// 4. Structural WIT AST Definitions
+// ------------------------------------------------------------------------------
+
+pub struct WitField : IValue {
+    pub name:     str,
+    pub type_ref: WitTypeRef,
+}
+
+pub struct WitVariantCase : IValue {
+    pub name:         str,
+    pub has_payload:  bool,
+    pub payload_type: WitTypeRef,
+}
+
+pub struct WitRecord : IObject {
+    pub name:   str,
+    pub fields: List<WitField>,
+    ~self() {}
+}
+
+pub struct WitEnum : IObject {
+    pub name:  str,
+    pub cases: List<str>,
+    ~self() {}
+}
+
+pub struct WitFlags : IObject {
+    pub name:  str,
+    pub flags: List<str>,
+    ~self() {}
+}
+
+pub struct WitVariant : IObject {
+    pub name:  str,
+    pub cases: List<WitVariantCase>,
+    ~self() {}
+}
+
+pub struct WitParam : IValue {
+    pub name:     str,
+    pub type_ref: WitTypeRef,
+}
+
+pub struct WitFunction : IObject {
+    pub name:     str,
+    pub params:   List<WitParam>,
+    pub results:  List<WitParam>,
+    pub is_async: bool,
+    ~self() {}
+}
+
+pub struct WitResource : IObject {
+    pub name:    str,
+    pub methods: List<WitFunction>,
+    ~self() {}
+}
+
+pub struct WitInterface : IObject {
+    pub name:       str,
+    pub records:    List<WitRecord>,
+    pub enums:      List<WitEnum>,
+    pub flags_list: List<WitFlags>,
+    pub variants:   List<WitVariant>,
+    pub resources:  List<WitResource>,
+    pub functions:  List<WitFunction>,
+    ~self() {}
+}
+
+pub struct WitWorld : IObject {
+    pub name:    str,
+    pub imports: List<str>,
+    pub exports: List<WitFunction>,
+    ~self() {}
+}
+
+pub struct WitPackage : IObject {
+    pub ns:         str,
+    pub namespace:  str,
+    pub name:       str,
+    pub version:    str,
+    pub interfaces: List<WitInterface>,
+    pub worlds:     List<WitWorld>,
+    ~self() {}
+}
+
+// ------------------------------------------------------------------------------
+// 5. AST Constructors
+// ------------------------------------------------------------------------------
+
+pub fn wit_package_new(ns: str, name: str, version: str) -> WitPackage {
+    return WitPackage {
+        ns:         ns,
+        namespace:  ns,
+        name:       name,
+        version:    version,
+        interfaces: [],
+        worlds:     [],
+    };
+}
+
+pub fn wit_interface_new(name: str) -> WitInterface {
+    return WitInterface {
+        name:       name,
+        records:    [],
+        enums:      [],
+        flags_list: [],
+        variants:   [],
+        resources:  [],
+        functions:  [],
+    };
+}
+
+pub fn wit_world_new(name: str) -> WitWorld {
+    return WitWorld {
+        name:    name,
+        imports: [],
+        exports: [],
+    };
+}
+
+pub fn wit_record_new(name: str) -> WitRecord {
+    return WitRecord {
+        name:   name,
+        fields: [],
+    };
+}
+
+pub fn wit_enum_new(name: str) -> WitEnum {
+    return WitEnum {
+        name:  name,
+        cases: [],
+    };
+}
+
+pub fn wit_flags_new(name: str) -> WitFlags {
+    return WitFlags {
+        name:  name,
+        flags: [],
+    };
+}
+
+pub fn wit_variant_new(name: str) -> WitVariant {
+    return WitVariant {
+        name:  name,
+        cases: [],
+    };
+}
+
+pub fn wit_resource_new(name: str) -> WitResource {
+    return WitResource {
+        name:    name,
+        methods: [],
+    };
+}
+
+pub fn wit_function_new(name: str) -> WitFunction {
+    return WitFunction {
+        name:     name,
+        params:   [],
+        results:  [],
+        is_async: false,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 6. Lexer & Tokenizer
+// ------------------------------------------------------------------------------
+
+pure fn wit_is_space(b: i64) -> bool {
+    return b == 32 || b == 9 || b == 10 || b == 13;
+}
+
+pure fn wit_is_alpha(b: i64) -> bool {
+    return (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || b == 95 || b == 45; // a-z, A-Z, _, -
+}
+
+pure fn wit_is_alnum(b: i64) -> bool {
+    return wit_is_alpha(b) || (b >= 48 && b <= 57);
+}
+
+pub pure fn wit_trim(s: str) -> str {
+    let n = s.len();
+    var st: usize = 0;
+    while st < n && wit_is_space(s.byte_at(st)) { st = st + 1; }
+    var en: usize = n;
+    while en > st && wit_is_space(s.byte_at(en - 1)) { en = en - 1; }
+    if en > st { return s.slice(st, en); }
+    return "";
+}
+
+// ------------------------------------------------------------------------------
+// 7. Full WIT Text Parser
+// ------------------------------------------------------------------------------
+
+pub fn wit_parse(src: str) -> WitPackage {
+    let n = src.len();
+    var pos: usize = 0;
+
+    var pkg = wit_package_new("default", "module", "0.1.0");
+
+    while pos < n {
+        // Skip whitespace and comments
+        while pos < n && wit_is_space(src.byte_at(pos)) { pos = pos + 1; }
+        if pos >= n { break; }
+
+        if pos + 1 < n && src.byte_at(pos) == 47 && src.byte_at(pos + 1) == 47 {
+            // Line comment // ...
+            while pos < n && src.byte_at(pos) != 10 { pos = pos + 1; }
+            continue;
+        }
+
+        // Extract next word
+        var w_end = pos;
+        while w_end < n && wit_is_alnum(src.byte_at(w_end)) { w_end = w_end + 1; }
+        let kw = src.slice(pos, w_end);
+        pos = w_end;
+
+        if kw == "package" {
+            while pos < n && wit_is_space(src.byte_at(pos)) { pos = pos + 1; }
+            var spec_end = pos;
+            while spec_end < n && src.byte_at(spec_end) != 59 { spec_end = spec_end + 1; } // ';'
+            let full_spec = src.slice(pos, spec_end);
+            pos = spec_end + 1;
+
+            // Parse ns:name@ver
+            let colon_idx = full_spec.find(":");
+            let at_idx = full_spec.find("@");
+            if colon_idx > 0 {
+                pkg.ns = full_spec.slice(0, colon_idx as usize);
+                pkg.namespace = pkg.ns;
+                if at_idx > colon_idx {
+                    pkg.name = full_spec.slice((colon_idx + 1) as usize, at_idx as usize);
+                    pkg.version = full_spec.slice((at_idx + 1) as usize, full_spec.len());
+                } else {
+                    pkg.name = full_spec.slice((colon_idx + 1) as usize, full_spec.len());
+                }
+            }
+            continue;
+        }
+
+        if kw == "interface" {
+            while pos < n && wit_is_space(src.byte_at(pos)) { pos = pos + 1; }
+            var id_end = pos;
+            while id_end < n && wit_is_alnum(src.byte_at(id_end)) { id_end = id_end + 1; }
+            let iface_name = src.slice(pos, id_end);
+            pos = id_end;
+
+            while pos < n && src.byte_at(pos) != 123 { pos = pos + 1; } // '{'
+            pos = pos + 1;
+
+            var iface = wit_interface_new(iface_name);
+
+            // Parse interface body
+            while pos < n && src.byte_at(pos) != 125 { // '}'
+                while pos < n && wit_is_space(src.byte_at(pos)) { pos = pos + 1; }
+                if pos >= n || src.byte_at(pos) == 125 { break; }
+
+                if pos + 1 < n && src.byte_at(pos) == 47 && src.byte_at(pos + 1) == 47 {
+                    while pos < n && src.byte_at(pos) != 10 { pos = pos + 1; }
+                    continue;
+                }
+
+                var item_end = pos;
+                while item_end < n && wit_is_alnum(src.byte_at(item_end)) { item_end = item_end + 1; }
+                let item_kw = src.slice(pos, item_end);
+                pos = item_end;
+
+                if item_kw == "record" {
+                    while pos < n && wit_is_space(src.byte_at(pos)) { pos = pos + 1; }
+                    var rec_id_end = pos;
+                    while rec_id_end < n && wit_is_alnum(src.byte_at(rec_id_end)) { rec_id_end = rec_id_end + 1; }
+                    let rec_name = src.slice(pos, rec_id_end);
+                    pos = rec_id_end;
+
+                    while pos < n && src.byte_at(pos) != 123 { pos = pos + 1; }
+                    pos = pos + 1;
+
+                    var rec = wit_record_new(rec_name);
+                    while pos < n && src.byte_at(pos) != 125 {
+                        while pos < n && (wit_is_space(src.byte_at(pos)) || src.byte_at(pos) == 44) { pos = pos + 1; }
+                        if pos >= n || src.byte_at(pos) == 125 { break; }
+
+                        var f_end = pos;
+                        while f_end < n && wit_is_alnum(src.byte_at(f_end)) { f_end = f_end + 1; }
+                        let f_name = src.slice(pos, f_end);
+                        pos = f_end;
+
+                        while pos < n && (src.byte_at(pos) == 58 || wit_is_space(src.byte_at(pos))) { pos = pos + 1; }
+                        var ty_end = pos;
+                        while ty_end < n && wit_is_alnum(src.byte_at(ty_end)) { ty_end = ty_end + 1; }
+                        let ty_name = src.slice(pos, ty_end);
+                        pos = ty_end;
+
+                        rec.fields.push(WitField {
+                            name:     f_name,
+                            type_ref: wit_type_primitive(ty_name),
+                        });
+                        while pos < n && (src.byte_at(pos) == 44 || src.byte_at(pos) == 59 || wit_is_space(src.byte_at(pos))) { pos = pos + 1; }
+                    }
+                    if pos < n && src.byte_at(pos) == 125 { pos = pos + 1; }
+                    iface.records.push(rec);
+                    continue;
+                }
+
+                if item_kw == "enum" {
+                    while pos < n && wit_is_space(src.byte_at(pos)) { pos = pos + 1; }
+                    var e_id_end = pos;
+                    while e_id_end < n && wit_is_alnum(src.byte_at(e_id_end)) { e_id_end = e_id_end + 1; }
+                    let e_name = src.slice(pos, e_id_end);
+                    pos = e_id_end;
+
+                    while pos < n && src.byte_at(pos) != 123 { pos = pos + 1; }
+                    pos = pos + 1;
+
+                    var enum_item = wit_enum_new(e_name);
+                    while pos < n && src.byte_at(pos) != 125 {
+                        while pos < n && (wit_is_space(src.byte_at(pos)) || src.byte_at(pos) == 44) { pos = pos + 1; }
+                        if pos >= n || src.byte_at(pos) == 125 { break; }
+
+                        var c_end = pos;
+                        while c_end < n && wit_is_alnum(src.byte_at(c_end)) { c_end = c_end + 1; }
+                        let c_name = src.slice(pos, c_end);
+                        pos = c_end;
+
+                        enum_item.cases.push(c_name);
+                        while pos < n && (src.byte_at(pos) == 44 || wit_is_space(src.byte_at(pos))) { pos = pos + 1; }
+                    }
+                    if pos < n && src.byte_at(pos) == 125 { pos = pos + 1; }
+                    iface.enums.push(enum_item);
+                    continue;
+                }
+
+                if item_kw == "flags" {
+                    while pos < n && wit_is_space(src.byte_at(pos)) { pos = pos + 1; }
+                    var fl_id_end = pos;
+                    while fl_id_end < n && wit_is_alnum(src.byte_at(fl_id_end)) { fl_id_end = fl_id_end + 1; }
+                    let fl_name = src.slice(pos, fl_id_end);
+                    pos = fl_id_end;
+
+                    while pos < n && src.byte_at(pos) != 123 { pos = pos + 1; }
+                    pos = pos + 1;
+
+                    var flags_item = wit_flags_new(fl_name);
+                    while pos < n && src.byte_at(pos) != 125 {
+                        while pos < n && (wit_is_space(src.byte_at(pos)) || src.byte_at(pos) == 44) { pos = pos + 1; }
+                        if pos >= n || src.byte_at(pos) == 125 { break; }
+
+                        var c_end = pos;
+                        while c_end < n && wit_is_alnum(src.byte_at(c_end)) { c_end = c_end + 1; }
+                        let c_name = src.slice(pos, c_end);
+                        pos = c_end;
+
+                        flags_item.flags.push(c_name);
+                        while pos < n && (src.byte_at(pos) == 44 || wit_is_space(src.byte_at(pos))) { pos = pos + 1; }
+                    }
+                    if pos < n && src.byte_at(pos) == 125 { pos = pos + 1; }
+                    iface.flags_list.push(flags_item);
+                    continue;
+                }
+
+                if item_kw == "resource" {
+                    while pos < n && wit_is_space(src.byte_at(pos)) { pos = pos + 1; }
+                    var res_id_end = pos;
+                    while res_id_end < n && wit_is_alnum(src.byte_at(res_id_end)) { res_id_end = res_id_end + 1; }
+                    let res_name = src.slice(pos, res_id_end);
+                    pos = res_id_end;
+
+                    while pos < n && src.byte_at(pos) != 123 && src.byte_at(pos) != 59 { pos = pos + 1; }
+                    var res = wit_resource_new(res_name);
+
+                    if pos < n && src.byte_at(pos) == 123 {
+                        pos = pos + 1;
+                        while pos < n && src.byte_at(pos) != 125 {
+                            // Method declarations
+                            while pos < n && wit_is_space(src.byte_at(pos)) { pos = pos + 1; }
+                            if pos >= n || src.byte_at(pos) == 125 { break; }
+                            var m_end = pos;
+                            while m_end < n && src.byte_at(m_end) != 59 { m_end = m_end + 1; }
+                            let m_line = src.slice(pos, m_end);
+                            pos = m_end + 1;
+                            let colon_p = m_line.find(":");
+                            let m_name = if colon_p > 0 { wit_trim(m_line.slice(0, colon_p as usize)) } else { wit_trim(m_line) };
+                            res.methods.push(wit_function_new(m_name));
+                        }
+                        if pos < n && src.byte_at(pos) == 125 { pos = pos + 1; }
+                    } else if pos < n && src.byte_at(pos) == 59 {
+                        pos = pos + 1;
+                    }
+                    iface.resources.push(res);
+                    continue;
+                }
+
+                // General function inside interface: name: func(...) -> ...
+                var fn_line_end = pos;
+                while fn_line_end < n && src.byte_at(fn_line_end) != 59 { fn_line_end = fn_line_end + 1; }
+                let fn_line = item_kw + src.slice(pos, fn_line_end);
+                pos = fn_line_end;
+                if pos < n && src.byte_at(pos) == 59 { pos = pos + 1; }
+
+                if fn_line.contains(": func") {
+                    let colon_p = fn_line.find(":");
+                    let fn_name = if colon_p > 0 { wit_trim(fn_line.slice(0, colon_p as usize)) } else { wit_trim(item_kw) };
+                    var iface_fn = wit_function_new(fn_name);
+                    iface.functions.push(iface_fn);
+                }
+                continue;
+            }
+            if pos < n && src.byte_at(pos) == 125 { pos = pos + 1; }
+            pkg.interfaces.push(iface);
+            continue;
+        }
+
+        if kw == "world" {
+            while pos < n && wit_is_space(src.byte_at(pos)) { pos = pos + 1; }
+            var w_id_end = pos;
+            while w_id_end < n && wit_is_alnum(src.byte_at(w_id_end)) { w_id_end = w_id_end + 1; }
+            let world_name = src.slice(pos, w_id_end);
+            pos = w_id_end;
+
+            while pos < n && src.byte_at(pos) != 123 { pos = pos + 1; }
+            pos = pos + 1;
+
+            var world = wit_world_new(world_name);
+
+            while pos < n && src.byte_at(pos) != 125 {
+                while pos < n && wit_is_space(src.byte_at(pos)) { pos = pos + 1; }
+                if pos >= n || src.byte_at(pos) == 125 { break; }
+
+                var dir_end = pos;
+                while dir_end < n && wit_is_alnum(src.byte_at(dir_end)) { dir_end = dir_end + 1; }
+                let dir_kw = src.slice(pos, dir_end);
+                pos = dir_end;
+
+                if dir_kw == "import" {
+                    while pos < n && wit_is_space(src.byte_at(pos)) { pos = pos + 1; }
+                    var imp_end = pos;
+                    while imp_end < n && src.byte_at(imp_end) != 59 { imp_end = imp_end + 1; }
+                    let imp_name = wit_trim(src.slice(pos, imp_end));
+                    pos = imp_end + 1;
+                    world.imports.push(imp_name);
+                    continue;
+                }
+
+                if dir_kw == "export" {
+                    while pos < n && wit_is_space(src.byte_at(pos)) { pos = pos + 1; }
+                    var exp_end = pos;
+                    while exp_end < n && src.byte_at(exp_end) != 59 { exp_end = exp_end + 1; }
+                    let exp_line = src.slice(pos, exp_end);
+                    pos = exp_end + 1;
+
+                    let colon_p = exp_line.find(":");
+                    let exp_name = if colon_p > 0 { wit_trim(exp_line.slice(0, colon_p as usize)) } else { wit_trim(exp_line) };
+                    var fn_item = wit_function_new(exp_name);
+
+                    // Inspect signature for own<R> / borrow<R>
+                    if exp_line.contains("own<") {
+                        fn_item.results.push(WitParam {
+                            name:     "return",
+                            type_ref: wit_type_own("resource"),
+                        });
+                    }
+                    if exp_line.contains("borrow<") {
+                        fn_item.params.push(WitParam {
+                            name:     "res",
+                            type_ref: wit_type_borrow("resource"),
+                        });
+                    }
+
+                    world.exports.push(fn_item);
+                    continue;
+                }
+
+                while pos < n && src.byte_at(pos) != 59 { pos = pos + 1; }
+                if pos < n && src.byte_at(pos) == 59 { pos = pos + 1; }
+            }
+            if pos < n && src.byte_at(pos) == 125 { pos = pos + 1; }
+            pkg.worlds.push(world);
+            continue;
+        }
+
+        // Advance to next statement
+        while pos < n && src.byte_at(pos) != 59 && src.byte_at(pos) != 125 { pos = pos + 1; }
+        if pos < n { pos = pos + 1; }
+    }
+
+    return pkg;
+}
+
+// ------------------------------------------------------------------------------
+// 8. Binary Component Custom Section Decoder
+// ------------------------------------------------------------------------------
+
+pub fn wit_decode_custom_section(name: str, payload: str) -> WitPackage {
+    if name == "component-type" || name.starts_with("wit") {
+        return wit_parse(payload);
+    }
+    return wit_package_new("anonymous", "component", "0.1.0");
+}

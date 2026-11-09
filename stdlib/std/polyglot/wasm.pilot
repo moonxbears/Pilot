@@ -1,0 +1,129 @@
+// ==============================================================================
+// FILE: stdlib/std/polyglot/wasm.pilot
+// Milestone 19: WebAssembly Component Model & WIT High-Level Adapter Types
+// Package: std.polyglot.wasm
+// ==============================================================================
+
+pub lvl(0) pkg std.polyglot.wasm;
+
+// ------------------------------------------------------------------------------
+// 1. Diagnostics & WASM Trap Error (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+pub const WASM001_MAGIC_ERR:  str = "WASM001";
+pub const WASM002_SIG_ERR:    str = "WASM002";
+pub const WASM003_BOUNDS_ERR: str = "WASM003";
+pub const WASM004_UTF8_ERR:   str = "WASM004";
+pub const WASM005_BORROW_ERR: str = "WASM005";
+
+[Layout(c_abi)]
+pub struct WasmTrap : IValue {
+    pub code:    str;
+    pub message: str;
+
+    pub static pure fn create(code: str, message: str) -> WasmTrap {
+        return WasmTrap {
+            code:    code,
+            message: message,
+        };
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 2. Linear Memory View (0b01 : IReference)
+// ------------------------------------------------------------------------------
+
+pub struct WasmMemorySlice : IReference {
+    pub ptr: i64;
+    pub len: usize;
+
+    pub static pure fn from_raw_parts(p: i64, l: usize) -> WasmMemorySlice {
+        return WasmMemorySlice {
+            ptr: p,
+            len: l,
+        };
+    }
+
+    pub pure fn is_empty(ref self) -> bool {
+        return self.len == 0;
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 3. Owned WIT Resource Handle (0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct WasmResourceHandle<R: IAnyValue> : IObject {
+    pub handle_id: i64;
+    pub dtor_id:   i64;
+    pub is_valid:  bool;
+
+    pub static fn create(id: i64, dtor: i64) -> WasmResourceHandle<R> {
+        return WasmResourceHandle {
+            handle_id: id,
+            dtor_id:   dtor,
+            is_valid:  true,
+        };
+    }
+
+    pub fn drop_handle(var ref self) -> void {
+        if self.is_valid {
+            self.is_valid = false;
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 4. Scoped Sandboxed Lease (0b11 : IGuard)
+// ------------------------------------------------------------------------------
+
+pub struct WasmSandboxLease : IGuard {
+    pub instance_id:   i64;
+    pub fuel_budget:   i64;
+    pub fuel_consumed: i64;
+    pub is_open:       bool;
+
+    pub static fn enter(inst_id: i64, fuel: i64) -> WasmSandboxLease {
+        return WasmSandboxLease {
+            instance_id:   inst_id,
+            fuel_budget:   fuel,
+            fuel_consumed: 0,
+            is_open:       true,
+        };
+    }
+
+    pub fn tick_fuel(var ref self, cost: i64) -> res<bool, WasmTrap> {
+        if !self.is_open {
+            return err(WasmTrap::create(WASM003_BOUNDS_ERR, "Sandbox lease is closed"));
+        }
+        self.fuel_consumed = self.fuel_consumed + cost;
+        if self.fuel_budget > 0 && self.fuel_consumed > self.fuel_budget {
+            return err(WasmTrap::create(WASM003_BOUNDS_ERR, "WASM fuel exhausted"));
+        }
+        return ok(true);
+    }
+
+    pub fn exit(var ref self) -> void {
+        self.is_open = false;
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 5. Functional Accessors & Diagnostics
+// ------------------------------------------------------------------------------
+
+pub pure fn wasm_trap_code(t: WasmTrap) -> str {
+    return t.code;
+}
+
+pub pure fn wasm_trap_message(t: WasmTrap) -> str {
+    return t.message;
+}
+
+pub pure fn wasm_slice_len(s: WasmMemorySlice) -> usize {
+    return s.len;
+}
+
+pub pure fn wasm_sandbox_is_open(lease: WasmSandboxLease) -> bool {
+    return lease.is_open;
+}

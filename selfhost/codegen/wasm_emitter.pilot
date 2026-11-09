@@ -504,3 +504,56 @@ pub fn emit_arena_wasm_dts() -> str {
     return "export interface PilotModule {\n" + members + "}\n"
         + "export function loadPilotModule(wasmBytes: BufferSource): Promise<PilotModule>;\n";
 }
+
+// ------------------------------------------------------------------------------
+// WebAssembly Component Model & WASI Preview 2 Emitter (Milestone 19)
+// ------------------------------------------------------------------------------
+
+pub pure fn wasm_target_is_wasip2(target: str) -> bool {
+    return target == "wasm32-wasip2" || target == "wasip2";
+}
+
+// Emits WASM Component Model WAT representation (`(component ...)`).
+pub fn emit_component_wat_module(pkg_name: str, world_name: str, exports: List<str>) -> str {
+    var out = "(component\n";
+    out = out + "  ;; Component: " + pkg_name + "\n";
+    out = out + "  ;; World: " + world_name + "\n";
+    out = out + "  (core module $m\n";
+    out = out + "    (memory (export \"memory\") 1)\n";
+    var i = 0;
+    while i < exports.len() {
+        let fn_name = exports.get(i);
+        out = out + "    (func (export \"" + fn_name + "\") (result i64) (i64.const 0))\n";
+        i = i + 1;
+    }
+    out = out + "  )\n";
+    out = out + "  (core instance $inst (instantiate $m))\n";
+    var j = 0;
+    while j < exports.len() {
+        let fn_name = exports.get(j);
+        out = out + "  (func (export \"" + fn_name + "\") (result s64)\n";
+        out = out + "    (canon lift (core func $inst \"" + fn_name + "\"))\n";
+        out = out + "  )\n";
+        j = j + 1;
+    }
+    out = out + ")\n";
+    return out;
+}
+
+// Emits canonical `.wit` interface definition from exported function names.
+pub fn emit_wit_interface(pkg_namespace: str, pkg_name: str, iface_name: str, funcs: List<str>) -> str {
+    var out = "package " + pkg_namespace + ":" + pkg_name + "@0.1.0;\n\n";
+    out = out + "interface " + iface_name + " {\n";
+    var i = 0;
+    while i < funcs.len() {
+        let fname = funcs.get(i);
+        out = out + "    " + fname + ": func() -> s64;\n";
+        i = i + 1;
+    }
+    out = out + "}\n\n";
+    out = out + "world " + pkg_name + "-world {\n";
+    out = out + "    export " + iface_name + ";\n";
+    out = out + "}\n";
+    return out;
+}
+
