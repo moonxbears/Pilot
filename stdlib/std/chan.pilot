@@ -6,7 +6,7 @@ pub pkg std.chan;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
-pub struct Chan<T> : IObject {
+pub struct Chan<T: IAnyValue> : IObject {
     pub capacity: usize;
     pub queue:    List<T>;
     pub is_open:  bool;

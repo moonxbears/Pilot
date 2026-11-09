@@ -12,22 +12,41 @@ pub struct FmtStyle : IValue {
     pub static pure fn compact()  -> str => "compact";
 }
 
-pub struct FormatOptions {
+[Layout(c_abi)]
+pub struct FormatOptions : IValue {
     pub indent_width:    i64;
     pub max_width:       i64;
     pub emit_semicolons: bool;
     pub style:           str;
 }
 
-pub struct FormatResult {
+[Layout(c_abi)]
+pub struct FormatResult : IValue {
     pub formatted_code: str;
     pub was_modified: bool;
 }
 
-pub struct DocNode {
+[Layout(c_abi)]
+pub struct DocNode : IValue {
     pub kind: i64;
     pub text: str;
     pub indent: i64;
+}
+
+pub enum DocKind : u8 {
+    ::Nil      = 0,
+    ::Text     = 1,
+    ::Line     = 2,
+    ::Softline = 3,
+    ::Nest     = 4,
+    ::Group    = 5,
+}
+
+pub enum FmtTokKind : u8 {
+    ::Comment      = 1,
+    ::BlockComment = 2,
+    ::Lit          = 3,
+    ::Word         = 4,
 }
 
 // Wadler-Lindig Doc algebra constructors

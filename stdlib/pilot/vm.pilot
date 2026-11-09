@@ -5,6 +5,18 @@
 // ==============================================================================
 pub pkg pilot.vm;
 
+pub enum VmCapability : u32 {
+    ::None          = 0,
+    ::Clock         = 1,
+    ::RandomSeeded  = 2,
+    ::StdoutCapture = 4,
+    ::VirtualFs     = 8,
+    ::HostFsRead    = 16,
+    ::HostFsWrite   = 32,
+    ::HostNet       = 64,
+    ::HostFfi       = 128,
+}
+
 // Capability bitmask (0b00 : IValue)
 pub pure fn cap_none()            -> u32 => 0;
 pub pure fn cap_clock()           -> u32 => 1;
@@ -31,6 +43,16 @@ pub pure fn vm_config_default() -> VmConfig {
         max_call_depth: 64,
         capabilities:   cap_stdout_capture(),
     };
+}
+
+pub enum VmTrap : u8 {
+    ::None                 = 0,
+    ::FuelExhausted        = 1,
+    ::HeapLimitExceeded    = 2,
+    ::StackDepthExceeded   = 3,
+    ::CapabilityDenied     = 4,
+    ::DivisionByZero       = 5,
+    ::AssertionFailed      = 6,
 }
 
 // Trap codes (0b00 : IValue)

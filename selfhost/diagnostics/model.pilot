@@ -38,9 +38,11 @@ pub fn str_replace(src: str, target: str, replacement: str) -> str {
 // ------------------------------------------------------------------------------
 // Diagnostic Severity Levels (0b00 : IValue)
 // ------------------------------------------------------------------------------
-[Layout(c_abi)]
-pub struct DiagSeverity : IValue {
-    pub raw: u8;
+pub enum DiagSeverity : u8 {
+    ::Error   = 1,
+    ::Warning = 2,
+    ::Info    = 3,
+    ::Hint    = 4,
 }
 
 pub pure fn diag_severity_error()   -> u8 => 1;
@@ -59,9 +61,10 @@ pub fn diag_severity_name(s: u8) -> str {
 // ------------------------------------------------------------------------------
 // Fix Applicability (0b00 : IValue)
 // ------------------------------------------------------------------------------
-[Layout(c_abi)]
-pub struct FixApplicability : IValue {
-    pub raw: u8;
+pub enum FixApplicability : u8 {
+    ::MachineApplicable = 0,
+    ::HasPlaceholders   = 1,
+    ::MaybeIncorrect    = 2,
 }
 
 // 0: MachineApplicable (deterministic syntax/type/mutability correction; auto-applied by --fix)

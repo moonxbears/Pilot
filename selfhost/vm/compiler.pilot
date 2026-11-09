@@ -6,13 +6,15 @@
 // `PhysicsRegistry` (`RawAstArena`) in pure Pilot.
 // ============================================================================
 
-pub struct EncodedInstruction {
+[Layout(c_abi)]
+pub struct EncodedInstruction : IValue {
     pub word: i64;
     pub span_start: i64;
     pub span_end: i64;
 }
 
-pub struct DebugRegBinding {
+[Layout(c_abi)]
+pub struct DebugRegBinding : IValue {
     pub reg_slot: i64;
     pub symbol_id: i64;
     pub layout_id: i64;

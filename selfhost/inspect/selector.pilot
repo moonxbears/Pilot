@@ -10,6 +10,14 @@ pub pure fn nameof(sym: str) -> str => sym;
 // ------------------------------------------------------------------------------
 // Inspection Target Kinds
 // ------------------------------------------------------------------------------
+pub enum InspectTargetKind : u8 {
+    ::WholeFile          = 0,
+    ::LineColCursor     = 1,
+    ::LineRange          = 2,
+    ::SymbolPath         = 3,
+    ::MonomorphizedType  = 4,
+}
+
 pub pure fn target_kind_whole_file()          -> u8 => 0;
 pub pure fn target_kind_line_col_cursor()     -> u8 => 1;
 pub pure fn target_kind_line_range()          -> u8 => 2;

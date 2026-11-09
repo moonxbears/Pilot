@@ -10,6 +10,17 @@ pub pure fn nameof(sym: str) -> str => sym;
 // ------------------------------------------------------------------------------
 // Name-Blind IR Register Classes (Derived strictly from [Bits] & [Layout])
 // ------------------------------------------------------------------------------
+pub enum RegClass : u8 {
+    ::GprSigned   = 0,
+    ::GprUnsigned = 1,
+    ::SimdFloat   = 2,
+    ::SimdVector  = 3,
+    ::RawPtr      = 4,
+    ::Aggregate   = 5,
+    ::Unit        = 6,
+    ::Noreturn    = 7,
+}
+
 pub pure fn reg_class_gpr_signed()   -> u8 => 0;
 pub pure fn reg_class_gpr_unsigned() -> u8 => 1;
 pub pure fn reg_class_simd_float()   -> u8 => 2;
@@ -34,6 +45,13 @@ pub fn reg_class_name(rc: u8) -> str {
 // ------------------------------------------------------------------------------
 // 2-Bit Lattice Bits (Hardware Semantic Taxonomy)
 // ------------------------------------------------------------------------------
+pub enum LatticeBits : u8 {
+    ::Value     = 0,
+    ::Reference = 1,
+    ::Object    = 2,
+    ::Guard     = 3,
+}
+
 pub pure fn lattice_value()     -> u8 => 0; // 0b00: IValue (Trivial memcpy)
 pub pure fn lattice_reference() -> u8 => 1; // 0b01: IReference (Borrowed view)
 pub pure fn lattice_object()    -> u8 => 2; // 0b10: IObject (Owned ~self())

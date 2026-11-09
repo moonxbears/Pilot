@@ -11,7 +11,7 @@ pub struct TaskId : IValue {
     pub raw: u64;
 }
 
-pub struct TaskHandle<T> : IObject {
+pub struct TaskHandle<T: IAnyValue> : IObject {
     pub id:        TaskId;
     pub is_done:   bool;
     pub has_value: bool;

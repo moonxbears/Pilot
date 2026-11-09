@@ -4,6 +4,13 @@
 // ==============================================================================
 pub pkg pilot.types;
 
+pub enum LatticeClass : u8 {
+    ::Value = 0,
+    ::Reference = 1,
+    ::Object = 2,
+    ::Guard = 3,
+}
+
 pub pure fn lattice_class_value()     -> u8 => 0; // 0b00 : IValue
 pub pure fn lattice_class_reference() -> u8 => 1; // 0b01 : IReference
 pub pure fn lattice_class_object()    -> u8 => 2; // 0b10 : IObject

@@ -9,7 +9,7 @@ pub pure fn nameof(sym: str) -> str => sym;
 // ------------------------------------------------------------------------------
 // Dynamic List Buffer (0b10 : IObject)
 // ------------------------------------------------------------------------------
-pub struct ListBuffer<T> : IObject {
+pub struct ListBuffer<T: IAnyValue> : IObject {
     pub items: List<T>;
 
     pub pure fn len(ref self) -> usize => self.items.len;
@@ -37,7 +37,7 @@ pub fn list_buffer_new<T>() -> ListBuffer<T> {
 // ------------------------------------------------------------------------------
 // Ring Buffer Queue (0b10 : IObject)
 // ------------------------------------------------------------------------------
-pub struct RingBuffer<T> : IObject {
+pub struct RingBuffer<T: IAnyValue> : IObject {
     pub capacity: usize;
     pub head:     usize;
     pub tail:     usize;

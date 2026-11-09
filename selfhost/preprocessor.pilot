@@ -4,7 +4,8 @@
 // region/endregion, error, warning, pragma warning) & PREPROC001-PREPROC008
 // ============================================================================
 
-pub struct PreprocDiagnostic {
+[Layout(c_abi)]
+pub struct PreprocDiagnostic : IValue {
     pub line: i64;
     pub col: i64;
     pub severity: i64;
@@ -12,19 +13,22 @@ pub struct PreprocDiagnostic {
     pub message: str;
 }
 
-pub struct CodeRegion {
+[Layout(c_abi)]
+pub struct CodeRegion : IValue {
     pub name: str;
     pub start_line: i64;
     pub end_line: i64;
 }
 
-pub struct WarningSuppression {
+[Layout(c_abi)]
+pub struct WarningSuppression : IValue {
     pub warning_code: str;
     pub start_line: i64;
     pub end_line: i64;
 }
 
-pub struct IfFrame {
+[Layout(c_abi)]
+pub struct IfFrame : IValue {
     pub condition_met: bool;
     pub current_branch_active: bool;
     pub has_else_branch: bool;

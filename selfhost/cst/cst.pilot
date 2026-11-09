@@ -4,13 +4,15 @@
 // Immutable width-relative GreenNodes & ephemeral parent-linked SyntaxNodes
 // ============================================================================
 
-pub struct GreenToken {
+[Layout(c_abi)]
+pub struct GreenToken : IValue {
     pub kind: i64;
     pub text: str;
     pub text_len: i64;
 }
 
-pub struct GreenNode {
+[Layout(c_abi)]
+pub struct GreenNode : IValue {
     pub kind: i64;
     pub text_len: i64;
     pub child_count: i64;
@@ -19,14 +21,16 @@ pub struct GreenNode {
     pub raw_text: str;
 }
 
-pub struct SyntaxToken {
+[Layout(c_abi)]
+pub struct SyntaxToken : IValue {
     pub kind: i64;
     pub offset: i64;
     pub text_len: i64;
     pub text: str;
 }
 
-pub struct SyntaxNode {
+[Layout(c_abi)]
+pub struct SyntaxNode : IValue {
     pub kind: i64;
     pub parent_offset: i64;
     pub offset: i64;
@@ -37,7 +41,8 @@ pub struct SyntaxNode {
     pub raw_text: str;
 }
 
-pub struct CstDiagnostic {
+[Layout(c_abi)]
+pub struct CstDiagnostic : IValue {
     pub start: i64;
     pub end: i64;
     pub message: str;

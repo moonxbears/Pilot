@@ -5,6 +5,12 @@
 // (`Bit 0 != 0` => borrows memory: `0b01` Reference View or `0b11` Scoped Guard).
 // ============================================================================
 
+pub enum EscapeState : u8 {
+    ::Stack  = 0,
+    ::Region = 1,
+    ::Global = 2,
+}
+
 pub pure fn escape_state_stack() -> i64 { return 0; }
 pub pure fn escape_state_region() -> i64 { return 1; }
 pub pure fn escape_state_global() -> i64 { return 2; }

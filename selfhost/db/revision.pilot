@@ -14,6 +14,13 @@ pub pure fn nameof(sym: str) -> str => sym;
 // Workspace: Local project .pilot source file.
 // ExternalPkg: Locked external dependency in pilot.lock.
 // CoreGenesis: stdlib/core/ bootstrap files (never walked on user edits).
+pub enum Durability : u8 {
+    ::Volatile    = 0,
+    ::Workspace   = 1,
+    ::ExternalPkg = 2,
+    ::CoreGenesis = 3,
+}
+
 pub pure fn durability_volatile() -> u8 => 0;
 pub pure fn durability_workspace() -> u8 => 1;
 pub pure fn durability_external_pkg() -> u8 => 2;

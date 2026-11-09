@@ -55,6 +55,17 @@ pub fn compiler_session_set_file(var ref sess: CompilerSession, path: str, conte
     sess.revision_number = sess.revision_number + 1;
 }
 
+pub fn compiler_session_try_get_file(sess: CompilerSession, path: str) -> opt<str> {
+    var idx: usize = 0;
+    while idx < sess.file_names.len {
+        if sess.file_names[idx] == path {
+            return some sess.file_contents[idx];
+        }
+        idx = idx + 1;
+    }
+    return none;
+}
+
 pub fn compiler_session_get_file(sess: CompilerSession, path: str) -> str {
     var idx: usize = 0;
     while idx < sess.file_names.len {

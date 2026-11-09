@@ -9,7 +9,15 @@ comptime {
     __engine("bind_receptor", nameof(cst_detect_missing_ident), 33, 25);
 }
 
-pub struct ParsedCstSummary {
+pub enum CstDefect : u16 {
+    ::None          = 0,
+    ::MissingIdent  = 1,
+    ::MissingRParen = 2,
+    ::MissingRBrace = 4,
+}
+
+[Layout(c_abi)]
+pub struct ParsedCstSummary : IValue {
     pub lossless_text: str;
     pub has_missing_ident: bool;
     pub has_missing_rparen: bool;

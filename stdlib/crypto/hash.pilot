@@ -5,7 +5,8 @@
 // tree hashing, and RFC 2104 HMAC-SHA256 in pure Pilot.
 // ============================================================================
 
-pub struct Digest256 {
+[Layout(c_abi)]
+pub struct Digest256 : IValue {
     pub h0: i64;
     pub h1: i64;
     pub h2: i64;

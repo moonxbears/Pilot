@@ -30,6 +30,17 @@ pub pure fn token_new(kind: u16, st: u32, ed: u32, trivia: bool, txt: str) -> To
     };
 }
 
+pub enum TokenKind : u16 {
+    ::Eof        = 0,
+    ::Whitespace = 1,
+    ::Comment    = 2,
+    ::Ident      = 10,
+    ::Keyword    = 11,
+    ::Number     = 12,
+    ::String     = 13,
+    ::Symbol     = 14,
+}
+
 pub pure fn token_kind_eof()        -> u16 => 0;
 pub pure fn token_kind_whitespace() -> u16 => 1;
 pub pure fn token_kind_comment()    -> u16 => 2;

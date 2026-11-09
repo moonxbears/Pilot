@@ -6,7 +6,7 @@ pub pkg std.sync;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
-pub struct Mutex<T> : IObject {
+pub struct Mutex<T: IAnyValue> : IObject {
     pub is_locked: bool;
 
     ~self() {}
@@ -17,7 +17,7 @@ pub fn mutex_new<T>() -> Mutex<T> {
 }
 
 // Scoped Guard (0b11 : IGuard)
-pub struct MutexGuard<T> : IGuard {
+pub struct MutexGuard<T: IAnyValue> : IGuard {
     pub lock_id: usize;
 
     ~self() {}
