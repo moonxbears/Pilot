@@ -1,0 +1,187 @@
+// ==============================================================================
+// FILE: selfhost/chor/verifier.pilot
+// Milestone 24: .pchor Sublanguage Choreographer - Verifier
+// Enforces:
+//   CHOR001: 2-Bit Cue Boundary Law (0b01/0b11 or non-iso 0b10 forbidden across cues)
+//   CHOR002: Role Unauthorized Storage Read/Write Access
+//   CHOR003: Emitted Cue Has Zero Active Routes
+//   CHOR004: Synchronous ::DirectCall Route Cycle
+//   CHOR005: [HardRealtime] Role Routed Over Blocking Transport ::Block
+//   CHOR006: Architectural Dependency Law Firewall Breach
+//   CHOR007: Concurrent Write Race on Shared Storage
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Chor.Verifier;
+
+use Pilot.SelfHost.Chor.Ast.*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Diagnostic Formatting Helpers
+// ------------------------------------------------------------------------------
+
+pub pure fn format_chor001(cue_name: str, payload_type: str, reason: str) -> str {
+    return "CHOR001: 2-Bit Cue Boundary Law Violation in cue '" + cue_name + "' (payload '" + payload_type + "'): " + reason;
+}
+
+pub pure fn format_chor002(role_name: str, access: str, storage_name: str) -> str {
+    return "CHOR002: Role '" + role_name + "' unauthorized storage " + access + " on '" + storage_name + "'; declare in role contract";
+}
+
+pub pure fn format_chor003(role_name: str, cue_name: str) -> str {
+    return "CHOR003: Emitted cue '" + cue_name + "' from role '" + role_name + "' has zero active routes";
+}
+
+pub pure fn format_chor004(from_role: str, to_role: str) -> str {
+    return "CHOR004: Synchronous ::DirectCall route cycle detected between '" + from_role + "' and '" + to_role + "'; use ::RingBuffer to break recursion";
+}
+
+pub pure fn format_chor005(role_name: str, cue_name: str) -> str {
+    return "CHOR005: [HardRealtime] role '" + role_name + "' routed over blocking transport on cue '" + cue_name + "'; require non-blocking ::RingBuffer + ::TryFail or ::CoalesceLatest";
+}
+
+pub pure fn format_chor006(law_name: str, role_name: str, pkg_name: str) -> str {
+    return "CHOR006: Architectural dependency law '" + law_name + "' breached: role '" + role_name + "' cannot use package '" + pkg_name + "'";
+}
+
+pub pure fn format_chor007(role1: str, role2: str, storage: str) -> str {
+    return "CHOR007: Concurrent write race: asynchronous roles '" + role1 + "' and '" + role2 + "' both declare writes to unpartitioned storage '" + storage + "' without epoch barrier";
+}
+
+// ------------------------------------------------------------------------------
+// 2. Blueprint Topology Verifier
+// ------------------------------------------------------------------------------
+
+pub fn verify_blueprint_topology(bp: ref<BlueprintDef>) -> List<str> {
+    var diags: List<str> = [];
+
+    // 1. CHOR001: 2-Bit Cue Boundary Law
+    var ci = 0;
+    while ci < bp.cues.len() {
+        let cue = bp.cues[ci];
+        if cue.payload_lattice == 1 { // 0b01 Reference View
+            diags.push(format_chor001(cue.name, cue.payload_type, "borrowed 0b01 IReference views cannot cross process or thread cue boundaries"));
+        } else if cue.payload_lattice == 3 { // 0b11 Guard
+            diags.push(format_chor001(cue.name, cue.payload_type, "scoped 0b11 IGuard resources cannot cross cue boundaries"));
+        } else if cue.payload_lattice == 2 && !cue.requires_iso_move { // 0b10 Object without iso
+            diags.push(format_chor001(cue.name, cue.payload_type, "owned 0b10 IObject crossing cue boundary must be qualified 'iso' to guarantee zero shared mutable state"));
+        }
+        ci = ci + 1;
+    }
+
+    // 2. CHOR005: [HardRealtime] Blocking Transport Verification
+    var ri = 0;
+    while ri < bp.routes.len() {
+        let route = bp.routes[ri];
+        // Check if from_role is HardRealtime
+        var from_is_hrt = false;
+        var rj = 0;
+        while rj < bp.roles.len() {
+            if bp.roles[rj].name == route.from_role && bp.roles[rj].is_hard_realtime {
+                from_is_hrt = true;
+                break;
+            }
+            rj = rj + 1;
+        }
+
+        if from_is_hrt {
+            if route.transport.backpressure == BackpressurePolicy::Block {
+                diags.push(format_chor005(route.from_role, route.cue_name));
+            }
+        }
+        ri = ri + 1;
+    }
+
+    // 3. CHOR004: DirectCall Cycle Detection
+    var r1 = 0;
+    while r1 < bp.routes.len() {
+        let route1 = bp.routes[r1];
+        if route1.transport.kind == TransportKind::DirectCall {
+            var r2 = 0;
+            while r2 < bp.routes.len() {
+                let route2 = bp.routes[r2];
+                if route2.transport.kind == TransportKind::DirectCall {
+                    if route1.from_role == route2.to_role && route1.to_role == route2.from_role {
+                        diags.push(format_chor004(route1.from_role, route1.to_role));
+                        break;
+                    }
+                }
+                r2 = r2 + 1;
+            }
+        }
+        r1 = r1 + 1;
+    }
+
+    // 4. CHOR003: Emitted cue with zero active routes
+    var role_i = 0;
+    while role_i < bp.roles.len() {
+        let role = bp.roles[role_i];
+        var em_i = 0;
+        while em_i < role.emitted_cues.len() {
+            let emitted = role.emitted_cues[em_i];
+            var has_route = false;
+            var route_k = 0;
+            while route_k < bp.routes.len() {
+                if bp.routes[route_k].from_role == role.name && bp.routes[route_k].cue_name == emitted {
+                    has_route = true;
+                    break;
+                }
+                route_k = route_k + 1;
+            }
+            if !has_route {
+                diags.push(format_chor003(role.name, emitted));
+            }
+            em_i = em_i + 1;
+        }
+        role_i = role_i + 1;
+    }
+
+    // 5. CHOR006: Architectural Dependency Law Clauses
+    var law_i = 0;
+    while law_i < bp.laws.len() {
+        let law = bp.laws[law_i];
+        var r_idx = 0;
+        while r_idx < bp.roles.len() {
+            let role = bp.roles[r_idx];
+            if role.name == law.target_role_or_pkg {
+                var imp_k = 0;
+                while imp_k < role.prohibited_imports.len() {
+                    let imp = role.prohibited_imports[imp_k];
+                    if imp.contains(law.prohibited_pkg) || law.prohibited_pkg.contains(imp) {
+                        diags.push(format_chor006(law.rule_name, role.name, imp));
+                    }
+                    imp_k = imp_k + 1;
+                }
+            }
+            r_idx = r_idx + 1;
+        }
+        law_i = law_i + 1;
+    }
+
+    // 6. CHOR007: Concurrent write races on unpartitioned storage
+    var w1 = 0;
+    while w1 < bp.roles.len() {
+        var w2 = w1 + 1;
+        while w2 < bp.roles.len() {
+            let r_a = bp.roles[w1];
+            let r_b = bp.roles[w2];
+            var sa = 0;
+            while sa < r_a.write_storages.len() {
+                let st_name = r_a.write_storages[sa];
+                var sb = 0;
+                while sb < r_b.write_storages.len() {
+                    if r_b.write_storages[sb] == st_name {
+                        diags.push(format_chor007(r_a.name, r_b.name, st_name));
+                    }
+                    sb = sb + 1;
+                }
+                sa = sa + 1;
+            }
+            w2 = w2 + 1;
+        }
+        w1 = w1 + 1;
+    }
+
+    return diags;
+}

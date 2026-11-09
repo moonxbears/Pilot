@@ -1,0 +1,151 @@
+// ==============================================================================
+// FILE: selfhost/chor/ast.pilot
+// Milestone 24: .pchor Sublanguage Choreographer - Typed AST & Topology Graph Model
+// Defines BlueprintDef, StorageBinding, RoleContract, CueContract, RouteEdge,
+// TransportSpec, and ArchPolicyRule.
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Chor.Ast;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Transport & Backpressure Policies (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+pub enum TransportKind : u8 {
+    ::DirectCall       = 1, // 0 ns inline call
+    ::RingBuffer       = 2, // 64B cache-line padded SPSC/MPSC queue (0 heap alloc)
+    ::WorkStealingPool = 3, // M:N thread pool task submission
+    ::ShmIpc           = 4, // Zero-copy cross-process shared memory
+}
+
+pub enum BackpressurePolicy : u8 {
+    ::Block           = 1,
+    ::TryFail         = 2,
+    ::DropOldest      = 3,
+    ::CoalesceLatest  = 4,
+}
+
+[Layout(c_abi)]
+pub struct TransportSpec : IValue {
+    pub kind:         TransportKind;
+    pub capacity:     usize;
+    pub backpressure: BackpressurePolicy;
+    pub workers:      usize;
+    pub region_bytes: usize;
+
+    pub static pure fn direct_call() -> TransportSpec => TransportSpec {
+        kind:         TransportKind::DirectCall,
+        capacity:     0,
+        backpressure: BackpressurePolicy::Block,
+        workers:      1,
+        region_bytes: 0,
+    };
+
+    pub static pure fn ring_buffer(cap: usize, bp: BackpressurePolicy) -> TransportSpec => TransportSpec {
+        kind:         TransportKind::RingBuffer,
+        capacity:     cap,
+        backpressure: bp,
+        workers:      1,
+        region_bytes: 0,
+    };
+
+    pub static pure fn work_stealing(workers: usize) -> TransportSpec => TransportSpec {
+        kind:         TransportKind::WorkStealingPool,
+        capacity:     1024,
+        backpressure: BackpressurePolicy::Block,
+        workers:      workers,
+        region_bytes: 0,
+    };
+
+    pub static pure fn shm_ipc(region_sz: usize) -> TransportSpec => TransportSpec {
+        kind:         TransportKind::ShmIpc,
+        capacity:     256,
+        backpressure: BackpressurePolicy::TryFail,
+        workers:      1,
+        region_bytes: region_sz,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 2. Cue, Storage & Role Contracts (0b00 : IValue & 0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct CueContract : IValue {
+    pub name:               str;
+    pub payload_type:       str;
+    pub payload_layout_id:  usize;
+    pub payload_lattice:    u8; // 0b00=Val, 0b01=Ref, 0b10=Obj, 0b11=Guard
+    pub requires_iso_move:  bool;
+    pub backpressure:       BackpressurePolicy;
+    pub priority:           u8;
+}
+
+[Layout(c_abi)]
+pub struct StorageBinding : IValue {
+    pub name:        str;
+    pub entity_type: str;
+    pub strategy:    str; // "AoS", "SoA", "AoSoA", "HotCold"
+    pub capacity:    usize;
+}
+
+pub struct RoleContract : IObject {
+    pub name:               str;
+    pub is_hard_realtime:   bool;
+    pub read_storages:      List<str>;
+    pub write_storages:     List<str>;
+    pub emitted_cues:       List<str>;
+    pub handled_cues:       List<str>;
+    pub prohibited_imports: List<str>;
+}
+
+[Layout(c_abi)]
+pub struct RouteEdge : IValue {
+    pub from_role:   str;
+    pub cue_name:    str;
+    pub to_role:     str;
+    pub to_handler:  str;
+    pub transport:   TransportSpec;
+}
+
+[Layout(c_abi)]
+pub struct ArchPolicyRule : IValue {
+    pub rule_name:          str;
+    pub target_role_or_pkg: str;
+    pub prohibited_pkg:     str;
+    pub must_be_noalloc:    bool;
+}
+
+pub struct BlueprintDef : IObject {
+    pub name:     str;
+    pub storages: List<StorageBinding>;
+    pub roles:    List<RoleContract>;
+    pub cues:     List<CueContract>;
+    pub routes:   List<RouteEdge>;
+    pub laws:     List<ArchPolicyRule>;
+}
+
+pub fn blueprint_def_new(name: str) -> BlueprintDef {
+    return BlueprintDef {
+        name:     name,
+        storages: [],
+        roles:    [],
+        cues:     [],
+        routes:   [],
+        laws:     [],
+    };
+}
+
+pub fn role_contract_new(name: str, is_hrt: bool) -> RoleContract {
+    return RoleContract {
+        name:               name,
+        is_hard_realtime:   is_hrt,
+        read_storages:      [],
+        write_storages:     [],
+        emitted_cues:       [],
+        handled_cues:       [],
+        prohibited_imports: [],
+    };
+}

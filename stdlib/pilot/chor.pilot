@@ -1,0 +1,60 @@
+// ==============================================================================
+// FILE: stdlib/pilot/chor.pilot
+// Milestone 24: Ring-3 .pchor Introspection & Architecture Visualizer
+// Provides public query API and Mermaid flowchart export for .pchor blueprints.
+// ==============================================================================
+
+pub pkg pilot.chor;
+
+use Pilot.SelfHost.Chor.Ast.*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Mermaid Topology Exporter
+// ------------------------------------------------------------------------------
+
+pub fn export_mermaid_diagram(bp: ref<BlueprintDef>) -> str {
+    var out = "flowchart LR\n";
+
+    // 1. Storage subgraphs
+    if bp.storages.len() > 0 {
+        out = out + "    subgraph Storages\n";
+        var si = 0;
+        while si < bp.storages.len() {
+            let s = bp.storages[si];
+            out = out + "        st_" + s.name + "[(\"" + s.name + " (" + s.strategy + ")\")]\n";
+            si = si + 1;
+        }
+        out = out + "    end\n";
+    }
+
+    // 2. Roles
+    var ri = 0;
+    while ri < bp.roles.len() {
+        let r = bp.roles[ri];
+        let hrt_marker = if r.is_hard_realtime { " [HRT]" } else { "" };
+        out = out + "    role_" + r.name + "[\"" + r.name + hrt_marker + "\"]\n";
+        ri = ri + 1;
+    }
+
+    // 3. Route Edges
+    var ei = 0;
+    while ei < bp.routes.len() {
+        let edge = bp.routes[ei];
+        let t_label = if edge.transport.kind == TransportKind::DirectCall {
+            "DirectCall"
+        } else if edge.transport.kind == TransportKind::RingBuffer {
+            "RingBuffer"
+        } else if edge.transport.kind == TransportKind::WorkStealingPool {
+            "ThreadPool"
+        } else {
+            "ShmIpc"
+        };
+
+        out = out + "    role_" + edge.from_role + " -->|\"" + edge.cue_name + " (" + t_label + ")\"| role_" + edge.to_role + "\n";
+        ei = ei + 1;
+    }
+
+    return out;
+}

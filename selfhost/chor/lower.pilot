@@ -1,0 +1,88 @@
+// ==============================================================================
+// FILE: selfhost/chor/lower.pilot
+// Milestone 24: .pchor Sublanguage Choreographer - Lowering Engine
+// Compiles .pchor topology graph into runtime dispatch plans without modifying
+// domain .pilot functions.
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Chor.Lower;
+
+use Pilot.SelfHost.Chor.Ast.*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Lowered Route Plan (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct LoweredRoutePlan : IValue {
+    pub route_name:         str;
+    pub from_role:          str;
+    pub to_role:            str;
+    pub cue_name:           str;
+    pub transport_kind:     TransportKind;
+    pub dispatcher_fn_name: str;
+    pub is_zero_copy:       bool;
+    pub ring_buffer_cap:    usize;
+}
+
+pub struct LoweredTopologyPlan : IObject {
+    pub blueprint_name:    str;
+    pub routes:            List<LoweredRoutePlan>;
+    pub total_ring_bytes:  usize;
+    pub has_shared_memory: bool;
+}
+
+pub fn lowered_topology_plan_new(name: str) -> LoweredTopologyPlan {
+    return LoweredTopologyPlan {
+        blueprint_name:    name,
+        routes:            [],
+        total_ring_bytes:  0,
+        has_shared_memory: false,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 2. Topology Lowering Compiler
+// ------------------------------------------------------------------------------
+
+pub fn lower_topology(bp: ref<BlueprintDef>) -> LoweredTopologyPlan {
+    var plan = lowered_topology_plan_new(bp.name);
+
+    var i = 0;
+    while i < bp.routes.len() {
+        let edge = bp.routes[i];
+        let r_name = edge.from_role + "_" + edge.cue_name + "_to_" + edge.to_role;
+        let fn_dispatch = "pchor_dispatch_" + r_name;
+
+        var is_zc = false;
+        var r_cap = 0;
+
+        if edge.transport.kind == TransportKind::DirectCall {
+            is_zc = true; // In-register direct call
+        } else if edge.transport.kind == TransportKind::RingBuffer {
+            r_cap = edge.transport.capacity;
+            plan.total_ring_bytes = plan.total_ring_bytes + (r_cap * 64); // 64B cache-line padded
+            is_zc = true;
+        } else if edge.transport.kind == TransportKind::ShmIpc {
+            plan.has_shared_memory = true;
+            is_zc = true;
+        }
+
+        plan.routes.push(LoweredRoutePlan {
+            route_name:         r_name,
+            from_role:          edge.from_role,
+            to_role:            edge.to_role,
+            cue_name:           edge.cue_name,
+            transport_kind:     edge.transport.kind,
+            dispatcher_fn_name: fn_dispatch,
+            is_zero_copy:       is_zc,
+            ring_buffer_cap:    r_cap,
+        });
+
+        i = i + 1;
+    }
+
+    return plan;
+}

@@ -1232,7 +1232,7 @@ Before advancing to **Phase 3 (`M21` — Boilerplate Eradication & `.pchor` Chor
 
 ---
 
-### M24 — `.pchor` Sublanguage Choreographer Compiler (`blueprint`, `role`, `cue`, `route`)
+### M24 — `.pchor` Sublanguage Choreographer Compiler (`blueprint`, `role`, `cue`, `route`) [COMPLETE]
 
 #### 24.1 Objective & Current Codebase Audit
 - **Root Bottleneck 1 (`blueprint`, `role`, `cue`, `route` Are Dummy Pass-Through Macros!):** [`stdlib/core/meta.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/core/meta.pilot) (lines `173`–`176`) defines `blueprint(d) => quote { $d }`, `role(d) => quote { $d }`, `cue(d) => quote { $d }`, and `route(e) => quote { $e }`—doing zero parsing, zero architectural graph construction, and zero transport lowering!

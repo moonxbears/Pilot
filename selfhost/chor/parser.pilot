@@ -1,0 +1,308 @@
+// ==============================================================================
+// FILE: selfhost/chor/parser.pilot
+// Milestone 24: .pchor Sublanguage Choreographer - Parser
+// Parses blueprint, storage, role, cue, route, and law declarations.
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Chor.Parser;
+
+use Pilot.SelfHost.Chor.Ast.*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Lexing & Whitespace Helpers
+// ------------------------------------------------------------------------------
+
+pure fn chor_is_space(b: i64) -> bool => b == 32 || b == 9 || b == 10 || b == 13;
+pure fn chor_is_ident_start(b: i64) -> bool => (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
+pure fn chor_is_ident_char(b: i64) -> bool => chor_is_ident_start(b) || (b >= 48 && b <= 57) || b == 46; // '.' for dotted paths
+
+pure fn chor_skip_ws(src: str, start: usize) -> usize {
+    let n = src.len();
+    var cur = start;
+    while cur < n {
+        let b = src.byte_at(cur);
+        if chor_is_space(b) {
+            cur = cur + 1;
+        } else if b == 47 && cur + 1 < n && src.byte_at(cur + 1) == 47 { // // comment
+            cur = cur + 2;
+            while cur < n && src.byte_at(cur) != 10 { cur = cur + 1; }
+        } else {
+            break;
+        }
+    }
+    return cur;
+}
+
+pure fn chor_read_ident(src: str, start: usize) -> str {
+    let n = src.len();
+    var cur = start;
+    if cur < n && chor_is_ident_start(src.byte_at(cur)) {
+        cur = cur + 1;
+        while cur < n && chor_is_ident_char(src.byte_at(cur)) {
+            cur = cur + 1;
+        }
+        return src.slice(start, cur);
+    }
+    return "";
+}
+
+pure fn chor_trim(s: str) -> str {
+    let n = s.len();
+    var st: usize = 0;
+    while st < n && chor_is_space(s.byte_at(st)) { st = st + 1; }
+    var en: usize = n;
+    while en > st && chor_is_space(s.byte_at(en - 1)) { en = en - 1; }
+    if en > st { return s.slice(st, en); }
+    return "";
+}
+
+// ------------------------------------------------------------------------------
+// 2. Blueprint Parser
+// ------------------------------------------------------------------------------
+
+pub fn parse_pchor_source(src: str) -> BlueprintDef {
+    var bp = blueprint_def_new("DefaultBlueprint");
+    let n = src.len();
+    var pos: usize = 0;
+
+    while pos < n {
+        pos = chor_skip_ws(src, pos);
+        if pos >= n { break; }
+
+        let kw = chor_read_ident(src, pos);
+        if kw == "blueprint" {
+            pos = chor_skip_ws(src, pos + 9);
+            let bp_name = chor_read_ident(src, pos);
+            bp.name = bp_name;
+            pos = chor_skip_ws(src, pos + bp_name.len());
+            if pos < n && src.byte_at(pos) == 123 { // '{'
+                pos = pos + 1;
+            }
+            continue;
+        }
+
+        // storage Name: Type(strategy: "SoA", capacity: 1000);
+        if kw == "storage" {
+            pos = chor_skip_ws(src, pos + 7);
+            let s_name = chor_read_ident(src, pos);
+            pos = chor_skip_ws(src, pos + s_name.len());
+            var ent_ty = "";
+            var strat = "AoS";
+            var cap: usize = 1024;
+
+            if pos < n && src.byte_at(pos) == 58 { // ':'
+                pos = chor_skip_ws(src, pos + 1);
+                ent_ty = chor_read_ident(src, pos);
+                pos = chor_skip_ws(src, pos + ent_ty.len());
+            }
+
+            // Read until ';'
+            while pos < n && src.byte_at(pos) != 59 {
+                if src.slice(pos, pos + 3) == "SoA" { strat = "SoA"; }
+                else if src.slice(pos, pos + 5) == "AoSoA" { strat = "AoSoA"; }
+                else if src.slice(pos, pos + 7) == "HotCold" { strat = "HotCold"; }
+                pos = pos + 1;
+            }
+            if pos < n && src.byte_at(pos) == 59 { pos = pos + 1; }
+
+            bp.storages.push(StorageBinding {
+                name:        s_name,
+                entity_type: ent_ty,
+                strategy:    strat,
+                capacity:    cap,
+            });
+            continue;
+        }
+
+        // role Name [HardRealtime] { reads: ...; writes: ...; emits: ...; receives: ...; }
+        if kw == "role" {
+            pos = chor_skip_ws(src, pos + 4);
+            let r_name = chor_read_ident(src, pos);
+            pos = chor_skip_ws(src, pos + r_name.len());
+            var is_hrt = false;
+
+            // Check [HardRealtime]
+            if pos < n && src.byte_at(pos) == 91 { // '['
+                while pos < n && src.byte_at(pos) != 93 {
+                    if src.slice(pos, pos + 12) == "HardRealtime" { is_hrt = true; }
+                    pos = pos + 1;
+                }
+                if pos < n && src.byte_at(pos) == 93 { pos = pos + 1; }
+                pos = chor_skip_ws(src, pos);
+            }
+
+            var role_contract = role_contract_new(r_name, is_hrt);
+
+            if pos < n && src.byte_at(pos) == 123 { // '{'
+                pos = pos + 1;
+                while pos < n && src.byte_at(pos) != 125 {
+                    pos = chor_skip_ws(src, pos);
+                    if pos >= n || src.byte_at(pos) == 125 { break; }
+                    let clause = chor_read_ident(src, pos);
+                    pos = chor_skip_ws(src, pos + clause.len());
+                    if pos < n && src.byte_at(pos) == 58 { pos = pos + 1; } // ':'
+
+                    var item_end = pos;
+                    while item_end < n && src.byte_at(item_end) != 59 && src.byte_at(item_end) != 125 {
+                        item_end = item_end + 1;
+                    }
+                    let item_str = chor_trim(src.slice(pos, item_end));
+
+                    if clause == "reads" { role_contract.read_storages.push(item_str); }
+                    else if clause == "writes" { role_contract.write_storages.push(item_str); }
+                    else if clause == "emits" { role_contract.emitted_cues.push(item_str); }
+                    else if clause == "receives" { role_contract.handled_cues.push(item_str); }
+
+                    pos = if item_end < n && src.byte_at(item_end) == 59 { item_end + 1 } else { item_end };
+                }
+                if pos < n && src.byte_at(pos) == 125 { pos = pos + 1; }
+            }
+
+            bp.roles.push(role_contract);
+            continue;
+        }
+
+        // cue Name(PayloadType);
+        if kw == "cue" {
+            pos = chor_skip_ws(src, pos + 3);
+            let c_name = chor_read_ident(src, pos);
+            pos = chor_skip_ws(src, pos + c_name.len());
+            var p_ty = "";
+            var is_iso = false;
+            var lat: u8 = 0; // 0b00=Val default
+
+            if pos < n && src.byte_at(pos) == 40 { // '('
+                pos = pos + 1;
+                var p_end = pos;
+                while p_end < n && src.byte_at(p_end) != 41 { p_end = p_end + 1; }
+                let full_payload = chor_trim(src.slice(pos, p_end));
+                if full_payload.starts_with("iso ") {
+                    is_iso = true;
+                    p_ty = chor_trim(full_payload.slice(4, full_payload.len()));
+                    lat = 2; // 0b10 Object with iso
+                } else if full_payload.starts_with("slice<") || full_payload.contains("View") {
+                    lat = 1; // 0b01 Reference (Forbidden by 2-bit cue law!)
+                    p_ty = full_payload;
+                } else if full_payload.contains("Guard") {
+                    lat = 3; // 0b11 Guard (Forbidden!)
+                    p_ty = full_payload;
+                } else if full_payload.contains("Buffer") || full_payload.contains("List") {
+                    lat = 2; // 0b10 Object without iso
+                    p_ty = full_payload;
+                } else {
+                    lat = 0; // 0b00 Value
+                    p_ty = full_payload;
+                }
+                pos = if p_end < n { p_end + 1 } else { n };
+            }
+
+            while pos < n && src.byte_at(pos) != 59 { pos = pos + 1; }
+            if pos < n && src.byte_at(pos) == 59 { pos = pos + 1; }
+
+            bp.cues.push(CueContract {
+                name:              c_name,
+                payload_type:      p_ty,
+                payload_layout_id: 1,
+                payload_lattice:   lat,
+                requires_iso_move: is_iso,
+                backpressure:      BackpressurePolicy::Block,
+                priority:          1,
+            });
+            continue;
+        }
+
+        // route FromRole.Cue -> ToRole.handler (transport: ::RingBuffer(1024, ::CoalesceLatest));
+        if kw == "route" {
+            pos = chor_skip_ws(src, pos + 5);
+            let from_part = chor_read_ident(src, pos);
+            pos = chor_skip_ws(src, pos + from_part.len());
+
+            var f_role = from_part;
+            var c_name = "";
+            let dot_idx = from_part.index_of(".");
+            if dot_idx >= 0 {
+                f_role = from_part.slice(0, dot_idx as usize);
+                c_name = from_part.slice((dot_idx as usize) + 1, from_part.len());
+            }
+
+            // Skip '->'
+            if pos + 1 < n && src.slice(pos, pos + 2) == "->" {
+                pos = chor_skip_ws(src, pos + 2);
+            }
+
+            let to_part = chor_read_ident(src, pos);
+            pos = chor_skip_ws(src, pos + to_part.len());
+            var t_role = to_part;
+            var t_handler = "handle";
+            let to_dot = to_part.index_of(".");
+            if to_dot >= 0 {
+                t_role = to_part.slice(0, to_dot as usize);
+                t_handler = to_part.slice((to_dot as usize) + 1, to_part.len());
+            }
+
+            // Parse transport
+            var trans = TransportSpec::direct_call();
+            var is_block = false;
+            while pos < n && src.byte_at(pos) != 59 {
+                if src.slice(pos, pos + 10) == "RingBuffer" {
+                    trans.kind = TransportKind::RingBuffer;
+                    trans.capacity = 1024;
+                } else if src.slice(pos, pos + 14) == "CoalesceLatest" {
+                    trans.backpressure = BackpressurePolicy::CoalesceLatest;
+                } else if src.slice(pos, pos + 7) == "TryFail" {
+                    trans.backpressure = BackpressurePolicy::TryFail;
+                } else if src.slice(pos, pos + 5) == "Block" {
+                    is_block = true;
+                    trans.backpressure = BackpressurePolicy::Block;
+                }
+                pos = pos + 1;
+            }
+            if pos < n && src.byte_at(pos) == 59 { pos = pos + 1; }
+
+            bp.routes.push(RouteEdge {
+                from_role:  f_role,
+                cue_name:   c_name,
+                to_role:    t_role,
+                to_handler: t_handler,
+                transport:  trans,
+            });
+            continue;
+        }
+
+        // law LawName: role RoleA cannot use std.fs.*;
+        if kw == "law" {
+            pos = chor_skip_ws(src, pos + 3);
+            let l_name = chor_read_ident(src, pos);
+            pos = chor_skip_ws(src, pos + l_name.len());
+            if pos < n && src.byte_at(pos) == 58 { pos = pos + 1; } // ':'
+
+            var target = "";
+            var prohibited = "";
+            while pos < n && src.byte_at(pos) != 59 {
+                if src.slice(pos, pos + 4) == "role" {
+                    pos = chor_skip_ws(src, pos + 4);
+                    target = chor_read_ident(src, pos);
+                } else if src.slice(pos, pos + 10) == "cannot use" {
+                    pos = chor_skip_ws(src, pos + 10);
+                    prohibited = chor_read_ident(src, pos);
+                }
+                pos = pos + 1;
+            }
+            if pos < n && src.byte_at(pos) == 59 { pos = pos + 1; }
+
+            bp.laws.push(ArchPolicyRule {
+                rule_name:          l_name,
+                target_role_or_pkg: target,
+                prohibited_pkg:     prohibited,
+                must_be_noalloc:    false,
+            });
+            continue;
+        }
+
+        pos = pos + 1;
+    }
+
+    return bp;
+}

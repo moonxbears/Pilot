@@ -171,11 +171,7 @@ pub comptime fn verify_cue_payload<TPayload: IAnyValue>(is_iso_qualified: bool) 
 }
 
 pub syntax {
-    state(state_decl)         => quote { $state_decl };
-    blueprint(blueprint_decl) => quote { $blueprint_decl };
-    role(role_decl)           => quote { $role_decl };
-    cue(cue_decl)             => quote { $cue_decl };
-    route(route_expr)         => quote { $route_expr };
+    state(state_decl) => quote { $state_decl };
 }
 
 // =========================================================================
