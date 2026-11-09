@@ -1,6 +1,6 @@
 # AGENTS.md — Pilot Language AI Coding & Architecture Guidelines
 
-> **Master Companion References:** Always consult [`VISION.md`](file:///home/moony/Documents/dev/projects/Pilot/VISION.md) (North Star philosophy, syntax pairings, Universal Foreign Adapter, `.pchor`, and toolchain design) and [`MILESTONES_100.md`](file:///home/moony/Documents/dev/projects/Pilot/MILESTONES_100.md) (`M1` $\rightarrow$ `M50` Pilot 1.0 $\rightarrow$ `M100` Pilot 2.0 roadmap) when designing or implementing features.
+> **Master Companion References:** Always consult [`VISION.md`](file:///home/moony/Documents/dev/projects/Pilot/VISION.md) (North Star philosophy, syntax pairings, Universal Foreign Adapter, `.pchor`, and toolchain design), [`MILESTONES_100.md`](file:///home/moony/Documents/dev/projects/Pilot/MILESTONES_100.md) (`M1` $\rightarrow$ `M50` Pilot 1.0 $\rightarrow$ `M100` Pilot 2.0 roadmap), and [`imp_type.md`](file:///home/moony/Documents/dev/projects/Pilot/imp_type.md) (type selection decision matrix based on projected values, cardinality, domain constraints, and 2-bit hardware lattice rules) when designing or constructing any implementation.
 
 ---
 
@@ -81,6 +81,16 @@ Every type originates from `IAnyValue` (0 runtime header bytes) and is classifie
   - **Ring 1 (`core.*`):** Freestanding hardware/language core (`0` OS/libc/filesystem/network imports — `RING001`).
   - **Ring 2 (`std.*`):** Hosted standard library (`std.col`, `std.text`, `std.io`, `std.fs`, `std.net`, `std.http`, `std.sync`, `std.chan`, `std.time`, `std.math`, `std.rand`, `std.crypto`, `std.db`, `std.serde.*`, `std.compress`, `std.proc`, `std.cli`, `std.test`, `std.bench`, `std.log`, `std.polyglot.*`). Never name modules after Python/foreign clones (`pickle`, `urllib`, `pandas`, `unittest`, `tomllib`, `shutil`).
   - **Ring 3 (`pilot.*`):** First-class Compiler-as-a-Library (`pilot.lex`, `pilot.cst`, `pilot.ast`, `pilot.types`, `pilot.ir`, `pilot.fmt`, `pilot.db`, `pilot.vm`, `pilot.diag`, `pilot.abi`, `pilot.chor`, `pilot.pkg`, `pilot.mcp`).
+- **Mandatory Type Selection & Implementation Rules ([`imp_type.md`](file:///home/moony/Documents/dev/projects/Pilot/imp_type.md)):**
+  When constructing any implementation, data structure, or domain model, agents MUST consult and strictly obey [`imp_type.md`](file:///home/moony/Documents/dev/projects/Pilot/imp_type.md):
+  1. **Predefined Finite Sets ($\le 19$ items):** Implement as `enum : u8/u16` with target-typed `::Variant`. Never use stringly-typed constants or magic integers.
+  2. **Large Sets ($20+$ varieties / elements):** Implement as table-driven `array<T, N>` or `comptime Map<K, V>` open registries with integer ID handles to prevent closed, rigid switches.
+  3. **Fixed Composite Records:** Implement as `[Layout(c_abi)] struct : IValue` (`0b00`) with trivial `memcpy` and zero allocation overhead.
+  4. **Varying Implementations / Polymorphic Behavior:** Implement as an `interface` contract with concrete `struct`s, composing shared state via `*Bundle` and shared methods via `*Facet`.
+  5. **Orthogonal Combinations:** Implement as `bitflags : u32/u64`, never multiple booleans.
+  6. **Generics:** Always constrain type parameters (`<T : IConstraint>`), never write unconstrained `<T>` with runtime reflection guesswork.
+  7. **Unambiguous Absences & Failures:** Represent absence as `opt<T>` (`T?`) and expected domain errors as `res<T, E>` (`T ! E`), never sentinels (`null`, `-1`).
+  8. **Memory Boundaries:** Distinguish read-only borrowed views (`0b01` `...View` / `slice<T>`), owned dynamic allocations (`0b10` `...Buffer` / `List<T>`), and scoped cleanup resources (`0b11` `...Guard`).
 
 ---
 
