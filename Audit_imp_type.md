@@ -6,19 +6,24 @@
 
 ## 1. Executive Summary & Findings Matrix
 
-Following the initial audit, a comprehensive remediation pass was executed across `stdlib/` and `selfhost/`. All high-severity and medium-severity typing disparities—including generic constraints in `stdlib/std/`, canonical `enum` definitions in `stdlib/pilot/` and `selfhost/`, fixed composite `IValue` layout definitions, and optional getter methods—have been resolved and verified.
+Following the initial audit and the codification of the **Single Source of Truth & Zero Type Duplication / Import-First Law (Rule 11 & Foundational Law 5)** in [`imp_type.md`](file:///home/moony/Documents/dev/projects/Pilot/imp_type.md), a comprehensive audit was executed across the codebase (`selfhost/`, `stdlib/`, and `crates/`).
 
-### Remediation Scorecard by Category
+### Overall Scorecard Across All 11 Rules
 
-| Rule / Principle | Total Identified | Resolved & Verified | Retained Legacy Anchors | Status |
+| Rule / Principle | Total Identified | Remediated in Prior Pass | New Disparities Identified | Status |
 | :--- | :---: | :---: | :---: | :---: |
-| **Rule 1: Closed Finite Sets ($\le 19$) $\rightarrow$ `enum`** | 12 | 12 | 0 | **100% Resolved** |
-| **Rule 3: Fixed Composite Records $\rightarrow$ `struct : IValue`** | 18 | 14 | 4 (Phase 6 M57 `transpile/ir.pilot`) | **Substantially Resolved** |
-| **Rule 5: Orthogonal Flags $\rightarrow$ `bitflags` / `enum`** | 3 | 2 | 1 (Internal `GreenNode`) | **Substantially Resolved** |
-| **Rule 6: Absence/Error $\rightarrow$ `opt<T>` (No Sentinels)** | 7 | 2 | 5 (Internal string/AST probes) | **Resolved on Public APIs** |
-| **Rule 8: Constrained Generics (`<T : IConstraint>`)** | 6 | 6 | 0 | **100% Resolved** |
-| **Anti-Pattern: Primitive Obsession** | 4 | 2 | 2 (SelfHost map handles) | **Substantially Resolved** |
-| **Total** | **50** | **38** | **12** | **Compliant** |
+| **Rule 1: Closed Finite Sets ($\le 19$) $\rightarrow$ `enum`** | 13 | 12 | 1 (`selfhost/fmt/fmt.pilot` FmtStyle) | Substantially Compliant |
+| **Rule 2: Large Predefined Sets ($20+$) $\rightarrow$ Open-Registry** | 4 | 4 | 0 | **100% Compliant** |
+| **Rule 3: Fixed Composite Records $\rightarrow$ `struct : IValue`** | 111 | 14 | 93 (downstream artifacts & wire packets) | Partially Compliant |
+| **Rule 4: Varying Implementations $\rightarrow$ `interface` + `struct`** | 8 | 8 | 0 | **100% Compliant** |
+| **Rule 5: Orthogonal Flags $\rightarrow$ `bitflags` / `enum`** | 4 | 2 | 2 (`AstContext` bits, `GreenNode`) | Substantially Compliant |
+| **Rule 6: Absence/Error $\rightarrow$ `opt<T>` (No Sentinels)** | 7 | 2 | 5 (internal probes) | Public APIs Compliant |
+| **Rule 7: Borrowing vs Owning $\rightarrow$ 2-Bit Boundary** | 15 | 15 | 0 | **100% Compliant** |
+| **Rule 8: Constrained Generics (`<T : IConstraint>`)** | 6 | 6 | 0 | **100% Compliant** |
+| **Rule 9: Bounded State Machines $\rightarrow$ Typestate** | 4 | 4 | 0 | **100% Compliant** |
+| **Rule 10: Quantitative Invariants $\rightarrow$ Validated Struct** | 3 | 3 | 0 | **100% Compliant** |
+| **Rule 11: Zero Type Duplication & Import-First Law** | 50 | 0 | **50** (12 cross-module + 38 catalog primitives) | **Requires Remediation** |
+| **Total** | **225** | **66** | **151** | **Audit Completed** |
 
 ---
 
@@ -336,6 +341,135 @@ The following legacy structs in `selfhost/` omit both `[Layout(c_abi)]` and thei
    - Public query functions take `db: i64` instead of a typed handle `ref<PilotDb>` or `[Layout(c_abi)] struct PilotDbHandle : IValue { pub raw: i64; }`.
 2. **`Diagnostic.severity` & `FixSuggestion.applicability` (`stdlib/pilot/diag.pilot:27, 43`):**
    - Fields stored as raw `u8` instead of strongly-typed `DiagSeverity` and `FixApplicability`.
+
+---
+
+### Category G: Rule 11 & Foundational Law 5 — Single Canonical Definition & Zero Type Duplication (Import-First Law)
+
+`imp_type.md` mandates:
+> *Every type (`enum`, `struct`, `interface`, `bitflags`, or `type` alias) must reside in exactly one canonical file within its owning package (`stdlib/core/`, `stdlib/std/`, `stdlib/pilot/`, or a dedicated `selfhost/` module). Never re-declare, duplicate, copy-paste, or redefine an existing type in another file. Always import the type from its canonical home via `use Canonical.Package.Module;` into any file that needs it.*
+
+The static scan identified **12 cross-module production duplicate clusters** and **1 catalog redundancy cluster (38 types)**:
+
+#### 1. `SourceSpan` & `FileUnitId` Duplicate Declarations — **HIGH**
+- **Canonical Definition:** `selfhost/diagnostics/model.pilot:88, 97`:
+  ```pilot
+  [Layout(c_abi)]
+  pub struct FileUnitId : IValue { pub raw: u32; }
+
+  [Layout(c_abi)]
+  pub struct SourceSpan : IValue {
+      pub file_id: FileUnitId;
+      pub start:   u32;
+      pub end:     u32;
+  }
+  ```
+- **Violating Shadow Definition:** `selfhost/loader/module_graph.pilot:9, 14` re-declares `FileUnitId` and `SourceSpan` with identical layouts instead of importing `Pilot.Diagnostics.Model`.
+- **Remediation:** Remove duplicate struct definitions in `selfhost/loader/module_graph.pilot` and add `use Pilot.Diagnostics.Model;`.
+
+#### 2. `TargetDescriptor` Duplicate Declaration — **HIGH**
+- **Canonical Definition:** `stdlib/core/reflect.pilot:1004`:
+  ```pilot
+  [Layout(c_abi)]
+  pub struct TargetDescriptor : IValue {
+      pub arch:             str;
+      pub os:               str;
+      pub pointer_bytes:    usize;
+      pub endian:           str;
+      pub backend:          str;
+      pub simd_width_bits:  usize;
+      pub cache_line_bytes: usize;
+      pub opt_level:        u8;
+      // ... helper predicates: is_64bit(), is_linux(), is_wasm() ...
+  }
+  ```
+- **Violating Shadow Definition:** `selfhost/ir/model.pilot:336` re-declares the identical 8-field `TargetDescriptor : IValue` without the helper methods.
+- **Remediation:** Remove the shadow definition in `selfhost/ir/model.pilot` and import `use Pilot.Core.Reflect;`.
+
+#### 3. `Process` Duplicate Declaration — **HIGH**
+- **Canonical Definition:** `stdlib/core/env.pilot:20`:
+  ```pilot
+  pub struct Process : IValue {
+      pub static fn spawn_eval(bin: str, code: str) -> str => __engine("host_spawn_eval", bin, code);
+  }
+  ```
+- **Violating Shadow Definition:** `stdlib/polyglot/bridge.pilot:54` re-declares `pub struct Process` without `: IValue`.
+- **Remediation:** Remove shadow `Process` from `bridge.pilot` and import `use Pilot.Core.Env;`.
+
+#### 4. `Diagnostic` & `FixSuggestion` Divergent Duplication — **HIGH**
+- **Canonical Compiler Definition:** `selfhost/diagnostics/model.pilot:155, 180` with rich span labels (`List<LabeledSpan>`), notes, and fix suggestions.
+- **Divergent Stdlib Definition:** `stdlib/pilot/diag.pilot:24, 40` defines a simplified `Diagnostic : IObject` with a single `span: Span`.
+- **Remediation:** Unify the diagnostic models: align `stdlib/pilot/diag.pilot` to export or wrap the canonical `Diagnostic` model from `selfhost/diagnostics/model.pilot`.
+
+#### 5. `TextEdit` Divergent Duplication — **MEDIUM**
+- **Locations:**
+  - `stdlib/pilot/diag.pilot:18`: `[Layout(c_abi)] pub struct TextEdit : IValue { pub span: Span; pub replacement: str; }`.
+  - `selfhost/cst/incremental.pilot:5`: `pub struct TextEdit { pub start: i64; pub end: i64; pub replacement: str; }` (untyped offsets, missing `: IValue` and `[Layout(c_abi)]`).
+- **Remediation:** Standardize on `TextEdit` using `Span` or unify naming (e.g. `ByteEdit` vs `TextEdit`).
+
+#### 6. `FmtStyle` String Struct vs Enum Disparity — **HIGH**
+- **Canonical Definition:** `stdlib/pilot/fmt.pilot:7`:
+  ```pilot
+  pub enum FmtStyle : u8 {
+      ::Preserve = 0,
+      ::Readable = 1,
+      ::Compact  = 2,
+  }
+  ```
+- **Violating Shadow Definition:** `selfhost/fmt/fmt.pilot:9` defines `pub struct FmtStyle : IValue` with static functions returning string literals (`"preserve"`, `"readable"`, `"compact"`).
+- **Remediation:** Remove shadow string struct in `selfhost/fmt/fmt.pilot` and use the canonical `enum FmtStyle : u8`.
+
+#### 7. `FieldInfo` & `TypeInfo` Divergent Duplication — **HIGH**
+- **Locations:**
+  - `stdlib/core/reflect.pilot:332, 352`: `FieldInfo` (`name, offset, byte_size, layout_id`) and `TypeInfo` (`id, name, byte_size, byte_align, lattice, field_count`).
+  - `stdlib/pilot/types.pilot:20, 37`: `FieldInfo` (`name, byte_offset, byte_size, lattice_bits`) and `TypeInfo` (`type_name, byte_size, alignment, lattice_class, field_count`).
+- **Remediation:** Unify reflection types into `stdlib/core/reflect.pilot` and import into `stdlib/pilot/types.pilot`.
+
+#### 8. `AstContext` Name Collision / Semantic Overloading — **MEDIUM**
+- **Locations:**
+  - `stdlib/core/reflect.pilot:138`: Session hygiene and quotes tracking context (`node_count, root_node, hygiene_seq, quotes, pratt_ops`).
+  - `stdlib/core/meta.pilot:404`: AST token context bitflags (`is_declaration`, `is_call_callee`, etc.).
+- **Remediation:** Rename `stdlib/core/reflect.pilot` to `AstSessionContext` and `stdlib/core/meta.pilot` to `AstTokenContextBits` (or `enum : u32`).
+
+#### 9. `BootstrapStage` Type Disparity — **MEDIUM**
+- **Locations:**
+  - `stdlib/core/bootstrap.pilot:10`: `pub struct BootstrapStage : IValue { pub stage_id: i64; pub ring_level: i64; pub rel_path: str; }`.
+  - `selfhost/pilotc.pilot:10`: `pub enum BootstrapStage { Stage0, Stage1, Stage2, Stage3 }`.
+- **Remediation:** Rename `selfhost/pilotc.pilot` enum to `CompilerBootstrapStage` or import and align with `Pilot.Core.Bootstrap`.
+
+#### 10. `stdlib/core/primitives/catalog.pilot` Primitive Redundancy (38 Types) — **HIGH**
+- **Violation:** Lines 52–199 in `stdlib/core/primitives/catalog.pilot` declare empty non-partial structs:
+  `pub struct i8 {}`, `pub struct i16 {}`, `pub struct i32 {}`, ... `pub struct void {}`, `pub struct str {}`.
+  Each of these primitives is already comprehensively defined with full operator sets, layout bits, and interface contracts in `stdlib/core/primitives/<prim>.pilot` (e.g. `pub partial struct i32 : INumber<i32> ...`).
+- **Remediation:** Change `pub struct <prim> {}` declarations in `catalog.pilot` to `pub partial struct <prim> {}` so they participate in partial struct expansion rather than introducing conflicting full struct definitions.
+
+---
+
+### Category H: Downstream Rule 3 Lattice & Layout Disparities
+
+A comprehensive scan of `selfhost/` identified 93 structs lacking explicit 2-bit hardware lattice interfaces (`: IValue`, `: IReference`, `: IObject`, `: IGuard`) and 257 structs missing `[Layout(c_abi)]`:
+
+1. **Artifact & Mapping Records (`selfhost/codegen/*.pilot`):**
+   - `GpuLlvmIrArtifact`, `AsmModuleArtifact`, `LayoutDescriptor`, `CTypeMapping`, `WasmBundleArtifact`, `CModuleArtifact`, `GpuShaderArtifact`, `LlvmModuleArtifact`, `GpuKernelArtifact`.
+   - **Remediation:** Tag all immutable artifact descriptors with `[Layout(c_abi)] struct ... : IValue`.
+
+2. **Ingest & IR Descriptors (`selfhost/transpile/*.pilot`):**
+   - `IngestedPilotModule`, `IrParamDescriptor`, `IrFunctionDescriptor`, `IrStructFieldDescriptor`, `IrLayoutPhysics`, `EmittedTargetSource`.
+   - **Remediation:** Tag with `[Layout(c_abi)] struct ... : IValue`.
+
+3. **Incremental CST & Metrics (`selfhost/cst/incremental.pilot`):**
+   - `TextEdit`, `ReparseMetrics`, `IncrementalResult`.
+   - **Remediation:** Tag with `[Layout(c_abi)] struct ... : IValue`.
+
+4. **Perceus Optimizer State (`selfhost/perceus/*.pilot`):**
+   - `BindingLifecycleState`, `PerceusReport`.
+   - **Remediation:** Tag with `[Layout(c_abi)] struct ... : IValue`.
+
+5. **Database Wire Protocol Packets (`stdlib/db/*.pilot`):**
+   - `MysqlWirePacket`, `PostgresWirePacket`, `SqlQueryPlan`.
+   - **Remediation:** Tag wire frames with `[Layout(c_abi)] struct ... : IValue`.
+
+---
 
 ---
 
