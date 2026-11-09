@@ -1,0 +1,373 @@
+// ==============================================================================
+// FILE: selfhost/types/bundle_splice.pilot
+// Milestone 22: *Bundle & *Facet Algebraic Composition Engine
+// Arbitrary N-field layout flattener, transitive *Bundle DAG expander,
+// horizontal collision algebra (coalesce, with, without), partial struct sealer,
+// and 2-bit hardware lattice enforcement.
+// Enforces: COMP001, COMP002, COMP003, COMP004, COMP005, COMP006.
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Types.BundleSplice;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Splice Modifiers & Field Layout Schemas (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+pub enum SpliceModifierKind : u8 {
+    ::Coalesce       = 1,
+    ::AliasWith      = 2,
+    ::ExcludeWithout = 3,
+}
+
+[Layout(c_abi)]
+pub struct PhysicalFieldSlot : IValue {
+    pub canonical_name:    str;
+    pub type_name:         str;
+    pub layout_id:         usize;
+    pub byte_offset:       usize;
+    pub byte_size:         usize;
+    pub lattice_bits:      u8; // 0b00=Val, 0b01=Ref, 0b10=Obj, 0b11=Guard
+    pub is_mutable:        bool;
+    pub is_hidden_backing: bool;
+    pub origin_bundle:     str;
+}
+
+[Layout(c_abi)]
+pub struct BundleFieldDef : IValue {
+    pub name:         str;
+    pub type_name:    str;
+    pub layout_id:    usize;
+    pub byte_size:    usize;
+    pub lattice_bits: u8;
+    pub is_mutable:   bool;
+}
+
+pub struct BundleMethodDef : IObject {
+    pub name:            str;
+    pub return_type:     str;
+    pub params:          str;
+    pub is_mut:          bool;
+    pub accessed_fields: List<str>;
+}
+
+pub struct BundleDef : IObject {
+    pub name:            str;
+    pub is_facet:        bool; // true if 0 fields (pure method facet)
+    pub fields:          List<BundleFieldDef>;
+    pub methods:         List<BundleMethodDef>;
+    pub spliced_bundles: List<str>; // Transitive bundle splices
+}
+
+pub struct BundleSpliceDirective : IObject {
+    pub bundle_name:     str;
+    pub coalesce_fields: List<str>;
+    pub with_aliases:    Map<str, str>; // old_name -> new_name
+    pub without_items:   List<str>;    // excluded fields or methods
+}
+
+pub fn bundle_def_new(name: str, is_facet: bool) -> BundleDef {
+    return BundleDef {
+        name:            name,
+        is_facet:        is_facet,
+        fields:          [],
+        methods:         [],
+        spliced_bundles: [],
+    };
+}
+
+pub fn bundle_splice_directive_new(bname: str) -> BundleSpliceDirective {
+    return BundleSpliceDirective {
+        bundle_name:     bname,
+        coalesce_fields: [],
+        with_aliases:    [:],
+        without_items:   [],
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 2. Struct Layout Plan & Remap Table (0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct StructLayoutPlan : IObject {
+    pub struct_name:       str;
+    pub is_partial:        bool;
+    pub declared_lattice:  u8; // 0b00, 0b01, 0b10, 0b11
+    pub explicit_dtor:     bool;
+    pub physical_fields:   List<PhysicalFieldSlot>;
+    pub remap_offsets:     Map<str, usize>; // "Bundle.field" -> physical byte offset
+    pub remap_slots:       Map<str, usize>; // "Bundle.field" -> physical_field index
+    pub total_size:        usize;
+    pub alignment:         usize;
+    pub computed_lattice:  u8;
+    pub diagnostics:       List<str>;
+}
+
+pub fn struct_layout_plan_new(name: str, is_partial: bool, decl_lattice: u8) -> StructLayoutPlan {
+    return StructLayoutPlan {
+        struct_name:      name,
+        is_partial:       is_partial,
+        declared_lattice: decl_lattice,
+        explicit_dtor:    false,
+        physical_fields:  [],
+        remap_offsets:    [:],
+        remap_slots:      [:],
+        total_size:       0,
+        alignment:        8,
+        computed_lattice: 0,
+        diagnostics:      [],
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 3. Helper Functions & List Utilities
+// ------------------------------------------------------------------------------
+
+pure fn str_list_contains(items: List<str>, target: str) -> bool {
+    let n = items.len();
+    var i = 0;
+    while i < n {
+        if items[i] == target { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+pure fn align_up(offset: usize, align: usize) -> usize {
+    if align <= 1 { return offset; }
+    let rem = offset % align;
+    if rem == 0 { return offset; }
+    return offset + (align - rem);
+}
+
+// ------------------------------------------------------------------------------
+// 4. Cycle Detection in Transitive Bundle Splices (COMP002)
+// ------------------------------------------------------------------------------
+
+fn check_bundle_cycles_rec(
+    current: str,
+    all_bundles: Map<str, BundleDef>,
+    visiting: var ref<List<str>>,
+    visited: var ref<Map<str, bool>>,
+    diags: var ref<List<str>>
+) -> bool {
+    if str_list_contains(visiting, current) {
+        let msg = "COMP002: Cyclic *Bundle inclusion detected: " + current;
+        diags.push(msg);
+        return true;
+    }
+    if visited.has(current) {
+        return false;
+    }
+
+    if !all_bundles.has(current) {
+        return false;
+    }
+
+    visiting.push(current);
+    let b = all_bundles[current];
+    let n = b.spliced_bundles.len();
+    var i = 0;
+    while i < n {
+        let sub = b.spliced_bundles[i];
+        let had_cycle = check_bundle_cycles_rec(sub, all_bundles, var visiting, var visited, var diags);
+        if had_cycle { return true; }
+        i = i + 1;
+    }
+    let _ = visiting.pop();
+    visited[current] = true;
+    return false;
+}
+
+pub fn check_bundle_cycles(bundles: Map<str, BundleDef>, start: str, diags: var ref<List<str>>) -> bool {
+    var visiting: List<str> = [];
+    var visited: Map<str, bool> = [:];
+    return check_bundle_cycles_rec(start, bundles, var visiting, var visited, var diags);
+}
+
+// ------------------------------------------------------------------------------
+// 5. Arbitrary N-Field Layout Flattener & Collision Algebra
+// ------------------------------------------------------------------------------
+
+pub fn compute_struct_layout(
+    var ref plan: StructLayoutPlan,
+    primary_fields: List<BundleFieldDef>,
+    directives: List<BundleSpliceDirective>,
+    bundle_catalog: Map<str, BundleDef>
+) {
+    // 1. Add Tier-1 Explicit Primary Struct Fields
+    var cur_offset: usize = 0;
+    var max_align: usize = 1;
+    var max_lattice: u8 = if plan.explicit_dtor { 2 } else { 0 };
+
+    let n_prim = primary_fields.len();
+    var pfi = 0;
+    while pfi < n_prim {
+        let pf = primary_fields[pfi];
+        let f_align = if pf.byte_size >= 8 { 8 } else if pf.byte_size >= 4 { 4 } else if pf.byte_size >= 2 { 2 } else { 1 };
+        if f_align > max_align { max_align = f_align; }
+
+        cur_offset = align_up(cur_offset, f_align);
+
+        let slot = PhysicalFieldSlot {
+            canonical_name:    pf.name,
+            type_name:         pf.type_name,
+            layout_id:         pf.layout_id,
+            byte_offset:       cur_offset,
+            byte_size:         pf.byte_size,
+            lattice_bits:      pf.lattice_bits,
+            is_mutable:        pf.is_mutable,
+            is_hidden_backing: false,
+            origin_bundle:     "",
+        };
+        plan.physical_fields.push(slot);
+        cur_offset = cur_offset + pf.byte_size;
+        max_lattice = max_lattice | pf.lattice_bits;
+
+        pfi = pfi + 1;
+    }
+
+    // 2. Process Each Spliced *Bundle Directive
+    let n_dir = directives.len();
+    var di = 0;
+    while di < n_dir {
+        let dir = directives[di];
+        let bname = dir.bundle_name;
+
+        if !bundle_catalog.has(bname) {
+            di = di + 1;
+            continue;
+        }
+
+        let bdef = bundle_catalog[bname];
+
+        // COMP001: Cannot splice stateful bundle into layout-sealed partial struct
+        if plan.is_partial && (!bdef.is_facet && bdef.fields.len() > 0) {
+            let msg = "COMP001: Stateful *Bundle '" + bdef.name + "' spliced into layout-sealed 'partial struct'; only 0-field *Facet may be spliced in partial extensions";
+            plan.diagnostics.push(msg);
+            di = di + 1;
+            continue;
+        }
+
+        // COMP002: Check for cyclic bundle dependencies
+        var cycle_diags: List<str> = [];
+        if check_bundle_cycles(bundle_catalog, bname, var cycle_diags) {
+            var cj = 0;
+            while cj < cycle_diags.len() {
+                plan.diagnostics.push(cycle_diags[cj]);
+                cj = cj + 1;
+            }
+            di = di + 1;
+            continue;
+        }
+
+        // Process fields of the bundle
+        let bf_count = bdef.fields.len();
+        var bfi = 0;
+        while bfi < bf_count {
+            let bf = bdef.fields[bfi];
+
+            // Check if field is excluded via 'without'
+            if str_list_contains(dir.without_items, bf.name) {
+                // COMP006: Verify if any retained method still uses this excluded field
+                var mi = 0;
+                while mi < bdef.methods.len() {
+                    let m = bdef.methods[mi];
+                    if !str_list_contains(dir.without_items, m.name) {
+                        if str_list_contains(m.accessed_fields, bf.name) {
+                            let msg = "COMP006: 'without' excludes field '" + bf.name + "' referenced by retained bundle method '" + m.name + "'; exclude the method or alias field using 'with'";
+                            plan.diagnostics.push(msg);
+                        }
+                    }
+                    mi = mi + 1;
+                }
+                bfi = bfi + 1;
+                continue;
+            }
+
+            // Determine exposed field name (check 'with' alias)
+            var exposed_name = bf.name;
+            if dir.with_aliases.has(bf.name) {
+                exposed_name = dir.with_aliases[bf.name];
+            }
+
+            // Check if field is coalesced
+            let is_coalesced = str_list_contains(dir.coalesce_fields, bf.name) || str_list_contains(dir.coalesce_fields, exposed_name);
+
+            // Search for existing physical field with this exposed name
+            var existing_slot_idx: i64 = -1;
+            var si = 0;
+            while si < plan.physical_fields.len() {
+                if plan.physical_fields[si].canonical_name == exposed_name {
+                    existing_slot_idx = si as i64;
+                    break;
+                }
+                si = si + 1;
+            }
+
+            if existing_slot_idx >= 0 {
+                let ex_slot = plan.physical_fields[existing_slot_idx as usize];
+                if is_coalesced {
+                    // COMP003: Coalesce type, lattice, and mutability match check
+                    if ex_slot.byte_size != bf.byte_size || ex_slot.lattice_bits != bf.lattice_bits || ex_slot.is_mutable != bf.is_mutable {
+                        let msg = "COMP003: coalesce Field Type/Lattice/Mutability Mismatch for field '" + exposed_name + "' (size " + ex_slot.byte_size + " vs " + bf.byte_size + ", lattice " + ex_slot.lattice_bits + " vs " + bf.lattice_bits + ")";
+                        plan.diagnostics.push(msg);
+                    } else {
+                        // Point remap table for this bundle to the existing physical slot
+                        let remap_key = bname + "." + bf.name;
+                        plan.remap_offsets[remap_key] = ex_slot.byte_offset;
+                        plan.remap_slots[remap_key] = existing_slot_idx as usize;
+                    }
+                } else {
+                    // COMP004: Unresolved collision without coalesce, with, or without
+                    let msg = "COMP004: Unresolved Tier-2 field collision on '" + exposed_name + "' between existing struct and bundle '" + bname + "'. Help: resolve using 'coalesce { " + exposed_name + " }', 'with { " + bf.name + " as new_name }', or 'without { " + bf.name + " }'";
+                    plan.diagnostics.push(msg);
+                }
+            } else {
+                // Brand new physical field
+                let f_align = if bf.byte_size >= 8 { 8 } else if bf.byte_size >= 4 { 4 } else if bf.byte_size >= 2 { 2 } else { 1 };
+                if f_align > max_align { max_align = f_align; }
+
+                cur_offset = align_up(cur_offset, f_align);
+
+                let new_slot = PhysicalFieldSlot {
+                    canonical_name:    exposed_name,
+                    type_name:         bf.type_name,
+                    layout_id:         bf.layout_id,
+                    byte_offset:       cur_offset,
+                    byte_size:         bf.byte_size,
+                    lattice_bits:      bf.lattice_bits,
+                    is_mutable:        bf.is_mutable,
+                    is_hidden_backing: false,
+                    origin_bundle:     bname,
+                };
+                let new_idx = plan.physical_fields.len();
+                plan.physical_fields.push(new_slot);
+
+                let remap_key = bname + "." + bf.name;
+                plan.remap_offsets[remap_key] = cur_offset;
+                plan.remap_slots[remap_key] = new_idx;
+
+                cur_offset = cur_offset + bf.byte_size;
+                max_lattice = max_lattice | bf.lattice_bits;
+            }
+
+            bfi = bfi + 1;
+        }
+
+        di = di + 1;
+    }
+
+    // Pad total size to alignment
+    plan.alignment = max_align;
+    plan.total_size = align_up(cur_offset, max_align);
+    plan.computed_lattice = max_lattice;
+
+    // COMP005: 2-Bit Lattice Law Enforcement
+    // Splicing a field that borrows (0b01) or owns (0b10) into a struct declared IValue (0b00) is illegal
+    if plan.declared_lattice == 0 && max_lattice != 0 {
+        let msg = "COMP005: Declared Lattice Contract Violated: Struct '" + plan.struct_name + "' is declared ': IValue' (0b00), but spliced fields introduce lattice bits 0b" + if max_lattice == 1 { "01" } else if max_lattice == 2 { "10" } else { "11" };
+        plan.diagnostics.push(msg);
+    }
+}

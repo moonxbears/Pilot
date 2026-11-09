@@ -157,7 +157,8 @@ pub fn infer_struct(s_id: i64, node_count: i64) -> i64 {
         }
         fi_chk = fi_chk + 1;
     }
-    var num_fields = 0; var f0 = 0; var f1 = 0; var f2 = 0; var f3 = 0; var f4 = 0; var f5 = 0; var fi = 0;
+    var f_lids: List<i64> = [];
+    var fi = 0;
     while fi < c_count {
         let f_node = __engine(Cfg.ast.ast_child_at, s_id, fi);
         let f_kind = __engine(Cfg.ast.ast_node_kind, f_node);
@@ -165,15 +166,37 @@ pub fn infer_struct(s_id: i64, node_count: i64) -> i64 {
             let f_ty_sym = __engine(Cfg.ast.ast_node_raw_bits, f_node);
             let f_lid = resolve_type_sym(f_ty_sym, node_count);
             __engine(Cfg.ast.ast_bind_layout, f_node, f_lid);
-            if num_fields == 0 { f0 = f_lid; } else if num_fields == 1 { f1 = f_lid; } else if num_fields == 2 { f2 = f_lid; }
-            else if num_fields == 3 { f3 = f_lid; } else if num_fields == 4 { f4 = f_lid; } else if num_fields == 5 { f5 = f_lid; }
-            num_fields = num_fields + 1;
+            f_lids.push(f_lid);
         }
         fi = fi + 1;
     }
-    let agg_lid = if num_fields == 0 { __engine(Cfg.ast.layout_scalar, 8, 1, 0) } else if num_fields == 1 { __engine(Cfg.ast.layout_aggregate, f0) } else if num_fields == 2 { __engine(Cfg.ast.layout_aggregate, f0, f1) } else if num_fields == 3 { __engine(Cfg.ast.layout_aggregate, f0, f1, f2) } else if num_fields == 4 { __engine(Cfg.ast.layout_aggregate, f0, f1, f2, f3) } else if num_fields == 5 { __engine(Cfg.ast.layout_aggregate, f0, f1, f2, f3, f4) } else { __engine(Cfg.ast.layout_aggregate, f0, f1, f2, f3, f4, f5) };
-    __engine(Cfg.ast.ast_bind_layout, s_id, agg_lid);
-    return agg_lid;
+    let num_fields = f_lids.len();
+    var agg_lid = 0;
+    if num_fields == 0 { agg_lid = __engine(Cfg.ast.layout_scalar, 8, 1, 0); }
+    else if num_fields == 1 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0]); }
+    else if num_fields == 2 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1]); }
+    else if num_fields == 3 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2]); }
+    else if num_fields == 4 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3]); }
+    else if num_fields == 5 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4]); }
+    else if num_fields == 6 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5]); }
+    else if num_fields == 7 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6]); }
+    else if num_fields == 8 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7]); }
+    else if num_fields == 9 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7], f_lids[8]); }
+    else if num_fields == 10 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7], f_lids[8], f_lids[9]); }
+    else if num_fields == 11 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7], f_lids[8], f_lids[9], f_lids[10]); }
+    else if num_fields == 12 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7], f_lids[8], f_lids[9], f_lids[10], f_lids[11]); }
+    else if num_fields == 13 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7], f_lids[8], f_lids[9], f_lids[10], f_lids[11], f_lids[12]); }
+    else if num_fields == 14 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7], f_lids[8], f_lids[9], f_lids[10], f_lids[11], f_lids[12], f_lids[13]); }
+    else if num_fields == 15 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7], f_lids[8], f_lids[9], f_lids[10], f_lids[11], f_lids[12], f_lids[13], f_lids[14]); }
+    else if num_fields == 16 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7], f_lids[8], f_lids[9], f_lids[10], f_lids[11], f_lids[12], f_lids[13], f_lids[14], f_lids[15]); }
+    else if num_fields == 17 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7], f_lids[8], f_lids[9], f_lids[10], f_lids[11], f_lids[12], f_lids[13], f_lids[14], f_lids[15], f_lids[16]); }
+    else if num_fields == 18 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7], f_lids[8], f_lids[9], f_lids[10], f_lids[11], f_lids[12], f_lids[13], f_lids[14], f_lids[15], f_lids[16], f_lids[17]); }
+    else if num_fields == 19 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7], f_lids[8], f_lids[9], f_lids[10], f_lids[11], f_lids[12], f_lids[13], f_lids[14], f_lids[15], f_lids[16], f_lids[17], f_lids[18]); }
+    else if num_fields == 20 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7], f_lids[8], f_lids[9], f_lids[10], f_lids[11], f_lids[12], f_lids[13], f_lids[14], f_lids[15], f_lids[16], f_lids[17], f_lids[18], f_lids[19]); }
+    else if num_fields == 21 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7], f_lids[8], f_lids[9], f_lids[10], f_lids[11], f_lids[12], f_lids[13], f_lids[14], f_lids[15], f_lids[16], f_lids[17], f_lids[18], f_lids[19], f_lids[20]); }
+    else if num_fields == 22 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7], f_lids[8], f_lids[9], f_lids[10], f_lids[11], f_lids[12], f_lids[13], f_lids[14], f_lids[15], f_lids[16], f_lids[17], f_lids[18], f_lids[19], f_lids[20], f_lids[21]); }
+    else if num_fields == 23 { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7], f_lids[8], f_lids[9], f_lids[10], f_lids[11], f_lids[12], f_lids[13], f_lids[14], f_lids[15], f_lids[16], f_lids[17], f_lids[18], f_lids[19], f_lids[20], f_lids[21], f_lids[22]); }
+    else { agg_lid = __engine(Cfg.ast.layout_aggregate, f_lids[0], f_lids[1], f_lids[2], f_lids[3], f_lids[4], f_lids[5], f_lids[6], f_lids[7], f_lids[8], f_lids[9], f_lids[10], f_lids[11], f_lids[12], f_lids[13], f_lids[14], f_lids[15], f_lids[16], f_lids[17], f_lids[18], f_lids[19], f_lids[20], f_lids[21], f_lids[22], f_lids[23]); }
     __engine(Cfg.ast.ast_bind_layout, s_id, agg_lid);
     return agg_lid;
 }

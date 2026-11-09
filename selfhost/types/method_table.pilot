@@ -1,0 +1,178 @@
+// ==============================================================================
+// FILE: selfhost/types/method_table.pilot
+// Milestone 22: *Bundle & *Facet Algebraic Composition Engine
+// Deterministic 4-Tier MethodTable Builder & Horizontal Collision Resolver
+// Tier 1: Struct / Partial Struct Explicit Member (Wins Unconditionally)
+// Tier 2: Spliced *Bundle / *Facet / delegate Member
+// Tier 3: Sub-Interface Default Method
+// Tier 4: Base Interface Default Method
+// Tier 5: Scoped Extension (ext / use ext)
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Types.MethodTable;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Member Tiers & Method Entry Schemas (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+pub enum MemberTier : u8 {
+    ::Tier1ExplicitStruct      = 1,
+    ::Tier2SplicedBundleFacet  = 2,
+    ::Tier3SubInterfaceDefault = 3,
+    ::Tier4BaseInterfaceDefault= 4,
+    ::Tier5ScopedExtension     = 5,
+}
+
+[Layout(c_abi)]
+pub struct MethodTableEntry : IValue {
+    pub method_name:        str;
+    pub tier:               MemberTier;
+    pub origin_type_name:   str;
+    pub return_type:        str;
+    pub params:             str;
+    pub is_mut:             bool;
+    pub is_static:          bool;
+    pub field_remap_bundle: str;
+    pub clearance_lvl:      i32;
+    pub visibility:         u8;
+}
+
+pub struct MethodTable : IObject {
+    pub target_type_name: str;
+    pub methods:          Map<str, MethodTableEntry>;
+    pub static_methods:   Map<str, List<MethodTableEntry>>; // Bundle.method static delegation
+    pub diagnostics:      List<str>;
+}
+
+pub fn method_table_new(type_name: str) -> MethodTable {
+    return MethodTable {
+        target_type_name: type_name,
+        methods:          [:],
+        static_methods:   [:],
+        diagnostics:      [],
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 2. Method Registration & 4-Tier Vertical Precedence
+// ------------------------------------------------------------------------------
+
+pub fn register_method(
+    var ref mt: MethodTable,
+    entry: MethodTableEntry,
+    is_without: bool
+) {
+    if is_without {
+        return;
+    }
+
+    let m_name = entry.method_name;
+
+    // Record under static delegation dictionary (e.g., SpatialBundle.translate)
+    if entry.origin_type_name.len() > 0 {
+        var static_list: List<MethodTableEntry> = [];
+        if mt.static_methods.has(entry.origin_type_name) {
+            static_list = mt.static_methods[entry.origin_type_name];
+        }
+        static_list.push(entry);
+        mt.static_methods[entry.origin_type_name] = static_list;
+    }
+
+    if !mt.methods.has(m_name) {
+        mt.methods[m_name] = entry;
+        return;
+    }
+
+    let existing = mt.methods[m_name];
+
+    // Tier 1 wins unconditionally over Tiers 2, 3, 4, 5
+    if entry.tier == MemberTier::Tier1ExplicitStruct {
+        mt.methods[m_name] = entry;
+        return;
+    }
+
+    if existing.tier == MemberTier::Tier1ExplicitStruct {
+        // Existing Tier 1 already overrides incoming lower-tier method
+        return;
+    }
+
+    // Horizontal collision at Tier 2: two spliced bundles provide same method
+    if entry.tier == MemberTier::Tier2SplicedBundleFacet && existing.tier == MemberTier::Tier2SplicedBundleFacet {
+        if entry.origin_type_name != existing.origin_type_name {
+            let msg = "COMP004: Ambiguous Tier 2 bundle method collision on '" + m_name + "': multiple spliced bundles ('" + existing.origin_type_name + "' and '" + entry.origin_type_name + "') define '" + m_name + "' without a Tier 1 struct override. Help: resolve using 'without { " + m_name + " }' or provide an explicit struct method.";
+            mt.diagnostics.push(msg);
+        }
+        return;
+    }
+
+    // Tier 2 overrides Tiers 3, 4, 5
+    if entry.tier == MemberTier::Tier2SplicedBundleFacet {
+        mt.methods[m_name] = entry;
+        return;
+    }
+
+    if existing.tier == MemberTier::Tier2SplicedBundleFacet {
+        return;
+    }
+
+    // Tier 3 Sub-Interface overrides Tier 4 Base Interface
+    if entry.tier == MemberTier::Tier3SubInterfaceDefault && existing.tier == MemberTier::Tier4BaseInterfaceDefault {
+        mt.methods[m_name] = entry;
+        return;
+    }
+
+    if existing.tier == MemberTier::Tier3SubInterfaceDefault && entry.tier == MemberTier::Tier4BaseInterfaceDefault {
+        return;
+    }
+
+    // Diamond collision between two sub-interfaces at Tier 3 or two base interfaces at Tier 4
+    if entry.tier == existing.tier && (entry.tier == MemberTier::Tier3SubInterfaceDefault || entry.tier == MemberTier::Tier4BaseInterfaceDefault) {
+        if entry.origin_type_name != existing.origin_type_name {
+            let msg = "AmbiguousInterfaceDefault: Diamond interface default method collision on '" + m_name + "' between '" + existing.origin_type_name + "' and '" + entry.origin_type_name + "': provide an explicit Tier 1 or Tier 2 implementation to disambiguate";
+            mt.diagnostics.push(msg);
+        }
+        return;
+    }
+
+    // Tier 5 Scoped Extension overrides Tier 4 if applied
+    if entry.tier == MemberTier::Tier5ScopedExtension && existing.tier == MemberTier::Tier4BaseInterfaceDefault {
+        mt.methods[m_name] = entry;
+        return;
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 3. Static Delegation Lookup (BundleName.method)
+// ------------------------------------------------------------------------------
+
+pub fn resolve_static_delegation(
+    ref mt: MethodTable,
+    bundle_name: str,
+    method_name: str
+) -> MethodTableEntry {
+    if mt.static_methods.has(bundle_name) {
+        let list = mt.static_methods[bundle_name];
+        var i = 0;
+        while i < list.len() {
+            if list[i].method_name == method_name {
+                return list[i];
+            }
+            i = i + 1;
+        }
+    }
+    // Return empty fallback
+    return MethodTableEntry {
+        method_name:        "",
+        tier:               MemberTier::Tier1ExplicitStruct,
+        origin_type_name:   "",
+        return_type:        "",
+        params:             "",
+        is_mut:             false,
+        is_static:          false,
+        field_remap_bundle: "",
+        clearance_lvl:      0,
+        visibility:         0,
+    };
+}
