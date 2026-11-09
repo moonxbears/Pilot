@@ -426,6 +426,35 @@ pub pure fn reflect_operators_pattern() -> str {
     return "%%|\\\\*%|\\\\*\\\\?|\\\\*\\\\||\\\\+%|\\\\+\\\\?|\\\\+\\\\||-%|-\\\\?|-\\\\||<<|>>|~>|%|&|\\\\+|-|/|\\\\^|\\\\||~";
 }
 
+pub fn reflect_paired_symbol_for_keyword(kw: str) -> str {
+    let node_count = __engine(Cfg.ast.ast_node_count);
+    var idx = 0;
+    while idx < node_count {
+        let k = __engine(Cfg.ast.ast_node_kind, idx);
+        if k == 1 {
+            let sym = __engine(Cfg.ast.ast_node_sym, idx);
+            let nm = __engine(Cfg.ast.sym_str, sym);
+            if nm == kw {
+                let ac = __engine(Cfg.ast.ast_attr_count, idx);
+                if ac == 3 {
+                    let s_sym = __engine(Cfg.ast.ast_attr_arg, idx, 2);
+                    return __engine(Cfg.ast.sym_str, s_sym);
+                }
+            }
+        }
+        idx = idx + 1;
+    }
+    return "";
+}
+
+pub fn generate_hover_markdown_for_keyword(kw: str) -> str {
+    let sym = reflect_paired_symbol_for_keyword(kw);
+    if sym != "" {
+        return "**Keyword:** `" + kw + "`\n\n*Paired Syntax Form:* `" + sym + "`";
+    }
+    return "**Keyword:** `" + kw + "`";
+}
+
 pub fn reflect_primitives_pattern() -> str {
     let node_count = __engine(Cfg.ast.ast_node_count);
     var pat = "";

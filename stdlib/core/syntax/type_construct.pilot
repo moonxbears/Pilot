@@ -31,4 +31,9 @@ pub syntax type_construct {
     ((A) => R)     => quote { fn<$A, $R> };
     (A -> R)       => quote { fn<$A, $R> };
     (T ! E)        => quote { result<$T, $E> };
+    (opt<T>)       => quote { option<$T> };
+    (res<T, E>)    => quote { result<$T, $E> };
+    (sig<T>)       => quote { signal<$T> };
+    (grad<T, G>)   => quote { dual<$T, $G> };
+    (plan<T>)      => quote { effect_plan<$T> };
 }

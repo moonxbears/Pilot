@@ -309,6 +309,55 @@ fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
     }
 
     if tag == "Ident" || tag == "SeedKw" {
+        let nxt_tag = if cur + 1 < tcnt { sh_token_tag(tape, cur + 1) } else { "" };
+        if (text == "splat" || text == "pairs" || text == "flat") && nxt_tag == "LParen" {
+            __engine("map_set", ctx, "pos", cur + 2);
+            let operand = sh_parse_expr_bp(arena, tape, ctx, 0);
+            let cp = __engine("map_get", ctx, "pos");
+            if cp < tcnt && sh_token_tag(tape, cp) == "RParen" {
+                __engine("map_set", ctx, "pos", cp + 1);
+            }
+            var op_sym = "*";
+            if text == "pairs" { op_sym = "**"; }
+            else if text == "flat" { op_sym = "*.."; }
+            let nid = sh_ast_alloc_node(arena, "UnaryExpr", op_sym);
+            sh_ast_add_child(arena, nid, operand);
+            return nid;
+        }
+
+        let is_prefix_proj = text == "call" || text == "splice" || text == "frame" || text == "sig" || text == "grad" || text == "plan";
+        if is_prefix_proj && cur + 2 < tcnt {
+            let p1_tag = sh_token_tag(tape, cur + 1);
+            let p2_tag = sh_token_tag(tape, cur + 2);
+            if (p1_tag == "Ident" || p1_tag == "SeedKw") && p2_tag == "LParen" {
+                let callee_text = sh_token_text(tape, cur + 1);
+                __engine("map_set", ctx, "pos", cur + 3);
+                let call_nid = sh_ast_alloc_node(arena, "CallExpr", callee_text);
+                while true {
+                    let ap = __engine("map_get", ctx, "pos");
+                    if ap >= tcnt { break; }
+                    if sh_token_tag(tape, ap) == "RParen" {
+                        __engine("map_set", ctx, "pos", ap + 1);
+                        break;
+                    }
+                    let arg = sh_parse_expr_bp(arena, tape, ctx, 0);
+                    if arg >= 0 {
+                        sh_ast_add_child(arena, call_nid, arg);
+                    }
+                    let cp = __engine("map_get", ctx, "pos");
+                    if cp < tcnt && sh_token_text(tape, cp) == "," {
+                        __engine("map_set", ctx, "pos", cp + 1);
+                    } else if cp < tcnt && sh_token_tag(tape, cp) == "RParen" {
+                        __engine("map_set", ctx, "pos", cp + 1);
+                        break;
+                    } else if cp == ap {
+                        __engine("map_set", ctx, "pos", cp + 1);
+                    }
+                }
+                return call_nid;
+            }
+        }
+
         // Check expression-position macro expansion, call-quoting, OR standard `CallExpr`
         let nxt_tag = if cur + 1 < tcnt { sh_token_tag(tape, cur + 1) } else { "" };
         let is_cq = nxt_tag == "CallQuoteShallow" || nxt_tag == "CallQuoteDeep" || nxt_tag == "CallQuoteAbi" || nxt_tag == "CallQuoteSignal" || nxt_tag == "CallQuoteAdjoint" || nxt_tag == "CallQuoteEffect";

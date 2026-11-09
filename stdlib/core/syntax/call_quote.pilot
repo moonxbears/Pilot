@@ -62,3 +62,27 @@ pub partial struct {
         ~self() {}
     }
 }
+
+// -------------------------------------------------------------------------
+// RECEPTORS FOR HOMOICONIC CALL-QUOTING PROJECTIONS
+// Lowers readable prefix forms `call f(args)`..`plan f(args)` to the exact
+// same receptor AST nodes as compact punctuation forms `f!(args)`..`f!?(args)`.
+// -------------------------------------------------------------------------
+
+comptime {
+    __engine("bind_receptor", nameof(call),   37, 1);
+    __engine("bind_receptor", nameof(splice), 37, 2);
+    __engine("bind_receptor", nameof(frame),  37, 3);
+    __engine("bind_receptor", nameof(sig),    37, 4);
+    __engine("bind_receptor", nameof(grad),   37, 5);
+    __engine("bind_receptor", nameof(plan),   37, 6);
+}
+
+pub syntax {
+    call(callee, args)   => quote { $callee!($args) };
+    splice(callee, args) => quote { $callee!!($args) };
+    frame(callee, args)  => quote { $callee!&($args) };
+    sig(callee, args)    => quote { $callee!^($args) };
+    grad(callee, args)   => quote { $callee!@($args) };
+    plan(callee, args)   => quote { $callee!?($args) };
+}

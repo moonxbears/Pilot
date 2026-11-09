@@ -666,19 +666,28 @@ pub partial struct {
     [KeywordDefAttr(29, "Compile-time dimensional physical quantity with unit verification.")]
     Quantity {}
 
+    [KeywordDefAttr(29, "Optional value carrier (shorthand for option<T> or T?).", "?")]
+    opt {}
+
+    [KeywordDefAttr(29, "Fallible result carrier (shorthand for result<T, E> or T ! E).", "!")]
+    res {}
+
     [KeywordDefAttr(29, "Zero-copy key-value strided column projection map.")]
     map {}
 
-    [KeywordDefAttr(29, "Positional sequence unpack operator carrier.")]
+    [KeywordDefAttr(35, "Positional sequence unpack operator (readable counterpart of *x).", "*")]
     splat {}
 
-    [KeywordDefAttr(29, "Compile-time structural key-value unpack operator carrier.")]
+    [KeywordDefAttr(35, "Compile-time structural key-value unpack operator (readable counterpart of **x).", "**")]
     pairs {}
+
+    [KeywordDefAttr(35, "Recursive deep-flatten unpack operator (readable counterpart of *..x).", "*..")]
+    flat {}
 
     [KeywordDefAttr(29, "Recursive deep-flatten unpack operator carrier.")]
     expand {}
 
-    [KeywordDefAttr(29, "Raw ABI zero-marshalling call frame struct.")]
+    [KeywordDefAttr(37, "Zero-marshalling ABI call frame projection (readable counterpart of f!&(...)).", "!&")]
     frame {}
 
     [KeywordDefAttr(29, "Homoiconic abstract syntax tree node representation.")]
@@ -824,23 +833,38 @@ pub partial struct {
     macro {}
 
     // Category 37: Homoiconic Call-Quoting Modes
-    [KeywordDefAttr(37, "Shallow quote call expression projection (!).")]
+    [KeywordDefAttr(37, "Shallow quote call expression projection (!).", "!")]
     call_quote_shallow {}
 
-    [KeywordDefAttr(37, "Deep compile-time AST splice projection (!!).")]
+    [KeywordDefAttr(37, "Shallow AST quote call expression projection (readable counterpart of f!(...)).", "!")]
+    call {}
+
+    [KeywordDefAttr(37, "Deep compile-time AST splice projection (!!).", "!!")]
     call_quote_deep {}
 
-    [KeywordDefAttr(37, "Zero-marshalling ABI call frame projection (!&).")]
+    [KeywordDefAttr(37, "Deep compile-time AST splice projection (readable counterpart of f!!(~...)).", "!!")]
+    splice {}
+
+    [KeywordDefAttr(37, "Zero-marshalling ABI call frame projection (!&).", "!&")]
     call_quote_abi {}
 
-    [KeywordDefAttr(37, "Glitch-free push-pull reactive signal projection (!^).")]
+    [KeywordDefAttr(37, "Glitch-free push-pull reactive signal projection (!^).", "!^")]
     call_quote_signal {}
 
-    [KeywordDefAttr(37, "Symbolic adjoint dual CSE derivative projection (!@).")]
+    [KeywordDefAttr(37, "Glitch-free push-pull reactive signal projection (readable counterpart of f!^(...)).", "!^")]
+    sig {}
+
+    [KeywordDefAttr(37, "Symbolic adjoint dual CSE derivative projection (!@).", "!@")]
     call_quote_dual {}
 
-    [KeywordDefAttr(37, "CoW transactional dry-run effect plan projection (!?).")]
+    [KeywordDefAttr(37, "Symbolic adjoint dual CSE derivative projection (readable counterpart of f!@(...)).", "!@")]
+    grad {}
+
+    [KeywordDefAttr(37, "CoW transactional dry-run effect plan projection (!?).", "!?")]
     call_quote_plan {}
+
+    [KeywordDefAttr(37, "CoW transactional dry-run effect plan projection (readable counterpart of f!?(...)).", "!?")]
+    plan {}
 }
 
 // =========================================================================

@@ -5,10 +5,18 @@
 // `;` statement terminators, operator spacing, and width-aware `( ... )` groups.
 // ============================================================================
 
+[Layout(c_abi)]
+pub struct FmtStyle : IValue {
+    pub static pure fn preserve() -> str => "preserve";
+    pub static pure fn readable() -> str => "readable";
+    pub static pure fn compact()  -> str => "compact";
+}
+
 pub struct FormatOptions {
-    pub indent_width: i64;
-    pub max_width: i64;
+    pub indent_width:    i64;
+    pub max_width:       i64;
     pub emit_semicolons: bool;
+    pub style:           str;
 }
 
 pub struct FormatResult {
@@ -39,9 +47,10 @@ pub pure fn fmt_tok_punct() -> i64 { return 5; }
 
 pub fn default_format_options() -> FormatOptions {
     return FormatOptions {
-        indent_width: 4,
-        max_width: 100,
+        indent_width:    4,
+        max_width:       100,
         emit_semicolons: true,
+        style:           "preserve",
     };
 }
 
@@ -251,9 +260,21 @@ pub pure fn is_open_group_tok(t: str) -> bool {
     return t == "(" || t == "!(" || t == "!!(" || t == "!&(" || t == "!^(" || t == "!@(" || t == "!?(";
 }
 
+pub pure fn is_generic_lead_prev(prev2: str, prev: str) -> bool {
+    if prev2 == ":" || prev2 == "->" || prev2 == "as" || prev2 == nameof(fn)
+        || prev2 == nameof(struct) || prev2 == nameof(interface) || prev2 == nameof(let)
+        || prev2 == nameof(var) || prev2 == "bundle" || prev2 == "facet" || prev2 == "ext" {
+        return true;
+    }
+    return prev == "opt" || prev == "res" || prev == "sig" || prev == "grad" || prev == "plan"
+        || prev == "array" || prev == "simd" || prev == "ptr" || prev == "ref" || prev == "iso"
+        || prev == "span" || prev == "step" || prev == "from" || prev == "until" || prev == "map"
+        || prev == "frame" || prev == "List" || prev == "Map";
+}
+
 pub pure fn is_binary_or_assign_op(t: str) -> bool {
     return t == "->" || t == "=>" || t == "=" || t == "==" || t == "!="
-        || t == "<" || t == ">" || t == "<=" || t == ">=" || t == "&&"
+        || t == "<=" || t == ">=" || t == "&&"
         || t == "||" || t == "+" || t == "*" || t == "/" || t == "%"
         || t == "&" || t == "|" || t == "^" || t == "<<" || t == ">>"
         || t == "??" || t == "+=" || t == "-=" || t == "*=" || t == "/="
@@ -274,17 +295,26 @@ pub pure fn fmt_needs_space(prev2: str, prev: str, cur: str) -> bool {
     if prev.len() == 0 || cur.len() == 0 {
         return false;
     }
-    if cur == "," || cur == ";" || cur == ")" || cur == "]" || cur == "." || cur == "?." || cur == "::" || cur == ":" {
+    if cur == "," || cur == ";" || cur == ")" || cur == "]" || cur == "." || cur == "?." || cur == "::" || cur == ":" || cur == "?" {
         return false;
     }
     if is_open_group_tok(prev) || prev == "[" || prev == "." || prev == "?." || prev == "::" || prev == "!" {
         return false;
     }
-    if prev == "-" && can_precede_unary_minus(prev2) {
+    if (prev == "-" || prev == "*" || prev == "**" || prev == "*..") && can_precede_unary_minus(prev2) {
         return false;
     }
     if cur == "{" {
         return true;
+    }
+    if cur == "<" && is_generic_lead_prev(prev2, prev) {
+        return false;
+    }
+    if prev == "<" && (is_generic_lead_prev("", prev2) || prev2.len() == 0 || cur == ">") {
+        return false;
+    }
+    if cur == ">" && (prev2 == "<" || prev2 == "," || prev == ">") {
+        return false;
     }
     if is_open_group_tok(cur) || cur == "[" {
         if is_kw_spaced_before_lparen(prev) || prev == ":" || prev == "," || prev == ";" || is_binary_or_assign_op(prev) || prev == "-" {
@@ -445,14 +475,159 @@ pub fn fmt_render_broken_paren_group(
     return out + close_indent + ")";
 }
 
-// Formats Pilot source according to Wadler-Lindig `max_width` group layout and 4-space `{ ... }` blocks.
-pub fn format_pilot_with_width(src: str, max_width: i64) -> str {
+// Transforms token stream according to bidirectional syntax style (`preserve`, `readable`, `compact`).
+pub fn fmt_transform_stream_style(stream: i64, style: str) -> i64 {
+    if style == "preserve" || style == "" {
+        return stream;
+    }
+    let total = __engine("map_get", stream, "cnt") + 0;
+    let out = __engine("map_new");
+    __engine("map_set", out, "cnt", 0);
+    var i = 0;
+
+    if style == "readable" {
+        while i < total {
+            let k = __engine("map_get", stream, "k_" + i);
+            let t = __engine("map_get", stream, "t_" + i);
+
+            // 1. Compact call quotes: f!(...) -> call f(...), etc.
+            if k == fmt_tok_word() && i + 1 < total {
+                let nxt_t = __engine("map_get", stream, "t_" + (i + 1));
+                var prefix_kw = "";
+                if nxt_t == "!(" { prefix_kw = "call"; }
+                else if nxt_t == "!!(" { prefix_kw = "splice"; }
+                else if nxt_t == "!&(" { prefix_kw = "frame"; }
+                else if nxt_t == "!^(" { prefix_kw = "sig"; }
+                else if nxt_t == "!@(" { prefix_kw = "grad"; }
+                else if nxt_t == "!?(" { prefix_kw = "plan"; }
+
+                if prefix_kw.len() > 0 {
+                    fmt_push_tok(out, fmt_tok_word(), prefix_kw);
+                    fmt_push_tok(out, fmt_tok_word(), t);
+                    fmt_push_tok(out, fmt_tok_punct(), "(");
+                    i = i + 2;
+                    continue;
+                }
+            }
+
+            // 2. Unpack tokens: *..x -> flat(x), **x -> pairs(x), *x -> splat(x)
+            var prev_tok = "";
+            if i > 0 {
+                prev_tok = __engine("map_get", stream, "t_" + (i - 1));
+            }
+            let is_unary_splat = (t == "*.." || t == "**" || t == "*") && (i == 0 || prev_tok == "=" || can_precede_unary_minus(prev_tok));
+            if is_unary_splat && i + 1 < total && __engine("map_get", stream, "k_" + (i + 1)) == fmt_tok_word() {
+                var func_kw = "splat";
+                if t == "*.." { func_kw = "flat"; }
+                else if t == "**" { func_kw = "pairs"; }
+                fmt_push_tok(out, fmt_tok_word(), func_kw);
+                fmt_push_tok(out, fmt_tok_punct(), "(");
+                fmt_push_tok(out, fmt_tok_word(), __engine("map_get", stream, "t_" + (i + 1)));
+                fmt_push_tok(out, fmt_tok_punct(), ")");
+                i = i + 2;
+                continue;
+            }
+
+            // 3. Optional type: T? -> opt<T> (when preceded by `:` or `->` or `<`)
+            if k == fmt_tok_word() && i + 1 < total && __engine("map_get", stream, "t_" + (i + 1)) == "?" && i > 0 && (__engine("map_get", stream, "t_" + (i - 1)) == ":" || __engine("map_get", stream, "t_" + (i - 1)) == "->" || __engine("map_get", stream, "t_" + (i - 1)) == "<" || __engine("map_get", stream, "t_" + (i - 1)) == ",") {
+                fmt_push_tok(out, fmt_tok_word(), "opt");
+                fmt_push_tok(out, fmt_tok_punct(), "<");
+                fmt_push_tok(out, fmt_tok_word(), t);
+                fmt_push_tok(out, fmt_tok_punct(), ">");
+                i = i + 2;
+                continue;
+            }
+
+            // 4. Fallible result type: T ! E -> res<T, E>
+            if k == fmt_tok_word() && i + 2 < total && __engine("map_get", stream, "t_" + (i + 1)) == "!" && __engine("map_get", stream, "k_" + (i + 2)) == fmt_tok_word() && i > 0 && (__engine("map_get", stream, "t_" + (i - 1)) == ":" || __engine("map_get", stream, "t_" + (i - 1)) == "->" || __engine("map_get", stream, "t_" + (i - 1)) == "<" || __engine("map_get", stream, "t_" + (i - 1)) == ",") {
+                let err_t = __engine("map_get", stream, "t_" + (i + 2));
+                fmt_push_tok(out, fmt_tok_word(), "res");
+                fmt_push_tok(out, fmt_tok_punct(), "<");
+                fmt_push_tok(out, fmt_tok_word(), t);
+                fmt_push_tok(out, fmt_tok_punct(), ",");
+                fmt_push_tok(out, fmt_tok_word(), err_t);
+                fmt_push_tok(out, fmt_tok_punct(), ">");
+                i = i + 3;
+                continue;
+            }
+
+            fmt_push_tok(out, k, t);
+            i = i + 1;
+        }
+        return out;
+    }
+
+    if style == "compact" {
+        while i < total {
+            let k = __engine("map_get", stream, "k_" + i);
+            let t = __engine("map_get", stream, "t_" + i);
+
+            // 1. Readable call quotes: sig compute(...) -> compute!^(...), etc.
+            let is_proj_kw = (t == "call" || t == "splice" || t == "frame" || t == "sig" || t == "grad" || t == "plan") && k == fmt_tok_word();
+            if is_proj_kw && i + 2 < total && __engine("map_get", stream, "k_" + (i + 1)) == fmt_tok_word() && __engine("map_get", stream, "t_" + (i + 2)) == "(" {
+                let callee = __engine("map_get", stream, "t_" + (i + 1));
+                var compact_tok = "!(";
+                if t == "splice" { compact_tok = "!!("; }
+                else if t == "frame" { compact_tok = "!&("; }
+                else if t == "sig" { compact_tok = "!^("; }
+                else if t == "grad" { compact_tok = "!@("; }
+                else if t == "plan" { compact_tok = "!?("; }
+
+                fmt_push_tok(out, fmt_tok_word(), callee);
+                fmt_push_tok(out, fmt_tok_punct(), compact_tok);
+                i = i + 3;
+                continue;
+            }
+
+            // 2. Unpack calls: splat(x) -> *x, pairs(x) -> **x, flat(x) -> *..x
+            let is_unpack_kw = (t == "splat" || t == "pairs" || t == "flat") && k == fmt_tok_word();
+            if is_unpack_kw && i + 3 < total && __engine("map_get", stream, "t_" + (i + 1)) == "(" && __engine("map_get", stream, "k_" + (i + 2)) == fmt_tok_word() && __engine("map_get", stream, "t_" + (i + 3)) == ")" {
+                var sigil = "*";
+                if t == "pairs" { sigil = "**"; }
+                else if t == "flat" { sigil = "*.."; }
+                let operand = __engine("map_get", stream, "t_" + (i + 2));
+                fmt_push_tok(out, fmt_tok_punct(), sigil);
+                fmt_push_tok(out, fmt_tok_word(), operand);
+                i = i + 4;
+                continue;
+            }
+
+            // 3. opt<T> -> T?
+            if t == "opt" && i + 3 < total && __engine("map_get", stream, "t_" + (i + 1)) == "<" && __engine("map_get", stream, "k_" + (i + 2)) == fmt_tok_word() && __engine("map_get", stream, "t_" + (i + 3)) == ">" {
+                let inner_t = __engine("map_get", stream, "t_" + (i + 2));
+                fmt_push_tok(out, fmt_tok_word(), inner_t);
+                fmt_push_tok(out, fmt_tok_punct(), "?");
+                i = i + 4;
+                continue;
+            }
+
+            // 4. res<T, E> -> T ! E
+            if t == "res" && i + 5 < total && __engine("map_get", stream, "t_" + (i + 1)) == "<" && __engine("map_get", stream, "k_" + (i + 2)) == fmt_tok_word() && __engine("map_get", stream, "t_" + (i + 3)) == "," && __engine("map_get", stream, "k_" + (i + 4)) == fmt_tok_word() && __engine("map_get", stream, "t_" + (i + 5)) == ">" {
+                let ok_t = __engine("map_get", stream, "t_" + (i + 2));
+                let err_t = __engine("map_get", stream, "t_" + (i + 4));
+                fmt_push_tok(out, fmt_tok_word(), ok_t);
+                fmt_push_tok(out, fmt_tok_punct(), "!");
+                fmt_push_tok(out, fmt_tok_word(), err_t);
+                i = i + 6;
+                continue;
+            }
+
+            fmt_push_tok(out, k, t);
+            i = i + 1;
+        }
+        return out;
+    }
+
+    return stream;
+}
+
+// Formats token stream according to Wadler-Lindig `max_width` group layout and 4-space `{ ... }` blocks.
+pub fn fmt_layout_stream(stream: i64, max_width: i64) -> str {
     var effective_width = max_width;
     if effective_width < 20 {
         effective_width = 20;
     }
     let indent_width = 4;
-    let stream = fmt_tokenize(src);
     let total = __engine("map_get", stream, "cnt");
     if total == 0 {
         return "";
@@ -626,6 +801,18 @@ pub fn format_pilot_with_width(src: str, max_width: i64) -> str {
         out = out + cur_line + "\n";
     }
     return out;
+}
+
+// Formats Pilot source according to Wadler-Lindig `max_width` group layout and syntax style.
+pub fn format_pilot_with_style(src: str, max_width: i64, style: str) -> str {
+    let raw_stream = fmt_tokenize(src);
+    let stream = fmt_transform_stream_style(raw_stream, style);
+    return fmt_layout_stream(stream, max_width);
+}
+
+// Formats Pilot source according to Wadler-Lindig `max_width` group layout and 4-space `{ ... }` blocks.
+pub fn format_pilot_with_width(src: str, max_width: i64) -> str {
+    return format_pilot_with_style(src, max_width, "preserve");
 }
 
 // Formats a Pilot source string with default 100-column Wadler-Lindig width and 4-space `{ ... }` indentation.

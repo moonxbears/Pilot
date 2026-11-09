@@ -109,7 +109,8 @@ pub enum TypePostfixKind { BracketEmpty, BracketDotDot, BracketColon, BracketArg
 #[derive(Clone, Debug)]
 pub enum TypeConstructRule { Prefix { op: String, param: String, template: TemplateNode },
     Postfix { kind: TypePostfixKind, params: Vec<String>, template: TemplateNode },
-    Infix { op: String, bp: u8, right_assoc: bool, lhs_param: String, rhs_param: String, template: TemplateNode }, }
+    Infix { op: String, bp: u8, right_assoc: bool, lhs_param: String, rhs_param: String, template: TemplateNode },
+    NamedGeneric { name: String, params: Vec<String>, template: TemplateNode }, }
 #[derive(Clone, Debug)]
 pub struct SyntaxMacroRule { pub params: Vec<String>, pub template: TemplateNode }
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -185,7 +186,7 @@ pub fn bootstrap_tables() -> &'static ParserTables { BOOTSTRAP_TABLES.get_or_ini
             include_str!("../../../stdlib/core/syntax/while.pilot"), include_str!("../../../stdlib/core/syntax/until.pilot"),
             include_str!("../../../stdlib/core/syntax/switch.pilot"), include_str!("../../../stdlib/core/syntax/guard.pilot"),
             include_str!("../../../stdlib/core/syntax/try_catch.pilot"), include_str!("../../../stdlib/core/syntax/expr_sugar.pilot"),
-            include_str!("../../../stdlib/core/syntax/fstring.pilot"),
+            include_str!("../../../stdlib/core/syntax/fstring.pilot"), include_str!("../../../stdlib/core/syntax/call_quote.pilot"),
             include_str!("../../../stdlib/core/syntax/unit_decl.pilot"), include_str!("../../../stdlib/db/sql_syntax.pilot"),
             include_str!("../../../stdlib/polyglot/polyglot_syntax.pilot"), include_str!("../../../stdlib/realtime/rt_syntax.pilot"),
             include_str!("../../../stdlib/asyncio/select_syntax.pilot"),
@@ -659,13 +660,13 @@ impl<'a> Parser<'a> {
             while self.eat(TokenKind::InfixDot) || self.eat(TokenKind::ColonColon) { nm.push('.'); nm.push_str(self.text()); self.advance(); }
             let (sym, mut args) = (self.arena.interner.intern(&nm), Vec::new()); if self.eat(TokenKind::Less) {
                 while !self.at_end() && !self.at(TokenKind::Greater) && !self.at(TokenKind::ShiftRight) {
-                                        args.push(if matches!(self.peek(), TokenKind::IntLit | TokenKind::Minus) { self.parse_expr_bp(30) } else { self.parse_type() });
-                    if self.eat(TokenKind::Comma) {
-                                                if self.at(TokenKind::Greater) { self.arena.diagnostics.push((self.prev_span(), "Trailing comma not permitted in generic parameters".into())); break; }
-                    } else { break; } }
-                if !self.eat(TokenKind::Greater) && self.at(TokenKind::ShiftRight) { let p = self.cur(); self.tape.kinds[p] = TokenKind::Greater; }
-            }
-            self.arena.alloc_type_named(sym, &args, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)))
+                    args.push(if matches!(self.peek(), TokenKind::IntLit | TokenKind::Minus) { self.parse_expr_bp(30) } else { self.parse_type() });
+                    if self.eat(TokenKind::Comma) { if self.at(TokenKind::Greater) { self.arena.diagnostics.push((self.prev_span(), "Trailing comma not permitted in generic parameters".into())); break; } } else { break; } }
+                if !self.eat(TokenKind::Greater) && self.at(TokenKind::ShiftRight) { let p = self.cur(); self.tape.kinds[p] = TokenKind::Greater; } }
+            if let Some(TypeConstructRule::NamedGeneric { params, template, .. }) = self.tables.type_rules.iter().find(|r| matches!(r, TypeConstructRule::NamedGeneric { name, params, .. } if name == &nm && params.len() == args.len())).cloned() {
+                let (b, end) = (params.into_iter().zip(args).collect::<Vec<_>>(), self.prev_span().end.max(sp.end));
+                template.instantiate(&mut self.arena, &b, ByteSpan::new(sp.start, end))
+            } else { self.arena.alloc_type_named(sym, &args, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end))) }
         } else { return NodeId::NONE; }; loop { if TypePrecedence::PostfixOptional as u8 >= min_bp { if self.eat(TokenKind::LBracket) {
                     let (kind, extra) = if self.eat(TokenKind::RBracket) { (TypePostfixKind::BracketEmpty, Vec::new()) }
                     else if self.eat(TokenKind::DotDot) { self.expect(TokenKind::RBracket); (TypePostfixKind::BracketDotDot, Vec::new()) }
@@ -708,45 +709,33 @@ impl<'a> Parser<'a> {
             let m = self.pos; self.parse_item(&mut items, false); if self.pos == m { self.advance(); } }
         self.expect(TokenKind::RBrace); self.active_hdr = self.hdr_stack.pop().unwrap_or(None);
         self.arena.alloc_list_node(NodeKind::BlockExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), &items) }
-    fn parse_stmt(&mut self) -> NodeId { let sp = self.span(); match self.peek() { TokenKind::KwReturn => { self.advance();
-                let v = if self.at(TokenKind::Semicolon) || self.at(TokenKind::RBrace) || self.at_end() { NodeId::NONE } else { self.parse_expr() };
-                let _ = self.eat(TokenKind::Semicolon);
-                self.arena.alloc_node(NodeKind::ReturnStmt, 0, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), v.0, 0) }
+    fn parse_stmt(&mut self) -> NodeId { let sp = self.span(); match self.peek() {
+            TokenKind::KwReturn => { self.advance(); let v = if self.at(TokenKind::Semicolon) || self.at(TokenKind::RBrace) || self.at_end() { NodeId::NONE } else { self.parse_expr() }; let _ = self.eat(TokenKind::Semicolon); self.arena.alloc_node(NodeKind::ReturnStmt, 0, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), v.0, 0) }
             TokenKind::KwYield => { self.advance(); let v = self.parse_expr(); let _ = self.eat(TokenKind::Semicolon); self.arena.alloc_node(NodeKind::YieldStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), v.0, 0) }
             TokenKind::KwDefer => { self.advance(); let b = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_stmt() }; self.arena.alloc_node(NodeKind::DeferStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), b.0, 0) }
             TokenKind::KwLoop => { self.advance(); let (tr, b) = (self.arena.alloc_node(NodeKind::BoolLit, 0, sp, 1, 0), self.parse_block()); self.arena.alloc_node(NodeKind::WhileStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), tr.0, b.0) }
             TokenKind::KwIf => self.parse_if(), TokenKind::KwAsm => { self.advance(); let bsp = self.span(); if self.at(TokenKind::LBrace) {
-                    let close = self.tape.matching_bracket(self.cur()).unwrap_or(self.cur() as u32) as usize;
-                    let code = &self.src[bsp.end as usize..self.tape.span(close).start as usize]; self.pos = close + 1;
-                    self.arena.alloc_polyglot_block("asm", code.trim(), 0, ByteSpan::new(sp.start, self.prev_span().end))
-                } else { NodeId::NONE } }
-            TokenKind::RawDslBlock => { let raw = self.text(); self.advance(); let inner = raw.trim_start_matches('`').trim_end_matches('`');
-                let (lang, code) = inner.split_once('\n').unwrap_or(("dsl", inner));
-                self.arena.alloc_polyglot_block(lang.trim(), code.trim(), 0, sp) }
+                    let close = self.tape.matching_bracket(self.cur()).unwrap_or(self.cur() as u32) as usize; let code = &self.src[bsp.end as usize..self.tape.span(close).start as usize]; self.pos = close + 1;
+                    self.arena.alloc_polyglot_block("asm", code.trim(), 0, ByteSpan::new(sp.start, self.prev_span().end)) } else { NodeId::NONE } }
+            TokenKind::RawDslBlock => { let raw = self.text(); self.advance(); let inner = raw.trim_start_matches('`').trim_end_matches('`'); let (lang, code) = inner.split_once('\n').unwrap_or(("dsl", inner)); self.arena.alloc_polyglot_block(lang.trim(), code.trim(), 0, sp) }
             _ if self.is_word() => { if let Some((rk, pl)) = self.receptor() { match rk { 9 => return self.parse_for(), 13 => { self.advance();
                             let v = if self.at(TokenKind::Semicolon) || self.at(TokenKind::RBrace) || self.at_end() { NodeId::NONE }
-                            else { let first = self.parse_expr();
-                                if self.at(TokenKind::Comma) { let mut items = vec![first]; while self.eat(TokenKind::Comma) { items.push(self.parse_expr()); } self.arena.alloc_list_node(NodeKind::TupleExpr, 0, sp, &items) } else { first }
-                            }; let _ = self.eat(TokenKind::Semicolon);
-                            return self.arena.alloc_node(if pl == 0 { NodeKind::BreakStmt } else { NodeKind::ContinueStmt }, 0, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), v.0, 0);
-                        }
+                            else { let first = self.parse_expr(); if self.at(TokenKind::Comma) { let mut items = vec![first]; while self.eat(TokenKind::Comma) { items.push(self.parse_expr()); } self.arena.alloc_list_node(NodeKind::TupleExpr, 0, sp, &items) } else { first } }; let _ = self.eat(TokenKind::Semicolon);
+                            return self.arena.alloc_node(if pl == 0 { NodeKind::BreakStmt } else { NodeKind::ContinueStmt }, 0, ByteSpan::new(sp.start, self.prev_span().end.max(sp.end)), v.0, 0); }
                         14 => return self.parse_switch(), 17 => { self.advance();
                             if self.receptor() == Some((31, 2)) || self.at(TokenKind::KwLet) { self.advance(); }
                             self.no_struct_lit = true; let mut c = self.parse_expr(); if self.eat(TokenKind::Equal) { c = self.parse_expr(); } self.no_struct_lit = false; if self.is_rec(3) { self.advance(); } else { self.arena.diagnostics.push((sp, "NULL002: 'guard' statement requires an 'else' block with early exit".into())); }
-                            let eb = self.parse_block();
-                            return self.arena.alloc_node(NodeKind::GuardStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), c.0, eb.0); }
+                            let eb = self.parse_block(); return self.arena.alloc_node(NodeKind::GuardStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), c.0, eb.0); }
                         18 => { self.advance(); let tb = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() };
                             let mut ch = vec![tb]; while self.is_rec(19) { let csp = self.span(); self.advance();
                                 let psym = if self.is_word() && !self.at(TokenKind::LBrace) { let s = self.intern_cur(); if self.eat(TokenKind::Colon) { let _ = self.parse_type(); } s } else { SymbolId(0) };
-                                let cb = if self.eat(TokenKind::FatArrow) { self.parse_expr() } else { self.parse_block() };
-                                ch.push(self.arena.alloc_node(NodeKind::CatchClause, 0, csp, psym.0, cb.0)); }
-                            let _ = self.eat(TokenKind::Semicolon);
-                            return self.arena.alloc_list_node(NodeKind::TryStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), &ch); }
+                                let cb = if self.eat(TokenKind::FatArrow) { self.parse_expr() } else { self.parse_block() }; ch.push(self.arena.alloc_node(NodeKind::CatchClause, 0, csp, psym.0, cb.0)); }
+                            let _ = self.eat(TokenKind::Semicolon); return self.arena.alloc_list_node(NodeKind::TryStmt, 0, ByteSpan::new(sp.start, self.prev_span().end), &ch); }
                         32 if matches!(self.tape.kind(self.next_non_nl(self.cur() + 1)), TokenKind::LBrace | TokenKind::LParen) => return self.parse_polyglot_inline(),
                         _ => {} } }
                 let w = self.text().to_string(); let nx = self.next_non_nl(self.cur() + 1);
                 if let Some(mac) = self.tables.syntax_macros.get(&w).cloned() {
-                    if nx >= self.tape.len() || !matches!(self.tape.kind(nx), TokenKind::Equal | TokenKind::InfixDot) {
+                    if nx < self.tape.len() && !matches!(self.tape.kind(nx), TokenKind::Equal | TokenKind::InfixDot | TokenKind::RBrace | TokenKind::Semicolon | TokenKind::Comma | TokenKind::RParen | TokenKind::RBracket) {
                         return self.expand_syntax_macro(&mac); } }
                 if nx < self.tape.len() && (is_word_tok(self.tape.kind(nx)) || matches!(self.tape.kind(nx), TokenKind::IntLit | TokenKind::StrLit | TokenKind::KwFn))
                     && !self.tables.infix_ops.contains_key(self.tape.text(nx, self.src))
@@ -776,9 +765,8 @@ impl<'a> Parser<'a> {
             !(mac.params.len() >= 2 && after < self.tape.len() && self.tape.kind(after) == TokenKind::LBrace) };
         if mac.params.is_empty() { if self.eat(TokenKind::LParen) { self.expect(TokenKind::RParen); }
         } else if call_form { self.eat(TokenKind::LParen); for p in &mac.params {
-                                let arg = if matches!(self.peek(), TokenKind::KwFn | TokenKind::KwStruct) {
-                    let mut v = Vec::new(); self.parse_item(&mut v, false); v.first().copied().unwrap_or(NodeId::NONE)
-                } else { self.parse_expr() }; bindings.push((p.clone(), arg)); let _ = self.eat(TokenKind::Comma); }
+                let arg = if matches!(self.peek(), TokenKind::KwFn | TokenKind::KwStruct) { let mut v = Vec::new(); self.parse_item(&mut v, false); v.first().copied().unwrap_or(NodeId::NONE) } else { self.parse_expr() };
+                bindings.push((p.clone(), arg)); let _ = self.eat(TokenKind::Comma); }
             self.expect(TokenKind::RParen); } else { for (i, p) in mac.params.iter().enumerate() {
                 let arg = if i + 1 == mac.params.len() && self.at(TokenKind::LBrace) { self.parse_block() }
                 else { self.no_struct_lit = true; let a = self.parse_expr(); self.no_struct_lit = false; a }; bindings.push((p.clone(), arg)); } }
@@ -796,7 +784,7 @@ impl<'a> Parser<'a> {
         else { let s = self.intern_cur(); if self.eat(TokenKind::Comma) { self.advance(); } s }; if self.is_rec(10) { self.advance(); }
         self.no_struct_lit = true; let iter = self.parse_expr(); self.no_struct_lit = false;
         let body = if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_stmt() };
-                let then_n = if self.is_rec(11) { self.advance(); if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() } } else { NodeId::NONE };
+        let then_n = if self.is_rec(11) { self.advance(); if self.at(TokenKind::LBrace) { self.parse_block() } else { self.parse_expr() } } else { NodeId::NONE };
         self.arena.alloc_for(vsym, iter, body, then_n, ByteSpan::new(sp.start, self.prev_span().end)) }
     fn parse_switch(&mut self) -> NodeId { let sp = self.span(); self.advance();
         self.no_struct_lit = true; let scrut = self.parse_expr(); self.no_struct_lit = false; self.expect(TokenKind::LBrace);
@@ -807,10 +795,9 @@ impl<'a> Parser<'a> {
             } else { if self.is_rec(15) { self.advance(); } self.parse_pattern() };
             if self.eat(TokenKind::KwIf) || self.is_rec(28) { self.no_struct_lit = true; let _ = self.parse_expr(); self.no_struct_lit = false; }
             let is_colon = self.eat(TokenKind::Colon); if !is_colon { let _ = self.eat(TokenKind::FatArrow); }
-                        let body = if self.at(TokenKind::LBrace) { self.parse_block() }
+            let body = if self.at(TokenKind::LBrace) { self.parse_block() }
             else { let mut stmts = Vec::new(); while !self.at_end() && !self.at(TokenKind::RBrace) && !self.is_rec(15) && !self.is_rec(16) {
-                    let m = self.pos; stmts.push(self.parse_stmt());                     if self.eat(TokenKind::Comma) || self.pos == m || (!is_colon && stmts.len() == 1) { break; }
-                }
+                    let m = self.pos; stmts.push(self.parse_stmt()); if self.eat(TokenKind::Comma) || self.pos == m || (!is_colon && stmts.len() == 1) { break; } }
                 if stmts.len() == 1 { let s = stmts[0]; if self.arena.node(s).node_kind() == NodeKind::ExprStmt { NodeId(self.arena.node(s).lhs) } else { s } }
                 else { self.arena.alloc_list_node(NodeKind::BlockExpr, 0, asp, &stmts) } };
             let _ = self.eat(TokenKind::Comma) || self.eat(TokenKind::Semicolon);
@@ -962,6 +949,20 @@ impl<'a> Parser<'a> {
                         33 if matches!(pl, 17 | 23) && nx < self.tape.len() && !matches!(self.tape.kind(nx), TokenKind::RParen | TokenKind::Comma | TokenKind::Semicolon | TokenKind::InfixDot) => {
                             self.advance(); return self.parse_expr_bp(80); }
                         33 if pl == 7 && nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LBrace => { self.advance(); return self.parse_block(); }
+                        35 if nx < self.tape.len() && self.tape.kind(nx) == TokenKind::LParen => {
+                            self.advance(); self.expect(TokenKind::LParen); let arg = self.parse_expr(); self.expect(TokenKind::RParen);
+                            let fl = match pl { 1 => UNARY_OP_SPLAT, 2 => UNARY_OP_DOUBLE_SPLAT, 3 => UNARY_OP_DEEP_FLATTEN, _ => UNARY_OP_SPLAT };
+                            return self.arena.alloc_node(NodeKind::UnaryExpr, fl, ByteSpan::new(sp.start, self.prev_span().end), arg.0, 0); }
+                        37 if pl >= 1 && pl <= 6 => {
+                            if nx < self.tape.len() && (is_word_tok(self.tape.kind(nx)) || is_seed_kw(self.tape.kind(nx))) {
+                                let mut p_check = nx; while p_check < self.tape.len() && (is_word_tok(self.tape.kind(p_check)) || is_seed_kw(self.tape.kind(p_check)) || self.tape.kind(p_check) == TokenKind::InfixDot) { p_check += 1; }
+                                if p_check < self.tape.len() && self.tape.kind(p_check) == TokenKind::LParen && p_check > nx {
+                                    self.advance(); let mut callee = self.parse_prefix();
+                                    if callee.is_some() {
+                                        while matches!(self.peek(), TokenKind::InfixDot | TokenKind::SafeNav) {
+                                            let safe = (self.peek() == TokenKind::SafeNav) as u16; self.advance(); let sym = self.intern_cur();
+                                            callee = self.arena.alloc_node(NodeKind::MemberExpr, safe, ByteSpan::new(self.arena.span(callee).start, self.prev_span().end), callee.0, sym.0); }
+                                        return self.parse_call_args(callee, pl as u16); } } } }
                         _ => {} } }
                 let w = self.text().to_string(); if let Some(mac) = self.tables.syntax_macros.get(&w).cloned() {
                     if nx < self.tape.len() && matches!(self.tape.kind(nx), TokenKind::LParen | TokenKind::LBrace) { return self.expand_syntax_macro(&mac); }
@@ -974,20 +975,18 @@ impl<'a> Parser<'a> {
             TokenKind::CallQuoteAbi => CallQuoteKind::AbiFrame, TokenKind::CallQuoteReact => CallQuoteKind::ReactiveSignal,
             TokenKind::CallQuoteAdjoint => CallQuoteKind::SymbolicAdjoint, TokenKind::CallQuoteEffect => CallQuoteKind::EffectDryRun,
             _ => CallQuoteKind::None, }; if qk != CallQuoteKind::None { self.advance(); }
-        let is_sym_quote = self.arena.node(callee).node_kind() == NodeKind::IdentExpr
-            && self.tables.receptors.get(self.arena.interner.resolve(SymbolId(self.arena.node(callee).lhs))) == Some(&(33, 25));
+        self.parse_call_args(callee, qk as u16) }
+    fn parse_call_args(&mut self, callee: NodeId, qk: u16) -> NodeId {
+        let is_sym_quote = self.arena.node(callee).node_kind() == NodeKind::IdentExpr && self.tables.receptors.get(self.arena.interner.resolve(SymbolId(self.arena.node(callee).lhs))) == Some(&(33, 25));
         self.expect(TokenKind::LParen); let mut ch = vec![callee]; while !self.at_end() && !self.at(TokenKind::RParen) {
-                        if is_sym_quote { let (tsp, mut txt) = (self.span(), String::new());
+            if is_sym_quote { let (tsp, mut txt) = (self.span(), String::new());
                 while !self.at_end() && !self.at(TokenKind::RParen) && !self.at(TokenKind::Comma) { txt.push_str(self.text()); self.advance(); }
                 let sym = self.arena.interner.intern(&txt); ch.push(self.arena.alloc_node(NodeKind::StrLit, 0, tsp, sym.0, 0));
             } else { let nx = self.next_non_nl(self.cur() + 1);
                 if self.is_word() && nx < self.tape.len() && matches!(self.tape.kind(nx), TokenKind::Equal | TokenKind::Colon) { self.advance(); self.advance(); }
                 let a = self.parse_expr(); if a.is_some() { ch.push(a); } }
-            if self.eat(TokenKind::Comma) {
-                                if self.at(TokenKind::RParen) { self.arena.diagnostics.push((self.prev_span(), "Trailing comma not permitted in argument list".into())); break; }
-            } else { break; } }
-        self.expect(TokenKind::RParen);
-        self.arena.alloc_list_node(NodeKind::CallExpr, qk as u16, ByteSpan::new(self.arena.span(callee).start, self.prev_span().end), &ch) }
+            if self.eat(TokenKind::Comma) { if self.at(TokenKind::RParen) { self.arena.diagnostics.push((self.prev_span(), "Trailing comma not permitted in argument list".into())); break; } } else { break; } }
+        self.expect(TokenKind::RParen); self.arena.alloc_list_node(NodeKind::CallExpr, qk, ByteSpan::new(self.arena.span(callee).start, self.prev_span().end), &ch) }
     fn parse_paren_or_lambda(&mut self) -> NodeId { let sp = self.span(); if let Some(close) = self.tape.matching_bracket(self.cur()) {
             let nx = self.next_non_nl(close as usize + 1); if nx < self.tape.len() && self.tape.kind(nx) == TokenKind::FatArrow {
                 let params = self.parse_param_list(); self.expect(TokenKind::FatArrow);
@@ -995,13 +994,12 @@ impl<'a> Parser<'a> {
                 let (st, ln) = self.arena.alloc_child_slice(&params);
                 return self.arena.alloc_node(NodeKind::LambdaExpr, ln as u16, ByteSpan::new(sp.start, self.prev_span().end), st, body.0); } }
         self.advance(); let (mut items, mut had_comma) = (Vec::new(), false); while !self.at_end() && !self.at(TokenKind::RParen) {
-                        let e = self.parse_expr(); if e.is_some() { items.push(e); }
+            let e = self.parse_expr(); if e.is_some() { items.push(e); }
             if self.eat(TokenKind::Comma) { had_comma = true; } else { break; } }
         self.expect(TokenKind::RParen);
-        if items.len() == 1 && !had_comma { items[0] } else { self.arena.alloc_list_node(NodeKind::TupleExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), &items) }
-    }
+        if items.len() == 1 && !had_comma { items[0] } else { self.arena.alloc_list_node(NodeKind::TupleExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), &items) } }
     fn parse_bracket_lit(&mut self) -> NodeId {
-        let sp = self.span(); self.advance();         if self.eat(TokenKind::Colon) { self.expect(TokenKind::RBracket); return self.arena.alloc_list_node(NodeKind::MapExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), &[]); }
+        let sp = self.span(); self.advance(); if self.eat(TokenKind::Colon) { self.expect(TokenKind::RBracket); return self.arena.alloc_list_node(NodeKind::MapExpr, 0, ByteSpan::new(sp.start, self.prev_span().end), &[]); }
         let (mut items, mut is_map) = (Vec::new(), false); while !self.at_end() && !self.at(TokenKind::RBracket) {
             if self.at(TokenKind::RBracket) { break; }
             let mp = self.pos; let k = self.parse_expr();
@@ -1009,8 +1007,7 @@ impl<'a> Parser<'a> {
             else if k.is_some() { items.push(k); }
             if self.eat(TokenKind::Comma) { } else if self.pos == mp { self.advance(); } else { break; } }
         self.expect(TokenKind::RBracket);
-        self.arena.alloc_list_node(if is_map { NodeKind::MapExpr } else { NodeKind::ListExpr }, 0, ByteSpan::new(sp.start, self.prev_span().end), &items)
-    }
+        self.arena.alloc_list_node(if is_map { NodeKind::MapExpr } else { NodeKind::ListExpr }, 0, ByteSpan::new(sp.start, self.prev_span().end), &items) }
     fn looks_like_brace_map(&self) -> bool { let p1 = self.next_non_nl(self.cur() + 1); if p1 >= self.tape.len() { return false; }
         if self.tape.kind(p1) == TokenKind::RBrace { return true; }
         let p2 = self.next_non_nl(p1 + 1);
@@ -1062,6 +1059,7 @@ fn match_postfix(a: &TypePostfixKind, b: &TypePostfixKind) -> bool { matches!((a
         | (TypePostfixKind::BracketColon, TypePostfixKind::BracketColon))
         || matches!((a, b), (TypePostfixKind::BracketArgs(x), TypePostfixKind::BracketArgs(y)) if x == y) }
 fn same_type_trigger(a: &TypeConstructRule, b: &TypeConstructRule) -> bool { match (a, b) {
+        (TypeConstructRule::NamedGeneric { name: x, .. }, TypeConstructRule::NamedGeneric { name: y, .. }) => x == y,
         (TypeConstructRule::Prefix { op: x, .. }, TypeConstructRule::Prefix { op: y, .. }) => x == y,
         (TypeConstructRule::Infix { op: x, .. }, TypeConstructRule::Infix { op: y, .. }) => x == y,
         (TypeConstructRule::Postfix { kind: TypePostfixKind::BracketArgs(x), .. }, TypeConstructRule::Postfix { kind: TypePostfixKind::BracketArgs(y), .. }) => x == y,
@@ -1069,6 +1067,10 @@ fn same_type_trigger(a: &TypeConstructRule, b: &TypeConstructRule) -> bool { mat
         (TypeConstructRule::Postfix { kind: x, .. }, TypeConstructRule::Postfix { kind: y, .. }) => core::mem::discriminant(x) == core::mem::discriminant(y),
         _ => false, } }
 fn compile_type_rule(pat: &[(TokenKind, String)], template: TemplateNode) -> Option<TypeConstructRule> { if pat.is_empty() { return None; }
+    if pat.len() >= 4 && is_word_tok(pat[0].0) && pat[1].0 == TokenKind::Less && pat.last().map(|x| x.0) == Some(TokenKind::Greater) {
+        let (name, mut params) = (pat[0].1.clone(), Vec::new());
+        for (tk, s) in &pat[2..pat.len() - 1] { if is_word_tok(*tk) { params.push(s.clone()); } }
+        return Some(TypeConstructRule::NamedGeneric { name, params, template }); }
     if pat.len() == 2 && matches!(pat[0].0, TokenKind::Star | TokenKind::At) {
         return Some(TypeConstructRule::Prefix { op: pat[0].1.clone(), param: pat[1].1.clone(), template }); }
     if pat.len() >= 3 && pat[1].0 == TokenKind::LBracket { let t = pat[0].1.clone();
@@ -1080,8 +1082,7 @@ fn compile_type_rule(pat: &[(TokenKind, String)], template: TemplateNode) -> Opt
     if pat.len() == 2 && matches!(pat[1].0, TokenKind::Question | TokenKind::Caret) {
         return Some(TypeConstructRule::Postfix { kind: TypePostfixKind::Sym(pat[1].1.clone(), false), params: vec![pat[0].1.clone()], template }); }
     if pat.len() == 3 && pat[1].0 == TokenKind::At {
-        return Some(TypeConstructRule::Postfix { kind: TypePostfixKind::Sym("@".into(), true), params: vec![pat[0].1.clone(), pat[2].1.clone()], template });
-    }
+        return Some(TypeConstructRule::Postfix { kind: TypePostfixKind::Sym("@".into(), true), params: vec![pat[0].1.clone(), pat[2].1.clone()], template }); }
     let clean: Vec<&(TokenKind, String)> = pat.iter().filter(|(k, _)| !matches!(k, TokenKind::LParen | TokenKind::RParen)).collect();
     if clean.len() == 3 { let (bp, ra) = match clean[1].0 { TokenKind::Amper => (20, false), TokenKind::Vbar => (15, false),
             TokenKind::FatArrow | TokenKind::Arrow => (10, true), TokenKind::Exclamation => (5, false), _ => return None, };

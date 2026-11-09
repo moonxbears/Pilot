@@ -33,6 +33,9 @@ mod m02;
 #[path = "milestone03_declarative_cli_registry_and_comptime_parity.rs"]
 mod m03;
 
+#[path = "milestone04_dual_syntax_pairings_and_bidirectional_formatter.rs"]
+mod m04;
+
 #[path = "milestone50_lossless_bridge_and_reflection.rs"]
 mod m50;
 
@@ -134,6 +137,10 @@ pub fn test_mega_all_milestones_50_through_61_simultaneously() {
             m03::test_m3_2_posix_gnu_argument_parser_and_passthrough();
             m03::test_m3_3_dynamic_shell_completions_and_schema_json();
             m03::test_m3_4_zero_stdout_scraping_and_cli_shrink_ceiling();
+            m04::test_m4_1_identifier_non_collision_and_prefix_projection();
+            m04::test_m4_2_dual_syntax_equivalence_and_identical_codegen();
+            m04::test_m4_3_bidirectional_formatter_styles();
+            m04::test_m4_4_universal_rename_litmus_and_ide_reflection();
         });
         s.spawn(|| {
             m50::test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts();
