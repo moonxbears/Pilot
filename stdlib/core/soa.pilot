@@ -1,0 +1,253 @@
+// ==============================================================================
+// FILE: stdlib/core/soa.pilot
+// Milestone 25: .pchor Storage & Memory Layout Choreography
+// Freestanding Ring-1 multi-column container primitives (0b01 views & 0b10 tables)
+// ==============================================================================
+
+pub lvl(0) pkg core.soa;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Storage Strategy & Alignment Constants
+// ------------------------------------------------------------------------------
+
+pub enum StorageStrategy : u8 {
+    ::AoS       = 1,
+    ::SoA       = 2,
+    ::AoSoA     = 3,
+    ::HotCold   = 4,
+    ::BitPacked = 5,
+}
+
+pub pure fn storage_strategy_name(strategy: StorageStrategy) -> str {
+    if strategy == StorageStrategy::AoS       { return "AoS"; }
+    if strategy == StorageStrategy::SoA       { return "SoA"; }
+    if strategy == StorageStrategy::AoSoA     { return "AoSoA"; }
+    if strategy == StorageStrategy::HotCold   { return "HotCold"; }
+    if strategy == StorageStrategy::BitPacked { return "BitPacked"; }
+    return "UnknownStrategy";
+}
+
+pub pure fn default_simd_alignment() -> usize => 64;
+
+pub pure fn align_up_bytes(offset: usize, align: usize) -> usize {
+    if align <= 1 { return offset; }
+    let rem = offset % align;
+    if rem == 0 { return offset; }
+    return offset + (align - rem);
+}
+
+// ------------------------------------------------------------------------------
+// 2. Row Proxy Reference Views (0b01 : IReference)
+// ------------------------------------------------------------------------------
+
+pub struct RowProxyRef<T> : IReference {
+    pub table_base: usize;
+    pub row_index:  usize;
+    pub is_active:  bool;
+
+    pub static pure fn create(base: usize, idx: usize) -> RowProxyRef<T> => RowProxyRef<T> {
+        table_base: base,
+        row_index:  idx,
+        is_active:  true,
+    };
+
+    pub pure fn index(ref self) -> usize => self.row_index;
+    pub pure fn valid(ref self) -> bool => self.is_active;
+}
+
+pub struct RowProxyMut<T> : IReference {
+    pub table_base: usize;
+    pub row_index:  usize;
+    pub is_active:  bool;
+
+    pub static pure fn create(base: usize, idx: usize) -> RowProxyMut<T> => RowProxyMut<T> {
+        table_base: base,
+        row_index:  idx,
+        is_active:  true,
+    };
+
+    pub pure fn index(ref self) -> usize => self.row_index;
+    pub pure fn valid(ref self) -> bool => self.is_active;
+}
+
+// ------------------------------------------------------------------------------
+// 3. SoaTable<T> (0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct SoaTable<T> : IObject {
+    pub count:       usize;
+    pub capacity:    usize;
+    pub align_bytes: usize;
+    pub col_count:   usize;
+    pub col_sizes:   List<usize>;
+    pub col_aligns:  List<usize>;
+    pub col_offsets: List<usize>;
+    pub total_bytes: usize;
+    pub drop_mask:   u64;
+
+    pub static fn create(cap: usize, col_szs: List<usize>, align: usize) -> SoaTable<T> {
+        let n_cols = col_szs.len();
+        var offsets: List<usize> = [];
+        var aligns: List<usize> = [];
+        var cur_off: usize = 0;
+        var i = 0;
+        while i < n_cols {
+            let sz = col_szs[i];
+            cur_off = align_up_bytes(cur_off, align);
+            offsets.push(cur_off);
+            aligns.push(align);
+            cur_off = cur_off + cap * sz;
+            i = i + 1;
+        }
+        let total = align_up_bytes(cur_off, align);
+
+        return SoaTable<T> {
+            count:       0,
+            capacity:    cap,
+            align_bytes: align,
+            col_count:   n_cols,
+            col_sizes:   col_szs,
+            col_aligns:  aligns,
+            col_offsets: offsets,
+            total_bytes: total,
+            drop_mask:   0,
+        };
+    }
+
+    pub pure fn len(ref self) -> usize => self.count;
+    pub pure fn cap(ref self) -> usize => self.capacity;
+    pub pure fn is_empty(ref self) -> bool => self.count == 0;
+    pub pure fn columns(ref self) -> usize => self.col_count;
+
+    pub pure fn column_byte_offset(ref self, col_idx: usize, row_idx: usize) -> usize {
+        if col_idx >= self.col_count { return 0; }
+        return self.col_offsets[col_idx] + row_idx * self.col_sizes[col_idx];
+    }
+
+    pub pure fn column_base(ref self, col_idx: usize) -> usize {
+        if col_idx >= self.col_count { return 0; }
+        return self.col_offsets[col_idx];
+    }
+
+    pub pure fn row(ref self, idx: usize) -> RowProxyRef<T> {
+        return RowProxyRef<T>::create(0, idx);
+    }
+
+    pub var fn row_mut(var ref self, idx: usize) -> RowProxyMut<T> {
+        return RowProxyMut<T>::create(0, idx);
+    }
+
+    pub var fn push(var ref self) -> usize {
+        if self.count >= self.capacity { return self.capacity; }
+        let new_idx = self.count;
+        self.count = self.count + 1;
+        return new_idx;
+    }
+
+    pub var fn swap_remove(var ref self, idx: usize) -> bool {
+        if idx >= self.count { return false; }
+        self.count = self.count - 1;
+        return true;
+    }
+
+    pub var fn clear(var ref self) {
+        self.count = 0;
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 4. AoSoA Table (Tiled SoA, 0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct AoSoaTable<T, Tile> : IObject {
+    pub count:        usize;
+    pub capacity:     usize;
+    pub tile_width:   usize;
+    pub block_bytes:  usize;
+    pub col_count:    usize;
+    pub col_sizes:    List<usize>;
+    pub tile_offsets: List<usize>;
+    pub total_bytes:  usize;
+
+    pub static fn create(cap: usize, tile_w: usize, col_szs: List<usize>) -> AoSoaTable<T, Tile> {
+        let n_cols = col_szs.len();
+        var t_offsets: List<usize> = [];
+        var cur_blk_off: usize = 0;
+        var i = 0;
+        while i < n_cols {
+            t_offsets.push(cur_blk_off);
+            cur_blk_off = cur_blk_off + tile_w * col_szs[i];
+            i = i + 1;
+        }
+        let blk_sz = align_up_bytes(cur_blk_off, 16);
+        let n_blocks = (cap + tile_w - 1) / tile_w;
+        let total = n_blocks * blk_sz;
+
+        return AoSoaTable<T, Tile> {
+            count:        0,
+            capacity:     cap,
+            tile_width:   tile_w,
+            block_bytes:  blk_sz,
+            col_count:    n_cols,
+            col_sizes:    col_szs,
+            tile_offsets: t_offsets,
+            total_bytes:  total,
+        };
+    }
+
+    pub pure fn len(ref self) -> usize => self.count;
+    pub pure fn cap(ref self) -> usize => self.capacity;
+    pub pure fn block_index(ref self, row: usize) -> usize => row / self.tile_width;
+    pub pure fn lane_index(ref self, row: usize) -> usize => row % self.tile_width;
+
+    pub pure fn element_byte_offset(ref self, col_idx: usize, row_idx: usize) -> usize {
+        let blk_idx = row_idx / self.tile_width;
+        let lane_idx = row_idx % self.tile_width;
+        let blk_start = blk_idx * self.block_bytes;
+        let col_tile_start = self.tile_offsets[col_idx];
+        let elem_offset = lane_idx * self.col_sizes[col_idx];
+        return blk_start + col_tile_start + elem_offset;
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 5. HotCold Table (Partitioned Storage, 0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct HotColdTable<T> : IObject {
+    pub count:            usize;
+    pub capacity:         usize;
+    pub hot_stride:       usize;
+    pub cold_stride:      usize;
+    pub hot_base_offset:  usize;
+    pub cold_base_offset: usize;
+    pub total_bytes:      usize;
+
+    pub static fn create(cap: usize, hot_sz: usize, cold_sz: usize) -> HotColdTable<T> {
+        let hot_aligned = align_up_bytes(hot_sz, 8);
+        let cold_aligned = align_up_bytes(cold_sz, 8);
+        let hot_total = align_up_bytes(cap * hot_aligned, 64);
+        let cold_total = align_up_bytes(cap * cold_aligned, 64);
+
+        return HotColdTable<T> {
+            count:            0,
+            capacity:         cap,
+            hot_stride:       hot_aligned,
+            cold_stride:      cold_aligned,
+            hot_base_offset:  0,
+            cold_base_offset: hot_total,
+            total_bytes:      hot_total + cold_total,
+        };
+    }
+
+    pub pure fn len(ref self) -> usize => self.count;
+    pub pure fn hot_addr(ref self, row: usize, field_hot_off: usize) -> usize {
+        return self.hot_base_offset + row * self.hot_stride + field_hot_off;
+    }
+
+    pub pure fn cold_addr(ref self, row: usize, field_cold_off: usize) -> usize {
+        return self.cold_base_offset + row * self.cold_stride + field_cold_off;
+    }
+}

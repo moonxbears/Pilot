@@ -1,0 +1,367 @@
+// ==============================================================================
+// FILE: selfhost/chor/storage_plan.pilot
+// Milestone 25: .pchor Storage & Memory Layout Choreography - Storage Planner
+// Computes physical column splits, 64-byte SIMD cache-line alignment padding,
+// nested struct flattening, bit-packed bool/enum planes, and Perceus drop masks.
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Chor.StoragePlan;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Storage Strategy & Alignment Helpers
+// ------------------------------------------------------------------------------
+
+pub enum StorageStrategy : u8 {
+    ::AoS       = 1,
+    ::SoA       = 2,
+    ::AoSoA     = 3,
+    ::HotCold   = 4,
+    ::BitPacked = 5,
+}
+
+pub pure fn strategy_to_str(s: StorageStrategy) -> str {
+    if s == StorageStrategy::AoS       { return "AoS"; }
+    if s == StorageStrategy::SoA       { return "SoA"; }
+    if s == StorageStrategy::AoSoA     { return "AoSoA"; }
+    if s == StorageStrategy::HotCold   { return "HotCold"; }
+    if s == StorageStrategy::BitPacked { return "BitPacked"; }
+    return "UnknownStrategy";
+}
+
+pub pure fn parse_storage_strategy(name: str) -> StorageStrategy {
+    if name == "SoA"       { return StorageStrategy::SoA; }
+    if name == "AoSoA"     { return StorageStrategy::AoSoA; }
+    if name == "HotCold"   { return StorageStrategy::HotCold; }
+    if name == "BitPacked" { return StorageStrategy::BitPacked; }
+    return StorageStrategy::AoS;
+}
+
+pub pure fn align_up(val: usize, align: usize) -> usize {
+    if align <= 1 { return val; }
+    let rem = val % align;
+    if rem == 0 { return val; }
+    return val + (align - rem);
+}
+
+// ------------------------------------------------------------------------------
+// 2. Leaf Field Descriptor & Physical Column Layout (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct FieldLeafDesc : IValue {
+    pub path:          str;
+    pub leaf_name:     str;
+    pub byte_size:     usize;
+    pub align_bytes:   usize;
+    pub lattice_bits:  u8;
+    pub is_cold:       bool;
+    pub bit_width:     u8;
+    pub is_bit_packed: bool;
+}
+
+pub pure fn field_leaf_desc_new(
+    path: str,
+    leaf_name: str,
+    byte_size: usize,
+    align_bytes: usize,
+    lattice_bits: u8,
+    is_cold: bool,
+    bit_width: u8,
+    is_bit_packed: bool
+) -> FieldLeafDesc {
+    return FieldLeafDesc {
+        path:          path,
+        leaf_name:     leaf_name,
+        byte_size:     byte_size,
+        align_bytes:   align_bytes,
+        lattice_bits:  lattice_bits,
+        is_cold:       is_cold,
+        bit_width:     bit_width,
+        is_bit_packed: is_bit_packed,
+    };
+}
+
+[Layout(c_abi)]
+pub struct ColumnPhysicalLayout : IValue {
+    pub column_index:       usize;
+    pub field_path:         str;
+    pub byte_size:          usize;
+    pub element_stride:     usize;
+    pub plane_offset:       usize;
+    pub plane_bytes:        usize;
+    pub alignment:          usize;
+    pub lattice_bits:       u8;
+    pub needs_perceus_drop: bool;
+}
+
+// ------------------------------------------------------------------------------
+// 3. Storage Plan Schema (0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct StoragePlan : IObject {
+    pub struct_name:             str;
+    pub strategy:                StorageStrategy;
+    pub capacity:                usize;
+    pub alignment_bytes:         usize;
+    pub tile_width:              usize;
+    pub columns:                 List<ColumnPhysicalLayout>;
+    pub total_allocation_bytes:  usize;
+    pub hot_bytes:               usize;
+    pub cold_bytes:              usize;
+    pub perceus_drop_columns:    List<usize>;
+    pub perceus_drop_mask:       u64;
+}
+
+// ------------------------------------------------------------------------------
+// 4. Nested Struct Flattening
+// ------------------------------------------------------------------------------
+
+pub fn flatten_nested_vec3(prefix: str) -> List<FieldLeafDesc> {
+    var leaves: List<FieldLeafDesc> = [];
+    leaves.push(field_leaf_desc_new(prefix + ".x", "x", 4, 4, 0, false, 32, false));
+    leaves.push(field_leaf_desc_new(prefix + ".y", "y", 4, 4, 0, false, 32, false));
+    leaves.push(field_leaf_desc_new(prefix + ".z", "z", 4, 4, 0, false, 32, false));
+    return leaves;
+}
+
+// ------------------------------------------------------------------------------
+// 5. Storage Plan Computation
+// ------------------------------------------------------------------------------
+
+pub fn compute_storage_plan(
+    struct_name: str,
+    strategy: StorageStrategy,
+    capacity: usize,
+    fields: List<FieldLeafDesc>,
+    tile_w: usize,
+    align_b: usize
+) -> StoragePlan {
+    let effective_align = if align_b == 0 { 64 } else { align_b };
+    let effective_tile = if tile_w == 0 { 8 } else { tile_w };
+    let n_fields = fields.len();
+
+    var cols: List<ColumnPhysicalLayout> = [];
+    var drop_cols: List<usize> = [];
+    var drop_mask: u64 = 0;
+    var total_bytes: usize = 0;
+    var hot_sz: usize = 0;
+    var cold_sz: usize = 0;
+
+    if strategy == StorageStrategy::SoA {
+        // SoA: Partitioned into m 64B-aligned column planes
+        var cur_offset: usize = 0;
+        var i = 0;
+        while i < n_fields {
+            let f = fields[i];
+            cur_offset = align_up(cur_offset, effective_align);
+            let plane_size = align_up(capacity * f.byte_size, effective_align);
+
+            let is_obj = f.lattice_bits == 2; // 0b10 : IObject
+            if is_obj {
+                drop_cols.push(i);
+                if i < 64 {
+                    let bit_val: u64 = 1;
+                    drop_mask = drop_mask | (bit_val << i);
+                }
+            }
+
+            cols.push(ColumnPhysicalLayout {
+                column_index:       i,
+                field_path:         f.path,
+                byte_size:          f.byte_size,
+                element_stride:     f.byte_size,
+                plane_offset:       cur_offset,
+                plane_bytes:        plane_size,
+                alignment:          effective_align,
+                lattice_bits:       f.lattice_bits,
+                needs_perceus_drop: is_obj,
+            });
+
+            cur_offset = cur_offset + plane_size;
+            i = i + 1;
+        }
+        total_bytes = cur_offset;
+    } else if strategy == StorageStrategy::AoSoA {
+        // AoSoA: Blocks of W elements with f0[W], f1[W], ...
+        var cur_tile_off: usize = 0;
+        var i = 0;
+        while i < n_fields {
+            let f = fields[i];
+            let is_obj = f.lattice_bits == 2;
+            if is_obj {
+                drop_cols.push(i);
+                if i < 64 {
+                    let bit_val: u64 = 1;
+                    drop_mask = drop_mask | (bit_val << i);
+                }
+            }
+            cols.push(ColumnPhysicalLayout {
+                column_index:       i,
+                field_path:         f.path,
+                byte_size:          f.byte_size,
+                element_stride:     f.byte_size,
+                plane_offset:       cur_tile_off,
+                plane_bytes:        effective_tile * f.byte_size,
+                alignment:          f.align_bytes,
+                lattice_bits:       f.lattice_bits,
+                needs_perceus_drop: is_obj,
+            });
+            cur_tile_off = cur_tile_off + effective_tile * f.byte_size;
+            i = i + 1;
+        }
+        let block_bytes = align_up(cur_tile_off, 16);
+        let n_blocks = (capacity + effective_tile - 1) / effective_tile;
+        total_bytes = n_blocks * block_bytes;
+    } else if strategy == StorageStrategy::HotCold {
+        // HotCold: Hot AoS slab + Cold AoS slab
+        var hot_off: usize = 0;
+        var cold_off: usize = 0;
+        var i = 0;
+        while i < n_fields {
+            let f = fields[i];
+            let is_obj = f.lattice_bits == 2;
+            if is_obj {
+                drop_cols.push(i);
+                if i < 64 {
+                    let bit_val: u64 = 1;
+                    drop_mask = drop_mask | (bit_val << i);
+                }
+            }
+            if f.is_cold {
+                cols.push(ColumnPhysicalLayout {
+                    column_index:       i,
+                    field_path:         f.path,
+                    byte_size:          f.byte_size,
+                    element_stride:     f.byte_size,
+                    plane_offset:       cold_off,
+                    plane_bytes:        capacity * f.byte_size,
+                    alignment:          f.align_bytes,
+                    lattice_bits:       f.lattice_bits,
+                    needs_perceus_drop: is_obj,
+                });
+                cold_off = cold_off + f.byte_size;
+            } else {
+                cols.push(ColumnPhysicalLayout {
+                    column_index:       i,
+                    field_path:         f.path,
+                    byte_size:          f.byte_size,
+                    element_stride:     f.byte_size,
+                    plane_offset:       hot_off,
+                    plane_bytes:        capacity * f.byte_size,
+                    alignment:          f.align_bytes,
+                    lattice_bits:       f.lattice_bits,
+                    needs_perceus_drop: is_obj,
+                });
+                hot_off = hot_off + f.byte_size;
+            }
+            i = i + 1;
+        }
+        hot_sz = align_up(hot_off, 8);
+        cold_sz = align_up(cold_off, 8);
+        let hot_total = align_up(capacity * hot_sz, 64);
+        let cold_total = align_up(capacity * cold_sz, 64);
+        total_bytes = hot_total + cold_total;
+    } else if strategy == StorageStrategy::BitPacked {
+        // BitPacked: bit-planes for bool & small enums
+        var cur_bit_off: usize = 0;
+        var i = 0;
+        while i < n_fields {
+            let f = fields[i];
+            let bits = if f.is_bit_packed { f.bit_width as usize } else { f.byte_size * 8 };
+            let total_plane_bits = capacity * bits;
+            let total_plane_bytes = align_up((total_plane_bits + 7) / 8, 8);
+
+            cols.push(ColumnPhysicalLayout {
+                column_index:       i,
+                field_path:         f.path,
+                byte_size:          f.byte_size,
+                element_stride:     bits,
+                plane_offset:       cur_bit_off,
+                plane_bytes:        total_plane_bytes,
+                alignment:          8,
+                lattice_bits:       f.lattice_bits,
+                needs_perceus_drop: false,
+            });
+
+            cur_bit_off = cur_bit_off + total_plane_bytes;
+            i = i + 1;
+        }
+        total_bytes = cur_bit_off;
+    } else {
+        // AoS default: Single slab capacity * sizeof(T)
+        var struct_sz: usize = 0;
+        var i = 0;
+        while i < n_fields {
+            let f = fields[i];
+            let is_obj = f.lattice_bits == 2;
+            if is_obj {
+                drop_cols.push(i);
+                if i < 64 {
+                    let bit_val: u64 = 1;
+                    drop_mask = drop_mask | (bit_val << i);
+                }
+            }
+            cols.push(ColumnPhysicalLayout {
+                column_index:       i,
+                field_path:         f.path,
+                byte_size:          f.byte_size,
+                element_stride:     f.byte_size,
+                plane_offset:       struct_sz,
+                plane_bytes:        capacity * f.byte_size,
+                alignment:          f.align_bytes,
+                lattice_bits:       f.lattice_bits,
+                needs_perceus_drop: is_obj,
+            });
+            struct_sz = struct_sz + f.byte_size;
+            i = i + 1;
+        }
+        total_bytes = capacity * struct_sz;
+    }
+
+    return StoragePlan {
+        struct_name:            struct_name,
+        strategy:               strategy,
+        capacity:               capacity,
+        alignment_bytes:        effective_align,
+        tile_width:             effective_tile,
+        columns:                cols,
+        total_allocation_bytes: total_bytes,
+        hot_bytes:              hot_sz,
+        cold_bytes:             cold_sz,
+        perceus_drop_columns:   drop_cols,
+        perceus_drop_mask:      drop_mask,
+    };
+}
+
+pub pure fn storage_plan_is_column_dropped(plan: ref<StoragePlan>, col_idx: usize) -> bool {
+    if col_idx < plan.columns.len() {
+        return plan.columns[col_idx].needs_perceus_drop;
+    }
+    return false;
+}
+
+pub pure fn storage_plan_drop_count(plan: ref<StoragePlan>) -> usize {
+    return plan.perceus_drop_columns.len();
+}
+
+// ------------------------------------------------------------------------------
+// 6. Cache-Line Utilization & Bandwidth Estimation
+// ------------------------------------------------------------------------------
+
+pub pure fn estimate_cacheline_efficiency(strategy: StorageStrategy, struct_size: usize, accessed_bytes: usize) -> usize {
+    if strategy == StorageStrategy::SoA {
+        // SoA 64B-aligned columns: every byte fetched in the cache line is part of the stream
+        return 100;
+    }
+    if struct_size == 0 || accessed_bytes == 0 { return 100; }
+    // AoS: fetches entire struct_size (or cache line containing it)
+    let eff = (accessed_bytes * 100) / struct_size;
+    return eff;
+}
+
+pub pure fn estimate_speedup_factor(struct_size: usize, accessed_bytes: usize) -> usize {
+    if accessed_bytes == 0 { return 1; }
+    return struct_size / accessed_bytes;
+}

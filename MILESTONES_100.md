@@ -1282,7 +1282,7 @@ Before advancing to **Phase 3 (`M21` — Boilerplate Eradication & `.pchor` Chor
 
 ---
 
-### M25 — `.pchor` Storage & Memory Layout Choreography (`AoS` $\leftrightarrow$ `SoA`, `AoSoA` & Hot/Cold Split)
+### M25 — [COMPLETE] `.pchor` Storage & Memory Layout Choreography (`AoS` $\leftrightarrow$ `SoA`, `AoSoA` & Hot/Cold Split)
 
 #### 25.1 Objective & Current Codebase Audit
 - **Root Bottleneck (Layout Refactoring Paralysis):** In conventional systems languages, developers start with clean object/struct domain code (`struct Particle { pub pos: Vec3; pub vel: Vec3; pub mass: f32; pub debug_tag: str; }`), only to discover later that iterating `pos += vel * dt` over `1_000_000` particles wastes `>60%` of CPU memory bandwidth fetching `mass` and `debug_tag` into L1 cache! Fixing this manually requires ripping apart `struct Particle` into parallel arrays (`pos_x: List<f32>`, `pos_y: List<f32>`, ...) and rewriting hundreds of call sites across the entire codebase. Pilot's `.pchor` choreographer solves this **declaratively in 1 line**.

@@ -1,0 +1,225 @@
+// ==============================================================================
+// FILE: selfhost/ir/pass_soa_rewrite.pilot
+// Milestone 25: .pchor Storage & Memory Layout Choreography - PilIR Rewrite Pass
+// Rewrites FieldAddr / Load / Store on choreographed storage views from AoS
+// record strides to SoA / AoSoA / HotCold / BitPacked column pointer arithmetic.
+// Statically enforces CHOR008: Raw Pointer Escape Guard.
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Ir.SoaRewrite;
+
+use Pilot.SelfHost.Chor.StoragePlan.*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. CHOR008: Raw Pointer Escape Guard
+// ------------------------------------------------------------------------------
+
+pub pure fn format_chor008(storage_name: str, struct_name: str, strategy: str) -> str {
+    return "CHOR008: Cannot form contiguous AoS 'ptr<" + struct_name + ">' into " + strategy + "-choreographed storage '" + storage_name + "'; borrow individual field or materialize '" + struct_name + "' by value";
+}
+
+pub pure fn chor008_fix_hint() -> str {
+    return "Hint: Access fields individually via slice<FieldT> or use .row() proxy / value copy.";
+}
+
+[Layout(c_abi)]
+pub struct Chor008Diagnostic : IValue {
+    pub has_error:    bool;
+    pub storage_name: str;
+    pub struct_name:  str;
+    pub strategy:     str;
+    pub message:      str;
+    pub fix_hint:     str;
+
+    pub static pure fn none() -> Chor008Diagnostic => Chor008Diagnostic {
+        has_error:    false,
+        storage_name: "",
+        struct_name:  "",
+        strategy:     "",
+        message:      "",
+        fix_hint:     "",
+    };
+
+    pub static pure fn error(storage: str, st_name: str, strat: str) -> Chor008Diagnostic => Chor008Diagnostic {
+        has_error:    true,
+        storage_name: storage,
+        struct_name:  st_name,
+        strategy:     strat,
+        message:      format_chor008(storage, st_name, strat),
+        fix_hint:     chor008_fix_hint(),
+    };
+}
+
+pub fn check_raw_pointer_escape(strategy: StorageStrategy, storage_name: str, struct_name: str, takes_raw_ptr: bool) -> Chor008Diagnostic {
+    if takes_raw_ptr && strategy != StorageStrategy::AoS {
+        return Chor008Diagnostic::error(storage_name, struct_name, strategy_to_str(strategy));
+    }
+    return Chor008Diagnostic::none();
+}
+
+// ------------------------------------------------------------------------------
+// 2. Physical Address Lowering Equations
+// ------------------------------------------------------------------------------
+
+// AoS: base + row * sizeof(T) + offset(f_k)
+pub pure fn compute_addr_aos(base: usize, row_idx: usize, struct_size: usize, field_offset: usize) -> usize {
+    return base + row_idx * struct_size + field_offset;
+}
+
+// SoA: col_base_k + row * s_k
+pub pure fn compute_addr_soa(col_base: usize, row_idx: usize, elem_size: usize) -> usize {
+    return col_base + row_idx * elem_size;
+}
+
+// AoSoA: base + floor(row / W) * BlockBytes + tile_off(f_k) + (row % W) * s_k
+pub pure fn compute_addr_aosoa(
+    base: usize,
+    row_idx: usize,
+    tile_width: usize,
+    block_bytes: usize,
+    tile_field_offset: usize,
+    elem_size: usize
+) -> usize {
+    let block_idx = row_idx / tile_width;
+    let lane_idx = row_idx % tile_width;
+    return base + block_idx * block_bytes + tile_field_offset + lane_idx * elem_size;
+}
+
+// HotCold: base + row * stride + field_offset
+pub pure fn compute_addr_hotcold(base: usize, row_idx: usize, stride: usize, field_offset: usize) -> usize {
+    return base + row_idx * stride + field_offset;
+}
+
+// BitPacked: word = (row * k) >> 6, shift = (row * k) & 63, mask = (1 << k) - 1
+[Layout(c_abi)]
+pub struct BitPackedCoord : IValue {
+    pub word_index: usize;
+    pub bit_shift:  usize;
+    pub bit_mask:   u64;
+}
+
+pub pure fn compute_bitpacked_coord(row_idx: usize, bit_width: usize) -> BitPackedCoord {
+    let bit_idx = row_idx * bit_width;
+    let word_idx = bit_idx / 64;
+    let shift = bit_idx % 64;
+    var mask: u64 = 0;
+    if bit_width >= 64 {
+        mask = 18446744073709551615; // 0xFFFFFFFFFFFFFFFF
+    } else {
+        let one: u64 = 1;
+        mask = (one << bit_width) - 1;
+    }
+    return BitPackedCoord {
+        word_index: word_idx,
+        bit_shift:  shift,
+        bit_mask:   mask,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 3. PilIR Access Rewrite Engine
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct LoweredFieldAccess : IValue {
+    pub target_addr:        usize;
+    pub is_bitpacked:       bool;
+    pub bit_word_idx:       usize;
+    pub bit_shift:          usize;
+    pub bit_mask:           u64;
+    pub cacheline_speedup:  usize;
+}
+
+pub fn lower_choreographed_field_access(
+    plan: ref<StoragePlan>,
+    base_ptr: usize,
+    row_idx: usize,
+    col_idx: usize
+) -> LoweredFieldAccess {
+    if col_idx >= plan.columns.len() {
+        return LoweredFieldAccess {
+            target_addr:       0,
+            is_bitpacked:      false,
+            bit_word_idx:      0,
+            bit_shift:         0,
+            bit_mask:          0,
+            cacheline_speedup: 1,
+        };
+    }
+
+    let col = plan.columns[col_idx];
+
+    if plan.strategy == StorageStrategy::SoA {
+        let col_base = base_ptr + col.plane_offset;
+        let addr = compute_addr_soa(col_base, row_idx, col.byte_size);
+        let speedup = estimate_speedup_factor(plan.columns.len() * col.byte_size, col.byte_size);
+        return LoweredFieldAccess {
+            target_addr:       addr,
+            is_bitpacked:      false,
+            bit_word_idx:      0,
+            bit_shift:         0,
+            bit_mask:          0,
+            cacheline_speedup: speedup,
+        };
+    } else if plan.strategy == StorageStrategy::AoSoA {
+        let w = plan.tile_width;
+        var block_bytes: usize = 0;
+        var i = 0;
+        while i < plan.columns.len() {
+            block_bytes = block_bytes + w * plan.columns[i].byte_size;
+            i = i + 1;
+        }
+        block_bytes = align_up(block_bytes, 16);
+        let addr = compute_addr_aosoa(base_ptr, row_idx, w, block_bytes, col.plane_offset, col.byte_size);
+        return LoweredFieldAccess {
+            target_addr:       addr,
+            is_bitpacked:      false,
+            bit_word_idx:      0,
+            bit_shift:         0,
+            bit_mask:          0,
+            cacheline_speedup: 4,
+        };
+    } else if plan.strategy == StorageStrategy::HotCold {
+        let stride = if col.plane_offset >= plan.hot_bytes { plan.cold_bytes } else { plan.hot_bytes };
+        let base = if col.plane_offset >= plan.hot_bytes { base_ptr + plan.capacity * plan.hot_bytes } else { base_ptr };
+        let addr = compute_addr_hotcold(base, row_idx, stride, col.plane_offset);
+        return LoweredFieldAccess {
+            target_addr:       addr,
+            is_bitpacked:      false,
+            bit_word_idx:      0,
+            bit_shift:         0,
+            bit_mask:          0,
+            cacheline_speedup: 2,
+        };
+    } else if plan.strategy == StorageStrategy::BitPacked {
+        let coord = compute_bitpacked_coord(row_idx, col.element_stride);
+        let word_addr = base_ptr + col.plane_offset + coord.word_index * 8;
+        return LoweredFieldAccess {
+            target_addr:       word_addr,
+            is_bitpacked:      true,
+            bit_word_idx:      coord.word_index,
+            bit_shift:         coord.bit_shift,
+            bit_mask:          coord.bit_mask,
+            cacheline_speedup: 8,
+        };
+    } else {
+        // AoS
+        var struct_sz: usize = 0;
+        var j = 0;
+        while j < plan.columns.len() {
+            struct_sz = struct_sz + plan.columns[j].byte_size;
+            j = j + 1;
+        }
+        let addr = compute_addr_aos(base_ptr, row_idx, struct_sz, col.plane_offset);
+        return LoweredFieldAccess {
+            target_addr:       addr,
+            is_bitpacked:      false,
+            bit_word_idx:      0,
+            bit_shift:         0,
+            bit_mask:          0,
+            cacheline_speedup: 1,
+        };
+    }
+}
