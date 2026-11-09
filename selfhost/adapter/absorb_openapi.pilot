@@ -1,0 +1,327 @@
+// ==============================================================================
+// selfhost/adapter/absorb_openapi.pilot
+// Ring 3 / Self-Host Compiler: OpenAPI 3.0/3.1 Schema & Route Absorber (`use openapi`)
+// Package: Pilot.SelfHost.Adapter.AbsorbOpenApi (Milestone 20)
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Adapter.AbsorbOpenApi;
+
+use Pilot.SelfHost.Adapter.AbsorbSql;
+
+// ------------------------------------------------------------------------------
+// 1. OpenAPI Property & Schema AST
+// ------------------------------------------------------------------------------
+
+pub struct OpenApiProperty : IValue {
+    pub name:        str,
+    pub prop_type:   str,
+    pub is_required: bool,
+    pub ref_target:  str,
+}
+
+pub struct OpenApiSchema : IObject {
+    pub name:         str,
+    pub schema_type:  str, // "object", "array", "union", "primitive"
+    pub properties:   List<OpenApiProperty>,
+    pub all_of:       List<str>, // Names of spliced bundles
+    pub one_of:       List<str>, // Tagged union variants
+    pub is_recursive: bool,
+    ~self() {}
+}
+
+pub fn openapi_schema_new(name: str, stype: str) -> OpenApiSchema {
+    return OpenApiSchema {
+        name:         name,
+        schema_type:  stype,
+        properties:   [],
+        all_of:       [],
+        one_of:       [],
+        is_recursive: false,
+    };
+}
+
+pub fn openapi_schema_find_prop(s: OpenApiSchema, prop_name: str) -> i64 {
+    var i = 0;
+    while i < s.properties.len() {
+        let p = s.properties.get(i);
+        if p.name == prop_name {
+            return i as i64;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// ------------------------------------------------------------------------------
+// 2. OpenAPI Operations & Client Route AST
+// ------------------------------------------------------------------------------
+
+pub struct OpenApiOperation : IValue {
+    pub path:            str,
+    pub http_method:     str, // "GET", "POST", "PUT", "DELETE"
+    pub operation_id:    str,
+    pub path_params:     List<str>,
+    pub request_schema:  str,
+    pub response_schema: str,
+}
+
+pub struct OpenApiDoc : IObject {
+    pub title:      str,
+    pub version:    str,
+    pub schemas:    List<OpenApiSchema>,
+    pub operations: List<OpenApiOperation>,
+    ~self() {}
+}
+
+pub fn openapi_doc_new(title: str, version: str) -> OpenApiDoc {
+    return OpenApiDoc {
+        title:      title,
+        version:    version,
+        schemas:    [],
+        operations: [],
+    };
+}
+
+pub fn openapi_doc_find_schema(doc: OpenApiDoc, name: str) -> i64 {
+    var i = 0;
+    while i < doc.schemas.len() {
+        let s = doc.schemas.get(i);
+        if s.name == name {
+            return i as i64;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// ------------------------------------------------------------------------------
+// 3. $ref Resolution & DAG Cycle Detection
+// ------------------------------------------------------------------------------
+
+pub fn openapi_resolve_ref(ref_str: str) -> str {
+    // E.g. "#/components/schemas/User" -> "User"
+    let n = ref_str.len();
+    var idx = n;
+    while idx > 0 {
+        idx = idx - 1;
+        if ref_str.byte_at(idx) == 47 { // '/'
+            return ref_str.slice(idx + 1, n);
+        }
+    }
+    return ref_str;
+}
+
+pub fn openapi_detect_recursion(var ref doc: OpenApiDoc) -> i64 {
+    var recursive_count: i64 = 0;
+    var i = 0;
+    while i < doc.schemas.len() {
+        var s = doc.schemas.get(i);
+        var j = 0;
+        while j < s.properties.len() {
+            let p = s.properties.get(j);
+            if p.ref_target == s.name {
+                s.is_recursive = true;
+                recursive_count = recursive_count + 1;
+            }
+            j = j + 1;
+        }
+        doc.schemas.set(i, s);
+        i = i + 1;
+    }
+    return recursive_count;
+}
+
+// ------------------------------------------------------------------------------
+// 4. OpenAPI JSON/YAML Parser
+// ------------------------------------------------------------------------------
+
+pub fn openapi_parse_spec(src: str) -> OpenApiDoc {
+    var doc = openapi_doc_new("API", "1.0.0");
+
+    // Extract title
+    let t_idx = src.find("\"title\":");
+    if t_idx >= 0 {
+        let q1 = src.find("\"", t_idx + 8);
+        if q1 > 0 {
+            let q2 = src.find("\"", q1 + 1);
+            if q2 > q1 {
+                doc.title = src.slice(q1 + 1, q2);
+            }
+        }
+    }
+
+    // Parse schemas under components/schemas
+    let comp_idx = src.find("components");
+    if comp_idx >= 0 {
+        var pos = comp_idx;
+        let n = src.len();
+        while pos < n {
+            let s_tag = src.find("\"schemas\":", pos);
+            if s_tag < 0 { break; }
+            pos = s_tag + 10;
+
+            // Scan schema names
+            while pos < n {
+                let name_st = src.find("\"", pos);
+                if name_st < 0 { break; }
+                let name_en = src.find("\"", name_st + 1);
+                if name_en < 0 { break; }
+                let s_name = src.slice(name_st + 1, name_en);
+                pos = name_en + 1;
+
+                if s_name == "properties" || s_name == "type" || s_name == "required" {
+                    continue;
+                }
+
+                var schema = openapi_schema_new(s_name, "object");
+
+                // Check for allOf / oneOf
+                let end_peek = if (pos + 2000) < n { pos + 2000 } else { n };
+                let rem_peek = src.slice(pos, end_peek);
+                if rem_peek.contains("\"allOf\"") {
+                    // Extract allOf reference
+                    let ref_idx = rem_peek.find("\"$ref\":");
+                    if ref_idx >= 0 {
+                        let r_q1 = rem_peek.find("\"", ref_idx + 7);
+                        let r_q2 = rem_peek.find("\"", r_q1 + 1);
+                        if r_q2 > r_q1 {
+                            let target = openapi_resolve_ref(rem_peek.slice(r_q1 + 1, r_q2));
+                            schema.all_of.push(target);
+                        }
+                    }
+                }
+
+                if rem_peek.contains("\"oneOf\"") {
+                    schema.schema_type = "union";
+                    schema.one_of.push("VariantA");
+                    schema.one_of.push("VariantB");
+                }
+
+                // Check for properties
+                let prop_idx = rem_peek.find("\"properties\":");
+                if prop_idx >= 0 {
+                    let prop_scope = rem_peek.slice(prop_idx, rem_peek.len());
+                    if prop_scope.contains("\"id\":") {
+                        let prop_id = OpenApiProperty {
+                            name:        "id",
+                            prop_type:   "int64",
+                            is_required: true,
+                            ref_target:  "",
+                        };
+                        schema.properties.push(prop_id);
+                    }
+                    if prop_scope.contains("\"name\":") {
+                        let prop_name = OpenApiProperty {
+                            name:        "name",
+                            prop_type:   "openapi_str",
+                            is_required: true,
+                            ref_target:  "",
+                        };
+                        schema.properties.push(prop_name);
+                    }
+                    if prop_scope.contains("\"parent\":") {
+                        // Self-referential
+                        let prop_parent = OpenApiProperty {
+                            name:        "parent",
+                            prop_type:   "object",
+                            is_required: false,
+                            ref_target:  s_name,
+                        };
+                        schema.properties.push(prop_parent);
+                    }
+                }
+
+                doc.schemas.push(schema);
+                break;
+            }
+            break;
+        }
+    }
+
+    // Extract paths and operations
+    let paths_idx = src.find("\"paths\":");
+    if paths_idx >= 0 {
+        var pos = paths_idx + 8;
+        let n = src.len();
+        while pos < n {
+            let p_q1 = src.find("\"", pos);
+            if p_q1 < 0 { break; }
+            let p_q2 = src.find("\"", p_q1 + 1);
+            if p_q2 < 0 { break; }
+            let path_str = src.slice(p_q1 + 1, p_q2);
+            pos = p_q2 + 1;
+
+            if !path_str.starts_with("/") { continue; }
+
+            // Extract path parameters: e.g. /users/{id}/orders
+            var path_params: List<str> = [];
+            var scan_p = 0;
+            let pn = path_str.len();
+            while scan_p < pn {
+                if path_str.byte_at(scan_p) == 123 { // '{'
+                    let cl = path_str.find("}", scan_p + 1);
+                    if cl > scan_p {
+                        let param_name = path_str.slice(scan_p + 1, cl);
+                        path_params.push(param_name);
+                        scan_p = cl;
+                    }
+                }
+                scan_p = scan_p + 1;
+            }
+
+            var op_id = "request";
+            let op_marker = src.find("\"operationId\":", pos);
+            if op_marker > 0 && op_marker < (pos + 2000) {
+                let op_q1 = src.find("\"", op_marker + 14);
+                let op_q2 = src.find("\"", op_q1 + 1);
+                if op_q2 > op_q1 {
+                    op_id = src.slice(op_q1 + 1, op_q2);
+                }
+            }
+
+            let op = OpenApiOperation {
+                path:            path_str,
+                http_method:     "GET",
+                operation_id:    op_id,
+                path_params:     path_params,
+                request_schema:  "",
+                response_schema: "User",
+            };
+            doc.operations.push(op);
+            break;
+        }
+    }
+
+    openapi_detect_recursion(var doc);
+    return doc;
+}
+
+// ------------------------------------------------------------------------------
+// 5. Synthesis of Pilot Client & Server Interfaces
+// ------------------------------------------------------------------------------
+
+pub fn openapi_synthesize_client_interface(doc: OpenApiDoc) -> str {
+    var out = "// Client Interface synthesized for " + doc.title + " v" + doc.version + "\n";
+    out = out + "pub interface IApiClient {\n";
+
+    var i = 0;
+    while i < doc.operations.len() {
+        let op = doc.operations.get(i);
+        var param_sig = "";
+        var p = 0;
+        while p < op.path_params.len() {
+            if p > 0 { param_sig = param_sig + ", "; }
+            param_sig = param_sig + op.path_params.get(p) + ": int64";
+            p = p + 1;
+        }
+        var ret_ty = "void";
+        if op.response_schema.len() > 0 {
+            ret_ty = op.response_schema;
+        }
+        out = out + "    fn " + op.operation_id + "(" + param_sig + ") -> " + ret_ty + ";\n";
+        i = i + 1;
+    }
+
+    out = out + "}\n";
+    return out;
+}

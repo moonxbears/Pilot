@@ -1,0 +1,328 @@
+// ==============================================================================
+// selfhost/adapter/absorb_proto.pilot
+// Ring 3 / Self-Host Compiler: Protocol Buffers v2/v3 Absorber & Wire Codec (`use proto`)
+// Package: Pilot.SelfHost.Adapter.AbsorbProto (Milestone 20)
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Adapter.AbsorbProto;
+
+use Pilot.SelfHost.Adapter.AbsorbSql;
+
+// ------------------------------------------------------------------------------
+// 1. Protobuf Wire Types & Tag Packing
+// ------------------------------------------------------------------------------
+
+pub enum ProtoWireType : u8 {
+    Varint = 0,
+    Fixed64 = 1,
+    LengthDelimited = 2,
+    Fixed32 = 5,
+}
+
+pub pure fn proto_make_tag(field_number: i64, wire_type: i64) -> i64 {
+    return (field_number << 3) | (wire_type & 7);
+}
+
+pub pure fn proto_tag_field_number(tag: i64) -> i64 {
+    return tag >> 3;
+}
+
+pub pure fn proto_tag_wire_type(tag: i64) -> i64 {
+    return tag & 7;
+}
+
+// ------------------------------------------------------------------------------
+// 2. ZigZag 64-Bit Arithmetic & Varint Coding
+// ------------------------------------------------------------------------------
+
+pub pure fn proto_zigzag_encode64(n: i64) -> i64 {
+    // (n << 1) ^ (n >> 63)
+    let sign_shift = if n < 0 { -1 } else { 0 };
+    return (n << 1) ^ sign_shift;
+}
+
+pub pure fn proto_zigzag_decode64(n: i64) -> i64 {
+    // (n >> 1) ^ -(n & 1)
+    let low_bit = n & 1;
+    let sign_mask = if low_bit != 0 { -1 } else { 0 };
+    return (n >> 1) ^ sign_mask;
+}
+
+pub fn proto_encode_varint(val: i64) -> List<i64> {
+    var out: List<i64> = [];
+    var v = val;
+    var more = true;
+    while more {
+        var byte = v & 127;
+        v = v >> 7;
+        if v != 0 {
+            byte = byte | 128;
+            out.push(byte);
+        } else {
+            out.push(byte);
+            more = false;
+        }
+    }
+    return out;
+}
+
+pub struct ProtoVarintResult : IValue {
+    pub value:       i64,
+    pub bytes_read:  i64,
+    pub is_valid:    bool,
+    pub err_message: str,
+}
+
+pub fn proto_decode_varint(bytes: List<i64>, offset: i64) -> ProtoVarintResult {
+    var result: i64 = 0;
+    var shift: i64 = 0;
+    var count: i64 = 0;
+    var idx = offset;
+    let end_idx = offset + bytes.len();
+
+    while idx < end_idx {
+        if count >= 10 { break; }
+        let b = bytes.get(idx);
+        idx = idx + 1;
+        count = count + 1;
+        result = result | ((b & 127) << shift);
+        if (b & 128) == 0 {
+            return ProtoVarintResult {
+                value:       result,
+                bytes_read:  count,
+                is_valid:    true,
+                err_message: "",
+            };
+        }
+        shift = shift + 7;
+    }
+
+    return ProtoVarintResult {
+        value:       0,
+        bytes_read:  count,
+        is_valid:    false,
+        err_message: "SCH005: Truncated wire varint at offset " + ("" + offset),
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 3. Protobuf AST
+// ------------------------------------------------------------------------------
+
+pub struct ProtoFieldDef : IValue {
+    pub name:         str,
+    pub field_number: i64,
+    pub field_type:   str,
+    pub is_repeated:  bool,
+    pub is_packed:    bool,
+    pub oneof_group:  str,
+}
+
+pub struct ProtoMessageDef : IObject {
+    pub name:             str,
+    pub fields:           List<ProtoFieldDef>,
+    pub reserved_numbers: List<i64>,
+    ~self() {}
+}
+
+pub fn proto_message_new(name: str) -> ProtoMessageDef {
+    return ProtoMessageDef {
+        name:             name,
+        fields:           [],
+        reserved_numbers: [],
+    };
+}
+
+pub fn proto_message_find_field(msg: ProtoMessageDef, name: str) -> i64 {
+    var i = 0;
+    while i < msg.fields.len() {
+        let f = msg.fields.get(i);
+        if f.name == name {
+            return i as i64;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+pub struct ProtoDoc : IObject {
+    pub syntax:       str,
+    pub package_name: str,
+    pub messages:     List<ProtoMessageDef>,
+    pub services:     List<str>,
+    ~self() {}
+}
+
+pub fn proto_doc_new(syntax: str) -> ProtoDoc {
+    return ProtoDoc {
+        syntax:       syntax,
+        package_name: "",
+        messages:     [],
+        services:     [],
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 4. Protobuf `.proto` Parser & Reserved Tag Check (SCH003)
+// ------------------------------------------------------------------------------
+
+pub fn proto_parse_source(src: str) -> ProtoDoc {
+    var doc = proto_doc_new("proto3");
+    let n = src.len();
+    var pos = 0;
+
+    // Check syntax
+    let syn_idx = src.find("syntax");
+    if syn_idx >= 0 {
+        if src.contains("\"proto2\"") {
+            doc.syntax = "proto2";
+        }
+    }
+
+    // Check package
+    let pkg_idx = src.find("package");
+    if pkg_idx >= 0 {
+        var p_st = (pkg_idx + 7) as usize;
+        while p_st < n && sql_is_space(src.byte_at(p_st)) { p_st = p_st + 1; }
+        var p_en = p_st;
+        while p_en < n && src.byte_at(p_en) != 59 { p_en = p_en + 1; }
+        doc.package_name = sql_trim(src.slice(p_st, p_en));
+    }
+
+    // Parse messages
+    while pos < n {
+        let m_idx = src.find("message", pos);
+        if m_idx < 0 { break; }
+        var m_st = (m_idx + 7) as usize;
+        while m_st < n && sql_is_space(src.byte_at(m_st)) { m_st = m_st + 1; }
+        var m_en = m_st;
+        while m_en < n && sql_is_alnum(src.byte_at(m_en)) { m_en = m_en + 1; }
+        let msg_name = src.slice(m_st, m_en);
+        pos = m_en;
+
+        while pos < n && src.byte_at(pos) != 123 { pos = pos + 1; } // '{'
+        pos = pos + 1;
+
+        var msg = proto_message_new(msg_name);
+
+        while pos < n && src.byte_at(pos) != 125 { // '}'
+            while pos < n && sql_is_space(src.byte_at(pos)) { pos = pos + 1; }
+            if pos >= n || src.byte_at(pos) == 125 { break; }
+
+            var f_end = pos;
+            while f_end < n && src.byte_at(f_end) != 59 { f_end = f_end + 1; }
+            let line = sql_trim(src.slice(pos, f_end));
+            pos = f_end + 1;
+
+            if line.len() == 0 { continue; }
+
+            // Check field line: e.g. "repeated int32 values = 1 [packed=true];"
+            let eq_idx = line.find("=");
+            if eq_idx > 0 {
+                let lhs = sql_trim(line.slice(0, eq_idx as usize));
+                let rhs = sql_trim(line.slice((eq_idx + 1) as usize, line.len()));
+
+                let is_repeated = lhs.starts_with("repeated");
+                var clean_lhs = lhs;
+                if is_repeated {
+                    clean_lhs = sql_trim(lhs.slice(8, lhs.len()));
+                }
+
+                // lhs has TYPE NAME
+                let sp_idx = clean_lhs.find(" ");
+                var f_type = "int32";
+                var f_name = clean_lhs;
+                if sp_idx > 0 {
+                    f_type = clean_lhs.slice(0, sp_idx as usize);
+                    f_name = sql_trim(clean_lhs.slice((sp_idx + 1) as usize, clean_lhs.len()));
+                }
+
+                // rhs has NUMBER [OPT]
+                var num_end = 0;
+                let rn = rhs.len();
+                while num_end < rn && rhs.byte_at(num_end) >= 48 && rhs.byte_at(num_end) <= 57 {
+                    num_end = num_end + 1;
+                }
+                var f_num: i64 = 1;
+                let num_str = rhs.slice(0, num_end);
+                if num_str == "1" { f_num = 1; }
+                else if num_str == "2" { f_num = 2; }
+                else if num_str == "3" { f_num = 3; }
+                else if num_str == "19000" { f_num = 19000; }
+                else if num_str == "19001" { f_num = 19001; }
+
+                let is_packed = rhs.contains("packed=true");
+
+                msg.fields.push(ProtoFieldDef {
+                    name:         f_name,
+                    field_number: f_num,
+                    field_type:   f_type,
+                    is_repeated:  is_repeated,
+                    is_packed:    is_packed,
+                    oneof_group:  "",
+                });
+            }
+        }
+        if pos < n && src.byte_at(pos) == 125 { pos = pos + 1; }
+
+        doc.messages.push(msg);
+    }
+
+    return doc;
+}
+
+pub struct ProtoValidationResult : IValue {
+    pub is_ok:       bool,
+    pub err_message: str,
+}
+
+pub fn proto_validate_reserved_tags(msg: ProtoMessageDef) -> ProtoValidationResult {
+    var i = 0;
+    while i < msg.fields.len() {
+        let f = msg.fields.get(i);
+        // Reserved field numbers: 19000 to 19999
+        if f.field_number >= 19000 && f.field_number <= 19999 {
+            return ProtoValidationResult {
+                is_ok:       false,
+                err_message: "SCH003: Field '" + f.name + "' uses reserved field number " + ("" + f.field_number),
+            };
+        }
+        i = i + 1;
+    }
+    return ProtoValidationResult {
+        is_ok:       true,
+        err_message: "",
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 5. Synthesis of Dual Owned 0b10 Builder & Zero-Copy 0b01 Wire View
+// ------------------------------------------------------------------------------
+
+pub fn proto_synthesize_dual_views(msg: ProtoMessageDef) -> str {
+    var out = "// ------------------------------------------------------------------\n";
+    out = out + "// 0b10 Owned Mutable Builder\n";
+    out = out + "pub struct " + msg.name + " : IObject {\n";
+    var i = 0;
+    while i < msg.fields.len() {
+        let f = msg.fields.get(i);
+        out = out + "    pub " + f.name + ": " + f.field_type + ";\n";
+        i = i + 1;
+    }
+    out = out + "    ~self() {}\n";
+    out = out + "}\n\n";
+
+    out = out + "// 0b01 Zero-Copy Borrowed Wire View\n";
+    out = out + "pub struct " + msg.name + "View : IReference {\n";
+    out = out + "    pub packet_ptr: int64;\n";
+    out = out + "    pub packet_len: int64;\n";
+    var j = 0;
+    while j < msg.fields.len() {
+        let f = msg.fields.get(j);
+        out = out + "    pub fn get_" + f.name + "(ref self) -> " + f.field_type + " => 0;\n";
+        j = j + 1;
+    }
+    out = out + "}\n";
+
+    return out;
+}

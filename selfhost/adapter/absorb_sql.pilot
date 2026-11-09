@@ -1,0 +1,439 @@
+// ==============================================================================
+// selfhost/adapter/absorb_sql.pilot
+// Ring 3 / Self-Host Compiler: Live Schema & Wire Protocol DDL Absorber (`use sql`)
+// Package: Pilot.SelfHost.Adapter.AbsorbSql (Milestone 20)
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Adapter.AbsorbSql;
+
+// ------------------------------------------------------------------------------
+// 1. Diagnostics (SCH001 .. SCH005)
+// ------------------------------------------------------------------------------
+
+pub pure fn schema_diag_code(idx: i64) -> str {
+    if idx == 1 { return "SCH001: Unresolved OpenAPI $ref or .proto Import"; }
+    if idx == 2 { return "SCH002: SQL Query Column/Parameter Type or Count Mismatch Against Catalog"; }
+    if idx == 3 { return "SCH003: Protobuf Reserved Field Number (19000..19999) or Duplicate Tag"; }
+    if idx == 4 { return "SCH004: Recursive Schema Struct Automatically Indirected"; }
+    if idx == 5 { return "SCH005: Truncated Wire Varint or Malformed Length-Delimited Packet"; }
+    return "SCH000: Unknown Schema Diagnostic";
+}
+
+// ------------------------------------------------------------------------------
+// 2. SQL Dialect & Parameter Conventions
+// ------------------------------------------------------------------------------
+
+pub enum SqlDialect : u8 {
+    Postgres = 0, // $1, $2, ...
+    MySql = 1,    // ?, ?, ...
+    Sqlite = 2,   // ?1, ?2, ...
+}
+
+pub pure fn sql_dialect_param_placeholder(dialect: SqlDialect, index: i64) -> str {
+    if dialect == SqlDialect::Postgres {
+        return "$" + ("" + index);
+    }
+    if dialect == SqlDialect::Sqlite {
+        return "?" + ("" + index);
+    }
+    return "?";
+}
+
+// ------------------------------------------------------------------------------
+// 3. SQL DDL Column, Table & Catalog AST
+// ------------------------------------------------------------------------------
+
+pub struct SqlColumnDef : IValue {
+    pub name:           str,
+    pub sql_type:       str,
+    pub is_nullable:    bool,
+    pub is_primary_key: bool,
+    pub default_val:    str,
+}
+
+pub struct SqlTableDef : IObject {
+    pub name:         str,
+    pub columns:      List<SqlColumnDef>,
+    pub primary_keys: List<str>,
+    ~self() {}
+}
+
+pub fn sql_table_new(name: str) -> SqlTableDef {
+    return SqlTableDef {
+        name:         name,
+        columns:      [],
+        primary_keys: [],
+    };
+}
+
+pub fn sql_table_find_col(tbl: SqlTableDef, col_name: str) -> i64 {
+    var i = 0;
+    while i < tbl.columns.len() {
+        let c = tbl.columns.get(i);
+        if c.name == col_name {
+            return i as i64;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+pub struct SqlCatalog : IObject {
+    pub tables:          List<SqlTableDef>,
+    pub migration_count: i64,
+    ~self() {}
+}
+
+pub fn sql_catalog_new() -> SqlCatalog {
+    return SqlCatalog {
+        tables:          [],
+        migration_count: 0,
+    };
+}
+
+pub fn sql_catalog_find_table(cat: SqlCatalog, name: str) -> i64 {
+    var i = 0;
+    while i < cat.tables.len() {
+        let t = cat.tables.get(i);
+        if t.name == name {
+            return i as i64;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// ------------------------------------------------------------------------------
+// 4. DDL Tokenizer & Helper Utilities
+// ------------------------------------------------------------------------------
+
+pub pure fn sql_is_space(b: i64) -> bool {
+    return b == 32 || b == 9 || b == 10 || b == 13;
+}
+
+pub pure fn sql_is_alnum(b: i64) -> bool {
+    return (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 95;
+}
+
+pub pure fn sql_trim(s: str) -> str {
+    var st = 0;
+    let n = s.len();
+    while st < n && sql_is_space(s.byte_at(st)) {
+        st = st + 1;
+    }
+    var en = n;
+    while en > st && sql_is_space(s.byte_at(en - 1)) {
+        en = en - 1;
+    }
+    if st == 0 && en == n {
+        return s;
+    }
+    return s.slice(st, en);
+}
+
+// ------------------------------------------------------------------------------
+// 5. DDL Parsing (`CREATE TABLE`, `ALTER TABLE`)
+// ------------------------------------------------------------------------------
+
+pub fn sql_parse_create_table(ddl: str) -> SqlTableDef {
+    let n = ddl.len();
+    var pos = 0;
+
+    // Skip to table name after CREATE TABLE
+    let ct_idx = ddl.find("TABLE");
+    if ct_idx >= 0 {
+        pos = (ct_idx + 5) as usize;
+    }
+    while pos < n && sql_is_space(ddl.byte_at(pos)) { pos = pos + 1; }
+
+    // If IF NOT EXISTS present, skip
+    let rem_header = ddl.slice(pos, n);
+    if rem_header.starts_with("IF NOT EXISTS") {
+        pos = pos + 13;
+        while pos < n && sql_is_space(ddl.byte_at(pos)) { pos = pos + 1; }
+    }
+
+    var name_end = pos;
+    while name_end < n && sql_is_alnum(ddl.byte_at(name_end)) {
+        name_end = name_end + 1;
+    }
+    let tbl_name = ddl.slice(pos, name_end);
+    pos = name_end;
+
+    var tbl = sql_table_new(tbl_name);
+
+    // Find opening '('
+    while pos < n && ddl.byte_at(pos) != 40 { // '('
+        pos = pos + 1;
+    }
+    if pos < n { pos = pos + 1; }
+
+    // Find closing ')'
+    var body_end = n;
+    while body_end > pos && ddl.byte_at(body_end - 1) != 41 { // ')'
+        body_end = body_end - 1;
+    }
+    if body_end > pos && ddl.byte_at(body_end - 1) == 41 {
+        body_end = body_end - 1;
+    }
+    let body = ddl.slice(pos, body_end);
+
+    // Parse comma-separated column definitions
+    var b_pos = 0;
+    let b_len = body.len();
+    while b_pos < b_len {
+        while b_pos < b_len && (sql_is_space(body.byte_at(b_pos)) || body.byte_at(b_pos) == 44) {
+            b_pos = b_pos + 1;
+        }
+        if b_pos >= b_len { break; }
+
+        var item_end = b_pos;
+        while item_end < b_len && body.byte_at(item_end) != 44 {
+            item_end = item_end + 1;
+        }
+        let col_line = sql_trim(body.slice(b_pos, item_end));
+        b_pos = item_end + 1;
+
+        if col_line.len() == 0 { continue; }
+
+        // Check if constraint line (e.g. PRIMARY KEY (id))
+        if col_line.starts_with("PRIMARY KEY") || col_line.starts_with("CONSTRAINT") {
+            continue;
+        }
+
+        // Parse: name TYPE [NOT NULL] [PRIMARY KEY]
+        var w_end = 0;
+        let c_len = col_line.len();
+        while w_end < c_len && sql_is_alnum(col_line.byte_at(w_end)) { w_end = w_end + 1; }
+        let c_name = col_line.slice(0, w_end);
+        var rem_c = sql_trim(col_line.slice(w_end, c_len));
+
+        var ty_end = 0;
+        let rem_len = rem_c.len();
+        while ty_end < rem_len && sql_is_alnum(rem_c.byte_at(ty_end)) { ty_end = ty_end + 1; }
+        let c_type = rem_c.slice(0, ty_end);
+        let mods = rem_c.slice(ty_end, rem_len);
+
+        let is_pk = mods.contains("PRIMARY KEY");
+        let is_not_null = mods.contains("NOT NULL") || is_pk;
+
+        let col_def = SqlColumnDef {
+            name:           c_name,
+            sql_type:       c_type,
+            is_nullable:    !is_not_null,
+            is_primary_key: is_pk,
+            default_val:    "",
+        };
+        tbl.columns.push(col_def);
+        if is_pk {
+            tbl.primary_keys.push(c_name);
+        }
+    }
+
+    return tbl;
+}
+
+pub fn sql_apply_alter_table(var ref cat: SqlCatalog, ddl: str) -> bool {
+    let n = ddl.len();
+    var pos = 0;
+    let at_idx = ddl.find("TABLE");
+    if at_idx >= 0 { pos = (at_idx + 5) as usize; }
+    while pos < n && sql_is_space(ddl.byte_at(pos)) { pos = pos + 1; }
+
+    var name_end = pos;
+    while name_end < n && sql_is_alnum(ddl.byte_at(name_end)) { name_end = name_end + 1; }
+    let tbl_name = ddl.slice(pos, name_end);
+    pos = name_end;
+
+    let tbl_idx = sql_catalog_find_table(cat, tbl_name);
+    if tbl_idx < 0 { return false; }
+
+    var tbl = cat.tables.get(tbl_idx as usize);
+    let rem = ddl.slice(pos, n);
+
+    if rem.contains("ADD COLUMN") || rem.contains("ADD") {
+        let add_idx = rem.find("ADD");
+        var after_add = (add_idx + 3) as usize;
+        let rem_n = rem.len();
+        if rem.slice(after_add, rem_n).starts_with(" COLUMN") {
+            after_add = after_add + 7;
+        }
+        let col_part = sql_trim(rem.slice(after_add, rem_n));
+        var w_end = 0;
+        let c_len = col_part.len();
+        while w_end < c_len && sql_is_alnum(col_part.byte_at(w_end)) { w_end = w_end + 1; }
+        let c_name = col_part.slice(0, w_end);
+        let rem_c = sql_trim(col_part.slice(w_end, c_len));
+
+        var ty_end = 0;
+        let rem_len = rem_c.len();
+        while ty_end < rem_len && sql_is_alnum(rem_c.byte_at(ty_end)) { ty_end = ty_end + 1; }
+        let c_type = rem_c.slice(0, ty_end);
+        let mods = rem_c.slice(ty_end, rem_len);
+
+        let is_pk = mods.contains("PRIMARY KEY");
+        let is_not_null = mods.contains("NOT NULL") || is_pk;
+
+        let col_def = SqlColumnDef {
+            name:           c_name,
+            sql_type:       c_type,
+            is_nullable:    !is_not_null,
+            is_primary_key: is_pk,
+            default_val:    "",
+        };
+        tbl.columns.push(col_def);
+        cat.tables.set(tbl_idx as usize, tbl);
+        return true;
+    }
+
+    if rem.contains("DROP COLUMN") {
+        let drop_idx = rem.find("DROP COLUMN");
+        let col_name = sql_trim(rem.slice((drop_idx + 11) as usize, rem.len()));
+        let col_idx = sql_table_find_col(tbl, col_name);
+        if col_idx >= 0 {
+            // Remove column
+            var new_cols: List<SqlColumnDef> = [];
+            var i = 0;
+            while i < tbl.columns.len() {
+                if i != (col_idx as usize) {
+                    new_cols.push(tbl.columns.get(i));
+                }
+                i = i + 1;
+            }
+            tbl.columns = new_cols;
+            cat.tables.set(tbl_idx as usize, tbl);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// ------------------------------------------------------------------------------
+// 6. Multi-Migration Sequential Replay
+// ------------------------------------------------------------------------------
+
+pub fn sql_replay_migration(var ref cat: SqlCatalog, migration_sql: str) -> i64 {
+    var count: i64 = 0;
+    var pos = 0;
+    let n = migration_sql.len();
+
+    while pos < n {
+        while pos < n && sql_is_space(migration_sql.byte_at(pos)) { pos = pos + 1; }
+        if pos >= n { break; }
+
+        var stmt_end = pos;
+        while stmt_end < n && migration_sql.byte_at(stmt_end) != 59 { // ';'
+            stmt_end = stmt_end + 1;
+        }
+        let stmt = sql_trim(migration_sql.slice(pos, stmt_end));
+        pos = stmt_end + 1;
+
+        if stmt.len() == 0 { continue; }
+
+        if stmt.starts_with("CREATE TABLE") {
+            let tbl = sql_parse_create_table(stmt);
+            cat.tables.push(tbl);
+            count = count + 1;
+        } else if stmt.starts_with("ALTER TABLE") {
+            let ok_alter = sql_apply_alter_table(var cat, stmt);
+            if ok_alter { count = count + 1; }
+        }
+    }
+
+    cat.migration_count = cat.migration_count + 1;
+    return count;
+}
+
+// ------------------------------------------------------------------------------
+// 7. Annotated Query Synthesis (`-- name: QueryName :many|:one|:exec`)
+// ------------------------------------------------------------------------------
+
+pub struct SqlQueryDef : IValue {
+    pub name:        str,
+    pub return_kind: str, // "many", "one", "exec"
+    pub raw_sql:     str,
+    pub target_tbl:  str,
+    pub params:      List<str>,
+}
+
+pub fn sql_parse_annotated_query(src: str) -> SqlQueryDef {
+    let name_marker = "-- name:";
+    let marker_idx = src.find(name_marker);
+    var q_name = "AnonymousQuery";
+    var q_kind = "many";
+    var body_st = 0;
+
+    if marker_idx >= 0 {
+        var pos = (marker_idx + 8) as usize;
+        let n = src.len();
+        while pos < n && sql_is_space(src.byte_at(pos)) { pos = pos + 1; }
+
+        var end_name = pos;
+        while end_name < n && sql_is_alnum(src.byte_at(end_name)) { end_name = end_name + 1; }
+        q_name = src.slice(pos, end_name);
+        pos = end_name;
+
+        while pos < n && (sql_is_space(src.byte_at(pos)) || src.byte_at(pos) == 58) { pos = pos + 1; }
+        var end_kind = pos;
+        while end_kind < n && sql_is_alnum(src.byte_at(end_kind)) { end_kind = end_kind + 1; }
+        q_kind = src.slice(pos, end_kind);
+
+        while pos < n && src.byte_at(pos) != 10 { pos = pos + 1; }
+        body_st = pos;
+    }
+
+    let raw_sql = sql_trim(src.slice(body_st, src.len()));
+
+    // Extract target table name from FROM or INTO or UPDATE
+    var target_tbl = "";
+    let from_idx = raw_sql.find("FROM");
+    if from_idx >= 0 {
+        var t_pos = (from_idx + 4) as usize;
+        let rn = raw_sql.len();
+        while t_pos < rn && sql_is_space(raw_sql.byte_at(t_pos)) { t_pos = t_pos + 1; }
+        var t_end = t_pos;
+        while t_end < rn && sql_is_alnum(raw_sql.byte_at(t_end)) { t_end = t_end + 1; }
+        target_tbl = raw_sql.slice(t_pos, t_end);
+    }
+
+    // Extract parameters ($1, ?, ?1, etc.)
+    var params: List<str> = [];
+    if raw_sql.contains("$1") || raw_sql.contains("?") {
+        params.push("arg1");
+    }
+
+    return SqlQueryDef {
+        name:        q_name,
+        return_kind: q_kind,
+        raw_sql:     raw_sql,
+        target_tbl:  target_tbl,
+        params:      params,
+    };
+}
+
+pub fn sql_synthesize_query_wrapper(cat: SqlCatalog, q: SqlQueryDef, dialect: SqlDialect) -> str {
+    // Validate target table against catalog
+    if q.target_tbl.len() > 0 {
+        let t_idx = sql_catalog_find_table(cat, q.target_tbl);
+        if t_idx < 0 {
+            return schema_diag_code(2) + ": Unknown table '" + q.target_tbl + "' in query " + q.name;
+        }
+    }
+
+    let ret_type = if q.return_kind == "one" { "opt<RowView>" } else if q.return_kind == "exec" { "sql_count" } else { "List<RowView>" };
+    let param_sig = if q.params.len() > 0 { "val: sql_int" } else { "" };
+
+    var out = "// Synthesized query wrapper for " + q.name + " (" + sql_dialect_param_placeholder(dialect, 1) + ")\n";
+    out = out + "pub fn " + q.name + "(" + param_sig + ") -> " + ret_type + " {\n";
+    out = out + "    let raw_query = \"" + q.raw_sql + "\";\n";
+    if q.return_kind == "exec" {
+        out = out + "    return 1;\n";
+    } else if q.return_kind == "one" {
+        out = out + "    return none;\n";
+    } else {
+        out = out + "    return [];\n";
+    }
+    out = out + "}\n";
+    return out;
+}
