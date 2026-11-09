@@ -173,6 +173,18 @@ fn test_m12_1_c_preprocessor_includes_macros_and_integer_eval() {
             if !cpp_has_error(env) { return 12; }
             if cpp_error_code(env) != "CAB003" { return 13; }
 
+            // Test function-like macro expansion with parameter substitution, stringification and token pasting
+            let fn_macro_src = "#define STR(x) #x\n"
+                + "#define CONCAT(a, b) a ## b\n"
+                + "#define SQR(x) ((x) * (x))\n"
+                + "char* s = STR(hello_world);\n"
+                + "int CONCAT(my_, var) = SQR(3);\n"
+                + "int sqr_x = SQR(x + 1);\n";
+            let fn_processed = preprocess_c_header(fn_macro_src, "macros.h", [], var env);
+            if !fn_processed.contains("char* s = \"hello_world\";") { return 14; }
+            if !fn_processed.contains("int my_var = ((3) * (3));") { return 15; }
+            if !fn_processed.contains("int sqr_x = ((x + 1) * (x + 1));") { return 16; }
+
             return 42;
         }
     "##;

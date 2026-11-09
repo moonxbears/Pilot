@@ -246,14 +246,14 @@ pub fn cpp_eval_primary(expr: str, ref env: CppEnv) -> i64 {
                 break;
             }
         }
-        let num_str = expr.slice(cur, end);
+        let start_num = cur;
         cur = num_end;
         env.eval_pos = cur;
         var parsed: i64 = 0;
         if is_hex {
-            var hi = 2;
-            while hi < num_str.len() {
-                let c = num_str.byte_at(hi);
+            var hi = start_num + 2;
+            while hi < end {
+                let c = expr.byte_at(hi);
                 var digit_val: i64 = 0;
                 if c >= 48 && c <= 57 { digit_val = c - 48; }
                 else if c >= 65 && c <= 70 { digit_val = c - 55; }
@@ -262,9 +262,9 @@ pub fn cpp_eval_primary(expr: str, ref env: CppEnv) -> i64 {
                 hi = hi + 1;
             }
         } else {
-            var di = 0;
-            while di < num_str.len() {
-                parsed = (parsed * 10) + (num_str.byte_at(di) - 48);
+            var di = start_num;
+            while di < end {
+                parsed = (parsed * 10) + (expr.byte_at(di) - 48);
                 di = di + 1;
             }
         }
@@ -580,10 +580,111 @@ pub fn cpp_evaluate_condition(cond_str: str, ref env: CppEnv) -> bool {
 // 4. Macro Expansion Engine (Object-like, Token Pasting, Arguments)
 // ------------------------------------------------------------------------------
 
+pub fn cpp_expand_fn_macro(ref m: CppMacro, args: List<str>) -> str {
+    let body = m.val;
+    let blen = body.len();
+    var out = "";
+    var bi: usize = 0;
+    var b_chunk: usize = 0;
+
+    while bi < blen {
+        let b = body.byte_at(bi);
+
+        // String literal in macro body - preserve as is
+        if b == 34 { // '"'
+            var bj = bi + 1;
+            while bj < blen && body.byte_at(bj) != 34 {
+                if body.byte_at(bj) == 92 && bj + 1 < blen { bj = bj + 2; }
+                else { bj = bj + 1; }
+            }
+            if bj < blen { bj = bj + 1; }
+            bi = bj;
+            continue;
+        }
+
+        // Token pasting '##' or stringification '#'
+        if b == 35 { // '#'
+            if bi + 1 < blen && body.byte_at(bi + 1) == 35 { // '##'
+                if bi > b_chunk {
+                    let left = cpp_trim(body.slice(b_chunk, bi));
+                    out = out + left;
+                }
+                out = cpp_trim(out);
+                bi = bi + 2;
+                b_chunk = cpp_skip_space(body, bi);
+                bi = b_chunk;
+                continue;
+            }
+
+            // Single '#' stringification operator: #param
+            var after_hash = cpp_skip_space(body, bi + 1);
+            if after_hash < blen && cpp_is_alpha(body.byte_at(after_hash)) {
+                let pname = cpp_read_ident(body, after_hash);
+                var found_pi: i64 = -1;
+                var pi: usize = 0;
+                while pi < m.params.len() {
+                    if m.params[pi] == pname {
+                        found_pi = pi as i64;
+                        break;
+                    }
+                    pi = pi + 1;
+                }
+                if found_pi >= 0 {
+                    if bi > b_chunk {
+                        out = out + body.slice(b_chunk, bi);
+                    }
+                    let parg = if (found_pi as usize) < args.len() { args[found_pi as usize] } else { "" };
+                    out = out + "\"" + parg + "\"";
+                    bi = after_hash + pname.len();
+                    b_chunk = bi;
+                    continue;
+                }
+            }
+        }
+
+        // Identifier in macro body
+        if cpp_is_alpha(b) {
+            let ident = cpp_read_ident(body, bi);
+            let next_bi = bi + ident.len();
+            var found_pi: i64 = -1;
+            var pi: usize = 0;
+            while pi < m.params.len() {
+                if m.params[pi] == ident {
+                    found_pi = pi as i64;
+                    break;
+                }
+                pi = pi + 1;
+            }
+            if found_pi >= 0 {
+                if bi > b_chunk {
+                    out = out + body.slice(b_chunk, bi);
+                }
+                let parg = if (found_pi as usize) < args.len() { args[found_pi as usize] } else { "" };
+                out = out + parg;
+                bi = next_bi;
+                b_chunk = bi;
+                continue;
+            }
+            bi = next_bi;
+            continue;
+        }
+
+        bi = bi + 1;
+    }
+
+    if b_chunk < blen {
+        out = out + body.slice(b_chunk, blen);
+    }
+    return out;
+}
+
 pub fn cpp_expand_tokens(line: str, ref env: CppEnv) -> str {
     let n = line.len();
     var out = "";
+    var chunk_start: usize = 0;
     var i: usize = 0;
+    var has_expansion = false;
+
     while i < n {
         let b = line.byte_at(i);
         // String literal - preserve as is
@@ -594,10 +695,10 @@ pub fn cpp_expand_tokens(line: str, ref env: CppEnv) -> str {
                 else { j = j + 1; }
             }
             if j < n { j = j + 1; }
-            out = out + line.slice(i, j);
             i = j;
             continue;
         }
+
         // Identifier - check macro expansion
         if cpp_is_alpha(b) {
             let ident = cpp_read_ident(line, i);
@@ -608,6 +709,11 @@ pub fn cpp_expand_tokens(line: str, ref env: CppEnv) -> str {
                 if m.is_fn {
                     var cur = cpp_skip_space(line, next_i);
                     if cur < n && line.byte_at(cur) == 40 { // '('
+                        if i > chunk_start {
+                            out = out + line.slice(chunk_start, i);
+                        }
+                        has_expansion = true;
+
                         // Extract args
                         var depth = 1;
                         var arg_start = cur + 1;
@@ -629,47 +735,38 @@ pub fn cpp_expand_tokens(line: str, ref env: CppEnv) -> str {
                             }
                             cur = cur + 1;
                         }
-                        // Substitute parameters in function-like macro body
-                        var body = m.val;
-                        var pi: usize = 0;
-                        while pi < m.params.len() {
-                            let pname = m.params[pi];
-                            let parg = if pi < args.len() { args[pi] } else { "" };
-                            // Replace stringification: #pname -> "parg"
-                            var hash_pname = "#" + pname;
-                            while body.contains(hash_pname) {
-                                let idx = body.index_of(hash_pname);
-                                body = body.slice(0, idx as usize) + "\"" + parg + "\"" + body.slice((idx as usize) + hash_pname.len(), body.len());
-                            }
-                            // Replace parameter name
-                            while body.contains(pname) {
-                                let idx = body.index_of(pname);
-                                body = body.slice(0, idx as usize) + parg + body.slice((idx as usize) + pname.len(), body.len());
-                            }
-                            pi = pi + 1;
-                        }
-                        // Strip ## paste operators
-                        while body.contains("##") {
-                            let idx = body.index_of("##");
-                            let b_left = cpp_trim(body.slice(0, idx as usize));
-                            let b_right = cpp_trim(body.slice((idx as usize) + 2, body.len()));
-                            body = b_left + b_right;
-                        }
-                        out = out + body;
+
+                        let expanded_fn = cpp_expand_fn_macro(m, args);
+                        out = out + expanded_fn;
                         i = cur;
+                        chunk_start = cur;
                         continue;
                     }
+                } else {
+                    // Object-like macro
+                    if i > chunk_start {
+                        out = out + line.slice(chunk_start, i);
+                    }
+                    has_expansion = true;
+                    out = out + m.val;
+                    i = next_i;
+                    chunk_start = next_i;
+                    continue;
                 }
-                out = out + m.val;
-                i = next_i;
-                continue;
             }
-            out = out + ident;
             i = next_i;
             continue;
         }
-        out = out + line.slice(i, i + 1);
+
         i = i + 1;
+    }
+
+    if !has_expansion {
+        return line;
+    }
+
+    if chunk_start < n {
+        out = out + line.slice(chunk_start, n);
     }
     return out;
 }
