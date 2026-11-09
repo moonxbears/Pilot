@@ -103,6 +103,9 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
 fn eval_cli(raw_args: &str) -> String {
     let root = anticheat::workspace_root();
     let deps = [
+        "stdlib/core/file.pilot",
+        "stdlib/core/env.pilot",
+        "stdlib/core/primitives/map.pilot",
         "selfhost/cli/spec.pilot",
         "selfhost/cli/parser.pilot",
         "selfhost/cli/help_and_comp.pilot",
@@ -198,6 +201,9 @@ pub fn test_m3_2_posix_gnu_argument_parser_and_passthrough() {
     // 5. Verify backward-compatible resolve_cli_subcommand API
     let root = anticheat::workspace_root();
     let deps = [
+        "stdlib/core/file.pilot",
+        "stdlib/core/env.pilot",
+        "stdlib/core/primitives/map.pilot",
         "selfhost/cli/spec.pilot",
         "selfhost/cli/parser.pilot",
         "selfhost/cli/help_and_comp.pilot",
@@ -231,6 +237,9 @@ pub fn test_m3_3_dynamic_shell_completions_and_schema_json() {
     // 1. Verify dynamic command registration produces updated shell completions without compiler edits
     let root = anticheat::workspace_root();
     let deps = [
+        "stdlib/core/file.pilot",
+        "stdlib/core/env.pilot",
+        "stdlib/core/primitives/map.pilot",
         "selfhost/cli/spec.pilot",
         "selfhost/cli/parser.pilot",
         "selfhost/cli/help_and_comp.pilot",
