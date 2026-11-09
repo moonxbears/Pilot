@@ -5,7 +5,8 @@
 // and AST body expressions into CUDA, ROCm/HIP, OpenCL C, and OpenMP Offload.
 // ============================================================================
 
-pub struct GpuKernelArtifact {
+[Layout(c_abi)]
+pub struct GpuKernelArtifact : IValue {
     pub backend_name: str;
     pub kernel_name: str;
     pub source_code: str;

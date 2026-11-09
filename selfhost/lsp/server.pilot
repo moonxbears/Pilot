@@ -450,7 +450,7 @@ pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
                     ",{\"label\":\"reflect_category_badge\",\"kind\":3,\"detail\":\"pub fn reflect_category_badge(cat_id: i64) -> str\"}" +
                     ",{\"label\":\"reflect_keyword_doc\",\"kind\":3,\"detail\":\"pub fn reflect_keyword_doc(cat_id: i64, word: str) -> str\"}" +
                     ",{\"label\":\"reflect_category_words\",\"kind\":3,\"detail\":\"pub fn reflect_category_words(cat_id: i64) -> str\"}" +
-                    ",{\"label\":\"reflect_type_layout\",\"kind\":3,\"detail\":\"pub fn reflect_type_layout(name: str) -> TypeInfo\"}";
+                    ",{\"label\":\"reflect_type_layout\",\"kind\":3,\"detail\":\"pub fn reflect_type_layout(name: str) -> ReflectTypeInfo\"}";
             }
             if lsp_find_substr(doc, "Pilot.Collections", 0) >= 0 {
                 comp_json = comp_json +

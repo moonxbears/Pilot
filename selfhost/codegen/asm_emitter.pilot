@@ -4,7 +4,8 @@
 // Emits System V AMD64 x86_64 & AVX2/SSE assembly strictly from layout physics.
 // ============================================================================
 
-pub struct AsmModuleArtifact {
+[Layout(c_abi)]
+pub struct AsmModuleArtifact : IValue {
     pub module_name: str;
     pub asm_text: str;
     pub uses_avx2_simd: bool;

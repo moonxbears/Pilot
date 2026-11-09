@@ -5,7 +5,8 @@
 // `ORDER BY ASC/DESC`), `UPDATE`, and `DELETE` in pure Pilot.
 // ============================================================================
 
-pub struct SqlQueryPlan {
+[Layout(c_abi)]
+pub struct SqlQueryPlan : IValue {
     pub table_name: str;
     pub projection_cols: str;
     pub where_predicate: str;

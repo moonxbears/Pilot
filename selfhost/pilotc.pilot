@@ -7,7 +7,7 @@ pub pkg Pilot.SelfHost.Pilotc;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
-pub enum BootstrapStage {
+pub enum CompilerBootstrapStage {
     Stage0,
     Stage1,
     Stage2,
@@ -42,7 +42,7 @@ let KernelFieldId = [
     InputN: 3,
 ];
 
-pub pure fn pilotc_stage_kind(stage: i64) -> BootstrapStage {
+pub pure fn pilotc_stage_kind(stage: i64) -> CompilerBootstrapStage {
     if stage == 1 { return BootstrapStageId.Stage1; }
     if stage == 2 { return BootstrapStageId.Stage2; }
     if stage == 3 { return BootstrapStageId.Stage3; }

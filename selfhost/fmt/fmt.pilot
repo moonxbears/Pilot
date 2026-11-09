@@ -5,11 +5,15 @@
 // `;` statement terminators, operator spacing, and width-aware `( ... )` groups.
 // ============================================================================
 
-[Layout(c_abi)]
-pub struct FmtStyle : IValue {
-    pub static pure fn preserve() -> str => "preserve";
-    pub static pure fn readable() -> str => "readable";
-    pub static pure fn compact()  -> str => "compact";
+use pilot.fmt;
+
+// Canonical FmtStyle enum is imported from pilot.fmt (::Preserve, ::Readable, ::Compact)
+pub pure fn fmt_style_name(style: FmtStyle) -> str {
+    return switch style {
+        case ::Preserve: "preserve";
+        case ::Readable: "readable";
+        case ::Compact:  "compact";
+    };
 }
 
 [Layout(c_abi)]

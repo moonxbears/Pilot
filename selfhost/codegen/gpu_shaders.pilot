@@ -5,7 +5,8 @@
 // into WGSL compute shaders and SPIR-V compute modules (with real SSA ops).
 // ============================================================================
 
-pub struct GpuShaderArtifact {
+[Layout(c_abi)]
+pub struct GpuShaderArtifact : IValue {
     pub format_name: str;
     pub entry_point: str;
     pub shader_source: str;

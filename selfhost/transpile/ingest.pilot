@@ -7,7 +7,8 @@
 // for Pilot seed keywords.
 // ============================================================================
 
-pub struct IngestedPilotModule {
+[Layout(c_abi)]
+pub struct IngestedPilotModule : IValue {
     pub source_lang: str;
     pub pilot_code: str;
     pub is_canonical: bool;

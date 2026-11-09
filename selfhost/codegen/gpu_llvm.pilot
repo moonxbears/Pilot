@@ -4,7 +4,8 @@
 // 8-Backend GPU Kernel Dispatcher (`emit_arena_gpu_kernel`).
 // ============================================================================
 
-pub struct GpuLlvmIrArtifact {
+[Layout(c_abi)]
+pub struct GpuLlvmIrArtifact : IValue {
     pub target_triple: str;
     pub kernel_name: str;
     pub llvm_ir: str;

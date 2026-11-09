@@ -6,7 +6,8 @@
 // directly over `tcp_connect`, `tcp_send`, `tcp_recv`, and `tcp_close`.
 // ============================================================================
 
-pub struct HttpResponse {
+[Layout(c_abi)]
+pub struct HttpResponse : IValue {
     pub status: i64;
     pub body: str;
     pub headers_raw: str;

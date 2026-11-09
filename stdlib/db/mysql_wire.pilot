@@ -5,7 +5,8 @@
 // `COM_QUERY` (`0x03`) packet encoding and decoding in pure Pilot.
 // ============================================================================
 
-pub struct MysqlWirePacket {
+[Layout(c_abi)]
+pub struct MysqlWirePacket : IValue {
     pub sequence_id: i64;
     pub command_byte: i64;
     pub payload_len: i64;

@@ -5,7 +5,8 @@
 // and emits SSA modules, `alloca` stack slots, branches, loops, and calls.
 // ============================================================================
 
-pub struct LlvmModuleArtifact {
+[Layout(c_abi)]
+pub struct LlvmModuleArtifact : IValue {
     pub module_name: str;
     pub ir_text: str;
     pub fn_count: i64;

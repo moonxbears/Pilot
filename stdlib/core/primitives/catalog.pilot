@@ -49,151 +49,151 @@ pub struct CatComposite {}
 
 // Category 20: Signed Integers
 [KeywordDefAttr(20, "8-bit signed two's-complement integer (-128..127).")]
-pub struct i8 {}
+pub partial struct i8 {}
 
 [KeywordDefAttr(20, "16-bit signed two's-complement integer (-32768..32767).")]
-pub struct i16 {}
+pub partial struct i16 {}
 
 [KeywordDefAttr(20, "32-bit signed two's-complement integer (-2147483648..2147483647).")]
-pub struct i32 {}
+pub partial struct i32 {}
 
 [KeywordDefAttr(20, "64-bit signed two's-complement integer (-9223372036854775808..9223372036854775807).")]
-pub struct i64 {}
+pub partial struct i64 {}
 
 [KeywordDefAttr(20, "128-bit signed two's-complement integer.")]
-pub struct i128 {}
+pub partial struct i128 {}
 
 [KeywordDefAttr(20, "Pointer-width signed two's-complement integer.")]
-pub struct isize {}
+pub partial struct isize {}
 
 // Category 21: Unsigned Integers
 [KeywordDefAttr(21, "8-bit unsigned integer (0..255).")]
-pub struct u8 {}
+pub partial struct u8 {}
 
 [KeywordDefAttr(21, "16-bit unsigned integer (0..65535).")]
-pub struct u16 {}
+pub partial struct u16 {}
 
 [KeywordDefAttr(21, "32-bit unsigned integer (0..4294967295).")]
-pub struct u32 {}
+pub partial struct u32 {}
 
 [KeywordDefAttr(21, "64-bit unsigned integer (0..18446744073709551615).")]
-pub struct u64 {}
+pub partial struct u64 {}
 
 [KeywordDefAttr(21, "128-bit unsigned integer.")]
-pub struct u128 {}
+pub partial struct u128 {}
 
 [KeywordDefAttr(21, "Pointer-width unsigned integer representing memory offsets and buffer lengths.")]
-pub struct usize {}
+pub partial struct usize {}
 
 // Category 22: Floating-Point
 [KeywordDefAttr(22, "16-bit IEEE 754 half-precision floating-point number.")]
-pub struct f16 {}
+pub partial struct f16 {}
 
 [KeywordDefAttr(22, "32-bit IEEE 754 single-precision floating-point number.")]
-pub struct f32 {}
+pub partial struct f32 {}
 
 [KeywordDefAttr(22, "64-bit IEEE 754 double-precision floating-point number.")]
-pub struct f64 {}
+pub partial struct f64 {}
 
 [KeywordDefAttr(22, "128-bit IEEE 754 quadruple-precision floating-point number.")]
-pub struct f128 {}
+pub partial struct f128 {}
 
 // Category 23: Scalar Truth and Characters
 [KeywordDefAttr(23, "Single-bit Boolean truth value (`true` or `false`).")]
-pub struct bool {}
+pub partial struct bool {}
 
 [KeywordDefAttr(23, "32-bit Unicode scalar character value (`0x0000`..`0x10FFFF`).")]
-pub struct char {}
+pub partial struct char {}
 
 // Category 24: Unit and Bottom
 [KeywordDefAttr(24, "Zero-size unit type representing the absence of a meaningful value (0 runtime bytes).")]
-pub struct void {}
+pub partial struct void {}
 
 [KeywordDefAttr(24, "Empty bottom type for non-returning functions and unreachable code branches.")]
-pub struct never {}
+pub partial struct never {}
 
 // Category 25: Text & String Views
 [KeywordDefAttr(25, "Borrowed UTF-8 string view backed by contiguous byte pointer and length (16 bytes).")]
-pub struct str {}
+pub partial struct str {}
 
 // Category 26: Pointers & Contiguous Views
 [KeywordDefAttr(26, "Raw 64-bit untracked address register pointer.")]
-pub struct ptr {}
+pub partial struct ptr {}
 
 [KeywordDefAttr(26, "Borrowed contiguous memory slice view backed by pointer and length (16 bytes).")]
-pub struct slice {}
+pub partial struct slice {}
 
 [KeywordDefAttr(26, "Strided offset memory lens view backed by pointer, length, and byte stride (24 bytes).")]
-pub struct stride {}
+pub partial struct stride {}
 
 // Category 27: Fixed Array & Hardware Vectors
 [KeywordDefAttr(27, "Inline fixed-capacity C-ABI array stored contiguously without pointer indirection.")]
-pub struct array {}
+pub partial struct array {}
 
 [KeywordDefAttr(27, "Hardware SIMD vector packed in dedicated vector registers.")]
-pub struct simd {}
+pub partial struct simd {}
 
 [KeywordDefAttr(27, "2D inline fixed-capacity matrix grid stored contiguously.")]
-pub struct grid {}
+pub partial struct grid {}
 
 [KeywordDefAttr(27, "Power-of-two circular ring buffer view.")]
-pub struct ring {}
+pub partial struct ring {}
 
 // Category 28: Ranges, Intervals & Orderings
 [KeywordDefAttr(28, "Three-way comparison ordering result (-1 Less, 0 Equal, +1 Greater).")]
-pub struct order {}
+pub partial struct order {}
 
 [KeywordDefAttr(28, "Half-open interval `start .. end` iterating from start up to (excluding) end.")]
-pub struct range {}
+pub partial struct range {}
 
 [KeywordDefAttr(28, "Closed interval `start ..= end` iterating from start up to and including end.")]
-pub struct span {}
+pub partial struct span {}
 
 [KeywordDefAttr(28, "Stepped interval progression advancing by a fixed non-zero step.")]
-pub struct step {}
+pub partial struct step {}
 
 [KeywordDefAttr(28, "Open slice bound descriptor with both start and end specified.")]
-pub struct open {}
+pub partial struct open {}
 
 [KeywordDefAttr(28, "Half-bounded slice descriptor starting strictly after the given index.")]
-pub struct after {}
+pub partial struct after {}
 
 [KeywordDefAttr(28, "Half-bounded slice descriptor starting from the given index to the end.")]
-pub struct from {}
+pub partial struct from {}
 
 [KeywordDefAttr(28, "Half-bounded slice descriptor spanning from the beginning until the given index.")]
-pub struct until {}
+pub partial struct until {}
 
 [KeywordDefAttr(28, "Full unbounded slice descriptor spanning the entire underlying buffer.")]
-pub struct full {}
+pub partial struct full {}
 
 // Category 29: Structural & Algebraic Composites
 [KeywordDefAttr(29, "Structural heterogeneous tuple composite storing ordered items contiguously.")]
-pub struct tuple {}
+pub partial struct tuple {}
 
 [KeywordDefAttr(29, "Tagged union variant storing a discriminant byte alongside payload storage.")]
-pub struct union {}
+pub partial struct union {}
 
 [KeywordDefAttr(29, "Compile-time dimensional physical quantity with unit verification.")]
-pub struct Quantity {}
+pub partial struct Quantity {}
 
 [KeywordDefAttr(29, "Zero-copy key-value strided column projection map.")]
-pub struct map {}
+pub partial struct map {}
 
 [KeywordDefAttr(29, "Positional sequence unpack operator carrier.")]
-pub struct splat {}
+pub partial struct splat {}
 
 [KeywordDefAttr(29, "Compile-time structural key-value unpack operator carrier.")]
-pub struct pairs {}
+pub partial struct pairs {}
 
 [KeywordDefAttr(29, "Recursive deep-flatten unpack operator carrier.")]
-pub struct expand {}
+pub partial struct expand {}
 
 [KeywordDefAttr(29, "Raw ABI zero-marshalling call frame struct.")]
-pub struct frame {}
+pub partial struct frame {}
 
 [KeywordDefAttr(29, "Compile-time or runtime type reflection descriptor.")]
-pub struct type {}
+pub partial struct type {}
 
 [KeywordDefAttr(29, "Homoiconic abstract syntax tree node representation.")]
-pub struct ast {}
+pub partial struct ast {}

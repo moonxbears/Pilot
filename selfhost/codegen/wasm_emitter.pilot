@@ -5,7 +5,8 @@
 // WASM v1 modules (`\0asm\x01\x00\x00\x00`), WAT text, and JS/TS host bindings.
 // ============================================================================
 
-pub struct WasmBundleArtifact {
+[Layout(c_abi)]
+pub struct WasmBundleArtifact : IValue {
     pub module_name: str;
     pub wat_source: str;
     pub mjs_bindings: str;

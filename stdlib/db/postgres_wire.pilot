@@ -5,7 +5,8 @@
 // multi-byte big-endian binary wire framing & decoding in pure Pilot.
 // ============================================================================
 
-pub struct PostgresWirePacket {
+[Layout(c_abi)]
+pub struct PostgresWirePacket : IValue {
     pub msg_tag_byte: i64;
     pub payload_len: i64;
     pub query_sql: str;

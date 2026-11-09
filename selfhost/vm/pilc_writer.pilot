@@ -6,7 +6,8 @@
 // register-to-symbol debug manifests in pure Pilot.
 // ============================================================================
 
-pub struct PilcContainerSummary {
+[Layout(c_abi)]
+pub struct PilcContainerSummary : IValue {
     pub magic: str;
     pub version: i64;
     pub const_count: i64;

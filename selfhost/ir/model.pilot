@@ -5,6 +5,8 @@
 // ==============================================================================
 pub lvl(0) pkg Pilot.SelfHost.Ir.Model;
 
+use Pilot.Core.Reflect;
+
 pub pure fn nameof(sym: str) -> str => sym;
 
 // ------------------------------------------------------------------------------
@@ -330,19 +332,8 @@ pub pure fn ir_inst_new(res: u32, op: u16, sub: u16, phy: IrTypePhysics, a_off: 
 }
 
 // ------------------------------------------------------------------------------
-// Target Descriptor & Multiplatform ABI Physics
+// Target Descriptor & Multiplatform ABI Physics (from Pilot.Core.Reflect)
 // ------------------------------------------------------------------------------
-[Layout(c_abi)]
-pub struct TargetDescriptor : IValue {
-    pub arch:             str;
-    pub os:               str;
-    pub pointer_bytes:    usize;
-    pub endian:           str;
-    pub backend:          str;
-    pub simd_width_bits:  usize;
-    pub cache_line_bytes: usize;
-    pub opt_level:        u8;
-}
 
 pub fn target_descriptor_new(os: str, arch: str) -> TargetDescriptor {
     var p_bytes: usize = 8;

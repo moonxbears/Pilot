@@ -5,7 +5,8 @@
 // `f32`, `f64`, `bool`, `&str`) with zero hardcoded Pilot type names.
 // ============================================================================
 
-pub struct EmittedTargetSource {
+[Layout(c_abi)]
+pub struct EmittedTargetSource : IValue {
     pub target_lang: str;
     pub source_code: str;
 }

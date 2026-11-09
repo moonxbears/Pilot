@@ -5,7 +5,8 @@
 // and compound literals from `PhysicsRegistry` with zero hardcoded type names.
 // ============================================================================
 
-pub struct CModuleArtifact {
+[Layout(c_abi)]
+pub struct CModuleArtifact : IValue {
     pub module_name: str;
     pub c_source: str;
     pub fn_count: i64;

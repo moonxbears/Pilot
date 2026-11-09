@@ -6,13 +6,15 @@
 // zero hardcoded Pilot type names or benchmark pattern cheats.
 // ============================================================================
 
-pub struct IrParamDescriptor {
+[Layout(c_abi)]
+pub struct IrParamDescriptor : IValue {
     pub param_name: str;
     pub reg_class: i64;
     pub bit_width: i64;
 }
 
-pub struct IrFunctionDescriptor {
+[Layout(c_abi)]
+pub struct IrFunctionDescriptor : IValue {
     pub fn_name: str;
     pub ret_reg_class: i64;
     pub ret_bit_width: i64;
@@ -24,7 +26,8 @@ pub struct IrFunctionDescriptor {
     pub body_rhs: str;
 }
 
-pub struct IrStructFieldDescriptor {
+[Layout(c_abi)]
+pub struct IrStructFieldDescriptor : IValue {
     pub struct_name: str;
     pub field_index: i64;
     pub field_name: str;
@@ -32,7 +35,8 @@ pub struct IrStructFieldDescriptor {
     pub bit_width: i64;
 }
 
-pub struct IrLayoutPhysics {
+[Layout(c_abi)]
+pub struct IrLayoutPhysics : IValue {
     pub reg_class: i64;
     pub bit_width: i64;
     pub lanes: i64;

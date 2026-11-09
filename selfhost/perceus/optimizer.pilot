@@ -6,7 +6,8 @@
 // (`PILOT104`–`PILOT105`) in pure Pilot over `PhysicsRegistry`.
 // ============================================================================
 
-pub struct PerceusReport {
+[Layout(c_abi)]
+pub struct PerceusReport : IValue {
     pub region_allocs: i64;
     pub global_allocs: i64;
     pub stack_allocs: i64;

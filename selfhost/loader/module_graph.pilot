@@ -5,17 +5,9 @@
 // ==============================================================================
 pub lvl(0) pkg Pilot.SelfHost.Loader.ModuleGraph;
 
-[Layout(c_abi)]
-pub struct FileUnitId : IValue {
-    pub raw: u32;
-}
+use Pilot.Diagnostics.Model;
 
-[Layout(c_abi)]
-pub struct SourceSpan : IValue {
-    pub file_id: FileUnitId;
-    pub start: u32;
-    pub end: u32;
-}
+pub pure fn mg_unit_span(fid: FileUnitId, start: u32, end: u32) -> SourceSpan => source_span_new(fid.raw, start, end);
 
 [Layout(c_abi)]
 pub struct ModuleNode : IValue {

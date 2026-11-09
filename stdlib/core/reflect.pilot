@@ -103,13 +103,13 @@ pub struct AnatomyInfo : IValue {
 
 [Layout(c_abi)]
 pub struct HardwareType : IValue {
-    pub registry:           map<usize, TypeInfo>;
+    pub registry:           map<usize, ReflectTypeInfo>;
     pub lattice:            map<usize, u8>;
     pub anatomy:            map<usize, AnatomyInfo>;
     pub registered_classes: map<usize, str>;
 
     pub static pure fn create(
-        registry:           map<usize, TypeInfo>,
+        registry:           map<usize, ReflectTypeInfo>,
         lattice:            map<usize, u8>,
         anatomy:            map<usize, AnatomyInfo>,
         registered_classes: map<usize, str>
@@ -135,7 +135,7 @@ pub struct HardwareType : IValue {
 }
 
 [Layout(c_abi)]
-pub struct AstContext : IValue {
+pub struct AstReflectionContext : IValue {
     pub node_count:  usize;
     pub root_node:   i64;
     pub hygiene_seq: i64;
@@ -148,7 +148,7 @@ pub struct AstContext : IValue {
         hygiene_seq: i64,
         quotes:      map<usize, str>,
         pratt_ops:   map<str, i64>
-    ) -> AstContext => AstContext {
+    ) -> AstReflectionContext => AstReflectionContext {
         node_count:  node_count,
         root_node:   root_node,
         hygiene_seq: hygiene_seq,
@@ -263,7 +263,7 @@ pub struct VmContext : IValue {
 pub struct Environment : IValue {
     pub layout:   LayoutTarget;
     pub types:    HardwareType;
-    pub ast:      AstContext;
+    pub ast:      AstReflectionContext;
     pub symbols:  SymbolContext;
     pub attrs:    AttributeContext;
     pub packages: PackageContext;
@@ -272,7 +272,7 @@ pub struct Environment : IValue {
     pub static pure fn create(
         layout:   LayoutTarget,
         types:    HardwareType,
-        ast:      AstContext,
+        ast:      AstReflectionContext,
         symbols:  SymbolContext,
         attrs:    AttributeContext,
         packages: PackageContext,
@@ -329,7 +329,7 @@ pub struct KeywordInfo : IValue {
 }
 
 [Layout(c_abi)]
-pub struct FieldInfo : IValue {
+pub struct ReflectFieldInfo : IValue {
     pub name:        str;
     pub offset:      usize;
     pub byte_size:   usize;
@@ -340,7 +340,7 @@ pub struct FieldInfo : IValue {
         offset:    usize,
         byte_size: usize,
         layout_id: usize
-    ) -> FieldInfo => FieldInfo {
+    ) -> ReflectFieldInfo => ReflectFieldInfo {
         name:      name,
         offset:    offset,
         byte_size: byte_size,
@@ -349,7 +349,7 @@ pub struct FieldInfo : IValue {
 }
 
 [Layout(c_abi)]
-pub struct TypeInfo : IValue {
+pub struct ReflectTypeInfo : IValue {
     pub id:          usize;
     pub name:        str;
     pub byte_size:   usize;
@@ -364,7 +364,7 @@ pub struct TypeInfo : IValue {
         byte_align:  usize,
         lattice:     u8,
         field_count: usize = 0
-    ) -> TypeInfo => TypeInfo {
+    ) -> ReflectTypeInfo => ReflectTypeInfo {
         id:          id,
         name:        name,
         byte_size:   byte_size,
@@ -607,10 +607,10 @@ pub fn reflect_is_in_category(cat_id: i64, word: str) -> bool {
 }
 
 // Queries type layout metrics from the compiler physics engine
-pub fn reflect_type_layout(type_id: usize, type_name: str = "") -> TypeInfo {
+pub fn reflect_type_layout(type_id: usize, type_name: str = "") -> ReflectTypeInfo {
     let size = __engine(ReflectEngine.layout_size, type_id);
     let lat = __engine(ReflectEngine.lattice_get, type_id);
-    return TypeInfo.create(type_id, type_name, size, 8, lat as u8);
+    return ReflectTypeInfo.create(type_id, type_name, size, 8, lat as u8);
 }
 
 // =========================================================================
@@ -636,7 +636,7 @@ pub fn reflect_target() -> LayoutTarget {
 }
 
 pub fn reflect_hardware_type(
-    registry:           map<usize, TypeInfo>,
+    registry:           map<usize, ReflectTypeInfo>,
     lattice:            map<usize, u8>,
     anatomy:            map<usize, AnatomyInfo>,
     registered_classes: map<usize, str>
@@ -650,8 +650,8 @@ pub fn reflect_ast_context(
     hygiene_seq: i64,
     quotes:      map<usize, str>,
     pratt_ops:   map<str, i64>
-) -> AstContext {
-    return AstContext.create(node_count, root_node, hygiene_seq, quotes, pratt_ops);
+) -> AstReflectionContext {
+    return AstReflectionContext.create(node_count, root_node, hygiene_seq, quotes, pratt_ops);
 }
 
 pub fn reflect_symbol_context(
@@ -692,7 +692,7 @@ pub fn reflect_vm_context(
 pub fn reflect_environment(
     layout:   LayoutTarget,
     types:    HardwareType,
-    ast:      AstContext,
+    ast:      AstReflectionContext,
     symbols:  SymbolContext,
     attrs:    AttributeContext,
     packages: PackageContext,
@@ -726,7 +726,7 @@ pub fn reflect_ast_attr_count(node_id: usize) -> usize {
     return __engine(ReflectEngine.attr_decl_count, node_id) as usize;
 }
 
-pub comptime fn reflect_hydrate_ast_context() -> AstContext {
+pub comptime fn reflect_hydrate_ast_context() -> AstReflectionContext {
     let total_nodes = __engine(ReflectEngine.node_count) as usize;
     var root_node: i64 = 0;
     var quotes: map<usize, str> = map<usize, str> { keys: [], vals: [] };
@@ -759,7 +759,7 @@ pub comptime fn reflect_hydrate_ast_context() -> AstContext {
         nid = nid + 1;
     }
 
-    return AstContext.create(
+    return AstReflectionContext.create(
         total_nodes,
         root_node,
         0,
@@ -770,7 +770,7 @@ pub comptime fn reflect_hydrate_ast_context() -> AstContext {
 
 pub comptime fn reflect_hydrate_hardware_type() -> HardwareType {
     let total_nodes = __engine(ReflectEngine.node_count) as usize;
-    var registry: map<usize, TypeInfo> = map<usize, TypeInfo> { keys: [], vals: [] };
+    var registry: map<usize, ReflectTypeInfo> = map<usize, ReflectTypeInfo> { keys: [], vals: [] };
     var lattice: map<usize, u8> = map<usize, u8> { keys: [], vals: [] };
     var anatomy: map<usize, AnatomyInfo> = map<usize, AnatomyInfo> { keys: [], vals: [] };
     var registered_classes: map<usize, str> = map<usize, str> { keys: [], vals: [] };
@@ -787,7 +787,7 @@ pub comptime fn reflect_hydrate_hardware_type() -> HardwareType {
                 let s_id = __engine(ReflectEngine.node_sym, nid);
                 let name = __engine(ReflectEngine.sym_str, s_id);
 
-                registry[lid] = TypeInfo.create(lid, name, sz, 8, lat, 0);
+                registry[lid] = ReflectTypeInfo.create(lid, name, sz, 8, lat, 0);
                 lattice[lid] = lat;
 
                 var kind_code: u8 = 0;

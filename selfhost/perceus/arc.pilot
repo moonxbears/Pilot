@@ -5,7 +5,8 @@
 // (`0b00` Value, `0b01` Reference View, `0b10` Owned Object, `0b11` Scoped Guard).
 // ============================================================================
 
-pub struct BindingLifecycleState {
+[Layout(c_abi)]
+pub struct BindingLifecycleState : IValue {
     pub lattice_bits: i64;
     pub move_by_default: bool;
     pub is_moved: bool;

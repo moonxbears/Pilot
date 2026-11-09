@@ -3,20 +3,23 @@
 // Milestone 53.1: Sub-Millisecond Incremental CST Splicer & Island Reuse
 // ============================================================================
 
-pub struct TextEdit {
+[Layout(c_abi)]
+pub struct IncrementalTextEdit : IValue {
     pub start: i64;
     pub end: i64;
     pub replacement: str;
 }
 
-pub struct ReparseMetrics {
+[Layout(c_abi)]
+pub struct ReparseMetrics : IValue {
     pub reparse_time_micros: i64;
     pub reused_nodes: i64;
     pub allocated_nodes: i64;
     pub escalated_to_root: bool;
 }
 
-pub struct IncrementalResult {
+[Layout(c_abi)]
+pub struct IncrementalResult : IValue {
     pub new_source: str;
     pub reused_nodes: i64;
     pub allocated_nodes: i64;

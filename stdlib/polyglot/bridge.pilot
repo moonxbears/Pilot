@@ -4,7 +4,10 @@
 // Replaces `crates/pilot-polyglot/src/bridge.rs` in pure Pilot.
 // ============================================================================
 
-pub struct PolyglotExecutionPlan {
+use Pilot.Core.Env;
+
+[Layout(c_abi)]
+pub struct PolyglotExecutionPlan : IValue {
     pub runtime_lang: str;
     pub host_binary: str;
     pub wrapped_script: str;
@@ -51,10 +54,8 @@ pub pure fn bridge_quote_str(s: str) -> str {
     return out + "\"";
 }
 
-pub struct Process {
-    pub static fn spawn_eval(runtime_bin: str, code: str) -> str {
-        return "" + __engine("host_spawn_eval", runtime_bin, code);
-    }
+pub fn bridge_spawn_eval(bin: str, code: str) -> str {
+    return "" + __engine("host_spawn_eval", bin, code);
 }
 
 pub fn polyglot_eval_json(lang: str, json_bindings: str, user_expr: str) -> str {
@@ -62,12 +63,12 @@ pub fn polyglot_eval_json(lang: str, json_bindings: str, user_expr: str) -> str 
     let q_json = bridge_quote_str(json_bindings);
     if bin == "python3" {
         let py_script = "import json\nenv = json.loads(" + q_json + ")\nglobals().update(env)\nprint(" + user_expr + ", end='')\n";
-        return Process.spawn_eval("python3", py_script);
+        return bridge_spawn_eval("python3", py_script);
     }
     if bin == "node" {
         let js_script = "const env = JSON.parse(" + q_json + ");\nwith (env) { process.stdout.write(String(" + user_expr + ")); }\n";
-        return Process.spawn_eval("node", js_script);
+        return bridge_spawn_eval("node", js_script);
     }
     let sh_script = user_expr;
-    return Process.spawn_eval(bin, sh_script);
+    return bridge_spawn_eval(bin, sh_script);
 }

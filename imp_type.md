@@ -12,7 +12,7 @@ Good typing obeys five foundational laws:
 2. **Appropriate Constraining:** Constrain as tightly as the domain requires, but no tighter. Broad, open-ended types (`any`, bare `str`, bare `i64`) should only represent genuinely open-ended varieties of values.
 3. **Generic Precision:** Never write unconstrained generics (`<T>`) when capabilities are required. Constrain with interfaces (`<T : IComparable<T>>`).
 4. **Hardware Lattice Alignment:** Every type must clearly classify into the 2-bit hardware lattice (`0b00` Value, `0b01` Borrowed View, `0b10` Owned Object, `0b11` Scoped Guard).
-5. **Single Source of Truth & Zero Duplication (Import-First Law):** Every type must have exactly one canonical definition in its owning module or package. Types must never be duplicated, re-declared, or shadowed across different files or subsystems; any file requiring a type must explicitly import it.
+5. **Single Source of Truth & Targeted Importing (Import-First Law):** Every type must have exactly one canonical definition in its owning module or package. Types must never be duplicated, re-declared, or shadowed across different files or subsystems. When importing, only import what you need instead of importing an entire library or broad module, unless you genuinely require the entire library or are importing several symbols from that library.
 
 ```mermaid
 flowchart TD
@@ -236,28 +236,42 @@ pub struct Percentage : IValue {
 }
 ```
 
-### Rule 11: Single Canonical Definition & Zero Type Duplication (Import-First Law)
+### Rule 11: Single Canonical Definition & Targeted Importing (Import-First Law)
 Every type (`enum`, `struct`, `interface`, `bitflags`, or `type` alias) must reside in exactly one canonical file within its owning package (`stdlib/core/`, `stdlib/std/`, `stdlib/pilot/`, or a dedicated `selfhost/` module).
 - **Never** re-declare, duplicate, copy-paste, or redefine an existing type in another file.
 - **Always** import the type from its canonical home via `use Canonical.Package.Module;` into any file that needs it (e.g. `use Pilot.Diagnostics.Model;`, `use std.sync;`).
 - If multiple subsystems require a shared domain type (e.g. `Span`, `SourceLocation`, `Token`, `Diagnostic`, `LatticeBits`), place it once in a shared foundational module (such as `pilot.diag`, `pilot.cst`, or `core.*`) and import it everywhere it is referenced.
 - Shadowing, diverging clones, or parallel duplicate structs violate compiler type safety, bloat binary metadata, and break polymorphism across module boundaries.
 
+#### Targeted Import Discipline: Import Only What You Need
+When consuming types from external modules or standard library packages:
+- **Default to targeted imports:** Only import the specific types/symbols needed by the file instead of importing an entire library or broad namespace.
+- **Avoid blanket/wildcard imports:** Never use blanket wildcard imports (`use Pkg.Module::*;`) when a file only depends on one or two specific types.
+- **When whole-library/module imports are permitted:**
+  1. The consumer genuinely relies on the functionality of the **entire library** (e.g., standard library core prelude `use Pilot.Core.Genesis::*;`).
+  2. The consumer is importing **several items** (e.g., 3+ types, interfaces, or functions) from that cohesive library module.
+
 ```pilot
-// GOOD: Import the canonical type from its owning module
-use Pilot.Diagnostics.Model; // Imports canonical SourceSpan, Diagnostic, DiagSeverity
+// GOOD: Targeted import of only the required types
+use Pilot.Diagnostics.Model.SourceSpan; // Imports specifically what is needed
 
 pub fn format_error(span: SourceSpan, message: str) -> str {
-    return f"{span.file}:{span.line}:{span.col}: {message}";
+    return f"{span.file_id.raw}:{span.start}:{span.end}: {message}";
 }
+
+// GOOD: Importing a module when several types are used from it
+use Pilot.Diagnostics.Model; // Used when referencing SourceSpan, FileUnitId, Diagnostic, and FixSuggestion
+
+// BAD: Blanket importing an entire library when only one type is needed
+use Pilot.Diagnostics.Model::*; // ANTI-PATTERN: Wildcard namespace pollution
 
 // BAD: Re-declaring a duplicate struct in a consumer file
 // Duplicate declaration creates an incompatible type and breaks interoperability!
 [Layout(c_abi)]
 pub struct SourceSpan : IValue { // ANTI-PATTERN: Duplicate definition
-    pub file: str;
-    pub line: u32;
-    pub col:  u32;
+    pub file_id: FileUnitId;
+    pub start:   u32;
+    pub end:     u32;
 }
 ```
 
@@ -268,6 +282,7 @@ pub struct SourceSpan : IValue { // ANTI-PATTERN: Duplicate definition
 | Anti-Pattern | Description | Correct Replacement |
 | :--- | :--- | :--- |
 | **Type Duplication / Shadow Structs** | Re-declaring or copying an existing struct/enum across multiple files instead of importing it. | Place in a single canonical owning module and `use` import it wherever needed. |
+| **Blanket Import Pollution** | Importing an entire library or using wildcards (`use Pkg::*;`) when only a single type is needed. | Import only the specific required type(s), reserving whole-library imports for when the entire library or several items from it are used. |
 | **Primitive Obsession** | Using bare `str` or `i64` for IDs, status codes, and units. | Domain Value Struct (`UserId(u64)`), `enum`, or Dimensional Unit. |
 | **Stringly-Typed APIs** | Passing `"json"`, `"yaml"`, `"csv"` to select a format. | `enum DataFormat { ::Json, ::Yaml, ::Csv }` |
 | **God Enum** | An enum with 30+ variants containing unrelated, asymmetric data payloads. | Split into sub-categories, or use table-driven structs with polymorphic interfaces. |
@@ -282,6 +297,7 @@ pub struct SourceSpan : IValue { // ANTI-PATTERN: Duplicate definition
 - [ ] **Does this type (or an equivalent) already exist in the codebase?**
   - **Never redeclare or duplicate** existing types.
   - Always import the canonical type from its owning package (`use ...;`).
+  - **Import only what you need:** Do not import the entire library unless you genuinely need the entire library or are importing several items from it.
   - If creating a newly shared concept, place it in a canonical module accessible to all consumers.
 - [ ] **Are all possible values known at compile time?**
   - If $\le 19$: Use `enum` with `::Variant`.

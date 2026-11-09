@@ -6,7 +6,8 @@
 // structural `typedef struct`) with zero hardcoded Pilot type names.
 // ============================================================================
 
-pub struct CTypeMapping {
+[Layout(c_abi)]
+pub struct CTypeMapping : IValue {
     pub layout_id: i64;
     pub c_type_name: str;
     pub is_composite: bool;

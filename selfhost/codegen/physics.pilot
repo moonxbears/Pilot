@@ -6,7 +6,8 @@
 // and mounted `PhysicsRegistry` (`RawAstArena` + `LayoutTable`) queries.
 // ============================================================================
 
-pub struct LayoutDescriptor {
+[Layout(c_abi)]
+pub struct LayoutDescriptor : IValue {
     pub layout_id: i64;
     pub reg_class: i64;
     pub bit_width: i64;
