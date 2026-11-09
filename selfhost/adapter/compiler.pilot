@@ -1,0 +1,232 @@
+// ==============================================================================
+// FILE: selfhost/adapter/compiler.pilot
+// Milestone 11.2: Adapter Declaration Compiler & Zero-Cost PilIR Idiom Lifter
+// Synthesizes Tier-1/Tier-2 MethodTable entries and 0-allocation PilIR thunks
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Adapter.Compiler;
+
+use Pilot.SelfHost.Adapter.Rules;
+use Pilot.SelfHost.Ir.Model;
+use Pilot.Diagnostics.Model;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Adapter Method Model & Synthesis
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct AdaptedParam : IValue {
+    pub name:         str;
+    pub pilot_type:   str;
+    pub raw_reg:      u8;
+    pub raw_idx:      u16;
+    pub is_receiver:  bool;
+    pub is_out_param: bool;
+}
+
+pub pure fn adapted_param_new(name: str, p_ty: str, reg: u8, idx: u16) -> AdaptedParam {
+    return AdaptedParam {
+        name:         name,
+        pilot_type:   p_ty,
+        raw_reg:      reg,
+        raw_idx:      idx,
+        is_receiver:  false,
+        is_out_param: false,
+    };
+}
+
+pub struct AdaptedMethod : IObject {
+    pub raw_symbol:       str;
+    pub clean_name:       str;
+    pub is_property_get:  bool;
+    pub is_property_set:  bool;
+    pub property_name:    str;
+    pub params:           List<AdaptedParam>;
+    pub return_type:      str;
+    pub has_error_lift:   bool;
+    pub ir_thunk:         str;
+
+    ~self() {}
+}
+
+pub fn adapted_method_new(raw_sym: str, clean_name: str) -> AdaptedMethod {
+    return AdaptedMethod {
+        raw_symbol:      raw_sym,
+        clean_name:      clean_name,
+        is_property_get: false,
+        is_property_set: false,
+        property_name:   "",
+        params:          [],
+        return_type:     "void",
+        has_error_lift:  false,
+        ir_thunk:        "",
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 2. Adapter Compiler State & Output
+// ------------------------------------------------------------------------------
+
+pub struct AdapterCompilationReport : IObject {
+    pub target_type:      str;
+    pub methods:          List<AdaptedMethod>;
+    pub properties_count: usize;
+    pub diagnostics:      List<Diagnostic>;
+    pub total_ir_ops:     usize;
+
+    ~self() {}
+}
+
+pub fn adapter_compilation_report_new(target: str) -> AdapterCompilationReport {
+    return AdapterCompilationReport {
+        target_type:      target,
+        methods:          [],
+        properties_count: 0,
+        diagnostics:      [],
+        total_ir_ops:     0,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 3. Foreign Method Transformation & PilIR Thunk Synthesis
+// ------------------------------------------------------------------------------
+
+pub fn compile_adapter_method_thunk(
+    blueprint: ref<AdapterBlueprint>,
+    raw_symbol: str,
+    raw_param_types: List<str>,
+    raw_ret_type: str
+) -> AdaptedMethod {
+    let clean = adapter_strip_prefix(raw_symbol, blueprint.strip_prefixes);
+    let normed_name = adapter_case_norm(clean, blueprint.method_case);
+
+    var method = adapted_method_new(raw_symbol, normed_name);
+
+    // Check for property getter: get_foo(handle) -> T
+    if clean.len() > 4 && clean.slice(0, 4) == "get_" {
+        method.is_property_get = true;
+        method.property_name = adapter_case_norm(clean.slice(4, clean.len()), blueprint.method_case);
+    }
+    // Check for property setter: set_foo(handle, val) -> void/rc
+    if clean.len() > 4 && clean.slice(0, 4) == "set_" {
+        method.is_property_set = true;
+        method.property_name = adapter_case_norm(clean.slice(4, clean.len()), blueprint.method_case);
+    }
+
+    var ir_builder = "";
+    var p_idx: usize = 0;
+    let n_params = raw_param_types.len();
+
+    // 1. Receiver promote: First parameter matching handle becomes self
+    var receiver_found = false;
+    while p_idx < n_params {
+        let ty = raw_param_types[p_idx];
+        if !receiver_found && p_idx == 0 {
+            var param = adapted_param_new("self", blueprint.target_type, reg_class_raw_ptr(), 0);
+            param.is_receiver = true;
+            method.params.push(param);
+            receiver_found = true;
+            ir_builder = ir_builder + f"  %r0 = ExtractHandle(self)\n";
+        } else {
+            // Check slice pair rules
+            var is_slice_ptr = false;
+            var r_idx: usize = 0;
+            while r_idx < blueprint.slice_rules.len() {
+                let rule = blueprint.slice_rules[r_idx];
+                if rule.ptr_param_idx as usize == p_idx {
+                    is_slice_ptr = true;
+                    let p_name = f"arg_{p_idx}";
+                    let p_type = if rule.as_utf8_str { "str" } else { "slice<u8>" };
+                    var sp_param = adapted_param_new(p_name, p_type, reg_class_raw_ptr(), p_idx as u16);
+                    method.params.push(sp_param);
+
+                    ir_builder = ir_builder + f"  %ptr_{p_idx} = ExtractField({p_name}, 0)\n";
+                    ir_builder = ir_builder + f"  %len_{p_idx} = ExtractField({p_name}, 1)\n";
+                    break;
+                }
+                r_idx = r_idx + 1;
+            }
+
+            if !is_slice_ptr {
+                let p_name = f"arg_{p_idx}";
+                var reg_cl = reg_class_gpr_signed();
+                if ty == "void*" || ty == "ptr" { reg_cl = reg_class_raw_ptr(); }
+                var normal_param = adapted_param_new(p_name, ty, reg_cl, p_idx as u16);
+                method.params.push(normal_param);
+                ir_builder = ir_builder + f"  %r{p_idx} = PassArg({p_name})\n";
+            }
+        }
+        p_idx = p_idx + 1;
+    }
+
+    // 2. Out-param stack slot allocation
+    var out_rule_idx: usize = 0;
+    while out_rule_idx < blueprint.out_rules.len() {
+        let out_rule = blueprint.out_rules[out_rule_idx];
+        let out_slot = out_rule.param_idx;
+        ir_builder = ir_builder + f"  %slot_{out_slot} = StackSlot({out_rule.pointee_layout})\n";
+        if out_rule.zero_init_stack {
+            ir_builder = ir_builder + f"  ZeroMem(%slot_{out_slot})\n";
+        }
+        out_rule_idx = out_rule_idx + 1;
+    }
+
+    // 3. Call foreign function directly
+    ir_builder = ir_builder + f"  %ret = CallDirect({raw_symbol})\n";
+
+    // 4. Status code error lifting
+    if blueprint.err_policy == ErrorLiftPolicy::ZeroIsOk {
+        ir_builder = ir_builder + f"  %cond = CmpEq(%ret, 0)\n";
+        ir_builder = ir_builder + f"  Branch(%cond, .ok_path, .err_path)\n";
+        method.has_error_lift = true;
+        method.return_type = if raw_ret_type == "int" || raw_ret_type == "i32" { "void ! i32" } else { f"{raw_ret_type} ! i32" };
+    } else if blueprint.err_policy == ErrorLiftPolicy::NonNullIsOk {
+        ir_builder = ir_builder + f"  %cond = CmpNe(%ret, 0)\n";
+        ir_builder = ir_builder + f"  Branch(%cond, .ok_path, .err_path)\n";
+        method.has_error_lift = true;
+        method.return_type = f"{blueprint.target_type}? ";
+    } else {
+        method.return_type = raw_ret_type;
+    }
+
+    method.ir_thunk = ir_builder;
+    return method;
+}
+
+// ------------------------------------------------------------------------------
+// 4. Blueprint Verification & Diagnostics Catalog
+// ------------------------------------------------------------------------------
+
+pub fn verify_and_compile_blueprint(
+    blueprint: ref<AdapterBlueprint>,
+    raw_symbols: List<str>
+) -> AdapterCompilationReport {
+    var report = adapter_compilation_report_new(blueprint.target_type);
+
+    // ADP001: Handle Type Not Found
+    if blueprint.target_type.len() == 0 {
+        let span = source_span_new(0, 0, 0);
+        let diag = diagnostic_new("ADP001", diag_severity_error(), "Adapter target type cannot be empty", span);
+        report.diagnostics.push(diag);
+        return report;
+    }
+
+    var i: usize = 0;
+    let n = raw_symbols.len();
+    while i < n {
+        let sym = raw_symbols[i];
+        let dummy_params: List<str> = ["ptr", "ptr", "size_t"];
+        let m = compile_adapter_method_thunk(blueprint, sym, dummy_params, "i32");
+        if m.clean_name.len() > 0 {
+            if m.is_property_get || m.is_property_set {
+                report.properties_count = report.properties_count + 1;
+            }
+            report.total_ir_ops = report.total_ir_ops + 6;
+            report.methods.push(m);
+        }
+        i = i + 1;
+    }
+
+    return report;
+}

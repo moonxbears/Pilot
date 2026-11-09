@@ -1,0 +1,117 @@
+// ==============================================================================
+// FILE: stdlib/std/polyglot/adapter.pilot
+// Milestone 11.3: User-Facing Foreign Adapter Facade & Presets
+// `[Adapt]` attributes, CError/Errno value types, and POSIX/Win32 adapter profiles
+// ==============================================================================
+pub pkg std.polyglot.adapter;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Foreign Error Outcomes & Value Structs (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct CError : IValue {
+    pub code:    i32;
+    pub message: str;
+}
+
+pub pure fn c_error_new(code: i32, msg: str) -> CError {
+    return CError { code: code, message: msg };
+}
+
+[Layout(c_abi)]
+pub struct Errno : IValue {
+    pub raw: i32;
+}
+
+pub pure fn errno_new(val: i32) -> Errno {
+    return Errno { raw: val };
+}
+
+pub pure fn errno_is_eagain(e: Errno) -> bool => e.raw == 11;
+pub pure fn errno_is_eintr(e: Errno)  -> bool => e.raw == 4;
+
+[Layout(c_abi)]
+pub struct NullPtrErr : IValue {
+    pub symbol: str;
+}
+
+pub pure fn null_ptr_err_new(sym: str) -> NullPtrErr {
+    return NullPtrErr { symbol: sym };
+}
+
+// ------------------------------------------------------------------------------
+// 2. [Adapt] Attribute Definitions
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct AdaptAttr : IValue {
+    pub source_module: str;
+    pub strip_prefix:  str;
+    pub error_policy:  u8; // 1=ZeroIsOk, 2=NonNegativeIsOk, 3=NonNullIsOk
+}
+
+pub pure fn adapt_attr_new(module: str, prefix: str, policy: u8) -> AdaptAttr {
+    return AdaptAttr {
+        source_module: module,
+        strip_prefix:  prefix,
+        error_policy:  policy,
+    };
+}
+
+[Layout(c_abi)]
+pub struct SlicePairAttr : IValue {
+    pub ptr_param: u16;
+    pub len_param: u16;
+}
+
+pub pure fn slice_pair_attr_new(p: u16, l: u16) -> SlicePairAttr {
+    return SlicePairAttr { ptr_param: p, len_param: l };
+}
+
+[Layout(c_abi)]
+pub struct OutParamAttr : IValue {
+    pub param_index: u16;
+}
+
+pub pure fn out_param_attr_new(idx: u16) -> OutParamAttr {
+    return OutParamAttr { param_index: idx };
+}
+
+// ------------------------------------------------------------------------------
+// 3. Composable Preset Adapter Facets
+// ------------------------------------------------------------------------------
+
+pub partial struct PosixAdapterFacet {
+    pub pure fn posix_check_rc(rc: i32) -> void ! Errno {
+        if rc == 0 {
+            return;
+        }
+        return fail errno_new(rc);
+    }
+
+    pub pure fn posix_check_fd(fd: i32) -> i32 ! Errno {
+        if fd >= 0 {
+            return fd;
+        }
+        return fail errno_new(-fd);
+    }
+}
+
+pub partial struct Win32AdapterFacet {
+    pub pure fn win32_check_bool(ok: i32) -> void ! CError {
+        if ok != 0 {
+            return;
+        }
+        return fail c_error_new(ok, "Win32 call failed (FALSE)");
+    }
+
+    pub pure fn win32_check_hresult(hr: i32) -> void ! CError {
+        if hr >= 0 {
+            return;
+        }
+        return fail c_error_new(hr, "Win32 HRESULT failure");
+    }
+}

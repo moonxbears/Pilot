@@ -1,0 +1,279 @@
+// ==============================================================================
+// FILE: selfhost/adapter/rules.pilot
+// Milestone 11.1: First-Class `adapter` Blueprint Engine & Transformation Rules
+// Open table-driven AdapterRuleRegistry and IAdapterTransform protocol
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Adapter.Rules;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Adapter Rule Enums & Lattice Classification
+// ------------------------------------------------------------------------------
+
+pub enum NamingStyle : u8 {
+    ::Preserve   = 0,
+    ::SnakeCase  = 1,
+    ::PascalCase = 2,
+    ::CamelCase  = 3,
+}
+
+pub pure fn naming_style_preserve()   -> u8 => 0;
+pub pure fn naming_style_snake_case()  -> u8 => 1;
+pub pure fn naming_style_pascal_case() -> u8 => 2;
+pub pure fn naming_style_camel_case()  -> u8 => 3;
+
+pub enum ErrorLiftPolicy : u8 {
+    ::None              = 0,
+    ::ZeroIsOk          = 1,
+    ::NonNegativeIsOk   = 2,
+    ::NonNullIsOk       = 3,
+    ::CustomPredicate   = 4,
+}
+
+pub enum AdapterDiagnosticKind : u16 {
+    ::HandleTypeNotFound      = 1,  // ADP001
+    ::AmbiguousMethodCollision = 2,  // ADP002
+    ::CallbackMissingUserdata = 3,  // ADP003
+    ::InvalidSlicePair        = 4,  // ADP004
+}
+
+// ------------------------------------------------------------------------------
+// 2. Fixed Composite Transformation Rules (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct SlicePairRule : IValue {
+    pub ptr_param_idx:    u16;
+    pub len_param_idx:    u16;
+    pub len_is_byte_size: bool;
+    pub as_utf8_str:      bool;
+}
+
+pub pure fn slice_pair_rule_new(
+    ptr_idx: u16,
+    len_idx: u16,
+    is_bytes: bool,
+    is_str: bool
+) -> SlicePairRule {
+    return SlicePairRule {
+        ptr_param_idx:    ptr_idx,
+        len_param_idx:    len_idx,
+        len_is_byte_size: is_bytes,
+        as_utf8_str:      is_str,
+    };
+}
+
+[Layout(c_abi)]
+pub struct OutParamRule : IValue {
+    pub param_idx:        u16;
+    pub pointee_layout:   u32;
+    pub zero_init_stack:  bool;
+}
+
+pub pure fn out_param_rule_new(
+    param_idx: u16,
+    layout: u32,
+    zero_init: bool
+) -> OutParamRule {
+    return OutParamRule {
+        param_idx:       param_idx,
+        pointee_layout:  layout,
+        zero_init_stack: zero_init,
+    };
+}
+
+[Layout(c_abi)]
+pub struct CallbackPairRule : IValue {
+    pub fn_ptr_param_idx:      u16;
+    pub userdata_void_ptr_idx: u16;
+}
+
+pub pure fn callback_pair_rule_new(
+    fn_idx: u16,
+    ud_idx: u16
+) -> CallbackPairRule {
+    return CallbackPairRule {
+        fn_ptr_param_idx:      fn_idx,
+        userdata_void_ptr_idx: ud_idx,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 3. Adapter Blueprint Model (0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct AdapterBlueprint : IObject {
+    pub source_ns:        str;
+    pub target_type:      str;
+    pub strip_prefixes:   List<str>;
+    pub method_case:      NamingStyle;
+    pub handle_raw_type:  u32;
+    pub drop_symbol:      str;
+    pub slice_rules:      List<SlicePairRule>;
+    pub out_rules:        List<OutParamRule>;
+    pub err_policy:       ErrorLiftPolicy;
+    pub err_type_layout:  u32;
+    pub callbacks:        List<CallbackPairRule>;
+
+    ~self() {}
+}
+
+pub fn adapter_blueprint_new(source_ns: str, target_type: str) -> AdapterBlueprint {
+    return AdapterBlueprint {
+        source_ns:       source_ns,
+        target_type:     target_type,
+        strip_prefixes:  [],
+        method_case:     NamingStyle::SnakeCase,
+        handle_raw_type: 0,
+        drop_symbol:     "",
+        slice_rules:     [],
+        out_rules:       [],
+        err_policy:      ErrorLiftPolicy::ZeroIsOk,
+        err_type_layout: 0,
+        callbacks:       [],
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 4. Transform Protocols & Core Rule Transformations
+// ------------------------------------------------------------------------------
+
+pub fn adapter_strip_prefix(name: str, prefixes: List<str>) -> str {
+    var out = name;
+    let n = prefixes.len();
+    var i: usize = 0;
+    while i < n {
+        let pfx = prefixes[i];
+        let p_len = pfx.len();
+        if out.len() >= p_len {
+            if out.slice(0, p_len) == pfx {
+                out = out.slice(p_len, out.len());
+                // Strip leading underscore if present
+                if out.len() > 0 && out.slice(0, 1) == "_" {
+                    out = out.slice(1, out.len());
+                }
+                break;
+            }
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+pub pure fn ascii_to_upper_str(ch: str) -> str {
+    if ch == "a" { return "A"; }
+    if ch == "b" { return "B"; }
+    if ch == "c" { return "C"; }
+    if ch == "d" { return "D"; }
+    if ch == "e" { return "E"; }
+    if ch == "f" { return "F"; }
+    if ch == "g" { return "G"; }
+    if ch == "h" { return "H"; }
+    if ch == "i" { return "I"; }
+    if ch == "j" { return "J"; }
+    if ch == "k" { return "K"; }
+    if ch == "l" { return "L"; }
+    if ch == "m" { return "M"; }
+    if ch == "n" { return "N"; }
+    if ch == "o" { return "O"; }
+    if ch == "p" { return "P"; }
+    if ch == "q" { return "Q"; }
+    if ch == "r" { return "R"; }
+    if ch == "s" { return "S"; }
+    if ch == "t" { return "T"; }
+    if ch == "u" { return "U"; }
+    if ch == "v" { return "V"; }
+    if ch == "w" { return "W"; }
+    if ch == "x" { return "X"; }
+    if ch == "y" { return "Y"; }
+    if ch == "z" { return "Z"; }
+    return ch;
+}
+
+pub pure fn ascii_to_lower_str(ch: str) -> str {
+    if ch == "A" { return "a"; }
+    if ch == "B" { return "b"; }
+    if ch == "C" { return "c"; }
+    if ch == "D" { return "d"; }
+    if ch == "E" { return "e"; }
+    if ch == "F" { return "f"; }
+    if ch == "G" { return "g"; }
+    if ch == "H" { return "h"; }
+    if ch == "I" { return "i"; }
+    if ch == "J" { return "j"; }
+    if ch == "K" { return "k"; }
+    if ch == "L" { return "l"; }
+    if ch == "M" { return "m"; }
+    if ch == "N" { return "n"; }
+    if ch == "O" { return "o"; }
+    if ch == "P" { return "p"; }
+    if ch == "Q" { return "q"; }
+    if ch == "R" { return "r"; }
+    if ch == "S" { return "s"; }
+    if ch == "T" { return "t"; }
+    if ch == "U" { return "u"; }
+    if ch == "V" { return "v"; }
+    if ch == "W" { return "w"; }
+    if ch == "X" { return "x"; }
+    if ch == "Y" { return "y"; }
+    if ch == "Z" { return "z"; }
+    return ch;
+}
+
+pub fn adapter_case_norm(name: str, style: u8) -> str {
+    if style == 0 {
+        return name;
+    }
+    var out = "";
+    let n = name.len();
+    var i: usize = 0;
+    var next_upper = (style == 2);
+
+    while i < n {
+        let ch = name.slice(i, i + 1);
+        if ch == "_" {
+            if style == 1 {
+                out = out + "_";
+            } else {
+                next_upper = true;
+            }
+        } else {
+            if style == 1 {
+                out = out + ascii_to_lower_str(ch);
+            } else if next_upper {
+                out = out + ascii_to_upper_str(ch);
+                next_upper = false;
+            } else {
+                out = out + ch;
+            }
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+// ------------------------------------------------------------------------------
+// 5. Open Table-Driven Rule Registry
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct AdapterTransformEntry : IValue {
+    pub rule_id:     u16;
+    pub name:        str;
+    pub description: str;
+}
+
+pub pure fn adapter_rule_count() -> usize => 9;
+
+pub pure fn adapter_rule_get(index: usize) -> AdapterTransformEntry {
+    if index == 0 { return AdapterTransformEntry { rule_id: 1, name: "strip_prefix",     description: "Removes foreign module/library namespace prefixes" }; }
+    if index == 1 { return AdapterTransformEntry { rule_id: 2, name: "case_norm",        description: "Normalizes C snake_case to Pilot camelCase/PascalCase" }; }
+    if index == 2 { return AdapterTransformEntry { rule_id: 3, name: "receiver_promote", description: "Lifts handle pointer to self/var ref self receiver" }; }
+    if index == 3 { return AdapterTransformEntry { rule_id: 4, name: "slice_pair",       description: "Combines (ptr, len) parameters into 0b01 slice<T>" }; }
+    if index == 4 { return AdapterTransformEntry { rule_id: 5, name: "cstr_view",        description: "Lifts null-terminated const char* to str view" }; }
+    if index == 5 { return AdapterTransformEntry { rule_id: 6, name: "out_param",        description: "Promotes pointer out-parameter to returned tuple or result" }; }
+    if index == 6 { return AdapterTransformEntry { rule_id: 7, name: "error_lift",       description: "Translates integer status codes into res<T, E> outcomes" }; }
+    if index == 7 { return AdapterTransformEntry { rule_id: 8, name: "null_opt",         description: "Translates nullable pointer return values into opt<T>" }; }
+    return AdapterTransformEntry { rule_id: 9, name: "callback_closure", description: "Unpacks Pilot closure into trampoline fn and void* context" };
+}

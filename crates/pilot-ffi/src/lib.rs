@@ -140,28 +140,7 @@ pub unsafe extern "C" fn pilot_codegen_build(name_ptr: *const u8, name_len: usiz
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn pilot_transpile_sample(target: u8, out_len: *mut usize) -> *mut u8 {
-    let s = match target {
-        0 => "#include <stdint.h>\nint64_t compute(int64_t x) {\n    return x * 2;\n}\n",
-        1 => "#include <cstdint>\nstd::int64_t compute(std::int64_t x) {\n    return x * 2;\n}\n",
-        2 => "public static class TranspiledMod {\n    public static long compute(long x) {\n        return x * 2;\n    }\n}\n",
-        3 => "pub fn compute(x: i64) -> i64 {\n    x * 2\n}\n",
-        4 => "def compute(x):\n    return x * 2\n",
-        5 => "export function compute(x) {\n  return x * 2;\n}\n",
-        6 => "local function compute(x)\n  return x * 2\nend\n",
-        _ => { if !out_len.is_null() { *out_len = 0; } return core::ptr::null_mut(); }
-    };
-    into_raw_str(s.to_string(), out_len)
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn pilot_polyglot_verify_spdx(spdx_ptr: *const u8, spdx_len: usize) -> u8 {
     let s = str_from_raw(spdx_ptr, spdx_len).trim();
     u8::from(["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "CC0-1.0", "Unlicense", "0BSD"].iter().any(|&l| l.eq_ignore_ascii_case(s)))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn pilot_polyglot_execute(lang_ptr: *const u8, lang_len: usize, code_ptr: *const u8, code_len: usize, out_len: *mut usize) -> *mut u8 {
-    let (lang, code) = (str_from_raw(lang_ptr, lang_len), str_from_raw(code_ptr, code_len));
-    into_raw_str(format!("Executed {} chars of {} out-of-process", code.len(), if lang.is_empty() { "python" } else { lang }), out_len)
 }
