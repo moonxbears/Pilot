@@ -145,39 +145,139 @@ pub fn cargo_metadata_new() -> CargoMetadata {
 }
 
 // ------------------------------------------------------------------------------
-// 3. Rust Type Classifier
+// 3. Rust Type Classifier & Symbol Demangler (Fast Prefix Dispatch)
 // ------------------------------------------------------------------------------
 
 pub pure fn rust_type_classify(ty_name: str) -> RustTypeKind {
     let t = rust_trim(ty_name);
-    if t == "&str" || t.find("&'a str") >= 0 || t.find("&str") >= 0 {
-        return RustTypeKind::StrRef;
+    let n = t.len();
+    if n == 0 { return RustTypeKind::Named; }
+    let b0 = t.byte_at(0);
+
+    // 1-cycle first-byte dispatch table:
+    if b0 == 38 { // '&'
+        if t == "&str" || t.starts_with("&'a str") || t.starts_with("&str") {
+            return RustTypeKind::StrRef;
+        }
+        if t.starts_with("&mut [") || t.starts_with("&'a mut [") {
+            return RustTypeKind::SliceMut;
+        }
+        if t.starts_with("&[") || t.starts_with("&'a [") {
+            return RustTypeKind::SliceRef;
+        }
+        if t.starts_with("&dyn ") || t.starts_with("&'a dyn ") || t.starts_with("&mut dyn ") {
+            return RustTypeKind::DynTrait;
+        }
+    } else if b0 == 79 { // 'O' - Option
+        if t.starts_with("Option<&") || t.starts_with("Option<NonNull") || t.starts_with("Option<ref<") {
+            return RustTypeKind::OptNiche;
+        }
+    } else if b0 == 82 { // 'R' - Result
+        if t.starts_with("Result<") {
+            return RustTypeKind::Result;
+        }
+    } else if b0 == 86 { // 'V' - Vec
+        if t.starts_with("Vec<") {
+            return RustTypeKind::Vec;
+        }
+    } else if b0 == 83 { // 'S' - String
+        if t == "String" || t.starts_with("std::string::String") {
+            return RustTypeKind::String;
+        }
     }
-    if t.find("&mut [") >= 0 || t.find("&'a mut [") >= 0 {
-        return RustTypeKind::SliceMut;
-    }
-    if t.find("&[") >= 0 || t.find("&'a [") >= 0 {
-        return RustTypeKind::SliceRef;
-    }
-    if t.find("Option<&") >= 0 || t.find("Option<NonNull") >= 0 || t.find("Option<ref<") >= 0 {
-        return RustTypeKind::OptNiche;
-    }
-    if t.find("Result<") >= 0 {
-        return RustTypeKind::Result;
-    }
-    if t.find("Vec<") >= 0 {
-        return RustTypeKind::Vec;
-    }
-    if t == "String" || t.find("std::string::String") >= 0 {
-        return RustTypeKind::String;
-    }
-    if t.find("&dyn ") >= 0 || t.find("&'a dyn ") >= 0 || t.find("&mut dyn ") >= 0 {
-        return RustTypeKind::DynTrait;
-    }
+
     if rust_is_scalar_type(t) {
         return RustTypeKind::Scalar;
     }
     return RustTypeKind::Named;
+}
+
+pub pure fn rust_demangle_v0(mangled: str) -> str {
+    let n = mangled.len();
+    if n < 3 { return mangled; }
+
+    var cursor: usize = 0;
+    if mangled.starts_with("_R") {
+        cursor = 2;
+    } else if mangled.starts_with("__R") {
+        cursor = 3;
+    } else {
+        return mangled;
+    }
+
+    var parts: List<str> = [];
+
+    // State machine for Rust v0 path prefixes:
+    // N: Nested path (starts with N, then namespace tag like 'v', 't', 'c', etc.)
+    // C: Crate root (C, optional disambiguator 's..._', length-prefixed crate name)
+    // Digits: Identifier length
+    while cursor < n {
+        let b = mangled.byte_at(cursor);
+
+        // 'N' (78): Nested path prefix -> skip 'N' and namespace char ('v', 't', 'c', etc.)
+        if b == 78 { // 'N'
+            cursor = cursor + 1;
+            if cursor < n {
+                cursor = cursor + 1; // skip namespace tag
+            }
+            continue;
+        }
+
+        // 'C' (67): Crate root
+        if b == 67 { // 'C'
+            cursor = cursor + 1;
+            // Check for disambiguator 's..._'
+            if cursor < n && mangled.byte_at(cursor) == 115 { // 's'
+                cursor = cursor + 1;
+                while cursor < n && mangled.byte_at(cursor) != 95 { // '_'
+                    cursor = cursor + 1;
+                }
+                if cursor < n && mangled.byte_at(cursor) == 95 {
+                    cursor = cursor + 1;
+                }
+            }
+            continue;
+        }
+
+        // 'M' (77) / 'X' (88) / 'Y' (89) / 'I' (73): Other v0 prefixes
+        if b == 77 || b == 88 || b == 89 || b == 73 {
+            cursor = cursor + 1;
+            continue;
+        }
+
+        // Decimal length of identifier
+        if b >= 48 && b <= 57 {
+            var len_val: usize = 0;
+            while cursor < n && mangled.byte_at(cursor) >= 48 && mangled.byte_at(cursor) <= 57 {
+                len_val = len_val * 10 + (mangled.byte_at(cursor) - 48) as usize;
+                cursor = cursor + 1;
+            }
+            if len_val > 0 && cursor + len_val <= n {
+                let id_str = mangled.slice(cursor, cursor + len_val);
+                parts.push(id_str);
+                cursor = cursor + len_val;
+            } else {
+                break;
+            }
+            continue;
+        }
+
+        // Unknown character or end of path
+        break;
+    }
+
+    if parts.len() == 0 {
+        return mangled;
+    }
+
+    var full_name = "";
+    var pi: usize = 0;
+    while pi < parts.len() {
+        if pi > 0 { full_name = full_name + "::"; }
+        full_name = full_name + parts[pi];
+        pi = pi + 1;
+    }
+    return full_name;
 }
 
 pub pure fn rust_is_scalar_type(t: str) -> bool {

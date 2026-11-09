@@ -179,6 +179,16 @@ fn test_m16_1_rust_signature_parser_and_cargo_metadata() {
             if meta.version != "1.0.197" { return 22; }
             if meta.edition != "2021" { return 23; }
 
+            // Verify Rust v0 symbol demangling
+            let d1 = rust_demangle_v0("_RNvCs1234_7mycrate3foo");
+            if d1 != "mycrate::foo" { return 24; }
+
+            let d2 = rust_demangle_v0("_RNtCs1234_7mycrate5MyMod3bar");
+            if d2 != "mycrate::MyMod::bar" { return 25; }
+
+            let d3 = rust_demangle_v0("plain_c_symbol");
+            if d3 != "plain_c_symbol" { return 26; }
+
             return 42;
         }
     "##;
