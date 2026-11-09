@@ -1,0 +1,246 @@
+// ==============================================================================
+// stdlib/std/polyglot/transport/yaml.pilot
+// Ring 2 Standard Library: Full Bidirectional YAML/YML AST & Serialization
+// Package: std.polyglot.transport.yaml (Transport Languages Subsystem)
+// ==============================================================================
+
+pub pkg std.polyglot.transport.yaml;
+
+// ------------------------------------------------------------------------------
+// 1. YAML Node Kinds
+// ------------------------------------------------------------------------------
+
+pub enum YamlKind : u8 {
+    Scalar = 0,
+    Sequence = 1,
+    Mapping = 2,
+}
+
+// ------------------------------------------------------------------------------
+// 2. YAML Data Structures
+// ------------------------------------------------------------------------------
+
+pub struct YamlPair : IValue {
+    pub key: str,
+    pub val: YamlNode,
+}
+
+pub struct YamlNode : IObject {
+    pub kind:         YamlKind,
+    pub scalar_val:   str,
+    pub sequence_val: List<YamlNode>,
+    pub mapping_val:  List<YamlPair>,
+
+    // --------------------------------------------------------------------------
+    // Mapping Operations
+    // --------------------------------------------------------------------------
+
+    pub fn get(ref self, key: str) -> YamlNode {
+        if self.kind != YamlKind::Mapping {
+            return yaml_scalar("");
+        }
+        var i: usize = 0;
+        let n = self.mapping_val.len();
+        while i < n {
+            let p = self.mapping_val[i];
+            if p.key == key {
+                return p.val;
+            }
+            i = i + 1;
+        }
+        return yaml_scalar("");
+    }
+
+    pub fn set(var ref self, key: str, val: YamlNode) {
+        if self.kind != YamlKind::Mapping {
+            self.kind = YamlKind::Mapping;
+        }
+        var i: usize = 0;
+        let n = self.mapping_val.len();
+        while i < n {
+            if self.mapping_val[i].key == key {
+                self.mapping_val[i].val = val;
+                return;
+            }
+            i = i + 1;
+        }
+        self.mapping_val.push(YamlPair { key: key, val: val });
+    }
+
+    pub fn has(ref self, key: str) -> bool {
+        if self.kind != YamlKind::Mapping {
+            return false;
+        }
+        var i: usize = 0;
+        let n = self.mapping_val.len();
+        while i < n {
+            if self.mapping_val[i].key == key {
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    // --------------------------------------------------------------------------
+    // Sequence Operations
+    // --------------------------------------------------------------------------
+
+    pub fn push(var ref self, val: YamlNode) {
+        if self.kind != YamlKind::Sequence {
+            self.kind = YamlKind::Sequence;
+        }
+        self.sequence_val.push(val);
+    }
+
+    pub fn get_at(ref self, idx: usize) -> YamlNode {
+        if self.sequence_val.len() > idx {
+            return self.sequence_val[idx];
+        }
+        let k = "" + idx;
+        if self.has(k) {
+            return self.get(k);
+        }
+        return yaml_scalar("");
+    }
+
+    pub fn len(ref self) -> usize {
+        if self.kind == YamlKind::Sequence {
+            return self.sequence_val.len();
+        }
+        if self.kind == YamlKind::Mapping {
+            return self.mapping_val.len();
+        }
+        return 0;
+    }
+
+    // --------------------------------------------------------------------------
+    // Emitter (YAML Document Formatter)
+    // --------------------------------------------------------------------------
+
+    pub fn emit(ref self) -> str {
+        if self.kind == YamlKind::Scalar {
+            return self.scalar_val;
+        }
+        if self.kind == YamlKind::Sequence {
+            var out = "";
+            var i: usize = 0;
+            let n = self.sequence_val.len();
+            while i < n {
+                out = out + "- " + self.sequence_val[i].emit() + "\n";
+                i = i + 1;
+            }
+            return out;
+        }
+        if self.kind == YamlKind::Mapping {
+            var out = "";
+            var i: usize = 0;
+            let n = self.mapping_val.len();
+            while i < n {
+                let p = self.mapping_val[i];
+                out = out + p.key + ": " + p.val.emit() + "\n";
+                i = i + 1;
+            }
+            return out;
+        }
+        return "";
+    }
+
+    ~self() {}
+}
+
+// ------------------------------------------------------------------------------
+// 3. Constructors
+// ------------------------------------------------------------------------------
+
+pub fn yaml_scalar(s: str) -> YamlNode {
+    return YamlNode {
+        kind:         YamlKind::Scalar,
+        scalar_val:   s,
+        sequence_val: [],
+        mapping_val:  [],
+    };
+}
+
+pub fn yaml_sequence() -> YamlNode {
+    return YamlNode {
+        kind:         YamlKind::Sequence,
+        scalar_val:   "",
+        sequence_val: [],
+        mapping_val:  [],
+    };
+}
+
+pub fn yaml_mapping() -> YamlNode {
+    return YamlNode {
+        kind:         YamlKind::Mapping,
+        scalar_val:   "",
+        sequence_val: [],
+        mapping_val:  [],
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 4. Lightweight YAML Parser
+// ------------------------------------------------------------------------------
+
+pure fn yaml_is_space(b: i64) -> bool {
+    return b == 32 || b == 9 || b == 10 || b == 13;
+}
+
+pub pure fn yaml_trim(s: str) -> str {
+    let n = s.len();
+    var st: usize = 0;
+    while st < n && yaml_is_space(s.byte_at(st)) { st = st + 1; }
+    var en: usize = n;
+    while en > st && yaml_is_space(s.byte_at(en - 1)) { en = en - 1; }
+    if en > st { return s.slice(st, en); }
+    return "";
+}
+
+pub fn yaml_parse(src: str) -> YamlNode {
+    let n = src.len();
+    var pos: usize = 0;
+
+    var mapping = yaml_mapping();
+    var sequence = yaml_sequence();
+    var is_seq = false;
+
+    while pos < n {
+        // Skip newlines
+        while pos < n && (src.byte_at(pos) == 10 || src.byte_at(pos) == 13) {
+            pos = pos + 1;
+        }
+        if pos >= n { break; }
+
+        let nl_pos = src.slice(pos, n).find("\n");
+        let line = if nl_pos >= 0 { src.slice(pos, pos + (nl_pos as usize)) } else { src.slice(pos, n) };
+        pos = if nl_pos >= 0 { pos + (nl_pos as usize) + 1 } else { n };
+
+        let clean = yaml_trim(line);
+        if clean.len() == 0 || clean.starts_with("#") {
+            continue;
+        }
+
+        // Sequence item: - val
+        if clean.starts_with("- ") {
+            is_seq = true;
+            let item_str = yaml_trim(clean.slice(2, clean.len()));
+            sequence.push(yaml_scalar(item_str));
+            continue;
+        }
+
+        // Mapping item: key: val
+        let colon_idx = clean.find(":");
+        if colon_idx > 0 {
+            let key = yaml_trim(clean.slice(0, colon_idx as usize));
+            let val = yaml_trim(clean.slice((colon_idx + 1) as usize, clean.len()));
+            mapping.set(key, yaml_scalar(val));
+        }
+    }
+
+    if is_seq {
+        return sequence;
+    }
+    return mapping;
+}

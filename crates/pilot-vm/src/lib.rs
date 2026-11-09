@@ -386,16 +386,17 @@ impl BytecodeCompiler {
                             return dst;
                         }
                     } else if callee_n.node_kind() == NodeKind::MemberExpr {
-                        let hook = match arena.interner.resolve(SymbolId(callee_n.rhs)) { "len" => Some("str_len"), "get" => Some("map_get"), "set" => Some("map_set"), "push" => Some("list_push"), "byte_at" => Some("str_byte_at"), "slice" | "substring" => Some("str_slice"), "find" | "index_of" => Some("str_find"), "contains" => Some("str_contains"), "starts_with" => Some("str_starts_with"), "ends_with" => Some("str_ends_with"), "is_null" => Some("is_null"), "has" => Some("map_has"), "remove" => Some("map_remove"), _ => None };
-                        if let Some(h) = hook {
-                            let mut args = vec![self.compile_node(arena, NodeId(callee_n.lhs))];
-                            for i in 1..arg_len { args.push(self.compile_node(arena, NodeId(arena.extra_children[arg_start + i]))); }
-                            return self.emit_intrinsic(h, &args);
-                        }
                         let ln = arena.node(NodeId(callee_n.lhs));
                         let (is_v, raw_l, r_nm) = (ln.node_kind() == NodeKind::IdentExpr && self.var_slots.contains_key(arena.interner.resolve(SymbolId(ln.lhs))), if matches!(ln.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed) { arena.interner.resolve(SymbolId(ln.lhs)) } else { "" }, arena.interner.resolve(SymbolId(callee_n.rhs)));
                         let l_nm = if is_v { self.var_types.get(raw_l).map(|s| s.as_str()).unwrap_or(raw_l) } else { raw_l };
                         let full = format!("{l_nm}.{r_nm}");
+                        if !self.fn_entries.contains_key(&full) {
+                            if let Some(h) = match r_nm { "len" => Some("str_len"), "get" => Some("map_get"), "set" => Some("map_set"), "push" => Some("list_push"), "byte_at" => Some("str_byte_at"), "slice" | "substring" => Some("str_slice"), "find" | "index_of" => Some("str_find"), "contains" => Some("str_contains"), "starts_with" => Some("str_starts_with"), "ends_with" => Some("str_ends_with"), "is_null" => Some("is_null"), "has" => Some("map_has"), "remove" => Some("map_remove"), _ => None } {
+                                let mut args = vec![self.compile_node(arena, NodeId(callee_n.lhs))];
+                                for i in 1..arg_len { args.push(self.compile_node(arena, NodeId(arena.extra_children[arg_start + i]))); }
+                                return self.emit_intrinsic(h, &args);
+                            }
+                        }
                         let mut args = if is_v || (!matches!(ln.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed) && !self.fn_entries.contains_key(&full)) { vec![self.compile_node(arena, NodeId(callee_n.lhs))] } else { Vec::new() };
                         for i in 1..arg_len { args.push(self.compile_node(arena, NodeId(arena.extra_children[arg_start + i]))); }
                         self.stage_args(&args);

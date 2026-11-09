@@ -79,7 +79,7 @@ Every type originates from `IAnyValue` (0 runtime header bytes) and is classifie
 
 - **3-Ring Standard Library Personality (Zero Python-Clone Module Names):**
   - **Ring 1 (`core.*`):** Freestanding hardware/language core (`0` OS/libc/filesystem/network imports — `RING001`).
-  - **Ring 2 (`std.*`):** Hosted standard library (`std.col`, `std.text`, `std.io`, `std.fs`, `std.net`, `std.http`, `std.sync`, `std.chan`, `std.time`, `std.math`, `std.rand`, `std.crypto`, `std.db`, `std.serde.*`, `std.compress`, `std.proc`, `std.cli`, `std.test`, `std.bench`, `std.log`, `std.polyglot.*`). Never name modules after Python/foreign clones (`pickle`, `urllib`, `pandas`, `unittest`, `tomllib`, `shutil`).
+  - **Ring 2 (`std.*`):** Hosted standard library (`std.col`, `std.text`, `std.io`, `std.fs`, `std.net`, `std.http`, `std.sync`, `std.chan`, `std.time`, `std.math`, `std.rand`, `std.crypto`, `std.db`, `std.serde.*`, `std.compress`, `std.proc`, `std.cli`, `std.test`, `std.bench`, `std.log`, `std.polyglot.*` partitioned cleanly into execution-tier `std.polyglot.prog.*` and data-tier `std.polyglot.transport.*`). Never name modules after Python/foreign clones (`pickle`, `urllib`, `pandas`, `unittest`, `tomllib`, `shutil`).
   - **Ring 3 (`pilot.*`):** First-class Compiler-as-a-Library (`pilot.lex`, `pilot.cst`, `pilot.ast`, `pilot.types`, `pilot.ir`, `pilot.fmt`, `pilot.db`, `pilot.vm`, `pilot.diag`, `pilot.abi`, `pilot.chor`, `pilot.pkg`, `pilot.mcp`).
 - **Mandatory Type Selection & Implementation Rules ([`imp_type.md`](file:///home/moony/Documents/dev/projects/Pilot/imp_type.md)):**
   When constructing any implementation, data structure, or domain model, agents MUST consult and strictly obey [`imp_type.md`](file:///home/moony/Documents/dev/projects/Pilot/imp_type.md):
@@ -152,12 +152,28 @@ Every type originates from `IAnyValue` (0 runtime header bytes) and is classifie
 ---
 
 ## 7. Priority Pillar: Universal Foreign-Language Adapter (`use <lang>` & `adapter`)
-Interoperability with C, C++, Rust, Zig, Python, JS/TypeScript, WASM, SQL/OpenAPI/Protobuf, JVM, .NET, and Swift must feel native with minimal-to-zero downsides:
+Interoperability with foreign languages is partitioned into two distinct architectural subsystems: **Programming Languages** (execution, native ABIs, in-process runtimes, and zero-copy memory) and **Transport Languages** (structural data representations, tree/DOM manipulation, nested querying, and serialization).
+
+### 7.1 Programming Languages Subsystem (`std.polyglot.prog.*` / `std.polyglot.<lang>`)
+Covers C, C++, Rust, Zig, Python, JS/TypeScript, WebAssembly, JVM, .NET, and Swift at native register speed with minimal-to-zero overhead:
 1. **Zero Manual Glue Files (`use <lang>`):** Absorb foreign headers, crates, `.pyi` stubs, `.d.ts` declarations, `.wit` components, and `.sql`/OpenAPI/`.proto` schemas directly at `comptime` through open `PilotDb` absorber registries.
 2. **In-Process Execution Only (Zero Subprocess-Per-Call):** Call native ABIs at `0 ns` register speed via declarative `pilot.abi.*` `AbiFramePlan`s, and host managed runtimes (`libpython` PEP 384/Vectorcall, Node-API v9/QuickJS, WASM, JNI, CLR) strictly in-process. Never spawn `python3`/`node` subprocesses or JSON-serialize buffers to invoke library code.
 3. **Zero-Copy `0b01` Memory Sharing:** Map foreign `(ptr, len)`, `&[T]`, `std::span<T>`, PEP 3118 `Py_buffer`/NumPy/DLPack/Arrow, JS `TypedArray`, and WASM linear memory directly onto `0b01` `slice<T>` and `stride<T>` with `0` byte copies and `ESCAPE001`/`ESCAPE004` static borrow enforcement.
 4. **Perceus `0b10` & `0b11` Cross-Runtime Safety:** Bind foreign heap resources to `0b10 : IObject` (`ForeignHandle<T>` + `ThreadAffineDropQueue`), bind runtime execution scopes (GIL, N-API `HandleScope`, buffer leases) to `0b11 : IGuard`, and catch all foreign exceptions/panics/traps at the ABI boundary into `res<T, ForeignErr>`.
 5. **Zero-Cost `adapter` Idiom Lifting:** Compile prefix stripping, `(ptr, len)` slice pairs, stack out-parameters, status-code lifting, closure trampolines, and getter/setter properties into force-inlined `0`-allocation `PilIR`.
+
+### 7.2 Transport Languages Subsystem (`std.polyglot.transport.*`)
+Covers serialization, configuration, and data-interchange formats: **JSON**, **YAML/YML**, **XML**, and **TOML**:
+1. **First-Class Dynamic AST/DOM Records:** Strongly typed AST nodes (`JsonValue`, `YamlNode`, `XmlNode`, `TomlValue`) implementing the 2-bit lattice (`0b00: IValue` for scalar leaves/pairs and `0b10: IObject` for composite trees).
+2. **Full Bidirectional Manipulation:** Native query and mutation APIs (`get`, `set`, `has`, `remove`, `push`, `get_at`, `len`, `query_path("a.b.c")`, `find_first`, `find_all`) enabling Pilot code to inspect, alter, and build transport payloads in memory without string hacking.
+3. **Lossless Emitter / Serializer & Parser:** Format-compliant serializers (`stringify()`, `emit()`) and parsers (`json_parse`, `yaml_parse`, `xml_parse`, `toml_parse`) operating directly between Pilot strings and structured trees.
+
+### 7.3 Phased Roadmap: Cross-Language Generative Metaprogramming
+Enables natural embedding and execution of Pilot generative code inside foreign host languages across 4 defined phases:
+- **Phase 1 — Bidirectional Transport & AST Representation [COMPLETE]:** Full bidirectional DOM/AST manipulation for JSON, YAML, XML, and TOML via `std.polyglot.transport.*`.
+- **Phase 2 — Homoiconic Quote & Template Synthesis:** Pilot `quote { ... }` and `ast<T>` metaprogramming compiles foreign-language source templates and structured configuration payloads directly into typed transport trees.
+- **Phase 3 — In-Process Foreign Macro Provider (`pilot-proc-macro` / Foreign Absorbers):** Foreign compiler plugins (e.g. Rust `proc_macro`, Python import hooks, Babel/SWC plugins) call into Pilot's in-process compiler library to execute generative compile-time expansions.
+- **Phase 4 — Universal Embedded Generative Blocks:** Direct inline multi-language code embedding (`pilot in rust`, `pilot in python`) where Pilot generative blocks synthesize types, bindings, and algorithms natively into the host language compilation pipeline.
 
 ---
 

@@ -1,0 +1,58 @@
+// ==============================================================================
+// stdlib/std/polyglot/transport/mod.pilot
+// Ring 2 Standard Library: Polyglot Transport Languages Facade & Taxonomy
+// Package: std.polyglot.transport (Transport Languages Subsystem)
+// ==============================================================================
+
+pub pkg std.polyglot.transport;
+
+use std.polyglot.transport.json;
+use std.polyglot.transport.yaml;
+use std.polyglot.transport.xml;
+use std.polyglot.transport.toml;
+
+// ------------------------------------------------------------------------------
+// 1. Language Taxonomy Duality (Programming vs Transport)
+// ------------------------------------------------------------------------------
+
+pub enum TransportFormat : u8 {
+    Json = 0,
+    Yaml = 1,
+    Xml = 2,
+    Toml = 3,
+}
+
+pub pure fn transport_format_from_str(s: str) -> TransportFormat {
+    if s == "yaml" || s == "yml" {
+        return TransportFormat::Yaml;
+    }
+    if s == "xml" {
+        return TransportFormat::Xml;
+    }
+    if s == "toml" {
+        return TransportFormat::Toml;
+    }
+    return TransportFormat::Json;
+}
+
+pub pure fn transport_is_data_language(name: str) -> bool {
+    return name == "json" || name == "yaml" || name == "yml" || name == "xml" || name == "toml"
+        || name == "proto" || name == "protobuf" || name == "csv";
+}
+
+pub pure fn transport_is_programming_language(name: str) -> bool {
+    return name == "c" || name == "cpp" || name == "cxx" || name == "rust" || name == "rs"
+        || name == "py" || name == "python" || name == "js" || name == "javascript"
+        || name == "ts" || name == "typescript" || name == "wasm" || name == "zig"
+        || name == "java" || name == "jvm" || name == "cs" || name == "csharp" || name == "swift";
+}
+
+pub pure fn polyglot_subsystem_category(name: str) -> str {
+    if transport_is_data_language(name) {
+        return "transport";
+    }
+    if transport_is_programming_language(name) {
+        return "programming";
+    }
+    return "unknown";
+}

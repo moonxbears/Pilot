@@ -25,7 +25,7 @@ struct Vector3 {
     z: f32
 }
 
-def main() {
+fn main() {
     print("=== TIER A: Isomorphic Bit-Cast ===");
     let color = Rgba(r: 255, g: 128, b: 64, a: 32);
     let u32_val = color as u32;

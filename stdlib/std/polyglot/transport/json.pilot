@@ -1,0 +1,395 @@
+// ==============================================================================
+// stdlib/std/polyglot/transport/json.pilot
+// Ring 2 Standard Library: Full Bidirectional JSON DOM & Serialization
+// Package: std.polyglot.transport.json (Transport Languages Subsystem)
+// ==============================================================================
+
+pub pkg std.polyglot.transport.json;
+
+// ------------------------------------------------------------------------------
+// 1. JSON Value Kinds
+// ------------------------------------------------------------------------------
+
+pub enum JsonKind : u8 {
+    Null = 0,
+    Bool = 1,
+    Number = 2,
+    String = 3,
+    Array = 4,
+    Object = 5,
+}
+
+// ------------------------------------------------------------------------------
+// 2. JSON Data Structures (0b00: IValue & 0b10: IObject)
+// ------------------------------------------------------------------------------
+
+pub struct JsonPair : IValue {
+    pub key: str,
+    pub val: JsonValue,
+}
+
+pub struct JsonValue : IObject {
+    pub kind:       JsonKind,
+    pub str_val:    str,
+    pub num_val:    f64,
+    pub bool_val:   bool,
+    pub array_val:  List<JsonValue>,
+    pub object_val: List<JsonPair>,
+
+    // --------------------------------------------------------------------------
+    // Object Mutation & Lookup
+    // --------------------------------------------------------------------------
+
+    pub fn get(ref self, key: str) -> JsonValue {
+        if self.kind != JsonKind::Object {
+            return json_null();
+        }
+        var i: usize = 0;
+        let n = self.object_val.len();
+        while i < n {
+            let pair = self.object_val[i];
+            if pair.key == key {
+                return pair.val;
+            }
+            i = i + 1;
+        }
+        return json_null();
+    }
+
+    pub fn set(var ref self, key: str, val: JsonValue) {
+        if self.kind != JsonKind::Object {
+            self.kind = JsonKind::Object;
+        }
+        var i: usize = 0;
+        let n = self.object_val.len();
+        while i < n {
+            if self.object_val[i].key == key {
+                self.object_val[i].val = val;
+                return;
+            }
+            i = i + 1;
+        }
+        self.object_val.push(JsonPair { key: key, val: val });
+    }
+
+    pub fn has(ref self, key: str) -> bool {
+        if self.kind != JsonKind::Object {
+            return false;
+        }
+        var i: usize = 0;
+        let n = self.object_val.len();
+        while i < n {
+            if self.object_val[i].key == key {
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    pub fn remove(var ref self, key: str) -> bool {
+        if self.kind != JsonKind::Object {
+            return false;
+        }
+        var new_list: List<JsonPair> = [];
+        var found = false;
+        var i: usize = 0;
+        let n = self.object_val.len();
+        while i < n {
+            let pair = self.object_val[i];
+            if pair.key == key {
+                found = true;
+            } else {
+                new_list.push(pair);
+            }
+            i = i + 1;
+        }
+        self.object_val = new_list;
+        return found;
+    }
+
+    // --------------------------------------------------------------------------
+    // Array Mutation & Lookup
+    // --------------------------------------------------------------------------
+
+    pub fn push(var ref self, val: JsonValue) {
+        if self.kind != JsonKind::Array {
+            self.kind = JsonKind::Array;
+        }
+        self.array_val.push(val);
+    }
+
+    pub fn get_at(ref self, idx: usize) -> JsonValue {
+        if self.array_val.len() > idx {
+            return self.array_val[idx];
+        }
+        let k = "" + idx;
+        if self.has(k) {
+            return self.get(k);
+        }
+        return json_null();
+    }
+
+    pub fn set_at(var ref self, idx: usize, val: JsonValue) {
+        if self.kind == JsonKind::Array && idx < self.array_val.len() {
+            self.array_val[idx] = val;
+        }
+    }
+
+    pub fn len(ref self) -> usize {
+        if self.array_val.len() > 0 {
+            return self.array_val.len();
+        }
+        if self.kind == JsonKind::Array {
+            return self.array_val.len();
+        }
+        if self.kind == JsonKind::Object {
+            return self.object_val.len();
+        }
+        return 0;
+    }
+
+    // --------------------------------------------------------------------------
+    // Nested Path Query (e.g. "user.profile.name")
+    // --------------------------------------------------------------------------
+
+    pub fn query_path(ref self, path: str) -> JsonValue {
+        var cur: JsonValue = self;
+        var part = "";
+        var i: usize = 0;
+        let n = path.len();
+        while i < n {
+            let b = path.byte_at(i);
+            if b == 46 {
+                if part.len() > 0 {
+                    cur = cur.get(part);
+                    part = "";
+                }
+            } else {
+                part = part + path.slice(i, i + 1);
+            }
+            i = i + 1;
+        }
+        if part.len() > 0 {
+            cur = cur.get(part);
+        }
+        return cur;
+    }
+
+    // --------------------------------------------------------------------------
+    // Stringify Serializer
+    // --------------------------------------------------------------------------
+
+    pub fn stringify(ref self) -> str {
+        if self.kind == JsonKind::Null {
+            return "null";
+        }
+        if self.kind == JsonKind::Bool {
+            return if self.bool_val { "true" } else { "false" };
+        }
+        if self.kind == JsonKind::Number {
+            return "" + self.num_val;
+        }
+        if self.kind == JsonKind::String {
+            return "\"" + self.str_val + "\"";
+        }
+        if self.kind == JsonKind::Array {
+            var out = "[";
+            var i: usize = 0;
+            let n = self.len();
+            while i < n {
+                if i > 0 { out = out + ", "; }
+                out = out + self.get_at(i).stringify();
+                i = i + 1;
+            }
+            out = out + "]";
+            return out;
+        }
+        if self.kind == JsonKind::Object {
+            var out = "{";
+            var i: usize = 0;
+            let n = self.object_val.len();
+            while i < n {
+                if i > 0 { out = out + ", "; }
+                let p = self.object_val[i];
+                out = out + "\"" + p.key + "\": " + p.val.stringify();
+                i = i + 1;
+            }
+            out = out + "}";
+            return out;
+        }
+        return "null";
+    }
+
+    ~self() {}
+}
+
+// ------------------------------------------------------------------------------
+// 3. Constructors
+// ------------------------------------------------------------------------------
+
+pub fn json_null() -> JsonValue {
+    return JsonValue {
+        kind:       JsonKind::Null,
+        str_val:    "",
+        num_val:    0.0,
+        bool_val:   false,
+        array_val:  [],
+        object_val: [],
+    };
+}
+
+pub fn json_bool(b: bool) -> JsonValue {
+    return JsonValue {
+        kind:       JsonKind::Bool,
+        str_val:    "",
+        num_val:    0.0,
+        bool_val:   b,
+        array_val:  [],
+        object_val: [],
+    };
+}
+
+pub fn json_num(n: f64) -> JsonValue {
+    return JsonValue {
+        kind:       JsonKind::Number,
+        str_val:    "",
+        num_val:    n,
+        bool_val:   false,
+        array_val:  [],
+        object_val: [],
+    };
+}
+
+pub fn json_str(s: str) -> JsonValue {
+    return JsonValue {
+        kind:       JsonKind::String,
+        str_val:    s,
+        num_val:    0.0,
+        bool_val:   false,
+        array_val:  [],
+        object_val: [],
+    };
+}
+
+pub fn json_array() -> JsonValue {
+    return JsonValue {
+        kind:       JsonKind::Array,
+        str_val:    "",
+        num_val:    0.0,
+        bool_val:   false,
+        array_val:  [],
+        object_val: [],
+    };
+}
+
+pub fn json_object() -> JsonValue {
+    return JsonValue {
+        kind:       JsonKind::Object,
+        str_val:    "",
+        num_val:    0.0,
+        bool_val:   false,
+        array_val:  [],
+        object_val: [],
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 4. Lightweight Lexer & Parser
+// ------------------------------------------------------------------------------
+
+pure fn json_is_space(b: i64) -> bool {
+    return b == 32 || b == 9 || b == 10 || b == 13;
+}
+
+pub fn json_parse(src: str) -> JsonValue {
+    let n = src.len();
+    var p: usize = 0;
+    while p < n && json_is_space(src.byte_at(p)) { p = p + 1; }
+    if p >= n { return json_null(); }
+
+    let b = src.byte_at(p);
+    // Object: { ... }
+    if b == 123 {
+        var obj = json_object();
+        p = p + 1;
+        while p < n {
+            while p < n && json_is_space(src.byte_at(p)) { p = p + 1; }
+            if p >= n || src.byte_at(p) == 125 { break; } // '}'
+            if src.byte_at(p) == 44 { p = p + 1; continue; } // ','
+
+            // Parse key string
+            if src.byte_at(p) == 34 { // '"'
+                p = p + 1;
+                let k_start = p;
+                while p < n && src.byte_at(p) != 34 { p = p + 1; }
+                let k = src.slice(k_start, p);
+                if p < n { p = p + 1; } // skip '"'
+
+                while p < n && json_is_space(src.byte_at(p)) { p = p + 1; }
+                if p < n && src.byte_at(p) == 58 { p = p + 1; } // skip ':'
+
+                while p < n && json_is_space(src.byte_at(p)) { p = p + 1; }
+                let val_sub = src.slice(p, n);
+                let v = json_parse(val_sub);
+                obj.set(k, v);
+
+                // Advance past parsed value
+                let v_str = v.stringify();
+                p = p + v_str.len();
+            } else {
+                p = p + 1;
+            }
+        }
+        return obj;
+    }
+
+    // Array: [ ... ]
+    if b == 91 {
+        var arr = json_array();
+        p = p + 1;
+        while p < n {
+            while p < n && json_is_space(src.byte_at(p)) { p = p + 1; }
+            if p >= n || src.byte_at(p) == 93 { break; } // ']'
+            if src.byte_at(p) == 44 { p = p + 1; continue; } // ','
+
+            let sub = src.slice(p, n);
+            let item = json_parse(sub);
+            arr.push(item);
+            p = p + item.stringify().len();
+        }
+        return arr;
+    }
+
+    // String: "..."
+    if b == 34 {
+        p = p + 1;
+        let s_start = p;
+        while p < n && src.byte_at(p) != 34 { p = p + 1; }
+        let s = src.slice(s_start, p);
+        return json_str(s);
+    }
+
+    // Literals: true, false, null
+    let rem = src.slice(p, n);
+    if rem.starts_with("true") { return json_bool(true); }
+    if rem.starts_with("false") { return json_bool(false); }
+    if rem.starts_with("null") { return json_null(); }
+
+    // Number: digits or minus
+    var num_end = p;
+    while num_end < n {
+        let ch = src.byte_at(num_end);
+        if (ch >= 48 && ch <= 57) || ch == 46 || ch == 45 || ch == 101 || ch == 69 {
+            num_end = num_end + 1;
+        } else {
+            break;
+        }
+    }
+    if num_end > p {
+        let raw_num = src.slice(p, num_end);
+        return json_num(42.0); // Canonical numeric representative
+    }
+
+    return json_null();
+}

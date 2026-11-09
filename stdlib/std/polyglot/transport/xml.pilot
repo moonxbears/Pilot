@@ -1,0 +1,290 @@
+// ==============================================================================
+// stdlib/std/polyglot/transport/xml.pilot
+// Ring 2 Standard Library: Full Bidirectional XML DOM & Serialization
+// Package: std.polyglot.transport.xml (Transport Languages Subsystem)
+// ==============================================================================
+
+pub pkg std.polyglot.transport.xml;
+
+// ------------------------------------------------------------------------------
+// 1. XML Node Kinds
+// ------------------------------------------------------------------------------
+
+pub enum XmlKind : u8 {
+    Element = 0,
+    Text = 1,
+    Comment = 2,
+}
+
+// ------------------------------------------------------------------------------
+// 2. XML Data Structures
+// ------------------------------------------------------------------------------
+
+pub struct XmlAttr : IValue {
+    pub name: str,
+    pub val:  str,
+}
+
+pub struct XmlNode : IObject {
+    pub kind:         XmlKind,
+    pub tag_name:     str,
+    pub text_content: str,
+    pub attributes:   List<XmlAttr>,
+    pub children:     List<XmlNode>,
+
+    // --------------------------------------------------------------------------
+    // Attribute Operations
+    // --------------------------------------------------------------------------
+
+    pub fn get_attr(ref self, name: str) -> str {
+        var i: usize = 0;
+        let n = self.attributes.len();
+        while i < n {
+            let a = self.attributes[i];
+            if a.name == name {
+                return a.val;
+            }
+            i = i + 1;
+        }
+        return "";
+    }
+
+    pub fn set_attr(var ref self, name: str, val: str) {
+        var i: usize = 0;
+        let n = self.attributes.len();
+        while i < n {
+            if self.attributes[i].name == name {
+                self.attributes[i].val = val;
+                return;
+            }
+            i = i + 1;
+        }
+        self.attributes.push(XmlAttr { name: name, val: val });
+    }
+
+    pub fn has_attr(ref self, name: str) -> bool {
+        var i: usize = 0;
+        let n = self.attributes.len();
+        while i < n {
+            if self.attributes[i].name == name {
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    // --------------------------------------------------------------------------
+    // Child Hierarchy Operations
+    // --------------------------------------------------------------------------
+
+    pub fn add_child(var ref self, child: XmlNode) {
+        self.children.push(child);
+    }
+
+    pub fn find_first(ref self, tag: str) -> XmlNode {
+        var i: usize = 0;
+        let n = self.children.len();
+        while i < n {
+            let c = self.children[i];
+            if c.kind == XmlKind::Element && c.tag_name == tag {
+                return c;
+            }
+            i = i + 1;
+        }
+        return xml_text("");
+    }
+
+    pub fn find_all(ref self, tag: str) -> List<XmlNode> {
+        var out: List<XmlNode> = [];
+        var i: usize = 0;
+        let n = self.children.len();
+        while i < n {
+            let c = self.children[i];
+            if c.kind == XmlKind::Element && c.tag_name == tag {
+                out.push(c);
+            }
+            i = i + 1;
+        }
+        return out;
+    }
+
+    // --------------------------------------------------------------------------
+    // Serializer (XML Emitter)
+    // --------------------------------------------------------------------------
+
+    pub fn emit(ref self) -> str {
+        if self.kind == XmlKind::Text {
+            return self.text_content;
+        }
+        if self.kind == XmlKind::Comment {
+            return "<!-- " + self.text_content + " -->";
+        }
+        if self.kind == XmlKind::Element {
+            var out = "<" + self.tag_name;
+            var i: usize = 0;
+            let an = self.attributes.len();
+            while i < an {
+                let a = self.attributes[i];
+                out = out + " " + a.name + "=\"" + a.val + "\"";
+                i = i + 1;
+            }
+
+            if self.children.len() == 0 && self.text_content.len() == 0 {
+                out = out + " />";
+                return out;
+            }
+
+            out = out + ">";
+            if self.text_content.len() > 0 {
+                out = out + self.text_content;
+            }
+
+            var j: usize = 0;
+            let cn = self.children.len();
+            while j < cn {
+                out = out + self.children[j].emit();
+                j = j + 1;
+            }
+
+            out = out + "</" + self.tag_name + ">";
+            return out;
+        }
+        return "";
+    }
+
+    ~self() {}
+}
+
+// ------------------------------------------------------------------------------
+// 3. Constructors
+// ------------------------------------------------------------------------------
+
+pub fn xml_element(tag: str) -> XmlNode {
+    return XmlNode {
+        kind:         XmlKind::Element,
+        tag_name:     tag,
+        text_content: "",
+        attributes:   [],
+        children:     [],
+    };
+}
+
+pub fn xml_text(text: str) -> XmlNode {
+    return XmlNode {
+        kind:         XmlKind::Text,
+        tag_name:     "",
+        text_content: text,
+        attributes:   [],
+        children:     [],
+    };
+}
+
+pub fn xml_comment(comment: str) -> XmlNode {
+    return XmlNode {
+        kind:         XmlKind::Comment,
+        tag_name:     "",
+        text_content: comment,
+        attributes:   [],
+        children:     [],
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 4. Lightweight XML Parser
+// ------------------------------------------------------------------------------
+
+pure fn xml_is_space(b: i64) -> bool {
+    return b == 32 || b == 9 || b == 10 || b == 13;
+}
+
+pub pure fn xml_trim(s: str) -> str {
+    let n = s.len();
+    var st: usize = 0;
+    while st < n && xml_is_space(s.byte_at(st)) { st = st + 1; }
+    var en: usize = n;
+    while en > st && xml_is_space(s.byte_at(en - 1)) { en = en - 1; }
+    if en > st { return s.slice(st, en); }
+    return "";
+}
+
+pub fn xml_parse(src: str) -> XmlNode {
+    let s = xml_trim(src);
+    let n = s.len();
+    if n == 0 || !s.starts_with("<") {
+        return xml_text(s);
+    }
+
+    // Skip XML declaration <?xml ... ?> if present
+    var pos: usize = 0;
+    if s.starts_with("<?xml") {
+        let decl_close = s.find("?>");
+        if decl_close >= 0 {
+            pos = (decl_close + 2) as usize;
+            while pos < n && xml_is_space(s.byte_at(pos)) { pos = pos + 1; }
+        }
+    }
+
+    let rem = s.slice(pos, n);
+    if !rem.starts_with("<") {
+        return xml_text(rem);
+    }
+
+    let open_end = rem.find(">");
+    if open_end <= 0 {
+        return xml_text(rem);
+    }
+
+    let tag_header = rem.slice(1, open_end as usize);
+    var tag_name = tag_header;
+    var attrs_raw = "";
+    let sp_idx = tag_header.find(" ");
+    if sp_idx > 0 {
+        tag_name = tag_header.slice(0, sp_idx as usize);
+        attrs_raw = xml_trim(tag_header.slice((sp_idx + 1) as usize, tag_header.len()));
+    }
+
+    var root = xml_element(tag_name);
+
+    // Parse attributes: attr="val"
+    if attrs_raw.len() > 0 {
+        var a_rem = attrs_raw;
+        while a_rem.len() > 0 {
+            let eq_pos = a_rem.find("=\"");
+            if eq_pos > 0 {
+                let a_name = xml_trim(a_rem.slice(0, eq_pos as usize));
+                let after_quote = a_rem.slice((eq_pos + 2) as usize, a_rem.len());
+                let quote_close = after_quote.find("\"");
+                if quote_close >= 0 {
+                    let a_val = after_quote.slice(0, quote_close as usize);
+                    root.set_attr(a_name, a_val);
+                    a_rem = xml_trim(after_quote.slice((quote_close + 1) as usize, after_quote.len()));
+                    continue;
+                }
+            }
+            break;
+        }
+    }
+
+    // Self-closing: <tag />
+    if tag_header.ends_with("/") {
+        return root;
+    }
+
+    // Body & closing tag
+    let after_open = rem.slice((open_end + 1) as usize, rem.len());
+    let close_tag = "</" + tag_name + ">";
+    let close_pos = after_open.find(close_tag);
+    if close_pos >= 0 {
+        let body = after_open.slice(0, close_pos as usize);
+        if body.find("<") >= 0 {
+            // Nested element child
+            let child = xml_parse(body);
+            root.add_child(child);
+        } else {
+            root.text_content = body;
+        }
+    }
+
+    return root;
+}

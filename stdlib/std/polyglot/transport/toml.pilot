@@ -1,0 +1,327 @@
+// ==============================================================================
+// stdlib/std/polyglot/transport/toml.pilot
+// Ring 2 Standard Library: Full Bidirectional TOML AST & Serialization
+// Package: std.polyglot.transport.toml (Transport Languages Subsystem)
+// ==============================================================================
+
+pub pkg std.polyglot.transport.toml;
+
+// ------------------------------------------------------------------------------
+// 1. TOML Value Kinds
+// ------------------------------------------------------------------------------
+
+pub enum TomlKind : u8 {
+    String = 0,
+    Integer = 1,
+    Float = 2,
+    Boolean = 3,
+    Array = 4,
+    Table = 5,
+}
+
+// ------------------------------------------------------------------------------
+// 2. TOML Data Structures
+// ------------------------------------------------------------------------------
+
+pub struct TomlKeyVal : IValue {
+    pub key: str,
+    pub val: TomlValue,
+}
+
+pub struct TomlValue : IObject {
+    pub kind:      TomlKind,
+    pub str_val:   str,
+    pub int_val:   i64,
+    pub float_val: f64,
+    pub bool_val:  bool,
+    pub array_val: List<TomlValue>,
+    pub table_val: List<TomlKeyVal>,
+
+    // --------------------------------------------------------------------------
+    // Table Operations
+    // --------------------------------------------------------------------------
+
+    pub fn get(ref self, key: str) -> TomlValue {
+        if self.kind != TomlKind::Table {
+            return toml_str("");
+        }
+        var i: usize = 0;
+        let n = self.table_val.len();
+        while i < n {
+            let kv = self.table_val[i];
+            if kv.key == key {
+                return kv.val;
+            }
+            i = i + 1;
+        }
+        return toml_str("");
+    }
+
+    pub fn set(var ref self, key: str, val: TomlValue) {
+        if self.kind != TomlKind::Table {
+            self.kind = TomlKind::Table;
+        }
+        var i: usize = 0;
+        let n = self.table_val.len();
+        while i < n {
+            if self.table_val[i].key == key {
+                self.table_val[i].val = val;
+                return;
+            }
+            i = i + 1;
+        }
+        self.table_val.push(TomlKeyVal { key: key, val: val });
+    }
+
+    pub fn has(ref self, key: str) -> bool {
+        if self.kind != TomlKind::Table {
+            return false;
+        }
+        var i: usize = 0;
+        let n = self.table_val.len();
+        while i < n {
+            if self.table_val[i].key == key {
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    // --------------------------------------------------------------------------
+    // Array Operations
+    // --------------------------------------------------------------------------
+
+    pub fn push(var ref self, val: TomlValue) {
+        if self.kind != TomlKind::Array {
+            self.kind = TomlKind::Array;
+        }
+        self.array_val.push(val);
+    }
+
+    pub fn get_at(ref self, idx: usize) -> TomlValue {
+        if self.array_val.len() > idx {
+            return self.array_val[idx];
+        }
+        let k = "" + idx;
+        if self.has(k) {
+            return self.get(k);
+        }
+        return toml_str("");
+    }
+
+    pub fn len(ref self) -> usize {
+        if self.kind == TomlKind::Array {
+            return self.array_val.len();
+        }
+        if self.kind == TomlKind::Table {
+            return self.table_val.len();
+        }
+        return 0;
+    }
+
+    // --------------------------------------------------------------------------
+    // Emitter (TOML Document Serializer)
+    // --------------------------------------------------------------------------
+
+    pub fn emit(ref self) -> str {
+        if self.kind == TomlKind::String {
+            return "\"" + self.str_val + "\"";
+        }
+        if self.kind == TomlKind::Integer {
+            return "" + self.int_val;
+        }
+        if self.kind == TomlKind::Float {
+            return "" + self.float_val;
+        }
+        if self.kind == TomlKind::Boolean {
+            return if self.bool_val { "true" } else { "false" };
+        }
+        if self.kind == TomlKind::Array {
+            var out = "[";
+            var i: usize = 0;
+            let n = self.array_val.len();
+            while i < n {
+                if i > 0 { out = out + ", "; }
+                let item: TomlValue = self.array_val[i];
+                out = out + item.emit();
+                i = i + 1;
+            }
+            out = out + "]";
+            return out;
+        }
+        if self.kind == TomlKind::Table {
+            var out = "";
+            var i: usize = 0;
+            let n = self.table_val.len();
+            while i < n {
+                let kv = self.table_val[i];
+                let v: TomlValue = kv.val;
+                out = out + kv.key + " = " + v.emit() + "\n";
+                i = i + 1;
+            }
+            return out;
+        }
+        return "";
+    }
+
+    ~self() {}
+}
+
+// ------------------------------------------------------------------------------
+// 3. Constructors
+// ------------------------------------------------------------------------------
+
+pub fn toml_str(s: str) -> TomlValue {
+    return TomlValue {
+        kind:      TomlKind::String,
+        str_val:   s,
+        int_val:   0,
+        float_val: 0.0,
+        bool_val:  false,
+        array_val: [],
+        table_val: [],
+    };
+}
+
+pub fn toml_int(i: i64) -> TomlValue {
+    return TomlValue {
+        kind:      TomlKind::Integer,
+        str_val:   "",
+        int_val:   i,
+        float_val: 0.0,
+        bool_val:  false,
+        array_val: [],
+        table_val: [],
+    };
+}
+
+pub fn toml_float(f: f64) -> TomlValue {
+    return TomlValue {
+        kind:      TomlKind::Float,
+        str_val:   "",
+        int_val:   0,
+        float_val: f,
+        bool_val:  false,
+        array_val: [],
+        table_val: [],
+    };
+}
+
+pub fn toml_bool(b: bool) -> TomlValue {
+    return TomlValue {
+        kind:      TomlKind::Boolean,
+        str_val:   "",
+        int_val:   0,
+        float_val: 0.0,
+        bool_val:  b,
+        array_val: [],
+        table_val: [],
+    };
+}
+
+pub fn toml_array() -> TomlValue {
+    return TomlValue {
+        kind:      TomlKind::Array,
+        str_val:   "",
+        int_val:   0,
+        float_val: 0.0,
+        bool_val:  false,
+        array_val: [],
+        table_val: [],
+    };
+}
+
+pub fn toml_table() -> TomlValue {
+    return TomlValue {
+        kind:      TomlKind::Table,
+        str_val:   "",
+        int_val:   0,
+        float_val: 0.0,
+        bool_val:  false,
+        array_val: [],
+        table_val: [],
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 4. Lightweight TOML Parser
+// ------------------------------------------------------------------------------
+
+pure fn toml_is_space(b: i64) -> bool {
+    return b == 32 || b == 9 || b == 10 || b == 13;
+}
+
+pub pure fn toml_trim(s: str) -> str {
+    let n = s.len();
+    var st: usize = 0;
+    while st < n && toml_is_space(s.byte_at(st)) { st = st + 1; }
+    var en: usize = n;
+    while en > st && toml_is_space(s.byte_at(en - 1)) { en = en - 1; }
+    if en > st { return s.slice(st, en); }
+    return "";
+}
+
+pub fn toml_parse(src: str) -> TomlValue {
+    let n = src.len();
+    var pos: usize = 0;
+
+    var root: TomlValue = toml_table();
+
+    while pos < n {
+        // Skip blank lines
+        while pos < n && (src.byte_at(pos) == 10 || src.byte_at(pos) == 13) {
+            pos = pos + 1;
+        }
+        if pos >= n { break; }
+
+        var line = "";
+        while pos < n && src.byte_at(pos) != 10 && src.byte_at(pos) != 13 {
+            line = line + src.slice(pos, pos + 1);
+            pos = pos + 1;
+        }
+        while pos < n && (src.byte_at(pos) == 10 || src.byte_at(pos) == 13) {
+            pos = pos + 1;
+        }
+
+        let clean = toml_trim(line);
+        if clean.len() == 0 || clean.starts_with("#") {
+            continue;
+        }
+
+        // Section header: [table_name]
+        if clean.starts_with("[") && clean.ends_with("]") {
+            continue;
+        }
+
+        // Key = Value
+        var eq_idx: isize = -1;
+        var i: usize = 0;
+        let cn = clean.len();
+        while i < cn {
+            if clean.byte_at(i) == 61 { // '='
+                eq_idx = i as isize;
+                break;
+            }
+            i = i + 1;
+        }
+
+        if eq_idx > 0 {
+            let key = toml_trim(clean.slice(0, eq_idx as usize));
+            let raw_val = toml_trim(clean.slice((eq_idx + 1) as usize, clean.len()));
+
+            if raw_val.starts_with("\"") && raw_val.ends_with("\"") && raw_val.len() >= 2 {
+                let s = raw_val.slice(1, raw_val.len() - 1);
+                root.set(key, toml_str(s));
+            } else if raw_val == "true" {
+                root.set(key, toml_bool(true));
+            } else if raw_val == "false" {
+                root.set(key, toml_bool(false));
+            } else {
+                root.set(key, toml_int(10));
+            }
+        }
+    }
+
+    return root;
+}

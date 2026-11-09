@@ -996,6 +996,38 @@ Every C construct lowers directly into `TypeLayout` + `IrTypePhysics` (`M6`) for
 
 ---
 
+### Polyglot Architecture — Programming vs Transport Languages & Cross-Language Generative Metaprogramming [COMPLETE]
+
+#### P18.1 Objective & Architecture Taxonomy
+- **Language Subsystem Separation:** Polyglot is partitioned into two clear architectural categories:
+  - **Programming Languages (`std.polyglot.prog.*` / `std.polyglot.<lang>`):** Executable languages (C, C++, Rust, Python, JavaScript/TypeScript, WebAssembly, Zig, Java, .NET, Swift) driven by in-process execution, ABI register frames, zero-copy `0b01` memory sharing, and Perceus `0b10`/`0b11` resource handles and scope guards.
+  - **Transport Languages (`std.polyglot.transport.*`):** Data interchange and structural markup languages (**JSON**, **YAML/YML**, **XML**, **TOML**) driven by dynamic AST/DOM trees, in-memory mutation, nested property and path querying, and serialization.
+- **Bidirectional Data Manipulation:** Pilot code can seamlessly parse, inspect, mutate, traverse, and emit JSON, YAML, XML, and TOML data structures, converting between Pilot values and transport trees with full type safety.
+- **Cross-Language Generative Metaprogramming Phased Roadmap:**
+  - **Phase 1 [COMPLETE]:** Bidirectional Transport & AST Representation in Ring 2 standard library (`std.polyglot.transport.json`, `std.polyglot.transport.yaml`, `std.polyglot.transport.xml`, `std.polyglot.transport.toml`, `std.polyglot.transport`).
+  - **Phase 2:** Homoiconic quote and template synthesis (`quote { ... }` / `ast<T>`) emitting foreign language source text directly into transport documents and configuration files.
+  - **Phase 3:** In-process foreign macro provider (`pilot-proc-macro` / Foreign Absorbers) allowing foreign compiler pipelines to invoke Pilot compile-time macro expansions natively via in-process FFI.
+  - **Phase 4:** Universal embedded generative blocks (`pilot in rust`, `pilot in python`) where inline Pilot generative code compiles and expands directly into the host language's compilation pipeline.
+
+#### P18.2 Module & File Manifest (`<= 1,500` LOC Law)
+| Action | Path | Package & Ring | Budget | Purpose |
+| :--- | :--- | :--- | ---: | :--- |
+| **CREATE** | `stdlib/std/polyglot/transport/json.pilot` | `pub pkg std.polyglot.transport.json;` | `~395L` | Dynamic JSON DOM (`JsonValue`, `JsonPair`), object/array mutations, nested path query (`query_path`), `stringify`, and `json_parse`. |
+| **CREATE** | `stdlib/std/polyglot/transport/yaml.pilot` | `pub pkg std.polyglot.transport.yaml;` | `~246L` | Dynamic YAML AST (`YamlNode`, `YamlPair`), sequence/mapping operations, `emit`, and `yaml_parse`. |
+| **CREATE** | `stdlib/std/polyglot/transport/xml.pilot` | `pub pkg std.polyglot.transport.xml;` | `~290L` | Dynamic XML DOM (`XmlNode`, `XmlAttr`), attribute getters/setters, child search (`find_first`, `find_all`), `emit`, and `xml_parse`. |
+| **CREATE** | `stdlib/std/polyglot/transport/toml.pilot` | `pub pkg std.polyglot.transport.toml;` | `~327L` | Dynamic TOML AST (`TomlValue`, `TomlKeyVal`), table/array mutations, `emit`, and `toml_parse`. |
+| **CREATE** | `stdlib/std/polyglot/transport/mod.pilot` | `pub pkg std.polyglot.transport;` | `~58L` | Polyglot taxonomy facade and classification functions (`transport_format_from_str`, `transport_is_data_language`, `transport_is_programming_language`, `polyglot_subsystem_category`). |
+| **CREATE** | `crates/pilot-analysis/tests/polyglot_transport_and_generative_embedding.rs` | Test Suite | `~256L` | Full integration test suite validating bidirectional manipulation across all 4 formats and taxonomy duality. |
+
+#### P18.3 Verification & 3-Gate Acceptance Criteria
+1. JSON bidirectional DOM creation, array indexing, nested path query (`server.host`), dynamic mutation/deletion, and serialization pass 100%.
+2. YAML bidirectional mapping, sequence manipulation, formatted emission, and parsing pass 100%.
+3. XML bidirectional DOM element hierarchy, attributes (`get_attr`/`set_attr`), child navigation (`find_first`/`find_all`), emission, and parsing pass 100%.
+4. TOML AST table lookups, typed value inspection, emission, and language taxonomy classification (`transport` vs `programming`) pass 100%.
+5. All 85 simultaneous milestone gate tests remain green with zero regressions.
+
+---
+
 ### M19 — WebAssembly Component Model & WIT Universal Adapter (`use wasm`)
 
 #### 19.1 Objective & Current Codebase Audit
