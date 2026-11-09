@@ -1,0 +1,238 @@
+// SPDX-License-Identifier: MIT AND PSF-2.0
+// std.formats.dotenv — `.env` / Dotenv Parser (with `${VAR:-default}` Expansion) & Serializer
+
+pub pkg Pilot.Formats;
+
+use Pilot.Core.Genesis.*;
+use Pilot.Core.Interfaces.*;
+use Pilot.Core.Memory.*;
+use Pilot.Core.Option.*;
+use Pilot.Core.Result.*;
+use Pilot.Core.Builtins.*;
+use Pilot.Formats.*;
+
+fn __is_env_key_start(c: i64) -> bool {
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95;
+}
+
+fn __is_env_key_char(c: i64) -> bool {
+    return __is_env_key_start(c) || (c >= 48 && c <= 57) || c == 46;
+}
+
+fn __env_expand_vars(raw_val: str, env_map: any) -> str {
+    let n: i64 = len(raw_val);
+    var out: str = "";
+    var i: i64 = 0;
+    while i < n {
+        let c: i64 = raw_val.char_code_at(i);
+        if c == 92 && (i + 1) < n && raw_val.char_code_at(i + 1) == 36 {
+            out = out + "$";
+            i = i + 2;
+        } else if c == 36 && (i + 1) < n {
+            let next_c: i64 = raw_val.char_code_at(i + 1);
+            if next_c == 123 {
+                // `${VAR}` or `${VAR:-fallback}`
+                let close_idx: i64 = raw_val.index_of("}", i + 2);
+                if close_idx > (i + 2) {
+                    let expr = raw_val[(i + 2)..close_idx];
+                    let def_sep: i64 = expr.index_of(":-");
+                    var var_name: str = expr;
+                    var fallback: str = "";
+                    if def_sep >= 0 {
+                        var_name = expr[0..def_sep];
+                        fallback = expr[(def_sep + 2)..len(expr)];
+                    }
+                    if env_map.contains_key(var_name) && len(str(env_map[var_name])) > 0 {
+                        out = out + str(env_map[var_name]);
+                    } else {
+                        out = out + fallback;
+                    }
+                    i = close_idx + 1;
+                    continue;
+                }
+            } else if __is_env_key_start(next_c) {
+                var j: i64 = i + 2;
+                while j < n && __is_env_key_char(raw_val.char_code_at(j)) {
+                    j = j + 1;
+                }
+                let var_name = raw_val[(i + 1)..j];
+                if env_map.contains_key(var_name) {
+                    out = out + str(env_map[var_name]);
+                }
+                i = j;
+                continue;
+            }
+            out = out + "$";
+            i = i + 1;
+        } else {
+            out = out + raw_val[i..(i + 1)];
+            i = i + 1;
+        }
+    }
+    return out;
+}
+
+pub fn env_parse(src: any, expand_vars: bool = true) -> map ! ParseError {
+    let text = __coerce_format_text(src, "env")?;
+    var cur = __FormatCursor("env", text);
+    var env_map = {};
+
+    while true {
+        __toml_skip_ws_and_comments(cur);
+        if cur.is_eof() {
+            break;
+        }
+
+        let stmt_ln: i64 = cur.line;
+        let stmt_cl: i64 = cur.col;
+
+        // Optional `export ` prefix
+        if (cur.pos + 7) <= cur.total && cur.slice_span(cur.pos, cur.pos + 6) == "export" {
+            let after_exp: i64 = cur.peek_at(6);
+            if after_exp == 32 || after_exp == 9 {
+                for _i in 0..<6 { cur.advance(); }
+                __toml_skip_inline_ws(cur);
+            }
+        }
+
+        if !__is_env_key_start(cur.peek_code()) {
+            return fail(ParseError.Syntax("env", "invalid environment variable name", cur.line, cur.col));
+        }
+        let k_start: i64 = cur.pos;
+        while __is_env_key_char(cur.peek_code()) {
+            cur.advance();
+        }
+        let key: str = cur.slice_span(k_start, cur.pos);
+
+        __toml_skip_inline_ws(cur);
+        if cur.peek_code() != 61 {
+            return fail(ParseError.Syntax("env", f"expected '=' after '{key}'", stmt_ln, stmt_cl));
+        }
+        cur.advance(); // '='
+        __toml_skip_inline_ws(cur);
+
+        var val_str: str = "";
+        let vc: i64 = cur.peek_code();
+        if vc == 39 {
+            // Single-quoted literal value (never expanded)
+            let q_ln: i64 = cur.line;
+            let q_cl: i64 = cur.col;
+            cur.advance();
+            let v_start: i64 = cur.pos;
+            var closed: bool = false;
+            while !cur.is_eof() {
+                if cur.peek_code() == 39 {
+                    val_str = cur.slice_span(v_start, cur.pos);
+                    cur.advance();
+                    closed = true;
+                    break;
+                }
+                cur.advance();
+            }
+            if !closed {
+                return fail(ParseError.PrematureEof("env", q_ln, q_cl));
+            }
+            __toml_skip_inline_comment(cur);
+        } else if vc == 34 {
+            // Double-quoted value (supports multi-line + escapes + optional var expansion)
+            let q_ln: i64 = cur.line;
+            let q_cl: i64 = cur.col;
+            cur.advance();
+            var raw_dq: str = "";
+            var closed: bool = false;
+            while !cur.is_eof() {
+                let ch_c: i64 = cur.advance();
+                if ch_c == 34 {
+                    closed = true;
+                    break;
+                }
+                if ch_c == 92 {
+                    if cur.is_eof() {
+                        return fail(ParseError.PrematureEof("env", q_ln, q_cl));
+                    }
+                    let esc: i64 = cur.advance();
+                    if esc == 110 { raw_dq = raw_dq + "\n"; }
+                    else if esc == 114 { raw_dq = raw_dq + "\r"; }
+                    else if esc == 116 { raw_dq = raw_dq + "\t"; }
+                    else if esc == 34 { raw_dq = raw_dq + "\""; }
+                    else if esc == 92 { raw_dq = raw_dq + "\\"; }
+                    else if esc == 36 { raw_dq = raw_dq + "\\$"; }
+                    else { raw_dq = raw_dq + __char_from_code(esc); }
+                } else {
+                    raw_dq = raw_dq + __char_from_code(ch_c);
+                }
+            }
+            if !closed {
+                return fail(ParseError.PrematureEof("env", q_ln, q_cl));
+            }
+            val_str = if expand_vars { __env_expand_vars(raw_dq, env_map) } else { raw_dq.replace("\\$", "$") };
+            __toml_skip_inline_comment(cur);
+        } else {
+            // Unquoted value up to newline or ` #` inline comment
+            let u_start: i64 = cur.pos;
+            while !cur.is_eof() {
+                let uc: i64 = cur.peek_code();
+                if uc == 10 || uc == 13 {
+                    break;
+                }
+                if uc == 35 {
+                    let prev_idx: i64 = cur.pos - 1;
+                    let prev_c: i64 = if prev_idx >= u_start { cur.src.char_code_at(prev_idx) } else { 32 };
+                    if prev_c == 32 || prev_c == 9 {
+                        break;
+                    }
+                }
+                cur.advance();
+            }
+            let raw_uq = cur.slice_span(u_start, cur.pos).trim();
+            val_str = if expand_vars { __env_expand_vars(raw_uq, env_map) } else { raw_uq };
+            __toml_skip_inline_comment(cur);
+        }
+
+        env_map[key] = val_str;
+
+        if !cur.is_eof() {
+            if cur.peek_code() == 13 && cur.peek_at(1) == 10 {
+                cur.advance();
+                cur.advance();
+            } else if cur.peek_code() == 10 {
+                cur.advance();
+            } else {
+                return fail(ParseError.Syntax("env", "unexpected trailing characters on line", cur.line, cur.col));
+            }
+        }
+    }
+
+    return ok(env_map);
+}
+
+pub fn env_stringify(vars_map: any) -> str {
+    let entries = __map_entries_sorted(vars_map);
+    var out: str = "";
+    for i in 0..<len(entries) {
+        if i > 0 {
+            out = out + "\n";
+        }
+        let pair = entries[i];
+        let k: str = str(pair[0]);
+        let v: str = if __opt_is_none(pair[1]) { "" } else { str(pair[1]) };
+        let needs_q: bool = v.contains(" ") ||
+                            v.contains("#") ||
+                            v.contains("\"") ||
+                            v.contains("'") ||
+                            v.contains("\n") ||
+                            v.contains("\r") ||
+                            v.contains("\t");
+        if needs_q {
+            var esc: str = v.replace("\\", "\\\\");
+            esc = esc.replace("\"", "\\\"");
+            esc = esc.replace("\n", "\\n");
+            esc = esc.replace("\r", "\\r");
+            esc = esc.replace("\t", "\\t");
+            out = out + k + "=\"" + esc + "\"";
+        } else {
+            out = out + k + "=" + v;
+        }
+    }
+    return out;
+}

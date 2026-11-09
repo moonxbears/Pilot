@@ -255,8 +255,28 @@ pub fn glob(root_dir: str, pattern: str) -> str[] ! IoError {
     return ok(matched);
 }
 
+pub fn read_dir(path: str) -> str[] ! IoError {
+    return list_dir(path);
+}
+
 pub struct File {
+    pub static fn exists(path: str) -> bool {
+        return __engine("fs_exists", path);
+    }
+
+    pub static fn read_text(path: str) -> str {
+        return __engine("fs_read_text", path);
+    }
+
     pub static fn write_text(path: str, content: str) -> i64 {
         return __engine("fs_write_text", path, content);
+    }
+
+    pub static fn read_dir(path: str) -> str {
+        return __engine("fs_list_dirs", path);
+    }
+
+    pub static fn walk_files(path: str) -> str {
+        return __engine("fs_walk_files", path);
     }
 }

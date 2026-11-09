@@ -853,15 +853,22 @@ pub fn test_50_4_and_50_5_target_width_projections_pilc_snapshot_and_gate1_gate2
     let mut rng = Rng::new(0x5004_F00D);
     let root = workspace_root();
 
-    // 1. Run gate1_check.py and gate2_check.py to enforce pilot-analysis contraction & whitelist
-    for gate in ["scripts/gate1_check.py", "scripts/gate2_check.py"] {
-        let status = Command::new("python3")
-            .arg(gate)
+    // 1. Run pure-Pilot `pilot gate` to enforce pilot-analysis contraction & whitelist
+    let pilot_bin = root.join("target/debug/pilot");
+    if !pilot_bin.exists() {
+        let build_st = Command::new("cargo")
+            .args(["build", "-q", "-p", "pilot-cli"])
             .current_dir(root)
             .status()
-            .unwrap_or_else(|e| panic!("Failed to execute {}: {}", gate, e));
-        assert!(status.success(), "{} must pass 100%", gate);
+            .expect("cargo build -p pilot-cli");
+        assert!(build_st.success(), "Failed building pilot-cli");
     }
+    let status = Command::new(&pilot_bin)
+        .args(["gate", "--json"])
+        .current_dir(root)
+        .status()
+        .expect("Failed to execute pilot gate");
+    assert!(status.success(), "pilot gate must pass 100%");
 
     // 2. Randomized multi-field aggregate offsets, target-width SOA projections & capability lattice
     let analyzer_raw = std::fs::read_to_string(root.join("selfhost/analyzer.pilot"))

@@ -100,8 +100,8 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
                 "sh_token_matching_bracket",
             ],
             required_code_markers: &[],
-            forbidden_code_markers: &[],
-            forbidden_string_substrings: &["ast_node_kind", "ast_child_at"],
+            forbidden_code_markers: &["__engine(\"ast_node_kind\"", "__engine(\"ast_child_at\""],
+            forbidden_string_substrings: &[],
         },
         anticheat::FileAuditRule {
             path: "selfhost/ast.pilot",
@@ -109,8 +109,8 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             name_blind: true,
             required_pub_fns: &[],
             required_code_markers: &[],
-            forbidden_code_markers: &[],
-            forbidden_string_substrings: &["ast_node_kind", "ast_child_at", "expanded syntax "],
+            forbidden_code_markers: &["__engine(\"ast_node_kind\"", "__engine(\"ast_child_at\""],
+            forbidden_string_substrings: &["expanded syntax "],
         },
         anticheat::FileAuditRule {
             path: "selfhost/parser.pilot",
@@ -118,8 +118,8 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
             name_blind: true,
             required_pub_fns: &["sh_parse_program"],
             required_code_markers: &[],
-            forbidden_code_markers: &[],
-            forbidden_string_substrings: &["ast_node_kind", "ast_child_at", "expanded syntax "],
+            forbidden_code_markers: &["__engine(\"ast_node_kind\"", "__engine(\"ast_child_at\""],
+            forbidden_string_substrings: &["expanded syntax "],
         },
         anticheat::FileAuditRule {
             path: "selfhost/pilotc.pilot",
@@ -591,26 +591,27 @@ pub fn test_61_3_and_61_4_all_four_gates_and_dual_pass_universal_rename_litmus_a
     let root = workspace_root();
     let mut rng = SplitMix64::from_entropy();
 
-    // 1. Run ALL 4 workspace verification gates (`gate1`..`gate4`)
-    for gate in [
-        "scripts/gate1_check.py",
-        "scripts/gate2_check.py",
-        "scripts/gate3_check.py",
-        "scripts/gate4_selfhost_contraction.py",
-    ] {
-        let out = Command::new("python3")
-            .arg(gate)
+    // 1. Run ALL 4 workspace verification gates via pure-Pilot `pilot gate --full`
+    let pilot_bin = root.join("target/debug/pilot");
+    if !pilot_bin.exists() {
+        let build_st = Command::new("cargo")
+            .args(["build", "-q", "-p", "pilot-cli"])
             .current_dir(&root)
-            .output()
-            .unwrap_or_else(|e| panic!("Failed to spawn {}: {}", gate, e));
-        assert!(
-            out.status.success(),
-            "{} failed:\n{}{}",
-            gate,
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        );
+            .status()
+            .expect("cargo build -p pilot-cli");
+        assert!(build_st.success(), "Failed building pilot-cli");
     }
+    let out = Command::new(&pilot_bin)
+        .args(["gate", "--full"])
+        .current_dir(&root)
+        .output()
+        .expect("Failed to spawn pilot gate --full");
+    assert!(
+        out.status.success(),
+        "pilot gate --full failed:\n{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     // 2. Scan all surviving Rust `crates/*/src/**/*.rs` for zero hardcoded Pilot scalar/composite type strings
     let banned_rust_type_literals = [

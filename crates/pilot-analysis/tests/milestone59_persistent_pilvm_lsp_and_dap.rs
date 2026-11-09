@@ -353,17 +353,26 @@ pub fn test_59_1_vscode_gen_strict_json_no_fs_bypass_and_full_lsp_handlers_matri
         "Monolithic selfhost/ide_sync.pilot must be deleted in M59"
     );
 
-    // Run `scripts/gate3_check.py` directly
-    let gate3 = Command::new("python3")
-        .arg(root.join("scripts/gate3_check.py"))
+    // Run pure-Pilot `pilot gate` directly
+    let pilot_bin = root.join("target/debug/pilot");
+    if !pilot_bin.exists() {
+        let build_st = Command::new("cargo")
+            .args(["build", "-q", "-p", "pilot-cli"])
+            .current_dir(&root)
+            .status()
+            .expect("cargo build -p pilot-cli");
+        assert!(build_st.success(), "Failed building pilot-cli");
+    }
+    let gate_out = Command::new(&pilot_bin)
+        .args(["gate", "--json"])
         .current_dir(&root)
         .output()
-        .expect("python3 must run scripts/gate3_check.py");
+        .expect("pilot gate --json must execute");
     assert!(
-        gate3.status.success(),
-        "scripts/gate3_check.py failed:\n{}{}",
-        String::from_utf8_lossy(&gate3.stdout),
-        String::from_utf8_lossy(&gate3.stderr)
+        gate_out.status.success(),
+        "pilot gate failed:\n{}{}",
+        String::from_utf8_lossy(&gate_out.stdout),
+        String::from_utf8_lossy(&gate_out.stderr)
     );
 
     let vscode_gen_src = std::fs::read_to_string(root.join("selfhost/ide/vscode_gen.pilot")).unwrap();

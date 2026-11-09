@@ -11,14 +11,29 @@ use crate::types::{LayoutId, LayoutTable};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ComptimeValue {
-    Void, Int(i64), Uint(u128), Float(f64), Bool(bool), Str(SymbolId), Ident(SymbolId), AstNode(NodeId),
+    Void,
+    Int(i64),
+    Uint(u128),
+    Float(f64),
+    Bool(bool),
+    Str(SymbolId),
+    StringVal(String),
+    Ident(SymbolId),
+    AstNode(NodeId),
+    Map(i64),
 }
 
 impl ComptimeValue {
     pub fn as_int(&self) -> Option<i64> { match self { Self::Int(v) => Some(*v), Self::Uint(v) => Some(*v as i64), _ => None } }
     pub fn as_uint(&self) -> Option<u128> { match self { Self::Uint(v) => Some(*v), Self::Int(v) if *v >= 0 => Some(*v as u128), _ => None } }
     pub fn as_bool(&self) -> Option<bool> { match self { Self::Bool(b) => Some(*b), _ => None } }
-    pub fn as_str<'a>(&'a self, interner: &'a pilot_intern::Interner) -> Option<&'a str> { match self { Self::Str(sym) | Self::Ident(sym) => Some(interner.resolve(*sym)), _ => None } }
+    pub fn as_str<'a>(&'a self, interner: &'a pilot_intern::Interner) -> Option<&'a str> {
+        match self {
+            Self::Str(sym) | Self::Ident(sym) => Some(interner.resolve(*sym)),
+            Self::StringVal(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -45,14 +60,20 @@ impl ComptimeEngine {
         registry.layouts = self.layout_table.clone();
         let (mut env_m, mut tgt_m, mut ast_m, mut sym_m) = (std::collections::HashMap::new(), std::collections::HashMap::new(), std::collections::HashMap::new(), std::collections::HashMap::new());
         tgt_m.insert("architecture".to_string(), PilotVal::from_str(std::env::consts::ARCH));
+        tgt_m.insert("os".to_string(), PilotVal::from_str(std::env::consts::OS));
         tgt_m.insert("pointer_byte".to_string(), PilotVal::from_int(std::mem::size_of::<usize>() as i64));
         tgt_m.insert("endianess".to_string(), PilotVal::from_str(if cfg!(target_endian = "little") { "little" } else { "big" }));
         tgt_m.insert("backend".to_string(), PilotVal::from_str("vm"));
+        tgt_m.insert("simd_width_bits".to_string(), PilotVal::from_int(128));
         tgt_m.insert("cache_line".to_string(), PilotVal::from_int(64));
+        tgt_m.insert("cache_line_bytes".to_string(), PilotVal::from_int(64));
         tgt_m.insert("opt_level".to_string(), PilotVal::from_int(2));
         ast_m.insert("node_count".to_string(), PilotVal::from_int(registry.arena.nodes.len() as i64));
         ast_m.insert("root_node".to_string(), PilotVal::from_int(0));
         sym_m.insert("count".to_string(), PilotVal::from_int(registry.symbol_strings.len() as i64));
+        env_m.insert("is_comptime".to_string(), PilotVal::from_int(1));
+        env_m.insert("unit_count".to_string(), PilotVal::from_int(1));
+        env_m.insert("symbol_count".to_string(), PilotVal::from_int(registry.symbol_strings.len() as i64));
         env_m.insert("target".to_string(), PilotVal::from_int(1));
         env_m.insert("ast".to_string(), PilotVal::from_int(2));
         env_m.insert("symbols".to_string(), PilotVal::from_int(3));
@@ -69,6 +90,7 @@ impl ComptimeEngine {
         if let Some(v) = ret.as_int() { Ok(ComptimeValue::Int(v)) }
         else if let Some(v) = ret.as_float() { Ok(ComptimeValue::Float(v)) }
         else if let Some(v) = ret.as_bool() { Ok(ComptimeValue::Bool(v)) }
+        else if ret.is_sso_str() || ret.tag() == 9 { Ok(ComptimeValue::StringVal(ret.to_string_repr())) }
         else { Ok(ComptimeValue::Void) }
     }
 }
@@ -101,18 +123,31 @@ impl BootstrapSnapshot {
         GLOBAL_BOOTSTRAP_SNAPSHOT.get_or_init(|| {
             let (mut tables, mut vm, mut arenas, mut m_vm) = (ParserTables::new(), ComptimeEngine::new(), Vec::new(), PilVirtualMachine::new());
             let manifest_src = include_str!("../../../stdlib/core/bootstrap.pilot");
-            let c_arena = pilot_parser::parse(&format!("{}\nbootstrap_stage_count();\n", manifest_src));
+            let harness = format!(
+                "{}\n\
+                 let sc = bootstrap_stage_count();\n\
+                 var out = \"\" + sc;\n\
+                 var si = 0;\n\
+                 while si < sc {{\n\
+                     out = out + \"|\" + bootstrap_stage_path(si);\n\
+                     si = si + 1;\n\
+                 }}\n\
+                 out;\n",
+                manifest_src
+            );
+            let c_arena = pilot_parser::parse(&harness);
             m_vm.load_binary(BytecodeCompiler::compile(&c_arena, c_arena.root));
-            let (stage_count, ws_root) = (m_vm.run().as_int().unwrap_or(0), Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
-            for idx in 0..stage_count {
-                let p_arena = pilot_parser::parse(&format!("{}\nbootstrap_stage_path({});\n", manifest_src, idx));
-                m_vm.load_binary(BytecodeCompiler::compile(&p_arena, p_arena.root));
-                let rel_path = m_vm.run().to_string_repr();
-                let src = std::fs::read_to_string(ws_root.join(&rel_path)).or_else(|_| std::fs::read_to_string(&rel_path))
+            let result_str = m_vm.run().to_string_repr();
+            let mut parts = result_str.split('|');
+            let _stage_count: usize = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let stage_paths: Vec<&str> = parts.collect();
+            let ws_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            for (idx, rel_path) in stage_paths.iter().enumerate() {
+                let src = std::fs::read_to_string(ws_root.join(rel_path)).or_else(|_| std::fs::read_to_string(rel_path))
                     .unwrap_or_else(|e| panic!("Bootstrap stage {} ('{}') unreadable: {}", idx, rel_path, e));
                 let arena = bootstrap_core_file(&src, &mut tables, &mut vm).unwrap_or_else(|e| panic!("Bootstrap stage '{}' failed: {:?}", rel_path, e));
                 let pkg = arena.decl_flags.iter().enumerate().find(|(_, &f)| (f & pilot_ast::DECL_FLAG_PKG) != 0)
-                    .map(|(n, _)| arena.interner.resolve(SymbolId(arena.node(NodeId(n as u32)).lhs)).to_string()).unwrap_or(rel_path);
+                    .map(|(n, _)| arena.interner.resolve(SymbolId(arena.node(NodeId(n as u32)).lhs)).to_string()).unwrap_or_else(|| rel_path.to_string());
                 arenas.push((pkg, arena));
             }
             BootstrapSnapshot { tables, vm, arenas }

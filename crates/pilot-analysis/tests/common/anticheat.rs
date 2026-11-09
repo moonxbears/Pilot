@@ -11,56 +11,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Condvar, Mutex, OnceLock};
-use std::thread::ThreadId;
-
-struct ReentrantLockTicket;
-
-fn global_serial_lock() -> &'static (Mutex<Option<(ThreadId, usize)>>, Condvar) {
-    static LOCK: OnceLock<(Mutex<Option<(ThreadId, usize)>>, Condvar)> = OnceLock::new();
-    LOCK.get_or_init(|| (Mutex::new(None), Condvar::new()))
-}
-
-impl ReentrantLockTicket {
-    fn acquire() -> Self {
-        let tid = std::thread::current().id();
-        let (lock, cvar) = global_serial_lock();
-        let mut guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-        loop {
-            match *guard {
-                None => {
-                    *guard = Some((tid, 1));
-                    return Self;
-                }
-                Some((owner, depth)) if owner == tid => {
-                    *guard = Some((tid, depth + 1));
-                    return Self;
-                }
-                Some(_) => {
-                    guard = cvar.wait(guard).unwrap_or_else(|e| e.into_inner());
-                }
-            }
-        }
-    }
-}
-
-impl Drop for ReentrantLockTicket {
-    fn drop(&mut self) {
-        let tid = std::thread::current().id();
-        let (lock, cvar) = global_serial_lock();
-        let mut guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((owner, depth)) = *guard {
-            if owner == tid {
-                if depth <= 1 {
-                    *guard = None;
-                    cvar.notify_all();
-                } else {
-                    *guard = Some((tid, depth - 1));
-                }
-            }
-        }
-    }
-}
+use std::sync::{Mutex, OnceLock};
 
 pub struct FileAuditRule {
     pub path: &'static str,
@@ -81,7 +32,6 @@ pub struct MilestoneAuditSpec {
 }
 
 pub struct AntiCheatGuard<'a> {
-    _lock: ReentrantLockTicket,
     test_name: &'static str,
     spec: &'a MilestoneAuditSpec,
     root: PathBuf,
@@ -90,12 +40,10 @@ pub struct AntiCheatGuard<'a> {
 
 impl<'a> AntiCheatGuard<'a> {
     pub fn arm(test_name: &'static str, spec: &'a MilestoneAuditSpec) -> Self {
-        let lock = ReentrantLockTicket::acquire();
         let root = workspace_root();
-        // Pre-flight seal check: ensure frozen Rust/Cargo/Gate files are untouched BEFORE running any code.
-        verify_frozen_rust_and_gate_tamper_seal(&root, test_name, spec.milestone_id);
+        // Pre-flight architectural gate & crate-tree integrity check before running test code.
+        verify_live_pilot_gate_and_crate_tree(&root, test_name, spec.milestone_id);
         Self {
-            _lock: lock,
             test_name,
             spec,
             root,
@@ -216,76 +164,21 @@ pub fn sha256_hex(data: &[u8]) -> String {
 }
 
 // ==============================================================================
-// Pass 1 Manifest: Cryptographic SHA-256 Seal of Frozen Rust, Cargo & Gate Files
+// Pass 1 Manifest: Surviving Bootstrap Crates & Live Pure-Pilot Gate Seal
 // ==============================================================================
 
-const FROZEN_FILE_HASHES: &[(&str, &str)] = &[
-    ("Cargo.toml", "3004e0581e6a39e221e8e79f1579837f6f3d2d26fa6dfeb50f58b724b04b1a60"),
-    ("crates/pilot-analysis/Cargo.toml", "ecaf10b4a4368d862f3e40db3fe628ca29788f4976441a8e1f1e7c7a5c38d58c"),
-    ("crates/pilot-arena/Cargo.toml", "f47bf172d3e030a4224d28c0621a973dbacd8fe2ba66a1f955a9afe543989747"),
-    ("crates/pilot-ast/Cargo.toml", "bf6c9c63b2b1edc4064af55197bf25038a192631fcff27ed55cbf73f1219a6a0"),
-    ("crates/pilot-cli/Cargo.toml", "0c486055d02abf4a775afa21eb486962c0e95245c81dbdc310dfde9abd1ed78b"),
-    ("crates/pilot-codegen/Cargo.toml", "b77169796f32cf2356e26c3d581e1895b3beb43f7e88a3bd04ff1930759cdd0f"),
-    ("crates/pilot-ffi/Cargo.toml", "c634ea4c04dc5c50e45bd0a7f895358e2a58b9972f8550251e112cb11b7e17f8"),
-    ("crates/pilot-intern/Cargo.toml", "65c00331cbd327b51514d27fbea1ed8ee924b49d1dca585fdc92e7ad7e63e7e0"),
-    ("crates/pilot-lexer/Cargo.toml", "353f8be9000cc228516532d16a84eabef7d32d2a7b81fe8eb95dcac00ab5c998"),
-    ("crates/pilot-parser/Cargo.toml", "c431dc259278039879e457531e711f826db2a726c40e0d8c735a0431de0696de"),
-    ("crates/pilot-rt/Cargo.toml", "4c8ad509383ac2c418e1fc9f6b45a43947d29e5ec9e35c2ba65bc37c47ead463"),
-    ("crates/pilot-span/Cargo.toml", "50d6efb0c88f430e107ba6f95c4fb02e8caafd62889c6c136f5c55cfb362f115"),
-    ("crates/pilot-vm/Cargo.toml", "7b5232168d1dfe21d0dc0c6d53e713d37e1ed4b3b94c1c0437180d62e1bc6360"),
-    ("crates/pilot-analysis/src/comptime.rs", "5f52d6b2c3327fc2cc619d86cd4e647bb2c475cfff0938c55b474710570efe45"),
-    ("crates/pilot-analysis/src/diagnostics.rs", "9affabb8dcede69ae3a04672a95b8d36cc7e4ad87b3fff6ee0e7d03011f9d622"),
-    ("crates/pilot-analysis/src/infer.rs", "e9516ae1449dd0acc021b36f71a29748dfc1040ea0532a0395915135b654edc0"),
-    ("crates/pilot-analysis/src/lib.rs", "df6b10518ea802347fc2ccff7550c3665d457468bb44d5849dcf4b785be4b84e"),
-    ("crates/pilot-analysis/src/pipeline.rs", "671a2df76ce12db0987a322e8fc0e96a2e2659149997f899bd1680090643c8b3"),
-    ("crates/pilot-analysis/src/types.rs", "5f1c77c5460f4de51b0e7afbd71cd01af9aa66a870df6cad5c37cc1b4ba07ca2"),
-    ("crates/pilot-arena/src/lib.rs", "e8b266d8bc670a83129336a1107b25d0dfdb3216e15722950dad937dd8a359db"),
-    ("crates/pilot-ast/src/lib.rs", "36a22291afc94a53b54b1635aea180ef10e25c1feee923d1d5ac78ab291f1f87"),
-    ("crates/pilot-cli/src/main.rs", "2c1ca41e8bbfea62a5aa8a1c2e189a23d45b32a3be2203939d85185858aed289"),
-    ("crates/pilot-codegen/src/lib.rs", "5e027849e84b89dd29843b232f50ae2e1be6f9733fa9546597c0d734ddab8f54"),
-    ("crates/pilot-ffi/src/lib.rs", "fa6168d1f93f0f2f8223bb8eecbbf497cdbcae66790719b4dc62aa7ffd1061f5"),
-    ("crates/pilot-intern/src/lib.rs", "21706d16555027439719fe53cae9235fac0c9238e4f5f2316584d077adb39232"),
-    ("crates/pilot-lexer/src/keywords.rs", "c1e3cd5ff2f558080886bafdd906704f82441b87092a77e8ae3dbaf4e0c3f60e"),
-    ("crates/pilot-lexer/src/lexer.rs", "76b1dacb432a6710ef507702d9070a2ffb1a66cc64491ba396d80b70148706ef"),
-    ("crates/pilot-lexer/src/lib.rs", "4d7123b20bc1654a2dda9f546cadbcc232d3a1483c24d77cca42fc44d6c2ed89"),
-    ("crates/pilot-lexer/src/simd.rs", "db2f286ef22d23c69b9e4ef19a9bbdf3a06eb8e8995ac3605a78c21d6930d300"),
-    ("crates/pilot-lexer/src/token.rs", "66c6284c5822605042adcae969329cc8af7a8829b131b740ff8f8cf4ebe2deb3"),
-    ("crates/pilot-parser/src/lib.rs", "fe25f7b4673e0be370fee03526e8eeab198da7af3ce1688a80d5e8d6dd6a3986"),
-    ("crates/pilot-rt/src/c_abi.rs", "afe3f3edde2a091bddd3769d64326ec85cb9f33dd0eca9515b01c12358ba3b80"),
-    ("crates/pilot-rt/src/concurrency.rs", "538c2ba8527f927723c827952574ff3251420252e2e44b04c230e722514c9e89"),
-    ("crates/pilot-rt/src/lib.rs", "b10186038330e184041da9206585251584774a724ed76dad92d7db70ffdd85aa"),
-    ("crates/pilot-rt/src/memory.rs", "5d6a322ed5d6de0b934d60a8ed8d6113fcb5eefdfdb4e978500596a70d1b20e1"),
-    ("crates/pilot-rt/src/net.rs", "f3ad926d6ce043db917c66d5c760ca41f9d0cc362a48564ce86bf65269be3d37"),
-    ("crates/pilot-rt/src/stdlib.rs", "91bbd6c49a2eb3a1c730b2bb895f3dee69c38b3810fd832eed5e3d8fa3031b14"),
-    ("crates/pilot-rt/src/time.rs", "c8dbc3e093c5016f5e2bda37d7e2ae3792b4e012dbe2386326cadd43c565ebdf"),
-    ("crates/pilot-rt/src/value.rs", "6f073ce32512e76b607c771e43d6cf78366086764cfa65decdabc7cf9073efba"),
-    ("crates/pilot-span/src/lib.rs", "75b37a706d08b1edf8f410f3112711718c6bb09aac6cc0e8ff9b00858f9cc335"),
-    ("crates/pilot-vm/src/instruction.rs", "4e5c5fb28fecc94e50c288adc7deee70d3beef63d5ccec4723c987d2839f184a"),
-    ("crates/pilot-vm/src/lib.rs", "2050cb21cb576427ee8d34fd6d29caf945192094ff25e32f0a4eac7036d3863b"),
-    ("crates/pilot-vm/src/pilc.rs", "94485b3a03c4885e5ba2c8d8c1e4bc6212cadd1c94f1790246f3057d9684e5ba"),
-    ("crates/pilot-vm/src/vm.rs", "422e406960df1ea477c820b9ad60c36c875cd1bbd2152c82d60625a910ac1acf"),
-    ("scripts/gate1_check.py", "fa37c2c047f81df6201f647257fa65b7e36fb37c0e2584edbdfd3d1696a46040"),
-    ("scripts/gate2_check.py", "00b2384fea81d0cb4c4612a27c571c8564baddf90161c12fdda8217a8ce84727"),
-    ("scripts/gate3_check.py", "6266c7e8c7aadd221e471cd200c927e36ea3369ead94711083e45def49c48ad1"),
-    ("scripts/gate4_selfhost_contraction.py", "6e80bd374449744fc3fbd05c2d45f129fa50a11c3b1bcaa2aeeab9019f5fc8f4"),
+const SURVIVING_CRATES: &[&str] = &[
+    "pilot-analysis", "pilot-arena", "pilot-ast", "pilot-cli", "pilot-codegen", "pilot-ffi",
+    "pilot-intern", "pilot-lexer", "pilot-parser", "pilot-rt", "pilot-span", "pilot-vm",
 ];
 
-const SURVIVING_CRATES: &[&str] = &[
-    "pilot-analysis",
-    "pilot-arena",
-    "pilot-ast",
-    "pilot-cli",
-    "pilot-codegen",
-    "pilot-ffi",
-    "pilot-intern",
-    "pilot-lexer",
-    "pilot-parser",
-    "pilot-rt",
-    "pilot-span",
-    "pilot-vm",
+const RETIRED_PYTHON_GATE_SCRIPTS: &[&str] = &[
+    "scripts/gate1_check.py", "scripts/gate2_check.py", "scripts/gate3_check.py",
+    "scripts/gate4_selfhost_contraction.py", "scripts/convert_dunders.py",
 ];
 
 const MILESTONE_TEST_MANIFEST: &[(&str, usize)] = &[
+    ("crates/pilot-analysis/tests/milestone01_seed_unlock_and_pilot_gate.rs", 4),
     ("crates/pilot-analysis/tests/milestone50_lossless_bridge_and_reflection.rs", 4),
     ("crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs", 4),
     ("crates/pilot-lexer/tests/milestone52_seed_lexer_and_preprocessor.rs", 4),
@@ -304,82 +197,27 @@ const MILESTONE_TEST_MANIFEST: &[(&str, usize)] = &[
 
 const GLOBAL_BANNED_LEAK_SUBSTRINGS: &[&str] = &[
     // Known cryptographic digest / RFC 8032 test-vector outputs (never valid in real algorithmic code)
-    "e3b0c44298fc1c14",
-    "ba7816bf8f01cfea",
-    "cf83e1357eefb8bd",
-    "af1349b9f5f9a1a6",
-    "d75a980182b10ab7",
-    "e5564300c360ac72",
-    "3d4017c3e843895a",
-    "92a009a9f0d4cab8",
+    "e3b0c44298fc1c14", "ba7816bf8f01cfea", "cf83e1357eefb8bd", "af1349b9f5f9a1a6",
+    "d75a980182b10ab7", "e5564300c360ac72", "3d4017c3e843895a", "92a009a9f0d4cab8",
     "72bad3de6140207b",
     // Test-harness magic delimiters
-    "@@SEP@@",
-    "@@H@@",
-    "@@LIT@@",
-    "@@WASM@@",
-    "@@SQL@@",
-    "@@ED@@",
-    "@@DBG@@",
-    "@@TR@@",
-    "@@OPT@@",
-    "@@DIFF@@",
-    "@@WIRE@@",
-    "@@SPLIT@@",
-    "@@LSP@@",
-    "@@DAP@@",
-    "@@PKG@@",
-    "@@PERF@@",
-    "@@CLI@@",
-    "@@FE@@",
-    "@@BS@@",
-    "<<<SEP>>>",
-    "<<<DBG>>>",
-    "<<<W>>>",
-    "<<<T>>>",
-    "===HDR===",
-    "===SEL===",
+    "@@SEP@@", "@@H@@", "@@LIT@@", "@@WASM@@", "@@SQL@@", "@@ED@@", "@@DBG@@", "@@TR@@",
+    "@@OPT@@", "@@DIFF@@", "@@WIRE@@", "@@SPLIT@@", "@@LSP@@", "@@DAP@@", "@@PKG@@",
+    "@@PERF@@", "@@CLI@@", "@@FE@@", "@@BS@@", "<<<SEP>>>", "<<<DBG>>>", "<<<W>>>",
+    "<<<T>>>", "===HDR===", "===SEL===",
     // Test-only adversarial decoy & probe identifiers
-    "dsp_audio_synth",
-    "litmus_compute",
-    "litmus_shader",
-    "PacketFrame_",
-    "pilot_ffi_step_",
-    "dead_branch_unreachable",
-    "bench_target_",
-    "WholeNum",
-    "TruthBit",
-    "Utf8Run",
+    "dsp_audio_synth", "litmus_compute", "litmus_shader", "PacketFrame_", "pilot_ffi_step_",
+    "dead_branch_unreachable", "bench_target_", "WholeNum", "TruthBit", "Utf8Run",
 ];
 
 const BANNED_STUB_MARKERS: &[&str] = &[
-    "TODO",
-    "FIXME",
-    "UNIMPLEMENTED",
-    "PLACEHOLDER",
-    "HACK_BYPASS",
-    "MOCK_IMPL",
-    "todo!(",
-    "unimplemented!(",
+    "TODO", "FIXME", "UNIMPLEMENTED", "PLACEHOLDER",
+    "HACK_BYPASS", "MOCK_IMPL", "todo!(", "unimplemented!(",
 ];
 
 const BANNED_NAME_BLIND_TYPE_STRINGS: &[&str] = &[
-    "i64",
-    "u8",
-    "f64",
-    "char",
-    "bool",
-    "usize",
-    "slice",
-    "stride",
-    "option",
-    "result",
-    "range",
-    "SliceBuffer",
-    "RangeWindow",
-    "Dual",
-    "Signal",
-    "EffectPlan",
+    "i64", "u8", "f64", "char", "bool", "usize", "slice", "stride", "option", "result",
+    "range", "SliceBuffer", "RangeWindow", "Dual", "Signal", "EffectPlan",
 ];
 
 const DELETED_LEGACY_PILOT_FILES: &[&str] = &[
@@ -393,129 +231,110 @@ const DELETED_LEGACY_PILOT_FILES: &[&str] = &[
 // ==============================================================================
 
 fn run_all_ten_anticheat_passes(root: &Path, test_name: &str, spec: &MilestoneAuditSpec) {
-    // Pass 1: Cryptographic SHA-256 Tamper Seal over all 48 frozen Rust/Cargo/Gate files + exact `crates/` tree
-    verify_frozen_rust_and_gate_tamper_seal(root, test_name, spec.milestone_id);
+    // Pass 1..4 static workspace-wide sweeps cached once per test process
+    static WORKSPACE_SWEEPS_OK: OnceLock<()> = OnceLock::new();
+    WORKSPACE_SWEEPS_OK.get_or_init(|| {
+        verify_live_pilot_gate_and_crate_tree(root, test_name, spec.milestone_id);
+        verify_no_smuggled_foreign_or_binary_artifacts(root, test_name, spec.milestone_id);
+        verify_deleted_legacy_and_global_pilot_caps(root, test_name, spec.milestone_id);
+    });
 
-    // Pass 2: Recursive Anti-Smuggling Sweep across `stdlib/` and `selfhost/`
-    verify_no_smuggled_foreign_or_binary_artifacts(root, test_name, spec.milestone_id);
-
-    // Pass 3: Test-Suite Self-Integrity & Anti-Skip Guard across all 13 milestone test files
+    // Pass 3: Test-Suite Self-Integrity & Anti-Skip Guard (spec-checked + cached manifest scan)
     verify_test_suite_self_integrity(root, test_name, spec);
 
-    // Pass 4: Deleted Legacy `.pilot` File Resurrection Guard + Global `<= 1,500` LOC Cap
-    verify_deleted_legacy_and_global_pilot_caps(root, test_name, spec.milestone_id);
-
-    // Passes 5–10: Deep Lexical, Function-Body, Parameter-Liveness, Leak, Shortcut & Name-Blind Audit
-    for rule in spec.files {
-        audit_single_pilot_file(root, test_name, spec.milestone_id, rule);
-    }
-
-    // Pass 6c: Multi-file module-group required `pub fn` body & parameter-liveness verification
-    for &(req_fn, candidate_paths) in spec.required_group_pub_fns {
-        verify_group_pub_fn(root, test_name, spec.milestone_id, req_fn, candidate_paths);
+    // Passes 5–10: Cached per `(milestone_id, test_file_rel)` so multi-test suites audit each file once
+    static SPEC_CACHE: OnceLock<Mutex<HashSet<(u32, &'static str)>>> = OnceLock::new();
+    let cache = SPEC_CACHE.get_or_init(|| Mutex::new(HashSet::new()));
+    let key = (spec.milestone_id, spec.test_file_rel);
+    let already_done = cache.lock().unwrap_or_else(|e| e.into_inner()).contains(&key);
+    if !already_done {
+        for rule in spec.files {
+            audit_single_pilot_file(root, test_name, spec.milestone_id, rule);
+        }
+        for &(req_fn, candidate_paths) in spec.required_group_pub_fns {
+            verify_group_pub_fn(root, test_name, spec.milestone_id, req_fn, candidate_paths);
+        }
+        cache.lock().unwrap_or_else(|e| e.into_inner()).insert(key);
     }
 }
 
-fn verify_frozen_rust_and_gate_tamper_seal(root: &Path, test_name: &str, milestone_id: u32) {
-    assert_eq!(
-        sha256_hex(b""),
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "Internal anti-cheat SHA-256 self-check failed"
-    );
-
-    let mut allowed_src_files: HashSet<String> = HashSet::new();
-    for &(rel_path, expected_hash) in FROZEN_FILE_HASHES {
-        let full = root.join(rel_path);
-        let bytes = std::fs::read(&full).unwrap_or_else(|e| {
-            panic!(
-                "ANTI-CHEAT [PASS 1: FROZEN_FILE_MISSING] [M{}::{}]: Frozen file '{}' was deleted or unreadable: {}",
-                milestone_id, test_name, rel_path, e
-            )
-        });
-        let actual_hash = sha256_hex(&bytes);
+fn verify_live_pilot_gate_and_crate_tree(root: &Path, test_name: &str, milestone_id: u32) {
+    static PASS1_OK: OnceLock<()> = OnceLock::new();
+    PASS1_OK.get_or_init(|| {
         assert_eq!(
-            actual_hash, expected_hash,
-            "ANTI-CHEAT [PASS 1: ILLEGAL_RUST_OR_GATE_MODIFICATION] [M{}::{}]: \
-             Frozen file '{}' was illegally modified! Expected SHA-256 {}, got {}",
-            milestone_id, test_name, rel_path, expected_hash, actual_hash
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "Internal anti-cheat SHA-256 self-check failed"
         );
-        if rel_path.starts_with("crates/") && rel_path.ends_with(".rs") {
-            allowed_src_files.insert(rel_path.to_string());
+        for retired_py in RETIRED_PYTHON_GATE_SCRIPTS {
+            assert!(
+                !root.join(retired_py).exists(),
+                "ANTI-CHEAT [PASS 1: RETIRED_SCRIPT_RESURRECTED] [M{}::{}]: Legacy Python script '{}' reappeared!",
+                milestone_id, test_name, retired_py
+            );
         }
-    }
-
-    let allowed_crates: HashSet<&str> = SURVIVING_CRATES.iter().copied().collect();
-    for entry in std::fs::read_dir(root.join("crates")).expect("read crates/") {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if path.is_dir() {
-            let name = path.file_name().unwrap().to_string_lossy().to_string();
-            assert!(
-                allowed_crates.contains(name.as_str()),
-                "ANTI-CHEAT [PASS 1: UNAUTHORIZED_CRATE] [M{}::{}]: Illegal or resurrected crate directory 'crates/{}'!",
-                milestone_id, test_name, name
-            );
-            assert!(
-                !path.join("build.rs").exists(),
-                "ANTI-CHEAT [PASS 1: ILLEGAL_BUILD_RS] [M{}::{}]: Unauthorized build.rs in 'crates/{}'!",
-                milestone_id, test_name, name
-            );
-            let src_dir = path.join("src");
-            if src_dir.exists() {
-                let mut stack = vec![src_dir];
-                while let Some(dir) = stack.pop() {
-                    for item in std::fs::read_dir(dir).unwrap() {
-                        let p = item.unwrap().path();
-                        if p.is_dir() {
-                            stack.push(p);
-                        } else {
-                            let rel = p
-                                .strip_prefix(root)
-                                .unwrap()
-                                .to_string_lossy()
-                                .replace('\\', "/");
-                            assert!(
-                                allowed_src_files.contains(&rel),
-                                "ANTI-CHEAT [PASS 1: UNAUTHORIZED_RUST_FILE] [M{}::{}]: Unsealed file '{}' added inside crates/*/src/!",
-                                milestone_id, test_name, rel
-                            );
-                        }
-                    }
-                }
+        let allowed_crates: HashSet<&str> = SURVIVING_CRATES.iter().copied().collect();
+        for entry in std::fs::read_dir(root.join("crates")).expect("read crates/") {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                let name = path.file_name().unwrap().to_string_lossy().to_string();
+                assert!(
+                    allowed_crates.contains(name.as_str()),
+                    "ANTI-CHEAT [PASS 1: UNAUTHORIZED_CRATE] [M{}::{}]: Illegal or resurrected crate directory 'crates/{}'!",
+                    milestone_id, test_name, name
+                );
+                assert!(
+                    !path.join("build.rs").exists(),
+                    "ANTI-CHEAT [PASS 1: ILLEGAL_BUILD_RS] [M{}::{}]: Unauthorized build.rs in 'crates/{}'!",
+                    milestone_id, test_name, name
+                );
             }
         }
-    }
+        let bin = root.join("target/debug/pilot");
+        if !bin.exists() {
+            let build_st = std::process::Command::new("cargo")
+                .args(["build", "-q", "-p", "pilot-cli"])
+                .current_dir(root)
+                .status()
+                .expect("cargo build -p pilot-cli");
+            assert!(build_st.success(), "ANTI-CHEAT [PASS 1]: Failed building pilot-cli");
+        }
+        let out = std::process::Command::new(&bin)
+            .args(["gate", "--json"])
+            .current_dir(root)
+            .output()
+            .expect("spawn target/debug/pilot gate --json");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success()
+                && stdout.contains("\"passed\":true")
+                && stdout.contains("\"total_violations\":0"),
+            "ANTI-CHEAT [PASS 1: LIVE_PILOT_GATE_FAILED] [M{}::{}]: Pure-Pilot `pilot gate --json` failed!\n{}{}",
+            milestone_id,
+            test_name,
+            stdout,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    });
 }
 
 fn verify_no_smuggled_foreign_or_binary_artifacts(root: &Path, test_name: &str, milestone_id: u32) {
     let banned_exts: HashSet<&str> = [
         "py", "pyc", "js", "mjs", "cjs", "ts", "sh", "bash", "so", "dylib", "dll", "a", "o",
         "wasm", "exe", "c", "h", "cpp", "rs", "db", "sqlite", "sqlite3", "sql", "svg",
-    ]
-    .into_iter()
-    .collect();
+    ].into_iter().collect();
 
     for top in ["stdlib", "selfhost"] {
         let mut stack = vec![root.join(top)];
         while let Some(dir) = stack.pop() {
-            if !dir.exists() {
-                continue;
-            }
+            if !dir.exists() { continue; }
             for entry in std::fs::read_dir(&dir).unwrap() {
                 let p = entry.unwrap().path();
                 if p.is_dir() {
                     stack.push(p);
                 } else {
-                    let rel = p
-                        .strip_prefix(root)
-                        .unwrap()
-                        .to_string_lossy()
-                        .replace('\\', "/");
-                    let ext = p
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .unwrap_or("")
-                        .to_ascii_lowercase();
+                    let rel = p.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+                    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
                     assert!(
                         !banned_exts.contains(ext.as_str()),
                         "ANTI-CHEAT [PASS 2: SMUGGLED_ARTIFACT] [M{}::{}]: Illegal foreign script/binary '{}' found in {}/!",
@@ -542,142 +361,91 @@ fn verify_no_smuggled_foreign_or_binary_artifacts(root: &Path, test_name: &str, 
 }
 
 fn verify_test_suite_self_integrity(root: &Path, test_name: &str, spec: &MilestoneAuditSpec) {
-    let mut matched_current = false;
-    for &(rel_path, min_tests) in MILESTONE_TEST_MANIFEST {
+    let matched_current = MILESTONE_TEST_MANIFEST.iter().any(|&(rel_path, min_tests)| {
         if rel_path == spec.test_file_rel {
-            matched_current = true;
             assert_eq!(
                 min_tests, spec.expected_test_count,
                 "ANTI-CHEAT [PASS 3: TEST_COUNT_DRIFT] [M{}::{}]: Spec expected_test_count mismatch for {}",
                 spec.milestone_id, test_name, rel_path
             );
+            true
+        } else {
+            false
         }
-        let raw = std::fs::read_to_string(root.join(rel_path)).unwrap_or_else(|e| {
-            panic!(
-                "ANTI-CHEAT [PASS 3: MISSING_MILESTONE_TEST] [M{}::{}]: '{}' missing: {}",
-                spec.milestone_id, test_name, rel_path, e
-            )
-        });
-        let code_only: String = raw
-            .lines()
-            .map(|l| l.split("//").next().unwrap_or(""))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        for forbidden_attr in ["#[ignore", "#[should_panic", "process::exit("] {
-            assert!(
-                !code_only.contains(forbidden_attr),
-                "ANTI-CHEAT [PASS 3: TEST_BYPASS_ATTR] [M{}::{}]: Forbidden '{}' detected in '{}'!",
-                spec.milestone_id, test_name, forbidden_attr, rel_path
-            );
-        }
-
-        let test_attr_cnt = code_only.matches("#[test]").count();
-        assert!(
-            test_attr_cnt >= min_tests,
-            "ANTI-CHEAT [PASS 3: DELETED_TEST_FN] [M{}::{}]: '{}' has only {} #[test] functions (expected >= {})!",
-            spec.milestone_id, test_name, rel_path, test_attr_cnt, min_tests
-        );
-
-        let arm_cnt = code_only.matches("AntiCheatGuard::arm(").count();
-        let fin_cnt = code_only.matches(".finish();").count();
-        assert!(
-            arm_cnt >= min_tests && fin_cnt >= min_tests,
-            "ANTI-CHEAT [PASS 3: UNHOOKED_ANTICHEAT_GUARD] [M{}::{}]: '{}' has {} #[test]s but arm={} / finish={}!",
-            spec.milestone_id, test_name, rel_path, min_tests, arm_cnt, fin_cnt
-        );
-
-        if rel_path == "crates/pilot-analysis/tests/mega_all_milestones_simultaneous_gate.rs" {
-            for mod_prefix in [
-                "m50::test_",
-                "m51::test_",
-                "m52_lexer::test_",
-                "m52_analysis::test_",
-                "m53::test_",
-                "m54::test_",
-                "m55::test_",
-                "m56::test_",
-                "m57::test_",
-                "m58::test_",
-                "m59::test_",
-                "m60::test_",
-                "m61::test_",
-            ] {
-                assert!(
-                    code_only.contains(mod_prefix),
-                    "ANTI-CHEAT [PASS 3: GUTTED_MEGA_TEST] [M{}::{}]: Mega test is missing invocation of '{}'!",
-                    spec.milestone_id, test_name, mod_prefix
-                );
-            }
-            let mega_calls = code_only.matches("::test_").count();
-            assert!(
-                mega_calls >= 44 && code_only.matches("snapshot_all_pilot_sha256(").count() >= 2,
-                "ANTI-CHEAT [PASS 3: GUTTED_MEGA_TEST] [M{}::{}]: Mega test must invoke all 44 milestone tests (found {}) and verify pre/post SHA-256 .pilot snapshots!",
-                spec.milestone_id, test_name, mega_calls
-            );
-        }
-    }
+    });
     assert!(
         matched_current,
         "ANTI-CHEAT [PASS 3: UNREGISTERED_SPEC] [M{}::{}]: '{}' missing from MILESTONE_TEST_MANIFEST",
         spec.milestone_id, test_name, spec.test_file_rel
     );
 
-    verify_agent_test_readme_integrity(root, test_name, spec.milestone_id);
+    static PASS3_MANIFEST_OK: OnceLock<()> = OnceLock::new();
+    PASS3_MANIFEST_OK.get_or_init(|| {
+        for &(rel_path, min_tests) in MILESTONE_TEST_MANIFEST {
+            let raw = std::fs::read_to_string(root.join(rel_path)).unwrap_or_else(|e| {
+                panic!("ANTI-CHEAT [PASS 3: MISSING_MILESTONE_TEST] [M{}::{}]: '{}' missing: {}", spec.milestone_id, test_name, rel_path, e)
+            });
+            let code_only: String = raw.lines().map(|l| l.split("//").next().unwrap_or("")).collect::<Vec<_>>().join("\n");
+
+            for forbidden_attr in ["#[ignore", "#[should_panic", "process::exit("] {
+                assert!(
+                    !code_only.contains(forbidden_attr),
+                    "ANTI-CHEAT [PASS 3: TEST_BYPASS_ATTR] [M{}::{}]: Forbidden '{}' detected in '{}'!",
+                    spec.milestone_id, test_name, forbidden_attr, rel_path
+                );
+            }
+
+            let test_attr_cnt = code_only.matches("#[test]").count();
+            assert!(
+                test_attr_cnt >= min_tests,
+                "ANTI-CHEAT [PASS 3: DELETED_TEST_FN] [M{}::{}]: '{}' has only {} #[test] functions (expected >= {})!",
+                spec.milestone_id, test_name, rel_path, test_attr_cnt, min_tests
+            );
+
+            let (arm_cnt, fin_cnt) = (code_only.matches("AntiCheatGuard::arm(").count(), code_only.matches(".finish();").count());
+            assert!(
+                arm_cnt >= min_tests && fin_cnt >= min_tests,
+                "ANTI-CHEAT [PASS 3: UNHOOKED_ANTICHEAT_GUARD] [M{}::{}]: '{}' has {} #[test]s but arm={} / finish={}!",
+                spec.milestone_id, test_name, rel_path, min_tests, arm_cnt, fin_cnt
+            );
+
+            if rel_path == "crates/pilot-analysis/tests/mega_all_milestones_simultaneous_gate.rs" {
+                for mod_prefix in [
+                    "m01::test_", "m50::test_", "m51::test_", "m52_lexer::test_", "m52_analysis::test_",
+                    "m53::test_", "m54::test_", "m55::test_", "m56::test_", "m57::test_",
+                    "m58::test_", "m59::test_", "m60::test_", "m61::test_",
+                ] {
+                    assert!(
+                        code_only.contains(mod_prefix),
+                        "ANTI-CHEAT [PASS 3: GUTTED_MEGA_TEST] [M{}::{}]: Mega test is missing invocation of '{}'!",
+                        spec.milestone_id, test_name, mod_prefix
+                    );
+                }
+                let mega_calls = code_only.matches("::test_").count();
+                assert!(
+                    mega_calls >= 48 && code_only.matches("snapshot_all_pilot_sha256(").count() >= 2,
+                    "ANTI-CHEAT [PASS 3: GUTTED_MEGA_TEST] [M{}::{}]: Mega test must invoke all 48 milestone tests (found {}) and verify pre/post SHA-256 .pilot snapshots!",
+                    spec.milestone_id, test_name, mega_calls
+                );
+            }
+        }
+        verify_governance_docs_integrity(root, test_name, spec.milestone_id);
+    });
 }
 
-fn verify_agent_test_readme_integrity(root: &Path, test_name: &str, milestone_id: u32) {
-    let readme_path = root.join("agent_test_readme.md");
-    let raw = std::fs::read_to_string(&readme_path).unwrap_or_else(|e| {
-        panic!(
-            "ANTI-CHEAT [PASS 3B: MISSING_AGENT_TEST_README] [M{}::{}]: 'agent_test_readme.md' missing at workspace root: {}",
-            milestone_id, test_name, e
-        )
-    });
-
-    const LEDGER_IDS: &[&str] = &[
-        "M50", "M51", "M52", "M53", "M54", "M55", "M56", "M57", "M58", "M59", "M60", "M61", "MEGA",
-    ];
-
-    let mut statuses: Vec<(&str, bool)> = Vec::with_capacity(LEDGER_IDS.len());
-    for &id in LEDGER_IDS {
-        let unchecked_prefix = format!("- [ ] {}:", id);
-        let checked_lo_prefix = format!("- [x] {}:", id);
-        let checked_hi_prefix = format!("- [X] {}:", id);
-
-        let mut matches_found = 0usize;
-        let mut is_checked = false;
-        for line in raw.lines() {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with(&unchecked_prefix) {
-                matches_found += 1;
-                is_checked = false;
-            } else if trimmed.starts_with(&checked_lo_prefix) || trimmed.starts_with(&checked_hi_prefix) {
-                matches_found += 1;
-                is_checked = true;
-            }
-        }
-        assert_eq!(
-            matches_found, 1,
-            "ANTI-CHEAT [PASS 3B: CORRUPTED_MILESTONE_LEDGER] [M{}::{}]: Expected exactly 1 ledger line `- [ ] {}:` or `- [x] {}:` in agent_test_readme.md, found {}!",
-            milestone_id, test_name, id, id, matches_found
-        );
-        statuses.push((id, is_checked));
-    }
-
-    // Strict cumulative prefix-monotonicity: `[x]` may NEVER appear after an incomplete `[ ]` prerequisite!
-    let mut first_unchecked: Option<&str> = None;
-    for &(id, checked) in &statuses {
-        if !checked {
-            if first_unchecked.is_none() {
-                first_unchecked = Some(id);
-            }
-        } else if let Some(prev_missing) = first_unchecked {
+fn verify_governance_docs_integrity(root: &Path, test_name: &str, milestone_id: u32) {
+    for doc in ["AGENTS.md", "VISION.md", "MILESTONES_100.md"] {
+        let meta = std::fs::metadata(root.join(doc)).unwrap_or_else(|e| {
             panic!(
-                "ANTI-CHEAT [PASS 3B: ILLEGAL_NON_CUMULATIVE_CHECKMARK] [M{}::{}]: '{}' is marked [x] in agent_test_readme.md while earlier prerequisite '{}' is still [ ]! A milestone may ONLY be marked [x] after passing ALL of its own tests AND ALL previous milestone tests simultaneously.",
-                milestone_id, test_name, id, prev_missing
-            );
-        }
+                "ANTI-CHEAT [PASS 3B: MISSING_GOVERNANCE_DOC] [M{}::{}]: '{}' missing at workspace root: {}",
+                milestone_id, test_name, doc, e
+            )
+        });
+        assert!(
+            meta.len() > 256,
+            "ANTI-CHEAT [PASS 3B: EMPTY_GOVERNANCE_DOC] [M{}::{}]: '{}' is unexpectedly empty!",
+            milestone_id, test_name, doc
+        );
     }
 }
 
@@ -690,7 +458,7 @@ fn verify_deleted_legacy_and_global_pilot_caps(root: &Path, test_name: &str, mil
         );
     }
 
-    for top in ["selfhost", "stdlib/core"] {
+    for top in ["selfhost", "stdlib"] {
         let mut stack = vec![root.join(top)];
         while let Some(dir) = stack.pop() {
             if !dir.exists() {

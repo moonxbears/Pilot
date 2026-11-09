@@ -1,0 +1,380 @@
+// ==============================================================================
+// FILE: selfhost/gate/runner.pilot
+// Milestone 1: Unified Pure-Pilot Architectural Gate Orchestrator (`pilot gate`)
+// Open-registry dispatcher supporting fast default checks, `--full`, `--only`,
+// `--litmus`, `--seed`, `--json`, and `--ratchet-update` (`0`/`1`/`2` exit codes).
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Gate.Runner;
+
+use stdlib.crypto.hash.*;
+use selfhost.lexer.*;
+use selfhost.ast.*;
+use selfhost.parser.*;
+use selfhost.pilotc.*;
+use selfhost.gate.manifest.*;
+use selfhost.gate.seed_audit.*;
+use selfhost.gate.rename_litmus.*;
+use selfhost.gate.bootstrap_parity.*;
+
+fn gr_reg_gate(reg: i64, ids: i64, gid: str, cat: GateCategory, fast_def: bool) -> usize {
+    let entry = __engine("map_new");
+    __engine("map_set", entry, "id", gid);
+    __engine("map_set", entry, "category", cat);
+    __engine("map_set", entry, "fast_default", fast_def);
+    __engine("map_set", reg, gid, entry);
+    return glist_push(ids, gid);
+}
+
+pub fn build_gate_registry() -> i64 {
+    let reg = __engine("map_new");
+    let ids = glist_new();
+    let _ = gr_reg_gate(reg, ids, "adaptability", GateCategoryId.Adaptability, true);
+    let _ = gr_reg_gate(reg, ids, "hygiene", GateCategoryId.Hygiene, true);
+    let _ = gr_reg_gate(reg, ids, "rename_litmus", GateCategoryId.Adaptability, false);
+    let _ = gr_reg_gate(reg, ids, "bootstrap_parity", GateCategoryId.BootstrapParity, false);
+    __engine("map_set", reg, "__ids__", ids);
+    return reg;
+}
+
+pub fn gate_help_banner() -> str {
+    return "Pilot Architectural Gate Suite (pilot gate)\n" +
+           "Usage: pilot gate [options]\n\n" +
+           "Options:\n" +
+           "  --full             Run all gates including Dual-Pass Rename Litmus & Stage-3 Parity\n" +
+           "  --only <id>        Run a single registered gate (adaptability|hygiene|rename_litmus|bootstrap_parity)\n" +
+           "  --litmus           Include Dual-Pass Universal Rename Litmus gate\n" +
+           "  --seed <u64>       Deterministic seed for Pass-1 Rename Litmus & Bootstrap Parity\n" +
+           "  --json             Emit machine-readable JSON gate report\n" +
+           "  --ratchet-update   Tighten CrateCeilingRule LOC caps downward to live Rust LOC\n" +
+           "  -h, --help         Show this help message";
+}
+
+fn gr_parse_u64(s: str) -> i64 {
+    let n = s.len();
+    if n == 0 { return -1; }
+    var acc = 0;
+    var i = 0;
+    while i < n {
+        let b = s.byte_at(i);
+        if b < 48 || b > 57 { return -1; }
+        acc = acc * 10 + (b - 48);
+        i = i + 1;
+    }
+    return acc;
+}
+
+fn gr_split_ws(raw: str) -> i64 {
+    let toks = glist_new();
+    let n = raw.len();
+    var i = 0;
+    while i < n {
+        while i < n {
+            let b = raw.byte_at(i);
+            if b != 32 && b != 9 && b != 10 && b != 13 { break; }
+            i = i + 1;
+        }
+        if i >= n { break; }
+        let st = i;
+        while i < n {
+            let b = raw.byte_at(i);
+            if b == 32 || b == 9 || b == 10 || b == 13 { break; }
+            i = i + 1;
+        }
+        let _ = glist_push(toks, raw.slice(st, i));
+    }
+    return toks;
+}
+
+pub fn default_gate_options() -> GateRunOptions {
+    return GateRunOptions {
+        full: false,
+        only_id: "",
+        json: false,
+        litmus: false,
+        seed: 0,
+        ratchet_update: false,
+        show_help: false,
+        invalid_flag: "",
+    };
+}
+
+pub fn parse_gate_cli_args(raw_args: str) -> GateRunOptions {
+    let toks = gr_split_ws(raw_args);
+    let n = glist_len(toks);
+    let reg = build_gate_registry();
+    var full = false;
+    var only_id = "";
+    var json = false;
+    var litmus = false;
+    var seed = 0;
+    var ratchet = false;
+    var show_help = false;
+    var invalid = "";
+
+    var i = 0;
+    while i < n {
+        let arg = glist_get(toks, i);
+        if arg == "--full" {
+            full = true;
+            i = i + 1;
+        } else if arg == "--json" {
+            json = true;
+            i = i + 1;
+        } else if arg == "--litmus" {
+            litmus = true;
+            i = i + 1;
+        } else if arg == "--ratchet-update" {
+            ratchet = true;
+            i = i + 1;
+        } else if arg == "-h" || arg == "--help" || arg == "help" {
+            show_help = true;
+            i = i + 1;
+        } else if arg == "--only" {
+            if i + 1 >= n {
+                invalid = "--only requires a gate id";
+                i = n;
+            } else {
+                let gid = glist_get(toks, i + 1);
+                let found = __engine("map_get", reg, gid);
+                if found.len() == 0 {
+                    invalid = "unknown gate id: " + gid;
+                } else {
+                    only_id = gid;
+                }
+                i = i + 2;
+            }
+        } else if arg == "--seed" {
+            if i + 1 >= n {
+                invalid = "--seed requires a numeric seed";
+                i = n;
+            } else {
+                let parsed = gr_parse_u64(glist_get(toks, i + 1));
+                if parsed < 0 {
+                    invalid = "invalid numeric seed: " + glist_get(toks, i + 1);
+                } else {
+                    seed = parsed;
+                }
+                i = i + 2;
+            }
+        } else {
+            invalid = "unknown flag: " + arg;
+            i = n;
+        }
+    }
+
+    return GateRunOptions {
+        full: full,
+        only_id: only_id,
+        json: json,
+        litmus: litmus,
+        seed: seed,
+        ratchet_update: ratchet,
+        show_help: show_help,
+        invalid_flag: invalid,
+    };
+}
+
+pub fn run_gate_by_id(workspace_root: str, gate_id: str, opts: ref<GateRunOptions>) -> opt<GateReport> {
+    if gate_id == "adaptability" {
+        return execute_adaptability_gate(workspace_root, opts);
+    }
+    if gate_id == "hygiene" {
+        return execute_hygiene_and_ratchet_gate(workspace_root, opts);
+    }
+    if gate_id == "rename_litmus" {
+        return execute_dual_pass_rename_gate(workspace_root, opts);
+    }
+    if gate_id == "bootstrap_parity" {
+        return execute_bootstrap_parity_gate(workspace_root, opts);
+    }
+    return __engine("get_env");
+}
+
+pub fn run_all_gates(workspace_root: str, opts: ref<GateRunOptions>) -> List<GateReport> {
+    let reports = glist_new();
+    let reg = build_gate_registry();
+    let ids = __engine("map_get", reg, "__ids__");
+    let n_ids = glist_len(ids);
+
+    if opts.only_id.len() > 0 {
+        let single = run_gate_by_id(workspace_root, opts.only_id, opts);
+        if single.gate_id.len() > 0 {
+            let _ = glist_push(reports, single);
+        }
+        return reports;
+    }
+
+    var i = 0;
+    while i < n_ids {
+        let gid = glist_get(ids, i);
+        let desc = __engine("map_get", reg, gid);
+        let is_fast = __engine("map_get", desc, "fast_default") == true;
+        let should_run = opts.full == true || is_fast || (opts.litmus == true && gid == "rename_litmus");
+        if should_run {
+            let rep = run_gate_by_id(workspace_root, gid, opts);
+            let _ = glist_push(reports, rep);
+        }
+        i = i + 1;
+    }
+    return reports;
+}
+
+pub fn apply_ratchet_update(workspace_root: str) -> str {
+    let root = resolve_workspace_root(workspace_root);
+    let mf_path = gm_join_path(root, "selfhost/gate/manifest.pilot");
+    var mf_src = gate_fs_read_text(mf_path);
+    if mf_src.len() == 0 {
+        return "ERROR: unable to read selfhost/gate/manifest.pilot";
+    }
+    let crate_sums = __engine("map_new");
+    let rs_files = gm_split_lines(gate_fs_walk_files(gm_join_path(root, "crates")));
+    var fi = 0;
+    while fi < glist_len(rs_files) {
+        let fp = glist_get(rs_files, fi);
+        if gm_ends_with(fp, ".rs") && gm_contains(fp, "/src/") {
+            let cidx = gm_find(fp, "crates/", 0);
+            let sidx = gm_find(fp, "/src/", cidx);
+            if cidx >= 0 && sidx > cidx {
+                let ckey = fp.slice(cidx, sidx);
+                let prev = __engine("map_get", crate_sums, ckey) + 0;
+                __engine("map_set", crate_sums, ckey, prev + gm_count_lines(gate_fs_read_text(fp)));
+            }
+        }
+        fi = fi + 1;
+    }
+
+    let reg = build_crate_ceiling_registry();
+    let keys = __engine("map_get", reg, "__keys__");
+    var tightened = 0;
+    var ki = 0;
+    while ki < glist_len(keys) {
+        let cpath = glist_get(keys, ki);
+        let rule = __engine("map_get", reg, cpath);
+        if rule.must_be_absent == false {
+            let live_loc = __engine("map_get", crate_sums, cpath) + 0;
+            if live_loc > 0 && live_loc < rule.max_loc {
+                let old_pat = "\"" + cpath + "\", " + rule.max_loc + ", false";
+                let new_pat = "\"" + cpath + "\", " + live_loc + ", false";
+                let p = gm_find(mf_src, old_pat, 0);
+                if p >= 0 {
+                    mf_src = mf_src.slice(0, p) + new_pat + mf_src.slice(p + old_pat.len(), mf_src.len());
+                    tightened = tightened + 1;
+                }
+            }
+        }
+        ki = ki + 1;
+    }
+    if tightened > 0 {
+        let _ = gate_fs_write_text(mf_path, mf_src);
+    }
+    return "Ratchet update complete: tightened " + tightened + " crate ceiling(s).";
+}
+
+pub fn format_gate_reports_json(reports: List<GateReport>) -> str {
+    let n = glist_len(reports);
+    var all_passed = true;
+    var total_viols = 0;
+    var gates_json = "";
+    var i = 0;
+    while i < n {
+        let rep = glist_get(reports, i);
+        let vcount = glist_len(rep.violations);
+        total_viols = total_viols + vcount;
+        if rep.passed == false { all_passed = false; }
+
+        var viols_json = "";
+        var vi = 0;
+        while vi < vcount {
+            let v = glist_get(rep.violations, vi);
+            if vi > 0 { viols_json = viols_json + ","; }
+            viols_json = viols_json +
+                "{\"code\":\"" + gm_json_escape(v.code) +
+                "\",\"file\":\"" + gm_json_escape(v.file_path) +
+                "\",\"line\":" + v.line +
+                ",\"column\":" + v.column +
+                ",\"snippet\":\"" + gm_json_escape(v.offending_snippet) +
+                "\",\"message\":\"" + gm_json_escape(v.message) +
+                "\",\"remediation\":\"" + gm_json_escape(v.remediation) + "\"}";
+            vi = vi + 1;
+        }
+
+        if i > 0 { gates_json = gates_json + ","; }
+        gates_json = gates_json +
+            "{\"id\":\"" + gm_json_escape(rep.gate_id) +
+            "\",\"category\":\"" + gate_category_name(rep.category) +
+            "\",\"passed\":" + (if rep.passed == true { "true" } else { "false" }) +
+            ",\"elapsed_us\":" + rep.elapsed_us +
+            ",\"items_scanned\":" + rep.items_scanned +
+            ",\"violations\":[" + viols_json + "]}";
+        i = i + 1;
+    }
+
+    return "{\"passed\":" + (if all_passed { "true" } else { "false" }) +
+           ",\"gate_count\":" + n +
+           ",\"total_violations\":" + total_viols +
+           ",\"gates\":[" + gates_json + "]}";
+}
+
+pub fn format_gate_reports_human(reports: List<GateReport>) -> str {
+    let n = glist_len(reports);
+    var all_passed = true;
+    var total_viols = 0;
+    var out = "=== Pilot Pure-Pilot Architectural Gate Runner ===\n";
+    var i = 0;
+    while i < n {
+        let rep = glist_get(reports, i);
+        let vcount = glist_len(rep.violations);
+        total_viols = total_viols + vcount;
+        if rep.passed == false { all_passed = false; }
+        let badge = if rep.passed == true { "[PASS]" } else { "[FAIL]" };
+        out = out + "  " + badge + " " + rep.gate_id +
+              " (" + gate_category_name(rep.category) + ", scanned=" + rep.items_scanned +
+              ", " + rep.elapsed_us + " us)\n";
+        var vi = 0;
+        while vi < vcount {
+            let v = glist_get(rep.violations, vi);
+            out = out + "    -> " + v.code + " at " + v.file_path + ":" + v.line + ":" + v.column +
+                  " [" + v.offending_snippet + "]: " + v.message + "\n" +
+                  "       fix: " + v.remediation + "\n";
+            vi = vi + 1;
+        }
+        i = i + 1;
+    }
+    if all_passed {
+        out = out + "RESULT: ALL " + n + " GATE(S) PASSED (0 violations)";
+    } else {
+        out = out + "RESULT: FAILED (" + total_viols + " blocker violation(s) across " + n + " gate(s))";
+    }
+    return out;
+}
+
+pub fn run_pilot_gate_cli(workspace_root: str, raw_args: str) -> str {
+    let opts = parse_gate_cli_args(raw_args);
+    if opts.invalid_flag.len() > 0 {
+        if opts.json == true {
+            return "2\n{\"passed\":false,\"error\":\"" + gm_json_escape(opts.invalid_flag) + "\"}";
+        }
+        return "2\nError: " + opts.invalid_flag + "\n\n" + gate_help_banner();
+    }
+    if opts.show_help == true {
+        return "0\n" + gate_help_banner();
+    }
+    if opts.ratchet_update == true {
+        return "0\n" + apply_ratchet_update(workspace_root);
+    }
+    let reports = run_all_gates(workspace_root, opts);
+    var all_ok = true;
+    var i = 0;
+    while i < glist_len(reports) {
+        let r = glist_get(reports, i);
+        if r.passed == false { all_ok = false; }
+        i = i + 1;
+    }
+    let code = if all_ok { "0" } else { "1" };
+    let body = if opts.json == true {
+        format_gate_reports_json(reports)
+    } else {
+        format_gate_reports_human(reports)
+    };
+    return code + "\n" + body;
+}

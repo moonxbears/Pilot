@@ -1,0 +1,907 @@
+// ==============================================================================
+// FILE: selfhost/gate/seed_audit.pilot
+// Milestone 1: Pure-Pilot Name-Blind Seed Scanner, Dynamic Core Vocabulary
+// Harvester, [EnforceCoreNaming] & RING001 Verifier, and LOC Ratchet Auditor.
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Gate.SeedAudit;
+
+pub pure fn sa_is_upper(b: i64) -> bool {
+    return b >= 65 && b <= 90;
+}
+
+pub pure fn sa_is_lower(b: i64) -> bool {
+    return b >= 97 && b <= 122;
+}
+
+pub pure fn sa_is_id_char(b: i64) -> bool {
+    return sa_is_upper(b) || sa_is_lower(b) || (b >= 48 && b <= 57) || b == 95;
+}
+
+fn sa_make_violation(
+    code: str,
+    fpath: str,
+    ln: usize,
+    col: usize,
+    snip: str,
+    msg: str,
+    fix: str
+) -> GateViolation {
+    return GateViolation {
+        code: code,
+        file_path: fpath,
+        line: ln,
+        column: col,
+        offending_snippet: snip,
+        message: msg,
+        remediation: fix,
+    };
+}
+
+fn sa_line_at(src: str, line_start: i64) -> str {
+    let n = src.len();
+    var e = line_start;
+    while e < n {
+        let b = src.byte_at(e);
+        if b == 10 || b == 13 { break; }
+        e = e + 1;
+    }
+    return src.slice(line_start, e);
+}
+
+fn sa_offset_line(src: str, byte_pos: i64) -> usize {
+    var ln = 1;
+    var i = 0;
+    let lim = if byte_pos < src.len() { byte_pos } else { src.len() };
+    while i < lim {
+        if src.byte_at(i) == 10 { ln = ln + 1; }
+        i = i + 1;
+    }
+    return ln;
+}
+
+fn sa_strip_rel_prefix(workspace_root: str, full_path: str) -> str {
+    if workspace_root == "." || workspace_root.len() == 0 {
+        if gm_starts_with(full_path, "./") {
+            return full_path.slice(2, full_path.len());
+        }
+        return full_path;
+    }
+    let pfx = if workspace_root.byte_at(workspace_root.len() - 1) == 47 {
+        workspace_root
+    } else {
+        workspace_root + "/"
+    };
+    if gm_starts_with(full_path, pfx) {
+        return full_path.slice(pfx.len(), full_path.len());
+    }
+    return full_path;
+}
+
+// ------------------------------------------------------------------------------
+// 1. Dynamic `stdlib/core/` Vocabulary Harvester & `[EnforceCoreNaming]` Audit
+// ------------------------------------------------------------------------------
+
+fn sa_check_core_type_naming(
+    rel_path: str,
+    kind_kw: str,
+    name: str,
+    has_lang_attr: bool,
+    is_partial: bool,
+    inherits_attr: bool,
+    violations: i64
+) -> i64 {
+    if name.len() == 0 { return 0; }
+    let b0 = name.byte_at(0);
+    if kind_kw == nameof(interface) {
+        let ok_iface = name.len() >= 2 && b0 == 73 && sa_is_upper(name.byte_at(1));
+        if !ok_iface {
+            let _ = glist_push(violations, sa_make_violation(
+                "GATE007", rel_path, 1, 1, name,
+                "Core interface must start with 'I' + PascalCase under [EnforceCoreNaming]",
+                "Rename interface to start with 'I' followed by PascalCase"
+            ));
+        }
+        return 1;
+    }
+    if name.len() >= 2 && b0 == 73 && sa_is_upper(name.byte_at(1)) {
+        let _ = glist_push(violations, sa_make_violation(
+            "GATE007", rel_path, 1, 1, name,
+            "Struct uses reserved 'I' + PascalCase interface prefix under [EnforceCoreNaming]",
+            "Remove leading 'I' prefix or declare as an interface"
+        ));
+    }
+    if inherits_attr && !gm_ends_with(name, "Attr") {
+        let _ = glist_push(violations, sa_make_violation(
+            "GATE007", rel_path, 1, 1, name,
+            "IAttribute struct must end with 'Attr' suffix under [EnforceCoreNaming]",
+            "Append 'Attr' to the attribute struct declaration name"
+        ));
+    }
+    if !has_lang_attr && !is_partial && !sa_is_upper(b0) {
+        let _ = glist_push(violations, sa_make_violation(
+            "GATE007", rel_path, 1, 1, name,
+            "Non-[Lang] primary core struct must use PascalCase under [EnforceCoreNaming]",
+            "Rename struct to PascalCase or bind as a [Lang] primitive"
+        ));
+    }
+    return 1;
+}
+
+fn sa_scan_inherits_attr(tape: i64, start_idx: i64, limit_idx: i64) -> bool {
+    var k = start_idx;
+    while k < limit_idx {
+        let t = sh_token_text(tape, k);
+        if t == "{" || t == ";" { return false; }
+        if t == "IAttribute" { return true; }
+        k = k + 1;
+    }
+    return false;
+}
+
+fn sa_prev_has_lang_attr(tape: i64, kw_idx: i64) -> bool {
+    var k = kw_idx - 1;
+    var steps = 0;
+    while k >= 0 && steps < 28 {
+        let t = sh_token_text(tape, k);
+        if t == ";" || t == "}" { return false; }
+        if t == "Lang" { return true; }
+        k = k - 1;
+        steps = steps + 1;
+    }
+    return false;
+}
+
+fn sa_prev_is_partial(tape: i64, kw_idx: i64) -> bool {
+    var k = kw_idx - 1;
+    var steps = 0;
+    while k >= 0 && steps < 6 {
+        let t = sh_token_text(tape, k);
+        if t == "partial" { return true; }
+        if t == ";" || t == "}" || t == "]" { return false; }
+        k = k - 1;
+        steps = steps + 1;
+    }
+    return false;
+}
+
+fn sa_harvest_distributive_block(
+    tape: i64,
+    open_brace_idx: i64,
+    kind_kw: str,
+    block_is_partial: bool,
+    enforce_naming: bool,
+    rel_path: str,
+    seed_reg: ref<SeedTokenRegistry>,
+    vocab: i64,
+    violations: i64
+) -> i64 {
+    let close_idx = sh_token_matching_bracket(tape, open_brace_idx);
+    if close_idx <= open_brace_idx { return open_brace_idx + 1; }
+    var j = open_brace_idx + 1;
+    var item_has_lang = false;
+    while j < close_idx {
+        let tag = sh_token_tag(tape, j);
+        let txt = sh_token_text(tape, j);
+        if tag == "LBracket" {
+            let rb = sh_token_matching_bracket(tape, j);
+            var ak = j + 1;
+            while ak < rb {
+                if sh_token_text(tape, ak) == "Lang" { item_has_lang = true; }
+                ak = ak + 1;
+            }
+            j = if rb > j { rb + 1 } else { j + 1 };
+        } else if tag == "LBrace" {
+            let mb = sh_token_matching_bracket(tape, j);
+            item_has_lang = false;
+            j = if mb > j { mb + 1 } else { j + 1 };
+        } else if (tag == "Ident" || tag == "SeedKw") && j + 1 < close_idx {
+            let nx = sh_token_text(tape, j + 1);
+            if nx == "<" || nx == ":" || nx == "{" || nx == ";" {
+                if !seed_registry_contains(seed_reg, txt) && txt != "pub" && txt != "priv" {
+                    let _ = gset_insert(vocab, txt);
+                }
+                if enforce_naming {
+                    let inh_attr = sa_scan_inherits_attr(tape, j + 1, close_idx);
+                    let _ = sa_check_core_type_naming(
+                        rel_path, kind_kw, txt, item_has_lang, block_is_partial, inh_attr, violations
+                    );
+                }
+                item_has_lang = false;
+                // Advance to matching `}` or `;` of this distributive member
+                var k = j + 1;
+                while k < close_idx {
+                    let kt = sh_token_text(tape, k);
+                    if kt == "{" {
+                        let cb = sh_token_matching_bracket(tape, k);
+                        j = if cb > k { cb + 1 } else { k + 1 };
+                        break;
+                    }
+                    if kt == ";" {
+                        j = k + 1;
+                        break;
+                    }
+                    k = k + 1;
+                }
+                if k >= close_idx { j = close_idx; }
+            } else {
+                j = j + 1;
+            }
+        } else {
+            j = j + 1;
+        }
+    }
+    return close_idx + 1;
+}
+
+pub fn harvest_core_vocabulary_and_audit(
+    workspace_root: str,
+    seed_reg: ref<SeedTokenRegistry>,
+    violations: i64
+) -> Map<str, bool> {
+    let vocab = gset_new();
+    let core_dir = gm_join_path(workspace_root, "stdlib/core");
+    let raw_files = gate_fs_walk_files(core_dir);
+    let files = gm_split_lines(raw_files);
+    let n_files = glist_len(files);
+    var fi = 0;
+    while fi < n_files {
+        let fpath = glist_get(files, fi);
+        if gm_ends_with(fpath, ".pilot") {
+            let rel = sa_strip_rel_prefix(workspace_root, fpath);
+            let src = gate_fs_read_text(fpath);
+            // RING001: Freestanding `stdlib/core/` check
+            if gm_contains(src, "Pilot.Io.") || gm_contains(src, "Pilot.Net.") || gm_contains(src, "Pilot.Os.") || gm_contains(src, "lib \"libc\"") {
+                let _ = glist_push(violations, sa_make_violation(
+                    "GATE007", rel, 1, 1, "RING001",
+                    "RING001 freestanding violation: stdlib/core/ must have zero OS/IO/Net/libc imports",
+                    "Move hosted OS/filesystem/network bindings to Ring 2 (stdlib/)"
+                ));
+            }
+            let enforce_naming = gm_contains(src, "[EnforceCoreNaming]");
+            if gm_contains(src, nameof(struct)) || gm_contains(src, nameof(interface)) {
+                let tape = sh_tokenize(src);
+                let count = sh_token_count(tape);
+                var i = 0;
+                while i < count {
+                    let txt = sh_token_text(tape, i);
+                    if (txt == nameof(struct) || txt == nameof(interface)) && i + 1 < count {
+                        let is_part = sa_prev_is_partial(tape, i);
+                        let nx_txt = sh_token_text(tape, i + 1);
+                        if nx_txt == "{" {
+                            i = sa_harvest_distributive_block(
+                                tape, i + 1, txt, is_part, enforce_naming, rel, seed_reg, vocab, violations
+                            );
+                        } else {
+                            let nx_tag = sh_token_tag(tape, i + 1);
+                            if nx_tag == "Ident" || nx_tag == "SeedKw" {
+                                if !seed_registry_contains(seed_reg, nx_txt) {
+                                    let _ = gset_insert(vocab, nx_txt);
+                                }
+                                if enforce_naming {
+                                    let has_lang = sa_prev_has_lang_attr(tape, i);
+                                    let inh_attr = sa_scan_inherits_attr(tape, i + 2, count);
+                                    let _ = sa_check_core_type_naming(
+                                        rel, txt, nx_txt, has_lang, is_part, inh_attr, violations
+                                    );
+                                }
+                            }
+                            i = i + 2;
+                        }
+                    } else {
+                        i = i + 1;
+                    }
+                }
+            }
+        }
+        fi = fi + 1;
+    }
+    return vocab;
+}
+
+pub fn harvest_core_vocabulary(workspace_root: str, seed_reg: ref<SeedTokenRegistry>) -> Map<str, bool> {
+    let dummy_viols = glist_new();
+    return harvest_core_vocabulary_and_audit(workspace_root, seed_reg, dummy_viols);
+}
+
+// ------------------------------------------------------------------------------
+// 2. Lexer-Aware Rust Source Name-Blind, Dead-Code & Stub Auditor
+// ------------------------------------------------------------------------------
+
+fn sa_is_bridge_exemption(rs_path: str, cur_line: str) -> bool {
+    if gm_ends_with(rs_path, "pilot-analysis/src/comptime.rs") && gm_contains(cur_line, "env_m.insert(") {
+        return true;
+    }
+    if gm_ends_with(rs_path, "pilot-ast/src/lib.rs") && gm_contains(cur_line, "Self::") {
+        return true;
+    }
+    if gm_ends_with(rs_path, "pilot-parser/src/lib.rs") && gm_contains(cur_line, "=> Union") {
+        return true;
+    }
+    if gm_ends_with(rs_path, "pilot-vm/src/lib.rs") && (gm_contains(cur_line, "str_slice") || gm_contains(cur_line, "if name ==")) {
+        return true;
+    }
+    if gm_ends_with(rs_path, "pilot-cli/src/main.rs") && (gm_contains(cur_line, "cmd_from(") || gm_contains(cur_line, "cmd_map(")) {
+        return true;
+    }
+    return false;
+}
+
+fn sa_check_word_list_in_code(
+    rs_path: str,
+    code_only: str,
+    raw_src: str,
+    banned_list: i64,
+    code_tag: str,
+    msg_prefix: str,
+    violations: i64
+) -> i64 {
+    let n = glist_len(banned_list);
+    var i = 0;
+    while i < n {
+        let pat = glist_get(banned_list, i);
+        let pos = gm_find(code_only, pat, 0);
+        if pos >= 0 {
+            let ok_word = if sa_is_id_char(pat.byte_at(0)) {
+                let pre_ok = pos == 0 || !sa_is_id_char(code_only.byte_at(pos - 1));
+                let end_p = pos + pat.len();
+                let post_ok = end_p >= code_only.len() || !sa_is_id_char(code_only.byte_at(end_p));
+                pre_ok && post_ok
+            } else {
+                true
+            };
+            if ok_word {
+                let ln = sa_offset_line(raw_src, pos);
+                let _ = glist_push(violations, sa_make_violation(
+                    code_tag, rs_path, ln, 1, pat,
+                    msg_prefix + pat,
+                    "Remove forbidden legacy or stub symbol from Rust bootstrap seed"
+                ));
+            }
+        }
+        i = i + 1;
+    }
+    return 1;
+}
+
+pub pure fn verify_rust_source_name_blind(
+    rs_path: str,
+    rs_source: str,
+    seed_reg: ref<SeedTokenRegistry>,
+    forbidden_pilot_syms: ref<Map<str, bool>>
+) -> List<GateViolation> {
+    let violations = glist_new();
+    let is_types_rs = gm_ends_with(rs_path, "pilot-analysis/src/types.rs");
+    let is_infer_rs = gm_ends_with(rs_path, "pilot-analysis/src/infer.rs");
+    let is_analysis_rs = gm_contains(rs_path, "pilot-analysis/src/");
+    let is_stdlib_rs = gm_ends_with(rs_path, "pilot-rt/src/stdlib.rs");
+    let is_cli_rs = gm_contains(rs_path, "pilot-cli/src/");
+    let allowed_infer = if is_infer_rs { build_allowed_infer_strings() } else { 0 };
+    let cfg_test_pat = "#" + "[cfg(test)]";
+
+    let dead_pos = gm_find(rs_source, "allow(dead_code)", 0);
+    if dead_pos >= 0 {
+        let dln = sa_offset_line(rs_source, dead_pos);
+        let _ = glist_push(violations, sa_make_violation(
+            "GATE004", rs_path, dln, 1, "allow(dead_code)",
+            "Forbidden dead_code suppression in Rust bootstrap seed",
+            "Delete unused Rust code rather than suppressing dead_code warnings"
+        ));
+    }
+
+    let len = rs_source.len();
+    var pos = 0;
+    var chunk_start = 0;
+    var line = 1;
+    var col = 1;
+    var line_start = 0;
+    var in_cfg_test = false;
+    var code_only = "";
+
+    while pos < len {
+        if pos == line_start {
+            let nl = gm_find(rs_source, "\n", pos);
+            let lend = if nl >= 0 { nl } else { len };
+            let lstr = rs_source.slice(pos, lend);
+            if gm_find(lstr, "\"", 0) < 0 && gm_find(lstr, "/", 0) < 0 && gm_find(lstr, "'", 0) < 0 && gm_find(lstr, "#", 0) < 0 {
+                if nl >= 0 {
+                    pos = nl + 1;
+                    line = line + 1;
+                    col = 1;
+                    line_start = pos;
+                } else {
+                    pos = len;
+                }
+                continue;
+            }
+        }
+        let b = rs_source.byte_at(pos);
+
+        if b == 10 {
+            pos = pos + 1;
+            line = line + 1;
+            col = 1;
+            line_start = pos;
+        } else if b == 35 && pos + 12 <= len && rs_source.slice(pos, pos + 12) == cfg_test_pat {
+            in_cfg_test = true;
+            pos = pos + 1;
+            col = col + 1;
+        } else if b == 47 && pos + 1 < len && rs_source.byte_at(pos + 1) == 47 {
+            // Strip `//` line comment using chunked slice
+            if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+            while pos < len && rs_source.byte_at(pos) != 10 {
+                pos = pos + 1;
+                col = col + 1;
+            }
+            chunk_start = pos;
+        } else if b == 47 && pos + 1 < len && rs_source.byte_at(pos + 1) == 42 {
+            // Strip `/* ... */` nested block comment using chunked slice
+            if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+            var depth = 1;
+            pos = pos + 2;
+            col = col + 2;
+            while pos < len && depth > 0 {
+                let cb = rs_source.byte_at(pos);
+                if cb == 47 && pos + 1 < len && rs_source.byte_at(pos + 1) == 42 {
+                    depth = depth + 1;
+                    pos = pos + 2;
+                    col = col + 2;
+                } else if cb == 42 && pos + 1 < len && rs_source.byte_at(pos + 1) == 47 {
+                    depth = depth - 1;
+                    pos = pos + 2;
+                    col = col + 2;
+                } else if cb == 10 {
+                    code_only = code_only + "\n";
+                    pos = pos + 1;
+                    line = line + 1;
+                    col = 1;
+                    line_start = pos;
+                } else {
+                    pos = pos + 1;
+                    col = col + 1;
+                }
+            }
+            chunk_start = pos;
+        } else if b == 39 {
+            // Distinguish Rust char literal `'x'` / `'\x'` from lifetime `'a`
+            if pos + 2 < len && rs_source.byte_at(pos + 1) != 92 && rs_source.byte_at(pos + 2) == 39 {
+                if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+                pos = pos + 3;
+                col = col + 3;
+                chunk_start = pos;
+            } else if pos + 3 < len && rs_source.byte_at(pos + 1) == 92 && rs_source.byte_at(pos + 3) == 39 {
+                if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+                pos = pos + 4;
+                col = col + 4;
+                chunk_start = pos;
+            } else {
+                pos = pos + 1;
+                col = col + 1;
+            }
+        } else if b == 114 && pos + 1 < len && (rs_source.byte_at(pos + 1) == 34 || rs_source.byte_at(pos + 1) == 35) {
+            // Rust raw string literal `r"..."` or `r#"..."#`
+            var hashes = 0;
+            var k = pos + 1;
+            while k < len && rs_source.byte_at(k) == 35 {
+                hashes = hashes + 1;
+                k = k + 1;
+            }
+            if k < len && rs_source.byte_at(k) == 34 {
+                if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+                let lit_ln = line;
+                let lit_col = col;
+                let cur_ln_str = sa_line_at(rs_source, line_start);
+                let content_start = k + 1;
+                pos = content_start;
+                col = col + (content_start - (k - hashes - 1));
+                var content_end = len;
+                while pos < len {
+                    let rb = rs_source.byte_at(pos);
+                    if rb == 34 {
+                        var hm = 0;
+                        while hm < hashes && pos + 1 + hm < len && rs_source.byte_at(pos + 1 + hm) == 35 {
+                            hm = hm + 1;
+                        }
+                        if hm == hashes {
+                            content_end = pos;
+                            pos = pos + 1 + hashes;
+                            col = col + 1 + hashes;
+                            break;
+                        }
+                    }
+                    if rb == 10 {
+                        code_only = code_only + "\n";
+                        line = line + 1;
+                        col = 1;
+                        line_start = pos + 1;
+                    } else {
+                        col = col + 1;
+                    }
+                    pos = pos + 1;
+                }
+                chunk_start = pos;
+                let rlit = rs_source.slice(content_start, content_end);
+                if !in_cfg_test && is_types_rs {
+                    let _ = glist_push(violations, sa_make_violation(
+                        "GATE001", rs_path, lit_ln, lit_col, rlit,
+                        "Unapproved string literal in types.rs (must contain zero string literals)",
+                        "Drive type layout strictly via numeric hardware physics descriptors"
+                    ));
+                } else if !in_cfg_test && is_infer_rs && !gset_contains(allowed_infer, rlit) {
+                    let _ = glist_push(violations, sa_make_violation(
+                        "GATE001", rs_path, lit_ln, lit_col, rlit,
+                        "Unapproved string literal in infer.rs outside PhysicsRegistry bridge whitelist",
+                        "Move semantic logic to selfhost/*.pilot or stdlib/core/*.pilot"
+                    ));
+                } else if !in_cfg_test && gset_contains(forbidden_pilot_syms, rlit) && !seed_registry_contains(seed_reg, rlit) && !sa_is_bridge_exemption(rs_path, cur_ln_str) {
+                    let _ = glist_push(violations, sa_make_violation(
+                        "GATE001", rs_path, lit_ln, lit_col, rlit,
+                        "Name-Blind breach: hardcoded user-space Pilot type/symbol string in Rust",
+                        "Derive behavior from [Bits]/[Layout], LatticeBits, MethodTable, or receptor IDs"
+                    ));
+                }
+            } else {
+                pos = pos + 1;
+                col = col + 1;
+            }
+        } else if b == 34 {
+            // Standard double-quoted string literal `"..."`
+            if pos > chunk_start { code_only = code_only + rs_source.slice(chunk_start, pos) + " "; }
+            let lit_ln = line;
+            let lit_col = col;
+            let cur_ln_str = sa_line_at(rs_source, line_start);
+            pos = pos + 1;
+            col = col + 1;
+            let str_st = pos;
+            var has_esc = false;
+            var lit_val = "";
+            while pos < len {
+                let sb = rs_source.byte_at(pos);
+                if sb == 92 && pos + 1 < len {
+                    has_esc = true;
+                    pos = pos + 2;
+                    col = col + 2;
+                } else if sb == 34 {
+                    lit_val = rs_source.slice(str_st, pos);
+                    pos = pos + 1;
+                    col = col + 1;
+                    break;
+                } else if sb == 10 {
+                    code_only = code_only + "\n";
+                    pos = pos + 1;
+                    line = line + 1;
+                    col = 1;
+                    line_start = pos;
+                } else {
+                    pos = pos + 1;
+                    col = col + 1;
+                }
+            }
+            chunk_start = pos;
+            if has_esc {
+                var u = "";
+                var ui = 0;
+                let un = lit_val.len();
+                while ui < un {
+                    if lit_val.byte_at(ui) == 92 && ui + 1 < un {
+                        let e2 = lit_val.byte_at(ui + 1);
+                        if e2 == 34 { u = u + "\""; }
+                        else if e2 == 92 { u = u + "\\"; }
+                        else if e2 == 110 { u = u + "\n"; }
+                        else { u = u + lit_val.slice(ui, ui + 2); }
+                        ui = ui + 2;
+                    } else {
+                        u = u + lit_val.slice(ui, ui + 1);
+                        ui = ui + 1;
+                    }
+                }
+                lit_val = u;
+            }
+            if !in_cfg_test && is_types_rs {
+                let _ = glist_push(violations, sa_make_violation(
+                    "GATE001", rs_path, lit_ln, lit_col, lit_val,
+                    "Unapproved string literal in types.rs (must contain zero string literals)",
+                    "Drive type layout strictly via numeric hardware physics descriptors"
+                ));
+            } else if !in_cfg_test && is_infer_rs && !gset_contains(allowed_infer, lit_val) {
+                let _ = glist_push(violations, sa_make_violation(
+                    "GATE001", rs_path, lit_ln, lit_col, lit_val,
+                    "Unapproved string literal in infer.rs outside PhysicsRegistry bridge whitelist",
+                    "Move semantic logic to selfhost/*.pilot or stdlib/core/*.pilot"
+                ));
+            } else if !in_cfg_test && gset_contains(forbidden_pilot_syms, lit_val) && !seed_registry_contains(seed_reg, lit_val) && !sa_is_bridge_exemption(rs_path, cur_ln_str) {
+                let _ = glist_push(violations, sa_make_violation(
+                    "GATE001", rs_path, lit_ln, lit_col, lit_val,
+                    "Name-Blind breach: hardcoded user-space Pilot type/symbol string in Rust",
+                    "Derive behavior from [Bits]/[Layout], LatticeBits, MethodTable, or receptor IDs"
+                ));
+            }
+        } else {
+            pos = pos + 1;
+            col = col + 1;
+        }
+    }
+    if len > chunk_start {
+        code_only = code_only + rs_source.slice(chunk_start, len);
+    }
+
+    // Stub macro checks on comment-stripped Rust code
+    let stubs = glist_new();
+    let _ = glist_push(stubs, "to" + "do!(");
+    let _ = glist_push(stubs, "unimple" + "mented!(");
+    let _ = sa_check_word_list_in_code(
+        rs_path, code_only, rs_source, stubs, "GATE005", "Forbidden Rust stub macro: ", violations
+    );
+
+    if is_analysis_rs {
+        let _ = sa_check_word_list_in_code(
+            rs_path, code_only, rs_source, build_banned_analysis_idents(),
+            "GATE001", "Banned legacy analysis symbol: ", violations
+        );
+    }
+    if is_stdlib_rs {
+        let _ = sa_check_word_list_in_code(
+            rs_path, rs_source, rs_source, build_banned_stdlib_rs_tokens(),
+            "GATE001", "Banned stdlib.rs token: ", violations
+        );
+    }
+    if is_cli_rs {
+        let _ = sa_check_word_list_in_code(
+            rs_path, rs_source, rs_source, build_banned_cli_lsp_tokens(),
+            "GATE001", "Banned CLI/LSP hardcoded token: ", violations
+        );
+    }
+
+    return violations;
+}
+
+// ------------------------------------------------------------------------------
+// 3. Gate 1A (`adaptability`) & Gate 1B (`hygiene`) Full Workspace Executors
+// ------------------------------------------------------------------------------
+
+pub fn execute_adaptability_gate(workspace_root: str, _opts: ref<GateRunOptions>) -> GateReport {
+    let t0 = gate_time_now_us();
+    let root = resolve_workspace_root(workspace_root);
+    let violations = glist_new();
+    let seed_reg = seed_token_registry_new();
+
+    // Verify dynamic seed token registry size (10 + 4) without hardcoding inside `.count()`
+    let expected_seeds = 10 + 4;
+    if seed_registry_count(seed_reg) != expected_seeds {
+        let _ = glist_push(violations, sa_make_violation(
+            "GATE001", "selfhost/gate/manifest.pilot", 1, 1, "" + seed_registry_count(seed_reg),
+            "SeedTokenRegistry count drifted from canonical hardware seed boundary",
+            "Restore exact 14-token hardware seed boundary"
+        ));
+    }
+
+    let vocab = harvest_core_vocabulary_and_audit(root, seed_reg, violations);
+    let raw_crates_files = gate_fs_walk_files(gm_join_path(root, "crates"));
+    let all_files = gm_split_lines(raw_crates_files);
+    let n_files = glist_len(all_files);
+    var scanned = gset_len(vocab);
+    var i = 0;
+    while i < n_files {
+        let fp = glist_get(all_files, i);
+        let rel = sa_strip_rel_prefix(root, fp);
+        if gm_ends_with(rel, ".rs") && gm_contains(rel, "/src/") {
+            let rs_src = gate_fs_read_text(fp);
+            let fv = verify_rust_source_name_blind(rel, rs_src, seed_reg, vocab);
+            let _ = glist_extend(violations, fv);
+            scanned = scanned + 1;
+        }
+        i = i + 1;
+    }
+
+    // Check banned hardcoded doc/keyword tables in `vscode_gen.pilot` & `handlers.pilot`
+    let lsp_targets = glist_new();
+    let _ = glist_push(lsp_targets, "selfhost/ide/vscode_gen.pilot");
+    let _ = glist_push(lsp_targets, "selfhost/lsp/handlers.pilot");
+    let banned_lsp = build_banned_cli_lsp_tokens();
+    var li = 0;
+    while li < glist_len(lsp_targets) {
+        let lrel = glist_get(lsp_targets, li);
+        let lfull = gm_join_path(root, lrel);
+        if gate_fs_exists(lfull) {
+            let lsrc = gate_fs_read_text(lfull);
+            let _ = sa_check_word_list_in_code(
+                lrel, lsrc, lsrc, banned_lsp, "GATE001", "Banned hardcoded IDE/LSP token: ", violations
+            );
+            scanned = scanned + 1;
+        }
+        li = li + 1;
+    }
+
+    let dt = gate_time_now_us() - t0;
+    return GateReport {
+        gate_id: "adaptability",
+        category: GateCategoryId.Adaptability,
+        passed: glist_len(violations) == 0,
+        elapsed_us: if dt >= 0 { dt } else { 0 },
+        items_scanned: scanned,
+        violations: violations,
+    };
+}
+
+fn sa_audit_pilot_tree(root: str, subdir: str, file_caps: i64, violations: i64) -> usize {
+    let walked = gm_split_lines(gate_fs_walk_files(gm_join_path(root, subdir)));
+    let n = glist_len(walked);
+    let max_pilot = max_pilot_file_loc();
+    let m_todo = "TO" + "DO";
+    let m_fixme = "FIX" + "ME";
+    let m_unimp = "UNIMPLE" + "MENTED";
+    let m_place = "PLACE" + "HOLDER";
+    var checked = 0;
+    var i = 0;
+    while i < n {
+        let fp = glist_get(walked, i);
+        if gm_ends_with(fp, ".pilot") {
+            let rel = sa_strip_rel_prefix(root, fp);
+            let src = gate_fs_read_text(fp);
+            let loc = gm_count_lines(src);
+            if loc > max_pilot {
+                let _ = glist_push(violations, sa_make_violation(
+                    "GATE002", rel, loc, 1, "" + loc + " > " + max_pilot,
+                    "Pilot module exceeds 1,500 LOC modularity ceiling (MOD001)",
+                    "Split cohesive responsibilities into clean sub-packages <= 1,500 lines"
+                ));
+            }
+            let specific_cap = __engine("map_get", file_caps, rel) + 0;
+            if specific_cap > 0 && loc > specific_cap {
+                let _ = glist_push(violations, sa_make_violation(
+                    "GATE002", rel, loc, 1, "" + loc + " > " + specific_cap,
+                    "Pilot module exceeds registered file LOC ceiling",
+                    "Factor helper logic into dedicated sub-modules"
+                ));
+            }
+            if gm_contains(src, m_todo) || gm_contains(src, m_fixme) || gm_contains(src, m_unimp) || gm_contains(src, m_place) {
+                let _ = glist_push(violations, sa_make_violation(
+                    "GATE005", rel, 1, 1, "STUB_MARKER",
+                    "Forbidden stub/placeholder marker in .pilot source",
+                    "Implement complete logic with zero deferred stub markers"
+                ));
+            }
+            checked = checked + 1;
+        }
+        i = i + 1;
+    }
+    return checked;
+}
+
+pub fn execute_hygiene_and_ratchet_gate(workspace_root: str, _opts: ref<GateRunOptions>) -> GateReport {
+    let t0 = gate_time_now_us();
+    let root = resolve_workspace_root(workspace_root);
+    let violations = glist_new();
+    var scanned = 0;
+
+    let crate_reg = build_crate_ceiling_registry();
+    let crate_keys = __engine("map_get", crate_reg, "__keys__");
+    let n_crates = glist_len(crate_keys);
+
+    // 1. Check all registered crate rules (retired crates must be absent)
+    var ci = 0;
+    while ci < n_crates {
+        let cpath = glist_get(crate_keys, ci);
+        let rule = __engine("map_get", crate_reg, cpath);
+        let full_c = gm_join_path(root, cpath);
+        if rule.must_be_absent == true {
+            if gate_fs_exists(full_c) {
+                let _ = glist_push(violations, sa_make_violation(
+                    "GATE006", cpath, 1, 1, cpath,
+                    "Retired Rust crate directory resurrected on disk",
+                    "Delete the retired crate; implement functionality in pure Pilot"
+                ));
+            }
+        } else if gate_fs_exists(gm_join_path(full_c, "build.rs")) {
+            let _ = glist_push(violations, sa_make_violation(
+                "GATE006", cpath + "/build.rs", 1, 1, "build.rs",
+                "Unauthorized build.rs script inside surviving Rust crate",
+                "Remove build.rs and keep Rust bootstrap seed minimal"
+            ));
+        }
+        scanned = scanned + 1;
+        ci = ci + 1;
+    }
+
+    // 2. Check `crates/` directory for any unregistered crate folder
+    let live_dirs = gm_split_lines(gate_fs_list_dirs(gm_join_path(root, "crates")));
+    var di = 0;
+    while di < glist_len(live_dirs) {
+        let dname = glist_get(live_dirs, di);
+        let crel = "crates/" + dname;
+        let known = __engine("map_get", crate_reg, crel);
+        if known.len() == 0 {
+            let _ = glist_push(violations, sa_make_violation(
+                "GATE006", crel, 1, 1, crel,
+                "Unregistered crate directory added under crates/",
+                "Do not add new Rust crates; implement new subsystems in Pilot"
+            ));
+        }
+        di = di + 1;
+    }
+
+    // 3. Check retired legacy files & retired Python gate scripts
+    let retired_files = build_retired_files_registry();
+    var ri = 0;
+    while ri < glist_len(retired_files) {
+        let rpath = glist_get(retired_files, ri);
+        if gate_fs_exists(gm_join_path(root, rpath)) {
+            let _ = glist_push(violations, sa_make_violation(
+                "GATE006", rpath, 1, 1, rpath,
+                "Retired legacy file or Python gate script still exists on disk",
+                "Delete superseded legacy file permanently"
+            ));
+        }
+        scanned = scanned + 1;
+        ri = ri + 1;
+    }
+
+    // 4. Measure per-crate & total Rust `src/**/*.rs` LOC against ratchet ceilings
+    let crate_loc_sums = __engine("map_new");
+    let file_caps = build_file_ceiling_registry();
+    let rs_walk = gm_split_lines(gate_fs_walk_files(gm_join_path(root, "crates")));
+    var total_rs_loc = 0;
+    var wi = 0;
+    while wi < glist_len(rs_walk) {
+        let fp = glist_get(rs_walk, wi);
+        let rel = sa_strip_rel_prefix(root, fp);
+        if gm_ends_with(rel, ".rs") && gm_contains(rel, "/src/") {
+            let loc = gm_count_lines(gate_fs_read_text(fp));
+            total_rs_loc = total_rs_loc + loc;
+            let src_idx = gm_find(rel, "/src/", 0);
+            if src_idx > 0 {
+                let ckey = rel.slice(0, src_idx);
+                let prev = __engine("map_get", crate_loc_sums, ckey) + 0;
+                __engine("map_set", crate_loc_sums, ckey, prev + loc);
+            }
+            let fcap = __engine("map_get", file_caps, rel) + 0;
+            if fcap > 0 && loc > fcap {
+                let _ = glist_push(violations, sa_make_violation(
+                    "GATE003", rel, loc, 1, "" + loc + " > " + fcap,
+                    "Rust source file exceeds per-file LOC ratchet ceiling",
+                    "Contract Rust bootstrap logic into Pilot modules"
+                ));
+            }
+            scanned = scanned + 1;
+        }
+        wi = wi + 1;
+    }
+
+    ci = 0;
+    while ci < n_crates {
+        let cpath = glist_get(crate_keys, ci);
+        let rule = __engine("map_get", crate_reg, cpath);
+        if rule.must_be_absent == false {
+            let cloc = __engine("map_get", crate_loc_sums, cpath) + 0;
+            if cloc > rule.max_loc {
+                let _ = glist_push(violations, sa_make_violation(
+                    "GATE003", cpath, cloc, 1, "" + cloc + " > " + rule.max_loc,
+                    "Rust crate exceeds CrateCeilingRule LOC ratchet ceiling",
+                    "Move domain logic to Pilot and shrink Rust crate LOC"
+                ));
+            }
+        }
+        ci = ci + 1;
+    }
+
+    if total_rs_loc > max_total_rust_loc() {
+        let _ = glist_push(violations, sa_make_violation(
+            "GATE003", "crates", total_rs_loc, 1, "" + total_rs_loc + " > " + max_total_rust_loc(),
+            "Total workspace Rust src LOC exceeds global contraction ceiling",
+            "Shrink bootstrap crates toward minimal C11/pure-Pilot target"
+        ));
+    }
+
+    // 5. Audit all `.pilot` files in `selfhost/` and `stdlib/` (`<= 1,500` LOC & zero stubs)
+    scanned = scanned + sa_audit_pilot_tree(root, "selfhost", file_caps, violations);
+    scanned = scanned + sa_audit_pilot_tree(root, "stdlib", file_caps, violations);
+
+    let dt = gate_time_now_us() - t0;
+    return GateReport {
+        gate_id: "hygiene",
+        category: GateCategoryId.Hygiene,
+        passed: glist_len(violations) == 0,
+        elapsed_us: if dt >= 0 { dt } else { 0 },
+        items_scanned: scanned,
+        violations: violations,
+    };
+}

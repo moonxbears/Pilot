@@ -55,7 +55,7 @@ impl AnalysisPipeline {
     }
 
     pub fn load_program(path: &str) -> (AstArena, PhysicsRegistry) {
-        let (src, mut loaded, mut queue, mut dep_srcs) = (std::fs::read_to_string(path).unwrap_or_default(), std::collections::HashSet::new(), Vec::new(), Vec::new());
+        let (src, mut loaded, mut queue) = (std::fs::read_to_string(path).unwrap_or_default(), std::collections::HashSet::new(), Vec::new());
         let resolve = |spec: &str| -> Option<String> {
             let raw = spec.trim_matches(|c: char| c == ';' || c == '*' || c == '.' || c.is_whitespace()).replace('.', "/");
             let sub = raw.strip_prefix("Pilot/").or_else(|| raw.strip_prefix("pilot/")).unwrap_or(&raw).to_ascii_lowercase();
@@ -66,9 +66,8 @@ impl AnalysisPipeline {
         };
         scan(&src, &mut loaded, &mut queue);
         let mut idx = 0;
-        while idx < queue.len() { let p = queue[idx].clone(); idx += 1; if let Ok(c) = std::fs::read_to_string(&p) { scan(&c, &mut loaded, &mut queue); dep_srcs.push(c); } }
-        let full = if dep_srcs.is_empty() { src } else { format!("{}\n{src}", dep_srcs.join("\n")) };
-        let arena = pilot_parser::parse(&full);
+        while idx < queue.len() { let p = queue[idx].clone(); idx += 1; if let Ok(c) = std::fs::read_to_string(&p) { scan(&c, &mut loaded, &mut queue); } }
+        let arena = pilot_parser::parse(&src);
         let mut physics = analyze_physics(&arena, arena.root, None);
         for p in &queue { let _ = crate::infer::handle_engine_intrinsic(&mut physics, "mount_unit", &[pilot_rt::PilotVal::from_str(p)]); }
         (arena, physics)

@@ -260,15 +260,8 @@ pub pure fn gm_ends_with(s: str, sfx: str) -> bool {
 }
 
 pub pure fn gm_find(haystack: str, needle: str, start: i64) -> i64 {
-    let hl = haystack.len();
-    let nl = needle.len();
-    if nl == 0 || start < 0 || start + nl > hl { return -1; }
-    var i = start;
-    while i + nl <= hl {
-        if haystack.slice(i, i + nl) == needle { return i; }
-        i = i + 1;
-    }
-    return -1;
+    if needle.len() == 0 || start < 0 { return -1; }
+    return __engine("str_find", haystack, needle, start) + 0;
 }
 
 pub pure fn gm_contains(haystack: str, needle: str) -> bool {
@@ -297,15 +290,14 @@ pub pure fn gm_count_lines(s: str) -> usize {
     let n = s.len();
     if n == 0 { return 0; }
     var lines = 0;
-    var i = 0;
-    while i < n {
-        if s.byte_at(i) == 10 {
-            lines = lines + 1;
+    var p = 0;
+    while p < n {
+        let nx = gm_find(s, "\n", p);
+        if nx < 0 {
+            return lines + 1;
         }
-        i = i + 1;
-    }
-    if s.byte_at(n - 1) != 10 {
         lines = lines + 1;
+        p = nx + 1;
     }
     return lines;
 }
@@ -314,27 +306,21 @@ pub fn gm_split_lines(s: str) -> i64 {
     let out = glist_new();
     let n = s.len();
     if n == 0 { return out; }
-    var line_start = 0;
-    var i = 0;
-    while i < n {
-        if s.byte_at(i) == 10 {
-            var end_pos = i;
-            if end_pos > line_start && s.byte_at(end_pos - 1) == 13 {
-                end_pos = end_pos - 1;
-            }
-            let seg = s.slice(line_start, end_pos);
-            if seg.len() > 0 {
-                let _ = glist_push(out, seg);
-            }
-            line_start = i + 1;
+    var p = 0;
+    while p < n {
+        let nx = gm_find(s, "\n", p);
+        if nx < 0 {
+            let tail = s.slice(p, n);
+            if tail.len() > 0 { let _ = glist_push(out, tail); }
+            return out;
         }
-        i = i + 1;
-    }
-    if line_start < n {
-        let tail = s.slice(line_start, n);
-        if tail.len() > 0 {
-            let _ = glist_push(out, tail);
+        var end_pos = nx;
+        if end_pos > p && s.byte_at(end_pos - 1) == 13 {
+            end_pos = end_pos - 1;
         }
+        let seg = s.slice(p, end_pos);
+        if seg.len() > 0 { let _ = glist_push(out, seg); }
+        p = nx + 1;
     }
     return out;
 }

@@ -1,0 +1,332 @@
+// ==============================================================================
+// FILE: selfhost/gate/rename_litmus.pilot
+// Milestone 1: Ephemeral Sandboxed Dual-Pass Universal Rename Litmus Runner
+// Verifies zero hardcoded core primitive/algebraic names across stdlib/core/
+// syntax rewrites, self-hosted parser/AST, C11 codegen, and .pilc synthesis.
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Gate.RenameLitmus;
+
+pub fn rl_make_pair(from_ident: str, to_ident: str) -> i64 {
+    let p = __engine("map_new");
+    __engine("map_set", p, "from", from_ident);
+    __engine("map_set", p, "to", to_ident);
+    return p;
+}
+
+fn rl_seed_tag(seed_in: i64) -> str {
+    let alphabet = "abcdefghijklmnopqrstuvwxyz";
+    var state = if seed_in == 0 { 1311768467294899695 } else { seed_in };
+    var tag = "";
+    var i = 0;
+    while i < 6 {
+        state = (state ^ (state >> 12)) & 2147483647;
+        state = ((state * 1103515245) + 12345 + i) & 2147483647;
+        let idx = state % 26;
+        let pos = if idx < 0 { 0 - idx } else { idx };
+        tag = tag + alphabet.slice(pos, pos + 1);
+        i = i + 1;
+    }
+    return tag;
+}
+
+pub fn build_canonical_litmus_pairs() -> i64 {
+    let pairs = glist_new();
+    let _ = glist_push(pairs, rl_make_pair(nameof(char), "c32"));
+    let _ = glist_push(pairs, rl_make_pair(nameof(slice), "window"));
+    let _ = glist_push(pairs, rl_make_pair(nameof(option), "maybe"));
+    let _ = glist_push(pairs, rl_make_pair(nameof(result), "outcome"));
+    let _ = glist_push(pairs, rl_make_pair(nameof(range), "interval"));
+    let _ = glist_push(pairs, rl_make_pair(nameof(str), "utf8view"));
+    return pairs;
+}
+
+pub fn build_seeded_litmus_pairs(seed_val: i64) -> i64 {
+    let sfx = "_" + rl_seed_tag(seed_val);
+    let pairs = glist_new();
+    let _ = glist_push(pairs, rl_make_pair(nameof(char), "c32" + sfx));
+    let _ = glist_push(pairs, rl_make_pair(nameof(slice), "window" + sfx));
+    let _ = glist_push(pairs, rl_make_pair(nameof(option), "maybe" + sfx));
+    let _ = glist_push(pairs, rl_make_pair(nameof(result), "outcome" + sfx));
+    let _ = glist_push(pairs, rl_make_pair(nameof(range), "interval" + sfx));
+    let _ = glist_push(pairs, rl_make_pair(nameof(str), "utf8view" + sfx));
+    return pairs;
+}
+
+fn rl_pairs_to_map(rename_pairs: i64) -> i64 {
+    let rmap = __engine("map_new");
+    let n = glist_len(rename_pairs);
+    var i = 0;
+    while i < n {
+        let item = glist_get(rename_pairs, i);
+        let k = __engine("map_get", item, "from");
+        let v = __engine("map_get", item, "to");
+        if k.len() > 0 && v.len() > 0 {
+            __engine("map_set", rmap, k, v);
+        }
+        i = i + 1;
+    }
+    return rmap;
+}
+
+fn rl_mapped_or_self(rmap: i64, orig: str) -> str {
+    let v = __engine("map_get", rmap, orig);
+    if v.len() == 0 { return orig; }
+    return v;
+}
+
+// Lexer-aware whole-identifier alpha-renamer (preserves comments & string literals)
+pub pure fn rl_rename_pilot_identifiers(src: str, rmap: i64) -> str {
+    let n = src.len();
+    var out = "";
+    var chunk_start = 0;
+    var pos = 0;
+    while pos < n {
+        let b = src.byte_at(pos);
+        if b == 47 && pos + 1 < n && src.byte_at(pos + 1) == 47 {
+            pos = pos + 2;
+            while pos < n && src.byte_at(pos) != 10 {
+                pos = pos + 1;
+            }
+        } else if b == 47 && pos + 1 < n && src.byte_at(pos + 1) == 42 {
+            pos = pos + 2;
+            while pos + 1 < n {
+                if src.byte_at(pos) == 42 && src.byte_at(pos + 1) == 47 {
+                    pos = pos + 2;
+                    break;
+                }
+                pos = pos + 1;
+            }
+        } else if b == 34 {
+            pos = pos + 1;
+            while pos < n {
+                let sb = src.byte_at(pos);
+                if sb == 92 && pos + 1 < n {
+                    pos = pos + 2;
+                } else if sb == 34 {
+                    pos = pos + 1;
+                    break;
+                } else {
+                    pos = pos + 1;
+                }
+            }
+        } else if b == 39 {
+            pos = pos + 1;
+            while pos < n {
+                let cb = src.byte_at(pos);
+                if cb == 92 && pos + 1 < n {
+                    pos = pos + 2;
+                } else if cb == 39 {
+                    pos = pos + 1;
+                    break;
+                } else {
+                    pos = pos + 1;
+                }
+            }
+        } else if sa_is_upper(b) || sa_is_lower(b) || b == 95 {
+            let st = pos;
+            pos = pos + 1;
+            while pos < n && sa_is_id_char(src.byte_at(pos)) {
+                pos = pos + 1;
+            }
+            let word = src.slice(st, pos);
+            let repl = __engine("map_get", rmap, word);
+            if repl.len() > 0 {
+                out = out + src.slice(chunk_start, st) + repl;
+                chunk_start = pos;
+            }
+        } else {
+            pos = pos + 1;
+        }
+    }
+    if n > chunk_start {
+        out = out + src.slice(chunk_start, n);
+    }
+    return out;
+}
+
+fn rl_litmus_target_files() -> i64 {
+    let files = glist_new();
+    let _ = glist_push(files, "stdlib/core/core.pilot");
+    let _ = glist_push(files, "stdlib/core/option.pilot");
+    let _ = glist_push(files, "stdlib/core/result.pilot");
+    let _ = glist_push(files, "stdlib/core/syntax/type_construct.pilot");
+    let _ = glist_push(files, "stdlib/core/primitives/char.pilot");
+    let _ = glist_push(files, "stdlib/core/primitives/slice.pilot");
+    let _ = glist_push(files, "stdlib/core/primitives/range.pilot");
+    let _ = glist_push(files, "stdlib/core/primitives/str.pilot");
+    return files;
+}
+
+pub fn execute_universal_rename_litmus(workspace_root: str, rename_pairs: slice<(str, str)>) -> GateReport {
+    let t0 = gate_time_now_us();
+    let root = resolve_workspace_root(workspace_root);
+    let violations = glist_new();
+    let active_pairs = if glist_len(rename_pairs) > 0 {
+        rename_pairs
+    } else {
+        build_canonical_litmus_pairs()
+    };
+    let rmap = rl_pairs_to_map(active_pairs);
+
+    let sandbox_dir = "/tmp/pilot_litmus_" + gate_proc_pid() + "_" + gate_time_now_us();
+    let guard = temp_guard_new(sandbox_dir);
+
+    let target_files = rl_litmus_target_files();
+    let n_targets = glist_len(target_files);
+    var scanned = 0;
+    var fi = 0;
+    while fi < n_targets {
+        let rel = glist_get(target_files, fi);
+        let orig_src = gate_fs_read_text(gm_join_path(root, rel));
+        if orig_src.len() == 0 {
+            let _ = glist_push(violations, GateViolation {
+                code: "GATE008",
+                file_path: rel,
+                line: 1,
+                column: 1,
+                offending_snippet: rel,
+                message: "Missing core bootstrap source during Universal Rename Litmus",
+                remediation: "Ensure stdlib/core/ primitive and syntax modules exist on disk",
+            });
+        } else {
+            let renamed_src = rl_rename_pilot_identifiers(orig_src, rmap);
+            let out_path = gm_join_path(sandbox_dir, rel);
+            if !gate_fs_write_text(out_path, renamed_src) {
+                let _ = glist_push(violations, GateViolation {
+                    code: "GATE008",
+                    file_path: out_path,
+                    line: 1,
+                    column: 1,
+                    offending_snippet: out_path,
+                    message: "Failed to materialize sandboxed renamed core module",
+                    remediation: "Check /tmp write permissions for TempDirGuard arena",
+                });
+            }
+            scanned = scanned + 1;
+        }
+        fi = fi + 1;
+    }
+
+    let r_char = rl_mapped_or_self(rmap, nameof(char));
+    let r_slice = rl_mapped_or_self(rmap, nameof(slice));
+    let r_opt = rl_mapped_or_self(rmap, nameof(option));
+    let r_res = rl_mapped_or_self(rmap, nameof(result));
+    let r_rng = rl_mapped_or_self(rmap, nameof(range));
+    let r_str = rl_mapped_or_self(rmap, nameof(str));
+
+    // 1. Verify `syntax type_construct` rewrites in sandboxed `type_construct.pilot`
+    let tc_renamed = gate_fs_read_text(gm_join_path(sandbox_dir, "stdlib/core/syntax/type_construct.pilot"));
+    if !gm_contains(tc_renamed, r_slice + "<") || !gm_contains(tc_renamed, r_opt + "<") || !gm_contains(tc_renamed, r_res + "<") {
+        let _ = glist_push(violations, GateViolation {
+            code: "GATE008",
+            file_path: "stdlib/core/syntax/type_construct.pilot",
+            line: 1,
+            column: 1,
+            offending_snippet: r_slice + "/" + r_opt + "/" + r_res,
+            message: "syntax type_construct failed to rewrite T[], T?, T!E to renamed core targets",
+            remediation: "Express symbolic type lowering via pure Pilot quote templates in type_construct.pilot",
+        });
+    }
+
+    // 2. Verify renamed primitive declarations in sandbox
+    let sl_renamed = gate_fs_read_text(gm_join_path(sandbox_dir, "stdlib/core/primitives/slice.pilot"));
+    let st_renamed = gate_fs_read_text(gm_join_path(sandbox_dir, "stdlib/core/primitives/str.pilot"));
+    if !gm_contains(sl_renamed, "struct " + r_slice) || !gm_contains(st_renamed, "struct " + r_str) {
+        let _ = glist_push(violations, GateViolation {
+            code: "GATE008",
+            file_path: "stdlib/core/primitives/slice.pilot",
+            line: 1,
+            column: 1,
+            offending_snippet: r_slice + "/" + r_str,
+            message: "Sandboxed primitive declarations failed alpha-renaming verification",
+            remediation: "Keep stdlib/core/primitives declarations free of stringified self-names",
+        });
+    }
+
+    // 3. Parse renamed struct + function probe through standalone self-hosted frontend
+    let probe_src =
+        "[Bits(32, 3)] pub struct " + r_char + " {}\n" +
+        "pub struct " + r_rng + " { pub lo: " + r_char + "; pub hi: " + r_char + "; }\n" +
+        "pub fn alpha_probe_step(n: " + r_char + ") -> " + r_char + " {\n" +
+        "    var acc = 25;\n" +
+        "    var i = 1;\n" +
+        "    while i <= n {\n" +
+        "        acc = acc + (i * 7);\n" +
+        "        i = i + 1;\n" +
+        "    }\n" +
+        "    return acc;\n" +
+        "}\n" +
+        "alpha_probe_step(6);\n";
+
+    let ast_arena = sh_parse_program(probe_src);
+    let root_id = sh_ast_root(ast_arena);
+    if sh_ast_kind_name(ast_arena, root_id) != "Program" || sh_ast_child_count(ast_arena, root_id) < 3 {
+        let _ = glist_push(violations, GateViolation {
+            code: "GATE008",
+            file_path: "selfhost/parser.pilot",
+            line: 1,
+            column: 1,
+            offending_snippet: r_char + "/" + r_rng,
+            message: "Self-hosted parser failed to build AST under renamed core primitive vocabulary",
+            remediation: "Keep selfhost/lexer.pilot and selfhost/parser.pilot strictly 14-seed-token driven",
+        });
+    }
+
+    // 4. Emit C11 & `.pilc` bytecode for the renamed probe kernel via `selfhost/pilotc.pilot`
+    let c11_code = pilotc_compile_source_to_c11(probe_src);
+    let pilc_hex = pilotc_bootstrap_stage_pilc_hex(3, probe_src);
+    if !gm_contains(c11_code, "alpha_probe_step") || !gm_starts_with(pilc_hex, "50494c33") {
+        let _ = glist_push(violations, GateViolation {
+            code: "GATE008",
+            file_path: "selfhost/pilotc.pilot",
+            line: 1,
+            column: 1,
+            offending_snippet: "alpha_probe_step",
+            message: "Self-hosted C11 or .pilc backend failed under renamed core primitive vocabulary",
+            remediation: "Drive codegen from layout descriptors rather than type names",
+        });
+    }
+    scanned = scanned + 3;
+
+    // 5. Crash-safe deterministic TempDirGuard cleanup (`0b11 : IGuard`)
+    let _ = temp_guard_cleanup(guard);
+    if gate_fs_exists(sandbox_dir) {
+        let _ = glist_push(violations, GateViolation {
+            code: "GATE008",
+            file_path: sandbox_dir,
+            line: 1,
+            column: 1,
+            offending_snippet: sandbox_dir,
+            message: "TempDirGuard failed to unlink ephemeral litmus sandbox directory",
+            remediation: "Ensure fs_remove_all cleans up /tmp/pilot_litmus_* on scope exit",
+        });
+    }
+
+    let dt = gate_time_now_us() - t0;
+    return GateReport {
+        gate_id: "rename_litmus",
+        category: GateCategoryId.Adaptability,
+        passed: glist_len(violations) == 0,
+        elapsed_us: if dt >= 0 { dt } else { 0 },
+        items_scanned: scanned,
+        violations: violations,
+    };
+}
+
+pub fn execute_dual_pass_rename_gate(workspace_root: str, opts: ref<GateRunOptions>) -> GateReport {
+    let t0 = gate_time_now_us();
+    let pass0 = execute_universal_rename_litmus(workspace_root, build_canonical_litmus_pairs());
+    let pass1 = execute_universal_rename_litmus(workspace_root, build_seeded_litmus_pairs(opts.seed));
+    let combined = glist_new();
+    let _ = glist_extend(combined, pass0.violations);
+    let _ = glist_extend(combined, pass1.violations);
+    let dt = gate_time_now_us() - t0;
+    return GateReport {
+        gate_id: "rename_litmus",
+        category: GateCategoryId.Adaptability,
+        passed: glist_len(combined) == 0,
+        elapsed_us: if dt >= 0 { dt } else { 0 },
+        items_scanned: pass0.items_scanned + pass1.items_scanned,
+        violations: combined,
+    };
+}

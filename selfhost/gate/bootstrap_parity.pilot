@@ -1,0 +1,141 @@
+// ==============================================================================
+// FILE: selfhost/gate/bootstrap_parity.pilot
+// Milestone 1: Stage-2 == Stage-3 Deterministic SHA-256 Parity & Speed Verifier
+// Verifies bit-for-bit C11 & .pilc v3 fixed-point convergence via pure-Pilot
+// SHA-256 (`stdlib/crypto/hash.pilot`) and wall-clock latency budget (`GATE009`).
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Gate.BootstrapParity;
+
+fn bp_build_unit(fn_name: str, bias_v: i64, mul_k: i64, arg_n: i64) -> str {
+    return "pub fn " + fn_name + "(n: isize) -> isize {\n" +
+           "    var acc = " + bias_v + ";\n" +
+           "    var i = 1;\n" +
+           "    while i <= n {\n" +
+           "        acc = acc + (i * " + mul_k + ");\n" +
+           "        i = i + 1;\n" +
+           "    }\n" +
+           "    return acc;\n" +
+           "}\n" +
+           fn_name + "(" + arg_n + ");\n";
+}
+
+pub fn verify_stage3_fixed_point_digests(seed_val: i64) -> str {
+    let base = if seed_val > 0 { (seed_val % 97) + 17 } else { 37 };
+    let u_alpha = bp_build_unit("stage_fixed_alpha", 120 + base, 13, 9);
+    let s2_c = pilotc_bootstrap_stage_c11(2, u_alpha);
+    let s3_c = pilotc_bootstrap_stage_c11(3, u_alpha);
+    let s2_p = pilotc_bootstrap_stage_pilc_hex(2, u_alpha);
+    let s3_p = pilotc_bootstrap_stage_pilc_hex(3, u_alpha);
+    return sha256_hex(s2_c) + "|" + sha256_hex(s3_c) + "|" + sha256_hex(s2_p) + "|" + sha256_hex(s3_p);
+}
+
+pub fn execute_bootstrap_parity_gate(workspace_root: str, opts: ref<GateRunOptions>) -> GateReport {
+    let t0 = gate_time_now_us();
+    let root = resolve_workspace_root(workspace_root);
+    let violations = glist_new();
+    var scanned = 0;
+
+    let pilotc_rel = "selfhost/pilotc.pilot";
+    let pilotc_src = gate_fs_read_text(gm_join_path(root, pilotc_rel));
+    if pilotc_src.len() == 0 {
+        let _ = glist_push(violations, GateViolation {
+            code: "GATE009",
+            file_path: pilotc_rel,
+            line: 1,
+            column: 1,
+            offending_snippet: pilotc_rel,
+            message: "Missing selfhost/pilotc.pilot Stage-3 bootstrap compiler",
+            remediation: "Ensure selfhost/pilotc.pilot is present in selfhost/",
+        });
+    } else {
+        scanned = scanned + 1;
+        if gm_contains(pilotc_src, "PILOTC_BINARY[") || gm_contains(pilotc_src, "system(") {
+            let _ = glist_push(violations, GateViolation {
+                code: "GATE009",
+                file_path: pilotc_rel,
+                line: 1,
+                column: 1,
+                offending_snippet: "PILOTC_BINARY/system",
+                message: "Forbidden static stub or subprocess call in selfhost/pilotc.pilot",
+                remediation: "Compile Pilot source directly in pure Pilot without external shell calls",
+            });
+        }
+    }
+
+    let delta = if opts.seed > 0 { (opts.seed % 83) + 11 } else { 29 };
+    let unit_a = bp_build_unit("bootstrap_kern_alpha", 210 + delta, 19, 8);
+    let unit_b = bp_build_unit("bootstrap_kern_beta", 540 + delta, 41, 11);
+
+    let s2_c_a = pilotc_bootstrap_stage_c11(2, unit_a);
+    let s3_c_a = pilotc_bootstrap_stage_c11(3, unit_a);
+    let s2_c_b = pilotc_bootstrap_stage_c11(2, unit_b);
+
+    let s2_pilc_a = pilotc_bootstrap_stage_pilc_hex(2, unit_a);
+    let s3_pilc_a = pilotc_bootstrap_stage_pilc_hex(3, unit_a);
+    let s2_pilc_b = pilotc_bootstrap_stage_pilc_hex(2, unit_b);
+    scanned = scanned + 6;
+
+    let sha_c2 = sha256_hex(s2_c_a);
+    let sha_c3 = sha256_hex(s3_c_a);
+    let sha_p2 = sha256_hex(s2_pilc_a);
+    let sha_p3 = sha256_hex(s3_pilc_a);
+
+    if s2_c_a.len() == 0 || sha_c2.len() != 64 || sha_c2 != sha_c3 {
+        let _ = glist_push(violations, GateViolation {
+            code: "GATE009",
+            file_path: pilotc_rel,
+            line: 1,
+            column: 1,
+            offending_snippet: sha_c2 + " != " + sha_c3,
+            message: "Stage-2 and Stage-3 C11 emissions diverged (not a deterministic fixed point)",
+            remediation: "Ensure pilotc_bootstrap_stage_c11 is 100% deterministic across stages 2 and 3",
+        });
+    }
+
+    if !gm_starts_with(s3_pilc_a, "50494c33") || sha_p2.len() != 64 || sha_p2 != sha_p3 {
+        let _ = glist_push(violations, GateViolation {
+            code: "GATE009",
+            file_path: pilotc_rel,
+            line: 1,
+            column: 1,
+            offending_snippet: sha_p2 + " != " + sha_p3,
+            message: "Stage-2 and Stage-3 .pilc v3 binaries diverged or lacked PIL3 header",
+            remediation: "Ensure pilotc_bootstrap_stage_pilc_hex emits deterministic PIL3 bytecode",
+        });
+    }
+
+    if s2_c_a == s2_c_b || s2_pilc_a == s2_pilc_b {
+        let _ = glist_push(violations, GateViolation {
+            code: "GATE009",
+            file_path: pilotc_rel,
+            line: 1,
+            column: 1,
+            offending_snippet: "constant_emission",
+            message: "Bootstrap compiler ignored program differences between distinct inputs",
+            remediation: "Lower actual parsed AST/tokens into C11 and .pilc outputs",
+        });
+    }
+
+    let dt = gate_time_now_us() - t0;
+    let elapsed = if dt >= 0 { dt } else { 0 };
+    if elapsed > bootstrap_budget_us() {
+        let _ = glist_push(violations, GateViolation {
+            code: "GATE009",
+            file_path: pilotc_rel,
+            line: 1,
+            column: 1,
+            offending_snippet: "" + elapsed + " us",
+            message: "Bootstrap parity check exceeded compile-speed latency budget",
+            remediation: "Optimize pure-Pilot lexer/parser/SHA-256 hot loops",
+        });
+    }
+
+    return GateReport {
+        gate_id: "bootstrap_parity",
+        category: GateCategoryId.BootstrapParity,
+        passed: glist_len(violations) == 0,
+        elapsed_us: elapsed,
+        items_scanned: scanned,
+        violations: violations,
+    };
+}

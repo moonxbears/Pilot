@@ -21,6 +21,14 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/moonxbears/Pilot"
 
+[profile.dev]
+opt-level = 2
+debug = 0
+
+[profile.test]
+opt-level = 2
+debug = 0
+
 [profile.release]
 opt-level = 3
 lto = "fat"

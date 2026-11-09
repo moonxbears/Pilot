@@ -26,11 +26,12 @@ pub pure fn cli_help_banner() -> str {
            "  tree [file.pilot] [flags]       Display visual dependency tree of imports or packages\n" +
            "  deps <tree|list|check> [file]   Inspect, list, and verify dependencies\n" +
            "  map [file.pilot] [flags]        Display visual symbol map of namespaces, classes, fns\n" +
+           "  gate [--full|--only|--json]     Run pure-Pilot architectural & bootstrap gates\n" +
            "  ide-sync                        Synchronize VS Code extension grammar and schemas";
 }
 
 // Subcommand dispatch codes:
-// 1=run, 2=build, 3=check, 4=fmt, 5=test, 6=repl, 7=pkg, 8=venv, 9=debug, 10=lsp, 11=perf, 12=compile, 13=ide-sync, 14=tree, 15=deps, 16=map, 0=help
+// 1=run, 2=build, 3=check, 4=fmt, 5=test, 6=repl, 7=pkg, 8=venv, 9=debug, 10=lsp, 11=perf, 12=compile, 13=ide-sync, 14=tree, 15=deps, 16=map, 17=gate, 0=help
 pub pure fn resolve_cli_subcommand(cmd: str) -> i64 {
     if cmd == "run" { return 1; }
     if cmd == "build" { return 2; }
@@ -48,5 +49,6 @@ pub pure fn resolve_cli_subcommand(cmd: str) -> i64 {
     if cmd == "tree" { return 14; }
     if cmd == "deps" { return 15; }
     if cmd == "map" || cmd == "outline" { return 16; }
+    if cmd == "gate" { return 17; }
     return 0;
 }

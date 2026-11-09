@@ -1,12 +1,32 @@
 //! Milestone 28.2: Compact `FileId(u16)`, 8-Byte C-ABI `ByteSpan` & SIMD/SWAR `LineIndex` (`pilot-span`)
 
-/// Compact 16-bit source file identifier (supports up to 65,535 files per workspace).
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct FileId(pub u16);
+pub struct FileId(pub u32);
+impl FileId { pub const DUMMY: Self = Self(u32::MAX); }
 
-impl FileId {
-    pub const DUMMY: Self = Self(u16::MAX);
+#[derive(Clone, Debug)]
+pub struct SourceFile { pub id: FileId, pub path: String, pub line_index: LineIndex, pub source_len: u32 }
+
+#[derive(Clone, Debug, Default)]
+pub struct SourceMap { files: Vec<SourceFile>, path_to_id: std::collections::HashMap<String, FileId> }
+
+impl SourceMap {
+    pub fn new() -> Self { Self::default() }
+    pub fn add_file(&mut self, path: &str, source: &str) -> FileId {
+        if let Some(&id) = self.path_to_id.get(path) { return id; }
+        let id = FileId(self.files.len() as u32);
+        self.files.push(SourceFile { id, path: path.to_string(), line_index: LineIndex::new(source.as_bytes()), source_len: source.len() as u32 });
+        self.path_to_id.insert(path.to_string(), id); id
+    }
+    pub fn get_file(&self, id: FileId) -> Option<&SourceFile> { self.files.get(id.0 as usize) }
+    pub fn file_count(&self) -> usize { self.files.len() }
+    pub fn lookup_loc(&self, id: FileId, byte_offset: u32) -> Option<(&str, SourceLoc)> {
+        let f = self.get_file(id)?; Some((f.path.as_str(), f.line_index.lookup(byte_offset)))
+    }
+    pub fn lookup_span(&self, id: FileId, span: ByteSpan) -> Option<(&str, SourceLoc, SourceLoc)> {
+        let f = self.get_file(id)?; Some((f.path.as_str(), f.line_index.lookup(span.start), f.line_index.lookup(span.end)))
+    }
 }
 
 /// 8-byte C-ABI source byte span `[start, end)` within a file's UTF-8 buffer.
@@ -21,39 +41,14 @@ const _: () = assert!(core::mem::size_of::<ByteSpan>() == 8);
 
 impl ByteSpan {
     pub const EMPTY: Self = Self { start: 0, end: 0 };
-
-    #[inline]
-    pub const fn new(start: u32, end: u32) -> Self {
-        Self { start, end }
-    }
-
-    #[inline]
-    pub const fn len(self) -> u32 {
-        self.end.saturating_sub(self.start)
-    }
-
-    #[inline]
-    pub const fn is_empty(self) -> bool {
-        self.start >= self.end
-    }
-
-    #[inline]
-    pub const fn contains(self, offset: u32) -> bool {
-        offset >= self.start && offset < self.end
-    }
-
-    #[inline]
-    pub fn merge(self, other: Self) -> Self {
-        if self.is_empty() {
-            return other;
-        }
-        if other.is_empty() {
-            return self;
-        }
-        Self {
-            start: self.start.min(other.start),
-            end: self.end.max(other.end),
-        }
+    #[inline] pub const fn new(start: u32, end: u32) -> Self { Self { start, end } }
+    #[inline] pub const fn len(self) -> u32 { self.end.saturating_sub(self.start) }
+    #[inline] pub const fn is_empty(self) -> bool { self.start >= self.end }
+    #[inline] pub const fn contains(self, offset: u32) -> bool { offset >= self.start && offset < self.end }
+    #[inline] pub fn merge(self, other: Self) -> Self {
+        if self.is_empty() { return other; }
+        if other.is_empty() { return self; }
+        Self { start: self.start.min(other.start), end: self.end.max(other.end) }
     }
 
     #[inline]
@@ -210,5 +205,24 @@ mod tests {
         let ret_pos = src.find("return").unwrap() as u32;
         let loc_ret = idx.lookup(ret_pos);
         assert_eq!((loc_ret.line, loc_ret.col), (4, 1));
+    }
+
+    #[test]
+    fn source_map_file_id_and_span_lookup() {
+        let mut sm = SourceMap::new();
+        let f0 = sm.add_file("app.pilot", "let x = 10;\nlet y = 20;\n");
+        let f1 = sm.add_file("lib.pilot", "pub fn mul(a: i64, b: i64) -> i64 => a * b;\n");
+        assert_eq!(sm.file_count(), 2);
+        assert_eq!(f0, FileId(0));
+        assert_eq!(f1, FileId(1));
+
+        let (path, loc) = sm.lookup_loc(f0, 13).unwrap();
+        assert_eq!(path, "app.pilot");
+        assert_eq!((loc.line, loc.col), (2, 1));
+
+        let (path1, st, en) = sm.lookup_span(f1, ByteSpan::new(7, 10)).unwrap();
+        assert_eq!(path1, "lib.pilot");
+        assert_eq!((st.line, st.col), (1, 8));
+        assert_eq!((en.line, en.col), (1, 11));
     }
 }

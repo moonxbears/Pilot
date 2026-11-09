@@ -496,4 +496,32 @@ pub let ERRORS = [
         category: "DimensionalAlgebra",
         reference: "SI Physical Units / Milestone 33.2",
     },
+    ErrorDef {
+        code: "MOD001",
+        title: "Unresolved Module Import",
+        description: "Unresolved package or module path in 'use' declaration",
+        category: "ModuleGraph",
+        reference: "Pilot AGENTS.md §3 Module Resolution / Rust E0432 / Python ModuleNotFoundError",
+    },
+    ErrorDef {
+        code: "MOD002",
+        title: "Circular Module Dependency",
+        description: "Illegal cross-package circular dependency cycle detected in module graph",
+        category: "ModuleGraph",
+        reference: "Pilot AGENTS.md §3 Module Graph / Tarjan SCC / Go cyclic import",
+    },
+    ErrorDef {
+        code: "MOD003",
+        title: "Visibility Clearance Violation",
+        description: "Visibility or clearance ring level insufficient for importer",
+        category: "ModuleGraph",
+        reference: "Pilot AGENTS.md §5 Two-Axis Visibility / Rust E0603 / C# CS0122",
+    },
+    ErrorDef {
+        code: "MOD004",
+        title: "Conflicting Clearance Ring",
+        description: "Duplicate package file claiming conflicting clearance level ring",
+        category: "ModuleGraph",
+        reference: "Pilot AGENTS.md §5 Clearance Ring Conflict",
+    },
 ];
