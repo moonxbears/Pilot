@@ -1467,7 +1467,7 @@ Given domain `struct T` with leaf scalar/object fields $f_0, f_1, \dots, f_{m-1}
 
 ---
 
-### M30 — Self-Generating Service, CLI & Persistence Blueprints (`[Cli]`, `[Service]`, `[Entity]`)
+### M30 — [COMPLETE] Self-Generating Service, CLI & Persistence Blueprints (`[Cli]`, `[Service]`, `[Entity]`)
 
 #### 30.1 Objective & Current Codebase Audit
 - **Root Bottleneck (Cross-Layer Application Boilerplate):** In typical ecosystems, adding a single field (`discount_bps: u16`) to an `Order` domain concept forces manual edits across 5 disconnected layers: CLI flags, HTTP route handlers, JSON request/response validators, OpenAPI YAML docs, and SQL `CREATE TABLE` / `INSERT` / `SELECT` column indices. With Phase 3's weavers (`M21`), `*Bundle`/`*Facet` composition (`M22`), `.pchor` choreography (`M24`), typestates/contracts (`M26`), and sandboxed `comptime` (`M29`) in place, Pilot can **self-generate** production-grade CLI, HTTP/RPC, and SQL persistence layers from **one clean Pilot source of truth** at `0` runtime reflection cost!

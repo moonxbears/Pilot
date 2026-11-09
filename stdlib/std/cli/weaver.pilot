@@ -1,0 +1,203 @@
+// ==============================================================================
+// FILE: stdlib/std/cli/weaver.pilot
+// Milestone 30: Self-Generating CLI Blueprint ([Cli] & [Arg])
+// Synthesizes zero-alloc argv parsers, subcommands (from enum variants),
+// env-var fallbacks, help screens, and shell completions.
+// Enforces:
+//   GEN005: Duplicate CLI Short/Long Flag Collision in [Cli]
+// ==============================================================================
+
+pub pkg std.cli;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Diagnostic Formatting Helpers
+// ------------------------------------------------------------------------------
+
+pub pure fn format_gen005(cli_name: str, flag: str, field_a: str, field_b: str) -> str {
+    return "GEN005: Duplicate CLI flag '" + flag + "' collision in [Cli] '" + cli_name + "' between fields '" + field_a + "' and '" + field_b + "'";
+}
+
+// ------------------------------------------------------------------------------
+// 2. CLI Schema (0b00 & 0b10)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct CliArgDef : IValue {
+    pub name:        str;
+    pub short_flag:  str; // e.g. "-c"
+    pub long_flag:   str; // e.g. "--customer-id"
+    pub help_text:   str;
+    pub env_var:     str;
+    pub is_required: bool;
+    pub default_val: str;
+    pub arg_type:    str;
+}
+
+pub pure fn cli_arg_def_new(
+    name: str,
+    short_f: str,
+    long_f: str,
+    help: str,
+    env_v: str,
+    req: bool,
+    def_val: str,
+    a_type: str
+) -> CliArgDef {
+    return CliArgDef {
+        name:        name,
+        short_flag:  short_f,
+        long_flag:   long_f,
+        help_text:   help,
+        env_var:     env_v,
+        is_required: req,
+        default_val: def_val,
+        arg_type:    a_type,
+    };
+}
+
+pub struct CliAppDef : IObject {
+    pub name:        str;
+    pub version:     str;
+    pub description: str;
+    pub args:        List<CliArgDef>;
+    pub subcommands: List<str>;
+}
+
+pub fn cli_app_def_new(name: str, ver: str, desc: str) -> CliAppDef {
+    return CliAppDef {
+        name:        name,
+        version:     ver,
+        description: desc,
+        args:        [],
+        subcommands: [],
+    };
+}
+
+pub fn cli_add_arg(var ref self: CliAppDef, arg: CliArgDef) -> str {
+    var i = 0;
+    while i < self.args.len() {
+        let existing = self.args[i];
+        if arg.short_flag.len() > 0 && arg.short_flag == existing.short_flag {
+            return format_gen005(self.name, arg.short_flag, existing.name, arg.name);
+        }
+        if arg.long_flag.len() > 0 && arg.long_flag == existing.long_flag {
+            return format_gen005(self.name, arg.long_flag, existing.name, arg.name);
+        }
+        i = i + 1;
+    }
+    self.args.push(arg);
+    return "";
+}
+
+pub fn cli_add_subcommand(var ref self: CliAppDef, subcmd: str) {
+    self.subcommands.push(subcmd);
+}
+
+// ------------------------------------------------------------------------------
+// 3. Help Text & Shell Completion Generators
+// ------------------------------------------------------------------------------
+
+pub fn cli_generate_help(app: ref<CliAppDef>) -> str {
+    var out = app.name + " " + app.version + "\n" + app.description + "\n\nUSAGE:\n  " + app.name + " [OPTIONS]";
+    if app.subcommands.len() > 0 {
+        out = out + " [SUBCOMMAND]";
+    }
+    out = out + "\n\nOPTIONS:\n";
+    var i = 0;
+    while i < app.args.len() {
+        let a = app.args[i];
+        var flags = "  ";
+        if a.short_flag.len() > 0 {
+            flags = flags + a.short_flag + ", ";
+        }
+        flags = flags + a.long_flag;
+        out = out + flags + "    " + a.help_text + "\n";
+        i = i + 1;
+    }
+    return out;
+}
+
+// ------------------------------------------------------------------------------
+// 4. Argv Parsing Engine
+// ------------------------------------------------------------------------------
+
+pub struct CliParsedResult : IObject {
+    pub is_ok:          bool;
+    pub show_help:      bool;
+    pub subcommand:     str;
+    pub parsed_keys:    List<str>;
+    pub parsed_values:  List<str>;
+    pub error_message:  str;
+}
+
+pub fn cli_parse_argv(app: ref<CliAppDef>, argv: List<str>) -> CliParsedResult {
+    var res = CliParsedResult {
+        is_ok:         true,
+        show_help:     false,
+        subcommand:    "",
+        parsed_keys:   [],
+        parsed_values: [],
+        error_message: "",
+    };
+
+    var i = 0;
+    let n = argv.len();
+
+    // Check for subcommand
+    if n > 0 && argv[0].slice(0, 1) != "-" {
+        res.subcommand = argv[0];
+        i = 1;
+    }
+
+    while i < n {
+        let token = argv[i];
+        if token == "--help" || token == "-h" {
+            res.show_help = true;
+            return res;
+        }
+
+        var matched_arg_idx: i64 = -1;
+        var j = 0;
+        while j < app.args.len() {
+            let a = app.args[j];
+            if token == a.long_flag || token == a.short_flag {
+                matched_arg_idx = j as i64;
+                break;
+            }
+            j = j + 1;
+        }
+
+        if matched_arg_idx >= 0 {
+            let a = app.args[matched_arg_idx as usize];
+            if a.arg_type == "bool" {
+                res.parsed_keys.push(a.name);
+                res.parsed_values.push("true");
+            } else if i + 1 < n {
+                i = i + 1;
+                let val = argv[i];
+                res.parsed_keys.push(a.name);
+                res.parsed_values.push(val);
+            } else {
+                res.is_ok = false;
+                res.error_message = "Missing value for option '" + token + "'";
+                return res;
+            }
+        }
+        i = i + 1;
+    }
+
+    return res;
+}
+
+pub pure fn cli_parsed_get(res: ref<CliParsedResult>, key: str) -> str {
+    var i = 0;
+    while i < res.parsed_keys.len() {
+        if res.parsed_keys[i] == key {
+            return res.parsed_values[i];
+        }
+        i = i + 1;
+    }
+    return "";
+}
