@@ -161,3 +161,13 @@ No milestone (`M1`–`M100` in [`MILESTONES_100.md`](file:///home/moony/Document
 1. **Gate 1 — Adaptability & Hygiene:** `14` seed tokens respected, `0` hardcoded user-space names, all files `<= 1,500` LOC, `0` dead legacy shims/mocks, freestanding `core.*` (`RING001`), and Dual-Pass Universal Rename Litmus green.
 2. **Gate 2 — Bootstrap Parity & Compile Speed:** Deterministic Stage-2 == Stage-3 self-compilation fixed point (`pilotc`) + warm incremental `PilotDb` latency within budget.
 3. **Gate 3 — Top-of-Chart Performance & Zero Leaks:** `0` unintended hot-path heap allocations, `0` Perceus/foreign handle leaks, and C/Rust-competitive runtime execution verified.
+
+---
+
+## 10. Multiplatform Portability & Cross-Target Invariance
+- **Tier 1 Native Platforms (Linux, macOS, Windows):** The `pilot` toolchain, runtime, self-hosted compiler, and standard library MUST run natively and pass all gates on Linux (`x86_64`, `aarch64`, `riscv64`), macOS (Apple Silicon `aarch64`, Intel `x86_64`), and Windows (`x86_64`, `aarch64`).
+- **Tier 2 WebAssembly & Tier 3 Embedded/Mobile:** First-class compilation to `wasm32-wasip2`, `wasm32-unknown-unknown`, Android (`aarch64-linux-android`), iOS (`aarch64-apple-ios`), and freestanding bare-metal/RTOS (`thumbv7em`, `riscv32`).
+- **Canonical Path & Line-Ending Invariance:** Always normalize filesystem paths internally using `/` (forward slashes). Transparently handle Windows drive letters (`C:/...`) and UNC paths (`//...`) without leaking host OS quirks into compiler hashes or spans. Losslessly accept `\n`, `\r\n`, and `\r` line endings in CST/AST without column/line drift.
+- **OS-Agnostic Core (`RING001`) vs Native Hosted `std.*`:** `core.*` must strictly contain 0 OS syscalls or libc dependencies. Hosted `std.*` delegates to native high-performance OS backends (Linux `io_uring`/`epoll`, macOS `kqueue`, Windows `IOCP`/Overlapped I/O, WASI `poll_oneoff`) while maintaining identical public signatures.
+- **ABI & Calling Convention Fidelity:** Codegen and FFI bridges must respect target calling conventions declaratively: SysV AMD64, Microsoft x64 (with mandatory 32-byte shadow space), ARM64 AAPCS64 (handling Darwin vs Linux stack variadics and HFA packing), RISC-V LP64D, and WASM Canonical ABI.
+- **Zero-Host Cross-Compilation:** Cross-compile from any host OS to any target triple (`--target <triple>`) out of the box with zero requirement for target-host development headers.

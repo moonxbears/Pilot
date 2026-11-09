@@ -25,6 +25,49 @@
 
 ---
 
+## Multiplatform Compatibility Contract & Tiered Target Matrix
+
+Multiplatform compatibility is a non-negotiable, first-class architectural invariant across the entire 100-milestone roadmap. Pilot does not treat non-Linux operating systems as secondary ports or afterthoughts: every subsystem—from the lossless CST and `PilotDb` to the `PilIR` intermediate representation, `comptime` sandbox, Perceus ARC, foreign language adapters, and `.pchor` choreographies—is designed for host and target cross-platform invariance from day 1.
+
+### Target Tier Taxonomy
+
+| Tier | Target Platforms & Architectures | Operational Mandate & Continuous CI Verification |
+| :--- | :--- | :--- |
+| **Tier 1 (First-Class Host & Target Parity)** | **Linux** (`x86_64`, `aarch64` / ARM64, `riscv64gc` glibc & musl)<br>**macOS** (`aarch64` Apple Silicon, `x86_64` Intel)<br>**Windows** (`x86_64`, `aarch64` Windows on ARM, MSVC & MinGW) | Full CLI toolchain (`pilot`), self-hosting compiler (`pilotc`), register-based PilVM runtime, incremental `PilotDb`, LSP server, DAP debugger, MCP server, all 10 foreign language adapters, and 100% test gate parity. Bit-for-bit reproducible self-hosting across all Tier 1 hosts. |
+| **Tier 2 (Web & Cloud-Native Sandboxed Wasm)** | **WASI Preview 2** (`wasm32-wasip2`, `wasm32-wasi`)<br>**Web / Browser** (`wasm32-unknown-unknown` + WebGPU / Canvas) | First-class WebAssembly Component Model (`.wit` auto-generation, canonical ABI lowering), in-process fuel and memory sandbox isolation, and standard library polyfills with zero OS leaks. |
+| **Tier 3 (Mobile & Embedded / RTOS Systems)** | **Mobile:** Android (`aarch64-linux-android`, `x86_64`), iOS (`aarch64-apple-ios`, `aarch64-apple-ios-sim`)<br>**Embedded:** Bare-metal ARM Cortex-M (`thumbv7em-none-eabi`), RISC-V (`riscv32imc-unknown-none-elf`), RTOS (FreeRTOS, Zephyr) | Strictly freestanding `core.*` (`RING001`, exactly `0` external OS/libc symbols), deterministic memory footprint, and low-latency realtime execution under `[HardRealtime]` and `[Wcet]`. |
+
+### The 7 Universal Multiplatform Invariants
+
+1. **Canonical Virtual Path Normalization:**
+   All compiler internals (`PilotDb`, CST, AST, `ModuleGraph`, `pkg`, `use`, diagnostic spans) normalize filesystem paths internally using forward slashes (`/`). Windows drive letters (`C:/...`), UNC network shares (`//server/share/...`), and case-insensitive filesystem lookups are handled losslessly without leaking host-specific path quirks into compiler hashes, `FileId` maps, or diagnostic spans.
+2. **Line-Ending Invariance (`\n`, `\r\n`, `\r`):**
+   Lexers, parsers, lossless CST tools, and `SourceMap` coordinate resolvers process POSIX `\n`, Windows `\r\n`, and legacy `\r` bit-for-bit identically. Spans, line numbers, and column offsets never skew due to line ending variations or source file checkout normalization.
+3. **Target ABI & Calling Convention Fidelity:**
+   Codegen and FFI lowerings derive calling conventions, register partitions, and memory layouts declaratively from target descriptors (`TargetDescriptor`, `pilot.abi.*`) rather than the host system:
+   - **System V AMD64:** POSIX x86_64 standard (`RDI`, `RSI`, `RDX`, `RCX`, `R8`, `R9`).
+   - **Microsoft x64:** Windows x86_64 ABI (`RCX`, `RDX`, `R8`, `R9` with mandatory 32-byte caller shadow space and struct-return pointer rules).
+   - **AAPCS64 & Apple Darwin:** ARM64 ABI (handling Darwin-specific Mach-O stack variadic packing and Homogeneous Floating-point Aggregates `HFA` per Apple ABI).
+   - **RISC-V LP64D:** Standard RISC-V 64-bit calling convention (`a0..a7`, `fa0..fa7`).
+   - **WASM Canonical ABI:** Direct register passing up to 16 flat values with indirect memory spill and `cabi_post_*` cleanup.
+4. **Dynamic In-Process FFI & Linker Independence:**
+   Dynamic library loading adapts dynamically per OS without external glue:
+   - POSIX: `dlopen`, `dlsym`, `dlerror` (`.so` on Linux/Android, `.dylib` on macOS/iOS).
+   - Windows: `LoadLibraryW`, `GetProcAddress`, `FormatMessageW` (`.dll`).
+   - WASM: Component model table imports and linear memory buffer mapping.
+5. **Freestanding `core.*` vs Hosted `std.*` Isolation (`RING001`):**
+   `core.*` contains strictly 0 OS syscalls and 0 libc imports, enabling compilation on bare-metal, microcontrollers, and microkernels. Hosted `std.*` delegates to pluggable platform backends (`std.fs`, `std.io`, `std.net`, `std.sync`, `std.proc`) mapping to native OS facilities:
+   - Linux: `io_uring` / `epoll`, `futex`, `clone`/`fork`+`execve`.
+   - macOS: `kqueue`, `os_unfair_lock`, `posix_spawn`.
+   - Windows: `IOCP` / Overlapped I/O, `WaitOnAddress` / `SRWLock`, `CreateProcessW`.
+   - WASI: `poll_oneoff`, cooperative fibers.
+6. **Zero-Host Cross-Compilation from Day 1:**
+   The `pilot` toolchain can cross-compile from any host OS to any target triple (`--target <triple>`) out of the box using bundled target descriptors, pure-Pilot sysroots, and target-neutral `PilIR`.
+7. **Deterministic Cross-Platform Reproducibility:**
+   All hashes (`pilot.lock`, `.pilc` binaries, gate audits) use endian-neutral, path-normalized serialization. A project built on Windows, macOS, or Linux produces bit-for-bit identical binary artifacts.
+
+---
+
 # PART I: THE ROAD TO PILOT 1.0 (`M1` – `M50`)
 
 ## Phase 1 (`M1` – `M10`): Seed Unlock, Unified `PilotDb`, `PilIR` & Dual-Syntax Foundation (UNABRIDGED SPECIFICATION)
@@ -158,13 +201,14 @@
   - Methods: `pub pure fn lookup_type(name: str) -> opt<TypeLayout>;`, `pub pure fn symbols_in_pkg(pkg_name: str) -> slice<str>;`, `pub pure fn ast_root(unit: FileUnitId) -> usize;`
 
 #### 2.4 End-to-End Algorithmic Pipeline & Complexity Bounds
-1. **Declarative Package Search Table (Zero `"Pilot/"` Rust Hardcoding):**
+1. **Declarative Package Search Table & Canonical Path Normalization:**
    - `module_graph.pilot` resolves `use Pkg.Sub.Item;` via an ordered list of `SearchRoot` entries loaded from `stdlib/core/bootstrap.pilot` and project roots (`./`, `./src/`, `./stdlib/`, `./selfhost/`), converting namespace segments case-insensitively (`Pilot.Core.Reflect` $\rightarrow$ `stdlib/core/reflect.pilot`) in $O(D)$ filesystem stat probes cached in `pkg_to_unit` ($O(1)$ amortized).
+   - Normalizes both POSIX `/` and Windows `\` path separators internally to canonical `/`, losslessly handling Windows drive letters (`C:/...`) and UNC network shares (`//server/share/...`) without leaking host-specific path syntax into `FileUnitId` keys, module caches, or compiler hashes.
 2. **Tarjan Strongly-Connected Components & Topological Mount ($O(V + E)$):**
    - Parses each discovered `.pilot` file **once** into its own `FileUnitId`-tagged `AstArena`.
    - Detects import cycles via Tarjan's SCC algorithm: intra-package `partial struct` mutual references within the same `pkg` merge cleanly into one `CompilationGroup`, while illegal cross-package initialization cycles emit `MOD002 (CircularPackageImport)` showing the exact cycle chain `A -> B -> C -> A`.
 3. **$O(1)$ `ENV` Hydration Across Both `comptime` and Runtime:**
-   - Both `ComptimeEngine::eval_ast_node` and `pilot run` construct the identical `PhysicsRegistry` snapshot and bind global slot `0` (`ENV`) so `Pilot.Core.Reflect.env()` resolves target physics, layouts, and registered symbols in $O(1)$ hash lookup—eliminating all $O(N)$ AST node polling loops.
+   - Both `ComptimeEngine::eval_ast_node` and `pilot run` construct the identical `PhysicsRegistry` snapshot and bind global slot `0` (`ENV`) with target physics (`TargetDescriptor` populated with `os`: `"linux"`, `"darwin"`, `"windows"`, `"wasi"`, `"android"`, `"ios"`, or `"none"`; `arch`: `"x86_64"`, `"aarch64"`, `"riscv64"`, `"wasm32"`; pointer size and endianness), so `Pilot.Core.Reflect.env()` resolves target physics, layouts, and registered symbols in $O(1)$ hash lookup—eliminating all $O(N)$ AST node polling loops.
 4. **Real Transpile Routing for `emit` & `from`:**
    - `pilot emit <lang> <file.pilot>` parses `<file.pilot>` via `ModuleGraph` and dispatches to `selfhost/transpile/emit_{c,cpp,csharp,rust,python,js,lua}.pilot`.
    - `pilot from <lang> <foreign_file>` dispatches to `selfhost/transpile/ingest.pilot` and formats output via `selfhost/fmt/fmt.pilot`.
@@ -179,6 +223,7 @@
 #### 2.6 Edge Cases & Verification Criteria
 - **Exact Line/Col Preservation Test:** Import 5 stdlib modules at the top of `app.pilot` and trigger a type error on line `12`, column `9` of `app.pilot` $\rightarrow$ diagnostic reports `app.pilot:12:9` (not line `2,847` of a concatenated string!).
 - **`comptime` == Runtime Parity Test:** Execute identical reflection Function (`env().lookup_type(...)`, `Map<str, i64>` indexing, string slicing) inside `comptime { ... }` AND via `pilot run` $\rightarrow$ bit-identical output.
+- **Multiplatform Path & Line-Ending Invariance Test:** Parse and index modules with Windows CRLF line endings and backslash path strings (`.\src\sub\mod.pilot`) $\rightarrow$ assert `SourceMap` line/column coordinates and `ModuleGraph` node lookups match POSIX LF inputs bit-for-bit without span drift.
 - **Zero Fake Transpile Stubs Test:** Run `pilot emit python` and `pilot emit rust` on a randomized 50-line struct+loop `.pilot` program $\rightarrow$ verifies genuine transpiled Python/Rust of the input file (confirming `def add` / `pub fn mul` static mocks in `main.rs` are gone forever).
 
 ---
@@ -241,9 +286,11 @@
 2. **Damerau-Levenshtein Typo Suggestion ($O(|A| \cdot |B|)$ bounded on `<32` char tokens):**
    - Unknown subcommand `pilot biuld` or flag `--josn` computes edit distance $\le 2$ across `CommandRegistry` keys and emits `CLI001: Unknown command 'biuld'. Did you mean 'build'?` with exit code `2`.
 3. **Quad-Output Schema Synthesis from One `CommandRegistry`:**
-   - `render_help(spec)` $\rightarrow$ grouped, terminal-width-aware `--help` output.
-   - `emit_shell_completions(shell)` $\rightarrow$ complete subcommand + flag + file/enum tab-completion scripts for `bash`, `zsh`, `fish`, and `pwsh`.
+   - `render_help(spec)` $\rightarrow$ grouped, terminal-width-aware `--help` output with automatic cross-platform ANSI/VT100 detection (supporting Windows Terminal and enabling `ENABLE_VIRTUAL_TERMINAL_PROCESSING` on legacy Windows Console).
+   - `emit_shell_completions(shell)` $\rightarrow$ complete subcommand + flag + file/enum tab-completion scripts for `bash`, `zsh`, `fish`, and `pwsh` (PowerShell on Windows/macOS/Linux).
    - `export_cli_json_schema()` $\rightarrow$ JSON Schema of every `pilot` tool & flag, ready for VS Code tasks (`ide-sync`) and MCP tool registration (`M45`).
+4. **Multiplatform Shell Argument Escaping:**
+   - Command parser and pass-through argument serializer handle both POSIX `/bin/sh` shell tokenization and Windows `cmd.exe` / `PowerShell` escaping rules (`CommandLineToArgvW` quote-escaping and `^` caret rules).
 
 #### 3.5 Diagnostic & Exit Contracts
 - `CLI001` (Unknown Subcommand + suggestion), `CLI002` (Unknown Flag + suggestion), `CLI003` (Missing Required Argument/Flag), `CLI004` (Invalid Flag Type/Enum Choice), `CLI005` (Duplicate Non-Repeatable Flag), `CLI006` (Conflicting Mutually Exclusive Flags).
@@ -354,10 +401,13 @@ Every row below is guaranteed **100% AST-, Type-, Lattice-, and Codegen-Identica
 3. **BLAKE3 Early Cutoff Barrier:** Compute `new_fp = blake3_128(new_output)`.
    - If `new_fp == memo.header.output_fingerprint` (e.g., user edited a comment, reformatted whitespace, or changed a local variable inside a function body so `ItemSignature(file)` is unchanged!), keep `memo.header.changed_at` at its **old** revision and only bump `verified_at = current_rev`!
    - **Result:** Editing inside a function body in `module_a.pilot` re-typechecks *only* that single function body—**zero** downstream importers (`module_b`..`module_z`) re-typecheck!
+4. **Cross-Platform Virtual URI Canonicalization:**
+   - `FileUnitId` query resolution maps POSIX `file:///path`, Windows `file:///C:/path`, and UNC `file://server/share/path` into a canonical forward-slash virtual index.
+   - Preserves CRLF and LF line endings losslessly in Green trivia nodes without altering AST spans or token boundaries.
 
 #### 5.5 Complexity & Latency Guarantees
 - Typing inside a function body in a 100-module workspace: $O(|\text{single file CST diff}| + |\text{single fn body}|)$, completing `FileDiagnostics` in **`< 8 ms`**.
-- Warm CLI `pilot check` with zero changed files using `.pilc-cache/pilotdb.v1`: **`< 15 ms`**.
+- Warm CLI `pilot check` with zero changed files using `.pilc-cache/pilotdb.v1`: **`< 15 ms`** (cache format is endian-neutral and cross-platform portable).
 - Corrupt or compiler-version-mismatched `.pilc-cache/pilotdb.v1`: silently discarded and rebuilt cleanly (`DB002` info log under `--verbose`, never panics).
 
 #### 5.6 Verification & 3-Gate Acceptance Criteria
@@ -410,6 +460,8 @@ Every row below is guaranteed **100% AST-, Type-, Lattice-, and Codegen-Identica
     - `pub blocks: List<IrBlock>; pub operand_pool: List<u32>; pub value_physics: List<IrTypePhysics>;`
   - **`pub struct IrModule : IObject`** (`0b10`):
     - `pub unit_id: FileUnitId; pub target: TargetDescriptor; pub layouts: List<TypeLayout>; pub globals: List<IrGlobal>; pub functions: List<IrFunction>;`
+  - **Target-Aware ABI Lowering & Multiplatform Representation:**
+    - Every `IrModule` is parameterized by its `TargetDescriptor`. Calling conventions, register partitioning, aggregate passing rules, and stack alignments are computed relative to the target platform (SysV AMD64, Win64 with 32-byte caller shadow space, AAPCS64 Darwin/Linux with HFA packing, RISC-V LP64D, WASM) rather than the host system. This ensures cross-compilation from any host OS produces bit-for-bit identical target object representations.
 - **Complete `IrOp` Instruction Taxonomy (34 Orthogonal Opcodes across 6 Families):**
   1. **Constants & Aggregates:** `ConstBits`, `ConstFloat`, `ConstBytes`, `Undef`, `ConstructAggregate`, `ExtractField`, `InsertField`.
   2. **Register Arithmetic & Bitwise:** `Add`, `Sub`, `Mul`, `Div`, `Rem`, `BitAnd`, `BitOr`, `BitXor`, `Shl`, `Shr`, `Cmp`, `Cast`, `SimdLaneOp`.
@@ -537,9 +589,9 @@ Every row below is guaranteed **100% AST-, Type-, Lattice-, and Codegen-Identica
 | `stdlib/core/**` | **KEEP & HARDEN** | **Ring 1 (`core`)** — `core`, `core.mem`, `core.ops`, `core.opt`, `core.res`, `core.simd`, `core.meta`, `core.reflect`, `core.contracts`, `core.rt`, `core.syntax.*` | All `[Lang]` primitives, 2-bit lattice interfaces, `opt<T>`, `res<T, E>`, `slice<T>`, `stride<T>`, `simd<T, N>`, weavers, `.pchor` cue verifier. |
 | `stdlib/collections/collections.pilot` | **MIGRATE** | **Ring 2 (`std`)** — `stdlib/std/col/` (`pub pkg std.col;`) | `List<T>`, `Map<K, V>`, `Set<T>`, `Deque<T>`, `Ring<T>`, `BinaryHeap<T>`. |
 | `stdlib/collections/itertools.pilot` & `stdlib/functools/` | **DELETE** | Folded into `core` iterator facets & `std.col` lazy adapter views | Retires Python `itertools`/`functools` names. |
-| `stdlib/io/{io,fs,path}.pilot` | **MIGRATE** | **Ring 2 (`std`)** — `stdlib/std/io/`, `std/fs/`, `std/path/` (`std.io`, `std.fs`, `std.path`) | `IReader`, `IWriter`, `BufReader`, `File`, `DirEntry`, `PathView` (`0b01`), `PathBuf` (`0b10`). |
+| `stdlib/io/{io,fs,path}.pilot` | **MIGRATE** | **Ring 2 (`std`)** — `stdlib/std/io/`, `std/fs/`, `std/path/` (`std.io`, `std.fs`, `std.path`) | `IReader`, `IWriter`, `BufReader`, `File`, `DirEntry`, `PathView` (`0b01`), `PathBuf` (`0b10`). Cross-platform POSIX + Win32 (automatic UTF-8 $\leftrightarrow$ UTF-16 `wchar_t` transcoding via stack-allocated buffer; maps `errno` / `GetLastError()` to unified `IoError`). |
 | `stdlib/io/{pathlib,shutil}.pilot` | **DELETE** | Tree copy/remove & path join folded into `std.fs` & `std.path` | Retires Python `pathlib`/`shutil` duplicates. |
-| `stdlib/socket/` & `stdlib/http/` | **MIGRATE** | **Ring 2 (`std`)** — `stdlib/std/net/` (`std.net`) & `std/http/` (`std.http`) | `IpAddr`, `TcpStream`, `TcpListener`, `UdpSocket`, `Url`, `HttpReq`, `HttpResp`, `HttpServer`. |
+| `stdlib/socket/` & `stdlib/http/` | **MIGRATE** | **Ring 2 (`std`)** — `stdlib/std/net/` (`std.net`) & `std/http/` (`std.http`) | `IpAddr`, `TcpStream`, `TcpListener`, `UdpSocket`, `Url`, `HttpReq`, `HttpResp`, `HttpServer`. Cross-platform async I/O multiplexing (`epoll`/`kqueue`/`IOCP`/WASI `poll_oneoff`). |
 | `stdlib/urllib/` & `stdlib/request/` | **DELETE** | URL parser in `std.net`; client unified in `std.http` | Eliminates 3-way `urllib`/`request`/`http` split. |
 | `stdlib/asyncio/select_syntax.pilot` & `stdlib/core/task.pilot` | **MIGRATE** | **Ring 2 (`std`)** — `stdlib/std/task/` (`std.task`), `std/chan/` (`std.chan`), `std/sync/` (`std.sync`) | `Task<T>`, `Chan<T>`, `select` syntax, `Mutex<T>`, `MutexGuard<T>` (`0b11`), `RwLock<T>`, `Atomic<T>`. |
 | `stdlib/asyncio/asyncio.pilot`, `threading/`, `multiprocessing/` | **DELETE** | Superseded by `std.task`, `std.chan`, `std.sync`, and `std.proc` | Purges Python concurrency module names. |
@@ -565,7 +617,7 @@ Enforced automatically in `PilotDb` (`M5`) and `pilot gate` (`M1`):
 
 #### 9.4 Edge Cases & 3-Gate Verification Criteria
 1. **Bootstrap Alias Continuity:** `Pilot.Core.*` continues resolving seamlessly to `core.*` in `module_graph.pilot` (`M2`) so all `selfhost/` modules build with zero disruption while user code writes concise `use core.mem; use std.col;`.
-2. **Bare-Metal Symbol Table Proof:** Compile a freestanding module importing *only* `core.*` (`opt`, `res`, `slice`, `simd`, `core.math`) to `wasm32` and `x86_64` ELF object $\rightarrow$ inspect symbol import table and assert **`0` external OS imports**!
+2. **Bare-Metal & Multiplatform Symbol Table Proof:** Compile a freestanding module importing *only* `core.*` (`opt`, `res`, `slice`, `simd`, `core.math`) to `wasm32`, `x86_64-unknown-none` (ELF), `aarch64-unknown-none` (Mach-O), and `x86_64-pc-windows-none` (PE/COFF) $\rightarrow$ inspect symbol import table and assert **`0` external OS/libc imports**!
 3. **Full Test Suite Migration:** Migrate all existing showcase examples (`examples/showcase/*.pilot`) and milestone suites (`crypto`, `postgres_wire`, `mysql_wire`, `http`, `polyglot`) to `std.*` using `pilot check --fix` and verify 100% green execution.
 
 ---
@@ -622,7 +674,7 @@ To prove **Everything First-Class** at the close of Phase 1 (`M10`), an external
 
 #### 10.6 Phase 1 (`M1`–`M10`) Cumulative Exit Checkpoint
 Before advancing to **Phase 2 (`M11` — Universal Foreign-Language Adapter v1)**:
-- **Gate 1 (Adaptability):** `pilot gate --full` runs 100% in pure Pilot; Python `scripts/gate*.py` and frozen Rust SHA-256 locks are retired; Dual-Pass Universal Rename Litmus passes across all backends and `PilIR`.
+- **Gate 1 (Adaptability & Multiplatform):** `pilot gate --full` runs 100% in pure Pilot; Python `scripts/gate*.py` and frozen Rust SHA-256 locks are retired; Dual-Pass Universal Rename Litmus passes across all backends and `PilIR`; cross-target compilation and path/CRLF invariance validated across Linux, macOS, Windows, WASM, and bare-metal targets.
 - **Gate 2 (Bootstrap & Speed):** Stage-2 == Stage-3 SHA-256 fixed-point parity holds on `PilIR`-backed `pilotc`; warm incremental `PilotDb` single-function edit re-checks in `< 8 ms`; `crates/pilot-cli/src/main.rs` is `<= 35` LOC.
 - **Gate 3 (Ergonomics, Purity & Cleanliness):** Every compact symbol has a verified readable `lowercase` counterpart (`M4`); `pilot inspect` exposes every weave/layout/method/Perceus/IR decision (`M7`); `pilot check --fix` repairs code with 100% comment conservation (`M8`); all 21 legacy Python-clone `stdlib/` folders and 80 stale `.pilc-cache` blobs are purged with freestanding `core` verified (`M9`); and the entire compiler is importable as `pilot.*` (`M10`).
 
@@ -863,7 +915,7 @@ Every C construct lowers directly into `TypeLayout` + `IrTypePhysics` (`M6`) for
 | Action | Path | Package & Ring | Budget | Purpose |
 | :--- | :--- | :--- | ---: | :--- |
 | **CREATE** | `selfhost/adapter/py_stub.pilot` | `pub lvl(0) pkg Pilot.SelfHost.Adapter.PyStub;` | `~360L` | `comptime` parser for Python `.pyi` stub files & `inspect` signatures (`def`, `class`, `@property`, `*args`, `**kwargs`, type unions `X | None` $\rightarrow$ `opt<X>`, `numpy.typing.NDArray[np.float64]` $\rightarrow$ `stride<f64>`). |
-| **CREATE** | `stdlib/std/polyglot/py_capi.pilot` | `pub pkg std.polyglot.py;` | `~460L` | Dynamic `dlopen` binder for `libpython3` (**PEP 384 Stable ABI** `Py_InitializeEx`, `PyImport_ImportModule`, `PyObject_Vectorcall`, `PyDict_SetItemString`, `PyErr_Fetch` + PEP 3118 `PyObject_GetBuffer` / `PyMemoryView_FromMemory`). |
+| **CREATE** | `stdlib/std/polyglot/py_capi.pilot` | `pub pkg std.polyglot.py;` | `~460L` | Dynamic in-process loader for `libpython3` across Linux (`.so`), macOS (`.dylib` / `.framework`), and Windows (`python3*.dll` via Windows Registry / PEP 514) using **PEP 384 Stable ABI** (`Py_InitializeEx`, `PyImport_ImportModule`, `PyObject_Vectorcall`, `PyDict_SetItemString`, `PyErr_Fetch` + PEP 3118 `PyObject_GetBuffer` / `PyMemoryView_FromMemory`). |
 | **CREATE** | `selfhost/ir/pass_gil_coalesce.pilot` | `pub lvl(0) pkg Pilot.SelfHost.Ir.GilCoalesce;` | `~190L` | `PilIR` (`M6`) optimization pass merging adjacent `PyGilGuard` scopes within a basic block/loop and inserting `PyAllowThreadsGuard` around pure Pilot compute loops! |
 | **MODIFY** | `stdlib/std/polyglot/bridge.pilot` | `pub pkg std.polyglot;` | `-35L` | **Delete** `polyglot_eval_json` Python subprocess string-concat hack; retain explicit `std.proc` (`M9`) only for genuine OS CLI commands. |
 
@@ -893,7 +945,7 @@ Every C construct lowers directly into `TypeLayout` + `IrTypePhysics` (`M6`) for
 | Action | Path | Package & Ring | Budget | Purpose |
 | :--- | :--- | :--- | ---: | :--- |
 | **CREATE** | `selfhost/adapter/ts_dts.pilot` | `pub lvl(0) pkg Pilot.SelfHost.Adapter.TsDts;` | `~430L` | Pure-Pilot `.d.ts` TypeScript declaration absorber (`export function`, `interface`, `class`, `type` unions, optional `prop?: T` $\rightarrow$ `opt<T>`, `TypedArray`s $\rightarrow$ `slice<T>`, `bigint` $\rightarrow$ `i64`/`i128`, `Promise<T>` $\rightarrow$ `Task<res<T, JsError>>`). |
-| **CREATE** | `stdlib/std/polyglot/js_napi.pilot` | `pub pkg std.polyglot.js;` | `~440L` | ABI-stable **Node-API v9 (`napi_*`)** host & addon adapter supporting both `libnode`/Deno/Bun N-API hosting AND lightweight embedded QuickJS N-API fallback when Node is not installed! |
+| **CREATE** | `stdlib/std/polyglot/js_napi.pilot` | `pub pkg std.polyglot.js;` | `~440L` | ABI-stable **Node-API v9 (`napi_*`)** host & addon adapter across Linux, macOS, and Windows supporting both `libnode`/Deno/Bun N-API hosting AND lightweight embedded QuickJS N-API fallback when Node is not installed! |
 | **MODIFY** | `stdlib/std/polyglot/bridge.pilot` | `pub pkg std.polyglot;` | `-20L` | **Delete** `node` subprocess `with (env)` string-eval hack permanently. |
 
 #### 18.3 Schemas, 64-Bit `BigInt` Fidelity, Zero-Copy `TypedArray` & `Promise` Model
@@ -963,8 +1015,8 @@ Every C construct lowers directly into `TypeLayout` + `IrTypePhysics` (`M6`) for
 
 #### 20.5 Phase 2 (`M11`–`M20`) Cumulative Exit Checkpoint
 Before advancing to **Phase 3 (`M21` — Boilerplate Eradication & `.pchor` Choreographer v1)**:
-- **Gate 1 (Adaptability):** All 10 foreign/schema adapters (`adapter`, `c`, `cpp`, `rust`, `py`, `js`/`ts`, `wasm`, `sql`, `openapi`, `proto`) register cleanly in open `PilotDb` absorber tables with zero new seed tokens and pass the Dual-Pass Universal Rename Litmus.
-- **Gate 2 (Zero-Downside Safety):** Every foreign handle (`FILE*`, `sqlite3*`, C++ RAII, `RustVec`, `PyObj`, `JsRef`, WASM `own<R>`) is automatically freed by Perceus `0b10` `~self()` (including thread-affine queues), every runtime scope (GIL, N-API `HandleScope`, `PyBufferLease`) is protected by `0b11` LIFO `IGuard`, and every C++ exception / Rust `panic!` / Python `Exception` / JS `Error` / WASM `trap` converts cleanly to `res<T, Err>` with **zero UB crashes and zero memory leaks**.
+- **Gate 1 (Adaptability & Multiplatform Parity):** All 10 foreign/schema adapters (`adapter`, `c`, `cpp`, `rust`, `py`, `js`/`ts`, `wasm`, `sql`, `openapi`, `proto`) register cleanly in open `PilotDb` absorber tables with zero new seed tokens and pass the Dual-Pass Universal Rename Litmus. Verified to compile, load, and execute natively across Linux, macOS, and Windows.
+- **Gate 2 (Zero-Downside Safety):** Every foreign handle (`FILE*`, `sqlite3*`, C++ RAII, `RustVec`, `PyObj`, `JsRef`, WASM `own<R>`) is automatically freed by Perceus `0b10` `~self()` (including thread-affine queues across POSIX and Windows threads), every runtime scope (GIL, N-API `HandleScope`, `PyBufferLease`) is protected by `0b11` LIFO `IGuard`, and every C++ exception / Rust `panic!` / Python `Exception` / JS `Error` / WASM `trap` converts cleanly to `res<T, Err>` with **zero UB crashes and zero memory leaks**.
 - **Gate 3 (Peak Interop Speed):** Native C/C++/Rust calls execute at `0 ns` register ABI speed; Python NumPy and JS `TypedArray` exchange megabyte buffers at **`0` byte-copy overhead** via `0b01` `slice<T>`/`stride<T>`; and Protobuf `View` decoding performs **`0` heap allocations**.
 
 ---
@@ -1406,15 +1458,16 @@ Before advancing to **Phase 4 (`M31` — Peak Performance, Hardware Backends & Z
 
 - [ ] **M33 — Optimizing Native LLVM Backend (`selfhost/codegen/llvm.pilot`)**
   - Emit production LLVM 18+ IR with strict alias metadata (`noalias` derived from `0b01`/`iso` lattice guarantees!), tail calls, vectorization hints, DWARF v5 debug info, and ThinLTO cross-module inlining.
+  - Support cross-compilation from any host OS to Linux (`x86_64`, `aarch64`, `riscv64`), macOS (`aarch64` Darwin, `x86_64`), Windows (`x86_64`, `aarch64`), WASM (`wasm32-wasip2`), and bare-metal (`thumbv7em`, `riscv32`) targets.
 
 - [ ] **M34 — Portable Hardware SIMD Vectorization (`simd<T, N>` / `T@N`)**
   - Lower `simd<T, N>` operations and vectorizable `PilIR` loops to x86_64 AVX2/AVX-512, ARM64 NEON, and WASM SIMD128 strictly through name-blind `[Bits]` and `[Layout]` register descriptors.
 
 - [ ] **M35 — Sub-Millisecond Direct x86_64 & ARM64 Native Backend (`selfhost/codegen/asm_*`)**
-  - Emit direct native machine code + ELF/Mach-O/PE executables in pure Pilot without invoking LLVM or Clang—achieving $>500\text{K LOC/s}$ compile speeds for instant `pilot run` and debug cycles.
+  - Emit direct native machine code + ELF (Linux), Mach-O (macOS), and PE/COFF (Windows) executables in pure Pilot without invoking LLVM or Clang—achieving $>500\text{K LOC/s}$ compile speeds for instant `pilot run` and debug cycles.
 
-- [ ] **M36 — First-Class GPU Compute Pipeline (`[Kernel]` $\rightarrow$ PTX, AMDGPU, SPIR-V, WGSL, MSL)**
-  - Compile typed Pilot `[Kernel]` functions directly to GPU targets with automatic host-device buffer transfers, workgroup shared memory, and Perceus VRAM buffer pooling.
+- [ ] **M36 — First-Class GPU Compute Pipeline (`[Kernel]` $\rightarrow$ PTX, AMDGPU, SPIR-V, WGSL, MSL, HLSL)**
+  - Compile typed Pilot `[Kernel]` functions directly to GPU targets across platforms: Vulkan/SPIR-V (Linux/Windows/Android), Metal/MSL (macOS/iOS), DirectX 12/HLSL (Windows), WebGPU/WGSL (Web/Browsers), and CUDA/PTX (NVIDIA) with automatic host-device buffer transfers, workgroup shared memory, and Perceus VRAM buffer pooling.
 
 - [ ] **M37 — `PilIR` Symbolic Autodiff (`grad` / `!@`) & Glitch-Free Signals (`sig` / `!^`)**
   - Lower forward- and reverse-mode `grad` (`!@`) through `PilIR` CSE/dead-code passes and compile `sig` (`!^`) reactive graphs into flat, zero-allocation topological arenas.
@@ -1423,10 +1476,10 @@ Before advancing to **Phase 4 (`M31` — Peak Performance, Hardware Backends & Z
   - Promote the compiled native `pilot` binary to primary workspace compiler; delete `pilot-lexer`, `pilot-parser`, and `pilot-analysis` Rust crates in favor of their `selfhost/*.pilot` counterparts.
 
 - [ ] **M39 — Portable C11 Bootstrap Seed Snapshot (Zero Rust Toolchain Required)**
-  - Generate and verify a clean, self-contained C11 bootstrap snapshot (`bootstrap/pilot_seed.c`) + bootstrap script (`./bootstrap.sh`) that builds native `pilot` from scratch using **only a standard C compiler (Clang/GCC/Zig CC) and zero Rust/Cargo installation**.
+  - Generate and verify a clean, self-contained C11 bootstrap snapshot (`bootstrap/pilot_seed.c`) + multiplatform bootstrap scripts (`./bootstrap.sh` on POSIX, `bootstrap.bat` on Windows) that build native `pilot` from scratch using **only a standard C compiler (Clang/GCC/MSVC/Zig CC) and zero Rust/Cargo installation**.
 
 - [ ] **M40 — Integrated Hardware-Counter Benchmark Suite (`pilot bench` vs. C & Rust)**
-  - Build `pilot bench` reading hardware PMU counters (cycles, instructions, branches, cache misses, allocations) across canonical systems, string, JSON, crypto, matrix, and concurrency benchmarks—enforcing C/Rust parity gates.
+  - Build `pilot bench` reading hardware PMU counters (cycles, instructions, branches, cache misses, allocations) across Linux (`perf_event_open`), macOS (`proc_pidinfo`), and Windows (`QueryPerformanceCounter` / ETW) across canonical systems, string, JSON, crypto, matrix, and concurrency benchmarks—enforcing C/Rust parity gates.
 
 ---
 
