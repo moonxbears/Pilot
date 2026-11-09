@@ -134,27 +134,28 @@ pub fn pass_coalesce_gil_scopes(var ref scopes: List<GilScope>) -> GilCoalesceRe
 
     var merged: u32 = 0;
     var allow_th: u32 = 0;
-    var i: usize = 0;
+    var out_scopes: List<GilScope> = [];
 
-    while i + 1 < scopes.len() {
-        let cur = scopes[i];
-        let nxt = scopes[i + 1];
+    var cur = scopes[0];
+    var i: usize = 1;
 
+    while i < scopes.len() {
+        let nxt = scopes[i];
         if can_coalesce_scopes(ref cur, ref nxt) {
-            // Coalesce nxt into cur
-            scopes[i].end_inst = nxt.end_inst;
-            scopes[i].is_coalesced = true;
-            scopes.remove_at(i + 1);
+            cur.end_inst = nxt.end_inst;
+            cur.is_coalesced = true;
             merged = merged + 1;
         } else {
-            // Check if there is an intensive compute loop to wrap with AllowThreads
             if nxt.start_inst > cur.end_inst + 20 {
                 allow_th = allow_th + 1;
             }
-            i = i + 1;
+            out_scopes.push(cur);
+            cur = nxt;
         }
+        i = i + 1;
     }
+    out_scopes.push(cur);
 
-    let after_count = scopes.len() as u32;
+    let after_count = out_scopes.len() as u32;
     return gil_coalesce_report_new(merged, allow_th, before_count, after_count);
 }

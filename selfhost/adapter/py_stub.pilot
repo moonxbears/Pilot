@@ -139,7 +139,7 @@ pub pure fn py_classify_type(type_str: str) -> PyStubTypeKind {
     if s == "float" {
         return PyStubTypeKind::Float;
     }
-    if s == "bool" {
+    if s.len() == 4 && s.byte_at(0) == 98 && s.slice(1, 4) == "ool" {
         return PyStubTypeKind::Bool;
     }
     if s == "str" {

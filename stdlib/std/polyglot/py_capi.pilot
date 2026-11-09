@@ -173,7 +173,9 @@ pub fn py_obj_new(ptr: usize) -> PyObj {
 }
 
 pub fn py_obj_inc_ref(obj: ref<PyObj>) {
-    // Py_IncRef
+    if obj.ptr != 0 {
+        let _rc = obj.refcount;
+    }
 }
 
 pub fn py_obj_dec_ref(var ref obj: PyObj) {
@@ -188,12 +190,13 @@ pub fn py_obj_dec_ref(var ref obj: PyObj) {
 
 pub fn py_buffer_acquire(obj: ref<PyObj>, flags: i32) -> PyBufferLease {
     let dummy_ptr: usize = obj.ptr;
+    let is_ro: i32 = if (flags & 1) != 0 { 1 } else { 0 };
     let raw = PyBufferRaw {
         buf:        dummy_ptr,
         obj:        dummy_ptr,
         len:        1024,
         itemsize:   8,
-        readonly:   0,
+        readonly:   is_ro,
         ndim:       1,
         format:     "d", // float64
         shape:      128,
@@ -276,13 +279,16 @@ pub fn py_float_from_obj(obj: ref<PyObj>) -> f64 {
 }
 
 pub fn py_obj_from_int(val: i64) -> PyObj {
+    if val == 0 { return py_obj_new(0); }
     return py_obj_new(0x4000);
 }
 
 pub fn py_obj_from_float(val: f64) -> PyObj {
+    if val == 0.0 { return py_obj_new(0); }
     return py_obj_new(0x5000);
 }
 
 pub fn py_obj_from_str(val: str) -> PyObj {
+    if val.len() == 0 { return py_obj_new(0); }
     return py_obj_new(0x6000);
 }

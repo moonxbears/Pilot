@@ -939,7 +939,7 @@ Every C construct lowers directly into `TypeLayout` + `IrTypePhysics` (`M6`) for
 
 ---
 
-### M17 — In-Process Python C-API Adapter & Zero-Copy Tensor Views (`use py`)
+### M17 — In-Process Python C-API Adapter & Zero-Copy Tensor Views (`use py`) [COMPLETE]
 
 #### 17.1 Objective & Current Codebase Audit
 - **Root Bottleneck (`bridge.pilot` Spawns a New `python3` Subprocess + JSON Copy Per Call):** [`stdlib/polyglot/bridge.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/polyglot/bridge.pilot) (lines `60`–`66`) currently runs `Process.spawn_eval("python3", "import json\nenv = json.loads(...)...")` on every invocation—incurring `~35 ms` OS process-spawn latency per call, losing Python object state between calls, and copying all arrays through JSON text!
