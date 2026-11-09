@@ -1371,7 +1371,7 @@ Given domain `struct T` with leaf scalar/object fields $f_0, f_1, \dots, f_{m-1}
 
 ---
 
-### M27 — Scoped User Sublanguage Builder (`syntax` + Hygiene + Declarative IDE Sync)
+### M27 — [COMPLETE] Scoped User Sublanguage Builder (`syntax` + Hygiene + Declarative IDE Sync)
 
 #### 27.1 Objective & Current Codebase Audit
 - **Root Bottleneck 1 (Hardcoded 110-Word Keyword Strings in `analyzer.pilot` & `cst_recovery.pilot`!):** [`selfhost/analyzer.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/analyzer.pilot) (lines `560`–`561`) and [`selfhost/cst/cst_recovery.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/cst/cst_recovery.pilot) (line `141`) both hardcode a giant static string of 110+ user-space keywords (`"else|while|until|for|...|blueprint|cue|role|route|unit|syntax|use|op|"`)—reserving words globally even when a domain module isn't imported, and violating the Open-Registry / 14-Token Name-Blind philosophy!
