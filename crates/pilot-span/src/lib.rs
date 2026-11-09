@@ -216,7 +216,7 @@ mod tests {
         assert_eq!(f0, FileId(0));
         assert_eq!(f1, FileId(1));
 
-        let (path, loc) = sm.lookup_loc(f0, 13).unwrap();
+        let (path, loc) = sm.lookup_loc(f0, 12).unwrap();
         assert_eq!(path, "app.pilot");
         assert_eq!((loc.line, loc.col), (2, 1));
 

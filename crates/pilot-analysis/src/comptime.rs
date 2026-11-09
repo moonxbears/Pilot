@@ -59,25 +59,10 @@ impl ComptimeEngine {
         let mut registry = crate::infer::PhysicsRegistry::new(flat_arena, symbol_strings);
         registry.layouts = self.layout_table.clone();
         let (mut env_m, mut tgt_m, mut ast_m, mut sym_m) = (std::collections::HashMap::new(), std::collections::HashMap::new(), std::collections::HashMap::new(), std::collections::HashMap::new());
-        tgt_m.insert("architecture".to_string(), PilotVal::from_str(std::env::consts::ARCH));
-        tgt_m.insert("os".to_string(), PilotVal::from_str(std::env::consts::OS));
-        tgt_m.insert("pointer_byte".to_string(), PilotVal::from_int(std::mem::size_of::<usize>() as i64));
-        tgt_m.insert("endianess".to_string(), PilotVal::from_str(if cfg!(target_endian = "little") { "little" } else { "big" }));
-        tgt_m.insert("backend".to_string(), PilotVal::from_str("vm"));
-        tgt_m.insert("simd_width_bits".to_string(), PilotVal::from_int(128));
-        tgt_m.insert("cache_line".to_string(), PilotVal::from_int(64));
-        tgt_m.insert("cache_line_bytes".to_string(), PilotVal::from_int(64));
-        tgt_m.insert("opt_level".to_string(), PilotVal::from_int(2));
-        ast_m.insert("node_count".to_string(), PilotVal::from_int(registry.arena.nodes.len() as i64));
-        ast_m.insert("root_node".to_string(), PilotVal::from_int(0));
-        sym_m.insert("count".to_string(), PilotVal::from_int(registry.symbol_strings.len() as i64));
-        env_m.insert("is_comptime".to_string(), PilotVal::from_int(1));
-        env_m.insert("unit_count".to_string(), PilotVal::from_int(1));
-        env_m.insert("symbol_count".to_string(), PilotVal::from_int(registry.symbol_strings.len() as i64));
-        env_m.insert("target".to_string(), PilotVal::from_int(1));
-        env_m.insert("ast".to_string(), PilotVal::from_int(2));
-        env_m.insert("symbols".to_string(), PilotVal::from_int(3));
-        vm.heap_maps.push(env_m); vm.heap_maps.push(tgt_m); vm.heap_maps.push(ast_m); vm.heap_maps.push(sym_m);
+        for (k, v) in [("architecture", PilotVal::from_str(std::env::consts::ARCH)), ("os", PilotVal::from_str(std::env::consts::OS)), ("pointer_byte", PilotVal::from_int(std::mem::size_of::<usize>() as i64)), ("endianess", PilotVal::from_str(if cfg!(target_endian = "little") { "little" } else { "big" })), ("backend", PilotVal::from_str("vm")), ("simd_width_bits", PilotVal::from_int(128)), ("cache_line", PilotVal::from_int(64)), ("cache_line_bytes", PilotVal::from_int(64)), ("opt_level", PilotVal::from_int(2))] { tgt_m.insert(k.into(), v); }
+        ast_m.insert("node_count".into(), PilotVal::from_int(registry.arena.nodes.len() as i64)); ast_m.insert("root_node".into(), PilotVal::from_int(0)); sym_m.insert("count".into(), PilotVal::from_int(registry.symbol_strings.len() as i64));
+        for (k, v) in [("is_comptime", 1), ("unit_count", 1), ("symbol_count", registry.symbol_strings.len() as i64), ("target", 1), ("ast_nodes", 2), ("symbols", 3)] { env_m.insert(k.into(), PilotVal::from_int(v)); }
+        vm.heap_maps.extend([env_m, tgt_m, ast_m, sym_m]);
         vm.shared_symbols = Some(std::sync::Arc::new(registry.symbol_strings.clone()));
         let reg_ptr = &mut registry as *mut crate::infer::PhysicsRegistry;
         vm.engine_handler = Some(Box::new(move |op: &str, args: &[PilotVal]| crate::infer::handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op, args)));

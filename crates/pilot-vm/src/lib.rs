@@ -35,10 +35,8 @@ impl BytecodeCompiler {
         let last = if root.is_some() { c.compile_node(arena, root) } else { 0 };
         c.emit(Opcode::Move, 0, last, 0); c.emit(Opcode::Ret, 0, 0, 0); c.emit(Opcode::Halt, 0, 0, 0);
         for &(idx, ref name) in &c.call_patches {
-            let dst = c.instructions[idx].dst();
-            c.instructions[idx] = if let Some(&(ep, _)) = c.fn_entries.get(name) {
-                Instruction::encode(Opcode::Call, dst, (ep >> 8) as u8, (ep & 0xFF) as u8)
-            } else { Instruction::encode(Opcode::Nop, dst, 0, 0) };
+            let (dst, ep) = (c.instructions[idx].dst(), c.fn_entries.get(name).map(|&(e, _)| e));
+            c.instructions[idx] = ep.map_or_else(|| Instruction::encode(Opcode::Nop, dst, 0, 0), |e| Instruction::encode(Opcode::Call, dst, (e >> 8) as u8, (e & 0xFF) as u8));
         }
         PilcBinary::with_debug_tables(c.constants, c.instructions, c.pc_spans, c.reg_symbols)
     }
@@ -216,6 +214,7 @@ impl BytecodeCompiler {
                 } else { rhs_r }
             }
             NodeKind::BinaryExpr => {
+                if node.flags == 32 { return self.compile_node(arena, NodeId(node.lhs)); }
                 let (r_l, r_r) = (self.compile_node(arena, NodeId(node.lhs)), self.compile_node(arena, NodeId(node.rhs)));
                 if r_l == 0 || r_r == 0 { return 0; }
                 let (dst, op) = (self.alloc_reg(), match node.flags {
@@ -338,7 +337,7 @@ impl BytecodeCompiler {
                             return dst;
                         }
                     } else if callee_n.node_kind() == NodeKind::MemberExpr {
-                        let hook = match arena.interner.resolve(SymbolId(callee_n.rhs)) { "len" => Some("str_len"), "byte_at" => Some("str_byte_at"), "slice" | "substring" => Some("str_slice"), _ => None };
+                        let hook = match arena.interner.resolve(SymbolId(callee_n.rhs)) { "len" => Some("str_len"), "byte_at" => Some("str_byte_at"), "slice" | "substring" => Some("str_slice"), "find" => Some("str_find"), _ => None };
                         if let Some(h) = hook {
                             let mut args = vec![self.compile_node(arena, NodeId(callee_n.lhs))];
                             for i in 1..arg_len { args.push(self.compile_node(arena, NodeId(arena.extra_children[arg_start + i]))); }

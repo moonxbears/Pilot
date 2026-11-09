@@ -540,6 +540,7 @@ pub fn build_allowed_infer_strings() -> i64 {
     let _ = gset_insert(s, "ast_get_bound_target");
     let _ = gset_insert(s, "ast_emit_diag");
     let _ = gset_insert(s, "sym_str");
+    let _ = gset_insert(s, "sym_lookup");
     let _ = gset_insert(s, "str_len");
     let _ = gset_insert(s, "str_byte_at");
     let _ = gset_insert(s, "ast_span_start");

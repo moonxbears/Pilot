@@ -27,6 +27,9 @@ mod anticheat;
 #[path = "milestone01_seed_unlock_and_pilot_gate.rs"]
 mod m01;
 
+#[path = "milestone02_module_graph_and_comptime_parity.rs"]
+mod m02;
+
 #[path = "milestone50_lossless_bridge_and_reflection.rs"]
 mod m50;
 
@@ -120,6 +123,10 @@ pub fn test_mega_all_milestones_50_through_61_simultaneously() {
             m01::test_m1_2_rust_tamper_unlock_comment_freedom_and_retired_scripts_purged();
             m01::test_m1_3_dual_pass_universal_rename_litmus_and_temp_dir_guard_cleanup();
             m01::test_m1_4_cli_pilot_gate_full_json_exit_codes_and_stage3_sha256_parity();
+            m02::test_m2_1_exact_line_col_preservation_without_span_drift();
+            m02::test_m2_2_comptime_and_runtime_env_reflection_parity();
+            m02::test_m2_3_pure_pilot_module_graph_and_pragma_suppression();
+            m02::test_m2_4_zero_fake_transpile_stubs_and_crate_ceilings();
         });
         s.spawn(|| {
             m50::test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts();

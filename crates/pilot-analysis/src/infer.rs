@@ -300,6 +300,7 @@ pub fn handle_engine_intrinsic(registry: &mut PhysicsRegistry, op_code: &str, ar
         "ast_get_bound_target" => Ok(PilotVal::from_int(registry.node_targets.get(nid).and_then(|x| *x).map_or(u32::MAX as i64, |t| t as i64))),
         "ast_emit_diag" => { registry.diagnostics.push(PhysicsDiagnostic { node_id: nid as u32, severity: arg_i(1) as u8, message: arg_s(2) }); Ok(PilotVal::NULL) }
         "sym_str" => Ok(PilotVal::from_str(registry.symbol_strings.get(&(arg_i(0) as u32)).map(|s| s.as_str()).unwrap_or_default())),
+        "sym_lookup" => Ok(PilotVal::from_int(registry.symbol_strings.iter().find(|(_, s)| s.as_str() == arg_s(0)).map(|(&k, _)| k as i64).unwrap_or(-1))),
         "str_len" => Ok(PilotVal::from_int(arg_s(0).len() as i64)),
         "str_byte_at" => Ok(PilotVal::from_int(arg_s(0).as_bytes().get(arg_i(1).max(0) as usize).copied().unwrap_or(0) as i64)),
         "ast_span_start" => Ok(PilotVal::from_int(registry.arena.nodes.get(nid).map_or(0, |n| n.span_start as i64))),

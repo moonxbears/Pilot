@@ -1,0 +1,198 @@
+// ==============================================================================
+// FILE: selfhost/loader/pragma_filter.pilot
+// Milestone 2.2: Pure-Pilot Pragma Interval Solver & Diagnostic Suppressor
+// Replaces pipeline.rs:27-49 (#pragma warning/no_hardcode disable|restore)
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Loader.PragmaFilter;
+
+[Layout(c_abi)]
+pub struct PragmaInterval : IValue {
+    pub start_offset: usize;
+    pub end_offset: usize;
+    pub code: str;
+    pub is_all_warnings: bool;
+}
+
+// ------------------------------------------------------------------------------
+// Internal dynamic list helpers built on VM map primitives
+// ------------------------------------------------------------------------------
+
+pub fn glist_new() -> i64 {
+    let m = __engine("map_new");
+    __engine("map_set", m, "count", 0);
+    return m;
+}
+
+pub fn glist_len(list: i64) -> usize {
+    return __engine("map_get", list, "count") + 0;
+}
+
+pub fn glist_push(list: i64, item: any) -> usize {
+    let idx = glist_len(list);
+    __engine("map_set", list, idx, item);
+    __engine("map_set", list, "count", idx + 1);
+    return idx + 1;
+}
+
+pub fn glist_get(list: i64, idx: usize) -> any {
+    return __engine("map_get", list, idx);
+}
+
+pub fn glist_get_str(list: i64, idx: usize) -> str {
+    return __engine("map_get", list, idx);
+}
+
+pub fn glist_get_int(list: i64, idx: usize) -> i64 {
+    return __engine("map_get", list, idx) as i64;
+}
+
+pub fn glist_set_str(list: i64, idx: usize, val: str) -> i64 {
+    __engine("map_set", list, idx, val);
+    return list;
+}
+
+pub fn pragma_interval_new(st: usize, en: usize, code: str, is_all: bool) -> i64 {
+    let m = __engine("map_new");
+    __engine("map_set", m, "start_offset", st);
+    __engine("map_set", m, "end_offset", en);
+    __engine("map_set", m, "code", code);
+    __engine("map_set", m, "is_all_warnings", if is_all { 1 } else { 0 });
+    return m;
+}
+
+// ------------------------------------------------------------------------------
+// String Utilities
+// ------------------------------------------------------------------------------
+
+pub pure fn pf_trim(s: str) -> str {
+    let l = s.len();
+    var start: usize = 0;
+    while start < l {
+        let b = s.byte_at(start);
+        if b != 32 && b != 9 && b != 13 && b != 10 { break; }
+        start = start + 1;
+    }
+    var end: usize = l;
+    while end > start {
+        let b = s.byte_at(end - 1);
+        if b != 32 && b != 9 && b != 13 && b != 10 { break; }
+        end = end - 1;
+    }
+    return s.slice(start, end);
+}
+
+pub pure fn pf_starts_with(s: str, pfx: str) -> bool {
+    let sl = s.len();
+    let pl = pfx.len();
+    if pl > sl { return false; }
+    let sub = s.slice(0, pl);
+    return sub == pfx;
+}
+
+pub pure fn pf_find(haystack: str, needle: str, start: usize) -> i64 {
+    return __engine("str_find", haystack, needle, start);
+}
+
+pub fn pragma_solve_intervals(src: str) -> i64 {
+    let list = glist_new();
+    let open_keys = glist_new();
+    let open_starts = glist_new();
+    let sl = src.len();
+    var cur: usize = 0;
+
+    while cur < sl {
+        let nl = pf_find(src, "\n", cur);
+        let line_end = if nl >= 0 { nl as usize } else { sl };
+        let line = src.slice(cur, line_end);
+        let line_len = line_end - cur;
+        let tr = pf_trim(line);
+
+        var is_pragma = false;
+        var is_disable = false;
+        var is_restore = false;
+        var code_arg = "";
+        var is_all = false;
+
+        if pf_starts_with(tr, "#pragma warning disable") {
+            is_pragma = true;
+            is_disable = true;
+            code_arg = pf_trim(tr.slice(23, tr.len()));
+            if code_arg.len() == 0 { is_all = true; }
+        } else if pf_starts_with(tr, "#pragma warning restore") {
+            is_pragma = true;
+            is_restore = true;
+            code_arg = pf_trim(tr.slice(23, tr.len()));
+            if code_arg.len() == 0 { is_all = true; }
+        } else if pf_starts_with(tr, "#pragma no_hardcode disable") {
+            is_pragma = true;
+            is_disable = true;
+            code_arg = "HARD001";
+        } else if pf_starts_with(tr, "#pragma no_hardcode restore") {
+            is_pragma = true;
+            is_restore = true;
+            code_arg = "HARD001";
+        }
+
+        if is_pragma {
+            let key = if is_all { "__ALL__" } else { code_arg };
+            if is_disable {
+                let _ = glist_push(open_keys, key);
+                let _ = glist_push(open_starts, cur as i64);
+            } else if is_restore {
+                let count = glist_len(open_keys);
+                var k: usize = 0;
+                while k < count {
+                    let ok = glist_get_str(open_keys, k);
+                    if ok == key {
+                        let st = glist_get_int(open_starts, k) as usize;
+                        let interval = pragma_interval_new(st, cur + line_len, code_arg, is_all);
+                        let _ = glist_push(list, interval);
+                        let _ = glist_set_str(open_keys, k, "__CLOSED__");
+                        break;
+                    }
+                    k = k + 1;
+                }
+            }
+        }
+
+        cur = if nl >= 0 { (nl + 1) as usize } else { sl };
+    }
+
+    // Flush unclosed intervals to EOF
+    let open_count = glist_len(open_keys);
+    var idx: usize = 0;
+    while idx < open_count {
+        let k = glist_get_str(open_keys, idx);
+        if k != "__CLOSED__" {
+            let st = glist_get_int(open_starts, idx) as usize;
+            let is_all = (k == "__ALL__");
+            let c = if is_all { "" } else { k };
+            let interval = pragma_interval_new(st, sl, c, is_all);
+            let _ = glist_push(list, interval);
+        }
+        idx = idx + 1;
+    }
+
+    return list;
+}
+
+pub fn pragma_is_suppressed(intervals: i64, offset: usize, diag_code: str, is_error: bool) -> bool {
+    let count = glist_len(intervals);
+    var i: usize = 0;
+    while i < count {
+        let item = glist_get(intervals, i);
+        let st = __engine("map_get", item, "start_offset") as usize;
+        let en = __engine("map_get", item, "end_offset") as usize;
+        let is_all = __engine("map_get", item, "is_all_warnings") as i64 == 1;
+        let c = __engine("map_get", item, "code");
+        if offset >= st && offset < en {
+            if is_all {
+                if !is_error { return true; }
+            } else if c == diag_code {
+                return true;
+            }
+        }
+        i = i + 1;
+    }
+    return false;
+}

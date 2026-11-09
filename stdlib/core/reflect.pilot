@@ -988,4 +988,95 @@ pub struct GrammarRegistry {
     }
 }
 
+// =========================================================================
+// 8. COMPILE ENVIRONMENT & TARGET DESCRIPTOR REFLECTION (Milestone 2)
+// =========================================================================
+
+[Layout(c_abi)]
+pub struct TargetDescriptor : IValue {
+    pub arch:             str;
+    pub os:               str;
+    pub pointer_bytes:    usize;
+    pub endian:           str;
+    pub backend:          str;
+    pub simd_width_bits:  usize;
+    pub cache_line_bytes: usize;
+    pub opt_level:        u8;
+
+    pub pure fn is_64bit() -> bool => .pointer_bytes == 8;
+    pub pure fn is_little_endian() -> bool => .endian == "little";
+}
+
+pub struct CompileEnvView : IReference {
+    pub target:       TargetDescriptor;
+    pub is_comptime:  bool;
+    pub unit_count:   usize;
+    pub symbol_count: usize;
+
+    pub pure fn lookup_type(name: str) -> opt<TypeLayout> {
+        let sym_id = __engine("sym_lookup", name) as i64;
+        if sym_id >= 0 {
+            let sz = __engine("layout_metrics", sym_id) as usize;
+            if sz > 0 {
+                return opt<TypeLayout>.some(TypeLayout {
+                    size_in_bytes: sz,
+                    alignment: 8,
+                    lattice_bits: 0,
+                });
+            }
+        }
+        return opt<TypeLayout>.none();
+    }
+
+    pub pure fn symbols_in_pkg(pkg_name: str) -> slice<str> {
+        return slice<str> { data: null, len: 0 };
+    }
+
+    pub pure fn ast_root(unit: u32) -> usize {
+        return 0;
+    }
+}
+
+pub fn env() -> CompileEnvView {
+    let arch = __engine("map_get", 1, "architecture");
+    let arch_str = if arch.len() > 0 { arch } else { "x86_64" };
+    let os = __engine("map_get", 1, "os");
+    let os_str = if os.len() > 0 { os } else { "linux" };
+    let ptr_b = __engine("map_get", 1, "pointer_byte") as usize;
+    let ptr_bytes = if ptr_b > 0 { ptr_b } else { 8 };
+    let end = __engine("map_get", 1, "endianess");
+    let endian_str = if end.len() > 0 { end } else { "little" };
+    let be = __engine("map_get", 1, "backend");
+    let be_str = if be.len() > 0 { be } else { "vm" };
+    let simd = __engine("map_get", 1, "simd_width_bits") as usize;
+    let simd_bits = if simd > 0 { simd } else { 128 };
+    let cl = __engine("map_get", 1, "cache_line_bytes") as usize;
+    let cache_bytes = if cl > 0 { cl } else { 64 };
+    let opt = __engine("map_get", 1, "opt_level") as u8;
+    let opt_lvl = if opt > 0 { opt } else { 2 };
+
+    let is_comp = __engine("map_get", 0, "is_comptime") as i64 == 1;
+    let u_cnt = __engine("map_get", 0, "unit_count") as usize;
+    let s_cnt = __engine("map_get", 0, "symbol_count") as usize;
+
+    let tgt = TargetDescriptor {
+        arch: arch_str,
+        os: os_str,
+        pointer_bytes: ptr_bytes,
+        endian: endian_str,
+        backend: be_str,
+        simd_width_bits: simd_bits,
+        cache_line_bytes: cache_bytes,
+        opt_level: opt_lvl,
+    };
+
+    return CompileEnvView {
+        target: tgt,
+        is_comptime: is_comp,
+        unit_count: if u_cnt > 0 { u_cnt } else { 1 },
+        symbol_count: s_cnt,
+    };
+}
+
+
 
