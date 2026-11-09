@@ -1,0 +1,315 @@
+// ==============================================================================
+// FILE: stdlib/core/derive.pilot
+// Ring-1 Freestanding Structural Comptime Weavers for:
+//   [Eq], [Ord], [Hash], [Clone], [Default], [Display]
+// Modifiers: [SkipEq], [SkipHash], [Redact]
+// Enforces 2-Bit Hardware Lattice Physics & IEEE-754 Hash Normalization
+// ==============================================================================
+
+pub lvl(0) pkg core.derive;
+
+// Protocol Sub-Interfaces
+pub interface ITypeWeaverAttribute : IAttribute {
+    pub comptime fn weave_type() -> bool => true;
+}
+
+pub interface IFieldWeaverAttribute : IAttribute {
+    pub comptime fn weave_field() -> bool => true;
+}
+
+// Built-in Derive Attributes
+[Layout(c_abi)]
+pub struct EqAttr : ITypeWeaverAttribute, IValue {
+    pub weight: i32;
+    pub static pure fn create() -> EqAttr => EqAttr { weight: 100 };
+}
+
+[Layout(c_abi)]
+pub struct OrdAttr : ITypeWeaverAttribute, IValue {
+    pub weight: i32;
+    pub static pure fn create() -> OrdAttr => OrdAttr { weight: 100 };
+}
+
+[Layout(c_abi)]
+pub struct HashAttr : ITypeWeaverAttribute, IValue {
+    pub weight: i32;
+    pub static pure fn create() -> HashAttr => HashAttr { weight: 100 };
+}
+
+[Layout(c_abi)]
+pub struct CloneAttr : ITypeWeaverAttribute, IValue {
+    pub weight: i32;
+    pub static pure fn create() -> CloneAttr => CloneAttr { weight: 100 };
+}
+
+[Layout(c_abi)]
+pub struct DefaultAttr : ITypeWeaverAttribute, IValue {
+    pub weight: i32;
+    pub static pure fn create() -> DefaultAttr => DefaultAttr { weight: 100 };
+}
+
+[Layout(c_abi)]
+pub struct DisplayAttr : ITypeWeaverAttribute, IValue {
+    pub weight: i32;
+    pub static pure fn create() -> DisplayAttr => DisplayAttr { weight: 100 };
+}
+
+// Field Modifiers
+[Layout(c_abi)]
+pub struct SkipEqAttr : IFieldWeaverAttribute, IValue {
+    pub weight: i32;
+    pub static pure fn create() -> SkipEqAttr => SkipEqAttr { weight: 50 };
+}
+
+[Layout(c_abi)]
+pub struct SkipHashAttr : IFieldWeaverAttribute, IValue {
+    pub weight: i32;
+    pub static pure fn create() -> SkipHashAttr => SkipHashAttr { weight: 50 };
+}
+
+[Layout(c_abi)]
+pub struct RedactAttr : IFieldWeaverAttribute, IValue {
+    pub weight: i32;
+    pub static pure fn create() -> RedactAttr => RedactAttr { weight: 50 };
+}
+
+// Metadata for a struct field participating in derivation
+[Layout(c_abi)]
+pub struct DeriveField : IValue {
+    pub name: str;
+    pub type_name: str;
+    pub skip_eq: bool;
+    pub skip_hash: bool;
+    pub is_redacted: bool;
+    pub field_lattice: u8; // 0=0b00, 1=0b01, 2=0b10, 3=0b11
+}
+
+// IEEE-754 Hash Normalization & Hash Combiner
+pub pure fn normalize_float_for_hash(val: f64) -> f64 {
+    let s = "" + val;
+    if s == "-0" || s == "-0.0" || s == "0" || s == "0.0" {
+        return 0.0;
+    }
+    return val;
+}
+
+pub pure fn combine_hash(acc: u64, field_hash: u64) -> u64 {
+    // 64-bit FNV-1a offset and prime: (acc ^ field_hash) * 1099511628211
+    let prime: u64 = 1099511628211;
+    let mixed = acc ^ field_hash;
+    return mixed * prime;
+}
+
+pub pure fn string_hash(s: str) -> u64 {
+    var h: u64 = 14695981039346656037;
+    let prime: u64 = 1099511628211;
+    let len = s.len();
+    var i = 0;
+    while i < len {
+        let b = s.byte_at(i);
+        h = (h ^ (b as u64)) * prime;
+        i = i + 1;
+    }
+    return h;
+}
+
+// Display formatting helper supporting [Redact]
+pub pure fn format_display_field(name: str, val_repr: str, is_redacted: bool) -> str {
+    if is_redacted {
+        return name + ": ***REDACTED***";
+    }
+    return name + ": " + val_repr;
+}
+
+// Verification of 2-bit lattice constraints: 0b11 IGuard cannot derive [Clone] or [Default]
+pub pure fn validate_lattice_for_clone(lattice_bits: u8) -> str {
+    if lattice_bits == 3 {
+        return "WEAVE003: Scoped 0b11 IGuard owns a unique LIFO exit effect and cannot implement ICloneable";
+    }
+    return "";
+}
+
+pub pure fn validate_lattice_for_default(lattice_bits: u8) -> str {
+    if lattice_bits == 3 {
+        return "WEAVE003: Scoped 0b11 IGuard cannot derive [Default]";
+    }
+    return "";
+}
+
+// ==============================================================================
+// AST / Source Synthesizers for Derived Traits
+// ==============================================================================
+
+pub fn derive_eq_source(type_name: str, fields: List<DeriveField>) -> str {
+    var body = "";
+    var count = 0;
+    let n = fields.len();
+    var i = 0;
+    while i < n {
+        let f = fields.get(i);
+        if !f.skip_eq {
+            if count > 0 {
+                body = body + " && (self." + f.name + " == other." + f.name + ")";
+            } else {
+                body = "(self." + f.name + " == other." + f.name + ")";
+            }
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    if count == 0 {
+        body = "true";
+    }
+    var out = "impl IEquatable<" + type_name + "> for " + type_name + " {\n";
+    out = out + "    pub pure fn op == (self, other: " + type_name + ") -> bool => " + body + ";\n";
+    out = out + "    pub pure fn op != (self, other: " + type_name + ") -> bool => !(self == other);\n";
+    out = out + "}\n";
+    return out;
+}
+
+pub fn derive_ord_source(type_name: str, fields: List<DeriveField>) -> str {
+    var out = "impl IComparable<" + type_name + "> for " + type_name + " {\n";
+    out = out + "    pub pure fn op <=> (self, other: " + type_name + ") -> i32 {\n";
+    let n = fields.len();
+    var i = 0;
+    while i < n {
+        let f = fields.get(i);
+        if !f.skip_eq {
+            out = out + "        if self." + f.name + " < other." + f.name + " { return -1; }\n";
+            out = out + "        if self." + f.name + " > other." + f.name + " { return 1; }\n";
+        }
+        i = i + 1;
+    }
+    out = out + "        return 0;\n";
+    out = out + "    }\n";
+    out = out + "    pub pure fn op <  (self, other: " + type_name + ") -> bool => (self <=> other) < 0;\n";
+    out = out + "    pub pure fn op <= (self, other: " + type_name + ") -> bool => (self <=> other) <= 0;\n";
+    out = out + "    pub pure fn op >  (self, other: " + type_name + ") -> bool => (self <=> other) > 0;\n";
+    out = out + "    pub pure fn op >= (self, other: " + type_name + ") -> bool => (self <=> other) >= 0;\n";
+    out = out + "}\n";
+    return out;
+}
+
+pub fn derive_hash_source(type_name: str, fields: List<DeriveField>) -> str {
+    var out = "impl IHashable for " + type_name + " {\n";
+    out = out + "    pub pure fn hash(self) -> u64 {\n";
+    out = out + "        var h: u64 = 14695981039346656037;\n";
+    let n = fields.len();
+    var i = 0;
+    while i < n {
+        let f = fields.get(i);
+        if !f.skip_hash {
+            out = out + "        h = combine_hash(h, self." + f.name + ".hash());\n";
+        }
+        i = i + 1;
+    }
+    out = out + "        return h;\n";
+    out = out + "    }\n";
+    out = out + "}\n";
+    return out;
+}
+
+pub fn derive_clone_source(type_name: str, fields: List<DeriveField>, lattice_bits: u8) -> str {
+    let err = validate_lattice_for_clone(lattice_bits);
+    if err.len() > 0 {
+        return err;
+    }
+    var out = "impl ICloneable<" + type_name + "> for " + type_name + " {\n";
+    out = out + "    pub fn clone(self) -> " + type_name + " {\n";
+    if lattice_bits == 0 {
+        // 0b00: trivial memcpy/register return
+        out = out + "        return self;\n";
+    } else {
+        // 0b10 or 0b01: clone each field
+        out = out + "        return " + type_name + " {\n";
+        let n = fields.len();
+        var i = 0;
+        while i < n {
+            let f = fields.get(i);
+            out = out + "            " + f.name + ": self." + f.name + ".clone(),\n";
+            i = i + 1;
+        }
+        out = out + "        };\n";
+    }
+    out = out + "    }\n";
+    out = out + "}\n";
+    return out;
+}
+
+pub fn derive_default_source(type_name: str, fields: List<DeriveField>, lattice_bits: u8) -> str {
+    let err = validate_lattice_for_default(lattice_bits);
+    if err.len() > 0 {
+        return err;
+    }
+    var out = "impl IDefault<" + type_name + "> for " + type_name + " {\n";
+    out = out + "    pub static pure fn default() -> " + type_name + " {\n";
+    out = out + "        return " + type_name + " {\n";
+    let n = fields.len();
+    var i = 0;
+    while i < n {
+        let f = fields.get(i);
+        out = out + "            " + f.name + ": " + f.type_name + ".default(),\n";
+        i = i + 1;
+    }
+    out = out + "        };\n";
+    out = out + "    }\n";
+    out = out + "}\n";
+    return out;
+}
+
+pub fn derive_display_source(type_name: str, fields: List<DeriveField>) -> str {
+    var out = "impl IDisplay for " + type_name + " {\n";
+    out = out + "    pub fn to_str(self) -> str {\n";
+    out = out + "        var res = \"" + type_name + " { \";\n";
+    let n = fields.len();
+    var i = 0;
+    while i < n {
+        let f = fields.get(i);
+        if i > 0 {
+            out = out + "        res = res + \", \";\n";
+        }
+        if f.is_redacted {
+            out = out + "        res = res + \"" + f.name + ": ***REDACTED***\";\n";
+        } else {
+            out = out + "        res = res + \"" + f.name + ": \" + self." + f.name + ".to_str();\n";
+        }
+        i = i + 1;
+    }
+    out = out + "        res = res + \" }\";\n";
+    out = out + "        return res;\n";
+    out = out + "    }\n";
+    out = out + "}\n";
+    return out;
+}
+
+pub fn derive_all_structural(type_name: str, derives: List<str>, fields: List<DeriveField>, lattice_bits: u8) -> str {
+    var full = "";
+    let n = derives.len();
+    var i = 0;
+    while i < n {
+        let d = derives.get(i);
+        if d == "Eq" {
+            full = full + derive_eq_source(type_name, fields);
+        } else if d == "Ord" {
+            full = full + derive_ord_source(type_name, fields);
+        } else if d == "Hash" {
+            full = full + derive_hash_source(type_name, fields);
+        } else if d == "Clone" {
+            let res = derive_clone_source(type_name, fields, lattice_bits);
+            if res.starts_with("WEAVE003") {
+                return res;
+            }
+            full = full + res;
+        } else if d == "Default" {
+            let res = derive_default_source(type_name, fields, lattice_bits);
+            if res.starts_with("WEAVE003") {
+                return res;
+            }
+            full = full + res;
+        } else if d == "Display" {
+            full = full + derive_display_source(type_name, fields);
+        }
+        i = i + 1;
+    }
+    return full;
+}

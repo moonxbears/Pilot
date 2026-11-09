@@ -1,0 +1,128 @@
+// ==============================================================================
+// FILE: selfhost/types/delegation.pilot
+// Zero-Overhead Structural Delegation Compiler for:
+//   delegate IContract to .member [except { m1 }];
+//   delegate * to .member;
+// Synthesizes Tier-2 MethodTable forwarding thunks with 0 vtable overhead.
+// Enforces WEAVE005 (Target Missing Interface) & WEAVE006 (Wildcard Ambiguity).
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Types.Delegation;
+
+[Layout(c_abi)]
+pub struct DelegationSpec : IValue {
+    pub owner_type_id: u32;
+    pub contract_iface_id: u32; // 0 = wildcard *
+    pub target_field_idx: u16;
+    pub target_is_ref_or_ptr: bool;
+    pub excluded_syms: slice<u32>;
+}
+
+[Layout(c_abi)]
+pub struct MethodContract : IValue {
+    pub name: str;
+    pub return_type: str;
+    pub params: str;
+    pub is_mut: bool;
+}
+
+[Layout(c_abi)]
+pub struct DelegationThunk : IValue {
+    pub name: str;
+    pub return_type: str;
+    pub params: str;
+    pub target_field: str;
+    pub is_mut: bool;
+    pub provenance_tier: u8; // Tier 2 = Spliced / Delegated
+}
+
+pure fn list_contains(items: List<str>, query: str) -> bool {
+    let n = items.len();
+    var i = 0;
+    while i < n {
+        if items.get(i) == query {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// Validates whether the target field methods fulfill all methods required by the interface contract (WEAVE005)
+pub fn validate_interface_compliance(field_methods: List<str>, iface_methods: List<str>, iface_name: str) -> str {
+    let n = iface_methods.len();
+    var i = 0;
+    while i < n {
+        let req = iface_methods.get(i);
+        if !list_contains(field_methods, req) {
+            return "WEAVE005: delegate Target Field Does Not Implement Specified Interface '" + iface_name + "' (missing method '" + req + "')";
+        }
+        i = i + 1;
+    }
+    return "";
+}
+
+// Validates whether wildcard delegation (*) across two fields leads to ambiguous collisions (WEAVE006)
+pub fn validate_wildcard_ambiguity(field1: str, methods1: List<str>, field2: str, methods2: List<str>) -> str {
+    let n1 = methods1.len();
+    var i = 0;
+    while i < n1 {
+        let m = methods1.get(i);
+        if list_contains(methods2, m) {
+            return "WEAVE006: Ambiguous Wildcard delegate * Across Two Fields Sharing Method Signature '" + m + "' (" + field1 + " and " + field2 + ")";
+        }
+        i = i + 1;
+    }
+    return "";
+}
+
+// Synthesizes Tier-2 delegation thunks for interface methods not overridden at Tier-1 and not excluded
+pub fn synthesize_delegation_thunks(
+    target_field: str,
+    contract_methods: List<MethodContract>,
+    owner_tier1_methods: List<str>,
+    excluded_methods: List<str>,
+) -> List<DelegationThunk> {
+    var thunks: List<DelegationThunk> = [];
+    let n = contract_methods.len();
+    var i = 0;
+    while i < n {
+        let m = contract_methods.get(i);
+        // If owner already has an explicit Tier-1 override, Tier-1 wins unconditionally!
+        let has_tier1_override = list_contains(owner_tier1_methods, m.name);
+        let is_excluded = list_contains(excluded_methods, m.name);
+
+        if !has_tier1_override && !is_excluded {
+            let thunk = DelegationThunk {
+                name: m.name,
+                return_type: m.return_type,
+                params: m.params,
+                target_field: target_field,
+                is_mut: m.is_mut,
+                provenance_tier: 2,
+            };
+            thunks.push(thunk);
+        }
+        i = i + 1;
+    }
+    return thunks;
+}
+
+// Formats the synthesized forwarding thunk source code
+pub fn render_thunk_source(thunk: DelegationThunk) -> str {
+    let receiver = if thunk.is_mut { "var ref self" } else { "ref self" };
+    var out = "    pub fn " + thunk.name + "(" + receiver;
+    if thunk.params.len() > 0 {
+        out = out + ", " + thunk.params;
+    }
+    out = out + ") -> " + thunk.return_type + " {\n";
+    out = out + "        // Tier 2 Forwarding Thunk to ." + thunk.target_field + "\n";
+    out = out + "        return self." + thunk.target_field + "." + thunk.name + "(";
+    if thunk.params.len() > 0 {
+        // Simple argument extraction
+        out = out + thunk.params;
+    }
+    out = out + ");\n";
+    out = out + "    }\n";
+    return out;
+}

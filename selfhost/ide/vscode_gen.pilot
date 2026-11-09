@@ -66,10 +66,18 @@ pure fn json_indent(depth: i64, spaces: i64) -> str {
 
 pub pure fn dumps(obj: any, indent: i64 = 2) -> str {
     if indent < 0 { return ""; }
-    return str(obj);
+    let s = str(obj);
+    if s.starts_with("{") || s.starts_with("[") {
+        return s;
+    }
+    return "\"" + s + "\"";
 }
 
 pub fn loads(s: str) -> any {
+    // Strips surrounding quotes if present
+    if s.starts_with("\"") && s.ends_with("\"") && s.len() >= 2 {
+        return s.slice(1, s.len() - 1);
+    }
     return s;
 }
 

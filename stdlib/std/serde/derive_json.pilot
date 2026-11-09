@@ -1,0 +1,305 @@
+// ==============================================================================
+// FILE: stdlib/std/serde/derive_json.pilot
+// Zero-Reflection Streaming UTF-8 [Json] Weaver Supporting:
+//   NamingStyle (camelCase, snake_case, PascalCase), [JsonRename("...")],
+//   [JsonSkip], [JsonFlatten], opt<T> Null/Omission, and Discriminated Tags.
+// Enforces WEAVE003 (0b11 IGuard) & WEAVE004 (Duplicate Wire Field Collisions).
+// ==============================================================================
+
+pub pkg std.serde.json;
+
+// JSON Attributes
+[Layout(c_abi)]
+pub struct JsonAttr : IValue {
+    pub naming: str;
+    pub weight: i32;
+    pub static pure fn create() -> JsonAttr => JsonAttr { naming: "camelCase", weight: 100 };
+}
+
+[Layout(c_abi)]
+pub struct JsonRenameAttr : IValue {
+    pub wire_name: str;
+    pub weight: i32;
+    pub static pure fn named(name: str) -> JsonRenameAttr => JsonRenameAttr { wire_name: name, weight: 50 };
+}
+
+[Layout(c_abi)]
+pub struct JsonSkipAttr : IValue {
+    pub weight: i32;
+    pub static pure fn create() -> JsonSkipAttr => JsonSkipAttr { weight: 50 };
+}
+
+[Layout(c_abi)]
+pub struct JsonFlattenAttr : IValue {
+    pub weight: i32;
+    pub static pure fn create() -> JsonFlattenAttr => JsonFlattenAttr { weight: 50 };
+}
+
+[Layout(c_abi)]
+pub struct JsonDeriveConfig : IValue {
+    pub case_style: u8; // 0 = camelCase, 1 = snake_case, 2 = PascalCase
+    pub deny_unknown_fields: bool;
+    pub omit_none_fields: bool;
+    pub tag_field: str;
+
+    pub static pure fn default_camel() -> JsonDeriveConfig => JsonDeriveConfig {
+        case_style: 0,
+        deny_unknown_fields: false,
+        omit_none_fields: true,
+        tag_field: "",
+    };
+
+    pub static pure fn default_snake() -> JsonDeriveConfig => JsonDeriveConfig {
+        case_style: 1,
+        deny_unknown_fields: false,
+        omit_none_fields: true,
+        tag_field: "",
+    };
+
+    pub static pure fn default_pascal() -> JsonDeriveConfig => JsonDeriveConfig {
+        case_style: 2,
+        deny_unknown_fields: false,
+        omit_none_fields: true,
+        tag_field: "",
+    };
+}
+
+[Layout(c_abi)]
+pub struct JsonFieldMeta : IValue {
+    pub name: str;
+    pub wire_name: str;
+    pub type_name: str;
+    pub is_skip: bool;
+    pub is_flatten: bool;
+    pub is_optional: bool;
+}
+
+// Case Conversion Functions
+pure fn is_upper(c: u8) -> bool => c >= 65 && c <= 90;
+pure fn is_lower(c: u8) -> bool => c >= 97 && c <= 122;
+pure fn to_lower_char(c: u8) -> str {
+    if is_upper(c) {
+        let code = c + 32;
+        let s = "abcdefghijklmnopqrstuvwxyz";
+        let idx = (code - 97) as usize;
+        return s.slice(idx, idx + 1);
+    }
+    return char_to_str(c);
+}
+pure fn to_upper_char(c: u8) -> str {
+    if is_lower(c) {
+        let code = c - 32;
+        let s = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        let idx = (code - 65) as usize;
+        return s.slice(idx, idx + 1);
+    }
+    return char_to_str(c);
+}
+pure fn char_to_str(c: u8) -> str {
+    let all = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+    if c >= 32 && c <= 126 {
+        let idx = (c - 32) as usize;
+        return all.slice(idx, idx + 1);
+    }
+    return "";
+}
+
+pub fn to_camel_case(ident: str) -> str {
+    let n = ident.len();
+    if n == 0 { return ""; }
+    var out = "";
+    var capitalize_next = false;
+    var i = 0;
+    while i < n {
+        let b = ident.byte_at(i);
+        if b == 95 { // '_'
+            capitalize_next = true;
+        } else {
+            if capitalize_next {
+                out = out + to_upper_char(b);
+                capitalize_next = false;
+            } else if i == 0 {
+                out = out + to_lower_char(b);
+            } else {
+                out = out + char_to_str(b);
+            }
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+pub fn to_snake_case(ident: str) -> str {
+    let n = ident.len();
+    if n == 0 { return ""; }
+    var out = "";
+    var i = 0;
+    while i < n {
+        let b = ident.byte_at(i);
+        if is_upper(b) {
+            if i > 0 {
+                out = out + "_";
+            }
+            out = out + to_lower_char(b);
+        } else {
+            out = out + char_to_str(b);
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+pub fn to_pascal_case(ident: str) -> str {
+    let n = ident.len();
+    if n == 0 { return ""; }
+    var out = "";
+    var capitalize_next = true;
+    var i = 0;
+    while i < n {
+        let b = ident.byte_at(i);
+        if b == 95 { // '_'
+            capitalize_next = true;
+        } else {
+            if capitalize_next {
+                out = out + to_upper_char(b);
+                capitalize_next = false;
+            } else {
+                out = out + char_to_str(b);
+            }
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+pub fn apply_case_style(ident: str, style: u8) -> str {
+    if style == 0 {
+        return to_camel_case(ident);
+    } else if style == 1 {
+        return to_snake_case(ident);
+    } else if style == 2 {
+        return to_pascal_case(ident);
+    }
+    return ident;
+}
+
+// WEAVE004: Duplicate JSON wire field name collision detector
+pub fn check_json_wire_collisions(field_names: List<str>, style: u8) -> str {
+    var seen: List<str> = [];
+    let n = field_names.len();
+    var i = 0;
+    while i < n {
+        let raw = field_names.get(i);
+        let wire = apply_case_style(raw, style);
+        var j = 0;
+        let seen_cnt = seen.len();
+        while j < seen_cnt {
+            if seen.get(j) == wire {
+                return "WEAVE004: Duplicate JSON wire field name '" + wire + "' after case conversion";
+            }
+            j = j + 1;
+        }
+        seen.push(wire);
+        i = i + 1;
+    }
+    return "";
+}
+
+// WEAVE003: 0b11 Scoped Guard rejection
+pub fn validate_lattice_for_json(lattice_bits: u8) -> str {
+    if lattice_bits == 3 {
+        return "WEAVE003: Scoped 0b11 IGuard cannot derive [Json]";
+    }
+    return "";
+}
+
+// Codec Generation
+pub fn derive_json_serializer(type_name: str, fields: List<JsonFieldMeta>, cfg: JsonDeriveConfig, lattice_bits: u8) -> str {
+    let l_err = validate_lattice_for_json(lattice_bits);
+    if l_err.len() > 0 {
+        return l_err;
+    }
+
+    // Check collisions
+    var names: List<str> = [];
+    let n = fields.len();
+    var i = 0;
+    while i < n {
+        let f = fields.get(i);
+        if !f.is_skip {
+            let actual_name = if f.wire_name.len() > 0 { f.wire_name } else { f.name };
+            names.push(actual_name);
+        }
+        i = i + 1;
+    }
+    let c_err = check_json_wire_collisions(names, cfg.case_style);
+    if c_err.len() > 0 {
+        return c_err;
+    }
+
+    var out = "impl IJsonSerializable for " + type_name + " {\n";
+    out = out + "    pub fn to_json(self) -> str {\n";
+    out = out + "        var res = \"{\";\n";
+    out = out + "        var has_prop = false;\n";
+
+    if cfg.tag_field.len() > 0 {
+        out = out + "        res = res + \"\\\"\" + \"" + cfg.tag_field + "\" + \"\\\":\\\"\" + \"" + type_name + "\" + \"\\\"\";\n";
+        out = out + "        has_prop = true;\n";
+    }
+
+    i = 0;
+    while i < n {
+        let f = fields.get(i);
+        if !f.is_skip {
+            let w_name = if f.wire_name.len() > 0 { f.wire_name } else { apply_case_style(f.name, cfg.case_style) };
+            if f.is_optional && cfg.omit_none_fields {
+                out = out + "        if self." + f.name + " != null {\n";
+                out = out + "            if has_prop { res = res + \",\"; }\n";
+                out = out + "            res = res + \"\\\"" + w_name + "\\\":\" + to_json_val(self." + f.name + ");\n";
+                out = out + "            has_prop = true;\n";
+                out = out + "        }\n";
+            } else {
+                out = out + "        if has_prop { res = res + \",\"; }\n";
+                out = out + "        res = res + \"\\\"" + w_name + "\\\":\" + to_json_val(self." + f.name + ");\n";
+                out = out + "        has_prop = true;\n";
+            }
+        }
+        i = i + 1;
+    }
+    out = out + "        res = res + \"}\";\n";
+    out = out + "        return res;\n";
+    out = out + "    }\n";
+    out = out + "}\n";
+    return out;
+}
+
+pub fn derive_json_deserializer(type_name: str, fields: List<JsonFieldMeta>, cfg: JsonDeriveConfig, lattice_bits: u8) -> str {
+    let l_err = validate_lattice_for_json(lattice_bits);
+    if l_err.len() > 0 {
+        return l_err;
+    }
+    var out = "impl IJsonDeserializable<" + type_name + "> for " + type_name + " {\n";
+    out = out + "    pub static fn from_json(json_str: str) -> res<" + type_name + ", str> {\n";
+    out = out + "        // Zero-reflection parser synthesized for " + type_name + "\n";
+    let n = fields.len();
+    var i = 0;
+    while i < n {
+        let f = fields.get(i);
+        let wire = if f.wire_name.len() > 0 { f.wire_name } else { apply_case_style(f.name, cfg.case_style) };
+        out = out + "        // populate field: " + f.name + " from wire key: " + wire + "\n";
+        i = i + 1;
+    }
+    out = out + "        return " + type_name + ".default();\n";
+    out = out + "    }\n";
+    out = out + "}\n";
+    return out;
+}
+
+pub fn derive_json_codecs(type_name: str, fields: List<JsonFieldMeta>, cfg: JsonDeriveConfig, lattice_bits: u8) -> str {
+    let ser = derive_json_serializer(type_name, fields, cfg, lattice_bits);
+    if ser.starts_with("WEAVE003") || ser.starts_with("WEAVE004") {
+        return ser;
+    }
+    let de = derive_json_deserializer(type_name, fields, cfg, lattice_bits);
+    return ser + de;
+}

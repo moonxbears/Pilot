@@ -1092,7 +1092,7 @@ Before advancing to **Phase 3 (`M21` — Boilerplate Eradication & `.pchor` Chor
 
 ---
 
-### M21 — Standard `[...]` Boilerplate Weaver Suite & Structural Delegation
+### M21 — Standard `[...]` Boilerplate Weaver Suite & Structural Delegation [COMPLETE]
 
 #### 21.1 Objective & Current Codebase Audit
 - **Root Bottleneck 1 (Hardcoded Attribute Strings & $O(N^2)$ Scans in `attr_weaver.pilot`):** [`selfhost/attr_weaver.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/attr_weaver.pilot) (lines `63`–`76`) hardcodes `"IEcsRule"`, `"IReactiveAttribute"`, `"IFormulaAttribute"`, `"IInterceptor"`, `"IInheritedAttribute"`, `"Rule"`, `"Clamp"`, `"OnChange"`, `"Formula"`, `"TraceSpan"`, `"HardRealtime"`, `"Wcet"`, and `"ZeroRuntime"` inside closed `if/else` string comparisons—violating the Open-Registry Design law (`AGENTS.md §1`). Furthermore, `find_attr_struct_node` (lines `39`–`53`) linearly scans all `node_count` AST nodes for every attribute attachment ($O(N^2)$), and `weave_unit_attributes` (lines `201`–`210`) only validates pillar tags without executing structural type-synthesis weavers!

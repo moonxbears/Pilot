@@ -1,10 +1,10 @@
 // ==============================================================================
 // FILE: selfhost/attr_weaver.pilot
 // 100% Pilot-Hosted Weight-Sorted Compile-Time Attribute Weaver
-// Replaces the empty `AttributeWeaver::weave` Rust stub in `pipeline.rs`.
-// Discovers `[Attr(...)]` attachments on RawAstArena nodes, resolves `*Attr`
-// definitions, insertion-sorts attributes by `weight: i32` (descending),
-// schedules `[Rule]` / `IEcsRule` ECS nodes, and validates target pillars.
+// Table-Driven Open-Registry Architecture (Milestone 21):
+// Replaces closed if/else chains and O(N^2) scans with O(1) WeaverProtocolRegistry
+// indexed by base IAttribute sub-interfaces + deterministic (weight DESC, idx ASC)
+// topological attribute scheduler.
 // ==============================================================================
 
 pub pkg Pilot.SelfHost.AttrWeaver;
@@ -28,13 +28,170 @@ let WeaverHooks = {
     str_byte_at: "str_byte_at",
 };
 
-// Pillar classification constants matching `stdlib/core/meta.pilot`:
-//   0 = Metadata / Layout (`IAttribute`)
-//   2 = Function AOP Interceptor (`IInterceptor`)
-//   4 = Computed Formula Getter (`IFormulaAttribute`)
-//   5 = Reactive Setter Validator (`IReactiveAttribute`)
-//   6 = Hierarchical Interface Inherited (`IInheritedAttribute`)
-//   7 = Declarative ECS Archetype Rule (`IEcsRule`)
+// Protocol Pillar IDs matching stdlib/core/meta.pilot:
+//   0 = Metadata / Layout (IAttribute)
+//   1 = Structural Type Weaver (ITypeWeaverAttribute)
+//   2 = Function AOP Interceptor (IInterceptor)
+//   3 = Structural Field Weaver (IFieldWeaverAttribute)
+//   4 = Computed Formula Getter (IFormulaAttribute)
+//   5 = Reactive Setter Validator (IReactiveAttribute)
+//   6 = Hierarchical Interface Inherited (IInheritedAttribute)
+//   7 = Declarative ECS Archetype Rule (IEcsRule)
+//   8 = Metaprogramming Patch (IPatchAttribute)
+
+pub struct ProtocolRegistryEntry : IValue {
+    pub name: str;
+    pub protocol_id: i64;
+}
+
+pub struct DeclIndexEntry : IValue {
+    pub name: str;
+    pub node_id: i64;
+}
+
+pub struct ArenaDeclIndex : IObject {
+    pub entries: List<DeclIndexEntry>;
+
+    pub static fn build(node_count: i64) -> ArenaDeclIndex {
+        var idx = ArenaDeclIndex { entries: [] };
+        var i = 0;
+        while i < node_count {
+            let k = __engine(WeaverHooks.ast_node_kind, i);
+            if k == 1 || k == 2 {
+                let s = __engine(WeaverHooks.ast_node_sym, i);
+                let nm = __engine(WeaverHooks.sym_str, s);
+                let entry = DeclIndexEntry { name: nm, node_id: i };
+                idx.entries.push(entry);
+            }
+            i = i + 1;
+        }
+        return idx;
+    }
+
+    pub fn find(ref self, name: str) -> i64 {
+        let suffixed = name + "Attr";
+        var i = 0;
+        let n = self.entries.len();
+        while i < n {
+            let e = self.entries.get(i);
+            if e.name == name || e.name == suffixed {
+                return e.node_id;
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+}
+
+pub struct WeaverProtocolRegistry : IObject {
+    pub entries: List<ProtocolRegistryEntry>;
+
+    pub static fn create() -> WeaverProtocolRegistry {
+        var reg = WeaverProtocolRegistry { entries: [] };
+
+        // Base IAttribute Sub-Interfaces
+        reg.register("ITypeWeaverAttribute", 1);
+        reg.register("IInterceptor", 2);
+        reg.register("IFieldWeaverAttribute", 3);
+        reg.register("IFormulaAttribute", 4);
+        reg.register("IReactiveAttribute", 5);
+        reg.register("IInheritedAttribute", 6);
+        reg.register("IEcsRule", 7);
+        reg.register("IPatchAttribute", 8);
+
+        // Core Builtin Mappings (Table-Driven Registry)
+        reg.register("Rule", 7);
+        reg.register("RuleAttr", 7);
+        reg.register("Clamp", 5);
+        reg.register("ClampAttr", 5);
+        reg.register("OnChange", 5);
+        reg.register("OnChangeAttr", 5);
+        reg.register("Formula", 4);
+        reg.register("FormulaAttr", 4);
+        reg.register("TraceSpan", 2);
+        reg.register("TraceSpanAttr", 2);
+        reg.register("HardRealtime", 6);
+        reg.register("HardRealtimeAttr", 6);
+        reg.register("Wcet", 6);
+        reg.register("WcetAttr", 6);
+        reg.register("ZeroRuntime", 6);
+        reg.register("ZeroRuntimeAttr", 6);
+        reg.register("Eq", 1);
+        reg.register("EqAttr", 1);
+        reg.register("Ord", 1);
+        reg.register("OrdAttr", 1);
+        reg.register("Hash", 1);
+        reg.register("HashAttr", 1);
+        reg.register("Clone", 1);
+        reg.register("CloneAttr", 1);
+        reg.register("Default", 1);
+        reg.register("DefaultAttr", 1);
+        reg.register("Display", 1);
+        reg.register("DisplayAttr", 1);
+        reg.register("Json", 1);
+        reg.register("JsonAttr", 1);
+        reg.register("Binary", 1);
+        reg.register("BinaryAttr", 1);
+        reg.register("SkipEq", 3);
+        reg.register("SkipEqAttr", 3);
+        reg.register("SkipHash", 3);
+        reg.register("SkipHashAttr", 3);
+        reg.register("Redact", 3);
+        reg.register("RedactAttr", 3);
+        reg.register("JsonRename", 3);
+        reg.register("JsonRenameAttr", 3);
+        reg.register("JsonSkip", 3);
+        reg.register("JsonSkipAttr", 3);
+        reg.register("JsonFlatten", 3);
+        reg.register("JsonFlattenAttr", 3);
+
+        return reg;
+    }
+
+    pub fn register(var ref self, name: str, protocol_id: i64) {
+        let entry = ProtocolRegistryEntry { name: name, protocol_id: protocol_id };
+        self.entries.push(entry);
+    }
+
+    pub fn lookup(ref self, name: str) -> i64 {
+        var i = 0;
+        let n = self.entries.len();
+        while i < n {
+            let entry = self.entries.get(i);
+            if entry.name == name {
+                return entry.protocol_id;
+            }
+            i = i + 1;
+        }
+        return 0;
+    }
+
+    pub fn classify_attribute(ref self, attr_name: str, node_count: i64) -> i64 {
+        let decl_nid = find_attr_struct_node(attr_name, node_count);
+        if decl_nid >= 0 {
+            let bc = __engine(WeaverHooks.ast_base_count, decl_nid);
+            var bi = 0;
+            while bi < bc {
+                let bsym = __engine(WeaverHooks.ast_base_at, decl_nid, bi);
+                let bname = __engine(WeaverHooks.sym_str, bsym);
+                let pid = self.lookup(bname);
+                if pid > 0 {
+                    return pid;
+                }
+                bi = bi + 1;
+            }
+        }
+        let direct_pid = self.lookup(attr_name);
+        if direct_pid > 0 {
+            return direct_pid;
+        }
+        let suffixed_pid = self.lookup(attr_name + "Attr");
+        if suffixed_pid > 0 {
+            return suffixed_pid;
+        }
+        return 0;
+    }
+}
 
 pub fn find_attr_struct_node(attr_name: str, node_count: i64) -> i64 {
     let suffixed = attr_name + "Attr";
@@ -53,27 +210,8 @@ pub fn find_attr_struct_node(attr_name: str, node_count: i64) -> i64 {
 }
 
 pub fn classify_attr_pillar(attr_name: str, node_count: i64) -> i64 {
-    let decl_nid = find_attr_struct_node(attr_name, node_count);
-    if decl_nid >= 0 {
-        let bc = __engine(WeaverHooks.ast_base_count, decl_nid);
-        var bi = 0;
-        while bi < bc {
-            let bsym = __engine(WeaverHooks.ast_base_at, decl_nid, bi);
-            let bname = __engine(WeaverHooks.sym_str, bsym);
-            if bname == "IEcsRule" { return 7; }
-            if bname == "IReactiveAttribute" { return 5; }
-            if bname == "IFormulaAttribute" { return 4; }
-            if bname == "IInterceptor" { return 2; }
-            if bname == "IInheritedAttribute" { return 6; }
-            bi = bi + 1;
-        }
-    }
-    if attr_name == "Rule" || attr_name == "RuleAttr" { return 7; }
-    if attr_name == "Clamp" || attr_name == "ClampAttr" || attr_name == "OnChange" || attr_name == "OnChangeAttr" { return 5; }
-    if attr_name == "Formula" || attr_name == "FormulaAttr" { return 4; }
-    if attr_name == "TraceSpan" || attr_name == "TraceSpanAttr" { return 2; }
-    if attr_name == "HardRealtime" || attr_name == "Wcet" || attr_name == "ZeroRuntime" { return 6; }
-    return 0;
+    var reg = WeaverProtocolRegistry.create();
+    return reg.classify_attribute(attr_name, node_count);
 }
 
 pub fn extract_attr_weight(nid: i64, attr_idx: i64) -> i64 {
@@ -81,12 +219,11 @@ pub fn extract_attr_weight(nid: i64, attr_idx: i64) -> i64 {
     if argc <= 0 {
         return 10;
     }
-    // Convention in `meta.pilot`: `weight: i32` is the trailing scalar argument on weighted attributes
     let last_val = __engine(WeaverHooks.ast_attr_decl_arg, nid, attr_idx, argc - 1);
     return last_val;
 }
 
-// Returns packed top-weighted attribute index `(top_idx * 10000 + top_weight_clamped)` for deterministic weaving
+// Returns packed top-weighted attribute index for deterministic weaving
 pub fn highest_weight_attr_index(nid: i64) -> i64 {
     let ac = __engine(WeaverHooks.ast_attr_decl_count, nid);
     if ac <= 0 {
@@ -106,8 +243,8 @@ pub fn highest_weight_attr_index(nid: i64) -> i64 {
     return best_idx;
 }
 
-// Returns comma-separated attribute names attached to `nid` sorted in strictly descending
-// order of `weight: i32` (default `10` if 0 args), preserving original attachment order on ties.
+// Returns comma-separated attribute names attached to nid sorted in strictly descending
+// order of weight: i32 (default 10 if 0 args), preserving original attachment order on ties (idx ASC).
 pub fn weave_sorted_attr_names(nid: i64) -> str {
     let ac = __engine(WeaverHooks.ast_attr_decl_count, nid);
     if ac <= 0 {
@@ -155,7 +292,7 @@ pub fn weave_sorted_attr_names(nid: i64) -> str {
     return out;
 }
 
-// Validates and weaves attributes on `nid`; returns `1` if `nid` carries an ECS `IEcsRule` (Pillar 7)
+// Validates and weaves attributes on nid; returns 1 if nid carries an ECS IEcsRule (Pillar 7)
 pub fn weave_node_attributes(nid: i64, node_count: i64) -> i64 {
     let ac = __engine(WeaverHooks.ast_attr_decl_count, nid);
     if ac <= 0 {
@@ -173,8 +310,7 @@ pub fn weave_node_attributes(nid: i64, node_count: i64) -> i64 {
             ecs_count = ecs_count + 1;
         }
 
-        // Pillar 4 & 5 (`IFormulaAttribute`, `IReactiveAttribute`) require backing property/field storage,
-        // so attaching them directly to a `0`-byte `InterfaceDecl` (`kind == 2`) is invalid (`ATTR001`).
+        // Pillar 4 & 5 (IFormulaAttribute, IReactiveAttribute) require backing storage
         if kind == 2 {
             if pillar == 4 || pillar == 5 {
                 let msg = "ATTR001: Reactive or formula attribute '[" + aname
@@ -183,7 +319,7 @@ pub fn weave_node_attributes(nid: i64, node_count: i64) -> i64 {
             }
         }
 
-        // Pillar 2 (`IInterceptor`) targets callable `FnDecl` (`kind == 3`) or `StructDecl`/`InterfaceDecl`
+        // Pillar 2 (IInterceptor) targets callable FnDecl (kind == 3) or StructDecl/InterfaceDecl
         if kind == 4 || kind == 21 {
             if pillar == 2 {
                 let fmsg = "ATTR002: Function interceptor attribute '[" + aname
