@@ -185,6 +185,20 @@ pub let ERRORS = [
         category: "PerceusOwnership",
         reference: "C# CA2000 / Perceus Guard",
     },
+    ErrorDef {
+        code: "ESCAPE004",
+        title: "Retained Parameter Borrow Escape",
+        description: "Ephemeral 0b01 borrow passed to [Retained] async foreign parameter — use PinnedSlice<T> or iso",
+        category: "PerceusOwnership",
+        reference: "Pilot Ring 100 / Perceus Escape",
+    },
+    ErrorDef {
+        code: "FFI001",
+        title: "Null Destructor on Foreign Handle",
+        description: "Null destructor registered for non-trivial ForeignHandle",
+        category: "ArchitecturalIntegrity",
+        reference: "Pilot Polyglot FFI",
+    },
 
     // -------------------------------------------------------------------------
     // 5. Null Safety & Fallible Values-First (NULL001 - NULL005, ERR001)

@@ -22,7 +22,7 @@ enum CMap { Val(PilotVal), Map(HashMap<String, CMap>) }
 pub struct BytecodeCompiler {
     pub instructions: Vec<Instruction>, pub constants: Vec<PilotVal>,
     pub pc_spans: Vec<ByteSpan>, pub reg_symbols: Vec<(u8, u32, u32)>,
-    var_slots: HashMap<String, u8>, fn_entries: HashMap<String, (u16, Vec<String>)>,
+    var_slots: HashMap<String, u8>, var_types: HashMap<String, String>, fn_ret_types: HashMap<String, String>, fn_entries: HashMap<String, (u16, Vec<String>)>,
     call_patches: Vec<(usize, String)>, const_maps: HashMap<String, CMap>,
     loop_stack: Vec<(u16, Vec<usize>)>, cur_span: ByteSpan, next_local_reg: u8, next_reg: u8,
 }
@@ -46,10 +46,7 @@ impl BytecodeCompiler {
     fn add_constant(&mut self, val: PilotVal) -> u16 { self.constants.iter().position(|&c| c == val).unwrap_or_else(|| { let i = self.constants.len(); self.constants.push(val); i }) as u16 }
     fn emit(&mut self, op: Opcode, dst: u8, src1: u8, src2: u8) -> usize { let i = self.instructions.len(); self.instructions.push(Instruction::encode(op, dst, src1, src2)); self.pc_spans.push(self.cur_span); i }
     fn emit_const(&mut self, val: PilotVal) -> u8 { let (c, r) = (self.add_constant(val), self.alloc_reg()); self.emit(Opcode::LoadConst, r, (c >> 8) as u8, (c & 0xFF) as u8); r }
-    fn stage_args(&mut self, args: &[u8]) {
-        let safe: Vec<u8> = args.iter().map(|&r| if r >= 1 && r <= args.len() as u8 { let t = self.alloc_reg(); self.emit(Opcode::Move, t, r, 0); t } else { r }).collect();
-        for (i, &r) in safe.iter().enumerate() { self.emit(Opcode::Move, (i + 1) as u8, r, 0); }
-    }
+    fn stage_args(&mut self, args: &[u8]) { let safe: Vec<u8> = args.iter().map(|&r| if r >= 1 && r <= args.len() as u8 { let t = self.alloc_reg(); self.emit(Opcode::Move, t, r, 0); t } else { r }).collect(); for (i, &r) in safe.iter().enumerate() { self.emit(Opcode::Move, (i + 1) as u8, r, 0); } }
     fn emit_intrinsic(&mut self, hook: &str, args: &[u8]) -> u8 { let r = self.emit_const(PilotVal::from_str(hook)); self.stage_args(args); let d = self.alloc_reg(); self.emit(Opcode::EngineIntrinsic, d, r, args.len() as u8); d }
 
     fn eval_cmap(&self, arena: &AstArena, id: NodeId) -> Option<CMap> {
@@ -113,13 +110,15 @@ impl BytecodeCompiler {
         if fn_start >= arena.extra_children.len() { return; }
         let body_node = NodeId(arena.extra_children[fn_start]);
         let mut params: Vec<String> = if fn_len > 1 { arena.extra_children[fn_start + 1..fn_start + fn_len].iter().map(|&p| arena.interner.resolve(SymbolId(arena.node(NodeId(p)).lhs)).to_string()).collect() } else { Vec::new() };
-        if pfx.is_some() && (arena.decl_flags.get(fn_id.0 as usize).copied().unwrap_or(0) & pilot_ast::DECL_FLAG_STATIC) == 0 && !params.iter().any(|p| p == "_self") { params.insert(0, "_self".to_string()); }
+        if pfx.is_some() && (arena.decl_flags.get(fn_id.0 as usize).copied().unwrap_or(0) & pilot_ast::DECL_FLAG_STATIC) == 0 && !params.iter().any(|p| p == "_self" || (p.len() == 4 && p == &"_self"[1..])) { params.insert(0, "_self".to_string()); }
         let pc = self.instructions.len() as u16;
         if params.is_empty() && fn_name == "main" { *entry = Some(pc); }
         if let Some(p) = pfx { self.fn_entries.insert(format!("{p}.{fn_name}"), (pc, params.clone())); }
-        self.fn_entries.entry(fn_name).or_insert((pc, params.clone()));
+        self.fn_entries.entry(fn_name.clone()).or_insert((pc, params.clone()));
+        let ret_name = arena.type_annot(fn_id).and_then(|tid| { let tn = arena.node(tid); if matches!(tn.node_kind(), NodeKind::TypeNamed | NodeKind::IdentExpr) { Some(arena.interner.resolve(SymbolId(tn.lhs)).to_string()) } else { None } }).unwrap_or_default();
+        if !ret_name.is_empty() { if let Some(p) = pfx { self.fn_ret_types.insert(format!("{p}.{fn_name}"), ret_name.clone()); } self.fn_ret_types.entry(fn_name).or_insert(ret_name); }
         self.var_slots.clear(); self.next_local_reg = 17; self.next_reg = 128;
-        for (i, p) in params.iter().enumerate() { let s = self.alloc_local_reg(); self.emit(Opcode::Move, s, (i + 1) as u8, 0); self.var_slots.insert(p.clone(), s); if p == "_self" { self.var_slots.insert(p[1..].to_string(), s); } }
+        for (i, p) in params.iter().enumerate() { let s = self.alloc_local_reg(); self.emit(Opcode::Move, s, (i + 1) as u8, 0); self.var_slots.insert(p.clone(), s); if p == "_self" { self.var_slots.insert(p[1..].to_string(), s); } if p.len() == 4 && p == &"_self"[1..] { self.var_slots.insert(format!("_{p}"), s); } }
         let b = self.compile_node(arena, body_node);
         self.emit(Opcode::Move, 0, b, 0); self.emit(Opcode::Ret, 0, 0, 0);
     }
@@ -154,7 +153,20 @@ impl BytecodeCompiler {
                         let s_nm = arena.interner.resolve(SymbolId(cn.lhs)).to_string();
                         let bn = *arena.node(NodeId(cn.rhs));
                         if bn.node_kind() == NodeKind::BlockExpr {
-                            for &m in arena.children_slice(bn.lhs, bn.rhs) { if arena.node(NodeId(m)).node_kind() == NodeKind::FnDecl { self.compile_fn_decl(arena, NodeId(m), Some(&s_nm), &mut entry_fn); } }
+                            for &m in arena.children_slice(bn.lhs, bn.rhs) {
+                                let mn = arena.node(NodeId(m));
+                                if mn.node_kind() == NodeKind::FnDecl { self.compile_fn_decl(arena, NodeId(m), Some(&s_nm), &mut entry_fn); }
+                                else if mn.node_kind() == NodeKind::DestructorDecl && mn.lhs != 0 {
+                                    let (body_node, pc, dnm) = (NodeId(mn.lhs), self.instructions.len() as u16, format!("~{}", &"_self"[1..]));
+                                    self.fn_entries.insert(format!("{s_nm}.{dnm}"), (pc, vec!["_self".to_string()]));
+                                    self.fn_entries.entry(dnm).or_insert((pc, vec!["_self".to_string()]));
+                                    self.var_slots.clear(); self.next_local_reg = 17; self.next_reg = 128;
+                                    let s = self.alloc_local_reg(); self.emit(Opcode::Move, s, 1, 0);
+                                    self.var_slots.insert("_self".to_string(), s); self.var_slots.insert("_self"[1..].to_string(), s);
+                                    let b = self.compile_node(arena, body_node);
+                                    self.emit(Opcode::Move, 0, b, 0); self.emit(Opcode::Ret, 0, 0, 0);
+                                }
+                            }
                         }
                     }
                 }
@@ -216,6 +228,16 @@ impl BytecodeCompiler {
             NodeKind::LetStmt | NodeKind::VarStmt => {
                 let (name, rhs) = (arena.interner.resolve(SymbolId(node.lhs)).to_string(), NodeId(node.rhs));
                 if node.node_kind() == NodeKind::LetStmt && rhs.is_some() { if let Some(m) = self.eval_cmap(arena, rhs) { self.const_maps.insert(name.clone(), m); } }
+                if let Some(ann_id) = arena.type_annot(node_id) { let an = arena.node(ann_id); if matches!(an.node_kind(), NodeKind::TypeNamed | NodeKind::IdentExpr) { self.var_types.insert(name.clone(), arena.interner.resolve(SymbolId(an.lhs)).to_string()); } }
+                if !self.var_types.contains_key(&name) && rhs.is_some() {
+                    let rn = arena.node(rhs);
+                    if rn.node_kind() == NodeKind::CallExpr && rn.rhs > 0 && (rn.lhs as usize) < arena.extra_children.len() {
+                        let cn = arena.node(NodeId(arena.extra_children[rn.lhs as usize]));
+                        let (fc, td) = if cn.node_kind() == NodeKind::MemberExpr { let (ln, r_sym) = (arena.node(NodeId(cn.lhs)), arena.interner.resolve(SymbolId(cn.rhs))); let l_id = if matches!(ln.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed) { arena.interner.resolve(SymbolId(ln.lhs)) } else { "" }; let l_real = self.var_types.get(l_id).map(|s| s.as_str()).unwrap_or(l_id); (format!("{l_real}.{r_sym}"), if !self.var_slots.contains_key(l_id) { l_id } else { "" }) } else if matches!(cn.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed) { let nm = arena.interner.resolve(SymbolId(cn.lhs)); (nm.to_string(), nm) } else { (String::new(), "") };
+                        let ty = self.fn_ret_types.get(&fc).map(|s| s.as_str()).unwrap_or(td);
+                        if !ty.is_empty() { self.var_types.insert(name.clone(), ty.to_string()); }
+                    }
+                }
                 let r_val = if rhs.is_some() { self.compile_node(arena, rhs) } else { self.emit_const(PilotVal::NULL) };
                 let slot = self.var_slots.get(&name).copied().unwrap_or_else(|| { let s = self.alloc_local_reg(); self.reg_symbols.push((s, node.lhs, 0)); s });
                 self.emit(Opcode::Move, slot, r_val, 0); self.var_slots.insert(name, slot); slot
@@ -331,14 +353,8 @@ impl BytecodeCompiler {
                             let r_c = if cn.node_kind() == NodeKind::TupleExpr { arena.children_slice(cn.lhs, cn.rhs).first().map_or(0, |&id| self.compile_node(arena, NodeId(id))) } else { self.compile_node(arena, cond_id) };
                             if r_c != 0 { let _ = self.emit_intrinsic("rt_assert", &[r_c]); }
                             return 0;
-                        } else if (name == "print" || name == "println") && arg_len > 1 {
-                            let r_a = self.compile_node(arena, NodeId(arena.extra_children[arg_start + 1]));
-                            let _ = self.emit_intrinsic("rt_print", &[r_a]);
-                            return 0;
-                        } else if name == "nameof" && arg_len > 1 {
-                            let arg_id = NodeId(arena.extra_children[arg_start + 1]);
-                            let an = arena.node(arg_id);
-                            return if an.node_kind() == NodeKind::IdentExpr { self.emit_const(PilotVal::from_str(arena.interner.resolve(SymbolId(an.lhs)))) } else { self.compile_node(arena, arg_id) };
+                        } else if (name == "print" || name == "println") && arg_len > 1 { let r_a = self.compile_node(arena, NodeId(arena.extra_children[arg_start + 1])); let _ = self.emit_intrinsic("rt_print", &[r_a]); return 0;
+                        } else if name == "nameof" && arg_len > 1 { let arg_id = NodeId(arena.extra_children[arg_start + 1]); let an = arena.node(arg_id); return if an.node_kind() == NodeKind::IdentExpr { self.emit_const(PilotVal::from_str(arena.interner.resolve(SymbolId(an.lhs)))) } else { self.compile_node(arena, arg_id) };
                         } else if arg_len == 2 && arena.node(NodeId(arena.extra_children[arg_start + 1])).node_kind() == NodeKind::MapExpr && !self.fn_entries.contains_key(name) {
                             let mn = *arena.node(NodeId(arena.extra_children[arg_start + 1]));
                             let (r_new, r_map, r_set) = (self.emit_const(PilotVal::from_str("map_new")), self.alloc_reg(), self.alloc_reg());
@@ -378,7 +394,8 @@ impl BytecodeCompiler {
                             return self.emit_intrinsic(h, &args);
                         }
                         let ln = arena.node(NodeId(callee_n.lhs));
-                        let (is_v, l_nm, r_nm) = (ln.node_kind() == NodeKind::IdentExpr && self.var_slots.contains_key(arena.interner.resolve(SymbolId(ln.lhs))), if matches!(ln.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed) { arena.interner.resolve(SymbolId(ln.lhs)) } else { "" }, arena.interner.resolve(SymbolId(callee_n.rhs)));
+                        let (is_v, raw_l, r_nm) = (ln.node_kind() == NodeKind::IdentExpr && self.var_slots.contains_key(arena.interner.resolve(SymbolId(ln.lhs))), if matches!(ln.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed) { arena.interner.resolve(SymbolId(ln.lhs)) } else { "" }, arena.interner.resolve(SymbolId(callee_n.rhs)));
+                        let l_nm = if is_v { self.var_types.get(raw_l).map(|s| s.as_str()).unwrap_or(raw_l) } else { raw_l };
                         let full = format!("{l_nm}.{r_nm}");
                         let mut args = if is_v || (!matches!(ln.node_kind(), NodeKind::IdentExpr | NodeKind::TypeNamed) && !self.fn_entries.contains_key(&full)) { vec![self.compile_node(arena, NodeId(callee_n.lhs))] } else { Vec::new() };
                         for i in 1..arg_len { args.push(self.compile_node(arena, NodeId(arena.extra_children[arg_start + i]))); }

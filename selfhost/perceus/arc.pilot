@@ -76,6 +76,14 @@ pub fn emit_drop_op_for_lattice(var_name: str, lattice_bits: i64, at_scope_exit:
     return "ScopeExitDrop:" + var_name;
 }
 
+// Milestone 14: Emits a Perceus drop operation with foreign destructor function pointer.
+pub fn emit_foreign_drop_op(var_name: str, dtor_sym: str) -> str {
+    if dtor_sym.len() > 0 {
+        return "ForeignDrop:" + var_name + "(" + dtor_sym + ")";
+    }
+    return "Drop:" + var_name;
+}
+
 // Emits a Perceus `DropReuse` token when a dropped `0b10` object's layout size matches
 // an immediately following allocation (`rc == 1` in-place memory recycling).
 pub fn emit_drop_reuse_op(

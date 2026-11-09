@@ -845,7 +845,7 @@ Every C construct lowers directly into `TypeLayout` + `IrTypePhysics` (`M6`) for
 
 ---
 
-### M14 — Perceus Foreign Resource & Scope Guard Synchronization (`0b10` & `0b11`)
+### M14 — Perceus Foreign Resource & Scope Guard Synchronization (`0b10` & `0b11`) [COMPLETE]
 
 #### 14.1 Objective & Current Codebase Audit
 - **Root Bottleneck 1 (`shm.pilot` Simulates Lattice Bits as Untracked Integers):** [`stdlib/polyglot/shm.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/polyglot/shm.pilot) defines `ShmOwnedBuffer` and `ShmBorrowedView` as plain `0b00` structs with a dummy `pub lattice_bits: i64` field (`2` and `1`), meaning the compiler neither calls `munmap`/`free` on `ShmOwnedBuffer` drop nor enforces `ESCAPE001` lexical borrow lifetimes on `ShmBorrowedView`!

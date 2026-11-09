@@ -284,6 +284,32 @@ pub fn get_diagnostic_explanation(code: str) -> DiagnosticCatalogEntry {
             "// GOOD: Pass owned SliceBuffer<T> or pass by value with 'iso'\ncue fn process_samples(iso samples: SliceBuffer<i32>) {\n    ...\n}"
         );
     }
+    if code == "ESCAPE004" {
+        return catalog_entry_new(
+            "ESCAPE004",
+            "Retained Parameter Borrow Escape",
+            "Ephemeral 0b01 borrow passed to [Retained] async foreign parameter — use PinnedSlice<T> or iso",
+            "PerceusOwnership",
+            "Pilot AGENTS.md §7 Foreign Interop & Perceus Cross-Runtime Safety",
+            "Ephemeral borrowed views (0b01) do not guarantee storage longevity past the calling expression. Asynchronous foreign runtime calls annotated with [Retained] store the pointer across events or worker threads.",
+            "Pass a heap-pinned buffer like PinnedSlice<T> (0b10) or isolate the object with 'iso'.",
+            "// BAD: Ephemeral slice borrow to retained foreign async call\nio_uring_prep_read(ring, fd, buf.as_slice(), len);\n",
+            "// GOOD: Pin the buffer or pass PinnedSlice<T>\nlet pinned = PinnedSlice.from_slice(buf);\nio_uring_prep_read(ring, fd, pinned.as_slice(), len);\n"
+        );
+    }
+    if code == "FFI001" {
+        return catalog_entry_new(
+            "FFI001",
+            "Null Destructor on Foreign Handle",
+            "Null destructor registered for non-trivial ForeignHandle",
+            "ArchitecturalIntegrity",
+            "Pilot AGENTS.md §7 Universal Foreign Adapter & Perceus Safety",
+            "Non-trivial foreign handles require a registered destructor function pointer so that Perceus drops can release foreign heap resources without memory leaks.",
+            "Provide a valid foreign free/destroy function pointer when calling ForeignHandle.wrap().",
+            "// BAD: Null destructor on non-trivial foreign handle\nlet handle = ForeignHandle.wrap(raw_ptr, null);\n",
+            "// GOOD: Provide real foreign release function pointer\nlet handle = ForeignHandle.wrap(raw_ptr, free_fn_ptr);\n"
+        );
+    }
     if code == "DECL004" {
         return catalog_entry_new(
             "DECL004",

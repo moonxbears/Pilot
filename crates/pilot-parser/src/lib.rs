@@ -861,7 +861,8 @@ impl<'a> Parser<'a> {
                 lhs = self.arena.alloc_list_node(NodeKind::CallExpr, 0, ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end), &[lhs, m]);
                 continue; }
             if matches!(k, TokenKind::InfixDot | TokenKind::SafeNav | TokenKind::ColonColon) {
-                let safe = (k == TokenKind::SafeNav) as u16; self.advance(); let sym = self.intern_cur();
+                let safe = (k == TokenKind::SafeNav) as u16; self.advance();
+                let sym = if self.eat(TokenKind::Tilde) { let dsym = self.intern_cur(); let dnm = format!("~{}", self.arena.interner.resolve(dsym)); self.arena.interner.intern(&dnm) } else { self.intern_cur() };
                 lhs = self.arena.alloc_node(NodeKind::MemberExpr, safe, ByteSpan::new(self.arena.span(lhs).start, self.prev_span().end), lhs.0, sym.0);
                 continue; }
             if k == TokenKind::LParen || matches!(k, TokenKind::CallQuoteShallow | TokenKind::CallQuoteDeep | TokenKind::CallQuoteAbi | TokenKind::CallQuoteReact | TokenKind::CallQuoteAdjoint | TokenKind::CallQuoteEffect) {
@@ -1059,9 +1060,7 @@ fn match_postfix(a: &TypePostfixKind, b: &TypePostfixKind) -> bool { matches!((a
         | (TypePostfixKind::BracketColon, TypePostfixKind::BracketColon))
         || matches!((a, b), (TypePostfixKind::BracketArgs(x), TypePostfixKind::BracketArgs(y)) if x == y) }
 fn same_type_trigger(a: &TypeConstructRule, b: &TypeConstructRule) -> bool { match (a, b) {
-        (TypeConstructRule::NamedGeneric { name: x, .. }, TypeConstructRule::NamedGeneric { name: y, .. }) => x == y,
-        (TypeConstructRule::Prefix { op: x, .. }, TypeConstructRule::Prefix { op: y, .. }) => x == y,
-        (TypeConstructRule::Infix { op: x, .. }, TypeConstructRule::Infix { op: y, .. }) => x == y,
+        (TypeConstructRule::NamedGeneric { name: x, .. }, TypeConstructRule::NamedGeneric { name: y, .. }) | (TypeConstructRule::Prefix { op: x, .. }, TypeConstructRule::Prefix { op: y, .. }) | (TypeConstructRule::Infix { op: x, .. }, TypeConstructRule::Infix { op: y, .. }) => x == y,
         (TypeConstructRule::Postfix { kind: TypePostfixKind::BracketArgs(x), .. }, TypeConstructRule::Postfix { kind: TypePostfixKind::BracketArgs(y), .. }) => x == y,
         (TypeConstructRule::Postfix { kind: TypePostfixKind::Sym(x, _), .. }, TypeConstructRule::Postfix { kind: TypePostfixKind::Sym(y, _), .. }) => x == y,
         (TypeConstructRule::Postfix { kind: x, .. }, TypeConstructRule::Postfix { kind: y, .. }) => core::mem::discriminant(x) == core::mem::discriminant(y),

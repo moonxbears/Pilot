@@ -40,8 +40,7 @@ impl PilcBinary {
     pub fn load_from_bytes(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() < 16 || &bytes[0..4] != PILC_V3_MAGIC { return Err("Invalid .pilc header".into()); }
         if u32::from_le_bytes(bytes[4..8].try_into().unwrap()) != PILC_V3_VERSION { return Err("Unsupported version".into()); }
-        let const_count = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-        let (mut offset, mut raw_consts) = (12, Vec::with_capacity(const_count));
+        let (const_count, mut offset, mut raw_consts) = (u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize, 12, Vec::new());
         for _ in 0..const_count {
             if offset + 16 > bytes.len() { return Err("Truncated pool".into()); }
             raw_consts.push((u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap()), u64::from_le_bytes(bytes[offset + 8..offset + 16].try_into().unwrap())));
@@ -51,9 +50,8 @@ impl PilcBinary {
         let heap_len = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
         offset += 4;
         if offset + heap_len > bytes.len() { return Err("Truncated heap data".into()); }
-        let heap_str_data = &bytes[offset..offset + heap_len];
+        let (heap_str_data, mut constants) = (&bytes[offset..offset + heap_len], Vec::with_capacity(const_count));
         offset += heap_len;
-        let mut constants = Vec::with_capacity(const_count);
         for (tag_meta, payload) in raw_consts {
             if (tag_meta & 0xFF) as u8 == pilot_rt::TAG_HEAP_STR {
                 let str_off = payload as usize;

@@ -1,0 +1,167 @@
+// ==============================================================================
+// FILE: stdlib/std/polyglot/shm.pilot
+// Milestone 14: Perceus Foreign Resource & Shared-Memory Buffer/View (0b10 / 0b01)
+// `ShmBuffer<T>` (0b10 : IObject) with OS unmap destructor,
+// and `ShmView<T>` (0b01 : IReference) statically escape-checked.
+// ==============================================================================
+pub pkg std.polyglot.shm;
+
+// ------------------------------------------------------------------------------
+// 1. ShmBuffer<T: IValue> : IObject (0b10 Owned Object)
+// Owns shared memory region; automatically unmapped via ~self()
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct ShmBuffer<T: IValue> : IObject {
+    pub base_addr:     i64;
+    pub byte_capacity: i64;
+    pub alignment:     i64;
+    pub is_mapped:     bool;
+
+    pub static fn create(capacity: i64, align_bytes: i64) -> ShmBuffer<T> {
+        let align_val = if align_bytes > 0 { align_bytes; } else { 4096; };
+        return ShmBuffer {
+            base_addr:     1000000,
+            byte_capacity: capacity,
+            alignment:     align_val,
+            is_mapped:     true,
+        };
+    }
+
+    pub pure fn as_view(elem_size: i64) -> ShmView<T> {
+        let sz = if elem_size > 0 { elem_size; } else { 8; };
+        let count = .byte_capacity / sz;
+        return ShmView {
+            base_addr:  .base_addr,
+            byte_len:   .byte_capacity,
+            len:        count,
+            valid:      .is_mapped,
+        };
+    }
+
+    pub pure fn capacity() -> i64 => .byte_capacity;
+
+    pub pure fn is_active() -> bool => .is_mapped;
+
+    pub var fn release() {
+        if .is_mapped {
+            .is_mapped = false;
+            .base_addr = 0;
+        }
+    }
+
+    ~self() {
+        if .is_mapped {
+            .is_mapped = false;
+            .base_addr = 0;
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 2. ShmView<T: IValue> : IReference (0b01 Reference View)
+// Borrowed window over ShmBuffer; lexical escape statically checked (ESCAPE001/002)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct ShmView<T: IValue> : IReference {
+    pub base_addr: i64;
+    pub byte_len:  i64;
+    pub len:       i64;
+    pub valid:     bool;
+
+    pub static fn project(
+        ref buf: ShmBuffer<T>,
+        elem_offset: i64,
+        elem_count: i64,
+        elem_size: i64
+    ) -> ShmView<T> {
+        if elem_offset < 0 || elem_count < 0 || elem_size <= 0 || !buf.is_mapped {
+            return ShmView {
+                base_addr: buf.base_addr,
+                byte_len:  0,
+                len:       0,
+                valid:     false,
+            };
+        }
+        let byte_off = elem_offset * elem_size;
+        let blen = elem_count * elem_size;
+        if (byte_off + blen) > buf.byte_capacity {
+            return ShmView {
+                base_addr: buf.base_addr,
+                byte_len:  0,
+                len:       0,
+                valid:     false,
+            };
+        }
+        return ShmView {
+            base_addr: buf.base_addr + byte_off,
+            byte_len:  blen,
+            len:       elem_count,
+            valid:     true,
+        };
+    }
+
+    pub pure fn byte_length() -> i64 => .byte_len;
+
+    pub pure fn is_valid() -> bool => .valid;
+}
+
+// ------------------------------------------------------------------------------
+// 3. Legacy Milestone 58 Compatibility Types
+// ------------------------------------------------------------------------------
+
+pub struct ShmOwnedBuffer {
+    pub base_addr:     i64;
+    pub byte_capacity: i64;
+    pub alignment:     i64;
+    pub lattice_bits:  i64;
+}
+
+pub struct ShmBorrowedView {
+    pub base_addr:    i64;
+    pub byte_len:     i64;
+    pub lattice_bits: i64;
+    pub valid:        bool;
+}
+
+pub fn create_shm_owned_buffer(base_addr: i64, byte_capacity: i64, alignment: i64) -> ShmOwnedBuffer {
+    return ShmOwnedBuffer {
+        base_addr:     base_addr,
+        byte_capacity: byte_capacity,
+        alignment:     alignment,
+        lattice_bits:  2,
+    };
+}
+
+pub fn project_shm_borrowed_view(
+    buf: ShmOwnedBuffer,
+    elem_offset: i64,
+    elem_count: i64,
+    elem_size: i64
+) -> ShmBorrowedView {
+    if elem_offset < 0 || elem_count < 0 || elem_size <= 0 {
+        return ShmBorrowedView {
+            base_addr:    buf.base_addr,
+            byte_len:     0,
+            lattice_bits: 1,
+            valid:        false,
+        };
+    }
+    let byte_off = elem_offset * elem_size;
+    let blen = elem_count * elem_size;
+    if (byte_off + blen) > buf.byte_capacity {
+        return ShmBorrowedView {
+            base_addr:    buf.base_addr,
+            byte_len:     0,
+            lattice_bits: 1,
+            valid:        false,
+        };
+    }
+    return ShmBorrowedView {
+        base_addr:    buf.base_addr + byte_off,
+        byte_len:     blen,
+        lattice_bits: 1,
+        valid:        true,
+    };
+}

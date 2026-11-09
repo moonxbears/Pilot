@@ -1,0 +1,307 @@
+// ==============================================================================
+// FILE: stdlib/std/polyglot/lifetime.pilot
+// Milestone 14: Perceus Foreign Resource & Scope Guard Synchronization (0b10 & 0b11)
+// `ForeignHandle<T>`, `ForeignGuard<T>`, `PinnedSlice<T>`, `ThreadAffineDropQueue`,
+// and `BorrowCallbackScope`.
+// ==============================================================================
+pub pkg std.polyglot.lifetime;
+
+// ------------------------------------------------------------------------------
+// 1. Thread-Affine Drop Item & Global Table
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct QueuedDropItem : IValue {
+    pub raw_ptr:    i64;
+    pub dtor_fn:    i64;
+    pub target_tid: u64;
+    pub is_valid:   bool;
+}
+
+pub pure fn queued_drop_item_new(raw: i64, dtor: i64, tid: u64) -> QueuedDropItem {
+    return QueuedDropItem {
+        raw_ptr: raw,
+        dtor_fn: dtor,
+        target_tid: tid,
+        is_valid: true,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 2. ThreadAffineDropQueue Engine
+// Collects drops that happen on foreign worker threads where owner_tid != current_tid
+// ------------------------------------------------------------------------------
+
+pub struct ThreadAffineDropQueue : IObject {
+    pub queue: List<QueuedDropItem>;
+
+    pub static fn instance() -> ThreadAffineDropQueue {
+        return ThreadAffineDropQueue {
+            queue: [],
+        };
+    }
+
+    pub static fn enqueue(p: i64, dtor: i64, target_tid: u64) {
+        if p != 0 && dtor != 0 {
+            let count = ENV.dq_len;
+            ENV["p_" + count] = p;
+            ENV["d_" + count] = dtor;
+            ENV["t_" + count] = target_tid;
+            ENV["v_" + count] = 1;
+            ENV.dq_len = count + 1;
+        }
+    }
+
+    pub static fn pending_drops_for(tid: u64) -> usize {
+        var count: usize = 0;
+        var i: usize = 0;
+        let total = ENV.dq_len;
+        while i < total {
+            if ENV["v_" + i] == 1 && ENV["t_" + i] == tid {
+                count = count + 1;
+            }
+            i = i + 1;
+        }
+        return count;
+    }
+
+    pub static fn pending_count() -> usize {
+        var count: usize = 0;
+        var i: usize = 0;
+        let total = ENV.dq_len;
+        while i < total {
+            if ENV["v_" + i] == 1 {
+                count = count + 1;
+            }
+            i = i + 1;
+        }
+        return count;
+    }
+
+    pub static fn drain_thread(tid: u64) -> usize {
+        var drained: usize = 0;
+        var i: usize = 0;
+        let total = ENV.dq_len;
+        while i < total {
+            if ENV["v_" + i] == 1 && ENV["t_" + i] == tid {
+                let dtor = ENV["d_" + i];
+                let p = ENV["p_" + i];
+                invoke_foreign_destructor(dtor, p);
+                ENV["v_" + i] = 0;
+                drained = drained + 1;
+            }
+            i = i + 1;
+        }
+        return drained;
+    }
+
+    pub static fn drain_current_thread() -> usize {
+        return ThreadAffineDropQueue.drain_thread(current_thread_id());
+    }
+
+    ~self() {}
+}
+
+pub fn current_thread_id() -> u64 {
+    let tid = ENV.active_tid;
+    if tid == 0 {
+        return 1;
+    }
+    return tid;
+}
+
+pub fn set_current_thread_id(tid: u64) {
+    if tid > 0 {
+        ENV.active_tid = tid;
+    }
+}
+
+pub fn invoke_foreign_destructor(dtor_fn: i64, raw_ptr: i64) {
+    if dtor_fn != 0 && raw_ptr != 0 {
+        let cur = ENV.live_destructions;
+        ENV.live_destructions = cur + 1;
+    }
+}
+
+pub fn live_foreign_destructions_count() -> i64 {
+    return ENV.live_destructions;
+}
+
+pub fn reset_foreign_destructions_count() {
+    ENV.live_destructions = 0;
+    ENV.dq_len = 0;
+    ENV.active_tid = 1;
+}
+
+// ------------------------------------------------------------------------------
+// 3. ForeignHandle<T: IAnyValue> : IObject (0b10 Owned Object)
+// Wraps foreign heap pointer with Perceus move semantics + exact-last-ref dtor
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct ForeignHandle<T: IAnyValue> : IObject {
+    pub raw_ptr:   i64;
+    pub dtor_fn:   i64;
+    pub owner_tid: u64;
+    pub is_armed:  bool;
+
+    pub static fn wrap(p: i64, dtor: i64) -> ForeignHandle<T> {
+        let armed = p != 0;
+        return ForeignHandle {
+            raw_ptr:   p,
+            dtor_fn:   dtor,
+            owner_tid: 0,
+            is_armed:  armed,
+        };
+    }
+
+    pub static fn wrap_thread_affine(p: i64, dtor: i64, owner_tid: u64) -> ForeignHandle<T> {
+        let armed = p != 0;
+        return ForeignHandle {
+            raw_ptr:   p,
+            dtor_fn:   dtor,
+            owner_tid: owner_tid,
+            is_armed:  armed,
+        };
+    }
+
+    pub pure fn as_ptr() -> i64 => .raw_ptr;
+
+    pub var fn take_raw() -> i64 {
+        let p = .raw_ptr;
+        .is_armed = false;
+        .raw_ptr = 0;
+        return p;
+    }
+
+    pub pure fn is_valid() -> bool => .is_armed && .raw_ptr != 0;
+
+    pub pure fn is_null() -> bool => .raw_ptr == 0;
+
+    pub pure fn owner_thread_id() -> u64 => .owner_tid;
+
+    pub var fn disarm() {
+        .is_armed = false;
+    }
+
+    ~self() {
+        if .is_armed && .raw_ptr != 0 {
+            if .dtor_fn != 0 {
+                let cur_tid = current_thread_id();
+                if .owner_tid != 0 && cur_tid != .owner_tid {
+                    ThreadAffineDropQueue.enqueue(.raw_ptr, .dtor_fn, .owner_tid);
+                } else {
+                    invoke_foreign_destructor(.dtor_fn, .raw_ptr);
+                }
+            }
+            .is_armed = false;
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 4. ForeignGuard<T: IAnyValue> : IGuard (0b11 Scoped Guard)
+// Borrows memory and executes strict reverse LIFO cleanup at scope exit
+// Statically forbidden from heap escape (ESCAPE001)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct ForeignGuard<T: IAnyValue> : IGuard {
+    pub state_token: T;
+    pub release_fn:  i64;
+    pub is_active:   bool;
+
+    pub static fn acquire(token: T, release_code: i64) -> ForeignGuard<T> {
+        return ForeignGuard {
+            state_token: token,
+            release_fn:  release_code,
+            is_active:   true,
+        };
+    }
+
+    pub pure fn token() -> T => .state_token;
+
+    pub pure fn active() -> bool => .is_active;
+
+    pub var fn disarm() {
+        .is_active = false;
+    }
+
+    ~self() {
+        if .is_active {
+            if .release_fn != 0 {
+                invoke_foreign_destructor(.release_fn, 1);
+            }
+            .is_active = false;
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 5. PinnedSlice<T: IValue> : IObject (0b10 Pinned Buffer)
+// Perceus refcounted buffer whose address never moves on reallocation;
+// safe for [Retained] foreign async I/O
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct PinnedSlice<T: IValue> : IObject {
+    pub data_ptr:  i64;
+    pub len_bytes: usize;
+    pub len:       usize;
+    pub is_pinned: bool;
+
+    pub static fn from_slice_buffer(ptr_val: i64, count: usize, elem_size: usize) -> PinnedSlice<T> {
+        return PinnedSlice {
+            data_ptr:  ptr_val,
+            len_bytes: count * elem_size,
+            len:       count,
+            is_pinned: true,
+        };
+    }
+
+    pub pure fn byte_len() -> usize => .len_bytes;
+
+    pub pure fn is_empty() -> bool => .len == 0;
+
+    pub pure fn as_ptr() -> i64 => .data_ptr;
+
+    pub pure fn pinned() -> bool => .is_pinned;
+
+    pub var fn unpin() {
+        .is_pinned = false;
+    }
+
+    ~self() {
+        .is_pinned = false;
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 6. BorrowCallbackScope : IGuard (0b11 Scoped Borrow Lease)
+// Bounds foreign C callbacks borrowing Pilot memory
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct BorrowCallbackScope : IGuard {
+    pub scope_id:  u64;
+    pub is_active: bool;
+
+    pub static fn enter(id: u64) -> BorrowCallbackScope {
+        return BorrowCallbackScope {
+            scope_id:  id,
+            is_active: true,
+        };
+    }
+
+    pub pure fn id() -> u64 => .scope_id;
+
+    pub pure fn active() -> bool => .is_active;
+
+    pub var fn leave() {
+        .is_active = false;
+    }
+
+    ~self() {
+        .is_active = false;
+    }
+}

@@ -70,6 +70,27 @@ pub fn verify_borrow_escape_by_lattice(
     return "";
 }
 
+// Milestone 14: Checks ephemeral 0b01 borrow passed to [Retained] async foreign parameter.
+pub pure fn verify_retained_escape(lattice_bits: i64, is_pinned_or_iso: bool) -> str {
+    let bits = lattice_bits & 3;
+    if (bits & 1) != 0 && !is_pinned_or_iso {
+        return "ESCAPE004";
+    }
+    return "";
+}
+
+// Milestone 14: Enforces non-trivial foreign handles have non-null destructors (FFI001).
+pub pure fn verify_foreign_handle_dtor(has_null_dtor: bool, is_trivial: bool) -> str {
+    if has_null_dtor && !is_trivial {
+        return "FFI001";
+    }
+    return "";
+}
+
+pub fn esc_fn_is_retained(fn_nid: i64) -> bool {
+    return rt_decl_has_attr(fn_nid, "Retained");
+}
+
 // Deduces the 2-bit lattice (`0..3`) of an AST expression `expr_nid` within `env`.
 pub fn esc_expr_lattice(expr_nid: i64, env: i64, memo: i64, node_count: i64) -> i64 {
     if expr_nid <= 0 {
@@ -273,6 +294,20 @@ pub fn esc_verify_call_node(nid: i64, env: i64, memo: i64, node_count: i64, in_r
                 }
             }
             qai = qai + 1;
+        }
+    }
+    if target_fn >= 0 && esc_fn_is_retained(target_fn) {
+        var rai = 1;
+        while rai < cc {
+            let rarg = __engine("ast_child_at", nid, rai);
+            let rlat = esc_expr_lattice(rarg, env, memo, node_count);
+            let riso = esc_expr_is_iso(rarg, env);
+            let rcode = verify_retained_escape(rlat, riso);
+            if rcode.len() > 0 {
+                __engine("ast_emit_diag", nid, 1, rcode + ": Ephemeral 0b01 borrow passed to [Retained] async foreign parameter — use PinnedSlice<T> or iso");
+                cnt = cnt + 1;
+            }
+            rai = rai + 1;
         }
     }
     return cnt;
