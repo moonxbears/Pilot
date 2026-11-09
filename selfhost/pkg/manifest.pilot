@@ -289,7 +289,7 @@ pub fn resolve_package_import_path(import_spec: str) -> str {
         return "stdlib/core/task.pilot";
     }
     if mf_find(import_spec, "Pilot.Collections", 0) >= 0 {
-        return "stdlib/collections/list.pilot";
+        return "stdlib/std/col.pilot";
     }
     if mf_find(import_spec, "Pilot.Crypto", 0) >= 0 {
         return "stdlib/crypto/hash.pilot";

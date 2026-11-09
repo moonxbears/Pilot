@@ -905,7 +905,7 @@ fn resolve_import_path(spec: str) -> str {
     if spec.find("Pilot.Core.Meta") >= 0 { return "stdlib/core/meta.pilot"; }
     if spec.find("Pilot.Core.Bootstrap") >= 0 { return "stdlib/core/bootstrap.pilot"; }
     if spec.find("Pilot.Core.Task") >= 0 { return "stdlib/core/task.pilot"; }
-    if spec.find("Pilot.Collections") >= 0 { return "stdlib/collections/list.pilot"; }
+    if spec.find("Pilot.Collections") >= 0 { return "stdlib/std/col.pilot"; }
     if spec.find("Pilot.Crypto") >= 0 { return "stdlib/crypto/hash.pilot"; }
     return "";
 }
@@ -966,8 +966,7 @@ pub fn is_keyword_or_seed(w: str) -> bool {
 pub fn handle_lsp_prepare_rename(offset: i64) {
     let word = extract_ident_at_offset(offset);
     if word == "" || is_keyword_or_seed(word) { __engine(Cfg.ast.lsp_set_result, "null"); return; }
-    let node_count = __engine(Cfg.ast.ast_node_count);
-    let best_nid = find_best_node_for_ident(word, offset, node_count);
+    let best_nid = find_best_node_for_ident(word, offset, __engine(Cfg.ast.ast_node_count));
     if best_nid != -1 {
         let sname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, best_nid));
         let sym_name = if sname != "" { sname } else { word };
@@ -977,11 +976,16 @@ pub fn handle_lsp_prepare_rename(offset: i64) {
     __engine(Cfg.ast.lsp_set_result, word);
 }
 
+pub fn handle_lsp_inspect(offset: i64) {
+    let w = extract_ident_at_offset(offset);
+    __engine(Cfg.ast.lsp_set_result, if w == "" { "null" } else { "{\"target\":\"" + w + "\",\"inspected\":true}" });
+}
+
 pub fn handle_lsp_rename(offset: i64, method_str: str) {
     let pfx = "textDocument/rename:";
-    if method_str.len() > pfx.len() && method_str.slice(0, pfx.len()) == pfx {
-        let target_word = method_str.slice(pfx.len(), method_str.len());
-        if is_keyword_or_seed(target_word) { __engine(Cfg.ast.lsp_set_result, "null"); return; }
+    if method_str.len() > pfx.len() && method_str.slice(0, pfx.len()) == pfx && is_keyword_or_seed(method_str.slice(pfx.len(), method_str.len())) {
+        __engine(Cfg.ast.lsp_set_result, "null");
+        return;
     }
     handle_lsp_prepare_rename(offset);
 }
@@ -994,4 +998,5 @@ else if _lsp_method == "textDocument/completion" { handle_lsp_completion(_lsp_of
 else if _lsp_method == "textDocument/definition" { handle_lsp_definition(_lsp_offset); }
 else if _lsp_method == "textDocument/prepareRename" { handle_lsp_prepare_rename(_lsp_offset); }
 else if _lsp_method == "textDocument/references" { handle_lsp_references(_lsp_offset); }
+else if _lsp_method == "pilot/inspect" { handle_lsp_inspect(_lsp_offset); }
 else if _lsp_method != "" && _lsp_method != "ide-sync" { handle_lsp_rename(_lsp_offset, _lsp_method); }
