@@ -92,6 +92,7 @@ Every type originates from `IAnyValue` (0 runtime header bytes) and is classifie
   7. **Unambiguous Absences & Failures:** Represent absence as `opt<T>` (`T?`) and expected domain errors as `res<T, E>` (`T ! E`), never sentinels (`null`, `-1`).
   8. **Memory Boundaries:** Distinguish read-only borrowed views (`0b01` `...View` / `slice<T>`), owned dynamic allocations (`0b10` `...Buffer` / `List<T>`), and scoped cleanup resources (`0b11` `...Guard`).
   9. **Single Source of Truth & Targeted Importing:** Types must never be duplicated, copied, or re-declared across files. Always define a type once in its canonical owning module and import it into any file that needs it (`use ...;`). Only import what you need instead of the entire library unless you need the entire library or are importing several items from that library.
+  10. **Intrinsic Encapsulation (Never Use Raw `__engine` Directly):** Never call `__engine(...)` directly to manipulate data structures, collections, or runtime operations in user, selfhost, or stdlib code. Always use strongly-typed encapsulating types (like `Map<K, V>`, `List<T>`, `SliceBuffer<T>`, `fs.*`, `time.*`) that incorporate these intrinsics safely within the 2-bit hardware type lattice.
 
 ---
 

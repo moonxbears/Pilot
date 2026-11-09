@@ -1,0 +1,214 @@
+// ==============================================================================
+// FILE: selfhost/adapter/c_sysroot.pilot
+// Milestone 12.3: Headerless C11/C23 Semantic Absorber - Cross-Platform Sysroot
+// Cross-platform include-path & library discovery: Linux, macOS, Win32, pkg-config
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Adapter.CSysroot;
+
+use Pilot.Core.File.File;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Sysroot Discovery Schema (0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct SysrootDiscovery : IObject {
+    pub include_dirs: List<str>;
+    pub lib_dirs:     List<str>;
+    pub target_os:    str;
+    pub target_arch:  str;
+}
+
+pub fn sysroot_discovery_new(os_name: str, arch_name: str) -> SysrootDiscovery {
+    var disc = SysrootDiscovery {
+        include_dirs: [],
+        lib_dirs:     [],
+        target_os:    os_name,
+        target_arch:  arch_name,
+    };
+    sysroot_add_standard_paths(var disc);
+    return disc;
+}
+
+// ------------------------------------------------------------------------------
+// 2. Standard Include & Library Discovery Paths
+// ------------------------------------------------------------------------------
+
+pub fn sysroot_add_standard_paths(var ref sys: SysrootDiscovery) {
+    if sys.target_os == "linux" {
+        sys.include_dirs.push("/usr/include");
+        sys.include_dirs.push("/usr/local/include");
+        if sys.target_arch == "x86_64" {
+            sys.include_dirs.push("/usr/include/x86_64-linux-gnu");
+            sys.lib_dirs.push("/usr/lib/x86_64-linux-gnu");
+        } else if sys.target_arch == "aarch64" {
+            sys.include_dirs.push("/usr/include/aarch64-linux-gnu");
+            sys.lib_dirs.push("/usr/lib/aarch64-linux-gnu");
+        }
+        sys.lib_dirs.push("/usr/lib");
+        sys.lib_dirs.push("/usr/local/lib");
+    } else if sys.target_os == "macos" || sys.target_os == "darwin" {
+        sys.include_dirs.push("/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include");
+        sys.include_dirs.push("/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include");
+        sys.include_dirs.push("/usr/local/include");
+        sys.include_dirs.push("/opt/homebrew/include");
+        sys.lib_dirs.push("/usr/lib");
+        sys.lib_dirs.push("/usr/local/lib");
+        sys.lib_dirs.push("/opt/homebrew/lib");
+    } else if sys.target_os == "windows" {
+        sys.include_dirs.push("C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0/ucrt");
+        sys.include_dirs.push("C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0/um");
+        sys.include_dirs.push("C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0/shared");
+        sys.lib_dirs.push("C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22000.0/ucrt/x64");
+        sys.lib_dirs.push("C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22000.0/um/x64");
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 3. Pure-Pilot .pc (pkg-config) Specification Parser
+// ------------------------------------------------------------------------------
+
+pub fn parse_pkg_config_file(pc_content: str) -> (List<str>, List<str>) {
+    var includes: List<str> = [];
+    var libs: List<str> = [];
+    var vars = Map<str, str> {};
+
+    let n = pc_content.len();
+    var pos: usize = 0;
+
+    while pos < n {
+        var line_end = pos;
+        while line_end < n && pc_content.byte_at(line_end) != 10 {
+            line_end = line_end + 1;
+        }
+        let line = pc_content.slice(pos, line_end);
+        pos = if line_end < n { line_end + 1 } else { line_end };
+
+        // Comments
+        if line.len() == 0 || line.byte_at(0) == 35 { // '#'
+            continue;
+        }
+
+        // Variable assignment: name=value
+        if line.contains("=") && !line.contains(":") {
+            let eq_idx = line.index_of("=") as usize;
+            let v_name = line.slice(0, eq_idx);
+            var v_val = line.slice(eq_idx + 1, line.len());
+            // Resolve nested ${var}
+            while v_val.contains("${") {
+                let s_idx = v_val.index_of("${") as usize;
+                let e_idx = v_val.index_of("}") as usize;
+                if e_idx > s_idx {
+                    let sub_name = v_val.slice(s_idx + 2, e_idx);
+                    let repl = if vars.has(sub_name) { vars[sub_name] } else { "" };
+                    v_val = v_val.slice(0, s_idx) + repl + v_val.slice(e_idx + 1, v_val.len());
+                } else {
+                    break;
+                }
+            }
+            vars[v_name] = v_val;
+            continue;
+        }
+
+        // Keyword lines: Cflags: ... Libs: ...
+        if line.starts_with("Cflags:") {
+            var cflags = line.slice(7, line.len());
+            // Resolve ${var}
+            while cflags.contains("${") {
+                let s_idx = cflags.index_of("${") as usize;
+                let e_idx = cflags.index_of("}") as usize;
+                if e_idx > s_idx {
+                    let sub_name = cflags.slice(s_idx + 2, e_idx);
+                    let repl = if vars.has(sub_name) { vars[sub_name] } else { "" };
+                    cflags = cflags.slice(0, s_idx) + repl + cflags.slice(e_idx + 1, cflags.len());
+                } else {
+                    break;
+                }
+            }
+
+            // Extract -I<dir>
+            var ci: usize = 0;
+            while ci < cflags.len() {
+                if ci + 1 < cflags.len() && cflags.byte_at(ci) == 45 && cflags.byte_at(ci + 1) == 73 { // "-I"
+                    var ie = ci + 2;
+                    while ie < cflags.len() && cflags.byte_at(ie) != 32 {
+                        ie = ie + 1;
+                    }
+                    let inc_dir = cflags.slice(ci + 2, ie);
+                    if inc_dir.len() > 0 {
+                        includes.push(inc_dir);
+                    }
+                    ci = ie;
+                } else {
+                    ci = ci + 1;
+                }
+            }
+        }
+
+        if line.starts_with("Libs:") {
+            var lib_str = line.slice(5, line.len());
+            while lib_str.contains("${") {
+                let s_idx = lib_str.index_of("${") as usize;
+                let e_idx = lib_str.index_of("}") as usize;
+                if e_idx > s_idx {
+                    let sub_name = lib_str.slice(s_idx + 2, e_idx);
+                    let repl = if vars.has(sub_name) { vars[sub_name] } else { "" };
+                    lib_str = lib_str.slice(0, s_idx) + repl + lib_str.slice(e_idx + 1, lib_str.len());
+                } else {
+                    break;
+                }
+            }
+
+            // Extract -l<name> and -L<dir>
+            var li: usize = 0;
+            while li < lib_str.len() {
+                if li + 1 < lib_str.len() && lib_str.byte_at(li) == 45 && (lib_str.byte_at(li + 1) == 108 || lib_str.byte_at(li + 1) == 76) { // "-l" or "-L"
+                    var le = li + 2;
+                    while le < lib_str.len() && lib_str.byte_at(le) != 32 {
+                        le = le + 1;
+                    }
+                    let item = lib_str.slice(li, le);
+                    libs.push(item);
+                    li = le;
+                } else {
+                    li = li + 1;
+                }
+            }
+        }
+    }
+
+    return (includes, libs);
+}
+
+// ------------------------------------------------------------------------------
+// 4. Header Path Resolution
+// ------------------------------------------------------------------------------
+
+pub fn resolve_c_header_path(
+    header_name: str,
+    extra_includes: List<str>,
+    sysroot: ref<SysrootDiscovery>
+) -> opt<str> {
+    // 1. Check extra user-provided include directories
+    var i: usize = 0;
+    while i < extra_includes.len() {
+        let cand = extra_includes[i] + "/" + header_name;
+        if File.exists(cand) {
+            return opt<str>::some(cand);
+        }
+        i = i + 1;
+    }
+
+    // 2. Check sysroot standard include directories
+    i = 0;
+    while i < sysroot.include_dirs.len() {
+        let cand = sysroot.include_dirs[i] + "/" + header_name;
+        if File.exists(cand) {
+            return opt<str>::some(cand);
+        }
+        i = i + 1;
+    }
+
+    return opt<str>::none;
+}

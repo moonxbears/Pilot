@@ -1,0 +1,916 @@
+// ==============================================================================
+// FILE: selfhost/adapter/c_pp.pilot
+// Milestone 12.1: Headerless C11/C23 Semantic Absorber - C Preprocessor
+// Pure-Pilot C preprocessor: #include, #pragma once, #define, #if/#elif, macros
+// Follows imp_type.md Rule 12: Encapsulated types (Map, List, File), zero raw __engine
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Adapter.CPp;
+
+use Pilot.Core.File.File;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Character & String Primitives for C Lexing
+// ------------------------------------------------------------------------------
+
+pub pure fn cpp_is_space(b: i64) -> bool => b == 32 || b == 9 || b == 13;
+pub pure fn cpp_is_digit(b: i64) -> bool => b >= 48 && b <= 57;
+pub pure fn cpp_is_alpha(b: i64) -> bool => (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
+pub pure fn cpp_is_alnum(b: i64) -> bool => cpp_is_alpha(b) || cpp_is_digit(b);
+
+pub pure fn cpp_trim(s: str) -> str {
+    let n = s.len();
+    var start: usize = 0;
+    while start < n && cpp_is_space(s.byte_at(start)) {
+        start = start + 1;
+    }
+    var end: usize = n;
+    while end > start && cpp_is_space(s.byte_at(end - 1)) {
+        end = end - 1;
+    }
+    if start == 0 && end == n { return s; }
+    return s.slice(start, end);
+}
+
+pub pure fn cpp_skip_space(s: str, pos: usize) -> usize {
+    let n = s.len();
+    var cur = pos;
+    while cur < n && cpp_is_space(s.byte_at(cur)) {
+        cur = cur + 1;
+    }
+    return cur;
+}
+
+pub pure fn cpp_read_ident(s: str, pos: usize) -> str {
+    let n = s.len();
+    var cur = pos;
+    while cur < n && cpp_is_alnum(s.byte_at(cur)) {
+        cur = cur + 1;
+    }
+    if cur > pos { return s.slice(pos, cur); }
+    return "";
+}
+
+// ------------------------------------------------------------------------------
+// 2. Preprocessor State Schemas (0b10 : IObject, Encapsulated Types)
+// ------------------------------------------------------------------------------
+
+pub struct CppMacro : IValue {
+    pub name:        str;
+    pub val:         str;
+    pub is_fn:       bool;
+    pub param_count: usize;
+    pub params:      List<str>;
+}
+
+pub struct CppCondFrame : IValue {
+    pub active:        bool;
+    pub parent_active: bool;
+    pub had_true:      bool;
+}
+
+pub struct CppEnv : IObject {
+    pub macros:          Map<str, CppMacro>;
+    pub visited_headers: Map<str, bool>;
+    pub has_error:       bool;
+    pub error_msg:       str;
+    pub error_code:      str;
+    pub eval_pos:        usize;
+}
+
+pub fn cpp_env_new() -> CppEnv {
+    var env = CppEnv {
+        macros:          [:],
+        visited_headers: [:],
+        has_error:       false,
+        error_msg:       "",
+        error_code:      "",
+        eval_pos:        0,
+    };
+
+    // Predefined standard C macros
+    cpp_define_macro(var env, "__STDC__", "1");
+    cpp_define_macro(var env, "__STDC_VERSION__", "201710L");
+    cpp_define_macro(var env, "__STDC_HOSTED__", "1");
+    cpp_define_macro(var env, "__x86_64__", "1");
+    cpp_define_macro(var env, "__LP64__", "1");
+    cpp_define_macro(var env, "_LP64", "1");
+    cpp_define_macro(var env, "__linux__", "1");
+    cpp_define_macro(var env, "__GNUC__", "11");
+    cpp_define_macro(var env, "__GNUC_MINOR__", "2");
+
+    return env;
+}
+
+pub fn cpp_define_macro(var ref env: CppEnv, name: str, val: str) {
+    env.macros[name] = CppMacro {
+        name:        name,
+        val:         val,
+        is_fn:       false,
+        param_count: 0,
+        params:      [],
+    };
+}
+
+pub fn cpp_define_fn_macro(var ref env: CppEnv, name: str, params: List<str>, body: str) {
+    env.macros[name] = CppMacro {
+        name:        name,
+        val:         body,
+        is_fn:       true,
+        param_count: params.len(),
+        params:      params,
+    };
+}
+
+pub fn cpp_undef_macro(var ref env: CppEnv, name: str) {
+    if env.macros.has(name) {
+        env.macros.remove(name);
+    }
+}
+
+pub fn cpp_is_defined(ref env: CppEnv, name: str) -> bool {
+    return env.macros.has(name);
+}
+
+pub fn cpp_get_macro(ref env: CppEnv, name: str) -> str {
+    return if env.macros.has(name) { env.macros[name].val } else { "" };
+}
+
+pub fn cpp_set_error(var ref env: CppEnv, code: str, msg: str) {
+    env.has_error = true;
+    env.error_code = code;
+    env.error_msg = msg;
+}
+
+pub fn cpp_has_error(ref env: CppEnv) -> bool => env.has_error;
+pub fn cpp_error_code(ref env: CppEnv) -> str => env.error_code;
+pub fn cpp_error_msg(ref env: CppEnv) -> str => env.error_msg;
+
+// ------------------------------------------------------------------------------
+// 3. Expression Evaluator for #if and #elif (64-bit Integer Math)
+// ------------------------------------------------------------------------------
+
+pub fn cpp_eval_primary(expr: str, ref env: CppEnv) -> i64 {
+    let n = expr.len();
+    var cur = cpp_skip_space(expr, env.eval_pos);
+    if cur >= n { env.eval_pos = cur; return 0; }
+
+    let b = expr.byte_at(cur);
+
+    // Parentheses
+    if b == 40 { // '('
+        cur = cur + 1;
+        env.eval_pos = cur;
+        let val = cpp_eval_logical_or(expr, env);
+        cur = cpp_skip_space(expr, env.eval_pos);
+        if cur < n && expr.byte_at(cur) == 41 { // ')'
+            cur = cur + 1;
+        }
+        env.eval_pos = cur;
+        return val;
+    }
+
+    // Unary '!'
+    if b == 33 {
+        cur = cur + 1;
+        env.eval_pos = cur;
+        let val = cpp_eval_primary(expr, env);
+        return if val == 0 { 1 } else { 0 };
+    }
+
+    // Unary '~'
+    if b == 126 {
+        cur = cur + 1;
+        env.eval_pos = cur;
+        let val = cpp_eval_primary(expr, env);
+        return ~val;
+    }
+
+    // Unary '-'
+    if b == 45 {
+        cur = cur + 1;
+        env.eval_pos = cur;
+        let val = cpp_eval_primary(expr, env);
+        return -val;
+    }
+
+    // Unary '+'
+    if b == 43 {
+        cur = cur + 1;
+        env.eval_pos = cur;
+        return cpp_eval_primary(expr, env);
+    }
+
+    // Number literal
+    if cpp_is_digit(b) {
+        var end = cur;
+        var is_hex = false;
+        if b == 48 && cur + 1 < n && (expr.byte_at(cur + 1) == 120 || expr.byte_at(cur + 1) == 88) {
+            is_hex = true;
+            end = cur + 2;
+            while end < n {
+                let hb = expr.byte_at(end);
+                if cpp_is_digit(hb) || (hb >= 65 && hb <= 70) || (hb >= 97 && hb <= 102) {
+                    end = end + 1;
+                } else {
+                    break;
+                }
+            }
+        } else {
+            while end < n && cpp_is_digit(expr.byte_at(end)) {
+                end = end + 1;
+            }
+        }
+        // Skip literal suffixes like 'U', 'L', 'ULL'
+        var num_end = end;
+        while num_end < n {
+            let sb = expr.byte_at(num_end);
+            if sb == 85 || sb == 117 || sb == 76 || sb == 108 {
+                num_end = num_end + 1;
+            } else {
+                break;
+            }
+        }
+        let num_str = expr.slice(cur, end);
+        cur = num_end;
+        env.eval_pos = cur;
+        var parsed: i64 = 0;
+        if is_hex {
+            var hi = 2;
+            while hi < num_str.len() {
+                let c = num_str.byte_at(hi);
+                var digit_val: i64 = 0;
+                if c >= 48 && c <= 57 { digit_val = c - 48; }
+                else if c >= 65 && c <= 70 { digit_val = c - 55; }
+                else if c >= 97 && c <= 102 { digit_val = c - 87; }
+                parsed = (parsed * 16) + digit_val;
+                hi = hi + 1;
+            }
+        } else {
+            var di = 0;
+            while di < num_str.len() {
+                parsed = (parsed * 10) + (num_str.byte_at(di) - 48);
+                di = di + 1;
+            }
+        }
+        return parsed;
+    }
+
+    // Identifier / defined(X) / macro
+    if cpp_is_alpha(b) {
+        let ident = cpp_read_ident(expr, cur);
+        cur = cur + ident.len();
+        if ident == "defined" {
+            cur = cpp_skip_space(expr, cur);
+            var target_sym = "";
+            if cur < n && expr.byte_at(cur) == 40 { // '('
+                cur = cpp_skip_space(expr, cur + 1);
+                target_sym = cpp_read_ident(expr, cur);
+                cur = cur + target_sym.len();
+                cur = cpp_skip_space(expr, cur);
+                if cur < n && expr.byte_at(cur) == 41 { // ')'
+                    cur = cur + 1;
+                }
+            } else {
+                target_sym = cpp_read_ident(expr, cur);
+                cur = cur + target_sym.len();
+            }
+            env.eval_pos = cur;
+            return if cpp_is_defined(env, target_sym) { 1 } else { 0 };
+        }
+
+        // Expanded macro
+        if cpp_is_defined(env, ident) {
+            let mval = cpp_get_macro(env, ident);
+            let saved = cur;
+            var m_pos: usize = 0;
+            let res = cpp_eval_expr(mval, var m_pos, env);
+            env.eval_pos = saved;
+            return res;
+        }
+        // Undefined identifier in C preprocessor evaluates to 0
+        env.eval_pos = cur;
+        return 0;
+    }
+
+    cur = cur + 1;
+    env.eval_pos = cur;
+    return 0;
+}
+
+pub fn cpp_eval_mul(expr: str, ref env: CppEnv) -> i64 {
+    var lhs = cpp_eval_primary(expr, env);
+    let n = expr.len();
+    var cur = env.eval_pos;
+    while true {
+        cur = cpp_skip_space(expr, cur);
+        if cur >= n { break; }
+        let b = expr.byte_at(cur);
+        if b == 42 { // '*'
+            cur = cur + 1;
+            env.eval_pos = cur;
+            let rhs = cpp_eval_primary(expr, env);
+            cur = env.eval_pos;
+            lhs = lhs * rhs;
+        } else if b == 47 { // '/'
+            cur = cur + 1;
+            env.eval_pos = cur;
+            let rhs = cpp_eval_primary(expr, env);
+            cur = env.eval_pos;
+            lhs = if rhs != 0 { lhs / rhs } else { 0 };
+        } else if b == 37 { // '%'
+            cur = cur + 1;
+            env.eval_pos = cur;
+            let rhs = cpp_eval_primary(expr, env);
+            cur = env.eval_pos;
+            lhs = if rhs != 0 { lhs % rhs } else { 0 };
+        } else {
+            break;
+        }
+    }
+    env.eval_pos = cur;
+    return lhs;
+}
+
+pub fn cpp_eval_add(expr: str, ref env: CppEnv) -> i64 {
+    var lhs = cpp_eval_mul(expr, env);
+    let n = expr.len();
+    var cur = env.eval_pos;
+    while true {
+        cur = cpp_skip_space(expr, cur);
+        if cur >= n { break; }
+        let b = expr.byte_at(cur);
+        if b == 43 { // '+'
+            cur = cur + 1;
+            env.eval_pos = cur;
+            let rhs = cpp_eval_mul(expr, env);
+            cur = env.eval_pos;
+            lhs = lhs + rhs;
+        } else if b == 45 { // '-'
+            cur = cur + 1;
+            env.eval_pos = cur;
+            let rhs = cpp_eval_mul(expr, env);
+            cur = env.eval_pos;
+            lhs = lhs - rhs;
+        } else {
+            break;
+        }
+    }
+    env.eval_pos = cur;
+    return lhs;
+}
+
+pub fn cpp_eval_shift(expr: str, ref env: CppEnv) -> i64 {
+    var lhs = cpp_eval_add(expr, env);
+    let n = expr.len();
+    var cur = env.eval_pos;
+    while true {
+        cur = cpp_skip_space(expr, cur);
+        if cur + 1 >= n { break; }
+        let b0 = expr.byte_at(cur);
+        let b1 = expr.byte_at(cur + 1);
+        if b0 == 60 && b1 == 60 { // '<<'
+            cur = cur + 2;
+            env.eval_pos = cur;
+            let rhs = cpp_eval_add(expr, env);
+            cur = env.eval_pos;
+            lhs = lhs << (rhs as u8);
+        } else if b0 == 62 && b1 == 62 { // '>>'
+            cur = cur + 2;
+            env.eval_pos = cur;
+            let rhs = cpp_eval_add(expr, env);
+            cur = env.eval_pos;
+            lhs = lhs >> (rhs as u8);
+        } else {
+            break;
+        }
+    }
+    env.eval_pos = cur;
+    return lhs;
+}
+
+pub fn cpp_eval_relational(expr: str, ref env: CppEnv) -> i64 {
+    var lhs = cpp_eval_shift(expr, env);
+    let n = expr.len();
+    var cur = env.eval_pos;
+    while true {
+        cur = cpp_skip_space(expr, cur);
+        if cur >= n { break; }
+        let b = expr.byte_at(cur);
+        if b == 60 { // '<' or '<='
+            if cur + 1 < n && expr.byte_at(cur + 1) == 61 {
+                cur = cur + 2;
+                env.eval_pos = cur;
+                let rhs = cpp_eval_shift(expr, env);
+                cur = env.eval_pos;
+                lhs = if lhs <= rhs { 1 } else { 0 };
+            } else {
+                cur = cur + 1;
+                env.eval_pos = cur;
+                let rhs = cpp_eval_shift(expr, env);
+                cur = env.eval_pos;
+                lhs = if lhs < rhs { 1 } else { 0 };
+            }
+        } else if b == 62 { // '>' or '>='
+            if cur + 1 < n && expr.byte_at(cur + 1) == 61 {
+                cur = cur + 2;
+                env.eval_pos = cur;
+                let rhs = cpp_eval_shift(expr, env);
+                cur = env.eval_pos;
+                lhs = if lhs >= rhs { 1 } else { 0 };
+            } else {
+                cur = cur + 1;
+                env.eval_pos = cur;
+                let rhs = cpp_eval_shift(expr, env);
+                cur = env.eval_pos;
+                lhs = if lhs > rhs { 1 } else { 0 };
+            }
+        } else {
+            break;
+        }
+    }
+    env.eval_pos = cur;
+    return lhs;
+}
+
+pub fn cpp_eval_equality(expr: str, ref env: CppEnv) -> i64 {
+    var lhs = cpp_eval_relational(expr, env);
+    let n = expr.len();
+    var cur = env.eval_pos;
+    while true {
+        cur = cpp_skip_space(expr, cur);
+        if cur + 1 >= n { break; }
+        let b0 = expr.byte_at(cur);
+        let b1 = expr.byte_at(cur + 1);
+        if b0 == 61 && b1 == 61 { // '=='
+            cur = cur + 2;
+            env.eval_pos = cur;
+            let rhs = cpp_eval_relational(expr, env);
+            cur = env.eval_pos;
+            lhs = if lhs == rhs { 1 } else { 0 };
+        } else if b0 == 33 && b1 == 61 { // '!='
+            cur = cur + 2;
+            env.eval_pos = cur;
+            let rhs = cpp_eval_relational(expr, env);
+            cur = env.eval_pos;
+            lhs = if lhs != rhs { 1 } else { 0 };
+        } else {
+            break;
+        }
+    }
+    env.eval_pos = cur;
+    return lhs;
+}
+
+pub fn cpp_eval_bitwise_and(expr: str, ref env: CppEnv) -> i64 {
+    var lhs = cpp_eval_equality(expr, env);
+    let n = expr.len();
+    var cur = env.eval_pos;
+    while true {
+        cur = cpp_skip_space(expr, cur);
+        if cur >= n { break; }
+        if expr.byte_at(cur) == 38 { // '&' but not '&&'
+            if cur + 1 < n && expr.byte_at(cur + 1) == 38 { break; }
+            cur = cur + 1;
+            env.eval_pos = cur;
+            let rhs = cpp_eval_equality(expr, env);
+            cur = env.eval_pos;
+            lhs = lhs & rhs;
+        } else {
+            break;
+        }
+    }
+    env.eval_pos = cur;
+    return lhs;
+}
+
+pub fn cpp_eval_bitwise_or(expr: str, ref env: CppEnv) -> i64 {
+    var lhs = cpp_eval_bitwise_and(expr, env);
+    let n = expr.len();
+    var cur = env.eval_pos;
+    while true {
+        cur = cpp_skip_space(expr, cur);
+        if cur >= n { break; }
+        if expr.byte_at(cur) == 124 { // '|' but not '||'
+            if cur + 1 < n && expr.byte_at(cur + 1) == 124 { break; }
+            cur = cur + 1;
+            env.eval_pos = cur;
+            let rhs = cpp_eval_bitwise_and(expr, env);
+            cur = env.eval_pos;
+            lhs = lhs | rhs;
+        } else {
+            break;
+        }
+    }
+    env.eval_pos = cur;
+    return lhs;
+}
+
+pub fn cpp_eval_logical_and(expr: str, ref env: CppEnv) -> i64 {
+    var lhs = cpp_eval_bitwise_or(expr, env);
+    let n = expr.len();
+    var cur = env.eval_pos;
+    while true {
+        cur = cpp_skip_space(expr, cur);
+        if cur >= n { break; }
+        if expr.byte_at(cur) == 38 && expr.byte_at(cur + 1) == 38 { // '&&'
+            cur = cur + 2;
+            env.eval_pos = cur;
+            let rhs = cpp_eval_bitwise_or(expr, env);
+            cur = env.eval_pos;
+            lhs = if lhs != 0 && rhs != 0 { 1 } else { 0 };
+        } else {
+            break;
+        }
+    }
+    env.eval_pos = cur;
+    return lhs;
+}
+
+pub fn cpp_eval_logical_or(expr: str, ref env: CppEnv) -> i64 {
+    var lhs = cpp_eval_logical_and(expr, env);
+    let n = expr.len();
+    var cur = env.eval_pos;
+    while true {
+        cur = cpp_skip_space(expr, cur);
+        if cur >= n { break; }
+        if expr.byte_at(cur) == 124 && expr.byte_at(cur + 1) == 124 { // '||'
+            cur = cur + 2;
+            env.eval_pos = cur;
+            let rhs = cpp_eval_logical_and(expr, env);
+            cur = env.eval_pos;
+            lhs = if lhs != 0 || rhs != 0 { 1 } else { 0 };
+        } else {
+            break;
+        }
+    }
+    env.eval_pos = cur;
+    return lhs;
+}
+
+pub fn cpp_eval_expr(expr: str, var ref cur: usize, ref env: CppEnv) -> i64 {
+    env.eval_pos = cur;
+    let res = cpp_eval_logical_or(expr, env);
+    cur = env.eval_pos;
+    return res;
+}
+
+pub fn cpp_evaluate_condition(cond_str: str, ref env: CppEnv) -> bool {
+    var pos: usize = 0;
+    let res = cpp_eval_expr(cond_str, var pos, env);
+    return res != 0;
+}
+
+// ------------------------------------------------------------------------------
+// 4. Macro Expansion Engine (Object-like, Token Pasting, Arguments)
+// ------------------------------------------------------------------------------
+
+pub fn cpp_expand_tokens(line: str, ref env: CppEnv) -> str {
+    let n = line.len();
+    var out = "";
+    var i: usize = 0;
+    while i < n {
+        let b = line.byte_at(i);
+        // String literal - preserve as is
+        if b == 34 { // '"'
+            var j = i + 1;
+            while j < n && line.byte_at(j) != 34 {
+                if line.byte_at(j) == 92 && j + 1 < n { j = j + 2; }
+                else { j = j + 1; }
+            }
+            if j < n { j = j + 1; }
+            out = out + line.slice(i, j);
+            i = j;
+            continue;
+        }
+        // Identifier - check macro expansion
+        if cpp_is_alpha(b) {
+            let ident = cpp_read_ident(line, i);
+            let next_i = i + ident.len();
+            if env.macros.has(ident) {
+                let m = env.macros[ident];
+                // Check if macro is function-like: e.g. FOO(a, b)
+                if m.is_fn {
+                    var cur = cpp_skip_space(line, next_i);
+                    if cur < n && line.byte_at(cur) == 40 { // '('
+                        // Extract args
+                        var depth = 1;
+                        var arg_start = cur + 1;
+                        var args: List<str> = [];
+                        cur = cur + 1;
+                        while cur < n && depth > 0 {
+                            let cb = line.byte_at(cur);
+                            if cb == 40 { depth = depth + 1; }
+                            else if cb == 41 {
+                                depth = depth - 1;
+                                if depth == 0 {
+                                    let arg = cpp_trim(line.slice(arg_start, cur));
+                                    args.push(arg);
+                                }
+                            } else if cb == 44 && depth == 1 { // ','
+                                let arg = cpp_trim(line.slice(arg_start, cur));
+                                args.push(arg);
+                                arg_start = cur + 1;
+                            }
+                            cur = cur + 1;
+                        }
+                        // Substitute parameters in function-like macro body
+                        var body = m.val;
+                        var pi: usize = 0;
+                        while pi < m.params.len() {
+                            let pname = m.params[pi];
+                            let parg = if pi < args.len() { args[pi] } else { "" };
+                            // Replace stringification: #pname -> "parg"
+                            var hash_pname = "#" + pname;
+                            while body.contains(hash_pname) {
+                                let idx = body.index_of(hash_pname);
+                                body = body.slice(0, idx as usize) + "\"" + parg + "\"" + body.slice((idx as usize) + hash_pname.len(), body.len());
+                            }
+                            // Replace parameter name
+                            while body.contains(pname) {
+                                let idx = body.index_of(pname);
+                                body = body.slice(0, idx as usize) + parg + body.slice((idx as usize) + pname.len(), body.len());
+                            }
+                            pi = pi + 1;
+                        }
+                        // Strip ## paste operators
+                        while body.contains("##") {
+                            let idx = body.index_of("##");
+                            let b_left = cpp_trim(body.slice(0, idx as usize));
+                            let b_right = cpp_trim(body.slice((idx as usize) + 2, body.len()));
+                            body = b_left + b_right;
+                        }
+                        out = out + body;
+                        i = cur;
+                        continue;
+                    }
+                }
+                out = out + m.val;
+                i = next_i;
+                continue;
+            }
+            out = out + ident;
+            i = next_i;
+            continue;
+        }
+        out = out + line.slice(i, i + 1);
+        i = i + 1;
+    }
+    return out;
+}
+
+// ------------------------------------------------------------------------------
+// 5. Preprocessor Line-by-Line Dispatcher & Directive Engine
+// ------------------------------------------------------------------------------
+
+pub fn cpp_process_source(
+    src: str,
+    file_path: str,
+    include_dirs: slice<str>,
+    var ref env: CppEnv
+) -> str {
+    // Check #pragma once or include guards
+    if env.visited_headers.has(file_path) {
+        return "";
+    }
+
+    let n = src.len();
+    var out = "";
+    var pos: usize = 0;
+
+    var cond_stack: List<CppCondFrame> = [];
+
+    while pos < n {
+        // Read line
+        var line_end = pos;
+        while line_end < n && src.byte_at(line_end) != 10 { // '\n'
+            line_end = line_end + 1;
+        }
+        var line = src.slice(pos, line_end);
+        pos = if line_end < n { line_end + 1 } else { line_end };
+
+        // Handle line continuations with backslash '\'
+        while line.len() > 0 && line.byte_at(line.len() - 1) == 92 && pos < n {
+            var next_end = pos;
+            while next_end < n && src.byte_at(next_end) != 10 {
+                next_end = next_end + 1;
+            }
+            line = line.slice(0, line.len() - 1) + src.slice(pos, next_end);
+            pos = if next_end < n { next_end + 1 } else { next_end };
+        }
+
+        let trimmed = cpp_trim(line);
+        if trimmed.len() == 0 {
+            continue;
+        }
+
+        // Directives begin with '#'
+        if trimmed.byte_at(0) == 35 { // '#'
+            let dir_body = cpp_trim(trimmed.slice(1, trimmed.len()));
+            if dir_body.len() == 0 { continue; }
+            let dir_name = cpp_read_ident(dir_body, 0);
+            let dir_arg = cpp_trim(dir_body.slice(dir_name.len(), dir_body.len()));
+
+            // Parent block activity
+            let is_parent_active = if cond_stack.len() == 0 {
+                true
+            } else {
+                cond_stack[cond_stack.len() - 1].active
+            };
+
+            // Branching directives
+            if dir_name == "ifdef" {
+                let cond_met = is_parent_active && cpp_is_defined(env, dir_arg);
+                cond_stack.push(CppCondFrame {
+                    parent_active: is_parent_active,
+                    active:        cond_met,
+                    had_true:      cond_met,
+                });
+                continue;
+            }
+
+            if dir_name == "ifndef" {
+                let cond_met = is_parent_active && !cpp_is_defined(env, dir_arg);
+                cond_stack.push(CppCondFrame {
+                    parent_active: is_parent_active,
+                    active:        cond_met,
+                    had_true:      cond_met,
+                });
+                continue;
+            }
+
+            if dir_name == "if" {
+                let cond_met = is_parent_active && cpp_evaluate_condition(dir_arg, env);
+                cond_stack.push(CppCondFrame {
+                    parent_active: is_parent_active,
+                    active:        cond_met,
+                    had_true:      cond_met,
+                });
+                continue;
+            }
+
+            if dir_name == "elif" {
+                if cond_stack.len() > 0 {
+                    let last_idx = cond_stack.len() - 1;
+                    let p_act = cond_stack[last_idx].parent_active;
+                    let had_true = cond_stack[last_idx].had_true;
+                    if p_act && !had_true && cpp_evaluate_condition(dir_arg, env) {
+                        cond_stack[last_idx].active = true;
+                        cond_stack[last_idx].had_true = true;
+                    } else {
+                        cond_stack[last_idx].active = false;
+                    }
+                }
+                continue;
+            }
+
+            if dir_name == "else" {
+                if cond_stack.len() > 0 {
+                    let last_idx = cond_stack.len() - 1;
+                    let p_act = cond_stack[last_idx].parent_active;
+                    let had_true = cond_stack[last_idx].had_true;
+                    if p_act && !had_true {
+                        cond_stack[last_idx].active = true;
+                        cond_stack[last_idx].had_true = true;
+                    } else {
+                        cond_stack[last_idx].active = false;
+                    }
+                }
+                continue;
+            }
+
+            if dir_name == "endif" {
+                if cond_stack.len() > 0 {
+                    let _ = cond_stack.pop();
+                }
+                continue;
+            }
+
+            // Check if current block is active before processing non-branching directives
+            var is_cur_active = true;
+            if cond_stack.len() > 0 {
+                is_cur_active = cond_stack[cond_stack.len() - 1].active;
+            }
+            if !is_cur_active {
+                continue;
+            }
+
+            // #pragma once
+            if dir_name == "pragma" && dir_arg == "once" {
+                env.visited_headers[file_path] = true;
+                continue;
+            }
+
+            // #error CAB003
+            if dir_name == "error" {
+                cpp_set_error(var env, "CAB003", "Preprocessor #error directive: " + dir_arg);
+                continue;
+            }
+
+            // #warning
+            if dir_name == "warning" {
+                continue;
+            }
+
+            // #define
+            if dir_name == "define" {
+                let mname = cpp_read_ident(dir_arg, 0);
+                let mbody_start = mname.len();
+                if mbody_start < dir_arg.len() && dir_arg.byte_at(mbody_start) == 40 { // '(' function-like
+                    var cp = mbody_start + 1;
+                    var fn_params: List<str> = [];
+                    while cp < dir_arg.len() && dir_arg.byte_at(cp) != 41 {
+                        cp = cpp_skip_space(dir_arg, cp);
+                        let pname = cpp_read_ident(dir_arg, cp);
+                        cp = cp + pname.len();
+                        fn_params.push(pname);
+                        cp = cpp_skip_space(dir_arg, cp);
+                        if cp < dir_arg.len() && dir_arg.byte_at(cp) == 44 { // ','
+                            cp = cp + 1;
+                        }
+                    }
+                    let body_str = if cp < dir_arg.len() { cpp_trim(dir_arg.slice(cp + 1, dir_arg.len())) } else { "" };
+                    cpp_define_fn_macro(var env, mname, fn_params, body_str);
+                } else {
+                    let mval = cpp_trim(dir_arg.slice(mname.len(), dir_arg.len()));
+                    cpp_define_macro(var env, mname, if mval.len() > 0 { mval } else { "1" });
+                }
+                continue;
+            }
+
+            // #undef
+            if dir_name == "undef" {
+                cpp_undef_macro(var env, dir_arg);
+                continue;
+            }
+
+            // #include "..." or #include <...>
+            if dir_name == "include" || dir_name == "include_next" {
+                var inc_target = "";
+                let is_quote = dir_arg.len() > 0 && dir_arg.byte_at(0) == 34; // '"'
+                let is_angle = dir_arg.len() > 0 && dir_arg.byte_at(0) == 60; // '<'
+                if is_quote || is_angle {
+                    let close_char = if is_quote { 34 } else { 62 };
+                    var ie = 1;
+                    while ie < dir_arg.len() && dir_arg.byte_at(ie) != close_char {
+                        ie = ie + 1;
+                    }
+                    inc_target = dir_arg.slice(1, ie);
+                }
+
+                // If already visited by #pragma once, skip
+                if env.visited_headers.has(inc_target) {
+                    continue;
+                }
+
+                // Resolve header path in include dirs
+                var resolved_path = "";
+                var di = 0;
+                while di < include_dirs.len() {
+                    let candidate = include_dirs[di] + "/" + inc_target;
+                    if File.exists(candidate) {
+                        resolved_path = candidate;
+                        break;
+                    }
+                    di = di + 1;
+                }
+
+                if resolved_path.len() > 0 {
+                    let inc_src = File.read_text(resolved_path);
+                    let inc_out = cpp_process_source(inc_src, resolved_path, include_dirs, var env);
+                    out = out + inc_out + "\n";
+                }
+                continue;
+            }
+
+            continue;
+        }
+
+        // Check if current block is active for normal source line
+        var is_active = true;
+        if cond_stack.len() > 0 {
+            is_active = cond_stack[cond_stack.len() - 1].active;
+        }
+
+        if is_active {
+            let expanded = cpp_expand_tokens(line, env);
+            out = out + expanded + "\n";
+        }
+    }
+
+    return out;
+}
+
+// ------------------------------------------------------------------------------
+// 6. Public Preprocessing Entry Points
+// ------------------------------------------------------------------------------
+
+pub fn preprocess_c_header(
+    source: str,
+    file_path: str,
+    include_dirs: slice<str>,
+    var ref env: CppEnv
+) -> str {
+    return cpp_process_source(source, file_path, include_dirs, var env);
+}

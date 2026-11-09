@@ -189,6 +189,7 @@ const MILESTONE_TEST_MANIFEST: &[(&str, usize)] = &[
     ("crates/pilot-analysis/tests/milestone09_three_ring_standard_library_personality.rs", 4),
     ("crates/pilot-analysis/tests/milestone10_compiler_as_a_library.rs", 4),
     ("crates/pilot-analysis/tests/milestone11_adapter_blueprint_engine.rs", 4),
+    ("crates/pilot-analysis/tests/milestone12_headerless_c_semantic_absorber.rs", 4),
     ("crates/pilot-analysis/tests/milestone50_lossless_bridge_and_reflection.rs", 4),
     ("crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs", 4),
     ("crates/pilot-lexer/tests/milestone52_seed_lexer_and_preprocessor.rs", 4),

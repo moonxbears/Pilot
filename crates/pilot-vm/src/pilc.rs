@@ -9,33 +9,20 @@ pub const PILC_V3_VERSION: u32 = 3;
 
 #[derive(Clone, Debug)]
 pub struct PilcBinary {
-    pub constants: Vec<PilotVal>,
-    pub instructions: Vec<Instruction>,
-    pub pc_spans: Vec<ByteSpan>,
-    pub reg_symbols: Vec<(u8, u32, u32)>,
+    pub constants: Vec<PilotVal>, pub instructions: Vec<Instruction>,
+    pub pc_spans: Vec<ByteSpan>, pub reg_symbols: Vec<(u8, u32, u32)>,
 }
 
 impl PilcBinary {
     pub fn new(constants: Vec<PilotVal>, instructions: Vec<Instruction>) -> Self {
         Self { constants, instructions, pc_spans: Vec::new(), reg_symbols: Vec::new() }
     }
-
-    pub fn with_debug_tables(
-        constants: Vec<PilotVal>, instructions: Vec<Instruction>,
-        pc_spans: Vec<ByteSpan>, reg_symbols: Vec<(u8, u32, u32)>,
-    ) -> Self {
+    pub fn with_debug_tables(constants: Vec<PilotVal>, instructions: Vec<Instruction>, pc_spans: Vec<ByteSpan>, reg_symbols: Vec<(u8, u32, u32)>) -> Self {
         Self { constants, instructions, pc_spans, reg_symbols }
     }
 
-    #[inline]
-    pub fn span_for_pc(&self, pc: usize) -> Option<ByteSpan> {
-        self.pc_spans.get(pc).copied().filter(|s| s.start > 0 || s.end > 0)
-    }
-
-    #[inline]
-    pub fn symbol_for_reg(&self, reg: u8) -> Option<(u32, u32)> {
-        self.reg_symbols.iter().find(|&&(r, _, _)| r == reg).map(|&(_, sym, lay)| (sym, lay))
-    }
+    #[inline] pub fn span_for_pc(&self, pc: usize) -> Option<ByteSpan> { self.pc_spans.get(pc).copied().filter(|s| s.start > 0 || s.end > 0) }
+    #[inline] pub fn symbol_for_reg(&self, reg: u8) -> Option<(u32, u32)> { self.reg_symbols.iter().find(|&&(r, _, _)| r == reg).map(|&(_, sym, lay)| (sym, lay)) }
 
     pub fn serialize(&self) -> Vec<u8> {
         let (mut buf, mut heap_str_data) = (Vec::new(), Vec::new());

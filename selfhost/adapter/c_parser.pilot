@@ -1,0 +1,711 @@
+// ==============================================================================
+// FILE: selfhost/adapter/c_parser.pilot
+// Milestone 12.2: Headerless C11/C23 Semantic Absorber - C Declarative Parser
+// Pure-Pilot C11/C23 parser: typedef, struct, union, bitfields, enum, fn decls
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Adapter.CParser;
+
+use Pilot.Diagnostics.Model;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Diagnostic Codes & Lattice Classifications
+// ------------------------------------------------------------------------------
+
+pub enum CDiagnosticKind : u16 {
+    ::HeaderNotFound       = 1, // CAB001
+    ::UnsupportedGnuExpr   = 2, // CAB002
+    ::PreprocessorError    = 3, // CAB003
+    ::InvalidBitfieldWidth = 4, // CAB004
+}
+
+pub pure fn c_diag_code(kind: CDiagnosticKind) -> str {
+    return switch kind {
+        case ::HeaderNotFound => "CAB001",
+        case ::UnsupportedGnuExpr => "CAB002",
+        case ::PreprocessorError => "CAB003",
+        case ::InvalidBitfieldWidth => "CAB004",
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 2. C AST & Declaration Schemas
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct CBitfieldSpec : IValue {
+    pub storage_unit_offset: usize;
+    pub bit_offset:          u8;
+    pub bit_width:           u8;
+    pub is_signed:           bool;
+}
+
+pub pure fn c_bitfield_spec_none() -> CBitfieldSpec {
+    return CBitfieldSpec {
+        storage_unit_offset: 0,
+        bit_offset:          0,
+        bit_width:           0,
+        is_signed:           false,
+    };
+}
+
+pub struct CFieldDecl : IObject {
+    pub name:         str;
+    pub type_name:    str;
+    pub byte_offset:  usize;
+    pub byte_size:    usize;
+    pub bitfield:     CBitfieldSpec;
+    pub is_bitfield:  bool;
+}
+
+pub pure fn c_field_decl_new(
+    name: str,
+    ty: str,
+    offset: usize,
+    size: usize
+) -> CFieldDecl {
+    return CFieldDecl {
+        name:         name,
+        type_name:    ty,
+        byte_offset:  offset,
+        byte_size:    size,
+        bitfield:     c_bitfield_spec_none(),
+        is_bitfield:  false,
+    };
+}
+
+pub struct CRecordDecl : IObject {
+    pub name:                    str;
+    pub is_union:                bool;
+    pub is_opaque:               bool;
+    pub pack_align:              u8;
+    pub has_flexible_array_tail: bool;
+    pub fields:                  List<CFieldDecl>;
+}
+
+[Layout(c_abi)]
+pub struct CParamDecl : IValue {
+    pub name:      str;
+    pub type_name: str;
+}
+
+pub struct CFnDecl : IObject {
+    pub name:         str;
+    pub return_type:  str;
+    pub calling_conv: str;
+    pub is_variadic:  bool;
+    pub is_inline:    bool;
+    pub params:       List<CParamDecl>;
+}
+
+pub fn c_fn_decl_new(
+    name: str,
+    ret_ty: str,
+    calling_conv: str,
+    is_var: bool,
+    is_inl: bool,
+    params: List<CParamDecl>
+) -> CFnDecl {
+    return CFnDecl {
+        name:         name,
+        return_type:  ret_ty,
+        calling_conv: calling_conv,
+        is_variadic:  is_var,
+        is_inline:    is_inl,
+        params:       params,
+    };
+}
+
+[Layout(c_abi)]
+pub struct CEnumItem : IValue {
+    pub name:  str;
+    pub value: i64;
+}
+
+pub struct CEnumDecl : IObject {
+    pub name:  str;
+    pub items: List<CEnumItem>;
+}
+
+pub fn c_enum_decl_new(name: str, items: List<CEnumItem>) -> CEnumDecl {
+    return CEnumDecl {
+        name:  name,
+        items: items,
+    };
+}
+
+[Layout(c_abi)]
+pub struct CComptimeConst : IValue {
+    pub name:       str;
+    pub val_str:    str;
+    pub is_numeric: bool;
+    pub num_val:    i64;
+}
+
+pub struct CTranslationUnit : IObject {
+    pub header_path:      str;
+    pub constants:        Map<str, CComptimeConst>;
+    pub records:          List<CRecordDecl>;
+    pub enums:            List<CEnumDecl>;
+    pub functions:        List<CFnDecl>;
+    pub inline_fn_bodies: List<str>;
+}
+
+pub fn c_translation_unit_new(header: str) -> CTranslationUnit {
+    return CTranslationUnit {
+        header_path:      header,
+        constants:        [:],
+        records:          [],
+        enums:            [],
+        functions:        [],
+        inline_fn_bodies: [],
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 3. Name-Blind Type Physics & Layout Calculator
+// ------------------------------------------------------------------------------
+
+pub pure fn c_type_size(ty: str) -> usize {
+    if ty == "signed char" || ty == "unsigned char" || ty == "int8_t" || ty == "uint8_t" || ty == "_Bool" || (ty.len() == 4 && ty.byte_at(0) == 99 && ty.byte_at(1) == 104) || (ty.len() == 4 && ty.byte_at(0) == 98 && ty.byte_at(1) == 111) {
+        return 1;
+    }
+    if ty == "short" || ty == "int16_t" || ty == "uint16_t" {
+        return 2;
+    }
+    if ty == "int" || ty == "int32_t" || ty == "uint32_t" || ty == "float" {
+        return 4;
+    }
+    if ty == "long" || ty == "long long" || ty == "int64_t" || ty == "uint64_t" || ty == "double" || ty == "size_t" || ty == "ssize_t" || ty == "intptr_t" || ty == "uintptr_t" {
+        return 8;
+    }
+    // Pointer types
+    if ty.find("*") >= 0 || ty.find("ptr<") >= 0 {
+        return 8;
+    }
+    return 8;
+}
+
+pub pure fn c_type_align(ty: str) -> usize => c_type_size(ty);
+
+pub pure fn c_type_size_and_align(ty: str) -> usize => c_type_size(ty);
+
+// ------------------------------------------------------------------------------
+// 4. Tokenizer Helpers
+// ------------------------------------------------------------------------------
+
+pub pure fn c_is_space(b: i64) -> bool => b == 32 || b == 9 || b == 10 || b == 13;
+pub pure fn c_is_alpha(b: i64) -> bool => (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
+pub pure fn c_is_digit(b: i64) -> bool => b >= 48 && b <= 57;
+pub pure fn c_is_alnum(b: i64) -> bool => c_is_alpha(b) || c_is_digit(b);
+
+pub pure fn c_skip_whitespace_and_comments(src: str, pos: usize) -> usize {
+    let n = src.len();
+    var cur = pos;
+    while cur < n {
+        let b = src.byte_at(cur);
+        if c_is_space(b) {
+            cur = cur + 1;
+            continue;
+        }
+        // Line comment //
+        if b == 47 && cur + 1 < n && src.byte_at(cur + 1) == 47 {
+            cur = cur + 2;
+            while cur < n && src.byte_at(cur) != 10 {
+                cur = cur + 1;
+            }
+            continue;
+        }
+        // Block comment /* ... */
+        if b == 47 && cur + 1 < n && src.byte_at(cur + 1) == 42 {
+            cur = cur + 2;
+            while cur + 1 < n && !(src.byte_at(cur) == 42 && src.byte_at(cur + 1) == 47) {
+                cur = cur + 1;
+            }
+            cur = if cur + 1 < n { cur + 2 } else { n };
+            continue;
+        }
+        break;
+    }
+    return cur;
+}
+
+pub pure fn c_read_word(src: str, pos: usize) -> str {
+    let n = src.len();
+    var cur = pos;
+    while cur < n && c_is_alnum(src.byte_at(cur)) {
+        cur = cur + 1;
+    }
+    if cur > pos { return src.slice(pos, cur); }
+    return "";
+}
+
+// ------------------------------------------------------------------------------
+// 5. C11/C23 Declarative Parser Implementation
+// ------------------------------------------------------------------------------
+
+pub fn c_parse_translation_unit(
+    src: str,
+    header_path: str,
+    diagnostics: var ref<List<Diagnostic>>
+) -> CTranslationUnit {
+    var tu = c_translation_unit_new(header_path);
+    let n = src.len();
+    var pos: usize = 0;
+    var current_pack_align: u8 = 8;
+
+    while pos < n {
+        pos = c_skip_whitespace_and_comments(src, pos);
+        if pos >= n { break; }
+
+        let word = c_read_word(src, pos);
+
+        // #pragma pack
+        if word == "_Pragma" || src.find("#pragma") == (pos as isize) {
+            // Check for pack(N)
+            var p_end = pos;
+            while p_end < n && src.byte_at(p_end) != 10 && src.byte_at(p_end) != 59 {
+                p_end = p_end + 1;
+            }
+            let pragma_line = src.slice(pos, p_end);
+            if pragma_line.find("pack(1)") >= 0 { current_pack_align = 1; }
+            else if pragma_line.find("pack(2)") >= 0 { current_pack_align = 2; }
+            else if pragma_line.find("pack(4)") >= 0 { current_pack_align = 4; }
+            else if pragma_line.find("pack(8)") >= 0 { current_pack_align = 8; }
+            else if pragma_line.find("pack()") >= 0 { current_pack_align = 8; }
+            pos = if p_end < n { p_end + 1 } else { p_end };
+            continue;
+        }
+
+        // typedef
+        var is_typedef = false;
+        if word == "typedef" {
+            is_typedef = true;
+            pos = c_skip_whitespace_and_comments(src, pos + 7);
+        }
+
+        let next_word = c_read_word(src, pos);
+
+        // Struct or Union
+        if next_word == "struct" || next_word == "union" {
+            let is_union = next_word == "union";
+            pos = c_skip_whitespace_and_comments(src, pos + next_word.len());
+            let tag_name = c_read_word(src, pos);
+            if tag_name.len() > 0 {
+                pos = c_skip_whitespace_and_comments(src, pos + tag_name.len());
+            }
+
+            pos = c_skip_whitespace_and_comments(src, pos);
+
+            // Opaque struct: e.g. "struct sqlite3;" or "typedef struct sqlite3 sqlite3;"
+            if pos < n && src.byte_at(pos) == 59 { // ';'
+                var rec = CRecordDecl {
+                    name:                    tag_name,
+                    is_union:                is_union,
+                    is_opaque:               true,
+                    pack_align:              current_pack_align,
+                    has_flexible_array_tail: false,
+                    fields:                  [],
+                };
+                tu.records.push(rec);
+                pos = pos + 1;
+                continue;
+            }
+
+            // Opaque typedef alias: "typedef struct sqlite3 sqlite3;"
+            if is_typedef && pos < n && src.byte_at(pos) != 123 { // not '{'
+                let alias = c_read_word(src, pos);
+                pos = c_skip_whitespace_and_comments(src, pos + alias.len());
+                if pos < n && src.byte_at(pos) == 59 { pos = pos + 1; }
+                var rec = CRecordDecl {
+                    name:                    if alias.len() > 0 { alias } else { tag_name },
+                    is_union:                is_union,
+                    is_opaque:               true,
+                    pack_align:              current_pack_align,
+                    has_flexible_array_tail: false,
+                    fields:                  [],
+                };
+                tu.records.push(rec);
+                continue;
+            }
+
+            // Body: '{' ... '}'
+            if pos < n && src.byte_at(pos) == 123 { // '{'
+                pos = pos + 1;
+                var rec_fields: List<CFieldDecl> = [];
+                var current_offset: usize = 0;
+                var max_align: usize = 1;
+                var has_flex = false;
+                var cur_bit_offset: u8 = 0;
+                var bit_storage_offset: usize = 0;
+                var in_bitfield_unit = false;
+
+                while pos < n && src.byte_at(pos) != 125 { // '}'
+                    let field_loop_start = pos;
+                    pos = c_skip_whitespace_and_comments(src, pos);
+                    if pos >= n || src.byte_at(pos) == 125 { break; }
+
+                    // Read field type
+                    var f_type = c_read_word(src, pos);
+                    pos = c_skip_whitespace_and_comments(src, pos + f_type.len());
+                    if f_type == "const" || f_type == "volatile" || f_type == "unsigned" || f_type == "signed" {
+                        let sub_t = c_read_word(src, pos);
+                        if sub_t.len() > 0 {
+                            f_type = f_type + " " + sub_t;
+                            pos = c_skip_whitespace_and_comments(src, pos + sub_t.len());
+                        }
+                    }
+
+                    // Check pointer '*'
+                    while pos < n && src.byte_at(pos) == 42 { // '*'
+                        f_type = f_type + "*";
+                        pos = c_skip_whitespace_and_comments(src, pos + 1);
+                    }
+
+                    // Read field name
+                    let f_name = c_read_word(src, pos);
+                    pos = c_skip_whitespace_and_comments(src, pos + f_name.len());
+
+                    // Check bitfield ':'
+                    if pos < n && src.byte_at(pos) == 58 { // ':'
+                        pos = c_skip_whitespace_and_comments(src, pos + 1);
+                        var w_end = pos;
+                        while w_end < n && c_is_digit(src.byte_at(w_end)) {
+                            w_end = w_end + 1;
+                        }
+                        let width_str = src.slice(pos, w_end);
+                        var bit_w: u8 = 0;
+                        var wi = 0;
+                        while wi < width_str.len() {
+                            bit_w = (bit_w * 10) + (width_str.byte_at(wi) - 48) as u8;
+                            wi = wi + 1;
+                        }
+                        pos = c_skip_whitespace_and_comments(src, w_end);
+
+                        let storage_sz = c_type_size(f_type);
+                        let storage_al = c_type_align(f_type);
+                        if (bit_w as usize) > storage_sz * 8 {
+                            // CAB004: Invalid Bitfield Width
+                            let sp = source_span_new(0, pos as u32, (pos + 1) as u32);
+                            let diag = diagnostic_new("CAB004", diag_severity_error(), "Bitfield width " + width_str + " exceeds storage size for type " + f_type, sp);
+                            diagnostics.push(diag);
+                        }
+
+                        if !in_bitfield_unit || (cur_bit_offset + bit_w > (storage_sz * 8) as u8) {
+                            // Align to storage boundary
+                            let eff_al = if (current_pack_align as usize) < storage_al { current_pack_align as usize } else { storage_al };
+                            if eff_al > 0 {
+                                let rem = current_offset % eff_al;
+                                if rem > 0 { current_offset = current_offset + (eff_al - rem); }
+                            }
+                            bit_storage_offset = current_offset;
+                            cur_bit_offset = 0;
+                            in_bitfield_unit = true;
+                            current_offset = current_offset + storage_sz;
+                        }
+
+                        let bf_spec = CBitfieldSpec {
+                            storage_unit_offset: bit_storage_offset,
+                            bit_offset:          cur_bit_offset,
+                            bit_width:           bit_w,
+                            is_signed:           f_type.find("unsigned") < 0,
+                        };
+                        cur_bit_offset = cur_bit_offset + bit_w;
+
+                        var fld = CFieldDecl {
+                            name:         f_name,
+                            type_name:    f_type,
+                            byte_offset:  bit_storage_offset,
+                            byte_size:    storage_sz,
+                            bitfield:     bf_spec,
+                            is_bitfield:  true,
+                        };
+                        rec_fields.push(fld);
+                    } else if pos < n && src.byte_at(pos) == 91 { // '[' array
+                        in_bitfield_unit = false;
+                        pos = c_skip_whitespace_and_comments(src, pos + 1);
+                        if pos < n && src.byte_at(pos) == 93 { // ']' flexible array tail!
+                            has_flex = true;
+                            pos = pos + 1;
+                            var fld = c_field_decl_new(f_name, f_type + "[]", current_offset, 0);
+                            rec_fields.push(fld);
+                        } else {
+                            // Fixed array: [N]
+                            var arr_n_end = pos;
+                            while arr_n_end < n && src.byte_at(arr_n_end) != 93 {
+                                arr_n_end = arr_n_end + 1;
+                            }
+                            let count_str = src.slice(pos, arr_n_end);
+                            pos = if arr_n_end < n { arr_n_end + 1 } else { arr_n_end };
+                            var count_val: usize = 1;
+                            var ci = 0;
+                            while ci < count_str.len() {
+                                if c_is_digit(count_str.byte_at(ci)) {
+                                    count_val = (count_val * 10) + (count_str.byte_at(ci) - 48) as usize;
+                                }
+                                ci = ci + 1;
+                            }
+                            let elem_sz = c_type_size(f_type);
+                            let elem_al = c_type_align(f_type);
+                            let eff_al = if (current_pack_align as usize) < elem_al { current_pack_align as usize } else { elem_al };
+                            if eff_al > 0 {
+                                let rem = current_offset % eff_al;
+                                if rem > 0 { current_offset = current_offset + (eff_al - rem); }
+                            }
+                            let total_sz = elem_sz * count_val;
+                            var fld = c_field_decl_new(f_name, f_type + "[" + count_str + "]", current_offset, total_sz);
+                            rec_fields.push(fld);
+                            current_offset = current_offset + total_sz;
+                        }
+                    } else {
+                        in_bitfield_unit = false;
+                        let elem_sz = c_type_size(f_type);
+                        let elem_al = c_type_align(f_type);
+                        let eff_al = if (current_pack_align as usize) < elem_al { current_pack_align as usize } else { elem_al };
+                        if eff_al > max_align { max_align = eff_al; }
+                        if eff_al > 0 && !is_union {
+                            let rem = current_offset % eff_al;
+                            if rem > 0 { current_offset = current_offset + (eff_al - rem); }
+                        }
+                        var fld_offset: usize = current_offset;
+                        if is_union { fld_offset = 0; }
+                        var fld = c_field_decl_new(f_name, f_type, fld_offset, elem_sz);
+                        rec_fields.push(fld);
+                        if !is_union {
+                            current_offset = current_offset + elem_sz;
+                        } else if elem_sz > current_offset {
+                            current_offset = elem_sz;
+                        }
+                    }
+
+                    // Semicolon
+                    pos = c_skip_whitespace_and_comments(src, pos);
+                    if pos < n && src.byte_at(pos) == 59 { // ';'
+                        pos = pos + 1;
+                    }
+
+                    if pos <= field_loop_start {
+                        pos = field_loop_start + 1;
+                    }
+                }
+
+                // Match closing '}'
+                if pos < n && src.byte_at(pos) == 125 {
+                    pos = pos + 1;
+                }
+
+                // Check alias if typedef or struct variable name
+                pos = c_skip_whitespace_and_comments(src, pos);
+                let alias_name = c_read_word(src, pos);
+                if alias_name.len() > 0 {
+                    pos = c_skip_whitespace_and_comments(src, pos + alias_name.len());
+                }
+                if pos < n && src.byte_at(pos) == 59 { // ';'
+                    pos = pos + 1;
+                }
+
+                var final_name = tag_name;
+                if alias_name.len() > 0 { final_name = alias_name; }
+                var rec = CRecordDecl {
+                    name:                    final_name,
+                    is_union:                is_union,
+                    is_opaque:               false,
+                    pack_align:              current_pack_align,
+                    has_flexible_array_tail: has_flex,
+                    fields:                  rec_fields,
+                };
+                tu.records.push(rec);
+                continue;
+            }
+        }
+
+        // Enum
+        if next_word == "enum" {
+            pos = c_skip_whitespace_and_comments(src, pos + 4);
+            let enum_name = c_read_word(src, pos);
+            if enum_name.len() > 0 {
+                pos = c_skip_whitespace_and_comments(src, pos + enum_name.len());
+            }
+
+            if pos < n && src.byte_at(pos) == 123 { // '{'
+                pos = pos + 1;
+                var items: List<CEnumItem> = [];
+                var next_val: i64 = 0;
+
+                while pos < n && src.byte_at(pos) != 125 {
+                    pos = c_skip_whitespace_and_comments(src, pos);
+                    if pos >= n || src.byte_at(pos) == 125 { break; }
+                    let item_name = c_read_word(src, pos);
+                    pos = c_skip_whitespace_and_comments(src, pos + item_name.len());
+
+                    if pos < n && src.byte_at(pos) == 61 { // '='
+                        pos = c_skip_whitespace_and_comments(src, pos + 1);
+                        var val_end = pos;
+                        while val_end < n && src.byte_at(val_end) != 44 && src.byte_at(val_end) != 125 {
+                            val_end = val_end + 1;
+                        }
+                        let val_str = src.slice(pos, val_end);
+                        // Parse int
+                        var explicit_val: i64 = 0;
+                        var vi = 0;
+                        while vi < val_str.len() {
+                            let vb = val_str.byte_at(vi);
+                            if c_is_digit(vb) {
+                                explicit_val = (explicit_val * 10) + (vb - 48);
+                            }
+                            vi = vi + 1;
+                        }
+                        next_val = explicit_val;
+                        pos = val_end;
+                    }
+
+                    if item_name.len() > 0 {
+                        items.push(CEnumItem { name: item_name, value: next_val });
+                        next_val = next_val + 1;
+                    }
+
+                    if pos < n && src.byte_at(pos) == 44 { // ','
+                        pos = pos + 1;
+                    }
+                }
+
+                if pos < n && src.byte_at(pos) == 125 { pos = pos + 1; }
+                pos = c_skip_whitespace_and_comments(src, pos);
+                let alias = c_read_word(src, pos);
+                if alias.len() > 0 { pos = c_skip_whitespace_and_comments(src, pos + alias.len()); }
+                if pos < n && src.byte_at(pos) == 59 { pos = pos + 1; }
+
+                var final_enum_name = enum_name;
+                if alias.len() > 0 { final_enum_name = alias; }
+                var ed = c_enum_decl_new(final_enum_name, items);
+                tu.enums.push(ed);
+                continue;
+            }
+        }
+
+        // Function Declaration or Inlined Function
+        var is_inline = false;
+        var is_static = false;
+        var calling_conv = "cdecl";
+
+        var ret_type = c_read_word(src, pos);
+        while ret_type == "static" || ret_type == "inline" || ret_type == "__inline" || ret_type == "__inline__" || ret_type == "extern" {
+            if ret_type == "static" { is_static = true; }
+            if ret_type == "inline" || ret_type == "__inline" || ret_type == "__inline__" { is_inline = true; }
+            pos = c_skip_whitespace_and_comments(src, pos + ret_type.len());
+            ret_type = c_read_word(src, pos);
+        }
+
+        if ret_type.len() == 0 {
+            pos = pos + 1;
+            continue;
+        }
+
+        pos = c_skip_whitespace_and_comments(src, pos + ret_type.len());
+        if ret_type == "unsigned" || ret_type == "signed" || ret_type == "const" || ret_type == "struct" {
+            let next_part = c_read_word(src, pos);
+            if next_part.len() > 0 {
+                ret_type = ret_type + " " + next_part;
+                pos = c_skip_whitespace_and_comments(src, pos + next_part.len());
+            }
+        }
+
+        // Pointer in return type
+        while pos < n && src.byte_at(pos) == 42 {
+            ret_type = ret_type + "*";
+            pos = c_skip_whitespace_and_comments(src, pos + 1);
+        }
+
+        // Calling conventions: __stdcall, __cdecl, __fastcall
+        let cc_cand = c_read_word(src, pos);
+        if cc_cand == "__stdcall" || cc_cand == "__cdecl" || cc_cand == "__fastcall" {
+            calling_conv = cc_cand;
+            pos = c_skip_whitespace_and_comments(src, pos + cc_cand.len());
+        }
+
+        let fn_name = c_read_word(src, pos);
+        if fn_name.len() == 0 {
+            pos = pos + 1;
+            continue;
+        }
+
+        pos = c_skip_whitespace_and_comments(src, pos + fn_name.len());
+        if pos < n && src.byte_at(pos) == 40 { // '('
+            pos = pos + 1;
+            var params: List<CParamDecl> = [];
+            var is_variadic = false;
+
+            while pos < n && src.byte_at(pos) != 41 { // ')'
+                pos = c_skip_whitespace_and_comments(src, pos);
+                if pos >= n || src.byte_at(pos) == 41 { break; }
+
+                // Check variadic '...'
+                if pos + 2 < n && src.byte_at(pos) == 46 && src.byte_at(pos + 1) == 46 && src.byte_at(pos + 2) == 46 {
+                    is_variadic = true;
+                    pos = pos + 3;
+                    break;
+                }
+
+                var p_ty = c_read_word(src, pos);
+                pos = c_skip_whitespace_and_comments(src, pos + p_ty.len());
+                if p_ty == "const" || p_ty == "unsigned" || p_ty == "struct" {
+                    let next_p = c_read_word(src, pos);
+                    if next_p.len() > 0 {
+                        p_ty = p_ty + " " + next_p;
+                        pos = c_skip_whitespace_and_comments(src, pos + next_p.len());
+                    }
+                }
+                while pos < n && src.byte_at(pos) == 42 {
+                    p_ty = p_ty + "*";
+                    pos = c_skip_whitespace_and_comments(src, pos + 1);
+                }
+
+                let p_name = c_read_word(src, pos);
+                if p_name.len() > 0 {
+                    pos = c_skip_whitespace_and_comments(src, pos + p_name.len());
+                }
+
+                if p_ty != "void" {
+                    params.push(CParamDecl { name: p_name, type_name: p_ty });
+                }
+
+                if pos < n && src.byte_at(pos) == 44 { // ','
+                    pos = pos + 1;
+                }
+            }
+
+            if pos < n && src.byte_at(pos) == 41 { pos = pos + 1; }
+            pos = c_skip_whitespace_and_comments(src, pos);
+
+            // Inline body or semicolon
+            if pos < n && src.byte_at(pos) == 123 { // '{' inline body
+                var depth = 1;
+                let b_start = pos;
+                pos = pos + 1;
+                while pos < n && depth > 0 {
+                    let cb = src.byte_at(pos);
+                    if cb == 123 { depth = depth + 1; }
+                    else if cb == 125 { depth = depth - 1; }
+                    pos = pos + 1;
+                }
+                let body_str = src.slice(b_start, pos);
+                tu.inline_fn_bodies.push(body_str);
+
+                var fn_decl = c_fn_decl_new(fn_name, ret_type, calling_conv, is_variadic, true, params);
+                tu.functions.push(fn_decl);
+                continue;
+            } else if pos < n && src.byte_at(pos) == 59 { // ';'
+                pos = pos + 1;
+                var fn_decl = c_fn_decl_new(fn_name, ret_type, calling_conv, is_variadic, is_inline, params);
+                tu.functions.push(fn_decl);
+                continue;
+            }
+        }
+
+        // Advance to avoid infinite loop
+        pos = pos + 1;
+    }
+
+    return tu;
+}

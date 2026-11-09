@@ -6,13 +6,14 @@ This guide specifies how to select and implement types in Pilot based on project
 
 ## 1. Core Typing Philosophy
 
-Good typing obeys five foundational laws:
+Good typing obeys six foundational laws:
 
 1. **Unambiguous Determinism:** If values and lifecycle are known at design time, the definition and type must be immediately obvious. Never leave semantics up to interpretation.
 2. **Appropriate Constraining:** Constrain as tightly as the domain requires, but no tighter. Broad, open-ended types (`any`, bare `str`, bare `i64`) should only represent genuinely open-ended varieties of values.
 3. **Generic Precision:** Never write unconstrained generics (`<T>`) when capabilities are required. Constrain with interfaces (`<T : IComparable<T>>`).
 4. **Hardware Lattice Alignment:** Every type must clearly classify into the 2-bit hardware lattice (`0b00` Value, `0b01` Borrowed View, `0b10` Owned Object, `0b11` Scoped Guard).
 5. **Single Source of Truth & Targeted Importing (Import-First Law):** Every type must have exactly one canonical definition in its owning module or package. Types must never be duplicated, re-declared, or shadowed across different files or subsystems. When importing, only import what you need instead of importing an entire library or broad module, unless you genuinely require the entire library or are importing several symbols from that library.
+6. **Intrinsic Encapsulation (Never Use Raw `__engine` Directly):** Raw `__engine(...)` calls are strictly forbidden in application, domain, standard library, and self-host code. Always use the high-level standard and core types that incorporate and encapsulate engine intrinsics (such as `Map<K, V>`, `List<T>`, `SliceBuffer<T>`, `fs.*`, `time.*`). Direct `__engine` calls bypass type safety, leak unmanaged resources, and violate the 2-bit hardware type lattice.
 
 ```mermaid
 flowchart TD
@@ -58,7 +59,7 @@ flowchart TD
 
 ---
 
-## 3. The 11 Invariant Rules of Good Typing
+## 3. The 12 Invariant Rules of Good Typing
 
 ### Rule 1: Closed, Predefined Discrete Sets ($\le 19$) $\rightarrow$ `enum`
 When the universe of discourse consists of a known, finite list of mutually exclusive states, use a strongly-typed `enum` backed by the smallest adequate scalar representation (`u8` or `u16`).
@@ -275,6 +276,32 @@ pub struct SourceSpan : IValue { // ANTI-PATTERN: Duplicate definition
 }
 ```
 
+### Rule 12: Intrinsic Encapsulation — Never Use Raw `__engine` Directly
+`__engine("...")` is an irreducible bootstrap engine intrinsic and low-level hardware bridge. In application, domain, standard library, and self-host code, developers and AI agents must **never** invoke `__engine(...)` directly to instantiate collections or manage data structures (e.g. `__engine("map_new")`, `__engine("map_set")`, `__engine("map_get")`).
+
+Instead, **always use the strongly-typed types and modules that incorporate and encapsulate those engine calls**:
+- **Dictionaries & Key-Value Lookup:** Use `Map<K, V>` (or `MapBuffer<K, V>`) instead of raw `__engine("map_*")` calls.
+- **Dynamic Collections & Arrays:** Use `List<T>` or `SliceBuffer<T>` instead of raw engine memory buffers.
+- **Filesystem & I/O Operations:** Use `std.fs` / `fs.*` instead of raw `__engine("fs_*")`.
+- **System Clocks & Timers:** Use `std.time` / `time.*` instead of raw `__engine("time_*")`.
+
+#### Why Direct `__engine` Invocations are Prohibited:
+1. **Lattice & RAII Bypass:** Direct `__engine("map_new")` produces an untyped pointer/integer handle (`i64`) without an associated `~self()` destructor, bypassing Perceus automatic reference counting and causing memory leaks.
+2. **Type Safety & Static Verification:** Raw engine calls are stringly-typed and accept `any`, disabling compile-time type-checking of keys and values.
+3. **Ergonomics & Idiomatic Pilot:** `Map<K, V>` provides clean indexer syntax `map[key]`, `.get()`, `.set()`, and `.has()` that integrate cleanly with Pilot's 4-tier vertical precedence and operator model.
+
+```pilot
+// GOOD: Strongly-typed Map encapsulating the underlying engine calls
+var my_map = Map<str, i64> {};
+my_map["count"] = 42;
+let val = my_map["count"];
+
+// BAD: Raw __engine calls leaking untyped handles and bypassing type safety
+let bad_map = __engine("map_new"); // ANTI-PATTERN
+__engine("map_set", bad_map, "count", 42); // ANTI-PATTERN
+let bad_val = __engine("map_get", bad_map, "count"); // ANTI-PATTERN
+```
+
 ---
 
 ## 4. Anti-Patterns to Avoid
@@ -289,6 +316,7 @@ pub struct SourceSpan : IValue { // ANTI-PATTERN: Duplicate definition
 | **Boolean Blindness** | Multiple boolean flags (`is_admin: bool, is_active: bool, is_verified: bool`). | `bitflags UserFlags : u32` or distinct state types. |
 | **Leaky Interpretation** | Leaving data validatable only at execution time deep in downstream callers. | Parse and validate at construction boundary (`res<T, E>`). |
 | **Sentinel Pointers** | Returning `0` / null / `-1` to represent "not found" or "no error". | `opt<T>` (`T?`) or `res<T, E>` (`T ! E`). |
+| **Raw `__engine` Intrinsic Calls** | Invoking `__engine("map_new")`, `__engine("map_set")`, etc. directly in domain or selfhost code instead of using high-level types. | Use strongly-typed encapsulating types like `Map<K, V>`, `List<T>`, or `fs.*`. |
 
 ---
 
@@ -299,6 +327,8 @@ pub struct SourceSpan : IValue { // ANTI-PATTERN: Duplicate definition
   - Always import the canonical type from its owning package (`use ...;`).
   - **Import only what you need:** Do not import the entire library unless you genuinely need the entire library or are importing several items from it.
   - If creating a newly shared concept, place it in a canonical module accessible to all consumers.
+- [ ] **Are any raw `__engine(...)` calls being made directly?**
+  - **Never use `__engine` directly**; always use the strongly-typed types that incorporate and encapsulate engine intrinsics (like `Map<K, V>`, `List<T>`, `fs.*`).
 - [ ] **Are all possible values known at compile time?**
   - If $\le 19$: Use `enum` with `::Variant`.
   - If orthogonal combinations: Use `bitflags`.

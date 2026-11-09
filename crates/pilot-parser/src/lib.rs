@@ -934,7 +934,7 @@ impl<'a> Parser<'a> {
             TokenKind::LParen => self.parse_paren_or_lambda(), TokenKind::LBracket => self.parse_bracket_lit(),
             TokenKind::LBrace => if self.looks_like_brace_map() { self.parse_brace_map() } else { self.parse_block() },
             _ if self.is_word() => { let nx = self.next_non_nl(self.cur() + 1);
-                if self.tables.modifiers.get(self.text()) == Some(&ModAct::Mut) && nx < self.tape.len() && matches!(self.tape.kind(nx), TokenKind::KwRef | TokenKind::Amper) {
+                if self.tables.modifiers.get(self.text()) == Some(&ModAct::Mut) && nx < self.tape.len() && (is_word_tok(self.tape.kind(nx)) || matches!(self.tape.kind(nx), TokenKind::KwRef | TokenKind::Amper)) {
                     self.advance(); return self.parse_prefix(); }
                 if let Some((rk, pl)) = self.receptor() { match rk {
                         1 => { self.advance(); return self.arena.alloc_node(NodeKind::BoolLit, 0, sp, pl as u32, 0); }
