@@ -20,14 +20,14 @@ pub pure fn ed_unhex_nib(b: i64) -> i64 {
 
 pub pure fn ed_hex_byte_at(hex_s: str, byte_idx: i64) -> i64 {
     let p = byte_idx * 2;
-    let hi = ed_unhex_nib(__engine("str_byte_at", hex_s, p));
-    let lo = ed_unhex_nib(__engine("str_byte_at", hex_s, p + 1));
+    let hi = ed_unhex_nib(hex_s.byte_at(p));
+    let lo = ed_unhex_nib(hex_s.byte_at(p + 1));
     return (hi << 4) | lo;
 }
 
 pub pure fn ed_hex_nib_str(v: i64) -> str {
     let idx = v & 15;
-    return __engine("str_slice", "0123456789abcdef", idx, idx + 1);
+    return "0123456789abcdef".slice(idx, idx + 1);
 }
 
 pub pure fn ed_byte_to_hex(b: i64) -> str {
@@ -576,7 +576,7 @@ pub fn ed_ge_to_hex(st: i64, pt: i64, scratch: i64) -> str {
 
 // Decodes a 32-byte point from `hex_s` into `pt`. Returns 1 if valid, 0 if invalid.
 pub fn ed_ge_from_hex(st: i64, pt: i64, hex_s: str, scratch: i64) -> i64 {
-    if __engine("str_len", hex_s) != 64 {
+    if hex_s.len() != 64 {
         return 0;
     }
     let b31 = ed_hex_byte_at(hex_s, 31);
@@ -714,7 +714,7 @@ pub pure fn ed_order_l_byte(idx: i64) -> i64 {
 
 // Checks whether the 32-byte little-endian scalar at `s_hex` is strictly < L
 pub pure fn ed_scalar_is_canonical_hex(s_hex: str) -> bool {
-    if __engine("str_len", s_hex) != 64 {
+    if s_hex.len() != 64 {
         return false;
     }
     var i = 31;
@@ -917,7 +917,7 @@ pub fn ed25519_sign_hex(seed32_hex: str, msg_hex: str) -> str {
     let pk_hex = ed_ge_to_hex(st, 2100, 2200);
 
     // 3. `r = SHA512(prefix || msg) mod L`
-    let mlen = __engine("str_len", msg_hex) / 2;
+    let mlen = msg_hex.len() / 2;
     let r_in = __engine("map_new");
     i = 0;
     while i < 32 {
@@ -974,11 +974,11 @@ pub fn ed25519_sign_hex(seed32_hex: str, msg_hex: str) -> str {
 }
 
 pub fn ed25519_verify_hex(pk32_hex: str, msg_hex: str, sig64_hex: str) -> bool {
-    if __engine("str_len", pk32_hex) != 64 || __engine("str_len", sig64_hex) != 128 {
+    if pk32_hex.len() != 64 || sig64_hex.len() != 128 {
         return false;
     }
-    let r_hex = __engine("str_slice", sig64_hex, 0, 64);
-    let s_hex = __engine("str_slice", sig64_hex, 64, 128);
+    let r_hex = sig64_hex.slice(0, 64);
+    let s_hex = sig64_hex.slice(64, 128);
 
     // RFC 8032 strict canonical S < L check (rejects S + L malleability forgeries!)
     if !ed_scalar_is_canonical_hex(s_hex) {
@@ -999,7 +999,7 @@ pub fn ed25519_verify_hex(pk32_hex: str, msg_hex: str, sig64_hex: str) -> bool {
     }
 
     // Compute k = SHA512(R || A || msg) mod L
-    let mlen = __engine("str_len", msg_hex) / 2;
+    let mlen = msg_hex.len() / 2;
     let k_in = __engine("map_new");
     var i = 0;
     while i < 32 {

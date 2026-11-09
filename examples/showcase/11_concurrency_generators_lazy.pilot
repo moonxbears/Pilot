@@ -183,7 +183,7 @@ println("Pulled first 3 items: " + s1 + ", " + s2 + ", " + s3);
 var rem_out = "";
 while __engine("map_get", stream, "count") < __engine("map_get", stream, "limit") {
     let item = fib_generator_next(stream);
-    if __engine("str_len", rem_out) > 0 { rem_out = rem_out + ", "; }
+    if rem_out.len() > 0 { rem_out = rem_out + ", "; }
     rem_out = rem_out + item;
 }
 println("Streamed remaining items: " + rem_out);

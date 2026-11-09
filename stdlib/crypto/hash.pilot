@@ -48,7 +48,7 @@ pub pure fn sha256_lsigma1(x: i64) -> i64 {
 
 pub pure fn hash_hex_nibble(v: i64) -> str {
     let idx = v & 15;
-    return __engine("str_slice", "0123456789abcdef", idx, idx + 1);
+    return "0123456789abcdef".slice(idx, idx + 1);
 }
 
 pub pure fn hash_hex_byte(b: i64) -> str {
@@ -255,11 +255,11 @@ pub fn sha256_hash_byte_map(bmap: i64, blen: i64) -> i64 {
 }
 
 pub fn sha256_hex(msg: str) -> str {
-    let n = __engine("str_len", msg);
+    let n = msg.len();
     let bmap = __engine("map_new");
     var i = 0;
     while i < n {
-        __engine("map_set", bmap, i, __engine("str_byte_at", msg, i));
+        __engine("map_set", bmap, i, msg.byte_at(i));
         i = i + 1;
     }
     let res = sha256_hash_byte_map(bmap, n);
@@ -267,11 +267,11 @@ pub fn sha256_hex(msg: str) -> str {
 }
 
 pub fn sha256_digest(msg: str) -> Digest256 {
-    let n = __engine("str_len", msg);
+    let n = msg.len();
     let bmap = __engine("map_new");
     var i = 0;
     while i < n {
-        __engine("map_set", bmap, i, __engine("str_byte_at", msg, i));
+        __engine("map_set", bmap, i, msg.byte_at(i));
         i = i + 1;
     }
     let res = sha256_hash_byte_map(bmap, n);
@@ -289,13 +289,13 @@ pub fn sha256_digest(msg: str) -> Digest256 {
 // ============================================================================
 
 pub fn hmac_sha256_hex(key: str, msg: str) -> str {
-    let klen = __engine("str_len", key);
+    let klen = key.len();
     let kblock = __engine("map_new");
     if klen > 64 {
         let raw_k = __engine("map_new");
         var ki = 0;
         while ki < klen {
-            __engine("map_set", raw_k, ki, __engine("str_byte_at", key, ki));
+            __engine("map_set", raw_k, ki, key.byte_at(ki));
             ki = ki + 1;
         }
         let kh = sha256_hash_byte_map(raw_k, klen);
@@ -311,7 +311,7 @@ pub fn hmac_sha256_hex(key: str, msg: str) -> str {
     } else {
         var j = 0;
         while j < klen {
-            __engine("map_set", kblock, j, __engine("str_byte_at", key, j));
+            __engine("map_set", kblock, j, key.byte_at(j));
             j = j + 1;
         }
         while j < 64 {
@@ -320,7 +320,7 @@ pub fn hmac_sha256_hex(key: str, msg: str) -> str {
         }
     }
 
-    let mlen = __engine("str_len", msg);
+    let mlen = msg.len();
     let inner_in = __engine("map_new");
     var i = 0;
     while i < 64 {
@@ -330,7 +330,7 @@ pub fn hmac_sha256_hex(key: str, msg: str) -> str {
     }
     var mi = 0;
     while mi < mlen {
-        __engine("map_set", inner_in, 64 + mi, __engine("str_byte_at", msg, mi));
+        __engine("map_set", inner_in, 64 + mi, msg.byte_at(mi));
         mi = mi + 1;
     }
     let inner_hash = sha256_hash_byte_map(inner_in, 64 + mlen);
@@ -353,7 +353,7 @@ pub fn hmac_sha256_hex(key: str, msg: str) -> str {
 
 pub fn hmac_sha256_tag(key: str, msg: str) -> i64 {
     let hex_s = hmac_sha256_hex(key, msg);
-    return __engine("str_byte_at", hex_s, 0);
+    return hex_s.byte_at(0);
 }
 
 // ============================================================================
@@ -768,11 +768,11 @@ pub fn sha512_hash_byte_map(bmap: i64, blen: i64) -> i64 {
 }
 
 pub fn sha512_hex(msg: str) -> str {
-    let n = __engine("str_len", msg);
+    let n = msg.len();
     let bmap = __engine("map_new");
     var i = 0;
     while i < n {
-        __engine("map_set", bmap, i, __engine("str_byte_at", msg, i));
+        __engine("map_set", bmap, i, msg.byte_at(i));
         i = i + 1;
     }
     let res = sha512_hash_byte_map(bmap, n);
@@ -903,7 +903,7 @@ pub fn blake3_compress_in_place(st: i64, counter: i64, block_len: i64, flags: i6
 
 pub pure fn blake3_msg_byte(msg: str, mlen: i64, idx: i64) -> i64 {
     if idx < mlen {
-        return __engine("str_byte_at", msg, idx) & 255;
+        return msg.byte_at(idx) & 255;
     }
     return 0;
 }
@@ -925,7 +925,7 @@ pub fn blake3_load_msg_block(st: i64, msg: str, mlen: i64, blk_offset: i64, blk_
 }
 
 pub fn blake3_hex(msg: str) -> str {
-    let mlen = __engine("str_len", msg);
+    let mlen = msg.len();
     let st = __engine("map_new");
 
     if mlen <= 1024 {
@@ -1076,10 +1076,10 @@ pub fn blake3_hex(msg: str) -> str {
 pub fn blake3_digest(msg: str) -> Digest256 {
     let hex_s = blake3_hex(msg);
     return Digest256 {
-        h0: __engine("str_byte_at", hex_s, 0),
-        h1: __engine("str_byte_at", hex_s, 1),
-        h2: __engine("str_byte_at", hex_s, 2),
-        h3: __engine("str_byte_at", hex_s, 3),
+        h0: hex_s.byte_at(0),
+        h1: hex_s.byte_at(1),
+        h2: hex_s.byte_at(2),
+        h3: hex_s.byte_at(3),
         hex_prefix: hex_s,
     };
 }

@@ -56,7 +56,7 @@ pub fn json_skip_ws(src: str, st: i64) -> i64 {
     let n = __engine("map_get", st, "len") + 0;
     var p = __engine("map_get", st, "pos") + 0;
     while p < n {
-        let b = __engine("str_byte_at", src, p);
+        let b = src.byte_at(p);
         if b == 32 || b == 9 || b == 10 || b == 13 {
             p = p + 1;
         } else {
@@ -70,18 +70,18 @@ pub fn json_skip_ws(src: str, st: i64) -> i64 {
 pub fn json_parse_str_token(src: str, st: i64) -> str {
     let n = __engine("map_get", st, "len") + 0;
     var p = json_skip_ws(src, st);
-    if p < n && __engine("str_byte_at", src, p) == 34 {
+    if p < n && src.byte_at(p) == 34 {
         p = p + 1;
     }
     var out = "";
     while p < n {
-        let b = __engine("str_byte_at", src, p);
+        let b = src.byte_at(p);
         if b == 34 {
             p = p + 1;
             break;
         }
         if b == 92 && (p + 1) < n {
-            let nb = __engine("str_byte_at", src, p + 1);
+            let nb = src.byte_at(p + 1);
             if nb == 34 {
                 out = out + "\"";
             } else if nb == 92 {
@@ -93,11 +93,11 @@ pub fn json_parse_str_token(src: str, st: i64) -> str {
             } else if nb == 116 {
                 out = out + "\t";
             } else {
-                out = out + __engine("str_slice", src, p + 1, p + 2);
+                out = out + src.slice(p + 1, p + 2);
             }
             p = p + 2;
         } else {
-            out = out + __engine("str_slice", src, p, p + 1);
+            out = out + src.slice(p, p + 1);
             p = p + 1;
         }
     }
@@ -111,7 +111,7 @@ pub fn json_parse_node(src: str, st: i64, doc: i64, path: str) -> str {
     if p >= n {
         return "null";
     }
-    let b = __engine("str_byte_at", src, p);
+    let b = src.byte_at(p);
 
     // Object `{ ... }`
     if b == 123 {
@@ -123,20 +123,20 @@ pub fn json_parse_node(src: str, st: i64, doc: i64, path: str) -> str {
             p = json_skip_ws(src, st);
             if p >= n {
                 loop_obj = 0;
-            } else if __engine("str_byte_at", src, p) == 125 {
+            } else if src.byte_at(p) == 125 {
                 __engine("map_set", st, "pos", p + 1);
                 loop_obj = 0;
             } else {
-                if __engine("str_byte_at", src, p) == 44 {
+                if src.byte_at(p) == 44 {
                     __engine("map_set", st, "pos", p + 1);
                     p = json_skip_ws(src, st);
                 }
                 let k = json_parse_str_token(src, st);
                 p = json_skip_ws(src, st);
-                if p < n && __engine("str_byte_at", src, p) == 58 {
+                if p < n && src.byte_at(p) == 58 {
                     __engine("map_set", st, "pos", p + 1);
                 }
-                let child_path = if __engine("str_len", path) > 0 { path + "." + k } else { k };
+                let child_path = if path.len() > 0 { path + "." + k } else { k };
                 let child_json = json_parse_node(src, st, doc, child_path);
                 if count > 0 {
                     canon = canon + ",";
@@ -160,15 +160,15 @@ pub fn json_parse_node(src: str, st: i64, doc: i64, path: str) -> str {
             p = json_skip_ws(src, st);
             if p >= n {
                 loop_arr = 0;
-            } else if __engine("str_byte_at", src, p) == 93 {
+            } else if src.byte_at(p) == 93 {
                 __engine("map_set", st, "pos", p + 1);
                 loop_arr = 0;
             } else {
-                if __engine("str_byte_at", src, p) == 44 {
+                if src.byte_at(p) == 44 {
                     __engine("map_set", st, "pos", p + 1);
                     p = json_skip_ws(src, st);
                 }
-                let elem_path = if __engine("str_len", path) > 0 { path + "." + count } else { "" + count };
+                let elem_path = if path.len() > 0 { path + "." + count } else { "" + count };
                 let elem_json = json_parse_node(src, st, doc, elem_path);
                 if count > 0 {
                     canon = canon + ",";
@@ -196,7 +196,7 @@ pub fn json_parse_node(src: str, st: i64, doc: i64, path: str) -> str {
     if b == 116 || b == 102 || b == 110 {
         let start = p;
         while p < n {
-            let ch = __engine("str_byte_at", src, p);
+            let ch = src.byte_at(p);
             if ch >= 97 && ch <= 122 {
                 p = p + 1;
             } else {
@@ -204,7 +204,7 @@ pub fn json_parse_node(src: str, st: i64, doc: i64, path: str) -> str {
             }
         }
         __engine("map_set", st, "pos", p);
-        let kw = __engine("str_slice", src, start, p);
+        let kw = src.slice(start, p);
         if kw == "true" {
             __engine("map_set", doc, "bool_" + path, 1);
             __engine("map_set", doc, "str_" + path, "true");
@@ -229,7 +229,7 @@ pub fn json_parse_node(src: str, st: i64, doc: i64, path: str) -> str {
     }
     var val = 0;
     while p < n {
-        let d = __engine("str_byte_at", src, p);
+        let d = src.byte_at(p);
         if d >= 48 && d <= 57 {
             val = (val * 10) + (d - 48);
             p = p + 1;
@@ -250,7 +250,7 @@ pub fn json_parse(src: str) -> i64 {
     let doc = __engine("map_new");
     let st = __engine("map_new");
     __engine("map_set", st, "pos", 0);
-    __engine("map_set", st, "len", __engine("str_len", src));
+    __engine("map_set", st, "len", src.len());
     let root_canon = json_parse_node(src, st, doc, "");
     __engine("map_set", doc, "root_json", root_canon);
     return doc;

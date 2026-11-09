@@ -933,4 +933,59 @@ pub fn reflect_current_environment() -> Environment {
     return reflect_hydrate_environment();
 }
 
+// =========================================================================
+// 8. TYPED LAYOUT & GRAMMAR REGISTRY ABSTRACTIONS (Replaces __engine)
+// =========================================================================
+
+[Layout(c_abi)]
+pub struct FieldLayout : IValue {
+    pub name:   str;
+    pub offset: usize;
+    pub size:   usize;
+}
+
+[Layout(c_abi)]
+pub struct TypeLayout : IValue {
+    pub size_in_bytes: usize;
+    pub alignment:     usize;
+    pub lattice_bits:  u8;
+
+    pub static pure fn for_type_id(type_sym: i64) -> TypeLayout {
+        let sz = __engine("layout_metrics", type_sym) as usize;
+        return TypeLayout {
+            size_in_bytes: sz,
+            alignment: 8,
+            lattice_bits: 0,
+        };
+    }
+
+    pub pure fn field_offset(type_sym: i64, field_idx: i64) -> usize {
+        return __engine("layout_field_offset", type_sym, field_idx) as usize;
+    }
+}
+
+pub struct PrattOperator : IValue {
+    pub op_str:        str;
+    pub binding_power: i32;
+    pub is_right_assoc: bool;
+}
+
+pub struct GrammarRegistry {
+    pub static fn bind_receptor(name: str, receptor_id: i64, sub_id: i64) -> i64 {
+        return __engine("bind_receptor", name, receptor_id, sub_id);
+    }
+
+    pub static fn register_modifier(mod_name: str, target: str) -> i64 {
+        return __engine("register_modifier", mod_name, target);
+    }
+
+    pub static fn register_pratt_op(op_str: str, bp: i64) -> i64 {
+        return __engine("register_pratt_op", op_str, bp);
+    }
+
+    pub static fn register_module_keyword(kw: str, category: str) -> i64 {
+        return __engine("register_module_kw", kw, category);
+    }
+}
+
 

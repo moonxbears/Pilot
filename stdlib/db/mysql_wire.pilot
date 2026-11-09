@@ -21,14 +21,14 @@ pub fn encode_mysql_query_packet(sequence_id: i64, sql: str) -> MysqlWirePacket 
     return MysqlWirePacket {
         sequence_id: sequence_id,
         command_byte: mysql_com_query_byte(),
-        payload_len: 1 + __engine("str_len", q_str),
+        payload_len: 1 + q_str.len(),
         query_sql: q_str,
     };
 }
 
 pub pure fn my_hex_nib(v: i64) -> str {
     let idx = v & 15;
-    return __engine("str_slice", "0123456789abcdef", idx, idx + 1);
+    return "0123456789abcdef".slice(idx, idx + 1);
 }
 
 pub pure fn my_hex_u8(b: i64) -> str {
@@ -37,11 +37,11 @@ pub pure fn my_hex_u8(b: i64) -> str {
 }
 
 pub pure fn my_str_to_hex(s: str) -> str {
-    let n = __engine("str_len", s);
+    let n = s.len();
     var out = "";
     var i = 0;
     while i < n {
-        out = out + my_hex_u8(__engine("str_byte_at", s, i));
+        out = out + my_hex_u8(s.byte_at(i));
         i = i + 1;
     }
     return out;
@@ -56,8 +56,8 @@ pub pure fn my_unhex_nib(b: i64) -> i64 {
 
 pub pure fn my_read_u8(hex_s: str, byte_idx: i64) -> i64 {
     let p = byte_idx * 2;
-    let hi = my_unhex_nib(__engine("str_byte_at", hex_s, p));
-    let lo = my_unhex_nib(__engine("str_byte_at", hex_s, p + 1));
+    let hi = my_unhex_nib(hex_s.byte_at(p));
+    let lo = my_unhex_nib(hex_s.byte_at(p + 1));
     return (hi << 4) | lo;
 }
 
@@ -65,7 +65,7 @@ pub pure fn my_ascii_char(b: i64) -> str {
     let table = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
     if b >= 32 && b <= 126 {
         let idx = b - 32;
-        return __engine("str_slice", table, idx, idx + 1);
+        return table.slice(idx, idx + 1);
     }
     if b == 10 { return "\n"; }
     if b == 13 { return "\r"; }
@@ -75,7 +75,7 @@ pub pure fn my_ascii_char(b: i64) -> str {
 
 pub fn mysql_encode_com_query_hex(seq_id: i64, sql: str) -> str {
     let q_str = sql;
-    let payload_len = 1 + __engine("str_len", q_str);
+    let payload_len = 1 + q_str.len();
     let b0 = payload_len & 255;
     let b1 = (payload_len >> 8) & 255;
     let b2 = (payload_len >> 16) & 255;
