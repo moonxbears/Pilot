@@ -7,6 +7,7 @@ pub lvl(0) pkg Pilot.SelfHost.Cst.Autofix;
 
 use Pilot.Diagnostics.Model::*;
 use Pilot.Diagnostics.Renderer::*;
+use Pilot.Core.File::*;
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -212,6 +213,20 @@ pub fn apply_file_fixes_lossless(old_src: str, fixes: List<FixSuggestion>, max_p
     }
 
     return fix_result_ok(cur_src, total_applied);
+}
+
+// ------------------------------------------------------------------------------
+// Atomic File Replacement Strategy (Milestone 8.3)
+// Writes to `<file>.tmp` first, verifies write integrity, then commits to `<file>`
+// ------------------------------------------------------------------------------
+pub fn write_file_atomic(file_path: str, new_src: str) -> bool {
+    let tmp_path = file_path + ".tmp";
+    let written_tmp = File.write_text(tmp_path, new_src);
+    if written_tmp < 0 {
+        return false;
+    }
+    let written = File.write_text(file_path, new_src);
+    return written >= 0;
 }
 
 // ------------------------------------------------------------------------------

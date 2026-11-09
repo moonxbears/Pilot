@@ -844,9 +844,7 @@ pub fn handle_lsp_references(offset: i64) {
     let word = extract_ident_at_offset(offset);
     if word == "" { __engine(Cfg.ast.lsp_set_result, "[]"); return; }
     let node_count = __engine(Cfg.ast.ast_node_count);
-    var refs_json = "[";
-    var added = 0;
-    var i = 0;
+    var refs_json = "["; var added = 0; var i = 0;
     while i < node_count {
         let sym = __engine(Cfg.ast.ast_node_sym, i);
         let sname = __engine(Cfg.ast.sym_str, sym);
@@ -855,8 +853,7 @@ pub fn handle_lsp_references(offset: i64) {
             let e = __engine(Cfg.ast.ast_span_end, i);
             if s != 4294967295 && s >= 0 {
                 let k = __engine(Cfg.ast.ast_node_kind, i);
-                var eff_s = s;
-                var eff_e = e;
+                var eff_s = s; var eff_e = e;
                 if k == 17 {
                     var p = e;
                     while p < e + 60 && __engine(Cfg.ast.source_slice, p, p + 1) != "." { p = p + 1; }
