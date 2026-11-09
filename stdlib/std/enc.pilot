@@ -1,0 +1,27 @@
+// ==============================================================================
+// FILE: stdlib/std/enc.pilot
+// Ring 2: Standard Hex & Base64 Encoders (pub pkg std.enc;)
+// ==============================================================================
+pub pkg std.enc;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub pure fn hex_digit(v: u8) -> u8 {
+    let d = v & 0x0F;
+    if d < 10 { return 48 + d; }
+    return 87 + d; // 'a' - 10 = 87
+}
+
+pub fn hex_encode(bytes: str) -> str {
+    var out = "";
+    var i: usize = 0;
+    let n = bytes.len();
+    while i < n {
+        let b = bytes.byte_at(i);
+        let hi = hex_digit(b >> 4);
+        let lo = hex_digit(b & 0x0F);
+        out = out + "" + (hi as char) + (lo as char);
+        i = i + 1;
+    }
+    return out;
+}

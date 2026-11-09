@@ -1,0 +1,29 @@
+// ==============================================================================
+// FILE: stdlib/std/fs.pilot
+// Ring 2: Standard File System Operations (pub pkg std.fs;)
+// ==============================================================================
+pub pkg std.fs;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+[Layout(c_abi)]
+pub struct DirEntry : IValue {
+    pub path:     str;
+    pub is_dir:   bool;
+    pub file_len: usize;
+}
+
+pub pure fn dir_entry_new(path: str, is_dir: bool, len: usize) -> DirEntry {
+    return DirEntry { path: path, is_dir: is_dir, file_len: len };
+}
+
+pub struct FileHandle : IObject {
+    pub path: str;
+    pub mode: str;
+
+    ~self() {}
+}
+
+pub pure fn file_handle_open(path: str, mode: str) -> FileHandle {
+    return FileHandle { path: path, mode: mode };
+}

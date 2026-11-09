@@ -1,0 +1,20 @@
+// ==============================================================================
+// FILE: stdlib/std/csv.pilot
+// Ring 2: Standard CSV Parsing & Generation (pub pkg std.csv;)
+// ==============================================================================
+pub pkg std.csv;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub struct CsvRow : IObject {
+    pub columns: List<str>;
+
+    pub pure fn len(ref self) -> usize => self.columns.len;
+    pub fn get(ref self, idx: usize) -> str => self.columns[idx];
+
+    ~self() {}
+}
+
+pub fn csv_row_new() -> CsvRow {
+    return CsvRow { columns: [] };
+}

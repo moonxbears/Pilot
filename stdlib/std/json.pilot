@@ -1,0 +1,24 @@
+// ==============================================================================
+// FILE: stdlib/std/json.pilot
+// Ring 2: Standard JSON Serialization & Parser (pub pkg std.json;)
+// ==============================================================================
+pub pkg std.json;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub pure fn json_kind_null()   -> u8 => 0;
+pub pure fn json_kind_bool()   -> u8 => 1;
+pub pure fn json_kind_number() -> u8 => 2;
+pub pure fn json_kind_string() -> u8 => 3;
+pub pure fn json_kind_array()  -> u8 => 4;
+pub pure fn json_kind_object() -> u8 => 5;
+
+[Layout(c_abi)]
+pub struct JsonVal : IValue {
+    pub kind: u8;
+    pub text: str;
+}
+
+pub pure fn json_null() -> JsonVal => JsonVal { kind: json_kind_null(), text: "null" };
+pub pure fn json_bool(b: bool) -> JsonVal => JsonVal { kind: json_kind_bool(), text: if b { "true" } else { "false" } };
+pub pure fn json_str(s: str) -> JsonVal => JsonVal { kind: json_kind_string(), text: s };

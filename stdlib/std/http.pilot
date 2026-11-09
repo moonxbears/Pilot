@@ -1,0 +1,28 @@
+// ==============================================================================
+// FILE: stdlib/std/http.pilot
+// Ring 2: Standard HTTP Client & Server (pub pkg std.http;)
+// ==============================================================================
+pub pkg std.http;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+[Layout(c_abi)]
+pub struct HttpReq : IValue {
+    pub method: str;
+    pub url:    str;
+    pub body:   str;
+}
+
+pub pure fn http_req_new(method: str, url: str, body: str) -> HttpReq {
+    return HttpReq { method: method, url: url, body: body };
+}
+
+[Layout(c_abi)]
+pub struct HttpResp : IValue {
+    pub status: u16;
+    pub body:   str;
+}
+
+pub pure fn http_resp_ok(body: str) -> HttpResp {
+    return HttpResp { status: 200, body: body };
+}

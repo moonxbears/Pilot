@@ -1,0 +1,36 @@
+// ==============================================================================
+// FILE: stdlib/std/io.pilot
+// Ring 2: Standard I/O Contracts & Buffers (pub pkg std.io;)
+// ==============================================================================
+pub pkg std.io;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub interface IReader {
+    fn read(var ref self, buf: var slice<u8>) -> usize;
+}
+
+pub interface IWriter {
+    fn write(var ref self, buf: slice<u8>) -> usize;
+    fn flush(var ref self);
+}
+
+pub struct BufReader : IObject {
+    pub buffer:   str;
+    pub position: usize;
+
+    pub pure fn is_eof(ref self) -> bool => self.position >= self.buffer.len();
+
+    pub fn read_byte(var ref self) -> i64 {
+        if self.is_eof() { return -1; }
+        let b = self.buffer.byte_at(self.position);
+        self.position = self.position + 1;
+        return b as i64;
+    }
+
+    ~self() {}
+}
+
+pub fn buf_reader_new(content: str) -> BufReader {
+    return BufReader { buffer: content, position: 0 };
+}

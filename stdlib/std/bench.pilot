@@ -1,0 +1,25 @@
+// ==============================================================================
+// FILE: stdlib/std/bench.pilot
+// Ring 2: Standard Benchmark & Profiling Framework (pub pkg std.bench;)
+// ==============================================================================
+pub pkg std.bench;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+[Layout(c_abi)]
+pub struct BenchmarkResult : IValue {
+    pub name:           str;
+    pub iterations:     u64;
+    pub elapsed_nanos:  u64;
+    pub nanos_per_iter: u64;
+}
+
+pub fn bench_result_new(name: str, iters: u64, elapsed_ns: u64) -> BenchmarkResult {
+    let per_iter = if iters > 0 { elapsed_ns / iters; } else { 0; };
+    return BenchmarkResult {
+        name:           name,
+        iterations:     iters,
+        elapsed_nanos:  elapsed_ns,
+        nanos_per_iter: per_iter,
+    };
+}

@@ -1,0 +1,38 @@
+// ==============================================================================
+// FILE: stdlib/std/test.pilot
+// Ring 2: Standard Test Framework (pub pkg std.test;)
+// ==============================================================================
+pub pkg std.test;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+[Layout(c_abi)]
+pub struct TestCaseSummary : IValue {
+    pub name:   str;
+    pub passed: bool;
+    pub error:  str;
+}
+
+pub pure fn test_case_pass(name: str) -> TestCaseSummary {
+    return TestCaseSummary { name: name, passed: true, error: "" };
+}
+
+pub pure fn test_case_fail(name: str, err: str) -> TestCaseSummary {
+    return TestCaseSummary { name: name, passed: false, error: err };
+}
+
+pub struct TestRunner : IObject {
+    pub cases: List<TestCaseSummary>;
+
+    pub pure fn total_count(ref self) -> usize => self.cases.len;
+
+    pub fn add_result(var ref self, res: TestCaseSummary) {
+        self.cases.push(res);
+    }
+
+    ~self() {}
+}
+
+pub fn test_runner_new() -> TestRunner {
+    return TestRunner { cases: [] };
+}

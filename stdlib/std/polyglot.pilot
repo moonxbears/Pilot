@@ -1,0 +1,32 @@
+// ==============================================================================
+// FILE: stdlib/std/polyglot.pilot
+// Ring 2: Standard Foreign Polyglot Interop & Cross-Runtime Arenas (pub pkg std.polyglot;)
+// ==============================================================================
+pub pkg std.polyglot;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+[Layout(c_abi)]
+pub struct ForeignRuntimeId : IValue {
+    pub lang_code: u8; // 1: C/C++, 2: Rust, 3: Python, 4: JS/Node, 5: WASM
+}
+
+pub pure fn lang_c()      -> u8 => 1;
+pub pure fn lang_rust()   -> u8 => 2;
+pub pure fn lang_python() -> u8 => 3;
+pub pure fn lang_js()     -> u8 => 4;
+pub pure fn lang_wasm()   -> u8 => 5;
+
+pub struct ForeignHandle : IObject {
+    pub runtime: ForeignRuntimeId;
+    pub ptr_val: usize;
+
+    ~self() {}
+}
+
+pub pure fn foreign_handle_new(lang: u8, ptr: usize) -> ForeignHandle {
+    return ForeignHandle {
+        runtime: ForeignRuntimeId { lang_code: lang },
+        ptr_val: ptr,
+    };
+}

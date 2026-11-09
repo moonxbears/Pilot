@@ -1,0 +1,28 @@
+// ==============================================================================
+// FILE: stdlib/std/task.pilot
+// Ring 2: Standard Asynchronous Task Model (pub pkg std.task;)
+// ==============================================================================
+pub pkg std.task;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+[Layout(c_abi)]
+pub struct TaskId : IValue {
+    pub raw: u64;
+}
+
+pub struct TaskHandle<T> : IObject {
+    pub id:        TaskId;
+    pub is_done:   bool;
+    pub has_value: bool;
+
+    ~self() {}
+}
+
+pub fn task_handle_new<T>(id: u64) -> TaskHandle<T> {
+    return TaskHandle<T> {
+        id:        TaskId { raw: id },
+        is_done:   false,
+        has_value: false,
+    };
+}

@@ -1,0 +1,24 @@
+// ==============================================================================
+// FILE: stdlib/std/log.pilot
+// Ring 2: Standard Structured Logging (pub pkg std.log;)
+// ==============================================================================
+pub pkg std.log;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub pure fn log_level_trace() -> u8 => 0;
+pub pure fn log_level_debug() -> u8 => 1;
+pub pure fn log_level_info()  -> u8 => 2;
+pub pure fn log_level_warn()  -> u8 => 3;
+pub pure fn log_level_error() -> u8 => 4;
+
+[Layout(c_abi)]
+pub struct LogRecord : IValue {
+    pub level:   u8;
+    pub target:  str;
+    pub message: str;
+}
+
+pub pure fn log_record_new(level: u8, target: str, msg: str) -> LogRecord {
+    return LogRecord { level: level, target: target, message: msg };
+}

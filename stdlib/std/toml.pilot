@@ -1,0 +1,40 @@
+// ==============================================================================
+// FILE: stdlib/std/toml.pilot
+// Ring 2: Standard Memory-Safe TOML Parser (pub pkg std.toml;)
+// ==============================================================================
+pub pkg std.toml;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+[Layout(c_abi)]
+pub struct TomlEntry : IValue {
+    pub key: str;
+    pub val: str;
+}
+
+pub struct TomlDoc : IObject {
+    pub entries: List<TomlEntry>;
+
+    pub pure fn count(ref self) -> usize => self.entries.len;
+
+    pub fn get(ref self, key: str) -> str {
+        var i = 0;
+        while i < self.entries.len {
+            if self.entries[i].key == key {
+                return self.entries[i].val;
+            }
+            i = i + 1;
+        }
+        return "";
+    }
+
+    pub fn set(var ref self, key: str, val: str) {
+        self.entries.push(TomlEntry { key: key, val: val });
+    }
+
+    ~self() {}
+}
+
+pub fn toml_doc_new() -> TomlDoc {
+    return TomlDoc { entries: [] };
+}

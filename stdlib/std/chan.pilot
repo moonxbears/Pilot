@@ -1,0 +1,36 @@
+// ==============================================================================
+// FILE: stdlib/std/chan.pilot
+// Ring 2: Standard Typed Message Channels (pub pkg std.chan;)
+// ==============================================================================
+pub pkg std.chan;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub struct Chan<T> : IObject {
+    pub capacity: usize;
+    pub queue:    List<T>;
+    pub is_open:  bool;
+
+    pub pure fn len(ref self) -> usize => self.queue.len;
+    pub pure fn is_closed(ref self) -> bool => !self.is_open;
+
+    pub fn send(var ref self, val: T) -> bool {
+        if !self.is_open { return false; }
+        self.queue.push(val);
+        return true;
+    }
+
+    pub fn close(var ref self) {
+        self.is_open = false;
+    }
+
+    ~self() {}
+}
+
+pub fn chan_new<T>(capacity: usize) -> Chan<T> {
+    return Chan<T> {
+        capacity: capacity,
+        queue:    [],
+        is_open:  true,
+    };
+}

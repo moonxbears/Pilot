@@ -1,0 +1,22 @@
+// ==============================================================================
+// FILE: stdlib/std/time.pilot
+// Ring 2: Standard Time, Duration & Monotonic Clocks (pub pkg std.time;)
+// ==============================================================================
+pub pkg std.time;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+[Layout(c_abi)]
+pub struct Duration : IValue {
+    pub nanos: u64;
+}
+
+pub pure fn duration_from_millis(ms: u64) -> Duration => Duration { nanos: ms * 1000000 };
+pub pure fn duration_from_secs(secs: u64) -> Duration => Duration { nanos: secs * 1000000000 };
+
+[Layout(c_abi)]
+pub struct Instant : IValue {
+    pub timestamp_nanos: u64;
+}
+
+pub pure fn instant_new(nanos: u64) -> Instant => Instant { timestamp_nanos: nanos };

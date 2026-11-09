@@ -1,0 +1,62 @@
+// ==============================================================================
+// FILE: stdlib/std/col.pilot
+// Ring 2: Standard Collections Package (pub pkg std.col;)
+// ==============================================================================
+pub pkg std.col;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Dynamic List Buffer (0b10 : IObject)
+// ------------------------------------------------------------------------------
+pub struct ListBuffer<T> : IObject {
+    pub items: List<T>;
+
+    pub pure fn len(ref self) -> usize => self.items.len;
+    pub pure fn is_empty(ref self) -> bool => self.items.len == 0;
+
+    pub fn push(var ref self, item: T) {
+        self.items.push(item);
+    }
+
+    pub fn get(ref self, index: usize) -> T {
+        return self.items[index];
+    }
+
+    pub fn set(var ref self, index: usize, item: T) {
+        self.items[index] = item;
+    }
+
+    ~self() {}
+}
+
+pub fn list_buffer_new<T>() -> ListBuffer<T> {
+    return ListBuffer<T> { items: [] };
+}
+
+// ------------------------------------------------------------------------------
+// Ring Buffer Queue (0b10 : IObject)
+// ------------------------------------------------------------------------------
+pub struct RingBuffer<T> : IObject {
+    pub capacity: usize;
+    pub head:     usize;
+    pub tail:     usize;
+    pub count:    usize;
+    pub items:    List<T>;
+
+    pub pure fn len(ref self) -> usize => self.count;
+    pub pure fn is_full(ref self) -> bool => self.count >= self.capacity;
+    pub pure fn is_empty(ref self) -> bool => self.count == 0;
+
+    ~self() {}
+}
+
+pub fn ring_buffer_new<T>(capacity: usize) -> RingBuffer<T> {
+    return RingBuffer<T> {
+        capacity: capacity,
+        head:     0,
+        tail:     0,
+        count:    0,
+        items:    [],
+    };
+}

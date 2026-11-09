@@ -48,6 +48,9 @@ mod m07;
 #[path = "milestone08_progressive_diagnostics_and_cst_autofix.rs"]
 mod m08;
 
+#[path = "milestone09_three_ring_standard_library_personality.rs"]
+mod m09;
+
 #[path = "milestone50_lossless_bridge_and_reflection.rs"]
 mod m50;
 
@@ -169,6 +172,10 @@ pub fn test_mega_all_milestones_50_through_61_simultaneously() {
             m08::test_m8_2_progressive_explain_tutorial_and_tier1_guidance();
             m08::test_m8_3_unicode_east_asian_display_width_and_caret_alignment();
             m08::test_m8_4_sarif_json_emitter_and_unified_diff_preview();
+            m09::test_m9_1_three_ring_hierarchy_and_illegal_upward_dependency_rejection();
+            m09::test_m9_2_freestanding_core_boundary_and_host_intrinsic_exclusion();
+            m09::test_m9_3_retired_python_clone_import_detection_and_lossless_autofix();
+            m09::test_m9_4_canonical_std_packages_and_stale_cache_rejection();
         });
         s.spawn(|| {
             m50::test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts();

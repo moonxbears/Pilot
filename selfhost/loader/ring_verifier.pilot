@@ -1,0 +1,243 @@
+// ==============================================================================
+// FILE: selfhost/loader/ring_verifier.pilot
+// Milestone 9.3: Three-Ring Dependency Verifier & Freestanding Ring Law
+// Enforces RING001 (Upward Dependency), RING002 (Freestanding Core),
+// RING003 (Retired Python-Clone Migration), and RING004 (Stale Cache Artifacts).
+// ==============================================================================
+pub lvl(0) pkg Pilot.Loader.RingVerifier;
+
+use Pilot.Diagnostics.Model::*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// Ring Constants (0b00 : IValue)
+// 0: User / External Application Code
+// 1: Ring 1 (`core.*` / `Pilot.Core.*`) — Strictly freestanding, noalloc/no-OS
+// 2: Ring 2 (`std.*` / `stdlib.*`)     — Hosted standard library
+// 3: Ring 3 (`pilot.*`)                — Compiler-as-a-Library
+// 4: SelfHost (`Pilot.SelfHost.*`)     — Compiler bootstrap internals
+// ------------------------------------------------------------------------------
+pub pure fn ring_user()     -> u8 => 0;
+pub pure fn ring_core()     -> u8 => 1;
+pub pure fn ring_std()      -> u8 => 2;
+pub pure fn ring_pilot()    -> u8 => 3;
+pub pure fn ring_selfhost() -> u8 => 4;
+
+pub fn ring_name(r: u8) -> str {
+    if r == ring_core()     { return "Ring 1 (core)"; }
+    if r == ring_std()      { return "Ring 2 (std)"; }
+    if r == ring_pilot()    { return "Ring 3 (pilot)"; }
+    if r == ring_selfhost() { return "SelfHost"; }
+    return "User";
+}
+
+// ------------------------------------------------------------------------------
+// Package Ring Classifier
+// ------------------------------------------------------------------------------
+pub fn parse_pkg_ring(pkg_name: str) -> u8 {
+    if str_starts_with(pkg_name, "core.") || pkg_name == "core" ||
+       str_starts_with(pkg_name, "Pilot.Core.") || pkg_name == "Pilot.Core" {
+        return ring_core();
+    }
+    if str_starts_with(pkg_name, "std.") || pkg_name == "std" ||
+       str_starts_with(pkg_name, "stdlib.") || pkg_name == "stdlib" {
+        return ring_std();
+    }
+    if str_starts_with(pkg_name, "Pilot.SelfHost.") || str_starts_with(pkg_name, "SelfHost.") {
+        return ring_selfhost();
+    }
+    if str_starts_with(pkg_name, "pilot.") || pkg_name == "pilot" ||
+       str_starts_with(pkg_name, "Pilot.") {
+        return ring_pilot();
+    }
+    return ring_user();
+}
+
+// ------------------------------------------------------------------------------
+// Ring Dependency Verification (RING001)
+// Ring 1 (core.*) cannot import Ring 2, 3, or SelfHost.
+// Ring 2 (std.*) cannot import SelfHost.
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct RingCheckResult : IValue {
+    pub passed:     bool;
+    pub code:       str;
+    pub message:    str;
+}
+
+pub fn ring_check_ok() -> RingCheckResult {
+    return RingCheckResult { passed: true, code: "", message: "" };
+}
+
+pub fn ring_check_err(code: str, msg: str) -> RingCheckResult {
+    return RingCheckResult { passed: false, code: code, message: msg };
+}
+
+pub fn verify_ring_dependency(importer_pkg: str, imported_pkg: str) -> RingCheckResult {
+    let r_from = parse_pkg_ring(importer_pkg);
+    let r_to = parse_pkg_ring(imported_pkg);
+
+    // Rule 1: Ring 1 (core) cannot import higher rings
+    if r_from == ring_core() && (r_to == ring_std() || r_to == ring_pilot() || r_to == ring_selfhost()) {
+        return ring_check_err(
+            "RING001",
+            "Illegal upward ring dependency: Ring 1 (core.*) cannot import " + ring_name(r_to)
+        );
+    }
+
+    // Rule 2: Ring 2 (std) cannot import compiler internals (SelfHost)
+    if r_from == ring_std() && r_to == ring_selfhost() {
+        return ring_check_err(
+            "RING001",
+            "Illegal ring dependency: Ring 2 (std.*) cannot import compiler internals (Pilot.SelfHost.*)"
+        );
+    }
+
+    return ring_check_ok();
+}
+
+// ------------------------------------------------------------------------------
+// Freestanding Core Verifier (RING002)
+// Asserts Ring 1 contains zero OS host intrinsics, syscalls, or libc imports.
+// ------------------------------------------------------------------------------
+pub fn verify_freestanding_source(src: str, pkg_name: str) -> RingCheckResult {
+    let r = parse_pkg_ring(pkg_name);
+    if r != ring_core() {
+        return ring_check_ok();
+    }
+
+    // Check for OS host intrinsics or host library imports
+    if str_contains(src, "use std.") || str_contains(src, "use stdlib.") {
+        return ring_check_err(
+            "RING002",
+            "Freestanding core violation: Ring 1 (core.*) cannot import hosted std library modules"
+        );
+    }
+
+    if str_contains(src, "\"fs_") || str_contains(src, "\"tcp_") ||
+       str_contains(src, "\"udp_") || str_contains(src, "\"proc_") ||
+       str_contains(src, "\"dlopen\"") || str_contains(src, "\"env_") {
+        return ring_check_err(
+            "RING002",
+            "Freestanding core violation: Ring 1 (core.*) cannot invoke OS host intrinsics"
+        );
+    }
+
+    return ring_check_ok();
+}
+
+// ------------------------------------------------------------------------------
+// Retired Python-Clone Import Auto-Migration Table (RING003)
+// ------------------------------------------------------------------------------
+[Layout(c_abi)]
+pub struct MigrationMatch : IValue {
+    pub is_legacy: bool;
+    pub old_name:  str;
+    pub new_name:  str;
+}
+
+pub fn check_legacy_import_migration(pkg_path: str) -> MigrationMatch {
+    var raw = pkg_path;
+    // Strip leading "std." or "stdlib."
+    if str_starts_with(raw, "std.") {
+        raw = raw.slice(4, raw.len());
+    } else if str_starts_with(raw, "stdlib.") {
+        raw = raw.slice(7, raw.len());
+    }
+
+    // Strip trailing ".*" or ";"
+    if str_contains(raw, ".*") {
+        let idx = raw.find(".*");
+        if idx >= 0 { raw = raw.slice(0, idx as usize); }
+    }
+    if str_contains(raw, ";") {
+        let idx = raw.find(";");
+        if idx >= 0 { raw = raw.slice(0, idx as usize); }
+    }
+
+    if raw == "unittest"         { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.test" }; }
+    if raw == "timeit"           { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.bench" }; }
+    if raw == "tomllib"          { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.toml" }; }
+    if raw == "pathlib"          { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.path" }; }
+    if raw == "shutil"           { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.fs" }; }
+    if raw == "pickle"           { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.bin" }; }
+    if raw == "urllib"           { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.net" }; }
+    if raw == "request"          { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.http" }; }
+    if raw == "asyncio"          { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.task" }; }
+    if raw == "threading"        { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.sync" }; }
+    if raw == "multiprocessing"  { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.proc" }; }
+    if raw == "itertools"        { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.col" }; }
+    if raw == "functools"        { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.col" }; }
+    if raw == "numpy"            { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.math" }; }
+    if raw == "pandas"           { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.math" }; }
+    if raw == "scikit"           { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.math" }; }
+    if raw == "matplotlib"       { return MigrationMatch { is_legacy: true, old_name: pkg_path, new_name: "std.math" }; }
+
+    return MigrationMatch { is_legacy: false, old_name: "", new_name: "" };
+}
+
+// ------------------------------------------------------------------------------
+// Import Migration Diagnostic & Lossless Fix Suggestion Generator
+// ------------------------------------------------------------------------------
+pub fn scan_and_migrate_ring_imports(src: str, file_id: u32) -> List<Diagnostic> {
+    var diags: List<Diagnostic> = [];
+    let n = src.len();
+    var p: usize = 0;
+
+    while p < n {
+        // Look for "use " statements
+        if p + 4 <= n && src.slice(p, p + 4) == "use " {
+            let prev = if p > 0 { src.byte_at(p - 1); } else { 10; };
+            if prev == 10 || prev == 32 || prev == 59 {
+                let stmt_st = p;
+                var q = p + 4;
+                while q < n && src.byte_at(q) != 59 && src.byte_at(q) != 10 {
+                    q = q + 1;
+                }
+                let import_target = src.slice(p + 4, q);
+                let stmt_ed = if q < n && src.byte_at(q) == 59 { q + 1; } else { q; };
+
+                let mig = check_legacy_import_migration(import_target);
+                if mig.is_legacy {
+                    let sp = source_span_new(file_id, stmt_st as u32, stmt_ed as u32);
+                    let rep_code = "use " + mig.new_name + ";";
+                    var d = diagnostic_with_primary_label(
+                        "RING003",
+                        diag_severity_error(),
+                        "Retired Python-clone module import '" + mig.old_name + "'",
+                        sp,
+                        "migrate to '" + rep_code + "'"
+                    );
+                    diagnostic_add_note(var ref d, "Python-clone module names in stdlib/ are deprecated in Pilot 1.0 (Milestone 9)");
+                    let ed = cst_text_edit_new(sp, rep_code);
+                    let fx = fix_suggestion_with_edit(
+                        "Migrate to canonical Pilot standard library package '" + mig.new_name + "'",
+                        fix_machine_applicable(),
+                        ed
+                    );
+                    diagnostic_add_fix(var ref d, fx);
+                    diags.push(d);
+                }
+                p = stmt_ed;
+                continue;
+            }
+        }
+        p = p + 1;
+    }
+
+    return diags;
+}
+
+// ------------------------------------------------------------------------------
+// Stale Committed Cache Binaries Verifier (RING004)
+// ------------------------------------------------------------------------------
+pub fn verify_no_stale_stdlib_cache(file_path: str) -> RingCheckResult {
+    if str_contains(file_path, "stdlib/") && str_contains(file_path, ".pilc") {
+        return ring_check_err(
+            "RING004",
+            "Duplicate stale cache artifact: committed .pilc binaries inside stdlib/ are prohibited"
+        );
+    }
+    return ring_check_ok();
+}

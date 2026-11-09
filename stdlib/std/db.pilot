@@ -1,0 +1,26 @@
+// ==============================================================================
+// FILE: stdlib/std/db.pilot
+// Ring 2: Standard Database Interfaces & Table Models (pub pkg std.db;)
+// ==============================================================================
+pub pkg std.db;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+[Layout(c_abi)]
+pub struct TableColumn : IValue {
+    pub name: str;
+    pub kind: str;
+}
+
+pub struct TableSchema : IObject {
+    pub name:    str;
+    pub columns: List<TableColumn>;
+
+    pub pure fn column_count(ref self) -> usize => self.columns.len;
+
+    ~self() {}
+}
+
+pub fn table_schema_new(name: str) -> TableSchema {
+    return TableSchema { name: name, columns: [] };
+}

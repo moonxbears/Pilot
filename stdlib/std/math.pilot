@@ -1,0 +1,28 @@
+// ==============================================================================
+// FILE: stdlib/std/math.pilot
+// Ring 2: Standard Extended Math Types (pub pkg std.math;)
+// Native replacements for Python numeric/numpy/scikit libraries
+// ==============================================================================
+pub pkg std.math;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+[Layout(c_abi)]
+pub struct ComplexF64 : IValue {
+    pub real: f64;
+    pub imag: f64;
+}
+
+pub pure fn complex_new(r: f64, i: f64) -> ComplexF64 {
+    return ComplexF64 { real: r, imag: i };
+}
+
+[Layout(c_abi)]
+pub struct RatioI64 : IValue {
+    pub numer: i64;
+    pub denom: i64;
+}
+
+pub pure fn ratio_new(n: i64, d: i64) -> RatioI64 {
+    return RatioI64 { numer: n, denom: d };
+}

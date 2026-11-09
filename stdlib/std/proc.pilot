@@ -1,0 +1,17 @@
+// ==============================================================================
+// FILE: stdlib/std/proc.pilot
+// Ring 2: Standard Process Spawning & Control (pub pkg std.proc;)
+// ==============================================================================
+pub pkg std.proc;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+[Layout(c_abi)]
+pub struct ProcessExit : IValue {
+    pub exit_code: i32;
+    pub success:   bool;
+}
+
+pub pure fn process_exit_new(code: i32) -> ProcessExit {
+    return ProcessExit { exit_code: code, success: code == 0 };
+}

@@ -1,0 +1,17 @@
+// ==============================================================================
+// FILE: stdlib/std/os.pilot
+// Ring 2: Standard Operating System Introspection (pub pkg std.os;)
+// ==============================================================================
+pub pkg std.os;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+[Layout(c_abi)]
+pub struct HostSystemInfo : IValue {
+    pub os_name: str;
+    pub arch:    str;
+}
+
+pub pure fn host_system_info(os: str, arch: str) -> HostSystemInfo {
+    return HostSystemInfo { os_name: os, arch: arch };
+}

@@ -1,0 +1,25 @@
+// ==============================================================================
+// FILE: stdlib/std/text.pilot
+// Ring 2: Standard Unicode Text Formatting & String Builders (pub pkg std.text;)
+// ==============================================================================
+pub pkg std.text;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub struct StringBuilder : IObject {
+    pub content: str;
+
+    pub pure fn len(ref self) -> usize => self.content.len();
+
+    pub fn append(var ref self, piece: str) {
+        self.content = self.content + piece;
+    }
+
+    pub fn to_string(ref self) -> str => self.content;
+
+    ~self() {}
+}
+
+pub fn string_builder_new() -> StringBuilder {
+    return StringBuilder { content: "" };
+}

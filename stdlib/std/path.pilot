@@ -1,0 +1,44 @@
+// ==============================================================================
+// FILE: stdlib/std/path.pilot
+// Ring 2: Standard Cross-Platform Path Manipulation (pub pkg std.path;)
+// ==============================================================================
+pub pkg std.path;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub pure fn path_is_sep(b: u8) -> bool => b == 47 || b == 92; // '/' or '\'
+
+pub fn path_join(base: str, part: str) -> str {
+    if base.len() == 0 { return part; }
+    if part.len() == 0 { return base; }
+    let last_b = base.byte_at(base.len() - 1);
+    if path_is_sep(last_b) {
+        return base + part;
+    }
+    return base + "/" + part;
+}
+
+pub fn path_filename(p: str) -> str {
+    let n = p.len();
+    var idx = n;
+    while idx > 0 {
+        idx = idx - 1;
+        if path_is_sep(p.byte_at(idx)) {
+            return p.slice(idx + 1, n);
+        }
+    }
+    return p;
+}
+
+pub fn path_extension(p: str) -> str {
+    let name = path_filename(p);
+    let n = name.len();
+    var idx = n;
+    while idx > 0 {
+        idx = idx - 1;
+        if name.byte_at(idx) == 46 { // '.'
+            return name.slice(idx + 1, n);
+        }
+    }
+    return "";
+}

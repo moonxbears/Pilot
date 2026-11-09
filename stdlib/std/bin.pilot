@@ -1,0 +1,21 @@
+// ==============================================================================
+// FILE: stdlib/std/bin.pilot
+// Ring 2: Standard Safe Binary Codec (pub pkg std.bin;)
+// Replaces unsafe Python pickle anti-patterns with deterministic binary packing
+// ==============================================================================
+pub pkg std.bin;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+[Layout(c_abi)]
+pub struct BinaryPacket : IValue {
+    pub magic:   u32;
+    pub version: u16;
+    pub payload: str;
+}
+
+pub pure fn binary_packet_new(magic: u32, version: u16, payload: str) -> BinaryPacket {
+    return BinaryPacket { magic: magic, version: version, payload: payload };
+}
+
+pub pure fn bin_magic_pilot() -> u32 => 0x50494C54; // 'P','I','L','T'

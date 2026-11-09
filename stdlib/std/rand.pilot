@@ -1,0 +1,24 @@
+// ==============================================================================
+// FILE: stdlib/std/rand.pilot
+// Ring 2: Standard Deterministic and Secure Random Generators (pub pkg std.rand;)
+// ==============================================================================
+pub pkg std.rand;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+[Layout(c_abi)]
+pub struct Xoshiro256 : IValue {
+    pub s0: u64;
+    pub s1: u64;
+    pub s2: u64;
+    pub s3: u64;
+}
+
+pub pure fn xoshiro256_new(seed: u64) -> Xoshiro256 {
+    return Xoshiro256 {
+        s0: seed,
+        s1: seed ^ 0x9E3779B97F4A7C15,
+        s2: seed + 0x517CC1B727220A95,
+        s3: seed ^ 0xBF58476D1CE4E5B9,
+    };
+}

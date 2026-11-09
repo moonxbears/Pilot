@@ -1,0 +1,29 @@
+// ==============================================================================
+// FILE: stdlib/std/net.pilot
+// Ring 2: Standard Network Sockets & URLs (pub pkg std.net;)
+// ==============================================================================
+pub pkg std.net;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+[Layout(c_abi)]
+pub struct SocketAddr : IValue {
+    pub ip_str: str;
+    pub port:   u16;
+}
+
+pub pure fn socket_addr_new(ip: str, port: u16) -> SocketAddr {
+    return SocketAddr { ip_str: ip, port: port };
+}
+
+[Layout(c_abi)]
+pub struct Url : IValue {
+    pub scheme: str;
+    pub host:   str;
+    pub port:   u16;
+    pub path:   str;
+}
+
+pub pure fn url_new(scheme: str, host: str, port: u16, path: str) -> Url {
+    return Url { scheme: scheme, host: host, port: port, path: path };
+}

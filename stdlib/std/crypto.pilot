@@ -1,0 +1,28 @@
+// ==============================================================================
+// FILE: stdlib/std/crypto.pilot
+// Ring 2: Standard Cryptographic Primitives (pub pkg std.crypto;)
+// ==============================================================================
+pub pkg std.crypto;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub pure fn ct_eq(a: str, b: str) -> bool {
+    let n = a.len();
+    if n != b.len() { return false; }
+    var diff: u8 = 0;
+    var i: usize = 0;
+    while i < n {
+        diff = diff | (a.byte_at(i) ^ b.byte_at(i));
+        i = i + 1;
+    }
+    return diff == 0;
+}
+
+[Layout(c_abi)]
+pub struct Sha256Digest : IValue {
+    pub hex: str;
+}
+
+pub pure fn sha256_digest_new(hex: str) -> Sha256Digest {
+    return Sha256Digest { hex: hex };
+}

@@ -1,0 +1,37 @@
+// ==============================================================================
+// FILE: stdlib/std/sync.pilot
+// Ring 2: Standard Concurrency Primitives & Scoped Guards (pub pkg std.sync;)
+// ==============================================================================
+pub pkg std.sync;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub struct Mutex<T> : IObject {
+    pub is_locked: bool;
+
+    ~self() {}
+}
+
+pub fn mutex_new<T>() -> Mutex<T> {
+    return Mutex<T> { is_locked: false };
+}
+
+// Scoped Guard (0b11 : IGuard)
+pub struct MutexGuard<T> : IGuard {
+    pub lock_id: usize;
+
+    ~self() {}
+}
+
+pub pure fn mutex_guard_new<T>(lock_id: usize) -> MutexGuard<T> {
+    return MutexGuard<T> { lock_id: lock_id };
+}
+
+[Layout(c_abi)]
+pub struct AtomicInt : IValue {
+    pub val: i64;
+}
+
+pub pure fn atomic_new(v: i64) -> AtomicInt {
+    return AtomicInt { val: v };
+}
