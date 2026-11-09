@@ -20,6 +20,14 @@ use Pilot.Core.Option::*;
 // =========================================================================
 
 [Layout(c_abi)]
+pub struct Reflect : IValue {
+    pub static fn sym_str(sym_id: i64) -> str => __engine("sym_str", sym_id);
+    pub static fn sym_lookup(name: str) -> i64 => __engine("sym_lookup", name);
+    pub static fn layout_metrics(lid: i64) -> i64 => __engine("layout_metrics", lid);
+    pub static fn layout_field_offset(tid: i64, fidx: i64) -> i64 => __engine("layout_field_offset", tid, fidx);
+}
+
+[Layout(c_abi)]
 pub struct LayoutTarget : IValue {
     pub architecture: str;
     pub pointer_byte: usize;

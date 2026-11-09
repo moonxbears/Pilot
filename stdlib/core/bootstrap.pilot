@@ -15,13 +15,15 @@ pub struct BootstrapStage : IValue {
 
 let bootstrap_stages = [
     0: "stdlib/core/core.pilot",
-    1: "stdlib/core/operator.pilot",
-    2: "stdlib/core/mem.pilot",
-    3: "stdlib/core/option.pilot",
-    4: "stdlib/core/result.pilot",
-    5: "stdlib/core/task.pilot",
-    6: "stdlib/core/builtins/builtins.pilot",
-    7: "stdlib/core/meta.pilot",
+    1: "stdlib/core/file.pilot",
+    2: "stdlib/core/env.pilot",
+    3: "stdlib/core/operator.pilot",
+    4: "stdlib/core/mem.pilot",
+    5: "stdlib/core/option.pilot",
+    6: "stdlib/core/result.pilot",
+    7: "stdlib/core/task.pilot",
+    8: "stdlib/core/builtins/builtins.pilot",
+    9: "stdlib/core/meta.pilot",
 ];
 
 let bootstrap_stage_rings = [
@@ -31,8 +33,10 @@ let bootstrap_stage_rings = [
     3: 90,
     4: 90,
     5: 90,
-    6: 80,
-    7: 100,
+    6: 90,
+    7: 90,
+    8: 80,
+    9: 100,
 ];
 
 pub pure fn bootstrap_stage_count() -> i64 {

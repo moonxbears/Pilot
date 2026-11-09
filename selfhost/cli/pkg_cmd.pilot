@@ -11,6 +11,9 @@ use Pilot.SelfHost.Pkg.Manifest.*;
 use Pilot.SelfHost.Pkg.Resolver.*;
 use Pilot.SelfHost.Pkg.Exclusions.*;
 use Pilot.SelfHost.Cli.DepsCmd.*;
+use Pilot.Core.File::*;
+
+// File.write_text maps directly to fs_write_text without __engine scraping.
 
 pub pure fn nameof(sym: str) -> str => sym;
 
@@ -143,8 +146,8 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         if pkg_name.len() == 0 { pkg_name = "pilot_app"; }
         let mf_content = generate_default_manifest_json(pkg_name, "0.1.0");
         let main_content = scaffold_canonical_main_pilot(pkg_name);
-        let _ = __engine("fs_write_text", "pilot.json", mf_content);
-        let _ = __engine("fs_write_text", "src/main.pilot", main_content);
+        let _ = File.write_text("pilot.json", mf_content);
+        let _ = File.write_text("src/main.pilot", main_content);
         return "Initialized new Pilot package '" + pkg_name + "' (v0.1.0)\n" +
                "  Created: pilot.json\n" +
                "  Created: src/main.pilot\n";
@@ -199,7 +202,7 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let res = resolve_package_dependencies(manifest_json);
         let summary = format_resolution_summary(res);
         let new_lock = generate_resolved_lockfile_json(name, ver, res);
-        let _ = __engine("fs_write_text", "pilot.lock", new_lock);
+        let _ = File.write_text("pilot.lock", new_lock);
 
         return "Resolving dependencies for " + name + " (v" + ver + "):\n\n" +
                summary + "\n" +
@@ -218,7 +221,7 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let res = resolve_package_dependencies(manifest_json);
         let summary = format_resolution_summary(res);
         let new_lock = generate_resolved_lockfile_json(name, ver, res);
-        let _ = __engine("fs_write_text", "pilot.lock", new_lock);
+        let _ = File.write_text("pilot.lock", new_lock);
 
         return "Updating package dependencies to latest SemVer constraints:\n\n" +
                summary + "\n" +
@@ -268,8 +271,8 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let root_ver = manifest_get_version(mf);
         let res = resolve_package_dependencies(updated_json);
         let new_lock = generate_resolved_lockfile_json(root_name, root_ver, res);
-        let _ = __engine("fs_write_text", "pilot.json", updated_json);
-        let _ = __engine("fs_write_text", "pilot.lock", new_lock);
+        let _ = File.write_text("pilot.json", updated_json);
+        let _ = File.write_text("pilot.lock", new_lock);
 
         return "Added '" + pkg_name + "' (" + version_req + ") to " + kind_str + " in pilot.json\n" +
                "Updated pilot.lock with resolved dependency graph.\n";
@@ -291,8 +294,8 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let root_ver = manifest_get_version(mf);
         let res = resolve_package_dependencies(updated_json);
         let new_lock = generate_resolved_lockfile_json(root_name, root_ver, res);
-        let _ = __engine("fs_write_text", "pilot.json", updated_json);
-        let _ = __engine("fs_write_text", "pilot.lock", new_lock);
+        let _ = File.write_text("pilot.json", updated_json);
+        let _ = File.write_text("pilot.lock", new_lock);
 
         return "Removed '" + pkg_name + "' from pilot.json\n" +
                "Updated pilot.lock.\n";
@@ -346,7 +349,7 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         }
         let pattern = p_trim(args);
         let updated_json = add_exclusion_to_manifest_json(manifest_json, pattern);
-        let _ = __engine("fs_write_text", "pilot.json", updated_json);
+        let _ = File.write_text("pilot.json", updated_json);
         return "Added exclusion rule for '" + pattern + "' in pilot.json\n";
     }
 
@@ -360,7 +363,7 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         }
         let pattern = p_trim(args);
         let updated_json = remove_exclusion_from_manifest_json(manifest_json, pattern);
-        let _ = __engine("fs_write_text", "pilot.json", updated_json);
+        let _ = File.write_text("pilot.json", updated_json);
         return "Removed exclusion rule for '" + pattern + "' from pilot.json\n";
     }
 

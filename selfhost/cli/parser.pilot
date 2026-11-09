@@ -5,6 +5,10 @@
 // ==============================================================================
 pub lvl(0) pkg Pilot.SelfHost.Cli.Parser;
 
+use Pilot.Core.Primitives.Map::*;
+use Pilot.Core.Env::*;
+use Pilot.SelfHost.Cli.Spec::*;
+
 pub pure fn nameof(sym: str) -> str => sym;
 
 // ------------------------------------------------------------------------------
@@ -78,34 +82,34 @@ pub fn cli_levenshtein(s1: str, s2: str) -> i64 {
 
     var i: usize = 0;
     while i < l1 {
-        __engine("map_set", v1, 0, (i + 1) as i64);
+        Map.set_handle(v1, 0, (i + 1) as i64);
         let c1 = s1.byte_at(i);
 
         j = 0;
         while j < l2 {
             let c2 = s2.byte_at(j);
             let cost: i64 = if c1 == c2 { 0 } else { 1 };
-            let deletion: i64 = __engine("map_get", v0, j + 1) as i64 + 1;
-            let insertion: i64 = __engine("map_get", v1, j) as i64 + 1;
-            let substitution: i64 = __engine("map_get", v0, j) as i64 + cost;
+            let deletion: i64 = Map.get_handle(v0, j + 1) as i64 + 1;
+            let insertion: i64 = Map.get_handle(v1, j) as i64 + 1;
+            let substitution: i64 = Map.get_handle(v0, j) as i64 + cost;
 
             let m1 = cp_min(deletion, insertion);
             let res = cp_min(m1, substitution);
-            __engine("map_set", v1, j + 1, res);
+            Map.set_handle(v1, j + 1, res);
             j = j + 1;
         }
 
         j = 0;
         while j <= l2 {
-            let val = __engine("map_get", v1, j);
-            __engine("map_set", v0, j, val);
+            let val = Map.get_handle(v1, j);
+            Map.set_handle(v0, j, val);
             j = j + 1;
         }
 
         i = i + 1;
     }
 
-    return __engine("map_get", v0, l2) as i64;
+    return Map.get_handle(v0, l2) as i64;
 }
 
 pub fn cli_suggest_typo(input: str, candidates: i64) -> str {
@@ -461,7 +465,7 @@ pub fn cli_parse_args(reg: ref<CommandRegistry>, raw_argv_line: str) -> i64 {
         let f: FlagSpec = cli_list_get(cmd_spec.flags_handle, fi);
         if f.required && !cli_map_contains(parsed.flag_values, f.long_name) {
             if f.env_fallback.len() > 0 {
-                let ev = __engine("env_var", f.env_fallback);
+                let ev = Env.get(f.env_fallback);
                 if ev.len() > 0 {
                     let vlist = cli_list_new();
                     let _ = cli_list_push(vlist, ev);

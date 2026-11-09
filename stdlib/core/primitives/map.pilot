@@ -140,9 +140,15 @@ pub partial struct Map<TKey: IEquatable<TKey>, TVal: IAnyValue> : IObject {
     pub fn clear() { .inner.clear(); }
     pub pure op [] (key: TKey) -> TVal => .inner[key];
     pub op []= (key: TKey, val: TVal) { .inner[key] = val; }
+
+    pub static fn new_handle() -> i64 => __engine("map_new");
+    pub static fn set_handle(m: i64, key: any, val: any) -> i64 => __engine("map_set", m, key, val);
+    pub static fn get_handle(m: i64, key: any) -> any => __engine("map_get", m, key);
+    pub static fn has_handle(m: i64, key: any) -> bool => __engine("map_has", m, key) as bool;
 }
 
 // Pure Pilot stand-alone functional map primitives (replaces direct __engine calls)
 pub pure fn map_new_pure() -> i64 => __engine("map_new");
 pub fn map_set_pure(m: i64, k: str, v: any) -> i64 => __engine("map_set", m, k, v);
 pub pure fn map_get_pure(m: i64, k: str) -> any => __engine("map_get", m, k);
+pub fn map_has_pure(m: i64, k: str) -> bool => __engine("map_has", m, k) as bool;

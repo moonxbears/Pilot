@@ -23,7 +23,7 @@ fn run_f(p: &str) {
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     let spec = args.join("\x1f").replace('\\', "\\\\").replace('"', "\\\"");
-    let out = eval_sh(&["selfhost/cli/spec.pilot", "selfhost/cli/parser.pilot", "selfhost/cli/help_and_comp.pilot", "selfhost/cli/main.pilot"], &format!("run_cli_entry(\"{spec}\");"));
+    let out = eval_sh(&["stdlib/core/file.pilot", "stdlib/core/env.pilot", "stdlib/core/primitives/map.pilot", "selfhost/cli/spec.pilot", "selfhost/cli/parser.pilot", "selfhost/cli/help_and_comp.pilot", "selfhost/cli/main.pilot"], &format!("run_cli_entry(\"{spec}\");"));
     let (act, p) = out.split_once(':').unwrap_or((&out, ""));
     if act == "RUN" { run_f(p); }
     else if act == "GATE" { let r = eval_sh(&["stdlib/crypto/hash.pilot", "selfhost/lexer.pilot", "selfhost/ast.pilot", "selfhost/parser.pilot", "selfhost/pilotc.pilot", "selfhost/gate/manifest.pilot", "selfhost/gate/seed_audit.pilot", "selfhost/gate/rename_litmus.pilot", "selfhost/gate/bootstrap_parity.pilot", "selfhost/gate/runner.pilot"], &format!("run_pilot_gate_cli(\".\", \"{p}\");")); let (c, b) = r.split_once('\n').unwrap_or(("1", &r)); println!("{b}"); if let Ok(n) = c.parse::<i32>() { if n != 0 { std::process::exit(n); } } }

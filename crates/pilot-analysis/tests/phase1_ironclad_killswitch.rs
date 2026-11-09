@@ -504,3 +504,84 @@ fn test_diagnostic_catalogs_parsed_cleanly() {
     }
 }
 
+#[test]
+fn test_engine_keyword_banned_outside_core_and_mapped_classes() {
+    // 1. Direct __engine call outside core must emit ENGINE001
+    let banned_user_src = r#"
+        pkg MyApp;
+        fn write_data() {
+            let res = __engine("fs_write_text", "out.txt", "hello");
+        }
+    "#;
+    let res = check_src(banned_user_src);
+    assert!(
+        res.diagnostics.iter().any(|d| d.message.contains("ENGINE001")),
+        "Direct __engine call in user code outside core must emit ENGINE001: {:?}",
+        res.diagnostics
+    );
+
+    // 2. Direct __engine call in script without package must also emit ENGINE001
+    let banned_script_src = r#"
+        fn main() {
+            let m = __engine("map_new");
+        }
+    "#;
+    let res2 = check_src(banned_script_src);
+    assert!(
+        res2.diagnostics.iter().any(|d| d.message.contains("ENGINE001")),
+        "Direct __engine call in script without package must emit ENGINE001: {:?}",
+        res2.diagnostics
+    );
+
+    // 3. __engine call inside Pilot.Core.* package is valid (no ENGINE001)
+    let valid_core_src = r#"
+        pub pkg Pilot.Core.Tests;
+        fn core_action() {
+            let h = __engine("map_new");
+        }
+    "#;
+    let res3 = check_src(valid_core_src);
+    assert!(
+        !res3.diagnostics.iter().any(|d| d.message.contains("ENGINE001")),
+        "__engine call inside Pilot.Core.* must be permitted: {:?}",
+        res3.diagnostics
+    );
+
+    // 4. Calling properly mapped File struct methods outside core emits zero ENGINE001 errors
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let file_src = std::fs::read_to_string(root.join("stdlib/core/file.pilot")).expect("read file.pilot");
+    let mapped_user_src = format!(
+        "{}\npkg MyApp;\nfn write_data() {{\n    let res = File.write_text(\"out.txt\", \"hello\");\n}}\n",
+        file_src
+    );
+    let res4 = check_src(&mapped_user_src);
+    assert!(
+        !res4.diagnostics.iter().any(|d| d.message.contains("ENGINE001")),
+        "Calling mapped File.write_text outside core must have zero ENGINE001 errors: {:?}",
+        res4.diagnostics
+    );
+
+    // 5. Verify selfhost/cli/ core files contain zero direct __engine calls
+    for rel in [
+        "selfhost/cli/pkg_cmd.pilot",
+        "selfhost/cli/spec.pilot",
+        "selfhost/cli/parser.pilot",
+        "selfhost/cli/main.pilot",
+    ] {
+        let p = root.join(rel);
+        let src = std::fs::read_to_string(&p).expect("read file");
+        for line in src.lines() {
+            let trimmed = line.trim();
+            if !trimmed.starts_with("//") {
+                assert!(
+                    !trimmed.contains("__engine("),
+                    "File '{}' contains banned direct __engine call: {}",
+                    rel,
+                    trimmed
+                );
+            }
+        }
+    }
+}
+
+

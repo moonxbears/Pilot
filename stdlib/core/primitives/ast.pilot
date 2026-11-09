@@ -158,4 +158,29 @@ pub struct {
                 return id;
             }
     }
+
+    [Layout(c_abi)]
+    Ast : IValue {
+        pub static fn node_count() -> i64 => __engine("ast_node_count");
+        pub static fn node_kind(nid: i64) -> i64 => __engine("ast_node_kind", nid);
+        pub static fn orig_kind(nid: i64) -> i64 => __engine("ast_orig_kind", nid);
+        pub static fn node_sym(nid: i64) -> i64 => __engine("ast_node_sym", nid);
+        pub static fn node_flags(nid: i64) -> i64 => __engine("ast_node_flags", nid);
+        pub static fn decl_flags(nid: i64) -> i64 => __engine("ast_decl_flags", nid);
+        pub static fn node_lit_kind(nid: i64) -> i64 => __engine("ast_node_lit_kind", nid);
+        pub static fn node_raw_bits(nid: i64) -> i64 => __engine("ast_node_raw_bits", nid);
+        pub static fn child_count(nid: i64) -> i64 => __engine("ast_child_count", nid);
+        pub static fn child_at(nid: i64, idx: i64) -> i64 => __engine("ast_child_at", nid, idx);
+        pub static fn parent(nid: i64) -> i64 => __engine("ast_parent", nid);
+        pub static fn span_start(nid: i64) -> i64 => __engine("ast_span_start", nid);
+        pub static fn span_end(nid: i64) -> i64 => __engine("ast_span_end", nid);
+        pub static fn emit_diag(nid: i64, sev: i64, msg: str) => __engine("ast_emit_diag", nid, sev, msg);
+        pub static fn attr_count(nid: i64) -> i64 => __engine("ast_attr_count", nid);
+        pub static fn attr_arg(nid: i64, idx: i64) -> i64 => __engine("ast_attr_arg", nid, idx);
+        pub static fn attr_decl_count(nid: i64) -> i64 => __engine("ast_attr_decl_count", nid);
+        pub static fn attr_name(nid: i64, idx: i64) -> i64 => __engine("ast_attr_name", nid, idx);
+        pub static fn base_count(nid: i64) -> i64 => __engine("ast_base_count", nid);
+        pub static fn base_at(nid: i64, idx: i64) -> i64 => __engine("ast_base_at", nid, idx);
+        pub static fn mount_unit(path: str) -> i64 => __engine("mount_unit", path);
+    }
 }

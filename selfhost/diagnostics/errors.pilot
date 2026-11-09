@@ -524,4 +524,11 @@ pub let ERRORS = [
         category: "ModuleGraph",
         reference: "Pilot AGENTS.md §5 Clearance Ring Conflict",
     },
+    ErrorDef {
+        code: "ENGINE001",
+        title: "Direct Engine Invocation Prohibited",
+        description: "Direct invocation of the '__engine' seed keyword is strictly banned outside of Pilot.Core. Use mapped core classes, structs, or functions (such as File, Map, or Reflect) instead.",
+        category: "CoreBoundary",
+        reference: "Pilot Architecture Rule 1 / Ring 1 Freestanding Boundary",
+    },
 ];

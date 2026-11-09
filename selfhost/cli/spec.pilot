@@ -5,56 +5,58 @@
 // ==============================================================================
 pub lvl(0) pkg Pilot.SelfHost.Cli.Spec;
 
+use Pilot.Core.Primitives.Map::*;
+
 pub pure fn nameof(sym: str) -> str => sym;
 
 // ------------------------------------------------------------------------------
-// Internal dynamic list and map helpers built on VM map primitives
+// Internal dynamic list and map helpers built on core Map primitives
 // ------------------------------------------------------------------------------
 
 pub fn cli_list_new() -> i64 {
-    let m = __engine("map_new");
-    __engine("map_set", m, "count", 0);
+    let m = Map.new_handle();
+    Map.set_handle(m, "count", 0);
     return m;
 }
 
 pub fn cli_list_len(list: i64) -> usize {
-    return __engine("map_get", list, "count") + 0;
+    return Map.get_handle(list, "count") + 0;
 }
 
 pub fn cli_list_push(list: i64, item: any) -> usize {
     let idx = cli_list_len(list);
-    __engine("map_set", list, idx, item);
-    __engine("map_set", list, "count", idx + 1);
+    Map.set_handle(list, idx, item);
+    Map.set_handle(list, "count", idx + 1);
     return idx + 1;
 }
 
 pub fn cli_list_get(list: i64, idx: usize) -> any {
-    return __engine("map_get", list, idx);
+    return Map.get_handle(list, idx);
 }
 
 pub fn cli_list_get_str(list: i64, idx: usize) -> str {
-    return __engine("map_get", list, idx);
+    return Map.get_handle(list, idx);
 }
 
 pub fn cli_map_new() -> i64 {
-    return __engine("map_new");
+    return Map.new_handle();
 }
 
 pub fn cli_map_set(m: i64, key: str, val: any) -> i64 {
-    __engine("map_set", m, key, val);
+    Map.set_handle(m, key, val);
     return m;
 }
 
 pub fn cli_map_get(m: i64, key: str) -> any {
-    return __engine("map_get", m, key);
+    return Map.get_handle(m, key);
 }
 
 pub fn cli_map_get_int(m: i64, key: str) -> i64 {
-    return __engine("map_get", m, key) as i64;
+    return Map.get_handle(m, key) as i64;
 }
 
 pub fn cli_map_contains(m: i64, key: str) -> bool {
-    return __engine("map_has", m, key) as bool;
+    return Map.has_handle(m, key);
 }
 
 // ------------------------------------------------------------------------------

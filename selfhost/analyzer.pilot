@@ -3,7 +3,6 @@
 // 100% Pilot-Hosted Multi-Pass Analyzer Executed in PilVirtualMachine
 // Driven by __engine(...) host bridge into PhysicsRegistry
 // ==============================================================================
-
 pub pkg Pilot.SelfHost.Analyzer;
 extern fn __engine(operation: string, ...args: i64) -> i64;
 let Cfg = {
@@ -71,7 +70,6 @@ pub fn is_suppressed(nid: i64, code: str, msg: str) -> bool {
     }
     return false;
 }
-
 pub fn emit_diag(nid: i64, sev: i64, msg: str) {
     var c = 0;
     let mlen = msg.len();
@@ -115,7 +113,6 @@ pub fn infer_struct(s_id: i64, node_count: i64) -> i64 {
         }
         fscan = fscan + 1;
     }
-
     let decl_cnt = __engine(Cfg.ast.ast_attr_decl_count, s_id);
     if has_non_self_field == 0 && decl_cnt > 0 {
         var di = 0;
@@ -180,7 +177,6 @@ pub fn infer_struct(s_id: i64, node_count: i64) -> i64 {
     __engine(Cfg.ast.ast_bind_layout, s_id, agg_lid);
     return agg_lid;
 }
-
 pub fn resolve_lit_layout(lit_kind: i64, node_count: i64) -> i64 {
     // 1. Check for StructDecl with matching 1-arg attribute (e.g. [DefaultLit(1)])
     var j = 0;
@@ -210,7 +206,6 @@ pub fn resolve_lit_layout(lit_kind: i64, node_count: i64) -> i64 {
         }
         j = j + 1;
     }
-
     // 3. Reuse previously bound literal of same lit_kind in this AST
     j = 0;
     while j < node_count {
@@ -220,12 +215,10 @@ pub fn resolve_lit_layout(lit_kind: i64, node_count: i64) -> i64 {
         }
         j = j + 1;
     }
-
     if lit_kind == 4 { return __engine(Cfg.ast.layout_hw_header, 1); }
     if lit_kind == 2 { return __engine(Cfg.ast.layout_hw_header, 13); }
     return __engine(Cfg.ast.layout_hw_header, 10);
 }
-
 pub fn infer_member_expr(i: i64, node_count: i64) -> i64 {
     let c_count = __engine(Cfg.ast.ast_child_count, i);
     if c_count == 0 { return 0; }
@@ -253,7 +246,6 @@ pub fn infer_member_expr(i: i64, node_count: i64) -> i64 {
     }
     return 0;
 }
-
 pub fn check_div_by_zero(i: i64, op: i64, c_count: i64) -> i64 {
     if op >= 4 && op <= 6 && c_count >= 2 {
         let rhs_id = __engine(Cfg.ast.ast_child_at, i, 1);
@@ -294,7 +286,6 @@ pub fn infer_binary_expr(i: i64, node_count: i64) -> i64 {
     }
     return 0;
 }
-
 pub fn infer_node(i: i64, node_count: i64) -> i64 {
     let kind = __engine(Cfg.ast.ast_node_kind, i);
     if kind == 15 {
@@ -302,7 +293,6 @@ pub fn infer_node(i: i64, node_count: i64) -> i64 {
         __engine(Cfg.ast.ast_bind_layout, i, lit_lid);
         return lit_lid;
     }
-
     if kind == 14 {
         let sym = __engine(Cfg.ast.ast_node_sym, i);
         var j = i - 1;
@@ -318,7 +308,6 @@ pub fn infer_node(i: i64, node_count: i64) -> i64 {
         }
         return 0;
     }
-
     if kind == 4 {
         let ann_sym = __engine(Cfg.ast.ast_node_raw_bits, i);
         if ann_sym > 0 {
@@ -347,7 +336,6 @@ pub fn infer_node(i: i64, node_count: i64) -> i64 {
         }
         return 0;
     }
-
     if kind == 16 { return infer_call_expr(i, node_count); }
     if kind == 17 { return infer_member_expr(i, node_count); }
     if kind == 19 { return infer_binary_expr(i, node_count); }
@@ -412,7 +400,6 @@ pub fn verify_capability_transition(src_cap: i64, dst_cap: i64) -> bool {
 pub fn compute_field_projection_offset(agg_lid: i64, field_idx: i64) -> i64 {
     return __engine(Cfg.ast.layout_field_offset, agg_lid, field_idx);
 }
-
 pub fn compute_soa_projection(elem_lid: i64, ptr_bits: i64) -> i64 {
     // Target-pointer-width-aware SOA column slice (`{ ptr<TField>, usize }` -> 8B on 32-bit, 16B on 64-bit)
     let w = if ptr_bits > 0 { ptr_bits } else { 64 };
@@ -476,19 +463,16 @@ pub fn verify_decl_contracts(nid: i64, enforce_naming: bool) -> i64 {
     if c0 == 36 {
         return 0;
     }
-
     let dflags = __engine(Cfg.ast.ast_decl_flags, nid);
     let is_partial = (dflags & 16) != 0;
     let has_dtor = (dflags & 1024) != 0;
     let is_lang = has_attr_named(nid, "Lang");
-
     if kind == 2 {
         if enforce_naming && (c0 != 73 || nlen < 2 || name.byte_at(1) < 65 || name.byte_at(1) > 90) {
             emit_diag(nid, 1, "EnforceCoreNaming: [InterfacePrefix] Interface '" + name + "' must begin with 'I' + PascalCase");
         }
         return 0;
     }
-
     let bc = __engine(Cfg.ast.ast_base_count, nid);
     var has_ivalue = false; var has_iref = false; var has_iobj = false; var has_iguard = false; var has_iattr = false; var bi = 0;
     while bi < bc {
@@ -498,11 +482,9 @@ pub fn verify_decl_contracts(nid: i64, enforce_naming: bool) -> i64 {
         else if bnm == "IAttribute" || bnm == "IInheritedAttribute" || bnm == "IInterceptor" || bnm == "IEcsRule" || str_ends_with_bytes(bnm, "Attribute") { has_iattr = true; }
         bi = bi + 1;
     }
-
     if has_ivalue && has_dtor {
         emit_diag(nid, 1, "LatticeContractMismatch: struct '" + name + "' declared ': IValue' (0b00), but declares ~self() destructor (0b10)");
     }
-
     if enforce_naming && !is_partial {
         if is_lang {
             if !is_lowercase_lang_ident(name) { emit_diag(nid, 1, "EnforceCoreNaming: [LangPrimitiveLowercase] [Lang] primitive struct '" + name + "' must be lowercase"); }
@@ -531,14 +513,12 @@ pub fn verify_decl_contracts(nid: i64, enforce_naming: bool) -> i64 {
     }
     return 0;
 }
-
 pub fn is_kw_contextual_ident(name: str) -> bool {
     if name == "self" || name == "field" || name == "value" || name == "type" || name == "unit" || name == "nameof" || name == "__engine" || name == "op" || name == "pkg" || name == "state" { return true; }
     if name == "get" || name == "set" || name == "open" || name == "role" || name == "route" || name == "connect" || name == "exit" || name == "delete" || name == "values" || name == "update" { return true; }
     if name == "from" || name == "where" || name == "select" || name == "insert" || name == "order" || name == "context" || name == "quote" || name == "partial" || name == "blueprint" || name == "cue" { return true; }
     return false;
 }
-
 pub fn is_in_pipe_delimited(kw_buf: str, target: str) -> bool {
     let tlen = target.len();
     if tlen == 0 { return false; }
@@ -555,11 +535,9 @@ pub fn is_in_pipe_delimited(kw_buf: str, target: str) -> bool {
     }
     return false;
 }
-
 pub fn build_dynamic_keyword_set(node_count: i64) -> str {
     var kw_buf = "|__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm|";
     kw_buf = kw_buf + "else|while|until|for|in|then|break|continue|guard|switch|case|default|try|catch|var|const|enum|actor|state|type|pub|priv|prot|pkg|int|file|open|export|lvl|pure|static|iso|partial|ext|scope|enter|exit|requires|ensures|old|context|adapter|each|coalesce|with|without|as|async|await|spawn|atomic|sync|isolate|select|timeout|bounded|noalloc|region|deadline|within|periodic|priority|jitter|database|transaction|commit|rollback|savepoint|connect|from|where|order|ascending|descending|insert|into|values|update|delete|extern|assembly|module|lib|sizeof|alignof|offsetof|fields_of|nameof|assert|blueprint|cue|role|route|unit|syntax|use|op|";
-
     var cat = 0;
     while cat <= 255 {
         if cat <= 16 || cat >= 100 {
@@ -568,7 +546,6 @@ pub fn build_dynamic_keyword_set(node_count: i64) -> str {
         }
         cat = cat + 1;
     }
-
     var i = 0;
     while i < node_count {
         if (has_attr_named(i, "KeywordDef") || has_attr_named(i, "KeywordDefAttr")) && __engine(Cfg.ast.ast_node_sym, i) != 0 {
@@ -662,7 +639,6 @@ pub fn is_same_lexical_scope(caller: i64, target: i64) -> bool {
 }
 pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
     let ok = __engine(Cfg.ast.ast_orig_kind, i);
-
     if ok == 104 {
         let cc = __engine(Cfg.ast.ast_child_count, i);
         if cc >= 2 {
@@ -689,7 +665,6 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
             }
         }
     }
-
     if ok == 100 || ok == 101 {
         let ann_sym = __engine(Cfg.ast.ast_node_raw_bits, i);
         if ann_sym > 0 {
@@ -707,7 +682,6 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
             }
         }
     }
-
     if ok == 102 {
         let cc = __engine(Cfg.ast.ast_child_count, i);
         if cc >= 2 {
@@ -731,7 +705,6 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
             }
         }
     }
-
     if ok == 103 {
         let cc = __engine(Cfg.ast.ast_child_count, i);
         if cc > 0 {
@@ -764,7 +737,6 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
             }
         }
     }
-
     if ok == 207 {
         let target_fn = __engine(Cfg.ast.ast_get_bound_target, i);
         if target_fn != 4294967295 && target_fn >= 0 {
@@ -805,7 +777,6 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
             }
         }
     }
-
     if (ok == 209 || ok == 210) && __engine(Cfg.ast.ast_child_count, i) > 0 {
         let recv = __engine(Cfg.ast.ast_child_at, i, 0);
         if __engine(Cfg.ast.ast_orig_kind, recv) != 213 {
@@ -823,13 +794,10 @@ pub fn verify_null_safety(i: i64, node_count: i64) -> i64 {
             }
         }
     }
-
     return 0;
 }
-
 pub fn verify_error_flow(i: i64, node_count: i64) -> i64 {
     let ok = __engine(Cfg.ast.ast_orig_kind, i);
-
     if ok == 110 && __engine(Cfg.ast.ast_child_count, i) > 0 {
         let expr = __engine(Cfg.ast.ast_child_at, i, 0);
         if __engine(Cfg.ast.ast_orig_kind, expr) == 207 {
@@ -896,7 +864,6 @@ pub fn verify_loop_ergonomics(i: i64, node_count: i64) -> i64 {
                 }
                 k = k + 1;
             }
-
             if has_valued_break && has_yield { emit_diag(i, 1, "LOOP001: Cannot mix 'break <expr>' and 'yield <expr>' in the same 'for' loop"); return 1; }
             if has_void_break && has_valued_break { emit_diag(i, 1, "LOOP002: Cannot mix valueless 'break;' and valued 'break <expr>;' in the same 'for' loop"); return 1; }
             if has_then && !has_valued_break { emit_diag(i, 1, "LOOP003: Loop completion 'then' branch is only valid on a ScalarBreak 'for' loop containing 'break <expr>'"); return 1; }
@@ -963,11 +930,9 @@ pub fn verify_pattern_matching(i: i64, node_count: i64) -> i64 {
     }
     return 0;
 }
-
 pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
     let ok = __engine(Cfg.ast.ast_orig_kind, i);
     let kind = __engine(Cfg.ast.ast_node_kind, i);
-
     // 1. UNIMP004: [Unimplemented] or [Todo] attribute on declaration
     if (kind == 1 || kind == 2 || kind == 3) && (has_attr_named(i, "Unimplemented") || has_attr_named(i, "Todo")) {
         let name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
@@ -1039,7 +1004,6 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
             bi = bi + 1;
         }
     }
-
     // 5. UNREACH001: Unreachable code after diverging statement in BlockExpr
     if ok == 200 {
         let cc = __engine(Cfg.ast.ast_child_count, i); var ci = 0; var diverged = false;
@@ -1117,7 +1081,6 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
             emit_diag(i, 3, "OPT002: Bounded loop is an eligible candidate for compile-time unrolling");
         }
     }
-
     // 10. VAR001: Untyped and uninitialized variable declaration (Error)
     if (ok == 100 || ok == 101) && __engine(Cfg.ast.ast_child_count, i) == 0 && __engine(Cfg.ast.ast_node_raw_bits, i) == 0 {
         let vname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
@@ -1126,13 +1089,11 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
             emit_diag(i, 1, "VAR001: Variable '" + vname + "' requires an explicit type annotation or initial value");
         }
     }
-
     // 11. UNUSED001: Unused declaration (Warning)
     if ok == 100 || ok == 101 || ok == 3 {
         let name = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
         if name.len() >= 6 && name.slice(0, 6) == "unused" { emit_diag(i, 2, "UNUSED001: Declaration '" + name + "' is unused"); }
     }
-
     // 12. OPT003: Small leaf function inlining candidate (Info)
     if ok == 3 && __engine(Cfg.ast.ast_child_count, i) > 0 {
         let body = __engine(Cfg.ast.ast_child_at, i, __engine(Cfg.ast.ast_child_count, i) - 1);
@@ -1141,7 +1102,6 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
             if fn_name.len() >= 6 && fn_name.slice(0, 6) == "unused" { emit_diag(i, 3, "OPT003: Leaf function '" + fn_name + "' is an eligible candidate for inlining"); }
         }
     }
-
     // 13. FLOAT001: Direct float equality comparison (Warning)
     if ok == 205 && __engine(Cfg.ast.ast_child_count, i) >= 2 {
         let op = __engine(Cfg.ast.ast_node_raw_bits, i);
@@ -1151,7 +1111,6 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
             if lok == 302 || rok == 302 { emit_diag(i, 2, "FLOAT001: Direct floating-point equality comparison ('==' or '!=') may fail due to precision; use epsilon comparison"); }
         }
     }
-
     // 14. MUT001, UNUSED, Hints
     let sname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, i));
     if ok == 101 {
@@ -1173,7 +1132,6 @@ pub fn verify_warnings_and_unimplemented(i: i64, node_count: i64) -> i64 {
     if sname.len() >= 5 && sname.slice(0, 5) == "each_" { emit_diag(i, 3, "HINT005: Loop '" + sname + "' can be vectorized using each adapter"); }
     return 0;
 }
-
 pub fn verify_type_and_decl(i: i64, node_count: i64) -> i64 {
     let ok = __engine(Cfg.ast.ast_orig_kind, i);
     let kind = __engine(Cfg.ast.ast_node_kind, i);
@@ -1295,7 +1253,6 @@ pub fn verify_type_and_decl(i: i64, node_count: i64) -> i64 {
     }
     return 0;
 }
-
 pub fn verify_ownership_and_perceus(i: i64, node_count: i64) -> i64 {
     let ok = __engine(Cfg.ast.ast_orig_kind, i);
     let kind = __engine(Cfg.ast.ast_node_kind, i);
@@ -1355,7 +1312,19 @@ pub fn verify_ownership_and_perceus(i: i64, node_count: i64) -> i64 {
     }
     return 0;
 }
-
+pub fn verify_engine_usage(i: i64, is_core: bool) -> i64 {
+    if is_core { return 0; }
+    if __engine(Cfg.ast.ast_node_kind, i) == 16 {
+        let callee = __engine(Cfg.ast.ast_child_at, i, 0);
+        if callee != 4294967295 && callee >= 0 && __engine(Cfg.ast.ast_node_kind, callee) == 14 {
+            let csym = __engine(Cfg.ast.ast_node_sym, callee);
+            if __engine(Cfg.ast.sym_str, csym) == "__engine" {
+                emit_diag(i, 1, "ENGINE001: Direct '__engine' invocation is banned outside of core; use mapped core classes, structs, or functions (such as File, Map, or Reflect) instead");
+            }
+        }
+    }
+    return 0;
+}
 pub fn is_inside_const_decl(nid: i64) -> bool {
     var cur = nid; var depth = 0;
     while cur >= 0 && cur < 100000 && depth < 20 {
@@ -1375,7 +1344,6 @@ pub fn is_inside_executable_scope(nid: i64) -> bool {
     }
     return false;
 }
-
 pub fn verify_hardcoding_contracts(i: i64, has_pkg_no_hardcode: bool, unit_pkg_name: str, targeted_ns: str) -> void {
     if __engine(Cfg.ast.ast_node_kind, i) != 15 || is_inside_const_decl(i) || !is_inside_executable_scope(i) { return; }
     var in_scope = has_pkg_no_hardcode;
@@ -1404,17 +1372,14 @@ pub fn verify_hardcoding_contracts(i: i64, has_pkg_no_hardcode: bool, unit_pkg_n
         emit_diag(i, 1, "HARD001: Hardcoded numeric literal '" + __engine(Cfg.ast.ast_node_raw_bits, i) + "' is prohibited in '[NoHardcoding]' scope; extract to a 'const' declaration or configuration");
     }
 }
-
 pub fn analyze_unit(unit_id: i64) -> i64 {
     let node_count = __engine(Cfg.ast.ast_node_count);
     if node_count == 0 { return 0; }
-
     var enforce_naming = false;
     var has_pkg_no_hardcode = false;
     var has_any_no_hardcode = false;
     var unit_pkg_name = "|";
     var targeted_no_hardcode_ns = "|";
-
     var ni = 0;
     while ni < node_count {
         if has_attr_named(ni, "EnforceCoreNaming") || has_attr_named(ni, "EnforceCoreNamingAttr") { enforce_naming = true; }
@@ -1448,7 +1413,6 @@ pub fn analyze_unit(unit_id: i64) -> i64 {
         }
         ni = ni + 1;
     }
-
     // Pass 1 & 2: Resolve StructDecl & param layouts
     var i = 0;
     while i < node_count {
@@ -1460,21 +1424,20 @@ pub fn analyze_unit(unit_id: i64) -> i64 {
         }
         i = i + 1;
     }
-
     // Pass 3, 4, 5: Inference, Decl Contracts, Keyword Validation
     i = 0; while i < node_count { infer_node(i, node_count); i = i + 1; }
     i = 0; while i < node_count { verify_decl_contracts(i, enforce_naming); i = i + 1; }
     let kw_set = build_dynamic_keyword_set(node_count);
     i = 0; while i < node_count { verify_ident_not_keyword(i, kw_set); i = i + 1; }
-
-    // Pass 6: Null-safety, Error flow, Loop ergonomics, Warnings, Type/Decl, and Perceus
+    // Pass 6: Null-safety, Error flow, Loop ergonomics, Warnings, Type/Decl, Perceus, Core Engine Boundary
+    let is_core = enforce_naming || str_contains(unit_pkg_name, "|Pilot.Core.") || str_contains(unit_pkg_name, "|core.") || str_contains(unit_pkg_name, "|Pilot.Core|") || str_contains(unit_pkg_name, "|core|");
     i = 0; while i < node_count {
         verify_null_safety(i, node_count); verify_error_flow(i, node_count); verify_loop_ergonomics(i, node_count);
         verify_pattern_matching(i, node_count); verify_warnings_and_unimplemented(i, node_count);
         verify_type_and_decl(i, node_count); verify_ownership_and_perceus(i, node_count);
+        verify_engine_usage(i, is_core);
         i = i + 1;
     }
-
     // Pass 7: Propagate declaration errors to corresponding uses later
     i = 0; while i < node_count {
         if __engine(Cfg.ast.ast_node_kind, i) == 14 {
@@ -1485,13 +1448,10 @@ pub fn analyze_unit(unit_id: i64) -> i64 {
         }
         i = i + 1;
     }
-
     // Pass 8: Anti-hardcoding contract verification ([NoHardcoding])
     if has_any_no_hardcode {
         i = 0; while i < node_count { verify_hardcoding_contracts(i, has_pkg_no_hardcode, unit_pkg_name, targeted_no_hardcode_ns); i = i + 1; }
     }
-
     return 1;
 }
-
 analyze_unit(0);

@@ -223,14 +223,14 @@ pub fn run_cli_entry(raw_args_line: str) -> str {
     let reg = default_command_registry();
     let p_res = cli_parse_args(reg, raw_args_line);
 
-    let ok = __engine("map_get", p_res, "ok") as bool;
+    let ok = cli_map_get(p_res, "ok") as bool;
     if !ok {
-        let msg = __engine("map_get", p_res, "message");
-        let ec = __engine("map_get", p_res, "exit_code");
+        let msg = cli_map_get(p_res, "message");
+        let ec = cli_map_get(p_res, "exit_code");
         return "PRINT:" + msg + "\nEXIT:" + ec;
     }
 
-    let p: ParsedArgs = __engine("map_get", p_res, "parsed");
+    let p: ParsedArgs = cli_map_get(p_res, "parsed");
 
     if p.command == "help" {
         return "PRINT:" + render_global_help(reg);
