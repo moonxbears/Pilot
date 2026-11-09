@@ -1,0 +1,106 @@
+// ==============================================================================
+// FILE: selfhost/types/clearance_flow.pilot
+// Milestone 28: 4-Tier Progressive Learning Profiles - Flow-Sensitive Clearance Solver
+// Replaces ad-hoc AST string re-walking with an O(1) flow-sensitive lvl clearance
+// solver over PilIR blocks (if lvl >= N branch elevation + audit trail).
+// Enforces:
+//   LVL001: Insufficient clearance ring level
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Types.ClearanceFlow;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Clearance Diagnostics & Formatting
+// ------------------------------------------------------------------------------
+
+pub pure fn format_lvl001(target: str, required_lvl: u32, active_lvl: u32) -> str {
+    return "LVL001: Insufficient clearance ring level (active: lvl" + (active_lvl as str) + ", required: lvl" + (required_lvl as str) + ") to access '" + target + "'";
+}
+
+// ------------------------------------------------------------------------------
+// 2. Clearance Frame (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct ClearanceFrame : IValue {
+    pub current_level:    u32;
+    pub is_elevated:      bool;
+    pub elevation_reason: str;
+}
+
+pub pure fn clearance_frame_new(lvl: u32, elevated: bool, reason: str) -> ClearanceFrame {
+    return ClearanceFrame {
+        current_level:    lvl,
+        is_elevated:      elevated,
+        elevation_reason: reason,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 3. Clearance Solver Schema (0b10 : IObject)
+// ------------------------------------------------------------------------------
+
+pub struct ClearanceSolver : IObject {
+    pub default_level: u32;
+    pub frame_levels:  List<u32>;
+    pub frame_reasons: List<str>;
+    pub depth:         usize;
+    pub audit_trail:   List<str>;
+}
+
+pub fn clearance_solver_new(base_level: u32) -> ClearanceSolver {
+    var lvls: List<u32> = [];
+    lvls.push(base_level);
+    var reasons: List<str> = [];
+    reasons.push("base_package_scope");
+    return ClearanceSolver {
+        default_level: base_level,
+        frame_levels:  lvls,
+        frame_reasons: reasons,
+        depth:         1,
+        audit_trail:   [],
+    };
+}
+
+pub pure fn current_clearance(self: ref<ClearanceSolver>) -> u32 {
+    if self.depth == 0 { return self.default_level; }
+    return self.frame_levels[self.depth - 1];
+}
+
+// ------------------------------------------------------------------------------
+// 4. Branch Elevation & Scope Lifecycle
+// ------------------------------------------------------------------------------
+
+pub var fn enter_elevated_scope(var ref self: ClearanceSolver, new_level: u32, reason: str) {
+    let prev_lvl = current_clearance(self);
+    let effective = if new_level > prev_lvl { new_level } else { prev_lvl };
+    self.frame_levels.push(effective);
+    self.frame_reasons.push(reason);
+    self.depth = self.depth + 1;
+    let audit_msg = "Elevated clearance from lvl" + (prev_lvl as str) + " to lvl" + (effective as str) + " (" + reason + ")";
+    self.audit_trail.push(audit_msg);
+}
+
+pub var fn exit_elevated_scope(var ref self: ClearanceSolver) {
+    if self.depth > 1 {
+        let prev_reason = self.frame_reasons[self.depth - 1];
+        self.depth = self.depth - 1;
+        let now_lvl = self.frame_levels[self.depth - 1];
+        let audit_msg = "Restored clearance to lvl" + (now_lvl as str) + " on exit from '" + prev_reason + "'";
+        self.audit_trail.push(audit_msg);
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 5. Access Permission Checking
+// ------------------------------------------------------------------------------
+
+pub fn check_clearance_access(self: ref<ClearanceSolver>, required_level: u32, target_name: str) -> str {
+    let active = current_clearance(self);
+    if active < required_level {
+        return format_lvl001(target_name, required_level, active);
+    }
+    return "";
+}

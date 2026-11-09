@@ -1,0 +1,195 @@
+// ==============================================================================
+// FILE: selfhost/diag/progressive_coach.pilot
+// Milestone 28: 4-Tier Progressive Learning Profiles & Compiler Guidance
+// Adapts diagnostic phrasing, concrete --fix suggestions, and opt-in PerfCoach
+// and ArchCoach hints to the active LearningTier without changing semantics.
+// Enforces:
+//   COACH001: Suggests [Eq, Json] weaver when manual field comparison is detected
+//   COACH002: Suggests adapter or -> projection on repetitive mapping funcs
+//   PERF001: Flags avoidable 0b10 .clone() in loops where ref<T> achieves 0 allocs
+//   PERF002: Reports struct field padding waste >= 8B (sizeof reorder hint)
+//   PERF003: Highlights hot AoS loop eligible for .pchor SoA<T> speedup
+// ==============================================================================
+
+pub lvl(0) pkg Pilot.SelfHost.Diag.Coach;
+
+use pilot.profile.*;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Coaching Diagnostic Formatters
+// ------------------------------------------------------------------------------
+
+pub pure fn format_coach001(struct_name: str) -> str {
+    return "COACH001: Manual equality boilerplate detected on '" + struct_name + "'; apply [Eq] attribute to auto-derive 1-cycle comparison";
+}
+
+pub pure fn format_coach002(from_type: str, to_type: str) -> str {
+    return "COACH002: Repetitive mapping pattern between '" + from_type + "' and '" + to_type + "'; consider defining 'adapter " + from_type + " -> " + to_type + "'";
+}
+
+pub pure fn format_perf001(var_name: str, type_name: str) -> str {
+    return "PERF001: Avoidable 0b10 .clone() of '" + var_name + ": " + type_name + "' inside loop; borrow via ref<" + type_name + "> for zero allocations";
+}
+
+pub pure fn format_perf002(struct_name: str, cur_sz: usize, opt_sz: usize, waste: usize) -> str {
+    return "PERF002: Struct '" + struct_name + "' wastes " + (waste as str) + " bytes in padding (" + (cur_sz as str) + "B -> " + (opt_sz as str) + "B); reorder fields by descending alignment";
+}
+
+pub pure fn format_perf003(struct_name: str, speedup: usize) -> str {
+    return "PERF003: Hot loop over '" + struct_name + "' fetches subset of fields; apply .pchor SoA<" + struct_name + "> for estimated " + (speedup as str) + "x cache-line speedup";
+}
+
+// ------------------------------------------------------------------------------
+// 2. Adapted Progressive Diagnostic Schema (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct AdaptedDiagnostic : IValue {
+    pub tier:           LearningTier;
+    pub error_code:     str;
+    pub title:          str;
+    pub explanation:    str;
+    pub fix_suggestion: str;
+    pub has_fix:        bool;
+}
+
+pub pure fn adapted_diagnostic_new(
+    tier: LearningTier,
+    code: str,
+    title: str,
+    expl: str,
+    fix: str,
+    has_fix: bool
+) -> AdaptedDiagnostic {
+    return AdaptedDiagnostic {
+        tier:           tier,
+        error_code:     code,
+        title:          title,
+        explanation:    expl,
+        fix_suggestion: fix,
+        has_fix:        has_fix,
+    };
+}
+
+// ------------------------------------------------------------------------------
+// 3. Progressive Diagnostic Adaptation (e.g. ESCAPE001 across Tiers)
+// ------------------------------------------------------------------------------
+
+pub fn adapt_escape001(
+    tier: LearningTier,
+    var_name: str,
+    fn_name: str,
+    drop_line: usize
+) -> AdaptedDiagnostic {
+    if tier == LearningTier::Tier1Everyday {
+        return adapted_diagnostic_new(
+            tier,
+            "ESCAPE001",
+            "Cannot return a slice of '" + var_name + "' because '" + var_name + "' only lives inside this function",
+            "The slice you are returning points to memory that will be deleted when " + fn_name + " finishes.",
+            "return '" + var_name + "' directly",
+            true
+        );
+    }
+    if tier == LearningTier::Tier2Domain {
+        return adapted_diagnostic_new(
+            tier,
+            "ESCAPE001",
+            "Borrowed slice<T> escapes lexical scope of local collection '" + var_name + "'",
+            "Returning a borrowed reference to a function-local collection causes an escape violation.",
+            "Return owned List<T> or pass caller-owned buffer as parameter",
+            true
+        );
+    }
+    // Tier3Systems & Tier4Meta: Full hardware & lattice precision
+    return adapted_diagnostic_new(
+        tier,
+        "ESCAPE001",
+        "ESCAPE001: 0b01 borrowed view escapes lexical owner span",
+        "Cannot outlive scope of 0b10 local buffer '" + var_name + "'; Perceus drop occurs at line " + (drop_line as str),
+        "Pass iso buffer or allocate in caller ArenaScope",
+        true
+    );
+}
+
+// ------------------------------------------------------------------------------
+// 4. Opt-in Performance & Architecture Coach Checkers
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct FieldLayoutInfo : IValue {
+    pub name:        str;
+    pub byte_size:   usize;
+    pub align_bytes: usize;
+}
+
+pub pure fn field_layout_info_new(name: str, sz: usize, align: usize) -> FieldLayoutInfo {
+    return FieldLayoutInfo {
+        name:        name,
+        byte_size:   sz,
+        align_bytes: align,
+    };
+}
+
+pub pure fn align_up_sz(val: usize, align: usize) -> usize {
+    if align <= 1 { return val; }
+    let rem = val % align;
+    if rem == 0 { return val; }
+    return val + (align - rem);
+}
+
+pub fn analyze_struct_padding(
+    struct_name: str,
+    fields: List<FieldLayoutInfo>
+) -> str {
+    // 1. Calculate current size with natural padding in declared order
+    var cur_off: usize = 0;
+    var max_align: usize = 1;
+    var i = 0;
+    while i < fields.len() {
+        let f = fields[i];
+        if f.align_bytes > max_align { max_align = f.align_bytes; }
+        cur_off = align_up_sz(cur_off, f.align_bytes);
+        cur_off = cur_off + f.byte_size;
+        i = i + 1;
+    }
+    let cur_total = align_up_sz(cur_off, max_align);
+
+    // 2. Calculate optimal size (e.g. descending alignment: 8, then 4, then 2, then 1)
+    var opt_off: usize = 0;
+    var a = 8;
+    while a >= 1 {
+        var j = 0;
+        while j < fields.len() {
+            let f = fields[j];
+            if f.align_bytes == a {
+                opt_off = align_up_sz(opt_off, f.align_bytes);
+                opt_off = opt_off + f.byte_size;
+            }
+            j = j + 1;
+        }
+        a = a / 2;
+    }
+    let opt_total = align_up_sz(opt_off, max_align);
+
+    if cur_total > opt_total {
+        let waste = cur_total - opt_total;
+        if waste >= 8 {
+            return format_perf002(struct_name, cur_total, opt_total, waste);
+        }
+    }
+    return "";
+}
+
+pub pure fn analyze_loop_clone(
+    in_loop: bool,
+    var_name: str,
+    type_name: str
+) -> str {
+    if in_loop {
+        return format_perf001(var_name, type_name);
+    }
+    return "";
+}

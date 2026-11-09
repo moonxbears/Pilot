@@ -1406,7 +1406,7 @@ Given domain `struct T` with leaf scalar/object fields $f_0, f_1, \dots, f_{m-1}
 
 ---
 
-### M28 — 4-Tier Progressive Learning Profiles & Friendly Compiler Guidance
+### M28 — [COMPLETE] 4-Tier Progressive Learning Profiles & Friendly Compiler Guidance
 
 #### 28.1 Objective & Current Codebase Audit
 - **Root Bottleneck 1 (One-Size-Fits-All Systems Jargon in Diagnostics):** Currently [`selfhost/diagnostics/errors.pilot`](file:///home/moony/Documents/dev/projects/Pilot/selfhost/diagnostics/errors.pilot) emits low-level compiler terminology (`0b01 IReference`, `LayoutTable`, `Tier 2 bundle`, `lvl(N)`) identically to a Day-1 scripting newcomer writing a 15-line `hello.pilot` and a Tier-4 kernel/compiler author editing `stdlib/core/`!

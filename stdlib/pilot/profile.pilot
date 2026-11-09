@@ -1,0 +1,99 @@
+// ==============================================================================
+// FILE: stdlib/pilot/profile.pilot
+// Milestone 28: 4-Tier Progressive Learning Profiles & Compiler Guidance
+// Defines LearningTier, [Tier(...)] package descriptors, and ClearanceRing.
+// ==============================================================================
+
+pub pkg pilot.profile;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+// ------------------------------------------------------------------------------
+// 1. Learning Tier Taxonomy
+// ------------------------------------------------------------------------------
+
+pub enum LearningTier : u8 {
+    ::Tier1Everyday = 1, // Default for scripts & starter apps: plain English, no bitcodes
+    ::Tier2Domain   = 2, // Architectural terms: interfaces, facets, opt, res, contracts
+    ::Tier3Systems  = 3, // Full hardware & lattice precision: 0b01 views, SIMD, Perceus
+    ::Tier4Meta     = 4, // Full compiler internals: AST/PilIR, hygiene, clearance rings
+}
+
+pub pure fn learning_tier_name(tier: LearningTier) -> str {
+    if tier == LearningTier::Tier1Everyday { return "everyday"; }
+    if tier == LearningTier::Tier2Domain   { return "domain"; }
+    if tier == LearningTier::Tier3Systems  { return "systems"; }
+    if tier == LearningTier::Tier4Meta     { return "meta"; }
+    return "unknown";
+}
+
+pub pure fn parse_learning_tier(name: str) -> LearningTier {
+    if name == "domain"  { return LearningTier::Tier2Domain; }
+    if name == "systems" { return LearningTier::Tier3Systems; }
+    if name == "meta"    { return LearningTier::Tier4Meta; }
+    return LearningTier::Tier1Everyday;
+}
+
+// ------------------------------------------------------------------------------
+// 2. Clearance Rings (lvl0 .. lvl4)
+// ------------------------------------------------------------------------------
+
+pub enum ClearanceRing : u8 {
+    ::Lvl0 = 0, // Kernel / hardware registers
+    ::Lvl1 = 1, // Core language runtime & memory
+    ::Lvl2 = 2, // Standard hosted library
+    ::Lvl3 = 3, // Domain applications
+    ::Lvl4 = 4, // Sandboxed untrusted scripts
+}
+
+pub pure fn clearance_ring_name(ring: ClearanceRing) -> str {
+    if ring == ClearanceRing::Lvl0 { return "lvl(0)"; }
+    if ring == ClearanceRing::Lvl1 { return "lvl(1)"; }
+    if ring == ClearanceRing::Lvl2 { return "lvl(2)"; }
+    if ring == ClearanceRing::Lvl3 { return "lvl(3)"; }
+    if ring == ClearanceRing::Lvl4 { return "lvl(4)"; }
+    return "lvl(custom)";
+}
+
+// ------------------------------------------------------------------------------
+// 3. Profile Descriptor (0b00 : IValue)
+// ------------------------------------------------------------------------------
+
+[Layout(c_abi)]
+pub struct ProfileDescriptor : IValue {
+    pub tier:                LearningTier;
+    pub perf_coach_enabled:  bool;
+    pub arch_coach_enabled:  bool;
+    pub explain_diagnostics: bool;
+    pub clearance:           u8;
+}
+
+pub pure fn profile_descriptor_new(
+    tier: LearningTier,
+    perf: bool,
+    arch: bool,
+    explain: bool,
+    clearance: u8
+) -> ProfileDescriptor {
+    return ProfileDescriptor {
+        tier:                tier,
+        perf_coach_enabled:  perf,
+        arch_coach_enabled:  arch,
+        explain_diagnostics: explain,
+        clearance:           clearance,
+    };
+}
+
+pub pure fn profile_for_tier(tier: LearningTier) -> ProfileDescriptor {
+    if tier == LearningTier::Tier1Everyday {
+        return profile_descriptor_new(tier, false, false, false, 3);
+    }
+    if tier == LearningTier::Tier2Domain {
+        return profile_descriptor_new(tier, false, true, false, 2);
+    }
+    if tier == LearningTier::Tier3Systems {
+        return profile_descriptor_new(tier, true, true, true, 1);
+    }
+    // Tier4Meta
+    return profile_descriptor_new(tier, true, true, true, 0);
+}
