@@ -91,6 +91,7 @@ Every type originates from `IAnyValue` (0 runtime header bytes) and is classifie
   6. **Generics:** Always constrain type parameters (`<T : IConstraint>`), never write unconstrained `<T>` with runtime reflection guesswork.
   7. **Unambiguous Absences & Failures:** Represent absence as `opt<T>` (`T?`) and expected domain errors as `res<T, E>` (`T ! E`), never sentinels (`null`, `-1`).
   8. **Memory Boundaries:** Distinguish read-only borrowed views (`0b01` `...View` / `slice<T>`), owned dynamic allocations (`0b10` `...Buffer` / `List<T>`), and scoped cleanup resources (`0b11` `...Guard`).
+  9. **Single Source of Truth & Zero Duplication:** Types must never be duplicated, copied, or re-declared across files. Always define a type once in its canonical owning module and import it (`use ...;`) into any file that needs it.
 
 ---
 
