@@ -719,7 +719,7 @@ Before advancing to **Phase 2 (`M11` — Universal Foreign-Language Adapter v1)*
 
 ---
 
-### M11 — First-Class `adapter` Blueprint Engine & Zero-Cost Idiom Lifter
+### M11 — First-Class `adapter` Blueprint Engine & Zero-Cost Idiom Lifter [COMPLETE]
 
 #### 11.1 Objective & Current Codebase Audit
 - **Root Bottleneck 1 (`adapter` Is Currently an Unimplemented Receptor Stub):** [`stdlib/contracts/contracts_syntax.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/contracts/contracts_syntax.pilot) (line `14`) registers `__engine("bind_receptor", nameof(adapter), 33, 21)`, and [`stdlib/polyglot/polyglot_syntax.pilot`](file:///home/moony/Documents/dev/projects/Pilot/stdlib/polyglot/polyglot_syntax.pilot) (lines `13`–`35`) registers language tag receptors (`c`, `cpp`, `rust`, `py`, `js`, `ts`, `sql`, etc.), yet neither analyzer nor IR compiler transforms `adapter` declarations into callable methods or zero-cost wrappers.
