@@ -1,0 +1,46 @@
+// ==============================================================================
+// FILE: stdlib/pilot/types.pilot
+// Ring 3: Compiler-as-a-Library Type Reflection & Layout Physics (pub pkg pilot.types;)
+// ==============================================================================
+pub pkg pilot.types;
+
+pub pure fn lattice_class_value()     -> u8 => 0; // 0b00 : IValue
+pub pure fn lattice_class_reference() -> u8 => 1; // 0b01 : IReference
+pub pure fn lattice_class_object()    -> u8 => 2; // 0b10 : IObject
+pub pure fn lattice_class_guard()     -> u8 => 3; // 0b11 : IGuard
+
+[Layout(c_abi)]
+pub struct FieldInfo : IValue {
+    pub name:         str;
+    pub byte_offset:  usize;
+    pub byte_size:    usize;
+    pub lattice_bits: u8;
+}
+
+pub pure fn field_info_new(name: str, offset: usize, size: usize, lattice: u8) -> FieldInfo {
+    return FieldInfo {
+        name:         name,
+        byte_offset:  offset,
+        byte_size:    size,
+        lattice_bits: lattice,
+    };
+}
+
+[Layout(c_abi)]
+pub struct TypeInfo : IValue {
+    pub type_name:     str;
+    pub byte_size:     usize;
+    pub alignment:     usize;
+    pub lattice_class: u8;
+    pub field_count:   usize;
+}
+
+pub pure fn type_info_new(name: str, size: usize, align: usize, lattice: u8, fields: usize) -> TypeInfo {
+    return TypeInfo {
+        type_name:     name,
+        byte_size:     size,
+        alignment:     align,
+        lattice_class: lattice,
+        field_count:   fields,
+    };
+}

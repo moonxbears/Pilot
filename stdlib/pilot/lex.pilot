@@ -1,0 +1,104 @@
+// ==============================================================================
+// FILE: stdlib/pilot/lex.pilot
+// Ring 3: Compiler-as-a-Library Streaming Tokenizer (pub pkg pilot.lex;)
+// Zero-allocation streaming cursor over source text
+// ==============================================================================
+pub pkg pilot.lex;
+
+[Layout(c_abi)]
+pub struct ByteSpan : IValue {
+    pub start: u32;
+    pub end:   u32;
+}
+
+pub pure fn byte_span_new(st: u32, ed: u32) -> ByteSpan => ByteSpan { start: st, end: ed };
+
+[Layout(c_abi)]
+pub struct Token : IValue {
+    pub kind_id:   u16;
+    pub span:      ByteSpan;
+    pub is_trivia: bool;
+    pub text:      str;
+}
+
+pub pure fn token_new(kind: u16, st: u32, ed: u32, trivia: bool, txt: str) -> Token {
+    return Token {
+        kind_id:   kind,
+        span:      byte_span_new(st, ed),
+        is_trivia: trivia,
+        text:      txt,
+    };
+}
+
+pub pure fn token_kind_eof()        -> u16 => 0;
+pub pure fn token_kind_whitespace() -> u16 => 1;
+pub pure fn token_kind_comment()    -> u16 => 2;
+pub pure fn token_kind_ident()      -> u16 => 10;
+pub pure fn token_kind_keyword()    -> u16 => 11;
+pub pure fn token_kind_number()     -> u16 => 12;
+pub pure fn token_kind_string()     -> u16 => 13;
+pub pure fn token_kind_symbol()     -> u16 => 14;
+
+// Zero-allocation streaming cursor (0b01 : IReference)
+pub struct TokenCursor : IReference {
+    pub source:   str;
+    pub position: usize;
+}
+
+pub pure fn tokenize(source: str) -> TokenCursor {
+    return TokenCursor { source: source, position: 0 };
+}
+
+pub pure fn token_cursor_has_more(cur: TokenCursor) -> bool {
+    return cur.position < cur.source.len();
+}
+
+pub fn token_cursor_next(var ref cur: TokenCursor) -> Token {
+    let n = cur.source.len();
+    if cur.position >= n {
+        return token_new(token_kind_eof(), n as u32, n as u32, false, "");
+    }
+
+    let st = cur.position;
+    let b = cur.source.byte_at(st);
+
+    // Whitespace
+    if b == 32 || b == 9 || b == 10 || b == 13 {
+        var ed = st + 1;
+        while ed < n {
+            let nb = cur.source.byte_at(ed);
+            if !(nb == 32 || nb == 9 || nb == 10 || nb == 13) { break; }
+            ed = ed + 1;
+        }
+        cur.position = ed;
+        return token_new(token_kind_whitespace(), st as u32, ed as u32, true, cur.source.slice(st, ed));
+    }
+
+    // Comment //
+    if b == 47 && st + 1 < n && cur.source.byte_at(st + 1) == 47 {
+        var ed = st + 2;
+        while ed < n && cur.source.byte_at(ed) != 10 && cur.source.byte_at(ed) != 13 {
+            ed = ed + 1;
+        }
+        cur.position = ed;
+        return token_new(token_kind_comment(), st as u32, ed as u32, true, cur.source.slice(st, ed));
+    }
+
+    // Ident / Keyword
+    if (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95 {
+        var ed = st + 1;
+        while ed < n {
+            let nb = cur.source.byte_at(ed);
+            if !((nb >= 65 && nb <= 90) || (nb >= 97 && nb <= 122) || nb == 95 || (nb >= 48 && nb <= 57)) {
+                break;
+            }
+            ed = ed + 1;
+        }
+        cur.position = ed;
+        return token_new(token_kind_ident(), st as u32, ed as u32, false, cur.source.slice(st, ed));
+    }
+
+    // Single byte symbol
+    cur.position = st + 1;
+    return token_new(token_kind_symbol(), st as u32, (st + 1) as u32, false, cur.source.slice(st, st + 1));
+}

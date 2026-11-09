@@ -1,0 +1,94 @@
+// ==============================================================================
+// FILE: stdlib/pilot/vm.pilot
+// Ring 3: Compiler-as-a-Library Deterministic VmSandbox (pub pkg pilot.vm;)
+// Capability-gated execution, instruction fuel limits, and memory quotas
+// ==============================================================================
+pub pkg pilot.vm;
+
+// Capability bitmask (0b00 : IValue)
+pub pure fn cap_none()            -> u32 => 0;
+pub pure fn cap_clock()           -> u32 => 1;
+pub pure fn cap_random_seeded()   -> u32 => 2;
+pub pure fn cap_stdout_capture()  -> u32 => 4;
+pub pure fn cap_virtual_fs()      -> u32 => 8;
+pub pure fn cap_host_fs_read()    -> u32 => 16;
+pub pure fn cap_host_fs_write()   -> u32 => 32;
+pub pure fn cap_host_net()        -> u32 => 64;
+pub pure fn cap_host_ffi()        -> u32 => 128;
+
+[Layout(c_abi)]
+pub struct VmConfig : IValue {
+    pub fuel_limit:     u64;
+    pub max_heap_bytes: usize;
+    pub max_call_depth: u32;
+    pub capabilities:   u32;
+}
+
+pub pure fn vm_config_default() -> VmConfig {
+    return VmConfig {
+        fuel_limit:     100000,
+        max_heap_bytes: 65536,
+        max_call_depth: 64,
+        capabilities:   cap_stdout_capture(),
+    };
+}
+
+// Trap codes (0b00 : IValue)
+pub pure fn vm_trap_none()                -> u8 => 0;
+pub pure fn vm_trap_fuel_exhausted()      -> u8 => 1; // VM001
+pub pure fn vm_trap_heap_limit_exceeded() -> u8 => 2; // VM002
+pub pure fn vm_trap_stack_depth_exceeded()-> u8 => 3; // VM003
+pub pure fn vm_trap_capability_denied()   -> u8 => 4; // VM004
+pub pure fn vm_trap_division_by_zero()    -> u8 => 5; // VM005
+pub pure fn vm_trap_assertion_failed()    -> u8 => 6; // VM006
+
+pub struct VmSandbox : IObject {
+    pub config:     VmConfig;
+    pub fuel_used:  u64;
+    pub peak_heap:  usize;
+    pub stdout_buf: str;
+    pub is_trapped: bool;
+    pub trap_code:  u8;
+    pub trap_msg:   str;
+
+    ~self() {}
+}
+
+pub fn vm_sandbox_new(cfg: VmConfig) -> VmSandbox {
+    return VmSandbox {
+        config:     cfg,
+        fuel_used:  0,
+        peak_heap:  0,
+        stdout_buf: "",
+        is_trapped: false,
+        trap_code:  vm_trap_none(),
+        trap_msg:   "",
+    };
+}
+
+pub fn vm_sandbox_consume_fuel(var ref s: VmSandbox, amount: u64) -> bool {
+    s.fuel_used = s.fuel_used + amount;
+    if s.fuel_used > s.config.fuel_limit {
+        s.is_trapped = true;
+        s.trap_code = vm_trap_fuel_exhausted();
+        s.trap_msg = "VM001: Execution fuel exhausted";
+        return false;
+    }
+    return true;
+}
+
+pub fn vm_sandbox_check_capability(var ref s: VmSandbox, cap: u32, cap_name: str) -> bool {
+    if (s.config.capabilities & cap) == 0 {
+        s.is_trapped = true;
+        s.trap_code = vm_trap_capability_denied();
+        s.trap_msg = "VM004: Capability denied: " + cap_name;
+        return false;
+    }
+    return true;
+}
+
+pub fn vm_sandbox_write_stdout(var ref s: VmSandbox, piece: str) {
+    if (s.config.capabilities & cap_stdout_capture()) != 0 {
+        s.stdout_buf = s.stdout_buf + piece;
+    }
+}

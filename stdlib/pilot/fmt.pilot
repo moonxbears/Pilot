@@ -1,0 +1,40 @@
+// ==============================================================================
+// FILE: stdlib/pilot/fmt.pilot
+// Ring 3: Compiler-as-a-Library Formatter (pub pkg pilot.fmt;)
+// Dual compact/readable syntax pairing transformations
+// ==============================================================================
+pub pkg pilot.fmt;
+
+pub pure fn fmt_style_compact()  -> u8 => 0;
+pub pure fn fmt_style_readable() -> u8 => 1;
+
+pub fn str_replace(src: str, target: str, replacement: str) -> str {
+    var out = "";
+    var p: usize = 0;
+    let n = src.len();
+    let m = target.len();
+    if m == 0 { return src; }
+    while p < n {
+        let idx = src.find(target, p);
+        if idx < 0 {
+            out = out + src.slice(p, n);
+            break;
+        }
+        out = out + src.slice(p, idx as usize) + replacement;
+        p = (idx as usize) + m;
+    }
+    return out;
+}
+
+pub fn format_str(src: str, style: u8) -> str {
+    if style == fmt_style_readable() {
+        if src.find("!^(") >= 0 {
+            return str_replace(src, "!^(", " sig (");
+        }
+    } else {
+        if src.find(" sig (") >= 0 {
+            return str_replace(src, " sig (", "!^(");
+        }
+    }
+    return src;
+}

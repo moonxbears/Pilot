@@ -1,0 +1,83 @@
+// ==============================================================================
+// FILE: stdlib/pilot/db.pilot
+// Ring 3: Compiler-as-a-Library Incremental Database Session (pub pkg pilot.db;)
+// In-memory virtual overlay and workspace project sessions
+// ==============================================================================
+pub pkg pilot.db;
+
+pub struct CompilerSession : IObject {
+    pub is_virtual:      bool;
+    pub workspace_root:  str;
+    pub file_names:      List<str>;
+    pub file_contents:   List<str>;
+    pub revision_number: u64;
+
+    ~self() {}
+}
+
+pub fn compiler_session_new_in_memory() -> CompilerSession {
+    return CompilerSession {
+        is_virtual:      true,
+        workspace_root:  "virtual://",
+        file_names:      [],
+        file_contents:   [],
+        revision_number: 1,
+    };
+}
+
+pub fn compiler_session_open_workspace(root: str) -> CompilerSession {
+    return CompilerSession {
+        is_virtual:      false,
+        workspace_root:  root,
+        file_names:      [],
+        file_contents:   [],
+        revision_number: 1,
+    };
+}
+
+pub pure fn compiler_session_total_files(sess: CompilerSession) -> usize => sess.file_names.len;
+
+pub fn compiler_session_set_file(var ref sess: CompilerSession, path: str, content: str) {
+    var idx: usize = 0;
+    var found = false;
+    while idx < sess.file_names.len {
+        if sess.file_names[idx] == path {
+            sess.file_contents[idx] = content;
+            found = true;
+            break;
+        }
+        idx = idx + 1;
+    }
+    if !found {
+        sess.file_names.push(path);
+        sess.file_contents.push(content);
+    }
+    sess.revision_number = sess.revision_number + 1;
+}
+
+pub fn compiler_session_get_file(sess: CompilerSession, path: str) -> str {
+    var idx: usize = 0;
+    while idx < sess.file_names.len {
+        if sess.file_names[idx] == path {
+            return sess.file_contents[idx];
+        }
+        idx = idx + 1;
+    }
+    return "";
+}
+
+pub fn compiler_session_check_all(sess: CompilerSession) -> usize {
+    if sess.file_names.len == 0 {
+        return 0;
+    }
+    var errs: usize = 0;
+    var i: usize = 0;
+    while i < sess.file_names.len {
+        let content = sess.file_contents[i];
+        if content.len() == 0 {
+            errs = errs + 1;
+        }
+        i = i + 1;
+    }
+    return errs;
+}

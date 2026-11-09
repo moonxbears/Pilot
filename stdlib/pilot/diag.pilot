@@ -1,0 +1,98 @@
+// ==============================================================================
+// FILE: stdlib/pilot/diag.pilot
+// Ring 3: Compiler-as-a-Library Diagnostics Facade (pub pkg pilot.diag;)
+// Human ANSI formatting, machine-readable JSON, and SARIF 2.1.0 report generation
+// ==============================================================================
+pub pkg pilot.diag;
+
+[Layout(c_abi)]
+pub struct Span : IValue {
+    pub file_id: u32;
+    pub start:   u32;
+    pub end:     u32;
+}
+
+pub pure fn span_new(fid: u32, st: u32, ed: u32) -> Span => Span { file_id: fid, start: st, end: ed };
+
+[Layout(c_abi)]
+pub struct TextEdit : IValue {
+    pub span:        Span;
+    pub replacement: str;
+}
+
+pub pure fn text_edit_new(span: Span, repl: str) -> TextEdit => TextEdit { span: span, replacement: repl };
+
+pub struct FixSuggestion : IObject {
+    pub title:         str;
+    pub applicability: u8;
+    pub edits:         List<TextEdit>;
+
+    ~self() {}
+}
+
+pub fn fix_suggestion_new(title: str, app: u8) -> FixSuggestion {
+    return FixSuggestion {
+        title:         title,
+        applicability: app,
+        edits:         [],
+    };
+}
+
+pub struct Diagnostic : IObject {
+    pub code:     str;
+    pub severity: u8;
+    pub message:  str;
+    pub span:     Span;
+    pub notes:    List<str>;
+    pub fixes:    List<FixSuggestion>;
+
+    ~self() {}
+}
+
+pub fn diagnostic_new(code: str, sev: u8, msg: str, sp: Span) -> Diagnostic {
+    return Diagnostic {
+        code:     code,
+        severity: sev,
+        message:  msg,
+        span:     sp,
+        notes:    [],
+        fixes:    [],
+    };
+}
+
+pub pure fn diag_sev_error()   -> u8 => 1;
+pub pure fn diag_sev_warning() -> u8 => 2;
+pub pure fn diag_sev_info()    -> u8 => 3;
+pub pure fn diag_sev_hint()    -> u8 => 4;
+
+pub pure fn diagnostic_is_error(diag: Diagnostic) -> bool => diag.severity == diag_sev_error();
+
+pub fn render_ansi(diag: Diagnostic, source: str) -> str {
+    let sev_str = if diag.severity == diag_sev_error() { "\x1b[1;31merror\x1b[0m" }
+                  else if diag.severity == diag_sev_warning() { "\x1b[1;33mwarning\x1b[0m" }
+                  else { "\x1b[1;34minfo\x1b[0m" };
+    var preview = "";
+    if source.len() > 0 && (diag.span.end as usize) <= source.len() {
+        preview = " --> " + source.slice(diag.span.start as usize, diag.span.end as usize);
+    }
+    return sev_str + " [" + diag.code + "]: " + diag.message + preview;
+}
+
+pub fn render_json(diag: Diagnostic) -> str {
+    return "{\"code\":\"" + diag.code + "\",\"severity\":" + diag.severity + ",\"message\":\"" + diag.message + "\"}";
+}
+
+pub fn render_sarif(diags: List<Diagnostic>) -> str {
+    var out = "{\"version\":\"2.1.0\",\"runs\":[{\"results\":[";
+    var i = 0;
+    while i < diags.len {
+        let d = diags[i];
+        out = out + "{\"ruleId\":\"" + d.code + "\",\"message\":{\"text\":\"" + d.message + "\"}}";
+        if i + 1 < diags.len {
+            out = out + ",";
+        }
+        i = i + 1;
+    }
+    out = out + "]}]}";
+    return out;
+}

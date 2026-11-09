@@ -1,0 +1,65 @@
+// ==============================================================================
+// FILE: stdlib/pilot/ast.pilot
+// Ring 3: Compiler-as-a-Library Abstract Syntax Tree (pub pkg pilot.ast;)
+// Typed nodes, generation-checked cross-arena splicing, and quote builders
+// ==============================================================================
+pub pkg pilot.ast;
+
+[Layout(c_abi)]
+pub struct AstNodeView : IReference {
+    pub kind:                u16;
+    pub arena_generation_id: u32;
+    pub node_id:             u32;
+    pub name:                str;
+}
+
+pub pure fn ast_node_view_new(k: u16, gen: u32, id: u32, name: str) -> AstNodeView {
+    return AstNodeView {
+        kind:                k,
+        arena_generation_id: gen,
+        node_id:             id,
+        name:                name,
+    };
+}
+
+pub struct AstModule : IObject {
+    pub generation_id: u32;
+    pub root_node_id:  u32;
+    pub sym_counter:   u32;
+
+    ~self() {}
+}
+
+pub fn ast_module_new(gen_id: u32) -> AstModule {
+    return AstModule {
+        generation_id: gen_id,
+        root_node_id:  1,
+        sym_counter:   0,
+    };
+}
+
+pub fn ast_module_gensym(var ref m: AstModule, prefix: str) -> str {
+    m.sym_counter = m.sym_counter + 1;
+    return prefix + "_" + m.sym_counter;
+}
+
+// Cross-Arena Node Splice Protection (AST001)
+pub pure fn ast_module_can_splice(m: AstModule, node: AstNodeView) -> bool {
+    return node.arena_generation_id == m.generation_id;
+}
+
+pub struct QuoteBuilder : IObject {
+    pub buffer: str;
+
+    ~self() {}
+}
+
+pub fn quote_builder_new() -> QuoteBuilder {
+    return QuoteBuilder { buffer: "" };
+}
+
+pub fn quote_builder_splice(var ref q: QuoteBuilder, unquoted_text: str) {
+    q.buffer = q.buffer + unquoted_text;
+}
+
+pub pure fn quote_builder_build(q: QuoteBuilder) -> str => q.buffer;

@@ -51,6 +51,9 @@ mod m08;
 #[path = "milestone09_three_ring_standard_library_personality.rs"]
 mod m09;
 
+#[path = "milestone10_compiler_as_a_library.rs"]
+mod m10;
+
 #[path = "milestone50_lossless_bridge_and_reflection.rs"]
 mod m50;
 
@@ -176,6 +179,10 @@ pub fn test_mega_all_milestones_50_through_61_simultaneously() {
             m09::test_m9_2_freestanding_core_boundary_and_host_intrinsic_exclusion();
             m09::test_m9_3_retired_python_clone_import_detection_and_lossless_autofix();
             m09::test_m9_4_canonical_std_packages_and_stale_cache_rejection();
+            m10::test_m10_1_streaming_tokenizer_and_cst_lossless_roundtrip();
+            m10::test_m10_2_ast_quote_builder_and_cross_arena_splice_safety();
+            m10::test_m10_3_type_reflection_lattice_classes_and_ir_pipeline();
+            m10::test_m10_4_in_memory_compiler_session_and_vm_sandbox_capabilities();
         });
         s.spawn(|| {
             m50::test_50_1_lossless_flatten_ast_randomized_quotes_attrs_bases_and_layouts();

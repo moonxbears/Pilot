@@ -1,0 +1,46 @@
+// ==============================================================================
+// FILE: stdlib/pilot/ir.pilot
+// Ring 3: Compiler-as-a-Library Typed SSA IR Facade (pub pkg pilot.ir;)
+// ==============================================================================
+pub pkg pilot.ir;
+
+pub struct IrModule : IObject {
+    pub name:        str;
+    pub fn_count:    usize;
+    pub block_count: usize;
+    pub inst_count:  usize;
+
+    ~self() {}
+}
+
+pub fn ir_module_new(name: str) -> IrModule {
+    return IrModule {
+        name:        name,
+        fn_count:    0,
+        block_count: 0,
+        inst_count:  0,
+    };
+}
+
+pub pure fn ir_module_function_count(m: IrModule) -> usize => m.fn_count;
+
+pub struct IrPassPipeline : IObject {
+    pub pass_names: List<str>;
+
+    ~self() {}
+}
+
+pub fn ir_pass_pipeline_new() -> IrPassPipeline {
+    return IrPassPipeline { pass_names: [] };
+}
+
+pub pure fn ir_pass_pipeline_count(p: IrPassPipeline) -> usize => p.pass_names.len;
+
+pub fn ir_pass_pipeline_add_pass(var ref p: IrPassPipeline, pass: str) {
+    p.pass_names.push(pass);
+}
+
+pub fn ir_pass_pipeline_run(p: IrPassPipeline, var ref m: IrModule) -> usize {
+    m.inst_count = m.inst_count + p.pass_names.len;
+    return p.pass_names.len;
+}

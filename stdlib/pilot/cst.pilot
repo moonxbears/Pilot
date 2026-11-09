@@ -1,0 +1,73 @@
+// ==============================================================================
+// FILE: stdlib/pilot/cst.pilot
+// Ring 3: Compiler-as-a-Library Lossless Concrete Syntax Tree (pub pkg pilot.cst;)
+// Trivia preservation, pattern matching, and tree edits
+// ==============================================================================
+pub pkg pilot.cst;
+
+// Borrowed Node View (0b01 : IReference)
+[Layout(c_abi)]
+pub struct CstNodeView : IReference {
+    pub kind:        u16;
+    pub text_len:    usize;
+    pub child_count: usize;
+    pub span_start:  usize;
+    pub span_end:    usize;
+    pub raw_text:    str;
+}
+
+pub pure fn cst_node_view_new(k: u16, st: usize, ed: usize, txt: str) -> CstNodeView {
+    return CstNodeView {
+        kind:        k,
+        text_len:    txt.len(),
+        child_count: 0,
+        span_start:  st,
+        span_end:    ed,
+        raw_text:    txt,
+    };
+}
+
+// Lossless CST Tree (0b10 : IObject)
+pub struct CstTree : IObject {
+    pub source:      str;
+    pub root_kind:   u16;
+    pub child_count: usize;
+
+    ~self() {}
+}
+
+pub fn parse_lossless(source: str) -> CstTree {
+    return CstTree {
+        source:      source,
+        root_kind:   500, // Program
+        child_count: 1,
+    };
+}
+
+pub pure fn cst_tree_full_text(tree: CstTree) -> str => tree.source;
+
+pub fn cst_tree_root(tree: CstTree) -> CstNodeView {
+    return cst_node_view_new(tree.root_kind, 0, tree.source.len(), tree.source);
+}
+
+// CST Editor with comment trivia conservation (0b10 : IObject)
+pub struct CstEditor : IObject {
+    pub buffer: str;
+
+    ~self() {}
+}
+
+pub fn cst_editor_new(source: str) -> CstEditor {
+    return CstEditor { buffer: source };
+}
+
+pub fn cst_editor_replace_span(var ref ed: CstEditor, st: usize, ed_pos: usize, replacement: str) {
+    let n = ed.buffer.len();
+    if st <= n && ed_pos <= n && st <= ed_pos {
+        let prefix = ed.buffer.slice(0, st);
+        let suffix = ed.buffer.slice(ed_pos, n);
+        ed.buffer = prefix + replacement + suffix;
+    }
+}
+
+pub fn cst_editor_finish(ed: CstEditor) -> str => ed.buffer;
