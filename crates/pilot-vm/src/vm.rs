@@ -134,7 +134,7 @@ impl PilVirtualMachine {
                             self.shared_symbols.as_ref().and_then(|s| s.get(&sid)).map_or_else(|| self.engine_handler.as_mut().and_then(|h| h(&hook_name, &args).ok()).unwrap_or(PilotVal::NULL), |s| PilotVal::from_str(s))
                         }
                         "get_env" => PilotVal::from_int(0),
-                        _ => self.engine_handler.as_mut().and_then(|h| h(&hook_name, &args).ok()).unwrap_or(PilotVal::NULL),
+                        _ => match self.engine_handler.as_mut().map(|h| h(&hook_name, &args)) { Some(Ok(v)) if !v.is_null() => v, Some(Err(_)) => PilotVal::NULL, _ => pilot_rt::PilotOsSyscall::vm_intrinsic(&hook_name, &args) },
                     };
                     unsafe { *self.registers.get_unchecked_mut(dst) = res };
                 }

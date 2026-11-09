@@ -1,0 +1,617 @@
+// ==============================================================================
+// FILE: selfhost/gate/manifest.pilot
+// Milestone 1: Pure-Pilot Architectural Gate Manifest & Open Registries
+// Declarative registries for seed tokens, LOC ratchets, retired artifacts,
+// and 2-bit lattice gate report structures (zero magic counts).
+// ==============================================================================
+pub lvl(0) pkg Pilot.SelfHost.Gate.Manifest;
+
+pub pure fn nameof(sym: str) -> str => sym;
+
+pub enum GateCategory : u8 {
+    Adaptability,
+    BootstrapParity,
+    Performance,
+    Hygiene,
+}
+
+let GateCategoryId = [
+    Adaptability: 0,
+    BootstrapParity: 1,
+    Performance: 2,
+    Hygiene: 3,
+];
+
+pub enum GateSeverity : u8 {
+    Blocker,
+    Warning,
+    Advisory,
+}
+
+let GateSeverityId = [
+    Blocker: 0,
+    Warning: 1,
+    Advisory: 2,
+];
+
+[Layout(c_abi)]
+pub struct SeedTokenRegistry : IValue {
+    pub tokens: slice<str>;
+    pub tokens_len: usize;
+    pub lookup: i64;
+
+    pub pure fn count() -> usize => .tokens_len;
+}
+
+[Layout(c_abi)]
+pub struct CrateCeilingRule : IValue {
+    pub crate_path: str;
+    pub max_loc: usize;
+    pub must_be_absent: bool;
+}
+
+[Layout(c_abi)]
+pub struct GateViolation : IValue {
+    pub code: str;
+    pub file_path: str;
+    pub line: usize;
+    pub column: usize;
+    pub offending_snippet: str;
+    pub message: str;
+    pub remediation: str;
+}
+
+[Layout(c_abi)]
+pub struct GateReport : IObject {
+    pub gate_id: str;
+    pub category: GateCategory;
+    pub passed: bool;
+    pub elapsed_us: u64;
+    pub items_scanned: usize;
+    pub violations: List<GateViolation>;
+
+    ~self() {
+    }
+}
+
+[Layout(c_abi)]
+pub struct GateRunOptions : IValue {
+    pub full: bool;
+    pub only_id: str;
+    pub json: bool;
+    pub litmus: bool;
+    pub seed: i64;
+    pub ratchet_update: bool;
+    pub show_help: bool;
+    pub invalid_flag: str;
+}
+
+pub interface IGateCheck : IAnyValue {
+    pub pure fn id() -> str;
+    pub pure fn category() -> GateCategory;
+    pub fn execute(workspace_root: str, opts: ref<GateRunOptions>) -> GateReport;
+}
+
+[Layout(c_abi)]
+pub struct TempDirGuard : IGuard {
+    pub dir_path: str;
+    pub active: bool;
+
+    ~self() {
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Irreducible Host OS Wrappers & Scoped TempDirGuard (`0b11 : IGuard`)
+// ------------------------------------------------------------------------------
+
+pub fn gate_fs_exists(path: str) -> bool {
+    return __engine("fs_exists", path) == true;
+}
+
+pub fn gate_fs_read_text(path: str) -> str {
+    let v = __engine("fs_read_text", path);
+    if v.len() == 0 { return ""; }
+    return v;
+}
+
+pub fn gate_fs_write_text(path: str, content: str) -> bool {
+    return __engine("fs_write_text", path, content) == true;
+}
+
+pub fn gate_fs_walk_files(dir_path: str) -> str {
+    let v = __engine("fs_walk_files", dir_path);
+    if v.len() == 0 { return ""; }
+    return v;
+}
+
+pub fn gate_fs_list_dirs(dir_path: str) -> str {
+    let v = __engine("fs_list_dirs", dir_path);
+    if v.len() == 0 { return ""; }
+    return v;
+}
+
+pub fn gate_fs_remove_all(path: str) -> bool {
+    return __engine("fs_remove_all", path) == true;
+}
+
+pub fn gate_time_now_us() -> i64 {
+    return __engine("time_now_us") + 0;
+}
+
+pub fn gate_proc_pid() -> i64 {
+    return __engine("proc_pid") + 0;
+}
+
+pub fn temp_guard_new(dir_path: str) -> TempDirGuard {
+    return TempDirGuard {
+        dir_path: dir_path,
+        active: true,
+    };
+}
+
+pub fn temp_guard_cleanup(guard: TempDirGuard) -> bool {
+    if guard.active == true && guard.dir_path.len() > 4 {
+        if gate_fs_exists(guard.dir_path) {
+            let _ = gate_fs_remove_all(guard.dir_path);
+        }
+        __engine("map_set", guard, "active", false);
+        return true;
+    }
+    return false;
+}
+
+pub fn resolve_workspace_root(hint: str) -> str {
+    if hint.len() > 0 && hint != "." {
+        return hint;
+    }
+    if gate_fs_exists("crates") && gate_fs_exists("selfhost") && gate_fs_exists("stdlib") {
+        return ".";
+    }
+    if gate_fs_exists("../crates") && gate_fs_exists("../selfhost") {
+        return "..";
+    }
+    if gate_fs_exists("../../crates") && gate_fs_exists("../../selfhost") {
+        return "../..";
+    }
+    return ".";
+}
+
+// ------------------------------------------------------------------------------
+// Dynamic Open-Registry Collection & String Helpers (Zero Magic Counts)
+// ------------------------------------------------------------------------------
+
+pub fn glist_new() -> i64 {
+    let m = __engine("map_new");
+    __engine("map_set", m, "count", 0);
+    return m;
+}
+
+pub fn glist_len(list: i64) -> usize {
+    return __engine("map_get", list, "count") + 0;
+}
+
+pub fn glist_push(list: i64, item: any) -> usize {
+    let idx = glist_len(list);
+    __engine("map_set", list, idx, item);
+    __engine("map_set", list, "count", idx + 1);
+    return idx + 1;
+}
+
+pub fn glist_get(list: i64, idx: usize) -> any {
+    return __engine("map_get", list, idx);
+}
+
+pub fn glist_extend(dst: i64, src: i64) -> usize {
+    let n = glist_len(src);
+    var i = 0;
+    while i < n {
+        let _ = glist_push(dst, glist_get(src, i));
+        i = i + 1;
+    }
+    return glist_len(dst);
+}
+
+pub fn gset_new() -> i64 {
+    let m = __engine("map_new");
+    __engine("map_set", m, "__count__", 0);
+    return m;
+}
+
+pub fn gset_insert(s: i64, key: str) -> bool {
+    if __engine("map_get", s, key) == true {
+        return false;
+    }
+    let cnt = __engine("map_get", s, "__count__") + 0;
+    __engine("map_set", s, key, true);
+    __engine("map_set", s, "__count__", cnt + 1);
+    return true;
+}
+
+pub pure fn gset_contains(s: i64, key: str) -> bool {
+    return __engine("map_get", s, key) == true;
+}
+
+pub pure fn gset_len(s: i64) -> usize {
+    return __engine("map_get", s, "__count__") + 0;
+}
+
+pub pure fn gm_join_path(root: str, rel: str) -> str {
+    if root == "." || root.len() == 0 {
+        return rel;
+    }
+    if root.byte_at(root.len() - 1) == 47 {
+        return root + rel;
+    }
+    return root + "/" + rel;
+}
+
+pub pure fn gm_starts_with(s: str, pfx: str) -> bool {
+    let pl = pfx.len();
+    if s.len() < pl { return false; }
+    return s.slice(0, pl) == pfx;
+}
+
+pub pure fn gm_ends_with(s: str, sfx: str) -> bool {
+    let sl = sfx.len();
+    let l = s.len();
+    if l < sl { return false; }
+    return s.slice(l - sl, l) == sfx;
+}
+
+pub pure fn gm_find(haystack: str, needle: str, start: i64) -> i64 {
+    let hl = haystack.len();
+    let nl = needle.len();
+    if nl == 0 || start < 0 || start + nl > hl { return -1; }
+    var i = start;
+    while i + nl <= hl {
+        if haystack.slice(i, i + nl) == needle { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+pub pure fn gm_contains(haystack: str, needle: str) -> bool {
+    return gm_find(haystack, needle, 0) >= 0;
+}
+
+pub pure fn gm_trim(s: str) -> str {
+    let l = s.len();
+    if l == 0 { return ""; }
+    var a = 0;
+    while a < l {
+        let b = s.byte_at(a);
+        if b != 32 && b != 9 && b != 10 && b != 13 { break; }
+        a = a + 1;
+    }
+    var e = l;
+    while e > a {
+        let b = s.byte_at(e - 1);
+        if b != 32 && b != 9 && b != 10 && b != 13 { break; }
+        e = e - 1;
+    }
+    return s.slice(a, e);
+}
+
+pub pure fn gm_count_lines(s: str) -> usize {
+    let n = s.len();
+    if n == 0 { return 0; }
+    var lines = 0;
+    var i = 0;
+    while i < n {
+        if s.byte_at(i) == 10 {
+            lines = lines + 1;
+        }
+        i = i + 1;
+    }
+    if s.byte_at(n - 1) != 10 {
+        lines = lines + 1;
+    }
+    return lines;
+}
+
+pub fn gm_split_lines(s: str) -> i64 {
+    let out = glist_new();
+    let n = s.len();
+    if n == 0 { return out; }
+    var line_start = 0;
+    var i = 0;
+    while i < n {
+        if s.byte_at(i) == 10 {
+            var end_pos = i;
+            if end_pos > line_start && s.byte_at(end_pos - 1) == 13 {
+                end_pos = end_pos - 1;
+            }
+            let seg = s.slice(line_start, end_pos);
+            if seg.len() > 0 {
+                let _ = glist_push(out, seg);
+            }
+            line_start = i + 1;
+        }
+        i = i + 1;
+    }
+    if line_start < n {
+        let tail = s.slice(line_start, n);
+        if tail.len() > 0 {
+            let _ = glist_push(out, tail);
+        }
+    }
+    return out;
+}
+
+pub pure fn gm_json_escape(s: str) -> str {
+    let n = s.len();
+    var out = "";
+    var i = 0;
+    while i < n {
+        let b = s.byte_at(i);
+        if b == 34 {
+            out = out + "\\\"";
+        } else if b == 92 {
+            out = out + "\\\\";
+        } else if b == 10 {
+            out = out + "\\n";
+        } else if b == 13 {
+            out = out + "\\r";
+        } else if b == 9 {
+            out = out + "\\t";
+        } else {
+            out = out + s.slice(i, i + 1);
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+pub pure fn gate_category_name(cat: GateCategory) -> str {
+    if cat == GateCategoryId.Adaptability { return "Adaptability"; }
+    if cat == GateCategoryId.BootstrapParity { return "BootstrapParity"; }
+    if cat == GateCategoryId.Performance { return "Performance"; }
+    return "Hygiene";
+}
+
+// ------------------------------------------------------------------------------
+// Canonical Seed Token Registry (Count Derived Dynamically via `.tokens_len`)
+// ------------------------------------------------------------------------------
+
+fn gm_push_seed(tokens: i64, lookup: i64, word: str) -> usize {
+    let _ = gset_insert(lookup, word);
+    return glist_push(tokens, word);
+}
+
+pub fn seed_token_registry_new() -> SeedTokenRegistry {
+    let toks = glist_new();
+    let lkp = gset_new();
+    let _ = gm_push_seed(toks, lkp, nameof(__engine));
+    let _ = gm_push_seed(toks, lkp, nameof(struct));
+    let _ = gm_push_seed(toks, lkp, nameof(interface));
+    let _ = gm_push_seed(toks, lkp, nameof(fn));
+    let _ = gm_push_seed(toks, lkp, nameof(let));
+    let _ = gm_push_seed(toks, lkp, nameof(ref));
+    let _ = gm_push_seed(toks, lkp, nameof(if));
+    let _ = gm_push_seed(toks, lkp, nameof(loop));
+    let _ = gm_push_seed(toks, lkp, nameof(return));
+    let _ = gm_push_seed(toks, lkp, nameof(yield));
+    let _ = gm_push_seed(toks, lkp, nameof(defer));
+    let _ = gm_push_seed(toks, lkp, nameof(comptime));
+    let _ = gm_push_seed(toks, lkp, nameof(quote));
+    let _ = gm_push_seed(toks, lkp, nameof(asm));
+    return SeedTokenRegistry {
+        tokens: toks,
+        tokens_len: glist_len(toks),
+        lookup: lkp,
+    };
+}
+
+pub pure fn seed_registry_count(reg: ref<SeedTokenRegistry>) -> usize {
+    return reg.tokens_len + 0;
+}
+
+pub pure fn seed_registry_contains(reg: ref<SeedTokenRegistry>, word: str) -> bool {
+    return gset_contains(reg.lookup, word);
+}
+
+pub pure fn seed_registry_at(reg: ref<SeedTokenRegistry>, idx: usize) -> str {
+    return glist_get(reg.tokens, idx);
+}
+
+// ------------------------------------------------------------------------------
+// Crate LOC Ratchet Registry, File Caps & Retired Artifact Registries
+// ------------------------------------------------------------------------------
+
+fn gm_reg_crate(reg: i64, keys: i64, path: str, cap: usize, absent: bool) -> usize {
+    let rule = CrateCeilingRule {
+        crate_path: path,
+        max_loc: cap,
+        must_be_absent: absent,
+    };
+    __engine("map_set", reg, path, rule);
+    return glist_push(keys, path);
+}
+
+pub fn build_crate_ceiling_registry() -> Map<str, CrateCeilingRule> {
+    let reg = __engine("map_new");
+    let keys = glist_new();
+
+    // Surviving bootstrap crates (ratchet ceilings: LOC may shrink to 0, never grow)
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-lexer", 860, false);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-ast", 450, false);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-parser", 1100, false);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-analysis", 780, false);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-vm", 650, false);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-codegen", 120, false);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-rt", 700, false);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-ffi", 300, false);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-cli", 100, false);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-arena", 400, false);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-intern", 300, false);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-span", 250, false);
+
+    // Retired crates (must remain permanently absent)
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-syntax", 0, true);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-fmt", 0, true);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-perceus", 0, true);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-transpile", 0, true);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-polyglot", 0, true);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-dap", 0, true);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-lsp", 0, true);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-lsp-macros", 0, true);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-db", 0, true);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-incremental", 0, true);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-pkg", 0, true);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-perf", 0, true);
+    let _ = gm_reg_crate(reg, keys, "crates/pilot-bench", 0, true);
+
+    __engine("map_set", reg, "__keys__", keys);
+    return reg;
+}
+
+fn gm_reg_fcap(reg: i64, keys: i64, path: str, cap: usize) -> usize {
+    __engine("map_set", reg, path, cap);
+    return glist_push(keys, path);
+}
+
+pub fn build_file_ceiling_registry() -> i64 {
+    let reg = __engine("map_new");
+    let keys = glist_new();
+    let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/types.rs", 250);
+    let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/infer.rs", 440);
+    let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/comptime.rs", 220);
+    let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/pipeline.rs", 80);
+    let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/lib.rs", 60);
+    let _ = gm_reg_fcap(reg, keys, "crates/pilot-rt/src/stdlib.rs", 90);
+    let _ = gm_reg_fcap(reg, keys, "crates/pilot-cli/src/main.rs", 100);
+    let _ = gm_reg_fcap(reg, keys, "selfhost/ide/vscode_gen.pilot", 1000);
+    let _ = gm_reg_fcap(reg, keys, "selfhost/lsp/handlers.pilot", 1000);
+    __engine("map_set", reg, "__keys__", keys);
+    return reg;
+}
+
+pub fn build_retired_files_registry() -> i64 {
+    let list = glist_new();
+    let _ = glist_push(list, "crates/pilot-analysis/src/autodiff.rs");
+    let _ = glist_push(list, "crates/pilot-analysis/src/contracts.rs");
+    let _ = glist_push(list, "crates/pilot-analysis/src/dimensions.rs");
+    let _ = glist_push(list, "crates/pilot-analysis/src/loops.rs");
+    let _ = glist_push(list, "crates/pilot-analysis/src/macros.rs");
+    let _ = glist_push(list, "crates/pilot-analysis/src/patterns.rs");
+    let _ = glist_push(list, "crates/pilot-analysis/src/quoting.rs");
+    let _ = glist_push(list, "crates/pilot-analysis/src/null_error.rs");
+    let _ = glist_push(list, "selfhost/scope_header.pilot");
+    let _ = glist_push(list, "selfhost/emitter.pilot");
+    let _ = glist_push(list, "selfhost/ide_sync.pilot");
+    let _ = glist_push(list, "crates/pilot-vm/src/compiler.rs");
+    let _ = glist_push(list, "crates/pilot-codegen/src/c_target.rs");
+    let _ = glist_push(list, "crates/pilot-codegen/src/gpu.rs");
+    let _ = glist_push(list, "crates/pilot-codegen/src/llvm.rs");
+    let _ = glist_push(list, "crates/pilot-codegen/src/wasm.rs");
+    let _ = glist_push(list, "crates/pilot-codegen/src/asm.rs");
+    let _ = glist_push(list, "crates/pilot-codegen/src/driver.rs");
+    let _ = glist_push(list, "crates/pilot-codegen/src/physics.rs");
+    let _ = glist_push(list, "crates/pilot-rt/src/crypto.rs");
+    let _ = glist_push(list, "crates/pilot-cli/src/commands.rs");
+    let _ = glist_push(list, "scripts/gate1_check.py");
+    let _ = glist_push(list, "scripts/gate2_check.py");
+    let _ = glist_push(list, "scripts/gate3_check.py");
+    let _ = glist_push(list, "scripts/gate4_selfhost_contraction.py");
+    let _ = glist_push(list, "scripts/convert_dunders.py");
+    return list;
+}
+
+pub fn build_allowed_infer_strings() -> i64 {
+    let s = gset_new();
+    let _ = gset_insert(s, "ast_node_count");
+    let _ = gset_insert(s, "ast_node_kind");
+    let _ = gset_insert(s, "ast_orig_kind");
+    let _ = gset_insert(s, "ast_node_flags");
+    let _ = gset_insert(s, "ast_decl_flags");
+    let _ = gset_insert(s, "ast_parent");
+    let _ = gset_insert(s, "ast_node_sym");
+    let _ = gset_insert(s, "ast_node_lit_kind");
+    let _ = gset_insert(s, "ast_node_raw_bits");
+    let _ = gset_insert(s, "ast_child_count");
+    let _ = gset_insert(s, "ast_child_at");
+    let _ = gset_insert(s, "ast_attr_count");
+    let _ = gset_insert(s, "ast_attr_arg");
+    let _ = gset_insert(s, "ast_attr_decl_count");
+    let _ = gset_insert(s, "ast_attr_name");
+    let _ = gset_insert(s, "ast_attr_decl_arg_count");
+    let _ = gset_insert(s, "ast_attr_decl_arg");
+    let _ = gset_insert(s, "ast_base_count");
+    let _ = gset_insert(s, "ast_base_at");
+    let _ = gset_insert(s, "layout_hw_header");
+    let _ = gset_insert(s, "layout_scalar");
+    let _ = gset_insert(s, "layout_ptr");
+    let _ = gset_insert(s, "layout_aggregate");
+    let _ = gset_insert(s, "layout_union");
+    let _ = gset_insert(s, "layout_fn_abi");
+    let _ = gset_insert(s, "layout_metrics");
+    let _ = gset_insert(s, "layout_field_offset");
+    let _ = gset_insert(s, "layout_physically_equal");
+    let _ = gset_insert(s, "ast_bind_layout");
+    let _ = gset_insert(s, "ast_get_bound_layout");
+    let _ = gset_insert(s, "ast_bind_target");
+    let _ = gset_insert(s, "ast_get_bound_target");
+    let _ = gset_insert(s, "ast_emit_diag");
+    let _ = gset_insert(s, "sym_str");
+    let _ = gset_insert(s, "str_len");
+    let _ = gset_insert(s, "str_byte_at");
+    let _ = gset_insert(s, "ast_span_start");
+    let _ = gset_insert(s, "ast_span_end");
+    let _ = gset_insert(s, "source_slice");
+    let _ = gset_insert(s, "register_keyword_category");
+    let _ = gset_insert(s, "register_keyword");
+    let _ = gset_insert(s, "query_registered_symbols");
+    let _ = gset_insert(s, "mount_unit");
+    let _ = gset_insert(s, "lsp_query_method");
+    let _ = gset_insert(s, "lsp_query_offset");
+    let _ = gset_insert(s, "lsp_set_result");
+    let _ = gset_insert(s, "selfhost/analyzer.pilot");
+    let _ = gset_insert(s, "../../../selfhost/analyzer.pilot");
+    let _ = gset_insert(s, "selfhost/.pilc-cache");
+    let _ = gset_insert(s, "selfhost/.pilc-cache/analyzer.pilc");
+    let _ = gset_insert(s, "selfhost/.pilc-cache/analyzer.pilc.tmp");
+    return s;
+}
+
+pub fn build_banned_analysis_idents() -> i64 {
+    let list = glist_new();
+    let _ = glist_push(list, "TypeInferenceEngine");
+    let _ = glist_push(list, "TypeArena");
+    let _ = glist_push(list, "TypeKind");
+    let _ = glist_push(list, "CollectionKind");
+    let _ = glist_push(list, "LangItem");
+    let _ = glist_push(list, "ReceptorSlot");
+    let _ = glist_push(list, "StructuralShape");
+    return list;
+}
+
+pub fn build_banned_stdlib_rs_tokens() -> i64 {
+    let list = glist_new();
+    let _ = glist_push(list, "pandas");
+    let _ = glist_push(list, "matplotlib");
+    let _ = glist_push(list, "scikit");
+    let _ = glist_push(list, "MODULE_MAP");
+    return list;
+}
+
+pub fn build_banned_cli_lsp_tokens() -> i64 {
+    let list = glist_new();
+    let _ = glist_push(list, "BUILTIN_DOCS");
+    let _ = glist_push(list, "KEYWORD_DOCS");
+    let _ = glist_push(list, "STR_METHOD_DOCS");
+    let _ = glist_push(list, "LIST_METHOD_DOCS");
+    let _ = glist_push(list, "INT_METHOD_DOCS");
+    let _ = glist_push(list, "TypeInferenceEngine");
+    let _ = glist_push(list, "TypeArena");
+    let _ = glist_push(list, "TypeId");
+    let _ = glist_push(list, "*Pilot Language*");
+    let _ = glist_push(list, "Custom(\"any\"");
+    let _ = glist_push(list, "secret_audit");
+    let _ = glist_push(list, "seed_kws");
+    return list;
+}
+
+pub pure fn max_total_rust_loc() -> usize => 5900;
+pub pure fn max_pilot_file_loc() -> usize => 1500;
+pub pure fn bootstrap_budget_us() -> u64 => 5000000;
